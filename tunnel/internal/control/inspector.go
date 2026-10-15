@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 const InspectorAccessPath = "/v1/edge/inspector/access"

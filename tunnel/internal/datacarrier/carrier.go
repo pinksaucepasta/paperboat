@@ -16,7 +16,7 @@ import (
 	"time"
 
 	yamux "github.com/libp2p/go-yamux/v5"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 const (

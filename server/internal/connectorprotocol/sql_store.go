@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
 )
@@ -36,29 +38,29 @@ var (
 // No bearer credential or private key is ever read into this process.
 type SQLControlStore struct {
 	DB               *db.DB
-	Clock            Clock
+	Clock            wire.Clock
 	LeaseDuration    time.Duration
 	SessionRetention time.Duration
 }
 
 type SQLControlStoreConfig struct {
-	Clock            Clock
+	Clock            wire.Clock
 	LeaseDuration    time.Duration
 	SessionRetention time.Duration
 }
 
 func NewSQLControlStore(database *db.DB, config SQLControlStoreConfig) (*SQLControlStore, error) {
 	if database == nil {
-		return nil, ErrInvalidInput
+		return nil, wire.ErrInvalidInput
 	}
 	if config.LeaseDuration == 0 {
-		config.LeaseDuration = DefaultLease
+		config.LeaseDuration = wire.DefaultLease
 	}
 	if config.SessionRetention == 0 {
 		config.SessionRetention = 24 * time.Hour
 	}
-	if config.LeaseDuration <= 0 || config.LeaseDuration > MaxLease || config.SessionRetention <= 0 {
-		return nil, ErrInvalidInput
+	if config.LeaseDuration <= 0 || config.LeaseDuration > wire.MaxLease || config.SessionRetention <= 0 {
+		return nil, wire.ErrInvalidInput
 	}
 	return &SQLControlStore{DB: database, Clock: config.Clock, LeaseDuration: config.LeaseDuration, SessionRetention: config.SessionRetention}, nil
 }
@@ -71,8 +73,8 @@ func (s *SQLControlStore) now() time.Time {
 }
 
 func (s *SQLControlStore) valid() error {
-	if s == nil || s.DB == nil || s.LeaseDuration <= 0 || s.LeaseDuration > MaxLease || s.SessionRetention <= 0 {
-		return ErrInvalidInput
+	if s == nil || s.DB == nil || s.LeaseDuration <= 0 || s.LeaseDuration > wire.MaxLease || s.SessionRetention <= 0 {
+		return wire.ErrInvalidInput
 	}
 	return nil
 }
@@ -89,7 +91,7 @@ type proofMaterial struct {
 
 func (s *SQLControlStore) loadProofMaterial(ctx context.Context, tx *db.Tx, accountID, tunnelID, connectorID, hostID string, credentialGeneration uint64, now time.Time, lock bool) (proofMaterial, error) {
 	if credentialGeneration == 0 {
-		return proofMaterial{}, ErrAuthenticationFailed
+		return proofMaterial{}, wire.ErrAuthenticationFailed
 	}
 	query := `
 SELECT t.account_id, c.host_id, m.public_identity_key,
@@ -157,13 +159,13 @@ func (m proofMaterial) proofKey(identityKeyID, identityThumbprint string) (ed255
 	// retaining the same durable connector/host authorization.
 	hostKey, hostErr := decodeStoredPublicKey(m.HostPublicIdentityKey)
 	if hostErr == nil {
-		hostThumbprint, thumbErr := IdentityThumbprint(hostKey)
+		hostThumbprint, thumbErr := wire.IdentityThumbprint(hostKey)
 		if thumbErr == nil && identityKeyID == "ed25519:"+hostThumbprint && identityThumbprint == hostThumbprint {
 			return hostKey, nil
 		}
 	}
 	credentialKey := ed25519.PublicKey(append([]byte(nil), m.CredentialPublicKey...))
-	if credentialThumbprint, err := IdentityThumbprint(credentialKey); err == nil && identityKeyID == "ed25519:"+credentialThumbprint && identityThumbprint == credentialThumbprint && identityThumbprint == m.CredentialThumbprint {
+	if credentialThumbprint, err := wire.IdentityThumbprint(credentialKey); err == nil && identityKeyID == "ed25519:"+credentialThumbprint && identityThumbprint == credentialThumbprint && identityThumbprint == m.CredentialThumbprint {
 		return credentialKey, nil
 	}
 	return nil, ErrProofKeyUnavailable
@@ -171,19 +173,19 @@ func (m proofMaterial) proofKey(identityKeyID, identityThumbprint string) (ed255
 
 func verifyTranscript(expected, supplied, signed []byte, key ed25519.PublicKey) error {
 	if !bytes.Equal(expected, supplied) || len(key) != ed25519.PublicKeySize || len(signed) != ed25519.SignatureSize || !ed25519.Verify(key, expected, signed) {
-		return ErrAuthenticationFailed
+		return wire.ErrAuthenticationFailed
 	}
 	return nil
 }
 
-func (s *SQLControlStore) VerifyAuthProof(ctx context.Context, request AuthRequest, payload, signature []byte) error {
+func (s *SQLControlStore) VerifyAuthProof(ctx context.Context, request wire.AuthRequest, payload, signature []byte) error {
 	if ctx == nil || s.valid() != nil {
-		return ErrAuthenticationFailed
+		return wire.ErrAuthenticationFailed
 	}
 	if err := request.Validate(s.now()); err != nil {
 		return err
 	}
-	expected, err := AuthProofPayload(request)
+	expected, err := wire.AuthProofPayload(request)
 	if err != nil {
 		return err
 	}
@@ -201,14 +203,14 @@ func (s *SQLControlStore) VerifyAuthProof(ctx context.Context, request AuthReque
 	})
 }
 
-func (s *SQLControlStore) VerifyRenewalProof(ctx context.Context, request RenewalRequest, payload, signature []byte) error {
+func (s *SQLControlStore) VerifyRenewalProof(ctx context.Context, request wire.RenewalRequest, payload, signature []byte) error {
 	if ctx == nil || s.valid() != nil {
-		return ErrAuthenticationFailed
+		return wire.ErrAuthenticationFailed
 	}
 	if err := request.ValidateAt(s.now()); err != nil {
 		return err
 	}
-	expected, err := RenewalProofPayload(request)
+	expected, err := wire.RenewalProofPayload(request)
 	if err != nil {
 		return err
 	}
@@ -232,8 +234,8 @@ func proofDigest(payload []byte) [sha256.Size]byte { return sha256.Sum256(payloa
 // intentionally separate from operations: authentication proofs are bounded
 // security metadata, not user-visible mutation operations.
 func reserveControlReplay(ctx context.Context, tx *db.Tx, accountID, tunnelID, connectorID string, credentialGeneration uint64, proofKind, nonce string, payload []byte, expiresAt, now time.Time) error {
-	if accountID == "" || tunnelID == "" || connectorID == "" || credentialGeneration == 0 || credentialGeneration > uint64(^uint64(0)>>1) || len(nonce) < 16 || len(nonce) > MaxNonceBytes || strings.TrimSpace(nonce) != nonce || strings.ContainsAny(nonce, "\r\n") || expiresAt.IsZero() || !expiresAt.After(now) || expiresAt.Sub(now) > MaxLease {
-		return ErrInvalidInput
+	if accountID == "" || tunnelID == "" || connectorID == "" || credentialGeneration == 0 || credentialGeneration > uint64(^uint64(0)>>1) || len(nonce) < 16 || len(nonce) > wire.MaxNonceBytes || strings.TrimSpace(nonce) != nonce || strings.ContainsAny(nonce, "\r\n") || expiresAt.IsZero() || !expiresAt.After(now) || expiresAt.Sub(now) > wire.MaxLease {
+		return wire.ErrInvalidInput
 	}
 	digest := proofDigest(payload)
 	var insertedDigest []byte
@@ -259,7 +261,7 @@ WHERE r.account_id = e.account_id
 	switch proofKind {
 	case "auth", "renew", "rotation":
 	default:
-		return ErrInvalidInput
+		return wire.ErrInvalidInput
 	}
 	err := tx.QueryRow(ctx, `
 INSERT INTO connector_proof_replays
@@ -275,23 +277,23 @@ ON CONFLICT DO NOTHING
 	return err
 }
 
-func (s *SQLControlStore) AuthenticateConnector(ctx context.Context, request AuthRequest) (AuthResult, error) {
+func (s *SQLControlStore) AuthenticateConnector(ctx context.Context, request wire.AuthRequest) (wire.AuthResult, error) {
 	if ctx == nil || s.valid() != nil {
-		return AuthResult{}, ErrInvalidInput
+		return wire.AuthResult{}, wire.ErrInvalidInput
 	}
 	now := s.now()
 	if err := request.Validate(now); err != nil {
-		return AuthResult{}, err
+		return wire.AuthResult{}, err
 	}
-	payload, err := AuthProofPayload(request)
+	payload, err := wire.AuthProofPayload(request)
 	if err != nil {
-		return AuthResult{}, err
+		return wire.AuthResult{}, err
 	}
-	signature, err := DecodeProof(request.SignedProof)
+	signature, err := wire.DecodeProof(request.SignedProof)
 	if err != nil {
-		return AuthResult{}, err
+		return wire.AuthResult{}, err
 	}
-	var result AuthResult
+	var result wire.AuthResult
 	err = s.DB.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		material, err := s.loadProofMaterial(ctx, tx, request.AccountID, request.TunnelID, request.ConnectorID, request.HostID, request.CredentialGeneration, now, true)
 		if err != nil {
@@ -312,9 +314,9 @@ func (s *SQLControlStore) AuthenticateConnector(ctx context.Context, request Aut
 			leaseExpiry = material.CredentialValidUntil
 		}
 		if !leaseExpiry.After(now) {
-			return ErrCredentialExpired
+			return wire.ErrCredentialExpired
 		}
-		result = AuthResult{
+		result = wire.AuthResult{
 			AccountID: request.AccountID, TunnelID: request.TunnelID, ConnectorID: request.ConnectorID,
 			HostID: request.HostID, IdentityKeyID: request.IdentityKeyID,
 			IdentityKeyThumbprint: request.IdentityKeyThumbprint, ProcessGeneration: request.ProcessGeneration,
@@ -326,23 +328,23 @@ func (s *SQLControlStore) AuthenticateConnector(ctx context.Context, request Aut
 	return result, err
 }
 
-func (s *SQLControlStore) RenewConnector(ctx context.Context, request RenewalRequest) (AuthResult, error) {
+func (s *SQLControlStore) RenewConnector(ctx context.Context, request wire.RenewalRequest) (wire.AuthResult, error) {
 	if ctx == nil || s.valid() != nil {
-		return AuthResult{}, ErrInvalidInput
+		return wire.AuthResult{}, wire.ErrInvalidInput
 	}
 	now := s.now()
 	if err := request.ValidateAt(now); err != nil {
-		return AuthResult{}, err
+		return wire.AuthResult{}, err
 	}
-	payload, err := RenewalProofPayload(request)
+	payload, err := wire.RenewalProofPayload(request)
 	if err != nil {
-		return AuthResult{}, err
+		return wire.AuthResult{}, err
 	}
-	signature, err := DecodeProof(request.SignedProof)
+	signature, err := wire.DecodeProof(request.SignedProof)
 	if err != nil {
-		return AuthResult{}, err
+		return wire.AuthResult{}, err
 	}
-	var result AuthResult
+	var result wire.AuthResult
 	err = s.DB.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		material, err := s.loadProofMaterial(ctx, tx, request.AccountID, request.TunnelID, request.ConnectorID, request.HostID, request.CredentialGeneration, now, true)
 		if err != nil {
@@ -376,7 +378,7 @@ FOR UPDATE OF s, c`, request.SessionID, request.ConnectorID, int64(request.Proce
 		if state == "" {
 			return ErrSessionNotFound
 		}
-		if err := reserveControlReplay(ctx, tx, request.AccountID, request.TunnelID, request.ConnectorID, request.CredentialGeneration, "renew", request.Nonce, payload, now.Add(MaxClockSkew), now); err != nil {
+		if err := reserveControlReplay(ctx, tx, request.AccountID, request.TunnelID, request.ConnectorID, request.CredentialGeneration, "renew", request.Nonce, payload, now.Add(wire.MaxClockSkew), now); err != nil {
 			return err
 		}
 		leaseExpiry := now.Add(s.LeaseDuration)
@@ -384,7 +386,7 @@ FOR UPDATE OF s, c`, request.SessionID, request.ConnectorID, int64(request.Proce
 			leaseExpiry = material.CredentialValidUntil
 		}
 		if !leaseExpiry.After(now) {
-			return ErrCredentialExpired
+			return wire.ErrCredentialExpired
 		}
 		if _, err := tx.Exec(ctx, `
 UPDATE tunnel_connector_sessions
@@ -398,7 +400,7 @@ SET last_session_id = $1, last_heartbeat_at = $2, updated_at = $2
 WHERE id = $3 AND tunnel_id = $4 AND host_id = $5 AND revoked_at IS NULL`, request.SessionID, now, request.ConnectorID, request.TunnelID, request.HostID); err != nil {
 			return err
 		}
-		result = AuthResult{
+		result = wire.AuthResult{
 			AccountID: request.AccountID, TunnelID: request.TunnelID, ConnectorID: request.ConnectorID,
 			SessionID: request.SessionID, HostID: request.HostID, IdentityKeyID: request.IdentityKeyID,
 			IdentityKeyThumbprint: request.IdentityKeyThumbprint, ProcessGeneration: request.ProcessGeneration,
@@ -410,7 +412,7 @@ WHERE id = $3 AND tunnel_id = $4 AND host_id = $5 AND revoked_at IS NULL`, reque
 	return result, err
 }
 
-func configHashMatches(stored []byte, snapshot Snapshot) bool {
+func configHashMatches(stored []byte, snapshot wire.Snapshot) bool {
 	if len(stored) != sha256.Size {
 		return false
 	}
@@ -418,11 +420,11 @@ func configHashMatches(stored []byte, snapshot Snapshot) bool {
 	return err == nil && bytes.Equal(stored, digest)
 }
 
-func (s *SQLControlStore) Snapshot(ctx context.Context, tunnelID string) (Snapshot, error) {
-	if ctx == nil || s.valid() != nil || ValidateIdentifier(tunnelID) != nil {
-		return Snapshot{}, ErrInvalidInput
+func (s *SQLControlStore) Snapshot(ctx context.Context, tunnelID string) (wire.Snapshot, error) {
+	if ctx == nil || s.valid() != nil || wire.ValidateIdentifier(tunnelID) != nil {
+		return wire.Snapshot{}, wire.ErrInvalidInput
 	}
-	var result Snapshot
+	var result wire.Snapshot
 	err := s.DB.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		var generation int64
 		var storedHash, payload []byte
@@ -441,14 +443,14 @@ LIMIT 1`, tunnelID).Scan(&generation, &storedHash, &payload); err != nil {
 		if generation <= 0 || uint64(generation) > ^uint64(0)>>1 {
 			return ErrConfigNotFound
 		}
-		candidate, err := NewSnapshot(tunnelID, uint64(generation), payload)
+		candidate, err := wire.NewSnapshot(tunnelID, uint64(generation), payload)
 		if err != nil {
 			return err
 		}
 		if !configHashMatches(storedHash, candidate) {
 			return ErrConfigHashCorrupt
 		}
-		if err := validateConfigSnapshotPayload(candidate.Payload, tunnelID, uint64(generation)); err != nil {
+		if err := wire.ValidateConfigSnapshotPayload(candidate.Payload, tunnelID, uint64(generation)); err != nil {
 			return err
 		}
 		result = candidate
@@ -457,28 +459,28 @@ LIMIT 1`, tunnelID).Scan(&generation, &storedHash, &payload); err != nil {
 	return result, err
 }
 
-func (s *SQLControlStore) CreateConnectorSession(ctx context.Context, ref SessionRef, lease Lease, credentialGeneration uint64) error {
-	return s.createConnectorSession(ctx, ref, lease, credentialGeneration, ProtocolVersion, nil)
+func (s *SQLControlStore) CreateConnectorSession(ctx context.Context, ref wire.SessionRef, lease wire.Lease, credentialGeneration uint64) error {
+	return s.createConnectorSession(ctx, ref, lease, credentialGeneration, wire.ProtocolVersion, nil)
 }
 
 // CreateConnectorSessionV1 is the metadata-rich variant used by
 // PersistentServer. The legacy-shaped method above remains a narrow adapter
 // for callers that only have a lease; SQL persistence always stores the
 // negotiated version and capabilities when available.
-func (s *SQLControlStore) CreateConnectorSessionV1(ctx context.Context, ref SessionRef, welcome Welcome, credentialGeneration uint64) error {
+func (s *SQLControlStore) CreateConnectorSessionV1(ctx context.Context, ref wire.SessionRef, welcome wire.Welcome, credentialGeneration uint64) error {
 	if err := welcome.Validate(time.Time{}); err != nil {
 		return err
 	}
 	return s.createConnectorSession(ctx, ref, welcome.Lease, credentialGeneration, welcome.Version, append([]string(nil), welcome.Capabilities...))
 }
 
-func (s *SQLControlStore) createConnectorSession(ctx context.Context, ref SessionRef, lease Lease, credentialGeneration uint64, protocolVersion string, capabilities []string) error {
-	if ctx == nil || s.valid() != nil || ref.Validate() != nil || lease.SessionID != ref.SessionID || credentialGeneration == 0 || protocolVersion != ProtocolVersion {
-		return ErrInvalidInput
+func (s *SQLControlStore) createConnectorSession(ctx context.Context, ref wire.SessionRef, lease wire.Lease, credentialGeneration uint64, protocolVersion string, capabilities []string) error {
+	if ctx == nil || s.valid() != nil || ref.Validate() != nil || lease.SessionID != ref.SessionID || credentialGeneration == 0 || protocolVersion != wire.ProtocolVersion {
+		return wire.ErrInvalidInput
 	}
 	now := s.now()
 	if lease.Validate(now) != nil {
-		return ErrInvalidInput
+		return wire.ErrInvalidInput
 	}
 	retainedUntil := now.Add(s.SessionRetention)
 	if !retainedUntil.After(lease.ExpiresAt) {
@@ -506,14 +508,14 @@ WHERE connector_id = $1 AND tunnel_id = $2 AND generation = $3
   AND state IN ('active','overlap') AND valid_until >= $4
 FOR UPDATE`, ref.ConnectorID, ref.TunnelID, int64(credentialGeneration), lease.ExpiresAt).Scan(&credentialState, &credentialValidUntil); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
-				return ErrCredentialExpired
+				return wire.ErrCredentialExpired
 			}
 			return err
 		}
 		if credentialState == "" || credentialValidUntil.Before(lease.ExpiresAt) {
 			// The lease is bounded by the exact credential generation. Keeping
 			// this check after the row lock closes the auth/session TOCTOU gap.
-			return ErrCredentialExpired
+			return wire.ErrCredentialExpired
 		}
 		var highest int64
 		if err := tx.QueryRow(ctx, `SELECT COALESCE(MAX(process_generation), 0) FROM tunnel_connector_sessions WHERE connector_id = $1`, ref.ConnectorID).Scan(&highest); err != nil {
@@ -550,7 +552,7 @@ WHERE id = $3 AND tunnel_id = $4 AND host_id = $5`, ref.SessionID, now, ref.Conn
 	})
 }
 
-func (s *SQLControlStore) lockSession(ctx context.Context, tx *db.Tx, ref SessionRef, now time.Time) (string, error) {
+func (s *SQLControlStore) lockSession(ctx context.Context, tx *db.Tx, ref wire.SessionRef, now time.Time) (string, error) {
 	var state, accountID, tunnelID string
 	err := tx.QueryRow(ctx, `
 SELECT s.state, t.account_id, c.tunnel_id
@@ -591,7 +593,7 @@ func (s *SQLControlStore) generationHash(ctx context.Context, tx *db.Tx, tunnelI
 	return stored, nil
 }
 
-func (s *SQLControlStore) updateConnectorOperation(ctx context.Context, tx *db.Tx, ref SessionRef, now time.Time, ready bool) error {
+func (s *SQLControlStore) updateConnectorOperation(ctx context.Context, tx *db.Tx, ref wire.SessionRef, now time.Time, ready bool) error {
 	if ready {
 		_, err := tx.Exec(ctx, `
 WITH candidate AS (
@@ -641,7 +643,7 @@ WHERE o.id = c.id`, ref.ConnectorID, ref.SessionID, int64(ref.ProcessGeneration)
 	return err
 }
 
-func (s *SQLControlStore) updateConnectorOperationFailure(ctx context.Context, tx *db.Tx, ref SessionRef, now time.Time, code Code) error {
+func (s *SQLControlStore) updateConnectorOperationFailure(ctx context.Context, tx *db.Tx, ref wire.SessionRef, now time.Time, code wire.Code) error {
 	_, err := tx.Exec(ctx, `
 WITH candidate AS (
   SELECT o.id
@@ -666,7 +668,7 @@ WHERE o.id = c.id`, ref.ConnectorID, ref.SessionID, int64(ref.ProcessGeneration)
 	return err
 }
 
-func (s *SQLControlStore) updateConnectorOperationRecovery(ctx context.Context, tx *db.Tx, ref SessionRef, now time.Time, code Code) error {
+func (s *SQLControlStore) updateConnectorOperationRecovery(ctx context.Context, tx *db.Tx, ref wire.SessionRef, now time.Time, code wire.Code) error {
 	_, err := tx.Exec(ctx, `
 WITH candidate AS (
   SELECT o.id
@@ -691,9 +693,9 @@ WHERE o.id = c.id`, ref.ConnectorID, ref.SessionID, int64(ref.ProcessGeneration)
 	return err
 }
 
-func (s *SQLControlStore) RecordApplied(ctx context.Context, ref SessionRef, ack Ack) error {
+func (s *SQLControlStore) RecordApplied(ctx context.Context, ref wire.SessionRef, ack wire.Ack) error {
 	if ctx == nil || s.valid() != nil || ref.Validate() != nil || ack.Validate() != nil || !matchesAckRef(ref, ack) {
-		return ErrInvalidInput
+		return wire.ErrInvalidInput
 	}
 	now := s.now()
 	return s.DB.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
@@ -702,15 +704,15 @@ func (s *SQLControlStore) RecordApplied(ctx context.Context, ref SessionRef, ack
 			return err
 		}
 		if ack.AccountID != accountID {
-			return ErrIdentityMismatch
+			return wire.ErrIdentityMismatch
 		}
 		switch ack.Status {
-		case AckApplied, AckDuplicate:
+		case wire.AckApplied, wire.AckDuplicate:
 			storedHash, err := s.generationHash(ctx, tx, ref.TunnelID, ack.Generation)
 			if err != nil {
 				return err
 			}
-			if !configHashMatches(storedHash, Snapshot{ContentHash: ack.ContentHash}) {
+			if !configHashMatches(storedHash, wire.Snapshot{ContentHash: ack.ContentHash}) {
 				return ErrConfigHashCorrupt
 			}
 			if _, err := tx.Exec(ctx, `
@@ -728,28 +730,28 @@ WHERE id = $3 AND tunnel_id = $4`, int64(ack.Generation), now, ref.ConnectorID, 
 			if err := s.updateConnectorOperation(ctx, tx, ref, now, false); err != nil {
 				return err
 			}
-		case AckRejected:
-			if err := s.updateConnectorOperationFailure(ctx, tx, ref, now, CodeSnapshotRejected); err != nil {
+		case wire.AckRejected:
+			if err := s.updateConnectorOperationFailure(ctx, tx, ref, now, wire.CodeSnapshotRejected); err != nil {
 				return err
 			}
-		case AckSnapshotRequired:
-			if err := s.updateConnectorOperationRecovery(ctx, tx, ref, now, CodeSnapshotRequired); err != nil {
+		case wire.AckSnapshotRequired:
+			if err := s.updateConnectorOperationRecovery(ctx, tx, ref, now, wire.CodeSnapshotRequired); err != nil {
 				return err
 			}
 		default:
-			return ErrInvalidInput
+			return wire.ErrInvalidInput
 		}
 		return nil
 	})
 }
 
-func matchesAckRef(ref SessionRef, ack Ack) bool {
+func matchesAckRef(ref wire.SessionRef, ack wire.Ack) bool {
 	return ack.TunnelID == ref.TunnelID && ack.ConnectorID == ref.ConnectorID && ack.SessionID == ref.SessionID && ack.ProcessGeneration == ref.ProcessGeneration
 }
 
-func (s *SQLControlStore) RecordReady(ctx context.Context, ref SessionRef, readiness Readiness) error {
+func (s *SQLControlStore) RecordReady(ctx context.Context, ref wire.SessionRef, readiness wire.Readiness) error {
 	if ctx == nil || s.valid() != nil || ref.Validate() != nil || readiness.Validate() != nil || readiness.TunnelID != ref.TunnelID || readiness.ConnectorID != ref.ConnectorID || readiness.SessionID != ref.SessionID || readiness.ProcessGeneration != ref.ProcessGeneration || !readiness.EdgeReady || !readiness.RouteReady || !readiness.OriginReady {
-		return ErrInvalidInput
+		return wire.ErrInvalidInput
 	}
 	now := s.now()
 	return s.DB.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
@@ -758,13 +760,13 @@ func (s *SQLControlStore) RecordReady(ctx context.Context, ref SessionRef, readi
 			return err
 		}
 		if readiness.AccountID != accountID {
-			return ErrIdentityMismatch
+			return wire.ErrIdentityMismatch
 		}
 		storedHash, err := s.generationHash(ctx, tx, ref.TunnelID, readiness.Generation)
 		if err != nil {
 			return err
 		}
-		if !configHashMatches(storedHash, Snapshot{ContentHash: readiness.ContentHash}) {
+		if !configHashMatches(storedHash, wire.Snapshot{ContentHash: readiness.ContentHash}) {
 			return ErrConfigHashCorrupt
 		}
 		if _, err := tx.Exec(ctx, `
@@ -804,16 +806,16 @@ WHERE id = $3 AND tunnel_id = $4`, now, int64(readiness.Generation), ref.Connect
 	})
 }
 
-func (s *SQLControlStore) RecordHeartbeat(ctx context.Context, ref SessionRef, heartbeat Heartbeat, ack HeartbeatAck) error {
+func (s *SQLControlStore) RecordHeartbeat(ctx context.Context, ref wire.SessionRef, heartbeat wire.Heartbeat, ack wire.HeartbeatAck) error {
 	if ctx == nil || s.valid() != nil || ref.Validate() != nil || heartbeat.Validate() != nil || ack.Validate(time.Time{}) != nil || heartbeat.TunnelID != ref.TunnelID || heartbeat.ConnectorID != ref.ConnectorID || heartbeat.SessionID != ref.SessionID || heartbeat.ProcessGeneration != ref.ProcessGeneration || ack.TunnelID != ref.TunnelID || ack.ConnectorID != ref.ConnectorID || ack.SessionID != ref.SessionID || ack.ProcessGeneration != ref.ProcessGeneration || ack.AccountID != heartbeat.AccountID {
-		return ErrInvalidInput
+		return wire.ErrInvalidInput
 	}
 	now := s.now()
-	if heartbeat.SentAt.Before(now.Add(-MaxClockSkew)) || heartbeat.SentAt.After(now.Add(MaxClockSkew)) {
-		return ErrInvalidInput
+	if heartbeat.SentAt.Before(now.Add(-wire.MaxClockSkew)) || heartbeat.SentAt.After(now.Add(wire.MaxClockSkew)) {
+		return wire.ErrInvalidInput
 	}
-	if ack.ServerTime.Before(now.Add(-MaxClockSkew)) || ack.ServerTime.After(now.Add(MaxClockSkew)) || !ack.LeaseExpiresAt.After(now) || ack.LeaseExpiresAt.After(now.Add(s.LeaseDuration)) {
-		return ErrInvalidInput
+	if ack.ServerTime.Before(now.Add(-wire.MaxClockSkew)) || ack.ServerTime.After(now.Add(wire.MaxClockSkew)) || !ack.LeaseExpiresAt.After(now) || ack.LeaseExpiresAt.After(now.Add(s.LeaseDuration)) {
+		return wire.ErrInvalidInput
 	}
 	return s.DB.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		accountID, err := s.lockSession(ctx, tx, ref, now)
@@ -821,7 +823,7 @@ func (s *SQLControlStore) RecordHeartbeat(ctx context.Context, ref SessionRef, h
 			return err
 		}
 		if heartbeat.AccountID != accountID {
-			return ErrIdentityMismatch
+			return wire.ErrIdentityMismatch
 		}
 		var lastSentAt sql.NullTime
 		if err := tx.QueryRow(ctx, `
@@ -841,7 +843,7 @@ JOIN tunnel_connector_credential_generations cg ON cg.connector_id=session.conne
 WHERE session.id=$1 AND session.connector_id=$3 AND session.process_generation=$4
  AND cg.state IN ('active','overlap')`, ref.SessionID, ref.TunnelID, ref.ConnectorID, int64(ref.ProcessGeneration)).Scan(&credentialState); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
-				return codeError(ErrAuthenticationFailed, ReasonAuthentication, false, nil)
+				return wire.CodeError(wire.ErrAuthenticationFailed, wire.ReasonAuthentication, false, nil)
 			}
 			return err
 		}
@@ -849,8 +851,8 @@ WHERE session.id=$1 AND session.connector_id=$3 AND session.process_generation=$
 		if err != nil {
 			return err
 		}
-		if !configHashMatches(storedHash, Snapshot{ContentHash: heartbeat.LastAppliedHash}) {
-			return ErrSnapshotRequired
+		if !configHashMatches(storedHash, wire.Snapshot{ContentHash: heartbeat.LastAppliedHash}) {
+			return wire.ErrSnapshotRequired
 		}
 		if _, err := tx.Exec(ctx, `
 UPDATE tunnel_connector_sessions
@@ -867,13 +869,13 @@ WHERE id = $3 AND tunnel_id = $4`, ref.SessionID, now, ref.ConnectorID, ref.Tunn
 	})
 }
 
-func (s *SQLControlStore) RecordRenewal(ctx context.Context, ref SessionRef, result AuthResult) error {
+func (s *SQLControlStore) RecordRenewal(ctx context.Context, ref wire.SessionRef, result wire.AuthResult) error {
 	if ctx == nil || s.valid() != nil || ref.Validate() != nil {
-		return ErrInvalidInput
+		return wire.ErrInvalidInput
 	}
 	now := s.now()
 	if result.Validate(now) != nil || result.AccountID == "" || result.TunnelID != ref.TunnelID || result.ConnectorID != ref.ConnectorID || result.SessionID != ref.SessionID || result.ProcessGeneration != ref.ProcessGeneration || result.LeaseExpiresAt.After(now.Add(s.LeaseDuration)) {
-		return ErrInvalidInput
+		return wire.ErrInvalidInput
 	}
 	return s.DB.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		accountID, err := s.lockSession(ctx, tx, ref, now)
@@ -881,7 +883,7 @@ func (s *SQLControlStore) RecordRenewal(ctx context.Context, ref SessionRef, res
 			return err
 		}
 		if result.AccountID != accountID {
-			return ErrIdentityMismatch
+			return wire.ErrIdentityMismatch
 		}
 		if _, err := tx.Exec(ctx, `
 UPDATE tunnel_connector_sessions
@@ -897,9 +899,9 @@ WHERE id = $3 AND tunnel_id = $4`, ref.SessionID, now, ref.ConnectorID, ref.Tunn
 	})
 }
 
-func (s *SQLControlStore) RecordDisconnected(ctx context.Context, ref SessionRef, disconnect Disconnect) error {
+func (s *SQLControlStore) RecordDisconnected(ctx context.Context, ref wire.SessionRef, disconnect wire.Disconnect) error {
 	if ctx == nil || s.valid() != nil || ref.Validate() != nil || disconnect.Validate() != nil || disconnect.TunnelID != ref.TunnelID || disconnect.ConnectorID != ref.ConnectorID || disconnect.SessionID != ref.SessionID || disconnect.ProcessGeneration != ref.ProcessGeneration {
-		return ErrInvalidInput
+		return wire.ErrInvalidInput
 	}
 	now := s.now()
 	return s.DB.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
@@ -922,7 +924,7 @@ FOR UPDATE OF s, c`, ref.SessionID, ref.ConnectorID, int64(ref.ProcessGeneration
 			return err
 		}
 		if disconnect.AccountID != accountID {
-			return ErrIdentityMismatch
+			return wire.ErrIdentityMismatch
 		}
 		// Exact identity in both predicates makes a stale close a harmless no-op
 		// after a higher process generation has replaced this session.
@@ -958,7 +960,7 @@ WHERE id = $3 AND tunnel_id = $4 AND last_session_id = $5`, string(disconnect.Re
 // process generation never changes a newer session's work. The transition and
 // its audit row share this transaction so a restart worker can discover the
 // same operation without relying on process memory.
-func (s *SQLControlStore) markDisconnectedOperations(ctx context.Context, tx *db.Tx, ref SessionRef, credentialGeneration int64, accountID string, reason DisconnectReason, now time.Time, includeConnectorOperations bool) error {
+func (s *SQLControlStore) markDisconnectedOperations(ctx context.Context, tx *db.Tx, ref wire.SessionRef, credentialGeneration int64, accountID string, reason wire.DisconnectReason, now time.Time, includeConnectorOperations bool) error {
 	type operationRef struct {
 		id, operationType, resourceType, resourceID string
 	}
@@ -1040,7 +1042,7 @@ SET phase = CASE WHEN operation_type = 'connector.credentials.rotate' THEN 'conn
     state = 'uncertain', progress = GREATEST(progress, 60), retrying = true,
     next_retry_at = $1, error_code = $2, outcome = 'uncertain', completed_at = NULL,
     updated_at = $1
-WHERE id = $3 AND account_id = $4 AND state IN ('pending','running','uncertain')`, now, string(CodeStaleSession), operation.id, accountID)
+WHERE id = $3 AND account_id = $4 AND state IN ('pending','running','uncertain')`, now, string(wire.CodeStaleSession), operation.id, accountID)
 		if err != nil {
 			return err
 		}
@@ -1069,28 +1071,28 @@ VALUES ($1, NULL, 'system', $2, $3, $4, $5, $6::jsonb, $7, $8,
 	return nil
 }
 
-func (s *SQLControlStore) RecordDrain(ctx context.Context, ref SessionRef, drain Drain, status DrainStatus, activeStreams uint32, code Code) error {
-	if ctx == nil || s.valid() != nil || ref.Validate() != nil || drain.TunnelID != ref.TunnelID || drain.ConnectorID != ref.ConnectorID || drain.SessionID != ref.SessionID || drain.ProcessGeneration != ref.ProcessGeneration || activeStreams > MaxActiveStreams {
-		return ErrInvalidInput
+func (s *SQLControlStore) RecordDrain(ctx context.Context, ref wire.SessionRef, drain wire.Drain, status wire.DrainStatus, activeStreams uint32, code wire.Code) error {
+	if ctx == nil || s.valid() != nil || ref.Validate() != nil || drain.TunnelID != ref.TunnelID || drain.ConnectorID != ref.ConnectorID || drain.SessionID != ref.SessionID || drain.ProcessGeneration != ref.ProcessGeneration || activeStreams > wire.MaxActiveStreams {
+		return wire.ErrInvalidInput
 	}
 	now := s.now()
 	if err := drain.Validate(now); err != nil {
 		return err
 	}
 	switch status {
-	case DrainAccepted, DrainProgress, DrainCompleted, DrainForced, DrainRejected:
+	case wire.DrainAccepted, wire.DrainProgress, wire.DrainCompleted, wire.DrainForced, wire.DrainRejected:
 	default:
-		return ErrInvalidInput
+		return wire.ErrInvalidInput
 	}
 	// The SQL boundary must enforce the same status/code/stream invariants as
 	// the wire decoder. PersistentSession normally supplies a validated ACK,
 	// but direct callers and retries must not be able to record a fabricated
 	// terminal outcome or an unknown code.
-	ack := DrainAck{
+	ack := wire.DrainAck{
 		AccountID: drain.AccountID, TunnelID: drain.TunnelID, ConnectorID: drain.ConnectorID,
 		SessionID: drain.SessionID, ProcessGeneration: drain.ProcessGeneration,
 		DrainID: drain.DrainID, Generation: drain.Generation, ContentHash: drain.ContentHash,
-		Status: status, ActiveStreams: activeStreams, ForcedClose: status == DrainForced, Code: code,
+		Status: status, ActiveStreams: activeStreams, ForcedClose: status == wire.DrainForced, Code: code,
 	}
 	if err := ack.Validate(now); err != nil {
 		return err
@@ -1101,13 +1103,13 @@ func (s *SQLControlStore) RecordDrain(ctx context.Context, ref SessionRef, drain
 			return err
 		}
 		if drain.AccountID != accountID {
-			return ErrIdentityMismatch
+			return wire.ErrIdentityMismatch
 		}
 		storedHash, err := s.generationHash(ctx, tx, ref.TunnelID, drain.Generation)
 		if err != nil {
 			return err
 		}
-		if !configHashMatches(storedHash, Snapshot{ContentHash: drain.ContentHash}) {
+		if !configHashMatches(storedHash, wire.Snapshot{ContentHash: drain.ContentHash}) {
 			return ErrConfigHashCorrupt
 		}
 		operationType, operationState, err := s.lockDrainOperation(ctx, tx, ref, drain)
@@ -1132,13 +1134,13 @@ FOR UPDATE`, ref.ConnectorID, ref.TunnelID).Scan(&connectorDesiredState, &connec
 		}
 		drainState := "draining"
 		sessionState := "draining"
-		if status == DrainCompleted {
+		if status == wire.DrainCompleted {
 			drainState = "drained"
 		}
-		if status == DrainForced {
+		if status == wire.DrainForced {
 			drainState = "forced_closed"
 		}
-		if status == DrainRejected {
+		if status == wire.DrainRejected {
 			drainState = "accepting"
 			sessionState = "ready"
 		}
@@ -1179,7 +1181,7 @@ WHERE id = $4 AND tunnel_id = $5 AND last_session_id = $6`, drainState, string(c
 	})
 }
 
-func (s *SQLControlStore) lockDrainOperation(ctx context.Context, tx *db.Tx, ref SessionRef, drain Drain) (string, string, error) {
+func (s *SQLControlStore) lockDrainOperation(ctx context.Context, tx *db.Tx, ref wire.SessionRef, drain wire.Drain) (string, string, error) {
 	var operationType, state string
 	if err := tx.QueryRow(ctx, `
 SELECT operation_type, state
@@ -1195,14 +1197,14 @@ FOR UPDATE`, drain.DrainID, drain.AccountID, ref.ConnectorID).Scan(&operationTyp
 	return operationType, state, nil
 }
 
-func (s *SQLControlStore) updateDrainOperation(ctx context.Context, tx *db.Tx, ref SessionRef, drain Drain, now time.Time, status DrainStatus, activeStreams uint32, code Code, operationType string) error {
+func (s *SQLControlStore) updateDrainOperation(ctx context.Context, tx *db.Tx, ref wire.SessionRef, drain wire.Drain, now time.Time, status wire.DrainStatus, activeStreams uint32, code wire.Code, operationType string) error {
 	phase, state, progress, outcome := "draining", "running", 80, "changed"
 	errorCode := string(code)
 	completed := false
 	switch status {
-	case DrainCompleted:
+	case wire.DrainCompleted:
 		phase, state, progress, outcome, completed = "ready", "succeeded", 100, "changed", true
-	case DrainForced:
+	case wire.DrainForced:
 		if operationType == "connector.revoke" {
 			// A forced close is the intended terminal result of revoke. The
 			// connector remains revoked while the operation is successful.
@@ -1210,13 +1212,13 @@ func (s *SQLControlStore) updateDrainOperation(ctx context.Context, tx *db.Tx, r
 		} else {
 			phase, state, progress, outcome, completed = "failed", "failed", 100, "uncertain", true
 			if errorCode == "" {
-				errorCode = string(CodeDrainTimeout)
+				errorCode = string(wire.CodeDrainTimeout)
 			}
 		}
-	case DrainRejected:
+	case wire.DrainRejected:
 		phase, state, progress, outcome, completed = "failed", "failed", 100, "uncertain", true
 		if errorCode == "" {
-			errorCode = string(CodeDrainRejected)
+			errorCode = string(wire.CodeDrainRejected)
 		}
 	}
 	completedAt := "NULL"
@@ -1350,23 +1352,23 @@ func (s *SQLControlStore) loadRotationTarget(ctx context.Context, tx *db.Tx, ope
 }
 
 func rotationHashBytes(hash string) ([]byte, error) {
-	if !hashPattern.MatchString(hash) {
-		return nil, ErrInvalidInput
+	if !wire.ValidContentHash(hash) {
+		return nil, wire.ErrInvalidInput
 	}
 	decoded, err := hex.DecodeString(strings.TrimPrefix(hash, "sha256:"))
 	if err != nil || len(decoded) != sha256.Size {
-		return nil, ErrInvalidInput
+		return nil, wire.ErrInvalidInput
 	}
 	return decoded, nil
 }
 
-func rotationTargetFromSQL(target sqlRotationTarget) (RotationTarget, error) {
+func rotationTargetFromSQL(target sqlRotationTarget) (wire.RotationTarget, error) {
 	if target.oldGeneration <= 0 || target.newGeneration <= 0 || uint64(target.oldGeneration) > uint64(^uint64(0)>>1) || uint64(target.newGeneration) > uint64(^uint64(0)>>1) {
-		return RotationTarget{}, ErrInvalidInput
+		return wire.RotationTarget{}, wire.ErrInvalidInput
 	}
-	result := RotationTarget{ConnectorID: target.connectorID, HostID: target.hostID, OldCredentialGeneration: uint64(target.oldGeneration), NewCredentialGeneration: uint64(target.newGeneration)}
+	result := wire.RotationTarget{ConnectorID: target.connectorID, HostID: target.hostID, OldCredentialGeneration: uint64(target.oldGeneration), NewCredentialGeneration: uint64(target.newGeneration)}
 	if err := result.Validate(); err != nil {
-		return RotationTarget{}, err
+		return wire.RotationTarget{}, err
 	}
 	return result, nil
 }
@@ -1394,16 +1396,16 @@ func rotationUint(value sql.NullInt64) uint64 {
 
 func rotationBool(value sql.NullBool) bool { return value.Valid && value.Bool }
 
-func (target sqlRotationTarget) target() (RotationTarget, error) {
+func (target sqlRotationTarget) target() (wire.RotationTarget, error) {
 	return rotationTargetFromSQL(target)
 }
 
-func (target sqlRotationTarget) challenge() (CredentialRotationChallenge, error) {
+func (target sqlRotationTarget) challenge() (wire.CredentialRotationChallenge, error) {
 	item, err := target.target()
 	if err != nil {
-		return CredentialRotationChallenge{}, err
+		return wire.CredentialRotationChallenge{}, err
 	}
-	publicTarget := CredentialRotationChallenge{
+	publicTarget := wire.CredentialRotationChallenge{
 		AccountID: target.accountID, TunnelID: target.tunnelID, OperationID: target.operationID,
 		ConnectorID: target.connectorID, HostID: target.hostID, SessionID: rotationString(target.proofSessionID),
 		ProcessGeneration: rotationUint(target.proofProcessGeneration), TargetSetHash: target.targetSetHash, Target: item,
@@ -1417,7 +1419,7 @@ func (target sqlRotationTarget) challenge() (CredentialRotationChallenge, error)
 		// The session that issued a challenge is represented by proof_session_id
 		// only after proof acceptance. Load it from the target's durable challenge
 		// column in callers that need the pre-proof state.
-		return CredentialRotationChallenge{}, ErrOperationNotFound
+		return wire.CredentialRotationChallenge{}, ErrOperationNotFound
 	}
 	return publicTarget, nil
 }
@@ -1446,7 +1448,7 @@ ON CONFLICT (id) DO NOTHING`, rotationAuditID(target.operationID, target.connect
 	return err
 }
 
-func (s *SQLControlStore) lockRotationOperation(ctx context.Context, tx *db.Tx, plan RotationPlan) error {
+func (s *SQLControlStore) lockRotationOperation(ctx context.Context, tx *db.Tx, plan wire.RotationPlan) error {
 	var accountID, resourceID, resourceKind, operationType, state string
 	if err := tx.QueryRow(ctx, `
 SELECT account_id, resource_id, resource_kind, operation_type, state
@@ -1457,14 +1459,14 @@ FROM operations WHERE id = $1 FOR UPDATE`, plan.OperationID).Scan(&accountID, &r
 		return err
 	}
 	if accountID != plan.AccountID || resourceID != plan.TunnelID || resourceKind != "tunnel" || operationType != "connector.credentials.rotate" || state == "cancelled" {
-		return ErrIdentityMismatch
+		return wire.ErrIdentityMismatch
 	}
 	return nil
 }
 
-func (s *SQLControlStore) BeginCredentialRotation(ctx context.Context, plan RotationPlan) error {
+func (s *SQLControlStore) BeginCredentialRotation(ctx context.Context, plan wire.RotationPlan) error {
 	if ctx == nil || s.valid() != nil || plan.Validate() != nil {
-		return ErrInvalidInput
+		return wire.ErrInvalidInput
 	}
 	if _, err := rotationHashBytes(plan.TargetSetHash); err != nil {
 		return err
@@ -1494,7 +1496,7 @@ WHERE operation_id = $1 AND account_id = $3 AND tunnel_id = $4`, plan.OperationI
 			return err
 		}
 		if count != len(plan.Targets) || mismatched {
-			return ErrContentHashMismatch
+			return wire.ErrContentHashMismatch
 		}
 		if _, err := tx.Exec(ctx, `
 UPDATE operations
@@ -1509,9 +1511,9 @@ WHERE id = $1 AND account_id = $3`, plan.OperationID, now, plan.AccountID); err 
 	})
 }
 
-func (s *SQLControlStore) authorizeRotationSession(ctx context.Context, tx *db.Tx, challenge CredentialRotationChallenge, lock bool) error {
+func (s *SQLControlStore) authorizeRotationSession(ctx context.Context, tx *db.Tx, challenge wire.CredentialRotationChallenge, lock bool) error {
 	if challenge.Validate(s.now()) != nil {
-		return ErrInvalidInput
+		return wire.ErrInvalidInput
 	}
 	query := `
 SELECT t.account_id, c.host_id, s.credential_generation, s.capabilities
@@ -1536,10 +1538,10 @@ WHERE s.id = $1 AND s.connector_id = $2 AND s.process_generation = $3
 		return err
 	}
 	if accountID != challenge.AccountID || hostID != challenge.HostID || credentialGeneration != int64(challenge.OldCredentialGeneration) {
-		return ErrIdentityMismatch
+		return wire.ErrIdentityMismatch
 	}
-	if !hasCapability(capabilities, CapabilityCredentialRotation) {
-		return codeError(ErrCapabilityMissing, ReasonCapabilityMissing, false, nil)
+	if !wire.HasCapability(capabilities, wire.CapabilityCredentialRotation) {
+		return wire.CodeError(wire.ErrCapabilityMissing, wire.ReasonCapabilityMissing, false, nil)
 	}
 	return nil
 }
@@ -1548,18 +1550,18 @@ WHERE s.id = $1 AND s.connector_id = $2 AND s.process_generation = $3
 // emits a challenge. It is intentionally a separate read-only boundary so a
 // worker cannot challenge an arbitrary session or a connector that did not
 // negotiate the rotation capability.
-func (s *SQLControlStore) AuthorizeCredentialRotationSession(ctx context.Context, challenge CredentialRotationChallenge) error {
+func (s *SQLControlStore) AuthorizeCredentialRotationSession(ctx context.Context, challenge wire.CredentialRotationChallenge) error {
 	if ctx == nil || s.valid() != nil {
-		return ErrInvalidInput
+		return wire.ErrInvalidInput
 	}
 	return s.DB.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		return s.authorizeRotationSession(ctx, tx, challenge, true)
 	})
 }
 
-func (s *SQLControlStore) authorizeRotationRecoverySession(ctx context.Context, tx *db.Tx, plan RotationPlan, target RotationTarget, ref SessionRef, credentialGeneration uint64, now time.Time) error {
+func (s *SQLControlStore) authorizeRotationRecoverySession(ctx context.Context, tx *db.Tx, plan wire.RotationPlan, target wire.RotationTarget, ref wire.SessionRef, credentialGeneration uint64, now time.Time) error {
 	if plan.Validate() != nil || target.Validate() != nil || ref.Validate() != nil || ref.TunnelID != plan.TunnelID || ref.ConnectorID != target.ConnectorID || credentialGeneration == 0 {
-		return ErrInvalidInput
+		return wire.ErrInvalidInput
 	}
 	var accountID, hostID string
 	var storedGeneration int64
@@ -1578,8 +1580,8 @@ FOR UPDATE OF session, c`, ref.SessionID, ref.ConnectorID, int64(ref.ProcessGene
 		}
 		return err
 	}
-	if accountID != plan.AccountID || hostID != target.HostID || storedGeneration != int64(credentialGeneration) || !hasCapability(capabilities, CapabilityCredentialRotation) {
-		return ErrIdentityMismatch
+	if accountID != plan.AccountID || hostID != target.HostID || storedGeneration != int64(credentialGeneration) || !wire.HasCapability(capabilities, wire.CapabilityCredentialRotation) {
+		return wire.ErrIdentityMismatch
 	}
 	return nil
 }
@@ -1588,9 +1590,9 @@ FOR UPDATE OF session, c`, ref.SessionID, ref.ConnectorID, int64(ref.ProcessGene
 // committed but the install frame was not received. Only a newer authenticated
 // old-key session may discard the staged verifier and return the target to an
 // expired challenged phase for a fresh nonce/proof exchange.
-func (s *SQLControlStore) ResetCredentialRotationInstall(ctx context.Context, plan RotationPlan, target RotationTarget, ref SessionRef) error {
+func (s *SQLControlStore) ResetCredentialRotationInstall(ctx context.Context, plan wire.RotationPlan, target wire.RotationTarget, ref wire.SessionRef) error {
 	if ctx == nil || s.valid() != nil {
-		return ErrInvalidInput
+		return wire.ErrInvalidInput
 	}
 	now := s.now()
 	return s.DB.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
@@ -1600,9 +1602,9 @@ func (s *SQLControlStore) ResetCredentialRotationInstall(ctx context.Context, pl
 		}
 		storedTarget, err := row.target()
 		if err != nil || storedTarget != target || row.targetSetHash != plan.TargetSetHash {
-			return ErrIdentityMismatch
+			return wire.ErrIdentityMismatch
 		}
-		if row.state != string(RotationTargetInstalled) || ref.ProcessGeneration <= rotationUint(row.proofProcessGeneration) {
+		if row.state != string(wire.RotationTargetInstalled) || ref.ProcessGeneration <= rotationUint(row.proofProcessGeneration) {
 			return ErrStaleProcess
 		}
 		if err := s.authorizeRotationRecoverySession(ctx, tx, plan, target, ref, target.OldCredentialGeneration, now); err != nil {
@@ -1616,7 +1618,7 @@ WHERE connector_id = $1 AND credential_generation = $2
 			return err
 		}
 		if liveReplacement != 0 {
-			return codeError(ErrSessionConflict, ReasonStaleGeneration, true, nil)
+			return wire.CodeError(wire.ErrSessionConflict, wire.ReasonStaleGeneration, true, nil)
 		}
 		credential, err := tx.Exec(ctx, `
 DELETE FROM tunnel_connector_credential_generations
@@ -1646,7 +1648,7 @@ WHERE operation_id = $2 AND account_id = $3 AND tunnel_id = $4
 		if result.RowsAffected() != 1 {
 			return ErrStaleProcess
 		}
-		row.state = string(RotationTargetChallenged)
+		row.state = string(wire.RotationTargetChallenged)
 		return s.recordRotationAudit(ctx, tx, row, "connector.credential_rotation_install_recovery_required", "uncertain", map[string]any{"session_id": ref.SessionID, "process_generation": ref.ProcessGeneration}, now)
 	})
 }
@@ -1654,13 +1656,13 @@ WHERE operation_id = $2 AND account_id = $3 AND tunnel_id = $4
 // RebindCredentialRotationRevoke safely moves an unexpired revoke to a newer
 // authenticated replacement session after reconnect. Readiness remains bound
 // to the session that proved it; only revoke delivery metadata changes.
-func (s *SQLControlStore) RebindCredentialRotationRevoke(ctx context.Context, plan RotationPlan, target RotationTarget, ref SessionRef, nonce string, issuedAt, deadline time.Time) (CredentialRotationRevoke, error) {
+func (s *SQLControlStore) RebindCredentialRotationRevoke(ctx context.Context, plan wire.RotationPlan, target wire.RotationTarget, ref wire.SessionRef, nonce string, issuedAt, deadline time.Time) (wire.CredentialRotationRevoke, error) {
 	if ctx == nil || s.valid() != nil {
-		return CredentialRotationRevoke{}, ErrInvalidInput
+		return wire.CredentialRotationRevoke{}, wire.ErrInvalidInput
 	}
-	revoke := CredentialRotationRevoke{AccountID: plan.AccountID, TunnelID: plan.TunnelID, OperationID: plan.OperationID, ConnectorID: target.ConnectorID, HostID: target.HostID, SessionID: ref.SessionID, ProcessGeneration: ref.ProcessGeneration, TargetSetHash: plan.TargetSetHash, OldCredentialGeneration: target.OldCredentialGeneration, NewCredentialGeneration: target.NewCredentialGeneration, RevokeNonce: nonce, IssuedAt: issuedAt, Deadline: deadline}
+	revoke := wire.CredentialRotationRevoke{AccountID: plan.AccountID, TunnelID: plan.TunnelID, OperationID: plan.OperationID, ConnectorID: target.ConnectorID, HostID: target.HostID, SessionID: ref.SessionID, ProcessGeneration: ref.ProcessGeneration, TargetSetHash: plan.TargetSetHash, OldCredentialGeneration: target.OldCredentialGeneration, NewCredentialGeneration: target.NewCredentialGeneration, RevokeNonce: nonce, IssuedAt: issuedAt, Deadline: deadline}
 	if err := revoke.Validate(s.now()); err != nil {
-		return CredentialRotationRevoke{}, err
+		return wire.CredentialRotationRevoke{}, err
 	}
 	err := s.DB.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		row, err := s.loadRotationTarget(ctx, tx, plan.OperationID, plan.AccountID, plan.TunnelID, target.ConnectorID, true)
@@ -1669,9 +1671,9 @@ func (s *SQLControlStore) RebindCredentialRotationRevoke(ctx context.Context, pl
 		}
 		storedTarget, err := row.target()
 		if err != nil || storedTarget != target || row.targetSetHash != plan.TargetSetHash {
-			return ErrIdentityMismatch
+			return wire.ErrIdentityMismatch
 		}
-		if row.state != string(RotationTargetRevoking) || ref.ProcessGeneration <= rotationUint(row.revokeProcessGeneration) {
+		if row.state != string(wire.RotationTargetRevoking) || ref.ProcessGeneration <= rotationUint(row.revokeProcessGeneration) {
 			return ErrStaleProcess
 		}
 		if err := s.authorizeRotationRecoverySession(ctx, tx, plan, target, ref, target.NewCredentialGeneration, s.now()); err != nil {
@@ -1702,9 +1704,9 @@ WHERE operation_id = $6 AND account_id = $7 AND tunnel_id = $8
 // whose immutable overlap window expired before readiness. It does not invent a
 // connector acknowledgement and revokes any staged verifier in the same
 // transaction.
-func (s *SQLControlStore) FailCredentialRotationTarget(ctx context.Context, plan RotationPlan, target RotationTarget, code Code) error {
-	if ctx == nil || s.valid() != nil || plan.Validate() != nil || target.Validate() != nil || !validCode(code) || code == "" {
-		return ErrInvalidInput
+func (s *SQLControlStore) FailCredentialRotationTarget(ctx context.Context, plan wire.RotationPlan, target wire.RotationTarget, code wire.Code) error {
+	if ctx == nil || s.valid() != nil || plan.Validate() != nil || target.Validate() != nil || !wire.ValidCode(code) || code == "" {
+		return wire.ErrInvalidInput
 	}
 	now := s.now()
 	return s.DB.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
@@ -1714,15 +1716,15 @@ func (s *SQLControlStore) FailCredentialRotationTarget(ctx context.Context, plan
 		}
 		storedTarget, err := row.target()
 		if err != nil || storedTarget != target || row.targetSetHash != plan.TargetSetHash {
-			return ErrIdentityMismatch
+			return wire.ErrIdentityMismatch
 		}
-		if row.state == string(RotationTargetFailed) {
+		if row.state == string(wire.RotationTargetFailed) {
 			if rotationString(row.failureCode) == string(code) {
 				return nil
 			}
 			return ErrDurableReplay
 		}
-		if row.state == string(RotationTargetReady) || row.state == string(RotationTargetRevoking) || row.state == string(RotationTargetRevoked) {
+		if row.state == string(wire.RotationTargetReady) || row.state == string(wire.RotationTargetRevoking) || row.state == string(wire.RotationTargetRevoked) {
 			return ErrStaleProcess
 		}
 		if _, err := tx.Exec(ctx, `
@@ -1757,19 +1759,19 @@ WHERE id = $3 AND account_id = $4 AND resource_kind = 'tunnel'
 		if operation.RowsAffected() != 1 {
 			return ErrOperationNotFound
 		}
-		row.state = string(RotationTargetFailed)
+		row.state = string(wire.RotationTargetFailed)
 		row.failureCode = sql.NullString{String: string(code), Valid: true}
 		return s.recordRotationAudit(ctx, tx, row, "connector.credential_rotation_failed", "uncertain", map[string]any{"code": code, "failure": rotationFailureMessage(code)}, now)
 	})
 }
 
-func sameRotationChallenge(a, b CredentialRotationChallenge) bool {
+func sameRotationChallenge(a, b wire.CredentialRotationChallenge) bool {
 	return a.AccountID == b.AccountID && a.TunnelID == b.TunnelID && a.OperationID == b.OperationID && a.ConnectorID == b.ConnectorID && a.HostID == b.HostID && a.SessionID == b.SessionID && a.ProcessGeneration == b.ProcessGeneration && a.TargetSetHash == b.TargetSetHash && a.Target == b.Target && a.OldCredentialGeneration == b.OldCredentialGeneration && a.NewCredentialGeneration == b.NewCredentialGeneration && a.OldIdentityKeyID == b.OldIdentityKeyID && a.OldIdentityKeyThumbprint == b.OldIdentityKeyThumbprint && a.ChallengeNonce == b.ChallengeNonce && a.IssuedAt.Equal(b.IssuedAt) && a.ExpiresAt.Equal(b.ExpiresAt) && a.OverlapUntil.Equal(b.OverlapUntil) && a.NewCredentialValidUntil.Equal(b.NewCredentialValidUntil)
 }
 
-func (s *SQLControlStore) RecordCredentialRotationChallenge(ctx context.Context, challenge CredentialRotationChallenge) error {
+func (s *SQLControlStore) RecordCredentialRotationChallenge(ctx context.Context, challenge wire.CredentialRotationChallenge) error {
 	if ctx == nil || s.valid() != nil {
-		return ErrInvalidInput
+		return wire.ErrInvalidInput
 	}
 	now := s.now()
 	if err := challenge.Validate(now); err != nil {
@@ -1785,13 +1787,13 @@ func (s *SQLControlStore) RecordCredentialRotationChallenge(ctx context.Context,
 			return err
 		}
 		if item != challenge.Target || row.targetSetHash != challenge.TargetSetHash || row.hostID != challenge.HostID {
-			return ErrIdentityMismatch
+			return wire.ErrIdentityMismatch
 		}
 		if (row.overlapUntil.Valid && !row.overlapUntil.Time.Equal(challenge.OverlapUntil)) || (row.newCredentialValidUntil.Valid && !row.newCredentialValidUntil.Time.Equal(challenge.NewCredentialValidUntil)) {
-			return ErrIdentityMismatch
+			return wire.ErrIdentityMismatch
 		}
-		if row.state == string(RotationTargetChallenged) {
-			stored := CredentialRotationChallenge{AccountID: row.accountID, TunnelID: row.tunnelID, OperationID: row.operationID, ConnectorID: row.connectorID, HostID: row.hostID, SessionID: rotationString(row.proofSessionID), ProcessGeneration: rotationUint(row.proofProcessGeneration), TargetSetHash: row.targetSetHash, Target: item, OldCredentialGeneration: item.OldCredentialGeneration, NewCredentialGeneration: item.NewCredentialGeneration, OldIdentityKeyID: rotationString(row.oldIdentityKeyID), OldIdentityKeyThumbprint: rotationString(row.oldIdentityKeyThumbprint), ChallengeNonce: rotationString(row.challengeNonce), IssuedAt: rotationTime(row.challengeIssuedAt), ExpiresAt: rotationTime(row.challengeExpiresAt), OverlapUntil: rotationTime(row.overlapUntil), NewCredentialValidUntil: rotationTime(row.newCredentialValidUntil)}
+		if row.state == string(wire.RotationTargetChallenged) {
+			stored := wire.CredentialRotationChallenge{AccountID: row.accountID, TunnelID: row.tunnelID, OperationID: row.operationID, ConnectorID: row.connectorID, HostID: row.hostID, SessionID: rotationString(row.proofSessionID), ProcessGeneration: rotationUint(row.proofProcessGeneration), TargetSetHash: row.targetSetHash, Target: item, OldCredentialGeneration: item.OldCredentialGeneration, NewCredentialGeneration: item.NewCredentialGeneration, OldIdentityKeyID: rotationString(row.oldIdentityKeyID), OldIdentityKeyThumbprint: rotationString(row.oldIdentityKeyThumbprint), ChallengeNonce: rotationString(row.challengeNonce), IssuedAt: rotationTime(row.challengeIssuedAt), ExpiresAt: rotationTime(row.challengeExpiresAt), OverlapUntil: rotationTime(row.overlapUntil), NewCredentialValidUntil: rotationTime(row.newCredentialValidUntil)}
 			if sameRotationChallenge(stored, challenge) {
 				return nil
 			}
@@ -1817,7 +1819,7 @@ WHERE operation_id = $11 AND account_id = $12 AND tunnel_id = $13
 			}
 			return s.recordRotationAudit(ctx, tx, row, "connector.credential_rotation_rechallenged", "changed", map[string]any{"target_set_hash": challenge.TargetSetHash}, now)
 		}
-		if row.state != string(RotationTargetPending) {
+		if row.state != string(wire.RotationTargetPending) {
 			return ErrStaleProcess
 		}
 		if err := s.authorizeRotationSession(ctx, tx, challenge, true); err != nil {
@@ -1840,7 +1842,7 @@ WHERE operation_id = $11 AND account_id = $12 AND tunnel_id = $13
 		if result.RowsAffected() != 1 {
 			return ErrStaleProcess
 		}
-		row.state = string(RotationTargetChallenged)
+		row.state = string(wire.RotationTargetChallenged)
 		row.oldIdentityKeyID = sql.NullString{String: challenge.OldIdentityKeyID, Valid: true}
 		row.oldIdentityKeyThumbprint = sql.NullString{String: challenge.OldIdentityKeyThumbprint, Valid: true}
 		row.challengeNonce = sql.NullString{String: challenge.ChallengeNonce, Valid: true}
@@ -1854,12 +1856,12 @@ WHERE operation_id = $11 AND account_id = $12 AND tunnel_id = $13
 	})
 }
 
-func (s *SQLControlStore) verifyRotationProofInTx(ctx context.Context, tx *db.Tx, proof CredentialRotationProof, now, replayExpiresAt time.Time) error {
-	payload, err := CredentialRotationProofPayload(proof)
+func (s *SQLControlStore) verifyRotationProofInTx(ctx context.Context, tx *db.Tx, proof wire.CredentialRotationProof, now, replayExpiresAt time.Time) error {
+	payload, err := wire.CredentialRotationProofPayload(proof)
 	if err != nil {
 		return err
 	}
-	oldSignature, err := DecodeProof(proof.OldSignedProof)
+	oldSignature, err := wire.DecodeProof(proof.OldSignedProof)
 	if err != nil {
 		return err
 	}
@@ -1874,13 +1876,13 @@ func (s *SQLControlStore) verifyRotationProofInTx(ctx context.Context, tx *db.Tx
 	if err := verifyTranscript(payload, payload, oldSignature, oldKey); err != nil {
 		return err
 	}
-	newSignature, err := DecodeProof(proof.NewSignedProof)
+	newSignature, err := wire.DecodeProof(proof.NewSignedProof)
 	if err != nil {
 		return err
 	}
-	newKey, err := decodeRotationPublicKey(proof.NewPublicKey)
+	newKey, err := wire.DecodeRotationPublicKey(proof.NewPublicKey)
 	if err != nil || !ed25519.Verify(newKey, payload, newSignature) {
-		return ErrAuthenticationFailed
+		return wire.ErrAuthenticationFailed
 	}
 	// Rotation proofs use the challenge nonce as their replay identity. Reserve
 	// it only after both old-key authorization and new-key proof of possession
@@ -1890,9 +1892,9 @@ func (s *SQLControlStore) verifyRotationProofInTx(ctx context.Context, tx *db.Tx
 	return reserveControlReplay(ctx, tx, proof.AccountID, proof.TunnelID, proof.ConnectorID, proof.OldCredentialGeneration, "rotation", proof.ChallengeNonce, payload, replayExpiresAt, now)
 }
 
-func (s *SQLControlStore) RecordCredentialRotationProof(ctx context.Context, challenge CredentialRotationChallenge, proof CredentialRotationProof, install CredentialRotationInstall) error {
+func (s *SQLControlStore) RecordCredentialRotationProof(ctx context.Context, challenge wire.CredentialRotationChallenge, proof wire.CredentialRotationProof, install wire.CredentialRotationInstall) error {
 	if ctx == nil || s.valid() != nil {
-		return ErrInvalidInput
+		return wire.ErrInvalidInput
 	}
 	now := s.now()
 	if err := challenge.Validate(now); err != nil {
@@ -1904,7 +1906,7 @@ func (s *SQLControlStore) RecordCredentialRotationProof(ctx context.Context, cha
 	if err := install.Validate(now); err != nil {
 		return err
 	}
-	publicKey, err := decodeRotationPublicKey(proof.NewPublicKey)
+	publicKey, err := wire.DecodeRotationPublicKey(proof.NewPublicKey)
 	if err != nil {
 		return err
 	}
@@ -1921,14 +1923,14 @@ func (s *SQLControlStore) RecordCredentialRotationProof(ctx context.Context, cha
 		if err != nil {
 			return err
 		}
-		if row.state != string(RotationTargetChallenged) || item != challenge.Target || !sameRotationChallenge(storedChallenge, challenge) || !rotationProofMatchesChallenge(proof, challenge, item) || proof.NewCredentialValidUntil != challenge.NewCredentialValidUntil || install.HostID != proof.HostID || install.NewCredentialValidUntil != proof.NewCredentialValidUntil {
+		if row.state != string(wire.RotationTargetChallenged) || item != challenge.Target || !sameRotationChallenge(storedChallenge, challenge) || !wire.RotationProofMatchesChallenge(proof, challenge, item) || proof.NewCredentialValidUntil != challenge.NewCredentialValidUntil || install.HostID != proof.HostID || install.NewCredentialValidUntil != proof.NewCredentialValidUntil {
 			return ErrStaleProcess
 		}
 		if err := s.authorizeRotationSession(ctx, tx, challenge, true); err != nil {
 			return err
 		}
 		if err := s.verifyRotationProofInTx(ctx, tx, proof, now, storedChallenge.ExpiresAt); err != nil {
-			return codeError(ErrAuthenticationFailed, ReasonAuthentication, false, err)
+			return wire.CodeError(wire.ErrAuthenticationFailed, wire.ReasonAuthentication, false, err)
 		}
 		// Proof acceptance stages the replacement verifier but does not switch
 		// the connector's authoritative credential yet. The old generation
@@ -1954,7 +1956,7 @@ WHERE connector_id = $1 AND tunnel_id = $2 AND generation = $3`, proof.Connector
 			return err
 		}
 		if !bytes.Equal(storedKey, publicKey) || storedReference != proof.NewCredentialReference || storedThumbprint != proof.NewIdentityKeyThumbprint || sourceOperation != proof.OperationID || storedState != "overlap" || !storedValidUntil.Equal(proof.NewCredentialValidUntil) {
-			return ErrContentHashMismatch
+			return wire.ErrContentHashMismatch
 		}
 		result, err := tx.Exec(ctx, `
 UPDATE tunnel_connector_rotation_targets
@@ -1980,7 +1982,7 @@ WHERE id = $1 AND account_id = $3 AND resource_kind = 'tunnel' AND resource_id =
 		if operationResult.RowsAffected() != 1 {
 			return ErrOperationNotFound
 		}
-		row.state = string(RotationTargetInstalled)
+		row.state = string(wire.RotationTargetInstalled)
 		return s.recordRotationAudit(ctx, tx, row, "connector.credential_rotation_installed", "changed", map[string]any{"new_credential_generation": proof.NewCredentialGeneration, "replacement_process_generation": install.ReplacementProcessGeneration}, now)
 	})
 }
@@ -1989,14 +1991,14 @@ WHERE id = $1 AND account_id = $3 AND resource_kind = 'tunnel' AND resource_id =
 // connector/host/generation boundary used by authentication. It is useful to
 // callers that need a verifier callback for RotationCoordinator; the SQL write
 // path still verifies again under its locked transaction.
-func (s *SQLControlStore) VerifyRotationOldProof(ctx context.Context, proof CredentialRotationProof, payload, signature []byte) error {
+func (s *SQLControlStore) VerifyRotationOldProof(ctx context.Context, proof wire.CredentialRotationProof, payload, signature []byte) error {
 	if ctx == nil || s.valid() != nil {
-		return ErrAuthenticationFailed
+		return wire.ErrAuthenticationFailed
 	}
 	if err := proof.Validate(s.now()); err != nil {
 		return err
 	}
-	expected, err := CredentialRotationProofPayload(proof)
+	expected, err := wire.CredentialRotationProofPayload(proof)
 	if err != nil {
 		return err
 	}
@@ -2014,9 +2016,9 @@ func (s *SQLControlStore) VerifyRotationOldProof(ctx context.Context, proof Cred
 	})
 }
 
-func (s *SQLControlStore) RecordCredentialRotationReady(ctx context.Context, ready CredentialRotationReady) error {
+func (s *SQLControlStore) RecordCredentialRotationReady(ctx context.Context, ready wire.CredentialRotationReady) error {
 	if ctx == nil || s.valid() != nil {
-		return ErrInvalidInput
+		return wire.ErrInvalidInput
 	}
 	now := s.now()
 	if err := ready.Validate(now); err != nil {
@@ -2031,11 +2033,11 @@ func (s *SQLControlStore) RecordCredentialRotationReady(ctx context.Context, rea
 		if err != nil {
 			return err
 		}
-		if row.state != string(RotationTargetInstalled) || row.hostID != ready.HostID || item.OldCredentialGeneration != ready.OldCredentialGeneration || item.NewCredentialGeneration != ready.NewCredentialGeneration || row.targetSetHash != ready.TargetSetHash || ready.ProcessGeneration < rotationUint(row.proofProcessGeneration)+1 || rotationString(row.newIdentityKeyID) != ready.NewIdentityKeyID || rotationString(row.newIdentityKeyThumbprint) != ready.NewIdentityKeyThumbprint || rotationString(row.newCredentialReference) != ready.NewCredentialReference || !bytes.Equal(row.newPublicKey, mustRotationPublicKey(ready.NewPublicKey)) || !rotationTime(row.newCredentialValidUntil).Equal(ready.NewCredentialValidUntil) {
-			return ErrIdentityMismatch
+		if row.state != string(wire.RotationTargetInstalled) || row.hostID != ready.HostID || item.OldCredentialGeneration != ready.OldCredentialGeneration || item.NewCredentialGeneration != ready.NewCredentialGeneration || row.targetSetHash != ready.TargetSetHash || ready.ProcessGeneration < rotationUint(row.proofProcessGeneration)+1 || rotationString(row.newIdentityKeyID) != ready.NewIdentityKeyID || rotationString(row.newIdentityKeyThumbprint) != ready.NewIdentityKeyThumbprint || rotationString(row.newCredentialReference) != ready.NewCredentialReference || !bytes.Equal(row.newPublicKey, mustRotationPublicKey(ready.NewPublicKey)) || !rotationTime(row.newCredentialValidUntil).Equal(ready.NewCredentialValidUntil) {
+			return wire.ErrIdentityMismatch
 		}
 		if !row.overlapUntil.Valid || !row.overlapUntil.Time.After(now) {
-			return ErrCredentialExpired
+			return wire.ErrCredentialExpired
 		}
 		var accountID, hostID, state string
 		var credentialGeneration, processGeneration int64
@@ -2055,13 +2057,13 @@ FOR UPDATE OF s, c`, ready.SessionID, ready.ConnectorID, int64(ready.ProcessGene
 			return err
 		}
 		if accountID != ready.AccountID || hostID != ready.HostID || state == "" || credentialGeneration != int64(ready.NewCredentialGeneration) || processGeneration != int64(ready.ProcessGeneration) {
-			return ErrIdentityMismatch
+			return wire.ErrIdentityMismatch
 		}
 		storedHash, err := s.generationHash(ctx, tx, ready.TunnelID, ready.ConfigGeneration)
 		if err != nil {
 			return err
 		}
-		if !configHashMatches(storedHash, Snapshot{ContentHash: ready.ConfigContentHash}) {
+		if !configHashMatches(storedHash, wire.Snapshot{ContentHash: ready.ConfigContentHash}) {
 			return ErrConfigHashCorrupt
 		}
 		// Demote the old generation first. The partial unique index permits only
@@ -2127,22 +2129,22 @@ WHERE id = $6 AND tunnel_id = $7 AND host_id = $8
 		if connectorResult.RowsAffected() != 1 {
 			return ErrStaleProcess
 		}
-		row.state = string(RotationTargetReady)
+		row.state = string(wire.RotationTargetReady)
 		return s.recordRotationAudit(ctx, tx, row, "connector.credential_rotation_ready", "changed", map[string]any{"new_credential_generation": ready.NewCredentialGeneration, "config_generation": ready.ConfigGeneration}, now)
 	})
 }
 
 func mustRotationPublicKey(value string) []byte {
-	key, err := decodeRotationPublicKey(value)
+	key, err := wire.DecodeRotationPublicKey(value)
 	if err != nil {
 		return nil
 	}
 	return key
 }
 
-func (s *SQLControlStore) RecordCredentialRotationRevoke(ctx context.Context, revoke CredentialRotationRevoke) error {
+func (s *SQLControlStore) RecordCredentialRotationRevoke(ctx context.Context, revoke wire.CredentialRotationRevoke) error {
 	if ctx == nil || s.valid() != nil {
-		return ErrInvalidInput
+		return wire.ErrInvalidInput
 	}
 	now := s.now()
 	if err := revoke.Validate(now); err != nil {
@@ -2158,15 +2160,15 @@ func (s *SQLControlStore) RecordCredentialRotationRevoke(ctx context.Context, re
 			return err
 		}
 		if row.hostID != revoke.HostID || row.targetSetHash != revoke.TargetSetHash || item.OldCredentialGeneration != revoke.OldCredentialGeneration || item.NewCredentialGeneration != revoke.NewCredentialGeneration || rotationString(row.replacementSessionID) != revoke.SessionID || rotationUint(row.replacementProcessGeneration) != revoke.ProcessGeneration {
-			return ErrIdentityMismatch
+			return wire.ErrIdentityMismatch
 		}
-		if row.state == string(RotationTargetRevoking) {
+		if row.state == string(wire.RotationTargetRevoking) {
 			if rotationString(row.revokeNonce) == revoke.RevokeNonce && rotationString(row.revokeSessionID) == revoke.SessionID && rotationUint(row.revokeProcessGeneration) == revoke.ProcessGeneration && rotationTime(row.revokeDeadline).Equal(revoke.Deadline) {
 				return nil
 			}
 			return ErrDurableReplay
 		}
-		if row.state != string(RotationTargetReady) {
+		if row.state != string(wire.RotationTargetReady) {
 			return ErrStaleProcess
 		}
 		var incomplete int
@@ -2177,7 +2179,7 @@ WHERE operation_id = $1 AND account_id = $2 AND tunnel_id = $3
 			return err
 		}
 		if incomplete != 0 {
-			return codeError(ErrCredentialRotationNotReady, ReasonCredentialRotation, true, nil)
+			return wire.CodeError(wire.ErrCredentialRotationNotReady, wire.ReasonCredentialRotation, true, nil)
 		}
 		result, err := tx.Exec(ctx, `
 UPDATE tunnel_connector_rotation_targets
@@ -2192,12 +2194,12 @@ UPDATE tunnel_connector_rotation_targets
 		if result.RowsAffected() != 1 {
 			return ErrStaleProcess
 		}
-		row.state = string(RotationTargetRevoking)
+		row.state = string(wire.RotationTargetRevoking)
 		return s.recordRotationAudit(ctx, tx, row, "connector.credential_rotation_revoke_requested", "changed", map[string]any{"old_credential_generation": revoke.OldCredentialGeneration, "new_credential_generation": revoke.NewCredentialGeneration}, now)
 	})
 }
 
-func (s *SQLControlStore) updateRotationOperation(ctx context.Context, tx *db.Tx, ack CredentialRotationAck, failed bool, now time.Time) error {
+func (s *SQLControlStore) updateRotationOperation(ctx context.Context, tx *db.Tx, ack wire.CredentialRotationAck, failed bool, now time.Time) error {
 	if failed {
 		result, err := tx.Exec(ctx, `
 UPDATE operations
@@ -2257,16 +2259,16 @@ WHERE id = $3 AND account_id = $4 AND resource_kind = 'tunnel'
 	return nil
 }
 
-func (s *SQLControlStore) RecordCredentialRotationResult(ctx context.Context, ack CredentialRotationAck, summary RotationSummary) error {
+func (s *SQLControlStore) RecordCredentialRotationResult(ctx context.Context, ack wire.CredentialRotationAck, summary wire.RotationSummary) error {
 	if ctx == nil || s.valid() != nil {
-		return ErrInvalidInput
+		return wire.ErrInvalidInput
 	}
 	now := s.now()
 	if err := ack.Validate(); err != nil {
 		return err
 	}
 	if summary.AccountID != ack.AccountID || summary.TunnelID != ack.TunnelID || summary.OperationID != ack.OperationID || summary.TargetSetHash != ack.TargetSetHash {
-		return ErrIdentityMismatch
+		return wire.ErrIdentityMismatch
 	}
 	return s.DB.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		row, err := s.loadRotationTarget(ctx, tx, ack.OperationID, ack.AccountID, ack.TunnelID, ack.ConnectorID, true)
@@ -2278,20 +2280,20 @@ func (s *SQLControlStore) RecordCredentialRotationResult(ctx context.Context, ac
 			return err
 		}
 		if row.hostID != ack.HostID || row.targetSetHash != ack.TargetSetHash || item.OldCredentialGeneration != ack.OldCredentialGeneration || item.NewCredentialGeneration != ack.NewCredentialGeneration {
-			return ErrIdentityMismatch
+			return wire.ErrIdentityMismatch
 		}
 		if err := s.validateRotationSummary(ctx, tx, ack, summary); err != nil {
 			return err
 		}
-		if row.state == string(RotationTargetRevoked) || row.state == string(RotationTargetFailed) {
+		if row.state == string(wire.RotationTargetRevoked) || row.state == string(wire.RotationTargetFailed) {
 			// A duplicate terminal result is safe only when it describes the
 			// exact durable aggregate state. The summary validation above binds
 			// the retry to the same target set and operation before this no-op.
 			return nil
 		}
-		if ack.Status == RotationAckRejected || ack.Status == RotationAckFailed {
+		if ack.Status == wire.RotationAckRejected || ack.Status == wire.RotationAckFailed {
 			if !rotationResultAckMatchesTarget(row, ack) {
-				return ErrIdentityMismatch
+				return wire.ErrIdentityMismatch
 			}
 			result, err := tx.Exec(ctx, `
 UPDATE tunnel_connector_rotation_targets
@@ -2304,14 +2306,14 @@ WHERE operation_id = $4 AND account_id = $5 AND tunnel_id = $6
 			if result.RowsAffected() != 1 {
 				return ErrStaleProcess
 			}
-			row.state = string(RotationTargetFailed)
+			row.state = string(wire.RotationTargetFailed)
 			row.failureCode = sql.NullString{String: string(ack.Code), Valid: true}
 			if err := s.updateRotationOperation(ctx, tx, ack, true, now); err != nil {
 				return err
 			}
 			return s.recordRotationAudit(ctx, tx, row, "connector.credential_rotation_failed", "uncertain", map[string]any{"code": ack.Code, "failure": rotationFailureMessage(ack.Code)}, now)
 		}
-		if ack.Status != RotationAckRevoked || row.state != string(RotationTargetRevoking) || ack.SessionID != rotationString(row.replacementSessionID) || ack.ProcessGeneration != rotationUint(row.replacementProcessGeneration) {
+		if ack.Status != wire.RotationAckRevoked || row.state != string(wire.RotationTargetRevoking) || ack.SessionID != rotationString(row.replacementSessionID) || ack.ProcessGeneration != rotationUint(row.replacementProcessGeneration) {
 			return ErrStaleProcess
 		}
 		var connectorState, drainState, sessionState string
@@ -2353,7 +2355,7 @@ WHERE connector_id = $2 AND tunnel_id = $3 AND generation = $4
 		if oldCredential.RowsAffected() != 1 {
 			return ErrStaleProcess
 		}
-		row.state = string(RotationTargetRevoked)
+		row.state = string(wire.RotationTargetRevoked)
 		if err := s.updateRotationOperation(ctx, tx, ack, false, now); err != nil {
 			return err
 		}
@@ -2366,9 +2368,9 @@ WHERE connector_id = $2 AND tunnel_id = $3 AND generation = $4
 // but the SQL boundary must not trust it: a caller could otherwise omit a
 // connector, claim a different target set, or advance an unrelated target's
 // state while still presenting a validly shaped ACK.
-func (s *SQLControlStore) validateRotationSummary(ctx context.Context, tx *db.Tx, ack CredentialRotationAck, summary RotationSummary) error {
-	if summary.Status != RotationAggregatePending && summary.Status != RotationAggregateSucceeded && summary.Status != RotationAggregateFailed {
-		return ErrInvalidInput
+func (s *SQLControlStore) validateRotationSummary(ctx context.Context, tx *db.Tx, ack wire.CredentialRotationAck, summary wire.RotationSummary) error {
+	if summary.Status != wire.RotationAggregatePending && summary.Status != wire.RotationAggregateSucceeded && summary.Status != wire.RotationAggregateFailed {
+		return wire.ErrInvalidInput
 	}
 	rows, err := tx.Query(ctx, strings.Replace(rotationTargetSelect, " AND connector_id = $4", "", 1)+` ORDER BY connector_id`, ack.OperationID, ack.AccountID, ack.TunnelID)
 	if err != nil {
@@ -2382,10 +2384,10 @@ func (s *SQLControlStore) validateRotationSummary(ctx context.Context, tx *db.Tx
 			return err
 		}
 		if target.accountID != ack.AccountID || target.tunnelID != ack.TunnelID || target.targetSetHash != ack.TargetSetHash {
-			return ErrContentHashMismatch
+			return wire.ErrContentHashMismatch
 		}
 		if _, duplicate := stored[target.connectorID]; duplicate {
-			return ErrContentHashMismatch
+			return wire.ErrContentHashMismatch
 		}
 		stored[target.connectorID] = target
 	}
@@ -2393,90 +2395,90 @@ func (s *SQLControlStore) validateRotationSummary(ctx context.Context, tx *db.Tx
 		return err
 	}
 	if len(stored) == 0 || len(stored) != len(summary.Targets) {
-		return ErrContentHashMismatch
+		return wire.ErrContentHashMismatch
 	}
 	if summary.AccountID != ack.AccountID || summary.TunnelID != ack.TunnelID || summary.OperationID != ack.OperationID || summary.TargetSetHash != ack.TargetSetHash {
-		return ErrIdentityMismatch
+		return wire.ErrIdentityMismatch
 	}
 	seen := make(map[string]struct{}, len(summary.Targets))
 	failed := false
 	allRevoked := true
 	for _, item := range summary.Targets {
 		if err := item.Target.Validate(); err != nil {
-			return ErrInvalidInput
+			return wire.ErrInvalidInput
 		}
 		if _, duplicate := seen[item.Target.ConnectorID]; duplicate {
-			return ErrContentHashMismatch
+			return wire.ErrContentHashMismatch
 		}
 		seen[item.Target.ConnectorID] = struct{}{}
 		row, ok := stored[item.Target.ConnectorID]
 		if !ok {
-			return ErrContentHashMismatch
+			return wire.ErrContentHashMismatch
 		}
 		target, err := row.target()
 		if err != nil {
 			return err
 		}
 		if target != item.Target || row.hostID != item.Target.HostID {
-			return ErrIdentityMismatch
+			return wire.ErrIdentityMismatch
 		}
-		expectedState := RotationTargetState(row.state)
+		expectedState := wire.RotationTargetState(row.state)
 		if item.Target.ConnectorID == ack.ConnectorID {
 			switch ack.Status {
-			case RotationAckRejected, RotationAckFailed:
-				expectedState = RotationTargetFailed
-			case RotationAckRevoked:
-				expectedState = RotationTargetRevoked
+			case wire.RotationAckRejected, wire.RotationAckFailed:
+				expectedState = wire.RotationTargetFailed
+			case wire.RotationAckRevoked:
+				expectedState = wire.RotationTargetRevoked
 			default:
-				return ErrInvalidInput
+				return wire.ErrInvalidInput
 			}
 		}
-		if !validRotationTargetState(expectedState) || item.State != expectedState {
+		if !wire.ValidRotationTargetState(expectedState) || item.State != expectedState {
 			return ErrStaleProcess
 		}
-		if expectedState == RotationTargetFailed {
-			expectedCode := Code(rotationString(row.failureCode))
-			if item.Target.ConnectorID == ack.ConnectorID && (ack.Status == RotationAckRejected || ack.Status == RotationAckFailed) {
+		if expectedState == wire.RotationTargetFailed {
+			expectedCode := wire.Code(rotationString(row.failureCode))
+			if item.Target.ConnectorID == ack.ConnectorID && (ack.Status == wire.RotationAckRejected || ack.Status == wire.RotationAckFailed) {
 				expectedCode = ack.Code
 			}
 			if expectedCode == "" || item.Code != expectedCode {
-				return ErrIdentityMismatch
+				return wire.ErrIdentityMismatch
 			}
 			failed = true
 		} else if item.Code != "" {
-			return ErrInvalidInput
+			return wire.ErrInvalidInput
 		}
-		if expectedState != RotationTargetRevoked {
+		if expectedState != wire.RotationTargetRevoked {
 			allRevoked = false
 		}
 	}
 	if len(seen) != len(stored) {
-		return ErrContentHashMismatch
+		return wire.ErrContentHashMismatch
 	}
-	wantStatus := RotationAggregatePending
+	wantStatus := wire.RotationAggregatePending
 	if failed {
-		wantStatus = RotationAggregateFailed
+		wantStatus = wire.RotationAggregateFailed
 	} else if allRevoked {
-		wantStatus = RotationAggregateSucceeded
+		wantStatus = wire.RotationAggregateSucceeded
 	}
 	if summary.Status != wantStatus {
 		return ErrStaleProcess
 	}
-	if (wantStatus == RotationAggregateSucceeded) != !summary.CompletedAt.IsZero() {
-		return ErrInvalidInput
+	if (wantStatus == wire.RotationAggregateSucceeded) != !summary.CompletedAt.IsZero() {
+		return wire.ErrInvalidInput
 	}
 	return nil
 }
 
-func rotationResultAckMatchesTarget(row sqlRotationTarget, ack CredentialRotationAck) bool {
+func rotationResultAckMatchesTarget(row sqlRotationTarget, ack wire.CredentialRotationAck) bool {
 	var sessionID string
 	var processGeneration uint64
-	switch RotationTargetState(row.state) {
-	case RotationTargetChallenged, RotationTargetInstalled:
+	switch wire.RotationTargetState(row.state) {
+	case wire.RotationTargetChallenged, wire.RotationTargetInstalled:
 		sessionID, processGeneration = rotationString(row.proofSessionID), rotationUint(row.proofProcessGeneration)
-	case RotationTargetReady:
+	case wire.RotationTargetReady:
 		sessionID, processGeneration = rotationString(row.replacementSessionID), rotationUint(row.replacementProcessGeneration)
-	case RotationTargetRevoking:
+	case wire.RotationTargetRevoking:
 		sessionID, processGeneration = rotationString(row.revokeSessionID), rotationUint(row.revokeProcessGeneration)
 	default:
 		return false
@@ -2484,41 +2486,41 @@ func rotationResultAckMatchesTarget(row sqlRotationTarget, ack CredentialRotatio
 	return sessionID != "" && processGeneration > 0 && ack.SessionID == sessionID && ack.ProcessGeneration == processGeneration
 }
 
-func rotationFailureMessage(code Code) string {
+func rotationFailureMessage(code wire.Code) string {
 	switch code {
-	case CodeCapabilityMissing:
+	case wire.CodeCapabilityMissing:
 		return "connector does not support credential rotation"
-	case CodeCredentialExpired:
+	case wire.CodeCredentialExpired:
 		return "credential rotation credential expired"
-	case CodeCredentialRotationNotReady:
+	case wire.CodeCredentialRotationNotReady:
 		return "replacement connector was not ready"
-	case CodeSnapshotRequired, CodeGenerationGap:
+	case wire.CodeSnapshotRequired, wire.CodeGenerationGap:
 		return "connector requires a fresh configuration snapshot"
-	case CodeStaleGeneration, CodeStaleSession:
+	case wire.CodeStaleGeneration, wire.CodeStaleSession:
 		return "connector session generation is stale"
 	default:
 		return "credential rotation failed"
 	}
 }
 
-func rotationResumeTarget(target sqlRotationTarget) (RotationResumeTarget, error) {
+func rotationResumeTarget(target sqlRotationTarget) (wire.RotationResumeTarget, error) {
 	item, err := target.target()
 	if err != nil {
-		return RotationResumeTarget{}, err
+		return wire.RotationResumeTarget{}, err
 	}
-	result := RotationResumeTarget{
-		Target: item, State: RotationTargetState(target.state), Code: Code(rotationString(target.failureCode)),
+	result := wire.RotationResumeTarget{
+		Target: item, State: wire.RotationTargetState(target.state), Code: wire.Code(rotationString(target.failureCode)),
 		OverlapUntil: rotationTime(target.overlapUntil), NewCredentialValidUntil: rotationTime(target.newCredentialValidUntil),
 	}
 	if target.proofSessionID.Valid {
 		result.Challenge, err = target.challenge()
 		if err != nil {
-			return RotationResumeTarget{}, err
+			return wire.RotationResumeTarget{}, err
 		}
 	}
 	publicKey := base64.RawURLEncoding.EncodeToString(target.newPublicKey)
-	if target.state == string(RotationTargetInstalled) || target.state == string(RotationTargetReady) || target.state == string(RotationTargetRevoking) || target.state == string(RotationTargetRevoked) {
-		result.Install = CredentialRotationInstall{
+	if target.state == string(wire.RotationTargetInstalled) || target.state == string(wire.RotationTargetReady) || target.state == string(wire.RotationTargetRevoking) || target.state == string(wire.RotationTargetRevoked) {
+		result.Install = wire.CredentialRotationInstall{
 			AccountID: target.accountID, TunnelID: target.tunnelID, OperationID: target.operationID,
 			ConnectorID: target.connectorID, HostID: target.hostID, SessionID: rotationString(target.proofSessionID),
 			ProcessGeneration: rotationUint(target.proofProcessGeneration), TargetSetHash: target.targetSetHash,
@@ -2529,8 +2531,8 @@ func rotationResumeTarget(target sqlRotationTarget) (RotationResumeTarget, error
 			NewCredentialValidUntil: rotationTime(target.newCredentialValidUntil), ReplacementProcessGeneration: rotationUint(target.proofProcessGeneration) + 1,
 		}
 	}
-	if target.state == string(RotationTargetReady) || target.state == string(RotationTargetRevoking) || target.state == string(RotationTargetRevoked) {
-		result.Ready = CredentialRotationReady{
+	if target.state == string(wire.RotationTargetReady) || target.state == string(wire.RotationTargetRevoking) || target.state == string(wire.RotationTargetRevoked) {
+		result.Ready = wire.CredentialRotationReady{
 			AccountID: target.accountID, TunnelID: target.tunnelID, OperationID: target.operationID,
 			ConnectorID: target.connectorID, HostID: target.hostID, SessionID: rotationString(target.replacementSessionID),
 			PreviousSessionID: rotationString(target.proofSessionID), ProcessGeneration: rotationUint(target.replacementProcessGeneration),
@@ -2542,8 +2544,8 @@ func rotationResumeTarget(target sqlRotationTarget) (RotationResumeTarget, error
 			EdgeReady: rotationBool(target.edgeReady), RouteReady: rotationBool(target.routeReady), OriginReady: rotationBool(target.originReady), ReadyAt: rotationTime(target.readyAt),
 		}
 	}
-	if target.state == string(RotationTargetRevoking) || target.state == string(RotationTargetRevoked) {
-		result.Revoke = CredentialRotationRevoke{
+	if target.state == string(wire.RotationTargetRevoking) || target.state == string(wire.RotationTargetRevoked) {
+		result.Revoke = wire.CredentialRotationRevoke{
 			AccountID: target.accountID, TunnelID: target.tunnelID, OperationID: target.operationID,
 			ConnectorID: target.connectorID, HostID: target.hostID, SessionID: rotationString(target.revokeSessionID),
 			ProcessGeneration: rotationUint(target.revokeProcessGeneration), TargetSetHash: target.targetSetHash,
@@ -2554,11 +2556,11 @@ func rotationResumeTarget(target sqlRotationTarget) (RotationResumeTarget, error
 	return result, nil
 }
 
-func (s *SQLControlStore) LoadCredentialRotation(ctx context.Context, plan RotationPlan) (RotationResume, error) {
+func (s *SQLControlStore) LoadCredentialRotation(ctx context.Context, plan wire.RotationPlan) (wire.RotationResume, error) {
 	if ctx == nil || s.valid() != nil || plan.Validate() != nil {
-		return RotationResume{}, ErrInvalidInput
+		return wire.RotationResume{}, wire.ErrInvalidInput
 	}
-	var result RotationResume
+	var result wire.RotationResume
 	err := s.DB.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		var accountID, resourceID, resourceKind, operationType, state string
 		var completedAt sql.NullTime
@@ -2571,21 +2573,21 @@ FROM operations WHERE id = $1`, plan.OperationID).Scan(&accountID, &resourceID, 
 			return err
 		}
 		if accountID != plan.AccountID || resourceID != plan.TunnelID || resourceKind != "tunnel" || operationType != "connector.credentials.rotate" || state == "cancelled" {
-			return ErrIdentityMismatch
+			return wire.ErrIdentityMismatch
 		}
 		rows, err := tx.Query(ctx, strings.Replace(rotationTargetSelect, " AND connector_id = $4", "", 1)+` ORDER BY connector_id`, plan.OperationID, plan.AccountID, plan.TunnelID)
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
-		byConnector := make(map[string]RotationResumeTarget, len(plan.Targets))
+		byConnector := make(map[string]wire.RotationResumeTarget, len(plan.Targets))
 		for rows.Next() {
 			var target sqlRotationTarget
 			if err := scanRotationTarget(rows, &target); err != nil {
 				return err
 			}
 			if target.targetSetHash != plan.TargetSetHash || target.accountID != plan.AccountID || target.tunnelID != plan.TunnelID {
-				return ErrContentHashMismatch
+				return wire.ErrContentHashMismatch
 			}
 			resumed, err := rotationResumeTarget(target)
 			if err != nil {
@@ -2597,16 +2599,16 @@ FROM operations WHERE id = $1`, plan.OperationID).Scan(&accountID, &resourceID, 
 			return err
 		}
 		if len(byConnector) != len(plan.Targets) {
-			return ErrContentHashMismatch
+			return wire.ErrContentHashMismatch
 		}
-		result = RotationResume{Plan: plan, Started: true, Targets: make([]RotationResumeTarget, 0, len(plan.Targets))}
+		result = wire.RotationResume{Plan: plan, Started: true, Targets: make([]wire.RotationResumeTarget, 0, len(plan.Targets))}
 		if completedAt.Valid {
 			result.FinishedAt = completedAt.Time.UTC()
 		}
 		for _, item := range plan.Targets {
 			resumed, ok := byConnector[item.ConnectorID]
 			if !ok || resumed.Target != item {
-				return ErrContentHashMismatch
+				return wire.ErrContentHashMismatch
 			}
 			result.Targets = append(result.Targets, resumed)
 		}
@@ -2619,11 +2621,11 @@ FROM operations WHERE id = $1`, plan.OperationID).Scan(&accountID, &resourceID, 
 // reconciler after restart. The target rows are the source of truth; this
 // method never recaptures current connectors. Callers should pass each plan to
 // PersistentServer.ResumeRotation and use their own bounded worker lease.
-func (s *SQLControlStore) ListCredentialRotationPlans(ctx context.Context, limit int) ([]RotationPlan, error) {
+func (s *SQLControlStore) ListCredentialRotationPlans(ctx context.Context, limit int) ([]wire.RotationPlan, error) {
 	if ctx == nil || s.valid() != nil || limit < 1 || limit > 64 {
-		return nil, ErrInvalidInput
+		return nil, wire.ErrInvalidInput
 	}
-	plans := make([]RotationPlan, 0, limit)
+	plans := make([]wire.RotationPlan, 0, limit)
 	err := s.DB.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		rows, err := tx.Query(ctx, `
 SELECT o.id, o.account_id, o.resource_id
@@ -2660,7 +2662,7 @@ LIMIT $1`, limit)
 			if err != nil {
 				return err
 			}
-			targets := make([]RotationTarget, 0, MaxRotationTargets)
+			targets := make([]wire.RotationTarget, 0, wire.MaxRotationTargets)
 			var targetSetHash string
 			for targetRows.Next() {
 				var row sqlRotationTarget
@@ -2678,7 +2680,7 @@ LIMIT $1`, limit)
 				}
 				if row.targetSetHash != targetSetHash || row.accountID != operation.accountID || row.tunnelID != operation.tunnelID {
 					targetRows.Close()
-					return ErrContentHashMismatch
+					return wire.ErrContentHashMismatch
 				}
 				targets = append(targets, item)
 			}
@@ -2687,10 +2689,10 @@ LIMIT $1`, limit)
 				return err
 			}
 			targetRows.Close()
-			plan, err := NewRotationPlan(operation.accountID, operation.tunnelID, operation.operationID, targets)
+			plan, err := wire.NewRotationPlan(operation.accountID, operation.tunnelID, operation.operationID, targets)
 			if err != nil || plan.TargetSetHash != targetSetHash {
 				if err == nil {
-					err = ErrContentHashMismatch
+					err = wire.ErrContentHashMismatch
 				}
 				return err
 			}
@@ -2705,11 +2707,11 @@ LIMIT $1`, limit)
 // reconciler page. Inbound frames and terminal retries must remain routable
 // even when more than one page of rotations is active or the operation has
 // already reached a terminal state.
-func (s *SQLControlStore) LoadCredentialRotationPlan(ctx context.Context, operationID string) (RotationPlan, error) {
-	if ctx == nil || s.valid() != nil || ValidateIdentifier(operationID) != nil {
-		return RotationPlan{}, ErrInvalidInput
+func (s *SQLControlStore) LoadCredentialRotationPlan(ctx context.Context, operationID string) (wire.RotationPlan, error) {
+	if ctx == nil || s.valid() != nil || wire.ValidateIdentifier(operationID) != nil {
+		return wire.RotationPlan{}, wire.ErrInvalidInput
 	}
-	var plan RotationPlan
+	var plan wire.RotationPlan
 	err := s.DB.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		var accountID, tunnelID, resourceKind, operationType string
 		if err := tx.QueryRow(ctx, `
@@ -2721,14 +2723,14 @@ FROM operations WHERE id = $1`, operationID).Scan(&accountID, &tunnelID, &resour
 			return err
 		}
 		if resourceKind != "tunnel" || operationType != "connector.credentials.rotate" {
-			return ErrIdentityMismatch
+			return wire.ErrIdentityMismatch
 		}
 		rows, err := tx.Query(ctx, strings.Replace(rotationTargetSelect, " AND connector_id = $4", "", 1)+` ORDER BY connector_id`, operationID, accountID, tunnelID)
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
-		targets := make([]RotationTarget, 0, MaxRotationTargets)
+		targets := make([]wire.RotationTarget, 0, wire.MaxRotationTargets)
 		var targetSetHash string
 		for rows.Next() {
 			var row sqlRotationTarget
@@ -2743,7 +2745,7 @@ FROM operations WHERE id = $1`, operationID).Scan(&accountID, &tunnelID, &resour
 				targetSetHash = row.targetSetHash
 			}
 			if row.accountID != accountID || row.tunnelID != tunnelID || row.targetSetHash != targetSetHash {
-				return ErrContentHashMismatch
+				return wire.ErrContentHashMismatch
 			}
 			targets = append(targets, target)
 		}
@@ -2753,12 +2755,12 @@ FROM operations WHERE id = $1`, operationID).Scan(&accountID, &tunnelID, &resour
 		if len(targets) == 0 {
 			return ErrOperationNotFound
 		}
-		loaded, err := NewRotationPlan(accountID, tunnelID, operationID, targets)
+		loaded, err := wire.NewRotationPlan(accountID, tunnelID, operationID, targets)
 		if err != nil {
 			return err
 		}
 		if loaded.TargetSetHash != targetSetHash {
-			return ErrContentHashMismatch
+			return wire.ErrContentHashMismatch
 		}
 		plan = loaded
 		return nil
@@ -2771,6 +2773,6 @@ FROM operations WHERE id = $1`, operationID).Scan(&accountID, &tunnelID, &resour
 var _ PersistentControlStore = (*SQLControlStore)(nil)
 var _ PersistentDrainStore = (*SQLControlStore)(nil)
 var _ IdentityProofVerifier = (*SQLControlStore)(nil)
-var _ RotationPersistence = (*SQLControlStore)(nil)
-var _ RotationRecoveryStore = (*SQLControlStore)(nil)
-var _ RotationSessionAuthorizer = (*SQLControlStore)(nil)
+var _ wire.RotationPersistence = (*SQLControlStore)(nil)
+var _ wire.RotationRecoveryStore = (*SQLControlStore)(nil)
+var _ wire.RotationSessionAuthorizer = (*SQLControlStore)(nil)

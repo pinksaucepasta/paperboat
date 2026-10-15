@@ -20,6 +20,8 @@ import (
 	"testing"
 	"time"
 
+	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
+
 	"github.com/pinksaucepasta/paperboat-server/internal/config"
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
 	"github.com/pinksaucepasta/paperboat-server/internal/testutil"
@@ -58,7 +60,7 @@ type trk08PostgresFixture struct {
 	suffix      string
 	accountID   string
 	tunnelID    string
-	config      Snapshot
+	config      wire.Snapshot
 	connectors  []trk08Connector
 	operationID string
 }
@@ -119,7 +121,7 @@ func trk08Key(seed string) (ed25519.PrivateKey, ed25519.PublicKey, string, strin
 	digest := sha256.Sum256([]byte("paperboat-trk08-acceptance:" + seed))
 	private := ed25519.NewKeyFromSeed(digest[:])
 	public := private.Public().(ed25519.PublicKey)
-	thumbprint, _ := IdentityThumbprint(public)
+	thumbprint, _ := wire.IdentityThumbprint(public)
 	return private, public, "ed25519:" + thumbprint, thumbprint
 }
 
@@ -170,7 +172,7 @@ VALUES ($1, $2, $3, 'active', 'public', 1, $4, $5, $6, $2, 'pending', $7, $7)`,
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.config, err = NewSnapshot(f.tunnelID, 1, payload)
+	f.config, err = wire.NewSnapshot(f.tunnelID, 1, payload)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +217,7 @@ INSERT INTO paperboat.tunnel_connectors
    last_heartbeat_at, ready_at, last_applied_config_generation,
    drain_state, generation, created_at, updated_at)
 VALUES ($1, $2, $3, $4, $5, 1, 'active', $6, NULL, $7, NULL, 0,
-        'accepting', 1, $7, $7)`, connectorID, f.tunnelID, hostID, credentialRef, oldThumbprint, ProtocolVersion, f.clock.now); err != nil {
+        'accepting', 1, $7, $7)`, connectorID, f.tunnelID, hostID, credentialRef, oldThumbprint, wire.ProtocolVersion, f.clock.now); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.database.SQL().ExecContext(ctx, `
@@ -255,7 +257,7 @@ VALUES ($1, $2, $3, $4,
         ARRAY['config.snapshot.v1','config.delta.v1','config.ack.v1',
               'session.heartbeat.v1','auth.renew.v1','connector.drain.v1',
               'credential.rotate.v1']::text[], $5, $6, $7, $8, $9, 1, $10, $8)`,
-		sessionID, connector.id, int64(processGeneration), ProtocolVersion, int64(credentialGeneration), state,
+		sessionID, connector.id, int64(processGeneration), wire.ProtocolVersion, int64(credentialGeneration), state,
 		f.clock.now.Add(20*time.Minute), f.clock.now, f.clock.now, f.clock.now.Add(24*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
@@ -321,9 +323,9 @@ SELECT EXISTS (
 	}
 }
 
-func trk08Challenge(f *trk08PostgresFixture, plan RotationPlan, connector trk08Connector, ordinal int) CredentialRotationChallenge {
+func trk08Challenge(f *trk08PostgresFixture, plan wire.RotationPlan, connector trk08Connector, ordinal int) wire.CredentialRotationChallenge {
 	now := f.clock.now
-	return CredentialRotationChallenge{
+	return wire.CredentialRotationChallenge{
 		AccountID:                plan.AccountID,
 		TunnelID:                 plan.TunnelID,
 		OperationID:              plan.OperationID,
@@ -345,11 +347,11 @@ func trk08Challenge(f *trk08PostgresFixture, plan RotationPlan, connector trk08C
 	}
 }
 
-func trk08Proof(t *testing.T, challenge CredentialRotationChallenge, connector *trk08Connector, suffix string) (CredentialRotationProof, CredentialRotationInstall) {
+func trk08Proof(t *testing.T, challenge wire.CredentialRotationChallenge, connector *trk08Connector, suffix string) (wire.CredentialRotationProof, wire.CredentialRotationInstall) {
 	t.Helper()
 	newPrivate, newPublic, newKeyID, newThumbprint := trk08Key("new:" + challenge.ConnectorID)
 	newReference := "keychain://paperboat/trk08/" + suffix + "/" + challenge.ConnectorID + "/2"
-	proof := CredentialRotationProof{
+	proof := wire.CredentialRotationProof{
 		AccountID:                challenge.AccountID,
 		TunnelID:                 challenge.TunnelID,
 		OperationID:              challenge.OperationID,
@@ -370,13 +372,13 @@ func trk08Proof(t *testing.T, challenge CredentialRotationChallenge, connector *
 		IssuedAt:                 challenge.IssuedAt.Add(time.Second),
 		NewCredentialValidUntil:  challenge.NewCredentialValidUntil,
 	}
-	proof, err := SignCredentialRotationProof(proof,
+	proof, err := wire.SignCredentialRotationProof(proof,
 		func(payload []byte) []byte { return ed25519.Sign(connector.oldPrivate, payload) },
 		func(payload []byte) []byte { return ed25519.Sign(newPrivate, payload) })
 	if err != nil {
 		t.Fatal(err)
 	}
-	install := CredentialRotationInstall{
+	install := wire.CredentialRotationInstall{
 		AccountID:                    challenge.AccountID,
 		TunnelID:                     challenge.TunnelID,
 		OperationID:                  challenge.OperationID,
@@ -406,9 +408,9 @@ func trk08Proof(t *testing.T, challenge CredentialRotationChallenge, connector *
 	return proof, install
 }
 
-func (f *trk08PostgresFixture) authRequest(connector trk08Connector, generation uint64, keyID, thumbprint string, private ed25519.PrivateKey, nonce string) AuthRequest {
+func (f *trk08PostgresFixture) authRequest(connector trk08Connector, generation uint64, keyID, thumbprint string, private ed25519.PrivateKey, nonce string) wire.AuthRequest {
 	now := f.clock.now
-	request := AuthRequest{
+	request := wire.AuthRequest{
 		AccountID:             f.accountID,
 		TunnelID:              f.tunnelID,
 		ConnectorID:           connector.id,
@@ -421,29 +423,29 @@ func (f *trk08PostgresFixture) authRequest(connector trk08Connector, generation 
 		IssuedAt:              now,
 		ExpiresAt:             now.Add(time.Minute),
 	}
-	request, _ = SignAuthProof(request, func(payload []byte) []byte { return ed25519.Sign(private, payload) })
+	request, _ = wire.SignAuthProof(request, func(payload []byte) []byte { return ed25519.Sign(private, payload) })
 	return request
 }
 
-func rotationSummary(plan RotationPlan, states map[string]RotationTargetState, codes map[string]Code, completedAt time.Time) RotationSummary {
-	summary := RotationSummary{AccountID: plan.AccountID, TunnelID: plan.TunnelID, OperationID: plan.OperationID, TargetSetHash: plan.TargetSetHash, Status: RotationAggregatePending}
-	summary.Targets = make([]RotationTargetSummary, 0, len(plan.Targets))
+func rotationSummary(plan wire.RotationPlan, states map[string]wire.RotationTargetState, codes map[string]wire.Code, completedAt time.Time) wire.RotationSummary {
+	summary := wire.RotationSummary{AccountID: plan.AccountID, TunnelID: plan.TunnelID, OperationID: plan.OperationID, TargetSetHash: plan.TargetSetHash, Status: wire.RotationAggregatePending}
+	summary.Targets = make([]wire.RotationTargetSummary, 0, len(plan.Targets))
 	allRevoked := true
 	failed := false
 	for _, target := range plan.Targets {
 		state := states[target.ConnectorID]
-		if state != RotationTargetRevoked {
+		if state != wire.RotationTargetRevoked {
 			allRevoked = false
 		}
-		if state == RotationTargetFailed {
+		if state == wire.RotationTargetFailed {
 			failed = true
 		}
-		summary.Targets = append(summary.Targets, RotationTargetSummary{Target: target, State: state, Code: codes[target.ConnectorID]})
+		summary.Targets = append(summary.Targets, wire.RotationTargetSummary{Target: target, State: state, Code: codes[target.ConnectorID]})
 	}
 	if failed {
-		summary.Status = RotationAggregateFailed
+		summary.Status = wire.RotationAggregateFailed
 	} else if allRevoked {
-		summary.Status = RotationAggregateSucceeded
+		summary.Status = wire.RotationAggregateSucceeded
 		summary.CompletedAt = completedAt
 	}
 	return summary
@@ -456,11 +458,11 @@ func TestTRK08PostgresMigration129AndRotationAcceptance(t *testing.T) {
 
 	f.operationID = "op_trk08_rotate_" + f.suffix
 	f.insertOperation(t, f.operationID, "connector.credentials.rotate", "tunnel", f.tunnelID, "validating", "pending")
-	targets := []RotationTarget{
+	targets := []wire.RotationTarget{
 		{ConnectorID: f.connectors[0].id, HostID: f.connectors[0].hostID, OldCredentialGeneration: 1, NewCredentialGeneration: 2},
 		{ConnectorID: f.connectors[1].id, HostID: f.connectors[1].hostID, OldCredentialGeneration: 1, NewCredentialGeneration: 2},
 	}
-	plan, err := NewRotationPlan(f.accountID, f.tunnelID, f.operationID, targets)
+	plan, err := wire.NewRotationPlan(f.accountID, f.tunnelID, f.operationID, targets)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -502,7 +504,7 @@ WHERE operation_id = $1 AND account_id = $2 AND tunnel_id = $3`, f.operationID, 
 	if err != nil || len(listed) != 1 || len(listed[0].Targets) != 2 {
 		t.Fatalf("new connector changed captured plan=%+v err=%v", listed, err)
 	}
-	wrongPlan, err := NewRotationPlan(f.accountID, f.tunnelID, f.operationID, append(append([]RotationTarget(nil), targets...), RotationTarget{ConnectorID: third.id, HostID: third.hostID, OldCredentialGeneration: 1, NewCredentialGeneration: 2}))
+	wrongPlan, err := wire.NewRotationPlan(f.accountID, f.tunnelID, f.operationID, append(append([]wire.RotationTarget(nil), targets...), wire.RotationTarget{ConnectorID: third.id, HostID: third.hostID, OldCredentialGeneration: 1, NewCredentialGeneration: 2}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -516,9 +518,9 @@ WHERE operation_id = $1 AND account_id = $2 AND tunnel_id = $3`, f.operationID, 
 		t.Fatalf("changed target-set attempt left %d rows", targetCount)
 	}
 
-	challenges := make([]CredentialRotationChallenge, 0, 2)
-	proofs := make([]CredentialRotationProof, 0, 2)
-	installs := make([]CredentialRotationInstall, 0, 2)
+	challenges := make([]wire.CredentialRotationChallenge, 0, 2)
+	proofs := make([]wire.CredentialRotationProof, 0, 2)
+	installs := make([]wire.CredentialRotationInstall, 0, 2)
 	for index, connector := range f.connectors[:2] {
 		challenge := trk08Challenge(f, plan, connector, index)
 		wrongSession := challenge
@@ -560,13 +562,13 @@ WHERE operation_id = $1 AND account_id = $2 AND tunnel_id = $3`, f.operationID, 
 	// is different, and it must not stage a new credential generation.
 	replayOperationID := "op_trk08_rotate_replay_" + f.suffix
 	f.insertOperation(t, replayOperationID, "connector.credentials.rotate", "tunnel", f.tunnelID, "validating", "pending")
-	replayTarget := RotationTarget{
+	replayTarget := wire.RotationTarget{
 		ConnectorID:             f.connectors[0].id,
 		HostID:                  f.connectors[0].hostID,
 		OldCredentialGeneration: 1,
 		NewCredentialGeneration: 2,
 	}
-	replayPlan, err := NewRotationPlan(f.accountID, f.tunnelID, replayOperationID, []RotationTarget{replayTarget})
+	replayPlan, err := wire.NewRotationPlan(f.accountID, f.tunnelID, replayOperationID, []wire.RotationTarget{replayTarget})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -583,11 +585,11 @@ WHERE operation_id = $1 AND account_id = $2 AND tunnel_id = $3`, f.operationID, 
 	}
 	replayConnector := f.connectors[0]
 	replayProof, replayInstall := trk08Proof(t, replayChallenge, &replayConnector, f.suffix+"-replay")
-	originalPayload, err := CredentialRotationProofPayload(proofs[0])
+	originalPayload, err := wire.CredentialRotationProofPayload(proofs[0])
 	if err != nil {
 		t.Fatal(err)
 	}
-	replayPayload, err := CredentialRotationProofPayload(replayProof)
+	replayPayload, err := wire.CredentialRotationProofPayload(replayProof)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -626,7 +628,7 @@ FROM paperboat.tunnel_connector_rotation_targets
 WHERE operation_id = $1 AND connector_id = $2`, replayOperationID, f.connectors[0].id).Scan(&replayTargetState, &replayNewKey); err != nil {
 		t.Fatal(err)
 	}
-	if replayTargetState != string(RotationTargetChallenged) || replayNewKey != nil {
+	if replayTargetState != string(wire.RotationTargetChallenged) || replayNewKey != nil {
 		t.Fatalf("replayed operation advanced target state=%q new_key_present=%v", replayTargetState, replayNewKey != nil)
 	}
 	var generationCount int
@@ -654,11 +656,11 @@ WHERE connector_id = $1 AND generation = 2`, f.connectors[0].id).Scan(&generatio
 		}
 	}
 
-	states := map[string]RotationTargetState{f.connectors[0].id: RotationTargetInstalled, f.connectors[1].id: RotationTargetInstalled}
+	states := map[string]wire.RotationTargetState{f.connectors[0].id: wire.RotationTargetInstalled, f.connectors[1].id: wire.RotationTargetInstalled}
 	for index := range f.connectors[:2] {
 		connector := f.connectors[index]
 		f.insertSession(t, connector, connector.newSessionID, connector.newProcessGeneration, 2, "authenticating")
-		oldReady := CredentialRotationReady{
+		oldReady := wire.CredentialRotationReady{
 			AccountID:                f.accountID,
 			TunnelID:                 f.tunnelID,
 			OperationID:              f.operationID,
@@ -692,7 +694,7 @@ WHERE connector_id = $1 AND generation = 2`, f.connectors[0].id).Scan(&generatio
 		if err := f.store.RecordCredentialRotationReady(ctx, ready); err != nil {
 			t.Fatalf("new readiness %s: %v", connector.id, err)
 		}
-		states[connector.id] = RotationTargetReady
+		states[connector.id] = wire.RotationTargetReady
 		var operationState string
 		if err := f.database.SQL().QueryRowContext(ctx, `SELECT state FROM paperboat.operations WHERE id = $1`, f.operationID).Scan(&operationState); err != nil {
 			t.Fatal(err)
@@ -709,17 +711,17 @@ WHERE connector_id = $1 AND generation = 2`, f.connectors[0].id).Scan(&generatio
 		t.Fatal(err)
 	}
 	resumed, err := restarted.LoadCredentialRotation(ctx, plan)
-	if err != nil || len(resumed.Targets) != 2 || resumed.Targets[0].State != RotationTargetReady || resumed.Targets[1].State != RotationTargetReady {
+	if err != nil || len(resumed.Targets) != 2 || resumed.Targets[0].State != wire.RotationTargetReady || resumed.Targets[1].State != wire.RotationTargetReady {
 		t.Fatalf("restart load = %+v err=%v", resumed, err)
 	}
-	coordinator, err := NewRotationCoordinator(plan, RotationConfig{Store: restarted, Clock: f.clock, VerifyOldProof: func(context.Context, CredentialRotationProof, []byte, []byte) error { return nil }})
+	coordinator, err := wire.NewRotationCoordinator(plan, wire.RotationConfig{Store: restarted, Clock: f.clock, VerifyOldProof: func(context.Context, wire.CredentialRotationProof, []byte, []byte) error { return nil }})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := coordinator.Resume(ctx); err != nil {
 		t.Fatalf("coordinator resume: %v", err)
 	}
-	if summary := coordinator.Summary(); summary.Status != RotationAggregatePending || len(summary.Targets) != 2 {
+	if summary := coordinator.Summary(); summary.Status != wire.RotationAggregatePending || len(summary.Targets) != 2 {
 		t.Fatalf("resumed summary = %+v", summary)
 	}
 	// Readiness switches the replacement generation authoritative but keeps the
@@ -754,9 +756,9 @@ WHERE connector_id = $1 AND generation = 1`, f.connectors[0].id).Scan(&overlapSt
 	// The first target cannot be revoked until every target reports readiness.
 	// At this point both are ready, so each revoke is accepted but aggregate
 	// completion remains gated on the second result.
-	revokes := make([]CredentialRotationRevoke, 0, 2)
+	revokes := make([]wire.CredentialRotationRevoke, 0, 2)
 	for index, connector := range f.connectors[:2] {
-		revoke := CredentialRotationRevoke{
+		revoke := wire.CredentialRotationRevoke{
 			AccountID:               f.accountID,
 			TunnelID:                f.tunnelID,
 			OperationID:             f.operationID,
@@ -783,10 +785,10 @@ WHERE connector_id = $1 AND generation = 1`, f.connectors[0].id).Scan(&overlapSt
 			t.Fatal("changed revoke replay was accepted")
 		}
 		revokes = append(revokes, revoke)
-		states[connector.id] = RotationTargetRevoking
+		states[connector.id] = wire.RotationTargetRevoking
 	}
 
-	badAck := CredentialRotationAck{
+	badAck := wire.CredentialRotationAck{
 		AccountID:               f.accountID,
 		TunnelID:                f.tunnelID,
 		OperationID:             f.operationID,
@@ -797,16 +799,16 @@ WHERE connector_id = $1 AND generation = 1`, f.connectors[0].id).Scan(&overlapSt
 		TargetSetHash:           plan.TargetSetHash,
 		OldCredentialGeneration: 1,
 		NewCredentialGeneration: 2,
-		Status:                  RotationAckRevoked,
+		Status:                  wire.RotationAckRevoked,
 	}
-	pendingFirst := rotationSummary(plan, map[string]RotationTargetState{f.connectors[0].id: RotationTargetRevoked, f.connectors[1].id: RotationTargetRevoking}, nil, time.Time{})
+	pendingFirst := rotationSummary(plan, map[string]wire.RotationTargetState{f.connectors[0].id: wire.RotationTargetRevoked, f.connectors[1].id: wire.RotationTargetRevoking}, nil, time.Time{})
 	if err := f.store.RecordCredentialRotationResult(ctx, badAck, pendingFirst); err == nil {
 		t.Fatal("stale replacement-session ACK was accepted")
 	}
 
-	acks := make([]CredentialRotationAck, 0, 2)
+	acks := make([]wire.CredentialRotationAck, 0, 2)
 	for index, connector := range f.connectors[:2] {
-		ack := CredentialRotationAck{
+		ack := wire.CredentialRotationAck{
 			AccountID:               f.accountID,
 			TunnelID:                f.tunnelID,
 			OperationID:             f.operationID,
@@ -817,9 +819,9 @@ WHERE connector_id = $1 AND generation = 1`, f.connectors[0].id).Scan(&overlapSt
 			TargetSetHash:           plan.TargetSetHash,
 			OldCredentialGeneration: 1,
 			NewCredentialGeneration: 2,
-			Status:                  RotationAckRevoked,
+			Status:                  wire.RotationAckRevoked,
 		}
-		states[connector.id] = RotationTargetRevoked
+		states[connector.id] = wire.RotationTargetRevoked
 		if index == 0 {
 			pending := rotationSummary(plan, states, nil, time.Time{})
 			if err := f.store.RecordCredentialRotationResult(ctx, ack, pending); err != nil {
@@ -828,7 +830,7 @@ WHERE connector_id = $1 AND generation = 1`, f.connectors[0].id).Scan(&overlapSt
 			if err := f.store.RecordCredentialRotationResult(ctx, ack, pending); err != nil {
 				t.Fatalf("idempotent first revoke result: %v", err)
 			}
-			states[connector.id] = RotationTargetRevoked
+			states[connector.id] = wire.RotationTargetRevoked
 			var operationState string
 			if err := f.database.SQL().QueryRowContext(ctx, `SELECT state FROM paperboat.operations WHERE id = $1`, f.operationID).Scan(&operationState); err != nil {
 				t.Fatal(err)
@@ -978,15 +980,15 @@ func TestTRK08PostgresDisconnectMarksRotationUncertainAndRecovers(t *testing.T) 
 	ctx := context.Background()
 	operationID := "op_trk08_recovery_" + f.suffix
 	f.insertOperation(t, operationID, "connector.credentials.rotate", "tunnel", f.tunnelID, "connecting", "running")
-	plan, err := NewRotationPlan(f.accountID, f.tunnelID, operationID, []RotationTarget{{ConnectorID: f.connectors[0].id, HostID: f.connectors[0].hostID, OldCredentialGeneration: 1, NewCredentialGeneration: 2}})
+	plan, err := wire.NewRotationPlan(f.accountID, f.tunnelID, operationID, []wire.RotationTarget{{ConnectorID: f.connectors[0].id, HostID: f.connectors[0].hostID, OldCredentialGeneration: 1, NewCredentialGeneration: 2}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := f.store.BeginCredentialRotation(ctx, plan); err != nil {
 		t.Fatal(err)
 	}
-	disconnect := Disconnect{AccountID: f.accountID, TunnelID: f.tunnelID, ConnectorID: f.connectors[0].id, SessionID: f.connectors[0].oldSessionID, ProcessGeneration: 1, Reason: ReasonCredentialRotation, Retryable: true}
-	if err := f.store.RecordDisconnected(ctx, SessionRef{TunnelID: f.tunnelID, ConnectorID: f.connectors[0].id, SessionID: f.connectors[0].oldSessionID, ProcessGeneration: 1}, disconnect); err != nil {
+	disconnect := wire.Disconnect{AccountID: f.accountID, TunnelID: f.tunnelID, ConnectorID: f.connectors[0].id, SessionID: f.connectors[0].oldSessionID, ProcessGeneration: 1, Reason: wire.ReasonCredentialRotation, Retryable: true}
+	if err := f.store.RecordDisconnected(ctx, wire.SessionRef{TunnelID: f.tunnelID, ConnectorID: f.connectors[0].id, SessionID: f.connectors[0].oldSessionID, ProcessGeneration: 1}, disconnect); err != nil {
 		t.Fatalf("disconnect recovery: %v", err)
 	}
 	var state string
@@ -995,10 +997,10 @@ func TestTRK08PostgresDisconnectMarksRotationUncertainAndRecovers(t *testing.T) 
 	if err := f.database.SQL().QueryRowContext(ctx, `SELECT state, retrying, error_code FROM paperboat.operations WHERE id = $1`, operationID).Scan(&state, &retrying, &errorCode); err != nil {
 		t.Fatal(err)
 	}
-	if state != "uncertain" || !retrying || errorCode != string(CodeStaleSession) {
+	if state != "uncertain" || !retrying || errorCode != string(wire.CodeStaleSession) {
 		t.Fatalf("disconnect operation state=%q retrying=%v error=%q", state, retrying, errorCode)
 	}
-	if err := f.store.RecordDisconnected(ctx, SessionRef{TunnelID: f.tunnelID, ConnectorID: f.connectors[0].id, SessionID: f.connectors[0].oldSessionID, ProcessGeneration: 1}, disconnect); err != nil {
+	if err := f.store.RecordDisconnected(ctx, wire.SessionRef{TunnelID: f.tunnelID, ConnectorID: f.connectors[0].id, SessionID: f.connectors[0].oldSessionID, ProcessGeneration: 1}, disconnect); err != nil {
 		t.Fatalf("idempotent disconnect recovery: %v", err)
 	}
 
@@ -1035,7 +1037,7 @@ WHERE event_type = 'connector.credential_rotation_recovery_required'
 	// has to become recoverable.
 	replacementFirstOperation := "op_trk08_replacement_first_" + f.suffix
 	f.insertOperation(t, replacementFirstOperation, "connector.credentials.rotate", "tunnel", f.tunnelID, "connecting", "running")
-	replacementFirstPlan, err := NewRotationPlan(f.accountID, f.tunnelID, replacementFirstOperation, []RotationTarget{{ConnectorID: f.connectors[1].id, HostID: f.connectors[1].hostID, OldCredentialGeneration: 1, NewCredentialGeneration: 2}})
+	replacementFirstPlan, err := wire.NewRotationPlan(f.accountID, f.tunnelID, replacementFirstOperation, []wire.RotationTarget{{ConnectorID: f.connectors[1].id, HostID: f.connectors[1].hostID, OldCredentialGeneration: 1, NewCredentialGeneration: 2}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1044,15 +1046,15 @@ WHERE event_type = 'connector.credential_rotation_recovery_required'
 	}
 	replacementFirstSession := "ses_trk08_" + f.suffix + "_b_replacement_first"
 	f.insertSession(t, f.connectors[1], replacementFirstSession, 2, 1, "authenticating")
-	oldRef := SessionRef{TunnelID: f.tunnelID, ConnectorID: f.connectors[1].id, SessionID: f.connectors[1].oldSessionID, ProcessGeneration: 1}
-	oldDisconnect := Disconnect{AccountID: f.accountID, TunnelID: f.tunnelID, ConnectorID: oldRef.ConnectorID, SessionID: oldRef.SessionID, ProcessGeneration: oldRef.ProcessGeneration, Reason: ReasonSessionReplaced, Retryable: true}
+	oldRef := wire.SessionRef{TunnelID: f.tunnelID, ConnectorID: f.connectors[1].id, SessionID: f.connectors[1].oldSessionID, ProcessGeneration: 1}
+	oldDisconnect := wire.Disconnect{AccountID: f.accountID, TunnelID: f.tunnelID, ConnectorID: oldRef.ConnectorID, SessionID: oldRef.SessionID, ProcessGeneration: oldRef.ProcessGeneration, Reason: wire.ReasonSessionReplaced, Retryable: true}
 	if err := f.store.RecordDisconnected(ctx, oldRef, oldDisconnect); err != nil {
 		t.Fatalf("replacement-first disconnect recovery: %v", err)
 	}
 	if err := f.database.SQL().QueryRowContext(ctx, `SELECT state, retrying, error_code FROM paperboat.operations WHERE id = $1`, replacementFirstOperation).Scan(&state, &retrying, &errorCode); err != nil {
 		t.Fatal(err)
 	}
-	if state != "uncertain" || !retrying || errorCode != string(CodeStaleSession) {
+	if state != "uncertain" || !retrying || errorCode != string(wire.CodeStaleSession) {
 		t.Fatalf("replacement-first operation state=%q retrying=%v error=%q", state, retrying, errorCode)
 	}
 }
@@ -1063,7 +1065,7 @@ func TestTRK08PostgresReconnectRebindsInterruptedRotationPhases(t *testing.T) {
 
 	installedOperation := "op_trk08_install_recovery_" + f.suffix
 	f.insertOperation(t, installedOperation, "connector.credentials.rotate", "tunnel", f.tunnelID, "connecting", "running")
-	installedPlan, err := NewRotationPlan(f.accountID, f.tunnelID, installedOperation, []RotationTarget{{ConnectorID: f.connectors[0].id, HostID: f.connectors[0].hostID, OldCredentialGeneration: 1, NewCredentialGeneration: 2}})
+	installedPlan, err := wire.NewRotationPlan(f.accountID, f.tunnelID, installedOperation, []wire.RotationTarget{{ConnectorID: f.connectors[0].id, HostID: f.connectors[0].hostID, OldCredentialGeneration: 1, NewCredentialGeneration: 2}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1080,7 +1082,7 @@ func TestTRK08PostgresReconnectRebindsInterruptedRotationPhases(t *testing.T) {
 	}
 	oldReconnect := "ses_trk08_" + f.suffix + "_old_reconnect"
 	f.insertSession(t, f.connectors[0], oldReconnect, 3, 1, "ready")
-	if err := f.store.ResetCredentialRotationInstall(ctx, installedPlan, installedPlan.Targets[0], SessionRef{TunnelID: f.tunnelID, ConnectorID: f.connectors[0].id, SessionID: oldReconnect, ProcessGeneration: 3}); err != nil {
+	if err := f.store.ResetCredentialRotationInstall(ctx, installedPlan, installedPlan.Targets[0], wire.SessionRef{TunnelID: f.tunnelID, ConnectorID: f.connectors[0].id, SessionID: oldReconnect, ProcessGeneration: 3}); err != nil {
 		t.Fatalf("reset interrupted install: %v", err)
 	}
 	var installedState string
@@ -1096,13 +1098,13 @@ SELECT count(*) FROM paperboat.tunnel_connector_credential_generations
 WHERE connector_id = $1 AND generation = 2`, f.connectors[0].id).Scan(&stagedCredentials); err != nil {
 		t.Fatal(err)
 	}
-	if installedState != string(RotationTargetChallenged) || stagedKey != nil || stagedCredentials != 0 {
+	if installedState != string(wire.RotationTargetChallenged) || stagedKey != nil || stagedCredentials != 0 {
 		t.Fatalf("install recovery state=%q staged_key=%x credentials=%d", installedState, stagedKey, stagedCredentials)
 	}
 
 	revokeOperation := "op_trk08_revoke_rebind_" + f.suffix
 	f.insertOperation(t, revokeOperation, "connector.credentials.rotate", "tunnel", f.tunnelID, "connecting", "running")
-	revokePlan, err := NewRotationPlan(f.accountID, f.tunnelID, revokeOperation, []RotationTarget{{ConnectorID: f.connectors[1].id, HostID: f.connectors[1].hostID, OldCredentialGeneration: 1, NewCredentialGeneration: 2}})
+	revokePlan, err := wire.NewRotationPlan(f.accountID, f.tunnelID, revokeOperation, []wire.RotationTarget{{ConnectorID: f.connectors[1].id, HostID: f.connectors[1].hostID, OldCredentialGeneration: 1, NewCredentialGeneration: 2}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1119,17 +1121,17 @@ WHERE connector_id = $1 AND generation = 2`, f.connectors[0].id).Scan(&stagedCre
 	}
 	firstNewSession := "ses_trk08_" + f.suffix + "_new_ready"
 	f.insertSession(t, f.connectors[1], firstNewSession, 2, 2, "authenticating")
-	ready := CredentialRotationReady{AccountID: f.accountID, TunnelID: f.tunnelID, OperationID: revokeOperation, ConnectorID: f.connectors[1].id, HostID: f.connectors[1].hostID, SessionID: firstNewSession, PreviousSessionID: f.connectors[1].oldSessionID, ProcessGeneration: 2, TargetSetHash: revokePlan.TargetSetHash, OldCredentialGeneration: 1, NewCredentialGeneration: 2, NewIdentityKeyID: revokeInstall.NewIdentityKeyID, NewIdentityKeyThumbprint: revokeInstall.NewIdentityKeyThumbprint, NewPublicKey: revokeInstall.NewPublicKey, NewCredentialReference: revokeInstall.NewCredentialReference, NewCredentialValidUntil: revokeInstall.NewCredentialValidUntil, ConfigGeneration: f.config.Generation, ConfigContentHash: f.config.ContentHash, EdgeReady: true, RouteReady: true, OriginReady: true, ReadyAt: f.clock.now}
+	ready := wire.CredentialRotationReady{AccountID: f.accountID, TunnelID: f.tunnelID, OperationID: revokeOperation, ConnectorID: f.connectors[1].id, HostID: f.connectors[1].hostID, SessionID: firstNewSession, PreviousSessionID: f.connectors[1].oldSessionID, ProcessGeneration: 2, TargetSetHash: revokePlan.TargetSetHash, OldCredentialGeneration: 1, NewCredentialGeneration: 2, NewIdentityKeyID: revokeInstall.NewIdentityKeyID, NewIdentityKeyThumbprint: revokeInstall.NewIdentityKeyThumbprint, NewPublicKey: revokeInstall.NewPublicKey, NewCredentialReference: revokeInstall.NewCredentialReference, NewCredentialValidUntil: revokeInstall.NewCredentialValidUntil, ConfigGeneration: f.config.Generation, ConfigContentHash: f.config.ContentHash, EdgeReady: true, RouteReady: true, OriginReady: true, ReadyAt: f.clock.now}
 	if err := f.store.RecordCredentialRotationReady(ctx, ready); err != nil {
 		t.Fatal(err)
 	}
-	initialRevoke := CredentialRotationRevoke{AccountID: f.accountID, TunnelID: f.tunnelID, OperationID: revokeOperation, ConnectorID: f.connectors[1].id, HostID: f.connectors[1].hostID, SessionID: firstNewSession, ProcessGeneration: 2, TargetSetHash: revokePlan.TargetSetHash, OldCredentialGeneration: 1, NewCredentialGeneration: 2, RevokeNonce: "rotation-revoke-initial-" + f.suffix, IssuedAt: f.clock.now, Deadline: f.clock.now.Add(DefaultAbortTimeout)}
+	initialRevoke := wire.CredentialRotationRevoke{AccountID: f.accountID, TunnelID: f.tunnelID, OperationID: revokeOperation, ConnectorID: f.connectors[1].id, HostID: f.connectors[1].hostID, SessionID: firstNewSession, ProcessGeneration: 2, TargetSetHash: revokePlan.TargetSetHash, OldCredentialGeneration: 1, NewCredentialGeneration: 2, RevokeNonce: "rotation-revoke-initial-" + f.suffix, IssuedAt: f.clock.now, Deadline: f.clock.now.Add(wire.DefaultAbortTimeout)}
 	if err := f.store.RecordCredentialRotationRevoke(ctx, initialRevoke); err != nil {
 		t.Fatal(err)
 	}
 	reboundSession := "ses_trk08_" + f.suffix + "_new_rebound"
 	f.insertSession(t, f.connectors[1], reboundSession, 3, 2, "ready")
-	rebound, err := f.store.RebindCredentialRotationRevoke(ctx, revokePlan, revokePlan.Targets[0], SessionRef{TunnelID: f.tunnelID, ConnectorID: f.connectors[1].id, SessionID: reboundSession, ProcessGeneration: 3}, "rotation-revoke-rebound-"+f.suffix, f.clock.now, f.clock.now.Add(DefaultAbortTimeout))
+	rebound, err := f.store.RebindCredentialRotationRevoke(ctx, revokePlan, revokePlan.Targets[0], wire.SessionRef{TunnelID: f.tunnelID, ConnectorID: f.connectors[1].id, SessionID: reboundSession, ProcessGeneration: 3}, "rotation-revoke-rebound-"+f.suffix, f.clock.now, f.clock.now.Add(wire.DefaultAbortTimeout))
 	if err != nil {
 		t.Fatalf("rebind revoke: %v", err)
 	}
@@ -1143,14 +1145,14 @@ WHERE connector_id = $1 AND generation = 2`, f.connectors[0].id).Scan(&stagedCre
 
 	expiredOperation := "op_trk08_expired_pending_" + f.suffix
 	f.insertOperation(t, expiredOperation, "connector.credentials.rotate", "tunnel", f.tunnelID, "connecting", "running")
-	expiredPlan, err := NewRotationPlan(f.accountID, f.tunnelID, expiredOperation, []RotationTarget{{ConnectorID: f.connectors[0].id, HostID: f.connectors[0].hostID, OldCredentialGeneration: 1, NewCredentialGeneration: 2}})
+	expiredPlan, err := wire.NewRotationPlan(f.accountID, f.tunnelID, expiredOperation, []wire.RotationTarget{{ConnectorID: f.connectors[0].id, HostID: f.connectors[0].hostID, OldCredentialGeneration: 1, NewCredentialGeneration: 2}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := f.store.BeginCredentialRotation(ctx, expiredPlan); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.store.FailCredentialRotationTarget(ctx, expiredPlan, expiredPlan.Targets[0], CodeCredentialExpired); err != nil {
+	if err := f.store.FailCredentialRotationTarget(ctx, expiredPlan, expiredPlan.Targets[0], wire.CodeCredentialExpired); err != nil {
 		t.Fatalf("fail expired pending target: %v", err)
 	}
 	var expiredTargetState, expiredOperationState, expiredCode string
@@ -1161,7 +1163,7 @@ JOIN paperboat.operations AS o ON o.id = rt.operation_id
 WHERE rt.operation_id = $1 AND rt.connector_id = $2`, expiredOperation, f.connectors[0].id).Scan(&expiredTargetState, &expiredOperationState, &expiredCode); err != nil {
 		t.Fatal(err)
 	}
-	if expiredTargetState != string(RotationTargetFailed) || expiredOperationState != "failed" || expiredCode != string(CodeCredentialExpired) {
+	if expiredTargetState != string(wire.RotationTargetFailed) || expiredOperationState != "failed" || expiredCode != string(wire.CodeCredentialExpired) {
 		t.Fatalf("expired states target=%q operation=%q code=%q", expiredTargetState, expiredOperationState, expiredCode)
 	}
 }
@@ -1181,10 +1183,10 @@ WHERE id = $2 AND tunnel_id = $3`, f.clock.now, connector.id, f.tunnelID); err !
 		t.Fatal("revoked connector accepted a new authentication")
 	}
 
-	for index, status := range []DrainStatus{DrainAccepted, DrainCompleted, DrainForced, DrainRejected} {
+	for index, status := range []wire.DrainStatus{wire.DrainAccepted, wire.DrainCompleted, wire.DrainForced, wire.DrainRejected} {
 		operationID := fmt.Sprintf("op_trk08_revoke_drain_%s_%d", f.suffix, index)
 		f.insertOperation(t, operationID, "connector.revoke", "connector", connector.id, "draining", "running")
-		drain := Drain{
+		drain := wire.Drain{
 			AccountID:          f.accountID,
 			TunnelID:           f.tunnelID,
 			ConnectorID:        connector.id,
@@ -1197,19 +1199,19 @@ WHERE id = $2 AND tunnel_id = $3`, f.clock.now, connector.id, f.tunnelID); err !
 			StopNewStreams:     true,
 			ForceAfterDeadline: true,
 		}
-		code := Code("")
-		if status == DrainForced {
-			code = CodeDrainTimeout
-		} else if status == DrainRejected {
-			code = CodeDrainRejected
+		code := wire.Code("")
+		if status == wire.DrainForced {
+			code = wire.CodeDrainTimeout
+		} else if status == wire.DrainRejected {
+			code = wire.CodeDrainRejected
 		}
-		if err := f.store.RecordDrain(ctx, SessionRef{TunnelID: f.tunnelID, ConnectorID: connector.id, SessionID: connector.oldSessionID, ProcessGeneration: 1}, drain, status, 0, code); err != nil {
+		if err := f.store.RecordDrain(ctx, wire.SessionRef{TunnelID: f.tunnelID, ConnectorID: connector.id, SessionID: connector.oldSessionID, ProcessGeneration: 1}, drain, status, 0, code); err != nil {
 			t.Fatalf("revoke drain status %s: %v", status, err)
 		}
 		// Terminal ACK replay is a no-op and must not turn a revoked connector
 		// back into accepting/draining state or append a duplicate event.
-		if status != DrainAccepted {
-			if err := f.store.RecordDrain(ctx, SessionRef{TunnelID: f.tunnelID, ConnectorID: connector.id, SessionID: connector.oldSessionID, ProcessGeneration: 1}, drain, status, 0, code); err != nil {
+		if status != wire.DrainAccepted {
+			if err := f.store.RecordDrain(ctx, wire.SessionRef{TunnelID: f.tunnelID, ConnectorID: connector.id, SessionID: connector.oldSessionID, ProcessGeneration: 1}, drain, status, 0, code); err != nil {
 				t.Fatalf("idempotent terminal drain %s: %v", status, err)
 			}
 		}
@@ -1228,17 +1230,17 @@ SELECT state, outcome, COALESCE(error_code, '') FROM paperboat.operations
 WHERE id = $1`, fmt.Sprintf("op_trk08_revoke_drain_%s_%d", f.suffix, 3)).Scan(&rejectedState, &rejectedOutcome, &rejectedError); err != nil {
 		t.Fatal(err)
 	}
-	if rejectedState != "failed" || rejectedOutcome != "uncertain" || rejectedError != string(CodeDrainRejected) {
+	if rejectedState != "failed" || rejectedOutcome != "uncertain" || rejectedError != string(wire.CodeDrainRejected) {
 		t.Fatalf("rejected revoke drain operation state=%q outcome=%q error=%q", rejectedState, rejectedOutcome, rejectedError)
 	}
 	var staleErr error
-	staleDrain := Drain{
+	staleDrain := wire.Drain{
 		AccountID: f.accountID, TunnelID: f.tunnelID, ConnectorID: connector.id, SessionID: connector.oldSessionID,
 		ProcessGeneration: 99, DrainID: "op_trk08_stale_drain_" + f.suffix, Generation: 1, ContentHash: f.config.ContentHash,
 		Deadline: f.clock.now.Add(2 * time.Second), StopNewStreams: true, ForceAfterDeadline: true,
 	}
 	f.insertOperation(t, staleDrain.DrainID, "connector.revoke", "connector", connector.id, "draining", "running")
-	staleErr = f.store.RecordDrain(ctx, SessionRef{TunnelID: f.tunnelID, ConnectorID: connector.id, SessionID: connector.oldSessionID, ProcessGeneration: 99}, staleDrain, DrainCompleted, 0, "")
+	staleErr = f.store.RecordDrain(ctx, wire.SessionRef{TunnelID: f.tunnelID, ConnectorID: connector.id, SessionID: connector.oldSessionID, ProcessGeneration: 99}, staleDrain, wire.DrainCompleted, 0, "")
 	if staleErr == nil {
 		t.Fatal("stale process drain ACK was accepted")
 	}

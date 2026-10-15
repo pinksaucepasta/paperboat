@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat-relay/admission"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"golang.org/x/time/rate"
 )
 

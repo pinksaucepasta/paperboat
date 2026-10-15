@@ -7,12 +7,13 @@ ARG PAPERBOAT_SENTRY_DSN
 ARG TARGETOS
 ARG TARGETARCH
 
-WORKDIR /src
+WORKDIR /src/server
 
-COPY go.mod go.sum ./
-RUN go mod download
+COPY server/go.mod server/go.sum ./
+COPY shared /src/shared
+RUN GOWORK=off go mod download
 
-COPY . .
+COPY server .
 RUN printf '%s\n' "${PAPERBOAT_VERSION}" | grep -Eq '^[0-9]{4}\.[0-9]{2}\.[0-9]{2}\.(0|[1-9][0-9]*)$' \
   && case "${PAPERBOAT_SENTRY_DSN}" in "") ;; *[!A-Za-z0-9:/@.-]*) exit 1 ;; https://?*) ;; *) exit 1 ;; esac \
   && { test -z "${PAPERBOAT_SENTRY_DSN}" || printf '%s\n' "${PAPERBOAT_SENTRY_DSN}" | grep -Eq '^https://[A-Za-z0-9]+@[A-Za-z0-9.-]+/[0-9]+$'; } \

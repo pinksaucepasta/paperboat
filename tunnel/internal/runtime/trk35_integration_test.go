@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/control"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/datacarrier"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/edgehttp"

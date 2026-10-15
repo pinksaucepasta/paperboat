@@ -81,3 +81,7 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
+
+require github.com/pinksaucepasta/paperboat/shared v0.0.0
+
+replace github.com/pinksaucepasta/paperboat/shared => ../shared

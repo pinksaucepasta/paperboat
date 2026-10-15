@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"reflect"
 
+	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
+
 	"github.com/coder/websocket"
 	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
 )
@@ -22,7 +24,7 @@ type WebSocketHandler struct {
 
 func NewWebSocketHandler(transport *ControlTransport) (*WebSocketHandler, error) {
 	if transport == nil {
-		return nil, ErrInvalidInput
+		return nil, wire.ErrInvalidInput
 	}
 	return &WebSocketHandler{transport: transport}, nil
 }
@@ -33,7 +35,7 @@ func (h *WebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tunnelID, connectorID := r.PathValue("tunnel_id"), r.PathValue("connector_id")
-	if ValidateIdentifier(tunnelID) != nil || ValidateIdentifier(connectorID) != nil || r.URL.RawQuery != "" {
+	if wire.ValidateIdentifier(tunnelID) != nil || wire.ValidateIdentifier(connectorID) != nil || r.URL.RawQuery != "" {
 		http.Error(w, "invalid connector control request", http.StatusBadRequest)
 		return
 	}
@@ -48,7 +50,7 @@ func (h *WebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = connection.Close(websocket.StatusPolicyViolation, "connector subprotocol required")
 		return
 	}
-	connection.SetReadLimit(MaxFrameBytes + 4)
+	connection.SetReadLimit(wire.MaxFrameBytes + 4)
 	stream := websocket.NetConn(r.Context(), connection, websocket.MessageBinary)
 	if err = h.transport.Serve(r.Context(), stream, tunnelID, connectorID); err != nil {
 		requestedCode, expectedRejection, canceled := classifyWebSocketFailure(err)
@@ -104,7 +106,7 @@ func classifyWebSocketFailure(err error) (code string, expectedRejection, cancel
 			return code, false, false
 		}
 		nodes++
-		if typed, ok := current.(*Error); ok {
+		if typed, ok := current.(*wire.Error); ok {
 			if typed == nil || !knownProtocolCode(typed.Code) {
 				return code, false, false
 			}
@@ -116,14 +118,14 @@ func classifyWebSocketFailure(err error) (code string, expectedRejection, cancel
 			}
 			if typed.Cause == nil {
 				sawTerminal = true
-				if typed.Code != CodeCanceled {
+				if typed.Code != wire.CodeCanceled {
 					allCanceled = false
 				}
 			} else {
 				if nodes+len(pending) >= websocketErrorWalkLimit {
 					return code, false, false
 				}
-				pending = append(pending, errorFrame{err: typed.Cause, malformedFrameEOF: typed.Code == CodeMalformedFrame})
+				pending = append(pending, errorFrame{err: typed.Cause, malformedFrameEOF: typed.Code == wire.CodeMalformedFrame})
 			}
 			continue
 		}
@@ -131,7 +133,7 @@ func classifyWebSocketFailure(err error) (code string, expectedRejection, cancel
 			sawTerminal = true
 			continue
 		}
-		if decoded, ok := current.(*clientFrameDecodeFailure); ok && frame.malformedFrameEOF && decoded.cause != nil {
+		if decoded, ok := current.(*wire.ClientFrameDecodeFailure); ok && frame.malformedFrameEOF && decoded.Unwrap() != nil {
 			sawTerminal = true
 			allCanceled = false
 			continue
@@ -195,30 +197,30 @@ func expectedProtocolSentinel(err error) bool {
 	return false
 }
 
-func knownProtocolCode(code Code) bool {
+func knownProtocolCode(code wire.Code) bool {
 	switch code {
-	case CodeInvalidInput, CodeMalformedFrame, CodeFrameTooLarge, CodeProtocolIncompatible,
-		CodeCapabilityMissing, CodeAuthenticationFailed, CodeCredentialExpired, CodeIdentityMismatch,
-		CodeSessionConflict, CodeSessionClosed, CodeLeaseExpired, CodeHeartbeatTimeout,
-		CodeSnapshotRequired, CodeGenerationGap, CodeStaleGeneration, CodeContentHashMismatch,
-		CodeSnapshotRejected, CodeDeltaRejected, CodeNotReady, CodeCanceled, CodeStaleSession,
-		CodeUnsupportedMessage, CodeDrainRejected, CodeDrainTimeout,
-		CodeCredentialRotationRejected, CodeCredentialRotationNotReady, CodeCredentialRotationFailed:
+	case wire.CodeInvalidInput, wire.CodeMalformedFrame, wire.CodeFrameTooLarge, wire.CodeProtocolIncompatible,
+		wire.CodeCapabilityMissing, wire.CodeAuthenticationFailed, wire.CodeCredentialExpired, wire.CodeIdentityMismatch,
+		wire.CodeSessionConflict, wire.CodeSessionClosed, wire.CodeLeaseExpired, wire.CodeHeartbeatTimeout,
+		wire.CodeSnapshotRequired, wire.CodeGenerationGap, wire.CodeStaleGeneration, wire.CodeContentHashMismatch,
+		wire.CodeSnapshotRejected, wire.CodeDeltaRejected, wire.CodeNotReady, wire.CodeCanceled, wire.CodeStaleSession,
+		wire.CodeUnsupportedMessage, wire.CodeDrainRejected, wire.CodeDrainTimeout,
+		wire.CodeCredentialRotationRejected, wire.CodeCredentialRotationNotReady, wire.CodeCredentialRotationFailed:
 		return true
 	default:
 		return false
 	}
 }
 
-func expectedProtocolRejectionCode(code Code) bool {
+func expectedProtocolRejectionCode(code wire.Code) bool {
 	switch code {
-	case CodeInvalidInput, CodeMalformedFrame, CodeFrameTooLarge, CodeProtocolIncompatible,
-		CodeCapabilityMissing, CodeAuthenticationFailed, CodeCredentialExpired, CodeIdentityMismatch,
-		CodeSessionConflict, CodeSessionClosed, CodeLeaseExpired, CodeHeartbeatTimeout,
-		CodeSnapshotRequired, CodeGenerationGap, CodeStaleGeneration, CodeContentHashMismatch,
-		CodeSnapshotRejected, CodeDeltaRejected, CodeNotReady, CodeCanceled, CodeStaleSession,
-		CodeUnsupportedMessage, CodeDrainRejected, CodeCredentialRotationRejected,
-		CodeCredentialRotationNotReady:
+	case wire.CodeInvalidInput, wire.CodeMalformedFrame, wire.CodeFrameTooLarge, wire.CodeProtocolIncompatible,
+		wire.CodeCapabilityMissing, wire.CodeAuthenticationFailed, wire.CodeCredentialExpired, wire.CodeIdentityMismatch,
+		wire.CodeSessionConflict, wire.CodeSessionClosed, wire.CodeLeaseExpired, wire.CodeHeartbeatTimeout,
+		wire.CodeSnapshotRequired, wire.CodeGenerationGap, wire.CodeStaleGeneration, wire.CodeContentHashMismatch,
+		wire.CodeSnapshotRejected, wire.CodeDeltaRejected, wire.CodeNotReady, wire.CodeCanceled, wire.CodeStaleSession,
+		wire.CodeUnsupportedMessage, wire.CodeDrainRejected, wire.CodeCredentialRotationRejected,
+		wire.CodeCredentialRotationNotReady:
 		return true
 	default:
 		return false

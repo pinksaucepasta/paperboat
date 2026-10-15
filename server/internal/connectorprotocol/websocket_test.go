@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
+
 	"github.com/coder/websocket"
 	serverdiagnostics "github.com/pinksaucepasta/paperboat-server/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
@@ -26,9 +28,9 @@ type websocketFailureStore struct {
 	authErr error
 }
 
-func (s *websocketFailureStore) AuthenticateConnector(ctx context.Context, request AuthRequest) (AuthResult, error) {
+func (s *websocketFailureStore) AuthenticateConnector(ctx context.Context, request wire.AuthRequest) (wire.AuthResult, error) {
 	if s.authErr != nil {
-		return AuthResult{}, s.authErr
+		return wire.AuthResult{}, s.authErr
 	}
 	return s.persistenceStoreStub.AuthenticateConnector(ctx, request)
 }
@@ -36,25 +38,25 @@ func (s *websocketFailureStore) AuthenticateConnector(ctx context.Context, reque
 func TestWebSocketHandlerRunsCanonicalControlSession(t *testing.T) {
 	now := time.Date(2026, 8, 31, 9, 30, 0, 0, time.UTC)
 	auth, private := testAuth(t, now, 1)
-	snapshot, err := NewSnapshot(auth.TunnelID, 1, testConfigPayload(1, "app.example.test"))
+	snapshot, err := wire.NewSnapshot(auth.TunnelID, 1, testConfigPayload(1, "app.example.test"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := &persistenceStoreStub{authResult: AuthResult{
+	store := &persistenceStoreStub{authResult: wire.AuthResult{
 		AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID,
 		HostID: auth.HostID, IdentityKeyID: auth.IdentityKeyID, IdentityKeyThumbprint: auth.IdentityKeyThumbprint,
 		ProcessGeneration: 1, CredentialGeneration: auth.CredentialGeneration,
 		CredentialExpiresAt: now.Add(time.Hour), LeaseExpiresAt: now.Add(time.Hour),
 	}, snapshot: snapshot}
 	persistent, err := NewPersistentServer(store, IdentityProofVerifierFuncs{
-		AuthFunc: func(_ context.Context, _ AuthRequest, payload, signature []byte) error {
+		AuthFunc: func(_ context.Context, _ wire.AuthRequest, payload, signature []byte) error {
 			if !ed25519.Verify(private.Public().(ed25519.PublicKey), payload, signature) {
-				return ErrAuthenticationFailed
+				return wire.ErrAuthenticationFailed
 			}
 			return nil
 		},
-		RenewalFunc: func(context.Context, RenewalRequest, []byte, []byte) error { return nil },
-	}, ServerConfig{
+		RenewalFunc: func(context.Context, wire.RenewalRequest, []byte, []byte) error { return nil },
+	}, wire.ServerConfig{
 		Capabilities: requiredCapabilityList(), Clock: &testClock{now: now},
 		LeaseDuration: time.Minute, HeartbeatInterval: 10 * time.Second,
 		SessionIDs: func() (string, error) { return "session_websocket_01", nil },
@@ -85,39 +87,39 @@ func TestWebSocketHandlerRunsCanonicalControlSession(t *testing.T) {
 	stream := websocket.NetConn(ctx, connection, websocket.MessageBinary)
 	defer stream.Close()
 
-	hello := Hello{
-		Protocol: ProtocolName, MinVersion: ProtocolVersion, MaxVersion: ProtocolVersion,
+	hello := wire.Hello{
+		Protocol: wire.ProtocolName, MinVersion: wire.ProtocolVersion, MaxVersion: wire.ProtocolVersion,
 		AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID,
 		HostID: auth.HostID, ProcessGeneration: 1, Capabilities: requiredCapabilityList(), Auth: auth,
 	}
-	frame, err := NewFrame(MessageHello, "hello_websocket_01", hello)
+	frame, err := wire.NewFrame(wire.MessageHello, "hello_websocket_01", hello)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = WriteFrame(stream, frame); err != nil {
+	if err = wire.WriteFrame(stream, frame); err != nil {
 		t.Fatal(err)
 	}
-	welcomeFrame, err := ReadFrame(stream)
-	if err != nil || welcomeFrame.Type != MessageWelcome {
+	welcomeFrame, err := wire.ReadFrame(stream)
+	if err != nil || welcomeFrame.Type != wire.MessageWelcome {
 		t.Fatalf("welcome frame=%+v err=%v", welcomeFrame, err)
 	}
-	var welcome Welcome
+	var welcome wire.Welcome
 	if err = welcomeFrame.DecodePayload(&welcome); err != nil {
 		t.Fatal(err)
 	}
-	snapshotFrame, err := ReadFrame(stream)
-	if err != nil || snapshotFrame.Type != MessageSnapshot {
+	snapshotFrame, err := wire.ReadFrame(stream)
+	if err != nil || snapshotFrame.Type != wire.MessageSnapshot {
 		t.Fatalf("snapshot frame=%+v err=%v", snapshotFrame, err)
 	}
-	disconnect := Disconnect{
+	disconnect := wire.Disconnect{
 		AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID,
-		SessionID: welcome.SessionID, ProcessGeneration: 1, Reason: ReasonProtocolClosed,
+		SessionID: welcome.SessionID, ProcessGeneration: 1, Reason: wire.ReasonProtocolClosed,
 	}
-	frame, err = NewFrame(MessageDisconnect, "disconnect_websocket_01", disconnect)
+	frame, err = wire.NewFrame(wire.MessageDisconnect, "disconnect_websocket_01", disconnect)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = WriteFrame(stream, frame); err != nil {
+	if err = wire.WriteFrame(stream, frame); err != nil {
 		t.Fatal(err)
 	}
 	// Wait for the HTTP handler and its deferred durable disconnect write to
@@ -163,61 +165,61 @@ func TestWebSocketHandlerReportsUnexpectedAuthenticationFailureOnce(t *testing.T
 	}{
 		{
 			name:      "pure credential rejection",
-			storeErr:  ErrAuthenticationFailed,
+			storeErr:  wire.ErrAuthenticationFailed,
 			wantLevel: "WARN", wantMessage: "connector control stream rejected",
-			wantCode: string(CodeAuthenticationFailed), wantOutcome: "rejected",
+			wantCode: string(wire.CodeAuthenticationFailed), wantOutcome: "rejected",
 		},
 		{
 			name:      "pure revoked connector rejection",
 			storeErr:  ErrConnectorNotFound,
 			wantLevel: "WARN", wantMessage: "connector control stream rejected",
-			wantCode: string(CodeAuthenticationFailed), wantOutcome: "rejected",
+			wantCode: string(wire.CodeAuthenticationFailed), wantOutcome: "rejected",
 		},
 		{
 			name:      "pure cancellation",
 			storeErr:  context.Canceled,
 			wantLevel: "INFO", wantMessage: "connector control stream canceled",
-			wantCode: string(CodeAuthenticationFailed), wantOutcome: "canceled",
+			wantCode: string(wire.CodeAuthenticationFailed), wantOutcome: "canceled",
 		},
 		{
 			name:       "pure version rejection",
 			minVersion: "2.0", maxVersion: "2.0",
 			wantLevel: "WARN", wantMessage: "connector control stream rejected",
-			wantCode: string(CodeProtocolIncompatible), wantOutcome: "rejected",
+			wantCode: string(wire.CodeProtocolIncompatible), wantOutcome: "rejected",
 		},
 		{
 			name:        "pure malformed client frame",
 			malformed:   true,
 			wantLevel:   "WARN",
 			wantMessage: "connector control stream rejected",
-			wantCode:    string(CodeMalformedFrame),
+			wantCode:    string(wire.CodeMalformedFrame),
 			wantOutcome: "rejected",
 		},
 		{
 			name: "client frame field type rejection", invalidType: true,
 			wantLevel: "WARN", wantMessage: "connector control stream rejected",
-			wantCode: string(CodeMalformedFrame), wantOutcome: "rejected",
+			wantCode: string(wire.CodeMalformedFrame), wantOutcome: "rejected",
 		},
 		{
 			name:        "truncated client frame",
 			truncated:   true,
 			wantLevel:   "WARN",
 			wantMessage: "connector control stream rejected",
-			wantCode:    string(CodeMalformedFrame),
+			wantCode:    string(wire.CodeMalformedFrame),
 			wantOutcome: "rejected",
 		},
 		{
 			name:      "truncated provider response",
 			storeErr:  io.ErrUnexpectedEOF,
 			wantLevel: "ERROR", wantMessage: "operation failed",
-			wantCode: string(CodeAuthenticationFailed), wantOutcome: "failed",
+			wantCode: string(wire.CodeAuthenticationFailed), wantOutcome: "failed",
 			wantReference: true,
 		},
 		{
 			name:      "joined provider failure and credential rejection",
-			storeErr:  errors.Join(context.Canceled, syscall.ECONNREFUSED, errors.New(privateCause), ErrAuthenticationFailed),
+			storeErr:  errors.Join(context.Canceled, syscall.ECONNREFUSED, errors.New(privateCause), wire.ErrAuthenticationFailed),
 			wantLevel: "ERROR", wantMessage: "operation failed",
-			wantCode: string(CodeAuthenticationFailed), wantOutcome: "failed",
+			wantCode: string(wire.CodeAuthenticationFailed), wantOutcome: "failed",
 			wantCause: "connection_refused", wantReference: true,
 		},
 	}
@@ -230,12 +232,12 @@ func TestWebSocketHandlerReportsUnexpectedAuthenticationFailureOnce(t *testing.T
 
 			now := time.Now().UTC()
 			auth, private := testAuth(t, now, 1)
-			snapshot, err := NewSnapshot(auth.TunnelID, 1, testConfigPayload(1, "app.example.test"))
+			snapshot, err := wire.NewSnapshot(auth.TunnelID, 1, testConfigPayload(1, "app.example.test"))
 			if err != nil {
 				t.Fatal(err)
 			}
 			store := &websocketFailureStore{persistenceStoreStub: &persistenceStoreStub{
-				authResult: AuthResult{
+				authResult: wire.AuthResult{
 					AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID,
 					HostID: auth.HostID, IdentityKeyID: auth.IdentityKeyID, IdentityKeyThumbprint: auth.IdentityKeyThumbprint,
 					ProcessGeneration: 1, CredentialGeneration: auth.CredentialGeneration,
@@ -244,14 +246,14 @@ func TestWebSocketHandlerReportsUnexpectedAuthenticationFailureOnce(t *testing.T
 				snapshot: snapshot,
 			}, authErr: test.storeErr}
 			persistent, err := NewPersistentServer(store, IdentityProofVerifierFuncs{
-				AuthFunc: func(_ context.Context, _ AuthRequest, payload, signature []byte) error {
+				AuthFunc: func(_ context.Context, _ wire.AuthRequest, payload, signature []byte) error {
 					if !ed25519.Verify(private.Public().(ed25519.PublicKey), payload, signature) {
-						return ErrAuthenticationFailed
+						return wire.ErrAuthenticationFailed
 					}
 					return nil
 				},
-				RenewalFunc: func(context.Context, RenewalRequest, []byte, []byte) error { return nil },
-			}, ServerConfig{
+				RenewalFunc: func(context.Context, wire.RenewalRequest, []byte, []byte) error { return nil },
+			}, wire.ServerConfig{
 				Capabilities: requiredCapabilityList(), Clock: &testClock{now: now},
 				LeaseDuration: time.Minute, HeartbeatInterval: 10 * time.Second,
 				SessionIDs: func() (string, error) { return "session_websocket_01", nil },
@@ -287,28 +289,28 @@ func TestWebSocketHandlerReportsUnexpectedAuthenticationFailureOnce(t *testing.T
 				t.Fatal(err)
 			}
 			defer connection.CloseNow()
-			hello := Hello{
-				Protocol: ProtocolName, MinVersion: ProtocolVersion, MaxVersion: ProtocolVersion,
+			hello := wire.Hello{
+				Protocol: wire.ProtocolName, MinVersion: wire.ProtocolVersion, MaxVersion: wire.ProtocolVersion,
 				AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID,
 				HostID: auth.HostID, ProcessGeneration: 1, Capabilities: requiredCapabilityList(), Auth: auth,
 			}
 			if test.minVersion != "" {
 				hello.MinVersion, hello.MaxVersion = test.minVersion, test.maxVersion
 			}
-			var frame Frame
+			var frame wire.Frame
 			if test.malformed {
 				payload, marshalErr := json.Marshal(hello)
 				if marshalErr != nil {
 					t.Fatal(marshalErr)
 				}
 				payload = append(payload[:len(payload)-1], []byte(`,"unexpected":"`+privateCause+`"}`)...)
-				frame = Frame{Type: MessageHello, Version: ProtocolVersion, RequestID: "hello_websocket_failure_01", Payload: payload}
+				frame = wire.Frame{Type: wire.MessageHello, Version: wire.ProtocolVersion, RequestID: "hello_websocket_failure_01", Payload: payload}
 			} else if test.minVersion == "" {
-				frame, err = NewFrame(MessageHello, "hello_websocket_failure_01", hello)
+				frame, err = wire.NewFrame(wire.MessageHello, "hello_websocket_failure_01", hello)
 			} else {
 				var payload []byte
 				payload, err = json.Marshal(hello)
-				frame = Frame{Type: MessageHello, Version: ProtocolVersion, RequestID: "hello_websocket_failure_01", Payload: payload}
+				frame = wire.Frame{Type: wire.MessageHello, Version: wire.ProtocolVersion, RequestID: "hello_websocket_failure_01", Payload: payload}
 			}
 			if err != nil {
 				t.Fatal(err)
@@ -318,14 +320,14 @@ func TestWebSocketHandlerReportsUnexpectedAuthenticationFailureOnce(t *testing.T
 				body := []byte(`{"type":"hello","version":17,"request_id":"private-key=never-log-this","payload":{}}`)
 				var prefix [4]byte
 				binary.BigEndian.PutUint32(prefix[:], uint32(len(body)))
-				err = writeAll(stream, append(prefix[:], body...))
+				err = writeTestFrameBytes(stream, append(prefix[:], body...))
 			} else if test.truncated {
-				err = writeAll(stream, []byte{0, 0, 0, 3, 'x'})
+				err = writeTestFrameBytes(stream, []byte{0, 0, 0, 3, 'x'})
 				if err == nil {
 					_ = connection.Close(websocket.StatusNormalClosure, "")
 				}
 			} else if test.minVersion == "" && !test.malformed {
-				err = WriteFrame(stream, frame)
+				err = wire.WriteFrame(stream, frame)
 			} else {
 				err = writeFrameUnchecked(stream, frame)
 			}
@@ -381,15 +383,29 @@ func TestWebSocketHandlerReportsUnexpectedAuthenticationFailureOnce(t *testing.T
 	}
 }
 
-func writeFrameUnchecked(writer io.Writer, frame Frame) error {
+func writeFrameUnchecked(writer io.Writer, frame wire.Frame) error {
 	body, err := json.Marshal(frame)
 	if err != nil {
 		return err
 	}
 	var prefix [4]byte
 	binary.BigEndian.PutUint32(prefix[:], uint32(len(body)))
-	if err := writeAll(writer, prefix[:]); err != nil {
+	if err := writeTestFrameBytes(writer, prefix[:]); err != nil {
 		return err
 	}
-	return writeAll(writer, body)
+	return writeTestFrameBytes(writer, body)
+}
+
+func writeTestFrameBytes(writer io.Writer, data []byte) error {
+	for len(data) > 0 {
+		n, err := writer.Write(data)
+		if err != nil {
+			return err
+		}
+		if n <= 0 || n > len(data) {
+			return io.ErrShortWrite
+		}
+		data = data[n:]
+	}
+	return nil
 }

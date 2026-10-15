@@ -5,12 +5,14 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat-server/internal/accountingauthority"
 	"net"
 	"net/url"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat-server/internal/accountingauthority"
+	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
 	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
@@ -34,8 +36,8 @@ type CarrierBootstrapRequest struct {
 }
 
 func (r CarrierBootstrapRequest) Validate() error {
-	if r.Schema != CarrierBootstrapSchema || r.Kind != "carrier_bootstrap_request" || ValidateIdentifier(r.SessionID) != nil || r.ProcessGeneration == 0 || r.ConfigGeneration == 0 || !hashPattern.MatchString(r.ConfigContentHash) {
-		return ErrInvalidInput
+	if r.Schema != CarrierBootstrapSchema || r.Kind != "carrier_bootstrap_request" || wire.ValidateIdentifier(r.SessionID) != nil || r.ProcessGeneration == 0 || r.ConfigGeneration == 0 || !wire.ValidContentHash(r.ConfigContentHash) {
+		return wire.ErrInvalidInput
 	}
 	return nil
 }
@@ -50,27 +52,27 @@ type CarrierBootstrapNode struct {
 }
 
 func (n CarrierBootstrapNode) Validate() error {
-	if ValidateIdentifier(n.EdgeNodeID) != nil || ValidateOpaqueEpoch(n.EdgeProcessEpoch) != nil || ValidateIdentifier(n.FailureDomain) != nil || len(n.Endpoints) != 2 || !spkiHashPattern.MatchString(n.ServerSPKISHA256) || !validCertificateChainPEM(n.ServerCertificateChainPEM) {
-		return ErrInvalidInput
+	if wire.ValidateIdentifier(n.EdgeNodeID) != nil || wire.ValidateOpaqueEpoch(n.EdgeProcessEpoch) != nil || wire.ValidateIdentifier(n.FailureDomain) != nil || len(n.Endpoints) != 2 || !spkiHashPattern.MatchString(n.ServerSPKISHA256) || !validCertificateChainPEM(n.ServerCertificateChainPEM) {
+		return wire.ErrInvalidInput
 	}
 	seen := map[string]bool{}
 	for _, raw := range n.Endpoints {
 		parsed, err := url.Parse(raw)
 		if err != nil || parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.Hostname() == "" || parsed.Port() == "" {
-			return ErrInvalidInput
+			return wire.ErrInvalidInput
 		}
 		switch parsed.Scheme {
 		case "h2", "h3":
 			if seen[parsed.Scheme] {
-				return ErrInvalidInput
+				return wire.ErrInvalidInput
 			}
 			seen[parsed.Scheme] = true
 		default:
-			return ErrInvalidInput
+			return wire.ErrInvalidInput
 		}
 	}
 	if !seen["h2"] || !seen["h3"] {
-		return ErrInvalidInput
+		return wire.ErrInvalidInput
 	}
 	return nil
 }
@@ -89,28 +91,28 @@ type CarrierBootstrapDescriptor struct {
 	ConfigGeneration     uint64                 `json:"config_generation"`
 	ConfigContentHash    string                 `json:"config_content_hash"`
 	Carriers             []CarrierBootstrapNode `json:"carriers"`
-	IngressDecisions     []IngressDecision      `json:"ingress_decisions"`
+	IngressDecisions     []wire.IngressDecision `json:"ingress_decisions"`
 	IssuedAt             time.Time              `json:"issued_at"`
 	ExpiresAt            time.Time              `json:"expires_at"`
 }
 
 func (d CarrierBootstrapDescriptor) Validate(now time.Time) error {
-	if d.Schema != CarrierBootstrapSchema || d.Kind != "carrier_bootstrap_descriptor" || ValidateIdentifier(d.AccountID) != nil || ValidateIdentifier(d.TunnelID) != nil || ValidateIdentifier(d.ConnectorID) != nil || ValidateIdentifier(d.HostID) != nil || tunnelendpoint.ValidateID(d.StableEndpointID) != nil || ValidateIdentifier(d.SessionID) != nil || d.ProcessGeneration == 0 || d.CredentialGeneration == 0 || d.ConfigGeneration == 0 || !hashPattern.MatchString(d.ConfigContentHash) || len(d.Carriers) == 0 || len(d.Carriers) > MaximumBootstrapCarriers || d.IssuedAt.IsZero() || d.ExpiresAt.IsZero() || !d.ExpiresAt.After(d.IssuedAt) || d.ExpiresAt.Sub(d.IssuedAt) > 15*time.Second {
-		return ErrInvalidInput
+	if d.Schema != CarrierBootstrapSchema || d.Kind != "carrier_bootstrap_descriptor" || wire.ValidateIdentifier(d.AccountID) != nil || wire.ValidateIdentifier(d.TunnelID) != nil || wire.ValidateIdentifier(d.ConnectorID) != nil || wire.ValidateIdentifier(d.HostID) != nil || tunnelendpoint.ValidateID(d.StableEndpointID) != nil || wire.ValidateIdentifier(d.SessionID) != nil || d.ProcessGeneration == 0 || d.CredentialGeneration == 0 || d.ConfigGeneration == 0 || !wire.ValidContentHash(d.ConfigContentHash) || len(d.Carriers) == 0 || len(d.Carriers) > MaximumBootstrapCarriers || d.IssuedAt.IsZero() || d.ExpiresAt.IsZero() || !d.ExpiresAt.After(d.IssuedAt) || d.ExpiresAt.Sub(d.IssuedAt) > 15*time.Second {
+		return wire.ErrInvalidInput
 	}
-	if !now.IsZero() && (d.IssuedAt.After(now.Add(MaxClockSkew)) || !d.ExpiresAt.After(now)) {
-		return ErrInvalidInput
+	if !now.IsZero() && (d.IssuedAt.After(now.Add(wire.MaxClockSkew)) || !d.ExpiresAt.After(now)) {
+		return wire.ErrInvalidInput
 	}
 	seenNodes, seenDomains := map[string]bool{}, map[string]bool{}
 	for _, carrier := range d.Carriers {
 		if carrier.Validate() != nil || seenNodes[carrier.EdgeNodeID+"\x00"+carrier.EdgeProcessEpoch] || seenDomains[carrier.FailureDomain] {
-			return ErrInvalidInput
+			return wire.ErrInvalidInput
 		}
 		seenNodes[carrier.EdgeNodeID+"\x00"+carrier.EdgeProcessEpoch] = true
 		seenDomains[carrier.FailureDomain] = true
 	}
 	if len(d.IngressDecisions) > 4096 {
-		return ErrInvalidInput
+		return wire.ErrInvalidInput
 	}
 	for _, ingress := range d.IngressDecisions {
 		at := now
@@ -118,7 +120,7 @@ func (d CarrierBootstrapDescriptor) Validate(now time.Time) error {
 			at = ingress.IssuedAt
 		}
 		if ingress.Validate(at) != nil || ingress.Binding.AccountID != d.AccountID || ingress.Binding.TunnelID != d.TunnelID || ingress.Binding.HostID != d.HostID || ingress.ConnectorID != d.ConnectorID || ingress.SessionID != d.SessionID || ingress.ProcessGeneration != d.ProcessGeneration || ingress.ConfigGeneration != d.ConfigGeneration {
-			return ErrInvalidInput
+			return wire.ErrInvalidInput
 		}
 	}
 	return nil
@@ -131,19 +133,19 @@ type CarrierBootstrapSource interface {
 type SQLCarrierBootstrapSource struct {
 	Quota accountingauthority.QuotaChecker
 	DB    *db.DB
-	Clock Clock
+	Clock wire.Clock
 }
 
 func (s SQLCarrierBootstrapSource) Descriptor(ctx context.Context, active ActiveControlSession) (CarrierBootstrapDescriptor, error) {
 	if ctx == nil || s.DB == nil || active.validate() != nil {
-		return CarrierBootstrapDescriptor{}, ErrInvalidInput
+		return CarrierBootstrapDescriptor{}, wire.ErrInvalidInput
 	}
 	tunnel, err := s.DB.Queries().GetTunnelManagedEndpointForConnectorBootstrapV1(ctx, dbsqlc.GetTunnelManagedEndpointForConnectorBootstrapV1Params{TunnelID: active.TunnelID, AccountID: active.AccountID})
 	if err != nil {
 		return CarrierBootstrapDescriptor{}, err
 	}
 	if tunnelendpoint.ValidateID(tunnel.StableEndpointID) != nil {
-		return CarrierBootstrapDescriptor{}, fmt.Errorf("persisted stable endpoint identity is invalid: %w", ErrSnapshotRejected)
+		return CarrierBootstrapDescriptor{}, fmt.Errorf("persisted stable endpoint identity is invalid: %w", wire.ErrSnapshotRejected)
 	}
 	now := time.Now().UTC()
 	if s.Clock != nil {
@@ -185,11 +187,11 @@ func (s SQLCarrierBootstrapSource) Descriptor(ctx context.Context, active Active
 		}
 	}
 	if len(carriers) == 0 {
-		return CarrierBootstrapDescriptor{}, codeError(ErrNotReady, ReasonSnapshotRejected, true, nil)
+		return CarrierBootstrapDescriptor{}, wire.CodeError(wire.ErrNotReady, wire.ReasonSnapshotRejected, true, nil)
 	}
 	// The descriptor and its ingress decisions form one authority snapshot.
 	// Validate them against the same instant used by both SQL projections.
-	ingress, err := (SQLIngressSource{DB: s.DB, Clock: ClockFunc(func() time.Time { return now }), Quota: s.Quota}).Daemon(ctx, active)
+	ingress, err := (SQLIngressSource{DB: s.DB, Clock: wire.ClockFunc(func() time.Time { return now }), Quota: s.Quota}).Daemon(ctx, active)
 	if err != nil {
 		return CarrierBootstrapDescriptor{}, err
 	}

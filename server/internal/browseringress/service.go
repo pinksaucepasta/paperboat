@@ -1,6 +1,7 @@
 package browseringress
 
 import (
+ wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"context"
 	"database/sql"
 	"net"
@@ -27,8 +28,8 @@ type Service struct {
 	Quota  accountingauthority.QuotaChecker
 }
 
-func (s *Service) Resolve(ctx context.Context, a browseraccess.Authorization, node, epoch string) (connectorprotocol.IngressDecision, error) {
-	var d connectorprotocol.IngressDecision
+func (s *Service) Resolve(ctx context.Context, a browseraccess.Authorization, node, epoch string) (wire.IngressDecision, error) {
+	var d wire.IngressDecision
 	var err error
 	policyGeneration := int64(0)
 	if a.ResourceKind == "lazy_policy" {
@@ -39,7 +40,7 @@ func (s *Service) Resolve(ctx context.Context, a browseraccess.Authorization, no
 		err = s.DB.Pool().QueryRow(ctx, browseraccess.LazyPreviewSQL, a.ResourceID, a.ResourceGeneration, "", "", a.IssuedAt).Scan(&preview, &route, &routeGeneration, &expiry)
 		if err != nil {
 			if err == pgx.ErrNoRows {
-				return d, connectorprotocol.ErrIngressDenied
+				return d, wire.ErrIngressDenied
 			}
 			return d, err
 		}
@@ -51,27 +52,27 @@ func (s *Service) Resolve(ctx context.Context, a browseraccess.Authorization, no
 	}
 	if a.ResourceKind == "tunnel" {
 		if a.ViewerPolicyGeneration < 1 {
-			return d, connectorprotocol.ErrIngressDenied
+			return d, wire.ErrIngressDenied
 		}
 		policyGeneration = a.ViewerPolicyGeneration
 		d, err = (connectorprotocol.SQLIngressSource{DB: s.DB}).RestrictedRoute(ctx, node, epoch, a.AccessMode, a.RouteID, a.Hostname)
 	} else if a.ResourceKind == "preview" {
 		d, err = s.preview(ctx, a, node, epoch)
 	} else {
-		return d, connectorprotocol.ErrIngressDenied
+		return d, wire.ErrIngressDenied
 	}
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			return d, connectorprotocol.ErrIngressDenied
+			return d, wire.ErrIngressDenied
 		}
 		return d, err
 	}
 	if a.ResourceKind == "tunnel" && d.PolicyGeneration != uint64(a.ViewerPolicyGeneration) {
-		return connectorprotocol.IngressDecision{}, connectorprotocol.ErrIngressDenied
+		return wire.IngressDecision{}, wire.ErrIngressDenied
 	}
 	b := &d.Binding
 	if b.AccountID != a.OwnerAccountID || b.ResourceGeneration != uint64(a.ResourceGeneration) || b.RouteID != a.RouteID || b.RouteGeneration != uint64(a.RouteGeneration) || b.Hostname != a.Hostname {
-		return connectorprotocol.IngressDecision{}, connectorprotocol.ErrIngressDenied
+		return wire.IngressDecision{}, wire.ErrIngressDenied
 	}
 	b.Audience = a.AccessMode
 	if policyGeneration != 0 {
@@ -91,25 +92,25 @@ func (s *Service) Resolve(ctx context.Context, a browseraccess.Authorization, no
 	d.DecisionID = a.GrantID
 	d.Action = "view"
 	if err = d.Validate(time.Now().UTC()); err != nil {
-		return connectorprotocol.IngressDecision{}, err
+		return wire.IngressDecision{}, err
 	}
 	team := a.TeamID
 	if team == "" {
 		if err = s.DB.SQL().QueryRowContext(ctx, `SELECT coalesce(owner_team_id,'') FROM user_machines WHERE id=$1 AND environment_id=$2 AND user_id=$3`, b.HostID, b.EnvironmentID, b.AccountID).Scan(&team); err != nil {
 			if err == sql.ErrNoRows {
-				return connectorprotocol.IngressDecision{}, connectorprotocol.ErrIngressDenied
+				return wire.IngressDecision{}, wire.ErrIngressDenied
 			}
-			return connectorprotocol.IngressDecision{}, err
+			return wire.IngressDecision{}, err
 		}
 	}
 	if err = accountingauthority.Record(ctx, s.DB, accountingauthority.Binding{ID: "grant:" + a.GrantID, Node: node, Environment: b.EnvironmentID, Route: b.RouteID, Revision: int64(b.RouteGeneration), User: a.OwnerAccountID, Team: team, IssuedAt: d.IssuedAt, ExpiresAt: d.ExpiresAt}, s.Quota); err != nil {
-		return connectorprotocol.IngressDecision{}, err
+		return wire.IngressDecision{}, err
 	}
 	return d, nil
 }
 
-func (s *Service) preview(ctx context.Context, a browseraccess.Authorization, node, epoch string) (connectorprotocol.IngressDecision, error) {
-	var d connectorprotocol.IngressDecision
+func (s *Service) preview(ctx context.Context, a browseraccess.Authorization, node, epoch string) (wire.IngressDecision, error) {
+	var d wire.IngressDecision
 	b := &d.Binding
 	err := s.DB.Pool().QueryRow(ctx, previewSQL, a.ResourceID, a.OwnerAccountID, a.RouteID, node, epoch, a.IssuedAt).Scan(
 		&b.EnvironmentID, &b.AccountID, &b.TunnelID, &b.ResourceGeneration, &b.RouteID, &b.RouteGeneration, &b.HostID, &b.InstallationGeneration,
@@ -120,14 +121,14 @@ func (s *Service) preview(ctx context.Context, a browseraccess.Authorization, no
 	if b.OriginScheme != "unix" {
 		host, port, err := net.SplitHostPort(b.OriginAddress)
 		if err != nil {
-			return d, connectorprotocol.ErrIngressDenied
+			return d, wire.ErrIngressDenied
 		}
 		if host == "localhost" {
 			host = "127.0.0.1"
 		}
 		b.OriginAddress = net.JoinHostPort(host, port)
 	}
-	b.Lifecycle = connectorprotocol.TunnelEphemeral
+	b.Lifecycle = wire.TunnelEphemeral
 	b.ConnectionMethod = "edge"
 	b.Protocol = "http"
 	b.PathPrefix = "/"

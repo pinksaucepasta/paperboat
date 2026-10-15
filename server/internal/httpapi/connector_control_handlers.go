@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+ wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -23,7 +24,7 @@ type activeConnectorControlSessionReader interface {
 
 func NewConnectorCarrierBootstrapHandler(sessions *connectorprotocol.ActiveControlSessions, source connectorprotocol.CarrierBootstrapSource, identities *controlplane.EnrollmentService) (http.Handler, error) {
 	if sessions == nil || source == nil || identities == nil {
-		return nil, connectorprotocol.ErrInvalidInput
+		return nil, wire.ErrInvalidInput
 	}
 	return connectorCarrierBootstrap(sessions, source, identities), nil
 }
@@ -89,7 +90,7 @@ func connectorCarrierBootstrap(sessions activeConnectorControlSessionReader, sou
 		}
 		descriptor, err := source.Descriptor(r.Context(), active)
 		if err != nil {
-			if errors.Is(err, connectorprotocol.ErrNotReady) {
+			if errors.Is(err, wire.ErrNotReady) {
 				writePreviewTunnelError(w, r, http.StatusServiceUnavailable, "carrier_unavailable", "No authenticated carrier endpoint is ready.", "unchanged", true, "retry", err)
 				return
 			}

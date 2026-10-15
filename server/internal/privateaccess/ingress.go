@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 // AuthorizeIngress rechecks the signed accessor grant and projects the exact

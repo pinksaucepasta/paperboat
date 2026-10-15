@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 const (

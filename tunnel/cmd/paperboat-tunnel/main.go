@@ -23,7 +23,7 @@ import (
 	"github.com/pinksaucepasta/paperboat-relay/selfhost"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/auth"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/config"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/control"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/datacarrier"
 	edgediagnostics "github.com/pinksaucepasta/paperboat-tunnel/internal/diagnostics"

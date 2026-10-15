@@ -6,6 +6,8 @@ import (
 	"io"
 	"sync"
 	"time"
+
+	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 // ActiveControlSession is the secret-free server projection of one currently
@@ -28,8 +30,8 @@ type ActiveControlSession struct {
 }
 
 func (s ActiveControlSession) validate() error {
-	if ValidateIdentifier(s.AccountID) != nil || ValidateIdentifier(s.TunnelID) != nil || ValidateIdentifier(s.ConnectorID) != nil || ValidateIdentifier(s.HostID) != nil || ValidateIdentifier(s.SessionID) != nil || ValidateIdentityKey(s.IdentityKeyID, s.IdentityKeyThumbprint) != nil || s.ProcessGeneration == 0 || s.CredentialGeneration == 0 || s.ConfigGeneration == 0 || !hashPattern.MatchString(s.ConfigContentHash) {
-		return ErrInvalidInput
+	if wire.ValidateIdentifier(s.AccountID) != nil || wire.ValidateIdentifier(s.TunnelID) != nil || wire.ValidateIdentifier(s.ConnectorID) != nil || wire.ValidateIdentifier(s.HostID) != nil || wire.ValidateIdentifier(s.SessionID) != nil || wire.ValidateIdentityKey(s.IdentityKeyID, s.IdentityKeyThumbprint) != nil || s.ProcessGeneration == 0 || s.CredentialGeneration == 0 || s.ConfigGeneration == 0 || !wire.ValidContentHash(s.ConfigContentHash) {
+		return wire.ErrInvalidInput
 	}
 	return nil
 }
@@ -52,14 +54,14 @@ func NewActiveControlSessions() *ActiveControlSessions {
 
 func (s *ActiveControlSessions) attach(projection ActiveControlSession, session *PersistentSession) error {
 	if s == nil || session == nil || projection.validate() != nil {
-		return ErrInvalidInput
+		return wire.ErrInvalidInput
 	}
 	key := controlSessionKey(projection.TunnelID, projection.ConnectorID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if current, ok := s.sessions[key]; ok {
 		if current.projection.ProcessGeneration > projection.ProcessGeneration || current.projection.ProcessGeneration == projection.ProcessGeneration && current.projection.SessionID != projection.SessionID {
-			return codeError(ErrSessionConflict, ReasonSessionReplaced, true, nil)
+			return wire.CodeError(wire.ErrSessionConflict, wire.ReasonSessionReplaced, true, nil)
 		}
 	}
 	s.sessions[key] = activeControlSessionEntry{projection: projection, session: session}
@@ -81,7 +83,7 @@ func (s *ActiveControlSessions) detach(projection ActiveControlSession) {
 
 // Lookup returns a copy only when every session fence matches.
 func (s *ActiveControlSessions) Lookup(tunnelID, connectorID, sessionID string, processGeneration uint64) (ActiveControlSession, bool) {
-	if s == nil || ValidateIdentifier(tunnelID) != nil || ValidateIdentifier(connectorID) != nil || ValidateIdentifier(sessionID) != nil || processGeneration == 0 {
+	if s == nil || wire.ValidateIdentifier(tunnelID) != nil || wire.ValidateIdentifier(connectorID) != nil || wire.ValidateIdentifier(sessionID) != nil || processGeneration == 0 {
 		return ActiveControlSession{}, false
 	}
 	s.mu.RLock()
@@ -129,8 +131,8 @@ type ControlTerminationEvent struct {
 	SessionID         string
 	ProcessGeneration uint64
 	Kind              ControlTerminationKind
-	ProtocolReason    DisconnectReason
-	Code              Code
+	ProtocolReason    wire.DisconnectReason
+	Code              wire.Code
 	Retryable         bool
 }
 
@@ -154,7 +156,7 @@ func NewControlTransportWithRotation(server *PersistentServer, sessions *ActiveC
 
 func NewControlTransportWithDispatchers(server *PersistentServer, sessions *ActiveControlSessions, rotation *RotationDispatcher, drain *DrainDispatcher) (*ControlTransport, error) {
 	if server == nil {
-		return nil, ErrInvalidInput
+		return nil, wire.ErrInvalidInput
 	}
 	if sessions == nil {
 		sessions = NewActiveControlSessions()
@@ -198,23 +200,23 @@ func populateTermination(event *ControlTerminationEvent, cause error) {
 	if event == nil {
 		return
 	}
-	event.Code = CodeOf(cause)
-	event.ProtocolReason = ReasonOf(cause)
-	var typed *Error
+	event.Code = wire.CodeOf(cause)
+	event.ProtocolReason = wire.ReasonOf(cause)
+	var typed *wire.Error
 	if errors.As(cause, &typed) && typed != nil {
 		event.Retryable = typed.Retryable
 	}
 }
 
 func classifyControlError(cause error) ControlTerminationKind {
-	switch ReasonOf(cause) {
-	case ReasonAuthentication:
+	switch wire.ReasonOf(cause) {
+	case wire.ReasonAuthentication:
 		return ControlTerminationAuthentication
-	case ReasonCredentialExpired, ReasonLeaseExpired, ReasonHeartbeatTimeout:
+	case wire.ReasonCredentialExpired, wire.ReasonLeaseExpired, wire.ReasonHeartbeatTimeout:
 		return ControlTerminationSessionExpired
-	case ReasonSessionReplaced, ReasonStaleGeneration:
+	case wire.ReasonSessionReplaced, wire.ReasonStaleGeneration:
 		return ControlTerminationSessionReplaced
-	case ReasonServerShutdown:
+	case wire.ReasonServerShutdown:
 		return ControlTerminationServerShutdown
 	default:
 		return ControlTerminationProtocolError
@@ -264,8 +266,8 @@ func (t *ControlTransport) Serve(ctx context.Context, stream io.ReadWriteCloser,
 		}
 		t.reportTermination(event)
 	}()
-	if t == nil || t.server == nil || t.sessions == nil || ctx == nil || stream == nil || ValidateIdentifier(expectedTunnelID) != nil || ValidateIdentifier(expectedConnectorID) != nil {
-		return finish(ControlTerminationInvalidRequest, ErrInvalidInput)
+	if t == nil || t.server == nil || t.sessions == nil || ctx == nil || stream == nil || wire.ValidateIdentifier(expectedTunnelID) != nil || wire.ValidateIdentifier(expectedConnectorID) != nil {
+		return finish(ControlTerminationInvalidRequest, wire.ErrInvalidInput)
 	}
 	defer stream.Close()
 	streamDone := make(chan struct{})
@@ -281,7 +283,7 @@ func (t *ControlTransport) Serve(ctx context.Context, stream io.ReadWriteCloser,
 		}
 	}()
 	writer := newSerializedFrameWriter(stream)
-	first, err := ReadFrame(stream)
+	first, err := wire.ReadFrame(stream)
 	if err != nil {
 		kind := classifyReadTermination(ctx, err)
 		if kind == ControlTerminationPeerEOF || kind == ControlTerminationPeerCanceled || kind == ControlTerminationServerShutdown {
@@ -290,16 +292,16 @@ func (t *ControlTransport) Serve(ctx context.Context, stream io.ReadWriteCloser,
 		}
 		return finish(kind, err)
 	}
-	if first.Type != MessageHello {
-		err = codeError(ErrUnsupportedMessage, ReasonProtocolMismatch, false, nil)
+	if first.Type != wire.MessageHello {
+		err = wire.CodeError(wire.ErrUnsupportedMessage, wire.ReasonProtocolMismatch, false, nil)
 		return finish(ControlTerminationProtocolError, err)
 	}
-	var hello Hello
+	var hello wire.Hello
 	if err = first.DecodePayload(&hello); err != nil {
 		return finish(ControlTerminationProtocolError, err)
 	}
 	if hello.TunnelID != expectedTunnelID || hello.ConnectorID != expectedConnectorID {
-		err = codeError(ErrIdentityMismatch, ReasonAuthentication, false, nil)
+		err = wire.CodeError(wire.ErrIdentityMismatch, wire.ReasonAuthentication, false, nil)
 		return finish(ControlTerminationAuthentication, err)
 	}
 	session, welcome, snapshot, err := t.server.Accept(ctx, hello)
@@ -316,14 +318,14 @@ func (t *ControlTransport) Serve(ctx context.Context, stream io.ReadWriteCloser,
 	event.SessionID = welcome.SessionID
 	event.ProcessGeneration = hello.ProcessGeneration
 	if err = t.sessions.attach(projection, session); err != nil {
-		_ = session.Close(context.Background(), ReasonSessionReplaced)
+		_ = session.Close(context.Background(), wire.ReasonSessionReplaced)
 		return finish(ControlTerminationSessionReplaced, err)
 	}
 	defer t.sessions.detach(projection)
-	closeReason := ReasonProtocolClosed
+	closeReason := wire.ReasonProtocolClosed
 	defer func() {
 		if ctx.Err() != nil {
-			closeReason = ReasonServerShutdown
+			closeReason = wire.ReasonServerShutdown
 		}
 		closeErr := session.Close(context.Background(), closeReason)
 		if serveErr == nil && closeErr != nil {
@@ -331,18 +333,18 @@ func (t *ControlTransport) Serve(ctx context.Context, stream io.ReadWriteCloser,
 		}
 	}()
 
-	welcomeFrame, err := NewFrame(MessageWelcome, first.RequestID, welcome)
+	welcomeFrame, err := wire.NewFrame(wire.MessageWelcome, first.RequestID, welcome)
 	if err != nil {
 		return finish(ControlTerminationServerError, errors.Join(err, errors.New("server could not encode connector welcome")))
 	}
 	if err = writer.Send(ctx, welcomeFrame); err != nil {
 		return finish(classifyWriteTermination(ctx), err)
 	}
-	snapshotRequestID, err := newOpaqueID("request")
+	snapshotRequestID, err := wire.NewOpaqueID("request")
 	if err != nil {
 		return finish(ControlTerminationServerError, err)
 	}
-	snapshotFrame, err := NewFrame(MessageSnapshot, snapshotRequestID, snapshot)
+	snapshotFrame, err := wire.NewFrame(wire.MessageSnapshot, snapshotRequestID, snapshot)
 	if err != nil {
 		return finish(ControlTerminationServerError, errors.Join(err, errors.New("server could not encode connector snapshot")))
 	}
@@ -375,7 +377,7 @@ func (t *ControlTransport) Serve(ctx context.Context, stream io.ReadWriteCloser,
 	lastOffered := snapshot
 	candidateAcknowledged := false
 	for {
-		frame, readErr := ReadFrame(stream)
+		frame, readErr := wire.ReadFrame(stream)
 		if readErr != nil {
 			if ctx.Err() != nil {
 				_ = finish(ControlTerminationServerShutdown, ctx.Err())
@@ -395,9 +397,9 @@ func (t *ControlTransport) Serve(ctx context.Context, stream io.ReadWriteCloser,
 			}
 			return finish(classifyControlError(handleErr), handleErr)
 		}
-		if frame.Type == MessageAck {
-			var ack Ack
-			if frame.DecodePayload(&ack) == nil && ack.Status == AckApplied {
+		if frame.Type == wire.MessageAck {
+			var ack wire.Ack
+			if frame.DecodePayload(&ack) == nil && ack.Status == wire.AckApplied {
 				// HandleAck persisted this exact candidate before bootstrap can
 				// read it; old serving readiness remains owned by the session.
 				candidateAcknowledged = true
@@ -412,7 +414,7 @@ func (t *ControlTransport) Serve(ctx context.Context, stream io.ReadWriteCloser,
 				return finish(classifyWriteTermination(ctx), err)
 			}
 		}
-		if frame.Type == MessageHeartbeat {
+		if frame.Type == wire.MessageHeartbeat {
 			if !candidateAcknowledged {
 				// Wait for the exact offered ACK. Once durable, a newer desired
 				// snapshot can replace an unready candidate without losing LKG.
@@ -420,25 +422,25 @@ func (t *ControlTransport) Serve(ctx context.Context, stream io.ReadWriteCloser,
 			}
 			// The existing heartbeat cadence drives desired configuration;
 			// long-lived paused sessions must receive resume without reconnect.
-			fetchCtx, cancel := context.WithTimeout(ctx, DefaultAbortTimeout)
+			fetchCtx, cancel := context.WithTimeout(ctx, wire.DefaultAbortTimeout)
 			desired, fetchErr := t.server.store.Snapshot(fetchCtx, hello.TunnelID)
 			cancel()
 			if fetchErr != nil {
 				return finish(classifyControlError(fetchErr), fetchErr)
 			}
 			if desired.Generation == lastOffered.Generation && desired.ContentHash != lastOffered.ContentHash {
-				return finish(ControlTerminationServerError, errors.Join(ErrContentHashMismatch, errors.New("stored connector snapshot changed without a generation advance")))
+				return finish(ControlTerminationServerError, errors.Join(wire.ErrContentHashMismatch, errors.New("stored connector snapshot changed without a generation advance")))
 			}
 			if desired.Generation > lastOffered.Generation {
-				desired = bindSnapshot(desired, hello.AccountID, hello.ConnectorID, welcome.SessionID, hello.ProcessGeneration)
+				desired = wire.BindSnapshot(desired, hello.AccountID, hello.ConnectorID, welcome.SessionID, hello.ProcessGeneration)
 				if err = session.OfferSnapshot(ctx, desired); err != nil {
 					return finish(classifyControlError(err), err)
 				}
-				requestID, idErr := newOpaqueID("request")
+				requestID, idErr := wire.NewOpaqueID("request")
 				if idErr != nil {
 					return finish(ControlTerminationServerError, idErr)
 				}
-				update, frameErr := NewFrame(MessageSnapshot, requestID, desired)
+				update, frameErr := wire.NewFrame(wire.MessageSnapshot, requestID, desired)
 				if frameErr != nil {
 					return finish(ControlTerminationServerError, errors.Join(frameErr, errors.New("server could not encode updated connector snapshot")))
 				}
@@ -450,13 +452,13 @@ func (t *ControlTransport) Serve(ctx context.Context, stream io.ReadWriteCloser,
 			}
 		}
 		if terminal {
-			if frame.Type == MessageDisconnect {
-				var disconnect Disconnect
+			if frame.Type == wire.MessageDisconnect {
+				var disconnect wire.Disconnect
 				if frame.DecodePayload(&disconnect) == nil {
 					closeReason = disconnect.Reason
 				}
 			}
-			if frame.Type == MessageDisconnect {
+			if frame.Type == wire.MessageDisconnect {
 				event.Kind = ControlTerminationPeerDisconnect
 				event.ProtocolReason = closeReason
 			}
@@ -465,19 +467,19 @@ func (t *ControlTransport) Serve(ctx context.Context, stream io.ReadWriteCloser,
 	}
 }
 
-func handleControlFrame(ctx context.Context, session *PersistentSession, rotation *RotationDispatcher, frame Frame) (*Frame, bool, error) {
+func handleControlFrame(ctx context.Context, session *PersistentSession, rotation *RotationDispatcher, frame wire.Frame) (*wire.Frame, bool, error) {
 	if ctx == nil || session == nil {
-		return nil, false, ErrInvalidInput
+		return nil, false, wire.ErrInvalidInput
 	}
 	switch frame.Type {
-	case MessageAck:
-		var value Ack
+	case wire.MessageAck:
+		var value wire.Ack
 		if err := frame.DecodePayload(&value); err != nil {
 			return nil, false, err
 		}
 		return nil, false, session.HandleAck(ctx, value)
-	case MessageReady:
-		var value Readiness
+	case wire.MessageReady:
+		var value wire.Readiness
 		if err := frame.DecodePayload(&value); err != nil {
 			return nil, false, err
 		}
@@ -485,13 +487,13 @@ func handleControlFrame(ctx context.Context, session *PersistentSession, rotatio
 		if err != nil {
 			return nil, false, err
 		}
-		response, err := NewFrame(MessageAck, frame.RequestID, ack)
+		response, err := wire.NewFrame(wire.MessageAck, frame.RequestID, ack)
 		if err != nil {
 			return nil, false, errors.Join(err, errors.New("server could not encode readiness acknowledgement"))
 		}
 		return &response, false, err
-	case MessageHeartbeat:
-		var value Heartbeat
+	case wire.MessageHeartbeat:
+		var value wire.Heartbeat
 		if err := frame.DecodePayload(&value); err != nil {
 			return nil, false, err
 		}
@@ -499,13 +501,13 @@ func handleControlFrame(ctx context.Context, session *PersistentSession, rotatio
 		if err != nil {
 			return nil, false, err
 		}
-		response, err := NewFrame(MessageHeartbeatAck, frame.RequestID, ack)
+		response, err := wire.NewFrame(wire.MessageHeartbeatAck, frame.RequestID, ack)
 		if err != nil {
 			return nil, false, errors.Join(err, errors.New("server could not encode heartbeat acknowledgement"))
 		}
 		return &response, false, err
-	case MessageAuthRenew:
-		var value RenewalRequest
+	case wire.MessageAuthRenew:
+		var value wire.RenewalRequest
 		if err := frame.DecodePayload(&value); err != nil {
 			return nil, false, err
 		}
@@ -513,34 +515,34 @@ func handleControlFrame(ctx context.Context, session *PersistentSession, rotatio
 		if err != nil {
 			return nil, false, err
 		}
-		response, err := NewFrame(MessageAuthRenewed, frame.RequestID, result)
+		response, err := wire.NewFrame(wire.MessageAuthRenewed, frame.RequestID, result)
 		if err != nil {
 			return nil, false, errors.Join(err, errors.New("server could not encode credential renewal response"))
 		}
 		return &response, false, err
-	case MessageDrainAck:
-		var value DrainAck
+	case wire.MessageDrainAck:
+		var value wire.DrainAck
 		if err := frame.DecodePayload(&value); err != nil {
 			return nil, false, err
 		}
 		return nil, false, session.HandleDrainAck(ctx, value)
-	case MessageCredentialRotationProof, MessageCredentialRotationReady, MessageCredentialRotationAck:
+	case wire.MessageCredentialRotationProof, wire.MessageCredentialRotationReady, wire.MessageCredentialRotationAck:
 		if rotation == nil {
-			return nil, false, codeError(ErrUnsupportedMessage, ReasonCredentialRotation, false, nil)
+			return nil, false, wire.CodeError(wire.ErrUnsupportedMessage, wire.ReasonCredentialRotation, false, nil)
 		}
 		return nil, false, rotation.HandleFrame(ctx, session.Reference(), frame)
-	case MessageDisconnect:
-		var value Disconnect
+	case wire.MessageDisconnect:
+		var value wire.Disconnect
 		if err := frame.DecodePayload(&value); err != nil {
 			return nil, false, err
 		}
 		ref := session.Reference()
 		if value.TunnelID != ref.TunnelID || value.ConnectorID != ref.ConnectorID || value.SessionID != ref.SessionID || value.ProcessGeneration != ref.ProcessGeneration {
-			return nil, false, codeError(ErrIdentityMismatch, ReasonAuthentication, false, nil)
+			return nil, false, wire.CodeError(wire.ErrIdentityMismatch, wire.ReasonAuthentication, false, nil)
 		}
 		return nil, true, nil
 	default:
-		return nil, false, codeError(ErrUnsupportedMessage, ReasonProtocolMismatch, false, nil)
+		return nil, false, wire.CodeError(wire.ErrUnsupportedMessage, wire.ReasonProtocolMismatch, false, nil)
 	}
 }
 
@@ -555,9 +557,9 @@ func newSerializedFrameWriter(writer io.Writer) *serializedFrameWriter {
 	return value
 }
 
-func (w *serializedFrameWriter) Send(ctx context.Context, frame Frame) error {
+func (w *serializedFrameWriter) Send(ctx context.Context, frame wire.Frame) error {
 	if w == nil || w.writer == nil || ctx == nil {
-		return ErrInvalidInput
+		return wire.ErrInvalidInput
 	}
 	select {
 	case <-ctx.Done():
@@ -573,25 +575,25 @@ func (w *serializedFrameWriter) Send(ctx context.Context, frame Frame) error {
 			defer connection.SetWriteDeadline(time.Time{})
 		}
 	}
-	return WriteFrame(w.writer, frame)
+	return wire.WriteFrame(w.writer, frame)
 }
 
-func writeControlReject(ctx context.Context, writer *serializedFrameWriter, ref SessionRef, accountID, requestID string, cause error) error {
-	code := CodeOf(cause)
+func writeControlReject(ctx context.Context, writer *serializedFrameWriter, ref wire.SessionRef, accountID, requestID string, cause error) error {
+	code := wire.CodeOf(cause)
 	if code == "" {
-		code = CodeSessionClosed
+		code = wire.CodeSessionClosed
 	}
-	reason := ReasonOf(cause)
+	reason := wire.ReasonOf(cause)
 	if reason == "" {
-		reason = ReasonProtocolClosed
+		reason = wire.ReasonProtocolClosed
 	}
 	retryable := false
-	var typed *Error
+	var typed *wire.Error
 	if errors.As(cause, &typed) {
 		retryable = typed.Retryable
 	}
-	reject := Reject{AccountID: accountID, TunnelID: ref.TunnelID, ConnectorID: ref.ConnectorID, SessionID: ref.SessionID, ProcessGeneration: ref.ProcessGeneration, Code: code, Reason: reason, Retryable: retryable}
-	frame, err := NewFrame(MessageReject, requestID, reject)
+	reject := wire.Reject{AccountID: accountID, TunnelID: ref.TunnelID, ConnectorID: ref.ConnectorID, SessionID: ref.SessionID, ProcessGeneration: ref.ProcessGeneration, Code: code, Reason: reason, Retryable: retryable}
+	frame, err := wire.NewFrame(wire.MessageReject, requestID, reject)
 	if err != nil {
 		return err
 	}

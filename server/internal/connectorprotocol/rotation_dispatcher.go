@@ -4,10 +4,12 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
-	"github.com/pinksaucepasta/paperboat-server/internal/workers"
 	"math/rand/v2"
 	"sync"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat-server/internal/workers"
+	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 const (
@@ -22,28 +24,28 @@ const (
 // RotationFrameSender is the only transport dependency of RotationDispatcher.
 // TRK-14 binds it to the multiplexed control carrier. The callback must return
 // only after the frame has been accepted by that carrier's bounded send queue.
-type RotationFrameSender func(context.Context, Frame) error
+type RotationFrameSender func(context.Context, wire.Frame) error
 
 type RotationOperationPlanSource interface {
-	LoadCredentialRotationPlan(context.Context, string) (RotationPlan, error)
+	LoadCredentialRotationPlan(context.Context, string) (wire.RotationPlan, error)
 }
 
 type RotationTargetRecoveryStore interface {
-	ResetCredentialRotationInstall(context.Context, RotationPlan, RotationTarget, SessionRef) error
-	RebindCredentialRotationRevoke(context.Context, RotationPlan, RotationTarget, SessionRef, string, time.Time, time.Time) (CredentialRotationRevoke, error)
-	FailCredentialRotationTarget(context.Context, RotationPlan, RotationTarget, Code) error
+	ResetCredentialRotationInstall(context.Context, wire.RotationPlan, wire.RotationTarget, wire.SessionRef) error
+	RebindCredentialRotationRevoke(context.Context, wire.RotationPlan, wire.RotationTarget, wire.SessionRef, string, time.Time, time.Time) (wire.CredentialRotationRevoke, error)
+	FailCredentialRotationTarget(context.Context, wire.RotationPlan, wire.RotationTarget, wire.Code) error
 }
 
 // RotationDispatcherStore is one durable source of truth for transitions and
 // restart recovery. Keeping these methods on one object prevents a dispatcher
 // from reading plans from a different database than the one it mutates.
 type RotationDispatcherStore interface {
-	RotationPersistence
+	wire.RotationPersistence
 	RotationPlanSource
-	RotationRecoveryStore
+	wire.RotationRecoveryStore
 	RotationOperationPlanSource
 	RotationTargetRecoveryStore
-	RecordDisconnected(context.Context, SessionRef, Disconnect) error
+	RecordDisconnected(context.Context, wire.SessionRef, wire.Disconnect) error
 }
 
 // RotationLiveSession is the authenticated, negotiated session metadata needed
@@ -52,7 +54,7 @@ type RotationDispatcherStore interface {
 type RotationLiveSession struct {
 	AccountID              string
 	HostID                 string
-	Reference              SessionRef
+	Reference              wire.SessionRef
 	CredentialGeneration   uint64
 	IdentityKeyID          string
 	IdentityKeyThumbprint  string
@@ -61,11 +63,11 @@ type RotationLiveSession struct {
 }
 
 func (s RotationLiveSession) validate() error {
-	if ValidateIdentifier(s.AccountID) != nil || ValidateIdentifier(s.HostID) != nil || s.Reference.Validate() != nil || s.CredentialGeneration == 0 || ValidateIdentityKey(s.IdentityKeyID, s.IdentityKeyThumbprint) != nil || s.Send == nil {
-		return ErrInvalidInput
+	if wire.ValidateIdentifier(s.AccountID) != nil || wire.ValidateIdentifier(s.HostID) != nil || s.Reference.Validate() != nil || s.CredentialGeneration == 0 || wire.ValidateIdentityKey(s.IdentityKeyID, s.IdentityKeyThumbprint) != nil || s.Send == nil {
+		return wire.ErrInvalidInput
 	}
-	if !hasCapability(s.NegotiatedCapabilities, CapabilityCredentialRotation) {
-		return codeError(ErrCapabilityMissing, ReasonCapabilityMissing, false, nil)
+	if !wire.HasCapability(s.NegotiatedCapabilities, wire.CapabilityCredentialRotation) {
+		return wire.CodeError(wire.ErrCapabilityMissing, wire.ReasonCapabilityMissing, false, nil)
 	}
 	return nil
 }
@@ -75,8 +77,8 @@ func (s RotationLiveSession) validate() error {
 // required interfaces.
 type RotationDispatcherConfig struct {
 	Store              RotationDispatcherStore
-	VerifyOldProof     RotationOldProofVerifier
-	Clock              Clock
+	VerifyOldProof     wire.RotationOldProofVerifier
+	Clock              wire.Clock
 	ReconcileInterval  time.Duration
 	ChallengeTTL       time.Duration
 	Overlap            time.Duration
@@ -87,7 +89,7 @@ type RotationDispatcherConfig struct {
 }
 
 type rotationDelivery struct {
-	reference SessionRef
+	reference wire.SessionRef
 	payload   [sha256.Size]byte
 }
 
@@ -97,8 +99,8 @@ type rotationDelivery struct {
 // failure because every phase is persisted before its frame is emitted.
 type RotationDispatcher struct {
 	store              RotationDispatcherStore
-	verify             RotationOldProofVerifier
-	clock              Clock
+	verify             wire.RotationOldProofVerifier
+	clock              wire.Clock
 	reconcileInterval  time.Duration
 	challengeTTL       time.Duration
 	overlap            time.Duration
@@ -114,11 +116,11 @@ type RotationDispatcher struct {
 
 func NewRotationDispatcher(config RotationDispatcherConfig) (*RotationDispatcher, error) {
 	if config.Store == nil || config.VerifyOldProof == nil || config.ReportError == nil {
-		return nil, ErrInvalidInput
+		return nil, wire.ErrInvalidInput
 	}
 	clock := config.Clock
 	if clock == nil {
-		clock = realClock{}
+		clock = wire.RealClock{}
 	}
 	reconcileInterval := config.ReconcileInterval
 	if reconcileInterval == 0 {
@@ -144,8 +146,8 @@ func NewRotationDispatcher(config RotationDispatcherConfig) (*RotationDispatcher
 	if sendTimeout == 0 {
 		sendTimeout = defaultRotationSendTimeout
 	}
-	if reconcileInterval <= 0 || challengeTTL <= 0 || challengeTTL > 15*time.Minute || overlap <= challengeTTL || overlap > MaxLease || credentialLifetime <= overlap || credentialLifetime > MaxRotationCredentialLifetime || planLimit < 1 || planLimit > 64 || sendTimeout <= 0 || sendTimeout > time.Minute {
-		return nil, ErrInvalidInput
+	if reconcileInterval <= 0 || challengeTTL <= 0 || challengeTTL > 15*time.Minute || overlap <= challengeTTL || overlap > wire.MaxLease || credentialLifetime <= overlap || credentialLifetime > wire.MaxRotationCredentialLifetime || planLimit < 1 || planLimit > 64 || sendTimeout <= 0 || sendTimeout > time.Minute {
+		return nil, wire.ErrInvalidInput
 	}
 	return &RotationDispatcher{
 		store: config.Store, verify: config.VerifyOldProof, clock: clock,
@@ -158,7 +160,7 @@ func NewRotationDispatcher(config RotationDispatcherConfig) (*RotationDispatcher
 // equal or stale generation cannot steal delivery from the active carrier.
 func (d *RotationDispatcher) RegisterSession(ctx context.Context, session RotationLiveSession) error {
 	if d == nil || ctx == nil {
-		return ErrInvalidInput
+		return wire.ErrInvalidInput
 	}
 	if err := session.validate(); err != nil {
 		return err
@@ -168,12 +170,12 @@ func (d *RotationDispatcher) RegisterSession(ctx context.Context, session Rotati
 	current, ok := d.sessions[session.Reference.ConnectorID]
 	if ok {
 		if current.AccountID != session.AccountID || current.HostID != session.HostID || current.Reference.TunnelID != session.Reference.TunnelID {
-			return codeError(ErrIdentityMismatch, ReasonAuthentication, false, nil)
+			return wire.CodeError(wire.ErrIdentityMismatch, wire.ReasonAuthentication, false, nil)
 		}
 		if session.Reference.ProcessGeneration <= current.Reference.ProcessGeneration {
-			return codeError(ErrSessionConflict, ReasonStaleGeneration, false, nil)
+			return wire.CodeError(wire.ErrSessionConflict, wire.ReasonStaleGeneration, false, nil)
 		}
-		disconnect := Disconnect{AccountID: current.AccountID, TunnelID: current.Reference.TunnelID, ConnectorID: current.Reference.ConnectorID, SessionID: current.Reference.SessionID, ProcessGeneration: current.Reference.ProcessGeneration, Reason: ReasonSessionReplaced, Retryable: true}
+		disconnect := wire.Disconnect{AccountID: current.AccountID, TunnelID: current.Reference.TunnelID, ConnectorID: current.Reference.ConnectorID, SessionID: current.Reference.SessionID, ProcessGeneration: current.Reference.ProcessGeneration, Reason: wire.ReasonSessionReplaced, Retryable: true}
 		if err := d.store.RecordDisconnected(ctx, current.Reference, disconnect); err != nil {
 			return err
 		}
@@ -185,9 +187,9 @@ func (d *RotationDispatcher) RegisterSession(ctx context.Context, session Rotati
 
 // UnregisterSession is generation-safe: a late close from an old carrier does
 // not remove its replacement.
-func (d *RotationDispatcher) UnregisterSession(ctx context.Context, ref SessionRef, reason DisconnectReason) error {
-	if d == nil || ctx == nil || ref.Validate() != nil || !validDisconnectReason(reason) {
-		return ErrInvalidInput
+func (d *RotationDispatcher) UnregisterSession(ctx context.Context, ref wire.SessionRef, reason wire.DisconnectReason) error {
+	if d == nil || ctx == nil || ref.Validate() != nil || !wire.ValidDisconnectReason(reason) {
+		return wire.ErrInvalidInput
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -196,9 +198,9 @@ func (d *RotationDispatcher) UnregisterSession(ctx context.Context, ref SessionR
 		return nil
 	}
 	if current.Reference != ref {
-		return codeError(ErrStaleSession, ReasonSessionReplaced, false, nil)
+		return wire.CodeError(wire.ErrStaleSession, wire.ReasonSessionReplaced, false, nil)
 	}
-	disconnect := Disconnect{AccountID: current.AccountID, TunnelID: ref.TunnelID, ConnectorID: ref.ConnectorID, SessionID: ref.SessionID, ProcessGeneration: ref.ProcessGeneration, Reason: reason, Retryable: reason != ReasonAuthentication && reason != ReasonCredentialExpired}
+	disconnect := wire.Disconnect{AccountID: current.AccountID, TunnelID: ref.TunnelID, ConnectorID: ref.ConnectorID, SessionID: ref.SessionID, ProcessGeneration: ref.ProcessGeneration, Reason: reason, Retryable: reason != wire.ReasonAuthentication && reason != wire.ReasonCredentialExpired}
 	if err := d.store.RecordDisconnected(ctx, ref, disconnect); err != nil {
 		return err
 	}
@@ -209,7 +211,7 @@ func (d *RotationDispatcher) UnregisterSession(ctx context.Context, ref SessionR
 // DetachSession removes only the in-memory delivery route. The control
 // transport uses it after PersistentSession.Close has already recorded the
 // durable disconnect, avoiding a duplicate persistence transition.
-func (d *RotationDispatcher) DetachSession(ref SessionRef) {
+func (d *RotationDispatcher) DetachSession(ref wire.SessionRef) {
 	if d == nil || ref.Validate() != nil {
 		return
 	}
@@ -234,36 +236,36 @@ func (d *RotationDispatcher) session(connectorID string) (RotationLiveSession, b
 	return session, ok
 }
 
-func (d *RotationDispatcher) coordinator(ctx context.Context, plan RotationPlan) (*RotationCoordinator, RotationResume, error) {
-	coordinator, err := NewRotationCoordinator(plan, RotationConfig{Store: d.store, VerifyOldProof: d.verify, Clock: d.clock})
+func (d *RotationDispatcher) coordinator(ctx context.Context, plan wire.RotationPlan) (*wire.RotationCoordinator, wire.RotationResume, error) {
+	coordinator, err := wire.NewRotationCoordinator(plan, wire.RotationConfig{Store: d.store, VerifyOldProof: d.verify, Clock: d.clock})
 	if err != nil {
-		return nil, RotationResume{}, err
+		return nil, wire.RotationResume{}, err
 	}
 	if err := coordinator.Resume(ctx); err != nil {
-		return nil, RotationResume{}, err
+		return nil, wire.RotationResume{}, err
 	}
 	resume, err := d.store.LoadCredentialRotation(ctx, plan)
 	return coordinator, resume, err
 }
 
-func (d *RotationDispatcher) findCoordinator(ctx context.Context, operationID string) (*RotationCoordinator, RotationPlan, error) {
-	if ValidateIdentifier(operationID) != nil {
-		return nil, RotationPlan{}, ErrInvalidInput
+func (d *RotationDispatcher) findCoordinator(ctx context.Context, operationID string) (*wire.RotationCoordinator, wire.RotationPlan, error) {
+	if wire.ValidateIdentifier(operationID) != nil {
+		return nil, wire.RotationPlan{}, wire.ErrInvalidInput
 	}
 	plan, err := d.store.LoadCredentialRotationPlan(ctx, operationID)
 	if err != nil {
-		return nil, RotationPlan{}, err
+		return nil, wire.RotationPlan{}, err
 	}
 	coordinator, _, err := d.coordinator(ctx, plan)
 	return coordinator, plan, err
 }
 
-func (d *RotationDispatcher) send(ctx context.Context, session RotationLiveSession, messageType MessageType, payload any) error {
-	requestID, err := newOpaqueID("request")
+func (d *RotationDispatcher) send(ctx context.Context, session RotationLiveSession, messageType wire.MessageType, payload any) error {
+	requestID, err := wire.NewOpaqueID("request")
 	if err != nil {
 		return err
 	}
-	frame, err := NewFrame(messageType, requestID, payload)
+	frame, err := wire.NewFrame(messageType, requestID, payload)
 	if err != nil {
 		return err
 	}
@@ -276,7 +278,7 @@ func (d *RotationDispatcher) send(ctx context.Context, session RotationLiveSessi
 	current, ok := d.sessions[session.Reference.ConnectorID]
 	if !ok || current.Reference != session.Reference || current.AccountID != session.AccountID || current.HostID != session.HostID || current.CredentialGeneration != session.CredentialGeneration || current.IdentityKeyID != session.IdentityKeyID || current.IdentityKeyThumbprint != session.IdentityKeyThumbprint {
 		d.mu.RUnlock()
-		return codeError(ErrStaleSession, ReasonSessionReplaced, false, nil)
+		return wire.CodeError(wire.ErrStaleSession, wire.ReasonSessionReplaced, false, nil)
 	}
 	if delivered, ok := d.deliveries[key]; ok && delivered.reference == current.Reference && delivered.payload == digest {
 		d.mu.RUnlock()
@@ -297,20 +299,20 @@ func (d *RotationDispatcher) send(ctx context.Context, session RotationLiveSessi
 	return nil
 }
 
-func rotationDeliveryKey(messageType MessageType, payload any) (string, error) {
+func rotationDeliveryKey(messageType wire.MessageType, payload any) (string, error) {
 	var operationID, connectorID string
 	switch value := payload.(type) {
-	case CredentialRotationChallenge:
+	case wire.CredentialRotationChallenge:
 		operationID, connectorID = value.OperationID, value.ConnectorID
-	case CredentialRotationInstall:
+	case wire.CredentialRotationInstall:
 		operationID, connectorID = value.OperationID, value.ConnectorID
-	case CredentialRotationRevoke:
+	case wire.CredentialRotationRevoke:
 		operationID, connectorID = value.OperationID, value.ConnectorID
 	default:
-		return "", ErrInvalidInput
+		return "", wire.ErrInvalidInput
 	}
-	if ValidateIdentifier(operationID) != nil || ValidateIdentifier(connectorID) != nil {
-		return "", ErrInvalidInput
+	if wire.ValidateIdentifier(operationID) != nil || wire.ValidateIdentifier(connectorID) != nil {
+		return "", wire.ErrInvalidInput
 	}
 	return operationID + "\x00" + connectorID + "\x00" + string(messageType), nil
 }
@@ -320,7 +322,7 @@ func rotationDeliveryKey(messageType MessageType, payload any) (string, error) {
 // only its own target, never the aggregate membership.
 func (d *RotationDispatcher) ReconcileOnce(ctx context.Context) error {
 	if d == nil || ctx == nil {
-		return ErrInvalidInput
+		return wire.ErrInvalidInput
 	}
 	if err := ctx.Err(); err != nil {
 		return err
@@ -348,24 +350,24 @@ func (d *RotationDispatcher) ReconcileOnce(ctx context.Context) error {
 	return joined
 }
 
-func (d *RotationDispatcher) reconcileTarget(ctx context.Context, plan RotationPlan, coordinator *RotationCoordinator, targets []RotationResumeTarget, recovered RotationResumeTarget) error {
+func (d *RotationDispatcher) reconcileTarget(ctx context.Context, plan wire.RotationPlan, coordinator *wire.RotationCoordinator, targets []wire.RotationResumeTarget, recovered wire.RotationResumeTarget) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	now := d.clock.Now().UTC()
-	if (recovered.State == RotationTargetPending || recovered.State == RotationTargetChallenged || recovered.State == RotationTargetInstalled) && !recovered.OverlapUntil.IsZero() && !recovered.OverlapUntil.After(now) {
-		if err := d.store.FailCredentialRotationTarget(ctx, plan, recovered.Target, CodeCredentialExpired); err != nil {
+	if (recovered.State == wire.RotationTargetPending || recovered.State == wire.RotationTargetChallenged || recovered.State == wire.RotationTargetInstalled) && !recovered.OverlapUntil.IsZero() && !recovered.OverlapUntil.After(now) {
+		if err := d.store.FailCredentialRotationTarget(ctx, plan, recovered.Target, wire.CodeCredentialExpired); err != nil {
 			return err
 		}
-		return codeError(ErrCredentialExpired, ReasonCredentialExpired, false, nil)
+		return wire.CodeError(wire.ErrCredentialExpired, wire.ReasonCredentialExpired, false, nil)
 	}
 	session, online := d.session(recovered.Target.ConnectorID)
 	switch recovered.State {
-	case RotationTargetPending:
+	case wire.RotationTargetPending:
 		if !online || session.AccountID != plan.AccountID || session.HostID != recovered.Target.HostID || session.Reference.TunnelID != plan.TunnelID || session.CredentialGeneration != recovered.Target.OldCredentialGeneration {
 			return nil
 		}
-		nonce, err := newOpaqueID("rotation-nonce")
+		nonce, err := wire.NewOpaqueID("rotation-nonce")
 		if err != nil {
 			return err
 		}
@@ -377,8 +379,8 @@ func (d *RotationDispatcher) reconcileTarget(ctx context.Context, plan RotationP
 		if err != nil {
 			return err
 		}
-		return d.send(ctx, session, MessageCredentialRotationChallenge, challenge)
-	case RotationTargetChallenged:
+		return d.send(ctx, session, wire.MessageCredentialRotationChallenge, challenge)
+	case wire.RotationTargetChallenged:
 		challenge := recovered.Challenge
 		if !online {
 			return nil
@@ -387,7 +389,7 @@ func (d *RotationDispatcher) reconcileTarget(ctx context.Context, plan RotationP
 			if !liveSessionMatchesRotationTarget(session, plan, recovered.Target) {
 				return nil
 			}
-			nonce, err := newOpaqueID("rotation-nonce")
+			nonce, err := wire.NewOpaqueID("rotation-nonce")
 			if err != nil {
 				return err
 			}
@@ -403,8 +405,8 @@ func (d *RotationDispatcher) reconcileTarget(ctx context.Context, plan RotationP
 		} else if !liveSessionMatchesChallenge(session, challenge) {
 			return nil
 		}
-		return d.send(ctx, session, MessageCredentialRotationChallenge, challenge)
-	case RotationTargetInstalled:
+		return d.send(ctx, session, wire.MessageCredentialRotationChallenge, challenge)
+	case wire.RotationTargetInstalled:
 		if !online {
 			return nil
 		}
@@ -414,8 +416,8 @@ func (d *RotationDispatcher) reconcileTarget(ctx context.Context, plan RotationP
 			}
 			return nil
 		}
-		return d.send(ctx, session, MessageCredentialRotationInstall, recovered.Install)
-	case RotationTargetReady:
+		return d.send(ctx, session, wire.MessageCredentialRotationInstall, recovered.Install)
+	case wire.RotationTargetReady:
 		if !allRotationTargetsReady(targets) {
 			return nil
 		}
@@ -426,31 +428,31 @@ func (d *RotationDispatcher) reconcileTarget(ctx context.Context, plan RotationP
 		if !online || !liveSessionMatchesRevoke(session, revoke) {
 			return nil
 		}
-		return d.send(ctx, session, MessageCredentialRotationRevoke, revoke)
-	case RotationTargetRevoking:
+		return d.send(ctx, session, wire.MessageCredentialRotationRevoke, revoke)
+	case wire.RotationTargetRevoking:
 		if !recovered.Revoke.Deadline.After(now) {
-			_, err := coordinator.Fail(ctx, recovered.Target.ConnectorID, CodeCredentialRotationFailed)
+			_, err := coordinator.Fail(ctx, recovered.Target.ConnectorID, wire.CodeCredentialRotationFailed)
 			return err
 		}
 		if online && session.AccountID == plan.AccountID && session.HostID == recovered.Target.HostID && session.Reference.TunnelID == plan.TunnelID && session.Reference.ConnectorID == recovered.Target.ConnectorID && session.CredentialGeneration == recovered.Target.NewCredentialGeneration && session.Reference.ProcessGeneration > recovered.Revoke.ProcessGeneration {
-			nonce, err := newOpaqueID("rotation-revoke")
+			nonce, err := wire.NewOpaqueID("rotation-revoke")
 			if err != nil {
 				return err
 			}
-			rebound, err := d.store.RebindCredentialRotationRevoke(ctx, plan, recovered.Target, session.Reference, nonce, now, now.Add(DefaultAbortTimeout))
+			rebound, err := d.store.RebindCredentialRotationRevoke(ctx, plan, recovered.Target, session.Reference, nonce, now, now.Add(wire.DefaultAbortTimeout))
 			if err != nil {
 				return err
 			}
-			return d.send(ctx, session, MessageCredentialRotationRevoke, rebound)
+			return d.send(ctx, session, wire.MessageCredentialRotationRevoke, rebound)
 		}
 		if online && liveSessionMatchesRevoke(session, recovered.Revoke) {
-			return d.send(ctx, session, MessageCredentialRotationRevoke, recovered.Revoke)
+			return d.send(ctx, session, wire.MessageCredentialRotationRevoke, recovered.Revoke)
 		}
 	}
 	return nil
 }
 
-func (d *RotationDispatcher) rotationPolicy(now time.Time, recovered RotationResumeTarget) (time.Time, time.Time, time.Time, error) {
+func (d *RotationDispatcher) rotationPolicy(now time.Time, recovered wire.RotationResumeTarget) (time.Time, time.Time, time.Time, error) {
 	overlapUntil := recovered.OverlapUntil
 	credentialValidUntil := recovered.NewCredentialValidUntil
 	if overlapUntil.IsZero() && credentialValidUntil.IsZero() {
@@ -460,61 +462,61 @@ func (d *RotationDispatcher) rotationPolicy(now time.Time, recovered RotationRes
 		credentialValidUntil = now.Add(d.credentialLifetime)
 	}
 	if !overlapUntil.After(now) || !credentialValidUntil.After(overlapUntil) {
-		return time.Time{}, time.Time{}, time.Time{}, codeError(ErrCredentialExpired, ReasonCredentialExpired, false, nil)
+		return time.Time{}, time.Time{}, time.Time{}, wire.CodeError(wire.ErrCredentialExpired, wire.ReasonCredentialExpired, false, nil)
 	}
 	expiresAt := now.Add(d.challengeTTL)
 	if !overlapUntil.After(expiresAt) {
 		expiresAt = overlapUntil.Add(-time.Millisecond)
 	}
 	if !expiresAt.After(now) {
-		return time.Time{}, time.Time{}, time.Time{}, codeError(ErrCredentialExpired, ReasonCredentialExpired, false, nil)
+		return time.Time{}, time.Time{}, time.Time{}, wire.CodeError(wire.ErrCredentialExpired, wire.ReasonCredentialExpired, false, nil)
 	}
 	return expiresAt, overlapUntil, credentialValidUntil, nil
 }
 
-func allRotationTargetsReady(targets []RotationResumeTarget) bool {
+func allRotationTargetsReady(targets []wire.RotationResumeTarget) bool {
 	if len(targets) == 0 {
 		return false
 	}
 	for _, target := range targets {
-		if target.State != RotationTargetReady && target.State != RotationTargetRevoking && target.State != RotationTargetRevoked {
+		if target.State != wire.RotationTargetReady && target.State != wire.RotationTargetRevoking && target.State != wire.RotationTargetRevoked {
 			return false
 		}
 	}
 	return true
 }
 
-func liveSessionMatchesChallenge(session RotationLiveSession, challenge CredentialRotationChallenge) bool {
-	return session.AccountID == challenge.AccountID && session.HostID == challenge.HostID && session.Reference.TunnelID == challenge.TunnelID && session.Reference.ConnectorID == challenge.ConnectorID && session.Reference.SessionID == challenge.SessionID && session.Reference.ProcessGeneration == challenge.ProcessGeneration && session.CredentialGeneration == challenge.OldCredentialGeneration && session.IdentityKeyID == challenge.OldIdentityKeyID && session.IdentityKeyThumbprint == challenge.OldIdentityKeyThumbprint && hasCapability(session.NegotiatedCapabilities, CapabilityCredentialRotation)
+func liveSessionMatchesChallenge(session RotationLiveSession, challenge wire.CredentialRotationChallenge) bool {
+	return session.AccountID == challenge.AccountID && session.HostID == challenge.HostID && session.Reference.TunnelID == challenge.TunnelID && session.Reference.ConnectorID == challenge.ConnectorID && session.Reference.SessionID == challenge.SessionID && session.Reference.ProcessGeneration == challenge.ProcessGeneration && session.CredentialGeneration == challenge.OldCredentialGeneration && session.IdentityKeyID == challenge.OldIdentityKeyID && session.IdentityKeyThumbprint == challenge.OldIdentityKeyThumbprint && wire.HasCapability(session.NegotiatedCapabilities, wire.CapabilityCredentialRotation)
 }
 
-func liveSessionMatchesRotationTarget(session RotationLiveSession, plan RotationPlan, target RotationTarget) bool {
-	return session.AccountID == plan.AccountID && session.HostID == target.HostID && session.Reference.TunnelID == plan.TunnelID && session.Reference.ConnectorID == target.ConnectorID && session.CredentialGeneration == target.OldCredentialGeneration && hasCapability(session.NegotiatedCapabilities, CapabilityCredentialRotation)
+func liveSessionMatchesRotationTarget(session RotationLiveSession, plan wire.RotationPlan, target wire.RotationTarget) bool {
+	return session.AccountID == plan.AccountID && session.HostID == target.HostID && session.Reference.TunnelID == plan.TunnelID && session.Reference.ConnectorID == target.ConnectorID && session.CredentialGeneration == target.OldCredentialGeneration && wire.HasCapability(session.NegotiatedCapabilities, wire.CapabilityCredentialRotation)
 }
 
-func liveSessionMatchesRevoke(session RotationLiveSession, revoke CredentialRotationRevoke) bool {
-	return session.AccountID == revoke.AccountID && session.HostID == revoke.HostID && session.Reference.TunnelID == revoke.TunnelID && session.Reference.ConnectorID == revoke.ConnectorID && session.Reference.SessionID == revoke.SessionID && session.Reference.ProcessGeneration == revoke.ProcessGeneration && session.CredentialGeneration == revoke.NewCredentialGeneration && hasCapability(session.NegotiatedCapabilities, CapabilityCredentialRotation)
+func liveSessionMatchesRevoke(session RotationLiveSession, revoke wire.CredentialRotationRevoke) bool {
+	return session.AccountID == revoke.AccountID && session.HostID == revoke.HostID && session.Reference.TunnelID == revoke.TunnelID && session.Reference.ConnectorID == revoke.ConnectorID && session.Reference.SessionID == revoke.SessionID && session.Reference.ProcessGeneration == revoke.ProcessGeneration && session.CredentialGeneration == revoke.NewCredentialGeneration && wire.HasCapability(session.NegotiatedCapabilities, wire.CapabilityCredentialRotation)
 }
 
 // HandleFrame routes a connector response only after binding it to the current
 // registered session. Durable coordinator/store checks provide the second,
 // transactional identity and generation guard.
-func (d *RotationDispatcher) HandleFrame(ctx context.Context, ref SessionRef, frame Frame) error {
+func (d *RotationDispatcher) HandleFrame(ctx context.Context, ref wire.SessionRef, frame wire.Frame) error {
 	if d == nil || ctx == nil || ref.Validate() != nil {
-		return ErrInvalidInput
+		return wire.ErrInvalidInput
 	}
 	session, ok := d.session(ref.ConnectorID)
 	if !ok || session.Reference != ref {
-		return codeError(ErrStaleSession, ReasonSessionReplaced, false, nil)
+		return wire.CodeError(wire.ErrStaleSession, wire.ReasonSessionReplaced, false, nil)
 	}
 	switch frame.Type {
-	case MessageCredentialRotationProof:
-		var proof CredentialRotationProof
+	case wire.MessageCredentialRotationProof:
+		var proof wire.CredentialRotationProof
 		if err := frame.DecodePayload(&proof); err != nil {
 			return err
 		}
 		if !frameMatchesSession(proof.AccountID, proof.TunnelID, proof.ConnectorID, proof.HostID, proof.SessionID, proof.ProcessGeneration, session) || session.CredentialGeneration != proof.OldCredentialGeneration || session.IdentityKeyID != proof.OldIdentityKeyID || session.IdentityKeyThumbprint != proof.OldIdentityKeyThumbprint {
-			return codeError(ErrIdentityMismatch, ReasonAuthentication, false, nil)
+			return wire.CodeError(wire.ErrIdentityMismatch, wire.ReasonAuthentication, false, nil)
 		}
 		coordinator, _, err := d.findCoordinator(ctx, proof.OperationID)
 		if err != nil {
@@ -524,14 +526,14 @@ func (d *RotationDispatcher) HandleFrame(ctx context.Context, ref SessionRef, fr
 		if err != nil {
 			return err
 		}
-		return d.send(ctx, session, MessageCredentialRotationInstall, install)
-	case MessageCredentialRotationReady:
-		var ready CredentialRotationReady
+		return d.send(ctx, session, wire.MessageCredentialRotationInstall, install)
+	case wire.MessageCredentialRotationReady:
+		var ready wire.CredentialRotationReady
 		if err := frame.DecodePayload(&ready); err != nil {
 			return err
 		}
 		if !frameMatchesSession(ready.AccountID, ready.TunnelID, ready.ConnectorID, ready.HostID, ready.SessionID, ready.ProcessGeneration, session) || session.CredentialGeneration != ready.NewCredentialGeneration || session.IdentityKeyID != ready.NewIdentityKeyID || session.IdentityKeyThumbprint != ready.NewIdentityKeyThumbprint {
-			return codeError(ErrIdentityMismatch, ReasonAuthentication, false, nil)
+			return wire.CodeError(wire.ErrIdentityMismatch, wire.ReasonAuthentication, false, nil)
 		}
 		coordinator, plan, err := d.findCoordinator(ctx, ready.OperationID)
 		if err != nil {
@@ -541,13 +543,13 @@ func (d *RotationDispatcher) HandleFrame(ctx context.Context, ref SessionRef, fr
 			return err
 		}
 		return d.reconcilePlan(ctx, plan, coordinator)
-	case MessageCredentialRotationAck:
-		var ack CredentialRotationAck
+	case wire.MessageCredentialRotationAck:
+		var ack wire.CredentialRotationAck
 		if err := frame.DecodePayload(&ack); err != nil {
 			return err
 		}
 		if !frameMatchesSession(ack.AccountID, ack.TunnelID, ack.ConnectorID, ack.HostID, ack.SessionID, ack.ProcessGeneration, session) {
-			return codeError(ErrIdentityMismatch, ReasonAuthentication, false, nil)
+			return wire.CodeError(wire.ErrIdentityMismatch, wire.ReasonAuthentication, false, nil)
 		}
 		coordinator, _, err := d.findCoordinator(ctx, ack.OperationID)
 		if err != nil {
@@ -556,11 +558,11 @@ func (d *RotationDispatcher) HandleFrame(ctx context.Context, ref SessionRef, fr
 		_, err = coordinator.HandleAck(ctx, ack)
 		return err
 	default:
-		return codeError(ErrUnsupportedMessage, ReasonCredentialRotation, false, nil)
+		return wire.CodeError(wire.ErrUnsupportedMessage, wire.ReasonCredentialRotation, false, nil)
 	}
 }
 
-func (d *RotationDispatcher) reconcilePlan(ctx context.Context, plan RotationPlan, coordinator *RotationCoordinator) error {
+func (d *RotationDispatcher) reconcilePlan(ctx context.Context, plan wire.RotationPlan, coordinator *wire.RotationCoordinator) error {
 	resume, err := d.store.LoadCredentialRotation(ctx, plan)
 	if err != nil || !allRotationTargetsReady(resume.Targets) {
 		return err
@@ -570,7 +572,7 @@ func (d *RotationDispatcher) reconcilePlan(ctx context.Context, plan RotationPla
 		if err := ctx.Err(); err != nil {
 			return errors.Join(joined, err)
 		}
-		if target.State != RotationTargetReady {
+		if target.State != wire.RotationTargetReady {
 			continue
 		}
 		revoke, revokeErr := coordinator.Revoke(ctx, target.Target.ConnectorID)
@@ -582,19 +584,19 @@ func (d *RotationDispatcher) reconcilePlan(ctx context.Context, plan RotationPla
 		if !ok || !liveSessionMatchesRevoke(session, revoke) {
 			continue
 		}
-		joined = errors.Join(joined, d.send(ctx, session, MessageCredentialRotationRevoke, revoke))
+		joined = errors.Join(joined, d.send(ctx, session, wire.MessageCredentialRotationRevoke, revoke))
 	}
 	return joined
 }
 
 func frameMatchesSession(accountID, tunnelID, connectorID, hostID, sessionID string, processGeneration uint64, session RotationLiveSession) bool {
-	return accountID == session.AccountID && tunnelID == session.Reference.TunnelID && connectorID == session.Reference.ConnectorID && hostID == session.HostID && sessionID == session.Reference.SessionID && processGeneration == session.Reference.ProcessGeneration && hasCapability(session.NegotiatedCapabilities, CapabilityCredentialRotation)
+	return accountID == session.AccountID && tunnelID == session.Reference.TunnelID && connectorID == session.Reference.ConnectorID && hostID == session.HostID && sessionID == session.Reference.SessionID && processGeneration == session.Reference.ProcessGeneration && wire.HasCapability(session.NegotiatedCapabilities, wire.CapabilityCredentialRotation)
 }
 
 // Run reconciles immediately and then at a bounded interval until canceled.
 func (d *RotationDispatcher) Run(ctx context.Context) error {
 	if d == nil || ctx == nil {
-		return ErrInvalidInput
+		return wire.ErrInvalidInput
 	}
 	attempt := 0
 	for {

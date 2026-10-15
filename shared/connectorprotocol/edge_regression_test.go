@@ -5,10 +5,14 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 type consumerPrepared struct {
@@ -42,10 +46,6 @@ type testRuntime struct {
 	stageErr    error
 }
 
-// rotationConsumerRuntime exercises the tunnel-side credential boundary
-// without putting key custody or transport behavior in Consumer. The adapter
-// receives protocol metadata and returns a proof/side effect result; all
-// cryptographic material remains test-local.
 type rotationConsumerRuntime struct {
 	*testRuntime
 	proof      CredentialRotationProof
@@ -426,7 +426,7 @@ func TestConsumerReturnsTypedRotationRejectionForMissingCapabilityAndRuntimeFail
 	}
 	challenge = CredentialRotationChallenge{AccountID: auth.AccountID, TunnelID: auth.TunnelID, OperationID: plan.OperationID, ConnectorID: auth.ConnectorID, HostID: auth.HostID, SessionID: welcome.SessionID, ProcessGeneration: 1, TargetSetHash: plan.TargetSetHash, Target: plan.Targets[0], OldCredentialGeneration: auth.CredentialGeneration, NewCredentialGeneration: auth.CredentialGeneration + 1, OldIdentityKeyID: auth.IdentityKeyID, OldIdentityKeyThumbprint: auth.IdentityKeyThumbprint, ChallengeNonce: "nonce-consumer-runtime", IssuedAt: clock.Now(), ExpiresAt: clock.Now().Add(time.Minute), OverlapUntil: clock.Now().Add(10 * time.Minute), NewCredentialValidUntil: clock.Now().Add(24 * time.Hour)}
 	runtime.proof = rotationProofFor(t, challenge, oldPrivate, newPrivate, "keychain://paperboat/rotation/consumer-error", clock.Now())
-	runtime.installErr = codeError(ErrCredentialExpired, ReasonCredentialExpired, true, errors.New("replacement expired"))
+	runtime.installErr = CodeError(ErrCredentialExpired, ReasonCredentialExpired, true, errors.New("replacement expired"))
 	challengeFrame, err := NewFrame(MessageCredentialRotationChallenge, "req_rotation_runtime_challenge", challenge)
 	if err != nil {
 		t.Fatal(err)
@@ -461,4 +461,112 @@ func mustJSON(t *testing.T, value any) []byte {
 		t.Fatal(err)
 	}
 	return raw
+}
+
+type privateProtocolCause struct{ calls int }
+
+func (e *privateProtocolCause) Error() string { e.calls++; return "PRIVATE credential" }
+
+type cyclicProtocolCause struct{}
+
+func (e *cyclicProtocolCause) Error() string { return "PRIVATE" }
+
+func (e *cyclicProtocolCause) Unwrap() error { return e }
+
+func TestProtocolFailureExportsFiniteLabelsWithoutFormattingCause(t *testing.T) {
+	private := &privateProtocolCause{}
+	failure := &Error{Code: CodeSnapshotRejected, Reason: ReasonSnapshotRejected, Cause: private}
+	if failure.Error() != string(CodeSnapshotRejected) || private.calls != 0 || !errors.Is(failure, private) {
+		t.Fatal("failure formatted or lost original cause")
+	}
+	unknown := &Error{Code: "PRIVATE_code", Reason: "PRIVATE_reason", Cause: private}
+	if unknown.Error() != "connector operation failed" || CodeOf(unknown) != "" || ReasonOf(unknown) != "" || private.calls != 0 {
+		t.Fatal("unowned labels escaped")
+	}
+	if CodeOf(&cyclicProtocolCause{}) != "" || ReasonOf(&cyclicProtocolCause{}) != "" {
+		t.Fatal("cyclic cause classified")
+	}
+	var absent *Error
+	if CodeOf(absent) != "" || absent.Unwrap() != nil {
+		t.Fatal("typed nil classified")
+	}
+	wrapped := fmt.Errorf("wrapper: %w", failure)
+	if CodeOf(wrapped) != CodeSnapshotRejected || ReasonOf(wrapped) != ReasonSnapshotRejected {
+		t.Fatal("owned labels lost")
+	}
+}
+
+func TestDefaultSessionIDsUseCanonicalConvention(t *testing.T) {
+	server, err := NewServer(ServerConfig{Capabilities: requiredCapabilityList(), Authenticator: AuthenticatorFuncs{}, Snapshots: SnapshotSourceFunc(func(context.Context, string) (Snapshot, error) { return Snapshot{}, nil })})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for range 2 {
+		id, err := server.config.SessionIDs()
+		parsed, parseErr := uuid.Parse(strings.TrimPrefix(id, "session_"))
+		if err != nil || parseErr != nil || parsed.Version() != 4 || parsed.Variant() != uuid.RFC4122 || "session_"+parsed.String() != id {
+			t.Fatalf("session identity = %q, %v", id, err)
+		}
+		if seen[id] {
+			t.Fatal("session identity reused")
+		}
+		seen[id] = true
+	}
+}
+
+type cancelingProtocolApplier struct{ cancel context.CancelFunc }
+
+func (a cancelingProtocolApplier) PrepareSnapshot(context.Context, Snapshot) (PreparedConfig, error) {
+	a.cancel()
+	return nil, syscall.EIO
+}
+
+func (a cancelingProtocolApplier) PrepareDelta(context.Context, Delta) (PreparedConfig, error) {
+	a.cancel()
+	return nil, syscall.EIO
+}
+
+func TestApplyPreservesOperationalFailureAlongsideCancellation(t *testing.T) {
+	for _, delta := range []bool{false, true} {
+		t.Run(map[bool]string{false: "snapshot", true: "delta"}[delta], func(t *testing.T) {
+			_, client, _, applier, first := testSessionPair(t)
+			snapshot, err := NewSnapshot(first.TunnelID, 2, testConfigPayload(2, "next.preview.example.test"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			snapshot = BindSnapshot(snapshot, "acct_1", "connector_1", "sess_1", 1)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			client.config.Applier = cancelingProtocolApplier{cancel: cancel}
+			if delta {
+				change, buildErr := NewDelta(first.TunnelID, first, 2, snapshot.Payload)
+				if buildErr != nil {
+					t.Fatal(buildErr)
+				}
+				change.AccountID, change.ConnectorID, change.SessionID, change.ProcessGeneration = "acct_1", "connector_1", "sess_1", 1
+				_, err = client.ApplyDelta(ctx, change)
+			} else {
+				_, err = client.ApplySnapshot(ctx, snapshot)
+			}
+			if !errors.Is(err, context.Canceled) || !errors.Is(err, syscall.EIO) || err.Error() != string(CodeCanceled) {
+				t.Fatalf("lost mixed cause: %v", err)
+			}
+			active, ok := client.Active()
+			if !ok || active.Generation != 1 {
+				t.Fatal("failed candidate changed active configuration")
+			}
+			client.config.Applier = applier
+			if _, err := client.ApplySnapshot(context.Background(), snapshot); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := client.MarkReady(true, true, true); err != nil {
+				t.Fatal(err)
+			}
+			active, ok = client.Active()
+			if !ok || active.Generation != 2 {
+				t.Fatal("recovery did not promote candidate")
+			}
+		})
+	}
 }

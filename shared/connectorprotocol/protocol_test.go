@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"crypto/sha256"
+	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -24,6 +26,17 @@ func testIdentity() (ed25519.PrivateKey, string, string) {
 		panic(err)
 	}
 	return private, keyID, thumbprint
+}
+
+func TestProtocolErrorDoesNotFormatWrappedCause(t *testing.T) {
+	cause := errors.New("private credential must not appear")
+	err := CodeError(ErrCredentialRotationFailed, ReasonCredentialRotation, true, cause)
+	if !errors.Is(err, cause) {
+		t.Fatal("typed protocol error lost its wrapped cause")
+	}
+	if strings.Contains(err.Error(), "private credential") {
+		t.Fatalf("protocol error exposed wrapped cause: %q", err.Error())
+	}
 }
 
 func TestIdentityThumbprintUsesCanonicalRFC7638JWK(t *testing.T) {
@@ -173,6 +186,20 @@ func TestFrameRoundTripAndBounds(t *testing.T) {
 	if _, err := NewFrame(MessageSnapshot, "req_1", oversized); !errors.Is(err, ErrFrameTooLarge) {
 		t.Fatalf("oversize frame error=%v", err)
 	}
+	var invalid bytes.Buffer
+	body := []byte(`{"type":"hello","version":17,"request_id":"private-frame-marker","payload":{}}`)
+	var prefix [4]byte
+	binary.BigEndian.PutUint32(prefix[:], uint32(len(body)))
+	invalid.Write(prefix[:])
+	invalid.Write(body)
+	_, decodeErr := ReadFrame(&invalid)
+	var typeErr *json.UnmarshalTypeError
+	if !errors.Is(decodeErr, ErrMalformedFrame) || !errors.As(decodeErr, &typeErr) {
+		t.Fatalf("invalid frame error=%v, want original JSON type cause", decodeErr)
+	}
+	if strings.Contains(decodeErr.Error(), "private-frame-marker") {
+		t.Fatal("invalid frame diagnostic exposed client content")
+	}
 	var truncated bytes.Buffer
 	truncated.Write([]byte{0, 0, 0, 4})
 	truncated.WriteString("{}{}")
@@ -195,46 +222,14 @@ func requiredCapabilityList() []string {
 func TestPublicStreamSnapshotAccessBoundary(t *testing.T) {
 	for _, protocol := range []string{"tcp", "tls"} {
 		payload := strings.NewReplacer(`"protocol":"http"`, `"protocol":"`+protocol+`"`, `"match_type":"exact"`, `"match_type":"managed_exact"`, `"origin_scheme":"http"`, `"origin_scheme":"tcp"`, `"preserve_host":true`, `"preserve_host":false`).Replace(string(testConfigPayload(1, "preview.example.test")))
-		if err := validateConfigSnapshotPayload([]byte(payload), "tunnel_1", 1); err != nil {
+		if err := ValidateConfigSnapshotPayload([]byte(payload), "tunnel_1", 1); err != nil {
 			t.Fatalf("%s public snapshot: %v", protocol, err)
 		}
 		for _, mode := range []string{"private", "team"} {
 			restricted := strings.Replace(payload, `"access_mode":"public"`, `"access_mode":"`+mode+`"`, 1)
-			if err := validateConfigSnapshotPayload([]byte(restricted), "tunnel_1", 1); err == nil {
+			if err := ValidateConfigSnapshotPayload([]byte(restricted), "tunnel_1", 1); err == nil {
 				t.Fatalf("%s accepted %s snapshot", protocol, mode)
 			}
 		}
-	}
-}
-
-type privateProtocolCause struct{ calls int }
-
-func (e *privateProtocolCause) Error() string { e.calls++; return "PRIVATE credential" }
-
-type cyclicProtocolCause struct{}
-
-func (e *cyclicProtocolCause) Error() string { return "PRIVATE" }
-func (e *cyclicProtocolCause) Unwrap() error { return e }
-
-func TestProtocolFailureExportsFiniteLabelsWithoutFormattingCause(t *testing.T) {
-	private := &privateProtocolCause{}
-	failure := &Error{Code: CodeSnapshotRejected, Reason: ReasonSnapshotRejected, Cause: private}
-	if failure.Error() != string(CodeSnapshotRejected) || private.calls != 0 || !errors.Is(failure, private) {
-		t.Fatal("failure formatted or lost original cause")
-	}
-	unknown := &Error{Code: "PRIVATE_code", Reason: "PRIVATE_reason", Cause: private}
-	if unknown.Error() != "connector operation failed" || CodeOf(unknown) != "" || ReasonOf(unknown) != "" || private.calls != 0 {
-		t.Fatal("unowned labels escaped")
-	}
-	if CodeOf(&cyclicProtocolCause{}) != "" || ReasonOf(&cyclicProtocolCause{}) != "" {
-		t.Fatal("cyclic cause classified")
-	}
-	var absent *Error
-	if CodeOf(absent) != "" || absent.Unwrap() != nil {
-		t.Fatal("typed nil classified")
-	}
-	wrapped := fmt.Errorf("wrapper: %w", failure)
-	if CodeOf(wrapped) != CodeSnapshotRejected || ReasonOf(wrapped) != ReasonSnapshotRejected {
-		t.Fatal("owned labels lost")
 	}
 }

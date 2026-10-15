@@ -7,11 +7,13 @@ import (
 	"testing"
 	"time"
 
+	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
+
 	"github.com/pinksaucepasta/paperboat-server/internal/accountingauthority"
 )
 
-func projectionFixture(now time.Time) IngressDecision {
-	return IngressDecision{Binding: IngressBinding{AccountID: "account_1", EnvironmentID: "environment_1", TunnelID: "tunnel_1", ResourceGeneration: 3, RouteID: "route_1", RouteGeneration: 4, HostID: "machine_1", InstallationGeneration: 5, Protocol: "http", Hostname: "app.example.com", PathPrefix: "/", OriginScheme: "http", OriginAddress: "localhost:3000", TLSVerification: "not_applicable"}, PolicyGeneration: 3, EdgeNodeID: "edge_1", EdgeProcessEpoch: "epoch_12345678", ConnectorID: "connector_1", SessionID: "session_1", ProcessGeneration: 6, ConfigGeneration: 7, AssignmentGeneration: 8, ExpiresAt: now.Add(10 * time.Second)}
+func projectionFixture(now time.Time) wire.IngressDecision {
+	return wire.IngressDecision{Binding: wire.IngressBinding{AccountID: "account_1", EnvironmentID: "environment_1", TunnelID: "tunnel_1", ResourceGeneration: 3, RouteID: "route_1", RouteGeneration: 4, HostID: "machine_1", InstallationGeneration: 5, Protocol: "http", Hostname: "app.example.com", PathPrefix: "/", OriginScheme: "http", OriginAddress: "localhost:3000", TLSVerification: "not_applicable"}, PolicyGeneration: 3, EdgeNodeID: "edge_1", EdgeProcessEpoch: "epoch_12345678", ConnectorID: "connector_1", SessionID: "session_1", ProcessGeneration: 6, ConfigGeneration: 7, AssignmentGeneration: 8, ExpiresAt: now.Add(10 * time.Second)}
 }
 
 func TestIngressProjectionPreservesExactAuthority(t *testing.T) {
@@ -21,7 +23,7 @@ func TestIngressProjectionPreservesExactAuthority(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := d.Binding
-	if b.OriginAddress != "127.0.0.1:3000" || b.TargetID != b.RouteID || b.TargetGeneration != 4 || b.PublicationID != b.RouteID || b.PublicationGeneration != 4 || b.Lifecycle != TunnelDurable || d.PolicyGeneration != 3 || b.InstallationGeneration != 5 || d.AssignmentGeneration != 8 {
+	if b.OriginAddress != "127.0.0.1:3000" || b.TargetID != b.RouteID || b.TargetGeneration != 4 || b.PublicationID != b.RouteID || b.PublicationGeneration != 4 || b.Lifecycle != wire.TunnelDurable || d.PolicyGeneration != 3 || b.InstallationGeneration != 5 || d.AssignmentGeneration != 8 {
 		t.Fatalf("authority mapping incorrect: %+v", d)
 	}
 	next := projectionFixture(now)
@@ -37,14 +39,14 @@ func TestIngressProjectionRejectsInvalidTargetAndExpiry(t *testing.T) {
 	now := time.Now().UTC()
 	for _, tc := range []struct {
 		name   string
-		mutate func(*IngressDecision)
+		mutate func(*wire.IngressDecision)
 	}{
-		{"remote target", func(d *IngressDecision) { d.Binding.OriginAddress = "192.0.2.1:3000" }},
-		{"dns target", func(d *IngressDecision) { d.Binding.OriginAddress = "origin.example.com:3000" }},
-		{"expired", func(d *IngressDecision) { d.ExpiresAt = now }},
-		{"excessive authority", func(d *IngressDecision) { d.ExpiresAt = now.Add(time.Minute) }},
-		{"missing generation", func(d *IngressDecision) { d.Binding.RouteGeneration = 0 }},
-		{"insecure TLS", func(d *IngressDecision) {
+		{"remote target", func(d *wire.IngressDecision) { d.Binding.OriginAddress = "192.0.2.1:3000" }},
+		{"dns target", func(d *wire.IngressDecision) { d.Binding.OriginAddress = "origin.example.com:3000" }},
+		{"expired", func(d *wire.IngressDecision) { d.ExpiresAt = now }},
+		{"excessive authority", func(d *wire.IngressDecision) { d.ExpiresAt = now.Add(time.Minute) }},
+		{"missing generation", func(d *wire.IngressDecision) { d.Binding.RouteGeneration = 0 }},
+		{"insecure TLS", func(d *wire.IngressDecision) {
 			d.Binding.OriginScheme = "https"
 			d.Binding.TLSVerification = "insecure_development"
 		}},

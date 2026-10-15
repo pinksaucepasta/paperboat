@@ -8,34 +8,36 @@ import (
 	"net"
 	"testing"
 	"time"
+
+	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 func TestControlTransportPersistsReadyHeartbeatAndGenerationSafeDisconnect(t *testing.T) {
 	now := time.Date(2026, 8, 31, 9, 0, 0, 0, time.UTC)
 	auth, private := testAuth(t, now, 1)
-	snapshot, err := NewSnapshot(auth.TunnelID, 1, testConfigPayload(1, "app.example.test"))
+	snapshot, err := wire.NewSnapshot(auth.TunnelID, 1, testConfigPayload(1, "app.example.test"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := &persistenceStoreStub{authResult: AuthResult{
+	store := &persistenceStoreStub{authResult: wire.AuthResult{
 		AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID,
 		HostID: auth.HostID, IdentityKeyID: auth.IdentityKeyID, IdentityKeyThumbprint: auth.IdentityKeyThumbprint,
 		ProcessGeneration: 1, CredentialGeneration: auth.CredentialGeneration, CredentialExpiresAt: now.Add(time.Hour), LeaseExpiresAt: now.Add(time.Hour),
 	}, snapshot: snapshot}
 	server, err := NewPersistentServer(store, IdentityProofVerifierFuncs{
-		AuthFunc: func(_ context.Context, _ AuthRequest, payload, signature []byte) error {
+		AuthFunc: func(_ context.Context, _ wire.AuthRequest, payload, signature []byte) error {
 			if !ed25519.Verify(private.Public().(ed25519.PublicKey), payload, signature) {
-				return ErrAuthenticationFailed
+				return wire.ErrAuthenticationFailed
 			}
 			return nil
 		},
-		RenewalFunc: func(context.Context, RenewalRequest, []byte, []byte) error { return nil },
-	}, ServerConfig{Capabilities: ProductionCapabilities(), Clock: &testClock{now: now}, LeaseDuration: time.Minute, HeartbeatInterval: 10 * time.Second, SessionIDs: func() (string, error) { return "session_transport_01", nil }})
+		RenewalFunc: func(context.Context, wire.RenewalRequest, []byte, []byte) error { return nil },
+	}, wire.ServerConfig{Capabilities: wire.ProductionCapabilities(), Clock: &testClock{now: now}, LeaseDuration: time.Minute, HeartbeatInterval: 10 * time.Second, SessionIDs: func() (string, error) { return "session_transport_01", nil }})
 	if err != nil {
 		t.Fatal(err)
 	}
 	sessions := NewActiveControlSessions()
-	rotationStore := &dispatcherStore{MemoryRotationPersistence: &MemoryRotationPersistence{}}
+	rotationStore := &dispatcherStore{MemoryRotationPersistence: &wire.MemoryRotationPersistence{}}
 	dispatcher, err := NewRotationDispatcher(RotationDispatcherConfig{Store: rotationStore, VerifyOldProof: rotationVerifier(nil), Clock: &testClock{now: now}, ReportError: func(error) {}})
 	if err != nil {
 		t.Fatal(err)
@@ -52,13 +54,13 @@ func TestControlTransportPersistsReadyHeartbeatAndGenerationSafeDisconnect(t *te
 	done := make(chan error, 1)
 	go func() { done <- transport.Serve(context.Background(), serverSide, auth.TunnelID, auth.ConnectorID) }()
 
-	hello := Hello{Protocol: ProtocolName, MinVersion: ProtocolVersion, MaxVersion: ProtocolVersion, AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, HostID: auth.HostID, ProcessGeneration: 1, Capabilities: ProductionCapabilities(), Auth: auth}
-	helloFrame, err := NewFrame(MessageHello, "hello_transport_01", hello)
-	if err != nil || WriteFrame(clientSide, helloFrame) != nil {
+	hello := wire.Hello{Protocol: wire.ProtocolName, MinVersion: wire.ProtocolVersion, MaxVersion: wire.ProtocolVersion, AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, HostID: auth.HostID, ProcessGeneration: 1, Capabilities: wire.ProductionCapabilities(), Auth: auth}
+	helloFrame, err := wire.NewFrame(wire.MessageHello, "hello_transport_01", hello)
+	if err != nil || wire.WriteFrame(clientSide, helloFrame) != nil {
 		t.Fatalf("write hello: %v", err)
 	}
-	welcomeFrame, err := ReadFrame(clientSide)
-	if err != nil || welcomeFrame.Type != MessageWelcome {
+	welcomeFrame, err := wire.ReadFrame(clientSide)
+	if err != nil || welcomeFrame.Type != wire.MessageWelcome {
 		select {
 		case serveErr := <-done:
 			t.Fatalf("welcome frame=%+v err=%v serve_err=%v", welcomeFrame, err, serveErr)
@@ -66,15 +68,15 @@ func TestControlTransportPersistsReadyHeartbeatAndGenerationSafeDisconnect(t *te
 			t.Fatalf("welcome frame=%+v err=%v", welcomeFrame, err)
 		}
 	}
-	var welcome Welcome
+	var welcome wire.Welcome
 	if err = welcomeFrame.DecodePayload(&welcome); err != nil {
 		t.Fatal(err)
 	}
-	snapshotFrame, err := ReadFrame(clientSide)
-	if err != nil || snapshotFrame.Type != MessageSnapshot {
+	snapshotFrame, err := wire.ReadFrame(clientSide)
+	if err != nil || snapshotFrame.Type != wire.MessageSnapshot {
 		t.Fatalf("snapshot frame=%+v err=%v", snapshotFrame, err)
 	}
-	var bound Snapshot
+	var bound wire.Snapshot
 	if err = snapshotFrame.DecodePayload(&bound); err != nil {
 		t.Fatal(err)
 	}
@@ -99,15 +101,15 @@ func TestControlTransportPersistsReadyHeartbeatAndGenerationSafeDisconnect(t *te
 	if !drainRegistered || drainLive.Session.Reference() != live.Reference {
 		t.Fatalf("drain live session = %+v registered=%t", drainLive.Projection, drainRegistered)
 	}
-	drain := Drain{AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, SessionID: welcome.SessionID, ProcessGeneration: 1, DrainID: "drain_transport_01", Generation: bound.Generation, ContentHash: bound.ContentHash, Deadline: now.Add(20 * time.Second), StopNewStreams: true, ForceAfterDeadline: true}
-	drainFrame, err := NewFrame(MessageDrain, "drain_transport_01", drain)
+	drain := wire.Drain{AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, SessionID: welcome.SessionID, ProcessGeneration: 1, DrainID: "drain_transport_01", Generation: bound.Generation, ContentHash: bound.ContentHash, Deadline: now.Add(20 * time.Second), StopNewStreams: true, ForceAfterDeadline: true}
+	drainFrame, err := wire.NewFrame(wire.MessageDrain, "drain_transport_01", drain)
 	if err != nil {
 		t.Fatal(err)
 	}
 	sendDone := make(chan error, 1)
 	go func() { sendDone <- live.Send(context.Background(), drainFrame) }()
-	receivedDrain, err := ReadFrame(clientSide)
-	if err != nil || receivedDrain.Type != MessageDrain {
+	receivedDrain, err := wire.ReadFrame(clientSide)
+	if err != nil || receivedDrain.Type != wire.MessageDrain {
 		t.Fatalf("outbound drain=%+v err=%v", receivedDrain, err)
 	}
 	if err = <-sendDone; err != nil {
@@ -117,18 +119,18 @@ func TestControlTransportPersistsReadyHeartbeatAndGenerationSafeDisconnect(t *te
 	if !ok || active.HostID != auth.HostID || active.ConfigGeneration != 1 || active.ConfigContentHash != bound.ContentHash {
 		t.Fatalf("active session = %+v ok=%t", active, ok)
 	}
-	ack := Ack{AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, SessionID: welcome.SessionID, ProcessGeneration: 1, Kind: AckSnapshot, Status: AckApplied, Generation: bound.Generation, ContentHash: bound.ContentHash}
-	frame, _ := NewFrame(MessageAck, snapshotFrame.RequestID, ack)
-	if err = WriteFrame(clientSide, frame); err != nil {
+	ack := wire.Ack{AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, SessionID: welcome.SessionID, ProcessGeneration: 1, Kind: wire.AckSnapshot, Status: wire.AckApplied, Generation: bound.Generation, ContentHash: bound.ContentHash}
+	frame, _ := wire.NewFrame(wire.MessageAck, snapshotFrame.RequestID, ack)
+	if err = wire.WriteFrame(clientSide, frame); err != nil {
 		t.Fatal(err)
 	}
-	ready := Readiness{AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, SessionID: welcome.SessionID, ProcessGeneration: 1, Generation: bound.Generation, ContentHash: bound.ContentHash, EdgeReady: true, RouteReady: true, OriginReady: true}
-	frame, _ = NewFrame(MessageReady, "ready_transport_01", ready)
-	if err = WriteFrame(clientSide, frame); err != nil {
+	ready := wire.Readiness{AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, SessionID: welcome.SessionID, ProcessGeneration: 1, Generation: bound.Generation, ContentHash: bound.ContentHash, EdgeReady: true, RouteReady: true, OriginReady: true}
+	frame, _ = wire.NewFrame(wire.MessageReady, "ready_transport_01", ready)
+	if err = wire.WriteFrame(clientSide, frame); err != nil {
 		t.Fatal(err)
 	}
-	readyAck, err := ReadFrame(clientSide)
-	if err != nil || readyAck.Type != MessageAck {
+	readyAck, err := wire.ReadFrame(clientSide)
+	if err != nil || readyAck.Type != wire.MessageAck {
 		t.Fatalf("ready ack=%+v err=%v", readyAck, err)
 	}
 	serving := bound
@@ -137,29 +139,29 @@ func TestControlTransportPersistsReadyHeartbeatAndGenerationSafeDisconnect(t *te
 		if generation == 2 {
 			payload = bytes.Replace(payload, []byte(`"desired_state":"active"`), []byte(`"desired_state":"paused"`), 1)
 		}
-		desired, err := NewSnapshot(auth.TunnelID, generation, payload)
+		desired, err := wire.NewSnapshot(auth.TunnelID, generation, payload)
 		if err != nil {
 			t.Fatal(err)
 		}
 		store.snapshotMu.Lock()
 		store.snapshot = desired
 		store.snapshotMu.Unlock()
-		heartbeat := Heartbeat{AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, SessionID: welcome.SessionID, ProcessGeneration: 1, LastAppliedGeneration: serving.Generation, LastAppliedHash: serving.ContentHash, SentAt: now.Add(time.Duration(generation) * time.Second)}
-		frame, _ = NewFrame(MessageHeartbeat, "heartbeat_transport_01", heartbeat)
-		if err = WriteFrame(clientSide, frame); err != nil {
+		heartbeat := wire.Heartbeat{AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, SessionID: welcome.SessionID, ProcessGeneration: 1, LastAppliedGeneration: serving.Generation, LastAppliedHash: serving.ContentHash, SentAt: now.Add(time.Duration(generation) * time.Second)}
+		frame, _ = wire.NewFrame(wire.MessageHeartbeat, "heartbeat_transport_01", heartbeat)
+		if err = wire.WriteFrame(clientSide, frame); err != nil {
 			t.Fatal(err)
 		}
-		heartbeatAck, err := ReadFrame(clientSide)
-		if err != nil || heartbeatAck.Type != MessageHeartbeatAck {
+		heartbeatAck, err := wire.ReadFrame(clientSide)
+		if err != nil || heartbeatAck.Type != wire.MessageHeartbeatAck {
 			t.Fatalf("heartbeat ack=%+v err=%v", heartbeatAck, err)
 		}
 		_ = clientSide.SetReadDeadline(time.Now().Add(time.Second))
-		update, err := ReadFrame(clientSide)
-		if err != nil || update.Type != MessageSnapshot {
+		update, err := wire.ReadFrame(clientSide)
+		if err != nil || update.Type != wire.MessageSnapshot {
 			t.Fatalf("live desired update=%+v err=%v", update, err)
 		}
 		_ = clientSide.SetReadDeadline(time.Time{})
-		var next Snapshot
+		var next wire.Snapshot
 		if err = update.DecodePayload(&next); err != nil || next.Generation != generation || next.SessionID != welcome.SessionID {
 			t.Fatalf("new snapshot=%+v error=%v", next, err)
 		}
@@ -168,8 +170,8 @@ func TestControlTransportPersistsReadyHeartbeatAndGenerationSafeDisconnect(t *te
 			t.Fatal("unapplied desired config advanced bootstrap authority")
 		}
 		ack.Generation, ack.ContentHash = next.Generation, next.ContentHash
-		frame, _ = NewFrame(MessageAck, update.RequestID, ack)
-		if err = WriteFrame(clientSide, frame); err != nil {
+		frame, _ = wire.NewFrame(wire.MessageAck, update.RequestID, ack)
+		if err = wire.WriteFrame(clientSide, frame); err != nil {
 			t.Fatal(err)
 		}
 		deadline := time.Now().Add(time.Second)
@@ -191,12 +193,12 @@ func TestControlTransportPersistsReadyHeartbeatAndGenerationSafeDisconnect(t *te
 			continue
 		} // Applied but failed readiness; next desired snapshot must recover.
 		ready.Generation, ready.ContentHash = next.Generation, next.ContentHash
-		frame, _ = NewFrame(MessageReady, "ready_transport_01", ready)
-		if err = WriteFrame(clientSide, frame); err != nil {
+		frame, _ = wire.NewFrame(wire.MessageReady, "ready_transport_01", ready)
+		if err = wire.WriteFrame(clientSide, frame); err != nil {
 			t.Fatal(err)
 		}
-		readyAck, err = ReadFrame(clientSide)
-		if err != nil || readyAck.Type != MessageAck {
+		readyAck, err = wire.ReadFrame(clientSide)
+		if err != nil || readyAck.Type != wire.MessageAck {
 			t.Fatalf("new ready ack=%+v err=%v", readyAck, err)
 		}
 		active, ok = sessions.Lookup(auth.TunnelID, auth.ConnectorID, welcome.SessionID, 1)
@@ -206,9 +208,9 @@ func TestControlTransportPersistsReadyHeartbeatAndGenerationSafeDisconnect(t *te
 		bound = next
 		serving = next
 	}
-	disconnect := Disconnect{AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, SessionID: welcome.SessionID, ProcessGeneration: 1, Reason: ReasonProtocolClosed}
-	frame, _ = NewFrame(MessageDisconnect, "disconnect_transport_01", disconnect)
-	if err = WriteFrame(clientSide, frame); err != nil {
+	disconnect := wire.Disconnect{AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, SessionID: welcome.SessionID, ProcessGeneration: 1, Reason: wire.ReasonProtocolClosed}
+	frame, _ = wire.NewFrame(wire.MessageDisconnect, "disconnect_transport_01", disconnect)
+	if err = wire.WriteFrame(clientSide, frame); err != nil {
 		t.Fatal(err)
 	}
 	if err = <-done; err != nil {
@@ -228,11 +230,11 @@ func TestControlTransportPersistsReadyHeartbeatAndGenerationSafeDisconnect(t *te
 func TestControlTransportRejectsPathIdentityBeforeSessionCreation(t *testing.T) {
 	now := time.Date(2026, 8, 31, 9, 0, 0, 0, time.UTC)
 	auth, _ := testAuth(t, now, 1)
-	snapshot, _ := NewSnapshot(auth.TunnelID, 1, testConfigPayload(1, "app.example.test"))
+	snapshot, _ := wire.NewSnapshot(auth.TunnelID, 1, testConfigPayload(1, "app.example.test"))
 	store := &persistenceStoreStub{snapshot: snapshot}
 	server, err := NewPersistentServer(store, IdentityProofVerifierFuncs{
-		AuthFunc: func(context.Context, AuthRequest, []byte, []byte) error { return nil }, RenewalFunc: func(context.Context, RenewalRequest, []byte, []byte) error { return nil },
-	}, ServerConfig{Capabilities: requiredCapabilityList(), Clock: &testClock{now: now}})
+		AuthFunc: func(context.Context, wire.AuthRequest, []byte, []byte) error { return nil }, RenewalFunc: func(context.Context, wire.RenewalRequest, []byte, []byte) error { return nil },
+	}, wire.ServerConfig{Capabilities: requiredCapabilityList(), Clock: &testClock{now: now}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,12 +242,12 @@ func TestControlTransportRejectsPathIdentityBeforeSessionCreation(t *testing.T) 
 	serverSide, clientSide := net.Pipe()
 	done := make(chan error, 1)
 	go func() { done <- transport.Serve(context.Background(), serverSide, "wrong_tunnel", auth.ConnectorID) }()
-	hello := Hello{Protocol: ProtocolName, MinVersion: ProtocolVersion, MaxVersion: ProtocolVersion, AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, HostID: auth.HostID, ProcessGeneration: 1, Capabilities: requiredCapabilityList(), Auth: auth}
-	frame, _ := NewFrame(MessageHello, "hello_wrong_path_01", hello)
-	if err = WriteFrame(clientSide, frame); err != nil {
+	hello := wire.Hello{Protocol: wire.ProtocolName, MinVersion: wire.ProtocolVersion, MaxVersion: wire.ProtocolVersion, AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, HostID: auth.HostID, ProcessGeneration: 1, Capabilities: requiredCapabilityList(), Auth: auth}
+	frame, _ := wire.NewFrame(wire.MessageHello, "hello_wrong_path_01", hello)
+	if err = wire.WriteFrame(clientSide, frame); err != nil {
 		t.Fatal(err)
 	}
-	if err = <-done; !errors.Is(err, ErrIdentityMismatch) || len(store.created) != 0 {
+	if err = <-done; !errors.Is(err, wire.ErrIdentityMismatch) || len(store.created) != 0 {
 		t.Fatalf("err=%v created=%d", err, len(store.created))
 	}
 }
@@ -274,7 +276,7 @@ const testThumbprint = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 
 func TestControlTransportRejectsStaleSnapshotAckBeforePersistence(t *testing.T) {
 	session, _, _, _, first := testSessionPair(t)
-	next, err := NewSnapshot("tunnel_1", 2, testConfigPayload(2, "next.example.test"))
+	next, err := wire.NewSnapshot("tunnel_1", 2, testConfigPayload(2, "next.example.test"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -283,12 +285,12 @@ func TestControlTransportRejectsStaleSnapshotAckBeforePersistence(t *testing.T) 
 	}
 	store := &persistenceStoreStub{}
 	persistent := &PersistentSession{session: session, store: store}
-	stale := Ack{AccountID: "acct_1", TunnelID: "tunnel_1", ConnectorID: "connector_1", SessionID: "sess_1", ProcessGeneration: 1, Kind: AckSnapshot, Status: AckApplied, Generation: first.Generation, ContentHash: first.ContentHash}
-	frame, err := NewFrame(MessageAck, "stale_ack", stale)
+	stale := wire.Ack{AccountID: "acct_1", TunnelID: "tunnel_1", ConnectorID: "connector_1", SessionID: "sess_1", ProcessGeneration: 1, Kind: wire.AckSnapshot, Status: wire.AckApplied, Generation: first.Generation, ContentHash: first.ContentHash}
+	frame, err := wire.NewFrame(wire.MessageAck, "stale_ack", stale)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err = handleControlFrame(context.Background(), persistent, nil, frame); !errors.Is(err, ErrSnapshotRejected) {
+	if _, _, err = handleControlFrame(context.Background(), persistent, nil, frame); !errors.Is(err, wire.ErrSnapshotRejected) {
 		t.Fatalf("stale ACK accepted: %v", err)
 	}
 	current, ready, _ := session.Current()

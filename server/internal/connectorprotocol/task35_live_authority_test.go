@@ -10,7 +10,10 @@ import (
 	"testing"
 	"time"
 
+	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
+
 	"crypto/sha256"
+
 	"github.com/pinksaucepasta/paperboat-server/internal/secrets"
 	"github.com/pinksaucepasta/paperboat-server/internal/selfhost"
 )
@@ -284,8 +287,8 @@ SELECT $1,$2,$7,t.account_id,t.id,c.id,c.host_id,m.public_identity_key,$3,c.gene
 				if err != nil {
 					t.Fatalf("edge projection %s err=%v", edge.NodeID, err)
 				}
-				var httpDecision *IngressDecision
-				tlsDecisions := make([]IngressDecision, 0)
+				var httpDecision *wire.IngressDecision
+				tlsDecisions := make([]wire.IngressDecision, 0)
 				for i := range decisions {
 					if decisions[i].Binding.Protocol == "http" {
 						value := decisions[i]

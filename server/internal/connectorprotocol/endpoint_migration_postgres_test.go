@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 
+	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/pinksaucepasta/paperboat-server/internal/config"
@@ -140,7 +142,7 @@ func TestEndpointIdentityMigrationPreservesBindingsAndFencesOldSessions(t *testi
 			if err = f.database.SQL().QueryRowContext(ctx, `SELECT snapshot,content_hash,previous_generation FROM paperboat.tunnel_config_generations WHERE tunnel_id=$1 AND generation=$2`, f.tunnelID, version).Scan(&payload, &storedHash, &previous); err != nil {
 				t.Fatal(err)
 			}
-			snapshot, snapshotErr := NewSnapshot(f.tunnelID, uint64(version), payload)
+			snapshot, snapshotErr := wire.NewSnapshot(f.tunnelID, uint64(version), payload)
 			if snapshotErr != nil {
 				t.Fatal(snapshotErr)
 			}
@@ -188,9 +190,9 @@ func TestEndpointIdentityMigrationPreservesBindingsAndFencesOldSessions(t *testi
 			t.Fatalf("ordinary immutable configuration mutation accepted: %v", mutationErr)
 		}
 		connector := f.connectors[0]
-		ref := SessionRef{TunnelID: f.tunnelID, ConnectorID: connector.id, SessionID: connector.oldSessionID, ProcessGeneration: 1}
+		ref := wire.SessionRef{TunnelID: f.tunnelID, ConnectorID: connector.id, SessionID: connector.oldSessionID, ProcessGeneration: 1}
 		oldHash := sha256.Sum256(seed.payload)
-		ack := Ack{AccountID: f.accountID, TunnelID: f.tunnelID, ConnectorID: connector.id, SessionID: connector.oldSessionID, ProcessGeneration: 1, Generation: 1, ContentHash: "sha256:" + hex.EncodeToString(oldHash[:]), Kind: AckSnapshot, Status: AckApplied}
+		ack := wire.Ack{AccountID: f.accountID, TunnelID: f.tunnelID, ConnectorID: connector.id, SessionID: connector.oldSessionID, ProcessGeneration: 1, Generation: 1, ContentHash: "sha256:" + hex.EncodeToString(oldHash[:]), Kind: wire.AckSnapshot, Status: wire.AckApplied}
 		if err = f.store.RecordApplied(ctx, ref, ack); !errors.Is(err, ErrSessionNotFound) {
 			t.Fatalf("old session retained configuration admission: %v", err)
 		}

@@ -12,7 +12,7 @@ GATE = Path(__file__).resolve().parents[2] / "tools" / "gate.sh"
 
 
 class SmokePrerequisiteTest(unittest.TestCase):
-    def run_gate(self, checklist, smoke=None, go_status=0, history=(), runtime_changed=True):
+    def run_gate(self, checklist, smoke=None, go_status=0, history=(), runtime_changed=True, runtime_path="cli/runtime.go"):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "tools/device-smoke/results").mkdir(parents=True)
@@ -37,6 +37,7 @@ case "$1" in
 esac
 """,
             }
+            scripts["git"] = scripts["git"].replace("cli/runtime.go", runtime_path)
             for name, source in scripts.items():
                 path = root / "bin" / name
                 path.write_text(source)
@@ -49,9 +50,12 @@ esac
                                   capture_output=True, text=True, timeout=10)
 
     def test_runtime_push_requires_head_smoke_independent_of_checklist(self):
-        for cells in ["[ ] | [ ] | [ ]", "[!] | [ ] | [ ]", "[x] | [x] | [x]"]:
-            with self.subTest(cells=cells):
-                result = self.run_gate(f"## F1. Install\n| F1-01 | Install | {cells} | |\n")
+        for cells, runtime_path in [("[ ] | [ ] | [ ]", "shared/connectorprotocol/session.go"),
+                                    ("[!] | [ ] | [ ]", "cli/runtime.go"),
+                                    ("[x] | [x] | [x]", "cli/runtime.go")]:
+            with self.subTest(cells=cells, runtime_path=runtime_path):
+                result = self.run_gate(f"## F1. Install\n| F1-01 | Install | {cells} | |\n",
+                                       runtime_path=runtime_path)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("no smoke result for build dev-abc1234", result.stdout)
 

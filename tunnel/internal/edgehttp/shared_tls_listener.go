@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 // SharedTLSListener dispatches the original ClientHello before any TLS writes.

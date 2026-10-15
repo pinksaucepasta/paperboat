@@ -1,6 +1,7 @@
 package app
 
 import (
+ wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
@@ -303,7 +304,7 @@ func New(opts Options) (*App, error) {
 		_ = store.Close()
 		return nil, fmt.Errorf("configure connector control store: %w", err)
 	}
-	connectorPersistentServer, err := connectorprotocol.NewPersistentServer(connectorControlStore, connectorControlStore, connectorprotocol.ServerConfig{Capabilities: connectorprotocol.ProductionCapabilities()})
+	connectorPersistentServer, err := connectorprotocol.NewPersistentServer(connectorControlStore, connectorControlStore, wire.ServerConfig{Capabilities: wire.ProductionCapabilities()})
 	if err != nil {
 		_ = store.Close()
 		return nil, fmt.Errorf("configure connector control server: %w", err)

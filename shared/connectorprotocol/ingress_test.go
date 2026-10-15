@@ -2,6 +2,8 @@ package connectorprotocol
 
 import (
 	"bytes"
+	"errors"
+	"io"
 	"testing"
 	"time"
 )
@@ -15,6 +17,23 @@ func ingressFixture(now time.Time) (IngressDecision, StreamOpen) {
 		DecisionID: "decision-1", PolicyGeneration: 1, EdgeNodeID: "edge-1", EdgeProcessEpoch: "epoch-1234567890123456789012345678", ConnectorID: "connector-1", SessionID: "session-1", ProcessGeneration: 1, ConfigGeneration: 1, AssignmentGeneration: 1, Action: "view", IssuedAt: now, ExpiresAt: now.Add(IngressAuthorityLifetime)}
 	o := StreamOpen{Protocol: ProtocolName, Version: ProtocolVersion, AccountID: d.Binding.AccountID, TunnelID: d.Binding.TunnelID, ConnectorID: d.ConnectorID, SessionID: d.SessionID, ProcessGeneration: 1, Generation: 1, RouteID: d.Binding.RouteID, RequestID: "request-1", Kind: "http"}
 	return d, o
+}
+
+func TestReadIngressDecisionRetainsBodyReadCauseWithoutChangingDenial(t *testing.T) {
+	for name, payload := range map[string][]byte{
+		"header": {0, 0},
+		"body":   {0, 0, 0, 8, '{', '}'},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := ReadIngressDecision(bytes.NewReader(payload), time.Now().UTC())
+			if !errors.Is(err, ErrIngressDenied) || !errors.Is(err, io.ErrUnexpectedEOF) {
+				t.Fatalf("read error=%v, want stable denial and original truncation cause", err)
+			}
+			if got := err.Error(); got != ErrIngressDenied.Error() {
+				t.Fatalf("public error=%q, want fixed denial prose", got)
+			}
+		})
+	}
 }
 
 func TestIngressExactIndependentAuthority(t *testing.T) {
@@ -75,9 +94,39 @@ func TestIngressStrictWireAndTCPBinding(t *testing.T) {
 	if d.Validate(now) != nil {
 		t.Fatal("valid opaque publication denied")
 	}
+	d.Binding.Protocol = "tls"
+	d.Binding.ListenerID = "listener_tls_443"
+	d.Binding.PublicPort = 443
+	d.Binding.Hostname = "db.example.test"
+	if d.Validate(now) != nil {
+		t.Fatal("valid exact TLS pass-through publication denied")
+	}
 	d.Binding.OriginAddress = "169.254.169.254:80"
 	if d.Validate(now) == nil {
 		t.Fatal("nonloopback target accepted")
+	}
+}
+
+func TestIngressAuthorityAllowsBoundedClockLagWithoutExtendingExpiry(t *testing.T) {
+	now := time.Now().UTC()
+	d, open := ingressFixture(now)
+	behind := now.Add(-850 * time.Millisecond)
+	if err := d.Authorize(d, open, d.EdgeNodeID, d.EdgeProcessEpoch, behind); err != nil {
+		t.Fatalf("fresh server authority rejected for clock lag: %v", err)
+	}
+	if d.Validate(now.Add(-MaxClockSkew)) != nil {
+		t.Fatal("clock boundary rejected")
+	}
+	if d.Validate(now.Add(-MaxClockSkew-time.Nanosecond)) == nil {
+		t.Fatal("future authority beyond clock bound accepted")
+	}
+	if d.Validate(d.ExpiresAt) == nil {
+		t.Fatal("clock allowance extended expiry")
+	}
+	changed := d
+	changed.Binding.RouteGeneration++
+	if d.Authorize(changed, open, d.EdgeNodeID, d.EdgeProcessEpoch, behind) == nil {
+		t.Fatal("clock allowance accepted changed route authority")
 	}
 }
 

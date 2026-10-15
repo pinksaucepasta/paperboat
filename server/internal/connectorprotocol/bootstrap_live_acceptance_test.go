@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
+
 	"github.com/pinksaucepasta/paperboat-server/internal/config"
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
 )
@@ -55,11 +57,11 @@ func TestLiveCarrierBootstrapDescriptor(t *testing.T) {
 		t.Fatal(err)
 	}
 	active.ConfigContentHash = "sha256:" + hex.EncodeToString(hash)
-	active.IdentityKeyThumbprint, err = IdentityThumbprint(ed25519.PublicKey(publicKey))
+	active.IdentityKeyThumbprint, err = wire.IdentityThumbprint(ed25519.PublicKey(publicKey))
 	if err != nil {
 		t.Fatal(err)
 	}
-	active.IdentityKeyID, err = IdentityKeyID(ed25519.PublicKey(publicKey))
+	active.IdentityKeyID, err = wire.IdentityKeyID(ed25519.PublicKey(publicKey))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +89,7 @@ func TestLiveConnectorHeartbeatPersistence(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	ctx := context.Background()
-	var ref SessionRef
+	var ref wire.SessionRef
 	var accountID, state string
 	var generation int64
 	var hash []byte
@@ -111,8 +113,8 @@ func TestLiveConnectorHeartbeatPersistence(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	contentHash := "sha256:" + hex.EncodeToString(hash)
-	heartbeat := Heartbeat{AccountID: accountID, SessionID: ref.SessionID, TunnelID: ref.TunnelID, ConnectorID: ref.ConnectorID, ProcessGeneration: ref.ProcessGeneration, LastAppliedGeneration: uint64(generation), LastAppliedHash: contentHash, SentAt: now}
-	ack := HeartbeatAck{AccountID: accountID, TunnelID: ref.TunnelID, ConnectorID: ref.ConnectorID, SessionID: ref.SessionID, ProcessGeneration: ref.ProcessGeneration, ServerTime: now, LeaseExpiresAt: now.Add(DefaultLease)}
+	heartbeat := wire.Heartbeat{AccountID: accountID, SessionID: ref.SessionID, TunnelID: ref.TunnelID, ConnectorID: ref.ConnectorID, ProcessGeneration: ref.ProcessGeneration, LastAppliedGeneration: uint64(generation), LastAppliedHash: contentHash, SentAt: now}
+	ack := wire.HeartbeatAck{AccountID: accountID, TunnelID: ref.TunnelID, ConnectorID: ref.ConnectorID, SessionID: ref.SessionID, ProcessGeneration: ref.ProcessGeneration, ServerTime: now, LeaseExpiresAt: now.Add(wire.DefaultLease)}
 	controlStore, err := NewSQLControlStore(store, SQLControlStoreConfig{})
 	if err != nil {
 		t.Fatal(err)

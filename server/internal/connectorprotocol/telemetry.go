@@ -3,6 +3,8 @@ package connectorprotocol
 import (
 	"time"
 
+	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
+
 	servertelemetry "github.com/pinksaucepasta/paperboat-server/internal/telemetry"
 )
 
@@ -26,13 +28,13 @@ func NewConnectorTelemetry(producer *servertelemetry.Producer) *ConnectorTelemet
 
 type connectorTelemetryIdentity struct {
 	AccountID            string
-	Reference            SessionRef
+	Reference            wire.SessionRef
 	CredentialGeneration uint64
 	ConfigGeneration     uint64
 }
 
 func (t *ConnectorTelemetry) identity(value connectorTelemetryIdentity) (servertelemetry.ProducerIdentity, servertelemetry.Generations) {
-	if ValidateIdentifier(value.Reference.TunnelID) != nil || ValidateIdentifier(value.Reference.ConnectorID) != nil || value.Reference.ProcessGeneration == 0 {
+	if wire.ValidateIdentifier(value.Reference.TunnelID) != nil || wire.ValidateIdentifier(value.Reference.ConnectorID) != nil || value.Reference.ProcessGeneration == 0 {
 		return servertelemetry.ProducerIdentity{}, servertelemetry.Generations{}
 	}
 	identity := servertelemetry.ProducerIdentity{
@@ -47,10 +49,10 @@ func (t *ConnectorTelemetry) identity(value connectorTelemetryIdentity) (servert
 			ConnectorID: value.Reference.ConnectorID,
 		},
 	}
-	if ValidateIdentifier(value.Reference.SessionID) == nil {
+	if wire.ValidateIdentifier(value.Reference.SessionID) == nil {
 		identity.IDs.SessionID = value.Reference.SessionID
 	}
-	if ValidateIdentifier(value.Reference.SessionID) == nil && len(value.Reference.SessionID) <= 124 {
+	if wire.ValidateIdentifier(value.Reference.SessionID) == nil && len(value.Reference.SessionID) <= 124 {
 		identity.CorrelationID = "cor_" + value.Reference.SessionID
 	}
 	return identity, servertelemetry.Generations{
@@ -140,7 +142,7 @@ func (t *ConnectorTelemetry) backoff(value connectorTelemetryIdentity, hostID st
 	})
 }
 
-func (t *ConnectorTelemetry) disconnect(value connectorTelemetryIdentity, hostID string, reason DisconnectReason) {
+func (t *ConnectorTelemetry) disconnect(value connectorTelemetryIdentity, hostID string, reason wire.DisconnectReason) {
 	if t == nil || t.Producer == nil {
 		return
 	}
@@ -178,17 +180,17 @@ func boundedTelemetryDuration(value time.Duration) time.Duration {
 	return value
 }
 
-func mapTelemetryDisconnectReason(reason DisconnectReason) servertelemetry.ConnectorDisconnectReason {
+func mapTelemetryDisconnectReason(reason wire.DisconnectReason) servertelemetry.ConnectorDisconnectReason {
 	switch reason {
-	case ReasonAuthentication, ReasonCredentialExpired:
+	case wire.ReasonAuthentication, wire.ReasonCredentialExpired:
 		return servertelemetry.ConnectorDisconnectAuth
-	case ReasonLeaseExpired, ReasonHeartbeatTimeout:
+	case wire.ReasonLeaseExpired, wire.ReasonHeartbeatTimeout:
 		return servertelemetry.ConnectorDisconnectNetwork
-	case ReasonServerShutdown:
+	case wire.ReasonServerShutdown:
 		return servertelemetry.ConnectorDisconnectShutdown
-	case ReasonProtocolMismatch, ReasonCapabilityMissing, ReasonMalformed, ReasonSnapshotRejected, ReasonGenerationGap, ReasonCredentialRotation, ReasonCanceled, ReasonProtocolClosed:
+	case wire.ReasonProtocolMismatch, wire.ReasonCapabilityMissing, wire.ReasonMalformed, wire.ReasonSnapshotRejected, wire.ReasonGenerationGap, wire.ReasonCredentialRotation, wire.ReasonCanceled, wire.ReasonProtocolClosed:
 		return servertelemetry.ConnectorDisconnectProtocol
-	case ReasonSessionReplaced, ReasonStaleGeneration:
+	case wire.ReasonSessionReplaced, wire.ReasonStaleGeneration:
 		return servertelemetry.ConnectorDisconnectServer
 	default:
 		return servertelemetry.ConnectorDisconnectUnknown
@@ -220,32 +222,11 @@ func (s *PersistentSession) connectorTelemetry() *ConnectorTelemetry {
 	return s.parent.connectorTelemetry()
 }
 
-func (s *ServerSession) telemetrySnapshot() (accountID, hostID string, ref SessionRef, credentialGeneration, configGeneration uint64) {
-	if s == nil {
-		return "", "", SessionRef{}, 0, 0
-	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	accountID, hostID, ref = s.auth.AccountID, s.auth.HostID, s.ref
-	credentialGeneration = s.auth.CredentialGeneration
-	switch {
-	case s.hasCandidate:
-		configGeneration = s.candidate.Generation
-	case s.hasActive:
-		configGeneration = s.active.Generation
-	case s.pendingSnapshot != nil:
-		configGeneration = s.pendingSnapshot.Generation
-	case s.pendingDelta != nil:
-		configGeneration = s.pendingDelta.Generation
-	}
-	return accountID, hostID, ref, credentialGeneration, configGeneration
-}
-
-func (s *PersistentSession) recordReadyTelemetry(readiness Readiness) {
+func (s *PersistentSession) recordReadyTelemetry(readiness wire.Readiness) {
 	if s == nil || s.session == nil {
 		return
 	}
-	accountID, hostID, ref, credentialGeneration, _ := s.session.telemetrySnapshot()
+	accountID, hostID, ref, credentialGeneration, _ := s.session.Metadata()
 	observer := s.connectorTelemetry()
 	if observer == nil {
 		return
@@ -254,11 +235,11 @@ func (s *PersistentSession) recordReadyTelemetry(readiness Readiness) {
 	observer.session(value, hostID, servertelemetry.ConnectorSessionActive, readiness.Generation)
 }
 
-func (s *PersistentSession) recordConfigTelemetry(ack Ack, retry servertelemetry.RetryDecision, nextRetryAt time.Time) {
+func (s *PersistentSession) recordConfigTelemetry(ack wire.Ack, retry servertelemetry.RetryDecision, nextRetryAt time.Time) {
 	if s == nil || s.session == nil {
 		return
 	}
-	accountID, hostID, ref, credentialGeneration, _ := s.session.telemetrySnapshot()
+	accountID, hostID, ref, credentialGeneration, _ := s.session.Metadata()
 	observer := s.connectorTelemetry()
 	if observer == nil {
 		return
@@ -267,11 +248,11 @@ func (s *PersistentSession) recordConfigTelemetry(ack Ack, retry servertelemetry
 	observer.config(value, hostID, servertelemetry.ConfigGenerationApplied, ack.Generation, retry, nextRetryAt)
 }
 
-func (s *PersistentSession) recordDesiredTelemetry(snapshot Snapshot, retry servertelemetry.RetryDecision, nextRetryAt time.Time) {
+func (s *PersistentSession) recordDesiredTelemetry(snapshot wire.Snapshot, retry servertelemetry.RetryDecision, nextRetryAt time.Time) {
 	if s == nil || s.session == nil {
 		return
 	}
-	accountID, hostID, ref, credentialGeneration, _ := s.session.telemetrySnapshot()
+	accountID, hostID, ref, credentialGeneration, _ := s.session.Metadata()
 	observer := s.connectorTelemetry()
 	if observer == nil {
 		return
@@ -280,23 +261,23 @@ func (s *PersistentSession) recordDesiredTelemetry(snapshot Snapshot, retry serv
 	observer.config(value, hostID, servertelemetry.ConfigGenerationDesired, snapshot.Generation, retry, nextRetryAt)
 }
 
-func (s *PersistentSession) currentSnapshotForTelemetry(generation uint64) Snapshot {
+func (s *PersistentSession) currentSnapshotForTelemetry(generation uint64) wire.Snapshot {
 	if s == nil || s.session == nil {
-		return Snapshot{Generation: generation}
+		return wire.Snapshot{Generation: generation}
 	}
-	_, _, ref, _, _ := s.session.telemetrySnapshot()
-	return Snapshot{TunnelID: ref.TunnelID, Generation: generation}
+	_, _, ref, _, _ := s.session.Metadata()
+	return wire.Snapshot{TunnelID: ref.TunnelID, Generation: generation}
 }
 
 func (s *PersistentSession) recordClosedTelemetry() {
 	if s == nil || s.session == nil {
 		return
 	}
-	if s.session.State() != SessionClosed {
+	if s.session.State() != wire.SessionClosed {
 		return
 	}
 	s.telemetryCloseOnce.Do(func() {
-		accountID, hostID, ref, credentialGeneration, configGeneration := s.session.telemetrySnapshot()
+		accountID, hostID, ref, credentialGeneration, configGeneration := s.session.Metadata()
 		observer := s.connectorTelemetry()
 		if observer == nil {
 			return

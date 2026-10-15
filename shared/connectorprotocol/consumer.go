@@ -169,15 +169,15 @@ func (c *Consumer) HandleFrame(ctx context.Context, frame Frame) (Frame, error) 
 			return c.rotationAckError(frame.RequestID, challenge.AccountID, challenge.TunnelID, challenge.OperationID, challenge.ConnectorID, challenge.HostID, challenge.SessionID, challenge.ProcessGeneration, challenge.TargetSetHash, challenge.OldCredentialGeneration, challenge.NewCredentialGeneration, err)
 		}
 		if c.rotation == nil {
-			return c.rotationAckError(frame.RequestID, challenge.AccountID, challenge.TunnelID, challenge.OperationID, challenge.ConnectorID, challenge.HostID, challenge.SessionID, challenge.ProcessGeneration, challenge.TargetSetHash, challenge.OldCredentialGeneration, challenge.NewCredentialGeneration, codeError(ErrUnsupportedMessage, ReasonCredentialRotation, false, errors.New("credential rotation runtime is not configured")))
+			return c.rotationAckError(frame.RequestID, challenge.AccountID, challenge.TunnelID, challenge.OperationID, challenge.ConnectorID, challenge.HostID, challenge.SessionID, challenge.ProcessGeneration, challenge.TargetSetHash, challenge.OldCredentialGeneration, challenge.NewCredentialGeneration, CodeError(ErrUnsupportedMessage, ReasonCredentialRotation, false, errors.New("credential rotation runtime is not configured")))
 		}
 		proof, err := c.rotation.ProveCredentialRotation(ctx, challenge)
 		if err != nil {
 			return c.rotationAckError(frame.RequestID, challenge.AccountID, challenge.TunnelID, challenge.OperationID, challenge.ConnectorID, challenge.HostID, challenge.SessionID, challenge.ProcessGeneration, challenge.TargetSetHash, challenge.OldCredentialGeneration, challenge.NewCredentialGeneration, err)
 		}
-		if err := proof.Validate(c.session.config.Clock.Now().UTC()); err != nil || !rotationProofMatchesChallenge(proof, challenge, challenge.Target) {
+		if err := proof.Validate(c.session.config.Clock.Now().UTC()); err != nil || !RotationProofMatchesChallenge(proof, challenge, challenge.Target) {
 			if err == nil {
-				err = codeError(ErrIdentityMismatch, ReasonAuthentication, false, errors.New("rotation proof identity does not match challenge"))
+				err = CodeError(ErrIdentityMismatch, ReasonAuthentication, false, errors.New("rotation proof identity does not match challenge"))
 			}
 			return c.rotationAckError(frame.RequestID, challenge.AccountID, challenge.TunnelID, challenge.OperationID, challenge.ConnectorID, challenge.HostID, challenge.SessionID, challenge.ProcessGeneration, challenge.TargetSetHash, challenge.OldCredentialGeneration, challenge.NewCredentialGeneration, err)
 		}
@@ -191,7 +191,7 @@ func (c *Consumer) HandleFrame(ctx context.Context, frame Frame) (Frame, error) 
 			return c.rotationAckError(frame.RequestID, install.AccountID, install.TunnelID, install.OperationID, install.ConnectorID, install.HostID, install.SessionID, install.ProcessGeneration, install.TargetSetHash, install.OldCredentialGeneration, install.NewCredentialGeneration, err)
 		}
 		if c.rotation == nil {
-			return c.rotationAckError(frame.RequestID, install.AccountID, install.TunnelID, install.OperationID, install.ConnectorID, install.HostID, install.SessionID, install.ProcessGeneration, install.TargetSetHash, install.OldCredentialGeneration, install.NewCredentialGeneration, codeError(ErrUnsupportedMessage, ReasonCredentialRotation, false, errors.New("credential rotation runtime is not configured")))
+			return c.rotationAckError(frame.RequestID, install.AccountID, install.TunnelID, install.OperationID, install.ConnectorID, install.HostID, install.SessionID, install.ProcessGeneration, install.TargetSetHash, install.OldCredentialGeneration, install.NewCredentialGeneration, CodeError(ErrUnsupportedMessage, ReasonCredentialRotation, false, errors.New("credential rotation runtime is not configured")))
 		}
 		if err := c.rotation.InstallCredentialRotation(ctx, install); err != nil {
 			return c.rotationAckError(frame.RequestID, install.AccountID, install.TunnelID, install.OperationID, install.ConnectorID, install.HostID, install.SessionID, install.ProcessGeneration, install.TargetSetHash, install.OldCredentialGeneration, install.NewCredentialGeneration, err)
@@ -206,7 +206,7 @@ func (c *Consumer) HandleFrame(ctx context.Context, frame Frame) (Frame, error) 
 			return c.rotationAckError(frame.RequestID, revoke.AccountID, revoke.TunnelID, revoke.OperationID, revoke.ConnectorID, revoke.HostID, revoke.SessionID, revoke.ProcessGeneration, revoke.TargetSetHash, revoke.OldCredentialGeneration, revoke.NewCredentialGeneration, err)
 		}
 		if c.rotation == nil {
-			return c.rotationAckError(frame.RequestID, revoke.AccountID, revoke.TunnelID, revoke.OperationID, revoke.ConnectorID, revoke.HostID, revoke.SessionID, revoke.ProcessGeneration, revoke.TargetSetHash, revoke.OldCredentialGeneration, revoke.NewCredentialGeneration, codeError(ErrUnsupportedMessage, ReasonCredentialRotation, false, errors.New("credential rotation runtime is not configured")))
+			return c.rotationAckError(frame.RequestID, revoke.AccountID, revoke.TunnelID, revoke.OperationID, revoke.ConnectorID, revoke.HostID, revoke.SessionID, revoke.ProcessGeneration, revoke.TargetSetHash, revoke.OldCredentialGeneration, revoke.NewCredentialGeneration, CodeError(ErrUnsupportedMessage, ReasonCredentialRotation, false, errors.New("credential rotation runtime is not configured")))
 		}
 		if err := c.rotation.RevokeCredentialRotation(ctx, revoke); err != nil {
 			return c.rotationAckError(frame.RequestID, revoke.AccountID, revoke.TunnelID, revoke.OperationID, revoke.ConnectorID, revoke.HostID, revoke.SessionID, revoke.ProcessGeneration, revoke.TargetSetHash, revoke.OldCredentialGeneration, revoke.NewCredentialGeneration, err)
@@ -225,7 +225,7 @@ func (c *Consumer) HandleFrame(ctx context.Context, frame Frame) (Frame, error) 
 		// Ready is emitted by the replacement connector session toward the
 		// server. Accepting it in the server-to-connector direction would make
 		// a peer able to claim readiness without installing anything.
-		return Frame{}, codeError(ErrUnsupportedMessage, ReasonMalformed, false, errors.New("credential rotation ready is connector-to-server"))
+		return Frame{}, CodeError(ErrUnsupportedMessage, ReasonMalformed, false, errors.New("credential rotation ready is connector-to-server"))
 	case MessageDisconnect:
 		var disconnect Disconnect
 		if err := frame.DecodePayload(&disconnect); err != nil {
@@ -233,7 +233,7 @@ func (c *Consumer) HandleFrame(ctx context.Context, frame Frame) (Frame, error) 
 		}
 		return Frame{}, c.session.Close(disconnect.Reason)
 	default:
-		return Frame{}, codeError(ErrUnsupportedMessage, ReasonMalformed, false, nil)
+		return Frame{}, CodeError(ErrUnsupportedMessage, ReasonMalformed, false, nil)
 	}
 }
 
@@ -247,11 +247,11 @@ func (c *Consumer) validateRotationIdentity(accountID, tunnelID, connectorID, ho
 	if err := c.session.ensureActiveReadLocked(now); err != nil {
 		return err
 	}
-	if !hasCapability(c.session.welcome.Capabilities, CapabilityCredentialRotation) {
-		return codeError(ErrCapabilityMissing, ReasonCapabilityMissing, false, nil)
+	if !HasCapability(c.session.welcome.Capabilities, CapabilityCredentialRotation) {
+		return CodeError(ErrCapabilityMissing, ReasonCapabilityMissing, false, nil)
 	}
 	if accountID != c.session.config.Hello.AccountID || tunnelID != c.session.config.Hello.TunnelID || connectorID != c.session.config.Hello.ConnectorID || hostID != c.session.auth.HostID || sessionID != c.session.welcome.SessionID || processGeneration != c.session.config.Hello.ProcessGeneration {
-		return codeError(ErrIdentityMismatch, ReasonAuthentication, false, nil)
+		return CodeError(ErrIdentityMismatch, ReasonAuthentication, false, nil)
 	}
 	return nil
 }

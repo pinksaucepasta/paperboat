@@ -1,6 +1,7 @@
 package contracttest
 
 import (
+ wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"bufio"
 	"encoding/json"
 	"os"
@@ -120,14 +121,14 @@ func connectorBootstrapSemanticallyValid(message json.RawMessage) bool {
 		}
 		return json.Unmarshal(message, &activation) == nil &&
 			activation.Schema == "paperboat.preview-tunnel/v1" && activation.Kind == "connector_activation" &&
-			connectorprotocol.ValidateIdentifier(activation.TunnelID) == nil &&
-			connectorprotocol.ValidateIdentifier(activation.ConnectorID) == nil &&
-			connectorprotocol.ValidateIdentifier(activation.HostID) == nil &&
+			wire.ValidateIdentifier(activation.TunnelID) == nil &&
+			wire.ValidateIdentifier(activation.ConnectorID) == nil &&
+			wire.ValidateIdentifier(activation.HostID) == nil &&
 			activation.CredentialGeneration > 0 && activation.ProcessGeneration > 0 &&
 			activation.Operation.Schema == activation.Schema && activation.Operation.Kind == "operation" &&
 			activation.Operation.ResourceKind == "connector" && activation.Operation.ResourceID == activation.ConnectorID &&
 			activation.Operation.Phase == "connecting" && activation.Operation.State == "running" &&
-			connectorprotocol.ValidateIdentifier(activation.Operation.ID) == nil &&
+			wire.ValidateIdentifier(activation.Operation.ID) == nil &&
 			!activation.Operation.CreatedAt.IsZero() && !activation.Operation.UpdatedAt.IsZero()
 	case "":
 		return discriminator.Error != nil && discriminator.Error.Kind == "error"

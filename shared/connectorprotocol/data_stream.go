@@ -68,7 +68,7 @@ func WriteStreamOpen(writer io.Writer, stream StreamOpen) error {
 	}
 	payload, err := json.Marshal(stream)
 	if err != nil {
-		return codeError(ErrMalformedFrame, ReasonMalformed, false, err)
+		return CodeError(ErrMalformedFrame, ReasonMalformed, false, err)
 	}
 	if len(payload) == 0 || len(payload) > MaxStreamOpenBytes-streamOpenHeader {
 		return ErrFrameTooLarge
@@ -76,10 +76,10 @@ func WriteStreamOpen(writer io.Writer, stream StreamOpen) error {
 	var header [streamOpenHeader]byte
 	binary.BigEndian.PutUint32(header[:], uint32(len(payload)))
 	if _, err := writeAllStreamOpen(writer, header[:]); err != nil {
-		return codeError(ErrMalformedFrame, ReasonMalformed, false, err)
+		return CodeError(ErrMalformedFrame, ReasonMalformed, false, err)
 	}
 	if _, err := writeAllStreamOpen(writer, payload); err != nil {
-		return codeError(ErrMalformedFrame, ReasonMalformed, false, err)
+		return CodeError(ErrMalformedFrame, ReasonMalformed, false, err)
 	}
 	return nil
 }
@@ -93,7 +93,7 @@ func ReadStreamOpen(reader io.Reader) (StreamOpen, error) {
 	}
 	var header [streamOpenHeader]byte
 	if _, err := io.ReadFull(reader, header[:]); err != nil {
-		return StreamOpen{}, codeError(ErrMalformedFrame, ReasonMalformed, false, err)
+		return StreamOpen{}, CodeError(ErrMalformedFrame, ReasonMalformed, false, err)
 	}
 	length := int(binary.BigEndian.Uint32(header[:]))
 	if length <= 0 {
@@ -104,11 +104,11 @@ func ReadStreamOpen(reader io.Reader) (StreamOpen, error) {
 	}
 	payload := make([]byte, length)
 	if _, err := io.ReadFull(reader, payload); err != nil {
-		return StreamOpen{}, codeError(ErrMalformedFrame, ReasonMalformed, false, err)
+		return StreamOpen{}, CodeError(ErrMalformedFrame, ReasonMalformed, false, err)
 	}
 	var stream StreamOpen
 	if err := decodeStrict(payload, &stream); err != nil {
-		return StreamOpen{}, codeError(ErrMalformedFrame, ReasonMalformed, false, err)
+		return StreamOpen{}, CodeError(ErrMalformedFrame, ReasonMalformed, false, err)
 	}
 	if err := stream.Validate(); err != nil {
 		return StreamOpen{}, err

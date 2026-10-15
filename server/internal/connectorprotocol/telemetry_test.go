@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
+
 	servertelemetry "github.com/pinksaucepasta/paperboat-server/internal/telemetry"
 )
 
@@ -45,7 +47,7 @@ func TestConnectorTelemetryCarriesSafeIdentityAndGenerations(t *testing.T) {
 	observer := NewConnectorTelemetry(producer)
 	value := connectorTelemetryIdentity{
 		AccountID:            "account_1",
-		Reference:            SessionRef{TunnelID: "tunnel_1", ConnectorID: "connector_1", SessionID: "session_1", ProcessGeneration: 7},
+		Reference:            wire.SessionRef{TunnelID: "tunnel_1", ConnectorID: "connector_1", SessionID: "session_1", ProcessGeneration: 7},
 		CredentialGeneration: 4,
 		ConfigGeneration:     12,
 	}
@@ -55,7 +57,7 @@ func TestConnectorTelemetryCarriesSafeIdentityAndGenerations(t *testing.T) {
 	observer.backoff(value, "host_1", servertelemetry.ConnectorBackoffScheduled, 3*time.Second)
 	observer.session(value, "host_1", servertelemetry.ConnectorSessionActive, 12)
 	observer.config(value, "host_1", servertelemetry.ConfigGenerationApplied, 12, servertelemetry.RetryNone, time.Time{})
-	observer.disconnect(value, "host_1", ReasonSessionReplaced)
+	observer.disconnect(value, "host_1", wire.ReasonSessionReplaced)
 	if err := events.Flush(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -97,9 +99,9 @@ func TestConnectorTelemetryDropsUnboundHandshakeIdentity(t *testing.T) {
 	producer, events := newConnectorTelemetryProducer(t, now)
 	defer events.Close()
 	observer := NewConnectorTelemetry(producer)
-	observer.handshake(connectorTelemetryIdentity{Reference: SessionRef{TunnelID: "tunnel_1", ConnectorID: "connector_1"}}, "host_1", servertelemetry.ConnectorHandshakeFailed, time.Second)
-	observer.connection(connectorTelemetryIdentity{Reference: SessionRef{TunnelID: "tunnel_1", ConnectorID: "connector_1"}}, "host_1", servertelemetry.ConnectorConnectionFailed)
-	observer.disconnect(connectorTelemetryIdentity{Reference: SessionRef{TunnelID: "tunnel_1", ConnectorID: "connector_1"}}, "host_1", ReasonAuthentication)
+	observer.handshake(connectorTelemetryIdentity{Reference: wire.SessionRef{TunnelID: "tunnel_1", ConnectorID: "connector_1"}}, "host_1", servertelemetry.ConnectorHandshakeFailed, time.Second)
+	observer.connection(connectorTelemetryIdentity{Reference: wire.SessionRef{TunnelID: "tunnel_1", ConnectorID: "connector_1"}}, "host_1", servertelemetry.ConnectorConnectionFailed)
+	observer.disconnect(connectorTelemetryIdentity{Reference: wire.SessionRef{TunnelID: "tunnel_1", ConnectorID: "connector_1"}}, "host_1", wire.ReasonAuthentication)
 	if err := events.Flush(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -111,12 +113,12 @@ func TestConnectorTelemetryDropsUnboundHandshakeIdentity(t *testing.T) {
 func TestPersistentConnectorTelemetryTracksLifecycleAndIgnoresFailures(t *testing.T) {
 	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
 	auth, private := testAuth(t, now, 1)
-	snapshot, err := NewSnapshot(auth.TunnelID, 1, testConfigPayload(1, "preview.example.test"))
+	snapshot, err := wire.NewSnapshot(auth.TunnelID, 1, testConfigPayload(1, "preview.example.test"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	store := &persistenceStoreStub{
-		authResult: AuthResult{
+		authResult: wire.AuthResult{
 			AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, HostID: auth.HostID,
 			IdentityKeyID: auth.IdentityKeyID, IdentityKeyThumbprint: auth.IdentityKeyThumbprint,
 			ProcessGeneration: 1, CredentialGeneration: auth.CredentialGeneration,
@@ -125,14 +127,14 @@ func TestPersistentConnectorTelemetryTracksLifecycleAndIgnoresFailures(t *testin
 		snapshot: snapshot,
 	}
 	server, err := NewPersistentServer(store, IdentityProofVerifierFuncs{
-		AuthFunc: func(_ context.Context, _ AuthRequest, payload, signature []byte) error {
+		AuthFunc: func(_ context.Context, _ wire.AuthRequest, payload, signature []byte) error {
 			if !ed25519.Verify(private.Public().(ed25519.PublicKey), payload, signature) {
-				return ErrAuthenticationFailed
+				return wire.ErrAuthenticationFailed
 			}
 			return nil
 		},
-		RenewalFunc: func(context.Context, RenewalRequest, []byte, []byte) error { return nil },
-	}, ServerConfig{
+		RenewalFunc: func(context.Context, wire.RenewalRequest, []byte, []byte) error { return nil },
+	}, wire.ServerConfig{
 		Capabilities: requiredCapabilityList(), Clock: &testClock{now: now}, LeaseDuration: time.Minute,
 		HeartbeatInterval: 10 * time.Second, SessionIDs: func() (string, error) { return "session_telemetry_1", nil },
 	})
@@ -142,26 +144,26 @@ func TestPersistentConnectorTelemetryTracksLifecycleAndIgnoresFailures(t *testin
 	producer, events := newConnectorTelemetryProducer(t, now)
 	defer events.Close()
 	server.SetTelemetryProducer(producer)
-	hello := Hello{Protocol: ProtocolName, MinVersion: ProtocolVersion, MaxVersion: ProtocolVersion, AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, HostID: auth.HostID, ProcessGeneration: 1, Capabilities: requiredCapabilityList(), Auth: auth}
+	hello := wire.Hello{Protocol: wire.ProtocolName, MinVersion: wire.ProtocolVersion, MaxVersion: wire.ProtocolVersion, AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, HostID: auth.HostID, ProcessGeneration: 1, Capabilities: requiredCapabilityList(), Auth: auth}
 	session, welcome, first, err := server.Accept(context.Background(), hello)
 	if err != nil {
 		t.Fatal(err)
 	}
-	apply := Ack{AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, SessionID: welcome.SessionID, ProcessGeneration: 1, Kind: AckSnapshot, Status: AckApplied, Generation: first.Generation, ContentHash: first.ContentHash}
+	apply := wire.Ack{AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, SessionID: welcome.SessionID, ProcessGeneration: 1, Kind: wire.AckSnapshot, Status: wire.AckApplied, Generation: first.Generation, ContentHash: first.ContentHash}
 	if err := session.HandleAck(context.Background(), apply); err != nil {
 		t.Fatal(err)
 	}
-	readiness := Readiness{AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, SessionID: welcome.SessionID, ProcessGeneration: 1, Generation: first.Generation, ContentHash: first.ContentHash, EdgeReady: true, RouteReady: true, OriginReady: true}
+	readiness := wire.Readiness{AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, SessionID: welcome.SessionID, ProcessGeneration: 1, Generation: first.Generation, ContentHash: first.ContentHash, EdgeReady: true, RouteReady: true, OriginReady: true}
 	if _, err := session.HandleReadiness(context.Background(), readiness); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := session.BeginDrain(context.Background(), "drain_telemetry_1", now.Add(20*time.Second), true); err != nil {
 		t.Fatal(err)
 	}
-	if err := session.Close(context.Background(), ReasonProtocolClosed); err != nil {
+	if err := session.Close(context.Background(), wire.ReasonProtocolClosed); err != nil {
 		t.Fatal(err)
 	}
-	if err := session.Close(context.Background(), ReasonProtocolClosed); err != nil {
+	if err := session.Close(context.Background(), wire.ReasonProtocolClosed); err != nil {
 		t.Fatal(err)
 	}
 	if err := events.Flush(context.Background()); err != nil {
@@ -185,12 +187,12 @@ func TestPersistentConnectorTelemetryTracksLifecycleAndIgnoresFailures(t *testin
 func TestPersistentConnectorTelemetryFencesReplacementStaleAndReadiness(t *testing.T) {
 	now := time.Date(2026, 8, 31, 13, 0, 0, 0, time.UTC)
 	auth, private := testAuth(t, now, 1)
-	snapshot, err := NewSnapshot(auth.TunnelID, 1, testConfigPayload(1, "preview.example.test"))
+	snapshot, err := wire.NewSnapshot(auth.TunnelID, 1, testConfigPayload(1, "preview.example.test"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	store := &persistenceStoreStub{
-		authResult: AuthResult{
+		authResult: wire.AuthResult{
 			AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, HostID: auth.HostID,
 			IdentityKeyID: auth.IdentityKeyID, IdentityKeyThumbprint: auth.IdentityKeyThumbprint,
 			ProcessGeneration: 1, CredentialGeneration: auth.CredentialGeneration,
@@ -201,14 +203,14 @@ func TestPersistentConnectorTelemetryFencesReplacementStaleAndReadiness(t *testi
 	sessionIDs := []string{"session_replacement_1", "session_replacement_2", "session_stale_3"}
 	nextSessionID := 0
 	server, err := NewPersistentServer(store, IdentityProofVerifierFuncs{
-		AuthFunc: func(_ context.Context, _ AuthRequest, payload, signature []byte) error {
+		AuthFunc: func(_ context.Context, _ wire.AuthRequest, payload, signature []byte) error {
 			if !ed25519.Verify(private.Public().(ed25519.PublicKey), payload, signature) {
-				return ErrAuthenticationFailed
+				return wire.ErrAuthenticationFailed
 			}
 			return nil
 		},
-		RenewalFunc: func(context.Context, RenewalRequest, []byte, []byte) error { return nil },
-	}, ServerConfig{
+		RenewalFunc: func(context.Context, wire.RenewalRequest, []byte, []byte) error { return nil },
+	}, wire.ServerConfig{
 		Capabilities: requiredCapabilityList(), Clock: &testClock{now: now}, LeaseDuration: time.Minute,
 		HeartbeatInterval: 10 * time.Second,
 		SessionIDs: func() (string, error) {
@@ -223,9 +225,9 @@ func TestPersistentConnectorTelemetryFencesReplacementStaleAndReadiness(t *testi
 	producer, events := newConnectorTelemetryProducer(t, now)
 	defer events.Close()
 	server.SetTelemetryProducer(producer)
-	hello := func(request AuthRequest) Hello {
-		return Hello{
-			Protocol: ProtocolName, MinVersion: ProtocolVersion, MaxVersion: ProtocolVersion,
+	hello := func(request wire.AuthRequest) wire.Hello {
+		return wire.Hello{
+			Protocol: wire.ProtocolName, MinVersion: wire.ProtocolVersion, MaxVersion: wire.ProtocolVersion,
 			AccountID: request.AccountID, TunnelID: request.TunnelID, ConnectorID: request.ConnectorID,
 			HostID: request.HostID, ProcessGeneration: request.ProcessGeneration,
 			Capabilities: requiredCapabilityList(), Auth: request,
@@ -235,17 +237,17 @@ func TestPersistentConnectorTelemetryFencesReplacementStaleAndReadiness(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	staleReadiness := Readiness{
+	staleReadiness := wire.Readiness{
 		AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, SessionID: firstWelcome.SessionID,
 		ProcessGeneration: 1, Generation: firstSnapshot.Generation + 1, ContentHash: firstSnapshot.ContentHash,
 		EdgeReady: true, RouteReady: true, OriginReady: true,
 	}
-	if _, err := firstSession.HandleReadiness(context.Background(), staleReadiness); !errors.Is(err, ErrStaleGeneration) {
+	if _, err := firstSession.HandleReadiness(context.Background(), staleReadiness); !errors.Is(err, wire.ErrStaleGeneration) {
 		t.Fatalf("stale readiness error=%v", err)
 	}
-	firstAck := Ack{
+	firstAck := wire.Ack{
 		AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, SessionID: firstWelcome.SessionID,
-		ProcessGeneration: 1, Kind: AckSnapshot, Status: AckApplied, Generation: firstSnapshot.Generation, ContentHash: firstSnapshot.ContentHash,
+		ProcessGeneration: 1, Kind: wire.AckSnapshot, Status: wire.AckApplied, Generation: firstSnapshot.Generation, ContentHash: firstSnapshot.ContentHash,
 	}
 	if err := firstSession.HandleAck(context.Background(), firstAck); err != nil {
 		t.Fatal(err)
@@ -260,7 +262,7 @@ func TestPersistentConnectorTelemetryFencesReplacementStaleAndReadiness(t *testi
 	secondAuth.ProcessGeneration = 2
 	secondAuth.Nonce = "nonce-replacement-0002"
 	secondAuth.SignedProof = ""
-	secondAuth, err = SignAuthProof(secondAuth, func(payload []byte) []byte { return ed25519.Sign(private, payload) })
+	secondAuth, err = wire.SignAuthProof(secondAuth, func(payload []byte) []byte { return ed25519.Sign(private, payload) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,18 +275,18 @@ func TestPersistentConnectorTelemetryFencesReplacementStaleAndReadiness(t *testi
 	staleAuth := auth
 	staleAuth.Nonce = "nonce-stale-replacement-0003"
 	staleAuth.SignedProof = ""
-	staleAuth, err = SignAuthProof(staleAuth, func(payload []byte) []byte { return ed25519.Sign(private, payload) })
+	staleAuth, err = wire.SignAuthProof(staleAuth, func(payload []byte) []byte { return ed25519.Sign(private, payload) })
 	if err != nil {
 		t.Fatal(err)
 	}
 	store.authResult.ProcessGeneration = 1
-	if _, _, _, err := server.Accept(context.Background(), hello(staleAuth)); !errors.Is(err, ErrSessionConflict) {
+	if _, _, _, err := server.Accept(context.Background(), hello(staleAuth)); !errors.Is(err, wire.ErrSessionConflict) {
 		t.Fatalf("stale replacement accept error=%v", err)
 	}
-	if err := firstSession.HandleAck(context.Background(), firstAck); !errors.Is(err, ErrStaleSession) {
+	if err := firstSession.HandleAck(context.Background(), firstAck); !errors.Is(err, wire.ErrStaleSession) {
 		t.Fatalf("stale old-session ack error=%v", err)
 	}
-	if err := firstSession.Close(context.Background(), ReasonSessionReplaced); err != nil {
+	if err := firstSession.Close(context.Background(), wire.ReasonSessionReplaced); err != nil {
 		t.Fatal(err)
 	}
 
@@ -304,10 +306,10 @@ func TestPersistentConnectorTelemetryFencesReplacementStaleAndReadiness(t *testi
 	if _, err := secondSession.HandleReadiness(context.Background(), secondReady); err != nil {
 		t.Fatal(err)
 	}
-	if err := secondSession.Close(context.Background(), ReasonProtocolClosed); err != nil {
+	if err := secondSession.Close(context.Background(), wire.ReasonProtocolClosed); err != nil {
 		t.Fatal(err)
 	}
-	if err := secondSession.Close(context.Background(), ReasonProtocolClosed); err != nil {
+	if err := secondSession.Close(context.Background(), wire.ReasonProtocolClosed); err != nil {
 		t.Fatal(err)
 	}
 	if err := events.Flush(context.Background()); err != nil {

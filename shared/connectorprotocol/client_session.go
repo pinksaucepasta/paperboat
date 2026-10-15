@@ -59,7 +59,7 @@ type ClientSession struct {
 
 func NewClientSession(config ClientSessionConfig) (*ClientSession, error) {
 	if config.Clock == nil {
-		config.Clock = realClock{}
+		config.Clock = RealClock{}
 	}
 	if config.Applier == nil {
 		config.Applier = noopApplier{}
@@ -111,10 +111,10 @@ func (c *ClientSession) AcceptWelcome(welcome Welcome) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.state != SessionNew {
-		return codeError(ErrSessionConflict, ReasonProtocolClosed, false, nil)
+		return CodeError(ErrSessionConflict, ReasonProtocolClosed, false, nil)
 	}
 	if welcome.Version != ProtocolVersion || welcome.Protocol != ProtocolName {
-		return codeError(ErrProtocolIncompatible, ReasonProtocolMismatch, false, nil)
+		return CodeError(ErrProtocolIncompatible, ReasonProtocolMismatch, false, nil)
 	}
 	if _, err := NegotiateVersion(c.config.Hello.MinVersion, c.config.Hello.MaxVersion); err != nil {
 		return err
@@ -131,15 +131,15 @@ func (c *ClientSession) AcceptWelcome(welcome Welcome) error {
 
 func (c *ClientSession) ensureActiveLocked(now time.Time) error {
 	if c.state == SessionClosed {
-		return codeError(ErrSessionClosed, c.disconnectReason, false, nil)
+		return CodeError(ErrSessionClosed, c.disconnectReason, false, nil)
 	}
 	if c.state == SessionNew {
-		return codeError(ErrSessionConflict, ReasonProtocolClosed, false, nil)
+		return CodeError(ErrSessionConflict, ReasonProtocolClosed, false, nil)
 	}
 	if !c.lastHeartbeatAck.IsZero() && now.Sub(c.lastHeartbeatAck) > 2*time.Duration(c.lease.HeartbeatIntervalMS)*time.Millisecond {
 		c.state = SessionClosed
 		c.disconnectReason = ReasonHeartbeatTimeout
-		return codeError(ErrHeartbeatTimeout, ReasonHeartbeatTimeout, true, nil)
+		return CodeError(ErrHeartbeatTimeout, ReasonHeartbeatTimeout, true, nil)
 	}
 	return nil
 }
@@ -149,7 +149,7 @@ func (c *ClientSession) ApplySnapshot(ctx context.Context, snapshot Snapshot) (A
 		return Ack{}, ErrInvalidInput
 	}
 	if err := snapshot.Validate(); err != nil {
-		return Ack{}, codeError(ErrSnapshotRejected, ReasonSnapshotRejected, false, err)
+		return Ack{}, CodeError(ErrSnapshotRejected, ReasonSnapshotRejected, false, err)
 	}
 	c.applyMu.Lock()
 	defer c.applyMu.Unlock()
@@ -160,11 +160,11 @@ func (c *ClientSession) ApplySnapshot(ctx context.Context, snapshot Snapshot) (A
 	}
 	if snapshot.TunnelID != c.config.Hello.TunnelID {
 		c.mu.Unlock()
-		return Ack{}, codeError(ErrIdentityMismatch, ReasonAuthentication, false, nil)
+		return Ack{}, CodeError(ErrIdentityMismatch, ReasonAuthentication, false, nil)
 	}
 	if err := snapshot.ValidateBound(); err != nil || snapshot.AccountID != c.config.Hello.AccountID || snapshot.ConnectorID != c.config.Hello.ConnectorID || snapshot.SessionID != c.welcome.SessionID || snapshot.ProcessGeneration != c.config.Hello.ProcessGeneration {
 		c.mu.Unlock()
-		return Ack{}, codeError(ErrIdentityMismatch, ReasonAuthentication, false, nil)
+		return Ack{}, CodeError(ErrIdentityMismatch, ReasonAuthentication, false, nil)
 	}
 	current := c.active
 	if c.hasCandidate {
@@ -174,7 +174,7 @@ func (c *ClientSession) ApplySnapshot(ctx context.Context, snapshot Snapshot) (A
 	if hasCurrent {
 		if snapshot.Generation < current.Generation {
 			c.mu.Unlock()
-			return Ack{}, codeError(ErrStaleGeneration, ReasonStaleGeneration, false, nil)
+			return Ack{}, CodeError(ErrStaleGeneration, ReasonStaleGeneration, false, nil)
 		}
 		if snapshot.Generation == current.Generation {
 			if snapshot.ContentHash == current.ContentHash {
@@ -183,12 +183,12 @@ func (c *ClientSession) ApplySnapshot(ctx context.Context, snapshot Snapshot) (A
 				return ack, nil
 			}
 			c.mu.Unlock()
-			return Ack{}, codeError(ErrContentHashMismatch, ReasonSnapshotRejected, false, nil)
+			return Ack{}, CodeError(ErrContentHashMismatch, ReasonSnapshotRejected, false, nil)
 		}
 	}
 	c.mu.Unlock()
 	if err := ctx.Err(); err != nil {
-		return Ack{}, codeError(ErrCanceled, ReasonCanceled, true, err)
+		return Ack{}, CodeError(ErrCanceled, ReasonCanceled, true, err)
 	}
 	prepareCtx, cancelPrepare := context.WithTimeout(ctx, c.config.ApplyTimeout)
 	prepared, err := c.config.Applier.PrepareSnapshot(prepareCtx, snapshot)
@@ -201,16 +201,16 @@ func (c *ClientSession) ApplySnapshot(ctx context.Context, snapshot Snapshot) (A
 			if cause == nil {
 				cause = prepareErr
 			}
-			return Ack{}, codeError(ErrCanceled, ReasonCanceled, true, joinCleanup(cause, abortErr))
+			return Ack{}, CodeError(ErrCanceled, ReasonCanceled, true, joinCleanup(errors.Join(cause, err), abortErr))
 		}
-		return Ack{}, codeError(ErrSnapshotRejected, ReasonSnapshotRejected, false, joinCleanup(err, abortErr))
+		return Ack{}, CodeError(ErrSnapshotRejected, ReasonSnapshotRejected, false, joinCleanup(err, abortErr))
 	}
 	if prepareErr != nil {
 		abortErr := c.abortPrepared(prepared)
-		return Ack{}, codeError(ErrCanceled, ReasonCanceled, true, joinCleanup(prepareErr, abortErr))
+		return Ack{}, CodeError(ErrCanceled, ReasonCanceled, true, joinCleanup(prepareErr, abortErr))
 	}
 	if prepared == nil {
-		return Ack{}, codeError(ErrSnapshotRejected, ReasonSnapshotRejected, false, errors.New("applier returned nil prepared configuration"))
+		return Ack{}, CodeError(ErrSnapshotRejected, ReasonSnapshotRejected, false, errors.New("applier returned nil prepared configuration"))
 	}
 	c.mu.Lock()
 	if err := c.ensureActiveLocked(c.config.Clock.Now().UTC()); err != nil {
@@ -219,9 +219,9 @@ func (c *ClientSession) ApplySnapshot(ctx context.Context, snapshot Snapshot) (A
 	}
 	if c.hasCandidate && c.prepared != nil {
 		c.mu.Unlock()
-		return Ack{}, c.abortAndJoin(codeError(ErrGenerationGap, ReasonGenerationGap, true, nil), prepared)
+		return Ack{}, c.abortAndJoin(CodeError(ErrGenerationGap, ReasonGenerationGap, true, nil), prepared)
 	}
-	snapshot = bindSnapshot(snapshot, c.config.Hello.AccountID, c.config.Hello.ConnectorID, c.welcome.SessionID, c.config.Hello.ProcessGeneration)
+	snapshot = BindSnapshot(snapshot, c.config.Hello.AccountID, c.config.Hello.ConnectorID, c.welcome.SessionID, c.config.Hello.ProcessGeneration)
 	c.candidate = snapshot
 	c.hasCandidate = true
 	c.prepared = prepared
@@ -238,7 +238,7 @@ func (c *ClientSession) ApplyDelta(ctx context.Context, delta Delta) (Ack, error
 		return Ack{}, ErrInvalidInput
 	}
 	if err := delta.Validate(); err != nil {
-		return Ack{}, codeError(ErrDeltaRejected, ReasonGenerationGap, false, err)
+		return Ack{}, CodeError(ErrDeltaRejected, ReasonGenerationGap, false, err)
 	}
 	c.applyMu.Lock()
 	defer c.applyMu.Unlock()
@@ -249,32 +249,32 @@ func (c *ClientSession) ApplyDelta(ctx context.Context, delta Delta) (Ack, error
 	}
 	if err := delta.ValidateBound(); err != nil || delta.TunnelID != c.config.Hello.TunnelID || delta.AccountID != c.config.Hello.AccountID || delta.ConnectorID != c.config.Hello.ConnectorID || delta.SessionID != c.welcome.SessionID || delta.ProcessGeneration != c.config.Hello.ProcessGeneration {
 		c.mu.Unlock()
-		return Ack{}, codeError(ErrIdentityMismatch, ReasonAuthentication, false, nil)
+		return Ack{}, CodeError(ErrIdentityMismatch, ReasonAuthentication, false, nil)
 	}
 	if !c.hasActive || c.needsSnapshot || c.hasCandidate {
 		ack := c.makeAckLocked(AckDelta, AckSnapshotRequired, Snapshot{Generation: delta.Generation, ContentHash: delta.ContentHash})
 		c.mu.Unlock()
-		return ack, codeError(ErrSnapshotRequired, ReasonGenerationGap, true, nil)
+		return ack, CodeError(ErrSnapshotRequired, ReasonGenerationGap, true, nil)
 	}
 	if delta.PreviousGeneration == c.active.Generation && delta.PreviousContentHash == c.active.ContentHash {
 		if delta.Generation != c.active.Generation+1 {
 			c.needsSnapshot = true
 			ack := c.makeAckLocked(AckDelta, AckSnapshotRequired, Snapshot{Generation: delta.Generation, ContentHash: delta.ContentHash})
 			c.mu.Unlock()
-			return ack, codeError(ErrGenerationGap, ReasonGenerationGap, true, nil)
+			return ack, CodeError(ErrGenerationGap, ReasonGenerationGap, true, nil)
 		}
 	} else if delta.Generation <= c.active.Generation {
 		c.mu.Unlock()
-		return Ack{}, codeError(ErrStaleGeneration, ReasonStaleGeneration, false, nil)
+		return Ack{}, CodeError(ErrStaleGeneration, ReasonStaleGeneration, false, nil)
 	} else {
 		c.needsSnapshot = true
 		ack := c.makeAckLocked(AckDelta, AckSnapshotRequired, Snapshot{Generation: delta.Generation, ContentHash: delta.ContentHash})
 		c.mu.Unlock()
-		return ack, codeError(ErrGenerationGap, ReasonGenerationGap, true, nil)
+		return ack, CodeError(ErrGenerationGap, ReasonGenerationGap, true, nil)
 	}
 	c.mu.Unlock()
 	if err := ctx.Err(); err != nil {
-		return Ack{}, codeError(ErrCanceled, ReasonCanceled, true, err)
+		return Ack{}, CodeError(ErrCanceled, ReasonCanceled, true, err)
 	}
 	prepareCtx, cancelPrepare := context.WithTimeout(ctx, c.config.ApplyTimeout)
 	prepared, err := c.config.Applier.PrepareDelta(prepareCtx, delta)
@@ -287,16 +287,16 @@ func (c *ClientSession) ApplyDelta(ctx context.Context, delta Delta) (Ack, error
 			if cause == nil {
 				cause = prepareErr
 			}
-			return Ack{}, codeError(ErrCanceled, ReasonCanceled, true, joinCleanup(cause, abortErr))
+			return Ack{}, CodeError(ErrCanceled, ReasonCanceled, true, joinCleanup(errors.Join(cause, err), abortErr))
 		}
-		return Ack{}, codeError(ErrDeltaRejected, ReasonSnapshotRejected, false, joinCleanup(err, abortErr))
+		return Ack{}, CodeError(ErrDeltaRejected, ReasonSnapshotRejected, false, joinCleanup(err, abortErr))
 	}
 	if prepareErr != nil {
 		abortErr := c.abortPrepared(prepared)
-		return Ack{}, codeError(ErrCanceled, ReasonCanceled, true, joinCleanup(prepareErr, abortErr))
+		return Ack{}, CodeError(ErrCanceled, ReasonCanceled, true, joinCleanup(prepareErr, abortErr))
 	}
 	if prepared == nil {
-		return Ack{}, codeError(ErrDeltaRejected, ReasonSnapshotRejected, false, errors.New("applier returned nil prepared configuration"))
+		return Ack{}, CodeError(ErrDeltaRejected, ReasonSnapshotRejected, false, errors.New("applier returned nil prepared configuration"))
 	}
 	c.mu.Lock()
 	if err := c.ensureActiveLocked(c.config.Clock.Now().UTC()); err != nil {
@@ -305,7 +305,7 @@ func (c *ClientSession) ApplyDelta(ctx context.Context, delta Delta) (Ack, error
 	}
 	if c.hasCandidate && c.prepared != nil {
 		c.mu.Unlock()
-		return Ack{}, c.abortAndJoin(codeError(ErrGenerationGap, ReasonGenerationGap, true, nil), prepared)
+		return Ack{}, c.abortAndJoin(CodeError(ErrGenerationGap, ReasonGenerationGap, true, nil), prepared)
 	}
 	c.candidate = Snapshot{AccountID: c.config.Hello.AccountID, TunnelID: delta.TunnelID, ConnectorID: c.config.Hello.ConnectorID, Generation: delta.Generation, SessionID: c.welcome.SessionID, ProcessGeneration: c.config.Hello.ProcessGeneration, ContentHash: delta.ContentHash, Payload: append([]byte(nil), delta.Payload...)}
 	c.hasCandidate = true
@@ -369,21 +369,21 @@ func (c *ClientSession) MarkReadyContext(ctx context.Context, edgeReady, routeRe
 	}
 	if !c.hasCandidate {
 		c.mu.Unlock()
-		return Readiness{}, codeError(ErrSnapshotRequired, ReasonGenerationGap, true, nil)
+		return Readiness{}, CodeError(ErrSnapshotRequired, ReasonGenerationGap, true, nil)
 	}
 	readiness := Readiness{AccountID: c.config.Hello.AccountID, SessionID: c.welcome.SessionID, TunnelID: c.config.Hello.TunnelID, ConnectorID: c.config.Hello.ConnectorID, ProcessGeneration: c.config.Hello.ProcessGeneration, Generation: c.candidate.Generation, ContentHash: c.candidate.ContentHash, EdgeReady: edgeReady, RouteReady: routeReady, OriginReady: originReady}
 	if !edgeReady || !routeReady || !originReady {
 		c.mu.Unlock()
-		return readiness, codeError(ErrNotReady, ReasonSnapshotRejected, true, nil)
+		return readiness, CodeError(ErrNotReady, ReasonSnapshotRejected, true, nil)
 	}
 	prepared := c.prepared
 	candidate := cloneSnapshot(c.candidate)
 	c.mu.Unlock()
 	if err := ctx.Err(); err != nil {
-		return readiness, codeError(ErrCanceled, ReasonCanceled, true, err)
+		return readiness, CodeError(ErrCanceled, ReasonCanceled, true, err)
 	}
 	if prepared == nil {
-		return readiness, codeError(ErrSnapshotRejected, ReasonSnapshotRejected, false, errors.New("missing prepared configuration"))
+		return readiness, CodeError(ErrSnapshotRejected, ReasonSnapshotRejected, false, errors.New("missing prepared configuration"))
 	}
 	if err := prepared.Activate(ctx); err != nil {
 		abortErr := c.abortPrepared(prepared)
@@ -397,9 +397,9 @@ func (c *ClientSession) MarkReadyContext(ctx context.Context, edgeReady, routeRe
 		}
 		c.mu.Unlock()
 		if ctx.Err() != nil {
-			return readiness, codeError(ErrCanceled, ReasonCanceled, true, joinCleanup(err, abortErr))
+			return readiness, CodeError(ErrCanceled, ReasonCanceled, true, joinCleanup(errors.Join(ctx.Err(), err), abortErr))
 		}
-		return readiness, codeError(ErrSnapshotRejected, ReasonSnapshotRejected, false, joinCleanup(err, abortErr))
+		return readiness, CodeError(ErrSnapshotRejected, ReasonSnapshotRejected, false, joinCleanup(err, abortErr))
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -407,7 +407,7 @@ func (c *ClientSession) MarkReadyContext(ctx context.Context, edgeReady, routeRe
 		return readiness, err
 	}
 	if !c.hasCandidate || c.candidate.Generation != candidate.Generation || c.candidate.ContentHash != candidate.ContentHash {
-		return readiness, codeError(ErrSessionConflict, ReasonStaleGeneration, true, nil)
+		return readiness, CodeError(ErrSessionConflict, ReasonStaleGeneration, true, nil)
 	}
 	c.active = cloneSnapshot(c.candidate)
 	c.hasActive = true
@@ -438,7 +438,7 @@ func (c *ClientSession) Heartbeat(now time.Time) (Heartbeat, error) {
 	// is still pending. This is liveness only and cannot activate the candidate.
 	current, ok := c.currentCandidateLocked()
 	if !ok {
-		return Heartbeat{}, codeError(ErrSnapshotRequired, ReasonGenerationGap, true, nil)
+		return Heartbeat{}, CodeError(ErrSnapshotRequired, ReasonGenerationGap, true, nil)
 	}
 	return Heartbeat{AccountID: c.config.Hello.AccountID, SessionID: c.welcome.SessionID, TunnelID: c.config.Hello.TunnelID, ConnectorID: c.config.Hello.ConnectorID, ProcessGeneration: c.config.Hello.ProcessGeneration, LastAppliedGeneration: current.Generation, LastAppliedHash: current.ContentHash, SentAt: now}, nil
 }
@@ -457,7 +457,7 @@ func (c *ClientSession) AcceptHeartbeatAck(ack HeartbeatAck) error {
 		return err
 	}
 	if ack.AccountID != c.config.Hello.AccountID || ack.TunnelID != c.config.Hello.TunnelID || ack.ConnectorID != c.config.Hello.ConnectorID || ack.SessionID != c.welcome.SessionID || ack.ProcessGeneration != c.config.Hello.ProcessGeneration {
-		return codeError(ErrIdentityMismatch, ReasonAuthentication, false, nil)
+		return CodeError(ErrIdentityMismatch, ReasonAuthentication, false, nil)
 	}
 	c.lease.ExpiresAt = ack.LeaseExpiresAt
 	c.lastHeartbeatAck = now
@@ -473,7 +473,7 @@ func (c *ClientSession) HandleDrain(ctx context.Context, request Drain) (DrainAc
 		return DrainAck{}, ErrInvalidInput
 	}
 	if err := ctx.Err(); err != nil {
-		return DrainAck{}, codeError(ErrCanceled, ReasonCanceled, true, err)
+		return DrainAck{}, CodeError(ErrCanceled, ReasonCanceled, true, err)
 	}
 	now := c.config.Clock.Now().UTC()
 	if err := request.Validate(now); err != nil {
@@ -484,25 +484,25 @@ func (c *ClientSession) HandleDrain(ctx context.Context, request Drain) (DrainAc
 		c.mu.Unlock()
 		return DrainAck{}, err
 	}
-	if !hasCapability(c.welcome.Capabilities, CapabilityDrain) {
+	if !HasCapability(c.welcome.Capabilities, CapabilityDrain) {
 		c.mu.Unlock()
-		return DrainAck{}, codeError(ErrCapabilityMissing, ReasonCapabilityMissing, false, nil)
+		return DrainAck{}, CodeError(ErrCapabilityMissing, ReasonCapabilityMissing, false, nil)
 	}
 	if request.AccountID != c.config.Hello.AccountID || request.TunnelID != c.config.Hello.TunnelID || request.ConnectorID != c.config.Hello.ConnectorID || request.SessionID != c.welcome.SessionID || request.ProcessGeneration != c.config.Hello.ProcessGeneration {
 		ack := c.makeDrainAckLocked(request, DrainRejected, 0, false, CodeDrainRejected)
 		c.mu.Unlock()
-		return ack, codeError(ErrIdentityMismatch, ReasonAuthentication, false, nil)
+		return ack, CodeError(ErrIdentityMismatch, ReasonAuthentication, false, nil)
 	}
 	if c.drain != nil {
 		if request.DrainID != c.drain.DrainID {
 			ack := c.makeDrainAckLocked(request, DrainRejected, c.activeStreams, false, CodeDrainRejected)
 			c.mu.Unlock()
-			return ack, codeError(ErrSessionConflict, ReasonStaleGeneration, true, nil)
+			return ack, CodeError(ErrSessionConflict, ReasonStaleGeneration, true, nil)
 		}
 		if request.Generation != c.drain.Generation || request.ContentHash != c.drain.ContentHash {
 			ack := c.makeDrainAckLocked(request, DrainRejected, c.activeStreams, false, CodeDrainRejected)
 			c.mu.Unlock()
-			return ack, codeError(ErrContentHashMismatch, ReasonSnapshotRejected, false, nil)
+			return ack, CodeError(ErrContentHashMismatch, ReasonSnapshotRejected, false, nil)
 		}
 		ack := c.makeDrainAckLocked(request, c.drainStatus, c.activeStreams, c.drainStatus == DrainForced, c.drainCode)
 		c.mu.Unlock()
@@ -511,12 +511,12 @@ func (c *ClientSession) HandleDrain(ctx context.Context, request Drain) (DrainAc
 	if !c.hasActive || c.needsSnapshot || c.readyGeneration != c.active.Generation {
 		ack := c.makeDrainAckLocked(request, DrainRejected, 0, false, CodeDrainRejected)
 		c.mu.Unlock()
-		return ack, codeError(ErrNotReady, ReasonSnapshotRejected, true, nil)
+		return ack, CodeError(ErrNotReady, ReasonSnapshotRejected, true, nil)
 	}
 	if request.Generation != c.active.Generation || request.ContentHash != c.active.ContentHash {
 		ack := c.makeDrainAckLocked(request, DrainRejected, 0, false, CodeDrainRejected)
 		c.mu.Unlock()
-		return ack, codeError(ErrStaleGeneration, ReasonStaleGeneration, true, nil)
+		return ack, CodeError(ErrStaleGeneration, ReasonStaleGeneration, true, nil)
 	}
 	c.drain = cloneDrain(request)
 	c.drainStatus = DrainAccepted
@@ -541,7 +541,7 @@ func (c *ClientSession) HandleDrain(ctx context.Context, request Drain) (DrainAc
 		}
 		ack := c.makeDrainAckLocked(request, DrainRejected, c.activeStreams, false, CodeDrainRejected)
 		c.mu.Unlock()
-		return ack, codeError(ErrDrainRejected, ReasonSnapshotRejected, true, stopErr)
+		return ack, CodeError(ErrDrainRejected, ReasonSnapshotRejected, true, stopErr)
 	}
 	countCtx, cancelCount := context.WithTimeout(ctx, c.config.AbortTimeout)
 	activeStreams, countErr := c.config.Drainer.ActiveStreams(countCtx)
@@ -559,12 +559,12 @@ func (c *ClientSession) HandleDrain(ctx context.Context, request Drain) (DrainAc
 		}
 		ack := c.makeDrainAckLocked(request, DrainRejected, 0, false, CodeDrainRejected)
 		c.mu.Unlock()
-		return ack, codeError(ErrDrainRejected, ReasonSnapshotRejected, true, countErr)
+		return ack, CodeError(ErrDrainRejected, ReasonSnapshotRejected, true, countErr)
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.drain == nil || c.drain.DrainID != request.DrainID {
-		return c.makeDrainAckLocked(request, DrainRejected, activeStreams, false, CodeDrainRejected), codeError(ErrStaleSession, ReasonStaleGeneration, false, nil)
+		return c.makeDrainAckLocked(request, DrainRejected, activeStreams, false, CodeDrainRejected), CodeError(ErrStaleSession, ReasonStaleGeneration, false, nil)
 	}
 	c.activeStreams = activeStreams
 	return c.makeDrainAckLocked(request, DrainAccepted, activeStreams, false, ""), nil
@@ -581,7 +581,7 @@ func (c *ClientSession) DrainProgress(ctx context.Context, activeStreams uint32,
 		return DrainAck{}, ErrInvalidInput
 	}
 	if err := ctx.Err(); err != nil {
-		return DrainAck{}, codeError(ErrCanceled, ReasonCanceled, true, err)
+		return DrainAck{}, CodeError(ErrCanceled, ReasonCanceled, true, err)
 	}
 	now := c.config.Clock.Now().UTC()
 	c.mu.Lock()
@@ -590,7 +590,7 @@ func (c *ClientSession) DrainProgress(ctx context.Context, activeStreams uint32,
 		return DrainAck{}, err
 	}
 	if c.drain == nil {
-		return DrainAck{}, codeError(ErrSessionConflict, ReasonStaleGeneration, false, nil)
+		return DrainAck{}, CodeError(ErrSessionConflict, ReasonStaleGeneration, false, nil)
 	}
 	c.activeStreams = activeStreams
 	if c.drainCompleted {
@@ -598,7 +598,7 @@ func (c *ClientSession) DrainProgress(ctx context.Context, activeStreams uint32,
 	}
 	if forcedClose {
 		if activeStreams != 0 {
-			return DrainAck{}, codeError(ErrInvalidInput, ReasonSnapshotRejected, false, errors.New("forced drain must have zero active streams"))
+			return DrainAck{}, CodeError(ErrInvalidInput, ReasonSnapshotRejected, false, errors.New("forced drain must have zero active streams"))
 		}
 		c.drainStatus = DrainForced
 		c.drainCode = CodeDrainTimeout
@@ -612,7 +612,7 @@ func (c *ClientSession) DrainProgress(ctx context.Context, activeStreams uint32,
 		return c.makeDrainAckLocked(*c.drain, DrainCompleted, 0, false, ""), nil
 	}
 	if !now.Before(c.drain.Deadline) {
-		return c.makeDrainAckLocked(*c.drain, DrainProgress, activeStreams, false, ""), codeError(ErrDrainTimeout, ReasonHeartbeatTimeout, true, nil)
+		return c.makeDrainAckLocked(*c.drain, DrainProgress, activeStreams, false, ""), CodeError(ErrDrainTimeout, ReasonHeartbeatTimeout, true, nil)
 	}
 	c.drainStatus = DrainProgress
 	c.drainCode = ""
@@ -634,7 +634,7 @@ func (c *ClientSession) CompleteDrain(ctx context.Context, force bool) (DrainAck
 	active := c.activeStreams
 	c.mu.RUnlock()
 	if request == nil {
-		return DrainAck{}, codeError(ErrSessionConflict, ReasonStaleGeneration, false, nil)
+		return DrainAck{}, CodeError(ErrSessionConflict, ReasonStaleGeneration, false, nil)
 	}
 	if completed {
 		c.mu.RLock()
@@ -647,7 +647,7 @@ func (c *ClientSession) CompleteDrain(ctx context.Context, force bool) (DrainAck
 		err := c.config.Drainer.ForceClose(forceCtx)
 		cancel()
 		if err != nil {
-			return DrainAck{}, codeError(ErrDrainRejected, ReasonSnapshotRejected, true, err)
+			return DrainAck{}, CodeError(ErrDrainRejected, ReasonSnapshotRejected, true, err)
 		}
 		return c.DrainProgress(ctx, 0, true)
 	}
@@ -655,7 +655,7 @@ func (c *ClientSession) CompleteDrain(ctx context.Context, force bool) (DrainAck
 	active, err := c.config.Drainer.ActiveStreams(countCtx)
 	cancel()
 	if err != nil {
-		return DrainAck{}, codeError(ErrDrainRejected, ReasonSnapshotRejected, true, err)
+		return DrainAck{}, CodeError(ErrDrainRejected, ReasonSnapshotRejected, true, err)
 	}
 	return c.DrainProgress(ctx, active, false)
 }
@@ -702,10 +702,10 @@ func (c *ClientSession) RenewalRequest(now time.Time, nonce, signedProof string)
 
 func (c *ClientSession) ensureActiveReadLocked(now time.Time) error {
 	if c.state == SessionClosed {
-		return codeError(ErrSessionClosed, c.disconnectReason, false, nil)
+		return CodeError(ErrSessionClosed, c.disconnectReason, false, nil)
 	}
 	if c.state == SessionNew {
-		return codeError(ErrSessionConflict, ReasonProtocolClosed, false, nil)
+		return CodeError(ErrSessionConflict, ReasonProtocolClosed, false, nil)
 	}
 	return nil
 }
@@ -760,10 +760,10 @@ func (c *ClientSession) ApplyRenewal(result AuthResult) error {
 		return err
 	}
 	if result.AccountID != c.auth.AccountID || result.TunnelID != c.auth.TunnelID || result.ConnectorID != c.auth.ConnectorID || result.SessionID != c.welcome.SessionID || result.HostID != c.auth.HostID || result.IdentityKeyID != c.auth.IdentityKeyID || result.IdentityKeyThumbprint != c.auth.IdentityKeyThumbprint || result.ProcessGeneration != c.config.Hello.ProcessGeneration || result.CredentialGeneration < c.auth.CredentialGeneration {
-		return codeError(ErrIdentityMismatch, ReasonAuthentication, false, nil)
+		return CodeError(ErrIdentityMismatch, ReasonAuthentication, false, nil)
 	}
 	if result.CredentialExpiresAt.Before(c.auth.ExpiresAt) || result.LeaseExpiresAt.Before(c.lease.ExpiresAt) {
-		return codeError(ErrSessionConflict, ReasonAuthentication, false, nil)
+		return CodeError(ErrSessionConflict, ReasonAuthentication, false, nil)
 	}
 	if result.CredentialGeneration == c.auth.CredentialGeneration && result.CredentialExpiresAt.Equal(c.auth.ExpiresAt) && result.LeaseExpiresAt.Equal(c.lease.ExpiresAt) {
 		return nil
@@ -839,7 +839,7 @@ func (c *ClientSession) State() SessionState {
 }
 
 func (c *ClientSession) Close(reason DisconnectReason) error {
-	if c == nil || !validDisconnectReason(reason) {
+	if c == nil || !ValidDisconnectReason(reason) {
 		return ErrInvalidInput
 	}
 	c.applyMu.Lock()
@@ -857,7 +857,7 @@ func (c *ClientSession) Close(reason DisconnectReason) error {
 	c.hasCandidate = false
 	c.mu.Unlock()
 	if err := c.abortPrepared(prepared); err != nil {
-		return codeError(ErrSnapshotRejected, ReasonSnapshotRejected, false, joinCleanup(nil, err))
+		return CodeError(ErrSnapshotRejected, ReasonSnapshotRejected, false, joinCleanup(nil, err))
 	}
 	return nil
 }

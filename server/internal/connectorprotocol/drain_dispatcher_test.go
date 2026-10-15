@@ -6,6 +6,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 type drainOperationSourceStub struct {
@@ -29,12 +31,12 @@ func (s *drainOperationSourceStub) ListConnectorDrainOperations(_ context.Contex
 
 type drainFrameSender struct {
 	mu       sync.Mutex
-	frames   []Frame
+	frames   []wire.Frame
 	failures int
 	err      error
 }
 
-func (s *drainFrameSender) send(_ context.Context, frame Frame) error {
+func (s *drainFrameSender) send(_ context.Context, frame wire.Frame) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.failures > 0 {
@@ -45,44 +47,44 @@ func (s *drainFrameSender) send(_ context.Context, frame Frame) error {
 	return nil
 }
 
-func (s *drainFrameSender) snapshot() []Frame {
+func (s *drainFrameSender) snapshot() []wire.Frame {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return append([]Frame(nil), s.frames...)
+	return append([]wire.Frame(nil), s.frames...)
 }
 
 func newDrainDispatcherTestSession(t *testing.T, now time.Time, processGeneration uint64, sessionID string, capabilities []string) DrainLiveSession {
 	t.Helper()
 	auth, _ := testAuth(t, now, processGeneration)
-	snapshot, err := NewSnapshot(auth.TunnelID, 7, testConfigPayload(7, "app.example.test"))
+	snapshot, err := wire.NewSnapshot(auth.TunnelID, 7, testConfigPayload(7, "app.example.test"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := &persistenceStoreStub{authResult: AuthResult{
+	store := &persistenceStoreStub{authResult: wire.AuthResult{
 		AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID,
 		HostID: auth.HostID, IdentityKeyID: auth.IdentityKeyID, IdentityKeyThumbprint: auth.IdentityKeyThumbprint,
 		ProcessGeneration: processGeneration, CredentialGeneration: auth.CredentialGeneration,
 		CredentialExpiresAt: now.Add(time.Hour), LeaseExpiresAt: now.Add(time.Hour),
 	}, snapshot: snapshot}
 	server, err := NewPersistentServer(store, IdentityProofVerifierFuncs{
-		AuthFunc:    func(context.Context, AuthRequest, []byte, []byte) error { return nil },
-		RenewalFunc: func(context.Context, RenewalRequest, []byte, []byte) error { return nil },
-	}, ServerConfig{
+		AuthFunc:    func(context.Context, wire.AuthRequest, []byte, []byte) error { return nil },
+		RenewalFunc: func(context.Context, wire.RenewalRequest, []byte, []byte) error { return nil },
+	}, wire.ServerConfig{
 		Capabilities: capabilities, Clock: &testClock{now: now}, LeaseDuration: time.Minute,
 		HeartbeatInterval: 10 * time.Second, SessionIDs: func() (string, error) { return sessionID, nil },
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	hello := Hello{Protocol: ProtocolName, MinVersion: ProtocolVersion, MaxVersion: ProtocolVersion, AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, HostID: auth.HostID, ProcessGeneration: processGeneration, Capabilities: capabilities, Auth: auth}
+	hello := wire.Hello{Protocol: wire.ProtocolName, MinVersion: wire.ProtocolVersion, MaxVersion: wire.ProtocolVersion, AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, HostID: auth.HostID, ProcessGeneration: processGeneration, Capabilities: capabilities, Auth: auth}
 	session, welcome, candidate, err := server.Accept(context.Background(), hello)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := session.HandleAck(context.Background(), Ack{AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, SessionID: welcome.SessionID, ProcessGeneration: processGeneration, Kind: AckSnapshot, Status: AckApplied, Generation: candidate.Generation, ContentHash: candidate.ContentHash}); err != nil {
+	if err := session.HandleAck(context.Background(), wire.Ack{AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, SessionID: welcome.SessionID, ProcessGeneration: processGeneration, Kind: wire.AckSnapshot, Status: wire.AckApplied, Generation: candidate.Generation, ContentHash: candidate.ContentHash}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := session.HandleReadiness(context.Background(), Readiness{AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, SessionID: welcome.SessionID, ProcessGeneration: processGeneration, Generation: candidate.Generation, ContentHash: candidate.ContentHash, EdgeReady: true, RouteReady: true, OriginReady: true}); err != nil {
+	if _, err := session.HandleReadiness(context.Background(), wire.Readiness{AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, SessionID: welcome.SessionID, ProcessGeneration: processGeneration, Generation: candidate.Generation, ContentHash: candidate.ContentHash, EdgeReady: true, RouteReady: true, OriginReady: true}); err != nil {
 		t.Fatal(err)
 	}
 	return DrainLiveSession{
@@ -122,7 +124,7 @@ func newDrainDispatcherForTest(t *testing.T, now time.Time, source *drainOperati
 
 func TestDrainDispatcherDeliversExactDrainAndReplaysSameOperation(t *testing.T) {
 	now := time.Date(2026, 8, 31, 10, 0, 0, 0, time.UTC)
-	live := newDrainDispatcherTestSession(t, now, 1, "session_drain_01", ProductionCapabilities())
+	live := newDrainDispatcherTestSession(t, now, 1, "session_drain_01", wire.ProductionCapabilities())
 	operation := operationForDrainSession(live, "operation_drain_01", "connector.drain")
 	source := &drainOperationSourceStub{operations: []DrainOperation{operation}}
 	dispatcher := newDrainDispatcherForTest(t, now, source)
@@ -141,8 +143,8 @@ func TestDrainDispatcherDeliversExactDrainAndReplaysSameOperation(t *testing.T) 
 	if len(delivered) != 2 {
 		t.Fatalf("delivered frames = %d, want 2", len(delivered))
 	}
-	var first, replay Drain
-	if delivered[0].Type != MessageDrain || delivered[0].RequestID != operation.OperationID || delivered[0].DecodePayload(&first) != nil || delivered[1].DecodePayload(&replay) != nil {
+	var first, replay wire.Drain
+	if delivered[0].Type != wire.MessageDrain || delivered[0].RequestID != operation.OperationID || delivered[0].DecodePayload(&first) != nil || delivered[1].DecodePayload(&replay) != nil {
 		t.Fatalf("frames = %+v", delivered)
 	}
 	if first != replay || first.DrainID != operation.OperationID || first.AccountID != operation.AccountID || first.TunnelID != operation.TunnelID || first.ConnectorID != operation.ConnectorID || first.SessionID != operation.SessionID || first.ProcessGeneration != operation.ProcessGeneration || first.Generation != operation.ConfigGeneration || first.ContentHash != operation.ConfigContentHash || first.ForceAfterDeadline || !first.Deadline.Equal(now.Add(40*time.Second)) {
@@ -152,7 +154,7 @@ func TestDrainDispatcherDeliversExactDrainAndReplaysSameOperation(t *testing.T) 
 
 func TestDrainDispatcherRevokeForcesAtBoundedDeadline(t *testing.T) {
 	now := time.Date(2026, 8, 31, 10, 10, 0, 0, time.UTC)
-	live := newDrainDispatcherTestSession(t, now, 1, "session_revoke_01", ProductionCapabilities())
+	live := newDrainDispatcherTestSession(t, now, 1, "session_revoke_01", wire.ProductionCapabilities())
 	operation := operationForDrainSession(live, "operation_revoke_01", "connector.revoke")
 	dispatcher := newDrainDispatcherForTest(t, now, &drainOperationSourceStub{operations: []DrainOperation{operation}})
 	frames := &drainFrameSender{}
@@ -163,7 +165,7 @@ func TestDrainDispatcherRevokeForcesAtBoundedDeadline(t *testing.T) {
 	if err := dispatcher.ReconcileOnce(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	var drain Drain
+	var drain wire.Drain
 	if delivered := frames.snapshot(); len(delivered) != 1 || delivered[0].DecodePayload(&drain) != nil {
 		t.Fatalf("frames=%+v", delivered)
 	}
@@ -174,8 +176,8 @@ func TestDrainDispatcherRevokeForcesAtBoundedDeadline(t *testing.T) {
 
 func TestDrainDispatcherReplacementAndDetachAreGenerationSafe(t *testing.T) {
 	now := time.Date(2026, 8, 31, 10, 20, 0, 0, time.UTC)
-	old := newDrainDispatcherTestSession(t, now, 1, "session_old_drain_01", ProductionCapabilities())
-	replacement := newDrainDispatcherTestSession(t, now, 2, "session_new_drain_01", ProductionCapabilities())
+	old := newDrainDispatcherTestSession(t, now, 1, "session_old_drain_01", wire.ProductionCapabilities())
+	replacement := newDrainDispatcherTestSession(t, now, 2, "session_new_drain_01", wire.ProductionCapabilities())
 	operation := operationForDrainSession(replacement, "operation_replacement_01", "connector.drain")
 	dispatcher := newDrainDispatcherForTest(t, now, &drainOperationSourceStub{operations: []DrainOperation{operation}})
 	oldFrames, newFrames := &drainFrameSender{}, &drainFrameSender{}
@@ -204,7 +206,7 @@ func TestDrainDispatcherReplacementAndDetachAreGenerationSafe(t *testing.T) {
 
 func TestDrainDispatcherNoSessionOrCapabilityPreservesReadySession(t *testing.T) {
 	now := time.Date(2026, 8, 31, 10, 30, 0, 0, time.UTC)
-	withoutDrain := []string{CapabilitySnapshot, CapabilityDelta, CapabilityAck, CapabilityHeartbeat, CapabilityRenewal}
+	withoutDrain := []string{wire.CapabilitySnapshot, wire.CapabilityDelta, wire.CapabilityAck, wire.CapabilityHeartbeat, wire.CapabilityRenewal}
 	live := newDrainDispatcherTestSession(t, now, 1, "session_no_capability_01", withoutDrain)
 	operation := operationForDrainSession(live, "operation_no_capability_01", "connector.drain")
 	dispatcher := newDrainDispatcherForTest(t, now, &drainOperationSourceStub{operations: []DrainOperation{operation}})
@@ -229,7 +231,7 @@ func TestDrainDispatcherNoSessionOrCapabilityPreservesReadySession(t *testing.T)
 
 func TestDrainDispatcherSendFailureRetriesSameDrain(t *testing.T) {
 	now := time.Date(2026, 8, 31, 10, 40, 0, 0, time.UTC)
-	live := newDrainDispatcherTestSession(t, now, 1, "session_send_retry_01", ProductionCapabilities())
+	live := newDrainDispatcherTestSession(t, now, 1, "session_send_retry_01", wire.ProductionCapabilities())
 	operation := operationForDrainSession(live, "operation_send_retry_01", "connector.drain")
 	dispatcher := newDrainDispatcherForTest(t, now, &drainOperationSourceStub{operations: []DrainOperation{operation}})
 	frames := &drainFrameSender{failures: 1, err: errors.New("bounded send failed")}
@@ -247,7 +249,7 @@ func TestDrainDispatcherSendFailureRetriesSameDrain(t *testing.T) {
 	if len(delivered) != 1 {
 		t.Fatalf("frames = %d, want 1", len(delivered))
 	}
-	var drain Drain
+	var drain wire.Drain
 	if err := delivered[0].DecodePayload(&drain); err != nil || drain.DrainID != operation.OperationID || !drain.Deadline.Equal(now.Add(40*time.Second)) {
 		t.Fatalf("retried drain=%+v err=%v", drain, err)
 	}
@@ -255,15 +257,15 @@ func TestDrainDispatcherSendFailureRetriesSameDrain(t *testing.T) {
 
 func TestDrainDispatcherRejectsStaleRegistrationAndBoundsRun(t *testing.T) {
 	now := time.Date(2026, 8, 31, 10, 50, 0, 0, time.UTC)
-	current := newDrainDispatcherTestSession(t, now, 2, "session_current_run_01", ProductionCapabilities())
-	stale := newDrainDispatcherTestSession(t, now, 1, "session_stale_run_01", ProductionCapabilities())
+	current := newDrainDispatcherTestSession(t, now, 2, "session_current_run_01", wire.ProductionCapabilities())
+	stale := newDrainDispatcherTestSession(t, now, 1, "session_stale_run_01", wire.ProductionCapabilities())
 	source := &drainOperationSourceStub{started: make(chan struct{})}
 	dispatcher := newDrainDispatcherForTest(t, now, source)
 	current.Send, stale.Send = (&drainFrameSender{}).send, (&drainFrameSender{}).send
 	if err := dispatcher.RegisterSession(context.Background(), current); err != nil {
 		t.Fatal(err)
 	}
-	if err := dispatcher.RegisterSession(context.Background(), stale); !errors.Is(err, ErrSessionConflict) {
+	if err := dispatcher.RegisterSession(context.Background(), stale); !errors.Is(err, wire.ErrSessionConflict) {
 		t.Fatalf("stale registration err = %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())

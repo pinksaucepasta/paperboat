@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
+
 	"github.com/pinksaucepasta/paperboat-server/internal/billing"
 )
 
@@ -66,14 +68,14 @@ func testIngressProjectionPostgres(t *testing.T, onlyLKG bool) {
 	active := ActiveControlSession{AccountID: f.accountID, TunnelID: f.tunnelID, ConnectorID: c.id, HostID: c.hostID, SessionID: c.oldSessionID, IdentityKeyID: c.oldIdentityKeyID, IdentityKeyThumbprint: c.oldThumbprint, ProcessGeneration: 1, CredentialGeneration: 1, ConfigGeneration: 1, ConfigContentHash: f.config.ContentHash}
 	check := func(t *testing.T, want int) {
 		t.Helper()
-		for _, read := range []func() ([]IngressDecision, error){func() ([]IngressDecision, error) { return source.Edge(ctx, nodeID, epoch) }, func() ([]IngressDecision, error) { return source.Daemon(ctx, active) }} {
+		for _, read := range []func() ([]wire.IngressDecision, error){func() ([]wire.IngressDecision, error) { return source.Edge(ctx, nodeID, epoch) }, func() ([]wire.IngressDecision, error) { return source.Daemon(ctx, active) }} {
 			got, err := read()
 			if err != nil || len(got) != want {
 				t.Fatalf("projection count=%d want=%d err=%v", len(got), want, err)
 			}
 			if want == 1 {
 				d := got[0]
-				if d.Binding.EnvironmentID != environmentID || d.Binding.RouteID != routeID || d.Binding.HostID != c.hostID || d.Binding.OriginAddress != "127.0.0.1:3000" || d.Validate(now) != nil || !d.ExpiresAt.Equal(now.Add(IngressAuthorityLifetime)) {
+				if d.Binding.EnvironmentID != environmentID || d.Binding.RouteID != routeID || d.Binding.HostID != c.hostID || d.Binding.OriginAddress != "127.0.0.1:3000" || d.Validate(now) != nil || !d.ExpiresAt.Equal(now.Add(wire.IngressAuthorityLifetime)) {
 					t.Fatal("incorrect current binding")
 				}
 			}
@@ -200,7 +202,7 @@ func testIngressProjectionPostgres(t *testing.T, onlyLKG bool) {
 	check(t, 2)
 	assertHTTPAlias := func(generation uint64) {
 		t.Helper()
-		for _, read := range []func() ([]IngressDecision, error){func() ([]IngressDecision, error) { return source.Edge(ctx, nodeID, epoch) }, func() ([]IngressDecision, error) { return source.Daemon(ctx, active) }} {
+		for _, read := range []func() ([]wire.IngressDecision, error){func() ([]wire.IngressDecision, error) { return source.Edge(ctx, nodeID, epoch) }, func() ([]wire.IngressDecision, error) { return source.Daemon(ctx, active) }} {
 			decisions, err := read()
 			if err != nil || len(decisions) != 2 {
 				t.Fatalf("HTTP names count=%d err=%v", len(decisions), err)
@@ -293,7 +295,7 @@ func testIngressProjectionPostgres(t *testing.T, onlyLKG bool) {
 		t.Fatalf("TLS managed+alias projection count=%d err=%v", len(decisions), err)
 	}
 	seen := map[string]bool{}
-	var aliasDecision IngressDecision
+	var aliasDecision wire.IngressDecision
 	for _, decision := range decisions {
 		seen[decision.Binding.Hostname] = true
 		if decision.Binding.Protocol != "tls" || decision.Binding.ListenerID != "listener_tls_443" || decision.Binding.PublicPort != 443 || decision.Validate(now) != nil {

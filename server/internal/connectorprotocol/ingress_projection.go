@@ -7,6 +7,8 @@ import (
 	"net"
 	"time"
 
+	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
+
 	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat-server/internal/accountingauthority"
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
@@ -20,20 +22,20 @@ const maximumIngressDecisions = 4096
 // public TCP allocation will supply their own persisted lifecycle fields.
 type SQLIngressSource struct {
 	DB    *db.DB
-	Clock Clock
+	Clock wire.Clock
 	Quota accountingauthority.QuotaChecker
 }
 
-func (s SQLIngressSource) Daemon(ctx context.Context, active ActiveControlSession) ([]IngressDecision, error) {
+func (s SQLIngressSource) Daemon(ctx context.Context, active ActiveControlSession) ([]wire.IngressDecision, error) {
 	if active.validate() != nil {
-		return nil, ErrInvalidInput
+		return nil, wire.ErrInvalidInput
 	}
 	return s.project(ctx, active, "", "", "public", "", "")
 }
 
-func (s SQLIngressSource) Edge(ctx context.Context, nodeID, epoch string) ([]IngressDecision, error) {
-	if ValidateIdentifier(nodeID) != nil || ValidateOpaqueEpoch(epoch) != nil {
-		return nil, ErrInvalidInput
+func (s SQLIngressSource) Edge(ctx context.Context, nodeID, epoch string) ([]wire.IngressDecision, error) {
+	if wire.ValidateIdentifier(nodeID) != nil || wire.ValidateOpaqueEpoch(epoch) != nil {
+		return nil, wire.ErrInvalidInput
 	}
 	durable, err := s.project(ctx, ActiveControlSession{}, nodeID, epoch, "public", "", "")
 	if err != nil {
@@ -44,7 +46,7 @@ func (s SQLIngressSource) Edge(ctx context.Context, nodeID, epoch string) ([]Ing
 		return nil, err
 	}
 	if len(durable)+len(previews) > maximumIngressDecisions {
-		return nil, ErrIngressDenied
+		return nil, wire.ErrIngressDenied
 	}
 	return append(durable, previews...), nil
 }
@@ -120,9 +122,9 @@ WHERE ((a.state='active' AND a.observed_state='ready') OR (a.state='staged' AND 
 ORDER BY a.route_id,a.assignment_generation,a.assignment_id,publication.hostname,publication.publication_id
 LIMIT 4097`
 
-func (s SQLIngressSource) project(ctx context.Context, active ActiveControlSession, nodeID, epoch, audience, routeID, hostname string) (decisions []IngressDecision, resultErr error) {
+func (s SQLIngressSource) project(ctx context.Context, active ActiveControlSession, nodeID, epoch, audience, routeID, hostname string) (decisions []wire.IngressDecision, resultErr error) {
 	if ctx == nil || s.DB == nil || s.DB.SQL() == nil {
-		return nil, ErrInvalidInput
+		return nil, wire.ErrInvalidInput
 	}
 	now := time.Now().UTC()
 	if s.Clock != nil {
@@ -146,12 +148,12 @@ func (s SQLIngressSource) project(ctx context.Context, active ActiveControlSessi
 			resultErr = errors.Join(resultErr, fmt.Errorf("close connector ingress rows: %w", closeErr))
 		}
 	}()
-	out := make([]IngressDecision, 0)
+	out := make([]wire.IngressDecision, 0)
 	for rows.Next() {
 		if len(out) == maximumIngressDecisions {
-			return nil, ErrIngressDenied
+			return nil, wire.ErrIngressDenied
 		}
-		var d IngressDecision
+		var d wire.IngressDecision
 		b := &d.Binding
 		if err = rows.Scan(&b.AccountID, &b.EnvironmentID, &b.TunnelID, &b.ResourceGeneration, &b.RouteID, &b.RouteGeneration, &b.HostID, &b.InstallationGeneration, &b.Hostname, &b.PathPrefix, &b.OriginScheme, &b.OriginAddress, &b.TLSVerification, &b.TLSServerName, &b.CAReference, &b.MTLSCredentialReference, &b.ListenerID, &b.PublicPort, &b.Protocol, &b.PublicationID, &b.PublicationGeneration, &d.EdgeNodeID, &d.EdgeProcessEpoch, &d.ConnectorID, &d.SessionID, &d.ProcessGeneration, &d.ConfigGeneration, &d.AssignmentGeneration, &d.PolicyGeneration, &d.ExpiresAt); err != nil {
 			return nil, err
@@ -196,7 +198,7 @@ func isExactQuotaExhaustion(err error) bool {
 	return err == accountingauthority.ErrQuotaExhausted
 }
 
-func completeIngressProjection(d *IngressDecision, now time.Time) error {
+func completeIngressProjection(d *wire.IngressDecision, now time.Time) error {
 	b := &d.Binding
 	// Route owns its exact target and owner publication in the existing schema;
 	// these aliases preserve generation fencing without inventing another owner.
@@ -208,19 +210,19 @@ func completeIngressProjection(d *IngressDecision, now time.Time) error {
 	if b.PublicationGeneration == 0 {
 		b.PublicationGeneration = b.RouteGeneration
 	}
-	b.Lifecycle = TunnelDurable
+	b.Lifecycle = wire.TunnelDurable
 	b.Audience = "public"
 	b.ConnectionMethod = "edge"
 	host, port, err := net.SplitHostPort(b.OriginAddress)
 	if err != nil {
-		return ErrIngressDenied
+		return wire.ErrIngressDenied
 	}
 	if host == "localhost" {
 		host = "127.0.0.1"
 	}
 	ip := net.ParseIP(host)
 	if ip == nil || !ip.IsLoopback() {
-		return ErrIngressDenied
+		return wire.ErrIngressDenied
 	}
 	b.OriginAddress = net.JoinHostPort(ip.String(), port)
 	d.Action = "view"
@@ -237,16 +239,16 @@ func completeIngressProjection(d *IngressDecision, now time.Time) error {
 // the hostname already authorized by the browser grant.
 // The caller must compose it with independently checked browser grant authority;
 // this method never issues a viewer grant or trusts a claimed principal.
-func (s SQLIngressSource) RestrictedRoute(ctx context.Context, nodeID, epoch, audience, routeID, hostname string) (IngressDecision, error) {
-	if ValidateIdentifier(nodeID) != nil || ValidateOpaqueEpoch(epoch) != nil || ValidateIdentifier(routeID) != nil || (hostname == "" || len(hostname) > 253) || (audience != "private" && audience != "team") {
-		return IngressDecision{}, ErrIngressDenied
+func (s SQLIngressSource) RestrictedRoute(ctx context.Context, nodeID, epoch, audience, routeID, hostname string) (wire.IngressDecision, error) {
+	if wire.ValidateIdentifier(nodeID) != nil || wire.ValidateOpaqueEpoch(epoch) != nil || wire.ValidateIdentifier(routeID) != nil || (hostname == "" || len(hostname) > 253) || (audience != "private" && audience != "team") {
+		return wire.IngressDecision{}, wire.ErrIngressDenied
 	}
 	rows, err := s.project(ctx, ActiveControlSession{}, nodeID, epoch, audience, routeID, hostname)
 	if err != nil {
-		return IngressDecision{}, err
+		return wire.IngressDecision{}, err
 	}
 	if len(rows) != 1 {
-		return IngressDecision{}, ErrIngressDenied
+		return wire.IngressDecision{}, wire.ErrIngressDenied
 	}
 	rows[0].Binding.Audience = audience
 	return rows[0], nil

@@ -23,7 +23,7 @@ import (
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/admission"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/control"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/route"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/realclientip/realclientip-go"
 )
 

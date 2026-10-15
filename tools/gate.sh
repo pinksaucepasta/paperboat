@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Regression gate. Run before every push (AGENTS.md "Regression gate").
 #   1. go vet + go test for every Go module, console lint + build.
-#   2. If runtime code (cli/ relay/ tunnel/ server/ helper/) changed relative to origin/main,
+#   2. If runtime code (cli/ relay/ tunnel/ server/ helper/ shared/) changed relative to origin/main,
 #      require a device smoke result for a build of HEAD (tools/device-smoke/results/*.json
 #      whose expect_version is dev-<short HEAD>) in which every check that passed in any
 #      earlier result still passes. Feature status in CHECKLIST.md does not matter.
@@ -11,7 +11,7 @@ cd "$(dirname "$0")/.." || exit 1
 fail=0
 step() { printf '\n== %s\n' "$1"; }
 
-for m in cli relay tunnel server helper; do
+for m in shared cli relay tunnel server helper; do
   [ -d "$m" ] || continue
   step "go vet + test: $m"
   (cd "$m" && go vet ./... && go test ./...) || { echo "FAIL: $m"; fail=1; }
@@ -21,7 +21,7 @@ step "console lint + build"
 (cd console && bun install --frozen-lockfile >/dev/null && bun run lint && bun run build) || { echo "FAIL: console"; fail=1; }
 
 base=$(git merge-base HEAD origin/main 2>/dev/null || git rev-list --max-parents=0 HEAD | tail -1)
-changed=$( { git diff --name-only "$base" HEAD; git diff --name-only; } | grep -E '^(cli|relay|tunnel|server|helper)/' | head -1)
+changed=$( { git diff --name-only "$base" HEAD; git diff --name-only; } | grep -E '^(cli|relay|tunnel|server|helper|shared)/' | head -1)
 if [ -n "$changed" ]; then
   step "device smoke for HEAD: no check that ever passed may fail"
   want="dev-$(git rev-parse --short HEAD)"

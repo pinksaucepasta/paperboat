@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat-server/internal/browseringress"
-	"github.com/pinksaucepasta/paperboat-server/internal/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	serverdiagnostics "github.com/pinksaucepasta/paperboat-server/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat-server/internal/previewattachment"
 	"github.com/pinksaucepasta/paperboat-server/internal/privateaccess"

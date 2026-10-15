@@ -1,6 +1,7 @@
 package controlplane
 
 import (
+ wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat-server/internal/accountingauthority"
 	"net/http"
 
@@ -17,7 +18,7 @@ func (s *EdgeService) handleIngress(w http.ResponseWriter, r *http.Request) {
 	if !s.decode(w, r, &input) {
 		return
 	}
-	if connectorprotocol.ValidateIdentifier(input.NodeID) != nil || connectorprotocol.ValidateOpaqueEpoch(input.ProcessEpoch) != nil {
+	if wire.ValidateIdentifier(input.NodeID) != nil || wire.ValidateOpaqueEpoch(input.ProcessEpoch) != nil {
 		writeEdgeError(w, r, http.StatusBadRequest, "invalid_request", false, 0)
 		return
 	}

@@ -8,7 +8,7 @@ import (
 )
 
 func TestIngressContractVectors(t *testing.T) {
-	f, err := os.Open("../../testdata/contracts/connector-v1/fixtures/ingress.ndjson")
+	f, err := os.Open("../testdata/contracts/connector-v1/fixtures/ingress.ndjson")
 	if err != nil {
 		t.Fatal(err)
 	}

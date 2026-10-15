@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
+
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
 	"github.com/pinksaucepasta/paperboat-server/internal/workers"
 )
@@ -38,11 +40,11 @@ type DrainOperation struct {
 }
 
 func (o DrainOperation) validate() error {
-	if ValidateIdentifier(o.OperationID) != nil || ValidateIdentifier(o.AccountID) != nil || ValidateIdentifier(o.TunnelID) != nil || ValidateIdentifier(o.ConnectorID) != nil || ValidateIdentifier(o.HostID) != nil || ValidateIdentifier(o.SessionID) != nil || o.ProcessGeneration == 0 || o.ConfigGeneration == 0 || !hashPattern.MatchString(o.ConfigContentHash) {
-		return ErrInvalidInput
+	if wire.ValidateIdentifier(o.OperationID) != nil || wire.ValidateIdentifier(o.AccountID) != nil || wire.ValidateIdentifier(o.TunnelID) != nil || wire.ValidateIdentifier(o.ConnectorID) != nil || wire.ValidateIdentifier(o.HostID) != nil || wire.ValidateIdentifier(o.SessionID) != nil || o.ProcessGeneration == 0 || o.ConfigGeneration == 0 || !wire.ValidContentHash(o.ConfigContentHash) {
+		return wire.ErrInvalidInput
 	}
 	if o.OperationType != "connector.drain" && o.OperationType != "connector.revoke" {
-		return ErrInvalidInput
+		return wire.ErrInvalidInput
 	}
 	return nil
 }
@@ -59,7 +61,7 @@ type DrainOperationSource interface {
 // ready, at which point this query safely rebinds delivery to that session.
 func (s *SQLControlStore) ListConnectorDrainOperations(ctx context.Context, limit int) ([]DrainOperation, error) {
 	if ctx == nil || s.valid() != nil || limit < 1 || limit > defaultDrainOperationLimit {
-		return nil, ErrInvalidInput
+		return nil, wire.ErrInvalidInput
 	}
 	now := s.now()
 	result := make([]DrainOperation, 0, limit)
@@ -101,7 +103,7 @@ LIMIT $2`, now, limit)
 				return err
 			}
 			if processGeneration <= 0 || configGeneration <= 0 {
-				return ErrInvalidInput
+				return wire.ErrInvalidInput
 			}
 			item.ProcessGeneration = uint64(processGeneration)
 			item.ConfigGeneration = uint64(configGeneration)
@@ -129,15 +131,15 @@ type DrainLiveSession struct {
 }
 
 func (s DrainLiveSession) validate() error {
-	if s.Projection.validate() != nil || s.Session == nil || s.Send == nil || s.Session.Reference() != (SessionRef{TunnelID: s.Projection.TunnelID, ConnectorID: s.Projection.ConnectorID, SessionID: s.Projection.SessionID, ProcessGeneration: s.Projection.ProcessGeneration}) {
-		return ErrInvalidInput
+	if s.Projection.validate() != nil || s.Session == nil || s.Send == nil || s.Session.Reference() != (wire.SessionRef{TunnelID: s.Projection.TunnelID, ConnectorID: s.Projection.ConnectorID, SessionID: s.Projection.SessionID, ProcessGeneration: s.Projection.ProcessGeneration}) {
+		return wire.ErrInvalidInput
 	}
 	return nil
 }
 
 type DrainDispatcherConfig struct {
 	Store             DrainOperationSource
-	Clock             Clock
+	Clock             wire.Clock
 	ReconcileInterval time.Duration
 	DrainDeadline     time.Duration
 	RevokeDeadline    time.Duration
@@ -150,7 +152,7 @@ type DrainDispatcherConfig struct {
 // control sessions. It owns no connector or operation state itself.
 type DrainDispatcher struct {
 	store             DrainOperationSource
-	clock             Clock
+	clock             wire.Clock
 	reconcileInterval time.Duration
 	drainDeadline     time.Duration
 	revokeDeadline    time.Duration
@@ -164,10 +166,10 @@ type DrainDispatcher struct {
 
 func NewDrainDispatcher(config DrainDispatcherConfig) (*DrainDispatcher, error) {
 	if config.Store == nil || config.ReportError == nil {
-		return nil, ErrInvalidInput
+		return nil, wire.ErrInvalidInput
 	}
 	if config.Clock == nil {
-		config.Clock = realClock{}
+		config.Clock = wire.RealClock{}
 	}
 	if config.ReconcileInterval == 0 {
 		config.ReconcileInterval = defaultDrainReconcileInterval
@@ -184,8 +186,8 @@ func NewDrainDispatcher(config DrainDispatcherConfig) (*DrainDispatcher, error) 
 	if config.OperationLimit == 0 {
 		config.OperationLimit = defaultDrainOperationLimit
 	}
-	if config.ReconcileInterval <= 0 || config.ReconcileInterval > time.Minute || config.DrainDeadline <= 0 || config.DrainDeadline > MaxLease || config.RevokeDeadline <= 0 || config.RevokeDeadline > config.DrainDeadline || config.SendTimeout <= 0 || config.SendTimeout > time.Minute || config.OperationLimit < 1 || config.OperationLimit > defaultDrainOperationLimit {
-		return nil, ErrInvalidInput
+	if config.ReconcileInterval <= 0 || config.ReconcileInterval > time.Minute || config.DrainDeadline <= 0 || config.DrainDeadline > wire.MaxLease || config.RevokeDeadline <= 0 || config.RevokeDeadline > config.DrainDeadline || config.SendTimeout <= 0 || config.SendTimeout > time.Minute || config.OperationLimit < 1 || config.OperationLimit > defaultDrainOperationLimit {
+		return nil, wire.ErrInvalidInput
 	}
 	return &DrainDispatcher{
 		store: config.Store, clock: config.Clock, reconcileInterval: config.ReconcileInterval,
@@ -200,7 +202,7 @@ func NewDrainDispatcher(config DrainDispatcherConfig) (*DrainDispatcher, error) 
 // a lower process generation is rejected.
 func (d *DrainDispatcher) RegisterSession(ctx context.Context, session DrainLiveSession) error {
 	if d == nil || ctx == nil {
-		return ErrInvalidInput
+		return wire.ErrInvalidInput
 	}
 	if err := ctx.Err(); err != nil {
 		return err
@@ -214,10 +216,10 @@ func (d *DrainDispatcher) RegisterSession(ctx context.Context, session DrainLive
 	key := controlSessionKey(session.Projection.TunnelID, session.Projection.ConnectorID)
 	if current, ok := d.sessions[key]; ok {
 		if current.Projection.AccountID != session.Projection.AccountID || current.Projection.HostID != session.Projection.HostID {
-			return codeError(ErrIdentityMismatch, ReasonAuthentication, false, nil)
+			return wire.CodeError(wire.ErrIdentityMismatch, wire.ReasonAuthentication, false, nil)
 		}
 		if session.Projection.ProcessGeneration < current.Projection.ProcessGeneration || session.Projection.ProcessGeneration == current.Projection.ProcessGeneration && session.Projection.SessionID != current.Projection.SessionID {
-			return codeError(ErrSessionConflict, ReasonStaleGeneration, false, nil)
+			return wire.CodeError(wire.ErrSessionConflict, wire.ReasonStaleGeneration, false, nil)
 		}
 	}
 	d.sessions[key] = session
@@ -225,7 +227,7 @@ func (d *DrainDispatcher) RegisterSession(ctx context.Context, session DrainLive
 }
 
 // DetachSession is exact-match and cannot remove a replacement process.
-func (d *DrainDispatcher) DetachSession(ref SessionRef) {
+func (d *DrainDispatcher) DetachSession(ref wire.SessionRef) {
 	if d == nil || ref.Validate() != nil {
 		return
 	}
@@ -242,7 +244,7 @@ func (d *DrainDispatcher) session(operation DrainOperation) (DrainLiveSession, b
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	current, ok := d.sessions[controlSessionKey(operation.TunnelID, operation.ConnectorID)]
-	if !ok || current.Projection.AccountID != operation.AccountID || current.Projection.HostID != operation.HostID || current.Session.Reference() != (SessionRef{TunnelID: operation.TunnelID, ConnectorID: operation.ConnectorID, SessionID: operation.SessionID, ProcessGeneration: operation.ProcessGeneration}) {
+	if !ok || current.Projection.AccountID != operation.AccountID || current.Projection.HostID != operation.HostID || current.Session.Reference() != (wire.SessionRef{TunnelID: operation.TunnelID, ConnectorID: operation.ConnectorID, SessionID: operation.SessionID, ProcessGeneration: operation.ProcessGeneration}) {
 		return DrainLiveSession{}, false
 	}
 	return current, true
@@ -250,7 +252,7 @@ func (d *DrainDispatcher) session(operation DrainOperation) (DrainLiveSession, b
 
 func (d *DrainDispatcher) ReconcileOnce(ctx context.Context) error {
 	if d == nil || ctx == nil {
-		return ErrInvalidInput
+		return wire.ErrInvalidInput
 	}
 	if err := ctx.Err(); err != nil {
 		return err
@@ -266,7 +268,7 @@ func (d *DrainDispatcher) ReconcileOnce(ctx context.Context) error {
 			continue
 		}
 		live, ok := d.session(operation)
-		if !ok || !hasCapability(live.NegotiatedCapabilities, CapabilityDrain) {
+		if !ok || !wire.HasCapability(live.NegotiatedCapabilities, wire.CapabilityDrain) {
 			continue
 		}
 		force := operation.OperationType == "connector.revoke"
@@ -288,10 +290,10 @@ func (d *DrainDispatcher) ReconcileOnce(ctx context.Context) error {
 			}
 		}
 		if drain.AccountID != operation.AccountID || drain.TunnelID != operation.TunnelID || drain.ConnectorID != operation.ConnectorID || drain.SessionID != operation.SessionID || drain.ProcessGeneration != operation.ProcessGeneration || drain.DrainID != operation.OperationID || drain.Generation != operation.ConfigGeneration || drain.ContentHash != operation.ConfigContentHash || drain.ForceAfterDeadline != force {
-			joined = errors.Join(joined, codeError(ErrSessionConflict, ReasonStaleGeneration, false, nil))
+			joined = errors.Join(joined, wire.CodeError(wire.ErrSessionConflict, wire.ReasonStaleGeneration, false, nil))
 			continue
 		}
-		frame, frameErr := NewFrame(MessageDrain, operation.OperationID, drain)
+		frame, frameErr := wire.NewFrame(wire.MessageDrain, operation.OperationID, drain)
 		if frameErr != nil {
 			joined = errors.Join(joined, frameErr)
 			continue
@@ -308,7 +310,7 @@ func (d *DrainDispatcher) ReconcileOnce(ctx context.Context) error {
 
 func (d *DrainDispatcher) Run(ctx context.Context) error {
 	if d == nil || ctx == nil {
-		return ErrInvalidInput
+		return wire.ErrInvalidInput
 	}
 	attempt := 0
 	for {

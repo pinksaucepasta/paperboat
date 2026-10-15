@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 func TestBrowserAccessActivateUsesSignedEdgeRequest(t *testing.T) {

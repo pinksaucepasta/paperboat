@@ -176,10 +176,10 @@ func writePrivateAccessFrame(writer io.Writer, value any) error {
 	var header [privateAccessFrameHeader]byte
 	binary.BigEndian.PutUint32(header[:], uint32(len(payload)))
 	if _, err := writeAllStreamOpen(writer, header[:]); err != nil {
-		return codeError(ErrMalformedFrame, ReasonMalformed, false, err)
+		return CodeError(ErrMalformedFrame, ReasonMalformed, false, err)
 	}
 	if _, err := writeAllStreamOpen(writer, payload); err != nil {
-		return codeError(ErrMalformedFrame, ReasonMalformed, false, err)
+		return CodeError(ErrMalformedFrame, ReasonMalformed, false, err)
 	}
 	return nil
 }
@@ -190,7 +190,7 @@ func readPrivateAccessFrame(reader io.Reader, value any) error {
 	}
 	var header [privateAccessFrameHeader]byte
 	if _, err := io.ReadFull(reader, header[:]); err != nil {
-		return codeError(ErrMalformedFrame, ReasonMalformed, false, err)
+		return CodeError(ErrMalformedFrame, ReasonMalformed, false, err)
 	}
 	length := int(binary.BigEndian.Uint32(header[:]))
 	if length <= 0 || length > MaxPrivateAccessFrameBytes-privateAccessFrameHeader {
@@ -198,10 +198,10 @@ func readPrivateAccessFrame(reader io.Reader, value any) error {
 	}
 	payload := make([]byte, length)
 	if _, err := io.ReadFull(reader, payload); err != nil {
-		return codeError(ErrMalformedFrame, ReasonMalformed, false, err)
+		return CodeError(ErrMalformedFrame, ReasonMalformed, false, err)
 	}
 	if err := decodeStrict(payload, value); err != nil {
-		return codeError(ErrMalformedFrame, ReasonMalformed, false, err)
+		return CodeError(ErrMalformedFrame, ReasonMalformed, false, err)
 	}
 	return nil
 }

@@ -4,6 +4,7 @@ use (
 	./cli
 	./helper
 	./relay
+	./shared
 	./server
 	./tunnel
 )

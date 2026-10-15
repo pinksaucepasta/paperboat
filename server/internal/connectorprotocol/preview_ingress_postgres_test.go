@@ -3,10 +3,12 @@ package connectorprotocol
 import (
 	"context"
 	"crypto/sha256"
-	"github.com/pinksaucepasta/paperboat-server/internal/previewtunnelstore"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat-server/internal/previewtunnelstore"
+	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 func TestPublicPreviewIngressPostgres(t *testing.T) {
@@ -55,7 +57,7 @@ func TestPublicPreviewIngressPostgres(t *testing.T) {
 		}
 		if want == 1 {
 			d := got[0]
-			if d.Binding.PublicationID != preview || d.Binding.RouteID != route || d.Binding.Hostname != hostname || d.Binding.Lifecycle != TunnelEphemeral || d.Binding.EnvironmentID != env || d.Binding.HostID != c.hostID || d.Validate(now) != nil {
+			if d.Binding.PublicationID != preview || d.Binding.RouteID != route || d.Binding.Hostname != hostname || d.Binding.Lifecycle != wire.TunnelEphemeral || d.Binding.EnvironmentID != env || d.Binding.HostID != c.hostID || d.Validate(now) != nil {
 				t.Fatal("incorrect preview authority")
 			}
 		}
@@ -79,8 +81,8 @@ func TestPublicPreviewIngressPostgres(t *testing.T) {
 	exec(`UPDATE user_machines SET revoked_at=NULL WHERE id=$1`, c.hostID)
 	check(1)
 	exec(`UPDATE preview_leases SET access_mode='private' WHERE id=$1`, preview)
-	q := PrivateAccessRequest{AccountID: f.accountID, ResourceKind: "preview", ResourceID: preview, RouteID: route, Audience: "paperboat-preview-http", MachineID: c.hostID, SessionID: "installation_" + f.suffix, InstallationGeneration: 1, ExpiresAt: now.Add(time.Minute), Nonce: "nonce_" + f.suffix, OperationID: operation, CarrierSessionID: c.oldSessionID, RouteGeneration: 1, ProcessGeneration: 1, ConfigGeneration: 1, SessionGeneration: 1, AssignmentGeneration: 1, EdgeNodeID: node, EdgeProcessEpoch: epoch, Protocol: "http", Method: "CONNECT", Host: hostname, Path: "/", IdempotencyKey: "access_" + f.suffix, RequestID: "request_" + f.suffix, CorrelationID: "correlation_" + f.suffix}
-	evidence := PrivateAccessOpen{Schema: PrivateAccessSchema, Kind: PrivateAccessKind, Grant: "signed-grant", Request: q}
+	q := wire.PrivateAccessRequest{AccountID: f.accountID, ResourceKind: "preview", ResourceID: preview, RouteID: route, Audience: "paperboat-preview-http", MachineID: c.hostID, SessionID: "installation_" + f.suffix, InstallationGeneration: 1, ExpiresAt: now.Add(time.Minute), Nonce: "nonce_" + f.suffix, OperationID: operation, CarrierSessionID: c.oldSessionID, RouteGeneration: 1, ProcessGeneration: 1, ConfigGeneration: 1, SessionGeneration: 1, AssignmentGeneration: 1, EdgeNodeID: node, EdgeProcessEpoch: epoch, Protocol: "http", Method: "CONNECT", Host: hostname, Path: "/", IdempotencyKey: "access_" + f.suffix, RequestID: "request_" + f.suffix, CorrelationID: "correlation_" + f.suffix}
+	evidence := wire.PrivateAccessOpen{Schema: wire.PrivateAccessSchema, Kind: wire.PrivateAccessKind, Grant: "signed-grant", Request: q}
 	native, err := source.RestrictedPreview(ctx, node, epoch, evidence)
 	if err != nil || native.Validate(now) != nil || native.NativeAuthorization == nil || native.NativeAuthorization.Request != q {
 		t.Fatalf("native preview authority: %v", err)

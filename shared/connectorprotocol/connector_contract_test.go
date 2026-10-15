@@ -24,7 +24,7 @@ type connectorVector struct {
 }
 
 func TestSharedConnectorV1Vectors(t *testing.T) {
-	path := filepath.Join("..", "..", "testdata", "contracts", "connector-v1", "fixtures", "vectors.ndjson")
+	path := filepath.Join("..", "testdata", "contracts", "connector-v1", "fixtures", "vectors.ndjson")
 	file, err := os.Open(path)
 	if err != nil {
 		t.Fatal(err)
@@ -84,7 +84,7 @@ func validateConnectorVectorSemantic(vector connectorVector, seenRotationNonces 
 			return ErrMalformedFrame
 		}
 		if _, seen := seenRotationNonces[challenge.ChallengeNonce]; seen {
-			return codeError(ErrCredentialRotationRejected, ReasonCredentialRotation, false, errors.New("fixture replay detected"))
+			return CodeError(ErrCredentialRotationRejected, ReasonCredentialRotation, false, errors.New("fixture replay detected"))
 		}
 		return nil
 	case "wrong_session":
@@ -93,7 +93,7 @@ func validateConnectorVectorSemantic(vector connectorVector, seenRotationNonces 
 			return ErrMalformedFrame
 		}
 		if ack.SessionID != "sess_1" {
-			return codeError(ErrIdentityMismatch, ReasonAuthentication, false, errors.New("fixture session is not bound"))
+			return CodeError(ErrIdentityMismatch, ReasonAuthentication, false, errors.New("fixture session is not bound"))
 		}
 		return nil
 	case "capability_missing_rotation":
@@ -101,10 +101,10 @@ func validateConnectorVectorSemantic(vector connectorVector, seenRotationNonces 
 		if err := json.Unmarshal(vector.Payload, &hello); err != nil {
 			return ErrMalformedFrame
 		}
-		if hasCapability(hello.Capabilities, CapabilityCredentialRotation) {
+		if HasCapability(hello.Capabilities, CapabilityCredentialRotation) {
 			return nil
 		}
-		return codeError(ErrCapabilityMissing, ReasonCapabilityMissing, false, errors.New("credential rotation capability is absent"))
+		return CodeError(ErrCapabilityMissing, ReasonCapabilityMissing, false, errors.New("credential rotation capability is absent"))
 	default:
 		return ErrInvalidInput
 	}

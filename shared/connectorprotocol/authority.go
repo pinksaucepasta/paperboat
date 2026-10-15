@@ -1,845 +1,20 @@
-// Package connectorprotocol implements the Paperboat connector control-plane
-// protocol. It contains only control messages and session state. Byte transport,
-// route forwarding, and origin proxying belong to their owning packages.
-//
-// This directory contains the repository-local Go implementation for the
-// connector-v1 family. Run the repository-local connector protocol tests before release.
 package connectorprotocol
 
 import (
 	"bytes"
-	"context"
-	"crypto/ed25519"
 	"crypto/sha256"
-	"encoding/base64"
-	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/url"
-	"reflect"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
-
-const (
-	ProtocolName    = "paperboat.connector"
-	ProtocolVersion = "1.0"
-
-	// A frame carries one complete configuration snapshot. The envelope is
-	// intentionally larger than MaxSnapshotBytes so the snapshot limit is
-	// meaningful on the wire.
-	MaxFrameBytes       = MaxSnapshotBytes + 64<<10
-	MaxSnapshotBytes    = 4 << 20
-	MaxDeltaBytes       = 1 << 20
-	MaxCapabilities     = 64
-	MaxCapabilityBytes  = 128
-	MaxIdentifierBytes  = 128
-	MaxCredentialRef    = 512
-	MaxProofBytes       = 16 << 10
-	MaxNonceBytes       = 128
-	MaxReasonMessage    = 512
-	MaxJSONDepth        = 64
-	MaxClockSkew        = 2 * time.Minute
-	DefaultLease        = 45 * time.Second
-	DefaultHeartbeat    = 5 * time.Second
-	DefaultApplyTimeout = 15 * time.Second
-	DefaultAbortTimeout = 5 * time.Second
-	MaxLease            = 24 * time.Hour
-)
-
-var identifierPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
-var capabilityPattern = regexp.MustCompile(`^[a-z][a-z0-9_.-]{1,127}$`)
-var versionPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+$`)
-var hashPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
-var identityKeyIDPattern = regexp.MustCompile(`^ed25519:[A-Za-z0-9_-]{43}$`)
-var identityThumbprintPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
-
-type Code string
-
-const (
-	CodeInvalidInput               Code = "invalid_input"
-	CodeMalformedFrame             Code = "malformed_frame"
-	CodeFrameTooLarge              Code = "frame_too_large"
-	CodeProtocolIncompatible       Code = "protocol_incompatible"
-	CodeCapabilityMissing          Code = "capability_missing"
-	CodeAuthenticationFailed       Code = "authentication_failed"
-	CodeCredentialExpired          Code = "credential_expired"
-	CodeIdentityMismatch           Code = "identity_mismatch"
-	CodeSessionConflict            Code = "session_conflict"
-	CodeSessionClosed              Code = "session_closed"
-	CodeLeaseExpired               Code = "lease_expired"
-	CodeHeartbeatTimeout           Code = "heartbeat_timeout"
-	CodeSnapshotRequired           Code = "snapshot_required"
-	CodeGenerationGap              Code = "generation_gap"
-	CodeStaleGeneration            Code = "stale_generation"
-	CodeContentHashMismatch        Code = "content_hash_mismatch"
-	CodeSnapshotRejected           Code = "snapshot_rejected"
-	CodeDeltaRejected              Code = "delta_rejected"
-	CodeNotReady                   Code = "not_ready"
-	CodeCanceled                   Code = "canceled"
-	CodeStaleSession               Code = "stale_session"
-	CodeUnsupportedMessage         Code = "unsupported_message"
-	CodeDrainRejected              Code = "drain_rejected"
-	CodeDrainTimeout               Code = "drain_timeout"
-	CodeCredentialRotationRejected Code = "credential_rotation_rejected"
-	CodeCredentialRotationNotReady Code = "credential_rotation_not_ready"
-	CodeCredentialRotationFailed   Code = "credential_rotation_failed"
-)
-
-// DisconnectReason is deliberately finite. User-visible diagnostics can map
-// these values to recovery text without branching on an error string.
-type DisconnectReason string
-
-const (
-	ReasonProtocolMismatch   DisconnectReason = "protocol_mismatch"
-	ReasonCapabilityMissing  DisconnectReason = "capability_missing"
-	ReasonMalformed          DisconnectReason = "malformed_message"
-	ReasonAuthentication     DisconnectReason = "authentication_failed"
-	ReasonCredentialExpired  DisconnectReason = "credential_expired"
-	ReasonLeaseExpired       DisconnectReason = "lease_expired"
-	ReasonHeartbeatTimeout   DisconnectReason = "heartbeat_timeout"
-	ReasonSessionReplaced    DisconnectReason = "session_replaced"
-	ReasonStaleGeneration    DisconnectReason = "stale_generation"
-	ReasonSnapshotRejected   DisconnectReason = "snapshot_rejected"
-	ReasonGenerationGap      DisconnectReason = "generation_gap"
-	ReasonCredentialRotation DisconnectReason = "credential_rotation"
-	ReasonCanceled           DisconnectReason = "canceled"
-	ReasonServerShutdown     DisconnectReason = "server_shutdown"
-	ReasonProtocolClosed     DisconnectReason = "protocol_closed"
-)
-
-// Error is the typed boundary error returned by this package. Retryable is a
-// protocol decision, not a claim that the caller may repeat an unsafe write.
-type Error struct {
-	Code       Code
-	Reason     DisconnectReason
-	Retryable  bool
-	RetryAfter time.Duration
-	Cause      error
-}
-
-func (e *Error) Error() string {
-	if e == nil {
-		return ""
-	}
-	if validCode(e.Code) {
-		return string(e.Code)
-	}
-	return "connector operation failed"
-}
-
-func (e *Error) Unwrap() error {
-	if e == nil {
-		return nil
-	}
-	return e.Cause
-}
-
-func (e *Error) Is(target error) bool {
-	other, ok := target.(*Error)
-	return ok && other != nil && e != nil && e.Code == other.Code
-}
-
-func (e *Error) Temporary() bool { return e != nil && e.Retryable }
-
-var (
-	ErrInvalidInput               = &Error{Code: CodeInvalidInput}
-	ErrMalformedFrame             = &Error{Code: CodeMalformedFrame}
-	ErrFrameTooLarge              = &Error{Code: CodeFrameTooLarge}
-	ErrProtocolIncompatible       = &Error{Code: CodeProtocolIncompatible}
-	ErrCapabilityMissing          = &Error{Code: CodeCapabilityMissing}
-	ErrAuthenticationFailed       = &Error{Code: CodeAuthenticationFailed}
-	ErrCredentialExpired          = &Error{Code: CodeCredentialExpired}
-	ErrIdentityMismatch           = &Error{Code: CodeIdentityMismatch}
-	ErrSessionConflict            = &Error{Code: CodeSessionConflict}
-	ErrSessionClosed              = &Error{Code: CodeSessionClosed}
-	ErrLeaseExpired               = &Error{Code: CodeLeaseExpired}
-	ErrHeartbeatTimeout           = &Error{Code: CodeHeartbeatTimeout}
-	ErrSnapshotRequired           = &Error{Code: CodeSnapshotRequired}
-	ErrGenerationGap              = &Error{Code: CodeGenerationGap}
-	ErrStaleGeneration            = &Error{Code: CodeStaleGeneration}
-	ErrContentHashMismatch        = &Error{Code: CodeContentHashMismatch}
-	ErrSnapshotRejected           = &Error{Code: CodeSnapshotRejected}
-	ErrDeltaRejected              = &Error{Code: CodeDeltaRejected}
-	ErrNotReady                   = &Error{Code: CodeNotReady}
-	ErrCanceled                   = &Error{Code: CodeCanceled}
-	ErrStaleSession               = &Error{Code: CodeStaleSession}
-	ErrUnsupportedMessage         = &Error{Code: CodeUnsupportedMessage}
-	ErrDrainRejected              = &Error{Code: CodeDrainRejected}
-	ErrDrainTimeout               = &Error{Code: CodeDrainTimeout}
-	ErrCredentialRotationRejected = &Error{Code: CodeCredentialRotationRejected}
-	ErrCredentialRotationNotReady = &Error{Code: CodeCredentialRotationNotReady}
-	ErrCredentialRotationFailed   = &Error{Code: CodeCredentialRotationFailed}
-)
-
-func codeError(base *Error, reason DisconnectReason, retryable bool, cause error) error {
-	return &Error{Code: base.Code, Reason: reason, Retryable: retryable, Cause: cause}
-}
-
-// protocolError projects only owned finite labels. A fixed traversal budget also
-// keeps malformed callback error chains from blocking diagnostic publication.
-func protocolError(err error) *Error {
-	pending := []error{err}
-	for remaining := 16; remaining > 0 && len(pending) > 0; remaining-- {
-		current := pending[0]
-		pending = pending[1:]
-		if current == nil {
-			continue
-		}
-		value := reflect.ValueOf(current)
-		if value.Kind() == reflect.Pointer && value.IsNil() {
-			continue
-		}
-		if typed, ok := current.(*Error); ok && validCode(typed.Code) {
-			return typed
-		}
-		switch wrapped := current.(type) {
-		case interface{ Unwrap() []error }:
-			children := wrapped.Unwrap()
-			capacity := remaining - 1 - len(pending)
-			if capacity < 0 {
-				capacity = 0
-			}
-			if len(children) > capacity {
-				children = children[:capacity]
-			}
-			pending = append(children, pending...)
-		case interface{ Unwrap() error }:
-			pending = append([]error{wrapped.Unwrap()}, pending...)
-		}
-	}
-	return nil
-}
-
-func CodeOf(err error) Code {
-	if typed := protocolError(err); typed != nil {
-		return typed.Code
-	}
-	return ""
-}
-
-func ReasonOf(err error) DisconnectReason {
-	if typed := protocolError(err); typed != nil && validDisconnectReason(typed.Reason) {
-		return typed.Reason
-	}
-	return ""
-}
-
-func ValidateIdentifier(value string) error {
-	if !identifierPattern.MatchString(value) || len(value) > MaxIdentifierBytes {
-		return ErrInvalidInput
-	}
-	return nil
-}
-
-func ValidateCredentialReference(value string) error {
-	if len(value) == 0 || len(value) > MaxCredentialRef || strings.TrimSpace(value) != value || strings.ContainsAny(value, "\r\n") {
-		return ErrInvalidInput
-	}
-	parsed, err := url.Parse(value)
-	if err != nil || parsed.Scheme == "" || parsed.Host != "paperboat" || parsed.User != nil || parsed.Opaque != "" || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.Path == "" {
-		return ErrInvalidInput
-	}
-	switch parsed.Scheme {
-	case "keychain", "credential-manager", "secret-service", "protected-file", "tpm":
-		return nil
-	default:
-		return ErrInvalidInput
-	}
-}
-
-func ValidateProof(value string) error {
-	if len(value) < 32 || len(value) > MaxProofBytes || strings.TrimSpace(value) != value || strings.ContainsAny(value, "\r\n") {
-		return ErrInvalidInput
-	}
-	return nil
-}
-
-// VerifyProofFunc lets the host identity package keep ownership of public-key
-// lookup and revocation while this package owns the signed transcript.
-type VerifyProofFunc func(message, signature []byte) bool
-
-func SignProofPayload(payload []byte, sign func([]byte) []byte) (string, error) {
-	if len(payload) == 0 || len(payload) > MaxProofBytes || sign == nil {
-		return "", ErrInvalidInput
-	}
-	signature := sign(payload)
-	if len(signature) == 0 || len(signature) > MaxProofBytes {
-		return "", ErrInvalidInput
-	}
-	return base64.RawURLEncoding.EncodeToString(signature), nil
-}
-
-func VerifyProofPayload(payload []byte, signedProof string, verify VerifyProofFunc) error {
-	if len(payload) == 0 || verify == nil {
-		return ErrAuthenticationFailed
-	}
-	signature, err := DecodeProof(signedProof)
-	if err != nil || !verify(payload, signature) {
-		return ErrAuthenticationFailed
-	}
-	return nil
-}
-
-// DecodeProof decodes the detached base64url signature without exposing any
-// credential material. Server adapters use this after deriving the exact
-// transcript and resolving the enrolled public identity for the request.
-func DecodeProof(signedProof string) ([]byte, error) {
-	if ValidateProof(signedProof) != nil {
-		return nil, ErrAuthenticationFailed
-	}
-	signature, err := base64.RawURLEncoding.Strict().DecodeString(signedProof)
-	if err != nil || len(signature) == 0 || len(signature) > MaxProofBytes {
-		return nil, ErrAuthenticationFailed
-	}
-	return signature, nil
-}
-
-// ValidateIdentityKey checks the stable public-key identity metadata used by
-// the host enrollment store. The private key, certificate bytes, and bearer
-// credential never cross this protocol boundary.
-func ValidateIdentityKey(keyID, thumbprint string) error {
-	if !identityKeyIDPattern.MatchString(keyID) || !identityThumbprintPattern.MatchString(thumbprint) || keyID[len("ed25519:"):] != thumbprint {
-		return ErrInvalidInput
-	}
-	return nil
-}
-
-// IdentityThumbprint returns the RFC 7638-style SHA-256 thumbprint for an
-// Ed25519 public key. The canonical JSON member order is part of the identity
-// contract and matches the host enrollment store.
-func IdentityThumbprint(publicKey ed25519.PublicKey) (string, error) {
-	if len(publicKey) != ed25519.PublicKeySize {
-		return "", ErrInvalidInput
-	}
-	canonical := `{"crv":"Ed25519","kty":"OKP","x":"` + base64.RawURLEncoding.EncodeToString(publicKey) + `"}`
-	digest := sha256.Sum256([]byte(canonical))
-	return base64.RawURLEncoding.EncodeToString(digest[:]), nil
-}
-
-func IdentityKeyID(publicKey ed25519.PublicKey) (string, error) {
-	thumbprint, err := IdentityThumbprint(publicKey)
-	if err != nil {
-		return "", err
-	}
-	return "ed25519:" + thumbprint, nil
-}
-
-// Capability names are stable wire names. The required set is intentionally
-// small so optional data-plane features can be negotiated independently.
-const (
-	CapabilitySnapshot           = "config.snapshot.v1"
-	CapabilityDelta              = "config.delta.v1"
-	CapabilityAck                = "config.ack.v1"
-	CapabilityHeartbeat          = "session.heartbeat.v1"
-	CapabilityRenewal            = "auth.renew.v1"
-	CapabilityDrain              = "connector.drain.v1"
-	CapabilityCredentialRotation = "credential.rotate.v1"
-)
-
-var requiredCapabilities = map[string]struct{}{
-	CapabilitySnapshot: {}, CapabilityDelta: {}, CapabilityAck: {},
-	CapabilityHeartbeat: {}, CapabilityRenewal: {},
-}
-
-// ProductionCapabilities returns a fresh copy of every connector-v1
-// capability implemented by the canonical server and stable host runtime.
-func ProductionCapabilities() []string {
-	return []string{
-		CapabilitySnapshot,
-		CapabilityDelta,
-		CapabilityAck,
-		CapabilityHeartbeat,
-		CapabilityRenewal,
-		CapabilityDrain,
-		CapabilityCredentialRotation,
-	}
-}
-
-func ValidateCapabilities(values []string) error {
-	if len(values) == 0 || len(values) > MaxCapabilities {
-		return ErrCapabilityMissing
-	}
-	seen := make(map[string]struct{}, len(values))
-	for _, value := range values {
-		if len(value) > MaxCapabilityBytes || !capabilityPattern.MatchString(value) {
-			return ErrInvalidInput
-		}
-		if _, exists := seen[value]; exists {
-			return ErrInvalidInput
-		}
-		seen[value] = struct{}{}
-	}
-	for required := range requiredCapabilities {
-		if _, ok := seen[required]; !ok {
-			return codeError(ErrCapabilityMissing, ReasonCapabilityMissing, false, fmt.Errorf("missing capability %q", required))
-		}
-	}
-	return nil
-}
-
-func NegotiateCapabilities(offered, supported []string) ([]string, error) {
-	if err := ValidateCapabilities(offered); err != nil {
-		return nil, err
-	}
-	if err := ValidateCapabilities(supported); err != nil {
-		return nil, err
-	}
-	supportedSet := make(map[string]struct{}, len(supported))
-	for _, value := range supported {
-		supportedSet[value] = struct{}{}
-	}
-	selected := make([]string, 0, len(offered))
-	for _, value := range offered {
-		if _, ok := supportedSet[value]; ok {
-			selected = append(selected, value)
-		}
-	}
-	if err := ValidateCapabilities(selected); err != nil {
-		return nil, codeError(ErrCapabilityMissing, ReasonCapabilityMissing, false, err)
-	}
-	return selected, nil
-}
-
-func NegotiateVersion(minVersion, maxVersion string) (string, error) {
-	if !versionPattern.MatchString(minVersion) || !versionPattern.MatchString(maxVersion) {
-		return "", codeError(ErrProtocolIncompatible, ReasonProtocolMismatch, false, errors.New("invalid version range"))
-	}
-	minMajor, minMinor, minOK := parseVersion(minVersion)
-	maxMajor, maxMinor, maxOK := parseVersion(maxVersion)
-	selectedMajor, selectedMinor, selectedOK := parseVersion(ProtocolVersion)
-	if !maxOK || !selectedOK {
-		return "", codeError(ErrProtocolIncompatible, ReasonProtocolMismatch, false, errors.New("invalid protocol version"))
-	}
-	if !minOK {
-		return "", codeError(ErrProtocolIncompatible, ReasonProtocolMismatch, false, errors.New("invalid protocol version"))
-	}
-	if minMajor > maxMajor || minMajor > selectedMajor || maxMajor < selectedMajor || minMajor == selectedMajor && minMinor > selectedMinor || maxMajor == selectedMajor && maxMinor < selectedMinor {
-		return "", codeError(ErrProtocolIncompatible, ReasonProtocolMismatch, false, errors.New("no compatible protocol version"))
-	}
-	return ProtocolVersion, nil
-}
-
-func parseVersion(value string) (int, int, bool) {
-	parts := strings.Split(value, ".")
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return 0, 0, false
-	}
-	major, errMajor := strconv.Atoi(parts[0])
-	minor, errMinor := strconv.Atoi(parts[1])
-	if errMajor != nil || errMinor != nil || major < 0 || minor < 0 || strconv.Itoa(major) != parts[0] || strconv.Itoa(minor) != parts[1] {
-		return 0, 0, false
-	}
-	return major, minor, true
-}
-
-type MessageType string
-
-const (
-	MessageHello                       MessageType = "hello"
-	MessageWelcome                     MessageType = "welcome"
-	MessageSnapshot                    MessageType = "snapshot"
-	MessageDelta                       MessageType = "delta"
-	MessageAck                         MessageType = "ack"
-	MessageReady                       MessageType = "ready"
-	MessageHeartbeat                   MessageType = "heartbeat"
-	MessageHeartbeatAck                MessageType = "heartbeat_ack"
-	MessageAuthRenew                   MessageType = "auth_renew"
-	MessageAuthRenewed                 MessageType = "auth_renewed"
-	MessageDrain                       MessageType = "drain"
-	MessageDrainAck                    MessageType = "drain_ack"
-	MessageCredentialRotationChallenge MessageType = "credential_rotation_challenge"
-	MessageCredentialRotationProof     MessageType = "credential_rotation_proof"
-	MessageCredentialRotationInstall   MessageType = "credential_rotation_install"
-	MessageCredentialRotationReady     MessageType = "credential_rotation_ready"
-	MessageCredentialRotationRevoke    MessageType = "credential_rotation_revoke"
-	MessageCredentialRotationAck       MessageType = "credential_rotation_ack"
-	MessageDisconnect                  MessageType = "disconnect"
-	MessageReject                      MessageType = "reject"
-)
-
-const (
-	MessageRotationChallenge = MessageCredentialRotationChallenge
-	MessageRotationProof     = MessageCredentialRotationProof
-	MessageRotationInstall   = MessageCredentialRotationInstall
-	MessageRotationReady     = MessageCredentialRotationReady
-	MessageRotationRevoke    = MessageCredentialRotationRevoke
-	MessageRotationAck       = MessageCredentialRotationAck
-)
-
-var allowedMessageTypes = map[MessageType]struct{}{
-	MessageHello: {}, MessageWelcome: {}, MessageSnapshot: {}, MessageDelta: {},
-	MessageAck: {}, MessageReady: {}, MessageHeartbeat: {}, MessageHeartbeatAck: {},
-	MessageAuthRenew: {}, MessageAuthRenewed: {}, MessageDrain: {}, MessageDrainAck: {},
-	MessageCredentialRotationChallenge: {}, MessageCredentialRotationProof: {}, MessageCredentialRotationInstall: {}, MessageCredentialRotationReady: {}, MessageCredentialRotationRevoke: {}, MessageCredentialRotationAck: {},
-	MessageDisconnect: {}, MessageReject: {},
-}
-
-type Frame struct {
-	Type      MessageType     `json:"type"`
-	Version   string          `json:"version"`
-	RequestID string          `json:"request_id"`
-	Payload   json.RawMessage `json:"payload"`
-}
-
-func NewFrame(messageType MessageType, requestID string, payload any) (Frame, error) {
-	if _, ok := allowedMessageTypes[messageType]; !ok || !validRequestID(requestID) {
-		return Frame{}, ErrInvalidInput
-	}
-	encoded, err := json.Marshal(payload)
-	if err != nil {
-		return Frame{}, codeError(ErrInvalidInput, ReasonMalformed, false, err)
-	}
-	if payloadTooLarge(messageType, payload) {
-		return Frame{}, ErrFrameTooLarge
-	}
-	if len(encoded) > maxPayloadBytes(messageType) {
-		return Frame{}, ErrFrameTooLarge
-	}
-	if err := validatePayloadJSON(encoded); err != nil {
-		return Frame{}, err
-	}
-	if err := validateMessagePayload(messageType, encoded); err != nil {
-		return Frame{}, err
-	}
-	return Frame{Type: messageType, Version: ProtocolVersion, RequestID: requestID, Payload: encoded}, nil
-}
-
-func payloadTooLarge(messageType MessageType, payload any) bool {
-	switch messageType {
-	case MessageSnapshot:
-		if value, ok := payload.(Snapshot); ok {
-			return len(value.Payload) > MaxSnapshotBytes
-		}
-	case MessageDelta:
-		if value, ok := payload.(Delta); ok {
-			return len(value.Payload) > MaxDeltaBytes
-		}
-	}
-	return false
-}
-
-func (f Frame) Validate() error {
-	if _, ok := allowedMessageTypes[f.Type]; !ok {
-		return codeError(ErrUnsupportedMessage, ReasonMalformed, false, nil)
-	}
-	if f.Version != ProtocolVersion || !validRequestID(f.RequestID) || len(f.Payload) == 0 || len(f.Payload) > maxPayloadBytes(f.Type) {
-		return ErrMalformedFrame
-	}
-	if err := validatePayloadJSON(f.Payload); err != nil {
-		return err
-	}
-	return validateMessagePayload(f.Type, f.Payload)
-}
-
-func validateMessagePayload(messageType MessageType, payload []byte) error {
-	switch messageType {
-	case MessageHello:
-		var message Hello
-		if err := decodeStrict(payload, &message); err != nil {
-			return ErrMalformedFrame
-		}
-		return message.Validate(time.Time{})
-	case MessageWelcome:
-		var message Welcome
-		if err := decodeStrict(payload, &message); err != nil {
-			return ErrMalformedFrame
-		}
-		return message.Validate(time.Time{})
-	case MessageSnapshot:
-		var message Snapshot
-		if err := decodeStrict(payload, &message); err != nil {
-			return ErrMalformedFrame
-		}
-		return message.ValidateBound()
-	case MessageDelta:
-		var message Delta
-		if err := decodeStrict(payload, &message); err != nil {
-			return ErrMalformedFrame
-		}
-		return message.ValidateBound()
-	case MessageAck:
-		var message Ack
-		if err := decodeStrict(payload, &message); err != nil {
-			return ErrMalformedFrame
-		}
-		return message.Validate()
-	case MessageReady:
-		var message Readiness
-		if err := decodeStrict(payload, &message); err != nil {
-			return ErrMalformedFrame
-		}
-		return message.Validate()
-	case MessageHeartbeat:
-		var message Heartbeat
-		if err := decodeStrict(payload, &message); err != nil {
-			return ErrMalformedFrame
-		}
-		return message.Validate()
-	case MessageHeartbeatAck:
-		var message HeartbeatAck
-		if err := decodeStrict(payload, &message); err != nil {
-			return ErrMalformedFrame
-		}
-		return message.Validate(time.Time{})
-	case MessageAuthRenew:
-		var message RenewalRequest
-		if err := decodeStrict(payload, &message); err != nil {
-			return ErrMalformedFrame
-		}
-		return message.Validate()
-	case MessageAuthRenewed:
-		var message AuthResult
-		if err := decodeStrict(payload, &message); err != nil {
-			return ErrMalformedFrame
-		}
-		return message.ValidateBound()
-	case MessageDrain:
-		var message Drain
-		if err := decodeStrict(payload, &message); err != nil {
-			return ErrMalformedFrame
-		}
-		return message.Validate(time.Time{})
-	case MessageDrainAck:
-		var message DrainAck
-		if err := decodeStrict(payload, &message); err != nil {
-			return ErrMalformedFrame
-		}
-		return message.Validate(time.Time{})
-	case MessageCredentialRotationChallenge:
-		var message CredentialRotationChallenge
-		if err := decodeStrict(payload, &message); err != nil {
-			return ErrMalformedFrame
-		}
-		return message.Validate(time.Time{})
-	case MessageCredentialRotationProof:
-		var message CredentialRotationProof
-		if err := decodeStrict(payload, &message); err != nil {
-			return ErrMalformedFrame
-		}
-		return message.Validate(time.Time{})
-	case MessageCredentialRotationInstall:
-		var message CredentialRotationInstall
-		if err := decodeStrict(payload, &message); err != nil {
-			return ErrMalformedFrame
-		}
-		return message.Validate(time.Time{})
-	case MessageCredentialRotationReady:
-		var message CredentialRotationReady
-		if err := decodeStrict(payload, &message); err != nil {
-			return ErrMalformedFrame
-		}
-		return message.Validate(time.Time{})
-	case MessageCredentialRotationRevoke:
-		var message CredentialRotationRevoke
-		if err := decodeStrict(payload, &message); err != nil {
-			return ErrMalformedFrame
-		}
-		return message.Validate(time.Time{})
-	case MessageCredentialRotationAck:
-		var message CredentialRotationAck
-		if err := decodeStrict(payload, &message); err != nil {
-			return ErrMalformedFrame
-		}
-		return message.Validate()
-	case MessageDisconnect:
-		var message Disconnect
-		if err := decodeStrict(payload, &message); err != nil {
-			return ErrMalformedFrame
-		}
-		return message.Validate()
-	case MessageReject:
-		var message Reject
-		if err := decodeStrict(payload, &message); err != nil {
-			return ErrMalformedFrame
-		}
-		return message.Validate()
-	}
-	return ErrUnsupportedMessage
-}
-
-func (f Frame) DecodePayload(target any) error {
-	if err := f.Validate(); err != nil {
-		return err
-	}
-	if err := decodeStrict(f.Payload, target); err != nil {
-		return codeError(ErrMalformedFrame, ReasonMalformed, false, err)
-	}
-	return nil
-}
-
-func ReadFrame(reader io.Reader) (Frame, error) {
-	if reader == nil {
-		return Frame{}, ErrInvalidInput
-	}
-	var prefix [4]byte
-	if _, err := io.ReadFull(reader, prefix[:]); err != nil {
-		return Frame{}, codeError(ErrMalformedFrame, ReasonMalformed, false, err)
-	}
-	length := binary.BigEndian.Uint32(prefix[:])
-	if length == 0 {
-		return Frame{}, ErrMalformedFrame
-	}
-	if length > MaxFrameBytes {
-		return Frame{}, ErrFrameTooLarge
-	}
-	body := make([]byte, int(length))
-	if _, err := io.ReadFull(reader, body); err != nil {
-		return Frame{}, codeError(ErrMalformedFrame, ReasonMalformed, false, err)
-	}
-	if !json.Valid(body) || rejectDuplicateKeys(body) != nil {
-		return Frame{}, ErrMalformedFrame
-	}
-	var frame Frame
-	if err := decodeStrict(body, &frame); err != nil {
-		return Frame{}, codeError(ErrMalformedFrame, ReasonMalformed, false, err)
-	}
-	if err := frame.Validate(); err != nil {
-		return Frame{}, err
-	}
-	return frame, nil
-}
-
-func WriteFrame(writer io.Writer, frame Frame) error {
-	if writer == nil {
-		return ErrInvalidInput
-	}
-	if err := frame.Validate(); err != nil {
-		return err
-	}
-	body, err := json.Marshal(frame)
-	if err != nil {
-		return codeError(ErrMalformedFrame, ReasonMalformed, false, err)
-	}
-	if len(body) > MaxFrameBytes {
-		return ErrFrameTooLarge
-	}
-	var prefix [4]byte
-	binary.BigEndian.PutUint32(prefix[:], uint32(len(body)))
-	if err := writeAll(writer, prefix[:]); err != nil {
-		return err
-	}
-	return writeAll(writer, body)
-}
-
-func maxPayloadBytes(messageType MessageType) int {
-	switch messageType {
-	case MessageSnapshot:
-		return MaxSnapshotBytes + 16<<10
-	case MessageDelta:
-		return MaxDeltaBytes + 16<<10
-	default:
-		return 64 << 10
-	}
-}
-
-func writeAll(writer io.Writer, data []byte) error {
-	for len(data) > 0 {
-		n, err := writer.Write(data)
-		if err != nil {
-			return err
-		}
-		if n <= 0 || n > len(data) {
-			return io.ErrShortWrite
-		}
-		data = data[n:]
-	}
-	return nil
-}
-
-func validRequestID(value string) bool {
-	return len(value) >= 1 && len(value) <= MaxIdentifierBytes && identifierPattern.MatchString(value)
-}
-
-func decodeStrict(data []byte, target any) error {
-	if len(data) == 0 || len(data) > MaxFrameBytes || target == nil || rejectDuplicateKeys(data) != nil {
-		return ErrMalformedFrame
-	}
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(target); err != nil {
-		return err
-	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		return errors.New("trailing JSON")
-	}
-	return nil
-}
-
-func validatePayloadJSON(data []byte) error {
-	if len(data) == 0 || len(data) > MaxFrameBytes || !json.Valid(data) {
-		return ErrMalformedFrame
-	}
-	if rejectDuplicateKeys(data) != nil {
-		return ErrMalformedFrame
-	}
-	return nil
-}
-
-func rejectDuplicateKeys(data []byte) error {
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.UseNumber()
-	var walk func(int) error
-	walk = func(depth int) error {
-		if depth > MaxJSONDepth {
-			return errors.New("JSON nesting exceeds limit")
-		}
-		token, err := decoder.Token()
-		if err != nil {
-			return err
-		}
-		delimiter, compound := token.(json.Delim)
-		if !compound {
-			return nil
-		}
-		switch delimiter {
-		case '{':
-			seen := make(map[string]struct{})
-			for decoder.More() {
-				keyToken, err := decoder.Token()
-				if err != nil {
-					return err
-				}
-				key, ok := keyToken.(string)
-				if !ok {
-					return errors.New("object key is not a string")
-				}
-				if _, exists := seen[key]; exists {
-					return errors.New("duplicate object key")
-				}
-				seen[key] = struct{}{}
-				if err := walk(depth + 1); err != nil {
-					return err
-				}
-			}
-			_, err = decoder.Token()
-			return err
-		case '[':
-			for decoder.More() {
-				if err := walk(depth + 1); err != nil {
-					return err
-				}
-			}
-			_, err = decoder.Token()
-			return err
-		default:
-			return errors.New("unexpected JSON delimiter")
-		}
-	}
-	if err := walk(0); err != nil {
-		return err
-	}
-	if _, err := decoder.Token(); err != io.EOF {
-		return errors.New("trailing JSON")
-	}
-	return nil
-}
 
 type AuthRequest struct {
 	AccountID             string    `json:"account_id"`
@@ -953,7 +128,7 @@ func (a AuthRequest) validate(now time.Time, requireProof bool) error {
 		return ErrInvalidInput
 	}
 	if !now.IsZero() && (a.IssuedAt.After(now.Add(MaxClockSkew)) || now.Sub(a.IssuedAt) > MaxClockSkew || !a.ExpiresAt.After(now)) {
-		return codeError(ErrCredentialExpired, ReasonCredentialExpired, true, nil)
+		return CodeError(ErrCredentialExpired, ReasonCredentialExpired, true, nil)
 	}
 	return nil
 }
@@ -1024,7 +199,7 @@ func (r RenewalRequest) ValidateAt(now time.Time) error {
 		return err
 	}
 	if !now.IsZero() && (r.RequestedAt.After(now.Add(MaxClockSkew)) || now.Sub(r.RequestedAt) > MaxClockSkew) {
-		return codeError(ErrAuthenticationFailed, ReasonAuthentication, false, errors.New("renewal request is outside clock skew"))
+		return CodeError(ErrAuthenticationFailed, ReasonAuthentication, false, nil)
 	}
 	return nil
 }
@@ -1076,7 +251,7 @@ func (h Hello) Validate(now time.Time) error {
 		return err
 	}
 	if h.Auth.AccountID != h.AccountID || h.Auth.TunnelID != h.TunnelID || h.Auth.ConnectorID != h.ConnectorID || h.Auth.HostID != h.HostID || h.Auth.ProcessGeneration != h.ProcessGeneration {
-		return codeError(ErrIdentityMismatch, ReasonAuthentication, false, nil)
+		return CodeError(ErrIdentityMismatch, ReasonAuthentication, false, nil)
 	}
 	return h.Auth.Validate(now)
 }
@@ -1117,7 +292,7 @@ func NewSnapshot(tunnelID string, generation uint64, payload []byte) (Snapshot, 
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if err := validateConfigSnapshotPayload(canonical, tunnelID, generation); err != nil {
+	if err := ValidateConfigSnapshotPayload(canonical, tunnelID, generation); err != nil {
 		return Snapshot{}, err
 	}
 	digest := sha256.Sum256(canonical)
@@ -1125,19 +300,19 @@ func NewSnapshot(tunnelID string, generation uint64, payload []byte) (Snapshot, 
 }
 
 func (s Snapshot) Validate() error {
-	if ValidateIdentifier(s.TunnelID) != nil || s.AccountID != "" && ValidateIdentifier(s.AccountID) != nil || s.SessionID != "" && ValidateIdentifier(s.SessionID) != nil || s.Generation == 0 || !hashPattern.MatchString(s.ContentHash) || len(s.Payload) == 0 || len(s.Payload) > MaxSnapshotBytes {
+	if ValidateIdentifier(s.TunnelID) != nil || s.AccountID != "" && ValidateIdentifier(s.AccountID) != nil || s.SessionID != "" && ValidateIdentifier(s.SessionID) != nil || s.Generation == 0 || !ValidContentHash(s.ContentHash) || len(s.Payload) == 0 || len(s.Payload) > MaxSnapshotBytes {
 		return ErrInvalidInput
 	}
 	canonical, err := canonicalJSON(s.Payload, MaxSnapshotBytes)
 	if err != nil || !bytes.Equal(canonical, s.Payload) {
-		return codeError(ErrContentHashMismatch, ReasonSnapshotRejected, false, err)
+		return CodeError(ErrContentHashMismatch, ReasonSnapshotRejected, false, err)
 	}
 	digest := sha256.Sum256(canonical)
 	if s.ContentHash != "sha256:"+hex.EncodeToString(digest[:]) {
-		return codeError(ErrContentHashMismatch, ReasonSnapshotRejected, false, nil)
+		return CodeError(ErrContentHashMismatch, ReasonSnapshotRejected, false, nil)
 	}
-	if err := validateConfigSnapshotPayload(canonical, s.TunnelID, s.Generation); err != nil {
-		return codeError(ErrSnapshotRejected, ReasonSnapshotRejected, false, err)
+	if err := ValidateConfigSnapshotPayload(canonical, s.TunnelID, s.Generation); err != nil {
+		return CodeError(ErrSnapshotRejected, ReasonSnapshotRejected, false, err)
 	}
 	return nil
 }
@@ -1180,7 +355,7 @@ type wireConfigRoute struct {
 	DesiredState            string  `json:"desired_state"`
 }
 
-func validateConfigSnapshotPayload(payload []byte, tunnelID string, generation uint64) error {
+func ValidateConfigSnapshotPayload(payload []byte, tunnelID string, generation uint64) error {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(payload, &fields); err != nil || fields == nil {
 		return ErrSnapshotRejected
@@ -1194,7 +369,7 @@ func validateConfigSnapshotPayload(payload []byte, tunnelID string, generation u
 	decoder := json.NewDecoder(bytes.NewReader(payload))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&snapshot); err != nil {
-		return codeError(ErrSnapshotRejected, ReasonSnapshotRejected, false, err)
+		return fmt.Errorf("%w: snapshot shape: %v", ErrSnapshotRejected, err)
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); err != io.EOF {
@@ -1221,7 +396,7 @@ func validateConfigSnapshotPayload(payload []byte, tunnelID string, generation u
 			return ErrSnapshotRejected
 		}
 		if err := validateWireConfigRoute(route); err != nil {
-			return codeError(ErrSnapshotRejected, ReasonSnapshotRejected, false, err)
+			return fmt.Errorf("%w: route %d: %v", ErrSnapshotRejected, index, err)
 		}
 	}
 	return nil
@@ -1259,16 +434,16 @@ func validateWireConfigRoute(route wireConfigRoute) error {
 		if route.OriginScheme == "tcp" {
 			return ErrInvalidInput
 		}
+	case "tcp_private":
+		if route.OriginScheme != "tcp" {
+			return ErrInvalidInput
+		}
 	case "tcp":
 		if route.OriginScheme != "tcp" || route.MatchType != "managed_exact" || route.PathPrefix != nil {
 			return ErrInvalidInput
 		}
 	case "tls":
-		if route.OriginScheme != "tcp" || route.MatchType != "managed_exact" || route.PathPrefix != nil || route.PreserveHost || route.HostOverride != nil {
-			return ErrInvalidInput
-		}
-	case "tcp_private":
-		if route.OriginScheme != "tcp" {
+		if route.OriginScheme != "tcp" || route.MatchType != "managed_exact" || route.MatchHostname == "" || route.WildcardSuffix != "" || route.PathPrefix != nil || route.PreserveHost || route.HostOverride != nil {
 			return ErrInvalidInput
 		}
 	default:
@@ -1348,7 +523,7 @@ type Delta struct {
 
 func NewDelta(tunnelID string, previous Snapshot, generation uint64, payload []byte) (Delta, error) {
 	if err := previous.Validate(); err != nil || generation != previous.Generation+1 {
-		return Delta{}, codeError(ErrGenerationGap, ReasonGenerationGap, false, err)
+		return Delta{}, CodeError(ErrGenerationGap, ReasonGenerationGap, false, err)
 	}
 	snapshot, err := NewSnapshot(tunnelID, generation, payload)
 	if err != nil {
@@ -1358,22 +533,22 @@ func NewDelta(tunnelID string, previous Snapshot, generation uint64, payload []b
 }
 
 func (d Delta) Validate() error {
-	if ValidateIdentifier(d.TunnelID) != nil || d.AccountID != "" && ValidateIdentifier(d.AccountID) != nil || d.SessionID != "" && ValidateIdentifier(d.SessionID) != nil || !hashPattern.MatchString(d.PreviousContentHash) || !hashPattern.MatchString(d.ContentHash) || len(d.Payload) == 0 || len(d.Payload) > MaxDeltaBytes {
+	if ValidateIdentifier(d.TunnelID) != nil || d.AccountID != "" && ValidateIdentifier(d.AccountID) != nil || d.SessionID != "" && ValidateIdentifier(d.SessionID) != nil || !ValidContentHash(d.PreviousContentHash) || !ValidContentHash(d.ContentHash) || len(d.Payload) == 0 || len(d.Payload) > MaxDeltaBytes {
 		return ErrInvalidInput
 	}
 	if d.PreviousGeneration == 0 || d.Generation != d.PreviousGeneration+1 {
-		return codeError(ErrGenerationGap, ReasonGenerationGap, true, nil)
+		return CodeError(ErrGenerationGap, ReasonGenerationGap, true, nil)
 	}
 	canonical, err := canonicalJSON(d.Payload, MaxDeltaBytes)
 	if err != nil || !bytes.Equal(canonical, d.Payload) {
-		return codeError(ErrContentHashMismatch, ReasonGenerationGap, false, err)
+		return CodeError(ErrContentHashMismatch, ReasonGenerationGap, false, err)
 	}
 	digest := sha256.Sum256(canonical)
 	if d.ContentHash != "sha256:"+hex.EncodeToString(digest[:]) {
-		return codeError(ErrContentHashMismatch, ReasonGenerationGap, false, nil)
+		return CodeError(ErrContentHashMismatch, ReasonGenerationGap, false, nil)
 	}
-	if err := validateConfigSnapshotPayload(canonical, d.TunnelID, d.Generation); err != nil {
-		return codeError(ErrDeltaRejected, ReasonGenerationGap, false, err)
+	if err := ValidateConfigSnapshotPayload(canonical, d.TunnelID, d.Generation); err != nil {
+		return CodeError(ErrDeltaRejected, ReasonGenerationGap, false, err)
 	}
 	return nil
 }
@@ -1417,10 +592,10 @@ type Ack struct {
 }
 
 func (a Ack) Validate() error {
-	if ValidateIdentifier(a.AccountID) != nil || ValidateIdentifier(a.TunnelID) != nil || ValidateIdentifier(a.ConnectorID) != nil || ValidateIdentifier(a.SessionID) != nil || a.ProcessGeneration == 0 || (a.Kind != AckSnapshot && a.Kind != AckDelta && a.Kind != AckReady && a.Kind != AckRenewal) || (a.Status != AckApplied && a.Status != AckDuplicate && a.Status != AckRejected && a.Status != AckSnapshotRequired) || a.Generation == 0 || !hashPattern.MatchString(a.ContentHash) {
+	if ValidateIdentifier(a.AccountID) != nil || ValidateIdentifier(a.TunnelID) != nil || ValidateIdentifier(a.ConnectorID) != nil || ValidateIdentifier(a.SessionID) != nil || a.ProcessGeneration == 0 || (a.Kind != AckSnapshot && a.Kind != AckDelta && a.Kind != AckReady && a.Kind != AckRenewal) || (a.Status != AckApplied && a.Status != AckDuplicate && a.Status != AckRejected && a.Status != AckSnapshotRequired) || a.Generation == 0 || !ValidContentHash(a.ContentHash) {
 		return ErrInvalidInput
 	}
-	if a.Status == AckRejected && (a.Code == "" || !validCode(a.Code)) || a.Status != AckRejected && a.Code != "" {
+	if a.Status == AckRejected && (a.Code == "" || !ValidCode(a.Code)) || a.Status != AckRejected && a.Code != "" {
 		return ErrInvalidInput
 	}
 	return nil
@@ -1440,7 +615,7 @@ type Readiness struct {
 }
 
 func (r Readiness) Validate() error {
-	if ValidateIdentifier(r.AccountID) != nil || ValidateIdentifier(r.SessionID) != nil || ValidateIdentifier(r.TunnelID) != nil || ValidateIdentifier(r.ConnectorID) != nil || r.ProcessGeneration == 0 || r.Generation == 0 || !hashPattern.MatchString(r.ContentHash) {
+	if ValidateIdentifier(r.AccountID) != nil || ValidateIdentifier(r.SessionID) != nil || ValidateIdentifier(r.TunnelID) != nil || ValidateIdentifier(r.ConnectorID) != nil || r.ProcessGeneration == 0 || r.Generation == 0 || !ValidContentHash(r.ContentHash) {
 		return ErrInvalidInput
 	}
 	return nil
@@ -1458,7 +633,7 @@ type Heartbeat struct {
 }
 
 func (h Heartbeat) Validate() error {
-	if ValidateIdentifier(h.AccountID) != nil || ValidateIdentifier(h.SessionID) != nil || ValidateIdentifier(h.TunnelID) != nil || ValidateIdentifier(h.ConnectorID) != nil || h.ProcessGeneration == 0 || h.LastAppliedGeneration == 0 || !hashPattern.MatchString(h.LastAppliedHash) || h.SentAt.IsZero() {
+	if ValidateIdentifier(h.AccountID) != nil || ValidateIdentifier(h.SessionID) != nil || ValidateIdentifier(h.TunnelID) != nil || ValidateIdentifier(h.ConnectorID) != nil || h.ProcessGeneration == 0 || h.LastAppliedGeneration == 0 || !ValidContentHash(h.LastAppliedHash) || h.SentAt.IsZero() {
 		return ErrInvalidInput
 	}
 	return nil
@@ -1514,7 +689,7 @@ type Drain struct {
 }
 
 func (d Drain) Validate(now time.Time) error {
-	if ValidateIdentifier(d.AccountID) != nil || ValidateIdentifier(d.TunnelID) != nil || ValidateIdentifier(d.ConnectorID) != nil || ValidateIdentifier(d.SessionID) != nil || ValidateIdentifier(d.DrainID) != nil || d.ProcessGeneration == 0 || d.Generation == 0 || !hashPattern.MatchString(d.ContentHash) || d.Deadline.IsZero() || !d.StopNewStreams {
+	if ValidateIdentifier(d.AccountID) != nil || ValidateIdentifier(d.TunnelID) != nil || ValidateIdentifier(d.ConnectorID) != nil || ValidateIdentifier(d.SessionID) != nil || ValidateIdentifier(d.DrainID) != nil || d.ProcessGeneration == 0 || d.Generation == 0 || !ValidContentHash(d.ContentHash) || d.Deadline.IsZero() || !d.StopNewStreams {
 		return ErrInvalidInput
 	}
 	if !now.IsZero() && (!d.Deadline.After(now) || d.Deadline.Sub(now) > MaxLease) {
@@ -1542,7 +717,7 @@ type DrainAck struct {
 }
 
 func (a DrainAck) Validate(now time.Time) error {
-	if ValidateIdentifier(a.AccountID) != nil || ValidateIdentifier(a.TunnelID) != nil || ValidateIdentifier(a.ConnectorID) != nil || ValidateIdentifier(a.SessionID) != nil || ValidateIdentifier(a.DrainID) != nil || a.ProcessGeneration == 0 || a.Generation == 0 || !hashPattern.MatchString(a.ContentHash) || a.ActiveStreams > MaxActiveStreams {
+	if ValidateIdentifier(a.AccountID) != nil || ValidateIdentifier(a.TunnelID) != nil || ValidateIdentifier(a.ConnectorID) != nil || ValidateIdentifier(a.SessionID) != nil || ValidateIdentifier(a.DrainID) != nil || a.ProcessGeneration == 0 || a.Generation == 0 || !ValidContentHash(a.ContentHash) || a.ActiveStreams > MaxActiveStreams {
 		return ErrInvalidInput
 	}
 	switch a.Status {
@@ -1565,7 +740,7 @@ func (a DrainAck) Validate(now time.Time) error {
 	default:
 		return ErrInvalidInput
 	}
-	if a.Code != "" && !validCode(a.Code) {
+	if a.Code != "" && !ValidCode(a.Code) {
 		return ErrInvalidInput
 	}
 	_ = now
@@ -1596,20 +771,20 @@ type Reject struct {
 }
 
 func (r Reject) Validate() error {
-	if ValidateIdentifier(r.AccountID) != nil || ValidateIdentifier(r.TunnelID) != nil || ValidateIdentifier(r.ConnectorID) != nil || ValidateIdentifier(r.SessionID) != nil || r.ProcessGeneration == 0 || !validCode(r.Code) || !validDisconnectReason(r.Reason) || len(r.Message) > MaxReasonMessage {
+	if ValidateIdentifier(r.AccountID) != nil || ValidateIdentifier(r.TunnelID) != nil || ValidateIdentifier(r.ConnectorID) != nil || ValidateIdentifier(r.SessionID) != nil || r.ProcessGeneration == 0 || !ValidCode(r.Code) || !ValidDisconnectReason(r.Reason) || len(r.Message) > MaxReasonMessage {
 		return ErrInvalidInput
 	}
 	return nil
 }
 
 func (d Disconnect) Validate() error {
-	if ValidateIdentifier(d.AccountID) != nil || ValidateIdentifier(d.TunnelID) != nil || ValidateIdentifier(d.ConnectorID) != nil || ValidateIdentifier(d.SessionID) != nil || d.ProcessGeneration == 0 || !validDisconnectReason(d.Reason) || len(d.Message) > MaxReasonMessage {
+	if ValidateIdentifier(d.AccountID) != nil || ValidateIdentifier(d.TunnelID) != nil || ValidateIdentifier(d.ConnectorID) != nil || ValidateIdentifier(d.SessionID) != nil || d.ProcessGeneration == 0 || !ValidDisconnectReason(d.Reason) || len(d.Message) > MaxReasonMessage {
 		return ErrInvalidInput
 	}
 	return nil
 }
 
-func validDisconnectReason(reason DisconnectReason) bool {
+func ValidDisconnectReason(reason DisconnectReason) bool {
 	switch reason {
 	case ReasonProtocolMismatch, ReasonCapabilityMissing, ReasonMalformed, ReasonAuthentication, ReasonCredentialExpired, ReasonLeaseExpired, ReasonHeartbeatTimeout, ReasonSessionReplaced, ReasonStaleGeneration, ReasonSnapshotRejected, ReasonGenerationGap, ReasonCredentialRotation, ReasonCanceled, ReasonServerShutdown, ReasonProtocolClosed:
 		return true
@@ -1618,7 +793,7 @@ func validDisconnectReason(reason DisconnectReason) bool {
 	}
 }
 
-func validCode(code Code) bool {
+func ValidCode(code Code) bool {
 	switch code {
 	case CodeInvalidInput, CodeMalformedFrame, CodeFrameTooLarge, CodeProtocolIncompatible, CodeCapabilityMissing, CodeAuthenticationFailed, CodeCredentialExpired, CodeIdentityMismatch, CodeSessionConflict, CodeSessionClosed, CodeLeaseExpired, CodeHeartbeatTimeout, CodeSnapshotRequired, CodeGenerationGap, CodeStaleGeneration, CodeContentHashMismatch, CodeSnapshotRejected, CodeDeltaRejected, CodeNotReady, CodeCanceled, CodeStaleSession, CodeUnsupportedMessage, CodeDrainRejected, CodeDrainTimeout, CodeCredentialRotationRejected, CodeCredentialRotationNotReady, CodeCredentialRotationFailed:
 		return true
@@ -1632,23 +807,9 @@ type ClockFunc func() time.Time
 
 func (f ClockFunc) Now() time.Time { return f() }
 
-type realClock struct{}
+type RealClock struct{}
 
-func (realClock) Now() time.Time { return time.Now().UTC() }
-
-// PreparedConfig is a two-phase configuration change. Prepare must stage the
-// candidate without changing active traffic. Activate is called only after
-// edge, route, and origin readiness have all been observed. Abort is safe to
-// call after any failed preparation or activation.
-type PreparedConfig interface {
-	Activate(context.Context) error
-	Abort(context.Context) error
-}
-
-type ConfigApplier interface {
-	PrepareSnapshot(context.Context, Snapshot) (PreparedConfig, error)
-	PrepareDelta(context.Context, Delta) (PreparedConfig, error)
-}
+func (RealClock) Now() time.Time { return time.Now().UTC() }
 
 // canonicalJSON validates duplicate keys, depth, trailing data and forbidden
 // secret-bearing fields before a payload is hashed or handed to an applier.
@@ -1767,4 +928,12 @@ func rejectSecretFields(value any) error {
 		return nil
 	}
 	return visit(value)
+}
+
+func NewOpaqueID(prefix string) (string, error) {
+	value, err := uuid.NewRandom()
+	if err != nil {
+		return "", err
+	}
+	return prefix + "_" + value.String(), nil
 }

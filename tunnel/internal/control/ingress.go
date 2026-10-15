@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 const maximumIngressDecisions = 4096

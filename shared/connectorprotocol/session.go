@@ -58,10 +58,10 @@ func (r *SessionRegistry) Attach(ref SessionRef) (AttachResult, error) {
 	previous, exists := r.current[ref.ConnectorID]
 	if exists {
 		if previous.TunnelID != ref.TunnelID {
-			return AttachResult{}, codeError(ErrIdentityMismatch, ReasonAuthentication, false, nil)
+			return AttachResult{}, CodeError(ErrIdentityMismatch, ReasonAuthentication, false, nil)
 		}
 		if ref.ProcessGeneration <= previous.ProcessGeneration {
-			return AttachResult{}, codeError(ErrSessionConflict, ReasonStaleGeneration, false, nil)
+			return AttachResult{}, CodeError(ErrSessionConflict, ReasonStaleGeneration, false, nil)
 		}
 	}
 	r.current[ref.ConnectorID] = ref
@@ -73,7 +73,7 @@ func (r *SessionRegistry) Attach(ref SessionRef) (AttachResult, error) {
 }
 
 func (r *SessionRegistry) Disconnect(ref SessionRef, reason DisconnectReason) error {
-	if r == nil || ref.Validate() != nil || !validDisconnectReason(reason) {
+	if r == nil || ref.Validate() != nil || !ValidDisconnectReason(reason) {
 		return ErrInvalidInput
 	}
 	r.mu.Lock()
@@ -83,7 +83,7 @@ func (r *SessionRegistry) Disconnect(ref SessionRef, reason DisconnectReason) er
 		return nil
 	}
 	if current != ref {
-		return codeError(ErrStaleSession, ReasonStaleGeneration, false, nil)
+		return CodeError(ErrStaleSession, ReasonStaleGeneration, false, nil)
 	}
 	delete(r.current, ref.ConnectorID)
 	return nil
@@ -120,14 +120,14 @@ type AuthenticatorFuncs struct {
 
 func (f AuthenticatorFuncs) Authenticate(ctx context.Context, request AuthRequest) (AuthResult, error) {
 	if f.AuthenticateFunc == nil {
-		return AuthResult{}, codeError(ErrAuthenticationFailed, ReasonAuthentication, false, errors.New("authentication is not configured"))
+		return AuthResult{}, CodeError(ErrAuthenticationFailed, ReasonAuthentication, false, errors.New("authentication is not configured"))
 	}
 	return f.AuthenticateFunc(ctx, request)
 }
 
 func (f AuthenticatorFuncs) Renew(ctx context.Context, request RenewalRequest) (AuthResult, error) {
 	if f.RenewFunc == nil {
-		return AuthResult{}, codeError(ErrCredentialExpired, ReasonCredentialExpired, true, errors.New("credential renewal is not configured"))
+		return AuthResult{}, CodeError(ErrCredentialExpired, ReasonCredentialExpired, true, errors.New("credential renewal is not configured"))
 	}
 	return f.RenewFunc(ctx, request)
 }
@@ -164,7 +164,7 @@ func NewServer(config ServerConfig) (*Server, error) {
 		return nil, ErrInvalidInput
 	}
 	if config.Clock == nil {
-		config.Clock = realClock{}
+		config.Clock = RealClock{}
 	}
 	if config.LeaseDuration == 0 {
 		config.LeaseDuration = DefaultLease
@@ -173,7 +173,7 @@ func NewServer(config ServerConfig) (*Server, error) {
 		config.HeartbeatInterval = DefaultHeartbeat
 	}
 	if config.SessionIDs == nil {
-		config.SessionIDs = func() (string, error) { return newOpaqueID("session") }
+		config.SessionIDs = func() (string, error) { return NewOpaqueID("session") }
 	}
 	if config.Registry == nil {
 		config.Registry = NewSessionRegistry()
@@ -230,30 +230,30 @@ func (s *Server) Accept(ctx context.Context, hello Hello) (*ServerSession, Welco
 	}
 	auth, err := s.config.Authenticator.Authenticate(ctx, hello.Auth)
 	if err != nil {
-		return nil, Welcome{}, Snapshot{}, codeError(ErrAuthenticationFailed, ReasonAuthentication, false, err)
+		return nil, Welcome{}, Snapshot{}, CodeError(ErrAuthenticationFailed, ReasonAuthentication, false, err)
 	}
 	if err := auth.Validate(now); err != nil || auth.AccountID != hello.AccountID || auth.TunnelID != hello.TunnelID || auth.ConnectorID != hello.ConnectorID || auth.HostID != hello.HostID || auth.IdentityKeyID != hello.Auth.IdentityKeyID || auth.IdentityKeyThumbprint != hello.Auth.IdentityKeyThumbprint || auth.ProcessGeneration != hello.ProcessGeneration {
 		if err == nil {
 			err = ErrIdentityMismatch
 		}
-		return nil, Welcome{}, Snapshot{}, codeError(ErrAuthenticationFailed, ReasonAuthentication, false, errors.Join(err, errors.New("authenticator returned invalid identity data")))
+		return nil, Welcome{}, Snapshot{}, CodeError(ErrAuthenticationFailed, ReasonAuthentication, false, errors.Join(err, errors.New("authenticator returned invalid identity data")))
 	}
 	snapshot, err := s.config.Snapshots.Snapshot(ctx, hello.TunnelID)
 	if err != nil {
-		return nil, Welcome{}, Snapshot{}, codeError(ErrSnapshotRejected, ReasonSnapshotRejected, true, err)
+		return nil, Welcome{}, Snapshot{}, CodeError(ErrSnapshotRejected, ReasonSnapshotRejected, true, err)
 	}
 	if err := snapshot.Validate(); err != nil || snapshot.TunnelID != hello.TunnelID {
 		if err == nil {
 			err = ErrIdentityMismatch
 		}
-		return nil, Welcome{}, Snapshot{}, codeError(ErrSnapshotRejected, ReasonSnapshotRejected, false, errors.Join(err, errors.New("snapshot source returned invalid snapshot data")))
+		return nil, Welcome{}, Snapshot{}, CodeError(ErrSnapshotRejected, ReasonSnapshotRejected, false, errors.Join(err, errors.New("snapshot source returned invalid snapshot data")))
 	}
 	sessionID, err := s.config.SessionIDs()
 	if err != nil || ValidateIdentifier(sessionID) != nil {
 		if ValidateIdentifier(sessionID) != nil {
 			err = errors.Join(err, errors.New("session identifier provider returned invalid identifier"))
 		}
-		return nil, Welcome{}, Snapshot{}, codeError(ErrSessionConflict, ReasonAuthentication, true, err)
+		return nil, Welcome{}, Snapshot{}, CodeError(ErrSessionConflict, ReasonAuthentication, true, err)
 	}
 	leaseExpiry := auth.LeaseExpiresAt
 	configuredExpiry := now.Add(s.config.LeaseDuration)
@@ -262,19 +262,19 @@ func (s *Server) Accept(ctx context.Context, hello Hello) (*ServerSession, Welco
 	}
 	lease := Lease{SessionID: sessionID, ExpiresAt: leaseExpiry, HeartbeatIntervalMS: uint32(s.config.HeartbeatInterval / time.Millisecond)}
 	if err := lease.Validate(now); err != nil {
-		return nil, Welcome{}, Snapshot{}, codeError(ErrAuthenticationFailed, ReasonAuthentication, false, err)
+		return nil, Welcome{}, Snapshot{}, CodeError(ErrAuthenticationFailed, ReasonAuthentication, false, err)
 	}
 	ref := SessionRef{TunnelID: hello.TunnelID, ConnectorID: hello.ConnectorID, SessionID: sessionID, ProcessGeneration: hello.ProcessGeneration}
 	if _, err := s.config.Registry.Attach(ref); err != nil {
 		return nil, Welcome{}, Snapshot{}, err
 	}
 	welcome := Welcome{Protocol: ProtocolName, Version: version, SessionID: sessionID, Capabilities: capabilities, Lease: lease, RequiresSnapshot: true, ServerTime: now}
-	snapshot = bindSnapshot(snapshot, hello.AccountID, hello.ConnectorID, sessionID, hello.ProcessGeneration)
+	snapshot = BindSnapshot(snapshot, hello.AccountID, hello.ConnectorID, sessionID, hello.ProcessGeneration)
 	session := &ServerSession{server: s, ref: ref, auth: auth, lease: lease, welcome: welcome, pendingSnapshot: &snapshot, state: SessionAwaitingSnapshot, lastHeartbeat: now}
 	return session, welcome, snapshot, nil
 }
 
-func bindSnapshot(snapshot Snapshot, accountID, connectorID, sessionID string, processGeneration uint64) Snapshot {
+func BindSnapshot(snapshot Snapshot, accountID, connectorID, sessionID string, processGeneration uint64) Snapshot {
 	snapshot.AccountID = accountID
 	snapshot.ConnectorID = connectorID
 	snapshot.SessionID = sessionID
@@ -341,18 +341,18 @@ func (s *ServerSession) State() SessionState {
 
 func (s *ServerSession) ensureActiveLocked(now time.Time) error {
 	if s.state == SessionClosed {
-		return codeError(ErrSessionClosed, s.disconnectReason, false, nil)
+		return CodeError(ErrSessionClosed, s.disconnectReason, false, nil)
 	}
 	if s.server == nil || s.server.config.Registry == nil {
-		return codeError(ErrSessionConflict, ReasonStaleGeneration, false, errors.New("session registry is not configured"))
+		return CodeError(ErrSessionConflict, ReasonStaleGeneration, false, errors.New("session registry is not configured"))
 	}
 	if current, ok := s.server.config.Registry.Active(s.ref.ConnectorID); !ok || current != s.ref {
 		s.closeLocked(ReasonSessionReplaced)
-		return codeError(ErrStaleSession, ReasonSessionReplaced, false, nil)
+		return CodeError(ErrStaleSession, ReasonSessionReplaced, false, nil)
 	}
 	if !s.lastHeartbeat.IsZero() && now.Sub(s.lastHeartbeat) > 2*time.Duration(s.lease.HeartbeatIntervalMS)*time.Millisecond {
 		s.closeLocked(ReasonHeartbeatTimeout)
-		return codeError(ErrHeartbeatTimeout, ReasonHeartbeatTimeout, true, nil)
+		return CodeError(ErrHeartbeatTimeout, ReasonHeartbeatTimeout, true, nil)
 	}
 	return nil
 }
@@ -386,20 +386,20 @@ func (s *ServerSession) HandleAck(ctx context.Context, ack Ack) error {
 		return err
 	}
 	if !s.matchesIdentity(ack.AccountID, ack.TunnelID, ack.ConnectorID, ack.SessionID, ack.ProcessGeneration) {
-		return codeError(ErrIdentityMismatch, ReasonAuthentication, false, nil)
+		return CodeError(ErrIdentityMismatch, ReasonAuthentication, false, nil)
 	}
 	if s.pendingSnapshot != nil {
 		if ack.Kind != AckSnapshot || ack.Generation != s.pendingSnapshot.Generation || ack.ContentHash != s.pendingSnapshot.ContentHash {
-			return codeError(ErrSnapshotRejected, ReasonSnapshotRejected, false, nil)
+			return CodeError(ErrSnapshotRejected, ReasonSnapshotRejected, false, nil)
 		}
 		if ack.Status == AckSnapshotRequired || ack.Status == AckRejected {
 			s.pendingSnapshot = nil
 			s.needsSnapshot = true
 			s.restoreStateLocked()
 			if ack.Status == AckSnapshotRequired {
-				return codeError(ErrSnapshotRequired, ReasonGenerationGap, true, nil)
+				return CodeError(ErrSnapshotRequired, ReasonGenerationGap, true, nil)
 			}
-			return codeError(ErrSnapshotRejected, ReasonSnapshotRejected, false, nil)
+			return CodeError(ErrSnapshotRejected, ReasonSnapshotRejected, false, nil)
 		}
 		s.candidate = cloneSnapshot(*s.pendingSnapshot)
 		s.hasCandidate = true
@@ -412,22 +412,22 @@ func (s *ServerSession) HandleAck(ctx context.Context, ack Ack) error {
 	}
 	if s.pendingDelta != nil {
 		if ack.Kind != AckDelta || ack.Generation != s.pendingDelta.Generation || ack.ContentHash != s.pendingDelta.ContentHash {
-			return codeError(ErrDeltaRejected, ReasonGenerationGap, false, nil)
+			return CodeError(ErrDeltaRejected, ReasonGenerationGap, false, nil)
 		}
 		pending := *s.pendingDelta
 		s.pendingDelta = nil
 		if ack.Status == AckSnapshotRequired {
 			s.needsSnapshot = true
 			s.restoreStateLocked()
-			return codeError(ErrSnapshotRequired, ReasonGenerationGap, true, nil)
+			return CodeError(ErrSnapshotRequired, ReasonGenerationGap, true, nil)
 		}
 		if ack.Status == AckRejected {
 			s.needsSnapshot = true
 			s.restoreStateLocked()
-			return codeError(ErrDeltaRejected, ReasonSnapshotRejected, false, nil)
+			return CodeError(ErrDeltaRejected, ReasonSnapshotRejected, false, nil)
 		}
 		if s.hasActive && (pending.PreviousGeneration != s.active.Generation || pending.PreviousContentHash != s.active.ContentHash) {
-			return codeError(ErrGenerationGap, ReasonGenerationGap, true, nil)
+			return CodeError(ErrGenerationGap, ReasonGenerationGap, true, nil)
 		}
 		s.candidate = Snapshot{AccountID: s.refAccountID(), TunnelID: pending.TunnelID, ConnectorID: s.ref.ConnectorID, SessionID: s.ref.SessionID, ProcessGeneration: s.ref.ProcessGeneration, Generation: pending.Generation, ContentHash: pending.ContentHash, Payload: append([]byte(nil), pending.Payload...)}
 		s.hasCandidate = true
@@ -438,18 +438,18 @@ func (s *ServerSession) HandleAck(ctx context.Context, ack Ack) error {
 	}
 	if ack.Status == AckDuplicate {
 		if !s.hasCandidate && !s.hasActive {
-			return codeError(ErrStaleGeneration, ReasonStaleGeneration, false, nil)
+			return CodeError(ErrStaleGeneration, ReasonStaleGeneration, false, nil)
 		}
 		current := s.active
 		if s.hasCandidate {
 			current = s.candidate
 		}
 		if ack.Generation != current.Generation || ack.ContentHash != current.ContentHash {
-			return codeError(ErrStaleGeneration, ReasonStaleGeneration, false, nil)
+			return CodeError(ErrStaleGeneration, ReasonStaleGeneration, false, nil)
 		}
 		return nil
 	}
-	return codeError(ErrInvalidInput, ReasonMalformed, false, nil)
+	return CodeError(ErrInvalidInput, ReasonMalformed, false, nil)
 }
 
 // CanPersistNegativeAck is checked before HandleAck mutates pending state. A
@@ -491,17 +491,17 @@ func (s *ServerSession) HandleReadiness(ctx context.Context, readiness Readiness
 		return Ack{}, err
 	}
 	if !s.matchesIdentity(readiness.AccountID, readiness.TunnelID, readiness.ConnectorID, readiness.SessionID, readiness.ProcessGeneration) {
-		return Ack{}, codeError(ErrIdentityMismatch, ReasonAuthentication, false, nil)
+		return Ack{}, CodeError(ErrIdentityMismatch, ReasonAuthentication, false, nil)
 	}
 	if s.hasCandidate {
 		if readiness.Generation != s.candidate.Generation || readiness.ContentHash != s.candidate.ContentHash {
-			return Ack{}, codeError(ErrStaleGeneration, ReasonStaleGeneration, false, nil)
+			return Ack{}, CodeError(ErrStaleGeneration, ReasonStaleGeneration, false, nil)
 		}
 	} else if !s.hasActive || readiness.Generation != s.active.Generation || readiness.ContentHash != s.active.ContentHash {
-		return Ack{}, codeError(ErrStaleGeneration, ReasonStaleGeneration, false, nil)
+		return Ack{}, CodeError(ErrStaleGeneration, ReasonStaleGeneration, false, nil)
 	}
 	if !readiness.EdgeReady || !readiness.RouteReady || !readiness.OriginReady {
-		return Ack{}, codeError(ErrNotReady, ReasonSnapshotRejected, true, nil)
+		return Ack{}, CodeError(ErrNotReady, ReasonSnapshotRejected, true, nil)
 	}
 	if s.hasCandidate {
 		s.active = cloneSnapshot(s.candidate)
@@ -520,7 +520,7 @@ func (s *ServerSession) OfferSnapshot(ctx context.Context, snapshot Snapshot) er
 		return ErrInvalidInput
 	}
 	if err := snapshot.Validate(); err != nil {
-		return codeError(ErrSnapshotRejected, ReasonSnapshotRejected, false, err)
+		return CodeError(ErrSnapshotRejected, ReasonSnapshotRejected, false, err)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -528,34 +528,34 @@ func (s *ServerSession) OfferSnapshot(ctx context.Context, snapshot Snapshot) er
 		return err
 	}
 	if snapshot.TunnelID != s.ref.TunnelID {
-		return codeError(ErrIdentityMismatch, ReasonAuthentication, false, nil)
+		return CodeError(ErrIdentityMismatch, ReasonAuthentication, false, nil)
 	}
 	if snapshot.AccountID != "" && snapshot.AccountID != s.refAccountID() || snapshot.ConnectorID != "" && snapshot.ConnectorID != s.ref.ConnectorID || snapshot.SessionID != "" && snapshot.SessionID != s.ref.SessionID || snapshot.ProcessGeneration != 0 && snapshot.ProcessGeneration != s.ref.ProcessGeneration {
-		return codeError(ErrIdentityMismatch, ReasonAuthentication, false, nil)
+		return CodeError(ErrIdentityMismatch, ReasonAuthentication, false, nil)
 	}
 	if s.hasActive && snapshot.Generation < s.active.Generation {
-		return codeError(ErrStaleGeneration, ReasonStaleGeneration, false, nil)
+		return CodeError(ErrStaleGeneration, ReasonStaleGeneration, false, nil)
 	}
 	if s.hasCandidate && snapshot.Generation == s.candidate.Generation {
 		if snapshot.ContentHash != s.candidate.ContentHash {
-			return codeError(ErrContentHashMismatch, ReasonSnapshotRejected, false, nil)
+			return CodeError(ErrContentHashMismatch, ReasonSnapshotRejected, false, nil)
 		}
 		return nil
 	}
 	if s.hasActive && snapshot.Generation == s.active.Generation {
 		if snapshot.ContentHash != s.active.ContentHash {
-			return codeError(ErrContentHashMismatch, ReasonSnapshotRejected, false, nil)
+			return CodeError(ErrContentHashMismatch, ReasonSnapshotRejected, false, nil)
 		}
 		return nil
 	}
 	if s.pendingSnapshot != nil && snapshot.Generation == s.pendingSnapshot.Generation {
 		if snapshot.ContentHash != s.pendingSnapshot.ContentHash {
-			return codeError(ErrContentHashMismatch, ReasonSnapshotRejected, false, nil)
+			return CodeError(ErrContentHashMismatch, ReasonSnapshotRejected, false, nil)
 		}
 		return nil
 	}
 	s.pendingDelta = nil
-	bound := bindSnapshot(snapshot, s.refAccountID(), s.ref.ConnectorID, s.ref.SessionID, s.ref.ProcessGeneration)
+	bound := BindSnapshot(snapshot, s.refAccountID(), s.ref.ConnectorID, s.ref.SessionID, s.ref.ProcessGeneration)
 	s.pendingSnapshot = &bound
 	if !s.hasActive {
 		s.state = SessionAwaitingSnapshot
@@ -568,7 +568,7 @@ func (s *ServerSession) OfferDelta(ctx context.Context, delta Delta) error {
 		return ErrInvalidInput
 	}
 	if err := delta.Validate(); err != nil {
-		return codeError(ErrDeltaRejected, ReasonGenerationGap, false, err)
+		return CodeError(ErrDeltaRejected, ReasonGenerationGap, false, err)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -576,13 +576,13 @@ func (s *ServerSession) OfferDelta(ctx context.Context, delta Delta) error {
 		return err
 	}
 	if !s.hasActive || s.readyGeneration != s.active.Generation || s.needsSnapshot {
-		return codeError(ErrNotReady, ReasonSnapshotRejected, true, nil)
+		return CodeError(ErrNotReady, ReasonSnapshotRejected, true, nil)
 	}
 	if s.pendingSnapshot != nil || s.pendingDelta != nil || s.hasCandidate {
-		return codeError(ErrGenerationGap, ReasonGenerationGap, true, nil)
+		return CodeError(ErrGenerationGap, ReasonGenerationGap, true, nil)
 	}
 	if delta.TunnelID != s.ref.TunnelID || delta.AccountID != "" && delta.AccountID != s.refAccountID() || delta.ConnectorID != "" && delta.ConnectorID != s.ref.ConnectorID || delta.SessionID != "" && delta.SessionID != s.ref.SessionID || delta.ProcessGeneration != 0 && delta.ProcessGeneration != s.ref.ProcessGeneration || delta.PreviousGeneration != s.active.Generation || delta.PreviousContentHash != s.active.ContentHash {
-		return codeError(ErrGenerationGap, ReasonGenerationGap, true, nil)
+		return CodeError(ErrGenerationGap, ReasonGenerationGap, true, nil)
 	}
 	bound := delta
 	bound.AccountID = s.refAccountID()
@@ -607,16 +607,16 @@ func (s *ServerSession) HandleHeartbeat(ctx context.Context, heartbeat Heartbeat
 		return HeartbeatAck{}, err
 	}
 	if !s.matchesIdentity(heartbeat.AccountID, heartbeat.TunnelID, heartbeat.ConnectorID, heartbeat.SessionID, heartbeat.ProcessGeneration) {
-		return HeartbeatAck{}, codeError(ErrIdentityMismatch, ReasonAuthentication, false, nil)
+		return HeartbeatAck{}, CodeError(ErrIdentityMismatch, ReasonAuthentication, false, nil)
 	}
 	if heartbeat.SentAt.After(now.Add(MaxClockSkew)) {
-		return HeartbeatAck{}, codeError(ErrInvalidInput, ReasonMalformed, false, nil)
+		return HeartbeatAck{}, CodeError(ErrInvalidInput, ReasonMalformed, false, nil)
 	}
 	if heartbeat.SentAt.Before(now.Add(-MaxClockSkew)) {
-		return HeartbeatAck{}, codeError(ErrHeartbeatTimeout, ReasonHeartbeatTimeout, true, nil)
+		return HeartbeatAck{}, CodeError(ErrHeartbeatTimeout, ReasonHeartbeatTimeout, true, nil)
 	}
 	if !s.lastHeartbeatSentAt.IsZero() && !heartbeat.SentAt.After(s.lastHeartbeatSentAt) {
-		return HeartbeatAck{}, codeError(ErrStaleSession, ReasonStaleGeneration, false, nil)
+		return HeartbeatAck{}, CodeError(ErrStaleSession, ReasonStaleGeneration, false, nil)
 	}
 	// A connector may need more than one heartbeat interval to make a newly
 	// staged configuration usable: the carrier, routes, and origin can still be
@@ -634,7 +634,7 @@ func (s *ServerSession) HandleHeartbeat(ctx context.Context, heartbeat Heartbeat
 	case s.pendingSnapshot != nil:
 		expected = *s.pendingSnapshot
 	default:
-		return HeartbeatAck{}, codeError(ErrSnapshotRequired, ReasonGenerationGap, true, nil)
+		return HeartbeatAck{}, CodeError(ErrSnapshotRequired, ReasonGenerationGap, true, nil)
 	}
 	if heartbeat.LastAppliedGeneration != expected.Generation || heartbeat.LastAppliedHash != expected.ContentHash {
 		// Keep the last-known-good snapshot for rollback/traffic inspection, but
@@ -646,7 +646,7 @@ func (s *ServerSession) HandleHeartbeat(ctx context.Context, heartbeat Heartbeat
 			s.readyGeneration = 0
 			s.state = SessionAwaitingSnapshot
 		}
-		return HeartbeatAck{}, codeError(ErrSnapshotRequired, ReasonGenerationGap, true, nil)
+		return HeartbeatAck{}, CodeError(ErrSnapshotRequired, ReasonGenerationGap, true, nil)
 	}
 	// Advance the replay fence only after all identity, freshness, and exact
 	// generation checks pass. An invalid heartbeat cannot poison a subsequent
@@ -667,24 +667,24 @@ func (s *ServerSession) BeginDrain(ctx context.Context, drainID string, deadline
 		return Drain{}, ErrInvalidInput
 	}
 	if err := ctx.Err(); err != nil {
-		return Drain{}, codeError(ErrCanceled, ReasonCanceled, true, err)
+		return Drain{}, CodeError(ErrCanceled, ReasonCanceled, true, err)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.ensureActiveLocked(s.server.config.Clock.Now().UTC()); err != nil {
 		return Drain{}, err
 	}
-	if !hasCapability(s.welcome.Capabilities, CapabilityDrain) {
-		return Drain{}, codeError(ErrCapabilityMissing, ReasonCapabilityMissing, false, nil)
+	if !HasCapability(s.welcome.Capabilities, CapabilityDrain) {
+		return Drain{}, CodeError(ErrCapabilityMissing, ReasonCapabilityMissing, false, nil)
 	}
 	if s.drain != nil {
 		if s.drain.DrainID == drainID {
 			return *s.drain, nil
 		}
-		return Drain{}, codeError(ErrSessionConflict, ReasonStaleGeneration, true, nil)
+		return Drain{}, CodeError(ErrSessionConflict, ReasonStaleGeneration, true, nil)
 	}
 	if !s.hasActive || s.needsSnapshot || s.readyGeneration != s.active.Generation || s.state != SessionReady {
-		return Drain{}, codeError(ErrNotReady, ReasonSnapshotRejected, true, nil)
+		return Drain{}, CodeError(ErrNotReady, ReasonSnapshotRejected, true, nil)
 	}
 	request := Drain{AccountID: s.refAccountID(), TunnelID: s.ref.TunnelID, ConnectorID: s.ref.ConnectorID, SessionID: s.ref.SessionID, ProcessGeneration: s.ref.ProcessGeneration, DrainID: drainID, Generation: s.active.Generation, ContentHash: s.active.ContentHash, Deadline: deadline, StopNewStreams: true, ForceAfterDeadline: forceAfterDeadline}
 	if err := request.Validate(s.server.config.Clock.Now().UTC()); err != nil {
@@ -706,7 +706,7 @@ func (s *ServerSession) HandleDrainAck(ctx context.Context, ack DrainAck) error 
 		return ErrInvalidInput
 	}
 	if err := ctx.Err(); err != nil {
-		return codeError(ErrCanceled, ReasonCanceled, true, err)
+		return CodeError(ErrCanceled, ReasonCanceled, true, err)
 	}
 	if err := ack.Validate(s.server.config.Clock.Now().UTC()); err != nil {
 		return err
@@ -717,19 +717,19 @@ func (s *ServerSession) HandleDrainAck(ctx context.Context, ack DrainAck) error 
 		return err
 	}
 	if !s.matchesIdentity(ack.AccountID, ack.TunnelID, ack.ConnectorID, ack.SessionID, ack.ProcessGeneration) {
-		return codeError(ErrIdentityMismatch, ReasonAuthentication, false, nil)
+		return CodeError(ErrIdentityMismatch, ReasonAuthentication, false, nil)
 	}
 	if s.drain == nil || ack.DrainID != s.drain.DrainID {
-		return codeError(ErrStaleSession, ReasonStaleGeneration, false, nil)
+		return CodeError(ErrStaleSession, ReasonStaleGeneration, false, nil)
 	}
 	if ack.Generation != s.drain.Generation || ack.ContentHash != s.drain.ContentHash {
-		return codeError(ErrContentHashMismatch, ReasonSnapshotRejected, false, nil)
+		return CodeError(ErrContentHashMismatch, ReasonSnapshotRejected, false, nil)
 	}
 	if s.drainCompleted {
 		if ack.Status == s.drainStatus && ack.Code == s.drainCode {
 			return nil
 		}
-		return codeError(ErrStaleGeneration, ReasonStaleGeneration, false, nil)
+		return CodeError(ErrStaleGeneration, ReasonStaleGeneration, false, nil)
 	}
 	s.drainStatus = ack.Status
 	s.drainCode = ack.Code
@@ -742,7 +742,7 @@ func (s *ServerSession) HandleDrainAck(ctx context.Context, ack DrainAck) error 
 	case DrainRejected:
 		s.drainCompleted = true
 		s.restoreStateLocked()
-		return codeError(ErrDrainRejected, ReasonSnapshotRejected, false, nil)
+		return CodeError(ErrDrainRejected, ReasonSnapshotRejected, false, nil)
 	default:
 		return ErrInvalidInput
 	}
@@ -760,7 +760,7 @@ func (s *ServerSession) CanPersistNegativeDrainAck(ack DrainAck) bool {
 	return s.drain != nil && s.matchesIdentity(ack.AccountID, ack.TunnelID, ack.ConnectorID, ack.SessionID, ack.ProcessGeneration) && ack.DrainID == s.drain.DrainID && ack.Generation == s.drain.Generation && ack.ContentHash == s.drain.ContentHash
 }
 
-func hasCapability(values []string, capability string) bool {
+func HasCapability(values []string, capability string) bool {
 	for _, value := range values {
 		if value == capability {
 			return true
@@ -799,18 +799,18 @@ func (s *ServerSession) Renew(ctx context.Context, request RenewalRequest) (Auth
 	ref := s.ref
 	if request.SessionID != ref.SessionID || request.AccountID != expected.AccountID || request.TunnelID != ref.TunnelID || request.ConnectorID != ref.ConnectorID || request.HostID != expected.HostID || request.IdentityKeyID != expected.IdentityKeyID || request.IdentityKeyThumbprint != expected.IdentityKeyThumbprint || request.ProcessGeneration != ref.ProcessGeneration || request.CredentialGeneration != expected.CredentialGeneration {
 		s.mu.Unlock()
-		return AuthResult{}, codeError(ErrIdentityMismatch, ReasonAuthentication, false, nil)
+		return AuthResult{}, CodeError(ErrIdentityMismatch, ReasonAuthentication, false, nil)
 	}
 	s.mu.Unlock()
 	result, err := s.server.config.Authenticator.Renew(ctx, request)
 	if err != nil {
-		return AuthResult{}, codeError(ErrCredentialExpired, ReasonCredentialExpired, true, err)
+		return AuthResult{}, CodeError(ErrCredentialExpired, ReasonCredentialExpired, true, err)
 	}
 	if err := result.Validate(now); err != nil || result.AccountID != expected.AccountID || result.TunnelID != ref.TunnelID || result.ConnectorID != ref.ConnectorID || result.SessionID != "" && result.SessionID != ref.SessionID || result.HostID != expected.HostID || result.IdentityKeyID != expected.IdentityKeyID || result.IdentityKeyThumbprint != expected.IdentityKeyThumbprint || result.ProcessGeneration != ref.ProcessGeneration || result.CredentialGeneration < expected.CredentialGeneration {
 		if err == nil {
 			err = ErrIdentityMismatch
 		}
-		return AuthResult{}, codeError(ErrAuthenticationFailed, ReasonAuthentication, false, err)
+		return AuthResult{}, CodeError(ErrAuthenticationFailed, ReasonAuthentication, false, err)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -818,7 +818,7 @@ func (s *ServerSession) Renew(ctx context.Context, request RenewalRequest) (Auth
 		return AuthResult{}, err
 	}
 	if s.auth != expected || s.ref != ref {
-		return AuthResult{}, codeError(ErrSessionConflict, ReasonStaleGeneration, true, nil)
+		return AuthResult{}, CodeError(ErrSessionConflict, ReasonStaleGeneration, true, nil)
 	}
 	result.SessionID = ref.SessionID
 	s.auth = result
@@ -832,7 +832,7 @@ func (s *ServerSession) Renew(ctx context.Context, request RenewalRequest) (Auth
 }
 
 func (s *ServerSession) Close(reason DisconnectReason) error {
-	if s == nil || !validDisconnectReason(reason) {
+	if s == nil || !ValidDisconnectReason(reason) {
 		return ErrInvalidInput
 	}
 	s.mu.Lock()
@@ -888,4 +888,33 @@ func (s *ServerSession) CheckLease(now time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.ensureActiveLocked(now)
+}
+
+func (s *ServerSession) Metadata() (accountID, hostID string, ref SessionRef, credentialGeneration, configGeneration uint64) {
+	if s == nil {
+		return "", "", SessionRef{}, 0, 0
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	accountID, hostID, ref = s.auth.AccountID, s.auth.HostID, s.ref
+	credentialGeneration = s.auth.CredentialGeneration
+	switch {
+	case s.hasCandidate:
+		configGeneration = s.candidate.Generation
+	case s.hasActive:
+		configGeneration = s.active.Generation
+	case s.pendingSnapshot != nil:
+		configGeneration = s.pendingSnapshot.Generation
+	case s.pendingDelta != nil:
+		configGeneration = s.pendingDelta.Generation
+	}
+	return accountID, hostID, ref, credentialGeneration, configGeneration
+}
+
+// Clock returns the clock used by this server's sessions and rotation adapters.
+func (s *Server) Clock() Clock { return s.config.Clock }
+
+// ActiveConnector reports the current exact session binding for an adapter.
+func (s *Server) ActiveConnector(connectorID string) (SessionRef, bool) {
+	return s.config.Registry.Active(connectorID)
 }

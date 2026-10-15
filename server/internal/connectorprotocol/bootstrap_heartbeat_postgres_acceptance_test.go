@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 // TestTRK08PostgresHeartbeatRenewsAwaitingReadiness exercises the durable
@@ -20,17 +22,17 @@ func TestTRK08PostgresHeartbeatRenewsAwaitingReadiness(t *testing.T) {
 	ctx := context.Background()
 	connector := f.insertConnector(t, "heartbeat", false)
 	sessionID := "sess_trk08_" + f.suffix + "_heartbeat"
-	ref := SessionRef{
+	ref := wire.SessionRef{
 		TunnelID:          f.tunnelID,
 		ConnectorID:       connector.id,
 		SessionID:         sessionID,
 		ProcessGeneration: 1,
 	}
 
-	server, err := NewPersistentServer(f.store, f.store, ServerConfig{
-		Capabilities:      ProductionCapabilities(),
+	server, err := NewPersistentServer(f.store, f.store, wire.ServerConfig{
+		Capabilities:      wire.ProductionCapabilities(),
 		Clock:             f.clock,
-		LeaseDuration:     30 * time.Minute,
+		LeaseDuration:     30 * time.Second,
 		HeartbeatInterval: 10 * time.Second,
 		SessionIDs: func() (string, error) {
 			return sessionID, nil
@@ -39,17 +41,20 @@ func TestTRK08PostgresHeartbeatRenewsAwaitingReadiness(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := f.database.SQL().ExecContext(ctx, `UPDATE tunnel_connector_credential_generations SET valid_until=$2 WHERE connector_id=$1`, connector.id, f.clock.now.Add(30*time.Second)); err != nil {
+		t.Fatal(err)
+	}
 	auth := f.authRequest(connector, 1, connector.oldIdentityKeyID, connector.oldThumbprint, connector.oldPrivate, "heartbeat-auth-"+f.suffix)
-	hello := Hello{
-		Protocol:          ProtocolName,
-		MinVersion:        ProtocolVersion,
-		MaxVersion:        ProtocolVersion,
+	hello := wire.Hello{
+		Protocol:          wire.ProtocolName,
+		MinVersion:        wire.ProtocolVersion,
+		MaxVersion:        wire.ProtocolVersion,
 		AccountID:         f.accountID,
 		TunnelID:          f.tunnelID,
 		ConnectorID:       connector.id,
 		HostID:            connector.hostID,
 		ProcessGeneration: ref.ProcessGeneration,
-		Capabilities:      ProductionCapabilities(),
+		Capabilities:      wire.ProductionCapabilities(),
 		Auth:              auth,
 	}
 	session, welcome, snapshot, err := server.Accept(ctx, hello)
@@ -57,26 +62,26 @@ func TestTRK08PostgresHeartbeatRenewsAwaitingReadiness(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_ = session.Close(context.Background(), ReasonProtocolClosed)
+		_ = session.Close(context.Background(), wire.ReasonProtocolClosed)
 	})
 	if session.Reference() != ref || welcome.SessionID != sessionID {
 		t.Fatalf("session binding = ref=%+v welcome=%+v want=%+v/%s", session.Reference(), welcome, ref, sessionID)
 	}
-	if err := session.HandleAck(ctx, Ack{
+	if err := session.HandleAck(ctx, wire.Ack{
 		AccountID:         f.accountID,
 		TunnelID:          ref.TunnelID,
 		ConnectorID:       ref.ConnectorID,
 		SessionID:         ref.SessionID,
 		ProcessGeneration: ref.ProcessGeneration,
-		Kind:              AckSnapshot,
-		Status:            AckApplied,
+		Kind:              wire.AckSnapshot,
+		Status:            wire.AckApplied,
 		Generation:        snapshot.Generation,
 		ContentHash:       snapshot.ContentHash,
 	}); err != nil {
 		t.Fatalf("persist initial snapshot ACK: %v", err)
 	}
-	if session.session.State() != SessionAwaitingReady {
-		t.Fatalf("in-memory state after snapshot ACK=%s, want %s", session.session.State(), SessionAwaitingReady)
+	if session.session.State() != wire.SessionAwaitingReady {
+		t.Fatalf("in-memory state after snapshot ACK=%s, want %s", session.session.State(), wire.SessionAwaitingReady)
 	}
 	if current, ready, generation := session.Current(); ready || generation != 0 || current.Generation != 0 {
 		t.Fatalf("session promoted before readiness: current=%+v ready=%t generation=%d", current, ready, generation)
@@ -94,8 +99,8 @@ func TestTRK08PostgresHeartbeatRenewsAwaitingReadiness(t *testing.T) {
 		if err != nil {
 			t.Fatalf("heartbeat %d at %s: %v", index+1, f.clock.now.Format(time.RFC3339), err)
 		}
-		if ack.LeaseExpiresAt.Before(f.clock.now.Add(30*time.Minute)) || !ack.LeaseExpiresAt.Equal(f.clock.now.Add(30*time.Minute)) {
-			t.Fatalf("heartbeat %d lease=%s, want %s", index+1, ack.LeaseExpiresAt, f.clock.now.Add(30*time.Minute))
+		if ack.LeaseExpiresAt.Before(f.clock.now.Add(30*time.Second)) || !ack.LeaseExpiresAt.Equal(f.clock.now.Add(30*time.Second)) {
+			t.Fatalf("heartbeat %d lease=%s, want %s", index+1, ack.LeaseExpiresAt, f.clock.now.Add(30*time.Second))
 		}
 		state := readTRK08HeartbeatState(t, f, ref)
 		assertTRK08AwaitingReady(t, state, snapshot.Generation)
@@ -125,8 +130,8 @@ func TestTRK08PostgresHeartbeatRenewsAwaitingReadiness(t *testing.T) {
 	f.clock.now = base.Add(4*heartbeatInterval + 2*time.Second)
 	badHash := trk08CandidateHeartbeat(ref, f.accountID, snapshot, f.clock.now)
 	badHash.LastAppliedHash = "sha256:" + strings.Repeat("b", 64)
-	if err := f.store.RecordHeartbeat(ctx, ref, badHash, trk08HeartbeatAck(ref, f.accountID, f.clock.now)); !errors.Is(err, ErrSnapshotRequired) {
-		t.Fatalf("mismatched hash error=%v, want %v", err, ErrSnapshotRequired)
+	if err := f.store.RecordHeartbeat(ctx, ref, badHash, trk08HeartbeatAck(ref, f.accountID, f.clock.now)); !errors.Is(err, wire.ErrSnapshotRequired) {
+		t.Fatalf("mismatched hash error=%v, want %v", err, wire.ErrSnapshotRequired)
 	}
 	assertTRK08HeartbeatFenceUnchanged(t, beforeInvalid, readTRK08HeartbeatState(t, f, ref), "mismatched hash")
 
@@ -145,11 +150,11 @@ func TestTRK08PostgresHeartbeatRenewsAwaitingReadiness(t *testing.T) {
 	if _, err := session.HandleHeartbeat(ctx, trk08CandidateHeartbeat(ref, f.accountID, snapshot, f.clock.now)); err != nil {
 		t.Fatalf("final candidate heartbeat: %v", err)
 	}
-	if session.session.State() != SessionAwaitingReady {
-		t.Fatalf("state after candidate heartbeats=%s, want %s", session.session.State(), SessionAwaitingReady)
+	if session.session.State() != wire.SessionAwaitingReady {
+		t.Fatalf("state after candidate heartbeats=%s, want %s", session.session.State(), wire.SessionAwaitingReady)
 	}
 
-	readyAck, err := session.HandleReadiness(ctx, Readiness{
+	readyAck, err := session.HandleReadiness(ctx, wire.Readiness{
 		AccountID:         f.accountID,
 		TunnelID:          ref.TunnelID,
 		ConnectorID:       ref.ConnectorID,
@@ -164,15 +169,15 @@ func TestTRK08PostgresHeartbeatRenewsAwaitingReadiness(t *testing.T) {
 	if err != nil {
 		t.Fatalf("exact readiness: %v", err)
 	}
-	if readyAck.Kind != AckReady || readyAck.Status != AckApplied {
+	if readyAck.Kind != wire.AckReady || readyAck.Status != wire.AckApplied {
 		t.Fatalf("readiness ACK=%+v, want applied ready", readyAck)
 	}
 	final := readTRK08HeartbeatState(t, f, ref)
 	if final.state != "ready" || !final.sessionReady.Valid || !final.connectorReady.Valid || final.appliedGeneration != int64(snapshot.Generation) || final.connectorAppliedGeneration != int64(snapshot.Generation) {
 		t.Fatalf("durable ready state=%+v", final)
 	}
-	if session.session.State() != SessionReady {
-		t.Fatalf("in-memory state after readiness=%s, want %s", session.session.State(), SessionReady)
+	if session.session.State() != wire.SessionReady {
+		t.Fatalf("in-memory state after readiness=%s, want %s", session.session.State(), wire.SessionReady)
 	}
 	// Credential and original lease deadlines are admission metadata, not live authority.
 	if _, err := f.database.SQL().ExecContext(ctx, `UPDATE tunnel_connector_credential_generations
@@ -182,8 +187,6 @@ SET created_at=$2::timestamptz-interval '1 hour',valid_until=$2 WHERE connector_
 	if _, err := f.database.SQL().ExecContext(ctx, `UPDATE tunnel_connector_sessions SET created_at=$2::timestamptz-interval '1 hour',lease_deadline=$2 WHERE id=$1`, ref.SessionID, base.Add(-time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	session.session.auth.CredentialExpiresAt = base.Add(-time.Second)
-	session.session.lease.ExpiresAt = base.Add(-time.Second)
 	f.clock.now = f.clock.now.Add(time.Second)
 	if _, err := session.HandleHeartbeat(ctx, trk08CandidateHeartbeat(ref, f.accountID, snapshot, f.clock.now)); err != nil {
 		t.Fatalf("admitted connector lost durable authority at credential expiry: %v", err)
@@ -209,7 +212,7 @@ type trk08HeartbeatState struct {
 	leaseDeadline              time.Time
 }
 
-func readTRK08HeartbeatState(t *testing.T, f *trk08PostgresFixture, ref SessionRef) trk08HeartbeatState {
+func readTRK08HeartbeatState(t *testing.T, f *trk08PostgresFixture, ref wire.SessionRef) trk08HeartbeatState {
 	t.Helper()
 	var state trk08HeartbeatState
 	err := f.database.SQL().QueryRowContext(context.Background(), `
@@ -249,8 +252,8 @@ func assertTRK08HeartbeatFenceUnchanged(t *testing.T, before, after trk08Heartbe
 	}
 }
 
-func trk08CandidateHeartbeat(ref SessionRef, accountID string, snapshot Snapshot, sentAt time.Time) Heartbeat {
-	return Heartbeat{
+func trk08CandidateHeartbeat(ref wire.SessionRef, accountID string, snapshot wire.Snapshot, sentAt time.Time) wire.Heartbeat {
+	return wire.Heartbeat{
 		AccountID:             accountID,
 		SessionID:             ref.SessionID,
 		TunnelID:              ref.TunnelID,
@@ -262,8 +265,8 @@ func trk08CandidateHeartbeat(ref SessionRef, accountID string, snapshot Snapshot
 	}
 }
 
-func trk08HeartbeatAck(ref SessionRef, accountID string, now time.Time) HeartbeatAck {
-	return HeartbeatAck{
+func trk08HeartbeatAck(ref wire.SessionRef, accountID string, now time.Time) wire.HeartbeatAck {
+	return wire.HeartbeatAck{
 		AccountID:         accountID,
 		TunnelID:          ref.TunnelID,
 		ConnectorID:       ref.ConnectorID,

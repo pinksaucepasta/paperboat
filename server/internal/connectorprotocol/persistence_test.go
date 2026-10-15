@@ -8,20 +8,22 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 type persistenceStoreStub struct {
 	snapshotMu            sync.Mutex
-	authResult            AuthResult
-	snapshot              Snapshot
-	created               []SessionRef
-	applied               []Ack
-	ready                 []Readiness
-	heartbeats            []Heartbeat
-	renewals              []AuthResult
-	disconnect            []Disconnect
+	authResult            wire.AuthResult
+	snapshot              wire.Snapshot
+	created               []wire.SessionRef
+	applied               []wire.Ack
+	ready                 []wire.Readiness
+	heartbeats            []wire.Heartbeat
+	renewals              []wire.AuthResult
+	disconnect            []wire.Disconnect
 	authNonces            map[string]struct{}
-	drains                []DrainStatus
+	drains                []wire.DrainStatus
 	appliedErr            error
 	readyErr              error
 	heartbeatErr          error
@@ -31,57 +33,57 @@ type persistenceStoreStub struct {
 	disconnectContextErrs []error
 }
 
-func (s *persistenceStoreStub) AuthenticateConnector(_ context.Context, request AuthRequest) (AuthResult, error) {
+func (s *persistenceStoreStub) AuthenticateConnector(_ context.Context, request wire.AuthRequest) (wire.AuthResult, error) {
 	if s.authNonces == nil {
 		s.authNonces = make(map[string]struct{})
 	}
 	key := fmt.Sprintf("%s/%d/%s", request.ConnectorID, request.CredentialGeneration, request.Nonce)
 	if _, exists := s.authNonces[key]; exists {
-		return AuthResult{}, ErrDurableReplay
+		return wire.AuthResult{}, ErrDurableReplay
 	}
 	s.authNonces[key] = struct{}{}
 	return s.authResult, nil
 }
-func (s *persistenceStoreStub) RenewConnector(context.Context, RenewalRequest) (AuthResult, error) {
+func (s *persistenceStoreStub) RenewConnector(context.Context, wire.RenewalRequest) (wire.AuthResult, error) {
 	result := s.authResult
 	result.CredentialGeneration++
 	return result, nil
 }
-func (s *persistenceStoreStub) Snapshot(context.Context, string) (Snapshot, error) {
+func (s *persistenceStoreStub) Snapshot(context.Context, string) (wire.Snapshot, error) {
 	s.snapshotMu.Lock()
 	defer s.snapshotMu.Unlock()
 	return s.snapshot, nil
 }
-func (s *persistenceStoreStub) CreateConnectorSession(_ context.Context, ref SessionRef, _ Lease, _ uint64) error {
+func (s *persistenceStoreStub) CreateConnectorSession(_ context.Context, ref wire.SessionRef, _ wire.Lease, _ uint64) error {
 	s.created = append(s.created, ref)
 	return nil
 }
-func (s *persistenceStoreStub) CreateConnectorSessionV1(_ context.Context, ref SessionRef, _ Welcome, _ uint64) error {
+func (s *persistenceStoreStub) CreateConnectorSessionV1(_ context.Context, ref wire.SessionRef, _ wire.Welcome, _ uint64) error {
 	s.created = append(s.created, ref)
 	return nil
 }
-func (s *persistenceStoreStub) RecordApplied(_ context.Context, _ SessionRef, ack Ack) error {
+func (s *persistenceStoreStub) RecordApplied(_ context.Context, _ wire.SessionRef, ack wire.Ack) error {
 	s.applied = append(s.applied, ack)
 	return s.appliedErr
 }
-func (s *persistenceStoreStub) RecordReady(_ context.Context, _ SessionRef, readiness Readiness) error {
+func (s *persistenceStoreStub) RecordReady(_ context.Context, _ wire.SessionRef, readiness wire.Readiness) error {
 	s.ready = append(s.ready, readiness)
 	return s.readyErr
 }
-func (s *persistenceStoreStub) RecordHeartbeat(_ context.Context, _ SessionRef, heartbeat Heartbeat, _ HeartbeatAck) error {
+func (s *persistenceStoreStub) RecordHeartbeat(_ context.Context, _ wire.SessionRef, heartbeat wire.Heartbeat, _ wire.HeartbeatAck) error {
 	s.heartbeats = append(s.heartbeats, heartbeat)
 	return s.heartbeatErr
 }
-func (s *persistenceStoreStub) RecordRenewal(_ context.Context, _ SessionRef, result AuthResult) error {
+func (s *persistenceStoreStub) RecordRenewal(_ context.Context, _ wire.SessionRef, result wire.AuthResult) error {
 	s.renewals = append(s.renewals, result)
 	return s.renewalErr
 }
-func (s *persistenceStoreStub) RecordDisconnected(ctx context.Context, _ SessionRef, disconnect Disconnect) error {
+func (s *persistenceStoreStub) RecordDisconnected(ctx context.Context, _ wire.SessionRef, disconnect wire.Disconnect) error {
 	s.disconnect = append(s.disconnect, disconnect)
 	s.disconnectContextErrs = append(s.disconnectContextErrs, ctx.Err())
 	return s.disconnectErr
 }
-func (s *persistenceStoreStub) RecordDrain(_ context.Context, _ SessionRef, _ Drain, status DrainStatus, _ uint32, _ Code) error {
+func (s *persistenceStoreStub) RecordDrain(_ context.Context, _ wire.SessionRef, _ wire.Drain, status wire.DrainStatus, _ uint32, _ wire.Code) error {
 	s.drains = append(s.drains, status)
 	return s.drainErr
 }
@@ -89,54 +91,54 @@ func (s *persistenceStoreStub) RecordDrain(_ context.Context, _ SessionRef, _ Dr
 func TestPersistentServerVerifiesProofAndPersistsSessionLifecycle(t *testing.T) {
 	now := time.Date(2026, 8, 30, 10, 0, 0, 0, time.UTC)
 	auth, private := testAuth(t, now, 1)
-	snapshot, err := NewSnapshot("tunnel_1", 1, testConfigPayload(1, "preview.example.test"))
+	snapshot, err := wire.NewSnapshot("tunnel_1", 1, testConfigPayload(1, "preview.example.test"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := &persistenceStoreStub{authResult: AuthResult{AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, HostID: auth.HostID, IdentityKeyID: auth.IdentityKeyID, IdentityKeyThumbprint: auth.IdentityKeyThumbprint, ProcessGeneration: 1, CredentialGeneration: auth.CredentialGeneration, CredentialExpiresAt: now.Add(time.Hour), LeaseExpiresAt: now.Add(time.Hour)}, snapshot: snapshot}
+	store := &persistenceStoreStub{authResult: wire.AuthResult{AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, HostID: auth.HostID, IdentityKeyID: auth.IdentityKeyID, IdentityKeyThumbprint: auth.IdentityKeyThumbprint, ProcessGeneration: 1, CredentialGeneration: auth.CredentialGeneration, CredentialExpiresAt: now.Add(time.Hour), LeaseExpiresAt: now.Add(time.Hour)}, snapshot: snapshot}
 	clock := &testClock{now: now}
 	verifier := IdentityProofVerifierFuncs{
-		AuthFunc: func(_ context.Context, _ AuthRequest, message, signature []byte) error {
+		AuthFunc: func(_ context.Context, _ wire.AuthRequest, message, signature []byte) error {
 			if !ed25519.Verify(private.Public().(ed25519.PublicKey), message, signature) {
-				return ErrAuthenticationFailed
+				return wire.ErrAuthenticationFailed
 			}
 			return nil
 		},
-		RenewalFunc: func(_ context.Context, _ RenewalRequest, message, signature []byte) error {
+		RenewalFunc: func(_ context.Context, _ wire.RenewalRequest, message, signature []byte) error {
 			if !ed25519.Verify(private.Public().(ed25519.PublicKey), message, signature) {
-				return ErrAuthenticationFailed
+				return wire.ErrAuthenticationFailed
 			}
 			return nil
 		},
 	}
-	server, err := NewPersistentServer(store, verifier, ServerConfig{Capabilities: requiredCapabilityList(), Clock: clock, LeaseDuration: time.Minute, HeartbeatInterval: 10 * time.Second, SessionIDs: func() (string, error) { return "sess_1", nil }})
+	server, err := NewPersistentServer(store, verifier, wire.ServerConfig{Capabilities: requiredCapabilityList(), Clock: clock, LeaseDuration: time.Minute, HeartbeatInterval: 10 * time.Second, SessionIDs: func() (string, error) { return "sess_1", nil }})
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, welcome, first, err := server.Accept(context.Background(), Hello{Protocol: ProtocolName, MinVersion: "1.0", MaxVersion: "1.0", AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, HostID: auth.HostID, ProcessGeneration: 1, Capabilities: requiredCapabilityList(), Auth: auth})
+	session, welcome, first, err := server.Accept(context.Background(), wire.Hello{Protocol: wire.ProtocolName, MinVersion: "1.0", MaxVersion: "1.0", AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, HostID: auth.HostID, ProcessGeneration: 1, Capabilities: requiredCapabilityList(), Auth: auth})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if first.ContentHash != snapshot.ContentHash || len(store.created) != 1 || store.created[0].SessionID != welcome.SessionID {
 		t.Fatalf("session persistence created=%+v first=%+v welcome=%+v", store.created, first, welcome)
 	}
-	if err := session.HandleAck(context.Background(), Ack{AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, SessionID: welcome.SessionID, ProcessGeneration: 1, Kind: AckSnapshot, Status: AckApplied, Generation: first.Generation, ContentHash: first.ContentHash}); err != nil {
+	if err := session.HandleAck(context.Background(), wire.Ack{AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, SessionID: welcome.SessionID, ProcessGeneration: 1, Kind: wire.AckSnapshot, Status: wire.AckApplied, Generation: first.Generation, ContentHash: first.ContentHash}); err != nil {
 		t.Fatal(err)
 	}
-	readiness := Readiness{AccountID: auth.AccountID, SessionID: welcome.SessionID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, ProcessGeneration: 1, Generation: first.Generation, ContentHash: first.ContentHash, EdgeReady: true, RouteReady: true, OriginReady: true}
+	readiness := wire.Readiness{AccountID: auth.AccountID, SessionID: welcome.SessionID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, ProcessGeneration: 1, Generation: first.Generation, ContentHash: first.ContentHash, EdgeReady: true, RouteReady: true, OriginReady: true}
 	if _, err := session.HandleReadiness(context.Background(), readiness); err != nil {
 		t.Fatal(err)
 	}
 	if len(store.applied) != 1 || len(store.ready) != 1 || len(store.heartbeats) != 0 {
 		t.Fatalf("lifecycle persistence before adapter heartbeat applied=%d ready=%d heartbeat=%d", len(store.applied), len(store.ready), len(store.heartbeats))
 	}
-	if _, err := session.HandleHeartbeat(context.Background(), Heartbeat{AccountID: auth.AccountID, SessionID: welcome.SessionID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, ProcessGeneration: 1, LastAppliedGeneration: 1, LastAppliedHash: first.ContentHash, SentAt: now}); err != nil {
+	if _, err := session.HandleHeartbeat(context.Background(), wire.Heartbeat{AccountID: auth.AccountID, SessionID: welcome.SessionID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, ProcessGeneration: 1, LastAppliedGeneration: 1, LastAppliedHash: first.ContentHash, SentAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	if len(store.heartbeats) != 1 {
 		t.Fatal("heartbeat was not persisted")
 	}
-	if err := session.Close(context.Background(), ReasonProtocolClosed); err != nil {
+	if err := session.Close(context.Background(), wire.ReasonProtocolClosed); err != nil {
 		t.Fatal(err)
 	}
 	if len(store.disconnect) != 1 || store.disconnect[0].SessionID != welcome.SessionID {
@@ -147,24 +149,24 @@ func TestPersistentServerVerifiesProofAndPersistsSessionLifecycle(t *testing.T) 
 func TestPersistentAuthenticatorRejectsProofReplay(t *testing.T) {
 	now := time.Date(2026, 8, 30, 10, 0, 0, 0, time.UTC)
 	request, private := testAuth(t, now, 1)
-	store := &persistenceStoreStub{authResult: AuthResult{AccountID: request.AccountID, TunnelID: request.TunnelID, ConnectorID: request.ConnectorID, HostID: request.HostID, IdentityKeyID: request.IdentityKeyID, IdentityKeyThumbprint: request.IdentityKeyThumbprint, ProcessGeneration: 1, CredentialGeneration: 4, CredentialExpiresAt: now.Add(time.Hour), LeaseExpiresAt: now.Add(time.Hour)}}
+	store := &persistenceStoreStub{authResult: wire.AuthResult{AccountID: request.AccountID, TunnelID: request.TunnelID, ConnectorID: request.ConnectorID, HostID: request.HostID, IdentityKeyID: request.IdentityKeyID, IdentityKeyThumbprint: request.IdentityKeyThumbprint, ProcessGeneration: 1, CredentialGeneration: 4, CredentialExpiresAt: now.Add(time.Hour), LeaseExpiresAt: now.Add(time.Hour)}}
 	authenticator := PersistentAuthenticator{
 		Store: store,
 		Verifier: IdentityProofVerifierFuncs{
-			AuthFunc: func(_ context.Context, _ AuthRequest, message, signature []byte) error {
+			AuthFunc: func(_ context.Context, _ wire.AuthRequest, message, signature []byte) error {
 				if !ed25519.Verify(private.Public().(ed25519.PublicKey), message, signature) {
-					return ErrAuthenticationFailed
+					return wire.ErrAuthenticationFailed
 				}
 				return nil
 			},
-			RenewalFunc: func(_ context.Context, _ RenewalRequest, message, signature []byte) error {
+			RenewalFunc: func(_ context.Context, _ wire.RenewalRequest, message, signature []byte) error {
 				if !ed25519.Verify(private.Public().(ed25519.PublicKey), message, signature) {
-					return ErrAuthenticationFailed
+					return wire.ErrAuthenticationFailed
 				}
 				return nil
 			},
 		},
-		Clock: ClockFunc(func() time.Time { return now }),
+		Clock: wire.ClockFunc(func() time.Time { return now }),
 	}
 	if _, err := authenticator.Authenticate(context.Background(), request); err != nil {
 		t.Fatal(err)
@@ -174,40 +176,40 @@ func TestPersistentAuthenticatorRejectsProofReplay(t *testing.T) {
 	}
 	mutated := request
 	mutated.TunnelID = "tunnel_2"
-	if _, err := authenticator.Authenticate(context.Background(), mutated); err == nil || !errors.Is(err, ErrAuthenticationFailed) {
+	if _, err := authenticator.Authenticate(context.Background(), mutated); err == nil || !errors.Is(err, wire.ErrAuthenticationFailed) {
 		t.Fatalf("cross-tunnel proof result=%v", err)
 	}
 }
 
-func newPersistentSessionTest(t *testing.T, store *persistenceStoreStub, now time.Time) (*PersistentSession, AuthRequest, Welcome, Snapshot) {
+func newPersistentSessionTest(t *testing.T, store *persistenceStoreStub, now time.Time) (*PersistentSession, wire.AuthRequest, wire.Welcome, wire.Snapshot) {
 	t.Helper()
 	auth, private := testAuth(t, now, 1)
-	snapshot, err := NewSnapshot(auth.TunnelID, 1, testConfigPayload(1, "preview.example.test"))
+	snapshot, err := wire.NewSnapshot(auth.TunnelID, 1, testConfigPayload(1, "preview.example.test"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	store.authResult = AuthResult{AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, HostID: auth.HostID, IdentityKeyID: auth.IdentityKeyID, IdentityKeyThumbprint: auth.IdentityKeyThumbprint, ProcessGeneration: 1, CredentialGeneration: auth.CredentialGeneration, CredentialExpiresAt: now.Add(time.Hour), LeaseExpiresAt: now.Add(time.Hour)}
+	store.authResult = wire.AuthResult{AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, HostID: auth.HostID, IdentityKeyID: auth.IdentityKeyID, IdentityKeyThumbprint: auth.IdentityKeyThumbprint, ProcessGeneration: 1, CredentialGeneration: auth.CredentialGeneration, CredentialExpiresAt: now.Add(time.Hour), LeaseExpiresAt: now.Add(time.Hour)}
 	store.snapshot = snapshot
 	clock := &testClock{now: now}
 	verifier := IdentityProofVerifierFuncs{
-		AuthFunc: func(_ context.Context, _ AuthRequest, message, signature []byte) error {
+		AuthFunc: func(_ context.Context, _ wire.AuthRequest, message, signature []byte) error {
 			if !ed25519.Verify(private.Public().(ed25519.PublicKey), message, signature) {
-				return ErrAuthenticationFailed
+				return wire.ErrAuthenticationFailed
 			}
 			return nil
 		},
-		RenewalFunc: func(_ context.Context, _ RenewalRequest, message, signature []byte) error {
+		RenewalFunc: func(_ context.Context, _ wire.RenewalRequest, message, signature []byte) error {
 			if !ed25519.Verify(private.Public().(ed25519.PublicKey), message, signature) {
-				return ErrAuthenticationFailed
+				return wire.ErrAuthenticationFailed
 			}
 			return nil
 		},
 	}
-	server, err := NewPersistentServer(store, verifier, ServerConfig{Capabilities: requiredCapabilityList(), Clock: clock, LeaseDuration: time.Minute, HeartbeatInterval: 10 * time.Second, SessionIDs: func() (string, error) { return "sess_1", nil }})
+	server, err := NewPersistentServer(store, verifier, wire.ServerConfig{Capabilities: requiredCapabilityList(), Clock: clock, LeaseDuration: time.Minute, HeartbeatInterval: 10 * time.Second, SessionIDs: func() (string, error) { return "sess_1", nil }})
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, welcome, first, err := server.Accept(context.Background(), Hello{Protocol: ProtocolName, MinVersion: ProtocolVersion, MaxVersion: ProtocolVersion, AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, HostID: auth.HostID, ProcessGeneration: 1, Capabilities: requiredCapabilityList(), Auth: auth})
+	session, welcome, first, err := server.Accept(context.Background(), wire.Hello{Protocol: wire.ProtocolName, MinVersion: wire.ProtocolVersion, MaxVersion: wire.ProtocolVersion, AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, HostID: auth.HostID, ProcessGeneration: 1, Capabilities: requiredCapabilityList(), Auth: auth})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,11 +220,11 @@ func TestPersistentSessionPersistsNegativeSnapshotAckBeforeReturningError(t *tes
 	now := time.Date(2026, 8, 30, 10, 0, 0, 0, time.UTC)
 	store := &persistenceStoreStub{}
 	session, auth, welcome, first := newPersistentSessionTest(t, store, now)
-	ack := Ack{AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, SessionID: welcome.SessionID, ProcessGeneration: 1, Kind: AckSnapshot, Status: AckRejected, Generation: first.Generation, ContentHash: first.ContentHash, Code: CodeSnapshotRejected}
-	if err := session.HandleAck(context.Background(), ack); !errors.Is(err, ErrSnapshotRejected) {
+	ack := wire.Ack{AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, SessionID: welcome.SessionID, ProcessGeneration: 1, Kind: wire.AckSnapshot, Status: wire.AckRejected, Generation: first.Generation, ContentHash: first.ContentHash, Code: wire.CodeSnapshotRejected}
+	if err := session.HandleAck(context.Background(), ack); !errors.Is(err, wire.ErrSnapshotRejected) {
 		t.Fatalf("rejected ack error=%v", err)
 	}
-	if len(store.applied) != 1 || store.applied[0].Status != AckRejected {
+	if len(store.applied) != 1 || store.applied[0].Status != wire.AckRejected {
 		t.Fatalf("negative ack was not persisted: %+v", store.applied)
 	}
 }
@@ -231,11 +233,11 @@ func TestPersistentSessionPersistsGenerationRecoveryAck(t *testing.T) {
 	now := time.Date(2026, 8, 30, 10, 0, 0, 0, time.UTC)
 	store := &persistenceStoreStub{}
 	session, auth, welcome, first := newPersistentSessionTest(t, store, now)
-	ack := Ack{AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, SessionID: welcome.SessionID, ProcessGeneration: 1, Kind: AckSnapshot, Status: AckSnapshotRequired, Generation: first.Generation, ContentHash: first.ContentHash}
-	if err := session.HandleAck(context.Background(), ack); !errors.Is(err, ErrSnapshotRequired) {
+	ack := wire.Ack{AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, SessionID: welcome.SessionID, ProcessGeneration: 1, Kind: wire.AckSnapshot, Status: wire.AckSnapshotRequired, Generation: first.Generation, ContentHash: first.ContentHash}
+	if err := session.HandleAck(context.Background(), ack); !errors.Is(err, wire.ErrSnapshotRequired) {
 		t.Fatalf("snapshot recovery error=%v", err)
 	}
-	if len(store.applied) != 1 || store.applied[0].Status != AckSnapshotRequired {
+	if len(store.applied) != 1 || store.applied[0].Status != wire.AckSnapshotRequired {
 		t.Fatalf("recovery ack was not persisted: %+v", store.applied)
 	}
 }
@@ -244,17 +246,17 @@ func TestPersistentSessionFailClosedUsesDetachedDisconnectCleanup(t *testing.T) 
 	now := time.Date(2026, 8, 30, 10, 0, 0, 0, time.UTC)
 	store := &persistenceStoreStub{readyErr: errors.New("ready persistence failed")}
 	session, auth, welcome, first := newPersistentSessionTest(t, store, now)
-	ack := Ack{AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, SessionID: welcome.SessionID, ProcessGeneration: 1, Kind: AckSnapshot, Status: AckApplied, Generation: first.Generation, ContentHash: first.ContentHash}
+	ack := wire.Ack{AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, SessionID: welcome.SessionID, ProcessGeneration: 1, Kind: wire.AckSnapshot, Status: wire.AckApplied, Generation: first.Generation, ContentHash: first.ContentHash}
 	if err := session.HandleAck(context.Background(), ack); err != nil {
 		t.Fatal(err)
 	}
-	readiness := Readiness{AccountID: auth.AccountID, SessionID: welcome.SessionID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, ProcessGeneration: 1, Generation: first.Generation, ContentHash: first.ContentHash, EdgeReady: true, RouteReady: true, OriginReady: true}
+	readiness := wire.Readiness{AccountID: auth.AccountID, SessionID: welcome.SessionID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, ProcessGeneration: 1, Generation: first.Generation, ContentHash: first.ContentHash, EdgeReady: true, RouteReady: true, OriginReady: true}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if _, err := session.HandleReadiness(ctx, readiness); err == nil || !errors.Is(err, store.readyErr) {
 		t.Fatalf("persistence failure was not returned: %v", err)
 	}
-	if session.session.State() != SessionClosed || len(store.disconnect) != 1 {
+	if session.session.State() != wire.SessionClosed || len(store.disconnect) != 1 {
 		t.Fatalf("session was not failed closed: state=%s disconnects=%d", session.session.State(), len(store.disconnect))
 	}
 	if len(store.disconnectContextErrs) != 1 || store.disconnectContextErrs[0] != nil {
@@ -266,11 +268,11 @@ func TestPersistentSessionPersistsRejectedDrainAck(t *testing.T) {
 	now := time.Date(2026, 8, 30, 10, 0, 0, 0, time.UTC)
 	store := &persistenceStoreStub{}
 	session, auth, welcome, first := newPersistentSessionTest(t, store, now)
-	apply := Ack{AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, SessionID: welcome.SessionID, ProcessGeneration: 1, Kind: AckSnapshot, Status: AckApplied, Generation: first.Generation, ContentHash: first.ContentHash}
+	apply := wire.Ack{AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, SessionID: welcome.SessionID, ProcessGeneration: 1, Kind: wire.AckSnapshot, Status: wire.AckApplied, Generation: first.Generation, ContentHash: first.ContentHash}
 	if err := session.HandleAck(context.Background(), apply); err != nil {
 		t.Fatal(err)
 	}
-	readiness := Readiness{AccountID: auth.AccountID, SessionID: welcome.SessionID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, ProcessGeneration: 1, Generation: first.Generation, ContentHash: first.ContentHash, EdgeReady: true, RouteReady: true, OriginReady: true}
+	readiness := wire.Readiness{AccountID: auth.AccountID, SessionID: welcome.SessionID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, ProcessGeneration: 1, Generation: first.Generation, ContentHash: first.ContentHash, EdgeReady: true, RouteReady: true, OriginReady: true}
 	if _, err := session.HandleReadiness(context.Background(), readiness); err != nil {
 		t.Fatal(err)
 	}
@@ -278,11 +280,11 @@ func TestPersistentSessionPersistsRejectedDrainAck(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ack := DrainAck{AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, SessionID: welcome.SessionID, ProcessGeneration: 1, DrainID: request.DrainID, Generation: request.Generation, ContentHash: request.ContentHash, Status: DrainRejected, Code: CodeDrainRejected}
-	if err := session.HandleDrainAck(context.Background(), ack); !errors.Is(err, ErrDrainRejected) {
+	ack := wire.DrainAck{AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, SessionID: welcome.SessionID, ProcessGeneration: 1, DrainID: request.DrainID, Generation: request.Generation, ContentHash: request.ContentHash, Status: wire.DrainRejected, Code: wire.CodeDrainRejected}
+	if err := session.HandleDrainAck(context.Background(), ack); !errors.Is(err, wire.ErrDrainRejected) {
 		t.Fatalf("rejected drain error=%v", err)
 	}
-	if len(store.drains) != 2 || store.drains[1] != DrainRejected {
+	if len(store.drains) != 2 || store.drains[1] != wire.DrainRejected {
 		t.Fatalf("rejected drain was not persisted: %+v", store.drains)
 	}
 }

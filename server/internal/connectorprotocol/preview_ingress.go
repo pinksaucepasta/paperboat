@@ -7,6 +7,8 @@ import (
 	"net"
 	"time"
 
+	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
+
 	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat-server/internal/accountingauthority"
 )
@@ -44,26 +46,26 @@ WHERE a.edge_node_id=$1 AND a.edge_process_epoch=$2
  AND paperboat.node_preview_eligible(n.id,p.account_id,p.id)
  ORDER BY p.id,publication.hostname LIMIT 4097`
 
-func (s SQLIngressSource) publicPreviews(ctx context.Context, node, epoch string) ([]IngressDecision, error) {
+func (s SQLIngressSource) publicPreviews(ctx context.Context, node, epoch string) ([]wire.IngressDecision, error) {
 	return s.projectPreviews(ctx, node, epoch, nil)
 }
 
 // RestrictedPreview is called only after independently verifying the native grant.
-func (s SQLIngressSource) RestrictedPreview(ctx context.Context, node, epoch string, evidence PrivateAccessOpen) (IngressDecision, error) {
+func (s SQLIngressSource) RestrictedPreview(ctx context.Context, node, epoch string, evidence wire.PrivateAccessOpen) (wire.IngressDecision, error) {
 	if evidence.Validate(time.Time{}) != nil || evidence.Request.ResourceKind != "preview" || evidence.Request.Protocol != "http" || evidence.Request.AssignmentGeneration != evidence.Request.SessionGeneration {
-		return IngressDecision{}, ErrIngressDenied
+		return wire.IngressDecision{}, wire.ErrIngressDenied
 	}
 	out, err := s.projectPreviews(ctx, node, epoch, &evidence)
 	if err != nil {
-		return IngressDecision{}, err
+		return wire.IngressDecision{}, err
 	}
 	if len(out) != 1 {
-		return IngressDecision{}, ErrIngressDenied
+		return wire.IngressDecision{}, wire.ErrIngressDenied
 	}
 	return out[0], nil
 }
 
-func (s SQLIngressSource) projectPreviews(ctx context.Context, node, epoch string, evidence *PrivateAccessOpen) (decisions []IngressDecision, resultErr error) {
+func (s SQLIngressSource) projectPreviews(ctx context.Context, node, epoch string, evidence *wire.PrivateAccessOpen) (decisions []wire.IngressDecision, resultErr error) {
 	now := time.Now().UTC()
 	if s.Clock != nil {
 		now = s.Clock.Now().UTC()
@@ -96,19 +98,19 @@ func (s SQLIngressSource) projectPreviews(ctx context.Context, node, epoch strin
 			resultErr = errors.Join(resultErr, fmt.Errorf("close preview ingress rows: %w", closeErr))
 		}
 	}()
-	out := []IngressDecision{}
+	out := []wire.IngressDecision{}
 	teams := []string{}
 	for rows.Next() {
 		if len(out) >= maximumIngressDecisions {
-			return nil, ErrIngressDenied
+			return nil, wire.ErrIngressDenied
 		}
-		var d IngressDecision
+		var d wire.IngressDecision
 		var team string
 		b := &d.Binding
 		if err := rows.Scan(&b.EnvironmentID, &b.AccountID, &b.TunnelID, &b.ResourceGeneration, &b.RouteID, &b.RouteGeneration, &b.HostID, &b.InstallationGeneration, &b.Hostname, &b.OriginScheme, &b.OriginAddress, &d.EdgeNodeID, &d.EdgeProcessEpoch, &d.ConnectorID, &d.SessionID, &d.ProcessGeneration, &d.ConfigGeneration, &d.AssignmentGeneration, &b.PublicationID, &team, &d.ExpiresAt); err != nil {
 			return nil, err
 		}
-		b.Lifecycle = TunnelEphemeral
+		b.Lifecycle = wire.TunnelEphemeral
 		b.Audience = audience
 		b.ConnectionMethod = "edge"
 		b.Protocol = "http"
@@ -123,7 +125,7 @@ func (s SQLIngressSource) projectPreviews(ctx context.Context, node, epoch strin
 		if b.OriginScheme != "unix" {
 			host, port, err := net.SplitHostPort(b.OriginAddress)
 			if err != nil {
-				return nil, ErrIngressDenied
+				return nil, wire.ErrIngressDenied
 			}
 			if host == "localhost" {
 				host = "127.0.0.1"

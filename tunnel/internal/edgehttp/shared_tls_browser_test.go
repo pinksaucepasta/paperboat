@@ -6,7 +6,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"errors"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"io"
 	"net"
 	"net/http"
