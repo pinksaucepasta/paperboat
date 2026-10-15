@@ -48,7 +48,7 @@ func TestPeerNetworkCLIRegistrationDerivesIdentity(t *testing.T) {
 }
 
 func TestPeerNetworkConfigDerivesIdentityAndBindsLiveScopes(t *testing.T) {
-	body := []byte(`{"operation_id":"operation_123","admitted_scopes":[{"resource_kind":"machine_access","resource_id":"access_live"}]}`)
+	body := []byte(`{"operation_id":"operation_123","admitted_scopes":[{"resource_kind":"machine_access","resource_id":"access_live"}],"admitted_certificates":[{"endpoint_id":"peer_live","fingerprint":"abababababababababababababababababababababababababababababababab"}]}`)
 	stub := &peerNetworkStub{}
 	verifier := machineProofVerifierFunc(func(_ context.Context, credential string, proof []byte, method, path string, exact []byte) (controlplane.MachineRequestClaims, error) {
 		if credential != "machine-token" || string(proof) != "proof" || method != http.MethodPost || path != "/v1/machine-peer-network/config" || !bytes.Equal(exact, body) {
@@ -61,14 +61,14 @@ func TestPeerNetworkConfigDerivesIdentityAndBindsLiveScopes(t *testing.T) {
 	r.Header.Set("X-Paperboat-Machine-Proof", base64.RawURLEncoding.EncodeToString([]byte("proof")))
 	w := httptest.NewRecorder()
 	machinePeerNetworkConfig(stub, verifier).ServeHTTP(w, r)
-	if w.Code != http.StatusOK || stub.config.UserID != "account_1" || stub.config.EndpointID != "machine_1" || len(stub.config.AdmittedScopes) != 1 || stub.config.AdmittedScopes[0].ResourceID != "access_live" {
+	if w.Code != http.StatusOK || stub.config.UserID != "account_1" || stub.config.EndpointID != "machine_1" || len(stub.config.AdmittedCertificates) != 1 || stub.config.AdmittedCertificates[0].EndpointID != "peer_live" || len(stub.config.AdmittedScopes) != 1 || stub.config.AdmittedScopes[0].ResourceID != "access_live" {
 		t.Fatalf("status=%d config=%+v", w.Code, stub.config)
 	}
 	cliRequest := httptest.NewRequest(http.MethodPost, "/v1/peer-network/config", bytes.NewReader(body))
 	cliRequest = cliRequest.WithContext(context.WithValue(cliRequest.Context(), authContextKey{}, principal{User: auth.User{ID: "account_2"}, Client: &auth.ClientPrincipal{SessionID: "cli_2"}}))
 	w = httptest.NewRecorder()
 	peerNetworkConfig(stub).ServeHTTP(w, cliRequest)
-	if w.Code != http.StatusOK || stub.config.UserID != "account_2" || stub.config.EndpointID != "cli_2" || len(stub.config.AdmittedScopes) != 1 || stub.config.AdmittedScopes[0].ResourceKind != "machine_access" || stub.config.AdmittedScopes[0].ResourceID != "access_live" {
+	if w.Code != http.StatusOK || stub.config.UserID != "account_2" || stub.config.EndpointID != "cli_2" || len(stub.config.AdmittedCertificates) != 1 || stub.config.AdmittedCertificates[0].EndpointID != "peer_live" || len(stub.config.AdmittedScopes) != 1 || stub.config.AdmittedScopes[0].ResourceKind != "machine_access" || stub.config.AdmittedScopes[0].ResourceID != "access_live" {
 		t.Fatal("CLI principal or admitted-scope request binding lost")
 	}
 

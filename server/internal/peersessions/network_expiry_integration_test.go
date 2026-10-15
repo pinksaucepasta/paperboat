@@ -6,6 +6,8 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
@@ -167,6 +169,21 @@ func TestNetworkApplicationExpiryOnPostgres(t *testing.T) {
 			t.Fatalf("%s continuation input accepted: %v", name, err)
 		}
 	}
+
+	for name, refs := range map[string][]AdmittedCertificate{
+		"duplicate certificates": {{EndpointID: cli, Fingerprint: strings.Repeat("ab", 32)}, {EndpointID: cli, Fingerprint: strings.Repeat("ab", 32)}},
+		"uppercase certificate":  {{EndpointID: cli, Fingerprint: strings.Repeat("AB", 32)}},
+		"invalid certificate":    {{EndpointID: cli, Fingerprint: "not-a-fingerprint"}},
+		"oversized endpoint":     {{EndpointID: strings.Repeat("a", 129), Fingerprint: strings.Repeat("ab", 32)}},
+		"certificate budget":     make([]AdmittedCertificate, 129),
+	} {
+		if _, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "invalid_cert_" + suffix, UserID: account, EndpointID: cli, AdmittedScopes: live, AdmittedCertificates: refs}); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("%s accepted: %v", name, err)
+		}
+	}
+	if _, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "no_scope_cert_" + suffix, UserID: account, EndpointID: cli, AdmittedCertificates: []AdmittedCertificate{{EndpointID: cli, Fingerprint: strings.Repeat("ab", 32)}}}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("certificate continuation without live scopes accepted: %v", err)
+	}
 	if err := store.SQL().QueryRowContext(ctx, `SELECT config_generation FROM peer_network_identities WHERE endpoint_id=$1`, cli).Scan(&generationAfter); err != nil || generationAfter != generationBefore {
 		t.Fatal("invalid continuation request changed network authority")
 	}
@@ -221,6 +238,76 @@ func TestNetworkApplicationExpiryOnPostgres(t *testing.T) {
 			t.Fatalf("idle admitted carrier expired: %v", err)
 		}
 		assertNetworkScope(t, result.Configuration, "machine_network", networkID, "connect")
+	}
+
+	// Same-key renewal changes the admission certificate, not the identity of a
+	// carrier that already authenticated the old exact certificate.
+	var oldFingerprint, quicBytes, wg, disco []byte
+	if err := store.SQL().QueryRowContext(ctx, `SELECT n.quic_certificate_fingerprint,c.quic_public_key,n.wireguard_public_key,n.disco_public_key FROM peer_network_identities n JOIN peer_endpoint_certificates c ON c.fingerprint=n.quic_certificate_fingerprint WHERE n.endpoint_id=$1`, cli).Scan(&oldFingerprint, &quicBytes, &wg, &disco); err != nil {
+		t.Fatal(err)
+	}
+	var quic [32]byte
+	copy(quic[:], quicBytes)
+	renewed, renewedFingerprint := networkCertificateWithKeys(t, private, account, peeridentity.RoleCLI, cli, 1, 2, quic, now.Add(2*time.Hour), now.Add(4*time.Hour))
+	execute(`UPDATE peer_endpoint_certificates SET revoked_at=$2,revocation_reason='certificate_superseded' WHERE endpoint_id=$1`, cli, now.Add(2*time.Hour))
+	execute(`INSERT INTO peer_endpoint_certificates(fingerprint,user_id,endpoint_id,role,generation,serial,certificate,quic_public_key,issued_at,expires_at,key_id,signer_public_key) VALUES($1,$2,$3,'cli',1,2,$4,$5,$6,$7,'expiry-test',$8)`, renewedFingerprint[:], account, cli, renewed, quic[:], now.Add(2*time.Hour), now.Add(4*time.Hour), public)
+	for _, endpoint := range []string{cli, machine} {
+		result, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "rebind_gap_" + suffix, UserID: account, EndpointID: endpoint, AdmittedScopes: carrierRef})
+		if err != nil {
+			t.Fatalf("same-key renewal gap revoked admitted carrier: %v", err)
+		}
+		assertNetworkScope(t, result.Configuration, "machine_network", networkID, "connect")
+	}
+	if _, err := service.Register(ctx, NetworkRegistration{OperationID: "renew_" + suffix, UserID: account, EndpointID: cli, Role: "cli", EndpointGeneration: 1, ExpectedKeyGeneration: 1, WireGuardPublicKey: wg, DiscoPublicKey: disco, QUICCertificateFingerprint: renewedFingerprint[:]}); err != nil {
+		t.Fatal(err)
+	}
+	oldHex := hex.EncodeToString(oldFingerprint)
+	checkPinned := func(endpoint string, refs []AdmittedCertificate, want bool) {
+		t.Helper()
+		result, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "pinned_" + suffix, UserID: account, EndpointID: endpoint, AdmittedScopes: carrierRef, AdmittedCertificates: refs})
+		if err != nil {
+			t.Fatal(err)
+		}
+		parts := strings.Split(result.Configuration, ".")
+		signature, err := base64.RawURLEncoding.DecodeString(parts[2])
+		if err != nil || !ed25519.Verify(public, []byte(parts[0]+"."+parts[1]), signature) {
+			t.Fatal("pinned binding signature invalid")
+		}
+		payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+		if err != nil {
+			t.Fatal(err)
+		}
+		var document struct {
+			Self  networkBinding `json:"self"`
+			Peers []networkPeer  `json:"peers"`
+		}
+		if err := json.Unmarshal(payload, &document); err != nil {
+			t.Fatal(err)
+		}
+		binding := document.Self
+		if endpoint != cli {
+			for _, peer := range document.Peers {
+				if peer.Identity.EndpointID == cli {
+					binding = peer.Identity
+				}
+			}
+		}
+		if binding.QUICCertificateFingerprint != hex.EncodeToString(renewedFingerprint[:]) {
+			t.Fatal("fresh binding did not use renewed certificate")
+		}
+		if got := len(binding.AdmittedCertificateFingerprints) == 1 && binding.AdmittedCertificateFingerprints[0] == oldHex; got != want {
+			t.Fatalf("exact old admitted binding retained=%v want=%v", got, want)
+		}
+	}
+	pinned := []AdmittedCertificate{{EndpointID: cli, Fingerprint: oldHex}}
+	for _, endpoint := range []string{cli, machine} {
+		checkPinned(endpoint, pinned, true)
+		checkPinned(endpoint, nil, false)
+		checkPinned(endpoint, []AdmittedCertificate{{EndpointID: cli, Fingerprint: strings.Repeat("ab", 32)}}, false)
+	}
+	execute(`UPDATE peer_endpoint_certificates SET revocation_reason='key_compromise' WHERE fingerprint=$1`, oldFingerprint)
+	for _, endpoint := range []string{cli, machine} {
+		checkPinned(endpoint, pinned, false)
 	}
 	execute(`UPDATE peer_endpoint_certificates SET revoked_at=now(),revocation_reason='key_compromise' WHERE endpoint_id=$1`, cli)
 	if _, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "revoked_cert_" + suffix, UserID: account, EndpointID: cli, AdmittedScopes: carrierRef}); !errors.Is(err, ErrDenied) {

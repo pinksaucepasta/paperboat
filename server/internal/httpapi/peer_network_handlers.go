@@ -22,8 +22,9 @@ type peerNetworkRegisterBody struct {
 	QUICCertificateFingerprint string `json:"quic_certificate_fingerprint"`
 }
 type peerNetworkConfigBody struct {
-	OperationID    string                       `json:"operation_id"`
-	AdmittedScopes []peersessions.AdmittedScope `json:"admitted_scopes,omitempty"`
+	OperationID          string                             `json:"operation_id"`
+	AdmittedScopes       []peersessions.AdmittedScope       `json:"admitted_scopes,omitempty"`
+	AdmittedCertificates []peersessions.AdmittedCertificate `json:"admitted_certificates,omitempty"`
 }
 type peerNetworkService interface {
 	Register(context.Context, peersessions.NetworkRegistration) (peersessions.NetworkRegistrationResult, error)
@@ -84,7 +85,7 @@ func peerNetworkConfig(s peerNetworkService) http.HandlerFunc {
 		if !decodeStrictJSON(w, r, &body) {
 			return
 		}
-		value, err := s.Configuration(r.Context(), peersessions.NetworkConfigRequest{OperationID: body.OperationID, UserID: p.User.ID, EndpointID: p.Client.SessionID, AdmittedScopes: body.AdmittedScopes})
+		value, err := s.Configuration(r.Context(), peersessions.NetworkConfigRequest{OperationID: body.OperationID, UserID: p.User.ID, EndpointID: p.Client.SessionID, AdmittedScopes: body.AdmittedScopes, AdmittedCertificates: body.AdmittedCertificates})
 		if err != nil {
 			peerNetworkError(w, r, err)
 			return
@@ -157,7 +158,7 @@ func machinePeerNetwork(s peerNetworkService, v machineEndpointProofVerifier, re
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "Peer network configuration request is invalid.")
 			return
 		}
-		value, e := s.Configuration(r.Context(), peersessions.NetworkConfigRequest{OperationID: body.OperationID, UserID: claims.UserID, EndpointID: claims.MachineID, AdmittedScopes: body.AdmittedScopes})
+		value, e := s.Configuration(r.Context(), peersessions.NetworkConfigRequest{OperationID: body.OperationID, UserID: claims.UserID, EndpointID: claims.MachineID, AdmittedScopes: body.AdmittedScopes, AdmittedCertificates: body.AdmittedCertificates})
 		if e != nil {
 			peerNetworkError(w, r, e)
 			return

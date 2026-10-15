@@ -8144,6 +8144,30 @@
                 }
               }
             }
+          },
+          "admitted_certificates": {
+            "type": "array",
+            "maxItems": 128,
+            "description": "Exact certificates pinned by live admitted carriers; requires admitted_scopes. Current signed self/peer binding returns admitted_certificate_fingerprints only for requested original certificates with identical account, endpoint, role, generation, QUIC key and signer. Expiry and same-key supersession do not revoke admitted carriers; explicit certificate revocation does. These fingerprints never permit fresh admission. Drop on disconnect.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "endpoint_id",
+                "fingerprint"
+              ],
+              "properties": {
+                "endpoint_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "fingerprint": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              }
+            }
           }
         },
         "required": [
@@ -42425,7 +42449,7 @@
         },
         "responses": {
           "204": {
-            "description": "Cancelled; a consumed grant’s client session is revoked."
+            "description": "Cancelled; a consumed grant\u2019s client session is revoked."
           },
           "400": {
             "description": "Invalid client or device code."

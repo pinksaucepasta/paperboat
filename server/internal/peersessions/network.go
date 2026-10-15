@@ -36,6 +36,7 @@ type NetworkRegistrationResult struct {
 type NetworkConfigRequest struct {
 	OperationID, UserID, EndpointID string
 	AdmittedScopes                  []AdmittedScope
+	AdmittedCertificates            []AdmittedCertificate
 }
 type NetworkConfigResult struct {
 	Configuration string   `json:"configuration"`
@@ -177,18 +178,19 @@ func (s *NetworkService) Register(ctx context.Context, in NetworkRegistration) (
 }
 
 type networkBinding struct {
-	AccountID                  string `json:"account_id"`
-	EndpointID                 string `json:"endpoint_id"`
-	Role                       string `json:"role"`
-	MachineID                  string `json:"machine_id"`
-	EndpointGeneration         int64  `json:"endpoint_generation"`
-	MachineGeneration          int64  `json:"machine_generation"`
-	KeyGeneration              int64  `json:"key_generation"`
-	WireGuardPublicKey         string `json:"wireguard_public_key"`
-	DiscoPublicKey             string `json:"disco_public_key"`
-	QUICCertificateFingerprint string `json:"quic_certificate_fingerprint"`
-	QUICPublicKey              string `json:"quic_public_key"`
-	VirtualAddress             string `json:"virtual_address"`
+	AccountID                       string   `json:"account_id"`
+	EndpointID                      string   `json:"endpoint_id"`
+	Role                            string   `json:"role"`
+	MachineID                       string   `json:"machine_id"`
+	EndpointGeneration              int64    `json:"endpoint_generation"`
+	MachineGeneration               int64    `json:"machine_generation"`
+	KeyGeneration                   int64    `json:"key_generation"`
+	WireGuardPublicKey              string   `json:"wireguard_public_key"`
+	DiscoPublicKey                  string   `json:"disco_public_key"`
+	QUICCertificateFingerprint      string   `json:"quic_certificate_fingerprint"`
+	QUICPublicKey                   string   `json:"quic_public_key"`
+	AdmittedCertificateFingerprints []string `json:"admitted_certificate_fingerprints,omitempty"`
+	VirtualAddress                  string   `json:"virtual_address"`
 }
 type networkScope struct {
 	ResourceKind       string `json:"resource_kind"`
@@ -228,6 +230,9 @@ func (s *NetworkService) Configuration(ctx context.Context, in NetworkConfigRequ
 func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequest) (NetworkConfigResult, error) {
 	if ctx == nil || !bounded(in.OperationID, 8, 128) || !bounded(in.UserID, 1, 256) || !bounded(in.EndpointID, 1, 128) {
 		return NetworkConfigResult{}, ErrInvalid
+	}
+	if err := validateAdmittedCertificates(in.AdmittedCertificates, len(in.AdmittedScopes) > 0); err != nil {
+		return NetworkConfigResult{}, err
 	}
 	live, err := admittedScopeIDs(in.AdmittedScopes)
 	if err != nil {
@@ -451,6 +456,9 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 		p.Scopes = append(p.Scopes, personalNetworkScope(self, binding, expiry))
 		scopes++
 	}
+	if err := retainAdmittedCertificates(ctx, tx, &self, byPeer, in.AdmittedCertificates, now); err != nil {
+		return NetworkConfigResult{}, err
+	}
 	peerIDs := make([]string, 0, len(byPeer))
 	for id := range byPeer {
 		peerIDs = append(peerIDs, id)
@@ -597,6 +605,9 @@ func (s *NetworkService) relayGrants(ctx context.Context, tx *sql.Tx, self netwo
 		}
 		relayPeers := relayGrantPeers(peers)
 		claims := map[string]any{"version": 1, "iss": s.issuer, "aud": "paperboat-relay", "iat": now.Unix(), "exp": expires.Unix(), "generation": generation, "account_id": self.AccountID, "endpoint_id": self.EndpointID, "wireguard_public_key": self.WireGuardPublicKey, "quic_certificate_fingerprint": self.QUICCertificateFingerprint, "quic_public_key": self.QUICPublicKey, "node_id": nodeID, "node_generation": nodeGeneration, "process_epoch": processEpoch, "peers": relayPeers}
+		if len(self.AdmittedCertificateFingerprints) > 0 {
+			claims["admitted_certificate_fingerprints"] = self.AdmittedCertificateFingerprints
+		}
 		if self.DiscoPublicKey != "" {
 			claims["disco_public_key"] = self.DiscoPublicKey
 		}
@@ -736,7 +747,15 @@ func loadNetworkBinding(ctx context.Context, tx *sql.Tx, userID, endpointID stri
 	var b networkBinding
 	var key, disco, fingerprint, quicPublic []byte
 	var expiry time.Time
-	err := tx.QueryRowContext(ctx, `SELECT n.user_id,n.endpoint_id,n.role,coalesce(n.machine_id,''),n.endpoint_generation,n.machine_generation,n.key_generation,n.wireguard_public_key,n.disco_public_key,n.quic_certificate_fingerprint,c.quic_public_key,host(n.virtual_address),c.expires_at FROM paperboat.peer_network_identities n JOIN paperboat.users u ON u.id=n.user_id AND u.status='active' JOIN paperboat.peer_endpoint_certificates c ON c.fingerprint=n.quic_certificate_fingerprint AND c.user_id=n.user_id AND c.endpoint_id=n.endpoint_id AND c.generation=n.endpoint_generation AND c.role=n.role AND c.revoked_at IS NULL AND c.issued_at<=$3 AND (c.expires_at>$3 OR $4) WHERE n.user_id=$1 AND n.endpoint_id=$2 AND n.revoked_at IS NULL`, userID, endpointID, now, admitted).Scan(&b.AccountID, &b.EndpointID, &b.Role, &b.MachineID, &b.EndpointGeneration, &b.MachineGeneration, &b.KeyGeneration, &key, &disco, &fingerprint, &quicPublic, &b.VirtualAddress, &expiry)
+	err := tx.QueryRowContext(ctx, `SELECT n.user_id,n.endpoint_id,n.role,coalesce(n.machine_id,''),n.endpoint_generation,n.machine_generation,n.key_generation,n.wireguard_public_key,n.disco_public_key,n.quic_certificate_fingerprint,c.quic_public_key,host(n.virtual_address),c.expires_at FROM paperboat.peer_network_identities n JOIN paperboat.users u ON u.id=n.user_id AND u.status='active' JOIN paperboat.peer_endpoint_certificates c ON c.fingerprint=n.quic_certificate_fingerprint AND c.user_id=n.user_id AND c.endpoint_id=n.endpoint_id AND c.generation=n.endpoint_generation AND c.role=n.role
+AND (c.revoked_at IS NULL OR ($4 AND c.revocation_reason='certificate_superseded'
+ AND EXISTS(SELECT 1 FROM paperboat.peer_endpoint_certificates replacement
+ WHERE replacement.user_id=c.user_id AND replacement.endpoint_id=c.endpoint_id
+ AND replacement.role=c.role AND replacement.generation=c.generation
+ AND replacement.quic_public_key=c.quic_public_key AND replacement.signer_public_key=c.signer_public_key
+ AND replacement.revoked_at IS NULL AND replacement.issued_at<=$3 AND replacement.serial>c.serial)))
+AND NOT EXISTS(SELECT 1 FROM paperboat.peer_endpoint_certificate_revocations r WHERE r.certificate_fingerprint=c.fingerprint)
+AND c.issued_at<=$3 AND (c.expires_at>$3 OR $4) WHERE n.user_id=$1 AND n.endpoint_id=$2 AND n.revoked_at IS NULL`, userID, endpointID, now, admitted).Scan(&b.AccountID, &b.EndpointID, &b.Role, &b.MachineID, &b.EndpointGeneration, &b.MachineGeneration, &b.KeyGeneration, &key, &disco, &fingerprint, &quicPublic, &b.VirtualAddress, &expiry)
 	if err != nil {
 		return b, time.Time{}, err
 	}
