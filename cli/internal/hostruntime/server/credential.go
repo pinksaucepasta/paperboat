@@ -34,6 +34,7 @@ type CredentialAuthorizer struct {
 	Token         string
 	Revocations   CredentialRevocationWatcher
 	mu            sync.Mutex
+	verified      *auth.Claims
 	jti           string
 	revoked       *atomic.Bool
 	revokedSignal <-chan struct{}
@@ -48,7 +49,7 @@ func (a *CredentialAuthorizer) Authorize(ctx context.Context, frame protocol.Fra
 	if err != nil {
 		return Authorization{}, err
 	}
-	claims, err := a.Verifier.Verify(ctx, a.Token, policy)
+	claims, err := a.verifiedClaims(ctx, policy)
 	if err != nil {
 		return Authorization{}, err
 	}
@@ -83,6 +84,9 @@ func (a *CredentialAuthorizer) Authorize(ctx context.Context, frame protocol.Fra
 		}
 		revoked = a.revoked
 		a.mu.Unlock()
+		if revoked != nil && revoked.Load() {
+			return Authorization{}, &auth.Error{Code: auth.Revoked}
+		}
 		if err != nil {
 			return Authorization{}, err
 		}
@@ -131,6 +135,24 @@ func (a *CredentialAuthorizer) Authorize(ctx context.Context, frame protocol.Fra
 	}, nil
 }
 
+// A CredentialAuthorizer belongs to one authenticated connection. Reusing its
+// verified claims keeps accepted commands independent of token wall-clock TTL.
+func (a *CredentialAuthorizer) verifiedClaims(ctx context.Context, policy auth.Policy) (auth.Claims, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.verified != nil {
+		if err := auth.ValidateAdmitted(*a.verified, policy); err != nil {
+			return auth.Claims{}, err
+		}
+		return *a.verified, nil
+	}
+	claims, err := a.Verifier.Verify(ctx, a.Token, policy)
+	if err == nil {
+		a.verified = &claims
+	}
+	return claims, err
+}
+
 // BrowserTerminalPublicKeySHA256 verifies the terminal credential before TLS
 // starts and returns its browser client certificate pin. The credential is
 // verified again when ServeAuthenticated authorizes application frames.
@@ -142,7 +164,7 @@ func (a *CredentialAuthorizer) BrowserTerminalPublicKeySHA256(ctx context.Contex
 	if err != nil {
 		return "", err
 	}
-	claims, err := a.Verifier.Verify(ctx, a.Token, policy)
+	claims, err := a.verifiedClaims(ctx, policy)
 	if err != nil {
 		return "", err
 	}

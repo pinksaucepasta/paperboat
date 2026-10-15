@@ -41,7 +41,9 @@ func TestCredentialAuthorizerReturnsStableBoundIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	claims.JTI, claims.IssuedAt, claims.ExpiresAt = "jti_2", 50, 150
-	second, err := authorizer.Authorize(context.Background(), protocol.Frame{Capability: "terminal.v1"})
+	// A renewed signed credential is admitted on a new authenticated connection.
+	renewed := CredentialAuthorizer{Token: authorizer.Token, Verifier: authorizer.Verifier, Resolver: authorizer.Resolver}
+	second, err := renewed.Authorize(context.Background(), protocol.Frame{Capability: "terminal.v1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +54,8 @@ func TestCredentialAuthorizerReturnsStableBoundIdentity(t *testing.T) {
 		t.Fatalf("resource id=%q", first.ResourceID)
 	}
 	claims.SessionID = "ses_2"
-	third, err := authorizer.Authorize(context.Background(), protocol.Frame{Capability: "terminal.v1"})
+	different := CredentialAuthorizer{Token: authorizer.Token, Verifier: authorizer.Verifier, Resolver: authorizer.Resolver}
+	third, err := different.Authorize(context.Background(), protocol.Frame{Capability: "terminal.v1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +79,8 @@ func TestCredentialAuthorizerDerivesSharedRoleAndRequiresBindings(t *testing.T) 
 		t.Fatalf("authorization=%#v err=%v", got, err)
 	}
 	claims.SessionID = ""
-	if _, err := authorizer.Authorize(context.Background(), protocol.Frame{Capability: "terminal.v1"}); !errors.Is(err, ErrCredentialPolicy) {
+	invalid := CredentialAuthorizer{Token: authorizer.Token, Verifier: authorizer.Verifier, Resolver: authorizer.Resolver}
+	if _, err := invalid.Authorize(context.Background(), protocol.Frame{Capability: "terminal.v1"}); !errors.Is(err, ErrCredentialPolicy) {
 		t.Fatalf("empty session err=%v", err)
 	}
 }

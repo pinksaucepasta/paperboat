@@ -232,18 +232,10 @@ func (v Verifier) Verify(ctx context.Context, token string, policy Policy) (Clai
 	} else if claims.BrowserPublicKeySHA256 != "" {
 		return Claims{}, &Error{Code: BindingInvalid}
 	}
-	if claims.Issuer != policy.Issuer {
-		return Claims{}, &Error{Code: BindingInvalid}
+	if err := ValidateAdmitted(claims, policy); err != nil {
+		return Claims{}, err
 	}
-	if claims.Audience != policy.Audience {
-		return Claims{}, &Error{Code: AudienceInvalid}
-	}
-	if !credentialClassMatches(claims.CredentialClass, policy) || !bindingsMatch(claims, policy) || claims.UserID != "" && claims.Subject != claims.UserID {
-		return Claims{}, &Error{Code: BindingInvalid}
-	}
-	if !policyScopesMatch(claims.Scope, policy) {
-		return Claims{}, &Error{Code: ScopeInvalid}
-	}
+
 	now := v.Clock.Now()
 	skew := v.ClockSkew
 	if skew < 0 {
@@ -417,4 +409,23 @@ func exactScopes(actual, expected []string) bool {
 		delete(set, scope)
 	}
 	return len(set) == 0
+}
+
+// ValidateAdmitted rechecks exact resource, capability and identity policy for
+// an already cryptographically verified connection. Its credential lifetime
+// was checked at admission; revocation remains owned by the live watcher.
+func ValidateAdmitted(claims Claims, policy Policy) error {
+	if claims.Issuer != policy.Issuer {
+		return &Error{Code: BindingInvalid}
+	}
+	if claims.Audience != policy.Audience {
+		return &Error{Code: AudienceInvalid}
+	}
+	if !credentialClassMatches(claims.CredentialClass, policy) || !bindingsMatch(claims, policy) || claims.UserID != "" && claims.Subject != claims.UserID {
+		return &Error{Code: BindingInvalid}
+	}
+	if !policyScopesMatch(claims.Scope, policy) {
+		return &Error{Code: ScopeInvalid}
+	}
+	return nil
 }
