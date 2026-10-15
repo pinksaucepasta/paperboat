@@ -28,9 +28,50 @@ type workspaceMachineFixture struct {
 }
 
 func TestWorkspaceTerminalDescriptorDoesNotBorrowPersonalCapabilities(t *testing.T) {
-	f := newWorkspaceMachineFixture(t)
+	f, source, _ := newWorkspaceDescriptorFixture(t)
 	team := workspace.WithContext(f.ctx, workspace.Scope{ID: f.teamOne, TeamID: f.teamOne})
 	personal := workspace.WithContext(f.ctx, workspace.Scope{ID: "personal"})
+
+	for _, test := range []struct {
+		ctx       context.Context
+		name      string
+		wantFiles bool
+	}{{team, "team-only", false}, {personal, "personal-full", true}} {
+		session, err := f.service.CreateTerminalSession(test.ctx, f.account, f.machine, test.name, "descriptor_"+test.name+f.suffix, 8)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// No runtime operation executor is configured: remove the queued create
+		// to exercise completed-session descriptor authorization directly.
+		if _, err := f.store.SQL().ExecContext(f.ctx, `DELETE FROM paperboat.user_machine_terminal_session_operations WHERE terminal_session_id=$1`, session.ID); err != nil {
+			t.Fatal(err)
+		}
+		descriptor, err := f.service.ConnectTerminalSession(test.ctx, f.account, source, f.machine, "cli_"+f.suffix, session.ID)
+		if err != nil {
+			t.Fatalf("%s descriptor: %v", test.name, err)
+		}
+		if !descriptor.Connectable || (descriptor.FileTransfer != nil) != test.wantFiles {
+			t.Fatalf("%s descriptor readiness/files mismatch", test.name)
+		}
+		auth := descriptor.Terminal["auth"].(map[string]any)
+		var capabilities string
+		var teamID sql.NullString
+		if err := f.store.SQL().QueryRowContext(f.ctx, `SELECT array_to_string(capabilities,','),team_id FROM paperboat.user_machine_access_sessions WHERE id=$1`, auth["access_session_id"]).Scan(&capabilities, &teamID); err != nil {
+			t.Fatal(err)
+		}
+		if test.wantFiles {
+			if capabilities != "terminal,files,private_access" || teamID.Valid {
+				t.Fatalf("Personal capability/payer mismatch: %v %v", capabilities, teamID)
+			}
+		} else if capabilities != "terminal" || !teamID.Valid || teamID.String != f.teamOne {
+			t.Fatalf("Team borrowed Personal capabilities/payer: %v %v", capabilities, teamID)
+		}
+	}
+}
+
+func newWorkspaceDescriptorFixture(t *testing.T) (workspaceMachineFixture, string, *mint.Provider) {
+	t.Helper()
+	f := newWorkspaceMachineFixture(t)
 	source, env, edge := "ws_source_"+f.suffix, "env_"+f.suffix, "ws_edge_"+f.suffix
 	publicKey := newIntegrationPublicIdentityKey(t)
 	statements := []struct {
@@ -72,41 +113,7 @@ func TestWorkspaceTerminalDescriptorDoesNotBorrowPersonalCapabilities(t *testing
 	}
 	f.service.ConfigureAccess(fakeCredentialIssuer{}, "https://api.paperboat.test", 5*time.Minute)
 	f.service.ConfigureTerminalSessions(8, signer, nil)
-	for _, test := range []struct {
-		ctx       context.Context
-		name      string
-		wantFiles bool
-	}{{team, "team-only", false}, {personal, "personal-full", true}} {
-		session, err := f.service.CreateTerminalSession(test.ctx, f.account, f.machine, test.name, "descriptor_"+test.name+f.suffix, 8)
-		if err != nil {
-			t.Fatal(err)
-		}
-		// No runtime operation executor is configured: remove the queued create
-		// to exercise completed-session descriptor authorization directly.
-		if _, err := f.store.SQL().ExecContext(f.ctx, `DELETE FROM paperboat.user_machine_terminal_session_operations WHERE terminal_session_id=$1`, session.ID); err != nil {
-			t.Fatal(err)
-		}
-		descriptor, err := f.service.ConnectTerminalSession(test.ctx, f.account, source, f.machine, "cli_"+f.suffix, session.ID)
-		if err != nil {
-			t.Fatalf("%s descriptor: %v", test.name, err)
-		}
-		if !descriptor.Connectable || (descriptor.FileTransfer != nil) != test.wantFiles {
-			t.Fatalf("%s descriptor readiness/files mismatch", test.name)
-		}
-		auth := descriptor.Terminal["auth"].(map[string]any)
-		var capabilities string
-		var teamID sql.NullString
-		if err := f.store.SQL().QueryRowContext(f.ctx, `SELECT array_to_string(capabilities,','),team_id FROM paperboat.user_machine_access_sessions WHERE id=$1`, auth["access_session_id"]).Scan(&capabilities, &teamID); err != nil {
-			t.Fatal(err)
-		}
-		if test.wantFiles {
-			if capabilities != "terminal,files,private_access" || teamID.Valid {
-				t.Fatalf("Personal capability/payer mismatch: %v %v", capabilities, teamID)
-			}
-		} else if capabilities != "terminal" || !teamID.Valid || teamID.String != f.teamOne {
-			t.Fatalf("Team borrowed Personal capabilities/payer: %v %v", capabilities, teamID)
-		}
-	}
+	return f, source, signer
 }
 
 func newWorkspaceMachineFixture(t *testing.T) workspaceMachineFixture {

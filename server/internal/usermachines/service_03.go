@@ -20,7 +20,7 @@ import (
 )
 
 func (s *Service) fileTransferDescriptor(ctx context.Context, userID, sourceMachineID, destinationMachineID, cliClientSessionID, sessionID, requestID, manifestDigest string) (FileTransferDescriptor, error) {
-	if sourceMachineID == "" || destinationMachineID == "" || sourceMachineID == destinationMachineID || cliClientSessionID == "" || s.controlSigner == nil {
+	if sourceMachineID == "" || destinationMachineID == "" || cliClientSessionID == "" || s.controlSigner == nil {
 		return FileTransferDescriptor{}, ErrNotFound
 	}
 	if _, err := s.db.Queries().GetUserMachineForUser(ctx, dbsqlc.GetUserMachineForUserParams{ID: sourceMachineID, UserID: userID}); err != nil {
@@ -45,14 +45,18 @@ func (s *Service) fileTransferDescriptor(ctx context.Context, userID, sourceMach
 	if err != nil {
 		return FileTransferDescriptor{}, err
 	}
-	if sessionID == "" && !slices.Contains(destination.ConfiguredCapabilities, "file_receive") {
+	requiresReceive := sessionID == "" || sourceMachineID == destinationMachineID
+	if requiresReceive && !slices.Contains(destination.ConfiguredCapabilities, "file_receive") {
 		return FileTransferDescriptor{}, ErrMachineCapabilityUnavailable
 	}
-	if sessionID == "" && (!destination.Online || !slices.Contains(destination.ObservedCapabilities, "file_receive")) {
+	if requiresReceive && (!destination.Online || !slices.Contains(destination.ObservedCapabilities, "file_receive")) {
 		return FileTransferDescriptor{}, ErrMachineOffline
 	}
 	if destination.State == "revoked" || destination.State == "disconnected" || destination.State == "deleted" {
 		return FileTransferDescriptor{}, ErrNotFound
+	}
+	if sourceMachineID == destinationMachineID && (destination.State != "online" || destination.SeatState != "occupied") {
+		return FileTransferDescriptor{}, ErrMachineOffline
 	}
 	var acceptedRequest *teaminbox.Request
 	if destination.UserID != userID {
