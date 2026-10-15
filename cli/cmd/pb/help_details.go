@@ -177,7 +177,7 @@ var commandHelpDetails = map[string]string{
 	"pb inbox path":                           "Print the current local Inbox directory used for received files. This is a receiver setting; it does not choose a destination for outgoing sends.",
 	"pb inbox policy":                         "Show or set manual versus automatic acceptance for team file requests. --receipt-email controls receipt notification behavior, not file retention.",
 	"pb inbox requests":                       "List pending team file requests and their identities for review. Use approve or decline with the exact request ID and current generation.",
-	"pb inbox reset":                          "Restore the default local receiving directory for future files. The account's team request acceptance policy and already delivered files are unchanged.",
+	"pb inbox reset":                          "Restore ~/Paperboat/Inbox as the local receiving directory for future files. The account's team request acceptance policy and already delivered files are unchanged.",
 	"pb inbox set":                            "Set an explicit local directory for future received files. The command configures the receiving side; it does not move already delivered files.",
 	"pb install":                              "Install this executable and its local background service on the current machine. --install-dir selects the binary location; use pb service status after installation to inspect the supervised daemon.",
 	"pb logout":                               "Revoke and remove the current CLI client session. This top-level command has the same account effect as pb auth logout and reports any pending server revocation.",

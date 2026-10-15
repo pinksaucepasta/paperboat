@@ -504,15 +504,11 @@ func (i *Inbox) Deliver(ctx context.Context, manifest filetransfer.Manifest) (pa
 }
 
 func DefaultPath() (string, error) {
-	downloads, err := DownloadsDir()
-	if err == nil && filepath.IsAbs(downloads) {
-		return filepath.Join(downloads, "Paperboat Inbox"), nil
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve Paperboat Inbox home folder: %w", err)
 	}
-	home, homeErr := os.UserHomeDir()
-	if homeErr != nil {
-		return "", errors.Join(err, homeErr)
-	}
-	return filepath.Join(home, "Documents", "Paperboat Inbox"), nil
+	return filepath.Join(home, "Paperboat", "Inbox"), nil
 }
 
 func EnsurePath(path string) error {
