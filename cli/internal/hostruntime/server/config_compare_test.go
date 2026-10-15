@@ -86,14 +86,20 @@ func TestConfigComparisonStreamsCompleteLargeSidesAndClears(t *testing.T) {
 		t.Fatal("foreign path accessed")
 	}
 }
-func TestConfigComparisonStopsOnRevocationAndExpiry(t *testing.T) {
+func TestConfigComparisonOutlivesCredentialAndStopsOnRevocation(t *testing.T) {
 	var revoked atomic.Bool
+	expires := time.Now().Add(20 * time.Millisecond)
+	stream := &configComparisonStream{authorization: Authorization{Revoked: &revoked, ExpiresAt: expires}, value: configsync.ConflictComparison{Local: configsync.ConflictComparisonSide{Content: bytes.Repeat([]byte{42}, 128<<10)}}}
+	if _, err := stream.Next(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(time.Until(expires) + 20*time.Millisecond)
+	if frame, err := stream.Next(t.Context()); err != nil || len(frame.Data) != 64<<10 {
+		t.Fatal("admitted comparison ended at credential expiry", err)
+	}
 	revoked.Store(true)
-	for _, authorization := range []Authorization{{Revoked: &revoked}, {ExpiresAt: time.Now().Add(-time.Second)}} {
-		stream := &configComparisonStream{authorization: authorization}
-		if _, err := stream.Next(context.Background()); err == nil {
-			t.Fatal("stale grant read content")
-		}
+	if _, err := stream.Next(t.Context()); err == nil {
+		t.Fatal("revoked comparison read content")
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat-relay/admission"
 	"io"
 	"sync"
 	"sync/atomic"
@@ -176,6 +177,9 @@ type SSHDataHandler interface {
 }
 
 type terminalStreamBinding struct {
+	lease *admission.Lease
+	stop  func() bool
+
 	kind           string
 	authorization  Authorization
 	operationID    string
@@ -188,16 +192,17 @@ type terminalStreamBinding struct {
 }
 
 type terminalConnectionState struct {
-	mu              sync.RWMutex
-	nextID          uint32
-	streams         map[uint32]*terminalStreamBinding
-	closed          map[uint32]struct{}
-	closedIDs       []uint32
-	revoked         *atomic.Bool
-	expired         chan struct{}
-	expireOnce      sync.Once
-	expiryWatchOnce sync.Once
-	done            <-chan struct{}
+	ctx context.Context
+
+	mu         sync.RWMutex
+	nextID     uint32
+	streams    map[uint32]*terminalStreamBinding
+	closed     map[uint32]struct{}
+	closedIDs  []uint32
+	revoked    *atomic.Bool
+	expired    chan struct{}
+	expireOnce sync.Once
+	done       <-chan struct{}
 }
 
 func newTerminalConnectionState(revoked ...*atomic.Bool) *terminalConnectionState {
@@ -349,6 +354,7 @@ func (s *Server) ServeAuthenticated(conn Connection, authorizer Authorizer) (ser
 	}
 	terminalState := newTerminalConnectionState(revocationFlag)
 	terminalState.done = connectionCtx.Done()
+	terminalState.ctx = connectionCtx
 
 	frames := make(chan readResult, 1)
 	readerDone := make(chan struct{})
@@ -898,9 +904,6 @@ func (s *terminalConnectionState) bind(authorization Authorization, frame protoc
 	} else {
 		return 0, errors.New("invalid stream binding")
 	}
-	if !authorization.ExpiresAt.IsZero() && !time.Now().UTC().Before(authorization.ExpiresAt) {
-		return 0, &protocol.Error{Code: protocol.CredentialExpired}
-	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for attempts := uint64(0); attempts < uint64(^uint32(0)); attempts++ {
@@ -918,36 +921,33 @@ func (s *terminalConnectionState) bind(authorization Authorization, frame protoc
 		}
 		binding.revoked = revoked
 		s.streams[streamID] = binding
-		if authorization.RevokedSignal != nil {
-			go func(signal <-chan struct{}) {
-				select {
-				case <-signal:
-					s.expireOnce.Do(func() { close(s.expired) })
-				case <-s.done:
-				}
-			}(authorization.RevokedSignal)
+		parent := s.ctx
+		if parent == nil {
+			parent = context.Background()
 		}
-		if frame.Capability == "config.compare.v1" || authorization.BrowserTerminal || authorization.TerminalRole == TerminalRoleViewer || authorization.TerminalRole == TerminalRoleInteractive {
-			deadline := authorization.ExpiresAt
-			s.expiryWatchOnce.Do(func() {
-				go func() {
-					timer := time.NewTimer(time.Until(deadline))
-					defer timer.Stop()
-					select {
-					case <-timer.C:
-						s.expireOnce.Do(func() { close(s.expired) })
-					case <-s.done:
-					}
-				}()
-			})
+		lease, err := admission.Admit(parent, authorization.ExpiresAt, authorization.RevokedSignal)
+		if err != nil {
+			delete(s.streams, streamID)
+			return 0, &protocol.Error{Code: protocol.CredentialExpired, Cause: err}
 		}
+		binding.lease = lease
+		binding.stop = lease.Bind(s)
 		return streamID, nil
 	}
 	return 0, errors.New("terminal stream id space exhausted")
 }
 
+func (s *terminalConnectionState) Close() error {
+	s.expireOnce.Do(func() { close(s.expired) })
+	return nil
+}
+
 func (s *terminalConnectionState) remove(streamID uint32) {
 	s.mu.Lock()
+	if b := s.streams[streamID]; b != nil && b.lease != nil {
+		b.stop()
+		b.lease.Close()
+	}
 	delete(s.streams, streamID)
 	if _, exists := s.closed[streamID]; !exists {
 		s.closed[streamID] = struct{}{}

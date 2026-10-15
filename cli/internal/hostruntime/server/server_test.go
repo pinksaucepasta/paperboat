@@ -65,22 +65,31 @@ func TestTerminalBindingSurvivesCredentialExpiry(t *testing.T) {
 	}
 }
 
-func TestSharedTerminalBindingClosesAtCredentialExpiry(t *testing.T) {
+func TestSharedAndBrowserTerminalOutliveCredentialAndRevokeImmediately(t *testing.T) {
 	attach := protocol.Frame{Type: "request", RequestID: "req_attach", Version: "1.0", OperationID: "op_attach_0001", Capability: "terminal.v1", DeadlineMS: 1000, Payload: json.RawMessage(`{"action":"attach","session_id":"ses_1"}`)}
 	outcome := operation.Outcome{Result: json.RawMessage(`{"attachment_id":"att_1","session":{"snapshot":{"generation":1}}}`)}
-	for _, role := range []TerminalRole{TerminalRoleViewer, TerminalRoleInteractive} {
-		state := newTerminalConnectionState()
-		done := make(chan struct{})
-		state.done = done
-		if _, err := state.bind(Authorization{ClientID: "cli_1", TerminalRole: role, ExpiresAt: time.Now().Add(20 * time.Millisecond)}, attach, outcome); err != nil {
-			t.Fatal(err)
+	for _, role := range []TerminalRole{TerminalRoleOwner, TerminalRoleViewer, TerminalRoleInteractive} {
+		for _, browser := range []bool{false, true} {
+			state := newTerminalConnectionState()
+			done := make(chan struct{})
+			state.done = done
+			revoked := make(chan struct{})
+			if _, err := state.bind(Authorization{ClientID: "cli_1", TerminalRole: role, BrowserTerminal: browser, ExpiresAt: time.Now().Add(20 * time.Millisecond), RevokedSignal: revoked}, attach, outcome); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case <-state.expired:
+				t.Fatalf("%s browser=%t expired admitted terminal", role, browser)
+			case <-time.After(60 * time.Millisecond):
+			}
+			close(revoked)
+			select {
+			case <-state.expired:
+			case <-time.After(time.Second):
+				t.Fatalf("%s browser=%t ignored revocation", role, browser)
+			}
+			close(done)
 		}
-		select {
-		case <-state.expired:
-		case <-time.After(time.Second):
-			t.Fatalf("%s binding survived credential expiry", role)
-		}
-		close(done)
 	}
 }
 

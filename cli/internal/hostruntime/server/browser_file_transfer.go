@@ -8,8 +8,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat-relay/admission"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/filetransfer"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/operation"
@@ -38,7 +40,7 @@ func browserTransferOwned(a Authorization, t store.FileTransfer) bool {
 }
 
 func (d *Dispatcher) browserTransferLive(a Authorization) error {
-	if !a.BrowserTerminal || a.TerminalRole != TerminalRoleOwner || a.AccountID == "" || a.UserID != a.AccountID || a.MachineID == "" || a.SessionID == "" || a.TerminalGeneration == 0 || a.BrowserAttachmentID == "" || a.ClientID != a.BrowserAttachmentID || a.Revoked != nil && a.Revoked.Load() || !a.ExpiresAt.IsZero() && !d.config.Now().Before(a.ExpiresAt) {
+	if !a.BrowserTerminal || a.TerminalRole != TerminalRoleOwner || a.AccountID == "" || a.UserID != a.AccountID || a.MachineID == "" || a.SessionID == "" || a.TerminalGeneration == 0 || a.BrowserAttachmentID == "" || a.ClientID != a.BrowserAttachmentID || a.Revoked != nil && a.Revoked.Load() {
 		return session.ErrSessionUnknown
 	}
 	snapshot, err := d.config.Sessions.SnapshotAtGeneration(a.SessionID, a.TerminalGeneration)
@@ -103,29 +105,17 @@ func (d *Dispatcher) browserFileTransfer(ctx context.Context, a Authorization, p
 			return failure("invalid_request")
 		}
 	}
-	operationCtx, cancel := context.WithCancel(ctx)
-	if !a.ExpiresAt.IsZero() {
-		cancel()
-		operationCtx, cancel = context.WithDeadline(ctx, a.ExpiresAt)
-	}
-	defer cancel()
-	if a.RevokedSignal != nil {
-		select {
-		case <-a.RevokedSignal:
-			cancel()
-		default:
+	// The browser terminal has already admitted this participant. Its token
+	// deadline is not a deadline for requests on that established connection.
+	lease, err := admission.Admit(ctx, time.Time{}, a.RevokedSignal)
+	if err != nil {
+		if errors.Is(err, admission.ErrRevoked) {
+			return failure("operation_canceled")
 		}
-		go func() {
-			select {
-			case <-a.RevokedSignal:
-				cancel()
-			case <-operationCtx.Done():
-			}
-		}()
-	}
-	if err := operationCtx.Err(); err != nil {
 		return domainResult(nil, err)
 	}
+	defer lease.Close()
+	operationCtx := lease.Context()
 	service := d.config.FileTransfers
 	if request.Action == "policy" {
 		return result(map[string]any{"policy": service.Policy()})

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
 	"sync"
-	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/configsync"
@@ -99,8 +98,8 @@ func (s *configComparisonStream) Next(ctx context.Context) (protocol.BinaryFrame
 	if err := ctx.Err(); err != nil {
 		return protocol.BinaryFrame{}, err
 	}
-	if s.authorization.Revoked != nil && s.authorization.Revoked.Load() || !s.authorization.ExpiresAt.IsZero() && !time.Now().Before(s.authorization.ExpiresAt) {
-		return protocol.BinaryFrame{}, &StreamError{Code: "credential_expired"}
+	if s.authorization.Revoked != nil && s.authorization.Revoked.Load() {
+		return protocol.BinaryFrame{}, &StreamError{Code: "credential_revoked"}
 	}
 	for s.side < 2 {
 		content := s.value.Local.Content

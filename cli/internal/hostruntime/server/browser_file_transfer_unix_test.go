@@ -139,7 +139,7 @@ func TestBrowserFileTransferRejectsAuthorityAndMalformedChunks(t *testing.T) {
 	d, a := browserTransferFixture(t)
 	data := []byte("verified")
 	transfer := browserTransferCreate(t, d, a, "browser_batch_security", data)
-	for _, name := range []string{"viewer", "interactive", "native", "account", "machine", "session", "generation", "revoked", "expired", "attachment"} {
+	for _, name := range []string{"viewer", "interactive", "native", "account", "machine", "session", "generation", "revoked", "attachment"} {
 		t.Run(name, func(t *testing.T) {
 			bad := a
 			switch name {
@@ -161,8 +161,6 @@ func TestBrowserFileTransferRejectsAuthorityAndMalformedChunks(t *testing.T) {
 			case "revoked":
 				bad.Revoked = &atomic.Bool{}
 				bad.Revoked.Store(true)
-			case "expired":
-				bad.ExpiresAt = time.Now().Add(-time.Second)
 			case "attachment":
 				bad.BrowserAttachmentID = "other"
 				bad.ClientID = "other"
@@ -301,5 +299,22 @@ func TestBrowserFileTransferBatchResumeAndAtomicPublication(t *testing.T) {
 		if err != nil || !bytes.Equal(content, data[i]) {
 			t.Fatalf("batch publication integrity err=%v", err)
 		}
+	}
+}
+
+func TestAdmittedBrowserTransferOutlivesCredentialAndRejectsRevocation(t *testing.T) {
+	d, a := browserTransferFixture(t)
+	a.ExpiresAt = time.Now().Add(20 * time.Millisecond)
+	a.Revoked = &atomic.Bool{}
+	transfer := browserTransferCreate(t, d, a, "browser_lifetime_batch", []byte("verified"))
+	time.Sleep(time.Until(a.ExpiresAt) + 20*time.Millisecond)
+	out := browserTransferCall(t, d, a, map[string]any{"action": "get", "transfer_id": transfer.ID})
+	if out.ErrorCode != "" {
+		t.Fatalf("admitted transfer expired: %s", out.ErrorCode)
+	}
+	a.Revoked.Store(true)
+	out = browserTransferCall(t, d, a, map[string]any{"action": "get", "transfer_id": transfer.ID})
+	if out.ErrorCode == "" {
+		t.Fatal("revoked transfer remained accessible")
 	}
 }
