@@ -7,8 +7,29 @@ import time
 import unittest
 
 from install_path import windows_executable
+from uninstall_inventory import retained
 
 HERE = pathlib.Path(__file__).resolve().parent
+
+
+class UninstallInventoryPreservation(unittest.TestCase):
+    def test_preserved_inbox_does_not_hide_owned_state_or_symlinks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            owned = pathlib.Path(directory) / "product"
+            inbox = owned / "received" / "inbox"
+            inbox.mkdir(parents=True)
+            (inbox / "synthetic-smoke-file").write_bytes(b"fixture")
+            self.assertFalse(retained(owned, inbox))
+            credential = owned / "leftover-credential"
+            credential.write_bytes(b"synthetic")
+            self.assertTrue(retained(owned, inbox))
+            credential.unlink()
+            link = owned / "unexpected-link"
+            link.symlink_to(inbox, target_is_directory=True)
+            self.assertTrue(retained(owned, inbox))
+            link.unlink()
+            self.assertFalse(retained(owned, inbox))
+            self.assertFalse(retained(owned / "missing", inbox))
 
 
 class SmokeReceipts(unittest.TestCase):

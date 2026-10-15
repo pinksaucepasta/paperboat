@@ -39,13 +39,19 @@ def command(pb, *args, timeout=45, env=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('check', choices=['reinstall', 'pair-refusal', 'service', 'interrupt-install', 'crash-service', 'shell-install'])
+    parser.add_argument('check', choices=['reinstall', 'pair-refusal', 'service', 'interrupt-install', 'crash-service', 'shell-install', 'post-reboot'])
     parser.add_argument('--shell')
+    parser.add_argument('--previous-boot-id')
     args = parser.parse_args()
     pb = Path.home() / '.local/bin/pb'
     before = registration()
     started = time.monotonic()
-    if args.check == 'shell-install':
+    if args.check == 'post-reboot':
+        boot = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+        if not args.previous_boot_id or boot == args.previous_boot_id:
+            raise RuntimeError('device did not reboot since the saved observation')
+        command(pb, 'doctor', '--json')
+    elif args.check == 'shell-install':
         if not args.shell or not Path(args.shell).is_absolute():
             raise RuntimeError('shell must be an absolute installed executable')
         previous = os.umask(0o077)
