@@ -1,4 +1,6 @@
 import os
+import sys
+import pairing_lifecycle
 import json
 import pathlib
 import subprocess
@@ -17,6 +19,29 @@ from uninstall_inventory import retained
 from pairing_fault import PairingFaultProxy
 
 HERE = pathlib.Path(__file__).resolve().parent
+
+
+
+class PairingTerminal(unittest.TestCase):
+    def test_pair_has_foreground_controlling_terminal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            script = pathlib.Path(directory) / 'approval.py'
+            script.write_text("import os\nassert os.isatty(0), 'administrator approval needs a terminal'\nwith open('/dev/tty') as terminal:\n assert os.tcgetpgrp(terminal.fileno()) == os.getpgrp()\nprint('terminal approval ready')\n")
+            result = pairing_lifecycle.pair(sys.executable, [str(script)], pathlib.Path(directory), 'none', 'https://api.example.test')
+            self.assertIn('terminal approval ready', result)
+
+    def test_approval_password_is_not_echoed_and_child_is_bounded(self):
+        import terminal_command
+        with tempfile.TemporaryDirectory() as directory:
+            script = pathlib.Path(directory) / 'approval.py'
+            script.write_text("import sys,termios\nassert not termios.tcgetattr(0)[3] & termios.ECHO\nsys.stdout.write('[sudo] password for device: ');sys.stdout.flush()\nassert sys.stdin.readline().rstrip('\\n') == 'fixture-secret'\nprint('approved')\n")
+            result = terminal_command.run([sys.executable, str(script)], password='fixture-secret', timeout=3)
+            self.assertEqual(0, result.returncode)
+            self.assertIn('approved', result.stdout)
+            self.assertNotIn('fixture-secret', result.stdout)
+            script.write_text('import os,time\nfor fd in range(3): os.close(fd)\ntime.sleep(60)\n')
+            with self.assertRaises(subprocess.TimeoutExpired):
+                terminal_command.run([sys.executable, str(script)], password=None, timeout=0.1)
 
 
 class PairingNetworkFault(unittest.TestCase):

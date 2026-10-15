@@ -17,11 +17,15 @@ from urllib.parse import parse_qs, urlparse
 import uuid
 
 from pairing_fault import PairingFaultProxy
+import terminal_command
 
 
-def invoke(binary, *arguments, timeout=180, input=None, env=None, raw=False):
-    result = subprocess.run([str(binary), *arguments], input=input,
-                            capture_output=True, text=True, timeout=timeout, env=env)
+def invoke(binary, *arguments, timeout=180, input=None, env=None, raw=False, terminal=False, password=None):
+    if terminal:
+        result = terminal_command.run([str(binary), *arguments], password=password, env=env, timeout=timeout)
+    else:
+        result = subprocess.run([str(binary), *arguments], input=input,
+                                capture_output=True, text=True, timeout=timeout, env=env)
     if result.returncode:
         diagnostic = Path(tempfile.gettempdir()) / ('paperboat-f1-error-' + uuid.uuid4().hex)
         fd = os.open(diagnostic, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -61,7 +65,8 @@ def inventory(script, inbox, installed, password):
     elif result.returncode or receipt.get('status') != 'PASS' or receipt.get('total') != 0:
         print(json.dumps({'check': 'uninstall-inventory', 'status': 'FAIL',
                           'leftovers': receipt.get('leftovers', {}),
-                          'total': receipt.get('total')}), flush=True)
+                          'total': receipt.get('total'),
+                          'reason': receipt.get('reason', receipt.get('error'))}), flush=True)
         raise RuntimeError('uninstall inventory did not reach zero leftovers')
     return receipt
 
@@ -112,7 +117,7 @@ def interrupt_pair(binary, arguments, root, mode, proxy):
             process.communicate(timeout=10)
 
 
-def pair(binary, arguments, root, fault, server):
+def pair(binary, arguments, root, fault, server, password=None):
     proxy = None
     try:
         if fault == 'network':
@@ -124,7 +129,7 @@ def pair(binary, arguments, root, fault, server):
         if fault != 'none':
             environment = interrupt_pair(binary, arguments, root, fault, proxy)
         # Exact argv, token file and protected journal; no manual recovery edits.
-        return invoke(binary, *arguments, env=environment, raw=True)
+        return invoke(binary, *arguments, env=environment, raw=True, terminal=True, password=password)
     finally:
         if proxy is not None:
             proxy.close()
@@ -181,7 +186,7 @@ def qualify(expected, check, fault, script, password):
             invoke(staged, 'install', '--json')
             arguments = ['pair', '--server', before['server_url'],
                          '--enrollment-token-file', str(token), '--name', original['alias']]
-            output = pair(staged, arguments, root, fault, before['server_url'])
+            output = pair(staged, arguments, root, fault, before['server_url'], password)
             after = json.loads((root / 'machine-registration.json').read_text())
             machines = invoke(binary, '--workspace', 'personal', 'machine', 'list', '--json')['machines']
             current = next((item for item in machines if item['id'] == after['machine_id']), None)
