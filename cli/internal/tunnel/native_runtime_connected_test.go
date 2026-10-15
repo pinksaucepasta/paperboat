@@ -394,12 +394,10 @@ func connectedProductionRuntime(t *testing.T, mode string) {
 		// available; the same owner and endpoint keys must recover afterwards.
 		deadline = time.NewTimer(15 * time.Second)
 		ticker = time.NewTicker(10 * time.Millisecond)
-	observation:
-		for machineAuthority.RegionalStatus().Reason != "regional_admission_denied" {
+		for machineAuthority.RegionalStatus().Reason != "regional_admission_denied" || relay.Snapshot().Connections != 0 {
 			select {
 			case <-deadline.C:
-				t.Logf("receiver revocation status: %+v; relay: %+v", machineAuthority.RegionalStatus(), relay.Snapshot())
-				break observation
+				t.Fatalf("receiver revocation did not retire the carrier: %+v; relay: %+v", machineAuthority.RegionalStatus(), relay.Snapshot())
 			case <-ticker.C:
 			}
 		}
