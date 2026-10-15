@@ -153,6 +153,18 @@ ARM builds must compile, pass unit tests and be included in every release.
 - **Our own relays and tunnel edge are installed with the same `pbh` installer** (dogfooding),
   then enrolled as Paperboat global nodes through the operator enrollment API.
 
+### 1.4c Credential lifetimes (all features)
+
+Short-lived credentials and descriptors gate **starting or joining** a connection only. Once a
+connection, stream or session is admitted (terminal, exec, SSH, transfers, previews, tunnels,
+private access, relay/edge carriers, browser terminal, config sync, everything), it never ends
+because a credential expired. It ends only when the work completes, either side disconnects,
+or access is **revoked** (machine removed, member removed, session signed out, policy change),
+and revocation ends it immediately. Renewal and reattach exist for lost connections, never as
+a workaround for expiry. Each lane audits its own code for any timer, deadline or check that
+ties an admitted connection to credential expiry, removes it, and adds a test per path: short
+credential TTL, connection outlives it; revocation still cuts it.
+
 ### 1.5 Repository and process
 
 - This monorepo lives at github.com/pinksaucepasta/paperboat (**private**; licence later,
