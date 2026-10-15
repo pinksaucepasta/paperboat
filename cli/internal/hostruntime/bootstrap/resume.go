@@ -205,8 +205,9 @@ func ResumeMatchesEnrollmentToken(stateRoot, enrollmentToken string) (bool, erro
 
 // PrepareAuthenticatedSetupResume creates or reuses the protected verifier
 // journal for an authenticated Host setup. It replaces an older journal only
-// when every immutable machine binding matches and the journal is expired with
-// no material or locally committed installation progress.
+// after the authenticated setup API has authorized the current owner and exact
+// machine key. An expired one-shot installation can transition to a new owner-
+// authorized operation only for its existing machine and generation.
 func PrepareAuthenticatedSetupResume(stateRoot, serverURL, publicIdentityKey, alias, machineID string, installationGeneration int64, now time.Time) (ResumeRecord, error) {
 	serverURL = strings.TrimRight(strings.TrimSpace(serverURL), "/")
 	publicIdentityKey, alias, machineID = strings.TrimSpace(publicIdentityKey), strings.TrimSpace(alias), strings.TrimSpace(machineID)
@@ -232,12 +233,17 @@ func PrepareAuthenticatedSetupResume(stateRoot, serverURL, publicIdentityKey, al
 			if progress {
 				return ResumeRecord{}, ErrResumeBinding
 			}
-		} else if !exactBase || !existing.PairingStarted || !expired || existing.Material != nil || existing.RuntimeEnrolled || existing.ClientInstalled {
-			return ResumeRecord{}, ErrResumeBinding
+		} else {
+			installedBinding := existing.Material != nil && existing.RuntimeEnrolled &&
+				existing.Material.UserMachineID == machineID &&
+				existing.Material.InstallationGeneration == installationGeneration
+			empty := existing.Material == nil && !existing.RuntimeEnrolled && !existing.ClientInstalled
+			if !exactBase || !existing.PairingStarted || !expired || (!empty && !installedBinding) {
+				return ResumeRecord{}, ErrResumeBinding
+			}
 		}
-		if clearErr := ClearResume(stateRoot); clearErr != nil {
-			return ResumeRecord{}, clearErr
-		}
+		// SaveResume atomically replaces the expired authority below. Never
+		// remove the original journal before its replacement is durable.
 	} else if !errors.Is(err, ErrResumeNotFound) {
 		return ResumeRecord{}, err
 	}

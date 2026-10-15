@@ -441,3 +441,47 @@ func TestResumeRejectsObsoleteFieldsAndSchemasWithoutWrite(t *testing.T) {
 		t.Fatal("canonical resume read wrote state")
 	}
 }
+
+func TestAuthenticatedSetupReauthorizesExpiredOneShotForExactInstalledIdentity(t *testing.T) {
+	root := t.TempDir()
+	now := time.Now().UTC()
+	server := "https://api.example.test"
+	publicKey := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+	old := NewResumeRecord(server, publicKey, "consumed-enrollment", "workstation", "protected-verifier-01234567890123456789", now.Add(-time.Minute))
+	old.PairingStarted, old.RuntimeEnrolled, old.ClientInstalled = true, true, true
+	old.Material = &Material{Schema: "paperboat.machine-installation/v1", UserMachineID: "mch_1", PairingID: "ume_1", EnvironmentID: "mch_1", ControlURL: server, HelperID: "helper_1", ReuseIdentity: true, ExpiresAt: now.Add(-time.Minute), HelperListenAddress: "127.0.0.1:38080", InstallationGeneration: 7, ClientSession: &ClientSession{Schema: "paperboat.cli-session/v1", SessionID: "cls_revoked", AccessToken: "access-012345678901234567890123456789", RefreshToken: "refresh-012345678901234567890123456789", TokenType: "Bearer", ExpiresIn: 3600}}
+	encoded, err := json.Marshal(old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := atomicfile.Write(ResumePath(root), encoded, atomicfile.CurrentOwnerOptions(0o600)); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(ResumePath(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, binding := range []struct {
+		machine    string
+		generation int64
+	}{{"mch_other", 7}, {"mch_1", 8}} {
+		if _, err := PrepareAuthenticatedSetupResume(root, server, publicKey, "workstation", binding.machine, binding.generation, now); !errors.Is(err, ErrResumeBinding) {
+			t.Fatalf("changed binding accepted: %v", err)
+		}
+		after, err := os.ReadFile(ResumePath(root))
+		if err != nil || !bytes.Equal(before, after) {
+			t.Fatal("rejected authorization changed protected recovery")
+		}
+	}
+	renewed, err := PrepareAuthenticatedSetupResume(root, server, publicKey, "workstation", "mch_1", 7, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !renewed.AuthenticatedSetup || renewed.ExpectedUserMachineID != "mch_1" || renewed.ExpectedGeneration != 7 || renewed.Verifier == old.Verifier || renewed.Material != nil || renewed.ClientInstalled || renewed.RuntimeEnrolled {
+		t.Fatal("reauthorization reused revoked authority or lost machine binding")
+	}
+	loaded, err := LoadResume(root, server, publicKey, "", "workstation", now)
+	if err != nil || loaded.SetupOperationID != renewed.SetupOperationID {
+		t.Fatal("new authenticated operation was not persisted")
+	}
+}
