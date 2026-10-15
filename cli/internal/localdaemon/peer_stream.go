@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat-relay/admission"
 	"net"
-	"sync"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
@@ -35,26 +35,12 @@ func TunnelPeerStreamOpener(peerTunnel *tunnel.PeerTerminalTunnel) func(context.
 		// Setup is part of the local API request and must stop when the caller
 		// cancels or its deadline expires. Once the HTTP handler upgrades, the
 		// returned stream becomes daemon-owned and is governed by its lease.
-		lifetime, cancelLifetime := context.WithCancelCause(context.WithoutCancel(ctx))
-		var handoffMu sync.Mutex
-		handedOff := false
-		stopCallerCancel := context.AfterFunc(ctx, func() {
-			handoffMu.Lock()
-			defer handoffMu.Unlock()
-			if !handedOff {
-				cancelLifetime(context.Cause(ctx))
-			}
-		})
-		deadlineTimer := time.AfterFunc(time.Until(request.Deadline), func() { cancelLifetime(context.DeadlineExceeded) })
-		stopSetupCancellation := func() bool {
-			handoffMu.Lock()
-			handedOff = true
-			handoffMu.Unlock()
-			stopCallerCancel()
-			return deadlineTimer.Stop() && ctx.Err() == nil && lifetime.Err() == nil && time.Now().Before(request.Deadline)
+		staged, err := admission.Stage(ctx, request.Deadline)
+		if err != nil {
+			return nil, err
 		}
+		lifetime := staged.Context()
 		var remote tunnel.Conn
-		var err error
 		dial := func() (tunnel.Conn, error) {
 			switch request.Consumer {
 			case "terminal":
@@ -79,45 +65,31 @@ func TunnelPeerStreamOpener(peerTunnel *tunnel.PeerTerminalTunnel) func(context.
 		}
 		remote, err = dial()
 		if errors.Is(err, ErrInvalidInventoryConfig) {
-			stopCallerCancel()
-			deadlineTimer.Stop()
-			cancelLifetime(context.Canceled)
+			staged.Abort()
 			return nil, ErrInvalidInventoryConfig
 		}
 		if err != nil {
-			stopCallerCancel()
-			deadlineTimer.Stop()
-			cancelLifetime(context.Canceled)
+			staged.Abort()
 			errorreport.Current().ObserveFailure(ctx, "paperboatd", "peer_stream", "peer_connect", "transport_failed", err)
 			return nil, err
 		}
-		if !stopSetupCancellation() {
-			cause := ctx.Err()
-			if cause == nil {
-				cause = context.Cause(lifetime)
-			}
-			if cause == nil && !time.Now().Before(request.Deadline) {
-				cause = context.DeadlineExceeded
-			}
-			if cause == nil {
-				cause = context.Canceled
-			}
-			cancelLifetime(context.Canceled)
+		if _, err := staged.Accept(); err != nil {
+			staged.Abort()
 			_ = remote.Close()
-			if cause == context.DeadlineExceeded && ctx.Err() == nil && request.Consumer == "terminal" {
+			if ctx.Err() == nil && request.Consumer == "terminal" && (errors.Is(err, admission.ErrExpired) || errors.Is(err, context.DeadlineExceeded)) {
 				return nil, terminalCredentialExpiredError{}
 			}
-			return nil, cause
+			return nil, err
 		}
 		if recorder := diagnostics.FromContext(ctx); recorder != nil {
 			_ = recorder.RecordWithSupportReference("stream_open", "peer_stream_opened", "info", supportref.FromContext(ctx), map[string]string{"component": "paperboat-daemon", "operation": "peer_stream", "outcome": "success"})
 		}
 		if request.Consumer == "ssh" || request.Consumer == "config_compare" {
-			return &rawPeerConn{Conn: remote, cancel: func() { cancelLifetime(context.Canceled) }}, nil
+			return &rawPeerConn{Conn: remote, cancel: func() { staged.Abort() }}, nil
 		}
 		client, server := net.Pipe()
 		go func() {
-			defer cancelLifetime(context.Canceled)
+			defer staged.Abort()
 			if request.Consumer == "terminal" && terminalPayload.Debug {
 				reportLocalPeerBridgeFailure(lifetime, tunnel.ServeLocalPeerDebugTerminalConn(lifetime, server, remote, cursor))
 			} else {

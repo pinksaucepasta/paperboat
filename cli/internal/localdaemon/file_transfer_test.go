@@ -80,7 +80,7 @@ func TestFileTransferBrokerBindsHandleToUnixPeer(t *testing.T) {
 	}
 }
 
-func TestFileTransferBrokerExpiresAndBoundsNativeLeases(t *testing.T) {
+func TestFileTransferBrokerOutlivesCredentialAndKeepsPeerAndCapacityBounds(t *testing.T) {
 	now := time.Unix(20_000, 0).UTC()
 	directs := make([]*transferDirectFake, 0, maxNativeTransferLeases+1)
 	preparer := nativeTransferPreparerFunc(func(context.Context, resolver.ConnectInfo, string) (tunnel.DirectTransferStreamOpener, error) {
@@ -112,8 +112,16 @@ func TestFileTransferBrokerExpiresAndBoundsNativeLeases(t *testing.T) {
 		t.Fatal("lease bound did not close rejected native session")
 	}
 	broker.now = func() time.Time { return now.Add(2 * time.Hour) }
-	if _, err := broker.OpenFileTransferStream(context.Background(), peer, first); !errors.Is(err, localapi.ErrPermission) || !directs[0].closed {
-		t.Fatalf("expired lease err=%v closed=%t", err, directs[0].closed)
+	stream, err := broker.OpenFileTransferStream(context.Background(), peer, first)
+	if err != nil || directs[0].closed {
+		t.Fatalf("credential expiry closed admitted lease: %v", err)
+	}
+	stream.Close()
+	if err := broker.ReleaseFileTransfer(peer, first); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := broker.OpenFileTransferStream(context.Background(), peer, first); !errors.Is(err, localapi.ErrPermission) {
+		t.Fatal("released lease remained usable", err)
 	}
 }
 

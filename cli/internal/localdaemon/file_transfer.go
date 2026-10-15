@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"github.com/pinksaucepasta/paperboat-relay/admission"
 	"io"
 	"net"
 	"sync"
@@ -18,10 +19,9 @@ import (
 const maxNativeTransferLeases = 64
 
 type daemonTransferLease struct {
-	peer    localapi.Peer
-	expires time.Time
-	opener  tunnel.DirectTransferStreamOpener
-	closer  io.Closer
+	peer   localapi.Peer
+	opener tunnel.DirectTransferStreamOpener
+	closer io.Closer
 }
 
 type transferLeaseCloser struct {
@@ -69,21 +69,25 @@ func (b *FileTransferBroker) PrepareFileTransfer(ctx context.Context, peer local
 		return localapi.FileTransferResult{}, ErrInvalidInventoryConfig
 	}
 	info := resolver.ConnectInfo{TargetKind: "machine", MachineID: request.MachineID, MachineGeneration: request.MachineGeneration, Terminal: &resolver.TerminalTarget{EnvironmentID: request.EnvironmentID, Auth: resolver.AuthTarget{Method: "bearer", Token: request.Credential, ExpiresAt: request.Deadline.UTC().Format(time.RFC3339Nano), ResourceID: request.AccessSessionID}}}
-	leaseCtx, cancelLease := context.WithCancel(context.WithoutCancel(ctx))
-	stopSetupCancel := context.AfterFunc(ctx, cancelLease)
-	opener, err := b.tunnel.PrepareNativeFileTransfer(leaseCtx, info, request.OperationID)
+	staged, err := admission.Stage(ctx, time.Time{})
 	if err != nil {
-		stopSetupCancel()
-		cancelLease()
 		return localapi.FileTransferResult{}, err
 	}
-	if !stopSetupCancel() || ctx.Err() != nil || leaseCtx.Err() != nil {
-		cancelLease()
+	leaseCtx := staged.Context()
+	opener, err := b.tunnel.PrepareNativeFileTransfer(leaseCtx, info, request.OperationID)
+	if err != nil {
+		staged.Abort()
+		return localapi.FileTransferResult{}, err
+	}
+	lifetime, err := staged.Accept()
+	if err != nil {
+		staged.Abort()
 		if closer, ok := opener.(io.Closer); ok {
 			_ = closer.Close()
 		}
-		return localapi.FileTransferResult{}, context.Canceled
+		return localapi.FileTransferResult{}, err
 	}
+	cancelLease := lifetime.Close
 	closer, ok := opener.(io.Closer)
 	if !ok {
 		cancelLease()
@@ -108,7 +112,7 @@ func (b *FileTransferBroker) PrepareFileTransfer(ctx context.Context, peer local
 		_ = closer.Close()
 		return localapi.FileTransferResult{}, errors.New("native file transfer lease limit reached")
 	}
-	b.leases[handle] = daemonTransferLease{peer: peer, expires: request.Deadline, opener: opener, closer: &transferLeaseCloser{closer: closer, cancel: cancelLease}}
+	b.leases[handle] = daemonTransferLease{peer: peer, opener: opener, closer: &transferLeaseCloser{closer: closer, cancel: cancelLease}}
 	b.mu.Unlock()
 	return localapi.FileTransferResult{Handle: handle}, nil
 }
@@ -116,17 +120,10 @@ func (b *FileTransferBroker) PrepareFileTransfer(ctx context.Context, peer local
 func (b *FileTransferBroker) OpenFileTransferStream(ctx context.Context, peer localapi.Peer, handle string) (net.Conn, error) {
 	b.mu.Lock()
 	lease, ok := b.leases[handle]
-	expired := ok && !lease.expires.After(b.now().UTC())
-	if expired {
-		delete(b.leases, handle)
-	}
-	if ok && (!samePeer(lease.peer, peer) || expired) {
+	if ok && !samePeer(lease.peer, peer) {
 		ok = false
 	}
 	b.mu.Unlock()
-	if expired {
-		_ = lease.closer.Close()
-	}
 	if !ok {
 		return nil, localapi.ErrPermission
 	}
