@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"github.com/google/uuid"
+	"github.com/pinksaucepasta/paperboat-relay/admission"
 	"net/http"
 	"strings"
 	"sync"
@@ -305,11 +306,12 @@ func (m *Manager) Replay(ctx context.Context, req ReplayRequest, forward ReplayF
 		return ReplayResult{}, ErrStaleAuthority
 	}
 
-	deadline := now.Add(ReplayTimeout)
-	if req.ExpiresAt.Before(deadline) {
-		deadline = req.ExpiresAt
+	lease, err := admission.Admit(ctx, req.ExpiresAt, nil)
+	if err != nil {
+		return ReplayResult{}, err
 	}
-	forwardCtx, cancel := context.WithDeadline(ctx, deadline)
+	defer lease.Close()
+	forwardCtx, cancel := context.WithTimeout(lease.Context(), ReplayTimeout)
 	defer cancel()
 	if err := forwardCtx.Err(); err != nil {
 		return ReplayResult{}, err

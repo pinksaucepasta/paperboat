@@ -86,7 +86,7 @@ func (t *PeerTerminalTunnel) InspectorRequest(ctx context.Context, access api.In
 	}
 	req.Header.Set("X-Paperboat-Inspector-Grant", grant)
 	req.Header.Set("Content-Type", "application/json")
-	response, err := (&http.Client{Transport: transport, Timeout: time.Until(deadline), CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}).Do(req)
+	response, err := (&http.Client{Transport: transport, Timeout: 45 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}).Do(req)
 	if err != nil {
 		return nil, 0, err
 	}

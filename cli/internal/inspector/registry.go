@@ -1,6 +1,8 @@
 package inspector
 
 import (
+	"context"
+	"github.com/pinksaucepasta/paperboat-relay/admission"
 	"sync"
 	"time"
 )
@@ -26,10 +28,11 @@ type ReplayBinding struct {
 type Registry struct {
 	mu      sync.Mutex
 	entries map[string]ReplayBinding
+	changed chan struct{}
 }
 
 func NewRegistry() *Registry {
-	return &Registry{entries: make(map[string]ReplayBinding)}
+	return &Registry{entries: make(map[string]ReplayBinding), changed: make(chan struct{})}
 }
 
 // Register installs or replaces the current replay binding for a resource.
@@ -46,14 +49,6 @@ func (r *Registry) Register(resourceID string, binding ReplayBinding) error {
 	if previous, ok := r.entries[resourceID]; ok && (binding.ResourceGeneration < previous.ResourceGeneration || binding.RouteGeneration < previous.RouteGeneration || binding.TargetGeneration < previous.TargetGeneration) {
 		return ErrStaleGeneration
 	}
-	// Opportunistically drop expired entries so a churn of short-lived
-	// resources cannot grow the map without bound.
-	now := time.Now().UTC()
-	for id, entry := range r.entries {
-		if !entry.ExpiresAt.After(now) {
-			delete(r.entries, id)
-		}
-	}
 	if len(r.entries) >= DaemonMaxRecords {
 		if _, ok := r.entries[resourceID]; !ok {
 			return ErrDropped
@@ -63,6 +58,7 @@ func (r *Registry) Register(resourceID string, binding ReplayBinding) error {
 	// disagree; keep it so the caller gets an honest stale error rather than
 	// a missing-target error.
 	r.entries[resourceID] = binding
+	r.signalLocked()
 	return nil
 }
 
@@ -75,6 +71,7 @@ func (r *Registry) Unregister(resourceID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.entries, resourceID)
+	r.signalLocked()
 }
 
 // Current returns the binding when one is registered and unexpired.
@@ -89,13 +86,38 @@ func (r *Registry) Current(resourceID string, now time.Time) (ReplayBinding, boo
 	defer r.mu.Unlock()
 	binding, ok := r.entries[resourceID]
 	if !ok || !binding.ExpiresAt.After(now) {
-		if ok {
-			delete(r.entries, resourceID)
-		}
 		return ReplayBinding{}, false
 	}
 	if binding.Available != nil && !binding.Available() {
 		return ReplayBinding{}, false
 	}
 	return binding, true
+}
+
+func (r *Registry) signalLocked() {
+	if r.changed != nil {
+		close(r.changed)
+	}
+	r.changed = make(chan struct{})
+}
+
+// Admit binds a deliberate replay to the registered target generation. Expiry
+// rejects new work; withdrawal or replacement cancels already admitted work.
+func (r *Registry) Admit(ctx context.Context, resourceID string, binding ReplayBinding) (*admission.Lease, error) {
+	lease, err := admission.Admit(ctx, binding.ExpiresAt, nil)
+	if err != nil {
+		return nil, err
+	}
+	changes := func() <-chan struct{} { r.mu.Lock(); defer r.mu.Unlock(); return r.changed }
+	allowed := func() bool {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		current, ok := r.entries[resourceID]
+		return ok && current.ResourceGeneration == binding.ResourceGeneration && current.RouteGeneration == binding.RouteGeneration && current.TargetGeneration == binding.TargetGeneration && (current.Available == nil || current.Available())
+	}
+	if err := lease.Watch(changes, allowed); err != nil {
+		lease.Close()
+		return nil, err
+	}
+	return lease, nil
 }

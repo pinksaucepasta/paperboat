@@ -242,3 +242,51 @@ func TestReplayConcurrencyAndAuditBounds(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestAdmittedReplayOutlivesCredentialAndHonorsRevocation(t *testing.T) {
+	for _, revoke := range []bool{false, true} {
+		t.Run(map[bool]string{false: "complete", true: "revoked"}[revoke], func(t *testing.T) {
+			_, manager, id := replayTestSetup(t, ResourcePolicy{}, false)
+			request := replayTestRequest(id, time.Now())
+			request.ExpiresAt = time.Now().Add(50 * time.Millisecond)
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			entered := make(chan struct{})
+			var cut atomic.Bool
+			release := make(chan struct{})
+			done := make(chan error, 1)
+			go func() {
+				_, err := manager.Replay(ctx, request, func(work context.Context, _ string, _ string, _ http.Header, _ []byte) (int, http.Header, []byte, bool, error) {
+					close(entered)
+					select {
+					case <-work.Done():
+						cut.Store(true)
+						return 0, nil, nil, false, work.Err()
+					case <-release:
+						return 200, http.Header{"Content-Type": {"application/json"}}, []byte(`{}`), false, nil
+					}
+				})
+				done <- err
+			}()
+			<-entered
+			select {
+			case err := <-done:
+				t.Fatal("credential expiry ended admitted replay", err)
+			case <-time.After(time.Until(request.ExpiresAt) + 30*time.Millisecond):
+			}
+			if revoke {
+				cancel()
+			} else {
+				close(release)
+			}
+			select {
+			case err := <-done:
+				if revoke && (!cut.Load() || !errors.Is(err, ErrAmbiguousReplay)) || !revoke && err != nil {
+					t.Fatal("unexpected replay outcome", err)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("replay ignored completion or revocation")
+			}
+		})
+	}
+}

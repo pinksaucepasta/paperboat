@@ -739,7 +739,13 @@ func (s *Service) handleReplay(writer http.ResponseWriter, request *http.Request
 		if binding.ExpiresAt.Before(replayReq.ExpiresAt) {
 			replayReq.ExpiresAt = binding.ExpiresAt
 		}
-		result, err = s.manager.Replay(request.Context(), replayReq, binding.Forward)
+		lease, admitErr := s.registry.Admit(request.Context(), credential.ResourceID, binding)
+		if admitErr != nil {
+			writeError(requestContext(request), writer, http.StatusGone, "inspector_expired", nil)
+			return
+		}
+		defer lease.Close()
+		result, err = s.manager.Replay(lease.Context(), replayReq, binding.Forward)
 	}
 	envelope := map[string]any{
 		"schema": SchemaV1, "kind": "replay",
