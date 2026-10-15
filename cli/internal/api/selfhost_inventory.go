@@ -75,6 +75,9 @@ func (c *Client) SelfhostInstallationsPage(ctx context.Context, limit, offset in
 	if err := c.do(ctx, http.MethodGet, "/v1/selfhost/installations?"+query.Encode(), nil, &wire); err != nil {
 		return SelfhostInstallationPage{}, err
 	}
+	if err := ctx.Err(); err != nil {
+		return SelfhostInstallationPage{}, err
+	}
 	if wire.Installations == nil || wire.Pagination == nil || wire.Counts == nil || wire.Pagination.Limit == nil || wire.Pagination.Offset == nil || wire.Pagination.Total == nil || len(wire.Pagination.NextOffset) == 0 || wire.Counts.Ready == nil || wire.Counts.Enrolled == nil || wire.Counts.Pending == nil {
 		return SelfhostInstallationPage{}, invalidSelfhostInventory("self-hosted inventory is missing pagination or counts")
 	}
@@ -181,6 +184,9 @@ func (c *Client) selfhostInventory(ctx context.Context, capability string, filte
 	if err := c.do(ctx, http.MethodGet, poolPath, nil, &pool); err != nil {
 		return nil, SelfhostPool{}, err
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, SelfhostPool{}, err
+	}
 	validMode := capability == "relay" && (pool.Mode == "mixed" || pool.Mode == "self-hosted-only") || capability == "tunnel" && (pool.Mode == "managed-only" || pool.Mode == "self-hosted-only")
 	if len(pool.InstallationIDs) > 32 || !validMode || pool.Mode == "managed-only" && len(pool.InstallationIDs) != 0 || pool.Mode == "self-hosted-only" && len(pool.InstallationIDs) == 0 {
 		return nil, SelfhostPool{}, invalidSelfhostInventory("paperboat-server returned invalid self-hosted pool")
@@ -198,6 +204,9 @@ func (c *Client) selfhostInventory(ctx context.Context, capability string, filte
 			item.Selected = selected[item.InstallationID] && item.ScopeKind != "global"
 			items = append(items, item)
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, SelfhostPool{}, err
 	}
 	return items, pool, nil
 }

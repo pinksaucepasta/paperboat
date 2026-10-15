@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strconv"
+	"sync/atomic"
 	"testing"
 )
 
@@ -117,21 +118,35 @@ func TestSelfhostInventoryRejectsIncompleteRequiredPagination(t *testing.T) {
 }
 
 func TestSelfhostCanceledDiscoveryReturnsNoPartialPool(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	calls, pools := 0, 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/selfhost/installations" {
-			pools++
-			return
-		}
-		calls++
-		cancel()
-		fmt.Fprint(w, `{"data":{"installations":[],"pagination":{"limit":200,"offset":0,"total":1,"next_offset":0},"counts":{"ready":0,"enrolled":1,"pending":0}}}`)
-	}))
-	defer server.Close()
-	items, _, err := New(server.URL, config.Credential{AccessToken: "test"}, server.Client()).SelfhostInventory(ctx, "relay")
-	if !errors.Is(err, context.Canceled) || items != nil || calls != 1 || pools != 0 {
-		t.Fatalf("canceled discovery continued: items=%d requests=%d pools=%d err=%v", len(items), calls, pools, err)
+	for _, phase := range []string{"page", "pool"} {
+		t.Run(phase, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			var calls, pools atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/v1/selfhost/installations" {
+					pools.Add(1)
+					cancel()
+					fmt.Fprint(w, `{"data":{"mode":"invalid","installation_ids":[]}}`)
+					return
+				}
+				calls.Add(1)
+				if phase == "page" {
+					cancel()
+					fmt.Fprint(w, `{"data":{"installations":[],"pagination":{"limit":200,"offset":0,"total":1,"next_offset":0},"counts":{"ready":0,"enrolled":1,"pending":0}}}`)
+				} else {
+					fmt.Fprint(w, `{"data":{"installations":[],"pagination":{"limit":200,"offset":0,"total":0,"next_offset":null},"counts":{"ready":0,"enrolled":0,"pending":0}}}`)
+				}
+			}))
+			defer server.Close()
+			items, pool, err := New(server.URL, config.Credential{AccessToken: "test"}, server.Client()).SelfhostInventory(ctx, "relay")
+			wantPools := int32(0)
+			if phase == "pool" {
+				wantPools = 1
+			}
+			if !errors.Is(err, context.Canceled) || items != nil || calls.Load() != 1 || pools.Load() != wantPools || pool.Mode != "" || len(pool.InstallationIDs) != 0 {
+				t.Fatalf("canceled discovery continued: items=%d requests=%d pools=%d err=%v", len(items), calls.Load(), pools.Load(), err)
+			}
+		})
 	}
 }
