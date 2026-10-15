@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat-server/internal/admission"
@@ -85,62 +86,97 @@ func TestNetworkApplicationExpiryOnPostgres(t *testing.T) {
 	execute(`INSERT INTO paperboat.user_machine_access_sessions(credential_kind,id,user_machine_id,user_id,environment_id,cli_client_session_id,http_base_url,helper_terminal_session_id,helper_file_session_id,capabilities,operation_id,expires_at) VALUES('external_issuer',$1,$2,$3,$4,$5,'https://machine.example.test',$6,$7,ARRAY['terminal','files','private_access'],$8,$9)`, access, machine, account, environment, cli, "terminal_"+suffix, "files_"+suffix, "operation_access_"+suffix, now.Add(5*time.Second))
 	execute(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,state,ready,last_heartbeat_at,node_generation,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,allowed_account_ids) VALUES($1,'task23','v1',$2,'relay.example.test',443,444,'ready',true,$3,1,'hel','hel-a',ARRAY['relay'],ARRAY['derp_quic'],100,20,$3,$4,ARRAY[$5])`, "expiry_relay_"+suffix, "epoch_"+suffix, now, now.Add(time.Minute), account)
 	inspector, assignment := addExpiryResourceAdmissions(t, execute, account, cli, machine, environment, suffix, now)
+	live := []AdmittedScope{{ResourceKind: "machine_access", ResourceID: access}, {ResourceKind: "inspector", ResourceID: inspector}, {ResourceKind: "config_compare", ResourceID: assignment}}
+	execute(`INSERT INTO user_machine_access_sessions(credential_kind,id,user_machine_id,user_id,environment_id,cli_client_session_id,http_base_url,helper_terminal_session_id,helper_file_session_id,capabilities,operation_id,expires_at)
+ SELECT 'external_issuer',$1||'-historical-'||i,$2,$3,$4,$5,'https://machine.example.test',$6||i,$7||i,ARRAY['terminal','files','private_access'],$8||i,$9 FROM generate_series(1,200) i`, access, machine, account, environment, cli, "terminal_history_"+suffix, "files_history_"+suffix, "operation_history_"+suffix, now.Add(-time.Second))
+	execute(`INSERT INTO config_compare_admissions(id,account_id,environment_id,machine_id,installation_generation,assignment_id,assignment_version,config_path,conflict_revision,expected_remote_revision,native_cli_session_id,source_machine_id,workspace_id,expires_at,operation_id)
+ SELECT 'token_'||gen_random_uuid(),a.account_id,a.environment_id,a.machine_id,a.installation_generation,a.assignment_id,a.assignment_version,a.config_path,a.conflict_revision,a.expected_remote_revision,a.native_cli_session_id,a.source_machine_id,a.workspace_id,$2,a.operation_id||'-history-'||i
+ FROM config_compare_admissions a CROSS JOIN generate_series(1,200) i WHERE a.assignment_id=$1`, assignment, now.Add(-time.Second))
 	for _, remaining := range []time.Duration{-time.Second, 750 * time.Millisecond, 5 * time.Second} {
 		execute(`UPDATE paperboat.user_machine_access_sessions SET expires_at=$2 WHERE id=$1`, access, now.Add(remaining))
 		execute(`UPDATE inspector_credentials SET expires_at=$2 WHERE credential_id=$1`, inspector, now.Add(remaining))
 		execute(`UPDATE config_compare_admissions SET expires_at=$2 WHERE assignment_id=$1`, assignment, now.Add(remaining))
-		result, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "configuration_" + suffix, UserID: account, EndpointID: cli})
-		if err != nil {
-			t.Fatalf("application expiry %s: %v", remaining, err)
-		}
-		if len(result.RelayGrants) != 1 {
-			t.Fatal("registered relay missing from signed configuration")
-		}
-		relayParts := strings.Split(result.RelayGrants[0], ".")
-		if len(relayParts) != 3 {
-			t.Fatal("invalid signed relay grant")
-		}
-		relaySignature, relayErr := base64.RawURLEncoding.DecodeString(relayParts[2])
-		if relayErr != nil || !ed25519.Verify(public, []byte(relayParts[0]+"."+relayParts[1]), relaySignature) {
-			t.Fatal("relay signature invalid")
-		}
-		parts := strings.Split(result.Configuration, ".")
-		if len(parts) != 3 {
-			t.Fatal("invalid signed network document")
-		}
-		signature, err := base64.RawURLEncoding.DecodeString(parts[2])
-		if err != nil || !ed25519.Verify(public, []byte(parts[0]+"."+parts[1]), signature) {
-			t.Fatal("network signature invalid")
-		}
-		claims := networkClaims(t, result.Configuration)
-		if claims["exp"].(float64) != float64(now.Add(admission.DefaultLifetime).Unix()) {
-			t.Fatal("application scope shortened unrelated network binding")
-		}
-		assertNetworkScope(t, result.Configuration, "inspector", inspector, "inspector")
-		assertNetworkScope(t, result.Configuration, "config_compare", assignment, "config_compare")
-		applications := 0
-		for _, peer := range claims["peers"].([]any) {
-			for _, raw := range peer.(map[string]any)["scopes"].([]any) {
-				scope := raw.(map[string]any)
-				if scope["resource_kind"] != "machine_access" {
-					continue
-				}
-				applications++
-				if scope["expires_at"].(float64) != float64(now.Add(remaining).Unix()) {
-					t.Fatal("application authorization lifetime extended")
+		for _, endpoint := range []string{cli, machine} {
+			result, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "configuration_" + suffix, UserID: account, EndpointID: endpoint, AdmittedScopes: live})
+			if err != nil {
+				t.Fatalf("application expiry %s: %v", remaining, err)
+			}
+			if len(result.RelayGrants) != 1 {
+				t.Fatal("registered relay missing from signed configuration")
+			}
+			relayParts := strings.Split(result.RelayGrants[0], ".")
+			if len(relayParts) != 3 {
+				t.Fatal("invalid signed relay grant")
+			}
+			relaySignature, relayErr := base64.RawURLEncoding.DecodeString(relayParts[2])
+			if relayErr != nil || !ed25519.Verify(public, []byte(relayParts[0]+"."+relayParts[1]), relaySignature) {
+				t.Fatal("relay signature invalid")
+			}
+			parts := strings.Split(result.Configuration, ".")
+			if len(parts) != 3 {
+				t.Fatal("invalid signed network document")
+			}
+			signature, err := base64.RawURLEncoding.DecodeString(parts[2])
+			if err != nil || !ed25519.Verify(public, []byte(parts[0]+"."+parts[1]), signature) {
+				t.Fatal("network signature invalid")
+			}
+			claims := networkClaims(t, result.Configuration)
+			if claims["exp"].(float64) != float64(now.Add(admission.DefaultLifetime).Unix()) {
+				t.Fatal("application scope shortened unrelated network binding")
+			}
+			assertNetworkScope(t, result.Configuration, "inspector", inspector, "inspector")
+			assertNetworkScope(t, result.Configuration, "config_compare", assignment, "config_compare")
+			applications := 0
+			for _, peer := range claims["peers"].([]any) {
+				for _, raw := range peer.(map[string]any)["scopes"].([]any) {
+					scope := raw.(map[string]any)
+					if scope["resource_kind"] != "machine_access" {
+						continue
+					}
+					applications++
+					if scope["expires_at"].(float64) != float64(now.Add(remaining).Unix()) {
+						t.Fatal("application authorization lifetime extended")
+					}
 				}
 			}
-		}
-		if applications != 3 {
-			t.Fatalf("application scopes at wire expiry: %d", applications)
+			if applications != 3 {
+				t.Fatalf("application scopes at wire expiry: %d", applications)
+			}
 		}
 	}
+	execute(`UPDATE user_machine_access_sessions SET expires_at=$2 WHERE id=$1`, access, now.Add(-time.Second))
+	for _, endpoint := range []string{cli, machine} {
+		result, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "inactive_history_" + suffix, UserID: account, EndpointID: endpoint})
+		if err != nil {
+			t.Fatalf("inactive credential history exhausted bounded configuration: %v", err)
+		}
+		assertNoNetworkScope(t, result.Configuration, "machine_access", access, "terminal")
+	}
+	var generationBefore, generationAfter int64
+	if err := store.SQL().QueryRowContext(ctx, `SELECT config_generation FROM peer_network_identities WHERE endpoint_id=$1`, cli).Scan(&generationBefore); err != nil {
+		t.Fatal(err)
+	}
+	for name, refs := range map[string][]AdmittedScope{
+		"duplicate":        {live[0], live[0]},
+		"unsupported kind": {{ResourceKind: "account", ResourceID: account}},
+		"oversized id":     {{ResourceKind: "machine_access", ResourceID: strings.Repeat("a", 257)}},
+		"over budget":      make([]AdmittedScope, 129),
+	} {
+		_, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "invalid_refs_" + suffix, UserID: account, EndpointID: cli, AdmittedScopes: refs})
+		if !errors.Is(err, ErrInvalid) {
+			t.Fatalf("%s continuation input accepted: %v", name, err)
+		}
+	}
+	if err := store.SQL().QueryRowContext(ctx, `SELECT config_generation FROM peer_network_identities WHERE endpoint_id=$1`, cli).Scan(&generationAfter); err != nil || generationAfter != generationBefore {
+		t.Fatal("invalid continuation request changed network authority")
+	}
+
 	execute(`UPDATE inspector_credentials SET revoked_at=now() WHERE credential_id=$1`, inspector)
 	execute(`UPDATE control_config_assignments SET version=version+1 WHERE id=$1`, assignment)
 	// Explicit withdrawal reaches both the caller and the machine even after TTL.
 	execute(`UPDATE paperboat.user_machine_access_sessions SET state='revoked',revoked_at=now(),revocation_reason='test' WHERE id=$1`, access)
 	for _, endpoint := range []string{cli, machine} {
-		result, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "revoked_" + suffix, UserID: account, EndpointID: endpoint})
+		result, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "revoked_" + suffix, UserID: account, EndpointID: endpoint, AdmittedScopes: live})
 		if err != nil {
 			t.Fatal(err)
 		}

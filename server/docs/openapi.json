@@ -8115,6 +8115,34 @@
         "properties": {
           "operation_id": {
             "type": "string"
+          },
+          "admitted_scopes": {
+            "type": "array",
+            "maxItems": 128,
+            "description": "Only scopes referenced by currently live admitted operations on this exact authenticated endpoint. Keeps current revocation authority visible after original credential expiry without renewing that credential. Drop each reference when its work ends. Historical cached credentials must not be submitted.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "resource_kind",
+                "resource_id"
+              ],
+              "properties": {
+                "resource_kind": {
+                  "type": "string",
+                  "enum": [
+                    "machine_access",
+                    "inspector",
+                    "config_compare"
+                  ]
+                },
+                "resource_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              }
+            }
           }
         },
         "required": [

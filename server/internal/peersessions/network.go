@@ -32,7 +32,10 @@ type NetworkRegistrationResult struct {
 	KeyGeneration  int64  `json:"key_generation"`
 	VirtualAddress string `json:"virtual_address"`
 }
-type NetworkConfigRequest struct{ OperationID, UserID, EndpointID string }
+type NetworkConfigRequest struct {
+	OperationID, UserID, EndpointID string
+	AdmittedScopes                  []AdmittedScope
+}
 type NetworkConfigResult struct {
 	Configuration string   `json:"configuration"`
 	CandidateSet  string   `json:"candidate_set"`
@@ -225,6 +228,11 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 	if ctx == nil || !bounded(in.OperationID, 8, 128) || !bounded(in.UserID, 1, 256) || !bounded(in.EndpointID, 1, 128) {
 		return NetworkConfigResult{}, ErrInvalid
 	}
+	live, err := admittedScopeIDs(in.AdmittedScopes)
+	if err != nil {
+		return NetworkConfigResult{}, err
+	}
+
 	now := s.now().UTC()
 	tx, err := s.store.SQL().BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
@@ -251,6 +259,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 		JOIN paperboat.users actor ON actor.id=a.user_id AND actor.status='active'
 		JOIN paperboat.users owner ON owner.id=m.user_id AND owner.status='active'
 		WHERE a.state='active' AND a.revoked_at IS NULL
+ AND (a.expires_at>$3 OR a.id=ANY($4::text[]))
 		AND ((a.cli_client_session_id=$2 AND a.user_id=$1) OR (a.user_machine_id=$2 AND m.user_id=$1))
 		AND ((a.machine_service_port IS NOT NULL AND paperboat.machine_service_session_allowed(a.id))
 		 OR (a.terminal_role IN ('viewer','interactive') AND a.team_id IS NOT NULL AND m.state='online' AND m.online AND m.configured_capabilities @> ARRAY['terminal_host'] AND m.observed_capabilities @> ARRAY['terminal_host']
@@ -260,7 +269,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 		 OR (coalesce(a.terminal_role,'owner')='owner' AND a.team_id IS NOT NULL AND NOT ('private_access'=ANY(a.capabilities)) AND NOT EXISTS(
 		  SELECT 1 FROM unnest(a.capabilities) capability
 		  WHERE NOT paperboat.team_machine_capability_allowed(a.user_id,a.team_id,a.user_machine_id,capability))))
-		ORDER BY a.id LIMIT 129`, in.UserID, in.EndpointID)
+		ORDER BY a.id LIMIT 129`, in.UserID, in.EndpointID, now, live["machine_access"])
 	if err != nil {
 		return NetworkConfigResult{}, err
 	}
@@ -317,7 +326,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 	if len(grants) > 128 {
 		return NetworkConfigResult{}, ErrResourceLimit
 	}
-	inspectorRows, err := tx.QueryContext(ctx, `SELECT credential_id,native_cli_session_id,native_machine_id,account_id,owner_account_id,expires_at FROM paperboat.inspector_native_admissions WHERE (native_cli_session_id=$1 AND account_id=$2) OR (native_machine_id=$1 AND owner_account_id=$2) ORDER BY credential_id LIMIT 129`, in.EndpointID, in.UserID)
+	inspectorRows, err := tx.QueryContext(ctx, `SELECT credential_id,native_cli_session_id,native_machine_id,account_id,owner_account_id,expires_at FROM paperboat.inspector_native_admissions WHERE ((native_cli_session_id=$1 AND account_id=$2) OR (native_machine_id=$1 AND owner_account_id=$2)) AND (expires_at>$3 OR credential_id=ANY($4::text[])) ORDER BY credential_id LIMIT 129`, in.EndpointID, in.UserID, now, live["inspector"])
 	if err != nil {
 		return NetworkConfigResult{}, err
 	}
@@ -340,7 +349,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 		return NetworkConfigResult{}, ErrResourceLimit
 	}
 
-	compareRows, err := tx.QueryContext(ctx, `SELECT a.assignment_id,a.native_cli_session_id,a.machine_id,a.account_id,a.account_id,a.expires_at
+	compareRows, err := tx.QueryContext(ctx, `SELECT DISTINCT ON (a.assignment_id,a.native_cli_session_id,a.machine_id) a.assignment_id,a.native_cli_session_id,a.machine_id,a.account_id,a.account_id,a.expires_at
  FROM config_compare_admissions a
  JOIN cli_client_sessions c ON c.id=a.native_cli_session_id AND c.user_id=a.account_id AND c.state='active' AND c.revoked_at IS NULL
  JOIN users u ON u.id=a.account_id AND u.status='active'
@@ -348,8 +357,9 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
  JOIN control_config_assignments assignment ON assignment.id=a.assignment_id AND assignment.version=a.assignment_version AND assignment.machine_id=a.machine_id AND assignment.consent_state='accepted'
  JOIN control_config_sync_statuses status ON status.environment_id=a.environment_id AND status.assignment_id=a.assignment_id AND status.machine_id=a.machine_id AND status.installation_generation=a.installation_generation AND status.remote_revision=a.expected_remote_revision
  WHERE ((a.native_cli_session_id=$2 AND a.account_id=$1) OR (a.machine_id=$2 AND a.account_id=$1))
+ AND (a.expires_at>$3 OR a.assignment_id=ANY($4::text[]))
  AND ((a.workspace_id='personal' AND assignment.adopted_team_id IS NULL) OR (assignment.adopted_team_id=a.workspace_id AND EXISTS(SELECT 1 FROM teams t JOIN team_members member USING(team_id) WHERE t.team_id=a.workspace_id AND t.deleted_at IS NULL AND NOT t.suspended AND member.account_id=a.account_id AND member.active)))
- AND EXISTS(SELECT 1 FROM jsonb_array_elements(status.conflicts) conflict WHERE conflict->>'path'=a.config_path AND conflict->>'revision'=a.conflict_revision)`, in.UserID, in.EndpointID)
+ AND EXISTS(SELECT 1 FROM jsonb_array_elements(status.conflicts) conflict WHERE conflict->>'path'=a.config_path AND conflict->>'revision'=a.conflict_revision) ORDER BY a.assignment_id,a.native_cli_session_id,a.machine_id,a.expires_at DESC LIMIT 129`, in.UserID, in.EndpointID, now, live["config_compare"])
 	if err != nil {
 		return NetworkConfigResult{}, err
 	}
