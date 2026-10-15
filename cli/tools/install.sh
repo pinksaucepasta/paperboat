@@ -89,7 +89,6 @@ if [ "$pair" = true ]; then
   token=
 fi
 asset="pb-${os}-${arch}"
-if [ "$os" = darwin ]; then asset="$asset.pkg"; fi
 case "$os-$arch" in
   linux-amd64)
     product_version='@PAPERBOAT_PRODUCT_LINUX_AMD64_VERSION@'
@@ -110,7 +109,8 @@ case "$os-$arch" in
 esac
 case "$product_version:$product_url:$product_sha:$product_length" in *'@PAPERBOAT_PRODUCT_'*) echo 'pb installer: this platform has no published product record' >&2; exit 1 ;; esac
 [ "$requested_version" = latest ] || [ "$requested_version" = "$product_version" ] || { echo "pb installer: version $requested_version is unavailable for $os-$arch; available version is $product_version" >&2; exit 1; }
-expected_url="https://github.com/pinksaucepasta/paperboat-cli/releases/download/$product_version/$asset"
+repository='@PAPERBOAT_PRODUCT_REPOSITORY@'
+expected_url="https://github.com/$repository/releases/download/$product_version/$asset"
 [ "$product_url" = "$expected_url" ] || { echo 'pb installer: published product URL is not the canonical immutable asset URL' >&2; exit 1; }
 [ "${#product_sha}" -eq 64 ] || { echo 'pb installer: published product digest is invalid' >&2; exit 1; }
 case "$product_sha" in *[!0123456789abcdef]*) echo 'pb installer: published product digest is invalid' >&2; exit 1 ;; esac
@@ -127,20 +127,11 @@ else echo "pb installer: shasum, sha256sum, or openssl is required" >&2; exit 1;
 
 if [ "$os" = linux ]; then
   case "$install_dir" in /*) ;; *) echo "pb installer: --install-dir must be absolute" >&2; exit 2 ;; esac
-  chmod 0755 "$product_file"
-  installer_pb=$product_file
 else
   [ "$install_dir_requested" = false ] && [ -z "${PAPERBOAT_INSTALL_DIR:-}" ] || { echo "pb installer: --install-dir is not supported on macOS" >&2; exit 2; }
-  command -v pkgutil >/dev/null 2>&1 && command -v cpio >/dev/null 2>&1 || { echo "pb installer: pkgutil and cpio are required" >&2; exit 1; }
-  expanded="$temporary/expanded"; payload="$temporary/payload"
-  pkgutil --expand "$product_file" "$expanded"
-  mkdir -p "$payload"
-  (cd "$payload" && gzip -dc "$expanded/Payload" | cpio -idm >/dev/null 2>&1)
-  payload_pb="$payload/Library/PrivilegedHelperTools/Paperboat/bin/pb"
-  [ -f "$payload_pb" ] && [ ! -L "$payload_pb" ] || { echo "pb installer: macOS package is missing its canonical executable" >&2; exit 1; }
-  chmod 0755 "$payload_pb"
-  installer_pb=$payload_pb
 fi
+chmod 0755 "$product_file"
+installer_pb=$product_file
 
 if [ "$pair" = true ]; then
   unset PAPERBOAT_ENROLLMENT_TOKEN || true

@@ -36,7 +36,7 @@ func releaseRepository() string {
 	if value := strings.TrimSpace(os.Getenv("PAPERBOAT_GITHUB_REPOSITORY")); value != "" {
 		return value
 	}
-	return "pinksaucepasta/paperboat-cli"
+	return "pinksaucepasta/paperboat"
 }
 
 func releaseAssetName(platform, architecture string) string {
@@ -46,7 +46,7 @@ func releaseAssetName(platform, architecture string) string {
 func releaseAssetFormat(platform string) string {
 	switch platform {
 	case "darwin":
-		return "pkg"
+		return "macho"
 	case "linux":
 		return "elf"
 	case "windows":
@@ -356,30 +356,7 @@ func publishWithPolicy(repo, version, artifacts string, qualificationEvidencePat
 		info.Custom, info.Path = &raw, name
 		targets.Signed.Targets[name] = info
 	}
-	if err := validateTargetsForPublication(targets, createdAt); err != nil {
-		return fmt.Errorf("release publication preflight failed: %w", err)
-	}
-	targets.Signed.Version++
-	targets.Signed.Expires = time.Now().UTC().Add(90 * 24 * time.Hour)
-	targets.ClearSignatures()
-	if err := sign(targets); err != nil {
-		return err
-	}
-	snapshot.Signed.Version++
-	snapshot.Signed.Expires = time.Now().UTC().Add(7 * 24 * time.Hour)
-	snapshot.Signed.Meta["targets.json"] = metadata.MetaFile(targets.Signed.Version)
-	snapshot.ClearSignatures()
-	if err := sign(snapshot); err != nil {
-		return err
-	}
-	timestamp.Signed.Version++
-	timestamp.Signed.Expires = time.Now().UTC().Add(24 * time.Hour)
-	timestamp.Signed.Meta["snapshot.json"] = metadata.MetaFile(snapshot.Signed.Version)
-	timestamp.ClearSignatures()
-	if err := sign(timestamp); err != nil {
-		return err
-	}
-	return writeSet(repo, root, targets, snapshot, timestamp)
+	return signTargetsSet(repo, root, targets, snapshot, timestamp)
 }
 
 func loadPublicationPolicy(artifacts, version string, rolloutRevision uint64, severity, manifestPath, planPath string) (releaseplan.Manifest, releaseplan.Plan, error) {
@@ -674,13 +651,12 @@ type releaseTargetPlatform struct {
 }
 
 func supportedReleaseTargets() []releaseTargetPlatform {
-	return []releaseTargetPlatform{
-		{platform: "darwin", architecture: "arm64"},
-		{platform: "linux", architecture: "amd64"},
-		{platform: "linux", architecture: "arm64"},
-		{platform: "windows", architecture: "amd64"},
-		{platform: "windows", architecture: "arm64"},
+	specs := releaseplan.ArtifactSpecs()
+	targets := make([]releaseTargetPlatform, 0, len(specs))
+	for _, spec := range specs {
+		targets = append(targets, releaseTargetPlatform{platform: spec.Platform, architecture: spec.Architecture})
 	}
+	return targets
 }
 
 func applyDeploymentMutation(plan *releasepolicy.Plan, operation string, revision uint64, percentage uint8) error {

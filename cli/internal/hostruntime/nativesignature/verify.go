@@ -8,8 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
-	"path/filepath"
-	"strings"
 
 	"github.com/pinksaucepasta/paperboat/internal/processlaunch"
 )
@@ -64,29 +62,13 @@ func (v Verifier) Verify(ctx context.Context, path, platform, architecture strin
 }
 
 func (v Verifier) verifyDarwin(ctx context.Context, path string) error {
-	if strings.EqualFold(filepath.Ext(path), ".pkg") {
-		output, err := v.Runner.Run(ctx, "/usr/sbin/pkgutil", "--check-signature", path)
-		if err != nil && !isUnsignedPackage(output) {
-			return fmt.Errorf("%w: package signature", ErrInvalid)
-		}
-		// TUF authenticates unsigned packages. When a publisher signature is
-		// present, pkgutil must validate it. Gatekeeper admission additionally
-		// requires optional publisher/notarization credentials, so it is not an
-		// updater release-identity check.
-		return nil
-	}
 	// Validate the embedded code signature, including the ad-hoc signature
-	// produced by the package builder. TUF establishes publisher identity;
+	// produced by the release runner. TUF establishes publisher identity;
 	// Gatekeeper admission is not required by the release trust policy.
 	if _, err := v.Runner.Run(ctx, "codesign", "--verify", "--deep", "--strict", "--verbose=2", path); err != nil {
 		return fmt.Errorf("%w: codesign", ErrInvalid)
 	}
 	return nil
-}
-
-func isUnsignedPackage(output []byte) bool {
-	value := strings.ToLower(string(output))
-	return strings.Contains(value, "no signature") || strings.Contains(value, "not signed")
 }
 
 func validArchitecture(architecture string) bool {

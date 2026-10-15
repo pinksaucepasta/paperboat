@@ -75,37 +75,6 @@ func TestWorkerUpdateSeedsSignedActiveStateBeforeFirstUpdate(t *testing.T) {
 
 }
 
-func TestRuntimeStagingPatternPreservesDarwinPackageSuffix(t *testing.T) {
-	if got := runtimeStagingPattern("darwin"); got != ".paperboat-runtime-*.pkg" {
-		t.Fatalf("darwin staging pattern = %q", got)
-	}
-	if got := runtimeStagingPattern("linux"); got != ".paperboat-runtime-*" {
-		t.Fatalf("linux staging pattern = %q", got)
-	}
-}
-
-func TestDarwinInstalledExecutableIsRunnableByWorker(t *testing.T) {
-	root := t.TempDir()
-	source := filepath.Join(root, "installed-pb")
-	destination := filepath.Join(root, "releases", "pb.staged")
-	if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(source, []byte("signed executable"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := stageInstalledDarwinExecutable(source, destination, os.Geteuid(), os.Getegid()); err != nil {
-		t.Fatal(err)
-	}
-	info, err := os.Stat(destination)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Mode().Perm()&0o111 == 0 {
-		t.Fatalf("staged Darwin executable mode=%#o, want executable", info.Mode().Perm())
-	}
-}
-
 func retainedFiles(paths fixturePaths) (int, error) {
 	count := 0
 	for _, directory := range []string{filepath.Dir(paths.current), filepath.Dir(paths.rollback), filepath.Dir(paths.staged)} {
@@ -233,7 +202,7 @@ type fixture struct {
 func newFixture(t *testing.T) fixture {
 	t.Helper()
 	root := t.TempDir()
-	for _, directory := range []string{"current", "rollback", "staged", "state", "installed"} {
+	for _, directory := range []string{"current", "rollback", "staged", "state"} {
 		if err := os.Mkdir(filepath.Join(root, directory), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -248,10 +217,6 @@ func newFixture(t *testing.T) fixture {
 	}
 	paths := fixturePaths{root: root, current: filepath.Join(root, "current", "pb"), rollback: filepath.Join(root, "rollback", "pb"), staged: filepath.Join(root, "staged", "pb"), journal: filepath.Join(root, "state", "journal.json")}
 	if err := os.WriteFile(paths.current, body, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	installed := filepath.Join(root, "installed", "pb")
-	if err := os.WriteFile(installed, body, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	active := release("2026.08.18.1", body)
@@ -305,7 +270,7 @@ func newFixture(t *testing.T) fixture {
 		committed = &selected
 		return a.Source, nil
 	}
-	manager, err = New(Config{ApplyPrepared: apply, StatePath: paths.journal, Binary: paths.current, BinaryStaged: paths.staged, Active: active, OwnerUID: os.Geteuid(), OwnerGID: os.Getegid(), Fetcher: fetcher, Hostd: hostd, Health: health, Gate: fakeActivationGate{}, NativeVerifier: nativeVerifierFunc(func(context.Context, string, string, string) error { return nil }), ExtractPackage: func(context.Context, string, string) (string, error) { return installed, nil }, MonitorWindow: time.Millisecond, HealthInterval: time.Millisecond})
+	manager, err = New(Config{ApplyPrepared: apply, StatePath: paths.journal, Binary: paths.current, BinaryStaged: paths.staged, Active: active, OwnerUID: os.Geteuid(), OwnerGID: os.Getegid(), Fetcher: fetcher, Hostd: hostd, Health: health, Gate: fakeActivationGate{}, NativeVerifier: nativeVerifierFunc(func(context.Context, string, string, string) error { return nil }), MonitorWindow: time.Millisecond, HealthInterval: time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}

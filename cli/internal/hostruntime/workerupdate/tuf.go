@@ -2,8 +2,6 @@ package workerupdate
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"io"
 	"net/http"
@@ -174,54 +172,7 @@ func (s TUFSource) Active(ctx context.Context, version string) (Release, error) 
 		}
 		return Release{}, ErrInvalidRelease
 	}
-	if release.Platform == "darwin" {
-		return s.localDarwinActive(ctx, index, release, now)
-	}
 	return release, nil
-}
-
-func (s TUFSource) localDarwinActive(ctx context.Context, index releaseindex.Index, release Release, now time.Time) (Release, error) {
-	if selected, ok := releaseFromIndex(index); !ok || !sameReleaseTargets(selected, release) {
-		return Release{}, ErrInvalidRelease
-	}
-	verifiedPath, err := bootstrap.FetchVerifiedReleaseComponent(ctx, s.RepositoryURL, filepath.Join(s.StateRoot, "targets"), index, "pb", s.HTTP, now)
-	if err != nil {
-		return Release{}, err
-	}
-	stream, err := os.Open(verifiedPath)
-	if err != nil {
-		return Release{}, err
-	}
-	defer stream.Close()
-	workRoot, err := os.MkdirTemp(s.StateRoot, ".paperboat-active-package-")
-	if err != nil {
-		return Release{}, err
-	}
-	defer os.RemoveAll(workRoot)
-	if err := os.Chmod(workRoot, 0o700); err != nil {
-		return Release{}, err
-	}
-	packagePath := filepath.Join(workRoot, "active.pkg")
-	file, err := os.OpenFile(packagePath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-	if err != nil {
-		return Release{}, err
-	}
-	hash := sha256.New()
-	written, copyErr := io.Copy(io.MultiWriter(file, hash), io.LimitReader(stream, release.Length+1))
-	syncErr := file.Sync()
-	closeErr := file.Close()
-	if copyErr != nil || syncErr != nil || closeErr != nil || written != release.Length || hex.EncodeToString(hash.Sum(nil)) != release.SHA256 {
-		return Release{}, ErrInvalidRelease
-	}
-	extractionRoot := filepath.Join(workRoot, "extraction")
-	if err := os.Mkdir(extractionRoot, 0o700); err != nil {
-		return Release{}, err
-	}
-	payload, err := ExtractDarwinPackage(ctx, packagePath, extractionRoot)
-	if err != nil {
-		return Release{}, ErrInvalidRelease
-	}
-	return localReleaseIdentity(release, payload)
 }
 
 func activeVersionPermitted(index releaseindex.Index, version string) bool {

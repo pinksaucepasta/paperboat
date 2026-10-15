@@ -125,9 +125,6 @@ func TestNativeSourceCommitKeepsOriginalApprovalUntilGateAndFinalizerComplete(t 
 			}
 			f.fetcher.body = append(append([]byte(nil), originalImage...), []byte("distinct native candidate")...)
 			f.candidate = release(f.candidate.Version, f.fetcher.body)
-			if e = os.WriteFile(filepath.Join(f.paths.root, "installed", "pb"), f.fetcher.body, 0700); e != nil {
-				t.Fatal(e)
-			}
 			f.manager.config.RecoveryExecutable = retained
 			original := f.manager.config
 			failure := errors.New("post-commit completion pending")

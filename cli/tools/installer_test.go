@@ -32,8 +32,8 @@ func TestShellInstallerVerifiesBeforeRunningPublicInstall(t *testing.T) {
 	body := installerSource(t, "install.sh")
 	for _, required := range []string{
 		"@paperboat_product_linux_amd64_sha256@", "--proto-redir '=https'", "releases/download", "product length mismatch",
-		"product digest mismatch", `"$installer_pb" install --install-dir "$install_dir" --json`, "data.executable", "pkgutil --expand",
-		`$payload/library/privilegedhelpertools/paperboat/bin/pb`, "installer_pb=$payload_pb", "--pair requires --enrollment-token", "umask 077", "--enrollment-token-file", "resume_executable", `"$target" pair`, `"$target" setup`,
+		"product digest mismatch", `"$installer_pb" install --install-dir "$install_dir" --json`, "data.executable",
+		"--pair requires --enrollment-token", "umask 077", "--enrollment-token-file", "resume_executable", `"$target" pair`, `"$target" setup`,
 	} {
 		if !strings.Contains(body, required) {
 			t.Fatalf("shell installer is missing %q", required)

@@ -241,7 +241,7 @@ func validPlatform(platform, arch, format string) bool {
 	if arch != "amd64" && arch != "arm64" {
 		return false
 	}
-	return platform == "linux" && format == "elf" || platform == "darwin" && format == "pkg" || platform == "windows" && format == "pe"
+	return platform == "linux" && format == "elf" || platform == "darwin" && format == "macho" || platform == "windows" && format == "pe"
 }
 
 // AssetName is the only public release asset naming rule. A platform has one
@@ -250,9 +250,6 @@ func AssetName(platform, architecture string) string {
 	name := "pb-" + platform + "-" + architecture
 	if platform == "windows" {
 		name += ".exe"
-	}
-	if platform == "darwin" {
-		name += ".pkg"
 	}
 	return name
 }

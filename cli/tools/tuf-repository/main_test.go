@@ -31,8 +31,6 @@ func TestCIKeyEnvironmentAndSupportedTargets(t *testing.T) {
 		{platform: "darwin", architecture: "arm64"},
 		{platform: "linux", architecture: "amd64"},
 		{platform: "linux", architecture: "arm64"},
-		{platform: "windows", architecture: "amd64"},
-		{platform: "windows", architecture: "arm64"},
 	}
 	got := supportedReleaseTargets()
 	if len(got) != len(want) {
@@ -62,19 +60,7 @@ func TestCISigningPublishesCompleteSupportedRelease(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	evidencePaths := make(map[string]string, 2)
-	for _, architecture := range []string{"amd64", "arm64"} {
-		evidence, err := json.Marshal(windowsNativeQualification{Schema: windowsNativeQualificationSchema, ReleaseVersion: version, Platform: "windows", Architecture: architecture, Status: "passed", NativeTested: true, WindowsBuild: "26100", Runner: "windows-" + architecture + "-test"})
-		if err != nil {
-			t.Fatal(err)
-		}
-		evidencePath := filepath.Join(artifacts, windowsNativeQualificationTarget(architecture))
-		if err := os.WriteFile(evidencePath, evidence, 0o600); err != nil {
-			t.Fatal(err)
-		}
-		evidencePaths[architecture] = evidencePath
-	}
-	if err := publish(repository, version, artifacts, evidencePaths, 1, "routine", false); err != nil {
+	if err := publish(repository, version, artifacts, nil, 1, "routine", false); err != nil {
 		t.Fatal(err)
 	}
 	if err := verifyPublished(repository); err != nil {
@@ -87,14 +73,11 @@ func TestCISigningPublishesCompleteSupportedRelease(t *testing.T) {
 	if _, exists := targets.Signed.Targets["pb-darwin-amd64.pkg"]; exists {
 		t.Fatal("unsupported macOS amd64 target was published")
 	}
-	if _, exists := targets.Signed.Targets["pb-darwin-arm64.pkg"]; !exists {
+	if _, exists := targets.Signed.Targets["pb-darwin-arm64"]; !exists {
 		t.Fatal("macOS arm64 target was not published")
 	}
-	wantNames := map[string]bool{}
+	wantNames := map[string]bool{"pb-darwin-arm64": false, "pb-linux-amd64": false, "pb-linux-arm64": false}
 	var signedManifestDigest, signedPlanDigest string
-	for _, target := range supportedReleaseTargets() {
-		wantNames[releaseAssetName(target.platform, target.architecture)] = false
-	}
 	if len(targets.Signed.Targets) != len(wantNames) {
 		t.Fatalf("published target count=%d, want %d", len(targets.Signed.Targets), len(wantNames))
 	}
@@ -225,16 +208,7 @@ func newPublishedTestRepository(t *testing.T, version string) string {
 			t.Fatal(err)
 		}
 	}
-	evidencePaths := make(map[string]string, 2)
-	for _, architecture := range []string{"amd64", "arm64"} {
-		evidence := []byte(`{"schema":"paperboat.windows-native-qualification/v1","release_version":"` + version + `","platform":"windows","architecture":"` + architecture + `","status":"passed","native_tested":true,"windows_build":"26100","runner":"refresh-test-` + architecture + `"}`)
-		evidencePath := filepath.Join(artifacts, windowsNativeQualificationTarget(architecture))
-		if err := os.WriteFile(evidencePath, evidence, 0o600); err != nil {
-			t.Fatal(err)
-		}
-		evidencePaths[architecture] = evidencePath
-	}
-	if err := publish(repository, version, artifacts, evidencePaths, 1, "routine", false); err != nil {
+	if err := publish(repository, version, artifacts, nil, 1, "routine", false); err != nil {
 		t.Fatal(err)
 	}
 	return repository
@@ -283,19 +257,7 @@ func TestVerifyPublishedRejectsTamperedSignedDeploymentPolicy(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	evidencePaths := make(map[string]string, 2)
-	for _, architecture := range []string{"amd64", "arm64"} {
-		evidence, err := json.Marshal(windowsNativeQualification{Schema: windowsNativeQualificationSchema, ReleaseVersion: version, Platform: "windows", Architecture: architecture, Status: "passed", NativeTested: true, WindowsBuild: "26100", Runner: "tamper-test-" + architecture})
-		if err != nil {
-			t.Fatal(err)
-		}
-		path := filepath.Join(artifacts, windowsNativeQualificationTarget(architecture))
-		if err := os.WriteFile(path, evidence, 0o600); err != nil {
-			t.Fatal(err)
-		}
-		evidencePaths[architecture] = path
-	}
-	if err := publish(repository, version, artifacts, evidencePaths, 3, "routine", false); err != nil {
+	if err := publish(repository, version, artifacts, nil, 3, "routine", false); err != nil {
 		t.Fatal(err)
 	}
 	targetsPath := filepath.Join(repository, "metadata", "targets.json")
@@ -577,17 +539,7 @@ func TestQualifiedSubsetPublicationRetainsOtherPlatformTargets(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(dir, name), []byte(version+"-"+name), 0600); err != nil {
 				t.Fatal(err)
 			}
-			if target.platform == "windows" {
-				body, err := json.Marshal(windowsNativeQualification{Schema: windowsNativeQualificationSchema, ReleaseVersion: version, Platform: "windows", Architecture: target.architecture, Status: "passed", NativeTested: true, WindowsBuild: "26100", Runner: "unit-test"})
-				if err != nil {
-					t.Fatal(err)
-				}
-				path := filepath.Join(t.TempDir(), windowsNativeQualificationTarget(target.architecture))
-				if err = os.WriteFile(path, body, 0600); err != nil {
-					t.Fatal(err)
-				}
-				evidence[target.architecture] = path
-			}
+
 		}
 		return dir, evidence
 	}
@@ -601,21 +553,28 @@ func TestQualifiedSubsetPublicationRetainsOtherPlatformTargets(t *testing.T) {
 		t.Fatal(err)
 	}
 	retained := map[string][]byte{}
-	for _, name := range []string{"pb-linux-arm64", "pb-windows-arm64.exe"} {
+	for _, name := range []string{"pb-linux-arm64"} {
 		retained[name], err = json.Marshal(before.Signed.Targets[name])
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
-	selected := []releaseTargetPlatform{{"darwin", "arm64"}, {"linux", "amd64"}, {"windows", "amd64"}}
+	selected := []releaseTargetPlatform{{"darwin", "arm64"}, {"linux", "amd64"}}
 	next := "2026.09.30.1"
 	dir, evidence = makeAssets(next, selected)
+	unexpected := filepath.Join(dir, "unqualified-helper")
+	if err = os.WriteFile(unexpected, []byte("unsupported product"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	if err = publish(repository, next, dir, nil, 2, "routine", false); err == nil {
-		t.Fatal("selected Windows target published without native evidence")
+		t.Fatal("unqualified extra product was published")
 	}
 	_, unchanged, _, _, err := loadSet(repository)
 	if err != nil || unchanged.Signed.Version != before.Signed.Version {
 		t.Fatal("failed qualification changed signed repository")
+	}
+	if err = os.Remove(unexpected); err != nil {
+		t.Fatal(err)
 	}
 	if err = publish(repository, next, dir, evidence, 2, "routine", false); err != nil {
 		t.Fatal(err)
@@ -652,7 +611,7 @@ func TestQualifiedSubsetPublicationRetainsOtherPlatformTargets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tampered.Signed.Targets["pb-windows-arm64.exe"].Length++
+	tampered.Signed.Targets["pb-linux-arm64"].Length++
 	if err = tampered.ToFile(filepath.Join(repository, "metadata", "targets.json"), true); err != nil {
 		t.Fatal(err)
 	}

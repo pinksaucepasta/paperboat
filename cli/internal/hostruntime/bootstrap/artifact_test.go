@@ -81,11 +81,11 @@ func newTestTUFRepositoryForMetadataVersion(t *testing.T, body []byte, version s
 	digestBytes := sha256.Sum256(body)
 	format := "elf"
 	if platform == "darwin" {
-		format = "pkg"
+		format = "macho"
 	} else if platform == "windows" {
 		format = "pe"
 	}
-	repository := "pinksaucepasta/paperboat-cli"
+	repository := "example/paperboat"
 	manifest := strings.Repeat("b", 64)
 	plan, err := releasepolicy.Default(version, manifest, 1, "routine", "release-"+version, []releasepolicy.PlatformTarget{{Platform: platform, Architecture: architecture}})
 	if err != nil {
@@ -508,7 +508,7 @@ func newTestReleaseComponentRepositoryWithoutTargets(t *testing.T) testTUFReposi
 
 func testLinuxReleaseIndex() releaseindex.Index {
 	name := releaseindex.AssetName("linux", "amd64")
-	targets := []releaseindex.Target{{Component: "pb", TargetPath: name, AssetName: name, Repository: "pinksaucepasta/paperboat-cli", DownloadURL: "https://github.com/pinksaucepasta/paperboat-cli/releases/download/2026.08.22.22/" + name, SHA256: fmt.Sprintf("%064x", 1), Length: 1, Platform: "linux", Architecture: "amd64", BinaryFormat: "elf"}}
+	targets := []releaseindex.Target{{Component: "pb", TargetPath: name, AssetName: name, Repository: "example/paperboat", DownloadURL: "https://github.com/example/paperboat/releases/download/2026.08.22.22/" + name, SHA256: fmt.Sprintf("%064x", 1), Length: 1, Platform: "linux", Architecture: "amd64", BinaryFormat: "elf"}}
 	manifest := strings.Repeat("b", 64)
 	plan, err := releasepolicy.Default("2026.08.22.22", manifest, 1, "routine", "release-2026.08.22.22", []releasepolicy.PlatformTarget{{Platform: "linux", Architecture: "amd64"}})
 	if err != nil {

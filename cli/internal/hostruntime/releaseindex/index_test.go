@@ -38,6 +38,46 @@ func TestDecodeAndEligibility(t *testing.T) {
 	}
 }
 
+func TestSignedDarwinTargetIsTheDirectMachOProduct(t *testing.T) {
+	i := fixture()
+	i.Platform, i.Architecture, i.BinaryFormat = "darwin", "arm64", "macho"
+	plan, err := releasepolicy.Default(i.Version, i.ManifestSHA256, 1, "routine", "seed",
+		[]releasepolicy.PlatformTarget{{Platform: "darwin", Architecture: "arm64"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	i.DeploymentPlan = &plan
+	i.DeploymentPlanSHA256, _ = plan.PlanSHA256()
+	target := &i.Targets[0]
+	target.Platform, target.Architecture, target.BinaryFormat = "darwin", "arm64", "macho"
+	target.TargetPath, target.AssetName = "pb-darwin-arm64", "pb-darwin-arm64"
+	target.DownloadURL = "https://github.com/example/paperboat/releases/download/" + i.Version + "/pb-darwin-arm64"
+	target.Repository = "example/paperboat"
+	for _, invalid := range []bool{false, true} {
+		candidate := i
+		if invalid {
+			candidate.BinaryFormat = "pkg"
+			candidate.Targets = append([]Target(nil), i.Targets...)
+			candidate.Targets[0].BinaryFormat = "pkg"
+			candidate.Targets[0].AssetName += ".pkg"
+			candidate.Targets[0].TargetPath += ".pkg"
+			candidate.Targets[0].DownloadURL += ".pkg"
+		}
+		body, err := json.Marshal(candidate)
+		if err != nil {
+			t.Fatal(err)
+		}
+		decoded, err := Decode(strings.NewReader(string(body)), time.Now().UTC())
+		if invalid {
+			if !errors.Is(err, ErrInvalid) {
+				t.Fatal("obsolete package metadata was accepted")
+			}
+		} else if err != nil || !decoded.AvailableForNewInstall(time.Now().UTC()) {
+			t.Fatalf("direct Mach-O new install rejected: %v", err)
+		}
+	}
+}
+
 func TestNewInstallRejectsSignedGlobalStops(t *testing.T) {
 	now := time.Now().UTC()
 	base := fixture()

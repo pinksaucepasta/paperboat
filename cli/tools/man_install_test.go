@@ -32,7 +32,7 @@ func TestLinuxInstallerRunsPinnedProductAndRejectsWrongDigest(t *testing.T) {
 			payload := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$PB_TEST_LOG\"\nif [ \"$1\" = install ] && [ \"$2\" = --install-dir ] && [ \"$4\" = --json ]; then mkdir -p \"$3\"; cp \"$0\" \"$3/pb\"; chmod 0755 \"$3/pb\"; printf '{\"ok\":true,\"data\":{\"executable\":\"%s\"}}\\n' \"$3/pb\"; fi\n"
 			write(filepath.Join(dir, "binary"), payload)
 			version := "2026.09.19.1"
-			url := "https://github.com/pinksaucepasta/paperboat-cli/releases/download/" + version + "/pb-linux-amd64"
+			url := "https://github.com/example/paperboat/releases/download/" + version + "/pb-linux-amd64"
 			digest := fmt.Sprintf("%x", sha256.Sum256([]byte(payload)))
 			if !valid {
 				digest = strings.Repeat("0", 64)
@@ -42,6 +42,7 @@ func TestLinuxInstallerRunsPinnedProductAndRejectsWrongDigest(t *testing.T) {
 				t.Fatal(err)
 			}
 			rendered := strings.ReplaceAll(string(body), "@PAPERBOAT_PRODUCT_LINUX_AMD64_VERSION@", version)
+			rendered = strings.ReplaceAll(rendered, "@PAPERBOAT_PRODUCT_REPOSITORY@", "example/paperboat")
 			rendered = strings.ReplaceAll(rendered, "@PAPERBOAT_PRODUCT_LINUX_AMD64_URL@", url)
 			rendered = strings.ReplaceAll(rendered, "@PAPERBOAT_PRODUCT_LINUX_AMD64_SHA256@", digest)
 			rendered = strings.ReplaceAll(rendered, "@PAPERBOAT_PRODUCT_LINUX_AMD64_LENGTH@", fmt.Sprint(len(payload)))

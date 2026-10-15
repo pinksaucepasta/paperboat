@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
@@ -242,9 +241,6 @@ func TestRestartedCandidateRequiresExactApprovedStagingBinding(t *testing.T) {
 			next := append(append([]byte(nil), f.fetcher.body...), []byte("prepared candidate bytes")...)
 			f.fetcher.body = next
 			f.candidate = release(f.candidate.Version, next)
-			if err := os.WriteFile(filepath.Join(f.paths.root, "installed", "pb"), next, 0700); err != nil {
-				t.Fatal(err)
-			}
 			candidate, err := f.manager.Prepare(ctx, f.candidate)
 			if err != nil {
 				t.Fatal(err)

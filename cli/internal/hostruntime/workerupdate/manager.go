@@ -153,10 +153,6 @@ type Config struct {
 	Gate            ActivationGate
 	Events          EventSink
 	NativeVerifier  NativeVerifier
-	// ExtractPackage is the macOS package extraction boundary. A pkg is never
-	// renamed into an executable slot; the installer returns the executable
-	// installed by the verified package so it can be staged atomically.
-	ExtractPackage  func(context.Context, string, string) (string, error)
 	MonitorWindow   time.Duration
 	HealthInterval  time.Duration
 	CanaryTimeout   time.Duration
@@ -204,9 +200,6 @@ func New(config Config) (*Manager, error) {
 	}
 	if config.NativeVerifier == nil {
 		config.NativeVerifier = nativesignature.New(nil)
-	}
-	if config.ExtractPackage == nil && runtime.GOOS == "darwin" {
-		config.ExtractPackage = ExtractDarwinPackage
 	}
 	if err := validateConfig(config); err != nil {
 		return nil, err
@@ -414,20 +407,15 @@ func (m *Manager) stage(ctx context.Context, release Release) (Release, error) {
 	defer stream.Close()
 	directory := filepath.Dir(m.config.BinaryStaged)
 	//paperboat:allow-source-policy atomic-replacement owner=worker-update reason=same-directory-verified-runtime-download-staging
-	pending, err := os.CreateTemp(directory, runtimeStagingPattern(release.Platform))
+	pending, err := os.CreateTemp(directory, ".paperboat-runtime-*")
 	if err != nil {
 		return Release{}, err
 	}
 	pendingPath := pending.Name()
 	defer os.Remove(pendingPath)
-	// The downloaded Darwin package stays private while its canonical payload
-	// is extracted. Native executable targets must be traversable by the
-	// enrolled worker UID when hostd launches the candidate.
-	stagingMode := os.FileMode(0o755)
-	if release.Platform == "darwin" {
-		stagingMode = 0o600
-	}
-	if err := pending.Chmod(stagingMode); err != nil {
+	// The authenticated product is the same executable used by every role.
+	// It must remain traversable when the enrolled worker launches it.
+	if err := pending.Chmod(0o755); err != nil {
 		pending.Close()
 		return Release{}, err
 	}
@@ -448,39 +436,6 @@ func (m *Manager) stage(ctx context.Context, release Release) (Release, error) {
 	if err := pending.Close(); err != nil {
 		return Release{}, err
 	}
-	if release.Platform == "darwin" {
-		if m.config.ExtractPackage == nil {
-			return Release{}, ErrInvalidConfig
-		}
-		if err := m.config.NativeVerifier.Verify(ctx, pendingPath, release.Platform, release.Architecture); err != nil {
-			return Release{}, ErrInvalidRelease
-		}
-		extractionRoot, err := os.MkdirTemp(directory, ".paperboat-package-extraction-")
-		if err != nil {
-			return Release{}, err
-		}
-		defer os.RemoveAll(extractionRoot)
-		if err := os.Chmod(extractionRoot, 0o700); err != nil {
-			return Release{}, err
-		}
-		installedPath, err := m.config.ExtractPackage(ctx, pendingPath, extractionRoot)
-		if err != nil {
-			return Release{}, ErrInvalidRelease
-		}
-		if err := stageInstalledDarwinExecutable(installedPath, m.config.BinaryStaged, m.config.OwnerUID, m.config.OwnerGID); err != nil {
-			return Release{}, ErrInvalidRelease
-		}
-		if err := binarytarget.Validate(m.config.BinaryStaged, release.Platform, release.Architecture); err != nil {
-			return Release{}, ErrInvalidRelease
-		}
-		if err := m.config.NativeVerifier.Verify(ctx, m.config.BinaryStaged, release.Platform, release.Architecture); err != nil {
-			return Release{}, ErrInvalidRelease
-		}
-		if err := syncDirectories(directory, filepath.Dir(m.config.BinaryStaged)); err != nil {
-			return Release{}, err
-		}
-		return localReleaseIdentity(release, m.config.BinaryStaged)
-	}
 	if err := binarytarget.Validate(pendingPath, release.Platform, release.Architecture); err != nil {
 		return Release{}, ErrInvalidRelease
 	}
@@ -494,22 +449,6 @@ func (m *Manager) stage(ctx context.Context, release Release) (Release, error) {
 	if err := syncDirectories(directory); err != nil {
 		return Release{}, err
 	}
-	return release, nil
-}
-
-func localReleaseIdentity(release Release, path string) (Release, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return Release{}, err
-	}
-	hash := sha256.New()
-	written, copyErr := io.Copy(hash, io.LimitReader(file, maxRuntimeBytes+1))
-	closeErr := file.Close()
-	if copyErr != nil || closeErr != nil || written < 1 || written > maxRuntimeBytes {
-		return Release{}, ErrInvalidRelease
-	}
-	release.SHA256 = hex.EncodeToString(hash.Sum(nil))
-	release.Length = written
 	return release, nil
 }
 
@@ -533,62 +472,6 @@ func (m *Manager) authorizeRecovery(ctx context.Context, release Release, path s
 	}
 	if err := m.config.NativeVerifier.Verify(ctx, path, release.Platform, release.Architecture); err != nil {
 		return ErrInvalidRelease
-	}
-	return nil
-}
-
-func runtimeStagingPattern(platform string) string {
-	if platform == "darwin" {
-		return ".paperboat-runtime-*.pkg"
-	}
-	return ".paperboat-runtime-*"
-}
-
-func stageInstalledDarwinExecutable(source, destination string, ownerUID, ownerGID int) error {
-	if source == "" || !filepath.IsAbs(source) || filepath.Clean(source) != source || !filepath.IsAbs(destination) || filepath.Clean(destination) != destination {
-		return ErrInvalidRelease
-	}
-	info, err := os.Lstat(source)
-	if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Size() < 1 || info.Size() > maxRuntimeBytes {
-		return ErrInvalidRelease
-	}
-	directory := filepath.Dir(destination)
-	//paperboat:allow-source-policy atomic-replacement owner=worker-update reason=same-directory-verified-darwin-executable-staging
-	pending, err := os.CreateTemp(directory, ".paperboat-darwin-executable-")
-	if err != nil {
-		return err
-	}
-	pendingPath := pending.Name()
-	defer os.Remove(pendingPath)
-	if err := pending.Chmod(0o755); err != nil {
-		_ = pending.Close()
-		return err
-	}
-	if err := pending.Chown(ownerUID, ownerGID); err != nil {
-		_ = pending.Close()
-		return err
-	}
-	input, err := os.Open(source)
-	if err != nil {
-		_ = pending.Close()
-		return err
-	}
-	written, copyErr := io.Copy(pending, io.LimitReader(input, maxRuntimeBytes+1))
-	closeErr := input.Close()
-	if copyErr != nil || closeErr != nil || written != info.Size() {
-		_ = pending.Close()
-		return ErrInvalidRelease
-	}
-	if err := pending.Sync(); err != nil {
-		_ = pending.Close()
-		return err
-	}
-	if err := pending.Close(); err != nil {
-		return err
-	}
-	//paperboat:allow-source-policy atomic-replacement owner=worker-update reason=verified-darwin-package-executable-staging
-	if err := os.Rename(pendingPath, destination); err != nil {
-		return err
 	}
 	return nil
 }
@@ -728,9 +611,6 @@ func validateConfig(config Config) error {
 		return ErrUnsafeStorage
 	}
 	if !regularMatches(config.Binary, config.Active.Length, config.Active.SHA256) && !matchesInterruptedCandidate(config) {
-		return ErrUnsafeStorage
-	}
-	if config.Active.Platform == "darwin" && config.ExtractPackage == nil {
 		return ErrUnsafeStorage
 	}
 	return nil

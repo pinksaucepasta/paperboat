@@ -227,13 +227,7 @@ func TestTask39NativeUserFixture(t *testing.T) {
 		if err = nativesignature.New(nil).Verify(ctx, path, runtime.GOOS, runtime.GOARCH); err != nil {
 			t.Fatal(err)
 		}
-		if err = os.MkdirAll(filepath.Join(state, "extracted"), 0700); err != nil {
-			t.Fatal(err)
-		}
-		path, err = workerupdate.ExtractDarwinPackage(ctx, path, filepath.Join(state, "extracted"))
-		if err != nil {
-			t.Fatal(err)
-		}
+
 	}
 	source, err := installsource.Inspect(path, artifact.Version, installsource.Official)
 	if err != nil {
@@ -548,7 +542,7 @@ func TestTask39NativeCleanup(t *testing.T) {
 }
 
 func TestTask39ArtifactFaultSurvivesFixtureURLMapping(t *testing.T) {
-	for _, raw := range []string{"https://github.com/pinksaucepasta/paperboat-cli/releases/download/2026.09.08.391/pb-darwin-arm64.pkg", "https://coolify.newt-mermaid.ts.net:18439/darwin-arm64/2026.09.08.391/pinksaucepasta/paperboat-cli/releases/download/2026.09.08.391/pb-darwin-arm64.pkg"} {
+	for _, raw := range []string{"https://github.com/example/paperboat/releases/download/2026.09.08.391/pb-darwin-arm64", "https://control.example.test:18439/darwin-arm64/2026.09.08.391/example/paperboat/releases/download/2026.09.08.391/pb-darwin-arm64"} {
 		request, err := http.NewRequest(http.MethodGet, raw, nil)
 		if err != nil {
 			t.Fatal(err)

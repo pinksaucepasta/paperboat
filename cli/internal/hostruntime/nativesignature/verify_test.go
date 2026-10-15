@@ -38,38 +38,19 @@ func TestVerifierAcceptsLinuxWithoutNativeTool(t *testing.T) {
 }
 
 func TestVerifierAcceptsDarwinCodeSignatureWithoutGatekeeperOverride(t *testing.T) {
-	runner := &fakeRunner{rejectGatekeeper: true}
-	if err := New(runner).Verify(context.Background(), "/release/pb", "darwin", "arm64"); err != nil {
-		t.Fatal(err)
-	}
-	if len(runner.calls) != 1 || runner.calls[0].name != "codesign" {
-		t.Fatalf("native calls = %#v", runner.calls)
-	}
-	if got := strings.Join(runner.calls[0].args, " "); got != "--verify --deep --strict --verbose=2 /release/pb" {
-		t.Fatalf("codesign args = %q", got)
-	}
-}
-
-func TestVerifierAcceptsValidDarwinPackageSignatureWithoutNotarization(t *testing.T) {
-	runner := &fakeRunner{output: []byte("Status: signed by a certificate trusted by macOS"), rejectGatekeeper: true}
-	if err := New(runner).Verify(context.Background(), "/release/pb-darwin-arm64.pkg", "darwin", "arm64"); err != nil {
-		t.Fatal(err)
-	}
-	if len(runner.calls) != 1 || runner.calls[0].name != "/usr/sbin/pkgutil" {
-		t.Fatalf("native calls = %#v", runner.calls)
-	}
-	if got := strings.Join(runner.calls[0].args, " "); got != "--check-signature /release/pb-darwin-arm64.pkg" {
-		t.Fatalf("pkgutil args = %q", got)
-	}
-}
-
-func TestVerifierAcceptsUnsignedDevelopmentDarwinPackage(t *testing.T) {
-	runner := &fakeRunner{output: []byte(`Package "pb.pkg": no signature found`), err: errors.New("unsigned")}
-	if err := New(runner).Verify(context.Background(), "/release/pb-darwin-arm64.pkg", "darwin", "arm64"); err != nil {
-		t.Fatal(err)
-	}
-	if len(runner.calls) != 1 || runner.calls[0].name != "/usr/sbin/pkgutil" {
-		t.Fatalf("native calls = %#v", runner.calls)
+	for _, path := range []string{"/release/pb", "/release/renamed.pkg"} {
+		t.Run(path, func(t *testing.T) {
+			runner := &fakeRunner{rejectGatekeeper: true}
+			if err := New(runner).Verify(context.Background(), path, "darwin", "arm64"); err != nil {
+				t.Fatal(err)
+			}
+			if len(runner.calls) != 1 || runner.calls[0].name != "codesign" {
+				t.Fatalf("native calls = %#v", runner.calls)
+			}
+			if got := strings.Join(runner.calls[0].args, " "); got != "--verify --deep --strict --verbose=2 "+path {
+				t.Fatalf("codesign args = %q", got)
+			}
+		})
 	}
 }
 
@@ -80,16 +61,6 @@ func TestVerifierRejectsCorruptDarwinCodeSignature(t *testing.T) {
 	}
 	if len(runner.calls) != 1 || runner.calls[0].name != "codesign" {
 		t.Fatalf("corrupt signature did not fail at codesign: %#v", runner.calls)
-	}
-}
-
-func TestVerifierRejectsCorruptDarwinPackageSignature(t *testing.T) {
-	runner := &fakeRunner{output: []byte("Status: invalid signature"), err: errors.New("package signature verification failed")}
-	if err := New(runner).Verify(context.Background(), "/release/pb-darwin-arm64.pkg", "darwin", "arm64"); !errors.Is(err, ErrInvalid) {
-		t.Fatalf("corrupt package signature accepted: %v", err)
-	}
-	if len(runner.calls) != 1 || runner.calls[0].name != "/usr/sbin/pkgutil" {
-		t.Fatalf("corrupt package signature did not fail at pkgutil: %#v", runner.calls)
 	}
 }
 

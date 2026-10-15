@@ -18,7 +18,7 @@ GOFMT       := $(GO_ROOT)/bin/gofmt
 GO_FILES    := $(shell find . \( -path ./.git -o -path ./upstream -o -path ./.build -o -path ./.codex-build \) -prune -o -name '*.go' -print)
 LDFLAGS     := -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Version=$(VERSION) -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Commit=$(COMMIT) -X github.com/pinksaucepasta/paperboat/internal/buildinfo.ProtocolVersion=$(PROTOCOL_VERSION) -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultServerURL=$(DEFAULT_SERVER_URL) -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultReleaseURL=$(DEFAULT_RELEASE_URL)
 
-.PHONY: binary-size-check build check clean complete container-compose-check container-image-check cross-build dependencies fmt fmt-check fuzz generate generate-check install license-check lint metrics-check metrics-generate preflight race release-assets release-binaries release-macos-pkg reproducible-builds source-policy static-analysis test tidy tidy-check uninstall upstream-foundations verification verify-toolchain vet vulnerability-check
+.PHONY: binary-size-check build check clean complete container-compose-check container-image-check cross-build dependencies fmt fmt-check fuzz generate generate-check install license-check lint metrics-check metrics-generate preflight race release-assets release-binaries release-macos reproducible-builds source-policy static-analysis test tidy tidy-check uninstall upstream-foundations verification verify-toolchain vet vulnerability-check
 
 dependencies:
 	@./tools/verify-peer-dependencies.sh
@@ -55,26 +55,20 @@ cross-build: verify-toolchain
 
 release-binaries: verify-toolchain
 	@mkdir -p dist
-	@rm -f dist/pb-linux-amd64 dist/pb-linux-arm64 dist/pb-windows-amd64.exe dist/pb-windows-arm64.exe
+	@rm -f dist/pb-linux-amd64 dist/pb-linux-arm64 dist/pb-windows-amd64.exe dist/pb-windows-arm64.exe dist/pb-darwin-arm64.pkg
 	@./tools/build-release-asset.sh --platform linux --architecture amd64 --output dist/pb-linux-amd64 --version "$(VERSION)" --server-url "$(DEFAULT_SERVER_URL)" --release-url "$(DEFAULT_RELEASE_URL)"
 	@./tools/build-release-asset.sh --platform linux --architecture arm64 --output dist/pb-linux-arm64 --version "$(VERSION)" --server-url "$(DEFAULT_SERVER_URL)" --release-url "$(DEFAULT_RELEASE_URL)"
-	@./tools/build-release-asset.sh --platform windows --architecture amd64 --output dist/pb-windows-amd64.exe --version "$(VERSION)" --server-url "$(DEFAULT_SERVER_URL)" --release-url "$(DEFAULT_RELEASE_URL)"
-	@./tools/build-release-asset.sh --platform windows --architecture arm64 --output dist/pb-windows-arm64.exe --version "$(VERSION)" --server-url "$(DEFAULT_SERVER_URL)" --release-url "$(DEFAULT_RELEASE_URL)"
 
-release-macos-pkg: verify-toolchain
-	@test "$$(uname -s)" = Darwin || { echo 'release-macos-pkg requires macOS' >&2; exit 1; }
-	@test "$$(uname -m)" = arm64 || { echo 'release-macos-pkg requires an Apple Silicon runner' >&2; exit 1; }
+release-macos: verify-toolchain
+	@test "$$(uname -s)" = Darwin || { echo 'release-macos requires macOS' >&2; exit 1; }
+	@test "$$(uname -m)" = arm64 || { echo 'release-macos requires an Apple Silicon runner' >&2; exit 1; }
 	@mkdir -p dist
-	@rm -f dist/pb-darwin-arm64.stage dist/pb-darwin-arm64.pkg
-	@./tools/build-release-asset.sh --platform darwin --architecture arm64 --output dist/pb-darwin-arm64.stage --version "$(VERSION)" --server-url "$(DEFAULT_SERVER_URL)" --release-url "$(DEFAULT_RELEASE_URL)"
-	@if test -n "$(MACOS_INSTALLER_SIGNING_IDENTITY)"; then \
-		./tools/build-macos-pkg.sh --binary dist/pb-darwin-arm64.stage --output dist/pb-darwin-arm64.pkg --version "$(VERSION)" --signing-identity "$(MACOS_INSTALLER_SIGNING_IDENTITY)"; \
-	else \
-		./tools/build-macos-pkg.sh --binary dist/pb-darwin-arm64.stage --output dist/pb-darwin-arm64.pkg --version "$(VERSION)"; \
-	fi
-	@rm -f dist/pb-darwin-arm64.stage
+	@rm -f dist/pb-darwin-arm64 dist/pb-darwin-arm64.pkg
+	@./tools/build-release-asset.sh --platform darwin --architecture arm64 --output dist/pb-darwin-arm64 --version "$(VERSION)" --server-url "$(DEFAULT_SERVER_URL)" --release-url "$(DEFAULT_RELEASE_URL)"
+	@codesign --force --sign - --timestamp=none dist/pb-darwin-arm64
+	@codesign --verify --strict dist/pb-darwin-arm64
 
-release-assets: release-binaries release-macos-pkg
+release-assets: release-binaries release-macos
 
 cli-docs:
 	$(GO) test ./cmd/pb -run '^TestCLIReference$$' -count=1 -args -update-cli-docs

@@ -9,14 +9,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
 	"github.com/theupdateframework/go-tuf/v2/metadata"
 )
 
@@ -56,23 +54,7 @@ func ResolveUpdateBundle(ctx context.Context, request Request, updateState strin
 		return Request{}, noop, ErrUpdateVerificationFailed
 	}
 	executable := verified.ArtifactPath
-	if runtime.GOOS == "darwin" {
-		packagePath := filepath.Join(staging, verified.Index.Targets[0].AssetName)
-		if err = os.Rename(executable, packagePath); err != nil {
-			cleanup()
-			return Request{}, noop, err
-		}
-		extractionRoot := filepath.Join(staging, "payload")
-		if err = os.Mkdir(extractionRoot, 0700); err != nil {
-			cleanup()
-			return Request{}, noop, err
-		}
-		executable, err = workerupdate.ExtractDarwinPackage(ctx, packagePath, extractionRoot)
-		if err != nil {
-			cleanup()
-			return Request{}, noop, err
-		}
-	}
+
 	source, err := installsource.InspectBuild(executable, verified.Index.Version)
 	if err != nil {
 		cleanup()

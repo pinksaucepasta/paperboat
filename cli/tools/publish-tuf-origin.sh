@@ -112,7 +112,7 @@ mkdir "$next"
 tar -xzf "$bundle" -C "$next" --no-same-owner --no-same-permissions
 
 [[ -z "$(find "$next" -type l -print -quit)" ]] || { echo "staged release contains a symlink" >&2; exit 1; }
-[[ "$(find "$next" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort)" == $'install\ntuf\nwindows' ]] || { echo "staged release has an unexpected top-level file" >&2; exit 1; }
+[[ "$(find "$next" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort)" == $'install\ntuf' ]] || { echo "staged release has an unexpected top-level file" >&2; exit 1; }
 
 python3 - "$next/tuf/metadata" "$live/tuf/metadata" <<'PY_METADATA'
 import json
@@ -149,7 +149,7 @@ try:
     if candidate_targets == live_targets:
         # Snapshot/timestamp refresh owns no target, policy, root or installer
         # change. Compare exact bytes under the same publication lock.
-        for relative in ("tuf/metadata/root.json", "tuf/metadata/targets.json", "install", "windows"):
+        for relative in ("tuf/metadata/root.json", "tuf/metadata/targets.json", "install"):
             incoming = candidate.parent.parent / relative
             current = live.parent.parent / relative
             if not incoming.is_file() or incoming.is_symlink() or not current.is_file() or current.is_symlink() or incoming.read_bytes() != current.read_bytes():
@@ -178,11 +178,9 @@ targets_path = pathlib.Path(sys.argv[1])
 live_targets_path = pathlib.Path(sys.argv[2])
 version = sys.argv[3]
 expected = {
-    "pb-darwin-arm64.pkg": ("darwin", "arm64", "pkg"),
+    "pb-darwin-arm64": ("darwin", "arm64", "macho"),
     "pb-linux-amd64": ("linux", "amd64", "elf"),
     "pb-linux-arm64": ("linux", "arm64", "elf"),
-    "pb-windows-amd64.exe": ("windows", "amd64", "pe"),
-    "pb-windows-arm64.exe": ("windows", "arm64", "pe"),
 }
 
 def reject_duplicate_keys(pairs):
@@ -392,61 +390,37 @@ def shell_product_branches(body):
         branches[match.group(1)] = body[match.start():end]
     return branches
 
-def windows_product_branches(body):
-    start_matches = list(re.finditer(r"(?m)^if \(\$arch -eq 'amd64'\) \{[ \t]*$", body))
-    if len(start_matches) != 1:
-        raise SystemExit("Windows installer architecture branches are missing or ambiguous")
-    else_match = re.search(r"(?m)^\} else \{[ \t]*$", body[start_matches[0].end():])
-    if else_match is None:
-        raise SystemExit("Windows installer ARM64 branch is missing")
-    else_start = start_matches[0].end() + else_match.start()
-    else_end = start_matches[0].end() + else_match.end()
-    end_match = re.search(r"(?m)^\}[ \t]*$", body[else_end:])
-    if end_match is None:
-        raise SystemExit("Windows installer ARM64 branch is unterminated")
-    arm_end = else_end + end_match.start()
-    return {
-        "amd64": body[start_matches[0].end():else_start],
-        "arm64": body[else_end:arm_end],
-    }
-
-def require_product_pins(branch, name, pin, powershell):
+def require_product_pins(branch, name, pin):
     version, url, digest, length = pin
     fields = (
-        ("version", "$productVersion" if powershell else "product_version", version),
-        ("URL", "$productUrl" if powershell else "product_url", url),
-        ("SHA-256", "$productSha" if powershell else "product_sha", digest),
-        ("length", "$productLength" if powershell else "product_length", str(length)),
+        ("version", "product_version", version),
+        ("URL", "product_url", url),
+        ("SHA-256", "product_sha", digest),
+        ("length", "product_length", str(length)),
     )
     for field, variable, value in fields:
         variable_pattern = re.escape(variable)
-        if powershell:
-            pattern = re.compile(rf"(?m)^[ \t]*{variable_pattern}[ \t]*=[ \t]*'([^']*)'[ \t]*$")
-        else:
-            pattern = re.compile(rf"(?m)^[ \t]*{variable_pattern}='([^']*)'[ \t]*(?:;;)?[ \t]*$")
+        pattern = re.compile(rf"(?m)^[ \t]*{variable_pattern}='([^']*)'[ \t]*(?:;;)?[ \t]*$")
         matches = pattern.findall(branch)
         if len(matches) != 1 or matches[0] != value:
             raise SystemExit(f"installer product pin mismatch for {name}: {field}")
 
 install_body = read_installer("install")
+repository_pins = re.findall(r"(?m)^repository='([^']*)'$", install_body)
+if repository_pins != [next(iter(candidate_repositories))]:
+    raise SystemExit("installer repository pin mismatch")
 install_branches = shell_product_branches(install_body)
 for name, branch_name in (
     ("pb-linux-amd64", "linux-amd64"),
     ("pb-linux-arm64", "linux-arm64"),
-    ("pb-darwin-arm64.pkg", "darwin-arm64"),
+    ("pb-darwin-arm64", "darwin-arm64"),
 ):
-    require_product_pins(install_branches[branch_name], name, candidate_product_pins[name], False)
+    require_product_pins(install_branches[branch_name], name, candidate_product_pins[name])
 
-windows_body = read_installer("windows")
-windows_branches = windows_product_branches(windows_body)
-for name, architecture in (
-    ("pb-windows-amd64.exe", "amd64"),
-    ("pb-windows-arm64.exe", "arm64"),
-):
-    require_product_pins(windows_branches[architecture], name, candidate_product_pins[name], True)
+
 PY
 
-for required in install windows tuf/metadata/root.json tuf/metadata/targets.json tuf/metadata/snapshot.json tuf/metadata/timestamp.json; do
+for required in install tuf/metadata/root.json tuf/metadata/targets.json tuf/metadata/snapshot.json tuf/metadata/timestamp.json; do
   [[ -s "$next/$required" && ! -L "$next/$required" ]] || { echo "release bundle is missing $required" >&2; exit 1; }
 done
 for directory in "$next/tuf/metadata" "$next/tuf/targets"; do

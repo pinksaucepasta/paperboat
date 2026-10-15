@@ -27,23 +27,21 @@ import sys
 
 version = sys.argv[2]
 assets = {
-    "pb-darwin-arm64.pkg": ("darwin", "arm64", "pkg"),
+    "pb-darwin-arm64": ("darwin", "arm64", "macho"),
     "pb-linux-amd64": ("linux", "amd64", "elf"),
     "pb-linux-arm64": ("linux", "arm64", "elf"),
-    "pb-windows-amd64.exe": ("windows", "amd64", "pe"),
-    "pb-windows-arm64.exe": ("windows", "arm64", "pe"),
 }
 
 body = {
     "schema": "paperboat.release-current/v1",
     "version": version,
-    "repository": "pinksaucepasta/paperboat-cli",
+    "repository": "example/paperboat",
     "assets": {
         name: {
             "platform": platform,
             "architecture": architecture,
             "format": format_,
-            "url": f"https://github.com/pinksaucepasta/paperboat-cli/releases/download/{version}/{name}",
+            "url": f"https://github.com/example/paperboat/releases/download/{version}/{name}",
             "sha256": "0" * 64,
             "length": 1,
         }
@@ -57,7 +55,7 @@ PY
 write_installers() {
   local root=$1
   python3 "$repository_root/tools/render-installers.py" \
-    "$root/tuf/metadata/targets.json" "$root/install" "$root/windows"
+    "$root/tuf/metadata/targets.json" "$root/install"
 }
 
 write_matching_targets_metadata() {
@@ -349,7 +347,7 @@ expect_candidate_rejection() {
   local name=$1 expected_error=$2
   local candidate_bundle="$temporary/$name.tgz"
   local output="$temporary/$name.log"
-  tar -C "$candidate" -czf "$candidate_bundle" install windows tuf
+  tar -C "$candidate" -czf "$candidate_bundle" install tuf
   local candidate_digest
   candidate_digest=$(run_checksum "$checksum_backend" "$candidate_bundle" | awk '{print $1}')
   if run_test_publisher "$candidate_bundle" "$release_root" "$candidate_version" "$candidate_digest" >"$output" 2>&1; then
@@ -387,7 +385,7 @@ set_metadata_versions "$candidate/tuf/metadata" 2
 write_installers "$candidate"
 for name in root targets snapshot timestamp; do printf x > "$candidate/tuf/metadata/$name.json"; done
 bundle="$temporary/candidate.tgz"
-tar -C "$candidate" -czf "$bundle" install windows tuf
+tar -C "$candidate" -czf "$bundle" install tuf
 digest=$(run_checksum "$checksum_backend" "$bundle" | awk '{print $1}')
 if run_test_publisher "$bundle" "$release_root" 2026.08.22.23 "$digest" >/dev/null 2>&1; then
   echo 'publisher accepted invalid TUF metadata' >&2
@@ -411,7 +409,7 @@ body["signed"]["targets"]["pb-linux-amd64"]["custom"]["version"] = "2026.08.22.2
 path.write_text(json.dumps(body) + "\n")
 PY
 mismatch_bundle="$temporary/mismatch.tgz"
-tar -C "$candidate" -czf "$mismatch_bundle" install windows tuf
+tar -C "$candidate" -czf "$mismatch_bundle" install tuf
 mismatch_digest=$(run_checksum "$checksum_backend" "$mismatch_bundle" | awk '{print $1}')
 if run_test_publisher "$mismatch_bundle" "$release_root" "$candidate_version" "$mismatch_digest" >/dev/null 2>&1; then
   echo 'publisher accepted TUF version drift' >&2
@@ -434,7 +432,7 @@ del body["signed"]["targets"]["pb-linux-arm64"]["custom"]["release_index"][field
 path.write_text(json.dumps(body) + "\n")
 PY
   incomplete_bundle="$temporary/incomplete-$field.tgz"
-  tar -C "$candidate" -czf "$incomplete_bundle" install windows tuf
+  tar -C "$candidate" -czf "$incomplete_bundle" install tuf
   incomplete_digest=$(run_checksum "$checksum_backend" "$incomplete_bundle" | awk '{print $1}')
   if run_test_publisher "$incomplete_bundle" "$release_root" "$candidate_version" "$incomplete_digest" >/dev/null 2>&1; then
     echo "publisher accepted release metadata missing $field" >&2
@@ -458,7 +456,7 @@ del document["signed"]["targets"]["pb-linux-arm64"]
 path.write_text(json.dumps(document) + "\n")
 PY
 omitted_bundle="$temporary/omitted-target.tgz"
-tar -C "$candidate" -czf "$omitted_bundle" install windows tuf
+tar -C "$candidate" -czf "$omitted_bundle" install tuf
 omitted_digest=$(run_checksum "$checksum_backend" "$omitted_bundle" | awk '{print $1}')
 if run_test_publisher "$omitted_bundle" "$release_root" "$candidate_version" "$omitted_digest" >/dev/null 2>&1; then
   echo 'publisher accepted targets with a canonical asset omitted' >&2
@@ -478,13 +476,13 @@ import sys
 path = pathlib.Path(sys.argv[1])
 document = json.loads(path.read_text())
 target = document["signed"]["targets"]["pb-linux-amd64"]
-forged_url = "https://github.com/pinksaucepasta/paperboat-cli/releases/download/2026.08.22.24/pb-linux-amd64"
+forged_url = "https://github.com/example/paperboat/releases/download/2026.08.22.24/pb-linux-amd64"
 target["custom"]["url"] = forged_url
 target["custom"]["release_index"]["targets"][0]["download_url"] = forged_url
 path.write_text(json.dumps(document) + "\n")
 PY
 forged_url_bundle="$temporary/forged-url.tgz"
-tar -C "$candidate" -czf "$forged_url_bundle" install windows tuf
+tar -C "$candidate" -czf "$forged_url_bundle" install tuf
 forged_url_digest=$(run_checksum "$checksum_backend" "$forged_url_bundle" | awk '{print $1}')
 if run_test_publisher "$forged_url_bundle" "$release_root" "$candidate_version" "$forged_url_digest" >/dev/null 2>&1; then
   echo 'publisher accepted a forged selected-target URL' >&2
@@ -497,7 +495,7 @@ test "$before" = "$(snapshot)"
 cp "$temporary/live-targets.json" "$candidate/tuf/metadata/targets.json"
 write_installers "$candidate"
 no_selected_bundle="$temporary/no-selected.tgz"
-tar -C "$candidate" -czf "$no_selected_bundle" install windows tuf
+tar -C "$candidate" -czf "$no_selected_bundle" install tuf
 no_selected_digest=$(run_checksum "$checksum_backend" "$no_selected_bundle" | awk '{print $1}')
 if run_test_publisher "$no_selected_bundle" "$release_root" "$candidate_version" "$no_selected_digest" >/dev/null 2>&1; then
   echo 'publisher accepted targets with no artifact at the requested release version' >&2
@@ -510,7 +508,7 @@ same_version=$live_version
 cp "$temporary/live-targets.json" "$candidate/tuf/metadata/targets.json"
 write_installers "$candidate"
 stale_bundle="$temporary/stale-version.tgz"
-tar -C "$candidate" -czf "$stale_bundle" install windows tuf
+tar -C "$candidate" -czf "$stale_bundle" install tuf
 stale_digest=$(run_checksum "$checksum_backend" "$stale_bundle" | awk '{print $1}')
 if run_test_publisher "$stale_bundle" "$release_root" "$same_version" "$stale_digest" >/dev/null 2>&1; then
   echo 'publisher accepted a selected target without a strictly newer version' >&2
@@ -530,7 +528,7 @@ import sys
 candidate_path = pathlib.Path(sys.argv[1])
 live = json.loads(pathlib.Path(sys.argv[2]).read_text())
 candidate = json.loads(candidate_path.read_text())
-for name in ("pb-linux-arm64", "pb-windows-arm64.exe"):
+for name in ("pb-linux-arm64",):
     candidate["signed"]["targets"][name] = live["signed"]["targets"][name]
 omitted = candidate["signed"]["targets"]["pb-linux-arm64"]
 omitted["hashes"]["sha256"] = "f" * 64
@@ -540,7 +538,7 @@ candidate_path.write_text(json.dumps(candidate) + "\n")
 PY
 write_installers "$candidate"
 tampered_omitted_bundle="$temporary/tampered-omitted.tgz"
-tar -C "$candidate" -czf "$tampered_omitted_bundle" install windows tuf
+tar -C "$candidate" -czf "$tampered_omitted_bundle" install tuf
 tampered_omitted_digest=$(run_checksum "$checksum_backend" "$tampered_omitted_bundle" | awk '{print $1}')
 if run_test_publisher "$tampered_omitted_bundle" "$release_root" "$candidate_version" "$tampered_omitted_digest" >/dev/null 2>&1; then
   echo 'publisher accepted changed metadata for an omitted target' >&2
@@ -560,7 +558,7 @@ import sys
 candidate_path = pathlib.Path(sys.argv[1])
 live = json.loads(pathlib.Path(sys.argv[2]).read_text())
 candidate = json.loads(candidate_path.read_text())
-for name in ("pb-linux-arm64", "pb-windows-arm64.exe"):
+for name in ("pb-linux-arm64",):
     candidate["signed"]["targets"][name] = live["signed"]["targets"][name]
 name = "pb-linux-amd64"
 target = candidate["signed"]["targets"][name]
@@ -573,7 +571,7 @@ target["custom"]["release_index"]["targets"][0]["download_url"] = url
 candidate_path.write_text(json.dumps(candidate) + "\n")
 PY
 forged_repo_bundle="$temporary/forged-repository.tgz"
-tar -C "$candidate" -czf "$forged_repo_bundle" install windows tuf
+tar -C "$candidate" -czf "$forged_repo_bundle" install tuf
 forged_repo_digest=$(run_checksum "$checksum_backend" "$forged_repo_bundle" | awk '{print $1}')
 if run_test_publisher "$forged_repo_bundle" "$release_root" "$candidate_version" "$forged_repo_digest" >/dev/null 2>&1; then
   echo 'publisher accepted a changed selected-target repository' >&2
@@ -583,7 +581,7 @@ test "$before" = "$(snapshot)"
 
 write_matching_targets_metadata "$candidate/current.json" "$candidate/tuf/metadata/targets.json"
 set_metadata_versions "$candidate/tuf/metadata" 2
-# Retain the two omitted targets from the active metadata in the valid bundle.
+# Retain the omitted target from the active metadata in the valid bundle.
 python3 - "$candidate/tuf/metadata/targets.json" "$temporary/live-targets.json" <<'PY'
 import json
 import pathlib
@@ -592,7 +590,7 @@ import sys
 candidate_path = pathlib.Path(sys.argv[1])
 live = json.loads(pathlib.Path(sys.argv[2]).read_text())
 candidate = json.loads(candidate_path.read_text())
-for name in ("pb-linux-arm64", "pb-windows-arm64.exe"):
+for name in ("pb-linux-arm64",):
     candidate["signed"]["targets"][name] = live["signed"]["targets"][name]
 candidate_path.write_text(json.dumps(candidate) + "\n")
 PY
@@ -601,7 +599,6 @@ write_installers "$candidate"
 # Product pins must use retained ARM64 target identities, not the newest
 # release's version or another platform's branch values.
 cp "$candidate/install" "$temporary/install-correct"
-cp "$candidate/windows" "$temporary/windows-correct"
 python3 - "$candidate/install" "$live_version" "$candidate_version" <<'PY'
 import pathlib
 import sys
@@ -621,25 +618,18 @@ PY
 expect_candidate_rejection wrong-linux-arm-pin "installer product pin mismatch for pb-linux-arm64: version"
 cp "$temporary/install-correct" "$candidate/install"
 
-python3 - "$candidate/windows" "$live_version" "$candidate_version" <<'PY'
-import pathlib
-import sys
 
-path = pathlib.Path(sys.argv[1])
-old_version, new_version = sys.argv[2:]
+# The installer must bind its configured repository to the signed target pool.
+python3 - "$candidate/install" <<'PY_REPOSITORY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
 body = path.read_text()
-start = body.index("if ($arch -eq 'amd64') {\n")
-else_start = body.index("} else {\n", start) + len("} else {\n")
-end = body.index("\n}\nif ($productVersion", else_start)
-branch = body[else_start:end]
-old = f"$productUrl = 'https://github.com/pinksaucepasta/paperboat-cli/releases/download/{old_version}/pb-windows-arm64.exe'"
-new = f"$productUrl = 'https://github.com/pinksaucepasta/paperboat-cli/releases/download/{new_version}/pb-windows-arm64.exe'"
-if branch.count(old) != 1:
-    raise SystemExit("fixture has no unique retained Windows ARM64 URL pin")
-path.write_text(body[:else_start] + branch.replace(old, new, 1) + body[end:])
-PY
-expect_candidate_rejection wrong-windows-arm-pin "installer product pin mismatch for pb-windows-arm64.exe: URL"
-cp "$temporary/windows-correct" "$candidate/windows"
+assert body.count("repository='example/paperboat'") == 1
+path.write_text(body.replace("repository='example/paperboat'", "repository='example/untrusted'"))
+PY_REPOSITORY
+expect_candidate_rejection wrong-repository-pin "installer repository pin mismatch"
+cp "$temporary/install-correct" "$candidate/install"
 
 # A correct value present in the wrong shell branch cannot stand in for the
 # value required by the selected platform branch.
@@ -695,7 +685,7 @@ PY_METADATA
 done
 
 bundle="$temporary/candidate.tgz"
-tar -C "$candidate" -czf "$bundle" install windows tuf
+tar -C "$candidate" -czf "$bundle" install tuf
 digest=$(run_checksum "$checksum_backend" "$bundle" | awk '{print $1}')
 
 # renameat2(RENAME_EXCHANGE) is a Linux deployment requirement. Exercise the
@@ -823,10 +813,10 @@ active = json.loads(pathlib.Path(sys.argv[1]).read_text())
 live = json.loads(pathlib.Path(sys.argv[2]).read_text())
 active_targets = active["signed"]["targets"]
 live_targets = live["signed"]["targets"]
-for name in ("pb-linux-arm64", "pb-windows-arm64.exe"):
+for name in ("pb-linux-arm64",):
     if active_targets[name] != live_targets[name]:
         raise SystemExit(f"omitted target metadata changed after activation: {name}")
-for name in ("pb-darwin-arm64.pkg", "pb-linux-amd64", "pb-windows-amd64.exe"):
+for name in ("pb-darwin-arm64", "pb-linux-amd64"):
     if active_targets[name]["custom"]["version"] != "2026.08.22.10":
         raise SystemExit(f"selected target did not advance: {name}")
 PY
@@ -839,7 +829,7 @@ PY
   printf x > "$next/tuf/metadata/root.json"
   set_metadata_versions "$next/tuf/metadata" 3
   next_bundle="$temporary/next.tgz"
-  tar -C "$next" -czf "$next_bundle" install windows tuf
+  tar -C "$next" -czf "$next_bundle" install tuf
   next_digest=$(run_checksum "$checksum_backend" "$next_bundle" | awk '{print $1}')
   live_before_wrong_env=$(snapshot)
   if PATH="$temporary/bin:$PATH" PAPERBOAT_TEST_DOCKER_MODE=wrong-env PAPERBOAT_TEST_RELEASE_ROOT="$release_root" run_test_publisher "$next_bundle" "$release_root" 2026.08.22.24 "$next_digest" >/dev/null 2>&1; then
