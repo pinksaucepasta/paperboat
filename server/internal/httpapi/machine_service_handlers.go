@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	wire "github.com/pinksaucepasta/paperboat/shared/machineservices"
 	"io"
 	"net/http"
 	"strings"
@@ -16,7 +17,7 @@ import (
 
 func machineServiceError(w http.ResponseWriter, r *http.Request, e error) {
 	switch {
-	case expectedHTTPErrorOnly(e, machineservices.ErrInvalid):
+	case expectedHTTPErrorOnly(e, wire.ErrInvalid):
 		writeError(w, r, 400, "invalid_request", "Machine service request is invalid.")
 	case expectedHTTPErrorOnly(e, machineservices.ErrConflict):
 		writeError(w, r, 409, "generation_conflict", "Machine service policy changed; refresh and retry.")
@@ -34,14 +35,14 @@ func machineServicePolicy(s *machineservices.Service) http.HandlerFunc {
 			writeError(w, r, 401, "unauthenticated", "Authentication is required.")
 			return
 		}
-		var result machineservices.Policy
+		var result wire.Policy
 		var e error
 		if r.Method == http.MethodPut {
-			var in machineservices.PolicyUpdate
+			var in wire.PolicyUpdate
 			d := json.NewDecoder(io.LimitReader(r.Body, 4097))
 			d.DisallowUnknownFields()
 			if d.Decode(&in) != nil || d.Decode(&struct{}{}) != io.EOF {
-				machineServiceError(w, r, machineservices.ErrInvalid)
+				machineServiceError(w, r, wire.ErrInvalid)
 				return
 			}
 			result, e = s.UpdatePolicy(r.Context(), p.User.ID, r.PathValue("machine_id"), in)
@@ -103,7 +104,7 @@ func runtimeMachineServiceAuthorize(identities machineRequestVerifier, s *native
 		d := json.NewDecoder(bytes.NewReader(body))
 		d.DisallowUnknownFields()
 		if e != nil || len(body) > 8192 || d.Decode(&in) != nil || d.Decode(&struct{}{}) != io.EOF {
-			machineServiceError(w, r, machineservices.ErrInvalid)
+			machineServiceError(w, r, wire.ErrInvalid)
 			return
 		}
 		proof, e := base64.RawURLEncoding.DecodeString(r.Header.Get("X-Paperboat-Machine-Proof"))

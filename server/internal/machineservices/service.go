@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	wire "github.com/pinksaucepasta/paperboat/shared/machineservices"
 	"net"
 	"slices"
 	"strconv"
@@ -20,48 +21,12 @@ import (
 )
 
 const MaxMachines = 128
-const MaxServices = 64
 const MaxBrowserPolicies = 32
 const SnapshotLifetime = 30 * time.Second
 
 var ErrDenied = errors.New("machine service access denied")
-var ErrInvalid = errors.New("invalid machine service request")
 var ErrConflict = errors.New("machine service generation conflict")
 
-type Port struct {
-	Port          int    `json:"port"`
-	AddressFamily string `json:"address_family"`
-}
-type PublishedPort struct {
-	Port          int    `json:"port"`
-	AddressFamily string `json:"address_family"`
-	BrowserURL    string `json:"browser_url,omitempty"`
-}
-type Snapshot struct {
-	Schema                 string    `json:"schema"`
-	InstallationGeneration int64     `json:"installation_generation"`
-	BootID                 string    `json:"boot_id"`
-	StartedAt              time.Time `json:"started_at"`
-	Generation             int64     `json:"generation"`
-	Services               []Port    `json:"services"`
-}
-type Policy struct {
-	Schema              string `json:"schema"`
-	MachineID           string `json:"machine_id"`
-	Generation          int64  `json:"generation"`
-	PersonalAutoEnabled bool   `json:"personal_auto_enabled"`
-	TeamAutoEnabled     bool   `json:"team_auto_enabled"`
-}
-type PolicyUpdate struct {
-	ExpectedGeneration  int64 `json:"expected_generation"`
-	PersonalAutoEnabled bool  `json:"personal_auto_enabled"`
-	TeamAutoEnabled     bool  `json:"team_auto_enabled"`
-}
-type RuntimePolicy struct {
-	Generation                int64  `json:"generation"`
-	AutomaticDiscoveryEnabled bool   `json:"automatic_discovery_enabled"`
-	ExplicitPorts             []Port `json:"explicit_ports"`
-}
 type Authority struct {
 	SourceKind, SourceID, TeamID string
 	Generation                   int64
@@ -121,39 +86,6 @@ func (s *Service) now() time.Time {
 	}
 	return time.Now().UTC()
 }
-func (p Port) Address() string {
-	h := "127.0.0.1"
-	if p.AddressFamily == "ipv6" {
-		h = "::1"
-	}
-	return net.JoinHostPort(h, strconv.Itoa(p.Port))
-}
-func ValidPort(p Port) bool {
-	return p.Port > 0 && p.Port <= 65535 && (p.AddressFamily == "ipv4" || p.AddressFamily == "ipv6")
-}
-func ParseRoute(route string) (int, error) {
-	if !strings.HasPrefix(route, "tcp:") {
-		return 0, ErrInvalid
-	}
-	n, e := strconv.Atoi(strings.TrimPrefix(route, "tcp:"))
-	if e != nil || n < 1 || n > 65535 || route != "tcp:"+strconv.Itoa(n) {
-		return 0, ErrInvalid
-	}
-	return n, nil
-}
-func ValidateSnapshot(in Snapshot, now time.Time) error {
-	if in.Schema != "paperboat.machine-services/v1" || in.InstallationGeneration < 1 || in.Generation < 1 || in.Generation > 9007199254740991 || !ValidBoot(in.BootID) || in.StartedAt.IsZero() || in.StartedAt.After(now.Add(5*time.Second)) || len(in.Services) > MaxServices {
-		return ErrInvalid
-	}
-	seen := map[int]bool{}
-	for _, p := range in.Services {
-		if !ValidPort(p) || seen[p.Port] {
-			return ErrInvalid
-		}
-		seen[p.Port] = true
-	}
-	return nil
-}
 
 // ResolveTx selects explicit authority first. Multiple team paths are ambiguous;
 // callers must not silently choose a tenant. No runtime or origin is consulted.
@@ -188,47 +120,47 @@ func ResolveTx(ctx context.Context, tx *sql.Tx, actor, machine string, port int)
 	}
 	return out, nil
 }
-func (s *Service) GetPolicy(ctx context.Context, actor, machine string) (Policy, error) {
-	p := Policy{Schema: "paperboat.machine-service-policy/v1", MachineID: machine}
+func (s *Service) GetPolicy(ctx context.Context, actor, machine string) (wire.Policy, error) {
+	p := wire.Policy{Schema: "paperboat.machine-service-policy/v1", MachineID: machine}
 	e := s.DB.QueryRowContext(ctx, `SELECT machine_service_policy_generation,personal_auto_enabled,team_auto_enabled FROM paperboat.user_machines WHERE id=$1 AND paperboat.machine_management_allowed($2,id)`, machine, actor).Scan(&p.Generation, &p.PersonalAutoEnabled, &p.TeamAutoEnabled)
 	if machineServiceRowMissing(e) {
 		e = ErrDenied
 	}
 	return p, e
 }
-func (s *Service) UpdatePolicy(ctx context.Context, actor, machine string, in PolicyUpdate) (policy Policy, resultErr error) {
+func (s *Service) UpdatePolicy(ctx context.Context, actor, machine string, in wire.PolicyUpdate) (policy wire.Policy, resultErr error) {
 	if in.ExpectedGeneration < 1 {
-		return Policy{}, ErrInvalid
+		return wire.Policy{}, wire.ErrInvalid
 	}
 	tx, e := s.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if e != nil {
-		return Policy{}, e
+		return wire.Policy{}, e
 	}
 	defer captureServiceRollback(tx, &resultErr)
 	var gen int64
 	e = tx.QueryRowContext(ctx, `SELECT machine_service_policy_generation FROM paperboat.user_machines WHERE id=$1 AND paperboat.machine_management_allowed($2,id) FOR UPDATE`, machine, actor).Scan(&gen)
 	if machineServiceRowMissing(e) {
-		return Policy{}, ErrDenied
+		return wire.Policy{}, ErrDenied
 	}
 	if e != nil {
-		return Policy{}, e
+		return wire.Policy{}, e
 	}
 	if gen != in.ExpectedGeneration {
-		return Policy{}, ErrConflict
+		return wire.Policy{}, ErrConflict
 	}
-	p := Policy{Schema: "paperboat.machine-service-policy/v1", MachineID: machine, Generation: gen + 1, PersonalAutoEnabled: in.PersonalAutoEnabled, TeamAutoEnabled: in.TeamAutoEnabled}
+	p := wire.Policy{Schema: "paperboat.machine-service-policy/v1", MachineID: machine, Generation: gen + 1, PersonalAutoEnabled: in.PersonalAutoEnabled, TeamAutoEnabled: in.TeamAutoEnabled}
 	_, e = tx.ExecContext(ctx, `UPDATE paperboat.user_machines SET personal_auto_enabled=$2,team_auto_enabled=$3,machine_service_policy_generation=$4 WHERE id=$1`, machine, in.PersonalAutoEnabled, in.TeamAutoEnabled, p.Generation)
 	if e != nil {
-		return Policy{}, e
+		return wire.Policy{}, e
 	}
 	_, e = tx.ExecContext(ctx, `UPDATE paperboat.user_machine_access_sessions SET state='revoked',revoked_at=now(),updated_at=now(),revocation_reason='machine_service_policy_changed' WHERE user_machine_id=$1 AND state='active' AND machine_service_source_kind='automatic'`, machine)
 	if e != nil {
-		return Policy{}, e
+		return wire.Policy{}, e
 	}
 	return p, tx.Commit()
 }
-func (s *Service) RuntimePolicy(ctx context.Context, environment, machine string) (policy RuntimePolicy, resultErr error) {
-	p := RuntimePolicy{ExplicitPorts: []Port{}}
+func (s *Service) RuntimePolicy(ctx context.Context, environment, machine string) (policy wire.RuntimePolicy, resultErr error) {
+	p := wire.RuntimePolicy{ExplicitPorts: []wire.Port{}}
 	// Serialize projection for this machine. Audience and explicit-route changes
 	// have their own authority generations, independent of the machine toggle.
 	tx, e := s.DB.BeginTx(ctx, nil)
@@ -266,27 +198,27 @@ func (s *Service) RuntimePolicy(ctx context.Context, environment, machine string
 		if e != nil {
 			continue
 		}
-		v := Port{Port: port, AddressFamily: "ipv4"}
+		v := wire.Port{Port: port, AddressFamily: "ipv4"}
 		if h == "::1" {
 			v.AddressFamily = "ipv6"
 		} else if h != "127.0.0.1" {
 			continue
 		}
-		if ValidPort(v) && !slices.Contains(p.ExplicitPorts, v) {
+		if wire.ValidPort(v) && !slices.Contains(p.ExplicitPorts, v) {
 			p.ExplicitPorts = append(p.ExplicitPorts, v)
 		}
 	}
 	if e = rows.Err(); e != nil {
 		return p, e
 	}
-	slices.SortFunc(p.ExplicitPorts, func(a, b Port) int {
+	slices.SortFunc(p.ExplicitPorts, func(a, b wire.Port) int {
 		if a.Port != b.Port {
 			return a.Port - b.Port
 		}
 		return strings.Compare(a.AddressFamily, b.AddressFamily)
 	})
-	if len(p.ExplicitPorts) > MaxServices {
-		p.ExplicitPorts = p.ExplicitPorts[:MaxServices]
+	if len(p.ExplicitPorts) > wire.MaxServices {
+		p.ExplicitPorts = p.ExplicitPorts[:wire.MaxServices]
 	}
 	if e = rows.Close(); e != nil {
 		rowsClosed = true
@@ -307,16 +239,16 @@ func (s *Service) RuntimePolicy(ctx context.Context, environment, machine string
 	}
 	return p, tx.Commit()
 }
-func (s *Service) RecordMachineServices(ctx context.Context, environment, machine string, in Snapshot, observedAt time.Time) (resultErr error) {
+func (s *Service) RecordMachineServices(ctx context.Context, environment, machine string, in wire.Snapshot, observedAt time.Time) (resultErr error) {
 	now := s.now()
 	if observedAt.IsZero() || observedAt.After(now.Add(5*time.Second)) || !observedAt.Add(SnapshotLifetime).After(now) {
-		return ErrInvalid
+		return wire.ErrInvalid
 	}
 	expiry := observedAt.Add(SnapshotLifetime)
 	if expiry.After(now.Add(SnapshotLifetime)) {
 		expiry = now.Add(SnapshotLifetime)
 	}
-	if e := ValidateSnapshot(in, now); e != nil {
+	if e := wire.ValidateSnapshot(in, now); e != nil {
 		return e
 	}
 	policy, e := s.RuntimePolicy(ctx, environment, machine)
@@ -367,19 +299,7 @@ func (s *Service) RecordMachineServices(ctx context.Context, environment, machin
 	return tx.Commit()
 }
 
-type Item struct {
-	MachineID              string          `json:"machine_id"`
-	Alias                  string          `json:"alias"`
-	Description            string          `json:"description,omitempty"`
-	InstallationGeneration int64           `json:"installation_generation"`
-	BootID                 string          `json:"boot_id"`
-	PolicyGeneration       int64           `json:"policy_generation"`
-	AnnouncementGeneration int64           `json:"announcement_generation"`
-	ExpiresAt              time.Time       `json:"expires_at"`
-	Services               []PublishedPort `json:"services"`
-}
-
-func (s *Service) List(ctx context.Context, actor string) (items []Item, resultErr error) {
+func (s *Service) List(ctx context.Context, actor string) (items []wire.Item, resultErr error) {
 	tx, e := s.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if e != nil {
 		return nil, e
@@ -395,9 +315,9 @@ func (s *Service) List(ctx context.Context, actor string) (items []Item, resultE
 			resultErr = withServiceCleanupFailure(resultErr, rows.Close())
 		}
 	}()
-	var candidates []Item
+	var candidates []wire.Item
 	for rows.Next() {
-		var i Item
+		var i wire.Item
 		var data []byte
 		if e = rows.Scan(&i.MachineID, &i.Alias, &i.Description, &i.InstallationGeneration, &i.BootID, &i.PolicyGeneration, &i.AnnouncementGeneration, &i.ExpiresAt, &data); e != nil {
 			return nil, e
@@ -419,9 +339,9 @@ func (s *Service) List(ctx context.Context, actor string) (items []Item, resultE
 	if len(candidates) > MaxMachines {
 		return nil, ErrDenied
 	}
-	out := []Item{}
+	out := []wire.Item{}
 	for _, i := range candidates {
-		allowed := []PublishedPort{}
+		allowed := []wire.PublishedPort{}
 		for _, p := range i.Services {
 			_, e := ResolveTx(ctx, tx, actor, i.MachineID, p.Port)
 			if e == nil {
@@ -462,24 +382,12 @@ func (s *Service) List(ctx context.Context, actor string) (items []Item, resultE
 // denial.
 func machineServiceRowMissing(err error) bool { return err == sql.ErrNoRows }
 
-func ValidBoot(s string) bool {
-	if len(s) < 16 || len(s) > 64 {
-		return false
-	}
-	for _, r := range s {
-		if r != '-' && r != '_' && (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') {
-			return false
-		}
-	}
-	return true
-}
-
 // ReserveBrowserHostname binds a random public name to the exact machine/port.
 // Authorization belongs to the caller and must precede this allocation.
 func ReserveBrowserHostname(ctx context.Context, tx *sql.Tx, machine string, port int, domain string) (string, error) {
 	domain = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(domain), "."))
 	if port < 1 || port > 65535 {
-		return "", ErrInvalid
+		return "", wire.ErrInvalid
 	}
 	for attempt := 0; attempt < 8; attempt++ {
 		label, err := naming.PublicSlug(nil)
@@ -488,7 +396,7 @@ func ReserveBrowserHostname(ctx context.Context, tx *sql.Tx, machine string, por
 		}
 		candidate := label + "." + domain
 		if !validBrowserHostname(candidate) {
-			return "", ErrInvalid
+			return "", wire.ErrInvalid
 		}
 		var host string
 		if err = tx.QueryRowContext(ctx, `SELECT paperboat.reserve_machine_hostname($1,$2,$3)`, machine, port, candidate).Scan(&host); err != nil {
@@ -522,11 +430,11 @@ func validBrowserHostname(host string) bool {
 // It is resolved through account-scoped local routing, never public edge state.
 func NativeBrowserHostname(alias string, port int, baseDomain string) (string, error) {
 	if !machinealias.Valid(alias) || port < 1 || port > 65535 || (!validBrowserHostname(baseDomain) || net.ParseIP(baseDomain) != nil) {
-		return "", ErrInvalid
+		return "", wire.ErrInvalid
 	}
 	hostname := strconv.Itoa(port) + "." + alias + "." + baseDomain
 	if !validBrowserHostname(hostname) {
-		return "", ErrInvalid
+		return "", wire.ErrInvalid
 	}
 	return hostname, nil
 }

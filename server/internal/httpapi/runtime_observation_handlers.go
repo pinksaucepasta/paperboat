@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	wire "github.com/pinksaucepasta/paperboat/shared/machineservices"
 	"io"
 	"net/http"
 	"slices"
@@ -46,8 +47,8 @@ type machineCapabilitiesRepository interface {
 }
 
 type machineServicesRepository interface {
-	RecordMachineServices(context.Context, string, string, machineservices.Snapshot, time.Time) error
-	RuntimePolicy(context.Context, string, string) (machineservices.RuntimePolicy, error)
+	RecordMachineServices(context.Context, string, string, wire.Snapshot, time.Time) error
+	RuntimePolicy(context.Context, string, string) (wire.RuntimePolicy, error)
 }
 
 type runtimeAuxiliaryRejection struct {
@@ -115,7 +116,7 @@ func runtimeObservation(repo runtimeObservationRepository, identities runtimeIde
 	return func(w http.ResponseWriter, r *http.Request) {
 		noStore(w)
 		var req struct {
-			MachineServices     *machineservices.Snapshot                    `json:"machine_services,omitempty"`
+			MachineServices     *wire.Snapshot                               `json:"machine_services,omitempty"`
 			TerminalJoin        *usermachines.TerminalJoinObservation        `json:"terminal_join,omitempty"`
 			LazyRuntime         *lazyaccess.RuntimeObservation               `json:"lazy_runtime,omitempty"`
 			EnvironmentID       string                                       `json:"environment_id"`
@@ -207,7 +208,7 @@ func runtimeObservation(repo runtimeObservationRepository, identities runtimeIde
 			}
 			if err := machineServices.RecordMachineServices(r.Context(), req.EnvironmentID, req.ResourceID, *req.MachineServices, req.SampledAt); err != nil {
 				switch {
-				case expectedHTTPErrorOnly(err, machineservices.ErrInvalid):
+				case expectedHTTPErrorOnly(err, wire.ErrInvalid):
 					writeError(w, r, 400, "invalid_request", "Machine service snapshot is invalid.")
 				case expectedHTTPErrorOnly(err, machineservices.ErrDenied):
 					writeError(w, r, 403, "machine_services_denied", "Machine service policy changed; refresh policy before announcing ports.")

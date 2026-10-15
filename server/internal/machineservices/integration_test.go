@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	wire "github.com/pinksaucepasta/paperboat/shared/machineservices"
 	"os"
 	"testing"
 	"time"
@@ -53,7 +54,7 @@ func TestMachineServicePostgresAuthorityLifecycle(t *testing.T) {
 		t.Fatal(e)
 	}
 	now := time.Now().UTC().Truncate(time.Microsecond)
-	snapshot := machineservices.Snapshot{Schema: "paperboat.machine-services/v1", InstallationGeneration: 1, BootID: "boot-012345678901", StartedAt: now.Add(-time.Minute), Generation: 1, Services: []machineservices.Port{{Port: 5432, AddressFamily: "ipv4"}}}
+	snapshot := wire.Snapshot{Schema: "paperboat.machine-services/v1", InstallationGeneration: 1, BootID: "boot-012345678901", StartedAt: now.Add(-time.Minute), Generation: 1, Services: []wire.Port{{Port: 5432, AddressFamily: "ipv4"}}}
 	announce := func() {
 		t.Helper()
 		if e := s.RecordMachineServices(ctx, environment, machine, snapshot, time.Now().UTC()); e != nil {
@@ -97,10 +98,10 @@ func TestMachineServicePostgresAuthorityLifecycle(t *testing.T) {
 	if e != nil || !policy.PersonalAutoEnabled || policy.TeamAutoEnabled {
 		t.Fatalf("defaults %+v %v", policy, e)
 	}
-	if _, e = s.UpdatePolicy(ctx, other, machine, machineservices.PolicyUpdate{ExpectedGeneration: 1}); !errors.Is(e, machineservices.ErrDenied) {
+	if _, e = s.UpdatePolicy(ctx, other, machine, wire.PolicyUpdate{ExpectedGeneration: 1}); !errors.Is(e, machineservices.ErrDenied) {
 		t.Fatalf("outsider settings %v", e)
 	}
-	_, e = s.UpdatePolicy(ctx, owner, machine, machineservices.PolicyUpdate{ExpectedGeneration: policy.Generation})
+	_, e = s.UpdatePolicy(ctx, owner, machine, wire.PolicyUpdate{ExpectedGeneration: policy.Generation})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -127,13 +128,13 @@ func TestMachineServicePostgresAuthorityLifecycle(t *testing.T) {
 		t.Fatalf("discovery changed native policy generation: %+v %v", machinePolicy, e)
 	}
 	snapshot.Generation++
-	snapshot.Services = []machineservices.Port{{Port: 22, AddressFamily: "ipv4"}}
+	snapshot.Services = []wire.Port{{Port: 22, AddressFamily: "ipv4"}}
 	announce()
 	explicit, e := resolver.ResolveNativePrivate(ctx, request(owner, 22))
 	if e != nil {
 		t.Fatal(e)
 	}
-	_, e = s.UpdatePolicy(ctx, owner, machine, machineservices.PolicyUpdate{ExpectedGeneration: 2, PersonalAutoEnabled: true})
+	_, e = s.UpdatePolicy(ctx, owner, machine, wire.PolicyUpdate{ExpectedGeneration: 2, PersonalAutoEnabled: true})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -143,11 +144,11 @@ func TestMachineServicePostgresAuthorityLifecycle(t *testing.T) {
 	// A changed generation cannot be refreshed with different content; stale boot
 	// and signed observation replay cannot extend the current announcement.
 	bad := snapshot
-	bad.Services = []machineservices.Port{{Port: 5432, AddressFamily: "ipv4"}}
+	bad.Services = []wire.Port{{Port: 5432, AddressFamily: "ipv4"}}
 	if e = s.RecordMachineServices(ctx, environment, machine, bad, time.Now()); !errors.Is(e, machineservices.ErrConflict) {
 		t.Fatalf("same generation changed set %v", e)
 	}
-	if e = s.RecordMachineServices(ctx, environment, machine, snapshot, time.Now().Add(-31*time.Second)); !errors.Is(e, machineservices.ErrInvalid) {
+	if e = s.RecordMachineServices(ctx, environment, machine, snapshot, time.Now().Add(-31*time.Second)); !errors.Is(e, wire.ErrInvalid) {
 		t.Fatalf("signed replay %v", e)
 	}
 	snapshot.BootID = "boot-112345678901"
@@ -164,7 +165,7 @@ func TestMachineServicePostgresAuthorityLifecycle(t *testing.T) {
 	exec(`UPDATE paperboat.user_machines SET owner_team_id=$2 WHERE id=$1`, machine, team)
 	denied(owner, 5432)
 	denied(other, 5432)
-	_, e = s.UpdatePolicy(ctx, owner, machine, machineservices.PolicyUpdate{ExpectedGeneration: 3, PersonalAutoEnabled: true, TeamAutoEnabled: true})
+	_, e = s.UpdatePolicy(ctx, owner, machine, wire.PolicyUpdate{ExpectedGeneration: 3, PersonalAutoEnabled: true, TeamAutoEnabled: true})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -183,7 +184,7 @@ func TestMachineServicePostgresAuthorityLifecycle(t *testing.T) {
 		t.Fatalf("audience discovery changed native policy generation: %+v %v", machinePolicy, e)
 	}
 	snapshot.Generation++
-	snapshot.Services = []machineservices.Port{{Port: 5432, AddressFamily: "ipv4"}}
+	snapshot.Services = []wire.Port{{Port: 5432, AddressFamily: "ipv4"}}
 	announce()
 	shared, e := resolver.ResolveNativePrivate(ctx, request(other, 5432))
 	if e != nil || shared.AccountID != other || shared.UserID != other {

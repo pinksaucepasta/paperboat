@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"github.com/pinksaucepasta/paperboat-server/internal/admission"
+	wire "github.com/pinksaucepasta/paperboat/shared/machineservices"
 	"reflect"
 	"strconv"
 	"time"
@@ -14,7 +15,7 @@ import (
 )
 
 func (r *SQLResolver) resolveMachineService(ctx context.Context, in Request) (target Target, returnErr error) {
-	port, e := machineservices.ParseRoute(in.RouteID)
+	port, e := wire.ParseRoute(in.RouteID)
 	if e != nil || in.Protocol != "tcp" {
 		return Target{}, ErrInvalid
 	}
@@ -40,12 +41,12 @@ func (r *SQLResolver) resolveMachineService(ctx context.Context, in Request) (ta
 	if e != nil {
 		return Target{}, mapResolveError(e)
 	}
-	var ports []machineservices.Port
+	var ports []wire.Port
 	if e = json.Unmarshal(services, &ports); e != nil {
 		return Target{}, e
 	}
 	for _, p := range ports {
-		if p.Port == port && machineservices.ValidPort(p) {
+		if p.Port == port && wire.ValidPort(p) {
 			out.TargetAddress = p.Address()
 			break
 		}
@@ -105,7 +106,7 @@ func (r *SQLResolver) MachineServiceCurrent(ctx context.Context, in Request, ses
 	if in.UserID == "" || in.AccountID != in.UserID || in.ResourceKind != "machine_service" || session == "" {
 		return time.Time{}, ErrDenied
 	}
-	port, e := machineservices.ParseRoute(in.RouteID)
+	port, e := wire.ParseRoute(in.RouteID)
 	if e != nil {
 		return time.Time{}, ErrDenied
 	}
@@ -122,7 +123,7 @@ func (r *SQLResolver) MachineServiceCurrent(ctx context.Context, in Request, ses
 	if !current {
 		return time.Time{}, ErrDenied
 	}
-	var ports []machineservices.Port
+	var ports []wire.Port
 	if e = json.Unmarshal(services, &ports); e != nil {
 		return time.Time{}, e
 	}

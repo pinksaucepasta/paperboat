@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	wire "github.com/pinksaucepasta/paperboat/shared/machineservices"
 	"io"
 	"log/slog"
 	"net/http"
@@ -57,11 +58,11 @@ func TestMachineServiceErrorMapsOnlyPureExpectedFailures(t *testing.T) {
 		wantStatus int
 		wantCode   string
 	}{
-		{name: "invalid", err: machineservices.ErrInvalid, wantStatus: http.StatusBadRequest, wantCode: "invalid_request"},
+		{name: "invalid", err: wire.ErrInvalid, wantStatus: http.StatusBadRequest, wantCode: "invalid_request"},
 		{name: "conflict", err: machineservices.ErrConflict, wantStatus: http.StatusConflict, wantCode: "generation_conflict"},
 		{name: "service denied", err: machineservices.ErrDenied, wantStatus: http.StatusForbidden, wantCode: "forbidden"},
 		{name: "native access denied", err: nativeprivateaccess.ErrDenied, wantStatus: http.StatusForbidden, wantCode: "forbidden"},
-		{name: "invalid with I/O failure", err: errors.Join(machineservices.ErrInvalid, syscall.EIO), wantStatus: http.StatusServiceUnavailable, wantCode: "machine_services_unavailable"},
+		{name: "invalid with I/O failure", err: errors.Join(wire.ErrInvalid, syscall.EIO), wantStatus: http.StatusServiceUnavailable, wantCode: "machine_services_unavailable"},
 		{name: "conflict with I/O failure", err: errors.Join(machineservices.ErrConflict, syscall.EIO), wantStatus: http.StatusServiceUnavailable, wantCode: "machine_services_unavailable"},
 		{name: "denial with I/O failure", err: errors.Join(machineservices.ErrDenied, syscall.EIO), wantStatus: http.StatusServiceUnavailable, wantCode: "machine_services_unavailable"},
 	}
@@ -141,14 +142,14 @@ func TestMachineServiceObservationCannotSilentlyDropSnapshot(t *testing.T) {
 
 func TestMachineServiceObservationRecordsSignedSnapshotAndReturnsPolicy(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Microsecond)
-	snapshot := machineservices.Snapshot{
+	snapshot := wire.Snapshot{
 		Schema: "paperboat.machine-services/v1", InstallationGeneration: 4,
 		BootID: "boot-012345678901", StartedAt: now, Generation: 7,
-		Services: []machineservices.Port{{Port: 5432, AddressFamily: "ipv4"}},
+		Services: []wire.Port{{Port: 5432, AddressFamily: "ipv4"}},
 	}
-	policy := machineservices.RuntimePolicy{
+	policy := wire.RuntimePolicy{
 		Generation: 11, AutomaticDiscoveryEnabled: true,
-		ExplicitPorts: []machineservices.Port{{Port: 8080, AddressFamily: "ipv6"}},
+		ExplicitPorts: []wire.Port{{Port: 8080, AddressFamily: "ipv6"}},
 	}
 	sink := &fakeMachineServicesRepository{policy: policy}
 	repo := &fakeRuntimeObservationRepository{}
@@ -171,7 +172,7 @@ func TestMachineServiceObservationRecordsSignedSnapshotAndReturnsPolicy(t *testi
 	}
 	var response struct {
 		Data struct {
-			Policy machineservices.RuntimePolicy `json:"machine_services_policy"`
+			Policy wire.RuntimePolicy `json:"machine_services_policy"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
@@ -187,10 +188,10 @@ func TestMachineServiceObservationRejectedSnapshotIsNotStoredOrMetered(t *testin
 		name string
 		err  error
 		want int
-	}{{"invalid", machineservices.ErrInvalid, http.StatusBadRequest}, {"revoked", machineservices.ErrDenied, http.StatusForbidden}} {
+	}{{"invalid", wire.ErrInvalid, http.StatusBadRequest}, {"revoked", machineservices.ErrDenied, http.StatusForbidden}} {
 		t.Run(tc.name, func(t *testing.T) {
 			now := time.Now().UTC().Truncate(time.Microsecond)
-			snapshot := machineservices.Snapshot{Schema: "paperboat.machine-services/v1", InstallationGeneration: 1, BootID: "boot-012345678901", StartedAt: now, Generation: 1, Services: []machineservices.Port{{Port: 5432, AddressFamily: "ipv4"}}}
+			snapshot := wire.Snapshot{Schema: "paperboat.machine-services/v1", InstallationGeneration: 1, BootID: "boot-012345678901", StartedAt: now, Generation: 1, Services: []wire.Port{{Port: 5432, AddressFamily: "ipv4"}}}
 			sink := &fakeMachineServicesRepository{recordErr: tc.err}
 			repo := &fakeRuntimeObservationRepository{}
 			r := httptest.NewRequest(http.MethodPost, "/v1/runtime-observations", strings.NewReader(machineServiceObservationBody(t, now, snapshot)))
@@ -220,8 +221,8 @@ func TestMachineServiceObservationMixedFailureRetainsCauseAtHTTPBoundary(t *test
 	defer func() { cancel(); <-done }()
 
 	now := time.Now().UTC().Truncate(time.Microsecond)
-	snapshot := machineservices.Snapshot{Schema: "paperboat.machine-services/v1", InstallationGeneration: 1, BootID: "boot-012345678901", StartedAt: now, Generation: 1, Services: []machineservices.Port{{Port: 5432, AddressFamily: "ipv4"}}}
-	sink := &fakeMachineServicesRepository{recordErr: errors.Join(machineservices.ErrInvalid, syscall.EIO)}
+	snapshot := wire.Snapshot{Schema: "paperboat.machine-services/v1", InstallationGeneration: 1, BootID: "boot-012345678901", StartedAt: now, Generation: 1, Services: []wire.Port{{Port: 5432, AddressFamily: "ipv4"}}}
+	sink := &fakeMachineServicesRepository{recordErr: errors.Join(wire.ErrInvalid, syscall.EIO)}
 	repo := &fakeRuntimeObservationRepository{}
 	identity := &fakeRuntimeIdentity{}
 	request := httptest.NewRequest(http.MethodPost, "/v1/runtime-observations", strings.NewReader(machineServiceObservationBody(t, now, snapshot)))
@@ -260,15 +261,15 @@ func TestMachineServiceObservationMixedFailureRetainsCauseAtHTTPBoundary(t *test
 }
 
 type fakeMachineServicesRepository struct {
-	policy               machineservices.RuntimePolicy
+	policy               wire.RuntimePolicy
 	recordErr            error
-	recorded             *machineservices.Snapshot
+	recorded             *wire.Snapshot
 	environment, machine string
 	observedAt           time.Time
 	policyCalls          int
 }
 
-func (f *fakeMachineServicesRepository) RecordMachineServices(_ context.Context, environment, machine string, snapshot machineservices.Snapshot, observedAt time.Time) error {
+func (f *fakeMachineServicesRepository) RecordMachineServices(_ context.Context, environment, machine string, snapshot wire.Snapshot, observedAt time.Time) error {
 	if f.recordErr != nil {
 		return f.recordErr
 	}
@@ -277,18 +278,18 @@ func (f *fakeMachineServicesRepository) RecordMachineServices(_ context.Context,
 	return nil
 }
 
-func (f *fakeMachineServicesRepository) RuntimePolicy(context.Context, string, string) (machineservices.RuntimePolicy, error) {
+func (f *fakeMachineServicesRepository) RuntimePolicy(context.Context, string, string) (wire.RuntimePolicy, error) {
 	f.policyCalls++
 	return f.policy, nil
 }
 
-func machineServiceObservationBody(t *testing.T, sampledAt time.Time, snapshot machineservices.Snapshot) string {
+func machineServiceObservationBody(t *testing.T, sampledAt time.Time, snapshot wire.Snapshot) string {
 	t.Helper()
 	body, err := json.Marshal(struct {
-		EnvironmentID   string                   `json:"environment_id"`
-		ResourceID      string                   `json:"resource_id"`
-		SampledAt       time.Time                `json:"sampled_at"`
-		MachineServices machineservices.Snapshot `json:"machine_services"`
+		EnvironmentID   string        `json:"environment_id"`
+		ResourceID      string        `json:"resource_id"`
+		SampledAt       time.Time     `json:"sampled_at"`
+		MachineServices wire.Snapshot `json:"machine_services"`
 	}{"environment", "machine", sampledAt, snapshot})
 	if err != nil {
 		t.Fatal(err)
@@ -296,7 +297,7 @@ func machineServiceObservationBody(t *testing.T, sampledAt time.Time, snapshot m
 	return string(body)
 }
 
-func snapshotsEqual(a, b machineservices.Snapshot) bool {
+func snapshotsEqual(a, b wire.Snapshot) bool {
 	return a.Schema == b.Schema && a.InstallationGeneration == b.InstallationGeneration && a.BootID == b.BootID && a.StartedAt.Equal(b.StartedAt) && a.Generation == b.Generation && len(a.Services) == 1 && len(b.Services) == 1 && a.Services[0] == b.Services[0]
 }
 

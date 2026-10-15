@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	wire "github.com/pinksaucepasta/paperboat/shared/machineservices"
 	"os"
 	"regexp"
 	"strings"
@@ -149,7 +150,7 @@ func TestPolicyRegrantPostgres(t *testing.T) {
 	}
 	services := machineservices.New(store, "local.example.test")
 	now := time.Now().UTC().Truncate(time.Microsecond)
-	snapshot := machineservices.Snapshot{Schema: "paperboat.machine-services/v1", InstallationGeneration: 1, BootID: "boot-regrant-" + suffix, StartedAt: now.Add(-time.Minute), Generation: 1, Services: []machineservices.Port{{Port: 80, AddressFamily: "ipv4"}}}
+	snapshot := wire.Snapshot{Schema: "paperboat.machine-services/v1", InstallationGeneration: 1, BootID: "boot-regrant-" + suffix, StartedAt: now.Add(-time.Minute), Generation: 1, Services: []wire.Port{{Port: 80, AddressFamily: "ipv4"}}}
 	if err = services.RecordMachineServices(ctx, environment, machine, snapshot, now); err != nil {
 		t.Fatal(err)
 	}

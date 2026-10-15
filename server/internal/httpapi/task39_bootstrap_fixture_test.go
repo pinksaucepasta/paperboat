@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	wire "github.com/pinksaucepasta/paperboat/shared/machineservices"
 	"io"
 	"log/slog"
 	"net"
@@ -322,7 +323,7 @@ VALUES($1,$2,$1,$1,$3,$3,'consumed','installing',1,$4,$3,'OBSERVE123','fixture-o
 	now := time.Now().UTC()
 	body, err := json.Marshal(map[string]any{
 		"environment_id": environment, "resource_id": machine, "sampled_at": now, "reporter_version": "2026.10.03.990",
-		"machine_services":    machineservices.Snapshot{Schema: "paperboat.machine-services/v1", InstallationGeneration: 1, BootID: "process-fixture-observation", StartedAt: now, Generation: 1, Services: []machineservices.Port{}},
+		"machine_services":    wire.Snapshot{Schema: "paperboat.machine-services/v1", InstallationGeneration: 1, BootID: "process-fixture-observation", StartedAt: now, Generation: 1, Services: []wire.Port{}},
 		"runtime_diagnostics": map[string]any{"capabilities": []string{"file_receive", "preview_launch", "terminal_host", "session_host", "ssh_host", "keep_awake"}, "worker_generation": 1, "os_boot_id": "fixture-boot", "worker_service_scope": "user", "connector_state": "unavailable", "connector_generation": 0, "observed_at": now},
 	})
 	if err != nil {

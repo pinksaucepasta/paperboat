@@ -365,7 +365,7 @@ that use them; say which in Evidence.
 
 | ID | Scenario | L | M | W | Evidence |
 |---|---|---|---|---|---|
-| F9-01 | `https://<port>.<m>.<local domain>` and `https://<m>.<local domain>:<port>` open with trusted HTTPS from every client platform — all pairs. | [ ] | [ ] | [ ] | 1.4c edge browser/private/public TCP use shared admission lifetime and revocation owner; short-TTL duplex tests preserve explicit cuts and strict new admission. BrowserAccessPostgres PASS0.46s; private ingress signer tests PASS. Device qualification pending. |
+| F9-01 | `https://<port>.<m>.<local domain>` and `https://<m>.<local domain>:<port>` open with trusted HTTPS from every client platform — all pairs. | [ ] | [ ] | [ ] | 1.4c edge browser/private/public TCP use shared admission lifetime and revocation owner; short-TTL duplex tests preserve explicit cuts and strict new admission. BrowserAccessPostgres PASS0.46s; private ingress signer tests PASS. Device qualification pending.  shared/machineservices producer moved; real machine authority PostgreSQL PASS0.46s and owner race PASS; Lane A shared consumers/device verification pending. |
 | F9-02 | Raw TCP via `127.100.x.x` and `pb access machine <m> --port <p> --listen 127.0.0.1:<q>`. | [ ] | [ ] | [ ] | — |
 | F9-03 | `pb config local-access` alias, domain and proxy settings apply and reset correctly. | [ ] | [ ] | [ ] | — |
 | F9-04 | Access is denied without permission; revoking access ends active flows. | [ ] | [ ] | [ ] | —  Server exact native machine identity TTL/observation-loss vs explicit revocation PG PASS0.18s, authorized accessor discovery/current role/hostname/readiness/revocation PG PASS16.27s. A real active-flow/device proof pending. |

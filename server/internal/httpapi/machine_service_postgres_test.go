@@ -12,6 +12,7 @@ import (
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
 	"github.com/pinksaucepasta/paperboat-server/internal/machineservices"
 	"github.com/pinksaucepasta/paperboat-server/internal/nativeprivateaccess"
+	wire "github.com/pinksaucepasta/paperboat/shared/machineservices"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -50,7 +51,7 @@ func TestMachineServiceSignedRuntimePostgres(t *testing.T) {
 	identity := &machineServiceProof{fakeRuntimeIdentity: &fakeRuntimeIdentity{}}
 	repo := &fakeRuntimeObservationRepository{}
 	now := time.Now().UTC()
-	snapshot := machineservices.Snapshot{Schema: "paperboat.machine-services/v1", InstallationGeneration: 1, BootID: "boot-012345678901", StartedAt: now, Generation: 1, Services: []machineservices.Port{{Port: 5432, AddressFamily: "ipv4"}}}
+	snapshot := wire.Snapshot{Schema: "paperboat.machine-services/v1", InstallationGeneration: 1, BootID: "boot-012345678901", StartedAt: now, Generation: 1, Services: []wire.Port{{Port: 5432, AddressFamily: "ipv4"}}}
 	body, _ := json.Marshal(map[string]any{"environment_id": environment, "resource_id": machine, "sampled_at": now, "machine_services": snapshot})
 	request := func(path string, body []byte) *httptest.ResponseRecorder {
 		t.Helper()
@@ -75,7 +76,7 @@ func TestMachineServiceSignedRuntimePostgres(t *testing.T) {
 	}
 	var response struct {
 		Data struct {
-			Policy machineservices.RuntimePolicy `json:"machine_services_policy"`
+			Policy wire.RuntimePolicy `json:"machine_services_policy"`
 		}
 	}
 	if json.Unmarshal(w.Body.Bytes(), &response) != nil || !response.Data.Policy.AutomaticDiscoveryEnabled || response.Data.Policy.Generation != 1 {
