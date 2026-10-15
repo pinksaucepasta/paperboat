@@ -480,7 +480,7 @@ func (s *Service) Consume(ctx context.Context, sender, requestID, digest string)
 		if out.ManifestDigest != digest {
 			return ErrConflict
 		}
-		if !out.ExpiresAt.After(s.now().UTC()) {
+		if out.Status != "consumed" && !out.ExpiresAt.After(s.now().UTC()) {
 			if _, err = tx.Exec(ctx, `UPDATE team_inbox_requests SET status='expired',decision_generation=decision_generation+1,updated_at=$2 WHERE request_id=$1 AND status IN ('pending','approved')`, requestID, s.now().UTC()); err != nil {
 				return err
 			}
@@ -500,6 +500,10 @@ func (s *Service) Consume(ctx context.Context, sender, requestID, digest string)
 			return ErrConflict
 		}
 		_, err = tx.Exec(ctx, `UPDATE team_inbox_requests SET status='consumed',decision_generation=decision_generation+1,consumed_at=$2,updated_at=$2 WHERE request_id=$1`, requestID, s.now().UTC())
+		if err != nil {
+			return err
+		}
+		out, err = readTx(ctx, tx, requestID, sender)
 		if err != nil {
 			return err
 		}

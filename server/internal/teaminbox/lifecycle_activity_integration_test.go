@@ -82,11 +82,16 @@ func TestPostgresInboxLifecycleActivityAndCurrentAuthority(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = service.Consume(ctx, sender, request.RequestID, request.ManifestDigest); err != nil {
+	request, err = service.Consume(ctx, sender, request.RequestID, request.ManifestDigest)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = service.Consume(ctx, sender, request.RequestID, request.ManifestDigest); err != nil {
-		t.Fatalf("consume retry: %v", err)
+	admissionClock := service.now
+	service.now = func() time.Time { return request.ExpiresAt.Add(time.Second) }
+	resumed, err := service.Consume(ctx, sender, request.RequestID, request.ManifestDigest)
+	service.now = admissionClock
+	if err != nil || resumed.RequestID != request.RequestID || resumed.Status != "consumed" || resumed.DecisionGeneration != request.DecisionGeneration {
+		t.Fatalf("admitted transfer retry after approval expiry changed authority: %v", err)
 	}
 	if _, err = service.Complete(ctx, sender, request.RequestID, request.ManifestDigest); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("sender completed recipient publication: %v", err)
