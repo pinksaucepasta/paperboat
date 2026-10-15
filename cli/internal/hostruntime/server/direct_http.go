@@ -14,6 +14,9 @@ func ServeHTTPConnection(ctx context.Context, connection net.Conn, handler http.
 	if ctx == nil || connection == nil || handler == nil {
 		return ErrInvalidConfiguration
 	}
+	cached := &httpAdmission{ctx: ctx, connection: connection}
+	defer cached.Close()
+	ctx = context.WithValue(ctx, httpAdmissionKey{}, cached)
 	server := &http.Server{}
 	if admit, ok := ctx.Value(nativeHTTPAdmissionKey{}).(nativeHTTPAdmission); ok {
 		var mu sync.Mutex

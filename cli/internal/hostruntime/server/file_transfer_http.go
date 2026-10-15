@@ -170,6 +170,18 @@ func (h *FileTransferHandler) authorize(writer http.ResponseWriter, request *htt
 		writeHTTPError(writer, requestID, "unauthorized", http.StatusUnauthorized, false)
 		return Authorization{}, release, false
 	}
+	cached, _ := request.Context().Value(httpAdmissionKey{}).(*httpAdmission)
+	if cached != nil {
+		cached.mu.Lock()
+		defer cached.mu.Unlock()
+		if cached.authorization != nil {
+			if cached.token != token || cached.lifetime.Check() != nil {
+				writeHTTPError(writer, requestID, "unauthorized", http.StatusUnauthorized, false)
+				return Authorization{}, release, false
+			}
+			return *cached.authorization, release, true
+		}
+	}
 	authorizer, err := h.config.Authorizer(token)
 	if err != nil {
 		writeHTTPError(writer, requestID, "unauthorized", http.StatusUnauthorized, false)
@@ -185,6 +197,12 @@ func (h *FileTransferHandler) authorize(writer http.ResponseWriter, request *htt
 	}
 	frame := protocol.Frame{Type: "request", Version: protocol.ProtocolVersion, RequestID: requestID, OperationID: request.Header.Get(HeaderOperationID), Capability: "file-transfer.v1"}
 	authz, err := authorizer.Authorize(request.Context(), frame)
+	if err == nil && authz.JournalBinding != "" && cached != nil {
+		err = cached.keep(token, authz, release)
+		if err == nil {
+			release = func() {}
+		}
+	}
 	if err != nil || authz.JournalBinding == "" {
 		release()
 		if reportAuthorizationFailure(request.Context(), err) {
