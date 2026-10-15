@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/nativesession"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
@@ -112,6 +114,9 @@ func TestNativeNewResourceRefreshAndRejectedStreamIsolation(t *testing.T) {
 	}
 	echo := func(c net.Conn) {
 		t.Helper()
+		if e := c.SetDeadline(time.Now().Add(3 * time.Second)); e != nil {
+			t.Fatal(e)
+		}
 		if _, e := c.Write([]byte("x")); e != nil {
 			t.Fatal(e)
 		}
@@ -154,6 +159,52 @@ func TestNativeNewResourceRefreshAndRejectedStreamIsolation(t *testing.T) {
 		t.Fatalf("refresh attempts=%d", refreshes.Load())
 	}
 	echo(existing)
+	// Invalid or incomplete admission belongs to that stream, not every
+	// authorized application already sharing its QUIC connection.
+	for _, kind := range []string{"expired", "malformed", "unknown_consumer", "incomplete"} {
+		h, e := streamauth.New("bad_header", "terminal", "bad_header", "grant_test", time.Now().Add(time.Minute), 1<<20)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if kind == "expired" {
+			h.DeadlineUnix = time.Now().Add(-time.Second).Unix()
+		}
+		if kind == "unknown_consumer" {
+			h.Consumer = "unsupported"
+		}
+		encoded, e := json.Marshal(h)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if kind == "malformed" {
+			encoded = []byte("not-json-frame")
+		}
+		length := len(encoded)
+		if kind == "incomplete" {
+			length += 10
+		}
+		raw, e := session.Open(ctx)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if e = raw.SetDeadline(time.Now().Add(12 * time.Second)); e != nil {
+			t.Fatal(e)
+		}
+		var size [4]byte
+		binary.BigEndian.PutUint32(size[:], uint32(length))
+		if _, e = raw.Write(append(size[:], encoded...)); e != nil {
+			t.Fatal(e)
+		}
+		_, readErr := raw.Read(b[:])
+		raw.Close()
+		if readErr == nil {
+			t.Fatalf("%s header accepted", kind)
+		}
+		if timeout, ok := readErr.(net.Error); ok && timeout.Timeout() {
+			t.Fatalf("%s header admission was not bounded", kind)
+		}
+		echo(existing)
+	}
 	// Ending one operation must revoke its stream without dropping another
 	// still-authorized operation sharing the same native peer connection.
 	serverConfig.Generation++

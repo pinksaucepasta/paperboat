@@ -179,20 +179,17 @@ func (s *Session) AcceptAuthorized(ctx context.Context, authorize func(context.C
 	if err != nil {
 		return nil, streamauth.Header{}, err
 	}
-	encoded, err := readHeader(connection)
+	encoded, err := readAuthorizationHeader(connection)
 	if err != nil {
-		_ = connection.Close()
-		return nil, streamauth.Header{}, err
+		return rejectAuthorizedStream(connection, err)
 	}
 	header, err := streamauth.Parse(encoded, time.Now().UTC())
 	if err != nil {
-		_ = connection.Close()
-		return nil, streamauth.Header{}, err
+		return rejectAuthorizedStream(connection, err)
 	}
 	capability := capabilityForConsumer(header.Consumer)
 	if capability == "" {
-		_ = connection.Close()
-		return nil, streamauth.Header{}, tailnet.ErrAdmission
+		return rejectAuthorizedStream(connection, tailnet.ErrAdmission)
 	}
 	var accessSessionID string
 	err = s.authorizeIncoming(ctx, header, capability, func(ctx context.Context, header streamauth.Header) (string, error) {
@@ -201,14 +198,29 @@ func (s *Session) AcceptAuthorized(ctx context.Context, authorize func(context.C
 		return accessSessionID, authorizeErr
 	})
 	if err != nil {
-		_ = connection.Close()
-		return nil, streamauth.Header{}, errors.Join(ErrStreamRejected, err)
+		return rejectAuthorizedStream(connection, err)
 	}
 	scoped, err := s.bindScope(newLimitedConn(connection, header.MaximumBytes), accessSessionID, capability, "accept")
 	if err != nil {
-		return nil, streamauth.Header{}, err
+		return rejectAuthorizedStream(connection, err)
 	}
 	return s.MeterIncoming(scoped, header, accessSessionID, false), header, nil
+}
+
+// Header parsing is per-stream admission. A bad or abandoned header must
+// neither tear down other applications nor hold the accept loop indefinitely.
+const authorizationHeaderTimeout = 5 * time.Second
+
+func readAuthorizationHeader(connection net.Conn) ([]byte, error) {
+	if err := connection.SetReadDeadline(time.Now().Add(authorizationHeaderTimeout)); err != nil {
+		return nil, err
+	}
+	encoded, err := readHeader(connection)
+	return encoded, errors.Join(err, connection.SetReadDeadline(time.Time{}))
+}
+
+func rejectAuthorizedStream(connection net.Conn, err error) (net.Conn, streamauth.Header, error) {
+	return nil, streamauth.Header{}, errors.Join(ErrStreamRejected, err, connection.Close())
 }
 
 func capabilityForConsumer(consumer string) string {
