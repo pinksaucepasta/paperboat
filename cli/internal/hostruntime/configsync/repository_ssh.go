@@ -254,7 +254,7 @@ func (s *repositorySSHSession) ReceivePack(ctx context.Context, req *packp.Refer
 		return nil, s.failure(ctx, err)
 	}
 	if !req.Capabilities.Supports(capability.ReportStatus) {
-		return nil, s.failure(ctx, s.Close())
+		return nil, s.Close()
 	}
 	r := s.out
 	var demux *sideband.Demuxer
@@ -275,7 +275,7 @@ func (s *repositorySSHSession) ReceivePack(ctx context.Context, req *packp.Refer
 	if err := report.Error(); err != nil {
 		return report, err
 	}
-	return report, s.failure(ctx, s.Close())
+	return report, s.Close()
 }
 func (s *repositorySSHSession) Close() error {
 	s.once.Do(func() {

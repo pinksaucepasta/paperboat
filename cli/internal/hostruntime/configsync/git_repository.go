@@ -3,6 +3,7 @@ package configsync
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat-relay/admission"
 	"io"
 	"net"
 	"os"
@@ -65,8 +66,12 @@ func (r *GitRepository) Fetch(ctx context.Context) (result RemoteSnapshot, resul
 	if err != nil {
 		return RemoteSnapshot{}, err
 	}
-	ctx, cancel := context.WithDeadline(ctx, access.ExpiresAt)
-	defer cancel()
+	lease, err := admission.Admit(ctx, time.Time{}, nil)
+	if err != nil {
+		return RemoteSnapshot{}, err
+	}
+	defer lease.Close()
+	ctx = lease.Context()
 	opts, err := r.transportAccess(ctx, access)
 	if err != nil {
 		return RemoteSnapshot{}, err
@@ -175,8 +180,12 @@ func (r *GitRepository) Publish(ctx context.Context, prepared PreparedPublicatio
 	if err != nil || localReference.Hash().String() != prepared.CommitID {
 		return PublishResult{}, ErrGitRepositoryInvalid
 	}
-	ctx, cancel := context.WithDeadline(ctx, access.ExpiresAt)
-	defer cancel()
+	lease, err := admission.Admit(ctx, time.Time{}, nil)
+	if err != nil {
+		return PublishResult{}, err
+	}
+	defer lease.Close()
+	ctx = lease.Context()
 	if access.Transport == "local" {
 		return publishLocal(ctx, repository, access, prepared)
 	}
@@ -214,8 +223,12 @@ func (r *GitRepository) ObserveCommit(ctx context.Context, commitID string) (lan
 	if err != nil {
 		return false, "", err
 	}
-	ctx, cancel := context.WithDeadline(ctx, access.ExpiresAt)
-	defer cancel()
+	lease, err := admission.Admit(ctx, time.Time{}, nil)
+	if err != nil {
+		return false, "", err
+	}
+	defer lease.Close()
+	ctx = lease.Context()
 	opts, err := r.transportAccess(ctx, access)
 	if err != nil {
 		return false, "", err
@@ -285,8 +298,12 @@ func (r *GitRepository) open(ctx context.Context) (accessResult RepositoryAccess
 	if err != nil || kind != access.Transport || normalized != repositoryURL {
 		return RepositoryAccess{}, nil, ErrGitRepositoryInvalid
 	}
-	ctx, cancel := context.WithDeadline(ctx, access.ExpiresAt)
-	defer cancel()
+	lease, err := admission.Admit(ctx, access.ExpiresAt, nil)
+	if err != nil {
+		return RepositoryAccess{}, nil, err
+	}
+	defer lease.Close()
+	ctx = lease.Context()
 	if kind == "local" {
 		if _, err := openLocalRepositoryContext(ctx, repositoryURL); err != nil {
 			return RepositoryAccess{}, nil, err

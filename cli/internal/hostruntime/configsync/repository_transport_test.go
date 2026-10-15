@@ -25,6 +25,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -566,5 +567,101 @@ func TestLocalFileURLNoGitPublish(t *testing.T) {
 	result, err := repo.Publish(context.Background(), prepared, 1)
 	if err != nil || !result.Landed {
 		t.Fatal("local file URL publish failed", err)
+	}
+}
+
+func TestGitOperationsOutliveAdmissionAndHonorWithdrawal(t *testing.T) {
+	bare, _ := transportFixture(t)
+	setSharedSource(t, bare, []byte(`"version" = 1
+`))
+	handler := smartGitHandler(t, bare, "reader", "fixture-password")
+	var deadline atomic.Int64
+	var delay atomic.Bool
+	entered := make(chan struct{}, 1)
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if delay.Swap(false) {
+			select {
+			case entered <- struct{}{}:
+			default:
+			}
+			timer := time.NewTimer(time.Until(time.Unix(0, deadline.Load())) + 50*time.Millisecond)
+			defer timer.Stop()
+			select {
+			case <-timer.C:
+			case <-r.Context().Done():
+				return
+			}
+		}
+		handler.ServeHTTP(w, r)
+	}))
+	defer srv.Close()
+	credentials := t.TempDir()
+	if err := EnsureRepositoryCredentialRoot(credentials); err != nil {
+		t.Fatal(err)
+	}
+	ca := filepath.Join(credentials, "ca.pem")
+	if err := os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw}), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveRepositoryCredentialProfile(credentials, "repo", RepositoryCredentialProfile{Transport: "https", Auth: "basic", Username: "reader", Password: "fixture-password", CAFile: ca}); err != nil {
+		t.Fatal(err)
+	}
+	repo := newTransportRepository(t, srv.URL+"/repo.git", "https", credentials)
+	admit := func() {
+		access := repo.access.(staticAccessSource).access
+		access.ExpiresAt = time.Now().Add(150 * time.Millisecond)
+		repo.access = staticAccessSource{access}
+		deadline.Store(access.ExpiresAt.UnixNano())
+		delay.Store(true)
+	}
+	admit()
+	snapshot, err := repo.Fetch(t.Context())
+	if err != nil {
+		t.Fatal("admitted clone/fetch ended at credential expiry", err)
+	}
+	if _, err := repo.Fetch(t.Context()); !errors.Is(err, ErrAuthorization) {
+		t.Fatal("expired new admission accepted", err)
+	}
+	prepared, err := repo.Reconcile(t.Context(), snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	admit()
+	result, err := repo.Publish(t.Context(), prepared, 1)
+	if err != nil || !result.Landed {
+		t.Fatal("admitted push ended at credential expiry", err)
+	}
+	admit()
+	if landed, _, err := repo.ObserveCommit(t.Context(), prepared.CommitID); err != nil || !landed {
+		t.Fatal("admitted observation ended at credential expiry", err)
+	}
+	readAccess := readGrant(srv.URL+"/repo.git", "https")
+	readAccess.ExpiresAt = time.Now().Add(150 * time.Millisecond)
+	deadline.Store(readAccess.ExpiresAt.UnixNano())
+	delay.Store(true)
+	if _, revision, err := ReadSharedRepositoryConfig(t.Context(), t.TempDir(), credentials, readAccess, DefaultSourceConfigLimits()); err != nil || revision == "" {
+		t.Fatal("admitted bootstrap read ended at credential expiry", err)
+	}
+	for len(entered) > 0 {
+		<-entered
+	}
+	admit()
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { _, err := repo.Fetch(ctx); done <- err }()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		cancel()
+		t.Fatal("Git request did not start")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatal("withdrawal did not cancel Git work", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("withdrawn Git work stayed active")
 	}
 }

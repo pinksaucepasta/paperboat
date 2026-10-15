@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"github.com/pinksaucepasta/paperboat-relay/admission"
 	"io"
 	"os"
 	"path/filepath"
@@ -70,8 +71,12 @@ func readSharedRepositoryConfig(ctx context.Context, root, credentialRoot string
 	if limits.MaxBytes <= 0 || limits.MaxBytes > defaults.MaxBytes || limits.MaxPaths <= 0 || limits.MaxPaths > defaults.MaxPaths || limits.MaxPatterns <= 0 || limits.MaxPatterns > defaults.MaxPatterns || limits.MaxPatternBytes <= 0 || limits.MaxPatternBytes > defaults.MaxPatternBytes {
 		return fail(ErrSourceConfigInvalid)
 	}
-	ctx, cancel := context.WithDeadline(ctx, access.ExpiresAt)
-	defer cancel()
+	lease, err := admission.Admit(ctx, access.ExpiresAt, nil)
+	if err != nil {
+		return fail(err)
+	}
+	defer lease.Close()
+	ctx = lease.Context()
 	if err := ctx.Err(); err != nil {
 		return fail(err)
 	}

@@ -177,14 +177,24 @@ func TestSupervisorObservesAndRecoversFromInvalidCredentialWithoutError(t *testi
 	case <-time.After(2 * time.Second):
 		t.Fatal("supervisor did not activate after the credential became valid")
 	}
-	var recovered bool
-	for _, event := range recorder.Recent() {
-		if event.Code == "recovered" {
-			recovered = event.SupportReference == reference
+	// Start can publish runtime readiness before its caller records recovery.
+	// Observe the actual diagnostic instead of racing that independent event.
+	observed := time.NewTimer(time.Second)
+	defer observed.Stop()
+	tick := time.NewTicker(time.Millisecond)
+	defer tick.Stop()
+recoveredLoop:
+	for {
+		for _, event := range recorder.Recent() {
+			if event.Code == "recovered" && event.SupportReference == reference {
+				break recoveredLoop
+			}
 		}
-	}
-	if !recovered {
-		t.Fatal("credential recovery was not recorded with the original support reference")
+		select {
+		case <-observed.C:
+			t.Fatal("credential recovery was not recorded with the original support reference")
+		case <-tick.C:
+		}
 	}
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Second)
