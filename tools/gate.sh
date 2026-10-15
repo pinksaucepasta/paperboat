@@ -36,7 +36,8 @@ for f in sorted(glob.glob('tools/device-smoke/results/*.json')):
         continue
     if d.get('expect_version') == want:
         head = (f, d.get('results') or [])
-    passed |= {r['id'] for r in d.get('results') or [] if r['status'] == 'PASS'}
+    # Windows (victus) is after launch (PLAN.md 1.1), so its checks do not gate.
+    passed |= {r['id'] for r in d.get('results') or [] if r['status'] == 'PASS' and not r['id'].endswith(':victus')}
 if head is None:
     print(f"FAIL: runtime code changed but no smoke result for build {want}.")
     print(f"      Build HEAD for all devices, install it, run tools/device-smoke/smoke.sh --expect-version {want}")
