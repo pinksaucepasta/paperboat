@@ -415,7 +415,7 @@ func (s *Service) persistInstallationCLISessionTx(ctx context.Context, tx *db.Tx
 	return nil
 }
 
-func (s *Service) buildInstallationMaterial(ctx context.Context, userID string, pairing dbsqlc.UserMachinePairing, machine UserMachine, operationKey string, existingClientSession json.RawMessage, reuseRuntimeIdentity bool, expectedHelperID string, authorityGuard HelperEnrollmentAuthorityGuard) (installationMaterialBuild, error) {
+func (s *Service) buildInstallationMaterial(ctx context.Context, userID string, pairing dbsqlc.UserMachinePairing, machine UserMachine, operationKey string, existingClientSession json.RawMessage, issueCLICredentials, reuseRuntimeIdentity bool, expectedHelperID string, authorityGuard HelperEnrollmentAuthorityGuard) (installationMaterialBuild, error) {
 	if strings.TrimSpace(s.encryptionKey) == "" {
 		return installationMaterialBuild{}, errors.New("user-machine provisioning encryption is not configured")
 	}
@@ -478,7 +478,7 @@ func (s *Service) buildInstallationMaterial(ctx context.Context, userID string, 
 		}
 	}
 	var cliSessionID, cliAccessToken, cliRefreshToken string
-	if len(existingClientSession) == 0 && s.cliClientID != "" && s.cliScopes != "" && len(s.cliHashKey) > 0 && s.cliAccessLifetime > 0 && s.cliRefreshLifetime > 0 {
+	if len(existingClientSession) == 0 && issueCLICredentials && s.cliClientID != "" && s.cliScopes != "" && len(s.cliHashKey) > 0 && s.cliAccessLifetime > 0 && s.cliRefreshLifetime > 0 {
 		cliSessionID = newID("session")
 		cliAccessToken, cliRefreshToken = oneShotToken(32), oneShotToken(32)
 	}
@@ -525,7 +525,7 @@ func (s *Service) provisionApprovedUserMachineWithOperation(ctx context.Context,
 	if err != nil {
 		return err
 	}
-	build, err := s.buildInstallationMaterial(ctx, userID, pairing, machine, operationKey, nil, pairing.CanReuseRuntimeIdentity, "", nil)
+	build, err := s.buildInstallationMaterial(ctx, userID, pairing, machine, operationKey, nil, true, pairing.CanReuseRuntimeIdentity, "", nil)
 	if err != nil {
 		return err
 	}
@@ -601,11 +601,11 @@ func (s *Service) provisionRecoveredUserMachine(ctx context.Context, userID stri
 	if authenticatedBinding != nil {
 		authorityGuard = s.authenticatedMachineInstallationRecoveryAuthorityGuard(userID, pairing, *authenticatedBinding, materialSessionID)
 	}
-	build, err := s.buildInstallationMaterial(ctx, userID, pairing, machine, operationKey, existingClientSession, runtimeEnrolled, expectedHelperID, authorityGuard)
+	build, err := s.buildInstallationMaterial(ctx, userID, pairing, machine, operationKey, existingClientSession, !runtimeEnrolled, runtimeEnrolled, expectedHelperID, authorityGuard)
 	if err != nil {
 		return nil, err
 	}
-	if len(existingClientSession) > 0 {
+	if len(existingClientSession) > 0 && !runtimeEnrolled {
 		var session installationClientSession
 		if err := json.Unmarshal(existingClientSession, &session); err != nil || session.Schema != "paperboat.cli-session/v1" || session.SessionID == "" || session.AccessToken == "" || session.RefreshToken == "" || s.cliClientID == "" || len(s.cliHashKey) == 0 || s.cliAccessLifetime <= 0 || s.cliRefreshLifetime <= 0 {
 			return nil, ErrInstallationUnavailable
@@ -640,13 +640,13 @@ func (s *Service) provisionRecoveredUserMachine(ctx context.Context, userID stri
 				return ErrInstallationUnavailable
 			}
 		}
-		if build.existingCLISessionID != "" {
-			identity, identityErr := tx.Queries().GetClientSessionForInstallationRecovery(ctx, build.existingCLISessionID)
+		if materialSessionID != "" {
+			identity, identityErr := tx.Queries().GetClientSessionForInstallationRecovery(ctx, materialSessionID)
 			if identityErr != nil || identity.UserID != userID || identity.ClientID != s.cliClientID {
 				return ErrInstallationUnavailable
 			}
 			if bound, bindErr := tx.Queries().BindCLIClientSessionToUserMachine(ctx, dbsqlc.BindCLIClientSessionToUserMachineParams{
-				TargetMachineID: sql.NullString{String: machine.ID, Valid: true}, TargetCLISessionID: build.existingCLISessionID, TargetUserID: userID,
+				TargetMachineID: sql.NullString{String: machine.ID, Valid: true}, TargetCLISessionID: materialSessionID, TargetUserID: userID,
 			}); bindErr != nil {
 				return bindErr
 			} else if bound != 1 {

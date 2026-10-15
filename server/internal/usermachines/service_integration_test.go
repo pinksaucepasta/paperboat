@@ -2079,6 +2079,12 @@ func TestInstallationMaterialIsSingleUseAndExpiryBound(t *testing.T) {
 }
 
 func TestExpiredInstallationRecoveryIsCrashSafeConcurrentAndIdentityBound(t *testing.T) {
+	t.Run("active_refresh_and_response_loss", func(t *testing.T) { testExpiredInstallationRecovery(t, false) })
+	t.Run("explicit_revocation", func(t *testing.T) { testExpiredInstallationRecovery(t, true) })
+}
+
+func testExpiredInstallationRecovery(t *testing.T, revoke bool) {
+	t.Helper()
 	store := testStore(t)
 	ctx := context.Background()
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
@@ -2091,7 +2097,7 @@ func TestExpiredInstallationRecoveryIsCrashSafeConcurrentAndIdentityBound(t *tes
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machine_entitlements (id,user_id,provider_subscription_id,product_code,state,seat_quantity,allowance_bytes,current_period_start,current_period_end) VALUES ($1,$2,$3,'connected-test','active',1,1048576,now()-interval '1 hour',now()+interval '1 hour')`, "ent_install_recovery_"+suffix, userID, "sub_install_recovery_"+suffix); err != nil {
 		t.Fatal(err)
 	}
-	service := New(store, audit.NewWriter(store), Policy{PairingLifetime: 10 * time.Minute, AllowedPlatforms: []string{"windows"}}, testSeatAuthorizer{})
+	service := New(store, audit.NewWriter(store), Policy{PairingLifetime: 10 * time.Minute, AllowedPlatforms: []string{"linux"}}, testSeatAuthorizer{})
 	service.ConfigureInstallationEncryption("test-install-recovery-key")
 	service.ConfigureAccess(nil, "https://api.paperboat.test")
 	service.ConfigureCLIAuth("paperboat-cli", []string{"account:read", "machines:connect", "session:refresh"}, 5*time.Minute, 24*time.Hour, "test-cli-hash-key")
@@ -2124,12 +2130,12 @@ func TestExpiredInstallationRecoveryIsCrashSafeConcurrentAndIdentityBound(t *tes
 		grantMu.Unlock()
 		return HelperEnrollmentGrant{EnrollmentID: "henr_recovered_" + suffix, HelperID: "helper_recovered_" + suffix, Credential: strings.Repeat("recovered", 8), ExpiresAt: time.Now().UTC().Add(10 * time.Minute)}, nil
 	})
-	start, err := service.StartEnrollmentWithOptions(ctx, userID, "idem-install-recovery-"+suffix, EnrollmentOptions{Shell: "powershell"})
+	start, err := service.StartEnrollmentWithOptions(ctx, userID, "idem-install-recovery-"+suffix, EnrollmentOptions{Shell: "posix"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	verifier := "verifier-install-recovery-" + suffix
-	pairing, err := service.CreatePairing(ctx, PairingInput{EnrollmentToken: start.BootstrapToken, Verifier: verifier, Alias: "victus-recovery", Platform: "windows", Architecture: "amd64", WorkspaceRoot: `C:\Users\Pujan`, PublicIdentityKey: publicIdentityKey})
+	pairing, err := service.CreatePairing(ctx, PairingInput{EnrollmentToken: start.BootstrapToken, Verifier: verifier, Alias: "recovery-host", Platform: "linux", Architecture: "amd64", WorkspaceRoot: "/home/test", PublicIdentityKey: publicIdentityKey})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2146,6 +2152,7 @@ func TestExpiredInstallationRecoveryIsCrashSafeConcurrentAndIdentityBound(t *tes
 		EnvironmentID string                    `json:"environment_id"`
 		HelperID      string                    `json:"helper_id"`
 		ReuseIdentity bool                      `json:"reuse_identity"`
+		Generation    int64                     `json:"installation_generation"`
 		ClientSession installationClientSession `json:"client_session"`
 	}
 	var original recoveryMaterial
@@ -2157,7 +2164,7 @@ func TestExpiredInstallationRecoveryIsCrashSafeConcurrentAndIdentityBound(t *tes
 	}
 	// A journal that already persisted the runtime identity may recover only
 	// against the exact helper bound into its original signed material. This
-	// path rotates the CLI access and refresh tokens without issuing a replacement helper.
+	// path retains current CLI profile ownership without issuing replacement credentials.
 	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machine_pairings
 SET expires_at=now()-interval '1 minute', installation_config_consumed_at=now()-interval '1 hour', installation_state='ready'
 WHERE id=$1`, pairing.ID); err != nil {
@@ -2175,6 +2182,16 @@ WHERE id=$1`, pairing.ID); err != nil {
 	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET installation_generation=installation_generation-1 WHERE id=$1`, original.UserMachineID); err != nil {
 		t.Fatal(err)
 	}
+	machineAuth := authservice.NewDeviceService(store, audit.NewWriter(store), config.Default().CLIAuth, []string{"test-cli-hash-key"})
+	machineAuth.ConfigureAuthorizationEncryptionKey("test-refresh-recovery-encryption")
+	currentProfile, err := machineAuth.Refresh(ctx, original.ClientSession.RefreshToken, strings.Repeat("a", 64))
+	if err != nil {
+		t.Fatalf("active daemon initial refresh: %v", err)
+	}
+	var tokenCountBefore int
+	if err := store.SQL().QueryRowContext(ctx, `SELECT (SELECT count(*) FROM paperboat.cli_access_tokens WHERE cli_client_session_id=$1) + (SELECT count(*) FROM paperboat.cli_refresh_tokens WHERE cli_client_session_id=$1)`, original.ClientSession.SessionID).Scan(&tokenCountBefore); err != nil {
+		t.Fatal(err)
+	}
 	reusedBody, err := service.ConsumeInstallationForIdentityState(ctx, verifier, publicIdentityKey, true)
 	if err != nil {
 		t.Fatal(err)
@@ -2186,9 +2203,57 @@ WHERE id=$1`, pairing.ID); err != nil {
 	if reused.HelperID != original.HelperID || !reused.ReuseIdentity {
 		t.Fatalf("runtime-enrolled recovery changed helper binding: same_helper=%v reuse_identity=%v", original.HelperID == reused.HelperID, reused.ReuseIdentity)
 	}
-	if reused.ClientSession.SessionID != original.ClientSession.SessionID || reused.ClientSession.RefreshToken == original.ClientSession.RefreshToken || reused.ClientSession.AccessToken == original.ClientSession.AccessToken {
-		t.Fatalf("runtime-enrolled recovery session binding: same_session=%v same_refresh=%v rotated_access=%v", reused.ClientSession.SessionID == original.ClientSession.SessionID, reused.ClientSession.RefreshToken == original.ClientSession.RefreshToken, reused.ClientSession.AccessToken != original.ClientSession.AccessToken)
+	if reused.ClientSession.SessionID != "" {
+		t.Fatal("admitted-runtime recovery must not return stale or replacement CLI credentials")
 	}
+	var tokenCountAfter int
+	if err := store.SQL().QueryRowContext(ctx, `SELECT (SELECT count(*) FROM paperboat.cli_access_tokens WHERE cli_client_session_id=$1) + (SELECT count(*) FROM paperboat.cli_refresh_tokens WHERE cli_client_session_id=$1)`, original.ClientSession.SessionID).Scan(&tokenCountAfter); err != nil {
+		t.Fatal(err)
+	}
+	if tokenCountAfter != tokenCountBefore {
+		t.Fatal("runtime recovery issued new CLI tokens")
+	}
+	if _, err := machineAuth.Authenticate(ctx, currentProfile.AccessToken); err != nil {
+		t.Fatalf("runtime recovery revoked current access: %v", err)
+	}
+	// Discard the response as if the network lost it. The existing daemon can
+	// refresh, and the same journal can recover again without overwriting it.
+	refreshed, err := machineAuth.Refresh(ctx, currentProfile.RefreshToken, strings.Repeat("b", 64))
+	if err != nil {
+		t.Fatalf("runtime recovery revoked active refresh after lost response: %v", err)
+	}
+	repeatedRefresh, err := machineAuth.Refresh(ctx, currentProfile.RefreshToken, strings.Repeat("b", 64))
+	if err != nil || repeatedRefresh.AccessToken != refreshed.AccessToken || repeatedRefresh.RefreshToken != refreshed.RefreshToken || repeatedRefresh.CLIClientSessionID != refreshed.CLIClientSessionID || repeatedRefresh.ExpiresIn <= 0 || repeatedRefresh.ExpiresIn > refreshed.ExpiresIn {
+		t.Fatal("same refresh attempt lost its immutable recovery receipt")
+	}
+	replayedRuntime, err := service.ConsumeInstallationForIdentityState(ctx, verifier, publicIdentityKey, true)
+	if err != nil {
+		t.Fatalf("admitted recovery after response loss: %v", err)
+	}
+	var replayedIdentity recoveryMaterial
+	if err := json.Unmarshal(replayedRuntime, &replayedIdentity); err != nil {
+		t.Fatal(err)
+	}
+	if replayedIdentity.UserMachineID != reused.UserMachineID || replayedIdentity.PairingID != reused.PairingID || replayedIdentity.EnvironmentID != reused.EnvironmentID || replayedIdentity.HelperID != reused.HelperID || replayedIdentity.Generation != reused.Generation || !replayedIdentity.ReuseIdentity || replayedIdentity.ClientSession.SessionID != "" {
+		t.Fatal("admitted response-loss recovery changed exact identity or returned CLI credentials")
+	}
+	if _, err := machineAuth.Authenticate(ctx, refreshed.AccessToken); err != nil {
+		t.Fatalf("recovery replay revoked refreshed profile: %v", err)
+	}
+	if revoke {
+		if err := machineAuth.RevokeClient(ctx, userID, original.ClientSession.SessionID, "user_logout"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := service.ConsumeInstallationForIdentityState(ctx, verifier, publicIdentityKey, true); !errors.Is(err, ErrInstallationUnavailable) {
+			t.Fatalf("explicitly revoked session recovered runtime: %v", err)
+		}
+		if _, err := machineAuth.Authenticate(ctx, refreshed.AccessToken); err == nil {
+			t.Fatal("explicit revocation retained live profile access")
+		}
+		return
+	}
+	reused.ClientSession = original.ClientSession
+	reused.ClientSession.AccessToken, reused.ClientSession.RefreshToken = refreshed.AccessToken, refreshed.RefreshToken
 	// Recovery preserves the machine/session binding while retiring both old
 	// credentials. Verify the durable token records, not just different strings.
 	assertRotation := func(previous, next installationClientSession) {
@@ -2214,7 +2279,6 @@ WHERE id=$1`, pairing.ID); err != nil {
 			t.Fatalf("recovery rejected replacement access token: err=%v", err)
 		}
 	}
-	assertRotation(original.ClientSession, reused.ClientSession)
 	grantMu.Lock()
 	for operation, calls := range grantCalls {
 		if strings.HasPrefix(operation, "machine-recovery:") && calls != 0 {

@@ -122,7 +122,12 @@ func (s *Service) ConsumeInstallationForIdentityState(ctx context.Context, verif
 	return s.consumeInstallation(ctx, verifier, strings.TrimSpace(publicIdentityKey), runtimeEnrolled)
 }
 
-func (s *Service) consumeInstallation(ctx context.Context, verifier, publicIdentityKey string, runtimeEnrolled bool) (json.RawMessage, error) {
+func (s *Service) consumeInstallation(ctx context.Context, verifier, publicIdentityKey string, runtimeEnrolled bool) (material json.RawMessage, err error) {
+	defer func() {
+		if err == nil && runtimeEnrolled {
+			material, err = s.runtimeRecoveryMaterial(ctx, verifier, publicIdentityKey, material)
+		}
+	}()
 	if strings.TrimSpace(verifier) == "" || strings.TrimSpace(s.encryptionKey) == "" {
 		return nil, ErrInstallationUnavailable
 	}
@@ -131,7 +136,7 @@ func (s *Service) consumeInstallation(ctx context.Context, verifier, publicIdent
 	var ciphertext []byte
 	var recoveryPairing dbsqlc.UserMachinePairing
 	var recoveryUserID string
-	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+	err = s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		value, err := tx.Queries().ConsumeUserMachineInstallationConfig(ctx, dbsqlc.ConsumeUserMachineInstallationConfigParams{VerifierHash: hash[:], PublicIdentityKey: publicIdentityKey})
 		if errors.Is(err, sql.ErrNoRows) {
 			// A successful response can be lost after the database transaction
@@ -802,7 +807,7 @@ func (s *Service) PrepareAuthenticatedMachineInstallation(ctx context.Context, u
 			}
 			return nil
 		}
-		build, buildErr := s.buildInstallationMaterial(ctx, userID, pairing, machine, operationKey, nil, in.CanReuseRuntimeIdentity, "", authorityGuard)
+		build, buildErr := s.buildInstallationMaterial(ctx, userID, pairing, machine, operationKey, nil, true, in.CanReuseRuntimeIdentity, "", authorityGuard)
 		if buildErr != nil {
 			return AuthenticatedMachineInstallation{}, buildErr
 		}

@@ -25423,7 +25423,7 @@
     "/v1/machines/pairings/installation": {
       "post": {
         "summary": "Consume or recover approved machine installation material",
-        "description": "Exchanges the pairing verifier and the machine's stable public identity key for installation material. The first successful exchange consumes the pairing. A retry for the same identity can replay material while the enrollment is still installing; a protected resume can recover material for up to 24 hours after the original delivery. The runtime_enrolled assertion controls whether an existing helper identity may be reused; mismatched identities, completed enrollments, and expired recovery windows fail closed.",
+        "description": "Exchanges the pairing verifier and the machine's stable public identity key for installation material. The first successful exchange consumes the pairing. A retry for the same identity can replay material while the enrollment is still installing; a protected resume can recover material for up to 24 hours after the original delivery. For runtime_enrolled=true, current exact machine/helper/key/generation and active CLI session authority are revalidated, reuse_identity is true, and client_session plus enrollment credentials are omitted. Recovery never issues, rotates or revokes the running profile's CLI tokens; clients preserve their current protected profile and normal refresh owner. Response-loss retries return the same identity without reinstalling stale credentials. Explicit revocation, mismatched identities and expired recovery windows fail closed; a missing or revoked profile requires normal account sign-in and authenticated setup.",
         "security": [],
         "requestBody": {
           "required": true,
