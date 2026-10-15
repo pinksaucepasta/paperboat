@@ -520,7 +520,9 @@ func TestNetworkAuthorityRotationReplayRestartAndFailedWrite(t *testing.T) {
 
 func TestNetworkAuthorityPartitionExpiry(t *testing.T) {
 	a, c, priv, _ := networkTestAuthority(t)
-	c.ExpiresAt = time.Now().Unix() + 1
+	// Unix timestamps truncate fractional seconds. Leave at least one full
+	// second for signing and applying before testing the actual expiry.
+	c.ExpiresAt = time.Now().Unix() + 2
 	if err := a.Apply(context.Background(), networkToken(t, priv, c)); err != nil {
 		t.Fatal(err)
 	}
