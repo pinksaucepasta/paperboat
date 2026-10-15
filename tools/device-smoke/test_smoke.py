@@ -5,11 +5,69 @@ import subprocess
 import tempfile
 import time
 import unittest
+import socket
+import socketserver
+import threading
 
 from install_path import windows_executable
 from uninstall_inventory import retained
+from pairing_fault import PairingFaultProxy
 
 HERE = pathlib.Path(__file__).resolve().parent
+
+
+class PairingNetworkFault(unittest.TestCase):
+    def test_cut_closes_live_tunnel_and_same_proxy_accepts_recovery(self):
+        class Echo(socketserver.BaseRequestHandler):
+            def handle(self):
+                self.request.settimeout(3)
+                while True:
+                    data = self.request.recv(128)
+                    if not data:
+                        return
+                    self.request.sendall(data)
+
+        class Server(socketserver.ThreadingTCPServer):
+            daemon_threads = True
+
+        server = Server(('127.0.0.1', 0), Echo)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        proxy = PairingFaultProxy(*server.server_address)
+        def connect(target):
+            connection = socket.create_connection(proxy.address, timeout=3)
+            connection.sendall(('CONNECT ' + target + ' HTTP/1.1\r\n\r\n').encode())
+            response = bytearray()
+            while not response.endswith(b'\r\n\r\n'):
+                value = connection.recv(1)
+                if not value:
+                    connection.close()
+                    raise EOFError('proxy closed before its CONNECT response')
+                response.extend(value)
+            return connection, bytes(response)
+
+        try:
+            with self.subTest('endpoint denial'):
+                connection, response = connect('other.example.test:443')
+                with connection:
+                    self.assertIn(b'403 Forbidden', response)
+            connection, response = connect(proxy.authority)
+            with connection:
+                self.assertIn(b'200 Connection Established', response)
+                connection.sendall(b'fixture-before-cut')
+                self.assertEqual(connection.recv(128), b'fixture-before-cut')
+                self.assertEqual(proxy.cut(), 1)
+                self.assertEqual(connection.recv(128), b'')
+            connection, response = connect(proxy.authority)
+            with connection:
+                self.assertIn(b'200 Connection Established', response)
+                connection.sendall(b'fixture-after-cut')
+                self.assertEqual(connection.recv(128), b'fixture-after-cut')
+        finally:
+            proxy.close()
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=3)
 
 
 class UninstallInventoryPreservation(unittest.TestCase):
