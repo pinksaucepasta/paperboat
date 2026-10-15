@@ -142,6 +142,12 @@ only when all its rows across lanes are done; Lane A runs its device verificatio
 
 - **Unit tests** for every change, in the package that owns the behaviour. They must not
   be weakened to pass. Run the affected packages (`go vet`, `go test -race` for concurrency).
+- **A check that passed before and fails now is found by bisection, not by reading logs alone.**
+  First re-run only that check (`smoke.sh --targets <device>` with `--skip` for the rest) on the
+  last build where it passed, to confirm it is a regression and not a flake. Then bisect the
+  commits between that build and HEAD with the same single check (`git bisect`, one device
+  build per step) until one commit is named. Diagnose and fix that commit's change. Never rerun
+  the full suite to investigate one failing check.
 - **Every real-device failure gets a workspace test** that reproduces it (fails before the
   fix, passes after), so it is caught without devices next time.
 - **Device smoke suite** after every device build:
