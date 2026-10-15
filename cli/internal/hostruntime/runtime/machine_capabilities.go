@@ -157,14 +157,25 @@ func (c *machineCapabilityController) Observation(now time.Time) *machineCapabil
 	return &machineCapabilitiesObservation{Schema: machineCapabilitiesSchemaV1, Version: c.version, Applied: c.applied, Status: c.status, ErrorCode: c.errorCode, ObservedAt: now.UTC()}
 }
 
-func applyRuntimeMachineCapabilities(ctx context.Context, body []byte, controller *machineCapabilityController) error {
+func applyRuntimeMachineCapabilities(ctx context.Context, body []byte, controller *machineCapabilityController) (bool, error) {
 	var response struct {
 		Data struct {
-			Policy *machineCapabilityPolicy `json:"machine_capabilities"`
+			Policy     *machineCapabilityPolicy `json:"machine_capabilities"`
+			Rejections []struct {
+				Observation string `json:"observation"`
+			} `json:"auxiliary_rejections"`
 		} `json:"data"`
 	}
 	if controller == nil || json.Unmarshal(body, &response) != nil || response.Data.Policy == nil {
-		return errors.New("runtime response has no machine capability policy")
+		return false, errors.New("runtime response has no machine capability policy")
 	}
-	return controller.Apply(ctx, *response.Data.Policy)
+	if err := controller.Apply(ctx, *response.Data.Policy); err != nil {
+		return false, err
+	}
+	for _, rejection := range response.Data.Rejections {
+		if rejection.Observation == "machine_capabilities" {
+			return false, nil
+		}
+	}
+	return true, nil
 }

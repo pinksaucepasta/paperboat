@@ -3,7 +3,6 @@
 package runtime
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -14,8 +13,6 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/google/uuid"
-	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
-	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -24,22 +21,18 @@ import (
 	"os/user"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	clientapi "github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
 	"github.com/pinksaucepasta/paperboat/internal/bandwidth"
 	clientconfig "github.com/pinksaucepasta/paperboat/internal/config"
-	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/availability"
 	runtimeconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/enrollment"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/envinject"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/environmentkey"
@@ -55,14 +48,11 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
 	hosttelemetry "github.com/pinksaucepasta/paperboat/internal/hostruntime/telemetry"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelmanager"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
 	"github.com/pinksaucepasta/paperboat/internal/httptransport"
 	"github.com/pinksaucepasta/paperboat/internal/inspector"
-	"github.com/pinksaucepasta/paperboat/internal/machineservices"
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 	"github.com/pinksaucepasta/paperboat/internal/nativeprivate"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/endpointidentity"
-	"github.com/pinksaucepasta/paperboat/internal/supportref"
 )
 
 var (
@@ -829,451 +819,6 @@ func validateMachineWorkspaceUnix(root string) error {
 		return errors.Join(ErrProductionInvalid, errors.New("machine workspace symlink resolution is not permitted"))
 	}
 	return nil
-}
-
-type runtimeObservationService struct {
-	mu       sync.Mutex
-	sender   *runtimeObservationSender
-	interval time.Duration
-	timeout  time.Duration
-	cancel   context.CancelFunc
-	done     chan struct{}
-}
-
-func (s *runtimeObservationService) Start(ctx context.Context) error {
-	if s.sender == nil || s.interval <= 0 || s.timeout <= 0 {
-		return ErrProductionInvalid
-	}
-	s.mu.Lock()
-	if s.cancel != nil {
-		s.mu.Unlock()
-		return nil
-	}
-	s.mu.Unlock()
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	initial, cancel := context.WithTimeout(ctx, s.timeout)
-	err := s.sender.Send(initial)
-	cancel()
-	if err != nil {
-		// Presence is the required part of this service. A first observation
-		// can fail while credentials, DNS, or an auxiliary local store is
-		// recovering. Do not let one transient failure make the optional
-		// component disappear permanently: install the stable loop and let its
-		// bounded sends retry on the normal heartbeat cadence.
-		reportRuntimeObservationAttempt(initial, err)
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.cancel != nil {
-		return nil
-	}
-	// Service.Start's context bounds startup only. The stable daemon owns the
-	// accepted service until it calls Shutdown; tying the loop to the caller's
-	// startup context silently stops machine presence after successful startup
-	// on supervisors that cancel that context. Partial starts are still safe
-	// because hostd always invokes Shutdown for an accepted or failed component.
-	runCtx, stop := context.WithCancel(context.WithoutCancel(ctx))
-	s.cancel, s.done = stop, make(chan struct{})
-	go s.loop(runCtx, s.done)
-	return nil
-}
-
-func (s *runtimeObservationService) loop(ctx context.Context, done chan<- struct{}) {
-	defer close(done)
-	ticker := time.NewTicker(s.interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			sendCtx, cancel := context.WithTimeout(ctx, s.timeout)
-			if err := s.sender.Send(sendCtx); err != nil {
-				reportRuntimeObservationAttempt(sendCtx, err)
-			}
-			cancel()
-		}
-	}
-}
-
-func (s *runtimeObservationService) Shutdown(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	s.mu.Lock()
-	cancel, done := s.cancel, s.done
-	s.cancel, s.done = nil, nil
-	s.mu.Unlock()
-	if cancel == nil {
-		return nil
-	}
-	cancel()
-	select {
-	case <-done:
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-	final, stop := context.WithTimeout(ctx, s.timeout)
-	err := s.sender.Send(final)
-	stop()
-	return err
-}
-
-type runtimeObservationSender struct {
-	machineServicesDiscover                             func(context.Context) ([]machineservices.Service, error)
-	machineServicesMu                                   sync.Mutex
-	machineServicesFaultMu                              sync.Mutex
-	machineServicesFaults                               [2]errorreport.Fault
-	machineServicesPolicy                               clientapi.MachineServicesPolicy
-	machineServicesPorts                                []clientapi.MachineServicePort
-	machineServicesGeneration                           uint64
-	endpoint, environmentID, machineID, reporterVersion string
-	tokens                                              interface {
-		Token(context.Context) (string, error)
-	}
-	proofs interface {
-		Proof(context.Context, string, string, string, []byte) ([]byte, error)
-	}
-	operationID  func() (string, error)
-	client       *http.Client
-	availability interface {
-		Observation() *availability.Observation
-	}
-	updater interface {
-		Status(context.Context) (updated.ControlResponse, error)
-	}
-	layers                 interface{ FlushLayerObservations(context.Context) error }
-	receiptPath            string
-	installationGeneration uint64
-	workerGeneration       uint64
-	osBootID               string
-	lazyBootID             string
-	lazyStartedAt          time.Time
-	serviceScope           string
-	connector              interface{ Status() connector.Status }
-	transferPolicy         *filetransfer.PolicyStore
-	capabilities           []string
-	capabilitiesController *machineCapabilityController
-	environmentFaultMu     sync.Mutex
-	environmentFaults      [4]errorreport.Fault
-}
-
-func (s *runtimeObservationSender) Send(ctx context.Context) error {
-	if s.layers != nil {
-		s.observeEnvironmentFailure(ctx, 0, s.layers.FlushLayerObservations(ctx))
-	}
-	now := time.Now().UTC()
-	availabilityState := availabilityObservation(s.availability)
-	var updaterState *updated.ControlResponse
-	var updaterErr error
-	if s.updater != nil {
-		status, err := s.updater.Status(ctx)
-		if err != nil {
-			updaterErr = err
-		} else {
-			updaterState = &status
-		}
-	}
-	body, err := json.Marshal(struct {
-		MachineServices     *clientapi.MachineServicesSnapshot `json:"machine_services,omitempty"`
-		LazyRuntime         *lazyRuntimeObservation            `json:"lazy_runtime,omitempty"`
-		EnvironmentID       string                             `json:"environment_id"`
-		ResourceID          string                             `json:"resource_id"`
-		ReporterVersion     string                             `json:"reporter_version"`
-		SampledAt           time.Time                          `json:"sampled_at"`
-		Availability        *availability.Observation          `json:"availability,omitempty"`
-		RuntimeDiagnostics  *runtimeDiagnosticsObservation     `json:"runtime_diagnostics,omitempty"`
-		Update              *runtimeUpdateObservation          `json:"update,omitempty"`
-		MachineCapabilities *machineCapabilitiesObservation    `json:"machine_capabilities,omitempty"`
-	}{
-		MachineServices:     s.machineServicesObservation(ctx),
-		LazyRuntime:         s.lazyRuntimeObservation(),
-		EnvironmentID:       s.environmentID,
-		ResourceID:          s.machineID,
-		ReporterVersion:     s.reporterVersion,
-		SampledAt:           now,
-		Availability:        availabilityState,
-		RuntimeDiagnostics:  s.runtimeDiagnostics(now, s.layers != nil),
-		Update:              s.updateObservationFrom(now, availabilityState, updaterState, updaterErr),
-		MachineCapabilities: s.capabilitiesController.Observation(now),
-	})
-	if err != nil {
-		return err
-	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, s.endpoint, bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	token, err := s.tokens.Token(ctx)
-	if err != nil {
-		return runtimeObservationFailure{stage: "peer_authority", cause: err}
-	}
-	operationID, err := s.operationID()
-	if err != nil {
-		return err
-	}
-	proof, err := s.proofs.Proof(ctx, operationID, http.MethodPost, "/v1/runtime-observations", body)
-	if err != nil {
-		return runtimeObservationFailure{stage: "peer_authority", cause: err}
-	}
-	request.Header.Set("Authorization", "Bearer "+token)
-	request.Header.Set("X-Paperboat-Machine-Proof", base64.RawURLEncoding.EncodeToString(proof))
-	request.Header.Set("Content-Type", "application/json")
-	response, err := s.client.Do(request)
-	if err != nil {
-		return runtimeObservationFailure{stage: "control_request", cause: err}
-	}
-	defer response.Body.Close()
-	responseBody, readErr := io.ReadAll(io.LimitReader(response.Body, 8<<20+1))
-	defer func() {
-		for index := range responseBody {
-			responseBody[index] = 0
-		}
-	}()
-	if readErr != nil {
-		return runtimeObservationFailure{stage: "delivery", cause: readErr}
-	}
-	if len(responseBody) > 8<<20 {
-		return errors.New("runtime observation response is invalid")
-	}
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		s.applyMachineServicesPolicy(nil)
-		return runtimeObservationFailure{stage: "control_request", cause: errorreport.HTTPStatusFailure(response)}
-	}
-	s.applyMachineServicesPolicy(responseBody)
-	if s.transferPolicy != nil {
-		if err := applyRuntimeTransferPolicy(responseBody, s.transferPolicy); err != nil {
-			return err
-		}
-	}
-	if s.capabilitiesController != nil {
-		if err := applyRuntimeMachineCapabilities(ctx, responseBody, s.capabilitiesController); err != nil {
-			return err
-		}
-	}
-	if s.receiptPath == "" {
-		return nil
-	}
-	return writeServerHeartbeatReceipt(s.receiptPath, serverHeartbeatReceipt{Schema: "paperboat.server-heartbeat/v1", WorkerGeneration: s.workerGeneration, ReporterVersion: s.reporterVersion, AcceptedAt: time.Now().UTC()})
-}
-
-type runtimeObservationFailure struct {
-	stage string
-	cause error
-}
-
-func (runtimeObservationFailure) Error() string                   { return "runtime observation failed" }
-func (failure runtimeObservationFailure) Unwrap() error           { return failure.cause }
-func (failure runtimeObservationFailure) DiagnosticStage() string { return failure.stage }
-func (runtimeObservationFailure) DiagnosticCode() string          { return "control_request_failed" }
-
-func reportRuntimeObservationAttempt(ctx context.Context, err error) {
-	if errorreport.HTTPAttemptObserved(err) {
-		return
-	}
-	errorreport.Current().ObserveFailure(ctx, "paperboat-daemon", "runtime_observation", "reconciliation", "control_request_failed", err)
-}
-
-// Four producer-owned phases bound the retained retry classifications. Only a
-// changed fault or actual successful recovery produces another local event.
-func (s *runtimeObservationSender) observeEnvironmentFailure(ctx context.Context, phase int, err error) {
-	stage := "reconciliation"
-	if phase < 2 {
-		stage = "diagnostic_storage"
-	}
-	fault := errorreport.ProjectFault(ctx, "paperboat-daemon", "config_sync", stage, "environment_sync_failed", err)
-	if fault.Outcome == "canceled" {
-		return
-	}
-	s.environmentFaultMu.Lock()
-	previous := s.environmentFaults[phase]
-	s.environmentFaults[phase] = fault
-	s.environmentFaultMu.Unlock()
-	if err == nil {
-		if previous.Code != "" {
-			errorreport.Current().Lifecycle(ctx, "config", "config_sync", "recovered", "success")
-			if local := diagnostics.FromContext(ctx); local != nil {
-				_ = local.RecordWithSupportReference(stage, "recovered", "info", supportref.FromContext(ctx), map[string]string{"component": "paperboat-daemon", "operation": "config_sync"})
-			}
-		}
-		return
-	}
-	if previous.Code == fault.Code && previous.Stage == fault.Stage && previous.Cause == fault.Cause && previous.Errno == fault.Errno && previous.HTTPStatus == fault.HTTPStatus {
-		return
-	}
-	errorreport.Current().ObserveFailure(ctx, "paperboat-daemon", "config_sync", stage, "environment_sync_failed", err)
-}
-
-type lazyRuntimeObservation struct {
-	Schema                 string    `json:"schema"`
-	BootID                 string    `json:"boot_id"`
-	InstallationGeneration uint64    `json:"installation_generation"`
-	StartedAt              time.Time `json:"started_at"`
-}
-
-func (s *runtimeObservationSender) lazyRuntimeObservation() *lazyRuntimeObservation {
-	if s.lazyBootID == "" || s.installationGeneration == 0 || s.lazyStartedAt.IsZero() {
-		return nil
-	}
-	return &lazyRuntimeObservation{Schema: "paperboat.lazy-runtime/v1", BootID: s.lazyBootID, InstallationGeneration: s.installationGeneration, StartedAt: s.lazyStartedAt.UTC()}
-}
-
-type runtimeUpdateObservation struct {
-	Schema                 string    `json:"schema"`
-	State                  string    `json:"state"`
-	CurrentVersion         string    `json:"current_version"`
-	TargetVersion          string    `json:"target_version,omitempty"`
-	Channel                string    `json:"channel"`
-	OperationID            string    `json:"operation_id"`
-	InstallationGeneration uint64    `json:"installation_generation"`
-	WorkerGeneration       uint64    `json:"worker_generation"`
-	OSBootID               string    `json:"os_boot_id"`
-	RollbackCount          uint64    `json:"rollback_count"`
-	ErrorCode              string    `json:"error_code,omitempty"`
-	ObservedAt             time.Time `json:"observed_at"`
-}
-
-func (s *runtimeObservationSender) updateObservation(now time.Time, availabilityState *availability.Observation) *runtimeUpdateObservation {
-	return s.updateObservationFrom(now, availabilityState, nil, nil)
-}
-
-func (s *runtimeObservationSender) updateObservationFrom(now time.Time, availabilityState *availability.Observation, updaterState *updated.ControlResponse, updaterErr error) *runtimeUpdateObservation {
-	if s.reporterVersion == "" || s.installationGeneration == 0 || s.workerGeneration == 0 || s.osBootID == "" {
-		return nil
-	}
-	state, target, errorCode := "healthy", "", ""
-	channel := "custom"
-	if buildinfo.Distribution == "official" {
-		channel = "stable"
-	}
-	var rollbackCount uint64
-	if updaterErr != nil {
-		return &runtimeUpdateObservation{
-			Schema: "paperboat.update-observation/v1", State: "failed", CurrentVersion: s.reporterVersion,
-			TargetVersion: s.reporterVersion, Channel: channel, OperationID: "update-" + strconv.FormatUint(s.workerGeneration, 10) + "-" + strconv.FormatInt(now.UnixNano(), 10),
-			InstallationGeneration: s.installationGeneration, WorkerGeneration: s.workerGeneration, OSBootID: s.osBootID,
-			ErrorCode: "updater_unavailable", ObservedAt: now,
-		}
-	}
-	if updaterState != nil {
-		currentVersion := s.reporterVersion
-		if updaterState.Version != "" {
-			currentVersion = updaterState.Version
-		}
-		if updaterState.Observation.Failure != "" || updaterState.Status != "ok" {
-			return &runtimeUpdateObservation{
-				Schema: "paperboat.update-observation/v1", State: "failed", CurrentVersion: currentVersion,
-				TargetVersion: currentVersion, Channel: channel, OperationID: "update-" + strconv.FormatUint(s.workerGeneration, 10) + "-" + strconv.FormatInt(now.UnixNano(), 10),
-				InstallationGeneration: s.installationGeneration, WorkerGeneration: s.workerGeneration, OSBootID: s.osBootID,
-				ErrorCode: "update_failed", ObservedAt: now,
-			}
-		}
-		// The updater owns activation and is authoritative for the installed
-		// version. The runtime process can remain alive across that activation.
-		return &runtimeUpdateObservation{
-			Schema: "paperboat.update-observation/v1", State: "healthy", CurrentVersion: currentVersion,
-			Channel: channel, OperationID: "update-" + strconv.FormatUint(s.workerGeneration, 10) + "-" + strconv.FormatInt(now.UnixNano(), 10),
-			InstallationGeneration: s.installationGeneration, WorkerGeneration: s.workerGeneration, OSBootID: s.osBootID,
-			ObservedAt: now,
-		}
-	}
-	if availabilityState != nil {
-		if availabilityState.UpdateHealth == "unknown" {
-			return nil
-		}
-		rollbackCount = availabilityState.UpdateRollbacks
-		if availabilityState.UpdateHealth == "recovery_required" {
-			state, target, errorCode = "failed", s.reporterVersion, "recovery_required"
-		}
-	}
-	return &runtimeUpdateObservation{
-		Schema:                 "paperboat.update-observation/v1",
-		State:                  state,
-		CurrentVersion:         s.reporterVersion,
-		TargetVersion:          target,
-		Channel:                channel,
-		OperationID:            "update-" + strconv.FormatUint(s.workerGeneration, 10) + "-" + strconv.FormatInt(now.UnixNano(), 10),
-		InstallationGeneration: s.installationGeneration,
-		WorkerGeneration:       s.workerGeneration,
-		OSBootID:               s.osBootID,
-		RollbackCount:          rollbackCount,
-		ErrorCode:              errorCode,
-		ObservedAt:             now,
-	}
-}
-
-type runtimeDiagnosticsObservation struct {
-	Capabilities        []string  `json:"capabilities"`
-	WorkerGeneration    uint64    `json:"worker_generation"`
-	OSBootID            string    `json:"os_boot_id"`
-	ConnectorState      string    `json:"connector_state"`
-	ConnectorGeneration uint64    `json:"connector_generation"`
-	WorkerServiceScope  string    `json:"worker_service_scope"`
-	ObservedAt          time.Time `json:"observed_at"`
-}
-
-func (s *runtimeObservationSender) runtimeDiagnostics(observedAt time.Time, environmentEnabled bool) *runtimeDiagnosticsObservation {
-	if s.workerGeneration < 1 || s.osBootID == "" || s.connector == nil {
-		return nil
-	}
-	status := s.connector.Status()
-	state := "unavailable"
-	if status.Connected {
-		state = "ready"
-	} else if status.Stopping {
-		state = "degraded"
-	}
-	capabilities := append([]string(nil), s.capabilities...)
-	if len(capabilities) == 0 {
-		capabilities = []string{"file_receive", "preview_launch", "terminal_host", "session_host", "keep_awake"}
-	}
-	if environmentEnabled && !slices.Contains(capabilities, "environment_injection") {
-		capabilities = append(capabilities, "environment_injection")
-	}
-	return &runtimeDiagnosticsObservation{Capabilities: capabilities, WorkerGeneration: s.workerGeneration, OSBootID: s.osBootID, ConnectorState: state, ConnectorGeneration: status.Generation, WorkerServiceScope: s.serviceScope, ObservedAt: observedAt}
-}
-
-type serverHeartbeatReceipt struct {
-	Schema           string    `json:"schema"`
-	WorkerGeneration uint64    `json:"worker_generation"`
-	ReporterVersion  string    `json:"reporter_version"`
-	AcceptedAt       time.Time `json:"accepted_at"`
-}
-
-func writeServerHeartbeatReceipt(path string, receipt serverHeartbeatReceipt) error {
-	if !filepath.IsAbs(path) || receipt.WorkerGeneration < 1 || receipt.ReporterVersion == "" || receipt.AcceptedAt.IsZero() {
-		return ErrProductionInvalid
-	}
-	body, err := json.Marshal(receipt)
-	if err != nil {
-		return err
-	}
-	directory := filepath.Dir(path)
-	if err := os.MkdirAll(directory, 0o700); err != nil {
-		return err
-	}
-	info, err := os.Lstat(directory)
-	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return ErrProductionInvalid
-	}
-	return atomicfile.Write(path, body, atomicfile.Options{Mode: 0o600, OwnerUID: -1, OwnerGID: -1})
-}
-
-func availabilityObservation(source interface {
-	Observation() *availability.Observation
-}) *availability.Observation {
-	if source == nil {
-		return nil
-	}
-	return source.Observation()
 }
 
 type jwksRefreshService struct {
