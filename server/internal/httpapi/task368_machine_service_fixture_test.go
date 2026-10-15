@@ -105,7 +105,7 @@ func TestTask368ServeMachineServices(t *testing.T) {
 	}
 	machines := usermachines.New(database, writer, usermachines.Policy{PairingLifetime: cfg.UserMachines.PairingLifetime, OfflineAfter: cfg.UserMachines.OfflineAfter, AllowedPlatforms: cfg.UserMachines.AllowedPlatforms}, billingService)
 	machines.ConfigureInstallationEncryption(secret)
-	machines.ConfigureAccess(nil, base, cfg.CLIAuth.AccessTokenLifetime)
+	machines.ConfigureAccess(nil, base)
 	machines.ConfigureFileTransfer(accessdescriptor.FileTransferPolicy{
 		Revision: cfg.Access.FileTransfer.Revision, MaxFileBytes: cfg.Access.FileTransfer.MaxFileBytes,
 		MaxBatchFiles: cfg.Access.FileTransfer.MaxBatchFiles, MaxBatchBytes: cfg.Access.FileTransfer.MaxBatchBytes,

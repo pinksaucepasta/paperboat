@@ -183,7 +183,7 @@ func (s TicketStore) SessionActive(ctx context.Context, userID, browserSessionID
 	}
 	var active bool
 	err := s.DB.SQL().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM sessions auth_session JOIN users account ON account.id=auth_session.user_id
-		WHERE auth_session.id=$1 AND auth_session.user_id=$2 AND auth_session.revoked_at IS NULL AND auth_session.expires_at>now() AND account.status='active')`, browserSessionID, userID).Scan(&active)
+		WHERE auth_session.id=$1 AND auth_session.user_id=$2 AND auth_session.revoked_at IS NULL AND account.status='active')`, browserSessionID, userID).Scan(&active)
 	return active, err
 }
 
@@ -217,6 +217,6 @@ func (s TicketStore) GuestSessionActive(ctx context.Context, guestID string) (bo
 	}
 	var active bool
 	err := s.DB.SQL().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM terminal_guest_sessions g JOIN terminal_code_access c ON c.terminal_session_id=g.terminal_session_id
- WHERE g.id=$1 AND g.expires_at>now() AND c.enabled AND c.expires_at>now() AND c.generation=g.code_generation)`, guestID).Scan(&active)
+ WHERE g.id=$1 AND c.enabled AND c.generation=g.code_generation)`, guestID).Scan(&active)
 	return active, err
 }

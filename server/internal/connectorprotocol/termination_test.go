@@ -218,7 +218,7 @@ func TestControlTransportReportsProtocolError(t *testing.T) {
 	}
 }
 
-func TestControlTransportReportsLeaseExpiry(t *testing.T) {
+func TestControlTransportReportsHeartbeatLoss(t *testing.T) {
 	harness := newTerminationHarness(t)
 	events := make(chan ControlTerminationEvent, 1)
 	harness.transport.SetTerminationObserver(func(event ControlTerminationEvent) { events <- event })
@@ -246,10 +246,10 @@ func TestControlTransportReportsLeaseExpiry(t *testing.T) {
 	}
 	_ = clientSide.Close()
 	event, serveErr := waitTermination(t, done, events)
-	if serveErr == nil || CodeOf(serveErr) != CodeLeaseExpired {
-		t.Fatalf("lease serve error=%v", serveErr)
+	if serveErr == nil || CodeOf(serveErr) != CodeHeartbeatTimeout {
+		t.Fatalf("heartbeat serve error=%v", serveErr)
 	}
-	if event.Kind != ControlTerminationSessionExpired || event.ProtocolReason != ReasonLeaseExpired || event.Code != CodeLeaseExpired || !event.Retryable {
-		t.Fatalf("lease expiry event=%+v", event)
+	if event.Kind != ControlTerminationSessionExpired || event.ProtocolReason != ReasonHeartbeatTimeout || event.Code != CodeHeartbeatTimeout || !event.Retryable {
+		t.Fatalf("heartbeat loss event=%+v", event)
 	}
 }

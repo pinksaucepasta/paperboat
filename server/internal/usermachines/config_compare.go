@@ -5,10 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"github.com/pinksaucepasta/paperboat-server/internal/accessdescriptor"
+	"github.com/pinksaucepasta/paperboat-server/internal/admission"
 	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat-server/internal/mint"
 	"github.com/pinksaucepasta/paperboat-server/internal/workspace"
-	"time"
 )
 
 type ConfigCompareDescriptor struct {
@@ -55,17 +55,22 @@ func (s *Service) ConfigCompareDescriptor(ctx context.Context, account, environm
 		return ConfigCompareDescriptor{}, ErrNotFound
 	}
 	now := s.now().UTC()
-	expires := now.Add(2 * time.Minute)
+	expires := admission.Expiry(s.controlSigner, now)
 	jti := newID("token")
 	operationID := newID("operation")
 	scopeID := "personal"
 	if scope, ok := workspace.FromContext(ctx); ok {
 		scopeID = scope.ID
 	}
-	token, err := s.controlSigner.SignCredential(mint.CredentialInput{Issuer: s.issuer, Audience: "paperboat-machine", Subject: account, JTI: jti, IssuedAt: now, ExpiresAt: expires, CredentialClass: "config_compare", Scopes: []string{"config:compare"}, EnvironmentID: environment, AccountID: account, UserID: account, MachineID: machineID, InstallationGeneration: row.InstallationGeneration, SourceMachineID: source, CLIClientSessionID: cli, OperationID: operationID, AssignmentID: binding.AssignmentID, AssignmentVersion: binding.AssignmentVersion, ConfigPath: binding.ConfigPath, ConflictRevision: binding.ConflictRevision, ExpectedRemoteRevision: binding.ExpectedRemoteRevision})
+	issuer, err := admission.New(s.controlSigner, 0)
 	if err != nil {
 		return ConfigCompareDescriptor{}, err
 	}
+	credential, err := issuer.Issue(mint.CredentialInput{Issuer: s.issuer, Audience: "paperboat-machine", Subject: account, JTI: jti, IssuedAt: now, ExpiresAt: expires, CredentialClass: "config_compare", Scopes: []string{"config:compare"}, EnvironmentID: environment, AccountID: account, UserID: account, MachineID: machineID, InstallationGeneration: row.InstallationGeneration, SourceMachineID: source, CLIClientSessionID: cli, OperationID: operationID, AssignmentID: binding.AssignmentID, AssignmentVersion: binding.AssignmentVersion, ConfigPath: binding.ConfigPath, ConflictRevision: binding.ConflictRevision, ExpectedRemoteRevision: binding.ExpectedRemoteRevision})
+	if err != nil {
+		return ConfigCompareDescriptor{}, err
+	}
+	token, expires := credential.Token, credential.ExpiresAt
 	tx, err := s.db.SQL().BeginTx(ctx, nil)
 	if err != nil {
 		return ConfigCompareDescriptor{}, err
@@ -74,9 +79,6 @@ func (s *Service) ConfigCompareDescriptor(ctx context.Context, account, environm
 	var lockedAccount string
 	if err = tx.QueryRowContext(ctx, "SELECT id FROM users WHERE id=$1 AND status='active' FOR UPDATE", account).Scan(&lockedAccount); err != nil {
 		return ConfigCompareDescriptor{}, ErrNotFound
-	}
-	if _, err = tx.ExecContext(ctx, "DELETE FROM config_compare_admissions WHERE expires_at<now()"); err != nil {
-		return ConfigCompareDescriptor{}, err
 	}
 	var count int
 	if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM config_compare_admissions WHERE account_id=$1 AND expires_at>now()`, account).Scan(&count); err != nil {

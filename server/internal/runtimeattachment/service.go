@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
+	"github.com/pinksaucepasta/paperboat-server/internal/admission"
 	"io"
 	"net"
 	"time"
@@ -26,7 +27,6 @@ import (
 )
 
 const Schema = "paperboat.runtime-carrier/v1"
-const LeaseDuration = time.Minute
 const MaximumAdmissions = 4096
 
 var ErrInvalid = errors.New("invalid runtime carrier request")
@@ -95,7 +95,10 @@ type Observation struct {
 	SessionID            string `json:"session_id"`
 	Ready                bool   `json:"ready"`
 }
-type Service struct{ DB *db.DB }
+type Service struct {
+	DB                *db.DB
+	AdmissionLifetime time.Duration
+}
 
 func validRequest(p previewattachment.MachineProof, r Request) bool {
 	return p.Validate() == nil && r.OperationID == p.OperationID && connectorprotocol.ValidateOpaqueEpoch(r.ProcessID) == nil && r.WorkerGeneration > 0 && r.WorkerGeneration <= 1<<62 && r.InstallationGeneration == p.InstallationGeneration && r.RuntimeListenPort >= 1024 && r.RuntimeListenPort <= 65535 && ((r.ActiveEdgeNodeID == "" && r.ActiveEdgeProcessEpoch == "") || (connectorprotocol.ValidateIdentifier(r.ActiveEdgeNodeID) == nil && connectorprotocol.ValidateOpaqueEpoch(r.ActiveEdgeProcessEpoch) == nil))
@@ -285,7 +288,7 @@ WHEN n.id=$2 THEN 2 ELSE 3 END,n.id LIMIT 32 FOR SHARE OF n`, proof.UserID, acti
 			binding := Binding{AccountID: proof.UserID, HostID: proof.MachineID, TunnelID: route, ConnectorID: proof.MachineID, SessionID: sessionID, ProcessGeneration: request.WorkerGeneration, ConfigGeneration: uint64(revision), RouteID: route, RouteGeneration: uint64(revision), InstallationGeneration: request.InstallationGeneration, EdgeNodeID: edge.node, EdgeProcessEpoch: edge.epoch, EdgeCarrierServerSPKISHA256: edge.pin, EdgeCarrierServerCertificateChainPEM: edge.chain, MachineIdentityPublicKey: publicKey, MachineIdentityThumbprint: thumb}
 			encoded, _ := json.Marshal(binding)
 			hash := sha256.Sum256(encoded)
-			admission := Admission{Schema: Schema, Binding: binding, AttachmentGeneration: rowGeneration, ConfigContentHash: "sha256:" + hex.EncodeToString(hash[:]), EdgeEndpoints: []string{"h2://" + net.JoinHostPort(edge.endpoint, fmt.Sprint(edge.tcp)), "h3://" + net.JoinHostPort(edge.endpoint, fmt.Sprint(edge.quic))}, Hostname: host, RouteKind: "runtime_https_wss", RouteRevision: uint64(revision), ExpiresAt: time.Now().UTC().Add(LeaseDuration)}
+			admission := Admission{Schema: Schema, Binding: binding, AttachmentGeneration: rowGeneration, ConfigContentHash: "sha256:" + hex.EncodeToString(hash[:]), EdgeEndpoints: []string{"h2://" + net.JoinHostPort(edge.endpoint, fmt.Sprint(edge.tcp)), "h3://" + net.JoinHostPort(edge.endpoint, fmt.Sprint(edge.quic))}, Hostname: host, RouteKind: "runtime_https_wss", RouteRevision: uint64(revision), ExpiresAt: admission.Deadline(time.Now(), s.AdmissionLifetime)}
 			encoded, err = json.Marshal(admission)
 			if err != nil {
 				return err
@@ -384,6 +387,7 @@ func (s *Service) Pull(ctx context.Context, edge previewattachment.PreviewEdgeId
 		if err := json.Unmarshal(raw, &a); err != nil {
 			return nil, err
 		}
+		a.ExpiresAt = admission.Deadline(time.Now(), s.AdmissionLifetime)
 		out = append(out, a)
 		if len(out) > MaximumAdmissions {
 			return nil, ErrUnavailable

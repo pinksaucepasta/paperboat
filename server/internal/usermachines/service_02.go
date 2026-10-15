@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/pinksaucepasta/paperboat-server/internal/accessdescriptor"
+	"github.com/pinksaucepasta/paperboat-server/internal/admission"
 	"github.com/pinksaucepasta/paperboat-server/internal/audit"
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
 	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
@@ -792,12 +793,8 @@ func (s *Service) operationDescriptor(ctx context.Context, userID, sourceMachine
 	if s.controlSigner == nil {
 		return ExecDescriptor{}, errors.New("user-machine exec credential issuer is unavailable")
 	}
-	ttl := s.ttl
-	if ttl <= 0 || ttl > 5*time.Minute {
-		ttl = 5 * time.Minute
-	}
 	issuedAt := s.now().UTC()
-	expiresAt := issuedAt.Add(ttl)
+	expiresAt := admission.Expiry(s.controlSigner, issuedAt)
 	operationJTI := newID("token")
 	accessSessionID := newID("session")
 	token, err := s.signProcessCredential(ctx, mint.CredentialInput{

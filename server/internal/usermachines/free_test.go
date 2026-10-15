@@ -18,7 +18,7 @@ func TestFreeAccountSetupWithoutSubscription(t *testing.T) {
 		t.Fatal(err)
 	}
 	service := New(store, audit.NewWriter(store), Policy{AllowedPlatforms: []string{"linux"}}, testSeatAuthorizer{})
-	service.ConfigureAccess(nil, "https://api.example.test", 5*time.Minute)
+	service.ConfigureAccess(nil, "https://api.example.test")
 	if err := service.ConfigureRuntimeRoute("runtime.example.test", 38080); err != nil {
 		t.Fatal(err)
 	}

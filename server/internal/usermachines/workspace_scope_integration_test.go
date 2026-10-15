@@ -111,7 +111,7 @@ func newWorkspaceDescriptorFixture(t *testing.T) (workspaceMachineFixture, strin
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.service.ConfigureAccess(fakeCredentialIssuer{}, "https://api.paperboat.test", 5*time.Minute)
+	f.service.ConfigureAccess(fakeCredentialIssuer{}, "https://api.paperboat.test")
 	f.service.ConfigureTerminalSessions(8, signer, nil)
 	return f, source, signer
 }

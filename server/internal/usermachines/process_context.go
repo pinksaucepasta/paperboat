@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 
+	"github.com/pinksaucepasta/paperboat-server/internal/admission"
 	"github.com/pinksaucepasta/paperboat-server/internal/mint"
 	"github.com/pinksaucepasta/paperboat-server/internal/workspace"
 )
@@ -70,5 +71,5 @@ func (s *Service) signProcessCredential(ctx context.Context, input mint.Credenti
 		}
 	}
 	input.ActorAccountID = input.UserID
-	return s.controlSigner.SignCredential(input)
+	return admission.Sign(s.controlSigner, input)
 }

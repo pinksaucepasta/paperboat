@@ -93,9 +93,13 @@ func TestSignRelayGrantPublishesFrozenTypeAndRejectsLongLifetime(t *testing.T) {
 	}
 	for _, expiry := range []int64{1_700_000_000, 1_699_999_999} {
 		scope["expires_at"] = expiry
-		if _, err := provider.SignRelayGrant(claims); err == nil {
-			t.Fatal("expired application scope signed")
+		if _, err := provider.SignRelayGrant(claims); err != nil {
+			t.Fatal("expired admission scope must remain signed for live revocation", err)
 		}
+	}
+	scope["expires_at"] = int64(0)
+	if _, err := provider.SignRelayGrant(claims); err == nil {
+		t.Fatal("malformed scope expiry signed")
 	}
 }
 

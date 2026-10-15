@@ -106,8 +106,20 @@ func TestBrowserTerminalTicketIsSingleUseAndSessionBoundPostgres(t *testing.T) {
 	if _, err := tickets.Issue(ctx, Ticket{UserID: userID, BrowserSessionID: browserSessionID, TerminalSessionID: terminalID, Origin: "https://dashboard.example.test", Role: "viewer", PolicyGeneration: 2, BrowserPublicKeySHA256: testBrowserKeyDigest}); !errors.Is(err, ErrTicketInvalid) {
 		t.Fatalf("unconsumed ticket capacity: %v", err)
 	}
+	if _, err := store.SQL().ExecContext(ctx, `UPDATE sessions SET expires_at=now()-interval '1 second' WHERE id=$1`, browserSessionID); err != nil {
+		t.Fatal(err)
+	}
+	if active, err := tickets.SessionActive(ctx, userID, browserSessionID); err != nil || !active {
+		t.Fatal("admitted terminal lost to browser credential expiry")
+	}
+	if _, err := tickets.Consume(ctx, second.Value, second.Origin, terminalID); !errors.Is(err, ErrTicketInvalid) {
+		t.Fatal("expired browser session admitted a new attachment")
+	}
 	if _, err := store.SQL().ExecContext(ctx, `UPDATE sessions SET revoked_at=now() WHERE id=$1`, browserSessionID); err != nil {
 		t.Fatal(err)
+	}
+	if active, err := tickets.SessionActive(ctx, userID, browserSessionID); err != nil || active {
+		t.Fatal("revoked browser session retained")
 	}
 	if _, err := tickets.Consume(ctx, second.Value, second.Origin, terminalID); !errors.Is(err, ErrTicketInvalid) {
 		t.Fatalf("revoked session ticket: %v", err)

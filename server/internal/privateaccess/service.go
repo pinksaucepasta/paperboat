@@ -16,10 +16,11 @@ import (
 // here.  The optional Grant is a short-lived signed grant carried by an edge
 // request; when a GrantVerifier is configured it is mandatory.
 type AuthorizeInput struct {
-	Identity Identity
-	Request  Request
-	Edge     EdgeIdentity
-	Grant    string
+	AdmittedDecisionID string
+	Identity           Identity
+	Request            Request
+	Edge               EdgeIdentity
+	Grant              string
 }
 
 type cachedDecision struct {
@@ -186,7 +187,14 @@ func (s *Service) Authorize(ctx context.Context, input AuthorizeInput) (Decision
 	if s.grant == nil || strings.TrimSpace(input.Grant) == "" {
 		return s.deny(ctx, input, ReasonUnauthenticated, now, "grant")
 	}
-	signed, err := s.grant.VerifyGrant(ctx, input.Grant, now)
+	admitted := input.AdmittedDecisionID != ""
+	var signed Request
+	var err error
+	if admitted {
+		signed, err = s.grant.VerifyAdmittedGrant(ctx, input.Grant, now)
+	} else {
+		signed, err = s.grant.VerifyGrant(ctx, input.Grant, now)
+	}
 	if err != nil {
 		return s.deny(ctx, input, ReasonUnauthenticated, now, "grant")
 	}
@@ -206,13 +214,22 @@ func (s *Service) Authorize(ctx context.Context, input AuthorizeInput) (Decision
 	if s.machine == nil {
 		return Decision{}, ErrIdentityUnavailable
 	}
-	if err := s.machine.VerifyCurrentMachine(ctx, input.Identity, now); err != nil {
+	if admitted {
+		err = s.machine.VerifyAdmittedMachine(ctx, input.Identity, now)
+	} else {
+		err = s.machine.VerifyCurrentMachine(ctx, input.Identity, now)
+	}
+	if err != nil {
 		if denied, ok := privateAccessExpectedDenial(err); ok {
 			return s.deny(ctx, input, denied.Reason, now, "machine", denied.DiagnosticCause())
 		}
 		return Decision{}, fmt.Errorf("%w: verify current machine: %w", ErrIdentityUnavailable, err)
 	}
-	if err := input.Identity.Validate(now); err != nil {
+	validationTime := now
+	if admitted {
+		validationTime = time.Time{}
+	}
+	if err := input.Identity.Validate(validationTime); err != nil {
 		if denied, ok := err.(*DeniedError); ok {
 			return s.deny(ctx, input, denied.Reason, now, "identity")
 		}
@@ -226,7 +243,7 @@ func (s *Service) Authorize(ctx context.Context, input AuthorizeInput) (Decision
 	if input.Request.MachineID != input.Identity.MachineID || input.Request.SessionID != input.Identity.SessionID {
 		return s.deny(ctx, input, ReasonIdentityInvalid, now, "identity")
 	}
-	if !input.Request.ExpiresAt.After(now) {
+	if !admitted && !input.Request.ExpiresAt.After(now) {
 		return s.deny(ctx, input, ReasonSessionExpired, now, "grant")
 	}
 	if input.Request.ExpiresAt.Sub(now) > MaximumDecisionTTL {
@@ -235,6 +252,9 @@ func (s *Service) Authorize(ctx context.Context, input AuthorizeInput) (Decision
 	fingerprint, err := requestFingerprint(input)
 	if err != nil {
 		return Decision{}, fmt.Errorf("%w: fingerprint request", ErrInvalid)
+	}
+	if admitted && input.AdmittedDecisionID != decisionID(fingerprint) {
+		return s.deny(ctx, input, ReasonIdentityInvalid, now, "admitted_decision")
 	}
 	cacheKey := input.Identity.AccountID + "\x00" + input.Identity.SessionID + "\x00" + input.Request.IdempotencyKey
 	if s.cachedConflict(cacheKey, fingerprint, now) {
@@ -260,10 +280,13 @@ func (s *Service) Authorize(ctx context.Context, input AuthorizeInput) (Decision
 		return s.denyWithBinding(ctx, input, binding, err.(*DeniedError).Reason, now, "route")
 	}
 
-	if cached, ok := s.replay(cacheKey, fingerprint, now); ok {
+	if cached, ok := s.replay(cacheKey, fingerprint, now); ok && !admitted {
 		return cached, nil
 	}
 	expiresAt := minTime(input.Request.ExpiresAt, binding.ExpiresAt, now.Add(s.ttl))
+	if admitted {
+		expiresAt = minTime(binding.ExpiresAt, now.Add(s.ttl))
+	}
 	decision := Decision{
 		Schema: Schema, Kind: Kind, DecisionID: decisionID(fingerprint), Allowed: true,
 		Reason: DenyReason(DecisionAllowed), ExpiresAt: expiresAt,

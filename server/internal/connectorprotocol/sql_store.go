@@ -560,8 +560,8 @@ JOIN tunnels AS t ON t.id = c.tunnel_id
 WHERE s.id = $1 AND s.connector_id = $2 AND s.process_generation = $3
   AND c.tunnel_id = $4 AND t.deleted_at IS NULL
   AND s.state IN ('authenticating', 'ready', 'draining')
-  AND s.lease_deadline > $5
-FOR UPDATE OF s, c`, ref.SessionID, ref.ConnectorID, int64(ref.ProcessGeneration), ref.TunnelID, now).Scan(&state, &accountID, &tunnelID)
+  AND s.last_heartbeat_at > $5
+FOR UPDATE OF s, c`, ref.SessionID, ref.ConnectorID, int64(ref.ProcessGeneration), ref.TunnelID, now.Add(-s.LeaseDuration)).Scan(&state, &accountID, &tunnelID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", ErrSessionNotFound
 	}
@@ -834,25 +834,16 @@ FOR UPDATE`, ref.SessionID, ref.ConnectorID, int64(ref.ProcessGeneration)).Scan(
 		if lastSentAt.Valid && !heartbeat.SentAt.After(lastSentAt.Time) {
 			return ErrDurableReplay
 		}
-		var credentialExpiry time.Time
-		if err := tx.QueryRow(ctx, `
-SELECT cg.valid_until
-FROM tunnel_connector_sessions AS session
-JOIN tunnel_connector_credential_generations AS cg
-  ON cg.connector_id = session.connector_id
- AND cg.tunnel_id = $2
- AND cg.generation = session.credential_generation
-WHERE session.id = $1 AND session.connector_id = $3
-  AND session.process_generation = $4
-  AND cg.state IN ('active', 'overlap')
-  AND cg.valid_until > $5`, ref.SessionID, ref.TunnelID, ref.ConnectorID, int64(ref.ProcessGeneration), now).Scan(&credentialExpiry); err != nil {
+		var credentialState string
+		if err := tx.QueryRow(ctx, `SELECT cg.state FROM tunnel_connector_sessions session
+JOIN tunnel_connector_credential_generations cg ON cg.connector_id=session.connector_id
+ AND cg.tunnel_id=$2 AND cg.generation=session.credential_generation
+WHERE session.id=$1 AND session.connector_id=$3 AND session.process_generation=$4
+ AND cg.state IN ('active','overlap')`, ref.SessionID, ref.TunnelID, ref.ConnectorID, int64(ref.ProcessGeneration)).Scan(&credentialState); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
-				return ErrCredentialExpired
+				return codeError(ErrAuthenticationFailed, ReasonAuthentication, false, nil)
 			}
 			return err
-		}
-		if ack.LeaseExpiresAt.After(credentialExpiry) {
-			return ErrCredentialExpired
 		}
 		storedHash, err := s.generationHash(ctx, tx, ref.TunnelID, heartbeat.LastAppliedGeneration)
 		if err != nil {

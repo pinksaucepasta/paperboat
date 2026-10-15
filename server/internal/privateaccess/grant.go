@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat-server/internal/admission"
 	"github.com/pinksaucepasta/paperboat-server/internal/mint"
 )
 
@@ -58,14 +59,14 @@ func (g *MintGrantIssuer) MintGrant(_ context.Context, request Request, issuedAt
 		issuedAt = g.clock().UTC()
 	}
 	issuedAt = issuedAt.UTC()
-	if !request.ExpiresAt.After(issuedAt) || request.ExpiresAt.Sub(issuedAt) > mintPrivateAccessTTL {
+	if !request.ExpiresAt.After(issuedAt) || request.ExpiresAt.Sub(issuedAt) > admission.Lifetime(g.provider) {
 		return "", fmt.Errorf("%w: grant expiry is out of bounds", ErrInvalid)
 	}
 	hash, err := request.Hash()
 	if err != nil {
 		return "", err
 	}
-	token, err := g.provider.SignCredential(mint.CredentialInput{
+	token, err := admission.Sign(g.provider, mint.CredentialInput{
 		Issuer: g.issuer, Audience: request.Audience, Subject: request.AccountID,
 		JTI: request.Nonce, IssuedAt: issuedAt, ExpiresAt: request.ExpiresAt,
 		CredentialClass: privateAccessCredentialClass, Scopes: []string{privateAccessScope},
@@ -87,14 +88,26 @@ func (g *MintGrantIssuer) MintGrant(_ context.Context, request Request, issuedAt
 	return token, nil
 }
 
-func (g *MintGrantIssuer) VerifyGrant(_ context.Context, token string, now time.Time) (Request, error) {
+func (g *MintGrantIssuer) VerifyGrant(ctx context.Context, token string, now time.Time) (Request, error) {
+	return g.verifyGrant(ctx, token, now, false)
+}
+func (g *MintGrantIssuer) VerifyAdmittedGrant(ctx context.Context, token string, now time.Time) (Request, error) {
+	return g.verifyGrant(ctx, token, now, true)
+}
+func (g *MintGrantIssuer) verifyGrant(_ context.Context, token string, now time.Time, admitted bool) (Request, error) {
 	if g == nil || g.provider == nil || strings.TrimSpace(token) == "" {
 		return Request{}, ErrIdentityUnavailable
 	}
 	if now.IsZero() {
 		now = g.clock().UTC()
 	}
-	claims, err := g.provider.VerifyCredential(token, g.issuer, privateAccessCredentialClass, now.UTC())
+	var claims mint.CredentialClaims
+	var err error
+	if admitted {
+		claims, err = g.provider.VerifyAdmittedCredential(token, g.issuer, privateAccessCredentialClass, now.UTC())
+	} else {
+		claims, err = g.provider.VerifyCredential(token, g.issuer, privateAccessCredentialClass, now.UTC())
+	}
 	if err != nil {
 		return Request{}, ErrIdentityUnavailable
 	}
@@ -120,5 +133,3 @@ func (g *MintGrantIssuer) VerifyGrant(_ context.Context, token string, now time.
 	}
 	return request, nil
 }
-
-const mintPrivateAccessTTL = 2 * time.Minute

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat-server/internal/admission"
 	"net/netip"
 	"sort"
 	"time"
@@ -16,7 +17,6 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/pinksaucepasta/paperboat-server/internal/config"
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/mint"
 	"golang.org/x/crypto/curve25519"
 )
 
@@ -250,8 +250,8 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 		JOIN paperboat.control_environments e ON e.id=a.environment_id AND e.owner_user_id=m.user_id AND e.desired_state='active' AND e.revoked_at IS NULL
 		JOIN paperboat.users actor ON actor.id=a.user_id AND actor.status='active'
 		JOIN paperboat.users owner ON owner.id=m.user_id AND owner.status='active'
-		WHERE a.state='active' AND a.revoked_at IS NULL AND a.expires_at>$2
-		AND ((a.cli_client_session_id=$3 AND a.user_id=$1) OR (a.user_machine_id=$3 AND m.user_id=$1))
+		WHERE a.state='active' AND a.revoked_at IS NULL
+		AND ((a.cli_client_session_id=$2 AND a.user_id=$1) OR (a.user_machine_id=$2 AND m.user_id=$1))
 		AND ((a.machine_service_port IS NOT NULL AND paperboat.machine_service_session_allowed(a.id))
 		 OR (a.terminal_role IN ('viewer','interactive') AND a.team_id IS NOT NULL AND m.state='online' AND m.online AND m.configured_capabilities @> ARRAY['terminal_host'] AND m.observed_capabilities @> ARRAY['terminal_host']
 		 AND paperboat.terminal_session_role(a.user_id,a.terminal_session_id)=a.terminal_role
@@ -260,7 +260,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 		 OR (coalesce(a.terminal_role,'owner')='owner' AND a.team_id IS NOT NULL AND NOT ('private_access'=ANY(a.capabilities)) AND NOT EXISTS(
 		  SELECT 1 FROM unnest(a.capabilities) capability
 		  WHERE NOT paperboat.team_machine_capability_allowed(a.user_id,a.team_id,a.user_machine_id,capability))))
-		ORDER BY a.id LIMIT 129`, in.UserID, now, in.EndpointID)
+		ORDER BY a.id LIMIT 129`, in.UserID, in.EndpointID)
 	if err != nil {
 		return NetworkConfigResult{}, err
 	}
@@ -347,9 +347,9 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
  JOIN user_machines m ON m.id=a.machine_id AND m.user_id=a.account_id AND m.revoked_at IS NULL AND m.deleted_at IS NULL AND m.installation_generation=a.installation_generation
  JOIN control_config_assignments assignment ON assignment.id=a.assignment_id AND assignment.version=a.assignment_version AND assignment.machine_id=a.machine_id AND assignment.consent_state='accepted'
  JOIN control_config_sync_statuses status ON status.environment_id=a.environment_id AND status.assignment_id=a.assignment_id AND status.machine_id=a.machine_id AND status.installation_generation=a.installation_generation AND status.remote_revision=a.expected_remote_revision
- WHERE a.expires_at>$2 AND ((a.native_cli_session_id=$3 AND a.account_id=$1) OR (a.machine_id=$3 AND a.account_id=$1))
+ WHERE ((a.native_cli_session_id=$2 AND a.account_id=$1) OR (a.machine_id=$2 AND a.account_id=$1))
  AND ((a.workspace_id='personal' AND assignment.adopted_team_id IS NULL) OR (assignment.adopted_team_id=a.workspace_id AND EXISTS(SELECT 1 FROM teams t JOIN team_members member USING(team_id) WHERE t.team_id=a.workspace_id AND t.deleted_at IS NULL AND NOT t.suspended AND member.account_id=a.account_id AND member.active)))
- AND EXISTS(SELECT 1 FROM jsonb_array_elements(status.conflicts) conflict WHERE conflict->>'path'=a.config_path AND conflict->>'revision'=a.conflict_revision)`, in.UserID, now, in.EndpointID)
+ AND EXISTS(SELECT 1 FROM jsonb_array_elements(status.conflicts) conflict WHERE conflict->>'path'=a.config_path AND conflict->>'revision'=a.conflict_revision)`, in.UserID, in.EndpointID)
 	if err != nil {
 		return NetworkConfigResult{}, err
 	}
@@ -373,15 +373,15 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 	}
 	byPeer := map[string]*networkPeer{}
 	scopes := 0
-	expiry := now.Add(mint.MaxProofTTL)
+	expiry := admission.Expiry(s.signer, now)
 	if certExpiry.Before(expiry) {
 		expiry = certExpiry
 	}
 	for _, g := range grants {
-		// Application scopes expire independently of the network binding. The
-		// signed protocol uses whole seconds, so a fractional database lifetime
-		// in the current second is already expired for this configuration.
-		if len(g.capabilities) == 0 || g.expiry.Unix() <= now.Unix() {
+		// Preserve expired admission scopes until explicit withdrawal. Machines
+		// use their original expiry to reject new operations, not to kill work
+		// already admitted under this exact access-session identity.
+		if len(g.capabilities) == 0 {
 			continue
 		}
 		peerID, peerAccount, direction := g.machine, g.machineAccount, "dial"

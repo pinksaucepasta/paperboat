@@ -113,6 +113,22 @@ func TestMachineServiceSignedRuntimePostgres(t *testing.T) {
 	if json.Unmarshal(w.Body.Bytes(), &lease) != nil || !lease.Data.ExpiresAt.After(time.Now()) || lease.Data.ExpiresAt.After(now.Add(30*time.Second)) {
 		t.Fatalf("unbounded runtime lease %s", w.Body.String())
 	}
+	exec(`UPDATE user_machine_access_sessions SET expires_at=now()-interval '1 second' WHERE id=$1`, target.AccessSessionID)
+	var originalExpiry time.Time
+	if err := store.SQL().QueryRowContext(ctx, `SELECT expires_at FROM user_machine_access_sessions WHERE id=$1`, target.AccessSessionID).Scan(&originalExpiry); err != nil {
+		t.Fatal(err)
+	}
+	w = request("/v1/runtime-machine-services/authorize", body)
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &lease) != nil || !lease.Data.ExpiresAt.After(time.Now()) {
+		t.Fatal("admitted machine service lost to credential TTL")
+	}
+	var afterExpiry time.Time
+	if err := store.SQL().QueryRowContext(ctx, `SELECT expires_at FROM user_machine_access_sessions WHERE id=$1`, target.AccessSessionID).Scan(&afterExpiry); err != nil {
+		t.Fatal(err)
+	}
+	if !afterExpiry.Equal(originalExpiry) {
+		t.Fatal("current-authority check renewed an admission credential")
+	}
 	exec(`UPDATE paperboat.cli_client_sessions SET state='revoked',revoked_at=now() WHERE id=$1`, owner)
 	w = request("/v1/runtime-machine-services/authorize", body)
 	if w.Code != 403 {

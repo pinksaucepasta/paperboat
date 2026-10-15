@@ -24,13 +24,22 @@ func normalizeHelperIssuer(raw string) string {
 }
 
 func mintKeyProvider(cfg config.Config) (*mint.Provider, error) {
+	var provider *mint.Provider
+	var err error
 	if len(cfg.Secrets.MintSigningKeys) > 0 {
-		return mint.ParseKeys(cfg.Secrets.MintSigningKeys, cfg.CLIAuth.MintActiveKeyID, cfg.CLIAuth.MintJWKSMaxAge)
+		provider, err = mint.ParseKeys(cfg.Secrets.MintSigningKeys, cfg.CLIAuth.MintActiveKeyID, cfg.CLIAuth.MintJWKSMaxAge)
+	} else if cfg.Environment != config.EnvironmentProduction {
+		provider, err = mint.NewEphemeral(cfg.CLIAuth.MintJWKSMaxAge)
+	} else {
+		return nil, errors.New("mint signing keys are not configured")
 	}
-	if cfg.Environment != config.EnvironmentProduction {
-		return mint.NewEphemeral(cfg.CLIAuth.MintJWKSMaxAge)
+	if err != nil {
+		return nil, err
 	}
-	return nil, errors.New("mint signing keys are not configured")
+	if err = provider.ConfigureAdmissionLifetime(cfg.CLIAuth.MintProofLifetime); err != nil {
+		return nil, err
+	}
+	return provider, nil
 }
 
 func githubClient(cfg config.Config) pbgithub.Client {

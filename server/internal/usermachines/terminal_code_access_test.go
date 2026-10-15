@@ -110,6 +110,14 @@ func TestTerminalCodeAccessLifecycleAndBoundsPostgres(t *testing.T) {
 	if _, err = service.ResolveTerminalBrowserRole(ctx, outsider, session); !errors.Is(err, ErrTerminalSessionNotFound) {
 		t.Fatalf("outsider gained account grant %v", err)
 	}
+	// A new guest must not delete a still-admitted guest whose bearer expired.
+	insert(`UPDATE terminal_guest_sessions SET created_at=now()-interval '1 minute',expires_at=now()-interval '1 second' WHERE id=$1`, guest.ID)
+	if _, err = service.JoinTerminalWithCode(ctx, session, state.Code, "Next guest"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.ResolveTerminalGuestRole(ctx, guest.ID, session); err != nil {
+		t.Fatalf("joining guest removed admitted authority: %v", err)
+	}
 	// Changing account policy must not revoke a separately admitted guest.
 	policy, err := service.SetTerminalBrowserAccessPolicy(ctx, owner, session, TerminalBrowserAccessPolicyMutation{ExpectedGeneration: 1, Audience: "specific_emails", AllowedEmails: []string{"other@outside.test"}})
 	if err != nil {
@@ -169,7 +177,7 @@ func TestTerminalCodeAccessLifecycleAndBoundsPostgres(t *testing.T) {
 	if _, err = service.ResolveTerminalGuestRole(ctx, guest.ID, session); !errors.Is(err, ErrTerminalSessionNotFound) {
 		t.Fatalf("stop authority %v", err)
 	}
-	// Expiry denies bearer, code and reauthorization, without relying on a cleanup worker.
+	// Expiry denies new bearer/code admission, while an admitted guest retains authority.
 	in.ExpectedGeneration = state.Generation
 	in.Role = TerminalBrowserRoleViewer
 	state, err = service.SetTerminalCodeAccess(ctx, owner, session, in)
@@ -181,8 +189,8 @@ func TestTerminalCodeAccessLifecycleAndBoundsPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	insert(`UPDATE terminal_code_access SET expires_at=now()-interval '1 second' WHERE terminal_session_id=$1`, session)
-	if _, err = service.ResolveTerminalGuestRole(ctx, guest.ID, session); !errors.Is(err, ErrTerminalSessionNotFound) {
-		t.Fatalf("expired authority %v", err)
+	if _, err = service.ResolveTerminalGuestRole(ctx, guest.ID, session); err != nil {
+		t.Fatalf("admitted guest lost authority at credential expiry: %v", err)
 	}
 	if _, err = service.AuthenticateTerminalGuest(ctx, session, guest.Token); !errors.Is(err, ErrTerminalCodeInvalid) {
 		t.Fatalf("expired bearer %v", err)

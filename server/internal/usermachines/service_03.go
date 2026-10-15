@@ -7,6 +7,7 @@ import (
 	"errors"
 	"github.com/pinksaucepasta/paperboat-server/internal/access"
 	"github.com/pinksaucepasta/paperboat-server/internal/accessdescriptor"
+	"github.com/pinksaucepasta/paperboat-server/internal/admission"
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
 	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat-server/internal/mint"
@@ -91,11 +92,7 @@ func (s *Service) fileTransferDescriptor(ctx context.Context, userID, sourceMach
 	if err != nil {
 		return FileTransferDescriptor{}, err
 	}
-	ttl := s.ttl
-	if ttl <= 0 || ttl > 5*time.Minute {
-		ttl = 5 * time.Minute
-	}
-	expiresAt := s.now().UTC().Add(ttl)
+	expiresAt := admission.Expiry(s.controlSigner, s.now())
 	jti := newID("token")
 	accessSessionID := newID("session")
 	operationID := sessionID
@@ -111,7 +108,7 @@ func (s *Service) fileTransferDescriptor(ctx context.Context, userID, sourceMach
 	if acceptedRequest != nil {
 		credentialInput.RequestID, credentialInput.IdempotencyKey, credentialInput.RequestHash = acceptedRequest.RequestID, acceptedRequest.BatchID, acceptedRequest.ManifestDigest
 	}
-	token, err := s.controlSigner.SignCredential(credentialInput)
+	token, err := admission.Sign(s.controlSigner, credentialInput)
 	if err != nil {
 		return FileTransferDescriptor{}, err
 	}
@@ -240,11 +237,7 @@ func (s *Service) ConnectSharedTerminalSession(ctx context.Context, userID, sour
 	if !slices.Contains(row.ConfiguredCapabilities, "terminal_host") {
 		return ConnectionDescriptor{}, ErrMachineCapabilityUnavailable
 	}
-	ttl := s.ttl
-	if ttl <= 0 || ttl > 5*time.Minute {
-		ttl = 5 * time.Minute
-	}
-	expires := s.now().UTC().Add(ttl)
+	expires := admission.Expiry(s.controlSigner, s.now())
 	response := ConnectionDescriptor{Issuer: s.issuer, UserMachineID: row.ID, UserMachineState: row.State, ExpiresAt: expires, Status: "connector_connecting", Reason: "connector_offline", RetryAfterSeconds: 2}
 	setCanonicalMachineIdentity(&response, row)
 	if row.State == "revoked" || row.State == "disconnected" || row.State == "deleted" {
@@ -388,14 +381,7 @@ func (s *Service) ConnectTerminalSession(ctx context.Context, userID, sourceMach
 	if err != nil {
 		return ConnectionDescriptor{}, err
 	}
-	ttl := s.ttl
-	if ttl <= 0 {
-		ttl = 5 * time.Minute
-	}
-	if s.controlSigner != nil && ttl > 5*time.Minute {
-		ttl = 5 * time.Minute
-	}
-	expires := s.now().UTC().Add(ttl)
+	expires := admission.Expiry(s.controlSigner, s.now())
 	response := ConnectionDescriptor{Issuer: s.issuer, UserMachineID: row.ID, UserMachineState: row.State, ExpiresAt: expires, Status: "connector_connecting", Reason: "connector_offline", RetryAfterSeconds: 2}
 	setCanonicalMachineIdentity(&response, row)
 	if row.State == "revoked" || row.State == "disconnected" || row.State == "deleted" {

@@ -1101,7 +1101,6 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "token",
           "host",
           "resource_kind",
           "resource_id",
@@ -1137,8 +1136,24 @@
               "machine"
             ],
             "default": "browser"
+          },
+          "grant_id": {
+            "type": "string",
+            "description": "Edge-only continuation of an independently admitted connection. Checks current exact resource and revocation without renewing the original bearer. New connections require token."
           }
-        }
+        },
+        "oneOf": [
+          {
+            "required": [
+              "token"
+            ]
+          },
+          {
+            "required": [
+              "grant_id"
+            ]
+          }
+        ]
       },
       "BrowserMachineCredentialRequest": {
         "type": "object",
@@ -16142,6 +16157,15 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/PrivateAccessGrant"
+          },
+          {
+            "name": "X-Paperboat-Admitted-Decision",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Edge-only revalidation of an independently admitted connection. Must match the original signed grant and exact decision; expiry is checked only at initial admission. Explicit revocation still denies continuation."
           }
         ],
         "requestBody": {
@@ -42372,7 +42396,7 @@
         },
         "responses": {
           "204": {
-            "description": "Cancelled; a consumed grant\u2019s client session is revoked."
+            "description": "Cancelled; a consumed grant’s client session is revoked."
           },
           "400": {
             "description": "Invalid client or device code."

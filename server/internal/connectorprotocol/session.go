@@ -350,14 +350,6 @@ func (s *ServerSession) ensureActiveLocked(now time.Time) error {
 		s.closeLocked(ReasonSessionReplaced)
 		return codeError(ErrStaleSession, ReasonSessionReplaced, false, nil)
 	}
-	if !s.auth.CredentialExpiresAt.After(now) {
-		s.closeLocked(ReasonCredentialExpired)
-		return codeError(ErrCredentialExpired, ReasonCredentialExpired, true, nil)
-	}
-	if !s.lease.ExpiresAt.After(now) {
-		s.closeLocked(ReasonLeaseExpired)
-		return codeError(ErrLeaseExpired, ReasonLeaseExpired, true, nil)
-	}
 	if !s.lastHeartbeat.IsZero() && now.Sub(s.lastHeartbeat) > 2*time.Duration(s.lease.HeartbeatIntervalMS)*time.Millisecond {
 		s.closeLocked(ReasonHeartbeatTimeout)
 		return codeError(ErrHeartbeatTimeout, ReasonHeartbeatTimeout, true, nil)
@@ -662,9 +654,6 @@ func (s *ServerSession) HandleHeartbeat(ctx context.Context, heartbeat Heartbeat
 	s.lastHeartbeatSentAt = heartbeat.SentAt
 	s.lastHeartbeat = now
 	leaseExpiry := now.Add(s.server.config.LeaseDuration)
-	if s.auth.CredentialExpiresAt.Before(leaseExpiry) {
-		leaseExpiry = s.auth.CredentialExpiresAt
-	}
 	s.lease.ExpiresAt = leaseExpiry
 	return HeartbeatAck{AccountID: s.refAccountID(), TunnelID: s.ref.TunnelID, ConnectorID: s.ref.ConnectorID, SessionID: s.ref.SessionID, ProcessGeneration: s.ref.ProcessGeneration, LeaseExpiresAt: leaseExpiry, ServerTime: now}, nil
 }

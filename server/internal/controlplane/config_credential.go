@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat-server/internal/admission"
 	"strings"
 	"time"
 
@@ -108,8 +109,8 @@ func (s *ConfigCredentialService) Issue(ctx context.Context, identityToken strin
 		if strings.TrimSpace(machineID) == "" || assignment.MachineID != machineID {
 			return ErrConfigCredentialInvalid
 		}
-		expiresAt := now.Add(5 * time.Minute)
-		token, err := s.signer.SignCredential(mint.CredentialInput{Issuer: s.issuer, Audience: "paperboat-machine", Subject: claims.MachineID, JTI: jti, IssuedAt: now, ExpiresAt: expiresAt, CredentialClass: "config_sync", Scopes: []string{"config:pull", "config:apply", "config:report"}, EnvironmentID: claims.EnvironmentID, MachineID: machineID, InstallationGeneration: claims.InstallationGeneration, AssignmentID: assignment.ID, WarningRevision: assignment.WarningRevision.String})
+		expiresAt := admission.Expiry(s.signer, now)
+		token, err := admission.Sign(s.signer, mint.CredentialInput{Issuer: s.issuer, Audience: "paperboat-machine", Subject: claims.MachineID, JTI: jti, IssuedAt: now, ExpiresAt: expiresAt, CredentialClass: "config_sync", Scopes: []string{"config:pull", "config:apply", "config:report"}, EnvironmentID: claims.EnvironmentID, MachineID: machineID, InstallationGeneration: claims.InstallationGeneration, AssignmentID: assignment.ID, WarningRevision: assignment.WarningRevision.String})
 		if err != nil {
 			return err
 		}

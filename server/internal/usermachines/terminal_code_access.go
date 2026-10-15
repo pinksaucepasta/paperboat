@@ -209,9 +209,6 @@ func (s *Service) JoinTerminalWithCode(ctx context.Context, sessionID, code, dis
 		if !valid || subtle.ConstantTimeCompare(hash, sum[:]) != 1 {
 			return ErrTerminalCodeInvalid
 		}
-		if _, err = tx.Exec(ctx, `DELETE FROM terminal_guest_sessions WHERE terminal_session_id=$1 AND expires_at<=now()`, sessionID); err != nil {
-			return err
-		}
 		var count int
 		if err = tx.QueryRow(ctx, `SELECT count(*) FROM terminal_guest_sessions WHERE terminal_session_id=$1`, sessionID).Scan(&count); err != nil {
 			return err
@@ -263,7 +260,7 @@ func (s *Service) ResolveTerminalGuestRole(ctx context.Context, guestID, session
  JOIN user_machine_terminal_sessions t ON t.id=g.terminal_session_id
  JOIN user_machines m ON m.id=t.user_machine_id AND m.deleted_at IS NULL AND m.revoked_at IS NULL
  JOIN users owner ON owner.id=t.owner_account AND owner.status='active'
- WHERE g.id=$1 AND g.terminal_session_id=$2 AND g.expires_at>now() AND c.enabled AND c.expires_at>now() AND c.generation=g.code_generation
+ WHERE g.id=$1 AND g.terminal_session_id=$2 AND c.enabled AND c.generation=g.code_generation
  AND t.deleted_at IS NULL AND t.desired_state='open' AND t.runtime_state NOT IN ('closed','exited','deleted')`, guestID, sessionID).Scan(&decision.SessionID, &decision.OwnerAccountID, &decision.WorkspaceID, &decision.MachineID, &decision.EnvironmentID, &decision.Role, &decision.PolicyGeneration)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return TerminalBrowserDecision{}, ErrTerminalSessionNotFound

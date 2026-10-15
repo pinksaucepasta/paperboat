@@ -288,7 +288,7 @@ func (s *Service) Issue(ctx context.Context, in IssueRequest) (IssueResult, erro
 	now := s.now()
 	out := IssueResult{CredentialID: id, Token: token, ExpiresAt: now.Add(in.TTL)}
 	err = s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if _, e := tx.Exec(ctx, `DELETE FROM inspector_credentials WHERE credential_id IN (SELECT credential_id FROM inspector_credentials WHERE expires_at<=$1 OR revoked_at IS NOT NULL ORDER BY expires_at LIMIT $2)`, now, maxCleanupRows); e != nil {
+		if _, e := tx.Exec(ctx, `DELETE FROM inspector_credentials WHERE credential_id IN (SELECT credential_id FROM inspector_credentials WHERE revoked_at IS NOT NULL AND revoked_at<=$1 ORDER BY expires_at LIMIT $2)`, now, maxCleanupRows); e != nil {
 			return e
 		}
 		a, e := resolveResource(ctx, tx, in.ResourceKind, in.ResourceID, in.RouteID, now)
@@ -417,7 +417,7 @@ func (s *Service) Cleanup(ctx context.Context, limit int) (int64, error) {
 	if limit < 1 || limit > 1000 {
 		return 0, ErrInvalid
 	}
-	result, err := s.db.Pool().Exec(ctx, `WITH doomed AS (SELECT credential_id FROM inspector_credentials WHERE expires_at<=$1 OR revoked_at IS NOT NULL ORDER BY expires_at LIMIT $2) DELETE FROM inspector_credentials s USING doomed d WHERE s.credential_id=d.credential_id`, s.now(), limit)
+	result, err := s.db.Pool().Exec(ctx, `WITH doomed AS (SELECT credential_id FROM inspector_credentials WHERE revoked_at IS NOT NULL AND revoked_at<=$1 ORDER BY expires_at LIMIT $2) DELETE FROM inspector_credentials s USING doomed d WHERE s.credential_id=d.credential_id`, s.now(), limit)
 	if err != nil {
 		return 0, err
 	}

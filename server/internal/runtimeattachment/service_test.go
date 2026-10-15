@@ -437,13 +437,18 @@ VALUES($1,'default','1.0','epoch_backup','ready',true,now(),'second-region','sec
 	// Keep registry liveness independent of the admission-expiry scenario.
 	exec(`UPDATE control_tunnel_nodes SET last_heartbeat_at=now(),capacity_observed_at=now() WHERE id IN ($1,$2)`, node, backupNode)
 	exec(`UPDATE runtime_carrier_attachments SET expires_at=now()-interval '1 second' WHERE route_id=$1`, route)
-	ready(false)
-	if _, err := database.Queries().GetReadyRuntimeEdgeDNSAddressV1(ctx, dnsArgs); err == nil {
-		t.Fatal("expired runtime edge remained advertised in DNS")
+	ready(true)
+	if _, err := database.Queries().GetReadyRuntimeEdgeDNSAddressV1(ctx, dnsArgs); err != nil {
+		t.Fatal("admitted runtime edge lost DNS on credential expiry")
 	}
-	if err = service.Observe(ctx, backupEdge, []Observation{backupObservation}); !errors.Is(err, ErrStale) {
-		t.Fatal("expired admission became ready")
+	if err = service.Observe(ctx, backupEdge, []Observation{backupObservation}); err != nil {
+		t.Fatal("admitted runtime edge heartbeat rejected after credential expiry")
 	}
+	values, err := service.Pull(ctx, backupEdge)
+	if err != nil || len(values) == 0 || !values[0].ExpiresAt.After(time.Now()) {
+		t.Fatal("current carrier did not receive fresh admission metadata")
+	}
+
 	if _, err = service.Attach(ctx, proof, request); err != nil {
 		t.Fatal(err)
 	}

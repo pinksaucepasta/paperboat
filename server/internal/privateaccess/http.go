@@ -104,7 +104,12 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeHTTPError(requestContext(r), w, http.StatusUnauthorized, "grant_required", "A signed private access grant is required.", false)
 		return
 	}
-	decision, err := h.service.AuthorizeIngress(r.Context(), AuthorizeInput{Request: request, Edge: edgeIdentity, Grant: grant})
+	admittedID, err := singleHeader(r.Header, "X-Paperboat-Admitted-Decision", true)
+	if err != nil {
+		writeHTTPError(r.Context(), w, http.StatusBadRequest, "invalid_request", "Invalid admitted decision.", false)
+		return
+	}
+	decision, err := h.service.AuthorizeIngress(r.Context(), AuthorizeInput{Request: request, Edge: edgeIdentity, Grant: grant, AdmittedDecisionID: admittedID})
 	if err == nil {
 		writeDecision(w, r.Context(), decision, nil)
 		return

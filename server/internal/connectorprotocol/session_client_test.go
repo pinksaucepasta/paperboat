@@ -136,11 +136,6 @@ func (c *ClientSession) ensureActiveLocked(now time.Time) error {
 	if c.state == SessionNew {
 		return codeError(ErrSessionConflict, ReasonProtocolClosed, false, nil)
 	}
-	if !c.lease.ExpiresAt.After(now) {
-		c.state = SessionClosed
-		c.disconnectReason = ReasonLeaseExpired
-		return codeError(ErrLeaseExpired, ReasonLeaseExpired, true, nil)
-	}
 	if !c.lastHeartbeatAck.IsZero() && now.Sub(c.lastHeartbeatAck) > 2*time.Duration(c.lease.HeartbeatIntervalMS)*time.Millisecond {
 		c.state = SessionClosed
 		c.disconnectReason = ReasonHeartbeatTimeout
@@ -711,9 +706,6 @@ func (c *ClientSession) ensureActiveReadLocked(now time.Time) error {
 	}
 	if c.state == SessionNew {
 		return codeError(ErrSessionConflict, ReasonProtocolClosed, false, nil)
-	}
-	if !c.lease.ExpiresAt.After(now) {
-		return codeError(ErrLeaseExpired, ReasonLeaseExpired, true, nil)
 	}
 	return nil
 }

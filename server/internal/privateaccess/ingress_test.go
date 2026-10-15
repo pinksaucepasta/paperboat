@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/pinksaucepasta/paperboat-server/internal/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat-server/internal/mint"
 	"syscall"
 	"testing"
 	"time"
@@ -52,19 +53,32 @@ func testNativeIngress(t *testing.T, preview bool) {
 	}
 	source := &nativeRouteSource{decision: d}
 	state := &fakeMachineState{}
-	grants := &fakeGrant{request: q, token: "signed_grant"}
+	provider, err := mint.NewEphemeral(time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	grants, err := NewMintGrantIssuer(provider, "https://api.example.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := grants.MintGrant(t.Context(), q, now)
+	if err != nil {
+		t.Fatal(err)
+	}
 	resolver := &fakeResolver{binding: b}
 	service, err := NewService(resolver, nil, Config{Now: func() time.Time { return now }, GrantVerifier: grants, MachineState: state, IngressSource: source})
 	if err != nil {
 		t.Fatal(err)
 	}
-	input := AuthorizeInput{Grant: grants.token, Request: q, Edge: EdgeIdentity{NodeID: q.EdgeNodeID, ProcessEpoch: q.EdgeProcessEpoch}}
+	var admittedID string
+	input := AuthorizeInput{Grant: token, Request: q, Edge: EdgeIdentity{NodeID: q.EdgeNodeID, ProcessEpoch: q.EdgeProcessEpoch}}
 	for _, stage := range []string{"initial", "refresh"} {
 		t.Run(stage, func(t *testing.T) {
 			got, err := service.AuthorizeIngress(context.Background(), input)
 			if err != nil || got.Ingress == nil {
 				t.Fatalf("authorize: %v", err)
 			}
+			admittedID = got.DecisionID
 			current := *got.Ingress
 			if current.NativeAuthorization == nil || current.NativeAuthorization.Grant != input.Grant || current.NativeAuthorization.Request != connectorprotocol.PrivateAccessRequest(q) || current.Binding.HostID == q.MachineID || current.Binding.InstallationGeneration == q.InstallationGeneration {
 				t.Fatal("publisher and accessor authority conflated")
@@ -92,6 +106,28 @@ func testNativeIngress(t *testing.T, preview bool) {
 			now = saved
 		})
 	}
+	now = q.ExpiresAt.Add(time.Second)
+	source.decision.IssuedAt, source.decision.ExpiresAt = now, now.Add(10*time.Second)
+	resolver.binding.ExpiresAt = now.Add(time.Minute)
+	input.AdmittedDecisionID = admittedID
+	if got, err := service.AuthorizeIngress(t.Context(), input); err != nil || got.Ingress == nil {
+		t.Fatalf("admitted grant lost after TTL: %v", err)
+	}
+	state.err = newDenied(ReasonMachineRevoked)
+	if _, err := service.AuthorizeIngress(t.Context(), input); err == nil {
+		t.Fatal("revoked accessor retained admitted private connection")
+	}
+	state.err = nil
+	source.err = connectorprotocol.ErrIngressDenied
+	if _, err := service.AuthorizeIngress(t.Context(), input); err == nil {
+		t.Fatal("revoked publisher retained admitted private connection")
+	}
+	source.err = nil
+	input.AdmittedDecisionID = "decision_other"
+	if _, err := service.AuthorizeIngress(t.Context(), input); err == nil {
+		t.Fatal("foreign admission continuation accepted")
+	}
+
 	if state.calls < 4 || resolver.calls < 4 || source.calls < 4 {
 		t.Fatal("refresh skipped independent authorization")
 	}

@@ -10,8 +10,9 @@ import (
 )
 
 type SQLResolver struct {
-	database *sql.DB
-	now      func() time.Time
+	AdmissionLifetime time.Duration
+	database          *sql.DB
+	now               func() time.Time
 }
 
 func NewSQLResolver(database *db.DB) (*SQLResolver, error) {

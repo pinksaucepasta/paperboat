@@ -250,7 +250,6 @@ type Service struct {
 	encryptionKey               string
 	credentials                 access.CredentialIssuer
 	issuer                      string
-	ttl                         time.Duration
 	fileTransferPolicy          accessdescriptor.FileTransferPolicy
 	teamInbox                   *teaminbox.Service
 	maxSessions                 int
@@ -398,8 +397,8 @@ func (s *Service) ConfigureInstallationEncryption(encryptionKey string) {
 	s.encryptionKey = encryptionKey
 }
 
-func (s *Service) ConfigureAccess(credentials access.CredentialIssuer, issuer string, ttl time.Duration) {
-	s.credentials, s.issuer, s.ttl = credentials, strings.TrimRight(issuer, "/"), ttl
+func (s *Service) ConfigureAccess(credentials access.CredentialIssuer, issuer string) {
+	s.credentials, s.issuer = credentials, strings.TrimRight(issuer, "/")
 }
 
 // ConfigureCLIAuth supplies the same CLI credential policy used by browser login.

@@ -33,7 +33,7 @@ func (s *Service) AuthorizeIngress(ctx context.Context, input AuthorizeInput) (D
 		}
 		return Decision{}, err
 	}
-	current, err = composeNativeIngress(current, evidence, decision, s.clock().UTC())
+	current, err = composeNativeIngress(current, evidence, decision, s.clock().UTC(), input.AdmittedDecisionID != "")
 	if err != nil {
 		if pureExpectedPrivateAccessError(err, connectorprotocol.ErrIngressDenied) {
 			return s.deny(ctx, input, ReasonWrongRoute, s.clock().UTC(), "ingress")
@@ -44,12 +44,21 @@ func (s *Service) AuthorizeIngress(ctx context.Context, input AuthorizeInput) (D
 	return decision, nil
 }
 
-func composeNativeIngress(current connectorprotocol.IngressDecision, evidence connectorprotocol.PrivateAccessOpen, decision Decision, now time.Time) (connectorprotocol.IngressDecision, error) {
+func composeNativeIngress(current connectorprotocol.IngressDecision, evidence connectorprotocol.PrivateAccessOpen, decision Decision, now time.Time, admitted bool) (connectorprotocol.IngressDecision, error) {
 	q := evidence.Request
 	current.NativeAuthorization = &evidence
 	current.PrincipalID, current.GrantID, current.GrantGeneration, current.MembershipGeneration = q.MachineID, q.Nonce, q.InstallationGeneration, 0
 	current.IssuedAt = now
+	current.DecisionID = decision.DecisionID
 	current.ExpiresAt = minTime(current.ExpiresAt, decision.ExpiresAt, q.ExpiresAt, now.Add(connectorprotocol.IngressAuthorityLifetime))
+	if admitted {
+		current.ExpiresAt = minTime(decision.ExpiresAt, now.Add(connectorprotocol.IngressAuthorityLifetime))
+		open := connectorprotocol.StreamOpen{Protocol: connectorprotocol.ProtocolName, Version: connectorprotocol.ProtocolVersion, AccountID: current.Binding.AccountID, TunnelID: current.Binding.TunnelID, ConnectorID: current.ConnectorID, SessionID: current.SessionID, ProcessGeneration: current.ProcessGeneration, Generation: current.ConfigGeneration, RouteID: current.Binding.RouteID, RequestID: q.RequestID, Kind: "http_browser"}
+		if current.Revalidate(current, open, current.EdgeNodeID, current.EdgeProcessEpoch, now) != nil {
+			return connectorprotocol.IngressDecision{}, connectorprotocol.ErrIngressDenied
+		}
+		return current, nil
+	}
 	if current.Validate(now) != nil {
 		return connectorprotocol.IngressDecision{}, connectorprotocol.ErrIngressDenied
 	}

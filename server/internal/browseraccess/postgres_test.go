@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
 	"os"
 	"strings"
 	"sync"
@@ -43,7 +44,7 @@ func TestBrowserAccessPostgres(t *testing.T) {
 	hostMachine := "host_ba_" + suffix
 	team := "team_ba_" + suffix
 	secondTeam := "team_ba_second_" + suffix
-	host := "00000000-0000-8000-8000-" + suffix[len(suffix)-12:] + ".tunnels.example.test"
+	host := uuid.NewString() + ".tunnels.example.test"
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	exec := func(q string, args ...any) {
 		t.Helper()
@@ -59,7 +60,7 @@ func TestBrowserAccessPostgres(t *testing.T) {
 	exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@test.invalid','active'),($2,$2,$2||'@test.invalid','active')`, owner, viewer)
 	exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,description,platform,architecture,workspace_root,state,seat_state) VALUES($1,$2,$3,'browser-host','Browser host','linux','amd64','/workspace','offline','released')`, hostMachine, owner, "env_"+suffix)
 	exec(`INSERT INTO paperboat.sessions(id,user_id,session_hash,csrf_hash,expires_at) VALUES($1,$2,$3,$4,$5)`, session, owner, "hash_"+suffix, "csrf_"+suffix, now.Add(2*time.Hour))
-	exec(`INSERT INTO paperboat.tunnels(id,account_id,name,desired_state,access_mode,generation,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id,created_at,updated_at) VALUES($1,$2,$1,'active','private',3,$3,$4,$5,$2,$6,$6)`, tunnel, owner, strings.TrimSuffix(host, ".tunnels.example.test"), "https://"+host, hostMachine, now)
+	exec(`INSERT INTO paperboat.tunnels(id,account_id,name,desired_state,access_mode,generation,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id,created_at,updated_at) VALUES($1,$2,$1,'active','private',3,$3,$4,$5,$2,$6,$6)`, tunnel, owner, "endpoint_"+strings.TrimSuffix(host, ".tunnels.example.test"), "https://"+host, hostMachine, now)
 	exec(`INSERT INTO paperboat.tunnel_routes(id,tunnel_id,name,protocol,match_type,origin_scheme,origin_address,generation,desired_state,created_by_actor_id,updated_by_actor_id,created_at,updated_at) VALUES($1,$2,'web','http','catch_all','http','127.0.0.1:3000',7,'active',$3,$3,$4,$4)`, route, tunnel, owner, now)
 	svc, err := NewService(store, "https://login.example.test")
 	if err != nil {
@@ -115,7 +116,27 @@ func TestBrowserAccessPostgres(t *testing.T) {
 	if _, e := svc.Authorize(ctx, AuthorizeRequest{Token: token, Host: "wrong." + host, ResourceKind: "tunnel", ResourceID: tunnel, RouteID: route}); e == nil {
 		t.Fatal("wrong host authorized")
 	}
+
+	admitted, err := svc.Authorize(ctx, AuthorizeRequest{Token: token, Host: host, ResourceKind: "tunnel", ResourceID: tunnel, RouteID: route})
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec(`UPDATE browser_access_sessions SET expires_at=$2 WHERE grant_id=$1`, admitted.GrantID, now.Add(-time.Second))
+	if _, err := svc.Authorize(ctx, AuthorizeRequest{Token: token, Host: host, ResourceKind: "tunnel", ResourceID: tunnel, RouteID: route}); err == nil {
+		t.Fatal("expired credential admitted a new browser request")
+	}
+	if _, err := svc.Cleanup(ctx, 256); err != nil {
+		t.Fatal(err)
+	}
+	exec(`UPDATE sessions SET expires_at=$2 WHERE id=$1`, session, now.Add(-time.Second))
+	if current, err := svc.AuthorizeGrant(ctx, admitted.GrantID, host, "tunnel", tunnel, route); err != nil || !current.ExpiresAt.After(now) {
+		t.Fatal("admitted browser authority lost to credential expiry or cleanup")
+	}
+	exec(`UPDATE sessions SET expires_at=$2 WHERE id=$1`, session, now.Add(2*time.Hour))
 	exec(`UPDATE paperboat.sessions SET version=version+1,rotated_at=$2 WHERE id=$1`, session, now)
+	if _, err := svc.AuthorizeGrant(ctx, admitted.GrantID, host, "tunnel", tunnel, route); err == nil {
+		t.Fatal("signed-out session retained admitted browser authority")
+	}
 	if _, e := svc.Authorize(ctx, AuthorizeRequest{Token: token, Host: host, ResourceKind: "tunnel", ResourceID: tunnel, RouteID: route}); e == nil {
 		t.Fatal("rotated trusted session retained old grant")
 	}
@@ -174,7 +195,7 @@ func TestBrowserAccessPostgres(t *testing.T) {
 		t.Fatal("revoked team issued another machine credential")
 	}
 	var retained int
-	if err = store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.browser_machine_credentials WHERE credential_id=$1`, machine.CredentialID).Scan(&retained); err != nil || retained != 0 {
-		t.Fatalf("machine-only cleanup retained expired credential: count=%d err=%v", retained, err)
+	if err = store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.browser_machine_credentials WHERE credential_id=$1`, machine.CredentialID).Scan(&retained); err != nil || retained != 1 {
+		t.Fatalf("cleanup removed unrevoked admission authority: count=%d err=%v", retained, err)
 	}
 }

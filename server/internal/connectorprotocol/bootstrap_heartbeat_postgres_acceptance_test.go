@@ -174,6 +174,28 @@ func TestTRK08PostgresHeartbeatRenewsAwaitingReadiness(t *testing.T) {
 	if session.session.State() != SessionReady {
 		t.Fatalf("in-memory state after readiness=%s, want %s", session.session.State(), SessionReady)
 	}
+	// Credential and original lease deadlines are admission metadata, not live authority.
+	if _, err := f.database.SQL().ExecContext(ctx, `UPDATE tunnel_connector_credential_generations
+SET created_at=$2::timestamptz-interval '1 hour',valid_until=$2 WHERE connector_id=$1`, ref.ConnectorID, base.Add(-time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.database.SQL().ExecContext(ctx, `UPDATE tunnel_connector_sessions SET created_at=$2::timestamptz-interval '1 hour',lease_deadline=$2 WHERE id=$1`, ref.SessionID, base.Add(-time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	session.session.auth.CredentialExpiresAt = base.Add(-time.Second)
+	session.session.lease.ExpiresAt = base.Add(-time.Second)
+	f.clock.now = f.clock.now.Add(time.Second)
+	if _, err := session.HandleHeartbeat(ctx, trk08CandidateHeartbeat(ref, f.accountID, snapshot, f.clock.now)); err != nil {
+		t.Fatalf("admitted connector lost durable authority at credential expiry: %v", err)
+	}
+	if _, err := f.database.SQL().ExecContext(ctx, `UPDATE tunnel_connector_credential_generations SET state='revoked',revoked_at=now() WHERE connector_id=$1`, ref.ConnectorID); err != nil {
+		t.Fatal(err)
+	}
+	f.clock.now = f.clock.now.Add(time.Second)
+	if _, err := session.HandleHeartbeat(ctx, trk08CandidateHeartbeat(ref, f.accountID, snapshot, f.clock.now)); err == nil {
+		t.Fatal("revoked connector retained durable authority")
+	}
+
 }
 
 type trk08HeartbeatState struct {

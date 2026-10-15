@@ -425,12 +425,14 @@ type ResourceResolver interface {
 // used after a grant has been verified at the edge.
 type MachineStateVerifier interface {
 	VerifyCurrentMachine(context.Context, Identity, time.Time) error
+	VerifyAdmittedMachine(context.Context, Identity, time.Time) error
 }
 
 // GrantVerifier validates a server-signed, short-lived route grant.  The
 // verifier must return the signed request claims, not arbitrary caller input.
 type GrantVerifier interface {
 	VerifyGrant(context.Context, string, time.Time) (Request, error)
+	VerifyAdmittedGrant(context.Context, string, time.Time) (Request, error)
 }
 
 // AuditRecord is deliberately a safe projection.  Implementations must not

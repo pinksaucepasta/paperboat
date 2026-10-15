@@ -90,7 +90,7 @@ func (p *Provider) SignRelayGrant(claims map[string]any) (string, error) {
 	if !issuerOK || strings.TrimSpace(issuer) == "" || !accountOK || accountID == "" || !endpointOK || endpointID == "" ||
 		!wgOK || wgDecodeErr != nil || len(decodedWGKey) != 32 || base64.RawURLEncoding.EncodeToString(decodedWGKey) != wgKey ||
 		!certOK || fingerprintDecodeErr != nil || len(decodedFingerprint) != 32 || hex.EncodeToString(decodedFingerprint) != certFingerprint ||
-		!nodeOK || nodeID == "" || !epochOK || processEpoch == "" || !discoOK || !peerRelayOK || !relayPeersClaim(peers, issuedAt) || !peersOK ||
+		!nodeOK || nodeID == "" || !epochOK || processEpoch == "" || !discoOK || !peerRelayOK || !relayPeersClaim(peers) || !peersOK ||
 		!issuedOK || !expiresOK || expiresAt <= issuedAt || expiresAt-issuedAt > 60 || !configGenerationOK || configGeneration < 1 || !nodeGenerationOK || nodeGeneration < 1 {
 		return "", errors.New("relay grant claims are invalid")
 	}
@@ -145,7 +145,7 @@ func relayDescriptorClaim(value any) bool {
 	return err == nil && prefix.Contains(address)
 }
 
-func relayPeersClaim(value any, issuedAt int64) bool {
+func relayPeersClaim(value any) bool {
 	raw, err := json.Marshal(value)
 	if err != nil {
 		return false
@@ -169,7 +169,7 @@ func relayPeersClaim(value any, issuedAt int64) bool {
 			return false
 		}
 		for _, scope := range peer.Scopes {
-			if scope.ResourceKind == "" || scope.ResourceID == "" || scope.ResourceGeneration < 1 || scope.Capability == "" || (scope.Direction != "dial" && scope.Direction != "accept") || scope.Port < 1 || scope.Port > 65535 || scope.ExpiresAt <= issuedAt {
+			if scope.ResourceKind == "" || scope.ResourceID == "" || scope.ResourceGeneration < 1 || scope.Capability == "" || (scope.Direction != "dial" && scope.Direction != "accept") || scope.Port < 1 || scope.Port > 65535 || scope.ExpiresAt <= 0 {
 				return false
 			}
 		}
@@ -227,10 +227,11 @@ type Key struct {
 }
 
 type Provider struct {
-	mu       sync.RWMutex
-	activeID string
-	keys     map[string]ed25519.PrivateKey
-	maxAge   time.Duration
+	admissionLifetime time.Duration
+	mu                sync.RWMutex
+	activeID          string
+	keys              map[string]ed25519.PrivateKey
+	maxAge            time.Duration
 }
 
 type ProofInput struct {
@@ -829,17 +830,23 @@ func (p *Provider) SignCredential(input CredentialInput) (string, error) {
 }
 
 func (p *Provider) VerifyCredential(token, expectedIssuer, expectedClass string, now time.Time) (CredentialClaims, error) {
-	return p.verifyCredential(token, expectedIssuer, expectedClass, now, 0)
+	return p.verifyCredential(token, expectedIssuer, expectedClass, now, 0, false)
+}
+
+// VerifyAdmittedCredential verifies signature, issuer, class and exact bindings
+// for an independently admitted connection. It never authorizes new admission.
+func (p *Provider) VerifyAdmittedCredential(token, issuer, class string, now time.Time) (CredentialClaims, error) {
+	return p.verifyCredential(token, issuer, class, now, 0, true)
 }
 
 func (p *Provider) VerifyCredentialWithExpiryGrace(token, expectedIssuer, expectedClass string, now time.Time, expiryGrace time.Duration) (CredentialClaims, error) {
 	if expiryGrace <= 0 {
 		return CredentialClaims{}, errors.New("credential expiry grace is invalid")
 	}
-	return p.verifyCredential(token, expectedIssuer, expectedClass, now, expiryGrace)
+	return p.verifyCredential(token, expectedIssuer, expectedClass, now, expiryGrace, false)
 }
 
-func (p *Provider) verifyCredential(token, expectedIssuer, expectedClass string, now time.Time, expiryGrace time.Duration) (CredentialClaims, error) {
+func (p *Provider) verifyCredential(token, expectedIssuer, expectedClass string, now time.Time, expiryGrace time.Duration, admitted bool) (CredentialClaims, error) {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
 		return CredentialClaims{}, CredentialVerificationError{Code: CredentialMalformed}
@@ -889,7 +896,7 @@ func (p *Provider) verifyCredential(token, expectedIssuer, expectedClass string,
 		return CredentialClaims{}, CredentialVerificationError{Code: CredentialScopesInvalid}
 	case claims.Subject == "" || claims.JTI == "" || claims.EnvironmentID == "":
 		return CredentialClaims{}, CredentialVerificationError{Code: CredentialBaseBindingsInvalid}
-	case claims.ExpiresAt <= current-int64(expiryGrace/time.Second):
+	case !admitted && claims.ExpiresAt <= current-int64(expiryGrace/time.Second):
 		return CredentialClaims{}, CredentialVerificationError{Code: CredentialExpired}
 	case claims.IssuedAt > current+60:
 		return CredentialClaims{}, CredentialVerificationError{Code: CredentialIssuedAtInvalid}

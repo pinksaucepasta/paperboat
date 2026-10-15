@@ -77,6 +77,10 @@ func (f *fakeMachineState) VerifyCurrentMachine(_ context.Context, identity Iden
 	return f.err
 }
 
+func (f *fakeMachineState) VerifyAdmittedMachine(ctx context.Context, identity Identity, now time.Time) error {
+	return f.VerifyCurrentMachine(ctx, identity, now)
+}
+
 type fakeGrant struct {
 	request Request
 	token   string
@@ -100,6 +104,9 @@ func (f *fakeGrant) VerifyGrant(_ context.Context, token string, _ time.Time) (R
 	return f.request, nil
 }
 
+func (f *fakeGrant) VerifyAdmittedGrant(ctx context.Context, token string, now time.Time) (Request, error) {
+	return f.VerifyGrant(ctx, token, now)
+}
 func TestMachineGrantThenEdgeAuthorize(t *testing.T) {
 	now := testClock()
 	request := testRequest(now)

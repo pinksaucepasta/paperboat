@@ -332,7 +332,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 		t.Fatalf("runtime carrier fixture is not ready: route=%s err=%v", route.ID, err)
 	}
 	machineService := usermachines.New(store, audit.NewWriter(store), usermachines.Policy{}, nil)
-	machineService.ConfigureAccess(nil, "https://api.example.test", 5*time.Minute)
+	machineService.ConfigureAccess(nil, "https://api.example.test")
 	machineService.ConfigureTerminalSessions(4, provider, nil)
 	machineService.ConfigureFileTransfer(accessdescriptor.FileTransferPolicy{Revision: "shared-native-v1", MaxFileBytes: 1 << 20, MaxBatchFiles: 2, MaxBatchBytes: 2 << 20, MaxConcurrentTransfers: 2, RetentionSeconds: 60, DeliveryTimeoutSeconds: 60, MaxPendingSpoolBytes: 2 << 20})
 	execOperationID := "operation_shared_exec_" + suffix

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat-server/internal/admission"
 	"net"
 	"net/url"
 	"os"
@@ -408,7 +409,7 @@ func Default() Config {
 			GrantPollsPerMinute:        30,
 			AccountActionsPerMinute:    30,
 			MintJWKSMaxAge:             5 * time.Minute,
-			MintProofLifetime:          2 * time.Minute,
+			MintProofLifetime:          admission.DefaultLifetime,
 			ClientSessionTouchInterval: time.Minute,
 		},
 		Access: Access{

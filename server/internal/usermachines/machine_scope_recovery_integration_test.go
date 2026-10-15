@@ -43,7 +43,7 @@ func TestAuthenticatedMachineScopeRefreshPreservesInstallation(t *testing.T) {
 	enrollments := controlplane.NewEnrollmentService(store, signer, writer, "https://api.paperboat.test", "scope-enrollment-key")
 	service := New(store, writer, Policy{PairingLifetime: 10 * time.Minute, AllowedPlatforms: []string{"linux"}}, testSeatAuthorizer{})
 	service.ConfigureInstallationEncryption("scope-installation-key")
-	service.ConfigureAccess(nil, "https://api.paperboat.test", 5*time.Minute)
+	service.ConfigureAccess(nil, "https://api.paperboat.test")
 	service.ConfigureCLIAuth("paperboat-cli", []string{"account:read", "machines:connect", "session:refresh"}, 5*time.Minute, 24*time.Hour, "scope-cli-hash")
 	convert := func(g controlplane.EnrollmentGrant) HelperEnrollmentGrant {
 		return HelperEnrollmentGrant{EnrollmentID: g.EnrollmentID, HelperID: g.HelperID, Credential: g.Credential, ExpiresAt: g.ExpiresAt}

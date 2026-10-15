@@ -73,6 +73,7 @@ type AuthorizeRequest struct {
 	ResourceKind string `json:"resource_kind"`
 	ResourceID   string `json:"resource_id"`
 	RouteID      string `json:"route_id"`
+	GrantID      string `json:"grant_id,omitempty"`
 }
 type Authorization struct {
 	AccountID              string    `json:"account_id"`
@@ -354,7 +355,7 @@ func (s *Service) Redeem(ctx context.Context, in RedeemRequest) (RedeemResult, e
 
 func (s *Service) Authorize(ctx context.Context, in AuthorizeRequest) (Authorization, error) {
 	h := digest(in.Token)
-	return s.authorize(ctx, in.Host, in.ResourceKind, in.ResourceID, in.RouteID, `token_hash=$1`, h[:])
+	return s.authorize(ctx, in.Host, in.ResourceKind, in.ResourceID, in.RouteID, `token_hash=$1`, h[:], false)
 }
 func (s *Service) AuthorizeGrant(ctx context.Context, grantID, host, kind, id, route string) (Authorization, error) {
 	var machineCredential bool
@@ -362,9 +363,9 @@ func (s *Service) AuthorizeGrant(ctx context.Context, grantID, host, kind, id, r
 		return Authorization{}, err
 	}
 	if machineCredential {
-		return s.authorizeMachine(ctx, grantID, host, kind, id, route, "use", "credential_id=$1")
+		return s.authorizeMachine(ctx, grantID, host, kind, id, route, "use", "credential_id=$1", true)
 	}
-	return s.authorize(ctx, host, kind, id, route, `grant_id=$1`, grantID)
+	return s.authorize(ctx, host, kind, id, route, `grant_id=$1`, grantID, true)
 }
 
 // IssueMachineCredential is called only after transport authentication has
@@ -420,9 +421,9 @@ func (s *Service) IssueMachineCredential(ctx context.Context, in MachineCredenti
 
 func (s *Service) AuthorizeMachineCredential(ctx context.Context, token, host, kind, id, route, action string) (Authorization, error) {
 	h := digest(token)
-	return s.authorizeMachine(ctx, h[:], host, kind, id, route, action, "token_hash=$1")
+	return s.authorizeMachine(ctx, h[:], host, kind, id, route, action, "token_hash=$1", false)
 }
-func (s *Service) authorizeMachine(ctx context.Context, key any, host, kind, id, route, action, predicate string) (Authorization, error) {
+func (s *Service) authorizeMachine(ctx context.Context, key any, host, kind, id, route, action, predicate string, admitted bool) (Authorization, error) {
 	if action != "use" {
 		return Authorization{}, ErrInvalid
 	}
@@ -445,7 +446,7 @@ func (s *Service) authorizeMachine(ctx context.Context, key any, host, kind, id,
 		if err != nil {
 			return err
 		}
-		if shost != host || skind != kind || sid != id || sroute != route || saction != action || !expiry.After(now) {
+		if shost != host || skind != kind || sid != id || sroute != route || saction != action || !admitted && !expiry.After(now) {
 			return ErrNotAuthorized
 		}
 		a, e := resolveBound(ctx, tx, account, host, kind, id, route, now)
@@ -455,12 +456,15 @@ func (s *Service) authorizeMachine(ctx context.Context, key any, host, kind, id,
 		if (kind != "preview" && a.generation != gen) || ((kind == "preview" || a.previewOwnerSession != "") && (previewOwner == nil || *previewOwner != a.previewOwnerSession)) || a.owner != owner || a.mode != mode || !sameTeamAuthority(a, team, tg, mg, bg, gg) {
 			return ErrNotAuthorized
 		}
+		if admitted {
+			expiry = now.Add(decisionTTL)
+		}
 		out = Authorization{AccountID: account, OwnerAccountID: owner, ResourceKind: kind, ResourceID: id, ResourceGeneration: a.generation, RouteID: a.route, RouteGeneration: a.routeGeneration, ViewerPolicyGeneration: effectiveViewerPolicyGeneration(a), Hostname: host, AccessMode: mode, GrantID: credential, TeamID: a.team, TeamGeneration: int64(a.td.TeamGeneration), MembershipGeneration: int64(a.td.MembershipGeneration), BindingGeneration: int64(a.td.BindingGeneration), GrantGeneration: int64(a.td.GrantGeneration), IssuedAt: now, ExpiresAt: minTime(now.Add(decisionTTL), expiry, a.expires), SessionExpiresAt: expiry}
 		return nil
 	})
 	return out, e
 }
-func (s *Service) authorize(ctx context.Context, host, kind, id, route, predicate string, key any) (Authorization, error) {
+func (s *Service) authorize(ctx context.Context, host, kind, id, route, predicate string, key any, admitted bool) (Authorization, error) {
 	host, err := validHost(host)
 	if err != nil {
 		return Authorization{}, ErrInvalid
@@ -485,11 +489,11 @@ func (s *Service) authorize(ctx context.Context, host, kind, id, route, predicat
 		if selectorErr != nil {
 			return selectorErr
 		}
-		if storedPolicyGeneration == nil || host != storedHost || kind != skind || id != sid || route != storedRoute || !expiry.After(now) || !absolute.After(now) || !authExpiry.After(now) {
+		if storedPolicyGeneration == nil || host != storedHost || kind != skind || id != sid || route != storedRoute || !admitted && (!expiry.After(now) || !absolute.After(now) || !authExpiry.After(now)) {
 			return ErrNotAuthorized
 		}
 		var currentSessionExpiry time.Time
-		if err := tx.QueryRow(ctx, `SELECT expires_at FROM sessions WHERE id=$1 AND user_id=$2 AND version=$3 AND revoked_at IS NULL AND expires_at>$4`, trustedSessionID, account, sessionVersion, now).Scan(&currentSessionExpiry); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT expires_at FROM sessions WHERE id=$1 AND user_id=$2 AND version=$3 AND revoked_at IS NULL AND ($5 OR expires_at>$4)`, trustedSessionID, account, sessionVersion, now, admitted).Scan(&currentSessionExpiry); err != nil {
 			return mapMissing(err)
 		}
 		authExpiry = minTime(authExpiry, currentSessionExpiry)
@@ -504,9 +508,13 @@ func (s *Service) authorize(ctx context.Context, host, kind, id, route, predicat
 			return ErrNotAuthorized
 		}
 		newExpiry := minTime(now.Add(s.sessionPolicy.ResourceIdleLifetime), absolute, authExpiry, a.sessionCap)
-		_, err = tx.Exec(ctx, `UPDATE browser_access_sessions SET last_seen_at=$2,expires_at=$3 WHERE grant_id=$1`, grant, now, newExpiry)
-		if err != nil {
-			return err
+		if admitted {
+			newExpiry = now.Add(decisionTTL)
+		} else {
+			_, err = tx.Exec(ctx, `UPDATE browser_access_sessions SET last_seen_at=$2,expires_at=$3 WHERE grant_id=$1`, grant, now, newExpiry)
+			if err != nil {
+				return err
+			}
 		}
 		out = Authorization{AccountID: account, OwnerAccountID: owner, ResourceKind: kind, ResourceID: id, ResourceGeneration: a.generation, RouteID: a.route, RouteGeneration: a.routeGeneration, ViewerPolicyGeneration: effectiveViewerPolicyGeneration(a), Hostname: host, AccessMode: mode, GrantID: grant, TeamID: a.team, TeamGeneration: int64(a.td.TeamGeneration), MembershipGeneration: int64(a.td.MembershipGeneration), BindingGeneration: int64(a.td.BindingGeneration), GrantGeneration: int64(a.td.GrantGeneration), IssuedAt: now, ExpiresAt: minTime(now.Add(decisionTTL), newExpiry, a.expires), SessionExpiresAt: newExpiry}
 		return nil
@@ -514,20 +522,21 @@ func (s *Service) authorize(ctx context.Context, host, kind, id, route, predicat
 	return out, err
 }
 
-// Cleanup removes at most limit expired records. Callers may repeat it; a bound
+// Cleanup removes revoked authority and expired, unconsumed login transactions.
+// Expired admission credentials remain available for live revocation checks. Callers may repeat it; a bound
 // keeps maintenance from monopolizing the database.
 func (s *Service) Cleanup(ctx context.Context, limit int) (int64, error) {
 	if limit < 1 || limit > 1000 {
 		return 0, ErrInvalid
 	}
 	now := s.now()
-	result, err := s.db.Pool().Exec(ctx, `WITH doomed AS (SELECT grant_id FROM browser_access_sessions WHERE expires_at<=$1 OR revoked_at IS NOT NULL ORDER BY expires_at LIMIT $2) DELETE FROM browser_access_sessions s USING doomed d WHERE s.grant_id=d.grant_id`, now, limit)
+	result, err := s.db.Pool().Exec(ctx, `WITH doomed AS (SELECT grant_id FROM browser_access_sessions WHERE revoked_at IS NOT NULL AND revoked_at<=$1 ORDER BY expires_at LIMIT $2) DELETE FROM browser_access_sessions s USING doomed d WHERE s.grant_id=d.grant_id`, now, limit)
 	if err != nil {
 		return 0, err
 	}
 	removed := result.RowsAffected()
 	if removed < int64(limit) {
-		result, err = s.db.Pool().Exec(ctx, `WITH doomed AS (SELECT credential_id FROM browser_machine_credentials WHERE expires_at<=$1 OR revoked_at IS NOT NULL ORDER BY expires_at LIMIT $2) DELETE FROM browser_machine_credentials c USING doomed d WHERE c.credential_id=d.credential_id`, now, limit-int(removed))
+		result, err = s.db.Pool().Exec(ctx, `WITH doomed AS (SELECT credential_id FROM browser_machine_credentials WHERE revoked_at IS NOT NULL AND revoked_at<=$1 ORDER BY expires_at LIMIT $2) DELETE FROM browser_machine_credentials c USING doomed d WHERE c.credential_id=d.credential_id`, now, limit-int(removed))
 		if err != nil {
 			return removed, err
 		}

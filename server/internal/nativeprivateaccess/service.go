@@ -3,6 +3,7 @@ package nativeprivateaccess
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat-server/internal/admission"
 	"net"
 	"reflect"
 	"strconv"
@@ -79,12 +80,15 @@ func (s Service) Issue(ctx context.Context, request Request) (Grant, error) {
 	// JWT NumericDate is second-granular. Return the identical instant in the
 	// stream binding so host comparison cannot reject a valid grant because the
 	// JSON timestamp retained sub-second precision.
-	expires := now.Add(5 * time.Minute).Truncate(time.Second)
-	credential, err := s.Signer.SignCredential(mint.CredentialInput{Issuer: s.Issuer, Audience: "paperboat-machine", Subject: target.UserID, JTI: "token_" + uuid.NewString(), IssuedAt: now, ExpiresAt: expires, CredentialClass: "native_private", Scopes: []string{"private:native"}, EnvironmentID: target.EnvironmentID, AccountID: target.AccountID, MachineID: target.MachineID, UserID: target.UserID, CLIClientSessionID: request.CLIClientSessionID, AssignmentID: target.AccessSessionID, OperationID: request.OperationID, ResourceKind: target.ResourceKind, ResourceID: target.ResourceID, RouteID: target.RouteID, Protocol: target.Protocol, TargetScheme: target.TargetScheme, TargetAddress: target.TargetAddress, ExpectedGeneration: target.ResourceGeneration, RouteGeneration: target.RouteGeneration, TargetGeneration: target.TargetGeneration, InstallationGeneration: target.InstallationGeneration, BootID: target.BootID, PolicyGeneration: target.PolicyGeneration, AnnouncementGeneration: target.AnnouncementGeneration})
+	issuer, err := admission.New(s.Signer, 0)
 	if err != nil {
 		return Grant{}, err
 	}
-	return Grant{Target: target, Credential: credential, ExpiresAt: expires}, nil
+	credential, err := issuer.Issue(mint.CredentialInput{Issuer: s.Issuer, Audience: "paperboat-machine", Subject: target.UserID, JTI: "token_" + uuid.NewString(), IssuedAt: now, CredentialClass: "native_private", Scopes: []string{"private:native"}, EnvironmentID: target.EnvironmentID, AccountID: target.AccountID, MachineID: target.MachineID, UserID: target.UserID, CLIClientSessionID: request.CLIClientSessionID, AssignmentID: target.AccessSessionID, OperationID: request.OperationID, ResourceKind: target.ResourceKind, ResourceID: target.ResourceID, RouteID: target.RouteID, Protocol: target.Protocol, TargetScheme: target.TargetScheme, TargetAddress: target.TargetAddress, ExpectedGeneration: target.ResourceGeneration, RouteGeneration: target.RouteGeneration, TargetGeneration: target.TargetGeneration, InstallationGeneration: target.InstallationGeneration, BootID: target.BootID, PolicyGeneration: target.PolicyGeneration, AnnouncementGeneration: target.AnnouncementGeneration})
+	if err != nil {
+		return Grant{}, err
+	}
+	return Grant{Target: target, Credential: credential.Token, ExpiresAt: credential.ExpiresAt}, nil
 }
 
 func (s Service) Revalidate(ctx context.Context, request Request, expected Target) error {

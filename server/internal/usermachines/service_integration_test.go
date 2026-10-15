@@ -105,7 +105,7 @@ func TestSetupIsIdempotentAndPreservesCapabilities(t *testing.T) {
 	}
 	input := SetupInput{Alias: "studio", Platform: "linux", Architecture: "amd64", WorkspaceRoot: "/home/paperboat", PublicIdentityKey: base64.RawURLEncoding.EncodeToString(public), RuntimeVersions: json.RawMessage(`{"pb":"test"}`)}
 	service := New(store, audit.NewWriter(store), Policy{AllowedPlatforms: []string{"linux"}}, testSeatAuthorizer{})
-	service.ConfigureAccess(nil, "https://api.paperboat.test", 5*time.Minute)
+	service.ConfigureAccess(nil, "https://api.paperboat.test")
 	if err := service.ConfigureRuntimeRoute("runtime.example.test", 38080); err != nil {
 		t.Fatal(err)
 	}
@@ -208,7 +208,7 @@ func TestOnlineMachinePairingPreservesIdentity(t *testing.T) {
 	publicKey := base64.RawURLEncoding.EncodeToString(public)
 	service := New(store, audit.NewWriter(store), Policy{PairingLifetime: 10 * time.Minute, AllowedPlatforms: []string{"linux"}}, testSeatAuthorizer{})
 	service.ConfigureInstallationEncryption("client-upgrade-key")
-	service.ConfigureAccess(nil, "https://api.paperboat.test", 5*time.Minute)
+	service.ConfigureAccess(nil, "https://api.paperboat.test")
 	service.ConfigureHelperEnrollment(func(context.Context, string, string, string, time.Duration) (HelperEnrollmentGrant, error) {
 		return HelperEnrollmentGrant{EnrollmentID: "henr_client_upgrade_" + suffix, HelperID: "helper_client_upgrade_" + suffix, Credential: "client-upgrade-credential", ExpiresAt: time.Now().UTC().Add(10 * time.Minute)}, nil
 	})
@@ -264,7 +264,7 @@ func TestAuthenticatedMachineInstallationIsBoundIdempotentAndGenerationFenced(t 
 	setupEnrollments := controlplane.NewEnrollmentService(store, setupSigner, audit.NewWriter(store), "https://api.paperboat.test", "authenticated-host-setup-enrollment-key")
 	service := New(store, audit.NewWriter(store), Policy{PairingLifetime: 10 * time.Minute, AllowedPlatforms: []string{"linux"}}, testSeatAuthorizer{})
 	service.ConfigureInstallationEncryption("authenticated-host-key")
-	service.ConfigureAccess(nil, "https://api.paperboat.test", 5*time.Minute)
+	service.ConfigureAccess(nil, "https://api.paperboat.test")
 	service.ConfigureCLIAuth("paperboat-cli", []string{"account:read", "machines:connect", "session:refresh"}, 5*time.Minute, 24*time.Hour, "authenticated-host-cli-hash-key")
 	service.ConfigureHelperEnrollment(func(_ context.Context, gotUserID, operationKey, environmentID string, _ time.Duration) (HelperEnrollmentGrant, error) {
 		if gotUserID != userID || !strings.Contains(operationKey, clientSessionID) || environmentID == "" {
@@ -1058,7 +1058,7 @@ authenticated_setup_cli_session_id,authenticated_setup_operation_id,authenticate
 	}
 	service := New(store, audit.NewWriter(store), Policy{PairingLifetime: 10 * time.Minute, AllowedPlatforms: []string{"linux"}}, testSeatAuthorizer{})
 	service.ConfigureInstallationEncryption("client-pairing-host-key")
-	service.ConfigureAccess(nil, "https://api.paperboat.test", 5*time.Minute)
+	service.ConfigureAccess(nil, "https://api.paperboat.test")
 	service.ConfigureHelperEnrollment(func(context.Context, string, string, string, time.Duration) (HelperEnrollmentGrant, error) {
 		return HelperEnrollmentGrant{EnrollmentID: "enr_client_pairing_material_" + suffix, HelperID: "hlp_client_pairing_material_" + suffix, Credential: strings.Repeat("m", 48), ExpiresAt: time.Now().UTC().Add(10 * time.Minute)}, nil
 	})
@@ -1639,7 +1639,7 @@ func TestDashboardEnrollmentIsIdempotentSingleClaimAndIssuesMaterial(t *testing.
 	}
 	service := New(store, audit.NewWriter(store), Policy{PairingLifetime: 10 * time.Minute, AllowedPlatforms: []string{"darwin", "linux"}}, testSeatAuthorizer{})
 	service.ConfigureInstallationEncryption("test-enrollment-key")
-	service.ConfigureAccess(nil, "https://api.paperboat.test", 5*time.Minute)
+	service.ConfigureAccess(nil, "https://api.paperboat.test")
 	service.ConfigureBootstrapCommand("pb machine bootstrap")
 	if err := service.ConfigureRuntimeRoute("runtime.example.test", 38080); err != nil {
 		t.Fatal(err)
@@ -1734,7 +1734,7 @@ func TestDashboardEnrollmentsStayBoundToTheirOwnTokenAndInstallation(t *testing.
 
 	service := New(store, audit.NewWriter(store), Policy{PairingLifetime: 10 * time.Minute, AllowedPlatforms: []string{"linux"}}, testSeatAuthorizer{})
 	service.ConfigureInstallationEncryption("test-enrollment-isolation-key")
-	service.ConfigureAccess(nil, "https://api.paperboat.test", 5*time.Minute)
+	service.ConfigureAccess(nil, "https://api.paperboat.test")
 	service.ConfigureBootstrapCommand("pb machine bootstrap")
 	if err := service.ConfigureRuntimeRoute("runtime.example.test", 38080); err != nil {
 		t.Fatal(err)
@@ -1999,7 +1999,7 @@ func TestInstallationMaterialIsSingleUseAndExpiryBound(t *testing.T) {
 	}
 	service := New(store, audit.NewWriter(store), Policy{PairingLifetime: 10 * time.Minute, AllowedPlatforms: []string{"linux"}}, testSeatAuthorizer{})
 	service.ConfigureInstallationEncryption("test-install-key")
-	service.ConfigureAccess(nil, "https://api.paperboat.test", 5*time.Minute)
+	service.ConfigureAccess(nil, "https://api.paperboat.test")
 	service.ConfigureHelperEnrollment(func(context.Context, string, string, string, time.Duration) (HelperEnrollmentGrant, error) {
 		return HelperEnrollmentGrant{EnrollmentID: "henr_install_replay_" + suffix, HelperID: "helper_install_replay_" + suffix, Credential: "install-replay-credential", ExpiresAt: time.Now().UTC().Add(10 * time.Minute)}, nil
 	})
@@ -2090,7 +2090,7 @@ func TestExpiredInstallationRecoveryIsCrashSafeConcurrentAndIdentityBound(t *tes
 	}
 	service := New(store, audit.NewWriter(store), Policy{PairingLifetime: 10 * time.Minute, AllowedPlatforms: []string{"windows"}}, testSeatAuthorizer{})
 	service.ConfigureInstallationEncryption("test-install-recovery-key")
-	service.ConfigureAccess(nil, "https://api.paperboat.test", 5*time.Minute)
+	service.ConfigureAccess(nil, "https://api.paperboat.test")
 	service.ConfigureCLIAuth("paperboat-cli", []string{"account:read", "machines:connect", "session:refresh"}, 5*time.Minute, 24*time.Hour, "test-cli-hash-key")
 	if err := service.ConfigureRuntimeRoute("runtime.example.test", 38080); err != nil {
 		t.Fatal(err)
@@ -2350,7 +2350,7 @@ func TestInstallationFailureRevokesIdentityReleasesSeatAndRetryIssuesNewIdentity
 	}
 	service := New(store, audit.NewWriter(store), Policy{PairingLifetime: 10 * time.Minute, AllowedPlatforms: []string{"linux"}}, testSeatAuthorizer{})
 	service.ConfigureInstallationEncryption("test-install-key")
-	service.ConfigureAccess(nil, "https://control.example.test", time.Minute)
+	service.ConfigureAccess(nil, "https://control.example.test")
 	if err := service.ConfigureRuntimeRoute("example.test", 38080); err != nil {
 		t.Fatal(err)
 	}
@@ -2673,7 +2673,7 @@ func TestConnectIssuesEnvironmentBoundDescriptor(t *testing.T) {
 	}
 	service := New(store, audit.NewWriter(store), Policy{}, nil)
 	service.ConfigureInstallationEncryption("test-key")
-	service.ConfigureAccess(fakeCredentialIssuer{}, "https://api.paperboat.test", 15*time.Minute)
+	service.ConfigureAccess(fakeCredentialIssuer{}, "https://api.paperboat.test")
 	signer, err := mint.NewEphemeral(5 * time.Minute)
 	if err != nil {
 		t.Fatal(err)
@@ -2760,7 +2760,7 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 	}
 	service := New(store, audit.NewWriter(store), Policy{}, nil)
 	service.ConfigureInstallationEncryption("test-key")
-	service.ConfigureAccess(fakeCredentialIssuer{}, "https://api.paperboat.test", 15*time.Minute)
+	service.ConfigureAccess(fakeCredentialIssuer{}, "https://api.paperboat.test")
 	signer, err := mint.NewEphemeral(5 * time.Minute)
 	if err != nil {
 		t.Fatal(err)
@@ -2853,7 +2853,7 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 		t.Fatal(err)
 	}
 	service := New(store, audit.NewWriter(store), Policy{}, nil)
-	service.ConfigureAccess(fakeCredentialIssuer{}, "https://api.paperboat.test", 5*time.Minute)
+	service.ConfigureAccess(fakeCredentialIssuer{}, "https://api.paperboat.test")
 	service.ConfigureTerminalSessions(4, signer, nil)
 	operationID := "operation_exec_" + suffix
 	descriptor, err := service.ExecDescriptor(ctx, userID, sourceMachineID, machineID, "cli_exec_1", operationID)
@@ -2969,7 +2969,7 @@ func TestTransferDefaultsAndBrokerPreserveMachineOwnershipAndRouteHost(t *testin
 	}
 	policy := accessdescriptor.FileTransferPolicy{Revision: "file-transfer-v1", MaxFileBytes: 50 << 20, MaxBatchFiles: 10, MaxBatchBytes: 500 << 20, MaxConcurrentTransfers: 2, RetentionSeconds: 604800, DeliveryTimeoutSeconds: 600, MaxPendingSpoolBytes: 1 << 30}
 	service := New(store, audit.NewWriter(store), Policy{}, nil)
-	service.ConfigureAccess(nil, "https://api.paperboat.test", 2*time.Minute)
+	service.ConfigureAccess(nil, "https://api.paperboat.test")
 	service.ConfigureTerminalSessions(4, signer, nil)
 	service.ConfigureFileTransfer(policy)
 
@@ -3080,7 +3080,7 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,'{}',now()+interval '1 hour',true,now())
 	issuer := &recordingIssuer{}
 	service := New(store, audit.NewWriter(store), Policy{}, nil)
 	service.ConfigureInstallationEncryption("test-key")
-	service.ConfigureAccess(issuer, "https://api.paperboat.test", 5*time.Minute)
+	service.ConfigureAccess(issuer, "https://api.paperboat.test")
 	if _, err := service.ConnectTerminalSession(ctx, userID, sourceMachineID, userMachineID, "cls_1", terminalSessionID); err != nil {
 		t.Fatal(err)
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"github.com/pinksaucepasta/paperboat-server/internal/admission"
 	"reflect"
 	"strconv"
 	"time"
@@ -60,7 +61,7 @@ func (r *SQLResolver) resolveMachineService(ctx context.Context, in Request) (ta
 	e = tx.QueryRowContext(ctx, `SELECT id FROM paperboat.user_machine_access_sessions WHERE user_id=$1 AND user_machine_id=$2 AND cli_client_session_id=$3 AND machine_service_port=$4 AND machine_service_source_kind=$5 AND machine_service_source_id=$6 AND machine_service_source_generation=$7 AND team_id IS NOT DISTINCT FROM nullif($8,'') AND state='active' AND revoked_at IS NULL AND expires_at>$9 AND machine_service_team_fence=paperboat.machine_service_team_fence(user_id,user_machine_id,machine_service_source_kind,machine_service_source_id,team_id) ORDER BY created_at DESC LIMIT 1`, in.UserID, in.ResourceID, in.CLIClientSessionID, port, authority.SourceKind, authority.SourceID, authority.Generation, authority.TeamID, now).Scan(&out.AccessSessionID)
 	if pureNativeRejection(e, sql.ErrNoRows) {
 		out.AccessSessionID = "session_" + uuid.NewString()
-		_, e = tx.ExecContext(ctx, `INSERT INTO paperboat.user_machine_access_sessions(credential_kind,id,user_machine_id,user_id,environment_id,cli_client_session_id,http_base_url,expires_at,team_id,capabilities,operation_id,machine_service_port,machine_service_source_kind,machine_service_source_id,machine_service_source_generation,machine_service_team_fence) VALUES('control_plane_signed',$1,$2,$3,$4,$5,'',$6,nullif($7,''),ARRAY['private_access'],$8,$9,$10,$11,$12,paperboat.machine_service_team_fence($3,$2,$10,$11,nullif($7,'')))`, out.AccessSessionID, in.ResourceID, in.UserID, out.EnvironmentID, in.CLIClientSessionID, now.Add(5*time.Minute), authority.TeamID, in.OperationID, port, authority.SourceKind, authority.SourceID, authority.Generation)
+		_, e = tx.ExecContext(ctx, `INSERT INTO paperboat.user_machine_access_sessions(credential_kind,id,user_machine_id,user_id,environment_id,cli_client_session_id,http_base_url,expires_at,team_id,capabilities,operation_id,machine_service_port,machine_service_source_kind,machine_service_source_id,machine_service_source_generation,machine_service_team_fence) VALUES('control_plane_signed',$1,$2,$3,$4,$5,'',$6,nullif($7,''),ARRAY['private_access'],$8,$9,$10,$11,$12,paperboat.machine_service_team_fence($3,$2,$10,$11,nullif($7,'')))`, out.AccessSessionID, in.ResourceID, in.UserID, out.EnvironmentID, in.CLIClientSessionID, admission.Deadline(now, r.AdmissionLifetime), authority.TeamID, in.OperationID, port, authority.SourceKind, authority.SourceID, authority.Generation)
 	}
 	if e != nil {
 		return Target{}, e
@@ -111,7 +112,7 @@ func (r *SQLResolver) MachineServiceCurrent(ctx context.Context, in Request, ses
 	var current bool
 	var expiry time.Time
 	var services []byte
-	e = r.database.QueryRowContext(ctx, `SELECT paperboat.machine_service_session_allowed(a.id),least(s.expires_at,a.expires_at),s.services FROM paperboat.user_machine_access_sessions a JOIN paperboat.user_machines m ON m.id=a.user_machine_id JOIN paperboat.machine_service_snapshots s ON s.machine_id=m.id WHERE a.id=$1 AND a.user_id=$2 AND a.cli_client_session_id=$3 AND a.user_machine_id=$4 AND a.machine_service_port=$5 AND a.machine_service_source_generation=$6 AND m.environment_id=$7 AND m.installation_generation=$8 AND s.installation_generation=$8 AND s.boot_id=$9 AND s.generation=$10 AND m.state='online' AND m.online AND s.expires_at>now()`, session, in.UserID, in.CLIClientSessionID, in.ResourceID, port, expected.PolicyGeneration, expected.EnvironmentID, expected.InstallationGeneration, expected.BootID, expected.AnnouncementGeneration).Scan(&current, &expiry, &services)
+	e = r.database.QueryRowContext(ctx, `SELECT paperboat.machine_service_session_allowed(a.id),s.expires_at,s.services FROM paperboat.user_machine_access_sessions a JOIN paperboat.user_machines m ON m.id=a.user_machine_id JOIN paperboat.machine_service_snapshots s ON s.machine_id=m.id WHERE a.id=$1 AND a.user_id=$2 AND a.cli_client_session_id=$3 AND a.user_machine_id=$4 AND a.machine_service_port=$5 AND a.machine_service_source_generation=$6 AND m.environment_id=$7 AND m.installation_generation=$8 AND s.installation_generation=$8 AND s.boot_id=$9 AND s.generation=$10 AND m.state='online' AND m.online AND s.expires_at>now()`, session, in.UserID, in.CLIClientSessionID, in.ResourceID, port, expected.PolicyGeneration, expected.EnvironmentID, expected.InstallationGeneration, expected.BootID, expected.AnnouncementGeneration).Scan(&current, &expiry, &services)
 	if pureNativeRejection(e, sql.ErrNoRows) {
 		return time.Time{}, ErrDenied
 	}
@@ -134,16 +135,6 @@ func (r *SQLResolver) MachineServiceCurrent(ctx context.Context, in Request, ses
 	if !found || expected.ResourceID != in.ResourceID || expected.RouteID != "tcp:"+strconv.Itoa(port) || expected.ResourceGeneration != expected.InstallationGeneration || expected.RouteGeneration != expected.PolicyGeneration || expected.TargetGeneration != expected.AnnouncementGeneration || expected.Protocol != "tcp" || expected.TargetScheme != "tcp" {
 		return time.Time{}, ErrDenied
 	}
-	result, e := r.database.ExecContext(ctx, `UPDATE paperboat.user_machine_access_sessions SET expires_at=$2,updated_at=now() WHERE id=$1 AND paperboat.machine_service_session_allowed(id)`, session, r.now().Add(5*time.Minute))
-	if e != nil {
-		return time.Time{}, e
-	}
-	n, e := result.RowsAffected()
-	if e != nil {
-		return time.Time{}, e
-	}
-	if n != 1 {
-		return time.Time{}, ErrDenied
-	}
+
 	return expiry, nil
 }

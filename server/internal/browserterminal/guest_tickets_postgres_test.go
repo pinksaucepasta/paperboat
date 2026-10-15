@@ -93,7 +93,8 @@ func TestGuestTicketsPostgres(t *testing.T) {
 				t.Fatalf("invalidated guest ticket admitted: %v", err)
 			}
 			if test.name != "ticket expiry" {
-				if active, err := tickets.GuestSessionActive(ctx, guest); err != nil || active {
+				wantActive := test.name == "guest expiry" || test.name == "code expiry"
+				if active, err := tickets.GuestSessionActive(ctx, guest); err != nil || active != wantActive {
 					t.Fatalf("invalid guest session active: %v %v", active, err)
 				}
 				if _, err := tickets.Issue(ctx, in); !errors.Is(err, ErrTicketInvalid) {

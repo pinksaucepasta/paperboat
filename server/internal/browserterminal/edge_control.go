@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/pinksaucepasta/paperboat-server/internal/admission"
 	serverdiagnostics "github.com/pinksaucepasta/paperboat-server/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat-server/internal/mint"
 	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
@@ -105,18 +106,23 @@ func (g *Gateway) admitEdge(ctx context.Context, input EdgeControlRequest, nodeI
 	if ticket.GuestSessionID != "" {
 		actorAccountID = ""
 	}
-	credential, err := g.Signer.SignCredential(mint.CredentialInput{Issuer: g.Issuer, Audience: "paperboat-machine", Subject: ticket.subjectID(), JTI: jti, IssuedAt: now, ExpiresAt: now.Add(5 * time.Minute), CredentialClass: "browser_terminal_operation", WorkspaceID: decision.WorkspaceID, ActorAccountID: actorAccountID, Scopes: []string{scopeForRole(decision.Role)}, EnvironmentID: decision.EnvironmentID, AccountID: ticket.subjectID(), MachineID: decision.MachineID, UserID: ticket.subjectID(), SessionID: ticket.TerminalSessionID, BrowserAttachmentID: attachmentID, BrowserPublicKeySHA256: ticket.BrowserPublicKeySHA256, ExpectedGeneration: processGeneration, PolicyGeneration: decision.PolicyGeneration})
+	issuer, err := admission.New(g.Signer, g.AdmissionLifetime)
+	if err != nil {
+		release()
+		return edgeAdmission{}, nil, err
+	}
+	credential, err := issuer.Issue(mint.CredentialInput{Issuer: g.Issuer, Audience: "paperboat-machine", Subject: ticket.subjectID(), JTI: jti, IssuedAt: now, CredentialClass: "browser_terminal_operation", WorkspaceID: decision.WorkspaceID, ActorAccountID: actorAccountID, Scopes: []string{scopeForRole(decision.Role)}, EnvironmentID: decision.EnvironmentID, AccountID: ticket.subjectID(), MachineID: decision.MachineID, UserID: ticket.subjectID(), SessionID: ticket.TerminalSessionID, BrowserAttachmentID: attachmentID, BrowserPublicKeySHA256: ticket.BrowserPublicKeySHA256, ExpectedGeneration: processGeneration, PolicyGeneration: decision.PolicyGeneration})
 	if err != nil {
 		release()
 		return edgeAdmission{}, nil, err
 	}
 	if g.RecordUsageAdmission != nil {
-		if err := g.RecordUsageAdmission(ctx, attachmentID, decision.MachineID, ticket.TerminalSessionID, nodeID, now.Add(5*time.Minute)); err != nil {
+		if err := g.RecordUsageAdmission(ctx, attachmentID, decision.MachineID, ticket.TerminalSessionID, nodeID, credential.ExpiresAt); err != nil {
 			release()
 			return edgeAdmission{}, nil, err
 		}
 	}
-	return edgeAdmission{Ticket: ticket, Decision: decision, Credential: credential, AttachmentID: attachmentID}, release, nil
+	return edgeAdmission{Ticket: ticket, Decision: decision, Credential: credential.Token, AttachmentID: attachmentID}, release, nil
 }
 
 // ServeEdgeControl holds the admission reservation and checks the browser

@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/jackc/pgx/v5"
+	"github.com/pinksaucepasta/paperboat-server/internal/admission"
 	"io"
 	"log/slog"
 	"net/http"
@@ -462,7 +463,7 @@ func (s *EdgeService) IssueConnectorAdmission(ctx context.Context, identityToken
 		if err != nil {
 			return err
 		}
-		expiresAt := now.Add(5 * time.Minute)
+		expiresAt := admission.Expiry(s.signer, now)
 		policy := s.fileTransferPolicy
 		if policy.Revision == "" {
 			policy = mint.DefaultFileTransferPolicy
@@ -474,7 +475,7 @@ func (s *EdgeService) IssueConnectorAdmission(ctx context.Context, identityToken
 			handoffs = append(handoffs, handoff)
 		}
 		binding := connectorRouteBinding(handoffs)
-		token, err := s.signer.SignCredential(mint.CredentialInput{Issuer: s.issuer, Audience: "paperboat-edge", Subject: claims.MachineID, JTI: jti, IssuedAt: now, ExpiresAt: expiresAt, CredentialClass: "connector_admission", Scopes: []string{"connector:admit"}, EnvironmentID: claims.EnvironmentID, MachineID: claims.MachineID, InstallationGeneration: claims.InstallationGeneration, ConnectorID: request.ConnectorID, ConnectorGeneration: generation.Generation, EdgePool: edgePool, EdgeNodeID: node.ID, RouteBinding: binding, FileTransferPolicy: &policy})
+		token, err := admission.Sign(s.signer, mint.CredentialInput{Issuer: s.issuer, Audience: "paperboat-edge", Subject: claims.MachineID, JTI: jti, IssuedAt: now, ExpiresAt: expiresAt, CredentialClass: "connector_admission", Scopes: []string{"connector:admit"}, EnvironmentID: claims.EnvironmentID, MachineID: claims.MachineID, InstallationGeneration: claims.InstallationGeneration, ConnectorID: request.ConnectorID, ConnectorGeneration: generation.Generation, EdgePool: edgePool, EdgeNodeID: node.ID, RouteBinding: binding, FileTransferPolicy: &policy})
 		if err != nil {
 			return err
 		}

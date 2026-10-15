@@ -19,6 +19,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/pinksaucepasta/paperboat-server/internal/admission"
 	"github.com/pinksaucepasta/paperboat-server/internal/canonicaljson"
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
 	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
@@ -180,7 +181,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, request previewv1.DispatchReq
 	if err != nil {
 		return previewv1.DispatchOutcome{}, &DispatchError{Code: "route_unavailable", Retryable: true, Cause: err}
 	}
-	expiresAt := now.Add(2 * time.Minute)
+	expiresAt := admission.Expiry(d.signer, now)
 	if request.LeaseDeadline.Before(expiresAt) {
 		expiresAt = request.LeaseDeadline.UTC()
 	}
@@ -192,7 +193,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, request previewv1.DispatchReq
 		return previewv1.DispatchOutcome{}, &DispatchError{Code: "credential_mint_failed", Uncertain: false, Retryable: true, Cause: err}
 	}
 	userDeadline := utcTime(request.UserDeadline)
-	token, err := d.signer.SignCredential(mint.CredentialInput{
+	token, err := admission.Sign(d.signer, mint.CredentialInput{
 		Issuer: d.issuer, Audience: "paperboat-machine", Subject: request.ActorID, JTI: jti,
 		IssuedAt: now, ExpiresAt: expiresAt, CredentialClass: "preview_launch", Scopes: []string{"preview:launch"},
 		EnvironmentID: route.EnvironmentID, AccountID: request.AccountID, MachineID: request.OwnerMachineID,

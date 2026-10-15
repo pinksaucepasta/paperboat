@@ -258,7 +258,7 @@ func New(opts Options) (*App, error) {
 	if len(opts.Config.Secrets.SessionKeys) > 0 {
 		userMachineService.ConfigureCLIAuth(opts.Config.CLIAuth.ClientID, opts.Config.CLIAuth.AllowedScopes, opts.Config.CLIAuth.AccessTokenLifetime, opts.Config.CLIAuth.RefreshTokenLifetime, opts.Config.Secrets.SessionKeys[0])
 	}
-	userMachineService.ConfigureAccess(nil, normalizeHelperIssuer(opts.Config.HTTP.PublicBaseURL), opts.Config.CLIAuth.AccessTokenLifetime)
+	userMachineService.ConfigureAccess(nil, normalizeHelperIssuer(opts.Config.HTTP.PublicBaseURL))
 	userMachineService.ConfigureFileTransfer(accessdescriptor.FileTransferPolicy{
 		Revision: opts.Config.Access.FileTransfer.Revision, MaxFileBytes: opts.Config.Access.FileTransfer.MaxFileBytes,
 		MaxBatchFiles: opts.Config.Access.FileTransfer.MaxBatchFiles, MaxBatchBytes: opts.Config.Access.FileTransfer.MaxBatchBytes,
@@ -459,6 +459,7 @@ func New(opts Options) (*App, error) {
 		_ = store.Close()
 		return nil, fmt.Errorf("configure native private target resolver: %w", err)
 	}
+	nativePrivateResolver.AdmissionLifetime = opts.Config.CLIAuth.MintProofLifetime
 	nativePrivateService := &nativeprivateaccess.Service{Resolver: nativePrivateResolver, Signer: mintKeys, Issuer: config.NormalizeIssuer(opts.Config.HTTP.PublicBaseURL)}
 	managedSSHRepository, err := managedssh.NewSQLRepository(store, auditWriter)
 	if err != nil {
@@ -551,7 +552,7 @@ func New(opts Options) (*App, error) {
 			return nil, fmt.Errorf("configure preview carrier edge verifier: %w", verifierErr)
 		}
 		previewEdgeVerifier.SetNodeCredentials(nodeCredentials)
-		runtimeAttachmentHandler = &runtimeattachment.Handler{Service: &runtimeattachment.Service{DB: store}, Machine: previewAttachmentMachineVerifier, Edge: previewEdgeVerifier}
+		runtimeAttachmentHandler = &runtimeattachment.Handler{Service: &runtimeattachment.Service{DB: store, AdmissionLifetime: opts.Config.CLIAuth.MintProofLifetime}, Machine: previewAttachmentMachineVerifier, Edge: previewEdgeVerifier}
 		if trustedLoginOrigin != "" {
 			newBrowserService := browseraccess.NewService
 			if opts.Config.Environment != config.EnvironmentProduction {
@@ -712,6 +713,7 @@ func New(opts Options) (*App, error) {
 	}
 	resourceUsageService := resourceusage.New(store)
 	browserTerminalGateway := &browserterminal.Gateway{
+		AdmissionLifetime:    opts.Config.CLIAuth.MintProofLifetime,
 		RecordUsageAdmission: resourceUsageService.RecordBrowserAdmission,
 		Tickets:              browserterminal.TicketStore{DB: store},
 		Authorizer:           browserterminal.MachineAuthorizer{Service: userMachineService},

@@ -4,8 +4,11 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"github.com/google/uuid"
+	"github.com/pinksaucepasta/paperboat-server/internal/admission"
 	"os"
 	"strings"
 	"testing"
@@ -81,8 +84,11 @@ func TestNetworkApplicationExpiryOnPostgres(t *testing.T) {
 	access := "expiry_access_" + suffix
 	execute(`INSERT INTO paperboat.user_machine_access_sessions(credential_kind,id,user_machine_id,user_id,environment_id,cli_client_session_id,http_base_url,helper_terminal_session_id,helper_file_session_id,capabilities,operation_id,expires_at) VALUES('external_issuer',$1,$2,$3,$4,$5,'https://machine.example.test',$6,$7,ARRAY['terminal','files','private_access'],$8,$9)`, access, machine, account, environment, cli, "terminal_"+suffix, "files_"+suffix, "operation_access_"+suffix, now.Add(5*time.Second))
 	execute(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,state,ready,last_heartbeat_at,node_generation,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,allowed_account_ids) VALUES($1,'task23','v1',$2,'relay.example.test',443,444,'ready',true,$3,1,'hel','hel-a',ARRAY['relay'],ARRAY['derp_quic'],100,20,$3,$4,ARRAY[$5])`, "expiry_relay_"+suffix, "epoch_"+suffix, now, now.Add(time.Minute), account)
-	for _, remaining := range []time.Duration{750 * time.Millisecond, 5 * time.Second} {
+	inspector, assignment := addExpiryResourceAdmissions(t, execute, account, cli, machine, environment, suffix, now)
+	for _, remaining := range []time.Duration{-time.Second, 750 * time.Millisecond, 5 * time.Second} {
 		execute(`UPDATE paperboat.user_machine_access_sessions SET expires_at=$2 WHERE id=$1`, access, now.Add(remaining))
+		execute(`UPDATE inspector_credentials SET expires_at=$2 WHERE credential_id=$1`, inspector, now.Add(remaining))
+		execute(`UPDATE config_compare_admissions SET expires_at=$2 WHERE assignment_id=$1`, assignment, now.Add(remaining))
 		result, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "configuration_" + suffix, UserID: account, EndpointID: cli})
 		if err != nil {
 			t.Fatalf("application expiry %s: %v", remaining, err)
@@ -107,9 +113,11 @@ func TestNetworkApplicationExpiryOnPostgres(t *testing.T) {
 			t.Fatal("network signature invalid")
 		}
 		claims := networkClaims(t, result.Configuration)
-		if claims["exp"].(float64) != float64(now.Add(mint.MaxProofTTL).Unix()) {
+		if claims["exp"].(float64) != float64(now.Add(admission.DefaultLifetime).Unix()) {
 			t.Fatal("application scope shortened unrelated network binding")
 		}
+		assertNetworkScope(t, result.Configuration, "inspector", inspector, "inspector")
+		assertNetworkScope(t, result.Configuration, "config_compare", assignment, "config_compare")
 		applications := 0
 		for _, peer := range claims["peers"].([]any) {
 			for _, raw := range peer.(map[string]any)["scopes"].([]any) {
@@ -123,8 +131,39 @@ func TestNetworkApplicationExpiryOnPostgres(t *testing.T) {
 				}
 			}
 		}
-		if remaining < time.Second && applications != 0 || remaining >= time.Second && applications != 3 {
+		if applications != 3 {
 			t.Fatalf("application scopes at wire expiry: %d", applications)
 		}
 	}
+	execute(`UPDATE inspector_credentials SET revoked_at=now() WHERE credential_id=$1`, inspector)
+	execute(`UPDATE control_config_assignments SET version=version+1 WHERE id=$1`, assignment)
+	// Explicit withdrawal reaches both the caller and the machine even after TTL.
+	execute(`UPDATE paperboat.user_machine_access_sessions SET state='revoked',revoked_at=now(),revocation_reason='test' WHERE id=$1`, access)
+	for _, endpoint := range []string{cli, machine} {
+		result, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "revoked_" + suffix, UserID: account, EndpointID: endpoint})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertNoNetworkScope(t, result.Configuration, "machine_access", access, "terminal")
+		assertNoNetworkScope(t, result.Configuration, "machine_access", access, "file_transfer")
+		assertNoNetworkScope(t, result.Configuration, "machine_access", access, "private_access")
+		assertNoNetworkScope(t, result.Configuration, "inspector", inspector, "inspector")
+		assertNoNetworkScope(t, result.Configuration, "config_compare", assignment, "config_compare")
+	}
+
+}
+
+func addExpiryResourceAdmissions(t *testing.T, execute func(string, ...any), account, cli, machine, environment, suffix string, now time.Time) (string, string) {
+	t.Helper()
+	tunnel, route, inspector, repository, assignment := "expiry_tunnel_"+suffix, "expiry_route_"+suffix, "expiry_inspector_"+suffix, "expiry_repository_"+suffix, "expiry_assignment_"+suffix
+	endpoint := uuid.NewString()
+	execute(`INSERT INTO tunnels(id,account_id,name,desired_state,access_mode,generation,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id) VALUES($1,$2,$1,'active','private',1,$3,$4,$5,$2)`, tunnel, account, "endpoint_"+endpoint, "https://"+endpoint+".tunnels.example.test", machine)
+	execute(`INSERT INTO tunnel_routes(id,tunnel_id,name,priority,protocol,match_type,origin_scheme,origin_address,tls_verification,generation,desired_state,created_by_actor_id,updated_by_actor_id,created_at,updated_at) VALUES($1,$2,'expiry',1,'http','catch_all','http','127.0.0.1:3000','not_applicable',1,'active',$3,$3,$4,$4)`, route, tunnel, account, now)
+	hash := sha256.Sum256([]byte(inspector))
+	execute(`INSERT INTO inspector_credentials(credential_id,token_hash,account_id,owner_account_id,resource_kind,resource_id,route_id,action,resource_generation,route_generation,target_generation,issued_at,expires_at,native_cli_session_id,native_machine_id,native_machine_generation) VALUES($1,$2,$3,$3,'tunnel',$4,$5,'inspect',1,1,1,$6,$7,$8,$9,1)`, inspector, hash[:], account, tunnel, route, now.Add(-10*time.Second), now.Add(5*time.Second), cli, machine)
+	execute(`INSERT INTO control_config_repositories(id,owner_user_id,provider,external_ref,display_name,state) VALUES($1,$2,'github',$1,'owner/config','active')`, repository, account)
+	execute(`INSERT INTO control_config_assignments(id,machine_id,environment_id,repository_id,consent_state,warning_revision,accepted_at,configuration_revision) VALUES($1,$2,$3,$4,'accepted','warning',now(),repeat('a',64))`, assignment, machine, environment, repository)
+	execute(`INSERT INTO control_config_sync_statuses(environment_id,repository_id,assignment_id,machine_id,installation_generation,warning_revision,policy_revision,sync_revision,state,remote_revision,conflicts,machine_updated_at,observed_at) VALUES($1,$2,$3,$4,1,'warning','policy',1,'conflict','remote',jsonb_build_array(jsonb_build_object('path','editor/settings','revision',repeat('a',64))),now(),now())`, environment, repository, assignment, machine)
+	execute(`INSERT INTO config_compare_admissions(id,account_id,environment_id,machine_id,installation_generation,assignment_id,assignment_version,config_path,conflict_revision,expected_remote_revision,native_cli_session_id,source_machine_id,workspace_id,expires_at,operation_id) VALUES($1,$2,$3,$4,1,$5,1,'editor/settings',repeat('a',64),'remote',$6,$4,'personal',$7,$8)`, "token_"+uuid.NewString(), account, environment, machine, assignment, cli, now.Add(5*time.Second), "operation_"+suffix)
+	return inspector, assignment
 }

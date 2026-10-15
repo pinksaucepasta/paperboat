@@ -99,7 +99,7 @@ func TestNativeConfigCompareDescriptorAndMeterPostgres(t *testing.T) {
 		t.Fatal("stale assignment authorized")
 	}
 	machines := usermachines.New(store, nil, usermachines.Policy{}, nil)
-	machines.ConfigureAccess(nil, "https://api.compare.test", time.Minute)
+	machines.ConfigureAccess(nil, "https://api.compare.test")
 	machines.ConfigureTerminalSessions(8, signer, nil)
 	native, err := machines.ConfigCompareDescriptor(scoped, account, environment, machine, client, binding)
 	if err != nil {

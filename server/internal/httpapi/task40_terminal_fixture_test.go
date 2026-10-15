@@ -79,7 +79,7 @@ func TestTask40ServeTerminalSharing(t *testing.T) {
 	cliAuth := auth.NewDeviceService(store, writer, cfg.CLIAuth, []string{secret})
 	cliAuth.ConfigureAuthorizationEncryptionKey("test-device-recovery-key")
 	machines := usermachines.New(store, writer, usermachines.Policy{}, nil)
-	machines.ConfigureAccess(nil, base, 5*time.Minute)
+	machines.ConfigureAccess(nil, base)
 	machines.ConfigureMachineControl(signer, base)
 	router := NewRouter(Options{Config: cfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Auth: accounts, DeviceAuth: cliAuth, Teams: teams.NewService(store), Machines: machines, MintKeys: signer})
 	type cookie struct {

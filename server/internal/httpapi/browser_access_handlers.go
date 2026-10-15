@@ -200,10 +200,12 @@ func (h *BrowserAccessHandlers) EdgeRequest(w http.ResponseWriter, r *http.Reque
 		}
 		if err = browserDecode(raw, &input); err == nil {
 			var a browseraccess.Authorization
-			switch input.CredentialKind {
-			case "", "browser":
+			switch {
+			case input.GrantID != "":
+				a, err = h.Access.AuthorizeGrant(r.Context(), input.GrantID, input.Host, input.ResourceKind, input.ResourceID, input.RouteID)
+			case input.CredentialKind == "" || input.CredentialKind == "browser":
 				a, err = h.Access.Authorize(r.Context(), input.AuthorizeRequest)
-			case "machine":
+			case input.CredentialKind == "machine":
 				a, err = h.Access.AuthorizeMachineCredential(r.Context(), input.Token, input.Host, input.ResourceKind, input.ResourceID, input.RouteID, "use")
 			default:
 				err = browseraccess.ErrInvalid
@@ -271,12 +273,12 @@ func (h *BrowserAccessHandlers) MachineRequest(w http.ResponseWriter, r *http.Re
 		return
 	}
 	if d.NativeAuthorization != nil {
-		if h.Ingress.Native == nil || d.NativeAuthorization.Validate(time.Now().UTC()) != nil {
+		if h.Ingress.Native == nil || d.NativeAuthorization.Validate(time.Time{}) != nil {
 			browserAccessError(w, r, connectorprotocol.ErrIngressDenied)
 			return
 		}
 		a := d.NativeAuthorization
-		result, err := h.Ingress.Native.AuthorizeIngress(r.Context(), privateaccess.AuthorizeInput{Grant: a.Grant, Request: privateaccess.Request(a.Request), Edge: privateaccess.EdgeIdentity{NodeID: d.EdgeNodeID, ProcessEpoch: d.EdgeProcessEpoch}})
+		result, err := h.Ingress.Native.AuthorizeIngress(r.Context(), privateaccess.AuthorizeInput{Grant: a.Grant, Request: privateaccess.Request(a.Request), Edge: privateaccess.EdgeIdentity{NodeID: d.EdgeNodeID, ProcessEpoch: d.EdgeProcessEpoch}, AdmittedDecisionID: d.DecisionID})
 		if err != nil {
 			var denied *privateaccess.DeniedError
 			if errors.As(err, &denied) && denied.DiagnosticCause() == nil && denied.Reason != privateaccess.ReasonInternal {
@@ -297,7 +299,7 @@ func (h *BrowserAccessHandlers) MachineRequest(w http.ResponseWriter, r *http.Re
 			return
 		}
 		d.IssuedAt, d.ExpiresAt = current.IssuedAt, current.ExpiresAt
-		if d.Authorize(current, input.Open, current.EdgeNodeID, current.EdgeProcessEpoch, time.Now().UTC()) != nil {
+		if d.Revalidate(current, input.Open, current.EdgeNodeID, current.EdgeProcessEpoch, time.Now().UTC()) != nil {
 			browserAccessError(w, r, connectorprotocol.ErrIngressDenied)
 			return
 		}
@@ -319,7 +321,7 @@ func (h *BrowserAccessHandlers) MachineRequest(w http.ResponseWriter, r *http.Re
 		return
 	}
 	d.IssuedAt, d.ExpiresAt = current.IssuedAt, current.ExpiresAt
-	if d.Authorize(current, input.Open, current.EdgeNodeID, current.EdgeProcessEpoch, time.Now().UTC()) != nil {
+	if d.Revalidate(current, input.Open, current.EdgeNodeID, current.EdgeProcessEpoch, time.Now().UTC()) != nil {
 		browserAccessError(w, r, connectorprotocol.ErrIngressDenied)
 		return
 	}
