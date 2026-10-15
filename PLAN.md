@@ -200,8 +200,8 @@ consumers. 1.4c's shared admission/reattach packages also move into `shared/`.
 
 ### 1.5 Repository and process
 
-- This monorepo lives at github.com/pinksaucepasta/paperboat and **becomes public (user decision
-  2026-10-15)**, after a full-history secret scan comes back clean. Licence (user decision 2026-10-15): source
+- This monorepo lives at github.com/pinksaucepasta/paperboat and is **public since 2026-10-15** (user decision; full-history secret scan clean: only test
+  fixtures and placeholders). Licence (user decision 2026-10-15): source
   under PolyForm Noncommercial 1.0.0 (`LICENSE`, `LICENSING.md`); official binaries and the
   hosted service under the terms of service, which allow commercial use with the hosted service.
   Releases are published on this repo's GitHub Releases (no separate download repo).
