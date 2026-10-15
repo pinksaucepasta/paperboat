@@ -19,7 +19,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/pinksaucepasta/paperboat-relay/reattach"
+	"github.com/pinksaucepasta/paperboat/shared/reattach"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/admission"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/control"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/route"
