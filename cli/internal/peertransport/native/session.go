@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat-relay/admission"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
@@ -29,9 +30,8 @@ type Session struct {
 	closing    atomic.Bool
 	err        error
 	scopeMu    sync.Mutex
-	scopeConns map[*scopeConn]struct{}
 	http3Scope *scopeKey
-	scopeDone  chan struct{}
+	carrier    *admission.Lease
 }
 
 // MeterBinding contains only verified accounting metadata, never credentials.
@@ -66,7 +66,7 @@ func (s *Session) OpenAuthorizedHTTP3(ctx context.Context, header streamauth.Hea
 	if ctx == nil || header.Consumer != "private_http" || !s.IsPrivateHTTP3() || !s.owner.authority.Allows(s.peerID, accessSessionID, "private_access", "dial") {
 		return nil, tailnet.ErrAdmission
 	}
-	if err := s.bindHTTP3Scope(accessSessionID, "dial"); err != nil {
+	if err := s.bindHTTP3Scope(accessSessionID, "dial", time.Unix(header.DeadlineUnix, 0)); err != nil {
 		return nil, err
 	}
 	return (&http3.Transport{}).NewClientConn(s.quic.Connection), nil
@@ -97,16 +97,35 @@ func (s *Session) AuthorizeHTTP3(ctx context.Context, header streamauth.Header, 
 	if err != nil {
 		return err
 	}
-	return s.bindHTTP3Scope(resource, "accept")
+	return s.bindHTTP3Scope(resource, "accept", time.Unix(header.DeadlineUnix, 0))
 }
 
 var ErrStreamRejected = errors.New("native application stream rejected")
 
 var _ http.RoundTripper = (*http3.ClientConn)(nil)
 
-func newSession(owner *Owner, peerID string, binding tailnet.NetworkBinding, session *peerquic.Session) *Session {
-	s := &Session{owner: owner, peerID: peerID, binding: binding, quic: session, scopeConns: make(map[*scopeConn]struct{})}
-	return s
+func newSession(owner *Owner, peerID string, binding tailnet.NetworkBinding, session *peerquic.Session) (*Session, error) {
+	s := &Session{owner: owner, peerID: peerID, binding: binding, quic: session}
+	release, err := owner.authority.TrackAdmittedCarrier(peerID)
+	if err != nil {
+		return nil, err
+	}
+	if release == nil {
+		return s, nil
+	}
+	lease, err := admission.Admit(session.Connection.Context(), time.Time{}, nil)
+	if err != nil {
+		release()
+		return nil, err
+	}
+	lease.OnDone(release)
+	if err := lease.Watch(owner.authority.ScopeChanges, func() bool { return owner.authority.AllowsAdmittedCarrier(peerID, binding) }); err != nil {
+		lease.Close()
+		return nil, err
+	}
+	lease.Bind(session)
+	s.carrier = lease
+	return s, nil
 }
 func (s *Session) PeerID() string { return s.peerID }
 
@@ -169,7 +188,7 @@ func (s *Session) OpenAuthorized(ctx context.Context, header streamauth.Header, 
 		_ = connection.Close()
 		return nil, err
 	}
-	return s.bindScope(newLimitedConn(connection, header.MaximumBytes), accessSessionID, capability, "dial")
+	return s.bindScope(newLimitedConn(connection, header.MaximumBytes), accessSessionID, capability, "dial", time.Unix(header.DeadlineUnix, 0))
 }
 
 // AcceptAuthorized validates the operation credential first, then requires
@@ -200,7 +219,7 @@ func (s *Session) AcceptAuthorized(ctx context.Context, authorize func(context.C
 	if err != nil {
 		return rejectAuthorizedStream(connection, err)
 	}
-	scoped, err := s.bindScope(newLimitedConn(connection, header.MaximumBytes), accessSessionID, capability, "accept")
+	scoped, err := s.bindScope(newLimitedConn(connection, header.MaximumBytes), accessSessionID, capability, "accept", time.Unix(header.DeadlineUnix, 0))
 	if err != nil {
 		return rejectAuthorizedStream(connection, err)
 	}
@@ -288,15 +307,15 @@ func readHeader(reader io.Reader) ([]byte, error) {
 func (s *Session) Close() error {
 	s.closing.Store(true)
 	s.once.Do(func() {
+		if s.carrier != nil {
+			s.carrier.Close()
+		}
 		s.routerMu.Lock()
 		if s.router != nil {
 			s.err = errors.Join(s.err, s.router.Close())
 		}
 		s.routerMu.Unlock()
 		s.err = errors.Join(s.err, s.quic.Close())
-		if s.scopeDone != nil {
-			<-s.scopeDone
-		}
 		s.owner.remove(s)
 		s.owner.emit(Event{Kind: "closed", PeerID: s.peerID, Err: s.err})
 	})

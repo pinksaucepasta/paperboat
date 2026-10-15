@@ -29,11 +29,19 @@ type PeerNetworkConfigurationResult struct {
 	RelayGrants   []string `json:"relay_grants"`
 }
 
-func (c *Client) PeerNetworkConfiguration(ctx context.Context, operationID string) (PeerNetworkConfigurationResult, error) {
+const MaxAdmittedNetworkScopes = 128
+
+type AdmittedNetworkScope struct {
+	ResourceKind string `json:"resource_kind"`
+	ResourceID   string `json:"resource_id"`
+}
+
+func (c *Client) PeerNetworkConfiguration(ctx context.Context, operationID string, scopes []AdmittedNetworkScope) (PeerNetworkConfigurationResult, error) {
 	var result PeerNetworkConfigurationResult
 	err := c.doRequest(ctx, http.MethodPost, c.peerNetworkPath("config"), struct {
-		OperationID string `json:"operation_id"`
-	}{operationID}, &result, http.Header{"Idempotency-Key": {operationID}}, true)
+		OperationID    string                 `json:"operation_id"`
+		AdmittedScopes []AdmittedNetworkScope `json:"admitted_scopes,omitempty"`
+	}{operationID, scopes}, &result, http.Header{"Idempotency-Key": {operationID}}, true)
 	return result, err
 }
 func (c *Client) peerNetworkPath(action string) string {

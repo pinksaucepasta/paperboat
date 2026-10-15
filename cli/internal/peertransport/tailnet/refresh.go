@@ -10,12 +10,13 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat-relay/admission"
 	"github.com/pinksaucepasta/paperboat/internal/api"
 )
 
 type NetworkAPI interface {
 	RegisterPeerNetwork(context.Context, api.PeerNetworkRegistration) (api.PeerNetworkRegistrationResult, error)
-	PeerNetworkConfiguration(context.Context, string) (api.PeerNetworkConfigurationResult, error)
+	PeerNetworkConfiguration(context.Context, string, []api.AdmittedNetworkScope) (api.PeerNetworkConfigurationResult, error)
 }
 
 // Register persists a proposed key before sending its public half. Deterministic
@@ -62,7 +63,7 @@ func (a *Authority) Refresh(ctx context.Context, client NetworkAPI) error {
 	if err != nil {
 		return err
 	}
-	result, err := client.PeerNetworkConfiguration(ctx, "operation_"+operation.String())
+	result, err := client.PeerNetworkConfiguration(ctx, "operation_"+operation.String(), a.AdmittedScopes())
 	if err != nil {
 		var apiErr *api.APIError
 		if errors.Is(err, api.ErrUnauthenticated) || errors.As(err, &apiErr) && (apiErr.Status == 401 || apiErr.Status == 403) {
@@ -110,6 +111,24 @@ func (a *Authority) Run(ctx context.Context, client NetworkAPI, report func(erro
 	defer a.Close()
 	ctx, cancelRun := context.WithCancel(ctx)
 	defer cancelRun()
+	// Live carrier and operation refs need current policy independently of the
+	// credential renewal schedule. The shared owner bounds every lookup and
+	// keeps accepted work through transient control-plane failures.
+	revocations, err := admission.Admit(ctx, time.Time{}, nil)
+	if err != nil {
+		return err
+	}
+	defer revocations.Close()
+	revocations.Poll(func(check context.Context) error {
+		if len(a.AdmittedScopes()) == 0 {
+			return nil
+		}
+		err := a.Refresh(check, client)
+		if err != nil && report != nil {
+			report(err)
+		}
+		return err
+	})
 	watchDone := make(chan struct{})
 	defer close(watchDone)
 	go func() {

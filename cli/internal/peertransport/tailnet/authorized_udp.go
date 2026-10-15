@@ -111,6 +111,7 @@ func (a *Authority) replaceLocked() error {
 		}
 	}
 	a.server.admitted = admitted
+	a.server.admission = a.peerAdmissionExpiriesLocked()
 	var removed []*Packet
 	for p := range a.server.flows {
 		remote := p.RemoteAddr()
@@ -154,7 +155,7 @@ func (a *Authority) Listen(region *tailcfg.DERPRegion) (*UDPServer, error) {
 	peers, admitted := a.peersLocked()
 	server := &mesh.Server{STUNServers: a.stunServersLocked(), OnRelayControl: a.relayControl, DERPCarrierFactory: a.relay.factory, PeerRelayNodes: a.relay.peerNodes, RelayControlPeers: a.relay.controlPeers, TestOnlyPacketListener: a.options.TestOnlyPacketListener, Key: a.private, LocalAddr: netip.MustParseAddr(a.current.Self.VirtualAddress), AllowedPeers: peers, Region: region, ServedUDPPorts: []filter.PortRange{{First: NetworkPort, Last: NetworkPort}}, Logf: func(string, ...any) {}}
 	var err error
-	a.server, err = listenUDP(server, NetworkPort, admitted, &a.expiresAt)
+	a.server, err = listenUDP(server, NetworkPort, admitted, a.peerAdmissionExpiriesLocked(), &a.expiresAt)
 	return a.server, err
 }
 
@@ -299,7 +300,7 @@ func (a *Authority) Client(descriptor mesh.Addr, peerID string) (*UDPClient, err
 		}
 		ctx, cancel := context.WithCancel(context.Background())
 		peerAddr := netip.AddrPortFrom(netip.MustParseAddr(p.Identity.VirtualAddress), NetworkPort)
-		client := &UDPClient{expiresAt: &a.expiresAt, dial: func(ctx context.Context) (mesh.ConnPacketConn, error) {
+		client := &UDPClient{expiresAt: &a.expiresAt, admit: func() bool { _, err := a.Peer(peerID); return err == nil }, dial: func(ctx context.Context) (mesh.ConnPacketConn, error) {
 			return a.clientEngine.DialAuthorizedUDP(ctx, pub, disco, peerAddr)
 		}, slots: a.clientSlots, port: NetworkPort, flows: make(map[*Packet]struct{}), ctx: ctx, cancel: cancel}
 		a.clients[peerID] = authorizedClient{client: client, peer: p.Identity, scopes: append([]NetworkScope(nil), p.Scopes...), node: pub}
@@ -310,9 +311,6 @@ func (a *Authority) Client(descriptor mesh.Addr, peerID string) (*UDPClient, err
 
 func scopesRetained(old, current []NetworkScope) bool {
 	for _, prior := range old {
-		if prior.ExpiresAt <= time.Now().Unix() {
-			continue
-		}
 		found := false
 		for _, next := range current {
 			if prior.ResourceKind == next.ResourceKind &&
@@ -320,8 +318,7 @@ func scopesRetained(old, current []NetworkScope) bool {
 				prior.ResourceGeneration == next.ResourceGeneration &&
 				prior.Capability == next.Capability &&
 				prior.Direction == next.Direction &&
-				prior.Port == next.Port &&
-				next.ExpiresAt >= prior.ExpiresAt {
+				prior.Port == next.Port {
 				found = true
 				break
 			}
@@ -387,3 +384,18 @@ type authorityPeerAdmissionError struct{}
 
 func (authorityPeerAdmissionError) Error() string { return "peer network admission refused" }
 func (authorityPeerAdmissionError) Unwrap() error { return ErrAdmission }
+
+func peerAdmissionExpiry(peer NetworkPeer) int64 {
+	var expiry int64
+	for _, scope := range peer.Scopes {
+		expiry = max(expiry, scope.ExpiresAt)
+	}
+	return expiry
+}
+func (a *Authority) peerAdmissionExpiriesLocked() map[netip.Addr]int64 {
+	result := make(map[netip.Addr]int64, len(a.current.Peers))
+	for _, peer := range a.current.Peers {
+		result[netip.MustParseAddr(peer.Identity.VirtualAddress)] = peerAdmissionExpiry(peer)
+	}
+	return result
+}

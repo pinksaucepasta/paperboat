@@ -217,7 +217,7 @@ func udpAdmissionServer(t *testing.T, region *tailcfg.DERPRegion, admitted key.N
 	private := key.NewNode()
 	address := netip.MustParseAddr("fd7a:115c:a1e0::1")
 	clientAddr := netip.MustParseAddr("fd7a:115c:a1e0::2")
-	server, err := listenUDP(&mesh.Server{Key: private, LocalAddr: address, AllowedPeers: map[key.NodePublic]netip.Addr{admitted.Public(): clientAddr}, Region: region, ServedUDPPorts: []filter.PortRange{{First: 4242, Last: 4242}}, Logf: func(string, ...any) {}}, 4242, map[netip.Addr]string{clientAddr: "admitted"}, nil)
+	server, err := listenUDP(&mesh.Server{Key: private, LocalAddr: address, AllowedPeers: map[key.NodePublic]netip.Addr{admitted.Public(): clientAddr}, Region: region, ServedUDPPorts: []filter.PortRange{{First: 4242, Last: 4242}}, Logf: func(string, ...any) {}}, 4242, map[netip.Addr]string{clientAddr: "admitted"}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

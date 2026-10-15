@@ -1,7 +1,7 @@
 package tailnet
 
 // UseStreamScopeFences transfers per-resource revocation to the native stream
-// owner before any UDP flow starts. Peer identity and authority expiry remain
+// owner before any UDP flow starts. Peer identity changes remain
 // enforced by this owner. Raw UDP callers retain conservative peer-wide fences.
 func (a *Authority) UseStreamScopeFences() error {
 	a.mu.Lock()
@@ -16,7 +16,7 @@ func (a *Authority) UseStreamScopeFences() error {
 	return nil
 }
 
-// ScopeChanges wakes resource owners after a signed update or scope expiry.
+// ScopeChanges wakes resource owners after a signed update or explicit revocation.
 // Capture the channel before checking Allows, so no revocation can be missed.
 func (a *Authority) ScopeChanges() <-chan struct{} {
 	a.mu.Lock()

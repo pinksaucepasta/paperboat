@@ -34,6 +34,10 @@ func TestPeerNetworkAPIPathsAndStrictResponses(t *testing.T) {
 			w.WriteHeader(404)
 			return
 		}
+		refs, ok := body["admitted_scopes"].([]any)
+		if !ok || len(refs) != 1 || refs[0].(map[string]any)["resource_kind"] != "machine_access" || refs[0].(map[string]any)["resource_id"] != "live_access" {
+			t.Error("configuration request lost live admitted scopes")
+		}
 		data := map[string]any{"configuration": "signed-config", "candidate_set": "signed-candidates"}
 		if unknown.Load() {
 			data["unexpected_authority"] = true
@@ -45,11 +49,11 @@ func TestPeerNetworkAPIPathsAndStrictResponses(t *testing.T) {
 	if r, err := c.RegisterPeerNetwork(context.Background(), PeerNetworkRegistration{OperationID: "network_operation_test"}); err != nil || r.KeyGeneration != 1 {
 		t.Fatal("registration response failed", err)
 	}
-	if result, err := c.PeerNetworkConfiguration(context.Background(), "network_operation_test"); err != nil || result.Configuration != "signed-config" || result.CandidateSet != "signed-candidates" {
+	if result, err := c.PeerNetworkConfiguration(context.Background(), "network_operation_test", []AdmittedNetworkScope{{ResourceKind: "machine_access", ResourceID: "live_access"}}); err != nil || result.Configuration != "signed-config" || result.CandidateSet != "signed-candidates" {
 		t.Fatal("config response failed", err)
 	}
 	unknown.Store(true)
-	if _, err := c.PeerNetworkConfiguration(context.Background(), "network_operation_test"); err == nil {
+	if _, err := c.PeerNetworkConfiguration(context.Background(), "network_operation_test", []AdmittedNetworkScope{{ResourceKind: "machine_access", ResourceID: "live_access"}}); err == nil {
 		t.Fatal("unknown security response field accepted")
 	}
 }

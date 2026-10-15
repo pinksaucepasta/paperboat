@@ -120,7 +120,13 @@ func (d *connectedMachineAccess) control(r *http.Request, identity clientauthori
 		data = api.EndpointCertificateDocument{Version: 1, AccountID: c.Claims.AccountID, KeyID: identity.MachineCertificateKeyID, EndpointID: c.Claims.EndpointID, Role: "machine", Generation: 1, Serial: c.Claims.Serial, IssuedAt: c.Claims.IssuedAt.Format(time.RFC3339), ExpiresAt: c.Claims.ExpiresAt.Format(time.RFC3339), Certificate: base64.RawURLEncoding.EncodeToString(identity.MachineCertificateRaw), CertificateFingerprint: fp}
 	case "/v1/peer-network/config":
 		var err error
-		data, err = network.PeerNetworkConfiguration(r.Context(), "")
+		var body struct {
+			AdmittedScopes []api.AdmittedNetworkScope `json:"admitted_scopes"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			return nil, err
+		}
+		data, err = network.PeerNetworkConfiguration(r.Context(), "", body.AdmittedScopes)
 		if err != nil {
 			return nil, err
 		}

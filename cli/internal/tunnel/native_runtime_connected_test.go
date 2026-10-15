@@ -58,7 +58,7 @@ func (f connectedRoundTripper) RoundTrip(request *http.Request) (*http.Response,
 func (a connectedNetworkAPI) RegisterPeerNetwork(_ context.Context, request api.PeerNetworkRegistration) (api.PeerNetworkRegistrationResult, error) {
 	return a.register(request)
 }
-func (a connectedNetworkAPI) PeerNetworkConfiguration(context.Context, string) (api.PeerNetworkConfigurationResult, error) {
+func (a connectedNetworkAPI) PeerNetworkConfiguration(context.Context, string, []api.AdmittedNetworkScope) (api.PeerNetworkConfigurationResult, error) {
 	return a.config()
 }
 

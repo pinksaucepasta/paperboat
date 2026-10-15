@@ -23,6 +23,7 @@ var ErrFlowLimit = errors.New("virtual UDP flow limit reached")
 // Paperboat authority. Application operation grants remain separate.
 type UDPServer struct {
 	expiresAt *atomic.Int64
+	admission map[netip.Addr]int64
 	server    *mesh.Server
 	mu        sync.Mutex
 	closed    bool
@@ -35,8 +36,8 @@ type UDPServer struct {
 	once      sync.Once
 }
 
-func listenUDP(server *mesh.Server, port uint16, admitted map[netip.Addr]string, expiresAt *atomic.Int64) (*UDPServer, error) {
-	s := &UDPServer{expiresAt: expiresAt, server: server, admitted: admitted, flows: make(map[*Packet]struct{}), slots: make(chan struct{}, MaxFlows), ready: make(chan *Packet, MaxFlows), done: make(chan struct{})}
+func listenUDP(server *mesh.Server, port uint16, admitted map[netip.Addr]string, admission map[netip.Addr]int64, expiresAt *atomic.Int64) (*UDPServer, error) {
+	s := &UDPServer{expiresAt: expiresAt, server: server, admitted: admitted, admission: admission, flows: make(map[*Packet]struct{}), slots: make(chan struct{}, MaxFlows), ready: make(chan *Packet, MaxFlows), done: make(chan struct{})}
 	s.server.OnUDP = func(p uint16) func(mesh.ConnPacketConn) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
@@ -62,7 +63,7 @@ func listenUDP(server *mesh.Server, port uint16, admitted map[netip.Addr]string,
 			}
 			address, _ := netip.ParseAddrPort(remote.String())
 			binding := s.admitted[address.Addr()]
-			if s.closed || !validExpiry(s.expiresAt) || s.admitted != nil && binding == "" {
+			if s.closed || !validExpiry(s.expiresAt) || s.admitted != nil && binding == "" || s.admission != nil && s.admission[address.Addr()] <= time.Now().Unix() {
 				s.mu.Unlock()
 				_ = packet.Close()
 				return
@@ -71,7 +72,7 @@ func listenUDP(server *mesh.Server, port uint16, admitted map[netip.Addr]string,
 				packet.permit = func() bool {
 					s.mu.Lock()
 					defer s.mu.Unlock()
-					return validExpiry(s.expiresAt) && !s.closed && binding != "" && s.admitted[address.Addr()] == binding
+					return !s.closed && binding != "" && s.admitted[address.Addr()] == binding
 				}
 			}
 			s.flows[packet] = struct{}{}
@@ -143,6 +144,7 @@ func (s *UDPServer) Close() error {
 // It admits only its configured peer and application port.
 type UDPClient struct {
 	expiresAt *atomic.Int64
+	admit     func() bool
 	dial      func(context.Context) (mesh.ConnPacketConn, error)
 	slots     chan struct{}
 	port      uint16
@@ -157,6 +159,9 @@ type UDPClient struct {
 }
 
 func (c *UDPClient) Dial(ctx context.Context) (*Packet, error) {
+	if c.admit != nil && !c.admit() {
+		return nil, net.ErrClosed
+	}
 	c.mu.Lock()
 	if c.closed || !validExpiry(c.expiresAt) {
 		c.mu.Unlock()
@@ -186,7 +191,6 @@ func (c *UDPClient) Dial(ctx context.Context) (*Packet, error) {
 	}
 	var p *Packet
 	p = newPacket(conn, func() { c.mu.Lock(); delete(c.flows, p); c.count--; c.mu.Unlock(); <-c.slots })
-	p.permit = func() bool { return validExpiry(c.expiresAt) }
 	c.mu.Lock()
 	if c.closed || op.Err() != nil || !validExpiry(c.expiresAt) {
 		c.mu.Unlock()

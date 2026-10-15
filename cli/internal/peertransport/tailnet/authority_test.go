@@ -37,13 +37,14 @@ type networkAPIFunc struct {
 func (n networkAPIFunc) RegisterPeerNetwork(ctx context.Context, r api.PeerNetworkRegistration) (api.PeerNetworkRegistrationResult, error) {
 	return n.register(ctx, r)
 }
-func (n networkAPIFunc) PeerNetworkConfiguration(ctx context.Context, op string) (api.PeerNetworkConfigurationResult, error) {
+func (n networkAPIFunc) PeerNetworkConfiguration(ctx context.Context, op string, _ []api.AdmittedNetworkScope) (api.PeerNetworkConfigurationResult, error) {
 	token, err := n.configuration(ctx, op)
 	return api.PeerNetworkConfigurationResult{Configuration: token}, err
 }
 
 func TestNetworkRegistrationLostResponseAndRefreshRecovery(t *testing.T) {
 	a, c, signer, _ := networkTestAuthority(t)
+	c.ExpiresAt = c.IssuedAt + int64((7*time.Minute)/time.Second)
 	calls := 0
 	var previous api.PeerNetworkRegistration
 	client := networkAPIFunc{
@@ -97,6 +98,48 @@ func TestNetworkRegistrationLostResponseAndRefreshRecovery(t *testing.T) {
 	client.configuration = func(context.Context, string) (string, error) { c.Generation++; return networkToken(t, signer, c), nil }
 	if err := a.Refresh(t.Context(), client); err != nil || !a.Allows("machine_test", "grant_test", "terminal", "dial") {
 		t.Fatal("fresh authorized recovery failed", err)
+	}
+}
+
+func TestLiveNativeScopeObservesWithdrawalBeforeCredentialRefresh(t *testing.T) {
+	a, c, signer, _ := networkTestAuthority(t)
+	if err := a.Apply(t.Context(), networkToken(t, signer, c)); err != nil {
+		t.Fatal(err)
+	}
+	release, err := a.TrackAdmittedScope("machine_test", "grant_test", "terminal", "dial")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	var withdrawn atomic.Bool
+	first := make(chan struct{}, 1)
+	client := networkAPIFunc{configuration: func(context.Context, string) (string, error) {
+		c.Generation++
+		if withdrawn.Load() {
+			c.Peers = nil
+		}
+		select {
+		case first <- struct{}{}:
+		default:
+		}
+		return networkToken(t, signer, c), nil
+	}}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- a.Run(ctx, client, nil) }()
+	defer func() { cancel(); <-done }()
+	select {
+	case <-first:
+	case <-time.After(40 * time.Second):
+		t.Fatal("initial network refresh unavailable")
+	}
+	withdrawn.Store(true)
+	deadline := time.Now().Add(2500 * time.Millisecond)
+	for a.AllowsAdmitted("machine_test", "grant_test", "terminal", "dial") {
+		if time.Now().After(deadline) {
+			t.Fatal("live operation waited for credential refresh to observe withdrawal")
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 
@@ -272,8 +315,9 @@ func TestNetworkAuthorityRejectsInvalidBindingsAndScopes(t *testing.T) {
 			c.IssuedAt = time.Now().Add(derpquic.MaxClockSkew + time.Second).Unix()
 			c.ExpiresAt = c.IssuedAt + 300
 		},
-		"scope_expired":     func(c *NetworkConfiguration) { c.Peers[0].Scopes[0].ExpiresAt = c.IssuedAt },
-		"address_collision": func(c *NetworkConfiguration) { c.Peers[0].Identity.VirtualAddress = c.Self.VirtualAddress },
+		"missing_scope_expiry": func(c *NetworkConfiguration) { c.Peers[0].Scopes[0].ExpiresAt = 0 },
+		"scope_expired":        func(c *NetworkConfiguration) { c.Peers[0].Scopes[0].ExpiresAt = c.IssuedAt },
+		"address_collision":    func(c *NetworkConfiguration) { c.Peers[0].Identity.VirtualAddress = c.Self.VirtualAddress },
 		"oversized_peers": func(c *NetworkConfiguration) {
 			for len(c.Peers) <= MaxFlows {
 				c.Peers = append(c.Peers, c.Peers[0])
@@ -284,6 +328,19 @@ func TestNetworkAuthorityRejectsInvalidBindingsAndScopes(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			a, c, priv, _ := networkTestAuthority(t)
 			mutate(&c)
+			if name == "scope_expired" {
+				if err := a.Apply(t.Context(), networkToken(t, priv, c)); err != nil {
+					t.Fatal("retained signed scope rejected", err)
+				}
+				if a.Allows("machine_test", "grant_test", "terminal", "dial") {
+					t.Fatal("expired scope admitted new operation")
+				}
+				if release, err := a.TrackAdmittedScope("machine_test", "grant_test", "terminal", "dial"); err == nil {
+					release()
+					t.Fatal("expired scope gained a new live-operation ref")
+				}
+				return
+			}
 			if err := a.Apply(context.Background(), networkToken(t, priv, c)); err == nil {
 				t.Fatal("invalid authority accepted")
 			}
@@ -525,7 +582,7 @@ func TestNetworkAuthorityExpiryDoesNotWaitForStorage(t *testing.T) {
 	}
 }
 
-func TestNetworkAllocatedUDPRotationRemovalAndExpiry(t *testing.T) {
+func TestNetworkAllocatedUDPRotationRemovalAndAdmittedLifetime(t *testing.T) {
 	t.Setenv("IN_TS_TEST", "true")
 	dm := integration.RunDERPAndSTUN(t, func(string, ...any) {}, "127.0.0.1")
 	cli, c, signer, _ := networkTestAuthority(t)
@@ -657,15 +714,20 @@ func TestNetworkAllocatedUDPRotationRemovalAndExpiry(t *testing.T) {
 	m.Generation++
 	m.ExpiresAt = time.Now().Unix() + 1
 	apply(machine, m)
-	// Hold the lifecycle lock so the expiry timer cannot close the engine yet.
-	// Packet authorization must expire independently of cleanup scheduling.
-	machine.mu.Lock()
+	// The snapshot expires for new admission, while the admitted packet flow remains usable.
 	time.Sleep(time.Until(time.Unix(m.ExpiresAt, 0)) + 20*time.Millisecond)
-	_, expiryErr := in.Write([]byte("expired"))
-	machine.mu.Unlock()
-	if expiryErr == nil {
-		t.Fatal("partition retained expired socket")
+	if _, err := in.Write([]byte("admitted")); err != nil {
+		t.Fatal("credential expiry closed admitted socket", err)
 	}
+	m.Generation++
+	m.IssuedAt = time.Now().Unix()
+	m.ExpiresAt = m.IssuedAt + 60
+	m.Peers = nil
+	apply(machine, m)
+	if _, err := in.Write([]byte("revoked")); err == nil {
+		t.Fatal("revocation retained admitted socket")
+	}
+
 }
 
 func TestNetworkDescriptorUsesSignedPeerAndAdmittedRegion(t *testing.T) {
@@ -889,7 +951,7 @@ func TestNetworkRunRenewsShortSignedValidityAndRecoversAfterExpiry(t *testing.T)
 	}
 }
 
-func TestNetworkScopeExpiryPreservesUnrelatedLiveClientAndWithdrawsExpiredPeer(t *testing.T) {
+func TestNetworkScopeExpiryRejectsNewWorkAndPreservesAdmittedClient(t *testing.T) {
 	a, c, signer, _ := networkTestAuthority(t)
 	short := time.Now().Unix() + 2
 	c.Peers[0].Scopes[0].ExpiresAt = short
@@ -947,14 +1009,23 @@ func TestNetworkScopeExpiryPreservesUnrelatedLiveClientAndWithdrawsExpiredPeer(t
 	}
 	c.Generation++
 	c.Peers = c.Peers[:1]
-	c.Peers[0].Scopes = []NetworkScope{live}
-	c.Peers[0].Scopes[0].ExpiresAt = live.ExpiresAt - 1
+	c.Peers[0].Scopes[1].ExpiresAt = live.ExpiresAt - 1
+	if err := a.Apply(t.Context(), networkToken(t, signer, c)); err != nil {
+		t.Fatal(err)
+	}
+	again, err = a.Client(descriptor, "machine_test")
+	if err != nil || again != attached {
+		t.Fatal("credential lifetime change replaced admitted client", err)
+	}
+	c.Generation++
+	c.Peers = nil
 	if err := a.Apply(t.Context(), networkToken(t, signer, c)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := attached.Dial(probeCtx); !errors.Is(err, net.ErrClosed) {
-		t.Fatal("nonexpired scope shortening preserved old native client", err)
+		t.Fatal("revoked client admitted work", err)
 	}
+
 }
 
 func TestNetworkReceiptPrunesExpiredScopesAfterSignedValidation(t *testing.T) {

@@ -52,12 +52,12 @@ func (c cliNativeNetworkAPI) RegisterPeerNetwork(ctx context.Context, request ap
 	return client.RegisterPeerNetwork(ctx, request)
 }
 
-func (c cliNativeNetworkAPI) PeerNetworkConfiguration(ctx context.Context, operationID string) (api.PeerNetworkConfigurationResult, error) {
+func (c cliNativeNetworkAPI) PeerNetworkConfiguration(ctx context.Context, operationID string, scopes []api.AdmittedNetworkScope) (api.PeerNetworkConfigurationResult, error) {
 	client, err := c.client()
 	if err != nil {
 		return api.PeerNetworkConfigurationResult{}, err
 	}
-	return client.PeerNetworkConfiguration(ctx, operationID)
+	return client.PeerNetworkConfiguration(ctx, operationID, scopes)
 }
 
 // cliNativeRuntime owns the one CLI-role authority and Tailcat engine shared

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat-relay/derpquic"
+	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=network-key-custody
@@ -29,7 +30,6 @@ import (
 )
 
 const MaxConfigurationBytes = 128 << 10
-const ConfigurationTTL = 5 * time.Minute
 const RefreshInterval = 30 * time.Second
 const NetworkPort = 443
 
@@ -96,15 +96,14 @@ type AuthorityOptions struct {
 type Authority struct {
 	streamScopes bool
 	scopeChanges chan struct{}
-	// expiresAt fences packet I/O independently of timer scheduling and teardown.
+	admitted     map[api.AdmittedNetworkScope]int
+	// expiresAt gates new flows; admitted flows are fenced by revocation.
 	expiresAt       atomic.Int64
 	mu              sync.Mutex
 	updateMu        sync.Mutex // custody I/O must never hold the expiry/lifecycle lock
 	options         AuthorityOptions
 	current         *NetworkConfiguration
 	private         key.NodePrivate
-	timer           *time.Timer
-	scopeTimer      *time.Timer
 	stunTimer       *time.Timer
 	closed          bool
 	expired         bool
@@ -237,7 +236,7 @@ func (a *Authority) verify(ctx context.Context, token string, now time.Time) (Ne
 	if err != nil || !found || len(pub) != ed25519.PublicKeySize || !ed25519.Verify(pub, []byte(parts[0]+"."+parts[1]), sig) || strictDecode(body, &cfg) != nil {
 		return cfg, "", ErrAuthority
 	}
-	if cfg.Version != 1 || cfg.Issuer != a.options.Issuer || cfg.Audience != "paperboat-network" || cfg.Generation == 0 || cfg.Generation > 1<<53-1 || cfg.IssuedAt <= 0 || cfg.IssuedAt > now.Add(derpquic.MaxClockSkew).Unix() || cfg.ExpiresAt <= cfg.IssuedAt || cfg.ExpiresAt-cfg.IssuedAt > int64(ConfigurationTTL/time.Second) || !validBinding(cfg.Self) || len(cfg.Peers) > MaxFlows {
+	if cfg.Version != 1 || cfg.Issuer != a.options.Issuer || cfg.Audience != "paperboat-network" || cfg.Generation == 0 || cfg.Generation > 1<<53-1 || cfg.IssuedAt <= 0 || cfg.IssuedAt > now.Add(derpquic.MaxClockSkew).Unix() || cfg.ExpiresAt <= cfg.IssuedAt || !validBinding(cfg.Self) || len(cfg.Peers) > MaxFlows {
 		return cfg, "", ErrAuthority
 	}
 	if cfg.ExpiresAt <= now.Unix() {
@@ -264,7 +263,7 @@ func (a *Authority) verify(ctx context.Context, token string, now time.Time) (Ne
 			scopes++
 			networkOnly := scope.ResourceKind == "machine_network" && scope.Capability == "connect" && b.AccountID == s.AccountID
 			validResource := networkOnly || scope.ResourceKind == "config_compare" && scope.Capability == "config_compare" || scope.ResourceKind == "inspector" && scope.Capability == "inspector" || scope.ResourceKind == "machine_access" && (scope.Capability == "terminal" || scope.Capability == "exec" || scope.Capability == "managed_ssh" || scope.Capability == "file_transfer" || scope.Capability == "private_access") || scope.ResourceKind == "codex_session" && scope.Capability == "codex"
-			if scopes > 128 || !validResource || !validID(scope.ResourceID) || scope.ResourceGeneration != 1 || scope.Port != NetworkPort || scope.ExpiresAt <= cfg.IssuedAt || scope.Direction != "dial" && scope.Direction != "accept" || s.Role == "cli" && scope.Direction != "dial" || !networkOnly && (s.Role == b.Role || s.Role == "machine" && scope.Direction != "accept") {
+			if scopes > api.MaxAdmittedNetworkScopes || !validResource || !validID(scope.ResourceID) || scope.ResourceGeneration != 1 || scope.Port != NetworkPort || scope.ExpiresAt <= 0 || scope.Direction != "dial" && scope.Direction != "accept" || s.Role == "cli" && scope.Direction != "dial" || !networkOnly && (s.Role == b.Role || s.Role == "machine" && scope.Direction != "accept") {
 				return cfg, "", ErrAuthority
 			}
 			k := scope.ResourceID + "\x00" + scope.Capability + "\x00" + scope.Direction
@@ -396,7 +395,6 @@ func (a *Authority) Apply(ctx context.Context, token string) error {
 		return err
 	}
 	if time.Now().Unix() >= cfg.ExpiresAt {
-		a.dropLocked()
 		return ErrExpiredAuthority
 	}
 	if a.current != nil && a.current.Self != cfg.Self {
@@ -404,7 +402,6 @@ func (a *Authority) Apply(ctx context.Context, token string) error {
 	}
 	a.expired = false
 	a.current = &cfg
-	pruneNetworkScopes(a.current, time.Now().Unix())
 	a.expiresAt.Store(cfg.ExpiresAt)
 	select {
 	case a.refreshWake <- struct{}{}:
@@ -415,28 +412,11 @@ func (a *Authority) Apply(ctx context.Context, token string) error {
 		a.dropLocked()
 		return err
 	}
-	if a.timer != nil {
-		a.timer.Stop()
-	}
-	a.scheduleScopeExpiryLocked()
-	generation := cfg.Generation
-	a.timer = time.AfterFunc(time.Until(time.Unix(cfg.ExpiresAt, 0)), func() {
-		a.mu.Lock()
-		defer a.mu.Unlock()
-		if a.current != nil && a.current.Generation == generation {
-			a.dropLocked()
-			a.expired = true
-		}
-	})
 	return nil
 }
 
 func (a *Authority) dropLocked() {
 	a.expired = false
-	if a.scopeTimer != nil {
-		a.scopeTimer.Stop()
-		a.scopeTimer = nil
-	}
 	if a.stunTimer != nil {
 		a.stunTimer.Stop()
 		a.stunTimer = nil
@@ -451,10 +431,6 @@ func (a *Authority) dropLocked() {
 	a.relay.mu.Unlock()
 	if recovery != nil {
 		recovery.stop()
-	}
-	if a.timer != nil {
-		a.timer.Stop()
-		a.timer = nil
 	}
 	if a.server != nil {
 		_ = a.server.Close()
@@ -488,7 +464,6 @@ func (a *Authority) usableLocked() bool {
 		return false
 	}
 	if time.Now().Unix() >= a.current.ExpiresAt {
-		a.dropLocked()
 		a.expired = true
 		return false
 	}
@@ -534,7 +509,7 @@ func (a *Authority) Peer(endpointID string) (NetworkBinding, error) {
 		return NetworkBinding{}, ErrAuthority
 	}
 	for _, peer := range a.current.Peers {
-		if peer.Identity.EndpointID == endpointID {
+		if peer.Identity.EndpointID == endpointID && peerAdmissionExpiry(peer) > time.Now().Unix() {
 			return peer.Identity, nil
 		}
 	}
@@ -556,59 +531,23 @@ func (a *Authority) PeerAt(address netip.Addr) (NetworkBinding, error) {
 	return NetworkBinding{}, ErrAdmission
 }
 
-// Resource expiry withdraws only expired authority. Configuration expiry and
-// certificate/key changes remain the independent fence for the entire engine.
-func (a *Authority) scheduleScopeExpiryLocked() {
-	if a.scopeTimer != nil {
-		a.scopeTimer.Stop()
-		a.scopeTimer = nil
+// AllowsAdmitted checks explicit resource withdrawal without reapplying the
+// admission credential's lifetime to work that has already been accepted.
+func (a *Authority) AllowsAdmitted(peerID, resourceID, capability, direction string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.closed || a.current == nil {
+		return false
 	}
-	if a.current == nil || a.closed {
-		return
-	}
-	earliest := a.current.ExpiresAt
-	for _, peer := range a.current.Peers {
-		for _, scope := range peer.Scopes {
-			if scope.ExpiresAt < earliest {
-				earliest = scope.ExpiresAt
+	for _, p := range a.current.Peers {
+		if p.Identity.EndpointID != peerID {
+			continue
+		}
+		for _, scope := range p.Scopes {
+			if scope.ResourceKind != "machine_network" && scope.ResourceID == resourceID && scope.Capability == capability && scope.Direction == direction {
+				return true
 			}
 		}
 	}
-	if earliest >= a.current.ExpiresAt {
-		return
-	}
-	generation := a.current.Generation
-	a.scopeTimer = time.AfterFunc(time.Until(time.Unix(earliest, 0)), func() {
-		a.mu.Lock()
-		defer a.mu.Unlock()
-		if a.closed || a.current == nil || a.current.Generation != generation {
-			return
-		}
-		now := time.Now().Unix()
-		pruneNetworkScopes(a.current, now)
-		if err := a.replaceLocked(); err != nil {
-			a.dropLocked()
-			return
-		}
-		a.scheduleScopeExpiryLocked()
-	})
-}
-
-// Pruning occurs only after the complete signed shape and original bounds have
-// passed validation; receipt latency cannot extend expired resource authority.
-func pruneNetworkScopes(configuration *NetworkConfiguration, now int64) {
-	peers := make([]NetworkPeer, 0, len(configuration.Peers))
-	for _, peer := range configuration.Peers {
-		scopes := make([]NetworkScope, 0, len(peer.Scopes))
-		for _, scope := range peer.Scopes {
-			if scope.ExpiresAt > now {
-				scopes = append(scopes, scope)
-			}
-		}
-		if len(scopes) != 0 {
-			peer.Scopes = scopes
-			peers = append(peers, peer)
-		}
-	}
-	configuration.Peers = peers
+	return false
 }
