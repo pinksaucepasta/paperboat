@@ -14,7 +14,6 @@ import {
   nameProblem,
   normalizeName,
   startEnrollment,
-  type Shell,
 } from "@/lib/enrollment"
 import { CopyIcons, useCopy } from "@/components/copy-button"
 import { ShareMachineDialog } from "@/components/share-machine-dialog"
@@ -22,7 +21,6 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 
 /** Shown only in Personal, where the control plane publishes the installer. */
 /** Personal: install on a new computer. Team: add one of your machines (see ShareMachineDialog). */
@@ -53,22 +51,22 @@ export function AddMachineDialog() {
 
 function AddMachine({ installUrl, onDone }: { installUrl: string; onDone: () => void }) {
   const queryClient = useQueryClient()
-  const [shell, setShell] = useState<Shell>("posix")
+  // Launch is macOS and Linux only; Windows comes in the first update (PLAN.md 1.1).
+  const shell = "posix"
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
   const [plain, setPlain] = useState(false)
 
   // The command is the point of this dialog, so a pairing token is requested as soon as it opens.
-  // One token per platform: its first character tells the server which installer to serve.
   const start = useMutation({ mutationFn: startEnrollment })
   const enrollment = start.data
-  const requested = useRef<Shell | null>(null)
+  const requested = useRef(false)
   useEffect(() => {
-    // Exactly one request per platform choice, even when effects run twice in development.
-    if (requested.current === shell) return
-    requested.current = shell
+    // Exactly one request, even when effects run twice in development.
+    if (requested.current) return
+    requested.current = true
     start.mutate(shell)
-  }, [start, shell])
+  }, [start])
 
   const live = useApiQuery({ ...enrollmentQuery(enrollment?.id ?? ""), enabled: Boolean(enrollment) })
   const state = live.data?.state ?? enrollment?.state
@@ -93,13 +91,6 @@ function AddMachine({ installUrl, onDone }: { installUrl: string; onDone: () => 
     if (description.trim() && describe.isIdle) describe.mutate()
   }, [state, machineId, description, describe, queryClient])
 
-  const switchShell = (next: Shell) => {
-    if (next === shell) return
-    if (enrollment && state !== "ready") void cancelEnrollment(enrollment.id).catch(() => {})
-    start.reset()
-    setShell(next)
-  }
-
   const finalName = name.replace(/-+$/, "")
   const problem = nameProblem(name)
   const command = plain
@@ -121,21 +112,6 @@ function AddMachine({ installUrl, onDone }: { installUrl: string; onDone: () => 
 
   return (
     <div className="flex flex-col gap-4">
-      <ToggleGroup
-        variant="outline"
-        spacing={0}
-        value={[shell]}
-        onValueChange={(next) => next[0] && switchShell(next[0] as Shell)}
-        className="w-full"
-      >
-        <ToggleGroupItem value="posix" className="h-8 flex-1 text-sm">
-          macOS / Linux
-        </ToggleGroupItem>
-        <ToggleGroupItem value="powershell" className="h-8 flex-1 text-sm">
-          Windows
-        </ToggleGroupItem>
-      </ToggleGroup>
-
       <div className="flex flex-col gap-2">
         {command ? (
           <CommandBlock command={command} />
