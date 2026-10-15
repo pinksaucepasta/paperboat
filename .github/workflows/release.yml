@@ -28,7 +28,7 @@ env:
   RELEASE_VERSION: ${{ inputs.release_tag || github.ref_name }}
   SUPERVISOR_MAINTENANCE: 'true'
   SENTRY_DSN: ${{ vars.SENTRY_DSN }}
-  PAPERBOAT_GITHUB_REPOSITORY: pinksaucepasta/paperboat-old
+  PAPERBOAT_GITHUB_REPOSITORY: ${{ github.repository }}
 
 defaults:
   run:
@@ -451,7 +451,7 @@ jobs:
           chmod 0600 "$HOME/.ssh/paperboat-release" "$HOME/.ssh/known_hosts"
       - name: Create or resume the immutable GitHub release
         env:
-          GH_TOKEN: ${{ secrets.PAPERBOAT_PUBLIC_RELEASE_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -460,11 +460,11 @@ jobs:
           remote_commit=$(git ls-remote origin "refs/tags/$RELEASE_VERSION" "refs/tags/$RELEASE_VERSION^{}" | awk '$2 ~ /\^\{\}$/ { peeled=$1 } $2 !~ /\^\{\}$/ { commit=$1 } END { print peeled ? peeled : commit }')
           test "$remote_commit" = "$RELEASE_SOURCE_SHA" || { echo 'Release tag changed during qualification.' >&2; exit 1; }
           if ! gh release view "$RELEASE_VERSION" --repo "$PAPERBOAT_GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release create "$RELEASE_VERSION" --repo "$PAPERBOAT_GITHUB_REPOSITORY" --title "Paperboat $RELEASE_VERSION" --notes "Paperboat $RELEASE_VERSION; source $RELEASE_SOURCE_SHA" --draft --latest=false
+            gh release create "$RELEASE_VERSION" --repo "$PAPERBOAT_GITHUB_REPOSITORY" --verify-tag --title "Paperboat $RELEASE_VERSION" --notes "Paperboat $RELEASE_VERSION; source $RELEASE_SOURCE_SHA" --draft --latest=false
           fi
       - name: Upload only missing draft assets; never replace published bytes
         env:
-          GH_TOKEN: ${{ secrets.PAPERBOAT_PUBLIC_RELEASE_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -508,7 +508,7 @@ jobs:
           done
       - name: Verify GitHub asset bytes and exact asset set without re-downloading
         env:
-          GH_TOKEN: ${{ secrets.PAPERBOAT_PUBLIC_RELEASE_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -543,7 +543,7 @@ jobs:
           PY
       - name: Publish release assets without changing Latest
         env:
-          GH_TOKEN: ${{ secrets.PAPERBOAT_PUBLIC_RELEASE_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -557,7 +557,7 @@ jobs:
           fi
       - name: Verify published GitHub download URLs
         env:
-          GH_TOKEN: ${{ secrets.PAPERBOAT_PUBLIC_RELEASE_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -712,7 +712,7 @@ jobs:
           done
       - name: Mark the verified release Latest
         env:
-          GH_TOKEN: ${{ secrets.PAPERBOAT_PUBLIC_RELEASE_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: gh release edit "$RELEASE_VERSION" --repo "$PAPERBOAT_GITHUB_REPOSITORY" --draft=false --latest=true
       - name: Summarize the completed release

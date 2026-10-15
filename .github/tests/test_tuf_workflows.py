@@ -73,6 +73,36 @@ class TUFWorkflowSignerTest(unittest.TestCase):
                 metadata = runner / "tuf-candidate/metadata/root.json"
                 self.assertEqual(metadata.is_file(), status == 42)
 
+    def test_release_creation_uses_source_repository_and_verified_tag(self):
+        publication = yaml.safe_load((ROOT / ".github/workflows/release.yml").read_text())
+        step = next(s for s in publication["jobs"]["release-publication"]["steps"]
+                    if s.get("name") == "Create or resume the immutable GitHub release")
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            tag, source, repository = "2026.10.15.0", "a" * 40, "example/source"
+            configured = publication["env"]["PAPERBOAT_GITHUB_REPOSITORY"]
+            configured = configured.replace("${{ github.repository }}", repository)
+            git = directory / "git"
+            git.write_text(f"#!/bin/sh\nprintf '%s\\t%s\\n' '{source}' 'refs/tags/{tag}'\n")
+            git.chmod(0o755)
+            gh = directory / "gh"
+            gh.write_text("#!/usr/bin/env python3\nimport json,os,sys\n"
+                          "with open(os.environ['GH_CALLS'],'a') as f: f.write(json.dumps(sys.argv[1:])+'\\n')\n"
+                          "sys.exit(1 if sys.argv[1:3]==['release','view'] else 0)\n")
+            gh.chmod(0o755)
+            calls = directory / "calls.jsonl"
+            environment = dict(os.environ, PATH=str(directory)+":"+os.environ["PATH"],
+                               RELEASE_VERSION=tag, RELEASE_SOURCE_SHA=source,
+                               GITHUB_REPOSITORY=repository, PAPERBOAT_GITHUB_REPOSITORY=configured,
+                               GH_CALLS=str(calls))
+            result = subprocess.run(["bash", "-c", step["run"]], env=environment,
+                                    capture_output=True, timeout=10)
+            self.assertEqual(result.returncode, 0, "qualified immutable tag cannot create its release")
+            recorded = [json.loads(line) for line in calls.read_text().splitlines()]
+            creation = next(args for args in recorded if args[:2] == ["release", "create"])
+            self.assertEqual(creation[creation.index("--repo")+1], repository)
+            self.assertIn("--verify-tag", creation)
+
     def test_launch_candidate_accepts_three_binaries_and_rejects_incomplete_or_extra_products(self):
         publication = yaml.safe_load((ROOT / ".github/workflows/release.yml").read_text())
         step = next(s for s in publication["jobs"]["release-publication"]["steps"]
