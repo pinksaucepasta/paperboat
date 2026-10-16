@@ -411,13 +411,7 @@ TERMINAL_FIXTURES_READY=","
 stage_terminal_fixtures() {
   local source=$1
   [[ "$TERMINAL_FIXTURES_READY" != *",$source,"* ]] || return 0
-  if ! tar -C "$HERE" -czf - terminal_lifecycle.py session_lifecycle.py session_controller.py \
-      terminal_entry.py status_bar_lifecycle.py session_sharing_lifecycle.py \
-      exec_lifecycle.py exec_cancel.py ssh_lifecycle.py ssh_tools_lifecycle.py transfer_lifecycle.py \
-      ssh_doctor_lifecycle.py ssh_alias_lifecycle.py inbox_manage.py \
-      transfer_manage.py preview_manage.py preview_lifecycle.py preview_receipt.py \
-      machine_lifecycle.py install_lifecycle.py pairing_lifecycle.py pairing_fault.py \
-      terminal_command.py session_cleanup.py | \
+  if ! python3 "$HERE/stage_fixtures.py" "$HERE" | \
       on "$source" "umask 077; mkdir -p /tmp/$RUN_ID; tar -xzf - -C /tmp/$RUN_ID"; then
     return 1
   fi
