@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -30,22 +31,27 @@ type runtimeHandoffFixture struct {
 	dir, component, image, name string
 }
 
-func newRuntimeHandoffFixture(t *testing.T) runtimeHandoffFixture {
+func newRuntimeHandoffFixture(t *testing.T, failAfterFirst bool) runtimeHandoffFixture {
 	t.Helper()
 	image := os.Getenv("PAPERBOAT_TEST_DOCKER_BASE_IMAGE")
 	if image == "" {
 		t.Skip("explicit local Docker fixture image required")
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
 	t.Cleanup(cancel)
 	dir := t.TempDir()
 	component := filepath.Join(dir, "relay")
 	if err := os.Mkdir(component, 0700); err != nil {
 		t.Fatal(err)
 	}
+	var calls atomic.Int32
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/selfhost/runtime-readiness" || r.Header.Get("Authorization") != "Bearer "+strings.Repeat("c", 48) {
 			w.WriteHeader(403)
+			return
+		}
+		if calls.Add(1) > 1 && failAfterFirst {
+			w.WriteHeader(503)
 			return
 		}
 		now := time.Now().UTC()
@@ -77,7 +83,7 @@ func newRuntimeHandoffFixture(t *testing.T) runtimeHandoffFixture {
 }
 
 func TestDockerSupervisorAdoptsUnchangedRuntimeWithoutRestart(t *testing.T) {
-	f := newRuntimeHandoffFixture(t)
+	f := newRuntimeHandoffFixture(t, false)
 	ctx, dir, component, image, name := f.ctx, f.dir, f.component, f.image, f.name
 	before, err := docker(ctx, "inspect", "--format", "{{.Id}}", name)
 	if err != nil {
@@ -163,5 +169,22 @@ func TestDockerSupervisorAdoptsUnchangedRuntimeWithoutRestart(t *testing.T) {
 
 	if _, exists, err := inspectContainer(ctx, name); err != nil || exists {
 		t.Fatal("explicit supervisor stop retained owned runtime")
+	}
+}
+
+func TestDockerAdoptionReadinessOutageRetainsRuntime(t *testing.T) {
+	f := newRuntimeHandoffFixture(t, true)
+	before, err := docker(f.ctx, "inspect", "--format", "{{.Id}}", f.name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	launcher := Launcher{StateDir: f.dir, Images: Images{Relay: f.image}}
+	err = launcher.Run(f.ctx, "relay", f.component, &runtimeReadyWriter{ready: make(chan struct{})})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal("readiness outage did not retain its deadline error", err)
+	}
+	after, err := docker(f.ctx, "inspect", "--format", "{{.Id}}", f.name)
+	if err != nil || string(after) != string(before) {
+		t.Fatal("readiness outage terminated the admitted runtime")
 	}
 }

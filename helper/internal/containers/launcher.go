@@ -103,6 +103,10 @@ func (l *Launcher) Run(ctx context.Context, capability, componentDir string, out
 	}
 
 	defer func() {
+		// A readiness/control failure must not destroy an already serving process.
+		if adopted && ctx.Err() == nil {
+			return
+		}
 		if ctx.Err() != nil && preservesHandoff(l.StateDir, capability, imageID) {
 			return
 		}
