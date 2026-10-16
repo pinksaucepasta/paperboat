@@ -1430,7 +1430,7 @@ file | note`. Row-level evidence goes in CHECKLIST.md.
 
 2026-10-16 | Lane B F7-01 exact preview DNS | Rows ticked:none; DNS worker omitted previews while each carrier serves only one edge, so wildcard round-robin can select the other edge. Add preview owner/name and exact ready-node publication, fenced by identity, current epoch, origin readiness, ingress proof and distributed certificate. TestPublicPreviewIngressPostgres intended RED missing name/GREEN actual VPS PostgreSQL2.27s; TLS admission race1.396s PASS; gate/deploy pending.
 
-2026-10-16 | Lane B GHCR grant retry | Rows ticked:none; rerun38862264460 again fails both server/tunnel, now permission_denied:write_package (relay succeeds). Superseded by repository-owned image names in5f14c7f; new publication38870106441 is running, with no further old-package retries.
+2026-10-16 | Lane B GHCR grant retry | Rows ticked:none; rerun38862264460 again fails both server/tunnel, now permission_denied:write_package (relay succeeds). Superseded by repository-owned image names in5f14c7f; new publication38870106441 passed all3 jobs; no further old-package retries.
 
 2026-10-16 | Lane B F7 DNS renewal identity | Rows ticked:none; preview IDs/names are immutable, so use stable DNS resource identity and carrier placement instead of lease/attachment renewal counters. Same primary actual PG test RED renewal rewrites placement/GREEN2.09s includes worker/placement generation agreement. No deployment yet; full gate running.
 
@@ -1443,3 +1443,9 @@ file | note`. Row-level evidence goes in CHECKLIST.md.
 
 
 2026-10-16 | Lane B F7 deployment qualified | Rows ticked:none;663ae4d/4b0d0df/f277003 pushed after full gate PASS (/tmp/lane-b-preview-rebased-gate.log). Server5 public health/schema071/config preservation PASS; actual PG preview1.95s, durable1.32s, runtime0.96s and final race1.812/1.283s PASS. Live DNS queue3 instead of93; F7-01 remains A browser proof, not claimed done.
+
+2026-10-16 | Lane B repository-owned images published/deployed | Rows ticked:none;5f14c7f publication38870106441 all3 multiarch jobs PASS, anonymous manifests contain amd64/arm64. Oracle/anvit now use /paperboat/{relay,tunnel}:2026.10.16.4; native version/source3f7787c and unchanged carrier keys/runtime credentials verified. Server5/f277003 healthy; final TestLiveGlobalNodeReadinessDeploymentProbe0.02s/public proofs2/2.
+
+2026-10-16 | Lane B S0-07 server package visibility | Rows ticked:none; new paperboat/server is anonymously pullable, contrary to server/RELEASE.md private-package policy. Package owner must resolve that policy/visibility discrepancy; current machine gh OAuth lacks package-administration scope. Relay/tunnel public pull is working; publication permission blocker is resolved.
+
+2026-10-16 | Lane B remaining pass1 owners | Rows ticked:none; F7-01 producer deployed and focused browser request above; remaining normal-path completion needs A/C F1/F3/F7/F13/F15 and S1 domain consumers, A trusted per-flow relay counters, Stripe test/live credentials and authorized purchase. S4/shared reorganization waits for core feature pass1 per PLAN3; no test devices used by B.
