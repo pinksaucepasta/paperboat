@@ -170,7 +170,11 @@ func previewLeaseRequestContext(w http.ResponseWriter, r *http.Request, body []b
 		writePreviewMachineProofFailure(w, r, err)
 		return previewtunnelapi.RequestContext{}, false
 	}
-	if claims.UserID == "" || claims.MachineID == "" || claims.InstallationGeneration < 1 || claims.OperationID != idempotencyKey {
+	operationMatches := claims.OperationID == idempotencyKey
+	if r.Method == http.MethodGet {
+		operationMatches = claims.OperationID != ""
+	}
+	if claims.UserID == "" || claims.MachineID == "" || claims.InstallationGeneration < 1 || !operationMatches {
 		logHTTPRejection(r, http.StatusUnauthorized, "machine_identity_invalid", nil)
 		writePreviewTunnelError(w, r, http.StatusUnauthorized, "machine_identity_invalid", "The signed host identity could not be verified.", "unchanged", false, "run_on_authorized_host")
 		return previewtunnelapi.RequestContext{}, false
@@ -180,10 +184,14 @@ func previewLeaseRequestContext(w http.ResponseWriter, r *http.Request, body []b
 		return previewtunnelapi.RequestContext{}, false
 	}
 	bindSupportOwner(r.Context(), claims.UserID)
+	scopes := []string{"previews:write"}
+	if r.Method == http.MethodGet {
+		scopes = []string{"previews:read"}
+	}
 	return previewtunnelapi.RequestContext{
 		Actor: previewtunnelapi.Actor{
 			AccountID: claims.UserID, ActorID: claims.UserID, MachineID: claims.MachineID, HostID: claims.MachineID,
-			Role: "user", Scopes: []string{"previews:write"},
+			Role: "user", Scopes: scopes,
 		},
 		RequestID:     requestIDFromContext(r.Context()),
 		CorrelationID: serverdiagnostics.CorrelationID(r.Context()),

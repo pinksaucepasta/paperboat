@@ -18575,6 +18575,59 @@
           }
         },
         "operationId": "post_v1_previews_preview_id_readiness"
+      },
+      "get": {
+        "summary": "Read exact owner-machine preview publication readiness",
+        "description": "Machine-only read of the canonical preview lease and strong ETag, including connecting, ready and terminal states. Send the renewable machine identity as bearer and X-Paperboat-Machine-Identity, and a fresh X-Paperboat-Machine-Proof bound to GET, this exact path, empty body and current installation. No Idempotency-Key or If-Match is required. The signed machine must own this exact preview; no user session or other machine grant substitutes. Responses are never cached.",
+        "security": [
+          {
+            "bearerAccess": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machine:connect"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/MachineIdentity"
+          },
+          {
+            "$ref": "#/components/parameters/MachineProof"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current canonical preview publication readiness and strong lease ETag.",
+            "headers": {
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreviewLeaseResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "operationId": "get_v1_previews_preview_id_readiness"
       }
     },
     "/v1/previews/{preview_id}/carrier-attachment": {

@@ -234,6 +234,9 @@ func NewRouter(opts Options) http.Handler {
 			}
 		}
 		if opts.PreviewLeases != nil && opts.RuntimeIdentity != nil {
+			if readiness, ok := opts.PreviewLeases.(PreviewReadinessReadAPI); ok {
+				mux.Handle("GET /v1/previews/{preview_id}/readiness", previewLeaseReadinessGet(readiness, opts.RuntimeIdentity))
+			}
 			if readiness, ok := opts.PreviewLeases.(PreviewReadinessAPI); ok {
 				// Readiness is deliberately machine-auth-only. Browser sessions and
 				// CLI client-session bearers may observe a preview, but only a
