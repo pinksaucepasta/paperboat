@@ -19,6 +19,9 @@ for m in shared cli relay tunnel server helper; do
   (cd "$m" && go vet ./... && go test ./...) || { echo "FAIL: $m"; fail=1; }
 done
 
+step "managed deployment lifecycle tests"
+python3 -m unittest discover -s deploy -p 'test_*.py' || { echo "FAIL: deployment"; fail=1; }
+
 step "console lint + build"
 (cd console && bun install --frozen-lockfile >/dev/null && bun run lint && bun run build) || { echo "FAIL: console"; fail=1; }
 

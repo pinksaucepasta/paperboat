@@ -15,7 +15,7 @@ private diagnostics bucket before admitting uploads. Never print Compose's resol
 environment or server secrets.
 
 `docker compose config --quiet` validates composition without printing values.
-`docker compose up -d` starts PostgreSQL, migrates from the repository schema, and
+For initial bootstrap only, `docker compose up -d` starts PostgreSQL, migrates from the repository schema, and
 starts the server only after migrations succeed. Caddy owns API/download/object-store
 TLS; the server certificate coordinator owns the public/runtime edge wildcards.
 Configure DNS before starting the proxy. The release workflow publishes the three
@@ -79,3 +79,29 @@ the service is restored on failure. A current certificate leaves the service run
 The protected `public-acme/renew.log` contains the latest attempt. Verify both current
 node readiness and the server's authenticated public ingress proof after configuring
 or renewing a certificate.
+
+## Managed server upgrades
+
+Use `python3 rollout-server.py --directory /opt/paperboat --image <qualified-image>`
+for upgrades. Do not replace the serving server with `compose up` or restart the
+proxy. The controller runs additive migrations and starts a separate candidate,
+checks `/readyz`, then reloads only Caddy's API/download upstreams. Database,
+configuration, secrets, certificate state and existing server processes remain.
+A failed candidate leaves the serving process untouched; interrupted switching
+restores the previous route before retiring anything.
+
+The controller records the serving container in protected `server-rollout.json`.
+Old containers stay alive while their namespace has accepted live TCP connections,
+including long HTTP responses and control streams. Run `--reap` periodically and
+before the next upgrade; it removes an old container only after those connections
+finish. There is no session-killing retirement deadline. Two retained generations
+block the next rollout with an actionable message instead of accumulating processes.
+Caddy retains in-flight HTTP responses during reload; server browser WebSocket
+endpoints would additionally need explicit proxy stream preservation before use.
+Use `server-rollout.json`'s `active` container for logs/exec after the first rollout,
+rather than assuming the bootstrap Compose container still exists.
+
+Changes that remove schema or change wire contracts must preserve the prior serving
+version for the drain window. Back up the database before rollout as described above.
+This controller upgrades the control plane; edge carrier rolling replacement is a
+separate lifecycle and must also retain its admitted streams.
