@@ -9,7 +9,9 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	previewruntime "github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
 	"github.com/pinksaucepasta/paperboat/internal/privatepreviewproxy"
@@ -80,6 +82,11 @@ func newProductionAccessMachineRuntime(command *cobra.Command, selector string) 
 		_ = dependencies.peerTunnel.Close()
 		return nil, "", err
 	}
+	port, _ := command.Flags().GetInt("port")
+	if err := waitForMachineService(command.Context(), client, machine.ID, port); err != nil {
+		_ = dependencies.peerTunnel.Close()
+		return nil, "", err
+	}
 	access, err := previewruntime.NewNativePrivateTCPAccess(previewruntime.NativePrivateTCPAccessConfig{
 		Grants: client, DialSession: dependencies.peerTunnel.DialPrivateSession,
 	})
@@ -137,4 +144,34 @@ func runAccessMachine(command *cobra.Command, args []string) error {
 		return errors.Join(err, proxy.Close(), runtime.Close())
 	}
 	return errors.Join(proxy.Wait(), proxy.Close(), runtime.Close())
+}
+
+// A just-started service is not grantable until the endpoint publishes it.
+// Wait on the authorized catalog; never retry a rejected access grant.
+func waitForMachineService(ctx context.Context, client *api.Client, machine string, port int) error {
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(config.PeerConnectTimeoutMilliseconds)*time.Millisecond)
+	defer cancel()
+	ticker := time.NewTicker(time.Duration(config.DefaultPollIntervalSeconds) * time.Second)
+	defer ticker.Stop()
+	for {
+		machines, err := client.MachineServices(ctx)
+		if err != nil {
+			return fmt.Errorf("read authorized machine services: %w", err)
+		}
+		for _, candidate := range machines {
+			if candidate.MachineID != machine || candidate.InstallationGeneration < 1 || !candidate.ExpiresAt.After(time.Now()) {
+				continue
+			}
+			for _, service := range candidate.Services {
+				if service.Port == port {
+					return nil
+				}
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("wait for machine service on port %d: start the service and check automatic discovery with pb doctor: %w", port, ctx.Err())
+		case <-ticker.C:
+		}
+	}
 }

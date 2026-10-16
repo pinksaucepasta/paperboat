@@ -7,11 +7,17 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -223,5 +229,72 @@ func TestAccessMachineJSONOutputIsBoundedPublicState(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("JSON command ignored cancellation")
+	}
+}
+
+func TestProductionAccessWaitsForExactServicePublication(t *testing.T) {
+	var catalogs atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/machines":
+			fmt.Fprint(w, `{"data":{"items":[{"id":"machine_target","alias":"target"}],"pagination":{"limit":200,"offset":0,"total":1,"next_offset":null}}}`)
+		case "/v1/machine-services":
+			count := catalogs.Add(1)
+			port := 4322
+			if count > 1 {
+				port = 4321
+			}
+			fmt.Fprintf(w, `{"data":{"items":[{"machine_id":"machine_target","installation_generation":1,"expires_at":%q,"services":[{"port":%d,"address_family":"ipv4"}]}]}}`, time.Now().Add(time.Minute).UTC().Format(time.RFC3339), port)
+		default:
+			t.Errorf("unexpected request %s", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	directory := t.TempDir()
+	path := filepath.Join(directory, "config.json")
+	writeTestProfile(t, directory, path, server.URL)
+	command := accessMachineCobraCommandV1()
+	command.Flags().String("config", path, "")
+	command.Flags().String("server", "", "")
+	if err := command.Flags().Set("port", "4321"); err != nil {
+		t.Fatal(err)
+	}
+	command.SetContext(t.Context())
+	runtime, machine, err := newProductionAccessMachineRuntime(command, "target")
+	if runtime != nil {
+		defer runtime.Close()
+	}
+	if err != nil || machine != "machine_target" || catalogs.Load() < 2 {
+		t.Fatalf("access returned before the exact port was published: catalogs=%d machine=%q err=%v", catalogs.Load(), machine, err)
+	}
+}
+
+func TestMachineServicePublicationWaitStopsOnDenialOrCancellation(t *testing.T) {
+	for _, denied := range []bool{true, false} {
+		t.Run(fmt.Sprint("denied=", denied), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				if denied {
+					w.WriteHeader(http.StatusForbidden)
+					fmt.Fprint(w, `{"error":{"code":"forbidden"}}`)
+					return
+				}
+				fmt.Fprint(w, `{"data":{"items":[]}}`)
+				cancel()
+			}))
+			defer server.Close()
+			client := api.New(server.URL, config.Credential{}, server.Client())
+			err := waitForMachineService(ctx, client, "machine_target", 4321)
+			var failure *api.APIError
+			if calls.Load() != 1 || denied && (!errors.As(err, &failure) || failure.Status != http.StatusForbidden) || !denied && !errors.Is(err, context.Canceled) {
+				t.Fatalf("publication wait did not stop at its authority/cancellation boundary: calls=%d err=%v", calls.Load(), err)
+			}
+		})
 	}
 }
