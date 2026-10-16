@@ -688,6 +688,28 @@ $parent"
   done
 }
 
+test_local_access_settings() {
+  skipped local-access-settings && return
+  local device id out status t0 password
+  for device in "${TLIST[@]}"; do
+    id="local-access-settings:$device"
+    skipped "$id" && continue
+    t0=$(now)
+    if ! stage_terminal_fixtures "$device"; then
+      record "$id" FAIL 0 "could not stage local settings fixture"
+      continue
+    fi
+    password="${HP_PASS:-}"
+    [ "$device" != apple ] || password="$APPLE_PASS"
+    out=$(printf '%s\n' "$password" | on "$device" "python3 /tmp/$RUN_ID/local_access_settings.py" 2>&1); status=$?
+    if [ "$status" = 0 ] && python3 -c 'import json,sys;r=json.loads(sys.argv[1]);assert r["check"]=="local-access-settings" and r["status"]=="PASS" and r["alias_proxy_apply_reset"] and r["enrollment_preserved"]' "$out" 2>/dev/null; then
+      record "$id" PASS $(( $(now)-t0 )) "alias, proxy, apply, domain set/reset; original settings restored"
+    else
+      record_command_failure "$id" $(( $(now)-t0 )) "$out"
+    fi
+  done
+}
+
 test_device_application() {
   local group=$1 script=$2 flags=${3:-}
   skipped "$group" && return
@@ -807,6 +829,7 @@ test_application_pairs preview-manage preview_manage.py
 test_device_application team-lifecycle team_lifecycle.py
 test_device_application team-roles team_lifecycle.py --roles
 test_device_application tunnel-manage tunnel_manage.py
+test_local_access_settings
 test_preview_protocols
 for t in "${TLIST[@]}"; do
   skipped ssh-long || collect "ssh-long:$t" "long-ssh-$t" SSHFINAL "$LONG_SSH"
