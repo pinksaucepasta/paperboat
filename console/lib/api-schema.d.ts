@@ -2612,7 +2612,7 @@ export interface paths {
         };
         /**
          * Create a WorkOS OAuth state token
-         * @description Optionally binds a same-origin /dashboard path to the signed login state. The callback returns it as data.return_to after successful sign-in; arbitrary URLs are rejected.
+         * @description Issues expiring cookie-bound signed OAuth login state. Console navigation stays in the console-owned return cookie.
          */
         get: operations["get_v1_auth_workos_state"];
         put?: never;
@@ -2634,7 +2634,7 @@ export interface paths {
         put?: never;
         /**
          * Complete WorkOS login
-         * @description Creates or updates a Paperboat account and browser session. Successful data includes the signed same-origin return_to path, defaulting to /dashboard.
+         * @description Creates or updates a Paperboat account and browser session after validating expiring cookie-bound OAuth state. Returns the authenticated identity.
          */
         post: operations["post_v1_auth_workos_callback"];
         delete?: never;
@@ -2848,7 +2848,7 @@ export interface paths {
         put?: never;
         /**
          * Prepare authenticated machine installation material
-         * @description Idempotently issues verifier-bound installation material for the exact authenticated CLI session, machine identity, unified service composition, and installation generation after the release artifact has been verified locally.
+         * @description Idempotently issues verifier-bound installation material for the exact authenticated CLI session, machine identity, unified service composition and installation generation. The local CLI binary is independent of server-published artifacts.
          */
         post: operations["post_v1_machines_machine_id_machine_installations"];
         delete?: never;
@@ -2996,7 +2996,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Create machine pairing */
+        /**
+         * Create machine pairing
+         * @description Enrollment-token rejections do not claim or modify the enrollment. HTTP 410 enrollment_token_expired means a fresh unclaimed command expired; create a new command. HTTP 409 enrollment_token_used means the command was already claimed, including a claimed journal past expiry; resume only on its original machine. HTTP 400 enrollment_token_invalid covers malformed, unknown and revoked commands. HTTP 400 pairing_platform_unsupported covers unsupported platform/architecture pairs, platforms disabled by policy, or a syntactically valid enrollment token whose first-character installer shell tag does not match the requested platform. This check occurs before token lookup, claim or allocation. Existing verifier- and identity-bound installation recovery remains separate.
+         */
         post: operations["post_v1_user_machines_pairings"];
         delete?: never;
         options?: never;
@@ -3015,7 +3018,7 @@ export interface paths {
         put?: never;
         /**
          * Consume or recover approved machine installation material
-         * @description Exchanges the pairing verifier and the machine's stable public identity key for installation material. The first successful exchange consumes the pairing. A retry for the same identity can replay material while the enrollment is still installing; a protected resume can recover material for up to 24 hours after the original delivery. The runtime_enrolled assertion controls whether an existing helper identity may be reused; mismatched identities, completed enrollments, and expired recovery windows fail closed.
+         * @description Exchanges the pairing verifier and the machine's stable public identity key for installation material. The first successful exchange consumes the pairing. A retry for the same identity can replay material while the enrollment is still installing; a protected resume can recover material for up to 24 hours after the original delivery. For runtime_enrolled=true, current exact machine/helper/key/generation and active CLI session authority are revalidated, reuse_identity is true, and client_session plus enrollment credentials are omitted. Recovery never issues, rotates or revokes the running profile's CLI tokens; clients preserve their current protected profile and normal refresh owner. Response-loss retries return the same identity without reinstalling stale credentials. Explicit revocation, mismatched identities and expired recovery windows fail closed; a missing or revoked profile requires normal account sign-in and authenticated setup.
          */
         post: operations["post_v1_user_machines_pairings_installation"];
         delete?: never;
@@ -4248,7 +4251,10 @@ export interface paths {
         /** List bounded incoming and outgoing Team Inbox requests */
         get: operations["list_team_inbox_requests"];
         put?: never;
-        /** Create an exact cross-account Team Inbox request */
+        /**
+         * Create an exact cross-account Team Inbox request
+         * @description Manifest file count, each declared file size and aggregate bytes must fit the configured transfer policy. Over-limit requests return 413 file_transfer_limit_exceeded with error.details.max_file_bytes, max_batch_files and max_batch_bytes; reduce the number or size of files and retry. No approval or payload stream is admitted for an over-limit manifest.
+         */
         post: operations["create_team_inbox_request"];
         delete?: never;
         options?: never;
@@ -6664,7 +6670,7 @@ export interface paths {
         };
         /**
          * Read workspace resource bandwidth history
-         * @description Active account and selected workspace membership required. Cookie auth or account:read bearer scope. At most 90 days per window, hourly UTC buckets through 48 hours, daily thereafter. Half-open window uses measurement interval end. Retains 90 days. Totals/series include detail omitted by truncated limits. Application byte observations are separate from billing. resource_route_id distinguishes machine service ports. Coverage reports missing, stale, dropped and incomplete native reporting.
+         * @description Active account and selected workspace membership required. Cookie auth or account:read bearer scope. At most 90 days per window, hourly UTC buckets through 48 hours, daily thereafter. Half-open window uses measurement interval end. Retains 90 days. Totals/series include detail omitted by truncated limits. Application byte observations are separate from billing. resource_route_id distinguishes machine service ports. Coverage reports missing, stale, dropped and incomplete native reporting. totals.by_path and each series point by_path aggregate all matching resources before pagination; unknown mode or hosting is excluded from breakdowns with a coverage note, while combined totals retain it.
          */
         get: operations["get_v1_usage"];
         put?: never;
@@ -6977,6 +6983,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/selfhost/runtime-readiness": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the authenticated pbh node readiness
+         * @description The runtime credential selects the exact node. No resource selector, query parameters or request body is accepted. This read-only response carries no credential or signing material; registered/offline/stale nodes return ready=false. Responses are not cached.
+         */
+        get: operations["get_selfhost_runtime_readiness"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/machines/pairings/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Atomically retire exact original machine identities before replacement pairing
+         * @description Authority is the fresh enrollment token original account, never a hostname or a soon-to-be-revoked CLI token. Retires all requested machines, aliases, seats, current sessions, access/refresh credentials and server-side authorities in one transaction. Returns an immutable retirement receipt bound to this enrollment generation, verifier and exact sorted request. Retry the same token/verifier/request after a lost response even after original token expiry; explicit cancellation/revocation still denies recovery. Follow-up pairing must use the same verifier and a currently valid enrollment token. A reset receipt does not renew token expiry or authorize new pairing. Client preserves local state until receipt is confirmed; it then follows normal pairing and identity-bound installation recovery. A new enrollment generation cannot read or reuse a prior generation receipt. Each resource requires proof by its stored old Ed25519 identity; account enrollment authority alone cannot substitute for possession of that identity.
+         */
+        post: operations["post_v1_machines_pairings_reset"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read recent workspace activity
+         * @description Cookie session or account:read bearer scope. Active workspace owner/admin required for team administrative activity. Scope, machine identity and target name are snapshotted when supported resource audits are written; earlier unscoped events and raw audit metadata are omitted. Retains the last 90 days. Newest first with opaque workspace-bound cursor; rechecks current authorization for each page. Machine, terminal, preview, tunnel, team, user and machine-environment resource audit events are supported. Unknown resource kinds and internal operational events are omitted.
+         */
+        get: operations["get_v1_activity"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -7255,7 +7321,7 @@ export interface components {
             expires_at: string;
         };
         BrowserAccessAuthorizeRequest: {
-            token: string;
+            token?: string;
             host: string;
             /** @enum {string} */
             resource_kind: "preview" | "tunnel" | "lazy_policy";
@@ -7266,7 +7332,9 @@ export interface components {
              * @enum {string}
              */
             credential_kind: "browser" | "machine";
-        };
+            /** @description Edge-only continuation of an independently admitted connection. Checks current exact resource and revocation without renewing the original bearer. New connections require token. */
+            grant_id?: string;
+        } & (unknown | unknown);
         BrowserMachineCredentialRequest: {
             host: string;
             /** @enum {string} */
@@ -8909,6 +8977,17 @@ export interface components {
         };
         PeerNetworkConfigRequest: {
             operation_id: string;
+            /** @description Only scopes referenced by currently live admitted operations on this exact authenticated endpoint. Keeps current revocation authority visible after original credential expiry without renewing that credential. Drop each reference when its work ends. Historical cached credentials must not be submitted. machine_network identifies an already-admitted personal peer carrier using its signed network scope ID, including idle carriers; this retains current authority beyond endpoint certificate expiry without reissuing that certificate. Fresh transports still require current certificates. */
+            admitted_scopes?: {
+                /** @enum {string} */
+                resource_kind: "machine_access" | "inspector" | "config_compare" | "machine_network";
+                resource_id: string;
+            }[];
+            /** @description Exact certificates pinned by live admitted carriers; requires admitted_scopes. Current signed self/peer binding returns admitted_certificate_fingerprints only for requested original certificates with identical account, endpoint, role, generation, QUIC key and signer. Expiry and same-key supersession do not revoke admitted carriers; explicit certificate revocation does. These fingerprints never permit fresh admission. Drop on disconnect. */
+            admitted_certificates?: {
+                endpoint_id: string;
+                fingerprint: string;
+            }[];
         };
         PeerNetworkRegistration: {
             /** Format: int64 */
@@ -9167,8 +9246,10 @@ export interface components {
         TeamInviteRequest: {
             operation_id: string;
             expected_generation: number;
-            account_id: string;
-        };
+            account_id?: string;
+            /** Format: email */
+            email?: string;
+        } & (unknown | unknown);
         TeamAcceptRequest: {
             operation_id: string;
         };
@@ -9180,6 +9261,8 @@ export interface components {
             /** Format: date-time */
             expires_at: string;
             generation: number;
+            /** Format: email */
+            email?: string;
         };
         TeamGrantRequest: {
             operation_id: string;
@@ -10156,6 +10239,7 @@ export interface components {
                 upload_bytes: number;
                 /** Format: int64 */
                 download_bytes: number;
+                by_path: components["schemas"]["ResourceBandwidthPathTotal"][];
             };
             resources: {
                 resource_kind: string;
@@ -10189,6 +10273,7 @@ export interface components {
                 upload_bytes: number;
                 /** Format: int64 */
                 download_bytes: number;
+                by_path: components["schemas"]["ResourceBandwidthPathTotal"][];
             }[];
             pagination: components["schemas"]["InventoryOffsetPagination"];
         };
@@ -10451,6 +10536,8 @@ export interface components {
             /** @enum {string} */
             state: "pending" | "accepted" | "cancelled" | "expired";
             created_by: string;
+            /** Format: email */
+            email?: string;
         };
         Me: {
             id: string;
@@ -10482,7 +10569,9 @@ export interface components {
             permissions: string[] | null;
             /** Format: int64 */
             installation_generation: number;
-            runtime_versions: unknown;
+            runtime_versions: {
+                [key: string]: string;
+            };
             capabilities: components["schemas"]["MachineCapabilities"];
             availability: components["schemas"]["AvailabilityPolicy"];
             runtime_diagnostics: components["schemas"]["UserMachineRuntimeDiagnostics"];
@@ -10516,15 +10605,6 @@ export interface components {
                 /** Format: uri */
                 control_url: string;
                 helper_listen_address: string;
-                artifact: {
-                    schema: string;
-                    kind: string;
-                    version: string;
-                    platform: string;
-                    architecture: string;
-                    repository_url: string;
-                    target_path: string;
-                };
             };
         };
         MeResponse: {
@@ -10538,6 +10618,55 @@ export interface components {
                 items: components["schemas"]["Machine"][];
                 pagination: components["schemas"]["InventoryOffsetPagination"];
             };
+        };
+        SelfhostRuntimeReadiness: {
+            node_id: string;
+            state: string;
+            process_epoch: string;
+            /** @enum {string} */
+            capability: "relay" | "tunnel";
+            /** @description Ready state, a nonempty current process epoch and heartbeat within the server readiness deadline. */
+            ready: boolean;
+            /** Format: date-time */
+            last_heartbeat_at: string | null;
+            /** Format: date-time */
+            valid_until: string | null;
+            /** Format: date-time */
+            server_time: string;
+        };
+        ActivityEvent: {
+            id: string;
+            /** Format: date-time */
+            occurred_at: string;
+            action: string;
+            actor: {
+                /** @enum {string} */
+                kind: "user" | "system";
+                id: string;
+            };
+            target: {
+                kind: string;
+                id: string;
+                name?: string;
+            };
+            machine?: {
+                id: string;
+                name: string;
+            };
+        };
+        ActivityPage: {
+            items: components["schemas"]["ActivityEvent"][];
+            next_cursor?: string;
+        };
+        ResourceBandwidthPathTotal: {
+            /** @enum {string} */
+            mode: "direct" | "relay" | "edge";
+            /** @enum {string} */
+            hosting: "managed" | "self_hosted" | "none";
+            /** Format: int64 */
+            upload_bytes: number;
+            /** Format: int64 */
+            download_bytes: number;
         };
     };
     responses: {
@@ -11138,6 +11267,8 @@ export interface operations {
             header: {
                 /** @description Short-lived signed grant returned by the grant endpoint. Never log or persist it. */
                 "X-Paperboat-Private-Access-Grant": components["parameters"]["PrivateAccessGrant"];
+                /** @description Edge-only revalidation of an independently admitted connection. Must match the original signed grant and exact decision; expiry is checked only at initial admission. Explicit revocation still denies continuation. */
+                "X-Paperboat-Admitted-Decision"?: string;
             };
             path?: never;
             cookie?: never;
@@ -11264,7 +11395,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Signed metadata or content-addressed target. */
+            /** @description Signed update metadata; CLI binaries are distributed independently. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -11291,7 +11422,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Signed metadata or content-addressed target. */
+            /** @description Signed update metadata; CLI binaries are distributed independently. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -15701,9 +15832,7 @@ export interface operations {
     };
     get_v1_auth_workos_state: {
         parameters: {
-            query?: {
-                return_to?: string;
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
@@ -16050,16 +16179,6 @@ export interface operations {
                     verifier: string;
                     public_identity_key: string;
                     installation_generation: number;
-                    artifact: {
-                        schema: string;
-                        kind: string;
-                        version: string;
-                        platform: string;
-                        architecture: string;
-                        /** Format: uri */
-                        repository_url: string;
-                        target_path: string;
-                    };
                     ssh_user?: string;
                     ssh_port?: number;
                     can_reuse_runtime_identity?: boolean;
@@ -16279,6 +16398,10 @@ export interface operations {
                 content?: never;
             };
             400: components["responses"]["Error"];
+            /** @description Enrollment token already claimed (enrollment_token_used). */
+            409: components["responses"]["Error"];
+            /** @description Unclaimed enrollment token expired (enrollment_token_expired). */
+            410: components["responses"]["Error"];
         };
     };
     post_v1_user_machines_pairings_installation: {
@@ -19210,6 +19333,7 @@ export interface operations {
             };
             403: components["responses"]["Error"];
             409: components["responses"]["Error"];
+            413: components["responses"]["Error"];
             429: components["responses"]["Error"];
         };
     };
@@ -24850,6 +24974,8 @@ export interface operations {
                 resource_route_id?: string;
                 /** @description Exact filter when present, including empty string. Omission applies no filter. */
                 machine_id?: string;
+                /** @description Exact retained authenticated member within the authorized workspace. Omission returns aggregate usage. Historical team events without retained actor remain aggregate-only. This is telemetry, not the authoritative billing debit. */
+                actor_account_id?: string;
             };
             header?: never;
             path?: never;
@@ -25637,6 +25763,164 @@ export interface operations {
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
             503: components["responses"]["Error"];
+        };
+    };
+    get_selfhost_runtime_readiness: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current authenticated node readiness. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["SelfhostRuntimeReadiness"];
+                    };
+                };
+            };
+            /** @description A query parameter or request body was supplied. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description runtime_unauthorized: missing/invalid credential or incomplete, removed or expired installation. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description runtime_readiness_unavailable: configuration/database unavailable; retry shortly. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    post_v1_machines_pairings_reset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    enrollment_token: string;
+                    verifier: string;
+                    platform: string;
+                    architecture: string;
+                    machines: {
+                        id: string;
+                        public_identity_key: string;
+                        installation_generation: number;
+                        /** @description Unpadded base64url Ed25519 signature by this exact OLD machine identity key over UTF-8 lines (including final LF): paperboat.machine-reset/v1, lowercase hex SHA256(trimmed enrollment_token), lowercase hex SHA256(verifier), normalized platform, normalized architecture, exact id, exact public_identity_key, decimal installation_generation. No private key leaves the machine. */
+                        identity_signature: string;
+                    }[];
+                };
+            };
+        };
+        responses: {
+            /** @description Retired receipt; identical state on exact recovery. No credentials returned. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            /** @enum {string} */
+                            state: "retired";
+                            enrollment_id: string;
+                            retired_machine_ids: string[];
+                            /** Format: date-time */
+                            completed_at: string;
+                        };
+                    };
+                };
+            };
+            /** @description pairing_reset_invalid, enrollment_token_invalid or pairing_platform_unsupported. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description pairing_reset_denied: account, exact key/generation or current management authority mismatch. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description pairing_reset_conflict for changed protected request/verifier or non-fresh linked enrollment; enrollment_token_used for already-claimed enrollment. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description enrollment_token_expired for a reset not yet admitted. */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description pairing_reset_unavailable: outcome uncertain; retain saved recovery state and retry identical request. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_v1_activity: {
+        parameters: {
+            query?: {
+                workspace?: string;
+                machine_id?: string;
+                area?: string;
+                q?: string;
+                cursor?: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Activity page; empty items means no matching scoped events. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["ActivityPage"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            500: components["responses"]["Error"];
         };
     };
 }

@@ -236,23 +236,19 @@ export type TrafficBreakdown = {
   byPath: Record<PathMode, number>
 }
 
+type PathTotal = Usage["totals"]["by_path"][number]
+
 /**
- * Traffic for one source, split by path, summed from `resources[].paths`. Direct (peer-to-peer)
- * traffic crosses no relay or edge, so it counts only for "all". Undefined when paging cut the
- * detail short; the server's own totals still cover everything for "all".
+ * Traffic for one source, split by path, from the server's whole-period aggregates. Direct
+ * (peer-to-peer) traffic crosses no relay or edge, so it counts only for "all".
  */
-export function trafficBreakdown(usage: Usage, source: TrafficSource): TrafficBreakdown | undefined {
-  if (usage.pagination.next_offset !== null) return
+export function trafficBreakdown(byPath: PathTotal[], source: TrafficSource): TrafficBreakdown {
   const result: TrafficBreakdown = { upload: 0, download: 0, byPath: { direct: 0, relay: 0, edge: 0 } }
-  for (const resource of usage.resources) {
-    if (resource.path_pagination.next_offset !== null) return
-    for (const path of resource.paths) {
-      if (path.mode === "unknown") continue
-      if (source !== "all" && path.hosting !== source) continue
-      result.upload += path.upload_bytes
-      result.download += path.download_bytes
-      result.byPath[path.mode] += path.upload_bytes + path.download_bytes
-    }
+  for (const path of byPath) {
+    if (source !== "all" && path.hosting !== source) continue
+    result.upload += path.upload_bytes
+    result.download += path.download_bytes
+    result.byPath[path.mode] += path.upload_bytes + path.download_bytes
   }
   return result
 }

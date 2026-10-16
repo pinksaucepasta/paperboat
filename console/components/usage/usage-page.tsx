@@ -52,19 +52,14 @@ const usageForQuery = (workspace: string, period: UsagePeriod, machineId: string
 
 type Split = Record<PathMode, { up: number; down: number }>
 
-/** Totals per path, summed from each resource's paths (complete unless the server paged them). */
-function split(usage: Usage): { byPath: Split; complete: boolean } {
+/** Totals per path for the whole period, from the server's aggregates. */
+function split(usage: Usage): Split {
   const byPath: Split = { direct: { up: 0, down: 0 }, relay: { up: 0, down: 0 }, edge: { up: 0, down: 0 } }
-  let complete = usage.pagination.next_offset === null
-  for (const resource of usage.resources) {
-    if (resource.path_pagination.next_offset !== null) complete = false
-    for (const path of resource.paths) {
-      if (path.mode === "unknown") continue
-      byPath[path.mode].up += path.upload_bytes
-      byPath[path.mode].down += path.download_bytes
-    }
+  for (const path of usage.totals.by_path) {
+    byPath[path.mode].up += path.upload_bytes
+    byPath[path.mode].down += path.download_bytes
   }
-  return { byPath, complete }
+  return byPath
 }
 
 export function UsagePage({ machine: tabMachine }: { machine?: Machine }) {
@@ -103,7 +98,7 @@ export function UsagePage({ machine: tabMachine }: { machine?: Machine }) {
 }
 
 function Loaded({ usage, period, showMachine }: { usage: Usage; period: UsagePeriod; showMachine: boolean }) {
-  const { byPath, complete } = split(usage)
+  const byPath = split(usage)
   const total = usage.totals.upload_bytes + usage.totals.download_bytes
   const resources = [...usage.resources]
     .map((resource) => ({ resource, total: resource.upload_bytes + resource.download_bytes }))
@@ -137,9 +132,9 @@ function Loaded({ usage, period, showMachine }: { usage: Usage; period: UsagePer
                 </span>
               }
             >
-              <Figure>{complete ? formatBytes(bytes) : "—"}</Figure>
+              <Figure>{formatBytes(bytes)}</Figure>
               <span className="text-xs text-muted-foreground">
-                {complete && total > 0 ? `${Math.round((bytes / total) * 100)}% · ` : ""}
+                {total > 0 ? `${Math.round((bytes / total) * 100)}% · ` : ""}
                 {path.detail}
               </span>
             </Stat>

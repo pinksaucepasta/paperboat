@@ -244,14 +244,11 @@ const paths: { mode: PathMode; label: string; color: string; dot: string }[] = [
  * other sources count relay and edge traffic through those nodes (direct traffic uses none).
  */
 function Bandwidth({ usage, source }: { usage: Usage; source: TrafficSource }) {
-  const breakdown = trafficBreakdown(usage, source)
-  const up = source === "all" ? usage.totals.upload_bytes : breakdown?.upload
-  const down = source === "all" ? usage.totals.download_bytes : breakdown?.download
+  const breakdown = trafficBreakdown(usage.totals.by_path, source)
+  const up = source === "all" ? usage.totals.upload_bytes : breakdown.upload
+  const down = source === "all" ? usage.totals.download_bytes : breakdown.download
   const shown = paths.filter((path) => source === "all" || path.mode !== "direct")
 
-  if (up === undefined || down === undefined) {
-    return <span className="text-sm text-muted-foreground">Too much detail to split by source this period</span>
-  }
   return (
     <div className="flex flex-1 flex-col gap-3">
       {/* The total, and beside it two even lines: upload/download, then the paths (the chart's
@@ -263,7 +260,7 @@ function Bandwidth({ usage, source }: { usage: Usage; source: TrafficSource }) {
             <Mark icon={<ArrowUpIcon className="size-3" />}>{formatBytes(up)}</Mark>
             <Mark icon={<ArrowDownIcon className="size-3" />}>{formatBytes(down)}</Mark>
           </span>
-          {breakdown && up + down > 0 && (
+          {up + down > 0 && (
             <span className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
               {shown.map((path) => (
                 <Mark key={path.mode} icon={<span className={cn("size-1.5 rounded-full", path.dot)} />}>
@@ -289,32 +286,18 @@ function Mark({ icon, children }: { icon: React.ReactNode; children: React.React
 }
 
 /**
- * Sample lines per path, shaped from the real combined series. The API's series is one combined
- * line (NOTES.md, "Bandwidth card"); development shows these so the chart's design can be judged.
- */
-function samplePathSeries(totals: number[], source: TrafficSource): Record<PathMode, number[]> {
-  const scale = source === "all" ? 1 : source === "managed" ? 0.7 : 0.3
-  return {
-    direct: totals.map((value, index) => value * (0.55 + 0.12 * Math.sin(index / 3))),
-    relay: totals.map((value, index) => scale * value * (0.27 + 0.08 * Math.cos(index / 4))),
-    edge: totals.map((value, index) => scale * value * (0.12 + 0.06 * Math.sin(index / 2 + 1))),
-  }
-}
-
-/**
- * Traffic over the period (hourly or daily, as the server buckets it), bled to the card's edges
- * and bottom so it reads as the card's floor. Production has one combined series, so it draws
- * that line for "Combined" only.
+ * Traffic over the period (hourly or daily, as the server buckets it), one line per path, bled
+ * to the card's edges and bottom so it reads as the card's floor.
  */
 function Trend({ usage, shown, source }: { usage: Usage; shown: typeof paths; source: TrafficSource }) {
   const gradientId = useId()
-  const totals = usage.series.map((point) => point.upload_bytes + point.download_bytes)
-  if (totals.length < 2) return null
-  const sample = process.env.NODE_ENV === "development"
-  if (!sample && source !== "all") return null
-  const lines = sample
-    ? shown.map((path) => ({ key: path.mode, color: path.color, values: samplePathSeries(totals, source)[path.mode] }))
-    : [{ key: "all", color: "text-primary", values: totals }]
+  if (usage.series.length < 2) return null
+  const perPoint = usage.series.map((point) => trafficBreakdown(point.by_path, source).byPath)
+  const lines = shown.map((path) => ({
+    key: path.mode,
+    color: path.color,
+    values: perPoint.map((point) => point[path.mode]),
+  }))
   const peak = Math.max(1, ...lines.flatMap((line) => line.values))
   // Each area fades from its line down to nothing (eased, so it does not band); the lines stay
   // crisp, which is what keeps the chart readable.
