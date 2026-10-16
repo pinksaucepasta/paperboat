@@ -239,6 +239,18 @@ func TestSharedTLSReservedIPNoSNIRequiresHTTPSBinding(t *testing.T) {
 }
 
 func TestSharedTLSRuntimeCarrierAuthority(t *testing.T) {
+	testSharedTLSAdmittedCarrierAuthority(t, "runtime")
+}
+
+func TestSharedTLSRestrictedPreviewCarrierAuthority(t *testing.T) {
+	for _, mode := range []string{"private", "team", "public", "unadmitted"} {
+		t.Run(mode, func(t *testing.T) { testSharedTLSAdmittedCarrierAuthority(t, mode) })
+	}
+}
+
+func testSharedTLSAdmittedCarrierAuthority(t *testing.T, mode string) {
+	t.Helper()
+
 	const host = "machine.runtime.example.test"
 	clientTLS, serverTLS, _, _, _ := task24Certificates(t, host)
 	clientTLS.ServerName = host
@@ -253,15 +265,34 @@ func TestSharedTLSRuntimeCarrierAuthority(t *testing.T) {
 	defer registry.Close()
 	identity := testEdgePreviewIdentity(1, 1)
 	carrier, _ := testEdgePreviewCarrierPair(t, identity)
-	value := DataCarrierPreviewRoute{RouteID: "runtime_route", Hostname: host, Kind: runtimewire.RouteKind, EdgeProcessEpoch: "edge_epoch_1", Revision: 1, AttachmentGeneration: 1, Identity: identity, Server: carrier, ExpiresAt: time.Now().Add(time.Minute)}
-	if err = registry.Attach(value); err != nil {
-		t.Fatal(err)
+	value := DataCarrierPreviewRoute{RouteID: "runtime_route", Hostname: host, Kind: runtimewire.RouteKind, EdgeProcessEpoch: "edge_epoch_1", Revision: 1, AttachmentGeneration: 1, Identity: identity, Server: carrier, ExpiresAt: time.Now().Add(150 * time.Millisecond)}
+	if mode == "runtime" || mode == "unadmitted" {
+		if mode == "unadmitted" {
+			value.Kind = dataCarrierPreviewPrivateRouteKind
+			value.AccessMode = "private"
+			value.AttachmentGeneration = 0
+		}
+		if err = registry.Attach(value); err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		d := publicTCPDecision(time.Now().UTC(), 443)
+		d.Binding.AccountID, d.Binding.HostID, d.Binding.TunnelID = identity.AccountID, identity.HostID, identity.TunnelID
+		d.ConnectorID, d.SessionID = identity.ConnectorID, identity.SessionID
+		d.ProcessGeneration, d.ConfigGeneration = identity.ProcessGeneration, identity.Generation
+		d.EdgeProcessEpoch, d.Binding.Hostname = value.EdgeProcessEpoch, host
+		d.Binding.RouteID, d.Binding.RouteGeneration, d.Binding.PublicationID = value.RouteID, value.Revision, "preview_tls"
+		d.ExpiresAt = value.ExpiresAt
+		admission := testPreviewCarrierAdmission(d, mode)
+		if err = registry.AttachAdmission(admission, carrier); err != nil {
+			t.Fatal(err)
+		}
 	}
 	durable, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
 	defer durable.Close()
 	authority := &sharedTLSOutageAuthority{}
 	matcher := NewPreviewCarrierRouteMatcher(registry)
-	shared := newSharedTLSListener(raw, authority, durable, matcher.HasHTTPSHostname, make(chan struct{}, 4), "infrastructure.test", matcher.HasRuntimeHTTPSHostname, nil, nil)
+	shared := newSharedTLSListener(raw, authority, durable, matcher.HasHTTPSHostname, make(chan struct{}, 4), "infrastructure.test", matcher.HasAdmittedHTTPSHostname, nil, nil)
 	server := &http.Server{TLSConfig: serverTLS, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) })}
 	defer server.Close()
 	go server.ServeTLS(shared, "", "")
@@ -272,22 +303,32 @@ func TestSharedTLSRuntimeCarrierAuthority(t *testing.T) {
 		}
 		return err
 	}
+	if mode == "unadmitted" || mode == "public" {
+		if err = dial(); err == nil {
+			t.Fatal("resource without current TLS ownership accepted TLS")
+		}
+		return
+	}
 	if err = dial(); err != nil {
-		t.Fatal("current runtime carrier rejected before HTTP", err)
+		t.Fatal("current admitted carrier rejected before HTTP", err)
+	}
+	time.Sleep(time.Until(value.ExpiresAt) + 10*time.Millisecond)
+	if err = dial(); err != nil {
+		t.Fatal("admitted carrier lost TLS ownership at credential expiry", err)
 	}
 	authority.unavailable.Store(true)
 	if err = dial(); err == nil {
-		t.Fatal("runtime accepted without current ingress authority")
+		t.Fatal("admitted resource accepted without current ingress authority")
 	}
 	authority.unavailable.Store(false)
 	if err = dial(); err != nil {
-		t.Fatal("runtime did not recover", err)
+		t.Fatal("admitted resource did not recover", err)
 	}
 	if err = registry.Detach(value.RouteID, identity, value.Revision); err != nil {
 		t.Fatal(err)
 	}
 	if err = dial(); err == nil {
-		t.Fatal("withdrawn runtime carrier accepted TLS")
+		t.Fatal("withdrawn resource accepted TLS")
 	}
 }
 

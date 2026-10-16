@@ -23,7 +23,6 @@ import (
 	"github.com/pinksaucepasta/paperboat-relay/selfhost"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/auth"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/config"
-	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/control"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/datacarrier"
 	edgediagnostics "github.com/pinksaucepasta/paperboat-tunnel/internal/diagnostics"
@@ -37,6 +36,7 @@ import (
 	edgetelemetry "github.com/pinksaucepasta/paperboat-tunnel/internal/telemetry"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/tlscert"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/usage"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 var version = "development"
@@ -615,7 +615,8 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 			}
 			return routeMatcher.HasHTTPSHostname(host)
 		}, func(host string) bool {
-			return !deployment.SelfHosted && edgehttp.NewPreviewCarrierRouteMatcher(runtimeRoutes).HasRuntimeHTTPSHostname(host)
+			return previewHTTPSMatcher.HasAdmittedHTTPSHostname(host) ||
+				(!deployment.SelfHosted && edgehttp.NewPreviewCarrierRouteMatcher(runtimeRoutes).HasAdmittedHTTPSHostname(host))
 		})
 	}, GatewayMaxHeaderBytes: int(deployment.MaxHeaderBytes), PrivateAddress: deployment.PrivateHTTPSListenAddress, PrivateHandler: gatewayHandler, PrivateTLS: certificateSelector.TLSConfig(), RedirectAddress: deployment.PublicHTTPListenAddress, RedirectHandler: redirectHandler})
 	if err != nil {

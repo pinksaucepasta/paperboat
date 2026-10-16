@@ -187,10 +187,13 @@ func (m *PreviewCarrierRouteMatcher) HasHTTPSHostname(host string) bool {
 	return ok
 }
 
-// HasRuntimeHTTPSHostname requires an unexpired, live, exact admitted runtime carrier.
-func (m *PreviewCarrierRouteMatcher) HasRuntimeHTTPSHostname(host string) bool {
+// HasAdmittedHTTPSHostname identifies live server-admitted resources whose HTTP
+// requests require independent browser grants. Expiry cannot revoke an admitted
+// carrier; its owner must withdraw the route.
+func (m *PreviewCarrierRouteMatcher) HasAdmittedHTTPSHostname(host string) bool {
 	value, _, ok := m.lookup(host, "/")
-	return ok && value.Kind == runtimewire.RouteKind
+	return ok && value.AttachmentGeneration != 0 &&
+		(value.Kind == runtimewire.RouteKind || value.Kind == dataCarrierPreviewPrivateRouteKind)
 }
 
 // AuthorizePublicHTTPS refreshes only an exact live public preview admission.

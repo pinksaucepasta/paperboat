@@ -48,15 +48,9 @@ func testPreviewMeteredAdmission(t *testing.T, accessMode string) {
 	if err := decision.Validate(time.Now()); err != nil {
 		t.Fatalf("invalid viewer authority fixture: %v", err)
 	}
-	identity := datacarrier.Identity{AccountID: decision.Binding.AccountID, HostID: decision.Binding.HostID, TunnelID: decision.Binding.TunnelID, ConnectorID: decision.ConnectorID, SessionID: decision.SessionID, ProcessGeneration: decision.ProcessGeneration, Generation: decision.ConfigGeneration}
-	public := sha256.Sum256([]byte("browser-admission-test-machine"))
-	thumb := sha256.Sum256(public[:])
-	admission := datacarrier.ExpectedAdmission{Schema: datacarrier.PreviewCarrierSchema, Kind: datacarrier.PreviewCarrierKind, EdgeNodeID: decision.EdgeNodeID, EdgeProcessEpoch: decision.EdgeProcessEpoch, PreviewID: decision.Binding.PublicationID, OperationID: "operation_private", OwnerMachineID: identity.HostID, OwnerSessionID: "owner_private", Identity: identity, LeaseGeneration: 1, ConfigGeneration: identity.Generation, ConfigContentHash: "sha256:" + strings.Repeat("a", 64), RouteID: decision.Binding.RouteID, AccessMode: datacarrier.PreviewCarrierAccessPrivate, RouteKind: datacarrier.PreviewCarrierPrivateRoute, Hostname: decision.Binding.Hostname, RouteRevision: decision.Binding.RouteGeneration, AttachmentGeneration: 1, Endpoint: "https://" + decision.Binding.Hostname, ExpiresAt: decision.ExpiresAt, MachineIdentityPublicKey: base64.RawURLEncoding.EncodeToString(public[:]), MachineIdentityThumbprint: "sha256:" + base64.RawURLEncoding.EncodeToString(thumb[:]), EdgeCarrierServerSPKISHA256: "sha256:" + strings.Repeat("b", 64), EdgeCarrierServerCertificateChainPEM: "test public certificate", Admitted: true}
-	admission.AccessMode = accessMode
-	if publicPreview {
-		admission.AccessMode = "public"
-		admission.RouteKind = dataCarrierPreviewRouteKind
-	}
+	admission := testPreviewCarrierAdmission(decision, accessMode)
+	identity := admission.Identity
+
 	expected, e := datacarrier.NewExpectedAdmissionRegistry(datacarrier.ExpectedAdmissionRegistryConfig{NodeID: decision.EdgeNodeID, ProcessEpoch: decision.EdgeProcessEpoch, MaximumAdmissions: 1})
 	if e != nil {
 		t.Fatal(e)
@@ -203,4 +197,33 @@ func testPreviewMeteredAdmission(t *testing.T, accessMode string) {
 		t.Fatalf("response close retained capacity: %v", e)
 	}
 	lease.Release()
+}
+
+func testPreviewCarrierAdmission(decision connectorprotocol.IngressDecision, accessMode string) datacarrier.ExpectedAdmission {
+	identity := datacarrier.Identity{
+		AccountID: decision.Binding.AccountID, HostID: decision.Binding.HostID, TunnelID: decision.Binding.TunnelID,
+		ConnectorID: decision.ConnectorID, SessionID: decision.SessionID,
+		ProcessGeneration: decision.ProcessGeneration, Generation: decision.ConfigGeneration,
+	}
+	public := sha256.Sum256([]byte("browser-admission-test-machine"))
+	thumb := sha256.Sum256(public[:])
+	kind := datacarrier.PreviewCarrierPrivateRoute
+	if accessMode == "public" {
+		kind = datacarrier.PreviewCarrierRoute
+	}
+	return datacarrier.ExpectedAdmission{
+		Schema: datacarrier.PreviewCarrierSchema, Kind: datacarrier.PreviewCarrierKind,
+		EdgeNodeID: decision.EdgeNodeID, EdgeProcessEpoch: decision.EdgeProcessEpoch,
+		PreviewID: decision.Binding.PublicationID, OperationID: "operation_private",
+		OwnerMachineID: identity.HostID, OwnerSessionID: "owner_private", Identity: identity,
+		LeaseGeneration: 1, ConfigGeneration: identity.Generation,
+		ConfigContentHash: "sha256:" + strings.Repeat("a", 64), RouteID: decision.Binding.RouteID,
+		AccessMode: accessMode, RouteKind: kind, Hostname: decision.Binding.Hostname,
+		RouteRevision: decision.Binding.RouteGeneration, AttachmentGeneration: 1,
+		Endpoint: "https://" + decision.Binding.Hostname, ExpiresAt: decision.ExpiresAt,
+		MachineIdentityPublicKey:             base64.RawURLEncoding.EncodeToString(public[:]),
+		MachineIdentityThumbprint:            "sha256:" + base64.RawURLEncoding.EncodeToString(thumb[:]),
+		EdgeCarrierServerSPKISHA256:          "sha256:" + strings.Repeat("b", 64),
+		EdgeCarrierServerCertificateChainPEM: "test public certificate", Admitted: true,
+	}
 }

@@ -18,7 +18,7 @@ type SharedTLSListener struct {
 	authority              PublicTCPAuthority
 	routes                 *DataCarrierRouteRegistry
 	httpsHostname          func(string) bool
-	runtimeHTTPSHostname   func(string) bool
+	admittedHTTPSHostname  func(string) bool
 	previewHTTPSAuthority  func(context.Context, string) error
 	infrastructureHostname string
 	ctx                    context.Context
@@ -41,9 +41,9 @@ func NewSharedTLSListener(listener net.Listener, authority PublicTCPAuthority, r
 	return newSharedTLSListener(listener, authority, routes, httpsHostname, make(chan struct{}, maximumConnections), infrastructureHostname, nil, nil, nil), nil
 }
 
-func newSharedTLSListener(listener net.Listener, authority PublicTCPAuthority, routes *DataCarrierRouteRegistry, httpsHostname func(string) bool, slots chan struct{}, infrastructureHostname string, runtimeHTTPSHostname func(string) bool, previewHTTPSAuthority func(context.Context, string) error, observe func(context.Context, string, error)) *SharedTLSListener {
+func newSharedTLSListener(listener net.Listener, authority PublicTCPAuthority, routes *DataCarrierRouteRegistry, httpsHostname func(string) bool, slots chan struct{}, infrastructureHostname string, admittedHTTPSHostname func(string) bool, previewHTTPSAuthority func(context.Context, string) error, observe func(context.Context, string, error)) *SharedTLSListener {
 	ctx, cancel := context.WithCancel(context.Background())
-	l := &SharedTLSListener{Listener: listener, authority: authority, routes: routes, httpsHostname: httpsHostname, runtimeHTTPSHostname: runtimeHTTPSHostname, previewHTTPSAuthority: previewHTTPSAuthority, infrastructureHostname: infrastructureHostname, ctx: ctx, cancel: cancel, ready: make(chan net.Conn), slots: slots, done: make(chan struct{}), onFailure: observe}
+	l := &SharedTLSListener{Listener: listener, authority: authority, routes: routes, httpsHostname: httpsHostname, admittedHTTPSHostname: admittedHTTPSHostname, previewHTTPSAuthority: previewHTTPSAuthority, infrastructureHostname: infrastructureHostname, ctx: ctx, cancel: cancel, ready: make(chan net.Conn), slots: slots, done: make(chan struct{}), onFailure: observe}
 	go l.run()
 	return l
 }
@@ -101,10 +101,10 @@ func (l *SharedTLSListener) dispatch(conn net.Conn) {
 	if len(decisions) > 4096 {
 		return
 	}
-	// Customer aliases are projected by ingress authority even when the logical
-	// route matcher names a different hostname. Matcher/configuration membership
-	// detects protocol conflicts; it cannot grant dynamic browser TLS authority.
-	authorizedHTTPS := l.runtimeHTTPSHostname != nil && l.runtimeHTTPSHostname(host)
+	// Customer aliases need ingress authority even when the route matcher names
+	// a different host. Configuration membership cannot grant TLS ownership;
+	// only live server-admitted runtime/private carriers supply that exception.
+	authorizedHTTPS := l.admittedHTTPSHostname != nil && l.admittedHTTPSHostname(host)
 	for _, decision := range decisions {
 		if decision.Binding.Protocol == "http" && decision.Binding.Hostname == host {
 			if decision.Validate(time.Now().UTC()) != nil {

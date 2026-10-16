@@ -11,9 +11,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/control"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/route"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 type PublicTCPAuthority interface {
@@ -331,7 +331,7 @@ func (p *PublicTCPListeners) Shutdown(ctx context.Context) error {
 
 // WrapTLSListener transfers dispatch ownership to the HTTPS server's listener.
 // PublicTCPListeners only checks readiness; it never binds or closes TCP443.
-func (p *PublicTCPListeners) WrapTLSListener(listener net.Listener, httpsHostname func(string) bool, runtimeHTTPSHostname func(string) bool) (net.Listener, error) {
+func (p *PublicTCPListeners) WrapTLSListener(listener net.Listener, httpsHostname func(string) bool, admittedHTTPSHostname func(string) bool) (net.Listener, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.sharedTLS != nil {
@@ -342,7 +342,7 @@ func (p *PublicTCPListeners) WrapTLSListener(listener net.Listener, httpsHostnam
 	}
 	// Opaque TLS streams, raw TCP streams and pending TLS inspections share
 	// the existing process admission budget.
-	shared := newSharedTLSListener(listener, p.cfg.Authority, p.cfg.Routes, httpsHostname, p.connections, p.cfg.InfrastructureHostname, runtimeHTTPSHostname, p.cfg.PreviewHTTPSAuthority, func(_ context.Context, phase string, cause error) {
+	shared := newSharedTLSListener(listener, p.cfg.Authority, p.cfg.Routes, httpsHostname, p.connections, p.cfg.InfrastructureHostname, admittedHTTPSHostname, p.cfg.PreviewHTTPSAuthority, func(_ context.Context, phase string, cause error) {
 		p.mu.Lock()
 		ctx := p.ctx
 		p.mu.Unlock()
