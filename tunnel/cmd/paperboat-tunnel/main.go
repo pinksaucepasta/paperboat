@@ -615,7 +615,8 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 			}
 			return routeMatcher.HasHTTPSHostname(host)
 		}, func(host string) bool {
-			return previewHTTPSMatcher.HasAdmittedHTTPSHostname(host) ||
+			return durableRoutes.HasAdmittedHTTPSHostname(host, canonicalRoutes) ||
+				previewHTTPSMatcher.HasAdmittedHTTPSHostname(host) ||
 				(!deployment.SelfHosted && edgehttp.NewPreviewCarrierRouteMatcher(runtimeRoutes).HasAdmittedHTTPSHostname(host))
 		})
 	}, GatewayMaxHeaderBytes: int(deployment.MaxHeaderBytes), PrivateAddress: deployment.PrivateHTTPSListenAddress, PrivateHandler: gatewayHandler, PrivateTLS: certificateSelector.TLSConfig(), RedirectAddress: deployment.PublicHTTPListenAddress, RedirectHandler: redirectHandler})

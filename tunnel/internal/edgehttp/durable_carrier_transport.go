@@ -16,9 +16,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/datacarrier"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/route"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 const (
@@ -371,13 +371,8 @@ func (r *DataCarrierRouteRegistry) entryFor(rule route.RouteRule, requestID stri
 	defer r.mu.RUnlock()
 	var eligible []*dataCarrierRouteEntry
 	for _, entry := range r.byKey {
-		if entry == nil || entry.server == nil || entry.identity.AccountID != rule.AccountID || entry.identity.TunnelID != rule.TunnelID {
+		if !carrierForRoute(entry, rule) {
 			continue
-		}
-		select {
-		case <-entry.server.Done():
-			continue
-		default:
 		}
 		// Legacy exact assignments remain usable until their admission metadata
 		// is refreshed into replica state.
@@ -387,15 +382,7 @@ func (r *DataCarrierRouteRegistry) entryFor(rule route.RouteRule, requestID stri
 			}
 			continue
 		}
-		routeID := carrierRouteID(rule)
-		binding, bindingOK := replicaRouteBinding(entry.state.RouteBindings, routeID)
-		// The matcher owns one route-level rule while the registry owns every
-		// replica-specific assignment. Do not pin selection to the representative
-		// connector embedded in the matcher rule; instead require each candidate's
-		// authoritative server-issued binding to match the immutable route/config
-		// tuple. The entry identity and verifier material were already authenticated
-		// when this binding was attached.
-		if !entry.state.Ready || entry.state.Generation != rule.ConfigGeneration || entry.identity.Generation != rule.ConfigGeneration || !sortedContains(entry.state.RouteIDs, routeID) || !sortedContains(entry.state.HealthyRoutes, routeID) || !bindingOK || binding.RouteGeneration != rule.RouteGeneration || binding.ConfigContentHash != rule.ConfigContentHash || uint32(entry.server.ActiveStreams()) >= entry.state.Capacity {
+		if !readyRouteReplica(entry, rule) || uint32(entry.server.ActiveStreams()) >= entry.state.Capacity {
 			continue
 		}
 		eligible = append(eligible, entry)

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/control"
+	"github.com/pinksaucepasta/paperboat-tunnel/internal/route"
 )
 
 func TestSharedTLSBrowserAuthorization(t *testing.T) {
@@ -293,6 +294,17 @@ func testSharedTLSAdmittedCarrierAuthority(t *testing.T, mode string) {
 	authority := &sharedTLSOutageAuthority{}
 	matcher := NewPreviewCarrierRouteMatcher(registry)
 	shared := newSharedTLSListener(raw, authority, durable, matcher.HasHTTPSHostname, make(chan struct{}, 4), "infrastructure.test", matcher.HasAdmittedHTTPSHostname, nil, nil)
+	assertSharedTLSCarrierAuthority(t, raw, shared, authority, clientTLS, serverTLS, value.ExpiresAt,
+		mode != "unadmitted" && mode != "public", func() error {
+			return registry.Detach(value.RouteID, identity, value.Revision)
+		})
+}
+
+func assertSharedTLSCarrierAuthority(t *testing.T, raw net.Listener, shared net.Listener,
+	authority *sharedTLSOutageAuthority, clientTLS, serverTLS *tls.Config,
+	expiresAt time.Time, allowed bool, revoke func() error) {
+	t.Helper()
+	var err error
 	server := &http.Server{TLSConfig: serverTLS, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) })}
 	defer server.Close()
 	go server.ServeTLS(shared, "", "")
@@ -303,7 +315,7 @@ func testSharedTLSAdmittedCarrierAuthority(t *testing.T, mode string) {
 		}
 		return err
 	}
-	if mode == "unadmitted" || mode == "public" {
+	if !allowed {
 		if err = dial(); err == nil {
 			t.Fatal("resource without current TLS ownership accepted TLS")
 		}
@@ -312,9 +324,11 @@ func testSharedTLSAdmittedCarrierAuthority(t *testing.T, mode string) {
 	if err = dial(); err != nil {
 		t.Fatal("current admitted carrier rejected before HTTP", err)
 	}
-	time.Sleep(time.Until(value.ExpiresAt) + 10*time.Millisecond)
-	if err = dial(); err != nil {
-		t.Fatal("admitted carrier lost TLS ownership at credential expiry", err)
+	if !expiresAt.IsZero() {
+		time.Sleep(time.Until(expiresAt) + 10*time.Millisecond)
+		if err = dial(); err != nil {
+			t.Fatal("admitted carrier lost TLS ownership at credential expiry", err)
+		}
 	}
 	authority.unavailable.Store(true)
 	if err = dial(); err == nil {
@@ -324,7 +338,7 @@ func testSharedTLSAdmittedCarrierAuthority(t *testing.T, mode string) {
 	if err = dial(); err != nil {
 		t.Fatal("admitted resource did not recover", err)
 	}
-	if err = registry.Detach(value.RouteID, identity, value.Revision); err != nil {
+	if err = revoke(); err != nil {
 		t.Fatal(err)
 	}
 	if err = dial(); err == nil {
@@ -446,6 +460,61 @@ func TestSharedTLSColdPreviewRefreshesExactAuthority(t *testing.T) {
 			if calls.Load() != wantCalls {
 				t.Fatalf("authority requests=%d want%d", calls.Load(), wantCalls)
 			}
+		})
+	}
+}
+
+func TestSharedTLSRestrictedDurableCarrierAuthority(t *testing.T) {
+	for _, mode := range []string{"private", "team", "public", "unadmitted", "foreign_config", "withdrawn", "unbound"} {
+		t.Run(mode, func(t *testing.T) {
+			const host = "service.customer.test"
+			clientTLS, serverTLS, _, _, _ := task24Certificates(t, host)
+			clientTLS.ServerName = host
+			raw, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { raw.Close() })
+			rules := route.NewRegistry("preview.example.test", "runtime.example.test")
+			defer rules.Close()
+			rule := replicaRule()
+			rule.Hostname, rule.PathPrefix, rule.MatchType = host, "/application", route.MatchExact
+			rule.Target, rule.OriginScheme, rule.AccessMode = rule.RouteID, "http", mode
+			if mode == "unadmitted" || mode == "foreign_config" || mode == "withdrawn" || mode == "unbound" {
+				rule.AccessMode = "private"
+			}
+			if mode == "withdrawn" {
+				rule.DesiredState = "disabled"
+			}
+			rule.Revision = rule.RouteGeneration
+			if err = rules.ApplyGeneration(t.Context(), 1, []route.RouteRule{rule}, func(context.Context, []route.RouteRule) error { return nil }, 0); err != nil {
+				t.Fatal(err)
+			}
+			durable, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer durable.Close()
+			identity := replicaIdentity(rule.HostID, rule.ConnectorID, rule.ConnectorSessionID, rule.ConfigGeneration)
+			carrier, _ := testEdgePreviewCarrierPair(t, identity)
+			state := replicaState(rule, rule.ConfigGeneration, rule.AssignmentID, "zone_a", time.Millisecond, 4)
+			if mode == "foreign_config" {
+				state.RouteBindings[0].ConfigContentHash = "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+			}
+			if mode == "unbound" {
+				if err = durable.AttachBound(carrier, "machine-key", "machine-thumb"); err != nil {
+					t.Fatal(err)
+				}
+			} else if mode != "unadmitted" {
+				if err = durable.AttachReplica(carrier, "machine-key", "machine-thumb", state); err != nil {
+					t.Fatal(err)
+				}
+			}
+			authority := &sharedTLSOutageAuthority{}
+			// Restricted routes have no public forwarding grant; use the same
+			// admitted-carrier owner as production assembly.
+			shared := newSharedTLSListener(raw, authority, durable, rules.HasHTTPSHostname, make(chan struct{}, 4), "infrastructure.test", func(host string) bool { return durable.HasAdmittedHTTPSHostname(host, rules) }, nil, nil)
+			assertSharedTLSCarrierAuthority(t, raw, shared, authority, clientTLS, serverTLS, time.Time{}, mode == "private" || mode == "team", func() error { return durable.Detach(carrier) })
 		})
 	}
 }

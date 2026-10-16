@@ -319,6 +319,15 @@ func (r *Registry) CanonicalSnapshot() (uint64, []RouteRule, bool) {
 	return r.matcher.Snapshot()
 }
 
+// HTTPSRules returns current canonical assignments for a TLS hostname.
+// Legacy attachment membership cannot grant restricted carrier ownership.
+func (r *Registry) HTTPSRules(host string) []RouteRule {
+	if r == nil {
+		return nil
+	}
+	return r.matcher.httpsRules(host)
+}
+
 func (r *Registry) Close() error {
 	if r.matcher == nil {
 		return nil

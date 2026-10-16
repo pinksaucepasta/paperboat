@@ -217,3 +217,26 @@ func (m *PreviewCarrierRouteMatcher) AuthorizePublicHTTPS(ctx context.Context, h
 	}
 	return nil
 }
+
+// HasAdmittedHTTPSHostname grants TLS ownership only to a current restricted
+// HTTP assignment backed by an eligible authenticated carrier. Public routes
+// still require their current public ingress decision.
+func (r *DataCarrierRouteRegistry) HasAdmittedHTTPSHostname(host string, assignments *route.Registry) bool {
+	if r == nil {
+		return false
+	}
+	rules := assignments.HTTPSRules(host)
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, rule := range rules {
+		if rule.Kind != route.TunnelHTTPSWSS || rule.AccessMode != "private" && rule.AccessMode != "team" {
+			continue
+		}
+		for _, entry := range r.byKey {
+			if readyRouteReplica(entry, rule) {
+				return true
+			}
+		}
+	}
+	return false
+}

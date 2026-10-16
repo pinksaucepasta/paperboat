@@ -315,7 +315,7 @@ that use them; say which in Evidence.
 | F8-03 | Tunnel survives daemon restart, machine reboot and update; pause/resume; stop. | [ ] | [ ] | [ ] | — |
 | F8-04 | Connectors add/list/drain/revoke and credential rotation without downtime. | [ ] | [ ] | [ ] | — |
 | F8-05 | On-demand port policy (`pb tunnel policy allow/get/revoke`). | [ ] | [ ] | [ ] | — |
-| F8-06 | HTTP/1.1, HTTP/2, HTTP/3, WebSocket, large uploads/downloads. | [ ] | [ ] | [ ] | — |
+| F8-06 | HTTP/1.1, HTTP/2, HTTP/3, WebSocket, large uploads/downloads. | [ ] | [ ] | [ ] | Server restricted durable TLS RED private/team EOF; real TLS owner GREEN1.227s with public/unbound/foreign-config/withdrawn denial. Common replica readiness and HTTP/TLS active-state filtering retained; current browser/ingress PostgreSQL0.42/0.71/2.90/1.48s PASS. Gate/deploy and A actual protocol/browser proof pending. |
 | F8-07 | `pb tunnel doctor/logs/status` explain real failures. | [ ] | [ ] | [ ] | — |
 | F8-08 | Console: create, rename, route editing, domains, list filters (no deleted tombstones) all work against the server. | [ ] | [ ] | [ ] |  |
 
