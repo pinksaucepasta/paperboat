@@ -44,11 +44,12 @@ JOIN paperboat.control_tunnel_nodes n ON n.id=i.node_id
 WHERE i.scope_kind='global' AND i.state='active' AND i.claim_complete
 AND (i.expires_at IS NULL OR i.expires_at>now())
 AND i.capability=$1 AND n.endpoint_host=$2 AND n.state='ready' AND n.ready
+AND (i.capability<>'tunnel' OR n.public_ingress_verified_at IS NOT NULL)
 AND n.process_epoch<>'' AND n.last_heartbeat_at>$3`, role, host, heartbeatAfter).Scan(&count)
 			if err != nil || count != 1 {
 				t.Fatalf("configured host %s: expected one current ready global %s", host, role)
 			}
 		}
 	}
-	t.Logf("%d configured hosts: global relay and tunnel claims, current epochs and fresh ready heartbeats verified", len(hosts))
+	t.Logf("%d configured hosts: global relay and tunnel claims, current epochs, fresh ready heartbeats and verified public edge ingress checked", len(hosts))
 }
