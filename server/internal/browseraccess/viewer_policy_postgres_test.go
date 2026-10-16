@@ -48,7 +48,7 @@ func TestBrowserViewerPolicyPostgres(t *testing.T) {
 	routeA := "rte_vp_a_" + suffix
 	routeB := "rte_vp_b_" + suffix
 	machine := "host_vp_" + suffix
-	endpointID := "00000000-0000-8000-8000-" + suffix[len(suffix)-12:]
+	endpointID := "00000000-0000-4000-8000-" + suffix[len(suffix)-12:]
 	host := endpointID + ".tunnels.example.test"
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	exec := func(q string, args ...any) {
@@ -71,13 +71,13 @@ func TestBrowserViewerPolicyPostgres(t *testing.T) {
 	exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,email_verified,status) VALUES
 ($1,$1,'owner@test.invalid',false,'active'),
 ($2,$2,'team@elsewhere.test',true,'active'),
-($3,$3,'person@company.com',true,'active'),
-($4,$4,'person@company.com',true,'active'),
-($5,$5,'person@sub.company.com',true,'active'),
-($6,$6,'person@notcompany.com',true,'active'),
-($7,$7,'person@company.com',false,'active')`, owner, teamViewer, emailViewer, domainViewer, subdomainViewer, suffixViewer, unverifiedViewer)
+($3,$3,'person@company.test',true,'active'),
+($4,$4,'person@company.test',true,'active'),
+($5,$5,'person@sub.company.test',true,'active'),
+($6,$6,'person@notcompany.test',true,'active'),
+($7,$7,'person@company.test',false,'active')`, owner, teamViewer, emailViewer, domainViewer, subdomainViewer, suffixViewer, unverifiedViewer)
 	exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,description,platform,architecture,workspace_root,state,seat_state) VALUES($1,$2,$3,'browser-host','Viewer policy test host','linux','amd64','/workspace','offline','released')`, machine, owner, "env_vp_"+suffix)
-	exec(`INSERT INTO paperboat.tunnels(id,account_id,name,desired_state,access_mode,generation,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id,created_at,updated_at) VALUES($1,$2,'viewer-policy','active','public',1,$3,$4,$5,$2,$6,$6)`, tunnel, owner, endpointID, "https://"+host, machine, now)
+	exec(`INSERT INTO paperboat.tunnels(id,account_id,name,desired_state,access_mode,generation,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id,created_at,updated_at) VALUES($1,$2,'viewer-policy','active','public',1,$3,$4,$5,$2,$6,$6)`, tunnel, owner, "endpoint_"+endpointID, "https://"+host, machine, now)
 	exec(`INSERT INTO paperboat.tunnel_routes(id,tunnel_id,name,protocol,match_type,match_hostname,path_prefix,priority,origin_scheme,origin_address,desired_state,generation,created_by_actor_id,updated_by_actor_id,created_at,updated_at) VALUES
 ($1,$2,'a','http','managed',$3,'/a',100,'http','127.0.0.1:3100','active',1,$4,$4,$5,$5),
 ($6,$2,'b','http','managed',$3,'/b',100,'http','127.0.0.1:3200','active',1,$4,$4,$5,$5)`, routeA, tunnel, host, owner, now, routeB)
@@ -118,7 +118,7 @@ func TestBrowserViewerPolicyPostgres(t *testing.T) {
 			if audience == AudienceOwner {
 				_, e = set(audience, 0, "", "")
 			} else {
-				_, e = set(audience, 0, "", "", "person@company.com")
+				_, e = set(audience, 0, "", "", "person@company.test")
 			}
 			results <- e
 		}(audience)
@@ -221,8 +221,8 @@ func TestBrowserViewerPolicyPostgres(t *testing.T) {
 		t.Fatalf("team changes revoked an unrelated route's owner session: %v", err)
 	}
 
-	policy, err = set(AudienceSpecificEmails, 2, "", "", "Person@Company.com")
-	if err != nil || policy.Generation != 3 || len(policy.AllowedEmails) != 1 || policy.AllowedEmails[0] != "person@company.com" {
+	policy, err = set(AudienceSpecificEmails, 2, "", "", "Person@Company.test")
+	if err != nil || policy.Generation != 3 || len(policy.AllowedEmails) != 1 || policy.AllowedEmails[0] != "person@company.test" {
 		t.Fatalf("exact-email policy = %#v, %v", policy, err)
 	}
 	oldTeamToken := teamToken
@@ -244,7 +244,7 @@ func TestBrowserViewerPolicyPostgres(t *testing.T) {
 		t.Fatalf("resource owner denied by restricted policy: %v", err)
 	}
 
-	policy, err = set(AudienceEmailDomain, 3, "", "company.com")
+	policy, err = set(AudienceEmailDomain, 3, "", "company.test")
 	if err != nil || policy.Generation != 4 {
 		t.Fatalf("domain policy = %#v, %v", policy, err)
 	}
@@ -270,9 +270,9 @@ func TestBrowserViewerPolicyPostgres(t *testing.T) {
 	}
 	publicTunnel := "tun_vp_public_" + suffix
 	publicRoute := "rte_vp_public_" + suffix
-	publicEndpointID := "10000000-0000-8000-8000-" + suffix[len(suffix)-12:]
+	publicEndpointID := "10000000-0000-4000-8000-" + suffix[len(suffix)-12:]
 	publicHost := publicEndpointID + ".tunnels.example.test"
-	exec(`INSERT INTO paperboat.tunnels(id,account_id,name,desired_state,access_mode,generation,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id,created_at,updated_at) VALUES($1,$2,'viewer-policy-public','active','public',1,$3,$4,$5,$2,$6,$6)`, publicTunnel, owner, publicEndpointID, "https://"+publicHost, machine, now)
+	exec(`INSERT INTO paperboat.tunnels(id,account_id,name,desired_state,access_mode,generation,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id,created_at,updated_at) VALUES($1,$2,'viewer-policy-public','active','public',1,$3,$4,$5,$2,$6,$6)`, publicTunnel, owner, "endpoint_"+publicEndpointID, "https://"+publicHost, machine, now)
 	exec(`INSERT INTO paperboat.tunnel_routes(id,tunnel_id,name,protocol,match_type,match_hostname,path_prefix,priority,origin_scheme,origin_address,desired_state,generation,created_by_actor_id,updated_by_actor_id,created_at,updated_at) VALUES($1,$2,'public','http','managed',$3,'/',100,'http','127.0.0.1:3300','active',1,$4,$4,$5,$5)`, publicRoute, publicTunnel, publicHost, owner, now)
 	t.Cleanup(func() {
 		_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.tunnels WHERE id=$1`, publicTunnel)
@@ -283,21 +283,21 @@ func TestBrowserViewerPolicyPostgres(t *testing.T) {
 	}
 	privateTunnel := "tun_vp_native_private_" + suffix
 	privateRoute := "rte_vp_native_private_" + suffix
-	privateEndpointID := "20000000-0000-8000-8000-" + suffix[len(suffix)-12:]
+	privateEndpointID := "20000000-0000-4000-8000-" + suffix[len(suffix)-12:]
 	privateHost := privateEndpointID + ".tunnels.example.test"
-	exec(`INSERT INTO paperboat.tunnels(id,account_id,name,desired_state,access_mode,generation,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id,summary_code,created_at,updated_at) VALUES($1,$2,'viewer-policy-native-private','active','private',1,$3,$4,$5,$2,'pending',$6,$6)`, privateTunnel, owner, privateEndpointID, "https://"+privateHost, machine, now)
+	exec(`INSERT INTO paperboat.tunnels(id,account_id,name,desired_state,access_mode,generation,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id,summary_code,created_at,updated_at) VALUES($1,$2,'viewer-policy-native-private','active','private',1,$3,$4,$5,$2,'pending',$6,$6)`, privateTunnel, owner, "endpoint_"+privateEndpointID, "https://"+privateHost, machine, now)
 	exec(`INSERT INTO paperboat.tunnel_routes(id,tunnel_id,name,protocol,match_type,match_hostname,path_prefix,priority,origin_scheme,origin_address,desired_state,generation,created_by_actor_id,updated_by_actor_id,created_at,updated_at) VALUES($1,$2,'private','http','managed',$3,'/',100,'http','127.0.0.1:3400','active',1,$4,$4,$5,$5)`, privateRoute, privateTunnel, privateHost, owner, now)
 	t.Cleanup(func() {
 		_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.tunnels WHERE id=$1`, privateTunnel)
 	})
-	if _, err = svc.SetViewerPolicy(ctx, SetViewerPolicyRequest{ActorAccountID: owner, ResourceKind: "tunnel", ResourceID: privateTunnel, RouteID: privateRoute, Audience: AudienceSpecificEmails, AllowedEmails: []string{"person@company.com"}, ExpectedGeneration: 0}); !errors.Is(err, ErrPolicyWidening) {
+	if _, err = svc.SetViewerPolicy(ctx, SetViewerPolicyRequest{ActorAccountID: owner, ResourceKind: "tunnel", ResourceID: privateTunnel, RouteID: privateRoute, Audience: AudienceSpecificEmails, AllowedEmails: []string{"person@company.test"}, ExpectedGeneration: 0}); !errors.Is(err, ErrPolicyWidening) {
 		t.Fatalf("native-private specific-email policy = %v, want ErrPolicyWidening", err)
 	}
 	nativeTeamTunnel := "tun_vp_native_team_" + suffix
 	nativeTeamRoute := "rte_vp_native_team_" + suffix
-	nativeTeamEndpointID := "30000000-0000-8000-8000-" + suffix[len(suffix)-12:]
+	nativeTeamEndpointID := "30000000-0000-4000-8000-" + suffix[len(suffix)-12:]
 	nativeTeamHost := nativeTeamEndpointID + ".tunnels.example.test"
-	exec(`INSERT INTO paperboat.tunnels(id,account_id,name,desired_state,access_mode,generation,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id,summary_code,created_at,updated_at) VALUES($1,$2,'viewer-policy-native-team','active','team',1,$3,$4,$5,$2,'pending',$6,$6)`, nativeTeamTunnel, owner, nativeTeamEndpointID, "https://"+nativeTeamHost, machine, now)
+	exec(`INSERT INTO paperboat.tunnels(id,account_id,name,desired_state,access_mode,generation,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id,summary_code,created_at,updated_at) VALUES($1,$2,'viewer-policy-native-team','active','team',1,$3,$4,$5,$2,'pending',$6,$6)`, nativeTeamTunnel, owner, "endpoint_"+nativeTeamEndpointID, "https://"+nativeTeamHost, machine, now)
 	exec(`INSERT INTO paperboat.tunnel_routes(id,tunnel_id,name,protocol,match_type,match_hostname,path_prefix,priority,origin_scheme,origin_address,desired_state,generation,created_by_actor_id,updated_by_actor_id,created_at,updated_at) VALUES($1,$2,'team','http','managed',$3,'/',100,'http','127.0.0.1:3500','active',1,$4,$4,$5,$5)`, nativeTeamRoute, nativeTeamTunnel, nativeTeamHost, owner, now)
 	t.Cleanup(func() {
 		_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.tunnels WHERE id=$1`, nativeTeamTunnel)
