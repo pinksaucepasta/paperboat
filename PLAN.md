@@ -1493,3 +1493,5 @@ file | note`. Row-level evidence goes in CHECKLIST.md.
 2026-10-16 | Lane A request for Lane B F3 cleanup | Smoke-only terminal_ae7afd5c-1a39-4f6b-8363-4793a1462fd3 remains cloud-closing after UI close raced candidate install; exact owned shell removed. Resolved by Lane B exact-record closed/closed reconciliation above; no F3 success claimed from that earlier probe.
 
 2026-10-16 | User drops Codex/OpenCode integrations permanently | Lane A, Lane B, pass 2 | — | Agents use pb exec/ssh/terminal like any tool. Leftover "codex" stream consumer and codex_manage/codex_connect credential classes remain in cli (localapi/types.go, native/session.go, tunnel/native_runtime.go, tailnet/authority.go, hostruntime/server) and server (resourceusage, db models). Remove them with the producer/consumer/test changes together in the pass-2 cleanup, not now.
+
+2026-10-16 | Lane A F4-03 main path qualified | Rows ticked:F4-03 L/M; dev-d25e9c4 timeout/Ctrl-C/actual process-stop checks PASS34/48s, receipt092424,6 PASS0 FAIL. Fix d25e9c4; second scheduled full smoke running against server2026.10.16.5, reboot remains pass2.
