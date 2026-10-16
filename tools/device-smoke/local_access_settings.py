@@ -7,7 +7,7 @@ import uuid
 import urllib.request
 
 from install_lifecycle import registration
-from pairing_lifecycle import invoke, command_result, command_diagnostic
+from pairing_lifecycle import invoke, command_result, command_diagnostic, runtime_root
 
 
 def main():
@@ -16,7 +16,7 @@ def main():
     before = registration()
     shown = invoke(binary, 'config', 'local-access', 'show', '--json')
     original = shown['local_access']
-    configuration = json.loads(Path(shown['path']).read_text())
+    configuration = json.loads((runtime_root() / 'machine-registration.json').read_text())
     with urllib.request.urlopen(configuration['server_url'].rstrip('/') + '/v1/client-configuration', timeout=20) as response:
         metadata = json.load(response)
     discovered = metadata.get('data', metadata)['local_access_base_domain'].strip().lower()
