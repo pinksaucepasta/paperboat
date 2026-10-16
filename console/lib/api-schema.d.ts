@@ -10282,7 +10282,7 @@ export interface components {
                 access_session_id: string;
                 stream_id: string;
                 /** @enum {string} */
-                consumer: "terminal" | "exec" | "ssh" | "codex" | "file" | "file_transfer" | "file_transfer_key" | "private_http" | "private_tcp" | "inspector";
+                consumer: "terminal" | "exec" | "ssh" | "file" | "file_transfer" | "file_transfer_key" | "private_http" | "private_tcp" | "inspector";
                 /** @enum {string} */
                 mode: "direct" | "relay" | "edge" | "unknown";
                 node_id: string;

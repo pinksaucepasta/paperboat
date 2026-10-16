@@ -32,11 +32,20 @@ export async function GET(request: Request): Promise<Response> {
 
   const stored = readCookie(cookie, "pb-return")
   const returnTo = (stored && safeReturnPath(decodeURIComponent(stored))) || "/"
-  const response = redirect(callback.ok ? returnTo : "/auth/failed")
+  const response = redirect(callback.ok ? returnTo : await failedPath(callback))
   relayCookies(callback, response)
   response.headers.append("set-cookie", `pb-return=; ${cookieAttributes("/auth", 0)}`)
   response.headers.set("referrer-policy", "no-referrer")
   return response
+}
+
+/** Signup refusals the person can act on get their own message; anything else is generic. */
+const refusals = new Set(["email_alias_not_allowed", "email_already_registered"])
+
+async function failedPath(callback: Response): Promise<string> {
+  const body = (await callback.json().catch(() => null)) as { error?: { code?: string } } | null
+  const code = body?.error?.code
+  return code && refusals.has(code) ? `/auth/failed?reason=${code}` : "/auth/failed"
 }
 
 function redirect(path: string): Response {
