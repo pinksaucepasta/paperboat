@@ -45,7 +45,7 @@ func TestSupportPostgresIsolationRetentionAndAudit(t *testing.T) {
 	}()
 	store, _ := NewSQLStore(database)
 	service, _ := New(store, Config{})
-	first := Record{ID: NewReference(), Reference: ref, OwnerID: ownerA, RequestID: "req_a", Component: "paperboat-server", Release: "test", Stage: "authorize", Code: "internal_error", At: time.Now().UTC(), ExpiresAt: time.Now().Add(time.Hour), Reporting: "disabled", Operation: "http_other", Cause: "internal", ErrorType: "none", ErrorChain: []string{}, Outcome: "failed", Severity: "error"}
+	first := Record{ID: NewReference(), Reference: ref, OwnerID: ownerA, RequestID: "req_a", Component: "paperboat-server", Release: "test", Stage: "authorize", Code: "internal_error", At: time.Now().UTC(), ExpiresAt: time.Now().Add(time.Hour), Reporting: "disabled", Operation: "http_other", Cause: "internal", ErrorType: "none", Outcome: "failed", Severity: "error"}
 	if err = store.Save(ctx, first); err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestSupportPostgresIsolationRetentionAndAudit(t *testing.T) {
 		t.Fatal(err)
 	}
 	a, err := service.Lookup(ctx, ownerA, ownerA, ref, false)
-	if err != nil || len(a) != 32 || a[0].Stage != "authorize" {
+	if err != nil || len(a) != 32 || a[0].Stage != "authorize" || len(a[0].ErrorChain) != 0 {
 		t.Fatalf("first failure/cap: %d %v", len(a), err)
 	}
 	b, err := service.Lookup(ctx, ownerB, ownerB, ref, false)

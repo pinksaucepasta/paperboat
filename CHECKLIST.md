@@ -572,7 +572,7 @@ that use them; say which in Evidence.
 | ID | Scenario | L | M | W | Evidence |
 |---|---|---|---|---|---|
 | F15-01 | `pb doctor` is healthy only when terminal and exec actually work; every failing check says what to do; `--repair` fixes what it claims. | [ ] | [ ] | [ ] | — |
-| F15-02 | `pb bugreport` produces a bundle with no secrets; support references resolve in the server support lookup. | [ ] | [ ] | [ ] | —  Server TestSupportPostgresIsolationRetentionAndAudit isolated VPS PG PASS0.41s after schema-valid fixture repair; vet/race PASS3.422s. Device bugreport verification pending. |
+| F15-02 | `pb bugreport` produces a bundle with no secrets; support references resolve in the server support lookup. | [ ] | [ ] | [ ] | —  Server TestSupportPostgresIsolationRetentionAndAudit actual VPS PG nil-chain regression RED23502/error_chain0.16s/GREEN0.43s; empty-chain lookup, owner isolation, concurrent report cap, audit and retention preserved. Support vet/race PASS3.428s. Device bugreport verification pending. |
 | F15-03 | Diagnostics are written on L, M, W (confirm the Windows location) and never contain credentials, ENV values, terminal or file content. | [ ] | [ ] | [ ] | — |
 | F15-04 | `pb config customize` (shortcuts, defaults, TUI), `status-bar`, `set/unset/show/path` work and survive updates. | [ ] | [ ] | [ ] | — |
 | F15-05 | Shell completion for bash, zsh, fish, PowerShell installs and completes commands and machine names. | [ ] | [ ] | [ ] | — |

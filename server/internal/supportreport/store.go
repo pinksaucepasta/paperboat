@@ -32,7 +32,7 @@ func (s *SQLStore) Save(ctx context.Context, r Record) error {
 	_, err = tx.Exec(ctx, `INSERT INTO support_reports (
 id,support_reference,owner_id,request_id,component,release,stage,code,created_at,expires_at,sentry_event_id,source_file,source_function,source_line,reporting,
 operation,correlation_id,cause,error_type,error_chain,errno,http_status,outcome,severity
-) SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24
+) SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,coalesce($20::text[],'{}'),$21,$22,$23,$24
 WHERE (SELECT count(*) FROM support_reports WHERE owner_id=$3 AND support_reference=$2)<32 ON CONFLICT DO NOTHING`, r.ID, r.Reference, r.OwnerID, r.RequestID, r.Component, r.Release, r.Stage, r.Code, r.At, r.ExpiresAt, r.EventID, r.SourceFile, r.SourceFunction, r.SourceLine, r.Reporting, r.Operation, r.CorrelationID, r.Cause, r.ErrorType, r.ErrorChain, r.Errno, r.HTTPStatus, r.Outcome, r.Severity)
 	if err != nil {
 		return err
