@@ -162,7 +162,7 @@ func waitReady(ctx context.Context, name, owner string, client *nodeClient, prev
 	for {
 		running, err := containerRunning(ctx, name, owner)
 		if err != nil {
-			return err
+			return errors.Join(ctx.Err(), err)
 		}
 		if !running {
 			return errors.New("runtime container exited before readiness")
