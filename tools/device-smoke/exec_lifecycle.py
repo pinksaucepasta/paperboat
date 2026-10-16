@@ -113,7 +113,7 @@ def main():
     {'exec': execute, 'readiness': readiness, 'repeated': repeated}[args.check](binary, args.target)
     if registration() != enrolled:
         raise RuntimeError('exec/readiness changed the enrolled identity')
-    print(json.dumps({'check': args.check + '-main', 'target': args.target, 'status': 'PASS',
+    print(json.dumps({'check': 'exec-repeat' if args.check == 'repeated' else args.check + '-main', 'target': args.target, 'status': 'PASS',
                       'enrollment_unchanged': True}), flush=True)
 
 

@@ -404,7 +404,7 @@ stage_terminal_fixtures() {
   [[ "$TERMINAL_FIXTURES_READY" != *",$source,"* ]] || return 0
   if ! tar -C "$HERE" -czf - terminal_lifecycle.py session_lifecycle.py session_controller.py \
       terminal_entry.py status_bar_lifecycle.py session_sharing_lifecycle.py \
-      exec_lifecycle.py ssh_lifecycle.py transfer_lifecycle.py \
+      exec_lifecycle.py ssh_lifecycle.py ssh_tools_lifecycle.py transfer_lifecycle.py \
       machine_lifecycle.py install_lifecycle.py pairing_lifecycle.py pairing_fault.py \
       terminal_command.py session_cleanup.py | \
       on "$source" "umask 077; mkdir -p /tmp/$RUN_ID; tar -xzf - -C /tmp/$RUN_ID"; then
@@ -420,7 +420,9 @@ test_application_pairs() {
   skipped "$kind" && return
   for source in "${TLIST[@]}"; do
     for target in "${TLIST[@]}"; do
-      [ "$kind" != transfer-multi ] || [ "$source" != "$target" ] || continue
+      if [ "$kind" = transfer-multi ] || [ "$kind" = exec-repeat ] || [ "$kind" = ssh-tools ]; then
+        [ "$source" != "$target" ] || continue
+      fi
       id="$kind:$source-$target"
       skipped "$id" && continue
       t0=$(now)
@@ -632,7 +634,9 @@ skipped terminal-main || test_terminal_main_pairs
 skipped terminal-replay || test_terminal_replay
 test_application_pairs exec-main exec_lifecycle.py exec
 test_application_pairs ssh-main ssh_lifecycle.py
+test_application_pairs ssh-tools ssh_tools_lifecycle.py
 test_application_pairs transfer-multi transfer_lifecycle.py
+test_application_pairs exec-repeat exec_lifecycle.py repeated
 for t in "${TLIST[@]}"; do
   skipped ssh-long || collect "ssh-long:$t" "long-ssh-$t" SSHFINAL "$LONG_SSH"
   skipped exec-long || collect "exec-long:$t" "long-exec-$t" FINAL "$LONG_EXEC"
