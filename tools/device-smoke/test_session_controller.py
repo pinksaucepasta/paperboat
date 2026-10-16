@@ -12,8 +12,8 @@ SCRIPT = Path(__file__).with_name('session_controller.py')
 
 
 class PhaseAdmissionTests(unittest.TestCase):
-    def test_exact_phase_gate_is_exclusive_for_terminal_and_preview(self):
-        for state in ['terminal_attach_required', 'preview_protocol_required']:
+    def test_exact_phase_gate_is_exclusive_for_each_controller(self):
+        for state in ['terminal_attach_required', 'preview_protocol_required', 'inbox_sender_required']:
             with self.subTest(state=state), tempfile.TemporaryDirectory() as directory:
                 gate = Path(directory) / 'accepted'
                 refused = Path(directory) / 'refused'

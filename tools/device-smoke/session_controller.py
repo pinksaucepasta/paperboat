@@ -37,7 +37,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=['wait', 'finish', 'command', 'signal'])
     parser.add_argument('--job', type=Path)
-    parser.add_argument('--expected-state', choices=['terminal_attach_required', 'preview_protocol_required'],
+    parser.add_argument('--expected-state', choices=['terminal_attach_required', 'preview_protocol_required', 'inbox_sender_required'],
                         default='terminal_attach_required')
     parser.add_argument('--phase')
     parser.add_argument('--script')

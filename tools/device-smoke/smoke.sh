@@ -93,6 +93,7 @@ on() {
   local device=$1; shift
   case "$device" in
     hp) ssh "${SSH_OPTS[@]}" -o BatchMode=yes anvit@hp "$*" ;;
+    ubuntu24) ssh "${SSH_OPTS[@]}" -o BatchMode=yes pujan@ubuntu24 "$*" ;;
     apple) SSHPASS="$APPLE_PASS" sshpass -e ssh "${SSH_OPTS[@]}" pujan.pm@apple \
       "security unlock-keychain -p '$APPLE_PASS' ~/Library/Keychains/login.keychain-db >/dev/null 2>&1; $*" ;;
     victus) local encoded
@@ -612,6 +613,45 @@ $parent"
   done
 }
 
+test_inbox_approval() {
+  skipped inbox-approval && return
+  local device id tag source_id phase output parent command success status t0
+  if ! stage_terminal_fixtures ubuntu24; then
+    for device in "${TLIST[@]}"; do record "inbox-approval:$device" FAIL 0 "could not stage teammate source"; done
+    return
+  fi
+  if ! source_id=$(on ubuntu24 "python3 -c 'import sys;sys.path.insert(0,\"/tmp/$RUN_ID\");from install_lifecycle import registration;print(registration()[\"machine_id\"])'") || ! [[ "$source_id" =~ ^[A-Za-z0-9_-]{3,128}$ ]]; then
+    for device in "${TLIST[@]}"; do record "inbox-approval:$device" FAIL 0 "teammate source identity unavailable"; done
+    return
+  fi
+  for device in "${TLIST[@]}"; do
+    id="inbox-approval:$device"
+    skipped "$id" && continue
+    t0=$(now); tag="inbox-approval-$device"; success=0
+    if ! stage_terminal_fixtures "$device"; then
+      record "$id" FAIL 0 "could not stage recipient fixture"
+      continue
+    fi
+    printf '%s\n' "python3 /tmp/$RUN_ID/inbox_approval.py --source-machine-id $source_id && echo INBOX_APPROVAL_OK" | device_job "$device" "$tag"
+    phase=$(on "$device" "python3 /tmp/$RUN_ID/session_controller.py wait --job /tmp/$RUN_ID/$tag --expected-state inbox_sender_required" 2>&1); status=$?
+    output="$phase"
+    if [ "$status" = 0 ]; then
+      command=$(python3 -c 'import shlex,sys;print(shlex.join(["python3",sys.argv[2],"--phase",sys.argv[1]]))' "$phase" "/tmp/$RUN_ID/inbox_sender.py")
+      output=$(on ubuntu24 "timeout 400 $command" 2>&1); status=$?
+      if [ "$status" = 0 ] && python3 -c 'import json,sys;r=json.loads(sys.argv[1]);assert r["check"]=="inbox-sender" and r["status"]=="PASS" and r["approval_acknowledged"] and r["decline_acknowledged"]' "$output" 2>/dev/null; then success=1; fi
+      command=$(python3 "$HERE/session_controller.py" signal --phase "$phase" --success "$success" --expected-state inbox_sender_required)
+      on "$device" "$command" >/dev/null 2>&1 || success=0
+    fi
+    parent=$(on "$device" "python3 /tmp/$RUN_ID/session_controller.py finish --job /tmp/$RUN_ID/$tag" 2>&1); status=$?
+    if [ "$success" = 1 ] && command_ok "$status" "$parent" && marker_present "$parent" INBOX_APPROVAL_OK; then
+      record "$id" PASS $(( $(now)-t0 )) "independent teammate; approve delivers exact bytes; decline publishes nothing"
+    else
+      record_command_failure "$id" $(( $(now)-t0 )) "$output
+$parent"
+    fi
+  done
+}
+
 test_device_application() {
   local group=$1 script=$2 flags=${3:-}
   skipped "$group" && return
@@ -724,6 +764,7 @@ test_application_pairs exec-cancel exec_cancel.py
 test_application_pairs ssh-doctor ssh_doctor_lifecycle.py
 test_application_pairs ssh-alias ssh_alias_lifecycle.py
 test_application_pairs inbox-manage inbox_manage.py
+test_inbox_approval
 test_application_pairs transfer-manage transfer_manage.py
 test_application_pairs preview-manage preview_manage.py
 test_device_application team-lifecycle team_lifecycle.py
