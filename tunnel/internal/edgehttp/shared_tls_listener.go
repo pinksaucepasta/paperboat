@@ -87,12 +87,13 @@ func (l *SharedTLSListener) dispatch(conn net.Conn) {
 	decisions, err := l.authority.Snapshot(ctx)
 	cancel()
 	https := l.httpsHostname(host)
+	infrastructureHTTPS := host == l.infrastructureHostname && https
 	if err != nil {
 		l.observe("public_tcp_reconcile", err)
 		// This exact installation name is reserved for HTTPS by server authority.
 		// Keep health/installation verification usable during control outages;
 		// dynamic route names must never fall back when authority is unavailable.
-		if host != l.infrastructureHostname || !https {
+		if !infrastructureHTTPS {
 			return
 		}
 		decisions = nil
@@ -115,7 +116,7 @@ func (l *SharedTLSListener) dispatch(conn net.Conn) {
 	// The locally admitted public preview may become ready after the cached
 	// complete snapshot was fetched. Refresh its exact authority before any TLS
 	// writes, then inspect the entire current snapshot for protocol conflicts.
-	if !authorizedHTTPS && https && l.previewHTTPSAuthority != nil {
+	if !authorizedHTTPS && !infrastructureHTTPS && https && l.previewHTTPSAuthority != nil {
 		refresh, stop := context.WithTimeout(l.ctx, 2*time.Second)
 		defer stop()
 		if err := l.previewHTTPSAuthority(refresh, host); err != nil {
@@ -151,7 +152,7 @@ func (l *SharedTLSListener) dispatch(conn net.Conn) {
 		l.observe("public_tcp_stream", l.routes.ForwardPublicTCP(l.ctx, replay, *selected, l.authority.ResolveDecision))
 		return
 	}
-	if !authorizedHTTPS && (host != l.infrastructureHostname || !https) {
+	if !authorizedHTTPS && !infrastructureHTTPS {
 		return
 	}
 	select {

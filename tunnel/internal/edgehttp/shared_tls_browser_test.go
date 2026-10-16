@@ -133,21 +133,41 @@ func TestSharedTLSAuthorityOutageAndRecovery(t *testing.T) {
 			_, httpDecision := browserTestMatch()
 			httpDecision.Binding.Hostname = host
 			httpDecision.ExpiresAt = time.Now().Add(8 * time.Second)
-			authority.set(httpDecision)
+			if host == "application.test" {
+				authority.set(httpDecision)
+			}
 			authority.unavailable.Store(true)
-			shared, err := NewSharedTLSListener(raw, authority, registry, func(name string) bool { return name == host }, 4, "infrastructure.test")
+			manager, err := NewPublicTCPListeners(PublicTCPListenerConfig{ListenHost: "127.0.0.1", InfrastructureHostname: "infrastructure.test", Authority: authority, Routes: registry, MaximumConnections: 4, PreviewHTTPSAuthority: func(context.Context, string) error { return control.ErrBrowserDenied }})
+			if err != nil {
+				raw.Close()
+				t.Fatal(err)
+			}
+			shared, err := manager.WrapTLSListener(raw, func(name string) bool { return name == host }, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
+			defer shared.Close()
 			server := &http.Server{TLSConfig: serverTLS, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, "ready") })}
 			defer server.Close()
 			go server.ServeTLS(shared, "", "")
+			transport := &http.Transport{TLSClientConfig: clientTLS, DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+				return (&net.Dialer{}).DialContext(ctx, network, raw.Addr().String())
+			}}
+			defer transport.CloseIdleConnections()
 			dial := func() error {
-				conn, err := tls.DialWithDialer(&net.Dialer{Timeout: time.Second}, "tcp", raw.Addr().String(), clientTLS)
-				if err == nil {
-					conn.Close()
+				response, err := (&http.Client{Transport: transport, Timeout: time.Second}).Get("https://" + host + "/.well-known/paperboat-installation")
+				if err != nil {
+					return err
 				}
-				return err
+				defer response.Body.Close()
+				body, err := io.ReadAll(response.Body)
+				if err != nil {
+					return err
+				}
+				if response.StatusCode != 200 || string(body) != "ready" {
+					return errors.New("infrastructure HTTPS handler not reached")
+				}
+				return nil
 			}
 			err = dial()
 			if host == "infrastructure.test" && err != nil {
