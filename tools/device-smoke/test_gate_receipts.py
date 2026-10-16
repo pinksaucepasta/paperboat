@@ -74,6 +74,20 @@ class GateReceipts(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('ssh:hp', result.stdout)
 
+    def test_batch_requires_fresh_targeted_proof_and_retains_published_baseline(self):
+        self.receipt('01', {'exec:hp': 'PASS', 'ssh:hp': 'PASS'})
+        self.git('update-ref', 'refs/remotes/origin/main', 'HEAD')
+        (self.root / 'cli/source.go').write_text('package changed\n')
+        self.commit('next batch fix')
+        self.assertNotEqual(self.evaluate().returncode, 0)
+        version = 'dev-' + self.git('rev-parse', '--short', 'HEAD').strip()
+        self.receipt('02', {'exec:hp': 'PASS'}, version)
+        self.assertEqual(self.evaluate().returncode, 0)
+        self.receipt('03', {'exec:hp': 'FAIL'}, version)
+        result = self.evaluate()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('exec:hp', result.stdout)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -30,25 +30,36 @@ if [ -n "$changed" ]; then
   python3 - "$want" <<'PY' || fail=1
 import glob, json, subprocess, sys
 want = sys.argv[1]
-passed, current, receipts = set(), {}, []
-def same_runtime(version):
+passed, current, receipts, fresh = set(), {}, [], False
+def receipt_source(version):
     if not version.startswith('dev-'):
-        return False
+        return False, False
     revision = version[4:]
     resolved = subprocess.run(['git', 'rev-parse', '--verify', revision + '^{commit}'], capture_output=True, text=True)
-    return resolved.returncode == 0 and subprocess.run(
-        ['git', 'diff', '--quiet', resolved.stdout.strip(), 'HEAD', '--', 'cli/', 'relay/', 'shared/']).returncode == 0
+    if resolved.returncode != 0:
+        return False, False
+    revision = resolved.stdout.strip()
+    same = subprocess.run(['git', 'diff', '--quiet', revision, 'HEAD', '--',
+                           'cli/', 'relay/', 'shared/']).returncode == 0
+    # Speed rules: retain published ancestor evidence between batch-wide runs,
+    # but require targeted device proof for this candidate's exact runtime tree.
+    published = all(subprocess.run(['git', 'merge-base', '--is-ancestor', revision, target],
+                    capture_output=True).returncode == 0 for target in ['origin/main', 'HEAD'])
+    return same, published
+
 for f in sorted(glob.glob('tools/device-smoke/results/*.json')):
     try:
         d = json.load(open(f))
     except Exception:
         continue
-    if same_runtime(d.get('expect_version', '')):
+    same, published = receipt_source(d.get('expect_version', ''))
+    if same or published:
+        fresh = fresh or same
         receipts.append(f)
         current.update({r['id']: r['status'] for r in d.get('results') or []})
     # Windows (victus) is after launch (PLAN.md 1.1), so its checks do not gate.
     passed |= {r['id'] for r in d.get('results') or [] if r['status'] == 'PASS' and not r['id'].endswith(':victus')}
-if not receipts:
+if not fresh:
     print(f"FAIL: runtime code changed but no smoke result for build {want}.")
     print(f"      Build HEAD for all devices, install it, run tools/device-smoke/smoke.sh --expect-version {want}")
     sys.exit(1)
@@ -56,7 +67,7 @@ regressed = sorted(i for i in passed if current.get(i) != 'PASS')
 if regressed:
     print(f"FAIL: regression in {receipts[-1]}: previously passing checks not passing now: {', '.join(regressed)}")
     sys.exit(1)
-print(f"OK: {len(receipts)} source-equivalent receipts ({len(passed)} previously passing checks still pass)")
+print(f"OK: {len(receipts)} accepted-baseline/targeted receipts ({len(passed)} previously passing checks still pass)")
 PY
 else
   step "no runtime code changed; device smoke not required"
