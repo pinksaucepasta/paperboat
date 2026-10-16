@@ -130,9 +130,10 @@ Goal: every main-path row on L and M `[x]` by 2026-10-19.
 - **Tick from passing checks.** When a smoke check that covers a row's main path passes on L and
   M, tick it in the same commit. Missing pieces of a row become new checks, written now, not
   research.
-- **Time-box everything.** Investigation of one failure: 30 minutes. A one-off failure gets one
-  rerun; caused by the network, a device or a deploy restart, it is noted in one line and
-  ignored. Otherwise `[!]` and next row.
+- **Triage failures.** A failure that does not repeat on one rerun, or is caused by the network,
+  a device or a deploy restart, gets one Log line and no investigation. A failure that repeats
+  is a real bug and is fixed (bisect, fix, test). If the fix is not found in about 2 hours, mark
+  the row `[!]` with what is known, work the next row, and come back to it before pass 2.
 - **Short Log lines.** Max 3 lines per PLAN.md Log entry: rows ticked, commits, blocker. No
   narratives.
 - **No isolated worktrees for finished work.** Rebase onto `main` and push the same hour.
