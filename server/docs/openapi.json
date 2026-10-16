@@ -13417,7 +13417,6 @@
                     "terminal",
                     "exec",
                     "ssh",
-                    "codex",
                     "file",
                     "file_transfer",
                     "file_transfer_key",

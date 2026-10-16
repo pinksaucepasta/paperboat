@@ -59,7 +59,7 @@ func (r NativeReport) validate(now time.Time) error {
 		return ErrInvalid
 	}
 	switch r.Consumer {
-	case "terminal", "exec", "ssh", "codex", "file", "file_transfer", "file_transfer_key", "private_http", "private_tcp", "inspector", "config_compare":
+	case "terminal", "exec", "ssh", "file", "file_transfer", "file_transfer_key", "private_http", "private_tcp", "inspector", "config_compare":
 	default:
 		return ErrInvalid
 	}
@@ -73,8 +73,6 @@ func consumerCapability(consumer string) string {
 		return "files"
 	case "private_http", "private_tcp":
 		return "private_access"
-	case "codex":
-		return "exec"
 	default:
 		return consumer
 	}

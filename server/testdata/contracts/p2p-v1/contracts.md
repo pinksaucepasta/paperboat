@@ -41,7 +41,7 @@ file payloads.
 ## Application authorization
 
 QUIC authenticates the approved Ed25519 endpoint key. Each terminal, SSH, transfer,
-preview, private-access, or Codex stream also carries a short-lived credential bound to
+preview or private-access stream also carries a short-lived credential bound to
 its exact operation, consumer, resource, deadline, and byte limit. Reconnect obtains
 current authority and resumes through the owning application protocol; it never replays
 commands implicitly.

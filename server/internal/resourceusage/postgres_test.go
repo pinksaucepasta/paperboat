@@ -61,9 +61,22 @@ func TestPostgresBandwidthHistory(t *testing.T) {
 		_, _ = store.SQL().ExecContext(ctx, `DELETE FROM users WHERE id IN ($1,$2)`, a, b)
 	}()
 
+	var retiredStorageRemoved bool
+	if e := store.SQL().QueryRowContext(ctx, `SELECT to_regclass('paperboat.codex_sessions') IS NULL
+ AND NOT ('codex_host'=ANY(configured_capabilities))
+ AND NOT ('codex_host'=ANY(observed_capabilities)) FROM user_machines WHERE id=$1`, machine).Scan(&retiredStorageRemoved); e != nil || !retiredStorageRemoved {
+		t.Fatalf("retired integration storage/default capability remains: %v", e)
+	}
 	service := New(store)
 	service.Now = func() time.Time { return now.Add(2 * time.Minute) }
 	report := NativeReport{AccessSessionID: session, StreamID: "stream1", Consumer: "terminal", Mode: "direct", IntervalStart: now, IntervalEnd: now.Add(30 * time.Second), Upload: 100, Download: 200}
+	for _, consumer := range []string{"codex", "codex_manage", "codex_connect"} {
+		retired := report
+		retired.Consumer = consumer
+		if _, e := service.RecordNative(ctx, machine, 1, NativeBatch{Reports: []NativeReport{retired}}); !errors.Is(e, ErrInvalid) {
+			t.Fatalf("retired consumer was not rejected at reporting admission: %v", e)
+		}
+	}
 	batch := NativeBatch{Reports: []NativeReport{report}}
 	receipt, err := service.RecordNative(ctx, machine, 1, batch)
 	if err != nil || receipt.Accepted != 1 {
