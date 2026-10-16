@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net/mail"
 	"sort"
 	"strings"
 	"unicode"
@@ -99,19 +100,21 @@ func teamCreateCommand() *cobra.Command {
 }
 
 func teamInviteCommand() *cobra.Command {
-	c := &cobra.Command{Use: "invite <team> <account>", Short: "Invite an account as a member", Args: commandArgs(cobra.ExactArgs(2)), RunE: func(c *cobra.Command, args []string) error {
+	c := &cobra.Command{Use: "invite <team> <email>", Short: "Invite a member by email, including before signup", Args: commandArgs(cobra.ExactArgs(2)), RunE: func(c *cobra.Command, args []string) error {
 		generation, err := requiredTeamGeneration(c)
 		if err != nil {
 			return err
 		}
-		if !validTeamCLIIdentifier(args[0]) || !validTeamCLIIdentifier(args[1]) {
-			return localArgumentError("team and account must be valid identifiers")
+		email := strings.TrimSpace(args[1])
+		address, emailErr := mail.ParseAddress(email)
+		if !validTeamCLIIdentifier(args[0]) || emailErr != nil || address.Address != email {
+			return localArgumentError("use an exact team ID and a valid email address")
 		}
 		client, err := backendForCommand(c)
 		if err != nil {
 			return err
 		}
-		invite, err := client.InviteTeamMember(c.Context(), args[0], api.TeamInviteRequest{OperationID: newIdempotencyKey(), ExpectedGeneration: generation, AccountID: args[1]})
+		invite, err := client.InviteTeamMember(c.Context(), args[0], api.TeamInviteRequest{OperationID: newIdempotencyKey(), ExpectedGeneration: generation, Email: email})
 		if err != nil {
 			return err
 		}
@@ -119,7 +122,7 @@ func teamInviteCommand() *cobra.Command {
 		if jsonOutput {
 			return json.NewEncoder(c.OutOrStdout()).Encode(invite)
 		}
-		_, err = fmt.Fprintf(c.OutOrStdout(), "Invited %s to %s as member; invitation %s expires %s.\n", invite.AccountID, invite.TeamID, invite.InvitationID, invite.ExpiresAt.Format("2006-01-02T15:04:05Z07:00"))
+		_, err = fmt.Fprintf(c.OutOrStdout(), "Invited %s to %s as member; invitation %s expires %s. Recipient must sign in and verify this email to accept.\n", invite.Email, invite.TeamID, invite.InvitationID, invite.ExpiresAt.Format("2006-01-02T15:04:05Z07:00"))
 		return err
 	}}
 	teamGenerationFlag(c)
@@ -464,7 +467,7 @@ func teamInvitationsCommand() *cobra.Command {
 			return err
 		}
 		for _, item := range items {
-			if _, err = fmt.Fprintf(command.OutOrStdout(), "%s\t%s\t%s\t%s\n", item.InvitationID, item.TeamID, item.AccountID, item.ExpiresAt.Format("2006-01-02T15:04:05Z07:00")); err != nil {
+			if _, err = fmt.Fprintf(command.OutOrStdout(), "%s\t%s\t%s\t%s\t%s\n", item.InvitationID, item.TeamID, teamInvitationRecipient(item), teamInvitationState(item), item.ExpiresAt.Format("2006-01-02T15:04:05Z07:00")); err != nil {
 				return err
 			}
 		}
@@ -489,4 +492,18 @@ func teamInvitationShowCommand() *cobra.Command {
 		return json.NewEncoder(command.OutOrStdout()).Encode(item)
 	}}
 	return command
+}
+
+func teamInvitationRecipient(invitation api.TeamInvitation) string {
+	if invitation.Email != "" {
+		return invitation.Email
+	}
+	return invitation.AccountID
+}
+
+func teamInvitationState(invitation api.TeamInvitation) string {
+	if invitation.State == "pending" && invitation.Email != "" && invitation.AccountID == "" {
+		return "pending (verify email to accept)"
+	}
+	return invitation.State
 }

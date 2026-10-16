@@ -1,10 +1,10 @@
 ## pb team invite
 
-Invite an account as a member
+Invite a member by email, including before signup
 
 ### Synopsis
 
-Invite an account as a member
+Invite a member by email, including before signup
 
 Invite one exact account to the selected team at its current generation. The recipient must accept; an invitation is not immediate membership or a resource grant.
 
@@ -13,7 +13,7 @@ Teams use explicit membership and resource grants. Membership alone does not gra
 JSON output is supported with --json.
 
 ```
-pb team invite <team> <account> [flags]
+pb team invite <team> <email> [flags]
 ```
 
 ### Options

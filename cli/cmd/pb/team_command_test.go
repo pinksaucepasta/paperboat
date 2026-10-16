@@ -12,6 +12,87 @@ import (
 	"testing"
 )
 
+func TestTeamInviteUsesEmailBeforeSignup(t *testing.T) {
+	supportedTeamFixtureVersion(t)
+	for _, jsonOutput := range []bool{false, true} {
+		t.Run(map[bool]string{false: "text", true: "json"}[jsonOutput], func(t *testing.T) {
+			calls := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if teamFixtureUpdatePolicy(w, r) {
+					return
+				}
+				calls++
+				var input map[string]any
+				if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+					t.Error(err)
+					w.WriteHeader(400)
+					return
+				}
+				operation, ok := input["operation_id"].(string)
+				if r.Method != http.MethodPost || r.URL.Path != "/v1/teams/team_1/invitations" || input["email"] != "new.member@example.test" || input["account_id"] != nil || input["expected_generation"] != float64(3) || !ok || operation == "" || r.Header.Get("Idempotency-Key") != operation {
+					t.Error("invitation did not use one email selector with its operation and team generation")
+					w.WriteHeader(400)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"data":{"invitation_id":"inv_1","team_id":"team_1","email":"new.member@example.test","account_id":"","role":"member","state":"pending","expires_at":"2026-10-20T00:00:00Z"}}`))
+			}))
+			defer server.Close()
+			dir := t.TempDir()
+			configPath := filepath.Join(dir, "config.json")
+			writeTestProfile(t, dir, configPath, server.URL)
+			args := []string{"team", "invite", "team_1", "new.member@example.test", "--generation", "3", "--server", server.URL, "--config", configPath}
+			if jsonOutput {
+				args = append(args, "--json")
+			}
+			var output bytes.Buffer
+			if code := run(t.Context(), args, &output, &output); code != 0 || calls != 1 {
+				t.Fatalf("invite exit=%d requests=%d", code, calls)
+			}
+			if jsonOutput {
+				var result map[string]any
+				if err := json.Unmarshal(output.Bytes(), &result); err != nil {
+					t.Fatal(err)
+				}
+				if result["email"] != "new.member@example.test" || result["account_id"] != "" || result["state"] != "pending" {
+					t.Fatal("pre-signup recipient or pending state was lost")
+				}
+			} else if !strings.Contains(output.String(), "new.member@example.test") || !strings.Contains(strings.ToLower(output.String()), "verify") {
+				t.Fatal("invite omitted the recipient or verified-sign-in next step")
+			}
+		})
+	}
+}
+
+func TestTeamInvitationInventoryShowsPendingEmailVerification(t *testing.T) {
+	supportedTeamFixtureVersion(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if teamFixtureUpdatePolicy(w, r) {
+			return
+		}
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/team-invitations" || r.URL.Query().Get("state") != "pending" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{
+			"items":      []map[string]any{{"invitation_id": "inv_1", "team_id": "team_1", "email": "new.member@example.test", "account_id": "", "state": "pending", "expires_at": "2026-10-20T00:00:00Z"}},
+			"pagination": map[string]any{"limit": 200, "offset": 0, "total": 1, "next_offset": nil},
+		}})
+	}))
+	defer server.Close()
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	writeTestProfile(t, dir, configPath, server.URL)
+	var output bytes.Buffer
+	code := run(t.Context(), []string{"team", "invitations", "--server", server.URL, "--config", configPath}, &output, &output)
+	for _, wanted := range []string{"new.member@example.test", "pending", "verify"} {
+		if code != 0 || !strings.Contains(output.String(), wanted) {
+			t.Fatalf("inventory omitted %q; exit=%d", wanted, code)
+		}
+	}
+}
+
 func TestTeamDeleteRequiresExactConfirmationBeforeRequest(t *testing.T) {
 	mutated := false
 	supportedTeamFixtureVersion(t)

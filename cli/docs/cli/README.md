@@ -192,7 +192,7 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb team grant](pb_team_grant.md) | Set or revoke an explicit resource permission |
 | [pb team invitation](pb_team_invitation.md) | Show an invitation you may receive or administer |
 | [pb team invitations](pb_team_invitations.md) | Discover pending invitations received by you or administered for a team |
-| [pb team invite](pb_team_invite.md) | Invite an account as a member |
+| [pb team invite](pb_team_invite.md) | Invite a member by email, including before signup |
 | [pb team leave](pb_team_leave.md) | Leave a team |
 | [pb team list](pb_team_list.md) | List teams |
 | [pb team machine](pb_team_machine.md) | Share machines and manage exact team access |

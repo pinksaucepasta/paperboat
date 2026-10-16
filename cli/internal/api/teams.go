@@ -48,7 +48,8 @@ type TeamMutationRequest struct {
 type TeamInviteRequest struct {
 	OperationID        string `json:"operation_id"`
 	ExpectedGeneration uint64 `json:"expected_generation"`
-	AccountID          string `json:"account_id"`
+	AccountID          string `json:"account_id,omitempty"`
+	Email              string `json:"email,omitempty"`
 }
 type TeamAcceptRequest struct {
 	OperationID string `json:"operation_id"`
@@ -57,6 +58,7 @@ type TeamInvitation struct {
 	InvitationID string    `json:"invitation_id"`
 	TeamID       string    `json:"team_id"`
 	AccountID    string    `json:"account_id"`
+	Email        string    `json:"email,omitempty"`
 	Role         string    `json:"role"`
 	ExpiresAt    time.Time `json:"expires_at"`
 	Generation   uint64    `json:"generation"`
