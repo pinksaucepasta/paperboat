@@ -31,7 +31,8 @@ func TestStatusProjectsSelectedWorkspaceBeforeRendering(t *testing.T) {
 		}
 		items := []map[string]any{}
 		if workspace == "personal" || workspace == "team-a" {
-			items = append(items, map[string]any{"id": workspace, "alias": workspace, "installation_generation": 1})
+			items = append(items, map[string]any{"id": "machine-" + workspace,
+				"alias": workspace, "installation_generation": 1})
 		} else if workspace != "empty" {
 			t.Errorf("status omitted selected workspace: %q", workspace)
 		}
@@ -45,7 +46,7 @@ func TestStatusProjectsSelectedWorkspaceBeforeRendering(t *testing.T) {
 	snapshot := localapi.Snapshot{Schema: localapi.SnapshotSchemaV1, Generation: 7,
 		ObservedAt: time.Now().UTC(), DaemonState: "ready", DaemonVersion: "dev"}
 	for _, id := range []string{"personal", "team-a"} {
-		snapshot.Machines = append(snapshot.Machines, localapi.MachineStatus{ID: id, Alias: id,
+		snapshot.Machines = append(snapshot.Machines, localapi.MachineStatus{ID: "machine-" + id, Alias: "cached-" + id,
 			RuntimeState: "ready", Generation: 3, SelectedPath: "direct", ActiveConsumers: 1,
 			TransferReadiness: "ready", PreviewReadiness: "ready", SSHReadiness: "ready",
 			NATMappingIPv4: "unknown", NATMappingIPv6: "unknown", CaptivePortal: "unknown",
@@ -77,6 +78,9 @@ func TestStatusProjectsSelectedWorkspaceBeforeRendering(t *testing.T) {
 		t.Run(workspace, func(t *testing.T) {
 			var out, diagnostics bytes.Buffer
 			args := []string{"--config", path, "--workspace", workspace, "status", "--json"}
+			if workspace == "personal" || workspace == "team-a" {
+				args = append(args, workspace)
+			}
 			code := run(t.Context(), args, &out, &diagnostics)
 			if workspace == "denied" {
 				if code == 0 || bytes.Contains(out.Bytes(), []byte("\"machines\"")) {
@@ -95,7 +99,8 @@ func TestStatusProjectsSelectedWorkspaceBeforeRendering(t *testing.T) {
 			if len(result.Machines) != want || result.Generation != 7 {
 				t.Fatal("status exposed another workspace or discarded local observations")
 			}
-			if want == 1 && (result.Machines[0].ID != workspace || result.Machines[0].ActiveConsumers != 1) {
+			if want == 1 && (result.Machines[0].ID != "machine-"+workspace ||
+				result.Machines[0].Alias != workspace || result.Machines[0].ActiveConsumers != 1) {
 				t.Fatal("status lost workspace identity or live transport observations")
 			}
 		})

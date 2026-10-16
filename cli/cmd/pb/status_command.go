@@ -26,13 +26,14 @@ func statusCommand() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("read machines for the selected workspace: %w", friendlyCommandError(err))
 			}
-			allowed := make(map[string]bool, len(machines))
+			aliases := make(map[string]string, len(machines))
 			for _, machine := range machines {
-				allowed[machine.ID] = true
+				aliases[machine.ID] = machine.Alias
 			}
 			selected := make([]localapi.MachineStatus, 0, len(machines))
 			for _, machine := range snapshot.Machines {
-				if allowed[machine.ID] {
+				if alias, allowed := aliases[machine.ID]; allowed {
+					machine.Alias = alias
 					selected = append(selected, machine)
 				}
 			}
