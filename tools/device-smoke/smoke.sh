@@ -14,7 +14,8 @@
 #   --expect-version V   version every device must report (required)
 #   --windows-install-json FILE  saved Windows pb install --json output (required for victus)
 #   --targets LIST       comma list of launch targets (default hp,apple)
-#   --long-seconds N     duration of long exec / held SSH (default 420 / 200)
+#   --long-seconds N     duration of long exec (default 420)
+#   --ssh-seconds N      duration of held SSH (default 200)
 #   --skip LIST          comma list of test ids to skip (e.g. preview,transfer)
 #   --update DIR         after the baseline, update each target with the build in DIR
 #                        (pb-linux-amd64, pb-darwin-arm64, pb-windows-amd64.exe)
@@ -51,12 +52,19 @@ while [ $# -gt 0 ]; do
     --windows-install-json) WINDOWS_INSTALL_JSON=$2; shift 2 ;;
     --targets) TARGETS=$2; shift 2 ;;
     --long-seconds) LONG_EXEC=$2; shift 2 ;;
+    --ssh-seconds) LONG_SSH=$2; shift 2 ;;
     --skip) SKIP=$2; shift 2 ;;
     --update) UPDATE_DIR=$2; shift 2 ;;
     --update-version) UPDATE_VERSION=$2; shift 2 ;;
     -h|--help) sed -n '2,32p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
+done
+for duration in "$LONG_EXEC" "$LONG_SSH"; do
+  if ! [[ "$duration" =~ ^[0-9]+$ ]] || [ "$duration" -lt 1 ] || [ "$duration" -gt 86400 ]; then
+    echo "long-check durations must be 1..86400 seconds" >&2
+    exit 2
+  fi
 done
 # PLAN.md 1.1: Windows device work resumes after launch.
 if [[ ",$TARGETS," == *,victus,* ]]; then
@@ -177,12 +185,13 @@ start_long_ssh() {
   fi
 }
 collect() { # collect ID TAG EXPECT-MARKER : waits for the background job
-  local id=$1 tag=$2 want=$3 minimum=${4:-0} out status completed=0
-  for _ in $(seq 1 200); do
+  local id=$1 tag=$2 want=$3 minimum=${4:-0} out status completed=0 deadline
+  deadline=$(( $(now)+minimum+300 ))
+  while [ "$(now)" -lt "$deadline" ]; do
     if on hp "test -f /tmp/$RUN_ID/$tag.end"; then completed=1; break; fi
     sleep 15
   done
-  [ "$completed" = 1 ] || { record "$id" FAIL 3000 "job did not finish before deadline"; return; }
+  [ "$completed" = 1 ] || { record "$id" FAIL "$((minimum+300))" "job did not finish before deadline"; return; }
   out=$(on hp "cat /tmp/$RUN_ID/$tag.out; echo; echo dur=\$(( \$(cat /tmp/$RUN_ID/$tag.end 2>/dev/null || date +%s) - \$(cat /tmp/$RUN_ID/$tag.start) ))" 2>&1)
   status=$?
   local dur; dur=$(grep -oE 'dur=[0-9]+' <<<"$out" | cut -d= -f2)
@@ -404,7 +413,7 @@ stage_terminal_fixtures() {
   [[ "$TERMINAL_FIXTURES_READY" != *",$source,"* ]] || return 0
   if ! tar -C "$HERE" -czf - terminal_lifecycle.py session_lifecycle.py session_controller.py \
       terminal_entry.py status_bar_lifecycle.py session_sharing_lifecycle.py \
-      exec_lifecycle.py ssh_lifecycle.py ssh_tools_lifecycle.py transfer_lifecycle.py \
+      exec_lifecycle.py exec_cancel.py ssh_lifecycle.py ssh_tools_lifecycle.py transfer_lifecycle.py \
       transfer_manage.py preview_manage.py preview_lifecycle.py preview_receipt.py \
       machine_lifecycle.py install_lifecycle.py pairing_lifecycle.py pairing_fault.py \
       terminal_command.py session_cleanup.py | \
@@ -421,7 +430,7 @@ test_application_pairs() {
   skipped "$kind" && return
   for source in "${TLIST[@]}"; do
     for target in "${TLIST[@]}"; do
-      if [ "$kind" = transfer-multi ] || [ "$kind" = exec-repeat ] || [ "$kind" = ssh-tools ] || [ "$kind" = transfer-manage ]; then
+      if [ "$kind" = transfer-multi ] || [ "$kind" = exec-repeat ] || [ "$kind" = ssh-tools ] || [ "$kind" = transfer-manage ] || [ "$kind" = exec-cancel ]; then
         [ "$source" != "$target" ] || continue
       fi
       if [ "$kind" = preview-manage ]; then
@@ -641,6 +650,8 @@ test_application_pairs ssh-main ssh_lifecycle.py
 test_application_pairs ssh-tools ssh_tools_lifecycle.py
 test_application_pairs transfer-multi transfer_lifecycle.py
 test_application_pairs exec-repeat exec_lifecycle.py repeated
+test_application_pairs readiness-main exec_lifecycle.py readiness
+test_application_pairs exec-cancel exec_cancel.py
 test_application_pairs transfer-manage transfer_manage.py
 test_application_pairs preview-manage preview_manage.py
 for t in "${TLIST[@]}"; do
