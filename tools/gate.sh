@@ -28,29 +28,35 @@ if [ -n "$changed" ]; then
   step "device smoke for HEAD: no check that ever passed may fail"
   want="dev-$(git rev-parse --short HEAD)"
   python3 - "$want" <<'PY' || fail=1
-import glob, json, sys
+import glob, json, subprocess, sys
 want = sys.argv[1]
-passed, head = set(), None
+passed, current, receipts = set(), {}, []
+def same_runtime(version):
+    if not version.startswith('dev-'):
+        return False
+    revision = version[4:]
+    resolved = subprocess.run(['git', 'rev-parse', '--verify', revision + '^{commit}'], capture_output=True, text=True)
+    return resolved.returncode == 0 and subprocess.run(
+        ['git', 'diff', '--quiet', resolved.stdout.strip(), 'HEAD', '--', 'cli/', 'relay/', 'shared/']).returncode == 0
 for f in sorted(glob.glob('tools/device-smoke/results/*.json')):
     try:
         d = json.load(open(f))
     except Exception:
         continue
-    if d.get('expect_version') == want:
-        head = (f, d.get('results') or [])
+    if same_runtime(d.get('expect_version', '')):
+        receipts.append(f)
+        current.update({r['id']: r['status'] for r in d.get('results') or []})
     # Windows (victus) is after launch (PLAN.md 1.1), so its checks do not gate.
     passed |= {r['id'] for r in d.get('results') or [] if r['status'] == 'PASS' and not r['id'].endswith(':victus')}
-if head is None:
+if not receipts:
     print(f"FAIL: runtime code changed but no smoke result for build {want}.")
     print(f"      Build HEAD for all devices, install it, run tools/device-smoke/smoke.sh --expect-version {want}")
     sys.exit(1)
-f, results = head
-status = {r['id']: r['status'] for r in results}
-regressed = sorted(i for i in passed if status.get(i) != 'PASS')
+regressed = sorted(i for i in passed if current.get(i) != 'PASS')
 if regressed:
-    print(f"FAIL: regression in {f}: previously passing checks not passing now: {', '.join(regressed)}")
+    print(f"FAIL: regression in {receipts[-1]}: previously passing checks not passing now: {', '.join(regressed)}")
     sys.exit(1)
-print(f"OK: {f} ({len(passed)} previously passing checks still pass)")
+print(f"OK: {len(receipts)} source-equivalent receipts ({len(passed)} previously passing checks still pass)")
 PY
 else
   step "no runtime code changed; device smoke not required"
