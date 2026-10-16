@@ -56,7 +56,7 @@ type HostConfig struct {
 	OriginPatterns     []string
 	EnvironmentID      string
 	MachineID          string
-	InboxPath          string
+	InboxPath          func() (string, error)
 	AgentTokenFile     string
 	ShutdownTimeout    time.Duration
 	RecoveryExitSignal string

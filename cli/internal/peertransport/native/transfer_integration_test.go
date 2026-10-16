@@ -152,7 +152,7 @@ func testNativeTransferResume(t *testing.T, relayed bool) {
 		if openErr != nil {
 			t.Fatal(openErr)
 		}
-		service, openErr = hosttransfer.New(hosttransfer.Config{Root: filepath.Join(root, "spool"), PublishRoot: filepath.Join(root, "published"), LocalMachineID: "machine_transfer", Store: durable})
+		service, openErr = hosttransfer.New(hosttransfer.Config{Root: filepath.Join(root, "spool"), PublishRoot: func() (string, error) { return filepath.Join(root, "published"), nil }, LocalMachineID: "machine_transfer", Store: durable})
 		if openErr != nil {
 			t.Fatal(openErr)
 		}

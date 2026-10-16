@@ -344,7 +344,7 @@ func newWindowsRegressionCoordinator(t *testing.T, endpoint http.Handler, lifecy
 		Runtime:       config,
 		ListenAddress: "127.0.0.1:0",
 		WorkspaceRoot: root,
-		InboxPath:     root,
+		InboxPath:     func() (string, error) { return root, nil },
 		MachineID:     "machine_windows_regression",
 	}, dependencies)
 	if err != nil {

@@ -39,7 +39,7 @@ func TestHostStableShutdownDrainsBandwidthAfterNative(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	host, err := NewHost(t.Context(), HostConfig{Runtime: runtimeconfig.Config{StateRoot: root, Version: "test", Limits: runtimeconfig.DefaultLimits, Resources: runtimeconfig.DefaultResources}, ListenAddress: "127.0.0.1:0", WorkspaceRoot: root, MachineID: "machine-test", InboxPath: filepath.Join(root, "Inbox")}, HostDependencies{Bandwidth: recorder, Authorizer: func(string) (server.Authorizer, error) { return hostAuthorizer{}, nil }, SessionLauncherFactory: testSessionLauncherFactory("/bin/sh", []string{"-l"}, []string{"PATH=/usr/bin:/bin"}), NativePeerFactory: func(func(net.Conn) error, http.Handler) (Service, error) {
+	host, err := NewHost(t.Context(), HostConfig{Runtime: runtimeconfig.Config{StateRoot: root, Version: "test", Limits: runtimeconfig.DefaultLimits, Resources: runtimeconfig.DefaultResources}, ListenAddress: "127.0.0.1:0", WorkspaceRoot: root, MachineID: "machine-test", InboxPath: func() (string, error) { return filepath.Join(root, "Inbox"), nil }}, HostDependencies{Bandwidth: recorder, Authorizer: func(string) (server.Authorizer, error) { return hostAuthorizer{}, nil }, SessionLauncherFactory: testSessionLauncherFactory("/bin/sh", []string{"-l"}, []string{"PATH=/usr/bin:/bin"}), NativePeerFactory: func(func(net.Conn) error, http.Handler) (Service, error) {
 		return finalUsageNativeService{recorder}, nil
 	}})
 	if err != nil {

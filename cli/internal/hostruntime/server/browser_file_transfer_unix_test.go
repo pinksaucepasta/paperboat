@@ -30,7 +30,7 @@ func browserTransferFixture(t *testing.T) (*Dispatcher, Authorization) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = durable.Close() })
-	service, err := filetransfer.New(filetransfer.Config{Root: filepath.Join(root, "transfers"), PublishRoot: filepath.Join(root, "inbox"), LocalMachineID: "machine_browser", Store: durable})
+	service, err := filetransfer.New(filetransfer.Config{Root: filepath.Join(root, "transfers"), PublishRoot: func() (string, error) { return filepath.Join(root, "inbox"), nil }, LocalMachineID: "machine_browser", Store: durable})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -35,7 +35,7 @@ func (s *machineLifecycleService) Shutdown(context.Context) error {
 
 func TestUnifiedRuntimeOwnsTerminalResources(t *testing.T) {
 	root := t.TempDir()
-	host, err := NewHost(context.Background(), HostConfig{Runtime: runtimeconfig.Config{StateRoot: root, Version: "test", Limits: runtimeconfig.DefaultLimits, Resources: runtimeconfig.DefaultResources}, ListenAddress: "127.0.0.1:0", WorkspaceRoot: root, InboxPath: filepath.Join(root, "Inbox"), MachineID: "machine_test"}, HostDependencies{Authorizer: func(string) (server.Authorizer, error) { return hostAuthorizer{}, nil }, SessionLauncherFactory: machineTestLauncherFactory, Capabilities: newMachineCapabilityController(nil)})
+	host, err := NewHost(context.Background(), HostConfig{Runtime: runtimeconfig.Config{StateRoot: root, Version: "test", Limits: runtimeconfig.DefaultLimits, Resources: runtimeconfig.DefaultResources}, ListenAddress: "127.0.0.1:0", WorkspaceRoot: root, InboxPath: func() (string, error) { return filepath.Join(root, "Inbox"), nil }, MachineID: "machine_test"}, HostDependencies{Authorizer: func(string) (server.Authorizer, error) { return hostAuthorizer{}, nil }, SessionLauncherFactory: machineTestLauncherFactory, Capabilities: newMachineCapabilityController(nil)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestUnifiedRuntimeSupportsStableLifecycle(t *testing.T) {
 	peer := &machineLifecycleService{}
 	host, err := NewHost(context.Background(), HostConfig{
 		Runtime:       runtimeconfig.Config{StateRoot: root, Version: "test", Limits: runtimeconfig.DefaultLimits, Resources: runtimeconfig.DefaultResources},
-		ListenAddress: "127.0.0.1:0", WorkspaceRoot: root, InboxPath: filepath.Join(root, "Inbox"), MachineID: "machine_test",
+		ListenAddress: "127.0.0.1:0", WorkspaceRoot: root, InboxPath: func() (string, error) { return filepath.Join(root, "Inbox"), nil }, MachineID: "machine_test",
 	}, HostDependencies{
 		SessionLauncherFactory: machineTestLauncherFactory,
 		Authorizer:             func(string) (server.Authorizer, error) { return hostAuthorizer{}, nil },

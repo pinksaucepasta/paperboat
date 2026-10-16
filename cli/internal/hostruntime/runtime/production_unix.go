@@ -169,7 +169,13 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	if registrationErr != nil || machineRegistration.MachineID != machineID || !filepath.IsAbs(machineRegistration.InboxPath) || filepath.Clean(machineRegistration.InboxPath) != machineRegistration.InboxPath {
 		return nil, errors.Join(ErrProductionInvalid, registrationErr)
 	}
-	inboxPath := machineRegistration.InboxPath
+	inboxPath := func() (string, error) {
+		registration, err := identityStore.Registration()
+		if err != nil || registration.MachineID != machineID {
+			return "", errors.Join(ErrProductionInvalid, err)
+		}
+		return registration.InboxPath, nil
+	}
 	// Host enrollment uses the renewable helper token and proof for managed SSH.
 	managedSSHIdentity := managedSSHIdentitySource(renewingMachineIdentity{tokens: renewingTokens, proofs: enrollment.ProofSource{StateRoot: runtimeConfig.StateRoot}})
 	networkFingerprintSecret, err := identityStore.NetworkFingerprintSecret()

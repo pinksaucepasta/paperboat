@@ -193,7 +193,7 @@ type CreateRequest struct {
 
 type Config struct {
 	Root                     string
-	PublishRoot              string
+	PublishRoot              func() (string, error)
 	LocalMachineID           string
 	Store                    *store.Store
 	Now                      func() time.Time
@@ -823,133 +823,6 @@ func (s *Service) OpenContent(ctx context.Context, id string) (*os.File, store.F
 		return nil, transfer, &Error{Code: StorageUnavailable, Cause: err}
 	}
 	return file, transfer, nil
-}
-
-func (s *Service) PublishedPath(ctx context.Context, id string) (string, error) {
-	releaseMutation, err := s.admitMutation(ctx)
-	if err != nil {
-		return "", err
-	}
-	defer releaseMutation()
-	transfer, err := s.config.Store.FileTransfer(ctx, id)
-	if err != nil {
-		return "", lookupFailure(err)
-	}
-	if transfer.DestinationMachineID != s.config.LocalMachineID || transfer.State != "published" {
-		return "", &Error{Code: InvalidPath}
-	}
-	contentPath := s.contentPath(id)
-	if s.config.PublishRoot != "" {
-		return s.publishToRoot(contentPath, transfer)
-	}
-	path := s.publishedPath(transfer)
-	if err := os.Link(contentPath, path); err != nil && !errors.Is(err, os.ErrExist) {
-		return "", &Error{Code: StorageUnavailable, Cause: err}
-	}
-	contentInfo, contentErr := os.Stat(contentPath)
-	info, err := os.Lstat(path)
-	if contentErr != nil || err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || !os.SameFile(contentInfo, info) {
-		return "", &Error{Code: StorageUnavailable, Cause: errors.Join(contentErr, err)}
-	}
-	if err := syncDir(s.config.Root); err != nil {
-		return "", &Error{Code: StorageUnavailable, Cause: err}
-	}
-	return path, nil
-}
-
-// ExistingPublishedPath resolves the already-published destination without
-// creating or repairing any filesystem entry. Status requests use this path so
-// a read-only inspection can report the exact collision-resolved Inbox name.
-func (s *Service) ExistingPublishedPath(ctx context.Context, id string) (string, error) {
-	transfer, err := s.config.Store.FileTransfer(ctx, id)
-	if err != nil {
-		return "", lookupFailure(err)
-	}
-	if transfer.DestinationMachineID != s.config.LocalMachineID || transfer.State != "published" {
-		return "", &Error{Code: InvalidPath}
-	}
-	contentInfo, err := os.Stat(s.contentPath(id))
-	if err != nil {
-		return "", &Error{Code: StorageUnavailable, Cause: err}
-	}
-	if s.config.PublishRoot == "" {
-		path := s.publishedPath(transfer)
-		matches, matchErr := publishedFileMatches(contentInfo, path)
-		if matchErr != nil {
-			return "", &Error{Code: StorageUnavailable, Cause: matchErr}
-		}
-		if !matches {
-			return "", &Error{Code: InvalidPath}
-		}
-		return path, nil
-	}
-	root := filepath.Clean(s.config.PublishRoot)
-	if !filepath.IsAbs(root) || root != s.config.PublishRoot {
-		return "", &Error{Code: StorageUnavailable, Cause: errors.New("publish root is invalid")}
-	}
-	for index := 1; index <= 10000; index++ {
-		path := filepath.Join(root, publishedName(transfer.Basename, index))
-		matches, matchErr := publishedFileMatches(contentInfo, path)
-		if matchErr != nil {
-			return "", &Error{Code: StorageUnavailable, Cause: matchErr}
-		}
-		if matches {
-			return path, nil
-		}
-	}
-	return "", &Error{Code: InvalidPath}
-}
-
-func publishedFileMatches(contentInfo os.FileInfo, path string) (bool, error) {
-	info, err := os.Lstat(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	return info.Mode().IsRegular() && info.Mode()&os.ModeSymlink == 0 && os.SameFile(contentInfo, info), nil
-}
-
-func (s *Service) publishToRoot(contentPath string, transfer store.FileTransfer) (string, error) {
-	root := filepath.Clean(s.config.PublishRoot)
-	if !filepath.IsAbs(root) || root != s.config.PublishRoot {
-		return "", &Error{Code: StorageUnavailable, Cause: errors.New("publish root is invalid")}
-	}
-	if err := os.MkdirAll(root, 0o700); err != nil {
-		return "", &Error{Code: StorageUnavailable, Cause: err}
-	}
-	if err := os.Chmod(root, 0o700); err != nil {
-		return "", &Error{Code: StorageUnavailable, Cause: err}
-	}
-	contentInfo, err := os.Stat(contentPath)
-	if err != nil {
-		return "", &Error{Code: StorageUnavailable, Cause: err}
-	}
-	for index := 1; index <= 10000; index++ {
-		path := filepath.Join(root, publishedName(transfer.Basename, index))
-		info, statErr := os.Lstat(path)
-		if statErr == nil {
-			if info.Mode().IsRegular() && info.Mode()&os.ModeSymlink == 0 && os.SameFile(contentInfo, info) {
-				return path, nil
-			}
-			continue
-		}
-		if !errors.Is(statErr, os.ErrNotExist) {
-			return "", &Error{Code: StorageUnavailable, Cause: statErr}
-		}
-		if err := os.Link(contentPath, path); err != nil {
-			if errors.Is(err, os.ErrExist) {
-				continue
-			}
-			return "", &Error{Code: StorageUnavailable, Cause: err}
-		}
-		if err := syncDir(root); err != nil {
-			return "", &Error{Code: StorageUnavailable, Cause: err}
-		}
-		return path, nil
-	}
-	return "", &Error{Code: StorageUnavailable, Cause: errors.New("inbox name collision limit reached")}
 }
 
 func publishedName(basename string, index int) string {

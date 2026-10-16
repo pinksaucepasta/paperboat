@@ -503,7 +503,7 @@ func task44TransferFile(t *testing.T, parent context.Context, verifier auth.Veri
 	if !policy.Valid() {
 		t.Fatal("invalid bounded file fixture policy")
 	}
-	service, err := hosttransfer.New(hosttransfer.Config{Root: filepath.Join(root, "spool"), PublishRoot: filepath.Join(root, "inbox"), LocalMachineID: machineID, Store: durable, Policy: hosttransfer.NewPolicyStore(policy)})
+	service, err := hosttransfer.New(hosttransfer.Config{Root: filepath.Join(root, "spool"), PublishRoot: func() (string, error) { return filepath.Join(root, "inbox"), nil }, LocalMachineID: machineID, Store: durable, Policy: hosttransfer.NewPolicyStore(policy)})
 	if err != nil {
 		return "file_service_failed"
 	}

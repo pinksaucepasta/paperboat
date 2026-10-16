@@ -285,7 +285,7 @@ func TestServerIssuedCrossAccountNativeRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer durable.Close()
-	transferService, err := hosttransfer.New(hosttransfer.Config{Root: filepath.Join(transferRoot, "spool"), PublishRoot: filepath.Join(transferRoot, "inbox"), LocalMachineID: fixture.Machine.EndpointID, Store: durable})
+	transferService, err := hosttransfer.New(hosttransfer.Config{Root: filepath.Join(transferRoot, "spool"), PublishRoot: func() (string, error) { return filepath.Join(transferRoot, "inbox"), nil }, LocalMachineID: fixture.Machine.EndpointID, Store: durable})
 	if err != nil {
 		t.Fatal(err)
 	}

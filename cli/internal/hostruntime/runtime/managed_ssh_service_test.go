@@ -82,7 +82,7 @@ func TestOptionalSSHFailureKeepsUnifiedRuntimeUsableAndRecovers(t *testing.T) {
 		return authority, nil
 	}}
 	root := t.TempDir()
-	host, err := NewHost(t.Context(), HostConfig{Runtime: runtimeconfig.Config{StateRoot: root, Version: "test", Limits: runtimeconfig.DefaultLimits, Resources: runtimeconfig.DefaultResources}, ListenAddress: "127.0.0.1:0", WorkspaceRoot: root, MachineID: "machine_test", InboxPath: root}, HostDependencies{Authorizer: func(string) (server.Authorizer, error) { return hostAuthorizer{}, nil }, SessionLauncherFactory: machineTestLauncherFactory, ManagedSSHService: service, Capabilities: gate})
+	host, err := NewHost(t.Context(), HostConfig{Runtime: runtimeconfig.Config{StateRoot: root, Version: "test", Limits: runtimeconfig.DefaultLimits, Resources: runtimeconfig.DefaultResources}, ListenAddress: "127.0.0.1:0", WorkspaceRoot: root, MachineID: "machine_test", InboxPath: func() (string, error) { return root, nil }}, HostDependencies{Authorizer: func(string) (server.Authorizer, error) { return hostAuthorizer{}, nil }, SessionLauncherFactory: machineTestLauncherFactory, ManagedSSHService: service, Capabilities: gate})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -175,7 +175,7 @@ func TestBatchCompletionPublishesEveryFileAtomically(t *testing.T) {
 func TestPublishedPathUsesInboxAndResolvesCollisionsIdempotently(t *testing.T) {
 	service, durable, root := newService(t)
 	inbox := filepath.Join(root, "Paperboat Inbox")
-	service.config.PublishRoot = inbox
+	service.config.PublishRoot = func() (string, error) { return inbox, nil }
 	if err := os.MkdirAll(inbox, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -1051,5 +1051,67 @@ func TestCancelStoreFailurePreservesPartialAndSignals(t *testing.T) {
 	case <-service.CancellationSignal(created[0].ID):
 		t.Fatal("failed storage transition signaled cancellation")
 	default:
+	}
+}
+
+func TestInboxChangeKeepsPublishedHistoryAndUsesNewDestination(t *testing.T) {
+	service, durable, root := newService(t)
+	firstRoot, secondRoot := filepath.Join(root, "first"), filepath.Join(root, "second")
+	currentRoot := firstRoot
+	service.config.PublishRoot = func() (string, error) { return currentRoot, nil }
+	publish := func(receiver *Service, batch string) string {
+		t.Helper()
+		data := []byte(batch)
+		request := requestFor(data)
+		request.BatchID = batch
+		created, err := receiver.Create(t.Context(), request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := receiver.Append(t.Context(), created[0].ID, 0, bytes.NewReader(data)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := receiver.Complete(t.Context(), created[0].ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := receiver.PublishedPath(t.Context(), created[0].ID); err != nil {
+			t.Fatal(err)
+		}
+		return created[0].ID
+	}
+	first := publish(service, "first-batch")
+	currentRoot = secondRoot
+	second := publish(service, "second-batch")
+	config := service.config
+	restarted, err := New(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(firstRoot, "data.bin")
+	if got, err := restarted.ExistingPublishedPath(t.Context(), first); err != nil || got != want {
+		t.Fatalf("changed Inbox lost the original receipt: path=%q err=%v", got, err)
+	}
+	// A crash may leave a durable destination before its hard link exists.
+	if err := os.Remove(want); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := restarted.ExistingPublishedPath(t.Context(), first); !hasCode(err, InvalidPath) {
+		t.Fatalf("read-only lookup repaired an unfinished publication: %v", err)
+	}
+	if got, err := restarted.PublishedPath(t.Context(), first); err != nil || got != want {
+		t.Fatalf("retried completion moved the original file: path=%q err=%v", got, err)
+	}
+	if got, err := restarted.ExistingPublishedPath(t.Context(), second); err != nil || got != filepath.Join(secondRoot, "data.bin") {
+		t.Fatalf("new transfer ignored the new Inbox: path=%q err=%v", got, err)
+	}
+	for id, want := range map[string]string{first: filepath.Join(firstRoot, "data.bin"), second: filepath.Join(secondRoot, "data.bin")} {
+		record, err := durable.FileTransfer(t.Context(), id)
+		if err != nil || record.ReceiptPath != want {
+			t.Fatalf("durable receipt path=%q want=%q err=%v", record.ReceiptPath, want, err)
+		}
+	}
+	entries, err := os.ReadDir(secondRoot)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("retried history duplicated content: entries=%d err=%v", len(entries), err)
 	}
 }
