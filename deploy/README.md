@@ -94,7 +94,10 @@ The controller records the serving container in protected `server-rollout.json`.
 Old containers stay alive while their namespace has accepted live TCP connections,
 including long HTTP responses and control streams. Run `--reap` periodically and
 before the next upgrade; it removes an old container only after those connections
-finish. There is no session-killing retirement deadline. Two retained generations
+finish. Install `paperboat-server-reap.service` and `.timer` in `/etc/systemd/system/`
+and enable the timer to perform this check every minute. Each check is bounded;
+it retains live connections for the next check. There is no session-killing
+retirement deadline. Two retained generations
 block the next rollout with an actionable message instead of accumulating processes.
 Caddy retains in-flight HTTP responses during reload; server browser WebSocket
 endpoints would additionally need explicit proxy stream preservation before use.

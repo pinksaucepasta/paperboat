@@ -1,0 +1,9 @@
+[Unit]
+Description=Check for drained Paperboat server generations
+[Timer]
+OnBootSec=60
+OnUnitInactiveSec=60
+RandomizedDelaySec=5
+Unit=paperboat-server-reap.service
+[Install]
+WantedBy=timers.target
