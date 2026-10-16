@@ -65,22 +65,6 @@ plane. Before selecting a fallback, test real browsers and restrictive networks,
 output, resize, replay, background-tab recovery, reconnect, revocation and cleanup. This is
 planning direction only, not implementation or deployment evidence.
 
-## Codex and OpenCode remote command integrations — deferred
-
-Recorded 2026-09-08 by Codex at explicit user direction. Neither `pb codex` nor
-`pb opencode` belongs in the current main-branch product or launch acceptance.
-Preserve the existing Codex implementation on `archive/codex-integration` in the
-Paperboat CLI, server and web repositories, then remove its command, runtime/API
-integration, UI entry points and pinned protocol/path-manifest machinery from main.
-OpenCode has no current command implementation to preserve.
-
-Revisit thin wrappers around the tools' standard remote commands, retaining useful
-machine/project/folder selection and authenticated transport/process cleanup. Avoid
-maintaining upstream protocol schemas or path-rewrite manifests. Verify supported
-remote/platform behavior before choosing an implementation; archived Windows workarounds
-are reference evidence, not a requirement to restore that design. Normal use of these
-tools through a PB terminal or managed SSH is unaffected.
-
 ## Remote desktop beta — deferred former Task 38
 
 Moved from TRACKER.md on 2026-09-08 by Codex at user direction. Not scheduled,

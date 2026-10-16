@@ -211,7 +211,7 @@ consumers. 1.4c's shared admission/reattach packages also move into `shared/`.
 
 ### 1.6 Not in this launch
 
-Generic UDP, SDK, WebTransport browser terminal, Codex/OpenCode integrations, remote desktop,
+Generic UDP, SDK, WebTransport browser terminal, remote desktop,
 PostHog, agent skill (all in WHITEBOARD.md), desktop app, e2e harness. Operator admin
 console frontend: **USER DECIDES**. Inspector capture/replay: ships only if it already works
 (F7-07 checks it); no new inspector work.
@@ -1491,3 +1491,5 @@ file | note`. Row-level evidence goes in CHECKLIST.md.
 2026-10-16 | Lane A F4-03 cause found | Renewed native grants put a new access-session instance in AssignmentID; durable journal binding incorrectly hashed it, causing replacement-open conflict/503. Workspace reproduction fails before the binding fix; Lane B field comparison no longer needed.
 
 2026-10-16 | Lane A request for Lane B F3 cleanup | Smoke-only terminal_ae7afd5c-1a39-4f6b-8363-4793a1462fd3 remains cloud-closing after UI close raced candidate install; exact owned shell removed. Resolved by Lane B exact-record closed/closed reconciliation above; no F3 success claimed from that earlier probe.
+
+2026-10-16 | User drops Codex/OpenCode integrations permanently | Lane A, Lane B, pass 2 | — | Agents use pb exec/ssh/terminal like any tool. Leftover "codex" stream consumer and codex_manage/codex_connect credential classes remain in cli (localapi/types.go, native/session.go, tunnel/native_runtime.go, tailnet/authority.go, hostruntime/server) and server (resourceusage, db models). Remove them with the producer/consumer/test changes together in the pass-2 cleanup, not now.
