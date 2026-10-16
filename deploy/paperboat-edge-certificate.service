@@ -7,5 +7,5 @@ Wants=network-online.target
 Type=oneshot
 EnvironmentFile=/etc/paperboat-edge-certificate.env
 ExecStart=/usr/local/lib/paperboat-selfhost/edge-ip-certificate.py
-TimeoutStartSec=360
+TimeoutStartSec=420
 UMask=0077

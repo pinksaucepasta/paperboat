@@ -8,6 +8,26 @@ from pathlib import Path
 import subprocess
 
 
+def stop_owned_edge(state, log):
+    ids = subprocess.check_output(["docker", "ps", "--filter", "label=io.paperboat.pbh-owner",
+                                   "--format", "{{.ID}}"], text=True, timeout=10).splitlines()
+    if not ids:
+        return
+    if len(ids) > 16:
+        raise RuntimeError("too many self-host containers; inspect ownership before certificate renewal")
+    containers = json.loads(subprocess.check_output(["docker", "inspect", *ids], timeout=10))
+    owned = [item for item in containers
+             if item["Config"].get("Labels", {}).get("io.paperboat.pbh-owner")
+             and item["Config"].get("Cmd") == ["run", "--state-dir", str(state / "tunnel")]
+             and any(m.get("Type") == "bind" and m.get("Source") == str(state)
+                     and m.get("Destination") == str(state) for m in item.get("Mounts", []))]
+    if len(owned) > 1:
+        raise RuntimeError("ambiguous edge ownership; inspect containers before certificate renewal")
+    for item in owned:
+        subprocess.run(["docker", "stop", "--time", "10", item["Id"]],
+                       stdout=log, stderr=subprocess.STDOUT, check=True, timeout=20)
+
+
 def renew(args):
     os.umask(0o077)
     state = Path(args.state_dir).resolve()
@@ -34,6 +54,7 @@ def renew(args):
         run("stop edge for HTTP certificate validation", ["systemctl", "stop", args.service])
         primary = None
         try:
+            stop_owned_edge(state, log)
             run("issue public IP certificate", [
                 "docker", "run", "--rm", "--network", "host", "--mount",
                 "type=bind,source=" + str(acme) + ",target=/etc/letsencrypt",

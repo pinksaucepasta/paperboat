@@ -19,6 +19,7 @@ class EdgeCertificateLifecycleTest(unittest.TestCase):
                 (state / "tunnel").mkdir(parents=True)
                 (state / "tunnel/deployment.json").write_text(json.dumps({"connector_advertise_host": "93.184.216.34"}))
                 (root / "active").write_text("yes")
+                (root / "edge-running").touch()
                 if current:
                     cert = state / "public-acme/live/paperboat-edge-ip/fullchain.pem"
                     cert.parent.mkdir(parents=True)
@@ -26,12 +27,20 @@ class EdgeCertificateLifecycleTest(unittest.TestCase):
                 binaries = root / "bin"
                 binaries.mkdir()
                 executable = '''#!/usr/bin/python3
-import os,pathlib,sys
+import os,pathlib,sys,json
 root=pathlib.Path(os.environ['CERTIFICATE_FIXTURE'])
 name=pathlib.Path(sys.argv[0]).name
 with (root/'events').open('a') as out: out.write(name+' '+sys.argv[1]+'\\n')
 if name=='systemctl': (root/'active').write_text('yes' if sys.argv[1]=='start' else 'no')
+if name=='docker' and sys.argv[1]=='ps':
+ print('owned-edge'); sys.exit(0)
+if name=='docker' and sys.argv[1]=='inspect':
+ state=str(root/'installation')
+ print(json.dumps([{'Id':'owned-edge','Config':{'Labels':{'io.paperboat.pbh-owner':'fixture'},'Cmd':['run','--state-dir',state+'/tunnel']},'Mounts':[{'Type':'bind','Source':state,'Destination':state}]}])); sys.exit(0)
+if name=='docker' and sys.argv[1]=='stop':
+ (root/'edge-running').unlink(); sys.exit(0)
 if name=='docker':
+ if (root/'edge-running').exists(): sys.exit(26)
  if os.environ['CERTIFICATE_FAIL']=='1': sys.exit(23)
  (root/'issued').touch()
 if name=='pbh' and not (root/'issued').exists(): sys.exit(24)
@@ -51,7 +60,7 @@ if name=='pbh' and not (root/'issued').exists(): sys.exit(24)
                 self.assertEqual((root / "active").read_text(), "yes")
                 events = (root / "events").read_text().splitlines()
                 expected = (["openssl x509"] if current else
-                            ["systemctl stop", "docker run"] + ([] if failure else ["pbh configure-tls"]) + ["systemctl start"])
+                            ["systemctl stop", "docker ps", "docker inspect", "docker stop", "docker run"] + ([] if failure else ["pbh configure-tls"]) + ["systemctl start"])
                 self.assertEqual(events, expected)
                 if failure:
                     self.assertIn("issue public IP certificate failed", result.stdout)
