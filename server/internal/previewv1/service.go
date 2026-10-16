@@ -1017,6 +1017,9 @@ func previewView(row previewtunnelstore.PreviewLeaseRecord) Preview {
 		endpoint = *row.PublicEndpoint
 	}
 	edgeState := row.EdgeState
+	if row.ManagedDNSPending && edgeState == "ready" {
+		edgeState = "pending"
+	}
 	if edgeState == "released" {
 		edgeState = "down"
 	}

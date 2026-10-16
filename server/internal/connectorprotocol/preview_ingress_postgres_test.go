@@ -108,6 +108,32 @@ func TestPublicPreviewIngressPostgres(t *testing.T) {
 	exec(`INSERT INTO tunnel_certificate_records(id,domain_id,account_id,hostname,domain_generation,certificate_generation,strategy,state,certificate_reference,master_key_reference,certificate_ciphertext,private_key_ciphertext,fingerprint,issuer,not_before,expires_at,renewal_at,target_kind) VALUES($1,'platform_cert_public_v1','platform_system_v1',$2,1,1,'platform_dns01','active','fixture','fixture',decode(repeat('ab',29),'hex'),decode(repeat('ab',29),'hex'),decode(repeat('ab',32),'hex'),'fixture',$3,$4,$3,'platform_wildcard')`, certificate, "*.preview.example.test", now.Add(-time.Hour), now.Add(time.Hour))
 	exec(`INSERT INTO tunnel_certificate_edge_distributions(certificate_id,edge_node_id,edge_process_epoch,edge_assignment_generation,state,observed_certificate_generation) VALUES($1,$2,$3,1,'active',1)`, certificate, node, epoch)
 	dns(1)
+	publicationStore, err := previewtunnelstore.New(f.database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicationReady := func(want bool) {
+		t.Helper()
+		lease, err := publicationStore.GetPreviewLeaseV1(ctx, f.accountID, preview)
+		if err != nil || lease.ManagedDNSPending == want {
+			t.Fatalf("preview publication ready=%v want=%v: %v", !lease.ManagedDNSPending, want, err)
+		}
+	}
+	publicationReady(false)
+	exec(`INSERT INTO edge_dns_publications(hostname,owner_id,resource_generation,readiness_version,observed_at,valid_until,publication_generation,desired_addresses,state,created_at,updated_at,verified_at) VALUES($1,$2,1,'fixture',$3,$4,1,'["8.8.8.8"]','submitted',$3,$3,NULL)`, hostname, preview, now, now.Add(time.Hour))
+	t.Cleanup(func() {
+		_, _ = f.database.SQL().ExecContext(ctx, `DELETE FROM edge_dns_publications WHERE owner_id=$1`, preview)
+	})
+	publicationReady(false)
+	exec(`UPDATE edge_dns_publications SET state='verified',verified_at=$2 WHERE owner_id=$1`, preview, now)
+	publicationReady(true)
+	exec(`UPDATE edge_dns_publications SET desired_addresses='["8.8.4.4"]' WHERE owner_id=$1`, preview)
+	publicationReady(false)
+	exec(`UPDATE edge_dns_publications SET desired_addresses='["8.8.8.8"]',valid_until=now()-interval '1 second' WHERE owner_id=$1`, preview)
+	publicationReady(false)
+	exec(`UPDATE edge_dns_publications SET valid_until=$2 WHERE owner_id=$1`, preview, now.Add(time.Hour))
+	publicationReady(true)
+	exec(`DELETE FROM edge_dns_publications WHERE owner_id=$1`, preview)
 	beforeRenewal, err := f.database.Queries().ListReadyEdgeDNSAddressesV1(ctx, dbsqlc.ListReadyEdgeDNSAddressesV1Params{TunnelID: preview, Hostname: hostname, Now: sql.NullTime{Time: now, Valid: true}})
 	if err != nil {
 		t.Fatal(err)
@@ -202,7 +228,7 @@ func TestPublicPreviewIngressPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	lease, err := store.GetPreviewLeaseV1(ctx, f.accountID, preview)
+	lease, err := publicationStore.GetPreviewLeaseV1(ctx, f.accountID, preview)
 	if err != nil {
 		t.Fatal(err)
 	}
