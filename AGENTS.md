@@ -137,11 +137,15 @@ Goal: every main-path row on L and M `[x]`, as fast as possible.
 - **Short Log lines.** Max 3 lines per PLAN.md Log entry: rows ticked, commits, blocker. No
   narratives.
 - **No isolated worktrees for finished work.** Rebase onto `main` and push the same hour.
-- **Next rows.** Lane A: F4–F7 remaining main paths, then F8–F12 main paths; S1-01 CLI domain
-  literals when touching those files. Lane B, when every server main path waits on A/C: start
-  pass-2 server work instead of idling — server and edge deploys must not cut live sessions
-  (no 502s during rollout), then S3-07 server/shared part (remove codex consumer and credential
-  classes together with Lane A's consumers, logged as one request), then server edge-case rows.
+- **Next rows, in this order.** Lane A: (1) F1-01/S3-02: run the published one-liner install +
+  pair on L and M, it is unblocked; (2) re-run F6-04, F7-05, F8-01 on server13, tick what passes;
+  (3) real product bugs: F9-02 explicit access fails on 3 of 4 pairs, F7-05 HTTP/2 EOF on HP and
+  WebSocket EOF on Apple, F2-01 doctor right after login; (4) F8–F12 main paths. Lane B: F1-10
+  shared reset payload/sign/verify owner in shared/ (Lane A waits on it), then pass-2 server work
+  (S3-07, server edge-case rows).
+- **Product before harness.** Smoke code changes only when a row being ticked needs them. A
+  commit that adds diagnostics, fixtures or receipts without ticking a row or fixing a product
+  bug is not progress; reuse the existing checks.
 - **Deploy when ready.** Lane B deploys a staged server/edge build as soon as its gate passes
   (rollouts no longer cut sessions); no waiting for a shared window. Rows that need a paid team
   before Stripe keys exist: Lane B grants the paid entitlement to the test team directly as test
