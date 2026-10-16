@@ -12,6 +12,7 @@ import {
 import { useId, useState } from "react"
 import {
   billingQuery,
+  usageSinceQuery,
   trafficBreakdown,
   useApiQuery,
   usageQuery,
@@ -58,7 +59,7 @@ export function UsageLimits() {
         {machines.data && <Machines machines={machines.data} />}
       </Card>
       <Card label="Hosted allowance" loading={!workspace || billing.isPending} failed={billing.isError}>
-        {billing.data && <Allowance billing={billing.data} />}
+        {billing.data && workspace && <Allowance billing={billing.data} workspace={workspace.id} />}
       </Card>
       <Card
         label="Bandwidth"
@@ -201,45 +202,77 @@ const resetFormat = new Intl.DateTimeFormat(undefined, { month: "short", day: "n
  * What is left of this period's allowance for traffic through Paperboat's hosted relays and
  * edge. Direct and self-hosted traffic are free and not counted here.
  */
-function Allowance({ billing }: { billing: BillingWorkspace }) {
+function Allowance({ billing, workspace }: { billing: BillingWorkspace; workspace: string }) {
   const used = billing.usage_bytes
   const allowance = billing.allowance_bytes
   const resets = billing.period_end ? `Resets ${resetFormat.format(new Date(billing.period_end))}` : null
-  if (allowance === null) {
-    return (
-      <div className="flex flex-col gap-1.5">
-        <Figure>{formatBytes(used)}</Figure>
-        <span className="text-xs text-muted-foreground">Used, no limit{resets && ` · ${resets}`}</span>
-      </div>
-    )
-  }
-  const share = allowance > 0 ? Math.min(1, used / allowance) : 1
-  const out = used >= allowance
+  // The period's hosted traffic by path; before a period exists, this calendar month.
+  const now = new Date()
+  const start = billing.period_start ?? new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
+  const usage = useApiQuery(usageSinceQuery(workspace, start))
+  const split = usage.data && trafficBreakdown(usage.data.totals.by_path, "managed").byPath
+  const hosted = split ? split.relay + split.edge : 0
+  const share = allowance === null ? 0 : allowance > 0 ? Math.min(1, used / allowance) : 1
+  const out = allowance !== null && used >= allowance
+
   return (
     <div className="flex flex-1 flex-col gap-1.5">
-      <span className="flex items-baseline gap-2">
-        <Figure>{formatBytes(Math.max(0, allowance - used))}</Figure>
-        <span className="text-sm text-muted-foreground">left</span>
-      </span>
-      <span className="text-xs text-muted-foreground">
-        {formatBytes(used)} of {formatBytes(allowance)} used{resets && ` · ${resets}`}
-      </span>
-      <div
-        role="meter"
-        aria-label="Hosted allowance used"
-        aria-valuemin={0}
-        aria-valuemax={allowance}
-        aria-valuenow={Math.min(used, allowance)}
-        className="mt-auto h-1.5 overflow-hidden rounded-full bg-muted"
-      >
-        <div
-          className={cn("h-full rounded-full", out ? "bg-destructive" : "bg-primary")}
-          style={{ width: `${share * 100}%` }}
-        />
+      {allowance === null ? (
+        <>
+          <Figure>{formatBytes(used)}</Figure>
+          <span className="text-xs text-muted-foreground">Used, no limit{resets && ` · ${resets}`}</span>
+        </>
+      ) : (
+        <>
+          <span className="flex items-baseline gap-2">
+            <Figure>{formatBytes(Math.max(0, allowance - used))}</Figure>
+            <span className="text-sm text-muted-foreground">left</span>
+          </span>
+          <span className="text-xs text-muted-foreground">
+            {formatBytes(used)} of {formatBytes(allowance)} used{resets && ` · ${resets}`}
+          </span>
+        </>
+      )}
+      {/* The floor: the meter, split by path in the bandwidth card's colours, and its legend. */}
+      <div className="mt-auto flex flex-col gap-2.5">
+        {allowance !== null && (
+          <div
+            role="meter"
+            aria-label="Hosted allowance used"
+            aria-valuemin={0}
+            aria-valuemax={allowance}
+            aria-valuenow={Math.min(used, allowance)}
+            className="flex h-1.5 overflow-hidden rounded-full bg-muted"
+          >
+            {out || !hosted ? (
+              <div className={out ? "bg-destructive" : "bg-primary"} style={{ width: `${share * 100}%` }} />
+            ) : (
+              paths
+                .filter((path) => path.mode !== "direct")
+                .map((path) => (
+                  <div
+                    key={path.mode}
+                    className={path.dot}
+                    style={{ width: `${(share * 100 * split![path.mode as "relay" | "edge"]) / hosted}%` }}
+                  />
+                ))
+            )}
+          </div>
+        )}
+        <span className="flex items-center gap-4 text-xs text-muted-foreground">
+          {paths
+            .filter((path) => path.mode !== "direct")
+            .map((path) => (
+              <Mark key={path.mode} icon={<span className={cn("size-2 rounded-full", path.dot)} />}>
+                {path.label} {usage.data ? formatBytes(split![path.mode]) : "…"}
+              </Mark>
+            ))}
+        </span>
       </div>
     </div>
   )
 }
+
 const paths: { mode: PathMode; label: string; color: string; dot: string }[] = [
   { mode: "direct", label: "Direct", color: "text-path-direct", dot: "bg-path-direct" },
   { mode: "relay", label: "Relay", color: "text-path-relay", dot: "bg-path-relay" },

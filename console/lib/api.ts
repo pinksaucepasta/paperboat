@@ -241,6 +241,16 @@ export const billingQuery = (workspace: Workspace | undefined) =>
     staleTime: minute,
   })
 
+/** Usage from `start` until now, for a window that is not one of the card's periods. */
+export const usageSinceQuery = (workspace: string, start: string) =>
+  queryOptions({
+    queryKey: ["usage-since", workspace, start],
+    queryFn: () =>
+      api<Usage>(`usage?${new URLSearchParams({ start, end: new Date().toISOString(), limit: "1", workspace })}`),
+    enabled: Boolean(workspace && start),
+    staleTime: 5 * minute,
+  })
+
 export type PathMode = "direct" | "relay" | "edge"
 
 /** Whose infrastructure carried traffic: any, Paperboat's relays and edges, or self-hosted ones. */
