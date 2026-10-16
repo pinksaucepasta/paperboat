@@ -31,6 +31,9 @@ class SmokePrerequisiteTest(unittest.TestCase):
                 "git": """#!/bin/sh
 case "$1" in
   merge-base) echo base;;
+  log) echo abc1234;;
+  ls-tree)
+    case "$2" in HEAD|base|abc1234) echo '040000 tree fixture-runtime cli';; *) exit 1;; esac;;
   diff) if [ "$2" = --quiet ]; then exit 0; fi; echo cli/runtime.go;;
   rev-parse)
     if [ "$2" = --verify ] && [ "$3" != 'abc1234^{commit}' ]; then exit 1; fi
