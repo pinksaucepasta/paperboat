@@ -69,7 +69,7 @@ func TestTunnelRouteSelectorsResolveNamesToCanonicalIDs(t *testing.T) {
 				updated.Generation = 2
 				updated.ETag = `"route:route_1:2"`
 				operation := validCommandOperation("route", route.ID)
-				operation.State = "succeeded"
+				operation.State = "running"
 				_ = json.NewEncoder(w).Encode(map[string]any{"data": operation})
 			case r.Method == http.MethodGet && r.URL.Path == "/v1/tunnels/tun_1/routes/route_1":
 				w.Header().Set("ETag", updated.ETag)

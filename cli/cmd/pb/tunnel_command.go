@@ -2604,7 +2604,7 @@ func routeUpdateCommand() *cobra.Command {
 		if e != nil {
 			return e
 		}
-		if out.Operation.State == "succeeded" && out.Route.Schema == "" {
+		if out.Route.Schema == "" {
 			out.Route, e = retryTunnelRead(ctx, func() (api.TunnelRoute, error) {
 				return c.GetTunnelRouteV1(ctx, tunnelID, current.ID)
 			})
