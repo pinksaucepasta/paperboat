@@ -98,6 +98,8 @@ func (q *Queries) ListEdgeDNSPublicationNamesV1(ctx context.Context, tunnelID st
 const listEdgeDNSPublicationResourcesV1 = `-- name: ListEdgeDNSPublicationResourcesV1 :many
 SELECT id, max(generation)::bigint AS generation FROM (
  SELECT id,generation FROM tunnels
+  WHERE desired_state='active' AND deleted_at IS NULL
+   AND (expires_at IS NULL OR expires_at>statement_timestamp())
  UNION ALL SELECT id,1::bigint AS generation FROM preview_leases WHERE terminal_state='active'
  UNION ALL SELECT id,desired_revision AS generation FROM control_routes
   WHERE kind='runtime_https_wss' AND desired_state IN ('attached','replacing')
