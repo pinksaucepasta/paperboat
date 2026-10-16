@@ -258,13 +258,31 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 	var code int
 	var inputCloseFailure error
 	contextDone := c.Context.Done()
-	var cancelDeadline <-chan time.Time
-	var cancelTimer *time.Timer
-	defer func() {
-		if cancelTimer != nil {
-			cancelTimer.Stop()
+	cancelFinished := false
+	applyCancellation := func(outcome execCancelOutcome) error {
+		cancelFinished = true
+		// The execution owner's result supersedes loss of the retired output
+		// attachment. Preserve unrelated input or I/O failures.
+		if outcome.terminal != nil && (err == nil || retryableExecTransportFailure(err) || execCancellationOnly(err)) {
+			err = outcome.err
+		} else {
+			err = appendExecFailure(err, outcome.err)
 		}
-	}()
+		code = outcome.code
+		if outcome.terminal != nil && !sawTerminalEvent {
+			if writeErr := writeExecEvent(c, encoder, *outcome.terminal, request.PTY, jsonOutput); writeErr != nil {
+				return execCommandFailure{cause: appendExecFailure(err, writeErr), code: 255, presented: jsonOutput}
+			}
+			sawTerminalEvent = true
+		}
+		if c.Context.Err() == context.DeadlineExceeded && (outcome.terminal == nil || outcome.terminal.State == "canceled") {
+			err = appendExecFailure(err, context.DeadlineExceeded)
+		}
+		if abortErr := abortExecAttachment(connection); abortErr != nil {
+			observeExecFailure(workerCtx, abortErr)
+		}
+		return nil
+	}
 	for {
 		events := connection.Events()
 		streamEnded := false
@@ -308,38 +326,29 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 					}
 				}
 			case outcome := <-cancelResult:
-				err = appendExecFailure(err, outcome.err)
-				code = outcome.code
-				if outcome.terminal != nil && !sawTerminalEvent {
-					if writeErr := writeExecEvent(c, encoder, *outcome.terminal, request.PTY, jsonOutput); writeErr != nil {
-						return execCommandFailure{cause: appendExecFailure(err, writeErr), code: 255, presented: jsonOutput}
-					}
-					sawTerminalEvent = true
-				}
-				if c.Context.Err() == context.DeadlineExceeded && (outcome.terminal == nil || outcome.terminal.State == "canceled") {
-					err = appendExecFailure(err, context.DeadlineExceeded)
-				}
-				if abortErr := abortExecAttachment(connection); abortErr != nil {
-					observeExecFailure(workerCtx, abortErr)
+				if applyErr := applyCancellation(outcome); applyErr != nil {
+					return applyErr
 				}
 				streamEnded = true
 			case <-contextDone:
 				contextDone = nil
 				startCancel()
-				if cancelDeadline == nil {
-					cancelTimer = time.NewTimer(30 * time.Second)
-					cancelDeadline = cancelTimer.C
-				}
-			case <-cancelDeadline:
-				err = errors.New("remote execution cancellation outcome is uncertain")
-				_ = abortExecAttachment(connection)
-				streamEnded = true
 			}
 		}
-		if err == nil {
+		if err == nil && !cancelFinished {
 			code, err = connection.Wait()
 		}
-		if cancelRequested.Load() || c.Context.Err() != nil {
+		if c.Context.Err() != nil {
+			startCancel()
+		}
+		if cancelRequested.Load() {
+			// Reattachment may retire the original stream before the cancel
+			// RPC completes. Its bounded owner must finish before CLI teardown.
+			if !cancelFinished {
+				if applyErr := applyCancellation(<-cancelResult); applyErr != nil {
+					return applyErr
+				}
+			}
 			break
 		}
 		if !retryableExecTransportFailure(err) || sawTerminalEvent || recovery.Remaining() == 0 || c.Context.Err() != nil {

@@ -65,12 +65,12 @@ func TestExecRecoveryKeepsItsBudgetAfterTransientReplacementHandshake(t *testing
 	}
 }
 
-func runExecRecoveryHandshake(t *testing.T, transient bool) {
+func execCommandBrokerFixture(t *testing.T, descriptors *atomic.Int32) (string, localapi.Paths, localapi.ServerConfig) {
+	t.Helper()
 	_, configPath := localDaemonReadinessTestConfig(t, true)
-	var opens, descriptors atomic.Int32
 	machine := api.UserMachine{ID: "machine_target", Alias: "target", EnvironmentID: "environment_target", State: "online", Online: true, InstallationGeneration: 1, Platform: runtime.GOOS, WorkspaceRoot: filepath.Dir(configPath)}
-	backend := execRecoveryBackend(t, machine, &descriptors)
-	defer backend.Close()
+	backend := execRecoveryBackend(t, machine, descriptors)
+	t.Cleanup(backend.Close)
 	writeTestProfile(t, filepath.Dir(configPath), configPath, backend.URL)
 	state, err := identity.Open(identity.Config{StateRoot: os.Getenv("PAPERBOAT_RUNTIME_STATE_ROOT")})
 	if err != nil {
@@ -97,6 +97,12 @@ func runExecRecoveryHandshake(t *testing.T, transient bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	return configPath, paths, cfg
+}
+
+func runExecRecoveryHandshake(t *testing.T, transient bool) {
+	var opens, descriptors atomic.Int32
+	configPath, paths, cfg := execCommandBrokerFixture(t, &descriptors)
 	output := &execRecoveryOutput{observed: make(chan struct{})}
 	var operation atomic.Value
 	bridges := make(chan struct{}, 3)
