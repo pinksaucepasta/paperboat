@@ -273,12 +273,12 @@ func (s *Service) completeTerminalBrowserRoute(ctx context.Context, decision Ter
 		}
 		decision.HostWSSURL = runtimeWebsocketBase(httpIngressURL) + "/v1/browser-terminal"
 		if !route.AppliedNodeID.Valid || route.AppliedNodeID.String == "" {
-			return TerminalBrowserDecision{}, ErrTerminalBrowserSessionClosed
+			return TerminalBrowserDecision{}, ErrMachineCapabilityUnavailable
 		}
 		decision.EdgeNodeID = route.AppliedNodeID.String
 		if err := s.db.Pool().QueryRow(ctx, `SELECT process_epoch,endpoint_host FROM paperboat.control_tunnel_nodes WHERE id=$1 AND state='ready' AND ready=true AND public_ingress_verified_at IS NOT NULL`, decision.EdgeNodeID).Scan(&decision.EdgeProcessEpoch, &decision.EdgeEndpointHost); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
-				return TerminalBrowserDecision{}, ErrTerminalBrowserSessionClosed
+				return TerminalBrowserDecision{}, ErrMachineCapabilityUnavailable
 			}
 			return TerminalBrowserDecision{}, err
 		}

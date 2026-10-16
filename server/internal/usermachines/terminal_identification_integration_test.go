@@ -84,6 +84,19 @@ func TestPostgresTerminalLiveIdentificationAuthorization(t *testing.T) {
 	service.ConfigureTerminalSessions(4, signer, nil)
 	runtime := &terminalIdentificationRuntime{signer: signer, machine: machine, environment: environment, account: owner, session: session, route: "https://" + host}
 	service.controlRuntime = runtime
+	// A ready carrier without verified public ingress is temporarily unavailable,
+	// not a missing or closed terminal. Authorization still precedes that check.
+	if _, err = service.ResolveTerminalBrowserRole(ctx, stranger, session); !errors.Is(err, ErrTerminalSessionNotFound) {
+		t.Fatalf("unverified edge disclosed terminal to stranger: %v", err)
+	}
+	if _, err = service.ResolveTerminalBrowserRole(ctx, owner, session); !errors.Is(err, ErrMachineCapabilityUnavailable) {
+		t.Fatalf("unverified edge must preserve terminal availability classification: %v", err)
+	}
+	insert(`UPDATE paperboat.control_tunnel_nodes SET public_ingress_verified_at=now(),endpoint_host='edge.example.test' WHERE id=$1`, edge)
+	decision, err := service.ResolveTerminalBrowserRole(ctx, owner, session)
+	if err != nil || decision.EdgeNodeID != edge || decision.EdgeProcessEpoch != epoch || decision.EdgeEndpointHost != "edge.example.test" || decision.HostWSSURL != "wss://"+host+"/v1/browser-terminal" {
+		t.Fatalf("verified browser route unavailable: %+v error=%v", decision, err)
+	}
 	if _, err = service.TerminalSessionSharing(ctx, stranger, session); !errors.Is(err, ErrTerminalSessionNotFound) {
 		t.Fatalf("unauthorized sharing metadata: %v", err)
 	}
