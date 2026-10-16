@@ -284,3 +284,11 @@ only `pb preview inspect/replay`. Captures stay on the machine (`cli/internal/in
 the console reads them over the same end-to-end encrypted path as the browser terminal, never
 through the server. Needs CLI, server authorization and console work. Not in this launch
 (PLAN.md 1.6).
+
+## ENV in plain SSH and VS Code — later
+
+ENV reaches Paperboat terminals and `pb exec` only; `pb ssh`, plain `ssh` and VS Code Remote-SSH
+get the machine's own sshd environment. An opt-in shell hook (`pb env hook` adding one line to
+bash/zsh/fish startup) would cover them. Open question first: a plain SSH login identifies only a
+unix user, not a Paperboat account or workspace, so the hook must not guess whose values to load.
+Must fail quietly when the vault is locked and never slow shell startup. Build only if users ask.
