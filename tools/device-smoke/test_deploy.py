@@ -88,6 +88,32 @@ class DeviceDeployment(unittest.TestCase):
             self.assertIn('install_failed', result.stdout, 'primary installer receipt must survive failure')
             self.assertFalse(archive.exists())
 
+    def test_installer_answers_administrator_prompt_on_a_real_terminal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            marker = root / 'approved'
+            binary = ('#!/usr/bin/env python3\nimport json,sys\nfrom pathlib import Path\n'
+                      'if "--version" in sys.argv: print(json.dumps({"ok":True,"data":{"version":"dev-fixture"}}))\n'
+                      'else:\n'
+                      ' assert sys.stdin.isatty(), "administrator approval needs a terminal"\n'
+                      ' print("[sudo] password for fixture: ",end="",flush=True)\n'
+                      ' assert input()=="test-admin-secret"\n'
+                      ' Path(' + repr(str(marker)) + ').write_text("approved")\n'
+                      ' print(json.dumps({"ok":True}))\n').encode()
+            archive = root / 'candidate.xz'
+            archive.write_bytes(lzma.compress(binary))
+            request = dict(archive=str(archive), sha256=hashlib.sha256(binary).hexdigest(),
+                           version='dev-fixture', install_timeout=3,
+                           password='test-admin-secret')
+            result = subprocess.run([sys.executable, str(HERE / 'device_install.py')],
+                                    input=json.dumps(request), text=True, capture_output=True,
+                                    timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(json.loads(result.stdout)['ok'])
+            self.assertEqual(marker.read_text(), 'approved')
+            self.assertNotIn('test-admin-secret', result.stdout + result.stderr)
+            self.assertFalse(archive.exists())
+
     def test_transport_timeout_reaps_child_and_keeps_output_private(self):
         with tempfile.TemporaryDirectory() as directory:
             receipt = Path(directory) / 'receipt'

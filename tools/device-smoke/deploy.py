@@ -44,12 +44,12 @@ def deploy(args):
     args.receipts.mkdir(parents=True, exist_ok=True, mode=0o700)
     prefix = []
     env = dict(os.environ)
+    password = env.pop('DEVICE_PASSWORD', '')
     if args.device == 'apple':
-        password = env.pop('DEVICE_PASSWORD')
+        if not password:
+            raise RuntimeError('macOS installation requires DEVICE_PASSWORD')
         env['SSHPASS'] = password
         prefix = ['sshpass', '-e']
-    else:
-        password = ''
     digest = hashlib.sha256(args.binary.read_bytes()).hexdigest()
     remote = '/tmp/paperboat-candidate-' + uuid.uuid4().hex + '.xz'
     options = ['-o', 'ConnectTimeout=15', '-o', 'ServerAliveInterval=15',
@@ -68,7 +68,14 @@ def deploy(args):
                 timeout=budget, receipt=args.receipts / 'upload.log', env=env)
             request = dict(archive=remote, sha256=digest, version=args.version,
                            password=password, install_timeout=args.install_timeout)
-            command = 'python3 -c ' + shlex.quote((HERE / 'device_install.py').read_text())
+            # Ship the existing terminal owner inside the one remote script;
+            # no second upload, remote dependency or copied PTY implementation.
+            script = ('import sys,types\n'
+                      'terminal=types.ModuleType("terminal_command")\n'
+                      'exec(' + repr((HERE / 'terminal_command.py').read_text()) + ',terminal.__dict__)\n'
+                      'sys.modules["terminal_command"]=terminal\n'
+                      + (HERE / 'device_install.py').read_text())
+            command = 'python3 -c ' + shlex.quote(script)
             print(json.dumps({'phase': 'install', 'device': args.device}), flush=True)
             receipt = args.receipts / 'install.json'
             run(prefix + ['ssh', *options, args.ssh_target, command],
@@ -92,7 +99,7 @@ def deploy(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--device', required=True, choices=['hp', 'apple'])
+    parser.add_argument('--device', required=True, choices=['hp', 'apple', 'ubuntu24'])
     parser.add_argument('--ssh-target', required=True)
     parser.add_argument('--binary', required=True, type=Path)
     parser.add_argument('--version', required=True)

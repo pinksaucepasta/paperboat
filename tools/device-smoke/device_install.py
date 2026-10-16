@@ -11,6 +11,32 @@ import subprocess
 import sys
 import tempfile
 
+import terminal_command
+
+
+def run_installer(candidate, request):
+    arguments = [str(candidate), 'install', '--json']
+    if request.get('password') and sys.platform != 'darwin':
+        result = terminal_command.run(arguments, password=request['password'],
+                                      timeout=request['install_timeout'])
+        # sudo's prompt shares the PTY with stdout. Preserve that diagnostic,
+        # but emit the actual installer's JSON receipt separately.
+        sys.stderr.write(result.stdout)
+        receipt = None
+        for line in result.stdout.splitlines():
+            try:
+                value = json.loads(line[line.index('{'):])
+                if isinstance(value, dict) and isinstance(value.get('ok'), bool):
+                    receipt = value
+            except (ValueError, TypeError):
+                continue
+        if receipt is None:
+            raise RuntimeError('supplied installer did not return its JSON receipt')
+        result.stdout = json.dumps(receipt)
+        return result
+    return subprocess.run(arguments, capture_output=True, text=True,
+                          timeout=request['install_timeout'])
+
 
 def install(request):
     archive = Path(request['archive'])
@@ -32,8 +58,7 @@ def install(request):
                 subprocess.run(['security', 'unlock-keychain', '-p', request['password'],
                                 str(Path.home() / 'Library/Keychains/login.keychain-db')],
                                check=True, capture_output=True, timeout=30)
-            result = subprocess.run([str(candidate), 'install', '--json'],
-                                    capture_output=True, text=True, timeout=request['install_timeout'])
+            result = run_installer(candidate, request)
             # Preserve the complete supplied-installer receipt privately at the caller.
             sys.stdout.write(result.stdout)
             sys.stderr.write(result.stderr)
