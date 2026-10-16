@@ -165,10 +165,7 @@ func (s *Service) RecordNative(ctx context.Context, machine string, generation i
 			}
 			receipt.Accepted++
 		}
-		_, err := tx.Exec(ctx, `INSERT INTO native_usage_reporting_status(machine_id,installation_generation,workspace_id,last_seen,unrecorded_bytes,expired_bytes,rejected_reports,recording_incomplete)
- SELECT id,$2,coalesce('team:'||owner_team_id,'personal:'||user_id),$3,$4,$5,$6,$7 FROM user_machines WHERE id=$1 AND installation_generation=$2
- ON CONFLICT(machine_id) DO UPDATE SET installation_generation=EXCLUDED.installation_generation,last_seen=EXCLUDED.last_seen,unrecorded_bytes=CASE WHEN native_usage_reporting_status.installation_generation=EXCLUDED.installation_generation THEN greatest(native_usage_reporting_status.unrecorded_bytes,EXCLUDED.unrecorded_bytes) ELSE EXCLUDED.unrecorded_bytes END,expired_bytes=CASE WHEN native_usage_reporting_status.installation_generation=EXCLUDED.installation_generation THEN greatest(native_usage_reporting_status.expired_bytes,EXCLUDED.expired_bytes) ELSE EXCLUDED.expired_bytes END,rejected_reports=native_usage_reporting_status.rejected_reports+EXCLUDED.rejected_reports,recording_incomplete=CASE WHEN native_usage_reporting_status.installation_generation=EXCLUDED.installation_generation THEN native_usage_reporting_status.recording_incomplete OR EXCLUDED.recording_incomplete ELSE EXCLUDED.recording_incomplete END`, machine, generation, now, batch.UnrecordedBytes, batch.ExpiredBytes, int64(len(receipt.RejectedIndices)), batch.RecordingIncomplete)
-		if err != nil {
+		if err := recordNativeReportingStatus(ctx, tx, machine, generation, batch, len(receipt.RejectedIndices), now); err != nil {
 			return err
 		}
 		// Bounded opportunistic retention avoids a new maintenance service and
@@ -176,7 +173,7 @@ func (s *Service) RecordNative(ctx context.Context, machine string, generation i
 		if _, err := tx.Exec(ctx, `DELETE FROM native_usage_authorities WHERE access_session_id IN (SELECT access_session_id FROM native_usage_authorities WHERE retain_until<$1 LIMIT 500)`, now); err != nil {
 			return err
 		}
-		_, err = tx.Exec(ctx, `DELETE FROM resource_bandwidth_events WHERE operation_id IN (SELECT operation_id FROM resource_bandwidth_events WHERE interval_end<$1 LIMIT 500)`, now.Add(-MaxWindow))
+		_, err := tx.Exec(ctx, `DELETE FROM resource_bandwidth_events WHERE operation_id IN (SELECT operation_id FROM resource_bandwidth_events WHERE interval_end<$1 LIMIT 500)`, now.Add(-MaxWindow))
 		return err
 	})
 	return receipt, err

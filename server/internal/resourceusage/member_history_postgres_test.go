@@ -49,6 +49,9 @@ func assertTeamMemberHistory(t *testing.T, store *db.DB, service *Service, suffi
 		exec("INSERT INTO teams(team_id,owner_account,generation) VALUES($1,$2,1)", team, owner)
 		exec("INSERT INTO team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'admin',true),($1,$3,1,'member',true)", team, owner, member)
 		exec("INSERT INTO user_machines(id,user_id,owner_team_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$3,$4,'linux','amd64','/workspace','online','occupied',true,1)", machine, owner, team, "team_env_"+suffix)
+		// A transferred machine's current report must replace its former workspace
+		// status, including counters belonging to that former reporting scope.
+		exec(`INSERT INTO native_usage_reporting_status(machine_id,installation_generation,workspace_id,last_seen,unrecorded_bytes,expired_bytes,rejected_reports,recording_incomplete) VALUES($1,1,$2,$3,9,7,6,true)`, machine, "personal:"+owner, now.Add(-time.Hour))
 		cases := []struct {
 			actor string
 			want  Bytes
@@ -66,6 +69,9 @@ func assertTeamMemberHistory(t *testing.T, store *db.DB, service *Service, suffi
 		scope := workspace.Scope{ID: team, TeamID: team}
 		for _, c := range cases {
 			got, err := service.Get(ctx, owner, scope, Query{Start: now, End: now.Add(time.Minute), ActorAccountID: c.actor})
+			if !got.Coverage.Native {
+				t.Fatalf("current team reporting retained former workspace status: %+v %v", got.Coverage, err)
+			}
 			wantPaths := []PathTotal{{Mode: "direct", Hosting: "none", Bytes: c.want}}
 			if !slices.Equal(got.Totals.ByPath, wantPaths) || len(got.Series) != 1 || !slices.Equal(got.Series[0].ByPath, wantPaths) {
 				t.Fatalf("member path aggregates=%+v %v", got.Totals, err)
