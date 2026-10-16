@@ -85,10 +85,11 @@ type MachineAttachmentSessionSource struct {
 	clock           func() time.Time
 	factory         DataCarrierSessionSourceFactory
 
-	acquireMu sync.Mutex
-	mu        sync.Mutex
-	closed    bool
-	entries   map[machineAttachmentSessionKey]*machineAttachmentSessionEntry
+	acquireMu  sync.Mutex
+	mu         sync.Mutex
+	closed     bool
+	entries    map[machineAttachmentSessionKey]*machineAttachmentSessionEntry
+	allEntries map[*machineAttachmentSessionEntry]struct{}
 }
 
 type machineAttachmentSessionKey struct {
@@ -108,6 +109,7 @@ type machineAttachmentSessionEntry struct {
 	active   *connector.ActiveDataCarrier
 	identity connector.DataCarrierIdentity
 	refs     int
+	retiring bool
 }
 
 // AccessorCarrierAdmission is the server-issued, short-lived authority for an
@@ -169,6 +171,7 @@ func NewMachineAttachmentSessionSource(config MachineAttachmentSessionSourceConf
 	return &MachineAttachmentSessionSource{
 		stateRoot: config.StateRoot, carrier: config.Carrier, tlsLeafLifetime: config.TLSLeafLifetime, clock: config.Clock,
 		factory: config.SessionFactory, entries: make(map[machineAttachmentSessionKey]*machineAttachmentSessionEntry),
+		allEntries: make(map[*machineAttachmentSessionEntry]struct{}),
 	}, nil
 }
 
@@ -368,68 +371,11 @@ func (s *MachineAttachmentSessionSource) AcquirePreviewDataCarrier(ctx context.C
 	if err := admission.Validate(now); err != nil {
 		return AttachmentSession{}, fmt.Errorf("%w: admission: %v", ErrMachineAttachmentSessionInvalid, err)
 	}
-	key, localIdentity, leaf, endpoints, poolConfig, err := s.prepareAdmission(admission, now)
+	key, localIdentity, _, endpoints, poolConfig, err := s.prepareAdmission(admission, now)
 	if err != nil {
 		return AttachmentSession{}, err
 	}
-
-	// Serializing construction prevents two simultaneous previews from
-	// dialing duplicate machine carriers for the same session generation.
-	s.acquireMu.Lock()
-	defer s.acquireMu.Unlock()
-	s.mu.Lock()
-	if s.closed {
-		s.mu.Unlock()
-		return AttachmentSession{}, ErrMachineAttachmentSessionUnavailable
-	}
-	if existing := s.entries[key]; existing != nil && machineAttachmentEntryReady(existing, localIdentity) {
-		existing.refs++
-		s.mu.Unlock()
-		return s.sessionForEntry(key, existing), nil
-	}
-	stale := s.entries[key]
-	if stale != nil {
-		delete(s.entries, key)
-	}
-	s.mu.Unlock()
-	if stale != nil && stale.active != nil {
-		_ = stale.active.Close(context.WithoutCancel(ctx))
-	}
-
-	// The TLS leaf is created before dialing and is held only in the in-memory
-	// endpoint configs for this carrier lifetime.
-	_ = leaf
-	source, err := s.factory(localIdentity, poolConfig, endpoints)
-	if err != nil {
-		return AttachmentSession{}, errors.Join(ErrMachineAttachmentSessionUnavailable, err)
-	}
-	prepared, err := source.Prepare(ctx)
-	if err != nil {
-		return AttachmentSession{}, errors.Join(ErrMachineAttachmentSessionUnavailable, err)
-	}
-	active, err := prepared.Activate(ctx)
-	if err != nil {
-		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		_ = prepared.Abort(cleanupCtx)
-		cancel()
-		return AttachmentSession{}, errors.Join(ErrMachineAttachmentSessionUnavailable, err)
-	}
-	entry := &machineAttachmentSessionEntry{active: active, identity: localIdentity, refs: 1}
-	s.mu.Lock()
-	if s.closed {
-		s.mu.Unlock()
-		_ = active.Close(context.WithoutCancel(ctx))
-		return AttachmentSession{}, ErrMachineAttachmentSessionUnavailable
-	}
-	if existing := s.entries[key]; existing != nil && machineAttachmentEntryReady(existing, localIdentity) {
-		existing.refs++
-		s.mu.Unlock()
-		_ = active.Close(context.WithoutCancel(ctx))
-		return s.sessionForEntry(key, existing), nil
-	}
-	s.entries[key] = entry
-	s.mu.Unlock()
-	return s.sessionForEntry(key, entry), nil
+	return s.acquirePrepared(ctx, key, localIdentity, endpoints, poolConfig)
 }
 
 func (s *MachineAttachmentSessionSource) AcquirePrivateAccessCarrier(ctx context.Context, admission AccessorCarrierAdmission) (AttachmentSession, error) {
@@ -466,7 +412,7 @@ func (s *MachineAttachmentSessionSource) acquirePrepared(ctx context.Context, ke
 	delete(s.entries, key)
 	s.mu.Unlock()
 	if stale != nil && stale.active != nil {
-		_ = stale.active.Close(context.WithoutCancel(ctx))
+		_ = s.retire(stale, ctx)
 	}
 	source, err := s.factory(localIdentity, poolConfig, endpoints)
 	if err != nil {
@@ -495,74 +441,9 @@ func (s *MachineAttachmentSessionSource) acquirePrepared(ctx context.Context, ke
 		return AttachmentSession{}, ErrMachineAttachmentSessionUnavailable
 	}
 	s.entries[key] = entry
+	s.allEntries[entry] = struct{}{}
 	s.mu.Unlock()
 	return s.sessionForEntry(key, entry), nil
-}
-
-// Close releases every source-owned active carrier. It is idempotent and does
-// not use a process-global background context; callers supply the shutdown
-// deadline that bounds transport cleanup.
-func (s *MachineAttachmentSessionSource) Close(ctx context.Context) error {
-	if s == nil || ctx == nil {
-		return ErrMachineAttachmentSessionInvalid
-	}
-	s.mu.Lock()
-	if s.closed {
-		s.mu.Unlock()
-		return nil
-	}
-	s.closed = true
-	entries := make([]*machineAttachmentSessionEntry, 0, len(s.entries))
-	for _, entry := range s.entries {
-		entries = append(entries, entry)
-	}
-	s.entries = make(map[machineAttachmentSessionKey]*machineAttachmentSessionEntry)
-	s.mu.Unlock()
-	var result error
-	for _, entry := range entries {
-		if entry != nil && entry.active != nil {
-			result = errors.Join(result, entry.active.Close(ctx))
-		}
-	}
-	return result
-}
-
-func (s *MachineAttachmentSessionSource) sessionForEntry(key machineAttachmentSessionKey, entry *machineAttachmentSessionEntry) AttachmentSession {
-	var once sync.Once
-	var releaseErr error
-	return AttachmentSession{
-		Active: entry.active, Identity: entry.identity,
-		Release: func(ctx context.Context) error {
-			once.Do(func() { releaseErr = s.release(key, entry, ctx) })
-			return releaseErr
-		},
-	}
-}
-
-func (s *MachineAttachmentSessionSource) release(key machineAttachmentSessionKey, entry *machineAttachmentSessionEntry, ctx context.Context) error {
-	if ctx == nil {
-		return ErrMachineAttachmentSessionInvalid
-	}
-	s.mu.Lock()
-	current := s.entries[key]
-	if current != entry {
-		s.mu.Unlock()
-		return nil
-	}
-	if current.refs > 0 {
-		current.refs--
-	}
-	if current.refs != 0 {
-		s.mu.Unlock()
-		return nil
-	}
-	delete(s.entries, key)
-	active := current.active
-	s.mu.Unlock()
-	if active == nil {
-		return nil
-	}
-	return active.Close(ctx)
 }
 
 func machineAttachmentEntryReady(entry *machineAttachmentSessionEntry, identity connector.DataCarrierIdentity) bool {
