@@ -70,6 +70,33 @@ func NewHTTPDispatchReadinessObserver(config HTTPDispatchReadinessObserverConfig
 }
 
 func (o *HTTPDispatchReadinessObserver) ObservePreviewReadiness(ctx context.Context, metadata DispatchReadiness, lease Lease, expectedGeneration int64) (Lease, error) {
+	if ctx == nil {
+		return Lease{}, ErrDispatchInvalid
+	}
+	// This bounds initial publication only, never the admitted carrier lifetime.
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	current, err := o.readinessRequest(ctx, metadata, lease, expectedGeneration, http.MethodPost)
+	for err == nil {
+		if !sameLeaseIdentity(lease, current) || current.Generation <= expectedGeneration || !validActiveLeaseState(current.State) {
+			return Lease{}, ErrDispatchInvalid
+		}
+		if isReadyLease(current) {
+			return current, nil
+		}
+		if err = waitReconnect(ctx, PreviewLeaseDefaultReconnect); err != nil {
+			break
+		}
+		previous := current.Generation
+		current, err = o.readinessRequest(ctx, metadata, current, previous, http.MethodGet)
+		if err == nil && current.Generation < previous {
+			return Lease{}, ErrDispatchInvalid
+		}
+	}
+	return Lease{}, err
+}
+
+func (o *HTTPDispatchReadinessObserver) readinessRequest(ctx context.Context, metadata DispatchReadiness, lease Lease, expectedGeneration int64, method string) (Lease, error) {
 	if o == nil || ctx == nil || expectedGeneration < 1 || metadata.OperationID == "" || metadata.IdempotencyKey == "" || metadata.RequestID == "" || metadata.CorrelationID == "" || lease.ID == "" || lease.OwnerMachineID == "" || lease.OwnerSessionID == "" || lease.ETag == "" || leaseGenerationForID(lease.ID, lease.ETag) != expectedGeneration {
 		return Lease{}, ErrDispatchInvalid
 	}
@@ -83,18 +110,21 @@ func (o *HTTPDispatchReadinessObserver) ObservePreviewReadiness(ctx context.Cont
 	if err != nil {
 		return Lease{}, errors.Join(ErrDispatchInvalid, err)
 	}
+	if method == http.MethodGet {
+		body = nil
+	}
 	path := "/v1/previews/" + url.PathEscape(lease.ID) + "/readiness"
 	identity, err := o.identities.Token(ctx)
 	if err != nil || identity == "" || len(identity) > 16<<10 {
 		return Lease{}, errors.Join(ErrDispatchUnavailable, err)
 	}
-	proof, err := o.proofs.Proof(ctx, metadata.OperationID, http.MethodPost, path, body)
+	proof, err := o.proofs.Proof(ctx, metadata.OperationID, method, path, body)
 	if err != nil || len(proof) == 0 || len(proof) > 16<<10 {
 		return Lease{}, errors.Join(ErrDispatchUnavailable, err)
 	}
 	endpoint := *o.base
 	endpoint.Path = path
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), bytes.NewReader(body))
+	request, err := http.NewRequestWithContext(ctx, method, endpoint.String(), bytes.NewReader(body))
 	if err != nil {
 		return Lease{}, errors.Join(ErrDispatchInvalid, err)
 	}
@@ -103,8 +133,10 @@ func (o *HTTPDispatchReadinessObserver) ObservePreviewReadiness(ctx context.Cont
 	request.Header.Set("X-Paperboat-Machine-Proof", base64.RawURLEncoding.EncodeToString(proof))
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json")
-	request.Header.Set("If-Match", lease.ETag)
-	request.Header.Set("Idempotency-Key", metadata.OperationID)
+	if method == http.MethodPost {
+		request.Header.Set("If-Match", lease.ETag)
+		request.Header.Set("Idempotency-Key", metadata.OperationID)
+	}
 	request.Header.Set("Request-Id", metadata.RequestID)
 	request.Header.Set("Correlation-Id", metadata.CorrelationID)
 	response, err := o.client.Do(request)

@@ -2,7 +2,11 @@ package preview
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -478,61 +482,49 @@ func TestReadinessCarrierUsesCurrentCustomDomainProjection(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			admitted := testDispatchRequest(t, time.Now().UTC()).Lease()
-			admitted.Endpoint = ""
-			admitted.EndpointState = "custom_domain_not_ready"
-			session := &Session{lease: admitted}
-			source := &dispatchSessionLease{admitted: admitted, session: session}
-			observer := &dispatchObserver{}
-			entered := make(chan struct{})
+			admitted.Endpoint, admitted.EndpointState = "", "custom_domain_not_ready"
+			source := &dispatchSessionLease{admitted: admitted, session: &Session{lease: admitted}}
+			calls := 0
+			observer, err := NewHTTPDispatchReadinessObserver(HTTPDispatchReadinessObserverConfig{
+				ControlURL: "https://api.example.test", AllowedHosts: []string{"api.example.test"}, Identities: readinessTokenSource("machine-identity"),
+				Proofs: &readinessProofSource{t: t, operation: "op_projection", path: "/v1/previews/prv_dispatch_1/readiness"},
+				Transport: readinessRoundTripper(func(request *http.Request) (*http.Response, error) {
+					calls++
+					if request.Method != http.MethodPost {
+						t.Fatal("unexpected publication request")
+					}
+					projected := sessionReadyLease(admitted)
+					projected.Endpoint, projected.EndpointState = "https://customer.example.test", "ready"
+					data, err := json.Marshal(map[string]any{"data": projected})
+					if err != nil {
+						t.Fatal(err)
+					}
+					headers := make(http.Header)
+					headers.Set("ETag", formatLeaseETag(admitted.ID, 2))
+					return &http.Response{StatusCode: http.StatusOK, Header: headers, Body: io.NopCloser(strings.NewReader(string(data)))}, nil
+				}),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
 			inner := &sessionCarrier{run: func(ctx context.Context, captured Lease, ready func(Lease) error) error {
-				captured.State, captured.AllocationState, captured.EdgeState, captured.OriginState = "ready", "ready", "ready", "ready"
+				captured = sessionReadyLease(captured)
 				if changedOwner {
 					captured.OwnerSessionID = "unrelated-owner"
 				}
-				close(entered)
 				return ready(captured)
 			}}
 			carrier := &readinessCarrier{inner: inner, observer: observer, admitted: admitted, leaseSource: source, readiness: DispatchReadiness{OperationID: "op_projection", IdempotencyKey: "projection-key", RequestID: "req_projection", CorrelationID: "cor_projection"}}
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
-			done := make(chan error, 1)
-			delivered := make(chan Lease, 1)
-			go func() {
-				done <- carrier.RunWithLease(ctx, source.current, func(lease Lease) error { delivered <- lease; return nil })
-			}()
-			<-entered
+			var delivered Lease
+			err = carrier.RunWithLease(ctx, source.current, func(lease Lease) error { delivered = lease; return nil })
 			if changedOwner {
-				if err := <-done; !errors.Is(err, ErrDispatchInvalid) {
-					t.Fatalf("changed owner=%v", err)
+				if !errors.Is(err, ErrDispatchInvalid) || calls != 0 {
+					t.Fatalf("changed owner reached authority: calls=%d err=%v", calls, err)
 				}
-				observer.mu.Lock()
-				count := observer.count
-				observer.mu.Unlock()
-				if count != 0 {
-					t.Fatal("changed owner reached readiness authority")
-				}
-				return
-			}
-			observer.mu.Lock()
-			count := observer.count
-			observer.mu.Unlock()
-			if count != 0 {
-				t.Fatal("pending public projection reached readiness authority")
-			}
-			projected := admitted
-			projected.Endpoint = "https://customer.example.test"
-			projected.EndpointState = "ready"
-			projected.Generation = 2
-			projected.ETag = formatLeaseETag(projected.ID, 2)
-			session.mu.Lock()
-			session.lease = projected
-			session.mu.Unlock()
-			if err := <-done; err != nil {
-				t.Fatal(err)
-			}
-			ready := <-delivered
-			if ready.Endpoint != projected.Endpoint || ready.EndpointState != "ready" || ready.Generation != 3 || !sameLeaseIdentity(admitted, ready) {
-				t.Fatalf("ready projection=%+v", ready)
+			} else if err != nil || calls != 1 || !isReadyLease(delivered) || delivered.Endpoint != "https://customer.example.test" || delivered.Generation != 2 || !sameLeaseIdentity(admitted, delivered) {
+				t.Fatalf("carrier waited for publication before reporting readiness: calls=%d ready=%v err=%v", calls, isReadyLease(delivered), err)
 			}
 		})
 	}

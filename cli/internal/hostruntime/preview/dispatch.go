@@ -721,21 +721,6 @@ func (c *readinessCarrier) RunWithLease(ctx context.Context, currentLease func()
 		if !sameLeaseIdentity(c.admitted, observed) || observed.Generation < c.admitted.Generation || leaseGenerationForID(observed.ID, observed.ETag) != observed.Generation || observed.State != "ready" || observed.AllocationState != "ready" || observed.EdgeState != "ready" || observed.OriginState != "ready" {
 			return fmt.Errorf("%w: carrier readiness does not match admitted lease", ErrDispatchInvalid)
 		}
-		for {
-			current := c.leaseSource.current()
-			if !sameLeaseIdentity(c.admitted, current) || observed.Generation > current.Generation {
-				return fmt.Errorf("%w: current lease changed identity or generation", ErrDispatchInvalid)
-			}
-			if current.EndpointState == "ready" && validPreviewHTTPSURL(current.Endpoint) {
-				break
-			}
-			if current.EndpointState != "custom_domain_not_ready" || current.Endpoint != "" || !validActiveLeaseState(current.State) {
-				return ErrDispatchInvalid
-			}
-			if err := waitReconnect(ctx, PreviewLeaseDefaultReconnect); err != nil {
-				return err
-			}
-		}
 		for attempt := 0; attempt < 4; attempt++ {
 			current := c.leaseSource.current()
 			if !sameLeaseIdentity(c.admitted, current) {
@@ -750,9 +735,6 @@ func (c *readinessCarrier) RunWithLease(ctx context.Context, currentLease func()
 			}
 			candidate := current
 			candidate.State, candidate.AllocationState, candidate.EdgeState, candidate.OriginState = "ready", "ready", "ready", "ready"
-			if err := validateReadyLeaseIdentity(c.admitted, candidate); err != nil {
-				return err
-			}
 			updated, err := c.observer.ObservePreviewReadiness(ctx, c.readiness, candidate, expected)
 			if err != nil {
 				latest := c.leaseSource.current()
