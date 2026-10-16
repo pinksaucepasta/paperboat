@@ -163,25 +163,25 @@ test_exec() { # test_exec TARGET [ID-PREFIX]
 
 # Long work runs on HP in the background as uploaded job scripts, so remote
 # commands never need nested shell quoting. Results are collected later.
-hp_job() { # hp_job TAG  (job body on stdin)
-  local tag=$1
-  on hp "mkdir -p /tmp/$RUN_ID && cat > /tmp/$RUN_ID/$tag.sh" >/dev/null
-  on hp "cd /tmp/$RUN_ID && (nohup sh -c 'date +%s > $tag.start; sh $tag.sh > $tag.out 2>&1; echo rc=\$? >> $tag.out; date +%s > $tag.end' >/dev/null 2>&1 &)" >/dev/null
+device_job() { # device_job DEVICE TAG (job body on stdin)
+  local device=$1 tag=$2
+  on "$device" "mkdir -p /tmp/$RUN_ID && cat > /tmp/$RUN_ID/$tag.sh" >/dev/null
+  on "$device" "cd /tmp/$RUN_ID && (nohup sh -c 'date +%s > $tag.start; sh $tag.sh > $tag.out 2>&1; echo rc=\$? >> $tag.out; date +%s > $tag.end' >/dev/null 2>&1 &)" >/dev/null
 }
 start_long_exec() { # start_long_exec TARGET TAG SECONDS
   local t=$1 tag=$2 secs=$3
   if [ "$t" = victus ]; then
-    printf '%s\n' "timeout $((secs+300)) $PB_HP exec $t -- powershell -NoProfile -Command \"Start-Sleep $secs; 'FINAL'\"" | hp_job "$tag"
+    printf '%s\n' "timeout $((secs+300)) $PB_HP exec $t -- powershell -NoProfile -Command \"Start-Sleep $secs; 'FINAL'\"" | device_job hp "$tag"
   else
-    printf '%s\n' "timeout $((secs+300)) $PB_HP exec $t -- sh -c 'sleep $secs; echo FINAL'" | hp_job "$tag"
+    printf '%s\n' "timeout $((secs+300)) $PB_HP exec $t -- sh -c 'sleep $secs; echo FINAL'" | device_job hp "$tag"
   fi
 }
 start_long_ssh() {
   local t=$1 tag=$2 secs=$3
   if [ "$t" = victus ]; then
-    printf '%s\n' "timeout $((secs+300)) $PB_HP ssh $t -- powershell -NoProfile -Command \"Start-Sleep $secs; 'SSHFINAL'\" < /dev/null" | hp_job "$tag"
+    printf '%s\n' "timeout $((secs+300)) $PB_HP ssh $t -- powershell -NoProfile -Command \"Start-Sleep $secs; 'SSHFINAL'\" < /dev/null" | device_job hp "$tag"
   else
-    printf '%s\n' "timeout $((secs+300)) $PB_HP ssh $t -- \"sleep $secs; echo SSHFINAL\" < /dev/null" | hp_job "$tag"
+    printf '%s\n' "timeout $((secs+300)) $PB_HP ssh $t -- \"sleep $secs; echo SSHFINAL\" < /dev/null" | device_job hp "$tag"
   fi
 }
 collect() { # collect ID TAG EXPECT-MARKER : waits for the background job
@@ -356,7 +356,7 @@ start_update_terminal() {
     line="pb_smoke=\$\$; echo $before-\$((6*7))"
     next="[ \"\$pb_smoke\" = \"\$\$\" ] && echo $after-\$((6*7))"
   fi
-  printf '%s\n' "python3 /tmp/$RUN_ID/term.py $PB_HP $t smoke-update-$RUN_ID '$line' $before-42 /tmp/$RUN_ID/upd-term-$t.ready /tmp/$RUN_ID/upd-term-$t.resume '$next' $after-42" | hp_job "upd-term-$t"
+  printf '%s\n' "python3 /tmp/$RUN_ID/term.py $PB_HP $t smoke-update-$RUN_ID '$line' $before-42 /tmp/$RUN_ID/upd-term-$t.ready /tmp/$RUN_ID/upd-term-$t.resume '$next' $after-42" | device_job hp "upd-term-$t"
   local deadline=$(( $(now) + 120 ))
   while [ "$(now)" -lt "$deadline" ]; do
     on hp "test -f /tmp/$RUN_ID/upd-term-$t.ready" && return 0
@@ -591,7 +591,7 @@ test_terminal_replay() {
       continue
     fi
     t0=$(now); tag="terminal-replay-$target"; controller_ok=0
-    printf '%s\n' "python3 /tmp/$RUN_ID/session_lifecycle.py $target --check cross && echo TERMINAL_REPLAY_OK" | hp_job "$tag"
+    printf '%s\n' "python3 /tmp/$RUN_ID/session_lifecycle.py $target --check cross && echo TERMINAL_REPLAY_OK" | device_job hp "$tag"
     phase=$(on hp "python3 /tmp/$RUN_ID/session_controller.py wait --job /tmp/$RUN_ID/$tag" 2>&1); status=$?
     out="$phase"
     if [ "$status" = 0 ]; then
@@ -616,6 +616,48 @@ assert receipt["same_shell"] is True and receipt["replayed_output"] is True
 $parent"
     fi
   done
+}
+
+# The origin stays on its enrolled device; TLS/ALPN/body/WebSocket probes run
+# here, independently of that device's network and client credentials.
+test_preview_protocols() {
+  skipped preview-protocols && return
+  local probe_root probe device id tag phase url marker output parent status success command t0
+  probe_root=$(mktemp -d)
+  probe="$probe_root/protocol-client"
+  if ! (cd "$HERE/../.." && GOMAXPROCS=2 GOFLAGS=-p=2 go build -o "$probe" "$HERE/preview_protocol_client.go") >"$probe_root/build.log" 2>&1; then
+    for device in "${TLIST[@]}"; do record_command_failure "preview-protocols:$device" 0 "$(cat "$probe_root/build.log")"; done
+    rm -rf "$probe_root"
+    return
+  fi
+  for device in "${TLIST[@]}"; do
+    id="preview-protocols:$device"
+    skipped "$id" && continue
+    t0=$(now); tag="preview-protocols-$device"; success=0; output=""
+    if ! stage_terminal_fixtures "$device"; then
+      record "$id" FAIL 0 "could not stage compressed protocol fixture"
+      continue
+    fi
+    printf '%s\n' "python3 /tmp/$RUN_ID/preview_protocols.py $device && echo PREVIEW_PROTOCOLS_OK" | device_job "$device" "$tag"
+    phase=$(on "$device" "python3 /tmp/$RUN_ID/session_controller.py wait --job /tmp/$RUN_ID/$tag --expected-state preview_protocol_required" 2>&1); status=$?
+    output="$phase"
+    if [ "$status" = 0 ]; then
+      url=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["url"])' "$phase")
+      marker=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["marker"])' "$phase")
+      output=$("$probe" --url "$url" --marker "$marker" 2>&1); status=$?
+      if [ "$status" = 0 ]; then success=1; fi
+      command=$(python3 "$HERE/session_controller.py" signal --phase "$phase" --success "$success" --expected-state preview_protocol_required)
+      on "$device" "$command" >/dev/null 2>&1 || success=0
+    fi
+    parent=$(on "$device" "python3 /tmp/$RUN_ID/session_controller.py finish --job /tmp/$RUN_ID/$tag" 2>&1); status=$?
+    if [ "$success" = 1 ] && command_ok "$status" "$parent" && marker_present "$parent" PREVIEW_PROTOCOLS_OK; then
+      record "$id" PASS $(( $(now)-t0 )) "HTTP1/2/3, WebSocket binary/Unicode,16MiB body; exact cleanup"
+    else
+      record_command_failure "$id" $(( $(now)-t0 )) "$output
+$parent"
+    fi
+  done
+  rm -rf "$probe_root"
 }
 
 # ---------------------------------------------------------------- run
@@ -657,6 +699,7 @@ test_application_pairs ssh-alias ssh_alias_lifecycle.py
 test_application_pairs inbox-manage inbox_manage.py
 test_application_pairs transfer-manage transfer_manage.py
 test_application_pairs preview-manage preview_manage.py
+test_preview_protocols
 for t in "${TLIST[@]}"; do
   skipped ssh-long || collect "ssh-long:$t" "long-ssh-$t" SSHFINAL "$LONG_SSH"
   skipped exec-long || collect "exec-long:$t" "long-exec-$t" FINAL "$LONG_EXEC"

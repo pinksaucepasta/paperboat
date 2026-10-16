@@ -8,14 +8,14 @@ import sys
 import time
 
 
-def wait_job(job, phase):
+def wait_job(job, phase, expected_state):
     deadline = time.monotonic() + (180 if phase else 420)
     while time.monotonic() < deadline:
         if phase:
             try:
                 with job.with_suffix('.out').open() as output:
                     value = json.loads(output.readline(8192))
-                if value.get('state') == 'terminal_attach_required':
+                if value.get('state') == expected_state:
                     print(json.dumps(value))
                     return
             except (FileNotFoundError, ValueError):
@@ -37,6 +37,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=['wait', 'finish', 'command', 'signal'])
     parser.add_argument('--job', type=Path)
+    parser.add_argument('--expected-state', choices=['terminal_attach_required', 'preview_protocol_required'],
+                        default='terminal_attach_required')
     parser.add_argument('--phase')
     parser.add_argument('--script')
     parser.add_argument('--success', choices=['0', '1'])
@@ -44,16 +46,16 @@ def main():
     if args.action in ('wait', 'finish'):
         if args.job is None:
             parser.error('wait/finish require the exact creator job path')
-        wait_job(args.job, args.action == 'wait')
+        wait_job(args.job, args.action == 'wait', args.expected_state)
         return
     if not args.phase:
         parser.error('controller command/signal requires the exact creator phase')
     phase = json.loads(args.phase)
-    if phase['state'] != 'terminal_attach_required':
+    if phase['state'] != args.expected_state:
         parser.error('unexpected creator phase')
     if args.action == 'command':
-        if not args.script:
-            parser.error('command requires the staged controller script')
+        if not args.script or args.expected_state != 'terminal_attach_required':
+            parser.error('command requires the staged terminal controller script')
         print(shlex.join(['python3', args.script, phase['target'], '--check', 'resume',
                           '--session-id', phase['session_id'], '--expected-state', phase['expected_state'],
                           '--expected-account', phase['expected_account']]))
