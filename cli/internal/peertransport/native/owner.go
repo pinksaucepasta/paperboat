@@ -259,8 +259,8 @@ func (o *Owner) dialOnce(ctx context.Context, descriptor mesh.Addr, peerID strin
 		// after every other flow has released the cached client.
 		failure := o.dialFailure(ctx, peerID, "peer_connect", "native_private_failed", err)
 		var idle *quic.IdleTimeoutError
-		if ctx.Err() == nil && errors.As(err, &idle) && o.authority.RetireIdleClient(client) {
-			return nil, &retiredPeerClientError{failure}
+		if ctx.Err() == nil && errors.As(err, &idle) {
+			o.authority.RetireIdleClient(client)
 		}
 		return nil, failure
 	}

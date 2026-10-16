@@ -7,20 +7,18 @@ import (
 	"github.com/pinksaucepasta/paperboat-relay/reattach"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
+	"github.com/quic-go/quic-go"
 )
 
-type retiredPeerClientError struct{ error }
-
-func (e *retiredPeerClientError) Unwrap() error { return e.error }
-
 // Dial obtains a new QUIC association before any application request is sent.
-// Recovering an idle route cannot replay exec, terminal input or transfer bytes.
+// Recovering a lost handshake cannot replay exec, terminal input or transfer bytes.
 func (o *Owner) Dial(ctx context.Context, descriptor mesh.Addr, peerID string, class peerquic.Class) (*Session, error) {
 	var session *Session
 	attempts := 0
 	recovery := reattach.New(reattach.Policy{Attempts: 2, Retryable: func(err error) bool {
-		var retired *retiredPeerClientError
-		return errors.As(err, &retired)
+		var failure *peerOperationFailure
+		var idle *quic.IdleTimeoutError
+		return errors.As(err, &failure) && failure.retryable && errors.As(err, &idle)
 	}})
 	err := recovery.Run(ctx, func(ctx context.Context) error {
 		if attempts > 0 {
