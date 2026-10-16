@@ -6,7 +6,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/internal/splitdns"
 	"github.com/spf13/cobra"
 )
 
@@ -31,6 +33,32 @@ func localAccessConfigCommand() *cobra.Command {
 		Short: "Configure local browser domains, aliases and reverse proxies",
 		Long:  "Configure the browser domain and named service URLs used by this local Paperboat client. These settings only select names for machine ports already authorized elsewhere; they do not grant access or publish additional ports.",
 	}
+	domain := localAccessDomainCommand()
+
+	aliases := localAccessAliasCommand()
+
+	show := &cobra.Command{Use: "show", Short: "Show local browser domains and aliases", Long: "Show the effective browser domain and named service mappings stored in the local configuration. This is a read-only view and does not change trust, machine permissions, active routes, or running services.", Args: cobra.NoArgs, RunE: func(command *cobra.Command, _ []string) error {
+		cfg, err := loadLocalAccessConfig(command)
+		if err != nil {
+			return err
+		}
+		return writeLocalAccessShow(command, cfg)
+	}}
+	show.Flags().Bool("json", false, "print JSON")
+	apply := &cobra.Command{Use: "apply", Short: "Apply local browser settings from the config file", Long: "Validate and apply local browser settings after editing the configuration file directly. Domain changes use the ordinary privileged trust workflow; aliases remain bounded to already authorized machine ports, and errors leave success unreported.", Args: cobra.NoArgs, RunE: func(command *cobra.Command, _ []string) error {
+		cfg, err := loadLocalAccessConfig(command)
+		if err != nil {
+			return err
+		}
+		return applyLocalAccessChange(command, cfg, cfg.LocalAccess, "apply", "Local browser settings applied.")
+	}}
+	apply.Flags().Bool("json", false, "print JSON")
+
+	command.AddCommand(domain, aliases, localAccessProxyCommand(), show, apply)
+	return command
+}
+
+func localAccessDomainCommand() *cobra.Command {
 	domain := &cobra.Command{
 		Use:   "domain",
 		Short: "Set the local browser domain",
@@ -46,18 +74,33 @@ func localAccessConfigCommand() *cobra.Command {
 		return applyLocalAccessChange(command, cfg, next, "domain-set", "")
 	}}
 	domainSet.Flags().Bool("json", false, "print JSON")
-	domainReset := &cobra.Command{Use: "reset", Short: "Restore the default local browser domain", Long: "Restore local.pprbt.dev as this client's browser domain and apply the change. The helper and trust state are reconciled before success is printed; configured named services remain attached to their existing machine ports.", Args: cobra.NoArgs, RunE: func(command *cobra.Command, _ []string) error {
+	domainReset := &cobra.Command{Use: "reset", Short: "Restore the default local browser domain", Long: "Restore the server-discovered domain for this client and apply the change. The helper and trust state are reconciled before success is printed; configured named services remain attached to their existing machine ports.", Args: cobra.NoArgs, RunE: func(command *cobra.Command, _ []string) error {
 		cfg, err := loadLocalAccessConfig(command)
 		if err != nil {
 			return err
 		}
+		metadata, err := api.New(cfg.ServerURL, config.Credential{}, nil).ClientConfiguration(command.Context())
+		if err != nil {
+			return localAccessFailure("retrieve the server's local browser domain; run `pb doctor` and retry", err)
+		}
+		if strings.TrimSpace(metadata.LocalAccessBaseDomain) == "" {
+			return localAccessFailure("the server did not publish a local browser domain; contact the server operator", errors.New("missing local access discovery domain"))
+		}
+		domain, err := splitdns.NormalizeBrowserDomain(metadata.LocalAccessBaseDomain)
+		if err != nil {
+			return localAccessFailure("the server published an invalid local browser domain; contact the server operator", err)
+		}
 		next := cloneLocalAccess(cfg.LocalAccess)
-		next.Domain = config.DefaultLocalAccessDomain
-		return applyLocalAccessChange(command, cfg, next, "domain-reset", fmt.Sprintf("Local browser domain reset to %s.", config.DefaultLocalAccessDomain))
+		next.Domain = domain
+		return applyLocalAccessChange(command, cfg, next, "domain-reset", fmt.Sprintf("Local browser domain reset to %s.", domain))
 	}}
 	domainReset.Flags().Bool("json", false, "print JSON")
 	domain.AddCommand(domainSet, domainReset)
 
+	return domain
+}
+
+func localAccessAliasCommand() *cobra.Command {
 	aliases := &cobra.Command{
 		Use:   "alias",
 		Short: "Manage named browser aliases for authorized machine ports",
@@ -111,25 +154,7 @@ func localAccessConfigCommand() *cobra.Command {
 	aliasUnset.Flags().Bool("json", false, "print JSON")
 	aliases.AddCommand(aliasSet, aliasUnset)
 
-	show := &cobra.Command{Use: "show", Short: "Show local browser domains and aliases", Long: "Show the effective browser domain and named service mappings stored in the local configuration. This is a read-only view and does not change trust, machine permissions, active routes, or running services.", Args: cobra.NoArgs, RunE: func(command *cobra.Command, _ []string) error {
-		cfg, err := loadLocalAccessConfig(command)
-		if err != nil {
-			return err
-		}
-		return writeLocalAccessShow(command, cfg)
-	}}
-	show.Flags().Bool("json", false, "print JSON")
-	apply := &cobra.Command{Use: "apply", Short: "Apply local browser settings from the config file", Long: "Validate and apply local browser settings after editing the configuration file directly. Domain changes use the ordinary privileged trust workflow; aliases remain bounded to already authorized machine ports, and errors leave success unreported.", Args: cobra.NoArgs, RunE: func(command *cobra.Command, _ []string) error {
-		cfg, err := loadLocalAccessConfig(command)
-		if err != nil {
-			return err
-		}
-		return applyLocalAccessChange(command, cfg, cfg.LocalAccess, "apply", "Local browser settings applied.")
-	}}
-	apply.Flags().Bool("json", false, "print JSON")
-
-	command.AddCommand(domain, aliases, localAccessProxyCommand(), show, apply)
-	return command
+	return aliases
 }
 
 func loadLocalAccessConfig(command *cobra.Command) (*config.Config, error) {

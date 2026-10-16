@@ -4,7 +4,7 @@ Restore the default local browser domain
 
 ### Synopsis
 
-Restore local.pprbt.dev as this client's browser domain and apply the change. The helper and trust state are reconciled before success is printed; configured named services remain attached to their existing machine ports.
+Restore the server-discovered domain for this client and apply the change. The helper and trust state are reconciled before success is printed; configured named services remain attached to their existing machine ports.
 
 JSON output is supported with --json.
 
