@@ -13,21 +13,28 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/datacarrier"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 func TestBrowserPreviewTransportUsesExactPrivateAdmission(t *testing.T) {
-	testPreviewMeteredAdmission(t, false)
+	for _, mode := range []string{"private", "team"} {
+		t.Run(mode, func(t *testing.T) { testPreviewMeteredAdmission(t, mode) })
+	}
 }
 func TestDataCarrierPreviewPublicAccountingAdmission(t *testing.T) {
-	testPreviewMeteredAdmission(t, true)
+	testPreviewMeteredAdmission(t, "public")
 }
-func testPreviewMeteredAdmission(t *testing.T, publicPreview bool) {
+func testPreviewMeteredAdmission(t *testing.T, accessMode string) {
+	publicPreview := accessMode == "public"
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	_, decision := browserTestMatch()
 	decision.Binding.Lifecycle = connectorprotocol.TunnelEphemeral
+	decision.Binding.Audience = accessMode
+	if accessMode == "team" {
+		decision.MembershipGeneration = 1
+	}
 	decision.Binding.Hostname = "private.preview.example.test"
 	decision.Binding.PublicationID = "preview_private"
 	decision.ExpiresAt = time.Now().UTC().Add(4 * time.Second)
@@ -38,10 +45,14 @@ func testPreviewMeteredAdmission(t *testing.T, publicPreview bool) {
 		decision.GrantGeneration = 0
 		decision.MembershipGeneration = 0
 	}
+	if err := decision.Validate(time.Now()); err != nil {
+		t.Fatalf("invalid viewer authority fixture: %v", err)
+	}
 	identity := datacarrier.Identity{AccountID: decision.Binding.AccountID, HostID: decision.Binding.HostID, TunnelID: decision.Binding.TunnelID, ConnectorID: decision.ConnectorID, SessionID: decision.SessionID, ProcessGeneration: decision.ProcessGeneration, Generation: decision.ConfigGeneration}
 	public := sha256.Sum256([]byte("browser-admission-test-machine"))
 	thumb := sha256.Sum256(public[:])
 	admission := datacarrier.ExpectedAdmission{Schema: datacarrier.PreviewCarrierSchema, Kind: datacarrier.PreviewCarrierKind, EdgeNodeID: decision.EdgeNodeID, EdgeProcessEpoch: decision.EdgeProcessEpoch, PreviewID: decision.Binding.PublicationID, OperationID: "operation_private", OwnerMachineID: identity.HostID, OwnerSessionID: "owner_private", Identity: identity, LeaseGeneration: 1, ConfigGeneration: identity.Generation, ConfigContentHash: "sha256:" + strings.Repeat("a", 64), RouteID: decision.Binding.RouteID, AccessMode: datacarrier.PreviewCarrierAccessPrivate, RouteKind: datacarrier.PreviewCarrierPrivateRoute, Hostname: decision.Binding.Hostname, RouteRevision: decision.Binding.RouteGeneration, AttachmentGeneration: 1, Endpoint: "https://" + decision.Binding.Hostname, ExpiresAt: decision.ExpiresAt, MachineIdentityPublicKey: base64.RawURLEncoding.EncodeToString(public[:]), MachineIdentityThumbprint: "sha256:" + base64.RawURLEncoding.EncodeToString(thumb[:]), EdgeCarrierServerSPKISHA256: "sha256:" + strings.Repeat("b", 64), EdgeCarrierServerCertificateChainPEM: "test public certificate", Admitted: true}
+	admission.AccessMode = accessMode
 	if publicPreview {
 		admission.AccessMode = "public"
 		admission.RouteKind = dataCarrierPreviewRouteKind

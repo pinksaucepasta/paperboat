@@ -26,6 +26,7 @@ const (
 	PreviewCarrierPrivateRoute  = "preview_private_https_wss"
 	PreviewCarrierAccessPublic  = "public"
 	PreviewCarrierAccessPrivate = "private"
+	PreviewCarrierAccessTeam    = "team"
 	maxExpectedAdmissions       = 4096
 )
 
@@ -74,6 +75,10 @@ type ExpectedAdmission struct {
 	Admitted bool
 }
 
+func restrictedPreviewAccess(mode string) bool {
+	return mode == PreviewCarrierAccessPrivate || mode == PreviewCarrierAccessTeam
+}
+
 func (a ExpectedAdmission) Validate(now time.Time, nodeID string) error {
 	runtime := a.Schema == runtimewire.Schema && a.Kind == "" && a.RouteKind == runtimewire.RouteKind
 	if !runtime && (a.Schema != PreviewCarrierSchema || a.Kind != PreviewCarrierKind) {
@@ -107,11 +112,11 @@ func (a ExpectedAdmission) Validate(now time.Time, nodeID string) error {
 	if (!runtime && a.LeaseGeneration == 0) || a.ConfigGeneration == 0 || a.RouteRevision == 0 || a.AttachmentGeneration == 0 {
 		return fmt.Errorf("%w: generations must be positive", ErrAdmissionNotExpected)
 	}
-	if !runtime && a.AccessMode != PreviewCarrierAccessPublic && a.AccessMode != PreviewCarrierAccessPrivate {
+	if !runtime && a.AccessMode != PreviewCarrierAccessPublic && !restrictedPreviewAccess(a.AccessMode) {
 		return fmt.Errorf("%w: access mode is invalid", ErrAdmissionNotExpected)
 	}
 	wantRoute := PreviewCarrierRoute
-	if a.AccessMode == PreviewCarrierAccessPrivate {
+	if restrictedPreviewAccess(a.AccessMode) {
 		wantRoute = PreviewCarrierPrivateRoute
 	}
 	if runtime {
@@ -584,7 +589,7 @@ func (r *ExpectedAdmissionRegistry) AuthorizeStream(ctx context.Context, identit
 	now := time.Now().UTC()
 	for _, admission := range r.byKey {
 		if admission.Admitted && admission.Identity == identity && admission.RouteID == open.RouteID {
-			if admission.AccessMode == PreviewCarrierAccessPrivate {
+			if restrictedPreviewAccess(admission.AccessMode) {
 				decision, ok := PrivateAccessDecisionFromContext(ctx)
 				if !ok || !decision.Allowed || decision.ExpiresAt.IsZero() || !decision.ExpiresAt.After(now) || decision.ResourceID != admission.PreviewID || decision.RouteID != admission.RouteID || decision.OperationID != admission.OperationID || decision.CarrierSessionID != admission.Identity.SessionID || decision.RouteGeneration != admission.RouteRevision || decision.ProcessGeneration != admission.Identity.ProcessGeneration || decision.ConfigGeneration != admission.Identity.Generation || decision.Protocol != "http" && decision.Protocol != "tcp" {
 					return ErrRouteDenied
