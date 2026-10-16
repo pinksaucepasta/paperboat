@@ -15,8 +15,8 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/admission"
-	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/route"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 type readinessFunc func(string) (string, string, bool)
@@ -476,7 +476,7 @@ func TestHelperCredentialClassesCannotCrossCapabilityPaths(t *testing.T) {
 		"file_transfer": "/v1/file-transfers", "preview_launch": "/v1/preview-launches",
 		"terminal_operation": "/v1/runtime", "browser_terminal_operation": "/v1/browser-terminal",
 	}
-	paths := []string{"/v1/file-transfers", "/v1/preview-launches", "/v1/runtime", "/v1/browser-terminal", "/v1/codex-sessions/cdx_1/ws", "/v1/local-file-transfers", "/v1/local-file-transfers/transfer_1/content"}
+	paths := []string{"/v1/file-transfers", "/v1/preview-launches", "/v1/runtime", "/v1/browser-terminal", "/v1/unsupported-feature", "/v1/local-file-transfers", "/v1/local-file-transfers/transfer_1/content"}
 	for class, ownPath := range allowed {
 		for _, path := range paths {
 			got := credentialAllowsHelperPath(class, path)
@@ -965,19 +965,6 @@ func TestCancellationAndStreamingInterfacesPassThrough(t *testing.T) {
 	policy.ServeHTTP(recorder, request)
 	if recorder.Body.String() != "data: ready\n\n" || !recorder.Flushed {
 		t.Fatalf("stream = %q flushed=%v", recorder.Body.String(), recorder.Flushed)
-	}
-}
-
-func TestCodexSessionPathsArePeerOnly(t *testing.T) {
-	for _, path := range []string{
-		"/v1/codex-sessions/cdx_12345678",
-		"/v1/codex-sessions/cdx_12345678/ws",
-		"/v1/codex-sessions/cdx_12345678/renew",
-		"/v1/codex-sessions/cdx_12345678/directories",
-	} {
-		if helperAccessPath(path) {
-			t.Fatalf("helperAccessPath(%q) = true", path)
-		}
 	}
 }
 

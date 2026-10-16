@@ -205,7 +205,7 @@ func TestVerifierAcceptsExactHelperAccessCredential(t *testing.T) {
 	}
 }
 
-func TestVerifierAcceptsBoundCodexCredentials(t *testing.T) {
+func TestVerifierRejectsRetiredHelperCredentials(t *testing.T) {
 	public, private, _ := ed25519.GenerateKey(rand.Reader)
 	verifier := &Verifier{Issuer: "https://api.paperboat.test", Keys: StaticKeys{"key-1": public}, Now: func() time.Time { return time.Unix(1000, 0) }}
 	for class, scopes := range map[string][]string{"codex_connect": {"codex:connect"}, "codex_manage": {"codex:prepare", "codex:browse", "codex:renew", "codex:stop"}} {
@@ -219,22 +219,10 @@ func TestVerifierAcceptsBoundCodexCredentials(t *testing.T) {
 			claims["session_id"] = "cdx_1"
 			delete(claims, "file_transfer_policy")
 		})
-		if claims, err := verifier.VerifyHelperAccess(context.Background(), token); err != nil || claims.CredentialClass != class {
-			t.Fatalf("%s claims=%+v err=%v", class, claims, err)
+		_, err := verifier.VerifyHelperAccess(context.Background(), token)
+		if code, _ := edgeerrors.CodeOf(err); code != edgeerrors.CodeCredentialInvalid {
+			t.Fatalf("retired class %s accepted: %v", class, err)
 		}
-	}
-	missingSession := tokenFor(t, private, "key-1", func(claims map[string]any) {
-		claims["aud"] = "paperboat-machine"
-		claims["credential_class"] = "codex_connect"
-		claims["scope"] = []string{"codex:connect"}
-		claims["machine_id"] = "machine_1"
-		claims["user_id"] = "usr_1"
-		claims["cli_client_session_id"] = "cls_1"
-		delete(claims, "session_id")
-		delete(claims, "file_transfer_policy")
-	})
-	if _, err := verifier.VerifyHelperAccess(context.Background(), missingSession); err == nil {
-		t.Fatal("Codex credential without session accepted")
 	}
 }
 
@@ -438,11 +426,13 @@ func TestVerifierPreservesUnavailableSourceCausesAndRecovers(t *testing.T) {
 	connector := tokenFor(t, private, "key-1", nil)
 	helper := tokenFor(t, private, "key-1", func(c map[string]any) {
 		c["aud"] = "paperboat-machine"
-		c["credential_class"] = "codex_connect"
-		c["scope"] = []string{"codex:connect"}
+		c["credential_class"] = "terminal_operation"
+		c["workspace_id"] = "personal"
+		c["actor_account_id"] = "usr_1"
+		c["scope"] = []string{"terminal:operate"}
 		c["user_id"] = "usr_1"
 		c["cli_client_session_id"] = "acs_1"
-		c["session_id"] = "cdx_1"
+		c["session_id"] = "pts_1"
 	})
 	for _, verify := range []struct {
 		name  string

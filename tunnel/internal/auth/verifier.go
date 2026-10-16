@@ -139,10 +139,6 @@ func (v *Verifier) VerifyHelperAccess(ctx context.Context, token string) (admiss
 		wantScopes = []string{"terminal:operate"}
 	case "file_transfer":
 		wantScopes = []string{"file:transfer"}
-	case "codex_connect":
-		wantScopes = []string{"codex:connect"}
-	case "codex_manage":
-		wantScopes = []string{"codex:prepare", "codex:browse", "codex:renew", "codex:stop"}
 	case "preview_launch":
 		if parsed.OwnerSessionKind != "local_lease" && parsed.OwnerSessionKind != "foreground" && parsed.OwnerSessionKind != "lazy_runtime" {
 			return admission.Claims{}, invalid()
@@ -160,11 +156,10 @@ func (v *Verifier) VerifyHelperAccess(ctx context.Context, token string) (admiss
 			return admission.Claims{}, invalid()
 		}
 	}
-	codexCredential := parsed.CredentialClass == "codex_connect" || parsed.CredentialClass == "codex_manage"
 	// preview_launch is a control-plane-to-host credential. It may originate
 	// from a browser or a CLI request, so it binds the authenticated user and
 	// operation but deliberately has no CLI client-session claim. Interactive
-	// terminal, transfer, and Codex credentials remain client-session bound.
+	// terminal and transfer credentials remain client-session bound.
 	requiresClientSession := parsed.CredentialClass != "preview_launch" && parsed.CredentialClass != "browser_terminal_operation"
 	if parsed.CredentialClass == "browser_terminal_operation" {
 		digest, e := base64.RawURLEncoding.Strict().DecodeString(parsed.BrowserPublicKeySHA256)
@@ -172,7 +167,7 @@ func (v *Verifier) VerifyHelperAccess(ctx context.Context, token string) (admiss
 			return admission.Claims{}, invalid()
 		}
 	}
-	if parsed.Issuer != v.Issuer || parsed.Audience != "paperboat-machine" || parsed.Subject == "" || parsed.JTI == "" || !exactScopes(parsed.Scope, wantScopes) || parsed.EnvironmentID == "" || parsed.MachineID == "" || parsed.CredentialClass == "file_transfer" && parsed.SourceMachineID == "" || parsed.CredentialClass == "terminal_operation" && parsed.SessionID == "" || codexCredential && (parsed.SessionID == "" || parsed.InstallationGeneration < 1 || parsed.ConnectorID == "" || parsed.ConnectorGeneration < 1 || parsed.EdgePool == "" || parsed.EdgeNodeID == "") || parsed.UserID == "" || requiresClientSession && parsed.CLIClientSessionID == "" || parsed.Expires <= parsed.IssuedAt || parsed.Expires-parsed.IssuedAt > 300 || time.Unix(parsed.IssuedAt, 0).After(now.Add(v.ClockSkew)) || !time.Unix(parsed.Expires, 0).After(now) {
+	if parsed.Issuer != v.Issuer || parsed.Audience != "paperboat-machine" || parsed.Subject == "" || parsed.JTI == "" || !exactScopes(parsed.Scope, wantScopes) || parsed.EnvironmentID == "" || parsed.MachineID == "" || parsed.CredentialClass == "file_transfer" && parsed.SourceMachineID == "" || parsed.CredentialClass == "terminal_operation" && parsed.SessionID == "" || parsed.UserID == "" || requiresClientSession && parsed.CLIClientSessionID == "" || parsed.Expires <= parsed.IssuedAt || parsed.Expires-parsed.IssuedAt > 300 || time.Unix(parsed.IssuedAt, 0).After(now.Add(v.ClockSkew)) || !time.Unix(parsed.Expires, 0).After(now) {
 		return admission.Claims{}, invalid()
 	}
 	result := admission.Claims{KeyID: parsedHeader.KeyID, Issuer: parsed.Issuer, Audience: parsed.Audience, JTI: parsed.JTI, CredentialClass: parsed.CredentialClass, Scopes: append([]string(nil), parsed.Scope...), EnvironmentID: parsed.EnvironmentID, MachineID: parsed.MachineID, InstallationGeneration: parsed.InstallationGeneration, HelperID: parsed.HelperID, ConnectorID: parsed.ConnectorID, EdgePool: parsed.EdgePool, EdgeNodeID: parsed.EdgeNodeID, ConnectorGeneration: parsed.ConnectorGeneration, ExpiresAt: time.Unix(parsed.Expires, 0).UTC()}
