@@ -731,6 +731,8 @@ assert r["enrollment_preserved"]
 if sys.argv[2] in ("team-lifecycle", "team-roles"):
  assert all(r[k] for k in ("create_get_list_delete", "invite_accept_decline_cancel", "independent_verified_recipient"))
  assert sys.argv[2]!="team-roles" or r["roles_remove_leave_transfer"]
+elif sys.argv[2]=="network-inventory":
+ assert r["edges_and_verified_relays"]
 elif sys.argv[2]=="tunnel-manage":
  assert all(r[k] for k in ("create_show_list_delete", "route_add_update_remove", "rename"))
 else:
@@ -830,6 +832,7 @@ test_device_application team-lifecycle team_lifecycle.py
 test_device_application team-roles team_lifecycle.py --roles
 test_device_application tunnel-manage tunnel_manage.py
 test_local_access_settings
+test_device_application network-inventory network_inventory.py
 test_preview_protocols
 for t in "${TLIST[@]}"; do
   skipped ssh-long || collect "ssh-long:$t" "long-ssh-$t" SSHFINAL "$LONG_SSH"
