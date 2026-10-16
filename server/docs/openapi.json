@@ -42419,6 +42419,16 @@
               "type": "string"
             },
             "description": "Exact filter when present, including empty string. Omission applies no filter."
+          },
+          {
+            "name": "actor_account_id",
+            "in": "query",
+            "required": false,
+            "description": "Exact retained authenticated member within the authorized workspace. Omission returns aggregate usage. Historical team events without retained actor remain aggregate-only. This is telemetry, not the authoritative billing debit.",
+            "schema": {
+              "type": "string",
+              "maxLength": 256
+            }
           }
         ],
         "responses": {
