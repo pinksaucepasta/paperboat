@@ -43,7 +43,7 @@ func TestAttachmentCarrierMovesStillConnectedPreviewOnPlacementChange(t *testing
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	err = carrier.RunWithLease(ctx, func() Lease { return lease }, func(Lease) error { return nil })
+	err = carrier.RunWithLease(ctx, func() Lease { return lease }, nil, func(Lease) error { return nil })
 	if !errors.Is(err, ErrAttachmentPlacementChanged) || !stopped.Load() || ctx.Err() != nil {
 		t.Fatalf("placement move err=%v stopped=%v context=%v", err, stopped.Load(), ctx.Err())
 	}

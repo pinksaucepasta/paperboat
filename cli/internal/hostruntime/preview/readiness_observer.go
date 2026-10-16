@@ -76,7 +76,7 @@ func (o *HTTPDispatchReadinessObserver) ObservePreviewReadiness(ctx context.Cont
 	// This bounds initial publication only, never the admitted carrier lifetime.
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	current, err := o.readinessRequest(ctx, metadata, lease, expectedGeneration, http.MethodPost)
+	current, err := o.observeLease(ctx, metadata, lease, expectedGeneration, http.MethodPost)
 	for err == nil {
 		if !sameLeaseIdentity(lease, current) || current.Generation <= expectedGeneration || !validActiveLeaseState(current.State) {
 			return Lease{}, ErrDispatchInvalid
@@ -88,12 +88,28 @@ func (o *HTTPDispatchReadinessObserver) ObservePreviewReadiness(ctx context.Cont
 			break
 		}
 		previous := current.Generation
-		current, err = o.readinessRequest(ctx, metadata, current, previous, http.MethodGet)
+		current, err = o.observeLease(ctx, metadata, current, previous, http.MethodGet)
 		if err == nil && current.Generation < previous {
 			return Lease{}, ErrDispatchInvalid
 		}
 	}
 	return Lease{}, err
+}
+
+func (o *HTTPDispatchReadinessObserver) observeLease(ctx context.Context, metadata DispatchReadiness, lease Lease, generation int64, method string) (Lease, error) {
+	if metadata.Mutate == nil {
+		return o.readinessRequest(ctx, metadata, lease, generation, method)
+	}
+	return metadata.Mutate(func(current Lease) (Lease, error) {
+		observed, err := o.readinessRequest(ctx, metadata, current, current.Generation, method)
+		if err != nil {
+			return Lease{}, err
+		}
+		if !sameLeaseIdentity(current, observed) || !validActiveLeaseState(observed.State) || observed.Generation < current.Generation || method == http.MethodPost && observed.Generation == current.Generation {
+			return Lease{}, ErrDispatchInvalid
+		}
+		return observed, nil
+	})
 }
 
 func (o *HTTPDispatchReadinessObserver) readinessRequest(ctx context.Context, metadata DispatchReadiness, lease Lease, expectedGeneration int64, method string) (Lease, error) {

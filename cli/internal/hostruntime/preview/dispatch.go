@@ -104,6 +104,7 @@ type DispatchReadinessObserver interface {
 // to sign and idempotently replay the machine readiness observation. It has no
 // reusable credential material.
 type DispatchReadiness struct {
+	Mutate         LeaseMutation
 	OperationID    string
 	IdempotencyKey string
 	RequestID      string
@@ -319,9 +320,8 @@ func (m *DispatchManager) Dispatch(ctx context.Context, authorization DispatchAu
 		cancel()
 		return DispatchOutcome{}, errors.Join(ErrDispatchInvalid, err)
 	}
-	leaseSource := &dispatchSessionLease{admitted: lease}
 	wrapped := &readinessCarrier{
-		inner: carrier, observer: m.config.Readiness, admitted: lease, leaseSource: leaseSource,
+		inner: carrier, observer: m.config.Readiness, admitted: lease,
 		readiness: DispatchReadiness{OperationID: request.OperationID, IdempotencyKey: request.IdempotencyKey, RequestID: request.RequestID, CorrelationID: request.CorrelationID},
 	}
 	baseSessionConfig.Carrier = wrapped
@@ -338,7 +338,6 @@ func (m *DispatchManager) Dispatch(ctx context.Context, authorization DispatchAu
 		cancel()
 		return DispatchOutcome{}, err
 	}
-	leaseSource.setSession(session)
 	if err := m.config.Sessions.Track(session); err != nil {
 		m.releaseReservation(request.OperationID, hash)
 		lazyLifecycle.Stop()
@@ -681,40 +680,17 @@ func (r DispatchRequest) Lease() Lease {
 }
 
 type readinessCarrier struct {
-	inner       Carrier
-	observer    DispatchReadinessObserver
-	admitted    Lease
-	leaseSource *dispatchSessionLease
-	readiness   DispatchReadiness
-}
-
-type dispatchSessionLease struct {
-	mu       sync.RWMutex
-	admitted Lease
-	session  *Session
-}
-
-func (s *dispatchSessionLease) setSession(session *Session) {
-	s.mu.Lock()
-	s.session = session
-	s.mu.Unlock()
-}
-
-func (s *dispatchSessionLease) current() Lease {
-	s.mu.RLock()
-	session, admitted := s.session, s.admitted
-	s.mu.RUnlock()
-	if session == nil {
-		return admitted
-	}
-	return session.currentLease()
+	inner     Carrier
+	observer  DispatchReadinessObserver
+	admitted  Lease
+	readiness DispatchReadiness
 }
 
 func (c *readinessCarrier) Run(ctx context.Context, lease Lease, ready func(Lease) error) error {
-	return c.RunWithLease(ctx, func() Lease { return lease }, ready)
+	return c.RunWithLease(ctx, func() Lease { return lease }, nil, ready)
 }
 
-func (c *readinessCarrier) RunWithLease(ctx context.Context, currentLease func() Lease, ready func(Lease) error) error {
+func (c *readinessCarrier) RunWithLease(ctx context.Context, currentLease func() Lease, mutate LeaseMutation, ready func(Lease) error) error {
 	markReady := func(observed Lease) error {
 		// The carrier proves the attachment and origin are ready. Its public
 		// URL can be the projection captured before DNS and certificate issuance.
@@ -722,7 +698,7 @@ func (c *readinessCarrier) RunWithLease(ctx context.Context, currentLease func()
 			return fmt.Errorf("%w: carrier readiness does not match admitted lease", ErrDispatchInvalid)
 		}
 		for attempt := 0; attempt < 4; attempt++ {
-			current := c.leaseSource.current()
+			current := currentLease()
 			if !sameLeaseIdentity(c.admitted, current) {
 				return fmt.Errorf("%w: current lease changed identity", ErrDispatchInvalid)
 			}
@@ -735,9 +711,11 @@ func (c *readinessCarrier) RunWithLease(ctx context.Context, currentLease func()
 			}
 			candidate := current
 			candidate.State, candidate.AllocationState, candidate.EdgeState, candidate.OriginState = "ready", "ready", "ready", "ready"
-			updated, err := c.observer.ObservePreviewReadiness(ctx, c.readiness, candidate, expected)
+			metadata := c.readiness
+			metadata.Mutate = mutate
+			updated, err := c.observer.ObservePreviewReadiness(ctx, metadata, candidate, expected)
 			if err != nil {
-				latest := c.leaseSource.current()
+				latest := currentLease()
 				latestGeneration := latest.Generation
 				if latestGeneration < 1 {
 					latestGeneration = leaseGenerationForID(latest.ID, latest.ETag)
@@ -756,9 +734,9 @@ func (c *readinessCarrier) RunWithLease(ctx context.Context, currentLease func()
 		return fmt.Errorf("%w: readiness raced repeated lease renewals", ErrDispatchUnavailable)
 	}
 	if current, ok := c.inner.(interface {
-		RunWithLease(context.Context, func() Lease, func(Lease) error) error
+		RunWithLease(context.Context, func() Lease, LeaseMutation, func(Lease) error) error
 	}); ok {
-		return current.RunWithLease(ctx, currentLease, markReady)
+		return current.RunWithLease(ctx, currentLease, mutate, markReady)
 	}
 	return c.inner.Run(ctx, currentLease(), markReady)
 }

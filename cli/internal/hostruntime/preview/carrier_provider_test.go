@@ -332,7 +332,7 @@ func TestAttachmentCarrierAcquiresRenewedPendingCustomerLease(t *testing.T) {
 		t.Fatal(err)
 	}
 	called := false
-	err = carrier.RunWithLease(ctx, func() Lease { return current }, func(observed Lease) error {
+	err = carrier.RunWithLease(ctx, func() Lease { return current }, nil, func(observed Lease) error {
 		called = true
 		if observed.Generation != 2 || observed.Endpoint != "" || observed.EndpointState != "custom_domain_not_ready" {
 			t.Fatal("transport acquisition changed canonical publication projection")

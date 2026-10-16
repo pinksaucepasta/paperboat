@@ -483,7 +483,7 @@ func TestReadinessCarrierUsesCurrentCustomDomainProjection(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			admitted := testDispatchRequest(t, time.Now().UTC()).Lease()
 			admitted.Endpoint, admitted.EndpointState = "", "custom_domain_not_ready"
-			source := &dispatchSessionLease{admitted: admitted, session: &Session{lease: admitted}}
+			source := &Session{lease: admitted}
 			calls := 0
 			observer, err := NewHTTPDispatchReadinessObserver(HTTPDispatchReadinessObserverConfig{
 				ControlURL: "https://api.example.test", AllowedHosts: []string{"api.example.test"}, Identities: readinessTokenSource("machine-identity"),
@@ -514,11 +514,11 @@ func TestReadinessCarrierUsesCurrentCustomDomainProjection(t *testing.T) {
 				}
 				return ready(captured)
 			}}
-			carrier := &readinessCarrier{inner: inner, observer: observer, admitted: admitted, leaseSource: source, readiness: DispatchReadiness{OperationID: "op_projection", IdempotencyKey: "projection-key", RequestID: "req_projection", CorrelationID: "cor_projection"}}
+			carrier := &readinessCarrier{inner: inner, observer: observer, admitted: admitted, readiness: DispatchReadiness{OperationID: "op_projection", IdempotencyKey: "projection-key", RequestID: "req_projection", CorrelationID: "cor_projection"}}
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
 			var delivered Lease
-			err = carrier.RunWithLease(ctx, source.current, func(lease Lease) error { delivered = lease; return nil })
+			err = carrier.RunWithLease(ctx, source.currentLease, nil, func(lease Lease) error { delivered = lease; return nil })
 			if changedOwner {
 				if !errors.Is(err, ErrDispatchInvalid) || calls != 0 {
 					t.Fatalf("changed owner reached authority: calls=%d err=%v", calls, err)

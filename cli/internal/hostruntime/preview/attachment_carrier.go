@@ -94,12 +94,12 @@ func NewAttachmentCarrier(config AttachmentCarrierConfig) (*AttachmentCarrier, e
 }
 
 func (c *AttachmentCarrier) Run(ctx context.Context, lease Lease, ready func(Lease) error) error {
-	return c.RunWithLease(ctx, func() Lease { return lease }, ready)
+	return c.RunWithLease(ctx, func() Lease { return lease }, nil, ready)
 }
 
 // RunWithLease observes the latest lease ETag while a ready preview is live.
 // Session renewals may advance that ETag independently of carrier placement.
-func (c *AttachmentCarrier) RunWithLease(ctx context.Context, currentLease func() Lease, ready func(Lease) error) error {
+func (c *AttachmentCarrier) RunWithLease(ctx context.Context, currentLease func() Lease, mutate LeaseMutation, ready func(Lease) error) error {
 	if c == nil || ctx == nil || currentLease == nil || ready == nil {
 		return ErrAttachmentCarrierInvalid
 	}
