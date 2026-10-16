@@ -74,7 +74,11 @@ func (s *WorkspaceService) workspaceBandwidthTx(ctx context.Context, tx *db.Tx, 
 	}
 	var team, catalog sql.NullString
 	var start, end sql.NullTime
-	if err := tx.QueryRow(ctx, `SELECT w.team_id,w.period_start,w.period_end,p.catalog_ref FROM billing_workspaces w LEFT JOIN billing_products p ON p.code=w.product_code AND p.provider='stripe' WHERE w.id=$1 FOR UPDATE OF w`, workspaceID).Scan(&team, &start, &end, &catalog); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT w.team_id,w.period_start,w.period_end,p.catalog_ref
+FROM billing_workspaces w LEFT JOIN billing_products p
+ ON p.code=w.product_code AND p.provider='stripe'
+ AND w.period_start<=$2 AND w.period_end>$2
+WHERE w.id=$1 FOR UPDATE OF w`, workspaceID, at).Scan(&team, &start, &end, &catalog); err != nil {
 		return 0, false, err
 	}
 	policy, err := operatorPolicyTx(ctx, tx)
