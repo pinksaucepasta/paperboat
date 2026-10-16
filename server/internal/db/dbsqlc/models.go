@@ -2149,11 +2149,12 @@ type TeamInboxSenderPolicy struct {
 type TeamInvitation struct {
 	InvitationID     string
 	TeamID           string
-	RecipientAccount string
+	RecipientAccount sql.NullString
 	CreatedBy        string
 	ExpiresAt        time.Time
 	AcceptedAt       sql.NullTime
 	CancelledAt      sql.NullTime
+	RecipientEmail   sql.NullString
 }
 
 type TeamMachineGrant struct {

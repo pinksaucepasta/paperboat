@@ -89,7 +89,7 @@ func TestPostgresTeamAuthorityLifecycle(t *testing.T) {
 			t.Errorf("cleanup commit: %v", e)
 		}
 	}()
-	if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users(id,workos_subject,primary_email,status) SELECT x,x,x||'@invalid.test','active' FROM unnest($1::text[]) x`, []string{owner, admin, ordinary, other}); err != nil {
+	if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users(id,workos_subject,primary_email,status) SELECT x,x,x||'@invalid.test','active' FROM unnest($1::text[]) x`, []string{owner, admin, ordinary}); err != nil {
 		t.Fatal(err)
 	}
 	s := NewService(store)
@@ -112,6 +112,90 @@ func TestPostgresTeamAuthorityLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	// An invitation can precede signup, but only a current verified email can
+	// discover it or act on it. Binding after acceptance is to the account.
+	for _, invalid := range []InviteRequest{
+		{Email: "not-an-email"}, {Email: "Name <member@example.test>"},
+		{Email: other + "@invalid.test", AccountID: other}, {},
+	} {
+		invalid.OperationID, invalid.ExpectedGeneration = "invalid_email", state.Generation
+		if _, e := s.Invite(ctx, owner, team, invalid); !errors.Is(e, ErrInvalid) {
+			t.Fatalf("invalid invitation recipient accepted: %v", e)
+		}
+	}
+	emailRequest := InviteRequest{OperationID: "pre_signup", ExpectedGeneration: state.Generation, Email: strings.ToUpper(other + "@invalid.test")}
+	emailInvite, err := s.Invite(ctx, owner, team, emailRequest)
+	if err != nil || emailInvite.AccountID != "" || emailInvite.Email != other+"@invalid.test" {
+		t.Fatalf("pre-signup email invitation: %v", err)
+	}
+	if replayed, e := s.Invite(ctx, owner, team, emailRequest); e != nil || replayed.InvitationID != emailInvite.InvitationID {
+		t.Fatalf("email invitation replay: %v", e)
+	}
+	if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users(id,workos_subject,primary_email,email_verified,status) VALUES($1,$1,$2,false,'active')`, other, other+"@invalid.test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, e := s.Invitation(ctx, other, emailInvite.InvitationID); !errors.Is(e, ErrNotFound) {
+		t.Fatalf("unverified recipient discovered invitation: %v", e)
+	}
+	if _, e := s.Accept(ctx, other, emailInvite.InvitationID, AcceptRequest{OperationID: "unverified_accept"}); !errors.Is(e, ErrForbidden) {
+		t.Fatalf("unverified recipient accepted: %v", e)
+	}
+	if _, e := s.DeclineInvitation(ctx, other, emailInvite.InvitationID, AcceptRequest{OperationID: "unverified_decline"}); !errors.Is(e, ErrForbidden) {
+		t.Fatalf("unverified recipient declined: %v", e)
+	}
+	if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.users SET email_verified=true WHERE id=$1`, other); err != nil {
+		t.Fatal(err)
+	}
+	if listed, total, e := s.InvitationInventory(ctx, other, "", "", "pending", "mine", 10, 0); e != nil || total != 1 || len(listed) != 1 || listed[0].InvitationID != emailInvite.InvitationID {
+		t.Fatalf("verified email discovery total=%d: %v", total, e)
+	}
+	if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.users SET email_verified=true WHERE id=$1`, admin); err != nil {
+		t.Fatal(err)
+	}
+	if _, e := s.Invitation(ctx, admin, emailInvite.InvitationID); !errors.Is(e, ErrNotFound) {
+		t.Fatalf("foreign email discovery: %v", e)
+	}
+	state, err = s.Get(ctx, owner, team)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, e := s.Invite(ctx, owner, team, InviteRequest{OperationID: "duplicate_account", ExpectedGeneration: state.Generation, AccountID: other}); !errors.Is(e, ErrConflict) {
+		t.Fatalf("account invitation duplicated pending email: %v", e)
+	}
+	if _, e := s.DeclineInvitation(ctx, other, emailInvite.InvitationID, AcceptRequest{OperationID: "email_decline"}); e != nil {
+		t.Fatalf("verified email decline: %v", e)
+	}
+	state, err = s.Get(ctx, owner, team)
+	if err != nil {
+		t.Fatal(err)
+	}
+	emailRequest.OperationID, emailRequest.ExpectedGeneration = "email_join", state.Generation
+	emailInvite, err = s.Invite(ctx, owner, team, emailRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err = s.Accept(ctx, other, emailInvite.InvitationID, AcceptRequest{OperationID: "email_accept"})
+	if err != nil {
+		t.Fatalf("verified email accept: %v", err)
+	}
+	if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.users SET primary_email=$2 WHERE id=$1`, other, other+"-changed@invalid.test"); err != nil {
+		t.Fatal(err)
+	}
+	if item, e := s.Invitation(ctx, other, emailInvite.InvitationID); e != nil || item.AccountID != other || item.State != "accepted" {
+		t.Fatalf("accepted invitation lost account binding: %v", e)
+	}
+	if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.users SET primary_email=$2 WHERE id=$1`, admin, other+"@invalid.test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, e := s.Invitation(ctx, admin, emailInvite.InvitationID); !errors.Is(e, ErrNotFound) {
+		t.Fatalf("old email reassignment exposed bound invitation: %v", e)
+	}
+	state, err = s.Mutate(ctx, owner, team, MutationRequest{OperationID: "remove_email_fixture", Action: "remove", AccountID: other, ExpectedGeneration: state.Generation})
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	invite := func(actor, recipient, op string) Invitation {
 		t.Helper()
 		i, e := s.Invite(ctx, actor, team, InviteRequest{OperationID: op, ExpectedGeneration: state.Generation, AccountID: recipient})

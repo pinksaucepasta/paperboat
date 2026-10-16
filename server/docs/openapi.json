@@ -9303,12 +9303,38 @@
           },
           "account_id": {
             "type": "string"
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "maxLength": 254
           }
         },
         "required": [
           "operation_id",
-          "expected_generation",
-          "account_id"
+          "expected_generation"
+        ],
+        "oneOf": [
+          {
+            "required": [
+              "email"
+            ],
+            "not": {
+              "required": [
+                "account_id"
+              ]
+            }
+          },
+          {
+            "required": [
+              "account_id"
+            ],
+            "not": {
+              "required": [
+                "email"
+              ]
+            }
+          }
         ]
       },
       "TeamAcceptRequest": {
@@ -9347,6 +9373,10 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 9007199254740991
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
           }
         },
         "required": [
@@ -14410,6 +14440,10 @@
           },
           "created_by": {
             "type": "string"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
           }
         },
         "required": [

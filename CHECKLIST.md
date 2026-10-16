@@ -489,7 +489,7 @@ that use them; say which in Evidence.
 | ID | Scenario | L | M | W | Evidence |
 |---|---|---|---|---|---|
 | F12-01 | Create, get, list, delete a team (payment handled in F13). | [ ] | [ ] | [ ] | TestPostgresTeamAuthorityLifecycle actual isolated VPS PostgreSQL PASS0.73s; real CLI/console proof remains A/C. |
-| F12-02 | Invite by email (also people without an account), accept, decline, cancel, invitations listing. | [ ] | [ ] | [ ] | — |
+| F12-02 | Invite by email (also people without an account), accept, decline, cancel, invitations listing. | [ ] | [ ] | [ ] | Server pre-signup regression RED0.20s/GREEN actual isolated VPS PostgreSQL0.94s: normalized email, unverified/foreign refusal, discovery, duplicate-account prevention, replay, accept/decline and permanent account binding. Five team PG owners PASS; teams/HTTP race1.030/5.614s. Migration072/API producer awaiting gate/deploy; CLI/console new email selector and real signup proof requested from A/C in PLAN Log. |
 | F12-03 | Roles owner/admin/member; change role; remove member; leave; transfer ownership. | [ ] | [ ] | [ ] | —  Server TestPostgresUnifiedLifecycleNoRevivedAuthority: isolated VPS PG PASS0.51s after typed-endpoint fixture repair; device qualification pending. |
 | F12-04 | Team machines: enroll into team, share personal machine, grant, unshare, transfer-to-team, remove; default access shown while enrolling. | [ ] | [ ] | [ ] | TestPostgresTeamMachineAuthority actual isolated VPS PostgreSQL RED untyped endpoint fixture/GREEN0.69s; original exact grants/public disposition/ownership/revocation assertions retained. A/C real enrollment and sharing proof pending. |
 | F12-05 | Explicit resource grants and `pb team attach`; `pb team activity`. | [ ] | [ ] | [ ] | — |

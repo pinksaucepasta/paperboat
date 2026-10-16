@@ -111,14 +111,16 @@ type MutationRequest struct {
 	Confirmation       string `json:"confirmation"`
 }
 type InviteRequest struct {
+	Email              string `json:"email,omitempty"`
 	OperationID        string `json:"operation_id"`
 	ExpectedGeneration uint64 `json:"expected_generation"`
-	AccountID          string `json:"account_id"`
+	AccountID          string `json:"account_id,omitempty"`
 }
 type AcceptRequest struct {
 	OperationID string `json:"operation_id"`
 }
 type Invitation struct {
+	Email        string    `json:"email,omitempty"`
 	InvitationID string    `json:"invitation_id"`
 	TeamID       string    `json:"team_id"`
 	AccountID    string    `json:"account_id"`

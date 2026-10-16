@@ -451,3 +451,19 @@ covers scoped machine, terminal, preview, tunnel, team, user and machine-environ
 audits from the past90 days. Empty matches return an empty array. Invalid filters
 or cursor return400 `invalid_activity_query`, missing auth401, unavailable workspace
 or insufficient team role403, and storage failure500 `activity_unavailable`.
+
+## Team invitations
+
+`POST /v1/teams/{team_id}/invitations` takes `operation_id`,
+`expected_generation`, and exactly one of `email` or `account_id`. An email
+invitation can precede signup; the address is normalized to lowercase and does
+not create an account. The response and invitation inventory include `email`
+when addressed by email, with empty `account_id` until the recipient acts.
+Only a current active account with that verified email can discover, accept or
+decline it. Acceptance and decline bind the invitation to that account, so a
+later email change does not transfer its history or replay authority.
+
+Existing accept, decline, cancellation and inventory endpoints are unchanged.
+Malformed recipient inputs return `400 invalid_request`; stale generations or
+an existing pending invitation return `409 team_changed`. Administrators keep
+team-scoped inventory access; unrelated accounts cannot discover invitations.
