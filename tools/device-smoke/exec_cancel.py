@@ -16,6 +16,13 @@ from install_lifecycle import registration
 from pairing_lifecycle import command_diagnostic
 
 
+class FixtureCommandFailure(RuntimeError):
+    def __init__(self, diagnostic):
+        self.diagnostic_path = diagnostic
+        self.cleanup_errors = []
+        super().__init__('exec cancellation check failed; private diagnostics: ' + str(diagnostic))
+
+
 def events(output):
     data = os.pread(output.fileno(), (1 << 20) + 1, 0)
     if len(data) > 1 << 20:
@@ -74,11 +81,10 @@ def one(binary, target, mode):
                 raise RuntimeError('cancellation lost its known outcome')
             verify_stopped(binary, target, pid, nonce)
         except Exception as error:
-            failure = error
             diagnostic = command_diagnostic(arguments, os.pread(output.fileno(), 1 << 20, 0),
                                             os.pread(errors.fileno(), 1 << 20, 0))
-            error.add_note('Private command diagnostics: ' + str(diagnostic))
-            raise
+            failure = FixtureCommandFailure(diagnostic)
+            raise failure from error
         finally:
             if process.poll() is None:
                 process.send_signal(signal.SIGINT)
@@ -97,7 +103,7 @@ def one(binary, target, mode):
                 except Exception as cleanup_error:
                     if failure is None:
                         raise
-                    failure.add_note('Exact exec fixture cleanup failed: ' + str(cleanup_error))
+                    failure.cleanup_errors.append(cleanup_error)
 
 
 def main():

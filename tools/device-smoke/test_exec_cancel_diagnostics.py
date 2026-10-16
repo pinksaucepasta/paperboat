@@ -18,15 +18,13 @@ class ExecCancellationDiagnostics(unittest.TestCase):
             binary.chmod(0o700)
             with self.assertRaises(RuntimeError) as raised:
                 one(binary, 'fixture-target', 'timeout')
-            notes = getattr(raised.exception, '__notes__', [])
-            paths = [Path(note.removeprefix('Private command diagnostics: '))
-                     for note in notes if note.startswith('Private command diagnostics: ')]
-            self.assertEqual(len(paths), 1)
-            self.addCleanup(paths[0].unlink, missing_ok=True)
-            receipt = json.loads(paths[0].read_text())
+            path = raised.exception.diagnostic_path
+            self.assertIsInstance(raised.exception.__cause__, RuntimeError)
+            self.addCleanup(path.unlink, missing_ok=True)
+            receipt = json.loads(path.read_text())
             self.assertEqual(json.loads(receipt['stdout'])['error_code'], 'fixture_start_failed')
             self.assertEqual(receipt['argv'][0], str(binary))
-            self.assertEqual(stat.S_IMODE(paths[0].stat().st_mode), 0o600)
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
 
 
 if __name__ == '__main__':
