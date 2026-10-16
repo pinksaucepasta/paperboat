@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -96,30 +97,36 @@ func TestPostgresBandwidthHistory(t *testing.T) {
 	if !got.Coverage.Native || strings.Contains(got.Coverage.Note, "Reporting 2 of 1") {
 		t.Fatalf("retired reporter changed current coverage: %+v", got.Coverage)
 	}
-	if got.Totals != (Bytes{Upload: 130, Download: 240}) || len(got.Resources) != 1 || len(got.Resources[0].Paths) != 2 || len(got.Series) != 1 {
+	if got.Totals.Bytes != (Bytes{Upload: 130, Download: 240}) || len(got.Resources) != 1 || len(got.Resources[0].Paths) != 2 || len(got.Series) != 1 {
 		t.Fatalf("history=%+v", got)
 	}
+	exec(`UPDATE native_usage_reporting_status SET installation_generation=2 WHERE machine_id=$1`, machine)
+	staleGeneration, e := service.Get(ctx, a, scope, q)
+	if e != nil || staleGeneration.Coverage.Native || !strings.Contains(staleGeneration.Coverage.Note, "Reporting 0 of 1 machines") {
+		t.Fatalf("old installation counted as current reporter: %+v %v", staleGeneration.Coverage, e)
+	}
+	exec(`UPDATE native_usage_reporting_status SET installation_generation=1 WHERE machine_id=$1`, machine)
 	q.Hosting = "self_hosted"
 	got, err = service.Get(ctx, a, scope, q)
-	if err != nil || got.Totals != (Bytes{Upload: 30, Download: 40}) || got.Resources[0].Paths[0].NodeID != node {
+	if err != nil || got.Totals.Bytes != (Bytes{Upload: 30, Download: 40}) || got.Resources[0].Paths[0].NodeID != node {
 		t.Fatalf("selfhost=%+v %v", got, err)
 	}
 	q.Hosting = ""
 	got, err = service.Get(ctx, b, scope, q)
-	if err != nil || got.Totals != (Bytes{}) || len(got.Resources) != 0 {
+	if err != nil || got.Totals.Bytes != (Bytes{}) || len(got.Resources) != 0 {
 		t.Fatalf("cross workspace=%+v %v", got, err)
 	}
 	q.Start = now.Add(time.Minute)
 	q.End = now.Add(2 * time.Minute)
 	got, err = service.Get(ctx, a, scope, q)
-	if err != nil || got.Totals != (Bytes{}) {
+	if err != nil || got.Totals.Bytes != (Bytes{}) {
 		t.Fatalf("time filter=%+v %v", got, err)
 	}
 	q.Start = now
 	q.End = now.Add(time.Minute)
 	q.Mode = "direct"
 	got, err = service.Get(ctx, a, scope, q)
-	if err != nil || got.Totals != (Bytes{Upload: 100, Download: 200}) {
+	if err != nil || got.Totals.Bytes != (Bytes{Upload: 100, Download: 200}) {
 		t.Fatalf("direct=%+v %v", got, err)
 	}
 	// A wrong machine generation is rejected independently of valid reports.
@@ -157,7 +164,7 @@ func TestPostgresBandwidthHistory(t *testing.T) {
 	q.Mode = "edge"
 	q.Hosting = "managed"
 	got, err = service.Get(ctx, a, scope, q)
-	if err != nil || got.Totals != (Bytes{Upload: 111}) || len(got.Resources) != 1 || got.Resources[0].Paths[0].NodeID != edgeNode {
+	if err != nil || got.Totals.Bytes != (Bytes{Upload: 111}) || len(got.Resources) != 1 || got.Resources[0].Paths[0].NodeID != edgeNode {
 		t.Fatalf("accepted edge projection=%+v %v", got, err)
 	}
 	terminal, attachment := "terminal_"+suffix, "attachment_"+suffix
@@ -177,7 +184,7 @@ func TestPostgresBandwidthHistory(t *testing.T) {
 	}
 	browserQuery := Query{Start: browserStart, End: browserStart.Add(time.Minute), ResourceID: terminal, Mode: "edge"}
 	got, err = service.Get(ctx, a, scope, browserQuery)
-	if err != nil || got.Totals != (Bytes{Upload: 17, Download: 19}) || got.Resources[0].Paths[0].NodeID != edgeNode {
+	if err != nil || got.Totals.Bytes != (Bytes{Upload: 17, Download: 19}) || got.Resources[0].Paths[0].NodeID != edgeNode {
 		t.Fatalf("browser derived edge=%+v %v", got, err)
 	}
 	browser.NodeID = "different-node"
@@ -224,7 +231,7 @@ func TestPostgresBandwidthHistory(t *testing.T) {
 		t.Fatalf("foreign node observation=%+v %v", receipt, err)
 	}
 	got, err = service.Get(ctx, a, scope, Query{Start: now, End: now.Add(time.Minute), Mode: "relay", Hosting: "unknown"})
-	if err != nil || got.Totals != (Bytes{Upload: 3, Download: 4}) || len(got.Resources) != 1 || len(got.Resources[0].Paths) != 1 || got.Resources[0].Paths[0].NodeName != node {
+	if err != nil || got.Totals.Bytes != (Bytes{Upload: 3, Download: 4}) || len(got.Resources) != 1 || len(got.Resources[0].Paths) != 1 || got.Resources[0].Paths[0].NodeName != node {
 		t.Fatalf("foreign node metadata disclosed or valid bytes lost: %+v %v", got, err)
 	}
 	// Retirement is not revocation of the owner's right to see earlier usage.
@@ -259,14 +266,37 @@ func TestPostgresBandwidthHistory(t *testing.T) {
 			exec(insert, fmt.Sprintf("paths_%s_%03d", suffix, i), "personal:"+a, "page_000", machine, fmt.Sprintf("node_%03d", i), now, now.Add(30*time.Second))
 		}
 		exec(insert, "foreign_paging_"+suffix, "personal:"+b, "page_999", machine, "node", now, now.Add(30*time.Second))
+		// These paths are on the resource omitted by the first detail page.
+		for i, path := range []struct {
+			mode, hosting    string
+			upload, download int64
+		}{
+			{"direct", "none", 7, 11}, {"edge", "self_hosted", 13, 17}, {"unknown", "unknown", 19, 23},
+		} {
+			exec(`INSERT INTO resource_bandwidth_events(operation_id,workspace_id,resource_kind,resource_id,resource_name,machine_id,machine_name,mode,hosting,node_id,node_name,upload_bytes,download_bytes,interval_start,interval_end) VALUES($1,$2,'paging','page_200','page_200',$3,'Machine',$4,$5,'','',$6,$7,$8,$9)`, fmt.Sprintf("aggregate_%s_%d", suffix, i), "personal:"+a, machine, path.mode, path.hosting, path.upload, path.download, now, now.Add(30*time.Second))
+		}
 		query := Query{Start: now, End: now.Add(time.Minute), ResourceKind: "paging", Limit: 200}
 		first, err := service.Get(ctx, a, scope, query)
-		if err != nil || len(first.Resources) != 200 || first.Pagination.Total != 201 || first.Pagination.NextOffset == nil || *first.Pagination.NextOffset != 200 || first.Totals != (Bytes{Upload: 233, Download: 466}) {
+		if err != nil || len(first.Resources) != 200 || first.Pagination.Total != 201 || first.Pagination.NextOffset == nil || *first.Pagination.NextOffset != 200 || first.Totals.Bytes != (Bytes{Upload: 272, Download: 517}) {
 			t.Fatalf("first page: %+v %v", first, err)
+		}
+		wantPaths := []PathTotal{
+			{Mode: "direct", Hosting: "none", Bytes: Bytes{Upload: 7, Download: 11}},
+			{Mode: "edge", Hosting: "self_hosted", Bytes: Bytes{Upload: 13, Download: 17}},
+			{Mode: "relay", Hosting: "managed", Bytes: Bytes{Upload: 233, Download: 466}},
+		}
+		if !slices.Equal(first.Totals.ByPath, wantPaths) || len(first.Series) != 1 || !slices.Equal(first.Series[0].ByPath, wantPaths) || !strings.Contains(first.Coverage.Note, "unknown attribution") {
+			t.Fatalf("whole-period path aggregates missing beyond detail page: totals=%+v series=%+v coverage=%+v", first.Totals, first.Series, first.Coverage)
+		}
+		dailyQuery := query
+		dailyQuery.Start = now.Add(-72 * time.Hour)
+		daily, e := service.Get(ctx, a, scope, dailyQuery)
+		if e != nil || len(daily.Series) != 1 || !slices.Equal(daily.Series[0].ByPath, wantPaths) || !daily.Series[0].Start.Equal(now.Truncate(24*time.Hour)) {
+			t.Fatalf("daily path aggregates: %+v %v", daily.Series, e)
 		}
 		query.Offset = 200
 		last, err := service.Get(ctx, a, scope, query)
-		if err != nil || len(last.Resources) != 1 || last.Resources[0].ID != "page_200" || last.Pagination.NextOffset != nil || last.Totals != first.Totals {
+		if err != nil || len(last.Resources) != 1 || last.Resources[0].ID != "page_200" || last.Pagination.NextOffset != nil || last.Totals.Bytes != first.Totals.Bytes {
 			t.Fatalf("last page: %+v %v", last, err)
 		}
 		empty := ""
@@ -279,10 +309,16 @@ func TestPostgresBandwidthHistory(t *testing.T) {
 		if err != nil || len(paths.Resources) != 1 || len(paths.Resources[0].Paths) != 32 || paths.Resources[0].PathPagination.Total != 33 || paths.Resources[0].PathPagination.NextOffset == nil || paths.Totals.Upload != 33 {
 			t.Fatalf("path first: %+v %v", paths, err)
 		}
+		if !slices.Equal(paths.Totals.ByPath, []PathTotal{{Mode: "relay", Hosting: "managed", Bytes: Bytes{Upload: 33, Download: 66}}}) {
+			t.Fatalf("path pagination truncated aggregate: %+v", paths.Totals)
+		}
 		query.PathOffset = 32
 		tail, err := service.Get(ctx, a, scope, query)
-		if err != nil || len(tail.Resources) != 1 || len(tail.Resources[0].Paths) != 1 || tail.Resources[0].PathPagination.NextOffset != nil || tail.Resources[0].Upload != 33 || tail.Totals != paths.Totals {
+		if err != nil || len(tail.Resources) != 1 || len(tail.Resources[0].Paths) != 1 || tail.Resources[0].PathPagination.NextOffset != nil || tail.Resources[0].Upload != 33 || tail.Totals.Bytes != paths.Totals.Bytes {
 			t.Fatalf("path tail: %+v %v", tail, err)
+		}
+		if !slices.Equal(tail.Totals.ByPath, paths.Totals.ByPath) {
+			t.Fatal("path offset changed aggregate")
 		}
 		query.PathOffset = 33
 		exhausted, err := service.Get(ctx, a, scope, query)
@@ -291,7 +327,7 @@ func TestPostgresBandwidthHistory(t *testing.T) {
 		}
 		query.MachineID = &empty
 		none, err := service.Get(ctx, a, scope, query)
-		if err != nil || none.Pagination.Total != 0 || len(none.Resources) != 0 || none.Totals != (Bytes{}) {
+		if err != nil || none.Pagination.Total != 0 || len(none.Resources) != 0 || none.Totals.Bytes != (Bytes{}) {
 			t.Fatalf("exact empty machine: %+v %v", none, err)
 		}
 	})

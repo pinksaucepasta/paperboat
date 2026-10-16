@@ -452,6 +452,14 @@ audits from the past90 days. Empty matches return an empty array. Invalid filter
 or cursor return400 `invalid_activity_query`, missing auth401, unavailable workspace
 or insufficient team role403, and storage failure500 `activity_unavailable`.
 
+`totals.by_path` and each series point's `by_path` contain
+`{mode, hosting, upload_bytes, download_bytes}` aggregates over all matching
+measurements, independently of resource/path pagination. Modes are `direct`,
+`relay`, `edge`; hosting is `managed`, `self_hosted`, `none`. Unknown attribution
+is omitted from these breakdowns and identified in `coverage.note`; combined
+upload/download totals still include it. Empty breakdowns are `[]`. Current
+machine reporting coverage excludes retired installations and former workspaces.
+
 ## Team invitations
 
 `POST /v1/teams/{team_id}/invitations` takes `operation_id`,

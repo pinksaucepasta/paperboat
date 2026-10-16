@@ -13220,11 +13220,19 @@
                 "type": "integer",
                 "format": "int64",
                 "minimum": 0
+              },
+              "by_path": {
+                "type": "array",
+                "maxItems": 9,
+                "items": {
+                  "$ref": "#/components/schemas/ResourceBandwidthPathTotal"
+                }
               }
             },
             "required": [
               "upload_bytes",
-              "download_bytes"
+              "download_bytes",
+              "by_path"
             ]
           },
           "resources": {
@@ -13350,12 +13358,20 @@
                   "type": "integer",
                   "format": "int64",
                   "minimum": 0
+                },
+                "by_path": {
+                  "type": "array",
+                  "maxItems": 9,
+                  "items": {
+                    "$ref": "#/components/schemas/ResourceBandwidthPathTotal"
+                  }
                 }
               },
               "required": [
                 "start",
                 "upload_bytes",
-                "download_bytes"
+                "download_bytes",
+                "by_path"
               ]
             }
           },
@@ -14896,6 +14912,44 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "ResourceBandwidthPathTotal": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "direct",
+              "relay",
+              "edge"
+            ]
+          },
+          "hosting": {
+            "type": "string",
+            "enum": [
+              "managed",
+              "self_hosted",
+              "none"
+            ]
+          },
+          "upload_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "download_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "mode",
+          "hosting",
+          "upload_bytes",
+          "download_bytes"
         ]
       }
     },
@@ -42311,7 +42365,7 @@
       "get": {
         "operationId": "get_v1_usage",
         "summary": "Read workspace resource bandwidth history",
-        "description": "Active account and selected workspace membership required. Cookie auth or account:read bearer scope. At most 90 days per window, hourly UTC buckets through 48 hours, daily thereafter. Half-open window uses measurement interval end. Retains 90 days. Totals/series include detail omitted by truncated limits. Application byte observations are separate from billing. resource_route_id distinguishes machine service ports. Coverage reports missing, stale, dropped and incomplete native reporting.",
+        "description": "Active account and selected workspace membership required. Cookie auth or account:read bearer scope. At most 90 days per window, hourly UTC buckets through 48 hours, daily thereafter. Half-open window uses measurement interval end. Retains 90 days. Totals/series include detail omitted by truncated limits. Application byte observations are separate from billing. resource_route_id distinguishes machine service ports. Coverage reports missing, stale, dropped and incomplete native reporting. totals.by_path and each series point by_path aggregate all matching resources before pagination; unknown mode or hosting is excluded from breakdowns with a coverage note, while combined totals retain it.",
         "security": [
           {
             "cookieSession": []

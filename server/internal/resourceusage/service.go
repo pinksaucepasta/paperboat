@@ -66,9 +66,18 @@ type Resource struct {
 	Paths          []Path     `json:"paths"`
 	PathPagination Pagination `json:"path_pagination"`
 }
+type PathTotal struct {
+	Mode    string `json:"mode"`
+	Hosting string `json:"hosting"`
+	Bytes
+}
+type Totals struct {
+	Bytes
+	ByPath []PathTotal `json:"by_path"`
+}
 type Point struct {
 	Start time.Time `json:"start"`
-	Bytes
+	Totals
 }
 type Coverage struct {
 	Edge   bool   `json:"edge"`
@@ -80,7 +89,7 @@ type Result struct {
 	End        time.Time  `json:"end"`
 	UpdatedAt  time.Time  `json:"updated_at"`
 	Coverage   Coverage   `json:"coverage"`
-	Totals     Bytes      `json:"totals"`
+	Totals     Totals     `json:"totals"`
 	Resources  []Resource `json:"resources"`
 	Series     []Point    `json:"series"`
 	Pagination Pagination `json:"pagination"`
@@ -198,29 +207,7 @@ func (s *Service) Get(ctx context.Context, account string, scope workspace.Scope
 		if stamp.Valid {
 			out.UpdatedAt = stamp.Time.UTC()
 		}
-		if err := tx.QueryRow(ctx, `SELECT coalesce(sum(upload_bytes),0)::bigint,coalesce(sum(download_bytes),0)::bigint FROM resource_bandwidth_events e WHERE `+predicate, args...).Scan(&out.Totals.Upload, &out.Totals.Download); err != nil {
-			return err
-		}
-		bucket := "hour"
-		if q.End.Sub(q.Start) > 48*time.Hour {
-			bucket = "day"
-		}
-		seriesArgs := append(append([]any{}, args...), bucket)
-		rows, err := tx.Query(ctx, `SELECT date_trunc($13,interval_end AT TIME ZONE 'UTC') AT TIME ZONE 'UTC',sum(upload_bytes)::bigint,sum(download_bytes)::bigint FROM resource_bandwidth_events e WHERE `+predicate+` GROUP BY 1 ORDER BY 1`, seriesArgs...)
-		if err != nil {
-			return err
-		}
-		for rows.Next() {
-			var p Point
-			if err := rows.Scan(&p.Start, &p.Upload, &p.Download); err != nil {
-				rows.Close()
-				return err
-			}
-			out.Series = append(out.Series, p)
-		}
-		err = rows.Err()
-		rows.Close()
-		if err != nil {
+		if err := aggregateUsage(ctx, tx, args, &out); err != nil {
 			return err
 		}
 		var total int64
@@ -229,7 +216,7 @@ func (s *Service) Get(ctx context.Context, account string, scope workspace.Scope
 		}
 		out.Pagination = page(q.Limit, q.Offset, total)
 		detailArgs := append(append([]any{}, args...), q.Limit, q.Offset, q.PathLimit, q.PathOffset)
-		rows, err = tx.Query(ctx, `WITH selected AS (
+		rows, err := tx.Query(ctx, `WITH selected AS (
           SELECT resource_kind,resource_id,resource_route_id,machine_id,max(resource_name) resource_name,max(machine_name) machine_name,sum(upload_bytes)::bigint upload,sum(download_bytes)::bigint download FROM resource_bandwidth_events e WHERE `+predicate+`
           GROUP BY resource_kind,resource_id,resource_route_id,machine_id ORDER BY resource_kind,resource_id,resource_route_id,machine_id LIMIT $13 OFFSET $14
         ) SELECT r.resource_kind,r.resource_id,r.resource_route_id,r.resource_name,r.machine_id,r.machine_name,r.upload,r.download,c.total,p.mode,p.hosting,p.node_id,p.node_name,p.upload,p.download
