@@ -10,12 +10,14 @@ import (
 	"errors"
 	"io"
 	"net"
+	"os"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
 	runtimeidentity "github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 	"github.com/pinksaucepasta/paperboat/internal/nativeprivate"
@@ -299,16 +301,45 @@ func TestProductionNativePeerRecoversInitialControlFailure(t *testing.T) {
 			return nil, failure
 		}
 	}}
-	if err := service.Start(t.Context()); err != nil {
+	// Slow diagnostic publication must never expose recovery before activation.
+	var block atomic.Bool
+	entered, release := make(chan struct{}), make(chan struct{})
+	local, err := diagnostics.NewRecorder(diagnostics.DiskConfig{
+		Directory: filepath.Join(t.TempDir(), "diagnostics"),
+		OwnerUID:  os.Geteuid(),
+		Clock: func() time.Time {
+			if block.Load() && service.LastError() == nil && block.CompareAndSwap(true, false) {
+				close(entered)
+				<-release
+			}
+			return time.Now()
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer local.Close()
+	ctx := diagnostics.WithRecorder(t.Context(), local)
+	defer func() {
+		close(release)
+		cleanup, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if err := service.Shutdown(cleanup); err != nil {
+			t.Error(err)
+		}
+	}()
+	if err := service.Start(ctx); err != nil {
 		t.Fatal("initial control failure abandoned supervisor", err)
 	}
 	if !errors.Is(service.LastError(), failure) {
 		t.Fatal("initial failure not retained")
 	}
+	block.Store(true)
 	close(recovered)
-	deadline := time.Now().Add(3 * time.Second)
-	for service.LastError() != nil && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
+	select {
+	case <-entered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("control recovery did not publish its transition")
 	}
 	if service.LastError() != nil {
 		t.Fatal("control recovery did not restart peer service")
@@ -318,8 +349,5 @@ func TestProductionNativePeerRecoversInitialControlFailure(t *testing.T) {
 	service.mu.Unlock()
 	if !active {
 		t.Fatal("recovery did not activate peer generation")
-	}
-	if err := service.Shutdown(t.Context()); err != nil {
-		t.Fatal(err)
 	}
 }

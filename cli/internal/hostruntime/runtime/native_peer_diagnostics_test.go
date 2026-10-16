@@ -19,7 +19,7 @@ func TestPeerListenerFailureKeepsBindStageAndOriginalCause(t *testing.T) {
 	ctx, local := peerDiagnosticContext(t)
 	failure := nativePeerListenerError{cause: syscall.EADDRINUSE}
 	service := &productionNativePeerService{}
-	service.recordPeerState(ctx, failure)
+	service.recordPeerState(ctx, nil, failure)
 	events := local.Recent()
 	if !errors.Is(service.LastError(), syscall.EADDRINUSE) || len(events) != 1 || events[0].Category != "listener_bind" || events[0].Code != "native_private_failed" || events[0].SupportReference != supportref.FromContext(ctx) {
 		t.Fatalf("listener failure lost stage/cause/reference: %#v", events)
@@ -44,15 +44,15 @@ func peerDiagnosticContext(t *testing.T) (context.Context, *diagnostics.Recorder
 func TestPeerDiagnosticsPreserveTransitionsWithoutRetryFlood(t *testing.T) {
 	ctx, local := peerDiagnosticContext(t)
 	s := &productionNativePeerService{}
-	s.recordPeerState(ctx, errNativePeerPending)
-	s.recordPeerState(ctx, errNativePeerPending)
+	s.recordPeerState(ctx, nil, errNativePeerPending)
+	s.recordPeerState(ctx, nil, errNativePeerPending)
 	failure := &api.APIError{Status: 503, Message: "PRIVATE_DATABASE_DETAIL"}
-	s.recordPeerState(ctx, failure)
-	s.recordPeerState(ctx, &api.APIError{Status: 503, Message: "OTHER_PRIVATE_DETAIL"})
+	s.recordPeerState(ctx, nil, failure)
+	s.recordPeerState(ctx, nil, &api.APIError{Status: 503, Message: "OTHER_PRIVATE_DETAIL"})
 	if s.LastError() == nil {
 		t.Fatal("retry lost its original cause")
 	}
-	s.recordPeerState(ctx, nil)
+	s.recordPeerState(ctx, &productionNativePeerGeneration{}, nil)
 	events := local.Recent()
 	if len(events) != 3 || events[0].Code != "approval_pending" || events[1].Fields["http_status"] != "503" || events[2].Code != "recovered" {
 		t.Fatalf("transitions=%#v", events)

@@ -176,7 +176,7 @@ func (s *productionNativePeerService) Start(ctx context.Context) error {
 	generation, err := s.startGeneration(runCtx)
 	if err != nil {
 		if runCtx.Err() == nil && transientNativePeerStart(err) {
-			s.recordPeerState(runCtx, err)
+			s.recordPeerState(runCtx, nil, err)
 			// Keep initial control or approval failure under the same bounded
 			// supervisor as later failures. No listener exists until admission passes.
 			go s.supervise(runCtx, nil)
@@ -191,9 +191,7 @@ func (s *productionNativePeerService) Start(ctx context.Context) error {
 		s.mu.Unlock()
 		return err
 	}
-	s.mu.Lock()
-	s.current = generation
-	s.mu.Unlock()
+	s.recordPeerState(runCtx, generation, nil)
 	go s.supervise(runCtx, generation)
 	return nil
 }
@@ -414,13 +412,10 @@ func (s *productionNativePeerService) supervise(ctx context.Context, generation 
 			case <-ticker.C:
 			}
 			next, err := s.startGeneration(ctx)
-			s.recordPeerState(ctx, err)
-			s.mu.Lock()
+			s.recordPeerState(ctx, next, err)
 			if err == nil {
 				generation = next
-				s.current = next
 			}
-			s.mu.Unlock()
 		}
 	}
 	for {
@@ -434,7 +429,7 @@ func (s *productionNativePeerService) supervise(ctx context.Context, generation 
 			if err == nil {
 				err = errors.New("native peer worker stopped unexpectedly")
 			}
-			s.recordPeerState(ctx, err)
+			s.recordPeerState(ctx, nil, err)
 			stopErr := generation.stop()
 			if stopErr != nil {
 				errorreport.Current().CaptureFailure(ctx, "paperboat-daemon", "peer_identity", "component_shutdown", "service_failed", stopErr)
@@ -451,7 +446,7 @@ func (s *productionNativePeerService) supervise(ctx context.Context, generation 
 				err = errors.New("native endpoint identity changed")
 				s.recordPeerEvent(ctx, "identity_renewed")
 			} else {
-				s.recordPeerState(ctx, err)
+				s.recordPeerState(ctx, nil, err)
 			}
 			s.mu.Lock()
 			s.lastErr = err
@@ -473,13 +468,9 @@ func (s *productionNativePeerService) supervise(ctx context.Context, generation 
 		}
 		for {
 			next, err := s.startGeneration(ctx)
-			s.recordPeerState(ctx, err)
+			s.recordPeerState(ctx, next, err)
 			if err == nil {
 				generation = next
-				s.mu.Lock()
-				s.current = next
-				s.lastErr = nil
-				s.mu.Unlock()
 				break
 			}
 			timer.Reset(productionNativePeerRestartDelay)
@@ -495,9 +486,15 @@ func (s *productionNativePeerService) supervise(ctx context.Context, generation 
 
 // Publish transitions rather than every retry. The retained error remains the
 // original typed cause; diagnostic comparison uses only bounded safe metadata.
-func (s *productionNativePeerService) recordPeerState(ctx context.Context, err error) {
+// Publish the active generation before any reader or observer can see recovery.
+func (s *productionNativePeerService) recordPeerState(
+	ctx context.Context, generation *productionNativePeerGeneration, err error,
+) {
 	s.mu.Lock()
 	previous := s.lastErr
+	if err == nil {
+		s.current = generation
+	}
 	s.lastErr = err
 	s.mu.Unlock()
 	if ctx.Err() != nil {
