@@ -4,7 +4,8 @@
 # Runs the user-visible baseline on the real test machines after every build:
 # doctor and version on every device, then from the HP client against every
 # launch target (hp, apple): short exec, long exec, terminal input, managed
-# SSH (short and held), 50 MiB transfer with hash check; previews on the Unix
+# SSH (short and held), 50 MiB transfer with hash check; all-pairs interactive
+# terminals (resize, controls, paste, Unicode, Vim/less/htop) with exact cleanup; previews on the Unix
 # devices. Optional `--update <dir>` adds the update-continuity check.
 #
 # Usage:
@@ -396,6 +397,43 @@ update_target() { # update TARGET with the build in UPDATE_DIR while work is liv
   collect "during-update-exec:$t" "upd-exec-$t" FINAL 240
 }
 
+# Normal terminal behavior is checked from each selected client to each target.
+# Stage the same compressed fixture once per client; each run owns and cleans
+# only its random non-default terminal, even when an assertion fails.
+test_terminal_main_pairs() {
+  local source target out status t0 monitor id staged
+  for source in "${TLIST[@]}"; do
+    staged=1
+    if ! tar -C "$HERE" -czf - terminal_lifecycle.py machine_lifecycle.py install_lifecycle.py \
+        pairing_lifecycle.py pairing_fault.py terminal_command.py session_cleanup.py | \
+        on "$source" "umask 077; mkdir -p /tmp/$RUN_ID; tar -xzf - -C /tmp/$RUN_ID"; then
+      staged=0
+    fi
+    for target in "${TLIST[@]}"; do
+      id="terminal-main:$source-$target"
+      if [ "$staged" = 0 ]; then
+        record "$id" FAIL 0 "could not stage the compressed terminal fixture"
+        continue
+      fi
+      monitor=htop
+      [ "$target" != apple ] || monitor="${APPLE_HTOP:-/opt/homebrew/bin/htop}"
+      monitor=$(python3 -c 'import shlex,sys; print(shlex.quote(sys.argv[1]))' "$monitor")
+      t0=$(now)
+      out=$(on "$source" "python3 /tmp/$RUN_ID/terminal_lifecycle.py $target --check all --monitor-path $monitor" 2>&1); status=$?
+      if [ "$status" = 0 ] && python3 -c '
+import json,sys
+receipt=json.loads(sys.argv[1])
+assert receipt["status"]=="PASS" and receipt["check"]=="terminal-all" and receipt["target"]==sys.argv[2]
+assert set(receipt["phases"])==set("input_output unicode resize colour ctrl_c ctrl_z large_paste vim less htop ctrl_d exact_session_cleanup".split())
+' "$out" "$target" 2>/dev/null; then
+        record "$id" PASS $(( $(now)-t0 ))
+      else
+        record_command_failure "$id" $(( $(now)-t0 )) "$out"
+      fi
+    done
+  done
+}
+
 # ---------------------------------------------------------------- run
 IFS=, read -r -a TLIST <<<"$TARGETS"
 echo "Paperboat device smoke  run=$RUN_ID  expect=$EXPECT_VERSION  targets=$TARGETS"
@@ -419,6 +457,7 @@ for d in "${TLIST[@]}"; do
   [ "$d" = victus ] && continue
   skipped preview || test_preview "$d"
 done
+skipped terminal-main || test_terminal_main_pairs
 for t in "${TLIST[@]}"; do
   skipped ssh-long || collect "ssh-long:$t" "long-ssh-$t" SSHFINAL "$LONG_SSH"
   skipped exec-long || collect "exec-long:$t" "long-exec-$t" FINAL "$LONG_EXEC"
@@ -429,7 +468,7 @@ if [ -n "$UPDATE_DIR" ]; then
 fi
 
 # ---------------------------------------------------------------- report
-on hp "rm -rf /tmp/$RUN_ID" >/dev/null 2>&1
+for source in "${TLIST[@]}"; do on "$source" "rm -rf /tmp/$RUN_ID" >/dev/null 2>&1; done
 {
   printf '{"run":"%s","at":"%s","expect_version":"%s","update_version":"%s","results":[' "$RUN_ID" "$STAMP" "$EXPECT_VERSION" "$UPDATE_VERSION"
   first=1
