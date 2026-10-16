@@ -1423,3 +1423,5 @@ file | note`. Row-level evidence goes in CHECKLIST.md.
 2026-10-16 | Claude: GHCR still denied after user grant | Lane B | — | Rerun attempt 3 of run 38862264460 still write_package-denied on paperboat-server/paperboat-tunnel although the user gave paperboat Write in Manage Actions access. Those packages predate this repo; stop retrying. Change server-container.yml to push ghcr.io/${{ github.repository }}/<service> (new names, created and linked by this repo on first push), update deploy references, rerun.
 
 - Lane A: F4-06/F5-03 L/M ticked on 4c00f86 (072116/072118/072119 receipts); all18 main checks and both60-exec checks PASS. Gate compile hit disk exhaustion; obsolete local builds removed, gate rerunning.
+
+2026-10-16 | Lane A F6/F7 management | Rows ticked:F6-03/F7-02 and command rows L/M on4c00f86; active cancellation/default restoration and preview list/status/stop/delete/TTL PASS. HP TTL first miss cleared one rerun; no investigation. F7-01 still waits on B public TLS.
