@@ -1561,3 +1561,5 @@ file | note`. Row-level evidence goes in CHECKLIST.md.
 2026-10-16 | Lane A team role main paths | Rows ticked:F12-03/C205/C213-C215 L/M; team-roles38/92s receipt120519,6 PASS0 FAIL on unchanged dev99844a0. Actual admin/member/remove/leave/rejoin/ownership transfer and transfer-back verified; exact teams deleted, primary accounts/enrollments retained; previous team batch gate PASS before non-fast-forward push, integrating normally.
 
 2026-10-16 | User supplies teammate source | F6-04/C068/C069: user authorized ubuntu24 as teammate-owned source, clearing the machine-availability prerequisite above. Host online; default SSH ubuntu refused by tailnet policy, OS username requested; preserve existing hp/apple enrollments.
+
+2026-10-16 | Lane A ubuntu24 install prerequisite | User supplied SSH username pujan; authenticated access PASS, old2026.10.03.19 primary enrollment is degraded. Verified candidate dev99844a0 compressed upload/install stopped at required sudo approval; no passwordless sudo, credential path requested. Recovery copy stays private on that host, uploads/staging cleaned, original binary retained; F6 source setup resumes when credential arrives.
