@@ -13,22 +13,27 @@ import signal
 import struct
 import sys
 import termios
+import tempfile
 import time
 import uuid
 
 from pairing_lifecycle import command_diagnostic
-from machine_lifecycle import restore_all
+from install_lifecycle import registration
+from machine_lifecycle import machine, restore_all
 from session_cleanup import cleanup
 
 
 class Terminal:
-    def __init__(self, arguments):
+    def __init__(self, arguments, cwd=None):
         self.arguments = list(map(str, arguments))
         self.output = bytearray()
         self.pending = bytearray()
+        self.query_buffer = bytearray()
         self.status = None
         self.pid, self.fd = pty.fork()
         if self.pid == 0:
+            if cwd is not None:
+                os.chdir(cwd)
             environment = dict(os.environ, TERM='xterm-256color', LC_ALL='C')
             os.execvpe(self.arguments[0], self.arguments, environment)
         self.resize(24, 80)
@@ -47,6 +52,25 @@ class Terminal:
                 count = os.write(self.fd, data[:1024])
                 data = data[count:]
 
+    def answer_queries(self, chunk):
+        # This fixture's virtual terminal starts at home with white on black.
+        # Answer capability probes rather than leaving TTY applications blocked.
+        self.query_buffer.extend(chunk)
+        requests = [(b'\x1b[6n', b'\x1b[1;1R')]
+        for number, colour in [(b'10', b'ffff/ffff/ffff'), (b'11', b'0000/0000/0000')]:
+            reply = b'\x1b]' + number + b';rgb:' + colour + b'\x07'
+            for end in [b'\x07', b'\x1b\\']:
+                requests.append((b'\x1b]' + number + b';?' + end, reply))
+        while True:
+            matches = [(self.query_buffer.find(request), request, reply)
+                       for request, reply in requests if request in self.query_buffer]
+            if not matches:
+                break
+            offset, request, reply = min(matches)
+            del self.query_buffer[:offset + len(request)]
+            self.send(reply)
+        self.query_buffer = self.query_buffer[-16:]
+
     def expect(self, token, timeout=45):
         token = token.encode() if isinstance(token, str) else token
         deadline = time.monotonic() + timeout
@@ -63,6 +87,7 @@ class Terminal:
                 chunk = b''
             if not chunk:
                 raise RuntimeError('terminal closed before the expected fixture output')
+            self.answer_queries(chunk)
             self.pending.extend(chunk)
             self.output.extend(chunk)
             if len(self.output) > 4 << 20:
@@ -84,6 +109,19 @@ class Terminal:
             completed, status = os.waitpid(self.pid, os.WNOHANG)
             if completed:
                 self.status = os.waitstatus_to_exitcode(status)
+                # Reaping can win the race with reading the child's final error.
+                while select.select([self.fd], [], [], 0)[0]:
+                    try:
+                        chunk = os.read(self.fd, 65536)
+                    except OSError as error:
+                        if error.errno != errno.EIO:
+                            raise
+                        break
+                    if not chunk:
+                        break
+                    self.output.extend(chunk)
+                    if len(self.output) > 4 << 20:
+                        raise RuntimeError('terminal exceeded its output bound')
                 break
             if time.monotonic() >= deadline:
                 raise RuntimeError('terminal did not exit within its cleanup bound')
@@ -94,6 +132,7 @@ class Terminal:
                     if error.errno != errno.EIO:
                         raise
                     chunk = b''
+                self.answer_queries(chunk)
                 self.output.extend(chunk)
                 if len(self.output) > 4 << 20:
                     raise RuntimeError('terminal exceeded its output bound')
@@ -143,14 +182,24 @@ def applications(terminal, monitor=None):
         terminal.expect(terminal.marker('MONITOR_EXIT'))
 
 
-def qualify(pb, target, check, monitor):
+def qualify(pb, target, check, monitor, entry='connect', cwd=None):
     name = 'smoke-terminal-' + uuid.uuid4().hex[:12]
     terminal = None
     started = time.monotonic()
     try:
-        terminal = Terminal([pb, 'connect', target, '--name', name, '--status-bar', 'off'])
+        if entry == 'new':
+            own = machine(pb, registration()['machine_id'])
+            if target not in (own['id'], own['alias']):
+                raise RuntimeError('pb new must be checked against this exact enrolled machine')
+            arguments = [pb, 'new']
+        else:
+            arguments = [pb, target] if entry == 'root' else [pb, 'connect', target]
+        terminal = Terminal([*arguments, '--name', name, '--status-bar', 'off'], cwd=cwd)
         terminal.expect(b'\x1b[?2004h')
         terminal.expect(terminal.marker('READY', 'stty -echo; '))
+        if entry == 'new':
+            expected = shlex.quote(str(Path(cwd).resolve()))
+            terminal.expect(terminal.marker('LOCAL_CWD', '[ "$(pwd -P)" = ' + expected + ' ] && '))
         if check not in ('paste', 'typing', 'apps', 'monitor'):
             terminal.send("printf '\\nPB_ARITH_%s\\n' \"$((6*7))\"; printf '\\nPB_UNICODE_λ船\\n'\r")
             terminal.expect('PB_ARITH_42')
@@ -195,7 +244,7 @@ def qualify(pb, target, check, monitor):
             phases += ['vim', 'less']
         if check in ('monitor', 'all'):
             phases.append('htop')
-        result = {'check': 'terminal-' + check, 'target': target, 'status': 'PASS',
+        result = {'check': 'terminal-' + check, 'entry': entry, 'target': target, 'status': 'PASS',
                   'seconds': round(time.monotonic() - started, 1),
                   'phases': phases + ['ctrl_d', 'exact_session_cleanup']}
     except Exception as error:
@@ -215,8 +264,16 @@ def main():
     parser.add_argument('target')
     parser.add_argument('--check', choices=['main', 'paste', 'typing', 'apps', 'monitor', 'all'], default='all')
     parser.add_argument('--monitor-path', default='htop')
+    parser.add_argument('--entry', choices=['connect', 'root', 'new'], default='connect')
+    parser.add_argument('--cwd-root', type=Path, default=Path.home(),
+                        help='parent of the distinct project directory; /tmp exercises namespace isolation')
     args = parser.parse_args()
-    qualify(Path.home() / '.local/bin/pb', args.target, args.check, args.monitor_path)
+    pb = Path.home() / '.local/bin/pb'
+    if args.entry == 'new':
+        with tempfile.TemporaryDirectory(prefix='.paperboat-terminal-cwd-', dir=args.cwd_root) as directory:
+            qualify(pb, args.target, args.check, args.monitor_path, args.entry, directory)
+    else:
+        qualify(pb, args.target, args.check, args.monitor_path, args.entry)
 
 
 if __name__ == '__main__':

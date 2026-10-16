@@ -121,16 +121,23 @@ def check_machine_revoked(binary, identifier, *, perform):
                       'new_exec_denied': True, 'denial_code': event['error_code']}), flush=True)
 
 
-def await_external_revoke(directory, before, original):
+def await_external_action(directory, state, fields):
     gate = directory / 'controller-complete'
-    print(json.dumps({'state': 'external_revoke_required', 'gate': str(gate),
-                      'machine_id': before['machine_id'], 'account_id': before['account_id'],
-                      'alias': original['alias']}), flush=True)
+    failed = directory / 'controller-failed'
+    print(json.dumps(dict(fields, state=state, gate=str(gate), failure_gate=str(failed))), flush=True)
     deadline = time.monotonic() + 300
-    while not gate.exists():
+    while not gate.exists() and not failed.exists():
         if time.monotonic() >= deadline:
-            raise RuntimeError('external revoke controller did not finish within its bound')
+            raise RuntimeError('external controller did not finish within its bound')
         time.sleep(0.1)
+    if failed.exists():
+        raise RuntimeError('external controller failed; restoring the owned fixture')
+
+
+def await_external_revoke(directory, before, original):
+    await_external_action(directory, 'external_revoke_required',
+                          {'machine_id': before['machine_id'], 'account_id': before['account_id'],
+                           'alias': original['alias']})
 
 
 def inventory(script, inbox, installed, password):

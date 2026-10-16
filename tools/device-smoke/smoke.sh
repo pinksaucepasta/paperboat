@@ -397,20 +397,30 @@ update_target() { # update TARGET with the build in UPDATE_DIR while work is liv
   collect "during-update-exec:$t" "upd-exec-$t" FINAL 240
 }
 
-# Normal terminal behavior is checked from each selected client to each target.
-# Stage the same compressed fixture once per client; each run owns and cleans
-# only its random non-default terminal, even when an assertion fails.
+# Each source gets one compressed fixture upload, shared by terminal checks.
+TERMINAL_FIXTURES_READY=","
+stage_terminal_fixtures() {
+  local source=$1
+  [[ "$TERMINAL_FIXTURES_READY" != *",$source,"* ]] || return 0
+  if ! tar -C "$HERE" -czf - terminal_lifecycle.py session_lifecycle.py session_controller.py \
+      machine_lifecycle.py install_lifecycle.py pairing_lifecycle.py pairing_fault.py \
+      terminal_command.py session_cleanup.py | \
+      on "$source" "umask 077; mkdir -p /tmp/$RUN_ID; tar -xzf - -C /tmp/$RUN_ID"; then
+    return 1
+  fi
+  TERMINAL_FIXTURES_READY+="$source,"
+}
+
+# Normal behavior from each selected client to each target. Each run owns and
+# cleans only its random non-default terminal, including assertion failures.
 test_terminal_main_pairs() {
   local source target out status t0 monitor id staged
   for source in "${TLIST[@]}"; do
     staged=1
-    if ! tar -C "$HERE" -czf - terminal_lifecycle.py machine_lifecycle.py install_lifecycle.py \
-        pairing_lifecycle.py pairing_fault.py terminal_command.py session_cleanup.py | \
-        on "$source" "umask 077; mkdir -p /tmp/$RUN_ID; tar -xzf - -C /tmp/$RUN_ID"; then
-      staged=0
-    fi
+    stage_terminal_fixtures "$source" || staged=0
     for target in "${TLIST[@]}"; do
       id="terminal-main:$source-$target"
+      skipped "$id" && continue
       if [ "$staged" = 0 ]; then
         record "$id" FAIL 0 "could not stage the compressed terminal fixture"
         continue
@@ -431,6 +441,96 @@ assert set(receipt["phases"])==set("input_output unicode resize colour ctrl_c ct
         record_command_failure "$id" $(( $(now)-t0 )) "$out"
       fi
     done
+  done
+}
+
+# Public management commands and the local project-directory entry point.
+test_terminal_commands() {
+  local source target id out status t0 staged
+  for source in "${TLIST[@]}"; do
+    staged=1
+    stage_terminal_fixtures "$source" || staged=0
+    for target in "${TLIST[@]}"; do
+      id="session-manage:$source-$target"
+      skipped session-manage && continue
+      skipped "$id" && continue
+      t0=$(now)
+      if [ "$staged" = 0 ]; then
+        record "$id" FAIL 0 "could not stage the terminal fixture"
+        continue
+      fi
+      out=$(on "$source" "python3 /tmp/$RUN_ID/session_lifecycle.py $target --check manage" 2>&1); status=$?
+      if [ "$status" = 0 ] && python3 -c '
+import json,sys
+receipt=json.loads(sys.argv[1])
+assert receipt["status"]=="PASS" and receipt["check"]=="session-manage" and receipt["target"]==sys.argv[2]
+' "$out" "$target" 2>/dev/null; then
+        record "$id" PASS $(( $(now)-t0 ))
+      else
+        record_command_failure "$id" $(( $(now)-t0 )) "$out"
+      fi
+    done
+    id="terminal-new:$source"
+    skipped terminal-new && continue
+    skipped "$id" && continue
+    t0=$(now)
+    if [ "$staged" = 0 ]; then
+      record "$id" FAIL 0 "could not stage the terminal fixture"
+      continue
+    fi
+    out=$(on "$source" "python3 /tmp/$RUN_ID/terminal_lifecycle.py $source --check main --entry new" 2>&1); status=$?
+    if [ "$status" = 0 ] && python3 -c '
+import json,sys
+receipt=json.loads(sys.argv[1])
+assert receipt["status"]=="PASS" and receipt["check"]=="terminal-main"
+assert receipt["entry"]=="new" and receipt["target"]==sys.argv[2]
+' "$out" "$source" 2>/dev/null; then
+      record "$id" PASS $(( $(now)-t0 ))
+    else
+      record_command_failure "$id" $(( $(now)-t0 )) "$out"
+    fi
+  done
+}
+
+# The creator first reattaches locally; a separate enrolled device then proves
+# replay and the same shell variable through its own authenticated CLI session.
+test_terminal_replay() {
+  local target out status t0 staged=1 id tag phase command controller_ok parent parent_status
+  [[ ",$TARGETS," == *,hp,* && ",$TARGETS," == *,apple,* ]] || return 0
+  stage_terminal_fixtures hp || staged=0
+  stage_terminal_fixtures apple || staged=0
+  for target in "${TLIST[@]}"; do
+    id="terminal-replay:$target"
+    skipped "$id" && continue
+    if [ "$staged" = 0 ]; then
+      record "$id" FAIL 0 "could not stage the cross-device fixture"
+      continue
+    fi
+    t0=$(now); tag="terminal-replay-$target"; controller_ok=0
+    printf '%s\n' "python3 /tmp/$RUN_ID/session_lifecycle.py $target --check cross && echo TERMINAL_REPLAY_OK" | hp_job "$tag"
+    phase=$(on hp "python3 /tmp/$RUN_ID/session_controller.py wait --job /tmp/$RUN_ID/$tag" 2>&1); status=$?
+    out="$phase"
+    if [ "$status" = 0 ]; then
+      command=$(python3 "$HERE/session_controller.py" command --phase "$phase" --script "/tmp/$RUN_ID/session_lifecycle.py")
+      out=$(on apple "$command" 2>&1); status=$?
+      if [ "$status" = 0 ] && python3 -c '
+import json,sys
+receipt=json.loads(sys.argv[1])
+assert receipt["check"]=="session-resume" and receipt["status"]=="PASS" and receipt["target"]==sys.argv[2]
+assert receipt["same_shell"] is True and receipt["replayed_output"] is True
+' "$out" "$target" 2>/dev/null; then
+        controller_ok=1
+      fi
+      command=$(python3 "$HERE/session_controller.py" signal --phase "$phase" --success "$controller_ok")
+      on hp "$command" >/dev/null 2>&1 || controller_ok=0
+    fi
+    parent=$(on hp "python3 /tmp/$RUN_ID/session_controller.py finish --job /tmp/$RUN_ID/$tag" 2>&1); parent_status=$?
+    if [ "$controller_ok" = 1 ] && command_ok "$parent_status" "$parent" && marker_present "$parent" TERMINAL_REPLAY_OK; then
+      record "$id" PASS $(( $(now)-t0 ))
+    else
+      record_command_failure "$id" $(( $(now)-t0 )) "$out
+$parent"
+    fi
   done
 }
 
@@ -457,7 +557,9 @@ for d in "${TLIST[@]}"; do
   [ "$d" = victus ] && continue
   skipped preview || test_preview "$d"
 done
+test_terminal_commands
 skipped terminal-main || test_terminal_main_pairs
+skipped terminal-replay || test_terminal_replay
 for t in "${TLIST[@]}"; do
   skipped ssh-long || collect "ssh-long:$t" "long-ssh-$t" SSHFINAL "$LONG_SSH"
   skipped exec-long || collect "exec-long:$t" "long-exec-$t" FINAL "$LONG_EXEC"
