@@ -1555,3 +1555,9 @@ file | note`. Row-level evidence goes in CHECKLIST.md.
 2026-10-16 | Lane A team main paths qualified | Rows ticked:F12-01/F12-02,C192/C193/C196-C200/C202-C204/C206 L/M; team-lifecycle19/22s, receipt120252,6 PASS0 FAIL on dev99844a0/sourcec6eb617. Independent verified recipient accepted pre-signup email-only invitation; decline/cancel/discovery and exact cleanup PASS, enrollments/primary accounts retained;37 workspace checks PASS39.788s.
 
 2026-10-16 | Lane A sign-in triage | First secondary console callback showed auth/failed; sole fresh sign-in retry PASS, no account-management access or investigation. Separate teammate profiles retain existing credential-storage policy; macOS keeps its login Keychain HOME and isolates credential publication with XDG paths.
+
+2026-10-16 | Lane A F6-04 exact prerequisite | F6-04/C068/C069 L/M[!]: teammate sign-in now works, but actual Inbox requests require source.user_id=sender_account (server teaminbox.Create), while both device enrollments belong to the primary account. Needs a separately paired teammate-owned source machine; a shared-machine grant cannot satisfy that producer contract, and primary enrollments are preserved.
+
+2026-10-16 | Lane A team role main paths | Rows ticked:F12-03/C205/C213-C215 L/M; team-roles38/92s receipt120519,6 PASS0 FAIL on unchanged dev99844a0. Actual admin/member/remove/leave/rejoin/ownership transfer and transfer-back verified; exact teams deleted, primary accounts/enrollments retained; previous team batch gate PASS before non-fast-forward push, integrating normally.
+
+2026-10-16 | User supplies teammate source | F6-04/C068/C069: user authorized ubuntu24 as teammate-owned source, clearing the machine-availability prerequisite above. Host online; default SSH ubuntu refused by tailnet policy, OS username requested; preserve existing hp/apple enrollments.

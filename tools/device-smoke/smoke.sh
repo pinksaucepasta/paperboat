@@ -613,23 +613,26 @@ $parent"
 }
 
 test_team_lifecycle() {
-  skipped team-lifecycle && return
+  local group=${1:-team-lifecycle} flags=
+  skipped "$group" && return
+  [ "$group" != team-roles ] || flags=--roles
   local device id out status t0
   for device in "${TLIST[@]}"; do
-    id="team-lifecycle:$device"
+    id="$group:$device"
     skipped "$id" && continue
     t0=$(now)
     if ! stage_terminal_fixtures "$device"; then
       record "$id" FAIL 0 "could not stage the team fixture"
       continue
     fi
-    out=$(on "$device" "python3 /tmp/$RUN_ID/team_lifecycle.py" 2>&1); status=$?
+    out=$(on "$device" "python3 /tmp/$RUN_ID/team_lifecycle.py $flags" 2>&1); status=$?
     if [ "$status" = 0 ] && python3 -c '
 import json,sys
 r=json.loads(sys.argv[1])
-assert r["check"]=="team-lifecycle" and r["status"]=="PASS"
+assert r["check"]==sys.argv[2] and r["status"]=="PASS"
 assert all(r[k] for k in ("create_get_list_delete", "invite_accept_decline_cancel", "independent_verified_recipient", "enrollment_preserved"))
-' "$out" 2>/dev/null; then
+assert sys.argv[2]!="team-roles" or r["roles_remove_leave_transfer"]
+' "$out" "$group" 2>/dev/null; then
       record "$id" PASS $(( $(now)-t0 ))
     else
       record_command_failure "$id" $(( $(now)-t0 )) "$out"
@@ -719,6 +722,7 @@ test_application_pairs inbox-manage inbox_manage.py
 test_application_pairs transfer-manage transfer_manage.py
 test_application_pairs preview-manage preview_manage.py
 test_team_lifecycle
+test_team_lifecycle team-roles
 test_preview_protocols
 for t in "${TLIST[@]}"; do
   skipped ssh-long || collect "ssh-long:$t" "long-ssh-$t" SSHFINAL "$LONG_SSH"

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Qualify real owner/teammate team commands without changing device enrollment."""
+import argparse
 import json
 from pathlib import Path
 import secrets
@@ -9,7 +10,34 @@ from pairing_lifecycle import invoke
 from teammate_profile import environment, profile_root
 
 
+def check_roles(call, current, invite, team_id, owner_id, recipient_id):
+    def mutate(action, *values, teammate=False):
+        return call('team', action, team_id, *values, '--generation',
+                    str(current()['generation']), '--json', teammate=teammate)
+
+    def member():
+        return next(m for m in current()['members'] if m['account_id'] == recipient_id)
+
+    for role in ['admin', 'member']:
+        mutate('role', recipient_id, role)
+        assert member()['active'] and member()['role'] == role
+    mutate('remove', recipient_id)
+    assert not member()['active']
+    call('team', 'accept', invite(), '--json', teammate=True)
+    assert member()['active']
+    mutate('leave', teammate=True)
+    assert not member()['active']
+    call('team', 'accept', invite(), '--json', teammate=True)
+    mutate('transfer', recipient_id)
+    assert current()['owner_account'] == recipient_id
+    mutate('transfer', owner_id, teammate=True)
+    assert current()['owner_account'] == owner_id
+
+
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--roles', action='store_true')
+    args = parser.parse_args()
     pb = Path.home() / '.local/bin/pb'
     root = profile_root()
     config = root / 'config.json'
@@ -72,6 +100,9 @@ def main():
                    for m in current()['members'])
         assert any(t['team_id'] == team_id for t in
                    call('team', 'list', '--json', teammate=True))
+        if args.roles:
+            check_roles(call, current, invite, team_id, before['account_id'],
+                        recipient['account']['id'])
     except BaseException as error:
         primary_error = error
         raise
@@ -79,9 +110,11 @@ def main():
         try:
             if created:
                 current_team = call('team', 'get', team_id, '--json')
-                assert current_team['owner_account'] == before['account_id']
+                cleanup_owner = current_team['owner_account']
+                assert cleanup_owner in (before['account_id'], recipient['account']['id'])
                 deleted = call('team', 'delete', team_id, '--generation',
-                               str(current_team['generation']), '--confirm', team_id, '--json')
+                               str(current_team['generation']), '--confirm', team_id, '--json',
+                               teammate=cleanup_owner == recipient['account']['id'])
                 assert deleted['deleted']
                 assert not any(t['team_id'] == team_id for t in call('team', 'list', '--json'))
             assert registration() == before
@@ -92,8 +125,9 @@ def main():
                 raise
             print(json.dumps({'check': 'team-lifecycle', 'cleanup': 'failed',
                               'owned_state_retained': True}), flush=True)
-    print(json.dumps({'check': 'team-lifecycle', 'status': 'PASS',
+    print(json.dumps({'check': 'team-roles' if args.roles else 'team-lifecycle', 'status': 'PASS',
                       'create_get_list_delete': True, 'invite_accept_decline_cancel': True,
+                      'roles_remove_leave_transfer': args.roles,
                       'independent_verified_recipient': True, 'enrollment_preserved': True}))
 
 
