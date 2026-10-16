@@ -146,6 +146,10 @@ Goal: every main-path row on L and M `[x]`, as fast as possible.
 - **Product before harness.** Smoke code changes only when a row being ticked needs them. A
   commit that adds diagnostics, fixtures or receipts without ticking a row or fixing a product
   bug is not progress; reuse the existing checks.
+- **`[!]` only when truly stuck**: needs the user (credentials, USER DECIDES) or a real bug
+  past its ~2-hour cap. A row whose own part is done and only waits for another lane's step
+  (device check, deploy, console check) stays `[ ]` with "waits for Lane X: <step>" in Evidence.
+  Re-mark existing `[!]` rows by this rule when touching them.
 - **Deploy when ready.** Lane B deploys a staged server/edge build as soon as its gate passes
   (rollouts no longer cut sessions); no waiting for a shared window. Rows that need a paid team
   before Stripe keys exist: Lane B grants the paid entitlement to the test team directly as test
