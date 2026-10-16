@@ -31,8 +31,10 @@ class SmokePrerequisiteTest(unittest.TestCase):
                 "git": """#!/bin/sh
 case "$1" in
   merge-base) echo base;;
-  diff) echo cli/runtime.go;;
-  rev-parse) echo abc1234;;
+  diff) if [ "$2" = --quiet ]; then exit 0; fi; echo cli/runtime.go;;
+  rev-parse)
+    if [ "$2" = --verify ] && [ "$3" != 'abc1234^{commit}' ]; then exit 1; fi
+    echo abc1234;;
   *) exit 1;;
 esac
 """,
@@ -80,14 +82,14 @@ esac
         result = self.run_gate("", runtime_changed=False)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-    def test_same_head_previous_pass_cannot_regress(self):
+    def test_same_source_focused_receipts_preserve_checks_and_failures(self):
         history = [{"expect_version": "dev-abc1234", "results": [
             {"id": "same-build", "status": "PASS"}]}]
-        for results in [[], [{"id": "same-build", "status": "FAIL"}]]:
+        for results, expected in [([], 0), ([{"id": "same-build", "status": "FAIL"}], 1)]:
             with self.subTest(results=results):
                 result = self.run_gate("", {"expect_version": "dev-abc1234", "results": results},
                                        history=history)
-                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
 
     def test_module_failure_blocks_push_with_passing_smoke(self):
         result = self.run_gate("", {"expect_version": "dev-abc1234", "results": []}, go_status=1)
