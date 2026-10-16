@@ -4,15 +4,14 @@ import { infiniteQueryOptions } from "@tanstack/react-query"
 import { api } from "@/lib/api"
 
 /*
- * Activity: what happened in the workspace, newest first. The server writes audit events
- * (`audit.Write`) but has no read API yet; this is the console's side of the planned
- * `GET /v1/activity` (NOTES.md).
+ * Activity: what happened in the workspace, newest first, from `GET /v1/activity`
+ * (the server's audit events).
  */
 
 export type ActivityEvent = {
   id: string
   occurred_at: string
-  /** `area.verb`, e.g. `terminal.opened`, `tunnel.created`, `machine.removed`. */
+  /** The audit event type, e.g. `auth.login`, `tunnel.created`, `user_machine.renamed`. */
   action: string
   actor: { kind: "user" | "machine" | "system"; id: string; name?: string; email?: string }
   /** What it happened to; its name as it was then. */
@@ -37,7 +36,7 @@ export type ActivityArea = keyof typeof activityAreas
 const areaActions: Record<Exclude<ActivityArea, "all">, string> = {
   machine: "machine",
   terminal: "terminal",
-  publish: "preview,tunnel",
+  publish: "preview,tunnel,domain",
   file: "file",
   environment: "environment,config",
   team: "team,share",
@@ -60,40 +59,61 @@ export const activityQuery = (input: { workspace: string; machineId?: string | n
     retry: 1,
   })
 
-/** What happened, as the middle of a sentence: "opened a terminal", "removed the tunnel". */
+/** What happened, as the middle of a sentence. Keys are the server's audit event types. */
 const phrases: Record<string, string> = {
-  "machine.added": "added the machine",
-  "machine.removed": "removed the machine",
-  "machine.renamed": "renamed the machine",
-  "machine.updated": "updated Paperboat on",
-  "machine.shared": "shared the machine",
-  "terminal.opened": "opened a terminal",
-  "terminal.closed": "closed the terminal",
-  "terminal.shared": "shared the terminal",
-  "terminal.joined": "joined the terminal",
+  "auth.login": "signed in",
+  "auth.logout": "signed out",
+  "auth.client.approved": "approved a CLI sign-in",
+  "auth.client.revoked": "signed out a CLI",
+  "auth.device.completed": "signed in on a device",
+  "user_machine.enrollment_started": "started adding a machine",
+  "user_machine.enrollment_approved": "added the machine",
+  "user_machine.enrollment_cancelled": "cancelled adding a machine",
+  "user_machine.enrollment_restarted": "restarted adding a machine",
+  "user_machine.installation_failed": "couldn't finish installing",
+  "user_machine.installation_retried": "retried installing",
+  "user_machine.renamed": "renamed the machine",
+  "user_machine.deleted": "removed the machine",
+  "user_machine.disconnected": "disconnected",
+  "user_machine.denied": "denied the machine",
+  "user_machine.availability_policy_updated": "changed sleep settings on",
+  "user_machine.capabilities_updated": "changed what's allowed on",
+  "user_machine.maintenance_approval_requested": "asked to update",
+  "user_machine.maintenance_approval_decided": "answered an update request for",
+  "terminal.browser_access_policy_changed": "changed browser access to",
+  "terminal.code_access_changed": "changed join-code access to",
   "preview.created": "started the preview",
+  "preview.ready": "published the preview",
   "preview.stopped": "stopped the preview",
+  "preview.expired": "let the preview expire:",
+  "preview.failed": "couldn't start the preview",
   "tunnel.created": "created the tunnel",
-  "tunnel.deleted": "deleted the tunnel",
+  "tunnel.updated": "updated the tunnel",
   "tunnel.paused": "paused the tunnel",
-  "tunnel.resumed": "resumed the tunnel",
-  "tunnel.hostname_added": "added a public hostname to",
-  "tunnel.hostname_removed": "removed a public hostname from",
-  "file.sent": "sent",
-  "file.deleted": "deleted",
-  "file.shared": "shared a link to",
-  "environment.changed": "changed environment variables",
-  "config.conflict": "found a config conflict",
-  "team.member_added": "added a member:",
-  "team.member_removed": "removed a member:",
-  "team.invited": "invited",
-  "share.granted": "gave access to",
-  "share.revoked": "removed access to",
-  "account.signed_in": "signed in",
+  "tunnel.route_created": "added a route to",
+  "tunnel.route_updated": "changed a route on",
+  "tunnel.route_deleted": "removed a route from",
+  "tunnel.domain_created": "added a domain to",
+  "tunnel.domain_deleted": "removed a domain from",
+  "domain.created": "added the domain",
+  "domain.deleted": "removed the domain",
+  "domain.verification_requested": "started verifying",
+  "environment_manifest.set": "changed environment variables",
+  "config.repository_connected": "connected the config repository",
+  "config.repository_disconnected": "disconnected the config repository",
+  "config.conflict_resolution_applied": "resolved a config conflict",
+  "config.assignment_set": "assigned config to",
+  "config.assignment_cleared": "removed config from",
+  "transfer_destination.default_set": "changed the Inbox folder on",
+  "transfer_destination.default_cleared": "reset the Inbox folder on",
+  "managed_ssh.client_key_registered": "added an SSH key",
+  "managed_ssh.client_key_revoked": "removed an SSH key",
+  "github.oauth.connected": "connected GitHub",
 }
 
+/** Unknown types read as their verb part: `user_machine.foo_bar` → "foo bar". */
 export function describe(event: ActivityEvent): string {
-  return phrases[event.action] ?? event.action.replace(/[._]/g, " ")
+  return phrases[event.action] ?? event.action.split(".").slice(1).join(" ").replace(/_/g, " ")
 }
 
 export function actorName(event: ActivityEvent, meId?: string) {
