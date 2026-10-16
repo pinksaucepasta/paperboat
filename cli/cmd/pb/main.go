@@ -907,38 +907,6 @@ func sentence(message string) string {
 
 func isCobraUsageError(err error) bool { return classifyCommandFailure(err).kind == commandUsage }
 
-func statusCommand() *cobra.Command {
-	command := &cobra.Command{
-		Use:   "status [machine]",
-		Short: "Show local Paperboat machine status",
-		Args:  commandArgs(cobra.MaximumNArgs(1)),
-		RunE: func(command *cobra.Command, args []string) error {
-
-			_, snapshot, err := localDaemonSnapshot(command, installLocalDaemonService)
-			if err != nil {
-				return fmt.Errorf("read local Paperboat status: %w", err)
-			}
-			if len(args) == 1 {
-				machine, err := selectStatusMachine(snapshot.Machines, args[0])
-				if err != nil {
-					return err
-				}
-				snapshot.Machines = []localapi.MachineStatus{machine}
-			}
-			jsonOutput, _ := command.Flags().GetBool("json")
-			if jsonOutput {
-				encoder := json.NewEncoder(command.OutOrStdout())
-				encoder.SetEscapeHTML(false)
-				return encoder.Encode(snapshot)
-			}
-			writeStatus(command.OutOrStdout(), snapshot)
-			return nil
-		},
-	}
-	command.Flags().Bool("json", false, "print JSON")
-	return command
-}
-
 func selectStatusMachine(machines []localapi.MachineStatus, target string) (localapi.MachineStatus, error) {
 	return localwait.ResolveMachine(machines, target)
 }
