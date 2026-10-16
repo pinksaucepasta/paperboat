@@ -88,6 +88,26 @@ class GateReceipts(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('exec:hp', result.stdout)
 
+    def test_rebased_published_source_retains_its_exact_build_receipt(self):
+        parent = self.git('rev-parse', 'HEAD').strip()
+        (self.root / 'cli/source.go').write_text('package baseline\n')
+        self.commit('qualified source')
+        built = self.git('rev-parse', 'HEAD').strip()
+        self.receipt('01', {'exec:hp': 'PASS', 'ssh:hp': 'PASS'}, 'dev-' + built)
+        self.git('checkout', '-qb', 'published', parent)
+        (self.root / 'AGENTS.md').write_text('Incoming lane documentation.\n')
+        self.commit('incoming lane')
+        self.git('cherry-pick', built)
+        self.git('update-ref', 'refs/remotes/origin/main', 'HEAD')
+        self.assertNotEqual(self.git('rev-parse', 'HEAD').strip(), built)
+        (self.root / 'cli/source.go').write_text('package candidate\n')
+        self.commit('new candidate')
+        current = 'dev-' + self.git('rev-parse', '--short', 'HEAD').strip()
+        self.receipt('02', {'exec:hp': 'PASS'}, current)
+        self.assertEqual(self.evaluate().returncode, 0)
+        self.receipt('03', {'ssh:hp': 'FAIL'}, current)
+        self.assertNotEqual(self.evaluate().returncode, 0)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -31,6 +31,19 @@ if [ -n "$changed" ]; then
 import glob, json, subprocess, sys
 want = sys.argv[1]
 passed, current, receipts, fresh = set(), {}, [], False
+runtime_paths = ['cli/', 'relay/', 'shared/']
+def runtime_tree(revision):
+    return subprocess.check_output(['git', 'ls-tree', revision, '--', *runtime_paths], text=True)
+
+# Rebasing changes commit IDs, but not the source that was built and accepted.
+# Only exact runtime trees already published in our common history are baselines.
+common = subprocess.run(['git', 'merge-base', 'origin/main', 'HEAD'], capture_output=True, text=True)
+published_trees = set()
+if common.returncode == 0:
+    revisions = subprocess.check_output(['git', 'log', '--format=%H', common.stdout.strip(), '--',
+                                        *runtime_paths], text=True).splitlines()
+    published_trees = {runtime_tree(revision) for revision in revisions}
+head_tree = runtime_tree('HEAD')
 def receipt_source(version):
     if not version.startswith('dev-'):
         return False, False
@@ -39,13 +52,9 @@ def receipt_source(version):
     if resolved.returncode != 0:
         return False, False
     revision = resolved.stdout.strip()
-    same = subprocess.run(['git', 'diff', '--quiet', revision, 'HEAD', '--',
-                           'cli/', 'relay/', 'shared/']).returncode == 0
-    # Speed rules: retain published ancestor evidence between batch-wide runs,
-    # but require targeted device proof for this candidate's exact runtime tree.
-    published = all(subprocess.run(['git', 'merge-base', '--is-ancestor', revision, target],
-                    capture_output=True).returncode == 0 for target in ['origin/main', 'HEAD'])
-    return same, published
+    tree = runtime_tree(revision)
+    # Fresh proof is still required for this candidate's exact runtime tree.
+    return tree == head_tree, tree in published_trees
 
 for f in sorted(glob.glob('tools/device-smoke/results/*.json')):
     try:
