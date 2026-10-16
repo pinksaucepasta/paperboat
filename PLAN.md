@@ -1378,3 +1378,7 @@ file | note`. Row-level evidence goes in CHECKLIST.md.
 2026-10-16 | Lane B S3-03 image identity | Rows ticked:none; CI passes each service reporting DSN and validated source revision into published images. Workflow contract RED/GREEN; make gate PASS. Tag publication/deployment next.
 
 2026-10-16 | Lane B CI gate fixtures | Rows ticked:none; fake Git now rejects unknown revisions; focused empty receipts retain prior checks, explicit FAIL still blocks per approved70ece17 contract. All14 infrastructure tests PASS (one opt-in skip); make gate PASS.
+
+2026-10-16 | Lane B S3-03 package permission blocker | Rows ticked:none; tag2026.10.16.4/run38862264460 relay succeeds, server/tunnel fail GHCR permission_denied:read_package. Owner must grant repository pinksaucepasta/paperboat Actions Read/write access to existing paperboat-server and paperboat-tunnel packages (and public pull visibility); local gh auth lacks read/write:packages. No token/certificate creation requested.
+
+2026-10-16 | Lane B F3-07 IP HTTPS renewal | Rows ticked:none; both enrolled endpoints are public IPs with no public certificate configured. Add native Certbot5.4 pinned image, daily renewal timer, canonical pbh configure-tls; process owner proves current certificate avoids downtime and issuance failure restores service. make gate PASS; issue/configure next.

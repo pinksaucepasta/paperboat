@@ -1,0 +1,11 @@
+[Unit]
+Description=Renew Paperboat public edge IP certificate
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/paperboat-edge-certificate.env
+ExecStart=/usr/local/lib/paperboat-selfhost/edge-ip-certificate.py
+TimeoutStartSec=360
+UMask=0077
