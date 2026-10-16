@@ -32,6 +32,10 @@ func TestRemoteReaderLostAcknowledgementBoundsAndEpochCleanupPreserveExec(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
+	if snapshot, err := execution.WaitStarted(ctx); err != nil || snapshot.State != StateRunning {
+		t.Fatal("remote exec acknowledged before process readiness", snapshot.State, err)
+	}
+
 	reader, err := execution.OpenReader(1)
 	if err != nil {
 		t.Fatal(err)

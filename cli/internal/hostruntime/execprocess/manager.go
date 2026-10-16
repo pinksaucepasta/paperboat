@@ -438,59 +438,6 @@ func (m *Manager) validate(request Request) (Request, [sha256.Size]byte, error) 
 	return request, sha256.Sum256(canonical), nil
 }
 
-func (e *Execution) Snapshot() Snapshot {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return e.snapshotLocked()
-}
-
-func (e *Execution) snapshotLocked() Snapshot {
-	value := Snapshot{OperationID: e.request.OperationID, State: e.state, StartedAt: e.startedAt, ErrorCode: e.errorCode, NextSequence: e.next}
-	if e.result != nil {
-		result := *e.result
-		value.Result = &result
-	}
-	return value
-}
-
-func (e *Execution) Wait(ctx context.Context) (Snapshot, error) {
-	select {
-	case <-e.done:
-		e.mu.Lock()
-		err := e.waitErr
-		e.mu.Unlock()
-		return e.Snapshot(), err
-	case <-ctx.Done():
-		return Snapshot{}, ctx.Err()
-	}
-}
-
-func (e *Execution) Next(ctx context.Context, from uint64) (Event, error) {
-	for {
-		e.mu.Lock()
-		if from < e.earliest {
-			e.mu.Unlock()
-			return Event{}, ErrReplayUnavailable
-		}
-		if from < e.next {
-			event := e.events[from-e.earliest]
-			e.mu.Unlock()
-			return cloneEvent(event), nil
-		}
-		wake := e.wake
-		terminal := terminalState(e.state)
-		e.mu.Unlock()
-		if terminal {
-			return Event{}, io.EOF
-		}
-		select {
-		case <-wake:
-		case <-ctx.Done():
-			return Event{}, ctx.Err()
-		}
-	}
-}
-
 // OpenReader registers a live delivery cursor. Replay remains bounded when no
 // reader is attached; an attached reader pins unread events and backpressures
 // the child process instead of allowing ordinary live output to become a gap.

@@ -165,6 +165,61 @@ func TestManagedEnvironmentTimeoutRemainsCancellation(t *testing.T) {
 	}
 }
 
+func TestWaitStartedCancelsWithoutCancelingAdmittedExecution(t *testing.T) {
+	root := t.TempDir()
+	entered, release := make(chan struct{}), make(chan struct{})
+	defer func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	}()
+	manager := testManager(t, root, func(config *Config) {
+		config.ManagedEnvironment = func(ctx context.Context) ([]string, error) {
+			close(entered)
+			select {
+			case <-release:
+				return nil, nil
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+	})
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	execution, _, err := manager.Start(ctx, Request{OperationID: "operation_start_ready", Argv: []string{"/bin/sh", "-c", "cat > received"}, CWD: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-entered:
+	case <-ctx.Done():
+		t.Fatal("managed launch did not start", ctx.Err())
+	}
+	stopped, stop := context.WithCancel(ctx)
+	stop()
+	if _, err := execution.WaitStarted(stopped); !errors.Is(err, context.Canceled) {
+		t.Fatal("readiness cancellation did not return its cause", err)
+	}
+	close(release)
+	if snapshot, err := execution.WaitStarted(ctx); err != nil || snapshot.State != StateRunning {
+		t.Fatal("admitted execution was not ready after launch", snapshot.State, err)
+	}
+	if _, err := execution.Write([]byte("exact-input")); err != nil {
+		t.Fatal(err)
+	}
+	if err := execution.CloseInput(); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot, err := execution.Wait(ctx); err != nil || snapshot.State != StateExited || snapshot.Result.Code != 0 {
+		t.Fatal("readiness cancellation changed the remote outcome", err)
+	}
+	if received, err := os.ReadFile(filepath.Join(root, "received")); err != nil || string(received) != "exact-input" {
+		t.Fatal("ready execution lost its input", err)
+	}
+}
+
 func TestExecExitObservationKeepsResultAndOriginalReference(t *testing.T) {
 	var faults []errorreport.Fault
 	restore := errorreport.InstallFaultObserver(func(_ context.Context, fault errorreport.Fault) {

@@ -21,6 +21,7 @@ type UpdateAdmission interface {
 
 type ExecutionService interface {
 	Snapshot() Snapshot
+	WaitStarted(context.Context) (Snapshot, error)
 	Wait(context.Context) (Snapshot, error)
 	Next(context.Context, uint64) (Event, error)
 	OpenReader(uint64) (ReaderService, error)

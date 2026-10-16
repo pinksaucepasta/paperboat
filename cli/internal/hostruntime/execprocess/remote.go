@@ -116,6 +116,10 @@ func (e *remoteExecution) Wait(ctx context.Context) (Snapshot, error) {
 	}
 	return out.Snapshot, err
 }
+func (e *remoteExecution) WaitStarted(ctx context.Context) (Snapshot, error) {
+	out, err := e.invoke(ctx, "wait_started", remoteRequest{})
+	return out.Snapshot, err
+}
 func (e *remoteExecution) Next(ctx context.Context, from uint64) (Event, error) {
 	out, err := e.invoke(ctx, "next", remoteRequest{From: from})
 	return out.Event, err
@@ -360,6 +364,8 @@ func (s *RemoteServer) Call(ctx context.Context, op string, body json.RawMessage
 		out.Snapshot = e.Snapshot()
 	case "wait":
 		out.Snapshot, err = e.Wait(ctx)
+	case "wait_started":
+		out.Snapshot, err = e.WaitStarted(ctx)
 	case "next":
 		out.Event, err = e.Next(ctx, request.From)
 	case "write":
