@@ -20,17 +20,40 @@ from pairing_fault import PairingFaultProxy
 import terminal_command
 
 
+class CommandTimeout(subprocess.TimeoutExpired):
+    def __init__(self, failure, diagnostic):
+        super().__init__(failure.cmd, failure.timeout, output=failure.output,
+                         stderr=failure.stderr)
+        self.diagnostic_path = diagnostic
+
+    def __str__(self):
+        return 'command timed out; private diagnostics: ' + str(self.diagnostic_path)
+
+
+def command_diagnostic(arguments, stdout, stderr, timeout=None):
+    def text(value):
+        return value.decode(errors='replace') if isinstance(value, bytes) else value or ''
+    diagnostic = Path(tempfile.gettempdir()) / ('paperboat-f1-error-' + uuid.uuid4().hex)
+    fd = os.open(diagnostic, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, 'w') as output:
+        json.dump({'argv': arguments, 'stdout': text(stdout),
+                   'stderr': text(stderr), 'timeout': timeout}, output)
+    return diagnostic
+
+
 def invoke(binary, *arguments, timeout=180, input=None, env=None, raw=False, terminal=False, password=None):
-    if terminal:
-        result = terminal_command.run([str(binary), *arguments], password=password, env=env, timeout=timeout)
-    else:
-        result = subprocess.run([str(binary), *arguments], input=input,
-                                capture_output=True, text=True, timeout=timeout, env=env)
+    command = [str(binary), *arguments]
+    try:
+        if terminal:
+            result = terminal_command.run(command, password=password, env=env, timeout=timeout)
+        else:
+            result = subprocess.run(command, input=input, capture_output=True,
+                                    text=True, timeout=timeout, env=env)
+    except subprocess.TimeoutExpired as error:
+        diagnostic = command_diagnostic(command, error.stdout, error.stderr, error.timeout)
+        raise CommandTimeout(error, diagnostic) from None
     if result.returncode:
-        diagnostic = Path(tempfile.gettempdir()) / ('paperboat-f1-error-' + uuid.uuid4().hex)
-        fd = os.open(diagnostic, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(fd, 'w') as output:
-            json.dump({'argv': [str(binary), *arguments], 'stdout': result.stdout, 'stderr': result.stderr}, output)
+        diagnostic = command_diagnostic(command, result.stdout, result.stderr)
         raise RuntimeError('command failed; private diagnostics: ' + str(diagnostic))
     if raw:
         return result.stdout + result.stderr

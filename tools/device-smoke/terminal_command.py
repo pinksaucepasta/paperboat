@@ -9,6 +9,11 @@ import termios
 import time
 
 
+def captured_output(output, password):
+    text = output.decode(errors='replace')
+    return text.replace(password, '[redacted]') if password else text
+
+
 def run(argv, *, password, env=None, timeout=180):
     pid, terminal = pty.fork()
     if pid == 0:
@@ -26,7 +31,8 @@ def run(argv, *, password, env=None, timeout=180):
     try:
         while True:
             if time.monotonic() >= deadline:
-                raise subprocess.TimeoutExpired(argv, timeout)
+                raise subprocess.TimeoutExpired(argv, timeout,
+                                                output=captured_output(output, password), stderr='')
             if select.select([terminal], [], [], min(0.1, deadline - time.monotonic()))[0]:
                 try:
                     chunk = os.read(terminal, 65536)
@@ -58,7 +64,5 @@ def run(argv, *, password, env=None, timeout=180):
                 pass
             os.waitpid(pid, 0)
         os.close(terminal)
-    text = output.decode(errors='replace')
-    if password:
-        text = text.replace(password, '[redacted]')
+    text = captured_output(output, password)
     return subprocess.CompletedProcess(argv, os.waitstatus_to_exitcode(status), text, '')
