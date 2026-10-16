@@ -145,6 +145,8 @@ func TestPostgresExactApprovalRevocationAndReceiptDelivery(t *testing.T) {
 	if err != nil || request.Status != "pending" {
 		t.Fatalf("create=%+v err=%v", request, err)
 	}
+	checkConcurrentInboxInventorySnapshot(t, ctx, store, service, recipient, request.RequestID)
+
 	results := make(chan error, 2)
 	for range 2 {
 		go func() {

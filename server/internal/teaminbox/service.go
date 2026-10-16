@@ -163,11 +163,18 @@ func (s *Service) Inventory(ctx context.Context, account, q, state, owner string
  AND ($3='' OR r.status=$3)
  AND ($4='' OR ($4='mine' AND r.recipient_account=$1) OR ($4='shared' AND r.sender_account=$1) OR r.sender_account=$4 OR r.recipient_account=$4)`
 	args := []any{account, q, state, owner}
-	var total int
-	if err := s.db.SQL().QueryRowContext(ctx, "SELECT count(*)"+predicate, args...).Scan(&total); err != nil {
+	// Count and rows must describe one inventory snapshot even while requests
+	// are created or decided. Expiry reconciliation above remains a write.
+	tx, err := s.db.SQL().BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	if err != nil {
 		return Page{}, 0, err
 	}
-	rows, err := s.db.SQL().QueryContext(ctx, `SELECT r.request_id,r.team_id,r.sender_account,r.recipient_account,r.source_machine_id,r.destination_machine_id,r.batch_id,r.manifest_digest,r.manifest,r.status,r.decision_generation,r.expires_at,coalesce(o.status,'')`+predicate+` ORDER BY r.created_at DESC,r.request_id DESC LIMIT $5 OFFSET $6`, append(args, limit, offset)...)
+	defer tx.Rollback()
+	var total int
+	if err := tx.QueryRowContext(ctx, "SELECT count(*)"+predicate, args...).Scan(&total); err != nil {
+		return Page{}, 0, err
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT r.request_id,r.team_id,r.sender_account,r.recipient_account,r.source_machine_id,r.destination_machine_id,r.batch_id,r.manifest_digest,r.manifest,r.status,r.decision_generation,r.expires_at,coalesce(o.status,'')`+predicate+` ORDER BY r.created_at DESC,r.request_id DESC LIMIT $5 OFFSET $6`, append(args, limit, offset)...)
 	if err != nil {
 		return Page{}, 0, err
 	}
