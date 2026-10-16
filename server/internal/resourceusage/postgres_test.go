@@ -346,6 +346,7 @@ func TestPostgresBandwidthHistory(t *testing.T) {
 	})
 
 	assertTeamMemberHistory(t, store, service, suffix, a, b, now)
+	assertNativeConsumerWorkspace(t, store, service, suffix, a, b, now)
 }
 
 func TestUsageBounds(t *testing.T) {
