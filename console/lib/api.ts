@@ -225,6 +225,22 @@ export const usageQuery = (workspace: string, period: UsagePeriod) =>
     staleTime: 5 * minute,
   })
 
+export type BillingWorkspace = Schemas["BillingWorkspace"]
+
+/** The workspace's plan and its hosted relay + edge allowance for the current period. */
+export const billingQuery = (workspace: Workspace | undefined) =>
+  queryOptions({
+    queryKey: ["billing", workspace?.id ?? ""],
+    queryFn: () =>
+      api<BillingWorkspace>(
+        workspace?.kind === "team"
+          ? `billing/workspaces/teams/${encodeURIComponent(workspace.id)}`
+          : "billing/workspaces/personal",
+      ),
+    enabled: Boolean(workspace),
+    staleTime: minute,
+  })
+
 export type PathMode = "direct" | "relay" | "edge"
 
 /** Whose infrastructure carried traffic: any, Paperboat's relays and edges, or self-hosted ones. */

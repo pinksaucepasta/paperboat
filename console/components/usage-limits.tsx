@@ -9,24 +9,22 @@ import {
   WindowsLogoIcon,
   type Icon,
 } from "@phosphor-icons/react"
-import Link from "next/link"
 import { useId, useState } from "react"
 import {
+  billingQuery,
   trafficBreakdown,
   useApiQuery,
   usageQuery,
   useMachines,
-  useRunning,
   useWorkspace,
+  type BillingWorkspace,
   type Machine,
   type PathMode,
-  type RunningCounts,
   type TrafficSource,
   type Usage,
 } from "@/lib/api"
 import { formatBytes, formatPlatform } from "@/lib/format"
 import { filterKeys, parseQuery, platformToken, withFilter, type FilterKey } from "@/lib/machine-filter"
-import { sections } from "@/lib/sections"
 import { cn } from "@/lib/utils"
 import { defaultUsagePeriod, usagePeriods, type UsagePeriod } from "@/lib/usage-period"
 import {
@@ -48,19 +46,19 @@ const sources: Record<TrafficSource, string> = {
 export function UsageLimits() {
   const workspace = useWorkspace()
   const machines = useMachines()
-  const running = useRunning()
+  const billing = useApiQuery(billingQuery(workspace))
   const [period, setPeriod] = useState<UsagePeriod>(defaultUsagePeriod)
   const [source, setSource] = useState<TrafficSource>("all")
   const usage = useApiQuery({ ...usageQuery(workspace?.id ?? "", period), enabled: Boolean(workspace) })
 
   return (
-    // Machines and what is running first, then bandwidth across the other half.
+    // Machines and what is left of the hosted allowance first, then bandwidth across the other half.
     <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
       <Card label="Machines" loading={!workspace || machines.isPending} failed={machines.isError}>
         {machines.data && <Machines machines={machines.data} />}
       </Card>
-      <Card label="Running" loading={!workspace || running.isPending} failed={running.isError}>
-        {running.data && <Running counts={running.data} />}
+      <Card label="Hosted allowance" loading={!workspace || billing.isPending} failed={billing.isError}>
+        {billing.data && <Allowance billing={billing.data} />}
       </Card>
       <Card
         label="Bandwidth"
@@ -197,40 +195,49 @@ function Stat({
     </div>
   )
 }
-/** Everything live across the workspace's machines right now. */
-function Running({ counts }: { counts: Map<string, RunningCounts> }) {
-  const totals = { terminals: 0, tunnels: 0, previews: 0 }
-  for (const machine of counts.values()) {
-    totals.terminals += machine.terminals
-    totals.tunnels += machine.tunnels
-    totals.previews += machine.previews
+const resetFormat = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" })
+
+/**
+ * What is left of this period's allowance for traffic through Paperboat's hosted relays and
+ * edge. Direct and self-hosted traffic are free and not counted here.
+ */
+function Allowance({ billing }: { billing: BillingWorkspace }) {
+  const used = billing.usage_bytes
+  const allowance = billing.allowance_bytes
+  const resets = billing.period_end ? `Resets ${resetFormat.format(new Date(billing.period_end))}` : null
+  if (allowance === null) {
+    return (
+      <div className="flex flex-col gap-1.5">
+        <Figure>{formatBytes(used)}</Figure>
+        <span className="text-xs text-muted-foreground">Used, no limit{resets && ` · ${resets}`}</span>
+      </div>
+    )
   }
+  const share = allowance > 0 ? Math.min(1, used / allowance) : 1
+  const out = used >= allowance
   return (
-    <Rows
-      rows={[
-        ["Terminals", totals.terminals, sections.terminals.href],
-        ["Tunnels", totals.tunnels, sections.tunnels.href],
-        ["Previews", totals.previews, sections.previews.href],
-      ]}
-    />
-  )
-}
-/** Each label opens its section. */
-function Rows({ rows }: { rows: (readonly [string, number, string])[] }) {
-  return (
-    <ul className="flex flex-col gap-3">
-      {rows.map(([label, value, href]) => (
-        // Number and label centred on each other's letters (trim-cap), not their line boxes.
-        <li key={label} className="flex h-7 items-center justify-between">
-          <Link href={href} className={cn(textControl, "text-sm text-muted-foreground trim-cap")}>
-            {label}
-          </Link>
-          <span className={cn("font-heading text-xl font-semibold trim-cap", !value && "text-muted-foreground")}>
-            {value}
-          </span>
-        </li>
-      ))}
-    </ul>
+    <div className="flex flex-1 flex-col gap-1.5">
+      <span className="flex items-baseline gap-2">
+        <Figure>{formatBytes(Math.max(0, allowance - used))}</Figure>
+        <span className="text-sm text-muted-foreground">left</span>
+      </span>
+      <span className="text-xs text-muted-foreground">
+        {formatBytes(used)} of {formatBytes(allowance)} used{resets && ` · ${resets}`}
+      </span>
+      <div
+        role="meter"
+        aria-label="Hosted allowance used"
+        aria-valuemin={0}
+        aria-valuemax={allowance}
+        aria-valuenow={Math.min(used, allowance)}
+        className="mt-auto h-1.5 overflow-hidden rounded-full bg-muted"
+      >
+        <div
+          className={cn("h-full rounded-full", out ? "bg-destructive" : "bg-primary")}
+          style={{ width: `${share * 100}%` }}
+        />
+      </div>
+    </div>
   )
 }
 const paths: { mode: PathMode; label: string; color: string; dot: string }[] = [
