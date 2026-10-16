@@ -3,6 +3,7 @@
 import argparse
 import errno
 import hashlib
+import http.server
 import ipaddress
 import json
 import os
@@ -39,9 +40,24 @@ class Echo(socketserver.BaseRequestHandler):
         self.request.sendall(self.server.marker.encode() + hashlib.sha256(PAYLOAD).digest())
 
 
+class HTTPOrigin(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        body = self.server.marker.encode() + hashlib.sha256(PAYLOAD).digest()
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/octet-stream')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *_):
+        pass
+
+
 def origin(args):
     before = registration()
-    server = socketserver.ThreadingTCPServer(('127.0.0.1', 0), Echo)
+    server = (http.server.ThreadingHTTPServer(('127.0.0.1', 0), HTTPOrigin)
+              if args.check == 'private-https' else
+              socketserver.ThreadingTCPServer(('127.0.0.1', 0), Echo))
     server.daemon_threads = True
     server.marker = 'PB_PRIVATE_' + uuid.uuid4().hex
     worker = threading.Thread(target=server.serve_forever, daemon=True)
@@ -130,6 +146,23 @@ def probe(args):
     binary = Path.home() / '.local/bin/pb'
     if args.check == 'access-machine':
         forward(binary, phase)
+    elif args.check == 'private-https':
+        machines = invoke(binary, 'machine', 'list', '--json')['machines']
+        matches = [m for m in machines if m['id'] == phase['machine_id']]
+        assert len(matches) == 1 and matches[0]['network_approved']
+        alias = matches[0]['alias']
+        domain = invoke(binary, 'config', 'local-access', 'show', '--json')['local_access']['domain']
+        assert alias and domain and not any(c in alias + domain for c in '/: \r\n')
+        expected = phase['marker'].encode() + hashlib.sha256(PAYLOAD).digest()
+        hosts = [str(phase['port']) + '.' + alias + '.' + domain,
+                 alias + '.' + domain + ':' + str(phase['port'])]
+        for host in hosts:
+            command = ['curl', '--silent', '--show-error', '--fail', '--noproxy', '*',
+                       '--connect-timeout', '15', '--max-time', '30', 'https://' + host + '/']
+            result = subprocess.run(command, capture_output=True, timeout=35)
+            if result.returncode or result.stdout != expected:
+                path = command_diagnostic(command, b'', result.stderr)
+                raise RuntimeError('trusted private HTTPS failed; private diagnostics: ' + str(path))
     else:
         machines = invoke(binary, 'machine', 'list', '--json')['machines']
         matches = [m for m in machines if m['id'] == phase['machine_id']]
@@ -147,7 +180,8 @@ def probe(args):
                 time.sleep(.25)
     assert registration() == before
     print(json.dumps({'check': args.check, 'target': phase['target'], 'status': 'PASS',
-                      'exact_bytes': True, 'half_close': True, 'enrollment_unchanged': True}))
+                      'exact_bytes': True, 'half_close': args.check != 'private-https',
+                      'trusted_https': args.check == 'private-https', 'enrollment_unchanged': True}))
 
 
 def main():
@@ -155,7 +189,7 @@ def main():
     parser.add_argument('action', choices=['origin', 'probe'])
     parser.add_argument('--target')
     parser.add_argument('--phase')
-    parser.add_argument('--check', choices=['access-machine', 'private-address'], required=True)
+    parser.add_argument('--check', choices=['access-machine', 'private-address', 'private-https'], required=True)
     args = parser.parse_args()
     (origin if args.action == 'origin' else probe)(args)
 

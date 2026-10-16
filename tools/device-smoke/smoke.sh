@@ -616,7 +616,7 @@ $parent"
 
 test_private_access() {
   local kind source target id tag phase output parent command success status t0
-  for kind in access-machine private-address; do
+  for kind in access-machine private-address private-https; do
     skipped "$kind" && continue
     for source in "${TLIST[@]}"; do
       for target in "${TLIST[@]}"; do
@@ -633,13 +633,17 @@ test_private_access() {
         if [ "$status" = 0 ]; then
           command=$(python3 -c 'import shlex,sys;print(shlex.join(["python3",sys.argv[2],"probe","--phase",sys.argv[1],"--check",sys.argv[3]]))' "$phase" "/tmp/$RUN_ID/private_access.py" "$kind")
           output=$(on "$source" "$command" 2>&1); status=$?
-          if [ "$status" = 0 ] && python3 -c 'import json,sys;r=json.loads(sys.argv[1]);assert r["status"]=="PASS" and r["check"]==sys.argv[2] and r["target"]==sys.argv[3] and r["exact_bytes"] and r["half_close"] and r["enrollment_unchanged"]' "$output" "$kind" "$target" 2>/dev/null; then success=1; fi
+          if [ "$status" = 0 ] && python3 -c 'import json,sys;r=json.loads(sys.argv[1]);assert r["status"]=="PASS" and r["check"]==sys.argv[2] and r["target"]==sys.argv[3] and r["exact_bytes"] and r["enrollment_unchanged"];assert r["trusted_https"] if sys.argv[2]=="private-https" else r["half_close"]' "$output" "$kind" "$target" 2>/dev/null; then success=1; fi
           command=$(python3 "$HERE/session_controller.py" signal --phase "$phase" --success "$success" --expected-state private_access_required)
           on "$target" "$command" >/dev/null 2>&1 || success=0
         fi
         parent=$(on "$target" "python3 /tmp/$RUN_ID/session_controller.py finish --job /tmp/$RUN_ID/$tag" 2>&1); status=$?
         if [ "$success" = 1 ] && command_ok "$status" "$parent" && marker_present "$parent" PRIVATE_ORIGIN_OK; then
-          record "$id" PASS $(( $(now)-t0 )) "exact binary bytes; TCP half-close; origin and forward cleaned"
+          if [ "$kind" = private-https ]; then
+            record "$id" PASS $(( $(now)-t0 )) "both private URL forms; OS-trusted TLS and normal DNS; exact response"
+          else
+            record "$id" PASS $(( $(now)-t0 )) "exact binary bytes; TCP half-close; origin and forward cleaned"
+          fi
         else
           record_command_failure "$id" $(( $(now)-t0 )) "$output
 $parent"
