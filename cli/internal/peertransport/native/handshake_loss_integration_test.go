@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"net"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -24,6 +25,16 @@ import (
 )
 
 func TestNativeNewHandshakeRecoversPacketLossWithoutClosingAdmittedPeer(t *testing.T) {
+	for _, live := range []bool{false, true} {
+		name := "IdleClientRetired"
+		if live {
+			name = "LiveClientReused"
+		}
+		t.Run(name, func(t *testing.T) { testNativeLostHandshake(t, live) })
+	}
+}
+
+func testNativeLostHandshake(t *testing.T, live bool) {
 	t.Setenv("IN_TS_TEST", "true")
 	regions := integration.RunDERPAndSTUN(t, func(string, ...any) {}, "127.0.0.1")
 	public, signer, err := ed25519.GenerateKey(rand.Reader)
@@ -54,23 +65,30 @@ func TestNativeNewHandshakeRecoversPacketLossWithoutClosingAdmittedPeer(t *testi
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 40*time.Second)
 	defer cancel()
-	address, flows, failures, stop := listenWithLostSecondHandshake(t, ctx, receiver, regions.Regions[1], serverTLS)
+	lost := int32(1)
+	if live {
+		lost = 2
+	}
+	address, flows, failures, stop := listenWithLostHandshake(t, ctx, receiver, regions.Regions[1], serverTLS, lost)
 	defer stop()
 	owner, err := native.NewOwner(native.Config{Authority: sender, TLS: clientTLS})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer owner.Close()
-	first, err := owner.Dial(ctx, address, "machine_test", peerquic.ClassInteractive)
-	if err != nil {
-		t.Fatal(err)
+	var stream net.Conn
+	if live {
+		first, err := owner.Dial(ctx, address, "machine_test", peerquic.ClassInteractive)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer first.Close()
+		stream, err = first.Open(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer stream.Close()
 	}
-	defer first.Close()
-	stream, err := first.Open(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer stream.Close()
 	exchange := func(value string) {
 		t.Helper()
 		if err := stream.SetDeadline(time.Now().Add(3 * time.Second)); err != nil {
@@ -84,9 +102,17 @@ func TestNativeNewHandshakeRecoversPacketLossWithoutClosingAdmittedPeer(t *testi
 			t.Fatalf("admitted peer lost its byte stream: %v", err)
 		}
 	}
-	exchange("before-loss")
+	if live {
+		exchange("before-loss")
+	}
+	cached, err := sender.Client(address, "machine_test")
+	if err != nil {
+		t.Fatal(err)
+	}
 	second, dialErr := owner.Dial(ctx, address, "machine_test", peerquic.ClassInteractive)
-	exchange("after-loss")
+	if live {
+		exchange("after-loss")
+	}
 	if dialErr != nil {
 		var idle *quic.IdleTimeoutError
 		if !errors.As(dialErr, &idle) {
@@ -95,8 +121,12 @@ func TestNativeNewHandshakeRecoversPacketLossWithoutClosingAdmittedPeer(t *testi
 		t.Fatalf("a lost new handshake was not recovered while the admitted peer survived: %v", dialErr)
 	}
 	defer second.Close()
-	if flows.Load() != 3 {
-		t.Fatalf("wanted one admitted, one lost and one replacement flow; got %d", flows.Load())
+	again, err := sender.Client(address, "machine_test")
+	if err != nil || (again == cached) != live {
+		t.Fatal("lost handshake violated idle retirement/live reuse rule", err)
+	}
+	if flows.Load() != lost+1 {
+		t.Fatalf("wanted %d flows including one lost and one replacement; got %d", lost+1, flows.Load())
 	}
 	select {
 	case err := <-failures:
@@ -105,7 +135,7 @@ func TestNativeNewHandshakeRecoversPacketLossWithoutClosingAdmittedPeer(t *testi
 	}
 }
 
-func listenWithLostSecondHandshake(t *testing.T, parent context.Context, receiver *tailnet.Authority, region *tailcfg.DERPRegion, serverTLS *tls.Config) (mesh.Addr, *atomic.Int32, <-chan error, func()) {
+func listenWithLostHandshake(t *testing.T, parent context.Context, receiver *tailnet.Authority, region *tailcfg.DERPRegion, serverTLS *tls.Config, lost int32) (mesh.Addr, *atomic.Int32, <-chan error, func()) {
 	t.Helper()
 	server, err := receiver.Listen(region)
 	if err != nil {
@@ -141,7 +171,7 @@ func listenWithLostSecondHandshake(t *testing.T, parent context.Context, receive
 				defer stop()
 				// Lose only the next association's datagrams. The already admitted
 				// association and all later UDP flows continue using the real peer engine.
-				if ordinal == 2 {
+				if ordinal == lost {
 					buffer := make([]byte, 2048)
 					for {
 						if _, _, err := socket.ReadFrom(buffer); err != nil {

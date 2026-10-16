@@ -1398,3 +1398,10 @@ file | note`. Row-level evidence goes in CHECKLIST.md.
 2026-10-16 | Lane B same-release service deployment | Rows ticked:S3-01/S3-03; all6 native images from release2026.10.16.4/3f7787c pass version/revision checks. Server on coolify, relay/edge on oracle/anvit healthy; config/identity retained, schema071, deployed readiness0.02s/public proofs2/2. Public registry publication awaits S0-07 package grant; native local deployments complete.
 
 2026-10-16 | Lane B renewal and remaining main paths | Rows ticked:S3-01/S3-03; TUF refresh38864003090 PASS; actual IP-certificate timer no-op passes both hosts without changing helper uptime. Remaining owned pass1 completion waits for named A/C checks in F1/F3/F13/F15 and S1 consumers, GHCR package grant, trusted relay counters and Stripe credentials. Continue deferred sections after those main paths.
+
+
+
+
+2026-10-16 | Lane B closes05:39 correlation per user | rows ticked:none | Brief502s were deployment restart. Diagnostic-detail request withdrawn; no dependency on Lane A correlation evidence. Continue normal server feature producers in PLAN order.
+
+2026-10-16 | Lane A cache policy | Rows ticked:none; one reuse/retire/retry rule in owner.go, shared UDP/QUIC failure decision. Restart, overload, relay-hint, lost-handshake idle/live and TLS-no-retry owners PASS; focused race33.721s, native vet/full race176.387s. Next batch uses targeted affected checks under Speed rules; Apple DNS/deploy loss closed without further investigation.

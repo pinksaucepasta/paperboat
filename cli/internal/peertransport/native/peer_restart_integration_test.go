@@ -78,6 +78,10 @@ func TestNativeCachedSenderReconnectsAfterPeerEngineRestart(t *testing.T) {
 		}
 	}
 	exchange()
+	cached, err := sender.Client(descriptor, "machine_test")
+	if err != nil {
+		t.Fatal(err)
+	}
 	listener, err := receiver.Listen(regions.Regions[1])
 	if err != nil {
 		t.Fatal(err)
@@ -89,4 +93,8 @@ func TestNativeCachedSenderReconnectsAfterPeerEngineRestart(t *testing.T) {
 	// Keep the same sender/authority and machine key, just as a remote upgrade.
 	// Replacing the sender here would conceal the retained UDP-engine failure.
 	exchange()
+	replacement, err := sender.Client(descriptor, "machine_test")
+	if err != nil || replacement == cached {
+		t.Fatal("peer restart retained its failed idle cached route", err)
+	}
 }

@@ -1,5 +1,14 @@
 // Package native owns Paperboat QUIC sessions over signed Tailcat authority.
 // Application session ownership stays above the authorized carrier selection.
+//
+// Peer client cache rule: reuse the authority-owned client while its signed peer
+// identity is unchanged; relay/bootstrap hints do not define identity. Authority
+// revocation or identity replacement closes the affected client's flows immediately.
+// A failed pre-application transport (closed socket or lost QUIC handshake) may
+// retire only that exact client, and only after all pending/admitted flows release
+// it. A live flow always keeps its client. Recheck current authority and retry
+// that transport failure once, whether or not retirement was possible. Never retry
+// authority, TLS, overload or caller cancellation; never replay application bytes.
 package native
 
 import (
@@ -15,8 +24,6 @@ import (
 	"reflect"
 	"sync"
 	"time"
-
-	"github.com/quic-go/quic-go"
 
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
@@ -244,10 +251,7 @@ func (o *Owner) dialOnce(ctx context.Context, descriptor mesh.Addr, peerID strin
 	}
 	socket, err := client.Dial(ctx)
 	if err != nil {
-		if ctx.Err() == nil && !errors.Is(err, tailnet.ErrFlowLimit) {
-			o.authority.RetireIdleClient(client)
-		}
-		return nil, o.dialFailure(ctx, peerID, "peer_connect", "native_private_failed", err)
+		return nil, o.failedPeerDial(ctx, peerID, client, err)
 	}
 	tlsConfig := boundTLS(o.tls, peer, false)
 	if class == peerquic.ClassPreview {
@@ -255,14 +259,8 @@ func (o *Owner) dialOnce(ctx context.Context, descriptor mesh.Addr, peerID strin
 	}
 	quicSession, err := peerquic.DialPacket(ctx, socket, tlsConfig, peerquic.DevelopmentSessionConfig(class))
 	if err != nil {
-		// DialPacket closes its failed socket. Retire stale learned routes only
-		// after every other flow has released the cached client.
-		failure := o.dialFailure(ctx, peerID, "peer_connect", "native_private_failed", err)
-		var idle *quic.IdleTimeoutError
-		if ctx.Err() == nil && errors.As(err, &idle) {
-			o.authority.RetireIdleClient(client)
-		}
-		return nil, failure
+		// DialPacket releases its failed socket before the shared cache decision.
+		return nil, o.failedPeerDial(ctx, peerID, client, err)
 	}
 	if current, currentErr := o.authority.Peer(peerID); currentErr != nil || current != peer {
 		_ = quicSession.Close()

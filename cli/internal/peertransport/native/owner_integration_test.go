@@ -75,8 +75,10 @@ func TestAuthorizedTerminalAndLiveTransferRevocationReconnect(t *testing.T) {
 	signerPublic, signerPrivate, _ := ed25519.GenerateKey(rand.Reader)
 	clientTLS, clientFingerprint := testTLS(t, "cli")
 	var rejectHandshake atomic.Bool
+	var rejectedHandshakes atomic.Int32
 	clientTLS.GetClientCertificate = func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
 		if rejectHandshake.Load() {
+			rejectedHandshakes.Add(1)
 			return nil, errors.New("new handshake rejected by certificate source")
 		}
 		return &clientTLS.Certificates[0], nil
@@ -93,7 +95,12 @@ func TestAuthorizedTerminalAndLiveTransferRevocationReconnect(t *testing.T) {
 	serverConfig := testConfiguration(now, 1, serverBinding, clientBinding, "accept")
 	applyTestConfiguration(t, clientAuthority, signerPrivate, clientConfig)
 	applyTestConfiguration(t, serverAuthority, signerPrivate, serverConfig)
-	clientOwner, err := native.NewOwner(native.Config{Authority: clientAuthority, TLS: clientTLS})
+	var overloads atomic.Int32
+	clientOwner, err := native.NewOwner(native.Config{Authority: clientAuthority, TLS: clientTLS, Observe: func(event native.Event) {
+		if errors.Is(event.Err, tailnet.ErrFlowLimit) {
+			overloads.Add(1)
+		}
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,6 +155,31 @@ func TestAuthorizedTerminalAndLiveTransferRevocationReconnect(t *testing.T) {
 	if _, err = io.ReadFull(sshConn, sshResponse); err != nil || string(sshResponse) != string(sshPayload) {
 		t.Fatalf("SSH response=%q err=%v", sshResponse, err)
 	}
+	t.Run("LiveFlowReusesCachedClient", func(t *testing.T) {
+		cached, err := clientAuthority.Client(descriptor, "machine_test")
+		if err != nil {
+			t.Fatal(err)
+		}
+		next, err := clientOwner.Dial(t.Context(), descriptor, "machine_test", peerquic.ClassInteractive)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer next.Close()
+		again, err := clientAuthority.Client(descriptor, "machine_test")
+		if err != nil || again != cached {
+			t.Fatal("healthy concurrent association replaced the cached client", err)
+		}
+		payload := []byte("ssh-after-client-reuse")
+		timer := time.AfterFunc(3*time.Second, func() { sshConn.Close() })
+		defer timer.Stop()
+		if _, err := sshConn.Write(payload); err != nil {
+			t.Fatal(err)
+		}
+		response := make([]byte, len(payload))
+		if _, err := io.ReadFull(sshConn, response); err != nil || string(response) != string(payload) {
+			t.Fatal("reuse interrupted the admitted stream", err)
+		}
+	})
 	t.Run("FlowLimitPreservesLiveSSHStream", func(t *testing.T) {
 		client, err := clientAuthority.Client(descriptor, "machine_test")
 		if err != nil {
@@ -173,6 +205,10 @@ func TestAuthorizedTerminalAndLiveTransferRevocationReconnect(t *testing.T) {
 		if !errors.Is(err, tailnet.ErrFlowLimit) {
 			t.Fatalf("extra dial did not preserve the flow limit: %v", err)
 		}
+		again, cacheErr := clientAuthority.Client(descriptor, "machine_test")
+		if cacheErr != nil || again != client || overloads.Load() != 1 {
+			t.Fatal("overload retired its client or retried the refused flow", cacheErr, overloads.Load())
+		}
 		timer := time.AfterFunc(3*time.Second, func() { sshConn.Close() })
 		defer timer.Stop()
 		payload := []byte("ssh-after-refused-extra-flow")
@@ -185,6 +221,10 @@ func TestAuthorizedTerminalAndLiveTransferRevocationReconnect(t *testing.T) {
 		}
 	})
 	t.Run("BootstrapHintRefreshPreservesLiveSSHStream", func(t *testing.T) {
+		cached, err := clientAuthority.Client(descriptor, "machine_test")
+		if err != nil {
+			t.Fatal(err)
+		}
 		info, err := mesh.ParseAddr(descriptor)
 		if err != nil {
 			t.Fatal(err)
@@ -196,6 +236,10 @@ func TestAuthorizedTerminalAndLiveTransferRevocationReconnect(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer refreshed.Close()
+		again, err := clientAuthority.Client(info.Addr(), "machine_test")
+		if err != nil || again != cached {
+			t.Fatal("relay bootstrap change replaced unchanged signed peer client", err)
+		}
 		timer := time.AfterFunc(3*time.Second, func() { sshConn.Close() })
 		defer timer.Stop()
 		payload := []byte("ssh-after-bootstrap-refresh")
@@ -219,6 +263,9 @@ func TestAuthorizedTerminalAndLiveTransferRevocationReconnect(t *testing.T) {
 		}
 		if dialCtx.Err() != nil {
 			t.Fatal("handshake failed only because test deadline expired")
+		}
+		if rejectedHandshakes.Load() != 1 {
+			t.Fatal("TLS rejection was retried", rejectedHandshakes.Load())
 		}
 		timer := time.AfterFunc(3*time.Second, func() { sshConn.Close() })
 		defer timer.Stop()
