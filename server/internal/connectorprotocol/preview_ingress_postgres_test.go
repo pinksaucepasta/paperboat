@@ -237,4 +237,32 @@ func TestPublicPreviewIngressPostgres(t *testing.T) {
 		t.Fatal("stale-generation alias exposed as preview endpoint")
 	}
 
+	// Finished previews with no DNS records must not delay new publications;
+	// retained owned records still need a withdrawal reconciliation.
+	exec(`UPDATE preview_leases SET terminal_state='stopped',stopped_at=$2 WHERE id=$1`, preview, now)
+	assertQueued := func(want bool) {
+		t.Helper()
+		owners, err := f.database.Queries().ListEdgeDNSPublicationResourcesV1(ctx, dbsqlc.ListEdgeDNSPublicationResourcesV1Params{AfterID: preview[:len(preview)-1], BatchSize: 100})
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, owner := range owners {
+			if owner.ID == preview {
+				found = true
+			}
+		}
+		if found != want {
+			t.Fatalf("finished preview DNS queued=%t want=%t", found, want)
+		}
+	}
+	assertQueued(false)
+	exec(`INSERT INTO edge_dns_publications(hostname,owner_id,resource_generation,readiness_version,observed_at,publication_generation,desired_addresses,provider_records,state,created_at,updated_at) VALUES($1,$2,1,'fixture',$3,1,'["8.8.8.8"]','[]','verified',$3,$3)`, managedHostname, preview, now)
+	t.Cleanup(func() {
+		_, _ = f.database.SQL().ExecContext(ctx, `DELETE FROM edge_dns_publications WHERE owner_id=$1`, preview)
+	})
+	assertQueued(true)
+	exec(`UPDATE edge_dns_publications SET desired_addresses='[]' WHERE owner_id=$1`, preview)
+	assertQueued(false)
+
 }

@@ -98,10 +98,11 @@ func (q *Queries) ListEdgeDNSPublicationNamesV1(ctx context.Context, tunnelID st
 const listEdgeDNSPublicationResourcesV1 = `-- name: ListEdgeDNSPublicationResourcesV1 :many
 SELECT id, max(generation)::bigint AS generation FROM (
  SELECT id,generation FROM tunnels
- UNION ALL SELECT id,1::bigint AS generation FROM preview_leases
+ UNION ALL SELECT id,1::bigint AS generation FROM preview_leases WHERE terminal_state='active'
  UNION ALL SELECT id,desired_revision AS generation FROM control_routes
   WHERE kind='runtime_https_wss' AND desired_state IN ('attached','replacing')
  UNION ALL SELECT owner_id AS id,resource_generation AS generation FROM edge_dns_publications
+  WHERE state<>'verified' OR desired_addresses<>'[]'::jsonb OR provider_records<>'[]'::jsonb
 ) owners WHERE id > $1::text
 GROUP BY id ORDER BY id LIMIT $2
 `
