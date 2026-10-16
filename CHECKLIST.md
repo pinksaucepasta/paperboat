@@ -532,9 +532,9 @@ that use them; say which in Evidence.
 | ID | Scenario | L | M | W | Evidence |
 |---|---|---|---|---|---|
 | F13-01 | Free plan: new accounts pair machines with no subscription or trial; the old "active subscription required" gates are replaced by the allowance model. | [ ] | [ ] | [ ] |  Server producer: TestFreeAccountSetupWithoutSubscription PASS on isolated VPS PostgreSQL with no published artifact/subscription; installation release dependency removed per 92b5ad9. Lane A device and full allowance verification pending. |
-| F13-02 | Metering of relay and edge bytes per workspace (personal) and per member + pool (team); direct P2P never metered. | [ ] | [ ] | [ ] | Isolated retained-actor SQL regression RED0.29s/GREEN0.30s; browser authenticated team-member attribution RED0.38s/GREEN0.48s, existing edge replacement PASS0.47s. Fixture born inside team resolves prior setup blocker. Migration069 and browser fix not deployed/pushed; member counters/pool and relay usage binding remain pending. |
+| F13-02 | Metering of relay and edge bytes per workspace (personal) and per member + pool (team); direct P2P never metered. | [!] | [!] | [ ] | Isolated retained-actor SQL regression RED0.29s/GREEN0.30s; browser authenticated team-member attribution RED0.38s/GREEN0.48s, existing edge replacement PASS0.47s. Fixture born inside team resolves prior setup blocker. Migration069 and browser fix not deployed/pushed; member counters/pool and relay usage binding remain pending.  Normal relay billing blocked on Lane A per-admitted-flow workspace/member binding and signed cumulative relay counters; opaque carrier account cannot identify team workspace. B actor/history commits cccfbf5/7a380d2 await combined HEAD smoke/gate/deployment. Pool/cap edge verification is pass2. |
 | F13-03 | Caps enforced as in 1.3; CLI and console messages with upgrade/top-up links; team owners/admins notified. | [ ] | [ ] | [ ] |  |
-| F13-04 | Stripe test mode: Pro monthly/yearly, upgrade/downgrade/cancel, top-ups, Team seats monthly/yearly, seat changes mid-cycle (charged immediately, billing date fixed), failed payment → grace → suspension → recovery, invoices. | [ ] | [ ] | [ ] |   Nine billing PostgreSQL owners PASS using fake Stripe boundary; actual Stripe test-mode account flows still pending. |
+| F13-04 | Stripe test mode: Pro monthly/yearly, upgrade/downgrade/cancel, top-ups, Team seats monthly/yearly, seat changes mid-cycle (charged immediately, billing date fixed), failed payment → grace → suspension → recovery, invoices. | [!] | [!] | [ ] |   Nine billing PostgreSQL owners PASS using fake Stripe boundary; actual Stripe test-mode account flows still pending.  Actual test-mode API credential and webhook signing secret/file references absent from protected deployment inventory; needs restricted Products/Prices, Customers, Checkout Sessions, Subscriptions, Billing Portal and webhook setup access. No real Stripe flow verified. |
 | F13-05 | Stripe live: products/prices via API, webhook verified, one real $8 purchase and refund done by the user. | [!] | [!] | [!] | Blocked: restricted Stripe live key absent from archived server configuration/secrets and current repository secret inventory. Needs live key plus user real $8 purchase/refund after test-mode verification. |
 | F13-06 | Console billing, bandwidth card (per-path series: direct/relay/edge), usage and plan screens. | [ ] | [ ] | [ ] |  |
 
@@ -552,7 +552,7 @@ that use them; say which in Evidence.
 | F14-06 | Automatic update at a configured time on L, M, W; `pb update settings` changes and disables it. | [ ] | [ ] | [ ] | — |
 | F14-07 | Minimum supported version blocks an old official build with a clear message; custom builds unaffected. | [ ] | [ ] | [ ] | —  Unchanged TestClientUpdatePolicyPostgres fresh isolated VPS PG PASS0.12s; clientupdate vet/race PASS1.031s. Device official/custom floor checks pending.  HTTP operator policy PostgreSQL PASS0.30s incl CSRF/origin/role/target/logout; configured example.test fixture. |
 | F14-08 | `pb update bundle` + `--from <file.pb-update>` installs offline on L, M, W. | [ ] | [ ] | [ ] | — |
-| F14-09 | `pb update check/download/status` accurate; console update summary accurate per workspace. | [ ] | [ ] | [ ] | — |
+| F14-09 | `pb update check/download/status` accurate; console update summary accurate per workspace. | [ ] | [ ] | [ ] | —  Existing TestFleetUpdateInventoryPaginationOnPostgres actual VPS PostgreSQL PASS0.31s: workspace/foreign/deleted exclusion, current observation generation, filter/paging/count accuracy. Signed/device update and Claude summary proof pending. |
 
 **Commands**
 
@@ -576,7 +576,7 @@ that use them; say which in Evidence.
 | F15-03 | Diagnostics are written on L, M, W (confirm the Windows location) and never contain credentials, ENV values, terminal or file content. | [ ] | [ ] | [ ] | — |
 | F15-04 | `pb config customize` (shortcuts, defaults, TUI), `status-bar`, `set/unset/show/path` work and survive updates. | [ ] | [ ] | [ ] | — |
 | F15-05 | Shell completion for bash, zsh, fish, PowerShell installs and completes commands and machine names. | [ ] | [ ] | [ ] | — |
-| F15-06 | Console Activity feed shows real events. | [ ] | [ ] | [ ] |  |
+| F15-06 | Console Activity feed shows real events. | [ ] | [ ] | [ ] |   Isolated server producer: real authenticated TestActivityConnectedWorkspaceHistory RED4040.09s/GREEN0.14s; immutable resource/workspace/name snapshot, paging, no metadata leak, exact account isolation and immediate membership revocation. HTTP/activity vet and race PASS5.896s, full server check PASS, existing browser/terminal PG owners0.48/0.45s PASS. Migration071, producer push/deployment and Claude browser check still pending; no platform tick. |
 
 **Commands**
 
