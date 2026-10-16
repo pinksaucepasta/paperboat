@@ -11,7 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/pinksaucepasta/paperboat-server/internal/config"
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/emailpolicy"
 )
 
 func TestPermissionImplications(t *testing.T) {
@@ -125,34 +124,31 @@ func TestPostgresTeamAuthorityLifecycle(t *testing.T) {
 			t.Fatalf("invalid invitation recipient accepted: %v", e)
 		}
 	}
-	if _, e := s.Invite(ctx, owner, team, InviteRequest{OperationID: "plus_invite", ExpectedGeneration: state.Generation, Email: "member+tag@example.test"}); !errors.Is(e, emailpolicy.ErrPlusAddress) {
-		t.Fatalf("plus-address invitation: %v", e)
-	}
-	gmail := other + ".Member@gmail.com"
-	gi, e := s.Invite(ctx, owner, team, InviteRequest{OperationID: "canonical_invite", ExpectedGeneration: state.Generation, Email: gmail})
+	aliasEmail := other + ".Member+tag@example.test"
+	gi, e := s.Invite(ctx, owner, team, InviteRequest{OperationID: "canonical_invite", ExpectedGeneration: state.Generation, Email: aliasEmail})
 	if e != nil {
 		t.Fatal(e)
 	}
 	state.Generation = gi.Generation
-	if gi.Email != other+"member@gmail.com" {
+	if gi.Email != other+".member@example.test" {
 		t.Fatal("invitation did not store canonical email")
 	}
-	if _, e = s.Invite(ctx, owner, team, InviteRequest{OperationID: "canonical_duplicate", ExpectedGeneration: state.Generation, Email: other + "member@googlemail.com"}); !errors.Is(e, ErrConflict) {
+	if _, e = s.Invite(ctx, owner, team, InviteRequest{OperationID: "canonical_duplicate", ExpectedGeneration: state.Generation, Email: other + ".member+other@example.test"}); !errors.Is(e, ErrConflict) {
 		t.Fatalf("canonical duplicate invitation: %v", e)
 	}
 	state, e = s.CancelInvite(ctx, owner, team, gi.InvitationID, MutationRequest{OperationID: "cancel_canonical", ExpectedGeneration: state.Generation})
 	if e != nil {
 		t.Fatal(e)
 	}
-	emailRequest := InviteRequest{OperationID: "pre_signup", ExpectedGeneration: state.Generation, Email: strings.ToUpper(other + ".Member@gmail.com")}
+	emailRequest := InviteRequest{OperationID: "pre_signup", ExpectedGeneration: state.Generation, Email: strings.ToUpper(other + ".Member+tag@example.test")}
 	emailInvite, err := s.Invite(ctx, owner, team, emailRequest)
-	if err != nil || emailInvite.AccountID != "" || emailInvite.Email != other+"member@gmail.com" {
+	if err != nil || emailInvite.AccountID != "" || emailInvite.Email != other+".member@example.test" {
 		t.Fatalf("pre-signup email invitation: %v", err)
 	}
 	if replayed, e := s.Invite(ctx, owner, team, emailRequest); e != nil || replayed.InvitationID != emailInvite.InvitationID {
 		t.Fatalf("email invitation replay: %v", e)
 	}
-	if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users(id,workos_subject,primary_email,email_verified,status) VALUES($1,$1,$2,false,'active')`, other, other+"member@googlemail.com"); err != nil {
+	if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users(id,workos_subject,primary_email,email_verified,status) VALUES($1,$1,$2,false,'active')`, other, other+".member+recipient@example.test"); err != nil {
 		t.Fatal(err)
 	}
 	if _, e := s.Invitation(ctx, other, emailInvite.InvitationID); !errors.Is(e, ErrNotFound) {
@@ -205,7 +201,7 @@ func TestPostgresTeamAuthorityLifecycle(t *testing.T) {
 	if item, e := s.Invitation(ctx, other, emailInvite.InvitationID); e != nil || item.AccountID != other || item.State != "accepted" {
 		t.Fatalf("accepted invitation lost account binding: %v", e)
 	}
-	if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.users SET primary_email=$2 WHERE id=$1`, admin, other+"member@googlemail.com"); err != nil {
+	if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.users SET primary_email=$2 WHERE id=$1`, admin, other+".member+recipient@example.test"); err != nil {
 		t.Fatal(err)
 	}
 	if _, e := s.Invitation(ctx, admin, emailInvite.InvitationID); !errors.Is(e, ErrNotFound) {

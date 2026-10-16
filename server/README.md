@@ -16,6 +16,11 @@ The server requires real WorkOS credentials for browser authentication. Configur
 equivalents) before starting it on the designated remote dev server. Fake WorkOS
 verification is available only in tests.
 
+Paperboat lowercases email addresses and removes the local part's first `+` suffix
+for every domain. Dots and domain names are preserved. Verified provider identities
+for these aliases sign into one account; invitations and contact addresses use the
+same canonical email. Refresh and logout remain bound to each provider session.
+
 Apply Postgres migrations:
 
 ```sh

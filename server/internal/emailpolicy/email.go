@@ -11,13 +11,11 @@ import (
 )
 
 var (
-	ErrInvalid     = errors.New("Enter a valid email address.")
-	ErrPlusAddress = errors.New("Email addresses containing + cannot be used. Sign in with your original email address.")
-	ErrDuplicate   = errors.New("An account already uses this email address. Sign in to the existing account.")
+	ErrInvalid = errors.New("Enter a valid email address.")
 )
 
-// Normalize uses the database's canonical identity function, also used when
-// matching legacy accounts and invitations. Legacy account rows are not rewritten.
+// Normalize shares the database identity function with account lookup and
+// invitations: lowercase and remove the first plus suffix, preserving dots.
 func Normalize(ctx context.Context, tx *db.Tx, value string) (string, error) {
 	value = strings.ToLower(strings.TrimSpace(value))
 	parsed, err := mail.ParseAddress(value)
@@ -28,8 +26,8 @@ func Normalize(ctx context.Context, tx *db.Tx, value string) (string, error) {
 	if !ok {
 		return "", ErrInvalid
 	}
-	if strings.Contains(local, "+") {
-		return "", ErrPlusAddress
+	if strings.SplitN(local, "+", 2)[0] == "" {
+		return "", ErrInvalid
 	}
 	var canonical string
 	err = tx.QueryRow(ctx, `SELECT paperboat.canonical_email_address($1)`, value).Scan(&canonical)

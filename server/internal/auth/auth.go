@@ -158,16 +158,16 @@ func (s *Service) VerifyCallback(ctx context.Context, input CallbackInput) (User
 	sessionID := newID("session")
 	err = s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		q := tx.Queries()
-		canonical, err := signupEmail(ctx, tx, profile)
+		canonical, accountID, err := resolveWorkOSIdentity(ctx, tx, profile)
 		if err != nil {
 			return err
 		}
-		row, err := q.UpsertWorkOSUser(ctx, dbsqlc.UpsertWorkOSUserParams{CanonicalEmail: canonical, UserID: newID("user"), WorkosSubject: profile.Subject, PrimaryEmail: strings.ToLower(strings.TrimSpace(profile.Email)), EmailVerified: profile.EmailVerified, DisplayName: profile.DisplayName})
+		row, err := q.UpsertWorkOSUser(ctx, dbsqlc.UpsertWorkOSUserParams{CanonicalEmail: sql.NullString{String: canonical, Valid: true}, UserID: accountID, WorkosSubject: profile.Subject, PrimaryEmail: canonical, EmailVerified: profile.EmailVerified, DisplayName: profile.DisplayName})
 		if err != nil {
 			return err
 		}
 		user = User{ID: row.ID, WorkOSSubject: row.WorkosSubject, PrimaryEmail: row.PrimaryEmail, EmailVerified: row.EmailVerified, DisplayName: row.DisplayName, Status: row.Status, Role: Role(row.Role), CreatedAt: row.CreatedAt}
-		err = q.CreateBrowserSession(ctx, dbsqlc.CreateBrowserSessionParams{ID: sessionID, UserID: user.ID, SessionHash: sessionHash, CsrfHash: csrfHash, ExpiresAt: expiresAt, WorkosSessionID: sql.NullString{String: profile.SessionID, Valid: profile.SessionID != ""}, WorkosRefreshTokenCiphertext: refreshCiphertext, WorkosAccessExpiresAt: sql.NullTime{Time: profile.AccessExpiresAt, Valid: !profile.AccessExpiresAt.IsZero()}})
+		err = q.CreateBrowserSession(ctx, dbsqlc.CreateBrowserSessionParams{ID: sessionID, UserID: user.ID, SessionHash: sessionHash, CsrfHash: csrfHash, ExpiresAt: expiresAt, WorkosSessionID: sql.NullString{String: profile.SessionID, Valid: profile.SessionID != ""}, WorkosSubject: sql.NullString{String: profile.Subject, Valid: true}, WorkosRefreshTokenCiphertext: refreshCiphertext, WorkosAccessExpiresAt: sql.NullTime{Time: profile.AccessExpiresAt, Valid: !profile.AccessExpiresAt.IsZero()}})
 		if err != nil {
 			return err
 		}
@@ -182,7 +182,7 @@ func (s *Service) VerifyCallback(ctx context.Context, input CallbackInput) (User
 		})
 	})
 	if err != nil {
-		return User{}, Session{}, fmt.Errorf("upsert workos user and session: %w", signupPolicyError(err))
+		return User{}, Session{}, fmt.Errorf("upsert workos user and session: %w", err)
 	}
 	return user, Session{ID: sessionID, UserID: user.ID, Token: sessionToken, CSRFToken: csrfToken, ExpiresAt: expiresAt, WorkOSSessionID: profile.SessionID}, nil
 }

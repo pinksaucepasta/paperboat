@@ -1995,6 +1995,7 @@ type Session struct {
 	WorkosSessionID              sql.NullString
 	WorkosRefreshTokenCiphertext []byte
 	WorkosAccessExpiresAt        sql.NullTime
+	WorkosSubject                sql.NullString
 }
 
 type Shared443NamesV1 struct {

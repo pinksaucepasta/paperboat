@@ -34,7 +34,7 @@ func (s *Service) refreshWorkOSSession(ctx context.Context, sessionHash, subject
 	var expiresAt sql.NullTime
 	err = tx.QueryRowContext(ctx, `SELECT s.id, s.user_id, s.workos_refresh_token_ciphertext, s.workos_access_expires_at
 		FROM paperboat.sessions s JOIN paperboat.users u ON u.id=s.user_id
-		WHERE s.session_hash=$1 AND s.workos_session_id=$2 AND u.workos_subject=$3
+		WHERE s.session_hash=$1 AND s.workos_session_id=$2 AND coalesce(s.workos_subject,u.workos_subject)=$3
 		AND u.status='active' AND s.revoked_at IS NULL AND s.expires_at>now() FOR UPDATE OF s`, sessionHash, sessionID, subject).Scan(&id, &userID, &ciphertext, &expiresAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrUnauthenticated
@@ -98,8 +98,8 @@ func (s *Service) refreshWorkOSSession(ctx context.Context, sessionHash, subject
 	}
 	// The verified email is an authorization input for shared browser resources.
 	// Refresh it atomically with provider credentials before this request continues.
-	if _, err = tx.ExecContext(ctx, `UPDATE paperboat.users SET canonical_email=CASE WHEN canonical_email IS NULL THEN NULL ELSE paperboat.canonical_email_address($1) END, primary_email=$1, email_verified=$2,
-		updated_at=now(), version=version+1 WHERE id=$3 AND workos_subject=$4`, strings.ToLower(strings.TrimSpace(profile.Email)), profile.EmailVerified, userID, subject); err != nil {
+	if _, err = tx.ExecContext(ctx, `UPDATE paperboat.users SET canonical_email=CASE WHEN canonical_email IS NULL THEN NULL ELSE paperboat.canonical_email_address($1) END, primary_email=paperboat.canonical_email_address($1), email_verified=$2,
+		updated_at=now(), version=version+1 WHERE id=$3`, strings.ToLower(strings.TrimSpace(profile.Email)), profile.EmailVerified, userID); err != nil {
 		return err
 	}
 	if _, err = tx.ExecContext(ctx, `UPDATE paperboat.user_identities SET email=$1, updated_at=now()

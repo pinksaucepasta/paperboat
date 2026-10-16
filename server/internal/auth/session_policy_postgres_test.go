@@ -160,9 +160,9 @@ func TestWorkOSRefreshRechecksVerifiedEmailPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	before := WorkOSProfile{Subject: fmt.Sprintf("workos_refresh_email_%d", now.UnixNano()), Email: "allowed@test.invalid", EmailVerified: true, SessionID: "session_123456", RefreshToken: "before-refresh", AccessExpiresAt: now.Add(9 * time.Second)}
+	before := WorkOSProfile{Subject: fmt.Sprintf("workos_refresh_email_%d", now.UnixNano()), Email: fmt.Sprintf("allowed-%d@test.invalid", now.UnixNano()), EmailVerified: true, SessionID: "session_123456", RefreshToken: "before-refresh", AccessExpiresAt: now.Add(9 * time.Second)}
 	after := before
-	after.Email, after.EmailVerified, after.RefreshToken, after.AccessExpiresAt = "removed@test.invalid", false, "after-refresh", now.Add(time.Hour)
+	after.Email, after.EmailVerified, after.RefreshToken, after.AccessExpiresAt = fmt.Sprintf("removed-%d@test.invalid", now.UnixNano()), false, "after-refresh", now.Add(time.Hour)
 	s := NewService(store, audit.NewWriter(store), verifiedEmailRefreshVerifier{before: before, after: after}, []string{"refresh-email-test-key"}, false)
 	s.RequireWorkOSSessions("refresh-email-encryption-key")
 	user, session, err := s.VerifyCallback(ctx, CallbackInput{Code: "first"})
@@ -195,14 +195,15 @@ func TestWorkOSVerifiedEmailFollowsProviderProfilePostgres(t *testing.T) {
 	if err := db.Migrate(ctx, store); err != nil {
 		t.Fatal(err)
 	}
-	profile := WorkOSProfile{Subject: fmt.Sprintf("workos_verified_%d", time.Now().UnixNano()), Email: "first@test.invalid", EmailVerified: true}
+	stamp := time.Now().UnixNano()
+	profile := WorkOSProfile{Subject: fmt.Sprintf("workos_verified_%d", stamp), Email: fmt.Sprintf("first-%d@test.invalid", stamp), EmailVerified: true}
 	s := NewService(store, audit.NewWriter(store), sessionLogoutVerifier{profile: profile}, []string{"verified-email-test-key"}, false)
 	user, session, err := s.VerifyCallback(ctx, CallbackInput{Code: "first"})
 	if err != nil || !user.EmailVerified {
 		t.Fatalf("verified callback: user=%+v err=%v", user, err)
 	}
 	defer store.SQL().ExecContext(ctx, `DELETE FROM paperboat.users WHERE id=$1`, user.ID)
-	profile.Email, profile.EmailVerified = "second@test.invalid", false
+	profile.Email, profile.EmailVerified = fmt.Sprintf("second-%d@test.invalid", stamp), false
 	s.verifier = sessionLogoutVerifier{profile: profile}
 	if _, _, err := s.VerifyCallback(ctx, CallbackInput{Code: "second"}); err != nil {
 		t.Fatal(err)
@@ -210,7 +211,7 @@ func TestWorkOSVerifiedEmailFollowsProviderProfilePostgres(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "http://dashboard.example.test/v1/me", nil)
 	request.AddCookie(&http.Cookie{Name: DevSessionCookieName, Value: session.Token})
 	current, _, err := s.AuthenticateRequest(ctx, request)
-	if err != nil || current.EmailVerified || current.PrimaryEmail != "second@test.invalid" {
+	if err != nil || current.EmailVerified || current.PrimaryEmail != profile.Email {
 		t.Fatalf("old session retained stale verified email: user=%+v err=%v", current, err)
 	}
 }
@@ -234,7 +235,7 @@ func TestWorkOSSessionLogoutPostgres(t *testing.T) {
 	}
 	verifier := sessionLogoutVerifier{profile: WorkOSProfile{
 		Subject: fmt.Sprintf("workos_logout_%d", time.Now().UnixNano()),
-		Email:   "workos-logout@test.invalid", SessionID: "session_123",
+		Email:   fmt.Sprintf("workos-logout-%d@test.invalid", time.Now().UnixNano()), SessionID: "session_123",
 	}}
 	s := NewService(store, audit.NewWriter(store), verifier, []string{"workos-logout-test-key"}, false)
 	user, session, err := s.VerifyCallback(ctx, CallbackInput{Code: "test"})

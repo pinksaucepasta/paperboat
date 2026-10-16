@@ -27,8 +27,6 @@ func TestWorkOSCallbackFailureSeparatesRejectionProviderAndStoreErrors(t *testin
 		cause       string
 		wantCapture bool
 	}{
-		{name: "plus address", err: emailpolicy.ErrPlusAddress, status: 400, code: "email_alias_not_allowed"},
-		{name: "duplicate email", err: emailpolicy.ErrDuplicate, status: 409, code: "email_already_registered"},
 		{name: "invalid email", err: emailpolicy.ErrInvalid, status: 400, code: "invalid_email"},
 		{name: "invalid code", err: &auth.WorkOSVerificationError{Reason: "provider_http_error", HTTPStatus: http.StatusBadRequest}, status: http.StatusUnauthorized, code: "auth_callback_failed"},
 		{name: "provider transport failure", err: &auth.WorkOSVerificationError{Reason: "provider_transport", HTTPStatus: http.StatusServiceUnavailable, Cause: syscall.ETIMEDOUT}, status: http.StatusServiceUnavailable, code: "provider_unavailable", cause: "network_timeout", wantCapture: true},
