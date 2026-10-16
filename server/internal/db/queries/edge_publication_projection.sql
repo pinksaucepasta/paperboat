@@ -2,7 +2,7 @@
 -- Paginate resources, not rows/addresses, so a batch cannot publish a partial set.
 SELECT id, max(generation)::bigint AS generation FROM (
  SELECT id,generation FROM tunnels
- UNION ALL SELECT id,generation FROM preview_leases
+ UNION ALL SELECT id,1::bigint AS generation FROM preview_leases
  UNION ALL SELECT id,desired_revision AS generation FROM control_routes
   WHERE kind='runtime_https_wss' AND desired_state IN ('attached','replacing')
  UNION ALL SELECT owner_id AS id,resource_generation AS generation FROM edge_dns_publications
@@ -133,12 +133,14 @@ WHERE t.id=sqlc.arg(tunnel_id) AND t.desired_state='active' AND t.deleted_at IS 
   )
  )
 UNION ALL
+-- Preview IDs and hostnames are immutable; lease/attachment renewal counters
+-- must not rewrite DNS. Placement and process changes fence readiness instead.
 -- Ephemeral previews have one exact carrier placement. Never advertise the
 -- other global edge merely because it shares the wildcard certificate.
-SELECT node.id,p.generation AS resource_generation,statement_timestamp()::timestamptz AS observed_at,
+SELECT node.id,1::bigint AS resource_generation,statement_timestamp()::timestamptz AS observed_at,
  COALESCE(host(node.public_ingress_ipv4),'')::text AS ipv4,
  COALESCE(host(node.public_ingress_ipv6),'')::text AS ipv6,
- (node.process_epoch||'/'||a.operation_id||'/'||a.attachment_generation::text||'/'||cert.id)::text AS readiness_version,
+ (node.process_epoch||'/'||a.operation_id||'/'||a.route_id||'/'||a.route_generation::text||'/'||a.connector_session_id||'/'||a.process_generation::text||'/'||cert.id)::text AS readiness_version,
  LEAST(p.lease_deadline,p.user_deadline,a.expires_at,identity.expires_at,node.registry_expires_at,node.last_heartbeat_at+interval '15 seconds',cert.expires_at)::timestamptz AS valid_until
 FROM preview_leases p
 JOIN preview_lease_carrier_attachments a ON a.preview_id=p.id AND a.account_id=p.account_id

@@ -108,6 +108,27 @@ func TestPublicPreviewIngressPostgres(t *testing.T) {
 	exec(`INSERT INTO tunnel_certificate_records(id,domain_id,account_id,hostname,domain_generation,certificate_generation,strategy,state,certificate_reference,master_key_reference,certificate_ciphertext,private_key_ciphertext,fingerprint,issuer,not_before,expires_at,renewal_at,target_kind) VALUES($1,'platform_cert_public_v1','platform_system_v1',$2,1,1,'platform_dns01','active','fixture','fixture',decode(repeat('ab',29),'hex'),decode(repeat('ab',29),'hex'),decode(repeat('ab',32),'hex'),'fixture',$3,$4,$3,'platform_wildcard')`, certificate, "*.preview.example.test", now.Add(-time.Hour), now.Add(time.Hour))
 	exec(`INSERT INTO tunnel_certificate_edge_distributions(certificate_id,edge_node_id,edge_process_epoch,edge_assignment_generation,state,observed_certificate_generation) VALUES($1,$2,$3,1,'active',1)`, certificate, node, epoch)
 	dns(1)
+	beforeRenewal, err := f.database.Queries().ListReadyEdgeDNSAddressesV1(ctx, dbsqlc.ListReadyEdgeDNSAddressesV1Params{TunnelID: preview, Hostname: hostname, Now: sql.NullTime{Time: now, Valid: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec(`UPDATE preview_leases SET generation=generation+1 WHERE id=$1`, preview)
+	exec(`UPDATE preview_lease_carrier_attachments SET attachment_generation=attachment_generation+1 WHERE preview_id=$1`, preview)
+	afterRenewal, err := f.database.Queries().ListReadyEdgeDNSAddressesV1(ctx, dbsqlc.ListReadyEdgeDNSAddressesV1Params{TunnelID: preview, Hostname: hostname, Now: sql.NullTime{Time: now, Valid: true}})
+	if err != nil || len(afterRenewal) != 1 || afterRenewal[0].ResourceGeneration != beforeRenewal[0].ResourceGeneration || afterRenewal[0].ReadinessVersion != beforeRenewal[0].ReadinessVersion {
+		t.Fatal("lease renewal changed unchanged DNS placement identity")
+	}
+	owners, err = f.database.Queries().ListEdgeDNSPublicationResourcesV1(ctx, dbsqlc.ListEdgeDNSPublicationResourcesV1Params{AfterID: preview[:len(preview)-1], BatchSize: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, owner := range owners {
+		if owner.ID == preview && owner.Generation != afterRenewal[0].ResourceGeneration {
+			t.Fatal("DNS worker generation disagrees with renewed preview placement")
+		}
+	}
+	exec(`UPDATE preview_leases SET generation=generation-1 WHERE id=$1`, preview)
+	exec(`UPDATE preview_lease_carrier_attachments SET attachment_generation=attachment_generation-1 WHERE preview_id=$1`, preview)
 	exec(`UPDATE preview_lease_carrier_attachments SET origin_ready=false,state='edge_ready',ready_at=NULL WHERE preview_id=$1`, preview)
 	dns(0)
 	exec(`UPDATE preview_lease_carrier_attachments SET origin_ready=true,state='ready',ready_at=issued_at WHERE preview_id=$1`, preview)
