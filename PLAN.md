@@ -1425,3 +1425,5 @@ file | note`. Row-level evidence goes in CHECKLIST.md.
 - Lane A: F4-06/F5-03 L/M ticked on 4c00f86 (072116/072118/072119 receipts); all18 main checks and both60-exec checks PASS. Gate compile hit disk exhaustion; obsolete local builds removed, gate rerunning.
 
 2026-10-16 | Lane A F6/F7 management | Rows ticked:F6-03/F7-02 and command rows L/M on4c00f86; active cancellation/default restoration and preview list/status/stop/delete/TTL PASS. HP TTL first miss cleared one rerun; no investigation. F7-01 still waits on B public TLS.
+
+2026-10-16 | Lane A batch gate/publication | Rows ticked:F4-01/F4-06/F5-01/F5-03/F6-01/F7-02 L/M; rebased make gate PASS,56 historical checks retained. F6-03 reopened: new active-cancel check twice503 with receiver drain deadline; fixing real HTTP-body interruption next. F7 browser: HP background PASS; Apple foreground still fails after edge16.4, exact preview_6d0ceed8-3736-4657-9e3e-542e8b72c9db cleaned.
