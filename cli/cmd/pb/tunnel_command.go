@@ -2604,6 +2604,14 @@ func routeUpdateCommand() *cobra.Command {
 		if e != nil {
 			return e
 		}
+		if out.Operation.State == "succeeded" && out.Route.Schema == "" {
+			out.Route, e = retryTunnelRead(ctx, func() (api.TunnelRoute, error) {
+				return c.GetTunnelRouteV1(ctx, tunnelID, current.ID)
+			})
+			if e != nil {
+				return fmt.Errorf("read completed route update: %w", e)
+			}
+		}
 		return tunnelOutput(command, out, fmt.Sprintf("Updated route %s; status: %s", out.Route.ID, tunnelOperationHuman(out.Operation)))
 	})
 	command.Flags().String("name", "", "new route name")

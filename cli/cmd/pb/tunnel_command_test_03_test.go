@@ -47,6 +47,7 @@ func TestTunnelRouteSelectorsResolveNamesToCanonicalIDs(t *testing.T) {
 	})
 
 	t.Run("route update", func(t *testing.T) {
+		updated := route
 		withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
 			switch {
 			case r.Method == http.MethodGet && r.URL.Path == "/v1/tunnels/tun_1/routes":
@@ -62,24 +63,36 @@ func TestTunnelRouteSelectorsResolveNamesToCanonicalIDs(t *testing.T) {
 				if len(patch) != 2 || patch["name"] != "renamed" || patch["path_prefix"] != "/renamed" {
 					t.Fatalf("route patch did not preserve requested fields: %#v", patch)
 				}
-				updated := route
 				updated.Name = patch["name"].(string)
 				path := patch["path_prefix"].(string)
 				updated.PathPrefix = &path
 				updated.Generation = 2
 				updated.ETag = `"route:route_1:2"`
-				_ = json.NewEncoder(w).Encode(map[string]any{"data": api.TunnelRouteMutation{Route: updated, Operation: validCommandOperation("route", route.ID), Changed: true}})
+				operation := validCommandOperation("route", route.ID)
+				operation.State = "succeeded"
+				_ = json.NewEncoder(w).Encode(map[string]any{"data": operation})
+			case r.Method == http.MethodGet && r.URL.Path == "/v1/tunnels/tun_1/routes/route_1":
+				w.Header().Set("ETag", updated.ETag)
+				_ = json.NewEncoder(w).Encode(map[string]any{"data": updated})
 			default:
 				t.Fatalf("request=%s %s", r.Method, r.URL.Path)
 			}
 		})
 		command := newRootCommand()
-		command.SetArgs([]string{"tunnel", "route", "update", "tun_1", "default", "--name", "renamed", "--path", "/renamed"})
+		var output bytes.Buffer
+		command.SetOut(&output)
+		command.SetArgs([]string{"tunnel", "route", "update", "tun_1", "default", "--name", "renamed", "--path", "/renamed", "--json"})
 		if err := command.Execute(); err != nil {
 			t.Fatal(err)
 		}
+		var result api.TunnelRouteMutation
+		if err := json.Unmarshal(output.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		if result.Route.Name != "renamed" || result.Route.PathPrefix == nil || *result.Route.PathPrefix != "/renamed" {
+			t.Fatalf("completed route fields missing: %#v", result.Route)
+		}
 	})
-
 	t.Run("route remove", func(t *testing.T) {
 		t.Setenv(config.EnvConfigPath, filepath.Join(t.TempDir(), "config.json"))
 		withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
