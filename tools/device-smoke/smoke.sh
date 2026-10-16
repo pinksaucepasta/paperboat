@@ -612,6 +612,31 @@ $parent"
   done
 }
 
+test_team_lifecycle() {
+  skipped team-lifecycle && return
+  local device id out status t0
+  for device in "${TLIST[@]}"; do
+    id="team-lifecycle:$device"
+    skipped "$id" && continue
+    t0=$(now)
+    if ! stage_terminal_fixtures "$device"; then
+      record "$id" FAIL 0 "could not stage the team fixture"
+      continue
+    fi
+    out=$(on "$device" "python3 /tmp/$RUN_ID/team_lifecycle.py" 2>&1); status=$?
+    if [ "$status" = 0 ] && python3 -c '
+import json,sys
+r=json.loads(sys.argv[1])
+assert r["check"]=="team-lifecycle" and r["status"]=="PASS"
+assert all(r[k] for k in ("create_get_list_delete", "invite_accept_decline_cancel", "independent_verified_recipient", "enrollment_preserved"))
+' "$out" 2>/dev/null; then
+      record "$id" PASS $(( $(now)-t0 ))
+    else
+      record_command_failure "$id" $(( $(now)-t0 )) "$out"
+    fi
+  done
+}
+
 # The origin stays on its enrolled device; TLS/ALPN/body/WebSocket probes run
 # here, independently of that device's network and client credentials.
 test_preview_protocols() {
@@ -693,6 +718,7 @@ test_application_pairs ssh-alias ssh_alias_lifecycle.py
 test_application_pairs inbox-manage inbox_manage.py
 test_application_pairs transfer-manage transfer_manage.py
 test_application_pairs preview-manage preview_manage.py
+test_team_lifecycle
 test_preview_protocols
 for t in "${TLIST[@]}"; do
   skipped ssh-long || collect "ssh-long:$t" "long-ssh-$t" SSHFINAL "$LONG_SSH"
