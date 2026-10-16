@@ -18,20 +18,22 @@ const (
 	tlsHandshakeAttempts       = 3
 )
 
+// API objects keep their own credentials and request deadlines, while the
+// process owns one bounded connection pool across command steps.
+var processHTTPTransport = newProcessHTTPTransport()
+
 func defaultHTTPClient() *http.Client {
+	return &http.Client{Timeout: defaultRequestTimeout, Transport: processHTTPTransport}
+}
+
+func newProcessHTTPTransport() http.RoundTripper {
 	config := httptransport.DevelopmentConfig()
 	config.TLSHandshakeTimeout = defaultTLSHandshakeTimeout
 	transport, err := httptransport.New(config)
 	if err != nil {
 		panic(err)
 	}
-	return &http.Client{
-		Timeout: defaultRequestTimeout,
-		Transport: &tlsHandshakeRetryTransport{
-			base:     transport,
-			attempts: tlsHandshakeAttempts,
-		},
-	}
+	return &tlsHandshakeRetryTransport{base: transport, attempts: tlsHandshakeAttempts}
 }
 
 // tlsHandshakeRetryTransport retries only failures that happen before an HTTP
