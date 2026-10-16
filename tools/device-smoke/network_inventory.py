@@ -13,7 +13,8 @@ def main():
     for kind, collection, identity in [('edge', 'edges', 'id'), ('relay', 'relays', 'relay_id')]:
         receipt = invoke(binary, kind, 'list', '--json', timeout=60)
         assert receipt['schema'] == 'paperboat.' + kind + '-list/v1'
-        assert receipt['pool_mode'] in ('managed-only', 'self-hosted-only')
+        modes = ('managed-only', 'self-hosted-only') if kind == 'edge' else ('mixed', 'self-hosted-only')
+        assert receipt['pool_mode'] in modes
         items = receipt[collection]
         assert isinstance(items, list) and items, 'no network nodes available in the active workspace'
         ids = [item[identity] for item in items]
