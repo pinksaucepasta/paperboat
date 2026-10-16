@@ -197,7 +197,7 @@ func TestPostgresTeamMachineAuthority(t *testing.T) {
 	// Even paused public publication must have an explicit disposition before
 	// ownership changes; a machine-use grant cannot inherit public authority.
 	publicTunnel := "public_" + suffix
-	if _, err = store.SQL().ExecContext(ctx, `WITH endpoint AS (SELECT gen_random_uuid()::text AS id) INSERT INTO paperboat.tunnels(id,account_id,name,desired_state,access_mode,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id) SELECT $1,$2,'public-transfer-test','paused','public',id,'https://'||id||'.example.test',$3,$2 FROM endpoint`, publicTunnel, enroller, machine); err != nil {
+	if _, err = store.SQL().ExecContext(ctx, `WITH endpoint AS (SELECT gen_random_uuid()::text AS id) INSERT INTO paperboat.tunnels(id,account_id,name,desired_state,access_mode,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id) SELECT $1,$2,'public-transfer-test','paused','public','endpoint_'||id,'https://'||id||'.example.test',$3,$2 FROM endpoint`, publicTunnel, enroller, machine); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = s.Machine(ctx, enroller, team, MachineRequest{OperationID: "denied_public_transfer", ExpectedGeneration: current.Generation, MachineID: machine, Action: "transfer_to_team", Confirmation: machine}); !errors.Is(err, ErrMachinePublication) {

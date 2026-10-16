@@ -418,7 +418,7 @@ func TestPostgresInvitationExpiryAndResourceAttachment(t *testing.T) {
 		t.Fatal(err)
 	}
 	endpoint := "00000000-0000-4000-8000-" + suffix[len(suffix)-12:]
-	if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.tunnels(id,account_id,name,access_mode,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id) VALUES($1,$2,'attachment test','private',$3,'https://'||$3||'.invalid.test','test-host',$2)`, tunnel, owner, endpoint); err != nil {
+	if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.tunnels(id,account_id,name,access_mode,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id) VALUES($1,$2,'attachment test','private','endpoint_'||$3,'https://'||$3||'.invalid.test','test-host',$2)`, tunnel, owner, endpoint); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = s.Authorize(ctx, recipient, team, "tunnel", tunnel, "use"); !errors.Is(err, ErrForbidden) {

@@ -488,10 +488,10 @@ that use them; say which in Evidence.
 
 | ID | Scenario | L | M | W | Evidence |
 |---|---|---|---|---|---|
-| F12-01 | Create, get, list, delete a team (payment handled in F13). | [ ] | [ ] | [ ] | — |
+| F12-01 | Create, get, list, delete a team (payment handled in F13). | [ ] | [ ] | [ ] | TestPostgresTeamAuthorityLifecycle actual isolated VPS PostgreSQL PASS0.73s; real CLI/console proof remains A/C. |
 | F12-02 | Invite by email (also people without an account), accept, decline, cancel, invitations listing. | [ ] | [ ] | [ ] | — |
 | F12-03 | Roles owner/admin/member; change role; remove member; leave; transfer ownership. | [ ] | [ ] | [ ] | —  Server TestPostgresUnifiedLifecycleNoRevivedAuthority: isolated VPS PG PASS0.51s after typed-endpoint fixture repair; device qualification pending. |
-| F12-04 | Team machines: enroll into team, share personal machine, grant, unshare, transfer-to-team, remove; default access shown while enrolling. | [ ] | [ ] | [ ] | — |
+| F12-04 | Team machines: enroll into team, share personal machine, grant, unshare, transfer-to-team, remove; default access shown while enrolling. | [ ] | [ ] | [ ] | TestPostgresTeamMachineAuthority actual isolated VPS PostgreSQL RED untyped endpoint fixture/GREEN0.69s; original exact grants/public disposition/ownership/revocation assertions retained. A/C real enrollment and sharing proof pending. |
 | F12-05 | Explicit resource grants and `pb team attach`; `pb team activity`. | [ ] | [ ] | [ ] | — |
 | F12-06 | Suspension and recovery behave as documented. | [ ] | [ ] | [ ] | —  Server TestOperatorTeamSuspensionFencesAuthorityAndResumesAtNewGeneration isolated VPS PG PASS0.10s; teams vet/race PASS1.031s; devices pending. |
 | F12-07 | Console Teams screens per console/NOTES.md "Teams". | [ ] | [ ] | [ ] |  |
