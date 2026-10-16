@@ -71,12 +71,13 @@ def one(binary, target, mode):
             terminal = [event for event in events(output) if event.get('state') == 'canceled']
             wanted = 'exec_timeout' if mode == 'timeout' else 'exec_canceled'
             if status != expected or len(terminal) != 1 or terminal[0].get('error_code') != wanted:
-                output.seek(0); errors.seek(0)
-                diagnostic = command_diagnostic(arguments, output.read(), errors.read())
-                raise RuntimeError('cancellation lost its known outcome; private diagnostics: ' + str(diagnostic))
+                raise RuntimeError('cancellation lost its known outcome')
             verify_stopped(binary, target, pid, nonce)
         except Exception as error:
             failure = error
+            diagnostic = command_diagnostic(arguments, os.pread(output.fileno(), 1 << 20, 0),
+                                            os.pread(errors.fileno(), 1 << 20, 0))
+            error.add_note('Private command diagnostics: ' + str(diagnostic))
             raise
         finally:
             if process.poll() is None:
