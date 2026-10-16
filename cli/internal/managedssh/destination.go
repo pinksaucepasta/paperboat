@@ -6,8 +6,6 @@ import (
 	"strings"
 )
 
-const AliasSuffix = "local.pprbt.dev"
-
 var (
 	ErrSSHAliasInvalid       = errors.New("managed SSH alias is invalid")
 	ErrSSHUsernameInvalid    = errors.New("managed SSH username is invalid")
@@ -44,13 +42,15 @@ func ValidateUsername(value string) error {
 }
 
 type Destination struct {
-	Alias string
-	Host  string
-	Port  uint16
-	User  string
+	AliasDomain string
+	Alias       string
+	Host        string
+	Port        uint16
+	User        string
 }
 
 type DestinationInput struct {
+	AliasDomain       string
 	Alias             string
 	RegisteredPort    uint16
 	RequestedPort     uint16
@@ -65,7 +65,7 @@ type DestinationInput struct {
 // ResolveDestination applies the account alias, registered target, and username
 // policy before OpenSSH or a proxy process is started.
 func ResolveDestination(input DestinationInput) (Destination, error) {
-	host, err := AliasHost(input.Alias)
+	host, err := AliasHost(input.Alias, input.AliasDomain)
 	if err != nil {
 		return Destination{}, err
 	}
@@ -79,24 +79,24 @@ func ResolveDestination(input DestinationInput) (Destination, error) {
 	if err != nil {
 		return Destination{}, err
 	}
-	return Destination{Alias: strings.ToLower(input.Alias), Host: host, Port: input.RegisteredPort, User: user}, nil
+	return Destination{AliasDomain: input.AliasDomain, Alias: strings.ToLower(input.Alias), Host: host, Port: input.RegisteredPort, User: user}, nil
 }
 
-func AliasHost(alias string) (string, error) {
+func AliasHost(alias, domain string) (string, error) {
 	alias = strings.ToLower(strings.TrimSpace(alias))
-	if !validAliasLabel(alias) {
+	if ValidateAlias(alias) != nil || ValidateAliasDomain(domain) != nil {
 		return "", ErrSSHAliasInvalid
 	}
-	return alias + "." + AliasSuffix, nil
+	return alias + "." + domain, nil
 }
 
 // ParseAliasHost accepts exactly one alias label beneath the canonical suffix.
-func ParseAliasHost(host string) (string, error) {
+func ParseAliasHost(host, domain string) (string, error) {
 	host = strings.ToLower(strings.TrimSpace(host))
-	if !strings.HasSuffix(host, "."+AliasSuffix) {
+	if ValidateAliasDomain(domain) != nil || !strings.HasSuffix(host, "."+domain) {
 		return "", ErrSSHAliasInvalid
 	}
-	alias := strings.TrimSuffix(host, "."+AliasSuffix)
+	alias := strings.TrimSuffix(host, "."+domain)
 	if !validAliasLabel(alias) {
 		return "", ErrSSHAliasInvalid
 	}

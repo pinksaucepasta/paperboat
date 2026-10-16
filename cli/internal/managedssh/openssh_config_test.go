@@ -29,7 +29,7 @@ func TestOpenSSHConfigInstallRepairAndExactUninstall(t *testing.T) {
 	if err := ValidateOpenSSHConfig(config); err != nil {
 		t.Fatalf("validate installed config: %v", err)
 	}
-	if err := ValidateInstalledOpenSSHConfig(home, uint32(os.Getuid()), config.AgentSocket); err != nil {
+	if err := ValidateInstalledOpenSSHConfig(home, uint32(os.Getuid()), config.AgentSocket, config.AliasDomain); err != nil {
 		t.Fatalf("validate daemon-installed config: %v", err)
 	}
 	alternate := config
@@ -38,7 +38,7 @@ func TestOpenSSHConfigInstallRepairAndExactUninstall(t *testing.T) {
 	if err := ValidateOpenSSHConfig(alternate); !errors.Is(err, ErrOpenSSHConfigConflict) {
 		t.Fatalf("path-specific validation error=%v", err)
 	}
-	if err := ValidateInstalledOpenSSHConfig(home, uint32(os.Getuid()), config.AgentSocket); err != nil {
+	if err := ValidateInstalledOpenSSHConfig(home, uint32(os.Getuid()), config.AgentSocket, config.AliasDomain); err != nil {
 		t.Fatalf("path-independent validation error=%v", err)
 	}
 	main := readOpenSSHTestFile(t, filepath.Join(directory, "config"))
@@ -48,7 +48,7 @@ func TestOpenSSHConfigInstallRepairAndExactUninstall(t *testing.T) {
 		t.Fatalf("main config=%q", main)
 	}
 	owned := string(readOpenSSHTestFile(t, filepath.Join(directory, "paperboat_config")))
-	for _, required := range []string{"Host *.local.pprbt.dev", "ProxyCommand " + config.ProxyCommand, "KnownHostsCommand " + config.KnownHostsCommand, "IdentityAgent \"" + config.AgentSocket + "\"", "IdentityFile \"" + config.IdentityFile + "\"", "IdentitiesOnly yes", "BatchMode yes", "PasswordAuthentication no", "KbdInteractiveAuthentication no", "StrictHostKeyChecking yes", "CheckHostIP no", "UserKnownHostsFile none", "GlobalKnownHostsFile none"} {
+	for _, required := range []string{"Host *.machines.example.test", "ProxyCommand " + config.ProxyCommand, "KnownHostsCommand " + config.KnownHostsCommand, "IdentityAgent \"" + config.AgentSocket + "\"", "IdentityFile \"" + config.IdentityFile + "\"", "IdentitiesOnly yes", "BatchMode yes", "PasswordAuthentication no", "KbdInteractiveAuthentication no", "StrictHostKeyChecking yes", "CheckHostIP no", "UserKnownHostsFile none", "GlobalKnownHostsFile none"} {
 		if !strings.Contains(owned, required) {
 			t.Fatalf("owned config missing %q: %q", required, owned)
 		}
@@ -83,11 +83,11 @@ func TestOpenSSHConfigRendersCanonicalAliasPortWithoutUser(t *testing.T) {
 		t.Fatal(err)
 	}
 	owned := string(readOpenSSHTestFile(t, filepath.Join(home, ".ssh", "paperboat_config")))
-	want := "Host victus-windows-e2e-fresh.local.pprbt.dev\n    Port 38222\n"
+	want := "Host victus-windows-e2e-fresh.machines.example.test\n    Port 38222\n"
 	if !strings.Contains(owned, want) {
 		t.Fatalf("owned config missing authoritative target: %q", owned)
 	}
-	if strings.Contains(owned, "Victus-Windows-E2E-Fresh.local.pprbt.dev") {
+	if strings.Contains(owned, "Victus-Windows-E2E-Fresh.machines.example.test") {
 		t.Fatalf("managed config contains a noncanonical machine name: %q", owned)
 	}
 	if strings.Contains(owned, "\n    User ") {
@@ -108,7 +108,7 @@ func TestOpenSSHConfigMigratesOwnedTargetUsersWithoutChangingUserConfig(t *testi
 	directory := filepath.Join(home, ".ssh")
 	ownedPath := filepath.Join(directory, "paperboat_config")
 	owned := readOpenSSHTestFile(t, ownedPath)
-	oldOwned := bytes.Replace(owned, []byte("Host mac.local.pprbt.dev\n    Port 22\n"), []byte("Host mac.local.pprbt.dev\n    User adam\n    Port 22\n"), 1)
+	oldOwned := bytes.Replace(owned, []byte("Host mac.machines.example.test\n    Port 22\n"), []byte("Host mac.machines.example.test\n    User adam\n    Port 22\n"), 1)
 	if bytes.Equal(oldOwned, owned) {
 		t.Fatal("failed to construct preceding owned format")
 	}
@@ -212,7 +212,7 @@ func TestGeneratedOpenSSHConfigIsAcceptedByInstalledClient(t *testing.T) {
 	if _, err := InstallOpenSSHConfig(openSSHTestConfig(home)); err != nil {
 		t.Fatal(err)
 	}
-	command := exec.Command(executable, "-G", "-F", filepath.Join(home, ".ssh", "paperboat_config"), "probe.local.pprbt.dev")
+	command := exec.Command(executable, "-G", "-F", filepath.Join(home, ".ssh", "paperboat_config"), "probe.machines.example.test")
 	var stderr bytes.Buffer
 	var stdout bytes.Buffer
 	command.Stdout = &stdout
@@ -239,7 +239,7 @@ func TestInstalledOpenSSHConfigResolvesEditorHostAlias(t *testing.T) {
 	if _, err := InstallOpenSSHConfig(config); err != nil {
 		t.Fatal(err)
 	}
-	command := exec.Command(executable, "-G", "-F", filepath.Join(home, ".ssh", "config"), "editor-host.local.pprbt.dev")
+	command := exec.Command(executable, "-G", "-F", filepath.Join(home, ".ssh", "config"), "editor-host.machines.example.test")
 	command.Env = openSSHTestEnvironment(home)
 	var stderr bytes.Buffer
 	var stdout bytes.Buffer
@@ -276,7 +276,7 @@ func openSSHTestEnvironment(home string) []string {
 func TestOpenSSHConfigRejectsConflictsSymlinksAndModifiedOwnedState(t *testing.T) {
 	home := openSSHTestHome(t)
 	directory := filepath.Join(home, ".ssh")
-	conflicting := "Host *.local.pprbt.dev\n    ProxyCommand /tmp/other-proxy %h %p\n"
+	conflicting := "Host *.machines.example.test\n    ProxyCommand /tmp/other-proxy %h %p\n"
 	if err := os.WriteFile(filepath.Join(directory, "config"), []byte(conflicting), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -339,7 +339,7 @@ func TestOpenSSHOptionConflictOmitsConfiguredCommandValues(t *testing.T) {
 }
 
 func TestOpenSSHConfigBoundaryClassifiesValidationFailure(t *testing.T) {
-	err := ValidateOpenSSHConfig(OpenSSHConfig{Home: "relative-private-home"})
+	err := ValidateOpenSSHConfig(OpenSSHConfig{AliasDomain: testAliasDomain, Home: "relative-private-home"})
 	if !errors.Is(err, ErrOpenSSHConfigConflict) {
 		t.Fatalf("invalid home error=%v", err)
 	}
@@ -406,7 +406,7 @@ func openSSHTestHome(t *testing.T) string {
 }
 
 func openSSHTestConfig(home string) OpenSSHConfig {
-	return OpenSSHConfig{
+	return OpenSSHConfig{AliasDomain: testAliasDomain,
 		Home: home, OwnerUID: uint32(os.Getuid()),
 		ProxyCommand:      "\"/usr/local/bin/pb\" internal ssh-proxy --host %h --port %p",
 		KnownHostsCommand: "\"/usr/local/bin/pb\" internal ssh-known-hosts --host %h --port %p",

@@ -102,7 +102,7 @@ func TestOpenSSHExecutorPreservesArgumentsAndEnvironment(t *testing.T) {
 		t.Fatal(err)
 	}
 	result := filepath.Join(t.TempDir(), "result")
-	arguments := []string{"-test.run=TestOpenSSHExecutorHelperProcess", "--", "-vv", "deploy@build.local.pprbt.dev", "printf", "%s", "hello world"}
+	arguments := []string{"-test.run=TestOpenSSHExecutorHelperProcess", "--", "-vv", "deploy@build.machines.example.test", "printf", "%s", "hello world"}
 	environment := []string{"PB_EXECUTOR_HELPER=arguments", "PB_EXECUTOR_RESULT=" + result, "PB_EXECUTOR_PRIVATE=PRIVATE_VALUE"}
 	if err := (OpenSSHExecutor{}).Execute(context.Background(), binary, arguments, environment); err != nil {
 		t.Fatal(err)

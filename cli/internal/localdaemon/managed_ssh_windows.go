@@ -67,11 +67,15 @@ func StartManagedSSH(ctx context.Context, cfg ManagedSSHConfig) (*ManagedSSHRunt
 		return nil, err
 	}
 	install := func(refreshCtx context.Context) error {
+		configuration, err := client.ClientConfiguration(refreshCtx)
+		if err != nil {
+			return err
+		}
 		targets, err := managedSSHAliasTargets(refreshCtx, client)
 		if err != nil {
 			return err
 		}
-		return installWindowsOpenSSHConfig(cfg, agentRuntime.socket, identity.PublicKey, targets)
+		return installWindowsOpenSSHConfig(cfg, agentRuntime.socket, identity.PublicKey, configuration.LocalAccessBaseDomain, targets)
 	}
 	if err := install(ctx); err != nil {
 		return nil, errors.Join(err, agentRuntime.Close())
@@ -177,14 +181,14 @@ func validWindowsAgentPipe(value string) bool {
 	return strings.HasPrefix(strings.ToLower(value), prefix) && len(value) > len(prefix) && len(value) <= 256 && !strings.ContainsAny(value[len(prefix):], "/\\\\:*?\"<>|"+"\x00\r\n")
 }
 
-func installWindowsOpenSSHConfig(cfg ManagedSSHConfig, agentSocket, publicKey string, targets []managedssh.OpenSSHAliasTarget) error {
+func installWindowsOpenSSHConfig(cfg ManagedSSHConfig, agentSocket, publicKey, domain string, targets []managedssh.OpenSSHAliasTarget) error {
 	if err := managedssh.InstallManagedIdentityPublicKey(cfg.Home, cfg.OwnerUID, publicKey); err != nil {
 		return err
 	}
 	identityFile := managedssh.ManagedIdentityPublicKeyPath(cfg.Home)
 	executable := quoteWindowsOpenSSH(cfg.Executable)
 	_, err := managedssh.InstallOpenSSHConfig(managedssh.OpenSSHConfig{
-		Home: cfg.Home, OwnerUID: cfg.OwnerUID,
+		Home: cfg.Home, OwnerUID: cfg.OwnerUID, AliasDomain: domain,
 		ProxyCommand:      managedSSHProxyCommand(executable),
 		KnownHostsCommand: executable + " __ssh-known-hosts --host %h --port %p",
 		AgentSocket:       agentSocket,
@@ -229,29 +233,6 @@ func readWindowsSSHConfig(path string) (string, error) {
 		return "", managedssh.ErrOpenSSHConfigConflict
 	}
 	return string(body), nil
-}
-
-func renderWindowsManagedSSH(executable, agentSocket, identityFile string) ([]byte, error) {
-	if !filepath.IsAbs(executable) || !strings.EqualFold(filepath.Ext(executable), ".exe") || !validWindowsAgentPipe(agentSocket) || !filepath.IsAbs(identityFile) || strings.ContainsAny(identityFile, "\r\n\x00\"") {
-		return nil, managedssh.ErrOpenSSHConfigConflict
-	}
-	command := quoteWindowsOpenSSH(executable)
-	value := windowsManagedSSHBeginMarker + "\n" +
-		"Host *." + managedssh.AliasSuffix + "\n" +
-		"    ProxyCommand " + command + " __ssh-proxy --host %h --port %p --user %r\n" +
-		"    KnownHostsCommand " + command + " __ssh-known-hosts --host %h --port %p\n" +
-		"    IdentityAgent " + strings.ReplaceAll(agentSocket, "\\", "\\\\") + "\n" +
-		"    IdentityFile " + quoteWindowsOpenSSH(identityFile) + "\n" +
-		"    IdentitiesOnly yes\n" +
-		"    BatchMode yes\n" +
-		"    PasswordAuthentication no\n" +
-		"    KbdInteractiveAuthentication no\n" +
-		"    StrictHostKeyChecking yes\n" +
-		"    CheckHostIP no\n" +
-		"    UserKnownHostsFile none\n" +
-		"    GlobalKnownHostsFile none\n" +
-		windowsManagedSSHEndMarker + "\n"
-	return []byte(value), nil
 }
 
 func quoteWindowsOpenSSH(value string) string {

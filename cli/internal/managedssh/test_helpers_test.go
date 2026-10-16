@@ -9,6 +9,8 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+const testAliasDomain = "machines.example.test"
+
 func authorizedPublicLine(t *testing.T) string {
 	t.Helper()
 	public, _, err := ed25519.GenerateKey(rand.Reader)

@@ -13,3 +13,18 @@ func validAliasSuffix(value string) bool {
 	}
 	return true
 }
+
+// ValidateAliasDomain accepts only a canonical, explicitly discovered DNS namespace.
+func ValidateAliasDomain(domain string) error {
+	if !validAliasSuffix(domain) || !strings.Contains(domain, ".") {
+		return ErrSSHAliasInvalid
+	}
+	return nil
+}
+
+func ValidateAlias(alias string) error {
+	if !validAliasLabel(strings.ToLower(strings.TrimSpace(alias))) {
+		return ErrSSHAliasInvalid
+	}
+	return nil
+}

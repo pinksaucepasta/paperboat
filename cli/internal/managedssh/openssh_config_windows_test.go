@@ -32,7 +32,7 @@ func TestWindowsOpenSSHOptionConflictOmitsConfiguredCommandValues(t *testing.T) 
 func TestValidateInstalledOpenSSHConfigAcceptsTargetBlocks(t *testing.T) {
 	home := managedSSHWindowsTestHome(t)
 	agentSocket := `\\.\pipe\paperboat-ssh-agent-test`
-	config := OpenSSHConfig{
+	config := OpenSSHConfig{AliasDomain: testAliasDomain,
 		Home:              home,
 		ProxyCommand:      `"C:\Program Files\Paperboat\bin\pb.exe" __ssh-proxy --host %h --port %p --user %r`,
 		KnownHostsCommand: `"C:\Program Files\Paperboat\bin\pb.exe" __ssh-known-hosts --host %h --port %p`,
@@ -46,10 +46,10 @@ func TestValidateInstalledOpenSSHConfigAcceptsTargetBlocks(t *testing.T) {
 	if _, err := InstallOpenSSHConfig(config); err != nil {
 		t.Fatal(err)
 	}
-	if err := ValidateInstalledOpenSSHConfig(home, 0, agentSocket); err != nil {
+	if err := ValidateInstalledOpenSSHConfig(home, 0, agentSocket, testAliasDomain); err != nil {
 		t.Fatalf("target-bearing installed config was rejected: %v", err)
 	}
-	if err := ValidateInstalledOpenSSHConfig(home, 0, `\\.\pipe\paperboat-ssh-agent-other`); !errors.Is(err, ErrOpenSSHConfigConflict) {
+	if err := ValidateInstalledOpenSSHConfig(home, 0, `\\.\pipe\paperboat-ssh-agent-other`, testAliasDomain); !errors.Is(err, ErrOpenSSHConfigConflict) {
 		t.Fatalf("mismatched agent socket error=%v", err)
 	}
 }

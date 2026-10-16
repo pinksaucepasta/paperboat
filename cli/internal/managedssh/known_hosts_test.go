@@ -15,16 +15,16 @@ func TestFormatKnownHostsUsesStrictAliasAndPortAuthority(t *testing.T) {
 		t.Fatal(err)
 	}
 	key := HostPublicKey{Fingerprint: sha256.Sum256(public.Marshal()), Algorithm: public.Type(), PublicKey: line}
-	defaultPort, err := FormatKnownHosts("Machine.LOCAL.PPRBT.DEV", 22, []HostPublicKey{key})
-	if err != nil || !strings.HasPrefix(string(defaultPort), "machine.local.pprbt.dev ssh-ed25519 ") {
+	defaultPort, err := FormatKnownHosts("Machine.MACHINES.EXAMPLE.TEST", 22, []HostPublicKey{key})
+	if err != nil || !strings.HasPrefix(string(defaultPort), "machine.machines.example.test ssh-ed25519 ") {
 		t.Fatalf("default known hosts=%q error=%v", defaultPort, err)
 	}
-	nonDefault, err := FormatKnownHosts("machine.local.pprbt.dev", 2222, []HostPublicKey{key})
-	if err != nil || !strings.HasPrefix(string(nonDefault), "[machine.local.pprbt.dev]:2222 ssh-ed25519 ") {
+	nonDefault, err := FormatKnownHosts("machine.machines.example.test", 2222, []HostPublicKey{key})
+	if err != nil || !strings.HasPrefix(string(nonDefault), "[machine.machines.example.test]:2222 ssh-ed25519 ") {
 		t.Fatalf("non-default known hosts=%q error=%v", nonDefault, err)
 	}
 	key.Fingerprint[0] ^= 0xff
-	if _, err := FormatKnownHosts("machine.local.pprbt.dev", 22, []HostPublicKey{key}); err == nil {
+	if _, err := FormatKnownHosts("machine.machines.example.test", 22, []HostPublicKey{key}); err == nil {
 		t.Fatal("mismatched host fingerprint was accepted")
 	}
 }
@@ -33,12 +33,12 @@ func TestFormatKnownHostsRejectsUnsafeHostAndDuplicateKeys(t *testing.T) {
 	line := authorizedPublicLine(t)
 	public, _, _, _, _ := ssh.ParseAuthorizedKey([]byte(line))
 	key := HostPublicKey{Fingerprint: sha256.Sum256(public.Marshal()), Algorithm: public.Type(), PublicKey: line}
-	for _, host := range []string{"127.0.0.1", "bad\nhost", "*.local.pprbt.dev", "-bad.local.pprbt.dev"} {
+	for _, host := range []string{"127.0.0.1", "bad\nhost", "*.machines.example.test", "-bad.machines.example.test"} {
 		if _, err := FormatKnownHosts(host, 22, []HostPublicKey{key}); err == nil {
 			t.Fatalf("unsafe host %q was accepted", host)
 		}
 	}
-	if _, err := FormatKnownHosts("machine.local.pprbt.dev", 22, []HostPublicKey{key, key}); err == nil {
+	if _, err := FormatKnownHosts("machine.machines.example.test", 22, []HostPublicKey{key, key}); err == nil {
 		t.Fatal("duplicate host key was accepted")
 	}
 }

@@ -31,7 +31,7 @@ func TestWindowsManagedSSHDefaultAdministratorsOwnerAndRestartMigration(t *testi
 		t.Fatal(err)
 	}
 	setWindowsManagedSSHStateOwner(t, home, administrators)
-	if err := ValidateInstalledOpenSSHConfig(home, 0, config.AgentSocket); !errors.Is(err, ErrOpenSSHConfigConflict) {
+	if err := ValidateInstalledOpenSSHConfig(home, 0, config.AgentSocket, testAliasDomain); !errors.Is(err, ErrOpenSSHConfigConflict) {
 		t.Fatalf("Administrators-owned state validation error=%v", err)
 	}
 
@@ -48,7 +48,7 @@ func TestWindowsManagedSSHDefaultAdministratorsOwnerAndRestartMigration(t *testi
 	if err := ValidateManagedIdentityPublicKey(home, 0, publicKey); err != nil {
 		t.Fatalf("validate identity after restart migration: %v", err)
 	}
-	if err := ValidateInstalledOpenSSHConfig(home, 0, config.AgentSocket); err != nil {
+	if err := ValidateInstalledOpenSSHConfig(home, 0, config.AgentSocket, testAliasDomain); err != nil {
 		t.Fatalf("validate OpenSSH config after restart migration: %v", err)
 	}
 	assertWindowsManagedSSHStateOwner(t, home, currentWindowsUserSID(t))
@@ -139,7 +139,7 @@ func managedSSHWindowsTestHome(t *testing.T) string {
 }
 
 func managedSSHWindowsTestConfig(home string) OpenSSHConfig {
-	return OpenSSHConfig{
+	return OpenSSHConfig{AliasDomain: testAliasDomain,
 		Home:              home,
 		ProxyCommand:      `"C:\Program Files\Paperboat\bin\pb.exe" __ssh-proxy --host %h --port %p --user %r`,
 		KnownHostsCommand: `"C:\Program Files\Paperboat\bin\pb.exe" __ssh-known-hosts --host %h --port %p`,

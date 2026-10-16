@@ -51,7 +51,7 @@ func TestProbeSSHAuthenticationProvesManagedKeyAndHostPinWithoutChannel(t *testi
 		t.Fatal(err)
 	}
 	public := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(hostSigner.PublicKey())))
-	if err := ProbeSSHAuthentication(t.Context(), client, "studio.local.pprbt.dev:22", "deploy", clientSigner, []string{public}); err != nil {
+	if err := ProbeSSHAuthentication(t.Context(), client, "studio.machines.example.test:22", "deploy", clientSigner, []string{public}); err != nil {
 		t.Fatal(err)
 	}
 	if err := <-serverDone; err != nil {
@@ -65,7 +65,7 @@ func TestProbeSSHAuthenticationHonorsCancellation(t *testing.T) {
 	defer server.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	err := ProbeSSHAuthentication(ctx, client, "studio.local.pprbt.dev:22", "deploy", clientSigner, []string{strings.TrimSpace(string(ssh.MarshalAuthorizedKey(clientSigner.PublicKey())))})
+	err := ProbeSSHAuthentication(ctx, client, "studio.machines.example.test:22", "deploy", clientSigner, []string{strings.TrimSpace(string(ssh.MarshalAuthorizedKey(clientSigner.PublicKey())))})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancellation error=%v", err)
 	}
@@ -80,7 +80,7 @@ func (failingAuthenticationStream) Close() error                    { return nil
 func TestProbeSSHAuthenticationKeepsTransportCauseWithStaticText(t *testing.T) {
 	clientSigner, _ := testKey(t)
 	cause := errors.New("private host address and handshake detail")
-	err := ProbeSSHAuthentication(t.Context(), failingAuthenticationStream{cause: cause}, "studio.local.pprbt.dev:22", "deploy", clientSigner, []string{"not a host key"})
+	err := ProbeSSHAuthentication(t.Context(), failingAuthenticationStream{cause: cause}, "studio.machines.example.test:22", "deploy", clientSigner, []string{"not a host key"})
 	if !errors.Is(err, ErrSSHAuthentication) {
 		t.Fatalf("authentication classification lost: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestProbeSSHAuthenticationKeepsTransportCauseWithStaticText(t *testing.T) {
 	}
 
 	valid := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(clientSigner.PublicKey())))
-	err = ProbeSSHAuthentication(t.Context(), failingAuthenticationStream{cause: cause}, "studio.local.pprbt.dev:22", "deploy", clientSigner, []string{valid})
+	err = ProbeSSHAuthentication(t.Context(), failingAuthenticationStream{cause: cause}, "studio.machines.example.test:22", "deploy", clientSigner, []string{valid})
 	if !errors.Is(err, cause) {
 		t.Fatalf("transport cause lost: %v", err)
 	}

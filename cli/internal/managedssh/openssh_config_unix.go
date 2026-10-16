@@ -30,6 +30,7 @@ const (
 var ErrOpenSSHConfigConflict = errors.New("Paperboat OpenSSH configuration conflicts with existing state")
 
 type OpenSSHConfig struct {
+	AliasDomain       string
 	Home              string
 	OwnerUID          uint32
 	ProxyCommand      string
@@ -64,7 +65,7 @@ func ValidateOpenSSHConfig(config OpenSSHConfig) (resultErr error) {
 	}
 	record, recordSet, err := readOpenSSHRecord(directoryFD, config.OwnerUID)
 	includeLine := "Include ~/.ssh/paperboat_config # " + openSSHIncludeMarker + "\n"
-	if err != nil || !mainSet || !ownedSet || !recordSet || record.Version != 1 || record.AliasSuffix != AliasSuffix || !validRecordedInclude(record.IncludeChunk, includeLine) || bytes.Count(main, []byte(record.IncludeChunk)) != 1 || !bytes.Equal(owned, expectedOwned) || record.OwnedHash != hashOpenSSHBytes(owned) {
+	if err != nil || !mainSet || !ownedSet || !recordSet || record.Version != 1 || record.AliasSuffix != config.AliasDomain || !validRecordedInclude(record.IncludeChunk, includeLine) || bytes.Count(main, []byte(record.IncludeChunk)) != 1 || !bytes.Equal(owned, expectedOwned) || record.OwnedHash != hashOpenSSHBytes(owned) {
 		return errors.Join(ErrOpenSSHConfigConflict, err)
 	}
 	return findOpenSSHOptionConflict(main, config)
@@ -75,7 +76,8 @@ func ValidateOpenSSHConfig(config OpenSSHConfig) (resultErr error) {
 // pathname. Updates and package layouts may expose the same installed binary at
 // more than one absolute path while OpenSSH intentionally retains one stable
 // daemon-managed entry point.
-func ValidateInstalledOpenSSHConfig(home string, ownerUID uint32, agentSocket string) (resultErr error) {
+func ValidateInstalledOpenSSHConfig(home string, ownerUID uint32, agentSocket, domain string) (resultErr error) {
+	config := OpenSSHConfig{AliasDomain: domain}
 	defer func() { resultErr = managedSSHBoundary("command", resultErr) }()
 	directoryFD, closeDirectory, err := openExistingOpenSSHConfigDirectory(home, ownerUID)
 	if err != nil {
@@ -93,15 +95,16 @@ func ValidateInstalledOpenSSHConfig(home string, ownerUID uint32, agentSocket st
 	record, recordSet, err := readOpenSSHRecord(directoryFD, ownerUID)
 	includeLine := "Include ~/.ssh/paperboat_config # " + openSSHIncludeMarker + "\n"
 	lines := strings.Split(strings.TrimSuffix(string(owned), "\n"), "\n")
-	wildcard := ownedWildcardLine(lines, AliasSuffix)
-	if err != nil || !mainSet || !ownedSet || !recordSet || record.Version != 1 || record.AliasSuffix != AliasSuffix ||
+	wildcard := ownedWildcardLine(lines, config.AliasDomain)
+	if err != nil || !mainSet || !ownedSet || !recordSet || record.Version != 1 || record.AliasSuffix != config.AliasDomain ||
 		!validRecordedInclude(record.IncludeChunk, includeLine) || bytes.Count(main, []byte(record.IncludeChunk)) != 1 ||
-		!validOwnedOpenSSHContent(owned, AliasSuffix) || record.OwnedHash != hashOpenSSHBytes(owned) || wildcard < 1 ||
+		!validOwnedOpenSSHContent(owned, config.AliasDomain) || record.OwnedHash != hashOpenSSHBytes(owned) || wildcard < 1 ||
 		lines[wildcard+3] != "    IdentityAgent \""+strings.ReplaceAll(agentSocket, "\\", "\\\\")+"\"" ||
 		lines[wildcard+4] != "    IdentityFile \""+strings.ReplaceAll(ManagedIdentityPublicKeyPath(home), "\\", "\\\\")+"\"" {
 		return errors.Join(ErrOpenSSHConfigConflict, err)
 	}
 	installed := OpenSSHConfig{
+		AliasDomain:       domain,
 		ProxyCommand:      strings.TrimPrefix(lines[wildcard+1], "    ProxyCommand "),
 		KnownHostsCommand: strings.TrimPrefix(lines[wildcard+2], "    KnownHostsCommand "),
 	}
@@ -236,7 +239,7 @@ func InstallOpenSSHConfig(config OpenSSHConfig) (result OpenSSHConfigResult, res
 	if recordSet {
 		originalMainExisted = record.MainExisted
 	}
-	nextRecord := &openSSHInstallRecord{Version: 1, MainExisted: originalMainExisted, IncludeChunk: includeChunk, AliasSuffix: AliasSuffix, OwnedHash: hashOpenSSHBytes(owned)}
+	nextRecord := &openSSHInstallRecord{Version: 1, MainExisted: originalMainExisted, IncludeChunk: includeChunk, AliasSuffix: config.AliasDomain, OwnedHash: hashOpenSSHBytes(owned)}
 	if bytes.Equal(main, nextMain) && bytes.Equal(existingOwned, owned) && recordSet && *record == *nextRecord {
 		return OpenSSHConfigResult{}, nil
 	}
@@ -310,13 +313,13 @@ func UninstallOpenSSHConfig(home string, ownerUID uint32) (result OpenSSHConfigR
 }
 
 func renderOwnedOpenSSHConfig(config OpenSSHConfig) ([]byte, error) {
-	if !validOpenSSHCommand(config.ProxyCommand) || !validOpenSSHCommand(config.KnownHostsCommand) || !filepath.IsAbs(config.AgentSocket) || strings.ContainsAny(config.AgentSocket, "\r\n\x00\"") || !filepath.IsAbs(config.IdentityFile) || strings.ContainsAny(config.IdentityFile, "\r\n\x00\"") {
+	if ValidateAliasDomain(config.AliasDomain) != nil || !validOpenSSHCommand(config.ProxyCommand) || !validOpenSSHCommand(config.KnownHostsCommand) || !filepath.IsAbs(config.AgentSocket) || strings.ContainsAny(config.AgentSocket, "\r\n\x00\"") || !filepath.IsAbs(config.IdentityFile) || strings.ContainsAny(config.IdentityFile, "\r\n\x00\"") {
 		return nil, ErrOpenSSHConfigConflict
 	}
 	var targets strings.Builder
 	seen := make(map[string]struct{}, len(config.Targets))
 	for _, target := range config.Targets {
-		host, hostErr := AliasHost(target.Alias)
+		host, hostErr := AliasHost(target.Alias, config.AliasDomain)
 		if hostErr != nil || target.Port == 0 {
 			return nil, ErrOpenSSHConfigConflict
 		}
@@ -327,7 +330,7 @@ func renderOwnedOpenSSHConfig(config OpenSSHConfig) ([]byte, error) {
 		fmt.Fprintf(&targets, "Host %s\n    Port %d\n", host, target.Port)
 	}
 	content := openSSHBeginMarker + "\n" + targets.String() +
-		"Host *." + AliasSuffix + "\n" +
+		"Host *." + config.AliasDomain + "\n" +
 		"    ProxyCommand " + config.ProxyCommand + "\n" +
 		"    KnownHostsCommand " + config.KnownHostsCommand + "\n" +
 		"    IdentityAgent \"" + strings.ReplaceAll(config.AgentSocket, "\\", "\\\\") + "\"\n" +
@@ -466,7 +469,7 @@ func firstOpenSSHBlockOffset(value []byte) int {
 
 func findOpenSSHOptionConflict(value []byte, config OpenSSHConfig) error {
 	matching, uncertain := false, false
-	probe := "paperboat-probe." + AliasSuffix
+	probe := "paperboat-probe." + config.AliasDomain
 	for index, line := range bytes.Split(value, []byte{'\n'}) {
 		trimmed := strings.TrimSpace(string(line))
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") {

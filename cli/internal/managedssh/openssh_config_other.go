@@ -7,8 +7,8 @@ import "errors"
 var ErrOpenSSHConfigConflict = errors.New("Paperboat OpenSSH configuration conflicts with existing state")
 
 type OpenSSHConfig struct {
-	Home, ProxyCommand, KnownHostsCommand, AgentSocket, IdentityFile string
-	OwnerUID                                                         uint32
+	AliasDomain, Home, ProxyCommand, KnownHostsCommand, AgentSocket, IdentityFile string
+	OwnerUID                                                                      uint32
 }
 type OpenSSHConfigResult struct{ Changed bool }
 
@@ -20,7 +20,7 @@ func ValidateOpenSSHConfig(OpenSSHConfig) error {
 	err := errors.New("OpenSSH configuration is unsupported on this platform")
 	return managedSSHFailure("command", err, err)
 }
-func ValidateInstalledOpenSSHConfig(string, uint32, string) error {
+func ValidateInstalledOpenSSHConfig(string, uint32, string, string) error {
 	err := errors.New("OpenSSH configuration is unsupported on this platform")
 	return managedSSHFailure("command", err, err)
 }

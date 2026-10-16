@@ -252,7 +252,7 @@ func (s AuthenticatedMachineSource) ListUserMachines(ctx context.Context) ([]api
 		}
 	}
 	for index := range machines {
-		if _, err := managedssh.AliasHost(machines[index].Alias); err != nil {
+		if err := managedssh.ValidateAlias(machines[index].Alias); err != nil {
 			return nil, inventorySourceFailure("machine_alias", err)
 		}
 		machines[index].SSHLocalReady = s.SSHLocalReady

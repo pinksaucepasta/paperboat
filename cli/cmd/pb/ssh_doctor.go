@@ -49,8 +49,12 @@ func actionSSHDoctor(command *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	domain, err := managedSSHDomain(command.Context(), client)
+	if err != nil {
+		return err
+	}
 	agentSocket := managedssh.InstalledAgentSocket(paths.RuntimeRoot)
-	if err := managedssh.ValidateInstalledOpenSSHConfig(home, uint32(os.Geteuid()), agentSocket); err != nil {
+	if err := managedssh.ValidateInstalledOpenSSHConfig(home, uint32(os.Geteuid()), agentSocket, domain); err != nil {
 		return fmt.Errorf("managed OpenSSH configuration is not ready; rerun `pb login`: %w", err)
 	}
 	if err := managedssh.ValidateManagedIdentityPublicKey(home, uint32(os.Geteuid()), identity.PublicKey); err != nil {
@@ -74,7 +78,7 @@ func actionSSHDoctor(command *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("managed SSH transport or loopback target is not ready: %w", err)
 	}
-	host, err := managedssh.AliasHost(machine.Alias)
+	host, err := managedssh.AliasHost(machine.Alias, domain)
 	if err != nil {
 		_ = connection.Close()
 		return err

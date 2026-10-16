@@ -30,18 +30,22 @@ func newManagedSSHToolCommand(name string) *cobra.Command {
 
 func actionManagedSSHTool(cobraCommand *cobra.Command, tool string, args []string) error {
 	ctx := actionContext(cobraCommand, nil)
+	domain, err := configuredManagedSSHDomain(ctx)
+	if err != nil {
+		return err
+	}
 	resolve := func(ctx *command.Context, target, requestedUser string) (managedssh.Destination, error) {
 		_, machine, sshTarget, err := resolveSSHCommandTargetFast(ctx, target)
 		if err != nil {
 			return managedssh.Destination{}, friendlyCommandError(err)
 		}
 		return managedssh.ResolveDestination(managedssh.DestinationInput{
-			Alias:          machine.Alias,
+			Alias: machine.Alias, AliasDomain: domain,
 			RegisteredPort: sshTarget.Port, RequestedUser: requestedUser, RegisteredUser: sshTarget.OSUser,
 			HasRegisteredUser: true, Platform: machine.Platform,
 		})
 	}
-	rewritten, err := rewriteManagedToolArguments(ctx, tool, args, resolve)
+	rewritten, err := rewriteManagedToolArguments(ctx, tool, args, domain, resolve)
 	if err != nil {
 		return err
 	}
@@ -52,7 +56,7 @@ func actionManagedSSHTool(cobraCommand *cobra.Command, tool string, args []strin
 	return executeManagedSSHTool(cobraCommand.Context(), tool, rewritten, environment)
 }
 
-func rewriteManagedToolArguments(ctx *command.Context, tool string, args []string, resolve managedToolTargetResolver) ([]string, error) {
+func rewriteManagedToolArguments(ctx *command.Context, tool string, args []string, domain string, resolve managedToolTargetResolver) ([]string, error) {
 	if ctx == nil || resolve == nil || len(args) == 0 {
 		return nil, errManagedToolOperand
 	}
@@ -69,8 +73,8 @@ func rewriteManagedToolArguments(ctx *command.Context, tool string, args []strin
 			if err != nil {
 				continue
 			}
-			target = strings.TrimSuffix(strings.ToLower(target), "."+managedssh.AliasSuffix)
-			if _, err := managedssh.AliasHost(strings.ToLower(target)); err != nil {
+			target = strings.TrimSuffix(strings.ToLower(target), "."+domain)
+			if err := managedssh.ValidateAlias(strings.ToLower(target)); err != nil {
 				continue
 			}
 			destination, err := resolve(ctx, target, requestedUser)
@@ -96,7 +100,7 @@ func rewriteManagedToolArguments(ctx *command.Context, tool string, args []strin
 		if err != nil {
 			return nil, err
 		}
-		target = strings.TrimSuffix(strings.ToLower(target), "."+managedssh.AliasSuffix)
+		target = strings.TrimSuffix(strings.ToLower(target), "."+domain)
 		destination, err := resolve(ctx, target, requestedUser)
 		if err != nil {
 			return nil, err
