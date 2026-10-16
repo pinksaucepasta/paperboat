@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/pinksaucepasta/paperboat-server/internal/accessdescriptor"
+	"github.com/pinksaucepasta/paperboat-server/internal/activity"
 	"github.com/pinksaucepasta/paperboat-server/internal/audit"
 	"github.com/pinksaucepasta/paperboat-server/internal/auth"
 	"github.com/pinksaucepasta/paperboat-server/internal/backupreport"
@@ -777,6 +778,7 @@ func New(opts Options) (*App, error) {
 		PeerNetwork:               peerNetworkService,
 		MachineServices:           machineServices,
 		ResourceUsage:             resourceUsageService,
+		Activity:                  activity.New(store),
 		NativePrivateAccess:       nativePrivateService,
 		ManagedSSH:                managedSSHService,
 		DiagnosticUploads:         diagnosticUploadService,

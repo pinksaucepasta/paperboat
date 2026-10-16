@@ -35,23 +35,27 @@ type AccountE2eeRoot struct {
 }
 
 type AuditEvent struct {
-	ID              string
-	ActorUserID     sql.NullString
-	ActorType       string
-	EventType       string
-	ResourceType    string
-	ResourceID      string
-	IdempotencyKey  sql.NullString
-	Metadata        []byte
-	CreatedAt       time.Time
-	AccountID       sql.NullString
-	ActorID         sql.NullString
-	ChangeType      string
-	Outcome         string
-	RequestID       sql.NullString
-	CorrelationID   sql.NullString
-	SourceMachineID sql.NullString
-	CursorSequence  sql.NullInt64
+	ID                  string
+	ActorUserID         sql.NullString
+	ActorType           string
+	EventType           string
+	ResourceType        string
+	ResourceID          string
+	IdempotencyKey      sql.NullString
+	Metadata            []byte
+	CreatedAt           time.Time
+	AccountID           sql.NullString
+	ActorID             sql.NullString
+	ChangeType          string
+	Outcome             string
+	RequestID           sql.NullString
+	CorrelationID       sql.NullString
+	SourceMachineID     sql.NullString
+	CursorSequence      sql.NullInt64
+	ActivityWorkspaceID sql.NullString
+	ActivityMachineID   sql.NullString
+	ActivityMachineName sql.NullString
+	ActivityTargetName  sql.NullString
 }
 
 type AuthRateLimit struct {

@@ -888,7 +888,7 @@ VALUES
 ON CONFLICT (event_type, resource_type, resource_id, idempotency_key)
   WHERE idempotency_key IS NOT NULL
 DO NOTHING
-RETURNING id, actor_user_id, actor_type, event_type, resource_type, resource_id, idempotency_key, metadata, created_at, account_id, actor_id, change_type, outcome, request_id, correlation_id, source_machine_id, cursor_sequence
+RETURNING id, actor_user_id, actor_type, event_type, resource_type, resource_id, idempotency_key, metadata, created_at, account_id, actor_id, change_type, outcome, request_id, correlation_id, source_machine_id, cursor_sequence, activity_workspace_id, activity_machine_id, activity_machine_name, activity_target_name
 `
 
 type InsertPreviewTunnelAuditEventParams struct {
@@ -948,12 +948,16 @@ func (q *Queries) InsertPreviewTunnelAuditEvent(ctx context.Context, arg InsertP
 		&i.CorrelationID,
 		&i.SourceMachineID,
 		&i.CursorSequence,
+		&i.ActivityWorkspaceID,
+		&i.ActivityMachineID,
+		&i.ActivityMachineName,
+		&i.ActivityTargetName,
 	)
 	return i, err
 }
 
 const listPreviewTunnelEvents = `-- name: ListPreviewTunnelEvents :many
-SELECT id, actor_user_id, actor_type, event_type, resource_type, resource_id, idempotency_key, metadata, created_at, account_id, actor_id, change_type, outcome, request_id, correlation_id, source_machine_id, cursor_sequence
+SELECT id, actor_user_id, actor_type, event_type, resource_type, resource_id, idempotency_key, metadata, created_at, account_id, actor_id, change_type, outcome, request_id, correlation_id, source_machine_id, cursor_sequence, activity_workspace_id, activity_machine_id, activity_machine_name, activity_target_name
 FROM audit_events
 WHERE account_id = $1
   AND resource_type = $2
@@ -1004,6 +1008,10 @@ func (q *Queries) ListPreviewTunnelEvents(ctx context.Context, arg ListPreviewTu
 			&i.CorrelationID,
 			&i.SourceMachineID,
 			&i.CursorSequence,
+			&i.ActivityWorkspaceID,
+			&i.ActivityMachineID,
+			&i.ActivityMachineName,
+			&i.ActivityTargetName,
 		); err != nil {
 			return nil, err
 		}

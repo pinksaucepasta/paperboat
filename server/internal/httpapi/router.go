@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat-server/internal/activity"
 	"github.com/pinksaucepasta/paperboat-server/internal/auth"
 	"github.com/pinksaucepasta/paperboat-server/internal/backupreport"
 	"github.com/pinksaucepasta/paperboat-server/internal/billing"
@@ -50,6 +51,7 @@ type ReadinessChecker interface {
 }
 
 type Options struct {
+	Activity                 *activity.Service
 	ClientUpdatePolicy       ClientUpdatePolicyAPI
 	OperatorInfrastructure   *operatorinfra.Service
 	OperatorBackups          *backupreport.Service
@@ -330,6 +332,10 @@ func NewRouter(opts Options) http.Handler {
 			mux.Handle("POST "+privateaccess.MachineRoutesPath, opts.PrivateAccessRoutes)
 			mux.Handle("POST "+privateaccess.EdgeAdmissionsPath, opts.PrivateAccessRoutes)
 		}
+		if opts.Activity != nil {
+			mux.Handle("GET /v1/activity", requireAnyAuth(opts.Auth, opts.DeviceAuth, requireScope("account:read", activityGet(opts.Activity))))
+		}
+
 		if opts.ResourceUsage != nil {
 			mux.HandleFunc("POST /v1/usage/native", resourceUsageNative(opts.RuntimeIdentity, opts.ResourceUsage))
 			mux.Handle("GET /v1/usage", requireAnyAuth(opts.Auth, opts.DeviceAuth, requireScope("account:read", resourceUsageGet(opts.ResourceUsage))))

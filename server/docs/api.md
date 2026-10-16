@@ -434,3 +434,20 @@ Old receipts without a retained workspace binding and native
 sessions issued before reporting authority existed are unavailable. These product
 observations do not add or duplicate billing debits and contain no file, terminal,
 environment, or target payloads. See [OpenAPI](openapi.json) for the response schema.
+
+
+### Workspace activity
+
+`GET /v1/activity?workspace=personal` returns `{data:{items,next_cursor?}}`.
+Cookie sessions or `account:read` bearer access are accepted; team administrative
+activity requires the current owner/admin. Optional `machine_id`, comma-separated
+`area`, substring `q` (200 bytes), opaque `cursor` and `limit` (1–200, default50)
+filter the newest-first page. Events include `id`, `occurred_at`, `action`,
+`actor:{kind,id}`, `target:{kind,id,name?}` and optional `machine:{id,name}`.
+Names and exact workspace ownership are retained at audit insertion, never inferred
+from a resource's later owner. Raw metadata is never returned. Earlier events with
+no retained scope and unsupported/internal resource kinds are omitted. The feed
+covers scoped machine, terminal, preview, tunnel, team, user and machine-environment
+audits from the past90 days. Empty matches return an empty array. Invalid filters
+or cursor return400 `invalid_activity_query`, missing auth401, unavailable workspace
+or insufficient team role403, and storage failure500 `activity_unavailable`.
