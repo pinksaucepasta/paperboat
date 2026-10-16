@@ -18,6 +18,7 @@ const (
 	prepareMachineName
 	prepareInboxPreservation
 	prepareSelectedFile
+	prepareOpenSSH
 )
 
 // Only finite local phases become public prose. The original error remains
@@ -40,6 +41,8 @@ func (e commandPreparationFailure) Error() string {
 		return "Paperboat could not resolve this machine's hostname. Check the operating-system hostname; for setup, pass --name."
 	case prepareInboxPreservation:
 		return "Paperboat could not verify Inbox preservation. Check the machine registration with `pb doctor`, then retry `pb uninstall`."
+	case prepareOpenSSH:
+		return "A supported OpenSSH client is unavailable. Install OpenSSH or repair its PATH entry, then retry `pb ssh doctor`."
 	case prepareSelectedFile:
 		return "A selected file or folder is unavailable. Check that it exists and is readable, then select it again."
 	default:
