@@ -613,6 +613,42 @@ $parent"
   done
 }
 
+
+test_private_access() {
+  local kind source target id tag phase output parent command success status t0
+  for kind in access-machine private-address; do
+    skipped "$kind" && continue
+    for source in "${TLIST[@]}"; do
+      for target in "${TLIST[@]}"; do
+        id="$kind:$source-$target"
+        skipped "$id" && continue
+        t0=$(now); tag="$kind-$source-$target"; success=0
+        if ! stage_terminal_fixtures "$source" || ! stage_terminal_fixtures "$target"; then
+          record "$id" FAIL 0 "could not stage compressed private TCP fixture"
+          continue
+        fi
+        printf '%s\n' "python3 /tmp/$RUN_ID/private_access.py origin --target $target --check $kind && echo PRIVATE_ORIGIN_OK" | device_job "$target" "$tag"
+        phase=$(on "$target" "python3 /tmp/$RUN_ID/session_controller.py wait --job /tmp/$RUN_ID/$tag --expected-state private_access_required" 2>&1); status=$?
+        output="$phase"
+        if [ "$status" = 0 ]; then
+          command=$(python3 -c 'import shlex,sys;print(shlex.join(["python3",sys.argv[2],"probe","--phase",sys.argv[1],"--check",sys.argv[3]]))' "$phase" "/tmp/$RUN_ID/private_access.py" "$kind")
+          output=$(on "$source" "$command" 2>&1); status=$?
+          if [ "$status" = 0 ] && python3 -c 'import json,sys;r=json.loads(sys.argv[1]);assert r["status"]=="PASS" and r["check"]==sys.argv[2] and r["target"]==sys.argv[3] and r["exact_bytes"] and r["half_close"] and r["enrollment_unchanged"]' "$output" "$kind" "$target" 2>/dev/null; then success=1; fi
+          command=$(python3 "$HERE/session_controller.py" signal --phase "$phase" --success "$success" --expected-state private_access_required)
+          on "$target" "$command" >/dev/null 2>&1 || success=0
+        fi
+        parent=$(on "$target" "python3 /tmp/$RUN_ID/session_controller.py finish --job /tmp/$RUN_ID/$tag" 2>&1); status=$?
+        if [ "$success" = 1 ] && command_ok "$status" "$parent" && marker_present "$parent" PRIVATE_ORIGIN_OK; then
+          record "$id" PASS $(( $(now)-t0 )) "exact binary bytes; TCP half-close; origin and forward cleaned"
+        else
+          record_command_failure "$id" $(( $(now)-t0 )) "$output
+$parent"
+        fi
+      done
+    done
+  done
+}
+
 test_inbox_approval() {
   skipped inbox-approval && return
   local device id tag source_id phase output parent command success status t0
@@ -765,6 +801,7 @@ test_application_pairs ssh-doctor ssh_doctor_lifecycle.py
 test_application_pairs ssh-alias ssh_alias_lifecycle.py
 test_application_pairs inbox-manage inbox_manage.py
 test_inbox_approval
+test_private_access
 test_application_pairs transfer-manage transfer_manage.py
 test_application_pairs preview-manage preview_manage.py
 test_device_application team-lifecycle team_lifecycle.py
