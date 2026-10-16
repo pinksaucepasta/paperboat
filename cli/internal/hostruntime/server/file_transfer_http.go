@@ -113,7 +113,7 @@ func (h *FileTransferHandler) ServeHTTP(writer http.ResponseWriter, request *htt
 			select {
 			case <-authorization.RevokedSignal:
 				cancel()
-				_ = request.Body.Close()
+				interruptTransferBody(writer, request)
 			case <-ctx.Done():
 			}
 		}()
@@ -161,6 +161,13 @@ func (h *FileTransferHandler) ServeHTTP(writer http.ResponseWriter, request *htt
 	default:
 		writeHTTPError(writer, requestID, "not_found", http.StatusNotFound, false)
 	}
+}
+
+// Interrupt the transport read before closing net/http's body: Close itself
+// waits for a blocked Read and otherwise cannot release an active sender.
+func interruptTransferBody(writer http.ResponseWriter, request *http.Request) {
+	_ = http.NewResponseController(writer).SetReadDeadline(time.Now())
+	_ = request.Body.Close()
 }
 
 func (h *FileTransferHandler) authorize(writer http.ResponseWriter, request *http.Request, requestID string) (Authorization, func(), bool) {
@@ -423,7 +430,7 @@ func (h *FileTransferHandler) serveContent(writer http.ResponseWriter, request *
 		go func() {
 			select {
 			case <-h.config.Service.CancellationSignal(id):
-				_ = request.Body.Close()
+				interruptTransferBody(writer, request)
 			case <-request.Context().Done():
 			case <-stopClose:
 			}
