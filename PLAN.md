@@ -148,7 +148,7 @@ works on Windows-only failures until after launch.
   installer is after launch (1.1). Releases publish to this repo's GitHub Releases (1.5) with the
   workflow's own token; the user creates no tokens. `.pkg` + notarization come when there is an Apple Developer account.
 - **Server, relay and tunnel** are released as Docker images for **linux/amd64 and
-  linux/arm64** (`ghcr.io/pinksaucepasta/paperboat-server`, `…-relay`, `…-tunnel`).
+  linux/arm64** (`ghcr.io/pinksaucepasta/paperboat/server`, `…/relay`, `…/tunnel`).
 - **The server has no curl installer and is not installed by `pbh`.** We run it ourselves on the
   coolify VPS from its image with a compose file in `deploy/` (server, PostgreSQL 17, its
   edge/proxy), using config/env for every domain.
@@ -1360,7 +1360,7 @@ file | note`. Row-level evidence goes in CHECKLIST.md.
 2026-10-16 | Lane B fairness single-check controls pass; gate scheduling corrected | rows ticked:none; no product/test changes | Required same single check on accepted1eaafe8 PASS3.758s, terminal p95=18.960287ms/max28.669432ms; candidate0b3cda0 PASS2.888s, p95=13.088167ms/max17.531677ms, same100 samples and250ms/1s bounds. Logs /tmp/lane-b-fairness-{accepted,candidate}.log. This does not establish an introducing code regression. First full gate had own packages competing at nice19; rerunning full make gate at normal process priority with GOFLAGS-p1 and same GOMAXPROCS2 to serialize its package workloads. No assertion, timeout, payload, module or source policy changed. First gate other5 Go modules and console lint/build PASS, revised server-only smoke exemption behaves correctly. Production unchanged; replacement image ready. No full-suite diagnostic retry used: both focused controls completed before new qualification run.
 
 
-2026-10-16 | Lane B deployed batch; one Lane A smoke request | Rows ticked:S3-01/S3-03; server/relay/edge2026.10.16.4 from release3f7787c healthy, both public ingress proofs2/2, identity retained; actual PG owners and make gate PASS. Lane A: include this deployed batch in the next scheduled historical smoke; focused changed-feature checks between batches per Speed rules. B continues independently.
+2026-10-16 | Lane B deployed batch; one Lane A smoke request | Rows ticked:none this batch; server2026.10.16.5/f277003 healthy, relay/edge4 remain healthy, deployed public proofs2/2 (TestLiveGlobalNodeReadinessDeploymentProbe0.03s). Lane A: next scheduled historical smoke plus focused F7-01 foreground/background independent-browser checks against this exact preview DNS fix; no API fields changed. B continues independently.
 
 2026-10-16 | Lane B published F13/F15 API contract for Lane C | producer0b3cda0 deployed2026.10.16.2 | Usage page: existing GET /v1/usage gains optional actor_account_id scoped to authenticated workspace; fields unchanged, absent means aggregate, unknown historical team actors excluded from member totals with coverage.note, invalid filters400 invalid_usage_query, workspace403, storage500 usage_unavailable. Activity page: GET /v1/activity?workspace=personal|<team> with optional machine_id,area,q,cursor,limit; fields items[{id,occurred_at,action,actor:{kind,id},target:{kind,id,name?},machine?:{id,name}}],next_cursor?. Team administrative feed is current owner/admin only. Empty items is a valid empty state;400 invalid_activity_query,401 sign-in,403 workspace/role unavailable,500 activity_unavailable. Names/workspace captured at write, raw metadata never exposed, historical unscoped/internal audits omitted. OpenAPI documents both contracts. Claude: regenerate/use producer types, verify loading/empty/error/paging/member-selection states and record scripted browser evidence; no console source edited by B.
 
@@ -1430,7 +1430,7 @@ file | note`. Row-level evidence goes in CHECKLIST.md.
 
 2026-10-16 | Lane B F7-01 exact preview DNS | Rows ticked:none; DNS worker omitted previews while each carrier serves only one edge, so wildcard round-robin can select the other edge. Add preview owner/name and exact ready-node publication, fenced by identity, current epoch, origin readiness, ingress proof and distributed certificate. TestPublicPreviewIngressPostgres intended RED missing name/GREEN actual VPS PostgreSQL2.27s; TLS admission race1.396s PASS; gate/deploy pending.
 
-2026-10-16 | Lane B GHCR grant retry | Rows ticked:none; rerun38862264460 again fails both server/tunnel, now permission_denied:write_package (relay succeeds). Package owner must verify repository Actions Write access actually applies to both packages; current gh credential cannot change package permissions. Existing deployed release4 remains healthy.
+2026-10-16 | Lane B GHCR grant retry | Rows ticked:none; rerun38862264460 again fails both server/tunnel, now permission_denied:write_package (relay succeeds). Superseded by repository-owned image names in5f14c7f; new publication38870106441 is running, with no further old-package retries.
 
 2026-10-16 | Lane B F7 DNS renewal identity | Rows ticked:none; preview IDs/names are immutable, so use stable DNS resource identity and carrier placement instead of lease/attachment renewal counters. Same primary actual PG test RED renewal rewrites placement/GREEN2.09s includes worker/placement generation agreement. No deployment yet; full gate running.
 
@@ -1440,3 +1440,6 @@ file | note`. Row-level evidence goes in CHECKLIST.md.
 2026-10-16 | Lane A F6-03 repaired/F4-05 qualified | Rows ticked:F6-03/F4-05 and commands L/M; dev7a5b2e0 receipt074632 transfer management PASS29/36s, multi-file hashes PASS53/93s, readiness all4 PASS. New F4-03 Ctrl-C check reports unknown transport outcome; single focused rerun running, timeout already passes HP->Apple. Focused30-minute exec/1-hour SSH window runs in parallel without installing another build.
 
 2026-10-16 | Lane A rebased baseline receipt owner | Rows ticked:prior rows retained; rebase changed qualified build commit IDs, so later batches lost published baseline evidence. Accept only exact runtime trees found in published common history; candidate still requires fresh exact-tree checks and later failures still override PASS. Real-git rebase case RED/GREEN, all6 evaluator tests PASS; actual61 historical checks retained.
+
+
+2026-10-16 | Lane B F7 deployment qualified | Rows ticked:none;663ae4d/4b0d0df/f277003 pushed after full gate PASS (/tmp/lane-b-preview-rebased-gate.log). Server5 public health/schema071/config preservation PASS; actual PG preview1.95s, durable1.32s, runtime0.96s and final race1.812/1.283s PASS. Live DNS queue3 instead of93; F7-01 remains A browser proof, not claimed done.
