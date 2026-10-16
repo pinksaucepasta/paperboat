@@ -55,8 +55,17 @@ func TestTunnelRouteSelectorsResolveNamesToCanonicalIDs(t *testing.T) {
 				if r.Header.Get("If-Match") != route.ETag {
 					t.Fatalf("if-match=%q", r.Header.Get("If-Match"))
 				}
+				var patch map[string]any
+				if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
+					t.Fatal(err)
+				}
+				if len(patch) != 2 || patch["name"] != "renamed" || patch["path_prefix"] != "/renamed" {
+					t.Fatalf("route patch did not preserve requested fields: %#v", patch)
+				}
 				updated := route
-				updated.Name = "renamed"
+				updated.Name = patch["name"].(string)
+				path := patch["path_prefix"].(string)
+				updated.PathPrefix = &path
 				updated.Generation = 2
 				updated.ETag = `"route:route_1:2"`
 				_ = json.NewEncoder(w).Encode(map[string]any{"data": api.TunnelRouteMutation{Route: updated, Operation: validCommandOperation("route", route.ID), Changed: true}})
@@ -64,8 +73,8 @@ func TestTunnelRouteSelectorsResolveNamesToCanonicalIDs(t *testing.T) {
 				t.Fatalf("request=%s %s", r.Method, r.URL.Path)
 			}
 		})
-		command := tunnelCobraCommandV1()
-		command.SetArgs([]string{"route", "update", "tun_1", "default", "--name", "renamed"})
+		command := newRootCommand()
+		command.SetArgs([]string{"tunnel", "route", "update", "tun_1", "default", "--name", "renamed", "--path", "/renamed"})
 		if err := command.Execute(); err != nil {
 			t.Fatal(err)
 		}

@@ -310,7 +310,7 @@ that use them; say which in Evidence.
 
 | ID | Scenario | L | M | W | Evidence |
 |---|---|---|---|---|---|
-| F8-01 | Create a tunnel, add/update/remove routes, rename it, delete it — on L, M, W. | [ ] | [ ] | [ ] | —  Server canonical API PG PASS0.09s, expiry-reset0.47s, immutable lost-create reply0.25s and workspace ownership3.26s. Actual CLI route/lifecycle/device checks remain Lane A. BrowserViewerPolicyPostgres fixture RED23514/GREEN actual VPS PostgreSQL0.71s; BrowserAccessPostgres0.42s PASS, preserving owner/team/email/domain authorization and revocation controls. |
+| F8-01 | Create a tunnel, add/update/remove routes, rename it, delete it — on L, M, W. | [!] | [!] | [ ] | HP actual tunnel create/show/list/route-add PASS, route update twice keeps ID but does not publish requested name; receipt20261016T131744Z/536d7fd, exact tunnels cleaned. CLI full-root HTTP owner TestTunnelRouteSelectorsResolveNamesToCanonicalIDs/route_update verifies name+path PATCH/current ETag PASS0.086s. Lane B canonical route mutation producer request in PLAN Log; Apple create preflight diagnosis separate. |
 | F8-02 | Custom domain add → DNS instructions → verify → serves with TLS → remove. | [ ] | [ ] | [ ] | —  TestTunnelDomainDNSStateMachineOnPostgres unchanged PASS2.11s on dedicated fresh coolify test DB, preserving precise DNS transition/grace/recovery/drift assertions; edge-only certificate targets PASS0.10s. Real custom-domain/TLS device proof pending. |
 | F8-03 | Tunnel survives daemon restart, machine reboot and update; pause/resume; stop. | [ ] | [ ] | [ ] | — |
 | F8-04 | Connectors add/list/drain/revoke and credential rotation without downtime. | [ ] | [ ] | [ ] | — |
