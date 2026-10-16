@@ -51,9 +51,18 @@ def main():
         configured = change('domain', 'set', configured['domain'])
         assert configured['domain'] == discovered
     finally:
-        change('domain', 'set', original['domain'])
-        change('alias', 'unset', name, 'app')
-        change('proxy', 'unset', name)
+        primary = sys.exc_info()[1]
+        cleanup_errors = []
+        for arguments in [('domain', 'set', original['domain']),
+                          ('alias', 'unset', name, 'app'), ('proxy', 'unset', name)]:
+            try:
+                change(*arguments)
+            except Exception as error:
+                cleanup_errors.append(error)
+        if cleanup_errors:
+            if primary is None:
+                raise cleanup_errors[0]
+            print('Local settings cleanup also failed; inspect the protected command receipts.', file=sys.stderr)
     final = invoke(binary, 'config', 'local-access', 'show', '--json')['local_access']
     assert final['domain'] == original['domain']
     assert final.get('service_aliases') == original.get('service_aliases')
