@@ -13,7 +13,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"github.com/google/uuid"
 	"io"
@@ -5136,8 +5135,10 @@ func specTree(source *command.Spec, use string) *cobra.Command {
 func specCommandArgs(parent, name string) cobra.PositionalArgs {
 	if parent == "inbox" {
 		switch name {
-		case "set":
+		case "set", "approve", "decline":
 			return cobra.ExactArgs(1)
+		case "policy":
+			return cobra.MaximumNArgs(1)
 		case "path", "reset":
 			return cobra.NoArgs
 		}
@@ -5334,38 +5335,6 @@ func actionRun(action command.Action) func(*cobra.Command, []string) error {
 		c.Context = context.WithValue(c.Context, confirmationCommandKey{}, command)
 		return action(c)
 	}
-}
-
-func actionContext(cobraCommand *cobra.Command, args []string) *command.Context {
-	set := flag.NewFlagSet("pb", flag.ContinueOnError)
-	values := map[string]string{}
-	for _, name := range []string{"config", "server", "workspace", "name", "machine", "session", "status-bar", "status-bar-fullscreen", "status-bar-theme", "mode", "pull-repository", "push-repository", "path", "transport", "code", "input", "output", "keep", "recovery-key", "token-file"} {
-		value, _ := cobraCommand.Flags().GetString(name)
-		values[name] = value
-		set.String(name, value, "")
-	}
-	hours, _ := cobraCommand.Flags().GetFloat64("hours")
-	set.Float64("hours", hours, "")
-	for _, name := range []string{"json", "no-browser", "reauth", "change-account", "wide", "automatic-updates", "clear", "all", "indefinite", "public", "detach", "select-environment", "debug"} {
-		value, _ := cobraCommand.Flags().GetBool(name)
-		values[name] = strconv.FormatBool(value)
-		set.Bool(name, value, "")
-	}
-	port, _ := cobraCommand.Flags().GetUint("port")
-	set.Uint("port", port, "")
-	listenPort, _ := cobraCommand.Flags().GetUint("listen-port")
-	set.Uint("listen-port", listenPort, "")
-	generation, _ := cobraCommand.Flags().GetUint("generation")
-	set.Uint("generation", generation, "")
-	duration, _ := cobraCommand.Flags().GetDuration("duration")
-	set.Duration("duration", duration, "")
-	set.Bool("duration-set", cobraCommand.Flags().Changed("duration"), "")
-	_ = set.Parse(args)
-	context := command.NewContext(set)
-	context.Context = cobraCommand.Context()
-	context.Writer = cobraCommand.OutOrStdout()
-	context.ErrWriter = cobraCommand.ErrOrStderr()
-	return context
 }
 
 func containsString(values []string, wanted string) bool {
