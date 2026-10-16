@@ -623,3 +623,4 @@ that use them; say which in Evidence.
 | S3-04 | Full smoke suite (every feature F1–F15) green on the release build on L, M, W. | [ ] | — | — |  |
 | S3-05 | User and operator docs (`cli/docs`, `server/docs`, READMEs) match behaviour (each feature's docs fixed when the feature is verified). | [ ] | — | — |  |
 | S3-06 | Operator admin frontend: **USER DECIDES**. | [!] | — | — | USER DECIDES: operator admin frontend decision pending (PLAN 1.6); Claude owns frontend. |
+| S3-07 | No Codex/OpenCode integration remains anywhere: the "codex" stream consumer and codex_manage/codex_connect credential classes are removed from cli, server, shared and console (types regenerated), with their tests. `grep -rniE "codex|opencode"` over code finds nothing but lane names. | [ ] | — | — | User decision 2026-10-16: dropped permanently. |
