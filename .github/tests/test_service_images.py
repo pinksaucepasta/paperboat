@@ -17,6 +17,8 @@ class ServiceImageContractTest(unittest.TestCase):
         self.assertEqual({row["service"]: row.get("sentry_variable") for row in matrix}, expected)
         build = next(step for step in job["steps"]
                      if step.get("uses", "").startswith("docker/build-push-action@"))
+        self.assertEqual(build["with"]["tags"],
+                         "ghcr.io/${{ github.repository }}/${{ matrix.service }}:${{ inputs.release_tag }}")
         arguments = dict(line.split("=", 1) for line in build["with"]["build-args"].splitlines())
         self.assertEqual(arguments["PAPERBOAT_SENTRY_DSN"], "${{ vars[matrix.sentry_variable] }}")
         self.assertEqual(arguments["PAPERBOAT_VERSION"], "${{ inputs.release_tag }}")

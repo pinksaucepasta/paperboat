@@ -1,7 +1,7 @@
 # Service container releases
 
 `paperboat-server` is released only as the Linux amd64/arm64 image
-`ghcr.io/pinksaucepasta/paperboat-server`. Its GHCR visibility and access controls
+`ghcr.io/pinksaucepasta/paperboat/server`. Its GHCR visibility and access controls
 must remain private. Relay and tunnel image publication does not authorize any
 change to the server package visibility.
 
@@ -15,7 +15,7 @@ multi-architecture manifest digest.
 Pin production and rollback configuration to the reported digest:
 
 ```text
-ghcr.io/pinksaucepasta/paperboat-server@sha256:<manifest-digest>
+ghcr.io/pinksaucepasta/paperboat/server@sha256:<manifest-digest>
 ```
 
 When Sentry release association is configured in GitHub, the publish workflow
