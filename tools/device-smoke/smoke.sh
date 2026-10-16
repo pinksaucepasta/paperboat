@@ -30,9 +30,12 @@
 # Credentials: HP uses key SSH. APPLE_PASS and VICTUS_PASS must be exported by
 # the caller (values are in REMOTE_TESTING.md). They are never printed.
 
+if [ "${PAPERBOAT_SMOKE_SNAPSHOT:-}" != 1 ]; then
+  exec python3 "$(dirname "$0")/snapshot_run.py" "$0" "$@"
+fi
 set -uo pipefail
 
-HERE=$(cd "$(dirname "$0")" && pwd)
+HERE=$PAPERBOAT_SMOKE_SOURCE_DIR
 RESULTS_DIR="$HERE/results"
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 RUN_ID="smoke$(date -u +%H%M%S)$RANDOM"
@@ -412,8 +415,7 @@ TERMINAL_FIXTURES_READY=","
 stage_terminal_fixtures() {
   local source=$1
   [[ "$TERMINAL_FIXTURES_READY" != *",$source,"* ]] || return 0
-  if ! python3 "$HERE/stage_fixtures.py" "$HERE" | \
-      on "$source" "umask 077; mkdir -p /tmp/$RUN_ID; tar -xzf - -C /tmp/$RUN_ID"; then
+  if ! on "$source" "umask 077; mkdir -p /tmp/$RUN_ID; tar -xzf - -C /tmp/$RUN_ID" < "$PAPERBOAT_SMOKE_FIXTURES"; then
     return 1
   fi
   TERMINAL_FIXTURES_READY+="$source,"
