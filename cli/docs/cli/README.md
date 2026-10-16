@@ -229,6 +229,7 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb tunnel policy allow](pb_tunnel_policy_allow.md) | Allow on-demand access to an exact machine port |
 | [pb tunnel policy get](pb_tunnel_policy_get.md) | Show an on-demand port policy |
 | [pb tunnel policy revoke](pb_tunnel_policy_revoke.md) | Revoke an on-demand port policy |
+| [pb tunnel rename](pb_tunnel_rename.md) | Rename a durable tunnel |
 | [pb tunnel replay](pb_tunnel_replay.md) | Deliberately replay one retained HTTP request to the same origin |
 | [pb tunnel resume](pb_tunnel_resume.md) | Resume new traffic for a preserved tunnel |
 | [pb tunnel route](pb_tunnel_route.md) | Manage tunnel routes |

@@ -612,26 +612,31 @@ $parent"
   done
 }
 
-test_team_lifecycle() {
-  local group=${1:-team-lifecycle} flags=
+test_device_application() {
+  local group=$1 script=$2 flags=${3:-}
   skipped "$group" && return
-  [ "$group" != team-roles ] || flags=--roles
   local device id out status t0
   for device in "${TLIST[@]}"; do
     id="$group:$device"
     skipped "$id" && continue
     t0=$(now)
     if ! stage_terminal_fixtures "$device"; then
-      record "$id" FAIL 0 "could not stage the team fixture"
+      record "$id" FAIL 0 "could not stage the device fixture"
       continue
     fi
-    out=$(on "$device" "python3 /tmp/$RUN_ID/team_lifecycle.py $flags" 2>&1); status=$?
+    out=$(on "$device" "python3 /tmp/$RUN_ID/$script $flags" 2>&1); status=$?
     if [ "$status" = 0 ] && python3 -c '
 import json,sys
 r=json.loads(sys.argv[1])
 assert r["check"]==sys.argv[2] and r["status"]=="PASS"
-assert all(r[k] for k in ("create_get_list_delete", "invite_accept_decline_cancel", "independent_verified_recipient", "enrollment_preserved"))
-assert sys.argv[2]!="team-roles" or r["roles_remove_leave_transfer"]
+assert r["enrollment_preserved"]
+if sys.argv[2] in ("team-lifecycle", "team-roles"):
+ assert all(r[k] for k in ("create_get_list_delete", "invite_accept_decline_cancel", "independent_verified_recipient"))
+ assert sys.argv[2]!="team-roles" or r["roles_remove_leave_transfer"]
+elif sys.argv[2]=="tunnel-manage":
+ assert all(r[k] for k in ("create_show_list_delete", "route_add_update_remove", "rename"))
+else:
+ raise AssertionError("unknown device application")
 ' "$out" "$group" 2>/dev/null; then
       record "$id" PASS $(( $(now)-t0 ))
     else
@@ -721,8 +726,9 @@ test_application_pairs ssh-alias ssh_alias_lifecycle.py
 test_application_pairs inbox-manage inbox_manage.py
 test_application_pairs transfer-manage transfer_manage.py
 test_application_pairs preview-manage preview_manage.py
-test_team_lifecycle
-test_team_lifecycle team-roles
+test_device_application team-lifecycle team_lifecycle.py
+test_device_application team-roles team_lifecycle.py --roles
+test_device_application tunnel-manage tunnel_manage.py
 test_preview_protocols
 for t in "${TLIST[@]}"; do
   skipped ssh-long || collect "ssh-long:$t" "long-ssh-$t" SSHFINAL "$LONG_SSH"

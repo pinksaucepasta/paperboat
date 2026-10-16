@@ -51,6 +51,7 @@ pb tunnel [--ephemeral] [<port|url|path>] [flags]
 * [pb tunnel logs](pb_tunnel_logs.md)	 - Show tunnel logs
 * [pb tunnel pause](pb_tunnel_pause.md)	 - Pause new traffic while preserving tunnel identity and configuration
 * [pb tunnel policy](pb_tunnel_policy.md)	 - Manage permission to activate a private port on demand
+* [pb tunnel rename](pb_tunnel_rename.md)	 - Rename a durable tunnel
 * [pb tunnel replay](pb_tunnel_replay.md)	 - Deliberately replay one retained HTTP request to the same origin
 * [pb tunnel resume](pb_tunnel_resume.md)	 - Resume new traffic for a preserved tunnel
 * [pb tunnel route](pb_tunnel_route.md)	 - Manage tunnel routes
