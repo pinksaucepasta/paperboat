@@ -121,6 +121,22 @@ Contracts between lanes (server API, discovery response) are changed by the lane
 the producer first, committed and pushed, then consumers update. A feature becomes `[x]`
 only when all its rows across lanes are done; Lane A runs its device verification last.
 
+## Speed rules (user decision 2026-10-16, override anything slower above)
+
+Goal: every main-path row on L and M `[x]` by 2026-10-19.
+- **Batch, then smoke once.** Commit fixes as they are ready, but run the full device smoke at
+  most twice a day on a build of the batch. Between full runs, verify a fix with only the
+  checks it touches. A full-run regression is bisected inside the batch.
+- **Tick from passing checks.** When a smoke check that covers a row's main path passes on L and
+  M, tick it in the same commit. Missing pieces of a row become new checks, written now, not
+  research.
+- **Time-box everything.** Investigation of one failure: 30 minutes. A one-off failure gets one
+  rerun; caused by the network, a device or a deploy restart, it is noted in one line and
+  ignored. Otherwise `[!]` and next row.
+- **Short Log lines.** Max 3 lines per PLAN.md Log entry: rows ticked, commits, blocker. No
+  narratives.
+- **No isolated worktrees for finished work.** Rebase onto `main` and push the same hour.
+
 ## Code quality
 
 - Simple and small beats clever and defensive. Prefer deleting code to adding it. Remove
