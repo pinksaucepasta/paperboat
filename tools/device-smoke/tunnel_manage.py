@@ -50,7 +50,8 @@ def main():
                          '--to', 'http://127.0.0.1:' + str(server.server_port))['route']
             updated = call('route', 'update', identifier, added['id'],
                            '--name', 'smoke-edited', '--path', '/smoke-edited')['route']
-            assert updated['id'] == added['id'] and updated['name'] == 'smoke-edited'
+            assert updated['id'] == added['id'], 'route update changed its resource identity'
+            assert updated['name'] == 'smoke-edited', 'route update did not publish the requested name'
             assert updated['path_prefix'] == '/smoke-edited'
             confirmed_command(binary, 'tunnel', 'route', 'remove', identifier, added['id'])
             assert not any(r['id'] == added['id'] for r in call('route', 'list', identifier)['items'])
