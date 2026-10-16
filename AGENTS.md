@@ -137,9 +137,11 @@ Goal: every main-path row on L and M `[x]`, as fast as possible.
 - **Short Log lines.** Max 3 lines per PLAN.md Log entry: rows ticked, commits, blocker. No
   narratives.
 - **No isolated worktrees for finished work.** Rebase onto `main` and push the same hour.
-- **Next rows.** Lane A: F4-01, F5-01, F6-01, F7-01, then the other F4–F7 main paths. Lane B, rows
-  it can tick alone first: S1-01, S1-05, S3-01 (the Apple-certificate blocker is stale: PLAN 1.4b
-  is ad-hoc signing, no cert), S3-03, F13-01 server side; then server parts of F4–F7.
+- **Next rows.** Lane A: F4–F7 remaining main paths, then F8–F12 main paths; S1-01 CLI domain
+  literals when touching those files. Lane B, when every server main path waits on A/C: start
+  pass-2 server work instead of idling — server and edge deploys must not cut live sessions
+  (no 502s during rollout), then S3-07 server/shared part (remove codex consumer and credential
+  classes together with Lane A's consumers, logged as one request), then server edge-case rows.
 
 ## Code quality
 
