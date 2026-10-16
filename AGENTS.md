@@ -123,7 +123,7 @@ only when all its rows across lanes are done; Lane A runs its device verificatio
 
 ## Speed rules (user decision 2026-10-16, override anything slower above)
 
-Goal: every main-path row on L and M `[x]` by 2026-10-19.
+Goal: every main-path row on L and M `[x]`, as fast as possible.
 - **Batch, then smoke once.** Commit fixes as they are ready, but run the full device smoke at
   most twice a day on a build of the batch. Between full runs, verify a fix with only the
   checks it touches. A full-run regression is bisected inside the batch.
