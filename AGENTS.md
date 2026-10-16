@@ -142,6 +142,10 @@ Goal: every main-path row on L and M `[x]`, as fast as possible.
   pass-2 server work instead of idling — server and edge deploys must not cut live sessions
   (no 502s during rollout), then S3-07 server/shared part (remove codex consumer and credential
   classes together with Lane A's consumers, logged as one request), then server edge-case rows.
+- **Deploy when ready.** Lane B deploys a staged server/edge build as soon as its gate passes
+  (rollouts no longer cut sessions); no waiting for a shared window. Rows that need a paid team
+  before Stripe keys exist: Lane B grants the paid entitlement to the test team directly as test
+  data and logs it in one line.
 
 ## Code quality
 
