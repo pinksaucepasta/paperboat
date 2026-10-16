@@ -66,22 +66,6 @@ type Dispatcher struct {
 	ssh                   sshStreamRegistry
 }
 
-type terminalOutputStream struct {
-	manager            session.Service
-	sessionID          string
-	attachmentID       string
-	expectedGeneration uint64
-	writers            *filetransfer.WriterRegistry
-	checkpoint         []byte
-	checkpointSequence uint64
-	checkpointOffset   int
-	checkpointSent     bool
-	broadcast          *browserbroadcastserver.Registry
-	keyUpdates         <-chan browserbroadcastserver.Epoch
-}
-
-const terminalExitObservationInterval = 100 * time.Millisecond
-
 func NewDispatcher(config DispatcherConfig) (*Dispatcher, error) {
 	if config.Sessions == nil || config.Health == nil || config.SessionLauncher == nil || !filepath.IsAbs(config.WorkspaceRoot) || config.Random == nil {
 		return nil, ErrInvalidConfiguration
@@ -276,105 +260,6 @@ func (d *Dispatcher) HandleControl(_ context.Context, authorization Authorizatio
 		return failure("invalid_request")
 	}
 	return domainResult(struct{}{}, err)
-}
-
-func (d *Dispatcher) OpenStream(ctx context.Context, authorization Authorization, capability string, payload json.RawMessage, outcome operation.Outcome, replay bool) (OutputStream, bool, error) {
-	if capability == "config.compare.v1" && outcome.ErrorCode == "" {
-		return d.openConfigComparison(ctx, authorization, payload, outcome)
-	}
-	if capability == "ssh.v1" {
-		return d.openSSHStream(ctx, authorization, payload, outcome)
-	}
-	if capability == "exec.v1" && outcome.ErrorCode == "" {
-		var request execRequest
-		if decodeStrict(payload, &request) != nil || request.OperationID == "" || request.Action != "start" && request.Action != "attach" {
-			return nil, false, nil
-		}
-		execution, err := d.config.Exec.Get(request.OperationID)
-		if err != nil {
-			return nil, false, err
-		}
-		from := request.FromSequence
-		if from == 0 {
-			from = 1
-		}
-		reader, err := execution.OpenReader(from)
-		if err != nil {
-			return nil, false, err
-		}
-		return &execOutputStream{execution: execution, reader: reader}, true, nil
-	}
-	if capability != "terminal.v1" || outcome.ErrorCode != "" {
-		return nil, false, nil
-	}
-	var request terminalRequest
-	if decodeStrict(payload, &request) != nil || request.Action != "attach" && request.Action != "replay" {
-		return nil, false, nil
-	}
-	var response struct {
-		AttachmentID  string `json:"attachment_id"`
-		InputSequence uint64 `json:"input_sequence"`
-	}
-	if json.Unmarshal(outcome.Result, &response) != nil || response.AttachmentID == "" {
-		return nil, false, ErrInvalidConfiguration
-	}
-	if authorization.BrowserTerminal && response.AttachmentID != authorization.BrowserAttachmentID {
-		return nil, false, ErrInvalidConfiguration
-	}
-	if replay {
-		var err error
-		if isGenerationBoundTerminal(authorization) {
-			participant := session.Participant{AttachmentID: response.AttachmentID, AccountID: authorization.AccountID, ClientID: authorization.ClientID, Role: string(authorization.TerminalRole), ConnectedAt: d.config.Now(), Browser: authorization.BrowserTerminal}
-			if request.AtLiveBoundary && authorization.BrowserTerminal {
-				_, err = d.config.Sessions.AttachLiveParticipantAtGeneration(request.SessionID, participant, authorization.TerminalGeneration)
-			} else {
-				_, err = d.config.Sessions.AttachParticipantAtGeneration(request.SessionID, participant, request.FromSequence, authorization.TerminalGeneration)
-			}
-		} else if request.AtLiveBoundary {
-			_, err = d.config.Sessions.AttachLive(request.SessionID, response.AttachmentID)
-		} else {
-			_, err = d.config.Sessions.Attach(request.SessionID, response.AttachmentID, request.FromSequence)
-		}
-		if err != nil {
-			return nil, false, err
-		}
-	}
-	expectedGeneration := uint64(0)
-	if isGenerationBoundTerminal(authorization) {
-		expectedGeneration = authorization.TerminalGeneration
-	}
-	stream := &terminalOutputStream{manager: d.config.Sessions, sessionID: request.SessionID, attachmentID: response.AttachmentID, expectedGeneration: expectedGeneration, writers: d.config.Writers, checkpointSent: true}
-	if authorization.BrowserTerminal {
-		// The request has already attached this participant. If checkpoint or
-		// publisher setup fails, there will be no OutputStream to detach it.
-		browserReady := false
-		defer func() {
-			if !browserReady {
-				_ = d.config.Sessions.DetachParticipantAtGeneration(request.SessionID, response.AttachmentID, authorization.AccountID, authorization.ClientID, expectedGeneration)
-			}
-		}()
-		checkpoint, boundary, err := d.config.Sessions.BrowserScreenAttachment(request.SessionID, response.AttachmentID, authorization.AccountID, authorization.ClientID, expectedGeneration)
-		if err != nil {
-			return nil, false, err
-		}
-		stream.checkpoint = checkpoint
-		stream.checkpointSequence = boundary
-		stream.checkpointSent = false
-		if d.config.BrowserOutput == nil {
-			return nil, false, ErrCapabilityUnavailable
-		}
-		updates, err := d.config.BrowserOutput.Join(ctx, request.SessionID, expectedGeneration, response.AttachmentID)
-		if err != nil {
-			return nil, false, err
-		}
-		stream.broadcast = d.config.BrowserOutput
-		stream.keyUpdates = updates
-		browserReady = true
-	}
-	if d.config.Writers != nil {
-		d.config.Writers.Attach(request.SessionID, response.AttachmentID, authorization.ClientID, authorization.SourceMachineID)
-	}
-	return stream, true, nil
 }
 
 type execRequest struct {
@@ -684,32 +569,6 @@ type terminalRequest struct {
 	ExistingSnapshot bool `json:"existing_snapshot,omitempty"`
 }
 
-type terminalAttachResponse struct {
-	StreamID        uint32 `json:"stream_id,omitempty"`
-	AttachmentID    string `json:"attachment_id"`
-	InputSequence   uint64 `json:"input_sequence,omitempty"`
-	FirstAttachment bool   `json:"first_attachment,omitempty"`
-	Session         struct {
-		Snapshot session.Snapshot `json:"snapshot"`
-		Replay   struct {
-			FromSequence     uint64 `json:"from_sequence"`
-			ToSequence       uint64 `json:"to_sequence"`
-			EarliestSequence uint64 `json:"earliest_sequence"`
-			LatestSequence   uint64 `json:"latest_sequence"`
-		} `json:"replay"`
-	} `json:"session"`
-}
-
-func newTerminalAttachResponse(attachmentID string, attached session.AttachResult) terminalAttachResponse {
-	response := terminalAttachResponse{AttachmentID: attachmentID, FirstAttachment: attached.FirstAttachment}
-	response.Session.Snapshot = attached.Snapshot
-	response.Session.Replay.FromSequence = attached.Replay.FromSequence
-	response.Session.Replay.ToSequence = attached.Replay.ToSequence
-	response.Session.Replay.EarliestSequence = attached.Replay.EarliestSequence
-	response.Session.Replay.LatestSequence = attached.Replay.LatestSequence
-	return response
-}
-
 func (d *Dispatcher) terminal(ctx context.Context, authorization Authorization, payload json.RawMessage) operation.Outcome {
 	var request terminalRequest
 	if decodeStrict(payload, &request) != nil {
@@ -835,18 +694,7 @@ func (d *Dispatcher) terminal(ctx context.Context, authorization Authorization, 
 		if attachmentID == "" {
 			return failure("unavailable")
 		}
-		var value session.AttachResult
-		var err error
-		participant := session.Participant{AttachmentID: attachmentID, AccountID: authorization.AccountID, ClientID: authorization.ClientID, Role: string(authorization.TerminalRole), ConnectedAt: d.config.Now(), Browser: authorization.BrowserTerminal}
-		if participantBound && request.AtLiveBoundary && authorization.BrowserTerminal {
-			value, err = d.config.Sessions.AttachLiveParticipantAtGeneration(request.SessionID, participant, authorization.TerminalGeneration)
-		} else if participantBound {
-			value, err = d.config.Sessions.AttachParticipantAtGeneration(request.SessionID, participant, request.FromSequence, authorization.TerminalGeneration)
-		} else if request.Action == "attach" && request.AtLiveBoundary {
-			value, err = d.config.Sessions.AttachLiveParticipant(request.SessionID, session.Participant{AttachmentID: attachmentID, AccountID: authorization.AccountID, ClientID: authorization.ClientID, Role: string(TerminalRoleOwner), ConnectedAt: d.config.Now()})
-		} else {
-			value, err = d.config.Sessions.AttachParticipant(request.SessionID, session.Participant{AttachmentID: attachmentID, AccountID: authorization.AccountID, ClientID: authorization.ClientID, Role: string(TerminalRoleOwner), ConnectedAt: d.config.Now()}, request.FromSequence)
-		}
+		value, err := d.attachTerminalParticipant(authorization, request, attachmentID)
 		if err != nil {
 			errorreport.Current().ObserveFailure(ctx, "paperboat-daemon", "sessions", "attach", "terminal_session_failed", err)
 			return domainResult(nil, err)

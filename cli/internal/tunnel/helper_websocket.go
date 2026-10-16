@@ -159,14 +159,17 @@ type helperTerminalConn struct {
 	target         *resolver.TerminalTarget
 	runtimeVersion string
 
-	readMu        sync.Mutex
-	current       *helperOutput
-	out           chan helperOutput
-	done          chan struct{}
-	inputWrites   chan helperWrite
-	controlWrites chan helperWrite
-	detachWrites  chan helperWrite
-	ackWrites     chan helperWrite
+	checkpointActive   bool
+	checkpointSequence uint64
+	checkpointBytes    int
+	readMu             sync.Mutex
+	current            *helperOutput
+	out                chan helperOutput
+	done               chan struct{}
+	inputWrites        chan helperWrite
+	controlWrites      chan helperWrite
+	detachWrites       chan helperWrite
+	ackWrites          chan helperWrite
 
 	pendingMu sync.Mutex
 	responses map[string]chan helperFrame
@@ -314,9 +317,6 @@ func (c *helperTerminalConn) initialize(ctx context.Context) error {
 		// application redraw. Reconnects carry a committed sequence and replay all
 		// retained output after that cursor.
 		fromSequence = snapshotLatest
-		if c.target.SequenceSink != nil {
-			c.target.SequenceSink(int(snapshotLatest))
-		}
 	}
 	attach := func(sequence uint64, liveBoundary bool) (helperFrame, error) {
 		payload, _ := json.Marshal(map[string]any{"action": "attach", "session_id": c.target.SessionID, "attachment_id": c.target.InputAttachmentID, "from_sequence": sequence, "at_live_boundary": liveBoundary})
@@ -367,7 +367,7 @@ func (c *helperTerminalConn) finishAttachment(frame helperFrame, existingSession
 	}
 	if existingSession && c.target.AfterSequence <= 0 {
 		if modes := helperResponseTerminalModes(frame); modes != "" {
-			c.initial = append([]helperOutput{{data: []byte(modes), endSequence: snapshotLatest}}, c.initial...)
+			c.initial = append([]helperOutput{{data: []byte(modes)}}, c.initial...)
 		}
 	}
 	c.attachmentID = response.Result.AttachmentID
@@ -490,43 +490,6 @@ func helperResponseRuntimeVersion(frame helperFrame) string {
 		return ""
 	}
 	return strings.TrimSpace(response.Result.Version)
-}
-
-func helperResponseTerminalModes(frame helperFrame) string {
-	var response struct {
-		Result struct {
-			Session struct {
-				Snapshot struct {
-					TerminalModes struct {
-						AlternateScreen bool `json:"alternate_screen"`
-						MouseClick      bool `json:"mouse_click"`
-						MouseDrag       bool `json:"mouse_drag"`
-						MouseMotion     bool `json:"mouse_motion"`
-						MouseURXVT      bool `json:"mouse_urxvt"`
-						MouseSGR        bool `json:"mouse_sgr"`
-						FocusEvents     bool `json:"focus_events"`
-						BracketedPaste  bool `json:"bracketed_paste"`
-					} `json:"terminal_modes"`
-				} `json:"snapshot"`
-			} `json:"session"`
-		} `json:"result"`
-	}
-	if json.Unmarshal(frame.Payload, &response) != nil {
-		return ""
-	}
-	m := response.Result.Session.Snapshot.TerminalModes
-	var out strings.Builder
-	for _, item := range []struct {
-		on bool
-		id string
-	}{{m.AlternateScreen, "1049"}, {m.MouseClick, "1000"}, {m.MouseDrag, "1002"}, {m.MouseMotion, "1003"}, {m.MouseURXVT, "1015"}, {m.MouseSGR, "1006"}, {m.BracketedPaste, "2004"}, {m.FocusEvents, "1004"}} {
-		if item.on {
-			out.WriteString("\x1b[?")
-			out.WriteString(item.id)
-			out.WriteByte('h')
-		}
-	}
-	return out.String()
 }
 
 func (c *helperTerminalConn) writeFrame(frame helperFrame) error {
@@ -747,7 +710,9 @@ func (c *helperTerminalConn) Read(p []byte) (int, error) {
 	if len(c.current.data) == 0 {
 		sequence := c.current.endSequence
 		c.current = nil
-		c.queueAck(sequence)
+		if sequence > 0 {
+			c.queueAck(sequence)
+		}
 	}
 	return n, nil
 }
@@ -940,32 +905,6 @@ func decodeHelperFrame(data []byte) (helperFrame, error) {
 		return helperFrame{}, errors.New("helper structured frame is invalid")
 	}
 	return frame, nil
-}
-
-func (c *helperTerminalConn) decodeHelperBinary(data []byte) (helperOutput, error) {
-	started := time.Now()
-	frame, err := protocol.DecodeTerminalOutput(data)
-	c.compressionDecodeNanos.Add(uint64(time.Since(started).Nanoseconds()))
-	if err != nil || frame.StreamID != c.streamID {
-		c.compressionDecodeFailures.Add(1)
-		return helperOutput{}, errors.New("helper binary frame is invalid")
-	}
-	c.compressionDecodedBytes.Add(uint64(len(frame.Data)))
-	c.compressionEncodedBytes.Add(uint64(len(data) - protocol.TerminalOutputHeaderBytes))
-	if frame.Encoding == protocol.TerminalOutputZstd {
-		c.compressionZstdFrames.Add(1)
-	} else {
-		c.compressionRawFrames.Add(1)
-	}
-	return helperOutput{data: frame.Data, endSequence: frame.StartSequence + uint64(len(frame.Data))}, nil
-}
-
-func (c *helperTerminalConn) TerminalCompressionTelemetry() TerminalCompressionTelemetry {
-	return TerminalCompressionTelemetry{
-		RawFrames: c.compressionRawFrames.Load(), ZstdFrames: c.compressionZstdFrames.Load(),
-		DecodedBytes: c.compressionDecodedBytes.Load(), EncodedBytes: c.compressionEncodedBytes.Load(),
-		DecodeNanos: c.compressionDecodeNanos.Load(), DecodeFailures: c.compressionDecodeFailures.Load(),
-	}
 }
 
 func decodeHelperError(frame helperFrame) error {
