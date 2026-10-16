@@ -204,6 +204,13 @@ func (a *CredentialAuthorizer) CloseAuthorization() {
 }
 
 func stableClaimsBinding(claims auth.Claims) (string, error) {
+	// Native operation grants use AssignmentID for the renewable access-session
+	// instance, not the durable resource. Normalize only this binding copy; the
+	// original claims still identify the admitted grant for resource/revocation checks.
+	switch claims.CredentialClass {
+	case "terminal_operation", "exec_operation", "ssh_operation", "file_transfer":
+		claims.AssignmentID = ""
+	}
 	// Exclude token-instance fields (JTI and timestamps) so a renewed credential
 	// can retrieve the same durable operation result without crossing identity,
 	// resource, class, or exact-scope boundaries.

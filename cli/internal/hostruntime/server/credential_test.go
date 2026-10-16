@@ -41,6 +41,7 @@ func TestCredentialAuthorizerReturnsStableBoundIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	claims.JTI, claims.IssuedAt, claims.ExpiresAt = "jti_2", 50, 150
+	claims.AssignmentID = "asn_2"
 	// A renewed signed credential is admitted on a new authenticated connection.
 	renewed := CredentialAuthorizer{Token: authorizer.Token, Verifier: authorizer.Verifier, Resolver: authorizer.Resolver}
 	second, err := renewed.Authorize(context.Background(), protocol.Frame{Capability: "terminal.v1"})
@@ -50,8 +51,8 @@ func TestCredentialAuthorizerReturnsStableBoundIdentity(t *testing.T) {
 	if first.JournalBinding == "" || first.JournalBinding != second.JournalBinding {
 		t.Fatalf("renewed binding first=%q second=%q", first.JournalBinding, second.JournalBinding)
 	}
-	if first.ResourceID != "asn_1" {
-		t.Fatalf("resource id=%q", first.ResourceID)
+	if first.ResourceID != "asn_1" || second.ResourceID != "asn_2" {
+		t.Fatalf("credential-instance resource changed: first=%q second=%q", first.ResourceID, second.ResourceID)
 	}
 	claims.SessionID = "ses_2"
 	different := CredentialAuthorizer{Token: authorizer.Token, Verifier: authorizer.Verifier, Resolver: authorizer.Resolver}
@@ -97,21 +98,43 @@ func TestCredentialAuthorizerUsesCodexSessionAsResource(t *testing.T) {
 	}
 }
 
-func TestStableClaimsBindingKeepsExecRenewalButSeparatesOperations(t *testing.T) {
-	claims := auth.Claims{Issuer: "https://api.test", Subject: "usr_1", JTI: "jti_1", IssuedAt: 1, ExpiresAt: 100, Scope: []string{"exec:operate"}, CredentialClass: "exec_operation", EnvironmentID: "env_1", MachineID: "machine_1", UserID: "usr_1", CLIClientSessionID: "cli_1", OperationID: "operation_exec_1"}
-	first, err := stableClaimsBinding(claims)
-	if err != nil {
-		t.Fatal(err)
-	}
-	claims.JTI, claims.IssuedAt, claims.ExpiresAt = "jti_2", 50, 150
-	renewed, err := stableClaimsBinding(claims)
-	if err != nil || renewed != first {
-		t.Fatalf("renewed=%q first=%q err=%v", renewed, first, err)
-	}
-	claims.OperationID = "operation_exec_2"
-	other, err := stableClaimsBinding(claims)
-	if err != nil || other == first {
-		t.Fatalf("other=%q first=%q err=%v", other, first, err)
+func TestStableClaimsBindingKeepsRenewalButSeparatesResources(t *testing.T) {
+	for _, class := range []string{"terminal_operation", "exec_operation", "ssh_operation", "file_transfer", "config_compare"} {
+		t.Run(class, func(t *testing.T) {
+			claims := auth.Claims{Issuer: "https://api.test", Subject: "usr_1", JTI: "jti_1", IssuedAt: 1, ExpiresAt: 100, Scope: []string{"operate"}, CredentialClass: class, MachineID: "machine_1", UserID: "usr_1", CLIClientSessionID: "cli_1", OperationID: "operation_1", AssignmentID: "access_session_1"}
+			first, err := stableClaimsBinding(claims)
+			if err != nil {
+				t.Fatal(err)
+			}
+			claims.JTI, claims.IssuedAt, claims.ExpiresAt = "jti_2", 50, 150
+			claims.AssignmentID = "access_session_2"
+			renewed, err := stableClaimsBinding(claims)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if class == "config_compare" {
+				if renewed == first {
+					t.Fatal("distinct config assignments shared a binding")
+				}
+				return
+			}
+			if renewed != first {
+				t.Fatal("renewed access session changed durable binding")
+			}
+			for name, mutate := range map[string]func(*auth.Claims){
+				"operation": func(c *auth.Claims) { c.OperationID = "operation_2" },
+				"principal": func(c *auth.Claims) { c.UserID = "usr_2" },
+				"scope":     func(c *auth.Claims) { c.Scope = []string{"view"} },
+				"machine":   func(c *auth.Claims) { c.MachineID = "machine_2" },
+			} {
+				different := claims
+				mutate(&different)
+				binding, err := stableClaimsBinding(different)
+				if err != nil || binding == first {
+					t.Fatalf("%s crossed binding boundary: %v", name, err)
+				}
+			}
+		})
 	}
 }
 
