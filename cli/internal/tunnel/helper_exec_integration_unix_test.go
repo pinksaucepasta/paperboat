@@ -170,6 +170,13 @@ func TestExecApplicationProtocolCanary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		if execution, err := executions.Get(operationID); err == nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = execution.Cancel(ctx)
+		}
+	})
 	readiness := health.New("canary", []string{"terminal.v1", "health.v1", "exec.v1"}, nil)
 	dispatcher, err := server.NewDispatcher(server.DispatcherConfig{Sessions: sessions, Health: readiness, SessionLauncher: execCanaryLauncher{}, WorkspaceRoot: root, Random: bytes.NewReader(bytes.Repeat([]byte{1}, 256)), Exec: executions})
 	if err != nil {
@@ -209,6 +216,16 @@ func TestExecApplicationProtocolCanary(t *testing.T) {
 	}
 	if err := connection.CloseWrite(); err != nil {
 		t.Fatal(err)
+	}
+	// Finish the input phase before deliberately detaching its carrier. The
+	// event queue remains saturated, so the original reader cleanup/replay
+	// assertions still exercise the same backpressure boundary.
+	execution, err := executions.Get(operationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot, err := execution.Wait(ctx); err != nil || snapshot.State != execprocess.StateExited || snapshot.Result.Code != 23 {
+		t.Fatal("actual exec did not consume its input before detach", err)
 	}
 	deadline := time.Now().Add(time.Second)
 	for len(connection.events) != cap(connection.events) && time.Now().Before(deadline) {

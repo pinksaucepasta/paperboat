@@ -243,6 +243,7 @@ func TestHelperExecStreamsSeparatedOutputAndExactExit(t *testing.T) {
 	message := newExecMessageConnection()
 	request := ExecRequest{OperationID: "operation_exec_1", Argv: []string{"/bin/sh", "-c", "exit 7"}, CWD: "/workspace"}
 	connection := &helperExecConn{message: message, target: &resolver.TerminalTarget{}, request: request, events: make(chan ExecEvent, 8), done: make(chan struct{}), pending: make(map[string]chan helperFrame)}
+	stdout, _ := protocol.EncodeTerminalOutputAdaptive(protocol.TerminalOutputFrame{Channel: protocol.Stdout, StreamID: 4, StartSequence: 0, Data: append([]byte{1, 0, 0, 0, 0, 0, 0, 0, 2}, []byte("out")...)}, nil)
 	go func() {
 		written := <-message.writes
 		var frame helperFrame
@@ -251,17 +252,17 @@ func TestHelperExecStreamsSeparatedOutputAndExactExit(t *testing.T) {
 		}
 		payload, _ := json.Marshal(map[string]any{"result": map[string]any{"stream_id": 4, "snapshot": map[string]any{"operation_id": request.OperationID, "state": "running"}}})
 		response, _ := json.Marshal(helperFrame{Type: "response", RequestID: frame.RequestID, Version: helperProtocolVersion, OperationID: request.OperationID, Payload: payload})
+		// Independent QUIC output may arrive before the control response.
+		message.reads <- execMessage{kind: helperBinaryMessage, data: stdout}
 		message.reads <- execMessage{kind: helperStructuredMessage, data: response}
 	}()
 	if err := connection.initialize(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	stdout, _ := protocol.EncodeTerminalOutputAdaptive(protocol.TerminalOutputFrame{Channel: protocol.Stdout, StreamID: 4, StartSequence: 0, Data: append([]byte{1, 0, 0, 0, 0, 0, 0, 0, 2}, []byte("out")...)}, nil)
 	stderr, _ := protocol.EncodeTerminalOutputAdaptive(protocol.TerminalOutputFrame{Channel: protocol.Stderr, StreamID: 4, StartSequence: 0, Data: append([]byte{1, 0, 0, 0, 0, 0, 0, 0, 3}, []byte("err")...)}, nil)
 	endPayload, _ := json.Marshal(map[string]any{"event": "exec_stream_end", "operation_id": request.OperationID, "state": "exited", "sequence": 4, "last_output_sequence": 3, "result": map[string]any{"code": 7, "exited_at": time.Now().UTC()}})
 	end, _ := json.Marshal(helperFrame{Type: "event", RequestID: "stream", Version: helperProtocolVersion, Capability: "exec.v1", Payload: endPayload})
 	message.reads <- execMessage{kind: helperStructuredMessage, data: end}
-	message.reads <- execMessage{kind: helperBinaryMessage, data: stdout}
 	message.reads <- execMessage{kind: helperBinaryMessage, data: stderr}
 	events := make([]ExecEvent, 0, 4)
 	for event := range connection.Events() {

@@ -128,7 +128,8 @@ func (c *helperExecConn) initialize(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	frame, err := helperRequestSyncOperation(ctx, c.message, "exec.v1", c.request.OperationID, payload)
+	initial := initialHelperOutput{}
+	frame, err := helperRequestSyncOperation(ctx, c.message, "exec.v1", c.request.OperationID, payload, &initial)
 	if err != nil {
 		return err
 	}
@@ -146,6 +147,7 @@ func (c *helperExecConn) initialize(ctx context.Context) error {
 	if json.Unmarshal(frame.Payload, &response) != nil || response.Result.StreamID == 0 || response.Result.Snapshot.OperationID != c.request.OperationID {
 		return errors.New("helper returned an invalid execution attachment")
 	}
+	c.message = &initialOutputConnection{helperMessageConnection: c.message, frames: initial.frames}
 	c.streamID = response.Result.StreamID
 	c.emit(ExecEvent{OperationID: c.request.OperationID, State: "started"})
 	c.readLoopDone = make(chan struct{})
@@ -153,13 +155,13 @@ func (c *helperExecConn) initialize(ctx context.Context) error {
 	return nil
 }
 
-func helperRequestSyncOperation(ctx context.Context, message helperMessageConnection, capability, operationID string, payload json.RawMessage) (helperFrame, error) {
+func helperRequestSyncOperation(ctx context.Context, message helperMessageConnection, capability, operationID string, payload json.RawMessage, initial *initialHelperOutput) (helperFrame, error) {
 	requestID := helperID("request")
 	frame := helperFrame{Type: "request", RequestID: requestID, Version: helperProtocolVersion, OperationID: operationID, Capability: capability, DeadlineMS: uint32(helperRequestTimeout / time.Millisecond), Payload: payload}
 	if err := writeHelperFrame(ctx, message, frame); err != nil {
 		return helperFrame{}, err
 	}
-	response, err := readHelperStructured(ctx, message)
+	response, err := awaitHelperResponse(ctx, message, requestID, initial)
 	if err != nil {
 		return helperFrame{}, &ExecStartUncertainError{Cause: err}
 	}

@@ -191,9 +191,7 @@ type helperTerminalConn struct {
 	exitCode                  int
 	exitErr                   error
 	initial                   []helperOutput
-	initialBinary             [][]byte
-	initialEncodedBytes       int
-	initialDecodedBytes       int
+	initialOutput             initialHelperOutput
 	compressionRawFrames      atomic.Uint64
 	compressionZstdFrames     atomic.Uint64
 	compressionDecodedBytes   atomic.Uint64
@@ -383,17 +381,15 @@ func (c *helperTerminalConn) finishAttachment(frame helperFrame, existingSession
 	if c.generation == 0 {
 		return errors.New("helper terminal session has no generation")
 	}
-	diagnosticlog.TryInfo("peer terminal attachment initialized", "existing", existingSession, "snapshot_latest", snapshotLatest, "from_sequence", fromSequence, "initial_binary_frames", len(c.initialBinary), "initial_binary_bytes", c.initialDecodedBytes)
-	for _, data := range c.initialBinary {
+	diagnosticlog.TryInfo("peer terminal attachment initialized", "existing", existingSession, "snapshot_latest", snapshotLatest, "from_sequence", fromSequence, "initial_binary_frames", len(c.initialOutput.frames), "initial_binary_bytes", c.initialOutput.decoded)
+	for _, data := range c.initialOutput.frames {
 		output, decodeErr := c.decodeHelperBinary(data)
 		if decodeErr != nil {
 			return decodeErr
 		}
 		c.initial = append(c.initial, output)
 	}
-	c.initialBinary = nil
-	c.initialEncodedBytes = 0
-	c.initialDecodedBytes = 0
+	c.initialOutput = initialHelperOutput{}
 	go c.writeLoop()
 	go c.readLoop()
 	go c.ackLoop()
@@ -421,41 +417,14 @@ func (c *helperTerminalConn) requestSync(ctx context.Context, capability string,
 	if err := writeHelperFrame(operationCtx, c.message, frame); err != nil {
 		return helperFrame{}, err
 	}
-	for {
-		messageType, data, err := c.message.ReadMessage(operationCtx)
-		if err != nil {
-			return helperFrame{}, err
-		}
-		if messageType == helperBinaryMessage {
-			info, inspectErr := protocol.InspectTerminalOutput(data)
-			decodedBytes := int(info.UncompressedLength)
-			if inspectErr != nil || len(c.initialBinary) >= 64 || c.initialEncodedBytes > 4*helperMaxFrame-len(data) || c.initialDecodedBytes > 4*helperMaxFrame-decodedBytes {
-				return helperFrame{}, errors.New("helper sent excessive output before terminal attachment")
-			}
-			c.initialBinary = append(c.initialBinary, bytes.Clone(data))
-			c.initialEncodedBytes += len(data)
-			c.initialDecodedBytes += decodedBytes
-			continue
-		}
-		if messageType != helperStructuredMessage {
-			return helperFrame{}, errors.New("helper returned an unsupported message before terminal attachment")
-		}
-		response, err := decodeHelperFrame(data)
-		if err != nil {
-			return helperFrame{}, err
-		}
-		if response.Type == "heartbeat" {
-			_ = writeHelperFrame(operationCtx, c.message, response)
-			continue
-		}
-		if response.RequestID != requestID {
-			return helperFrame{}, errors.New("helper response did not match request")
-		}
-		if response.Type == "error" {
-			return helperFrame{}, decodeHelperError(response)
-		}
-		return response, nil
+	response, err := awaitHelperResponse(operationCtx, c.message, requestID, &c.initialOutput)
+	if err != nil {
+		return helperFrame{}, err
 	}
+	if response.Type == "error" {
+		return helperFrame{}, decodeHelperError(response)
+	}
+	return response, nil
 }
 
 func helperResponseSessionState(frame helperFrame) (string, uint64, uint64) {

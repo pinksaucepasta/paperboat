@@ -37,7 +37,7 @@ func (t *PeerTerminalTunnel) DialConfigComparison(ctx context.Context, info reso
 		if err != nil {
 			return nil, err
 		}
-		frame, err := helperRequestSyncOperation(ctx, message, "config.compare.v1", operationID, payload)
+		frame, err := helperRequestSyncOperation(ctx, message, "config.compare.v1", operationID, payload, nil)
 		if err != nil {
 			return nil, err
 		}
