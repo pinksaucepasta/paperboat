@@ -3,13 +3,12 @@
 import argparse
 import json
 from pathlib import Path
-import subprocess
 import sys
 import time
 import uuid
 
 from install_lifecycle import registration
-from pairing_lifecycle import invoke
+from pairing_lifecycle import check_machine_revoked, confirmed_command, denied_exec, invoke
 
 COMMAND_TIMEOUT = 45
 POLICY_APPLY_TIMEOUT = 30
@@ -67,14 +66,12 @@ def wait_policy(pb, machine_id, kind, version, expected):
 
 
 def availability(pb, machine_id, mode):
-    args = ['machine', 'availability', machine_id, '--mode', mode.replace('_', '-'), '--json']
+    args = ['machine', 'availability', machine_id, '--mode', mode.replace('_', '-')]
     if mode == 'keep_awake':
-        preview = subprocess.run([str(pb), *args], capture_output=True, text=True, timeout=30)
-        receipt = json.loads(preview.stdout)
-        if preview.returncode != 2 or receipt['error']['code'] != 'confirmation_required':
-            raise RuntimeError('keep-awake preview did not request confirmation')
-        args += ['--confirm', receipt['data']['confirmation_token']]
-    policy = invoke(pb, *args, timeout=COMMAND_TIMEOUT)['availability']
+        result = confirmed_command(pb, *args, timeout=COMMAND_TIMEOUT)
+    else:
+        result = invoke(pb, *args, '--json', timeout=COMMAND_TIMEOUT)
+    policy = result['availability']
     wait_policy(pb, machine_id, 'availability', policy['desired_version'], mode)
 
 
@@ -92,13 +89,7 @@ def settings(pb, original):
     try:
         invoke(pb, 'exec', original['alias'], '--', 'true', raw=True, timeout=COMMAND_TIMEOUT)
         capabilities(pb, machine_id, {key: False for key in original['machine_capabilities']['desired']})
-        denied = subprocess.run([str(pb), 'exec', original['alias'], '--json', '--', 'true'],
-                                capture_output=True, text=True, timeout=COMMAND_TIMEOUT)
-        receipt = json.loads(denied.stdout)
-        if (denied.returncode != 255 or receipt.get('version') != 'paperboat.exec-event/v1' or
-                receipt.get('event') != 'failed' or receipt.get('error_code') != 'transport_unavailable' or
-                receipt.get('changed') is not False or receipt.get('uncertain', False)):
-            raise RuntimeError('disabled terminal capability did not reject exec before any remote effect')
+        denied_exec(pb, original['alias'], {'transport_unavailable'})
     finally:
         restore_all(sys.exc_info()[1],
                     lambda: capabilities(pb, machine_id, original['machine_capabilities']['desired']))
@@ -114,14 +105,47 @@ def availability_only(pb, original):
                     lambda: availability(pb, original['id'], original['availability']['desired_mode']))
 
 
+def individual_capabilities(pb, original):
+    baseline = original['machine_capabilities']['desired']
+    if not all(baseline.values()):
+        raise RuntimeError('individual capability check requires the enabled baseline; nothing changed')
+    invoke(pb, 'exec', original['alias'], '--json', '--', 'true',
+           raw=True, timeout=COMMAND_TIMEOUT)
+    for name in baseline:
+        selection = dict(baseline, **{name: False})
+        try:
+            capabilities(pb, original['id'], selection)
+            if name == 'terminal':
+                denied_exec(pb, original['alias'], {'transport_unavailable'})
+        finally:
+            restore_all(sys.exc_info()[1], lambda: capabilities(pb, original['id'], baseline))
+        print(json.dumps({'check': 'individual-capability', 'name': name,
+                          'status': 'PASS', 'original_selection_restored': True}), flush=True)
+    invoke(pb, 'exec', original['alias'], '--json', '--', 'true',
+           raw=True, timeout=COMMAND_TIMEOUT)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('check', choices=['rename', 'settings', 'availability'])
+    parser.add_argument('check', choices=['rename', 'settings', 'availability', 'capabilities', 'revoke'])
+    parser.add_argument('--machine-id')
+    parser.add_argument('--expected-account')
     args = parser.parse_args()
+    if args.check == 'revoke' and (not args.machine_id or not args.expected_account):
+        parser.error('revoke requires --machine-id and --expected-account from the waiting target')
     pb, enrolled = Path.home() / '.local/bin/pb', registration()
     original = machine(pb, enrolled['machine_id'])
-    {'rename': rename, 'settings': settings,
-     'availability': availability_only}[args.check](pb, original)
+    if args.check == 'revoke':
+        target = machine(pb, args.machine_id)
+        if (target['id'] == enrolled['machine_id'] or not args.expected_account or
+                target['owner_account'] != args.expected_account or
+                enrolled['account_id'] != args.expected_account):
+            raise RuntimeError('revoke controller requires another machine of the exact same account')
+        invoke(pb, 'exec', target['id'], '--', 'true', raw=True, timeout=COMMAND_TIMEOUT)
+        check_machine_revoked(pb, target['id'], perform=True)
+    else:
+        {'rename': rename, 'settings': settings,
+         'availability': availability_only, 'capabilities': individual_capabilities}[args.check](pb, original)
     if registration() != enrolled:
         raise RuntimeError('machine command changed the protected enrollment')
     if machine(pb, enrolled['machine_id'])['alias'] != original['alias']:

@@ -41,7 +41,7 @@ def command_diagnostic(arguments, stdout, stderr, timeout=None):
     return diagnostic
 
 
-def invoke(binary, *arguments, timeout=180, input=None, env=None, raw=False, terminal=False, password=None):
+def command_result(binary, *arguments, timeout=180, input=None, env=None, terminal=False, password=None):
     command = [str(binary), *arguments]
     try:
         if terminal:
@@ -52,6 +52,13 @@ def invoke(binary, *arguments, timeout=180, input=None, env=None, raw=False, ter
     except subprocess.TimeoutExpired as error:
         diagnostic = command_diagnostic(command, error.stdout, error.stderr, error.timeout)
         raise CommandTimeout(error, diagnostic) from None
+    return result
+
+
+def invoke(binary, *arguments, timeout=180, input=None, env=None, raw=False, terminal=False, password=None):
+    command = [str(binary), *arguments]
+    result = command_result(binary, *arguments, timeout=timeout, input=input, env=env,
+                            terminal=terminal, password=password)
     if result.returncode:
         diagnostic = command_diagnostic(command, result.stdout, result.stderr)
         raise RuntimeError('command failed; private diagnostics: ' + str(diagnostic))
@@ -70,6 +77,60 @@ def runtime_root():
     if os.uname().sysname == 'Linux':
         return Path(os.environ.get('XDG_STATE_HOME', Path.home() / '.local/state')) / 'paperboat/runtime'
     return Path.home() / 'Library/Application Support/Paperboat/runtime'
+
+
+def confirmed_command(binary, *arguments, timeout=45):
+    preview = command_result(binary, *arguments, '--json', input='', timeout=timeout)
+    receipt = json.loads(preview.stdout)
+    if preview.returncode != 2 or receipt.get('error', {}).get('code') != 'confirmation_required':
+        raise RuntimeError('mutation did not request its confirmation preview')
+    return invoke(binary, *arguments, '--json', '--confirm',
+                  receipt['data']['confirmation_token'], timeout=timeout)
+
+
+def denied_exec(binary, identifier, expected_codes):
+    arguments = ['exec', identifier, '--json', '--', 'true']
+    denied = command_result(binary, *arguments, timeout=45)
+    try:
+        event = json.loads(denied.stdout)
+        valid = (denied.returncode == 255 and event.get('version') == 'paperboat.exec-event/v1' and
+                 event.get('event') == 'failed' and event.get('changed') is False and
+                 not event.get('uncertain', False) and event.get('error_code') in expected_codes)
+    except ValueError:
+        valid = False
+    if not valid:
+        diagnostic = command_diagnostic([str(binary), *arguments], denied.stdout, denied.stderr)
+        raise RuntimeError('exec was not denied before remote effect; private diagnostics: ' + str(diagnostic))
+    return event
+
+
+def check_machine_revoked(binary, identifier, *, perform):
+    if perform:
+        result = confirmed_command(binary, 'machine', 'revoke', identifier)
+        if result['outcome'] != 'confirmed' or result['machine']['id'] != identifier:
+            raise RuntimeError('revoke receipt did not identify the exact machine')
+    machines = invoke(binary, '--workspace', 'personal', 'machine', 'list', '--json')['machines']
+    current = next(item for item in machines if item['id'] == identifier)
+    if current['state'] != 'disconnected' or current['online'] is not False:
+        raise RuntimeError('revoked machine remains online in the server catalog')
+    event = denied_exec(binary, identifier, {'machine_resolution_failed', 'runtime_unavailable',
+                        'source_identity_unavailable', 'local_transport_unavailable',
+                        'transport_unavailable', 'environment_unavailable'})
+    print(json.dumps({'check': 'machine-revoke', 'status': 'PASS',
+                      'performed_here': perform, 'offline': True,
+                      'new_exec_denied': True, 'denial_code': event['error_code']}), flush=True)
+
+
+def await_external_revoke(directory, before, original):
+    gate = directory / 'controller-complete'
+    print(json.dumps({'state': 'external_revoke_required', 'gate': str(gate),
+                      'machine_id': before['machine_id'], 'account_id': before['account_id'],
+                      'alias': original['alias']}), flush=True)
+    deadline = time.monotonic() + 300
+    while not gate.exists():
+        if time.monotonic() >= deadline:
+            raise RuntimeError('external revoke controller did not finish within its bound')
+        time.sleep(0.1)
 
 
 def inventory(script, inbox, installed, password):
@@ -173,7 +234,7 @@ def uninstall(binary, identifier, check, inbox, script, password):
     inventory(script, inbox, installed=False, password=password)
 
 
-def qualify(expected, check, fault, script, password):
+def qualify(expected, check, fault, script, password, revoke_first=False, external_revoke=False):
     binary = Path.home() / '.local/bin/pb'
     version = subprocess.run([str(binary), '--version'], capture_output=True, text=True, timeout=10)
     if version.returncode or expected not in version.stdout:
@@ -184,6 +245,8 @@ def qualify(expected, check, fault, script, password):
     original = next((item for item in machines if item['id'] == before['machine_id']), None)
     if original is None or original['owner_account'] != before['account_id'] or original['public_identity_key'] != before['public_identity_key']:
         raise RuntimeError('current account does not own the exact installed machine')
+    if revoke_first or external_revoke:
+        invoke(binary, 'exec', original['alias'], '--', 'true', raw=True, timeout=45)
     inbox = Path(before['inbox_path'])
     inventory(script, inbox, installed=True, password=password)
     inbox.mkdir(parents=True, exist_ok=True)
@@ -200,10 +263,20 @@ def qualify(expected, check, fault, script, password):
             staged.chmod(0o700)
             token = enrollment_file(binary, original['alias'], temporary)
             pending_error = None
+            if revoke_first or external_revoke:
+                try:
+                    if external_revoke:
+                        await_external_revoke(temporary, before, original)
+                    check_machine_revoked(staged, before['machine_id'], perform=not external_revoke)
+                except Exception as error:
+                    pending_error = error
             try:
                 uninstall(staged, before['machine_id'], check, inbox, script, password)
             except Exception as error:
-                pending_error = error
+                if pending_error is None:
+                    pending_error = error
+                else:
+                    pending_error = RuntimeError(str(pending_error) + '; uninstall also failed: ' + str(error))
             # Restore even when an inventory assertion fails, while preserving
             # that primary failure. Never call a failed uninstall test a PASS.
             invoke(staged, 'install', '--json')
@@ -241,11 +314,15 @@ def main():
     parser.add_argument('--pair-fault', choices=['none', 'sigint', 'network'], default='none')
     parser.add_argument('--inventory', type=Path, required=True)
     parser.add_argument('--sudo-password-stdin', action='store_true')
+    revoke = parser.add_mutually_exclusive_group()
+    revoke.add_argument('--revoke-first', action='store_true')
+    revoke.add_argument('--external-revoke', action='store_true')
     args = parser.parse_args()
     password = sys.stdin.readline().rstrip('\n') if args.sudo_password_stdin else None
     if password == '':
         raise RuntimeError('missing test-device sudo credential on stdin')
-    qualify(args.expect_version, args.check, args.pair_fault, args.inventory, password)
+    qualify(args.expect_version, args.check, args.pair_fault, args.inventory, password,
+            args.revoke_first, args.external_revoke)
 
 
 if __name__ == '__main__':
