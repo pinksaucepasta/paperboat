@@ -18,14 +18,12 @@ environment or server secrets.
 `docker compose up -d` starts PostgreSQL, migrates from the repository schema, and
 starts the server only after migrations succeed. Caddy owns API/download/object-store
 TLS; the server certificate coordinator owns the public/runtime edge wildcards.
-Configure DNS before starting the proxy. Keep releases in `releases/` and publish
-through its atomic `current` directory. The proxy serves only `/tuf/targets/*`
-from that read-only release mount on the configured download host; API requests,
-installer scripts and TUF metadata still reach the server. Publish target files
-under the staged bundle’s `tuf/targets/` before its atomic `current` activation.
-The route follows `releases/current/` and requires cache revalidation because
-target paths can be reused across releases.
-Missing qualified artifacts do not make an installer available.
+Configure DNS before starting the proxy. The release workflow publishes the three
+native-qualified CLI binaries to public GitHub Releases, then atomically activates
+signed TUF metadata and the product-pinned installer in `releases/current/`.
+Installer and metadata requests reach the server; binary URLs in the signed metadata
+point to GitHub. The origin bundle keeps an empty `tuf/targets/` directory. Pairing
+custom builds is independent of this publication and needs no server release record.
 
 PostgreSQL is reachable only on VPS loopback and the private Compose network.
 Preserve the named volumes and protected secret files during upgrades; do not use
@@ -56,3 +54,28 @@ Install the distribution's `python3-boto3` on the managed VPS and run
 --bucket <bucket> --secrets-directory <protected-directory>`. It creates the private
 bucket if absent, checks upload/download, verifies anonymous reads are denied, and
 removes its random disposable object. It never prints credentials or payloads.
+
+## Public HTTPS for enrolled IP edges
+
+Relay/edge installations live on their own hosts. An installation advertising a
+public IP needs a publicly trusted IP certificate in addition to its enrolled
+carrier certificate. These identities serve different connections; keep the
+carrier key and runtime credentials unchanged.
+
+Install `edge-ip-certificate.py` as
+`/usr/local/lib/paperboat-selfhost/edge-ip-certificate.py` (mode 0755), and install
+`paperboat-edge-certificate.service` and `.timer` in `/etc/systemd/system/`.
+Create mode-0600 `/etc/paperboat-edge-certificate.env` with
+`PAPERBOAT_CERTIFICATE_EMAIL` set to the operator's certificate contact address.
+Run `systemctl daemon-reload`, start `paperboat-edge-certificate.service`, then
+`systemctl enable --now paperboat-edge-certificate.timer`.
+
+The script reads the enrolled IP from protected deployment configuration. It uses
+a pinned native Certbot image and the short-lived IP certificate profile, persists
+ACME state under the installation's `public-acme/`, and applies certificate paths
+through `pbh configure-tls`. It checks daily and renews only within two days of
+expiry. HTTP validation briefly stops the helper and its exact owned edge container;
+the service is restored on failure. A current certificate leaves the service running.
+The protected `public-acme/renew.log` contains the latest attempt. Verify both current
+node readiness and the server's authenticated public ingress proof after configuring
+or renewing a certificate.
