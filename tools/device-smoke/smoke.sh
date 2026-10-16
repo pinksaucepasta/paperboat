@@ -414,6 +414,7 @@ stage_terminal_fixtures() {
   if ! tar -C "$HERE" -czf - terminal_lifecycle.py session_lifecycle.py session_controller.py \
       terminal_entry.py status_bar_lifecycle.py session_sharing_lifecycle.py \
       exec_lifecycle.py exec_cancel.py ssh_lifecycle.py ssh_tools_lifecycle.py transfer_lifecycle.py \
+      ssh_doctor_lifecycle.py ssh_alias_lifecycle.py inbox_manage.py \
       transfer_manage.py preview_manage.py preview_lifecycle.py preview_receipt.py \
       machine_lifecycle.py install_lifecycle.py pairing_lifecycle.py pairing_fault.py \
       terminal_command.py session_cleanup.py | \
@@ -430,12 +431,11 @@ test_application_pairs() {
   skipped "$kind" && return
   for source in "${TLIST[@]}"; do
     for target in "${TLIST[@]}"; do
-      if [ "$kind" = transfer-multi ] || [ "$kind" = exec-repeat ] || [ "$kind" = ssh-tools ] || [ "$kind" = transfer-manage ] || [ "$kind" = exec-cancel ]; then
-        [ "$source" != "$target" ] || continue
-      fi
-      if [ "$kind" = preview-manage ]; then
-        [ "$source" = "$target" ] || continue
-      fi
+      case "$kind" in
+        transfer-multi|exec-repeat|ssh-tools|transfer-manage|exec-cancel|ssh-doctor|ssh-alias|inbox-manage)
+          [ "$source" != "$target" ] || continue ;;
+        preview-manage) [ "$source" = "$target" ] || continue ;;
+      esac
       id="$kind:$source-$target"
       skipped "$id" && continue
       t0=$(now)
@@ -652,6 +652,9 @@ test_application_pairs transfer-multi transfer_lifecycle.py
 test_application_pairs exec-repeat exec_lifecycle.py repeated
 test_application_pairs readiness-main exec_lifecycle.py readiness
 test_application_pairs exec-cancel exec_cancel.py
+test_application_pairs ssh-doctor ssh_doctor_lifecycle.py
+test_application_pairs ssh-alias ssh_alias_lifecycle.py
+test_application_pairs inbox-manage inbox_manage.py
 test_application_pairs transfer-manage transfer_manage.py
 test_application_pairs preview-manage preview_manage.py
 for t in "${TLIST[@]}"; do
