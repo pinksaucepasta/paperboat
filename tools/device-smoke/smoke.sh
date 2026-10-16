@@ -432,7 +432,7 @@ test_application_pairs() {
   for source in "${TLIST[@]}"; do
     for target in "${TLIST[@]}"; do
       case "$kind" in
-        transfer-multi|exec-repeat|ssh-tools|transfer-manage|exec-cancel|ssh-doctor|ssh-alias|inbox-manage)
+        transfer-multi|exec-repeat|ssh-tools|transfer-manage|exec-cancel|ssh-doctor|inbox-manage)
           [ "$source" != "$target" ] || continue ;;
         preview-manage) [ "$source" = "$target" ] || continue ;;
       esac

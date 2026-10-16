@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Use plain OpenSSH through the server-configured, generated machine alias."""
 import argparse
+import getpass
 import json
+import re
 from pathlib import Path
 import shlex
 import shutil
@@ -28,15 +30,23 @@ def main():
     if binary is None:
         raise RuntimeError('OpenSSH is not installed')
     host = args.target + '.' + domain
+    # Plain OpenSSH keeps its normal local username. Cross-device accounts may
+    # differ; use the target account explicitly, as a user or editor would.
+    username, errors = run(Path.home() / '.local/bin/pb', 'ssh', args.target, '--', 'id -un')
+    username = username.decode().strip()
+    if errors or not re.fullmatch(r'[A-Za-z0-9_.-]+', username):
+        raise RuntimeError('managed SSH did not identify one exact target login')
+    destination = host if username == getpass.getuser() else username + '@' + host
     marker = 'PB_PLAIN_SSH_' + uuid.uuid4().hex
     output, errors = run(Path(binary), '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15',
-                         host, 'printf %s ' + shlex.quote(marker))
+                         destination, 'printf %s ' + shlex.quote(marker))
     if output != marker.encode() or errors:
         raise RuntimeError('plain generated-alias SSH changed the exact command result')
     if registration() != before:
         raise RuntimeError('plain SSH changed the enrolled identity')
     print(json.dumps({'check': 'ssh-alias', 'target': args.target, 'status': 'PASS',
-                      'server_domain': True, 'plain_openssh': True, 'enrollment_unchanged': True}))
+                      'server_domain': True, 'plain_openssh': True,
+                      'explicit_target_user': destination != host, 'enrollment_unchanged': True}))
 
 
 if __name__ == '__main__':
