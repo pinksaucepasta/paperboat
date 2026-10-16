@@ -32,7 +32,7 @@ class CommandTimeout(subprocess.TimeoutExpired):
 
 def command_diagnostic(arguments, stdout, stderr, timeout=None):
     def text(value):
-        return value.decode(errors='replace') if isinstance(value, bytes) else value or ''
+        return value.decode(errors='replace') if isinstance(value, (bytes, bytearray)) else value or ''
     diagnostic = Path(tempfile.gettempdir()) / ('paperboat-f1-error-' + uuid.uuid4().hex)
     fd = os.open(diagnostic, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, 'w') as output:
