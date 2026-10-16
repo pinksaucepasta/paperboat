@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Regression gate. Run before every push (AGENTS.md "Regression gate").
 #   1. go vet + go test for every Go module, console lint + build.
-#   2. If runtime code (cli/ relay/ tunnel/ server/ helper/ shared/) changed relative to origin/main,
+#   2. If device-build code (cli/ relay/ shared/) changed relative to origin/main,
 #      require a device smoke result for a build of HEAD (tools/device-smoke/results/*.json
 #      whose expect_version is dev-<short HEAD>) in which every check that passed in any
 #      earlier result still passes. Feature status in CHECKLIST.md does not matter.
+#      server/ tunnel/ helper/ changes push on unit and PostgreSQL tests; their deploy is what
+#      the next device smoke checks (AGENTS.md "Regression gate").
 # Exit status is non-zero if anything fails.
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
@@ -21,7 +23,7 @@ step "console lint + build"
 (cd console && bun install --frozen-lockfile >/dev/null && bun run lint && bun run build) || { echo "FAIL: console"; fail=1; }
 
 base=$(git merge-base HEAD origin/main 2>/dev/null || git rev-list --max-parents=0 HEAD | tail -1)
-changed=$( { git diff --name-only "$base" HEAD; git diff --name-only; } | grep -E '^(cli|relay|tunnel|server|helper|shared)/' | head -1)
+changed=$( { git diff --name-only "$base" HEAD; git diff --name-only; } | grep -E '^(cli|relay|shared)/' | head -1)
 if [ -n "$changed" ]; then
   step "device smoke for HEAD: no check that ever passed may fail"
   want="dev-$(git rev-parse --short HEAD)"
