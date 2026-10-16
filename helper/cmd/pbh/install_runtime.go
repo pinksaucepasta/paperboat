@@ -18,7 +18,7 @@ import (
 
 const serviceCommandTimeout = 30 * time.Second
 
-func installRuntimeImages(ctx context.Context, dir string, c selfhost.Config, images containers.Images, noService bool) error {
+func installRuntimeImages(ctx context.Context, dir string, c selfhost.Config, images containers.Images, noService bool) (result error) {
 	if noService {
 		return containers.SaveImages(dir, images)
 	}
@@ -39,6 +39,16 @@ func installRuntimeImages(ctx context.Context, dir string, c selfhost.Config, im
 			return fmt.Errorf("%w: %w", commandError("read existing runtime readiness failed; installation unchanged"), err)
 		}
 	}
+	if claimed {
+		preserved, err := containers.PrepareHandoff(ctx, dir, images)
+		if err != nil {
+			return err
+		}
+		defer func() { result = errors.Join(result, containers.ClearHandoff(dir)) }()
+		for role := range preserved {
+			delete(before, role)
+		}
+	}
 	if err := containers.SaveImages(dir, images); err != nil {
 		return err
 	}
@@ -51,6 +61,11 @@ func installRuntimeImages(ctx context.Context, dir string, c selfhost.Config, im
 		if oldErr != nil {
 			stopErr := stopInstallation(recovery)
 			return errors.Join(primary, stopErr)
+		}
+		if claimed {
+			if _, err := containers.PrepareHandoff(recovery, dir, old); err != nil {
+				return errors.Join(primary, err)
+			}
 		}
 		if stopErr := stopInstallation(recovery); stopErr != nil {
 			return errors.Join(primary, stopErr)

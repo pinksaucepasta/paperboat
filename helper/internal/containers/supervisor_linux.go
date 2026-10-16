@@ -26,6 +26,9 @@ func Serve(ctx context.Context, dir string, out io.Writer, observe func(context.
 		return errors.New("this installation already has a runtime owner")
 	}
 	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+	if err := ClearHandoff(dir); err != nil {
+		return err
+	}
 	images, err := LoadImages(dir)
 	if err != nil {
 		return err

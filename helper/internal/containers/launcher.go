@@ -81,13 +81,31 @@ func (l *Launcher) Run(ctx context.Context, capability, componentDir string, out
 	}
 	owner := installationOwner(l.StateDir)
 	name := "paperboat-pbh-" + owner + "-" + capability
-	if err := removeOwned(ctx, name, owner); err != nil {
+	imageID, err := resolvedImage(ctx, image)
+	if err != nil {
 		return err
 	}
-	if err := l.startContainer(ctx, capability, image); err != nil {
+	info, exists, err := inspectContainer(ctx, name)
+	if err != nil {
 		return err
 	}
+	if exists && info.Owner != owner {
+		return errors.New("runtime container belongs to another installation; nothing changed")
+	}
+	adopted := exists && info.Running && info.ImageID == imageID
+	if !adopted {
+		if err := removeOwned(ctx, name, owner); err != nil {
+			return err
+		}
+		if err := l.startContainer(ctx, capability, image); err != nil {
+			return err
+		}
+	}
+
 	defer func() {
+		if ctx.Err() != nil && preservesHandoff(l.StateDir, capability, imageID) {
+			return
+		}
 		cleanup, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 		defer cancel()
 		if err := removeOwned(cleanup, name, owner); err != nil {
@@ -106,7 +124,11 @@ func (l *Launcher) Run(ctx context.Context, capability, componentDir string, out
 	go func() { logsDone <- logs.Wait() }()
 	defer func() { stopLogs(); <-logsDone }()
 	ready, cancel := context.WithTimeout(ctx, StartupTimeout)
-	err = waitReady(ready, name, owner, client, before.ProcessEpoch)
+	previousEpoch := before.ProcessEpoch
+	if adopted {
+		previousEpoch = ""
+	}
+	err = waitReady(ready, name, owner, client, previousEpoch)
 	cancel()
 	if err != nil {
 		return err
@@ -179,6 +201,7 @@ func containerRunning(ctx context.Context, name, owner string) (bool, error) {
 type containerInfo struct {
 	Owner   string `json:"owner"`
 	Running bool   `json:"running"`
+	ImageID string `json:"image_id"`
 }
 
 func inspectContainer(ctx context.Context, name string) (containerInfo, bool, error) {
@@ -192,7 +215,7 @@ func inspectContainer(ctx context.Context, name string) (containerInfo, bool, er
 	if strings.TrimSpace(string(list)) == "" {
 		return info, false, nil
 	}
-	b, err := docker(ctx, "inspect", "--format", `{"owner":{{json (index .Config.Labels "`+ownerLabel+`")}},"running":{{json .State.Running}}}`, name)
+	b, err := docker(ctx, "inspect", "--format", `{"owner":{{json (index .Config.Labels "`+ownerLabel+`")}},"running":{{json .State.Running}},"image_id":{{json .Image}}}`, name)
 	if err != nil || json.Unmarshal(b, &info) != nil {
 		return info, false, errors.New("inspect runtime container ownership failed")
 	}
