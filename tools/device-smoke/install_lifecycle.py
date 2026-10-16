@@ -9,6 +9,7 @@ import os
 import re
 from pathlib import Path
 import subprocess
+import sys
 import time
 
 
@@ -17,7 +18,7 @@ def registration():
                 else 'Library/Application Support/Paperboat/runtime')
     record = json.loads((Path.home() / relative / 'machine-registration.json').read_text())
     return {key: record[key] for key in ('machine_id', 'environment_id',
-            'public_identity_key', 'public_key_id', 'installation_generation', 'account_id')}
+            'public_identity_key', 'public_key_id', 'installation_generation', 'account_id', 'inbox_path')}
 
 
 def command(pb, *args, timeout=45, env=None):
@@ -39,14 +40,24 @@ def command(pb, *args, timeout=45, env=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('check', choices=['reinstall', 'pair-refusal', 'service', 'interrupt-install', 'crash-service', 'shell-install', 'post-reboot'])
+    parser.add_argument('check', choices=['reinstall', 'pair-refusal', 'service', 'interrupt-install', 'crash-service', 'shell-install', 'post-reboot', 'setup'])
+    parser.add_argument('--sudo-password-stdin', action='store_true')
     parser.add_argument('--shell')
     parser.add_argument('--previous-boot-id')
     args = parser.parse_args()
+    password = sys.stdin.readline().rstrip('\n') if args.sudo_password_stdin else None
     pb = Path.home() / '.local/bin/pb'
     before = registration()
     started = time.monotonic()
-    if args.check == 'post-reboot':
+    if args.check == 'setup':
+        from pairing_lifecycle import invoke
+        machines = invoke(pb, 'machine', 'list', '--json')['machines']
+        machine = next(item for item in machines if item['id'] == before['machine_id'])
+        invoke(pb, 'setup', '--name', machine['alias'], raw=True,
+               terminal=True, password=password)
+        command(pb, 'doctor', '--json')
+        invoke(pb, 'exec', machine['alias'], '--', 'true', raw=True, timeout=45)
+    elif args.check == 'post-reboot':
         boot = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
         if not args.previous_boot_id or boot == args.previous_boot_id:
             raise RuntimeError('device did not reboot since the saved observation')
@@ -164,9 +175,12 @@ def main():
         raise RuntimeError('operation changed the protected enrollment')
     if command(pb, 'service', 'status', '--json').get('status') != 'running':
         raise RuntimeError('local daemon was not left running')
-    print(json.dumps({'check': args.check, 'status': 'PASS',
-                      'seconds': round(time.monotonic() - started, 1),
-                      'enrollment_preserved': True}))
+    result = {'check': args.check, 'status': 'PASS',
+              'seconds': round(time.monotonic() - started, 1),
+              'enrollment_preserved': True}
+    if args.check == 'setup':
+        result['native_exec'] = True
+    print(json.dumps(result))
 
 
 if __name__ == '__main__':

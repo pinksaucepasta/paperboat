@@ -189,7 +189,7 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		return failBootstrapBeforeRuntime(ctx, err, material, *stateRoot, "artifact_verification")
 	}
 	wasRuntimeEnrolled := resume.RuntimeEnrolled
-	if err := prepareBootstrapListener(*stateRoot, &material, &resume); err != nil {
+	if err := prepareUnixBootstrapListener(ctx, *stateRoot, &material, &resume, uid); err != nil {
 		return err
 	}
 	if resume.RuntimeReady {
