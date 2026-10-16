@@ -68,6 +68,9 @@ WHERE d.tunnel_id=$1 AND d.ownership_state='verified'
 UNION
 SELECT r.public_host FROM control_routes r WHERE r.id=$1
  AND r.kind='runtime_https_wss' AND r.desired_state IN ('attached','replacing')
+UNION
+SELECT substring(p.endpoint from 9)::text FROM preview_leases p
+WHERE p.id=$1 AND paperboat.workspace_edge_mode(p.account_id,p.owner_team_id)='managed-only'
 ORDER BY hostname LIMIT 129
 `
 
@@ -95,6 +98,7 @@ func (q *Queries) ListEdgeDNSPublicationNamesV1(ctx context.Context, tunnelID st
 const listEdgeDNSPublicationResourcesV1 = `-- name: ListEdgeDNSPublicationResourcesV1 :many
 SELECT id, max(generation)::bigint AS generation FROM (
  SELECT id,generation FROM tunnels
+ UNION ALL SELECT id,generation FROM preview_leases
  UNION ALL SELECT id,desired_revision AS generation FROM control_routes
   WHERE kind='runtime_https_wss' AND desired_state IN ('attached','replacing')
  UNION ALL SELECT owner_id AS id,resource_generation AS generation FROM edge_dns_publications
@@ -221,7 +225,37 @@ WHERE t.id=$1 AND t.desired_state='active' AND t.deleted_at IS NULL
     AND distribution.observed_certificate_generation=cert.certificate_generation
   )
  )
-ORDER BY node.id LIMIT 3
+UNION ALL
+SELECT node.id,p.generation AS resource_generation,statement_timestamp()::timestamptz AS observed_at,
+ COALESCE(host(node.public_ingress_ipv4),'')::text AS ipv4,
+ COALESCE(host(node.public_ingress_ipv6),'')::text AS ipv6,
+ (node.process_epoch||'/'||a.operation_id||'/'||a.attachment_generation::text||'/'||cert.id)::text AS readiness_version,
+ LEAST(p.lease_deadline,p.user_deadline,a.expires_at,identity.expires_at,node.registry_expires_at,node.last_heartbeat_at+interval '15 seconds',cert.expires_at)::timestamptz AS valid_until
+FROM preview_leases p
+JOIN preview_lease_carrier_attachments a ON a.preview_id=p.id AND a.account_id=p.account_id
+JOIN user_machines m ON m.id=a.host_id AND m.id=p.owner_machine_id AND m.user_id=p.account_id
+JOIN users owner ON owner.id=p.account_id AND owner.status='active'
+JOIN control_environments env ON env.id=m.environment_id AND env.desired_state='active' AND env.revoked_at IS NULL
+JOIN machine_control_sessions identity ON identity.machine_id=m.id AND identity.installation_generation=m.installation_generation
+JOIN control_tunnel_nodes node ON node.id=a.edge_node_id AND node.process_epoch=a.edge_process_epoch
+JOIN tunnel_certificate_edge_distributions distribution ON distribution.edge_node_id=node.id AND distribution.edge_process_epoch=node.process_epoch AND distribution.state IN ('ready','active')
+JOIN tunnel_certificate_records cert ON cert.id=distribution.certificate_id AND cert.target_kind='platform_wildcard'
+ AND cert.certificate_generation=distribution.observed_certificate_generation
+WHERE p.id=$1 AND substring(p.endpoint from 9)=$3
+ AND paperboat.workspace_edge_mode(p.account_id,p.owner_team_id)='managed-only'
+ AND p.terminal_state='active' AND p.lease_deadline>$2 AND (p.user_deadline IS NULL OR p.user_deadline>$2)
+ AND a.state='ready' AND a.edge_ready AND a.origin_ready AND a.expires_at>$2
+ AND a.lease_generation>0 AND a.lease_generation<=p.generation
+ AND m.deleted_at IS NULL AND m.revoked_at IS NULL AND m.seat_state='occupied' AND m.state NOT IN ('pending','revoked','deleted')
+ AND m.public_identity_key=a.machine_identity_public_key AND identity.issued_at<=$2 AND identity.expires_at>$2
+ AND (p.owner_team_id IS NULL OR (paperboat.team_paid_entitled(p.owner_team_id) AND paperboat.workspace_preview_management_allowed(p.account_id,p.owner_team_id,p.id)))
+ AND paperboat.node_preview_eligible(node.id,p.account_id,p.id)
+ AND node.state='ready' AND node.ready AND node.drain_deadline IS NULL AND node.roles @> ARRAY['edge']::text[]
+ AND node.registry_expires_at>$2 AND node.last_heartbeat_at>$2::timestamptz-interval '15 seconds'
+ AND node.public_ingress_verified_at IS NOT NULL AND (node.public_ingress_ipv4 IS NOT NULL OR node.public_ingress_ipv6 IS NOT NULL)
+ AND cert.state='active' AND cert.revoked_at IS NULL AND cert.not_before<=$2 AND cert.expires_at>$2
+ AND left(cert.hostname,2)='*.' AND substring($3::text from position('.' in $3::text))=substring(cert.hostname from 2)
+ORDER BY id LIMIT 3
 `
 
 type ListReadyEdgeDNSAddressesV1Params struct {
@@ -243,6 +277,8 @@ type ListReadyEdgeDNSAddressesV1Row struct {
 // Every route in the serving config sharing the hostname must be usable on the advertised node.
 // An unapplied/unready replacement must not withdraw the serving hostname.
 // An active connector alone is not certificate, listener or origin readiness.
+// Ephemeral previews have one exact carrier placement. Never advertise the
+// other global edge merely because it shares the wildcard certificate.
 func (q *Queries) ListReadyEdgeDNSAddressesV1(ctx context.Context, arg ListReadyEdgeDNSAddressesV1Params) ([]ListReadyEdgeDNSAddressesV1Row, error) {
 	rows, err := q.db.Query(ctx, listReadyEdgeDNSAddressesV1, arg.TunnelID, arg.Now, arg.Hostname)
 	if err != nil {

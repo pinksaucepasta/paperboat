@@ -3,6 +3,8 @@ package connectorprotocol
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
+	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
 	"strings"
 	"testing"
 	"time"
@@ -63,6 +65,56 @@ func TestPublicPreviewIngressPostgres(t *testing.T) {
 		}
 	}
 	check(1)
+	// A preview is attached to one edge, so wildcard DNS pointing at every
+	// global edge cannot deliver it. The DNS worker must enumerate its exact name.
+	names, err := f.database.Queries().ListEdgeDNSPublicationNamesV1(ctx, preview)
+	if err != nil || len(names) != 1 || names[0] != hostname {
+		t.Fatalf("preview DNS names=%v: %v", names, err)
+	}
+	owners, err := f.database.Queries().ListEdgeDNSPublicationResourcesV1(ctx, dbsqlc.ListEdgeDNSPublicationResourcesV1Params{AfterID: preview[:len(preview)-1], BatchSize: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, owner := range owners {
+		if owner.ID == preview {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("active preview omitted from DNS reconciliation")
+	}
+	dns := func(want int) {
+		t.Helper()
+		rows, err := f.database.Queries().ListReadyEdgeDNSAddressesV1(ctx, dbsqlc.ListReadyEdgeDNSAddressesV1Params{TunnelID: preview, Hostname: hostname, Now: sql.NullTime{Time: now, Valid: true}})
+		if err != nil || len(rows) != want {
+			t.Fatalf("preview DNS addresses=%d want=%d: %v", len(rows), want, err)
+		}
+		if want == 1 && (rows[0].ID != node || rows[0].Ipv4 != "8.8.8.8") {
+			t.Fatal("preview DNS advertised another edge")
+		}
+	}
+	dns(0)
+	exec(`UPDATE control_tunnel_nodes SET public_ingress_ipv4='8.8.8.8',public_ingress_verified_at=$2 WHERE id=$1`, node, now)
+	dns(0)
+	exec(`INSERT INTO tunnel_platform_certificate_targets(id,kind,hostname,account_id,challenge_reference) VALUES('platform_cert_public_v1','public_wildcard','*.preview.example.test','platform_system_v1','dns:fixture')`)
+	t.Cleanup(func() {
+		_, _ = f.database.SQL().ExecContext(ctx, `DELETE FROM tunnel_platform_certificate_targets WHERE id='platform_cert_public_v1'`)
+	})
+	certificate := "certificate_preview_" + f.suffix
+	t.Cleanup(func() {
+		_, _ = f.database.SQL().ExecContext(ctx, `DELETE FROM tunnel_certificate_records WHERE id=$1`, certificate)
+	})
+	exec(`INSERT INTO tunnel_certificate_records(id,domain_id,account_id,hostname,domain_generation,certificate_generation,strategy,state,certificate_reference,master_key_reference,certificate_ciphertext,private_key_ciphertext,fingerprint,issuer,not_before,expires_at,renewal_at,target_kind) VALUES($1,'platform_cert_public_v1','platform_system_v1',$2,1,1,'platform_dns01','active','fixture','fixture',decode(repeat('ab',29),'hex'),decode(repeat('ab',29),'hex'),decode(repeat('ab',32),'hex'),'fixture',$3,$4,$3,'platform_wildcard')`, certificate, "*.preview.example.test", now.Add(-time.Hour), now.Add(time.Hour))
+	exec(`INSERT INTO tunnel_certificate_edge_distributions(certificate_id,edge_node_id,edge_process_epoch,edge_assignment_generation,state,observed_certificate_generation) VALUES($1,$2,$3,1,'active',1)`, certificate, node, epoch)
+	dns(1)
+	exec(`UPDATE preview_lease_carrier_attachments SET origin_ready=false,state='edge_ready',ready_at=NULL WHERE preview_id=$1`, preview)
+	dns(0)
+	exec(`UPDATE preview_lease_carrier_attachments SET origin_ready=true,state='ready',ready_at=issued_at WHERE preview_id=$1`, preview)
+	dns(1)
+	exec(`UPDATE tunnel_certificate_edge_distributions SET edge_process_epoch='epoch_stale' WHERE certificate_id=$1`, certificate)
+	dns(0)
+	exec(`UPDATE tunnel_certificate_edge_distributions SET edge_process_epoch=$2 WHERE certificate_id=$1`, certificate, epoch)
 	for _, test := range []struct{ deny, restore string }{
 		{`UPDATE control_tunnel_nodes SET process_epoch='epoch_other' WHERE id=$1`, `UPDATE control_tunnel_nodes SET process_epoch=$2,last_heartbeat_at=$3 WHERE id=$1`},
 		{`UPDATE control_tunnel_nodes SET last_heartbeat_at=now()-interval '1 minute' WHERE id=$1`, `UPDATE control_tunnel_nodes SET process_epoch=$2,last_heartbeat_at=$3 WHERE id=$1`},
@@ -78,6 +130,7 @@ func TestPublicPreviewIngressPostgres(t *testing.T) {
 	check(1)
 	exec(`UPDATE user_machines SET revoked_at=$2 WHERE id=$1`, c.hostID, now)
 	check(0)
+	dns(0)
 	exec(`UPDATE user_machines SET revoked_at=NULL WHERE id=$1`, c.hostID)
 	check(1)
 	exec(`UPDATE preview_leases SET access_mode='private' WHERE id=$1`, preview)
