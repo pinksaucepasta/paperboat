@@ -163,10 +163,17 @@ func (s *Service) Get(ctx context.Context, account string, scope workspace.Scope
 		var reported, expected int64
 		var unrecorded, expired, rejected int64
 		var stale, incomplete bool
-		if err := tx.QueryRow(ctx, `SELECT count(*),coalesce(sum(unrecorded_bytes),0)::bigint,coalesce(sum(expired_bytes),0)::bigint,coalesce(sum(rejected_reports),0)::bigint,coalesce(bool_or(last_seen<$2),false),coalesce(bool_or(recording_incomplete),false) FROM native_usage_reporting_status WHERE workspace_id=$1`, ws, now.Add(-time.Minute)).Scan(&reported, &unrecorded, &expired, &rejected, &stale, &incomplete); err != nil {
-			return err
-		}
-		if err := tx.QueryRow(ctx, `SELECT count(*) FROM user_machines WHERE coalesce('team:'||owner_team_id,'personal:'||user_id)=$1 AND deleted_at IS NULL AND revoked_at IS NULL`, ws).Scan(&expected); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT count(status.machine_id),count(machine.id),
+ coalesce(sum(status.unrecorded_bytes),0)::bigint,
+ coalesce(sum(status.expired_bytes),0)::bigint,
+ coalesce(sum(status.rejected_reports),0)::bigint,
+ coalesce(bool_or(status.last_seen<$2),false),
+ coalesce(bool_or(status.recording_incomplete),false)
+ FROM user_machines machine LEFT JOIN native_usage_reporting_status status
+ ON status.machine_id=machine.id AND status.installation_generation=machine.installation_generation
+ AND status.workspace_id=$1
+ WHERE coalesce('team:'||machine.owner_team_id,'personal:'||machine.user_id)=$1
+ AND machine.deleted_at IS NULL AND machine.revoked_at IS NULL`, ws, now.Add(-time.Minute)).Scan(&reported, &expected, &unrecorded, &expired, &rejected, &stale, &incomplete); err != nil {
 			return err
 		}
 		out.Coverage.Edge = !q.Start.Before(now.Add(-MaxWindow))

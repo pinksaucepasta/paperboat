@@ -51,7 +51,7 @@ func TestPostgresBandwidthHistory(t *testing.T) {
 	exec(`INSERT INTO selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete) VALUES($1,$2,decode(repeat('aa',32),'hex'),decode(repeat('bb',32),'hex'),decode('01','hex'),'Student relay','relay','account',$3,$1,true)`, "installation_"+suffix, node, a)
 	defer func() {
 		_, _ = store.SQL().ExecContext(ctx, `DELETE FROM resource_bandwidth_events WHERE workspace_id IN ($1,$2)`, "personal:"+a, "personal:"+b)
-		for _, query := range []string{`DELETE FROM native_usage_authorities WHERE machine_id=$1`, `DELETE FROM native_usage_reporting_status WHERE machine_id=$1`, `DELETE FROM user_machine_access_sessions WHERE user_machine_id=$1`, `DELETE FROM user_machines WHERE id=$1`} {
+		for _, query := range []string{`DELETE FROM native_usage_authorities WHERE machine_id=$1`, `DELETE FROM native_usage_reporting_status WHERE machine_id=$1 OR machine_id=$1||'_retired'`, `DELETE FROM user_machine_access_sessions WHERE user_machine_id=$1`, `DELETE FROM user_machines WHERE id=$1`} {
 			_, _ = store.SQL().ExecContext(ctx, query, machine)
 		}
 		_, _ = store.SQL().ExecContext(ctx, `DELETE FROM selfhost_installations WHERE node_id=$1`, node)
@@ -84,11 +84,17 @@ func TestPostgresBandwidthHistory(t *testing.T) {
 	if _, err := service.RecordNative(ctx, machine, 1, NativeBatch{Reports: []NativeReport{report}}); err != nil {
 		t.Fatal(err)
 	}
+	// Retired installations retain historical diagnostics, but cannot inflate
+	// current machine coverage or make healthy current reporting incomplete.
+	exec(`INSERT INTO native_usage_reporting_status(machine_id,installation_generation,workspace_id,last_seen,unrecorded_bytes,expired_bytes,rejected_reports,recording_incomplete) VALUES($1||'_retired',1,$2,$3,1,2,3,true)`, machine, "personal:"+a, now.Add(-time.Hour))
 	scope := workspace.Scope{ID: "personal"}
 	q := Query{Start: now, End: now.Add(time.Minute)}
 	got, err := service.Get(ctx, a, scope, q)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !got.Coverage.Native || strings.Contains(got.Coverage.Note, "Reporting 2 of 1") {
+		t.Fatalf("retired reporter changed current coverage: %+v", got.Coverage)
 	}
 	if got.Totals != (Bytes{Upload: 130, Download: 240}) || len(got.Resources) != 1 || len(got.Resources[0].Paths) != 2 || len(got.Series) != 1 {
 		t.Fatalf("history=%+v", got)
