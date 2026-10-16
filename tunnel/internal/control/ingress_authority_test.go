@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/route"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -137,6 +137,61 @@ func TestIngressAuthorityRefreshesColdPreviewWithoutRequestReplay(t *testing.T) 
 			wg.Wait()
 			if calls.Load() != 1 {
 				t.Fatalf("control refreshes=%d, want one coalesced refresh", calls.Load())
+			}
+		})
+	}
+}
+
+func TestIngressAuthorityRefreshesDecisionBeforeCacheInterval(t *testing.T) {
+	for _, outcome := range []string{"renewed", "withdrawn", "unavailable"} {
+		t.Run(outcome, func(t *testing.T) {
+			var calls atomic.Int32
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				n := calls.Add(1)
+				d := ingressAuthorityTestDecision(time.Now().UTC())
+				decisions := []connectorprotocol.IngressDecision{d}
+				if n == 1 {
+					d.ExpiresAt = time.Now().Add(75 * time.Millisecond)
+					decisions[0] = d
+				} else {
+					switch outcome {
+					case "withdrawn":
+						decisions = nil
+					case "unavailable":
+						w.WriteHeader(503)
+						return
+					}
+				}
+				json.NewEncoder(w).Encode(map[string]any{"complete": true, "decisions": decisions})
+			}))
+			defer server.Close()
+			client, err := NewHTTPClient(HTTPConfig{BaseURL: server.URL, Client: server.Client(), Credential: strings.Repeat("x", 32), Timeout: time.Second})
+			if err != nil {
+				t.Fatal(err)
+			}
+			authority := &IngressAuthority{Client: client, NodeID: "edge_01", ProcessEpoch: "epoch_0001"}
+			before, err := authority.Snapshot(t.Context())
+			if err != nil || len(before) != 1 {
+				t.Fatalf("initial authority: %v", err)
+			}
+			<-time.After(time.Until(before[0].ExpiresAt) + time.Millisecond)
+			after, err := authority.Snapshot(t.Context())
+			if calls.Load() != 2 {
+				t.Fatal("expired authority reused inside the refresh interval")
+			}
+			switch outcome {
+			case "renewed":
+				if err != nil || len(after) != 1 || !after[0].ExpiresAt.After(before[0].ExpiresAt) || after[0].Validate(time.Now().UTC()) != nil {
+					t.Fatalf("renewed authority missing: %v", err)
+				}
+			case "withdrawn":
+				if err != nil || len(after) != 0 {
+					t.Fatalf("withdrawn authority retained: %v", err)
+				}
+			case "unavailable":
+				if err == nil || len(after) != 0 {
+					t.Fatal("outage extended cached authority")
+				}
 			}
 		})
 	}

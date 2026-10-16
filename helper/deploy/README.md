@@ -77,8 +77,13 @@ Default inbound ports:
 | --- | --- | --- |
 | Claim API (all installations) | 8443 | — |
 | Relay only | 443 | 443 (STUN), 27446 (QUIC) |
-| Tunnel only | 80, 443, 27443 | 27444 |
-| Both | 80, 443, 27443, 27445 | 27444, 27445 (STUN), 27446 |
+| Tunnel only | 80, 443, 27443 | 443 (HTTP/3), 27444 |
+| Both | 80, 443, 27443, 27445 | 443 (HTTP/3), 27444, 27445 (STUN), 27446 |
+
+Allow these ports in both the host firewall and the cloud network rules. TCP 443
+alone permits HTTP/1 and HTTP/2 but leaves HTTP/3 unreachable; verify UDP 443
+from outside the host. On hosts behind public-IP NAT, scope host firewall rules
+to the configured local gateway bind address.
 
 A connected process is not readiness. Dashboard node status reports actual
 control-plane registration, health, and tunnel ingress verification. The service

@@ -5,8 +5,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/route"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 // IngressAuthority caches only the server's bounded decision lifetime. Fetches
@@ -52,6 +52,15 @@ func (a *IngressAuthority) Snapshot(ctx context.Context) ([]connectorprotocol.In
 
 func (a *IngressAuthority) snapshotLocked(ctx context.Context, force bool) ([]connectorprotocol.IngressDecision, error) {
 	now := time.Now().UTC()
+	// A node heartbeat or publication deadline can shorten a decision below
+	// the normal refresh interval. New connections must fetch current authority
+	// rather than receive a cached decision that the TLS/HTTP gate will reject.
+	for _, decision := range a.decisions {
+		if !now.Before(decision.ExpiresAt) {
+			force = true
+			break
+		}
+	}
 	if force || a.fetched.IsZero() || now.Sub(a.fetched) >= connectorprotocol.IngressRefreshInterval {
 		fetch, cancel := context.WithTimeout(ctx, 2*time.Second)
 		decisions, err := a.Client.IngressDecisions(fetch, a.NodeID, a.ProcessEpoch)
