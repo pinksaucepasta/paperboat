@@ -182,7 +182,7 @@ def applications(terminal, monitor=None):
         terminal.expect(terminal.marker('MONITOR_EXIT'))
 
 
-def qualify(pb, target, check, monitor, entry='connect', cwd=None):
+def qualify(pb, target, check, monitor, entry='connect', cwd=None, status_bar='off'):
     name = 'smoke-terminal-' + uuid.uuid4().hex[:12]
     terminal = None
     started = time.monotonic()
@@ -194,8 +194,10 @@ def qualify(pb, target, check, monitor, entry='connect', cwd=None):
             arguments = [pb, 'new']
         else:
             arguments = [pb, target] if entry == 'root' else [pb, 'connect', target]
-        terminal = Terminal([*arguments, '--name', name, '--status-bar', 'off'], cwd=cwd)
+        terminal = Terminal([*arguments, '--name', name, '--status-bar', status_bar], cwd=cwd)
         terminal.expect(b'\x1b[?2004h')
+        if status_bar == 'on':
+            terminal.expect(b'\x1b[1;23r')
         terminal.expect(terminal.marker('READY', 'stty -echo; '))
         if entry == 'new':
             expected = shlex.quote(str(Path(cwd).resolve()))
@@ -206,7 +208,7 @@ def qualify(pb, target, check, monitor, entry='connect', cwd=None):
             terminal.expect('PB_UNICODE_λ船')
             terminal.resize(37, 109)
             terminal.send("printf '\\nPB_SIZE_'; stty size\r")
-            terminal.expect('PB_SIZE_37 109')
+            terminal.expect('PB_SIZE_' + ('36' if status_bar == 'on' else '37') + ' 109')
             terminal.send("printf '\\033[31mPB_COLOUR\\033[0m\\n'\r")
             terminal.expect(b'\x1b[31mPB_COLOUR\x1b[0m')
             for control, label in [(b'\x03', 'INTERRUPTED'), (b'\x1a', 'STOPPED')]:
@@ -244,7 +246,7 @@ def qualify(pb, target, check, monitor, entry='connect', cwd=None):
             phases += ['vim', 'less']
         if check in ('monitor', 'all'):
             phases.append('htop')
-        result = {'check': 'terminal-' + check, 'entry': entry, 'target': target, 'status': 'PASS',
+        result = {'check': 'terminal-' + check, 'entry': entry, 'status_bar': status_bar, 'target': target, 'status': 'PASS',
                   'seconds': round(time.monotonic() - started, 1),
                   'phases': phases + ['ctrl_d', 'exact_session_cleanup']}
     except Exception as error:

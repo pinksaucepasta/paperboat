@@ -403,6 +403,7 @@ stage_terminal_fixtures() {
   local source=$1
   [[ "$TERMINAL_FIXTURES_READY" != *",$source,"* ]] || return 0
   if ! tar -C "$HERE" -czf - terminal_lifecycle.py session_lifecycle.py session_controller.py \
+      terminal_entry.py status_bar_lifecycle.py session_sharing_lifecycle.py \
       machine_lifecycle.py install_lifecycle.py pairing_lifecycle.py pairing_fault.py \
       terminal_command.py session_cleanup.py | \
       on "$source" "umask 077; mkdir -p /tmp/$RUN_ID; tar -xzf - -C /tmp/$RUN_ID"; then
@@ -492,6 +493,42 @@ assert receipt["entry"]=="new" and receipt["target"]==sys.argv[2]
   done
 }
 
+# Menus, persistent status-bar settings, and owner-side grant lifecycle.
+test_terminal_features() {
+  local source target kind script id out status t0
+  for source in "${TLIST[@]}"; do
+    for kind in terminal-entry status-bar session-sharing-owner; do
+      id="$kind:$source"
+      skipped "$kind" && continue
+      skipped "$id" && continue
+      target=$source
+      case "$kind" in
+        terminal-entry) script=terminal_entry.py ;;
+        status-bar) script=status_bar_lifecycle.py ;;
+        session-sharing-owner) script=session_sharing_lifecycle.py ;;
+      esac
+      if [ "$kind" != session-sharing-owner ] && [[ ",$TARGETS," == *,hp,* && ",$TARGETS," == *,apple,* ]]; then
+        [ "$source" != hp ] && target=hp || target=apple
+      fi
+      t0=$(now)
+      if ! stage_terminal_fixtures "$source"; then
+        record "$id" FAIL 0 "could not stage the terminal fixture"
+        continue
+      fi
+      out=$(on "$source" "python3 /tmp/$RUN_ID/$script $target" 2>&1); status=$?
+      if [ "$status" = 0 ] && python3 -c '
+import json,sys
+receipt=json.loads(sys.argv[1].splitlines()[-1])
+assert receipt["status"]=="PASS" and receipt["check"]==sys.argv[2] and receipt["target"]==sys.argv[3]
+' "$out" "$kind" "$target" 2>/dev/null; then
+        record "$id" PASS $(( $(now)-t0 ))
+      else
+        record_command_failure "$id" $(( $(now)-t0 )) "$out"
+      fi
+    done
+  done
+}
+
 # The creator first reattaches locally; a separate enrolled device then proves
 # replay and the same shell variable through its own authenticated CLI session.
 test_terminal_replay() {
@@ -558,6 +595,7 @@ for d in "${TLIST[@]}"; do
   skipped preview || test_preview "$d"
 done
 test_terminal_commands
+test_terminal_features
 skipped terminal-main || test_terminal_main_pairs
 skipped terminal-replay || test_terminal_replay
 for t in "${TLIST[@]}"; do
