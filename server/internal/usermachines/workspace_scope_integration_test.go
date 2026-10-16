@@ -347,3 +347,61 @@ func TestWorkspaceScopedTerminalOwnership(t *testing.T) {
 		t.Fatalf("resource-bound clear transfer destination: %v", err)
 	}
 }
+
+func TestFilesOnlyTeamInventoryRequiresPaidEntitlement(t *testing.T) {
+	f := newWorkspaceMachineFixture(t)
+	member := "files_member_" + f.suffix
+	t.Cleanup(func() {
+		_, _ = f.store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.team_machine_grants WHERE account_id=$1`, member)
+		_, _ = f.store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.team_members WHERE account_id=$1`, member)
+		_, _ = f.store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.users WHERE id=$1`, member)
+	})
+	for _, statement := range []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@example.test','active')`, []any{member}},
+		{`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'member',true)`, []any{f.teamOne, member}},
+		{`UPDATE paperboat.team_machine_grants SET active=false WHERE team_id=$1 AND machine_id=$2`, []any{f.teamOne, f.machine}},
+		{`INSERT INTO paperboat.team_machine_grants(team_id,machine_id,audience,account_id,capabilities,generation,active) VALUES($1,$2,'selected_member',$3,ARRAY['files'],1,true)`, []any{f.teamOne, f.machine, member}},
+	} {
+		if _, err := f.store.SQL().ExecContext(f.ctx, statement.sql, statement.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	team := workspace.WithContext(f.ctx, workspace.Scope{ID: f.teamOne, TeamID: f.teamOne})
+	check := func(want int) {
+		t.Helper()
+		items, total, err := f.service.ListInventory(team, member, InventoryOptions{Limit: 50})
+		if err != nil || total != want || len(items) != want {
+			t.Fatalf("files-only inventory count=%d total=%d want=%d: %v", len(items), total, want, err)
+		}
+		if want == 1 {
+			if items[0].ID != f.machine || items[0].CanManage || len(items[0].Permissions) != 1 || items[0].Permissions[0] != "files" {
+				t.Fatal("files-only member borrowed owner or terminal authority")
+			}
+			if _, err := f.service.Get(team, member, f.machine); err != nil {
+				t.Fatalf("files-only detail denied: %v", err)
+			}
+		}
+	}
+	check(1)
+	if _, err := getMachineForCapability(team, f.store.Queries(), dbsqlc.GetUserMachineForCapabilityParams{ID: f.machine, UserID: member, Capability: "terminal"}); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("files-only grant authorized terminal: %v", err)
+	}
+	if _, total, err := f.service.ListInventory(workspace.WithContext(f.ctx, workspace.Scope{ID: "personal"}), member, InventoryOptions{Limit: 50}); err != nil || total != 0 {
+		t.Fatal("team grant leaked into personal inventory")
+	}
+	if _, err := f.store.SQL().ExecContext(f.ctx, `UPDATE paperboat.billing_workspaces SET period_end=now()-interval '1 second' WHERE team_id=$1`, f.teamOne); err != nil {
+		t.Fatal(err)
+	}
+	check(0)
+	if _, err := f.store.SQL().ExecContext(f.ctx, `UPDATE paperboat.billing_workspaces SET period_end=now()+interval '1 hour' WHERE team_id=$1`, f.teamOne); err != nil {
+		t.Fatal(err)
+	}
+	check(1)
+	if _, err := f.store.SQL().ExecContext(f.ctx, `UPDATE paperboat.team_machine_grants SET active=false WHERE team_id=$1 AND account_id=$2`, f.teamOne, member); err != nil {
+		t.Fatal(err)
+	}
+	check(0)
+}
