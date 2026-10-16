@@ -72,9 +72,13 @@ func (p *fakeAddressProvider) DeleteAddressRecord(_ context.Context, record Addr
 type fakeAddressResolver struct {
 	values []string
 	err    error
+	byHost map[string][]string
 }
 
-func (r *fakeAddressResolver) LookupHost(context.Context, string) ([]string, error) {
+func (r *fakeAddressResolver) LookupHost(_ context.Context, host string) ([]string, error) {
+	if values, ok := r.byHost[host]; ok {
+		return append([]string(nil), values...), r.err
+	}
 	return append([]string(nil), r.values...), r.err
 }
 
@@ -187,6 +191,21 @@ func TestAddressReconcilerPersistsUncertainWriteAndRetainsHealthyRecordOnPostgre
 	resolver.values, resolver.err = nil, &net.DNSError{IsNotFound: true}
 	if err := reconciler.Reconcile(context.Background(), withdraw); err != nil {
 		t.Fatalf("NXDOMAIN withdrawal verification: %v", err)
+	}
+	// Deleting an exact preview record exposes its parent wildcard. That is a
+	// completed withdrawal, not an endless provider retry consuming DNS budget.
+	resolver.values, resolver.err = []string{"8.8.4.4"}, nil
+	withdraw.ReadinessVersion, withdraw.ObservedAt = "withdraw_wildcard", now.Add(2500*time.Millisecond)
+	resolver.byHost = map[string][]string{host: {"8.8.8.8"}}
+	if err := reconciler.Reconcile(context.Background(), withdraw); !isAddressErrorKind(err, AddressPublicationPending) {
+		t.Fatalf("unrelated cached address accepted as wildcard: %v", err)
+	}
+	delete(resolver.byHost, host)
+	if err := reconciler.Reconcile(context.Background(), withdraw); err != nil {
+		t.Fatalf("parent wildcard prevented exact withdrawal: %v", err)
+	}
+	if err := database.Pool().QueryRow(context.Background(), `SELECT state FROM edge_dns_publications WHERE hostname=$1`, host).Scan(&state); err != nil || state != "verified" {
+		t.Fatalf("wildcard withdrawal remained queued: %v", err)
 	}
 	mixedLookupCause := errors.New("private resolver failure")
 	resolver.err = errors.Join(&net.DNSError{IsNotFound: true}, mixedLookupCause)

@@ -357,14 +357,34 @@ func (r *AddressReconciler) Reconcile(ctx context.Context, desired DesiredAddres
 	if mutated {
 		return addressError(AddressPublicationPending, "provider changes require independent readback")
 	}
+	if err := r.verifyAddressResolution(ctx, host, wanted); err != nil {
+		return err
+	}
+	return r.markState(ctx, conn.Conn(), desired, generation, records, "verified", "")
+}
+
+func (r *AddressReconciler) verifyAddressResolution(ctx context.Context, host string, wanted map[string]struct{}) error {
 	resolved, lookupErr := r.resolver.LookupHost(ctx, addressLookupHostname(host))
 	if lookupErr != nil && !(len(wanted) == 0 && isDNSNotFound(lookupErr)) {
 		return addressErrorWithCauses(AddressPublicationPending, "authoritative address lookup failed", 0, lookupErr)
 	}
 	if !resolvedAddressesMatch(resolved, wanted) {
-		return addressError(AddressPublicationPending, "authoritative address results have not converged")
+		// Provider readback above proved that the exact A/AAAA records are gone.
+		// A parent wildcard can still answer this name; independently compare a
+		// fresh sibling before accepting that inherited response as withdrawal.
+		_, parent, exact := strings.Cut(host, ".")
+		if len(wanted) != 0 || !exact || strings.HasPrefix(host, "*.") {
+			return addressError(AddressPublicationPending, "authoritative address results have not converged")
+		}
+		inherited, err := r.resolver.LookupHost(ctx, addressLookupHostname("*."+parent))
+		if err != nil {
+			return addressErrorWithCauses(AddressPublicationPending, "parent wildcard lookup failed", 0, err)
+		}
+		if len(inherited) == 0 || !resolvedAddressesMatch(resolved, stringSet(inherited)) {
+			return addressError(AddressPublicationPending, "withdrawn address does not match the parent wildcard")
+		}
 	}
-	return r.markState(ctx, conn.Conn(), desired, generation, records, "verified", "")
+	return nil
 }
 
 func (r *AddressReconciler) persistDesired(ctx context.Context, conn *pgx.Conn, desired DesiredAddressPublication) (uint64, error) {
