@@ -66,6 +66,9 @@ func workOSCallback(service *auth.Service) http.HandlerFunc {
 }
 
 func writeWorkOSCallbackFailure(w http.ResponseWriter, r *http.Request, err error) {
+	if writeEmailPolicyError(w, r, err) {
+		return
+	}
 	var verification *auth.WorkOSVerificationError
 	if errors.Is(err, auth.ErrWorkOSImpersonation) || errors.As(err, &verification) && verification.HTTPStatus == http.StatusBadRequest {
 		logHTTPRejection(r, http.StatusUnauthorized, "auth_callback_failed", err)

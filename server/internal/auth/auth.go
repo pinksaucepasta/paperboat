@@ -158,7 +158,11 @@ func (s *Service) VerifyCallback(ctx context.Context, input CallbackInput) (User
 	sessionID := newID("session")
 	err = s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		q := tx.Queries()
-		row, err := q.UpsertWorkOSUser(ctx, dbsqlc.UpsertWorkOSUserParams{UserID: newID("user"), WorkosSubject: profile.Subject, PrimaryEmail: strings.ToLower(strings.TrimSpace(profile.Email)), EmailVerified: profile.EmailVerified, DisplayName: profile.DisplayName})
+		canonical, err := signupEmail(ctx, tx, profile)
+		if err != nil {
+			return err
+		}
+		row, err := q.UpsertWorkOSUser(ctx, dbsqlc.UpsertWorkOSUserParams{CanonicalEmail: canonical, UserID: newID("user"), WorkosSubject: profile.Subject, PrimaryEmail: strings.ToLower(strings.TrimSpace(profile.Email)), EmailVerified: profile.EmailVerified, DisplayName: profile.DisplayName})
 		if err != nil {
 			return err
 		}
@@ -178,7 +182,7 @@ func (s *Service) VerifyCallback(ctx context.Context, input CallbackInput) (User
 		})
 	})
 	if err != nil {
-		return User{}, Session{}, fmt.Errorf("upsert workos user and session: %w", err)
+		return User{}, Session{}, fmt.Errorf("upsert workos user and session: %w", signupPolicyError(err))
 	}
 	return user, Session{ID: sessionID, UserID: user.ID, Token: sessionToken, CSRFToken: csrfToken, ExpiresAt: expiresAt, WorkOSSessionID: profile.SessionID}, nil
 }

@@ -2,12 +2,14 @@ package teams
 
 import (
 	"context"
+	"errors"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"time"
 
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat-server/internal/emailpolicy"
 )
 
 func capacity(ctx context.Context, tx *db.Tx, account, team string) error {
@@ -263,16 +265,19 @@ func (s *Service) Invite(ctx context.Context, account, team string, r InviteRequ
 	if !validID(team) || (r.AccountID == "") == (r.Email == "") || (r.AccountID != "" && !validID(r.AccountID)) {
 		return out, ErrInvalid
 	}
-	if r.Email != "" {
-		var valid bool
-		r.Email, valid = normalizeInvitationEmail(r.Email)
-		if !valid {
-			return out, ErrInvalid
-		}
-	}
 	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		if err := Lock(ctx, tx); err != nil {
 			return err
+		}
+		if r.Email != "" {
+			var err error
+			r.Email, err = emailpolicy.Normalize(ctx, tx, r.Email)
+			if errors.Is(err, emailpolicy.ErrInvalid) {
+				return ErrInvalid
+			}
+			if err != nil {
+				return err
+			}
 		}
 		done, digest, err := replay(ctx, tx, account, r.OperationID, "invite", []any{team, r}, &out)
 		if err != nil {

@@ -112,6 +112,9 @@ func registerTeamRoutes(mux *http.ServeMux, service teamAPI, read, write func(ht
 				}
 				out, err = service.Attach(r.Context(), account, team, in)
 			}
+			if writeEmailPolicyError(w, r, err) {
+				return
+			}
 			switch {
 			case expectedHTTPErrorOnly(err, teams.ErrReservedSlug):
 				writeError(w, r, http.StatusBadRequest, "team_id_reserved", teams.ErrReservedSlug.Error())

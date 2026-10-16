@@ -168,9 +168,9 @@ func (q *Queries) RotateBrowserSession(ctx context.Context, arg RotateBrowserSes
 
 const upsertWorkOSUser = `-- name: UpsertWorkOSUser :one
 WITH upsert_user AS (
-	INSERT INTO users (id, workos_subject, primary_email, email_verified, display_name, status, created_at, updated_at)
-	VALUES ($1, $2, $3, $4, $5, 'active', now(), now())
-	ON CONFLICT (workos_subject) DO UPDATE SET primary_email = EXCLUDED.primary_email, email_verified = EXCLUDED.email_verified, display_name = EXCLUDED.display_name, updated_at = now(), version = users.version + 1
+	INSERT INTO users (id, workos_subject, primary_email, canonical_email, email_verified, display_name, status, created_at, updated_at)
+	VALUES ($1, $2, $3, $4, $5, $6, 'active', now(), now())
+	ON CONFLICT (workos_subject) DO UPDATE SET canonical_email = CASE WHEN users.canonical_email IS NULL THEN NULL ELSE paperboat.canonical_email_address(EXCLUDED.primary_email) END, primary_email = EXCLUDED.primary_email, email_verified = EXCLUDED.email_verified, display_name = EXCLUDED.display_name, updated_at = now(), version = users.version + 1
 	RETURNING id, workos_subject, primary_email, email_verified, display_name, status, role, created_at
 ), identity AS (
 	INSERT INTO user_identities (user_id, provider, provider_subject, email, created_at, updated_at)
@@ -181,11 +181,12 @@ SELECT id, workos_subject, primary_email, email_verified, display_name, status, 
 `
 
 type UpsertWorkOSUserParams struct {
-	UserID        string
-	WorkosSubject string
-	PrimaryEmail  string
-	EmailVerified bool
-	DisplayName   string
+	UserID         string
+	WorkosSubject  string
+	PrimaryEmail   string
+	CanonicalEmail sql.NullString
+	EmailVerified  bool
+	DisplayName    string
 }
 
 type UpsertWorkOSUserRow struct {
@@ -204,6 +205,7 @@ func (q *Queries) UpsertWorkOSUser(ctx context.Context, arg UpsertWorkOSUserPara
 		arg.UserID,
 		arg.WorkosSubject,
 		arg.PrimaryEmail,
+		arg.CanonicalEmail,
 		arg.EmailVerified,
 		arg.DisplayName,
 	)

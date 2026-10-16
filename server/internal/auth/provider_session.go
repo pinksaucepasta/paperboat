@@ -98,7 +98,7 @@ func (s *Service) refreshWorkOSSession(ctx context.Context, sessionHash, subject
 	}
 	// The verified email is an authorization input for shared browser resources.
 	// Refresh it atomically with provider credentials before this request continues.
-	if _, err = tx.ExecContext(ctx, `UPDATE paperboat.users SET primary_email=$1, email_verified=$2,
+	if _, err = tx.ExecContext(ctx, `UPDATE paperboat.users SET canonical_email=CASE WHEN canonical_email IS NULL THEN NULL ELSE paperboat.canonical_email_address($1) END, primary_email=$1, email_verified=$2,
 		updated_at=now(), version=version+1 WHERE id=$3 AND workos_subject=$4`, strings.ToLower(strings.TrimSpace(profile.Email)), profile.EmailVerified, userID, subject); err != nil {
 		return err
 	}

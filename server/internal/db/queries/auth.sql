@@ -1,8 +1,8 @@
 -- name: UpsertWorkOSUser :one
 WITH upsert_user AS (
-	INSERT INTO users (id, workos_subject, primary_email, email_verified, display_name, status, created_at, updated_at)
-	VALUES (sqlc.arg(user_id), sqlc.arg(workos_subject), sqlc.arg(primary_email), sqlc.arg(email_verified), sqlc.arg(display_name), 'active', now(), now())
-	ON CONFLICT (workos_subject) DO UPDATE SET primary_email = EXCLUDED.primary_email, email_verified = EXCLUDED.email_verified, display_name = EXCLUDED.display_name, updated_at = now(), version = users.version + 1
+	INSERT INTO users (id, workos_subject, primary_email, canonical_email, email_verified, display_name, status, created_at, updated_at)
+	VALUES (sqlc.arg(user_id), sqlc.arg(workos_subject), sqlc.arg(primary_email), sqlc.narg(canonical_email), sqlc.arg(email_verified), sqlc.arg(display_name), 'active', now(), now())
+	ON CONFLICT (workos_subject) DO UPDATE SET canonical_email = CASE WHEN users.canonical_email IS NULL THEN NULL ELSE paperboat.canonical_email_address(EXCLUDED.primary_email) END, primary_email = EXCLUDED.primary_email, email_verified = EXCLUDED.email_verified, display_name = EXCLUDED.display_name, updated_at = now(), version = users.version + 1
 	RETURNING id, workos_subject, primary_email, email_verified, display_name, status, role, created_at
 ), identity AS (
 	INSERT INTO user_identities (user_id, provider, provider_subject, email, created_at, updated_at)
