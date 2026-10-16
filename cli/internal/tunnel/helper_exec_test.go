@@ -1,6 +1,7 @@
 package tunnel
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -186,35 +187,55 @@ func TestHelperExecCloseDoesNotWaitForCancelResponse(t *testing.T) {
 	}
 }
 
-func TestHelperExecCloseWriteDoesNotWaitForResponse(t *testing.T) {
-	message := newExecMessageConnection()
-	request := ExecRequest{OperationID: "operation_exec_1", Argv: []string{"/bin/cat"}, CWD: "/workspace"}
-	connection := &helperExecConn{message: message, request: request, events: make(chan ExecEvent, 1), done: make(chan struct{}), pending: make(map[string]chan helperFrame)}
+type inputOrderStream struct{ bytes.Buffer }
+
+func (*inputOrderStream) Close() error                     { return nil }
+func (*inputOrderStream) SetWriteDeadline(time.Time) error { return nil }
+
+func TestHelperExecEOFFollowsAllInputWithoutWaitingForResponse(t *testing.T) {
+	control, input := &inputOrderStream{}, &inputOrderStream{}
+	message := &nativeMessageConnection{control: control, input: input, ctx: context.Background()}
+	connection := &helperExecConn{message: message, streamID: 7,
+		request: ExecRequest{OperationID: "operation_exec_1"}}
+	chunks := [][]byte{bytes.Repeat([]byte("x"), 16384), bytes.Repeat([]byte("y"), 48)}
+	for _, chunk := range chunks {
+		if n, err := connection.Write(chunk); err != nil || n != len(chunk) {
+			t.Fatal("stdin write failed", n, err)
+		}
+	}
 	done := make(chan error, 1)
 	go func() { done <- connection.CloseWrite() }()
-	select {
-	case written := <-message.writes:
-		var frame helperFrame
-		if err := json.Unmarshal(written.data, &frame); err != nil {
-			t.Fatal(err)
-		}
-		var payload struct {
-			Action      string `json:"action"`
-			OperationID string `json:"operation_id"`
-		}
-		if err := json.Unmarshal(frame.Payload, &payload); err != nil || payload.Action != "close-input" || payload.OperationID != request.OperationID {
-			t.Fatalf("close-input payload=%+v err=%v", payload, err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("close-write did not send authenticated input EOF")
-	}
 	select {
 	case err := <-done:
 		if err != nil {
 			t.Fatal(err)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("close-write waited for a control response")
+		t.Fatal("input EOF waited for a response")
+	}
+	if control.Len() != 0 {
+		t.Fatal("input EOF used the independent control stream and can overtake stdin")
+	}
+	for index, chunk := range chunks {
+		kind, data, err := readNativeRecord(input, false)
+		if err != nil || kind != nativeBinary {
+			t.Fatal("missing input record", err)
+		}
+		frame, err := protocol.DecodeTerminalInput(data)
+		if err != nil || frame.StreamID != 7 || frame.Sequence != uint64(index+1) || !bytes.Equal(frame.Data, chunk) {
+			t.Fatal("stdin framing lost bytes or ordering", err)
+		}
+	}
+	_, data, err := readNativeRecord(input, false)
+	if err != nil {
+		t.Fatal("missing ordered EOF", err)
+	}
+	frame, err := protocol.DecodeTerminalEOF(data)
+	if err != nil || frame.StreamID != 7 || frame.Sequence != 3 {
+		t.Fatal("EOF lost the exact input binding/sequence", err)
+	}
+	if input.Len() != 0 {
+		t.Fatal("unexpected trailing input records")
 	}
 }
 

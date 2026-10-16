@@ -404,12 +404,43 @@ stage_terminal_fixtures() {
   [[ "$TERMINAL_FIXTURES_READY" != *",$source,"* ]] || return 0
   if ! tar -C "$HERE" -czf - terminal_lifecycle.py session_lifecycle.py session_controller.py \
       terminal_entry.py status_bar_lifecycle.py session_sharing_lifecycle.py \
+      exec_lifecycle.py \
       machine_lifecycle.py install_lifecycle.py pairing_lifecycle.py pairing_fault.py \
       terminal_command.py session_cleanup.py | \
       on "$source" "umask 077; mkdir -p /tmp/$RUN_ID; tar -xzf - -C /tmp/$RUN_ID"; then
     return 1
   fi
   TERMINAL_FIXTURES_READY+="$source,"
+}
+
+# Main-path protocol checks run from each real client, without the long/stress
+# checks when selected through --skip. Transfers require a different recipient.
+test_application_pairs() {
+  local kind=$1 script=$2 check=${3:-} source target id out status t0 arguments
+  skipped "$kind" && return
+  for source in "${TLIST[@]}"; do
+    for target in "${TLIST[@]}"; do
+      [ "$kind" != transfer-multi ] || [ "$source" != "$target" ] || continue
+      id="$kind:$source-$target"
+      skipped "$id" && continue
+      t0=$(now)
+      if ! stage_terminal_fixtures "$source"; then
+        record "$id" FAIL 0 "could not stage compressed application fixture"
+        continue
+      fi
+      arguments="$target"
+      [ -z "$check" ] || arguments+=" --check $check"
+      out=$(on "$source" "python3 /tmp/$RUN_ID/$script $arguments" 2>&1); status=$?
+      if [ "$status" = 0 ] && python3 -c '
+import json,sys
+r=json.loads(sys.argv[1]); assert r["status"]=="PASS" and r["target"]==sys.argv[2]
+' "$out" "$target" 2>/dev/null; then
+        record "$id" PASS $(( $(now)-t0 ))
+      else
+        record_command_failure "$id" $(( $(now)-t0 )) "$out"
+      fi
+    done
+  done
 }
 
 # Normal behavior from each selected client to each target. Each run owns and
@@ -598,6 +629,7 @@ test_terminal_commands
 test_terminal_features
 skipped terminal-main || test_terminal_main_pairs
 skipped terminal-replay || test_terminal_replay
+test_application_pairs exec-main exec_lifecycle.py exec
 for t in "${TLIST[@]}"; do
   skipped ssh-long || collect "ssh-long:$t" "long-ssh-$t" SSHFINAL "$LONG_SSH"
   skipped exec-long || collect "exec-long:$t" "long-exec-$t" FINAL "$LONG_EXEC"

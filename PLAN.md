@@ -1405,3 +1405,5 @@ file | note`. Row-level evidence goes in CHECKLIST.md.
 2026-10-16 | Lane B closes05:39 correlation per user | rows ticked:none | Brief502s were deployment restart. Diagnostic-detail request withdrawn; no dependency on Lane A correlation evidence. Continue normal server feature producers in PLAN order.
 
 2026-10-16 | Lane A cache policy | Rows ticked:none; one reuse/retire/retry rule in owner.go, shared UDP/QUIC failure decision. Restart, overload, relay-hint, lost-handshake idle/live and TLS-no-retry owners PASS; focused race33.721s, native vet/full race176.387s. Next batch uses targeted affected checks under Speed rules; Apple DNS/deploy loss closed without further investigation.
+
+2026-10-16 | Lane A F4-01 input repair | Rows ticked:none yet; Apple pipe16432 bytes repeatedly arrived as16384, same bytes from regular file PASS. Host exec/SSH sequence fence never advanced and exec EOF used independent control lane; ordered binary EOF and sequence advancement now share the bound input stream. Workspace RED0.045/0.048s, focused race1.142s, tunnel/server vet+race27.833/15.411s and30 smoke-tool tests34.925s PASS; targeted L/M batch next.

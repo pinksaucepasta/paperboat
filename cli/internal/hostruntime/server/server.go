@@ -168,6 +168,7 @@ type legacyTerminalInputHandler interface {
 
 type ExecDataHandler interface {
 	HandleExecInput(context.Context, Authorization, string, []byte) error
+	HandleExecEOF(context.Context, Authorization, string) error
 	HandleExecResize(context.Context, Authorization, string, uint16, uint16) error
 }
 
@@ -447,6 +448,9 @@ func (s *Server) handleTerminalDataWithWriter(ctx context.Context, message []byt
 		}
 		duplicateInput := frame.Sequence == binding.inputSequence
 		if duplicateInput {
+			if binding.kind == "exec" || binding.kind == "ssh" {
+				return &protocol.Error{Code: protocol.InvalidFrame, Cause: errors.New("stream input sequence is not contiguous")}
+			}
 			if _, rich := s.config.Handler.(TerminalInputHandler); !rich {
 				return &protocol.Error{Code: protocol.InvalidFrame, Cause: errors.New("terminal input sequence is not contiguous")}
 			}
@@ -457,7 +461,7 @@ func (s *Server) handleTerminalDataWithWriter(ctx context.Context, message []byt
 		if err := validateTerminalBinding(binding); err != nil {
 			return err
 		}
-		advanceInput := false
+		advanceInput := binding.kind == "exec" || binding.kind == "ssh"
 		if binding.kind == "exec" {
 			handler, ok := s.config.Handler.(ExecDataHandler)
 			if !ok {
@@ -532,18 +536,28 @@ func (s *Server) handleTerminalDataWithWriter(ctx context.Context, message []byt
 			}
 			return bindErr
 		}
-		if frame.Sequence != binding.inputSequence+1 || binding.kind != "ssh" {
-			return &protocol.Error{Code: protocol.InvalidFrame, Cause: errors.New("SSH EOF sequence is not contiguous")}
+		if frame.Sequence != binding.inputSequence+1 || binding.kind != "ssh" && binding.kind != "exec" {
+			return &protocol.Error{Code: protocol.InvalidFrame, Cause: errors.New("input EOF sequence is not contiguous")}
 		}
 		if err := validateTerminalBinding(binding); err != nil {
 			return err
 		}
-		handler, ok := s.config.Handler.(SSHDataHandler)
-		if !ok {
-			return ErrCapabilityUnavailable
-		}
-		if err := handler.HandleSSHEOF(ctx, binding.authorization, binding.operationID); err != nil {
-			return err
+		if binding.kind == "exec" {
+			handler, ok := s.config.Handler.(ExecDataHandler)
+			if !ok {
+				return ErrCapabilityUnavailable
+			}
+			if err := handler.HandleExecEOF(ctx, binding.authorization, binding.operationID); err != nil {
+				return err
+			}
+		} else {
+			handler, ok := s.config.Handler.(SSHDataHandler)
+			if !ok {
+				return ErrCapabilityUnavailable
+			}
+			if err := handler.HandleSSHEOF(ctx, binding.authorization, binding.operationID); err != nil {
+				return err
+			}
 		}
 		state.mu.Lock()
 		if current := state.streams[streamID]; current == binding {

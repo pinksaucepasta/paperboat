@@ -375,9 +375,9 @@ func (c *helperExecConn) Write(p []byte) (int, error) {
 		message := make([]byte, 13+size)
 		message[0] = 1
 		binary.BigEndian.PutUint32(message[1:5], c.streamID)
-		binary.BigEndian.PutUint64(message[5:13], c.inputSeq.Add(1))
 		copy(message[13:], p[:size])
 		c.writeMu.Lock()
+		binary.BigEndian.PutUint64(message[5:13], c.inputSeq.Add(1))
 		err := c.message.WriteMessage(context.Background(), helperBinaryMessage, message)
 		c.writeMu.Unlock()
 		if err != nil {
@@ -392,11 +392,17 @@ func (c *helperExecConn) Write(p []byte) (int, error) {
 func (c *helperExecConn) CloseWrite() error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	_, frame, err := c.controlFrame("close-input", map[string]any{})
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	// EOF belongs to the ordered input stream. An independent control request
+	// can arrive before buffered stdin on another QUIC stream.
+	frame, err := protocol.EncodeTerminalEOF(protocol.TerminalEOFFrame{
+		StreamID: c.streamID, Sequence: c.inputSeq.Add(1),
+	}, nil)
 	if err != nil {
 		return err
 	}
-	return c.writeControl(ctx, frame)
+	return c.message.WriteMessage(ctx, helperBinaryMessage, frame)
 }
 func (c *helperExecConn) Cancel() error { return c.control("cancel", map[string]any{}) }
 func (c *helperExecConn) Signal(signal string) error {

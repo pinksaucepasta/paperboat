@@ -197,8 +197,17 @@ func TestExecApplicationProtocolCanary(t *testing.T) {
 	if _, err := helperHandshake(ctx, wire); err != nil {
 		t.Fatal(err)
 	}
-	connection := &helperExecConn{message: wire, target: &resolver.TerminalTarget{}, request: ExecRequest{OperationID: operationID, Argv: []string{"/bin/sh", "-c", `printf x >> launches; printf stdout-canary; printf stderr-canary >&2; exit 23`}, CWD: root}, events: make(chan ExecEvent, 1), done: make(chan struct{}), pending: make(map[string]chan helperFrame)}
+	connection := &helperExecConn{message: wire, target: &resolver.TerminalTarget{}, request: ExecRequest{OperationID: operationID, Argv: []string{"/bin/sh", "-c", `printf x >> launches; cat > received; printf stdout-canary; printf stderr-canary >&2; exit 23`}, CWD: root}, events: make(chan ExecEvent, 1), done: make(chan struct{}), pending: make(map[string]chan helperFrame)}
 	if err := connection.initialize(ctx); err != nil {
+		t.Fatal(err)
+	}
+	input := append(bytes.Repeat([]byte("x"), 16384), bytes.Repeat([]byte("y"), 48)...)
+	for _, part := range [][]byte{input[:16384], input[16384:]} {
+		if n, err := connection.Write(part); err != nil || n != len(part) {
+			t.Fatal("actual exec input failed", n, err)
+		}
+	}
+	if err := connection.CloseWrite(); err != nil {
 		t.Fatal(err)
 	}
 	deadline := time.Now().Add(time.Second)
@@ -235,7 +244,10 @@ func TestExecApplicationProtocolCanary(t *testing.T) {
 		t.Fatal("helper event reader did not join")
 	}
 	select {
-	case <-serveDone:
+	case err := <-serveDone:
+		if err != nil && !errors.Is(err, io.EOF) {
+			t.Fatal("actual exec input attachment failed", err)
+		}
 	case <-time.After(time.Second):
 		t.Fatal("detached server attachment did not stop")
 	}
@@ -252,7 +264,18 @@ func TestExecApplicationProtocolCanary(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
-	for event := range connection.Events() {
+	for events := connection.Events(); events != nil; {
+		var event ExecEvent
+		select {
+		case value, ok := <-events:
+			if !ok {
+				events = nil
+				continue
+			}
+			event = value
+		case <-ctx.Done():
+			t.Fatal("actual exec did not complete after ordered input EOF", ctx.Err())
+		}
 		switch event.Stream {
 		case "stdout":
 			stdout.Write(event.Data)
@@ -269,6 +292,10 @@ func TestExecApplicationProtocolCanary(t *testing.T) {
 	}
 	if code, err := connection.Wait(); err != nil || code != 23 {
 		t.Fatalf("cancel overwrote completed native result: %d/%v", code, err)
+	}
+	received, err := os.ReadFile(root + "/received")
+	if err != nil || !bytes.Equal(received, input) {
+		t.Fatal("actual exec EOF truncated stdin", len(received), err)
 	}
 	launches, readErr := os.ReadFile(root + "/launches")
 	if readErr != nil || string(launches) != "x" {

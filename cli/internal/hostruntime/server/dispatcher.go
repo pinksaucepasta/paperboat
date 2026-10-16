@@ -220,6 +220,17 @@ func (d *Dispatcher) HandleExecInput(_ context.Context, authorization Authorizat
 	return err
 }
 
+func (d *Dispatcher) HandleExecEOF(_ context.Context, authorization Authorization, operationID string) error {
+	if d.config.Exec == nil || authorization.ClientID == "" || operationID == "" {
+		return execprocess.ErrInvalid
+	}
+	execution, err := d.config.Exec.Get(operationID)
+	if err != nil {
+		return err
+	}
+	return execution.CloseInput()
+}
+
 func (d *Dispatcher) HandleExecResize(_ context.Context, authorization Authorization, operationID string, columns, rows uint16) error {
 	if d.config.Exec == nil || authorization.ClientID == "" || operationID == "" || columns == 0 || rows == 0 {
 		return execprocess.ErrInvalid
@@ -314,12 +325,6 @@ func (d *Dispatcher) exec(ctx context.Context, payload json.RawMessage) operatio
 		execution, err := d.config.Exec.Get(request.OperationID)
 		if err == nil {
 			_, err = execution.Write(request.Data)
-		}
-		return execResult(struct{}{}, err)
-	case "close-input":
-		execution, err := d.config.Exec.Get(request.OperationID)
-		if err == nil {
-			err = execution.CloseInput()
 		}
 		return execResult(struct{}{}, err)
 	case "signal":
