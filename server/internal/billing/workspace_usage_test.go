@@ -3,6 +3,7 @@ package billing_test
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -157,6 +158,10 @@ func TestPaidPeriodReplacesOnlyOverlappingFreeWindow(t *testing.T) {
 				t.Fatal("paid period was not stable across repeated reads and delayed reports")
 			}
 
+			if interval == "month" {
+				assertPriceSwitchBudget(t, store, service, workspace, code, paidStart, now)
+			}
+
 			if interval == "year" {
 				assertAnnualWindows(t, store, service, workspace, paidStart)
 			}
@@ -194,7 +199,7 @@ func assertAnnualWindows(t *testing.T, store *db.DB, service *billing.WorkspaceS
 		}
 		return result
 	}
-	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.billing_workspaces SET period_start=$2,period_end=$3 WHERE id=$1`, workspace, parse("2028-01-31T12:00:00Z"), parse("2029-01-31T12:00:00Z")); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.billing_workspaces SET period_start=$2,period_end=$3,bandwidth_anchor=$2 WHERE id=$1`, workspace, parse("2028-01-31T12:00:00Z"), parse("2029-01-31T12:00:00Z")); err != nil {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct{ at, start, end string }{
@@ -222,4 +227,62 @@ func assertAnnualWindows(t *testing.T, store *db.DB, service *billing.WorkspaceS
 			t.Fatalf("annual monthly window at %s = %s..%s", tc.at, start, end)
 		}
 	}
+}
+
+// Provider price changes can create partial billing periods; those boundaries
+// must neither replenish bandwidth nor move the workspace's monthly clock.
+func assertPriceSwitchBudget(t *testing.T, store *db.DB, service *billing.WorkspaceService, workspace, code string, anchor, now time.Time) {
+	t.Helper()
+	ctx := context.Background()
+	setPeriod := func(start, end time.Time) {
+		t.Helper()
+		if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.billing_workspaces SET period_start=$2,period_end=$3 WHERE id=$1`, workspace, start, end); err != nil {
+			t.Fatal(err)
+		}
+	}
+	debit := func(at time.Time, n, want int64) {
+		t.Helper()
+		if err := store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+			got, _, err := service.DebitWorkspaceBandwidthTx(ctx, tx, workspace, n, at)
+			if err == nil && got != want {
+				t.Errorf("price switch granted=%d want=%d at %s", got, want, at)
+			}
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	setPeriod(now.Add(-time.Minute), now.AddDate(1, 0, 0))
+	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.billing_products SET verified_interval='year' WHERE code=$1`, code); err != nil {
+		t.Fatal(err)
+	}
+	debit(now, 100, 89)
+	overview, err := service.Overview(ctx, strings.TrimPrefix(workspace, "personal:"), "")
+	if err != nil || overview.UsageBytes != 111 {
+		t.Fatal("price switch hid earlier usage", err)
+	}
+	// Switch back to monthly with a provider renewal BEFORE the original day.
+	next := anchor.AddDate(0, 1, 0)
+	early := next.Add(-24 * time.Hour)
+	setPeriod(now, early)
+	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.billing_products SET verified_interval='month' WHERE code=$1`, code); err != nil {
+		t.Fatal(err)
+	}
+	debit(now.Add(time.Minute), 1, 0)
+	setPeriod(early, early.AddDate(0, 1, 0))
+	debit(early.Add(time.Minute), 1, 0)
+	debit(next, 60, 60)
+	// A subsequent partial provider renewal cannot replenish that new month.
+	renewal := early.AddDate(0, 1, 0)
+	setPeriod(renewal, renewal.AddDate(0, 1, 0))
+	debit(renewal.Add(time.Minute), 60, 40)
+	// Expiry and repurchase within the original month retain its already spent budget.
+	expired := renewal.Add(2 * time.Minute)
+	setPeriod(renewal, expired)
+	debit(expired.Add(time.Minute), 1, 1)
+	resumed := expired.Add(2 * time.Minute)
+	setPeriod(resumed, resumed.AddDate(0, 1, 0))
+	debit(resumed, 1, 0)
+	// Historical traffic still belongs to the closed paid segment.
+	debit(expired.Add(-time.Second), 1, 0)
 }

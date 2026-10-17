@@ -155,6 +155,7 @@ func TestWorkspaceServicePersonalCheckoutReplayScopeAndWebhook(t *testing.T) {
 	t.Cleanup(func() {
 		store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.stripe_events WHERE id=$1`, "evt_"+suffix)
 		store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.stripe_events WHERE id=$1`, "evt_stale_"+suffix)
+		store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.stripe_events WHERE id=$1`, "evt_interval_"+suffix)
 		store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.stripe_events WHERE id LIKE $1`, "evt_replacement_%"+suffix)
 		store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.stripe_events WHERE id=$1`, "evt_repeat_old_"+suffix)
 		store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.billing_workspace_operations WHERE workspace_id=$1`, "personal:"+user)
@@ -250,6 +251,20 @@ func TestWorkspaceServicePersonalCheckoutReplayScopeAndWebhook(t *testing.T) {
 	}
 	if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.billing_workspaces SET state='active' WHERE id=$1`, w.ID); err != nil {
 		t.Fatal(err)
+	}
+	// Capture the original paid clock when the provider snapshot is accepted,
+	// before any usage is reported, and retain it on subsequent billing changes.
+	originalStart := fake.sub.PeriodStart
+	fake.sub.PeriodStart = originalStart.Add(12 * time.Hour)
+	fake.sub.PeriodEnd = fake.sub.PeriodStart.AddDate(1, 0, 0)
+	intervalEvent := event
+	intervalEvent.ID = "evt_interval_" + suffix
+	if processed, err = service.HandleWebhook(ctx, intervalEvent); err != nil || !processed {
+		t.Fatal("interval webhook failed", err)
+	}
+	var anchor time.Time
+	if err = store.SQL().QueryRowContext(ctx, `SELECT bandwidth_anchor FROM paperboat.billing_workspaces WHERE id=$1`, w.ID).Scan(&anchor); err != nil || !anchor.Equal(originalStart) {
+		t.Fatal("provider update moved the original bandwidth anchor", err)
 	}
 	old := fake.sub
 	old.ID = "sub_old_" + suffix
