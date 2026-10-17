@@ -1742,3 +1742,5 @@ A consumer queued after ENV producer: pb env team create must initialize the vau
 
 
 2026-10-18 | Lane A smoke receipt regression | Rows ticked:none;3d20928 source-freeze entry requires snapshot_run/stage_fixtures in temporary suite roots; missing helpers made19 receipt subcases exit2 before assertions. Fixtures now run the actual frozen entry with helpers, retained receipt/cleanup tests PASS; terminal-cleanup timeout sole focused rerun3 PASS1.096s. F6 cross-account constructor red/green qualification continues; no device changed.
+
+2026-10-18 | Lane A F6 cross-account native transfer | Rows ticked:none; server15 approval reaches transfer but sender asks for recipient account-scoped endpoint certificate and gets404. ResolveLocal now loads sender identity; existing signed native bindings authenticate exact admitted peer, constructor RED0.392s/GREEN0.404s and affected vet PASS. Affected:F6 native transfers; paid-team approval and regular transfer candidate checks next, no device changed yet.

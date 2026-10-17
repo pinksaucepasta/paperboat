@@ -10,7 +10,6 @@ import uuid
 
 from install_lifecycle import registration
 from pairing_lifecycle import invoke
-from teammate_profile import environment, profile_root
 
 PAYLOAD = b'Paperboat controlled teammate Inbox fixture\n'
 
@@ -41,34 +40,37 @@ def decide_manifests(call, source_id, destination_id, files, inbox, refused):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source-machine-id', required=True)
+    parser.add_argument('--team', default='paperboat-smoke-paid')
     args = parser.parse_args()
     binary = Path.home() / '.local/bin/pb'
     before = registration()
-    root = profile_root()
 
-    def call(*values, teammate=False):
-        prefix = ['--config', str(root / 'config.json')] if teammate else []
-        value = json.loads(invoke(binary, *prefix, *values, raw=True, input='',
-                                  env=environment(root) if teammate else None, timeout=35))
+    def call(*values):
+        value = json.loads(invoke(binary, *values, raw=True, input='', timeout=35))
         return value.get('data', value) if isinstance(value, dict) else value
 
-    recipient = call('auth', 'status', '--json', teammate=True)['account']
-    assert recipient['id'] != before['account_id']
+    current = call('team', 'get', args.team, '--json')
+    members = [member for member in current['members']
+               if member['active'] and member['account_id'] != before['account_id']]
+    assert len(members) == 1, 'paid fixture must have exactly one independent teammate'
+    recipient = {'id': members[0]['account_id']}
     name = 'smoke-inbox-' + uuid.uuid4().hex
-    team = name[:45]
+    team = args.team
     files = [name + '-approved.txt', name + '-declined.txt']
     inbox = Path(call('inbox', 'path', '--json')['path'])
     policy = call('inbox', 'policy', '--json')
-    created = False
+    shared = False
     failure = None
     try:
-        current = call('team', 'create', team, '--json')
-        created = True
-        invitation = call('team', 'invite', team, recipient['email'],
-                          '--generation', str(current['generation']), '--json')
-        current = call('team', 'accept', invitation['invitation_id'], '--json', teammate=True)
+        current = call('team', 'get', team, '--json')
+        assert current['owner_account'] == before['account_id']
+        assert any(member['account_id'] == recipient['id'] and member['active']
+                   for member in current['members'])
+        assert not any(machine['machine_id'] == before['machine_id'] and machine['active']
+                       for machine in current.get('machines', []))
         current = call('team', 'machine', 'share', team, before['machine_id'],
                        '--generation', str(current['generation']), '--json')
+        shared = True
         call('team', 'machine', 'grant', team, before['machine_id'], '--member', recipient['id'],
              '--capability', 'files', '--generation', str(current['generation']), '--json')
         call('inbox', 'policy', 'manual', '--json')
@@ -94,11 +96,11 @@ def main():
         try:
             options = ['--receipt-email'] if policy['receipt_email'] else []
             call('inbox', 'policy', policy['acceptance'], *options, '--json')
-            if created:
+            if shared:
                 current = call('team', 'get', team, '--json')
                 assert current['owner_account'] == before['account_id']
-                call('team', 'delete', team, '--generation', str(current['generation']),
-                     '--confirm', team, '--json')
+                call('team', 'machine', 'unshare', team, before['machine_id'],
+                     '--generation', str(current['generation']), '--json')
             for filename in files:
                 (inbox / filename).unlink(missing_ok=True)
         except BaseException:

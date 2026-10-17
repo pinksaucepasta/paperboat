@@ -395,7 +395,14 @@ func (t *PeerTerminalTunnel) PrepareNativeFileTransfer(ctx context.Context, info
 		return nil, err
 	}
 	client := api.New(t.config.Issuer, credential, t.config.HTTPClient)
-	authority, err := t.authorities.Resolve(ctx, clientauthority.Request{Store: t.config.Store, Client: client, Issuer: t.config.Issuer, AccountID: profile.Account.ID, CLIClientSessionID: profile.CLIClientSessionID, MachineID: info.MachineID, MachineGeneration: info.MachineGeneration, Now: t.config.Now().UTC()})
+	// The transfer descriptor admits the exact remote machine. Native network
+	// bindings authenticate that peer, including a teammate's account; loading
+	// its private account-scoped certificate here would reject shared machines.
+	authority, err := clientauthority.ResolveLocal(ctx, clientauthority.Request{
+		Store: t.config.Store, Client: client, Issuer: t.config.Issuer,
+		AccountID: profile.Account.ID, CLIClientSessionID: profile.CLIClientSessionID,
+		Now: t.config.Now().UTC(),
+	})
 	if err != nil {
 		return nil, err
 	}
