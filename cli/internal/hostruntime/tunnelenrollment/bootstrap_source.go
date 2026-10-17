@@ -24,6 +24,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connectorrotation"
@@ -45,13 +46,14 @@ const (
 // and fallback handling when a deployment returns a valid error envelope with
 // an unexpected status.
 type CarrierBootstrapError struct {
-	StatusCode    int
-	Code          string
-	Retryable     bool
-	RetryAt       *time.Time
-	RepairAction  string
-	RequestID     string
-	CorrelationID string
+	StatusCode       int
+	Code             string
+	Retryable        bool
+	RetryAt          *time.Time
+	RepairAction     string
+	RequestID        string
+	CorrelationID    string
+	SupportReference string
 }
 
 func (e *CarrierBootstrapError) Error() string {
@@ -115,6 +117,7 @@ type HTTPSProductionAssemblySource struct {
 	mu                    sync.Mutex
 	drainers              map[string]*assemblyDrainer
 	credentials           *FileCredentialStore
+	recorder              *diagnostics.Recorder
 	rotations             map[string]*productionRotationRuntime
 	lifetime              context.Context
 	cancel                context.CancelFunc
@@ -164,6 +167,7 @@ func (s *HTTPSProductionAssemblySource) Start(ctx context.Context) error {
 		return nil
 	}
 	s.lifetime, s.cancel = context.WithCancel(context.Background())
+	s.recorder = diagnostics.FromContext(ctx)
 	s.started = true
 	return nil
 }
@@ -510,6 +514,7 @@ func (s *HTTPSProductionAssemblySource) carrierSessionSource(ctx context.Context
 	}
 	descriptor, err := s.fetchCarrierDescriptor(ctx, request, body)
 	if err != nil {
+		s.recordCarrierBootstrapFailure(bootstrapRequest, err)
 		return connector.DataCarrierSessionSource{}, err
 	}
 	if err := validateCarrierDescriptor(descriptor, s.clock.Now().UTC(), request, controlIdentity, welcome, apply); err != nil {
@@ -684,7 +689,7 @@ func classifyCarrierBootstrapError(status int, raw []byte) error {
 
 	structured := &CarrierBootstrapError{
 		StatusCode: status, Code: payload.Code, Retryable: payload.Retryable != nil && *payload.Retryable,
-		RepairAction: payload.RepairAction, RequestID: payload.RequestID, CorrelationID: payload.CorrelationID,
+		RepairAction: payload.RepairAction, RequestID: payload.RequestID, CorrelationID: payload.CorrelationID, SupportReference: payload.SupportReference,
 	}
 	if payload.RetryAt != nil {
 		retryAt := payload.RetryAt.UTC()

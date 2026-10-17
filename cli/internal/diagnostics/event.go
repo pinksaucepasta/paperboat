@@ -29,6 +29,7 @@ func invalidDiagnostic(cause error) error {
 }
 
 var allowedFields = map[string]bool{
+	"session_id": true, "process_generation": true, "config_generation": true, "config_content_hash": true,
 	"capability": true, "generation": true, "operation": true, "outcome": true,
 	"path_category": true, "phase": true, "reason": true, "relay_region": true,
 	"retry_class": true, "state": true, "transport": true,

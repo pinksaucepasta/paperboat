@@ -14,6 +14,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connectorrotation"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hoststate"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelmanager"
@@ -40,7 +41,7 @@ func (f *staleControlFixture) serve(w http.ResponseWriter, r *http.Request) {
 			f.t.Error("unbounded bootstrap requests")
 		}
 		retryable := true
-		payload := carrierBootstrapErrorPayload{Schema: carrierBootstrapErrorSchema, Kind: "error", Code: "connector_session_stale", Component: "control", Message: "The connector session changed before carrier bootstrap.", Outcome: "unchanged", Retryable: &retryable, RepairAction: "reconnect", RequestID: "request_stale_01", CorrelationID: "correlation_stale_01"}
+		payload := carrierBootstrapErrorPayload{SupportReference: "support_123e4567-e89b-42d3-a456-426614174000", Schema: carrierBootstrapErrorSchema, Kind: "error", Code: "connector_session_stale", Component: "control", Message: "The connector session changed before carrier bootstrap.", Outcome: "unchanged", Retryable: &retryable, RepairAction: "reconnect", RequestID: "request_stale_01", CorrelationID: "correlation_stale_01"}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusConflict)
 		_ = json.NewEncoder(w).Encode(carrierBootstrapErrorResponse{Error: payload})
@@ -111,7 +112,8 @@ func TestTypedStaleBootstrapReconnectsControlBeforeRetryingTuple(t *testing.T) {
 	if err = source.BindCredentialStore(credentials); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
+	recorder := diagnostics.NewMemoryRecorder()
+	ctx, cancel := context.WithTimeout(diagnostics.WithRecorder(t.Context(), recorder), 8*time.Second)
 	defer cancel()
 	if err = source.Start(ctx); err != nil {
 		t.Fatal(err)
@@ -164,5 +166,13 @@ func TestTypedStaleBootstrapReconnectsControlBeforeRetryingTuple(t *testing.T) {
 		}
 	case <-ctx.Done():
 		t.Fatal("fresh control did not retry bootstrap")
+	}
+	events := recorder.Recent()
+	if len(events) == 0 {
+		t.Fatal("typed bootstrap failure lost its safe diagnostic envelope and tuple")
+	}
+	event := events[0]
+	if event.Code != "connector_session_stale" || event.SupportReference != "support_123e4567-e89b-42d3-a456-426614174000" || event.Fields["http_status"] != "409" || event.Fields["reason"] != "reconnect" || event.Fields["retry_class"] != "retryable" || event.Fields["session_id"] != initial.SessionID || event.Fields["process_generation"] != fmt.Sprint(initial.ProcessGeneration) || event.Fields["config_generation"] != fmt.Sprint(initial.ConfigGeneration) || event.Fields["config_content_hash"] != initial.ConfigContentHash {
+		t.Fatalf("bootstrap diagnostic did not preserve the rejected tuple: %+v", event)
 	}
 }
