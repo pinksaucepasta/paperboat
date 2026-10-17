@@ -222,6 +222,9 @@ func authBrowserLogin(c *command.Context) error {
 		if err = cfg.Save(); err != nil {
 			return fmt.Errorf("sign-in saved; retry `pb login` to finish configuration: %w", err)
 		}
+		if err = refreshSignedInDaemon(c.Context, cfg); err != nil {
+			return browserLoginFailure{message: "Sign-in is saved, but the installed daemon could not refresh. Run pb login again to finish, or pb doctor to check recovery.", cause: err}
+		}
 		account := state.Profile.Account
 		*state = config.BrowserLoginState{}
 		if err = save(); err != nil {

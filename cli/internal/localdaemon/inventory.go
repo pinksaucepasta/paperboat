@@ -82,6 +82,10 @@ func NewInventory(config InventoryConfig) (*Inventory, error) {
 	}, nil
 }
 
+func (i *Inventory) Snapshot(ctx context.Context) (localapi.Snapshot, error) {
+	return i.store.Snapshot(ctx)
+}
+
 func (i *Inventory) Run(ctx context.Context) error {
 	_ = i.Refresh(ctx)
 	return i.runTicker(ctx)

@@ -213,7 +213,7 @@ func (s *Server) handler() http.Handler {
 		writer.Header().Set("Cache-Control", "no-store")
 		peer, ok := request.Context().Value(peerContextKey{}).(Peer)
 		if request.URL.Path == "/v1/vault-custody" {
-			if !ok || !s.ownsVaultCustodyPeer(peer) {
+			if !ok || !s.ownsPeer(peer) {
 				writeError(writer, http.StatusForbidden, requestID, "permission_denied", "local API access denied")
 				return
 			}
@@ -230,6 +230,10 @@ func (s *Server) handler() http.Handler {
 				return
 			}
 			s.serveDiagnostics(writer, request, requestID)
+			return
+		}
+		if request.URL.Path == "/v1/inventory/refresh" {
+			s.refreshInventory(writer, request, requestID, peer)
 			return
 		}
 		if request.URL.Path == "/v1/watch" {

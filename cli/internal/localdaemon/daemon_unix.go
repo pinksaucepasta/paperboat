@@ -140,7 +140,7 @@ func Run(ctx context.Context, config DaemonConfig) (runErr error) {
 		SocketPath:           config.Paths.SocketPath,
 		OwnerUID:             config.OwnerUID,
 		OwnerGID:             config.OwnerGID,
-		Source:               store,
+		Source:               inventory,
 		Completions:          inventory,
 		Diagnostics:          diagnosticAPI,
 		AuthorizeDiagnostics: func(peer localapi.Peer) bool { return peer.UID == config.OwnerUID },

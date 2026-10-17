@@ -7,7 +7,7 @@ import (
 	"net/http"
 )
 
-func (s *Server) ownsVaultCustodyPeer(peer Peer) bool {
+func (s *Server) ownsPeer(peer Peer) bool {
 	if s.config.OwnerSID != "" {
 		return peer.SID == s.config.OwnerSID
 	}
