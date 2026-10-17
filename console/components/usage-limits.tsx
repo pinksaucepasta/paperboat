@@ -102,7 +102,12 @@ function Machines({ machines }: { machines: Machine[] }) {
     document.getElementById("machines-table")?.scrollIntoView({ behavior: "smooth", block: "nearest" })
   }
   const online = machines.filter((machine) => machine.online).length
-  const platforms = new Map<string, number>()
+  // The three supported platforms always show, in a fixed order, even at 0.
+  const platforms = new Map<string, number>([
+    ["linux", 0],
+    ["macos", 0],
+    ["windows", 0],
+  ])
   for (const machine of machines) {
     const key = platformToken(machine.platform) ?? "unknown"
     platforms.set(key, (platforms.get(key) ?? 0) + 1)
@@ -127,36 +132,34 @@ function Machines({ machines }: { machines: Machine[] }) {
         />
       </div>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
-        {[...platforms]
-          .sort((a, b) => b[1] - a[1])
-          .map(([platform, count]) => {
-            const PlatformIcon = platformIcons[platform]
-            const name = formatPlatform(platform === "macos" ? "darwin" : platform)
-            const filterable = platform in filterKeys.os.options
-            return (
-              <span key={platform} className="flex items-center gap-1.5">
-                <button
-                  type="button"
-                  title={filterable ? `Show ${name} machines` : name}
-                  aria-label={name}
-                  disabled={!filterable}
-                  aria-pressed={filters.os === platform}
-                  onClick={() => toggle("os", platform)}
-                  className={cn(
-                    "flex rounded-sm outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/30 disabled:pointer-events-none",
-                    filters.os === platform && "text-foreground",
-                  )}
-                >
-                  {PlatformIcon ? (
-                    <PlatformIcon weight="fill" className="size-4" />
-                  ) : (
-                    <span className="trim-cap">{name}</span>
-                  )}
-                </button>
-                <span className="text-foreground trim-cap">{count}</span>
-              </span>
-            )
-          })}
+        {[...platforms].map(([platform, count]) => {
+          const PlatformIcon = platformIcons[platform]
+          const name = formatPlatform(platform === "macos" ? "darwin" : platform)
+          const filterable = count > 0 && platform in filterKeys.os.options
+          return (
+            <span key={platform} className="flex items-center gap-1.5">
+              <button
+                type="button"
+                title={filterable ? `Show ${name} machines` : name}
+                aria-label={name}
+                disabled={!filterable}
+                aria-pressed={filters.os === platform}
+                onClick={() => toggle("os", platform)}
+                className={cn(
+                  "flex rounded-sm outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/30 disabled:pointer-events-none",
+                  filters.os === platform && "text-foreground",
+                )}
+              >
+                {PlatformIcon ? (
+                  <PlatformIcon weight="fill" className="size-4" />
+                ) : (
+                  <span className="trim-cap">{name}</span>
+                )}
+              </button>
+              <span className={cn("trim-cap", count ? "text-foreground" : "text-muted-foreground")}>{count}</span>
+            </span>
+          )
+        })}
       </div>
     </div>
   )
@@ -260,14 +263,16 @@ function Allowance({ billing, workspace }: { billing: BillingWorkspace; workspac
             )}
           </div>
         )}
-        <span className="flex items-center gap-4 text-xs text-muted-foreground">
+        <span className="flex items-start gap-8 text-xs text-muted-foreground">
           {paths
             .filter((path) => path.mode !== "direct")
             .map((path) => (
-              <span key={path.mode} title={split ? `${path.label} ${formatBytes(split[path.mode])}` : undefined}>
-                <Mark icon={<span className={cn("size-2 rounded-full", path.dot)} />}>
-                  {path.label}
-                </Mark>
+              // Name over amount, so the amount always shows and the row never outgrows the card.
+              <span key={path.mode} className="flex flex-col gap-1.5">
+                <Mark icon={<span className={cn("size-2 rounded-full", path.dot)} />}>{path.label}</Mark>
+                <span className="pl-[18px] text-foreground tabular-nums trim-cap">
+                  {split ? formatBytes(split[path.mode]) : "…"}
+                </span>
               </span>
             ))}
         </span>
