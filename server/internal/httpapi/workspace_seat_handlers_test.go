@@ -65,6 +65,10 @@ func TestPurchasedSeatHTTPContractPostgres(t *testing.T) {
 	exec(`INSERT INTO paperboat.billing_workspaces(id,team_id,state,quantity,product_code,provider_subscription_id,provider_customer_id,provider_item_id,period_start,period_end) VALUES('team:'||$1,$1,'active',2,$1,'sub_'||$1,'cus_'||$1,'si_'||$1,now()-interval '1 day',now()+interval '29 days')`, team)
 	provider := &seatHTTPProvider{}
 	service := billing.NewWorkspaceService(store, provider, "seat-http-key")
+	// Match application startup before the overview creates its allowance window.
+	if err = service.InitializeAllowancePolicy(ctx, nil, nil, nil); err != nil {
+		t.Fatal(err)
+	}
 	mux := http.NewServeMux()
 	mux.Handle("GET /v1/billing/workspaces/teams/{team_id}/seats/preview", workspaceSeatChange(service, true))
 	mux.Handle("POST /v1/billing/workspaces/teams/{team_id}/seats", workspaceSeatChange(service, false))

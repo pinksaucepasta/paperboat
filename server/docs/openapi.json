@@ -9961,7 +9961,9 @@
           "cancel_at_period_end",
           "usage_bytes",
           "allowance_bytes",
-          "seats_used"
+          "seats_used",
+          "allowance_period_start",
+          "allowance_period_end"
         ],
         "properties": {
           "id": {
@@ -10041,6 +10043,16 @@
           "scheduled_seats_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "allowance_period_start": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Start of the current monthly accounting budget shared by the usage and allowance, including earlier segments of that budget."
+          },
+          "allowance_period_end": {
+            "type": "string",
+            "format": "date-time",
+            "description": "End of the current monthly accounting budget at the original bandwidth anchor; independent of provider renewal dates and clipped segment boundaries."
           }
         }
       },

@@ -27,16 +27,24 @@ func (s *WorkspaceService) PersonalMachineQuota(ctx context.Context) (*int32, er
 }
 
 func (s *WorkspaceService) usageOverviewTx(ctx context.Context, tx *db.Tx, w *Workspace) error {
-	if _, err := s.CheckWorkspaceBandwidthTx(ctx, tx, w.ID, time.Now().UTC()); err != nil {
+	at := time.Now().UTC()
+	policy, err := workspaceUsagePolicyTx(ctx, tx, w.ID, at)
+	if err != nil {
 		return err
 	}
+	window, err := usageWindowTx(ctx, tx, w.ID, policy, at)
+	if err != nil {
+		return err
+	}
+	w.AllowancePeriodStart = window.budget
+	w.AllowancePeriodEnd = policy.end
 	w.AllowanceBytes = nil
 	var allowance sql.NullInt64
-	err := tx.QueryRow(ctx, `SELECT coalesce(sum(u.observed_bytes),0),max(p.included_bytes)
+	err = tx.QueryRow(ctx, `SELECT coalesce(sum(u.observed_bytes),0),max(p.included_bytes)
 FROM billing_workspace_usage_periods p JOIN billing_workspace_usage_periods u
  ON u.workspace_id=p.workspace_id AND u.paid=p.paid
  AND coalesce(u.budget_start,u.period_start)=coalesce(p.budget_start,p.period_start)
-WHERE p.workspace_id=$1 AND p.period_start<=now() AND p.period_end>now()`, w.ID).Scan(&w.UsageBytes, &allowance)
+WHERE p.workspace_id=$1 AND p.period_start<=$2 AND p.period_end>$2`, w.ID, at).Scan(&w.UsageBytes, &allowance)
 	if allowance.Valid {
 		w.AllowanceBytes = &allowance.Int64
 	}

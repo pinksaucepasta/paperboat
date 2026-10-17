@@ -48,29 +48,31 @@ func (s *WorkspaceService) ReserveUserMachineSeat(ctx context.Context, tx *db.Tx
 // Workspace is the billing owner, independent of the member initiating a request.
 // Membership and resource grants remain the authority for accessing team resources.
 type Workspace struct {
-	Product           *WorkspaceProduct `json:"product,omitempty"`
-	UsageBytes        int64             `json:"usage_bytes"`
-	AllowanceBytes    *int64            `json:"allowance_bytes"`
-	ID                string            `json:"id"`
-	UserID            string            `json:"user_id,omitempty"`
-	TeamID            string            `json:"team_id,omitempty"`
-	State             string            `json:"state"`
-	ProductCode       string            `json:"product_code,omitempty"`
-	SeatsUsed         int               `json:"seats_used"`
-	ScheduledQuantity *int              `json:"scheduled_seats,omitempty"`
-	ScheduledAt       *time.Time        `json:"scheduled_seats_at,omitempty"`
-	Quantity          int               `json:"seats_bought"`
-	Members           int               `json:"members"`
-	CanManage         bool              `json:"can_manage"`
-	RenewalGraceUntil *time.Time        `json:"renewal_grace_until,omitempty"`
-	PaidBenefitsUntil *time.Time        `json:"paid_benefits_until,omitempty"`
-	PeriodStart       *time.Time        `json:"period_start,omitempty"`
-	PeriodEnd         *time.Time        `json:"period_end,omitempty"`
-	CancelAtPeriodEnd bool              `json:"cancel_at_period_end"`
-	CustomerID        string            `json:"-"`
-	SubscriptionID    string            `json:"-"`
-	ItemID            string            `json:"-"`
-	Revision          int64             `json:"-"`
+	AllowancePeriodStart time.Time         `json:"allowance_period_start"`
+	AllowancePeriodEnd   time.Time         `json:"allowance_period_end"`
+	Product              *WorkspaceProduct `json:"product,omitempty"`
+	UsageBytes           int64             `json:"usage_bytes"`
+	AllowanceBytes       *int64            `json:"allowance_bytes"`
+	ID                   string            `json:"id"`
+	UserID               string            `json:"user_id,omitempty"`
+	TeamID               string            `json:"team_id,omitempty"`
+	State                string            `json:"state"`
+	ProductCode          string            `json:"product_code,omitempty"`
+	SeatsUsed            int               `json:"seats_used"`
+	ScheduledQuantity    *int              `json:"scheduled_seats,omitempty"`
+	ScheduledAt          *time.Time        `json:"scheduled_seats_at,omitempty"`
+	Quantity             int               `json:"seats_bought"`
+	Members              int               `json:"members"`
+	CanManage            bool              `json:"can_manage"`
+	RenewalGraceUntil    *time.Time        `json:"renewal_grace_until,omitempty"`
+	PaidBenefitsUntil    *time.Time        `json:"paid_benefits_until,omitempty"`
+	PeriodStart          *time.Time        `json:"period_start,omitempty"`
+	PeriodEnd            *time.Time        `json:"period_end,omitempty"`
+	CancelAtPeriodEnd    bool              `json:"cancel_at_period_end"`
+	CustomerID           string            `json:"-"`
+	SubscriptionID       string            `json:"-"`
+	ItemID               string            `json:"-"`
+	Revision             int64             `json:"-"`
 }
 
 // WorkspaceTx revalidates current role authority even when replaying a provider
