@@ -46,9 +46,13 @@ Checkout operation metadata associates a subscription with its authorized worksp
 Signed webhooks trigger a fresh provider read, rather than applying arrival order
 as subscription order. Duplicate receipts do not mutate another subscription.
 
-The adapter pins Stripe API `2024-06-20`. Configure test credentials through
+The adapter pins Stripe API `2026-09-30.endive`. Configure test credentials through
 `PAPERBOAT_STRIPE_API_KEY_FILE` and `PAPERBOAT_STRIPE_WEBHOOK_SECRET_FILE`; the default
 endpoint is `https://api.stripe.com`. Live keys are rejected before an HTTP request.
+Portal sessions require `PAPERBOAT_STRIPE_PERSONAL_PORTAL_CONFIGURATION_ID` and
+`PAPERBOAT_STRIPE_TEAM_PORTAL_CONFIGURATION_ID`. Each scope uses its own product
+and monthly/yearly prices, immediate proration, and no portal quantity changes.
+Retries retain the original configuration from the encrypted operation request.
 The webhook is `POST /v1/webhooks/stripe`. Prices come from configured Stripe price
 IDs; the example catalog is inactive until configured. Free and Pro have the same personal features. Allowance checks, usage accounting
 and quota enforcement remain implemented. Configure optional nonnegative
