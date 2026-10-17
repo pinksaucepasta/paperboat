@@ -49,7 +49,7 @@ func TestPostgresFreshHostBootstrapRequiresNeverConfiguredAccount(t *testing.T) 
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@invalid.test','active'),($2,$2,$2||'@invalid.test','active')`, freshAccount, markedAccount); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state) VALUES ($1,$2,$3,'fresh ENV host','linux','amd64','/env-test','online','released'),($4,$5,$6,'marked ENV host','linux','amd64','/env-test','online','released')`, freshMachine, freshAccount, "env_"+suffix, markedMachine, markedAccount, "env_marked_"+suffix); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,configured_capabilities) VALUES ($1,$2,$3,'fresh ENV host','linux','amd64','/env-test','online','released',ARRAY['environment_injection']),($4,$5,$6,'marked ENV host','linux','amd64','/env-test','online','released',ARRAY['environment_injection'])`, freshMachine, freshAccount, "env_"+suffix, markedMachine, markedAccount, "env_marked_"+suffix); err != nil {
 		t.Fatal(err)
 	}
 	service := NewService(store, nil, nil, "https://control.example")

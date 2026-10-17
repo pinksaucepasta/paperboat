@@ -1883,3 +1883,5 @@ No API/migration/deploy change (082 unused); F15-02 stays[ ] waiting A L/M bugre
 
 2026-10-18 | Lane A F8 typed503 bootstrap retry | Rows ticked:none; existing signed-bootstrap owner RED0.103s/GREEN0.709s, full enrollment race9.192s/vet PASS; same-tuple availability retry honors deadline/backoff/retry_at and preserves typed409 redial plus tuple diagnostics.
 Parent abf4031 full make gate EXIT0 reused per user; waits for primary historical-baseline work before tunnel-manage L/M, no devices or deployments used.
+2026-10-18 | Lane B F10 server requalification | Rows ticked:none; all10 ENV PostgreSQL owners PASS on isolated paperboat_lane_b_f10_test, exit0; protected lifetime-f10-env-final-9621c7a.log. Four stale machine fixtures omitted environment_injection; explicit opt-in restores intended bootstrap/reinstall/rotation checks, disabled-capability denial retained.
+F10-01–06 wait A actual L/M ENV/vault/grants/delivery and C Environment UI proof; producer API/fields/states/errors unchanged, no migration/deploy. ENV vet/race PASS9.515s; gate receipt /tmp/lane-b-f10-gate.log; push follows green rebased gate.

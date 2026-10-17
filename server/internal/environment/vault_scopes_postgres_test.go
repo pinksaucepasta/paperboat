@@ -68,7 +68,7 @@ func TestPostgresVaultScopesTeamRotationAndReconciliation(t *testing.T) {
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@invalid.test','active'),($2,$2,$2||'@invalid.test','active')`, owner, member); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state) VALUES ($1,$2,$3,'vault scopes','linux','amd64','/vault-test','online','released')`, machine, owner, "env_"+suffix); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,configured_capabilities) VALUES ($1,$2,$3,'vault scopes','linux','amd64','/vault-test','online','released',ARRAY['environment_injection'])`, machine, owner, "env_"+suffix); err != nil {
 		t.Fatal(err)
 	}
 	service := NewService(store, nil, nil, "https://control.example")
@@ -308,7 +308,7 @@ func TestPostgresVaultScopesTeamRotationAndReconciliation(t *testing.T) {
 	// time after installation generation one; machine-control auth binds that
 	// exact installation, independently of ENV recipient generation numbering.
 	laterMachine := "vslater_" + suffix
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,installation_generation) VALUES ($1,$2,$3,'later vault','linux','amd64','/vault-test','online','released',3)`, laterMachine, owner, "later_env_"+suffix); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,installation_generation,configured_capabilities) VALUES ($1,$2,$3,'later vault','linux','amd64','/vault-test','online','released',3,ARRAY['environment_injection'])`, laterMachine, owner, "later_env_"+suffix); err != nil {
 		t.Fatal(err)
 	}
 	laterRequest := VaultHostKeyRequest{OperationID: "later_host_" + suffix, InstallationGeneration: 3, HostKeyGeneration: 3, HostPublic: b64Vault(bytes.Repeat([]byte{75}, 32))}
