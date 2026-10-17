@@ -9087,13 +9087,27 @@
           },
           "active": {
             "type": "boolean"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "joined_at": {
+            "type": "string",
+            "format": "date-time"
           }
         },
         "required": [
           "account_id",
           "membership_generation",
           "role",
-          "active"
+          "active",
+          "email",
+          "display_name",
+          "joined_at"
         ]
       },
       "TeamGrant": {
@@ -9168,6 +9182,9 @@
             "items": {
               "$ref": "#/components/schemas/TeamGrant"
             }
+          },
+          "display_name": {
+            "type": "string"
           }
         },
         "required": [
@@ -9177,7 +9194,8 @@
           "generation",
           "deleted",
           "members",
-          "grants"
+          "grants",
+          "display_name"
         ]
       },
       "TeamActivityItem": {
@@ -9294,7 +9312,8 @@
               "remove",
               "leave",
               "transfer",
-              "delete"
+              "delete",
+              "rename"
             ]
           },
           "account_id": {
@@ -9305,6 +9324,11 @@
           },
           "confirmation": {
             "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
           }
         },
         "required": [
@@ -9332,6 +9356,15 @@
             "type": "string",
             "format": "email",
             "maxLength": 254
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "member",
+              "admin"
+            ],
+            "default": "member",
+            "description": "Only the owner may invite an admin."
           }
         },
         "required": [
@@ -14504,6 +14537,17 @@
           "email": {
             "type": "string",
             "format": "email"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "created_by_email": {
+            "type": "string",
+            "format": "email"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
           }
         },
         "required": [
@@ -14514,7 +14558,11 @@
           "expires_at",
           "generation",
           "state",
-          "created_by"
+          "created_by",
+          "email",
+          "display_name",
+          "created_by_email",
+          "created_at"
         ]
       },
       "Me": {

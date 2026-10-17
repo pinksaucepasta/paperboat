@@ -262,6 +262,12 @@ func (s *Service) Mutate(ctx context.Context, account, team string, r MutationRe
 }
 func (s *Service) Invite(ctx context.Context, account, team string, r InviteRequest) (Invitation, error) {
 	var out Invitation
+	if r.Role == "" {
+		r.Role = "member"
+	}
+	if r.Role != "member" && r.Role != "admin" {
+		return out, ErrInvalid
+	}
 	if !validID(team) || (r.AccountID == "") == (r.Email == "") || (r.AccountID != "" && !validID(r.AccountID)) {
 		return out, ErrInvalid
 	}
@@ -292,7 +298,7 @@ func (s *Service) Invite(ctx context.Context, account, team string, r InviteRequ
 		}
 		if done {
 			m, ok := member(t, account)
-			if !ok || t.Deleted || !administrative(m.Role) {
+			if !ok || t.Deleted || !administrative(m.Role) || (r.Role == "admin" && m.Role != "owner") {
 				return ErrForbidden
 			}
 			return nil
@@ -301,7 +307,7 @@ func (s *Service) Invite(ctx context.Context, account, team string, r InviteRequ
 		if err != nil {
 			return err
 		}
-		if !administrative(m.Role) {
+		if !administrative(m.Role) || (r.Role == "admin" && m.Role != "owner") {
 			return ErrForbidden
 		}
 		if _, ok := member(t, r.AccountID); ok {
@@ -317,10 +323,10 @@ func (s *Service) Invite(ctx context.Context, account, team string, r InviteRequ
 		if err != nil {
 			return err
 		}
-		out = Invitation{InvitationID: "invitation_" + id.String(), TeamID: team, AccountID: r.AccountID, Email: r.Email, Role: "member", Generation: t.Generation + 1}
+		out = Invitation{InvitationID: "invitation_" + id.String(), TeamID: team, AccountID: r.AccountID, Email: r.Email, Role: r.Role, Generation: t.Generation + 1}
 		err = tx.QueryRow(ctx, `INSERT INTO team_invitations
- (invitation_id,team_id,recipient_account,recipient_email,created_by,expires_at)
- VALUES($1,$2,nullif($3,''),nullif($4,''),$5,now()+$6*interval '1 second') RETURNING expires_at`, out.InvitationID, team, r.AccountID, r.Email, account, int64(InvitationLifetime/time.Second)).Scan(&out.ExpiresAt)
+ (invitation_id,team_id,recipient_account,recipient_email,created_by,expires_at,role)
+ VALUES($1,$2,nullif($3,''),nullif($4,''),$5,now()+$6*interval '1 second',$7) RETURNING expires_at`, out.InvitationID, team, r.AccountID, r.Email, account, int64(InvitationLifetime/time.Second), r.Role).Scan(&out.ExpiresAt)
 		if err != nil {
 			return err
 		}
@@ -358,11 +364,11 @@ func (s *Service) Accept(ctx context.Context, account, id string, r AcceptReques
 			out = current
 			return nil
 		}
-		var team string
+		var team, role string
 		var recipient bool
 		var expires time.Time
 		var usable bool
-		err = tx.QueryRow(ctx, `SELECT i.team_id,`+invitationRecipientSQL+`,i.expires_at,i.accepted_at IS NULL AND i.cancelled_at IS NULL AND i.expires_at>now() FROM team_invitations i JOIN users viewer ON viewer.id=$2 AND viewer.status='active' WHERE i.invitation_id=$1 FOR UPDATE OF i`, id, account).Scan(&team, &recipient, &expires, &usable)
+		err = tx.QueryRow(ctx, `SELECT i.team_id,i.role,`+invitationRecipientSQL+`,i.expires_at,i.accepted_at IS NULL AND i.cancelled_at IS NULL AND i.expires_at>now() FROM team_invitations i JOIN users viewer ON viewer.id=$2 AND viewer.status='active' WHERE i.invitation_id=$1 FOR UPDATE OF i`, id, account).Scan(&team, &role, &recipient, &expires, &usable)
 		if err == pgx.ErrNoRows {
 			return ErrNotFound
 		}
@@ -391,7 +397,7 @@ func (s *Service) Accept(ctx context.Context, account, id string, r AcceptReques
 		if err = capacity(ctx, tx, account, team); err != nil {
 			return err
 		}
-		if _, err = tx.Exec(ctx, `INSERT INTO team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'member',true) ON CONFLICT(team_id,account_id) DO UPDATE SET membership_generation=team_members.membership_generation+1,role='member',active=true`, team, account); err != nil {
+		if _, err = tx.Exec(ctx, `INSERT INTO team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,$3,true) ON CONFLICT(team_id,account_id) DO UPDATE SET membership_generation=team_members.membership_generation+1,role=EXCLUDED.role,active=true,joined_at=now()`, team, account, role); err != nil {
 			return err
 		}
 		if _, err = tx.Exec(ctx, `UPDATE team_invitations SET recipient_account=$2,accepted_at=now() WHERE invitation_id=$1`, id, account); err != nil {

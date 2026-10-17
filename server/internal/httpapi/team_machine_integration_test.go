@@ -53,6 +53,11 @@ func TestTeamMachineAuthenticatedHTTPLifecycle(t *testing.T) {
 	ownerCookies := loginCookies(t, router, "workos_owner_"+suffix+":"+ownerEmail+":Owner")
 	memberCookies := loginCookies(t, router, "workos_member_"+suffix+":"+memberEmail+":Member")
 	owner, member := userIDByEmail(t, store, ownerEmail), userIDByEmail(t, store, memberEmail)
+	// The identity-provider fixture has no verified-email claim by default.
+	// Email invitations require a verified recipient identity in production.
+	if _, err := store.SQL().ExecContext(context.Background(), `UPDATE paperboat.users SET email_verified=true WHERE id=$1`, member); err != nil {
+		t.Fatal(err)
+	}
 	ownerToken, memberToken := authorizeCLI(t, router, ownerCookies).AccessToken, authorizeCLI(t, router, memberCookies).AccessToken
 	machine, teamID := "http_machine_"+suffix, "http-team-"+suffix
 	if _, err := store.SQL().ExecContext(context.Background(), `INSERT INTO paperboat.user_machines(id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online,configured_capabilities,observed_capabilities) VALUES($1,$2,$3,'HTTP host','linux','amd64','/workspace','online','occupied',true,ARRAY['terminal_host'],ARRAY['terminal_host'])`, machine, owner, "env_"+suffix); err != nil {
@@ -110,9 +115,52 @@ func TestTeamMachineAuthenticatedHTTPLifecycle(t *testing.T) {
 	}
 	// Entitlement changes fence team generation; use the current HTTP projection.
 	call(ownerToken, http.MethodGet, "/v1/teams/"+teamID, nil, 200, &team)
+	// GET identity fields are visible to current members, with timestamps on the wire.
+	var identity map[string]any
+	call(ownerToken, http.MethodGet, "/v1/teams/"+teamID, nil, 200, &identity)
+	members := identity["members"].([]any)
+	first := members[0].(map[string]any)
+	if first["email"] != ownerEmail || first["display_name"] != "Owner" || identity["display_name"] != teamID {
+		t.Fatal("team identity contract missing")
+	}
+	if _, err := time.Parse(time.RFC3339Nano, first["joined_at"].(string)); err != nil {
+		t.Fatal(err)
+	}
+	call(memberToken, http.MethodGet, "/v1/teams/"+teamID, nil, 403, nil)
+	call(ownerToken, http.MethodPost, "/v1/teams/"+teamID+"/actions", map[string]any{"operation_id": "rename", "expected_generation": team.Generation, "action": "rename", "name": "Renamed Team"}, 200, &team)
+	if team.Name != "Renamed Team" {
+		t.Fatal("rename not applied")
+	}
 	var invite teams.Invitation
-	call(ownerToken, http.MethodPost, "/v1/teams/"+teamID+"/invitations", teams.InviteRequest{OperationID: "invite", ExpectedGeneration: team.Generation, AccountID: member}, 200, &invite)
+	call(ownerToken, http.MethodPost, "/v1/teams/"+teamID+"/invitations", teams.InviteRequest{OperationID: "invite", ExpectedGeneration: team.Generation, Email: memberEmail, Role: "admin"}, 200, &invite)
+	var invitation map[string]any
+	call(ownerToken, http.MethodGet, "/v1/team-invitations/"+invite.InvitationID, nil, 200, &invitation)
+	if invitation["email"] != memberEmail || invitation["display_name"] != "Member" || invitation["created_by_email"] != ownerEmail || invitation["role"] != "admin" {
+		t.Fatal("invitation identity contract missing")
+	}
+	if _, err := time.Parse(time.RFC3339Nano, invitation["created_at"].(string)); err != nil {
+		t.Fatal(err)
+	}
 	call(memberToken, http.MethodPost, "/v1/team-invitations/"+invite.InvitationID+"/accept", teams.AcceptRequest{OperationID: "accept"}, 200, &team)
+	for _, m := range team.Members {
+		if m.AccountID == member && m.Role != "admin" {
+			t.Fatal("invited role lost on acceptance")
+		}
+	}
+	call(memberToken, http.MethodPost, "/v1/teams/"+teamID+"/invitations", map[string]any{"operation_id": "escalating_invite", "expected_generation": team.Generation, "email": "another@example.test", "role": "admin"}, 403, nil)
+	call(ownerToken, http.MethodPost, "/v1/teams/"+teamID+"/invitations", map[string]any{"operation_id": "invalid_role", "expected_generation": team.Generation, "email": "another@example.test", "role": "owner"}, 400, nil)
+	call(ownerToken, http.MethodPost, "/v1/teams/"+teamID+"/actions", teams.MutationRequest{OperationID: "initial_demote", ExpectedGeneration: team.Generation, Action: "role", AccountID: member, Role: "member"}, 200, &team)
+	call(memberToken, http.MethodGet, "/v1/teams/"+teamID, nil, 200, &identity)
+	call(ownerToken, http.MethodPost, "/v1/teams/"+teamID+"/actions", teams.MutationRequest{OperationID: "identity_remove", ExpectedGeneration: team.Generation, Action: "remove", AccountID: member}, 200, &team)
+	call(memberToken, http.MethodGet, "/v1/teams/"+teamID, nil, 403, nil)
+	call(ownerToken, http.MethodPost, "/v1/teams/"+teamID+"/invitations", teams.InviteRequest{OperationID: "identity_reinvite", ExpectedGeneration: team.Generation, Email: memberEmail}, 200, &invite)
+	call(memberToken, http.MethodPost, "/v1/team-invitations/"+invite.InvitationID+"/accept", teams.AcceptRequest{OperationID: "identity_reaccept"}, 200, &team)
+	for _, m := range team.Members {
+		if m.AccountID == member && m.Role != "member" {
+			t.Fatal("default invitation role is not member")
+		}
+	}
+
 	call(ownerToken, http.MethodPost, "/v1/teams/"+teamID+"/machines", teams.MachineRequest{OperationID: "share", ExpectedGeneration: team.Generation, MachineID: machine, Action: "share"}, 200, &team)
 	call(memberToken, http.MethodGet, "/v1/machines/"+machine, nil, 404, nil)
 	call(ownerToken, http.MethodPost, "/v1/teams/"+teamID+"/machine-grants", teams.MachineGrantRequest{OperationID: "grant", ExpectedGeneration: team.Generation, MachineID: machine, Audience: "selected_member", AccountID: member, Capabilities: []string{"terminal"}, Active: true}, 200, &team)
@@ -147,6 +195,7 @@ func TestTeamMachineAuthenticatedHTTPLifecycle(t *testing.T) {
 	call(ownerToken, http.MethodGet, activityPath, nil, 403, nil)
 	call(memberToken, http.MethodGet, activityPath, nil, 200, &activity)
 	call(ownerToken, http.MethodPost, "/v1/teams/"+teamID+"/actions", teams.MutationRequest{OperationID: "leave", ExpectedGeneration: team.Generation, Action: "leave"}, 200, &team)
+	call(ownerToken, http.MethodGet, "/v1/teams/"+teamID, nil, 403, nil)
 	call(memberToken, http.MethodPost, "/v1/teams/"+teamID+"/actions", teams.MutationRequest{OperationID: "delete", ExpectedGeneration: team.Generation, Action: "delete", Confirmation: teamID}, 200, &team)
 	call(memberToken, http.MethodGet, activityPath, nil, 404, nil)
 }

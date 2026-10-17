@@ -27,17 +27,17 @@ func AuditTx(ctx context.Context, tx *db.Tx, account, team, action, operation st
 }
 func ReadTx(ctx context.Context, tx *db.Tx, id string) (Team, error) {
 	out := Team{TeamID: id, Members: []Member{}, Grants: []Grant{}, Machines: []MachineBinding{}, MachineGrants: []MachineGrant{}, TerminalSessionGrants: []TerminalSessionGrant{}}
-	err := tx.QueryRow(ctx, `SELECT coalesce(display_name,team_id),owner_account,generation,deleted_at IS NOT NULL,suspended,CASE WHEN deleted_at IS NOT NULL THEN 'deleted' WHEN suspended THEN 'suspended' ELSE coalesce((SELECT CASE WHEN rotation_required THEN 'rotation_pending' ELSE 'ready' END FROM environment_vault_teams WHERE team_id=$1),'not_initialized') END FROM teams WHERE team_id=$1 FOR UPDATE`, id).Scan(&out.Name, &out.OwnerAccount, &out.Generation, &out.Deleted, &out.Suspended, &out.ENVStatus)
+	err := tx.QueryRow(ctx, `SELECT coalesce(display_name,team_id),coalesce(display_name,team_id),owner_account,generation,deleted_at IS NOT NULL,suspended,CASE WHEN deleted_at IS NOT NULL THEN 'deleted' WHEN suspended THEN 'suspended' ELSE coalesce((SELECT CASE WHEN rotation_required THEN 'rotation_pending' ELSE 'ready' END FROM environment_vault_teams WHERE team_id=$1),'not_initialized') END FROM teams WHERE team_id=$1 FOR UPDATE`, id).Scan(&out.Name, &out.DisplayName, &out.OwnerAccount, &out.Generation, &out.Deleted, &out.Suspended, &out.ENVStatus)
 	if err != nil {
 		return out, mapTeamReadNotFound(err)
 	}
-	rows, err := tx.Query(ctx, `SELECT account_id,membership_generation,CASE WHEN account_id=$2 THEN 'owner' ELSE role END,active FROM team_members WHERE team_id=$1 ORDER BY account_id`, id, out.OwnerAccount)
+	rows, err := tx.Query(ctx, `SELECT m.account_id,m.membership_generation,CASE WHEN m.account_id=$2 THEN 'owner' ELSE m.role END,m.active,u.primary_email,u.display_name,m.joined_at FROM team_members m JOIN users u ON u.id=m.account_id WHERE m.team_id=$1 ORDER BY m.account_id`, id, out.OwnerAccount)
 	if err != nil {
 		return out, err
 	}
 	for rows.Next() {
 		var m Member
-		if err = rows.Scan(&m.AccountID, &m.MembershipGeneration, &m.Role, &m.Active); err != nil {
+		if err = rows.Scan(&m.AccountID, &m.MembershipGeneration, &m.Role, &m.Active, &m.Email, &m.DisplayName, &m.JoinedAt); err != nil {
 			rows.Close()
 			return out, err
 		}

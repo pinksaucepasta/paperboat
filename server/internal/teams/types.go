@@ -37,10 +37,13 @@ const MaximumCounter uint64 = 9007199254740991
 const InvitationLifetime = 24 * time.Hour
 
 type Member struct {
-	AccountID            string `json:"account_id"`
-	MembershipGeneration uint64 `json:"membership_generation"`
-	Role                 string `json:"role"`
-	Active               bool   `json:"active"`
+	Email                string    `json:"email"`
+	DisplayName          string    `json:"display_name"`
+	JoinedAt             time.Time `json:"joined_at"`
+	AccountID            string    `json:"account_id"`
+	MembershipGeneration uint64    `json:"membership_generation"`
+	Role                 string    `json:"role"`
+	Active               bool      `json:"active"`
 }
 type Grant struct {
 	AccountID    string `json:"account_id"`
@@ -51,6 +54,7 @@ type Grant struct {
 	Active       bool   `json:"active"`
 }
 type Team struct {
+	DisplayName           string                 `json:"display_name"`
 	Name                  string                 `json:"name"`
 	ENVStatus             string                 `json:"env_status"`
 	TeamID                string                 `json:"team_id"`
@@ -111,6 +115,7 @@ type MutationRequest struct {
 	Confirmation       string `json:"confirmation"`
 }
 type InviteRequest struct {
+	Role               string `json:"role,omitempty"`
 	Email              string `json:"email,omitempty"`
 	OperationID        string `json:"operation_id"`
 	ExpectedGeneration uint64 `json:"expected_generation"`

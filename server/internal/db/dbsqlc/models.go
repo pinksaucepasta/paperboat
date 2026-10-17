@@ -2151,6 +2151,8 @@ type TeamInvitation struct {
 	AcceptedAt       sql.NullTime
 	CancelledAt      sql.NullTime
 	RecipientEmail   sql.NullString
+	Role             string
+	CreatedAt        time.Time
 }
 
 type TeamMachineGrant struct {
@@ -2170,6 +2172,7 @@ type TeamMember struct {
 	MembershipGeneration int64
 	Role                 string
 	Active               bool
+	JoinedAt             time.Time
 }
 
 type TeamOperation struct {

@@ -7,14 +7,18 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 )
 
 type InvitationSummary struct {
 	Invitation
-	State     string `json:"state"`
-	CreatedBy string `json:"created_by"`
+	State          string    `json:"state"`
+	CreatedBy      string    `json:"created_by"`
+	DisplayName    string    `json:"display_name"`
+	CreatedByEmail string    `json:"created_by_email"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 func (s *Service) InvitationInventory(ctx context.Context, account, team, q, state, owner string, limit, offset int) ([]InvitationSummary, int, error) {
@@ -34,7 +38,7 @@ func (s *Service) invitationInventory(ctx context.Context, account, team, id, q,
 	if limit < 1 || limit > 200 || offset < 0 {
 		return nil, 0, ErrInvalid
 	}
-	predicate := ` FROM team_invitations i JOIN teams t USING(team_id) JOIN users viewer ON viewer.id=$1 AND viewer.status='active' WHERE t.deleted_at IS NULL
+	predicate := ` FROM team_invitations i JOIN teams t USING(team_id) JOIN users creator ON creator.id=i.created_by LEFT JOIN LATERAL (SELECT u.primary_email,u.display_name FROM users u WHERE u.id=i.recipient_account OR (i.recipient_account IS NULL AND u.status='active' AND u.email_verified AND paperboat.canonical_email_address(u.primary_email)=i.recipient_email) ORDER BY u.id LIMIT 1) invitee ON true JOIN users viewer ON viewer.id=$1 AND viewer.status='active' WHERE t.deleted_at IS NULL
  AND (` + invitationRecipientSQL + ` OR EXISTS(SELECT 1 FROM team_members m WHERE m.team_id=i.team_id AND m.account_id=$1 AND m.active AND (m.role='admin' OR t.owner_account=$1)))
  AND ($2='' OR i.team_id=$2) AND ($3='' OR i.invitation_id=$3)
  AND ($4='' OR position(lower($4) in lower(i.team_id||' '||coalesce(i.recipient_account,'')||' '||coalesce(i.recipient_email,'')||' '||i.invitation_id))>0)
@@ -45,17 +49,16 @@ func (s *Service) invitationInventory(ctx context.Context, account, team, id, q,
 	if err := s.db.SQL().QueryRowContext(ctx, "SELECT count(*)"+predicate, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
-	rows, err := s.db.SQL().QueryContext(ctx, `SELECT i.invitation_id,i.team_id,coalesce(i.recipient_account,''),coalesce(i.recipient_email,''),i.expires_at,t.generation,i.created_by,CASE WHEN i.accepted_at IS NOT NULL THEN 'accepted' WHEN i.cancelled_at IS NOT NULL THEN 'cancelled' WHEN i.expires_at<=now() THEN 'expired' ELSE 'pending' END`+predicate+` ORDER BY i.expires_at DESC,i.invitation_id DESC LIMIT $7 OFFSET $8`, append(args, limit, offset)...)
+	rows, err := s.db.SQL().QueryContext(ctx, `SELECT i.invitation_id,i.team_id,coalesce(i.recipient_account,''),coalesce(i.recipient_email,invitee.primary_email,''),i.expires_at,t.generation,i.created_by,i.role,coalesce(invitee.display_name,''),creator.primary_email,i.created_at,CASE WHEN i.accepted_at IS NOT NULL THEN 'accepted' WHEN i.cancelled_at IS NOT NULL THEN 'cancelled' WHEN i.expires_at<=now() THEN 'expired' ELSE 'pending' END`+predicate+` ORDER BY i.expires_at DESC,i.invitation_id DESC LIMIT $7 OFFSET $8`, append(args, limit, offset)...)
 	if err != nil {
 		return nil, 0, err
 	}
 	items := []InvitationSummary{}
 	for rows.Next() {
 		var v InvitationSummary
-		if err = rows.Scan(&v.InvitationID, &v.TeamID, &v.AccountID, &v.Email, &v.ExpiresAt, &v.Generation, &v.CreatedBy, &v.State); err != nil {
+		if err = rows.Scan(&v.InvitationID, &v.TeamID, &v.AccountID, &v.Email, &v.ExpiresAt, &v.Generation, &v.CreatedBy, &v.Role, &v.DisplayName, &v.CreatedByEmail, &v.CreatedAt, &v.State); err != nil {
 			return nil, 0, errors.Join(err, rows.Close())
 		}
-		v.Role = "member"
 		items = append(items, v)
 	}
 	readErr := rows.Err()
