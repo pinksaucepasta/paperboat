@@ -197,6 +197,15 @@ func TestWorkspaceTopupCheckoutFulfillmentAndLedgerPostgres(t *testing.T) {
 				t.Fatal("mismatched event credited")
 			}
 		}
+		unconfirmed := state
+		unconfirmed.PaymentStatus = "unpaid"
+		f.states[state.ID] = unconfirmed
+		if _, err = s.HandleWebhook(ctx, paid); !errors.Is(err, billing.ErrProviderOutcomeUnknown) {
+			t.Fatalf("paid event with unconfirmed provider snapshot: %v", err)
+		}
+		if remaining(w, paidAt) != 0 {
+			t.Fatal("unconfirmed paid event credited")
+		}
 		f.states[state.ID] = state
 		// Revoking paid benefits before delivery cannot grant a Free workspace credit.
 		exec(`UPDATE paperboat.billing_workspaces SET state='canceled' WHERE id=$1`, w)

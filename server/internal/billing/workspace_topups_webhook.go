@@ -83,7 +83,11 @@ func (s *WorkspaceService) handleTopupWebhook(ctx context.Context, event StripeW
 		if !op.ProviderAttemptedAt.Valid || paidAt.Before(op.ProviderAttemptedAt.Time.Truncate(time.Second)) {
 			return nil
 		}
-		if state.Status == "complete" && state.PaymentStatus == "paid" && (event.Type == "checkout.session.async_payment_succeeded" || event.Data.Object.PaymentStatus == "paid") {
+		expectsPaid := event.Type == "checkout.session.async_payment_succeeded" || event.Data.Object.PaymentStatus == "paid"
+		if expectsPaid && (state.Status != "complete" || state.PaymentStatus != "paid") {
+			return ErrProviderOutcomeUnknown
+		}
+		if expectsPaid {
 			_, e = tx.Exec(ctx, `INSERT INTO billing_workspace_topups(provider_session_id,operation_key,workspace_id,purchased_bytes,remaining_bytes,purchased_at,expires_at) VALUES($1,$2,$3,$4,$4,$5,$6) ON CONFLICT DO NOTHING`, state.ID, state.Operation, w.ID, request.BytesAmount, paidAt, expires)
 			if e != nil {
 				return e

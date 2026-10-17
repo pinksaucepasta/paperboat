@@ -24,7 +24,14 @@ type StripeTopupState struct {
 }
 
 func (c HTTPStripeClient) CreateTopupCheckout(ctx context.Context, in StripeTopupInput) (CheckoutSession, error) {
-	v := url.Values{"mode": {"payment"}, "customer": {in.CustomerID}, "line_items[0][price]": {in.PriceID}, "line_items[0][quantity]": {"1"}, "success_url": {in.SuccessURL}, "cancel_url": {in.CancelURL}, "metadata[paperboat_topup_operation]": {in.IdempotencyKey}, "metadata[workspace_id]": {in.WorkspaceID}, "managed_payments[enabled]": {"false"}}
+	v := url.Values{
+		"mode": {"payment"}, "customer": {in.CustomerID},
+		"line_items[0][price]": {in.PriceID}, "line_items[0][quantity]": {"1"},
+		"success_url": {in.SuccessURL}, "cancel_url": {in.CancelURL},
+		"metadata[paperboat_topup_operation]": {in.IdempotencyKey},
+		"metadata[workspace_id]":              {in.WorkspaceID},
+		"managed_payments[enabled]":           {"false"},
+	}
 	hash := sha256.Sum256([]byte(in.IdempotencyKey))
 	suffix := make([]byte, 8)
 	for i := range suffix {

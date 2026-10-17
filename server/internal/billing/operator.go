@@ -210,7 +210,8 @@ func (s *OperatorService) PutProduct(ctx context.Context, actorID, key, code, re
 	if err != nil {
 		return out, fmt.Errorf("verify Stripe price: %w", err)
 	}
-	if !validStripePriceStructure(price) || (input.CatalogType == "top_up") == price.Recurring || price.ID != input.ProviderPriceID || (input.Active && !price.Active) {
+	recurring := input.CatalogType != "top_up"
+	if !validStripePriceStructure(price) || price.Recurring != recurring || price.ID != input.ProviderPriceID || (input.Active && !price.Active) {
 		return out, ErrOperatorBillingInvalid
 	}
 	metadata, _ := json.Marshal(struct {
