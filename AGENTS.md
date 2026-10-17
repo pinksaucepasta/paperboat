@@ -124,6 +124,11 @@ only when all its rows across lanes are done; Lane A runs its device verificatio
 ## Speed rules (user decision 2026-10-16, override anything slower above)
 
 Goal: every main-path row on L and M `[x]`, as fast as possible.
+- **Push on workspace green (user decision 2026-10-18, overrides the regression gate's device
+  step).** A commit pushes as soon as `make gate` minus the device smoke passes (vet, unit,
+  race, PostgreSQL, console lint + `tsc`). Device smoke runs on the pushed batch; a failing
+  device check blocks only ticking its own rows and is fixed next, never all pushes. Never hold
+  finished commits locally. Every lane and subagent pushes its own work the same hour.
 - **Batch, then smoke once.** Commit fixes as they are ready, but run the full device smoke at
   most twice a day on a build of the batch. Between full runs, verify a fix with only the
   checks it touches. A full-run regression is bisected inside the batch.
