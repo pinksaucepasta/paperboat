@@ -17,6 +17,7 @@ type membershipStripeFake struct {
 	subs    map[string]billing.StripeSubscription
 	fail    map[string]bool
 	updates map[string]int
+	results map[string]billing.SeatPreview
 }
 
 func (f *membershipStripeFake) CreateCustomer(context.Context, string, string, string) (string, error) {
@@ -50,6 +51,37 @@ func (f *membershipStripeFake) UpdateSubscriptionSeats(_ context.Context, id, it
 	return s, nil
 }
 
+func (f *membershipStripeFake) PreviewSeats(_ context.Context, in billing.SeatChange) (billing.SeatPreview, error) {
+	amount := int64(0)
+	if in.Quantity > in.PreviousQuantity {
+		amount = int64(in.Quantity-in.PreviousQuantity) * 750
+	}
+	return billing.SeatPreview{AmountDueNow: amount, Currency: "usd", NextInvoiceAmount: int64(in.Quantity) * 1500, NextInvoiceAt: in.PeriodEnd}, nil
+}
+func (f *membershipStripeFake) ChangeSeats(_ context.Context, in billing.SeatChange, key string) (billing.SeatPreview, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.results == nil {
+		f.results = map[string]billing.SeatPreview{}
+	}
+	if out, ok := f.results[key]; ok {
+		return out, nil
+	}
+	out := in.Preview
+	f.results[key] = out
+	f.updates[in.SubscriptionID]++
+	if in.Quantity >= in.PreviousQuantity {
+		sub := f.subs[in.SubscriptionID]
+		sub.Quantity = in.Quantity
+		f.subs[in.SubscriptionID] = sub
+	}
+	if f.fail[in.SubscriptionID] {
+		delete(f.fail, in.SubscriptionID)
+		return billing.SeatPreview{}, context.DeadlineExceeded
+	}
+	return out, nil
+}
+
 func TestWorkspaceMembershipRecoveryAcrossTeamsAndOwnerChange(t *testing.T) {
 	store := testStore(t)
 	ctx := context.Background()
@@ -62,6 +94,13 @@ func TestWorkspaceMembershipRecoveryAcrossTeamsAndOwnerChange(t *testing.T) {
 	ts := teams.NewService(store)
 	createJoin := func(owner, team string) teams.Team {
 		state, err := ts.Create(ctx, owner, teams.CreateRequest{OperationID: "create_" + team, TeamID: team})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.billing_workspaces(id,team_id,state,quantity,period_start,period_end) VALUES($1,$2,'active',2,now()-interval '1 hour',now()+interval '1 day')`, "team:"+team, team); err != nil {
+			t.Fatal(err)
+		}
+		state, err = ts.Get(ctx, owner, team)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -81,13 +120,13 @@ func TestWorkspaceMembershipRecoveryAcrossTeamsAndOwnerChange(t *testing.T) {
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.billing_products(id,code,provider,provider_product_id,provider_price_id,catalog_type,catalog_ref,active) VALUES($1,$2,'stripe',$3,$4,'team_subscription','{}',true)`, "bp_team_"+x, "team-plan-"+x, "prod_team_"+x, price); err != nil {
 		t.Fatal(err)
 	}
-	periodStart, periodEnd := time.Unix(1700000000, 0).UTC(), time.Unix(1702592000, 0).UTC()
+	periodStart, periodEnd := time.Now().Add(-time.Hour).UTC().Truncate(time.Second), time.Now().Add(24*time.Hour).UTC().Truncate(time.Second)
 	fake := &membershipStripeFake{subs: map[string]billing.StripeSubscription{}, fail: map[string]bool{}, updates: map[string]int{}}
 	for _, v := range []struct{ team, sub, item, customer string }{{teamA, "sub_a_" + x, "si_a_" + x, "cus_a_" + x}, {teamB, "sub_b_" + x, "si_b_" + x, "cus_b_" + x}} {
-		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.billing_workspaces(id,team_id,provider_customer_id,provider_subscription_id,provider_item_id,product_code,state,quantity,period_start,period_end) VALUES($1,$2,$3,$4,$5,$6,'active',1,$7,$8)`, "team:"+v.team, v.team, v.customer, v.sub, v.item, "team-plan-"+x, periodStart, periodEnd); err != nil {
+		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.billing_workspaces(id,team_id,provider_customer_id,provider_subscription_id,provider_item_id,product_code,state,quantity,period_start,period_end) VALUES($1,$2,$3,$4,$5,$6,'active',2,$7,$8) ON CONFLICT(id) DO UPDATE SET provider_customer_id=excluded.provider_customer_id,provider_subscription_id=excluded.provider_subscription_id,provider_item_id=excluded.provider_item_id,product_code=excluded.product_code,period_start=excluded.period_start,period_end=excluded.period_end`, "team:"+v.team, v.team, v.customer, v.sub, v.item, "team-plan-"+x, periodStart, periodEnd); err != nil {
 			t.Fatal(err)
 		}
-		fake.subs[v.sub] = billing.StripeSubscription{ID: v.sub, CustomerID: v.customer, PriceID: price, ItemID: v.item, Status: "active", Quantity: 1, PeriodStart: periodStart, PeriodEnd: periodEnd}
+		fake.subs[v.sub] = billing.StripeSubscription{ID: v.sub, CustomerID: v.customer, PriceID: price, ItemID: v.item, Status: "active", Quantity: 2, PeriodStart: periodStart, PeriodEnd: periodEnd}
 	}
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.billing_workspaces(id,user_id,state,quantity) VALUES($1,$2,'active',7)`, "personal:"+shared, shared); err != nil {
 		t.Fatal(err)
@@ -108,7 +147,7 @@ func TestWorkspaceMembershipRecoveryAcrossTeamsAndOwnerChange(t *testing.T) {
 	})
 	service := billing.NewWorkspaceService(store, fake, "membership-test-key")
 	fake.fail["sub_a_"+x] = true
-	if _, err := service.ReconcileSeats(ctx, ownerA, teamA, "seat-timeout-"+x); !errors.Is(err, billing.ErrProviderOutcomeUnknown) {
+	if _, err := service.ChangeSeats(ctx, ownerA, teamA, 3, "seat-timeout-"+x); !errors.Is(err, billing.ErrProviderOutcomeUnknown) {
 		t.Fatalf("timeout error=%v", err)
 	}
 	stateA, err := ts.Mutate(ctx, ownerA, teamA, teams.MutationRequest{OperationID: "transfer_" + x, Action: "transfer", ExpectedGeneration: stateA.Generation, AccountID: shared})
@@ -127,7 +166,7 @@ func TestWorkspaceMembershipRecoveryAcrossTeamsAndOwnerChange(t *testing.T) {
 	if err = service.ReconcileMemberships(ctx, 128); err != nil {
 		t.Fatal(err)
 	}
-	if fake.subs["sub_a_"+x].Quantity != 1 || fake.subs["sub_b_"+x].Quantity != 2 || fake.updates["sub_a_"+x] != 2 || fake.updates["sub_b_"+x] != 1 {
+	if fake.subs["sub_a_"+x].Quantity != 3 || fake.subs["sub_b_"+x].Quantity != 2 || fake.updates["sub_a_"+x] != 1 || fake.updates["sub_b_"+x] != 0 {
 		t.Fatalf("provider quantities/updates a=%d/%d b=%d/%d", fake.subs["sub_a_"+x].Quantity, fake.updates["sub_a_"+x], fake.subs["sub_b_"+x].Quantity, fake.updates["sub_b_"+x])
 	}
 	var personal int

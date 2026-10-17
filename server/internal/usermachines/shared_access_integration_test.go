@@ -31,6 +31,14 @@ func TestPostgresSharedMachineSessionIsolationAndRevocation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	now := time.Now().UTC()
+	if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.billing_workspaces(id,team_id,state,product_code,quantity,period_start,period_end) VALUES($1,$2,'active','team-pro',2,$3,$4)`, "bw_"+team, team, now.Add(-time.Hour), now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	current, err = authority.Get(ctx, owner, team)
+	if err != nil {
+		t.Fatal(err)
+	}
 	invite, err := authority.Invite(ctx, owner, team, teams.InviteRequest{OperationID: "invite", ExpectedGeneration: current.Generation, AccountID: member})
 	if err != nil {
 		t.Fatal(err)
@@ -49,10 +57,6 @@ func TestPostgresSharedMachineSessionIsolationAndRevocation(t *testing.T) {
 	}
 	current, err = authority.GrantMachine(ctx, owner, team, teams.MachineGrantRequest{OperationID: "terminal-grant", ExpectedGeneration: current.Generation, MachineID: machine, Audience: "selected_member", AccountID: member, Capabilities: []string{"terminal"}, Active: true})
 	if err != nil {
-		t.Fatal(err)
-	}
-	now := time.Now().UTC()
-	if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.billing_workspaces(id,team_id,state,product_code,quantity,period_start,period_end) VALUES($1,$2,'active','team-pro',2,$3,$4)`, "bw_"+team, team, now.Add(-time.Hour), now.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	current, err = authority.Get(ctx, owner, team)

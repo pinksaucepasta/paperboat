@@ -141,6 +141,8 @@ those credentials, adopt a default, or apply configuration to a host.
 - `GET /v1/billing/workspaces/teams/{team_id}/products`
 - `POST /v1/billing/workspaces/teams/{team_id}/checkout`
 - `POST /v1/billing/workspaces/teams/{team_id}/portal`
+- `GET /v1/billing/workspaces/teams/{team_id}/seats/preview?quantity=N`
+- `POST /v1/billing/workspaces/teams/{team_id}/seats`
 
 Product discovery uses `limit` (1–200, default 50) and `offset`, returning
 `{items,pagination:{limit,offset,total,next_offset}}`. Each product includes its
@@ -148,7 +150,7 @@ catalog type, version and verified `unit_amount` in currency minor units,
 `currency` and recurring `interval`. Unverified price fields are null and cannot
 be selected for Checkout. Workspace overview also includes the current product.
 The client displays price and affected Personal or Team scope before calling
-Checkout; Team prices are per member, with current quantity shown separately.
+Checkout; Team prices are per purchased seat, with seats_bought and seats_used shown separately.
 Checkout requires `product_version` alongside the selected product code and
 rejects a changed catalog entry with `409 product_changed` before a provider
 operation, so the client reloads prices for review. Taxes and the final total

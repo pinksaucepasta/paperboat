@@ -56,7 +56,10 @@ type Workspace struct {
 	TeamID            string            `json:"team_id,omitempty"`
 	State             string            `json:"state"`
 	ProductCode       string            `json:"product_code,omitempty"`
-	Quantity          int               `json:"paid_seats"`
+	SeatsUsed         int               `json:"seats_used"`
+	ScheduledQuantity *int              `json:"scheduled_seats,omitempty"`
+	ScheduledAt       *time.Time        `json:"scheduled_seats_at,omitempty"`
+	Quantity          int               `json:"seats_bought"`
 	Members           int               `json:"members"`
 	CanManage         bool              `json:"can_manage"`
 	RenewalGraceUntil *time.Time        `json:"renewal_grace_until,omitempty"`
@@ -87,8 +90,8 @@ func WorkspaceTx(ctx context.Context, tx *db.Tx, account, team string, manage bo
 	out.ID, out.UserID, out.CanManage = "personal:"+account, account, true
 	if team != "" {
 		var owner string
-		var member, admin bool
-		err := tx.QueryRow(ctx, `SELECT t.owner_account,EXISTS(SELECT 1 FROM team_members m WHERE m.team_id=t.team_id AND m.account_id=$2 AND m.active),EXISTS(SELECT 1 FROM team_members m WHERE m.team_id=t.team_id AND m.account_id=$2 AND m.active AND m.role='admin'),(SELECT count(*) FROM team_members m WHERE m.team_id=t.team_id AND m.active) FROM teams t WHERE t.team_id=$1 AND t.deleted_at IS NULL`, team, account).Scan(&owner, &member, &admin, &out.Members)
+		var member bool
+		err := tx.QueryRow(ctx, `SELECT t.owner_account,EXISTS(SELECT 1 FROM team_members m WHERE m.team_id=t.team_id AND m.account_id=$2 AND m.active),(SELECT count(*) FROM team_members m WHERE m.team_id=t.team_id AND m.active) FROM teams t WHERE t.team_id=$1 AND t.deleted_at IS NULL`, team, account).Scan(&owner, &member, &out.Members)
 		if err == pgx.ErrNoRows {
 			return out, ErrWorkspaceForbidden
 		}
@@ -98,7 +101,7 @@ func WorkspaceTx(ctx context.Context, tx *db.Tx, account, team string, manage bo
 		if !member {
 			return out, ErrWorkspaceForbidden
 		}
-		out.CanManage = owner == account || admin
+		out.CanManage = owner == account
 		if manage && !out.CanManage {
 			return out, ErrWorkspaceForbidden
 		}
@@ -122,6 +125,16 @@ func WorkspaceTx(ctx context.Context, tx *db.Tx, account, team string, manage bo
 	}
 	if paidUntil.Valid {
 		out.PaidBenefitsUntil = &paidUntil.Time
+	}
+	if err != nil {
+		return out, err
+	}
+	if out.TeamID != "" {
+		out.SeatsUsed, err = teams.SeatUsageTx(ctx, tx, out.TeamID)
+		if err != nil {
+			return out, err
+		}
+		err = tx.QueryRow(ctx, `SELECT scheduled_quantity,scheduled_quantity_at FROM billing_workspaces WHERE id=$1`, out.ID).Scan(&out.ScheduledQuantity, &out.ScheduledAt)
 	}
 	return out, err
 }

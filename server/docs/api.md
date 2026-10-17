@@ -322,15 +322,28 @@ entitlements keep their existing behavior. The operator pays its infrastructure 
 `GET /v1/billing/workspaces/teams/{team_id}` returns a current team's subscription;
 membership is required. Each workspace exposes `/products`, `/checkout`, and
 `/portal`. Checkout and portal require browser authentication, CSRF protection and
-an `Idempotency-Key`; team mutations additionally require current Owner/Admin role.
+an `Idempotency-Key`; team mutations additionally require current Owner role.
 Return URLs must use a configured dashboard origin.
 
-Team seats count all active members, including the owner, personal Pro subscribers,
-and people also billed by another team. Team purchases do not alter personal plans
-or grant roles or resource permissions. Sharing a machine retains personal ownership.
-An access request matching several teams returns `409 ambiguous_team_access`; it
-does not choose which team pays. Removal revokes access independently of billing.
-Team deletion requires cancellation or resolution of its outstanding subscription.
+Team billing exposes `seats_bought` and `seats_used` (active members including the
+owner plus pending, unexpired invitations). Only the owner manages billing.
+`GET /v1/billing/workspaces/teams/{team_id}/seats/preview?quantity=N` previews a
+quantity change; `POST /v1/billing/workspaces/teams/{team_id}/seats` with
+`{"quantity":N}`, CSRF and `Idempotency-Key` commits it. Both return
+`{amount_due_now,currency,next_invoice_amount,next_invoice_at}` in `data`;
+amounts are currency minor units, the date is RFC3339.
+
+Increases use Stripe `always_invoice` and require immediate payment, without
+moving the renewal date. Reductions schedule a lower quantity at renewal, with
+no immediate credit or refund; `scheduled_seats` and `scheduled_seats_at` show
+that intent while `seats_bought` remains the paid current quantity. The requested
+quantity must cover used seats (`409 seats_in_use`). Invitations reserve a seat;
+full teams get `409 seat_required`. Acceptance uses the reservation. Removing a
+member or cancelling/expiring an invite changes usage only. A scheduled reduction
+also bounds new reservations. A pending payment operation must be retried with
+the same key (`409 billing_pending` / `503 provider_outcome_unknown`); membership
+reconciliation never changes purchased quantity. Other role, resource and
+personal subscription boundaries remain independent of seats.
 
 Stripe test setup is pending. Free and Pro provide identical personal features. Allowance checks and quotas
 remain configurable, with unset values imposing no limits. Prices remain unset. An uncertain checkout must retain its operation ID; a

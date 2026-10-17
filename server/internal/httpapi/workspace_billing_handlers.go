@@ -12,9 +12,14 @@ import (
 )
 
 func workspaceBillingError(w http.ResponseWriter, r *http.Request, err error) {
+	var provider billing.StripeAPIError
 	switch {
 	case errors.Is(err, billing.ErrWorkspaceForbidden):
 		writeError(w, r, http.StatusForbidden, "forbidden", "Your current workspace role does not permit this billing action.")
+	case errors.Is(err, billing.ErrSeatQuantity):
+		writeError(w, r, 409, "seats_in_use", "Seat quantity must cover the owner, active members and pending invitations.")
+	case errors.Is(err, billing.ErrSeatSubscription):
+		writeError(w, r, 409, "subscription_required", "An active team subscription is required to change seats.")
 	case errors.Is(err, billing.ErrProductChanged):
 		writeError(w, r, http.StatusConflict, "product_changed", "This price changed. Reload the plan and review its price before Checkout.")
 	case errors.Is(err, billing.ErrUnknownProduct):
@@ -33,6 +38,8 @@ func workspaceBillingError(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, r, http.StatusConflict, "billing_reconciliation_required", "The original payment operation exceeded the provider's safe retry window. Billing support must reconcile it before another operation starts.")
 	case errors.Is(err, billing.ErrProviderOutcomeUnknown):
 		writeError(w, r, http.StatusServiceUnavailable, "provider_outcome_unknown", "The payment provider outcome is not confirmed. Keep the same operation ID; do not start another purchase.", err)
+	case errors.As(err, &provider) && provider.StatusCode == http.StatusPaymentRequired:
+		writeError(w, r, http.StatusPaymentRequired, "payment_required", "Payment failed. Update your payment method in Manage billing, then start a new seat change.")
 	default:
 		writeError(w, r, http.StatusServiceUnavailable, "billing_unavailable", "Billing is unavailable. No subscription change has been confirmed.", err)
 	}

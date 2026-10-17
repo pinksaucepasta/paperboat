@@ -9922,12 +9922,13 @@
         "required": [
           "id",
           "state",
-          "paid_seats",
+          "seats_bought",
           "members",
           "can_manage",
           "cancel_at_period_end",
           "usage_bytes",
-          "allowance_bytes"
+          "allowance_bytes",
+          "seats_used"
         ],
         "properties": {
           "id": {
@@ -9944,10 +9945,6 @@
           },
           "product_code": {
             "type": "string"
-          },
-          "paid_seats": {
-            "type": "integer",
-            "minimum": 0
           },
           "members": {
             "type": "integer",
@@ -9995,6 +9992,22 @@
                 "type": "null"
               }
             ]
+          },
+          "seats_bought": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "seats_used": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "scheduled_seats": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "scheduled_seats_at": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },
@@ -14982,6 +14995,32 @@
           "upload_bytes",
           "download_bytes"
         ]
+      },
+      "SeatPreview": {
+        "type": "object",
+        "required": [
+          "amount_due_now",
+          "currency",
+          "next_invoice_amount",
+          "next_invoice_at"
+        ],
+        "properties": {
+          "amount_due_now": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "next_invoice_amount": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "next_invoice_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
       }
     },
     "responses": {
@@ -44642,6 +44681,169 @@
           },
           "500": {
             "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/billing/workspaces/teams/{team_id}/seats/preview": {
+      "get": {
+        "operationId": "workspace_team_seat_preview",
+        "summary": "Owner preview of purchased seat quantity",
+        "security": [
+          {
+            "cookieSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "team_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "quantity",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized workspace result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/SeatPreview"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/billing/workspaces/teams/{team_id}/seats": {
+      "post": {
+        "operationId": "workspace_team_seat_change",
+        "summary": "Owner purchase or scheduled reduction of seats",
+        "security": [
+          {
+            "cookieSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "team_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized workspace result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/SeatPreview"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "402": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "quantity"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "quantity": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 128
+                  }
+                }
+              }
+            }
           }
         }
       }

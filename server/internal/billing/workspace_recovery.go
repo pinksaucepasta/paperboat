@@ -202,7 +202,7 @@ func (s *WorkspaceRecoveryService) retire(ctx context.Context, actorID, recovery
 			return err
 		}
 		if kind == "seats" {
-			if _, err = tx.Exec(ctx, `UPDATE billing_workspaces SET revision=revision+1,updated_at=now() WHERE id=$1`, workspaceID); err != nil {
+			if _, err = tx.Exec(ctx, `UPDATE billing_workspaces SET pending_seat_capacity=NULL,revision=revision+1,updated_at=now() WHERE id=$1`, workspaceID); err != nil {
 				return err
 			}
 		}

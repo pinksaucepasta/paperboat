@@ -109,10 +109,9 @@ func TestWorkspaceOperatorRetiresOnlyExpiredNotAppliedOperation(t *testing.T) {
 	if err := billing.NewWorkspaceService(store, fake, "worker-recovery-key").ReconcileMemberships(ctx, 1); err != nil {
 		t.Fatal(err)
 	}
-	newKey := fmt.Sprintf("membership:%s:3:8", team)
-	var newState string
-	if err := store.SQL().QueryRowContext(ctx, `SELECT state FROM paperboat.billing_workspace_operations WHERE idempotency_key=$1`, newKey).Scan(&newState); err != nil || newState != "succeeded" {
-		t.Fatalf("new worker key state=%q err=%v", newState, err)
+	var bought int
+	if err := store.SQL().QueryRowContext(ctx, `SELECT quantity FROM paperboat.billing_workspaces WHERE id=$1`, "team:"+team).Scan(&bought); err != nil || bought != 2 || fake.updates["sub_"+x] != 0 {
+		t.Fatalf("retiring an operation changed paid seats: quantity=%d err=%v", bought, err)
 	}
 	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.operator_accounts SET role='operations' WHERE id=$1`, admin); err != nil {
 		t.Fatal(err)

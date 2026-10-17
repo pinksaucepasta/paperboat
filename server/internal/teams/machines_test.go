@@ -116,6 +116,14 @@ func TestPostgresTeamMachineAuthority(t *testing.T) {
 	if _, err = s.Create(ctx, outsider, CreateRequest{OperationID: "create", TeamID: otherTeam}); err != nil {
 		t.Fatal(err)
 	}
+	now := time.Now().UTC()
+	if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.billing_workspaces(id,team_id,state,product_code,quantity,period_start,period_end) VALUES($1,$2,'active','team-pro',3,$3,$4)`, "bw_"+team, team, now.Add(-time.Hour), now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	current, err = s.Get(ctx, owner, team)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, account := range []string{enroller, memberID} {
 		invitation, e := s.Invite(ctx, owner, team, InviteRequest{OperationID: "invite_" + account, ExpectedGeneration: current.Generation, AccountID: account})
 		if e != nil {
@@ -125,10 +133,6 @@ func TestPostgresTeamMachineAuthority(t *testing.T) {
 		if e != nil {
 			t.Fatal(e)
 		}
-	}
-	now := time.Now().UTC()
-	if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.billing_workspaces(id,team_id,state,product_code,quantity,period_start,period_end) VALUES($1,$2,'active','team-pro',3,$3,$4)`, "bw_"+team, team, now.Add(-time.Hour), now.Add(time.Hour)); err != nil {
-		t.Fatal(err)
 	}
 	current, err = s.Get(ctx, owner, team)
 	if err != nil {

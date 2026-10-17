@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"time"
 
@@ -435,7 +434,7 @@ func (s *WorkspaceService) markOperation(ctx context.Context, key, state string)
 }
 func stripeOutcomeUncertain(err error) bool {
 	var api StripeAPIError
-	return !errors.As(err, &api) || api.StatusCode == http.StatusConflict || api.StatusCode == http.StatusTooManyRequests || api.StatusCode >= http.StatusInternalServerError
+	return errors.Is(err, ErrProviderOutcomeUnknown) || !errors.As(err, &api) || api.StatusCode == http.StatusConflict || api.StatusCode == http.StatusTooManyRequests || api.StatusCode >= http.StatusInternalServerError
 }
 func (s *WorkspaceService) failOperation(ctx context.Context, key string, providerErr error) error {
 	if stripeOutcomeUncertain(providerErr) {
@@ -444,213 +443,6 @@ func (s *WorkspaceService) failOperation(ctx context.Context, key string, provid
 	}
 	_ = s.markOperation(ctx, key, "failed")
 	return providerErr
-}
-
-// ReconcileSeats sets a team subscription to the current authoritative active
-// membership count. The operation is safe to replay and never accepts a caller
-// supplied quantity.
-func (s *WorkspaceService) ReconcileSeats(ctx context.Context, account, team, key string) (StripeSubscription, error) {
-	if s.stripe == nil {
-		return StripeSubscription{}, ErrStripeUnavailable
-	}
-	if s.key == "" {
-		return StripeSubscription{}, ErrWorkspaceEncryptionUnavailable
-	}
-	var hash string
-	var err error
-	var w Workspace
-	var replay *StripeSubscription
-	var recoverUncertain bool
-	type seatRequest struct {
-		SubscriptionID, ItemID string
-		Quantity               int
-	}
-	var requested seatRequest
-	var attempted sql.NullTime
-	err = s.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		var e error
-		w, e = WorkspaceTx(ctx, tx, account, team, true)
-		if e != nil {
-			return e
-		}
-		if w.TeamID == "" {
-			return ErrWorkspaceForbidden
-		}
-		if w.SubscriptionID == "" || w.ItemID == "" {
-			return errors.New("workspace has no subscription to reconcile")
-		}
-		requested = seatRequest{w.SubscriptionID, w.ItemID, w.Members}
-		hash, e = workspaceRequestHash(struct {
-			Actor, Team, Subscription, Item string
-			Quantity                        int
-		}{account, team, w.SubscriptionID, w.ItemID, w.Members})
-		if e != nil {
-			return e
-		}
-		op, found, e := loadWorkspaceOperation(ctx, tx, key)
-		if e != nil {
-			return e
-		}
-		if !found {
-			e = tx.QueryRow(ctx, `SELECT idempotency_key,workspace_id,actor_user_id,kind,request_hash,state,result_ciphertext,request_ciphertext,provider_attempted_at FROM billing_workspace_operations WHERE workspace_id=$1 AND kind='seats' AND state IN ('pending','uncertain') FOR UPDATE`, w.ID).Scan(&key, &op.WorkspaceID, &op.Actor, &op.Kind, &op.Hash, &op.State, &op.Ciphertext, &op.RequestCiphertext, &op.ProviderAttemptedAt)
-			if e == nil {
-				found = true
-			} else if e != pgx.ErrNoRows {
-				return e
-			}
-		}
-		if found {
-			if op.WorkspaceID != w.ID || op.Kind != "seats" {
-				return ErrIdempotencyConflict
-			}
-			switch op.State {
-			case "succeeded":
-				var v StripeSubscription
-				if e = s.decryptResult(op.Ciphertext, &v); e != nil {
-					return e
-				}
-				replay = &v
-				return nil
-			case "uncertain":
-				recoverUncertain = true
-				if e = s.decryptResult(op.RequestCiphertext, &requested); e != nil {
-					return e
-				}
-				attempted = op.ProviderAttemptedAt
-				return nil
-			case "pending":
-				if e = s.decryptResult(op.RequestCiphertext, &requested); e != nil {
-					return e
-				}
-				recoverUncertain = true
-				attempted = op.ProviderAttemptedAt
-				return nil
-			case "failed":
-				return ErrWorkspaceOperationFailed
-			default:
-				return ErrCheckoutPending
-			}
-		}
-		b, e := json.Marshal(requested)
-		if e != nil {
-			return e
-		}
-		cipher, e := secrets.Encrypt(s.key, string(b))
-		if e != nil {
-			return e
-		}
-		_, e = tx.Exec(ctx, `INSERT INTO billing_workspace_operations(idempotency_key,workspace_id,actor_user_id,kind,request_hash,state,request_ciphertext) VALUES($1,$2,$3,'seats',$4,'pending',$5)`, key, w.ID, account, hash, cipher)
-		return e
-	})
-	if err != nil {
-		return StripeSubscription{}, err
-	}
-	if replay != nil {
-		return *replay, nil
-	}
-	current, err := s.stripe.GetSubscription(ctx, requested.SubscriptionID)
-	if err != nil {
-		if recoverUncertain {
-			return StripeSubscription{}, ErrProviderOutcomeUnknown
-		}
-		return StripeSubscription{}, s.failOperation(ctx, key, err)
-	}
-	if current.ID != requested.SubscriptionID || current.CustomerID != w.CustomerID || current.ItemID != requested.ItemID {
-		if !recoverUncertain {
-			_ = s.markOperation(ctx, key, "uncertain")
-		}
-		return StripeSubscription{}, ErrProviderOutcomeUnknown
-	}
-	if current.Quantity == requested.Quantity {
-		if recoverUncertain {
-			_, err = s.store.SQL().ExecContext(ctx, `UPDATE paperboat.billing_workspace_operations SET state='pending',updated_at=now() WHERE idempotency_key=$1 AND state='uncertain'`, key)
-			if err != nil {
-				return StripeSubscription{}, err
-			}
-		}
-		_, err = s.store.SQL().ExecContext(ctx, `UPDATE paperboat.billing_workspaces SET quantity=$2,updated_at=now(),revision=revision+1 WHERE id=$1 AND provider_subscription_id=$3 AND provider_item_id=$4`, w.ID, current.Quantity, current.ID, current.ItemID)
-		if err != nil {
-			return StripeSubscription{}, err
-		}
-		if err = s.completeOperation(ctx, key, current); err != nil {
-			return StripeSubscription{}, errors.Join(ErrProviderOutcomeUnknown, err)
-		}
-		return current, nil
-	}
-	if recoverUncertain && attempted.Valid && time.Since(attempted.Time) >= 24*time.Hour {
-		return StripeSubscription{}, ErrStripeOperationExpired
-	}
-	if recoverUncertain {
-		if _, err = s.store.SQL().ExecContext(ctx, `UPDATE paperboat.billing_workspace_operations SET state='pending',updated_at=now() WHERE idempotency_key=$1 AND state='uncertain'`, key); err != nil {
-			return StripeSubscription{}, err
-		}
-	}
-	if _, err = s.store.SQL().ExecContext(ctx, `UPDATE paperboat.billing_workspace_operations SET provider_attempted_at=COALESCE(provider_attempted_at,now()) WHERE idempotency_key=$1 AND state='pending'`, key); err != nil {
-		return StripeSubscription{}, err
-	}
-	result, err := s.stripe.UpdateSubscriptionSeats(ctx, requested.SubscriptionID, requested.ItemID, requested.Quantity, key)
-	if err != nil {
-		return StripeSubscription{}, s.failOperation(ctx, key, err)
-	}
-	if result.ID != requested.SubscriptionID || result.CustomerID != w.CustomerID || result.ItemID != requested.ItemID || result.Quantity != requested.Quantity {
-		_ = s.markOperation(ctx, key, "uncertain")
-		return StripeSubscription{}, ErrProviderOutcomeUnknown
-	}
-	_, err = s.store.SQL().ExecContext(ctx, `UPDATE paperboat.billing_workspaces SET quantity=$2,updated_at=now(),revision=revision+1 WHERE id=$1 AND provider_subscription_id=$3 AND provider_item_id=$4`, w.ID, result.Quantity, result.ID, result.ItemID)
-	if err != nil {
-		_ = s.markOperation(ctx, key, "uncertain")
-		return StripeSubscription{}, errors.Join(ErrProviderOutcomeUnknown, err)
-	}
-	if err = s.completeOperation(ctx, key, result); err != nil {
-		_ = s.markOperation(ctx, key, "uncertain")
-		return StripeSubscription{}, errors.Join(ErrProviderOutcomeUnknown, err)
-	}
-	return result, nil
-}
-
-func (s *WorkspaceService) ReconcileMemberships(ctx context.Context, limit int) error {
-	if limit <= 0 {
-		return nil
-	}
-	if limit > 128 {
-		limit = 128
-	}
-	rows, err := s.store.SQL().QueryContext(ctx, `SELECT w.team_id,t.owner_account,t.generation,w.revision,(SELECT count(*) FROM paperboat.team_members m WHERE m.team_id=w.team_id AND m.active) FROM paperboat.billing_workspaces w JOIN paperboat.teams t ON t.team_id=w.team_id AND t.deleted_at IS NULL WHERE w.provider_subscription_id IS NOT NULL AND w.provider_item_id IS NOT NULL AND (w.quantity<>(SELECT count(*) FROM paperboat.team_members m WHERE m.team_id=w.team_id AND m.active) OR EXISTS(SELECT 1 FROM paperboat.billing_workspace_operations o WHERE o.workspace_id=w.id AND o.kind='seats' AND o.state IN('pending','uncertain'))) ORDER BY w.updated_at LIMIT $1`, limit)
-	if err != nil {
-		return err
-	}
-	type candidate struct {
-		team, owner          string
-		generation, revision int64
-		members              int
-	}
-	var candidates []candidate
-	for rows.Next() {
-		var c candidate
-		if err = rows.Scan(&c.team, &c.owner, &c.generation, &c.revision, &c.members); err != nil {
-			rows.Close()
-			return err
-		}
-		candidates = append(candidates, c)
-	}
-	if err = rows.Err(); err != nil {
-		rows.Close()
-		return err
-	}
-	rows.Close()
-	for _, c := range candidates {
-		key := fmt.Sprintf("membership:%s:%d:%d", c.team, c.generation, c.revision)
-		var result StripeSubscription
-		if result, err = s.ReconcileSeats(ctx, c.owner, c.team, key); err != nil {
-			return err
-		}
-		if result.Quantity != c.members {
-			if _, err = s.ReconcileSeats(ctx, c.owner, c.team, key+":current"); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
 }
 
 func (s *WorkspaceService) HandleWebhook(ctx context.Context, event StripeWebhook) (bool, error) {
@@ -769,6 +561,9 @@ func (s *WorkspaceService) reconcileSubscription(ctx context.Context, subscripti
 			return err
 		}
 		if _, err = tx.Exec(ctx, `UPDATE billing_workspaces SET provider_subscription_id=$2,provider_item_id=$3,product_code=$4,state=$5,quantity=$6,period_start=$7,period_end=$8,cancel_at_period_end=$9,bandwidth_anchor=CASE WHEN $5 IN ('active','trialing') THEN coalesce(bandwidth_anchor,$7) ELSE bandwidth_anchor END,updated_at=now(),revision=revision+1 WHERE id=$1 AND provider_customer_id=$10`, workspaceID, current.ID, current.ItemID, productCode, current.Status, current.Quantity, current.PeriodStart, current.PeriodEnd, current.CancelAtPeriodEnd, current.CustomerID); err != nil {
+			return err
+		}
+		if _, err = tx.Exec(ctx, `UPDATE billing_workspaces SET scheduled_quantity=NULL,scheduled_quantity_at=NULL WHERE id=$1 AND scheduled_quantity_at<=$2 AND quantity=scheduled_quantity`, workspaceID, current.PeriodStart); err != nil {
 			return err
 		}
 		if event != nil {

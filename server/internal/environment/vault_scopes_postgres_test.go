@@ -123,7 +123,7 @@ func TestPostgresVaultScopesTeamRotationAndReconciliation(t *testing.T) {
 	if _, err := service.GetVaultScope(ctx, member, team, "team", team, ""); !errors.Is(err, ErrKeyAuthorizationRequired) {
 		t.Fatalf("unpaid outsider scope error: %v", err)
 	}
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.billing_workspaces(id,team_id,state,period_start,period_end) VALUES($1,$2,'active',now()-interval '1 hour',now()+interval '1 hour')`, "vault_billing_"+suffix, team); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.billing_workspaces(id,team_id,state,quantity,period_start,period_end) VALUES($1,$2,'active',2,now()-interval '1 hour',now()+interval '1 hour')`, "vault_billing_"+suffix, team); err != nil {
 		t.Fatal(err)
 	}
 	authority := teams.NewService(store)

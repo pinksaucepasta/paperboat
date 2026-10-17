@@ -310,6 +310,9 @@ func (s *Service) Invite(ctx context.Context, account, team string, r InviteRequ
 		if err = checkNewInvitation(ctx, tx, team, r); err != nil {
 			return err
 		}
+		if err = reserveInvitationSeatTx(ctx, tx, team); err != nil {
+			return err
+		}
 		id, err := uuid.NewRandom()
 		if err != nil {
 			return err

@@ -127,6 +127,8 @@ func registerTeamRoutes(mux *http.ServeMux, service teamAPI, read, write func(ht
 				writeError(w, r, http.StatusConflict, "invitation_unavailable", "Invitation expired, was cancelled or has already been accepted.")
 			case expectedHTTPErrorOnly(err, teams.ErrInvalid):
 				writeError(w, r, http.StatusBadRequest, "invalid_request", "Check the team action, resource permission and confirmation.")
+			case expectedHTTPErrorOnly(err, teams.ErrSeatRequired):
+				writeError(w, r, http.StatusConflict, "seat_required", teams.ErrSeatRequired.Error())
 			case expectedHTTPErrorOnly(err, teams.ErrLimit):
 				writeError(w, r, http.StatusConflict, "team_limit", "Team capacity reached. Remove unused entries before retrying.")
 			case err != nil:

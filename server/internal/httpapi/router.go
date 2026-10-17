@@ -644,6 +644,8 @@ func NewRouter(opts Options) http.Handler {
 			mux.Handle("GET /v1/billing/workspaces/personal/products", requireAnyAuth(opts.Auth, opts.DeviceAuth, requireScope("account:read", workspaceBillingProducts(opts.WorkspaceBilling))))
 			mux.Handle("POST /v1/billing/workspaces/personal/checkout", requireAuth(opts.Auth, requireCSRF(opts.Auth, workspaceBillingMutation(opts.WorkspaceBilling, opts.Config.HTTP.AllowedOrigins, false))))
 			mux.Handle("POST /v1/billing/workspaces/personal/portal", requireAuth(opts.Auth, requireCSRF(opts.Auth, workspaceBillingMutation(opts.WorkspaceBilling, opts.Config.HTTP.AllowedOrigins, true))))
+			mux.Handle("GET /v1/billing/workspaces/teams/{team_id}/seats/preview", requireAuth(opts.Auth, workspaceSeatChange(opts.WorkspaceBilling, true)))
+			mux.Handle("POST /v1/billing/workspaces/teams/{team_id}/seats", requireAuth(opts.Auth, requireCSRF(opts.Auth, workspaceSeatChange(opts.WorkspaceBilling, false))))
 			mux.Handle("GET /v1/billing/workspaces/teams/{team_id}", requireAnyAuth(opts.Auth, opts.DeviceAuth, requireScope("account:read", workspaceBillingOverview(opts.WorkspaceBilling))))
 			mux.Handle("GET /v1/billing/workspaces/teams/{team_id}/products", requireAnyAuth(opts.Auth, opts.DeviceAuth, requireScope("account:read", workspaceBillingProducts(opts.WorkspaceBilling))))
 			mux.Handle("POST /v1/billing/workspaces/teams/{team_id}/checkout", requireAuth(opts.Auth, requireCSRF(opts.Auth, workspaceBillingMutation(opts.WorkspaceBilling, opts.Config.HTTP.AllowedOrigins, false))))

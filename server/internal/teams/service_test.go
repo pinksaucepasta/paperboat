@@ -105,7 +105,7 @@ func TestPostgresTeamAuthorityLifecycle(t *testing.T) {
 		t.Fatalf("empty team detail contains null collections: %+v %v", snapshot, err)
 	}
 	now := time.Now().UTC()
-	if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.billing_workspaces(id,team_id,state,product_code,quantity,period_start,period_end) VALUES($1,$2,'active','team-pro',1,$3,$4)`, "bw_"+team, team, now.Add(-time.Hour), now.Add(time.Hour)); err != nil {
+	if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.billing_workspaces(id,team_id,state,product_code,quantity,period_start,period_end) VALUES($1,$2,'active','team-pro',4,$3,$4)`, "bw_"+team, team, now.Add(-time.Hour), now.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	state, err = s.Get(ctx, owner, team)
@@ -456,7 +456,7 @@ func TestPostgresInvitationExpiryAndResourceAttachment(t *testing.T) {
 			t.Error(e)
 			return
 		}
-		for _, q := range []string{`DELETE FROM paperboat.audit_events WHERE resource_type='team' AND resource_id=$1 AND actor_user_id IN($2,$3)`, `DELETE FROM paperboat.billing_workspaces WHERE team_id=$1 AND $2<>'' AND $3<>''`, `DELETE FROM paperboat.teams WHERE team_id=$1 AND $2<>'' AND $3<>''`, `DELETE FROM paperboat.users WHERE id IN($2,$3) AND $1<>''`} {
+		for _, q := range []string{`DELETE FROM paperboat.audit_events WHERE resource_type='team' AND resource_id=$1 AND actor_user_id IN($2,$3)`, `DELETE FROM paperboat.billing_workspaces WHERE team_id=$1 AND $2<>'' AND $3<>''`, `DELETE FROM paperboat.billing_workspaces WHERE team_id=$1 AND $2<>'' AND $3<>''`, `DELETE FROM paperboat.teams WHERE team_id=$1 AND $2<>'' AND $3<>''`, `DELETE FROM paperboat.users WHERE id IN($2,$3) AND $1<>''`} {
 			if _, e = tx.ExecContext(c, q, team, owner, recipient); e != nil {
 				t.Error(e)
 				return
@@ -587,7 +587,7 @@ func TestPostgresTeamHistoryBounds(t *testing.T) {
 			t.Error(e)
 			return
 		}
-		for _, q := range []string{`DELETE FROM paperboat.audit_events WHERE resource_type='team' AND resource_id=$1 AND actor_user_id IN($2,$3)`, `DELETE FROM paperboat.teams WHERE team_id=$1 AND $2<>'' AND $3<>''`, `DELETE FROM paperboat.users WHERE id IN($2,$3) AND $1<>''`} {
+		for _, q := range []string{`DELETE FROM paperboat.audit_events WHERE resource_type='team' AND resource_id=$1 AND actor_user_id IN($2,$3)`, `DELETE FROM paperboat.billing_workspaces WHERE team_id=$1 AND $2<>'' AND $3<>''`, `DELETE FROM paperboat.teams WHERE team_id=$1 AND $2<>'' AND $3<>''`, `DELETE FROM paperboat.users WHERE id IN($2,$3) AND $1<>''`} {
 			if _, e = tx.ExecContext(c, q, team, owner, recipient); e != nil {
 				t.Error(e)
 				return
@@ -607,6 +607,13 @@ func TestPostgresTeamHistoryBounds(t *testing.T) {
 	s := NewService(store)
 	create := CreateRequest{OperationID: "create", TeamID: team}
 	state, err := s.Create(ctx, owner, create)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.billing_workspaces(id,team_id,state,quantity,period_start,period_end) VALUES('team:'||$1,$1,'active',3,now()-interval '1 hour',now()+interval '1 day')`, team); err != nil {
+		t.Fatal(err)
+	}
+	state, err = s.Get(ctx, owner, team)
 	if err != nil {
 		t.Fatal(err)
 	}

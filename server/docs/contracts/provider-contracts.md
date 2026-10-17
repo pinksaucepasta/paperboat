@@ -35,13 +35,17 @@ Implementation constraints:
 
 Stripe replaces Polar for the new personal/team subscription model. Every personal
 account and team has its own Stripe customer. An initiating administrator is not
-the owner of a team's subscription. Current Owner/Admin authority is checked for
+the owner of a team's subscription. Current Owner authority is checked for
 checkout and portal access, including operation replays; ordinary members can read
 their workspace's subscription state. Personal Pro is never included in a team seat.
 
 Checkout uses Stripe subscription quantities: one personal subscription or the
-team's authoritative active membership count. A bounded recurring reconciliation
-updates team quantity after membership changes; the client cannot supply quantities.
+owner's purchased quantity, independent of membership. Explicit owner seat changes
+use durable operations; the worker recovers those exact requests, never membership-derived
+quantities. Increases invoice immediately without changing the billing date; reductions
+use a Stripe subscription schedule at renewal with no credit or refund. Active members
+and pending unexpired invitations consume capacity; cancellation, expiry or removal
+only free used seats. A scheduled reduction bounds future reservations.
 Checkout operation metadata associates a subscription with its authorized workspace.
 Signed webhooks trigger a fresh provider read, rather than applying arrival order
 as subscription order. Duplicate receipts do not mutate another subscription.
