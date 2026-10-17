@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	StripeAPIVersion      = "2024-06-20"
+	StripeAPIVersion      = "2026-09-30.endive"
 	stripeMaxResponseBody = 1 << 20
 )
 
@@ -84,7 +84,21 @@ func (c HTTPStripeClient) CreateCustomer(ctx context.Context, workspaceID, email
 }
 
 func (c HTTPStripeClient) CreateSubscriptionCheckout(ctx context.Context, in StripeCheckoutInput) (CheckoutSession, error) {
-	v := url.Values{"mode": {"subscription"}, "customer": {in.CustomerID}, "line_items[0][price]": {in.PriceID}, "line_items[0][quantity]": {strconv.Itoa(in.Quantity)}, "success_url": {in.SuccessURL}, "cancel_url": {in.CancelURL}, "metadata[paperboat_checkout_operation]": {in.IdempotencyKey}, "subscription_data[metadata][paperboat_checkout_operation]": {in.IdempotencyKey}}
+	v := url.Values{
+		"mode": {"subscription"}, "customer": {in.CustomerID},
+		"line_items[0][price]": {in.PriceID}, "line_items[0][quantity]": {strconv.Itoa(in.Quantity)},
+		"success_url": {in.SuccessURL}, "cancel_url": {in.CancelURL},
+		"metadata[paperboat_checkout_operation]":                    {in.IdempotencyKey},
+		"subscription_data[metadata][paperboat_checkout_operation]": {in.IdempotencyKey},
+	}
+	// Keep the integration label stable across retries of the same operation.
+	hash := sha256.Sum256([]byte(in.IdempotencyKey))
+	suffix := make([]byte, 8)
+	for i := range suffix {
+		suffix[i] = 'a' + hash[i]%26
+	}
+	v.Set("integration_identifier", "paperboat_"+string(suffix))
+	v.Set("managed_payments[enabled]", "false")
 	var out struct {
 		ID, URL, Customer string
 		Livemode          bool `json:"livemode"`
@@ -181,28 +195,38 @@ func (c HTTPStripeClient) UpdateSubscriptionSeats(ctx context.Context, subscript
 
 type stripeSubscriptionResponse struct {
 	ID, Customer, Status string
-	Livemode             bool  `json:"livemode"`
-	CurrentPeriodStart   int64 `json:"current_period_start"`
-	CurrentPeriodEnd     int64 `json:"current_period_end"`
-	CancelAtPeriodEnd    bool  `json:"cancel_at_period_end"`
+	Livemode             bool `json:"livemode"`
+	CancelAtPeriodEnd    bool `json:"cancel_at_period_end"`
 	Metadata             struct {
 		PaperboatCheckoutOperation string `json:"paperboat_checkout_operation"`
 	} `json:"metadata"`
 	Items struct {
 		Data []struct {
-			ID       string
-			Quantity int
-			Price    struct{ ID string }
+			ID                 string
+			Quantity           int
+			CurrentPeriodStart int64 `json:"current_period_start"`
+			CurrentPeriodEnd   int64 `json:"current_period_end"`
+			Price              struct{ ID string }
 		}
 	} `json:"items"`
 }
 
 func (r stripeSubscriptionResponse) subscription() (StripeSubscription, error) {
-	if r.ID == "" || r.Customer == "" || r.Status == "" || len(r.Items.Data) != 1 || r.Items.Data[0].ID == "" || r.Items.Data[0].Price.ID == "" || r.CurrentPeriodStart <= 0 || r.CurrentPeriodEnd <= r.CurrentPeriodStart || r.Items.Data[0].Quantity < 1 {
+	if r.ID == "" || r.Customer == "" || r.Status == "" || len(r.Items.Data) != 1 {
 		return StripeSubscription{}, errors.New("invalid stripe subscription response")
 	}
 	i := r.Items.Data[0]
-	return StripeSubscription{ID: r.ID, CustomerID: r.Customer, PriceID: i.Price.ID, ItemID: i.ID, Status: r.Status, CheckoutOperation: r.Metadata.PaperboatCheckoutOperation, Quantity: i.Quantity, PeriodStart: time.Unix(r.CurrentPeriodStart, 0).UTC(), PeriodEnd: time.Unix(r.CurrentPeriodEnd, 0).UTC(), CancelAtPeriodEnd: r.CancelAtPeriodEnd}, nil
+	if i.ID == "" || i.Price.ID == "" || i.Quantity < 1 ||
+		i.CurrentPeriodStart <= 0 || i.CurrentPeriodEnd <= i.CurrentPeriodStart {
+		return StripeSubscription{}, errors.New("invalid stripe subscription response")
+	}
+	return StripeSubscription{
+		ID: r.ID, CustomerID: r.Customer, PriceID: i.Price.ID, ItemID: i.ID,
+		Status: r.Status, CheckoutOperation: r.Metadata.PaperboatCheckoutOperation,
+		Quantity: i.Quantity, CancelAtPeriodEnd: r.CancelAtPeriodEnd,
+		PeriodStart: time.Unix(i.CurrentPeriodStart, 0).UTC(),
+		PeriodEnd:   time.Unix(i.CurrentPeriodEnd, 0).UTC(),
+	}, nil
 }
 
 func (c HTTPStripeClient) do(ctx context.Context, method, path, key string, values url.Values, out any) error {
@@ -215,7 +239,7 @@ func (c HTTPStripeClient) do(ctx context.Context, method, path, key string, valu
 	}
 	base := c.BaseURL
 	if base == "" {
-		base = "https://api.stripe.com"
+		return ErrStripeUnavailable
 	}
 	var body io.Reader
 	if values != nil {
@@ -274,6 +298,12 @@ type StripeWebhook struct {
 			ID           string `json:"id"`
 			Object       string `json:"object"`
 			Subscription string `json:"subscription"`
+			Parent       struct {
+				Type                string `json:"type"`
+				SubscriptionDetails struct {
+					Subscription string `json:"subscription"`
+				} `json:"subscription_details"`
+			} `json:"parent"`
 		} `json:"object"`
 	} `json:"data"`
 }
@@ -289,6 +319,12 @@ func ParseStripeWebhook(body []byte) (StripeWebhook, error) {
 func (e StripeWebhook) SubscriptionID() string {
 	if e.Data.Object.Object == "subscription" {
 		return e.Data.Object.ID
+	}
+	if e.Data.Object.Object == "invoice" {
+		if e.Data.Object.Parent.Type == "subscription_details" {
+			return e.Data.Object.Parent.SubscriptionDetails.Subscription
+		}
+		return ""
 	}
 	return e.Data.Object.Subscription
 }

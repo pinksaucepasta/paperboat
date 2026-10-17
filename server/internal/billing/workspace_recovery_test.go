@@ -49,10 +49,9 @@ func TestWorkspaceOperatorRetiresOnlyExpiredNotAppliedOperation(t *testing.T) {
 	store := testStore(t)
 	ctx := context.Background()
 	x := fmt.Sprint(time.Now().UnixNano())
-	admin, user := "usr_admin_recovery_"+x, "usr_recovery_"+x
-	insertUser(t, store, admin, admin+"@example.test")
+	admin, user := fmt.Sprintf("opr_%032x", time.Now().UnixNano()), "usr_recovery_"+x
 	insertUser(t, store, user, user+"@example.test")
-	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.users SET role='billing' WHERE id=$1`, admin); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.operator_accounts(id,email,password_hash,role,status) VALUES($1,$1||'@example.test','unused test login','billing','active')`, admin); err != nil {
 		t.Fatal(err)
 	}
 	team := "team_recovery_" + x
@@ -79,6 +78,9 @@ func TestWorkspaceOperatorRetiresOnlyExpiredNotAppliedOperation(t *testing.T) {
 		store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.billing_workspaces WHERE id=$1`, "team:"+team)
 		store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.team_members WHERE team_id=$1`, team)
 		store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.teams WHERE team_id=$1`, team)
+		store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.audit_events WHERE actor_user_id=$1`, admin)
+		store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.operator_accounts WHERE id=$1`, admin)
+		store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.users WHERE id=$1`, user)
 	})
 	s := billing.NewWorkspaceRecoveryService(store, audit.NewWriter(store), nil)
 	recoveryKey := "recovery-" + x
@@ -112,7 +114,7 @@ func TestWorkspaceOperatorRetiresOnlyExpiredNotAppliedOperation(t *testing.T) {
 	if err := store.SQL().QueryRowContext(ctx, `SELECT state FROM paperboat.billing_workspace_operations WHERE idempotency_key=$1`, newKey).Scan(&newState); err != nil || newState != "succeeded" {
 		t.Fatalf("new worker key state=%q err=%v", newState, err)
 	}
-	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.users SET role='user' WHERE id=$1`, admin); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.operator_accounts SET role='operations' WHERE id=$1`, admin); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.RetireNotApplied(ctx, admin, recoveryKey, op, evidence); !errors.Is(err, billing.ErrWorkspaceForbidden) {
@@ -125,7 +127,7 @@ func TestWorkspaceOperatorRetiresOnlyExpiredNotAppliedOperation(t *testing.T) {
 
 	// A separate expired checkout is completed only from a provider session
 	// whose immutable identity and line item match the stored request.
-	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.users SET role='admin' WHERE id=$1`, admin); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.operator_accounts SET role='admin' WHERE id=$1`, admin); err != nil {
 		t.Fatal(err)
 	}
 	price, product := "price_recovery_"+x, "product_recovery_"+x

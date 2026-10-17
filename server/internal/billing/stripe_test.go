@@ -30,7 +30,7 @@ func TestStripeRejectsLiveKeyBeforeSendingRequest(t *testing.T) {
 func TestHTTPStripeClientRequestsPreserveWorkspaceCustomerAndQuantity(t *testing.T) {
 	var requests []url.Values
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Stripe-Version") != StripeAPIVersion || r.Header.Get("Authorization") != "Bearer sk_test_secret" {
+		if r.Header.Get("Stripe-Version") != "2026-09-30.endive" || r.Header.Get("Authorization") != "Bearer sk_test_secret" {
 			t.Errorf("headers = %#v", r.Header)
 		}
 		if r.Method == http.MethodPost {
@@ -46,7 +46,7 @@ func TestHTTPStripeClientRequestsPreserveWorkspaceCustomerAndQuantity(t *testing
 		case "/v1/checkout/sessions":
 			io.WriteString(w, `{"id":"cs_test_1","url":"https://checkout.stripe.test/cs_test_1","customer":"cus_team","livemode":false}`)
 		case "/v1/subscriptions/sub_team":
-			io.WriteString(w, `{"id":"sub_team","customer":"cus_team","status":"active","livemode":false,"metadata":{"paperboat_checkout_operation":"checkout-op"},"current_period_start":1700000000,"current_period_end":1702592000,"cancel_at_period_end":false,"items":{"data":[{"id":"si_team","quantity":4,"price":{"id":"price_team"}}]}}`)
+			io.WriteString(w, `{"id":"sub_team","customer":"cus_team","status":"active","livemode":false,"metadata":{"paperboat_checkout_operation":"checkout-op"},"cancel_at_period_end":false,"items":{"data":[{"id":"si_team","quantity":4,"current_period_start":1700000000,"current_period_end":1702592000,"price":{"id":"price_team"}}]}}`)
 		default:
 			http.NotFound(w, r)
 		}
@@ -62,10 +62,10 @@ func TestHTTPStripeClientRequestsPreserveWorkspaceCustomerAndQuantity(t *testing
 		t.Fatalf("checkout=%+v err=%v", s, err)
 	}
 	sub, err := c.UpdateSubscriptionSeats(context.Background(), "sub_team", "si_team", 4, "seats-op")
-	if err != nil || sub.Quantity != 4 || sub.CheckoutOperation != "checkout-op" {
+	if err != nil || sub.Quantity != 4 || sub.CheckoutOperation != "checkout-op" || sub.PeriodStart.Unix() != 1700000000 || sub.PeriodEnd.Unix() != 1702592000 {
 		t.Fatalf("subscription=%+v err=%v", sub, err)
 	}
-	if requests[0].Get("metadata[workspace_id]") != "team_1" || requests[1].Get("customer") != "cus_team" || requests[1].Get("line_items[0][quantity]") != "4" || requests[1].Get("metadata[paperboat_checkout_operation]") != "checkout-op" || requests[1].Get("subscription_data[metadata][paperboat_checkout_operation]") != "checkout-op" || requests[2].Get("items[0][id]") != "si_team" || requests[2].Get("items[0][quantity]") != "4" {
+	if requests[0].Get("metadata[workspace_id]") != "team_1" || requests[1].Get("managed_payments[enabled]") != "false" || requests[1].Get("customer") != "cus_team" || requests[1].Get("line_items[0][quantity]") != "4" || requests[1].Get("metadata[paperboat_checkout_operation]") != "checkout-op" || requests[1].Get("subscription_data[metadata][paperboat_checkout_operation]") != "checkout-op" || requests[2].Get("items[0][id]") != "si_team" || requests[2].Get("items[0][quantity]") != "4" {
 		t.Fatalf("forms=%#v", requests)
 	}
 }
@@ -146,6 +146,16 @@ func TestStripeWebhookSignatureRotationToleranceAndParsing(t *testing.T) {
 	if err != nil || e.SubscriptionID() != "sub_1" {
 		t.Fatalf("event=%+v err=%v", e, err)
 	}
+	for _, payload := range []string{
+		`{"id":"evt_invoice","type":"invoice.payment_failed","data":{"object":{"object":"invoice","parent":{"type":"subscription_details","subscription_details":{"subscription":"sub_1"}}}}}`,
+		`{"id":"evt_checkout","type":"checkout.session.completed","data":{"object":{"object":"checkout.session","subscription":"sub_1"}}}`,
+	} {
+		event, err := ParseStripeWebhook([]byte(payload))
+		if err != nil || event.SubscriptionID() != "sub_1" {
+			t.Fatalf("provider event lost subscription identity: %v", err)
+		}
+	}
+
 }
 
 func TestStripeOutcomeUncertainClassification(t *testing.T) {
