@@ -12,8 +12,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/nativeprivate"
+	"github.com/pinksaucepasta/paperboat/internal/supportref"
 )
 
 const PreviewDispatchKind = "preview_dispatch"
@@ -402,7 +404,11 @@ func (m *DispatchManager) observeSession(operationID, hash string, session *Sess
 	failure := session.result
 	session.mu.RUnlock()
 	if !ready {
-		slog.Warn("preview dispatch ended before readiness", "code", previewDispatchFailureCode(failure))
+		code := previewDispatchFailureCode(failure)
+		slog.Warn("preview dispatch ended before readiness", "code", code)
+		if recorder := diagnostics.FromContext(session.ctx); recorder != nil {
+			_ = recorder.RecordWithSupportReference("preview", "preview_dispatch_failed", "warning", supportref.FromContext(session.ctx), map[string]string{"reason": code})
+		}
 	}
 	lease := session.currentLease()
 	if releaseOwner {

@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/nativeprivate"
 )
 
@@ -527,5 +528,19 @@ func TestReadinessCarrierUsesCurrentCustomDomainProjection(t *testing.T) {
 				t.Fatalf("carrier waited for publication before reporting readiness: calls=%d ready=%v err=%v", calls, isReadyLease(delivered), err)
 			}
 		})
+	}
+}
+
+func TestDispatchFailureRetainsSafeReadinessReason(t *testing.T) {
+	recorder := diagnostics.NewMemoryRecorder()
+	ctx := diagnostics.WithRecorder(t.Context(), recorder)
+	done := make(chan struct{})
+	close(done)
+	session := &Session{ctx: ctx, done: done, result: context.DeadlineExceeded}
+	manager := &DispatchManager{operations: map[string]dispatchOperation{"operation_01": {hash: "hash_01", session: session}}}
+	manager.observeSession("operation_01", "hash_01", session, false)
+	events := recorder.Recent()
+	if len(events) != 1 || events[0].Code != "preview_dispatch_failed" || events[0].Fields["reason"] != "timeout" {
+		t.Fatalf("readiness failure diagnostic missing: %+v", events)
 	}
 }
