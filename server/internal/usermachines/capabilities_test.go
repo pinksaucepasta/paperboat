@@ -94,6 +94,20 @@ func TestMachineCapabilityApplicationMatchesDesiredPostgres(t *testing.T) {
 	if err != nil || final.Applied != desired || final.AppliedVersion != policy.DesiredVersion || final.Status != "applied" {
 		t.Fatal("successful acknowledgement did not publish exact desired state")
 	}
+	// A machine with every incoming service disabled still acknowledges its
+	// policy. An empty selection must be stored as an empty array, not SQL NULL.
+	policy, err = f.service.SetMachineCapabilities(f.ctx, f.account, f.machine, "capability-disable-all-"+f.suffix, MachineCapabilitySelection{}, final.DesiredVersion)
+	if err != nil {
+		t.Fatalf("disable all capabilities: %v", err)
+	}
+	observed.Version, observed.Applied = policy.DesiredVersion, MachineCapabilitySelection{}
+	if err := f.service.RecordMachineCapabilitiesObservation(f.ctx, f.machine, environmentID, observed); err != nil {
+		t.Fatalf("acknowledge all capabilities disabled: %v", err)
+	}
+	final, err = f.service.ResolveMachineCapabilities(f.ctx, f.machine, environmentID)
+	if err != nil || final.Desired != (MachineCapabilitySelection{}) || final.Applied != final.Desired || final.AppliedVersion != policy.DesiredVersion || final.Status != "applied" {
+		t.Fatal("all-disabled acknowledgement did not publish exact desired state")
+	}
 	if err := f.service.RecordMachineCapabilitiesObservation(f.ctx, f.machine, environmentID+"-foreign", observed); !errors.Is(err, ErrCapabilitiesObservationStale) {
 		t.Fatalf("foreign environment changed capabilities: %v", err)
 	}

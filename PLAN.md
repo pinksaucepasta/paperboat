@@ -1655,3 +1655,5 @@ file | note`. Row-level evidence goes in CHECKLIST.md.
 2026-10-16 | Free allowance unset (Lane C) | Lane B | — | billing_operator_policy is empty on the deployed server, so every workspace reports allowance null (unlimited) and has no usage period. Set PLAN 1.x allowances (free 5 GB, Pro 100 GB, Team 100 GB/seat) as deploy config and open the free period; the console allowance card reads it.
 
 2026-10-17 | Stripe test-mode keys available (user) | Lane B | — | Publishable + secret test keys are in REMOTE_TESTING.md (Stripe section). F13-04 unblocked: set them as server deploy secrets, create products/prices and the webhook via API (store whsec the same way), run the test-mode flows.
+
+2026-10-18 | Lane B F2-06 all-disabled acknowledgement | Rows ticked:none; nil capability arrays became SQL NULL on both desired mutation and applied acknowledgement. Existing owner TestMachineCapabilityApplicationMatchesDesiredPostgres VPS PG RED0.41s/23502, GREEN0.27s includes disable-all/read-back; empty selections now persist as empty arrays, mismatch/revision/revocation guards retained. Vet PASS; gate/deploy follows, A reruns all-disabled L/M after deployment.

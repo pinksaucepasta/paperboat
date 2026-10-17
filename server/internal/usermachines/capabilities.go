@@ -173,7 +173,7 @@ func (s *Service) RecordMachineCapabilitiesObservation(ctx context.Context, mach
 }
 
 func capabilityNames(value MachineCapabilitySelection) []string {
-	var result []string
+	result := []string{}
 	if value.FileReceive {
 		result = append(result, "file_receive")
 	}
