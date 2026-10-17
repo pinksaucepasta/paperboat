@@ -403,3 +403,24 @@ func (a *ProductionAssemblyActivator) Status() connector.Status {
 	}
 	return result
 }
+
+// AdvanceProcessGeneration keeps the retained assembly binding aligned with
+// the epoch durably claimed by its control reconnect owner.
+func (a *ProductionAssemblyActivator) AdvanceProcessGeneration(expected, claimed ActivationRequest) error {
+	if a == nil || !validActivationRequest(expected) || !validActivationRequest(claimed) || claimed.ProcessGeneration <= expected.ProcessGeneration {
+		return ErrConflict
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	current := a.assemblies[expected.HostID+"\x00"+expected.TunnelID]
+	if current == nil || !sameActivation(current.request, expected) || claimed.ProcessGeneration != expected.ProcessGeneration+1 {
+		return ErrConflict
+	}
+	comparison := claimed
+	comparison.ProcessGeneration = expected.ProcessGeneration
+	if !sameActivation(comparison, expected) {
+		return ErrConflict
+	}
+	current.request = claimed
+	return nil
+}

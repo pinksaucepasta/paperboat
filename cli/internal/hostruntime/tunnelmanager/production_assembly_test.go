@@ -174,7 +174,7 @@ func TestWelcomeDataCarrierSessionSourceRefreshesReconnectIdentity(t *testing.T)
 	var descriptorCalls int
 	deferred := &welcomeDataCarrierSessionSource{
 		hello: config.Control.Hello,
-		factory: func(_ context.Context, welcome connectorprotocol.Welcome, _ ApplyRequest) (connector.DataCarrierSessionSource, error) {
+		factory: func(_ context.Context, _ connectorprotocol.Hello, welcome connectorprotocol.Welcome, _ ApplyRequest) (connector.DataCarrierSessionSource, error) {
 			descriptorCalls++
 			if welcome.SessionID == "" {
 				return connector.DataCarrierSessionSource{}, ErrProductionIdentityMissing
@@ -598,7 +598,7 @@ func TestProductionAssemblyBootstrapsPersistedDesiredStateBeforeCarrierActivatio
 	}
 	lazySessionSource := config.SessionSource
 	var descriptorCalls int
-	config.CarrierDescriptorSource = func(ctx context.Context, welcome connectorprotocol.Welcome, request ApplyRequest) (connector.DataCarrierSessionSource, error) {
+	config.CarrierDescriptorSource = func(ctx context.Context, _ connectorprotocol.Hello, welcome connectorprotocol.Welcome, request ApplyRequest) (connector.DataCarrierSessionSource, error) {
 		if ctx == nil || welcome.SessionID == "" || request.Snapshot.Generation == 0 {
 			return connector.DataCarrierSessionSource{}, ErrProductionAssemblyInvalid
 		}

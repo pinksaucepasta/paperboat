@@ -33,7 +33,7 @@ func (s *reconnectAssemblyTestSource) ResolveProductionAssembly(_ context.Contex
 		ControlSessionFactory: func(context.Context, *tunnelmanager.CoordinatedConfigApplier) (connectorrotation.ControlSessionConfig, error) {
 			return connectorrotation.ControlSessionConfig{Hello: hello}, nil
 		},
-		CarrierDescriptorSource: func(context.Context, connectorprotocol.Welcome, tunnelmanager.ApplyRequest) (connector.DataCarrierSessionSource, error) {
+		CarrierDescriptorSource: func(context.Context, connectorprotocol.Hello, connectorprotocol.Welcome, tunnelmanager.ApplyRequest) (connector.DataCarrierSessionSource, error) {
 			return connector.DataCarrierSessionSource{}, nil
 		},
 	}, nil

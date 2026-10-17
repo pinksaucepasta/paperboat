@@ -35,9 +35,10 @@ type Manager struct {
 	controlToken string
 	mu           sync.Mutex
 	activating   map[string]struct{}
-	// processClaims records the process generation claimed by this manager
-	// lifetime for each durable connector. A failed activation can therefore
-	// retry the exact same claim, while a newly-created manager advances it.
+	// processClaims records each connector epoch owned by this manager.
+	// Activation retries reuse it; control reconnects and a new manager
+	// durably advance it before sending a fresh Hello.
+	claimsMu      sync.Mutex
 	processClaims map[processGenerationClaimKey]uint64
 }
 
@@ -218,10 +219,7 @@ func (m *Manager) Enroll(ctx context.Context, tunnelID, localKey string) (Projec
 			if !projection.valid() || projection.TunnelID != tunnelID || projection.HostID != m.hostID || projection.ConnectorID != recordValue.ConnectorID || projection.OperationID != recordValue.OperationID || projection.CredentialReference != recordValue.Credential.Reference {
 				return Projection{}, ErrActivation
 			}
-			recordValue.Phase = "active"
-			recordValue.Projection = &projection
-			state.Records[tunnelID] = recordValue
-			if err := m.store.saveJournal(state); err != nil {
+			if err := m.commitActivation(tunnelID, recordValue.activationRequest(), projection); err != nil {
 				return Projection{}, err
 			}
 			return projection, nil
@@ -297,9 +295,9 @@ func (m *Manager) finishPendingTokenCleanup(state *journal, tunnelID string, cur
 
 // Resume reattaches every durable connector after stable hostd restarts. The
 // enrollment exchange is never replayed. Before any activation, each durable
-// connector gets one process-generation claim for this manager lifetime. The
-// claim is persisted first and cached so activation retries reuse the same
-// generation; a new manager claims the next generation.
+// connector claims an epoch before activation. The claim is persisted and
+// cached so activation retries reuse it; a control reconnect or a new manager
+// claims the next generation.
 func (m *Manager) Resume(ctx context.Context) error {
 	if m == nil || ctx == nil || m.store == nil || m.activator == nil {
 		return ErrActivation
@@ -314,9 +312,6 @@ func (m *Manager) Resume(ctx context.Context) error {
 	}
 	if m.activating == nil {
 		m.activating = make(map[string]struct{})
-	}
-	if m.processClaims == nil {
-		m.processClaims = make(map[processGenerationClaimKey]uint64)
 	}
 	state, err := m.store.loadJournal()
 	if err != nil {
@@ -339,35 +334,10 @@ func (m *Manager) Resume(ctx context.Context) error {
 		tunnelIDs = append(tunnelIDs, tunnelID)
 	}
 	sort.Strings(tunnelIDs)
-	claims := make([]processGenerationClaim, 0, len(tunnelIDs))
-	claimKeys := make([]processGenerationClaimKey, 0, len(tunnelIDs))
-	for _, tunnelID := range tunnelIDs {
-		recordValue := state.Records[tunnelID]
-		key := processGenerationClaimKeyFor(recordValue)
-		if claimed, ok := m.processClaims[key]; ok {
-			if recordValue.ProcessGeneration != claimed {
-				m.mu.Unlock()
-				return ErrConflict
-			}
-			continue
-		}
-		if recordValue.ProcessGeneration == ^uint64(0) {
-			m.mu.Unlock()
-			return errors.Join(ErrConflict, errProcessGenerationExhausted)
-		}
-		claims = append(claims, processGenerationClaim{tunnelID: tunnelID, expected: recordValue.ProcessGeneration, next: recordValue.ProcessGeneration + 1})
-		claimKeys = append(claimKeys, key)
-	}
-	if len(claims) > 0 {
-		claimedState, claimErr := m.store.claimProcessGenerations(claims)
-		if claimErr != nil {
-			m.mu.Unlock()
-			return claimErr
-		}
-		state = claimedState
-		for index, claim := range claims {
-			m.processClaims[claimKeys[index]] = claim.next
-		}
+	state, err = m.claimResumeGenerations(state, tunnelIDs)
+	if err != nil {
+		m.mu.Unlock()
+		return err
 	}
 	for _, tunnelID := range tunnelIDs {
 		m.activating[tunnelID] = struct{}{}
@@ -423,11 +393,22 @@ func (m *Manager) commitResumeActivation(tunnelID string, request ActivationRequ
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	return m.commitActivation(tunnelID, request, projection)
+}
+
+func (m *Manager) commitActivation(tunnelID string, request ActivationRequest, projection Projection) error {
+	m.claimsMu.Lock()
+	defer m.claimsMu.Unlock()
 	currentState, loadErr := m.store.loadJournal()
 	if loadErr != nil {
 		return loadErr
 	}
 	current, exists := currentState.Records[tunnelID]
+	if exists && current.ProcessGeneration != request.ProcessGeneration {
+		if claimed := m.processClaims[processGenerationClaimKeyFor(current)]; claimed == current.ProcessGeneration && claimed > request.ProcessGeneration {
+			request.ProcessGeneration = claimed
+		}
+	}
 	if !exists || (current.Phase != "active" && current.Phase != "exchanged") || !sameActivationRequest(current.activationRequest(), request) {
 		return ErrConflict
 	}
@@ -464,4 +445,70 @@ func randomID(noun string) (string, error) {
 		return "", err
 	}
 	return noun + "_" + id.String(), nil
+}
+
+// ClaimProcessGeneration serializes reconnect claims with activation commits.
+// The exact durable binding remains fenced by the credential store CAS.
+func (m *Manager) ClaimProcessGeneration(ctx context.Context, expected ActivationRequest) (ActivationRequest, error) {
+	if m == nil || m.store == nil || ctx == nil {
+		return ActivationRequest{}, ErrInvalid
+	}
+	m.claimsMu.Lock()
+	defer m.claimsMu.Unlock()
+	claimed, err := m.store.ClaimProcessGeneration(ctx, expected)
+	if err != nil {
+		return ActivationRequest{}, err
+	}
+	if m.processClaims == nil {
+		m.processClaims = make(map[processGenerationClaimKey]uint64)
+	}
+	state, err := m.store.loadJournal()
+	if err != nil {
+		return ActivationRequest{}, err
+	}
+	m.processClaims[processGenerationClaimKeyFor(state.Records[claimed.TunnelID])] = claimed.ProcessGeneration
+	if owner, ok := m.activator.(interface {
+		AdvanceProcessGeneration(ActivationRequest, ActivationRequest) error
+	}); ok {
+		if err := owner.AdvanceProcessGeneration(expected, claimed); err != nil {
+			return ActivationRequest{}, err
+		}
+	}
+	return claimed, nil
+}
+
+func (m *Manager) claimResumeGenerations(state journal, tunnelIDs []string) (journal, error) {
+	m.claimsMu.Lock()
+	defer m.claimsMu.Unlock()
+	if m.processClaims == nil {
+		m.processClaims = make(map[processGenerationClaimKey]uint64)
+	}
+	claims := make([]processGenerationClaim, 0, len(tunnelIDs))
+	claimKeys := make([]processGenerationClaimKey, 0, len(tunnelIDs))
+	for _, tunnelID := range tunnelIDs {
+		recordValue := state.Records[tunnelID]
+		key := processGenerationClaimKeyFor(recordValue)
+		if claimed, ok := m.processClaims[key]; ok {
+			if recordValue.ProcessGeneration != claimed {
+				return journal{}, ErrConflict
+			}
+			continue
+		}
+		if recordValue.ProcessGeneration == ^uint64(0) {
+			return journal{}, errors.Join(ErrConflict, errProcessGenerationExhausted)
+		}
+		claims = append(claims, processGenerationClaim{tunnelID: tunnelID, expected: recordValue.ProcessGeneration, next: recordValue.ProcessGeneration + 1})
+		claimKeys = append(claimKeys, key)
+	}
+	if len(claims) > 0 {
+		claimedState, claimErr := m.store.claimProcessGenerations(claims)
+		if claimErr != nil {
+			return journal{}, claimErr
+		}
+		state = claimedState
+		for index, claim := range claims {
+			m.processClaims[claimKeys[index]] = claim.next
+		}
+	}
+	return state, nil
 }

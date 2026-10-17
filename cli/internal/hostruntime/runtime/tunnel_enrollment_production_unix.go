@@ -135,6 +135,12 @@ func (s *reconnectSafeProductionAssemblySource) BindCredentialStore(store *tunne
 	return nil
 }
 
+func (s *reconnectSafeProductionAssemblySource) BindProcessGenerationClaimer(owner processGenerationClaimer) {
+	s.mu.Lock()
+	s.credentials = owner
+	s.mu.Unlock()
+}
+
 func (s *reconnectSafeProductionAssemblySource) ResolveProductionAssembly(ctx context.Context, request tunnelenrollment.ActivationRequest, signer tunnelenrollment.CredentialSigner) (tunnelmanager.ProductionAssemblyConfig, error) {
 	if s == nil || s.inner == nil || ctx == nil || signer == nil {
 		return tunnelmanager.ProductionAssemblyConfig{}, tunnelenrollment.ErrInvalid
@@ -192,7 +198,7 @@ func (s *reconnectSafeProductionAssemblySource) Shutdown(ctx context.Context) er
 	return nil
 }
 
-func (b *reconnectSafeAssemblyBinding) carrierDescriptor(ctx context.Context, welcome connectorprotocol.Welcome, apply tunnelmanager.ApplyRequest) (connector.DataCarrierSessionSource, error) {
+func (b *reconnectSafeAssemblyBinding) carrierDescriptor(ctx context.Context, hello connectorprotocol.Hello, welcome connectorprotocol.Welcome, apply tunnelmanager.ApplyRequest) (connector.DataCarrierSessionSource, error) {
 	if b == nil || ctx == nil {
 		return connector.DataCarrierSessionSource{}, tunnelenrollment.ErrInvalid
 	}
@@ -202,7 +208,7 @@ func (b *reconnectSafeAssemblyBinding) carrierDescriptor(ctx context.Context, we
 	if config.CarrierDescriptorSource == nil {
 		return connector.DataCarrierSessionSource{}, tunnelenrollment.ErrActivation
 	}
-	return config.CarrierDescriptorSource(ctx, welcome, apply)
+	return config.CarrierDescriptorSource(ctx, hello, welcome, apply)
 }
 
 func (b *reconnectSafeAssemblyBinding) controlSessionFactory(ctx context.Context, applier *tunnelmanager.CoordinatedConfigApplier) (connectorrotation.ControlSessionConfig, error) {

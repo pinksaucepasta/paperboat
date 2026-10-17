@@ -87,7 +87,7 @@ func TestTask24ProductionBootstrapInstallsAuthenticatedIngressLookup(t *testing.
 	}
 	welcome := connectorprotocol.Welcome{SessionID: decision.SessionID}
 	apply := tunnelmanager.ApplyRequest{Snapshot: hoststate.ConfigSnapshot{Generation: decision.ConfigGeneration, ContentHash: descriptor.ConfigContentHash}}
-	if _, err := config.CarrierDescriptorSource(context.Background(), welcome, apply); err != nil {
+	if _, err := config.CarrierDescriptorSource(context.Background(), config.Control.Hello, welcome, apply); err != nil {
 		t.Fatal(err)
 	}
 	forwarder := config.OriginStreamsForGeneration(apply, connector.DataCarrierIdentity{AccountID: request.AccountID, TunnelID: request.TunnelID, ConnectorID: request.ConnectorID, HostID: request.HostID, ProcessGeneration: request.ProcessGeneration, Generation: apply.Snapshot.Generation})
@@ -106,7 +106,7 @@ func TestTask24ProductionBootstrapInstallsAuthenticatedIngressLookup(t *testing.
 	candidate := apply
 	candidate.Snapshot.Generation = 8
 	candidate.Snapshot.ContentHash = "sha256:" + strings.Repeat("b", 64)
-	if _, err := config.CarrierDescriptorSource(context.Background(), welcome, candidate); err == nil {
+	if _, err := config.CarrierDescriptorSource(context.Background(), config.Control.Hello, welcome, candidate); err == nil {
 		t.Fatal("candidate bootstrap unexpectedly succeeded")
 	}
 	if _, err := forwarder.IngressAuthority(context.Background(), open, decision); err != nil {

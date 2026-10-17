@@ -238,8 +238,12 @@ func (s *HTTPSProductionAssemblySource) resolveProductionAssembly(ctx context.Co
 		forwarder.IngressAuthority = ingress.lookup
 		return &forwarder
 	}
-	descriptors := func(descriptorCtx context.Context, welcome connectorprotocol.Welcome, apply tunnelmanager.ApplyRequest) (connector.DataCarrierSessionSource, error) {
-		return s.carrierSessionSource(descriptorCtx, request, identity, hello, welcome, apply, signer)
+	descriptors := func(descriptorCtx context.Context, currentHello connectorprotocol.Hello, welcome connectorprotocol.Welcome, apply tunnelmanager.ApplyRequest) (connector.DataCarrierSessionSource, error) {
+		currentRequest := request
+		currentRequest.ProcessGeneration = currentHello.ProcessGeneration
+		currentIdentity := identity
+		currentIdentity.ProcessGeneration = currentHello.ProcessGeneration
+		return s.carrierSessionSource(descriptorCtx, currentRequest, currentIdentity, currentHello, welcome, apply, signer)
 	}
 	controlFactory := func(factoryCtx context.Context, _ *tunnelmanager.CoordinatedConfigApplier) (connectorrotation.ControlSessionConfig, error) {
 		fresh, freshErr := s.newHello(factoryCtx, request, identity, signer)
@@ -697,7 +701,7 @@ func classifyCarrierBootstrapError(status int, raw []byte) error {
 		// A stale session is a recoverable control race. The next control
 		// reconnect supplies a new Welcome/session tuple before retrying.
 		if payload.Code == "connector_session_stale" && structured.Retryable && payload.RepairAction == "reconnect" {
-			classification = errors.Join(ErrUnavailable, tunnelmanager.ErrConnectorUnavailable)
+			classification = errors.Join(ErrUnavailable, tunnelmanager.ErrConnectorUnavailable, tunnelmanager.ErrSessionStale)
 		} else {
 			classification = ErrConflict
 		}

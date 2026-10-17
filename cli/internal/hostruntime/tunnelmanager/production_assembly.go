@@ -88,7 +88,9 @@ type ProductionAssemblyConfig struct {
 	NetworkReplacerFactory NetworkRecoveryReplacerFactory
 }
 
-type CarrierDescriptorSource func(context.Context, connectorprotocol.Welcome, ApplyRequest) (connector.DataCarrierSessionSource, error)
+var ErrSessionStale = errors.New("tunnel control session is stale; reconnect required")
+
+type CarrierDescriptorSource func(context.Context, connectorprotocol.Hello, connectorprotocol.Welcome, ApplyRequest) (connector.DataCarrierSessionSource, error)
 
 // ProductionAssembly owns one ProductionManager, its coordinated applier,
 // and one canonical connectorrotation.ControlSession. It implements the
@@ -118,6 +120,8 @@ type ProductionAssembly struct {
 	controlCancel   context.CancelFunc
 	controlDone     chan struct{}
 	controlErr      error
+	activeControl   io.ReadWriteCloser
+	activeSession   string
 	networkRecovery *NetworkRecoveryCoordinator
 }
 
@@ -199,7 +203,7 @@ func OpenProductionAssembly(config ProductionAssemblyConfig) (*ProductionAssembl
 			return nil
 		}
 	}
-	return &ProductionAssembly{
+	assembly := &ProductionAssembly{
 		Manager:         manager,
 		Factory:         factory,
 		Applier:         applier,
@@ -215,7 +219,11 @@ func OpenProductionAssembly(config ProductionAssemblyConfig) (*ProductionAssembl
 		connectorID:     config.Control.Hello.ConnectorID,
 		hostID:          config.Control.Hello.HostID,
 		networkRecovery: networkRecovery,
-	}, status, nil
+	}
+	if deferred != nil {
+		deferred.reconnect = assembly.reconnectStaleSession
+	}
+	return assembly, status, nil
 }
 
 func validateProductionAssemblyConfig(config ProductionAssemblyConfig) error {
@@ -486,9 +494,31 @@ func (controlTerminationFailure) Error() string {
 }
 func (e controlTerminationFailure) Unwrap() error { return e.cause }
 
+// Only the exact session whose bootstrap was rejected may retire its stream.
+func (a *ProductionAssembly) reconnectStaleSession(session string) {
+	a.controlMu.Lock()
+	stream := a.activeControl
+	if a.activeSession != session {
+		stream = nil
+	}
+	a.controlMu.Unlock()
+	if stream != nil {
+		_ = stream.Close()
+	}
+}
+
 func (a *ProductionAssembly) runControlAttempt(ctx context.Context, runner *connector.DataCarrierControlRunner, stream io.ReadWriteCloser, helloRequestID string) error {
+	a.controlMu.Lock()
+	a.activeControl, a.activeSession = stream, ""
+	a.controlMu.Unlock()
+	defer func() { a.controlMu.Lock(); a.activeControl, a.activeSession = nil, ""; a.controlMu.Unlock() }()
 	if a.observeWelcome != nil {
-		stream = &welcomeObservingControlStream{ReadWriteCloser: stream, onWelcome: a.observeWelcome}
+		stream = &welcomeObservingControlStream{ReadWriteCloser: stream, onWelcome: func(w connectorprotocol.Welcome) error {
+			a.controlMu.Lock()
+			a.activeSession = w.SessionID
+			a.controlMu.Unlock()
+			return a.observeWelcome(w)
+		}}
 	}
 	err := runner.Run(ctx, stream, helloRequestID)
 	if err == nil && ctx.Err() != nil {
@@ -734,6 +764,7 @@ type liveDataCarrierSessionSource struct {
 
 type welcomeDataCarrierSessionSource struct {
 	factory     CarrierDescriptorSource
+	reconnect   func(string)
 	hello       connectorprotocol.Hello
 	mu          sync.RWMutex
 	welcome     connectorprotocol.Welcome
@@ -801,7 +832,10 @@ func (s *welcomeDataCarrierSessionSource) PrepareDataCarrier(ctx context.Context
 	welcome := s.welcome
 	hello := s.hello
 	s.mu.RUnlock()
-	source, err := s.factory(ctx, welcome, request)
+	source, err := s.factory(ctx, hello, welcome, request)
+	if errors.Is(err, ErrSessionStale) && s.reconnect != nil {
+		s.reconnect(welcome.SessionID)
+	}
 	if err != nil {
 		return connector.DataCarrierPrepareRequest{}, err
 	}

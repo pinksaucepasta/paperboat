@@ -144,6 +144,11 @@ func NewProductionTunnelEnrollment(config ProductionTunnelEnrollmentConfig) (*Pr
 	if err != nil {
 		return nil, err
 	}
+	if source, ok := config.AssemblySource.(interface {
+		BindProcessGenerationClaimer(processGenerationClaimer)
+	}); ok {
+		source.BindProcessGenerationClaimer(manager)
+	}
 	return &ProductionTunnelEnrollment{manager: manager, lifecycle: lifecycle}, nil
 }
 

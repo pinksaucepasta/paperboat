@@ -216,7 +216,7 @@ func TestProductionAssemblyInitialControlDoesNotFabricateReadyOrPromotion(t *tes
 	config.SessionSource = connector.DataCarrierSessionSource{}
 	var descriptorMu sync.Mutex
 	var descriptorCalls int
-	config.CarrierDescriptorSource = func(context.Context, connectorprotocol.Welcome, ApplyRequest) (connector.DataCarrierSessionSource, error) {
+	config.CarrierDescriptorSource = func(context.Context, connectorprotocol.Hello, connectorprotocol.Welcome, ApplyRequest) (connector.DataCarrierSessionSource, error) {
 		descriptorMu.Lock()
 		defer descriptorMu.Unlock()
 		descriptorCalls++

@@ -861,3 +861,44 @@ func resumeJournalProcessGeneration(t *testing.T, store *FileCredentialStore, tu
 	}
 	return state.Records[tunnelID].ProcessGeneration
 }
+
+type reconnectBeforeReadyActivator struct {
+	manager *Manager
+	testActivator
+}
+
+func (a *reconnectBeforeReadyActivator) Activate(ctx context.Context, request ActivationRequest) (Projection, error) {
+	if _, err := a.manager.ClaimProcessGeneration(ctx, request); err != nil {
+		return Projection{}, err
+	}
+	return a.testActivator.Activate(ctx, request)
+}
+
+func TestManagerPreservesOwnedReconnectEpochBeforeReadiness(t *testing.T) {
+	store, tunnelID := writeResumeJournalFixture(t, 1)
+	activator := &reconnectBeforeReadyActivator{}
+	manager, err := NewManager(ManagerConfig{ControlURL: "https://api.example.test", HostID: "host_01", Auth: &testAuth{}, Credentials: store, Activator: activator, ControlToken: "local-token"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	activator.manager = manager
+	for _, want := range []uint64{3, 4} {
+		if err := manager.Resume(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		if got := resumeJournalProcessGeneration(t, store, tunnelID); got != want {
+			t.Fatalf("epoch=%d want=%d", got, want)
+		}
+	}
+	state, err := store.loadJournal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := state.Records[tunnelID].activationRequest()
+	if _, err := store.ClaimProcessGeneration(t.Context(), current); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Resume(t.Context()); !errors.Is(err, ErrConflict) {
+		t.Fatalf("competing epoch accepted: %v", err)
+	}
+}

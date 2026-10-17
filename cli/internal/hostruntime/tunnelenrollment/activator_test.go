@@ -96,7 +96,7 @@ func TestResolvedAssemblyRequiresLazyWelcomeBoundCarrierAndExactCredential(t *te
 	config := tunnelmanager.ProductionAssemblyConfig{
 		StableEndpointID: request.StableEndpointID,
 		ControlStream:    func(context.Context) (io.ReadWriteCloser, error) { return nil, errors.New("not opened") },
-		CarrierDescriptorSource: func(context.Context, connectorprotocol.Welcome, tunnelmanager.ApplyRequest) (connector.DataCarrierSessionSource, error) {
+		CarrierDescriptorSource: func(context.Context, connectorprotocol.Hello, connectorprotocol.Welcome, tunnelmanager.ApplyRequest) (connector.DataCarrierSessionSource, error) {
 			return connector.DataCarrierSessionSource{}, errors.New("not resolved")
 		},
 		InitialConnector: &hoststate.Connector{
