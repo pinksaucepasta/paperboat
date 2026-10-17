@@ -101,6 +101,9 @@ func (s *Service) mutate(ctx context.Context, account, team, op, kind string, ex
 			return err
 		}
 		if t.Suspended {
+			if _, ok := currentMember(t, account); !ok || t.Deleted {
+				return ErrForbidden
+			}
 			return ErrSuspended
 		}
 		if done {
@@ -294,6 +297,9 @@ func (s *Service) Invite(ctx context.Context, account, team string, r InviteRequ
 			return err
 		}
 		if t.Suspended {
+			if _, ok := currentMember(t, account); !ok || t.Deleted {
+				return ErrForbidden
+			}
 			return ErrSuspended
 		}
 		if done {

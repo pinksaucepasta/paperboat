@@ -78,6 +78,29 @@ func TestOperatorTeamSuspensionFencesAuthorityAndResumesAtNewGeneration(t *testi
 	if _, err = service.Authorize(ctx, memberID, team, "env", team, "read"); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("suspended authorization err=%v", err)
 	}
+	for _, attempt := range []func() error{
+		func() error {
+			_, e := service.Mutate(ctx, "outside_account", team, MutationRequest{OperationID: "outside_suspend", ExpectedGeneration: uint64(suspendedGeneration), Action: "rename", Name: "Changed"})
+			return e
+		},
+		func() error {
+			_, e := service.Invite(ctx, "outside_account", team, InviteRequest{OperationID: "outside_invite", ExpectedGeneration: uint64(suspendedGeneration), AccountID: memberID})
+			return e
+		},
+	} {
+		if e := attempt(); !errors.Is(e, ErrForbidden) {
+			t.Fatalf("suspended team leaked to outsider: %v", e)
+		}
+	}
+	if _, e := service.Mutate(ctx, owner, team, MutationRequest{OperationID: "suspended_rename", ExpectedGeneration: uint64(suspendedGeneration), Action: "rename", Name: "Changed"}); !errors.Is(e, ErrSuspended) {
+		t.Fatalf("suspended mutation error=%v", e)
+	}
+	if state, e := service.Get(ctx, owner, team); e != nil || !state.Suspended {
+		t.Fatalf("current member cannot read suspended state: suspended=%v err=%v", state.Suspended, e)
+	}
+	if _, e := service.Get(ctx, "outside_account", team); !errors.Is(e, ErrForbidden) {
+		t.Fatalf("outsider read suspended team: %v", e)
+	}
 	if err = store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		_, e := SetOperatorSuspensionTx(ctx, tx, admin, team, false, int64(before.TeamGeneration))
 		return e

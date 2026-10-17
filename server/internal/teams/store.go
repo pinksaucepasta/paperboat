@@ -279,7 +279,7 @@ func (s *Service) Get(ctx context.Context, account, team string) (Team, error) {
 		if err != nil {
 			return err
 		}
-		if _, ok := member(out, account); !ok || out.Deleted {
+		if _, ok := currentMember(out, account); !ok || out.Deleted {
 			return ErrForbidden
 		}
 		return nil

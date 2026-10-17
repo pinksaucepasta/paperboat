@@ -172,6 +172,11 @@ func member(t Team, account string) (Member, bool) {
 	if t.Suspended {
 		return Member{}, false
 	}
+	return currentMember(t, account)
+}
+
+// Current membership allows reading recovery state even while access is suspended.
+func currentMember(t Team, account string) (Member, bool) {
 	for _, m := range t.Members {
 		if m.AccountID == account && m.Active {
 			return m, true

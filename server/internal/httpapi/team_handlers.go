@@ -111,6 +111,8 @@ func registerTeamRoutes(mux *http.ServeMux, service teamAPI, read, write func(ht
 			switch {
 			case expectedHTTPErrorOnly(err, teams.ErrReservedSlug):
 				writeError(w, r, http.StatusBadRequest, "team_id_reserved", teams.ErrReservedSlug.Error())
+			case expectedHTTPErrorOnly(err, teams.ErrSuspended):
+				writeError(w, r, http.StatusConflict, "team_suspended", "Ask the team owner to restore billing or resume the team.")
 			case expectedHTTPErrorOnly(err, teams.ErrForbidden):
 				writeError(w, r, http.StatusForbidden, "forbidden", "Current team role and exact resource permission are required.")
 			case expectedHTTPErrorOnly(err, teams.ErrNotFound):

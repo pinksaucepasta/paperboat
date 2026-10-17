@@ -32418,7 +32418,14 @@
             "$ref": "#/components/responses/Error"
           },
           "409": {
-            "$ref": "#/components/responses/Error"
+            "description": "Conflict, including team_suspended after team or invitation authorization. Ask the team owner to restore billing or resume the team.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           },
           "412": {
             "$ref": "#/components/responses/Error"
@@ -32495,7 +32502,14 @@
             "$ref": "#/components/responses/Error"
           },
           "409": {
-            "$ref": "#/components/responses/Error"
+            "description": "Conflict, including team_suspended after team or invitation authorization. Ask the team owner to restore billing or resume the team.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           },
           "412": {
             "$ref": "#/components/responses/Error"
@@ -32697,7 +32711,14 @@
             "$ref": "#/components/responses/Error"
           },
           "409": {
-            "$ref": "#/components/responses/Error"
+            "description": "Conflict, including team_suspended after team or invitation authorization. Ask the team owner to restore billing or resume the team.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           },
           "412": {
             "$ref": "#/components/responses/Error"
@@ -32774,7 +32795,14 @@
             "$ref": "#/components/responses/Error"
           },
           "409": {
-            "$ref": "#/components/responses/Error"
+            "description": "Conflict, including team_suspended after team or invitation authorization. Ask the team owner to restore billing or resume the team.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           },
           "412": {
             "$ref": "#/components/responses/Error"
@@ -32859,7 +32887,14 @@
             "$ref": "#/components/responses/Error"
           },
           "409": {
-            "$ref": "#/components/responses/Error"
+            "description": "Conflict, including team_suspended after team or invitation authorization. Ask the team owner to restore billing or resume the team.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           },
           "412": {
             "$ref": "#/components/responses/Error"
@@ -33330,7 +33365,14 @@
             "$ref": "#/components/responses/Error"
           },
           "409": {
-            "$ref": "#/components/responses/Error"
+            "description": "Conflict, including team_suspended after team or invitation authorization. Ask the team owner to restore billing or resume the team.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           },
           "412": {
             "$ref": "#/components/responses/Error"
@@ -44423,7 +44465,14 @@
             "$ref": "#/components/responses/Error"
           },
           "409": {
-            "$ref": "#/components/responses/Error"
+            "description": "Conflict, including team_suspended after team or invitation authorization. Ask the team owner to restore billing or resume the team.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         },
         "requestBody": {
