@@ -14,6 +14,8 @@ import (
 func workspaceBillingError(w http.ResponseWriter, r *http.Request, err error) {
 	var provider billing.StripeAPIError
 	switch {
+	case errors.Is(err, billing.ErrTopupRequiresPaid):
+		writeError(w, r, http.StatusConflict, "paid_plan_required", "Choose a paid workspace plan before buying a bandwidth top-up.")
 	case errors.Is(err, billing.ErrWorkspaceForbidden):
 		writeError(w, r, http.StatusForbidden, "forbidden", "Your current workspace role does not permit this billing action.")
 	case errors.Is(err, billing.ErrSeatQuantity):
@@ -130,6 +132,15 @@ func workspaceBillingMutation(s *billing.WorkspaceService, origins []string, por
 		}
 		if portal {
 			out, err := s.Portal(r.Context(), p.User.ID, r.PathValue("team_id"), key, in.ReturnURL)
+			if err != nil {
+				workspaceBillingError(w, r, err)
+				return
+			}
+			writeJSON(w, 200, SuccessResponse{Data: map[string]string{"url": out.URL}})
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/topups") {
+			out, err := s.Topup(r.Context(), p.User.ID, r.PathValue("team_id"), in.ProductCode, key, in.SuccessURL, in.CancelURL, in.ProductVersion)
 			if err != nil {
 				workspaceBillingError(w, r, err)
 				return

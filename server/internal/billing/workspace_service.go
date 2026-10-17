@@ -42,6 +42,7 @@ type WorkspaceProduct struct {
 	Interval      string `json:"interval"`
 	PriceVerified bool   `json:"price_verified"`
 	Version       int64  `json:"version"`
+	BytesAmount   *int64 `json:"bytes_amount"`
 }
 
 type PortalConfigurations struct{ Personal, Team string }
@@ -71,6 +72,10 @@ func (s *WorkspaceService) Overview(ctx context.Context, account, team string) (
 				out.Product = &p
 			}
 		}
+		out.TopupBytesRemaining, err = WorkspaceTopupRemainingTx(ctx, tx, out.ID, time.Now().UTC())
+		if err != nil {
+			return err
+		}
 		return s.usageOverviewTx(ctx, tx, &out)
 	})
 	return out, err
@@ -93,6 +98,7 @@ func workspaceProduct(row interface{ Scan(...any) error }) (WorkspaceProduct, er
 	if err := parseProductMetadata(metadata, &product); err != nil {
 		return p, err
 	}
+	p.BytesAmount = product.BytesAmount
 	p.Name = product.DisplayName
 	if p.Name == "" {
 		p.Name = p.Code
@@ -120,10 +126,10 @@ func (s *WorkspaceService) Products(ctx context.Context, account, team string, l
 		if w.TeamID != "" {
 			catalog = "team_subscription"
 		}
-		if err = tx.QueryRow(ctx, `SELECT count(*) FROM billing_products WHERE provider='stripe' AND active AND catalog_type=$1`, catalog).Scan(&out.Total); err != nil {
+		if err = tx.QueryRow(ctx, `SELECT count(*) FROM billing_products WHERE provider='stripe' AND active AND (catalog_type=$1 OR catalog_type='top_up')`, catalog).Scan(&out.Total); err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, `SELECT code,catalog_ref,verified_unit_amount,verified_currency,verified_interval,version,catalog_type FROM billing_products WHERE provider='stripe' AND active AND catalog_type=$1 ORDER BY code LIMIT $2 OFFSET $3`, catalog, limit, offset)
+		rows, err := tx.Query(ctx, `SELECT code,catalog_ref,verified_unit_amount,verified_currency,verified_interval,version,catalog_type FROM billing_products WHERE provider='stripe' AND active AND (catalog_type=$1 OR catalog_type='top_up') ORDER BY code LIMIT $2 OFFSET $3`, catalog, limit, offset)
 		if err != nil {
 			return err
 		}
@@ -448,6 +454,9 @@ func (s *WorkspaceService) failOperation(ctx context.Context, key string, provid
 func (s *WorkspaceService) HandleWebhook(ctx context.Context, event StripeWebhook) (bool, error) {
 	if s.stripe == nil {
 		return false, ErrStripeUnavailable
+	}
+	if handled, processed, err := s.handleTopupWebhook(ctx, event); handled {
+		return processed, err
 	}
 	if event.ID == "" {
 		return false, nil

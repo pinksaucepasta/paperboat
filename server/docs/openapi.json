@@ -9963,7 +9963,8 @@
           "allowance_bytes",
           "seats_used",
           "allowance_period_start",
-          "allowance_period_end"
+          "allowance_period_end",
+          "topup_bytes_remaining"
         ],
         "properties": {
           "id": {
@@ -10053,6 +10054,11 @@
             "type": "string",
             "format": "date-time",
             "description": "End of the current monthly accounting budget at the original bandwidth anchor; independent of provider renewal dates and clipped segment boundaries."
+          },
+          "topup_bytes_remaining": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Unspent top-up bytes for this exact workspace that have not expired at the current instant. Top-ups expire at the end of the UTC calendar month of payment."
           }
         }
       },
@@ -10079,8 +10085,9 @@
           "catalog_type": {
             "type": "string",
             "enum": [
-              "price",
-              "product"
+              "personal_subscription",
+              "team_subscription",
+              "top_up"
             ]
           },
           "unit_amount": {
@@ -10103,6 +10110,14 @@
           "version": {
             "type": "integer",
             "minimum": 1
+          },
+          "bytes_amount": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "description": "Purchased bytes for a top_up product; null for subscriptions."
           }
         }
       },
@@ -44955,6 +44970,204 @@
             }
           }
         }
+      }
+    },
+    "/v1/billing/workspaces/personal/topups": {
+      "post": {
+        "operationId": "workspace_personal_checkout_topup",
+        "summary": "Buy a paid workspace bandwidth top-up",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized workspace result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "url"
+                      ],
+                      "properties": {
+                        "url": {
+                          "type": "string",
+                          "format": "uri"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "product_code",
+                  "success_url",
+                  "cancel_url",
+                  "product_version"
+                ],
+                "properties": {
+                  "product_code": {
+                    "type": "string"
+                  },
+                  "success_url": {
+                    "type": "string"
+                  },
+                  "cancel_url": {
+                    "type": "string"
+                  },
+                  "product_version": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Reviewed price version; stale requests return409 before provider call."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "description": "Paid workspaces only. Creates payment-mode Checkout; no bytes are credited by returning to the success URL. A signed paid provider event credits the exact workspace once. Expires at the end of the UTC calendar month of payment. Conflict paid_plan_required rejects Free. Requires Idempotency-Key and configured-origin success_url/cancel_url."
+      }
+    },
+    "/v1/billing/workspaces/teams/{team_id}/topups": {
+      "post": {
+        "operationId": "workspace_team_checkout_topup",
+        "summary": "Buy a paid workspace bandwidth top-up",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "team_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized workspace result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "url"
+                      ],
+                      "properties": {
+                        "url": {
+                          "type": "string",
+                          "format": "uri"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "product_code",
+                  "success_url",
+                  "cancel_url",
+                  "product_version"
+                ],
+                "properties": {
+                  "product_code": {
+                    "type": "string"
+                  },
+                  "success_url": {
+                    "type": "string"
+                  },
+                  "cancel_url": {
+                    "type": "string"
+                  },
+                  "product_version": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Reviewed price version; stale requests return409 before provider call."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "description": "Paid workspaces only. Creates payment-mode Checkout; no bytes are credited by returning to the success URL. A signed paid provider event credits the exact workspace once. Expires at the end of the UTC calendar month of payment. Conflict paid_plan_required rejects Free. Requires Idempotency-Key and configured-origin success_url/cancel_url."
       }
     }
   }

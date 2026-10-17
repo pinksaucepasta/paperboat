@@ -62,6 +62,13 @@ func (c HTTPStripeClient) GetPrice(ctx context.Context, id string) (StripePrice,
 	if err := c.do(requestCtx, http.MethodGet, "/v1/prices/"+url.PathEscape(id), "", nil, &out); err != nil {
 		return StripePrice{}, err
 	}
+	if out.Type == "one_time" && out.Recurring == nil && out.UnitAmount != nil {
+		price := StripePrice{ID: out.ID, ProductID: out.Product, Currency: strings.ToLower(out.Currency), Interval: "one_time", UnitAmount: *out.UnitAmount, Active: out.Active}
+		if out.ID == id && out.Object == "price" && validStripePriceStructure(price) {
+			return price, nil
+		}
+		return StripePrice{}, errors.New("stripe one-time price has invalid identity, amount or currency")
+	}
 	if out.ID != id || out.Object != "price" || out.Type != "recurring" || out.Recurring == nil || out.Recurring.UsageType != "licensed" || out.Recurring.IntervalCount != 1 || out.UnitAmount == nil || *out.UnitAmount < 0 || strings.TrimSpace(out.Product) == "" || strings.TrimSpace(out.Currency) == "" {
 		return StripePrice{}, errors.New("stripe price is not a recurring licensed unit price")
 	}
@@ -84,6 +91,7 @@ type ProductInput struct {
 	CatalogType     string `json:"catalog_type"`
 	Active          bool   `json:"active"`
 	AllowanceBytes  *int64 `json:"allowance_bytes"`
+	BytesAmount     *int64 `json:"bytes_amount"`
 }
 
 type Product struct {
@@ -97,6 +105,7 @@ type Product struct {
 	Currency          string `json:"currency"`
 	Interval          string `json:"interval"`
 	AllowanceBytes    *int64 `json:"allowance_bytes"`
+	BytesAmount       *int64 `json:"bytes_amount"`
 	Active            bool   `json:"active"`
 	Version           int64  `json:"version"`
 }
@@ -201,13 +210,14 @@ func (s *OperatorService) PutProduct(ctx context.Context, actorID, key, code, re
 	if err != nil {
 		return out, fmt.Errorf("verify Stripe price: %w", err)
 	}
-	if !validStripePriceStructure(price) || price.ID != input.ProviderPriceID || (input.Active && !price.Active) {
+	if !validStripePriceStructure(price) || (input.CatalogType == "top_up") == price.Recurring || price.ID != input.ProviderPriceID || (input.Active && !price.Active) {
 		return out, ErrOperatorBillingInvalid
 	}
 	metadata, _ := json.Marshal(struct {
 		DisplayName    string `json:"display_name"`
 		AllowanceBytes *int64 `json:"allowance_bytes,omitempty"`
-	}{strings.TrimSpace(input.DisplayName), input.AllowanceBytes})
+		BytesAmount    *int64 `json:"bytes_amount,omitempty"`
+	}{strings.TrimSpace(input.DisplayName), input.AllowanceBytes, input.BytesAmount})
 	err = s.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		if err := requireBillingRole(ctx, tx, actorID, true); err != nil {
 			return err
@@ -233,7 +243,7 @@ func (s *OperatorService) PutProduct(ctx context.Context, actorID, key, code, re
 			}
 			return err
 		}
-		out = Product{Code: code, DisplayName: strings.TrimSpace(input.DisplayName), CatalogType: input.CatalogType, ProviderPriceID: price.ID, ProviderProductID: price.ProductID, UnitAmount: price.UnitAmount, PriceVerified: true, Currency: price.Currency, Interval: price.Interval, AllowanceBytes: input.AllowanceBytes, Active: input.Active, Version: out.Version}
+		out = Product{Code: code, DisplayName: strings.TrimSpace(input.DisplayName), CatalogType: input.CatalogType, ProviderPriceID: price.ID, ProviderProductID: price.ProductID, UnitAmount: price.UnitAmount, PriceVerified: true, Currency: price.Currency, Interval: price.Interval, AllowanceBytes: input.AllowanceBytes, BytesAmount: input.BytesAmount, Active: input.Active, Version: out.Version}
 		return recordOperatorResult(ctx, tx, s.audit, actorID, key, "put_product", code, hash, reason, out)
 	})
 	return out, err
@@ -315,18 +325,27 @@ func requireBillingRole(ctx context.Context, tx *db.Tx, actor string, admin bool
 	return nil
 }
 func validateProductInput(in ProductInput) error {
-	if in.Version < 0 || strings.TrimSpace(in.DisplayName) == "" || len(in.DisplayName) > 120 || strings.TrimSpace(in.ProviderPriceID) == "" || (in.CatalogType != "personal_subscription" && in.CatalogType != "team_subscription") || (in.AllowanceBytes != nil && *in.AllowanceBytes < 0) {
+	if in.CatalogType == "top_up" {
+		if in.BytesAmount == nil || *in.BytesAmount <= 0 || in.AllowanceBytes != nil {
+			return ErrOperatorBillingInvalid
+		}
+	} else if in.BytesAmount != nil {
+		return ErrOperatorBillingInvalid
+	}
+	if in.Version < 0 || strings.TrimSpace(in.DisplayName) == "" || len(in.DisplayName) > 120 || strings.TrimSpace(in.ProviderPriceID) == "" || (in.CatalogType != "personal_subscription" && in.CatalogType != "team_subscription" && in.CatalogType != "top_up") || (in.AllowanceBytes != nil && *in.AllowanceBytes < 0) {
 		return ErrOperatorBillingInvalid
 	}
 	return nil
 }
 func validStripePriceStructure(p StripePrice) bool {
-	if !p.Recurring || !p.Licensed || strings.TrimSpace(p.ID) == "" || strings.TrimSpace(p.ProductID) == "" || p.UnitAmount < 0 || !stripeCurrencyPattern.MatchString(p.Currency) {
+	if strings.TrimSpace(p.ID) == "" || strings.TrimSpace(p.ProductID) == "" || p.UnitAmount < 0 || !stripeCurrencyPattern.MatchString(p.Currency) {
 		return false
 	}
 	switch p.Interval {
+	case "one_time":
+		return !p.Recurring && !p.Licensed && p.UnitAmount > 0
 	case "month", "year":
-		return true
+		return p.Recurring && p.Licensed
 	}
 	return false
 }
@@ -377,12 +396,14 @@ func parseProductMetadata(raw string, p *Product) error {
 	var m struct {
 		DisplayName    string `json:"display_name"`
 		AllowanceBytes *int64 `json:"allowance_bytes"`
+		BytesAmount    *int64 `json:"bytes_amount"`
 	}
 	if err := json.Unmarshal([]byte(raw), &m); err != nil {
 		return err
 	}
 	p.DisplayName = m.DisplayName
 	p.AllowanceBytes = m.AllowanceBytes
+	p.BytesAmount = m.BytesAmount
 	return nil
 }
 

@@ -332,6 +332,8 @@ type StripeWebhook struct {
 		Object struct {
 			ID            string `json:"id"`
 			BillingReason string `json:"billing_reason"`
+			PaymentStatus string `json:"payment_status"`
+			Mode          string `json:"mode"`
 			AttemptCount  int    `json:"attempt_count"`
 			Object        string `json:"object"`
 			Subscription  string `json:"subscription"`

@@ -514,6 +514,7 @@ team-default-*); console Config sync.
 - F13-02: Metering of relay and edge bytes per workspace (personal) and per member + pool (team); direct P2P never metered.
 - F13-03: Caps enforced as in 1.3; CLI and console messages with upgrade/top-up links; team owners/admins notified.
 - F13-04: Stripe test mode: Pro monthly/yearly, upgrade/downgrade/cancel, top-ups, Team seats monthly/yearly, seat changes mid-cycle (charged immediately, billing date fixed), failed payment → grace → suspension → recovery, invoices.
+- F13-04T: Server top-up producer: verified one-time catalog, paid-workspace Checkout journal/replay, provider-confirmed Personal/Team credits, UTC calendar expiry and isolated transactional consumption. Cap admission/debit integration remains F13-03; deployed UI/payment qualification remains F13-04/F13-06.
 - F13-05: Stripe live: products/prices via API, webhook verified, one real $8 purchase and refund done by the user.
 - F13-06: Console billing, bandwidth card (per-path series: direct/relay/edge), usage and plan screens.
 
@@ -1850,3 +1851,5 @@ Migration093 replaces unpublished083; final binaries used freshly recreated pape
 Reuses published abf4031 workspace gate PASS; primary owns F14 native/update-continuity/rollback/retirement/scheduling/version-floor/offline/check-status L/M proof, producer owns official signed artifacts/keys, Claude owns workspace summary.
 
 2026-10-18 | Lane A F2-01 activated-login recovery | Rows ticked:none; daemon-refresh retry overwrote rotated credentials. Existing real login/daemon owner RED0.736s/GREEN focused auth/workspace race6.557s; CLI vet PASS. Exact committed account/session now resumes without replaying approval tokens; published abf4031 workspace gate reused. Waits for primary L/M normal browser login + immediate doctor and retained approval resume; no devices.
+2026-10-18 | Lane B F13-04T top-up producer | GET /v1/billing/workspaces/{personal|teams/{id}}/products adds catalog_type=top_up, bytes_amount, interval=one_time; POST .../topups {product_code,product_version,success_url,cancel_url}+Idempotency-Key → {url}; overview adds topup_bytes_remaining. Paid-only409 paid_plan_required;403 forbidden,409 product_changed/idempotency_key_conflict/billing_pending,503 provider_outcome_unknown.
+A/C: redirects never fulfill; signed paid completion/async success credits the exact workspace once, expires at end of payment UTC month. Parent integrates WorkspaceTopupRemainingTx/ConsumeWorkspaceTopupsTx into paid cap admission/debits; deploy/UI checks remain open.
