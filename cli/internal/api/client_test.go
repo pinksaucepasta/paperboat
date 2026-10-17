@@ -319,42 +319,6 @@ func TestConfigAssignmentRequestsUseBearerAndSnakeCase(t *testing.T) {
 	}
 }
 
-func TestPreviewRequestsUseAccountScopeAndIdempotency(t *testing.T) {
-	var requests []string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requests = append(requests, r.Method+" "+r.URL.Path)
-		if r.Header.Get("Authorization") != "Bearer token" {
-			t.Fatalf("authorization=%q", r.Header.Get("Authorization"))
-		}
-		preview := map[string]any{"id": "prv_1", "environment_id": "env_1", "resource_id": "um_1", "user_id": "usr_1", "logical_name": "web", "preview_key": "p-abcdefghijklmnopqrstuvwxyz", "url": "https://p-abcdefghijklmnopqrstuvwxyz.preview.example.test", "target_port": 3000, "state": "registering", "version": 1}
-		switch r.Method + " " + r.URL.Path {
-		case "GET /v1/previews":
-			writeData(w, http.StatusOK, []any{preview})
-		case "DELETE /v1/previews/prv_1":
-			if r.Header.Get("Idempotency-Key") != "preview-remove-1" {
-				t.Fatalf("idempotency=%q", r.Header.Get("Idempotency-Key"))
-			}
-			preview["state"] = "removed"
-			writeData(w, http.StatusOK, preview)
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer srv.Close()
-	client := New(srv.URL, config.Credential{AccessToken: "token"}, srv.Client())
-	items, err := client.ListPreviews(context.Background())
-	if err != nil || len(items) != 1 || items[0].LogicalName != "web" || items[0].ResourceID != "um_1" || items[0].UserID != "usr_1" {
-		t.Fatalf("items=%v err=%v", items, err)
-	}
-	removed, err := client.RemovePreview(context.Background(), "prv_1", "preview-remove-1")
-	if err != nil || removed.State != "removed" {
-		t.Fatalf("removed=%+v err=%v", removed, err)
-	}
-	if len(requests) != 2 {
-		t.Fatalf("requests=%v", requests)
-	}
-}
-
 func TestFavoritesRoundTrip(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/favorites" {

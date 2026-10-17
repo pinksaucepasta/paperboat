@@ -128,13 +128,11 @@ func (s AuthenticatedMachineSource) ListCompletionItems(ctx context.Context, mac
 			items = append(items, localapi.CompletionItem{Kind: "transfer_target", Value: machine.ID, Description: description, EnvironmentID: machine.EnvironmentID})
 		}
 	}
-	previews, err := client.ListPreviews(ctx)
+	previews, err := previewCompletionItems(ctx, client, machines, maximumCompletionItems-len(items))
 	if err != nil {
 		return nil, err
 	}
-	for _, preview := range previews {
-		items = append(items, localapi.CompletionItem{Kind: "preview", Value: preview.ID, Description: completionDescription(preview.LogicalName, preview.State), EnvironmentID: preview.EnvironmentID})
-	}
+	items = append(items, previews...)
 	const maximumConcurrentSessionLists = 8
 	var sessionMu sync.Mutex
 	var sessionWG sync.WaitGroup

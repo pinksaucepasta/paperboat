@@ -659,27 +659,6 @@ type ConfigWarningFacts struct {
 	AccessConsequence    string `json:"access_consequence"`
 }
 
-type Preview struct {
-	ID              string     `json:"id"`
-	EnvironmentID   string     `json:"environment_id"`
-	ResourceID      string     `json:"resource_id"`
-	UserID          string     `json:"user_id"`
-	LogicalName     string     `json:"logical_name"`
-	PreviewKey      string     `json:"preview_key"`
-	URL             string     `json:"url"`
-	TargetPort      int32      `json:"target_port"`
-	State           string     `json:"state"`
-	ExpiresAt       *time.Time `json:"expires_at"`
-	RemovedAt       *time.Time `json:"removed_at"`
-	Version         int64      `json:"version"`
-	EnvironmentName string     `json:"environment_name"`
-	EnvironmentKind string     `json:"environment_kind"`
-	OwnerEmail      string     `json:"owner_email"`
-	SourceKind      string     `json:"source_kind"`
-	OwnerMode       string     `json:"owner_mode"`
-	SourcePath      string     `json:"source_path,omitempty"`
-}
-
 type Favorite struct {
 	Kind       string    `json:"kind"`
 	ResourceID string    `json:"resource_id"`
@@ -695,22 +674,6 @@ func (c *Client) ListFavorites(ctx context.Context) ([]Favorite, error) {
 func (c *Client) SetFavorite(ctx context.Context, kind, resourceID string, favorite bool) ([]Favorite, error) {
 	var out []Favorite
 	err := c.do(ctx, http.MethodPut, "/v1/favorites", map[string]any{"kind": kind, "resource_id": resourceID, "favorite": favorite}, &out)
-	return out, err
-}
-
-func (c *Client) ListPreviews(ctx context.Context) ([]Preview, error) {
-	var out []Preview
-	err := c.do(ctx, http.MethodGet, "/v1/previews", nil, &out)
-	return out, err
-}
-
-func (c *Client) RemovePreview(ctx context.Context, previewID, idempotencyKey string) (Preview, error) {
-	if strings.TrimSpace(idempotencyKey) == "" {
-		return Preview{}, errors.New("preview idempotency key is required")
-	}
-	var out Preview
-	path := "/v1/previews/" + url.PathEscape(previewID)
-	err := c.doWithHeaders(ctx, http.MethodDelete, path, nil, &out, http.Header{"Idempotency-Key": []string{idempotencyKey}})
 	return out, err
 }
 

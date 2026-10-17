@@ -24,7 +24,7 @@ func TestInventoryCompletionOutageRetainsProjectionAndReportsOncePerOwner(t *tes
 		case "/v1/machines":
 			_, _ = w.Write([]byte(`{"data":{"items":[{"id":"machine_1","alias":"studio","environment_id":"environment_1"}],"pagination":{"limit":200,"offset":0,"total":1,"next_offset":null}}}`))
 		case "/v1/previews":
-			_, _ = w.Write([]byte(`{"data":[]}`))
+			_, _ = w.Write([]byte(`{"data":{"items":[]}}`))
 		case "/v1/machines/machine_1/terminal-sessions":
 			if outage.Load() {
 				w.WriteHeader(503)
