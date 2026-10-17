@@ -53,7 +53,7 @@ func Run(ctx context.Context, config Config, machine *Machine, probes []Probe) (
 			defer probeCancel()
 			check := probe.Run(probeCtx)
 			if probeCtx.Err() != nil {
-				check = Check{Category: "diagnostics", Code: probe.Code, Status: StatusUnavailable, Summary: "The check did not complete within its deadline."}
+				check = Check{Category: "diagnostics", Code: probe.Code, Status: StatusUnavailable, Summary: "The check did not complete within its deadline.", Recovery: "Check the Paperboat service and network, then run pb doctor again."}
 			}
 			if check.Code == "" {
 				check.Code = probe.Code

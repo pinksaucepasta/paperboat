@@ -76,7 +76,7 @@ func TestRunConvertsDeadlineAndInvalidIdentityToSafeResults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.Overall != "unhealthy" || report.Checks[0].Code != "identity_check" || report.Checks[0].Status != StatusFail || report.Checks[1].Status != StatusUnavailable {
+	if report.Overall != "unhealthy" || report.Checks[0].Code != "identity_check" || report.Checks[0].Status != StatusFail || report.Checks[1].Status != StatusUnavailable || report.Checks[1].Recovery == "" {
 		t.Fatalf("report=%#v", report)
 	}
 }
