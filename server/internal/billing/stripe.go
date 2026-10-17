@@ -36,7 +36,7 @@ type StripeClient interface {
 	CreateCustomer(context.Context, string, string, string) (string, error)
 	CreateSubscriptionCheckout(context.Context, StripeCheckoutInput) (CheckoutSession, error)
 	GetCheckoutSession(context.Context, string) (StripeCheckoutState, error)
-	CreatePortal(context.Context, string, string, string) (CustomerPortalSession, error)
+	CreatePortal(context.Context, StripePortalInput) (CustomerPortalSession, error)
 	GetSubscription(context.Context, string) (StripeSubscription, error)
 	UpdateSubscriptionSeats(context.Context, string, string, int, string) (StripeSubscription, error)
 }
@@ -45,6 +45,10 @@ type StripeCheckoutState struct {
 	ID, CustomerID, CheckoutOperation, Status, URL string
 	Mode, SubscriptionID, PriceID                  string
 	Quantity                                       int
+}
+
+type StripePortalInput struct {
+	CustomerID, ReturnURL, IdempotencyKey, ConfigurationID string
 }
 
 type StripeCheckoutInput struct {
@@ -157,15 +161,18 @@ func (c HTTPStripeClient) GetCheckoutSession(ctx context.Context, id string) (St
 	return state, nil
 }
 
-func (c HTTPStripeClient) CreatePortal(ctx context.Context, customerID, returnURL, key string) (CustomerPortalSession, error) {
-	var out struct {
-		URL, Customer string
-		Livemode      bool `json:"livemode"`
+func (c HTTPStripeClient) CreatePortal(ctx context.Context, in StripePortalInput) (CustomerPortalSession, error) {
+	if strings.TrimSpace(in.ConfigurationID) == "" {
+		return CustomerPortalSession{}, ErrStripeUnavailable
 	}
-	if err := c.do(ctx, http.MethodPost, "/v1/billing_portal/sessions", key, url.Values{"customer": {customerID}, "return_url": {returnURL}}, &out); err != nil {
+	var out struct {
+		URL, Customer, Configuration string
+		Livemode                     bool `json:"livemode"`
+	}
+	if err := c.do(ctx, http.MethodPost, "/v1/billing_portal/sessions", in.IdempotencyKey, url.Values{"customer": {in.CustomerID}, "return_url": {in.ReturnURL}, "configuration": {in.ConfigurationID}}, &out); err != nil {
 		return CustomerPortalSession{}, err
 	}
-	if out.URL == "" || out.Customer != customerID {
+	if out.URL == "" || out.Customer != in.CustomerID || out.Configuration != in.ConfigurationID {
 		return CustomerPortalSession{}, errors.New("invalid stripe portal response")
 	}
 	return CustomerPortalSession{URL: out.URL}, nil

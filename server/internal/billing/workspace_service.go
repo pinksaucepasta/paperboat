@@ -17,9 +17,10 @@ import (
 )
 
 type WorkspaceService struct {
-	store  *db.DB
-	stripe StripeClient
-	key    string
+	store   *db.DB
+	stripe  StripeClient
+	key     string
+	portals PortalConfigurations
 }
 
 var ErrProductChanged = errors.New("billing product price changed")
@@ -44,8 +45,14 @@ type WorkspaceProduct struct {
 	Version       int64  `json:"version"`
 }
 
-func NewWorkspaceService(store *db.DB, stripe StripeClient, key string) *WorkspaceService {
-	return &WorkspaceService{store: store, stripe: stripe, key: key}
+type PortalConfigurations struct{ Personal, Team string }
+
+func NewWorkspaceService(store *db.DB, stripe StripeClient, key string, portals ...PortalConfigurations) *WorkspaceService {
+	s := &WorkspaceService{store: store, stripe: stripe, key: key}
+	for _, configuration := range portals {
+		s.portals = configuration
+	}
+	return s
 }
 
 func (s *WorkspaceService) Overview(ctx context.Context, account, team string) (Workspace, error) {
@@ -371,106 +378,6 @@ func (s *WorkspaceService) Checkout(ctx context.Context, account, email, team, p
 		return CheckoutSession{}, err
 	}
 	return session, nil
-}
-
-func (s *WorkspaceService) Portal(ctx context.Context, account, team, key, returnURL string) (CustomerPortalSession, error) {
-	if s.stripe == nil {
-		return CustomerPortalSession{}, ErrStripeUnavailable
-	}
-	if s.key == "" {
-		return CustomerPortalSession{}, ErrWorkspaceEncryptionUnavailable
-	}
-	hash, err := workspaceRequestHash(struct{ Actor, Team, Return string }{account, team, returnURL})
-	if err != nil {
-		return CustomerPortalSession{}, err
-	}
-	var w Workspace
-	var replay *CustomerPortalSession
-	type portalProviderRequest struct{ CustomerID, ReturnURL string }
-	var providerRequest portalProviderRequest
-	err = s.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		var e error
-		w, e = WorkspaceTx(ctx, tx, account, team, true)
-		if e != nil {
-			return e
-		}
-		if w.CustomerID == "" {
-			return errors.New("workspace has no billing customer")
-		}
-		providerRequest = portalProviderRequest{w.CustomerID, returnURL}
-		op, found, e := loadWorkspaceOperation(ctx, tx, key)
-		if e != nil {
-			return e
-		}
-		if found {
-			if op.WorkspaceID != w.ID || op.Actor != account || op.Kind != "portal" || op.Hash != hash {
-				return ErrIdempotencyConflict
-			}
-			switch op.State {
-			case "succeeded":
-				var v CustomerPortalSession
-				if e = s.decryptResult(op.Ciphertext, &v); e != nil {
-					return e
-				}
-				replay = &v
-				return nil
-			case "uncertain":
-				if op.ProviderAttemptedAt.Valid && time.Since(op.ProviderAttemptedAt.Time) >= 24*time.Hour {
-					return ErrStripeOperationExpired
-				}
-				if e = s.decryptResult(op.RequestCiphertext, &providerRequest); e != nil {
-					return e
-				}
-				_, e = tx.Exec(ctx, `UPDATE billing_workspace_operations SET state='pending',updated_at=now() WHERE idempotency_key=$1 AND state='uncertain'`, key)
-				return e
-			case "failed":
-				return ErrWorkspaceOperationFailed
-			default:
-				if time.Since(op.UpdatedAt) < time.Minute {
-					return ErrCheckoutPending
-				}
-				if op.ProviderAttemptedAt.Valid && time.Since(op.ProviderAttemptedAt.Time) >= 24*time.Hour {
-					return ErrStripeOperationExpired
-				}
-				if e = s.decryptResult(op.RequestCiphertext, &providerRequest); e != nil {
-					return e
-				}
-				_, e = tx.Exec(ctx, `UPDATE billing_workspace_operations SET updated_at=now() WHERE idempotency_key=$1`, key)
-				return e
-			}
-		}
-		b, e := json.Marshal(providerRequest)
-		if e != nil {
-			return e
-		}
-		cipher, e := secrets.Encrypt(s.key, string(b))
-		if e != nil {
-			return e
-		}
-		_, e = tx.Exec(ctx, `INSERT INTO billing_workspace_operations(idempotency_key,workspace_id,actor_user_id,kind,request_hash,state,request_ciphertext) VALUES($1,$2,$3,'portal',$4,'pending',$5)`, key, w.ID, account, hash, cipher)
-		return e
-	})
-	if err != nil {
-		return CustomerPortalSession{}, err
-	}
-	if replay != nil {
-		return *replay, nil
-	}
-	if _, err = s.store.SQL().ExecContext(ctx, `UPDATE paperboat.billing_workspace_operations SET provider_attempted_at=COALESCE(provider_attempted_at,now()) WHERE idempotency_key=$1 AND state='pending'`, key); err != nil {
-		return CustomerPortalSession{}, err
-	}
-	result, err := s.stripe.CreatePortal(ctx, providerRequest.CustomerID, providerRequest.ReturnURL, key)
-	if err != nil {
-		return CustomerPortalSession{}, s.failOperation(ctx, key, err)
-	}
-	if err = s.completeOperation(ctx, key, result); err != nil {
-		_ = s.markOperation(ctx, key, "uncertain")
-		return CustomerPortalSession{}, errors.Join(ErrProviderOutcomeUnknown, err)
-	}
-	if err := s.reauthorizeBilling(ctx, account, team); err != nil {
-		return CustomerPortalSession{}, err
-	}
-	return result, nil
 }
 
 func (s *WorkspaceService) reauthorizeBilling(ctx context.Context, account, team string) error {

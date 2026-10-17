@@ -14,6 +14,8 @@ func TestLoadOverlaysEnvAndSecretFiles(t *testing.T) {
 		"/run/secrets/encryption": []byte("secret-from-file\n"),
 	}
 	env := map[string]string{
+		"PAPERBOAT_STRIPE_PERSONAL_PORTAL_CONFIGURATION_ID": "bpc_personal",
+		"PAPERBOAT_STRIPE_TEAM_PORTAL_CONFIGURATION_ID":     "bpc_team",
 		"PAPERBOAT_ENV":                                         "test",
 		"PAPERBOAT_LOCAL_ACCESS_BASE_DOMAIN":                    "local.example.test",
 		"PAPERBOAT_RUNTIME_BASE_DOMAIN":                         "runtime.example.test",
@@ -45,6 +47,9 @@ func TestLoadOverlaysEnvAndSecretFiles(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if cfg.Billing.PersonalPortalConfigurationID != "bpc_personal" || cfg.Billing.TeamPortalConfigurationID != "bpc_team" {
+		t.Fatal("workspace portal configuration environment mapping lost")
 	}
 	if cfg.Environment != EnvironmentTest {
 		t.Fatalf("environment = %q", cfg.Environment)

@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -71,14 +72,16 @@ func TestHTTPStripeClientRequestsPreserveWorkspaceCustomerAndQuantity(t *testing
 }
 
 func TestHTTPStripeClientGetPortalErrorsAndLiveGuard(t *testing.T) {
+	var requests atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
 		switch r.URL.Path {
 		case "/v1/billing_portal/sessions":
 			r.ParseForm()
-			if r.PostForm.Get("customer") != "cus_only" {
-				t.Error("customer isolation lost")
+			if r.PostForm.Get("customer") != "cus_only" || r.PostForm.Get("configuration") != "bpc_personal" {
+				t.Error("portal customer or configuration scope lost")
 			}
-			io.WriteString(w, `{"url":"https://billing.stripe.test/test","customer":"cus_only","livemode":false}`)
+			io.WriteString(w, `{"url":"https://billing.stripe.test/test","customer":"cus_only","configuration":"bpc_personal","livemode":false}`)
 		case "/v1/subscriptions/sub_live":
 			io.WriteString(w, `{"livemode":true}`)
 		default:
@@ -88,9 +91,13 @@ func TestHTTPStripeClientGetPortalErrorsAndLiveGuard(t *testing.T) {
 	}))
 	defer srv.Close()
 	c := HTTPStripeClient{BaseURL: srv.URL, APIKey: "sk_test_hidden", Client: srv.Client()}
-	portal, err := c.CreatePortal(context.Background(), "cus_only", "https://paperboat.test/account", "portal-op")
+	portal, err := c.CreatePortal(context.Background(), StripePortalInput{CustomerID: "cus_only", ReturnURL: "https://paperboat.test/account", IdempotencyKey: "portal-op", ConfigurationID: "bpc_personal"})
 	if err != nil || portal.URL == "" {
 		t.Fatalf("portal=%+v err=%v", portal, err)
+	}
+	before := requests.Load()
+	if _, err := c.CreatePortal(context.Background(), StripePortalInput{CustomerID: "cus_only", ReturnURL: "https://example.test/account", IdempotencyKey: "missing-config"}); !errors.Is(err, ErrStripeUnavailable) || requests.Load() != before {
+		t.Fatal("missing scoped configuration reached Stripe's default portal")
 	}
 	_, err = c.GetSubscription(context.Background(), "sub_live")
 	if err == nil || strings.Contains(err.Error(), "sk_test") {

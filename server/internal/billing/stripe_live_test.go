@@ -80,3 +80,43 @@ func TestStripeTestModeCheckoutAndSubscriptionContract(t *testing.T) {
 		t.Fatal("seat increase did not immediately invoice and collect its proration")
 	}
 }
+
+// Portal probes create no subscriptions and can run with lifecycle webhooks
+// enabled. Their exact test customers are removed on every exit path.
+func TestStripeTestModeScopedPortalContract(t *testing.T) {
+	key, base := os.Getenv("PAPERBOAT_TEST_STRIPE_API_KEY"), os.Getenv("PAPERBOAT_TEST_STRIPE_BASE_URL")
+	if key == "" {
+		t.Skip("explicit Stripe test credentials and scoped portal configurations required")
+	}
+	if !(strings.HasPrefix(key, "sk_test_") || strings.HasPrefix(key, "rk_test_")) || base == "" {
+		t.Fatal("explicit test credential and API base required")
+	}
+	for _, scope := range []string{"PERSONAL", "TEAM"} {
+		t.Run(scope, func(t *testing.T) {
+			configuration := os.Getenv("PAPERBOAT_TEST_STRIPE_" + scope + "_PORTAL_CONFIGURATION_ID")
+			if configuration == "" {
+				t.Fatal("scoped portal configuration required")
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+			defer cancel()
+			c := HTTPStripeClient{APIKey: key, BaseURL: base, Client: &http.Client{Timeout: 15 * time.Second}}
+			operation := "portal-test-" + uuid.NewString()
+			customer, err := c.CreateCustomer(ctx, operation, "portal@example.test", operation+"-customer")
+			if err != nil {
+				t.Fatal("create test portal customer:", err)
+			}
+			defer func() {
+				cleanup, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+				defer cancel()
+				var deleted struct{ Deleted bool }
+				if err := c.do(cleanup, http.MethodDelete, "/v1/customers/"+url.PathEscape(customer), "", nil, &deleted); err != nil || !deleted.Deleted {
+					t.Error("test portal customer cleanup failed")
+				}
+			}()
+			session, err := c.CreatePortal(ctx, StripePortalInput{CustomerID: customer, ReturnURL: "https://example.test/billing", IdempotencyKey: operation, ConfigurationID: configuration})
+			if err != nil || session.URL == "" {
+				t.Fatal("actual scoped portal contract:", err)
+			}
+		})
+	}
+}

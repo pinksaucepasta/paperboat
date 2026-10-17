@@ -139,6 +139,8 @@ func overlayEnv(c *Config, lookup func(string) (string, bool), readFile func(str
 	setString("PAPERBOAT_WORKOS_BASE_URL", &c.Providers.WorkOS.BaseURL)
 	setString("PAPERBOAT_OPERATOR_EMAIL", &c.OperatorBootstrapEmail)
 	setString("PAPERBOAT_STRIPE_BASE_URL", &c.Providers.Stripe.BaseURL)
+	setString("PAPERBOAT_STRIPE_PERSONAL_PORTAL_CONFIGURATION_ID", &c.Billing.PersonalPortalConfigurationID)
+	setString("PAPERBOAT_STRIPE_TEAM_PORTAL_CONFIGURATION_ID", &c.Billing.TeamPortalConfigurationID)
 	setString("PAPERBOAT_GITHUB_BASE_URL", &c.Providers.GitHub.BaseURL)
 	setString("PAPERBOAT_PREVIEW_SUBDOMAIN_PREFIX", &c.Access.RouteSubdomainPrefix)
 	setString("PAPERBOAT_DIAGNOSTICS_OBJECT_ENDPOINT", &c.Diagnostics.ObjectEndpoint)

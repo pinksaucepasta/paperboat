@@ -16,6 +16,7 @@ type workspaceStripeFake struct {
 	checkoutTimeout, portalTimeout             bool
 	checkoutInputs                             []billing.StripeCheckoutInput
 	portalCustomers, portalReturns, portalKeys []string
+	portalConfigurations                       []string
 	checkoutState                              string
 }
 
@@ -32,11 +33,12 @@ func (f *workspaceStripeFake) CreateSubscriptionCheckout(_ context.Context, in b
 	}
 	return billing.CheckoutSession{URL: "https://checkout.stripe.test/session", ProviderSessionID: "cs_test", ProviderCustomerID: in.CustomerID}, nil
 }
-func (f *workspaceStripeFake) CreatePortal(_ context.Context, customerID, returnURL, key string) (billing.CustomerPortalSession, error) {
+func (f *workspaceStripeFake) CreatePortal(_ context.Context, in billing.StripePortalInput) (billing.CustomerPortalSession, error) {
 	f.portals++
-	f.portalCustomers = append(f.portalCustomers, customerID)
-	f.portalReturns = append(f.portalReturns, returnURL)
-	f.portalKeys = append(f.portalKeys, key)
+	f.portalConfigurations = append(f.portalConfigurations, in.ConfigurationID)
+	f.portalCustomers = append(f.portalCustomers, in.CustomerID)
+	f.portalReturns = append(f.portalReturns, in.ReturnURL)
+	f.portalKeys = append(f.portalKeys, in.IdempotencyKey)
 	if f.portalTimeout {
 		f.portalTimeout = false
 		return billing.CustomerPortalSession{}, context.DeadlineExceeded
@@ -68,7 +70,7 @@ func TestWorkspaceCheckoutAndPortalRecoverSameProviderOperation(t *testing.T) {
 		store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.users WHERE id=$1`, user)
 	})
 	f := &workspaceStripeFake{checkoutTimeout: true}
-	s := billing.NewWorkspaceService(store, f, "recovery-key")
+	s := billing.NewWorkspaceService(store, f, "recovery-key", billing.PortalConfigurations{Personal: "bpc_personal_original", Team: "bpc_team_original"})
 	key := "checkout-recover-" + x
 	if _, err := s.Checkout(ctx, user, user+"@example.test", "", code, key, "https://example.test/success", "https://example.test/cancel", 1); !errors.Is(err, billing.ErrProviderOutcomeUnknown) {
 		t.Fatalf("first checkout error=%v", err)
@@ -85,12 +87,40 @@ func TestWorkspaceCheckoutAndPortalRecoverSameProviderOperation(t *testing.T) {
 	if _, err = s.Portal(ctx, user, "", portalKey, "https://example.test/account"); !errors.Is(err, billing.ErrProviderOutcomeUnknown) {
 		t.Fatalf("first portal error=%v", err)
 	}
+	// A restart with new portal configuration must recover the exact original
+	// provider request rather than changing an in-flight operation's scope.
+	s = billing.NewWorkspaceService(store, f, "recovery-key", billing.PortalConfigurations{Personal: "bpc_personal_next", Team: "bpc_team_next"})
 	portal, err := s.Portal(ctx, user, "", portalKey, "https://example.test/account")
 	if err != nil || portal.URL == "" || f.portals != 2 {
 		t.Fatalf("recovered portal=%+v calls=%d err=%v", portal, f.portals, err)
 	}
 	if f.portalCustomers[0] != f.portalCustomers[1] || f.portalReturns[0] != f.portalReturns[1] || f.portalKeys[0] != portalKey || f.portalKeys[1] != portalKey {
 		t.Fatalf("portal calls customers=%v returns=%v keys=%v", f.portalCustomers, f.portalReturns, f.portalKeys)
+	}
+	if f.portalConfigurations[0] != "bpc_personal_original" || f.portalConfigurations[1] != "bpc_personal_original" {
+		t.Fatal("portal recovery changed its original configuration")
+	}
+	team := "portal_team_" + x
+	teamWorkspace := "team:" + team
+	t.Cleanup(func() {
+		store.SQL().ExecContext(ctx, `DELETE FROM paperboat.billing_workspace_operations WHERE workspace_id=$1`, teamWorkspace)
+		store.SQL().ExecContext(ctx, `DELETE FROM paperboat.billing_workspaces WHERE id=$1`, teamWorkspace)
+		store.SQL().ExecContext(ctx, `DELETE FROM paperboat.teams WHERE team_id=$1`, team)
+	})
+	for _, q := range []string{`INSERT INTO paperboat.teams(team_id,owner_account,generation) VALUES($1,$2,1)`, `INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'admin',true)`} {
+		if _, err = store.SQL().ExecContext(ctx, q, team, user); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.billing_workspaces(id,team_id,provider_customer_id) VALUES($1,$2,$3)`, teamWorkspace, team, "cus_team_"+x); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Portal(ctx, user, team, "team-portal-"+x, "https://example.test/team"); err != nil {
+		t.Fatal(err)
+	}
+	last := len(f.portalConfigurations) - 1
+	if f.portalConfigurations[last] != "bpc_team_next" || f.portalCustomers[last] != "cus_team_"+x {
+		t.Fatal("team portal used a personal configuration or customer")
 	}
 	staleKey := "stale-pending-" + x
 	f.portalTimeout = true

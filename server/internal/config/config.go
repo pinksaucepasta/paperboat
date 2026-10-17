@@ -123,9 +123,11 @@ type Database struct {
 }
 
 type Billing struct {
-	PersonalAllowanceBytes *int64 `json:"personal_allowance_bytes,omitempty"`
-	TeamAllowanceBytes     *int64 `json:"team_allowance_bytes,omitempty"`
-	PersonalMachineLimit   *int32 `json:"personal_machine_limit,omitempty"`
+	PersonalPortalConfigurationID string `json:"personal_portal_configuration_id,omitempty"`
+	TeamPortalConfigurationID     string `json:"team_portal_configuration_id,omitempty"`
+	PersonalAllowanceBytes        *int64 `json:"personal_allowance_bytes,omitempty"`
+	TeamAllowanceBytes            *int64 `json:"team_allowance_bytes,omitempty"`
+	PersonalMachineLimit          *int32 `json:"personal_machine_limit,omitempty"`
 }
 
 type UserMachines struct {

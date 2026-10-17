@@ -216,7 +216,7 @@ func New(opts Options) (*App, error) {
 	if opts.Config.Secrets.StripeAPIKey != "" {
 		stripeClient = billing.HTTPStripeClient{BaseURL: opts.Config.Providers.Stripe.BaseURL, APIKey: opts.Config.Secrets.StripeAPIKey}
 	}
-	workspaceBilling := billing.NewWorkspaceService(store, stripeClient, opts.Config.Secrets.EncryptionKey)
+	workspaceBilling := billing.NewWorkspaceService(store, stripeClient, opts.Config.Secrets.EncryptionKey, billing.PortalConfigurations{Personal: opts.Config.Billing.PersonalPortalConfigurationID, Team: opts.Config.Billing.TeamPortalConfigurationID})
 	policyContext, cancelPolicy := context.WithTimeout(context.Background(), opts.Config.HTTP.RequestTimeout)
 	policyErr := workspaceBilling.InitializeAllowancePolicy(policyContext, opts.Config.Billing.PersonalAllowanceBytes, opts.Config.Billing.TeamAllowanceBytes, opts.Config.Billing.PersonalMachineLimit)
 	cancelPolicy()

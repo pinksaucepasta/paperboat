@@ -26,7 +26,7 @@ func (f *recoveryStripeFake) CreateCustomer(context.Context, string, string, str
 func (f *recoveryStripeFake) CreateSubscriptionCheckout(context.Context, billing.StripeCheckoutInput) (billing.CheckoutSession, error) {
 	panic("unexpected")
 }
-func (f *recoveryStripeFake) CreatePortal(context.Context, string, string, string) (billing.CustomerPortalSession, error) {
+func (f *recoveryStripeFake) CreatePortal(context.Context, billing.StripePortalInput) (billing.CustomerPortalSession, error) {
 	panic("unexpected")
 }
 func (f *recoveryStripeFake) GetCheckoutSession(context.Context, string) (billing.StripeCheckoutState, error) {
