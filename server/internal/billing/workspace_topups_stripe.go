@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"strconv"
 	"time"
 )
 
@@ -15,18 +16,21 @@ type StripeTopupClient interface {
 	GetTopupCheckout(context.Context, string) (StripeTopupState, error)
 }
 type StripeTopupInput struct {
+	Quantity                                                                int
 	CustomerID, PriceID, WorkspaceID, IdempotencyKey, SuccessURL, CancelURL string
 }
 type StripeTopupState struct {
 	ID, CustomerID, WorkspaceID, Operation, Mode, Status, PaymentStatus, PriceID, URL string
 	Quantity                                                                          int
+	AmountTotal                                                                       int64
+	Currency                                                                          string
 	CreatedAt                                                                         time.Time
 }
 
 func (c HTTPStripeClient) CreateTopupCheckout(ctx context.Context, in StripeTopupInput) (CheckoutSession, error) {
 	v := url.Values{
 		"mode": {"payment"}, "customer": {in.CustomerID},
-		"line_items[0][price]": {in.PriceID}, "line_items[0][quantity]": {"1"},
+		"line_items[0][price]": {in.PriceID}, "line_items[0][quantity]": {strconv.Itoa(in.Quantity)},
 		"success_url": {in.SuccessURL}, "cancel_url": {in.CancelURL},
 		"metadata[paperboat_topup_operation]": {in.IdempotencyKey},
 		"metadata[workspace_id]":              {in.WorkspaceID},
@@ -50,6 +54,8 @@ func (c HTTPStripeClient) CreateTopupCheckout(ctx context.Context, in StripeTopu
 func (c HTTPStripeClient) GetTopupCheckout(ctx context.Context, id string) (StripeTopupState, error) {
 	var out struct {
 		ID, Customer, Mode, Status, URL string
+		Currency                        string `json:"currency"`
+		AmountTotal                     int64  `json:"amount_total"`
 		PaymentStatus                   string `json:"payment_status"`
 		Created                         int64  `json:"created"`
 		Metadata                        struct {
@@ -70,7 +76,7 @@ func (c HTTPStripeClient) GetTopupCheckout(ctx context.Context, id string) (Stri
 	if out.ID != id || out.Customer == "" || out.Created <= 0 {
 		return StripeTopupState{}, errors.New("invalid stripe top-up checkout response")
 	}
-	s := StripeTopupState{ID: out.ID, CustomerID: out.Customer, Mode: out.Mode, Status: out.Status, URL: out.URL, PaymentStatus: out.PaymentStatus, Operation: out.Metadata.Operation, WorkspaceID: out.Metadata.Workspace, CreatedAt: time.Unix(out.Created, 0).UTC()}
+	s := StripeTopupState{AmountTotal: out.AmountTotal, Currency: out.Currency, ID: out.ID, CustomerID: out.Customer, Mode: out.Mode, Status: out.Status, URL: out.URL, PaymentStatus: out.PaymentStatus, Operation: out.Metadata.Operation, WorkspaceID: out.Metadata.Workspace, CreatedAt: time.Unix(out.Created, 0).UTC()}
 	if len(out.LineItems.Data) == 1 && !out.LineItems.HasMore {
 		s.PriceID = out.LineItems.Data[0].Price.ID
 		s.Quantity = out.LineItems.Data[0].Quantity

@@ -3,17 +3,31 @@ package billing
 import (
 	"context"
 	"errors"
+	"math"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
 )
 
+const TopupUnitBytes int64 = 100_000_000_000
+
+var ErrTopupQuantity = errors.New("top-up quantity must be an integer within the configured limit")
+
+func (s *WorkspaceService) ConfigureTopupMaxQuantity(n int) error {
+	if n < 1 {
+		return ErrTopupQuantity
+	}
+	s.topupMaxQuantity = n
+	return nil
+}
+
 var ErrTopupRequiresPaid = errors.New("top-ups require a paid workspace")
 
 type topupRequest struct {
 	StripeTopupInput
-	BytesAmount int64
+	UnitBytes, UnitAmount int64
+	Currency              string
 }
 
 func paidTopupWorkspace(w Workspace, at time.Time) bool {
@@ -22,7 +36,10 @@ func paidTopupWorkspace(w Workspace, at time.Time) bool {
 
 // Topup journals the immutable provider request before creating payment Checkout.
 // The redirect is only a receipt; only a verified paid webhook grants bytes.
-func (s *WorkspaceService) Topup(ctx context.Context, account, team, code, key, success, cancel string, version int64) (CheckoutSession, error) {
+func (s *WorkspaceService) Topup(ctx context.Context, account, team, code, key, success, cancel string, version int64, quantity int) (CheckoutSession, error) {
+	if quantity < 1 || quantity > s.topupMaxQuantity {
+		return CheckoutSession{}, ErrTopupQuantity
+	}
 	provider, ok := s.stripe.(StripeTopupClient)
 	if !ok {
 		return CheckoutSession{}, ErrStripeUnavailable
@@ -33,11 +50,12 @@ func (s *WorkspaceService) Topup(ctx context.Context, account, team, code, key, 
 	hash, err := workspaceRequestHash(struct {
 		Account, Team, Code, Success, Cancel string
 		Version                              int64
-	}{account, team, code, success, cancel, version})
+		Quantity                             int
+	}{account, team, code, success, cancel, version, quantity})
 	if err != nil {
 		return CheckoutSession{}, err
 	}
-	request, replay, err := s.prepareTopup(ctx, account, team, code, key, success, cancel, version, hash)
+	request, replay, err := s.prepareTopup(ctx, account, team, code, key, success, cancel, version, quantity, hash)
 	if err != nil {
 		return CheckoutSession{}, err
 	}
@@ -79,7 +97,7 @@ func (s *WorkspaceService) Topup(ctx context.Context, account, team, code, key, 
 	}
 	return result, nil
 }
-func (s *WorkspaceService) prepareTopup(ctx context.Context, account, team, code, key, success, cancel string, version int64, hash string) (topupRequest, *CheckoutSession, error) {
+func (s *WorkspaceService) prepareTopup(ctx context.Context, account, team, code, key, success, cancel string, version int64, quantity int, hash string) (topupRequest, *CheckoutSession, error) {
 	var request topupRequest
 	var replay *CheckoutSession
 	err := s.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
@@ -131,7 +149,7 @@ func (s *WorkspaceService) prepareTopup(ctx context.Context, account, team, code
 		}
 		var metadata string
 		var currentVersion int64
-		e = tx.QueryRow(ctx, `SELECT provider_price_id,catalog_ref,version FROM billing_products WHERE code=$1 AND provider='stripe' AND active AND catalog_type='top_up' AND verified_unit_amount>0 AND verified_currency IS NOT NULL AND verified_interval='one_time'`, code).Scan(&request.PriceID, &metadata, &currentVersion)
+		e = tx.QueryRow(ctx, `SELECT provider_price_id,catalog_ref,version,verified_unit_amount,verified_currency FROM billing_products WHERE code=$1 AND provider='stripe' AND active AND catalog_type='top_up' AND verified_unit_amount>0 AND verified_currency IS NOT NULL AND verified_interval='one_time'`, code).Scan(&request.PriceID, &metadata, &currentVersion, &request.UnitAmount, &request.Currency)
 		if e == pgx.ErrNoRows {
 			return ErrUnknownProduct
 		}
@@ -145,11 +163,11 @@ func (s *WorkspaceService) prepareTopup(ctx context.Context, account, team, code
 		if e = parseProductMetadata(metadata, &p); e != nil {
 			return e
 		}
-		if p.BytesAmount == nil || *p.BytesAmount <= 0 {
+		if p.BytesAmount == nil || *p.BytesAmount != TopupUnitBytes || int64(quantity) > math.MaxInt64/TopupUnitBytes || request.UnitAmount > math.MaxInt64/int64(quantity) {
 			return ErrUnknownProduct
 		}
-		request.BytesAmount = *p.BytesAmount
-		request.StripeTopupInput = StripeTopupInput{CustomerID: w.CustomerID, WorkspaceID: w.ID, PriceID: request.PriceID, IdempotencyKey: key, SuccessURL: success, CancelURL: cancel}
+		request.UnitBytes = *p.BytesAmount
+		request.StripeTopupInput = StripeTopupInput{Quantity: quantity, CustomerID: w.CustomerID, WorkspaceID: w.ID, PriceID: request.PriceID, IdempotencyKey: key, SuccessURL: success, CancelURL: cancel}
 		cipher, e := s.encryptResult(request)
 		if e != nil {
 			return e
@@ -161,7 +179,7 @@ func (s *WorkspaceService) prepareTopup(ctx context.Context, account, team, code
 }
 
 func topupIdentity(state StripeTopupState, r topupRequest) bool {
-	return state.Mode == "payment" && state.CustomerID == r.CustomerID && state.WorkspaceID == r.WorkspaceID && state.Operation == r.IdempotencyKey && state.PriceID == r.PriceID && state.Quantity == 1
+	return state.Mode == "payment" && state.CustomerID == r.CustomerID && state.WorkspaceID == r.WorkspaceID && state.Operation == r.IdempotencyKey && state.PriceID == r.PriceID && state.Quantity == r.Quantity
 }
 
 // WorkspaceTopupRemainingTx uses the accounting instant, not wall-clock time.
@@ -174,7 +192,7 @@ func WorkspaceTopupRemainingTx(ctx context.Context, tx *db.Tx, workspaceID strin
 		return 0, err
 	}
 	var total int64
-	err := tx.QueryRow(ctx, `SELECT coalesce(sum(remaining_bytes),0) FROM billing_workspace_topups WHERE workspace_id=$1 AND purchased_at<=$2 AND expires_at>$2`, workspaceID, at).Scan(&total)
+	err := tx.QueryRow(ctx, `SELECT coalesce(sum(remaining_bytes),0) FROM billing_workspace_topups WHERE workspace_id=$1 AND purchased_at<=$2`, workspaceID, at).Scan(&total)
 	return total, err
 }
 func ConsumeWorkspaceTopupsTx(ctx context.Context, tx *db.Tx, workspaceID string, bytes int64, at time.Time) (int64, error) {
@@ -184,11 +202,11 @@ func ConsumeWorkspaceTopupsTx(ctx context.Context, tx *db.Tx, workspaceID string
 	if _, err := WorkspaceTopupRemainingTx(ctx, tx, workspaceID, at); err != nil {
 		return 0, err
 	}
-	// A single statement drains the oldest expiry first, bounded by the request.
+	// A single statement drains the oldest purchase first, bounded by the request.
 	var consumed int64
 	err := tx.QueryRow(ctx, `WITH eligible AS (
- SELECT provider_session_id,remaining_bytes,coalesce(sum(remaining_bytes) OVER (ORDER BY expires_at,purchased_at,provider_session_id ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING),0) AS preceding
- FROM billing_workspace_topups WHERE workspace_id=$1 AND purchased_at<=$3 AND expires_at>$3 AND remaining_bytes>0
+ SELECT provider_session_id,remaining_bytes,coalesce(sum(remaining_bytes) OVER (ORDER BY purchased_at,provider_session_id ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING),0) AS preceding
+ FROM billing_workspace_topups WHERE workspace_id=$1 AND purchased_at<=$3 AND remaining_bytes>0
  ), debited AS (UPDATE billing_workspace_topups t SET remaining_bytes=t.remaining_bytes-least(e.remaining_bytes,greatest(0,$2::bigint-e.preceding)) FROM eligible e WHERE t.provider_session_id=e.provider_session_id
  RETURNING least(e.remaining_bytes,greatest(0,$2::bigint-e.preceding)) AS bytes)
  SELECT coalesce(sum(bytes),0) FROM debited`, workspaceID, bytes, at).Scan(&consumed)

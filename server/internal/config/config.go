@@ -123,6 +123,7 @@ type Database struct {
 }
 
 type Billing struct {
+	TopupMaxQuantity              int    `json:"topup_max_quantity"`
 	PersonalPortalConfigurationID string `json:"personal_portal_configuration_id,omitempty"`
 	TeamPortalConfigurationID     string `json:"team_portal_configuration_id,omitempty"`
 	PersonalAllowanceBytes        *int64 `json:"personal_allowance_bytes,omitempty"`
@@ -381,7 +382,7 @@ func Default() Config {
 			Driver: "postgres",
 			DSN:    "postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable",
 		},
-		Billing:           Billing{PersonalAllowanceBytes: new(int64(5_000_000_000))},
+		Billing:           Billing{TopupMaxQuantity: 100, PersonalAllowanceBytes: new(int64(5_000_000_000))},
 		RuntimeBaseDomain: "localhost",
 		UserMachines:      UserMachines{PairingLifetime: 10 * time.Minute, OfflineAfter: 2 * time.Minute, AllowedPlatforms: []string{"darwin", "linux", "windows"}, RuntimeListenPort: 38080},
 		TerminalSessions:  TerminalSessions{MaxActivePerProject: 20, OperationTimeout: 15 * time.Second, RetryBackoff: time.Second, WorkerInterval: time.Second, MaxAttemptsBeforeAlert: 10},
@@ -517,6 +518,9 @@ func (c Config) Validate() error {
 		errs = append(errs, fmt.Errorf("database.driver and database.dsn are required"))
 	} else if c.Database.Driver != "postgres" && c.Database.Driver != "pgx" {
 		errs = append(errs, fmt.Errorf("database.driver must be postgres"))
+	}
+	if c.Billing.TopupMaxQuantity < 1 {
+		return errors.New("billing.topup_max_quantity must be positive")
 	}
 	if (c.Billing.PersonalAllowanceBytes != nil && *c.Billing.PersonalAllowanceBytes < 0) || (c.Billing.TeamAllowanceBytes != nil && *c.Billing.TeamAllowanceBytes < 0) || (c.Billing.PersonalMachineLimit != nil && *c.Billing.PersonalMachineLimit < 0) {
 		errs = append(errs, fmt.Errorf("configured billing allowances and quotas must be nonnegative"))

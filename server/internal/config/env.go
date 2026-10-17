@@ -139,6 +139,13 @@ func overlayEnv(c *Config, lookup func(string) (string, bool), readFile func(str
 	setString("PAPERBOAT_WORKOS_BASE_URL", &c.Providers.WorkOS.BaseURL)
 	setString("PAPERBOAT_OPERATOR_EMAIL", &c.OperatorBootstrapEmail)
 	setString("PAPERBOAT_STRIPE_BASE_URL", &c.Providers.Stripe.BaseURL)
+	if value, ok := lookup("PAPERBOAT_BILLING_TOPUP_MAX_QUANTITY"); ok {
+		n, err := strconv.Atoi(value)
+		if err != nil {
+			return errors.New("PAPERBOAT_BILLING_TOPUP_MAX_QUANTITY must be an integer")
+		}
+		c.Billing.TopupMaxQuantity = n
+	}
 	setString("PAPERBOAT_STRIPE_PERSONAL_PORTAL_CONFIGURATION_ID", &c.Billing.PersonalPortalConfigurationID)
 	setString("PAPERBOAT_STRIPE_TEAM_PORTAL_CONFIGURATION_ID", &c.Billing.TeamPortalConfigurationID)
 	setString("PAPERBOAT_GITHUB_BASE_URL", &c.Providers.GitHub.BaseURL)

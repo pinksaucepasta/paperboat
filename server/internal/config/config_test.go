@@ -14,6 +14,7 @@ func TestLoadOverlaysEnvAndSecretFiles(t *testing.T) {
 		"/run/secrets/encryption": []byte("secret-from-file\n"),
 	}
 	env := map[string]string{
+		"PAPERBOAT_BILLING_TOPUP_MAX_QUANTITY":              "7",
 		"PAPERBOAT_STRIPE_PERSONAL_PORTAL_CONFIGURATION_ID": "bpc_personal",
 		"PAPERBOAT_STRIPE_TEAM_PORTAL_CONFIGURATION_ID":     "bpc_team",
 		"PAPERBOAT_ENV":                                         "test",
@@ -47,6 +48,9 @@ func TestLoadOverlaysEnvAndSecretFiles(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if cfg.Billing.TopupMaxQuantity != 7 {
+		t.Fatal("top-up quantity configuration mapping lost")
 	}
 	if cfg.Billing.PersonalPortalConfigurationID != "bpc_personal" || cfg.Billing.TeamPortalConfigurationID != "bpc_team" {
 		t.Fatal("workspace portal configuration environment mapping lost")

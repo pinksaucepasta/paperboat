@@ -68,10 +68,11 @@ works on Windows-only failures until after launch.
 | Price | $0 | $8/month or $80/year | $15/seat/month or $150/seat/year |
 | Scope | personal workspace | personal workspace | team workspace only |
 | Relay + edge bandwidth / month | 5 GB | 100 GB | 100 GB per seat (for that member's use inside the team workspace) |
-| Top-ups (100 GB, $5, one-time, expire at end of the calendar month) | no | yes, for the personal workspace | yes, into a team pool |
+| Top-ups (100 GB units, $5/unit, one-time, NEVER EXPIRE) | no | yes, for the personal workspace | yes, into a team pool |
 | Machines | unlimited | unlimited | unlimited |
 | Features | everything | everything | everything + collaboration |
 
+- Top-ups are bought as integer quantities of 100 GB units (unit_bytes=100000000000), 1–100 units by default; billing.topup_max_quantity is the single configurable purchase limit. Credits NEVER EXPIRE, remain isolated to their workspace, and are consumed only after the plan allowance.
 - Failed renewal keeps paid benefits for **7 days**, then suspends them until payment recovers (user decision 2026-10-18).
 - Paid bandwidth resets monthly on the workspace’s **original paid billing day** (UTC clock; clamp short months without shifting later dates). Switching monthly/yearly prices preserves the reset anchor and allowance already spent (user decision 2026-10-18).
 - Direct P2P traffic is always free and never metered.
@@ -514,7 +515,7 @@ team-default-*); console Config sync.
 - F13-02: Metering of relay and edge bytes per workspace (personal) and per member + pool (team); direct P2P never metered.
 - F13-03: Caps enforced as in 1.3; CLI and console messages with upgrade/top-up links; team owners/admins notified.
 - F13-04: Stripe test mode: Pro monthly/yearly, upgrade/downgrade/cancel, top-ups, Team seats monthly/yearly, seat changes mid-cycle (charged immediately, billing date fixed), failed payment → grace → suspension → recovery, invoices.
-- F13-04T: Server top-up producer: verified one-time catalog, paid-workspace Checkout journal/replay, provider-confirmed Personal/Team credits, UTC calendar expiry and isolated transactional consumption. Cap admission/debit integration remains F13-03; deployed UI/payment qualification remains F13-04/F13-06.
+- F13-04T: Server top-up producer: verified one-time catalog, paid-workspace Checkout journal/replay, provider-confirmed Personal/Team credits, permanent credits and isolated transactional consumption. Cap admission/debit integration remains F13-03; deployed UI/payment qualification remains F13-04/F13-06.
 - F13-05: Stripe live: products/prices via API, webhook verified, one real $8 purchase and refund done by the user.
 - F13-06: Console billing, bandwidth card (per-path series: direct/relay/edge), usage and plan screens.
 
@@ -1851,6 +1852,6 @@ Migration093 replaces unpublished083; final binaries used freshly recreated pape
 Reuses published abf4031 workspace gate PASS; primary owns F14 native/update-continuity/rollback/retirement/scheduling/version-floor/offline/check-status L/M proof, producer owns official signed artifacts/keys, Claude owns workspace summary.
 
 2026-10-18 | Lane A F2-01 activated-login recovery | Rows ticked:none; daemon-refresh retry overwrote rotated credentials. Existing real login/daemon owner RED0.736s/GREEN focused auth/workspace race6.557s; CLI vet PASS. Exact committed account/session now resumes without replaying approval tokens; published abf4031 workspace gate reused. Waits for primary L/M normal browser login + immediate doctor and retained approval resume; no devices.
-2026-10-18 | Lane B F13-04T top-up producer | GET /v1/billing/workspaces/{personal|teams/{id}}/products adds catalog_type=top_up, bytes_amount, interval=one_time; POST .../topups {product_code,product_version,success_url,cancel_url}+Idempotency-Key → {url}; overview adds topup_bytes_remaining. Paid-only409 paid_plan_required;403 forbidden,409 product_changed/idempotency_key_conflict/billing_pending,503 provider_outcome_unknown.
-A/C: redirects never fulfill; signed paid completion/async success credits the exact workspace once, expires at end of payment UTC month. Parent integrates WorkspaceTopupRemainingTx/ConsumeWorkspaceTopupsTx into paid cap admission/debits; deploy/UI checks remain open.
-Paid webhook/provider-unpaid convergence RED0.36s/GREEN0.46s preserves retryability until authenticated provider payment confirmation; full billing PostgreSQL and billing race1.570s PASS.
+2026-10-18 | Lane B F13-04T top-up producer | GET /v1/billing/workspaces/{personal|teams/{id}}/products adds catalog_type=top_up, unit_bytes=100000000000, max_quantity (default100; billing.topup_max_quantity), interval=one_time; POST .../topups {product_code,product_version,quantity,success_url,cancel_url}+Idempotency-Key → {url}; overview adds topup_bytes_remaining. Paid-only409 paid_plan_required;403 forbidden,409 product_changed/idempotency_key_conflict/billing_pending,503 provider_outcome_unknown.
+A/C: redirects never fulfill; signed paid completion/async success credits the exact workspace once, credits NEVER EXPIRE; quantity1..max_quantity buys100GB units, consumed only after plan allowance. Parent integrates WorkspaceTopupRemainingTx/ConsumeWorkspaceTopupsTx into paid cap admission/debits; deploy/UI checks remain open.
+Quantity single-unit owner RED unit0.145s/PG0.34s/Stripe2.05s; permanent-credit owner GREEN freshPG2.58s/full billing0.62s, realStripe3 units/1500cents2.11s. Policy source: billing.topup_max_quantity (env PAPERBOAT_BILLING_TOPUP_MAX_QUANTITY), one default100; unit_bytes100000000000. Credits NEVER EXPIRE and draw only after plan allowance.

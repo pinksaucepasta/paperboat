@@ -10058,7 +10058,7 @@
           "topup_bytes_remaining": {
             "type": "integer",
             "minimum": 0,
-            "description": "Unspent top-up bytes for this exact workspace that have not expired at the current instant. Top-ups expire at the end of the UTC calendar month of payment."
+            "description": "Unspent permanent credits for this exact workspace, excluding future purchases. Credits never expire and are consumed only after the paid plan allowance."
           }
         }
       },
@@ -10111,13 +10111,21 @@
             "type": "integer",
             "minimum": 1
           },
-          "bytes_amount": {
+          "unit_bytes": {
             "type": [
               "integer",
               "null"
             ],
             "minimum": 1,
-            "description": "Purchased bytes for a top_up product; null for subscriptions."
+            "description": "Bytes per top-up unit: 100000000000 (100 GB); null for subscriptions."
+          },
+          "max_quantity": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "description": "Configured integer purchase limit; default 100. Null for subscriptions."
           }
         }
       },
@@ -45036,35 +45044,12 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": [
-                  "product_code",
-                  "success_url",
-                  "cancel_url",
-                  "product_version"
-                ],
-                "properties": {
-                  "product_code": {
-                    "type": "string"
-                  },
-                  "success_url": {
-                    "type": "string"
-                  },
-                  "cancel_url": {
-                    "type": "string"
-                  },
-                  "product_version": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "description": "Reviewed price version; stale requests return409 before provider call."
-                  }
-                }
+                "$ref": "#/components/schemas/WorkspaceTopupRequest"
               }
             }
           }
         },
-        "description": "Paid workspaces only. Creates payment-mode Checkout; no bytes are credited by returning to the success URL. A signed paid provider event credits the exact workspace once. Expires at the end of the UTC calendar month of payment. Conflict paid_plan_required rejects Free. Requires Idempotency-Key and configured-origin success_url/cancel_url."
+        "description": "Paid workspaces only. Integer quantity 1..product.max_quantity buys quantity \u00d7 unit_bytes (100 GB each). Credits NEVER EXPIRE and are consumed after the plan allowance. Checkout uses the exact quantity and verified unit price; only signed provider-confirmed paid events credit the workspace once. Requires Idempotency-Key and configured-origin return URLs. invalid_quantity rejects missing/zero/over-limit quantity."
       }
     },
     "/v1/billing/workspaces/teams/{team_id}/topups": {
@@ -45139,35 +45124,12 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": [
-                  "product_code",
-                  "success_url",
-                  "cancel_url",
-                  "product_version"
-                ],
-                "properties": {
-                  "product_code": {
-                    "type": "string"
-                  },
-                  "success_url": {
-                    "type": "string"
-                  },
-                  "cancel_url": {
-                    "type": "string"
-                  },
-                  "product_version": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "description": "Reviewed price version; stale requests return409 before provider call."
-                  }
-                }
+                "$ref": "#/components/schemas/WorkspaceTopupRequest"
               }
             }
           }
         },
-        "description": "Paid workspaces only. Creates payment-mode Checkout; no bytes are credited by returning to the success URL. A signed paid provider event credits the exact workspace once. Expires at the end of the UTC calendar month of payment. Conflict paid_plan_required rejects Free. Requires Idempotency-Key and configured-origin success_url/cancel_url."
+        "description": "Paid workspaces only. Integer quantity 1..product.max_quantity buys quantity \u00d7 unit_bytes (100 GB each). Credits NEVER EXPIRE and are consumed after the plan allowance. Checkout uses the exact quantity and verified unit price; only signed provider-confirmed paid events credit the workspace once. Requires Idempotency-Key and configured-origin return URLs. invalid_quantity rejects missing/zero/over-limit quantity."
       }
     }
   }

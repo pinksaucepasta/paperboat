@@ -327,7 +327,7 @@ func requireBillingRole(ctx context.Context, tx *db.Tx, actor string, admin bool
 }
 func validateProductInput(in ProductInput) error {
 	if in.CatalogType == "top_up" {
-		if in.BytesAmount == nil || *in.BytesAmount <= 0 || in.AllowanceBytes != nil {
+		if in.BytesAmount == nil || *in.BytesAmount != TopupUnitBytes || in.AllowanceBytes != nil {
 			return ErrOperatorBillingInvalid
 		}
 	} else if in.BytesAmount != nil {

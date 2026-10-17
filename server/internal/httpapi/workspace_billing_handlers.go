@@ -14,6 +14,8 @@ import (
 func workspaceBillingError(w http.ResponseWriter, r *http.Request, err error) {
 	var provider billing.StripeAPIError
 	switch {
+	case errors.Is(err, billing.ErrTopupQuantity):
+		writeError(w, r, http.StatusBadRequest, "invalid_quantity", "Choose a whole number of top-up units within the product limit.")
 	case errors.Is(err, billing.ErrTopupRequiresPaid):
 		writeError(w, r, http.StatusConflict, "paid_plan_required", "Choose a paid workspace plan before buying a bandwidth top-up.")
 	case errors.Is(err, billing.ErrWorkspaceForbidden):
@@ -110,6 +112,7 @@ func workspaceBillingMutation(s *billing.WorkspaceService, origins []string, por
 			return
 		}
 		var in struct {
+			Quantity       int    `json:"quantity"`
 			ProductCode    string `json:"product_code"`
 			ProductVersion int64  `json:"product_version"`
 			SuccessURL     string `json:"success_url"`
@@ -140,7 +143,7 @@ func workspaceBillingMutation(s *billing.WorkspaceService, origins []string, por
 			return
 		}
 		if strings.HasSuffix(r.URL.Path, "/topups") {
-			out, err := s.Topup(r.Context(), p.User.ID, r.PathValue("team_id"), in.ProductCode, key, in.SuccessURL, in.CancelURL, in.ProductVersion)
+			out, err := s.Topup(r.Context(), p.User.ID, r.PathValue("team_id"), in.ProductCode, key, in.SuccessURL, in.CancelURL, in.ProductVersion, in.Quantity)
 			if err != nil {
 				workspaceBillingError(w, r, err)
 				return

@@ -11,15 +11,17 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/pinksaucepasta/paperboat-server/internal/config"
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
 	"github.com/pinksaucepasta/paperboat-server/internal/secrets"
 )
 
 type WorkspaceService struct {
-	store   *db.DB
-	stripe  StripeClient
-	key     string
-	portals PortalConfigurations
+	store            *db.DB
+	stripe           StripeClient
+	key              string
+	topupMaxQuantity int
+	portals          PortalConfigurations
 }
 
 var ErrProductChanged = errors.New("billing product price changed")
@@ -42,13 +44,14 @@ type WorkspaceProduct struct {
 	Interval      string `json:"interval"`
 	PriceVerified bool   `json:"price_verified"`
 	Version       int64  `json:"version"`
-	BytesAmount   *int64 `json:"bytes_amount"`
+	UnitBytes     *int64 `json:"unit_bytes"`
+	MaxQuantity   *int   `json:"max_quantity"`
 }
 
 type PortalConfigurations struct{ Personal, Team string }
 
 func NewWorkspaceService(store *db.DB, stripe StripeClient, key string, portals ...PortalConfigurations) *WorkspaceService {
-	s := &WorkspaceService{store: store, stripe: stripe, key: key}
+	s := &WorkspaceService{store: store, stripe: stripe, key: key, topupMaxQuantity: config.Default().Billing.TopupMaxQuantity}
 	for _, configuration := range portals {
 		s.portals = configuration
 	}
@@ -98,7 +101,7 @@ func workspaceProduct(row interface{ Scan(...any) error }) (WorkspaceProduct, er
 	if err := parseProductMetadata(metadata, &product); err != nil {
 		return p, err
 	}
-	p.BytesAmount = product.BytesAmount
+	p.UnitBytes = product.BytesAmount
 	p.Name = product.DisplayName
 	if p.Name == "" {
 		p.Name = p.Code
@@ -138,6 +141,9 @@ func (s *WorkspaceService) Products(ctx context.Context, account, team string, l
 			p, err := workspaceProduct(rows)
 			if err != nil {
 				return err
+			}
+			if p.CatalogType == "top_up" {
+				p.MaxQuantity = &s.topupMaxQuantity
 			}
 			out.Items = append(out.Items, p)
 		}

@@ -217,6 +217,9 @@ func New(opts Options) (*App, error) {
 		stripeClient = billing.HTTPStripeClient{BaseURL: opts.Config.Providers.Stripe.BaseURL, APIKey: opts.Config.Secrets.StripeAPIKey}
 	}
 	workspaceBilling := billing.NewWorkspaceService(store, stripeClient, opts.Config.Secrets.EncryptionKey, billing.PortalConfigurations{Personal: opts.Config.Billing.PersonalPortalConfigurationID, Team: opts.Config.Billing.TeamPortalConfigurationID})
+	if err := workspaceBilling.ConfigureTopupMaxQuantity(opts.Config.Billing.TopupMaxQuantity); err != nil {
+		return nil, err
+	}
 	policyContext, cancelPolicy := context.WithTimeout(context.Background(), opts.Config.HTTP.RequestTimeout)
 	policyErr := workspaceBilling.InitializeAllowancePolicy(policyContext, opts.Config.Billing.PersonalAllowanceBytes, opts.Config.Billing.TeamAllowanceBytes, opts.Config.Billing.PersonalMachineLimit)
 	cancelPolicy()

@@ -22,7 +22,7 @@ type topupStripeFake struct {
 func (f *topupStripeFake) CreateTopupCheckout(_ context.Context, in billing.StripeTopupInput) (billing.CheckoutSession, error) {
 	f.calls++
 	id := "cs_" + in.IdempotencyKey
-	f.states[id] = billing.StripeTopupState{ID: id, CustomerID: in.CustomerID, WorkspaceID: in.WorkspaceID, Operation: in.IdempotencyKey, PriceID: in.PriceID, Quantity: 1, Mode: "payment", Status: "open", PaymentStatus: "unpaid", CreatedAt: time.Now().UTC().Truncate(time.Second), URL: "https://checkout.example.test/topup"}
+	f.states[id] = billing.StripeTopupState{ID: id, CustomerID: in.CustomerID, WorkspaceID: in.WorkspaceID, Operation: in.IdempotencyKey, PriceID: in.PriceID, Quantity: in.Quantity, AmountTotal: 500 * int64(in.Quantity), Currency: "usd", Mode: "payment", Status: "open", PaymentStatus: "unpaid", CreatedAt: time.Now().UTC().Truncate(time.Second), URL: "https://checkout.example.test/topup"}
 	if f.timeout {
 		f.timeout = false
 		return billing.CheckoutSession{}, context.DeadlineExceeded
@@ -88,6 +88,11 @@ func TestWorkspaceTopupCheckoutFulfillmentAndLedgerPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	for _, q := range []int{0, -1, 101} {
+		if _, e := billing.NewWorkspaceService(nil, nil, "").Topup(ctx, user, "", code, "invalid", "https://dashboard.example.test/billing", "https://dashboard.example.test/billing", 1, q); !errors.Is(e, billing.ErrTopupQuantity) {
+			t.Fatalf("quantity %d accepted: %v", q, e)
+		}
+	}
 	f := &topupStripeFake{states: map[string]billing.StripeTopupState{}}
 	s := billing.NewWorkspaceService(store, f, "topup-test-key")
 	_, err = s.Overview(ctx, user, "")
@@ -103,7 +108,7 @@ func TestWorkspaceTopupCheckoutFulfillmentAndLedgerPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	buy := func(actor, team, key string) (billing.CheckoutSession, error) {
-		return s.Topup(ctx, actor, team, code, key, "https://dashboard.example.test/billing?done=1", "https://dashboard.example.test/billing", 1)
+		return s.Topup(ctx, actor, team, code, key, "https://dashboard.example.test/billing?done=1", "https://dashboard.example.test/billing", 1, 3)
 	}
 	if _, err = buy(free, "", "free_"+x); !errors.Is(err, billing.ErrTopupRequiresPaid) {
 		t.Fatalf("Free purchase: %v", err)
@@ -120,7 +125,7 @@ func TestWorkspaceTopupCheckoutFulfillmentAndLedgerPostgres(t *testing.T) {
 	found := false
 	for _, p := range page.Items {
 		if p.Code == code {
-			found = p.CatalogType == "top_up" && p.UnitAmount != nil && *p.UnitAmount == 500 && p.BytesAmount != nil && *p.BytesAmount == amount
+			found = p.CatalogType == "top_up" && p.UnitAmount != nil && *p.UnitAmount == 500 && p.UnitBytes != nil && *p.UnitBytes == amount && p.MaxQuantity != nil && *p.MaxQuantity == 100
 		}
 	}
 	if !found {
@@ -155,14 +160,20 @@ func TestWorkspaceTopupCheckoutFulfillmentAndLedgerPostgres(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		if _, e := s.Topup(ctx, user, scope, code, key, "https://dashboard.example.test/billing?done=1", "https://dashboard.example.test/billing", 1, 2); !errors.Is(e, billing.ErrIdempotencyConflict) {
+			t.Fatalf("quantity replay conflict: %v", e)
+		}
 		calls := f.calls
 		if _, err = buy(user, scope, key); err != nil || f.calls != calls {
 			t.Fatalf("replay calls=%d err=%v", f.calls-calls, err)
 		}
-		if _, err = s.Topup(ctx, user, scope, code, key, "https://dashboard.example.test/different", "https://dashboard.example.test/billing", 1); !errors.Is(err, billing.ErrIdempotencyConflict) {
+		if _, err = s.Topup(ctx, user, scope, code, key, "https://dashboard.example.test/different", "https://dashboard.example.test/billing", 1, 3); !errors.Is(err, billing.ErrIdempotencyConflict) {
 			t.Fatalf("changed replay: %v", err)
 		}
 		state := f.states[receipt.ProviderSessionID]
+		if state.Quantity != 3 || state.AmountTotal != 1500 {
+			t.Fatal("provider request did not retain the requested quantity and verified unit price")
+		}
 		w := state.WorkspaceID
 		if remaining(w, time.Now().UTC()) != 0 {
 			t.Fatal("Checkout redirect created credit")
@@ -185,7 +196,7 @@ func TestWorkspaceTopupCheckoutFulfillmentAndLedgerPostgres(t *testing.T) {
 		}
 		// A provider snapshot alone cannot override operation/customer/price binding.
 		for _, mutate := range []func(*billing.StripeTopupState){
-			func(v *billing.StripeTopupState) { v.CustomerID = "cus_foreign" }, func(v *billing.StripeTopupState) { v.PriceID = "price_foreign" }, func(v *billing.StripeTopupState) { v.Quantity = 2 }, func(v *billing.StripeTopupState) { v.WorkspaceID = "personal:" + free }, func(v *billing.StripeTopupState) { v.Operation = "foreign" },
+			func(v *billing.StripeTopupState) { v.CustomerID = "cus_foreign" }, func(v *billing.StripeTopupState) { v.PriceID = "price_foreign" }, func(v *billing.StripeTopupState) { v.Quantity = 2 }, func(v *billing.StripeTopupState) { v.AmountTotal = 500 }, func(v *billing.StripeTopupState) { v.Currency = "eur" }, func(v *billing.StripeTopupState) { v.WorkspaceID = "personal:" + free }, func(v *billing.StripeTopupState) { v.Operation = "foreign" },
 		} {
 			bad := state
 			mutate(&bad)
@@ -237,7 +248,7 @@ func TestWorkspaceTopupCheckoutFulfillmentAndLedgerPostgres(t *testing.T) {
 		if processedCount != 1 {
 			t.Fatalf("concurrent paid event processed %d times", processedCount)
 		}
-		if remaining(w, paidAt) != amount {
+		if remaining(w, paidAt) != amount*3 {
 			t.Fatal("paid bytes not credited")
 		}
 		if processed, err := s.HandleWebhook(ctx, paid); err != nil || processed {
@@ -248,21 +259,49 @@ func TestWorkspaceTopupCheckoutFulfillmentAndLedgerPostgres(t *testing.T) {
 		if _, err = s.HandleWebhook(ctx, second); err != nil {
 			t.Fatal(err)
 		}
-		if remaining(w, paidAt) != amount {
+		if remaining(w, paidAt) != amount*3 {
 			t.Fatal("duplicate session credited twice")
 		}
-		expiry := time.Date(paidAt.Year(), paidAt.Month()+1, 1, 0, 0, 0, 0, time.UTC)
-		if remaining(w, paidAt.Add(-time.Nanosecond)) != 0 || remaining(w, expiry) != 0 {
-			t.Fatal("purchase/UTC expiry boundary incorrect")
+		if remaining(w, paidAt.Add(-time.Nanosecond)) != 0 {
+			t.Fatal("future purchase credited")
 		}
+		future := paidAt.AddDate(2, 3, 0)
+		if remaining(w, future) != amount*3 {
+			t.Fatal("permanent credits expired across months/years")
+		}
+
+		secondReceipt, e := buy(user, scope, "z_second_"+key)
+		if e != nil {
+			t.Fatal(e)
+		}
+		secondState := f.states[secondReceipt.ProviderSessionID]
+		secondState.Status = "complete"
+		secondState.PaymentStatus = "paid"
+		f.states[secondState.ID] = secondState
+		secondPaid := event("second_paid_"+key, secondState.ID, "checkout.session.async_payment_succeeded", time.Now().UTC())
+		if _, e = s.HandleWebhook(ctx, secondPaid); e != nil {
+			t.Fatal(e)
+		}
+		consumeAt := time.Now().UTC().AddDate(3, 0, 0)
+
 		var used int64
 		err = store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 			var e error
-			used, e = billing.ConsumeWorkspaceTopupsTx(ctx, tx, w, amount+5, paidAt)
+			used, e = billing.ConsumeWorkspaceTopupsTx(ctx, tx, w, amount*3+5, consumeAt)
 			return e
 		})
-		if err != nil || used != amount || remaining(w, paidAt) != 0 {
+		if err != nil || used != amount*3+5 || remaining(w, consumeAt) != amount*3-5 {
 			t.Fatalf("bounded consumption=%d %v", used, err)
+		}
+		var oldRemaining int64
+		if e = store.SQL().QueryRowContext(ctx, `SELECT remaining_bytes FROM paperboat.billing_workspace_topups WHERE provider_session_id=$1`, receipt.ProviderSessionID).Scan(&oldRemaining); e != nil || oldRemaining != 0 {
+			t.Fatalf("oldest purchase remaining=%d err=%v", oldRemaining, e)
+		}
+		if e = store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+			_, err := billing.ConsumeWorkspaceTopupsTx(ctx, tx, w, amount*10, consumeAt)
+			return err
+		}); e != nil || remaining(w, consumeAt) != 0 {
+			t.Fatalf("bounded final consumption: %v", e)
 		}
 	}
 	if remaining("personal:"+free, time.Now().UTC()) != 0 {

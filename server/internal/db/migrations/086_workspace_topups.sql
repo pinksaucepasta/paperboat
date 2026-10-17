@@ -20,10 +20,9 @@ CREATE TABLE paperboat.billing_workspace_topups (
  workspace_id text NOT NULL REFERENCES paperboat.billing_workspaces(id),
  purchased_bytes bigint NOT NULL CHECK (purchased_bytes>0),
  remaining_bytes bigint NOT NULL CHECK (remaining_bytes>=0 AND remaining_bytes<=purchased_bytes),
- purchased_at timestamptz NOT NULL,
- expires_at timestamptz NOT NULL CHECK (expires_at>purchased_at)
+ purchased_at timestamptz NOT NULL
 );
-CREATE INDEX billing_workspace_topups_remaining ON paperboat.billing_workspace_topups(workspace_id,expires_at) WHERE remaining_bytes>0;
+CREATE INDEX billing_workspace_topups_remaining ON paperboat.billing_workspace_topups(workspace_id,purchased_at,provider_session_id) WHERE remaining_bytes>0;
 CREATE TABLE paperboat.billing_workspace_topup_events (
  event_id text PRIMARY KEY,
  provider_session_id text NOT NULL,

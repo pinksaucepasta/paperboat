@@ -43,7 +43,7 @@ func TestStripeTestModeTopupCheckoutContract(t *testing.T) {
 			t.Error("test customer cleanup failed")
 		}
 	}()
-	in := StripeTopupInput{CustomerID: customer, PriceID: price, WorkspaceID: workspace, IdempotencyKey: operation, SuccessURL: "https://dashboard.example.test/billing?done=1", CancelURL: "https://dashboard.example.test/billing"}
+	in := StripeTopupInput{Quantity: 3, CustomerID: customer, PriceID: price, WorkspaceID: workspace, IdempotencyKey: operation, SuccessURL: "https://dashboard.example.test/billing?done=1", CancelURL: "https://dashboard.example.test/billing"}
 	result, err := c.CreateTopupCheckout(ctx, in)
 	if err != nil {
 		t.Fatal("create unused payment Checkout", err)
@@ -61,7 +61,7 @@ func TestStripeTestModeTopupCheckoutContract(t *testing.T) {
 		t.Fatal("provider idempotency did not retain the same payment session", err)
 	}
 	state, err := c.GetTopupCheckout(ctx, result.ProviderSessionID)
-	if err != nil || state.ID != result.ProviderSessionID || !topupIdentity(state, topupRequest{StripeTopupInput: in}) || state.Status != "open" || state.PaymentStatus != "unpaid" {
+	if err != nil || state.ID != result.ProviderSessionID || !topupIdentity(state, topupRequest{StripeTopupInput: in}) || state.AmountTotal != 1500 || state.Currency != "usd" || state.Status != "open" || state.PaymentStatus != "unpaid" {
 		t.Fatal("unused payment Checkout binding did not round-trip", err)
 	}
 }

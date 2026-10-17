@@ -33,9 +33,8 @@ func (s *WorkspaceService) handleTopupWebhook(ctx context.Context, event StripeW
 		return true, false, nil
 	}
 	paidAt := time.Unix(event.Created, 0).UTC()
-	expires := time.Date(paidAt.Year(), paidAt.Month()+1, 1, 0, 0, 0, 0, time.UTC)
 	now := time.Now().UTC()
-	if event.Created <= 0 || paidAt.Before(state.CreatedAt) || paidAt.After(now.Add(5*time.Minute)) || !now.Before(expires) {
+	if event.Created <= 0 || paidAt.Before(state.CreatedAt) || paidAt.After(now.Add(5*time.Minute)) {
 		return true, false, nil
 	}
 	err = s.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
@@ -77,7 +76,7 @@ func (s *WorkspaceService) handleTopupWebhook(ctx context.Context, event StripeW
 		if e = s.decryptResult(op.Ciphertext, &receipt); e != nil {
 			return e
 		}
-		if !live || !paidTopupWorkspace(w, paidAt) || !paidTopupWorkspace(w, now) || !topupIdentity(state, request) || receipt.ProviderSessionID != state.ID || receipt.ProviderCustomerID != state.CustomerID || request.BytesAmount <= 0 {
+		if !live || !paidTopupWorkspace(w, now) || !topupIdentity(state, request) || receipt.ProviderSessionID != state.ID || receipt.ProviderCustomerID != state.CustomerID || request.UnitBytes != TopupUnitBytes {
 			return nil
 		}
 		if !op.ProviderAttemptedAt.Valid || paidAt.Before(op.ProviderAttemptedAt.Time.Truncate(time.Second)) {
@@ -87,8 +86,11 @@ func (s *WorkspaceService) handleTopupWebhook(ctx context.Context, event StripeW
 		if expectsPaid && (state.Status != "complete" || state.PaymentStatus != "paid") {
 			return ErrProviderOutcomeUnknown
 		}
+		if expectsPaid && (state.AmountTotal != request.UnitAmount*int64(request.Quantity) || state.Currency != request.Currency) {
+			return nil
+		}
 		if expectsPaid {
-			_, e = tx.Exec(ctx, `INSERT INTO billing_workspace_topups(provider_session_id,operation_key,workspace_id,purchased_bytes,remaining_bytes,purchased_at,expires_at) VALUES($1,$2,$3,$4,$4,$5,$6) ON CONFLICT DO NOTHING`, state.ID, state.Operation, w.ID, request.BytesAmount, paidAt, expires)
+			_, e = tx.Exec(ctx, `INSERT INTO billing_workspace_topups(provider_session_id,operation_key,workspace_id,purchased_bytes,remaining_bytes,purchased_at) VALUES($1,$2,$3,$4,$4,$5) ON CONFLICT DO NOTHING`, state.ID, state.Operation, w.ID, request.UnitBytes*int64(request.Quantity), paidAt)
 			if e != nil {
 				return e
 			}
