@@ -252,6 +252,7 @@ function Allowance({ billing, workspace }: { billing: BillingWorkspace; workspac
                 .map((path) => (
                   <div
                     key={path.mode}
+                    title={`${path.label} ${formatBytes(split![path.mode])}`}
                     className={path.dot}
                     style={{ width: `${(share * 100 * split![path.mode as "relay" | "edge"]) / hosted}%` }}
                   />
@@ -263,9 +264,11 @@ function Allowance({ billing, workspace }: { billing: BillingWorkspace; workspac
           {paths
             .filter((path) => path.mode !== "direct")
             .map((path) => (
-              <Mark key={path.mode} icon={<span className={cn("size-2 rounded-full", path.dot)} />}>
-                {path.label} {usage.data ? formatBytes(split![path.mode]) : "…"}
-              </Mark>
+              <span key={path.mode} title={split ? `${path.label} ${formatBytes(split[path.mode])}` : undefined}>
+                <Mark icon={<span className={cn("size-2 rounded-full", path.dot)} />}>
+                  {path.label}
+                </Mark>
+              </span>
             ))}
         </span>
       </div>
