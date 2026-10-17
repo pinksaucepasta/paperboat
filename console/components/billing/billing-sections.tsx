@@ -9,6 +9,7 @@ import {
   billingProductsQuery,
   billingQuery,
   buyTopup,
+  topupDefaults,
   changePlan,
   formatMoney,
   formatPrice,
@@ -25,6 +26,9 @@ import { formatBytes } from "@/lib/format"
 import { Row, Section } from "@/components/section"
 import { ConfirmAction } from "@/components/list-toolbar"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+
+const gigabyte = 1e9
 
 const dateFormat = new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric" })
 
@@ -189,38 +193,82 @@ function CancelRow({ workspace, billing }: { workspace: Workspace; billing: Bill
   )
 }
 
-/** One-time bandwidth packs on top of the plan's allowance; they last until used. */
+/**
+ * Buy more hosted bandwidth on top of the plan: any multiple of 100 GB up to 10,000 GB at a time,
+ * priced per 100 GB by the server's top-up product. It lasts until used.
+ */
 export function TopUps({ workspace, billing }: { workspace: Workspace; billing: BillingWorkspace }) {
   const products = useApiQuery({ ...billingProductsQuery(workspace), enabled: billingLive.topups })
-  const packs = (products.data ?? []).filter((p) => (p.catalog_type as string) === "top_up" && p.price_verified)
+  const product = products.data?.find((p) => (p.catalog_type as string) === "top_up" && p.price_verified)
+  const step = product?.unit_bytes ?? topupDefaults.unitBytes
+  const max = product?.max_quantity ?? topupDefaults.maxQuantity
+  const [units, setUnits] = useState(1)
   const buy = useMutation({
-    mutationFn: (product: BillingProduct) => buyTopup(workspace, product),
+    mutationFn: () => buyTopup(workspace, product!, units),
     onSuccess: (url) => window.location.assign(url),
   })
+  const live = billingLive.topups && Boolean(product) && billing.can_manage
+  const total = product?.unit_amount != null ? formatMoney(product.unit_amount * units, product.currency) : null
   return (
     <Section
-      title="Extra bandwidth"
+      title="Add bandwidth"
       action={
         billing.topup_bytes_remaining ? (
-          <span className="text-xs text-muted-foreground">{formatBytes(billing.topup_bytes_remaining)} left</span>
+          <span className="text-xs text-muted-foreground">{formatBytes(billing.topup_bytes_remaining)} extra left</span>
         ) : undefined
       }
     >
-      {!billingLive.topups ? (
-        <Row label="Bandwidth packs">
-          <Button disabled title={notLiveTitle}>
+      <div className="flex min-h-14 flex-wrap items-center justify-between gap-x-6 gap-y-2 border-b border-divider py-2 text-sm">
+        <span className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="icon-sm"
+            aria-label="100 GB less"
+            disabled={units <= 1}
+            onClick={() => setUnits(units - 1)}
+          >
+            <MinusIcon />
+          </Button>
+          <label className="flex items-center gap-1.5">
+            <Input
+              type="number"
+              aria-label="Gigabytes"
+              className="w-24 text-right tabular-nums"
+              min={step / gigabyte}
+              max={(step * max) / gigabyte}
+              step={step / gigabyte}
+              value={(units * step) / gigabyte}
+              onChange={(event) => {
+                const gb = Number(event.target.value)
+                if (Number.isFinite(gb)) setUnits(Math.min(max, Math.max(1, Math.round((gb * gigabyte) / step))))
+              }}
+            />
+            <span className="text-muted-foreground">GB</span>
+          </label>
+          <Button
+            variant="outline"
+            size="icon-sm"
+            aria-label="100 GB more"
+            disabled={units >= max}
+            onClick={() => setUnits(units + 1)}
+          >
+            <PlusIcon />
+          </Button>
+        </span>
+        <span className="flex items-center gap-3">
+          {total && <span className="tabular-nums">{total}</span>}
+          <Button
+            disabled={!live || buy.isPending}
+            title={live ? undefined : notLiveTitle}
+            onClick={() => buy.mutate()}
+          >
             Buy
           </Button>
-        </Row>
-      ) : (
-        packs.map((pack) => (
-          <Row key={pack.code} label={pack.name.replace(/^Paperboat\s+/, "")}>
-            <Button disabled={!billing.can_manage || buy.isPending} onClick={() => buy.mutate(pack)}>
-              Buy · {formatPrice(pack)}
-            </Button>
-          </Row>
-        ))
-      )}
+        </span>
+      </div>
+      <p className="py-2 text-xs text-muted-foreground">
+        Used after the plan&apos;s allowance runs out. It doesn&apos;t expire or renew.
+      </p>
       {buy.isError && <p className="py-2 text-sm text-destructive">{buy.error.message}</p>}
     </Section>
   )

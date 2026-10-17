@@ -15,7 +15,11 @@ type PendingBillingFields = {
   topup_bytes_remaining?: number
 }
 export type BillingWorkspace = components["schemas"]["BillingWorkspace"] & PendingBillingFields
-export type BillingProduct = components["schemas"]["WorkspaceBillingProduct"]
+/** Top-up products add `unit_bytes` and `max_quantity` (requested from Lane B). */
+export type BillingProduct = components["schemas"]["WorkspaceBillingProduct"] & {
+  unit_bytes?: number
+  max_quantity?: number
+}
 export type BillingInterval = "month" | "year"
 
 /**
@@ -137,11 +141,20 @@ export const changePlan = (workspace: Workspace, product: BillingProduct) =>
 export const setCancelled = (workspace: Workspace, cancel: boolean) =>
   post(`${billingPath(workspace)}/${cancel ? "cancel" : "resume"}`, {})
 
-export async function buyTopup(workspace: Workspace, product: BillingProduct) {
+/**
+ * Top-up size rules (user decision 2026-10-18): multiples of 100 GB, at most 10,000 GB per
+ * purchase. The server enforces them and publishes them on the top-up product as `unit_bytes`
+ * and `max_quantity`; these values only shape the form until that product is served.
+ */
+export const topupDefaults = { unitBytes: 100e9, maxQuantity: 100 } as const
+
+/** Checkout for `quantity` units of the top-up product (each `unit_bytes`, priced `unit_amount`). */
+export async function buyTopup(workspace: Workspace, product: BillingProduct, quantity: number) {
   const back = `${window.location.origin}/billing`
   const { url } = (await post(`${billingPath(workspace)}/topups`, {
     product_code: product.code,
     product_version: product.version,
+    quantity,
     success_url: `${back}?checkout=done`,
     cancel_url: back,
   })) as { url: string }
