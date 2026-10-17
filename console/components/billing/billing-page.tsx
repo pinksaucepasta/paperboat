@@ -84,6 +84,9 @@ function Plan({
     mutationFn: () => openPortal(workspace, idempotencyKey()),
     onSuccess: (url) => window.location.assign(url),
   })
+  // Stripe keeps retrying a failed renewal; paid features last until `paid_benefits_until`.
+  const failed = ["past_due", "unpaid", "suspended"].includes(billing.state)
+  const benefits = billing.paid_benefits_until
   const end = billing.period_end && dateFormat.format(new Date(billing.period_end))
   const manage = billing.product_code && billing.can_manage && (
     <Button variant="outline" disabled={portal.isPending} onClick={() => portal.mutate()}>
@@ -104,7 +107,22 @@ function Plan({
           "Free"
         )}
       </Row>
-      {billing.state !== "free" && billing.state !== "active" && <Row label="Status">{stateLabel(billing.state)}</Row>}
+      {failed ? (
+        <div className="flex items-center justify-between gap-6 border-b border-divider py-3 text-sm">
+          <span className="text-destructive">
+            {benefits && new Date(benefits) > new Date()
+              ? `Payment failed. Paid features stay until ${dateFormat.format(new Date(benefits))}.`
+              : "Payment failed. Paid features are paused until payment succeeds."}
+          </span>
+          {billing.can_manage && (
+            <Button disabled={portal.isPending} onClick={() => portal.mutate()}>
+              Update payment method
+            </Button>
+          )}
+        </div>
+      ) : (
+        billing.state !== "free" && billing.state !== "active" && <Row label="Status">{stateLabel(billing.state)}</Row>
+      )}
       {end && (
         <Row label={billing.cancel_at_period_end ? "Ends" : billing.product_code ? "Renews" : "Resets"}>{end}</Row>
       )}
@@ -215,7 +233,6 @@ function planName(product: BillingProduct) {
 
 function stateLabel(state: string) {
   const labels: Record<string, string> = {
-    past_due: "Payment failed. Update your payment method in Manage billing.",
     canceled: "Canceled",
     incomplete: "Payment incomplete",
     pending: "Payment processing",

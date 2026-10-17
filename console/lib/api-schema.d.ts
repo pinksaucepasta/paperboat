@@ -9404,6 +9404,10 @@ export interface components {
             period_start?: string;
             /** Format: date-time */
             period_end?: string;
+            /** Format: date-time */
+            renewal_grace_until?: string;
+            /** Format: date-time */
+            paid_benefits_until?: string;
             cancel_at_period_end: boolean;
             usage_bytes: number;
             allowance_bytes: number | null;
