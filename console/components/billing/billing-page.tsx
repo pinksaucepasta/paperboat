@@ -15,7 +15,7 @@ import {
   type BillingWorkspace,
 } from "@/lib/billing"
 import { formatBytes } from "@/lib/format"
-import { Invoices, PlanActions, Seats, TopUps } from "@/components/billing/billing-sections"
+import { PlanActions, Seats, TopUps } from "@/components/billing/billing-sections"
 import { Row, Section } from "@/components/section"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -40,7 +40,6 @@ export function BillingPage() {
       {!subscribed && !confirming && <Plans workspace={workspace} billing={billing.data} />}
       {subscribed && workspace.kind === "team" && <Seats workspace={workspace} billing={billing.data} />}
       <TopUps workspace={workspace} billing={billing.data} />
-      {subscribed && <Invoices workspace={workspace} />}
     </div>
   )
 }

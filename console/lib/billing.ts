@@ -28,7 +28,6 @@ export const billingLive = {
   planChange: false,
   cancel: false,
   topups: false,
-  invoices: false,
   paidTeamCreate: false,
 } as const
 export const notLiveTitle = "Not available yet"
@@ -39,15 +38,6 @@ export type ChangePreview = {
   currency: string
   next_invoice_amount: number
   next_invoice_at: string
-}
-
-export type Invoice = {
-  id: string
-  created_at: string
-  amount: number
-  currency: string
-  status: string
-  hosted_url: string
 }
 
 const minute = 60_000
@@ -157,14 +147,6 @@ export async function buyTopup(workspace: Workspace, product: BillingProduct) {
   })) as { url: string }
   return url
 }
-
-export const invoicesQuery = (workspace: Workspace) =>
-  queryOptions({
-    queryKey: ["billing-invoices", workspace.id],
-    queryFn: async () => (await api<{ items: Invoice[] }>(`${billingPath(workspace)}/invoices?limit=24`)).items,
-    enabled: billingLive.invoices,
-    staleTime: 5 * minute,
-  })
 
 /** "$8", "$15.50" from minor units. */
 export function formatMoney(amount: number, currency: string) {

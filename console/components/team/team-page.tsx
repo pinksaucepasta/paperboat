@@ -3,7 +3,7 @@
 import { EnvelopeSimpleIcon, MinusIcon, PlusIcon, UsersThreeIcon } from "@phosphor-icons/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
-import { useApiQuery, useWorkspace, workspacesQuery } from "@/lib/api"
+import { meQuery, useApiQuery, useWorkspace, workspacesQuery } from "@/lib/api"
 import { billingLive, notLiveTitle } from "@/lib/billing"
 import { answerInvitation, createPaidTeam, createTeam, myInvitationsQuery, teamIdPattern } from "@/lib/teams"
 import { setWorkspace } from "@/lib/workspace"
@@ -31,7 +31,16 @@ function Teams() {
   const invitations = useApiQuery(myInvitationsQuery)
   const [creating, setCreating] = useState(false)
   const teams = workspaces.data?.filter((workspace) => workspace.kind === "team") ?? []
-  const pending = invitations.data?.filter((invitation) => invitation.state === "pending") ?? []
+  const me = useApiQuery(meQuery).data
+  // The list also holds invitations you sent; only those addressed to you belong here.
+  const pending =
+    invitations.data?.filter(
+      (invitation) =>
+        invitation.state === "pending" &&
+        me &&
+        invitation.created_by !== me.id &&
+        (invitation.account_id === me.id || invitation.email?.toLowerCase() === me.email.toLowerCase()),
+    ) ?? []
 
   return (
     <div className="flex flex-col gap-10">
@@ -88,7 +97,10 @@ function Teams() {
                 </Avatar>
                 <span className="flex min-w-0 flex-1 flex-col">
                   <span className="truncate font-medium">{team.name}</span>
-                  <span className="text-xs text-muted-foreground">{roleLabels[team.role]}</span>
+                  <span className="truncate text-xs text-muted-foreground">
+                    {roleLabels[team.role]}
+                    {team.name !== team.id && ` · ${team.id}`}
+                  </span>
                 </span>
                 <span className="text-muted-foreground">Open</span>
               </button>

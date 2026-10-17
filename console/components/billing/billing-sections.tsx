@@ -1,6 +1,6 @@
 "use client"
 
-import { ArrowSquareOutIcon, MinusIcon, PlusIcon } from "@phosphor-icons/react"
+import { MinusIcon, PlusIcon } from "@phosphor-icons/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { useApiQuery, type Workspace } from "@/lib/api"
@@ -12,7 +12,6 @@ import {
   changePlan,
   formatMoney,
   formatPrice,
-  invoicesQuery,
   notLiveTitle,
   planPreviewQuery,
   seatPreviewQuery,
@@ -62,7 +61,7 @@ export function Seats({ workspace, billing }: { workspace: Workspace; billing: B
   const save = useMutation({ mutationFn: () => setSeats(workspace, quantity), onSuccess: refresh })
   const live = billingLive.seats && billing.can_manage
   return (
-    <Section title="Seats" action={<span className="text-xs text-muted-foreground">{used} used</span>}>
+    <Section title="Seats">
       <div className="flex min-h-12 flex-wrap items-center justify-between gap-x-6 gap-y-2 border-b border-divider py-2 text-sm">
         <span className="flex items-center gap-2">
           <Button
@@ -101,7 +100,7 @@ export function Seats({ workspace, billing }: { workspace: Workspace; billing: B
           </span>
         ) : (
           <span className="text-muted-foreground">
-            {live ? "Invites use free seats" : `${notLiveTitle}: seats change with members`}
+            {used} used · {Math.max(0, bought - used)} free
           </span>
         )}
       </div>
@@ -223,39 +222,6 @@ export function TopUps({ workspace, billing }: { workspace: Workspace; billing: 
         ))
       )}
       {buy.isError && <p className="py-2 text-sm text-destructive">{buy.error.message}</p>}
-    </Section>
-  )
-}
-
-export function Invoices({ workspace }: { workspace: Workspace }) {
-  const invoices = useApiQuery(invoicesQuery(workspace))
-  if (!billingLive.invoices) {
-    return (
-      <Section title="Invoices">
-        <p className="py-3 text-sm text-muted-foreground">Invoices are in Manage billing for now.</p>
-      </Section>
-    )
-  }
-  return (
-    <Section title="Invoices">
-      {invoices.data?.length === 0 && <p className="py-3 text-sm text-muted-foreground">No invoices yet.</p>}
-      {invoices.data?.map((invoice) => (
-        <Row key={invoice.id} label={dateFormat.format(new Date(invoice.created_at))}>
-          <span className="flex items-center gap-3">
-            <span className="tabular-nums">{formatMoney(invoice.amount, invoice.currency)}</span>
-            <span className="text-muted-foreground capitalize">{invoice.status}</span>
-            <a
-              href={invoice.hosted_url}
-              target="_blank"
-              rel="noreferrer"
-              aria-label="Open invoice"
-              className="text-muted-foreground hover:text-foreground"
-            >
-              <ArrowSquareOutIcon className="size-4" />
-            </a>
-          </span>
-        </Row>
-      ))}
     </Section>
   )
 }
