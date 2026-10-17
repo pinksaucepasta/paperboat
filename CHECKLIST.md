@@ -558,7 +558,7 @@ that use them; say which in Evidence.
 | F14-05 | Real signed release → `pb update` and `--force` on L, M, W; tampered metadata or file rejected. | [ ] | [ ] | [ ] | — |
 | F14-06 | Automatic update at a configured time on L, M, W; `pb update settings` changes and disables it. | [ ] | [ ] | [ ] | — |
 | F14-07 | Minimum supported version blocks an old official build with a clear message; custom builds unaffected. | [ ] | [ ] | [ ] | —  Unchanged TestClientUpdatePolicyPostgres fresh isolated VPS PG PASS0.12s; clientupdate vet/race PASS1.031s. Device official/custom floor checks pending.  HTTP operator policy PostgreSQL PASS0.30s incl CSRF/origin/role/target/logout; configured example.test fixture. |
-| F14-08 | `pb update bundle` + `--from <file.pb-update>` installs offline on L, M, W. | [ ] | [ ] | [ ] | — |
+| F14-08 | `pb update bundle` + `--from <file.pb-update>` installs offline on L, M, W. | [ ] | [ ] | [ ] | Workspace TestUpdateBundleExportPreservesOutputCreatedDuringDownload RED2.480s/GREEN bootstrap race47.941s; export atomically refuses occupied output, preserves existing bytes and cleans staging; bootstrap vet PASS. Waits for parent: L/M real offline bundle installation. |
 | F14-09 | `pb update check/download/status` accurate; console update summary accurate per workspace. | [ ] | [ ] | [ ] | —  Existing TestFleetUpdateInventoryPaginationOnPostgres actual VPS PostgreSQL PASS0.31s: workspace/foreign/deleted exclusion, current observation generation, filter/paging/count accuracy. Signed/device update and Claude summary proof pending. |
 
 **Commands**

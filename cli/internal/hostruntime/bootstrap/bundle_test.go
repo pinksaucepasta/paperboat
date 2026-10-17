@@ -429,3 +429,36 @@ func TestUpdateBundleStoreContentionCancellation(t *testing.T) {
 	}
 	os.Remove(imported.ArtifactPath)
 }
+
+func TestUpdateBundleExportPreservesOutputCreatedDuringDownload(t *testing.T) {
+	now := time.Now().UTC()
+	repo := newTestTUFRepository(t, []byte("official bytes"), "2026.10.11.1", now.Add(time.Hour))
+	server := repo.server(t)
+	defer server.Close()
+	directory := t.TempDir()
+	destination := filepath.Join(directory, "release.pb-update")
+	existing := []byte("another export owns this output")
+	client := *server.Client()
+	base := client.Transport
+	client.Transport = roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		response, err := base.RoundTrip(request)
+		if err == nil && request.URL.Hostname() == "github.com" {
+			if writeErr := os.WriteFile(destination, existing, 0600); writeErr != nil {
+				t.Error(writeErr)
+			}
+		}
+		return response, err
+	})
+	_, err := exportUpdateBundle(context.Background(), server.URL, filepath.Join(t.TempDir(), "state"), destination, &client, now, repo.root, runtime.GOOS, runtime.GOARCH)
+	if !errors.Is(err, os.ErrExist) {
+		t.Fatalf("occupied output error = %v, want file exists", err)
+	}
+	got, err := os.ReadFile(destination)
+	if err != nil || !bytes.Equal(got, existing) {
+		t.Fatalf("existing output changed: %q, %v", got, err)
+	}
+	entries, err := os.ReadDir(directory)
+	if err != nil || len(entries) != 1 || entries[0].Name() != filepath.Base(destination) {
+		t.Fatalf("export left temporary files: %v, %v", entries, err)
+	}
+}

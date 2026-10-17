@@ -320,7 +320,10 @@ func exportUpdateBundle(ctx context.Context, repositoryURL, stateDirectory, outp
 	if err = ctx.Err(); err != nil {
 		return releaseindex.Index{}, err
 	}
-	if err = os.Rename(pending.Name(), outputPath); err != nil {
+	// Publish complete bytes without replacing an output created while fetching.
+	// The temporary file shares the destination filesystem; deferred removal
+	// releases its original name after the exclusive link succeeds.
+	if err = os.Link(pending.Name(), outputPath); err != nil {
 		return releaseindex.Index{}, err
 	}
 	return index, nil
