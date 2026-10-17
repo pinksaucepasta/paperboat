@@ -112,6 +112,7 @@ type BillingOperatorPolicy struct {
 	PersonalMachineLimit   sql.NullInt32
 	Revision               int64
 	UpdatedAt              time.Time
+	RenewalGraceSeconds    int32
 }
 
 type BillingPortalOperation struct {
@@ -142,6 +143,20 @@ type BillingProduct struct {
 	VerifiedInterval   sql.NullString
 }
 
+type BillingTeamOrder struct {
+	OperationID        string
+	TeamID             string
+	ActorUserID        string
+	RequestHash        string
+	RequestCiphertext  []byte
+	ResultCiphertext   []byte
+	ProviderCustomerID sql.NullString
+	ProviderSessionID  sql.NullString
+	State              string
+	AttemptedAt        time.Time
+	UpdatedAt          time.Time
+}
+
 type BillingUncertainRecovery struct {
 	IdempotencyKey string
 	OperationKind  string
@@ -166,6 +181,12 @@ type BillingWorkspace struct {
 	CancelAtPeriodEnd      bool
 	Revision               int64
 	UpdatedAt              time.Time
+	BandwidthAnchor        sql.NullTime
+	RenewalGraceUntil      sql.NullTime
+	RenewalGraceInvoiceID  sql.NullString
+	PendingSeatCapacity    sql.NullInt32
+	ScheduledQuantity      sql.NullInt32
+	ScheduledQuantityAt    sql.NullTime
 }
 
 type BillingWorkspaceOperation struct {
@@ -200,6 +221,8 @@ type BillingWorkspaceUsagePeriod struct {
 	IncludedBytes sql.NullInt64
 	ConsumedBytes int64
 	ObservedBytes int64
+	Paid          bool
+	BudgetStart   sql.NullTime
 }
 
 type BrowserAccessSession struct {
