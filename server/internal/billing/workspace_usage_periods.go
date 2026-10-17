@@ -26,9 +26,9 @@ func workspaceUsagePolicyTx(ctx context.Context, tx *db.Tx, id string, at time.T
 	var team, catalog sql.NullString
 	var start, end, anchor sql.NullTime
 	var out usagePolicy
-	err := tx.QueryRow(ctx, `SELECT w.team_id,w.period_start,w.period_end,w.bandwidth_anchor,p.catalog_ref
+	err := tx.QueryRow(ctx, `SELECT w.team_id,w.period_start,coalesce(billing_workspace_paid_until(w),least(w.period_end,w.updated_at)),w.bandwidth_anchor,p.catalog_ref
 FROM billing_workspaces w LEFT JOIN billing_products p
- ON p.code=w.product_code AND p.provider='stripe' AND w.period_start<=$2 AND w.period_end>$2
+ ON p.code=w.product_code AND p.provider='stripe' AND w.period_start<=$2 AND billing_workspace_paid_until(w)>$2
 WHERE w.id=$1 FOR UPDATE OF w`, id, at).Scan(&team, &start, &end, &anchor, &catalog)
 	if err != nil {
 		return out, err

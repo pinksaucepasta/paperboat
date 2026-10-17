@@ -9940,6 +9940,14 @@
             "type": "string",
             "format": "date-time"
           },
+          "renewal_grace_until": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "paid_benefits_until": {
+            "type": "string",
+            "format": "date-time"
+          },
           "cancel_at_period_end": {
             "type": "boolean"
           },

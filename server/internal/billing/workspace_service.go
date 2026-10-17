@@ -852,6 +852,9 @@ func (s *WorkspaceService) reconcileSubscription(ctx context.Context, subscripti
 		if catalog != expected {
 			return errors.New("stripe product does not match workspace scope")
 		}
+		if err = updateRenewalGraceTx(ctx, tx, workspaceID, current, event); err != nil {
+			return err
+		}
 		if _, err = tx.Exec(ctx, `UPDATE billing_workspaces SET provider_subscription_id=$2,provider_item_id=$3,product_code=$4,state=$5,quantity=$6,period_start=$7,period_end=$8,cancel_at_period_end=$9,bandwidth_anchor=CASE WHEN $5 IN ('active','trialing') THEN coalesce(bandwidth_anchor,$7) ELSE bandwidth_anchor END,updated_at=now(),revision=revision+1 WHERE id=$1 AND provider_customer_id=$10`, workspaceID, current.ID, current.ItemID, productCode, current.Status, current.Quantity, current.PeriodStart, current.PeriodEnd, current.CancelAtPeriodEnd, current.CustomerID); err != nil {
 			return err
 		}

@@ -58,6 +58,8 @@ type StripeSubscription struct {
 	CheckoutOperation                       string
 	Quantity                                int
 	PeriodStart, PeriodEnd                  time.Time
+	RenewalInvoiceID                        string
+	RenewalFailureAt                        time.Time
 	CancelAtPeriodEnd                       bool
 }
 
@@ -171,7 +173,7 @@ func (c HTTPStripeClient) CreatePortal(ctx context.Context, customerID, returnUR
 
 func (c HTTPStripeClient) GetSubscription(ctx context.Context, id string) (StripeSubscription, error) {
 	var out stripeSubscriptionResponse
-	if err := c.do(ctx, http.MethodGet, "/v1/subscriptions/"+url.PathEscape(id), "", nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/subscriptions/"+url.PathEscape(id)+"?expand%5B%5D=latest_invoice", "", nil, &out); err != nil {
 		return StripeSubscription{}, err
 	}
 	return out.subscription()
@@ -181,6 +183,7 @@ func (c HTTPStripeClient) UpdateSubscriptionSeats(ctx context.Context, subscript
 	v := url.Values{
 		"items[0][id]": {itemID}, "items[0][quantity]": {strconv.Itoa(quantity)},
 		"proration_behavior": {"always_invoice"},
+		"expand[]":           {"latest_invoice"},
 	}
 	var out stripeSubscriptionResponse
 	if err := c.do(ctx, http.MethodPost, "/v1/subscriptions/"+url.PathEscape(subscriptionID), key, v, &out); err != nil {
@@ -196,7 +199,19 @@ func (c HTTPStripeClient) UpdateSubscriptionSeats(ctx context.Context, subscript
 	return s, nil
 }
 
+type stripeRenewalInvoice struct {
+	ID                string `json:"id"`
+	BillingReason     string `json:"billing_reason"`
+	Status            string `json:"status"`
+	Attempted         bool   `json:"attempted"`
+	AmountRemaining   int64  `json:"amount_remaining"`
+	StatusTransitions struct {
+		FinalizedAt int64 `json:"finalized_at"`
+	} `json:"status_transitions"`
+}
+
 type stripeSubscriptionResponse struct {
+	LatestInvoice        *stripeRenewalInvoice `json:"latest_invoice"`
 	ID, Customer, Status string
 	Livemode             bool `json:"livemode"`
 	CancelAtPeriodEnd    bool `json:"cancel_at_period_end"`
@@ -223,13 +238,22 @@ func (r stripeSubscriptionResponse) subscription() (StripeSubscription, error) {
 		i.CurrentPeriodStart <= 0 || i.CurrentPeriodEnd <= i.CurrentPeriodStart {
 		return StripeSubscription{}, errors.New("invalid stripe subscription response")
 	}
-	return StripeSubscription{
+	result := StripeSubscription{
 		ID: r.ID, CustomerID: r.Customer, PriceID: i.Price.ID, ItemID: i.ID,
 		Status: r.Status, CheckoutOperation: r.Metadata.PaperboatCheckoutOperation,
 		Quantity: i.Quantity, CancelAtPeriodEnd: r.CancelAtPeriodEnd,
 		PeriodStart: time.Unix(i.CurrentPeriodStart, 0).UTC(),
 		PeriodEnd:   time.Unix(i.CurrentPeriodEnd, 0).UTC(),
-	}, nil
+	}
+	if invoice := r.LatestInvoice; invoice != nil &&
+		(r.Status == "past_due" || r.Status == "unpaid") &&
+		invoice.BillingReason == "subscription_cycle" && invoice.Attempted &&
+		invoice.AmountRemaining > 0 && invoice.StatusTransitions.FinalizedAt > 0 &&
+		(invoice.Status == "open" || invoice.Status == "uncollectible") {
+		result.RenewalInvoiceID = invoice.ID
+		result.RenewalFailureAt = time.Unix(invoice.StatusTransitions.FinalizedAt, 0).UTC()
+	}
+	return result, nil
 }
 
 func (c HTTPStripeClient) do(ctx context.Context, method, path, key string, values url.Values, out any) error {
@@ -294,14 +318,17 @@ func (c HTTPStripeClient) do(ctx context.Context, method, path, key string, valu
 }
 
 type StripeWebhook struct {
-	ID   string `json:"id"`
-	Type string `json:"type"`
-	Data struct {
+	ID      string `json:"id"`
+	Type    string `json:"type"`
+	Created int64  `json:"created"`
+	Data    struct {
 		Object struct {
-			ID           string `json:"id"`
-			Object       string `json:"object"`
-			Subscription string `json:"subscription"`
-			Parent       struct {
+			ID            string `json:"id"`
+			BillingReason string `json:"billing_reason"`
+			AttemptCount  int    `json:"attempt_count"`
+			Object        string `json:"object"`
+			Subscription  string `json:"subscription"`
+			Parent        struct {
 				Type                string `json:"type"`
 				SubscriptionDetails struct {
 					Subscription string `json:"subscription"`

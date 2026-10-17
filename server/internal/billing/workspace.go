@@ -59,6 +59,8 @@ type Workspace struct {
 	Quantity          int               `json:"paid_seats"`
 	Members           int               `json:"members"`
 	CanManage         bool              `json:"can_manage"`
+	RenewalGraceUntil *time.Time        `json:"renewal_grace_until,omitempty"`
+	PaidBenefitsUntil *time.Time        `json:"paid_benefits_until,omitempty"`
 	PeriodStart       *time.Time        `json:"period_start,omitempty"`
 	PeriodEnd         *time.Time        `json:"period_end,omitempty"`
 	CancelAtPeriodEnd bool              `json:"cancel_at_period_end"`
@@ -106,14 +108,20 @@ func WorkspaceTx(ctx context.Context, tx *db.Tx, account, team string, manage bo
 		return out, err
 	}
 	var customer, subscription, item, product sql.NullString
-	var start, end sql.NullTime
-	err := tx.QueryRow(ctx, `SELECT id,provider_customer_id,provider_subscription_id,provider_item_id,product_code,state,quantity,period_start,period_end,cancel_at_period_end,revision FROM billing_workspaces WHERE (team_id=$1 AND $1<>'' AND user_id IS NULL) OR (user_id=$2 AND $1='' AND team_id IS NULL) FOR UPDATE`, out.TeamID, out.UserID).Scan(&out.ID, &customer, &subscription, &item, &product, &out.State, &out.Quantity, &start, &end, &out.CancelAtPeriodEnd, &out.Revision)
+	var start, end, grace, paidUntil sql.NullTime
+	err := tx.QueryRow(ctx, `SELECT id,provider_customer_id,provider_subscription_id,provider_item_id,product_code,state,quantity,period_start,period_end,cancel_at_period_end,revision,renewal_grace_until,billing_workspace_paid_until(billing_workspaces) FROM billing_workspaces WHERE (team_id=$1 AND $1<>'' AND user_id IS NULL) OR (user_id=$2 AND $1='' AND team_id IS NULL) FOR UPDATE`, out.TeamID, out.UserID).Scan(&out.ID, &customer, &subscription, &item, &product, &out.State, &out.Quantity, &start, &end, &out.CancelAtPeriodEnd, &out.Revision, &grace, &paidUntil)
 	out.CustomerID, out.SubscriptionID, out.ItemID, out.ProductCode = customer.String, subscription.String, item.String, product.String
 	if start.Valid {
 		out.PeriodStart = &start.Time
 	}
 	if end.Valid {
 		out.PeriodEnd = &end.Time
+	}
+	if grace.Valid {
+		out.RenewalGraceUntil = &grace.Time
+	}
+	if paidUntil.Valid {
+		out.PaidBenefitsUntil = &paidUntil.Time
 	}
 	return out, err
 }

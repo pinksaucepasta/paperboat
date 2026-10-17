@@ -110,7 +110,7 @@ WHERE workspace_id=$1 AND period_end>$2 AND period_end<=$3`, workspaceID, start,
 	return start, err
 }
 
-// Annual payment does not change monthly bandwidth. Preserve the original day
+// Payment intervals do not change monthly bandwidth. Preserve the original day
 // and clock, clamping short months without letting that clamp move later anchors.
 func subscriptionUsageMonth(start, at time.Time) (time.Time, time.Time) {
 	start, at = start.UTC(), at.UTC()
