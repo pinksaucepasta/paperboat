@@ -149,6 +149,7 @@ func (o *HTTPDispatchReadinessObserver) readinessRequest(ctx context.Context, me
 	request.Header.Set("X-Paperboat-Machine-Proof", base64.RawURLEncoding.EncodeToString(proof))
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json")
+	request.Header.Set("Accept-Encoding", "identity")
 	if method == http.MethodPost {
 		request.Header.Set("If-Match", lease.ETag)
 		request.Header.Set("Idempotency-Key", metadata.OperationID)
