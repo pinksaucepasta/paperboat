@@ -269,8 +269,13 @@ function Allowance({ billing, workspace }: { billing: BillingWorkspace; workspac
             .map((path) => (
               // Name over amount, so the amount always shows and the row never outgrows the card.
               <span key={path.mode} className="flex flex-col gap-1.5">
-                <Mark icon={<span className={cn("size-2 rounded-full", path.dot)} />}>{path.label}</Mark>
-                <span className="pl-[18px] text-foreground tabular-nums trim-cap">
+                {/* Colour keys only when there is a meter for them to key. */}
+                {allowance === null ? (
+                  <span className="trim-cap">{path.label}</span>
+                ) : (
+                  <Mark icon={<span className={cn("size-2 rounded-full", path.dot)} />}>{path.label}</Mark>
+                )}
+                <span className={cn("text-foreground tabular-nums trim-cap", allowance !== null && "pl-[18px]")}>
                   {split ? formatBytes(split[path.mode]) : "…"}
                 </span>
               </span>
