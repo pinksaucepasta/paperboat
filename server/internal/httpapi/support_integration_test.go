@@ -17,6 +17,7 @@ import (
 	"github.com/pinksaucepasta/paperboat-server/internal/auth"
 	"github.com/pinksaucepasta/paperboat-server/internal/config"
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat-server/internal/operatorauth"
 	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
 )
 
@@ -39,6 +40,9 @@ func TestSupportConnectedReferenceAndRoleRevocation(t *testing.T) {
 	}
 	ref := supportreport.NewReference()
 	owner := "usr_" + ref[3:]
+	operatorID := "opr_" + strings.ReplaceAll(ref[len("support_"):], "-", "")
+	operatorToken := supportreport.NewReference()
+	operatorHash := sha256.Sum256([]byte(operatorToken))
 	token := supportreport.NewReference()
 	hash := sha256.Sum256([]byte(token))
 	if _, err = database.Pool().Exec(ctx, `INSERT INTO users(id,workos_subject,primary_email,status,role) VALUES($1,$1,$2,'active','support')`, owner, owner+"@example.test"); err != nil {
@@ -52,6 +56,16 @@ func TestSupportConnectedReferenceAndRoleRevocation(t *testing.T) {
 		database.Pool().Exec(ctx, `DELETE FROM audit_events WHERE actor_user_id=$1`, owner)
 		database.Pool().Exec(ctx, `DELETE FROM sessions WHERE user_id=$1`, owner)
 		database.Pool().Exec(ctx, `DELETE FROM users WHERE id=$1`, owner)
+	}()
+	if _, err = database.Pool().Exec(ctx, `INSERT INTO operator_accounts(id,email,password_hash,role,status) VALUES($1,$2,'fixture-not-used-for-login','support','active')`, operatorID, operatorID+"@example.test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = database.Pool().Exec(ctx, `INSERT INTO operator_sessions(token_hash,operator_id,csrf_hash,expires_at) VALUES($1,$2,$1,now()+interval '1 hour')`, operatorHash[:], operatorID); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		database.Pool().Exec(ctx, `DELETE FROM audit_events WHERE actor_user_id=$1`, operatorID)
+		database.Pool().Exec(ctx, `DELETE FROM operator_accounts WHERE id=$1`, operatorID)
 	}()
 	store, _ := supportreport.NewSQLStore(database)
 	service, _ := supportreport.New(store, supportreport.Config{})
@@ -78,11 +92,18 @@ func TestSupportConnectedReferenceAndRoleRevocation(t *testing.T) {
 			token = cookie.Value
 		}
 	}
-	lookup := NewRouter(Options{Config: cfg, SupportReports: service, Auth: accounts, OperatorAudit: audit.NewWriter(database), Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	lookup := NewRouter(Options{Config: cfg, SupportReports: service, Auth: accounts, OperatorAuth: &operatorauth.Service{Store: database}, OperatorAudit: audit.NewWriter(database), Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	customerRequest := httptest.NewRequest("GET", "/v1/admin/support/"+ref, nil)
+	customerRequest.AddCookie(&http.Cookie{Name: auth.DevSessionCookieName, Value: token})
+	customerResponse := httptest.NewRecorder()
+	lookup.ServeHTTP(customerResponse, customerRequest)
+	if customerResponse.Code != http.StatusForbidden {
+		t.Fatal("customer session obtained operator support authority")
+	}
 	deadline := time.Now().Add(3 * time.Second)
 	for {
 		request = httptest.NewRequest("GET", "/v1/admin/support/"+ref, nil)
-		request.AddCookie(&http.Cookie{Name: auth.DevSessionCookieName, Value: token})
+		request.AddCookie(&http.Cookie{Name: operatorSessionCookie, Value: operatorToken})
 		response = httptest.NewRecorder()
 		lookup.ServeHTTP(response, request)
 		if response.Code != 200 {
@@ -99,7 +120,14 @@ func TestSupportConnectedReferenceAndRoleRevocation(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if _, err = database.Pool().Exec(ctx, `UPDATE users SET role='user' WHERE id=$1`, owner); err != nil {
+	selfRequest := httptest.NewRequest("GET", "/v1/support/"+ref, nil)
+	selfRequest.AddCookie(&http.Cookie{Name: auth.DevSessionCookieName, Value: token})
+	selfResponse := httptest.NewRecorder()
+	lookup.ServeHTTP(selfResponse, selfRequest)
+	if selfResponse.Code != http.StatusOK || !strings.Contains(selfResponse.Body.String(), `"status":"recorded"`) || strings.Contains(selfResponse.Body.String(), "synthetic_failure") || strings.Contains(selfResponse.Body.String(), owner) || selfResponse.Header().Get("Cache-Control") != "no-store" {
+		t.Fatal("owner support lookup lost availability or disclosed internal evidence")
+	}
+	if _, err = database.Pool().Exec(ctx, `UPDATE operator_accounts SET role='operations' WHERE id=$1`, operatorID); err != nil {
 		t.Fatal(err)
 	}
 	response = httptest.NewRecorder()

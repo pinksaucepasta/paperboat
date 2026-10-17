@@ -37,7 +37,7 @@ Dashboard instrumentation is outside this milestone.
 ## APIs and authority
 
 `GET /v1/admin/support/{reference}?owner_id=<user ID>` requires a current authenticated
-browser session with global `support` or `admin` role. Team roles and paired CLI credentials
+operator session with `support` or `admin` role. Customer browser sessions, team roles and paired CLI credentials
 do not grant this authority. An optional owner qualifies the lookup. With only the reference, staff receive matching
 records grouped by authenticated owner, including a separate unattributed group.
 Client-supplied reference collisions never merge ownership; the response flags truncation. A reference never grants access. The response
@@ -50,7 +50,7 @@ Do not use it to authorize actions or infer tenant ownership.
 the authenticated user's report availability/reporting status. It cannot expose stacks,
 other owners, Sentry event IDs or links. Both endpoints are `no-store`. Every successful
 lookup, including a miss, requires a durable audit write. Audit/storage failure returns 503
-without evidence. Revoked staff roles are evaluated by the existing session authentication
+without evidence. Revoked staff roles are evaluated by the separate operator session authentication
 on each request. WorkOS MFA policy remains a deployment responsibility; this integration
 does not claim to establish MFA assurance.
 
