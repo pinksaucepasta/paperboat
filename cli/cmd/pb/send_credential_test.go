@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -98,7 +99,20 @@ func TestSendUsesRenewedCredentialWhileWaitingForApproval(t *testing.T) {
 	commandCtx, finish := context.WithTimeout(context.Background(), 10*time.Second)
 	defer finish()
 	err = command.ExecuteContext(commandCtx)
-	if !renewed.Load() || err == nil || errors.Is(err, api.ErrUnauthenticated) || err.Error() != "file transfer was not accepted: declined" {
+	if !renewed.Load() || err == nil || errors.Is(err, api.ErrUnauthenticated) {
 		t.Fatalf("renewed account credential used=%t; result=%v", renewed.Load(), err)
+	}
+	var rendered bytes.Buffer
+	if writeErr := writeCLIJSONError(&rendered, err); writeErr != nil {
+		t.Fatal(writeErr)
+	}
+	var receipt cliJSONEnvelope
+	if decodeErr := json.Unmarshal(rendered.Bytes(), &receipt); decodeErr != nil {
+		t.Fatal(decodeErr)
+	}
+	if receipt.OK || receipt.Error == nil || receipt.Error.Code != "operation_refused" ||
+		receipt.Error.Message != "The recipient declined this transfer. Contact them before sending again." ||
+		receipt.Error.Retryable || receipt.Error.StateChanged != true {
+		t.Fatalf("declined transfer lost its public refusal: %s", rendered.String())
 	}
 }

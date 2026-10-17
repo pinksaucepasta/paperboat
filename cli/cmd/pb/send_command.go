@@ -163,6 +163,9 @@ func sendCommand() *cobra.Command {
 					}
 				}
 			}
+			if acceptance.Status == "declined" {
+				return commandRejection{reason: commandRejectInboxDeclined}
+			}
 			if acceptance.Status != "approved" && acceptance.Status != "not_required" {
 				return fmt.Errorf("file transfer was not accepted: %s", acceptance.Status)
 			}

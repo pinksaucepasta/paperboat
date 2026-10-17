@@ -215,6 +215,10 @@ func classifyCLIJSONFailure(err error, failure commandFailure) cliJSONError {
 			if typed.cause == nil {
 				result.StateChanged = false
 			}
+			if typed.reason == commandRejectInboxDeclined {
+				// The request was created and declined; file delivery never began.
+				result.StateChanged = true
+			}
 			if typed.reason == commandRejectActivationPending {
 				result.Code, result.StateChanged, result.Retryable = "activation_pending", "unknown", true
 				result.Recovery = "Wait for the signed update service to finish recovery, then retry; run pb doctor if this continues."

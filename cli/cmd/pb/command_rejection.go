@@ -19,9 +19,10 @@ const (
 	commandRejectUpdateVerification
 	commandRejectLegacyCarrierRunning
 	commandRejectActivationPending
+	commandRejectInboxDeclined
 )
 
-// commandRejection describes a command-owned refusal before mutation. Its
+// commandRejection describes a command-owned refusal. Its
 // finite reason controls presentation; an optional original cause still
 // participates in command classification and can outrank the refusal.
 type commandRejection struct {
@@ -30,10 +31,12 @@ type commandRejection struct {
 }
 
 func (e commandRejection) valid() bool {
-	return e.reason >= commandRejectDefaultSessionRename && e.reason <= commandRejectActivationPending
+	return e.reason >= commandRejectDefaultSessionRename && e.reason <= commandRejectInboxDeclined
 }
 func (e commandRejection) Error() string {
 	switch e.reason {
+	case commandRejectInboxDeclined:
+		return "The recipient declined this transfer. Contact them before sending again."
 	case commandRejectDefaultSessionRename:
 		return "The default session cannot be renamed. Select another session."
 	case commandRejectDefaultSessionDelete:
