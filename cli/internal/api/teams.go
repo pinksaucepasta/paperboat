@@ -23,16 +23,28 @@ type TeamGrant struct {
 	Active       bool   `json:"active"`
 }
 type Team struct {
-	ENVStatus     string               `json:"env_status"`
-	TeamID        string               `json:"team_id"`
-	OwnerAccount  string               `json:"owner_account"`
-	Generation    uint64               `json:"generation"`
-	Deleted       bool                 `json:"deleted"`
-	Members       []TeamMember         `json:"members"`
-	Grants        []TeamGrant          `json:"grants"`
-	Machines      []TeamMachineBinding `json:"machines"`
-	MachineGrants []TeamMachineGrant   `json:"machine_grants"`
+	Name                  string                     `json:"name"`
+	Suspended             bool                       `json:"suspended"`
+	TerminalSessionGrants []TeamTerminalSessionGrant `json:"terminal_session_grants"`
+	ENVStatus             string                     `json:"env_status"`
+	TeamID                string                     `json:"team_id"`
+	OwnerAccount          string                     `json:"owner_account"`
+	Generation            uint64                     `json:"generation"`
+	Deleted               bool                       `json:"deleted"`
+	Members               []TeamMember               `json:"members"`
+	Grants                []TeamGrant                `json:"grants"`
+	Machines              []TeamMachineBinding       `json:"machines"`
+	MachineGrants         []TeamMachineGrant         `json:"machine_grants"`
 }
+type TeamTerminalSessionGrant struct {
+	TerminalSessionID string `json:"terminal_session_id"`
+	Audience          string `json:"audience"`
+	AccountID         string `json:"account_id,omitempty"`
+	Role              string `json:"role"`
+	Generation        uint64 `json:"generation"`
+	Active            bool   `json:"active"`
+}
+
 type TeamCreateRequest struct {
 	OperationID string `json:"operation_id"`
 	TeamID      string `json:"team_id"`

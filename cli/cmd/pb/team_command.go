@@ -371,6 +371,23 @@ func writeTeamOutput(c *cobra.Command, jsonOutput bool, team api.Team) error {
 	if err != nil {
 		return err
 	}
+	if team.Name != "" {
+		if _, err = fmt.Fprintf(c.OutOrStdout(), "NAME\t%s\n", team.Name); err != nil {
+			return err
+		}
+	}
+	state := "active"
+	if team.Deleted {
+		state = "deleted"
+	} else if team.Suspended {
+		state = "suspended"
+	}
+	if _, err = fmt.Fprintf(c.OutOrStdout(), "STATE\t%s\n", state); err != nil {
+		return err
+	}
+	if err = writeTeamPermissions(c, team); err != nil {
+		return err
+	}
 	if team.ENVStatus != "" {
 		if _, err = fmt.Fprintf(c.OutOrStdout(), "ENV\t%s\n", team.ENVStatus); err != nil {
 			return err
@@ -401,6 +418,26 @@ func writeTeamOutput(c *cobra.Command, jsonOutput bool, team api.Team) error {
 			subject = "all members"
 		}
 		if _, err = fmt.Fprintf(c.OutOrStdout(), "MACHINE GRANT\t%s\t%s\t%s\n", grant.MachineID, subject, strings.Join(grant.Capabilities, ",")); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeTeamPermissions(c *cobra.Command, team api.Team) error {
+	for _, member := range team.Members {
+		if !member.Active {
+			continue
+		}
+		if _, err := fmt.Fprintf(c.OutOrStdout(), "MEMBER\t%s\t%s\n", member.AccountID, member.Role); err != nil {
+			return err
+		}
+	}
+	for _, grant := range team.Grants {
+		if !grant.Active {
+			continue
+		}
+		if _, err := fmt.Fprintf(c.OutOrStdout(), "RESOURCE GRANT\t%s\t%s\t%s\t%s\n", grant.ResourceKind, grant.ResourceID, grant.AccountID, grant.Permission); err != nil {
 			return err
 		}
 	}

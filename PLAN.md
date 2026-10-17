@@ -1812,3 +1812,7 @@ Primary: ssh-tools:hp-apple/apple-hp plus direct machine:/synthetic/file ./retur
 
 2026-10-18 | Lane A F15-04 literal shortcut operands | Rows ticked:none; resolver stripped -- operands before indexed expansion; owner RED0.142s/GREEN focused CLI race1.608s, vet PASS.
 Defaults stay before the preserved boundary; baseline workspace gate abf4031 all6 Go/deployment5/console lint+typegen+tsc PASS. Primary L/M customization/explain and update persistence remain pending.
+
+2026-10-18 | Lane A F12 Team response consumer | Rows ticked:none; command HTTP owner RED0.28s/GREEN command/API race3.241/1.073s and affected vet PASS; published name/suspended/terminal grants retained and active members/resource grants visible. Baseline workspace gate abf4031 PASS.
+Paid-create and bought-seat producers now published; CLI consumer follow-up in progress. F12-04 still waits B enrollment team/default capabilities/approval contract.
+F12-04/05/06 and C194/195/201/207-212 wait primary Lane A L/M checks; no device ticks from workspace proof.

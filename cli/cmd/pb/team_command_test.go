@@ -329,3 +329,66 @@ func TestTeamHumanOutputReturnsWriterFailures(t *testing.T) {
 		})
 	}
 }
+
+func TestTeamGetPreservesIdentitySuspensionAndResourcePermissions(t *testing.T) {
+	supportedTeamFixtureVersion(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if teamFixtureUpdatePolicy(w, r) {
+			return
+		}
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/teams/team_1" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{
+   "team_id":"team_1", "name":"Research crew", "owner_account":"acct_owner",
+   "generation":7, "suspended":true,
+   "members":[
+    {"account_id":"acct_member","role":"admin","active":true},
+    {"account_id":"acct_removed","role":"member","active":false}
+   ],
+   "grants":[
+    {"account_id":"acct_member","resource_kind":"preview","resource_id":"preview_1","permission":"use","active":true},
+    {"account_id":"acct_member","resource_kind":"tunnel","resource_id":"tunnel_revoked","permission":"manage","active":false}
+   ],
+   "terminal_session_grants":[
+    {"terminal_session_id":"terminal_1","audience":"all_members","role":"viewer","generation":2,"active":true}
+   ]
+  }}`))
+	}))
+	defer server.Close()
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	writeTestProfile(t, dir, configPath, server.URL)
+	for _, asJSON := range []bool{false, true} {
+		args := []string{"team", "get", "team_1", "--config", configPath, "--server", server.URL}
+		if asJSON {
+			args = append(args, "--json")
+		}
+		var output bytes.Buffer
+		if code := run(t.Context(), args, &output, &output); code != 0 {
+			t.Fatalf("exit=%d output=%s", code, &output)
+		}
+		if asJSON {
+			var result map[string]any
+			if err := json.Unmarshal(output.Bytes(), &result); err != nil {
+				t.Fatal(err)
+			}
+			if result["name"] != "Research crew" || result["suspended"] != true || result["terminal_session_grants"] == nil {
+				t.Errorf("JSON lost team identity or suspension: %s", &output)
+			}
+			continue
+		}
+		for _, want := range []string{"NAME\tResearch crew", "STATE\tsuspended", "MEMBER\tacct_member\tadmin", "RESOURCE GRANT\tpreview\tpreview_1\tacct_member\tuse"} {
+			if !strings.Contains(output.String(), want) {
+				t.Errorf("missing %q in %s", want, &output)
+			}
+		}
+		for _, revoked := range []string{"acct_removed", "tunnel_revoked"} {
+			if strings.Contains(output.String(), revoked) {
+				t.Errorf("inactive access shown as current: %s", &output)
+			}
+		}
+	}
+}
