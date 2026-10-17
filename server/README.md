@@ -137,6 +137,8 @@ credential. A confirmed WorkOS refresh revocation ends the Paperboat session;
 temporary provider failures deny protected requests until retry succeeds.
 - `PAPERBOAT_STRIPE_API_KEY` or `PAPERBOAT_STRIPE_API_KEY_FILE`
 - `PAPERBOAT_STRIPE_WEBHOOK_SECRET` or `PAPERBOAT_STRIPE_WEBHOOK_SECRET_FILE`
+- `PAPERBOAT_STRIPE_PERSONAL_PORTAL_CONFIGURATION_ID`
+- `PAPERBOAT_STRIPE_TEAM_PORTAL_CONFIGURATION_ID`
 - `PAPERBOAT_GITHUB_CLIENT_ID` or `PAPERBOAT_GITHUB_CLIENT_ID_FILE`
 - `PAPERBOAT_GITHUB_CLIENT_SECRET` or `PAPERBOAT_GITHUB_CLIENT_SECRET_FILE`
 - `PAPERBOAT_RELEASES_ROOT_PATH` (Compose host release root; legacy `PAPERBOAT_RELEASES_PATH` is a parent-path-only fallback)
@@ -228,3 +230,11 @@ Cloudflare documents `stun.cloudflare.com:3478` as public STUN at
 https://developers.cloudflare.com/realtime/sfu/get-started/connection-patterns/.
 Configure destinations explicitly according to the deployment's privacy policy;
 empty or unreachable supplemental discovery does not authorize public relays.
+
+Billing portal configurations must be separate for Personal and Team workspaces.
+Each configuration permits price changes only between the monthly and yearly
+prices of its own product, uses immediate proration, and disables quantity changes.
+Enable payment-method updates, invoice history and cancellation at period end.
+Missing configuration makes new portal requests unavailable. Retried operations
+retain their original configuration; changing deployment settings does not alter
+an existing provider operation.
