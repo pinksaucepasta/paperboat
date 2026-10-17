@@ -29,8 +29,6 @@ export type BillingInterval = "month" | "year"
  */
 export const billingLive = {
   seats: false,
-  planChange: false,
-  cancel: false,
   topups: false,
   paidTeamCreate: false,
 } as const
@@ -123,23 +121,6 @@ export const seatPreviewQuery = (workspace: Workspace, quantity: number) =>
 /** Buys or removes seats. Added seats are invoiced now; removed ones stay paid until the billing date. */
 export const setSeats = (workspace: Workspace, quantity: number) =>
   post(`${billingPath(workspace)}/seats`, { quantity })
-
-export const planPreviewQuery = (workspace: Workspace, product: BillingProduct) =>
-  queryOptions({
-    queryKey: ["billing-plan-preview", workspace.id, product.code, product.version],
-    queryFn: () =>
-      api<ChangePreview>(
-        `${billingPath(workspace)}/plan/preview?product_code=${encodeURIComponent(product.code)}&product_version=${product.version}`,
-      ),
-    enabled: billingLive.planChange,
-  })
-
-export const changePlan = (workspace: Workspace, product: BillingProduct) =>
-  post(`${billingPath(workspace)}/plan`, { product_code: product.code, product_version: product.version })
-
-/** Cancel keeps paid features until the period ends; resume undoes it before then. */
-export const setCancelled = (workspace: Workspace, cancel: boolean) =>
-  post(`${billingPath(workspace)}/${cancel ? "cancel" : "resume"}`, {})
 
 /**
  * Top-up size rules (user decision 2026-10-18): multiples of 100 GB, at most 10,000 GB per

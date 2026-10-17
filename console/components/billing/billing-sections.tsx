@@ -3,28 +3,24 @@
 import { MinusIcon, PlusIcon } from "@phosphor-icons/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
-import { useApiQuery, type Workspace } from "@/lib/api"
+import { idempotencyKey, useApiQuery, type Workspace } from "@/lib/api"
 import {
   billingLive,
   billingProductsQuery,
   billingQuery,
   buyTopup,
   topupDefaults,
-  changePlan,
   formatMoney,
   formatPrice,
   notLiveTitle,
-  planPreviewQuery,
+  openPortal,
   seatPreviewQuery,
-  setCancelled,
   setSeats,
-  type BillingProduct,
   type BillingWorkspace,
   type ChangePreview,
 } from "@/lib/billing"
 import { formatBytes } from "@/lib/format"
 import { Row, Section } from "@/components/section"
-import { ConfirmAction } from "@/components/list-toolbar"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 
@@ -40,7 +36,7 @@ function useRefreshBilling(workspace: Workspace) {
 
 /** "Charged now $X · then $Y on Nov 18": the line every paid change shows before it is confirmed. */
 function PreviewLine({ preview, pending }: { preview?: ChangePreview; pending: boolean }) {
-  if (!billingLive.seats && !billingLive.planChange) return null
+  if (!billingLive.seats) return null
   if (pending || !preview) return <span className="text-muted-foreground">Calculating…</span>
   return (
     <span className="text-muted-foreground">
@@ -116,80 +112,36 @@ export function Seats({ workspace, billing }: { workspace: Workspace; billing: B
   )
 }
 
-/** Monthly ↔ yearly on the same plan, and cancel or resume at the end of the period. */
+/**
+ * Monthly ↔ yearly and cancelling happen in Stripe's portal, which shows the prorated charge and
+ * confirms the change; the webhook updates the plan here when the user returns.
+ */
 export function PlanActions({ workspace, billing }: { workspace: Workspace; billing: BillingWorkspace }) {
   const products = useApiQuery(billingProductsQuery(workspace))
+  const portal = useMutation({
+    mutationFn: () => openPortal(workspace, idempotencyKey()),
+    onSuccess: (url) => window.location.assign(url),
+  })
   const current = billing.product
   const other = current && products.data?.find((p) => p.interval !== current.interval && p.price_verified)
   if (!current || !billing.can_manage) return null
   return (
     <>
-      {other && <SwitchInterval workspace={workspace} product={other} />}
-      <CancelRow workspace={workspace} billing={billing} />
-    </>
-  )
-}
-
-function SwitchInterval({ workspace, product }: { workspace: Workspace; product: BillingProduct }) {
-  const [open, setOpen] = useState(false)
-  const refresh = useRefreshBilling(workspace)
-  const preview = useApiQuery({ ...planPreviewQuery(workspace, product), enabled: billingLive.planChange && open })
-  const label = product.interval === "year" ? "Switch to yearly" : "Switch to monthly"
-  return (
-    <Row label="Billing period">
-      <Button
-        variant="outline"
-        disabled={!billingLive.planChange}
-        title={billingLive.planChange ? undefined : notLiveTitle}
-        onClick={() => setOpen(true)}
-      >
-        {label} · {formatPrice(product)}/{product.interval}
-      </Button>
-      <ConfirmAction
-        open={open}
-        onOpenChange={setOpen}
-        title={`${label}?`}
-        description={<PreviewLine preview={preview.data} pending={preview.isPending} />}
-        action="Switch"
-        pending="Switching…"
-        mutation={{ mutationFn: () => changePlan(workspace, product), onSuccess: refresh }}
-      />
-    </Row>
-  )
-}
-
-function CancelRow({ workspace, billing }: { workspace: Workspace; billing: BillingWorkspace }) {
-  const [open, setOpen] = useState(false)
-  const refresh = useRefreshBilling(workspace)
-  const end = billing.period_end ? dateFormat.format(new Date(billing.period_end)) : "the end of the period"
-  const resume = useMutation({ mutationFn: () => setCancelled(workspace, false), onSuccess: refresh })
-  const title = billingLive.cancel ? undefined : notLiveTitle
-  return (
-    <Row label={billing.cancel_at_period_end ? "Cancelled" : "Cancel"}>
-      {billing.cancel_at_period_end ? (
-        <Button
-          variant="outline"
-          disabled={!billingLive.cancel || resume.isPending}
-          title={title}
-          onClick={() => resume.mutate()}
-        >
-          Keep plan
-        </Button>
-      ) : (
-        <Button variant="outline" disabled={!billingLive.cancel} title={title} onClick={() => setOpen(true)}>
-          Cancel plan
-        </Button>
+      {other && (
+        <Row label="Billing period">
+          <Button variant="outline" disabled={portal.isPending} onClick={() => portal.mutate()}>
+            {other.interval === "year" ? "Switch to yearly" : "Switch to monthly"} · {formatPrice(other)}/
+            {other.interval}
+          </Button>
+        </Row>
       )}
-      <ConfirmAction
-        open={open}
-        onOpenChange={setOpen}
-        title="Cancel plan?"
-        description={`Paid features and the larger allowance stay until ${end}, then the workspace moves to Free. No refund for the current period.`}
-        action="Cancel plan"
-        pending="Cancelling…"
-        mutation={{ mutationFn: () => setCancelled(workspace, true), onSuccess: refresh }}
-      />
-    </Row>
+      <Row label={billing.cancel_at_period_end ? "Cancelled" : "Cancel"}>
+        <Button variant="outline" disabled={portal.isPending} onClick={() => portal.mutate()}>
+          {billing.cancel_at_period_end ? "Keep plan" : "Cancel plan"}
+        </Button>
+      </Row>
+      {portal.isError && <p className="py-2 text-sm text-destructive">{portal.error.message}</p>}
+    </>
   )
 }
 
