@@ -1,6 +1,7 @@
 import {
   ChartBarIcon,
   ClockCounterClockwiseIcon,
+  CreditCardIcon,
   EyeIcon,
   FolderIcon,
   GlobeIcon,
@@ -34,6 +35,7 @@ export const sections = {
   network: { href: "/network", title: "Network", icon: ShareNetworkIcon, machineScoped: false },
   usage: { href: "/usage", title: "Usage", icon: ChartBarIcon, machineScoped: true },
   activity: { href: "/activity", title: "Activity", icon: ClockCounterClockwiseIcon, machineScoped: true },
+  billing: { href: "/billing", title: "Billing", icon: CreditCardIcon, machineScoped: false },
 } satisfies Record<string, Section>
 
 /**
@@ -44,7 +46,7 @@ export const navigationGroups: { label?: string; items: Section[] }[] = [
   { items: [machinesSection] },
   { label: "Connect", items: [sections.terminals, sections.previews, sections.tunnels, sections.files] },
   { label: "Configure", items: [sections.environment, sections.config, sections.domains, sections.network] },
-  { label: "Monitor", items: [sections.usage, sections.activity] },
+  { label: "Monitor", items: [sections.usage, sections.activity, sections.billing] },
 ]
 
 /** Machine tabs, in the sidebar's order. Each is a route under /machines/<id>, so the list can grow without crowding the page. */

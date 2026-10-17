@@ -225,22 +225,6 @@ export const usageQuery = (workspace: string, period: UsagePeriod) =>
     staleTime: 5 * minute,
   })
 
-export type BillingWorkspace = Schemas["BillingWorkspace"]
-
-/** The workspace's plan and its hosted relay + edge allowance for the current period. */
-export const billingQuery = (workspace: Workspace | undefined) =>
-  queryOptions({
-    queryKey: ["billing", workspace?.id ?? ""],
-    queryFn: () =>
-      api<BillingWorkspace>(
-        workspace?.kind === "team"
-          ? `billing/workspaces/teams/${encodeURIComponent(workspace.id)}`
-          : "billing/workspaces/personal",
-      ),
-    enabled: Boolean(workspace),
-    staleTime: minute,
-  })
-
 /** Usage from `start` until now, for a window that is not one of the card's periods. */
 export const usageSinceQuery = (workspace: string, start: string) =>
   queryOptions({

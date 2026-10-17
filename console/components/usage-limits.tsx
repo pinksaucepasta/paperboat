@@ -11,19 +11,18 @@ import {
 } from "@phosphor-icons/react"
 import { useId, useState } from "react"
 import {
-  billingQuery,
   usageSinceQuery,
   trafficBreakdown,
   useApiQuery,
   usageQuery,
   useMachines,
   useWorkspace,
-  type BillingWorkspace,
   type Machine,
   type PathMode,
   type TrafficSource,
   type Usage,
 } from "@/lib/api"
+import { billingQuery, type BillingWorkspace } from "@/lib/billing"
 import { formatBytes, formatPlatform } from "@/lib/format"
 import { filterKeys, parseQuery, platformToken, withFilter, type FilterKey } from "@/lib/machine-filter"
 import { cn } from "@/lib/utils"

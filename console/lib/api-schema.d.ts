@@ -1134,7 +1134,11 @@ export interface paths {
             };
             cookie?: never;
         };
-        get?: never;
+        /**
+         * Read exact owner-machine preview publication readiness
+         * @description Machine-only read of the canonical preview lease and strong ETag, including connecting, ready and terminal states. Send the renewable machine identity as bearer and X-Paperboat-Machine-Identity, and a fresh X-Paperboat-Machine-Proof bound to GET, this exact path, empty body and current installation. No Idempotency-Key or If-Match is required. The signed machine must own this exact preview; no user session or other machine grant substitutes. Responses are never cached.
+         */
+        get: operations["get_v1_previews_preview_id_readiness"];
         put?: never;
         /**
          * Report machine preview readiness
@@ -12632,6 +12636,39 @@ export interface operations {
             409: components["responses"]["Error"];
             412: components["responses"]["Error"];
             428: components["responses"]["Error"];
+        };
+    };
+    get_v1_previews_preview_id_readiness: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Durable host identity credential used with the signed machine proof. */
+                "X-Paperboat-Machine-Identity": components["parameters"]["MachineIdentity"];
+                /** @description Strict unpadded base64url proof over the exact request body and idempotency key. */
+                "X-Paperboat-Machine-Proof": components["parameters"]["MachineProof"];
+            };
+            path: {
+                preview_id: components["parameters"]["PreviewID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current canonical preview publication readiness and strong lease ETag. */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PreviewLeaseResponse"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            503: components["responses"]["Error"];
         };
     };
     post_v1_previews_preview_id_readiness: {
