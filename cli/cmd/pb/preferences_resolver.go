@@ -514,6 +514,6 @@ func preferenceRecoveryInvocation(root *cobra.Command, args []string) bool {
 		return false
 	}
 	// Authentication must remain available even when local preferences are broken.
-	return args[i] == "help" ||
+	return args[i] == "help" || args[i] == "login" ||
 		(args[i] == "auth" && i+1 < len(args) && args[i+1] == "login")
 }

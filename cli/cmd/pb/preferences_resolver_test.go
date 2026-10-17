@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -179,6 +181,20 @@ func TestPreferenceRootFlagsAndOperandAccounting(t *testing.T) {
 
 func TestPreparePreferencesBypassDoesNotReadInvalidPreferences(t *testing.T) {
 	root := preferenceTestRoot()
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	path, err := preferences.Path(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"version":1,"bogus":true}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, invocation := range [][]string{{"login", "--no-browser"}, {"auth", "login", "--no-browser"}} {
+		args := append([]string{"--config", configPath}, invocation...)
+		if got, _, err := preparePreferences(newRootCommand(), args, context.Background()); err != nil || !reflect.DeepEqual(got, args) {
+			t.Fatalf("sign-in recovery args=%q got=%q err=%v", args, got, err)
+		}
+	}
 	for _, args := range [][]string{{"--config", "/no/such/parent/config.json", "--no-customization", "preview", "3000"}, {"--config", "/no/such/parent/config.json", "config", "customize"}} {
 		got, ctx, err := preparePreferences(root, args, context.Background())
 		if err != nil {
