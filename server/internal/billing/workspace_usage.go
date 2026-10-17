@@ -148,7 +148,11 @@ WHERE workspace_id=$1 AND period_start=$2 AND period_end=$3`,
 		count, consumed, included = 0, 0, sql.NullInt64{}
 	}
 	if count == 0 {
-		recordedStart, recordedEnd = periodStart, periodEnd
+		recordedStart, err = usagePeriodStartTx(ctx, tx, workspaceID, periodStart, at)
+		if err != nil {
+			return 0, false, err
+		}
+		recordedEnd = periodEnd
 		if allowance != nil {
 			included = sql.NullInt64{Int64: *allowance, Valid: true}
 		}
@@ -164,6 +168,16 @@ WHERE workspace_id=$1 AND period_start=$2 AND period_end=$3`,
 		return 0, false, err
 	}
 	return granted, included.Valid && consumed+granted >= included.Int64, nil
+}
+
+func usagePeriodStartTx(ctx context.Context, tx *db.Tx, workspaceID string, start, at time.Time) (time.Time, error) {
+	var previous sql.NullTime
+	err := tx.QueryRow(ctx, `SELECT max(period_end) FROM billing_workspace_usage_periods
+WHERE workspace_id=$1 AND period_end>$2 AND period_end<=$3`, workspaceID, start, at).Scan(&previous)
+	if previous.Valid {
+		start = previous.Time
+	}
+	return start, err
 }
 
 // Annual payment does not change monthly bandwidth. Preserve the original day
