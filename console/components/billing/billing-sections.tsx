@@ -3,7 +3,7 @@
 import { MinusIcon, PlusIcon } from "@phosphor-icons/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
-import { idempotencyKey, useApiQuery, type Workspace } from "@/lib/api"
+import { ApiError, idempotencyKey, useApiQuery, type Workspace } from "@/lib/api"
 import {
   billingLive,
   billingProductsQuery,
@@ -155,10 +155,17 @@ export function TopUps({ workspace, billing }: { workspace: Workspace; billing: 
   const step = product?.unit_bytes ?? topupDefaults.unitBytes
   const max = product?.max_quantity ?? topupDefaults.maxQuantity
   const [units, setUnits] = useState(1)
+  // Same rule as plan Checkout: an unknown provider outcome keeps the key so a retry can't buy twice.
+  const [key, setKey] = useState(idempotencyKey)
   const buy = useMutation({
-    mutationFn: () => buyTopup(workspace, product!, units),
+    mutationFn: () => buyTopup(workspace, product!, units, key),
     onSuccess: (url) => window.location.assign(url),
+    onError: (error) => {
+      if (!(error instanceof ApiError && error.code === "provider_outcome_unknown")) setKey(idempotencyKey())
+    },
   })
+  // Top-ups extend a paid plan's allowance; Free upgrades first (server: 409 paid_plan_required).
+  if (!billing.product_code) return null
   const live = billingLive.topups && Boolean(product) && billing.can_manage
   const total = product?.unit_amount != null ? formatMoney(product.unit_amount * units, product.currency) : null
   return (

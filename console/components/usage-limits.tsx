@@ -22,7 +22,7 @@ import {
   type TrafficSource,
   type Usage,
 } from "@/lib/api"
-import { billingQuery, type BillingWorkspace } from "@/lib/billing"
+import { allowanceWindow, billingQuery, type BillingWorkspace } from "@/lib/billing"
 import { formatBytes, formatPlatform } from "@/lib/format"
 import { filterKeys, parseQuery, platformToken, withFilter, type FilterKey } from "@/lib/machine-filter"
 import { cn } from "@/lib/utils"
@@ -207,10 +207,11 @@ const resetFormat = new Intl.DateTimeFormat(undefined, { month: "short", day: "n
 function Allowance({ billing, workspace }: { billing: BillingWorkspace; workspace: string }) {
   const used = billing.usage_bytes
   const allowance = billing.allowance_bytes
-  const resets = billing.period_end ? `Resets ${resetFormat.format(new Date(billing.period_end))}` : null
+  const window = allowanceWindow(billing)
+  const resets = window.end ? `Resets ${resetFormat.format(new Date(window.end))}` : null
   // The period's hosted traffic by path; before a period exists, this calendar month.
   const now = new Date()
-  const start = billing.period_start ?? new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
+  const start = window.start ?? new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
   const usage = useApiQuery(usageSinceQuery(workspace, start))
   const split = usage.data && trafficBreakdown(usage.data.totals.by_path, "managed").byPath
   const hosted = split ? split.relay + split.edge : 0

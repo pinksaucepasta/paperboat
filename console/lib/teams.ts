@@ -9,14 +9,20 @@ type Schemas = components["schemas"]
  * Identity fields requested from Lane B (PLAN.md Log, 2026-10-18), optional until served. Until
  * then a member's email comes from the invitation they accepted (`memberEmails`).
  */
-export type Team = Schemas["TeamTeam"] & { display_name?: string }
 export type TeamMember = Schemas["TeamMember"] & { email?: string; display_name?: string; joined_at?: string }
-export type TeamInvitation = Schemas["TeamInvitationSummary"] & { created_by_email?: string; created_at?: string }
+export type Team = Omit<Schemas["TeamTeam"], "members"> & { display_name?: string; members: TeamMember[] }
+export type TeamInvitation = Schemas["TeamInvitationSummary"] & {
+  created_by_email?: string
+  created_at?: string
+  /** Invitation email (Lane B mail producer): unconfigured until a sender is set up. */
+  delivery_state?: "queued" | "sent" | "failed" | "unconfigured"
+  last_sent_at?: string | null
+}
 export type TeamAction = "role" | "remove" | "leave" | "transfer" | "delete" | "rename"
 export type TeamRole = "owner" | "admin" | "member"
 
 /** Team features whose server side is not deployed yet; their controls render disabled. */
-export const teamLive = { inviteRole: false, rename: false } as const
+export const teamLive = { inviteRole: false, rename: false, mail: false } as const
 
 /** Account ID → email, from members' own fields or else the invitations they accepted. */
 export function memberEmails(team: Team, invitations: TeamInvitation[] | undefined) {
@@ -49,6 +55,8 @@ export const teamInvitationsQuery = (team: string) =>
 /** Invitations sent to the signed-in user, from any team. */
 export const myInvitationsQuery = queryOptions({
   queryKey: ["my-invitations"],
+  // `direction=received` is the server default once the mail producer ships; until then the page
+  // also filters out invitations the user sent.
   queryFn: async () => (await api<{ items: TeamInvitation[] }>("team-invitations")).items,
   staleTime: minute,
 })
@@ -101,6 +109,15 @@ export function cancelInvitation(team: Team, invitation: string) {
     method: "POST",
     headers: json,
     body: JSON.stringify({ operation_id: idempotencyKey(), expected_generation: team.generation }),
+  })
+}
+
+/** Sends the email again and gives the invitation a fresh 30 days; the server allows one a minute. */
+export function resendInvitation(team: Team, invitation: string) {
+  return api<TeamInvitation>(`${teamPath(team.team_id)}/invitations/${encodeURIComponent(invitation)}/resend`, {
+    method: "POST",
+    headers: json,
+    body: JSON.stringify({ operation_id: idempotencyKey() }),
   })
 }
 

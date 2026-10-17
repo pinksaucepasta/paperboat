@@ -13,6 +13,9 @@ type PendingBillingFields = {
   /** Members plus pending invitations: every invitation holds a seat. */
   seats_used?: number
   topup_bytes_remaining?: number
+  /** The monthly bandwidth window usage_bytes/allowance_bytes count in; yearly plans renew separately. */
+  allowance_period_start?: string
+  allowance_period_end?: string
 }
 export type BillingWorkspace = components["schemas"]["BillingWorkspace"] & PendingBillingFields
 /** Top-up products add `unit_bytes` and `max_quantity` (requested from Lane B). */
@@ -59,6 +62,16 @@ export const billingQuery = (workspace: Workspace | undefined) =>
     enabled: Boolean(workspace),
     staleTime: minute,
   })
+
+/**
+ * The bandwidth window: the server's when it sends one; else the plan period for monthly plans and
+ * Free. A yearly period is not the bandwidth window, so then only its start is known (as "since").
+ */
+export function allowanceWindow(billing: BillingWorkspace): { start?: string; end?: string } {
+  if (billing.allowance_period_end) return { start: billing.allowance_period_start, end: billing.allowance_period_end }
+  if (billing.product?.interval === "year") return {}
+  return { start: billing.period_start, end: billing.period_end }
+}
 
 /** Plans this workspace can buy, with verified prices. Personal sees Pro, a team sees Team. */
 export const billingProductsQuery = (workspace: Workspace | undefined) =>
@@ -130,15 +143,19 @@ export const setSeats = (workspace: Workspace, quantity: number) =>
 export const topupDefaults = { unitBytes: 100e9, maxQuantity: 100 } as const
 
 /** Checkout for `quantity` units of the top-up product (each `unit_bytes`, priced `unit_amount`). */
-export async function buyTopup(workspace: Workspace, product: BillingProduct, quantity: number) {
+export async function buyTopup(workspace: Workspace, product: BillingProduct, quantity: number, key: string) {
   const back = `${window.location.origin}/billing`
-  const { url } = (await post(`${billingPath(workspace)}/topups`, {
-    product_code: product.code,
-    product_version: product.version,
-    quantity,
-    success_url: `${back}?checkout=done`,
-    cancel_url: back,
-  })) as { url: string }
+  const { url } = (await post(
+    `${billingPath(workspace)}/topups`,
+    {
+      product_code: product.code,
+      product_version: product.version,
+      quantity,
+      success_url: `${back}?checkout=done`,
+      cancel_url: back,
+    },
+    key,
+  )) as { url: string }
   return url
 }
 

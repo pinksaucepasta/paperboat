@@ -6,6 +6,7 @@ import { useEffect, useState } from "react"
 import { ApiError, idempotencyKey, useApiQuery, useWorkspace, type Workspace } from "@/lib/api"
 import {
   billingProductsQuery,
+  allowanceWindow,
   billingQuery,
   formatPrice,
   openPortal,
@@ -90,6 +91,8 @@ function Plan({
   // Stripe keeps retrying a failed renewal; paid features last until `paid_benefits_until`.
   const failed = ["past_due", "unpaid", "suspended"].includes(billing.state)
   const benefits = billing.paid_benefits_until
+  // Yearly plans renew once a year but their bandwidth resets monthly.
+  const resets = allowanceWindow(billing).end
   const end = billing.period_end && dateFormat.format(new Date(billing.period_end))
   const manage = billing.product_code && billing.can_manage && (
     <Button variant="outline" disabled={portal.isPending} onClick={() => portal.mutate()}>
@@ -128,7 +131,12 @@ function Plan({
         billing.state !== "free" && billing.state !== "active" && <Row label="Status">{stateLabel(billing.state)}</Row>
       )}
       {end && (
-        <Row label={billing.cancel_at_period_end ? "Ends" : billing.product_code ? "Renews" : "Resets"}>{end}</Row>
+        <Row label={billing.cancel_at_period_end ? "Ends" : billing.product_code ? "Renews" : "Bandwidth resets"}>
+          {end}
+        </Row>
+      )}
+      {resets && resets !== billing.period_end && billing.product_code && (
+        <Row label="Bandwidth resets">{dateFormat.format(new Date(resets))}</Row>
       )}
       <Row label="Hosted allowance">
         {billing.allowance_bytes === null

@@ -8,6 +8,7 @@ import { meQuery, useApiQuery, useWorkspace, workspacesQuery, type Me, type Work
 import { billingQuery, notLiveTitle } from "@/lib/billing"
 import {
   cancelInvitation,
+  resendInvitation,
   memberEmails,
   teamAction,
   teamInvitationsQuery,
@@ -369,6 +370,7 @@ function InvitationsTable({
 }) {
   const refresh = useRefreshTeam(team.team_id)
   const revoke = useMutation({ mutationFn: (id: string) => cancelInvitation(team, id), onSuccess: refresh })
+  const resend = useMutation({ mutationFn: (id: string) => resendInvitation(team, id), onSuccess: refresh })
   return (
     <table className="w-full table-fixed text-sm">
       <colgroup>
@@ -376,7 +378,7 @@ function InvitationsTable({
         <col className="w-28" />
         <col className="hidden w-48 md:table-column" />
         <col className="hidden w-32 md:table-column" />
-        <col className="w-24" />
+        <col className="w-44" />
       </colgroup>
       <thead className="border-b border-divider text-left text-xs text-muted-foreground">
         <tr className="[&>th]:h-9 [&>th]:px-3 [&>th]:font-normal">
@@ -397,6 +399,7 @@ function InvitationsTable({
             <tr key={invitation.invitation_id} className="hover:bg-surface [&>td]:h-14 [&>td]:px-3">
               <td>
                 <Person email={invitation.email} />
+                {teamLive.mail && <Delivery invitation={invitation} />}
               </td>
               <td className="text-muted-foreground">{roleLabels[invitation.role] ?? invitation.role}</td>
               <td className="hidden truncate text-muted-foreground md:table-cell">{by}</td>
@@ -404,6 +407,14 @@ function InvitationsTable({
                 <Time iso={invitation.expires_at} relative />
               </td>
               <td className="text-right">
+                <Button
+                  variant="ghost"
+                  disabled={!teamLive.mail || resend.isPending}
+                  title={teamLive.mail ? "Send the email again; the invitation gets 30 more days" : notLiveTitle}
+                  onClick={() => resend.mutate(invitation.invitation_id)}
+                >
+                  Resend
+                </Button>
                 <Button
                   variant="ghost"
                   disabled={revoke.isPending}
@@ -419,10 +430,40 @@ function InvitationsTable({
       {invitations.length === 0 && (
         <caption className="caption-bottom py-12 text-sm text-muted-foreground">No pending invitations</caption>
       )}
-      {revoke.isError && (
-        <caption className="caption-bottom py-2 text-sm text-destructive">{revoke.error.message}</caption>
+      {(revoke.error ?? resend.error) && (
+        <caption className="caption-bottom py-2 text-sm text-destructive">
+          {(revoke.error ?? resend.error)!.message}
+        </caption>
       )}
     </table>
+  )
+}
+
+const deliveryLabels = {
+  queued: "Sending email…",
+  sent: "Email sent",
+  failed: "Email failed, resend it",
+  unconfigured: "Email not set up, share the link",
+} as const
+
+/** Whether the invitation email went out, under the address (Resend via the server's outbox). */
+function Delivery({ invitation }: { invitation: TeamInvitation }) {
+  if (!invitation.delivery_state) return null
+  return (
+    <span
+      className={cn(
+        "block pl-11 text-xs",
+        invitation.delivery_state === "failed" ? "text-destructive" : "text-muted-foreground",
+      )}
+    >
+      {deliveryLabels[invitation.delivery_state]}
+      {invitation.delivery_state === "sent" && invitation.last_sent_at && (
+        <>
+          {" "}
+          <Time iso={invitation.last_sent_at} relative />
+        </>
+      )}
+    </span>
   )
 }
 
