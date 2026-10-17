@@ -8,6 +8,7 @@ import tempfile
 import time
 import unittest
 import socket
+import shutil
 import socketserver
 import threading
 from types import SimpleNamespace
@@ -241,6 +242,12 @@ class UninstallInventoryPreservation(unittest.TestCase):
 
 
 class SmokeReceipts(unittest.TestCase):
+    def write_script(self, script, content):
+        # These fixtures run the production entry point, including its source freeze.
+        for name in ('snapshot_run.py', 'stage_fixtures.py'):
+            shutil.copyfile(HERE / name, script.parent / name)
+        script.write_text(content)
+
     def test_launch_rejects_windows_target_before_credentials_or_device_access(self):
         environment = dict(os.environ)
         environment.pop("APPLE_PASS", None)
@@ -258,7 +265,7 @@ class SmokeReceipts(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
             script = root / 'smoke.sh'
-            script.write_text(prefix + r'''
+            self.write_script(script, prefix + r'''
 on() { printf 'PRIVATE_FAILURE_DETAIL\nrc=7\n'; }
 test_exec apple
 exit "$FAILED"
@@ -284,7 +291,7 @@ exit "$FAILED"
                 harness = root / "boundary.py"
                 harness.write_text(SESSION_BOUNDARY_FIXTURE)
                 script = root / "smoke.sh"
-                script.write_text(prefix + r'''
+                self.write_script(script, prefix + r'''
 HERE="$SUITE_DIR"
 PB_HP="$FIXTURE_PB"
 on() {
@@ -327,7 +334,7 @@ exit "$FAILED"
                 curl.write_text('#!/bin/sh\necho pv-owned\n')
                 curl.chmod(0o700)
                 script = root / 'smoke.sh'
-                script.write_text(prefix + '\nHERE=' + str(HERE) + r'''
+                self.write_script(script, prefix + '\nHERE=' + str(HERE) + r'''
 RUN_ID=owned
 on() {
   shift
@@ -364,7 +371,7 @@ exit "$FAILED"
             command = pathlib.Path(directory) / 'fake-pb'
             command.write_text('#!/usr/bin/env bash\necho "${@: -1}"\n[ "$FORGED" = 0 ] || echo rc=0\nexit "$COMMAND_EXIT"\n')
             command.chmod(0o700)
-            script.write_text(prefix + f'\nPB_HP={command}\n' + '''
+            self.write_script(script, prefix + f'\nPB_HP={command}\n' + '''
 on() { shift; eval "$*"; [ "$TRANSPORT_FAIL" = 0 ]; }
 test_exec hp
 exit "$FAILED"
@@ -395,7 +402,7 @@ exit "$FAILED"
                     (root / 'job.end').write_text(str(100 + duration))
                     (root / 'job.out').write_text(f'FINAL\nrc=0\nrc={exit_code}\n')
                     script = root / 'smoke.sh'
-                    script.write_text(prefix + r'''
+                    self.write_script(script, prefix + r'''
 RUN_ID=owned
 on() { shift; local command="${*//\/tmp\/owned/$JOB_DIR}"; eval "$command"; [ "$TRANSPORT_FAIL" = 0 ]; }
 collect long job FINAL 50
