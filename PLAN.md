@@ -1698,3 +1698,5 @@ file | note`. Row-level evidence goes in CHECKLIST.md.
 2026-10-18 | Lane C real Checkout evidence | Scripted live console/card4242: personal pro-month and Team month/year paid; paperboat-billing-month-20261018 renews2026-11-18 USD15/month, paperboat-billing-year-20261018 renews2027-10-18 USD150/year, both100GB/1seat. F13-04/F13-06 evidence recorded; fixtures retained, no longer unpaid. C Team consumer5ef32e3 awaits B identity deployment.
 
 2026-10-18 | Lane B priority status | Nine sol6.1-low feature producers active independently; preview/server bisect and remaining server-edge owners added, A retains device checks. Checkout browser proofs recorded F13-04/F13-06; scoped portal PG/real-provider green/full gate running, two scope configs staged with protected backup; each ready producer pushes/deploys independently.
+
+2026-10-18 | Lane B completed billing producer subchecks | F13-04B/G/C tick original-billing-day budget, seven-day grace and exact C Checkout proofs with named PG/browser checks; broad F13-04 remains open for remaining flows.9621c7a/e980edc gates passed; preview single-check bisect owns current rollout window, scoped-portal gate still running.
