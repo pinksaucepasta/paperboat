@@ -133,6 +133,17 @@ WHERE w.id=$1 FOR UPDATE OF w`, workspaceID, at).Scan(&team, &start, &end, &cata
 	if count > 1 {
 		return 0, false, ErrBillingPolicyUnconfigured
 	}
+	// A subscription can start inside an already opened Free month. Close its
+	// predecessor at that boundary so delayed reports retain their old allowance
+	// and new traffic receives the provider's complete paid period.
+	if count == 1 && catalog.Valid && recordedStart.Before(periodStart) && recordedEnd.After(periodStart) {
+		if _, err = tx.Exec(ctx, `UPDATE billing_workspace_usage_periods SET period_end=$4
+WHERE workspace_id=$1 AND period_start=$2 AND period_end=$3`,
+			workspaceID, recordedStart, recordedEnd, periodStart); err != nil {
+			return 0, false, err
+		}
+		count, consumed, included = 0, 0, sql.NullInt64{}
+	}
 	if count == 0 {
 		recordedStart, recordedEnd = periodStart, periodEnd
 		if allowance != nil {
