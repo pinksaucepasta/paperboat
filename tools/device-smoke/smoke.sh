@@ -17,6 +17,7 @@
 #   --long-seconds N     duration of long exec (default 420)
 #   --ssh-seconds N      duration of held SSH (default 200)
 #   --skip LIST          comma list of test ids to skip (e.g. preview,transfer)
+#   --only-check ID      run one exact feature check, plus version/doctor baselines
 #   --update DIR         after the baseline, update each target with the build in DIR
 #                        (pb-linux-amd64, pb-darwin-arm64, pb-windows-amd64.exe)
 #                        while a terminal and a long exec are running, then verify
@@ -45,6 +46,7 @@ TARGETS="hp,apple"
 LONG_EXEC=420
 LONG_SSH=200
 SKIP=""
+ONLY_CHECK=""
 UPDATE_DIR=""
 UPDATE_VERSION=""
 WINDOWS_INSTALL_JSON=""
@@ -57,6 +59,7 @@ while [ $# -gt 0 ]; do
     --long-seconds) LONG_EXEC=$2; shift 2 ;;
     --ssh-seconds) LONG_SSH=$2; shift 2 ;;
     --skip) SKIP=$2; shift 2 ;;
+    --only-check) ONLY_CHECK=$2; shift 2 ;;
     --update) UPDATE_DIR=$2; shift 2 ;;
     --update-version) UPDATE_VERSION=$2; shift 2 ;;
     -h|--help) sed -n '2,32p' "$0"; exit 0 ;;
@@ -134,7 +137,12 @@ record_command_failure() {
   record "$id" FAIL "$seconds" "command failed; private diagnostics: $diagnostic"
 }
 
-skipped() { [[ ",$SKIP," == *",$1,"* ]]; }
+skipped() {
+  if [ -n "$ONLY_CHECK" ] && [ "$1" != "$ONLY_CHECK" ] && [ "$1" != "${ONLY_CHECK%%:*}" ]; then
+    return 0
+  fi
+  [[ ",$SKIP," == *",$1,"* ]]
+}
 now() { date +%s; }
 # Only the final receipt belongs to the remote wrapper; command stdout may
 # contain a misleading rc=0. The SSH transport must also have succeeded.
@@ -850,6 +858,13 @@ if [ -n "$UPDATE_DIR" ]; then
 fi
 
 # ---------------------------------------------------------------- report
+if [ -n "$ONLY_CHECK" ]; then
+  found=0
+  for row in "${ROWS[@]}"; do [ "${row%%|*}" != "$ONLY_CHECK" ] || found=1; done
+  if [ "$found" = 0 ]; then
+    record "$ONLY_CHECK" FAIL 0 "requested check did not run; a retired check needs its original runner"
+  fi
+fi
 for source in "${TLIST[@]}"; do on "$source" "rm -rf /tmp/$RUN_ID" >/dev/null 2>&1; done
 {
   printf '{"run":"%s","at":"%s","expect_version":"%s","update_version":"%s","results":[' "$RUN_ID" "$STAMP" "$EXPECT_VERSION" "$UPDATE_VERSION"
@@ -865,4 +880,8 @@ for source in "${TLIST[@]}"; do on "$source" "rm -rf /tmp/$RUN_ID" >/dev/null 2>
 echo
 pass=$(printf '%s\n' "${ROWS[@]}" | grep -c '|PASS|'); fail=$(printf '%s\n' "${ROWS[@]}" | grep -c '|FAIL|')
 echo "PASS $pass  FAIL $fail   results: $RESULTS_DIR/$STAMP.json"
+if [ "$FAILED" != 0 ]; then
+  python3 "$HERE/last_green.py" "$RESULTS_DIR/$STAMP.json" || \
+    echo "Last-green report unavailable; smoke failures still block the gate." >&2
+fi
 exit $FAILED

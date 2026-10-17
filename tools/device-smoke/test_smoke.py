@@ -244,9 +244,43 @@ class UninstallInventoryPreservation(unittest.TestCase):
 class SmokeReceipts(unittest.TestCase):
     def write_script(self, script, content):
         # These fixtures run the production entry point, including its source freeze.
-        for name in ('snapshot_run.py', 'stage_fixtures.py'):
+        for name in ('snapshot_run.py', 'stage_fixtures.py', 'last_green.py'):
             shutil.copyfile(HERE / name, script.parent / name)
         script.write_text(content)
+
+    def test_single_check_selection_keeps_failure_and_reports_previous_green(self):
+        source = (HERE / 'smoke.sh').read_text()
+        prefix, remainder = source.split('# ---------------------------------------------------------------- run', 1)
+        report = remainder.split('# ---------------------------------------------------------------- report', 1)[1]
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            results = root / 'results'
+            results.mkdir()
+            (results / '20200101T000000Z.json').write_text(json.dumps({
+                'expect_version': 'dev-7a5b2e0', 'results': [
+                    {'id': 'preview-manage:hp-hp', 'status': 'PASS'}]}))
+            script = root / 'smoke.sh'
+            self.write_script(script, prefix + r'''
+on() { return 0; }
+TLIST=(hp)
+for check in exec-main:hp-hp preview-manage:hp-hp preview-manage:apple-apple; do
+  skipped "${check%%:*}" && continue
+  skipped "$check" && continue
+  record "$check" FAIL 0 "controlled failure"
+done
+''' + report)
+            result = subprocess.run(['bash', str(script), '--expect-version', 'fixture',
+                                     '--targets', 'hp', '--only-check', 'preview-manage:hp-hp'],
+                                    capture_output=True, text=True, timeout=10)
+            self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+            self.assertIn('REGRESSION preview-manage:hp-hp', result.stdout)
+            self.assertNotIn('exec-main:hp-hp', result.stdout)
+            self.assertNotIn('preview-manage:apple-apple', result.stdout)
+            self.assertIn('Build commit unavailable', result.stdout)
+            current = sorted(results.glob('*.json'))[-1]
+            self.assertEqual([{'id': 'preview-manage:hp-hp', 'status': 'FAIL',
+                               'seconds': '0', 'detail': 'controlled failure'}],
+                             json.loads(current.read_text())['results'])
 
     def test_launch_rejects_windows_target_before_credentials_or_device_access(self):
         environment = dict(os.environ)
