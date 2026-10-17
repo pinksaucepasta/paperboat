@@ -44,6 +44,27 @@ export function createTeam(teamId: string) {
   })
 }
 
+/**
+ * Creating a team is paying first (NOTES.md "Teams"): the server returns Checkout for the seats,
+ * and the team exists once payment succeeds. Used when `billingLive.paidTeamCreate` is on.
+ */
+export async function createPaidTeam(teamId: string, seats: number, interval: "month" | "year") {
+  const back = `${window.location.origin}/team`
+  const { url } = await api<{ url: string }>("teams", {
+    method: "POST",
+    headers: json,
+    body: JSON.stringify({
+      operation_id: idempotencyKey(),
+      team_id: teamId,
+      seats,
+      interval,
+      success_url: `${back}?created=${encodeURIComponent(teamId)}`,
+      cancel_url: back,
+    }),
+  })
+  return url
+}
+
 /** Invites by email; the person can accept after signing up with that address. */
 export function inviteMember(team: Team, email: string) {
   return api<TeamInvitation>(`${teamPath(team.team_id)}/invitations`, {

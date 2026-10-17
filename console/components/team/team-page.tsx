@@ -1,12 +1,14 @@
 "use client"
 
-import { DotsThreeIcon } from "@phosphor-icons/react"
+import { DotsThreeIcon, MinusIcon, PlusIcon } from "@phosphor-icons/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
-import { meQuery, useApiQuery, useWorkspace, workspacesQuery } from "@/lib/api"
+import Link from "next/link"
+import { ApiError, meQuery, useApiQuery, useWorkspace, workspacesQuery } from "@/lib/api"
 import {
   answerInvitation,
   cancelInvitation,
+  createPaidTeam,
   createTeam,
   inviteMember,
   myInvitationsQuery,
@@ -18,7 +20,9 @@ import {
   type TeamInvitation,
   type TeamMember,
 } from "@/lib/teams"
+import { billingLive, notLiveTitle } from "@/lib/billing"
 import { setWorkspace } from "@/lib/workspace"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Row, Section } from "@/components/section"
 import { ConfirmAction } from "@/components/list-toolbar"
 import { Button } from "@/components/ui/button"
@@ -40,9 +44,13 @@ function Personal() {
   const queryClient = useQueryClient()
   const invitations = useApiQuery(myInvitationsQuery)
   const [name, setName] = useState("")
+  const [seats, setSeats] = useState(1)
+  const [interval, setPeriod] = useState<"month" | "year">("month")
+  const paid = billingLive.paidTeamCreate
   const create = useMutation({
-    mutationFn: () => createTeam(name.trim()),
-    onSuccess: async (team) => {
+    mutationFn: async () => {
+      if (paid) return window.location.assign(await createPaidTeam(name.trim(), seats, interval))
+      const team = await createTeam(name.trim())
       await queryClient.invalidateQueries({ queryKey: workspacesQuery.queryKey })
       setWorkspace(team.team_id)
     },
@@ -108,8 +116,41 @@ function Personal() {
               spellCheck={false}
             />
             <Button type="submit" disabled={!valid || create.isPending}>
-              Create
+              {paid ? "Continue to payment" : "Create"}
             </Button>
+          </div>
+          <div className="flex flex-wrap items-center gap-3 text-sm" title={paid ? undefined : notLiveTitle}>
+            <span className="text-muted-foreground">Seats</span>
+            <Button
+              variant="outline"
+              size="icon-sm"
+              aria-label="Fewer seats"
+              disabled={!paid || seats <= 1}
+              onClick={() => setSeats(seats - 1)}
+            >
+              <MinusIcon />
+            </Button>
+            <span className="min-w-6 text-center tabular-nums">{seats}</span>
+            <Button
+              variant="outline"
+              size="icon-sm"
+              aria-label="More seats"
+              disabled={!paid}
+              onClick={() => setSeats(seats + 1)}
+            >
+              <PlusIcon />
+            </Button>
+            <ToggleGroup
+              value={[interval]}
+              onValueChange={(next) => next[0] && setPeriod(next[0] as "month" | "year")}
+              variant="outline"
+              spacing={0}
+              disabled={!paid}
+            >
+              <ToggleGroupItem value="month">Monthly</ToggleGroupItem>
+              <ToggleGroupItem value="year">Yearly</ToggleGroupItem>
+            </ToggleGroup>
+            <span className="text-muted-foreground">You take one seat.</span>
           </div>
           <span className={name && !valid ? "text-sm text-destructive" : "text-sm text-muted-foreground"}>
             Lowercase letters, numbers and dashes. This is the team&apos;s ID and can&apos;t change.
@@ -276,7 +317,16 @@ function Invite({ team, pending }: { team: Team; pending: TeamInvitation[] }) {
           Invite
         </Button>
       </form>
-      {invite.isError && <p className="py-2 text-sm text-destructive">{invite.error.message}</p>}
+      {invite.isError && (
+        <p className="flex items-center justify-between gap-3 py-2 text-sm text-destructive">
+          {invite.error.message}
+          {invite.error instanceof ApiError && invite.error.code === "seat_required" && (
+            <Button variant="outline" render={<Link href="/billing" />}>
+              Add a seat
+            </Button>
+          )}
+        </p>
+      )}
       {pending.map((invitation) => (
         <Row key={invitation.invitation_id} label={invitation.email ?? invitation.account_id}>
           <span className="flex items-center gap-3">

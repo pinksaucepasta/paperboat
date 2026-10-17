@@ -1,12 +1,54 @@
 "use client"
 
 import { queryOptions } from "@tanstack/react-query"
-import { api, type Workspace } from "@/lib/api"
+import { api, idempotencyKey, type Workspace } from "@/lib/api"
 import type { components } from "@/lib/api-schema"
 
-export type BillingWorkspace = components["schemas"]["BillingWorkspace"]
+/**
+ * Fields requested from Lane B (PLAN.md Log, 2026-10-18) and not served yet; each stays optional
+ * and becomes part of the schema type when the server publishes it.
+ */
+type PendingBillingFields = {
+  seats_bought?: number
+  /** Members plus pending invitations: every invitation holds a seat. */
+  seats_used?: number
+  topup_bytes_remaining?: number
+}
+export type BillingWorkspace = components["schemas"]["BillingWorkspace"] & PendingBillingFields
 export type BillingProduct = components["schemas"]["WorkspaceBillingProduct"]
 export type BillingInterval = "month" | "year"
+
+/**
+ * Billing features whose endpoints the console may call. An unknown /v1 path answers 401, which
+ * signs the user out (NOTES.md), so the UI for a feature is built but disabled until its endpoint
+ * is deployed. Flip one when Lane B logs the deploy.
+ */
+export const billingLive = {
+  seats: false,
+  planChange: false,
+  cancel: false,
+  topups: false,
+  invoices: false,
+  paidTeamCreate: false,
+} as const
+export const notLiveTitle = "Not available yet"
+
+/** What a change costs now and from the next invoice; Stripe prorates to the fixed billing date. */
+export type ChangePreview = {
+  amount_due_now: number
+  currency: string
+  next_invoice_amount: number
+  next_invoice_at: string
+}
+
+export type Invoice = {
+  id: string
+  created_at: string
+  amount: number
+  currency: string
+  status: string
+  hosted_url: string
+}
 
 const minute = 60_000
 
@@ -67,9 +109,68 @@ export async function openPortal(workspace: Workspace, key: string) {
 /** "$8", "$80", "$15.50": whole amounts without cents. */
 export function formatPrice(product: BillingProduct) {
   if (product.unit_amount === null) return "Price unavailable"
+  return formatMoney(product.unit_amount, product.currency)
+}
+
+const post = (path: string, body: object, key = idempotencyKey()) =>
+  api<unknown>(path, {
+    method: "POST",
+    headers: { "content-type": "application/json", "idempotency-key": key },
+    body: JSON.stringify(body),
+  })
+
+export const seatPreviewQuery = (workspace: Workspace, quantity: number) =>
+  queryOptions({
+    queryKey: ["billing-seats-preview", workspace.id, quantity],
+    queryFn: () => api<ChangePreview>(`${billingPath(workspace)}/seats/preview?quantity=${quantity}`),
+    enabled: billingLive.seats,
+  })
+
+/** Buys or removes seats. Added seats are invoiced now; removed ones stay paid until the billing date. */
+export const setSeats = (workspace: Workspace, quantity: number) =>
+  post(`${billingPath(workspace)}/seats`, { quantity })
+
+export const planPreviewQuery = (workspace: Workspace, product: BillingProduct) =>
+  queryOptions({
+    queryKey: ["billing-plan-preview", workspace.id, product.code, product.version],
+    queryFn: () =>
+      api<ChangePreview>(
+        `${billingPath(workspace)}/plan/preview?product_code=${encodeURIComponent(product.code)}&product_version=${product.version}`,
+      ),
+    enabled: billingLive.planChange,
+  })
+
+export const changePlan = (workspace: Workspace, product: BillingProduct) =>
+  post(`${billingPath(workspace)}/plan`, { product_code: product.code, product_version: product.version })
+
+/** Cancel keeps paid features until the period ends; resume undoes it before then. */
+export const setCancelled = (workspace: Workspace, cancel: boolean) =>
+  post(`${billingPath(workspace)}/${cancel ? "cancel" : "resume"}`, {})
+
+export async function buyTopup(workspace: Workspace, product: BillingProduct) {
+  const back = `${window.location.origin}/billing`
+  const { url } = (await post(`${billingPath(workspace)}/topups`, {
+    product_code: product.code,
+    product_version: product.version,
+    success_url: `${back}?checkout=done`,
+    cancel_url: back,
+  })) as { url: string }
+  return url
+}
+
+export const invoicesQuery = (workspace: Workspace) =>
+  queryOptions({
+    queryKey: ["billing-invoices", workspace.id],
+    queryFn: async () => (await api<{ items: Invoice[] }>(`${billingPath(workspace)}/invoices?limit=24`)).items,
+    enabled: billingLive.invoices,
+    staleTime: 5 * minute,
+  })
+
+/** "$8", "$15.50" from minor units. */
+export function formatMoney(amount: number, currency: string) {
   return new Intl.NumberFormat(undefined, {
     style: "currency",
-    currency: product.currency.toUpperCase(),
-    minimumFractionDigits: product.unit_amount % 100 ? 2 : 0,
-  }).format(product.unit_amount / 100)
+    currency: currency.toUpperCase(),
+    minimumFractionDigits: amount % 100 ? 2 : 0,
+  }).format(amount / 100)
 }

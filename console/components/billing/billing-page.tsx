@@ -15,6 +15,7 @@ import {
   type BillingWorkspace,
 } from "@/lib/billing"
 import { formatBytes } from "@/lib/format"
+import { Invoices, PlanActions, Seats, TopUps } from "@/components/billing/billing-sections"
 import { Row, Section } from "@/components/section"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -37,6 +38,9 @@ export function BillingPage() {
     <div className="flex flex-col gap-10">
       <Plan workspace={workspace} billing={billing.data} confirming={confirming} />
       {!subscribed && !confirming && <Plans workspace={workspace} billing={billing.data} />}
+      {subscribed && workspace.kind === "team" && <Seats workspace={workspace} billing={billing.data} />}
+      <TopUps workspace={workspace} billing={billing.data} />
+      {subscribed && <Invoices workspace={workspace} />}
     </div>
   )
 }
@@ -104,7 +108,8 @@ function Plan({
         ) : billing.product ? (
           `${planName(billing.product)} · ${formatPrice(billing.product)}/${billing.product.interval}`
         ) : (
-          "Free"
+          // A plan granted outside the catalog (test data) has a code but no price.
+          (billing.product_code ?? "Free")
         )}
       </Row>
       {failed ? (
@@ -126,16 +131,12 @@ function Plan({
       {end && (
         <Row label={billing.cancel_at_period_end ? "Ends" : billing.product_code ? "Renews" : "Resets"}>{end}</Row>
       )}
-      {workspace.kind === "team" && billing.product_code && (
-        <Row label="Seats">
-          {billing.members} used of {billing.paid_seats}
-        </Row>
-      )}
       <Row label="Hosted allowance">
         {billing.allowance_bytes === null
           ? `${formatBytes(billing.usage_bytes)} used`
           : `${formatBytes(billing.usage_bytes)} of ${formatBytes(billing.allowance_bytes)} used`}
       </Row>
+      <PlanActions workspace={workspace} billing={billing} />
       {portal.isError && <p className="py-2 text-sm text-destructive">{portal.error.message}</p>}
     </Section>
   )
