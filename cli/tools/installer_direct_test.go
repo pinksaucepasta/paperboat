@@ -14,7 +14,7 @@ import (
 )
 
 func TestMacOSInstallerRunsOnlyVerifiedDirectProduct(t *testing.T) {
-	for _, scenario := range []string{"valid", "wrong-hash", "wrong-length", "wrong-url"} {
+	for _, scenario := range []string{"valid", "wrong-hash", "wrong-length", "wrong-url", "install-failure", "reset-failure"} {
 		t.Run(scenario, func(t *testing.T) {
 			root := t.TempDir()
 			product := filepath.Join(root, "product")
@@ -23,7 +23,14 @@ func TestMacOSInstallerRunsOnlyVerifiedDirectProduct(t *testing.T) {
 set -eu
 printf '%s\n' "$1" >> "$CALLS"
 case "$1" in
+reset)
+  printf '{"ok":false,"error":{"message":"private fixture detail"}}\n'
+  exit 19 ;;
 install)
+  if [ "$SCENARIO" = install-failure ]; then
+    printf '{"ok":false,"error":{"message":"private fixture detail"}}\n'
+    exit 19
+  fi
   cp "$0" "$CANONICAL"
   chmod 700 "$CANONICAL"
   printf '{"ok":true,"data":{"executable":"%s"}}\n' "$CANONICAL" ;;
@@ -62,9 +69,13 @@ esac
 			writeInstallerFixture(t, filepath.Join(root, "curl"), "#!/bin/sh\nwhile [ \"$#\" -gt 0 ]; do if [ \"$1\" = -o ]; then cp \"$PRODUCT\" \"$2\"; exit; fi; shift; done\nexit 1\n")
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			command := exec.CommandContext(ctx, "sh", installer)
+			args := []string{installer}
+			if scenario == "reset-failure" {
+				args = append(args, "--enrollment-token", "fixture-token")
+			}
+			command := exec.CommandContext(ctx, "sh", args...)
 			command.Env = append(os.Environ(), "PATH="+root+":"+os.Getenv("PATH"),
-				"TMPDIR="+root, "PRODUCT="+product, "CALLS="+calls, "CANONICAL="+canonical,
+				"TMPDIR="+root, "SCENARIO="+scenario, "PRODUCT="+product, "CALLS="+calls, "CANONICAL="+canonical,
 				"PAPERBOAT_INSTALL_DIR=", "PAPERBOAT_ENROLLMENT_TOKEN=")
 			output, err := command.CombinedOutput()
 			if scenario == "valid" {
@@ -74,6 +85,22 @@ esac
 				got, err := os.ReadFile(calls)
 				if err != nil || string(got) != "install\n--version\n" {
 					t.Fatalf("supplied install then canonical executable: %q, %v", got, err)
+				}
+			} else if scenario == "install-failure" || scenario == "reset-failure" {
+				step := strings.TrimSuffix(scenario, "-failure")
+				exit, ok := err.(*exec.ExitError)
+				if !ok || exit.ExitCode() != 19 {
+					t.Fatalf("%s failure status = %v, output=%s", step, err, output)
+				}
+				if !strings.Contains(string(output), "pb "+step+" failed") || !strings.Contains(string(output), "rerun this installer") {
+					t.Fatalf("%s failed without step and recovery: %q", step, output)
+				}
+				if strings.Contains(string(output), "private fixture detail") || strings.Contains(string(output), "fixture-token") {
+					t.Fatal("installer exposed captured details or enrollment token")
+				}
+				got, readErr := os.ReadFile(calls)
+				if readErr != nil || string(got) != step+"\n" {
+					t.Fatalf("installer continued after %s failure: %q, %v", step, got, readErr)
 				}
 			} else if err == nil {
 				t.Fatal("unverified product was accepted")

@@ -137,7 +137,11 @@ if [ "$pair" = true ]; then
   unset PAPERBOAT_ENROLLMENT_TOKEN || true
   host=$(hostname)
   [ -n "$host" ] || { echo "pb installer: could not resolve this machine hostname" >&2; exit 1; }
-  "$installer_pb" reset --confirmation 'RESET PAPERBOAT' --hostname "$host" --enrollment-token-file "$token_file" --json > "$temporary/reset.json"
+  "$installer_pb" reset --confirmation 'RESET PAPERBOAT' --hostname "$host" --enrollment-token-file "$token_file" --json > "$temporary/reset.json" || {
+    status=$?
+    echo "pb installer: pb reset failed; rerun this installer to retry machine enrollment" >&2
+    exit "$status"
+  }
   if [ "$os" = darwin ] && [ -x /usr/bin/plutil ]; then
     resume=$(/usr/bin/plutil -extract data.resume raw -o - "$temporary/reset.json")
     resume_executable=$(/usr/bin/plutil -extract data.executable raw -o - "$temporary/reset.json")
@@ -181,7 +185,15 @@ if [ "$resume" = true ]; then
   fi
 else
   install_result="$temporary/install.json"
-  if [ "$os" = linux ]; then "$installer_pb" install --install-dir "$install_dir" --json > "$install_result"; else "$installer_pb" install --json > "$install_result"; fi
+  if [ "$os" = linux ]; then
+    "$installer_pb" install --install-dir "$install_dir" --json > "$install_result"
+  else
+    "$installer_pb" install --json > "$install_result"
+  fi || {
+    status=$?
+    echo "pb installer: pb install failed; rerun this installer and approve administrator access when prompted" >&2
+    exit "$status"
+  }
   if [ "$os" = darwin ] && [ -x /usr/bin/plutil ]; then
     target=$(/usr/bin/plutil -extract data.executable raw -o - "$install_result")
   else
