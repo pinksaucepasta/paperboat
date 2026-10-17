@@ -1,127 +1,198 @@
 "use client"
 
-import { DotsThreeIcon, MinusIcon, PlusIcon } from "@phosphor-icons/react"
+import { EnvelopeSimpleIcon, MinusIcon, PlusIcon, UsersThreeIcon } from "@phosphor-icons/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
-import Link from "next/link"
-import { ApiError, meQuery, useApiQuery, useWorkspace, workspacesQuery } from "@/lib/api"
-import {
-  answerInvitation,
-  cancelInvitation,
-  createPaidTeam,
-  createTeam,
-  inviteMember,
-  myInvitationsQuery,
-  teamAction,
-  teamIdPattern,
-  teamInvitationsQuery,
-  teamQuery,
-  type Team,
-  type TeamInvitation,
-  type TeamMember,
-} from "@/lib/teams"
+import { useApiQuery, useWorkspace, workspacesQuery } from "@/lib/api"
 import { billingLive, notLiveTitle } from "@/lib/billing"
+import { answerInvitation, createPaidTeam, createTeam, myInvitationsQuery, teamIdPattern } from "@/lib/teams"
 import { setWorkspace } from "@/lib/workspace"
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import { Row, Section } from "@/components/section"
-import { ConfirmAction } from "@/components/list-toolbar"
+import { TeamManage } from "@/components/team/team-members"
+import { Time } from "@/components/time"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 
-const dateFormat = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" })
-const roles = { owner: "Owner", admin: "Admin", member: "Member" } as Record<string, string>
+const roleLabels: Record<string, string> = { owner: "Owner", admin: "Admin", member: "Member" }
 
 export function TeamPage() {
   const workspace = useWorkspace()
   if (!workspace) return <Skeleton className="h-40 w-full" />
-  return workspace.kind === "team" ? <TeamManage teamId={workspace.id} /> : <Personal />
+  return workspace.kind === "team" ? <TeamManage workspace={workspace} /> : <Teams />
 }
 
-/** In Personal: invitations waiting for you, and creating a team. */
-function Personal() {
-  const queryClient = useQueryClient()
+/** In Personal: the teams you belong to, invitations waiting for you, and creating a team. */
+function Teams() {
+  const workspaces = useApiQuery(workspacesQuery)
   const invitations = useApiQuery(myInvitationsQuery)
-  const [name, setName] = useState("")
+  const [creating, setCreating] = useState(false)
+  const teams = workspaces.data?.filter((workspace) => workspace.kind === "team") ?? []
+  const pending = invitations.data?.filter((invitation) => invitation.state === "pending") ?? []
+
+  return (
+    <div className="flex flex-col gap-10">
+      <header className="flex items-center gap-4">
+        <h1 className="flex-1 font-heading text-2xl font-semibold tracking-tight">Teams</h1>
+        <Button size="lg" onClick={() => setCreating(true)}>
+          Create team
+        </Button>
+      </header>
+
+      {pending.length > 0 && (
+        <section className="flex flex-col gap-3">
+          <h2 className="text-sm font-medium">Invitations</h2>
+          {pending.map((invitation) => (
+            <InvitationCard
+              key={invitation.invitation_id}
+              id={invitation.invitation_id}
+              team={invitation.team_id}
+              role={invitation.role}
+              expires={invitation.expires_at}
+            />
+          ))}
+        </section>
+      )}
+
+      <section className="flex flex-col gap-3">
+        <h2 className="text-sm font-medium">Your teams</h2>
+        {workspaces.isPending ? (
+          <Skeleton className="h-28 w-full" />
+        ) : teams.length === 0 ? (
+          <div className="flex flex-col items-center gap-3 surface rounded-lg px-6 py-12 text-center">
+            <UsersThreeIcon className="size-8 text-muted-foreground" />
+            <p className="font-medium">Work on machines together</p>
+            <p className="max-w-sm text-sm text-muted-foreground">
+              Share machines, ENV and config with your team, with roles and seats billed together.
+            </p>
+            <Button size="lg" onClick={() => setCreating(true)}>
+              Create team
+            </Button>
+          </div>
+        ) : (
+          <div className="flex flex-col divide-y divide-divider border-y border-divider">
+            {teams.map((team) => (
+              <button
+                key={team.id}
+                type="button"
+                onClick={() => setWorkspace(team.id)}
+                className="flex h-16 items-center gap-3 px-3 text-left text-sm hover:bg-surface"
+              >
+                <Avatar className="size-9 rounded-md">
+                  <AvatarFallback className="rounded-md bg-primary/12 font-semibold text-primary">
+                    {team.name.slice(0, 1).toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span className="truncate font-medium">{team.name}</span>
+                  <span className="text-xs text-muted-foreground">{roleLabels[team.role]}</span>
+                </span>
+                <span className="text-muted-foreground">Open</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <CreateTeamDialog open={creating} onOpenChange={setCreating} />
+    </div>
+  )
+}
+
+function InvitationCard({ id, team, role, expires }: { id: string; team: string; role: string; expires: string }) {
+  const queryClient = useQueryClient()
+  const answer = useMutation({
+    mutationFn: (reply: "accept" | "decline") => answerInvitation(id, reply),
+    onSuccess: async (_, reply) => {
+      await queryClient.invalidateQueries({ queryKey: myInvitationsQuery.queryKey })
+      await queryClient.invalidateQueries({ queryKey: workspacesQuery.queryKey })
+      if (reply === "accept") setWorkspace(team)
+    },
+  })
+  return (
+    <div className="flex flex-wrap items-center gap-4 surface rounded-lg p-4">
+      <EnvelopeSimpleIcon className="size-5 text-primary" />
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-sm">
+        <span>
+          You&apos;re invited to join <span className="font-medium">{team}</span> as{" "}
+          {roleLabels[role]?.toLowerCase() ?? role}
+        </span>
+        <span className="text-muted-foreground">
+          Expires <Time iso={expires} relative />
+        </span>
+        {answer.isError && <span className="text-destructive">{answer.error.message}</span>}
+      </div>
+      <Button variant="outline" size="lg" disabled={answer.isPending} onClick={() => answer.mutate("decline")}>
+        Decline
+      </Button>
+      <Button size="lg" disabled={answer.isPending} onClick={() => answer.mutate("accept")}>
+        Join team
+      </Button>
+    </div>
+  )
+}
+
+function CreateTeamDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="gap-4 sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Create team</DialogTitle>
+        </DialogHeader>
+        {open && <CreateTeamForm />}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/** Creating a team is paying first (NOTES.md "Teams"); until that endpoint is live it is free. */
+function CreateTeamForm() {
+  const queryClient = useQueryClient()
+  const [id, setId] = useState("")
   const [seats, setSeats] = useState(1)
-  const [interval, setPeriod] = useState<"month" | "year">("month")
+  const [period, setPeriod] = useState<"month" | "year">("month")
   const paid = billingLive.paidTeamCreate
+  const valid = teamIdPattern.test(id)
   const create = useMutation({
     mutationFn: async () => {
-      if (paid) return window.location.assign(await createPaidTeam(name.trim(), seats, interval))
-      const team = await createTeam(name.trim())
+      if (paid) return window.location.assign(await createPaidTeam(id, seats, period))
+      const team = await createTeam(id)
       await queryClient.invalidateQueries({ queryKey: workspacesQuery.queryKey })
       setWorkspace(team.team_id)
     },
   })
-  const answer = useMutation({
-    mutationFn: ({ id, reply }: { id: string; reply: "accept" | "decline" }) => answerInvitation(id, reply),
-    onSuccess: () =>
-      Promise.all([
-        queryClient.invalidateQueries({ queryKey: myInvitationsQuery.queryKey }),
-        queryClient.invalidateQueries({ queryKey: workspacesQuery.queryKey }),
-      ]),
-  })
-  const pending = invitations.data?.filter((invitation) => invitation.state === "pending") ?? []
-  const valid = teamIdPattern.test(name.trim())
   return (
-    <div className="flex flex-col gap-10">
-      {pending.length > 0 && (
-        <Section title="Invitations">
-          {pending.map((invitation) => (
-            <div
-              key={invitation.invitation_id}
-              className="flex min-h-12 items-center justify-between gap-6 border-b border-divider py-2 text-sm"
-            >
-              <span>
-                <span className="font-medium">{invitation.team_id}</span>
-                <span className="text-muted-foreground"> · {roles[invitation.role] ?? invitation.role}</span>
-              </span>
-              <span className="flex gap-2">
-                <Button
-                  variant="outline"
-                  disabled={answer.isPending}
-                  onClick={() => answer.mutate({ id: invitation.invitation_id, reply: "decline" })}
-                >
-                  Decline
-                </Button>
-                <Button
-                  disabled={answer.isPending}
-                  onClick={() => answer.mutate({ id: invitation.invitation_id, reply: "accept" })}
-                >
-                  Join
-                </Button>
-              </span>
-            </div>
-          ))}
-          {answer.isError && <p className="py-2 text-sm text-destructive">{answer.error.message}</p>}
-        </Section>
-      )}
-      <Section title="Create a team">
-        <form
-          className="flex flex-col gap-2 py-3"
-          onSubmit={(event) => {
-            event.preventDefault()
-            if (valid) create.mutate()
-          }}
-        >
-          <div className="flex gap-2">
-            <Input
-              aria-label="Team name"
-              placeholder="acme"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              autoComplete="off"
-              spellCheck={false}
-            />
-            <Button type="submit" disabled={!valid || create.isPending}>
-              {paid ? "Continue to payment" : "Create"}
-            </Button>
-          </div>
-          <div className="flex flex-wrap items-center gap-3 text-sm" title={paid ? undefined : notLiveTitle}>
-            <span className="text-muted-foreground">Seats</span>
+    <form
+      className="flex flex-col gap-4"
+      onSubmit={(event) => {
+        event.preventDefault()
+        if (valid) create.mutate()
+      }}
+    >
+      <Field className="gap-1.5">
+        <FieldLabel htmlFor="team-id">Team ID</FieldLabel>
+        <Input
+          id="team-id"
+          autoFocus
+          placeholder="acme"
+          value={id}
+          onChange={(event) => setId(event.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-"))}
+          autoComplete="off"
+          spellCheck={false}
+        />
+        <span className="text-xs text-muted-foreground">
+          Lowercase letters, numbers and dashes. It can&apos;t change later.
+        </span>
+      </Field>
+      <Field className="gap-1.5" title={paid ? undefined : notLiveTitle}>
+        <FieldLabel>Seats</FieldLabel>
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="flex items-center gap-2">
             <Button
+              type="button"
               variant="outline"
               size="icon-sm"
               aria-label="Fewer seats"
@@ -130,8 +201,9 @@ function Personal() {
             >
               <MinusIcon />
             </Button>
-            <span className="min-w-6 text-center tabular-nums">{seats}</span>
+            <span className="w-6 text-center tabular-nums">{seats}</span>
             <Button
+              type="button"
               variant="outline"
               size="icon-sm"
               aria-label="More seats"
@@ -140,249 +212,30 @@ function Personal() {
             >
               <PlusIcon />
             </Button>
-            <ToggleGroup
-              value={[interval]}
-              onValueChange={(next) => next[0] && setPeriod(next[0] as "month" | "year")}
-              variant="outline"
-              spacing={0}
-              disabled={!paid}
-            >
-              <ToggleGroupItem value="month">Monthly</ToggleGroupItem>
-              <ToggleGroupItem value="year">Yearly</ToggleGroupItem>
-            </ToggleGroup>
-            <span className="text-muted-foreground">You take one seat.</span>
-          </div>
-          <span className={name && !valid ? "text-sm text-destructive" : "text-sm text-muted-foreground"}>
-            Lowercase letters, numbers and dashes. This is the team&apos;s ID and can&apos;t change.
           </span>
-          {create.isError && <span className="text-sm text-destructive">{create.error.message}</span>}
-        </form>
-      </Section>
-    </div>
-  )
-}
-
-function TeamManage({ teamId }: { teamId: string }) {
-  const team = useApiQuery(teamQuery(teamId))
-  const invitations = useApiQuery(teamInvitationsQuery(teamId))
-  const me = useApiQuery(meQuery)
-  if (team.isPending || me.isPending) return <Skeleton className="h-40 w-full" />
-  if (team.isError) return <p className="text-sm text-muted-foreground">{team.error.message}</p>
-  if (!me.data) return null
-  const self = team.data.members.find((member) => member.account_id === me.data.id)
-  const role = self?.role ?? "member"
-  const admin = role === "owner" || role === "admin"
-  const pending = invitations.data?.filter((invitation) => invitation.state === "pending") ?? []
-  const members = team.data.members.filter((member) => member.active)
-  return (
-    <div className="flex flex-col gap-10">
-      <Section title="Members" action={<span className="text-xs text-muted-foreground">{members.length}</span>}>
-        {members.map((member) => (
-          <MemberRow
-            key={member.account_id}
-            team={team.data}
-            member={member}
-            you={member.account_id === me.data.id}
-            actorRole={role}
-          />
-        ))}
-      </Section>
-      {admin && <Invite team={team.data} pending={pending} />}
-      <DangerZone team={team.data} owner={role === "owner"} />
-    </div>
-  )
-}
-
-/** Refetches the team and its invitations after a change (every change bumps its generation). */
-function useRefreshTeam(team: Team) {
-  const queryClient = useQueryClient()
-  return () =>
-    Promise.all([
-      queryClient.invalidateQueries({ queryKey: teamQuery(team.team_id).queryKey }),
-      queryClient.invalidateQueries({ queryKey: teamInvitationsQuery(team.team_id).queryKey }),
-    ])
-}
-
-function MemberRow({
-  team,
-  member,
-  you,
-  actorRole,
-}: {
-  team: Team
-  member: TeamMember
-  you: boolean
-  actorRole: string
-}) {
-  const [confirm, setConfirm] = useState<"remove" | "transfer" | null>(null)
-  const refresh = useRefreshTeam(team)
-  const role = useMutation({
-    mutationFn: () =>
-      teamAction(team, "role", { account_id: member.account_id, role: member.role === "admin" ? "member" : "admin" }),
-    onSuccess: refresh,
-  })
-  const remove = {
-    mutationFn: () => teamAction(team, "remove", { account_id: member.account_id }),
-    onSuccess: refresh,
-  }
-  const transfer = {
-    mutationFn: () => teamAction(team, "transfer", { account_id: member.account_id }),
-    onSuccess: refresh,
-  }
-  const owner = actorRole === "owner"
-  const canRemove = !you && member.role !== "owner" && (owner || (actorRole === "admin" && member.role === "member"))
-  const canRole = owner && !you && member.role !== "owner"
-  return (
-    <div className="flex min-h-12 items-center justify-between gap-6 border-b border-divider py-2 text-sm">
-      <span className="min-w-0 truncate">
-        {member.account_id}
-        {you && <span className="text-muted-foreground"> (you)</span>}
-      </span>
-      <span className="flex items-center gap-3">
-        <span className="text-muted-foreground">{roles[member.role]}</span>
-        {(canRemove || canRole) && (
-          <DropdownMenu>
-            <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Member actions" />}>
-              <DotsThreeIcon className="size-4" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              {canRole && (
-                <DropdownMenuItem onClick={() => role.mutate()}>
-                  {member.role === "admin" ? "Make member" : "Make admin"}
-                </DropdownMenuItem>
-              )}
-              {canRole && (
-                <DropdownMenuItem onClick={() => setConfirm("transfer")}>Transfer ownership</DropdownMenuItem>
-              )}
-              {canRemove && (
-                <DropdownMenuItem variant="destructive" onClick={() => setConfirm("remove")}>
-                  Remove from team
-                </DropdownMenuItem>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
-      </span>
-      <ConfirmAction
-        open={confirm === "remove"}
-        onOpenChange={(open) => !open && setConfirm(null)}
-        title="Remove from team?"
-        description="They lose access to the team's machines, ENV and config right away. Their own machines stay theirs."
-        action="Remove"
-        pending="Removing…"
-        mutation={remove}
-      />
-      <ConfirmAction
-        open={confirm === "transfer"}
-        onOpenChange={(open) => !open && setConfirm(null)}
-        title="Transfer ownership?"
-        description="They become the owner, with billing and delete rights. You become a member."
-        action="Transfer"
-        pending="Transferring…"
-        mutation={transfer}
-      />
-      {role.isError && <span className="text-destructive">{role.error.message}</span>}
-    </div>
-  )
-}
-
-function Invite({ team, pending }: { team: Team; pending: TeamInvitation[] }) {
-  const [email, setEmail] = useState("")
-  const refresh = useRefreshTeam(team)
-  const invite = useMutation({
-    mutationFn: () => inviteMember(team, email.trim()),
-    onSuccess: async () => {
-      setEmail("")
-      await refresh()
-    },
-  })
-  const cancel = useMutation({ mutationFn: (id: string) => cancelInvitation(team, id), onSuccess: refresh })
-  return (
-    <Section title="Invitations">
-      <form
-        className="flex gap-2 border-b border-divider py-3"
-        onSubmit={(event) => {
-          event.preventDefault()
-          if (email.includes("@")) invite.mutate()
-        }}
-      >
-        <Input
-          type="email"
-          aria-label="Email"
-          placeholder="name@company.com"
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-        />
-        <Button type="submit" disabled={!email.includes("@") || invite.isPending}>
-          Invite
-        </Button>
-      </form>
-      {invite.isError && (
-        <p className="flex items-center justify-between gap-3 py-2 text-sm text-destructive">
-          {invite.error.message}
-          {invite.error instanceof ApiError && invite.error.code === "seat_required" && (
-            <Button variant="outline" render={<Link href="/billing" />}>
-              Add a seat
-            </Button>
-          )}
-        </p>
-      )}
-      {pending.map((invitation) => (
-        <Row key={invitation.invitation_id} label={invitation.email ?? invitation.account_id}>
-          <span className="flex items-center gap-3">
-            <span className="text-muted-foreground">Expires {dateFormat.format(new Date(invitation.expires_at))}</span>
-            <Button
-              variant="outline"
-              disabled={cancel.isPending}
-              onClick={() => cancel.mutate(invitation.invitation_id)}
-            >
-              Cancel
-            </Button>
-          </span>
-        </Row>
-      ))}
-      {cancel.isError && <p className="py-2 text-sm text-destructive">{cancel.error.message}</p>}
-    </Section>
-  )
-}
-
-/** Leaving (members and admins) and deleting (owner only, after billing is cancelled). */
-function DangerZone({ team, owner }: { team: Team; owner: boolean }) {
-  const queryClient = useQueryClient()
-  const [open, setOpen] = useState(false)
-  const done = async () => {
-    setWorkspace("personal")
-    await queryClient.invalidateQueries({ queryKey: workspacesQuery.queryKey })
-  }
-  const mutation = owner
-    ? { mutationFn: () => teamAction(team, "delete", { confirmation: team.team_id }), onSuccess: done }
-    : { mutationFn: () => teamAction(team, "leave"), onSuccess: done }
-  return (
-    <Section title="Danger zone">
-      <div className="flex min-h-12 items-center justify-between gap-6 border-b border-divider py-2 text-sm">
-        <span className="text-muted-foreground">
-          {owner
-            ? "Delete the team. Cancel its subscription in Billing first."
-            : "Leave the team and lose access to its machines."}
+          <ToggleGroup
+            value={[period]}
+            onValueChange={(next) => next[0] && setPeriod(next[0] as "month" | "year")}
+            variant="outline"
+            spacing={0}
+            disabled={!paid}
+          >
+            <ToggleGroupItem value="month">Monthly</ToggleGroupItem>
+            <ToggleGroupItem value="year">Yearly</ToggleGroupItem>
+          </ToggleGroup>
+        </div>
+        <span className="text-xs text-muted-foreground">
+          {paid
+            ? "You take one seat. Add more any time; new seats are charged for the rest of the period."
+            : `${notLiveTitle}: teams are created free for now.`}
         </span>
-        <Button variant="destructive" onClick={() => setOpen(true)}>
-          {owner ? "Delete team" : "Leave team"}
+      </Field>
+      {create.isError && <p className="text-sm text-destructive">{create.error.message}</p>}
+      <DialogFooter>
+        <Button type="submit" size="lg" disabled={!valid || create.isPending}>
+          {create.isPending ? "Creating…" : paid ? "Continue to payment" : "Create team"}
         </Button>
-      </div>
-      <ConfirmAction
-        open={open}
-        onOpenChange={setOpen}
-        title={owner ? "Delete this team?" : "Leave this team?"}
-        description={
-          owner
-            ? "Members lose access, team ENV and config are deleted, and team machines go back to their owners."
-            : "You need a new invitation to come back."
-        }
-        action={owner ? "Delete" : "Leave"}
-        pending={owner ? "Deleting…" : "Leaving…"}
-        mutation={mutation}
-        confirmName={owner ? team.team_id : undefined}
-      />
-    </Section>
+      </DialogFooter>
+    </form>
   )
 }

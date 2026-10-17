@@ -5,10 +5,27 @@ import { api, idempotencyKey } from "@/lib/api"
 import type { components } from "@/lib/api-schema"
 
 type Schemas = components["schemas"]
-export type Team = Schemas["TeamTeam"]
-export type TeamMember = Schemas["TeamMember"]
-export type TeamInvitation = Schemas["TeamInvitationSummary"]
-export type TeamAction = "role" | "remove" | "leave" | "transfer" | "delete"
+/**
+ * Identity fields requested from Lane B (PLAN.md Log, 2026-10-18), optional until served. Until
+ * then a member's email comes from the invitation they accepted (`memberEmails`).
+ */
+export type Team = Schemas["TeamTeam"] & { display_name?: string }
+export type TeamMember = Schemas["TeamMember"] & { email?: string; display_name?: string; joined_at?: string }
+export type TeamInvitation = Schemas["TeamInvitationSummary"] & { created_by_email?: string; created_at?: string }
+export type TeamAction = "role" | "remove" | "leave" | "transfer" | "delete" | "rename"
+export type TeamRole = "owner" | "admin" | "member"
+
+/** Team features whose server side is not deployed yet; their controls render disabled. */
+export const teamLive = { inviteRole: false, rename: false } as const
+
+/** Account ID → email, from members' own fields or else the invitations they accepted. */
+export function memberEmails(team: Team, invitations: TeamInvitation[] | undefined) {
+  const emails = new Map<string, string>()
+  for (const invitation of invitations ?? [])
+    if (invitation.state === "accepted" && invitation.email) emails.set(invitation.account_id, invitation.email)
+  for (const member of team.members) if (member.email) emails.set(member.account_id, member.email)
+  return emails
+}
 
 const minute = 60_000
 const json = { "content-type": "application/json" }
@@ -66,11 +83,16 @@ export async function createPaidTeam(teamId: string, seats: number, interval: "m
 }
 
 /** Invites by email; the person can accept after signing up with that address. */
-export function inviteMember(team: Team, email: string) {
+export function inviteMember(team: Team, email: string, role: TeamRole = "member") {
   return api<TeamInvitation>(`${teamPath(team.team_id)}/invitations`, {
     method: "POST",
     headers: json,
-    body: JSON.stringify({ operation_id: idempotencyKey(), expected_generation: team.generation, email }),
+    body: JSON.stringify({
+      operation_id: idempotencyKey(),
+      expected_generation: team.generation,
+      email,
+      ...(teamLive.inviteRole && role !== "member" ? { role } : {}),
+    }),
   })
 }
 
@@ -94,7 +116,7 @@ export function answerInvitation(invitation: string, answer: "accept" | "decline
 export function teamAction(
   team: Team,
   action: TeamAction,
-  fields: { account_id?: string; role?: string; confirmation?: string } = {},
+  fields: { account_id?: string; role?: string; confirmation?: string; name?: string } = {},
 ) {
   return api<Team>(`${teamPath(team.team_id)}/actions`, {
     method: "POST",
