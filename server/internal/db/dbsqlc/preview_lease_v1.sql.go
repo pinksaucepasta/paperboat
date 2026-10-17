@@ -666,7 +666,11 @@ const stopPreviewLeaseV1 = `-- name: StopPreviewLeaseV1 :exec
 UPDATE preview_leases
 SET allocation_state = 'released',
     edge_state = 'released',
-    terminal_state = 'stopped',
+    terminal_state = CASE
+      WHEN LEAST(lease_deadline, COALESCE(user_deadline, lease_deadline)) <= $1
+      THEN 'expired'
+      ELSE 'stopped'
+    END,
     stopped_at = $1
 WHERE id = $2
   AND account_id = $3

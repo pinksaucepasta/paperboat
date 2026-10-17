@@ -156,6 +156,33 @@ VALUES ($1, $2, $3, 'active')`, accountID, "workos_preview_"+suffix, "preview-"+
 		t.Fatalf("terminal stop idempotency = %#v, %v", replayed, err)
 	}
 
+	// Runtime cleanup can arrive at the deadline before the expiry worker.
+	// That ordering must retain expiry as the terminal outcome.
+	dueInput := createInput
+	dueInput.OperationID, dueInput.LeaseID = "op_stop_due_"+suffix, "prv_stop_due_"+suffix
+	dueInput.AuditEventID = "aud_stop_due_create_" + suffix
+	dueInput.Endpoint = "https://stop-due-" + suffix + ".preview.example.test"
+	dueInput.IdempotencyKey = "create-stop-due:" + suffix
+	dueInput.RequestHash = sha256Bytes(dueInput.IdempotencyKey)
+	dueInput.LeaseDeadline = now.Add(5 * time.Second)
+	due, err := store.CreatePreviewLeaseV1(ctx, dueInput)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dueStopped, err := store.StopPreviewLeaseV1(ctx, StopPreviewLeaseV1Input{
+		OperationID: "op_stop_due_cleanup_" + suffix, AuditEventID: "aud_stop_due_cleanup_" + suffix,
+		AccountID: accountID, ActorID: accountID, ActorType: "user", PreviewID: due.Lease.ID,
+		OwnerMachineID: due.Lease.OwnerMachineID, OwnerSessionID: due.Lease.OwnerSessionID,
+		ExpectedGeneration: 1, RequestHash: sha256Bytes("stop-due:" + suffix), IdempotencyKey: "stop-due:" + suffix,
+		CorrelationID: "cor_stop_due_" + suffix, RequestID: "req_stop_due_" + suffix, Now: dueInput.LeaseDeadline,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dueStopped.Lease.TerminalState != "expired" || dueStopped.Lease.Generation != 2 {
+		t.Fatalf("cleanup at deadline lost expiry: state=%s generation=%d", dueStopped.Lease.TerminalState, dueStopped.Lease.Generation)
+	}
+
 	expireHash := sha256Bytes("preview-expire:" + suffix)
 	expired, err := store.CreatePreviewLeaseV1(ctx, CreatePreviewLeaseV1Input{
 		OperationID: "op_expire_" + suffix, LeaseID: "prv_expire_" + suffix, AuditEventID: "aud_expire_" + suffix,

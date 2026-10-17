@@ -150,7 +150,11 @@ WHERE id = sqlc.arg(id)
 UPDATE preview_leases
 SET allocation_state = 'released',
     edge_state = 'released',
-    terminal_state = 'stopped',
+    terminal_state = CASE
+      WHEN LEAST(lease_deadline, COALESCE(user_deadline, lease_deadline)) <= sqlc.arg(now)
+      THEN 'expired'
+      ELSE 'stopped'
+    END,
     stopped_at = sqlc.arg(now)
 WHERE id = sqlc.arg(id)
   AND account_id = sqlc.arg(account_id)
