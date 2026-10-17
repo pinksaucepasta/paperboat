@@ -212,7 +212,7 @@ func (s *Service) GetUpdateObservation(ctx context.Context, userID, userMachineI
 	return mapUpdateObservation(status), nil
 }
 
-// FleetUpdateSummary pages Personal machines and counts the complete filtered
+// FleetUpdateSummary pages the selected workspace and counts the complete filtered
 // inventory in one snapshot. Missing observations are explicitly not_reporting.
 func (s *Service) FleetUpdateSummary(ctx context.Context, userID string, options InventoryOptions) (FleetUpdateSummary, error) {
 	result := FleetUpdateSummary{Items: []FleetUpdateMachine{}, Counts: map[string]uint64{}}
@@ -230,10 +230,19 @@ func (s *Service) FleetUpdateSummary(ctx context.Context, userID string, options
 	}
 	defer tx.Rollback()
 	const predicate = ` FROM user_machines m LEFT JOIN user_machine_update_observations o ON o.user_machine_id=m.id AND o.environment_id=m.environment_id
- WHERE m.user_id=$1 AND m.owner_team_id IS NULL AND m.deleted_at IS NULL
+ WHERE m.deleted_at IS NULL AND (
+ ($4::text IS NULL AND m.user_id=$1 AND m.owner_team_id IS NULL)
+ OR ($4::text IS NOT NULL AND EXISTS(
+  SELECT 1 FROM teams t JOIN team_members member USING(team_id)
+  WHERE t.team_id=$4 AND t.deleted_at IS NULL AND NOT t.suspended
+   AND member.account_id=$1 AND member.active)
+  AND ((m.owner_team_id=$4 AND machine_management_allowed($1,m.id))
+   OR EXISTS(SELECT 1 FROM unnest(ARRAY['terminal','exec','managed_ssh','files','preview_manage','tunnel_manage']) capability
+    WHERE team_machine_capability_allowed($1,$4,m.id,capability)))))
  AND ($2='' OR position(lower($2) in lower(m.id||' '||m.alias||' '||m.description))>0)
  AND ($3='' OR coalesce(o.state,'not_reporting')=$3)`
-	args := []any{userID, options.Q, options.State}
+	_, teamID := workspaceTeamArgument(ctx)
+	args := []any{userID, options.Q, options.State, teamID}
 	counts, err := tx.QueryContext(ctx, `SELECT coalesce(o.state,'not_reporting'),count(*)`+predicate+` GROUP BY coalesce(o.state,'not_reporting')`, args...)
 	if err != nil {
 		return result, err
@@ -253,7 +262,7 @@ func (s *Service) FleetUpdateSummary(ctx context.Context, userID string, options
 		return result, err
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT m.id,m.alias,m.description,m.online,coalesce(o.state,'not_reporting'),CASE WHEN o.user_machine_id IS NULL THEN NULL ELSE jsonb_build_object(
- 'schema',o.schema,'state',o.state,'current_version',o.current_version,'target_version',coalesce(o.target_version,''),'channel',o.channel,'operation_id',o.operation_id,'installation_generation',o.installation_generation,'worker_generation',o.worker_generation,'os_boot_id',o.os_boot_id,'rollback_count',o.rollback_count,'error_code',coalesce(o.error_code,''),'observed_at',o.observed_at) END`+predicate+` ORDER BY lower(m.alias),m.id LIMIT $4 OFFSET $5`, append(args, options.Limit, options.Offset)...)
+ 'schema',o.schema,'state',o.state,'current_version',o.current_version,'target_version',coalesce(o.target_version,''),'channel',o.channel,'operation_id',o.operation_id,'installation_generation',o.installation_generation,'worker_generation',o.worker_generation,'os_boot_id',o.os_boot_id,'rollback_count',o.rollback_count,'error_code',coalesce(o.error_code,''),'observed_at',o.observed_at) END`+predicate+` ORDER BY lower(m.alias),m.id LIMIT $5 OFFSET $6`, append(args, options.Limit, options.Offset)...)
 	if err != nil {
 		return result, err
 	}

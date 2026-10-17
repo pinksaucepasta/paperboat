@@ -25798,7 +25798,7 @@
     },
     "/v1/machines/update-summary": {
       "get": {
-        "summary": "Read paginated Personal fleet update status and complete filtered counts",
+        "summary": "Read paginated workspace fleet update status and complete filtered counts",
         "security": [
           {
             "cookieSession": []

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat-server/internal/workspace"
 )
 
 func TestFleetUpdateInventoryPaginationOnPostgres(t *testing.T) {
@@ -108,6 +110,27 @@ func TestFleetUpdateInventoryPaginationOnPostgres(t *testing.T) {
 	literal, err := service.FleetUpdateSummary(ctx, owner, InventoryOptions{Limit: 1, Q: "%"})
 	if err != nil || literal.Pagination.Total != 0 || len(literal.Items) != 0 {
 		t.Fatalf("q interpreted as wildcard: %+v %v", literal, err)
+	}
+	teamContext := workspace.WithContext(ctx, workspace.Scope{ID: team, TeamID: team})
+	teamPage, err := service.FleetUpdateSummary(teamContext, owner, InventoryOptions{Limit: 1})
+	if err != nil || teamPage.Pagination.Total != 1 || len(teamPage.Items) != 1 || teamPage.Items[0].MachineID != prefix+"076" || teamPage.Counts["not_reporting"] != 1 {
+		t.Fatalf("team workspace fleet: %+v %v", teamPage, err)
+	}
+	exec(`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'member',true)`, team, foreign)
+	ungranted, err := service.FleetUpdateSummary(teamContext, foreign, InventoryOptions{Limit: 1})
+	if err != nil || ungranted.Pagination.Total != 0 || len(ungranted.Items) != 0 {
+		t.Fatalf("membership alone leaked fleet: %+v %v", ungranted, err)
+	}
+	exec(`UPDATE paperboat.teams SET suspended=true,suspended_at=now(),suspended_by=$2 WHERE team_id=$1`, team, owner)
+	suspended, err := service.FleetUpdateSummary(teamContext, owner, InventoryOptions{Limit: 1})
+	if err != nil || suspended.Pagination.Total != 0 || len(suspended.Items) != 0 {
+		t.Fatalf("suspended team leaked fleet: %+v %v", suspended, err)
+	}
+	exec(`UPDATE paperboat.teams SET suspended=false,suspended_at=NULL,suspended_by=NULL WHERE team_id=$1`, team)
+	exec(`UPDATE paperboat.team_members SET active=false WHERE team_id=$1 AND account_id=$2`, team, owner)
+	revoked, err := service.FleetUpdateSummary(teamContext, owner, InventoryOptions{Limit: 1})
+	if err != nil || revoked.Pagination.Total != 0 || len(revoked.Items) != 0 || len(revoked.Counts) != 0 {
+		t.Fatalf("revoked team workspace leaked fleet: %+v %v", revoked, err)
 	}
 	closed := true
 	for _, options := range []InventoryOptions{{Limit: 0}, {Limit: 201}, {Limit: 1, Offset: -1}, {Limit: 1, Offset: 2147483648}, {Limit: 1, Q: strings.Repeat("x", 161)}, {Limit: 1, Q: "\x00"}, {Limit: 1, State: "offline"}, {Limit: 1, Owner: "mine"}, {Limit: 1, Closed: &closed}} {

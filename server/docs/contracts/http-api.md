@@ -279,7 +279,7 @@ assignment, approval, and runtime API bodies remain JSON.
   status and reported by stable code in the accepted response's `auxiliary_rejections` list; it
   never makes a live runtime appear offline.
 - `GET /v1/machines/{machine_id}/update-status` returns the latest durable update observation.
-- `GET /v1/machines/update-summary` returns a Personal fleet page and complete filtered state counts. It accepts `limit` (1–200, default50), `offset`, literal case-insensitive `q`, and update `state` (including `not_reporting`); `pagination` supplies `total` and nullable `next_offset`. Team-owned and foreign machines are excluded. Machines that have
+- `GET /v1/machines/update-summary` returns a fleet page for the selected `workspace` (Personal by default) and complete filtered state counts. It accepts `limit` (1–200, default50), `offset`, literal case-insensitive `q`, and update `state` (including `not_reporting`); `pagination` supplies `total` and nullable `next_offset`. Team selection uses current membership and the same machine management/capability visibility as machine inventory; Personal excludes team-owned and foreign machines. Machines that have
   not reported update state are explicitly counted as `not_reporting`; they are never folded into
   healthy or idle results.
 - `GET|POST /v1/machines/{machine_id}/maintenance-approvals` lists or requests an explicit,
