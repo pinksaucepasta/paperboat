@@ -442,7 +442,7 @@ func TestUpdateBundleExportPreservesOutputCreatedDuringDownload(t *testing.T) {
 	base := client.Transport
 	client.Transport = roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		response, err := base.RoundTrip(request)
-		if err == nil && request.URL.Hostname() == "github.com" {
+		if err == nil && strings.Contains(request.URL.Path, "/releases/download/") {
 			if writeErr := os.WriteFile(destination, existing, 0600); writeErr != nil {
 				t.Error(writeErr)
 			}
