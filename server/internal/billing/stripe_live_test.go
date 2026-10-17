@@ -57,8 +57,26 @@ func TestStripeTestModeCheckoutAndSubscriptionContract(t *testing.T) {
 	if err != nil || sub.CustomerID != customer.ID || sub.PriceID != price || sub.Quantity != 1 || sub.Status != "active" || !sub.PeriodEnd.After(sub.PeriodStart) {
 		t.Fatal("actual subscription identity/period decoding failed:", err)
 	}
+	var before struct {
+		LatestInvoice string `json:"latest_invoice"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/v1/subscriptions/"+url.PathEscape(sub.ID), "", nil, &before); err != nil {
+		t.Fatal("read initial invoice:", err)
+	}
 	updated, err := c.UpdateSubscriptionSeats(ctx, sub.ID, sub.ItemID, 2, operation+"-seats")
 	if err != nil || updated.Quantity != 2 || updated.PeriodStart != sub.PeriodStart || updated.PeriodEnd != sub.PeriodEnd {
 		t.Fatal("actual seat update changed its billing period or lost quantity:", err)
+	}
+	var after struct {
+		LatestInvoice struct {
+			ID, Status string
+			AmountPaid int64 `json:"amount_paid"`
+		} `json:"latest_invoice"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/v1/subscriptions/"+url.PathEscape(sub.ID)+"?expand%5B%5D=latest_invoice", "", nil, &after); err != nil {
+		t.Fatal("read seat-change invoice:", err)
+	}
+	if after.LatestInvoice.ID == before.LatestInvoice || after.LatestInvoice.Status != "paid" || after.LatestInvoice.AmountPaid <= 0 {
+		t.Fatal("seat increase did not immediately invoice and collect its proration")
 	}
 }

@@ -178,7 +178,10 @@ func (c HTTPStripeClient) GetSubscription(ctx context.Context, id string) (Strip
 }
 
 func (c HTTPStripeClient) UpdateSubscriptionSeats(ctx context.Context, subscriptionID, itemID string, quantity int, key string) (StripeSubscription, error) {
-	v := url.Values{"items[0][id]": {itemID}, "items[0][quantity]": {strconv.Itoa(quantity)}}
+	v := url.Values{
+		"items[0][id]": {itemID}, "items[0][quantity]": {strconv.Itoa(quantity)},
+		"proration_behavior": {"always_invoice"},
+	}
 	var out stripeSubscriptionResponse
 	if err := c.do(ctx, http.MethodPost, "/v1/subscriptions/"+url.PathEscape(subscriptionID), key, v, &out); err != nil {
 		return StripeSubscription{}, err

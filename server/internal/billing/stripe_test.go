@@ -65,7 +65,7 @@ func TestHTTPStripeClientRequestsPreserveWorkspaceCustomerAndQuantity(t *testing
 	if err != nil || sub.Quantity != 4 || sub.CheckoutOperation != "checkout-op" || sub.PeriodStart.Unix() != 1700000000 || sub.PeriodEnd.Unix() != 1702592000 {
 		t.Fatalf("subscription=%+v err=%v", sub, err)
 	}
-	if requests[0].Get("metadata[workspace_id]") != "team_1" || requests[1].Get("managed_payments[enabled]") != "false" || requests[1].Get("customer") != "cus_team" || requests[1].Get("line_items[0][quantity]") != "4" || requests[1].Get("metadata[paperboat_checkout_operation]") != "checkout-op" || requests[1].Get("subscription_data[metadata][paperboat_checkout_operation]") != "checkout-op" || requests[2].Get("items[0][id]") != "si_team" || requests[2].Get("items[0][quantity]") != "4" {
+	if requests[0].Get("metadata[workspace_id]") != "team_1" || requests[1].Get("managed_payments[enabled]") != "false" || requests[1].Get("customer") != "cus_team" || requests[1].Get("line_items[0][quantity]") != "4" || requests[1].Get("metadata[paperboat_checkout_operation]") != "checkout-op" || requests[1].Get("subscription_data[metadata][paperboat_checkout_operation]") != "checkout-op" || requests[2].Get("proration_behavior") != "always_invoice" || requests[2].Get("items[0][id]") != "si_team" || requests[2].Get("items[0][quantity]") != "4" {
 		t.Fatalf("forms=%#v", requests)
 	}
 }
