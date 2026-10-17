@@ -72,6 +72,8 @@ works on Windows-only failures until after launch.
 | Machines | unlimited | unlimited | unlimited |
 | Features | everything | everything | everything + collaboration |
 
+- Failed renewal keeps paid benefits for **7 days**, then suspends them until payment recovers (user decision 2026-10-18).
+- Paid bandwidth resets monthly on the workspace’s **original paid billing day** (UTC clock; clamp short months without shifting later dates). Switching monthly/yearly prices preserves the reset anchor and allowance already spent (user decision 2026-10-18).
 - Direct P2P traffic is always free and never metered.
 - **Workspaces share nothing.** A personal workspace's plan never affects a team workspace and
   vice versa. A team seat gives no personal-workspace benefit.
@@ -1673,3 +1675,7 @@ file | note`. Row-level evidence goes in CHECKLIST.md.
 2026-10-18 | Lane B F13 expiry window boundary | Rows ticked:none; same-month expiry created a Free window over historical paid usage, rejecting delayed reports (control prior-month PASS/current-month RED0.34s). New windows start after the latest closed period; owner GREEN0.33s/full billing PG, history0.93s/Free pairing0.08s and vet/race PASS; gate/deploy follows. Annual19983d5 is pushed/deployed2026.10.18.5 after gate PASS,11/11 health200/config unchanged; real Stripe webhook resend acknowledged0 pending.
 
 2026-10-18 | Lane B billing policy inputs and rollout | Rows ticked:none; F13-03/04[!] need user choices for failed-renewal grace duration and monthly reset date (original paid billing day or UTC calendar month); price changes must preserve the allowance already spent. Stripe test catalogue/credentials/webhook and recurring/paid-seat provider checks are ready; C checkout/card proof and A trusted relay counters/shared reset smoke remain requested. 4166281 gate/push/deploy2026.10.18.6 PASS,11/11 health200/config preserved; final global-node readiness PASS0.02s (lifetime-server18expiry-final.log); device/frontend qualification waits for A/C earlier feature work.
+
+2026-10-18 | Lane B billing policy decisions (user) | F13-03/04 unblocked: failed-renewal grace is7 days; monthly bandwidth uses the original paid billing day, retained across monthly/yearly price changes without another allowance. Implementation and boundary qualification continue; no policy inputs outstanding. Tracker-only update: make gate PASS.
+
+2026-10-18 | Lane B F13 price-switch boundary reproduced | Existing PostgreSQL allowance owner RED0.39s: moving the provider period during monthly-to-yearly change grants100 instead of the89 remaining and moves the reset date. Durable workspace anchor plus accounting across partial provider periods is required; portal plan changes remain disabled until complete boundary qualification. No partial accounting repair deployed.
