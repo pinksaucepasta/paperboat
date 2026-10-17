@@ -72,13 +72,13 @@ func (s *WorkspaceService) workspaceBandwidthTx(ctx context.Context, tx *db.Tx, 
 	if tx == nil || workspaceID == "" || bytes < 0 {
 		return 0, false, ErrBillingPolicyUnconfigured
 	}
-	var team, catalog sql.NullString
+	var team, catalog, interval sql.NullString
 	var start, end sql.NullTime
-	if err := tx.QueryRow(ctx, `SELECT w.team_id,w.period_start,w.period_end,p.catalog_ref
+	if err := tx.QueryRow(ctx, `SELECT w.team_id,w.period_start,w.period_end,p.catalog_ref,p.verified_interval
 FROM billing_workspaces w LEFT JOIN billing_products p
  ON p.code=w.product_code AND p.provider='stripe'
  AND w.period_start<=$2 AND w.period_end>$2
-WHERE w.id=$1 FOR UPDATE OF w`, workspaceID, at).Scan(&team, &start, &end, &catalog); err != nil {
+WHERE w.id=$1 FOR UPDATE OF w`, workspaceID, at).Scan(&team, &start, &end, &catalog, &interval); err != nil {
 		return 0, false, err
 	}
 	policy, err := operatorPolicyTx(ctx, tx)
@@ -109,6 +109,9 @@ WHERE w.id=$1 FOR UPDATE OF w`, workspaceID, at).Scan(&team, &start, &end, &cata
 	periodEnd := periodStart.AddDate(0, 1, 0)
 	if start.Valid && end.Valid && !at.Before(start.Time) && at.Before(end.Time) {
 		periodStart, periodEnd = start.Time, end.Time
+		if interval.String == "year" {
+			periodStart, periodEnd = subscriptionUsageMonth(periodStart, periodEnd, at)
+		}
 	}
 	var recordedStart, recordedEnd time.Time
 	var included sql.NullInt64
@@ -161,6 +164,30 @@ WHERE workspace_id=$1 AND period_start=$2 AND period_end=$3`,
 		return 0, false, err
 	}
 	return granted, included.Valid && consumed+granted >= included.Int64, nil
+}
+
+// Annual payment does not change monthly bandwidth. Preserve the original day
+// and clock, clamping short months without letting that clamp move later anchors.
+func subscriptionUsageMonth(start, end, at time.Time) (time.Time, time.Time) {
+	start, end, at = start.UTC(), end.UTC(), at.UTC()
+	months := (at.Year()-start.Year())*12 + int(at.Month()-start.Month())
+	anchor := func(offset int) time.Time {
+		month := time.Date(start.Year(), start.Month()+time.Month(offset), 1, 0, 0, 0, 0, time.UTC)
+		lastDay := time.Date(month.Year(), month.Month()+1, 0, 0, 0, 0, 0, time.UTC).Day()
+		day := min(start.Day(), lastDay)
+		return time.Date(month.Year(), month.Month(), day,
+			start.Hour(), start.Minute(), start.Second(), start.Nanosecond(), time.UTC)
+	}
+	from := anchor(months)
+	if from.After(at) {
+		months--
+		from = anchor(months)
+	}
+	to := anchor(months + 1)
+	if to.After(end) {
+		to = end
+	}
+	return from, to
 }
 
 func operatorPolicyTx(ctx context.Context, tx *db.Tx) (OperatorPolicy, error) {
