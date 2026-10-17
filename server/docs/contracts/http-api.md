@@ -672,7 +672,11 @@ with `invalid_inventory_query` rather than being silently ignored.
 
 Preview and tunnel inventories retain `items,next_cursor`; cursors bind account, workspace,
 and `q/state/owner` filters. Preview state uses `allocating`, `connecting`, `ready`,
-`owner_disconnected`, `expired`, `stopped`; `active` groups the first four. Tunnel state
+`owner_disconnected`, `expired`, `stopped`; `active` groups only `allocating`,
+`connecting`, and `ready`. `owner_disconnected` is terminal after the owner reconnect
+grace expires: its allocation and edge are released, renewal is refused, and it remains
+available in history or via its explicit state filter. A still-owned lease awaiting
+allocation or reconnect remains active. Tunnel state
 filters use desired state `active`, `paused`, `deleted`. Preview reads include `route_id`
 when a current ready carrier route is available for its viewer access policy.
 GitHub repositories and config repository candidates use `items,next_cursor`, with default

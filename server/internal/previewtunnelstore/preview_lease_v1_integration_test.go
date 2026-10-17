@@ -11,6 +11,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat-server/internal/config"
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat-server/internal/workspace"
 )
 
 // This test is intentionally opt-in. Run it against the isolated Hetzner
@@ -181,6 +182,30 @@ VALUES ($1, $2, $3, 'active')`, accountID, "workos_preview_"+suffix, "preview-"+
 	if _, err := database.SQL().ExecContext(ctx, `UPDATE paperboat.preview_leases SET owner_last_seen_at=$2 WHERE id=$1`, ownerLost.Lease.ID, now.Add(-time.Minute)); err != nil {
 		t.Fatal(err)
 	}
+	// A still-owned lease remains active while allocation or reconnect is pending.
+	for _, state := range []string{"allocating", "connecting", "ready"} {
+		live := createInput
+		live.OperationID, live.LeaseID, live.AuditEventID = "op_live_"+state+suffix, "prv_live_"+state+suffix, "aud_live_"+state+suffix
+		live.Endpoint = "https://live-" + state + suffix + ".preview.example.test"
+		live.IdempotencyKey, live.RequestHash = "live-"+state+suffix, sha256Bytes("live-"+state+suffix)
+		createdLive, err := store.CreatePreviewLeaseV1(ctx, live)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if state != "allocating" {
+			edge, origin := "pending", "unknown"
+			if state == "ready" {
+				edge, origin = "ready", "ready"
+			}
+			if _, err := store.MarkPreviewLeaseReadyV1(ctx, MarkPreviewLeaseReadyV1Input{
+				AuditEventID: "aud_live_ready_" + state + suffix, AccountID: accountID, ActorID: accountID, ActorType: "user",
+				PreviewID: createdLive.Lease.ID, ExpectedGeneration: 1, AllocationState: "ready", EdgeState: edge, OriginState: origin,
+				CorrelationID: "cor_live_" + state + suffix, RequestID: "req_live_" + state + suffix, Now: now.Add(time.Second),
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 	reconciled, err := store.ReconcilePreviewLeasesV1(ctx, ReconcilePreviewLeasesV1Input{
 		ActorID: accountID, ActorType: "system", CorrelationID: "cor_reconcile_" + suffix, RequestID: "req_reconcile_" + suffix,
 		Now: now.Add(10 * time.Second), OwnerGrace: 30 * time.Second, Limit: 100,
@@ -206,6 +231,33 @@ VALUES ($1, $2, $3, 'active')`, accountID, "workos_preview_"+suffix, "preview-"+
 	if reconciled.Expired[0].Generation != 2 || reconciled.OwnerLost[0].Generation != 2 {
 		t.Fatalf("reconciliation did not advance generation: expired=%d owner_lost=%d", reconciled.Expired[0].Generation, reconciled.OwnerLost[0].Generation)
 	}
+	activeContext := workspace.WithInventoryFilters(ctx, workspace.InventoryFilters{State: "active"})
+	active, err := store.ListPreviewLeasesV1(activeContext, ListPreviewLeasesV1Input{AccountID: accountID, Limit: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(active) != 3 {
+		t.Fatalf("active inventory count=%d want 3 live leases", len(active))
+	}
+	for _, lease := range active {
+		if lease.TerminalState != "active" {
+			t.Fatal("active inventory contains terminal lease")
+		}
+	}
+	historyContext := workspace.WithInventoryFilters(ctx, workspace.InventoryFilters{State: "owner_disconnected"})
+	history, err := store.ListPreviewLeasesV1(historyContext, ListPreviewLeasesV1Input{AccountID: accountID, Limit: 100})
+	if err != nil || len(history) != 1 || history[0].ID != ownerLost.Lease.ID || !history[0].StoppedAt.Valid {
+		t.Fatalf("owner-disconnected history count=%d err=%v", len(history), err)
+	}
+	if _, err := store.RenewPreviewLeaseV1(ctx, RenewPreviewLeaseV1Input{
+		OperationID: "op_lost_renew_" + suffix, AuditEventID: "aud_lost_renew_" + suffix, AccountID: accountID, ActorID: accountID, ActorType: "user",
+		PreviewID: ownerLost.Lease.ID, OwnerMachineID: ownerLost.Lease.OwnerMachineID, OwnerSessionID: ownerLost.Lease.OwnerSessionID,
+		ExpectedGeneration: 2, LeaseDeadline: now.Add(2 * time.Hour), RequestHash: sha256Bytes("lost-renew" + suffix),
+		IdempotencyKey: "lost-renew" + suffix, CorrelationID: "cor_lost_renew_" + suffix, RequestID: "req_lost_renew_" + suffix, Now: now.Add(11 * time.Second),
+	}); !errors.Is(err, ErrPreviewLeaseTerminal) {
+		t.Fatalf("owner-lost renewal: %v", err)
+	}
+
 }
 
 func sha256Bytes(value string) []byte {

@@ -105,7 +105,7 @@ WHERE preview_management_allowed(sqlc.arg(account_id), p.id)
     OR (p.created_at, p.id) < (sqlc.narg(after_created_at)::timestamptz, sqlc.narg(after_id)::text)
   )
  AND (sqlc.arg(q)::text='' OR position(lower(sqlc.arg(q)) in lower(p.id||' '||p.endpoint||' '||p.owner_machine_id))>0)
- AND (sqlc.arg(state)::text='' OR CASE WHEN p.terminal_state='owner_lost' THEN 'owner_disconnected' WHEN p.terminal_state='expired' THEN 'expired' WHEN p.terminal_state IN ('stopped','failed') THEN 'stopped' WHEN p.allocation_state<>'ready' THEN 'allocating' WHEN p.edge_state<>'ready' OR p.origin_state<>'ready' THEN 'connecting' ELSE 'ready' END=sqlc.arg(state) OR (sqlc.arg(state)='active' AND p.terminal_state NOT IN ('expired','stopped','failed')))
+ AND (sqlc.arg(state)::text='' OR CASE WHEN p.terminal_state='owner_lost' THEN 'owner_disconnected' WHEN p.terminal_state='expired' THEN 'expired' WHEN p.terminal_state IN ('stopped','failed') THEN 'stopped' WHEN p.allocation_state<>'ready' THEN 'allocating' WHEN p.edge_state<>'ready' OR p.origin_state<>'ready' THEN 'connecting' ELSE 'ready' END=sqlc.arg(state) OR (sqlc.arg(state)='active' AND p.terminal_state='active'))
  AND (sqlc.arg(owner)::text='' OR (sqlc.arg(owner)='mine' AND p.account_id=sqlc.arg(account_id)) OR (sqlc.arg(owner)='shared' AND p.account_id<>sqlc.arg(account_id)) OR p.account_id=sqlc.arg(owner))
 ORDER BY p.created_at DESC, p.id DESC
 LIMIT sqlc.arg(row_limit);

@@ -383,7 +383,7 @@ WHERE preview_management_allowed($1, p.id)
     OR (p.created_at, p.id) < ($4::timestamptz, $5::text)
   )
  AND ($6::text='' OR position(lower($6) in lower(p.id||' '||p.endpoint||' '||p.owner_machine_id))>0)
- AND ($7::text='' OR CASE WHEN p.terminal_state='owner_lost' THEN 'owner_disconnected' WHEN p.terminal_state='expired' THEN 'expired' WHEN p.terminal_state IN ('stopped','failed') THEN 'stopped' WHEN p.allocation_state<>'ready' THEN 'allocating' WHEN p.edge_state<>'ready' OR p.origin_state<>'ready' THEN 'connecting' ELSE 'ready' END=$7 OR ($7='active' AND p.terminal_state NOT IN ('expired','stopped','failed')))
+ AND ($7::text='' OR CASE WHEN p.terminal_state='owner_lost' THEN 'owner_disconnected' WHEN p.terminal_state='expired' THEN 'expired' WHEN p.terminal_state IN ('stopped','failed') THEN 'stopped' WHEN p.allocation_state<>'ready' THEN 'allocating' WHEN p.edge_state<>'ready' OR p.origin_state<>'ready' THEN 'connecting' ELSE 'ready' END=$7 OR ($7='active' AND p.terminal_state='active'))
  AND ($8::text='' OR ($8='mine' AND p.account_id=$1) OR ($8='shared' AND p.account_id<>$1) OR p.account_id=$8)
 ORDER BY p.created_at DESC, p.id DESC
 LIMIT $9
