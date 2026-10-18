@@ -761,3 +761,66 @@ func TestDataCarrierPreviewTransportHeaderTimeoutStartsAfterUpload(t *testing.T)
 		t.Fatal(err)
 	}
 }
+
+// A WebSocket upgrade must cross the preview data carrier: the 101 response
+// carries a writable body that bridges the upgraded connection.
+func TestDataCarrierPreviewTransportPreservesUpgrade(t *testing.T) {
+	identity := testEdgePreviewIdentity(1, 1)
+	server, client := testEdgePreviewCarrierPair(t, identity)
+	defer client.Close()
+	defer server.Close()
+	registry, err := NewDataCarrierPreviewRegistry(DataCarrierPreviewRegistryConfig{BaseDomain: "preview.example.test", ProcessEpoch: "edge_epoch_1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer registry.Close()
+	if err := registry.Attach(DataCarrierPreviewRoute{RouteID: "preview_01", Hostname: "app.preview.example.test", Kind: dataCarrierPreviewRouteKind, EdgeProcessEpoch: "edge_epoch_1", Revision: 1, Server: server}); err != nil {
+		t.Fatal(err)
+	}
+	transport, err := NewDataCarrierPreviewTransport(DataCarrierPreviewTransportConfig{Registry: registry, StreamOpenTimeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		stream, _, acceptErr := client.AcceptStream(context.Background())
+		if acceptErr != nil {
+			return
+		}
+		_ = datacarrier.ServeHTTPStream(context.Background(), stream, http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			connection, buffered, hijackErr := writer.(http.Hijacker).Hijack()
+			if hijackErr != nil {
+				return
+			}
+			defer connection.Close()
+			_, _ = buffered.WriteString("HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n")
+			_ = buffered.Flush()
+			echo := make([]byte, 4)
+			if _, readErr := io.ReadFull(buffered, echo); readErr == nil {
+				_, _ = connection.Write(echo)
+			}
+		}), 4096, 5*time.Second)
+	}()
+	request := httptest.NewRequest(http.MethodGet, "https://app.preview.example.test/ws", nil)
+	request.Host = "app.preview.example.test"
+	request.Header.Set("Connection", "Upgrade")
+	request.Header.Set("Upgrade", "websocket")
+	response, err := transport.RoundTrip(request)
+	if err != nil {
+		t.Fatalf("upgrade request failed: %v", err)
+	}
+	if response.StatusCode != http.StatusSwitchingProtocols {
+		t.Fatalf("status=%d, want 101", response.StatusCode)
+	}
+	writer, ok := response.Body.(io.ReadWriteCloser)
+	if !ok {
+		t.Fatal("101 body is not writable")
+	}
+	defer writer.Close()
+	if _, err := writer.Write([]byte("ping")); err != nil {
+		t.Fatal(err)
+	}
+	echo := make([]byte, 4)
+	if _, err := io.ReadFull(writer, echo); err != nil || string(echo) != "ping" {
+		t.Fatalf("echo=%q err=%v", echo, err)
+	}
+}
