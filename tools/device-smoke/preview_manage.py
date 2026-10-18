@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Verify preview list/status, exact stop/delete, and the declared TTL."""
 import argparse
-import datetime
 import functools
 import http.server
 import json
@@ -13,7 +12,7 @@ import time
 from install_lifecycle import registration
 from pairing_lifecycle import invoke
 from preview_lifecycle import QuietHandler
-from preview_receipt import receipt_value
+from preview_receipt import receipt_timestamp, receipt_value
 
 
 def main():
@@ -53,7 +52,7 @@ def main():
                     raise RuntimeError('preview stop/delete did not persist its documented stopped state')
                 owned.remove(identity)
             lease = create('30s')
-            deadline = datetime.datetime.fromisoformat(lease['user_deadline'].replace('Z', '+00:00')).timestamp()
+            deadline = receipt_timestamp(lease['user_deadline']).timestamp()
             if deadline - time.time() > 30:
                 raise RuntimeError('preview extended its requested TTL')
             while time.time() < deadline + 30:

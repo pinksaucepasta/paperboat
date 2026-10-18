@@ -2,7 +2,21 @@
 import json
 import re
 import sys
+from datetime import datetime
 from urllib.parse import urlsplit
+
+
+def receipt_timestamp(value):
+    # Python 3.9 accepts only three or six fractional digits. Go's RFC3339Nano
+    # receipts use zero to nine; normalize only the fraction to datetime's
+    # microsecond precision and retain the original numeric timezone offset.
+    match = re.fullmatch(
+        r'([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2})'
+        r'(?:\.([0-9]{1,9}))?(Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])', value)
+    if not match:
+        raise ValueError('invalid RFC3339 timestamp')
+    fraction = '.' + (match[2] + '000000')[:6] if match[2] else ''
+    return datetime.fromisoformat(match[1] + fraction + match[3].replace('Z', '+00:00'))
 
 
 def receipt_value(receipt, field, expected_id=None):

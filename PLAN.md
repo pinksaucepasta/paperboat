@@ -1818,3 +1818,6 @@ Paid-create and bought-seat producers now published; CLI consumer follow-up in p
 F12-04/05/06 and C194/195/201/207-212 wait primary Lane A L/M checks; no device ticks from workspace proof.
 
 | 2026-10-18 | Lane A frozen7a Apple server midpoint results | .12/4855acd preview-manage FAIL33s first create, receipt20261018T002932Z; sampler: ready then owner_lost without renewal while DNS submitted. .8/9afbbe2 FAIL79s TTL-only, receipt20261018T003207Z; all three creates/list/status/stop/delete passed. Version/doctor pass both; no network evidence/no reruns; B owns classification, no false whole-check GOOD or current-row tick. |
+
+2026-10-18 | Lane A preview RFC3339 compatibility | Rows ticked:none; Python3.9 rejected valid five-digit deadline after preview CRUD passed; shared receipt timestamp adapter normalizes only fractional precision and preserves timezone offset, TTL/state assertions unchanged.
+Actual Python3.9.25 owner RED0.023s/GREEN0.009s (1–9 digits/four offsets/invalid guards), Python3.12 GREEN0.007s; last-green+exact preview cleanup owners5 PASS/1 SKIP2.473s. Primary owns sole changed-harness7a Apple/.9 rerun.

@@ -6,9 +6,32 @@ import tempfile
 import unittest
 
 import last_green
+from preview_receipt import receipt_timestamp
 
 
 class LastGreenTests(unittest.TestCase):
+    def test_rfc3339_timestamp_fraction_and_offset(self):
+        for digits in range(1, 10):
+            fraction = '303661234'[:digits]
+            micros = int((fraction + '000000')[:6])
+            for offset, minutes in [('Z', 0), ('+00:00', 0), ('+05:30', 330), ('-07:45', -465)]:
+                value = '2026-10-18T00:36:06.' + fraction + offset
+                with self.subTest(value=value):
+                    expected = dt.datetime(2026, 10, 18, 0, 36, 6, micros,
+                                           tzinfo=dt.timezone(dt.timedelta(minutes=minutes)))
+                    actual = last_green.timestamp(Path('unused.json'), {'at': value})
+                    self.assertEqual(expected, actual)
+                    self.assertEqual(expected.timestamp(), actual.timestamp())
+                    parsed = receipt_timestamp(value)
+                    self.assertEqual(expected.utcoffset(), parsed.utcoffset())
+                    self.assertEqual(expected.microsecond, parsed.microsecond)
+        for value in ['2026-10-18T00:36:06.', '2026-02-30T00:36:06Z',
+                      '2026-10-18T00:36:06.30366xZ', 'not-a-timestamp',
+                      '2026-10-18T00:36:06.1234567890Z', '2026-10-18T00:36:06+05:99',
+                      '2026-10-18T00:36:06', '2026-10-18T24:36:06Z']:
+            with self.subTest(invalid=value), self.assertRaises(ValueError):
+                last_green.timestamp(Path('unused.json'), {'at': value})
+
     def receipt(self, root, stamp, version, rows, **extra):
         path = root / (stamp + '.json')
         path.write_text(json.dumps(dict(expect_version=version, results=[dict(id=i, status=s) for i, s in rows], **extra)))

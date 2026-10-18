@@ -244,7 +244,7 @@ class UninstallInventoryPreservation(unittest.TestCase):
 class SmokeReceipts(unittest.TestCase):
     def write_script(self, script, content):
         # These fixtures run the production entry point, including its source freeze.
-        for name in ('snapshot_run.py', 'stage_fixtures.py', 'last_green.py', 'failure_triage.py'):
+        for name in ('snapshot_run.py', 'stage_fixtures.py', 'last_green.py', 'failure_triage.py', 'preview_receipt.py'):
             shutil.copyfile(HERE / name, script.parent / name)
         script.write_text(content)
 

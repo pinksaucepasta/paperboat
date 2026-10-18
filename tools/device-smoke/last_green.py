@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import shlex
 import subprocess
+from preview_receipt import receipt_timestamp
 
 ROOT = Path(__file__).resolve().parents[2]
 PATHS = ['cli/', 'relay/', 'shared/']
@@ -24,7 +25,7 @@ def timestamp(path, receipt):
             return dt.datetime.strptime(value, pattern).replace(tzinfo=dt.timezone.utc)
         except ValueError:
             pass
-    return dt.datetime.fromisoformat(value.replace('Z', '+00:00')).astimezone(dt.timezone.utc)
+    return receipt_timestamp(value).astimezone(dt.timezone.utc)
 
 
 def receipts(directory):
