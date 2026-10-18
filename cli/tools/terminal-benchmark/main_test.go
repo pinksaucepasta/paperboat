@@ -143,11 +143,18 @@ func TestRunProbeRetriesWithFreshMarkerAfterUncertainTimeout(t *testing.T) {
 	chunks := make(chan []byte, 1)
 	done := make(chan error, 1)
 	var writes bytes.Buffer
-	go func() {
-		time.Sleep(15 * time.Millisecond)
-		chunks <- []byte("PBABC0000Q")
-	}()
-	latency, attempts, err := runProbe(context.Background(), &writes, newStreamMatcher(chunks, done), "ABC", 0, 3, 10*time.Millisecond)
+	writeCount := 0
+	writer := probeWriteFunc(func(data []byte) (int, error) {
+		n, err := writes.Write(data)
+		writeCount++
+		if writeCount == 2 {
+			// The first attempt has timed out before the retry is written.
+			// Deliver its delayed output without assuming scheduler latency.
+			chunks <- []byte("PBABC0000Q")
+		}
+		return n, err
+	})
+	latency, attempts, err := runProbe(context.Background(), writer, newStreamMatcher(chunks, done), "ABC", 0, 3, 10*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,6 +162,10 @@ func TestRunProbeRetriesWithFreshMarkerAfterUncertainTimeout(t *testing.T) {
 		t.Fatalf("attempts=%d latency=%s writes=%q", attempts, latency, writes.String())
 	}
 }
+
+type probeWriteFunc func([]byte) (int, error)
+
+func (write probeWriteFunc) Write(data []byte) (int, error) { return write(data) }
 
 func TestPercentileUsesNearestRank(t *testing.T) {
 	values := []time.Duration{time.Millisecond, 2 * time.Millisecond, 3 * time.Millisecond, 4 * time.Millisecond, 5 * time.Millisecond}
