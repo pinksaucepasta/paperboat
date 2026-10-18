@@ -27,7 +27,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -35,8 +34,6 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Field, FieldError, FieldLabel } from "@/components/ui/field"
-import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import { Skeleton } from "@/components/ui/skeleton"
 
 /**
@@ -182,111 +179,13 @@ function HealthNotice({ tunnel }: { tunnel: Tunnel }) {
   )
 }
 
-/** The managed address, copied on click; "Change" opens the address editor. */
+/** The managed address, copied on click. It is generated; only the tunnel's name changes. */
 function AddressValue({ tunnel }: { tunnel: Tunnel }) {
-  const [changing, setChanging] = useState(false)
   const host = hostOf(tunnel.stable_endpoint)
   return (
-    <span className="flex min-w-0 items-center gap-2">
-      <CopyRow value={host} className="-ml-2.5 min-w-0 font-mono text-code">
-        {host}
-      </CopyRow>
-      <button
-        type="button"
-        onClick={() => setChanging(true)}
-        className="shrink-0 text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
-      >
-        Change
-      </button>
-      {changing && <ChangeAddressDialog tunnel={tunnel} host={host} onClose={() => setChanging(false)} />}
-    </span>
-  )
-}
-
-/** A subdomain label: lowercase letters, digits and dashes, not starting or ending with a dash. */
-const labelProblem = (label: string) =>
-  !label
-    ? "Enter a subdomain."
-    : !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label)
-      ? "Lowercase letters, numbers and dashes, not at the start or end. Up to 63."
-      : undefined
-
-/**
- * Choosing the tunnel's own subdomain (`coolify` in `coolify.tunnels.…`). Your domains point at
- * the tunnel itself, not at this address, so they keep working.
- */
-function ChangeAddressDialog({ tunnel, host, onClose }: { tunnel: Tunnel; host: string; onClose: () => void }) {
-  const queryClient = useQueryClient()
-  const [label, ...rest] = host.split(".")
-  const suffix = rest.join(".")
-  const [draft, setDraft] = useState(label)
-  const problem = draft === label ? undefined : labelProblem(draft)
-  const save = useMutation({
-    mutationFn: () => patchTunnel(tunnel, { subdomain: draft }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["tunnel", tunnel.id] })
-      await queryClient.invalidateQueries({ queryKey: ["tunnels"] })
-      toast.success(`Address changed to ${draft}.${suffix}`)
-      onClose()
-    },
-  })
-  return (
-    <Dialog open onOpenChange={(next) => !next && !save.isPending && onClose()}>
-      <DialogContent className="gap-4 sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Change address</DialogTitle>
-        </DialogHeader>
-        <form
-          className="flex min-w-0 flex-col gap-4"
-          onSubmit={(event) => {
-            event.preventDefault()
-            if (draft !== label && !problem) save.mutate()
-          }}
-        >
-          <Field data-invalid={Boolean(problem)} className="gap-1.5">
-            <FieldLabel htmlFor="tunnel-address">Subdomain</FieldLabel>
-            <InputGroup>
-              <InputGroupInput
-                id="tunnel-address"
-                autoFocus
-                value={draft}
-                onChange={(event) =>
-                  setDraft(
-                    event.target.value
-                      .toLowerCase()
-                      .replace(/[^a-z0-9-]/g, "")
-                      .slice(0, 63),
-                  )
-                }
-                aria-invalid={Boolean(problem)}
-                className="font-mono"
-                autoComplete="off"
-                spellCheck={false}
-              />
-              <InputGroupAddon align="inline-end" className="font-mono text-muted-foreground">
-                .{suffix}
-              </InputGroupAddon>
-            </InputGroup>
-            {problem ? (
-              <FieldError>{problem}</FieldError>
-            ) : (
-              <p className="text-xs text-muted-foreground">
-                {label}.{suffix} stops working right away. Your own domains keep working.
-              </p>
-            )}
-          </Field>
-          {save.isError && <p className="text-sm text-destructive">{save.error.message}</p>}
-          <DialogFooter>
-            <Button type="button" variant="secondary" size="lg" onClick={onClose} disabled={save.isPending}>
-              Cancel
-            </Button>
-            <Button type="submit" size="lg" disabled={draft === label || Boolean(problem) || save.isPending}>
-              {save.isPending ? "Saving…" : "Save"}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+    <CopyRow value={host} className="-ml-2.5 min-w-0 font-mono text-code">
+      {host}
+    </CopyRow>
   )
 }
 

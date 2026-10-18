@@ -23,7 +23,11 @@ import { copyWithToast } from "@/lib/clipboard"
 
 type View = "live" | "ended"
 
-const ended = (preview: Preview) => preview.state === "expired" || preview.state === "stopped"
+/** Stopped, expired, or past its deadline (a disconnected machine leaves its preview behind unmarked). */
+const ended = (preview: Preview, now: number) =>
+  preview.state === "expired" ||
+  preview.state === "stopped" ||
+  Date.parse(preview.user_deadline ?? preview.lease_deadline) < now
 
 /**
  * When a preview ends. One started with a time limit ends at it; one tied to a running command
@@ -91,8 +95,8 @@ export function PreviewList({ machine: tabMachine }: { machine?: Machine }) {
   )
 
   const onMachine = (query.data ?? []).filter((preview) => !scope || preview.owner_machine_id === scope)
-  const live = onMachine.filter((preview) => !ended(preview))
-  const done = onMachine.filter(ended)
+  const live = onMachine.filter((preview) => !ended(preview, now))
+  const done = onMachine.filter((preview) => ended(preview, now))
   const shown = (view === "live" ? live : done)
     .filter(
       (preview) =>
@@ -210,7 +214,7 @@ function Row({ preview, now, machineName }: { preview: Preview; now: number; mac
   const queryClient = useQueryClient()
   const workspace = useWorkspace()
   const [stopping, setStopping] = useState(false)
-  const live = !ended(preview)
+  const live = !ended(preview, now)
   const host = hostOf(preview.endpoint)
 
   const entries: Entry[] = live

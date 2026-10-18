@@ -316,19 +316,17 @@ inspects, changes and stops them (`lib/tunnels.ts`, `components/tunnels/`). Gaps
 
 - **Previews are created from the console**: `POST /v1/previews` with the browser session and a
   `local_lease` owner (a random `session_<uuid>`), which the server dispatches to the machine's
-  daemon (`preview_launch`); the dialog polls `GET /v1/previews/{id}` until `ready`. Not yet run
-  against a live machine.
+  daemon (`preview_launch`); the dialog polls `GET /v1/previews/{id}` until `ready`. Run against a
+  live machine 2026-10-18: the server answers 503 `control_unavailable` (outcome uncertain), so
+  previews cannot be created from the console yet (reported to Lane B).
 - **Tunnel create from the console is UI-only for now.** New tunnel posts `POST /v1/tunnels` with
   the browser session and `owner_machine_id`, then polls the tunnel until `summary_code` leaves
   `pending`. The server rejects browser sessions today ("Create tunnels on the enrolled target")
   and has no `owner_machine_id`. Needed: accept it for machines the actor may manage (owner, not
   shared-with-you; the same authority that already opens terminals there), dispatch to the
   machine's daemon like `previewdispatch`, and let the daemon enroll its connector locally.
-- **Tunnel subdomain edit is UI-only for now.** Change address sends
-  `PATCH /v1/tunnels/{id}` `{ "subdomain": "coolify" }`. Needed: the field (availability check,
-  reserved names), moving `managed_exact` routes with it, releasing the old address, and custom
-  domain CNAMEs pointing at a fixed per-tunnel target (like Cloudflare's `<id>.cfargotunnel.com`)
-  instead of the address, so a rename never breaks DNS.
+- **Tunnel address is not editable.** The server patches only `name`, `access_mode` and `expires_at`
+  (`TunnelPatchRequest`); the address is generated, so the console renames the tunnel only.
 - **Share a file (drop.new-style) is UI-only for now.** Previews has "Share a file" and a page-wide
   drop target. The browser sends `POST /v1/previews/files?workspace=&machine=&name=&access_mode=&expires_at=`
   with the raw file as the body (streamed through the relay, Idempotency-Key) and expects a

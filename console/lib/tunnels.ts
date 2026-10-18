@@ -207,11 +207,8 @@ export function shareFile(
 export const pauseTunnel = (tunnel: Tunnel) => change(`${tunnelPath(tunnel.id)}/pause`, "POST", { etag: tunnel.etag })
 export const resumeTunnel = (tunnel: Tunnel) => change(`${tunnelPath(tunnel.id)}/resume`, "POST", { etag: tunnel.etag })
 export const deleteTunnel = (tunnel: Tunnel) => change(tunnelPath(tunnel.id), "DELETE", { etag: tunnel.etag })
-/** `subdomain` moves the tunnel's own address (`<subdomain>.tunnels.…`); NOTES.md has its status. */
-export const patchTunnel = (
-  tunnel: Tunnel,
-  patch: { name?: string; access_mode?: Tunnel["access_mode"]; subdomain?: string },
-) => change<Tunnel>(tunnelPath(tunnel.id), "PATCH", { etag: tunnel.etag, body: patch })
+export const patchTunnel = (tunnel: Tunnel, patch: { name?: string; access_mode?: Tunnel["access_mode"] }) =>
+  change<Tunnel>(tunnelPath(tunnel.id), "PATCH", { etag: tunnel.etag, body: patch })
 
 /**
  * Creates a tunnel on a machine from the console, like a preview: the server records it and has
