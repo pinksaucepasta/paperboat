@@ -2019,3 +2019,4 @@ All finished code is pushed, no unpushed or half-done source changes remain, and
 2026-10-18 | Edge 8204fb3 rollout | oracle+anvit edge 2026.10.16.8 -> 2026.10.18.1 (native arm64, pbh install --relay-image <same> --tunnel-image), relay containers not restarted, 0 route_invalid/reconcile_failed over 2 min on both, readyz healthy; rollback image paperboat-tunnel:2026.10.16.8 retained on both.
 
 2026-10-18 | Lane C batch | rows ticked:F15-06 L | 9fffe4e Activity sentences, 0797da2 update summary per workspace (F14-09 console part), d01e625 Environment 401 sign-in loop fixed; F10-06 needs browser vault (console/NOTES.md Environment).
+2026-10-18 | Lane C batch 2 | rows ticked:none | Team suspended notice, machine table past 200, console domains from /v1/client-configuration. Waits Lane B: GET/DELETE /v1/machines/{id}/inbox (F6-06), GET /v1/domains (Domains page). Revoke test needs a throwaway enrolled machine from Lane A.
