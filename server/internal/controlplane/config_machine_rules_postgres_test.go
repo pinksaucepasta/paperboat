@@ -222,4 +222,10 @@ func TestConfigCustomRepositoryRulesAccessAndRevocation(t *testing.T) {
 	if failedMarkerState != "pending" {
 		t.Fatalf("failed uncertain marker changed state unexpectedly: %q", failedMarkerState)
 	}
+	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET installation_generation=installation_generation+1 WHERE id=$1`, identity.MachineID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := leases.Authenticate(ctx, identity.Credential, providerCredential.Credential, proofFor("old-generation-runtime", "/v1/config/runtime"), body, "POST", "/v1/config/runtime"); !errors.Is(err, ErrConfigLeaseInvalid) {
+		t.Fatalf("previous installation retained configuration authority: %v", err)
+	}
 }

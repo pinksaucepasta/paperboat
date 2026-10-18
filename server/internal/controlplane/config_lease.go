@@ -85,7 +85,9 @@ func (s *ConfigLeaseService) Authenticate(ctx context.Context, identityToken, cr
 		return ConfigLeaseHolder{}, err
 	}
 	claims, err := s.signer.VerifyCredential(credential, s.issuer, "config_sync", s.clock())
-	if err != nil || claims.EnvironmentID != identity.EnvironmentID || claims.MachineID != identity.MachineID || claims.Subject != identity.MachineID {
+	if err != nil || claims.EnvironmentID != identity.EnvironmentID ||
+		claims.MachineID != identity.MachineID || claims.Subject != identity.MachineID ||
+		claims.InstallationGeneration != identity.InstallationGeneration {
 		return ConfigLeaseHolder{}, ErrConfigLeaseInvalid
 	}
 	persistedCredential, err := s.store.Queries().GetActiveControlConfigCredentialByJTI(ctx, dbsqlc.GetActiveControlConfigCredentialByJTIParams{
