@@ -31,8 +31,10 @@ def main():
             return invoke(binary, 'tunnel', *args, '--json', timeout=90)
 
         def owned():
+            # A deleted tunnel stays listed as a tombstone (desired_state=deleted).
             return [item for item in call('list', '--q', name)['items']
-                    if item['name'] in (name, renamed) and item['account_id'] == before['account_id']]
+                    if item['name'] in (name, renamed) and item['account_id'] == before['account_id']
+                    and item['desired_state'] != 'deleted']
 
         try:
             created = call('create', name, '--port', str(server.server_port),
