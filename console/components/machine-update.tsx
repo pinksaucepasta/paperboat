@@ -3,7 +3,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { ArrowCircleUpIcon, WarningCircleIcon, CircleNotchIcon } from "@phosphor-icons/react"
 import { useState } from "react"
-import { approveUpdate, updateSummaryQuery, useUpdate, type Machine } from "@/lib/api"
+import { approveUpdate, updateSummaryQuery, useUpdate, useWorkspace, type Machine } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -26,11 +26,12 @@ export function MachineUpdate({ machine }: { machine: Machine }) {
   const update = useUpdate(machine.id)
   const [open, setOpen] = useState(false)
   const queryClient = useQueryClient()
+  const workspace = useWorkspace()?.id ?? ""
   const approve = useMutation({
-    mutationFn: () => approveUpdate(machine.id, update!.target_version!),
+    mutationFn: () => approveUpdate(workspace, machine.id, update!.target_version!),
     onSuccess: () => {
       setOpen(false)
-      return queryClient.invalidateQueries({ queryKey: updateSummaryQuery.queryKey })
+      return queryClient.invalidateQueries({ queryKey: updateSummaryQuery(workspace).queryKey })
     },
   })
 

@@ -266,19 +266,21 @@ export function trafficBreakdown(byPath: PathTotal[], source: TrafficSource): Tr
 export type UpdateObservation = Schemas["UpdateObservation"]
 export type UpdateState = UpdateObservation["state"]
 
-/** Update reports exist for the personal workspace; keyed by machine id. */
-export const updateSummaryQuery = queryOptions({
-  queryKey: ["machines", "updates"],
-  queryFn: async () => {
-    const summary = await api<Data<"/v1/machines/update-summary">>("machines/update-summary?limit=200")
-    return new Map(summary.items.flatMap((item) => (item.observation ? [[item.machine_id, item.observation]] : [])))
-  },
-  refetchInterval: 30_000,
-})
+/** The workspace's update reports, keyed by machine id. */
+export const updateSummaryQuery = (workspace: string) =>
+  queryOptions({
+    queryKey: ["machines", "updates", workspace],
+    queryFn: async () => {
+      const params = new URLSearchParams({ limit: "200", workspace })
+      const summary = await api<Data<"/v1/machines/update-summary">>(`machines/update-summary?${params}`)
+      return new Map(summary.items.flatMap((item) => (item.observation ? [[item.machine_id, item.observation]] : [])))
+    },
+    refetchInterval: 30_000,
+  })
 
 export function useUpdate(machineId: string): UpdateObservation | undefined {
   const workspace = useWorkspace()
-  const { data } = useApiQuery({ ...updateSummaryQuery, enabled: workspace?.kind === "personal" })
+  const { data } = useApiQuery({ ...updateSummaryQuery(workspace?.id ?? ""), enabled: Boolean(workspace) })
   return data?.get(machineId)
 }
 
@@ -286,14 +288,17 @@ export function useUpdate(machineId: string): UpdateObservation | undefined {
  * Starting an update is a maintenance approval the owner requests and then approves, the same
  * two calls `pb` makes. The machine performs it on its next maintenance check.
  */
-export async function approveUpdate(machineId: string, targetVersion: string): Promise<void> {
+export async function approveUpdate(workspace: string, machineId: string, targetVersion: string): Promise<void> {
   const machine = encodeURIComponent(machineId)
-  const approval = await api<{ id: string }>(`machines/${machine}/maintenance-approvals`, {
+  const selector = `?workspace=${encodeURIComponent(workspace)}`
+  const approval = await api<{ id: string }>(`machines/${machine}/maintenance-approvals${selector}`, {
     method: "POST",
     headers: { "content-type": "application/json", "idempotency-key": idempotencyKey() },
     body: JSON.stringify({ action: "update", target_version: targetVersion, reason: "Approved from the console" }),
   })
-  await api(`machines/${machine}/maintenance-approvals/${encodeURIComponent(approval.id)}/approve`, { method: "POST" })
+  await api(`machines/${machine}/maintenance-approvals/${encodeURIComponent(approval.id)}/approve${selector}`, {
+    method: "POST",
+  })
 }
 
 /** An edge serving the account's previews and tunnels. Self-hosted edges are not listed yet. */
