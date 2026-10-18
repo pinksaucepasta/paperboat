@@ -135,6 +135,13 @@ def rows(args):
     r.expect(Row('C228', 'config status').json_ok() is not None, 'config status --json invalid')
     out.append(r)
 
+    r = Row('C022', 'auth'); r.help(); r.invalid('bogus')
+    d = Row('C022', 'auth status').json_ok()
+    r.expect(isinstance(d, dict) and d.get('signed_in') is True and d.get('account', {}).get('email'), 'auth status --json does not show the signed-in account')
+    human = run('auth', 'status')[1]
+    r.expect('@' in human, 'auth status shows no account')
+    out.append(r)
+
     r = Row('C030', 'machine'); r.help(); r.invalid('bogus')
     d = Row('C030', 'machine list').json_ok()
     r.expect(isinstance(d, dict) and any(m['alias'] == machine and m['state'] == 'online' for m in d.get('machines', [])), 'machine list does not show this machine online')
