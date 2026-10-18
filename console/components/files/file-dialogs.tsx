@@ -229,7 +229,7 @@ export function ShareInboxFileDialog({
     mutationFn: () => shareInboxFile(machine.id, file.id, { access, hours }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["previews"] }),
   })
-  const opens = opensInBrowser({ name: file.name, type: file.content_type ?? "" })
+  const opens = opensInBrowser({ name: file.name, type: "" })
   return (
     <Dialog open onOpenChange={(next) => !next && !share.isPending && onClose()}>
       <DialogContent className="gap-4 sm:max-w-md">

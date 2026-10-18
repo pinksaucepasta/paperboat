@@ -8,20 +8,29 @@ import { uploadFile } from "@/lib/upload"
 /*
  * Files: each machine's Paperboat Inbox (Downloads/Paperboat Inbox on the machine), where files
  * sent from the console, dropped into a terminal, sent with `pb send` or approved from a teammate
- * land. Paperboat keeps no file contents: listing, downloading and deleting are answered live by
- * the machine through the server, so an offline machine's Inbox can't be read until it's back.
- * The Inbox endpoints are the console's side of a planned API (NOTES.md); Team Inbox requests
- * (`/v1/team-inbox/requests`) exist today.
+ * land. Paperboat keeps no file contents. The list is what each machine last reported (names, sizes
+ * and times, every few seconds while it runs), so it is there even when the machine is offline.
+ * Downloading and deleting are answered live by the machine through the server; they stay off
+ * (`inboxLive`) until the server and daemons that serve them are deployed.
  */
+
+/** Which Inbox endpoints the deployed server answers. Flip one when its deploy is logged. */
+export const inboxLive = { upload: false, content: false, remove: false } as const
 
 export type InboxFile = {
   id: string
   name: string
   size: number
-  content_type?: string
   received_at: string
-  /** Where it came from: the console, another machine (`pb send`), a terminal drop, or a teammate. */
-  source: { kind: "console" | "machine" | "terminal" | "teammate"; machine_id?: string; name?: string }
+}
+
+/** `GET /v1/machines/{id}/inbox`: the machine's last reported listing, newest first. */
+export type InboxListing = {
+  /** When the machine observed it; null until it has reported. */
+  observed_at: string | null
+  /** Files in the Inbox; the list holds the newest 200. */
+  total: number
+  items: InboxFile[]
 }
 
 /** A Team Inbox request as `GET /v1/team-inbox/requests` lists it (teaminbox.Request). */
@@ -39,6 +48,7 @@ export type InboxRequest = {
 }
 
 const inboxPath = (machineId: string) => `machines/${encodeURIComponent(machineId)}/inbox`
+const workspaceQuery = (workspace: string) => `?workspace=${encodeURIComponent(workspace)}`
 const filePath = (machineId: string, fileId: string) => `${inboxPath(machineId)}/${encodeURIComponent(fileId)}`
 
 export const fileKeys = {
@@ -46,13 +56,11 @@ export const fileKeys = {
   requests: (workspace: string) => ["team-inbox", workspace] as const,
 }
 
-export const inboxQuery = (machineId: string) =>
+export const inboxQuery = (machineId: string, workspace: string) =>
   queryOptions({
     queryKey: fileKeys.inbox(machineId),
-    queryFn: async () => (await api<{ items: InboxFile[] }>(inboxPath(machineId))).items,
+    queryFn: () => api<InboxListing>(`${inboxPath(machineId)}${workspaceQuery(workspace)}`),
     refetchInterval: 15_000,
-    // An unreachable machine answers quickly; say so instead of retrying for seconds.
-    retry: 1,
   })
 
 export const requestsQuery = (workspace: string) =>
