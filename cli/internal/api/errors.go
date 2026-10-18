@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"net/url"
 	"strconv"
 )
 
@@ -56,6 +57,21 @@ func apiErrorMessage(code string, status int) string {
 		return "The server could not complete the request. Try again shortly."
 	}
 	return "The server rejected the request."
+}
+
+// apiErrorMessageFor is apiErrorMessage plus the one server-provided detail a recovery message
+// may carry: the console Billing page for bandwidth_quota_exhausted, when it is an http(s) URL.
+func apiErrorMessageFor(code string, status int, details map[string]any) string {
+	message := apiErrorMessage(code, status)
+	if code != "bandwidth_quota_exhausted" {
+		return message
+	}
+	if raw, _ := details["billing_url"].(string); raw != "" {
+		if parsed, err := url.Parse(raw); err == nil && (parsed.Scheme == "https" || parsed.Scheme == "http") && parsed.Host != "" && parsed.User == nil {
+			return message + " Add bandwidth: " + parsed.String()
+		}
+	}
+	return message
 }
 
 // PublicCode projects only audited protocol codes. The raw Code remains

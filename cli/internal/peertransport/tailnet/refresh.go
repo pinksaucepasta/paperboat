@@ -84,6 +84,7 @@ func (a *Authority) Refresh(ctx context.Context, client NetworkAPI) error {
 		}
 		return err
 	}
+	a.setRelayDenial(result.RelayDenial())
 	if result.CandidateSet == "" {
 		a.relay.mu.Lock()
 		a.relay.tokens = nil
@@ -127,6 +128,9 @@ func (a *Authority) Run(ctx context.Context, client NetworkAPI, report func(erro
 		if err != nil && report != nil {
 			report(err)
 		}
+		if denial := a.RelayDenial(); err == nil && denial != nil && report != nil {
+			report(denial)
+		}
 		return err
 	})
 	watchDone := make(chan struct{})
@@ -160,6 +164,9 @@ func (a *Authority) Run(ctx context.Context, client NetworkAPI, report func(erro
 			cancel()
 			if err != nil && report != nil {
 				report(err)
+			}
+			if denial := a.RelayDenial(); err == nil && denial != nil && report != nil {
+				report(denial)
 			}
 			delay := regionalRefreshDelay()
 			a.relay.mu.Lock()

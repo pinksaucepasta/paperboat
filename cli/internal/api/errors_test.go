@@ -134,3 +134,29 @@ func TestBandwidthQuotaExhaustedHasAuthoredRecoveryMessage(t *testing.T) {
 		t.Fatal("quota exhaustion fell back to the generic conflict message")
 	}
 }
+
+// The only server-provided detail the quota message may carry is an http(s) Billing URL.
+func TestBandwidthQuotaMessageCarriesOnlySafeBillingURL(t *testing.T) {
+	good := apiErrorMessageFor("bandwidth_quota_exhausted", http.StatusConflict, map[string]any{"billing_url": "https://console.example.test/billing"})
+	if !strings.HasSuffix(good, "Add bandwidth: https://console.example.test/billing") {
+		t.Fatalf("message lacks the Billing URL: %q", good)
+	}
+	for _, unsafe := range []any{"javascript:alert(1)", "https://user:secret@console.example.test/billing", "/billing", "", 7, nil} {
+		if got := apiErrorMessageFor("bandwidth_quota_exhausted", http.StatusConflict, map[string]any{"billing_url": unsafe}); strings.Contains(got, "Add bandwidth:") {
+			t.Fatalf("billing_url %v was shown: %q", unsafe, got)
+		}
+	}
+	if got := apiErrorMessageFor("conflict", http.StatusConflict, map[string]any{"billing_url": "https://console.example.test/billing"}); strings.Contains(got, "Add bandwidth") {
+		t.Fatalf("another code carried the billing link: %q", got)
+	}
+}
+
+func TestPeerNetworkRelayDenialIsTypedAndOnlyForQuota(t *testing.T) {
+	denial := PeerNetworkConfigurationResult{RelayDenied: "bandwidth_quota_exhausted", BillingURL: "https://console.example.test/billing"}.RelayDenial()
+	if denial == nil || denial.Code != "bandwidth_quota_exhausted" || denial.Status != http.StatusConflict || !strings.Contains(denial.Message, "https://console.example.test/billing") {
+		t.Fatalf("denial = %+v", denial)
+	}
+	if (PeerNetworkConfigurationResult{}).RelayDenial() != nil || (PeerNetworkConfigurationResult{RelayDenied: "something_else"}).RelayDenial() != nil {
+		t.Fatal("an unknown or absent denial produced an error")
+	}
+}
