@@ -80,8 +80,13 @@ func (a *assemblyIngressAuthority) lookup(ctx context.Context, open connectorpro
 		a.decisions = d.IngressDecisions
 		a.fetched = now
 	}
+	// An accepted stream refreshes its authority with the decision it was admitted
+	// under, which expires after IngressAuthorityLifetime while the stream goes on
+	// (a long upload or a WebSocket). Match everything about the claim except its
+	// own expiry, and require the returned authority itself to be current.
+	// Admission still authorizes the claim strictly against this result.
 	for _, d := range a.decisions {
-		if claimed.Authorize(d, open, claimed.EdgeNodeID, claimed.EdgeProcessEpoch, time.Now().UTC()) == nil {
+		if d.ExpiresAt.After(time.Now().UTC()) && claimed.Revalidate(d, open, claimed.EdgeNodeID, claimed.EdgeProcessEpoch, time.Now().UTC()) == nil {
 			return d, nil
 		}
 	}
