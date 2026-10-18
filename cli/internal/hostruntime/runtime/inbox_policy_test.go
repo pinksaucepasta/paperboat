@@ -10,7 +10,7 @@ import (
 
 func TestStaticPolicyBindsInboxCredentialsToTheirOperationAndSingleUse(t *testing.T) {
 	resolver := staticPolicyResolver{issuer: "https://api.example.test", environmentID: "env_1", machineID: "machine_1"}
-	for capability, want := range map[string][2]string{"inbox.read.v1": {"inbox_read", "inbox:read"}, "inbox.delete.v1": {"inbox_delete", "inbox:delete"}} {
+	for capability, want := range map[string][2]string{"inbox.list.v1": {"inbox_list", "inbox:list"}, "inbox.read.v1": {"inbox_read", "inbox:read"}, "inbox.delete.v1": {"inbox_delete", "inbox:delete"}} {
 		policy, err := resolver.Policy(protocol.Frame{Type: "request", Capability: capability, OperationID: "operation_inbox_1"})
 		if err != nil {
 			t.Fatal(err)
@@ -20,11 +20,11 @@ func TestStaticPolicyBindsInboxCredentialsToTheirOperationAndSingleUse(t *testin
 		}
 	}
 	controller := &machineCapabilityController{desired: machineCapabilitySelection{FileReceive: true}}
-	if !controller.Enabled("inbox.read.v1") || !controller.Enabled("inbox.delete.v1") {
+	if !controller.Enabled("inbox.list.v1") || !controller.Enabled("inbox.read.v1") || !controller.Enabled("inbox.delete.v1") {
 		t.Error("inbox capabilities follow file receive")
 	}
 	controller.desired.FileReceive = false
-	if controller.Enabled("inbox.read.v1") || controller.Enabled("inbox.delete.v1") {
+	if controller.Enabled("inbox.list.v1") || controller.Enabled("inbox.read.v1") || controller.Enabled("inbox.delete.v1") {
 		t.Error("inbox capabilities must stop when file receive is off")
 	}
 }

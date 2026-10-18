@@ -574,8 +574,8 @@ func NewRouter(opts Options) http.Handler {
 			}
 			mux.Handle("PATCH /v1/machines/{machine_id}", userMachineAuth("machines:connect", requireCSRF(opts.Auth, userMachineRename(opts.Machines))))
 			mux.Handle("GET /v1/machines/{machine_id}/update-status", userMachineAuth("machines:read", userMachineUpdateStatus(opts.Machines)))
-			mux.Handle("GET /v1/machines/{machine_id}/inbox", userMachineAuth("machines:read", userMachineInbox(opts.Machines)))
 			if opts.Inbox != nil {
+				mux.Handle("GET /v1/machines/{machine_id}/inbox", userMachineAuth("machines:read", userMachineInboxList(opts.Machines, opts.Inbox)))
 				mux.Handle("GET /v1/machines/{machine_id}/inbox/{file_id}/content", userMachineAuth("machines:read", userMachineInboxContent(opts.Machines, opts.Inbox)))
 				mux.Handle("DELETE /v1/machines/{machine_id}/inbox/{file_id}", userMachineAuth("machines:connect", requireCSRF(opts.Auth, userMachineInboxDelete(opts.Machines, opts.Inbox))))
 			}

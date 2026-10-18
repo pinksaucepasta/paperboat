@@ -40,10 +40,6 @@ type updateObservationRepository interface {
 	RecordUpdateObservation(context.Context, string, string, usermachines.UpdateObservation) error
 }
 
-type inboxObservationRepository interface {
-	RecordInboxObservation(context.Context, string, string, usermachines.InboxObservation) error
-}
-
 type machineCapabilitiesRepository interface {
 	MachineCapabilitiesEnabled() bool
 	ResolveMachineCapabilities(context.Context, string, string) (usermachines.MachineCapabilityPolicy, error)
@@ -70,7 +66,6 @@ func runtimeObservation(repo runtimeObservationRepository, identities runtimeIde
 	var terminalJoins terminalJoinRepository
 	var availability availabilityObservationRepository
 	var updates updateObservationRepository
-	var inboxes inboxObservationRepository
 	var machineCapabilities machineCapabilitiesRepository
 	var machineServices machineServicesRepository
 	for _, sink := range observationSinks {
@@ -112,9 +107,6 @@ func runtimeObservation(repo runtimeObservationRepository, identities runtimeIde
 		if candidate, ok := sink.(updateObservationRepository); ok {
 			updates = candidate
 		}
-		if candidate, ok := sink.(inboxObservationRepository); ok {
-			inboxes = candidate
-		}
 		if candidate, ok := sink.(machineCapabilitiesRepository); ok {
 			if candidate.MachineCapabilitiesEnabled() {
 				machineCapabilities = candidate
@@ -143,7 +135,6 @@ func runtimeObservation(repo runtimeObservationRepository, identities runtimeIde
 				ObservedAt          time.Time `json:"observed_at"`
 			} `json:"runtime_diagnostics"`
 			Update *usermachines.UpdateObservation `json:"update,omitempty"`
-			Inbox  *usermachines.InboxObservation  `json:"inbox,omitempty"`
 		}
 		body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20+1))
 		decoder := json.NewDecoder(bytes.NewReader(body))
@@ -183,7 +174,7 @@ func runtimeObservation(repo runtimeObservationRepository, identities runtimeIde
 				writeError(w, r, http.StatusForbidden, "terminal_join_denied", "Current signed host identity is required to record attachment.")
 				return
 			}
-			if req.MachineServices != nil || req.LazyRuntime != nil || req.Availability != nil || req.MachineCapabilities != nil || req.RuntimeDiagnostics != nil || req.Update != nil || req.Inbox != nil {
+			if req.MachineServices != nil || req.LazyRuntime != nil || req.Availability != nil || req.MachineCapabilities != nil || req.RuntimeDiagnostics != nil || req.Update != nil {
 				writeError(w, r, http.StatusBadRequest, "invalid_request", "Terminal join must be reported separately from presence.")
 				return
 			}
@@ -323,26 +314,6 @@ func runtimeObservation(repo runtimeObservationRepository, identities runtimeIde
 				auxiliaryRejections = append(auxiliaryRejections, runtimeAuxiliaryRejection{Observation: "update", Code: code})
 			} else {
 				updateRecorded = true
-			}
-		}
-		if req.Inbox != nil {
-			if req.Inbox.Validate(time.Now().UTC()) != nil {
-				auxiliaryRejections = append(auxiliaryRejections, runtimeAuxiliaryRejection{Observation: "inbox", Code: "inbox_observation_invalid"})
-			} else if inboxes == nil {
-				auxiliaryRejections = append(auxiliaryRejections, runtimeAuxiliaryRejection{Observation: "inbox", Code: "inbox_observation_unavailable"})
-			} else if err := inboxes.RecordInboxObservation(r.Context(), req.EnvironmentID, req.ResourceID, *req.Inbox); err != nil {
-				code := "inbox_observation_unavailable"
-				switch {
-				case errors.Is(err, usermachines.ErrInboxObservationStale):
-					code = "inbox_observation_stale"
-				case errors.Is(err, usermachines.ErrInboxObservationInvalid):
-					code = "inbox_observation_invalid"
-				case errors.Is(err, usermachines.ErrNotFound):
-					code = "inbox_observation_unavailable"
-				default:
-					captureRuntimeObservationFailure(r, "inbox_observation_unavailable", err)
-				}
-				auxiliaryRejections = append(auxiliaryRejections, runtimeAuxiliaryRejection{Observation: "inbox", Code: code})
 			}
 		}
 		response := map[string]any{"accepted": true, "update_observation_recorded": updateRecorded}

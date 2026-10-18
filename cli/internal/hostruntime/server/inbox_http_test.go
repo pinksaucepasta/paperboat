@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -33,7 +34,7 @@ func inboxFixture(t *testing.T, claimsFor func(id, class string) auth.Claims) (h
 				return nil, errors.New("unknown token")
 			}
 			return authorizerFunc(func(_ context.Context, frame protocol.Frame) (Authorization, error) {
-				class := map[string]string{inboxReadCapability: "inbox_read", inboxDeleteCapability: "inbox_delete"}[frame.Capability]
+				class := map[string]string{inboxReadCapability: "inbox_read", inboxDeleteCapability: "inbox_delete", inboxListCapability: "inbox_list"}[frame.Capability]
 				if class == "" || frame.OperationID == "" {
 					t.Fatalf("frame = %+v", frame)
 				}
@@ -48,11 +49,19 @@ func inboxFixture(t *testing.T, claimsFor func(id, class string) auth.Claims) (h
 }
 
 func goodInboxClaims(id, class string) auth.Claims {
-	return auth.Claims{CredentialClass: class, Subject: "actor_1", ActorID: "actor_1", UserID: "actor_1", AccountID: "account_1", MachineID: "machine_1", ResourceKind: "inbox_file", ResourceID: id, OperationID: "operation_inbox_1", ExpiresAt: 4102444800}
+	claims := auth.Claims{CredentialClass: class, Subject: "actor_1", ActorID: "actor_1", UserID: "actor_1", AccountID: "account_1", MachineID: "machine_1", ResourceKind: "inbox_file", ResourceID: id, OperationID: "operation_inbox_1", ExpiresAt: 4102444800}
+	if class == "inbox_list" {
+		claims.ResourceKind, claims.ResourceID = "inbox", "machine_1"
+	}
+	return claims
 }
 
 func inboxRequest(method, id string) *http.Request {
-	request := httptest.NewRequest(method, inboxFilesPath+id, nil)
+	path := inboxFilesPath + id
+	if id == "" {
+		path = inboxListPath
+	}
+	request := httptest.NewRequest(method, path, nil)
 	request.Header.Set("Authorization", "Bearer single-use-proof")
 	request.Header.Set(inboxOperationHeader, "operation_inbox_1")
 	return request
@@ -167,5 +176,72 @@ func TestInboxHandlerHonoursTheCapabilityGate(t *testing.T) {
 	handler.ServeHTTP(recorder, inboxRequest(http.MethodGet, inbox.FileID("a")))
 	if recorder.Code != http.StatusConflict {
 		t.Fatalf("status=%d", recorder.Code)
+	}
+}
+
+func TestInboxHandlerListsTheInboxLive(t *testing.T) {
+	handler, root := inboxFixture(t, goodInboxClaims)
+	if err := os.WriteFile(filepath.Join(root, "second.txt"), []byte("2"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".paperboat-receipts.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, inboxRequest(http.MethodGet, ""))
+	var answer struct {
+		Total int `json:"total"`
+		Items []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+			Size int64  `json:"size"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &answer); err != nil || recorder.Code != http.StatusOK || answer.Total != 2 || len(answer.Items) != 2 || recorder.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("status=%d body=%s err=%v", recorder.Code, recorder.Body.String(), err)
+	}
+	names := map[string]int64{}
+	for _, item := range answer.Items {
+		names[item.Name] = item.Size
+		if item.ID != inbox.FileID(item.Name) {
+			t.Errorf("id of %s = %s", item.Name, item.ID)
+		}
+	}
+	if names["report final.pdf"] != 11 || names["second.txt"] != 1 {
+		t.Fatalf("items = %v", names)
+	}
+}
+
+func TestInboxHandlerListNeedsItsOwnCredential(t *testing.T) {
+	for name, claims := range map[string]func(string, string) auth.Claims{
+		"read credential": func(id, _ string) auth.Claims { return goodInboxClaims(id, "inbox_read") },
+		"other machine": func(id, class string) auth.Claims {
+			c := goodInboxClaims(id, class)
+			c.ResourceID = "machine_2"
+			return c
+		},
+		"file resource": func(id, class string) auth.Claims {
+			c := goodInboxClaims(id, class)
+			c.ResourceKind = "inbox_file"
+			return c
+		},
+		"another operation id": func(id, class string) auth.Claims {
+			c := goodInboxClaims(id, class)
+			c.OperationID = "operation_other_9"
+			return c
+		},
+	} {
+		handler, _ := inboxFixture(t, claims)
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, inboxRequest(http.MethodGet, ""))
+		if recorder.Code != http.StatusForbidden {
+			t.Errorf("%s: status=%d", name, recorder.Code)
+		}
+	}
+	handler, _ := inboxFixture(t, goodInboxClaims)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, inboxRequest(http.MethodDelete, ""))
+	if recorder.Code != http.StatusMethodNotAllowed {
+		t.Errorf("delete of the collection: status=%d", recorder.Code)
 	}
 }

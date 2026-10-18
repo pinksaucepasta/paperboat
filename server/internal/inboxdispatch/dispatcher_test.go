@@ -26,6 +26,9 @@ type fakeMachine struct {
 func (m *fakeMachine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	m.seen++
 	class := map[string]string{http.MethodGet: "inbox_read", http.MethodDelete: "inbox_delete"}[r.Method]
+	if r.URL.Path == "/v1/inbox-files" {
+		class = "inbox_list"
+	}
 	token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 	claims, err := m.signer.VerifyCredential(token, testIssuer, class, time.Now().UTC())
 	if err != nil {
@@ -180,14 +183,66 @@ func TestOfflineMachineAndMalformedRequestsDoNotReachTheNetwork(t *testing.T) {
 		t.Fatalf("machine was called %d times", machine.seen)
 	}
 	for _, base := range []string{"ftp://x", "https://user:pw@host", "https://host?x=1", "https://host/v1/runtime/a/b", "https://host/other"} {
-		if _, err := inboxEndpoint(base, "0123456789abcdef"); err == nil {
+		if _, err := inboxEndpoint(base, "0123456789abcdef", false); err == nil {
 			t.Errorf("base %q accepted", base)
 		}
 	}
-	if got, err := inboxEndpoint("https://edge.example.test/v1/runtime/host-1", "0123456789abcdef"); err != nil || got != "https://edge.example.test/v1/runtime/host-1/v1/inbox-files/0123456789abcdef" {
+	if got, err := inboxEndpoint("https://edge.example.test/v1/runtime/host-1", "0123456789abcdef", false); err != nil || got != "https://edge.example.test/v1/runtime/host-1/v1/inbox-files/0123456789abcdef" {
 		t.Fatalf("endpoint = %q %v", got, err)
 	}
-	if _, err := inboxEndpoint("https://host", "../x"); err == nil {
+	if _, err := inboxEndpoint("https://host", "../x", false); err == nil {
 		t.Fatal("file id with a path accepted")
+	}
+}
+
+func TestListAsksTheMachineLiveWithAListCredential(t *testing.T) {
+	machine := &fakeMachine{handler: func(w http.ResponseWriter, r *http.Request, claims mint.CredentialClaims) {
+		if r.URL.Path != "/v1/inbox-files" || claims.ResourceKind != mint.InboxListResourceKind || claims.ResourceID != "machine_1" || claims.CredentialClass != "inbox_list" {
+			t.Errorf("path=%s claims=%+v", r.URL.Path, claims)
+		}
+		_, _ = w.Write([]byte(`{"total":3,"items":[{"id":"0123456789abcdef","name":"a.txt","size":3,"received_at":"2026-10-18T09:00:00Z"}]}`))
+	}}
+	dispatcher, _ := dispatcherFor(t, machine)
+	// A file id on a list request is ignored: a listing is about the machine, not a file.
+	listRequest := request()
+	listRequest.FileID = "ignored"
+	got, err := dispatcher.List(t.Context(), listRequest)
+	if err != nil || got.Total != 3 || len(got.Items) != 1 || got.Items[0].Name != "a.txt" || got.Items[0].Size != 3 {
+		t.Fatalf("listing = %+v err=%v", got, err)
+	}
+}
+
+func TestListRefusesInvalidListingsAndMapsAnswers(t *testing.T) {
+	body, status := "", http.StatusOK
+	machine := &fakeMachine{handler: func(w http.ResponseWriter, _ *http.Request, _ mint.CredentialClaims) {
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(body))
+	}}
+	dispatcher, _ := dispatcherFor(t, machine)
+	for name, tc := range map[string]struct {
+		status int
+		body   string
+		want   error
+	}{
+		"path in name":   {200, `{"total":1,"items":[{"id":"0123456789abcdef","name":"../x","size":1,"received_at":"2026-10-18T09:00:00Z"}]}`, ErrMachineUnreachable},
+		"total below":    {200, `{"total":0,"items":[{"id":"0123456789abcdef","name":"a","size":1,"received_at":"2026-10-18T09:00:00Z"}]}`, ErrMachineUnreachable},
+		"short id":       {200, `{"total":1,"items":[{"id":"abc","name":"a","size":1,"received_at":"2026-10-18T09:00:00Z"}]}`, ErrMachineUnreachable},
+		"unknown field":  {200, `{"total":0,"items":[],"extra":1}`, ErrMachineUnreachable},
+		"not json":       {200, `<html>`, ErrMachineUnreachable},
+		"capability off": {409, ``, ErrCapabilityDisabled},
+		"machine error":  {500, ``, ErrMachineUnreachable},
+	} {
+		status, body = tc.status, tc.body
+		if _, err := dispatcher.List(t.Context(), request()); !errors.Is(err, tc.want) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	status, body = 200, `{"total":0,"items":null}`
+	if got, err := dispatcher.List(t.Context(), request()); err != nil || got.Items == nil || len(got.Items) != 0 {
+		t.Errorf("empty listing = %+v %v", got, err)
+	}
+	dispatcher.resolve = func(context.Context, Request) (route, error) { return route{}, ErrMachineOffline }
+	if _, err := dispatcher.List(t.Context(), request()); !errors.Is(err, ErrMachineOffline) {
+		t.Errorf("offline: %v", err)
 	}
 }

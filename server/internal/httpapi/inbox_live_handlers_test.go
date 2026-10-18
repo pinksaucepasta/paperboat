@@ -16,14 +16,20 @@ import (
 
 type fakeInboxAuthority struct{ err error }
 
-func (f fakeInboxAuthority) ListInbox(context.Context, string, string) (usermachines.InboxListing, error) {
-	return usermachines.InboxListing{}, f.err
-}
+func (f fakeInboxAuthority) CanManageInbox(context.Context, string, string) error { return f.err }
 
 type fakeInboxAPI struct {
+	listErr            error
+	listing            inboxdispatch.Listing
+	listed             []inboxdispatch.Request
 	openErr, deleteErr error
 	file               inboxdispatch.File
 	opened, deleted    []inboxdispatch.Request
+}
+
+func (f *fakeInboxAPI) List(_ context.Context, request inboxdispatch.Request) (inboxdispatch.Listing, error) {
+	f.listed = append(f.listed, request)
+	return f.listing, f.listErr
 }
 
 func (f *fakeInboxAPI) Open(_ context.Context, request inboxdispatch.Request) (inboxdispatch.File, error) {
@@ -50,6 +56,42 @@ func inboxHTTP(method, fileID string, signedIn bool, headers map[string]string) 
 }
 
 const validInboxFile = "0123456789abcdef"
+
+func TestInboxListIsServedLiveFromTheMachine(t *testing.T) {
+	api := &fakeInboxAPI{listing: inboxdispatch.Listing{Total: 1, Items: []inboxdispatch.Item{{ID: validInboxFile, Name: "a.txt", Size: 3}}}}
+	recorder := httptest.NewRecorder()
+	userMachineInboxList(fakeInboxAuthority{}, api).ServeHTTP(recorder, inboxHTTP(http.MethodGet, "", true, nil))
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"name":"a.txt"`) || !strings.Contains(recorder.Header().Get("Cache-Control"), "no-store") {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if len(api.listed) != 1 || api.listed[0].ActorID != "user_1" || api.listed[0].MachineID != "machine_1" || api.listed[0].FileID != "" {
+		t.Fatalf("request = %+v", api.listed)
+	}
+	for name, tc := range map[string]struct {
+		authority inboxAuthority
+		err       error
+		signedIn  bool
+		status    int
+		code      string
+	}{
+		"offline machine": {fakeInboxAuthority{}, inboxdispatch.ErrMachineOffline, true, http.StatusConflict, "machine_offline"},
+		"unreachable":     {fakeInboxAuthority{}, inboxdispatch.ErrMachineUnreachable, true, http.StatusServiceUnavailable, "machine_unreachable"},
+		"stranger":        {fakeInboxAuthority{err: usermachines.ErrNotFound}, nil, true, http.StatusNotFound, "user_machine_not_found"},
+		"anonymous":       {fakeInboxAuthority{}, nil, false, http.StatusUnauthorized, "unauthenticated"},
+	} {
+		api := &fakeInboxAPI{listErr: tc.err}
+		recorder := httptest.NewRecorder()
+		userMachineInboxList(tc.authority, api).ServeHTTP(recorder, inboxHTTP(http.MethodGet, "", tc.signedIn, nil))
+		if recorder.Code != tc.status || !strings.Contains(recorder.Body.String(), `"`+tc.code+`"`) {
+			t.Errorf("%s: status=%d body=%s", name, recorder.Code, recorder.Body.String())
+		}
+		if tc.status == http.StatusNotFound || tc.status == http.StatusUnauthorized {
+			if len(api.listed) != 0 {
+				t.Errorf("%s: machine reached for a refused request", name)
+			}
+		}
+	}
+}
 
 func TestInboxContentStreamsTheFileAsAnAttachment(t *testing.T) {
 	api := &fakeInboxAPI{file: inboxdispatch.File{Body: io.NopCloser(strings.NewReader("hello inbox")), Size: 11, Name: "report final.pdf"}}

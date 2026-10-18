@@ -838,6 +838,33 @@ func TestInboxCredentialsBindOneFileOneOperationAndAreNotInterchangeable(t *test
 			t.Errorf("%s accepted", name)
 		}
 	}
+	list := read
+	list.CredentialClass, list.Scopes, list.JTI, list.ResourceKind, list.ResourceID = "inbox_list", []string{"inbox:list"}, "jti_inbox_3", InboxListResourceKind, "machine_1"
+	listToken, err := provider.SignCredential(list)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claims, err := provider.VerifyCredential(listToken, list.Issuer, "inbox_list", now); err != nil || claims.ResourceID != "machine_1" {
+		t.Fatalf("list claims = %#v err=%v", claims, err)
+	}
+	if _, err := provider.VerifyCredential(listToken, list.Issuer, "inbox_read", now); err == nil {
+		t.Fatal("inbox_list verified as inbox_read")
+	}
+	for name, mutate := range map[string]func(*CredentialInput){
+		"list of a file kind":     func(in *CredentialInput) { in.ResourceKind = InboxResourceKind },
+		"list of another machine": func(in *CredentialInput) { in.ResourceID = "machine_2" },
+	} {
+		invalid := list
+		mutate(&invalid)
+		if _, err := provider.SignCredential(invalid); err == nil {
+			t.Errorf("%s accepted", name)
+		}
+	}
+	readAsList := read
+	readAsList.ResourceKind = InboxListResourceKind
+	if _, err := provider.SignCredential(readAsList); err == nil {
+		t.Error("inbox_read with the listing resource accepted")
+	}
 	noKey := remove
 	noKey.IdempotencyKey = ""
 	if _, err := provider.SignCredential(noKey); err == nil {

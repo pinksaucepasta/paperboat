@@ -540,6 +540,7 @@ var credentialPolicies = map[string]struct {
 	"preview_launch":             {audience: "paperboat-machine", scopes: []string{"preview:launch"}, maxTTL: 5 * time.Minute},
 	"inbox_read":                 {audience: "paperboat-machine", scopes: []string{"inbox:read"}, maxTTL: 2 * time.Minute},
 	"inbox_delete":               {audience: "paperboat-machine", scopes: []string{"inbox:delete"}, maxTTL: 2 * time.Minute},
+	"inbox_list":                 {audience: "paperboat-machine", scopes: []string{"inbox:list"}, maxTTL: 2 * time.Minute},
 	"private_access":             {audience: "paperboat-edge", scopes: []string{"private:access"}, maxTTL: 2 * time.Minute},
 	"native_private":             {audience: "paperboat-machine", scopes: []string{"private:native"}, maxTTL: 5 * time.Minute},
 	"file_transfer":              {audience: "paperboat-machine", scopes: []string{"file:transfer"}, maxTTL: 5 * time.Minute},
@@ -768,7 +769,7 @@ func (p *Provider) SignCredential(input CredentialInput) (string, error) {
 		if input.AssignmentID != "" {
 			claims["assignment_id"] = input.AssignmentID
 		}
-	case "inbox_read", "inbox_delete":
+	case "inbox_read", "inbox_delete", "inbox_list":
 		if err := validateInboxInput(input.CredentialClass, input.AccountID, input.MachineID, input.UserID, input.ActorID, input.Subject, input.OperationID, input.ResourceKind, input.ResourceID, input.IdempotencyKey, input.RequestID, input.CorrelationID); err != nil {
 			return "", errors.New("inbox bindings are required")
 		}
@@ -966,7 +967,7 @@ func (p *Provider) verifyCredential(token, expectedIssuer, expectedClass string,
 		if claims.MachineID == "" || claims.SourceMachineID == "" || claims.UserID == "" || claims.CLIClientSessionID == "" || !validOperationID(claims.OperationID) {
 			return CredentialClaims{}, CredentialVerificationError{Code: CredentialClaimsInvalid}
 		}
-	case "inbox_read", "inbox_delete":
+	case "inbox_read", "inbox_delete", "inbox_list":
 		if err := validateInboxInput(claims.CredentialClass, claims.AccountID, claims.MachineID, claims.UserID, claims.ActorID, claims.Subject, claims.OperationID, claims.ResourceKind, claims.ResourceID, claims.IdempotencyKey, claims.RequestID, claims.CorrelationID); err != nil {
 			return CredentialClaims{}, CredentialVerificationError{Code: CredentialClaimsInvalid}
 		}
@@ -1052,13 +1053,22 @@ func validatePreviewLaunchInput(input CredentialInput) error {
 	return nil
 }
 
-// InboxResourceKind is the resource_kind claim of the credentials that read or delete one Inbox file.
-const InboxResourceKind = "inbox_file"
+// InboxResourceKind is the resource_kind claim of the credentials that read or delete one Inbox file;
+// InboxListResourceKind is the one of a listing, whose resource_id is the machine.
+const (
+	InboxResourceKind     = "inbox_file"
+	InboxListResourceKind = "inbox"
+)
 
-// validateInboxInput checks the bindings of an inbox_read or inbox_delete credential: one machine,
-// one actor on one account, one operation, one file; deletes also carry the caller's idempotency key.
+// validateInboxInput checks the bindings of an inbox_read, inbox_delete or inbox_list credential: one
+// machine, one actor on one account, one operation, one file (the machine itself for a listing);
+// deletes also carry the caller's idempotency key.
 func validateInboxInput(class, accountID, machineID, userID, actorID, subject, operationID, resourceKind, resourceID, idempotencyKey, requestID, correlationID string) error {
-	if accountID == "" || machineID == "" || userID == "" || actorID == "" || !validOperationID(operationID) || resourceKind != InboxResourceKind || resourceID == "" {
+	wantKind := InboxResourceKind
+	if class == "inbox_list" {
+		wantKind = InboxListResourceKind
+	}
+	if accountID == "" || machineID == "" || userID == "" || actorID == "" || !validOperationID(operationID) || resourceKind != wantKind || resourceID == "" || class == "inbox_list" && resourceID != machineID {
 		return errors.New("identity bindings are incomplete")
 	}
 	if subject != userID || !validCredentialBindingID(accountID) || !validCredentialBindingID(actorID) || !validCredentialBindingID(machineID) || !validCredentialBindingID(resourceID) {

@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
@@ -18,10 +19,13 @@ import (
 
 const (
 	inboxFilesPath        = "/v1/inbox-files/"
+	inboxListPath         = "/v1/inbox-files"
+	inboxListLimit        = 200
 	inboxOperationHeader  = "X-Paperboat-Operation-Id"
 	inboxFileNameHeader   = "X-Paperboat-Inbox-File-Name"
 	inboxReadCapability   = "inbox.read.v1"
 	inboxDeleteCapability = "inbox.delete.v1"
+	inboxListCapability   = "inbox.list.v1"
 )
 
 type InboxHandlerConfig struct {
@@ -31,25 +35,28 @@ type InboxHandlerConfig struct {
 	Capabilities CapabilityGate
 }
 
-// NewInboxHandler serves the control plane's live reads and deletes of one Paperboat Inbox file:
-// GET /v1/inbox-files/{id} streams the file, DELETE removes it. Each call carries a single-use
-// credential bound to this machine, one file and one operation; the file is found by its id in the
-// Inbox folder, never by a path the caller supplies.
+// NewInboxHandler serves the control plane's live view of the Paperboat Inbox: GET /v1/inbox-files
+// lists it, GET /v1/inbox-files/{id} streams one file, DELETE removes it. Each call carries a
+// single-use credential bound to this machine and one operation (and one file); the file is found
+// by its id in the Inbox folder, never by a path the caller supplies. Nothing is kept anywhere else.
 func NewInboxHandler(config InboxHandlerConfig) (http.Handler, error) {
 	config.MachineID = strings.TrimSpace(config.MachineID)
 	if config.Authorizer == nil || config.MachineID == "" || config.InboxPath == nil {
 		return nil, errors.New("invalid inbox handler configuration")
 	}
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		listing := request.URL.Path == inboxListPath
 		id, ok := strings.CutPrefix(request.URL.Path, inboxFilesPath)
-		if !ok || !inbox.ValidFileID(id) {
+		if !listing && (!ok || !inbox.ValidFileID(id)) {
 			rejectInbox(writer, http.StatusNotFound, "inbox_file_not_found", "path")
 			return
 		}
 		capability, class := inboxReadCapability, "inbox_read"
-		switch request.Method {
-		case http.MethodGet:
-		case http.MethodDelete:
+		switch {
+		case request.Method == http.MethodGet && listing:
+			capability, class = inboxListCapability, "inbox_list"
+		case request.Method == http.MethodGet:
+		case request.Method == http.MethodDelete && !listing:
 			capability, class = inboxDeleteCapability, "inbox_delete"
 		default:
 			rejectInbox(writer, http.StatusMethodNotAllowed, "method_not_allowed", "method")
@@ -79,7 +86,11 @@ func NewInboxHandler(config InboxHandlerConfig) (http.Handler, error) {
 			return
 		}
 		claims, ok := authorized.Value.(auth.Claims)
-		if !ok || claims.CredentialClass != class || claims.ResourceKind != "inbox_file" || claims.ResourceID != id || claims.OperationID != operationID ||
+		wantKind, wantResource := "inbox_file", id
+		if listing {
+			wantKind, wantResource = "inbox", config.MachineID
+		}
+		if !ok || claims.CredentialClass != class || claims.ResourceKind != wantKind || claims.ResourceID != wantResource || claims.OperationID != operationID ||
 			claims.AccountID == "" || claims.ActorID == "" || claims.Subject != claims.ActorID || claims.MachineID != config.MachineID || claims.ExpiresAt <= 0 {
 			rejectInbox(writer, http.StatusForbidden, "forbidden", "claims")
 			return
@@ -93,12 +104,45 @@ func NewInboxHandler(config InboxHandlerConfig) (http.Handler, error) {
 			rejectInbox(writer, http.StatusServiceUnavailable, "inbox_unavailable", "path")
 			return
 		}
+		if listing {
+			serveInboxList(writer, root)
+			return
+		}
 		if request.Method == http.MethodDelete {
 			serveInboxDelete(writer, root, id)
 			return
 		}
 		serveInboxRead(request.Context(), writer, root, id)
 	}), nil
+}
+
+func serveInboxList(writer http.ResponseWriter, root string) {
+	files, err := inbox.Files(root)
+	if err != nil {
+		log.Printf("inbox list failed: %v", err)
+		rejectInbox(writer, http.StatusServiceUnavailable, "inbox_unavailable", "list")
+		return
+	}
+	type item struct {
+		ID         string    `json:"id"`
+		Name       string    `json:"name"`
+		Size       int64     `json:"size"`
+		ReceivedAt time.Time `json:"received_at"`
+	}
+	answer := struct {
+		Total int    `json:"total"`
+		Items []item `json:"items"`
+	}{Total: len(files), Items: make([]item, 0, min(len(files), inboxListLimit))}
+	for _, file := range files {
+		if len(answer.Items) == inboxListLimit {
+			break
+		}
+		answer.Items = append(answer.Items, item{ID: file.ID, Name: file.Name, Size: file.Size, ReceivedAt: file.ReceivedAt})
+	}
+	writer.Header().Set("Content-Type", "application/json")
+	writer.Header().Set("Cache-Control", "no-store")
+	writer.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(writer).Encode(answer)
 }
 
 func serveInboxDelete(writer http.ResponseWriter, root, id string) {

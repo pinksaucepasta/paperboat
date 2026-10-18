@@ -20,13 +20,14 @@ import (
 
 // InboxAPI is the live path to a machine's Inbox: the machine answers, the server stores no bytes.
 type InboxAPI interface {
+	List(context.Context, inboxdispatch.Request) (inboxdispatch.Listing, error)
 	Open(context.Context, inboxdispatch.Request) (inboxdispatch.File, error)
 	Delete(context.Context, inboxdispatch.Request) error
 }
 
 // inboxAuthority says whether an actor may manage a machine's Inbox (*usermachines.Service).
 type inboxAuthority interface {
-	ListInbox(context.Context, string, string) (usermachines.InboxListing, error)
+	CanManageInbox(context.Context, string, string) error
 }
 
 // inboxIdleTimeout ends a download whose machine stops sending.
@@ -47,12 +48,12 @@ func inboxRequest(r *http.Request, principalID string) inboxdispatch.Request {
 
 // authorizeInbox answers 404 for machines the actor may not manage, as the listing does: file names
 // and machines are private.
-func authorizeInbox(w http.ResponseWriter, r *http.Request, machines inboxAuthority, userID string) bool {
-	if !inboxFileID.MatchString(r.PathValue("file_id")) {
+func authorizeInbox(w http.ResponseWriter, r *http.Request, machines inboxAuthority, userID string, file bool) bool {
+	if file && !inboxFileID.MatchString(r.PathValue("file_id")) {
 		writeError(w, r, http.StatusNotFound, "inbox_file_not_found", "That file is not in the machine's Inbox.")
 		return false
 	}
-	if _, err := machines.ListInbox(r.Context(), userID, r.PathValue("machine_id")); err != nil {
+	if err := machines.CanManageInbox(r.Context(), userID, r.PathValue("machine_id")); err != nil {
 		if errors.Is(err, usermachines.ErrNotFound) {
 			writeError(w, r, http.StatusNotFound, "user_machine_not_found", "Machine was not found.")
 		} else {
@@ -82,6 +83,30 @@ func writeInboxDispatchError(w http.ResponseWriter, r *http.Request, err error) 
 	}
 }
 
+// userMachineInboxList lists a machine's Inbox as the machine sees it right now; the server keeps
+// nothing. An offline machine answers 409 machine_offline.
+func userMachineInboxList(machines inboxAuthority, inbox InboxAPI) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		principal, ok := principalFromContext(r.Context())
+		if !ok {
+			writeError(w, r, http.StatusUnauthorized, "unauthenticated", "Authentication is required.")
+			return
+		}
+		if !authorizeInbox(w, r, machines, principal.User.ID, false) {
+			return
+		}
+		request := inboxRequest(r, principal.User.ID)
+		request.FileID = ""
+		listing, err := inbox.List(r.Context(), request)
+		if err != nil {
+			writeInboxDispatchError(w, r, err)
+			return
+		}
+		noStore(w)
+		writeJSON(w, http.StatusOK, SuccessResponse{Data: listing})
+	}
+}
+
 // userMachineInboxContent streams one Inbox file from the machine to the browser.
 func userMachineInboxContent(machines inboxAuthority, inbox InboxAPI) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -90,7 +115,7 @@ func userMachineInboxContent(machines inboxAuthority, inbox InboxAPI) http.Handl
 			writeError(w, r, http.StatusUnauthorized, "unauthenticated", "Authentication is required.")
 			return
 		}
-		if !authorizeInbox(w, r, machines, principal.User.ID) {
+		if !authorizeInbox(w, r, machines, principal.User.ID, true) {
 			return
 		}
 		ctx, cancel := context.WithCancel(r.Context())
@@ -147,7 +172,7 @@ func userMachineInboxDelete(machines inboxAuthority, inbox InboxAPI) http.Handle
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "An Idempotency-Key header is required.")
 			return
 		}
-		if !authorizeInbox(w, r, machines, principal.User.ID) {
+		if !authorizeInbox(w, r, machines, principal.User.ID, true) {
 			return
 		}
 		request := inboxRequest(r, principal.User.ID)

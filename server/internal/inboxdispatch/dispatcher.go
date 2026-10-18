@@ -5,8 +5,10 @@
 package inboxdispatch
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -15,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat-server/internal/admission"
@@ -31,6 +34,7 @@ const (
 	DefaultMaxFileBytes int64 = 2 << 30
 	credentialLifetime        = 90 * time.Second
 	maxErrorBody              = 4 << 10
+	maxListBody               = 256 << 10
 )
 
 var (
@@ -56,6 +60,23 @@ type Request struct {
 	IdempotencyKey string
 	// TeamID is the selected team workspace, empty for Personal.
 	TeamID sql.NullString
+}
+
+// MaxListItems is how many files a listing holds; Total counts them all.
+const MaxListItems = 200
+
+// Item is one file in a machine's Inbox as the machine lists it.
+type Item struct {
+	ID         string    `json:"id"`
+	Name       string    `json:"name"`
+	Size       int64     `json:"size"`
+	ReceivedAt time.Time `json:"received_at"`
+}
+
+// Listing is a machine's Inbox, newest first, as it is right now.
+type Listing struct {
+	Total int    `json:"total"`
+	Items []Item `json:"items"`
 }
 
 // File is a streaming read of one Inbox file. The caller closes Body.
@@ -162,6 +183,44 @@ func (d *Dispatcher) resolveRoute(ctx context.Context, request Request) (route, 
 	return found, nil
 }
 
+// List asks the machine for its Inbox right now. Nothing is stored here.
+func (d *Dispatcher) List(ctx context.Context, request Request) (Listing, error) {
+	request.FileID = ""
+	response, err := d.call(ctx, http.MethodGet, "inbox_list", "inbox:list", request)
+	if err != nil {
+		return Listing{}, err
+	}
+	defer response.Body.Close()
+	body, readErr := io.ReadAll(io.LimitReader(response.Body, maxListBody+1))
+	if response.StatusCode != http.StatusOK {
+		return Listing{}, statusError(response.StatusCode)
+	}
+	var listing Listing
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	if readErr != nil || len(body) > maxListBody || decoder.Decode(&listing) != nil || !validListing(listing) {
+		return Listing{}, errors.Join(ErrMachineUnreachable, errors.New("inbox listing is invalid"))
+	}
+	if listing.Items == nil {
+		listing.Items = []Item{}
+	}
+	return listing, nil
+}
+
+func validListing(listing Listing) bool {
+	if listing.Total < len(listing.Items) || len(listing.Items) > MaxListItems {
+		return false
+	}
+	seen := make(map[string]bool, len(listing.Items))
+	for _, item := range listing.Items {
+		if len(item.ID) != 16 || seen[item.ID] || item.Name == "" || len(item.Name) > 255 || !utf8.ValidString(item.Name) || strings.ContainsAny(item.Name, "/\\\x00\r\n") || item.Size < 0 || item.ReceivedAt.IsZero() {
+			return false
+		}
+		seen[item.ID] = true
+	}
+	return true
+}
+
 // Open starts a streaming read of one Inbox file.
 func (d *Dispatcher) Open(ctx context.Context, request Request) (File, error) {
 	response, err := d.call(ctx, http.MethodGet, "inbox_read", "inbox:read", request)
@@ -210,14 +269,15 @@ func statusError(status int) error {
 }
 
 func (d *Dispatcher) call(ctx context.Context, method, class, scope string, request Request) (*http.Response, error) {
-	if d == nil || strings.TrimSpace(request.ActorID) == "" || strings.TrimSpace(request.MachineID) == "" || strings.TrimSpace(request.FileID) == "" || strings.TrimSpace(request.OperationID) == "" {
+	listing := class == "inbox_list"
+	if d == nil || strings.TrimSpace(request.ActorID) == "" || strings.TrimSpace(request.MachineID) == "" || !listing && strings.TrimSpace(request.FileID) == "" || strings.TrimSpace(request.OperationID) == "" {
 		return nil, ErrInvalidConfiguration
 	}
 	found, err := d.resolve(ctx, request)
 	if err != nil {
 		return nil, err
 	}
-	endpoint, err := inboxEndpoint(found.BaseURL, request.FileID)
+	endpoint, err := inboxEndpoint(found.BaseURL, request.FileID, listing)
 	if err != nil {
 		return nil, errors.Join(ErrMachineUnreachable, err)
 	}
@@ -234,6 +294,9 @@ func (d *Dispatcher) call(ctx context.Context, method, class, scope string, requ
 	}
 	if class == "inbox_delete" {
 		input.IdempotencyKey = request.IdempotencyKey
+	}
+	if listing {
+		input.ResourceKind, input.ResourceID = mint.InboxListResourceKind, request.MachineID
 	}
 	token, err := admission.Sign(d.signer, input)
 	if err != nil {
@@ -262,7 +325,7 @@ func (d *Dispatcher) call(ctx context.Context, method, class, scope string, requ
 
 // inboxEndpoint builds the machine's file URL from its ingress base: the base may be a bare host or
 // the logical runtime path of a self-hosted edge, never anything with credentials or a query.
-func inboxEndpoint(base, fileID string) (string, error) {
+func inboxEndpoint(base, fileID string, collection bool) (string, error) {
 	parsed, err := url.Parse(strings.TrimRight(strings.TrimSpace(base), "/"))
 	if err != nil {
 		return "", err
@@ -275,6 +338,11 @@ func inboxEndpoint(base, fileID string) (string, error) {
 		if !ok || logical == "" || strings.ContainsAny(logical, "/:@?#") {
 			return "", errors.New("machine route is invalid")
 		}
+	}
+	if collection {
+		parsed.Path = strings.TrimRight(parsed.Path, "/") + "/v1/inbox-files"
+		parsed.RawPath = ""
+		return parsed.String(), nil
 	}
 	if fileID == "" || strings.ContainsAny(fileID, "/?#% \t\r\n") {
 		return "", errors.New("file id is invalid")

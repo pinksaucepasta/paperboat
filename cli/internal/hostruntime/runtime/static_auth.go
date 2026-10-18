@@ -142,6 +142,11 @@ func (r staticPolicyResolver) Policy(frame protocol.Frame) (auth.Policy, error) 
 		base.Scopes = []string{"inbox:read"}
 		base.OperationID = frame.OperationID
 		base.SingleUse = true
+	case "inbox.list.v1":
+		base.CredentialClass = "inbox_list"
+		base.Scopes = []string{"inbox:list"}
+		base.OperationID = frame.OperationID
+		base.SingleUse = true
 	case "inbox.delete.v1":
 		base.CredentialClass = "inbox_delete"
 		base.Scopes = []string{"inbox:delete"}

@@ -508,6 +508,7 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 		if inboxErr != nil {
 			return nil, inboxErr
 		}
+		mux.Handle("/v1/inbox-files", inboxHandler)
 		mux.Handle("/v1/inbox-files/", inboxHandler)
 	}
 	registerHostLivenessAndDiagnostics(mux, healthSource, dependencies.HealthTracker, dependencies.Metrics, dependencies.EventLog, func() HostWorkloadCounts {
