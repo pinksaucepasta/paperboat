@@ -7,7 +7,8 @@ import {
   useApiQuery,
   machineOwner,
   meQuery,
-  useMachines,
+  machineSearchQuery,
+  useMachinePage,
   useRunning,
   useWorkspace,
   type Machine,
@@ -30,12 +31,19 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 
 export function MachineTable() {
-  const { data: machines, isPending, isError, refetch } = useMachines()
+  const { data: page, isPending, isError, refetch } = useMachinePage()
   const { data: me } = useApiQuery(meQuery)
   const { data: running, isError: runningFailed } = useRunning()
   const workspace = useWorkspace()
   const [query, setQuery] = useMachineQuery()
   const parsed = parseQuery(useDeferredValue(query))
+  // The first page holds up to 200 machines; past that, typing searches the whole workspace.
+  const partial = Boolean(page && page.total > page.items.length)
+  const search = useApiQuery({
+    ...machineSearchQuery(workspace?.id ?? "", parsed.text),
+    enabled: partial && Boolean(workspace && parsed.text),
+  })
+  const machines = partial && parsed.text ? search.data?.items : page?.items
   const keys: FilterKey[] = workspace?.kind === "personal" ? ["status", "os", "owner"] : ["status", "os"]
   const applied = (Object.entries(parsed.filters) as [FilterKey, string][]).filter(([key]) => keys.includes(key))
   const visible = machines?.filter((machine) =>
@@ -126,7 +134,7 @@ export function MachineTable() {
             </tr>
           </thead>
           <tbody className="divide-y divide-divider">
-            {isPending && <LoadingRows />}
+            {(isPending || (partial && Boolean(parsed.text) && search.isPending)) && <LoadingRows />}
             {visible?.map((machine) => (
               <MachineRow
                 key={machine.id}
@@ -145,8 +153,13 @@ export function MachineTable() {
             </Button>
           </div>
         )}
-        {machines?.length === 0 && <NoMachines />}
-        {machines && machines.length > 0 && visible?.length === 0 && (
+        {partial && !parsed.text && page && (
+          <p className="py-4 text-center text-xs text-muted-foreground">
+            Showing {page.items.length} of {page.total} machines. Search to find the others.
+          </p>
+        )}
+        {machines?.length === 0 && !filtered && <NoMachines />}
+        {machines && visible?.length === 0 && (machines.length > 0 || filtered) && (
           <p className="py-12 text-center text-sm text-muted-foreground">
             {filtered ? "No machines match these filters" : "No machines"}
           </p>
