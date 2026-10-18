@@ -169,3 +169,12 @@ func withCleanup(message string, primary error, cleanups ...error) error {
 	}
 	return errors.Join(primary, cleanup)
 }
+
+// SuppliedExecutableError names why a binary offered to `pb install` is
+// refused and what to do about it. It is an invalid-request failure.
+type SuppliedExecutableError struct{ Path, Reason, Fix string }
+
+func (e *SuppliedExecutableError) Error() string {
+	return "the executable " + e.Path + " " + e.Reason + "; " + e.Fix + ", then run `pb install` again"
+}
+func (e *SuppliedExecutableError) Is(target error) bool { return target == ErrInvalidRequest }

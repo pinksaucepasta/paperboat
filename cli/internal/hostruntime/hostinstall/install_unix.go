@@ -1576,12 +1576,11 @@ func verifyArtifact(path string, uid int, platform string) (resultErr error) {
 		return ErrInvalidRequest
 	}
 	lstat, err := os.Lstat(path)
-	rootOwnedSource := lstat != nil && ownerUID(lstat) == 0
 	if err != nil {
 		return hostInstallFailure("inspecting installation state failed", ErrInvalidRequest, err)
 	}
-	if !lstat.Mode().IsRegular() || lstat.Mode()&os.ModeSymlink != 0 || lstat.Mode().Perm()&0o022 != 0 || (ownerUID(lstat) != uid && !rootOwnedSource) {
-		return ErrInvalidRequest
+	if problem := suppliedExecutableProblem(path, lstat, uid); problem != nil {
+		return problem
 	}
 	file, err := os.Open(path)
 	if err != nil {
@@ -1596,6 +1595,31 @@ func verifyArtifact(path string, uid int, platform string) (resultErr error) {
 		return ErrInvalidRequest
 	}
 	return nil
+}
+
+func suppliedExecutableProblem(path string, info os.FileInfo, uid int) error {
+	switch {
+	case info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular():
+		return &SuppliedExecutableError{Path: path, Reason: "is not a regular file", Fix: "run the real pb file directly, not a link or directory"}
+	case info.Mode().Perm()&0o022 != 0:
+		return &SuppliedExecutableError{Path: path, Reason: fmt.Sprintf("is writable by other users (mode %04o)", info.Mode().Perm()), Fix: "run `chmod go-w " + path + "`"}
+	case ownerUID(info) != uid && ownerUID(info) != 0:
+		return &SuppliedExecutableError{Path: path, Reason: "is owned by another user", Fix: "copy it to a file you own (or run `sudo chown " + strconv.Itoa(uid) + " " + path + "`)"}
+	}
+	return nil
+}
+
+// CheckSuppliedExecutable runs the privileged installer's file checks as the
+// invoking user, before any administrator prompt.
+func CheckSuppliedExecutable(path string, uid int) error {
+	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
+		return ErrInvalidRequest
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return hostInstallFailure("inspecting installation state failed", ErrInvalidRequest, err)
+	}
+	return suppliedExecutableProblem(path, info, uid)
 }
 
 func canonicalOwnedDirectory(path string, uid int) bool {

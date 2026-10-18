@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
 )
@@ -73,5 +75,24 @@ func TestSuppliedInstallTimeoutPreservesNativeRecoveryBudget(t *testing.T) {
 		if got := suppliedInstallTimeout(platform); got != 3*time.Minute {
 			t.Fatal("Unix install deadline changed", platform, got)
 		}
+	}
+}
+
+// A refused executable must reach the user with its reason and fix, not as the
+// generic "could not finish the command" text.
+func TestInstallShowsWhyTheSuppliedExecutableWasRefused(t *testing.T) {
+	oldSource, oldInstall := runningInstallSource, installSuppliedExecutable
+	t.Cleanup(func() { runningInstallSource, installSuppliedExecutable = oldSource, oldInstall })
+	runningInstallSource = func() (string, installsource.Source, error) {
+		return "/tmp/pb", installsource.Source{Version: "custom-test", Distribution: installsource.Custom}, nil
+	}
+	refusal := &hostinstall.SuppliedExecutableError{Path: "/tmp/pb", Reason: "is writable by other users (mode 0775)", Fix: "run `chmod go-w /tmp/pb`"}
+	installSuppliedExecutable = func(context.Context, string, installsource.Source, string) (string, error) { return "", refusal }
+	command := platformInstallCommand()
+	command.SetArgs([]string{})
+	err := command.Execute()
+	failure := classifyCommandFailure(err)
+	if err == nil || !strings.Contains(commandFailureMessage(err, failure), "chmod go-w /tmp/pb") {
+		t.Fatalf("message=%q err=%v", commandFailureMessage(err, failure), err)
 	}
 }

@@ -52,6 +52,11 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 	if err != nil {
 		return "", err
 	}
+	if bundlePath == "" {
+		if err := hostinstall.CheckSuppliedExecutable(executable, uid); err != nil {
+			return "", err
+		}
+	}
 	gid, err := strconv.Atoi(account.Gid)
 	if err != nil {
 		return "", err

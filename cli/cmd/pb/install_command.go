@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"runtime"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntimecmd"
 	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
@@ -34,6 +36,10 @@ func platformInstallCommand() *cobra.Command {
 			defer cancel()
 			installed, err := installSuppliedExecutable(ctx, executable, source, directory)
 			if err != nil {
+				var refused *hostinstall.SuppliedExecutableError
+				if errors.As(err, &refused) {
+					return usageError{err: err, publicMessage: refused.Error()}
+				}
 				return err
 			}
 			result := map[string]any{"executable": installed, "version": source.Version, "distribution": source.Distribution, "automatic_update_checks": source.AutomaticUpdates, "sha256": source.SHA256, "enrollment": "unchanged"}
