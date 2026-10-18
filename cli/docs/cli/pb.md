@@ -64,7 +64,7 @@ pb [environment] [new] [flags]
 ### SEE ALSO
 
 * [pb access](pb_access.md)	 - Open authenticated private access
-* [pb approve](pb_approve.md)	 - Approve or revoke a peer machine over gRPC IPC
+* [pb approve](pb_approve.md)	 - Approve a peer machine over gRPC IPC
 * [pb auth](pb_auth.md)	 - Manage Paperboat sign-in
 * [pb bugreport](pb_bugreport.md)	 - Create a redacted Paperboat diagnostic bundle
 * [pb completion](pb_completion.md)	 - Generate the autocompletion script for the specified shell

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -110,11 +111,14 @@ func rpcTagCommand() *cobra.Command {
 	return cmd
 }
 
+// ErrRevokeIsMachineRevoke says where revoking a machine's enrollment lives.
+var ErrRevokeIsMachineRevoke = errors.New("revoking a machine is `pb machine revoke <machine>`, which asks for confirmation")
+
 func rpcApproveCommand() *cobra.Command {
 	var revoke bool
 	cmd := &cobra.Command{
 		Use:   "approve <machine-id>",
-		Short: "Approve or revoke a peer machine over gRPC IPC",
+		Short: "Approve a peer machine over gRPC IPC",
 		Args:  commandArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) (resultErr error) {
 			ctx, cancel := context.WithTimeout(cmd.Context(), 5*time.Second)
@@ -144,7 +148,8 @@ func rpcApproveCommand() *cobra.Command {
 			return writeDaemonCommandResult(cmd, resp, fmt.Sprintf("Peer %s %s successfully (success: %v)", resp.MachineId, action, resp.Success))
 		},
 	}
-	cmd.Flags().BoolVar(&revoke, "revoke", false, "revoke peer admission")
+	cmd.Flags().BoolVar(&revoke, "revoke", false, "not supported here: revoking a machine is pb machine revoke")
+	_ = cmd.Flags().MarkHidden("revoke")
 	cmd.Flags().Bool("json", false, "print JSON")
 	return cmd
 }

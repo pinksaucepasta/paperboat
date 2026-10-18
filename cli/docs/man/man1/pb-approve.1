@@ -2,7 +2,7 @@
 .TH "PB-APPROVE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
 
 .SH NAME
-pb-approve - Approve or revoke a peer machine over gRPC IPC
+pb-approve - Approve a peer machine over gRPC IPC
 
 
 .SH SYNOPSIS
@@ -10,10 +10,10 @@ pb-approve - Approve or revoke a peer machine over gRPC IPC
 
 
 .SH DESCRIPTION
-Approve or revoke a peer machine over gRPC IPC
+Approve a peer machine over gRPC IPC
 
 .PP
-Approve an exact peer machine ID for local access, or use --revoke to withdraw that approval. This changes the local daemon's machine trust decision; inspect the ID before approving an unfamiliar peer.
+Approve an exact peer machine ID for local access. Inspect the ID before approving an unfamiliar peer. Withdrawing a machine is \fBpb machine revoke\fR, which asks for confirmation; pb approve never revokes.
 
 .PP
 JSON output is supported with --json.
@@ -26,10 +26,6 @@ JSON output is supported with --json.
 .PP
 \fB--json\fP[=false]
 	print JSON
-
-.PP
-\fB--revoke\fP[=false]
-	revoke peer admission
 
 
 .SH OPTIONS INHERITED FROM PARENT COMMANDS

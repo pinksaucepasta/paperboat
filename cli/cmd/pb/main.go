@@ -3039,7 +3039,15 @@ mode, relays, and observation timestamps.`, Example: "  pb relay list\n  pb rela
 	root.AddCommand(daemoncmd.ServiceCommand())
 	root.AddCommand(daemoncmd.ResolveCommand())
 	root.AddCommand(daemoncmd.TagCommand())
-	root.AddCommand(daemoncmd.ApproveCommand())
+	approve := daemoncmd.ApproveCommand()
+	approveRun := approve.RunE
+	approve.RunE = func(command *cobra.Command, args []string) error {
+		if revoke, _ := command.Flags().GetBool("revoke"); revoke {
+			return localArgumentError("pb approve only approves a peer. To revoke a machine, run `pb machine revoke <machine>`; it asks for a confirmation code and ends that machine's enrollment.")
+		}
+		return approveRun(command, args)
+	}
+	root.AddCommand(approve)
 	root.AddCommand(privilegedServiceOperationCommand())
 	root.AddCommand(platformInstallCommand())
 	root.AddCommand(platformUninstallHelperCommand())

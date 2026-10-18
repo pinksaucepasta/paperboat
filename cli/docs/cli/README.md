@@ -10,7 +10,7 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb access](pb_access.md) | Open authenticated private access |
 | [pb access machine](pb_access_machine.md) | Forward a local port to an authorized machine service |
 | [pb access tunnel](pb_access_tunnel.md) | Open private TCP access through stable hostd |
-| [pb approve](pb_approve.md) | Approve or revoke a peer machine over gRPC IPC |
+| [pb approve](pb_approve.md) | Approve a peer machine over gRPC IPC |
 | [pb auth](pb_auth.md) | Manage Paperboat sign-in |
 | [pb auth login](pb_auth_login.md) | Sign in through browser approval on any device |
 | [pb auth logout](pb_auth_logout.md) | Revoke and remove the active client session |

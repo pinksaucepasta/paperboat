@@ -312,7 +312,9 @@ func localDaemonCommand() *cobra.Command {
 					}
 					client := api.New(cfg.ServerURL, credential, &http.Client{Transport: peerHTTPTransport})
 					if !approved {
-						return client.DisconnectUserMachine(ctx, machineID)
+						// Revoking an enrollment is a server-side, account-wide action. It lives only
+						// in `pb machine revoke`, which asks for a confirmation code.
+						return ErrRevokeIsMachineRevoke
 					}
 					return localdaemon.ApproveOwnedMachineEnrollment(ctx, store, profile, client, machineID)
 				}
