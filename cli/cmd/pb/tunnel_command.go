@@ -2215,11 +2215,20 @@ func tunnelStateCommand(action string) *cobra.Command {
 		if err != nil {
 			return err
 		}
-		out.Operation, err = waitForTunnelOperation(command, client, out.Operation)
-		if err != nil {
-			return err
+		status := out.Tunnel.DesiredState
+		if out.Operation.Schema != "" {
+			out.Operation, err = waitForTunnelOperation(command, client, out.Operation)
+			if err != nil {
+				return err
+			}
+			status = tunnelOperationHuman(out.Operation)
+		} else {
+			expected := map[string]string{"delete": "deleted", "pause": "paused", "resume": "active"}[action]
+			if out.Tunnel.ID != current.ID || out.Tunnel.DesiredState != expected {
+				return api.ErrUnsafeTunnelResponse
+			}
 		}
-		return tunnelOutput(command, out, fmt.Sprintf("%s tunnel %s; status: %s", tunnelActionPastTense(action), out.Tunnel.ID, tunnelOperationHuman(out.Operation)))
+		return tunnelOutput(command, out, fmt.Sprintf("%s tunnel %s; status: %s", tunnelActionPastTense(action), out.Tunnel.ID, status))
 	})
 	if action == "delete" {
 		command.Flags().String("confirm", "", "six-character confirmation code from the preview")

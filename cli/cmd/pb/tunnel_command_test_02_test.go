@@ -171,7 +171,7 @@ func TestTunnelDeleteRequiresConfirmationAndUsesCurrentETag(t *testing.T) {
 			t.Fatalf("headers = %#v", r.Header)
 		}
 		tunnel.DesiredState = "deleted"
-		_ = json.NewEncoder(w).Encode(map[string]any{"data": api.TunnelMutation{Tunnel: tunnel, Operation: validCommandOperation("tunnel", tunnel.ID)}})
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": tunnel})
 	})
 	command := tunnelCobraCommandV1()
 	var preview bytes.Buffer
