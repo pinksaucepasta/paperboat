@@ -84,3 +84,42 @@ func TestRewriteManagedToolUsesCanonicalMachineSuffix(t *testing.T) {
 		t.Fatalf("rewrite=%q target=%q err=%v", got, target, err)
 	}
 }
+
+func TestRewriteManagedSFTPDestinationPreservesTransferPaths(t *testing.T) {
+	for _, test := range []struct {
+		name            string
+		arguments, want []string
+		resolution      string
+	}{
+		{
+			name:       "remote path",
+			arguments:  []string{"mac:/tmp/remote file"},
+			want:       []string{"adam@mac.machines.example.test:/tmp/remote file"},
+			resolution: "mac@",
+		},
+		{
+			name:       "download",
+			arguments:  []string{"-b", "batch:commands", "bob@mac:/tmp/remote file", "./local:file"},
+			want:       []string{"-b", "batch:commands", "bob@mac.machines.example.test:/tmp/remote file", "./local:file"},
+			resolution: "mac@bob",
+		},
+		{
+			name:       "option terminator",
+			arguments:  []string{"--", "mac", "./local-file"},
+			want:       []string{"--", "adam@mac.machines.example.test", "./local-file"},
+			resolution: "mac@",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var calls []string
+			got, err := rewriteManagedToolArguments(managedToolTestContext(), "sftp", test.arguments,
+				managedToolTestDomain, managedToolTestResolver(&calls))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, test.want) || !reflect.DeepEqual(calls, []string{test.resolution}) {
+				t.Fatalf("rewrite=%q calls=%q, want %q and resolution %q", got, calls, test.want, test.resolution)
+			}
+		})
+	}
+}

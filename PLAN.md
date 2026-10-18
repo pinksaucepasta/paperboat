@@ -1805,3 +1805,6 @@ Schema089 final embedded PG PASS (paid-Team payment, seat policy/recovery, HTTP0
 
 2026-10-18 | Lane B F7-02 publication qualification | Final merged store vet/race PASS1.341s; rebuilt TestPreviewLeaseV1LifecycleOnPostgres isolated VPS PG PASS2.24s through public schema087. CLI/shared/relay/console trees exactly match public abf4031 full gate EXIT0/GATE PASS; no new broad gate.
 Original /tmp/f14-gate.log remains raw CLI FAIL (TestLayerObservationFlushTraverses129ContextsAndKeepsRejectedWorkspace, TestTailcatQUIC), never relabeled green; A source-qualified full/focused owner evidence supersedes the old source. No migration/activation/deploy; parent rollout and console refresh remain.
+
+2026-10-18 | Lane A F5/C063 SFTP destination | Rows ticked:none; remote paths were passed into machine lookup and a trailing local filename replaced the remote destination. Owner RED0.102s/GREEN wrapper+doctor race1.707s, affected cmd/pb vet PASS; first remote operand and exact path/local filename now preserved.
+Primary: ssh-tools:hp-apple/apple-hp plus direct machine:/synthetic/file ./returned hash checks; C066 exact-fingerprint changed-key approval remains device-only. Rebased only worker changes onto published main; workspace gate qualification remains before push.

@@ -92,11 +92,15 @@ func rewriteManagedToolArguments(ctx *command.Context, tool string, args []strin
 			return nil, fmt.Errorf("%w: %s requires a remote machine:path operand", errManagedToolOperand, tool)
 		}
 	case "sftp":
-		index := lastSFTPDestination(result)
+		index := sftpDestination(result)
 		if index < 0 {
 			return nil, fmt.Errorf("%w: sftp requires [user@]machine", errManagedToolOperand)
 		}
-		target, requestedUser, err := managedssh.ParseMachineTarget(result[index])
+		operand, suffix := result[index], ""
+		if prefix, path, ok := splitManagedRemoteOperand(operand); ok {
+			operand, suffix = prefix, ":"+path
+		}
+		target, requestedUser, err := managedssh.ParseMachineTarget(operand)
 		if err != nil {
 			return nil, err
 		}
@@ -109,7 +113,7 @@ func rewriteManagedToolArguments(ctx *command.Context, tool string, args []strin
 		if user == "" {
 			user = destination.User
 		}
-		result[index] = user + "@" + destination.Host
+		result[index] = user + "@" + destination.Host + suffix
 	default:
 		return nil, errManagedToolOperand
 	}
@@ -127,17 +131,16 @@ func splitManagedRemoteOperand(value string) (prefix, path string, ok bool) {
 	return value[:colon], value[colon+1:], true
 }
 
-func lastSFTPDestination(args []string) int {
+func sftpDestination(args []string) int {
 	// OpenSSH options whose separate form consumes the following argv entry.
 	valueOptions := map[string]bool{"-B": true, "-b": true, "-c": true, "-D": true, "-F": true, "-i": true, "-J": true, "-l": true, "-o": true, "-P": true, "-R": true, "-S": true, "-s": true, "-X": true}
-	last := -1
 	for index := 0; index < len(args); index++ {
 		value := args[index]
 		if value == "--" {
 			if index+1 < len(args) {
-				last = index + 1
+				return index + 1
 			}
-			break
+			return -1
 		}
 		if valueOptions[value] {
 			index++
@@ -146,7 +149,8 @@ func lastSFTPDestination(args []string) int {
 		if strings.HasPrefix(value, "-") {
 			continue
 		}
-		last = index
+		// SFTP accepts a remote destination followed by an optional local path.
+		return index
 	}
-	return last
+	return -1
 }
