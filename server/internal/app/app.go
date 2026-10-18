@@ -27,6 +27,7 @@ import (
 	"github.com/pinksaucepasta/paperboat-server/internal/favorites"
 	pbgithub "github.com/pinksaucepasta/paperboat-server/internal/github"
 	"github.com/pinksaucepasta/paperboat-server/internal/httpapi"
+	"github.com/pinksaucepasta/paperboat-server/internal/inboxdispatch"
 	"github.com/pinksaucepasta/paperboat-server/internal/inspectaccess"
 	"github.com/pinksaucepasta/paperboat-server/internal/jobmonitor"
 	"github.com/pinksaucepasta/paperboat-server/internal/lazyaccess"
@@ -246,6 +247,16 @@ func New(opts Options) (*App, error) {
 		return nil, fmt.Errorf("configure preview dispatcher: %w", err)
 	}
 	previewLeaseService.ConfigureDispatcher(previewDispatcher)
+	inboxDispatcher, err := inboxdispatch.New(inboxdispatch.Config{
+		DB:     store,
+		Signer: mintKeys,
+		Issuer: normalizeHelperIssuer(opts.Config.HTTP.PublicBaseURL),
+		Client: providerHTTPClient("helper", opts.Config.HTTP.RequestTimeout),
+	})
+	if err != nil {
+		_ = store.Close()
+		return nil, fmt.Errorf("configure inbox dispatcher: %w", err)
+	}
 	checker := readinessChecker{cfg: opts.Config, db: store}
 	userMachineService := usermachines.New(store, auditWriter, usermachines.Policy{PairingLifetime: opts.Config.UserMachines.PairingLifetime, OfflineAfter: opts.Config.UserMachines.OfflineAfter, AllowedPlatforms: opts.Config.UserMachines.AllowedPlatforms}, workspaceBilling)
 	teamInboxService, err := teaminbox.New(store, opts.Config.Access.FileTransfer)
@@ -460,6 +471,7 @@ func New(opts Options) (*App, error) {
 		_ = store.Close()
 		return nil, fmt.Errorf("configure peer network authority: %w", err)
 	}
+	peerNetworkService.ConfigureQuota(workspaceBilling, billingPageURL(opts.Config.HTTP.BrowserLoginOrigin))
 	nativePrivateResolver, err := nativeprivateaccess.NewSQLResolver(store)
 	if err != nil {
 		_ = store.Close()
@@ -767,6 +779,7 @@ func New(opts Options) (*App, error) {
 		MeteringRepo:              metering.NewRuntimeRepository(store, opts.Config.Secrets.EncryptionKey, opts.Config.ConfigSync.StaleHeartbeatAfter),
 		RuntimeIdentity:           enrollmentService,
 		Machines:                  userMachineService,
+		Inbox:                     inboxDispatcher,
 		Workspaces:                workspace.New(store),
 		BrowserTerminal:           browserTerminalGateway,
 		MintKeys:                  mintKeys,
@@ -948,4 +961,13 @@ func New(opts Options) (*App, error) {
 	reporterTransferred = true
 	runtimeTransferred = true
 	return application, nil
+}
+
+// billingPageURL is the console's Billing page, derived from the same configured console
+// origin that client discovery publishes; empty when none is configured.
+func billingPageURL(consoleOrigin string) string {
+	if consoleOrigin == "" {
+		return ""
+	}
+	return strings.TrimRight(consoleOrigin, "/") + "/billing"
 }
