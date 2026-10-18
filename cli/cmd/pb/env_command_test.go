@@ -453,6 +453,7 @@ func TestSafeEnvironmentVariableCommandErrorUsesCurrentVaultRecoveryActions(t *t
 		{code: "vault_conflict", want: "unlock the current vault"},
 		{code: "rotation_required", want: "pb env rotate"},
 		{code: "key_authorization_required", want: "pb env grants sync"},
+		{code: "permission_denied", want: "do not have write access"},
 	} {
 		err := safeEnvironmentVariableCommandError(&api.APIError{Code: test.code, Message: "must not escape"})
 		if err == nil || !strings.Contains(err.Error(), test.want) || strings.Contains(err.Error(), "manager") || strings.Contains(err.Error(), "authority") {

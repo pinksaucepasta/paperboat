@@ -185,6 +185,9 @@ func (v PasswordVault) publishOperation(ctx context.Context, local *config.Passw
 			if errors.As(err, &rejected) && rejected.Status == 409 && rejected.Code == "version_conflict" {
 				return v.reconcileScopeConflict(ctx, local, c, in, err)
 			}
+			if vaultWriteDenied(err) {
+				return v.dropDeniedOperation(local, err)
+			}
 			return &ScopePublicationPending{Cause: err}
 		}
 		if out.Envelope != in.Envelope {

@@ -44,6 +44,9 @@ func (c *vaultScopesControl) PutVaultRecords(_ context.Context, coordinate api.V
 	if c.recordFailure == "conflict" {
 		return api.VaultRecordsResult{}, &api.APIError{Status: 409, Code: "version_conflict"}
 	}
+	if c.recordFailure == "denied" {
+		return api.VaultRecordsResult{}, &api.APIError{Status: 403, Code: "permission_denied"}
+	}
 	if previous, ok := c.recordOperations[in.OperationID]; ok {
 		if !reflect.DeepEqual(c.recordOperationRequests[in.OperationID], in) {
 			return api.VaultRecordsResult{}, errors.New("changed record replay")
@@ -167,4 +170,28 @@ func TestSingleRecordMutationSkipsSnapshotAndResumesExactCiphertext(t *testing.T
 		t.Fatal("rejected CAS overwrote committed value", err)
 	}
 	clear(value)
+}
+
+func TestDeniedRecordWriteIsReportedAndNotLeftPending(t *testing.T) {
+	ctx := context.Background()
+	v, c, store := newVaultScopesFixture(t)
+	c.recordFailure = "denied"
+	err := v.SetScopeVariable(ctx, "personal", v.AccountID, "", "VALUE", []byte("first"))
+	var rejected *api.APIError
+	var pending *ScopePublicationPending
+	if !errors.As(err, &rejected) || rejected.Status != 403 || errors.As(err, &pending) {
+		t.Fatalf("denied write err=%v, want definitive 403 and not pending", err)
+	}
+	local, err := store.LoadPasswordVault(v.Issuer, v.AccountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer local.Clear()
+	if local.Operation != nil {
+		t.Fatal("denied write left a staged operation")
+	}
+	c.recordFailure = ""
+	if err := v.SetScopeVariable(ctx, "personal", v.AccountID, "", "VALUE", []byte("second")); err != nil {
+		t.Fatalf("next edit after denial: %v", err)
+	}
 }

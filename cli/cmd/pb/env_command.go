@@ -507,6 +507,8 @@ func safeEnvironmentVariableCommandError(err error) error {
 			return envCommandError(err, "ENV recipient authorization is unavailable; run `pb env grants sync` and retry")
 		case "team_entitlement_required":
 			return envCommandError(err, "This ENV Team source requires an active Team subscription. Activate Team Billing, then retry the source operation or run `pb env vault resume` for a pending delivery.")
+		case "permission_denied":
+			return envCommandError(err, "You do not have write access to this ENV source; nothing was changed. Ask a Team admin for write access, then submit the edit again.")
 		case "operation_conflict":
 			return envCommandError(err, "the ENV operation conflicts with an existing operation; run `pb env vault resume` before retrying")
 		}

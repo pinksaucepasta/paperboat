@@ -281,6 +281,9 @@ func (v PasswordVault) publishRecordsOperation(ctx context.Context, local *confi
 			}
 			return &ScopeRefreshConflict{Cause: err}
 		}
+		if vaultWriteDenied(err) {
+			return v.dropDeniedOperation(local, err)
+		}
 		return &ScopePublicationPending{Cause: err}
 	}
 	if len(out.Records) != len(in.Records) {

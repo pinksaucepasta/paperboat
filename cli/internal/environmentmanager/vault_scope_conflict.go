@@ -31,6 +31,23 @@ func (e *ScopePublicationPending) Error() string {
 }
 func (e *ScopePublicationPending) Unwrap() error { return e.Cause }
 
+// vaultWriteDenied reports a definitive server refusal of the writer's access.
+// The staged write can never succeed by resuming, so it is not pending.
+func vaultWriteDenied(err error) bool {
+	var rejected *api.APIError
+	return errors.As(err, &rejected) && rejected.Status == 403 && rejected.Code == "permission_denied"
+}
+
+// dropDeniedOperation removes a staged source write the server refused, so the
+// vault is not left blocked on an operation that resume would retry forever.
+func (v PasswordVault) dropDeniedOperation(local *config.PasswordVaultRecord, denied error) error {
+	local.Operation = nil
+	if err := v.Store.SavePasswordVault(*local); err != nil {
+		return &ScopePublicationPending{Cause: errors.Join(denied, err)}
+	}
+	return denied
+}
+
 func (v PasswordVault) reconcileScopeConflict(ctx context.Context, local *config.PasswordVaultRecord, c VaultDataClient, in api.VaultScopePut, rejected error) error {
 	pending := func(cause error) error { return &ScopePublicationPending{Cause: errors.Join(rejected, cause)} }
 	op := local.Operation
