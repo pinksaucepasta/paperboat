@@ -57,7 +57,8 @@ func (nativeWorkerStarter) Start(ctx context.Context, request workerStartRequest
 		controlWriter.Close()
 		return nil, err
 	}
-	command.Stderr = io.Discard
+	stderr := &tailBuffer{limit: 2048}
+	command.Stderr = stderr
 	if os.Geteuid() == 0 {
 		command.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: uint32(request.UID), Gid: uint32(request.GID)}}
 	}
@@ -83,7 +84,35 @@ func (nativeWorkerStarter) Start(ctx context.Context, request workerStartRequest
 		_ = command.Wait()
 		return nil, err
 	}
-	return &execWorker{command: command, control: controlWriter, lines: bufio.NewReader(io.LimitReader(stdout, 128)), workerID: request.WorkerID}, nil
+	worker := &execWorker{command: command, control: controlWriter, lines: bufio.NewReader(io.LimitReader(stdout, 128)), workerID: request.WorkerID, stderr: stderr, exited: make(chan struct{})}
+	go func() {
+		worker.waitErr = command.Wait()
+		close(worker.exited)
+	}()
+	return worker, nil
+}
+
+// tailBuffer keeps the last bytes a worker wrote to stderr for the exit report.
+type tailBuffer struct {
+	mu    sync.Mutex
+	limit int
+	data  []byte
+}
+
+func (b *tailBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.data = append(b.data, p...)
+	if len(b.data) > b.limit {
+		b.data = append([]byte(nil), b.data[len(b.data)-b.limit:]...)
+	}
+	return len(p), nil
+}
+
+func (b *tailBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return strings.TrimSpace(string(b.data))
 }
 
 // execWorker uses a private stdin pipe for exactly one fixed activation word.
@@ -96,6 +125,27 @@ type execWorker struct {
 	workerID string
 	mu       sync.Mutex
 	ready    hostdproto.Status
+	stderr   *tailBuffer
+	exited   chan struct{}
+	waitErr  error
+}
+
+func (w *execWorker) Exited() <-chan struct{} { return w.exited }
+
+// ExitReason reports the exit status and the last stderr lines; the worker holds
+// no secrets in its diagnostics.
+func (w *execWorker) ExitReason() string {
+	<-w.exited
+	reason := "exit status unknown"
+	if w.waitErr == nil {
+		reason = "exit status 0"
+	} else {
+		reason = w.waitErr.Error()
+	}
+	if tail := w.stderr.String(); tail != "" {
+		reason += "; last output: " + tail
+	}
+	return reason
 }
 
 func (w *execWorker) Ready(ctx context.Context) (hostdproto.Status, error) {
@@ -143,24 +193,20 @@ func (w *execWorker) Stop(ctx context.Context) error {
 		return nil
 	}
 	_ = w.command.Process.Signal(os.Interrupt)
-	done := make(chan error, 1)
-	go func() { done <- w.command.Wait() }()
 	select {
 	case <-ctx.Done():
 		_ = w.command.Process.Kill()
-		<-done
+		<-w.exited
 		return ctx.Err()
-	case err := <-done:
-		if err != nil {
-			var exited *exec.ExitError
-			if !errors.As(err, &exited) {
-				return err
-			}
+	case <-w.exited:
+		var exited *exec.ExitError
+		if w.waitErr != nil && !errors.As(w.waitErr, &exited) {
+			return w.waitErr
 		}
 		return nil
 	case <-time.After(5 * time.Second):
 		_ = w.command.Process.Kill()
-		<-done
+		<-w.exited
 		return nil
 	}
 }

@@ -23,15 +23,17 @@ type ownedWorkers struct {
 	paths    []string
 	workers  map[string]*ownedWorker
 	active   string
+	lost     chan error
 }
 type ownedWorker struct {
 	request       workerStartRequest
 	process       workerProcess
 	ready, active hostdproto.Status
+	stopping      bool
 }
 
 func newOwnedWorkers(ctx context.Context, template workerStartRequest, start func(context.Context, workerStartRequest) (workerProcess, error)) *ownedWorkers {
-	return &ownedWorkers{ctx: ctx, start: start, template: template, paths: []string{template.Executable, os.Getenv("PAPERBOAT_BINARY_ROLLBACK"), os.Getenv("PAPERBOAT_BINARY_STAGED")}, workers: map[string]*ownedWorker{}}
+	return &ownedWorkers{ctx: ctx, start: start, template: template, paths: []string{template.Executable, os.Getenv("PAPERBOAT_BINARY_ROLLBACK"), os.Getenv("PAPERBOAT_BINARY_STAGED")}, workers: map[string]*ownedWorker{}, lost: make(chan error, 1)}
 }
 func (o *ownedWorkers) validExecutable(path, version string) bool {
 	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
@@ -85,7 +87,11 @@ func (o *ownedWorkers) HandleWorkerControl(ctx context.Context, r hostdproto.Wor
 		if err != nil {
 			return out, err
 		}
-		o.workers[r.WorkerID] = &ownedWorker{request: request, process: process}
+		worker := &ownedWorker{request: request, process: process}
+		o.workers[r.WorkerID] = worker
+		if watcher, ok := process.(exitWatcher); ok {
+			go o.watchExit(r.WorkerID, worker, watcher)
+		}
 		return out, nil
 	case "stop_active":
 		if o.active == "" {
@@ -132,6 +138,7 @@ func (o *ownedWorkers) stopLocked(ctx context.Context, id string) error {
 	if worker == nil {
 		return nil
 	}
+	worker.stopping = true
 	stopCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	if err := worker.process.Stop(stopCtx); err != nil {
@@ -152,3 +159,26 @@ func (o *ownedWorkers) shutdown(ctx context.Context) error {
 	}
 	return result
 }
+
+// watchExit reports the active worker dying without having been stopped, so
+// hostd can exit and let its service manager start it with a fresh worker. A
+// candidate or deliberately stopped worker is not a failure.
+func (o *ownedWorkers) watchExit(id string, worker *ownedWorker, watcher exitWatcher) {
+	select {
+	case <-watcher.Exited():
+	case <-o.ctx.Done():
+		return
+	}
+	o.mu.Lock()
+	unexpected := !worker.stopping && o.workers[id] == worker && o.active == id
+	o.mu.Unlock()
+	if !unexpected || o.ctx.Err() != nil {
+		return
+	}
+	select {
+	case o.lost <- runtimeFailure("the runtime worker exited without being stopped: "+watcher.ExitReason(), errWorkerExited):
+	default:
+	}
+}
+
+var errWorkerExited = errors.New("runtime worker exited")

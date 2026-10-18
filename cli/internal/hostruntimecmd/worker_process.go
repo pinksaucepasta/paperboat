@@ -27,3 +27,11 @@ type workerProcess interface {
 	Activate(context.Context) (hostdproto.Status, error)
 	Stop(context.Context) error
 }
+
+// exitWatcher is implemented by worker processes that report their own exit.
+// Hostd uses it to notice a runtime worker that died without being stopped.
+type exitWatcher interface {
+	Exited() <-chan struct{}
+	// ExitReason is a bounded, non-secret description of how the process ended.
+	ExitReason() string
+}

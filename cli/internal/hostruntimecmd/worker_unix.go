@@ -160,6 +160,11 @@ run:
 				runErr = runtimeFailure("hostd lifecycle listener stopped", serverErr)
 			}
 			break run
+		case lost := <-owned.lost:
+			// Without its worker the machine is not serving; Restart=always brings
+			// hostd and a fresh worker back instead of waiting for an updater.
+			runErr = errors.Join(lost, notifier.Degraded("runtime worker exited"))
+			break run
 		case <-ctx.Done():
 			runErr = runtimeFailureIfAny("hostd draining failed", runtimeShutdownCause(ctx), notifier.Draining())
 			break run
