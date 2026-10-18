@@ -9,6 +9,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"database/sql"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
@@ -37,6 +38,7 @@ import (
 	"github.com/pinksaucepasta/paperboat-server/internal/teaminbox"
 	"github.com/pinksaucepasta/paperboat-server/internal/teams"
 	"github.com/pinksaucepasta/paperboat-server/internal/usermachines"
+	"github.com/pinksaucepasta/paperboat-server/internal/workspace"
 	"golang.org/x/crypto/curve25519"
 	"golang.org/x/crypto/ssh"
 )
@@ -258,7 +260,9 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	// A teammate keeps an independently rooted CLI identity. The signed network
 	// projection joins that identity to the enrolled owner's exact machine key;
 	// it never copies either account's private identity material.
-	sharedUser, sharedCLI, teamID := "network_shared_user_"+suffix, "network_shared_cli_"+suffix, "network_team_"+suffix
+	sharedUser, sharedCLI, teamID := "network_shared_user_"+suffix, "network_shared_cli_"+suffix, "nt-"+suffix[len(suffix)-24:]
+	// A teammate reaches a shared machine only through an explicit team workspace.
+	sharedScope := workspace.WithContext(ctx, workspace.Scope{ID: teamID, TeamID: teamID})
 	if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$2,$3,'active')`, sharedUser, "workos_"+sharedUser, sharedUser+"@example.test"); err != nil {
 		t.Fatal(err)
 	}
@@ -339,7 +343,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	machineService.ConfigureFileTransfer(accessdescriptor.FileTransferPolicy{Revision: "shared-native-v1", MaxFileBytes: 1 << 20, MaxBatchFiles: 2, MaxBatchBytes: 2 << 20, MaxConcurrentTransfers: 2, RetentionSeconds: 60, DeliveryTimeoutSeconds: 60, MaxPendingSpoolBytes: 2 << 20})
 	execOperationID := "operation_shared_exec_" + suffix
 	refreshRuntimeCarrier()
-	execDescriptor, err := machineService.ExecDescriptor(ctx, sharedUser, "network_shared_source_"+suffix, machineID, sharedCLI, execOperationID)
+	execDescriptor, err := machineService.ExecDescriptor(sharedScope, sharedUser, "network_shared_source_"+suffix, machineID, sharedCLI, execOperationID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -353,26 +357,26 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	refreshRuntimeCarrier()
-	activeExecDescriptor, err := machineService.ExecDescriptor(ctx, sharedUser, "network_shared_source_"+suffix, machineID, sharedCLI, "operation_shared_active_exec_"+suffix)
+	activeExecDescriptor, err := machineService.ExecDescriptor(sharedScope, sharedUser, "network_shared_source_"+suffix, machineID, sharedCLI, "operation_shared_active_exec_"+suffix)
 	if err != nil {
 		t.Fatal(err)
 	}
 	refreshRuntimeCarrier()
-	afterDisableExecDescriptor, err := machineService.ExecDescriptor(ctx, sharedUser, "network_shared_source_"+suffix, machineID, sharedCLI, "operation_shared_after_disable_exec_"+suffix)
+	afterDisableExecDescriptor, err := machineService.ExecDescriptor(sharedScope, sharedUser, "network_shared_source_"+suffix, machineID, sharedCLI, "operation_shared_after_disable_exec_"+suffix)
 	if err != nil {
 		t.Fatal(err)
 	}
 	sharedTerminalID := "umts_network_shared_" + suffix
-	if _, err = store.Queries().CreateUserMachineTerminalSession(ctx, dbsqlc.CreateUserMachineTerminalSessionParams{ID: sharedTerminalID, UserMachineID: machineID, OwnerAccount: sharedUser, Name: "shared-shell", LaunchCwd: "/workspace"}); err != nil {
+	if _, err = store.Queries().CreateUserMachineTerminalSession(ctx, dbsqlc.CreateUserMachineTerminalSessionParams{ID: sharedTerminalID, UserMachineID: machineID, OwnerAccount: sharedUser, OwnerTeamID: sql.NullString{String: teamID, Valid: true}, Name: "shared-shell", LaunchCwd: "/workspace"}); err != nil {
 		t.Fatal(err)
 	}
 	refreshRuntimeCarrier()
-	terminalDescriptor, err := machineService.ConnectTerminalSession(ctx, sharedUser, "network_shared_source_"+suffix, machineID, sharedCLI, sharedTerminalID)
+	terminalDescriptor, err := machineService.ConnectTerminalSession(sharedScope, sharedUser, "network_shared_source_"+suffix, machineID, sharedCLI, sharedTerminalID)
 	if err != nil || !terminalDescriptor.Connectable {
 		t.Fatalf("shared terminal connectable=%v status=%q reason=%q err=%v", terminalDescriptor.Connectable, terminalDescriptor.Status, terminalDescriptor.Reason, err)
 	}
 	ownerSharedTerminalID := "umts_network_owner_shared_" + suffix
-	if _, err = store.Queries().CreateUserMachineTerminalSession(ctx, dbsqlc.CreateUserMachineTerminalSessionParams{ID: ownerSharedTerminalID, UserMachineID: machineID, OwnerAccount: userID, Name: "owner-shared-shell", LaunchCwd: "/workspace"}); err != nil {
+	if _, err = store.Queries().CreateUserMachineTerminalSession(ctx, dbsqlc.CreateUserMachineTerminalSessionParams{ID: ownerSharedTerminalID, UserMachineID: machineID, OwnerAccount: userID, OwnerTeamID: sql.NullString{String: teamID, Valid: true}, Name: "owner-shared-shell", LaunchCwd: "/workspace"}); err != nil {
 		t.Fatal(err)
 	}
 	refreshRuntimeCarrier()
@@ -587,7 +591,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	}
 	machineService.ConfigureTeamInbox(inbox)
 	refreshRuntimeCarrier()
-	if _, err = machineService.FileTransferDescriptor(ctx, sharedUser, "network_shared_source_"+suffix, machineID, sharedCLI, ""); !errors.Is(err, teaminbox.ErrPending) {
+	if _, err = machineService.FileTransferDescriptor(sharedScope, sharedUser, "network_shared_source_"+suffix, machineID, sharedCLI, ""); !errors.Is(err, teaminbox.ErrPending) {
 		t.Fatalf("cross-account descriptor without acceptance error=%v", err)
 	}
 	filePayload := []byte("server-issued-native-file")
@@ -604,7 +608,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 		t.Fatalf("manual Inbox request status=%q error=%v", fileRequest.Status, err)
 	}
 	refreshRuntimeCarrier()
-	if _, err = machineService.FileTransferDescriptorForRequest(ctx, sharedUser, "network_shared_source_"+suffix, machineID, sharedCLI, "", fileRequest.RequestID, fileRequest.ManifestDigest); !errors.Is(err, teaminbox.ErrPending) {
+	if _, err = machineService.FileTransferDescriptorForRequest(sharedScope, sharedUser, "network_shared_source_"+suffix, machineID, sharedCLI, "", fileRequest.RequestID, fileRequest.ManifestDigest); !errors.Is(err, teaminbox.ErrPending) {
 		t.Fatalf("pending Inbox descriptor error=%v", err)
 	}
 	if _, err = inbox.Decide(ctx, userID, fileRequest.RequestID, "approved", fileRequest.DecisionGeneration); err != nil {
@@ -624,7 +628,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 		t.Fatalf("own-machine descriptor without acceptance: %v", err)
 	}
 	refreshRuntimeCarrier()
-	fileDescriptor, err := machineService.FileTransferDescriptorForRequest(ctx, sharedUser, "network_shared_source_"+suffix, machineID, sharedCLI, "", fileRequest.RequestID, fileRequest.ManifestDigest)
+	fileDescriptor, err := machineService.FileTransferDescriptorForRequest(sharedScope, sharedUser, "network_shared_source_"+suffix, machineID, sharedCLI, "", fileRequest.RequestID, fileRequest.ManifestDigest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -663,7 +667,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 		}
 	}
 	refreshRuntimeCarrier()
-	sshDescriptor, err := machineService.SSHDescriptor(ctx, sharedUser, "network_shared_source_"+suffix, machineID, sharedCLI, "operation_shared_ssh_"+suffix)
+	sshDescriptor, err := machineService.SSHDescriptor(sharedScope, sharedUser, "network_shared_source_"+suffix, machineID, sharedCLI, "operation_shared_ssh_"+suffix)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -700,7 +704,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	}
 	assertNoNetworkCapability(t, sharedMachineDisabled.Configuration, "file_transfer")
 	refreshRuntimeCarrier()
-	if _, err = machineService.FileTransferDescriptor(ctx, sharedUser, "network_shared_source_"+suffix, machineID, sharedCLI, ""); !errors.Is(err, usermachines.ErrMachineCapabilityUnavailable) {
+	if _, err = machineService.FileTransferDescriptor(sharedScope, sharedUser, "network_shared_source_"+suffix, machineID, sharedCLI, ""); !errors.Is(err, usermachines.ErrMachineCapabilityUnavailable) {
 		t.Fatalf("disabled file receive descriptor error=%v", err)
 	}
 	if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.team_machine_grants SET active=false WHERE team_id=$1 AND machine_id=$2 AND account_id=$3`, teamID, machineID, sharedUser); err != nil {
@@ -729,7 +733,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	refreshRuntimeCarrier()
-	finalSharedExec, err := machineService.ExecDescriptor(ctx, sharedUser, "network_shared_source_"+suffix, machineID, sharedCLI, "operation_shared_after_owner_left_"+suffix)
+	finalSharedExec, err := machineService.ExecDescriptor(sharedScope, sharedUser, "network_shared_source_"+suffix, machineID, sharedCLI, "operation_shared_after_owner_left_"+suffix)
 	if err != nil {
 		t.Fatal(err)
 	}
