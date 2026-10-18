@@ -56,6 +56,12 @@ func TestTunnelRouteMutationIdempotencyReplayAndConflict(t *testing.T) {
 	var firstBody []byte
 	requests := 0
 	withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/v1/tunnels/tun_1" {
+			tunnel := validCommandTunnel()
+			w.Header().Set("ETag", tunnel.ETag)
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": tunnel})
+			return
+		}
 		if r.Method != http.MethodPost || r.URL.Path != "/v1/tunnels/tun_1/routes" {
 			t.Fatalf("request=%s %s", r.Method, r.URL.Path)
 		}
@@ -280,6 +286,12 @@ func TestTunnelMutationSelectorsRejectCursorCyclesAndOversizePages(t *testing.T)
 
 func TestTunnelMutationRejectsSecretBearingUnknownSuccessFields(t *testing.T) {
 	withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/v1/tunnels/tun_1" {
+			tunnel := validCommandTunnel()
+			w.Header().Set("ETag", tunnel.ETag)
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": tunnel})
+			return
+		}
 		if r.Method != http.MethodPost || r.URL.Path != "/v1/tunnels/tun_1/routes" {
 			t.Fatalf("request=%s %s", r.Method, r.URL.Path)
 		}

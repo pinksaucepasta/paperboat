@@ -2392,19 +2392,24 @@ func routeAddCommand() *cobra.Command {
 		if e != nil {
 			return e
 		}
-		if protocol == "tcp" {
+		// Public routes answer on the tunnel's own hostname unless --domain names
+		// another; the edge cannot serve a public catch-all. Private HTTP routes
+		// keep catch_all.
+		if protocol == "tcp" || protocol == "http" && host == "" {
 			tunnel, getErr := c.GetTunnelV1(ctx, tunnelID)
 			if getErr != nil {
 				return getErr
 			}
-			if tunnel.StableEndpoint == "" {
-				return fmt.Errorf("public TCP routes require a verified customer domain; list routes with `pb tunnel route list %s`, add a domain with `pb tunnel domain add %s HOSTNAME --route ROUTE_ID`, then retry", tunnelID, tunnelID)
+			if protocol == "tcp" || tunnel.AccessMode == "public" {
+				if tunnel.StableEndpoint == "" {
+					return fmt.Errorf("public %s routes require a verified customer domain; list routes with `pb tunnel route list %s`, add a domain with `pb tunnel domain add %s HOSTNAME --route ROUTE_ID`, then retry", strings.ToUpper(protocol), tunnelID, tunnelID)
+				}
+				u, parseErr := url.Parse(tunnel.StableEndpoint)
+				if parseErr != nil || u.Hostname() == "" {
+					return api.ErrUnsafeTunnelResponse
+				}
+				hostMatch = api.TunnelRouteHostMatch{Type: "managed_exact", Hostname: u.Hostname()}
 			}
-			u, parseErr := url.Parse(tunnel.StableEndpoint)
-			if parseErr != nil || u.Hostname() == "" {
-				return api.ErrUnsafeTunnelResponse
-			}
-			hostMatch = api.TunnelRouteHostMatch{Type: "managed_exact", Hostname: u.Hostname()}
 		}
 		out, e := retryTunnelRead(ctx, func() (api.TunnelRouteMutation, error) {
 			return c.CreateTunnelRouteV1(ctx, tunnelID, key, api.TunnelRouteInput{Name: name, Protocol: protocol, HostMatch: hostMatch, PathPrefix: pathValue, Origin: originValue, Priority: priority, ConnectTimeoutMS: int32(connectTimeout / time.Millisecond), IdleTimeoutMS: int32(idleTimeout / time.Millisecond), MaxConcurrentStreams: maxStreams})

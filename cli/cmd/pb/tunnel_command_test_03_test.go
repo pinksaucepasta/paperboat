@@ -184,6 +184,12 @@ func TestTunnelRouteMutationRetriesTransientFailureWithSameIdempotencyKey(t *tes
 	var calls int
 	var keys []string
 	withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/v1/tunnels/tun_1" {
+			tunnel := validCommandTunnel()
+			w.Header().Set("ETag", tunnel.ETag)
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": tunnel})
+			return
+		}
 		calls++
 		keys = append(keys, r.Header.Get("Idempotency-Key"))
 		if calls == 1 {
@@ -207,6 +213,12 @@ func TestTunnelRouteMutationRetriesTransientFailureWithSameIdempotencyKey(t *tes
 
 func TestTunnelRouteMutationReportsTerminalFailureWithoutWait(t *testing.T) {
 	withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/v1/tunnels/tun_1" {
+			tunnel := validCommandTunnel()
+			w.Header().Set("ETag", tunnel.ETag)
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": tunnel})
+			return
+		}
 		route := validCommandRoute("route_1", "api")
 		operation := validCommandOperation("route", route.ID)
 		operation.Phase = "failed"
@@ -398,5 +410,56 @@ func TestTunnelCreateWaitsForCanonicalDomainAndRejectsChangedBinding(t *testing.
 				t.Fatalf("canonical reads=%d", calls)
 			}
 		})
+	}
+}
+
+// The server rejects public HTTP catch-all routes (the edge needs a hostname),
+// so a public tunnel's default route uses the tunnel's managed hostname.
+func TestTunnelRouteAddDefaultHostMatchFollowsAccessMode(t *testing.T) {
+	for _, test := range []struct {
+		name, accessMode, wantType, wantHost string
+	}{
+		{"public", "public", "managed_exact", "123e4567-e89b-42d3-a456-426614174000.tunnels.example.test"},
+		{"private", "private", "catch_all", ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var input api.TunnelRouteInput
+			withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodGet && r.URL.Path == "/v1/tunnels/tun_1" {
+					tunnel := validCommandTunnel()
+					tunnel.AccessMode = test.accessMode
+					w.Header().Set("ETag", tunnel.ETag)
+					_ = json.NewEncoder(w).Encode(map[string]any{"data": tunnel})
+					return
+				}
+				if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+					t.Fatal(err)
+				}
+				route := validCommandRoute("route_1", "api")
+				_ = json.NewEncoder(w).Encode(map[string]any{"data": api.TunnelRouteMutation{Route: route, Operation: validCommandOperation("route", route.ID), Changed: true}})
+			})
+			command := tunnelCobraCommandV1()
+			command.SetArgs([]string{"route", "add", "tun_1", "--name", "api", "--to", "http://127.0.0.1:8080"})
+			if err := command.Execute(); err != nil {
+				t.Fatal(err)
+			}
+			if input.HostMatch.Type != test.wantType || input.HostMatch.Hostname != test.wantHost {
+				t.Fatalf("host match = %+v, want %s %q", input.HostMatch, test.wantType, test.wantHost)
+			}
+		})
+	}
+}
+
+func TestTunnelRouteAddPublicHTTPWithoutManagedHostnameExplainsTheDomainStep(t *testing.T) {
+	withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
+		tunnel := validCommandTunnel()
+		tunnel.AccessMode, tunnel.StableEndpoint, tunnel.SummaryCode = "public", "", "custom_domain_required"
+		w.Header().Set("ETag", tunnel.ETag)
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": tunnel})
+	})
+	command := tunnelCobraCommandV1()
+	command.SetArgs([]string{"route", "add", "tun_1", "--name", "api", "--to", "http://127.0.0.1:8080"})
+	if err := command.Execute(); err == nil || !strings.Contains(err.Error(), "verified customer domain") || !strings.Contains(err.Error(), "--domain") && !strings.Contains(err.Error(), "pb tunnel domain add tun_1 HOSTNAME") {
+		t.Fatalf("error = %v", err)
 	}
 }
