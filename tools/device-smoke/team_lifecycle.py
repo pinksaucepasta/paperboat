@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Qualify real owner/teammate team commands without changing device enrollment."""
+"""Qualify real owner/teammate team commands without changing device enrollment.
+
+The enrolled device account is the team owner by default (--device-role owner); with
+--device-role member the device account is the teammate and the controlled second profile
+(teammate_profile.py) is the owner. Roles are parameters, not a fork.
+"""
 import argparse
 import json
 import os
@@ -38,6 +43,7 @@ def check_roles(call, current, invite, team_id, owner_id, recipient_id):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--roles', action='store_true')
+    parser.add_argument('--device-role', choices=['owner', 'member'], default='owner')
     # Team creation now needs a paid Checkout, so a retained paid team is the fixture.
     parser.add_argument('--team', default=os.environ.get('PAPERBOAT_SMOKE_TEAM', ''))
     args = parser.parse_args()
@@ -49,23 +55,28 @@ def main():
     env = environment(root)
 
     def call(*args, teammate=False):
-        prefix = ['--config', str(config)] if teammate else []
+        # `teammate=True` means "act as the invited member"; that is the second profile when the
+        # device account owns the team, and the device account itself when it is the member.
+        profile = teammate == (args_device_role == 'owner')
+        prefix = ['--config', str(config)] if profile else []
         # Team inventories are canonical arrays, unlike command envelopes.
         value = json.loads(invoke(pb, *prefix, *args, raw=True, input='',
-                                  env=env if teammate else None, timeout=40))
+                                  env=env if profile else None, timeout=40))
         return value.get('data', value) if isinstance(value, dict) else value
 
+    args_device_role = args.device_role
     before = registration()
     owner = call('auth', 'status', '--json')
     recipient = call('auth', 'status', '--json', teammate=True)
     assert owner['signed_in'] and recipient['signed_in']
-    assert owner['account']['id'] == before['account_id']
+    device = owner if args.device_role == 'owner' else recipient
+    assert device['account']['id'] == before['account_id']
     assert recipient['account']['id'] != owner['account']['id']
     email = recipient['account']['email']
     fixture = bool(args.team)
     team_id = args.team or 'smoke-team-' + secrets.token_hex(8)
     state = root / 'owned-team.json'
-    state.write_text(json.dumps({'team_id': team_id, 'owner': before['account_id']}))
+    state.write_text(json.dumps({'team_id': team_id, 'owner': owner['account']['id']}))
     state.chmod(0o600)
     created = False
     was_member = False
@@ -86,7 +97,7 @@ def main():
         else:
             team = call('team', 'create', team_id, '--json')
             created = True
-        assert team['team_id'] == team_id and team['owner_account'] == before['account_id']
+        assert team['team_id'] == team_id and team['owner_account'] == owner['account']['id']
         assert any(t['team_id'] == team_id for t in call('team', 'list', '--json'))
 
         def invite():
@@ -114,7 +125,7 @@ def main():
         assert any(t['team_id'] == team_id for t in
                    call('team', 'list', '--json', teammate=True))
         if args.roles:
-            check_roles(call, current, invite, team_id, before['account_id'],
+            check_roles(call, current, invite, team_id, owner['account']['id'],
                         recipient['account']['id'])
     except BaseException as error:
         primary_error = error
@@ -131,14 +142,14 @@ def main():
             if created:
                 current_team = call('team', 'get', team_id, '--json')
                 cleanup_owner = current_team['owner_account']
-                assert cleanup_owner in (before['account_id'], recipient['account']['id'])
+                assert cleanup_owner in (owner['account']['id'], recipient['account']['id'])
                 deleted = call('team', 'delete', team_id, '--generation',
                                str(current_team['generation']), '--confirm', team_id, '--json',
                                teammate=cleanup_owner == recipient['account']['id'])
                 assert deleted['deleted']
                 assert not any(t['team_id'] == team_id for t in call('team', 'list', '--json'))
             assert registration() == before
-            assert call('auth', 'status', '--json')['account']['id'] == before['account_id']
+            assert device['account']['id'] == before['account_id']
             state.unlink()
         except BaseException:
             if primary_error is None:
