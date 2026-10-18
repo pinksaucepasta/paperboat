@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"github.com/google/uuid"
 	wire "github.com/pinksaucepasta/paperboat/shared/peeridentity"
 	"math/big"
 	"net/http"
@@ -312,7 +313,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 		{`INSERT INTO paperboat.control_helpers(id,environment_id,state) VALUES($1,$2,'active')`, []any{"network_helper_" + suffix, envID}},
 		{`INSERT INTO paperboat.control_connector_generations(environment_id,machine_id,generation,edge_pool,edge_node_id,state) VALUES($1,$2,1,'task8',$3,'admitted')`, []any{envID, machineID, runtimeEdgeID}},
 		{`INSERT INTO paperboat.control_routes(id,environment_id,kind,public_host,target_host,target_port,desired_revision,applied_revision,applied_node_id,applied_generation) VALUES($1,$2,'runtime_https_wss',$3,'127.0.0.1',8080,1,1,$4,1)`, []any{"network_route_" + suffix, envID, "network-" + suffix + ".example.test", runtimeEdgeID}},
-		{`INSERT INTO paperboat.runtime_carrier_attachments(route_id,machine_id,account_id,installation_generation,worker_generation,process_id,generation,edge_node_id,edge_process_epoch,public_identity_key,route_revision,session_id,admission,expires_at,ready,observed_at,active) VALUES($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,'{}',now()+interval '1 hour',true,now(),true)`, []any{runtimeRouteID, machineID, userID, "network_process_" + suffix, runtimeEdgeID, runtimeEdgeEpoch, runtimeIdentity, "network_carrier_session_" + suffix}},
+		{`INSERT INTO paperboat.runtime_carrier_attachments(route_id,machine_id,account_id,installation_generation,worker_generation,process_id,generation,edge_node_id,edge_process_epoch,public_identity_key,route_revision,session_id,preview_session_id,admission,expires_at,ready,observed_at,active) VALUES($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$8,'{}',now()+interval '1 hour',true,now(),true)`, []any{runtimeRouteID, machineID, userID, "network_process_" + suffix, runtimeEdgeID, runtimeEdgeEpoch, runtimeIdentity, "session_" + uuid.NewString()}},
 	} {
 		if _, err = store.SQL().ExecContext(ctx, statement.query, statement.args...); err != nil {
 			t.Fatal(err)
