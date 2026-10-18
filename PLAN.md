@@ -2017,3 +2017,5 @@ Owned HTTP origins stopped, temporary device runner helpers were removed, and ow
 Apple was left unchanged: last reported dev-claude-26d0167-tdiag, signed out with support_bf1b4a17-e3f4-4c78-8e02-34c5f9588194.
 All finished code is pushed, no unpushed or half-done source changes remain, and no workers or queued child runs remain; this docs-only handoff reuses the qualified workspace baseline and recorded focused race/vet checks.
 2026-10-18 | Edge 8204fb3 rollout | oracle+anvit edge 2026.10.16.8 -> 2026.10.18.1 (native arm64, pbh install --relay-image <same> --tunnel-image), relay containers not restarted, 0 route_invalid/reconcile_failed over 2 min on both, readyz healthy; rollback image paperboat-tunnel:2026.10.16.8 retained on both.
+
+2026-10-18 | Lane C batch | rows ticked:F15-06 L | 9fffe4e Activity sentences, 0797da2 update summary per workspace (F14-09 console part), d01e625 Environment 401 sign-in loop fixed; F10-06 needs browser vault (console/NOTES.md Environment).
