@@ -1816,3 +1816,5 @@ Defaults stay before the preserved boundary; baseline workspace gate abf4031 all
 2026-10-18 | Lane A F12 Team response consumer | Rows ticked:none; command HTTP owner RED0.28s/GREEN command/API race3.241/1.073s and affected vet PASS; published name/suspended/terminal grants retained and active members/resource grants visible. Baseline workspace gate abf4031 PASS.
 Paid-create and bought-seat producers now published; CLI consumer follow-up in progress. F12-04 still waits B enrollment team/default capabilities/approval contract.
 F12-04/05/06 and C194/195/201/207-212 wait primary Lane A L/M checks; no device ticks from workspace proof.
+
+| 2026-10-18 | Lane A frozen7a Apple server midpoint results | .12/4855acd preview-manage FAIL33s first create, receipt20261018T002932Z; sampler: ready then owner_lost without renewal while DNS submitted. .8/9afbbe2 FAIL79s TTL-only, receipt20261018T003207Z; all three creates/list/status/stop/delete passed. Version/doctor pass both; no network evidence/no reruns; B owns classification, no false whole-check GOOD or current-row tick. |
