@@ -122,19 +122,22 @@ pb_on() { # pb_on DEVICE ARGS... (args are already quoted for the remote shell)
 declare -a ROWS=()
 FAILED=0
 record() { # record ID STATUS SECONDS DETAIL
-  local id=$1 status=$2 secs=$3 detail=${4:-}
-  ROWS+=("$id|$status|$secs|${detail//|//}")
+  local id=$1 status=$2 secs=$3 detail=${4:-} failure_code=${5:-}
+  ROWS+=("$id|$status|$secs|${detail//|//}|$failure_code")
   [ "$status" = PASS ] || [ "$status" = SKIP ] || FAILED=1
   printf '%-28s %-5s %6ss  %s\n' "$id" "$status" "$secs" "${detail:0:150}"
 }
 # Preserve the actual failure without exposing command output in shared receipts.
 record_command_failure() {
-  local id=$1 seconds=$2 output=$3 diagnostic
+  local id=$1 seconds=$2 output=$3 diagnostic code detail
   mkdir -p "$RESULTS_DIR/diagnostics"
   chmod 0700 "$RESULTS_DIR/diagnostics"
   diagnostic=$(umask 077; mktemp "$RESULTS_DIR/diagnostics/$RUN_ID.XXXXXX") || return 1
   printf '%s' "$output" > "$diagnostic"
-  record "$id" FAIL "$seconds" "command failed; private diagnostics: $diagnostic"
+  code=$(python3 "$HERE/failure_triage.py" "$diagnostic")
+  detail="command failed; private diagnostics: $diagnostic"
+  [ "$code" != network_dns ] || detail="NETWORK network_dns; $detail"
+  record "$id" FAIL "$seconds" "$detail" "$code"
 }
 
 skipped() {
@@ -870,10 +873,12 @@ for source in "${TLIST[@]}"; do on "$source" "rm -rf /tmp/$RUN_ID" >/dev/null 2>
   printf '{"run":"%s","at":"%s","expect_version":"%s","update_version":"%s","results":[' "$RUN_ID" "$STAMP" "$EXPECT_VERSION" "$UPDATE_VERSION"
   first=1
   for row in "${ROWS[@]}"; do
-    IFS='|' read -r id status secs detail <<<"$row"
+    IFS='|' read -r id status secs detail failure_code <<<"$row"
     [ $first = 1 ] || printf ','
     first=0
-    printf '{"id":"%s","status":"%s","seconds":"%s","detail":%s}' "$id" "$status" "$secs" "$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$detail")"
+    printf '{"id":"%s","status":"%s","seconds":"%s","detail":%s' "$id" "$status" "$secs" "$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$detail")"
+    [ "$failure_code" != network_dns ] || printf ',"triage":"NETWORK","failure_code":"network_dns"'
+    printf '}'
   done
   printf ']}\n'
 } > "$RESULTS_DIR/$STAMP.json"

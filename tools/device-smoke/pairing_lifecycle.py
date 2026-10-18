@@ -18,6 +18,7 @@ import uuid
 
 from pairing_fault import PairingFaultProxy
 import terminal_command
+from failure_triage import emit_network_failure
 
 
 class CommandTimeout(subprocess.TimeoutExpired):
@@ -61,6 +62,8 @@ def invoke(binary, *arguments, timeout=180, input=None, env=None, raw=False, ter
                             terminal=terminal, password=password)
     if result.returncode:
         diagnostic = command_diagnostic(command, result.stdout, result.stderr)
+        if '--json' in arguments:
+            emit_network_failure(result.stdout)
         raise RuntimeError('command failed; private diagnostics: ' + str(diagnostic))
     if raw:
         return result.stdout + result.stderr
@@ -69,6 +72,7 @@ def invoke(binary, *arguments, timeout=180, input=None, env=None, raw=False, ter
     except ValueError:
         raise RuntimeError('command did not return JSON') from None
     if receipt.get('ok') is False:
+        emit_network_failure(result.stdout)
         raise RuntimeError('command reported a JSON failure')
     return receipt.get('data', receipt)
 

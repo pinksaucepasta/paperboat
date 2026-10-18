@@ -244,9 +244,60 @@ class UninstallInventoryPreservation(unittest.TestCase):
 class SmokeReceipts(unittest.TestCase):
     def write_script(self, script, content):
         # These fixtures run the production entry point, including its source freeze.
-        for name in ('snapshot_run.py', 'stage_fixtures.py', 'last_green.py'):
+        for name in ('snapshot_run.py', 'stage_fixtures.py', 'last_green.py', 'failure_triage.py'):
             shutil.copyfile(HERE / name, script.parent / name)
         script.write_text(content)
+
+    def test_structured_dns_failure_stays_fail_without_product_regression_claim(self):
+        source = (HERE / 'smoke.sh').read_text()
+        prefix, remainder = source.split('# ---------------------------------------------------------------- run', 1)
+        report = remainder.split('# ---------------------------------------------------------------- report', 1)[1]
+        for code, network in [('network_dns', True), ('operation_timeout', False),
+                              ('operation_failed', False), ('prose', False),
+                              ('success', False), ('wrong_schema', False)]:
+            with self.subTest(code=code), tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                results = root / 'results'
+                results.mkdir()
+                (results / '20200101T000000Z.json').write_text(json.dumps({
+                    'expect_version': 'fixture', 'results': [{'id': 'preview-manage:hp-hp', 'status': 'PASS'}]}))
+                payload = json.dumps({'schema_version': '1.0', 'ok': False, 'error': {
+                    'code': code, 'category': 'unavailable_retryable', 'retryable': True,
+                    'message': 'DNSError timeout network_dns PRIVATE_FIXTURE_NETWORK_TEXT'}})
+                if code == 'prose':
+                    payload = 'DNSError timeout network_dns PRIVATE_FIXTURE_NETWORK_TEXT'
+                elif code in ('success', 'wrong_schema'):
+                    value = json.loads(payload)
+                    value['error']['code'] = 'network_dns'
+                    if code == 'success':
+                        value['ok'] = True
+                    else:
+                        value['schema_version'] = 'unknown'
+                    payload = json.dumps(value)
+                fixture = root / 'fixture.py'
+                fixture.write_text('import sys\nfrom pairing_lifecycle import invoke\n'
+                                   'invoke(sys.executable, "-c", ' + repr('print(' + repr(payload) + '); raise SystemExit(1)') + ', "--json")\n')
+                script = root / 'smoke.sh'
+                self.write_script(script, prefix + '\non() { return 0; }\nTLIST=(hp)\n' +
+                                  'output=$(python3 ' + str(fixture) + ' 2>&1)\n' +
+                                  'record_command_failure preview-manage:hp-hp 0 "$output"\n' + report)
+                environment = dict(os.environ, PYTHONPATH=str(HERE), TMPDIR=str(root))
+                result = subprocess.run(['bash', str(script), '--expect-version', 'fixture', '--targets', 'hp'],
+                                        env=environment, capture_output=True, text=True, timeout=10)
+                self.assertEqual(1, result.returncode)
+                self.assertNotIn('PRIVATE_FIXTURE_NETWORK_TEXT', result.stdout + result.stderr)
+                row = json.loads(sorted(results.glob('*.json'))[-1].read_text())['results'][0]
+                self.assertEqual('FAIL', row['status'])
+                if network:
+                    self.assertEqual('NETWORK', row.get('triage'))
+                    self.assertEqual('network_dns', row.get('failure_code'))
+                    self.assertIn('network-inconclusive', result.stdout)
+                    self.assertIn('--only-check preview-manage:hp-hp', result.stdout)
+                    self.assertNotIn('REGRESSION preview-manage:hp-hp', result.stdout)
+                    self.assertNotIn('git bisect start', result.stdout)
+                else:
+                    self.assertNotIn('triage', row)
+                    self.assertIn('REGRESSION preview-manage:hp-hp', result.stdout)
 
     def test_single_check_selection_keeps_failure_and_reports_previous_green(self):
         source = (HERE / 'smoke.sh').read_text()

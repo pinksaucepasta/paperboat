@@ -1791,3 +1791,5 @@ Affected features F7 previews/F8 tunnels/F9 native preview access: enrollment/ma
 
 - Lane A 2026-10-18: held batch workspace Go vet/tests PASS all six modules; deployment tests PASS5; console lint + generated-type tsc PASS. Benchmark owner race PASS4.415s; device failures block only their rows per7597439.
 - F7 current teardown:3553cec added signed readiness GET, but production machinecontrol.Source and identity.Store reject GET; real signer regression/fix underway. Current-server old baseline also fails, so no false first-bad device-bisect claim.
+2026-10-18 | Lane A requested DNS triage | Rows ticked:none; structured network_dns survives private fixture diagnostics, stays FAIL/NETWORK and marks last-green range network-inconclusive with one exact-check rerun; no historical statuses rewritten.
+Smoke receipt owner RED2.432s/GREEN4.956s; full receipt/range/private-diagnostic owners11 PASS/1 SKIP26.024s (private historical receipt archive unavailable), bash syntax PASS; producer F15 typed DNS code pending; parent abf4031 workspace gate PASS.

@@ -79,6 +79,14 @@ def report(result, directory, root=ROOT, check=None):
                                            if row.get('status') == 'FAIL'})
     lines = []
     for identity in failing:
+        row = next((row for row in current.get('results', []) if row.get('id') == identity), {})
+        if row.get('triage') == 'NETWORK' and row.get('failure_code') == 'network_dns':
+            lines.append(f'NETWORK {identity}: network-inconclusive; FAIL retained, no product regression range established.')
+            devices = list(dict.fromkeys(re.findall(r'(?<![a-z])(hp|apple|victus)(?![a-z])', identity.split(':')[-1])))
+            command = ['tools/device-smoke/smoke.sh', '--expect-version', current.get('expect_version', 'BUILD_VERSION'),
+                       '--targets', ','.join(devices or ['hp', 'apple']), '--only-check', identity]
+            lines.append('Record one PLAN Log line and rerun this exact check once: ' + shlex.join(command))
+            continue
         previous = last_pass(directory, identity, before)
         if previous is None:
             lines.append(f'{identity}: no earlier PASS receipt; no regression range established.')
