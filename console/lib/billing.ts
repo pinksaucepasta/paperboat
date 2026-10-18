@@ -32,7 +32,7 @@ export type BillingInterval = "month" | "year"
  */
 export const billingLive = {
   seats: false,
-  topups: false,
+  topups: true,
   paidTeamCreate: false,
 } as const
 export const notLiveTitle = "Not available yet"
