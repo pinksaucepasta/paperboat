@@ -2,14 +2,14 @@
 """Launch progress dashboard: renders CHECKLIST.md from origin/main as one HTML page.
 
 Usage: tools/progress.py [--listen HOST:PORT]   (default 127.0.0.1:8090)
-Counts a row as done when it is [x] on both Linux and macOS (the launch platforms).
+Shows independently verified completion for Linux, macOS and Windows.
 """
 import argparse, html, re, subprocess, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-MARKS = ("[x]", "[ ]", "[!]", "n/a", "—")
+MARKS = ("[x]", "[ ]", "[!]", "[~]", "n/a", "—")
 FETCH_EVERY = 60
 _last_fetch = 0.0
 
@@ -34,13 +34,12 @@ def parse(text):
         if not (m and current):
             continue
         cells = [c.strip() for c in line.strip().strip("|").split("|")]
-        marks = [c for c in cells if c in MARKS]
-        if len(marks) < 2:
+        start = 3 if cells[0].startswith("C") else 2
+        marks = cells[start:start + 3]
+        if len(marks) != 3 or any(mark not in MARKS for mark in marks):
             continue
-        lm = marks[:2]
         row = {"id": cells[0], "text": cells[1] if cells[0].startswith(("F", "S")) else f"{cells[1]} — {cells[2]}",
-               "done": all(x in ("[x]", "n/a", "—") for x in lm) and "[x]" in lm,
-               "blocked": "[!]" in lm, "linux": lm[0] == "[x]", "evidence": cells[-1]}
+               "platforms": marks[:3], "evidence": cells[-1]}
         current["command" if cells[0].startswith("C") else "feature"].append(row)
     return sections
 
@@ -53,44 +52,56 @@ def bar(done, total, blocked=0):
             f'<i class="b" style="width:{b:.1f}%"></i></div>')
 
 
-def count(rows):
-    return sum(r["done"] for r in rows), sum(r["blocked"] and not r["done"] for r in rows), len(rows)
+def count(rows, platform):
+    marks = [r["platforms"][platform] for r in rows if len(r["platforms"]) > platform]
+    return marks.count("[x]"), marks.count("[!]"), sum(m in ("[x]", "[ ]", "[!]", "[~]") for m in marks)
 
 
-def render(sections):
+def render_platform(sections, platform, name):
     feats = [r for s in sections if s["id"].startswith("F") for r in s["feature"]]
     cmds = [r for s in sections for r in s["command"]]
-    infra = [r for s in sections if s["id"].startswith("S") for r in s["feature"]]
     out = []
-    for label, rows in (("Features", feats), ("Commands", cmds), ("Setup & release", infra)):
-        d, b, t = count(rows)
+    for label, rows in (("Features", feats), ("Commands", cmds)):
+        d, b, t = count(rows, platform)
         out.append(f'<div class="card"><div class="big">{d}<span>/{t}</span></div>'
-                   f'<div>{label} done on Linux + macOS</div>{bar(d, t, b)}'
+                   f'<div>{label} verified on {name}</div>{bar(d, t, b)}'
                    f'<div class="sub">{100*d//max(t,1)}% · {b} blocked</div></div>')
-    head = f'<div class="cards">{"".join(out)}</div>'
+    head = f'<h2>{name}</h2><div class="cards">{"".join(out)}</div>'
 
     table = ['<table><tr><th></th><th>Area</th><th>Features</th><th></th><th>Commands</th><th></th></tr>']
     for s in sections:
-        fd, fb, ft = count(s["feature"])
-        cd, cb, ct = count(s["command"])
+        if s["id"].startswith("S"):
+            continue
+        fd, fb, ft = count(s["feature"], platform)
+        cd, cb, ct = count(s["command"], platform)
         table.append(f'<tr><td class="id">{s["id"]}</td><td>{html.escape(s["name"])}</td>'
                      f'<td class="n">{fd}/{ft}</td><td class="w">{bar(fd, ft, fb)}</td>'
                      f'<td class="n">{cd}/{ct if ct else "–"}</td><td class="w">{bar(cd, ct, cb)}</td></tr>')
     table.append("</table>")
 
-    blocked = [(s, r) for s in sections for r in s["feature"] + s["command"] if r["blocked"] and not r["done"]]
+    blocked = [(s, r) for s in sections for r in s["feature"] + s["command"] if len(r["platforms"]) > platform and r["platforms"][platform] == "[!]"]
     items = "".join(
         f'<details><summary><b>{r["id"]}</b> {html.escape(r["text"][:140])}</summary>'
         f'<p>{html.escape(r["evidence"][:600])}</p></details>' for _, r in blocked)
-    stamp = time.strftime("%Y-%m-%d %H:%M:%S")
-    return PAGE.format(head=head, table="".join(table), blocked=items, nblocked=len(blocked), stamp=stamp)
+    return (head + "".join(table)
+            + f'<h3>Blocked on {name} ({len(blocked)})</h3>' + items)
+
+
+def render(sections):
+    platforms = ((0, "Linux — current focus"), (1, "macOS — next"), (2, "Windows — after macOS"))
+    content = "".join(render_platform(sections, index, name) for index, name in platforms)
+    infra = [r for s in sections if s["id"].startswith("S") for r in s["feature"]]
+    done, blocked, total = count(infra, 0)
+    content += (f'<h2>Shared setup &amp; release</h2><p>{done}/{total} verified · {blocked} blocked</p>'
+                + bar(done, total, blocked))
+    return PAGE.format(content=content, stamp=time.strftime("%Y-%m-%d %H:%M:%S %Z"))
 
 
 PAGE = """<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="60">
 <title>Paperboat launch progress</title><style>
 body{{font:15px/1.4 -apple-system,system-ui,sans-serif;margin:32px auto;max-width:1000px;color:#111;padding:0 16px}}
 h1{{font-size:22px;margin:0 0 4px}} .muted{{color:#777;font-size:13px}}
-.cards{{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin:24px 0}}
+.cards{{display:grid;grid-template-columns:repeat(2,1fr);gap:16px;margin:24px 0}}
 .card{{border:1px solid #e5e5e5;border-radius:12px;padding:16px}}
 .big{{font-size:40px;font-weight:600}} .big span{{font-size:20px;color:#999}} .sub{{color:#777;font-size:13px;margin-top:6px}}
 .bar{{height:8px;background:#eee;border-radius:4px;overflow:hidden;display:flex;margin-top:8px}}
@@ -103,9 +114,9 @@ summary{{cursor:pointer}} details p{{color:#555;font-size:13px;white-space:pre-w
 </style>
 <h1>Paperboat launch progress</h1>
 <div class="muted">From CHECKLIST.md on origin/main · updated {stamp} · refreshes every minute
-<span class="legend"><i class="d" style="background:#1f7a3a"></i>done (L+M)<i style="background:#d9822b"></i>blocked</span></div>
-{head}{table}
-<h2 style="font-size:17px;margin-top:32px">Blocked ({nblocked})</h2>{blocked}
+<span class="legend"><i class="d" style="background:#1f7a3a"></i>verified on this platform<i style="background:#d9822b"></i>blocked</span></div>
+<p class="muted">Each platform counts its own passing checks. Not-applicable cells are excluded. Order: Linux, then macOS, then Windows.</p>
+{content}
 """
 
 
