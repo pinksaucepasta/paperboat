@@ -57,65 +57,32 @@ def count(rows, platform):
     return marks.count("[x]"), marks.count("[!]"), sum(m in ("[x]", "[ ]", "[!]", "[~]") for m in marks)
 
 
-def render_platform(sections, platform, name):
+def render(sections):
     feats = [r for s in sections if s["id"].startswith("F") for r in s["feature"]]
     cmds = [r for s in sections for r in s["command"]]
-    out = []
-    for label, rows in (("Features", feats), ("Commands", cmds)):
-        d, b, t = count(rows, platform)
-        out.append(f'<div class="card"><div class="big">{d}<span>/{t}</span></div>'
-                   f'<div>{label} verified on {name}</div>{bar(d, t, b)}'
-                   f'<div class="sub">{100*d//max(t,1)}% · {b} blocked</div></div>')
-    head = f'<h2>{name}</h2><div class="cards">{"".join(out)}</div>'
-
-    table = ['<table><tr><th></th><th>Area</th><th>Features</th><th></th><th>Commands</th><th></th></tr>']
-    for s in sections:
-        if s["id"].startswith("S"):
-            continue
-        fd, fb, ft = count(s["feature"], platform)
-        cd, cb, ct = count(s["command"], platform)
-        table.append(f'<tr><td class="id">{s["id"]}</td><td>{html.escape(s["name"])}</td>'
-                     f'<td class="n">{fd}/{ft}</td><td class="w">{bar(fd, ft, fb)}</td>'
-                     f'<td class="n">{cd}/{ct if ct else "–"}</td><td class="w">{bar(cd, ct, cb)}</td></tr>')
-    table.append("</table>")
-
-    blocked = [(s, r) for s in sections for r in s["feature"] + s["command"] if len(r["platforms"]) > platform and r["platforms"][platform] == "[!]"]
-    items = "".join(
-        f'<details><summary><b>{r["id"]}</b> {html.escape(r["text"][:140])}</summary>'
-        f'<p>{html.escape(r["evidence"][:600])}</p></details>' for _, r in blocked)
-    return (head + "".join(table)
-            + f'<h3>Blocked on {name} ({len(blocked)})</h3>' + items)
-
-
-def render(sections):
-    platforms = ((0, "Linux — current focus"), (1, "macOS — next"), (2, "Windows — after macOS"))
-    content = "".join(render_platform(sections, index, name) for index, name in platforms)
-    infra = [r for s in sections if s["id"].startswith("S") for r in s["feature"]]
-    done, blocked, total = count(infra, 0)
-    content += (f'<h2>Shared setup &amp; release</h2><p>{done}/{total} verified · {blocked} blocked</p>'
-                + bar(done, total, blocked))
-    return PAGE.format(content=content, stamp=time.strftime("%Y-%m-%d %H:%M:%S %Z"))
+    cards = []
+    for index, name in ((0, "Linux"), (1, "macOS"), (2, "Windows")):
+        lines = []
+        for label, rows in (("Features", feats), ("Commands", cmds)):
+            d, b, t = count(rows, index)
+            lines.append(f'<div class="row"><span>{label}</span><b>{d}/{t}</b>'
+                         f'<em>{100*d//max(t,1)}%</em></div>{bar(d, t, b)}')
+        cards.append(f'<div class="card"><h2>{name}</h2>{"".join(lines)}</div>')
+    return PAGE.format(content="".join(cards), stamp=time.strftime("%H:%M %Z"))
 
 
 PAGE = """<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="60">
 <title>Paperboat launch progress</title><style>
-body{{font:15px/1.4 -apple-system,system-ui,sans-serif;margin:32px auto;max-width:1000px;color:#111;padding:0 16px}}
-h1{{font-size:22px;margin:0 0 4px}} .muted{{color:#777;font-size:13px}}
-.cards{{display:grid;grid-template-columns:repeat(2,1fr);gap:16px;margin:24px 0}}
-.card{{border:1px solid #e5e5e5;border-radius:12px;padding:16px}}
-.big{{font-size:40px;font-weight:600}} .big span{{font-size:20px;color:#999}} .sub{{color:#777;font-size:13px;margin-top:6px}}
-.bar{{height:8px;background:#eee;border-radius:4px;overflow:hidden;display:flex;margin-top:8px}}
+body{{font:16px/1.4 -apple-system,system-ui,sans-serif;margin:40px auto;max-width:640px;color:#111;padding:0 16px}}
+h1{{font-size:22px;margin:0}} .muted{{color:#888;font-size:13px;margin-bottom:24px}}
+.card{{border:1px solid #e5e5e5;border-radius:12px;padding:16px 20px;margin-bottom:16px}}
+h2{{font-size:18px;margin:0 0 8px}} .row{{display:flex;gap:12px;margin-top:10px}}
+.row span{{flex:1}} .row em{{color:#888;font-style:normal;width:44px;text-align:right}}
+.bar{{height:10px;background:#eee;border-radius:5px;overflow:hidden;display:flex;margin-top:6px}}
 .bar i{{display:block;height:100%}} .d{{background:#1f7a3a}} .b{{background:#d9822b}}
-table{{width:100%;border-collapse:collapse}} td,th{{padding:7px 6px;border-bottom:1px solid #f0f0f0;text-align:left}}
-th{{font-size:12px;color:#888;font-weight:500}} .id{{color:#888;width:40px}} .n{{width:60px;text-align:right;font-variant-numeric:tabular-nums}}
-.w{{width:150px}} .w .bar{{margin:0}} details{{border-bottom:1px solid #f0f0f0;padding:6px 0}}
-summary{{cursor:pointer}} details p{{color:#555;font-size:13px;white-space:pre-wrap}}
-.legend i{{display:inline-block;width:10px;height:10px;border-radius:2px;margin:0 4px 0 12px}}
 </style>
 <h1>Paperboat launch progress</h1>
-<div class="muted">From CHECKLIST.md on origin/main · updated {stamp} · refreshes every minute
-<span class="legend"><i class="d" style="background:#1f7a3a"></i>verified on this platform<i style="background:#d9822b"></i>blocked</span></div>
-<p class="muted">Each platform counts its own passing checks. Not-applicable cells are excluded. Order: Linux, then macOS, then Windows.</p>
+<div class="muted">Verified rows from CHECKLIST.md on main · green done, orange blocked · updated {stamp}</div>
 {content}
 """
 
