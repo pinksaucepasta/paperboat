@@ -482,3 +482,114 @@ func TestSourceRetriesLostRenewalWithTheSameOperation(t *testing.T) {
 		t.Fatalf("renewed credential must replace the pending one: %v", err)
 	}
 }
+
+type recoveryFixture struct {
+	source  *Source
+	store   *identity.Store
+	now     *time.Time
+	initial *int
+	renewal *int
+	deny    *bool
+}
+
+// newRecoveryFixture enrolls a helper identity and holds a machine-control
+// credential that the fake control plane renews with the given renewal status.
+func newRecoveryFixture(t *testing.T, renewalStatus int, credentialExpiry time.Duration) recoveryFixture {
+	t.Helper()
+	now := time.Date(2026, 10, 18, 8, 0, 0, 0, time.UTC)
+	root := filepath.Join(t.TempDir(), "runtime")
+	const helperToken = "helper-identity-credential-012345678901234567890"
+	recovered := strings.Repeat("r", 40)
+	var initialCalls, renewalCalls int
+	deny := false
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/helper-enrollments":
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"helper_id": "hlp_1", "machine_id": "mch_1", "environment_id": "env_1", "credential": helperToken, "expires_at": time.Now().UTC().Add(24 * time.Hour)}})
+		case "/v1/machine-control-renewals":
+			renewalCalls++
+			w.WriteHeader(renewalStatus)
+		case "/v1/machine-control-credentials":
+			initialCalls++
+			if deny {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"credential": recovered, "expires_at": now.Add(time.Hour)}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	client, err := enrollment.NewClient(server.Client().Transport, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Enroll(t.Context(), enrollment.Config{ControlURL: server.URL, StateRoot: root, EnrollmentCredential: strings.Repeat("e", 32)}); err != nil {
+		t.Fatal(err)
+	}
+	store, err := identity.Open(identity.Config{StateRoot: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := store.Current()
+	if err := store.SaveRegistration(identity.Registration{ServerURL: server.URL, MachineID: "mch_1", EnvironmentID: "env_1", PublicKeyID: key.ID, PublicIdentityKey: base64.RawURLEncoding.EncodeToString(key.Public()), InboxPath: filepath.Join(root, "inbox"), InstallationGeneration: 1, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveMachineControl(identity.MachineControl{MachineID: "mch_1", EnvironmentID: "env_1", InstallationGeneration: 1, Credential: strings.Repeat("o", 40), ExpiresAt: now.Add(credentialExpiry), KeyID: key.ID}); err != nil {
+		t.Fatal(err)
+	}
+	current := &now
+	source, err := NewSource(Config{ControlURL: server.URL, StateRoot: root, Transport: server.Client().Transport, Clock: func() time.Time { return *current }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return recoveryFixture{source: source, store: store, now: current, initial: &initialCalls, renewal: &renewalCalls, deny: &deny}
+}
+
+// HP sat with an expired, never-renewed credential until `pb tunnel create`
+// happened to re-establish it. Every consumer now recovers through the Source.
+func TestSourceRecoversExpiredCredentialThroughEnrolledIdentity(t *testing.T) {
+	f := newRecoveryFixture(t, http.StatusCreated, -time.Minute)
+	token, err := f.source.Token(t.Context())
+	if err != nil || token != strings.Repeat("r", 40) || *f.initial != 1 || *f.renewal != 0 {
+		t.Fatalf("expired credential: token ok=%v err=%v initial=%d renewal=%d", token != "", err, *f.initial, *f.renewal)
+	}
+}
+
+func TestSourceRecoversWhenRenewalIsDefinitivelyDenied(t *testing.T) {
+	f := newRecoveryFixture(t, http.StatusUnauthorized, 5*time.Minute)
+	token, err := f.source.Token(t.Context())
+	if err != nil || token != strings.Repeat("r", 40) || *f.renewal != 1 || *f.initial != 1 {
+		t.Fatalf("denied renewal: err=%v renewal=%d initial=%d", err, *f.renewal, *f.initial)
+	}
+	persisted, err := f.store.MachineControl(*f.now, 0)
+	if err != nil || persisted.PendingRenewalID != "" {
+		t.Fatalf("denied renewal left a pending operation: %v", err)
+	}
+}
+
+func TestSourceRecoveryBacksOffAfterDenial(t *testing.T) {
+	f := newRecoveryFixture(t, http.StatusCreated, -time.Minute)
+	*f.deny = true
+	for attempt := 0; attempt < 3; attempt++ {
+		if _, err := f.source.Token(t.Context()); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("denied recovery = %v, want invalid", err)
+		}
+	}
+	if *f.initial != 1 {
+		t.Fatalf("initial requests inside the backoff = %d, want 1", *f.initial)
+	}
+	*f.now = f.now.Add(recoveryBackoffStart + time.Second)
+	_, _ = f.source.Token(t.Context())
+	if *f.initial != 2 {
+		t.Fatalf("initial requests after the backoff = %d, want 2", *f.initial)
+	}
+	*f.now = f.now.Add(recoveryBackoffStart + time.Second)
+	_, _ = f.source.Token(t.Context())
+	if *f.initial != 2 {
+		t.Fatalf("the backoff must grow, got %d requests", *f.initial)
+	}
+}

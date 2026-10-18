@@ -154,7 +154,17 @@ type Source struct {
 	endpoint *url.URL
 	client   *http.Client
 	mu       sync.Mutex
+	// A credential the control plane no longer accepts is replaced through the
+	// enrolled machine identity; failures back off so a revoked machine does
+	// not hammer the control plane.
+	recoverAfter time.Time
+	recoverDelay time.Duration
 }
+
+const (
+	recoveryBackoffStart = 30 * time.Second
+	recoveryBackoffMax   = 10 * time.Minute
+)
 
 func NewSource(config Config) (*Source, error) {
 	endpoint, err := url.Parse(strings.TrimSpace(config.ControlURL))
@@ -194,7 +204,7 @@ func (s *Source) Token(ctx context.Context) (string, error) {
 	current, err := store.MachineControl(now, 0)
 	if err != nil {
 		if expectedInvalidMachineControl(err) {
-			return "", ErrInvalid
+			return s.recoverLocked(ctx, store)
 		}
 		return "", unavailable(err)
 	}
@@ -245,7 +255,7 @@ func (s *Source) Token(ctx context.Context) (string, error) {
 			if clearErr := store.SetPendingRenewal(current, ""); clearErr != nil {
 				return "", unavailable(clearErr)
 			}
-			return "", ErrInvalid
+			return s.recoverLocked(ctx, store)
 		}
 		statusFailure := errorreport.HTTPStatusFailure(response)
 		if bodyErr != nil {
@@ -294,12 +304,38 @@ func (s *Source) EnsureInitial(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", unavailable(err)
 	}
-	now := s.config.Clock().UTC()
-	if current, currentErr := store.MachineControl(now, 0); currentErr == nil {
+	if current, currentErr := store.MachineControl(s.config.Clock().UTC(), 0); currentErr == nil {
 		return current.Credential, nil
 	} else if !expectedInvalidMachineControl(currentErr) {
 		return "", unavailable(currentErr)
 	}
+	return s.mintInitialLocked(ctx, store)
+}
+
+// recoverLocked replaces a missing, expired or rejected credential through the
+// enrolled machine identity. The caller's credential is invalid either way, so
+// a failed or backed-off recovery reports ErrInvalid.
+func (s *Source) recoverLocked(ctx context.Context, store *identity.Store) (string, error) {
+	now := s.config.Clock().UTC()
+	if now.Before(s.recoverAfter) {
+		return "", ErrInvalid
+	}
+	token, err := s.mintInitialLocked(ctx, store)
+	if err != nil {
+		if s.recoverDelay = 2 * s.recoverDelay; s.recoverDelay < recoveryBackoffStart {
+			s.recoverDelay = recoveryBackoffStart
+		} else if s.recoverDelay > recoveryBackoffMax {
+			s.recoverDelay = recoveryBackoffMax
+		}
+		s.recoverAfter = now.Add(s.recoverDelay)
+		return "", ErrInvalid
+	}
+	s.recoverDelay, s.recoverAfter = 0, time.Time{}
+	return token, nil
+}
+
+func (s *Source) mintInitialLocked(ctx context.Context, store *identity.Store) (string, error) {
+	now := s.config.Clock().UTC()
 	registration, err := store.Registration()
 	if err != nil {
 		return "", unavailable(err)
