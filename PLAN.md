@@ -1926,3 +1926,5 @@ Focused platform-count unit PASS (independent cells, command columns, in-progres
 
 - Lane A Linux-only verification: C223–C227 L ticked on HP dev-46c2464 (four shell generators exit0/nonempty, bash syntax PASS); F15-05 full installation/dynamic completion stays open. network-inventory:hp PASS4s receipt20261018T012758Z on stable18.12; no implementation changes/new broad gate (qualified workspace baseline reused).
 - Already-running macOS ssh-tools:apple-hp completed PASS107s receipt20261018T012342Z and cleanup; no new macOS checks. Linux ssh-tools:hp-hp selector did not run (pair runner excludes self), not a product failure; no tick inferred.
+
+- Lane A continuing Linux verification: C231–C239 L PASS on HP dev-46c2464, temporary-config set/show/unset and customization import/validate/show/path/confirmed-reset with exact config preservation. Explain wrapper placed JSON after delimiter and captured text twice; no product diagnosis/tick, move to independent update state/CLI checks. No new implementation or broad gate; qualified workspace baseline reused.
