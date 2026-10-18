@@ -78,12 +78,13 @@ func Record(ctx context.Context, store *db.DB, b Binding, policy ...QuotaChecker
 				if exhausted {
 					return ErrQuotaExhausted
 				}
-			}
-			if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM billing_workspace_usage_periods WHERE workspace_id=$1 AND period_start<=$2 AND period_end>$2 AND included_bytes IS NOT NULL AND consumed_bytes>=included_bytes)`, workspace, b.IssuedAt).Scan(&exhausted); err != nil {
-				return err
-			}
-			if exhausted {
-				return ErrQuotaExhausted
+			} else {
+				if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM billing_workspace_usage_periods WHERE workspace_id=$1 AND period_start<=$2 AND period_end>$2 AND included_bytes IS NOT NULL AND consumed_bytes>=included_bytes)`, workspace, b.IssuedAt).Scan(&exhausted); err != nil {
+					return err
+				}
+				if exhausted {
+					return ErrQuotaExhausted
+				}
 			}
 		}
 		return retainBindingTx(ctx, tx, b, workspace)

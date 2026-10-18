@@ -105,7 +105,20 @@ WHERE workspace_id=$1 AND paid=$2 AND coalesce(budget_start,period_start)=$3`, w
 	if _, err = tx.Exec(ctx, `UPDATE billing_workspace_usage_periods SET consumed_bytes=consumed_bytes+$4,observed_bytes=observed_bytes+$5 WHERE workspace_id=$1 AND period_start=$2 AND period_end=$3`, workspaceID, window.start, window.end, granted, bytes); err != nil {
 		return 0, false, err
 	}
-	return granted, included.Valid && consumed+granted >= included.Int64, nil
+	exhausted := included.Valid && consumed+granted >= included.Int64
+	if exhausted && policy.paid && window.paid {
+		used, err := ConsumeWorkspaceTopupsTx(ctx, tx, workspaceID, bytes-granted, at)
+		if err != nil {
+			return 0, false, err
+		}
+		granted += used
+		remaining, err := WorkspaceTopupRemainingTx(ctx, tx, workspaceID, at)
+		if err != nil {
+			return 0, false, err
+		}
+		exhausted = remaining == 0
+	}
+	return granted, exhausted, nil
 }
 
 func usagePeriodStartTx(ctx context.Context, tx *db.Tx, workspaceID string, start, at time.Time) (time.Time, error) {
