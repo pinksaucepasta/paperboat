@@ -7,6 +7,10 @@ request headers. Retry a mutation only with its original idempotency key.
 
 ## Preview does not become ready
 
+Managed publication has a two-minute client wait budget. DNS queueing or outages
+can exhaust it; this is not a publication SLA. Canceling, a terminal lease, or
+the requested TTL can end startup earlier. Waiting never extends `--ttl`.
+
 1. Confirm the foreground `pb preview` process and stable host runtime are
    running.
 2. Check origin reachability, the preview owner lease, absolute expiry, carrier

@@ -222,7 +222,7 @@ func StartForeground(ctx context.Context, config ForegroundConfig) (*Foreground,
 		return nil, ErrInvalidSource
 	}
 	if config.ReadyTimeout <= 0 {
-		config.ReadyTimeout = 30 * time.Second
+		config.ReadyTimeout = preview.PreviewPublicationTimeout
 	}
 	if config.DrainTimeout <= 0 {
 		config.DrainTimeout = DefaultDrainTimeout

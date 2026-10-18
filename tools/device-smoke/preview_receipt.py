@@ -6,6 +6,10 @@ from datetime import datetime
 from urllib.parse import urlsplit
 
 
+# Allow the client publication window plus API setup and bounded cleanup.
+PREVIEW_COMMAND_TIMEOUT = 180
+
+
 def receipt_timestamp(value):
     # Python 3.9 accepts only three or six fractional digits. Go's RFC3339Nano
     # receipts use zero to nine; normalize only the fraction to datetime's

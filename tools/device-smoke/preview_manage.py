@@ -12,7 +12,7 @@ import time
 from install_lifecycle import registration
 from pairing_lifecycle import invoke
 from preview_lifecycle import QuietHandler
-from preview_receipt import receipt_timestamp, receipt_value
+from preview_receipt import PREVIEW_COMMAND_TIMEOUT, receipt_timestamp, receipt_value
 
 
 def main():
@@ -30,7 +30,7 @@ def main():
         thread.start()
 
         def create(ttl):
-            lease = invoke(binary, 'preview', str(server.server_port), '--background', '--ttl', ttl, '--json', timeout=60)
+            lease = invoke(binary, 'preview', str(server.server_port), '--background', '--ttl', ttl, '--json', timeout=PREVIEW_COMMAND_TIMEOUT)
             receipt_value(lease, 'endpoint')
             owned.add(lease['id'])
             return lease

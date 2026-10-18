@@ -13,7 +13,7 @@ import time
 import uuid
 
 from pairing_lifecycle import invoke
-from preview_receipt import receipt_value
+from preview_receipt import PREVIEW_COMMAND_TIMEOUT, receipt_value
 
 
 class QuietHandler(http.server.SimpleHTTPRequestHandler):
@@ -41,11 +41,11 @@ def main():
             arguments = [str(binary), 'preview', str(server.server_port), '--ttl', '5m', '--json']
             if args.mode == 'background':
                 arguments.append('--background')
-                lease = invoke(binary, *arguments[1:], timeout=60)
+                lease = invoke(binary, *arguments[1:], timeout=PREVIEW_COMMAND_TIMEOUT)
             else:
                 output = (root / 'foreground.jsonl').open('w+')
                 process = subprocess.Popen(arguments, stdout=output, stderr=subprocess.DEVNULL)
-                deadline = time.monotonic() + 60
+                deadline = time.monotonic() + PREVIEW_COMMAND_TIMEOUT
                 while lease is None:
                     output.seek(0)
                     for line in output:

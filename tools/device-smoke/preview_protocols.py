@@ -14,7 +14,7 @@ import uuid
 
 from install_lifecycle import registration
 from pairing_lifecycle import invoke
-from preview_receipt import receipt_value
+from preview_receipt import PREVIEW_COMMAND_TIMEOUT, receipt_value
 
 
 class ProtocolOrigin(http.server.BaseHTTPRequestHandler):
@@ -128,7 +128,7 @@ def main():
     try:
         with tempfile.TemporaryDirectory(prefix='paperboat-preview-protocol-') as directory:
             root = Path(directory)
-            lease = invoke(binary, 'preview', str(server.server_port), '--background', '--ttl', '5m', '--json', timeout=60)
+            lease = invoke(binary, 'preview', str(server.server_port), '--background', '--ttl', '5m', '--json', timeout=PREVIEW_COMMAND_TIMEOUT)
             endpoint = receipt_value(lease, 'endpoint')
             gate, refused = root / 'verified', root / 'failed'
             print(json.dumps({'state': 'preview_protocol_required', 'target': args.target,

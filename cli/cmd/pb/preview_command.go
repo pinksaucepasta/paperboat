@@ -479,7 +479,7 @@ func runPreviewWithDomains(command *cobra.Command, target preview.LeaseTarget, p
 			return closePreviewCarrier(command.Context(), carrier, previewFailure("preview output failed", err))
 		}
 	}
-	readinessTimeout := 30 * time.Second
+	readinessTimeout := preview.PreviewPublicationTimeout
 	if len(domains) > 0 {
 		// Self-hosted preview readiness includes customer DNS and certificate
 		// verification. Give the operator time to publish the displayed records.

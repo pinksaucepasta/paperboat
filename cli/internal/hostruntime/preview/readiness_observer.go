@@ -18,6 +18,9 @@ import (
 
 const maxPreviewReadinessResponseBytes = 64 << 10
 
+// PreviewPublicationTimeout bounds initial managed publication, not lease lifetime.
+const PreviewPublicationTimeout = 2 * time.Minute
+
 // HTTPDispatchReadinessObserver reports authenticated edge and origin
 // readiness for a server-dispatched preview. The renewable machine identity
 // remains in its source and is never copied into the lease or dispatch record.
@@ -73,7 +76,7 @@ func (o *HTTPDispatchReadinessObserver) ObservePreviewReadiness(ctx context.Cont
 		return Lease{}, ErrDispatchInvalid
 	}
 	// This bounds initial publication only, never the admitted carrier lifetime.
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, PreviewPublicationTimeout)
 	defer cancel()
 	method := http.MethodPost
 	current, err := o.observeLease(ctx, metadata, lease, expectedGeneration, method)
