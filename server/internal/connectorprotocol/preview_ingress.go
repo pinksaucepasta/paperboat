@@ -170,6 +170,9 @@ func (s SQLIngressSource) projectPreviews(ctx context.Context, node, epoch strin
 		}
 		err := accountingauthority.Record(ctx, s.DB, accountingauthority.Binding{ID: authority, Node: d.EdgeNodeID, Environment: b.EnvironmentID, Route: b.RouteID, Revision: int64(b.RouteGeneration), User: b.AccountID, Team: teams[i], IssuedAt: d.IssuedAt, ExpiresAt: d.ExpiresAt}, s.Quota)
 		if isExactQuotaExhaustion(err) {
+			if s.QuotaDenied != nil {
+				*s.QuotaDenied = append(*s.QuotaDenied, wire.IngressQuotaDenial{RouteID: b.RouteID, Hostname: b.Hostname})
+			}
 			continue
 		}
 		if err != nil {

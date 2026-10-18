@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"github.com/pinksaucepasta/paperboat-server/internal/billing"
 	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
 	"strings"
 	"testing"
@@ -65,6 +66,40 @@ func TestPublicPreviewIngressPostgres(t *testing.T) {
 		}
 	}
 	check(1)
+	// F13-03: a preview withheld only for bandwidth quota is named, so the edge can refuse it with
+	// the typed reason instead of a bare 502; restoring allowance reports none.
+	quota := billing.NewWorkspaceService(f.database, nil, "")
+	if err := quota.InitializeAllowancePolicy(ctx, nil, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	var originalPersonal, originalTeam sql.NullInt64
+	var originalMachines sql.NullInt32
+	var originalRevision int64
+	if err := f.database.SQL().QueryRowContext(ctx, `SELECT personal_allowance_bytes,team_allowance_bytes,personal_machine_limit,revision FROM paperboat.billing_operator_policy WHERE singleton`).Scan(&originalPersonal, &originalTeam, &originalMachines, &originalRevision); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = f.database.SQL().ExecContext(context.Background(), `UPDATE paperboat.billing_operator_policy SET personal_allowance_bytes=$1,team_allowance_bytes=$2,personal_machine_limit=$3,revision=$4,updated_at=now() WHERE singleton`, originalPersonal, originalTeam, originalMachines, originalRevision)
+	})
+	setPolicy := func(personal *int64) {
+		t.Helper()
+		exec(`UPDATE paperboat.billing_operator_policy SET personal_allowance_bytes=$1,team_allowance_bytes=NULL,personal_machine_limit=NULL,revision=revision+1,updated_at=now() WHERE singleton`, personal)
+	}
+	var denied []wire.IngressQuotaDenial
+	quotaSource := SQLIngressSource{DB: f.database, Clock: f.clock, Quota: quota, QuotaDenied: &denied}
+	zero := int64(0)
+	setPolicy(&zero)
+	if got, err := quotaSource.Edge(ctx, node, epoch); err != nil || len(got) != 0 {
+		t.Fatalf("exhausted preview decisions=%d err=%v, want none", len(got), err)
+	}
+	if len(denied) != 1 || denied[0].Hostname != hostname || denied[0].RouteID != route {
+		t.Fatalf("quota denial = %+v, want the withheld preview %s", denied, hostname)
+	}
+	setPolicy(nil)
+	denied = nil
+	if got, err := quotaSource.Edge(ctx, node, epoch); err != nil || len(got) != 1 || len(denied) != 0 {
+		t.Fatalf("restored preview decisions=%d denied=%+v err=%v, want 1 and none", len(got), denied, err)
+	}
 	// A preview is attached to one edge, so wildcard DNS pointing at every
 	// global edge cannot deliver it. The DNS worker must enumerate its exact name.
 	names, err := f.database.Queries().ListEdgeDNSPublicationNamesV1(ctx, preview)

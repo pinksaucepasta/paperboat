@@ -146,6 +146,11 @@ func (a *IngressAuthority) ResolvePreview(ctx context.Context, publication, host
 	if d, ok := selectDecision(decisions); ok {
 		return d, nil
 	}
+	// Withheld only because the workspace is out of allowance: refuse with the typed reason,
+	// without the readiness refresh below (nothing about origin readiness can change it).
+	if a.quotaDenied[hostname] {
+		return connectorprotocol.IngressDecision{}, connectorprotocol.ErrIngressQuotaExhausted
+	}
 	// A snapshot read before origin readiness may legitimately omit a now-ready
 	// local publication. Refresh that authority once; do not retry HTTP traffic.
 	now := time.Now().UTC()
@@ -175,6 +180,9 @@ func (a *IngressAuthority) ResolvePreview(ctx context.Context, publication, host
 		if d, ok := selectDecision(decisions); ok {
 			delete(a.previewMisses, key)
 			return d, nil
+		}
+		if a.quotaDenied[hostname] {
+			return connectorprotocol.IngressDecision{}, connectorprotocol.ErrIngressQuotaExhausted
 		}
 	}
 	return connectorprotocol.IngressDecision{}, connectorprotocol.ErrIngressDenied

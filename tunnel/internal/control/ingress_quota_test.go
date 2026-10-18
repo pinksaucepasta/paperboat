@@ -58,3 +58,39 @@ func TestIngressAuthorityRefusesQuotaDeniedRouteWithTypedReasonAndRecovers(t *te
 		t.Fatalf("route stayed refused after allowance recovery: %v", err)
 	}
 }
+
+// Previews are published through a different projection but get the same typed refusal.
+func TestIngressAuthorityRefusesQuotaDeniedPreviewWithTypedReason(t *testing.T) {
+	var exhausted atomic.Bool
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		denied := []connectorprotocol.IngressQuotaDenial{}
+		if exhausted.Load() {
+			denied = append(denied, connectorprotocol.IngressQuotaDenial{RouteID: "route_preview_01", Hostname: "open-amber-road.preview.test"})
+		}
+		json.NewEncoder(w).Encode(map[string]any{"complete": true, "decisions": []connectorprotocol.IngressDecision{}, "quota_denied": denied})
+	}))
+	defer server.Close()
+	client, err := NewHTTPClient(HTTPConfig{BaseURL: server.URL, Client: server.Client(), Credential: strings.Repeat("x", 32), Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority := &IngressAuthority{Client: client, NodeID: "edge_01", ProcessEpoch: "epoch_0001"}
+	open := connectorprotocol.StreamOpen{Protocol: connectorprotocol.ProtocolName, Version: connectorprotocol.ProtocolVersion, AccountID: "account_01", TunnelID: "tunnel_01", ConnectorID: "connector_01", SessionID: "session_live_01", ProcessGeneration: 1, Generation: 1, RouteID: "route_preview_01", RequestID: "preview-authority", Kind: "http"}
+	resolve := func(host string) error {
+		_, err := authority.ResolvePreview(context.Background(), "preview_01", host, 1, open)
+		return err
+	}
+	exhausted.Store(true)
+	authority.Invalidate()
+	if err := resolve("open-amber-road.preview.test"); !errors.Is(err, connectorprotocol.ErrIngressQuotaExhausted) || errors.Is(err, connectorprotocol.ErrIngressDenied) {
+		t.Fatalf("quota-denied preview: %v, want ErrIngressQuotaExhausted only", err)
+	}
+	if err := resolve("other.preview.test"); !errors.Is(err, connectorprotocol.ErrIngressDenied) || errors.Is(err, connectorprotocol.ErrIngressQuotaExhausted) {
+		t.Fatalf("unrelated preview: %v, want generic denial", err)
+	}
+	exhausted.Store(false)
+	authority.Invalidate()
+	if err := resolve("open-amber-road.preview.test"); errors.Is(err, connectorprotocol.ErrIngressQuotaExhausted) {
+		t.Fatalf("preview stayed quota-denied after recovery: %v", err)
+	}
+}
