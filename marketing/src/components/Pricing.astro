@@ -1,0 +1,74 @@
+---
+import Section from "./Section.astro"
+import { plans } from "../site"
+---
+
+<Section id="pricing" title="Start free. Pay for relayed traffic.">
+  <Fragment slot="text">
+    <p>
+      Every plan has every feature, with unlimited machines. Direct peer-to-peer traffic is always free; plans
+      differ in how much relay and edge bandwidth you get each month.
+    </p>
+  </Fragment>
+  <div class="plans" data-reveal>
+    {
+      plans.map((plan) => (
+        <article class="plan surface-pattern">
+          <h3 class="subtitle">{plan.name}</h3>
+          <p class="price">
+            {plan.price}
+            {plan.period && <span class="period">{plan.period}</span>}
+          </p>
+          <p class="bandwidth">{plan.bandwidth} of relay and edge bandwidth a month</p>
+          <p class="body">{plan.detail}</p>
+        </article>
+      ))
+    }
+  </div>
+</Section>
+
+<style>
+  .plans {
+    display: grid;
+    gap: 16px;
+  }
+
+  .plan {
+    display: grid;
+    gap: 12px;
+    align-content: start;
+    padding: clamp(24px, 3.2vw, 36px);
+  }
+
+  .price {
+    font-family: var(--font-brand);
+    font-weight: 600;
+    font-size: 2rem;
+    letter-spacing: -0.025em;
+    color: var(--ink);
+  }
+
+  .period {
+    font-family: var(--font-body, inherit);
+    font-weight: 400;
+    font-size: 0.875rem;
+    letter-spacing: 0;
+    color: var(--fog);
+  }
+
+  .bandwidth {
+    font-size: 0.9375rem;
+    color: var(--ink);
+  }
+
+  .plan .body {
+    font-size: 1rem;
+    max-width: 40ch;
+  }
+
+  @media (min-width: 860px) {
+    .plans {
+      grid-template-columns: repeat(3, 1fr);
+    }
+  }
+</style>

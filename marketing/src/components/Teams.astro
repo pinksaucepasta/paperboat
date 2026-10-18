@@ -1,6 +1,7 @@
 ---
 import Section from "./Section.astro"
 import Icon from "./Icon.astro"
+import { previewDomain } from "../site"
 const workspaces = [
   { name: "Personal", detail: "You" },
   { name: "Northwind", detail: "Owner", current: true },
@@ -10,7 +11,7 @@ const shared = [
   { icon: "laptop", name: "build-01", detail: "Machine" },
   { icon: "terminal-window", name: "api-build", detail: "Terminal" },
   { icon: "plugs", name: "api.northwind.dev", detail: "Tunnel" },
-  { icon: "eye", name: "q7f2kd.preview.pprbt.dev", detail: "Preview" },
+  { icon: "eye", name: `quiet-river-42.${previewDomain}`, detail: "Preview" },
   { icon: "key", name: "staging", detail: "Secrets" },
 ]
 ---

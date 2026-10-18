@@ -1,94 +1,32 @@
 ---
 import Icon from "./Icon.astro"
-import { installCommands } from "../site"
-/** The install command, as the console's Add machine dialog shows it: platform choice, then the command; clicking copies. */
+import { installCommand } from "../site"
+/** The install command, as the console's Add machine dialog shows it: the command, and clicking copies. */
 interface Props {
   tone?: "light" | "sea"
 }
 const { tone = "light" } = Astro.props
-const id = `install-${Math.random().toString(36).slice(2, 8)}`
 ---
-
-<div class:list={["install", `install-${tone}`]} data-install>
-  <div class="install-tabs" role="tablist" aria-label="Platform">
-    <button role="tab" id={`${id}-posix`} aria-selected="true" aria-controls={`${id}-panel`} data-shell="posix">macOS and Linux</button>
-    <button role="tab" id={`${id}-powershell`} aria-selected="false" aria-controls={`${id}-panel`} data-shell="powershell" tabindex="-1">Windows</button>
-  </div>
-  <button
-    class="install-command"
-    id={`${id}-panel`}
-    role="tabpanel"
-    aria-label="Copy install command"
-    data-copy={installCommands.posix}
-    data-posix={installCommands.posix}
-    data-powershell={installCommands.powershell}
-  >
-    <code data-command>{installCommands.posix}</code>
+<div class:list={["install", `install-${tone}`]}>
+  <p class="install-platform">macOS and Linux</p>
+  <button class="install-command" aria-label="Copy install command" data-copy={installCommand}>
+    <code>{installCommand}</code>
     <span class="install-icon">
       <Icon name="copy" size={16} class="when-idle" />
       <Icon name="check" size={16} class="when-copied" />
     </span>
   </button>
 </div>
-
-<script>
-  document.querySelectorAll<HTMLElement>("[data-install]").forEach((root) => {
-    const tabs = [...root.querySelectorAll<HTMLButtonElement>("[data-shell]")]
-    const panel = root.querySelector<HTMLButtonElement>(".install-command")!
-    const code = root.querySelector<HTMLElement>("[data-command]")!
-    const select = (tab: HTMLButtonElement) => {
-      for (const other of tabs) {
-        const on = other === tab
-        other.setAttribute("aria-selected", String(on))
-        other.tabIndex = on ? 0 : -1
-      }
-      const command = panel.dataset[tab.dataset.shell!]!
-      code.textContent = command
-      panel.dataset.copy = command
-    }
-    tabs.forEach((tab, index) => {
-      tab.addEventListener("click", () => select(tab))
-      tab.addEventListener("keydown", (event) => {
-        if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return
-        const next = tabs[(index + (event.key === "ArrowRight" ? 1 : tabs.length - 1)) % tabs.length]
-        next.focus()
-        select(next)
-      })
-    })
-    if (/Windows/.test(navigator.userAgent)) select(tabs[1])
-  })
-</script>
-
 <style>
   .install {
     width: 100%;
     max-width: 560px;
   }
 
-  .install-tabs {
-    display: flex;
-    gap: 4px;
+  .install-platform {
     margin-bottom: 8px;
-  }
-
-  .install-tabs button {
-    height: 28px;
-    padding-inline: 10px;
-    border-radius: 6px;
     font-size: 0.8125rem;
     color: var(--fog);
-    transition:
-      background-color 0.15s ease,
-      color 0.15s ease;
-  }
-
-  .install-tabs button:hover {
-    color: var(--ink);
-  }
-
-  .install-tabs button[aria-selected="true"] {
-    background: var(--surface);
-    color: var(--ink);
   }
 
   .install-command {
@@ -142,17 +80,8 @@ const id = `install-${Math.random().toString(36).slice(2, 8)}`
   }
 
   /* On the brand gradient: white on blue, no tints of the blue (brand guidelines 05). */
-  .install-sea .install-tabs button {
+  .install-sea .install-platform {
     color: rgb(255 255 255 / 0.72);
-  }
-
-  .install-sea .install-tabs button:hover,
-  .install-sea .install-tabs button[aria-selected="true"] {
-    color: #fff;
-  }
-
-  .install-sea .install-tabs button[aria-selected="true"] {
-    background: rgb(255 255 255 / 0.14);
   }
 
   .install-sea .install-command {

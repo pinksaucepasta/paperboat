@@ -1,6 +1,7 @@
 ---
 import Section from "./Section.astro"
 import Icon from "./Icon.astro"
+import { previewDomain } from "../site"
 ---
 
 <Section id="links" title="Share what you’re running.">
@@ -19,7 +20,7 @@ import Icon from "./Icon.astro"
       </div>
       <pre class="out"><span class="dollar">$</span> pb preview 3000
 Preview ready
-<span class="url">https://q7f2kd.preview.pprbt.dev</span> -&gt; http://127.0.0.1:3000
+<span class="url">https://quiet-river-42.{previewDomain}</span> -&gt; http://127.0.0.1:3000
 
 <span class="dim">Press Ctrl+C to stop</span></pre>
     </article>
@@ -32,7 +33,7 @@ Preview ready
       <pre class="out"><span class="dollar">$</span> pb tunnel create api --port 8080
 Created tunnel api (tun_4kq81zc2)
 Connector con_9d2f7a is ready
-<span class="url">https://8f3c1d2e.tunnels.pprbt.dev</span> -&gt; http://127.0.0.1:8080</pre>
+<span class="url">https://calm-harbor-17.{previewDomain}</span> -&gt; http://127.0.0.1:8080</pre>
     </article>
   </div>
 

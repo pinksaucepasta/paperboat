@@ -626,7 +626,7 @@ that use them; say which in Evidence.
 
 | ID | Scenario | L | M | W | Evidence |
 |---|---|---|---|---|---|
-| S2-01 | Content matches the product (features, platforms 1.1, pricing 1.3, domains 1.2); install instructions use the configured installer host; builds; hosting **USER DECIDES**. | [ ] | — | — |  |
+| S2-01 | Content matches the product (features, platforms 1.1, pricing 1.3, domains 1.2); install instructions use the configured installer host; builds; hosting **USER DECIDES**. | [x] | — | — | Lane C 2026-10-18 scripted browser check marketing/checks/site-check.js on the live dev site (http://100.95.70.63:4321, unit paperboat-marketing.service): install command uses installer_base_url from GET /v1/client-configuration (`curl -fsSL <installer>/install | bash`, /install returns 200), no Windows/PowerShell anywhere (PLAN 1.1), Pricing section with Free $0/5 GB, Pro $8 month or $80 year/100 GB, Team $15 or $150 per seat/100 GB per seat and "direct peer-to-peer traffic is always free" (PLAN 1.3, plans in src/site.ts), example hosts use local_access_base_domain and preview_base_domain, removed *.local/preview/tunnels.pprbt.dev gone, Sign in = console_url; no domain literal in marketing code (only PAPERBOAT_API_URL in git-ignored .env, template .env.example); `astro build` passes. Hosting is still USER DECIDES (production origin comes from the same configuration). Note: /selfhost/install currently answers 404 until S4 publication, so that one command on the site is not usable yet. |
 
 ---
 
