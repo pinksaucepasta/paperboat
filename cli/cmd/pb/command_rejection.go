@@ -2,6 +2,8 @@ package main
 
 import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
+	servepkg "github.com/pinksaucepasta/paperboat/internal/serve"
 	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
 	"reflect"
 )
@@ -20,6 +22,10 @@ const (
 	commandRejectLegacyCarrierRunning
 	commandRejectActivationPending
 	commandRejectInboxDeclined
+	commandRejectPreviewOrigin
+	commandRejectPreviewExpired
+	commandRejectPreviewTimeout
+	commandRejectPreviewDomainTimeout
 )
 
 // commandRejection describes a command-owned refusal. Its
@@ -31,10 +37,18 @@ type commandRejection struct {
 }
 
 func (e commandRejection) valid() bool {
-	return e.reason >= commandRejectDefaultSessionRename && e.reason <= commandRejectInboxDeclined
+	return e.reason >= commandRejectDefaultSessionRename && e.reason <= commandRejectPreviewDomainTimeout
 }
 func (e commandRejection) Error() string {
 	switch e.reason {
+	case commandRejectPreviewOrigin:
+		return "Cannot connect to the preview origin. Start your app and check its listening address and port, then retry. No preview was published."
+	case commandRejectPreviewExpired:
+		return "The preview's time limit ended before it was ready. Retry with a longer --ttl; publishing can take up to a minute."
+	case commandRejectPreviewTimeout:
+		return "The preview did not become ready in time and was stopped. Retry; run pb doctor if this continues."
+	case commandRejectPreviewDomainTimeout:
+		return "The customer domain did not become ready. Verify the displayed DNS records and certificate status, then retry."
 	case commandRejectInboxDeclined:
 		return "The recipient declined this transfer. Contact them before sending again."
 	case commandRejectDefaultSessionRename:
@@ -61,6 +75,19 @@ func (e commandRejection) Error() string {
 	return "Paperboat could not finish the command. Check the current state before retrying."
 }
 func (e commandRejection) Unwrap() error { return e.cause }
+
+// Is lets callers branch on the preview sentinel a preview refusal stands for.
+func (e commandRejection) Is(target error) bool {
+	switch e.reason {
+	case commandRejectPreviewOrigin:
+		return target == ErrPreviewOriginUnavailable
+	case commandRejectPreviewExpired:
+		return target == preview.ErrLeaseExpired
+	case commandRejectPreviewTimeout, commandRejectPreviewDomainTimeout:
+		return target == servepkg.ErrPreviewReadinessTimeout
+	}
+	return false
+}
 
 // API response status is supporting metadata, not permission to ignore an
 // independently preserved decoder/read failure. This proof is limited to the

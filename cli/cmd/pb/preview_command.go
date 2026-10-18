@@ -76,6 +76,29 @@ func previewFailure(message string, causes ...error) error {
 	return previewFailureError{message: message, causes: filtered}
 }
 
+// onlyCause reports whether every leaf of err is target, so a refusal never
+// hides an independent cleanup failure joined beside it.
+func onlyCause(err, target error) bool {
+	switch wrapped := err.(type) {
+	case interface{ Unwrap() []error }:
+		children := wrapped.Unwrap()
+		found := false
+		for _, child := range children {
+			if child == nil {
+				continue
+			}
+			if !onlyCause(child, target) {
+				return false
+			}
+			found = true
+		}
+		return found
+	case interface{ Unwrap() error }:
+		return wrapped.Unwrap() != nil && onlyCause(wrapped.Unwrap(), target)
+	}
+	return errors.Is(err, target)
+}
+
 func closePreviewCarrier(ctx context.Context, carrier preview.Carrier, primary error) error {
 	if carrier == nil {
 		return primary
@@ -446,7 +469,7 @@ func runPreviewWithDomains(command *cobra.Command, target preview.LeaseTarget, p
 			CheckOrigin(context.Context, preview.LeaseTarget) error
 		}); ok {
 			if err := checker.CheckOrigin(foregroundCtx, target); err != nil {
-				failure := previewFailure("cannot connect to the preview origin; start your app and check its listening address and port, then retry. No preview was published", ErrPreviewOriginUnavailable, err)
+				failure := error(commandRejection{reason: commandRejectPreviewOrigin})
 				if foregroundCtx.Err() != nil {
 					failure = previewFailure("preview origin check was interrupted", foregroundCtx.Err(), err)
 				}
@@ -503,10 +526,16 @@ func runPreviewWithDomains(command *cobra.Command, target preview.LeaseTarget, p
 			return previewFailure("this workspace requires a customer-owned domain for self-hosted previews; rerun with `pb preview --domain <hostname>`, add the displayed DNS records, and retry", err)
 		}
 		if errors.Is(err, servepkg.ErrPreviewReadinessTimeout) {
-			if len(domains) > 0 {
-				return previewFailure("the customer domain did not become ready; verify the displayed DNS records and certificate status, then retry", err)
+			if onlyCause(err, servepkg.ErrPreviewReadinessTimeout) {
+				if len(domains) > 0 {
+					return commandRejection{reason: commandRejectPreviewDomainTimeout}
+				}
+				return commandRejection{reason: commandRejectPreviewTimeout}
 			}
 			return previewFailure("preview readiness timed out", err)
+		}
+		if onlyCause(err, preview.ErrLeaseExpired) {
+			return commandRejection{reason: commandRejectPreviewExpired}
 		}
 		return previewFailure("preview could not be started", err)
 	}

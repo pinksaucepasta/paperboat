@@ -51,9 +51,9 @@ def main():
                 if status['state'] != 'stopped':
                     raise RuntimeError('preview stop/delete did not persist its documented stopped state')
                 owned.remove(identity)
-            lease = create('30s')
+            lease = create('60s')
             deadline = receipt_timestamp(lease['user_deadline']).timestamp()
-            if deadline - time.time() > 30:
+            if deadline - time.time() > 60:
                 raise RuntimeError('preview extended its requested TTL')
             while time.time() < deadline + 30:
                 status = invoke(binary, 'preview', 'status', lease['id'], '--json', timeout=20)
