@@ -108,6 +108,11 @@ func prepareMaintenance(ctx context.Context, socket, tokenFile string, force boo
 		return nil, err
 	}
 	if err = client.PrepareMaintenance(ctx, force); err != nil {
+		// Waiting for running finite work is bounded by timeout. Running out
+		// of that wait is the busy outcome, not a failed installation step.
+		if ctx.Err() == nil && (errors.Is(err, os.ErrDeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) || timeoutError(err)) {
+			return nil, errors.Join(hostdproto.ErrMaintenanceBusy, err)
+		}
 		return nil, err
 	}
 	return func() error {
@@ -136,4 +141,9 @@ func bundleProofFailure(err error) bool {
 		err = wrapped.Unwrap()
 	}
 	return false
+}
+
+func timeoutError(err error) bool {
+	var timeout interface{ Timeout() bool }
+	return errors.As(err, &timeout) && timeout.Timeout()
 }
