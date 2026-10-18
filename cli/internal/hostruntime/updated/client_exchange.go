@@ -68,7 +68,10 @@ func exchangeControl(ctx context.Context, connection net.Conn, request ControlRe
 			return ControlResponse{}, controlClientFailure{kind: ErrInvalidControl, cause: err}
 		}
 	}
-	decoder := json.NewDecoder(io.LimitReader(connection, 16<<10))
+	// Read one byte beyond the response limit so a truncated whitespace tail
+	// cannot masquerade as the end of the response.
+	input := &io.LimitedReader{R: connection, N: (16 << 10) + 1}
+	decoder := json.NewDecoder(input)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&response); err != nil {
 		return ControlResponse{}, controlClientFailure{kind: ErrInvalidControl, cause: err}
@@ -79,6 +82,9 @@ func exchangeControl(ctx context.Context, connection net.Conn, request ControlRe
 			err = ErrInvalidControl
 		}
 		return ControlResponse{}, controlClientFailure{kind: ErrInvalidControl, cause: err}
+	}
+	if input.N == 0 {
+		return ControlResponse{}, ErrInvalidControl
 	}
 	if response.Schema != ControlProtocolV1 || (response.Status != "ok" && response.Status != "error") || !validControlResponseError(response.Status, response.ErrorCode, response.ErrorMessage) {
 		return ControlResponse{}, ErrInvalidControl

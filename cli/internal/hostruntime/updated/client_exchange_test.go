@@ -67,6 +67,27 @@ func TestControlExchangeProjectsFiniteFailureCodeWithoutRemoteMessage(t *testing
 	}
 }
 
+func TestControlExchangeRejectsOversizedResponseAfterValidJSON(t *testing.T) {
+	client, server := net.Pipe()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer server.Close()
+		var request ControlRequest
+		if err := json.NewDecoder(server).Decode(&request); err != nil {
+			t.Error(err)
+			return
+		}
+		body := `{"schema":"` + ControlProtocolV1 + `","status":"ok"}`
+		_, _ = io.WriteString(server, body+strings.Repeat(" ", 16<<10))
+	}()
+	_, err := exchangeControl(context.Background(), client, ControlRequest{Schema: ControlProtocolV1, Operation: "status"}, time.Second, false)
+	<-done
+	if !errors.Is(err, ErrInvalidControl) {
+		t.Fatalf("oversized updater response accepted: %v", err)
+	}
+}
+
 func TestControlExchangeCancellationJoinsBlockedIOAndFreshRequestRecovers(t *testing.T) {
 	client, server := net.Pipe()
 	requestRead := make(chan struct{})

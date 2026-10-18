@@ -1845,3 +1845,6 @@ Migration093 replaces unpublished083; final binaries used freshly recreated pape
 2026-10-18 | Lane A F7 finite readiness failures | Rows ticked:none; real TLS POST/GET validation owner RED2.404s/GREEN2.083s distinguishes HTTP/JSON/ETag/identity/generation/state/network through joined cleanup, including after ready; no payloads or acceptance/timeouts changed. Full preview race13.379s/vet PASS; parent workspace gate reused; primary owns live qualification.
 
 2026-10-18 | Lane A F7 owner/retry failure retention | Rows ticked:none; real Session.mutateReadiness + TLS owner RED1.148s/GREEN1.055s reproduces owner validation loss and4POST/4GET last-cause loss. Finite owner stages and bounded-exhaustion marker retain primary failure; policy/timeouts unchanged; full preview race13.379s/vet PASS, parent gate reused.
+
+2026-10-18 | Lane A F14 response-size enforcement | Rows ticked:none; updater accepted valid JSON followed by an oversized whitespace tail because its limit looked like EOF. Owner RED0.030s/GREEN all ControlExchange race1.076s, updated vet PASS; actual response overflow now rejects.
+Reuses published abf4031 workspace gate PASS; primary owns F14 native/update-continuity/rollback/retirement/scheduling/version-floor/offline/check-status L/M proof, producer owns official signed artifacts/keys, Claude owns workspace summary.
