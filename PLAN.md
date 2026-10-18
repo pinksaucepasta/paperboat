@@ -2020,3 +2020,6 @@ All finished code is pushed, no unpushed or half-done source changes remain, and
 
 2026-10-18 | Lane C batch | rows ticked:F15-06 L | 9fffe4e Activity sentences, 0797da2 update summary per workspace (F14-09 console part), d01e625 Environment 401 sign-in loop fixed; F10-06 needs browser vault (console/NOTES.md Environment).
 2026-10-18 | Lane C batch 2 | rows ticked:none | Team suspended notice, machine table past 200, console domains from /v1/client-configuration. Waits Lane B: GET/DELETE /v1/machines/{id}/inbox (F6-06), GET /v1/domains (Domains page). Revoke test needs a throwaway enrolled machine from Lane A.
+
+2026-10-18 | Lane B route contract | server rejects public HTTP catch_all routes (create/patch) and blocks private→public flip while an HTTP catch_all route exists; not deployed yet. Lane A: `pb tunnel route add` without --domain sends catch_all and now gets 400 on public tunnels; default to the tunnel hostname or require --domain.
+2026-10-18 | Lane B F10-03 re-invite 409 | not a server bug: seat_required (team paperboat-smoke-paid has 2 seats = owner + pending email invitation invitation_39f38f91, expires 2026-10-18T23:02Z). Recover via owner cancelling that invitation, then re-invite; Lane A: surface the error code instead of bare 409.

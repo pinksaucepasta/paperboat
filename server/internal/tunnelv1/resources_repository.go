@@ -487,6 +487,11 @@ func validateEffectiveRouteCandidate(tunnel dbsqlc.Tunnel, candidate dbsqlc.Tunn
 	if candidate.Protocol == "http" && candidate.OriginScheme == "tcp" {
 		return fmt.Errorf("%w: HTTP routes cannot target a tcp origin", ErrInvalidInput)
 	}
+	// The edge serves a public HTTP route only for a concrete hostname, so a
+	// public catch-all route would be accepted here and never answer.
+	if candidate.Protocol == "http" && candidate.MatchType == "catch_all" && tunnel.AccessMode == AccessPublic {
+		return fmt.Errorf("%w: public HTTP routes require an exact, wildcard or managed hostname; catch-all is only valid on private tunnels", ErrInvalidInput)
+	}
 	if candidate.MatchType == "catch_all" && (candidate.MatchHostname.Valid || candidate.WildcardSuffix.Valid) {
 		return fmt.Errorf("%w: catch-all routes cannot include a hostname", ErrInvalidInput)
 	}

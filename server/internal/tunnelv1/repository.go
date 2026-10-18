@@ -414,7 +414,7 @@ func (r *SQLRepository) Patch(ctx context.Context, input PatchRecord) (MutationR
 				return translate(routeErr)
 			}
 			if hasTCPRoute {
-				return fmt.Errorf("%w: remove TCP routes before changing tunnel access mode", ErrInvalidInput)
+				return fmt.Errorf("%w: remove TCP and catch-all routes before changing tunnel access mode", ErrInvalidInput)
 			}
 		}
 		changed := patchChanges(current, input)

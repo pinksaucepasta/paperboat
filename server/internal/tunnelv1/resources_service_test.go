@@ -329,6 +329,21 @@ func TestTLSRouteManagedHostnameCannotClaimAnotherName(t *testing.T) {
 	}
 }
 
+func TestPublicHTTPRouteRejectsCatchAll(t *testing.T) {
+	route := dbsqlc.TunnelRoute{Protocol: "http", MatchType: "catch_all", OriginScheme: "http", TlsVerification: "not_applicable"}
+	if err := validateEffectiveRouteCandidate(dbsqlc.Tunnel{AccessMode: AccessPublic}, route); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("public catch-all HTTP route error=%v, want invalid input", err)
+	}
+	if err := validateEffectiveRouteCandidate(dbsqlc.Tunnel{AccessMode: AccessPrivate}, route); err != nil {
+		t.Fatalf("private catch-all HTTP route error=%v", err)
+	}
+	route.MatchType = "exact"
+	route.MatchHostname = sql.NullString{String: "app.example.test", Valid: true}
+	if err := validateEffectiveRouteCandidate(dbsqlc.Tunnel{AccessMode: AccessPublic}, route); err != nil {
+		t.Fatalf("public exact HTTP route error=%v", err)
+	}
+}
+
 func TestResourceServicePublicTCPAllocatesListenerIdentity(t *testing.T) {
 	repo := &fakeResourceRepository{}
 	service := resourceServiceForTest(t, repo, 0)

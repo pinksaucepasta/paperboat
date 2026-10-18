@@ -51,3 +51,49 @@ func TestRoutePatchPersistsNameAndCanonicalRootOnPostgres(t *testing.T) {
 		t.Fatalf("stale route ETag accepted: %v", err)
 	}
 }
+
+func TestPublicHTTPCatchAllRouteIsRejectedOnPostgres(t *testing.T) {
+	f := newTRK07PostgresFixture(t)
+	ctx := context.Background()
+	account, host := f.addAccount(t, "catch-all")
+	tunnel := "tun_catch_all_" + f.suffix
+	created := f.createTunnel(t, account, host, tunnel, "catch-all-"+f.suffix)
+	var route string
+	if err := f.database.SQL().QueryRowContext(ctx, `SELECT id FROM paperboat.tunnel_routes WHERE tunnel_id=$1 AND deleted_at IS NULL ORDER BY id LIMIT 1`, tunnel).Scan(&route); err != nil {
+		t.Fatal(err)
+	}
+	service, err := NewResourceService(f.repository, ResourceConfig{CursorKey: bytes.Repeat([]byte("p"), 32), Now: func() time.Time { return f.now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := testRequest(false)
+	request.Actor.AccountID, request.Actor.ActorID = account, account
+	before, err := service.GetRoute(ctx, request, tunnel, route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catchAll, none := "catch_all", ""
+	_, err = service.PatchRoute(ctx, request, tunnel, route, RoutePatchRequest{MatchType: &catchAll, Hostname: &none, WildcardSuffix: &none, Mutation: ResourceMutationInput{ExpectedGeneration: before.Generation, IdempotencyKey: "catch-all-public:" + f.suffix, RequestHash: sha256.Sum256([]byte("catch-all-public:" + f.suffix))}})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("public tunnel accepted a catch-all HTTP route: %v", err)
+	}
+	// A catch-all route that exists on a private tunnel must block publication.
+	if _, err := f.database.SQL().ExecContext(ctx, `UPDATE paperboat.tunnels SET access_mode='private' WHERE id=$1`, tunnel); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.database.SQL().ExecContext(ctx, `UPDATE paperboat.tunnel_routes SET match_type='catch_all', match_hostname=NULL WHERE id=$1`, route); err != nil {
+		t.Fatal(err)
+	}
+	public := AccessPublic
+	_, err = f.repository.Patch(ctx, PatchRecord{
+		OperationID: "op_catch_all_public_" + f.suffix, AuditEventID: "aud_catch_all_public_" + f.suffix,
+		TunnelID: tunnel, AccountID: account, AccessMode: &public,
+		ExpectedGeneration: created.Tunnel.Generation, IdempotencyKey: "catch-all-publish:" + f.suffix,
+		RequestHash: sha256.Sum256([]byte("catch-all-publish:" + f.suffix)), ActorID: account, AuditActorID: host, ActorType: "host",
+		RequestID: "req_catch_all_public_" + f.suffix, CorrelationID: "corr_catch_all_public_" + f.suffix,
+		SourceMachineID: host, Now: f.now,
+	})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("private catch-all HTTP route became public: %v", err)
+	}
+}

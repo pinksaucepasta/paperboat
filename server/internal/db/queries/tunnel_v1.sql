@@ -95,5 +95,5 @@ SELECT EXISTS (
   WHERE tunnel_id = sqlc.arg(tunnel_id)
     AND deleted_at IS NULL
     AND desired_state = 'active'
-    AND (protocol = 'private_tcp' OR origin_scheme = 'tcp')
+    AND (protocol = 'private_tcp' OR origin_scheme = 'tcp' OR (protocol = 'http' AND match_type = 'catch_all'))
 ) AS has_active_private_tcp_route;
