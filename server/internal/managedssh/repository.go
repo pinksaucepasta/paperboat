@@ -428,6 +428,15 @@ func (r *SQLRepository) ObserveHost(ctx context.Context, request ObserveHostRequ
 		}
 		for _, key := range proposed.Keys {
 			owner, ownerErr := q.GetMachineSSHHostKeyOwner(ctx, key.Fingerprint[:])
+			if ownerErr == nil && owner.UserMachineID != request.UserMachineID {
+				// The same computer enrolled again (reset, reinstall): its host keys are
+				// still recorded for the disconnected record, which no longer needs them.
+				if released, err := releaseRetiredHostKeyOwner(ctx, q, request.UserID, key.Fingerprint[:]); err != nil {
+					return err
+				} else if released {
+					ownerErr = pgx.ErrNoRows
+				}
+			}
 			if ownerErr == nil {
 				if owner.UserMachineID != request.UserMachineID || owner.Algorithm != key.Algorithm || owner.PublicKey != key.PublicKey {
 					return ErrConflict
@@ -708,4 +717,14 @@ func nullTime(value sql.NullTime) time.Time {
 		return time.Time{}
 	}
 	return value.Time
+}
+
+// releaseRetiredHostKeyOwner removes the claim a revoked, disconnected or deleted machine of the
+// same account holds on a host key, so the machine that now has that key can record it.
+func releaseRetiredHostKeyOwner(ctx context.Context, q *dbsqlc.Queries, userID string, fingerprint []byte) (bool, error) {
+	if err := q.DeleteRetiredMachineSSHHostKeys(ctx, dbsqlc.DeleteRetiredMachineSSHHostKeysParams{Fingerprint: fingerprint, UserID: userID}); err != nil {
+		return false, err
+	}
+	released, err := q.DeleteRetiredMachineSSHHostKeyOwner(ctx, dbsqlc.DeleteRetiredMachineSSHHostKeyOwnerParams{Fingerprint: fingerprint, UserID: userID})
+	return released > 0, err
 }

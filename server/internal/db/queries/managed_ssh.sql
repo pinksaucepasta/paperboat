@@ -112,6 +112,18 @@ RETURNING *;
 SELECT * FROM machine_ssh_host_key_owners
 WHERE fingerprint = sqlc.arg(fingerprint);
 
+-- name: DeleteRetiredMachineSSHHostKeys :exec
+DELETE FROM machine_ssh_host_keys k
+USING user_machines m
+WHERE k.fingerprint = sqlc.arg(fingerprint) AND m.id = k.user_machine_id AND m.user_id = sqlc.arg(user_id)
+  AND m.state IN ('revoked', 'disconnected', 'deleted');
+
+-- name: DeleteRetiredMachineSSHHostKeyOwner :execrows
+DELETE FROM machine_ssh_host_key_owners o
+USING user_machines m
+WHERE o.fingerprint = sqlc.arg(fingerprint) AND m.id = o.user_machine_id AND m.user_id = sqlc.arg(user_id)
+  AND m.state IN ('revoked', 'disconnected', 'deleted');
+
 -- name: CreateMachineSSHHostKeyOwner :one
 INSERT INTO machine_ssh_host_key_owners
   (fingerprint, user_machine_id, algorithm, public_key, first_observed_at)

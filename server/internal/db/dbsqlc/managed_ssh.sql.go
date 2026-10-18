@@ -264,6 +264,43 @@ func (q *Queries) CreateManagedSSHOperation(ctx context.Context, arg CreateManag
 	return i, err
 }
 
+const deleteRetiredMachineSSHHostKeyOwner = `-- name: DeleteRetiredMachineSSHHostKeyOwner :execrows
+DELETE FROM machine_ssh_host_key_owners o
+USING user_machines m
+WHERE o.fingerprint = $1 AND m.id = o.user_machine_id AND m.user_id = $2
+  AND m.state IN ('revoked', 'disconnected', 'deleted')
+`
+
+type DeleteRetiredMachineSSHHostKeyOwnerParams struct {
+	Fingerprint []byte
+	UserID      string
+}
+
+func (q *Queries) DeleteRetiredMachineSSHHostKeyOwner(ctx context.Context, arg DeleteRetiredMachineSSHHostKeyOwnerParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteRetiredMachineSSHHostKeyOwner, arg.Fingerprint, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteRetiredMachineSSHHostKeys = `-- name: DeleteRetiredMachineSSHHostKeys :exec
+DELETE FROM machine_ssh_host_keys k
+USING user_machines m
+WHERE k.fingerprint = $1 AND m.id = k.user_machine_id AND m.user_id = $2
+  AND m.state IN ('revoked', 'disconnected', 'deleted')
+`
+
+type DeleteRetiredMachineSSHHostKeysParams struct {
+	Fingerprint []byte
+	UserID      string
+}
+
+func (q *Queries) DeleteRetiredMachineSSHHostKeys(ctx context.Context, arg DeleteRetiredMachineSSHHostKeysParams) error {
+	_, err := q.db.Exec(ctx, deleteRetiredMachineSSHHostKeys, arg.Fingerprint, arg.UserID)
+	return err
+}
+
 const getActiveMachineSSHHostKeySetForUpdate = `-- name: GetActiveMachineSSHHostKeySetForUpdate :one
 SELECT id, user_machine_id, machine_generation, observation_generation, set_fingerprint, state, reconciliation_version, observed_at, promoted_at, rejected_at, rejection_reason FROM machine_ssh_host_key_sets
 WHERE user_machine_id = $1 AND state = 'active'
