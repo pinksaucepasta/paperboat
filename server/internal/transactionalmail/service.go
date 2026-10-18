@@ -49,6 +49,23 @@ func EnqueueTx(ctx context.Context, tx *db.Tx, id string, invitation *string, me
 	return err
 }
 
+// EnqueueOnceTx is EnqueueTx for notices that must be sent at most once per stable id:
+// a repeated call with the same id is a no-op, and it reports whether it queued the mail.
+func EnqueueOnceTx(ctx context.Context, tx *db.Tx, id string, message Message) (bool, error) {
+	payload, err := json.Marshal(message)
+	if err != nil {
+		return false, err
+	}
+	if len(payload) > responseLimit || len(id) < 1 || len(id) > 256 {
+		return false, errors.New("mail request exceeds payload or idempotency key bounds")
+	}
+	result, err := tx.Exec(ctx, `INSERT INTO transactional_mail_outbox(mail_id,payload) VALUES($1,$2) ON CONFLICT(mail_id) DO NOTHING`, id, payload)
+	if err != nil {
+		return false, err
+	}
+	return result.RowsAffected() == 1, nil
+}
+
 // Dispatch sends at most one item. Claim leases survive process crashes. Provider
 // calls never run in a database transaction; retries retain both key and payload.
 func (s *Service) Dispatch(ctx context.Context) error {

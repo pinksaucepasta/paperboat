@@ -22,6 +22,8 @@ type WorkspaceService struct {
 	key              string
 	topupMaxQuantity int
 	portals          PortalConfigurations
+	mail             config.TransactionalMail
+	mailEnabled      bool
 }
 
 var ErrProductChanged = errors.New("billing product price changed")

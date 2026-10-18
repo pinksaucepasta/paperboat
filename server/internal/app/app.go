@@ -714,6 +714,7 @@ func New(opts Options) (*App, error) {
 	}
 	teamService := teams.NewService(store)
 	teamService.ConfigureMail(opts.Config.Mail, opts.Config.Secrets.ResendAPIKey != "")
+	workspaceBilling.ConfigureNotificationMail(opts.Config.Mail, opts.Config.Secrets.ResendAPIKey != "")
 	mailService := &transactionalmail.Service{DB: store, Endpoint: opts.Config.Mail.Endpoint, Key: opts.Config.Secrets.ResendAPIKey}
 
 	operatorService := operator.NewService(store)

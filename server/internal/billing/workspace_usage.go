@@ -118,6 +118,11 @@ WHERE workspace_id=$1 AND paid=$2 AND coalesce(budget_start,period_start)=$3`, w
 		}
 		exhausted = remaining == 0
 	}
+	if exhausted && bytes > 0 {
+		if err = s.noticeBandwidthExhaustedTx(ctx, tx, workspaceID, window); err != nil {
+			return 0, false, err
+		}
+	}
 	return granted, exhausted, nil
 }
 
