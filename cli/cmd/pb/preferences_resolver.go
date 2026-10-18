@@ -133,12 +133,19 @@ func resolvePreferences(root *cobra.Command, doc preferences.Document, args []st
 		}
 	} else if shortcut, ok := doc.Shortcuts[name]; ok {
 		target, _, _ := root.Find(shortcut.Command)
-		expanded, err := expandPreferenceShortcut(name, shortcut, target, work[index+1:])
+		supplied := append(slices.Clone(work[index+1:]), tail...)
+		expanded, err := expandPreferenceShortcut(name, shortcut, target, supplied)
 		if err != nil {
 			return nil, result, err
 		}
 		result.Arguments = append(slices.Clone(work[:index]), expanded...)
 		result.Shortcut, result.Command = name, strings.Join(shortcut.Command, " ")
+		tail = nil
+	}
+	// Defaults belong to the command, before any literal operand boundary.
+	if dash := slices.Index(result.Arguments, "--"); dash >= 0 {
+		tail = slices.Clone(result.Arguments[dash:])
+		result.Arguments = result.Arguments[:dash]
 	}
 	command, _, err := root.Find(result.Arguments)
 	if err != nil || command == nil {
@@ -184,6 +191,8 @@ func expandPreferenceShortcut(name string, shortcut preferences.Shortcut, comman
 	}
 	used := map[int]bool{}
 	argsToken := false
+	separator := slices.Index(supplied, "--")
+	boundaryWritten := false
 	result := slices.Clone(shortcut.Command)
 	for _, template := range shortcut.Args {
 		for _, token := range preferenceTemplate.FindAllString(template, -1) {
@@ -209,25 +218,42 @@ func expandPreferenceShortcut(name string, shortcut preferences.Shortcut, comman
 			argsToken = true
 			for i, v := range supplied {
 				if !used[i] {
+					if i == separator {
+						if boundaryWritten {
+							continue
+						}
+						boundaryWritten = true
+					}
 					result = append(result, v)
 				}
 			}
 			continue
 		}
+		literal := false
 		expanded := preferenceTemplate.ReplaceAllStringFunc(template, func(token string) string {
 			key := token[1 : len(token)-1]
 			if key == "args" {
 				return ""
 			}
 			n, _ := strconv.Atoi(key)
-			return supplied[positional[n-1]]
+			index := positional[n-1]
+			literal = literal || separator >= 0 && index > separator
+			return supplied[index]
 		})
+		if literal && !boundaryWritten {
+			result = append(result, "--")
+			boundaryWritten = true
+		}
 		result = append(result, expanded)
+		boundaryWritten = boundaryWritten || template == "--"
 	}
 	for i := range supplied {
-		if !used[i] && !argsToken {
+		if !used[i] && !argsToken && i != separator {
 			return nil, fmt.Errorf("shortcut %q does not accept all supplied arguments", name)
 		}
+	}
+	if separator >= 0 && !boundaryWritten {
+		result = append(result, "--")
 	}
 	return result, nil
 }

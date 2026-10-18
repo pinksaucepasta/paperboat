@@ -170,6 +170,31 @@ func TestPreferenceRootFlagsAndOperandAccounting(t *testing.T) {
 	if !reflect.DeepEqual(got, []string{"--json", "ssh", "user@host"}) {
 		t.Fatalf("root flags/templates=%q", got)
 	}
+	doc.Shortcuts["literal"] = preferences.Shortcut{Command: []string{"ssh"}, Args: []string{"{1}"}}
+	doc.Shortcuts["literal-rest"] = preferences.Shortcut{Command: []string{"ssh"}, Args: []string{"{1}", "{args}"}}
+	for _, test := range []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{"rest first", []string{"pick", "--", "host", "user"}, []string{"ssh", "--", "user@host"}},
+		{"indexed only", []string{"literal", "--", "-host"}, []string{"ssh", "--", "-host"}},
+		{"rest last", []string{"literal-rest", "--", "-host", "echo"}, []string{"ssh", "--", "-host", "echo"}},
+		{"empty boundary", []string{"literal", "host", "--"}, []string{"ssh", "host", "--"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, _, err := resolvePreferences(root, doc, test.args)
+			if err != nil || !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("literal indexed operands=%q want=%q err=%v", got, test.want, err)
+			}
+		})
+	}
+	doc.Shortcuts["boat"] = preferences.Shortcut{Command: []string{"tunnel", "create"}, Args: []string{"{args}", "{1}"}}
+	doc.Defaults = map[string]map[string]string{"tunnel create": {"wait": "true"}}
+	got, _, err = resolvePreferences(root, doc, []string{"boat", "--", "-demo"})
+	if err != nil || !reflect.DeepEqual(got, []string{"tunnel", "create", "--wait=true", "--", "-demo"}) {
+		t.Fatalf("default crossed literal boundary: %q err=%v", got, err)
+	}
 	doc.Shortcuts = map[string]preferences.Shortcut{"one": {Command: []string{"ssh"}, Args: []string{"{1}"}}}
 	if _, _, err := resolvePreferences(root, doc, []string{"one"}); err == nil {
 		t.Fatal("missing operand accepted")
