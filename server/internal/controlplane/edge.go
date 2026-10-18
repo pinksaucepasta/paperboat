@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat-server/internal/audit"
+	"github.com/pinksaucepasta/paperboat-server/internal/bandwidthgate"
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
 	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
 	serverdiagnostics "github.com/pinksaucepasta/paperboat-server/internal/diagnostics"
@@ -48,6 +49,7 @@ type EdgeService struct {
 	clock                   func() time.Time
 	bandwidth               BandwidthDebiter
 	scopedBandwidth         ScopedBandwidthDebiter
+	relayQuota              *bandwidthgate.Gate
 	audit                   *audit.Writer
 	signer                  *mint.Provider
 	issuer                  string
@@ -58,6 +60,10 @@ type EdgeService struct {
 		ServeEdgeControl(http.ResponseWriter, *http.Request, string, string)
 	}
 }
+
+// SetRelayQuotaGate makes relay observations report which connected accounts are out of
+// bandwidth allowance (see relayNodeLeaseDocument.QuotaDenied). Nil leaves the list empty.
+func (s *EdgeService) SetRelayQuotaGate(gate *bandwidthgate.Gate) { s.relayQuota = gate }
 
 func (s *EdgeService) SetScopedBandwidthDebiter(debiter ScopedBandwidthDebiter) {
 	s.scopedBandwidth = debiter

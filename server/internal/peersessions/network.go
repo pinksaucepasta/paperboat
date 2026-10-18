@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/pinksaucepasta/paperboat-server/internal/admission"
+	"github.com/pinksaucepasta/paperboat-server/internal/bandwidthgate"
 	"log/slog"
 	"net/netip"
 	"slices"
@@ -61,11 +62,9 @@ type NetworkService struct {
 	}
 	issuer string
 	now    func() time.Time
-	// Relay quota gate (relay_quota.go): off until ConfigureQuota.
-	quotaEnabled bool
-	billingURL   string
-	quotaLookup  func(context.Context, string, time.Time) (bool, error)
-	quotaCache   relayQuotaCache
+	// Relay quota gate (relay_quota.go): nil (off) until ConfigureQuota.
+	quotaGate  *bandwidthgate.Gate
+	billingURL string
 }
 
 func NewNetworkService(store *db.DB, signer interface {

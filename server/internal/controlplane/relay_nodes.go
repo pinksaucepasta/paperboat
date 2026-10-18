@@ -30,6 +30,9 @@ type relayNodeObservation struct {
 	Draining     bool           `json:"draining"`
 	CapacityUsed int64          `json:"capacity_used"`
 	Subjects     []relaySubject `json:"subjects"`
+	// QuotaDeniedSupported is sent by relays that understand LeaseDocument.QuotaDenied. Relays
+	// decode leases strictly, so an older relay must never be sent the field.
+	QuotaDeniedSupported bool `json:"quota_denied_supported,omitempty"`
 }
 type relayNodeLeaseDocument struct {
 	NodeID        string                `json:"node_id"`
@@ -39,6 +42,10 @@ type relayNodeLeaseDocument struct {
 	CapacityLimit int64                 `json:"capacity_limit"`
 	Revocations   []relaySubject        `json:"revocations"`
 	PeerRelay     *relayServiceIdentity `json:"peer_relay,omitempty"`
+	// QuotaDenied lists connected accounts whose workspaces are all out of bandwidth allowance:
+	// the relay refuses their new admissions and closes their carriers (typed), until a later
+	// observation no longer lists them. It never carries authority.
+	QuotaDenied []string `json:"quota_denied,omitempty"`
 }
 type relayServiceIdentity struct {
 	WireGuardPublicKey string `json:"wireguard_public_key"`
@@ -106,7 +113,7 @@ func (s *EdgeService) StartRelayNode(ctx context.Context, in relayNodeStart) (re
 				return out, err
 			}
 		}
-		out = relayNodeLeaseDocument{in.NodeID, gen, epoch, min(expires.Unix(), s.clock().Add(relayNodeLease).Unix()), capacity, []relaySubject{}, nil}
+		out = relayNodeLeaseDocument{NodeID: in.NodeID, Generation: gen, ProcessEpoch: epoch, ExpiresAt: min(expires.Unix(), s.clock().Add(relayNodeLease).Unix()), CapacityLimit: capacity, Revocations: []relaySubject{}}
 	} else {
 		if gen != in.ExpectedGeneration || epoch == in.ProcessEpoch {
 			return out, ErrInvalidUsageReport
@@ -117,7 +124,7 @@ func (s *EdgeService) StartRelayNode(ctx context.Context, in relayNodeStart) (re
 		if err != nil {
 			return out, err
 		}
-		out = relayNodeLeaseDocument{in.NodeID, gen + 1, in.ProcessEpoch, now.Add(relayNodeLease).Unix(), capacity, []relaySubject{}, nil}
+		out = relayNodeLeaseDocument{NodeID: in.NodeID, Generation: gen + 1, ProcessEpoch: in.ProcessEpoch, ExpiresAt: now.Add(relayNodeLease).Unix(), CapacityLimit: capacity, Revocations: []relaySubject{}}
 	}
 	out.PeerRelay, err = relayServiceForNode(ctx, tx, in.NodeID)
 	if err != nil {
@@ -179,7 +186,7 @@ func (s *EdgeService) ObserveRelayNode(ctx context.Context, in relayNodeObservat
 	if err != nil {
 		return out, err
 	}
-	out = relayNodeLeaseDocument{in.NodeID, in.Generation, in.ProcessEpoch, now.Add(relayNodeLease).Unix(), capacity, []relaySubject{}, nil}
+	out = relayNodeLeaseDocument{NodeID: in.NodeID, Generation: in.Generation, ProcessEpoch: in.ProcessEpoch, ExpiresAt: now.Add(relayNodeLease).Unix(), CapacityLimit: capacity, Revocations: []relaySubject{}}
 	for _, subject := range in.Subjects {
 		var floor int64
 		err = tx.QueryRowContext(ctx, `SELECT n.relay_revocation_generation FROM paperboat.peer_network_identities n JOIN paperboat.control_tunnel_nodes r ON r.id=$3 WHERE n.user_id=$1 AND n.endpoint_id=$2 AND paperboat.node_pool_eligible(r.id,n.user_id,'relay')`, subject.AccountID, subject.EndpointID, in.NodeID).Scan(&floor)
@@ -197,8 +204,27 @@ func (s *EdgeService) ObserveRelayNode(ctx context.Context, in relayNodeObservat
 	if err != nil {
 		return relayNodeLeaseDocument{}, err
 	}
-	return out, tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return relayNodeLeaseDocument{}, err
+	}
+	// After the commit and outside the transaction: read-only, cached, bounded, fail-open.
+	if s.relayQuota != nil && in.QuotaDeniedSupported {
+		accounts := make([]string, 0, len(in.Subjects))
+		listed := map[string]bool{}
+		for _, subject := range in.Subjects {
+			if !listed[subject.AccountID] {
+				listed[subject.AccountID] = true
+				accounts = append(accounts, subject.AccountID)
+			}
+		}
+		out.QuotaDenied = s.relayQuota.DeniedAmong(ctx, accounts, now, relayQuotaFreshLookups)
+	}
+	return out, nil
 }
+
+// relayQuotaFreshLookups bounds the uncached allowance reads one relay observation may cost.
+const relayQuotaFreshLookups = 64
+
 func (s *EdgeService) handleRelayStart(w http.ResponseWriter, r *http.Request) {
 	var in relayNodeStart
 	if !s.decode(w, r, &in) {
