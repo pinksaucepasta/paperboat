@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat-server/internal/accountingauthority"
 	"github.com/pinksaucepasta/paperboat-server/internal/admission"
 	"net/netip"
 	"slices"
@@ -59,10 +58,13 @@ type NetworkService struct {
 		SignRegionalCandidates(map[string]any) (string, error)
 		SignRelayGrant(map[string]any) (string, error)
 	}
-	issuer     string
-	now        func() time.Time
-	quota      accountingauthority.QuotaChecker
-	billingURL string
+	issuer string
+	now    func() time.Time
+	// Relay quota gate (relay_quota.go): off until ConfigureQuota.
+	quotaEnabled bool
+	billingURL   string
+	quotaLookup  func(context.Context, string, time.Time) (bool, error)
+	quotaCache   relayQuotaCache
 }
 
 func NewNetworkService(store *db.DB, signer interface {
