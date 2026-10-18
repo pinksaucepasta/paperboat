@@ -59,6 +59,14 @@ func (v PasswordVault) RefreshSource(ctx context.Context, kind, owner, machine s
 		if err != nil {
 			return err
 		}
+		var team *api.VaultTeamState
+		if kind == "team" {
+			state, err := c.GetVaultTeam(ctx, owner)
+			if err != nil {
+				return err
+			}
+			team = &state
+		}
 		seen := map[string]bool{}
 		for _, recipient := range recipients {
 			if err := ctx.Err(); err != nil {
@@ -68,6 +76,9 @@ func (v PasswordVault) RefreshSource(ctx context.Context, kind, owner, machine s
 				return ErrIntegrity
 			}
 			seen[recipient.MachineID] = true
+			if !v.mayReceiveLayer(scope.Claims, team, recipient) {
+				continue
+			}
 			public, err := base64.RawURLEncoding.Strict().DecodeString(recipient.HostPublic)
 			if err != nil {
 				return ErrIntegrity
@@ -97,6 +108,27 @@ func (v PasswordVault) RefreshSource(ctx context.Context, kind, owner, machine s
 		return nil
 	})
 	return count, err
+}
+
+// mayReceiveLayer refuses recipients the control plane may list but this writer
+// must not seal to: Personal scope keys go only to the writer's own account,
+// a device override only to its own machine, and Team scope keys only to active
+// members who may read. The host key itself is checked by SealVaultScopeKey.
+func (v PasswordVault) mayReceiveLayer(c env.VaultScopeClaims, team *api.VaultTeamState, r api.VaultLayerRecipient) bool {
+	if r.MachineID == "" || r.RecipientAccount == "" || r.HostKeyGeneration == 0 || r.InstallationGeneration == 0 {
+		return false
+	}
+	if c.MachineID != "" && c.MachineID != r.MachineID {
+		return false
+	}
+	if c.OwnerKind == "personal" {
+		return r.RecipientAccount == v.AccountID && c.OwnerID == v.AccountID
+	}
+	if team == nil {
+		return false
+	}
+	_, ok := vaultTeamActor(*team, r.RecipientAccount, "read")
+	return ok
 }
 func (v PasswordVault) publishLayerOperation(ctx context.Context, local *config.PasswordVaultRecord) error {
 	client, ok := v.Client.(VaultLayerClient)

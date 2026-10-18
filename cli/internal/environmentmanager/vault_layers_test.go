@@ -302,3 +302,65 @@ func openLayerRecordValues(ctx context.Context, c *layerControl, delivery api.Va
 	}
 	return values, nil
 }
+
+// The control plane may list recipients this writer must not seal to; each is
+// skipped without failing delivery to the legitimate devices.
+func TestVaultLayerRefreshSkipsRecipientsOutsideTheSourceAuthority(t *testing.T) {
+	v, control, _ := newVaultScopesFixture(t)
+	ctx := context.Background()
+	if err := v.MutateScope(ctx, "personal", v.AccountID, "", func(values map[string][]byte) error {
+		values["FIRST"] = []byte("one")
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	host, err := ecdh.X25519().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	public := base64.RawURLEncoding.EncodeToString(host.PublicKey().Bytes())
+	recipient := func(account, machine string) api.VaultLayerRecipient {
+		return api.VaultLayerRecipient{RecipientAccount: account, MachineID: machine, InstallationGeneration: 1, HostKeyGeneration: 1, HostPublic: public, FenceGeneration: 1}
+	}
+	c := &layerControl{vaultScopesControl: control, deliveries: map[string]api.VaultLayerDelivery{}, operations: map[string]api.VaultLayerDelivery{}}
+	c.recipients = []api.VaultLayerRecipient{recipient(v.AccountID, "machine_own"), recipient("account_foreign", "machine_foreign")}
+	v.Client = c
+	if n, err := v.RefreshSource(ctx, "personal", v.AccountID, ""); err != nil || n != 1 || c.deliveries["machine_foreign"].Envelope != "" {
+		t.Fatalf("another account's device received a private key: n=%d err=%v", n, err)
+	}
+	c.recipients = []api.VaultLayerRecipient{recipient(v.AccountID, "machine_own"), recipient(v.AccountID, "machine_other")}
+	c.deliveries = map[string]api.VaultLayerDelivery{}
+	if n, err := v.RefreshSource(ctx, "personal", v.AccountID, "machine_own"); err != nil || n != 1 || c.deliveries["machine_other"].Envelope != "" {
+		t.Fatalf("device override reached another machine: n=%d err=%v", n, err)
+	}
+}
+
+func TestVaultLayerRefreshSealsTeamKeysOnlyToActiveReaders(t *testing.T) {
+	v, control, store := newVaultScopesFixture(t)
+	ctx := context.Background()
+	teamKey := configureIncomingGrant(t, control, store, true, 1)
+	defer clear(teamKey)
+	if err := v.SyncTeamGrants(ctx); err != nil {
+		t.Fatal(err)
+	}
+	v.WorkspaceID = "team_sync"
+	if err := v.MutateScope(ctx, "team", "team_sync", "", func(values map[string][]byte) error {
+		values["TEAM_GLOBAL"] = []byte("test-global")
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	host, err := ecdh.X25519().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	public := base64.RawURLEncoding.EncodeToString(host.PublicKey().Bytes())
+	c := &layerControl{vaultScopesControl: control, deliveries: map[string]api.VaultLayerDelivery{}, operations: map[string]api.VaultLayerDelivery{}, recipients: []api.VaultLayerRecipient{
+		{RecipientAccount: v.AccountID, MachineID: "machine_member", InstallationGeneration: 1, HostKeyGeneration: 1, HostPublic: public, FenceGeneration: 1},
+		{RecipientAccount: "account_stranger", MachineID: "machine_stranger", InstallationGeneration: 1, HostKeyGeneration: 1, HostPublic: public, FenceGeneration: 1},
+	}}
+	v.Client = c
+	if n, err := v.RefreshSource(ctx, "team", "team_sync", ""); err != nil || n != 1 || c.deliveries["machine_stranger"].Envelope != "" {
+		t.Fatalf("Team key reached a non-member device: n=%d err=%v", n, err)
+	}
+}
