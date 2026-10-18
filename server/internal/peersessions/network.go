@@ -497,10 +497,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 	if len(candidates) > networkConfigLimit {
 		return NetworkConfigResult{}, ErrUnavailable
 	}
-	quotaDenied, err := s.relayQuotaDenied(ctx, self.AccountID, now)
-	if err != nil {
-		return NetworkConfigResult{}, err
-	}
+	quotaDenied := s.relayQuotaWithheld(ctx, self.AccountID, now)
 	relayGrants, withheld, err := s.relayGrants(ctx, tx, self, peers, generation, now, expiry, quotaDenied)
 	if err != nil {
 		return NetworkConfigResult{}, err

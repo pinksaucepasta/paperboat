@@ -120,3 +120,44 @@ func TestRelayGrantsAreWithheldOnlyWhenEveryWorkspaceIsExhaustedPostgres(t *test
 		t.Fatalf("exhausted: %d grants, withheld=%v, want 0/true", n, held)
 	}
 }
+
+type failingQuota struct{}
+
+func (failingQuota) CheckWorkspaceBandwidthTx(context.Context, *db.Tx, string, time.Time) (bool, error) {
+	return false, fmt.Errorf("billing policy unavailable")
+}
+
+// A billing failure must not take peer-network configuration down with it.
+func TestRelayQuotaFailureNeverBlocksNetworkConfigurationPostgres(t *testing.T) {
+	dsn := os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
+	if dsn == "" {
+		t.Skip("isolated PostgreSQL required")
+	}
+	if err := db.ValidateIsolatedTestDSN(dsn, os.Getenv("PAPERBOAT_DATABASE_DSN")); err != nil {
+		t.Fatal(err)
+	}
+	store, err := db.Open(config.Database{Driver: "postgres", DSN: dsn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	if err := db.Migrate(ctx, store); err != nil {
+		t.Fatal(err)
+	}
+	user := fmt.Sprintf("relay_quota_fail_%d", time.Now().UnixNano())
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@example.test','active')`, user); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.billing_workspaces WHERE id=$1`, "personal:"+user)
+		_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.users WHERE id=$1`, user)
+	})
+	service := &NetworkService{store: store, quota: failingQuota{}, now: time.Now}
+	if _, err := service.relayQuotaDenied(ctx, user, time.Now()); err == nil {
+		t.Fatal("the failing checker did not fail the raw check")
+	}
+	if service.relayQuotaWithheld(ctx, user, time.Now()) {
+		t.Fatal("a billing failure withheld relay grants")
+	}
+}

@@ -2,6 +2,8 @@ package peersessions
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat-server/internal/accountingauthority"
@@ -18,6 +20,27 @@ const RelayDeniedQuotaExhausted = "bandwidth_quota_exhausted"
 // client so it can tell the user where to add bandwidth; it may be empty.
 func (s *NetworkService) ConfigureQuota(quota accountingauthority.QuotaChecker, billingURL string) {
 	s.quota, s.billingURL = quota, billingURL
+}
+
+// relayQuotaGateEnabled switches the per-refresh allowance check. Admission and debit still
+// enforce the cap; only the early withholding of relay grants is off.
+const relayQuotaGateEnabled = false
+
+// relayQuotaWithheld is the network-configuration gate. Peer networking must never depend on
+// billing availability: when the allowance cannot be read, relay grants stay available (flows
+// are still metered and charged when they are admitted) and the failure is logged.
+func (s *NetworkService) relayQuotaWithheld(ctx context.Context, account string, at time.Time) bool {
+	// Disabled until the check is lock-free and cached: running it in the refresh path wrote
+	// and locked billing rows on every refresh and took peer networking down under load.
+	if !relayQuotaGateEnabled {
+		return false
+	}
+	denied, err := s.relayQuotaDenied(ctx, account, at)
+	if err != nil {
+		slog.WarnContext(ctx, "relay quota check unavailable; relay grants stay available", "error_type", fmt.Sprintf("%T", err))
+		return false
+	}
+	return denied
 }
 
 // relayQuotaDenied reports whether every workspace available to the account is exhausted.
