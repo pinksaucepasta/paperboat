@@ -213,11 +213,25 @@ func (r *regionalRecovery) prepareProvisional(ctx context.Context) error {
 		return nil
 	}
 	r.mu.Unlock()
-	node := nodes[0]
-	prepareCtx, cancel := context.WithTimeout(ctx, regionalProbeTimeout)
-	defer cancel()
-	if err := r.engine.PrepareRelay(prepareCtx, regionalID(node.NodeID)); err != nil {
-		return fmt.Errorf("prepare provisional regional relay: %w", err)
+	// One relay that refuses authorization or is unreachable must not stop the
+	// connection while another granted relay can rendezvous.
+	var node RegionalNode
+	var prepareErr error
+	for _, candidate := range nodes {
+		prepareCtx, cancel := context.WithTimeout(ctx, regionalProbeTimeout)
+		err := r.engine.PrepareRelay(prepareCtx, regionalID(candidate.NodeID))
+		cancel()
+		if err == nil {
+			node, prepareErr = candidate, nil
+			break
+		}
+		prepareErr = errors.Join(prepareErr, err)
+		if ctx.Err() != nil {
+			break
+		}
+	}
+	if prepareErr != nil {
+		return fmt.Errorf("prepare provisional regional relay: %w", prepareErr)
 	}
 	// Revalidate after the network operation so expiry, revocation, or a newer
 	// acknowledged promotion cannot be overwritten by the provisional route.
@@ -532,7 +546,9 @@ func (r *regionalRecovery) run(ctx context.Context) {
 		results := make(chan regionalScore, len(shortlist))
 		failures := make(map[string]string)
 		var failureMu sync.Mutex
-		var denied atomic.Bool
+		// A relay that refuses authorization only excludes itself: authority is
+		// denied for the generation only when every prepared relay refused.
+		var refused, prepared atomic.Int32
 		fail := func(node, stage string) { failureMu.Lock(); failures[node] = stage; failureMu.Unlock() }
 		// Two simultaneous preparations bound work while direct discovery continues
 		// independently in magicsock. There is no serial four-carrier dial chain.
@@ -557,11 +573,12 @@ func (r *regionalRecovery) run(ctx context.Context) {
 				if probeErr := r.engine.PrepareRelay(probe, regionalID(n.NodeID)); probeErr != nil {
 					var fatal interface{ Fatal() bool }
 					if errors.As(probeErr, &fatal) && fatal.Fatal() {
-						denied.Store(true)
+						refused.Add(1)
 					}
 					fail(n.NodeID, "prepare_failed")
 					return
 				}
+				prepared.Add(1)
 				start := time.Now()
 				var peerTransport string
 				if !peer.IsZero() {
@@ -586,7 +603,7 @@ func (r *regionalRecovery) run(ctx context.Context) {
 				delete(retries, n.NodeID)
 			}
 		}
-		if denied.Load() {
+		if refused.Load() > 0 && prepared.Load() == 0 {
 			deniedGeneration = leaseGeneration
 			_ = r.engine.SetRelayRegions(nil)
 			r.mu.Lock()
