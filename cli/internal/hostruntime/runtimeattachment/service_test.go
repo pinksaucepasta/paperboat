@@ -24,6 +24,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/edgeplacement"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
 	"github.com/pinksaucepasta/paperboat/internal/supportref"
@@ -356,5 +357,78 @@ func TestRuntimeAttachmentOutlivesCredentialOutageAndRevokes(t *testing.T) {
 	case <-edge.Done():
 	case <-ctx.Done():
 		t.Fatal("explicit runtime revocation did not close carrier")
+	}
+}
+
+// Edge restart (12:30Z incident): one placement candidate is unresponsive while
+// another is healthy. The unresponsive probe must not keep the healthy edge
+// from being admitted.
+func TestRuntimeCarrierConnectsWhileAnotherEdgeCandidateIsUnresponsive(t *testing.T) {
+	var document admission
+	transport := roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		payload, err := json.Marshal(struct {
+			Data admission `json:"data"`
+		}{document})
+		if err != nil {
+			return nil, err
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(payload)), Request: request}, nil
+	})
+	service := newRuntimeAttachmentTestService(t, transport)
+	store, err := identity.Open(identity.Config{StateRoot: service.config.StateRoot})
+	if err != nil {
+		t.Fatal(err)
+	}
+	public := store.Current().Public()
+	digest := sha256.Sum256(public)
+	trust := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer trust.Close()
+	pin := sha256.Sum256(trust.Certificate().RawSubjectPublicKeyInfo)
+	const epoch = "epoch-1234567890123456789012345678"
+	document = admission{Schema: "paperboat.runtime-carrier/v1", RouteKind: "runtime_https_wss", Hostname: "runtime.example.test", EdgeEndpoints: []string{"h2://edge.example.test:8443"}, ExpiresAt: time.Now().Add(time.Hour),
+		ActiveEdgeNodeID: "edge-test", ActiveEdgeProcessEpoch: epoch,
+		EdgeCandidates: []edgeplacement.Candidate{
+			{NodeID: "edge-test", ProcessEpoch: epoch, Region: "region-a", FailureDomain: "domain-a", ProbeAddress: "127.0.0.1:38080"},
+			{NodeID: "edge-restarting", ProcessEpoch: "epoch-restarting-12345678901234567", Region: "region-b", FailureDomain: "domain-b", ProbeAddress: "127.0.0.1:38081"},
+		},
+		Binding: binding{AccountID: "account-test", HostID: "machine-test", TunnelID: "machine-test", ConnectorID: "machine-test", SessionID: "session-test", ProcessGeneration: 1, ConfigGeneration: 1, InstallationGeneration: 1, RouteID: "route-test", EdgeNodeID: "edge-test", EdgeProcessEpoch: epoch, MachineIdentityPublicKey: base64.RawURLEncoding.EncodeToString(public), MachineIdentityThumbprint: "sha256:" + base64.RawURLEncoding.EncodeToString(digest[:]), EdgeCarrierServerSPKISHA256: "sha256:" + hex.EncodeToString(pin[:]), EdgeCarrierServerCertificateChainPEM: string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: trust.Certificate().Raw}))}}
+	// The restarting edge accepts no connections and sends no reset: its probe
+	// only ends when the probe's own deadline does.
+	service.probeDial = func(ctx context.Context, address string) error {
+		if address == "127.0.0.1:38081" {
+			<-ctx.Done()
+			return ctx.Err()
+		}
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	connected := make(chan *connector.DataCarrier, 1)
+	source, err := preview.NewMachineAttachmentSessionSource(preview.MachineAttachmentSessionSourceConfig{StateRoot: service.config.StateRoot, SessionFactory: func(got connector.DataCarrierIdentity, config connector.DataCarrierPoolConfig, _ connector.NetworkDialerConfig) (connector.DataCarrierSessionSource, error) {
+		local, remote := net.Pipe()
+		edge, err := connector.NewDataCarrierServer(ctx, remote, config.Carrier, connector.DataCarrierAdmission{Identity: got, Authorize: func(context.Context, connector.StreamOpen) error { return nil }})
+		if err != nil {
+			local.Close()
+			remote.Close()
+			return connector.DataCarrierSessionSource{}, err
+		}
+		connected <- edge
+		return connector.NewDataCarrierSessionSource(got, config, func(_ context.Context, request connector.DataCarrierDialRequest) (connector.DataCarrierDialResult, error) {
+			return connector.DataCarrierDialResult{Link: local, PeerIdentity: got, Transport: request.Transport, EdgeID: request.EdgeID, FailureDomain: request.FailureDomain}, nil
+		})
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.sessions = source
+	if err := service.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { cancel(); _ = service.Shutdown(context.Background()) }()
+	select {
+	case edge := <-connected:
+		defer edge.Close()
+	case <-time.After(8 * time.Second):
+		t.Fatal("runtime carrier was not admitted while another edge candidate was unresponsive")
 	}
 }

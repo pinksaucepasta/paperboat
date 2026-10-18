@@ -55,6 +55,7 @@ type Service struct {
 	selector    edgeplacement.Selector
 	preference  *edgeplacement.Preference
 	lastProbe   time.Time
+	probeDial   func(context.Context, string) error // tests only; nil dials TCP
 	mu          sync.Mutex
 	cancel      context.CancelFunc
 	done        chan struct{}
@@ -117,6 +118,10 @@ type live struct {
 	release func(context.Context) error
 	open    browserbroadcastserver.OpenPublisher
 }
+
+// attachmentCheckTimeout bounds one attachment reconciliation: the control
+// request, an edge probe and any follow-up request.
+const attachmentCheckTimeout = 10 * time.Second
 
 type retryState struct {
 	attempts int
@@ -225,13 +230,23 @@ func (s *Service) run(ctx context.Context) {
 			}
 		}
 	}()
-	stopPoll := lifetime.Poll(func(checkCtx context.Context) error {
+	stopPoll := lifetime.Poll(func(context.Context) error {
+		// Poll bounds its own context to the 1s revocation cadence. That is far
+		// too short for a control round trip plus an edge probe, and an
+		// unresponsive candidate would then fail the whole check on every poll
+		// and keep the carrier from ever connecting. Each attachment check owns
+		// a bounded context derived from the service lifetime instead.
+		checkCtx, cancelCheck := context.WithTimeout(ctx, attachmentCheckTimeout)
+		defer cancelCheck()
 		response, err := s.fetch(checkCtx, "", "")
+		var probeErr error
 		if err == nil && len(response.EdgeCandidates) != 0 && (s.lastProbe.IsZero() || time.Since(s.lastProbe) >= 30*time.Second) {
-			measurements, probeErr := edgeplacement.Probe(checkCtx, response.EdgeCandidates, nil)
+			measurements, probeFailure := edgeplacement.Probe(checkCtx, response.EdgeCandidates, s.probeDial)
 			s.lastProbe = time.Now()
-			if probeErr != nil {
-				err = peerConnectFailure(probeErr)
+			if probeFailure != nil {
+				// Placement is an optimization: connect with the server's own
+				// ordering and report the probe failure afterwards.
+				probeErr = peerConnectFailure(probeFailure)
 			} else {
 				eligible := measurements[:0]
 				for _, measurement := range measurements {
@@ -248,7 +263,7 @@ func (s *Service) run(ctx context.Context) {
 				}
 				measurements = eligible
 			}
-			if err == nil && len(measurements) != 0 {
+			if probeErr == nil && len(measurements) != 0 {
 				selected, selectErr := s.selector.Select(s.lastProbe, measurements)
 				if selectErr != nil {
 					err = classifyFailure(selectErr, "reconciliation", "service_failed")
@@ -339,6 +354,9 @@ func (s *Service) run(ctx context.Context) {
 				}
 				publisherKey = chosen.key
 			}
+		}
+		if err == nil && probeErr != nil {
+			err = probeErr
 		}
 		for key, item := range lives {
 			if item.active.Pool().State() == connector.DataCarrierPoolReady {
