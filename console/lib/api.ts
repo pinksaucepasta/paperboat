@@ -25,7 +25,9 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { accept: "application/json", ...init?.headers },
   })
   if (response.status === 401) {
-    // A 401 means the session ended; unknown paths are a structured 404.
+    // Unknown paths also answer 401 (NOTES.md), so only an ended session goes to sign-in.
+    const session = await fetch("/api/v1/me", { headers: { accept: "application/json" } })
+    if (session.status !== 401) throw new ApiError(404, "not_found", "This isn't available yet.")
     const here = window.location.pathname + window.location.search
     // Sign-in is a route handler that redirects to WorkOS, so it needs a full navigation.
     // eslint-disable-next-line @next/next/no-location-assign-relative-destination

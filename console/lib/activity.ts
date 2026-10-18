@@ -148,7 +148,12 @@ export function describe(event: ActivityEvent): string {
 export function actorName(event: ActivityEvent, meId?: string, memberNames?: ReadonlyMap<string, string | undefined>) {
   if (event.actor.kind === "user" && event.actor.id === meId) return "You"
   if (event.actor.kind === "system") return "Paperboat"
-  return event.actor.name ?? event.actor.email ?? memberNames?.get(event.actor.id) ?? (event.actor.kind === "machine" ? "A machine" : "Someone")
+  return (
+    event.actor.name ??
+    event.actor.email ??
+    memberNames?.get(event.actor.id) ??
+    (event.actor.kind === "machine" ? "A machine" : "Someone")
+  )
 }
 
 /** Where a target opens in the console, when it has a page. */

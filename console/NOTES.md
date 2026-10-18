@@ -225,20 +225,16 @@ Backend gaps against this (current behaviour in brackets):
 
 ## Environment
 
-End-to-end encrypted (`lib/environment.ts`, `components/environment/`). The server keeps names,
-versions and delivery status; values are encrypted on the client with vault keys and published as
-signed manifests each machine decrypts. "All machines" is the shared (`global`) scope; a machine
-(header picker or its tab) shows what it gets: shared values plus its overrides (`machine` scope,
-same name wins), with the delivery status the server reports (`applied`, `pending`, `offline`, or
-an error code).
+The Environment page and a machine's Environment tab show how to use `pb env` and nothing else.
+The metadata API the first console build used (`GET /v1/environment-variables`,
+`/v1/environment-scopes`, per-machine variants) is gone: the server now serves only the encrypted
+vault (`/v1/environment-vault`, `/v1/environment/scopes/{kind}/{owner}/records`, layers, grants).
+Record ids are hashed and names live inside the encrypted record, so even listing names needs the
+vault open in the browser.
 
-Works today: listing (`GET /v1/environment-variables`, `GET /v1/machines/{id}/environment-variables`).
-UI-only for now: Unlock (the console reads `GET /v1/environment-vault`, then needs the CLI's vault
-code in the browser, e.g. as WASM like the terminal, to derive the key from the password and open
-the vault, then decrypt manifests for values), and saving (encrypt the scope's new contents and
-`PUT` the next signed manifest). `unlockVault`/`saveVariables` say so until then. Team workspaces
-have three scopes in the CLI (team globals, the member's private globals, machine overrides); the
-console shows the two the metadata API returns.
+To build it: compile the CLI's vault code to WASM (like the terminal), unlock with the vault
+password, list records per scope (personal, team, machine layers), and write records with `PUT`.
+Delivery status per machine comes from `/v1/environment/layers`. F10-06 stays open until then.
 
 ## Machine capabilities
 
