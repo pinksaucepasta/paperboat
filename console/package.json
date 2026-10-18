@@ -4,9 +4,10 @@
   "private": true,
   "scripts": {
     "terminal:wasm": "scripts/build-terminal-wasm.sh",
-    "predev": "bun run terminal:wasm",
+    "vault:wasm": "scripts/build-environment-vault-wasm.sh",
+    "predev": "bun run terminal:wasm && bun run vault:wasm",
     "dev": "next dev",
-    "prebuild": "bun run terminal:wasm",
+    "prebuild": "bun run terminal:wasm && bun run vault:wasm",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
