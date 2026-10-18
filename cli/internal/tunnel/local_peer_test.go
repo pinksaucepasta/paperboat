@@ -686,3 +686,34 @@ func TestLocalExecCancelWaitsForActualRemoteAcknowledgment(t *testing.T) {
 		_ = remotePeer.Close()
 	}
 }
+
+// The daemon relays the target's launch notices to the CLI before terminal output.
+func TestLocalPeerCarriesLaunchWarningsToTheCLI(t *testing.T) {
+	localClient, localServer := net.Pipe()
+	remoteServer, remotePeer := net.Pipe()
+	defer remotePeer.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cursor := &LocalPeerCursorBridge{}
+	cursor.RecordLaunchWarnings([]string{"environment_pending"})
+	served := make(chan error, 1)
+	go func() {
+		served <- ServeLocalPeerTerminalConn(ctx, localServer, &cursorPeerRemote{localPeerRemote: &localPeerRemote{Conn: remoteServer}, cursor: cursor}, cursor)
+	}()
+	warned := make(chan []string, 1)
+	connection, err := NewLocalPeerConn(localClient, nil, nil, func(codes []string) { warned <- codes })
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() { _, _ = connection.Read(make([]byte, 1)) }()
+	select {
+	case codes := <-warned:
+		if len(codes) != 1 || codes[0] != "environment_pending" {
+			t.Fatalf("codes=%v", codes)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("launch warning did not reach the CLI")
+	}
+	cancel()
+	_ = connection.Close()
+}

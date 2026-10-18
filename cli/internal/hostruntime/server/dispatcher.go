@@ -98,6 +98,35 @@ func (d *Dispatcher) Capabilities() []string {
 }
 
 func (d *Dispatcher) Handle(ctx context.Context, authorization Authorization, capability string, payload json.RawMessage) operation.Outcome {
+	ctx, notices := envinject.WithLaunchNotices(ctx)
+	return withLaunchWarnings(d.handle(ctx, authorization, capability, payload), notices)
+}
+
+// withLaunchWarnings reports, inside a successful object result, that managed
+// ENV was not applied to the launch. The launch itself already ran.
+func withLaunchWarnings(outcome operation.Outcome, notices *envinject.LaunchNotices) operation.Outcome {
+	codes := notices.Codes()
+	if len(codes) == 0 || outcome.ErrorCode != "" || len(outcome.Result) == 0 {
+		return outcome
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(outcome.Result, &fields) != nil || fields == nil {
+		return outcome
+	}
+	encoded, err := json.Marshal(codes)
+	if err != nil {
+		return outcome
+	}
+	fields["launch_warnings"] = encoded
+	merged, err := json.Marshal(fields)
+	if err != nil {
+		return outcome
+	}
+	outcome.Result = merged
+	return outcome
+}
+
+func (d *Dispatcher) handle(ctx context.Context, authorization Authorization, capability string, payload json.RawMessage) operation.Outcome {
 	ctx = envinject.WithLaunchContext(ctx, authorization.WorkspaceID, authorization.ActorAccountID)
 	if capability != "health.v1" && !d.capabilityEnabled(capability) {
 		return failure("capability_disabled")

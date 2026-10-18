@@ -7266,8 +7266,14 @@ func writeExecEvent(c *command.Context, encoder *json.Encoder, event tunnel.Exec
 			ErrorCode   string             `json:"error_code,omitempty"`
 			Changed     *bool              `json:"changed,omitempty"`
 			Uncertain   bool               `json:"uncertain,omitempty"`
-		}{Version: "paperboat.exec-event/v1", Event: execEventName(event), OperationID: event.OperationID, Stream: event.Stream, Sequence: execEventSequence(event), Data: event.Data, State: event.State, Result: event.Result, ErrorCode: publicExecErrorCode(event.ErrorCode), Changed: execEventChanged(event)}
+			Warnings    []launchWarning    `json:"warnings,omitempty"`
+		}{Version: "paperboat.exec-event/v1", Event: execEventName(event), OperationID: event.OperationID, Stream: event.Stream, Sequence: execEventSequence(event), Data: event.Data, State: event.State, Result: event.Result, ErrorCode: publicExecErrorCode(event.ErrorCode), Changed: execEventChanged(event), Warnings: launchWarnings(event.Warnings)}
 		return encoder.Encode(wire)
+	}
+	if line := launchWarningLine(event.Warnings); line != "" {
+		if _, err := fmt.Fprintln(c.ErrWriter, line); err != nil {
+			return err
+		}
 	}
 	if len(event.Data) == 0 {
 		return nil
@@ -7552,6 +7558,20 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 			fmt.Fprintf(os.Stderr, "File transfer is unavailable. Check `pb inbox` and `pb doctor`, then reconnect. Support reference: %s.\n", reference)
 		}
 	}
+	var launchWarned sync.Once
+	recordLaunchWarning := func(codes []string) {
+		line := launchWarningLine(codes)
+		if line == "" {
+			return
+		}
+		launchWarned.Do(func() {
+			if useStatusBar {
+				bar.Notice("ENV not applied: delivery pending (pb env vault unlock)")
+			} else {
+				fmt.Fprintln(os.Stderr, line)
+			}
+		})
+	}
 	var closeTelemetry func()
 	d.telemetry, closeTelemetry = connectTelemetry(d.cfg, os.Stderr)
 	defer closeTelemetry()
@@ -7669,6 +7689,7 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 				info.Terminal.ReplayHistory = true
 				info.Terminal.SequenceSink = recordTerminalSequence
 				info.Terminal.ReplayGapSink = recordReplayGap
+				info.Terminal.LaunchWarningSink = recordLaunchWarning
 				info.Terminal.Env = forwardedTerminalEnv(config.TerminalEnv)
 				info.Terminal.Cols, info.Terminal.Rows = remoteSize()
 			}

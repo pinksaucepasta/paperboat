@@ -31,6 +31,7 @@ const (
 	localPeerTerminalSequence
 	localPeerReplayGap
 	localPeerExecCancelAck
+	localPeerLaunchWarning
 )
 
 type localPeerReplayGapPayload struct{ requested, earliest, latest uint64 }
@@ -44,6 +45,7 @@ type LocalPeerCursorBridge struct {
 	baseline uint64
 	read     uint64
 	gaps     []localPeerReplayGapPayload
+	warnings []string
 }
 
 func (b *LocalPeerCursorBridge) RecordSequence(sequence int) {
@@ -67,6 +69,26 @@ func (b *LocalPeerCursorBridge) RecordReplayGap(requested, earliest, latest uint
 		b.gaps = append(b.gaps, localPeerReplayGapPayload{requested, earliest, latest})
 	}
 	b.mu.Unlock()
+}
+
+// RecordLaunchWarnings keeps the target's launch notices for the CLI.
+func (b *LocalPeerCursorBridge) RecordLaunchWarnings(codes []string) {
+	if b == nil || len(codes) == 0 {
+		return
+	}
+	b.mu.Lock()
+	b.warnings = append(b.warnings[:0], codes...)
+	b.mu.Unlock()
+}
+func (b *LocalPeerCursorBridge) takeLaunchWarnings() []string {
+	if b == nil {
+		return nil
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	warnings := b.warnings
+	b.warnings = nil
+	return warnings
 }
 func (b *LocalPeerCursorBridge) beginRead() {
 	if b != nil {
@@ -127,7 +149,7 @@ func readLocalPeerFrame(reader io.Reader) (byte, []byte, error) {
 		return 0, nil, err
 	}
 	size := binary.BigEndian.Uint32(header[1:])
-	if size > localPeerMaximumFrame || header[0] < localPeerData || header[0] > localPeerExecCancelAck {
+	if size > localPeerMaximumFrame || header[0] < localPeerData || header[0] > localPeerLaunchWarning {
 		return 0, nil, ErrPeerTerminalInvalid
 	}
 	payload := make([]byte, size)
@@ -234,6 +256,14 @@ func serveLocalPeerConn(ctx context.Context, local net.Conn, remote Conn, includ
 		go func() {
 			defer close(outputDone)
 			sequence, gaps := cursor.takeBaselineAndGaps()
+			if warnings := cursor.takeLaunchWarnings(); len(warnings) > 0 {
+				if encoded, err := json.Marshal(warnings); err == nil && len(encoded) <= localPeerMaximumFrame {
+					if err := writer.write(localPeerLaunchWarning, encoded); err != nil {
+						done <- err
+						return
+					}
+				}
+			}
 			for _, gap := range gaps {
 				payload := make([]byte, 24)
 				binary.BigEndian.PutUint64(payload, gap.requested)
@@ -413,6 +443,7 @@ type localPeerConn struct {
 	committedSequence uint64
 	sequenceSink      func(int)
 	replayGapSink     func(uint64, uint64, uint64)
+	launchWarningSink func([]string)
 	once              sync.Once
 	stopOnce          sync.Once
 	closeErr          error
@@ -428,16 +459,16 @@ type localPeerWaitResult struct {
 	err  error
 }
 
-func NewLocalPeerConn(connection net.Conn, sequenceSink func(int), replayGapSink func(uint64, uint64, uint64)) (Conn, error) {
-	value, err := newLocalPeerConn(connection, false, false, sequenceSink, replayGapSink)
+func NewLocalPeerConn(connection net.Conn, sequenceSink func(int), replayGapSink func(uint64, uint64, uint64), launchWarningSink ...func([]string)) (Conn, error) {
+	value, err := newLocalPeerConn(connection, false, false, sequenceSink, replayGapSink, launchWarningSink...)
 	if err != nil {
 		return nil, err
 	}
 	return &localBasicPeerConn{inner: value.(*localPeerConn)}, nil
 }
 
-func newLocalPeerDebugConn(connection net.Conn, sequenceSink func(int), replayGapSink func(uint64, uint64, uint64)) (Conn, error) {
-	value, err := newLocalPeerConn(connection, false, true, sequenceSink, replayGapSink)
+func newLocalPeerDebugConn(connection net.Conn, sequenceSink func(int), replayGapSink func(uint64, uint64, uint64), launchWarningSink ...func([]string)) (Conn, error) {
+	value, err := newLocalPeerConn(connection, false, true, sequenceSink, replayGapSink, launchWarningSink...)
 	if err != nil {
 		return nil, err
 	}
@@ -461,11 +492,14 @@ func NewLocalExecPeerConn(connection net.Conn) (ExecConn, error) {
 	return value.(*localPeerConn), nil
 }
 
-func newLocalPeerConn(connection net.Conn, exec, expectMetadata bool, sequenceSink func(int), replayGapSink func(uint64, uint64, uint64)) (Conn, error) {
+func newLocalPeerConn(connection net.Conn, exec, expectMetadata bool, sequenceSink func(int), replayGapSink func(uint64, uint64, uint64), launchWarningSink ...func([]string)) (Conn, error) {
 	if connection == nil {
 		return nil, ErrPeerTerminalInvalid
 	}
 	value := &localPeerConn{connection: connection, writer: &localPeerWriter{writer: connection}, data: make(chan localPeerOutput, 16), result: make(chan localPeerWaitResult, 1), done: make(chan struct{}), closed: make(chan struct{}), cancelAck: make(chan struct{}), stop: make(chan struct{}), events: make(chan ExecEvent, 256), exec: exec, sequenceSink: sequenceSink, replayGapSink: replayGapSink}
+	if len(launchWarningSink) > 0 {
+		value.launchWarningSink = launchWarningSink[0]
+	}
 	if expectMetadata {
 		_ = connection.SetReadDeadline(time.Now().Add(time.Second))
 		kind, payload, err := readLocalPeerFrame(connection)
@@ -527,6 +561,15 @@ func (c *localPeerConn) readLoop() {
 			}
 			if !c.enqueue(localPeerOutput{sequence: binary.BigEndian.Uint64(payload)}) {
 				return
+			}
+		case localPeerLaunchWarning:
+			var codes []string
+			if c.exec || json.Unmarshal(payload, &codes) != nil || len(codes) > 8 {
+				c.publishResult(localPeerWaitResult{err: ErrPeerTerminalInvalid})
+				return
+			}
+			if c.launchWarningSink != nil {
+				c.launchWarningSink(codes)
 			}
 		case localPeerReplayGap:
 			if c.exec || len(payload) != 24 {

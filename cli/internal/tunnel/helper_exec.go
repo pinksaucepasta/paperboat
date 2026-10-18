@@ -41,6 +41,9 @@ type ExecEvent struct {
 	State         string
 	Result        *ExecResult
 	ErrorCode     string
+	// Warnings are launch notices from the target (for example
+	// "environment_pending": managed ENV was not applied). The command ran.
+	Warnings []string
 }
 
 type RemoteExecError struct {
@@ -142,6 +145,7 @@ func (c *helperExecConn) initialize(ctx context.Context) error {
 				Result      *ExecResult `json:"result"`
 				ErrorCode   string      `json:"error_code"`
 			} `json:"snapshot"`
+			LaunchWarnings []string `json:"launch_warnings"`
 		} `json:"result"`
 	}
 	if json.Unmarshal(frame.Payload, &response) != nil || response.Result.StreamID == 0 || response.Result.Snapshot.OperationID != c.request.OperationID {
@@ -149,7 +153,7 @@ func (c *helperExecConn) initialize(ctx context.Context) error {
 	}
 	c.message = &initialOutputConnection{helperMessageConnection: c.message, frames: initial.frames}
 	c.streamID = response.Result.StreamID
-	c.emit(ExecEvent{OperationID: c.request.OperationID, State: "started"})
+	c.emit(ExecEvent{OperationID: c.request.OperationID, State: "started", Warnings: response.Result.LaunchWarnings})
 	c.readLoopDone = make(chan struct{})
 	go c.readLoop()
 	return nil

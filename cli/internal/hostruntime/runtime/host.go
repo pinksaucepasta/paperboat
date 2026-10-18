@@ -656,12 +656,23 @@ func managedEnvironmentForLaunch(source envinject.EnvironmentSource) func(contex
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
+		var values []string
+		var err error
 		if contextual, ok := source.(interface {
 			EnvironmentForLaunch(context.Context) ([]string, error)
 		}); ok {
-			return contextual.EnvironmentForLaunch(ctx)
+			values, err = contextual.EnvironmentForLaunch(ctx)
+		} else {
+			values, err = source.Environment()
 		}
-		return source.Environment()
+		// Managed ENV is an addition to a launch, never a precondition: when it
+		// cannot be delivered the process runs without those values and the
+		// caller is told once through the launch notices.
+		if err != nil && ctx.Err() == nil && envinject.Undeliverable(err) {
+			envinject.NoteLaunch(ctx, envinject.LaunchNoticePending)
+			return nil, nil
+		}
+		return values, err
 	}
 }
 

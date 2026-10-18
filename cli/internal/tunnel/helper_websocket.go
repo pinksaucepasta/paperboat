@@ -293,6 +293,16 @@ func (c *helperTerminalConn) initialize(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if c.target.LaunchWarningSink != nil {
+		var created struct {
+			Result struct {
+				LaunchWarnings []string `json:"launch_warnings"`
+			} `json:"result"`
+		}
+		if json.Unmarshal(frame.Payload, &created) == nil && len(created.Result.LaunchWarnings) > 0 {
+			c.target.LaunchWarningSink(created.Result.LaunchWarnings)
+		}
+	}
 	existingSession := helperResponseSessionExisting(frame)
 	snapshotLatest := uint64(0)
 	if existingSession {

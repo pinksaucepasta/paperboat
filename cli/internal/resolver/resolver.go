@@ -223,6 +223,9 @@ type TerminalTarget struct {
 	AfterSequence int
 	SequenceSink  func(int)
 	ReplayGapSink func(requested, earliest, latest uint64)
+	// LaunchWarningSink receives launch notices from the target, such as
+	// "environment_pending". The terminal started regardless.
+	LaunchWarningSink func(codes []string)
 	// InputAttachmentID is stable across transport reconnects. The host uses it
 	// as part of the durable input idempotency key; it is never a transport
 	// stream identifier and is safe to reuse after a detached stream is closed.

@@ -85,9 +85,9 @@ func (t LocalPeerTunnel) Dial(ctx context.Context, info resolver.ConnectInfo) (C
 	}
 	var connection Conn
 	if info.Terminal.Debug {
-		connection, err = newLocalPeerDebugConn(stream, info.Terminal.SequenceSink, info.Terminal.ReplayGapSink)
+		connection, err = newLocalPeerDebugConn(stream, info.Terminal.SequenceSink, info.Terminal.ReplayGapSink, info.Terminal.LaunchWarningSink)
 	} else {
-		connection, err = NewLocalPeerConn(stream, info.Terminal.SequenceSink, info.Terminal.ReplayGapSink)
+		connection, err = NewLocalPeerConn(stream, info.Terminal.SequenceSink, info.Terminal.ReplayGapSink, info.Terminal.LaunchWarningSink)
 	}
 	if err != nil {
 		_ = stream.Close()
