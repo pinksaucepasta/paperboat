@@ -157,6 +157,20 @@ func (s *Service) RecordNative(ctx context.Context, machine string, generation i
 				receipt.RejectedIndices = append(receipt.RejectedIndices, index)
 				continue
 			}
+			// Reports are cumulative per stream and minute and may be replayed or arrive
+			// out of order, so only growth of the stored record is charged, and only
+			// relay bytes carried by a hosted (managed) node: direct traffic is free and
+			// customer-run relays never consume Paperboat's allowance.
+			var previousUp, previousDown int64
+			if err := tx.QueryRow(ctx, `SELECT upload_bytes,download_bytes FROM resource_bandwidth_events WHERE operation_id=$1`, operation).Scan(&previousUp, &previousDown); err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+			grown := max(previousUp, r.Upload) + max(previousDown, r.Download) - previousUp - previousDown
+			if s.Debiter != nil && r.Mode == "relay" && hosting == "managed" && grown > 0 {
+				if _, _, err := s.Debiter.DebitWorkspaceBandwidthTx(ctx, tx, ws, grown, r.IntervalEnd); err != nil {
+					return fmt.Errorf("debit native relay bandwidth: %w", err)
+				}
+			}
 			_, err = tx.Exec(ctx, `INSERT INTO resource_bandwidth_events(operation_id,workspace_id,resource_kind,resource_id,resource_name,machine_id,machine_name,mode,hosting,node_id,node_name,upload_bytes,download_bytes,interval_start,interval_end,resource_route_id,actor_account_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) ON CONFLICT(operation_id) DO UPDATE SET actor_account_id=coalesce(resource_bandwidth_events.actor_account_id,EXCLUDED.actor_account_id),upload_bytes=greatest(resource_bandwidth_events.upload_bytes,EXCLUDED.upload_bytes),download_bytes=greatest(resource_bandwidth_events.download_bytes,EXCLUDED.download_bytes),interval_end=greatest(resource_bandwidth_events.interval_end,EXCLUDED.interval_end)`, operation, ws, kind, id, name, machine, machineName, r.Mode, hosting, r.NodeID, nodeName, r.Upload, r.Download, r.IntervalStart, r.IntervalEnd, resourceRoute, actor)
 			if err != nil {
 				return fmt.Errorf("persist native usage: %w", err)

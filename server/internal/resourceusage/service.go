@@ -94,9 +94,18 @@ type Result struct {
 	Series     []Point    `json:"series"`
 	Pagination Pagination `json:"pagination"`
 }
+
+// BandwidthDebiter charges hosted relay bytes to the workspace allowance inside the
+// transaction that records them; billing.WorkspaceService is the owner.
+type BandwidthDebiter interface {
+	DebitWorkspaceBandwidthTx(ctx context.Context, tx *db.Tx, workspaceID string, bytes int64, at time.Time) (granted int64, exhausted bool, err error)
+}
+
 type Service struct {
 	Store *db.DB
 	Now   func() time.Time
+	// Debiter is optional: without it native usage is history only.
+	Debiter BandwidthDebiter
 }
 
 func New(store *db.DB) *Service { return &Service{Store: store} }

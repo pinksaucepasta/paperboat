@@ -722,6 +722,7 @@ func New(opts Options) (*App, error) {
 		return nil, err
 	}
 	resourceUsageService := resourceusage.New(store)
+	resourceUsageService.Debiter = workspaceBilling
 	browserTerminalGateway := &browserterminal.Gateway{
 		AdmissionLifetime:    opts.Config.CLIAuth.MintProofLifetime,
 		RecordUsageAdmission: resourceUsageService.RecordBrowserAdmission,
