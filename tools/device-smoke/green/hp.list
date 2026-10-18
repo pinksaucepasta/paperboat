@@ -12,7 +12,6 @@ preview-manage:hp-hp
 preview-protocols:hp
 preview:hp
 private-address:hp-hp
-private-address:pbvm2-hp
 readiness-main:hp-hp
 session-manage:hp-hp
 session-sharing-owner:hp
@@ -26,6 +25,5 @@ team-roles:hp
 terminal-entry:hp
 terminal-main:hp-hp
 terminal-new:hp
-terminal-replay:hp
 terminal:hp
 tunnel-manage:hp
