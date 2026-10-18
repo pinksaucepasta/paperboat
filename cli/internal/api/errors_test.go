@@ -117,3 +117,20 @@ func TestOperationErrorOwnedProsePreservesRecoveryFields(t *testing.T) {
 		t.Fatalf("projection=%#v", value)
 	}
 }
+
+// F13-03: when the workspace allowance is used up, the user learns that direct access still
+// works and where to add bandwidth, from the server's audited code, never from response text.
+func TestBandwidthQuotaExhaustedHasAuthoredRecoveryMessage(t *testing.T) {
+	err := &APIError{Status: http.StatusConflict, Code: "bandwidth_quota_exhausted", Message: apiErrorMessage("bandwidth_quota_exhausted", http.StatusConflict)}
+	if err.PublicCode() != "bandwidth_quota_exhausted" {
+		t.Fatalf("code was projected as %q", err.PublicCode())
+	}
+	for _, want := range []string{"Direct machine-to-machine access still works", "Billing", "next allowance period"} {
+		if !strings.Contains(err.Message, want) {
+			t.Fatalf("message %q lacks %q", err.Message, want)
+		}
+	}
+	if generic := apiErrorMessage("unknown_code", http.StatusConflict); err.Message == generic {
+		t.Fatal("quota exhaustion fell back to the generic conflict message")
+	}
+}

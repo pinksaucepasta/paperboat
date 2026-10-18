@@ -74,6 +74,7 @@ var publicAPIMessages = map[string]string{
 	"update_required":                "This Paperboat version is no longer supported. Run `pb update` to continue.",
 	"access_denied":                  "Access was denied. Sign in with an authorized account.",
 	"authorization_pending":          "Authorization is pending. Complete sign-in in the browser.",
+	"bandwidth_quota_exhausted":      "This workspace's hosted relay and edge bandwidth is used up. Direct machine-to-machine access still works. Add bandwidth or upgrade under Billing in the Paperboat console, or wait for the next allowance period.",
 	"conflict":                       "The resource state changed. Refresh it and try again.",
 	"terminal_session_limit_reached": "This machine has reached its terminal session limit. Close a terminal with `pb session close`, then retry.",
 	"credits_exhausted":              "Credits are exhausted. Top up credits before trying again.",
