@@ -2003,3 +2003,16 @@ Controlled ENV values and machine shares were removed; original Ubuntu Team memb
 Secrets/config names are /opt/paperboat/secrets, server.env, .env, Caddyfile, server-rollout.json, local REMOTE_TESTING.md and ~/paperboat-archive/coolify-backup; protected evidence is /opt/paperboat/deployment-probes, and owner-only recovery files remain on Ubuntu.
 Deploy only an independently qualified exact image using deploy/README.md, Managed server upgrades: python3 deploy/rollout-server.py --directory /opt/paperboat --image <qualified-image> on the VPS; no deployment is authorized by this handoff.
 No B code edits, workers, tests, builds or rollouts remain running or queued; current investigation helpers are read-only temporary scripts, all finished work is pushed, and Lane B stops here.
+
+2026-10-18 Lane A handoff at the user’s 1% usage stop.
+The tunnel descriptor is accepted; the last failure class is carrier_tls, not a descriptor rejection.
+Published commits are cfe9efc, 5fb5f9c, cc0f372 and 5e2e431; the last fixes synchronous canonical tunnel-delete responses being misreported as local_io.
+The allowed current-install Ubuntu24 tunnel-manage check failed at round_trip before any HTTP status, with cause connection_closed and chain TransportDialError:HTTPCarrierFailure:joinError:errorString:wrapError:TransportError:errNetClosing.
+The next operator should use installed dev-5e2e431 first and read carrier_dial reason/http_status/error_chain/cause in ~/.local/state/paperboat/diagnostics/*.ndjson; the build is .build/dev-5e2e431/pb-linux-amd64 in /tmp/paperboat-lane-a-publish.
+Private Ubuntu24 evidence is /tmp/paperboat-tunnel-fix-verification/current-install-tunnel-manage.private; final cleanup, exec and doctor receipts are in that directory on both Linux machines.
+F10-03 still misreports a read-only Team ENV HTTP403 as pending publication; restoring the removed member remains blocked by invite409 support_8fe1e733-1416-4aed-b590-355a2fa28e96.
+F7 previews were working on server18.14 but have not been re-ticked; no new preview acceptance is claimed here.
+HP and Ubuntu24 both run dev-5e2e431 with exec0 and doctor0/healthy; normal deletion confirmed all18 HP stale tunnels, and final checks found zero active owned fixture tunnels or previews on either device.
+Owned HTTP origins stopped, temporary device runner helpers were removed, and owner-only ENV custody/recovery and private evidence were retained.
+Apple was left unchanged: last reported dev-claude-26d0167-tdiag, signed out with support_bf1b4a17-e3f4-4c78-8e02-34c5f9588194.
+All finished code is pushed, no unpushed or half-done source changes remain, and no workers or queued child runs remain; this docs-only handoff reuses the qualified workspace baseline and recorded focused race/vet checks.
