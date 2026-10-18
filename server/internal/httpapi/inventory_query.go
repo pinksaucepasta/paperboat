@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -13,14 +14,14 @@ type inventoryQuery struct {
 	Closed          *bool
 }
 
-func readInventoryQuery(w http.ResponseWriter, r *http.Request, states []string, allowClosed bool) (inventoryQuery, bool) {
+func readInventoryQuery(w http.ResponseWriter, r *http.Request, states []string, allowClosed bool, extraKeys ...string) (inventoryQuery, bool) {
 	out := inventoryQuery{Limit: 50}
 	values := r.URL.Query()
 	bad := func() (inventoryQuery, bool) {
 		writeError(w, r, 400, "invalid_inventory_query", "Use one valid limit (1–200), nonnegative offset, and supported inventory filters.")
 		return inventoryQuery{}, false
 	}
-	for _, key := range []string{"limit", "offset", "q", "state", "owner", "closed", "cursor", "sort"} {
+	for _, key := range append([]string{"limit", "offset", "q", "state", "owner", "closed", "cursor", "sort"}, extraKeys...) {
 		if len(values[key]) > 1 {
 			return bad()
 		}
@@ -29,7 +30,9 @@ func readInventoryQuery(w http.ResponseWriter, r *http.Request, states []string,
 		switch key {
 		case "limit", "offset", "q", "state", "owner", "closed", "cursor", "sort", "workspace":
 		default:
-			return bad()
+			if !slices.Contains(extraKeys, key) {
+				return bad()
+			}
 		}
 	}
 	if values.Has("cursor") {

@@ -34,7 +34,6 @@ const MaximumOperationReceipts = 4096
 const MaximumReceiptBytes = 1024
 const MaximumInvitationHistory = 4096
 const MaximumCounter uint64 = 9007199254740991
-const InvitationLifetime = 24 * time.Hour
 
 type Member struct {
 	Email                string    `json:"email"`

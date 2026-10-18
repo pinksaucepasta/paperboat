@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"sync"
 	"syscall"
 	"testing"
@@ -157,11 +158,15 @@ func TestProgressUnstartedAndConcurrentSnapshotsAreBounded(t *testing.T) {
 	for _, name := range ProgressNames() {
 		p.Register(name)
 	}
+	registered := p.Snapshot()
+	if len(registered) == 0 || len(registered) > 32 {
+		t.Fatal("worker registry is empty or exceeds its bound")
+	}
 	for i := 0; i < 100; i++ {
 		p.Register("untrusted")
 	}
-	if len(p.Snapshot()) != 20 {
-		t.Fatal("unexpected registry cardinality")
+	if !reflect.DeepEqual(p.Snapshot(), registered) {
+		t.Fatal("untrusted input changed the worker registry")
 	}
 	start = start.Add(time.Minute + time.Second)
 	for _, s := range p.Snapshot() {

@@ -46,34 +46,35 @@ type Reporting struct {
 }
 
 type Config struct {
-	Network                Network          `json:"network"`
-	OperatorBootstrapEmail string           `json:"operator_bootstrap_email"`
-	Backups                BackupReporting  `json:"backups"`
-	Reporting              Reporting        `json:"reporting"`
-	Environment            Environment      `json:"environment"`
-	LocalAccessBaseDomain  string           `json:"local_access_base_domain"`
-	RuntimeBaseDomain      string           `json:"runtime_base_domain"`
-	BrowserSessions        BrowserSessions  `json:"browser_sessions"`
-	HTTP                   HTTPConfig       `json:"http"`
-	Database               Database         `json:"database"`
-	Billing                Billing          `json:"billing"`
-	UserMachines           UserMachines     `json:"user_machines"`
-	TerminalSessions       TerminalSessions `json:"terminal_sessions"`
-	Preview                Preview          `json:"preview"`
-	Tunnel                 Tunnel           `json:"tunnel"`
-	Certificates           Certificates     `json:"certificates"`
-	ConfigSync             ConfigSync       `json:"config_sync"`
-	CLIAuth                CLIAuth          `json:"cli_auth"`
-	GitHub                 GitHub           `json:"github"`
-	Access                 Access           `json:"access"`
-	Sync                   SyncConfig       `json:"sync"`
-	Diagnostics            Diagnostics      `json:"diagnostics"`
-	Notifications          Notifications    `json:"notifications"`
-	Providers              Providers        `json:"providers"`
-	Secrets                Secrets          `json:"secrets"`
-	ReleaseDirectory       string           `json:"release_directory"`
-	ReleaseBaseURL         string           `json:"release_base_url"`
-	ReleaseAuthority       ReleaseAuthority `json:"release_authority"`
+	Mail                   TransactionalMail `json:"mail"`
+	Network                Network           `json:"network"`
+	OperatorBootstrapEmail string            `json:"operator_bootstrap_email"`
+	Backups                BackupReporting   `json:"backups"`
+	Reporting              Reporting         `json:"reporting"`
+	Environment            Environment       `json:"environment"`
+	LocalAccessBaseDomain  string            `json:"local_access_base_domain"`
+	RuntimeBaseDomain      string            `json:"runtime_base_domain"`
+	BrowserSessions        BrowserSessions   `json:"browser_sessions"`
+	HTTP                   HTTPConfig        `json:"http"`
+	Database               Database          `json:"database"`
+	Billing                Billing           `json:"billing"`
+	UserMachines           UserMachines      `json:"user_machines"`
+	TerminalSessions       TerminalSessions  `json:"terminal_sessions"`
+	Preview                Preview           `json:"preview"`
+	Tunnel                 Tunnel            `json:"tunnel"`
+	Certificates           Certificates      `json:"certificates"`
+	ConfigSync             ConfigSync        `json:"config_sync"`
+	CLIAuth                CLIAuth           `json:"cli_auth"`
+	GitHub                 GitHub            `json:"github"`
+	Access                 Access            `json:"access"`
+	Sync                   SyncConfig        `json:"sync"`
+	Diagnostics            Diagnostics       `json:"diagnostics"`
+	Notifications          Notifications     `json:"notifications"`
+	Providers              Providers         `json:"providers"`
+	Secrets                Secrets           `json:"secrets"`
+	ReleaseDirectory       string            `json:"release_directory"`
+	ReleaseBaseURL         string            `json:"release_base_url"`
+	ReleaseAuthority       ReleaseAuthority  `json:"release_authority"`
 }
 
 type HTTPConfig struct {
@@ -301,6 +302,7 @@ type ReleaseAuthority struct {
 }
 
 type Secrets struct {
+	ResendAPIKey          string   `json:"resend_api_key"`
 	SentryAPIToken        string   `json:"sentry_api_token"`
 	BackupReportToken     string   `json:"backup_report_token"`
 	SentryDSN             string   `json:"sentry_dsn"`
@@ -363,6 +365,7 @@ func Load(ctx context.Context, opts LoadOptions) (Config, error) {
 func Default() Config {
 	reportingEnabled := DefaultSentryDSN != "" && DefaultSentryRelease != ""
 	return Config{
+		Mail: TransactionalMail{InvitationLifetimeSeconds: 2592000},
 		Reporting: Reporting{
 			Enabled: reportingEnabled,
 			Release: DefaultSentryRelease,
@@ -455,6 +458,9 @@ func (c Config) Validate() error {
 		return err
 	}
 	var errs []error
+	if err := c.Mail.Validate(c.Secrets.ResendAPIKey); err != nil {
+		errs = append(errs, err)
+	}
 	if c.Reporting.WorkerStallTimeout != 0 && (c.Reporting.WorkerStallTimeout < time.Minute || c.Reporting.WorkerStallTimeout > 24*time.Hour) {
 		errs = append(errs, errors.New("reporting.worker_stall_timeout must be between one minute and 24 hours"))
 	}

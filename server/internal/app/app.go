@@ -59,6 +59,7 @@ import (
 	"github.com/pinksaucepasta/paperboat-server/internal/teaminbox"
 	"github.com/pinksaucepasta/paperboat-server/internal/teams"
 	"github.com/pinksaucepasta/paperboat-server/internal/telemetry"
+	"github.com/pinksaucepasta/paperboat-server/internal/transactionalmail"
 	"github.com/pinksaucepasta/paperboat-server/internal/tunnelcert"
 	"github.com/pinksaucepasta/paperboat-server/internal/tunnelv1"
 	"github.com/pinksaucepasta/paperboat-server/internal/usermachines"
@@ -711,6 +712,10 @@ func New(opts Options) (*App, error) {
 		_ = store.Close()
 		return nil, err
 	}
+	teamService := teams.NewService(store)
+	teamService.ConfigureMail(opts.Config.Mail, opts.Config.Secrets.ResendAPIKey != "")
+	mailService := &transactionalmail.Service{DB: store, Endpoint: opts.Config.Mail.Endpoint, Key: opts.Config.Secrets.ResendAPIKey}
+
 	operatorService := operator.NewService(store)
 	if err := operatorService.SetHostStaleAfter(opts.Config.UserMachines.OfflineAfter); err != nil {
 		_ = store.Close()
@@ -755,7 +760,7 @@ func New(opts Options) (*App, error) {
 		WorkspaceBillingRecovery:  workspaceRecovery,
 		GitHub:                    githubService,
 		EnvironmentVariables:      environmentVariableService,
-		Teams:                     teams.NewService(store),
+		Teams:                     teamService,
 		TeamInbox:                 teamInboxService,
 		MeteringRepo:              metering.NewRuntimeRepository(store, opts.Config.Secrets.EncryptionKey, opts.Config.ConfigSync.StaleHeartbeatAfter),
 		RuntimeIdentity:           enrollmentService,
@@ -812,6 +817,7 @@ func New(opts Options) (*App, error) {
 	// Membership is authoritative; provider retries run outside its transaction.
 	progress := workers.NewProgress(opts.Config.Reporting.WorkerStallTimeout)
 	serverWorkers := []workers.Worker{
+		observedWorker(supportService, "worker_transactional_mail", mailService.Run, progress),
 		operationalHealthWorker(backupService, supportService, healthMonitor, progress),
 		observedWorker(supportService, "worker_machines", userMachineService.Worker(opts.Config.TerminalSessions.WorkerInterval), progress),
 		observedWorker(supportService, "worker_config_warnings", configAssignmentService.WarningReconciliationWorker(opts.Config.TerminalSessions.WorkerInterval), progress),

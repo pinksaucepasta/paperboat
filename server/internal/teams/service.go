@@ -332,8 +332,11 @@ func (s *Service) Invite(ctx context.Context, account, team string, r InviteRequ
 		out = Invitation{InvitationID: "invitation_" + id.String(), TeamID: team, AccountID: r.AccountID, Email: r.Email, Role: r.Role, Generation: t.Generation + 1}
 		err = tx.QueryRow(ctx, `INSERT INTO team_invitations
  (invitation_id,team_id,recipient_account,recipient_email,created_by,expires_at,role)
- VALUES($1,$2,nullif($3,''),nullif($4,''),$5,now()+$6*interval '1 second',$7) RETURNING expires_at`, out.InvitationID, team, r.AccountID, r.Email, account, int64(InvitationLifetime/time.Second), r.Role).Scan(&out.ExpiresAt)
+ VALUES($1,$2,nullif($3,''),nullif($4,''),$5,now()+$6*interval '1 second',$7) RETURNING expires_at`, out.InvitationID, team, r.AccountID, r.Email, account, s.mail.InvitationLifetimeSeconds, r.Role).Scan(&out.ExpiresAt)
 		if err != nil {
+			return err
+		}
+		if err = s.enqueueInvitation(ctx, tx, out.InvitationID); err != nil {
 			return err
 		}
 		if err = advance(ctx, tx, team); err != nil {

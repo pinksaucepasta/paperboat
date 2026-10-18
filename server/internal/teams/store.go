@@ -5,15 +5,26 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"github.com/pinksaucepasta/paperboat-server/internal/config"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/pinksaucepasta/paperboat-server/internal/audit"
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
 )
 
-type Service struct{ db *db.DB }
+type Service struct {
+	db          *db.DB
+	mail        config.TransactionalMail
+	mailEnabled bool
+}
 
-func NewService(store *db.DB) *Service { return &Service{db: store} }
+func NewService(store *db.DB) *Service { return &Service{db: store, mail: config.Default().Mail} }
+
+// ConfigureMail supplies deployment policy before serving requests.
+func (s *Service) ConfigureMail(policy config.TransactionalMail, enabled bool) {
+	s.mail = policy
+	s.mailEnabled = enabled
+}
 func Lock(ctx context.Context, tx *db.Tx) error {
 	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(160235)`)
 	return err

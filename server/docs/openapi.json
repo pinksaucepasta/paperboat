@@ -14584,6 +14584,24 @@
           "created_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "last_sent_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Time the server most recently confirmed provider acceptance, including retry reconciliation; null until confirmed. Not proof of delivery or the provider creation timestamp."
+          },
+          "delivery_state": {
+            "type": "string",
+            "enum": [
+              "unconfigured",
+              "queued",
+              "sent",
+              "failed"
+            ],
+            "description": "Latest send request: unconfigured means no mail queued (sender unavailable or recipient lacks verified contact); queued includes bounded retries; sent means provider accepted, never proof of delivery; failed includes abandoned/suppressed jobs."
           }
         },
         "required": [
@@ -14598,7 +14616,9 @@
           "email",
           "display_name",
           "created_by_email",
-          "created_at"
+          "created_at",
+          "last_sent_at",
+          "delivery_state"
         ]
       },
       "Me": {
@@ -44270,7 +44290,7 @@
     "/v1/team-invitations": {
       "get": {
         "operationId": "list_team_invitations",
-        "summary": "List invitations visible to the recipient or current Team owner/admin",
+        "summary": "List received invitations (default), or caller-created invitations with direction=sent",
         "security": [
           {
             "cookieSession": []
@@ -44338,6 +44358,18 @@
               "maxLength": 128
             },
             "description": "Filter by recipient or creator account ID, mine (recipient is current account), or shared (creator is current account). At most 128 UTF-8 bytes; whitespace and NUL are rejected."
+          },
+          {
+            "name": "direction",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "received",
+                "sent"
+              ],
+              "default": "received"
+            }
           }
         ],
         "responses": {
@@ -44383,7 +44415,8 @@
           "503": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "description": "Received uses the current verified canonical recipient identity. Sent returns only invitations created by the caller while current owner/admin permission remains. Team-scoped inventory retains recipient/current owner/admin visibility."
       }
     },
     "/v1/team-invitations/{invitation_id}": {
@@ -45131,6 +45164,131 @@
           }
         },
         "description": "Paid workspaces only. Integer quantity 1..product.max_quantity buys quantity \u00d7 unit_bytes (100 GB each). Credits NEVER EXPIRE and are consumed after the plan allowance. Checkout uses the exact quantity and verified unit price; only signed provider-confirmed paid events credit the workspace once. Requires Idempotency-Key and configured-origin return URLs. invalid_quantity rejects missing/zero/over-limit quantity."
+      }
+    },
+    "/v1/teams/{team_id}/invitations/{invitation_id}/resend": {
+      "post": {
+        "operationId": "resend_team_invitation",
+        "summary": "Refresh an unaccepted, uncancelled invitation and queue a new email",
+        "security": [
+          {
+            "cookieSession": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:connect"
+        ],
+        "parameters": [
+          {
+            "name": "team_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "invitation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current authorized invitation state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/TeamInvitationSummary"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "description": "Team or invitation not found in this team.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "invitation_unavailable for accepted/cancelled/reused operation; seat_required if expired revival has no purchased seat. Refresh team state. team_suspended requires restoring team access before resending.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Current role forbidden; only owners resend admin-role invitations.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "invitation_rate_limited; retry after the Retry-After seconds header.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "description": "Seconds until this invitation may be resent."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TeamAcceptRequest"
+              }
+            }
+          }
+        },
+        "description": "Current team owner/admin required; admin-role invitations require owner, including operation replay. Refreshes expiry using mail.invitation_lifetime_seconds (default 30 days). Reuses the invitation and existing seat reservation; expired revival requires an available purchased seat. Body operation_id is retry-safe. Per-invitation cooldown is 60 seconds. No provider call occurs in the request transaction."
       }
     }
   }

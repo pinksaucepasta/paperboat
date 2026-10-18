@@ -214,6 +214,22 @@ type BillingWorkspaceRecovery struct {
 	CreatedAt      time.Time
 }
 
+type BillingWorkspaceTopup struct {
+	ProviderSessionID string
+	OperationKey      string
+	WorkspaceID       string
+	PurchasedBytes    int64
+	RemainingBytes    int64
+	PurchasedAt       time.Time
+}
+
+type BillingWorkspaceTopupEvent struct {
+	EventID           string
+	ProviderSessionID string
+	EventType         string
+	CreatedAt         time.Time
+}
+
 type BillingWorkspaceUsagePeriod struct {
 	WorkspaceID   string
 	PeriodStart   time.Time
@@ -2153,6 +2169,8 @@ type TeamInvitation struct {
 	RecipientEmail   sql.NullString
 	Role             string
 	CreatedAt        time.Time
+	MailRequestedAt  sql.NullTime
+	LatestMailID     sql.NullString
 }
 
 type TeamMachineGrant struct {
@@ -2255,6 +2273,20 @@ type TerminalGuestSession struct {
 	DisplayName       string
 	CreatedAt         time.Time
 	ExpiresAt         time.Time
+}
+
+type TransactionalMailOutbox struct {
+	MailID         string
+	InvitationID   sql.NullString
+	Payload        []byte
+	State          string
+	Attempts       int32
+	FirstAttemptAt sql.NullTime
+	NextAttemptAt  time.Time
+	LeaseUntil     sql.NullTime
+	AcceptedAt     sql.NullTime
+	ProviderID     sql.NullString
+	CreatedAt      time.Time
 }
 
 type Tunnel struct {

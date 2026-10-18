@@ -163,7 +163,7 @@ func TestPostgresTeamAuthorityLifecycle(t *testing.T) {
 	if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.users SET email_verified=true WHERE id=$1`, other); err != nil {
 		t.Fatal(err)
 	}
-	if listed, total, e := s.InvitationInventory(ctx, other, "", "", "pending", "mine", 10, 0); e != nil || total != 1 || len(listed) != 1 || listed[0].InvitationID != emailInvite.InvitationID {
+	if listed, total, e := s.InvitationInventory(ctx, other, "", "", "pending", "mine", "received", 10, 0); e != nil || total != 1 || len(listed) != 1 || listed[0].InvitationID != emailInvite.InvitationID {
 		t.Fatalf("verified email discovery total=%d: %v", total, e)
 	}
 	if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.users SET email_verified=true WHERE id=$1`, admin); err != nil {
@@ -254,7 +254,7 @@ func TestPostgresTeamAuthorityLifecycle(t *testing.T) {
 	if _, err = s.Accept(ctx, other, i.InvitationID, AcceptRequest{OperationID: "wrong_recipient"}); !errors.Is(err, ErrForbidden) {
 		t.Fatal("wrong recipient", err)
 	}
-	if listed, total, e := s.InvitationInventory(ctx, admin, "", "", "pending", "mine", 1, 0); e != nil || total != 1 || len(listed) != 1 || listed[0].InvitationID != i.InvitationID {
+	if listed, total, e := s.InvitationInventory(ctx, admin, "", "", "pending", "mine", "received", 1, 0); e != nil || total != 1 || len(listed) != 1 || listed[0].InvitationID != i.InvitationID {
 		t.Fatalf("recipient discovery=%v total=%d err=%v", listed, total, e)
 	}
 	if _, e := s.Invitation(ctx, other, i.InvitationID); !errors.Is(e, ErrNotFound) {

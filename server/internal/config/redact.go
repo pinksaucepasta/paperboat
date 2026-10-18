@@ -7,6 +7,9 @@ import (
 
 func (c Config) RedactedJSON() string {
 	redacted := c
+	if redacted.Secrets.ResendAPIKey != "" {
+		redacted.Secrets.ResendAPIKey = "[redacted]"
+	}
 	if redacted.Secrets.SentryAPIToken != "" {
 		redacted.Secrets.SentryAPIToken = "[redacted]"
 	}

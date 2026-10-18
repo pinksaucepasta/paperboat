@@ -238,3 +238,48 @@ Enable payment-method updates, invoice history and cancellation at period end.
 Missing configuration makes new portal requests unavailable. Retried operations
 retain their original configuration; changing deployment settings does not alter
 an existing provider operation.
+
+### Transactional mail and invitations
+
+Invitations expire after 30 days by default. `PAPERBOAT_INVITATION_LIFETIME_SECONDS`
+(config `mail.invitation_lifetime_seconds`) is the single policy used for initial
+invitations and resends. Configure Resend with `PAPERBOAT_RESEND_API_KEY` or
+`PAPERBOAT_RESEND_API_KEY_FILE`, `PAPERBOAT_MAIL_FROM` (a verified sender),
+`PAPERBOAT_MAIL_ENDPOINT` (the HTTPS Resend send-email endpoint), and
+`PAPERBOAT_MAIL_CONSOLE_ORIGIN` (the configured console origin). The link is always
+that origin plus `/team`; signing in must preserve that destination. Endpoint and navigation URLs have no credentials,
+queries or fragments. The deployment mounts key files from its existing secrets
+volume; never put the key in source or a command line.
+
+`POST /v1/teams/{team_id}/invitations/{invitation_id}/resend` accepts
+`{"operation_id":"<unique operation>"}`. Retry uncertain HTTP outcomes with the
+same operation ID. It refreshes the existing invitation, never adds a reservation
+for a still-pending invitation, and requires an available seat to revive an expired
+one. Accepted and cancelled invitations return 409. Current admins may resend
+member invitations; only current owners may resend admin invitations, including
+operation replays. A 60-second per-invitation cooldown returns 429 with
+`Retry-After` in seconds. Wrong team/invitation returns 404; unauthorized roles 403.
+
+`GET /v1/team-invitations` defaults to `direction=received`; `direction=sent`
+returns the caller's own created invitations with current administrative access.
+The team-scoped inventory preserves recipient and current owner/admin visibility.
+Summaries add nullable `last_sent_at` and `delivery_state`: `unconfigured` means no
+message queued (sender not configured or no verified recipient contact), `queued`
+includes retries, `sent` means provider acceptance, and `failed` means rejected,
+abandoned or suppressed. Provider acceptance does **not** prove delivery.
+`last_sent_at` remains the latest actual acceptance across resends, or null.
+
+Mail is enqueued atomically with product state. The worker sends outside database
+transactions with immutable payloads and stable Resend idempotency keys, leases,
+15-second HTTP timeouts, a 64 KiB response cap, eight attempts with exponential
+backoff, and a 23-hour retry horizon (Resend keys last 24 hours). A timed-out send
+may already have been accepted; the automatic retry preserves its key. Once the
+retry horizon is exhausted, operator investigation is required before explicitly
+requesting another send. Cancelled, accepted, expired, deleted/suspended teams and
+superseded invitation messages are suppressed. No email bodies, addresses, keys,
+or provider response bodies are logged. The generic outbox can serve other product
+mail; billing remains the authority for billing state.
+
+Provider contracts: [Send Email](https://resend.com/docs/api-reference/emails/send-email),
+[Idempotency Keys](https://resend.com/docs/dashboard/emails/idempotency-keys),
+[Errors](https://resend.com/docs/api-reference/errors).

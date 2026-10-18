@@ -36,6 +36,20 @@ func overlayEnv(c *Config, lookup func(string) (string, bool), readFile func(str
 		return nil
 	}
 
+	if err := setSecret("PAPERBOAT_RESEND_API_KEY", &c.Secrets.ResendAPIKey); err != nil {
+		return err
+	}
+	setString("PAPERBOAT_MAIL_ENDPOINT", &c.Mail.Endpoint)
+	setString("PAPERBOAT_MAIL_FROM", &c.Mail.From)
+	setString("PAPERBOAT_MAIL_CONSOLE_ORIGIN", &c.Mail.ConsoleOrigin)
+	if v, ok := lookup("PAPERBOAT_INVITATION_LIFETIME_SECONDS"); ok {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			return errors.New("PAPERBOAT_INVITATION_LIFETIME_SECONDS must be integer")
+		}
+		c.Mail.InvitationLifetimeSeconds = n
+	}
+
 	if v, ok := lookup("PAPERBOAT_SENTRY_ENABLED"); ok && strings.TrimSpace(v) != "" {
 		parsed, err := strconv.ParseBool(v)
 		if err != nil {
