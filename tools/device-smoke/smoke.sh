@@ -608,9 +608,12 @@ assert receipt["status"]=="PASS" and receipt["check"]==sys.argv[2] and receipt["
 # replay and the same shell variable through its own authenticated CLI session.
 test_terminal_replay() {
   local target out status t0 staged=1 id tag phase command controller_ok parent parent_status
-  [[ ",$TARGETS," == *,hp,* && ",$TARGETS," == *,apple,* ]] || return 0
+  # The second enrolled device is apple when selected, else dadape (Linux pair).
+  local controller=""
+  for target in apple dadape; do [[ ",$TARGETS," == *,$target,* ]] && controller=$target; done
+  [[ ",$TARGETS," == *,hp,* && -n "$controller" ]] || return 0
   stage_terminal_fixtures hp || staged=0
-  stage_terminal_fixtures apple || staged=0
+  stage_terminal_fixtures "$controller" || staged=0
   for target in "${TLIST[@]}"; do
     id="terminal-replay:$target"
     skipped "$id" && continue
@@ -624,7 +627,7 @@ test_terminal_replay() {
     out="$phase"
     if [ "$status" = 0 ]; then
       command=$(python3 "$HERE/session_controller.py" command --phase "$phase" --script "/tmp/$RUN_ID/session_lifecycle.py")
-      out=$(on apple "$command" 2>&1); status=$?
+      out=$(on "$controller" "$command" 2>&1); status=$?
       if [ "$status" = 0 ] && python3 -c '
 import json,sys
 receipt=json.loads(sys.argv[1])
