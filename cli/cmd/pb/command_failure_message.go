@@ -15,6 +15,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/identitybootstrap"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
+	"github.com/pinksaucepasta/paperboat/internal/resolver"
 	"github.com/pinksaucepasta/paperboat/internal/supportref"
 	"github.com/pinksaucepasta/paperboat/internal/tunnel"
 )
@@ -114,6 +115,10 @@ func commandFailureMessage(err error, failure commandFailure) string {
 	switch failure.owner {
 	case localwait.ErrMachineNotFound:
 		return "The selected machine was not found. Run `pb status` and select an available machine."
+	case resolver.ErrMachineNotFound:
+		return "No machine has that name or ID. Run `pb machine list` to see your machines."
+	case resolver.ErrMachineAmbiguous:
+		return "More than one machine has that name. Run `pb machine list` and retry with the machine ID."
 	case localwait.ErrMachineAmbiguous:
 		return "The machine selection is ambiguous. Run `pb status` and retry with the machine ID."
 	case localwait.ErrInvalid:
