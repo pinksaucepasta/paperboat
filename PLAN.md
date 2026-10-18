@@ -1857,3 +1857,5 @@ A/C: redirects never fulfill; signed paid completion/async success credits the e
 Quantity single-unit owner RED unit0.145s/PG0.34s/Stripe2.05s; permanent-credit owner GREEN freshPG2.58s/full billing0.62s, realStripe3 units/1500cents2.11s. Policy source: billing.topup_max_quantity (env PAPERBOAT_BILLING_TOPUP_MAX_QUANTITY), one default100; unit_bytes100000000000. Credits NEVER EXPIRE and draw only after plan allowance.
 
 2026-10-18 | Lane B top-up workspace gate triage | TestTailcatQUIC round0 loopback handshake deadline FAIL26.98s; one focused rerun PASS35.804s (/tmp/topup-peerquic-focused.log), no investigation per triage rule. Existing /tmp/topup-final-gate.log continues; next broad gate waits for serialized slot, top-up owner checks remain green.
+
+2026-10-18 | Lane B top-up migration ordering | Rebased paid-Team producer eae0e0a; unpublished top-up schema086 renamed090 above published087, permanent credits/quantity contract unchanged. Fresh isolated database and rebuilt embedded-migration PostgreSQL owners required; no production migration/activation, C communication pause respected.
