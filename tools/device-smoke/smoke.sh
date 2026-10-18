@@ -18,6 +18,7 @@
 #   --ssh-seconds N      duration of held SSH (default 200)
 #   --skip LIST          comma list of test ids to skip (e.g. preview,transfer)
 #   --only-check ID      run one exact feature check, plus version/doctor baselines
+#   --only-list FILE     run exactly the check ids listed in FILE (one per line), plus baselines
 #   --update DIR         after the baseline, update each target with the build in DIR
 #                        (pb-linux-amd64, pb-darwin-arm64, pb-windows-amd64.exe)
 #                        while a terminal and a long exec are running, then verify
@@ -47,6 +48,7 @@ LONG_EXEC=420
 LONG_SSH=200
 SKIP=""
 ONLY_CHECK=""
+ONLY_LIST=""
 UPDATE_DIR=""
 UPDATE_VERSION=""
 WINDOWS_INSTALL_JSON=""
@@ -60,6 +62,7 @@ while [ $# -gt 0 ]; do
     --ssh-seconds) LONG_SSH=$2; shift 2 ;;
     --skip) SKIP=$2; shift 2 ;;
     --only-check) ONLY_CHECK=$2; shift 2 ;;
+    --only-list) ONLY_LIST=$2; shift 2 ;;
     --update) UPDATE_DIR=$2; shift 2 ;;
     --update-version) UPDATE_VERSION=$2; shift 2 ;;
     -h|--help) sed -n '2,32p' "$0"; exit 0 ;;
@@ -78,6 +81,14 @@ if [[ ",$TARGETS," == *,victus,* ]]; then
   exit 2
 fi
 [ -n "$EXPECT_VERSION" ] || { echo "--expect-version is required" >&2; exit 2; }
+ONLY_IDS="|" ONLY_GROUPS="|"
+if [ -n "$ONLY_LIST" ]; then
+  [ -r "$ONLY_LIST" ] || { echo "--only-list file is not readable: $ONLY_LIST" >&2; exit 2; }
+  while IFS= read -r listed; do
+    case "$listed" in ''|'#'*) continue ;; esac
+    ONLY_IDS+="$listed|"; ONLY_GROUPS+="${listed%%:*}|"
+  done < "$ONLY_LIST"
+fi
 [ -z "$UPDATE_DIR" ] || [ -n "$UPDATE_VERSION" ] || { echo "--update requires --update-version" >&2; exit 2; }
 [ -n "${APPLE_PASS:-}" ] || [[ ",$TARGETS," != *,apple,* ]] || { echo "export APPLE_PASS (see REMOTE_TESTING.md)" >&2; exit 2; }
 [ -n "${VICTUS_PASS:-}" ] || [[ ",$TARGETS," != *,victus,* ]] || { echo "export VICTUS_PASS (see REMOTE_TESTING.md)" >&2; exit 2; }
@@ -141,6 +152,9 @@ record_command_failure() {
 }
 
 skipped() {
+  if [ -n "$ONLY_LIST" ] && [[ "$ONLY_IDS" != *"|$1|"* && "$ONLY_GROUPS" != *"|$1|"* ]]; then
+    return 0
+  fi
   if [ -n "$ONLY_CHECK" ] && [ "$1" != "$ONLY_CHECK" ] && [ "$1" != "${ONLY_CHECK%%:*}" ]; then
     return 0
   fi
@@ -867,6 +881,13 @@ if [ -n "$ONLY_CHECK" ]; then
   if [ "$found" = 0 ]; then
     record "$ONLY_CHECK" FAIL 0 "requested check did not run; a retired check needs its original runner"
   fi
+fi
+if [ -n "$ONLY_LIST" ]; then
+  for listed in ${ONLY_IDS//|/ }; do
+    found=0
+    for row in "${ROWS[@]}"; do [ "${row%%|*}" != "$listed" ] || found=1; done
+    [ "$found" = 1 ] || record "$listed" FAIL 0 "listed green check did not run; fix the runner or the list"
+  done
 fi
 for source in "${TLIST[@]}"; do on "$source" "rm -rf /tmp/$RUN_ID" >/dev/null 2>&1; done
 {

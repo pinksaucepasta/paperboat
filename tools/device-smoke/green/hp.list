@@ -1,0 +1,27 @@
+# Checks that have ever passed on hp; every one must pass on a build before it becomes the base.
+access-machine:hp-hp
+cleanup-preview:hp
+exec-long:hp
+exec-main:hp-hp
+exec:hp
+inbox-approval:hp
+local-access-settings:hp
+network-inventory:hp
+preview-manage:hp-hp
+preview:hp
+private-address:hp-hp
+readiness-main:hp-hp
+session-manage:hp-hp
+session-sharing-owner:hp
+ssh-alias:hp-hp
+ssh-long:hp
+ssh-main:hp-hp
+ssh:hp
+status-bar:hp
+team-lifecycle:hp
+team-roles:hp
+terminal-entry:hp
+terminal-main:hp-hp
+terminal-new:hp
+terminal-replay:hp
+terminal:hp
