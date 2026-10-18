@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -173,5 +174,31 @@ func TestStripeOutcomeUncertainClassification(t *testing.T) {
 	}
 	if stripeOutcomeUncertain(StripeAPIError{StatusCode: http.StatusBadRequest}) {
 		t.Fatal("validation failure treated uncertain")
+	}
+}
+
+func TestSubscriptionCancelScheduledByPortalCancelAtIsReflected(t *testing.T) {
+	body := func(extra string) stripeSubscriptionResponse {
+		t.Helper()
+		var r stripeSubscriptionResponse
+		raw := `{"id":"sub_1","customer":"cus_1","status":"active","cancel_at_period_end":false,` + extra + `"items":{"data":[{"id":"si_1","quantity":2,"current_period_start":1700000000,"current_period_end":1702592000,"price":{"id":"price_1"}}]}}`
+		if err := json.Unmarshal([]byte(raw), &r); err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	for name, tc := range map[string]struct {
+		extra string
+		want  bool
+	}{
+		"no cancellation":                {``, false},
+		"portal cancel_at at period end": {`"cancel_at":1702592000,`, true},
+		"cancel_at before period end":    {`"cancel_at":1701000000,`, true},
+		"cancel_at after this period":    {`"cancel_at":1710000000,`, false},
+	} {
+		subscription, err := body(tc.extra).subscription()
+		if err != nil || subscription.CancelAtPeriodEnd != tc.want {
+			t.Errorf("%s: cancel_at_period_end=%v err=%v, want %v", name, subscription.CancelAtPeriodEnd, err, tc.want)
+		}
 	}
 }

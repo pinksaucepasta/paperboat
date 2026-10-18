@@ -220,8 +220,9 @@ type stripeRenewalInvoice struct {
 type stripeSubscriptionResponse struct {
 	LatestInvoice        *stripeRenewalInvoice `json:"latest_invoice"`
 	ID, Customer, Status string
-	Livemode             bool `json:"livemode"`
-	CancelAtPeriodEnd    bool `json:"cancel_at_period_end"`
+	Livemode             bool  `json:"livemode"`
+	CancelAtPeriodEnd    bool  `json:"cancel_at_period_end"`
+	CancelAt             int64 `json:"cancel_at"`
 	Metadata             struct {
 		PaperboatCheckoutOperation string `json:"paperboat_checkout_operation"`
 	} `json:"metadata"`
@@ -236,6 +237,13 @@ type stripeSubscriptionResponse struct {
 	} `json:"items"`
 }
 
+// The customer portal schedules a cancellation with cancel_at set to the end of
+// the paid period, without cancel_at_period_end. Either way the subscription
+// will not renew.
+func (r stripeSubscriptionResponse) cancelsAtCurrentPeriodEnd(periodEnd int64) bool {
+	return r.CancelAt > 0 && r.CancelAt <= periodEnd
+}
+
 func (r stripeSubscriptionResponse) subscription() (StripeSubscription, error) {
 	if r.ID == "" || r.Customer == "" || r.Status == "" || len(r.Items.Data) != 1 {
 		return StripeSubscription{}, errors.New("invalid stripe subscription response")
@@ -248,7 +256,7 @@ func (r stripeSubscriptionResponse) subscription() (StripeSubscription, error) {
 	result := StripeSubscription{
 		ID: r.ID, CustomerID: r.Customer, PriceID: i.Price.ID, ItemID: i.ID,
 		Status: r.Status, CheckoutOperation: r.Metadata.PaperboatCheckoutOperation,
-		Quantity: i.Quantity, CancelAtPeriodEnd: r.CancelAtPeriodEnd,
+		Quantity: i.Quantity, CancelAtPeriodEnd: r.CancelAtPeriodEnd || r.cancelsAtCurrentPeriodEnd(i.CurrentPeriodEnd),
 		PeriodStart: time.Unix(i.CurrentPeriodStart, 0).UTC(),
 		PeriodEnd:   time.Unix(i.CurrentPeriodEnd, 0).UTC(),
 	}
