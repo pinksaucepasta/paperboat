@@ -38,6 +38,8 @@ fi
 set -uo pipefail
 
 HERE=$PAPERBOAT_SMOKE_SOURCE_DIR
+# Team creation needs a paid Checkout: team checks reuse this retained paid team.
+SMOKE_TEAM=${PAPERBOAT_SMOKE_TEAM:-paperboat-smoke-paid}
 RESULTS_DIR="$HERE/results"
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 RUN_ID="smoke$(date -u +%H%M%S)$RANDOM"
@@ -587,7 +589,8 @@ test_terminal_features() {
         record "$id" FAIL 0 "could not stage the terminal fixture"
         continue
       fi
-      out=$(on "$source" "python3 /tmp/$RUN_ID/$script $target" 2>&1); status=$?
+      extra=""; [ "$kind" != session-sharing-owner ] || extra=" --team $SMOKE_TEAM"
+      out=$(on "$source" "python3 /tmp/$RUN_ID/$script $target$extra" 2>&1); status=$?
       if [ "$status" = 0 ] && python3 -c '
 import json,sys
 receipt=json.loads(sys.argv[1].splitlines()[-1])
@@ -756,6 +759,7 @@ test_device_application() {
       record "$id" FAIL 0 "could not stage the device fixture"
       continue
     fi
+    case "$group" in team-lifecycle|team-roles) flags+=" --team $SMOKE_TEAM" ;; esac
     out=$(on "$device" "python3 /tmp/$RUN_ID/$script $flags" 2>&1); status=$?
     if [ "$status" = 0 ] && python3 -c '
 import json,sys

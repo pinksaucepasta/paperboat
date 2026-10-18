@@ -2,6 +2,7 @@
 """Qualify real owner/teammate team commands without changing device enrollment."""
 import argparse
 import json
+import os
 from pathlib import Path
 import secrets
 
@@ -37,6 +38,8 @@ def check_roles(call, current, invite, team_id, owner_id, recipient_id):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--roles', action='store_true')
+    # Team creation now needs a paid Checkout, so a retained paid team is the fixture.
+    parser.add_argument('--team', default=os.environ.get('PAPERBOAT_SMOKE_TEAM', ''))
     args = parser.parse_args()
     pb = Path.home() / '.local/bin/pb'
     root = profile_root()
@@ -59,22 +62,32 @@ def main():
     assert owner['account']['id'] == before['account_id']
     assert recipient['account']['id'] != owner['account']['id']
     email = recipient['account']['email']
-    team_id = 'smoke-team-' + secrets.token_hex(8)
+    fixture = bool(args.team)
+    team_id = args.team or 'smoke-team-' + secrets.token_hex(8)
     state = root / 'owned-team.json'
     state.write_text(json.dumps({'team_id': team_id, 'owner': before['account_id']}))
     state.chmod(0o600)
     created = False
+    was_member = False
     primary_error = None
     text = invoke(pb, 'team', raw=True, input='', timeout=15)
     assert 'invite' in text and 'create' in text
     try:
-        team = call('team', 'create', team_id, '--json')
-        created = True
-        assert team['team_id'] == team_id and team['owner_account'] == before['account_id']
-        assert any(t['team_id'] == team_id for t in call('team', 'list', '--json'))
-
         def current():
             return call('team', 'get', team_id, '--json')
+
+        if fixture:
+            team = current()
+            was_member = any(m['account_id'] == recipient['account']['id'] and m['active']
+                             for m in team['members'])
+            if was_member:
+                call('team', 'remove', team_id, recipient['account']['id'], '--generation',
+                     str(team['generation']), '--json')
+        else:
+            team = call('team', 'create', team_id, '--json')
+            created = True
+        assert team['team_id'] == team_id and team['owner_account'] == before['account_id']
+        assert any(t['team_id'] == team_id for t in call('team', 'list', '--json'))
 
         def invite():
             item = call('team', 'invite', team_id, email,
@@ -108,6 +121,13 @@ def main():
         raise
     finally:
         try:
+            if fixture:
+                # The retained team keeps its teammate: put the original membership back.
+                if was_member and not any(m['account_id'] == recipient['account']['id'] and m['active']
+                                          for m in call('team', 'get', team_id, '--json')['members']):
+                    restored = call('team', 'invite', team_id, email, '--generation',
+                                    str(call('team', 'get', team_id, '--json')['generation']), '--json')
+                    call('team', 'accept', restored['invitation_id'], '--json', teammate=True)
             if created:
                 current_team = call('team', 'get', team_id, '--json')
                 cleanup_owner = current_team['owner_account']
@@ -126,7 +146,8 @@ def main():
             print(json.dumps({'check': 'team-lifecycle', 'cleanup': 'failed',
                               'owned_state_retained': True}), flush=True)
     print(json.dumps({'check': 'team-roles' if args.roles else 'team-lifecycle', 'status': 'PASS',
-                      'create_get_list_delete': True, 'invite_accept_decline_cancel': True,
+                      'create_get_list_delete': True, 'fixture_team': fixture,
+                      'invite_accept_decline_cancel': True,
                       'roles_remove_leave_transfer': args.roles,
                       'independent_verified_recipient': True, 'enrollment_preserved': True}))
 

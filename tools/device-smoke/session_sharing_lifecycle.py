@@ -2,6 +2,7 @@
 """Verify owner-side terminal grants using only an owned, empty temporary team."""
 import argparse
 import json
+import os
 from pathlib import Path
 import sys
 import uuid
@@ -17,10 +18,12 @@ from terminal_lifecycle import Terminal
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('target')
+    # Team creation needs a paid Checkout, so a retained paid team is the fixture.
+    parser.add_argument('--team', default=os.environ.get('PAPERBOAT_SMOKE_TEAM', ''))
     args = parser.parse_args()
     pb = Path.home() / '.local/bin/pb'
     name = 'smoke-session-' + uuid.uuid4().hex[:12]
-    team = 'smoke-sharing-' + uuid.uuid4().hex[:12]
+    team = args.team or 'smoke-sharing-' + uuid.uuid4().hex[:12]
     terminal = None
     identifier = None
     created = False
@@ -38,8 +41,9 @@ def main():
                    str(current['generation']), '--confirm', team, '--json')
 
     try:
-        invoke(pb, *prefix, 'team', 'create', team, '--json')
-        created = True
+        if not args.team:
+            invoke(pb, *prefix, 'team', 'create', team, '--json')
+            created = True
         terminal = Terminal([pb, *prefix, 'connect', args.target, '--name', name, '--status-bar', 'off'])
         terminal.expect(b'\x1b[?2004h')
         terminal.expect(terminal.marker('READY', 'stty -echo; '))
