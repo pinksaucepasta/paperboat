@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/pinksaucepasta/paperboat-server/internal/helperruntime"
 	"github.com/pinksaucepasta/paperboat-server/internal/mint"
 	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
@@ -125,11 +126,17 @@ func (s *Service) terminalSessionInventory(ctx context.Context, account, exactSe
 		closed = *opts.Closed
 	}
 	args := []any{account, exactSession, workspaceSet, teamID, opts.Q, opts.State, opts.Owner, closed}
-	var total int
-	if err := s.db.SQL().QueryRowContext(ctx, "SELECT count(*) FROM ("+query+") inventory", args...).Scan(&total); err != nil {
+	// Runtime probes below must not hold a database snapshot open.
+	tx, err := s.db.Pool().BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	if err != nil {
 		return nil, 0, err
 	}
-	rows, err := s.db.SQL().QueryContext(ctx, query+" ORDER BY lower(x.name),x.id LIMIT $9 OFFSET $10", append(args, opts.Limit, opts.Offset)...)
+	defer tx.Rollback(ctx)
+	var total int
+	if err := tx.QueryRow(ctx, "SELECT count(*) FROM ("+query+") inventory", args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	rows, err := tx.Query(ctx, query+" ORDER BY lower(x.name),x.id LIMIT $9 OFFSET $10", append(args, opts.Limit, opts.Offset)...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -146,7 +153,8 @@ func (s *Service) terminalSessionInventory(ctx context.Context, account, exactSe
 		var observedTerminal bool
 		var browserCandidate bool
 		if err = rows.Scan(&v.ID, &v.Name, &v.StartedIn, &v.DesiredState, &runtimeState, &lastActive, &closedAt, &isDefault, &v.OwnerAccount, &v.Target.Kind, &v.Target.ID, &v.Target.Name, &v.Target.MachineID, &v.Target.EnvironmentID, &v.Target.MachineGeneration, &state, &online, &observedTerminal, &v.Sharing.TeamID, &v.Sharing.Generation, &role, &v.CanManage, &allMembers, &browserCandidate); err != nil {
-			return nil, 0, errors.Join(err, rows.Close())
+			rows.Close()
+			return nil, 0, err
 		}
 		v.Machine = cleanTerminalMetadata(v.Target.Name, 128)
 		v.StartedIn = cleanTerminalMetadata(v.StartedIn, 1024)
@@ -163,17 +171,9 @@ func (s *Service) terminalSessionInventory(ctx context.Context, account, exactSe
 		if v.CanManage {
 			v.Role = "owner"
 		}
-		if v.Role == "" && browserCandidate {
-			// The SQL narrows candidate rows; the same authoritative decision used
-			// for stream admission decides whether any metadata leaves this API.
-			decision, roleErr := s.ResolveTerminalBrowserRole(ctx, account, v.ID)
-			if roleErr != nil {
-				continue
-			}
-			v.Role = string(decision.Role)
-			v.BrowserOnly = true
-		}
-		if v.Role == "" {
+		// Resolve browser candidates after releasing the snapshot connection.
+		v.BrowserOnly = v.Role == "" && browserCandidate
+		if v.Role == "" && !v.BrowserOnly {
 			continue
 		}
 		v.Target.Status, v.Target.Reason = "offline", "terminal_host_unavailable"
@@ -193,11 +193,27 @@ func (s *Service) terminalSessionInventory(ctx context.Context, account, exactSe
 		out = append(out, v)
 	}
 	if err = rows.Err(); err != nil {
-		return nil, 0, errors.Join(err, rows.Close())
-	}
-	if err = rows.Close(); err != nil {
+		rows.Close()
 		return nil, 0, err
 	}
+	rows.Close()
+	if err := tx.Commit(ctx); err != nil {
+		return nil, 0, err
+	}
+	// Candidate SQL only narrows the audience. Recheck the current stream
+	// admission policy before exposing browser-only metadata.
+	authorized := out[:0]
+	for _, item := range out {
+		if item.BrowserOnly {
+			decision, err := s.ResolveTerminalBrowserRole(ctx, account, item.ID)
+			if err != nil {
+				continue
+			}
+			item.Role = string(decision.Role)
+		}
+		authorized = append(authorized, item)
+	}
+	out = authorized
 	if exactSession == "" {
 		ids := make([]string, len(out))
 		for index := range out {

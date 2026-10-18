@@ -135,6 +135,10 @@ the cleanup is complete.
   and asks the owner to close and retry. `200` means helper work applied immediately; `202`
   means it remains pending.
 
+Owner terminal inventories count and select durable records in one database snapshot,
+so concurrent creation or deletion cannot produce contradictory pagination. Live runtime
+metadata is fetched afterward and may be unavailable without hiding the selected record.
+
 Session list records contain `id`, editable `name`, automatic application `title`, terminal-host `machine`,
 stable launch directory `started_in`, `state`, nullable `attached_count`, terminal-I/O-only
 `last_active_at`, `created_at`, `updated_at`, and optional `expires_at`. Open sessions omit
