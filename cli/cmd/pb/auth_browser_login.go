@@ -213,11 +213,21 @@ func authBrowserLogin(c *command.Context) error {
 				}
 			}
 		}
-		if !time.Now().Before(state.Credential.ExpiresAt) {
-			return abortBrowserLogin(c.Context, issuer, state, save, errors.New("approved login session expired; run `pb login` again"))
-		}
-		if _, err = auth.CompleteLogin(c.Context, auth.LoginCompletion{Store: store, Client: api.New(issuer, *state.Credential, loginHTTPClient()), Issuer: issuer, Credential: *state.Credential, SessionID: state.Profile.CLIClientSessionID, ExpectedAccountID: state.Profile.Account.ID, PreviousSessionID: &state.PreviousSessionID, AllowAccountChange: true}); err != nil {
-			return fmt.Errorf("sign-in not activated; retry `pb login`: %w", err)
+		// A previous attempt may have activated this session before daemon refresh
+		// failed. Its durable credentials may already have rotated; never replay
+		// the original approval over the active session.
+		activated := e == nil && old.CLIClientSessionID == state.Profile.CLIClientSessionID && old.Account.ID == state.Profile.Account.ID
+		if activated {
+			if _, err = store.CredentialFor(issuer); err != nil {
+				return fmt.Errorf("sign-in saved; unlock the credential store and retry `pb login`: %w", err)
+			}
+		} else {
+			if !time.Now().Before(state.Credential.ExpiresAt) {
+				return abortBrowserLogin(c.Context, issuer, state, save, errors.New("approved login session expired; run `pb login` again"))
+			}
+			if _, err = auth.CompleteLogin(c.Context, auth.LoginCompletion{Store: store, Client: api.New(issuer, *state.Credential, loginHTTPClient()), Issuer: issuer, Credential: *state.Credential, SessionID: state.Profile.CLIClientSessionID, ExpectedAccountID: state.Profile.Account.ID, PreviousSessionID: &state.PreviousSessionID, AllowAccountChange: true}); err != nil {
+				return fmt.Errorf("sign-in not activated; retry `pb login`: %w", err)
+			}
 		}
 		if err = cfg.Save(); err != nil {
 			return fmt.Errorf("sign-in saved; retry `pb login` to finish configuration: %w", err)

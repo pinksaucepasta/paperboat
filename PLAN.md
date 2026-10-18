@@ -1848,3 +1848,5 @@ Migration093 replaces unpublished083; final binaries used freshly recreated pape
 
 2026-10-18 | Lane A F14 response-size enforcement | Rows ticked:none; updater accepted valid JSON followed by an oversized whitespace tail because its limit looked like EOF. Owner RED0.030s/GREEN all ControlExchange race1.076s, updated vet PASS; actual response overflow now rejects.
 Reuses published abf4031 workspace gate PASS; primary owns F14 native/update-continuity/rollback/retirement/scheduling/version-floor/offline/check-status L/M proof, producer owns official signed artifacts/keys, Claude owns workspace summary.
+
+2026-10-18 | Lane A F2-01 activated-login recovery | Rows ticked:none; daemon-refresh retry overwrote rotated credentials. Existing real login/daemon owner RED0.736s/GREEN focused auth/workspace race6.557s; CLI vet PASS. Exact committed account/session now resumes without replaying approval tokens; published abf4031 workspace gate reused. Waits for primary L/M normal browser login + immediate doctor and retained approval resume; no devices.
