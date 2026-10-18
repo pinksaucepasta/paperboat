@@ -26,6 +26,9 @@ const (
 	commandRejectPreviewExpired
 	commandRejectPreviewTimeout
 	commandRejectPreviewDomainTimeout
+	commandRejectConfigRepositoryEmpty
+	commandRejectConfigRepositoryBranch
+	commandRejectConfigRepositoryInvalid
 )
 
 // commandRejection describes a command-owned refusal. Its
@@ -37,7 +40,7 @@ type commandRejection struct {
 }
 
 func (e commandRejection) valid() bool {
-	return e.reason >= commandRejectDefaultSessionRename && e.reason <= commandRejectPreviewDomainTimeout
+	return e.reason >= commandRejectDefaultSessionRename && e.reason <= commandRejectConfigRepositoryInvalid
 }
 func (e commandRejection) Error() string {
 	switch e.reason {
@@ -49,6 +52,12 @@ func (e commandRejection) Error() string {
 		return "The preview did not become ready in time and was stopped. Retry; run pb doctor if this continues."
 	case commandRejectPreviewDomainTimeout:
 		return "The customer domain did not become ready. Verify the displayed DNS records and certificate status, then retry."
+	case commandRejectConfigRepositoryEmpty:
+		return "The config repository has no commits. Push an initial commit to its sync branch, then retry; config sync does not create the first commit."
+	case commandRejectConfigRepositoryBranch:
+		return "The config repository does not have the sync branch. Create that branch (or pick the repository's existing branch in the machine configuration), then retry."
+	case commandRejectConfigRepositoryInvalid:
+		return "The config repository could not be read. Check that it exists and that its saved credentials still work; a local repository must be a bare Git repository at a path without symbolic links. Then retry."
 	case commandRejectInboxDeclined:
 		return "The recipient declined this transfer. Contact them before sending again."
 	case commandRejectDefaultSessionRename:

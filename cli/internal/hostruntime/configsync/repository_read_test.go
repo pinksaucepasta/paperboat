@@ -152,3 +152,27 @@ func TestRepositoryReadMachineGrantReadWriteIdentity(t *testing.T) {
 		t.Fatal("unbound machine grant accepted", err)
 	}
 }
+
+func TestRepositoryReadNamesEmptyRepositoryAndMissingBranch(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	empty := filepath.Join(root, "empty.git")
+	if _, err := git.PlainInit(empty, true); err != nil {
+		t.Fatal(err)
+	}
+	access := readGrant(empty, "local")
+	access.Branch = "main"
+	_, _, err = ReadSharedRepositoryConfig(context.Background(), t.TempDir(), "", access, DefaultSourceConfigLimits())
+	if !errors.Is(err, ErrRepositoryEmpty) || !errors.Is(err, ErrGitRepositoryInvalid) {
+		t.Fatalf("empty repository: %v", err)
+	}
+	bare, _ := transportFixture(t)
+	access = readGrant(bare, "local")
+	access.Branch = "trunk"
+	_, _, err = ReadSharedRepositoryConfig(context.Background(), t.TempDir(), "", access, DefaultSourceConfigLimits())
+	if !errors.Is(err, ErrRepositoryBranchMissing) || !errors.Is(err, ErrGitRepositoryInvalid) {
+		t.Fatalf("missing branch: %v", err)
+	}
+}

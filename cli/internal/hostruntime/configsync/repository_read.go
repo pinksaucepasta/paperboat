@@ -16,6 +16,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/cache"
 	"github.com/go-git/go-git/v5/plumbing/format/packfile"
+	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/storage"
 	"github.com/go-git/go-git/v5/storage/filesystem"
@@ -45,6 +46,13 @@ const repositoryReadMaxObjectBytes int64 = 16 << 20
 const repositoryReadMaxObjects = 10000
 
 var ErrRepositoryReadLimit = errors.New("repository bootstrap exceeds read limits")
+
+// The granted branch must already exist: config sync reads and fast-forwards
+// it and never creates the first commit or branch.
+var (
+	ErrRepositoryEmpty         = errors.New("config repository has no commits")
+	ErrRepositoryBranchMissing = errors.New("config repository branch does not exist")
+)
 
 func ReadSharedRepositoryConfig(ctx context.Context, root, credentialRoot string, access RepositoryReadAccess, limits SourceConfigLimits) (SourceConfig, string, error) {
 	return readSharedRepositoryConfig(ctx, root, credentialRoot, access, limits, false)
@@ -122,6 +130,13 @@ func readSharedRepositoryConfig(ctx context.Context, root, credentialRoot string
 		underlying := gitUnderlyingError(err)
 		if errors.Is(underlying, ErrRepositoryReadLimit) && !errors.Is(underlying, ErrRepositoryUnavailable) {
 			return fail(ErrRepositoryReadLimit)
+		}
+		var noRef git.NoMatchingRefSpecError
+		switch {
+		case errors.Is(underlying, transport.ErrEmptyRemoteRepository):
+			return fail(&sanitizedGitFailure{cause: ErrRepositoryEmpty})
+		case errors.As(underlying, &noRef):
+			return fail(&sanitizedGitFailure{cause: ErrRepositoryBranchMissing})
 		}
 		return fail(sanitizeGitError(err))
 	}

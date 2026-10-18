@@ -493,3 +493,26 @@ func TestConfigAssignmentAbsenceRequiresPureHTTPStatusCause(t *testing.T) {
 		})
 	}
 }
+
+// An empty repository or a missing branch used to surface only as the generic
+// "could not finish the command" message.
+func TestConfigSyncProjectionExplainsEmptyRepositoryAndMissingBranch(t *testing.T) {
+	t.Setenv("PATH", "")
+	empty := filepath.Join(t.TempDir(), "empty.git")
+	if _, err := git.PlainInit(empty, true); err != nil {
+		t.Fatal(err)
+	}
+	backend := configSyncSourceBackendFixture(t, map[string]string{"branch": ""})
+	backend.repos = append(backend.repos, api.ConfigRepository{ID: "empty", DisplayName: "empty", ExternalRef: empty, Provider: "git"})
+	backend.grants["empty"] = configsync.RepositoryReadAccess{RepositoryID: "empty", CloneURL: empty, Branch: "main", Transport: "local", Capability: "repository_contents_read", ExpiresAt: time.Now().Add(5 * time.Minute)}
+	missing := backend.grants["branch"]
+	missing.Branch = "trunk"
+	backend.grants["branch"] = missing
+	for repository, want := range map[string]string{"empty": "no commits", "branch": "does not have the sync branch"} {
+		_, err := buildConfigSyncProjection(context.Background(), backend, configsync.SourceConfig{}, repository, api.ConfigAssignment{}, t.TempDir(), "", t.TempDir())
+		failure := classifyCommandFailure(err)
+		if err == nil || failure.kind != commandRejected || !strings.Contains(commandFailureMessage(err, failure), want) {
+			t.Fatalf("%s: kind=%v message=%q err=%v", repository, failure.kind, commandFailureMessage(err, failure), err)
+		}
+	}
+}

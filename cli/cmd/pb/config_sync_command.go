@@ -170,6 +170,20 @@ func sameSourceTarget(left, right *configsync.RepositoryTarget) bool {
 	return *left == *right
 }
 
+// configRepositoryReadFailure names why the repository could not be read when
+// the cause is something the user fixes in the repository.
+func configRepositoryReadFailure(err error) error {
+	switch {
+	case errors.Is(err, configsync.ErrRepositoryEmpty):
+		return commandRejection{reason: commandRejectConfigRepositoryEmpty}
+	case errors.Is(err, configsync.ErrRepositoryBranchMissing):
+		return commandRejection{reason: commandRejectConfigRepositoryBranch}
+	case errors.Is(err, configsync.ErrGitRepositoryInvalid):
+		return commandRejection{reason: commandRejectConfigRepositoryInvalid}
+	}
+	return err
+}
+
 func configAssignmentMissingOnly(err error) bool {
 	var response *api.APIError
 	if !errors.As(err, &response) || response == nil || response.Status != http.StatusNotFound {
@@ -234,7 +248,7 @@ func buildConfigSyncProjection(ctx context.Context, backend configSyncSourceBack
 			}
 			shared, sharedRevision, err = configsync.ReadSharedRepositoryConfig(ctx, cacheRoot, credentialRoot, access, configsync.DefaultSourceConfigLimits())
 			if err != nil {
-				return configSyncProjection{}, err
+				return configSyncProjection{}, configRepositoryReadFailure(err)
 			}
 		}
 		effective, err = configsync.MergeSourceConfigs(shared, machine)
