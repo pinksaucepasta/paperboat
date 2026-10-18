@@ -353,27 +353,24 @@ inspects, changes and stops them (`lib/tunnels.ts`, `components/tunnels/`). Gaps
 
 ## Files (machine Inboxes)
 
-The Files section lists each machine's Paperboat Inbox (`lib/files.ts`, `components/files/`).
-Paperboat keeps no file contents: every call is answered live by the machine through the server,
-so an offline machine's Inbox is named under the list instead of read. Team Inbox requests use the
-existing `GET /v1/team-inbox/requests` and `POST …/{id}/approve|decline` (`expected_generation`).
-The rest is UI-only for now; the console calls:
+The Files section lists each online machine's Paperboat Inbox (`lib/files.ts`, `components/files/`).
+Privacy: Paperboat stores no Inbox file names, sizes or contents. Every call goes through the server
+to the machine, live, on the same server-to-daemon HTTP boundary previews use (a 90-second single-use
+credential per call, bound to the machine, the operation and the file):
 
-- `GET /v1/machines/{id}/inbox` → `{ items: [{ id, name, size, content_type?, received_at,
-  source: { kind: console|machine|terminal|teammate, machine_id?, name? } }] }`.
-- `POST /v1/machines/{id}/inbox?name=` with the raw file body (streamed through the relay,
-  Idempotency-Key) → the new item. The server streams it to the machine without storing it.
-- `GET /v1/machines/{id}/inbox/{file_id}/content` → the file, with `Content-Disposition` and
-  `Content-Length` (the relay forwards both and streams without its 10-second deadline).
-- `DELETE /v1/machines/{id}/inbox/{file_id}`.
-- `POST /v1/machines/{id}/inbox/{file_id}/send` `{ destination_machine_id }`: machine to machine,
-  the `pb send` path (`file-transfer-descriptor` already authorizes owned source → destination).
-- `POST /v1/machines/{id}/inbox/{file_id}/share` `{ access_mode, expires_at }` → a preview lease or
-  operation, served by the machine like Share a file.
+- `GET /v1/machines/{id}/inbox?workspace=` → `{ total, items: [{ id, name, size, received_at }] }`,
+  newest 200. 409 `machine_offline` when the machine is offline, so the page says "Machine offline —
+  Inbox unavailable"; 404 for machines you may not manage (owner, or team owner/admin only).
+- `GET /v1/machines/{id}/inbox/{file_id}/content` → the file as an attachment, streamed through
+  (2 GiB limit, 30 s idle limit). `DELETE /v1/machines/{id}/inbox/{file_id}` needs an
+  Idempotency-Key and the CSRF token. Errors: 404 `inbox_file_not_found`, 409 `machine_offline`,
+  413 `file_too_large`, 503 `machine_unreachable`.
 
-Team Inbox requests carry account IDs only, so a request reads "A teammate wants to send…";
-naming the sender needs a display name or email on the request. A machine can take files when its
-`file_receive` capability is configured and observed.
+Download and Delete are behind `inboxLive` in `lib/files.ts` until verified against a real machine
+after the server and daemon deploys. Not in the contract (so off): sending files from the console,
+Send to another machine, and Share link. Machines record no sender, so there is no From column.
+Team Inbox requests use the existing `GET /v1/team-inbox/requests` and `POST …/{id}/approve|decline`
+(`expected_generation`); they carry account IDs only, so a request reads "A teammate wants to send…".
 
 ## Config sync
 

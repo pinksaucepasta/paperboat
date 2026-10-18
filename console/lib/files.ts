@@ -8,10 +8,9 @@ import { uploadFile } from "@/lib/upload"
 /*
  * Files: each machine's Paperboat Inbox (Downloads/Paperboat Inbox on the machine), where files
  * sent from the console, dropped into a terminal, sent with `pb send` or approved from a teammate
- * land. Paperboat keeps no file contents. The list is what each machine last reported (names, sizes
- * and times, every few seconds while it runs), so it is there even when the machine is offline.
- * Downloading and deleting are answered live by the machine through the server; they stay off
- * (`inboxLive`) until the server and daemons that serve them are deployed.
+ * land. Paperboat keeps no file names, sizes or contents: the machine answers every call live
+ * through the server, so an offline machine's Inbox is unavailable until it is back. Downloading
+ * and deleting stay off (`inboxLive`) until the server and daemons that serve them are deployed.
  */
 
 /** Which Inbox endpoints the deployed server answers. Flip one when its deploy is logged. */
@@ -24,10 +23,8 @@ export type InboxFile = {
   received_at: string
 }
 
-/** `GET /v1/machines/{id}/inbox`: the machine's last reported listing, newest first. */
+/** `GET /v1/machines/{id}/inbox`: the machine's Inbox right now, newest first. */
 export type InboxListing = {
-  /** When the machine observed it; null until it has reported. */
-  observed_at: string | null
   /** Files in the Inbox; the list holds the newest 200. */
   total: number
   items: InboxFile[]
@@ -60,7 +57,9 @@ export const inboxQuery = (machineId: string, workspace: string) =>
   queryOptions({
     queryKey: fileKeys.inbox(machineId),
     queryFn: () => api<InboxListing>(`${inboxPath(machineId)}${workspaceQuery(workspace)}`),
-    refetchInterval: 15_000,
+    // The machine answers live, so poll gently and let a 409 machine_offline stand.
+    refetchInterval: 30_000,
+    retry: false,
   })
 
 export const requestsQuery = (workspace: string) =>

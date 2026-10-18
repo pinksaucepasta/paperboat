@@ -4,7 +4,7 @@ import { DownloadSimpleIcon, FolderIcon, LinkIcon, PaperPlaneTiltIcon, TrashIcon
 import { useMutation, useQueries, useQueryClient } from "@tanstack/react-query"
 import { useDeferredValue, useState } from "react"
 import { toast } from "sonner"
-import { meQuery, useApiQuery, useMachines, useWorkspace, type Machine } from "@/lib/api"
+import { ApiError, meQuery, useApiQuery, useMachines, useWorkspace, type Machine } from "@/lib/api"
 import {
   decideRequest,
   deleteInboxFile,
@@ -43,15 +43,18 @@ const rowKey = (row: Row) => `${row.machine.id}/${row.file.id}`
 
 /**
  * What's in your machines' Paperboat Inboxes: files sent from here, dropped into a terminal, sent
- * with `pb send`, or approved from a teammate. The list is what each machine last reported, so it
- * shows for offline machines too; downloading and deleting wait for `inboxLive`.
+ * with `pb send`, or approved from a teammate. Each online machine answers for its own Inbox live
+ * (nothing is stored); an offline machine's Inbox is unavailable until it is back. Downloading and
+ * deleting wait for `inboxLive`.
  */
 export function FileList({ machine: tabMachine }: { machine?: Machine }) {
   const queryClient = useQueryClient()
   const workspace = useWorkspace()
   const { scope, machine } = useListScope(tabMachine)
   const machines = useMachines()
-  const readable = (machines.data ?? []).filter((entry) => !scope || entry.id === scope)
+  const inScope = (machines.data ?? []).filter((entry) => !scope || entry.id === scope)
+  const readable = inScope.filter((entry) => entry.online)
+  const offline = inScope.filter((entry) => !entry.online)
   const inboxes = useQueries({ queries: readable.map((entry) => inboxQuery(entry.id, workspace?.id ?? "")) })
   const [search, setSearch] = useState("")
   const text = useDeferredValue(search.trim().toLowerCase())
@@ -64,7 +67,8 @@ export function FileList({ machine: tabMachine }: { machine?: Machine }) {
     .flatMap((entry, index) => (inboxes[index]?.data?.items ?? []).map((file) => ({ file, machine: entry })))
     .filter((row) => !text || row.file.name.toLowerCase().includes(text))
     .sort((a, b) => Date.parse(b.file.received_at) - Date.parse(a.file.received_at))
-  const failed = readable.filter((_, index) => inboxes[index]?.isError)
+  const failed = readable.filter((_, index) => inboxes[index]?.isError && !isOffline(inboxes[index].error))
+  const unavailable = [...offline, ...readable.filter((_, index) => isOffline(inboxes[index]?.error))]
   const selectedRows = rows.filter((row) => selected.has(rowKey(row)))
   const allSelected = rows.length > 0 && selectedRows.length === rows.length
   const toggle = (key: string, on: boolean) =>
@@ -79,7 +83,6 @@ export function FileList({ machine: tabMachine }: { machine?: Machine }) {
     const listing = inboxes[index]?.data
     return listing && listing.total > listing.items.length
   })
-  const silent = readable.filter((_, index) => inboxes[index]?.data && !inboxes[index].data?.observed_at)
 
   const dropped = (
     <>
@@ -88,6 +91,7 @@ export function FileList({ machine: tabMachine }: { machine?: Machine }) {
     </>
   )
 
+  const allUnavailable = inScope.length > 0 && unavailable.length === inScope.length
   const empty = !loading && rows.length === 0 && !text && failed.length === 0
 
   return (
@@ -100,9 +104,17 @@ export function FileList({ machine: tabMachine }: { machine?: Machine }) {
             <EmptyMedia variant="icon">
               <FolderIcon />
             </EmptyMedia>
-            <EmptyTitle>{machine ? `${machine.alias}’s Inbox is empty` : "Inboxes are empty"}</EmptyTitle>
+            <EmptyTitle>
+              {allUnavailable
+                ? "Machine offline — Inbox unavailable"
+                : machine
+                  ? `${machine.alias}’s Inbox is empty`
+                  : "Inboxes are empty"}
+            </EmptyTitle>
             <EmptyDescription>
-              Files you send here, drop into a terminal, or send with pb send land in the machine’s Paperboat Inbox.
+              {allUnavailable
+                ? "An Inbox is read from its machine, so it shows when the machine is back online."
+                : "Files you send here, drop into a terminal, or send with pb send land in the machine’s Paperboat Inbox."}
             </EmptyDescription>
           </EmptyHeader>
           {inboxLive.upload && (
@@ -110,7 +122,7 @@ export function FileList({ machine: tabMachine }: { machine?: Machine }) {
               <SendFilesButton machine={machine} />
             </EmptyContent>
           )}
-          <InboxNotes silent={silent} truncated={[]} />
+          <InboxNotes unavailable={allUnavailable ? [] : unavailable} truncated={[]} />
         </Empty>
       ) : (
         <div className="flex flex-col gap-3">
@@ -195,7 +207,7 @@ export function FileList({ machine: tabMachine }: { machine?: Machine }) {
               </button>
             </p>
           )}
-          <InboxNotes silent={silent} truncated={truncated} />
+          <InboxNotes unavailable={unavailable} truncated={truncated} />
         </div>
       )}
 
@@ -223,13 +235,16 @@ export function FileList({ machine: tabMachine }: { machine?: Machine }) {
   )
 }
 
-/** What the list can't say: machines that haven't reported yet, and Inboxes longer than the list. */
-function InboxNotes({ silent, truncated }: { silent: Machine[]; truncated: Machine[] }) {
-  if (!silent.length && !truncated.length) return null
+/** The server answers 409 machine_offline when the machine went away between lists. */
+const isOffline = (error: unknown) => error instanceof ApiError && error.code === "machine_offline"
+
+/** What the list can't say: machines whose Inbox is unavailable, and Inboxes longer than the list. */
+function InboxNotes({ unavailable, truncated }: { unavailable: Machine[]; truncated: Machine[] }) {
+  if (!unavailable.length && !truncated.length) return null
   const names = (machines: Machine[]) => machines.map((entry) => entry.alias).join(", ")
   return (
     <div className="flex flex-col gap-1 text-sm text-muted-foreground">
-      {silent.length > 0 && <p>{names(silent)} hasn’t reported its Inbox yet; it shows after the next update.</p>}
+      {unavailable.length > 0 && <p>{names(unavailable)}: machine offline, Inbox unavailable.</p>}
       {truncated.length > 0 && <p>Showing the newest 200 files of {names(truncated)}’s Inbox.</p>}
     </div>
   )
