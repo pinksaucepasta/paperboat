@@ -353,6 +353,22 @@ WHERE machine_id = sqlc.arg(machine_id)
   AND credential_jti = sqlc.arg(credential_jti)
   AND expires_at > sqlc.arg(now);
 
+-- name: GetReplayableMachineControlRenewal :one
+-- A committed renewal is replayable by the credential it replaced: the same
+-- operation, still the machine's current session, replacing exactly the
+-- presented credential, and not yet expired.
+SELECT x.* FROM machine_control_renewals x
+JOIN machine_control_sessions s
+  ON s.machine_id = x.machine_id AND s.operation_id = x.operation_id
+ AND s.credential_jti = x.credential_jti AND s.session_generation = x.session_generation
+JOIN machine_control_renewals y
+  ON y.machine_id = x.machine_id AND y.installation_generation = x.installation_generation
+ AND y.credential_jti = sqlc.arg(previous_credential_jti)
+ AND y.session_generation = x.session_generation - 1 AND y.superseded_at IS NOT NULL
+WHERE x.operation_id = sqlc.arg(operation_id) AND x.machine_id = sqlc.arg(machine_id)
+  AND x.installation_generation = sqlc.arg(installation_generation)
+  AND x.superseded_at IS NULL AND x.expires_at > sqlc.arg(now);
+
 -- name: GetMachineControlSessionForUpdate :one
 SELECT * FROM machine_control_sessions
 WHERE machine_id = sqlc.arg(machine_id)

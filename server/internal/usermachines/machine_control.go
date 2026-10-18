@@ -121,8 +121,11 @@ func (s *Service) RenewMachineControl(ctx context.Context, credential string, pr
 		MachineID: machine.ID, InstallationGeneration: machine.InstallationGeneration,
 		CredentialJti: identity.JTI, Now: now.Add(-time.Hour),
 	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return s.replayMachineControlRenewal(ctx, machine, identity.JTI, proof, body, method, path, now)
+	}
 	if err != nil {
-		return MachineControlCredential{}, machineControlLookupError(err)
+		return MachineControlCredential{}, err
 	}
 	if current.SessionGeneration != identity.SessionGeneration {
 		return MachineControlCredential{}, ErrMachineControlInvalid
@@ -130,6 +133,25 @@ func (s *Service) RenewMachineControl(ctx context.Context, credential string, pr
 	claims, err := verifyMachineProof(machine, proof, method, path, body, now)
 	if err != nil {
 		return MachineControlCredential{}, err
+	}
+	return s.mintMachineControl(ctx, machine, claims.OperationID)
+}
+
+// replayMachineControlRenewal answers a retry whose first attempt committed but
+// whose response was lost: the presented credential was already replaced by the
+// renewal with this exact operation, so that renewal's credential is returned
+// again until it expires. Any other rotated credential stays invalid.
+func (s *Service) replayMachineControlRenewal(ctx context.Context, machine dbsqlc.UserMachine, presentedJTI string, proof, body []byte, method, path string, now time.Time) (MachineControlCredential, error) {
+	claims, err := verifyMachineProof(machine, proof, method, path, body, now)
+	if err != nil {
+		return MachineControlCredential{}, ErrMachineControlInvalid
+	}
+	_, err = s.db.Queries().GetReplayableMachineControlRenewal(ctx, dbsqlc.GetReplayableMachineControlRenewalParams{
+		PreviousCredentialJti: presentedJTI, OperationID: claims.OperationID, MachineID: machine.ID,
+		InstallationGeneration: machine.InstallationGeneration, Now: now,
+	})
+	if err != nil {
+		return MachineControlCredential{}, machineControlLookupError(err)
 	}
 	return s.mintMachineControl(ctx, machine, claims.OperationID)
 }

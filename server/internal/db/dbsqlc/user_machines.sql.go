@@ -2065,6 +2065,54 @@ func (q *Queries) GetOwnedActiveUserMachineForControl(ctx context.Context, arg G
 	return i, err
 }
 
+const getReplayableMachineControlRenewal = `-- name: GetReplayableMachineControlRenewal :one
+SELECT x.operation_id, x.machine_id, x.installation_generation, x.credential_jti, x.issued_at, x.expires_at, x.created_at, x.session_generation, x.superseded_at FROM machine_control_renewals x
+JOIN machine_control_sessions s
+  ON s.machine_id = x.machine_id AND s.operation_id = x.operation_id
+ AND s.credential_jti = x.credential_jti AND s.session_generation = x.session_generation
+JOIN machine_control_renewals y
+  ON y.machine_id = x.machine_id AND y.installation_generation = x.installation_generation
+ AND y.credential_jti = $1
+ AND y.session_generation = x.session_generation - 1 AND y.superseded_at IS NOT NULL
+WHERE x.operation_id = $2 AND x.machine_id = $3
+  AND x.installation_generation = $4
+  AND x.superseded_at IS NULL AND x.expires_at > $5
+`
+
+type GetReplayableMachineControlRenewalParams struct {
+	PreviousCredentialJti  string
+	OperationID            string
+	MachineID              string
+	InstallationGeneration int64
+	Now                    time.Time
+}
+
+// A committed renewal is replayable by the credential it replaced: the same
+// operation, still the machine's current session, replacing exactly the
+// presented credential, and not yet expired.
+func (q *Queries) GetReplayableMachineControlRenewal(ctx context.Context, arg GetReplayableMachineControlRenewalParams) (MachineControlRenewal, error) {
+	row := q.db.QueryRow(ctx, getReplayableMachineControlRenewal,
+		arg.PreviousCredentialJti,
+		arg.OperationID,
+		arg.MachineID,
+		arg.InstallationGeneration,
+		arg.Now,
+	)
+	var i MachineControlRenewal
+	err := row.Scan(
+		&i.OperationID,
+		&i.MachineID,
+		&i.InstallationGeneration,
+		&i.CredentialJti,
+		&i.IssuedAt,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+		&i.SessionGeneration,
+		&i.SupersededAt,
+	)
+	return i, err
+}
+
 const getSharedUserMachineTerminalSession = `-- name: GetSharedUserMachineTerminalSession :one
 SELECT s.id, s.user_machine_id, s.name, s.idempotency_key, s.is_default, s.launch_cwd, s.desired_state, s.runtime_state, s.last_activity_at, s.last_runtime_sync_at, s.last_runtime_sequence, s.deleted_at, s.version, s.created_at, s.updated_at, s.transfer_destination_machine_id, s.owner_account, s.title, s.closed_at, s.owner_team_id FROM user_machine_terminal_sessions s WHERE s.id=$1 AND s.deleted_at IS NULL AND terminal_session_role($2,s.id) IN ('viewer','interactive')
 `

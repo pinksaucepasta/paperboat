@@ -3548,3 +3548,79 @@ func oneShotHash(key []byte, value string) string {
 	_, _ = m.Write([]byte(value))
 	return hex.EncodeToString(m.Sum(nil))
 }
+
+func TestMachineControlRenewalReplayAfterLostResponse(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	userID, machineID, otherID := "usr_mc_replay_"+suffix, "mch_mc_replay_"+suffix, "mch_mc_replay_other_"+suffix
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users (id,workos_subject,primary_email,status) VALUES ($1,$2,$3,'active')`, userID, "workos_mc_replay_"+suffix, "mc-replay-"+suffix+"@example.test"); err != nil {
+		t.Fatal(err)
+	}
+	keys := map[string]ed25519.PrivateKey{}
+	for _, id := range []string{machineID, otherID} {
+		public, private, err := ed25519.GenerateKey(rand.Reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		keys[id] = private
+		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,configured_capabilities,observed_capabilities,public_identity_key,installation_generation) VALUES ($1,$2,$3,$1,'linux','amd64','/work','offline','occupied',ARRAY['file_receive']::text[],ARRAY[]::text[],$4,3)`, id, userID, "env_"+id, base64.RawURLEncoding.EncodeToString(public)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	machine, err := store.Queries().GetActiveUserMachineForControl(ctx, machineID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := mint.NewEphemeral(time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := New(store, audit.NewWriter(store), Policy{}, nil)
+	service.ConfigureMachineControl(signer, "https://api.example.test")
+	now := time.Date(2026, 8, 23, 1, 2, 3, 0, time.UTC)
+	service.now = func() time.Time { return now }
+	body := []byte(`{}`)
+	renew := func(credential, machine, operation string) (MachineControlCredential, error) {
+		t.Helper()
+		digest := sha256.Sum256(body)
+		claims := MachineProofClaims{MachineID: machine, EnvironmentID: "env_" + machine, InstallationGeneration: 3, OperationID: operation, Method: "POST", Path: "/v1/machine-control-renewals", BodySHA256: base64.RawURLEncoding.EncodeToString(digest[:]), IssuedAt: now, ExpiresAt: now.Add(time.Minute)}
+		payload, err := json.Marshal(claims)
+		if err != nil {
+			t.Fatal(err)
+		}
+		proof, err := json.Marshal(machineProofEnvelope{Algorithm: "EdDSA", Payload: base64.RawURLEncoding.EncodeToString(payload), Signature: base64.RawURLEncoding.EncodeToString(ed25519.Sign(keys[machine], payload))})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return service.RenewMachineControl(ctx, credential, proof, body, "POST", claims.Path)
+	}
+	initial, err := service.mintMachineControl(ctx, machine, "mc-initial-"+suffix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	operation := "mc-renew-" + suffix
+	committed, err := renew(initial.Credential, machineID, operation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The response was lost: the client retries with the credential it still holds.
+	now = now.Add(time.Second)
+	replayed, err := renew(initial.Credential, machineID, operation)
+	if err != nil || replayed.Credential != committed.Credential || !replayed.ExpiresAt.Equal(committed.ExpiresAt) {
+		t.Fatalf("lost-response replay = %+v err=%v, want the committed credential %+v", replayed, err, committed)
+	}
+	if _, err := renew(initial.Credential, machineID, "mc-other-"+suffix); !errors.Is(err, ErrMachineControlInvalid) {
+		t.Fatalf("rotated credential with a new operation err=%v, want ErrMachineControlInvalid", err)
+	}
+	if _, err := renew(initial.Credential, otherID, operation); !errors.Is(err, ErrMachineControlInvalid) {
+		t.Fatalf("another machine's proof replayed the renewal: %v", err)
+	}
+	// Once the committed credential renews, the older operation is no longer replayable.
+	if _, err := renew(committed.Credential, machineID, "mc-next-"+suffix); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := renew(initial.Credential, machineID, operation); !errors.Is(err, ErrMachineControlInvalid) {
+		t.Fatalf("replay after a newer renewal err=%v, want ErrMachineControlInvalid", err)
+	}
+}
