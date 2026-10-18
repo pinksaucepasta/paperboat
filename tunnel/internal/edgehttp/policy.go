@@ -537,7 +537,7 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
 			return
 		}
-		if !credentialAllowsHelperPath(claims.CredentialClass, r.URL.Path) {
+		if !credentialAllowsHelperPath(claims.CredentialClass, r.Method, r.URL.Path) {
 			http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
 			return
 		}
@@ -631,11 +631,18 @@ func (p *Policy) cancelWhenAccessRevoked(ctx context.Context, cancel context.Can
 }
 
 func helperAccessPath(path string) bool {
-	return path == "/v1/runtime" || path == "/v1/browser-terminal" || path == "/v1/preview-launches" || path == "/v1/file-transfers" || strings.HasPrefix(path, "/v1/file-transfers/")
+	return path == "/v1/runtime" || path == "/v1/browser-terminal" || path == "/v1/preview-launches" || path == "/v1/file-transfers" || strings.HasPrefix(path, "/v1/file-transfers/") ||
+		path == "/v1/inbox-files" || strings.HasPrefix(path, "/v1/inbox-files/")
 }
 
-func credentialAllowsHelperPath(class, path string) bool {
+// credentialAllowsHelperPath keeps each credential class on its own capability path; the Inbox paths
+// also depend on the method (list and read are GETs, delete is a DELETE).
+func credentialAllowsHelperPath(class, method, path string) bool {
 	switch {
+	case path == "/v1/inbox-files":
+		return class == "inbox_list" && method == http.MethodGet
+	case strings.HasPrefix(path, "/v1/inbox-files/"):
+		return class == "inbox_read" && method == http.MethodGet || class == "inbox_delete" && method == http.MethodDelete
 	case path == "/v1/runtime":
 		return class == "terminal_operation"
 	case path == "/v1/browser-terminal":

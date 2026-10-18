@@ -480,3 +480,41 @@ func TestVerifierPreservesUnavailableSourceCausesAndRecovers(t *testing.T) {
 		t.Fatal("fresh unrevoked helper could not recover")
 	}
 }
+
+func TestVerifierAcceptsInboxCredentialsWithoutCLIClientSession(t *testing.T) {
+	public, private, _ := ed25519.GenerateKey(rand.Reader)
+	verifier := &Verifier{Issuer: "https://api.paperboat.test", Keys: StaticKeys{"key-1": public}, Now: func() time.Time { return time.Unix(1000, 0) }}
+	build := func(class, scope, kind, resource string) string {
+		return tokenFor(t, private, "key-1", func(claims map[string]any) {
+			claims["aud"] = "paperboat-machine"
+			claims["sub"] = "user_11111111-1111-4111-8111-111111111111"
+			claims["credential_class"] = class
+			claims["scope"] = []string{scope}
+			claims["account_id"] = "user_11111111-1111-4111-8111-111111111111"
+			claims["machine_id"] = "machine_22222222-2222-4222-8222-222222222222"
+			claims["user_id"] = "user_11111111-1111-4111-8111-111111111111"
+			claims["actor_id"] = "user_11111111-1111-4111-8111-111111111111"
+			claims["operation_id"] = "operation_55555555-5555-4555-8555-555555555555"
+			claims["resource_kind"] = kind
+			claims["resource_id"] = resource
+			claims["request_id"] = "request_66666666-6666-4666-8666-666666666666"
+			claims["correlation_id"] = "correlation_77777777-7777-4777-8777-777777777777"
+			delete(claims, "cli_client_session_id")
+			delete(claims, "session_id")
+			delete(claims, "connector_id")
+			delete(claims, "connector_generation")
+			delete(claims, "edge_pool")
+			delete(claims, "edge_node_id")
+			delete(claims, "file_transfer_policy")
+		})
+	}
+	for class, scope := range map[string]string{"inbox_list": "inbox:list", "inbox_read": "inbox:read", "inbox_delete": "inbox:delete"} {
+		claims, err := verifier.VerifyHelperAccess(context.Background(), build(class, scope, "inbox_file", "0123456789abcdef"))
+		if err != nil || claims.CredentialClass != class || claims.MachineID != "machine_22222222-2222-4222-8222-222222222222" {
+			t.Errorf("%s: claims=%+v err=%v", class, claims, err)
+		}
+	}
+	if _, err := verifier.VerifyHelperAccess(context.Background(), build("inbox_read", "inbox:delete", "inbox_file", "0123456789abcdef")); err == nil {
+		t.Error("an inbox_read credential carrying the delete scope was accepted")
+	}
+}

@@ -479,7 +479,7 @@ func TestHelperCredentialClassesCannotCrossCapabilityPaths(t *testing.T) {
 	paths := []string{"/v1/file-transfers", "/v1/preview-launches", "/v1/runtime", "/v1/browser-terminal", "/v1/unsupported-feature", "/v1/local-file-transfers", "/v1/local-file-transfers/transfer_1/content"}
 	for class, ownPath := range allowed {
 		for _, path := range paths {
-			got := credentialAllowsHelperPath(class, path)
+			got := credentialAllowsHelperPath(class, http.MethodPost, path)
 			if got != (path == ownPath) {
 				t.Fatalf("class=%s path=%s allowed=%v", class, path, got)
 			}
@@ -489,6 +489,39 @@ func TestHelperCredentialClassesCannotCrossCapabilityPaths(t *testing.T) {
 		if helperAccessPath(path) {
 			t.Fatalf("peer-only path became edge reachable: %s", path)
 		}
+	}
+}
+
+func TestInboxCredentialsAreBoundToTheirInboxPathAndMethod(t *testing.T) {
+	for _, tc := range []struct {
+		class, method, path string
+		want                bool
+	}{
+		{"inbox_list", http.MethodGet, "/v1/inbox-files", true},
+		{"inbox_list", http.MethodDelete, "/v1/inbox-files", false},
+		{"inbox_list", http.MethodGet, "/v1/inbox-files/0123456789abcdef", false},
+		{"inbox_read", http.MethodGet, "/v1/inbox-files/0123456789abcdef", true},
+		{"inbox_read", http.MethodDelete, "/v1/inbox-files/0123456789abcdef", false},
+		{"inbox_read", http.MethodGet, "/v1/inbox-files", false},
+		{"inbox_delete", http.MethodDelete, "/v1/inbox-files/0123456789abcdef", true},
+		{"inbox_delete", http.MethodGet, "/v1/inbox-files/0123456789abcdef", false},
+		{"preview_launch", http.MethodGet, "/v1/inbox-files", false},
+		{"file_transfer", http.MethodGet, "/v1/inbox-files/0123456789abcdef", false},
+		{"terminal_operation", http.MethodGet, "/v1/inbox-files", false},
+		{"inbox_read", http.MethodGet, "/v1/preview-launches", false},
+		{"inbox_list", http.MethodGet, "/v1/runtime", false},
+	} {
+		if got := credentialAllowsHelperPath(tc.class, tc.method, tc.path); got != tc.want {
+			t.Errorf("%s %s %s: allowed=%v want %v", tc.class, tc.method, tc.path, got, tc.want)
+		}
+	}
+	for _, path := range []string{"/v1/inbox-files", "/v1/inbox-files/0123456789abcdef"} {
+		if !helperAccessPath(path) {
+			t.Errorf("%s is not edge reachable", path)
+		}
+	}
+	if helperAccessPath("/v1/inbox-filesx") || helperAccessPath("/v1/inbox") {
+		t.Error("a lookalike path became edge reachable")
 	}
 }
 

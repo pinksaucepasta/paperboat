@@ -78,6 +78,8 @@ type claims struct {
 	CLIClientSessionID     string              `json:"cli_client_session_id"`
 	SessionID              string              `json:"session_id"`
 	OperationID            string              `json:"operation_id,omitempty"`
+	ResourceKind           string              `json:"resource_kind,omitempty"`
+	ResourceID             string              `json:"resource_id,omitempty"`
 	PreviewID              string              `json:"preview_id,omitempty"`
 	OwnerSessionID         string              `json:"owner_session_id,omitempty"`
 	OwnerSessionKind       string              `json:"owner_session_kind,omitempty"`
@@ -139,6 +141,12 @@ func (v *Verifier) VerifyHelperAccess(ctx context.Context, token string) (admiss
 		wantScopes = []string{"terminal:operate"}
 	case "file_transfer":
 		wantScopes = []string{"file:transfer"}
+	case "inbox_list":
+		wantScopes = []string{"inbox:list"}
+	case "inbox_read":
+		wantScopes = []string{"inbox:read"}
+	case "inbox_delete":
+		wantScopes = []string{"inbox:delete"}
 	case "preview_launch":
 		if parsed.OwnerSessionKind != "local_lease" && parsed.OwnerSessionKind != "foreground" && parsed.OwnerSessionKind != "lazy_runtime" {
 			return admission.Claims{}, invalid()
@@ -160,7 +168,8 @@ func (v *Verifier) VerifyHelperAccess(ctx context.Context, token string) (admiss
 	// from a browser or a CLI request, so it binds the authenticated user and
 	// operation but deliberately has no CLI client-session claim. Interactive
 	// terminal and transfer credentials remain client-session bound.
-	requiresClientSession := parsed.CredentialClass != "preview_launch" && parsed.CredentialClass != "browser_terminal_operation"
+	// The inbox credentials are control-plane-to-host credentials too: a console request, no CLI session.
+	requiresClientSession := parsed.CredentialClass != "preview_launch" && parsed.CredentialClass != "browser_terminal_operation" && !strings.HasPrefix(parsed.CredentialClass, "inbox_")
 	if parsed.CredentialClass == "browser_terminal_operation" {
 		digest, e := base64.RawURLEncoding.Strict().DecodeString(parsed.BrowserPublicKeySHA256)
 		if e != nil || len(digest) != 32 || parsed.BrowserAttachmentID == "" || parsed.SessionID == "" || parsed.ExpectedGeneration < 1 || parsed.PolicyGeneration < 1 || parsed.CLIClientSessionID != "" || parsed.SourceMachineID != "" || parsed.AccountID != parsed.UserID || parsed.Subject != parsed.UserID {
