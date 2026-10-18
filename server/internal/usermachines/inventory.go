@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
+	"github.com/jackc/pgx/v5"
 	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat-server/internal/workspace"
 )
@@ -93,11 +95,17 @@ func (s *Service) ListTerminalSessionInventory(ctx context.Context, account, mac
  AND ($7='' OR $7='mine' OR t.owner_account=$7)
  AND ($8::boolean IS NULL OR (t.desired_state<>'open' OR t.runtime_state IN ('closed','exited','deleted'))=$8)`
 	args := []any{machineID, account, scoped, teamID, opts.Q, opts.State, opts.Owner, closed}
-	var total int
-	if err = s.db.SQL().QueryRowContext(ctx, "SELECT count(*)"+predicate, args...).Scan(&total); err != nil {
+	// Count, selected IDs and durable records belong to one inventory snapshot.
+	tx, err := s.db.Pool().BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	if err != nil {
 		return nil, 0, err
 	}
-	rows, err := s.db.SQL().QueryContext(ctx, "SELECT t.id"+predicate+" ORDER BY t.is_default DESC,t.last_activity_at DESC NULLS LAST,t.id LIMIT $9 OFFSET $10", append(args, opts.Limit, opts.Offset)...)
+	defer tx.Rollback(ctx)
+	var total int
+	if err = tx.QueryRow(ctx, "SELECT count(*)"+predicate, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	rows, err := tx.Query(ctx, "SELECT t.id"+predicate+" ORDER BY t.is_default DESC,t.last_activity_at DESC NULLS LAST,t.id LIMIT $9 OFFSET $10", append(args, opts.Limit, opts.Offset)...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -105,17 +113,19 @@ func (s *Service) ListTerminalSessionInventory(ctx context.Context, account, mac
 	for rows.Next() {
 		var id string
 		if err = rows.Scan(&id); err != nil {
-			return nil, 0, errors.Join(err, rows.Close())
+			rows.Close()
+			return nil, 0, err
 		}
 		ids = append(ids, id)
 	}
-	err = errors.Join(rows.Err(), rows.Close())
+	err = rows.Err()
+	rows.Close()
 	if err != nil {
 		return nil, 0, err
 	}
 	out := make([]TerminalSession, 0, len(ids))
 	for _, id := range ids {
-		row, e := getTerminalSession(ctx, s.db.Queries(), dbsqlc.GetUserMachineTerminalSessionParams{ID: id, UserMachineID: machineID, UserID: account})
+		row, e := getTerminalSession(ctx, dbsqlc.New(tx), dbsqlc.GetUserMachineTerminalSessionParams{ID: id, UserMachineID: machineID, UserID: account})
 		if e != nil {
 			return nil, 0, e
 		}
@@ -123,6 +133,9 @@ func (s *Service) ListTerminalSessionInventory(ctx context.Context, account, mac
 		item.Machine = machine.Alias
 
 		out = append(out, item)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, 0, err
 	}
 	for index, live := range s.terminalInventoryObservations(ctx, account, ids) {
 		if live == nil {
