@@ -67,7 +67,7 @@ func (e *engine) recordOperation(ctx context.Context, r request) (any, error) {
 		}
 	}
 	workspace, kind, owner, machine := r.WorkspaceID, r.Kind, r.Owner, r.Machine
-	if r.Action == "record-read" {
+	if r.Action == "record-name" {
 		if r.Record == nil {
 			return nil, env.ErrInvalid
 		}
@@ -89,7 +89,7 @@ func (e *engine) recordOperation(ctx context.Context, r request) (any, error) {
 			return nil, err
 		}
 		return map[string]string{"record_id": id}, nil
-	case "record-read":
+	case "record-name":
 		if r.Record.Epoch != epoch {
 			return nil, env.ErrInvalid
 		}
@@ -100,12 +100,13 @@ func (e *engine) recordOperation(ctx context.Context, r request) (any, error) {
 		if record.Claims.Issuer != e.head.Issuer {
 			return nil, env.ErrInvalid
 		}
+		// The decrypted value is cleared here and never returned: the console only lists names.
 		name, value, err := env.OpenVaultRecord(ctx, record, key)
 		if err != nil {
 			return nil, err
 		}
-		defer clear(value)
-		return map[string]any{"name": name, "value": string(value), "deleted": record.Claims.Deleted}, nil
+		clear(value)
+		return map[string]any{"name": name, "deleted": record.Claims.Deleted}, nil
 	case "scope-create":
 		if r.Scope != nil {
 			return nil, env.ErrInvalid

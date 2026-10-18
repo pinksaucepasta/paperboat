@@ -79,12 +79,32 @@ func writeRecord(t *testing.T, e *engine, v vaultState, anchor scopeState, name,
 
 func readRecord(t *testing.T, e *engine, v vaultState, record recordState) (string, string, bool) {
 	t.Helper()
-	out, err := e.run(context.Background(), request{Action: "record-read", Vault: v, Record: &record})
+	out, err := e.run(context.Background(), request{Action: "record-name", Vault: v, Record: &record})
 	if err != nil {
 		t.Fatal(err)
 	}
 	data := out.(map[string]any)
-	return data["name"].(string), data["value"].(string), data["deleted"].(bool)
+	if len(data) != 2 {
+		t.Fatalf("record-name must return only name and deleted, got %v", data)
+	}
+	// Values are checked natively with the engine's own keys; the engine API never returns them.
+	root, epoch, err := e.recordRoot(record.Kind, record.Owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := env.VaultRecordKey(root, record.WorkspaceID, record.Kind, record.Owner, record.Machine, epoch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := recordDocument(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, value, err := env.OpenVaultRecord(context.Background(), parsed, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data["name"].(string), string(value), data["deleted"].(bool)
 }
 
 func TestBrowserVaultNativeInteroperabilityAndFencing(t *testing.T) {
@@ -362,7 +382,7 @@ func TestBrowserTeamGrantAcceptAndRotation(t *testing.T) {
 	teamRecord := writeRecord(t, alice, a, team.Scope, "SHARED_TOKEN", "shared value", nil)
 	teamRecord.Sequence = 1
 	team.RecordSequence = 1
-	if _, err = bob.run(ctx, request{Action: "record-read", Vault: b, Record: &teamRecord}); err == nil {
+	if _, err = bob.run(ctx, request{Action: "record-name", Vault: b, Record: &teamRecord}); err == nil {
 		t.Fatal("team record opened before accepting its grant")
 	}
 	bobPublic, _ := ecdh.X25519().NewPrivateKey(bob.keys.SharingPrivate)

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	env "github.com/pinksaucepasta/paperboat/internal/environmente2ee"
 )
 
@@ -30,6 +31,9 @@ func (e *engine) hostLayer(ctx context.Context, r request) (any, error) {
 		return nil, env.ErrInvalid
 	}
 	c := scope.Claims
+	if err := authorizeLayerRecipient(e.head.AccountID, c, r.Team, *r.LayerRecipient); err != nil {
+		return nil, err
+	}
 	var key []byte
 	var epoch uint64
 	if c.OwnerKind == "personal" {
@@ -92,4 +96,31 @@ func (e *engine) hostLayer(ctx context.Context, r request) (any, error) {
 		return nil, err
 	}
 	return map[string]string{"operation_id": r.Operation, "envelope": encoded(layer.Raw)}, nil
+}
+
+// authorizeLayerRecipient refuses recipients the control plane may list but this
+// writer must not seal to: Personal scope keys go only to the writer's own
+// account and machine, and Team scope keys only to active members who may read.
+// The host public key itself is validated by SealVaultScopeKey (X25519, not
+// low-order); no key is trusted for any other account.
+func authorizeLayerRecipient(account string, c env.VaultScopeClaims, team *teamState, recipient layerRecipient) error {
+	if recipient.MachineID == "" || recipient.RecipientAccount == "" || recipient.HostKeyGeneration == 0 || recipient.InstallationGeneration == 0 {
+		return env.ErrInvalid
+	}
+	if c.MachineID != "" && c.MachineID != recipient.MachineID {
+		return errors.New("The device override belongs to a different machine than this recipient.")
+	}
+	if c.OwnerKind == "personal" {
+		if recipient.RecipientAccount != account || c.OwnerID != account {
+			return errors.New("Private ENV values can only be sent to your own devices.")
+		}
+		return nil
+	}
+	if team == nil {
+		return env.ErrInvalid
+	}
+	if _, ok := team.actor(recipient.RecipientAccount, "read"); !ok {
+		return errors.New("The recipient is not an active Team member allowed to read ENV values.")
+	}
+	return nil
 }

@@ -135,7 +135,7 @@ func (e *engine) run(ctx context.Context, r request) (any, error) {
 		return nil, ctx.Err()
 	}
 	switch r.Action {
-	case "record-id", "record-read", "record-write", "scope-create":
+	case "record-id", "record-name", "record-write", "scope-create":
 		return e.recordOperation(ctx, r)
 	case "scope-candidate", "scope-reconcile":
 		return e.reconcileScope(r)
