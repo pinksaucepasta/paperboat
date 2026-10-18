@@ -9244,11 +9244,35 @@
             "minLength": 1,
             "maxLength": 63,
             "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$"
+          },
+          "seats": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 128
+          },
+          "interval": {
+            "type": "string",
+            "enum": [
+              "month",
+              "year"
+            ]
+          },
+          "success_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "cancel_url": {
+            "type": "string",
+            "format": "uri"
           }
         },
         "required": [
           "operation_id",
-          "team_id"
+          "team_id",
+          "seats",
+          "interval",
+          "success_url",
+          "cancel_url"
         ]
       },
       "TeamMutationRequest": {
@@ -32034,7 +32058,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Authenticated current state or exact committed operation result.",
+            "description": "Checkout URL; Team creation is pending payment.",
             "content": {
               "application/json": {
                 "schema": {
@@ -32045,7 +32069,17 @@
                   ],
                   "properties": {
                     "data": {
-                      "$ref": "#/components/schemas/TeamTeam"
+                      "type": "object",
+                      "required": [
+                        "url"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "url": {
+                          "type": "string",
+                          "format": "uri"
+                        }
+                      }
                     }
                   }
                 }
@@ -32069,9 +32103,12 @@
           },
           "412": {
             "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
           }
         },
-        "description": "Current shared team authority. Roles do not grant resource use or decryption. Mutations require browser CSRF or scoped bearer authentication and exact operation IDs; generation conflicts require refresh.",
+        "description": "Reserve a Team identifier and create Stripe Checkout for purchased seats. No Team, owner membership or billing workspace exists until authoritative successful payment. The owner consumes one purchased seat. Retry the identical operation; no success-page fulfillment.",
         "requestBody": {
           "required": true,
           "content": {
@@ -32081,7 +32118,19 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "description": "Must equal operation_id."
+          }
+        ]
       }
     },
     "/v1/teams/{team_id}": {

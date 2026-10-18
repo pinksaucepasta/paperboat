@@ -185,10 +185,16 @@ func TestTask44ConnectedCollaboration(t *testing.T) {
 			}
 		}
 	}
-	var state teams.Team
-	call(owner, "POST", "/v1/teams", teams.CreateRequest{OperationID: "create", TeamID: teamID}, &state, 200)
-	var other teams.Team
-	call(outsider, "POST", "/v1/teams", teams.CreateRequest{OperationID: "create-other", TeamID: otherTeam}, &other, 200)
+	// This collaboration fixture begins after paid Team materialization;
+	// Checkout/payment ownership is exercised by the billing integration owner.
+	state, err := authority.Create(ctx, owner.id, teams.CreateRequest{OperationID: "create", TeamID: teamID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := authority.Create(ctx, outsider.id, teams.CreateRequest{OperationID: "create-other", TeamID: otherTeam})
+	if err != nil {
+		t.Fatal(err)
+	}
 	var invite teams.Invitation
 	call(owner, "POST", "/v1/teams/"+teamID+"/invitations", teams.InviteRequest{OperationID: "invite", ExpectedGeneration: state.Generation, AccountID: member.id}, &invite, 200)
 	call(member, "POST", "/v1/team-invitations/"+invite.InvitationID+"/accept", teams.AcceptRequest{OperationID: "accept"}, &state, 200)

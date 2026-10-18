@@ -15,7 +15,6 @@ type teamAPI interface {
 	GrantTerminalSession(context.Context, string, string, teams.TerminalSessionGrantRequest) (teams.Team, error)
 	List(context.Context, string) ([]teams.Team, error)
 	Get(context.Context, string, string) (teams.Team, error)
-	Create(context.Context, string, teams.CreateRequest) (teams.Team, error)
 	Mutate(context.Context, string, string, teams.MutationRequest) (teams.Team, error)
 	Invite(context.Context, string, string, teams.InviteRequest) (teams.Invitation, error)
 	Accept(context.Context, string, string, teams.AcceptRequest) (teams.Team, error)
@@ -51,12 +50,6 @@ func registerTeamRoutes(mux *http.ServeMux, service teamAPI, read, write func(ht
 				out, err = service.Activity(r.Context(), account, team, r.URL.Query().Get("cursor"), limit)
 			case "get":
 				out, err = service.Get(r.Context(), account, team)
-			case "create":
-				var in teams.CreateRequest
-				if !decodeStrictJSON(w, r, &in) {
-					return
-				}
-				out, err = service.Create(r.Context(), account, in)
 			case "mutate":
 				var in teams.MutationRequest
 				if !decodeStrictJSON(w, r, &in) {
@@ -152,7 +145,6 @@ func registerTeamRoutes(mux *http.ServeMux, service teamAPI, read, write func(ht
 	handle("POST /v1/teams/{team_id}/machine-grants", "machine_grant", true)
 	handle("POST /v1/teams/{team_id}/terminal-session-grants", "terminal_session_grant", true)
 	handle("GET /v1/teams", "list", false)
-	handle("POST /v1/teams", "create", true)
 	handle("GET /v1/teams/{team_id}/activity", "activity", false)
 	handle("GET /v1/teams/{team_id}", "get", false)
 	handle("POST /v1/teams/{team_id}/actions", "mutate", true)

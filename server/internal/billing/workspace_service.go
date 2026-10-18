@@ -657,8 +657,7 @@ func (s *WorkspaceService) HandleWebhook(ctx context.Context, event StripeWebhoo
 	if s.stripe == nil {
 		return false, ErrStripeUnavailable
 	}
-	subscriptionID := event.SubscriptionID()
-	if event.ID == "" || subscriptionID == "" {
+	if event.ID == "" {
 		return false, nil
 	}
 	var already bool
@@ -666,6 +665,13 @@ func (s *WorkspaceService) HandleWebhook(ctx context.Context, event StripeWebhoo
 		return false, err
 	}
 	if already {
+		return false, nil
+	}
+	if handled, processed, err := s.handleTeamCreationWebhook(ctx, event); handled || err != nil {
+		return processed, err
+	}
+	subscriptionID := event.SubscriptionID()
+	if subscriptionID == "" {
 		return false, nil
 	}
 	return s.reconcileSubscription(ctx, subscriptionID, &event)

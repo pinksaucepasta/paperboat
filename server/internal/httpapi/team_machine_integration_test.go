@@ -15,6 +15,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat-server/internal/audit"
 	"github.com/pinksaucepasta/paperboat-server/internal/auth"
+	"github.com/pinksaucepasta/paperboat-server/internal/billing"
 	"github.com/pinksaucepasta/paperboat-server/internal/config"
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
 	"github.com/pinksaucepasta/paperboat-server/internal/teams"
@@ -45,7 +46,8 @@ func TestTeamMachineAuthenticatedHTTPLifecycle(t *testing.T) {
 	authService := auth.NewService(store, writer, testauth.FakeWorkOSVerifier{}, []string{"test-session-key"}, true, "https://login.example.test")
 	cliAuth := auth.NewDeviceService(store, writer, cfg.CLIAuth, []string{"test-cliAuth-hash-key"})
 	cliAuth.ConfigureAuthorizationEncryptionKey("test-device-recovery-key")
-	router := authTestOriginHandler{next: NewRouter(Options{Config: cfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Auth: authService, DeviceAuth: cliAuth, Teams: teams.NewService(store), Machines: usermachines.New(store, writer, usermachines.Policy{}, nil)})}
+	teamService := teams.NewService(store)
+	router := authTestOriginHandler{next: NewRouter(Options{Config: cfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Auth: authService, DeviceAuth: cliAuth, Teams: teamService, WorkspaceBilling: billing.NewWorkspaceService(store, nil, ""), Machines: usermachines.New(store, writer, usermachines.Policy{}, nil)})}
 	suffix := fmt.Sprint(time.Now().UnixNano())
 	ownerEmail, memberEmail := "team-owner-"+suffix+"@example.test", "team-member-"+suffix+"@example.test"
 	ownerCookies := loginCookies(t, router, "workos_owner_"+suffix+":"+ownerEmail+":Owner")
@@ -96,7 +98,12 @@ func TestTeamMachineAuthenticatedHTTPLifecycle(t *testing.T) {
 	}
 	var team teams.Team
 	call("", http.MethodPost, "/v1/teams", teams.CreateRequest{OperationID: "create", TeamID: teamID}, 401, nil)
-	call(ownerToken, http.MethodPost, "/v1/teams", teams.CreateRequest{OperationID: "create", TeamID: teamID}, 200, &team)
+	// Paid creation is covered by the billing owner; this fixture starts at
+	// materialized Team state to exercise exact machine/grant HTTP authority.
+	team, err = teamService.Create(context.Background(), owner, teams.CreateRequest{OperationID: "create", TeamID: teamID})
+	if err != nil {
+		t.Fatal(err)
+	}
 	// Shared machine grants require an active paid team, independently of membership.
 	if _, err := store.SQL().ExecContext(context.Background(), `INSERT INTO paperboat.billing_workspaces(id,team_id,state,product_code,quantity,period_start,period_end) VALUES($1,$2,'active','team-pro',2,now()-interval '1 hour',now()+interval '1 hour')`, "team-http-billing-"+suffix, teamID); err != nil {
 		t.Fatal(err)

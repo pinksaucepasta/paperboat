@@ -13,56 +13,41 @@ import (
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat-server/internal/auth"
+	"github.com/pinksaucepasta/paperboat-server/internal/billing"
 	"github.com/pinksaucepasta/paperboat-server/internal/teams"
 )
 
-type teamHTTPStub struct {
-	teamAPI
-	calls   int
-	account string
-	request teams.CreateRequest
-}
-
-func (s *teamHTTPStub) Create(_ context.Context, account string, in teams.CreateRequest) (teams.Team, error) {
-	s.calls++
-	s.account = account
-	s.request = in
-	return teams.Team{TeamID: in.TeamID, OwnerAccount: account}, nil
-}
 func TestTeamHTTPPrincipalAndStrictBody(t *testing.T) {
-	s := &teamHTTPStub{}
-	mux := http.NewServeMux()
-	pass := func(h http.Handler) http.Handler { return h }
-	registerTeamRoutes(mux, s, pass, pass)
+	service := billing.NewWorkspaceService(nil, nil, "")
+	handler := paidTeamCreation(service, []string{"https://console.example.test"})
+	valid := `{"operation_id":"op_a","team_id":"team-a","seats":1,"interval":"month","success_url":"https://console.example.test/success","cancel_url":"https://console.example.test/cancel"}`
 	for _, tc := range []struct {
-		name, body    string
-		authenticated bool
-		status        int
+		name, body, key string
+		authenticated   bool
+		status          int
 	}{
-		{"anonymous", `{"operation_id":"op_a","team_id":"team_a"}`, false, 401},
-		{"actor substitution", `{"operation_id":"op_a","team_id":"team_a","account_id":"victim"}`, true, 400},
-		{"bounded body", `{"operation_id":"op_a","team_id":"` + strings.Repeat("a", 17<<10) + `"}`, true, 400},
-		{"authenticated create", `{"operation_id":"op_a","team_id":"team_a"}`, true, 200},
+		{"anonymous", valid, "op_a", false, 401},
+		{"actor substitution", strings.TrimSuffix(valid, "}") + `,"account_id":"victim"}`, "op_a", true, 400},
+		{"bounded body", `{"operation_id":"op_a","team_id":"` + strings.Repeat("a", 17<<10) + `"}`, "op_a", true, 400},
+		{"free creation rejected", `{"operation_id":"op_a","team_id":"team-a"}`, "op_a", true, 400},
+		{"missing idempotency header", valid, "", true, 400},
+		{"different idempotency header", valid, "op_b", true, 400},
+		{"external return origin", strings.ReplaceAll(valid, "console.example.test", "attacker.example.test"), "op_a", true, 400},
+		{"valid purchase reaches billing provider guard", valid, "op_a", true, 503},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := httptest.NewRequest(http.MethodPost, "/v1/teams", strings.NewReader(tc.body))
 			r.Header.Set("Content-Type", "application/json")
+			r.Header.Set("Idempotency-Key", tc.key)
 			if tc.authenticated {
 				r = r.WithContext(context.WithValue(r.Context(), authContextKey{}, principal{User: auth.User{ID: "current_actor"}}))
 			}
 			w := httptest.NewRecorder()
-			before := s.calls
-			mux.ServeHTTP(w, r)
+			handler.ServeHTTP(w, r)
 			if w.Code != tc.status {
 				t.Fatalf("status=%d want=%d", w.Code, tc.status)
 			}
-			if tc.status != 200 && s.calls != before {
-				t.Fatal("invalid request reached service")
-			}
 		})
-	}
-	if s.calls != 1 || s.account != "current_actor" || s.request.TeamID != "team_a" {
-		t.Fatal("authenticated principal or exact resource lost")
 	}
 }
 

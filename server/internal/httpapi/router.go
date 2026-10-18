@@ -639,6 +639,7 @@ func NewRouter(opts Options) http.Handler {
 			mux.HandleFunc("POST /v1/machine-peer-network/config", machinePeerNetworkConfig(opts.PeerNetwork, opts.RuntimeIdentity))
 		}
 		if opts.WorkspaceBilling != nil {
+			mux.Handle("POST /v1/teams", requireAnyAuth(opts.Auth, opts.DeviceAuth, requireScope("machines:connect", requireCSRF(opts.Auth, paidTeamCreation(opts.WorkspaceBilling, opts.Config.HTTP.AllowedOrigins)))))
 			mux.Handle("GET /v1/billing/workspaces/personal", requireAnyAuth(opts.Auth, opts.DeviceAuth, requireScope("account:read", workspaceBillingOverview(opts.WorkspaceBilling))))
 			mux.Handle("GET /v1/billing/workspaces/personal/products", requireAnyAuth(opts.Auth, opts.DeviceAuth, requireScope("account:read", workspaceBillingProducts(opts.WorkspaceBilling))))
 			mux.Handle("POST /v1/billing/workspaces/personal/checkout", requireAuth(opts.Auth, requireCSRF(opts.Auth, workspaceBillingMutation(opts.WorkspaceBilling, opts.Config.HTTP.AllowedOrigins, false))))
