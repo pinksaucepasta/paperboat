@@ -125,11 +125,13 @@ export function TeamManage({ workspace }: { workspace: Workspace }) {
           </p>
         </div>
         {admin && (
-          <Button size="lg" onClick={() => setInviting(true)}>
+          <Button size="lg" disabled={team.data.suspended} onClick={() => setInviting(true)}>
             Invite members
           </Button>
         )}
       </header>
+
+      {team.data.suspended && <SuspendedNotice owner={actor === "owner"} />}
 
       <section className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center gap-2">
@@ -161,6 +163,24 @@ export function TeamManage({ workspace }: { workspace: Workspace }) {
         open={inviting}
         onOpenChange={setInviting}
       />
+    </div>
+  )
+}
+
+/** A suspended team keeps its members but nothing else works (409 team_suspended on changes). */
+function SuspendedNotice({ owner }: { owner: boolean }) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg bg-destructive/5 px-4 py-3 text-sm dark:bg-destructive/10">
+      <span className="text-destructive">
+        This team is suspended. Members, machines and sharing are paused until it is restored.
+      </span>
+      {owner ? (
+        <Button nativeButton={false} render={<Link href="/billing" />}>
+          Restore billing
+        </Button>
+      ) : (
+        <span className="text-muted-foreground">Ask the team owner to restore it.</span>
+      )}
     </div>
   )
 }
@@ -377,9 +397,9 @@ function InvitationsTable({
       <colgroup>
         <col />
         <col className="w-28" />
-        <col className="hidden w-48 md:table-column" />
-        <col className="hidden w-32 md:table-column" />
-        <col className="w-44" />
+        <col className="hidden w-28 md:table-column" />
+        <col className="hidden w-28 md:table-column" />
+        <col className="w-40" />
       </colgroup>
       <thead className="border-b border-divider text-left text-xs text-muted-foreground">
         <tr className="[&>th]:h-9 [&>th]:px-3 [&>th]:font-normal">

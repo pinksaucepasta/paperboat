@@ -6,7 +6,8 @@ import type { components } from "@/lib/api-schema"
 
 type Schemas = components["schemas"]
 export type TeamMember = Schemas["TeamMember"]
-export type Team = Schemas["TeamTeam"]
+/** The server sends `suspended` but OpenAPI omits it (NOTES.md). */
+export type Team = Schemas["TeamTeam"] & { suspended?: boolean }
 export type TeamInvitation = Schemas["TeamInvitationSummary"]
 export type TeamAction = "role" | "remove" | "leave" | "transfer" | "delete" | "rename"
 export type TeamRole = "owner" | "admin" | "member"
