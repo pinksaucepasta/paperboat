@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"strconv"
@@ -158,7 +159,7 @@ func TestConfigCredentialIsBoundReplaySafeAndRevokedWithAssignment(t *testing.T)
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_environments (id,workspace_id,owner_user_id) VALUES ($1,$2,$3)`, environmentID, "workspace_"+suffix, user); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,alias,description,platform,architecture,workspace_root) VALUES ($1,$2,$3,'machine','Machine','linux','arm64','/workspace')`, "cfg_credential_machine_"+suffix, user, environmentID); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,alias,description,platform,architecture,workspace_root,seat_state) VALUES ($1,$2,$3,'machine','Machine','linux','arm64','/workspace','occupied')`, "cfg_credential_machine_"+suffix, user, environmentID); err != nil {
 		t.Fatal(err)
 	}
 	privateKey := ed25519.NewKeyFromSeed([]byte(strings.Repeat("c", ed25519.SeedSize)))
@@ -234,19 +235,21 @@ func TestConfigCredentialIsBoundReplaySafeAndRevokedWithAssignment(t *testing.T)
 	if err != nil || !containsString(document.JTIs, claims.JTI) {
 		t.Fatalf("revocation document = %#v, %v", document, err)
 	}
-	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.users SET role='admin' WHERE id=$1`, user); err != nil {
+	operatorDigest := sha256.Sum256([]byte(suffix))
+	operatorID := "opr_" + hex.EncodeToString(operatorDigest[:16])
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.operator_accounts (id,email,password_hash,role) VALUES ($1,$2,'unused-test-password-hash','admin')`, operatorID, strings.ToLower(user)+"@example.test"); err != nil {
 		t.Fatal(err)
 	}
-	if err := edge.RevokeSigningKey(ctx, user, "revoke-signing-key-01", "config-test", "compromise", now); err != nil {
+	if err := edge.RevokeSigningKey(ctx, operatorID, "revoke-signing-key-01", "config-test", "compromise", now); err != nil {
 		t.Fatal(err)
 	}
-	if err := edge.RevokeSigningKey(ctx, user, "revoke-signing-key-01", "config-test", "compromise", now.Add(time.Minute)); err != nil {
+	if err := edge.RevokeSigningKey(ctx, operatorID, "revoke-signing-key-01", "config-test", "compromise", now.Add(time.Minute)); err != nil {
 		t.Fatalf("exact signing-key revocation replay = %v", err)
 	}
-	if err := edge.RevokeSigningKey(ctx, user, "revoke-signing-key-01", "other-key", "compromise", now); !errors.Is(err, ErrUsageOperationConflict) {
+	if err := edge.RevokeSigningKey(ctx, operatorID, "revoke-signing-key-01", "other-key", "compromise", now); !errors.Is(err, ErrUsageOperationConflict) {
 		t.Fatalf("signing-key revocation conflict = %v", err)
 	}
-	if err := edge.RevokeSigningKey(ctx, user, "revoke-signing-key-02", "config-test", "confirmed compromise", now.Add(time.Hour)); err != nil {
+	if err := edge.RevokeSigningKey(ctx, operatorID, "revoke-signing-key-02", "config-test", "confirmed compromise", now.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	var persistedRevokedAt time.Time
@@ -257,10 +260,10 @@ func TestConfigCredentialIsBoundReplaySafeAndRevokedWithAssignment(t *testing.T)
 	if err != nil || !containsString(document.KeyIDs, "config-test") {
 		t.Fatalf("signing key revocation document = %#v, %v", document, err)
 	}
-	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.users SET role='support' WHERE id=$1`, user); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.operator_accounts SET role='support' WHERE id=$1`, operatorID); err != nil {
 		t.Fatal(err)
 	}
-	if err := edge.RevokeSigningKey(ctx, user, "revoke-signing-key-01", "config-test", "compromise", now); !errors.Is(err, ErrAdminMutationForbidden) {
+	if err := edge.RevokeSigningKey(ctx, operatorID, "revoke-signing-key-01", "config-test", "compromise", now); !errors.Is(err, ErrAdminMutationForbidden) {
 		t.Fatalf("support replay error = %v, want ErrAdminMutationForbidden", err)
 	}
 }
@@ -479,7 +482,7 @@ func TestConfigUpdatePolicyPreservesBaselineIdentity(t *testing.T) {
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_environments (id,workspace_id,owner_user_id) VALUES ($1,$2,$3)`, environmentID, "workspace_"+suffix, user); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,alias,description,platform,architecture,workspace_root) VALUES ($1,$2,$3,'machine','Machine','linux','arm64','/workspace')`, "cfg_credential_machine_"+suffix, user, environmentID); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,alias,description,platform,architecture,workspace_root,seat_state) VALUES ($1,$2,$3,'machine','Machine','linux','arm64','/workspace','occupied')`, "cfg_credential_machine_"+suffix, user, environmentID); err != nil {
 		t.Fatal(err)
 	}
 	privateKey := ed25519.NewKeyFromSeed([]byte(strings.Repeat("c", ed25519.SeedSize)))

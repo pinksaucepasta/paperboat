@@ -143,8 +143,8 @@ func TestConfigSyncAccountSuspensionRevokesAndPreventsAuthority(t *testing.T) {
 		{`INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root) VALUES ($1,$2,$3,'Machine','linux','unknown','/workspace')`, []any{"machine_" + suffix, user, environmentID}},
 		{`INSERT INTO paperboat.control_helpers (id,environment_id,state,generation) VALUES ($1,$2,'active',1)`, []any{helperID, environmentID}},
 		{`INSERT INTO paperboat.control_config_assignments (id,machine_id,environment_id,repository_id,mode,consent_state,warning_revision,accepted_at,configuration_revision) VALUES ($1,$2,$3,$4,'bidirectional','accepted','warning-1',now(),repeat('a',64))`, []any{assignmentID, "machine_" + suffix, environmentID, repositoryID}},
-		{`INSERT INTO paperboat.control_config_credentials (jti_hash,jti,operation_key,request_hash,environment_id,machine_id,assignment_id,warning_revision,credential_ciphertext,expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, []any{[]byte("account-jti-hash-" + suffix), "account-jti-" + suffix, "account-credential-" + suffix, []byte("request"), environmentID, "machine_" + suffix, assignmentID, []byte("ciphertext"), now.Add(time.Hour)}},
-		{`INSERT INTO paperboat.control_config_repository_access_operations (operation_id,request_hash,repository_id,assignment_id,environment_id,machine_id,installation_generation,warning_revision,state,access_ciphertext,expires_at) VALUES ($1,$2,$3,$4,$5,$6,1,'issued',$7,$8)`, []any{"account-access-" + suffix, []byte("request"), repositoryID, assignmentID, environmentID, "machine_" + suffix, []byte("ciphertext"), now.Add(time.Hour)}},
+		{`INSERT INTO paperboat.control_config_credentials (jti_hash,jti,operation_key,request_hash,environment_id,machine_id,assignment_id,warning_revision,credential_ciphertext,expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, []any{[]byte("account-jti-hash-" + suffix), "account-jti-" + suffix, "account-credential-" + suffix, []byte("request"), environmentID, "machine_" + suffix, assignmentID, "warning-1", []byte("ciphertext"), now.Add(time.Hour)}},
+		{`INSERT INTO paperboat.control_config_repository_access_operations (operation_id,request_hash,repository_id,assignment_id,environment_id,machine_id,installation_generation,warning_revision,state,access_ciphertext,expires_at) VALUES ($1,$2,$3,$4,$5,$6,1,'warning-1','issued',$7,$8)`, []any{"account-access-" + suffix, []byte("request"), repositoryID, assignmentID, environmentID, "machine_" + suffix, []byte("ciphertext"), now.Add(time.Hour)}},
 	}
 	for _, statement := range statements {
 		if _, err := store.SQL().ExecContext(ctx, statement.query, statement.args...); err != nil {
@@ -208,5 +208,67 @@ func TestConfigRepositoryLeaseRejectsUnsafeRequests(t *testing.T) {
 		if _, err := service.Acquire(context.Background(), "operation", holder, ttl); !errors.Is(err, ErrConfigLeaseInvalid) {
 			t.Fatalf("ttl %s error = %v", ttl, err)
 		}
+	}
+}
+
+func TestConfigLeaseUsesDistinctPushRepository(t *testing.T) {
+	store := openControlPlaneTestDB(t)
+	ctx := context.Background()
+	suffix := strings.ToLower(t.Name())
+	user, environment := "user_"+suffix, "env_"+suffix
+	pull, push := "pull_"+suffix, "push_"+suffix
+	machine, assignment := "machine_"+suffix, "assignment_"+suffix
+	t.Cleanup(func() {
+		cleanupConfigLeaseFixture(store, user, push, environment)
+	})
+	statements := []struct {
+		query string
+		args  []any
+	}{
+		{`INSERT INTO paperboat.users (id,workos_subject,primary_email,status) VALUES ($1,$1,$2,'active')`, []any{user, user + "@example.test"}},
+		{`INSERT INTO paperboat.control_config_repositories (id,owner_user_id,provider,external_ref,display_name) VALUES ($1,$3,'git',$1,'Pull'),($2,$3,'git',$2,'Push')`, []any{pull, push, user}},
+		{`INSERT INTO paperboat.control_environments (id,workspace_id,owner_user_id) VALUES ($1,$1,$2)`, []any{environment, user}},
+		{`INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root) VALUES ($1,$2,$3,'Machine','linux','unknown','/workspace')`, []any{machine, user, environment}},
+		{`INSERT INTO paperboat.control_config_assignments (id,machine_id,environment_id,repository_id,push_repository_id,mode,consent_state,warning_revision,accepted_at,configuration_revision) VALUES ($1,$2,$3,$4,$5,'bidirectional','accepted','warning',now(),repeat('a',64))`, []any{assignment, machine, environment, pull, push}},
+	}
+	for _, statement := range statements {
+		if _, err := store.SQL().ExecContext(ctx, statement.query, statement.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	service := NewConfigLeaseService(store, nil)
+	service.ConfigureMode("leased_writes")
+	holder := ConfigLeaseHolder{RepositoryID: push, AssignmentID: assignment, EnvironmentID: environment, MachineID: machine, InstallationGeneration: 1, BaseRemoteRevision: "push-head"}
+	wrong := holder
+	wrong.RepositoryID = pull
+	if _, err := service.Acquire(ctx, "pull-lease-"+suffix, wrong, 30*time.Second); !errors.Is(err, ErrConfigLeaseInvalid) {
+		t.Fatalf("pull repository acquired publication authority: %v", err)
+	}
+	lease, err := service.Acquire(ctx, "push-lease-"+suffix, holder, 30*time.Second)
+	if err != nil || lease.RepositoryID != push {
+		t.Fatalf("push lease failed: %v", err)
+	}
+	if _, err := service.Renew(ctx, "push-renew-"+suffix, holder, lease.LeaseID, lease.FencingToken, time.Minute); err != nil {
+		t.Fatalf("push renewal failed: %v", err)
+	}
+	if err := service.Release(ctx, "push-release-"+suffix, holder, lease.LeaseID, lease.FencingToken); err != nil {
+		t.Fatalf("push release failed: %v", err)
+	}
+	lease, err = service.Acquire(ctx, "push-reacquire-"+suffix, holder, 30*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.control_config_repositories SET state='disconnected',disconnected_at=now() WHERE id=$1`, push); err != nil {
+		t.Fatal(err)
+	}
+	var revoked bool
+	if err := store.SQL().QueryRowContext(ctx, `SELECT lease_id IS NULL AND revoked_at IS NOT NULL FROM paperboat.control_config_repository_lease_authority WHERE repository_id=$1`, push).Scan(&revoked); err != nil || !revoked {
+		t.Fatalf("push disconnect did not revoke the held lease: revoked=%t error=%v", revoked, err)
+	}
+	if _, err := service.Renew(ctx, "disconnected-renew-"+suffix, holder, lease.LeaseID, lease.FencingToken, time.Minute); !errors.Is(err, ErrConfigLeaseLost) {
+		t.Fatalf("disconnected push renewed authority: %v", err)
+	}
+	if _, err := service.Acquire(ctx, "disconnected-push-"+suffix, holder, 30*time.Second); !errors.Is(err, ErrConfigLeaseInvalid) {
+		t.Fatalf("disconnected push acquired authority: %v", err)
 	}
 }

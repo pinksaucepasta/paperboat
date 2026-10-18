@@ -148,20 +148,13 @@ func (s *ConfigLeaseService) Acquire(ctx context.Context, operationID string, ho
 		if !errors.Is(replayErr, sql.ErrNoRows) {
 			return replayErr
 		}
-		assignment, err := tx.Queries().GetEligibleControlConfigAssignment(ctx, dbsqlc.GetEligibleControlConfigAssignmentParams{
-			EnvironmentID: holder.EnvironmentID, MachineID: holder.MachineID, InstallationGeneration: holder.InstallationGeneration,
-		})
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
+		if err := validateEligibleLeaseHolder(ctx, tx, holder); err != nil {
+			if errors.Is(err, ErrConfigLeaseLost) {
 				return ErrConfigLeaseInvalid
 			}
 			return err
 		}
-		if assignment.ID != holder.AssignmentID || assignment.Mode == ConfigModePullOnly ||
-			!assignment.RepositoryID.Valid || assignment.RepositoryID.String != holder.RepositoryID {
-			return ErrConfigLeaseInvalid
-		}
-		if _, err = tx.Queries().EnsureControlConfigLeaseAuthority(ctx, holder.RepositoryID); err != nil {
+		if _, err := tx.Queries().EnsureControlConfigLeaseAuthority(ctx, holder.RepositoryID); err != nil {
 			return err
 		}
 		leaseID, err := randomHex("lease")
@@ -292,10 +285,18 @@ func validateEligibleLeaseHolder(ctx context.Context, tx *db.Tx, holder ConfigLe
 		}
 		return err
 	}
-	if assignment.ID != holder.AssignmentID || !assignment.RepositoryID.Valid || assignment.RepositoryID.String != holder.RepositoryID {
+	if assignment.ID != holder.AssignmentID || pushRepositoryID(assignment) != holder.RepositoryID {
 		return ErrConfigLeaseLost
 	}
-	return nil
+	var repositoryID string
+	err = tx.QueryRow(ctx, `SELECT r.id FROM control_config_repositories r
+ JOIN control_environments e ON e.owner_user_id=r.owner_user_id
+ WHERE r.id=$1 AND e.id=$2 AND r.state='active' AND r.disconnected_at IS NULL
+ FOR UPDATE OF r`, holder.RepositoryID, holder.EnvironmentID).Scan(&repositoryID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrConfigLeaseLost
+	}
+	return err
 }
 
 func (s *ConfigLeaseService) recordLeaseOperation(ctx context.Context, tx *db.Tx, operationID, operationType string, requestHash []byte, holder ConfigLeaseHolder, lease ConfigLease, state string) error {

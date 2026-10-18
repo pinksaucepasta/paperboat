@@ -52,7 +52,11 @@ func TestConfigCustomRepositoryRulesAccessAndRevocation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assignment, err := assignments.ConfigureProjection(ctx, user, identity.MachineID, repository.ID, repository.ID, ConfigModeBidirectional, false, "warning-7", 0, []ConfigPathRule{{Source: "machine", ID: "settings", RepositoryPath: "editor/settings.json", LocalPath: "/home/owner/settings.json", Kind: "file"}}, []ConfigRepositoryBinding{{RepositoryID: repository.ID, URL: "ssh://git@lan/config-test.git"}}, testConfigurationRevision)
+	pushRepository, err := assignments.ConnectRepository(ctx, user, "git", "/srv/publish-test.git", "Publish")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assignment, err := assignments.ConfigureProjection(ctx, user, identity.MachineID, repository.ID, pushRepository.ID, ConfigModeBidirectional, false, "warning-7", 0, []ConfigPathRule{{Source: "machine", ID: "settings", RepositoryPath: "editor/settings.json", LocalPath: "/home/owner/settings.json", Kind: "file"}}, []ConfigRepositoryBinding{{RepositoryID: repository.ID, URL: "ssh://git@lan/config-test.git"}, {RepositoryID: pushRepository.ID, URL: "ssh://git@lan/publish-test.git"}}, testConfigurationRevision)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +103,7 @@ func TestConfigCustomRepositoryRulesAccessAndRevocation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if granted.Transport != "ssh" || granted.CloneURL != "ssh://git@lan/config-test.git" || granted.RepositoryID != repository.ID || granted.Password != "" || granted.Username != "" || granted.Capability != "repository_contents_write" {
+	if granted.Transport != "ssh" || granted.CloneURL != "ssh://git@lan/publish-test.git" || granted.RepositoryID != pushRepository.ID || granted.Password != "" || granted.Username != "" || granted.Capability != "repository_contents_write" {
 		t.Fatalf("custom alias grant = %+v", granted)
 	}
 	replayed, err := issue("custom-access", "push")
@@ -108,15 +112,38 @@ func TestConfigCustomRepositoryRulesAccessAndRevocation(t *testing.T) {
 	}
 	runtime := NewConfigRuntimeService(store, leases, config.ConfigSync{Mode: "leased_writes"})
 	descriptor, err := runtime.Get(ctx, identity.Credential, credential.Credential, proofFor("custom-runtime", "/v1/config/runtime"), body, "POST", "/v1/config/runtime")
-	if err != nil || len(descriptor.PathRules) != 1 || len(descriptor.RepositoryBindings) != 1 || descriptor.AssignmentVersion != assignment.Version {
+	if err != nil || len(descriptor.PathRules) != 1 || len(descriptor.RepositoryBindings) != 2 || descriptor.AssignmentVersion != assignment.Version {
 		t.Fatalf("runtime machine rules = %+v %v", descriptor, err)
 	}
-	holder := ConfigLeaseHolder{RepositoryID: repository.ID, AssignmentID: assignment.ID, EnvironmentID: environmentID, MachineID: identity.MachineID, InstallationGeneration: 1, BaseRemoteRevision: "head"}
+	conflictRevision := strings.Repeat("b", 64)
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_config_sync_statuses
+ (environment_id,repository_id,assignment_id,machine_id,installation_generation,warning_revision,policy_revision,sync_revision,state,remote_revision,pending_clean_path_count,conflicts,machine_updated_at,observed_at)
+ VALUES ($1,$2,$3,$4,1,'warning-7','policy',1,'conflict','head',0,
+ jsonb_build_array(jsonb_build_object('path','editor/settings.json','reason','concurrent_update','revision',$5::text)),$6,$6)`, environmentID, repository.ID, assignment.ID, identity.MachineID, conflictRevision, now); err != nil {
+		t.Fatal(err)
+	}
+	conflicts := NewConfigConflictService(store, leases, nil)
+	resolution, err := conflicts.Request(ctx, user, environmentID, assignment.Version, ConfigConflictResolution{Path: "editor/settings.json", ConflictRevision: conflictRevision, ExpectedRemoteRevision: "head", Scope: "path", Action: "keep_remote"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending, err := conflicts.Pending(ctx, identity.Credential, credential.Credential, proofFor("distinct-pending", "/v1/config/conflict-resolutions"), body, "POST", "/v1/config/conflict-resolutions")
+	if err != nil || len(pending) != 1 || pending[0].ID != resolution.ID {
+		t.Fatalf("distinct-target conflict was not delivered: count=%d error=%v", len(pending), err)
+	}
+	if err := conflicts.Acknowledge(ctx, identity.Credential, credential.Credential, proofFor("distinct-ack", "/v1/config/conflict-resolutions/ack"), body, "POST", "/v1/config/conflict-resolutions/ack", resolution.ID, "landed"); err != nil {
+		t.Fatalf("distinct-target resolution acknowledgement: %v", err)
+	}
+	pending, err = conflicts.Pending(ctx, identity.Credential, credential.Credential, proofFor("distinct-pending-after-ack", "/v1/config/conflict-resolutions"), body, "POST", "/v1/config/conflict-resolutions")
+	if err != nil || len(pending) != 0 {
+		t.Fatalf("acknowledged resolution remained pending: count=%d error=%v", len(pending), err)
+	}
+	holder := ConfigLeaseHolder{RepositoryID: pushRepository.ID, AssignmentID: assignment.ID, EnvironmentID: environmentID, MachineID: identity.MachineID, InstallationGeneration: 1, BaseRemoteRevision: "head"}
 	lease, err := leases.Acquire(ctx, "custom-lease", holder, 30*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
-	replacement, err := assignments.ConfigureProjection(ctx, user, identity.MachineID, repository.ID, repository.ID, ConfigModeBidirectional, false, "warning-7", assignment.Version, []ConfigPathRule{{Source: "machine", ID: "settings", RepositoryPath: "editor/settings.json", LocalPath: "/home/owner/renamed.json", Kind: "file"}}, nil, testConfigurationRevision)
+	replacement, err := assignments.ConfigureProjection(ctx, user, identity.MachineID, repository.ID, pushRepository.ID, ConfigModeBidirectional, false, "warning-7", assignment.Version, []ConfigPathRule{{Source: "machine", ID: "settings", RepositoryPath: "editor/settings.json", LocalPath: "/home/owner/renamed.json", Kind: "file"}}, nil, testConfigurationRevision)
 	if err != nil || replacement.ID == assignment.ID || replacement.Version != assignment.Version+1 || replacement.ApprovedPullRevision.Valid {
 		t.Fatalf("mapping change failed fence: %+v %v", replacement, err)
 	}
@@ -126,14 +153,14 @@ func TestConfigCustomRepositoryRulesAccessAndRevocation(t *testing.T) {
 	if _, err = leases.Renew(ctx, "old-custom-lease", holder, lease.LeaseID, lease.FencingToken, 30*time.Second); !errors.Is(err, ErrConfigLeaseLost) {
 		t.Fatalf("old lease retained authority: %v", err)
 	}
-	if _, err = assignments.ConfigureProjection(ctx, user, identity.MachineID, repository.ID, repository.ID, ConfigModeBidirectional, false, "warning-7", assignment.Version, nil, nil, testConfigurationRevision); !errors.Is(err, ErrAssignmentConflict) {
+	if _, err = assignments.ConfigureProjection(ctx, user, identity.MachineID, repository.ID, pushRepository.ID, ConfigModeBidirectional, false, "warning-7", assignment.Version, nil, nil, testConfigurationRevision); !errors.Is(err, ErrAssignmentConflict) {
 		t.Fatalf("stale version accepted: %v", err)
 	}
 	replacement, err = assignments.AcceptConsent(ctx, user, identity.MachineID, "warning-7", replacement.Version)
 	if err != nil {
 		t.Fatal(err)
 	}
-	empty, err := assignments.ConfigureProjection(ctx, user, identity.MachineID, repository.ID, repository.ID, ConfigModeBidirectional, false, "warning-7", replacement.Version, nil, nil, testConfigurationRevision)
+	empty, err := assignments.ConfigureProjection(ctx, user, identity.MachineID, repository.ID, pushRepository.ID, ConfigModeBidirectional, false, "warning-7", replacement.Version, nil, nil, testConfigurationRevision)
 	if err != nil || string(empty.PathRules) != "[]" || string(empty.RepositoryBindings) != "[]" {
 		t.Fatalf("empty rules must remain explicit no-op: %+v %v", empty, err)
 	}
@@ -142,7 +169,7 @@ func TestConfigCustomRepositoryRulesAccessAndRevocation(t *testing.T) {
 		t.Fatalf("accept empty projection revision: %v", err)
 	}
 
-	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.control_config_repositories SET provider='github', external_ref=$2, display_name='owner/config-test', provider_account_id=$3, external_repository_id='123456', clone_url='https://github.com/owner/config-test.git', publish_url='https://github.com/owner/config-test.git', default_branch='main', authorization_ref=$4, credential_capability='provider_user_repository', version=version+1 WHERE id=$1`, repository.ID, "provider-access-"+suffix, user, "github-user:"+user); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.control_config_repositories SET provider='github', external_ref=$2, display_name='owner/config-test', provider_account_id=$3, external_repository_id='123456', clone_url='https://github.com/owner/config-test.git', publish_url='https://github.com/owner/config-test.git', default_branch='main', authorization_ref=$4, credential_capability='provider_user_repository', version=version+1 WHERE id=$1`, pushRepository.ID, "provider-access-"+suffix, user, "github-user:"+user); err != nil {
 		t.Fatal("provider repository fixture failed")
 	}
 	providerCredential, err := credentials.Issue(ctx, identity.Credential, proofFor("provider-access-credential", "/v1/config/credentials"), body, "POST", "/v1/config/credentials")

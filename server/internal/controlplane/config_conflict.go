@@ -203,6 +203,17 @@ func (s *ConfigConflictService) authenticate(ctx context.Context, identityToken,
 		}
 		return ConfigLeaseHolder{}, err
 	}
+	assignment, err := s.store.Queries().GetControlConfigAssignment(ctx, holder.EnvironmentID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ConfigLeaseHolder{}, ErrConfigConflictResolutionInvalid
+	}
+	if err != nil {
+		return ConfigLeaseHolder{}, err
+	}
+	if assignment.ID != holder.AssignmentID {
+		return ConfigLeaseHolder{}, ErrConfigConflictResolutionInvalid
+	}
+	holder.RepositoryID = statusRepositoryID(assignment)
 	return holder, nil
 }
 
