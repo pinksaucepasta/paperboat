@@ -62,8 +62,9 @@ type VaultRecordsPage struct {
 	NextCursor    string             `json:"next_cursor"`
 }
 type VaultRecordsResult struct {
-	Records  []VaultRecordState `json:"records"`
-	Sequence uint64             `json:"sequence"`
+	Records       []VaultRecordState `json:"records"`
+	Sequence      uint64             `json:"sequence"`
+	AfterSequence uint64             `json:"after_sequence"`
 }
 
 func vaultRecordsPath(c VaultLayerCoordinate) string {
