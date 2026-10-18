@@ -3038,7 +3038,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Read paginated Personal fleet update status and complete filtered counts */
+        /** Read paginated workspace fleet update status and complete filtered counts */
         get: operations["get_v1_user_machines_update_summary"];
         put?: never;
         post?: never;
@@ -4008,8 +4008,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Atomically create a team, owner grant, encrypted scope and owner vault successor
-         * @description Requires browser CSRF protection or an authorized bearer. Operation IDs bind exact request bytes. No password, recovery code, plaintext ENV or machine private keys are accepted.
+         * Initialize an existing paid Team ENV scope, owner grant and owner vault successor
+         * @description Initializes ENV for an existing owned paid Team at expected_team_generation; never creates a business Team or owner membership. Missing or foreign ownership returns forbidden; an unpaid Team returns team_entitlement_required; a stale generation returns version_conflict. Requires browser CSRF protection or an authorized bearer. Operation IDs bind exact request bytes. No password, recovery code, plaintext ENV or machine private keys are accepted.
          */
         post: operations["post__v1_environment_teams"];
         delete?: never;
@@ -4357,7 +4357,7 @@ export interface paths {
         put?: never;
         /**
          * Team create
-         * @description Current shared team authority. Roles do not grant resource use or decryption. Mutations require browser CSRF or scoped bearer authentication and exact operation IDs; generation conflicts require refresh.
+         * @description Reserve a Team identifier and create Stripe Checkout for purchased seats. No Team, owner membership or billing workspace exists until authoritative successful payment. The owner consumes one purchased seat. Retry the identical operation; no success-page fulfillment.
          */
         post: operations["team_create"];
         delete?: never;
@@ -6940,7 +6940,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List invitations visible to the recipient or current Team owner/admin */
+        /**
+         * List received invitations (default), or caller-created invitations with direction=sent
+         * @description Received uses the current verified canonical recipient identity. Sent returns only invitations created by the caller while current owner/admin permission remains. Team-scoped inventory retains recipient/current owner/admin visibility.
+         */
         get: operations["list_team_invitations"];
         put?: never;
         post?: never;
@@ -7041,6 +7044,100 @@ export interface paths {
         get: operations["get_v1_activity"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/billing/workspaces/teams/{team_id}/seats/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Owner preview of purchased seat quantity */
+        get: operations["workspace_team_seat_preview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/billing/workspaces/teams/{team_id}/seats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Owner purchase or scheduled reduction of seats */
+        post: operations["workspace_team_seat_change"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/billing/workspaces/personal/topups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Buy a paid workspace bandwidth top-up
+         * @description Paid workspaces only. Integer quantity 1..product.max_quantity buys quantity × unit_bytes (100 GB each). Credits NEVER EXPIRE and are consumed after the plan allowance. Checkout uses the exact quantity and verified unit price; only signed provider-confirmed paid events credit the workspace once. Requires Idempotency-Key and configured-origin return URLs. invalid_quantity rejects missing/zero/over-limit quantity.
+         */
+        post: operations["workspace_personal_checkout_topup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/billing/workspaces/teams/{team_id}/topups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Buy a paid workspace bandwidth top-up
+         * @description Paid workspaces only. Integer quantity 1..product.max_quantity buys quantity × unit_bytes (100 GB each). Credits NEVER EXPIRE and are consumed after the plan allowance. Checkout uses the exact quantity and verified unit price; only signed provider-confirmed paid events credit the workspace once. Requires Idempotency-Key and configured-origin return URLs. invalid_quantity rejects missing/zero/over-limit quantity.
+         */
+        post: operations["workspace_team_checkout_topup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/teams/{team_id}/invitations/{invitation_id}/resend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refresh an unaccepted, uncancelled invitation and queue a new email
+         * @description Current team owner/admin required; admin-role invitations require owner, including operation replay. Refreshes expiry using mail.invitation_lifetime_seconds (default 30 days). Reuses the invitation and existing seat reservation; expired revival requires an available purchased seat. Body operation_id is retry-safe. Per-invitation cooldown is 60 seconds. No provider call occurs in the request transaction.
+         */
+        post: operations["resend_team_invitation"];
         delete?: never;
         options?: never;
         head?: never;
@@ -9097,7 +9194,7 @@ export interface components {
             vault_envelope: string;
             scope_envelope: string;
             grant_envelope: string;
-            expected_team_generation?: number;
+            expected_team_generation: number;
         };
         EnvironmentVaultMemberGrant: {
             operation_id: string;
@@ -9200,6 +9297,11 @@ export interface components {
             /** @enum {string} */
             role: "owner" | "admin" | "member";
             active: boolean;
+            /** Format: email */
+            email: string;
+            display_name: string;
+            /** Format: date-time */
+            joined_at: string;
         };
         TeamGrant: {
             account_id: string;
@@ -9218,6 +9320,7 @@ export interface components {
             deleted: boolean;
             members: components["schemas"]["TeamMember"][];
             grants: components["schemas"]["TeamGrant"][];
+            display_name: string;
         };
         TeamActivityItem: {
             id: string;
@@ -9237,15 +9340,23 @@ export interface components {
         TeamCreateRequest: {
             operation_id: string;
             team_id: string;
+            seats: number;
+            /** @enum {string} */
+            interval: "month" | "year";
+            /** Format: uri */
+            success_url: string;
+            /** Format: uri */
+            cancel_url: string;
         };
         TeamMutationRequest: {
             operation_id: string;
             expected_generation: number;
             /** @enum {string} */
-            action: "role" | "remove" | "leave" | "transfer" | "delete";
+            action: "role" | "remove" | "leave" | "transfer" | "delete" | "rename";
             account_id?: string;
             role?: string;
             confirmation?: string;
+            name?: string;
         };
         TeamInviteRequest: {
             operation_id: string;
@@ -9253,6 +9364,12 @@ export interface components {
             account_id?: string;
             /** Format: email */
             email?: string;
+            /**
+             * @description Only the owner may invite an admin.
+             * @default member
+             * @enum {string}
+             */
+            role: "member" | "admin";
         } & (unknown | unknown);
         TeamAcceptRequest: {
             operation_id: string;
@@ -9397,7 +9514,6 @@ export interface components {
             team_id?: string;
             state: string;
             product_code?: string;
-            paid_seats: number;
             members: number;
             can_manage: boolean;
             /** Format: date-time */
@@ -9412,18 +9528,39 @@ export interface components {
             usage_bytes: number;
             allowance_bytes: number | null;
             product?: components["schemas"]["WorkspaceBillingProduct"] | null;
+            seats_bought: number;
+            seats_used: number;
+            scheduled_seats?: number;
+            /** Format: date-time */
+            scheduled_seats_at?: string;
+            /**
+             * Format: date-time
+             * @description Start of the current monthly accounting budget shared by the usage and allowance, including earlier segments of that budget.
+             */
+            allowance_period_start: string;
+            /**
+             * Format: date-time
+             * @description End of the current monthly accounting budget at the original bandwidth anchor; independent of provider renewal dates and clipped segment boundaries.
+             */
+            allowance_period_end: string;
+            /** @description Unspent permanent credits for this exact workspace, excluding future purchases. Credits never expire and are consumed only after the paid plan allowance. */
+            topup_bytes_remaining: number;
         };
         WorkspaceBillingProduct: {
             code: string;
             name: string;
             /** @enum {string} */
-            catalog_type: "price" | "product";
+            catalog_type: "personal_subscription" | "team_subscription" | "top_up";
             /** @description Verified currency minor units. Null is unknown, not free. */
             unit_amount: number | null;
             currency: string;
             interval: string;
             price_verified: boolean;
             version: number;
+            /** @description Bytes per top-up unit: 100000000000 (100 GB); null for subscriptions. */
+            unit_bytes?: number | null;
+            /** @description Configured integer purchase limit; default 100. Null for subscriptions. */
+            max_quantity?: number | null;
         };
         MachineServicePort: {
             port: number;
@@ -10545,7 +10682,22 @@ export interface components {
             state: "pending" | "accepted" | "cancelled" | "expired";
             created_by: string;
             /** Format: email */
-            email?: string;
+            email: string;
+            display_name: string;
+            /** Format: email */
+            created_by_email: string;
+            /** Format: date-time */
+            created_at: string;
+            /**
+             * Format: date-time
+             * @description Time the server most recently confirmed provider acceptance, including retry reconciliation; null until confirmed. Not proof of delivery or the provider creation timestamp.
+             */
+            last_sent_at: string | null;
+            /**
+             * @description Latest send request: unconfigured means no mail queued (sender unavailable or recipient lacks verified contact); queued includes bounded retries; sent means provider accepted, never proof of delivery; failed includes abandoned/suppressed jobs.
+             * @enum {string}
+             */
+            delivery_state: "unconfigured" | "queued" | "sent" | "failed";
         };
         Me: {
             id: string;
@@ -10675,6 +10827,26 @@ export interface components {
             upload_bytes: number;
             /** Format: int64 */
             download_bytes: number;
+        };
+        SeatPreview: {
+            /** Format: int64 */
+            amount_due_now: number;
+            currency: string;
+            /** Format: int64 */
+            next_invoice_amount: number;
+            /** Format: date-time */
+            next_invoice_at: string;
+        };
+        WorkspaceTopupRequest: {
+            product_code: string;
+            /** Format: int64 */
+            product_version: number;
+            /** @description Number of top-up units, up to the selected product max_quantity. */
+            quantity: number;
+            /** Format: uri */
+            success_url: string;
+            /** Format: uri */
+            cancel_url: string;
         };
     };
     responses: {
@@ -19525,7 +19697,10 @@ export interface operations {
     team_create: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description Must equal operation_id. */
+                "Idempotency-Key": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -19535,14 +19710,17 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Authenticated current state or exact committed operation result. */
+            /** @description Checkout URL; Team creation is pending payment. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": {
-                        data: components["schemas"]["TeamTeam"];
+                        data: {
+                            /** Format: uri */
+                            url: string;
+                        };
                     };
                 };
             };
@@ -19552,6 +19730,7 @@ export interface operations {
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
             412: components["responses"]["Error"];
+            503: components["responses"]["Error"];
         };
     };
     team_get: {
@@ -19647,7 +19826,15 @@ export interface operations {
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
-            409: components["responses"]["Error"];
+            /** @description Conflict, including team_suspended after team or invitation authorization. Ask the team owner to restore billing or resume the team. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             412: components["responses"]["Error"];
         };
     };
@@ -19718,7 +19905,15 @@ export interface operations {
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
-            409: components["responses"]["Error"];
+            /** @description Conflict, including team_suspended after team or invitation authorization. Ask the team owner to restore billing or resume the team. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             412: components["responses"]["Error"];
         };
     };
@@ -19752,7 +19947,15 @@ export interface operations {
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
-            409: components["responses"]["Error"];
+            /** @description Conflict, including team_suspended after team or invitation authorization. Ask the team owner to restore billing or resume the team. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             412: components["responses"]["Error"];
         };
     };
@@ -19787,7 +19990,15 @@ export interface operations {
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
-            409: components["responses"]["Error"];
+            /** @description Conflict, including team_suspended after team or invitation authorization. Ask the team owner to restore billing or resume the team. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             412: components["responses"]["Error"];
         };
     };
@@ -19821,7 +20032,15 @@ export interface operations {
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
-            409: components["responses"]["Error"];
+            /** @description Conflict, including team_suspended after team or invitation authorization. Ask the team owner to restore billing or resume the team. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             412: components["responses"]["Error"];
         };
     };
@@ -20052,7 +20271,15 @@ export interface operations {
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
-            409: components["responses"]["Error"];
+            /** @description Conflict, including team_suspended after team or invitation authorization. Ask the team owner to restore billing or resume the team. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             412: components["responses"]["Error"];
         };
     };
@@ -25721,6 +25948,7 @@ export interface operations {
                 state?: "pending" | "accepted" | "cancelled" | "expired";
                 /** @description Filter by recipient or creator account ID, mine (recipient is current account), or shared (creator is current account). At most 128 UTF-8 bytes; whitespace and NUL are rejected. */
                 owner?: string;
+                direction?: "received" | "sent";
             };
             header?: never;
             path?: never;
@@ -25802,7 +26030,15 @@ export interface operations {
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
             404: components["responses"]["Error"];
-            409: components["responses"]["Error"];
+            /** @description Conflict, including team_suspended after team or invitation authorization. Ask the team owner to restore billing or resume the team. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             503: components["responses"]["Error"];
         };
     };
@@ -25961,6 +26197,220 @@ export interface operations {
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
+            500: components["responses"]["Error"];
+        };
+    };
+    workspace_team_seat_preview: {
+        parameters: {
+            query: {
+                quantity: number;
+            };
+            header?: never;
+            path: {
+                team_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Authorized workspace result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["SeatPreview"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    workspace_team_seat_change: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+                "X-CSRF-Token": string;
+            };
+            path: {
+                team_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    quantity: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Authorized workspace result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["SeatPreview"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            402: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    workspace_personal_checkout_topup: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceTopupRequest"];
+            };
+        };
+        responses: {
+            /** @description Authorized workspace result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            /** Format: uri */
+                            url: string;
+                        };
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    workspace_team_checkout_topup: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                team_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceTopupRequest"];
+            };
+        };
+        responses: {
+            /** @description Authorized workspace result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            /** Format: uri */
+                            url: string;
+                        };
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    resend_team_invitation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                team_id: string;
+                invitation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TeamAcceptRequest"];
+            };
+        };
+        responses: {
+            /** @description Current authorized invitation state. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["TeamInvitationSummary"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            /** @description Current role forbidden; only owners resend admin-role invitations. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Team or invitation not found in this team. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description invitation_unavailable for accepted/cancelled/reused operation; seat_required if expired revival has no purchased seat. Refresh team state. team_suspended requires restoring team access before resending. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description invitation_rate_limited; retry after the Retry-After seconds header. */
+            429: {
+                headers: {
+                    /** @description Seconds until this invitation may be resent. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             500: components["responses"]["Error"];
         };
     };

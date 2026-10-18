@@ -92,9 +92,10 @@ export function TeamManage({ workspace }: { workspace: Workspace }) {
   const matches = (...texts: (string | undefined)[]) => !query || texts.some((t) => t?.toLowerCase().includes(query))
   const shownMembers = members.filter((m) => matches(emails.get(m.account_id), m.display_name))
   const shownInvites = pending.filter((i) => matches(i.email))
-  const seats = billing.data && (billing.data.seats_bought ?? billing.data.paid_seats)
-  const usedSeats = members.length + pending.length
-  const freeSeats = billing.data?.seats_bought !== undefined ? billing.data.seats_bought - usedSeats : undefined
+  const seats = billing.data && billing.data.seats_bought
+  // The server counts seats (members plus invitations that hold one).
+  const usedSeats = billing.data?.seats_used ?? members.length
+  const freeSeats = billing.data ? Math.max(0, billing.data.seats_bought - billing.data.seats_used) : undefined
   const name = team.data.display_name || team.data.team_id
 
   return (

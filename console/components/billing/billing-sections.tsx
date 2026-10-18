@@ -52,7 +52,7 @@ function PreviewLine({ preview, pending }: { preview?: ChangePreview; pending: b
  * charged now, prorated to the billing date; removing them lowers the next invoice only.
  */
 export function Seats({ workspace, billing }: { workspace: Workspace; billing: BillingWorkspace }) {
-  const bought = billing.seats_bought ?? billing.paid_seats
+  const bought = billing.seats_bought
   const used = billing.seats_used ?? billing.members
   const [quantity, setQuantity] = useState(bought)
   const refresh = useRefreshBilling(workspace)
@@ -151,7 +151,7 @@ export function PlanActions({ workspace, billing }: { workspace: Workspace; bill
  */
 export function TopUps({ workspace, billing }: { workspace: Workspace; billing: BillingWorkspace }) {
   const products = useApiQuery({ ...billingProductsQuery(workspace), enabled: billingLive.topups })
-  const product = products.data?.find((p) => (p.catalog_type as string) === "top_up" && p.price_verified)
+  const product = products.data?.find((p) => p.catalog_type === "top_up" && p.price_verified)
   const step = product?.unit_bytes ?? topupDefaults.unitBytes
   const max = product?.max_quantity ?? topupDefaults.maxQuantity
   const [units, setUnits] = useState(1)

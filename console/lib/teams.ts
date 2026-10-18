@@ -5,24 +5,14 @@ import { api, idempotencyKey } from "@/lib/api"
 import type { components } from "@/lib/api-schema"
 
 type Schemas = components["schemas"]
-/**
- * Identity fields requested from Lane B (PLAN.md Log, 2026-10-18), optional until served. Until
- * then a member's email comes from the invitation they accepted (`memberEmails`).
- */
-export type TeamMember = Schemas["TeamMember"] & { email?: string; display_name?: string; joined_at?: string }
-export type Team = Omit<Schemas["TeamTeam"], "members"> & { display_name?: string; members: TeamMember[] }
-export type TeamInvitation = Schemas["TeamInvitationSummary"] & {
-  created_by_email?: string
-  created_at?: string
-  /** Invitation email (Lane B mail producer): unconfigured until a sender is set up. */
-  delivery_state?: "queued" | "sent" | "failed" | "unconfigured"
-  last_sent_at?: string | null
-}
+export type TeamMember = Schemas["TeamMember"]
+export type Team = Schemas["TeamTeam"]
+export type TeamInvitation = Schemas["TeamInvitationSummary"]
 export type TeamAction = "role" | "remove" | "leave" | "transfer" | "delete" | "rename"
 export type TeamRole = "owner" | "admin" | "member"
 
 /** Team features whose server side is not deployed yet; their controls render disabled. */
-export const teamLive = { inviteRole: false, rename: false, mail: false } as const
+export const teamLive = { inviteRole: true, rename: true, mail: true } as const
 
 /** Account ID → email, from members' own fields or else the invitations they accepted. */
 export function memberEmails(team: Team, invitations: TeamInvitation[] | undefined) {

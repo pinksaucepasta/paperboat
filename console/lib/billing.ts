@@ -4,25 +4,8 @@ import { queryOptions } from "@tanstack/react-query"
 import { api, idempotencyKey, type Workspace } from "@/lib/api"
 import type { components } from "@/lib/api-schema"
 
-/**
- * Fields requested from Lane B (PLAN.md Log, 2026-10-18) and not served yet; each stays optional
- * and becomes part of the schema type when the server publishes it.
- */
-type PendingBillingFields = {
-  seats_bought?: number
-  /** Members plus pending invitations: every invitation holds a seat. */
-  seats_used?: number
-  topup_bytes_remaining?: number
-  /** The monthly bandwidth window usage_bytes/allowance_bytes count in; yearly plans renew separately. */
-  allowance_period_start?: string
-  allowance_period_end?: string
-}
-export type BillingWorkspace = components["schemas"]["BillingWorkspace"] & PendingBillingFields
-/** Top-up products add `unit_bytes` and `max_quantity` (requested from Lane B). */
-export type BillingProduct = components["schemas"]["WorkspaceBillingProduct"] & {
-  unit_bytes?: number
-  max_quantity?: number
-}
+export type BillingWorkspace = components["schemas"]["BillingWorkspace"]
+export type BillingProduct = components["schemas"]["WorkspaceBillingProduct"]
 export type BillingInterval = "month" | "year"
 
 /**
@@ -31,7 +14,7 @@ export type BillingInterval = "month" | "year"
  * is deployed. Flip one when Lane B logs the deploy.
  */
 export const billingLive = {
-  seats: false,
+  seats: true,
   topups: true,
   paidTeamCreate: false,
 } as const
