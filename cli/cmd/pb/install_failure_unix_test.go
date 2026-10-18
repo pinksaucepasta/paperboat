@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntimecmd"
 )
@@ -23,7 +24,21 @@ func TestSuppliedInstallFailureKeepsSafeStepAndPrivateCause(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "state"))
 	t.Setenv("XDG_RUNTIME_DIR", home)
-	executable, source, err := installsource.Current()
+	// The test binary is group-writable under umask 0002 and the installer now
+	// refuses that before any privileged work, so supply an owner-only copy.
+	current, _, err := installsource.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	executable := filepath.Join(home, "pb-copy")
+	if err := os.WriteFile(executable, body, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	source, err := installsource.Inspect(executable, buildinfo.Version, buildinfo.Distribution)
 	if err != nil {
 		t.Fatal(err)
 	}
