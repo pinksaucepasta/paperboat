@@ -33,7 +33,7 @@ var allowedFields = map[string]bool{
 	"capability": true, "generation": true, "operation": true, "outcome": true,
 	"path_category": true, "phase": true, "reason": true, "relay_region": true,
 	"retry_class": true, "state": true, "transport": true,
-	"cause": true, "error_type": true, "error_chain": true,
+	"cause": true, "error_type": true, "error_chain": true, "quic_error": true,
 	"component": true, "service_component": true, "errno": true, "http_status": true,
 	"source_file": true, "source_function": true, "source_line": true,
 	"sdk_submissions_dropped": true, "sdk_http_failures": true,

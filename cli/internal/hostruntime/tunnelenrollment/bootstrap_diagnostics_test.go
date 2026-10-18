@@ -6,6 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
+	"github.com/quic-go/quic-go"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
 )
@@ -28,6 +32,33 @@ func TestCarrierDialDiagnosticUsesFiniteTypedCategories(t *testing.T) {
 	} {
 		if got := carrierDialDiagnostic(test.err); got != test.want {
 			t.Fatalf("category=%q want=%q", got, test.want)
+		}
+	}
+}
+
+func TestQUICErrorDiagnosticNamesSideAndCodeWithoutMessage(t *testing.T) {
+	carrier := func(err error) error {
+		return &connector.HTTPCarrierFailure{Stage: "round_trip", Cause: errors.Join(connector.ErrDataCarrierTLS, fmt.Errorf("wrap: %w", err))}
+	}
+	for _, test := range []struct {
+		err  error
+		want string
+	}{
+		{carrier(&quic.TransportError{Remote: true, ErrorCode: 0x12a, ErrorMessage: "secret peer text"}), "transport_remote_0x12a"},
+		{carrier(&quic.TransportError{ErrorCode: quic.ConnectionRefused}), "transport_local_0x2"},
+		{carrier(&quic.ApplicationError{Remote: true, ErrorCode: 0x100, ErrorMessage: "secret"}), "application_remote_0x100"},
+		{carrier(&quic.IdleTimeoutError{}), "idle_timeout"},
+		{carrier(&quic.HandshakeTimeoutError{}), "handshake_timeout"},
+		{carrier(errors.New("not quic")), ""},
+	} {
+		got := quicErrorDiagnostic(test.err)
+		if got != test.want {
+			t.Fatalf("quic_error=%q want=%q", got, test.want)
+		}
+		if got != "" {
+			if _, err := diagnostics.NewEvent(time.Now(), "tunnel", "carrier_tls", "warning", map[string]string{"quic_error": got}); err != nil {
+				t.Fatalf("diagnostic event rejected %q: %v", got, err)
+			}
 		}
 	}
 }

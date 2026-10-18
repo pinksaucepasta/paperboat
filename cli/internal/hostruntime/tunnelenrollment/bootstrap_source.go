@@ -30,6 +30,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connectorrotation"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hoststate"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelmanager"
+	"github.com/quic-go/quic-go"
 )
 
 const (
@@ -592,6 +593,9 @@ func (s *HTTPSProductionAssemblySource) carrierSessionSource(ctx context.Context
 						fields["http_status"] = strconv.Itoa(failure.Status)
 					}
 				}
+				if code := quicErrorDiagnostic(err); code != "" {
+					fields["quic_error"] = code
+				}
 				_ = recorder.Record("tunnel", carrierDialDiagnostic(err), "warning", fields)
 			}
 			s.report(tunnelmanager.Observation{TunnelID: request.TunnelID, ConnectorID: request.ConnectorID,
@@ -953,6 +957,36 @@ func carrierNodeEndpoints(descriptor carrierBootstrapDescriptor, node carrierBoo
 }
 
 var _ ProductionAssemblySource = (*HTTPSProductionAssemblySource)(nil)
+
+// quicErrorDiagnostic names who closed a QUIC connection and with which
+// finite code, e.g. transport_remote_0x12a for a peer TLS bad_certificate
+// alert. The peer's free-form error message is never included.
+func quicErrorDiagnostic(err error) string {
+	side := func(remote bool) string {
+		if remote {
+			return "remote"
+		}
+		return "local"
+	}
+	var transport *quic.TransportError
+	var application *quic.ApplicationError
+	var idle *quic.IdleTimeoutError
+	var handshake *quic.HandshakeTimeoutError
+	var reset *quic.StatelessResetError
+	switch {
+	case errors.As(err, &transport):
+		return "transport_" + side(transport.Remote) + "_0x" + strconv.FormatUint(uint64(transport.ErrorCode), 16)
+	case errors.As(err, &application):
+		return "application_" + side(application.Remote) + "_0x" + strconv.FormatUint(uint64(application.ErrorCode), 16)
+	case errors.As(err, &idle):
+		return "idle_timeout"
+	case errors.As(err, &handshake):
+		return "handshake_timeout"
+	case errors.As(err, &reset):
+		return "stateless_reset"
+	}
+	return ""
+}
 
 // carrierDialDiagnostic exposes only finite error categories, never a peer's
 // response, certificate content, address or credential material.
