@@ -234,6 +234,12 @@ func configureProxyDiagnostics(proxy *httputil.ReverseProxy, observe func(contex
 		if observe != nil {
 			observe(request.Context(), err)
 		}
+		if errors.Is(err, ErrIngressQuotaExhausted) {
+			// A typed refusal at admission: the visitor learns why, and direct access is unaffected.
+			writer.Header().Set("X-Paperboat-Error", "bandwidth_quota_exhausted")
+			http.Error(writer, "This address has used up its bandwidth allowance. Its owner can add bandwidth, or it resumes when the allowance resets.", http.StatusTooManyRequests)
+			return
+		}
 		http.Error(writer, http.StatusText(http.StatusBadGateway), http.StatusBadGateway)
 	}
 }

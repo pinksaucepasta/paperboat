@@ -135,9 +135,24 @@ func testIngressProjectionPostgres(t *testing.T, onlyLKG bool) {
 	zero := int64(0)
 	setPolicy(&zero, nil, nil)
 	source.Quota = quota
+	// F13-03: a route withheld only for quota is named, so the edge can answer with the typed reason.
+	var denied []wire.IngressQuotaDenial
+	source.QuotaDenied = &denied
 	check(t, 0)
+	if len(denied) == 0 {
+		t.Fatal("a route withheld for bandwidth quota was not reported to the edge")
+	}
+	for _, d := range denied {
+		if d.RouteID != routeID || d.Hostname != "task24.example.test" {
+			t.Fatalf("quota denial names %+v, want the withheld route", d)
+		}
+	}
 	setPolicy(nil, nil, nil)
+	denied = nil
 	check(t, 1)
+	if len(denied) != 0 {
+		t.Fatalf("an admitted route was reported as quota denied: %+v", denied)
+	}
 	// A public route on an unpaid team-owned host cannot retain personal benefits.
 	teamID := "public_team_" + f.suffix
 	exec(`INSERT INTO teams(team_id,owner_account,generation) VALUES($1,$2,1)`, teamID, f.accountID)

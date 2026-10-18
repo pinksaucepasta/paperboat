@@ -24,6 +24,9 @@ type SQLIngressSource struct {
 	DB    *db.DB
 	Clock wire.Clock
 	Quota accountingauthority.QuotaChecker
+	// QuotaDenied, when set, receives each public route left out of a projection solely
+	// because its workspace is out of bandwidth allowance (never an authority).
+	QuotaDenied *[]wire.IngressQuotaDenial
 }
 
 func (s SQLIngressSource) Daemon(ctx context.Context, active ActiveControlSession) ([]wire.IngressDecision, error) {
@@ -183,6 +186,9 @@ func (s SQLIngressSource) project(ctx context.Context, active ActiveControlSessi
 			}
 			if err = accountingauthority.Record(ctx, s.DB, accountingauthority.Binding{ID: fmt.Sprintf("public:%s:%d", b.PublicationID, b.PublicationGeneration), Node: d.EdgeNodeID, Environment: b.EnvironmentID, Route: b.RouteID, Revision: int64(b.RouteGeneration), User: b.AccountID, Team: team, IssuedAt: d.IssuedAt, ExpiresAt: d.ExpiresAt}, s.Quota); err != nil {
 				if isExactQuotaExhaustion(err) {
+					if s.QuotaDenied != nil {
+						*s.QuotaDenied = append(*s.QuotaDenied, wire.IngressQuotaDenial{RouteID: b.RouteID, Hostname: b.Hostname})
+					}
 					continue
 				}
 				return nil, err

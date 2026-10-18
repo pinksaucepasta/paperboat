@@ -19,7 +19,7 @@ const (
 )
 
 var ErrIngressLimitExceeded = errors.New("ingress limit exceeded")
-var ErrIngressQuotaExhausted = errors.New("workspace bandwidth allowance exhausted; retry after allowance recovery")
+var ErrIngressQuotaExhausted = connectorprotocol.ErrIngressQuotaExhausted
 
 type IngressUsage interface {
 	SubscribeQuota(string, time.Time, func()) func()

@@ -17,6 +17,7 @@ type IngressAuthority struct {
 	ProcessEpoch  string
 	mu            sync.Mutex
 	decisions     []connectorprotocol.IngressDecision
+	quotaDenied   map[string]bool // hostnames withheld only for bandwidth quota, from the same fetch
 	fetched       time.Time
 	previewMisses map[previewAuthorityKey]time.Time
 }
@@ -63,14 +64,18 @@ func (a *IngressAuthority) snapshotLocked(ctx context.Context, force bool) ([]co
 	}
 	if force || a.fetched.IsZero() || now.Sub(a.fetched) >= connectorprotocol.IngressRefreshInterval {
 		fetch, cancel := context.WithTimeout(ctx, 2*time.Second)
-		decisions, err := a.Client.IngressDecisions(fetch, a.NodeID, a.ProcessEpoch)
+		decisions, denied, err := a.Client.IngressDecisions(fetch, a.NodeID, a.ProcessEpoch)
 		cancel()
 		if err != nil {
-			a.decisions = nil
+			a.decisions, a.quotaDenied = nil, nil
 			a.fetched = time.Time{}
 			return nil, err
 		}
 		a.decisions, a.fetched = decisions, now
+		a.quotaDenied = make(map[string]bool, len(denied))
+		for _, d := range denied {
+			a.quotaDenied[d.Hostname] = true
+		}
 	}
 	return append([]connectorprotocol.IngressDecision(nil), a.decisions...), nil
 }
@@ -106,6 +111,13 @@ func (a *IngressAuthority) Resolve(ctx context.Context, r route.RouteRule) (conn
 		if d.Binding.Hostname == r.Hostname && d.Binding.RouteID == id && d.Binding.TunnelID == r.TunnelID && d.Binding.AccountID == r.AccountID && d.ConnectorID == r.ConnectorID && d.SessionID == r.ConnectorSessionID && d.ProcessGeneration == r.ConnectorProcessGeneration && d.ConfigGeneration == r.ConfigGeneration && d.AssignmentGeneration == r.AssignmentGeneration && d.Binding.RouteGeneration == r.RouteGeneration && d.Binding.Audience == r.AccessMode && d.PolicyGeneration == r.ViewerPolicyGeneration && d.Validate(time.Now().UTC()) == nil {
 			return d, nil
 		}
+	}
+	// The route exists but its workspace is out of allowance: say so, never forward.
+	a.mu.Lock()
+	exhausted := a.quotaDenied[r.Hostname]
+	a.mu.Unlock()
+	if exhausted {
+		return connectorprotocol.IngressDecision{}, connectorprotocol.ErrIngressQuotaExhausted
 	}
 	return connectorprotocol.IngressDecision{}, connectorprotocol.ErrIngressDenied
 }

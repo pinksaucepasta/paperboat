@@ -23,11 +23,15 @@ func (s *EdgeService) handleIngress(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	quota, _ := s.scopedBandwidth.(accountingauthority.QuotaChecker)
-	decisions, err := (connectorprotocol.SQLIngressSource{DB: s.store, Quota: quota}).Edge(r.Context(), input.NodeID, input.ProcessEpoch)
+	var denied []wire.IngressQuotaDenial
+	decisions, err := (connectorprotocol.SQLIngressSource{DB: s.store, Quota: quota, QuotaDenied: &denied}).Edge(r.Context(), input.NodeID, input.ProcessEpoch)
 	if err != nil {
 		writeEdgeError(w, r, http.StatusServiceUnavailable, "control_unavailable", true, 1000, err)
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeEdgeJSON(w, http.StatusOK, map[string]any{"complete": true, "decisions": decisions})
+	if len(denied) > 4096 {
+		denied = denied[:4096]
+	}
+	writeEdgeJSON(w, http.StatusOK, map[string]any{"complete": true, "decisions": decisions, "quota_denied": denied})
 }

@@ -63,6 +63,18 @@ const (
 
 var ErrIngressDenied = errors.New("connector ingress authority denied")
 
+// ErrIngressQuotaExhausted is the typed reason an edge refuses a new stream at admission (or
+// ends one) because the publication's workspace has no bandwidth allowance left.
+var ErrIngressQuotaExhausted = errors.New("workspace bandwidth allowance exhausted; retry after allowance recovery")
+
+// IngressQuotaDenial names a public route the server withheld from the ingress snapshot only
+// because its workspace is out of allowance, so the edge can answer visitors with the typed
+// reason instead of a generic failure. It grants no authority.
+type IngressQuotaDenial struct {
+	RouteID  string `json:"route_id"`
+	Hostname string `json:"hostname"`
+}
+
 type ingressReadFailure struct{ cause error }
 
 func (ingressReadFailure) Error() string { return ErrIngressDenied.Error() }
