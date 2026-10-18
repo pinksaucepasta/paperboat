@@ -516,3 +516,17 @@ func TestConfigSyncProjectionExplainsEmptyRepositoryAndMissingBranch(t *testing.
 		}
 	}
 }
+
+// F11-02 device finding: with an empty machine file and no assignment, validate
+// ended in the generic failure text because the missing selection was an
+// unclassified error.
+func TestConfigSyncProjectionWithoutARepositoryExplainsTheChoice(t *testing.T) {
+	t.Setenv("PATH", "")
+	backend := configSyncSourceBackendFixture(t, map[string]string{"one": ""})
+	_, err := buildConfigSyncProjection(context.Background(), backend, configsync.SourceConfig{}, "", api.ConfigAssignment{}, t.TempDir(), "", t.TempDir())
+	failure := classifyCommandFailure(err)
+	message := commandFailureMessage(err, failure)
+	if err == nil || !strings.Contains(message, "--repository") || !strings.Contains(message, "pb config sync path") || strings.Contains(message, "could not finish") {
+		t.Fatalf("message=%q err=%v", message, err)
+	}
+}

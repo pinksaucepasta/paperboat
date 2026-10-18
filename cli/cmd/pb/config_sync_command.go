@@ -184,6 +184,12 @@ func configRepositoryReadFailure(err error) error {
 	return err
 }
 
+// configSyncRefusal reports a configuration the user fixes. It is a usage
+// failure, so the message is shown instead of the generic "could not finish".
+func configSyncRefusal(message string) error {
+	return usageError{err: errors.New(message), publicMessage: message}
+}
+
 func configAssignmentMissingOnly(err error) bool {
 	var response *api.APIError
 	if !errors.As(err, &response) || response == nil || response.Status != http.StatusNotFound {
@@ -230,7 +236,7 @@ func buildConfigSyncProjection(ctx context.Context, backend configSyncSourceBack
 			grants[key] = access
 		}
 		if access.RepositoryID != repository.ID || (target.URL != "" && access.CloneURL != target.URL) || (target.Branch != "" && target.Branch != access.Branch) {
-			return api.ConfigRepository{}, configsync.RepositoryReadAccess{}, errors.New("repository grant does not match the source target or branch")
+			return api.ConfigRepository{}, configsync.RepositoryReadAccess{}, configSyncRefusal("The repository grant does not match the configured target or branch. Check the repository, URL and branch in the machine configuration (`pb config sync path`).")
 		}
 		normalized, transport, err := configsync.NormalizeRepositoryEndpoint(access.CloneURL)
 		if err != nil || normalized != access.CloneURL || transport != access.Transport || access.Capability != "repository_contents_read" || !access.ExpiresAt.After(time.Now()) {
@@ -263,7 +269,7 @@ func buildConfigSyncProjection(ctx context.Context, backend configSyncSourceBack
 			break
 		}
 		if attempt == 1 {
-			return configSyncProjection{}, errors.New("shared configuration changes its primary repository repeatedly; define a stable machine target")
+			return configSyncProjection{}, configSyncRefusal("The shared configuration changes its primary repository repeatedly. Define a stable pull/push repository in the machine configuration (`pb config sync path`).")
 		}
 		primary = selected
 		shared = configsync.SourceConfig{}
@@ -308,7 +314,7 @@ func buildConfigSyncProjection(ctx context.Context, backend configSyncSourceBack
 			continue
 		}
 		if target == nil {
-			return configSyncProjection{}, errors.New("choose --repository or define pull/push repository_id in the machine configuration")
+			return configSyncProjection{}, configSyncRefusal("No repository is selected for config sync. Run `pb config sync validate --repository <repository>` (see `pb config repository list`), or set pull/push repository_id in the machine configuration (`pb config sync path`).")
 		}
 		repository, _, err := resolve(target)
 		if err != nil {
@@ -324,7 +330,7 @@ func buildConfigSyncProjection(ctx context.Context, backend configSyncSourceBack
 			for _, binding := range projection.RepositoryBindings {
 				if binding.RepositoryID == repository.ID {
 					if binding.URL != target.URL {
-						return configSyncProjection{}, errors.New("one repository cannot have conflicting endpoint bindings")
+						return configSyncProjection{}, configSyncRefusal("One repository is bound to two different endpoints. Keep a single URL per repository in the machine configuration (`pb config sync path`).")
 					}
 					found = true
 				}
