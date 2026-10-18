@@ -477,8 +477,8 @@ that use them; say which in Evidence.
 | C182 | `pb config status` | Show configuration synchronization status | [ ] | [ ] | [ ] | — |
 | C183 | `pb config sync` | Validate and apply this machine's configuration file | [ ] | [ ] | [ ] | — |
 | C184 | `pb config sync apply` | Review the effective file configuration on this machine | [ ] | [ ] | [ ] | — |
-| C185 | `pb config sync init` | Create an empty machine configuration without overwriting existing files | [ ] | [ ] | [ ] | — |
-| C186 | `pb config sync path` | Show the authoritative machine configuration path | [ ] | [ ] | [ ] | — |
+| C185 | `pb config sync init` | Create an empty machine configuration without overwriting existing files | [x] | [ ] | [ ] | HP Linux dev-46c2464 actual config sync path/init with isolated HOME/XDG_CONFIG_HOME: authoritative path inside temporary root, init0600, second init rejected existing file without changing bytes; temporary root removed. Existing TestConfigSyncSourcePathInitJSON/TestConfigSyncSourceInitNoOverwriteOrLinkedParent; qualified workspace baseline reused. |
+| C186 | `pb config sync path` | Show the authoritative machine configuration path | [x] | [ ] | [ ] | HP Linux dev-46c2464 actual config sync path/init with isolated HOME/XDG_CONFIG_HOME: authoritative path inside temporary root, init0600, second init rejected existing file without changing bytes; temporary root removed. Existing TestConfigSyncSourcePathInitJSON/TestConfigSyncSourceInitNoOverwriteOrLinkedParent; qualified workspace baseline reused. |
 | C187 | `pb config sync validate` | Review the effective file configuration on this machine | [ ] | [ ] | [ ] | — |
 | C188 | `pb config team-default-adopt` | Adopt a team default using your provider access | [ ] | [ ] | [ ] | — |
 | C189 | `pb config team-default-set` | Set a team's default pull repository | [ ] | [ ] | [ ] | — |
@@ -579,7 +579,7 @@ that use them; say which in Evidence.
 | C217 | `pb update bundle` | Save an official update and its signed proof for offline installation | [ ] | [ ] | [ ] | — |
 | C218 | `pb update check` | Check the signed Paperboat release without installing it | [ ] | [ ] | [ ] | — |
 | C219 | `pb update download` | Download and verify an update without installing it | [ ] | [ ] | [ ] | — |
-| C220 | `pb update settings` | View or change automatic update settings | [ ] | [ ] | [ ] | — |
+| C220 | `pb update settings` | View or change automatic update settings | [x] | [ ] | [ ] | HP Linux dev-46c2464 actual update settings JSON: read original, disable automatic updates, set04:30, reread persisted disabled/time, finally restore and assert exact original settings including time zone. Existing updater settings owner tests/qualified workspace baseline reused. Automatic scheduled execution F14-06 remains open. |
 | C221 | `pb update status` | Show installed Paperboat update state | [x] | [ ] | [ ] | HP Linux dev-46c2464: actual update status JSON exit0, cli_version and authenticated runtime_version both exact dev-46c2464, runtime_available=true, boolean candidate/activation states. Existing TestUpdateStatusUsesAuthenticatedDaemonVersion; qualified workspace baseline reused. |
 
 ---
