@@ -527,6 +527,7 @@ func (s *HTTPSProductionAssemblySource) carrierSessionSource(ctx context.Context
 	for _, node := range descriptor.Carriers {
 		configs, err := carrierNodeEndpoints(descriptor, node, identity, s.clock.Now().UTC(), s.machineTLSCertificate)
 		if err != nil {
+			s.recordCarrierDescriptorRejected(bootstrapRequest, &DescriptorRejectedError{Check: "carrier_endpoint"})
 			return connector.DataCarrierSessionSource{}, err
 		}
 		endpoints[node.EdgeNodeID+"\x00"+node.EdgeProcessEpoch] = configs
@@ -582,7 +583,11 @@ func (s *HTTPSProductionAssemblySource) carrierSessionSource(ctx context.Context
 		}
 		return result, err
 	})
-	return connector.NewDataCarrierSessionSource(identity, pool, dialer)
+	result, err := connector.NewDataCarrierSessionSource(identity, pool, dialer)
+	if err != nil {
+		s.recordCarrierDescriptorRejected(bootstrapRequest, &DescriptorRejectedError{Check: "carrier_pool"})
+	}
+	return result, err
 }
 
 // Assignment publication can follow the authenticated config ACK. Keep that
@@ -621,7 +626,16 @@ func (s *HTTPSProductionAssemblySource) fetchAvailableCarrierDescriptor(
 	}
 }
 
-func (s *HTTPSProductionAssemblySource) fetchCarrierDescriptor(ctx context.Context, request ActivationRequest, body []byte) (carrierBootstrapDescriptor, error) {
+func (s *HTTPSProductionAssemblySource) fetchCarrierDescriptor(ctx context.Context, request ActivationRequest, body []byte) (result carrierBootstrapDescriptor, resultErr error) {
+	stage := ""
+	defer func() {
+		if resultErr != nil && stage != "" {
+			var tuple carrierBootstrapRequest
+			if json.Unmarshal(body, &tuple) == nil {
+				s.recordCarrierDescriptorRejected(tuple, &DescriptorRejectedError{Check: stage})
+			}
+		}
+	}()
 	operationID, err := randomID("operation")
 	if err != nil {
 		return carrierBootstrapDescriptor{}, err
@@ -661,6 +675,7 @@ func (s *HTTPSProductionAssemblySource) fetchCarrierDescriptor(ctx context.Conte
 	if response.StatusCode != http.StatusOK {
 		return carrierBootstrapDescriptor{}, classifyCarrierBootstrapError(response.StatusCode, raw)
 	}
+	stage = "content_type"
 	contentType, _, err := mime.ParseMediaType(response.Header.Get("Content-Type"))
 	if err != nil {
 		return carrierBootstrapDescriptor{}, safeEnrollmentFailure("carrier bootstrap response is invalid", ErrUnavailable, err)
@@ -668,9 +683,11 @@ func (s *HTTPSProductionAssemblySource) fetchCarrierDescriptor(ctx context.Conte
 	if contentType != "application/json" {
 		return carrierBootstrapDescriptor{}, ErrUnavailable
 	}
+	stage = "duplicate_json"
 	if err := rejectDuplicateJSON(raw); err != nil {
 		return carrierBootstrapDescriptor{}, safeEnrollmentFailure("carrier bootstrap response is invalid", ErrUnavailable, err)
 	}
+	stage = "envelope_decode"
 	var envelope struct {
 		Data json.RawMessage `json:"data"`
 	}
@@ -688,6 +705,7 @@ func (s *HTTPSProductionAssemblySource) fetchCarrierDescriptor(ctx context.Conte
 	if len(envelope.Data) == 0 {
 		return carrierBootstrapDescriptor{}, ErrUnavailable
 	}
+	stage = "descriptor_decode"
 	var descriptor carrierBootstrapDescriptor
 	decoder = json.NewDecoder(bytes.NewReader(envelope.Data))
 	decoder.DisallowUnknownFields()

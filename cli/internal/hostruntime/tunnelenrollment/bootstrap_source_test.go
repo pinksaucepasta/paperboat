@@ -25,6 +25,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connectorrotation"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hoststate"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelmanager"
@@ -195,16 +196,18 @@ func TestHTTPSProductionAssemblySourcePreservesDeniedControlDiagnostic(t *testin
 
 func TestHTTPSProductionAssemblySourceBootstrapBindsProofDescriptorAndLazySession(t *testing.T) {
 	for _, test := range []struct {
-		name       string
-		status     int
-		code       string
-		action     string
-		failures   int32
-		terminal   bool
-		retryAfter time.Duration
-		want       error
+		name               string
+		status             int
+		code               string
+		action             string
+		failures           int32
+		terminal           bool
+		retryAfter         time.Duration
+		want               error
+		certificateFailure bool
 	}{
 		{name: "ready"},
+		{name: "certificate failure names local boundary", certificateFailure: true, want: ErrActivation},
 		{name: "staged assignment follows retryable 503", status: http.StatusServiceUnavailable, code: "carrier_unavailable", action: "retry", failures: 1},
 		{name: "operation deadline bounds unavailable carrier", status: http.StatusServiceUnavailable, code: "carrier_unavailable", action: "retry", failures: -1, want: context.DeadlineExceeded},
 		{name: "server retry time obeys operation deadline", status: http.StatusServiceUnavailable, code: "carrier_unavailable", action: "retry", failures: -1, retryAfter: time.Second, want: context.DeadlineExceeded},
@@ -253,6 +256,11 @@ func TestHTTPSProductionAssemblySourceBootstrapBindsProofDescriptorAndLazySessio
 				IssuedAt: now, ExpiresAt: now.Add(15 * time.Second),
 			}
 			source := newBootstrapSourceForTest(t, server, now, auth)
+			recorder := diagnostics.NewMemoryRecorder()
+			source.recorder = recorder
+			if test.certificateFailure {
+				source.machineTLSCertificate = nil
+			}
 			identity := ControlIdentity{AccountID: "account_01", ProcessGeneration: 2, CredentialGeneration: 3}
 			hello := connectorprotocol.Hello{AccountID: identity.AccountID, TunnelID: request.TunnelID, ConnectorID: request.ConnectorID, HostID: request.HostID, ProcessGeneration: identity.ProcessGeneration}
 			welcome := connectorprotocol.Welcome{SessionID: descriptor.SessionID}
@@ -265,6 +273,12 @@ func TestHTTPSProductionAssemblySourceBootstrapBindsProofDescriptorAndLazySessio
 			defer cancel()
 			sessionSource, err := source.carrierSessionSource(ctx, request, identity, hello, welcome, apply, func(_ context.Context, payload []byte) ([]byte, error) { return ed25519.Sign(private, payload), nil })
 			if test.want != nil {
+				if test.certificateFailure {
+					events := recorder.Recent()
+					if len(events) != 1 || events[0].Fields["reason"] != "carrier_endpoint" {
+						t.Fatalf("missing finite endpoint failure: %+v", events)
+					}
+				}
 				if calls.Load() == 0 {
 					t.Fatal("operation ended before reaching bootstrap")
 				}
