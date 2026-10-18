@@ -2028,3 +2028,6 @@ All finished code is pushed, no unpushed or half-done source changes remain, and
 2026-10-18 | Lane B deploy | server 2026.10.18.15 (959a68f renewal replay, b5c7672 Stripe cancel_at, c5b73c8 catch-all, 006e4b5) + edge 2026.10.18.2 (f87e204) on oracle/anvit, relays untouched; /readyz 200, nodes routes healthy; DB backup database-20261018T093126.
 Rollback: rollout-server.py --image paperboat-server:2026.10.18.14; edge pbh install --relay-image <same> --tunnel-image paperboat-tunnel:2026.10.18.1. Waits for Lane A/U post-deploy green list on HP.
 2026-10-18 | Decision F8-08 / console tunnel create | rows ticked:F8-08 L | Tunnels are created on the machine (control plane needs its signed identity and local connector); console New tunnel shows the exact pb tunnel create command, console lists/renames/edits routes/domains. Row re-worded accordingly.
+
+2026-10-18 | Lane B edge 2026.10.18.2 (f87e204) | anvit 13:21:12Z and oracle 13:26:25Z; relays untouched; both /readyz routes+carrier healthy, 0 drift. Anvit 5-min watch (Lane A): HP/dadape-2/Lane U machines stayed online, exec 3/3 ok; oracle watch + F7-05 in progress.
+Rollback per host: pbh install --relay-image ghcr.io/pinksaucepasta/paperboat/relay:2026.10.16.4 --tunnel-image paperboat-tunnel:2026.10.18.1. Server stays 2026.10.18.15; next server deploy held for Lane C's live inbox_list (no 098).
