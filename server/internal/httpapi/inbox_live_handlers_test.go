@@ -116,6 +116,7 @@ func TestInboxHandlersMapEveryFailureToItsStableCode(t *testing.T) {
 		{inboxdispatch.ErrFileNotFound, http.StatusNotFound, "inbox_file_not_found"},
 		{inboxdispatch.ErrMachineOffline, http.StatusConflict, "machine_offline"},
 		{inboxdispatch.ErrCapabilityDisabled, http.StatusConflict, "inbox_unavailable"},
+		{inboxdispatch.ErrMachineOutdated, http.StatusConflict, "machine_update_required"},
 		{inboxdispatch.ErrFileTooLarge, http.StatusRequestEntityTooLarge, "file_too_large"},
 		{errors.Join(inboxdispatch.ErrMachineUnreachable, errors.New("dial tcp")), http.StatusServiceUnavailable, "machine_unreachable"},
 		{errors.New("database exploded"), http.StatusInternalServerError, "internal_error"},

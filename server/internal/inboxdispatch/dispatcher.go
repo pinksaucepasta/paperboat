@@ -44,7 +44,9 @@ var (
 	// ErrMachineUnreachable: the machine did not answer, or answered something unusable.
 	ErrMachineUnreachable = errors.New("inbox machine is unreachable")
 	ErrFileNotFound       = errors.New("inbox file not found")
-	ErrFileTooLarge       = errors.New("inbox file is too large to download here")
+	// ErrMachineOutdated: the machine runs a Paperboat that cannot list its Inbox yet.
+	ErrMachineOutdated = errors.New("inbox machine runs an older Paperboat")
+	ErrFileTooLarge    = errors.New("inbox file is too large to download here")
 	// ErrCapabilityDisabled: the machine has turned file receiving off.
 	ErrCapabilityDisabled = errors.New("inbox capability is disabled on the machine")
 )
@@ -192,6 +194,10 @@ func (d *Dispatcher) List(ctx context.Context, request Request) (Listing, error)
 	}
 	defer response.Body.Close()
 	body, readErr := io.ReadAll(io.LimitReader(response.Body, maxListBody+1))
+	if response.StatusCode == http.StatusNotFound {
+		// A listing always exists on a machine that serves it; 404 means the route is not there.
+		return Listing{}, ErrMachineOutdated
+	}
 	if response.StatusCode != http.StatusOK {
 		return Listing{}, statusError(response.StatusCode)
 	}

@@ -67,7 +67,10 @@ export function FileList({ machine: tabMachine }: { machine?: Machine }) {
     .flatMap((entry, index) => (inboxes[index]?.data?.items ?? []).map((file) => ({ file, machine: entry })))
     .filter((row) => !text || row.file.name.toLowerCase().includes(text))
     .sort((a, b) => Date.parse(b.file.received_at) - Date.parse(a.file.received_at))
-  const failed = readable.filter((_, index) => inboxes[index]?.isError && !isOffline(inboxes[index].error))
+  const outdated = readable.filter((_, index) => isOutdated(inboxes[index]?.error))
+  const failed = readable.filter(
+    (_, index) => inboxes[index]?.isError && !isOffline(inboxes[index].error) && !isOutdated(inboxes[index].error),
+  )
   const unavailable = [...offline, ...readable.filter((_, index) => isOffline(inboxes[index]?.error))]
   const selectedRows = rows.filter((row) => selected.has(rowKey(row)))
   const allSelected = rows.length > 0 && selectedRows.length === rows.length
@@ -122,7 +125,7 @@ export function FileList({ machine: tabMachine }: { machine?: Machine }) {
               <SendFilesButton machine={machine} />
             </EmptyContent>
           )}
-          <InboxNotes unavailable={allUnavailable ? [] : unavailable} truncated={[]} />
+          <InboxNotes unavailable={allUnavailable ? [] : unavailable} outdated={outdated} truncated={[]} />
         </Empty>
       ) : (
         <div className="flex flex-col gap-3">
@@ -207,7 +210,7 @@ export function FileList({ machine: tabMachine }: { machine?: Machine }) {
               </button>
             </p>
           )}
-          <InboxNotes unavailable={unavailable} truncated={truncated} />
+          <InboxNotes unavailable={unavailable} outdated={outdated} truncated={truncated} />
         </div>
       )}
 
@@ -237,14 +240,25 @@ export function FileList({ machine: tabMachine }: { machine?: Machine }) {
 
 /** The server answers 409 machine_offline when the machine went away between lists. */
 const isOffline = (error: unknown) => error instanceof ApiError && error.code === "machine_offline"
+/** The machine runs a Paperboat that cannot list its Inbox yet. */
+const isOutdated = (error: unknown) => error instanceof ApiError && error.code === "machine_update_required"
 
 /** What the list can't say: machines whose Inbox is unavailable, and Inboxes longer than the list. */
-function InboxNotes({ unavailable, truncated }: { unavailable: Machine[]; truncated: Machine[] }) {
-  if (!unavailable.length && !truncated.length) return null
+function InboxNotes({
+  unavailable,
+  outdated,
+  truncated,
+}: {
+  unavailable: Machine[]
+  outdated: Machine[]
+  truncated: Machine[]
+}) {
+  if (!unavailable.length && !outdated.length && !truncated.length) return null
   const names = (machines: Machine[]) => machines.map((entry) => entry.alias).join(", ")
   return (
     <div className="flex flex-col gap-1 text-sm text-muted-foreground">
       {unavailable.length > 0 && <p>{names(unavailable)}: machine offline, Inbox unavailable.</p>}
+      {outdated.length > 0 && <p>Update Paperboat on {names(outdated)} to browse its Inbox here.</p>}
       {truncated.length > 0 && <p>Showing the newest 200 files of {names(truncated)}’s Inbox.</p>}
     </div>
   )

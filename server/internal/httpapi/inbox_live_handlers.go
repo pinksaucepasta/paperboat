@@ -68,6 +68,8 @@ func writeInboxDispatchError(w http.ResponseWriter, r *http.Request, err error) 
 	switch {
 	case errors.Is(err, inboxdispatch.ErrFileNotFound):
 		writeError(w, r, http.StatusNotFound, "inbox_file_not_found", "That file is no longer in the machine's Inbox.")
+	case errors.Is(err, inboxdispatch.ErrMachineOutdated):
+		writeError(w, r, http.StatusConflict, "machine_update_required", "This machine runs an older Paperboat that cannot list its Inbox. Update Paperboat on it, then try again.")
 	case errors.Is(err, inboxdispatch.ErrMachineOffline):
 		writeError(w, r, http.StatusConflict, "machine_offline", "The machine is offline or is not receiving files. Its Inbox can be read again when it is back.")
 	case errors.Is(err, inboxdispatch.ErrCapabilityDisabled):

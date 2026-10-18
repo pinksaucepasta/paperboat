@@ -230,6 +230,7 @@ func TestListRefusesInvalidListingsAndMapsAnswers(t *testing.T) {
 		"unknown field":  {200, `{"total":0,"items":[],"extra":1}`, ErrMachineUnreachable},
 		"not json":       {200, `<html>`, ErrMachineUnreachable},
 		"capability off": {409, ``, ErrCapabilityDisabled},
+		"older daemon":   {404, ``, ErrMachineOutdated},
 		"machine error":  {500, ``, ErrMachineUnreachable},
 	} {
 		status, body = tc.status, tc.body
