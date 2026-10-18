@@ -276,3 +276,16 @@ get the machine's own sshd environment. An opt-in shell hook (`pb env hook` addi
 bash/zsh/fish startup) would cover them. Open question first: a plain SSH login identifies only a
 unix user, not a Paperboat account or workspace, so the hook must not guess whose values to load.
 Must fail quietly when the vault is locked and never slow shell startup. Build only if users ask.
+
+## Unify tunnels and previews — later
+
+Recorded 2026-10-18 at the user's direction.
+
+Explore one underlying implementation and consistent user workflow for tunnels and
+previews, sharing publication, readiness, renewal, routing, expiry and cleanup instead
+of maintaining duplicate lifecycle paths. Decide whether separate CLI names remain
+useful for temporary previews and persistent tunnels before changing the public UX.
+
+Preserve existing protocol support, access controls and privacy boundaries: private
+native access remains end-to-end encrypted; browser HTTP terminates TLS at the edge.
+This is a post-launch design item, not new implementation work or a launch requirement.
