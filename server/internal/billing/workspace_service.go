@@ -461,9 +461,6 @@ func (s *WorkspaceService) HandleWebhook(ctx context.Context, event StripeWebhoo
 	if s.stripe == nil {
 		return false, ErrStripeUnavailable
 	}
-	if handled, processed, err := s.handleTopupWebhook(ctx, event); handled {
-		return processed, err
-	}
 	if event.ID == "" {
 		return false, nil
 	}
@@ -475,6 +472,9 @@ func (s *WorkspaceService) HandleWebhook(ctx context.Context, event StripeWebhoo
 		return false, nil
 	}
 	if handled, processed, err := s.handleTeamCreationWebhook(ctx, event); handled || err != nil {
+		return processed, err
+	}
+	if handled, processed, err := s.handleTopupWebhook(ctx, event); handled {
 		return processed, err
 	}
 	subscriptionID := event.SubscriptionID()

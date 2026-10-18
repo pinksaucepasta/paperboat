@@ -1859,3 +1859,5 @@ Quantity single-unit owner RED unit0.145s/PG0.34s/Stripe2.05s; permanent-credit 
 2026-10-18 | Lane B top-up workspace gate triage | TestTailcatQUIC round0 loopback handshake deadline FAIL26.98s; one focused rerun PASS35.804s (/tmp/topup-peerquic-focused.log), no investigation per triage rule. Existing /tmp/topup-final-gate.log continues; next broad gate waits for serialized slot, top-up owner checks remain green.
 
 2026-10-18 | Lane B top-up migration ordering | Rebased paid-Team producer eae0e0a; unpublished top-up schema086 renamed090 above published087, permanent credits/quantity contract unchanged. Fresh isolated database and rebuilt embedded-migration PostgreSQL owners required; no production migration/activation, C communication pause respected.
+
+2026-10-18 | Lane B top-up/paid-Team dispatch | Incoming Team owner RED0.16s: top-up lookup intercepted unrelated unpaid Checkout; Team handler now dispatches first. Rebuilt schema090 PostgreSQL owners GREEN: Team0.35s/top-up0.65s, protected lifetime-topup-migration090-dispatch.log; server gate phase still pending at source change.
