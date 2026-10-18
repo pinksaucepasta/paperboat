@@ -1864,3 +1864,5 @@ Quantity single-unit owner RED unit0.145s/PG0.34s/Stripe2.05s; permanent-credit 
 
 2026-10-18 | Lane B top-up final workspace evidence | Rebased abf4031 before server phase; matching CLI/shared/relay reuse A /tmp/paperboat-lane-a-publication-gate.log EXIT0. Own raw gate retains QUIC FAIL26.98s→unchanged focused PASS35.804s and tunnel bounded-handshake FAIL1.09s→unchanged focused PASS0.061s (/tmp/topup-tunnel-handshake-focused.log), nonrepeating under triage; no raw GATE PASS claim.
 Schema090 fresh isolated full billing PostgreSQL PASS (lifetime-topup-migration090-full-billing.log); final merged race /tmp/topup-migration090-race.log and current /tmp/topup-final-gate.log finish before publication. No C contact, production migration or activation during18.10 freeze.
+
+2026-10-18 | Lane B top-up final publication merge | Rebased800ad34 preserving identity093/seats089/allowance contracts; unpublished top-up schema090→094 above public093. Rebuilt embedded094 binary/fresh own isolated database: full billing PostgreSQL PASS, top-up0.71s/paid-Team0.26s/seats0.49s; receipt lifetime-topup-migration094-full-billing.log.

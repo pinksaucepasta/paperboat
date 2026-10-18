@@ -48,7 +48,7 @@ func (s *WorkspaceService) ReserveUserMachineSeat(ctx context.Context, tx *db.Tx
 // Workspace is the billing owner, independent of the member initiating a request.
 // Membership and resource grants remain the authority for accessing team resources.
 type Workspace struct {
-	TopupBytesRemaining int64 `json:"topup_bytes_remaining"`
+	TopupBytesRemaining  int64             `json:"topup_bytes_remaining"`
 	AllowancePeriodStart time.Time         `json:"allowance_period_start"`
 	AllowancePeriodEnd   time.Time         `json:"allowance_period_end"`
 	Product              *WorkspaceProduct `json:"product,omitempty"`
