@@ -2,7 +2,7 @@
 .TH "PB-TEAM-CREATE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
 
 .SH NAME
-pb-team-create - Create a team
+pb-team-create - Create a team by paying for its seats
 
 
 .SH SYNOPSIS
@@ -10,7 +10,7 @@ pb-team-create - Create a team
 
 
 .SH DESCRIPTION
-Create a team
+Create a team. Teams are paid for first: this prints a secure Checkout link for the seats, and the team exists as soon as payment completes. Running the same command again reuses the same order.
 
 .PP
 Create a named team with this account as its initial owner. Membership and resource grants are managed separately after creation.
@@ -27,8 +27,24 @@ JSON output is supported with --json.
 	help for create
 
 .PP
+\fB--interval\fP="month"
+	billing interval: month or year
+
+.PP
 \fB--json\fP[=false]
 	print canonical JSON
+
+.PP
+\fB--no-wait\fP[=false]
+	print the Checkout link and return without waiting for payment
+
+.PP
+\fB--seats\fP=1
+	seats to buy, including the owner's
+
+.PP
+\fB--wait-timeout\fP=15m0s
+	how long to wait for payment before returning
 
 
 .SH OPTIONS INHERITED FROM PARENT COMMANDS

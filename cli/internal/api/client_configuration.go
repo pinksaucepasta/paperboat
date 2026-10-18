@@ -14,6 +14,7 @@ type ClientConfiguration struct {
 	InstallerBaseURL      string `json:"installer_base_url"`
 	CLIVerificationURL    string `json:"cli_verification_url"`
 	MachinesURL           string `json:"machines_url"`
+	ConsoleURL            string `json:"console_url"`
 }
 
 func (c *Client) ClientConfiguration(ctx context.Context) (ClientConfiguration, error) {

@@ -29,6 +29,9 @@ const (
 	commandRejectConfigRepositoryEmpty
 	commandRejectConfigRepositoryBranch
 	commandRejectConfigRepositoryInvalid
+	commandRejectTeamReserved
+	commandRejectTeamRequestInvalid
+	commandRejectTeamSeatRequired
 )
 
 // commandRejection describes a command-owned refusal. Its
@@ -40,7 +43,7 @@ type commandRejection struct {
 }
 
 func (e commandRejection) valid() bool {
-	return e.reason >= commandRejectDefaultSessionRename && e.reason <= commandRejectConfigRepositoryInvalid
+	return e.reason >= commandRejectDefaultSessionRename && e.reason <= commandRejectTeamSeatRequired
 }
 func (e commandRejection) Error() string {
 	switch e.reason {
@@ -58,6 +61,12 @@ func (e commandRejection) Error() string {
 		return "The config repository does not have the sync branch. Create that branch (or pick the repository's existing branch in the machine configuration), then retry."
 	case commandRejectConfigRepositoryInvalid:
 		return "The config repository could not be read. Check that it exists and that its saved credentials still work; a local repository must be a bare Git repository at a path without symbolic links. Then retry."
+	case commandRejectTeamReserved:
+		return "That team name is already reserved. Choose another name, or run the original `pb team create` command again to reuse its payment."
+	case commandRejectTeamRequestInvalid:
+		return "The server rejected the team request. Use an available team name, at least one seat and a month or year interval."
+	case commandRejectTeamSeatRequired:
+		return "No free seat: every purchased seat is used or held by a pending invitation. Cancel a pending invitation (`pb team cancel-invite`) or add a seat in the console, then try again."
 	case commandRejectInboxDeclined:
 		return "The recipient declined this transfer. Contact them before sending again."
 	case commandRejectDefaultSessionRename:

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestTeamInviteUsesEmailBeforeSignup(t *testing.T) {
@@ -390,5 +391,136 @@ func TestTeamGetPreservesIdentitySuspensionAndResourcePermissions(t *testing.T) 
 				t.Errorf("inactive access shown as current: %s", &output)
 			}
 		}
+	}
+}
+
+// Contract of eae0e0a: POST /v1/teams {operation_id, team_id, seats, interval,
+// success_url, cancel_url} with Idempotency-Key == operation_id returns the
+// Checkout URL; the team exists only after payment.
+func TestTeamCreateIsPaidFirstAndWaitsUntilTheTeamExists(t *testing.T) {
+	supportedTeamFixtureVersion(t)
+	previousInterval, previousOpen := teamCreatePollInterval, openBrowser
+	teamCreatePollInterval = time.Millisecond
+	var opened string
+	openBrowser = func(target string) error { opened = target; return nil }
+	t.Cleanup(func() { teamCreatePollInterval, openBrowser = previousInterval, previousOpen })
+	var operations []string
+	polls := 0
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if teamFixtureUpdatePolicy(w, r) {
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method + " " + r.URL.Path {
+		case "GET /v1/client-configuration":
+			_, _ = w.Write([]byte(`{"data":{"version":"1","machines_url":"https://console.example.test/machines","cli_verification_url":"https://console.example.test/cli","console_url":"https://console.example.test/"}}`))
+		case "POST /v1/teams":
+			var input map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+				t.Fatal(err)
+			}
+			operation, _ := input["operation_id"].(string)
+			operations = append(operations, operation)
+			if operation == "" || r.Header.Get("Idempotency-Key") != operation || input["team_id"] != "acme" || input["seats"] != float64(3) || input["interval"] != "year" ||
+				input["success_url"] != "https://console.example.test/team?created=acme" || input["cancel_url"] != "https://console.example.test/team" {
+				t.Errorf("create request violates the paid-first contract: %v key=%q", input, r.Header.Get("Idempotency-Key"))
+				w.WriteHeader(400)
+				_, _ = w.Write([]byte(`{"error":{"code":"validation_failed","message":"bad","request_id":"r","details":{}}}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"data":{"url":"https://checkout.example.test/c/pay_1"}}`))
+		case "GET /v1/teams/acme":
+			polls++
+			if polls < 3 {
+				w.WriteHeader(404)
+				_, _ = w.Write([]byte(`{"error":{"code":"not_found","message":"missing","request_id":"r","details":{}}}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"data":{"team_id":"acme","owner_account":"acc_1","generation":1}}`))
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(404)
+		}
+	}))
+	defer server.Close()
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	writeTestProfile(t, dir, configPath, server.URL)
+	args := []string{"team", "create", "acme", "--seats", "3", "--interval", "year", "--server", server.URL, "--config", configPath}
+	var output bytes.Buffer
+	if code := run(t.Context(), args, &output, &output); code != 0 {
+		t.Fatalf("exit=%d output=%s", code, output.String())
+	}
+	if opened != "https://checkout.example.test/c/pay_1" || !strings.Contains(output.String(), "https://checkout.example.test/c/pay_1") || !strings.Contains(output.String(), "TEAM\tacme") || polls != 3 {
+		t.Fatalf("opened=%q polls=%d output=%s", opened, polls, output.String())
+	}
+	// The same command again reuses the same order.
+	output.Reset()
+	polls = 2
+	if code := run(t.Context(), args, &output, &output); code != 0 || len(operations) != 2 || operations[0] != operations[1] {
+		t.Fatalf("repeat exit=%d operations=%v", code, operations)
+	}
+}
+
+func TestTeamCreateNamesAReservedTeamAndNoWaitStopsAtCheckout(t *testing.T) {
+	supportedTeamFixtureVersion(t)
+	reserved := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if teamFixtureUpdatePolicy(w, r) {
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/client-configuration":
+			_, _ = w.Write([]byte(`{"data":{"version":"1","machines_url":"https://console.example.test/machines","cli_verification_url":"https://console.example.test/cli","console_url":"https://console.example.test"}}`))
+		case "/v1/teams":
+			if reserved {
+				w.WriteHeader(409)
+				_, _ = w.Write([]byte(`{"error":{"code":"team_reserved","message":"reserved","request_id":"r","details":{}}}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"data":{"url":"https://checkout.example.test/c/pay_2"}}`))
+		default:
+			t.Errorf("--no-wait polled %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	previousOpen := openBrowser
+	openBrowser = func(string) error { return errors.New("no browser") }
+	t.Cleanup(func() { openBrowser = previousOpen })
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	writeTestProfile(t, dir, configPath, server.URL)
+	base := []string{"team", "create", "acme", "--no-wait", "--server", server.URL, "--config", configPath}
+	var output bytes.Buffer
+	if code := run(t.Context(), append(base, "--json"), &output, &output); code != 0 || !strings.Contains(output.String(), `"state":"awaiting_payment"`) || !strings.Contains(output.String(), "pay_2") {
+		t.Fatalf("no-wait exit=%d output=%s", code, output.String())
+	}
+	reserved = true
+	output.Reset()
+	if code := run(t.Context(), base, &output, &output); code == 0 || !strings.Contains(output.String(), "already reserved") {
+		t.Fatalf("reserved exit=%d output=%s", code, output.String())
+	}
+}
+
+func TestTeamInviteExplainsSeatRequiredFromTheErrorCode(t *testing.T) {
+	supportedTeamFixtureVersion(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if teamFixtureUpdatePolicy(w, r) {
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"error":{"code":"seat_required","message":"wording may change","request_id":"r","details":{}}}`))
+	}))
+	defer server.Close()
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	writeTestProfile(t, dir, configPath, server.URL)
+	var output bytes.Buffer
+	args := []string{"team", "invite", "team_1", "new.member@example.test", "--generation", "3", "--server", server.URL, "--config", configPath}
+	if code := run(t.Context(), args, &output, &output); code == 0 || !strings.Contains(output.String(), "No free seat") || !strings.Contains(output.String(), "cancel-invite") {
+		t.Fatalf("exit=%d output=%s", code, output.String())
 	}
 }

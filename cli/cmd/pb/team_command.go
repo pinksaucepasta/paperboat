@@ -1,14 +1,21 @@
 package main
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/mail"
+	"net/url"
 	"sort"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -79,24 +86,121 @@ func teamReadCommand(action string) *cobra.Command {
 	return c
 }
 
+var teamCreatePollInterval = time.Duration(config.DefaultPollIntervalSeconds) * time.Second
+
+// startPaidTeamCreate reserves the Team and returns the Checkout that pays for
+// its seats. The operation ID is derived from the request, so repeating the same
+// command after a lost response reuses the same order instead of creating another.
+func startPaidTeamCreate(ctx context.Context, client *api.Client, team string, seats int, interval string) (api.TeamCheckout, error) {
+	configuration, err := client.ClientConfiguration(ctx)
+	if err != nil {
+		return api.TeamCheckout{}, err
+	}
+	console, err := url.Parse(strings.TrimRight(configuration.ConsoleURL, "/"))
+	if err != nil || console.Host == "" || console.Scheme != "https" && console.Scheme != "http" {
+		return api.TeamCheckout{}, errors.New("the Paperboat server did not publish its console address; update pb or contact the server operator")
+	}
+	back := console.String() + "/team"
+	sum := sha256.Sum256([]byte(fmt.Sprintf("team-create\x00%s\x00%d\x00%s", team, seats, interval)))
+	operation := "operation_" + hex.EncodeToString(sum[:16])
+	return client.CreateTeam(ctx, api.TeamCreateRequest{OperationID: operation, TeamID: team, Seats: seats, Interval: interval, SuccessURL: back + "?created=" + url.QueryEscape(team), CancelURL: back})
+}
+
 func teamCreateCommand() *cobra.Command {
-	c := &cobra.Command{Use: "create <team>", Short: "Create a team", Args: commandArgs(cobra.ExactArgs(1)), RunE: func(c *cobra.Command, args []string) error {
+	c := &cobra.Command{Use: "create <team>", Short: "Create a team by paying for its seats", Long: "Create a team. Teams are paid for first: this prints a secure Checkout link for the seats, and the team exists as soon as payment completes. Running the same command again reuses the same order.", Args: commandArgs(cobra.ExactArgs(1)), RunE: func(c *cobra.Command, args []string) error {
 		if !validTeamCLIIdentifier(args[0]) {
 			return localArgumentError("team must be a valid identifier")
+		}
+		seats, _ := c.Flags().GetInt("seats")
+		interval, _ := c.Flags().GetString("interval")
+		if seats < 1 || seats > 128 {
+			return localArgumentError("--seats must be between 1 and 128; the owner uses one seat")
+		}
+		if interval != "month" && interval != "year" {
+			return localArgumentError("--interval must be month or year")
 		}
 		client, err := backendForCommand(c)
 		if err != nil {
 			return err
 		}
-		team, err := client.CreateTeam(c.Context(), api.TeamCreateRequest{OperationID: newIdempotencyKey(), TeamID: args[0]})
+		checkout, err := startPaidTeamCreate(c.Context(), client, args[0], seats, interval)
 		if err != nil {
-			return err
+			return teamCreateFailure(err)
 		}
 		jsonOutput, _ := c.Flags().GetBool("json")
-		return writeTeamOutput(c, jsonOutput, team)
+		noWait, _ := c.Flags().GetBool("no-wait")
+		if jsonOutput {
+			if err := json.NewEncoder(c.OutOrStdout()).Encode(map[string]any{"team_id": args[0], "state": "awaiting_payment", "checkout_url": checkout.URL, "seats": seats, "interval": interval}); err != nil {
+				return err
+			}
+		} else {
+			fmt.Fprintf(c.OutOrStdout(), "To create team %s, pay for %d seat(s) (billed per %s) here:\n  %s\nThe team is created when payment completes.\n", args[0], seats, interval, checkout.URL)
+		}
+		if err := openBrowser(checkout.URL); err != nil && !jsonOutput {
+			fmt.Fprintln(c.ErrOrStderr(), "Could not open a browser; open the link above.")
+		}
+		if noWait {
+			return nil
+		}
+		timeout, _ := c.Flags().GetDuration("wait-timeout")
+		return waitForPaidTeam(c, client, args[0], timeout, jsonOutput)
 	}}
+	c.Flags().Int("seats", 1, "seats to buy, including the owner's")
+	c.Flags().String("interval", "month", "billing interval: month or year")
+	c.Flags().Bool("no-wait", false, "print the Checkout link and return without waiting for payment")
+	c.Flags().Duration("wait-timeout", 15*time.Minute, "how long to wait for payment before returning")
 	c.Flags().Bool("json", false, "print canonical JSON")
 	return c
+}
+
+// teamSeatFailure turns the server's seat_required code (not its message text)
+// into the recovery the inviter can act on.
+func teamSeatFailure(err error) error {
+	var rejected *api.APIError
+	if errors.As(err, &rejected) && rejected.Code == "seat_required" {
+		return commandRejection{reason: commandRejectTeamSeatRequired}
+	}
+	return err
+}
+
+// teamCreateFailure explains the stable server codes a creator can act on.
+func teamCreateFailure(err error) error {
+	var rejected *api.APIError
+	if errors.As(err, &rejected) {
+		switch rejected.Code {
+		case "team_reserved":
+			return commandRejection{reason: commandRejectTeamReserved}
+		case "validation_failed":
+			return commandRejection{reason: commandRejectTeamRequestInvalid}
+		}
+	}
+	return err
+}
+
+// waitForPaidTeam polls until the paid Team exists. Waiting is bounded; payment
+// is not cancelled when it is interrupted, so the message says how to continue.
+func waitForPaidTeam(c *cobra.Command, client *api.Client, team string, timeout time.Duration, jsonOutput bool) error {
+	ctx, cancel := context.WithTimeout(c.Context(), timeout)
+	defer cancel()
+	ticker := time.NewTicker(teamCreatePollInterval)
+	defer ticker.Stop()
+	if !jsonOutput {
+		fmt.Fprintln(c.ErrOrStderr(), "Waiting for payment... (Ctrl+C stops waiting; the team is still created once you pay)")
+	}
+	for {
+		found, err := client.GetTeam(ctx, team)
+		switch {
+		case err == nil:
+			return writeTeamOutput(c, jsonOutput, found)
+		case !api.IsNotFound(err) && ctx.Err() == nil:
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("stopped waiting before team %s was created; after paying, check with `pb team get %s`", team, team)
+		case <-ticker.C:
+		}
+	}
 }
 
 func teamInviteCommand() *cobra.Command {
@@ -116,7 +220,7 @@ func teamInviteCommand() *cobra.Command {
 		}
 		invite, err := client.InviteTeamMember(c.Context(), args[0], api.TeamInviteRequest{OperationID: newIdempotencyKey(), ExpectedGeneration: generation, Email: email})
 		if err != nil {
-			return err
+			return teamSeatFailure(err)
 		}
 		jsonOutput, _ := c.Flags().GetBool("json")
 		if jsonOutput {

@@ -45,9 +45,20 @@ type TeamTerminalSessionGrant struct {
 	Active            bool   `json:"active"`
 }
 
+// TeamCreateRequest reserves a Team and asks for Checkout of its purchased seats;
+// the Team exists only after payment succeeds. The Idempotency-Key equals OperationID.
 type TeamCreateRequest struct {
 	OperationID string `json:"operation_id"`
 	TeamID      string `json:"team_id"`
+	Seats       int    `json:"seats"`
+	Interval    string `json:"interval"`
+	SuccessURL  string `json:"success_url"`
+	CancelURL   string `json:"cancel_url"`
+}
+
+// TeamCheckout is the Stripe Checkout address that completes Team creation.
+type TeamCheckout struct {
+	URL string `json:"url"`
 }
 type TeamMutationRequest struct {
 	OperationID        string `json:"operation_id"`
@@ -103,8 +114,8 @@ func (c *Client) GetTeam(ctx context.Context, id string) (Team, error) {
 	err := c.do(ctx, http.MethodGet, "/v1/teams/"+url.PathEscape(id), nil, &out)
 	return out, err
 }
-func (c *Client) CreateTeam(ctx context.Context, in TeamCreateRequest) (Team, error) {
-	var out Team
+func (c *Client) CreateTeam(ctx context.Context, in TeamCreateRequest) (TeamCheckout, error) {
+	var out TeamCheckout
 	err := c.doWithHeaders(ctx, http.MethodPost, "/v1/teams", in, &out, teamHeaders(in.OperationID))
 	return out, err
 }

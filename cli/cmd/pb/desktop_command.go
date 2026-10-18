@@ -233,7 +233,7 @@ func handleDesktop(c *cobra.Command, in desktopRequest) (any, error) {
 		case "team.get":
 			return client.GetTeam(ctx, p.TeamID)
 		case "team.create":
-			return client.CreateTeam(ctx, api.TeamCreateRequest{OperationID: newIdempotencyKey(), TeamID: p.TeamID})
+			return startPaidTeamCreate(ctx, client, p.TeamID, 1, "month")
 		case "team.invite":
 			return client.InviteTeamMember(ctx, p.TeamID, api.TeamInviteRequest{OperationID: newIdempotencyKey(), ExpectedGeneration: p.ExpectedGeneration, AccountID: p.AccountID})
 		case "team.mutate":
