@@ -390,3 +390,36 @@ func TestProxyFailureOwnerPreservesCauseAndRecoveryWithoutFormatting(t *testing.
 		t.Fatal("diagnostic omitted")
 	}
 }
+
+type writableUpgradeBody struct {
+	io.Reader
+	written bytes.Buffer
+}
+
+func (b *writableUpgradeBody) Write(payload []byte) (int, error) { return b.written.Write(payload) }
+func (b *writableUpgradeBody) Close() error                      { return nil }
+
+// ReverseProxy bridges an upgraded connection only when the 101 response body
+// is writable, so request telemetry must not strip the origin's Write.
+func TestRequestTelemetryKeepsUpgradeResponseBodyWritable(t *testing.T) {
+	producer, _, _ := newTestRequestTelemetry(t)
+	origin := &writableUpgradeBody{Reader: strings.NewReader("frames")}
+	transport := producer.RoundTripper(telemetryRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusSwitchingProtocols, ProtoMajor: 1, Body: origin, Header: make(http.Header), Request: request}, nil
+	}))
+	upgrade := httptest.NewRequest(http.MethodGet, "http://origin.invalid/socket", nil)
+	upgrade.Header.Set("Connection", "Upgrade")
+	upgrade.Header.Set("Upgrade", "websocket")
+	response, err := transport.RoundTrip(upgrade)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer, ok := response.Body.(io.ReadWriteCloser)
+	if !ok {
+		t.Fatal("telemetry wrapped the 101 body without Write: ReverseProxy answers 502")
+	}
+	if _, err := writer.Write([]byte("client-frame")); err != nil || origin.written.String() != "client-frame" {
+		t.Fatalf("write did not reach the origin: %q err=%v", origin.written.String(), err)
+	}
+	_ = writer.Close()
+}

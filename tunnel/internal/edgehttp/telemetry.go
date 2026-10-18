@@ -236,8 +236,19 @@ func (t requestRoundTripper) RoundTrip(request *http.Request) (*http.Response, e
 	if response.Body == nil {
 		response.Body = http.NoBody
 	}
-	response.Body = newResponseBody(request.Context(), response.Body, lifecycle)
+	original := response.Body
+	response.Body = newResponseBody(request.Context(), original, lifecycle)
+	if writer, ok := original.(io.Writer); ok && response.StatusCode == http.StatusSwitchingProtocols {
+		// ReverseProxy bridges an upgraded connection only through a writable body.
+		response.Body = upgradedResponseBody{ReadCloser: response.Body, Writer: writer}
+	}
 	return response, nil
+}
+
+// upgradedResponseBody keeps the origin's Write on a counted 101 body.
+type upgradedResponseBody struct {
+	io.ReadCloser
+	io.Writer
 }
 
 func (p *RequestTelemetry) infoFor(ctx context.Context) RequestInfo {
