@@ -1,6 +1,7 @@
 # Checks that have ever passed on hp; every one must pass on a build before it becomes the base.
 access-machine:hp-hp
 cleanup-preview:hp
+config-sync:hp
 exec-long:hp
 exec-main:hp-hp
 exec:hp
