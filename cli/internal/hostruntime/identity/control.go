@@ -108,7 +108,7 @@ func (s *Store) MachineProof(operationID, method, path string, body []byte, now 
 		return nil, invalidIdentityStore(err)
 	}
 	method = strings.ToUpper(method)
-	if len(operationID) < 8 || len(operationID) > 128 || method != http.MethodPost && method != http.MethodPut && method != http.MethodDelete || !strings.HasPrefix(path, "/v1/") || len(body) > 1<<20 {
+	if len(operationID) < 8 || len(operationID) > 128 || method != http.MethodGet && method != http.MethodPost && method != http.MethodPut && method != http.MethodDelete || !strings.HasPrefix(path, "/v1/") || len(body) > 1<<20 {
 		return nil, ErrInvalidStore
 	}
 	now = now.UTC()
