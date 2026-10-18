@@ -578,6 +578,13 @@ func (s *HTTPSProductionAssemblySource) carrierSessionSource(ctx context.Context
 		}
 		result, err := connector.NewHTTPNetworkDialer(configured)(dialCtx, dialRequest)
 		if err != nil && !errors.Is(dialCtx.Err(), context.Canceled) {
+
+			s.mu.Lock()
+			recorder := s.recorder
+			s.mu.Unlock()
+			if recorder != nil {
+				_ = recorder.Record("tunnel", carrierDialDiagnostic(err), "warning", map[string]string{"operation": "carrier_dial"})
+			}
 			s.report(tunnelmanager.Observation{TunnelID: request.TunnelID, ConnectorID: request.ConnectorID,
 				Code: carrierDialDiagnostic(err), Retryable: true, ObservedAt: s.clock.Now().UTC(), Err: connector.ErrDataCarrierUnavailable})
 		}

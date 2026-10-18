@@ -26,6 +26,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connectorrotation"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hoststate"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelmanager"
@@ -302,6 +303,15 @@ func TestHTTPSProductionAssemblySourceBootstrapBindsProofDescriptorAndLazySessio
 			}
 			if prepared.Identity.AccountID != descriptor.AccountID || prepared.Identity.SessionID != descriptor.SessionID || prepared.Identity.Generation != descriptor.ConfigGeneration || prepared.Config.MaximumCarriers != 1 || prepared.Config.FailureDomains[0] != "zone_a" {
 				t.Fatalf("prepared carrier = %+v config=%+v", prepared.Identity, prepared.Config)
+			}
+			if test.name == "ready" {
+				dialCtx, cancelDial := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
+				defer cancelDial()
+				_, dialErr := sessionSource.Dialer(dialCtx, connector.DataCarrierDialRequest{Transport: connector.HTTP2, EdgeID: "edge_01", ProcessEpoch: "epoch_0001", FailureDomain: "zone_a", Identity: prepared.Identity})
+				events := recorder.Recent()
+				if dialErr == nil || len(events) != 1 || events[0].Code != "carrier_timeout" {
+					t.Fatalf("dial failure missing from local diagnostics: err=%v events=%+v", dialErr, events)
+				}
 			}
 			auth.mu.Lock()
 			defer auth.mu.Unlock()
