@@ -150,3 +150,25 @@ func userMachineMaintenanceApprovalDecision(service *usermachines.Service, decis
 		}
 	}
 }
+
+// userMachineInbox lists the last Inbox listing a machine reported: names, sizes and times, no contents.
+func userMachineInbox(service *usermachines.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		principal, ok := principalFromContext(r.Context())
+		if !ok {
+			writeError(w, r, http.StatusUnauthorized, "unauthenticated", "Authentication is required.")
+			return
+		}
+		result, err := service.ListInbox(r.Context(), principal.User.ID, r.PathValue("machine_id"))
+		if errors.Is(err, usermachines.ErrNotFound) {
+			writeError(w, r, http.StatusNotFound, "user_machine_not_found", "Machine was not found.")
+			return
+		}
+		if err != nil {
+			writeError(w, r, http.StatusInternalServerError, "internal_error", "Unable to read the machine inbox.", err)
+			return
+		}
+		noStore(w)
+		writeJSON(w, http.StatusOK, SuccessResponse{Data: result})
+	}
+}

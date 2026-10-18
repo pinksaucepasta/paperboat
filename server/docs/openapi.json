@@ -5959,6 +5959,9 @@
           },
           "machine_services": {
             "$ref": "#/components/schemas/MachineServicesSnapshot"
+          },
+          "inbox": {
+            "$ref": "#/components/schemas/InboxObservation"
           }
         }
       },
@@ -15162,6 +15165,93 @@
           "cancel_url": {
             "type": "string",
             "format": "uri"
+          }
+        }
+      },
+      "InboxItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name",
+          "size",
+          "received_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "received_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "MachineInbox": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "observed_at",
+          "total",
+          "items"
+        ],
+        "properties": {
+          "observed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the machine observed this listing; null until it has reported."
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Files in the Inbox; may exceed items."
+          },
+          "items": {
+            "type": "array",
+            "maxItems": 200,
+            "items": {
+              "$ref": "#/components/schemas/InboxItem"
+            }
+          }
+        }
+      },
+      "InboxObservation": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "observed_at",
+          "total",
+          "items"
+        ],
+        "properties": {
+          "observed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "items": {
+            "type": "array",
+            "maxItems": 200,
+            "items": {
+              "$ref": "#/components/schemas/InboxItem"
+            }
           }
         }
       }
@@ -45328,6 +45418,73 @@
           }
         },
         "description": "Current team owner/admin required; admin-role invitations require owner, including operation replay. Refreshes expiry using mail.invitation_lifetime_seconds (default 30 days). Reuses the invitation and existing seat reservation; expired revival requires an available purchased seat. Body operation_id is retry-safe. Per-invitation cooldown is 60 seconds. No provider call occurs in the request transaction."
+      }
+    },
+    "/v1/machines/{machine_id}/inbox": {
+      "parameters": [
+        {
+          "name": "machine_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "summary": "Read the last Paperboat Inbox listing a machine reported",
+        "security": [
+          {
+            "cookieSession": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:read"
+        ],
+        "responses": {
+          "200": {
+            "description": "Last reported Inbox listing, newest first, at most 200 files.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/SuccessResponse"
+                    }
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/MachineInbox"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "operationId": "get_v1_user_machines_machine_id_inbox",
+        "parameters": [
+          {
+            "name": "workspace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 63
+            },
+            "description": "Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field."
+          }
+        ],
+        "description": "Names, sizes and times only; the machine reports its own listing, so it can be stale (see observed_at) and an offline machine still answers. Only the machine's owner, or an owner or admin of its team, may read it."
       }
     }
   }

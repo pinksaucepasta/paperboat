@@ -573,6 +573,7 @@ func NewRouter(opts Options) http.Handler {
 			}
 			mux.Handle("PATCH /v1/machines/{machine_id}", userMachineAuth("machines:connect", requireCSRF(opts.Auth, userMachineRename(opts.Machines))))
 			mux.Handle("GET /v1/machines/{machine_id}/update-status", userMachineAuth("machines:read", userMachineUpdateStatus(opts.Machines)))
+			mux.Handle("GET /v1/machines/{machine_id}/inbox", userMachineAuth("machines:read", userMachineInbox(opts.Machines)))
 			mux.Handle("GET /v1/machines/{machine_id}/maintenance-approvals", userMachineAuth("machines:read", userMachineMaintenanceApprovalsList(opts.Machines)))
 			mux.Handle("POST /v1/machines/{machine_id}/maintenance-approvals", userMachineAuth("machines:connect", requireCSRF(opts.Auth, userMachineMaintenanceApprovalRequest(opts.Machines))))
 			mux.Handle("POST /v1/machines/{machine_id}/maintenance-approvals/{approval_id}/approve", userMachineAuth("machines:connect", requireCSRF(opts.Auth, userMachineMaintenanceApprovalDecision(opts.Machines, "approved"))))
