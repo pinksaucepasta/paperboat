@@ -278,7 +278,7 @@ function Chart({ usage, period }: { usage: Usage; period: UsagePeriod }) {
   const line = smoothPath(points)
   const label = (iso: string) => (period === "24h" ? hourFormat : dayFormat).format(new Date(iso))
   const shown = hover ?? values.indexOf(Math.max(...values))
-  const ticks = [0, Math.floor((values.length - 1) / 2), values.length - 1]
+  const ticks = [...new Set([0, Math.floor((values.length - 1) / 2), values.length - 1])]
 
   return (
     <div className="surface-pattern flex flex-col gap-3 p-5">
