@@ -70,6 +70,9 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 		err = friendlyCommandError(err)
 		return fail(255, "machine_resolution_failed", false, false, err)
 	}
+	if !machine.Online {
+		return fail(255, "machine_offline", false, false, &api.APIError{Code: "machine_offline"})
+	}
 	if machine.InstallationGeneration < 1 {
 		err = errors.New("machine has no active runtime generation")
 		return fail(255, "runtime_unavailable", false, false, err)
@@ -396,4 +399,29 @@ func execRecoveryBackoff(attempt int) time.Duration {
 func retryableExecReattachment(err error) bool {
 	var uncertain *tunnel.ExecStartUncertainError
 	return errors.As(err, &uncertain) || errors.Is(err, localapi.ErrExecStartUncertain) || retryableInitialConnectFailure(err)
+}
+
+func safeExecError(err error) string {
+	if err == nil {
+		return ""
+	}
+	if remote, ok := err.(*api.APIError); ok && remote.Code == "machine_offline" {
+		return sentence(friendlyAPIError(remote))
+	}
+	if remote, ok := err.(*localapi.RemoteError); ok && remote.Code == "environment_unavailable" {
+		return "Managed environment variables could not be delivered on the target. Check ENV delivery and retry."
+	}
+	if remote, ok := soleExecRemoteError(err); ok {
+		switch remote.Code {
+		case "environment_unavailable":
+			return "Managed environment variables could not be delivered on the target. Check ENV delivery and retry."
+		case "exec_timeout":
+			return "Remote execution exceeded its time limit. Check the operation before retrying."
+		case "exec_canceled", "canceled":
+			return "Remote execution was canceled."
+		case "exec_result_unavailable":
+			return "The remote execution result is unavailable. Check the machine before retrying."
+		}
+	}
+	return "Remote execution did not finish. Check the machine connection and retry; the remote outcome may be unknown."
 }

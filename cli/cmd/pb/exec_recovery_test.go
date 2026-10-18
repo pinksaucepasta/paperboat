@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -65,10 +66,19 @@ func TestExecRecoveryKeepsItsBudgetAfterTransientReplacementHandshake(t *testing
 	}
 }
 
-func execCommandBrokerFixture(t *testing.T, descriptors *atomic.Int32) (string, localapi.Paths, localapi.ServerConfig) {
+func execCommandBrokerFixture(
+	t *testing.T, descriptors *atomic.Int32, online bool,
+) (string, localapi.Paths, localapi.ServerConfig) {
 	t.Helper()
 	_, configPath := localDaemonReadinessTestConfig(t, true)
-	machine := api.UserMachine{ID: "machine_target", Alias: "target", EnvironmentID: "environment_target", State: "online", Online: true, InstallationGeneration: 1, Platform: runtime.GOOS, WorkspaceRoot: filepath.Dir(configPath)}
+	machine := api.UserMachine{
+		ID: "machine_target", Alias: "target", EnvironmentID: "environment_target",
+		State: "online", Online: online, InstallationGeneration: 1,
+		Platform: runtime.GOOS, WorkspaceRoot: filepath.Dir(configPath),
+	}
+	if !online {
+		machine.State = "offline"
+	}
 	backend := execRecoveryBackend(t, machine, descriptors)
 	t.Cleanup(backend.Close)
 	writeTestProfile(t, filepath.Dir(configPath), configPath, backend.URL)
@@ -102,7 +112,7 @@ func execCommandBrokerFixture(t *testing.T, descriptors *atomic.Int32) (string, 
 
 func runExecRecoveryHandshake(t *testing.T, transient bool) {
 	var opens, descriptors atomic.Int32
-	configPath, paths, cfg := execCommandBrokerFixture(t, &descriptors)
+	configPath, paths, cfg := execCommandBrokerFixture(t, &descriptors, true)
 	output := &execRecoveryOutput{observed: make(chan struct{})}
 	var operation atomic.Value
 	bridges := make(chan struct{}, 3)
@@ -221,4 +231,59 @@ func execRecoveryBackend(t *testing.T, machine api.UserMachine, descriptors *ato
 			w.WriteHeader(404)
 		}
 	}))
+}
+
+func TestExecOfflineTargetReportsCertainFailureWithoutOpeningStream(t *testing.T) {
+	for _, jsonOutput := range []bool{false, true} {
+		t.Run(fmt.Sprintf("json=%t", jsonOutput), func(t *testing.T) {
+			var descriptors, opens atomic.Int32
+			configPath, paths, cfg := execCommandBrokerFixture(t, &descriptors, false)
+			cfg.PeerStreams = execRecoveryBroker(func(context.Context, localapi.Peer, localapi.PeerStreamRequest) (net.Conn, error) {
+				opens.Add(1)
+				return nil, errors.New("private peer admission failure")
+			})
+			server, err := localapi.NewServer(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			done := make(chan error, 1)
+			go func() { done <- server.Run(ctx) }()
+			defer stopLocalDaemonReadinessServer(t, cancel, done)
+			waitForCommandSocket(t, paths.SocketPath)
+			var stdout, stderr bytes.Buffer
+			args := []string{"--config", configPath, "--no-customization", "exec", "target"}
+			if jsonOutput {
+				args = append(args, "--json")
+			}
+			args = append(args, "--", "fixture-command")
+			code := run(t.Context(), args, &stdout, &stderr)
+			if code == 0 {
+				t.Fatal("offline execution reported success")
+			}
+			if jsonOutput {
+				var event struct {
+					ErrorCode string `json:"error_code"`
+					Detail    string `json:"detail"`
+					Changed   bool   `json:"changed"`
+					Uncertain bool   `json:"uncertain"`
+				}
+				if err := json.Unmarshal(stdout.Bytes(), &event); err != nil {
+					t.Fatal(err)
+				}
+				if event.ErrorCode != "machine_offline" || event.Changed || event.Uncertain ||
+					!strings.Contains(event.Detail, "offline") || !strings.Contains(event.Detail, "retry") {
+					t.Fatalf("offline outcome=%+v", event)
+				}
+			} else if !strings.Contains(stderr.String(), "offline") || !strings.Contains(stderr.String(), "retry") {
+				t.Fatalf("offline guidance missing: %q", stderr.String())
+			}
+			if opens.Load() != 0 || descriptors.Load() != 0 {
+				t.Fatalf("offline admission attempts=%d descriptors=%d", opens.Load(), descriptors.Load())
+			}
+			if strings.Contains(stdout.String()+stderr.String(), "private peer") {
+				t.Fatal("private failure escaped")
+			}
+		})
+	}
 }

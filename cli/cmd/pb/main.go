@@ -7240,28 +7240,6 @@ func publicExecErrorCode(code string) string {
 	}
 }
 
-func safeExecError(err error) string {
-	if err == nil {
-		return ""
-	}
-	if remote, ok := err.(*localapi.RemoteError); ok && remote.Code == "environment_unavailable" {
-		return "Managed environment variables could not be delivered on the target. Check ENV delivery and retry."
-	}
-	if remote, ok := soleExecRemoteError(err); ok {
-		switch remote.Code {
-		case "environment_unavailable":
-			return "Managed environment variables could not be delivered on the target. Check ENV delivery and retry."
-		case "exec_timeout":
-			return "Remote execution exceeded its time limit. Check the operation before retrying."
-		case "exec_canceled", "canceled":
-			return "Remote execution was canceled."
-		case "exec_result_unavailable":
-			return "The remote execution result is unavailable. Check the machine before retrying."
-		}
-	}
-	return "Remote execution did not finish. Check the machine connection and retry; the remote outcome may be unknown."
-}
-
 func execConnectInfo(machine api.UserMachine, descriptor api.ExecDescriptor, selectedWorkspace string) resolver.ConnectInfo {
 	workspace := selectedWorkspace
 	return resolver.ConnectInfo{

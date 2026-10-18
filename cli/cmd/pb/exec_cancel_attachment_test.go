@@ -39,7 +39,7 @@ func (r *execCancelRemote) Close() error  { return r.Detach() }
 func TestExecCancellationRetainsResultAfterOriginalAttachmentEnds(t *testing.T) {
 	var descriptors, opens atomic.Int32
 	var operation atomic.Value
-	configPath, paths, cfg := execCommandBrokerFixture(t, &descriptors)
+	configPath, paths, cfg := execCommandBrokerFixture(t, &descriptors, true)
 	output := &execRecoveryOutput{observed: make(chan struct{})}
 	initial := make(chan tunnel.ExecEvent, 2)
 	firstDone := make(chan struct{})
