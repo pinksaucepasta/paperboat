@@ -2035,3 +2035,6 @@ Rollback per host: pbh install --relay-image ghcr.io/pinksaucepasta/paperboat/re
 
 2026-10-18 | Lane B edge 2026.10.18.3 (e6e2ebb) | anvit 13:53:32Z (Lane A 5-min watch GOOD, no dip) and oracle 17:40:37Z (readyz healthy, 5/5 machines online 1/1); carries f87e204, 096ed11 edge (429 at cap), e6e2ebb (WebSocket 101 stays writable through telemetry). Server 2026.10.18.16 (3ecf52c) live.
 Rollback per host: pbh install --relay-image ghcr.io/pinksaucepasta/paperboat/relay:2026.10.16.4 --tunnel-image paperboat-tunnel:2026.10.18.2. Waits for Lane A: F7-05 WebSocket + tunnel_manage on .3.
+
+2026-10-18 | Lane B edge 2026.10.18.5 (e28bd41) + server .18 | edge .5 on oracle 18:25:44Z (Lane A watch GOOD) and anvit 18:31:18Z; fixes the WebSocket 101-then-EOF (carrierResponseStream refused writes; live proof 101+echo on oracle .5) and carries Lane C's Inbox helper path (8724fc2). Server 2026.10.18.18 (084a86a: per-source ENV fence + 409 machine_update_required) live since 18:15Z.
+Rollback: edge pbh install --relay-image ghcr.io/pinksaucepasta/paperboat/relay:2026.10.16.4 --tunnel-image paperboat-tunnel:2026.10.18.3; server rollout-server.py --image paperboat-server:2026.10.18.17. Waits for Lane A: 16 MiB tunnel POST, F7-05, tunnel_manage, green list on .5.
