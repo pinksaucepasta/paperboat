@@ -977,7 +977,9 @@ func doctorCommandV1() *cobra.Command {
 					}
 					return nil
 				}
-				return repairWindowsOpenSSH(command.Context())
+				// Linux and macOS own no privileged dependency: reading the
+				// snapshot below already reinstalls and restarts the local
+				// daemon service, so repair runs the same checks.
 			}
 			_, snapshot, err := localDaemonSnapshot(command, installLocalDaemonService)
 			if err != nil {
@@ -1017,7 +1019,7 @@ func doctorCommandV1() *cobra.Command {
 		},
 	}
 	command.Flags().Bool("json", false, "print JSON")
-	command.Flags().Bool("repair", false, "repair Paperboat-owned local dependencies")
+	command.Flags().Bool("repair", false, "repair Paperboat-owned local dependencies (Windows) and restart the local daemon, then check")
 	return command
 }
 

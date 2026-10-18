@@ -21,6 +21,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -281,6 +282,21 @@ func TestWriteStatusIncludesOperationalFieldsAndSafeHealth(t *testing.T) {
 }
 
 func TestDoctorCommandUsesOwnerSocketAndStableJSON(t *testing.T) {
+	checkDoctorOwnerSocketJSON(t, "doctor", "--json")
+}
+
+// A Linux/macOS host has no Windows-only dependency to repair: --repair must
+// run the same checks (the local daemon is recovered while reading the
+// snapshot) instead of failing with operation_failed.
+func TestDoctorRepairOnUnixRunsTheChecks(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows repairs through the privileged host runtime")
+	}
+	checkDoctorOwnerSocketJSON(t, "doctor", "--repair", "--json")
+}
+
+func checkDoctorOwnerSocketJSON(t *testing.T, doctorArgs ...string) {
+	t.Helper()
 	root := commandRuntimeTestRoot(t)
 	home, runtimeRoot := filepath.Join(root, "home"), filepath.Join(root, "runtime")
 	for _, directory := range []string{home, runtimeRoot} {
@@ -326,7 +342,7 @@ func TestDoctorCommandUsesOwnerSocketAndStableJSON(t *testing.T) {
 	go func() { done <- server.Run(ctx) }()
 	waitForCommandSocket(t, paths.SocketPath)
 	var stdout, stderr bytes.Buffer
-	if code := run(context.Background(), []string{"--config", configPath, "doctor", "--json"}, &stdout, &stderr); code != 1 {
+	if code := run(context.Background(), append([]string{"--config", configPath}, doctorArgs...), &stdout, &stderr); code != 1 {
 		t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
 	var report doctorpkg.Report
