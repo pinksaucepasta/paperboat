@@ -30,6 +30,11 @@ var ErrOverload = &Error{Code: 3, Message: "relay capacity exhausted"}
 // ErrExpired requires fresh signed authority before reconnecting. It never permits
 // traffic under the expired lease and is distinct from a permanent denial.
 var ErrExpired = &Error{Code: 4, Message: "relay authorization expired"}
+
+// ErrQuota is the typed, non-fatal refusal for an account whose workspaces are all out of
+// bandwidth allowance: the control plane told this relay to refuse it. Clients back off and
+// retry; it ends as soon as the control plane stops listing the account.
+var ErrQuota = &Error{Code: 5, Message: "relay bandwidth allowance exhausted"}
 var ErrClosed = errors.New("relay closed")
 
 type Error struct {

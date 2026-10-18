@@ -71,6 +71,8 @@ func classifyWSS(err error) error {
 		return retainDecision(ErrOverload, err)
 	case 4004:
 		return retainDecision(ErrExpired, err)
+	case 4005:
+		return retainDecision(ErrQuota, err)
 	}
 	var cert *tls.CertificateVerificationError
 	if errors.As(err, &cert) {

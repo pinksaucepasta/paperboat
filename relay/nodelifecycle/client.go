@@ -40,6 +40,9 @@ type Lease struct {
 	CapacityLimit uint64                      `json:"capacity_limit"`
 	Revocations   []derpquic.AuthoritySubject `json:"revocations"`
 	PeerRelay     *derpquic.ServiceDescriptor `json:"peer_relay,omitempty"`
+	// QuotaDenied lists accounts the control plane reports out of bandwidth allowance; the relay
+	// refuses them (derpquic.ErrQuota) until a later observation no longer lists them.
+	QuotaDenied []string `json:"quota_denied,omitempty"`
 }
 type diskState struct {
 	NodeID       string `json:"node_id"`
@@ -257,7 +260,7 @@ func (c *Client) Observe(ctx context.Context, server *derpquic.Server, draining 
 		return ErrControl
 	}
 	subjects := server.AuthoritySubjects()
-	out, err := c.post(ctx, "/v1/relay/nodes/observe", map[string]any{"node_id": c.lease.NodeID, "node_generation": c.lease.Generation, "process_epoch": c.lease.ProcessEpoch, "ready": server.Ready() && !draining, "draining": draining, "capacity_used": stats.Connections, "subjects": subjects})
+	out, err := c.post(ctx, "/v1/relay/nodes/observe", map[string]any{"node_id": c.lease.NodeID, "node_generation": c.lease.Generation, "process_epoch": c.lease.ProcessEpoch, "ready": server.Ready() && !draining, "draining": draining, "capacity_used": stats.Connections, "subjects": subjects, "quota_denied_supported": true})
 	if err != nil {
 		return err
 	}
@@ -280,6 +283,9 @@ func (c *Client) Observe(ctx context.Context, server *derpquic.Server, draining 
 		if server.Revoke(rev.AccountID, rev.EndpointID, rev.Generation) != nil {
 			return ErrControl
 		}
+	}
+	if server.SetQuotaDenied(out.QuotaDenied) != nil {
+		return ErrControl
 	}
 	c.lease = out
 	return nil

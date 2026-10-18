@@ -8,6 +8,7 @@ import (
 	"github.com/pinksaucepasta/paperboat-relay/admission"
 	"io"
 	"net"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -31,6 +32,7 @@ type Server struct {
 	mu                                   sync.Mutex
 	peers                                map[key.NodePublic]*peerConn
 	fences                               map[string]*grantFence
+	quotaDenied                          map[string]bool
 	accounts                             map[string]*budget
 	connections                          map[*quic.Conn]struct{}
 	wssConnections                       map[*peerConn]struct{}
@@ -331,6 +333,9 @@ func (s *Server) admit(p *peerConn, token string) error {
 	if s.draining && (p.key.IsZero() || !now.Before(s.deadline)) {
 		return ErrOverload
 	}
+	if s.quotaDenied[g.AccountID] {
+		return ErrQuota
+	}
 	id := g.AccountID + "\x00" + g.EndpointID
 	for id, old := range s.fences {
 		k, _ := ParseKey(old.WireGuardPublicKey)
@@ -494,6 +499,46 @@ func (s *Server) writePackets(p *peerConn) {
 			s.forwarded.Add(1)
 		}
 	}
+}
+
+// SetQuotaDenied replaces the set of accounts this relay refuses because the control plane
+// reported them out of bandwidth allowance. New admissions and re-authentications of listed
+// accounts get ErrQuota, and their live carriers are closed with it now; unlisted accounts
+// are unaffected, and an empty set clears every refusal. It fences nothing: a grant stays
+// valid and works again as soon as the account is no longer listed.
+func (s *Server) SetQuotaDenied(accounts []string) error {
+	if len(accounts) > MaxConnections {
+		return ErrProtocol
+	}
+	denied := make(map[string]bool, len(accounts))
+	for _, account := range accounts {
+		if account == "" || len(account) > 256 {
+			return ErrProtocol
+		}
+		denied[account] = true
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.quotaDenied = denied
+	for k, p := range s.peers {
+		if denied[p.grant.AccountID] {
+			delete(s.peers, k)
+			p.close(ErrQuota.Code, ErrQuota.Message)
+		}
+	}
+	return nil
+}
+
+// QuotaDenied lists the accounts currently refused for bandwidth, sorted.
+func (s *Server) QuotaDenied() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	accounts := make([]string, 0, len(s.quotaDenied))
+	for account := range s.quotaDenied {
+		accounts = append(accounts, account)
+	}
+	sort.Strings(accounts)
+	return accounts
 }
 
 // Revoke fences current routing immediately; signed newer grants are required to reconnect.

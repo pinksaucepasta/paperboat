@@ -59,6 +59,8 @@ func classify(err error) error {
 			return retainDecision(ErrOverload, err)
 		case 4:
 			return retainDecision(ErrExpired, err)
+		case 5:
+			return retainDecision(ErrQuota, err)
 		}
 	}
 	var cert *tls.CertificateVerificationError
