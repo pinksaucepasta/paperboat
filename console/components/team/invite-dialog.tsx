@@ -5,7 +5,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import Link from "next/link"
 import { useState } from "react"
 import { api, ApiError } from "@/lib/api"
-import { notLiveTitle } from "@/lib/billing"
+import { billingKey, notLiveTitle } from "@/lib/billing"
 import { inviteMember, teamInvitationsQuery, teamLive, teamQuery, type Team, type TeamRole } from "@/lib/teams"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -94,6 +94,7 @@ function InviteForm({
     onSuccess: async (results) => {
       await queryClient.invalidateQueries({ queryKey: teamQuery(team.team_id).queryKey })
       await queryClient.invalidateQueries({ queryKey: teamInvitationsQuery(team.team_id).queryKey })
+      await queryClient.invalidateQueries({ queryKey: billingKey(team.team_id) })
       if (results.every((result) => !result.error)) return onDone()
       setOutcomes(results)
       setText(

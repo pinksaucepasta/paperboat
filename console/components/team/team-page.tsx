@@ -1,9 +1,9 @@
 "use client"
 
-import { EnvelopeSimpleIcon, MinusIcon, PlusIcon, UsersThreeIcon } from "@phosphor-icons/react"
+import { CircleNotchIcon, EnvelopeSimpleIcon, MinusIcon, PlusIcon, UsersThreeIcon } from "@phosphor-icons/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { useState } from "react"
-import { meQuery, useApiQuery, useWorkspace, workspacesQuery } from "@/lib/api"
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react"
+import { idempotencyKey, meQuery, useApiQuery, useWorkspace, workspacesQuery } from "@/lib/api"
 import { billingLive, notLiveTitle } from "@/lib/billing"
 import { answerInvitation, createPaidTeam, createTeam, myInvitationsQuery, teamIdPattern } from "@/lib/teams"
 import { setWorkspace } from "@/lib/workspace"
@@ -25,9 +25,42 @@ export function TeamPage() {
   return workspace.kind === "team" ? <TeamManage workspace={workspace} /> : <Teams />
 }
 
+/**
+ * Back from Checkout (`?created=<team>`): the team exists once the payment webhook lands, a moment
+ * after the redirect. Refreshes the workspace list until it shows up, then opens the team.
+ * Returns the team being confirmed, or undefined.
+ */
+function useConfirmedTeam(workspaceIds: string[] | undefined) {
+  const queryClient = useQueryClient()
+  const created = useSyncExternalStore(
+    () => () => {},
+    () => new URLSearchParams(window.location.search).get("created"),
+    () => null,
+  )
+  const [gaveUp, setGaveUp] = useState(false)
+  const arrived = Boolean(created && workspaceIds?.includes(created))
+  useEffect(() => {
+    if (!created) return
+    if (arrived) {
+      window.history.replaceState(null, "", "/team")
+      setWorkspace(created)
+      return
+    }
+    const timer = setInterval(() => queryClient.invalidateQueries({ queryKey: workspacesQuery.queryKey }), 2000)
+    // Stop waiting after a minute; the team still appears in the list once it exists.
+    const stop = setTimeout(() => setGaveUp(true), 60_000)
+    return () => {
+      clearInterval(timer)
+      clearTimeout(stop)
+    }
+  }, [created, arrived, queryClient])
+  return created && !arrived && !gaveUp ? created : undefined
+}
+
 /** In Personal: the teams you belong to, invitations waiting for you, and creating a team. */
 function Teams() {
   const workspaces = useApiQuery(workspacesQuery)
+  const confirming = useConfirmedTeam(workspaces.data?.map((workspace) => workspace.id))
   const invitations = useApiQuery(myInvitationsQuery)
   const [creating, setCreating] = useState(false)
   const teams = workspaces.data?.filter((workspace) => workspace.kind === "team") ?? []
@@ -64,6 +97,12 @@ function Teams() {
             />
           ))}
         </section>
+      )}
+
+      {confirming && (
+        <p className="flex items-center gap-2 text-sm text-muted-foreground">
+          <CircleNotchIcon className="size-4 animate-spin" /> Confirming payment for {confirming}…
+        </p>
       )}
 
       <section className="flex flex-col gap-3">
@@ -167,10 +206,12 @@ function CreateTeamForm() {
   const [seats, setSeats] = useState(1)
   const [period, setPeriod] = useState<"month" | "year">("month")
   const paid = billingLive.paidTeamCreate
+  // One operation per distinct order: changing the team, seats or interval is a new order.
+  const key = useMemo(() => idempotencyKey(), [id, seats, period]) // eslint-disable-line react-hooks/exhaustive-deps
   const valid = teamIdPattern.test(id)
   const create = useMutation({
     mutationFn: async () => {
-      if (paid) return window.location.assign(await createPaidTeam(id, seats, period))
+      if (paid) return window.location.assign(await createPaidTeam(id, seats, period, key))
       const team = await createTeam(id)
       await queryClient.invalidateQueries({ queryKey: workspacesQuery.queryKey })
       setWorkspace(team.team_id)

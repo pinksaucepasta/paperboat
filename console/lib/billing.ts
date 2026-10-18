@@ -16,7 +16,7 @@ export type BillingInterval = "month" | "year"
 export const billingLive = {
   seats: true,
   topups: true,
-  paidTeamCreate: false,
+  paidTeamCreate: true,
 } as const
 export const notLiveTitle = "Not available yet"
 
@@ -37,10 +37,12 @@ function billingPath(workspace: Workspace) {
     : "billing/workspaces/personal"
 }
 
+export const billingKey = (workspace: string) => ["billing", workspace] as const
+
 /** The workspace's plan and its hosted relay + edge allowance for the current period. */
 export const billingQuery = (workspace: Workspace | undefined) =>
   queryOptions({
-    queryKey: ["billing", workspace?.id ?? ""],
+    queryKey: billingKey(workspace?.id ?? ""),
     queryFn: () => api<BillingWorkspace>(billingPath(workspace!)),
     enabled: Boolean(workspace),
     staleTime: minute,

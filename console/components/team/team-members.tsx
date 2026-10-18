@@ -5,7 +5,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import Link from "next/link"
 import { useState } from "react"
 import { meQuery, useApiQuery, useWorkspace, workspacesQuery, type Me, type Workspace } from "@/lib/api"
-import { billingQuery, notLiveTitle } from "@/lib/billing"
+import { billingKey, billingQuery, notLiveTitle } from "@/lib/billing"
 import {
   cancelInvitation,
   resendInvitation,
@@ -60,6 +60,8 @@ function useRefreshTeam(teamId: string) {
     Promise.all([
       queryClient.invalidateQueries({ queryKey: teamQuery(teamId).queryKey }),
       queryClient.invalidateQueries({ queryKey: teamInvitationsQuery(teamId).queryKey }),
+      // Pending invitations hold seats, so seat counts change with them.
+      queryClient.invalidateQueries({ queryKey: billingKey(teamId) }),
     ])
 }
 
