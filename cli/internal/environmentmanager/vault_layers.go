@@ -143,7 +143,7 @@ func (v PasswordVault) publishLayerOperation(ctx context.Context, local *config.
 	out, err := client.PutVaultLayer(ctx, op.WorkspaceID, op.MachineID, in)
 	if err != nil {
 		var rejected *api.APIError
-		if errors.As(err, &rejected) && (rejected.Status == 403 && rejected.Code == "permission_denied" || rejected.Status == 409 && rejected.Code == "rotation_required") {
+		if errors.As(err, &rejected) && (rejected.Status == 403 && rejected.Code == "forbidden" || rejected.Status == 409 && rejected.Code == "rotation_required") {
 			if local.Pending != nil {
 				return &LayerPublicationPending{Cause: err}
 			}

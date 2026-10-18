@@ -456,7 +456,7 @@ func TestSafeEnvironmentVariableCommandErrorUsesCurrentVaultRecoveryActions(t *t
 		{code: "vault_conflict", want: "unlock the current vault"},
 		{code: "rotation_required", want: "pb env rotate"},
 		{code: "key_authorization_required", want: "pb env grants sync"},
-		{code: "permission_denied", want: "do not have write access"},
+		{code: "forbidden", want: "do not have write access"},
 	} {
 		err := safeEnvironmentVariableCommandError(&api.APIError{Code: test.code, Message: "must not escape"})
 		if err == nil || !strings.Contains(err.Error(), test.want) || strings.Contains(err.Error(), "manager") || strings.Contains(err.Error(), "authority") {
@@ -643,19 +643,20 @@ func TestEnvironmentVariableSharedReadOnlyActionsRemainUseful(t *testing.T) {
 	}
 }
 
-// Device finding: the real client chain (APIError -> observed HTTP failure ->
+// Device finding: the server answers a read-only member's ENV write with 403 and
+// code "forbidden" (httpapi/environment_vault_scopes_handlers.go); the real client chain (APIError -> observed HTTP failure ->
 // response fault) must still reach the code-based recovery text.
 func TestEnvironmentPermissionDeniedFromRealClientKeepsRecoveryText(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
-		_, _ = w.Write([]byte(`{"error":{"code":"permission_denied","message":"secret detail","request_id":"req_1"}}`))
+		_, _ = w.Write([]byte(`{"error":{"code":"forbidden","message":"secret detail","request_id":"req_1"}}`))
 	}))
 	defer server.Close()
 	client := api.New(server.URL, config.Credential{AccessToken: "token", TokenType: "Bearer", ExpiresAt: time.Now().Add(time.Hour)}, server.Client())
 	_, err := client.GetVaultGrants(context.Background())
 	var rejected *api.APIError
-	if !errors.As(err, &rejected) || rejected.Code != "permission_denied" {
+	if !errors.As(err, &rejected) || rejected.Code != "forbidden" {
 		t.Fatalf("real client error: %v", err)
 	}
 	message := safeEnvironmentVariableCommandError(err).Error()

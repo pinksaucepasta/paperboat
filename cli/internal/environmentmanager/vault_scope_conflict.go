@@ -35,7 +35,7 @@ func (e *ScopePublicationPending) Unwrap() error { return e.Cause }
 // The staged write can never succeed by resuming, so it is not pending.
 func vaultWriteDenied(err error) bool {
 	var rejected *api.APIError
-	return errors.As(err, &rejected) && rejected.Status == 403 && rejected.Code == "permission_denied"
+	return errors.As(err, &rejected) && rejected.Status == 403 && rejected.Code == "forbidden"
 }
 
 // dropDeniedOperation removes a staged source write the server refused, so the

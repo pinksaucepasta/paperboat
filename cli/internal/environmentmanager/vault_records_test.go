@@ -45,7 +45,7 @@ func (c *vaultScopesControl) PutVaultRecords(_ context.Context, coordinate api.V
 		return api.VaultRecordsResult{}, &api.APIError{Status: 409, Code: "version_conflict"}
 	}
 	if c.recordFailure == "denied" {
-		return api.VaultRecordsResult{}, &api.APIError{Status: 403, Code: "permission_denied"}
+		return api.VaultRecordsResult{}, &api.APIError{Status: 403, Code: "forbidden"}
 	}
 	if previous, ok := c.recordOperations[in.OperationID]; ok {
 		if !reflect.DeepEqual(c.recordOperationRequests[in.OperationID], in) {

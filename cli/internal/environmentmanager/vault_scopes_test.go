@@ -678,7 +678,7 @@ var _ VaultDataClient = (*vaultScopesControl)(nil)
 type deniedScopeControl struct{ *vaultScopesControl }
 
 func (deniedScopeControl) PutVaultScope(context.Context, string, string, string, api.VaultScopePut) (api.VaultScopeState, error) {
-	return api.VaultScopeState{}, &api.APIError{Status: 403, Code: "permission_denied"}
+	return api.VaultScopeState{}, &api.APIError{Status: 403, Code: "forbidden"}
 }
 
 // Device finding: errors.Join(err, nil) wrapped every vault operation error in
@@ -691,7 +691,7 @@ func TestVaultOperationErrorIsNotWrappedInAJoinWhenUnlockSucceeds(t *testing.T) 
 		return nil
 	})
 	var rejected *api.APIError
-	if !errors.As(err, &rejected) || rejected.Code != "permission_denied" {
+	if !errors.As(err, &rejected) || rejected.Code != "forbidden" {
 		t.Fatalf("typed rejection lost: %v", err)
 	}
 	for current := err; current != nil; current = errors.Unwrap(current) {

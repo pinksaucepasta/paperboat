@@ -30,7 +30,7 @@ func (c *layerControl) VaultAllLayerRecipients(context.Context, api.VaultLayerCo
 func (c *layerControl) PutVaultLayer(ctx context.Context, workspace, machine string, in api.VaultLayerPut) (api.VaultLayerDelivery, error) {
 	c.requests = append(c.requests, in)
 	if c.fail == "forbidden" {
-		return api.VaultLayerDelivery{}, &api.APIError{Status: 403, Code: "permission_denied"}
+		return api.VaultLayerDelivery{}, &api.APIError{Status: 403, Code: "forbidden"}
 	}
 	if c.fail == "rotation" {
 		return api.VaultLayerDelivery{}, &api.APIError{Status: 409, Code: "rotation_required"}
