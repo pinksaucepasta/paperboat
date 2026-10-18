@@ -317,6 +317,9 @@ func (s *Service) ConnectSharedTerminalSession(ctx context.Context, userID, sour
 	}
 	response.Connectable, response.Status, response.Reason, response.RetryAfterSeconds = true, "ready", "ready", 0
 	setCanonicalMachineIdentity(&response, row)
+	// A session grant is the complete authority: it never advertises file or preview access,
+	// and the CLI refuses a shared descriptor that claims more than the terminal.
+	response.Capabilities = []string{accessdescriptor.CapabilityTerminal}
 	auth := map[string]any{"method": "bearer", "token": token, "expires_at": expires, "scopes": []string{scope}, "access_session_id": accessID}
 	response.Terminal = map[string]any{"protocol": "paperboat.terminal.v1", "endpoints": machineTerminalEndpoints(runtimeWebsocketBase(httpIngressURL)), "session_id": sessionID, "cwd": cwd, "role": decision.Role, "auth": auth}
 	return response, nil

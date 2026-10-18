@@ -18,6 +18,10 @@ import (
 var ErrMachineNotFound = errors.New("machine not found")
 var ErrMachineAmbiguous = errors.New("machine name is ambiguous")
 
+// ErrSharedSessionAuthority marks a shared-session descriptor that grants more or less than the
+// exact terminal role; the command explains it instead of failing generically.
+var ErrSharedSessionAuthority = errors.New("server returned unexpected shared session authority")
+
 // connectClient is the subset of the paperboat-server client the resolver
 // needs. Defined here so the resolver can be unit-tested with a fake.
 type connectClient interface {

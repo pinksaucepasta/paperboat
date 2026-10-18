@@ -22,3 +22,12 @@ func TestUnknownAndAmbiguousMachinesAreExplained(t *testing.T) {
 		}
 	}
 }
+
+func TestSharedSessionAuthorityMismatchIsExplained(t *testing.T) {
+	err := fmt.Errorf("%w: capabilities terminal,file_transfer,preview", resolver.ErrSharedSessionAuthority)
+	failure := classifyCommandFailure(err)
+	message := commandFailureMessage(err, failure)
+	if failure.kind != commandRejected || !strings.Contains(message, "shared session") || !strings.Contains(message, "Update Paperboat") {
+		t.Fatalf("kind=%v message=%q", failure.kind, message)
+	}
+}

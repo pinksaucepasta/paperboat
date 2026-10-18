@@ -117,6 +117,8 @@ func commandFailureMessage(err error, failure commandFailure) string {
 		return "The selected machine was not found. Run `pb status` and select an available machine."
 	case resolver.ErrMachineNotFound:
 		return "No machine has that name or ID. Run `pb machine list` to see your machines."
+	case resolver.ErrSharedSessionAuthority:
+		return "The server offered this shared session with different access than the terminal role you were granted, so Paperboat refused to join. Update Paperboat, ask the owner to share it again, and retry; if this continues, run `pb doctor`."
 	case resolver.ErrMachineAmbiguous:
 		return "More than one machine has that name. Run `pb machine list` and retry with the machine ID."
 	case localwait.ErrMachineAmbiguous:

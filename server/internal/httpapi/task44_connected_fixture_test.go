@@ -288,6 +288,9 @@ func TestTask44ConnectedCollaboration(t *testing.T) {
 	if err != nil || !descriptor.Connectable {
 		t.Fatalf("shared descriptor connectable=%v err=%v", descriptor.Connectable, err)
 	}
+	if len(descriptor.Capabilities) != 1 || descriptor.Capabilities[0] != "terminal" {
+		t.Fatalf("shared descriptor advertises %v, want only terminal", descriptor.Capabilities)
+	}
 	token := descriptor.Terminal["auth"].(map[string]any)["token"].(string)
 	actionWithFields := func(id, operation string, fields map[string]string) {
 		t.Helper()

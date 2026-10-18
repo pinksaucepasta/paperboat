@@ -2,6 +2,7 @@ package resolver
 
 import (
 	"context"
+	"errors"
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"testing"
 )
@@ -58,6 +59,8 @@ func TestSharedResolverRequiresExactSessionRoleAndNoExtraAuthority(t *testing.T)
 				}
 			} else if err == nil {
 				t.Fatal("invalid authority accepted")
+			} else if map[string]bool{"files": true, "extra capability": true, "missing generation": true}[tt.name] && !errors.Is(err, ErrSharedSessionAuthority) {
+				t.Fatalf("invalid authority is not the typed shared-session error: %v", err)
 			}
 			if client.calls != 1 {
 				t.Fatalf("descriptor calls=%d", client.calls)
