@@ -18,9 +18,7 @@ func TestOperationRecoveryIsAuditedAndIdempotent(t *testing.T) {
 	actorID := "recovery_user_" + suffix
 	operationID := "recovery_op_" + suffix
 	seedRecoveryUser(t, store, actorID, suffix)
-	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.users SET role='operations' WHERE id=$1`, actorID); err != nil {
-		t.Fatal(err)
-	}
+	setOperatorRole(t, store, actorID, "operations")
 	seedControlOperation(t, store, operationID, "recovery_source_"+suffix)
 	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.control_operations SET state='dead_letter', attempts=4, last_error='terminal failure' WHERE id=$1`, operationID); err != nil {
 		t.Fatal(err)
@@ -57,9 +55,7 @@ func TestOperationRecoveryIsAuditedAndIdempotent(t *testing.T) {
 	if err := service.Recover(ctx, actorID, key, otherID, now); !errors.Is(err, ErrRecoveryKeyConflict) {
 		t.Fatalf("conflicting replay error = %v, want ErrRecoveryKeyConflict", err)
 	}
-	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.users SET role='user' WHERE id=$1`, actorID); err != nil {
-		t.Fatal(err)
-	}
+	setOperatorRole(t, store, actorID, "user")
 	if err := service.Recover(ctx, actorID, key, operationID, now); !errors.Is(err, ErrOperationRecoveryForbidden) {
 		t.Fatalf("demoted replay error = %v, want ErrOperationRecoveryForbidden", err)
 	}
@@ -71,9 +67,7 @@ func TestAdminUsageKeyMutationBindsReplayAndRechecksRole(t *testing.T) {
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
 	actorID, nodeID := "usage_admin_"+suffix, "usage_node_"+suffix
 	seedRecoveryUser(t, store, actorID, "usage_"+suffix)
-	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.users SET role='admin' WHERE id=$1`, actorID); err != nil {
-		t.Fatal(err)
-	}
+	setOperatorRole(t, store, actorID, "admin")
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch) VALUES($1,'default','1.0',$2)`, nodeID, "usage_epoch_"+suffix); err != nil {
 		t.Fatal(err)
 	}
@@ -92,9 +86,7 @@ func TestAdminUsageKeyMutationBindsReplayAndRechecksRole(t *testing.T) {
 	if err := service.ProvisionUsageKey(ctx, actorID, operationKey, keyID, nodeID, changed, notBefore, notBefore.Add(time.Hour)); !errors.Is(err, ErrUsageOperationConflict) {
 		t.Fatalf("changed replay error = %v, want ErrUsageOperationConflict", err)
 	}
-	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.users SET role='support' WHERE id=$1`, actorID); err != nil {
-		t.Fatal(err)
-	}
+	setOperatorRole(t, store, actorID, "support")
 	if err := service.ProvisionUsageKey(ctx, actorID, operationKey, keyID, nodeID, publicKey, notBefore, notBefore.Add(time.Hour)); !errors.Is(err, ErrAdminMutationForbidden) {
 		t.Fatalf("support replay error = %v, want ErrAdminMutationForbidden", err)
 	}
@@ -114,9 +106,7 @@ func TestOperationRecoveryRollsBackReservationForNonDeadLetter(t *testing.T) {
 
 	actorID := "non_dead_actor_" + suffix
 	seedRecoveryUser(t, store, actorID, "non_dead_"+suffix)
-	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.users SET role='admin' WHERE id=$1`, actorID); err != nil {
-		t.Fatal(err)
-	}
+	setOperatorRole(t, store, actorID, "admin")
 	service := NewOperationRecoveryService(store, nil)
 	if err := service.Recover(ctx, actorID, key, operationID, time.Now()); !errors.Is(err, ErrOperationNotDeadLettered) {
 		t.Fatalf("recovery error = %v, want ErrOperationNotDeadLettered", err)
@@ -137,4 +127,23 @@ func seedRecoveryUser(t *testing.T, store *db.DB, actorID, suffix string) {
 		VALUES ($1, $2, $3, 'active')`, actorID, "workos_"+suffix, suffix+"@recovery.example.test"); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// Operator permissions live in operator_accounts, separate from customer users;
+// a customer role grants nothing. "user" means no operator account.
+func setOperatorRole(t *testing.T, store *db.DB, actorID, role string) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := store.SQL().ExecContext(ctx, `DELETE FROM paperboat.operator_accounts WHERE id=$1`, actorID); err != nil {
+		t.Fatal(err)
+	}
+	if role == "user" {
+		return
+	}
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.operator_accounts(id,email,password_hash,role,status) VALUES($1,$1||'@operator.example.test','unused test login',$2,'active')`, actorID, role); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.operator_accounts WHERE id=$1`, actorID)
+	})
 }
