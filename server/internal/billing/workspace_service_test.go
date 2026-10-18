@@ -2,6 +2,7 @@ package billing_test
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"testing"
@@ -186,6 +187,7 @@ func TestWorkspaceServicePersonalCheckoutReplayScopeAndWebhook(t *testing.T) {
 		store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.stripe_events WHERE id=$1`, "evt_"+suffix)
 		store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.stripe_events WHERE id=$1`, "evt_stale_"+suffix)
 		store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.stripe_events WHERE id=$1`, "evt_interval_"+suffix)
+		store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.stripe_events WHERE id=$1`, "evt_cancel_"+suffix)
 		store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.stripe_events WHERE id LIKE $1`, "evt_replacement_%"+suffix)
 		store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.stripe_events WHERE id=$1`, "evt_repeat_old_"+suffix)
 		store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.billing_workspace_operations WHERE workspace_id=$1`, "personal:"+user)
@@ -295,6 +297,34 @@ func TestWorkspaceServicePersonalCheckoutReplayScopeAndWebhook(t *testing.T) {
 	var anchor time.Time
 	if err = store.SQL().QueryRowContext(ctx, `SELECT bandwidth_anchor FROM paperboat.billing_workspaces WHERE id=$1`, w.ID).Scan(&anchor); err != nil || !anchor.Equal(originalStart) {
 		t.Fatal("provider update moved the original bandwidth anchor", err)
+	}
+	// A portal cancellation arrives while Stripe still serves the pre-cancel
+	// subscription: the event must be retried, not acknowledged, and once the
+	// provider read catches up the cancellation clears the dead seat reduction.
+	if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.billing_workspaces SET scheduled_quantity=quantity,scheduled_quantity_at=period_end WHERE id=$1`, w.ID); err != nil {
+		t.Fatal(err)
+	}
+	cancelEvent, err := billing.ParseStripeWebhook([]byte(fmt.Sprintf(`{"id":%q,"type":"customer.subscription.updated","created":%d,"data":{"object":{"id":%q,"object":"subscription","cancel_at_period_end":false,"cancel_at":%d,"items":{"data":[{"current_period_end":%d}]}}}}`, "evt_cancel_"+suffix, time.Now().Unix(), fake.sub.ID, fake.sub.PeriodEnd.Unix(), fake.sub.PeriodEnd.Unix())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if processed, err = service.HandleWebhook(ctx, cancelEvent); !errors.Is(err, billing.ErrProviderOutcomeUnknown) || processed {
+		t.Fatalf("stale provider read acknowledged a cancellation: processed=%v err=%v", processed, err)
+	}
+	fake.sub.CancelAtPeriodEnd = true
+	if processed, err = service.HandleWebhook(ctx, cancelEvent); err != nil || !processed {
+		t.Fatalf("cancellation retry processed=%v err=%v", processed, err)
+	}
+	var scheduled sql.NullInt64
+	if w, err = service.Overview(ctx, user, ""); err != nil || !w.CancelAtPeriodEnd {
+		t.Fatalf("portal cancellation not reflected: %+v err=%v", w, err)
+	}
+	if err = store.SQL().QueryRowContext(ctx, `SELECT scheduled_quantity FROM paperboat.billing_workspaces WHERE id=$1`, w.ID).Scan(&scheduled); err != nil || scheduled.Valid {
+		t.Fatalf("cancelling subscription kept a scheduled seat reduction: %v err=%v", scheduled, err)
+	}
+	fake.sub.CancelAtPeriodEnd = false
+	if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.billing_workspaces SET cancel_at_period_end=false WHERE id=$1`, w.ID); err != nil {
+		t.Fatal(err)
 	}
 	old := fake.sub
 	old.ID = "sub_old_" + suffix

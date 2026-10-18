@@ -58,6 +58,8 @@ func NewWorkspaceService(store *db.DB, stripe StripeClient, key string, portals 
 	return s
 }
 
+const staleProviderReadWindow = 5 * time.Minute
+
 func (s *WorkspaceService) Overview(ctx context.Context, account, team string) (Workspace, error) {
 	var out Workspace
 	err := s.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
@@ -513,6 +515,15 @@ func (s *WorkspaceService) reconcileSubscription(ctx context.Context, subscripti
 		if current.CustomerID != initial.CustomerID || current.ID != subscriptionID {
 			return errors.New("stripe subscription identity changed during reconciliation")
 		}
+		// Stripe can serve the subscription from before a change it just
+		// announced. Do not acknowledge that event: the provider retries it and the
+		// next read reflects the cancellation.
+		if event != nil {
+			if cancelling, known := event.ReportsCancellation(); known && cancelling != current.CancelAtPeriodEnd &&
+				time.Since(time.Unix(event.Created, 0)) < staleProviderReadWindow {
+				return ErrProviderOutcomeUnknown
+			}
+		}
 		var team sql.NullString
 		var existingSubscription sql.NullString
 		var existingState string
@@ -580,6 +591,13 @@ func (s *WorkspaceService) reconcileSubscription(ctx context.Context, subscripti
 		}
 		if _, err = tx.Exec(ctx, `UPDATE billing_workspaces SET scheduled_quantity=NULL,scheduled_quantity_at=NULL WHERE id=$1 AND scheduled_quantity_at<=$2 AND quantity=scheduled_quantity`, workspaceID, current.PeriodStart); err != nil {
 			return err
+		}
+		// A cancelling subscription never renews, so no scheduled seat reduction
+		// can take effect; Stripe releases the schedule when the cancel is set.
+		if current.CancelAtPeriodEnd {
+			if _, err = tx.Exec(ctx, `UPDATE billing_workspaces SET scheduled_quantity=NULL,scheduled_quantity_at=NULL WHERE id=$1`, workspaceID); err != nil {
+				return err
+			}
 		}
 		if event != nil {
 			if _, err = tx.Exec(ctx, `INSERT INTO stripe_events(id,event_type,subscription_id) VALUES($1,$2,$3)`, event.ID, event.Type, current.ID); err != nil {

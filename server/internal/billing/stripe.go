@@ -345,7 +345,15 @@ type StripeWebhook struct {
 			AttemptCount  int    `json:"attempt_count"`
 			Object        string `json:"object"`
 			Subscription  string `json:"subscription"`
-			Parent        struct {
+			// Subscription snapshots carry the cancellation the event reports.
+			CancelAtPeriodEnd bool  `json:"cancel_at_period_end"`
+			CancelAt          int64 `json:"cancel_at"`
+			Items             struct {
+				Data []struct {
+					CurrentPeriodEnd int64 `json:"current_period_end"`
+				} `json:"data"`
+			} `json:"items"`
+			Parent struct {
 				Type                string `json:"type"`
 				SubscriptionDetails struct {
 					Subscription string `json:"subscription"`
@@ -361,6 +369,23 @@ func ParseStripeWebhook(body []byte) (StripeWebhook, error) {
 		return StripeWebhook{}, errors.New("invalid stripe webhook")
 	}
 	return e, nil
+}
+
+// ReportsCancellation says whether a subscription update event reports a
+// cancellation at the end of the paid period. known is false for other events.
+func (e StripeWebhook) ReportsCancellation() (cancelling, known bool) {
+	object := e.Data.Object
+	if e.Type != "customer.subscription.updated" || object.Object != "subscription" {
+		return false, false
+	}
+	if object.CancelAtPeriodEnd {
+		return true, true
+	}
+	periodEnd := int64(0)
+	if len(object.Items.Data) == 1 {
+		periodEnd = object.Items.Data[0].CurrentPeriodEnd
+	}
+	return object.CancelAt > 0 && (periodEnd == 0 || object.CancelAt <= periodEnd), true
 }
 
 func (e StripeWebhook) SubscriptionID() string {
