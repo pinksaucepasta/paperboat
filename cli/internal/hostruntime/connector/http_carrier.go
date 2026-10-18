@@ -3,7 +3,6 @@ package connector
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"sync"
@@ -16,6 +15,18 @@ import (
 var ErrHTTP3Unavailable = errors.New("HTTP/3 connector establishment timed out")
 
 const httpCarrierPath = "/_paperboat/connector-v1"
+
+// HTTPCarrierFailure retains the finite HTTP establishment boundary without
+// exposing a peer response body or transport error text.
+type HTTPCarrierFailure struct {
+	Stage  string
+	Status int
+	Cause  error
+}
+
+func (e *HTTPCarrierFailure) Error() string         { return "HTTP carrier establishment failed" }
+func (e *HTTPCarrierFailure) Unwrap() error         { return e.Cause }
+func (e *HTTPCarrierFailure) DiagnosticStatus() int { return e.Status }
 
 // NewHTTPNetworkDialer carries the existing bounded yamux carrier through a
 // full-duplex HTTP CONNECT over explicit HTTP3 and HTTP2 transports.
@@ -96,7 +107,7 @@ func dialHTTPCarrier(ctx context.Context, endpoint DataCarrierEndpointConfig, h3
 		if ctx.Err() != nil {
 			return nil, DataCarrierIdentity{}, ctx.Err()
 		}
-		return nil, DataCarrierIdentity{}, fmt.Errorf("%w: HTTP carrier dial: %w", ErrDataCarrierTLS, err)
+		return nil, DataCarrierIdentity{}, &HTTPCarrierFailure{Stage: "round_trip", Cause: errors.Join(ErrDataCarrierTLS, err)}
 	}
 	wantALPN := "h2"
 	if h3 {
@@ -107,7 +118,11 @@ func dialHTTPCarrier(ctx context.Context, endpoint DataCarrierEndpointConfig, h3
 		cancel()
 		_ = writer.Close()
 		_ = transport.close()
-		return nil, DataCarrierIdentity{}, fmt.Errorf("%w: CONNECT status %d or invalid ALPN", ErrDataCarrierTLS, resp.StatusCode)
+		stage := "connect_status"
+		if resp.StatusCode == http.StatusOK {
+			stage = "alpn"
+		}
+		return nil, DataCarrierIdentity{}, &HTTPCarrierFailure{Stage: stage, Status: resp.StatusCode, Cause: ErrDataCarrierTLS}
 	}
 	identity, err := bindPeer(endpoint, *resp.TLS)
 	if err != nil {

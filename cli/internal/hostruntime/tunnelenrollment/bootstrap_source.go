@@ -583,7 +583,16 @@ func (s *HTTPSProductionAssemblySource) carrierSessionSource(ctx context.Context
 			recorder := s.recorder
 			s.mu.Unlock()
 			if recorder != nil {
-				_ = recorder.Record("tunnel", carrierDialDiagnostic(err), "warning", map[string]string{"operation": "carrier_dial"})
+				fault := errorreport.ProjectFault(dialCtx, "paperboat-daemon", "carrier_dial", "peer_connect", "transport_failed", err)
+				fields := map[string]string{"operation": "carrier_dial", "error_chain": strings.Join(fault.ErrorChain, ":"), "cause": fault.Cause}
+				var failure *connector.HTTPCarrierFailure
+				if errors.As(err, &failure) {
+					fields["reason"] = failure.Stage
+					if failure.Status != 0 {
+						fields["http_status"] = strconv.Itoa(failure.Status)
+					}
+				}
+				_ = recorder.Record("tunnel", carrierDialDiagnostic(err), "warning", fields)
 			}
 			s.report(tunnelmanager.Observation{TunnelID: request.TunnelID, ConnectorID: request.ConnectorID,
 				Code: carrierDialDiagnostic(err), Retryable: true, ObservedAt: s.clock.Now().UTC(), Err: connector.ErrDataCarrierUnavailable})

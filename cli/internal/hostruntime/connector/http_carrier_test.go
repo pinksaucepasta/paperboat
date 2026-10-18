@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -22,9 +23,14 @@ func TestHTTPNetworkDialerUsesRealHTTP2AndHTTP3(t *testing.T) {
 			identity := testDataCarrierIdentity()
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
+			var status atomic.Int32
 			handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method != http.MethodConnect {
 					http.Error(w, "method", http.StatusMethodNotAllowed)
+					return
+				}
+				if code := status.Load(); code != 0 {
+					w.WriteHeader(int(code))
 					return
 				}
 				w.WriteHeader(http.StatusOK)
@@ -92,6 +98,13 @@ func TestHTTPNetworkDialerUsesRealHTTP2AndHTTP3(t *testing.T) {
 			if err := result.Link.Close(); err != nil && !errors.Is(err, context.Canceled) {
 				t.Fatalf("close: %v", err)
 			}
+			status.Store(http.StatusForbidden)
+			_, statusErr := NewHTTPNetworkDialer(config)(ctx, DataCarrierDialRequest{Transport: transport, Identity: identity})
+			var rejection interface{ DiagnosticStatus() int }
+			if !errors.As(statusErr, &rejection) || rejection.DiagnosticStatus() != http.StatusForbidden {
+				t.Fatalf("CONNECT status lost: %v", statusErr)
+			}
+			status.Store(0)
 			wrong := identity
 			wrong.HostID = "wrong-host"
 			endpoint.PeerBinding = func(tls.ConnectionState) (DataCarrierIdentity, error) { return wrong, nil }
