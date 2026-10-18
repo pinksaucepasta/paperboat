@@ -1880,3 +1880,6 @@ No API/migration/deploy change (082 unused); F15-02 stays[ ] waiting A L/M bugre
 | 2026-10-18 | Lane A patched preview qualification | Published594705e installs/version/doctor PASS L/M; preview-manage FAIL HP33s/Apple54s, receipts20261018T005235Z/005236Z. Live renewals now10s; one Apple publication succeeds19s, others cancelled pending by CLI30s while host permits2min. F7 real delayed-publication CLI owner/fix underway; DNS queue has no30s SLA, guards/userTTL remain exact; no ticks/reruns. |
 
 2026-10-18 | Lane A F4-04 offline exec | Rows ticked:none; ignored canonical offline state caused generic peer/unknown-outcome errors; reject before admission and retain fixed human/JSON recovery. TestExecOfflineTargetReportsCertainFailureWithoutOpeningStream RED0.524s/GREEN affected exec race4.139s; cmd/pb vet PASS; L/M offline/ENV qualification waits for primary.
+
+2026-10-18 | Lane A F8 typed503 bootstrap retry | Rows ticked:none; existing signed-bootstrap owner RED0.103s/GREEN0.709s, full enrollment race9.192s/vet PASS; same-tuple availability retry honors deadline/backoff/retry_at and preserves typed409 redial plus tuple diagnostics.
+Parent abf4031 full make gate EXIT0 reused per user; waits for primary historical-baseline work before tunnel-manage L/M, no devices or deployments used.

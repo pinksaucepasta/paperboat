@@ -19,6 +19,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -193,53 +194,111 @@ func TestHTTPSProductionAssemblySourcePreservesDeniedControlDiagnostic(t *testin
 }
 
 func TestHTTPSProductionAssemblySourceBootstrapBindsProofDescriptorAndLazySession(t *testing.T) {
-	now := time.Now().UTC()
-	request, private := productionActivationRequest(t)
-	var descriptor carrierBootstrapDescriptor
-	auth := &bootstrapMachineAuth{}
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/tunnels/tunnel_01/connectors/connector_01/carrier-bootstrap" || r.Header.Get("Authorization") != "" || r.Header.Get("Cookie") != "" || r.Header.Get("X-Paperboat-Machine-Identity") != strings.Repeat("i", 48) || r.Header.Get("X-Paperboat-Machine-Proof") == "" || r.Header.Get("Idempotency-Key") == "" {
-			t.Errorf("bootstrap request headers/path are not machine-proof-only")
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"data": descriptor})
-	}))
-	defer server.Close()
-	chainPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})
-	spki := sha256.Sum256(server.Certificate().RawSubjectPublicKeyInfo)
-	descriptor = carrierBootstrapDescriptor{
-		Schema: carrierBootstrapSchema, Kind: "carrier_bootstrap_descriptor",
-		AccountID: "account_01", TunnelID: request.TunnelID, ConnectorID: request.ConnectorID, HostID: request.HostID,
-		StableEndpointID: request.StableEndpointID,
-		SessionID:        "session_live_01", ProcessGeneration: 2, CredentialGeneration: 3,
-		ConfigGeneration: 7, ConfigContentHash: "sha256:" + strings.Repeat("a", 64),
-		Carriers: []carrierBootstrapNode{{EdgeNodeID: "edge_01", EdgeProcessEpoch: "epoch_0001", FailureDomain: "zone_a", Endpoints: []string{"h2://127.0.0.1:4443", "h3://127.0.0.1:4444"}, ServerSPKISHA256: "sha256:" + hex.EncodeToString(spki[:]), ServerCertificateChainPEM: string(chainPEM)}},
-		IssuedAt: now, ExpiresAt: now.Add(15 * time.Second),
-	}
-	source := newBootstrapSourceForTest(t, server, now, auth)
-	identity := ControlIdentity{AccountID: "account_01", ProcessGeneration: 2, CredentialGeneration: 3}
-	hello := connectorprotocol.Hello{AccountID: identity.AccountID, TunnelID: request.TunnelID, ConnectorID: request.ConnectorID, HostID: request.HostID, ProcessGeneration: identity.ProcessGeneration}
-	welcome := connectorprotocol.Welcome{SessionID: descriptor.SessionID}
-	apply := tunnelmanager.ApplyRequest{Snapshot: hoststate.ConfigSnapshot{Generation: descriptor.ConfigGeneration, ContentHash: descriptor.ConfigContentHash}}
-	sessionSource, err := source.carrierSessionSource(context.Background(), request, identity, hello, welcome, apply, func(_ context.Context, payload []byte) ([]byte, error) { return ed25519.Sign(private, payload), nil })
-	if err != nil {
-		t.Fatal(err)
-	}
-	prepared, err := sessionSource.PrepareDataCarrier(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if prepared.Identity.AccountID != descriptor.AccountID || prepared.Identity.SessionID != descriptor.SessionID || prepared.Identity.Generation != descriptor.ConfigGeneration || prepared.Config.MaximumCarriers != 1 || prepared.Config.FailureDomains[0] != "zone_a" {
-		t.Fatalf("prepared carrier = %+v config=%+v", prepared.Identity, prepared.Config)
-	}
-	auth.mu.Lock()
-	defer auth.mu.Unlock()
-	if auth.operation == "" || auth.method != http.MethodPost || auth.path != rpath(request) || len(auth.body) == 0 {
-		t.Fatalf("proof = operation %q method %q path %q body %q", auth.operation, auth.method, auth.path, auth.body)
-	}
-	var bootstrap carrierBootstrapRequest
-	if json.Unmarshal(auth.body, &bootstrap) != nil || bootstrap.SessionID != descriptor.SessionID || bootstrap.ProcessGeneration != descriptor.ProcessGeneration || bootstrap.ConfigGeneration != descriptor.ConfigGeneration || bootstrap.ConfigContentHash != descriptor.ConfigContentHash {
-		t.Fatalf("bootstrap proof body = %+v", bootstrap)
+	for _, test := range []struct {
+		name       string
+		status     int
+		code       string
+		action     string
+		failures   int32
+		terminal   bool
+		retryAfter time.Duration
+		want       error
+	}{
+		{name: "ready"},
+		{name: "staged assignment follows retryable 503", status: http.StatusServiceUnavailable, code: "carrier_unavailable", action: "retry", failures: 1},
+		{name: "operation deadline bounds unavailable carrier", status: http.StatusServiceUnavailable, code: "carrier_unavailable", action: "retry", failures: -1, want: context.DeadlineExceeded},
+		{name: "server retry time obeys operation deadline", status: http.StatusServiceUnavailable, code: "carrier_unavailable", action: "retry", failures: -1, retryAfter: time.Second, want: context.DeadlineExceeded},
+		{name: "nonretryable 503 stays terminal", status: http.StatusServiceUnavailable, code: "carrier_unavailable", action: "retry", failures: -1, terminal: true, want: ErrUnavailable},
+		{name: "authentication failure stays terminal", status: http.StatusUnauthorized, code: "machine_identity_invalid", action: "reauthenticate", failures: -1, want: ErrAuthentication},
+		{name: "stale session stays with redial owner", status: http.StatusConflict, code: "connector_session_stale", action: "reconnect", failures: -1, want: tunnelmanager.ErrSessionStale},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			now := time.Now().UTC()
+			var calls atomic.Int32
+			request, private := productionActivationRequest(t)
+			var descriptor carrierBootstrapDescriptor
+			auth := &bootstrapMachineAuth{}
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/v1/tunnels/tunnel_01/connectors/connector_01/carrier-bootstrap" || r.Header.Get("Authorization") != "" || r.Header.Get("Cookie") != "" || r.Header.Get("X-Paperboat-Machine-Identity") != strings.Repeat("i", 48) || r.Header.Get("X-Paperboat-Machine-Proof") == "" || r.Header.Get("Idempotency-Key") == "" {
+					t.Errorf("bootstrap request headers/path are not machine-proof-only")
+				}
+				var tuple carrierBootstrapRequest
+				if err := json.NewDecoder(r.Body).Decode(&tuple); err != nil || tuple.SessionID != "session_live_01" || tuple.ProcessGeneration != 2 || tuple.ConfigGeneration != 7 || tuple.ConfigContentHash != "sha256:"+strings.Repeat("a", 64) {
+					t.Errorf("bootstrap request lost exact control/config tuple: %+v, error=%v", tuple, err)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				if attempt := calls.Add(1); test.failures < 0 || attempt <= test.failures {
+					retryable := !test.terminal && test.status != http.StatusUnauthorized
+					payload := carrierBootstrapErrorPayload{Schema: carrierBootstrapErrorSchema, Kind: "error", Code: test.code, Component: "control", Message: "bootstrap is unavailable", Outcome: "unchanged", Retryable: &retryable, RepairAction: test.action, RequestID: "request_bootstrap_01", CorrelationID: "correlation_bootstrap_01"}
+					if test.retryAfter > 0 {
+						retryAt := now.Add(test.retryAfter)
+						payload.RetryAt = &retryAt
+					}
+					w.WriteHeader(test.status)
+					_ = json.NewEncoder(w).Encode(carrierBootstrapErrorResponse{Error: payload})
+					return
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{"data": descriptor})
+			}))
+			defer server.Close()
+			chainPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})
+			spki := sha256.Sum256(server.Certificate().RawSubjectPublicKeyInfo)
+			descriptor = carrierBootstrapDescriptor{
+				Schema: carrierBootstrapSchema, Kind: "carrier_bootstrap_descriptor",
+				AccountID: "account_01", TunnelID: request.TunnelID, ConnectorID: request.ConnectorID, HostID: request.HostID,
+				StableEndpointID: request.StableEndpointID,
+				SessionID:        "session_live_01", ProcessGeneration: 2, CredentialGeneration: 3,
+				ConfigGeneration: 7, ConfigContentHash: "sha256:" + strings.Repeat("a", 64),
+				Carriers: []carrierBootstrapNode{{EdgeNodeID: "edge_01", EdgeProcessEpoch: "epoch_0001", FailureDomain: "zone_a", Endpoints: []string{"h2://127.0.0.1:4443", "h3://127.0.0.1:4444"}, ServerSPKISHA256: "sha256:" + hex.EncodeToString(spki[:]), ServerCertificateChainPEM: string(chainPEM)}},
+				IssuedAt: now, ExpiresAt: now.Add(15 * time.Second),
+			}
+			source := newBootstrapSourceForTest(t, server, now, auth)
+			identity := ControlIdentity{AccountID: "account_01", ProcessGeneration: 2, CredentialGeneration: 3}
+			hello := connectorprotocol.Hello{AccountID: identity.AccountID, TunnelID: request.TunnelID, ConnectorID: request.ConnectorID, HostID: request.HostID, ProcessGeneration: identity.ProcessGeneration}
+			welcome := connectorprotocol.Welcome{SessionID: descriptor.SessionID}
+			apply := tunnelmanager.ApplyRequest{Snapshot: hoststate.ConfigSnapshot{Generation: descriptor.ConfigGeneration, ContentHash: descriptor.ConfigContentHash}}
+			timeout := 3 * time.Second
+			if test.want == context.DeadlineExceeded {
+				timeout = 250 * time.Millisecond
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), timeout)
+			defer cancel()
+			sessionSource, err := source.carrierSessionSource(ctx, request, identity, hello, welcome, apply, func(_ context.Context, payload []byte) ([]byte, error) { return ed25519.Sign(private, payload), nil })
+			if test.want != nil {
+				if calls.Load() == 0 {
+					t.Fatal("operation ended before reaching bootstrap")
+				}
+				if !errors.Is(err, test.want) {
+					t.Fatalf("bootstrap error=%v, want %v", err, test.want)
+				}
+				if (test.want != context.DeadlineExceeded || test.retryAfter > 0) && calls.Load() != 1 {
+					t.Fatalf("terminal failure made %d requests", calls.Load())
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if calls.Load() != test.failures+1 {
+				t.Fatalf("bootstrap calls=%d, want %d", calls.Load(), test.failures+1)
+			}
+			prepared, err := sessionSource.PrepareDataCarrier(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if prepared.Identity.AccountID != descriptor.AccountID || prepared.Identity.SessionID != descriptor.SessionID || prepared.Identity.Generation != descriptor.ConfigGeneration || prepared.Config.MaximumCarriers != 1 || prepared.Config.FailureDomains[0] != "zone_a" {
+				t.Fatalf("prepared carrier = %+v config=%+v", prepared.Identity, prepared.Config)
+			}
+			auth.mu.Lock()
+			defer auth.mu.Unlock()
+			if auth.operation == "" || auth.method != http.MethodPost || auth.path != rpath(request) || len(auth.body) == 0 {
+				t.Fatalf("proof = operation %q method %q path %q body %q", auth.operation, auth.method, auth.path, auth.body)
+			}
+			var bootstrap carrierBootstrapRequest
+			if json.Unmarshal(auth.body, &bootstrap) != nil || bootstrap.SessionID != descriptor.SessionID || bootstrap.ProcessGeneration != descriptor.ProcessGeneration || bootstrap.ConfigGeneration != descriptor.ConfigGeneration || bootstrap.ConfigContentHash != descriptor.ConfigContentHash {
+				t.Fatalf("bootstrap proof body = %+v", bootstrap)
+			}
+		})
 	}
 }
 

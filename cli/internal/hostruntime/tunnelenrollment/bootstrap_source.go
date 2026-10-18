@@ -512,9 +512,8 @@ func (s *HTTPSProductionAssemblySource) carrierSessionSource(ctx context.Context
 	if err != nil {
 		return connector.DataCarrierSessionSource{}, ErrActivation
 	}
-	descriptor, err := s.fetchCarrierDescriptor(ctx, request, body)
+	descriptor, err := s.fetchAvailableCarrierDescriptor(ctx, request, bootstrapRequest, body)
 	if err != nil {
-		s.recordCarrierBootstrapFailure(bootstrapRequest, err)
 		return connector.DataCarrierSessionSource{}, err
 	}
 	if err := validateCarrierDescriptor(descriptor, s.clock.Now().UTC(), request, controlIdentity, welcome, apply); err != nil {
@@ -583,6 +582,42 @@ func (s *HTTPSProductionAssemblySource) carrierSessionSource(ctx context.Context
 		return result, err
 	})
 	return connector.NewDataCarrierSessionSource(identity, pool, dialer)
+}
+
+// Assignment publication can follow the authenticated config ACK. Keep that
+// transient bootstrap window inside this apply operation instead of waiting
+// for the next manager reconciliation. Other failures retain their owner.
+func (s *HTTPSProductionAssemblySource) fetchAvailableCarrierDescriptor(
+	ctx context.Context,
+	request ActivationRequest,
+	tuple carrierBootstrapRequest,
+	body []byte,
+) (carrierBootstrapDescriptor, error) {
+	ctx, cancel := context.WithTimeout(ctx, s.http.Timeout)
+	defer cancel()
+	for attempt := 1; ; attempt++ {
+		descriptor, err := s.fetchCarrierDescriptor(ctx, request, body)
+		if err == nil {
+			return descriptor, nil
+		}
+		s.recordCarrierBootstrapFailure(tuple, err)
+		var failure *CarrierBootstrapError
+		if !errors.As(err, &failure) || failure.StatusCode != http.StatusServiceUnavailable ||
+			failure.Code != "carrier_unavailable" || !failure.Retryable || failure.RepairAction != "retry" {
+			return carrierBootstrapDescriptor{}, err
+		}
+		delay := min(time.Duration(attempt)*100*time.Millisecond, time.Second)
+		if failure.RetryAt != nil {
+			delay = max(delay, failure.RetryAt.Sub(s.clock.Now().UTC()))
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return carrierBootstrapDescriptor{}, errors.Join(ctx.Err(), err)
+		case <-timer.C:
+		}
+	}
 }
 
 func (s *HTTPSProductionAssemblySource) fetchCarrierDescriptor(ctx context.Context, request ActivationRequest, body []byte) (carrierBootstrapDescriptor, error) {
