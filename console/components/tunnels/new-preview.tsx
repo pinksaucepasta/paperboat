@@ -133,7 +133,6 @@ function NewPreviewDialog({ machine, onClose }: { machine?: Machine; onClose: ()
                     onChange={setHostname}
                     invalid={Boolean(hostnameProblem)}
                     placeholder="demo"
-                    wildcard={false}
                   />
                   {hostnameProblem && <FieldError>{hostnameProblem}</FieldError>}
                 </>

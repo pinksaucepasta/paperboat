@@ -389,21 +389,15 @@ shows them humanized (`changed_both_sides` → "Changed both sides").
 
 ## Domains page
 
-Your domains, Vercel/Cloudflare-style (`lib/domains.ts`, `components/domains/`): add `acme.dev`
-once, prove ownership with a TXT record, then use names under it for machine addresses, tunnel
-public hostnames and previews. The list shows what each domain is used for (machine addresses;
-tunnel hostnames and live previews whose names fall under it) and its status; its side panel has
-the TXT record and Check again, the machine-address switch with its A record, everything using
-it, and Remove. Tunnel "Add public hostname" and New preview ("On your domain") pick from
-verified domains as subdomain + domain (`HostnameInput`); with none verified they take a full
-hostname and link here. New preview sends it in `domains` on `POST /v1/previews`.
-
-UI-only for now; the console calls `GET/POST /v1/domains?workspace=` → `{ items: [{ id, name,
-state: pending|verified|failed, verification: { type: "TXT", name, value }, created_at }] }`,
-`POST /v1/domains/{id}/verify`, `DELETE /v1/domains/{id}`. Machine addresses still come from the
-browser-local machine domains (above) until the server stores them per domain. The server should
-check that a tunnel or preview hostname is under a verified domain of the workspace before binding
-it, so ownership is proven once instead of per binding.
+Where the workspace is reachable by name (`lib/domains.ts`, `components/domains/`): Paperboat's machine
+domain (`local_access_base_domain`), machine domains you add (browser-local, a wildcard A record to
+the local gateway, DNS check by the console's own route), and the custom hostnames tunnels publish
+(from `GET /v1/tunnels/{id}/domains`, with the state from the server: requested, waiting DNS,
+verified, ...). A tunnel hostname's DNS record and verification live on its tunnel page ("Add public
+hostname", instructions, verify); the Domains page only lists them and links there. There is no
+account-level domain API (`/v1/domains` was never built; the first console build assumed it), and no
+"verified once, used everywhere" step: ownership is proven per hostname. Machine domains still come
+from `lib/machine-domains.ts` until the server stores them per domain.
 
 ## Network (self-hosted relays and tunnel servers)
 

@@ -8,24 +8,16 @@ import {
   TrashIcon,
   WarningCircleIcon,
 } from "@phosphor-icons/react"
-import { useMutation, useQueries, useQueryClient } from "@tanstack/react-query"
+import { useQueries, useQueryClient } from "@tanstack/react-query"
 import Link from "next/link"
 import { useDeferredValue, useState } from "react"
 import { toast } from "sonner"
 import { useApiQuery, useWorkspace } from "@/lib/api"
-import {
-  accountDomainsQuery,
-  addAccountDomain,
-  cleanDomain,
-  domainPattern,
-  isUnder,
-  removeAccountDomain,
-  verifyAccountDomain,
-  type AccountDomain,
-} from "@/lib/domains"
+import { cleanDomain, isUnder } from "@/lib/domains"
 import {
   addDomain as addMachineDomain,
   domainCheckQuery,
+  domainProblem,
   gatewayAddress,
   recordName,
   removeDomain as removeMachineDomain,
@@ -42,6 +34,7 @@ import {
   type TunnelDomain,
 } from "@/lib/tunnels"
 import { cn } from "@/lib/utils"
+import { domainStates } from "@/components/tunnels/tunnel-hostnames"
 import { CopyText } from "@/components/copy-button"
 import { ConfirmAction, SearchField } from "@/components/list-toolbar"
 import { RowMenus, type Entry } from "@/components/row-menus"
@@ -54,10 +47,10 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Switch } from "@/components/ui/switch"
 
 /*
- * Your domains, like Vercel's or Cloudflare's: add one once, prove you own it with a TXT record,
- * then use names under it for machine addresses, tunnel public hostnames and previews. The list
- * says what each domain is used for; its panel holds the records, the machine-address switch and
- * everything using it.
+ * Where your workspace is reachable by name: Paperboat's machine domain, machine domains you add
+ * (a wildcard A record to the local gateway), and the custom hostnames your tunnels publish. A
+ * tunnel hostname is verified on its tunnel (DNS record, then check); the list shows its state and
+ * its panel links there.
  */
 
 type Tone = "ok" | "wait" | "bad"
@@ -85,7 +78,8 @@ function State({ tone, label, busy }: { tone: Tone; label: string; busy?: boolea
 /** One domain with everything that uses it. */
 type Entryish = {
   name: string
-  account?: AccountDomain
+  /** A hostname published by a tunnel (verified there), as opposed to a machine domain. */
+  tunnelDomain?: TunnelDomain
   /** Paperboat's own machine domain, which can't be removed. */
   managed: boolean
   machines: boolean
@@ -107,16 +101,13 @@ function usedFor(entry: Entryish) {
 
 function ownership(entry: Entryish): { tone: Tone; label: string } {
   if (entry.managed) return { tone: "ok", label: "Paperboat’s" }
-  if (!entry.account) return { tone: "wait", label: "Not added" }
-  if (entry.account.state === "verified") return { tone: "ok", label: "Verified" }
-  if (entry.account.state === "failed") return { tone: "bad", label: "Verification failed" }
-  return { tone: "wait", label: "Waiting for verification" }
+  if (entry.tunnelDomain) return domainStates[entry.tunnelDomain.state]
+  return { tone: "ok", label: "Yours" }
 }
 
 export function DomainList() {
   const workspace = useWorkspace()
   const ws = workspace?.id ?? ""
-  const account = useApiQuery({ ...accountDomainsQuery(ws), enabled: Boolean(workspace) })
   const machineDomains = useMachineDomains()
   const tunnels = useApiQuery({ ...tunnelsQuery(ws), enabled: Boolean(workspace) })
   const bindings = useQueries({ queries: (tunnels.data ?? []).map((tunnel) => domainsQuery(tunnel.id)) })
@@ -133,21 +124,21 @@ export function DomainList() {
     .filter((preview) => preview.state !== "expired" && preview.state !== "stopped")
     .flatMap((preview) => preview.domains.map((domain) => ({ hostname: domain.hostname, preview })))
 
-  // Your domains, plus machine domains kept in this browser until the server stores them.
-  const names = [
-    ...new Set([
-      ...machineDomains.domains.filter((domain) => domain.managed).map((domain) => domain.name),
-      ...(account.data ?? []).map((domain) => domain.name),
-      ...machineDomains.domains.filter((domain) => !domain.managed).map((domain) => domain.name),
-    ]),
+  // Machine domains (kept in this browser until the server stores them), then tunnel hostnames
+  // that no machine domain covers.
+  const machineNames = [
+    ...machineDomains.domains.filter((domain) => domain.managed).map((domain) => domain.name),
+    ...machineDomains.domains.filter((domain) => !domain.managed).map((domain) => domain.name),
   ]
+  const loose = hostnames.filter(({ domain }) => !machineNames.some((name) => isUnder(domain.hostname, name)))
+  const names = [...machineNames, ...new Set(loose.map(({ domain }) => domain.hostname))]
   const entries: Entryish[] = names.map((name) => ({
     name,
-    account: account.data?.find((domain) => domain.name === name),
+    tunnelDomain: loose.find(({ domain }) => domain.hostname === name)?.domain,
     managed: machineDomains.domains.some((domain) => domain.name === name && domain.managed),
     machines: machineDomains.domains.some((domain) => domain.name === name),
     primary: machineDomains.primary === name,
-    hostnames: hostnames.filter(({ domain }) => isUnder(domain.hostname, name)),
+    hostnames: hostnames.filter(({ domain }) => domain.hostname === name || isUnder(domain.hostname, name)),
     previews: previewNames.filter(({ hostname }) => isUnder(hostname, name)),
   }))
   const shown = entries.filter((entry) => !text || entry.name.includes(text))
@@ -164,9 +155,6 @@ export function DomainList() {
           </Button>
         </div>
       </div>
-      {account.isError && (
-        <p className="text-sm text-muted-foreground">Couldn’t load your domains. {account.error.message}</p>
-      )}
 
       <table className="w-full table-fixed text-sm">
         <colgroup>
@@ -195,7 +183,6 @@ export function DomainList() {
 
       {adding && (
         <AddDomainDialog
-          existing={names}
           onClose={() => setAdding(false)}
           onAdded={(name) => {
             setAdding(false)
@@ -227,7 +214,7 @@ function DomainRow({ entry, onOpen }: { entry: Entryish; onOpen: () => void }) {
           },
         ] satisfies Entry[])
       : []),
-    ...(entry.managed
+    ...(entry.managed || !entry.machines
       ? []
       : ([
           ...(entry.machines ? ([{ kind: "separator" }] satisfies Entry[]) : []),
@@ -282,23 +269,16 @@ function RemoveDomain({
   onRemoved?: () => void
 }) {
   const queryClient = useQueryClient()
-  const inUse = entry.hostnames.length + entry.previews.length
   return (
     <ConfirmAction
       open={open}
       onOpenChange={onOpenChange}
       title={`Remove ${entry.name}?`}
-      description={
-        inUse
-          ? `${plural(inUse, "hostname", "hostnames")} under it stop working, and machines stop answering on it. DNS records stay at your DNS provider.`
-          : "Machines stop answering on it, and it can’t be used for tunnels or previews until you add it again."
-      }
+      description="Machines stop answering on it. DNS records stay at your DNS provider."
       action="Remove domain"
       pending="Removing…"
-      confirmName={inUse ? entry.name : undefined}
       mutation={{
         mutationFn: async () => {
-          if (entry.account) await removeAccountDomain(entry.account)
           if (entry.machines) removeMachineDomain(entry.name)
         },
         onSuccess: async () => {
@@ -311,15 +291,9 @@ function RemoveDomain({
   )
 }
 
-/** A domain's panel: proof of ownership, machine addresses, and what uses it. */
+/** A domain's panel: machine addresses, and what uses it. */
 function DomainPanel({ entry, onRemoved }: { entry: Entryish; onRemoved: () => void }) {
-  const queryClient = useQueryClient()
   const [removing, setRemoving] = useState(false)
-  const verify = useMutation({
-    mutationFn: () => verifyAccountDomain(entry.account!),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["domains"] }),
-    onError: (error) => toast.error("Couldn’t check the record", { description: error.message }),
-  })
   const state = ownership(entry)
   return (
     <>
@@ -328,21 +302,15 @@ function DomainPanel({ entry, onRemoved }: { entry: Entryish; onRemoved: () => v
         <State tone={state.tone} label={state.label} />
       </SheetHeader>
       <div className="flex flex-col gap-8 overflow-y-auto p-6">
-        {entry.account && entry.account.state !== "verified" && entry.account.verification && (
-          <PanelSection title="Prove you own it">
-            <p className="text-sm text-muted-foreground">Add this record at your DNS provider, then check.</p>
-            <Record
-              type={entry.account.verification.type}
-              name={entry.account.verification.name}
-              value={entry.account.verification.value}
-            />
-            <Button variant="secondary" className="w-fit" onClick={() => verify.mutate()} disabled={verify.isPending}>
-              {verify.isPending ? "Checking…" : "Check again"}
-            </Button>
+        {entry.tunnelDomain && (
+          <PanelSection title="Tunnel hostname">
+            <p className="text-sm text-muted-foreground">
+              Its DNS record and verification are on the tunnel that publishes it.
+            </p>
           </PanelSection>
         )}
 
-        <MachineAddresses entry={entry} />
+        {entry.machines && <MachineAddresses entry={entry} />}
 
         <PanelSection title="Tunnels">
           {entry.hostnames.length ? (
@@ -390,11 +358,11 @@ function DomainPanel({ entry, onRemoved }: { entry: Entryish; onRemoved: () => v
           )}
         </PanelSection>
 
-        {!entry.managed && (
+        {entry.machines && !entry.managed && (
           <div className="flex flex-wrap items-center gap-4 rounded-lg bg-destructive/5 p-4 dark:bg-destructive/10">
             <div className="flex min-w-0 flex-1 flex-col gap-0.5">
               <p className="text-sm font-medium">Remove domain</p>
-              <p className="text-sm text-muted-foreground">Everything using it stops working.</p>
+              <p className="text-sm text-muted-foreground">Machines stop answering on it.</p>
             </div>
             <Button
               variant="secondary"
@@ -501,36 +469,14 @@ function Record({ type, name, value }: { type: string; name: string; value: stri
   )
 }
 
-/** Adds a domain; its panel opens next with the record that proves you own it. */
-function AddDomainDialog({
-  existing,
-  onClose,
-  onAdded,
-}: {
-  existing: string[]
-  onClose: () => void
-  onAdded: (name: string) => void
-}) {
-  const queryClient = useQueryClient()
-  const workspace = useWorkspace()
+/** Adds a machine domain: machines answer as `<name>.<domain>` once its wildcard record points at the gateway. */
+function AddDomainDialog({ onClose, onAdded }: { onClose: () => void; onAdded: (name: string) => void }) {
+  const machineDomains = useMachineDomains()
   const [draft, setDraft] = useState("")
   const name = cleanDomain(draft)
-  const problem = !name
-    ? undefined
-    : !domainPattern.test(name)
-      ? "Enter a domain like acme.dev."
-      : existing.includes(name)
-        ? "That domain is already added."
-        : undefined
-  const add = useMutation({
-    mutationFn: () => addAccountDomain(workspace?.id ?? "personal", name),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["domains"] })
-      onAdded(name)
-    },
-  })
+  const problem = name ? domainProblem(name, machineDomains) : undefined
   return (
-    <Dialog open onOpenChange={(next) => !next && !add.isPending && onClose()}>
+    <Dialog open onOpenChange={(next) => !next && onClose()}>
       <DialogContent className="gap-4 sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Add a domain</DialogTitle>
@@ -539,7 +485,10 @@ function AddDomainDialog({
           className="flex flex-col gap-4"
           onSubmit={(event) => {
             event.preventDefault()
-            if (name && !problem) add.mutate()
+            if (name && !problem) {
+              addMachineDomain(name)
+              onAdded(name)
+            }
           }}
         >
           <Field data-invalid={Boolean(problem)} className="gap-1.5">
@@ -547,7 +496,7 @@ function AddDomainDialog({
             <Input
               id="domain-name"
               autoFocus
-              placeholder="acme.dev"
+              placeholder="home.acme.dev"
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
               aria-invalid={Boolean(problem)}
@@ -559,17 +508,16 @@ function AddDomainDialog({
               <FieldError>{problem}</FieldError>
             ) : (
               <p className="text-xs text-muted-foreground">
-                Then use names under it for tunnels, previews and machine addresses.
+                Machines get addresses under it. Tunnel hostnames are added on the tunnel.
               </p>
             )}
           </Field>
-          {add.isError && <p className="text-sm text-destructive">{add.error.message}</p>}
           <DialogFooter>
-            <Button type="button" variant="secondary" size="lg" onClick={onClose} disabled={add.isPending}>
+            <Button type="button" variant="secondary" size="lg" onClick={onClose}>
               Cancel
             </Button>
-            <Button type="submit" size="lg" disabled={!name || Boolean(problem) || add.isPending}>
-              {add.isPending ? "Adding…" : "Add domain"}
+            <Button type="submit" size="lg" disabled={!name || Boolean(problem)}>
+              Add domain
             </Button>
           </DialogFooter>
         </form>
