@@ -19,7 +19,7 @@ pb doctor [machine] [flags]
 ```
   -h, --help     help for doctor
       --json     print JSON
-      --repair   repair Paperboat-owned local dependencies
+      --repair   repair Paperboat-owned local dependencies (Windows) and restart the local daemon, then check
 ```
 
 ### Options inherited from parent commands
