@@ -82,7 +82,9 @@ func TestLocalSenderClassifiesDeliveryDeadlineAtReceiptBoundary(t *testing.T) {
 		outlive        bool
 		revoked        bool
 		wantMessage    string
+		terminalState  string
 	}{
+		{name: "canceled receipt stops delivery", terminalState: "canceled", wantMessage: "file delivery failed"},
 		{name: "pure deadline", wantMessage: "file delivery timed out"},
 		{name: "deadline with independent io failure", cause: syscall.EIO, wantMessage: "file delivery failed"},
 		{name: "poll status preserved through deadline", pollStatus: http.StatusInternalServerError, wantMessage: "file delivery failed"},
@@ -111,6 +113,10 @@ func TestLocalSenderClassifiesDeliveryDeadlineAtReceiptBoundary(t *testing.T) {
 						return
 					}
 					statusStartedOnce.Do(func() { close(statusStarted) })
+					if tc.terminalState != "" {
+						writeJSONTest(writer, http.StatusOK, Manifest{TransferID: "ft_generated", State: tc.terminalState, ExpiresAt: expires})
+						return
+					}
 					if getCalls == 2 && tc.pollStatus != 0 {
 						writeJSONTest(writer, tc.pollStatus, map[string]any{"code": "status_unavailable", "message": "private poll response"})
 						return
@@ -171,6 +177,12 @@ func TestLocalSenderClassifiesDeliveryDeadlineAtReceiptBoundary(t *testing.T) {
 				t.Fatal("delivery receipt polling did not start")
 			}
 			result := <-done
+			if tc.terminalState != "" {
+				if result.err == nil || errors.Is(result.err, context.DeadlineExceeded) || result.err.Error() != tc.wantMessage || getCalls != 2 {
+					t.Fatalf("terminal receipt did not stop delivery: err=%v polls=%d", result.err, getCalls)
+				}
+				return
+			}
 			if tc.revoked {
 				var denied *Error
 				if !errors.As(result.err, &denied) || denied.StatusCode != http.StatusForbidden || errors.Is(result.err, context.DeadlineExceeded) {

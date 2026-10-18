@@ -94,7 +94,8 @@ func (s *LocalSender) sendBatch(ctx context.Context, batchID, sourceMachineID, d
 	for {
 		remaining := 0
 		for index, transfer := range created.Transfers {
-			if results[index].State == "delivered" || results[index].State == "failed" {
+			switch results[index].State {
+			case "delivered", "failed", "canceled":
 				continue
 			}
 			remaining++

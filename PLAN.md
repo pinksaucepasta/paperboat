@@ -1867,3 +1867,5 @@ Schema090 fresh isolated full billing PostgreSQL PASS (lifetime-topup-migration0
 
 2026-10-18 | Lane B top-up final publication merge | Rebased800ad34 preserving identity093/seats089/allowance contracts; unpublished top-up schema090→094 above public093. Rebuilt embedded094 binary/fresh own isolated database: full billing PostgreSQL PASS, top-up0.71s/paid-Team0.26s/seats0.49s; receipt lifetime-topup-migration094-full-billing.log.
 Final merged billing/HTTP/config/app vet+races PASS1.240/9.137/cached/1.322s; schema094 HTTP allowance0.92s/seats0.16s PASS. Workspace green after focused reruns, composed matching800ad34 CLI/shared/relay/console evidence; raw /tmp/topup-final-gate.log FAIL solely nonrepeating timeouts, all other phases PASS. Public max093 checked before push; no activation/C contact.
+
+2026-10-18 | Lane A F6 canceled receipt | Rows ticked:none; existing HTTP receipt owner RED0.50s proves canceled host-local delivery waits for deadline; treat canceled as terminal. Package race/vet queued under shared Go lock; primary owns L/M transfer-manage verification.
