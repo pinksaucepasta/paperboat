@@ -16,6 +16,8 @@ const eslintConfig = defineConfig([
     "lib/api-schema.d.ts",
     // The browser terminal runtime, copied as built.
     "public/terminal/**",
+    // The ENV vault worker and the Go toolchain's wasm_exec.js, copied as built.
+    "public/environment-vault/**",
   ]),
 ])
 
