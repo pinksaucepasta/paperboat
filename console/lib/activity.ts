@@ -109,17 +109,46 @@ const phrases: Record<string, string> = {
   "managed_ssh.client_key_registered": "added an SSH key",
   "managed_ssh.client_key_revoked": "removed an SSH key",
   "github.oauth.connected": "connected GitHub",
+  "team.created": "created the team",
+  "team.invite": "invited someone to the team",
+  "team.cancel_invite": "cancelled a team invitation",
+  "team.role": "changed a member's role",
+  "team.grant": "granted team access",
+  "team.machine_share": "shared a machine with the team",
+  "team.machine_unshare": "stopped sharing a machine with the team",
+  "team.machine_grant": "gave a member access to a machine",
+  "team.inbox_request": "asked to send files",
+  "team.inbox_decide": "answered a file request",
+  "team.inbox_consume": "received a file",
+  "team.inbox_complete": "finished a file transfer",
+  "team.config_default_changed": "changed the team's config default",
+  "team.config_default_adopted": "adopted the team's config default",
+  "team.config_default_unadopted": "stopped using the team's config default",
+  "team.config_default_deleted": "removed the team's config default",
+  "team.env.initialize": "set up the team's environment",
+  "team.env.key_grant": "gave a member access to the team's environment",
+  "team.env.rotate": "rotated the team's environment key",
+  "team.env.reset": "reset the team's environment",
+  "env.initialize": "set up environment variables",
+  "env.key_grant": "gave a device access to environment variables",
+  "env.rotate": "rotated the environment key",
+  "env.reset": "reset environment variables",
+  "env.write": "changed environment variables",
+  "config.consent_accepted": "allowed config sync on",
+  "config.consent_removed": "stopped config sync on",
+  "transfer_destination.session_set": "changed the Inbox folder for a session on",
+  "transfer_destination.session_cleared": "reset the Inbox folder for a session on",
 }
 
-/** Unknown types read as their verb part: `user_machine.foo_bar` → "foo bar". */
+/** Unknown types read as their verb part: `user_machine.foo_bar` → "did foo bar". */
 export function describe(event: ActivityEvent): string {
-  return phrases[event.action] ?? event.action.split(".").slice(1).join(" ").replace(/_/g, " ")
+  return phrases[event.action] ?? `did ${event.action.split(".").slice(1).join(" ").replace(/_/g, " ")}`
 }
 
-export function actorName(event: ActivityEvent, meId?: string) {
+export function actorName(event: ActivityEvent, meId?: string, memberNames?: ReadonlyMap<string, string | undefined>) {
   if (event.actor.kind === "user" && event.actor.id === meId) return "You"
   if (event.actor.kind === "system") return "Paperboat"
-  return event.actor.name ?? event.actor.email ?? (event.actor.kind === "machine" ? "A machine" : "Someone")
+  return event.actor.name ?? event.actor.email ?? memberNames?.get(event.actor.id) ?? (event.actor.kind === "machine" ? "A machine" : "Someone")
 }
 
 /** Where a target opens in the console, when it has a page. */

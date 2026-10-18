@@ -5,6 +5,7 @@ import { useInfiniteQuery } from "@tanstack/react-query"
 import Link from "next/link"
 import { Fragment, useDeferredValue, useState } from "react"
 import { meQuery, useApiQuery, useWorkspace, type Machine } from "@/lib/api"
+import { teamQuery } from "@/lib/teams"
 import { activityAreas, activityQuery, actorName, describe, targetHref, type ActivityArea } from "@/lib/activity"
 import { SearchField, useListScope } from "@/components/list-toolbar"
 import { useCurrentMachine } from "@/components/machine-shell"
@@ -39,6 +40,8 @@ export function ActivityPage({ machine: tabMachine }: { machine?: Machine }) {
   const workspace = useWorkspace()
   const { scope } = useListScope(tabMachine)
   const { data: me } = useApiQuery(meQuery)
+  const { data: team } = useApiQuery({ ...teamQuery(workspace?.id ?? ""), enabled: workspace?.kind === "team" })
+  const memberNames = new Map(team?.members?.map((member) => [member.account_id, member.display_name || member.email]))
   const [area, setArea] = useState<ActivityArea>("all")
   const [search, setSearch] = useState("")
   const q = useDeferredValue(search.trim())
@@ -103,7 +106,7 @@ export function ActivityPage({ machine: tabMachine }: { machine?: Machine }) {
               <ol className="flex flex-col divide-y divide-divider border-y border-divider">
                 {group.events.map((event) => {
                   const href = targetHref(event)
-                  const actor = actorName(event, me?.id)
+                  const actor = actorName(event, me?.id, memberNames)
                   return (
                     <li key={event.id} className="flex min-h-12 items-center gap-4 py-2 text-sm">
                       <span className="w-16 shrink-0 text-xs text-muted-foreground tabular-nums">
