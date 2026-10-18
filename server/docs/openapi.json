@@ -15125,6 +15125,41 @@
             "format": "date-time"
           }
         }
+      },
+      "WorkspaceTopupRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "product_code",
+          "product_version",
+          "quantity",
+          "success_url",
+          "cancel_url"
+        ],
+        "properties": {
+          "product_code": {
+            "type": "string",
+            "minLength": 1
+          },
+          "product_version": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Number of top-up units, up to the selected product max_quantity."
+          },
+          "success_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "cancel_url": {
+            "type": "string",
+            "format": "uri"
+          }
+        }
       }
     },
     "responses": {
