@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -76,10 +75,14 @@ func (o *HTTPDispatchReadinessObserver) ObservePreviewReadiness(ctx context.Cont
 	// This bounds initial publication only, never the admitted carrier lifetime.
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	current, err := o.observeLease(ctx, metadata, lease, expectedGeneration, http.MethodPost)
+	method := http.MethodPost
+	current, err := o.observeLease(ctx, metadata, lease, expectedGeneration, method)
 	for err == nil {
-		if !sameLeaseIdentity(lease, current) || current.Generation <= expectedGeneration || !validActiveLeaseState(current.State) {
-			return Lease{}, ErrDispatchInvalid
+		if err := readinessProjectionFailure(method, 0, lease, current, expectedGeneration); err != nil {
+			return Lease{}, err
+		}
+		if current.Generation <= expectedGeneration {
+			return Lease{}, readinessFailed(method, "stale_generation", 0, ErrDispatchInvalid, nil)
 		}
 		if isReadyLease(current) {
 			return current, nil
@@ -88,9 +91,10 @@ func (o *HTTPDispatchReadinessObserver) ObservePreviewReadiness(ctx context.Cont
 			break
 		}
 		previous := current.Generation
-		current, err = o.observeLease(ctx, metadata, current, previous, http.MethodGet)
+		method = http.MethodGet
+		current, err = o.observeLease(ctx, metadata, current, previous, method)
 		if err == nil && current.Generation < previous {
-			return Lease{}, ErrDispatchInvalid
+			return Lease{}, readinessFailed(method, "stale_generation", 0, ErrDispatchInvalid, nil)
 		}
 	}
 	return Lease{}, err
@@ -105,8 +109,8 @@ func (o *HTTPDispatchReadinessObserver) observeLease(ctx context.Context, metada
 		if err != nil {
 			return Lease{}, err
 		}
-		if !sameLeaseIdentity(current, observed) || !validActiveLeaseState(observed.State) || observed.Generation < current.Generation || method == http.MethodPost && observed.Generation == current.Generation {
-			return Lease{}, ErrDispatchInvalid
+		if err := readinessProjectionFailure(method, 0, current, observed, current.Generation); err != nil {
+			return Lease{}, err
 		}
 		return observed, nil
 	})
@@ -114,7 +118,7 @@ func (o *HTTPDispatchReadinessObserver) observeLease(ctx context.Context, metada
 
 func (o *HTTPDispatchReadinessObserver) readinessRequest(ctx context.Context, metadata DispatchReadiness, lease Lease, expectedGeneration int64, method string) (Lease, error) {
 	if o == nil || ctx == nil || expectedGeneration < 1 || metadata.OperationID == "" || metadata.IdempotencyKey == "" || metadata.RequestID == "" || metadata.CorrelationID == "" || lease.ID == "" || lease.OwnerMachineID == "" || lease.OwnerSessionID == "" || lease.ETag == "" || leaseGenerationForID(lease.ID, lease.ETag) != expectedGeneration {
-		return Lease{}, ErrDispatchInvalid
+		return Lease{}, readinessFailed(method, "request", 0, ErrDispatchInvalid, nil)
 	}
 	body, err := json.Marshal(struct {
 		OwnerMachineID  string `json:"owner_machine_id"`
@@ -124,7 +128,7 @@ func (o *HTTPDispatchReadinessObserver) readinessRequest(ctx context.Context, me
 		OriginState     string `json:"origin_state"`
 	}{lease.OwnerMachineID, lease.OwnerSessionID, "ready", "ready", "ready"})
 	if err != nil {
-		return Lease{}, errors.Join(ErrDispatchInvalid, err)
+		return Lease{}, readinessFailed(method, "request", 0, ErrDispatchInvalid, err)
 	}
 	if method == http.MethodGet {
 		body = nil
@@ -132,17 +136,17 @@ func (o *HTTPDispatchReadinessObserver) readinessRequest(ctx context.Context, me
 	path := "/v1/previews/" + url.PathEscape(lease.ID) + "/readiness"
 	identity, err := o.identities.Token(ctx)
 	if err != nil || identity == "" || len(identity) > 16<<10 {
-		return Lease{}, errors.Join(ErrDispatchUnavailable, err)
+		return Lease{}, readinessFailed(method, "identity", 0, ErrDispatchUnavailable, err)
 	}
 	proof, err := o.proofs.Proof(ctx, metadata.OperationID, method, path, body)
 	if err != nil || len(proof) == 0 || len(proof) > 16<<10 {
-		return Lease{}, errors.Join(ErrDispatchUnavailable, err)
+		return Lease{}, readinessFailed(method, "proof", 0, ErrDispatchUnavailable, err)
 	}
 	endpoint := *o.base
 	endpoint.Path = path
 	request, err := http.NewRequestWithContext(ctx, method, endpoint.String(), bytes.NewReader(body))
 	if err != nil {
-		return Lease{}, errors.Join(ErrDispatchInvalid, err)
+		return Lease{}, readinessFailed(method, "request", 0, ErrDispatchInvalid, err)
 	}
 	request.Header.Set("Authorization", "Bearer "+identity)
 	request.Header.Set("X-Paperboat-Machine-Identity", identity)
@@ -158,24 +162,24 @@ func (o *HTTPDispatchReadinessObserver) readinessRequest(ctx context.Context, me
 	request.Header.Set("Correlation-Id", metadata.CorrelationID)
 	response, err := o.client.Do(request)
 	if err != nil {
-		return Lease{}, errors.Join(ErrDispatchUnavailable, err)
+		return Lease{}, readinessFailed(method, "network", 0, ErrDispatchUnavailable, err)
 	}
 	defer response.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(response.Body, maxPreviewReadinessResponseBytes+1))
 	if err != nil || len(data) > maxPreviewReadinessResponseBytes {
-		return Lease{}, errors.Join(ErrDispatchUnavailable, err)
+		return Lease{}, readinessFailed(method, "response_body", response.StatusCode, ErrDispatchUnavailable, err)
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		if response.StatusCode == http.StatusConflict || response.StatusCode == http.StatusPreconditionFailed {
-			return Lease{}, fmt.Errorf("%w: readiness status %d", ErrDispatchConflict, response.StatusCode)
+			return Lease{}, readinessFailed(method, "http_status", response.StatusCode, ErrDispatchConflict, nil)
 		}
 		if response.StatusCode >= 500 {
-			return Lease{}, fmt.Errorf("%w: readiness status %d", ErrDispatchUnavailable, response.StatusCode)
+			return Lease{}, readinessFailed(method, "http_status", response.StatusCode, ErrDispatchUnavailable, nil)
 		}
-		return Lease{}, fmt.Errorf("%w: readiness status %d", ErrDispatchInvalid, response.StatusCode)
+		return Lease{}, readinessFailed(method, "http_status", response.StatusCode, ErrDispatchInvalid, nil)
 	}
 	if err := rejectPreviewReadinessDuplicateKeys(data); err != nil {
-		return Lease{}, fmt.Errorf("%w: readiness response JSON: %v", ErrDispatchInvalid, err)
+		return Lease{}, readinessFailed(method, "json_decode", response.StatusCode, ErrDispatchInvalid, err)
 	}
 	var envelope struct {
 		Data api.PreviewLease `json:"data"`
@@ -183,15 +187,18 @@ func (o *HTTPDispatchReadinessObserver) readinessRequest(ctx context.Context, me
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&envelope); err != nil {
-		return Lease{}, fmt.Errorf("%w: readiness response: %v", ErrDispatchInvalid, err)
+		return Lease{}, readinessFailed(method, "json_decode", response.StatusCode, ErrDispatchInvalid, err)
 	}
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
-		return Lease{}, fmt.Errorf("%w: readiness response has trailing data", ErrDispatchInvalid)
+		return Lease{}, readinessFailed(method, "json_decode", response.StatusCode, ErrDispatchInvalid, err)
 	}
 	envelope.Data.ETag = strings.TrimSpace(response.Header.Get("ETag"))
 	observed := leaseFromAPI(envelope.Data)
 	if observed.Generation < 1 {
-		return Lease{}, fmt.Errorf("%w: readiness response ETag is invalid", ErrDispatchInvalid)
+		return Lease{}, readinessFailed(method, "etag_invalid", response.StatusCode, ErrDispatchInvalid, nil)
+	}
+	if err := readinessProjectionFailure(method, response.StatusCode, lease, observed, expectedGeneration); err != nil {
+		return Lease{}, err
 	}
 	return observed, nil
 }

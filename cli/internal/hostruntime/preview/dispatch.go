@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -403,11 +404,19 @@ func (m *DispatchManager) observeSession(operationID, hash string, session *Sess
 	ready := session.readySet
 	failure := session.result
 	session.mu.RUnlock()
-	if !ready {
+	if !ready || failure != nil {
 		code := previewDispatchFailureCode(failure)
-		slog.Warn("preview dispatch ended before readiness", "code", code)
+		state := "pending"
+		if ready {
+			state = "ready"
+		}
+		slog.Warn("preview dispatch ended", "code", code, "state", state)
+		fields := map[string]string{"reason": code, "state": state}
+		if _, status := readinessFailureDiagnostic(failure); status != 0 {
+			fields["http_status"] = strconv.Itoa(status)
+		}
 		if recorder := diagnostics.FromContext(session.ctx); recorder != nil {
-			_ = recorder.RecordWithSupportReference("preview", "preview_dispatch_failed", "warning", supportref.FromContext(session.ctx), map[string]string{"reason": code})
+			_ = recorder.RecordWithSupportReference("preview", "preview_dispatch_failed", "warning", supportref.FromContext(session.ctx), fields)
 		}
 	}
 	lease := session.currentLease()
@@ -424,6 +433,9 @@ func (m *DispatchManager) observeSession(operationID, hash string, session *Sess
 }
 
 func previewDispatchFailureCode(err error) string {
+	if reason, _ := readinessFailureDiagnostic(err); reason != "" {
+		return reason
+	}
 	if err == nil {
 		return "owner_or_runtime_closed"
 	}
@@ -732,7 +744,7 @@ func (c *readinessCarrier) RunWithLease(ctx context.Context, currentLease func()
 				return err
 			}
 			if err := validateReadyLeaseMutation(candidate, updated, expected); err != nil {
-				return fmt.Errorf("%w: readiness response is stale or changed lease identity", ErrDispatchInvalid)
+				return readinessFailed("", "publish_validation", 0, ErrDispatchInvalid, err)
 			}
 			updated.CreateOperationID = c.admitted.CreateOperationID
 			return ready(updated)
