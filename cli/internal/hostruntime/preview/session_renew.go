@@ -122,24 +122,24 @@ func (s *Session) mutateLease(update func(Lease) (Lease, error), publish bool) (
 	previous := s.currentLease()
 	observed, err := update(previous)
 	if err != nil {
-		return Lease{}, err
+		return Lease{}, readinessOwnerFailed("owner_update", err)
 	}
 	observed.CreateOperationID = previous.CreateOperationID
 	observed.Generation = leaseGenerationForID(observed.ID, observed.ETag)
 	if !sameLeaseIdentity(previous, observed) || !validActiveLeaseState(observed.State) || observed.Generation < previous.Generation {
-		return Lease{}, ErrSessionInvalid
+		return Lease{}, readinessOwnerFailed("owner_projection", ErrSessionInvalid)
 	}
 	if err := validateSessionLease(observed, s.config, s.config.Now()); err != nil {
-		return Lease{}, err
+		return Lease{}, readinessOwnerFailed("owner_validate", err)
 	}
 	if observed.Generation > previous.Generation {
 		if err := s.acceptRenewal(observed, previous); err != nil {
-			return Lease{}, err
+			return Lease{}, readinessOwnerFailed("owner_accept_renewal", err)
 		}
 	}
 	if publish && isReadyLease(observed) {
 		if err := s.markReady(observed); err != nil {
-			return Lease{}, err
+			return Lease{}, readinessOwnerFailed("owner_mark_ready", err)
 		}
 	}
 	return observed, nil
@@ -181,7 +181,7 @@ func (s *Session) acceptRenewal(renewed, previous Lease) error {
 	for _, manager := range managers {
 		if err := manager.rekey(s, renewed); err != nil {
 			s.cancel()
-			return fmt.Errorf("%w: manager rejected renewed lease: %v", ErrLeaseLost, err)
+			return readinessOwnerFailed("owner_renewal_rekey", fmt.Errorf("%w: manager rejected renewed lease: %v", ErrLeaseLost, err))
 		}
 	}
 	if s.config.OnRenew != nil {

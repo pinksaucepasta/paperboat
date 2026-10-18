@@ -687,7 +687,7 @@ func (s *Session) rekeyManagers(lease Lease) error {
 			if errors.Is(err, ErrSessionManagerStopped) {
 				return context.Canceled
 			}
-			return fmt.Errorf("%w: manager rejected ready lease: %v", ErrLeaseLost, err)
+			return readinessOwnerFailed("owner_ready_rekey", fmt.Errorf("%w: manager rejected ready lease: %v", ErrLeaseLost, err))
 		}
 	}
 	return nil

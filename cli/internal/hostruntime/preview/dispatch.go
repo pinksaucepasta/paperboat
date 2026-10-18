@@ -412,6 +412,9 @@ func (m *DispatchManager) observeSession(operationID, hash string, session *Sess
 		}
 		slog.Warn("preview dispatch ended", "code", code, "state", state)
 		fields := map[string]string{"reason": code, "state": state}
+		if readinessRetriesExhausted(failure) {
+			fields["retry_class"] = "readiness_generation_race_exhausted"
+		}
 		if _, status := readinessFailureDiagnostic(failure); status != 0 {
 			fields["http_status"] = strconv.Itoa(status)
 		}
@@ -713,19 +716,20 @@ func (c *readinessCarrier) RunWithLease(ctx context.Context, currentLease func()
 		// The carrier proves the attachment and origin are ready. Its public
 		// URL can be the projection captured before DNS and certificate issuance.
 		if !sameLeaseIdentity(c.admitted, observed) || observed.Generation < c.admitted.Generation || leaseGenerationForID(observed.ID, observed.ETag) != observed.Generation || observed.State != "ready" || observed.AllocationState != "ready" || observed.EdgeState != "ready" || observed.OriginState != "ready" {
-			return fmt.Errorf("%w: carrier readiness does not match admitted lease", ErrDispatchInvalid)
+			return readinessFailed("", "carrier_projection", 0, ErrDispatchInvalid, nil)
 		}
+		var lastFailure error
 		for attempt := 0; attempt < 4; attempt++ {
 			current := currentLease()
 			if !sameLeaseIdentity(c.admitted, current) {
-				return fmt.Errorf("%w: current lease changed identity", ErrDispatchInvalid)
+				return readinessFailed("", "carrier_identity", 0, ErrDispatchInvalid, nil)
 			}
 			expected := current.Generation
 			if expected < 1 {
 				expected = leaseGenerationForID(current.ID, current.ETag)
 			}
 			if observed.Generation > expected {
-				return fmt.Errorf("%w: carrier reported a future lease generation", ErrDispatchInvalid)
+				return readinessFailed("", "carrier_generation", 0, ErrDispatchInvalid, nil)
 			}
 			candidate := current
 			candidate.State, candidate.AllocationState, candidate.EdgeState, candidate.OriginState = "ready", "ready", "ready", "ready"
@@ -733,6 +737,7 @@ func (c *readinessCarrier) RunWithLease(ctx context.Context, currentLease func()
 			metadata.Mutate = mutate
 			updated, err := c.observer.ObservePreviewReadiness(ctx, metadata, candidate, expected)
 			if err != nil {
+				lastFailure = err
 				latest := currentLease()
 				latestGeneration := latest.Generation
 				if latestGeneration < 1 {
@@ -747,9 +752,9 @@ func (c *readinessCarrier) RunWithLease(ctx context.Context, currentLease func()
 				return readinessFailed("", "publish_validation", 0, ErrDispatchInvalid, err)
 			}
 			updated.CreateOperationID = c.admitted.CreateOperationID
-			return ready(updated)
+			return readinessOwnerFailed("owner_mark_ready", ready(updated))
 		}
-		return fmt.Errorf("%w: readiness raced repeated lease renewals", ErrDispatchUnavailable)
+		return &readinessRetryError{cause: lastFailure}
 	}
 	if current, ok := c.inner.(interface {
 		RunWithLease(context.Context, func() Lease, LeaseMutation, func(Lease) error) error

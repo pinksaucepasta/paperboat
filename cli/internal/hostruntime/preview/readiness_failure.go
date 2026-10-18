@@ -1,6 +1,7 @@
 package preview
 
 import (
+	"context"
 	"net/http"
 )
 
@@ -24,7 +25,7 @@ func (e *readinessFailure) code() string {
 		prefix = "readiness_get"
 	}
 	switch e.stage {
-	case "request", "identity", "proof", "network", "response_body", "http_status", "json_decode", "etag_invalid", "identity_changed", "stale_generation", "lease_state_invalid", "publish_validation":
+	case "request", "identity", "proof", "network", "response_body", "http_status", "json_decode", "etag_invalid", "identity_changed", "stale_generation", "lease_state_invalid", "publish_validation", "owner_update", "owner_projection", "owner_validate", "owner_accept_renewal", "owner_renewal_rekey", "owner_mark_ready", "owner_ready_rekey", "carrier_projection", "carrier_identity", "carrier_generation":
 		return prefix + "_" + e.stage
 	}
 	return prefix + "_validation"
@@ -62,4 +63,35 @@ func readinessProjectionFailure(method string, status int, expected, observed Le
 		return readinessFailed(method, "lease_state_invalid", status, ErrDispatchInvalid, nil)
 	}
 	return nil
+}
+
+// Preserve the owner step without masking a more precise wire classification.
+func readinessOwnerFailed(stage string, err error) error {
+	if err == nil || err == context.Canceled {
+		return err
+	}
+	if reason, _ := readinessFailureDiagnostic(err); reason != "" {
+		return err
+	}
+	return readinessFailed("", stage, 0, nil, err)
+}
+
+type readinessRetryError struct{ cause error }
+
+func (e *readinessRetryError) Error() string {
+	return ErrDispatchUnavailable.Error() + ": readiness raced repeated lease renewals"
+}
+func (e *readinessRetryError) Unwrap() []error { return []error{ErrDispatchUnavailable, e.cause} }
+
+func readinessRetriesExhausted(err error) bool {
+	nodes, valid := machineAttachmentDialErrorTree(err)
+	if !valid {
+		return false
+	}
+	for _, node := range nodes {
+		if _, ok := node.err.(*readinessRetryError); ok {
+			return true
+		}
+	}
+	return false
 }
