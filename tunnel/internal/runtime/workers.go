@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"reflect"
@@ -18,13 +19,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/control"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/datacarrier"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/node"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/reporting"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/route"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/usage"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 var ErrWorkerInvalid = errors.New("runtime worker configuration is invalid")
@@ -523,7 +524,11 @@ func (w *RouteWorker) reconcileAccessor(ctx context.Context) error {
 	return nil
 }
 
-func (w *RouteWorker) reconcileRoutes(ctx context.Context) error {
+func (w *RouteWorker) reconcileRoutes(ctx context.Context) (result error) {
+	// invalid collects canonical rows excluded from serving. They are reported
+	// through the reconcile error after every valid assignment has been handled.
+	var invalid error
+	defer func() { result = errors.Join(result, invalid) }()
 	var (
 		desired   []control.RouteAssignment
 		canonical bool
@@ -559,7 +564,8 @@ func (w *RouteWorker) reconcileRoutes(ctx context.Context) error {
 		if w.ProcessEpoch == "" || w.Carrier == nil && w.Ready == nil || w.Observer == nil {
 			return route.ErrGenerationNotReady
 		}
-		selectedAssignments, err := selectCanonicalAssignments(desired, w.NodeID, w.ProcessEpoch)
+		selectedAssignments, selectInvalid, err := selectCanonicalAssignments(desired, w.NodeID, w.ProcessEpoch)
+		invalid = selectInvalid
 		if err != nil {
 			return err
 		}
@@ -828,7 +834,10 @@ func (w *RouteWorker) reconcileRoutes(ctx context.Context) error {
 	return w.Observer.ObserveRoutes(ctx, w.NodeID, observations)
 }
 
-func selectCanonicalAssignments(desired []control.RouteAssignment, nodeID, processEpoch string) ([]control.RouteAssignment, error) {
+// selectCanonicalAssignments returns the serving set. A staged or active row that
+// fails validation is excluded and reported in invalid so it cannot block the
+// valid rows; any other error is fatal for the snapshot.
+func selectCanonicalAssignments(desired []control.RouteAssignment, nodeID, processEpoch string) (result []control.RouteAssignment, invalid, err error) {
 	selected := make(map[string]control.RouteAssignment)
 	for _, assignment := range desired {
 		if !isCanonicalAssignment(assignment) {
@@ -836,18 +845,23 @@ func selectCanonicalAssignments(desired []control.RouteAssignment, nodeID, proce
 			// canonical durable assignments. They belong to the legacy owner.
 			continue
 		}
-		if err := validateCanonicalAssignment(assignment, nodeID, processEpoch); err != nil {
-			return nil, err
-		}
 		state := assignment.State
 		if state == "" {
 			state = "active"
 		}
 		if state == "draining" || state == "detached" {
+			// Only identity is needed to drain and acknowledge the row.
+			if err := validateCanonicalAssignment(assignment, nodeID, processEpoch); err != nil {
+				return nil, nil, err
+			}
 			continue
 		}
 		if state != "staged" && state != "active" {
-			return nil, route.ErrInvalid
+			return nil, nil, route.ErrInvalid
+		}
+		if err := validateCanonicalAssignment(assignment, nodeID, processEpoch); err != nil {
+			invalid = errors.Join(invalid, fmt.Errorf("assignment %q excluded: %w", assignment.AssignmentID, err))
+			continue
 		}
 		selectionKey := assignment.RouteID + "\x00" + assignment.ConnectorID
 		current, exists := selected[selectionKey]
@@ -872,10 +886,10 @@ func selectCanonicalAssignments(desired []control.RouteAssignment, nodeID, proce
 			// The staged candidate remains authoritative until its exact ready
 			// acknowledgement is accepted.
 		default:
-			return nil, route.ErrMatchConflict
+			return nil, nil, route.ErrMatchConflict
 		}
 	}
-	result := make([]control.RouteAssignment, 0, len(selected))
+	result = make([]control.RouteAssignment, 0, len(selected))
 	for _, assignment := range selected {
 		result = append(result, assignment)
 	}
@@ -885,7 +899,7 @@ func selectCanonicalAssignments(desired []control.RouteAssignment, nodeID, proce
 		}
 		return result[i].AssignmentID < result[j].AssignmentID
 	})
-	return result, nil
+	return result, invalid, nil
 }
 
 func canonicalRouteRules(assignments []control.RouteAssignment) []route.RouteRule {
@@ -1266,12 +1280,16 @@ func canonicalSupersededAssignments(desired, selected []control.RouteAssignment,
 		if !isCanonicalAssignment(assignment) {
 			continue
 		}
-		if err := validateCanonicalAssignment(assignment, nodeID, processEpoch); err != nil {
-			return nil, err
-		}
 		state := assignment.State
 		if state == "" {
 			state = "active"
+		}
+		if err := validateCanonicalAssignment(assignment, nodeID, processEpoch); err != nil {
+			if state == "draining" {
+				return nil, err
+			}
+			// Invalid serving rows were excluded and reported by selection.
+			continue
 		}
 		if state != "active" && state != "draining" {
 			continue
@@ -1365,6 +1383,14 @@ func validateCanonicalAssignment(assignment control.RouteAssignment, nodeID, pro
 	}
 	if assignment.EdgeFailureDomain == "" {
 		return route.ErrInvalid
+	}
+	if assignment.State != "" && assignment.State != "staged" && assignment.State != "active" && assignment.State != "draining" && assignment.State != "detached" {
+		return route.ErrInvalid
+	}
+	if assignment.State == "draining" || assignment.State == "detached" {
+		// Withdrawn rows are drained and acknowledged by identity alone; the
+		// serving shape (kind, host, match) no longer matters.
+		return nil
 	}
 	switch assignment.Kind {
 	case string(route.TunnelHTTPSWSS):

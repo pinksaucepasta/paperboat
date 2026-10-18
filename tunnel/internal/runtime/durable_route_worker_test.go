@@ -693,3 +693,39 @@ func TestCanonicalPrimaryDomainAndReadyAliasPublishOnce(t *testing.T) {
 		})
 	}
 }
+
+func TestRouteWorkerDrainingCatchAllRowDoesNotBlockValidAssignments(t *testing.T) {
+	for _, tc := range []string{"draining_catch_all_empty_host", "invalid_active_row"} {
+		t.Run(tc, func(t *testing.T) {
+			publicKey := make(ed25519.PublicKey, ed25519.PublicKeySize)
+			for index := range publicKey {
+				publicKey[index] = byte(index + 1)
+			}
+			encodedKey := base64.RawURLEncoding.EncodeToString(publicKey)
+			thumbprint, err := connectorprotocol.IdentityThumbprint(publicKey)
+			if err != nil {
+				t.Fatal(err)
+			}
+			valid := durableWorkerAssignment(encodedKey, thumbprint, "route_ok", "assignment_ok", route.TunnelHTTPSWSS)
+			bad := durableWorkerAssignment(encodedKey, thumbprint, "route_bad", "assignment_bad", route.TunnelHTTPSWSS)
+			bad.PublicHost, bad.MatchHostname = "", ""
+			bad.MatchType = "catch_all"
+			if tc == "draining_catch_all_empty_host" {
+				bad.State = "draining"
+			}
+			selected, invalid, err := selectCanonicalAssignments([]control.RouteAssignment{valid, bad}, "edge_1", "edge_epoch_1")
+			if err != nil {
+				t.Fatalf("select: %v", err)
+			}
+			if len(selected) != 1 || selected[0].AssignmentID != "assignment_ok" {
+				t.Fatalf("selected = %+v", selected)
+			}
+			if (tc == "invalid_active_row") != (invalid != nil) {
+				t.Fatalf("invalid = %v", invalid)
+			}
+			if _, err := canonicalSupersededAssignments([]control.RouteAssignment{valid, bad}, selected, "edge_1", "edge_epoch_1"); err != nil {
+				t.Fatalf("superseded: %v", err)
+			}
+		})
+	}
+}
