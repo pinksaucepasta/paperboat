@@ -77,7 +77,7 @@ def main():
     try:
         # Recover even when fault observation failed; preserve that primary failure.
         # Exact command and protected journal, without enrollment or manual edits.
-        invoke(binary, *arguments, env=environment, terminal=True, password=password)
+        invoke(binary, *arguments, env=environment, raw=True, terminal=True, password=password)
     except Exception as error:
         if failure is not None:
             raise failure from error
