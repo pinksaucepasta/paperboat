@@ -517,6 +517,7 @@ func (s *HTTPSProductionAssemblySource) carrierSessionSource(ctx context.Context
 		return connector.DataCarrierSessionSource{}, err
 	}
 	if err := validateCarrierDescriptor(descriptor, s.clock.Now().UTC(), request, controlIdentity, welcome, apply); err != nil {
+		s.recordCarrierDescriptorRejected(bootstrapRequest, err)
 		return connector.DataCarrierSessionSource{}, err
 	}
 	identity := connector.DataCarrierIdentity{AccountID: descriptor.AccountID, HostID: descriptor.HostID, TunnelID: descriptor.TunnelID, ConnectorID: descriptor.ConnectorID, SessionID: descriptor.SessionID, SessionGeneration: descriptor.CredentialGeneration, ProcessGeneration: descriptor.ProcessGeneration, Generation: descriptor.ConfigGeneration}
@@ -784,26 +785,56 @@ func knownCarrierBootstrapErrorCode(code string) bool {
 	}
 }
 
+// DescriptorRejectedError names the one check a carrier bootstrap descriptor failed. It wraps
+// ErrConflict, so callers keep branching on that; Check is a finite name, never a value.
+type DescriptorRejectedError struct{ Check string }
+
+func (e *DescriptorRejectedError) Error() string { return "carrier descriptor rejected: " + e.Check }
+func (e *DescriptorRejectedError) Unwrap() error { return ErrConflict }
+
 func validateCarrierDescriptor(descriptor carrierBootstrapDescriptor, now time.Time, request ActivationRequest, identity ControlIdentity, welcome connectorprotocol.Welcome, apply tunnelmanager.ApplyRequest) error {
-	if descriptor.Schema != carrierBootstrapSchema || descriptor.Kind != "carrier_bootstrap_descriptor" || descriptor.AccountID != identity.AccountID || descriptor.TunnelID != request.TunnelID || descriptor.ConnectorID != request.ConnectorID || descriptor.HostID != request.HostID || descriptor.StableEndpointID != request.StableEndpointID || hoststate.ValidateStableEndpointID(descriptor.StableEndpointID) != nil || descriptor.SessionID != welcome.SessionID || descriptor.ProcessGeneration != identity.ProcessGeneration || descriptor.CredentialGeneration != identity.CredentialGeneration || descriptor.ConfigGeneration != apply.Snapshot.Generation || descriptor.ConfigContentHash != apply.Snapshot.ContentHash || len(descriptor.Carriers) == 0 || len(descriptor.Carriers) > 2 || descriptor.IssuedAt.IsZero() || descriptor.ExpiresAt.IsZero() || !descriptor.ExpiresAt.After(descriptor.IssuedAt) || descriptor.ExpiresAt.Sub(descriptor.IssuedAt) > 15*time.Second || descriptor.IssuedAt.After(now.Add(connectorprotocol.MaxClockSkew)) || !descriptor.ExpiresAt.After(now) {
-		return ErrConflict
+	checks := []struct {
+		name string
+		bad  bool
+	}{
+		{"schema", descriptor.Schema != carrierBootstrapSchema || descriptor.Kind != "carrier_bootstrap_descriptor"},
+		{"account_id", descriptor.AccountID != identity.AccountID},
+		{"tunnel_id", descriptor.TunnelID != request.TunnelID},
+		{"connector_id", descriptor.ConnectorID != request.ConnectorID},
+		{"host_id", descriptor.HostID != request.HostID},
+		{"stable_endpoint_id", descriptor.StableEndpointID != request.StableEndpointID || hoststate.ValidateStableEndpointID(descriptor.StableEndpointID) != nil},
+		{"session_id", descriptor.SessionID != welcome.SessionID},
+		{"process_generation", descriptor.ProcessGeneration != identity.ProcessGeneration},
+		{"credential_generation", descriptor.CredentialGeneration != identity.CredentialGeneration},
+		{"config_generation", descriptor.ConfigGeneration != apply.Snapshot.Generation},
+		{"config_content_hash", descriptor.ConfigContentHash != apply.Snapshot.ContentHash},
+		{"carrier_count", len(descriptor.Carriers) == 0 || len(descriptor.Carriers) > 2},
+		{"lifetime", descriptor.IssuedAt.IsZero() || descriptor.ExpiresAt.IsZero() || !descriptor.ExpiresAt.After(descriptor.IssuedAt) || descriptor.ExpiresAt.Sub(descriptor.IssuedAt) > 15*time.Second},
+		{"issued_in_future", descriptor.IssuedAt.After(now.Add(connectorprotocol.MaxClockSkew))},
+		{"expired", !descriptor.ExpiresAt.After(now)},
+		{"ingress_count", len(descriptor.IngressDecisions) > 4096},
+	}
+	for _, check := range checks {
+		if check.bad {
+			return &DescriptorRejectedError{Check: check.name}
+		}
 	}
 	seenNodes := map[string]bool{}
 	for _, node := range descriptor.Carriers {
 		if connectorprotocol.ValidateIdentifier(node.EdgeNodeID) != nil || connectorprotocol.ValidateOpaqueEpoch(node.EdgeProcessEpoch) != nil || connectorprotocol.ValidateIdentifier(node.FailureDomain) != nil || len(node.Endpoints) != 2 || seenNodes[node.EdgeNodeID+"\x00"+node.EdgeProcessEpoch] {
-			return ErrConflict
+			return &DescriptorRejectedError{Check: "carrier_node"}
 		}
 		seenNodes[node.EdgeNodeID+"\x00"+node.EdgeProcessEpoch] = true
 		if _, _, _, err := parseCarrierNode(node); err != nil {
 			return err
 		}
 	}
-	if len(descriptor.IngressDecisions) > 4096 {
-		return ErrConflict
-	}
 	for _, ingress := range descriptor.IngressDecisions {
-		if ingress.Validate(now) != nil || ingress.Binding.AccountID != descriptor.AccountID || ingress.Binding.TunnelID != descriptor.TunnelID || ingress.Binding.HostID != descriptor.HostID || ingress.ConnectorID != descriptor.ConnectorID || ingress.SessionID != descriptor.SessionID || ingress.ProcessGeneration != descriptor.ProcessGeneration || ingress.ConfigGeneration != descriptor.ConfigGeneration {
-			return ErrConflict
+		if ingress.Validate(now) != nil {
+			return &DescriptorRejectedError{Check: "ingress_decision"}
+		}
+		if ingress.Binding.AccountID != descriptor.AccountID || ingress.Binding.TunnelID != descriptor.TunnelID || ingress.Binding.HostID != descriptor.HostID || ingress.ConnectorID != descriptor.ConnectorID || ingress.SessionID != descriptor.SessionID || ingress.ProcessGeneration != descriptor.ProcessGeneration || ingress.ConfigGeneration != descriptor.ConfigGeneration {
+			return &DescriptorRejectedError{Check: "ingress_binding"}
 		}
 	}
 	return nil
