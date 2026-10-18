@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat-server/internal/accountingauthority"
 	"github.com/pinksaucepasta/paperboat-server/internal/admission"
 	"net/netip"
 	"slices"
@@ -42,6 +43,10 @@ type NetworkConfigResult struct {
 	Configuration string   `json:"configuration"`
 	CandidateSet  string   `json:"candidate_set"`
 	RelayGrants   []string `json:"relay_grants"`
+	// RelayDenied is set when hosted relay grants were withheld at admission (see
+	// RelayDeniedQuotaExhausted); BillingURL then says where to add bandwidth.
+	RelayDenied string `json:"relay_denied,omitempty"`
+	BillingURL  string `json:"billing_url,omitempty"`
 }
 
 type NetworkOptions struct{ STUNServers []string }
@@ -54,8 +59,10 @@ type NetworkService struct {
 		SignRegionalCandidates(map[string]any) (string, error)
 		SignRelayGrant(map[string]any) (string, error)
 	}
-	issuer string
-	now    func() time.Time
+	issuer     string
+	now        func() time.Time
+	quota      accountingauthority.QuotaChecker
+	billingURL string
 }
 
 func NewNetworkService(store *db.DB, signer interface {
@@ -490,14 +497,22 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 	if len(candidates) > networkConfigLimit {
 		return NetworkConfigResult{}, ErrUnavailable
 	}
-	relayGrants, err := s.relayGrants(ctx, tx, self, peers, generation, now, expiry)
+	quotaDenied, err := s.relayQuotaDenied(ctx, self.AccountID, now)
+	if err != nil {
+		return NetworkConfigResult{}, err
+	}
+	relayGrants, withheld, err := s.relayGrants(ctx, tx, self, peers, generation, now, expiry, quotaDenied)
 	if err != nil {
 		return NetworkConfigResult{}, err
 	}
 	if err = tx.Commit(); err != nil {
 		return NetworkConfigResult{}, err
 	}
-	return NetworkConfigResult{Configuration: token, CandidateSet: candidates, RelayGrants: relayGrants}, nil
+	result := NetworkConfigResult{Configuration: token, CandidateSet: candidates, RelayGrants: relayGrants}
+	if withheld {
+		result.RelayDenied, result.BillingURL = RelayDeniedQuotaExhausted, s.billingURL
+	}
+	return result, nil
 }
 
 func personalNetworkScopeID(self, peer networkBinding) string {
@@ -569,20 +584,24 @@ func personalNetworkPeers(ctx context.Context, tx *sql.Tx, self networkBinding, 
 	return peers, nil
 }
 
-func (s *NetworkService) relayGrants(ctx context.Context, tx *sql.Tx, self networkBinding, peers []networkPeer, generation int64, now, authorityExpiry time.Time) ([]string, error) {
+// relayGrants signs one grant per eligible relay node. With quotaDenied only customer-run
+// relays (never metered against Paperboat's allowance) are granted; withheld reports that a
+// hosted grant was refused for that reason.
+func (s *NetworkService) relayGrants(ctx context.Context, tx *sql.Tx, self networkBinding, peers []networkPeer, generation int64, now, authorityExpiry time.Time, quotaDenied bool) ([]string, bool, error) {
 	controlPeers, err := relayControlPeers(self, peers)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT id,node_generation,process_epoch,registry_expires_at,roles @> ARRAY['peer_relay']::text[],peer_relay_wireguard_public_key,peer_relay_disco_public_key,host(peer_relay_virtual_address) FROM paperboat.control_tunnel_nodes WHERE region IS NOT NULL AND paperboat.node_pool_eligible(id,$1,'relay') AND state='ready' AND ready AND last_heartbeat_at>$2::timestamptz-interval '15 seconds' AND registry_expires_at>$2::timestamptz AND capacity_observed_at>$2::timestamptz-interval '15 seconds' AND capacity_used<capacity_limit-capacity_limit/10 AND drain_deadline IS NULL AND roles @> ARRAY['relay']::text[] AND transports @> ARRAY['derp_quic']::text[] ORDER BY region,id LIMIT 33`, self.AccountID, now)
+	rows, err := tx.QueryContext(ctx, `SELECT id,node_generation,process_epoch,registry_expires_at,roles @> ARRAY['peer_relay']::text[],peer_relay_wireguard_public_key,peer_relay_disco_public_key,host(peer_relay_virtual_address),EXISTS(SELECT 1 FROM paperboat.selfhost_installations i WHERE i.node_id=control_tunnel_nodes.id AND i.scope_kind IN ('account','team')) FROM paperboat.control_tunnel_nodes WHERE region IS NOT NULL AND paperboat.node_pool_eligible(id,$1,'relay') AND state='ready' AND ready AND last_heartbeat_at>$2::timestamptz-interval '15 seconds' AND registry_expires_at>$2::timestamptz AND capacity_observed_at>$2::timestamptz-interval '15 seconds' AND capacity_used<capacity_limit-capacity_limit/10 AND drain_deadline IS NULL AND roles @> ARRAY['relay']::text[] AND transports @> ARRAY['derp_quic']::text[] ORDER BY region,id LIMIT 33`, self.AccountID, now)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	defer rows.Close()
 	grants := make([]string, 0, 32)
+	withheld := false
 	for rows.Next() {
 		if len(grants) == 32 {
-			return nil, ErrResourceLimit
+			return nil, false, ErrResourceLimit
 		}
 		var nodeID, processEpoch string
 		var nodeGeneration int64
@@ -590,11 +609,16 @@ func (s *NetworkService) relayGrants(ctx context.Context, tx *sql.Tx, self netwo
 		var peerRelayEnabled bool
 		var peerRelayWG, peerRelayDisco []byte
 		var peerRelayAddress sql.NullString
-		if err := rows.Scan(&nodeID, &nodeGeneration, &processEpoch, &nodeExpiry, &peerRelayEnabled, &peerRelayWG, &peerRelayDisco, &peerRelayAddress); err != nil {
-			return nil, err
+		var customerOwned bool
+		if err := rows.Scan(&nodeID, &nodeGeneration, &processEpoch, &nodeExpiry, &peerRelayEnabled, &peerRelayWG, &peerRelayDisco, &peerRelayAddress, &customerOwned); err != nil {
+			return nil, false, err
+		}
+		if quotaDenied && !customerOwned {
+			withheld = true
+			continue
 		}
 		if peerRelayEnabled && (len(peerRelayWG) != 32 || len(peerRelayDisco) != 32 || !peerRelayAddress.Valid) {
-			return nil, ErrUnavailable
+			return nil, false, ErrUnavailable
 		}
 		expires := now.Add(time.Minute)
 		if authorityExpiry.Before(expires) {
@@ -624,17 +648,17 @@ func (s *NetworkService) relayGrants(ctx context.Context, tx *sql.Tx, self netwo
 		}
 		grant, err := s.signer.SignRelayGrant(claims)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		if len(grant) > networkConfigLimit {
-			return nil, ErrUnavailable
+			return nil, false, ErrUnavailable
 		}
 		grants = append(grants, grant)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return grants, nil
+	return grants, withheld, nil
 }
 
 func relayControlPeers(self networkBinding, peers []networkPeer) ([]string, error) {

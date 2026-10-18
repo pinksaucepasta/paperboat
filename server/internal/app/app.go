@@ -471,6 +471,7 @@ func New(opts Options) (*App, error) {
 		_ = store.Close()
 		return nil, fmt.Errorf("configure peer network authority: %w", err)
 	}
+	peerNetworkService.ConfigureQuota(workspaceBilling, billingPageURL(opts.Config.HTTP.BrowserLoginOrigin))
 	nativePrivateResolver, err := nativeprivateaccess.NewSQLResolver(store)
 	if err != nil {
 		_ = store.Close()
