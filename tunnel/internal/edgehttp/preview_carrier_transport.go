@@ -712,9 +712,17 @@ func (t *DataCarrierPreviewTransport) RoundTrip(request *http.Request) (*http.Re
 	out.URL.Scheme = ""
 	out.URL.Host = ""
 	out.Host = route.Hostname
+	headerContext, cancelHeader := context.WithCancel(request.Context())
+	headerWait := &responseHeaderWait{timeout: t.openWait, cancel: cancelHeader}
+	if request.Body == nil || request.Body == http.NoBody {
+		headerWait.start()
+	}
 	writeDone := make(chan error, 1)
 	go func() {
 		writeErr := upload.preserve(out.Write(application))
+		// The origin cannot answer a large upload before it has the whole body,
+		// so the response-header budget starts when the request is written.
+		headerWait.start()
 		if closeErr := closeRequestBody(); closeErr != nil && !expectedPrivateStreamClose(closeErr) {
 			writeErr = errors.Join(writeErr, closeErr)
 		}
@@ -723,12 +731,11 @@ func (t *DataCarrierPreviewTransport) RoundTrip(request *http.Request) (*http.Re
 		}
 		writeDone <- writeErr
 	}()
-	headerContext, cancelHeader := context.WithTimeout(request.Context(), t.openWait)
 	stopHeader := context.AfterFunc(headerContext, func() { _ = application.Close() })
 	headerReader := &boundedPreviewResponseHeaderReader{reader: application, maximum: dataCarrierPreviewMaxResponseHeader}
 	responseReader := bufio.NewReader(headerReader)
 	response, err := http.ReadResponse(responseReader, out)
-	headerTimedOut := errors.Is(headerContext.Err(), context.DeadlineExceeded)
+	headerTimedOut := headerWait.finish()
 	stopHeader()
 	cancelHeader()
 	if err != nil {
@@ -754,6 +761,44 @@ func (t *DataCarrierPreviewTransport) RoundTrip(request *http.Request) (*http.Re
 		response.Body = &dataCarrierPreviewResponseBody{body: response.Body, stream: application, stopCancel: stopCancel, writeDone: writeDone, closeRequestBody: closeRequestBody, lifetimeCancel: lifetimeCancel}
 	}
 	return response, nil
+}
+
+// responseHeaderWait cancels the header read when the origin stays silent for
+// timeout after the request was fully written.
+type responseHeaderWait struct {
+	timeout  time.Duration
+	cancel   context.CancelFunc
+	mu       sync.Mutex
+	timer    *time.Timer
+	started  bool
+	finished bool
+	expired  bool
+}
+
+func (w *responseHeaderWait) start() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.started || w.finished {
+		return
+	}
+	w.started = true
+	w.timer = time.AfterFunc(w.timeout, func() {
+		w.mu.Lock()
+		w.expired = !w.finished
+		w.mu.Unlock()
+		w.cancel()
+	})
+}
+
+// finish stops the timer and reports whether it expired first.
+func (w *responseHeaderWait) finish() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.finished = true
+	if w.timer != nil {
+		w.timer.Stop()
+	}
+	return w.expired
 }
 
 type boundedPreviewResponseHeaderReader struct {

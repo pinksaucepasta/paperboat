@@ -695,3 +695,69 @@ func TestPreviewResponseOutlivesAdmissionTTLUntilRouteRevoked(t *testing.T) {
 		t.Fatal("route revocation did not interrupt blocked response")
 	}
 }
+
+// A large upload keeps the origin from answering until the body is complete, so
+// the response-header budget must start after the request has been written.
+func TestDataCarrierPreviewTransportHeaderTimeoutStartsAfterUpload(t *testing.T) {
+	identity := testEdgePreviewIdentity(1, 1)
+	server, client := testEdgePreviewCarrierPair(t, identity)
+	defer client.Close()
+	defer server.Close()
+	registry, err := NewDataCarrierPreviewRegistry(DataCarrierPreviewRegistryConfig{BaseDomain: "preview.example.test", ProcessEpoch: "edge_epoch_1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer registry.Close()
+	if err := registry.Attach(DataCarrierPreviewRoute{RouteID: "preview_01", Hostname: "app.preview.example.test", Kind: dataCarrierPreviewRouteKind, EdgeProcessEpoch: "edge_epoch_1", Revision: 1, Server: server}); err != nil {
+		t.Fatal(err)
+	}
+	const uploadChunks, chunkSize = 8, 1024
+	transport, err := NewDataCarrierPreviewTransport(DataCarrierPreviewTransportConfig{Registry: registry, StreamOpenTimeout: 150 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	serveDone := make(chan error, 1)
+	go func() {
+		stream, _, acceptErr := client.AcceptStream(context.Background())
+		if acceptErr != nil {
+			serveDone <- acceptErr
+			return
+		}
+		serveDone <- datacarrier.ServeHTTPStream(context.Background(), stream, http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			received, copyErr := io.Copy(io.Discard, request.Body)
+			if copyErr != nil || received != uploadChunks*chunkSize {
+				t.Errorf("origin received %d bytes err=%v", received, copyErr)
+				http.Error(writer, "truncated upload", http.StatusBadRequest)
+				return
+			}
+			writer.WriteHeader(http.StatusAccepted)
+		}), 4096, 5*time.Second)
+	}()
+	bodyReader, bodyWriter := io.Pipe()
+	go func() {
+		chunk := make([]byte, chunkSize)
+		for range uploadChunks {
+			time.Sleep(60 * time.Millisecond)
+			if _, writeErr := bodyWriter.Write(chunk); writeErr != nil {
+				return
+			}
+		}
+		_ = bodyWriter.Close()
+	}()
+	request := httptest.NewRequest(http.MethodPost, "https://app.preview.example.test/upload", bodyReader)
+	request.Host = "app.preview.example.test"
+	request.ContentLength = uploadChunks * chunkSize
+	response, err := transport.RoundTrip(request)
+	if err != nil {
+		t.Fatalf("upload longer than the header budget failed: %v", err)
+	}
+	if response.StatusCode != http.StatusAccepted {
+		t.Fatalf("status=%d", response.StatusCode)
+	}
+	if err := response.Body.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-serveDone; err != nil {
+		t.Fatal(err)
+	}
+}
