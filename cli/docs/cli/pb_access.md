@@ -10,6 +10,10 @@ Choose machine access for an enrolled machine service or tunnel access for an ex
 
 With --json, this command group lists its available commands.
 
+```
+pb access [flags]
+```
+
 ### Options
 
 ```

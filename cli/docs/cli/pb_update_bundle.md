@@ -10,7 +10,7 @@ Save the official release for this platform together with its existing signed me
 
 Updates use signed release metadata and preserve artifact authenticity and rollback protection. Check inspects an available release; status reports the installed updater state. A failed update should leave the known installation usable and report a recovery action.
 
-This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
+JSON output is supported with --json.
 
 ```
 pb update bundle --output <file.pb-update> [flags]
@@ -20,6 +20,7 @@ pb update bundle --output <file.pb-update> [flags]
 
 ```
   -h, --help            help for bundle
+      --json            print JSON
       --output string   new .pb-update file for this platform
 ```
 
@@ -27,7 +28,6 @@ pb update bundle --output <file.pb-update> [flags]
 
 ```
       --config string      path to the CLI config file
-      --json               print machine-readable JSON
       --no-customization   ignore local shortcuts, command defaults, and TUI preferences
       --server string      paperboat-server base URL override
       --workspace string   resource workspace selector: personal or a team slug

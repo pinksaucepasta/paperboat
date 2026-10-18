@@ -8,6 +8,10 @@ Manage optional DNS names for ports that are already authorized on a machine. Al
 
 With --json, this command group lists its available commands.
 
+```
+pb config local-access alias [flags]
+```
+
 ### Options
 
 ```

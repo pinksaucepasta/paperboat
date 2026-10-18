@@ -12,6 +12,10 @@ The daemon owns this machine's background connectivity and local API. Normal lif
 
 With --json, this command group lists its available commands.
 
+```
+pb daemon machine-guard [flags]
+```
+
 ### Options
 
 ```

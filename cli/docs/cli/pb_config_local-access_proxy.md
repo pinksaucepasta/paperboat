@@ -8,6 +8,10 @@ Otherwise-unmapped app names automatically use authorized port 80. Configure a d
 
 With --json, this command group lists its available commands.
 
+```
+pb config local-access proxy [flags]
+```
+
 ### Options
 
 ```

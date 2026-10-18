@@ -96,15 +96,18 @@ func installStagedUpdateSource(command *cobra.Command, ctx context.Context, stag
 func updateBundleCommand() *cobra.Command {
 	command := &cobra.Command{Use: "bundle --output <file.pb-update>", Short: "Save an official update and its signed proof for offline installation", Args: commandArgs(cobra.NoArgs), RunE: func(command *cobra.Command, _ []string) error {
 		output, _ := command.Flags().GetString("output")
+		if output == "" {
+			return localArgumentError("--output is required: name the new file, for example `pb update bundle --output paperboat.pb-update`")
+		}
 		if !strings.EqualFold(filepath.Ext(output), ".pb-update") {
-			return errors.New("--output must name a .pb-update file")
+			return localArgumentError("--output must name a .pb-update file")
 		}
 		output, err := filepath.Abs(output)
 		if err != nil {
 			return err
 		}
 		if _, err := os.Lstat(output); !errors.Is(err, os.ErrNotExist) {
-			return errors.New("the bundle output must not already exist")
+			return localArgumentError("the bundle output already exists; choose a new file name")
 		}
 		ctx, cancel := context.WithTimeout(command.Context(), 15*time.Minute)
 		defer cancel()
@@ -123,10 +126,14 @@ func updateBundleCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
+		if jsonOutput, _ := command.Flags().GetBool("json"); jsonOutput {
+			return writeCLIJSON(command.OutOrStdout(), map[string]any{"output": output, "version": index.Version, "platform": index.Platform, "architecture": index.Architecture, "install_with": "pb update --from " + output})
+		}
 		_, err = fmt.Fprintf(command.OutOrStdout(), "Saved Paperboat %s (%s/%s) to %s.\nInstall offline with: pb update --from %s\n", index.Version, index.Platform, index.Architecture, output, output)
 		return err
 	}}
 	command.Flags().String("output", "", "new .pb-update file for this platform")
+	command.Flags().Bool("json", false, "print JSON")
 	return command
 }
 

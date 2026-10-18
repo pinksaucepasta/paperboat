@@ -10,6 +10,10 @@ Install, start, stop, restart, inspect, or uninstall the current-user daemon ser
 
 With --json, this command group lists its available commands.
 
+```
+pb service [flags]
+```
+
 ### Options
 
 ```

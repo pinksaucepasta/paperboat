@@ -8,6 +8,10 @@ Choose the DNS domain used for this user's local browser URLs. Changing the doma
 
 With --json, this command group lists its available commands.
 
+```
+pb config local-access domain [flags]
+```
+
 ### Options
 
 ```

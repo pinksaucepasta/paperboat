@@ -12,6 +12,10 @@ Configuration commands distinguish local CLI settings from synchronized reposito
 
 With --json, this command group lists its available commands.
 
+```
+pb config sync [flags]
+```
+
 ### Options
 
 ```

@@ -10,6 +10,10 @@ Inspect relay regions and self-hosted relay installations selected by the accoun
 
 With --json, this command group lists its available commands.
 
+```
+pb relay [flags]
+```
+
 ### Options
 
 ```

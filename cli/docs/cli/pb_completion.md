@@ -12,6 +12,10 @@ Choose bash, fish, powershell, or zsh to print that shell's completion script to
 
 With --json, this command group lists its available commands.
 
+```
+pb completion [flags]
+```
+
 ### Options
 
 ```

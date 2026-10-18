@@ -8,6 +8,10 @@ Configure the browser domain and named service URLs used by this local Paperboat
 
 With --json, this command group lists its available commands.
 
+```
+pb config local-access [flags]
+```
+
 ### Options
 
 ```

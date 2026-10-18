@@ -12,6 +12,10 @@ Durable tunnels retain identity, routes, connectors, and domains across client s
 
 With --json, this command group lists its available commands.
 
+```
+pb tunnel domain [flags]
+```
+
 ### Options
 
 ```

@@ -19,12 +19,16 @@ Save the official release for this platform together with its existing signed me
 Updates use signed release metadata and preserve artifact authenticity and rollback protection. Check inspects an available release; status reports the installed updater state. A failed update should leave the known installation usable and report a recovery action.
 
 .PP
-This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
+JSON output is supported with --json.
 
 
 .SH OPTIONS
 \fB-h\fP, \fB--help\fP[=false]
 	help for bundle
+
+.PP
+\fB--json\fP[=false]
+	print JSON
 
 .PP
 \fB--output\fP=""
@@ -34,10 +38,6 @@ This command does not support --json output; it rejects that mode before executi
 .SH OPTIONS INHERITED FROM PARENT COMMANDS
 \fB--config\fP=""
 	path to the CLI config file
-
-.PP
-\fB--json\fP[=false]
-	print machine-readable JSON
 
 .PP
 \fB--no-customization\fP[=false]

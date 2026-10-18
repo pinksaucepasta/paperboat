@@ -3054,6 +3054,7 @@ mode, relays, and observation timestamps.`, Example: "  pb relay list\n  pb rela
 	configureShellCompletion(root)
 	root.InitDefaultCompletionCmd()
 	enrichCommandHelp(root)
+	installGroupCommandHandlers(root)
 	return root
 }
 
