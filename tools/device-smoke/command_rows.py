@@ -77,7 +77,7 @@ def rows(args):
 
     r = Row('C143', 'pb env'.replace('pb ', '')); r.help()
     d = r.json_ok(); r.expect(d and 'commands' in d, 'pb env --json lists no commands')
-    names = Row('C143', 'env list'); v = names.json_ok(); r.expect(v is not None and isinstance(v['names'], list), 'env list has no names array')
+    names = Row('C143', 'env list'); v = names.json_ok(); r.expect(v is not None and isinstance(v.get('names'), list), 'env list has no names array')
     r.failures += names.failures; r.invalid('bogus', hint='invalid|usage|Usage'); out.append(r)
 
     r = Row('C144', 'env grants'); r.help(); r.invalid('bogus')
