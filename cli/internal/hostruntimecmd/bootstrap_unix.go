@@ -496,10 +496,18 @@ func removeNewEnrollmentCredentials(stateRoot string) error {
 	return result
 }
 
+var sudoExecutable = "/usr/bin/sudo"
+
 // approveAdministrator obtains sudo credentials before any bounded privileged
 // step, so a slow password entry cannot consume an installation deadline.
 func approveAdministrator(ctx context.Context, stdin io.Reader, stderr io.Writer) error {
-	command := exec.CommandContext(ctx, "/usr/bin/sudo", "-v")
+	// A passwordless grant needs no approval. `sudo -v` still asks for a password
+	// when another matching sudoers entry has none (a stock `(ALL:ALL) ALL` rule
+	// beside a later NOPASSWD rule), which blocked pairing on a passwordless host.
+	if exec.CommandContext(ctx, sudoExecutable, "-n", "true").Run() == nil {
+		return nil
+	}
+	command := exec.CommandContext(ctx, sudoExecutable, "-v")
 	command.Stdin = stdin
 	command.Stderr = stderr
 	if err := command.Run(); err != nil {
