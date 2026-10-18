@@ -240,6 +240,12 @@ console frontend: **USER DECIDES**. Inspector capture/replay: ships only if it a
 
 ## 3. Work, in order
 
+**Parallel features (user decision 2026-10-18), overriding the strict F1 → F15 order below.**
+Features do not wait for earlier features. With two Linux devices (hp, ubuntu24), verify the
+main paths of every feature whose code exists (F10 ENV, F11 config sync, F14 updates, F15
+diagnostics now) in parallel with fixes for blocked features (F7/F8). A row blocked for more
+than a few hours is `[!]` with its cause and the lane moves to the next independent row.
+
 **Main paths before edge cases (user decision 2026-10-16), overriding "finish a feature
 completely":** pass 1 goes F1 → F15 doing each feature's main-path rows (normal use working on L
 and M: the commands and scenarios people use daily). Edge-case and recovery rows (interruption at
