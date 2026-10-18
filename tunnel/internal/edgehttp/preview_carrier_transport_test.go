@@ -860,21 +860,27 @@ func TestPreviewProxyChainBridgesWebSocketUpgrade(t *testing.T) {
 			_, _ = buffered.WriteString("HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Accept: x\r\n\r\n")
 			_ = buffered.Flush()
 			echo := make([]byte, 4)
-			if _, readErr := io.ReadFull(buffered, echo); readErr == nil {
-				_, _ = connection.Write(echo)
+			for range 3 {
+				if _, readErr := io.ReadFull(buffered, echo); readErr != nil {
+					return
+				}
+				if _, writeErr := connection.Write(echo); writeErr != nil {
+					return
+				}
 			}
 		}), 4096, 5*time.Second)
 	}()
 	var observed error
-	proxy := &httputil.ReverseProxy{Transport: retryPreviewTransport{next: transport}, FlushInterval: -1, Rewrite: func(request *httputil.ProxyRequest) {
+	producer, _, _ := newTestRequestTelemetry(t)
+	proxy := &httputil.ReverseProxy{Transport: producer.RoundTripper(retryPreviewTransport{next: transport}), FlushInterval: -1, Rewrite: func(request *httputil.ProxyRequest) {
 		request.Out.URL.Scheme = "http"
 		request.Out.URL.Host = request.In.Host
 	}}
 	configureProxyDiagnostics(proxy, func(_ context.Context, err error) { observed = err })
-	front := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	front := httptest.NewServer(producer.Handler(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		request.Host = "app.preview.example.test"
 		proxy.ServeHTTP(writer, request)
-	}))
+	})))
 	defer front.Close()
 	connection, err := net.Dial("tcp", front.Listener.Addr().String())
 	if err != nil {
@@ -897,9 +903,12 @@ func TestPreviewProxyChainBridgesWebSocketUpgrade(t *testing.T) {
 			break
 		}
 	}
-	_, _ = connection.Write([]byte("ping"))
-	echo := make([]byte, 4)
-	if _, err := io.ReadFull(reader, echo); err != nil || string(echo) != "ping" {
-		t.Fatalf("echo=%q err=%v observed=%v", echo, err, observed)
+	for _, frame := range []string{"ping", "pong", "last"} {
+		time.Sleep(150 * time.Millisecond)
+		_, _ = connection.Write([]byte(frame))
+		echo := make([]byte, 4)
+		if _, err := io.ReadFull(reader, echo); err != nil || string(echo) != frame {
+			t.Fatalf("echo=%q want %q err=%v observed=%v", echo, frame, err, observed)
+		}
 	}
 }
