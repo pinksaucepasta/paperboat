@@ -9,7 +9,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"regexp"
 	"time"
 )
 
@@ -20,7 +19,22 @@ const (
 	maximumCertificateBytes = encodedClaimsLen + ed25519.SignatureSize
 )
 
-var identifierPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`)
+// ValidIdentifier reports whether value is 1 to 128 ASCII letters, digits, "_" or "-", not
+// starting with "_" or "-". It is a plain scan, not a regexp, so the browser build (TinyGo)
+// does not compile one at start-up.
+func ValidIdentifier(value string) bool {
+	if len(value) == 0 || len(value) > 128 {
+		return false
+	}
+	for i := 0; i < len(value); i++ {
+		c := value[i]
+		letterOrDigit := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
+		if !letterOrDigit && (i == 0 || c != '_' && c != '-') {
+			return false
+		}
+	}
+	return true
+}
 
 type Role uint8
 
@@ -128,7 +142,7 @@ func RootFingerprint(rootPublic ed25519.PublicKey) (string, error) {
 }
 
 func marshalClaims(claims Claims) ([]byte, error) {
-	if !identifierPattern.MatchString(claims.AccountID) || !identifierPattern.MatchString(claims.EndpointID) {
+	if !ValidIdentifier(claims.AccountID) || !ValidIdentifier(claims.EndpointID) {
 		return nil, errors.New("invalid endpoint certificate identifier")
 	}
 	if claims.Role != RoleCLI && claims.Role != RoleMachine {

@@ -6,9 +6,10 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
-	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/endpointidentity"
 )
 
 const (
@@ -94,13 +95,21 @@ func ParseDocumentID(value string) (DocumentID, error) {
 	return result, nil
 }
 
-var identifierPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`)
-var variablePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+func validIdentifier(value string) bool { return endpointidentity.ValidIdentifier(value) }
 
-func validIdentifier(value string) bool { return identifierPattern.MatchString(value) }
+// validVariableSyntax is ^[A-Za-z_][A-Za-z0-9_]*$ as a plain scan (see endpointidentity.ValidIdentifier).
+func validVariableSyntax(value string) bool {
+	for i := 0; i < len(value); i++ {
+		c := value[i]
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '_' || i > 0 && c >= '0' && c <= '9') {
+			return false
+		}
+	}
+	return len(value) > 0
+}
 
 func validVariableName(value string) bool {
-	if len(value) == 0 || len(value) > MaximumNameBytes || !variablePattern.MatchString(value) {
+	if len(value) == 0 || len(value) > MaximumNameBytes || !validVariableSyntax(value) {
 		return false
 	}
 	upper := strings.ToUpper(value)

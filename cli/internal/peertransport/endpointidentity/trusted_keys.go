@@ -32,7 +32,7 @@ func ValidateTrustedKeySet(keys []TrustedKey) ([]TrustedKey, error) {
 	seenIDs := make(map[string]struct{}, len(keys))
 	seenFingerprints := make(map[[sha256.Size]byte]struct{}, len(keys))
 	for _, key := range keys {
-		if !identifierPattern.MatchString(key.KeyID) || len(key.PublicKey) != ed25519.PublicKeySize || key.Generation == 0 {
+		if !ValidIdentifier(key.KeyID) || len(key.PublicKey) != ed25519.PublicKeySize || key.Generation == 0 {
 			return nil, ErrTrustedKeySet
 		}
 		fingerprint := sha256.Sum256(key.PublicKey)
