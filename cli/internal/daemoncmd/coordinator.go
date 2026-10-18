@@ -813,11 +813,19 @@ func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*pbSync.
 	}
 	if len(browserRoutes) > 0 {
 		web, err := c.prepareBrowserGatewayLocked(ctx, nameClient, browserRoutes, aliases)
-		if err != nil {
+		switch {
+		case errors.Is(err, machineguard.ErrPortInUse):
+			// Another program (a web server on :80/:443) owns a gateway port.
+			// Machine names and native ports keep working; only browser URLs
+			// are withdrawn, so a busy port must not degrade the whole daemon.
+			diagnosticlog.TryInfo("browser gateway ports are in use by another program; browser URLs are unavailable")
+			aliases = map[string]string{}
+		case err != nil:
 			c.resetNameGenerationLocked(ctx)
 			return err
+		default:
+			wantedWeb[splitdns.BrowserGatewayHostname] = web
 		}
-		wantedWeb[splitdns.BrowserGatewayHostname] = web
 	}
 	if err := nameClient.ReplaceAliases(ctx, aliases); err != nil {
 		c.resetNameGenerationLocked(ctx)

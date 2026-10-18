@@ -91,6 +91,7 @@ if [ -n "$ONLY_LIST" ]; then
 fi
 [ -z "$UPDATE_DIR" ] || [ -n "$UPDATE_VERSION" ] || { echo "--update requires --update-version" >&2; exit 2; }
 [ -n "${APPLE_PASS:-}" ] || [[ ",$TARGETS," != *,apple,* ]] || { echo "export APPLE_PASS (see REMOTE_TESTING.md)" >&2; exit 2; }
+[ -n "${DADAPE_PASS:-}" ] || [[ ",$TARGETS," != *,dadape,* ]] || { echo "export DADAPE_PASS (see REMOTE_TESTING.md)" >&2; exit 2; }
 [ -n "${VICTUS_PASS:-}" ] || [[ ",$TARGETS," != *,victus,* ]] || { echo "export VICTUS_PASS (see REMOTE_TESTING.md)" >&2; exit 2; }
 command -v sshpass >/dev/null || { echo "sshpass is required" >&2; exit 2; }
 mkdir -p "$RESULTS_DIR"
@@ -111,6 +112,7 @@ on() {
   case "$device" in
     hp) ssh "${SSH_OPTS[@]}" -o BatchMode=yes anvit@hp "$*" ;;
     ubuntu24) ssh "${SSH_OPTS[@]}" -o BatchMode=yes pujan@ubuntu24 "$*" ;;
+    dadape) SSHPASS="$DADAPE_PASS" sshpass -e ssh "${SSH_OPTS[@]}" anvit@dadape "$*" ;;
     apple) SSHPASS="$APPLE_PASS" sshpass -e ssh "${SSH_OPTS[@]}" pujan.pm@apple \
       "security unlock-keychain -p '$APPLE_PASS' ~/Library/Keychains/login.keychain-db >/dev/null 2>&1; $*" ;;
     victus) local encoded
@@ -124,6 +126,7 @@ pb_on() { # pb_on DEVICE ARGS... (args are already quoted for the remote shell)
   local device=$1; shift
   case "$device" in
     hp) on hp "$PB_HP $*" ;;
+    dadape) on dadape "$PB_HP $*" ;;
     apple) on apple "$PB_APPLE $*" ;;
     victus) on victus "& '${PB_VICTUS//\'/\'\'}' $*" ;;
   esac
@@ -336,7 +339,7 @@ test_transfer() {
   case "$t" in
     victus) dst_sha=$(on victus "\$f = Get-ChildItem -Path \$HOME -Recurse -Filter '$name' -ErrorAction SilentlyContinue -Depth 3 | Select-Object -First 1; if (\$f) { (Get-FileHash \$f.FullName -Algorithm SHA256).Hash.ToLower(); Remove-Item \$f.FullName }" | tr -d '\r') ;;
     apple) dst_sha=$(on apple "f=\$(find ~ -maxdepth 3 -name '$name' 2>/dev/null | head -1); [ -n \"\$f\" ] && shasum -a 256 \"\$f\" | cut -d' ' -f1 && rm -f \"\$f\"") ;;
-    hp) dst_sha=$(on hp "f=\$(find ~ -maxdepth 3 -name '$name' -not -path '/tmp/*' 2>/dev/null | grep -v '^/tmp' | head -1); [ -n \"\$f\" ] && sha256sum \"\$f\" | cut -d' ' -f1 && rm -f \"\$f\"") ;;
+    hp|dadape) dst_sha=$(on "$t" "f=\$(find ~ -maxdepth 3 -name '$name' -not -path '/tmp/*' 2>/dev/null | grep -v '^/tmp' | head -1); [ -n \"\$f\" ] && sha256sum \"\$f\" | cut -d' ' -f1 && rm -f \"\$f\"") ;;
   esac
   if [ -n "$dst_sha" ] && [ "$dst_sha" = "$src_sha" ]; then record "transfer:$t" PASS $(( $(now)-t0 ))
   else record "transfer:$t" FAIL $(( $(now)-t0 )) "received sha '${dst_sha:-missing}' != source"; fi

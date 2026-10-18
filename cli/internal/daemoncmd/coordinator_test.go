@@ -36,6 +36,34 @@ func TestCoordinatorBrowserGatewayPreservesRoutesWhenNativePortsConflict(t *test
 	testCoordinatorSharedBrowserGateway(t, true, splitdns.BrowserSuffix)
 }
 
+// A web server on :80 (caddy on the Raspberry Pi test machine) made the guard
+// refuse the browser gateway port, which kept the whole daemon degraded and
+// blocked `pb pair`. Native routes must survive; only browser URLs go.
+func TestCoordinatorBrowserGatewayPortInUseKeepsNativeRoutes(t *testing.T) {
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer origin.Close()
+	names := &coordinatorNameClient{conflictPorts: map[int]bool{80: true}}
+	c, err := NewCoordinator(CoordinatorConfig{LocalAccess: config.LocalAccessConfig{Domain: splitdns.BrowserSuffix}, NameClient: names,
+		DialMachine: func(ctx context.Context, _ string, _ int) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, "tcp", origin.Listener.Addr().String())
+		},
+		IssueCertificate: func(context.Context, string, string, int) (tls.Certificate, error) {
+			return tls.Certificate{}, errors.New("unused")
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.ctx = t.Context()
+	defer c.Stop()
+	peers := []*pbSync.PeerUpdate{{PeerId: "first", Alias: "hp", AssignedIp: "127.100.0.4", Approved: true, Online: true, ExportedPorts: []int32{6767}}}
+	if err := c.replaceGuardedRoutes(t.Context(), peers); err != nil {
+		t.Fatalf("a busy browser gateway port must not fail reconciliation: %v", err)
+	}
+	if len(c.webRoutes) != 0 || len(c.routes) != 1 || len(names.names) != 1 {
+		t.Fatalf("web routes=%d native routes=%d names=%d, want 0/1/1", len(c.webRoutes), len(c.routes), len(names.names))
+	}
+}
+
 func TestCoordinatorCustomDomainAliasesWithdrawWithAuthorization(t *testing.T) {
 	testCoordinatorSharedBrowserGateway(t, false, "apps.local.pprbt.dev")
 }
