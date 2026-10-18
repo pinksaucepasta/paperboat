@@ -229,16 +229,20 @@ Backend gaps against this (current behaviour in brackets):
 
 ## Environment
 
-The Environment page and a machine's Environment tab show how to use `pb env` and nothing else.
-The metadata API the first console build used (`GET /v1/environment-variables`,
-`/v1/environment-scopes`, per-machine variants) is gone: the server now serves only the encrypted
-vault (`/v1/environment-vault`, `/v1/environment/scopes/{kind}/{owner}/records`, layers, grants).
-Record ids are hashed and names live inside the encrypted record, so even listing names needs the
-vault open in the browser.
+The Environment page and a machine's Environment tab are a Vercel-style list: names, set, remove,
+never a value. Record ids are hashed and names live inside the encrypted record, so the vault is
+opened in the browser with its password (`lib/envvault/`): the CLI's own Go crypto
+(`cli/cmd/environmentvault-wasm`, built by `scripts/build-environment-vault-wasm.sh`) runs in a
+worker, keys exist only in its memory (terminating the worker is the lock; 10 minutes idle or page
+leave), and the page makes the same `/v1/environment-vault`, scope, record and layer calls as
+`pb env set`. After each set or remove it seals host layers for machines that have no key for the
+scope yet (the CLI's `refreshENVRecordScope` step), applying stricter recipient checks than the CLI.
 
-To build it: compile the CLI's vault code to WASM (like the terminal), unlock with the vault
-password, list records per scope (personal, team, machine layers), and write records with `PUT`.
-Delivery status per machine comes from `/v1/environment/layers`. F10-06 stays open until then.
+- Scopes: Personal, the selected Team workspace's shared set, and a machine's own override (its tab).
+- Not in the browser: vault init, recovery code, password change, reset, Team key grants. The page
+  points to `pb env vault init` when no vault exists.
+- Delivery status per machine (`/v1/environment/layers`) is not shown yet.
+- Browser check: `scripts/check-environment.js` (F10-06).
 
 ## Machine capabilities
 
