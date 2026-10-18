@@ -1,9 +1,8 @@
 "use client"
 
 import { queryOptions } from "@tanstack/react-query"
-import { useSyncExternalStore } from "react"
-import { ApiError } from "@/lib/api"
-import { machineDomain } from "@/lib/format"
+import { useMemo, useSyncExternalStore } from "react"
+import { ApiError, clientConfigQuery, useApiQuery } from "@/lib/api"
 
 /**
  * Domains machines are reachable under (`<name>.<domain>`). Paperboat's own domain is always
@@ -13,11 +12,12 @@ import { machineDomain } from "@/lib/format"
  */
 export type MachineDomains = { domains: { name: string; managed: boolean }[]; primary: string }
 
+type Stored = { added: string[]; primary: string }
+
 const key = "pb-machine-domains"
-const managed = machineDomain ?? "local.pprbt.dev"
-const initial = { added: ["ppr.boats"], primary: "ppr.boats" }
+const initial: Stored = { added: [], primary: "" }
 const listeners = new Set<() => void>()
-let cache: { raw: string | null; value: MachineDomains } | undefined
+let cache: { raw: string | null; value: Stored } | undefined
 
 function readRaw(): string | null {
   try {
@@ -27,13 +27,17 @@ function readRaw(): string | null {
   }
 }
 
-function build(stored: { added: string[]; primary: string }): MachineDomains {
-  const domains = [{ name: managed, managed: true }, ...stored.added.map((name) => ({ name, managed: false }))]
-  const primary = domains.some((domain) => domain.name === stored.primary) ? stored.primary : managed
+/** Paperboat's own domain (from the server's client configuration) first, then the added ones. */
+function build(stored: Stored, managed: string | undefined): MachineDomains {
+  const domains = [
+    ...(managed ? [{ name: managed, managed: true }] : []),
+    ...stored.added.map((name) => ({ name, managed: false })),
+  ]
+  const primary = domains.some((domain) => domain.name === stored.primary) ? stored.primary : (managed ?? "")
   return { domains, primary }
 }
 
-function stored(raw: string | null): { added: string[]; primary: string } {
+function stored(raw: string | null): Stored {
   if (!raw) return initial
   try {
     const value = JSON.parse(raw)
@@ -42,13 +46,11 @@ function stored(raw: string | null): { added: string[]; primary: string } {
   return initial
 }
 
-function snapshot(): MachineDomains {
+function snapshot(): Stored {
   const raw = readRaw()
-  if (!cache || cache.raw !== raw) cache = { raw, value: build(stored(raw)) }
+  if (!cache || cache.raw !== raw) cache = { raw, value: stored(raw) }
   return cache.value
 }
-
-const serverSnapshot = build(initial)
 
 function subscribe(listener: () => void) {
   listeners.add(listener)
@@ -60,7 +62,7 @@ function subscribe(listener: () => void) {
   }
 }
 
-function write(next: { added: string[]; primary: string }) {
+function write(next: Stored) {
   try {
     localStorage.setItem(key, JSON.stringify(next))
   } catch {
@@ -70,7 +72,9 @@ function write(next: { added: string[]; primary: string }) {
 }
 
 export function useMachineDomains(): MachineDomains {
-  return useSyncExternalStore(subscribe, snapshot, () => serverSnapshot)
+  const added = useSyncExternalStore(subscribe, snapshot, () => initial)
+  const managed = useApiQuery(clientConfigQuery).data?.local_access_base_domain
+  return useMemo(() => build(added, managed), [added, managed])
 }
 
 /** Every address a machine name has, the primary domain first. */
@@ -97,7 +101,7 @@ export function removeDomain(name: string) {
   const current = stored(readRaw())
   write({
     added: current.added.filter((domain) => domain !== name),
-    primary: current.primary === name ? managed : current.primary,
+    primary: current.primary === name ? "" : current.primary,
   })
 }
 

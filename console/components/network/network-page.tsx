@@ -4,7 +4,7 @@ import { CheckCircleIcon, CopyIcon, PlusIcon, ShieldCheckIcon, TrashIcon } from 
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { toast } from "sonner"
-import { edgesQuery, useApiQuery, useWorkspace } from "@/lib/api"
+import { clientConfigQuery, edgesQuery, useApiQuery, useWorkspace } from "@/lib/api"
 import { copyWithToast } from "@/lib/clipboard"
 import { placeName } from "@/lib/format"
 import {
@@ -381,6 +381,7 @@ function AddServerDialog({ workspaceName, onClose }: { workspaceName: string; on
   const queryClient = useQueryClient()
   const workspace = useWorkspace()
   const [components, setComponents] = useState<"relay" | "tunnel" | "both">("relay")
+  const installer = useApiQuery(clientConfigQuery).data?.installer_base_url
   const [address, setAddress] = useState("")
   const [code, setCode] = useState("")
   const pair = useMutation({
@@ -437,7 +438,11 @@ function AddServerDialog({ workspaceName, onClose }: { workspaceName: string; on
               </ToggleGroupItem>
             </ToggleGroup>
             <div className="flex flex-col gap-2">
-              <CommandBlock command={installCommand(components)} />
+              {installer ? (
+                <CommandBlock command={installCommand(installer, components)} />
+              ) : (
+                <Skeleton className="h-12 w-full" />
+              )}
               <p className="text-xs text-muted-foreground">
                 Run it on a Linux server with a public address. It prints an address and a code for the next step.
               </p>

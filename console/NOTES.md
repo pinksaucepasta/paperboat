@@ -18,6 +18,9 @@ owns it.
 
 ## Other contract gaps
 
+- **Team `suspended` is not in OpenAPI.** `GET /v1/teams/{id}` returns `suspended`, but `TeamTeam` omits it, so
+  `lib/teams.ts` adds it by hand; the Team page shows a recovery notice from it.
+
 - **Unknown `/v1/` paths answer 401, not 404.** The control plane's `/v1/` fallback is the
   edge-control handler (`router.go`), so a path it doesn't serve looks like an expired session
   (`unauthenticated`). The console now confirms with `/v1/me` before sending anyone to sign in
@@ -42,10 +45,11 @@ owns it.
   `pb-return` cookie instead.
 - **CLI approval pages.** `pb login` machine approval and logout-return pages lived in the old
   `paperboat-dashboard` and do not exist in the console yet.
-- **Machine list paging.** The console requests one page of 200 machines.
-- **Machine hostname.** Machines are reachable as `<alias>.local.pprbt.dev`, but the suffix is a
-  server constant (`machineservices.BrowserSuffix`) that the machine payload does not carry. The
-  console mirrors it in `NEXT_PUBLIC_MACHINE_DOMAIN`; the server should return the hostname.
+- **Machine list paging.** The console requests one page of 200 machines; past that the table
+  says "Showing 200 of N" and typing searches the whole workspace on the server (`?q=`).
+- **Machine hostname.** The payload carries no hostname; the console builds `<alias>.<domain>` from
+  `local_access_base_domain` in `GET /v1/client-configuration` (`clientConfigQuery`, no domain is
+  hardcoded). The same response gives `installer_base_url` for the self-host install command.
 - **Updates are personal only.** `GET /v1/machines/update-summary` uses the personal workspace,
   so team machines show no update state. Update = request + approve a maintenance approval; if
   the approve call fails, the pending request remains until it expires.
@@ -97,10 +101,10 @@ The sidebar has these sections; each needs the listed control-plane support.
 ## Machine domains (dummy UI)
 
 Every machine answers on `<name>.<domain>` for each of the account's machine domains. The Domains
-page lists them (with tunnel and preview domains, below): Paperboat's own (`NEXT_PUBLIC_MACHINE_DOMAIN`, `local.pprbt.dev`)
+page lists them (with tunnel and preview domains, below): Paperboat's own (`local_access_base_domain` from the client configuration)
 cannot be removed; custom ones can be added and removed; exactly one is the default, shown
 wherever an address appears. The machines table shows the default-domain address (click to copy);
-machine details show it with "+N", and clicking it opens every address to copy, as does the header's IP menu. The list starts as Paperboat's domain plus `ppr.boats`, with `ppr.boats` as default.
+machine details show it with "+N", and clicking it opens every address to copy, as does the header's IP menu. The list starts as Paperboat's domain alone, as default.
 
 Limitations, all from there being no server support yet:
 

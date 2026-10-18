@@ -74,7 +74,11 @@ export function EditMachineDialog({ machine, onClose }: { machine: Machine; onCl
               <FieldError>{edit.problem}</FieldError>
             ) : (
               <p className="text-xs text-muted-foreground">
-                Reachable as <span className="font-mono">{hostname}</span>
+                {hostname && (
+                  <>
+                    Reachable as <span className="font-mono">{hostname}</span>
+                  </>
+                )}
               </p>
             )}
           </Field>

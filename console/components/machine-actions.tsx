@@ -49,7 +49,9 @@ function useMachineMenu(machine: Machine) {
   const entries: Entry[] = [
     { kind: "item", label: "Quick terminal", icon: TerminalIcon, href: `/machines/${machine.id}?terminal=open` },
     { kind: "separator" },
-    { kind: "item", label: "Copy address", icon: CopyIcon, onSelect: copy(hostname, "Address") },
+    ...(hostname
+      ? [{ kind: "item" as const, label: "Copy address", icon: CopyIcon, onSelect: copy(hostname, "Address") }]
+      : []),
     ...(machine.assigned_ip
       ? [{ kind: "item" as const, label: "Copy IP", icon: CopyIcon, onSelect: copy(machine.assigned_ip, "IP") }]
       : []),

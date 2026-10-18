@@ -114,7 +114,9 @@ function ShareMachine({ team, onDone }: { team: Workspace; onDone: () => void })
                   <span className="trim-cap">{machine.alias}</span>
                   <StatusDot online={machine.online} />
                 </span>
-                <span className="truncate font-mono text-xs text-muted-foreground">{`${machine.alias}.${primaryDomain}`}</span>
+                <span className="truncate font-mono text-xs text-muted-foreground">
+                  {primaryDomain ? `${machine.alias}.${primaryDomain}` : machine.alias}
+                </span>
               </span>
               {share.isPending && share.variables?.id === machine.id ? (
                 <CircleNotchIcon className="size-4 animate-spin text-muted-foreground" />

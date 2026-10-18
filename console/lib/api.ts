@@ -174,6 +174,15 @@ export const meQuery = queryOptions({
   staleTime: 5 * minute,
 })
 
+/** The server's published URLs and domains (the discovery response every client reads). */
+export type ClientConfiguration = Data<"/v1/client-configuration">
+
+export const clientConfigQuery = queryOptions({
+  queryKey: ["client-configuration"],
+  queryFn: () => api<ClientConfiguration>("client-configuration"),
+  staleTime: Infinity,
+})
+
 export type Workspace = Schemas["Workspace"]
 
 const personal: Workspace = { id: "personal", name: "Personal", kind: "personal", role: "owner" }

@@ -23,7 +23,7 @@ export function MachineAddressStack({ machine }: { machine: Machine }) {
   const [hostname] = useMachineHostnames(machine.alias)
   return (
     <div className="flex min-w-0 flex-col items-start font-mono text-code">
-      <CopyText value={hostname} />
+      {hostname && <CopyText value={hostname} />}
       {machine.assigned_ip && <CopyText value={machine.assigned_ip} className="text-xs text-muted-foreground" />}
     </div>
   )

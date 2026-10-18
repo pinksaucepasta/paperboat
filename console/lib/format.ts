@@ -73,9 +73,6 @@ export function formatPlatform(platform: string): string {
   return platforms[platform.toLowerCase()] ?? platform
 }
 
-/** Paperboat's own machine domain; mirrors the server's `machineservices.BrowserSuffix`. */
-export const machineDomain = process.env.NEXT_PUBLIC_MACHINE_DOMAIN
-
 /** A region code as a place name: `in-mumbai` → Mumbai, `us-east` → Us East. */
 export function placeName(region: string): string {
   const parts = region.toLowerCase().split(/[-_]/).filter(Boolean)

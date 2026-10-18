@@ -5,7 +5,7 @@ import { api, idempotencyKey, type Workspace } from "@/lib/api"
 
 /*
  * Self-hosted relays and tunnel servers (`/v1/selfhost/...`). A node is installed on a Linux
- * server (`curl -fsSL https://get.pprbt.dev/selfhost/install | sh`), prints a claim address and a
+ * server (`curl -fsSL <installer>/selfhost/install | sh`), prints a claim address and a
  * one-time code, and is paired here to your personal workspace or a team. A node running both
  * components appears as two installations with the same node ID. Pools say which nodes to use:
  * relays mix with Paperboat's or replace them (account-only); tunnel servers are either Paperboat's
@@ -116,5 +116,5 @@ export function groupNodes(installations: Installation[]): Node[] {
 }
 
 /** The installer for a node, run on the server. */
-export const installCommand = (components: "relay" | "tunnel" | "both") =>
-  `curl -fsSL https://get.pprbt.dev/selfhost/install | sh${components === "relay" ? "" : ` -s -- --enable ${components}`}`
+export const installCommand = (installerBaseUrl: string, components: "relay" | "tunnel" | "both") =>
+  `curl -fsSL ${installerBaseUrl}/selfhost/install | sh${components === "relay" ? "" : ` -s -- --enable ${components}`}`

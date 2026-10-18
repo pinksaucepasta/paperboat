@@ -121,11 +121,12 @@ function TitleEditor({
         <p className={edit.problem || edit.save.isError ? "text-xs text-destructive" : "text-xs text-muted-foreground"}>
           {edit.save.isError
             ? edit.save.error.message
-            : (edit.problem ?? (
+            : (edit.problem ??
+              (hostname && (
                 <>
                   Reachable as <span className="font-mono">{hostname}</span>
                 </>
-              ))}
+              )))}
         </p>
       )}
     </form>
