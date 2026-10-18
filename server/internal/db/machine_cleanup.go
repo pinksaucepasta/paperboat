@@ -127,13 +127,16 @@ func RevokeMachineEnvironmentTx(ctx context.Context, tx *Tx, environmentID strin
 }
 
 // FenceRemovedMachineVaultTx fences delivery so removed and still-connected devices stop receiving ENV; it never requires key rotation.
-func FenceRemovedMachineVaultTx(ctx context.Context, tx *Tx, account string) error {
+// With a machine it fences only the sources that machine could have read (it received a layer
+// from them, or it is the source), so removing a device that never received ENV leaves every
+// other machine's delivery untouched. An empty machine (a revoked CLI session) fences the whole account.
+func FenceRemovedMachineVaultTx(ctx context.Context, tx *Tx, account, machine string) error {
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(160235)`); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `UPDATE environment_vault_layer_fences SET generation=generation+1 WHERE owner_kind='personal' AND owner_id=$1`, account); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE environment_vault_layer_fences f SET generation=generation+1 WHERE f.owner_kind='personal' AND f.owner_id=$1 AND ($2='' OR f.source_machine_id=$2 OR EXISTS(SELECT 1 FROM environment_vault_layers l WHERE l.workspace_id=f.workspace_id AND l.owner_kind=f.owner_kind AND l.owner_id=f.owner_id AND l.source_machine_id=f.source_machine_id AND l.machine_id=$2))`, account, machine); err != nil {
 		return err
 	}
-	_, err := tx.Exec(ctx, `WITH affected AS (SELECT t.team_id FROM environment_vault_teams t WHERE EXISTS(SELECT 1 FROM team_members m WHERE m.team_id=t.team_id AND m.account_id=$1 AND m.active AND (EXISTS(SELECT 1 FROM environment_vault_team_members e WHERE e.team_id=t.team_id AND e.account_id=$1 AND e.grant_epoch=t.key_epoch) OR EXISTS(SELECT 1 FROM environment_vault_layers l JOIN user_machines recipient ON recipient.id=l.machine_id WHERE l.owner_kind='team' AND l.owner_id=t.team_id AND recipient.user_id=$1)))), advanced AS (UPDATE teams SET generation=generation+1 WHERE team_id IN(SELECT team_id FROM affected)) UPDATE environment_vault_layer_fences SET generation=generation+1 WHERE owner_kind='team' AND owner_id IN(SELECT team_id FROM affected)`, account)
+	_, err := tx.Exec(ctx, `WITH affected AS (SELECT t.team_id FROM environment_vault_teams t WHERE EXISTS(SELECT 1 FROM team_members m WHERE m.team_id=t.team_id AND m.account_id=$1 AND m.active AND (($2='' AND (EXISTS(SELECT 1 FROM environment_vault_team_members e WHERE e.team_id=t.team_id AND e.account_id=$1 AND e.grant_epoch=t.key_epoch) OR EXISTS(SELECT 1 FROM environment_vault_layers l JOIN user_machines recipient ON recipient.id=l.machine_id WHERE l.owner_kind='team' AND l.owner_id=t.team_id AND recipient.user_id=$1))) OR ($2<>'' AND EXISTS(SELECT 1 FROM environment_vault_layers l WHERE l.owner_kind='team' AND l.owner_id=t.team_id AND (l.machine_id=$2 OR l.source_machine_id=$2)))))), advanced AS (UPDATE teams SET generation=generation+1 WHERE team_id IN(SELECT team_id FROM affected)) UPDATE environment_vault_layer_fences f SET generation=generation+1 WHERE f.owner_kind='team' AND f.owner_id IN(SELECT team_id FROM affected) AND ($2='' OR f.source_machine_id=$2 OR EXISTS(SELECT 1 FROM environment_vault_layers l WHERE l.workspace_id=f.workspace_id AND l.owner_kind=f.owner_kind AND l.owner_id=f.owner_id AND l.source_machine_id=f.source_machine_id AND l.machine_id=$2))`, account, machine)
 	return err
 }

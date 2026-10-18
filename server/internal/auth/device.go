@@ -540,7 +540,7 @@ func (s *DeviceService) RevokeClient(ctx context.Context, userID, sid, reason st
 			return err
 		}
 		if active {
-			return db.FenceRemovedMachineVaultTx(ctx, tx, userID)
+			return db.FenceRemovedMachineVaultTx(ctx, tx, userID, "")
 		}
 		return nil
 	})

@@ -827,7 +827,7 @@ func (s *Service) revokeUserMachineControlTx(ctx context.Context, tx *db.Tx, use
 		return ErrNotFound
 	}
 	if machine.State != "disconnected" && machine.State != "deleted" && machine.State != "revoked" {
-		if err := db.FenceRemovedMachineVaultTx(ctx, tx, machine.UserID); err != nil {
+		if err := db.FenceRemovedMachineVaultTx(ctx, tx, machine.UserID, machine.ID); err != nil {
 			return err
 		}
 	}

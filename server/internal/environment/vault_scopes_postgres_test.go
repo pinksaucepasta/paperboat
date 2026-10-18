@@ -299,7 +299,7 @@ func TestPostgresVaultScopesTeamRotationAndReconciliation(t *testing.T) {
 	}
 	scopeRaw = memberScope
 	granted.Generation = writable.Generation
-	if err := store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error { return db.FenceRemovedMachineVaultTx(ctx, tx, member) }); err != nil {
+	if err := store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error { return db.FenceRemovedMachineVaultTx(ctx, tx, member, "") }); err != nil {
 		t.Fatal(err)
 	}
 	memberInventory, err := service.GetVaultPersonalScopes(ctx, member)
