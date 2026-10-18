@@ -580,7 +580,7 @@ that use them; say which in Evidence.
 | C218 | `pb update check` | Check the signed Paperboat release without installing it | [ ] | [ ] | [ ] | — |
 | C219 | `pb update download` | Download and verify an update without installing it | [ ] | [ ] | [ ] | — |
 | C220 | `pb update settings` | View or change automatic update settings | [ ] | [ ] | [ ] | — |
-| C221 | `pb update status` | Show installed Paperboat update state | [ ] | [ ] | [ ] | — |
+| C221 | `pb update status` | Show installed Paperboat update state | [x] | [ ] | [ ] | HP Linux dev-46c2464: actual update status JSON exit0, cli_version and authenticated runtime_version both exact dev-46c2464, runtime_available=true, boolean candidate/activation states. Existing TestUpdateStatusUsesAuthenticatedDaemonVersion; qualified workspace baseline reused. |
 
 ---
 
@@ -599,7 +599,7 @@ that use them; say which in Evidence.
 
 | ID | Command | Purpose | L | M | W | Evidence |
 |---|---|---|---|---|---|---|
-| C222 | `pb bugreport` | Create a redacted Paperboat diagnostic bundle | [ ] | [ ] | [ ] | — |
+| C222 | `pb bugreport` | Create a redacted Paperboat diagnostic bundle | [x] | [ ] | [ ] | HP Linux dev-46c2464: actual bugreport JSON created local bundle, owner-only0600 ZIP, reported size/SHA256 exact, four expected categories, all event keys/fields within finite diagnostic allowlist. Bundle/temporary receipt removed after verification. Existing TestBundleIsRedactedBoundedOwnerOnlyAndCorrelated/TestBugreportCommandUsesDaemonBundleAndStableJSON. Upload/server support lookup F15-02 remains open. |
 | C223 | `pb completion` | Generate the autocompletion script for the specified shell | [x] | [ ] | [ ] | Linux HP dev-46c2464: actual `pb completion bash/fish/powershell/zsh` each exit0, nonempty shell-specific registration verified; bash output passes `bash -n`; temporary output removed. Existing owner TestShellCompletionIsBoundedSilentAndResourceSpecific. Generation only: full shell installation/dynamic machine completion F15-05 remains open. |
 | C224 | `pb completion bash` | Generate the autocompletion script for bash | [x] | [ ] | [ ] | Linux HP dev-46c2464: actual `pb completion bash/fish/powershell/zsh` each exit0, nonempty shell-specific registration verified; bash output passes `bash -n`; temporary output removed. Existing owner TestShellCompletionIsBoundedSilentAndResourceSpecific. Generation only: full shell installation/dynamic machine completion F15-05 remains open. |
 | C225 | `pb completion fish` | Generate the autocompletion script for fish | [x] | [ ] | [ ] | Linux HP dev-46c2464: actual `pb completion bash/fish/powershell/zsh` each exit0, nonempty shell-specific registration verified; bash output passes `bash -n`; temporary output removed. Existing owner TestShellCompletionIsBoundedSilentAndResourceSpecific. Generation only: full shell installation/dynamic machine completion F15-05 remains open. |

@@ -1928,3 +1928,5 @@ Focused platform-count unit PASS (independent cells, command columns, in-progres
 - Already-running macOS ssh-tools:apple-hp completed PASS107s receipt20261018T012342Z and cleanup; no new macOS checks. Linux ssh-tools:hp-hp selector did not run (pair runner excludes self), not a product failure; no tick inferred.
 
 - Lane A continuing Linux verification: C231–C239 L PASS on HP dev-46c2464, temporary-config set/show/unset and customization import/validate/show/path/confirmed-reset with exact config preservation. Explain wrapper placed JSON after delimiter and captured text twice; no product diagnosis/tick, move to independent update state/CLI checks. No new implementation or broad gate; qualified workspace baseline reused.
+
+- Lane A Linux verification continues: C221/C222 L PASS HP dev-46c2464, authenticated runtime update status exact; local bugreport ZIP0600/size/digest/categories/finite event fields verified then removed. F15-02 support upload/lookup not inferred; qualified workspace baseline reused, no new broad gate. Next existing update-settings round-trip and server-backed inventory/terminal after18.13 READY.
