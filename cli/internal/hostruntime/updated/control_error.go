@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-var ErrCustomInstallation = errors.New("Custom builds cannot use official updates. Install a fresh official build to switch to official updates.")
+var ErrCustomInstallation = errors.New("The installed Paperboat is a custom build, which cannot use official updates. To switch, run `pb update --force` (it may interrupt running work) or install an official bundle with `pb update --from <file.pb-update>`.")
 
 const maxControlErrorMessage = 2048
 

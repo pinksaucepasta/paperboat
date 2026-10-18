@@ -170,6 +170,9 @@ func classifyCLIJSONFailure(err error, failure commandFailure) cliJSONError {
 		if changed {
 			result.StateChanged = true
 		}
+	case updateCompletionFailure:
+		result.Code, result.Category, result.StateChanged = "update_installed_unverified", "local_io", true
+		result.Recovery = "Run pb doctor to confirm the new version is healthy; do not repeat the update."
 	case *configComparisonFailure:
 		result.Code, result.Category, result.StateChanged = "config_comparison_unavailable", "unavailable_retryable", false
 		result.Retryable = true
@@ -386,7 +389,7 @@ func classifyUpdaterControlJSONError(result cliJSONError, failure *updated.Contr
 		result.Category = "conflict"
 		result.StateChanged = false
 		result.Message = "Official updates are unavailable for this custom installation."
-		result.Recovery = "Install a fresh official build to switch to official updates."
+		result.Recovery = "Run pb update --force, or install an official bundle with pb update --from <file.pb-update>."
 	case "approval_required":
 		result.Category = "conflict"
 		result.StateChanged = false

@@ -64,6 +64,8 @@ func commandFailureMessage(err error, failure commandFailure) string {
 		return owned.Error()
 	case *configComparisonFailure:
 		return owned.Error()
+	case updateCompletionFailure:
+		return owned.Error()
 	case *hostruntimecmd.CommandFailure:
 		if message := owned.Error(); message != "" {
 			return "Paperboat could not finish: " + message + ". Check the current state before retrying; run `pb doctor` if this continues."
@@ -170,6 +172,8 @@ func typedCommandOwnerMessage(owner error, failure commandFailure) string {
 		}
 		return message
 	case *configComparisonFailure:
+		return owner.Error()
+	case updateCompletionFailure:
 		return owner.Error()
 	case *envHostRefreshFailure:
 		return owner.Error()

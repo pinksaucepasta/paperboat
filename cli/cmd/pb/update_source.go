@@ -38,6 +38,19 @@ func actionUpdateFrom(command *cobra.Command, input string, force bool) error {
 	return installStagedUpdateSource(command, ctx, staged.Path, force)
 }
 
+var installUpdateSourceForCommand = hostruntimecmd.InstallUpdateSource
+
+// updateCompletionFailure reports a step that failed after the update was installed.
+type updateCompletionFailure struct {
+	stage string
+	cause error
+}
+
+func (e updateCompletionFailure) Error() string {
+	return "Paperboat was updated, but the CLI could not " + e.stage + ". The new version is installed; run `pb doctor` to confirm it is healthy before retrying."
+}
+func (e updateCompletionFailure) Unwrap() error { return e.cause }
+
 func installStagedUpdateSource(command *cobra.Command, ctx context.Context, stagedPath string, force bool) error {
 	var source installsource.Source
 	var err error
@@ -53,20 +66,22 @@ func installStagedUpdateSource(command *cobra.Command, ctx context.Context, stag
 			return err
 		}
 	}
-	installed, err := hostruntimecmd.InstallUpdateSource(ctx, executable, source, bundle, force, "")
+	installed, err := installUpdateSourceForCommand(ctx, executable, source, bundle, force, "")
 	if err != nil {
 		if errors.Is(err, hostdproto.ErrMaintenanceBusy) {
 			return commandRejection{reason: commandRejectUpdateBusy, cause: err}
 		}
 		return err
 	}
+	// The installation is committed here. A failure below must say so, because
+	// the generic failure text invites a retry of an update that already landed.
 	canonical, err := filepath.EvalSymlinks(installed)
 	if err != nil {
-		return err
+		return updateCompletionFailure{stage: "locate the installed executable", cause: err}
 	}
 	actual, err := installsource.InspectCandidate(ctx, canonical)
 	if err != nil {
-		return fmt.Errorf("installation completed but its executable could not be verified: %w", err)
+		return updateCompletionFailure{stage: "verify the installed executable", cause: err}
 	}
 	if bundle != "" {
 		actual.Distribution, actual.AutomaticUpdates = installsource.Official, true

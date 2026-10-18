@@ -78,7 +78,7 @@ func (e commandRejection) Error() string {
 	case commandRejectMissingServer:
 		return "Paperboat server is not configured; set server_url or use --server."
 	case commandRejectCustomUpdate:
-		return "Custom builds cannot use official updates. Install a fresh official build to switch to official updates."
+		return "The installed Paperboat is a custom build, which cannot use official updates. To switch, run `pb update --force` (it may interrupt running work) or install an official bundle with `pb update --from <file.pb-update>`."
 	case commandRejectLegacyCarrierRunning:
 		return hostinstall.ErrLegacyCarrierRunning.Error()
 	case commandRejectUpdateVerification:
