@@ -729,3 +729,39 @@ func TestResetSweepPreservesCLIAndRejectsOtherPayload(t *testing.T) {
 		t.Fatal("reset accepted extra payload", err)
 	}
 }
+
+// F1-09 device finding: uninstall left /run/paperboat after the last account.
+func TestPurgeRemovesSharedRuntimeDirectoriesWithTheLastAccountOnly(t *testing.T) {
+	for _, accountsRemain := range []bool{false, true} {
+		root := t.TempDir()
+		plantLinuxAccount(t, root)
+		runtimeDirectory := filepath.Join(root, "run", "paperboat")
+		if err := os.MkdirAll(runtimeDirectory, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(runtimeDirectory, "host-service.sock"), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		plan, err := newUnixPurgePlan("linux", 1001)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if accountsRemain {
+			other := filepath.Join(root, plan.accountRecords, "u1002")
+			if err := os.MkdirAll(other, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(other, "install-metadata.json"), []byte("{}"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		_ = testSweep(root, plan, newPurgeFake()).purgeAccount(context.Background())
+		_, statErr := os.Stat(runtimeDirectory)
+		if accountsRemain && statErr != nil {
+			t.Fatalf("another account still needs %s: %v", runtimeDirectory, statErr)
+		}
+		if !accountsRemain && !os.IsNotExist(statErr) {
+			t.Fatalf("shared runtime directory survived the last uninstall: %v", statErr)
+		}
+	}
+}

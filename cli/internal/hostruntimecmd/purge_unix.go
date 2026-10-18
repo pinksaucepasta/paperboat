@@ -93,6 +93,9 @@ type unixPurgePlan struct {
 	definitionGlobs []string
 	payloadPaths    []string
 	payloadGlobs    []string
+	// sharedRuntimeDirs are volatile directories shared by every account; they go
+	// with the last installation.
+	sharedRuntimeDirs []string
 	// accountRecords holds one directory per installed account; its
 	// install-metadata.json files decide whether the machine guard may go.
 	accountRecords string
@@ -133,7 +136,8 @@ func newUnixPurgePlan(platform string, uid int) (unixPurgePlan, error) {
 				"/var/run/paperboat-*-" + instance + "*",
 				"/var/cache/paperboat*-" + instance + "*",
 			},
-			accountRecords: "/var/lib/paperboat-installer/users",
+			sharedRuntimeDirs: []string{"/run/paperboat", "/var/run/paperboat"},
+			accountRecords:    "/var/lib/paperboat-installer/users",
 		}, nil
 	case "darwin":
 		labels := []string{service.HostLabel + "." + instance, service.HostdLabel + "." + instance, service.UpdaterLabel + "." + instance}
@@ -277,6 +281,11 @@ func (s unixSweep) purgeAccount(ctx context.Context) error {
 	if err == nil && !recordsRemain {
 		if err := s.guard(ctx); err != nil {
 			result = errors.Join(result, withPurgeStage("machine_guard", err))
+		}
+		for _, directory := range s.plan.sharedRuntimeDirs {
+			if err := s.removePath(directory); err != nil {
+				result = errors.Join(result, withPurgeStage("shared_runtime", err))
+			}
 		}
 		if s.keepCLI == "" && result == nil {
 			result = errors.Join(result, withPurgeStage("shared_policy", s.removeLegacyAvailabilityPolicy(ctx)))

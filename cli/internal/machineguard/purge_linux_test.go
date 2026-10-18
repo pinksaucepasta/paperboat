@@ -29,16 +29,17 @@ func newLinuxPurgeFixture(t *testing.T) *linuxPurgeFixture {
 	root := t.TempDir()
 	fixture := &linuxPurgeFixture{
 		paths: linuxPurgePaths{
-			UnitDir:   filepath.Join(root, "units"),
-			StateDir:  filepath.Join(root, "state"),
-			Libexec:   []string{filepath.Join(root, "libexec", "paperboat-machineguard"), filepath.Join(root, "libexec", "paperboat-deviceguard")},
-			TrustDirs: []string{filepath.Join(root, "ca-certificates"), filepath.Join(root, "ssl-certs")},
+			UnitDir:    filepath.Join(root, "units"),
+			StateDir:   filepath.Join(root, "state"),
+			RuntimeDir: filepath.Join(root, "run"),
+			Libexec:    []string{filepath.Join(root, "libexec", "paperboat-machineguard"), filepath.Join(root, "libexec", "paperboat-deviceguard")},
+			TrustDirs:  []string{filepath.Join(root, "ca-certificates"), filepath.Join(root, "ssl-certs")},
 		},
 		runErrs: map[string]error{},
 	}
 	// The state directory is created only by tests that plant state, because its
 	// presence selects the guard uninstall path.
-	for _, directory := range append([]string{fixture.paths.UnitDir}, append(fixture.paths.Libexec, fixture.paths.TrustDirs...)...) {
+	for _, directory := range append([]string{fixture.paths.UnitDir, fixture.paths.RuntimeDir}, append(fixture.paths.Libexec, fixture.paths.TrustDirs...)...) {
 		if err := os.MkdirAll(directory, 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -218,5 +219,18 @@ func TestPurgeLinuxRetainsStateAndKeepsErrorsWhenTrustUpdateFails(t *testing.T) 
 	}
 	if !strings.Contains(err.Error(), "retained") {
 		t.Fatalf("purge error %q does not say that state was retained", err)
+	}
+}
+
+func TestLinuxPurgeRemovesTheVolatileControlDirectory(t *testing.T) {
+	f := newLinuxPurgeFixture(t)
+	if err := os.WriteFile(filepath.Join(f.paths.RuntimeDir, "control.sock"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.purge(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(f.paths.RuntimeDir); !os.IsNotExist(err) {
+		t.Fatalf("control directory survived purge: %v", err)
 	}
 }

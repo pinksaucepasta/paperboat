@@ -21,10 +21,11 @@ func Purge(ctx context.Context) error {
 	}
 	return purgeLinux(ctx, linuxPurge{
 		Paths: linuxPurgePaths{
-			UnitDir:   "/etc/systemd/system",
-			StateDir:  DefaultStateDir,
-			Libexec:   []string{"/usr/local/libexec/paperboat-machineguard", "/usr/local/libexec/paperboat-deviceguard"},
-			TrustDirs: []string{"/usr/local/share/ca-certificates", "/etc/ssl/certs"},
+			UnitDir:    "/etc/systemd/system",
+			StateDir:   DefaultStateDir,
+			RuntimeDir: "/run/paperboat-machineguard",
+			Libexec:    []string{"/usr/local/libexec/paperboat-machineguard", "/usr/local/libexec/paperboat-deviceguard"},
+			TrustDirs:  []string{"/usr/local/share/ca-certificates", "/etc/ssl/certs"},
 		},
 		Run: func(ctx context.Context, name string, args ...string) error {
 			output, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
@@ -44,10 +45,12 @@ func Purge(ctx context.Context) error {
 }
 
 type linuxPurgePaths struct {
-	UnitDir   string
-	StateDir  string
-	Libexec   []string
-	TrustDirs []string
+	UnitDir  string
+	StateDir string
+	// RuntimeDir is the volatile control-socket directory.
+	RuntimeDir string
+	Libexec    []string
+	TrustDirs  []string
 }
 
 // linuxPurge carries every external effect so the purge order can be tested
@@ -107,6 +110,9 @@ func purgeLinux(ctx context.Context, p linuxPurge) error {
 	result = errors.Join(result, p.LocalNames(ctx))
 	for _, path := range paths.Libexec {
 		result = errors.Join(result, removeOwnedPath(path))
+	}
+	if paths.RuntimeDir != "" {
+		result = errors.Join(result, removeOwnedPath(paths.RuntimeDir))
 	}
 	// State is the resumable record. Remove it only when every earlier step
 	// succeeded, so a retry still sees what it must clean up.
