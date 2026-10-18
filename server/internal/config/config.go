@@ -59,6 +59,7 @@ type Config struct {
 	Database               Database          `json:"database"`
 	Billing                Billing           `json:"billing"`
 	UserMachines           UserMachines      `json:"user_machines"`
+	ManagedSSH             ManagedSSH        `json:"managed_ssh"`
 	TerminalSessions       TerminalSessions  `json:"terminal_sessions"`
 	Preview                Preview           `json:"preview"`
 	Tunnel                 Tunnel            `json:"tunnel"`
@@ -132,11 +133,20 @@ type Billing struct {
 	PersonalMachineLimit          *int32 `json:"personal_machine_limit,omitempty"`
 }
 
+// ManagedSSH bounds how long an idle CLI session keeps counting toward SSH client-key capacity
+// and authorized keys; a session used within the window keeps its key, an older one stops counting.
+type ManagedSSH struct {
+	ClientKeyActiveWindow time.Duration `json:"client_key_active_window"`
+}
+
 type UserMachines struct {
-	PairingLifetime   time.Duration `json:"pairing_lifetime"`
-	OfflineAfter      time.Duration `json:"offline_after"`
-	AllowedPlatforms  []string      `json:"allowed_platforms"`
-	RuntimeListenPort int32         `json:"runtime_listen_port"`
+	PairingLifetime time.Duration `json:"pairing_lifetime"`
+	OfflineAfter    time.Duration `json:"offline_after"`
+	// ExpiredAccessSessionRetention is how long an expired access session may still be named as
+	// admitted before it is retired.
+	ExpiredAccessSessionRetention time.Duration `json:"expired_access_session_retention"`
+	AllowedPlatforms              []string      `json:"allowed_platforms"`
+	RuntimeListenPort             int32         `json:"runtime_listen_port"`
 }
 
 type TerminalSessions struct {
@@ -387,7 +397,8 @@ func Default() Config {
 		},
 		Billing:           Billing{TopupMaxQuantity: 100, PersonalAllowanceBytes: new(int64(5_000_000_000))},
 		RuntimeBaseDomain: "localhost",
-		UserMachines:      UserMachines{PairingLifetime: 10 * time.Minute, OfflineAfter: 2 * time.Minute, AllowedPlatforms: []string{"darwin", "linux", "windows"}, RuntimeListenPort: 38080},
+		ManagedSSH:        ManagedSSH{ClientKeyActiveWindow: 30 * 24 * time.Hour},
+		UserMachines:      UserMachines{PairingLifetime: 10 * time.Minute, OfflineAfter: 2 * time.Minute, ExpiredAccessSessionRetention: 7 * 24 * time.Hour, AllowedPlatforms: []string{"darwin", "linux", "windows"}, RuntimeListenPort: 38080},
 		TerminalSessions:  TerminalSessions{MaxActivePerProject: 20, OperationTimeout: 15 * time.Second, RetryBackoff: time.Second, WorkerInterval: time.Second, MaxAttemptsBeforeAlert: 10},
 		Preview:           Preview{BaseDomain: "preview.localhost"},
 		Tunnel:            Tunnel{BaseDomain: "tunnels.localhost", PublicTCPPortMin: 20000, PublicTCPPortMax: 29999},
@@ -530,6 +541,12 @@ func (c Config) Validate() error {
 	}
 	if (c.Billing.PersonalAllowanceBytes != nil && *c.Billing.PersonalAllowanceBytes < 0) || (c.Billing.TeamAllowanceBytes != nil && *c.Billing.TeamAllowanceBytes < 0) || (c.Billing.PersonalMachineLimit != nil && *c.Billing.PersonalMachineLimit < 0) {
 		errs = append(errs, fmt.Errorf("configured billing allowances and quotas must be nonnegative"))
+	}
+	if c.UserMachines.ExpiredAccessSessionRetention < time.Hour {
+		errs = append(errs, fmt.Errorf("user_machines expired access session retention must be at least one hour"))
+	}
+	if c.ManagedSSH.ClientKeyActiveWindow < time.Hour {
+		errs = append(errs, fmt.Errorf("managed_ssh client key active window must be at least one hour"))
 	}
 	if c.UserMachines.PairingLifetime <= 0 || c.UserMachines.OfflineAfter <= 0 || len(c.UserMachines.AllowedPlatforms) == 0 {
 		errs = append(errs, fmt.Errorf("user_machines pairing lifetime, offline timeout, and allowed platforms are required"))

@@ -468,3 +468,80 @@ func TestSQLRepositoryManagedSSHKeyRevokesWithClientSessionAndAccount(t *testing
 		}
 	}
 }
+
+// A CLI session that has not been used within the configured window stops counting toward SSH
+// client-key capacity and authorized keys; it never blocks a new registration.
+func TestSQLRepositoryManagedSSHIdleClientSessionsDoNotCount(t *testing.T) {
+	dsn := os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
+	if dsn == "" {
+		t.Skip("set PAPERBOAT_TEST_DATABASE_DSN to run managed SSH repository integration tests")
+	}
+	if err := db.ValidateIsolatedTestDSN(dsn, os.Getenv("PAPERBOAT_DATABASE_DSN")); err != nil {
+		t.Fatal(err)
+	}
+	store, err := db.Open(config.Database{Driver: "postgres", DSN: dsn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	ctx := t.Context()
+	if err := db.Migrate(ctx, store); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	suffix := strings.ToLower(strings.ReplaceAll(t.Name(), "/", "_")) + strings.ReplaceAll(now.Format("150405.000000000"), ".", "")
+	userID, machineID := "ssh_idle_user_"+suffix, "ssh_idle_machine_"+suffix
+	t.Cleanup(func() {
+		clean, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		for _, query := range []string{`DELETE FROM paperboat.managed_ssh_client_keys WHERE user_id=$1`, `DELETE FROM paperboat.user_machines WHERE user_id=$1`, `DELETE FROM paperboat.cli_client_sessions WHERE user_id=$1`, `DELETE FROM paperboat.users WHERE id=$1`} {
+			if _, err := store.SQL().ExecContext(clean, query, userID); err != nil {
+				t.Error(err)
+			}
+		}
+	})
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users (id,workos_subject,primary_email,status) VALUES ($1,$2,$3,'active')`, userID, "workos_"+userID, userID+"@example.test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES ($1,$2,$3,$1,'linux','amd64','/w','online','occupied',true,1)`, machineID, userID, "env_"+machineID); err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < 70; index++ {
+		sessionID := fmt.Sprintf("ssh_idle_cli_%02d_%s", index, suffix)
+		idle := now.Add(-90 * 24 * time.Hour)
+		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.cli_client_sessions (id,user_id,client_id,client_label,device_type,os,scopes,state,created_at,approved_at,last_used_at) VALUES ($1,$2,$3,'idle','desktop','test',ARRAY['machines:connect'],'active',$4,$4,$4)`, sessionID, userID, "client_"+sessionID, idle); err != nil {
+			t.Fatal(err)
+		}
+		public, _, _, _, err := ssh.ParseAuthorizedKey([]byte(publicLine(t, "ed25519")))
+		if err != nil {
+			t.Fatal(err)
+		}
+		fingerprint := sha256.Sum256(public.Marshal())
+		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.managed_ssh_client_keys (fingerprint,user_id,cli_client_session_id,algorithm,public_key,reconciliation_version,created_at) VALUES ($1,$2,$3,'ssh-ed25519',$4,1,$5)`, fingerprint[:], userID, sessionID, strings.TrimSpace(string(ssh.MarshalAuthorizedKey(public))), idle); err != nil {
+			t.Fatal(err)
+		}
+	}
+	repository, err := NewSQLRepository(store, audit.NewWriter(store))
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := NewService(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	set, err := service.ListClientKeys(ctx, ListClientKeysRequest{ActorUserID: userID, UserMachineID: machineID, MachineGeneration: 1})
+	if err != nil || len(set.Keys) != 0 {
+		t.Fatalf("70 idle sessions counted: keys=%d err=%v", len(set.Keys), err)
+	}
+	fresh := "ssh_idle_cli_fresh_" + suffix
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.cli_client_sessions (id,user_id,client_id,client_label,device_type,os,scopes,state,created_at,approved_at,last_used_at) VALUES ($1,$2,$3,'fresh','desktop','test',ARRAY['machines:connect'],'active',$4,$4,$4)`, fresh, userID, "client_"+fresh, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.RegisterClient(ctx, RegisterClientRequest{OperationID: "operation_idle_register_" + suffix, UserID: userID, CLIClientSessionID: fresh, PublicKey: publicLine(t, "ed25519"), Now: now}); err != nil {
+		t.Fatalf("registration blocked by idle sessions: %v", err)
+	}
+	set, err = service.ListClientKeys(ctx, ListClientKeysRequest{ActorUserID: userID, UserMachineID: machineID, MachineGeneration: 1})
+	if err != nil || len(set.Keys) != 1 {
+		t.Fatalf("keys after fresh registration=%d err=%v", len(set.Keys), err)
+	}
+}

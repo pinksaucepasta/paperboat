@@ -36,11 +36,17 @@ func (q *Queries) AddMachineSSHHostKeyToSet(ctx context.Context, arg AddMachineS
 const countActiveManagedSSHClientKeysForUser = `-- name: CountActiveManagedSSHClientKeysForUser :one
 SELECT count(*) FROM managed_ssh_client_keys k
 JOIN cli_client_sessions cs ON cs.id = k.cli_client_session_id AND cs.state = 'active'
-WHERE k.user_id = $1 AND k.state = 'active'
+  AND coalesce(cs.last_used_at, cs.created_at) >= $1
+WHERE k.user_id = $2 AND k.state = 'active'
 `
 
-func (q *Queries) CountActiveManagedSSHClientKeysForUser(ctx context.Context, userID string) (int64, error) {
-	row := q.db.QueryRow(ctx, countActiveManagedSSHClientKeysForUser, userID)
+type CountActiveManagedSSHClientKeysForUserParams struct {
+	UsedSince sql.NullTime
+	UserID    string
+}
+
+func (q *Queries) CountActiveManagedSSHClientKeysForUser(ctx context.Context, arg CountActiveManagedSSHClientKeysForUserParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countActiveManagedSSHClientKeysForUser, arg.UsedSince, arg.UserID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -521,12 +527,18 @@ func (q *Queries) GetPendingMachineSSHHostKeySetForUpdate(ctx context.Context, u
 const listActiveManagedSSHClientKeysForMachine = `-- name: ListActiveManagedSSHClientKeysForMachine :many
 SELECT k.fingerprint, k.user_id, k.cli_client_session_id, k.algorithm, k.public_key, k.state, k.reconciliation_version, k.created_at, k.revoked_at, k.revocation_reason FROM managed_ssh_client_keys k
 JOIN cli_client_sessions cs ON cs.id=k.cli_client_session_id AND cs.user_id=k.user_id AND cs.state='active' AND cs.revoked_at IS NULL
-WHERE k.state='active' AND machine_capability_allowed(k.user_id,$1,'managed_ssh')
+ AND coalesce(cs.last_used_at,cs.created_at) >= $1
+WHERE k.state='active' AND machine_capability_allowed(k.user_id,$2,'managed_ssh')
 ORDER BY k.created_at DESC,k.cli_client_session_id DESC LIMIT 65
 `
 
-func (q *Queries) ListActiveManagedSSHClientKeysForMachine(ctx context.Context, machineID string) ([]ManagedSshClientKey, error) {
-	rows, err := q.db.Query(ctx, listActiveManagedSSHClientKeysForMachine, machineID)
+type ListActiveManagedSSHClientKeysForMachineParams struct {
+	UsedSince sql.NullTime
+	MachineID string
+}
+
+func (q *Queries) ListActiveManagedSSHClientKeysForMachine(ctx context.Context, arg ListActiveManagedSSHClientKeysForMachineParams) ([]ManagedSshClientKey, error) {
+	rows, err := q.db.Query(ctx, listActiveManagedSSHClientKeysForMachine, arg.UsedSince, arg.MachineID)
 	if err != nil {
 		return nil, err
 	}
@@ -559,13 +571,19 @@ func (q *Queries) ListActiveManagedSSHClientKeysForMachine(ctx context.Context, 
 const listActiveManagedSSHClientKeysForUser = `-- name: ListActiveManagedSSHClientKeysForUser :many
 SELECT k.fingerprint, k.user_id, k.cli_client_session_id, k.algorithm, k.public_key, k.state, k.reconciliation_version, k.created_at, k.revoked_at, k.revocation_reason FROM managed_ssh_client_keys k
 JOIN cli_client_sessions cs ON cs.id = k.cli_client_session_id AND cs.state = 'active'
-WHERE k.user_id = $1 AND k.state = 'active'
+  AND coalesce(cs.last_used_at, cs.created_at) >= $1
+WHERE k.user_id = $2 AND k.state = 'active'
 ORDER BY k.created_at DESC, k.cli_client_session_id DESC
 LIMIT 64
 `
 
-func (q *Queries) ListActiveManagedSSHClientKeysForUser(ctx context.Context, userID string) ([]ManagedSshClientKey, error) {
-	rows, err := q.db.Query(ctx, listActiveManagedSSHClientKeysForUser, userID)
+type ListActiveManagedSSHClientKeysForUserParams struct {
+	UsedSince sql.NullTime
+	UserID    string
+}
+
+func (q *Queries) ListActiveManagedSSHClientKeysForUser(ctx context.Context, arg ListActiveManagedSSHClientKeysForUserParams) ([]ManagedSshClientKey, error) {
+	rows, err := q.db.Query(ctx, listActiveManagedSSHClientKeysForUser, arg.UsedSince, arg.UserID)
 	if err != nil {
 		return nil, err
 	}

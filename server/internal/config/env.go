@@ -181,6 +181,13 @@ func overlayEnv(c *Config, lookup func(string) (string, bool), readFile func(str
 		}
 		c.ReleaseAuthority.Threshold = parsed
 	}
+	if value, ok := lookup("PAPERBOAT_MANAGED_SSH_CLIENT_KEY_ACTIVE_WINDOW_HOURS"); ok {
+		parsed, err := strconv.ParseInt(value, 10, 64)
+		if err != nil {
+			return fmt.Errorf("parse PAPERBOAT_MANAGED_SSH_CLIENT_KEY_ACTIVE_WINDOW_HOURS: %w", err)
+		}
+		c.ManagedSSH.ClientKeyActiveWindow = time.Duration(parsed) * time.Hour
+	}
 	if value, ok := lookup("PAPERBOAT_USER_MACHINES_OFFLINE_AFTER_SECONDS"); ok {
 		parsed, err := strconv.ParseInt(value, 10, 64)
 		if err != nil {

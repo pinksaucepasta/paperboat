@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/pinksaucepasta/paperboat-server/internal/audit"
+	"github.com/pinksaucepasta/paperboat-server/internal/config"
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
 	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat-server/internal/teams"
@@ -25,14 +26,27 @@ import (
 type SQLRepository struct {
 	store *db.DB
 	audit *audit.Writer
+	// clientKeyWindow is how recently a CLI session must have been used for its SSH key to count.
+	clientKeyWindow time.Duration
 }
 
 func NewSQLRepository(store *db.DB, writer *audit.Writer) (*SQLRepository, error) {
 	if store == nil || writer == nil {
 		return nil, wire.ErrInvalid
 	}
-	return &SQLRepository{store: store, audit: writer}, nil
+	return &SQLRepository{store: store, audit: writer, clientKeyWindow: config.Default().ManagedSSH.ClientKeyActiveWindow}, nil
 }
+
+// WithClientKeyWindow sets how recently a CLI session must have been used for its SSH key to count
+// toward capacity and authorized keys.
+func (r *SQLRepository) WithClientKeyWindow(window time.Duration) *SQLRepository {
+	if window > 0 {
+		r.clientKeyWindow = window
+	}
+	return r
+}
+
+func (r *SQLRepository) usedSince(now time.Time) time.Time { return now.Add(-r.clientKeyWindow) }
 
 func (r *SQLRepository) RegisterClient(ctx context.Context, request RegisterClientRequest, proposed ClientKey) (ClientKey, error) {
 	var result ClientKey
@@ -74,7 +88,7 @@ func (r *SQLRepository) RegisterClient(ctx context.Context, request RegisterClie
 		if err != pgx.ErrNoRows {
 			return err
 		}
-		activeCount, err := q.CountActiveManagedSSHClientKeysForUser(ctx, request.UserID)
+		activeCount, err := q.CountActiveManagedSSHClientKeysForUser(ctx, dbsqlc.CountActiveManagedSSHClientKeysForUserParams{UserID: request.UserID, UsedSince: sql.NullTime{Time: r.usedSince(request.Now), Valid: true}})
 		if err != nil {
 			return err
 		}
@@ -165,7 +179,7 @@ func (r *SQLRepository) ListClientKeys(ctx context.Context, request ListClientKe
 		if _, err := tx.Queries().ResolveMachineSSHHostKeyAuthorityForUpdate(ctx, dbsqlc.ResolveMachineSSHHostKeyAuthorityForUpdateParams{UserMachineID: request.UserMachineID, UserID: request.ActorUserID, MachineGeneration: int64(request.MachineGeneration)}); err != nil {
 			return authorityError(err)
 		}
-		rows, err := tx.Queries().ListActiveManagedSSHClientKeysForMachine(ctx, request.UserMachineID)
+		rows, err := tx.Queries().ListActiveManagedSSHClientKeysForMachine(ctx, dbsqlc.ListActiveManagedSSHClientKeysForMachineParams{MachineID: request.UserMachineID, UsedSince: sql.NullTime{Time: r.usedSince(time.Now()), Valid: true}})
 		if err != nil {
 			return err
 		}

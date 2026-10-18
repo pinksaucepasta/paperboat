@@ -55,6 +55,7 @@ RETURNING *;
 -- name: ListActiveManagedSSHClientKeysForUser :many
 SELECT k.* FROM managed_ssh_client_keys k
 JOIN cli_client_sessions cs ON cs.id = k.cli_client_session_id AND cs.state = 'active'
+  AND coalesce(cs.last_used_at, cs.created_at) >= sqlc.arg(used_since)
 WHERE k.user_id = sqlc.arg(user_id) AND k.state = 'active'
 ORDER BY k.created_at DESC, k.cli_client_session_id DESC
 LIMIT 64;
@@ -62,6 +63,7 @@ LIMIT 64;
 -- name: CountActiveManagedSSHClientKeysForUser :one
 SELECT count(*) FROM managed_ssh_client_keys k
 JOIN cli_client_sessions cs ON cs.id = k.cli_client_session_id AND cs.state = 'active'
+  AND coalesce(cs.last_used_at, cs.created_at) >= sqlc.arg(used_since)
 WHERE k.user_id = sqlc.arg(user_id) AND k.state = 'active';
 
 -- name: ResolveMachineSSHHostKeyAuthorityForUpdate :one
@@ -202,6 +204,7 @@ RETURNING *;
 -- name: ListActiveManagedSSHClientKeysForMachine :many
 SELECT k.* FROM managed_ssh_client_keys k
 JOIN cli_client_sessions cs ON cs.id=k.cli_client_session_id AND cs.user_id=k.user_id AND cs.state='active' AND cs.revoked_at IS NULL
+ AND coalesce(cs.last_used_at,cs.created_at) >= sqlc.arg(used_since)
 WHERE k.state='active' AND machine_capability_allowed(k.user_id,sqlc.arg(machine_id),'managed_ssh')
 ORDER BY k.created_at DESC,k.cli_client_session_id DESC LIMIT 65;
 

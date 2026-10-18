@@ -259,7 +259,7 @@ func New(opts Options) (*App, error) {
 		return nil, fmt.Errorf("configure inbox dispatcher: %w", err)
 	}
 	checker := readinessChecker{cfg: opts.Config, db: store}
-	userMachineService := usermachines.New(store, auditWriter, usermachines.Policy{PairingLifetime: opts.Config.UserMachines.PairingLifetime, OfflineAfter: opts.Config.UserMachines.OfflineAfter, AllowedPlatforms: opts.Config.UserMachines.AllowedPlatforms}, workspaceBilling)
+	userMachineService := usermachines.New(store, auditWriter, usermachines.Policy{ExpiredAccessSessionRetention: opts.Config.UserMachines.ExpiredAccessSessionRetention, PairingLifetime: opts.Config.UserMachines.PairingLifetime, OfflineAfter: opts.Config.UserMachines.OfflineAfter, AllowedPlatforms: opts.Config.UserMachines.AllowedPlatforms}, workspaceBilling)
 	teamInboxService, err := teaminbox.New(store, opts.Config.Access.FileTransfer)
 	if err != nil {
 		_ = store.Close()
@@ -483,6 +483,7 @@ func New(opts Options) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
+	managedSSHRepository.WithClientKeyWindow(opts.Config.ManagedSSH.ClientKeyActiveWindow)
 	managedSSHService, err := managedssh.NewService(managedSSHRepository)
 	if err != nil {
 		return nil, err

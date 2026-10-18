@@ -248,6 +248,8 @@ type Policy struct {
 	PairingLifetime  time.Duration
 	OfflineAfter     time.Duration
 	AllowedPlatforms []string
+	// ExpiredAccessSessionRetention is how long an expired access session may still be admitted.
+	ExpiredAccessSessionRetention time.Duration
 }
 type Service struct {
 	nameRandom                  io.Reader
@@ -386,6 +388,7 @@ func (s *Service) Worker(interval time.Duration) func(context.Context) error {
 				workers.IterationFailure(ctx, "terminal_session_cleanup", "terminal_cleanup_failed", s.expireClosedTerminalSessions(ctx))
 				_, progressErr := s.db.Queries().MarkStaleUserMachinesOffline(ctx, sql.NullTime{Time: s.now().UTC().Add(-s.policy.OfflineAfter), Valid: true})
 				workers.IterationFailure(ctx, "stale_machine_offline", "machine_offline_reconcile_failed", progressErr)
+				workers.IterationFailure(ctx, "access_session_retention", "access_session_retention_failed", s.retireExpiredAccessSessions(ctx))
 
 				return nil
 			}()
@@ -400,6 +403,16 @@ func (s *Service) Worker(interval time.Duration) func(context.Context) error {
 			}
 		}
 	}
+}
+
+// retireExpiredAccessSessions stops expired access sessions from staying active (and from being
+// named as admitted) forever.
+func (s *Service) retireExpiredAccessSessions(ctx context.Context) error {
+	if s.policy.ExpiredAccessSessionRetention <= 0 {
+		return nil
+	}
+	_, err := s.db.Queries().RetireExpiredMachineAccessSessions(ctx, s.now().UTC().Add(-s.policy.ExpiredAccessSessionRetention))
+	return err
 }
 
 func (s *Service) ConfigureInstallationEncryption(encryptionKey string) {
