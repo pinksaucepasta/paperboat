@@ -201,12 +201,20 @@ func (s *Source) Token(ctx context.Context) (string, error) {
 	if current.ExpiresAt.After(now.Add(s.config.RenewBefore)) {
 		return current.Credential, nil
 	}
-	operationID, err := s.config.OperationID()
-	if err != nil {
-		return "", unavailable(err)
-	}
-	if len(operationID) < 8 || len(operationID) > 128 {
-		return "", ErrInvalid
+	// A renewal whose answer was lost may already be committed; the control
+	// plane then rejects this credential unless the same operation is retried.
+	operationID := current.PendingRenewalID
+	if operationID == "" {
+		operationID, err = s.config.OperationID()
+		if err != nil {
+			return "", unavailable(err)
+		}
+		if len(operationID) < 8 || len(operationID) > 128 {
+			return "", ErrInvalid
+		}
+		if err := store.SetPendingRenewal(current, operationID); err != nil {
+			return "", unavailable(err)
+		}
 	}
 	body, err := json.Marshal(struct {
 		OperationID string `json:"operation_id"`
@@ -233,6 +241,10 @@ func (s *Source) Token(ctx context.Context) (string, error) {
 	raw, tooLarge, bodyErr := readMachineControlResponse(response)
 	if response.StatusCode != http.StatusCreated {
 		if (response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden) && bodyErr == nil && !tooLarge {
+			// A definitive denial ends the pending operation; retrying it cannot succeed.
+			if clearErr := store.SetPendingRenewal(current, ""); clearErr != nil {
+				return "", unavailable(clearErr)
+			}
 			return "", ErrInvalid
 		}
 		statusFailure := errorreport.HTTPStatusFailure(response)
@@ -250,6 +262,7 @@ func (s *Source) Token(ctx context.Context) (string, error) {
 	if err := decodeMachineControlResponse(raw, &envelope); err != nil {
 		return "", unavailable(err)
 	}
+	envelope.Data.PendingRenewalID = ""
 	envelope.Data.MachineID = current.MachineID
 	envelope.Data.EnvironmentID = current.EnvironmentID
 	envelope.Data.InstallationGeneration = current.InstallationGeneration

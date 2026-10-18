@@ -415,3 +415,70 @@ func TestEnsureInitialUsesHelperIdentityAndRetriesWithStableOperation(t *testing
 		t.Fatalf("rotated credential was not persisted: err=%v", err)
 	}
 }
+
+// A renewal the control plane committed but whose answer never arrived must be
+// retried with the same operation: the superseded credential is otherwise
+// rejected forever and the machine loses control authentication (HP, 2026-10-18).
+func TestSourceRetriesLostRenewalWithTheSameOperation(t *testing.T) {
+	now := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
+	root := filepath.Join(t.TempDir(), "runtime")
+	store, err := identity.Open(identity.Config{StateRoot: root, Random: bytes.NewReader(bytes.Repeat([]byte{7}, 32))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := store.Current()
+	if err := store.SaveRegistration(identity.Registration{ServerURL: "https://unused.test", MachineID: "mch_1", EnvironmentID: "env_1", PublicKeyID: key.ID, PublicIdentityKey: base64.RawURLEncoding.EncodeToString(key.Public()), InboxPath: filepath.Join(root, "inbox"), InstallationGeneration: 2, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	oldToken, newToken := strings.Repeat("o", 40), strings.Repeat("n", 40)
+	if err := store.SaveMachineControl(identity.MachineControl{MachineID: "mch_1", EnvironmentID: "env_1", InstallationGeneration: 2, Credential: oldToken, ExpiresAt: now.Add(time.Minute), KeyID: key.ID}); err != nil {
+		t.Fatal(err)
+	}
+	committed := ""
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			OperationID string `json:"operation_id"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&request)
+		if committed != "" && request.OperationID != committed {
+			w.WriteHeader(http.StatusUnauthorized) // the old credential is superseded
+			return
+		}
+		committed = request.OperationID
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"credential": newToken, "expires_at": now.Add(time.Hour)}})
+	}))
+	defer server.Close()
+	lost := true
+	transport := roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		response, err := server.Client().Transport.RoundTrip(request)
+		if lost && err == nil {
+			lost = false
+			_ = response.Body.Close()
+			return nil, errors.New("response lost after the control plane committed")
+		}
+		return response, err
+	})
+	var issued atomic.Int32
+	source, err := NewSource(Config{ControlURL: server.URL, StateRoot: root, Transport: transport, Clock: func() time.Time { return now }, OperationID: func() (string, error) {
+		return "operation-renew-" + string(rune('0'+issued.Add(1))), nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := source.Token(t.Context()); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("lost response = %v, want unavailable", err)
+	}
+	token, err := source.Token(t.Context())
+	if err != nil || token != newToken {
+		t.Fatalf("retry after a lost response = %v, want the committed credential", err)
+	}
+	if issued.Load() != 1 {
+		t.Fatalf("operations issued = %d, want the pending one reused", issued.Load())
+	}
+	persisted, err := store.MachineControl(now, 0)
+	if err != nil || persisted.Credential != newToken || persisted.PendingRenewalID != "" {
+		t.Fatalf("renewed credential must replace the pending one: %v", err)
+	}
+}

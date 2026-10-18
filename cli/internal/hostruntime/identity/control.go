@@ -24,6 +24,11 @@ type MachineControl struct {
 	Credential             string    `json:"credential"`
 	ExpiresAt              time.Time `json:"expires_at"`
 	KeyID                  string    `json:"key_id"`
+	// PendingRenewalID is the renewal operation sent for this credential whose
+	// answer was never received. Retrying with the same ID lets the control
+	// plane replay the credential it already minted instead of rejecting the
+	// now-superseded one.
+	PendingRenewalID string `json:"pending_renewal_id,omitempty"`
 }
 
 type identityStoreFailure struct {
@@ -62,6 +67,13 @@ func (s *Store) SaveMachineControl(value MachineControl) error {
 		return err
 	}
 	return s.writePrivateDocument("machine-control.json", ".machine-control-*", encoded)
+}
+
+// SetPendingRenewal records (or, with an empty ID, clears) the renewal
+// operation in flight for the stored credential.
+func (s *Store) SetPendingRenewal(current MachineControl, operationID string) error {
+	current.PendingRenewalID = operationID
+	return s.SaveMachineControl(current)
 }
 
 func (s *Store) MachineControl(now time.Time, expiryGrace time.Duration) (MachineControl, error) {
