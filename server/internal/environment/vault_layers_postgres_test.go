@@ -256,13 +256,18 @@ func TestPostgresVaultLayersFanoutSignedPublicationAndWorkspaceIsolation(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	create := VaultTeamCreate{OperationID: nextOperation(), TeamID: team, VaultEnvelope: b64Vault(next), ScopeEnvelope: b64Vault(vaultScopeFixture(t, fixtureScopeHeader(team, "team", owner, 1, 1, 1, make([]byte, 32)), 11))}
+	create := VaultTeamCreate{OperationID: nextOperation(), TeamID: team, ExpectedTeamGeneration: 1, VaultEnvelope: b64Vault(next), ScopeEnvelope: b64Vault(vaultScopeFixture(t, fixtureScopeHeader(team, "team", owner, 1, 1, 1, make([]byte, 32)), 11))}
 	create.GrantEnvelope = b64Vault(vaultGrantFixture(t, fixtureGrantClaims(team, create.OperationID, 1, 1, vaults[owner], nextMetadata), 11))
+	exec(`INSERT INTO teams(team_id,owner_account,generation) VALUES($1,$2,1)`, team, owner)
+	exec(`INSERT INTO team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'member',true)`, team, owner)
+	exec(`INSERT INTO billing_workspaces(id,team_id,state,period_start,period_end) VALUES($1,$2,'active',now()-interval '1 hour',now()+interval '1 hour')`, "billing_"+team, team)
+	if err := store.SQL().QueryRowContext(ctx, `SELECT generation FROM teams WHERE team_id=$1`, team).Scan(&create.ExpectedTeamGeneration); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := service.CreateVaultTeam(ctx, owner, create); err != nil {
 		t.Fatal("initialize signed Team", err)
 	}
 	vaults[owner] = nextMetadata
-	exec(`INSERT INTO billing_workspaces(id,team_id,state,period_start,period_end) VALUES($1,$2,'active',now()-interval '1 hour',now()+interval '1 hour')`, "billing_"+team, team)
 	for _, account := range []string{member, noVault} {
 		exec(`INSERT INTO team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'member',true)`, team, account)
 	}

@@ -8621,6 +8621,7 @@
         "required": [
           "operation_id",
           "team_id",
+          "expected_team_generation",
           "vault_envelope",
           "scope_envelope",
           "grant_envelope"
@@ -8647,7 +8648,7 @@
           },
           "expected_team_generation": {
             "type": "integer",
-            "minimum": 0,
+            "minimum": 1,
             "maximum": 9007199254740991
           }
         }
@@ -30616,7 +30617,7 @@
     "/v1/environment/teams": {
       "post": {
         "operationId": "post__v1_environment_teams",
-        "summary": "Atomically create a team, owner grant, encrypted scope and owner vault successor",
+        "summary": "Initialize an existing paid Team ENV scope, owner grant and owner vault successor",
         "security": [
           {
             "cookieSession": []
@@ -30677,7 +30678,7 @@
             }
           }
         },
-        "description": "Requires browser CSRF protection or an authorized bearer. Operation IDs bind exact request bytes. No password, recovery code, plaintext ENV or machine private keys are accepted.",
+        "description": "Initializes ENV for an existing owned paid Team at expected_team_generation; never creates a business Team or owner membership. Missing or foreign ownership returns forbidden; an unpaid Team returns team_entitlement_required; a stale generation returns version_conflict. Requires browser CSRF protection or an authorized bearer. Operation IDs bind exact request bytes. No password, recovery code, plaintext ENV or machine private keys are accepted.",
         "parameters": [
           {
             "name": "workspace",

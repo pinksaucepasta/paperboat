@@ -100,7 +100,7 @@ func vaultScopePrincipal(w http.ResponseWriter, r *http.Request) (string, bool) 
 }
 func writeVaultScopeResult(w http.ResponseWriter, r *http.Request, result any, err error) {
 	if expectedHTTPErrorOnly(err, environment.ErrTeamEntitlementRequired) {
-		writeError(w, r, http.StatusForbidden, "team_entitlement_required", "Activate this team's subscription in Billing before using team ENV scopes. The encrypted initialization remains saved.")
+		writeError(w, r, http.StatusForbidden, "team_entitlement_required", "Activate this team's subscription in Billing before using team ENV scopes.")
 		return
 	}
 	if expectedHTTPErrorOnly(err, environment.ErrVaultRotationRequired) {

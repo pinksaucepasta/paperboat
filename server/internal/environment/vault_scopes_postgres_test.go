@@ -88,6 +88,30 @@ func TestPostgresVaultScopesTeamRotationAndReconciliation(t *testing.T) {
 	scopeRaw := vaultScopeFixture(t, fixtureScopeHeader(team, "team", owner, 1, 1, 1, make([]byte, 32)), 11)
 	create := VaultTeamCreate{OperationID: "create_" + suffix, TeamID: team, VaultEnvelope: b64Vault(nextRaw), ScopeEnvelope: b64Vault(scopeRaw)}
 	create.GrantEnvelope = b64Vault(vaultGrantFixture(t, fixtureGrantClaims(team, create.OperationID, 1, 1, writer, next), 11))
+	// ENV initialization cannot create a business Team before Checkout payment.
+	if _, err := service.CreateVaultTeam(ctx, owner, create); !errors.Is(err, ErrKeyAuthorizationRequired) {
+		t.Fatalf("fresh unpaid Team initialization must be denied: %v", err)
+	}
+	var teamCount int
+	if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM teams WHERE team_id=$1`, team).Scan(&teamCount); err != nil || teamCount != 0 {
+		t.Fatalf("denied ENV initialization created business Team: count=%d err=%v", teamCount, err)
+	}
+	assertUnchangedVault := func() {
+		t.Helper()
+		head, err := service.GetPasswordVault(ctx, owner)
+		if err != nil || head.DocumentID != DocumentID(first) {
+			t.Fatal("denied initialization advanced encrypted vault", err)
+		}
+		var initialized int
+		if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM environment_vault_teams WHERE team_id=$1`, team).Scan(&initialized); err != nil || initialized != 0 {
+			t.Fatalf("denied initialization persisted ENV authority: count=%d err=%v", initialized, err)
+		}
+		var receipts int
+		if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM environment_vault_operations WHERE account_id=$1 AND operation_id=$2`, owner, create.OperationID).Scan(&receipts); err != nil || receipts != 0 {
+			t.Fatalf("denied initialization persisted receipt: count=%d err=%v", receipts, err)
+		}
+	}
+	assertUnchangedVault()
 	// An ordinary Team without an ENV vault is absent, not an epoch conflict.
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO teams(team_id,owner_account,generation) VALUES($1,$2,1)`, team, owner); err != nil {
 		t.Fatal(err)
@@ -101,9 +125,44 @@ func TestPostgresVaultScopesTeamRotationAndReconciliation(t *testing.T) {
 	if _, err := service.GetVaultTeam(ctx, member, team); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("foreign absent Team ENV: %v", err)
 	}
-	if _, err := store.SQL().ExecContext(ctx, `DELETE FROM teams WHERE team_id=$1 AND owner_account=$2`, team, owner); err != nil {
+	create.ExpectedTeamGeneration = 1
+	if _, err := service.CreateVaultTeam(ctx, owner, create); !errors.Is(err, ErrTeamEntitlementRequired) {
+		t.Fatalf("existing unpaid Team initialized ENV: %v", err)
+	}
+	assertUnchangedVault()
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.billing_workspaces(id,team_id,state,quantity,period_start,period_end) VALUES($1,$2,'active',2,now()-interval '1 hour',now()+interval '1 hour')`, "vault_billing_"+suffix, team); err != nil {
 		t.Fatal(err)
 	}
+	if err := store.SQL().QueryRowContext(ctx, `SELECT generation FROM teams WHERE team_id=$1`, team).Scan(&create.ExpectedTeamGeneration); err != nil {
+		t.Fatal(err)
+	}
+	// A paid Team member with valid signed custody still cannot initialize an
+	// owner's Team. Denial must come from Team ownership, not invalid envelopes.
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'admin',true)`, team, member); err != nil {
+		t.Fatal(err)
+	}
+	memberDigest := sha256.Sum256(memberRaw)
+	memberNextRaw := passwordVaultFixtureByte(t, "https://control.example", member, 2, memberDigest[:], 9)
+	memberNext, _ := ParsePasswordVaultMetadata(memberNextRaw, "https://control.example", member)
+	foreign := VaultTeamCreate{OperationID: "foreign_init_" + suffix, TeamID: team, ExpectedTeamGeneration: create.ExpectedTeamGeneration,
+		VaultEnvelope: b64Vault(memberNextRaw),
+		ScopeEnvelope: b64Vault(vaultScopeFixture(t, fixtureScopeHeader(team, "team", member, 1, 1, 1, make([]byte, 32)), 11))}
+	foreign.GrantEnvelope = b64Vault(vaultGrantFixture(t, fixtureGrantClaims(team, foreign.OperationID, 1, 1, recipient, memberNext), 11))
+	if _, err := service.CreateVaultTeam(ctx, member, foreign); !errors.Is(err, ErrKeyAuthorizationRequired) {
+		t.Fatalf("non-owner paid Team admin initialized ENV: %v", err)
+	}
+	if head, err := service.GetPasswordVault(ctx, member); err != nil || head.DocumentID != DocumentID(memberRaw) {
+		t.Fatal("denied foreign initialization changed member vault", err)
+	}
+	if _, err := store.SQL().ExecContext(ctx, `DELETE FROM team_members WHERE team_id=$1 AND account_id=$2`, team, member); err != nil {
+		t.Fatal(err)
+	}
+	stale := create
+	stale.ExpectedTeamGeneration = 0
+	if _, err := service.CreateVaultTeam(ctx, owner, stale); !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("stale business Team generation initialized ENV: %v", err)
+	}
+	assertUnchangedVault()
 	created, err := service.CreateVaultTeam(ctx, owner, create)
 	if err != nil {
 		t.Fatal(err)
@@ -111,21 +170,40 @@ func TestPostgresVaultScopesTeamRotationAndReconciliation(t *testing.T) {
 	if _, err := service.CreateVaultTeam(ctx, owner, create); err != nil {
 		t.Fatal("exact initialize retry failed", err)
 	}
-	if created.Generation != 1 {
-		t.Fatal("new team generation", created.Generation)
+	if created.Generation != create.ExpectedTeamGeneration+1 || !created.Entitled || created.OwnerAccount != owner {
+		t.Fatal("paid existing Team initialization lost authority")
 	}
-	if created.Entitled {
-		t.Fatal("new unpaid team reported entitled")
+	setPaidPeriod := func(end string) {
+		t.Helper()
+		tx, err := store.SQL().BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback()
+		if _, err = tx.ExecContext(ctx, `ALTER TABLE paperboat.billing_workspaces DISABLE TRIGGER billing_workspace_team_entitlement`); err == nil {
+			_, err = tx.ExecContext(ctx, `UPDATE paperboat.billing_workspaces SET period_end=`+end+` WHERE team_id=$1`, team)
+		}
+		if _, enableErr := tx.ExecContext(ctx, `ALTER TABLE paperboat.billing_workspaces ENABLE TRIGGER billing_workspace_team_entitlement`); err == nil {
+			err = enableErr
+		}
+		if err == nil {
+			err = tx.Commit()
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
+	setPaidPeriod(`now()-interval '1 second'`)
 	if _, err := service.GetVaultScope(ctx, owner, team, "team", team, ""); !errors.Is(err, ErrTeamEntitlementRequired) {
 		t.Fatalf("unpaid authorized owner scope error: %v", err)
 	}
 	if _, err := service.GetVaultScope(ctx, member, team, "team", team, ""); !errors.Is(err, ErrKeyAuthorizationRequired) {
 		t.Fatalf("unpaid outsider scope error: %v", err)
 	}
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.billing_workspaces(id,team_id,state,quantity,period_start,period_end) VALUES($1,$2,'active',2,now()-interval '1 hour',now()+interval '1 hour')`, "vault_billing_"+suffix, team); err != nil {
-		t.Fatal(err)
+	if _, err := service.CreateVaultTeam(ctx, owner, create); !errors.Is(err, ErrTeamEntitlementRequired) {
+		t.Fatalf("expired initialization replay restored authority: %v", err)
 	}
+	setPaidPeriod(`now()+interval '1 hour'`)
 	authority := teams.NewService(store)
 	paidTeam, err := authority.Get(ctx, owner, team)
 	if err != nil {
@@ -136,6 +214,9 @@ func TestPostgresVaultScopesTeamRotationAndReconciliation(t *testing.T) {
 	}
 	if _, err = service.GetVaultTeam(ctx, owner, team); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("suspended team ENV read err=%v", err)
+	}
+	if _, err := service.CreateVaultTeam(ctx, owner, create); !errors.Is(err, ErrKeyAuthorizationRequired) {
+		t.Fatalf("suspended initialization replay restored authority: %v", err)
 	}
 	if _, err = authority.Invite(ctx, owner, team, teams.InviteRequest{OperationID: "suspended_invite_" + suffix, ExpectedGeneration: paidTeam.Generation, AccountID: member}); !errors.Is(err, teams.ErrSuspended) {
 		t.Fatalf("suspended team mutation err=%v", err)
@@ -177,26 +258,6 @@ func TestPostgresVaultScopesTeamRotationAndReconciliation(t *testing.T) {
 	inbox, err := service.ListVaultGrants(ctx, member)
 	if err != nil || len(inbox) != 1 {
 		t.Fatal("missing individual grant", err)
-	}
-	setPaidPeriod := func(end string) {
-		t.Helper()
-		tx, err := store.SQL().BeginTx(ctx, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer tx.Rollback()
-		if _, err = tx.ExecContext(ctx, `ALTER TABLE paperboat.billing_workspaces DISABLE TRIGGER billing_workspace_team_entitlement`); err == nil {
-			_, err = tx.ExecContext(ctx, `UPDATE paperboat.billing_workspaces SET period_end=`+end+` WHERE team_id=$1`, team)
-		}
-		if _, enableErr := tx.ExecContext(ctx, `ALTER TABLE paperboat.billing_workspaces ENABLE TRIGGER billing_workspace_team_entitlement`); err == nil {
-			err = enableErr
-		}
-		if err == nil {
-			err = tx.Commit()
-		}
-		if err != nil {
-			t.Fatal(err)
-		}
 	}
 	setPaidPeriod(`now()-interval '1 second'`)
 	if expired, err := service.ListVaultGrants(ctx, member); err != nil || len(expired) != 0 {
