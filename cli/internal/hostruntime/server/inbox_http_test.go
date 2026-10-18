@@ -1,0 +1,171 @@
+package server
+
+import (
+	"context"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
+	"github.com/pinksaucepasta/paperboat/internal/inbox"
+)
+
+type capabilitiesOff struct{}
+
+func (capabilitiesOff) Enabled(string) bool { return false }
+
+func inboxFixture(t *testing.T, claimsFor func(id, class string) auth.Claims) (http.Handler, string) {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "report final.pdf"), []byte("hello inbox"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	handler, err := NewInboxHandler(InboxHandlerConfig{
+		MachineID: "machine_1", InboxPath: func() (string, error) { return root, nil },
+		Authorizer: func(token string) (Authorizer, error) {
+			if token != "single-use-proof" {
+				return nil, errors.New("unknown token")
+			}
+			return authorizerFunc(func(_ context.Context, frame protocol.Frame) (Authorization, error) {
+				class := map[string]string{inboxReadCapability: "inbox_read", inboxDeleteCapability: "inbox_delete"}[frame.Capability]
+				if class == "" || frame.OperationID == "" {
+					t.Fatalf("frame = %+v", frame)
+				}
+				return Authorization{MachineID: "machine_1", Value: claimsFor(inbox.FileID("report final.pdf"), class)}, nil
+			}), nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return handler, root
+}
+
+func goodInboxClaims(id, class string) auth.Claims {
+	return auth.Claims{CredentialClass: class, Subject: "actor_1", ActorID: "actor_1", UserID: "actor_1", AccountID: "account_1", MachineID: "machine_1", ResourceKind: "inbox_file", ResourceID: id, OperationID: "operation_inbox_1", ExpiresAt: 4102444800}
+}
+
+func inboxRequest(method, id string) *http.Request {
+	request := httptest.NewRequest(method, inboxFilesPath+id, nil)
+	request.Header.Set("Authorization", "Bearer single-use-proof")
+	request.Header.Set(inboxOperationHeader, "operation_inbox_1")
+	return request
+}
+
+func TestInboxHandlerStreamsTheFileBoundByTheCredential(t *testing.T) {
+	handler, _ := inboxFixture(t, goodInboxClaims)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, inboxRequest(http.MethodGet, inbox.FileID("report final.pdf")))
+	body, _ := io.ReadAll(recorder.Result().Body)
+	if recorder.Code != http.StatusOK || string(body) != "hello inbox" || recorder.Header().Get("Content-Length") != "11" ||
+		recorder.Header().Get("Content-Type") != "application/octet-stream" || recorder.Header().Get("X-Content-Type-Options") != "nosniff" ||
+		recorder.Header().Get(inboxFileNameHeader) != "report%20final.pdf" {
+		t.Fatalf("status=%d headers=%v body=%q", recorder.Code, recorder.Header(), body)
+	}
+}
+
+func TestInboxHandlerDeletesOneFile(t *testing.T) {
+	handler, root := inboxFixture(t, goodInboxClaims)
+	id := inbox.FileID("report final.pdf")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, inboxRequest(http.MethodDelete, id))
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, "report final.pdf")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("file still present: %v", err)
+	}
+	again := httptest.NewRecorder()
+	handler.ServeHTTP(again, inboxRequest(http.MethodDelete, id))
+	if again.Code != http.StatusNotFound || !strings.Contains(again.Body.String(), "inbox_file_not_found") {
+		t.Fatalf("second delete: %d %s", again.Code, again.Body.String())
+	}
+}
+
+func TestInboxHandlerRefusesAnythingTheCredentialDoesNotBind(t *testing.T) {
+	id := inbox.FileID("report final.pdf")
+	for name, claims := range map[string]func(string, string) auth.Claims{
+		"other file": func(_, class string) auth.Claims { c := goodInboxClaims(inbox.FileID("other"), class); return c },
+		"other operation": func(id, class string) auth.Claims {
+			c := goodInboxClaims(id, class)
+			c.OperationID = "operation_other_9"
+			return c
+		},
+		"other machine": func(id, class string) auth.Claims {
+			c := goodInboxClaims(id, class)
+			c.MachineID = "machine_2"
+			return c
+		},
+		"wrong class": func(id, _ string) auth.Claims { return goodInboxClaims(id, "preview_launch") },
+		"wrong resource": func(id, class string) auth.Claims {
+			c := goodInboxClaims(id, class)
+			c.ResourceKind = "tunnel"
+			return c
+		},
+		"no actor": func(id, class string) auth.Claims { c := goodInboxClaims(id, class); c.ActorID = ""; return c },
+	} {
+		handler, root := inboxFixture(t, claims)
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, inboxRequest(http.MethodDelete, id))
+		if recorder.Code != http.StatusForbidden {
+			t.Errorf("%s: status=%d", name, recorder.Code)
+		}
+		if _, err := os.Stat(filepath.Join(root, "report final.pdf")); err != nil {
+			t.Errorf("%s: file removed: %v", name, err)
+		}
+	}
+}
+
+func TestInboxHandlerRejectsMalformedRequests(t *testing.T) {
+	handler, _ := inboxFixture(t, goodInboxClaims)
+	id := inbox.FileID("report final.pdf")
+	missingToken := inboxRequest(http.MethodGet, id)
+	missingToken.Header.Del("Authorization")
+	badOperation := inboxRequest(http.MethodGet, id)
+	badOperation.Header.Set(inboxOperationHeader, "short")
+	wrongToken := inboxRequest(http.MethodGet, id)
+	wrongToken.Header.Set("Authorization", "Bearer something-else")
+	for name, tc := range map[string]struct {
+		request *http.Request
+		status  int
+	}{
+		"bad id":          {inboxRequest(http.MethodGet, "../etc/passwd"), http.StatusNotFound},
+		"post":            {inboxRequest(http.MethodPost, id), http.StatusMethodNotAllowed},
+		"no bearer":       {missingToken, http.StatusUnauthorized},
+		"unknown token":   {wrongToken, http.StatusUnauthorized},
+		"bad operation":   {badOperation, http.StatusBadRequest},
+		"unknown file id": {inboxRequest(http.MethodGet, inbox.FileID("missing")), http.StatusForbidden},
+	} {
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, tc.request)
+		if recorder.Code != tc.status {
+			t.Errorf("%s: status=%d want %d", name, recorder.Code, tc.status)
+		}
+	}
+}
+
+func TestInboxHandlerHonoursTheCapabilityGate(t *testing.T) {
+	root := t.TempDir()
+	handler, err := NewInboxHandler(InboxHandlerConfig{
+		MachineID: "machine_1", InboxPath: func() (string, error) { return root, nil }, Capabilities: capabilitiesOff{},
+		Authorizer: func(string) (Authorizer, error) {
+			return authorizerFunc(func(_ context.Context, frame protocol.Frame) (Authorization, error) {
+				return Authorization{MachineID: "machine_1", Value: goodInboxClaims(inbox.FileID("a"), "inbox_read")}, nil
+			}), nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, inboxRequest(http.MethodGet, inbox.FileID("a")))
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("status=%d", recorder.Code)
+	}
+}

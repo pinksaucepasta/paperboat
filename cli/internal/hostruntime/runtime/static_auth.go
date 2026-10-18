@@ -137,6 +137,16 @@ func (r staticPolicyResolver) Policy(frame protocol.Frame) (auth.Policy, error) 
 		base.Scopes = []string{"preview:launch"}
 		base.OperationID = frame.OperationID
 		base.SingleUse = true
+	case "inbox.read.v1":
+		base.CredentialClass = "inbox_read"
+		base.Scopes = []string{"inbox:read"}
+		base.OperationID = frame.OperationID
+		base.SingleUse = true
+	case "inbox.delete.v1":
+		base.CredentialClass = "inbox_delete"
+		base.Scopes = []string{"inbox:delete"}
+		base.OperationID = frame.OperationID
+		base.SingleUse = true
 	case "private.access.v1":
 		base.CredentialClass = "native_private"
 		base.Scopes = []string{"private:native"}

@@ -503,6 +503,13 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 		}
 		mux.Handle("/v1/preview-launches", previewDispatchHandler)
 	}
+	if config.InboxPath != nil {
+		inboxHandler, inboxErr := server.NewInboxHandler(server.InboxHandlerConfig{Authorizer: dependencies.Authorizer, MachineID: config.MachineID, InboxPath: config.InboxPath, Capabilities: dependencies.Capabilities})
+		if inboxErr != nil {
+			return nil, inboxErr
+		}
+		mux.Handle("/v1/inbox-files/", inboxHandler)
+	}
 	registerHostLivenessAndDiagnostics(mux, healthSource, dependencies.HealthTracker, dependencies.Metrics, dependencies.EventLog, func() HostWorkloadCounts {
 		return hostWorkloadCounts(sessions, transferService)
 	})

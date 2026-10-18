@@ -105,7 +105,7 @@ func (c *machineCapabilityController) Enabled(capability string) bool {
 		return desired.Terminal
 	case "ssh.v1":
 		return desired.ManagedSSH
-	case "file-transfer.v1":
+	case "file-transfer.v1", "inbox.read.v1", "inbox.delete.v1":
 		return desired.FileReceive
 	case "preview.launch.v1", "private.access.v1":
 		return desired.PreviewTunnel

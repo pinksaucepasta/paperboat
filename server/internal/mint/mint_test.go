@@ -787,3 +787,60 @@ func TestBrowserGuestContextDoesNotInventAccountLaunchAuthority(t *testing.T) {
 		t.Fatal("anonymous guest received launch authority")
 	}
 }
+
+func TestInboxCredentialsBindOneFileOneOperationAndAreNotInterchangeable(t *testing.T) {
+	now := time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC)
+	provider, err := NewEphemeral(time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	read := CredentialInput{
+		Issuer: "https://api.example.test", Audience: "paperboat-machine", Subject: "user_1", JTI: "jti_inbox_1",
+		IssuedAt: now, ExpiresAt: now.Add(time.Minute), CredentialClass: "inbox_read", Scopes: []string{"inbox:read"},
+		EnvironmentID: "env_1", AccountID: "acct_1", MachineID: "machine_1", UserID: "user_1", ActorID: "user_1",
+		OperationID: "operation_inbox_1", ResourceKind: InboxResourceKind, ResourceID: "0123456789abcdef",
+		RequestID: "request_1", CorrelationID: "correlation_1",
+	}
+	token, err := provider.SignCredential(read)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims, err := provider.VerifyCredential(token, read.Issuer, "inbox_read", now)
+	if err != nil || claims.MachineID != "machine_1" || claims.ResourceID != read.ResourceID || claims.OperationID != read.OperationID || claims.IdempotencyKey != "" {
+		t.Fatalf("claims = %#v err=%v", claims, err)
+	}
+	// A read credential is not a delete credential, and the other way round.
+	if _, err := provider.VerifyCredential(token, read.Issuer, "inbox_delete", now); err == nil {
+		t.Fatal("inbox_read verified as inbox_delete")
+	}
+	remove := read
+	remove.CredentialClass, remove.Scopes, remove.JTI, remove.IdempotencyKey = "inbox_delete", []string{"inbox:delete"}, "jti_inbox_2", "delete_1"
+	deleteToken, err := provider.SignCredential(remove)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claims, err := provider.VerifyCredential(deleteToken, remove.Issuer, "inbox_delete", now); err != nil || claims.IdempotencyKey != "delete_1" {
+		t.Fatalf("delete claims = %#v err=%v", claims, err)
+	}
+	for name, mutate := range map[string]func(*CredentialInput){
+		"no file":        func(in *CredentialInput) { in.ResourceID = "" },
+		"wrong kind":     func(in *CredentialInput) { in.ResourceKind = "tunnel" },
+		"no operation":   func(in *CredentialInput) { in.OperationID = "" },
+		"actor mismatch": func(in *CredentialInput) { in.Subject = "someone_else" },
+		"no machine":     func(in *CredentialInput) { in.MachineID = "" },
+		"no trace":       func(in *CredentialInput) { in.RequestID = "" },
+		"scope mismatch": func(in *CredentialInput) { in.Scopes = []string{"inbox:delete"} },
+		"ttl too long":   func(in *CredentialInput) { in.ExpiresAt = now.Add(10 * time.Minute) },
+	} {
+		invalid := read
+		mutate(&invalid)
+		if _, err := provider.SignCredential(invalid); err == nil {
+			t.Errorf("%s accepted", name)
+		}
+	}
+	noKey := remove
+	noKey.IdempotencyKey = ""
+	if _, err := provider.SignCredential(noKey); err == nil {
+		t.Error("inbox_delete without an idempotency key accepted")
+	}
+}

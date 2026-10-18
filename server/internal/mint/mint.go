@@ -538,6 +538,8 @@ var credentialPolicies = map[string]struct {
 	"exec_operation":             {audience: "paperboat-machine", scopes: []string{"exec:operate"}, maxTTL: 5 * time.Minute},
 	"ssh_operation":              {audience: "paperboat-machine", scopes: []string{"ssh:operate"}, maxTTL: 5 * time.Minute},
 	"preview_launch":             {audience: "paperboat-machine", scopes: []string{"preview:launch"}, maxTTL: 5 * time.Minute},
+	"inbox_read":                 {audience: "paperboat-machine", scopes: []string{"inbox:read"}, maxTTL: 2 * time.Minute},
+	"inbox_delete":               {audience: "paperboat-machine", scopes: []string{"inbox:delete"}, maxTTL: 2 * time.Minute},
 	"private_access":             {audience: "paperboat-edge", scopes: []string{"private:access"}, maxTTL: 2 * time.Minute},
 	"native_private":             {audience: "paperboat-machine", scopes: []string{"private:native"}, maxTTL: 5 * time.Minute},
 	"file_transfer":              {audience: "paperboat-machine", scopes: []string{"file:transfer"}, maxTTL: 5 * time.Minute},
@@ -766,6 +768,16 @@ func (p *Provider) SignCredential(input CredentialInput) (string, error) {
 		if input.AssignmentID != "" {
 			claims["assignment_id"] = input.AssignmentID
 		}
+	case "inbox_read", "inbox_delete":
+		if err := validateInboxInput(input.CredentialClass, input.AccountID, input.MachineID, input.UserID, input.ActorID, input.Subject, input.OperationID, input.ResourceKind, input.ResourceID, input.IdempotencyKey, input.RequestID, input.CorrelationID); err != nil {
+			return "", errors.New("inbox bindings are required")
+		}
+		claims["account_id"], claims["machine_id"], claims["user_id"], claims["actor_id"] = input.AccountID, input.MachineID, input.UserID, input.ActorID
+		claims["operation_id"], claims["resource_kind"], claims["resource_id"] = input.OperationID, input.ResourceKind, input.ResourceID
+		claims["request_id"], claims["correlation_id"] = input.RequestID, input.CorrelationID
+		if input.CredentialClass == "inbox_delete" {
+			claims["idempotency_key"] = input.IdempotencyKey
+		}
 	case "preview_launch":
 		if err := validatePreviewLaunchInput(input); err != nil {
 			return "", errors.New("preview launch bindings are required")
@@ -954,6 +966,10 @@ func (p *Provider) verifyCredential(token, expectedIssuer, expectedClass string,
 		if claims.MachineID == "" || claims.SourceMachineID == "" || claims.UserID == "" || claims.CLIClientSessionID == "" || !validOperationID(claims.OperationID) {
 			return CredentialClaims{}, CredentialVerificationError{Code: CredentialClaimsInvalid}
 		}
+	case "inbox_read", "inbox_delete":
+		if err := validateInboxInput(claims.CredentialClass, claims.AccountID, claims.MachineID, claims.UserID, claims.ActorID, claims.Subject, claims.OperationID, claims.ResourceKind, claims.ResourceID, claims.IdempotencyKey, claims.RequestID, claims.CorrelationID); err != nil {
+			return CredentialClaims{}, CredentialVerificationError{Code: CredentialClaimsInvalid}
+		}
 	case "preview_launch":
 		if err := validatePreviewLaunchClaims(claims); err != nil {
 			return CredentialClaims{}, CredentialVerificationError{Code: CredentialClaimsInvalid}
@@ -1032,6 +1048,27 @@ func validatePreviewLaunchInput(input CredentialInput) error {
 	}
 	if !validPreviewLaunchState(input.State, input.AllocationState, input.EdgeState, input.OriginState) {
 		return errors.New("lease state binding is invalid")
+	}
+	return nil
+}
+
+// InboxResourceKind is the resource_kind claim of the credentials that read or delete one Inbox file.
+const InboxResourceKind = "inbox_file"
+
+// validateInboxInput checks the bindings of an inbox_read or inbox_delete credential: one machine,
+// one actor on one account, one operation, one file; deletes also carry the caller's idempotency key.
+func validateInboxInput(class, accountID, machineID, userID, actorID, subject, operationID, resourceKind, resourceID, idempotencyKey, requestID, correlationID string) error {
+	if accountID == "" || machineID == "" || userID == "" || actorID == "" || !validOperationID(operationID) || resourceKind != InboxResourceKind || resourceID == "" {
+		return errors.New("identity bindings are incomplete")
+	}
+	if subject != userID || !validCredentialBindingID(accountID) || !validCredentialBindingID(actorID) || !validCredentialBindingID(machineID) || !validCredentialBindingID(resourceID) {
+		return errors.New("identity bindings are invalid")
+	}
+	if !validPreviewLaunchTrace(requestID, 3, 128) || !validPreviewLaunchTrace(correlationID, 3, 128) {
+		return errors.New("trace bindings are invalid")
+	}
+	if class == "inbox_delete" && !validPreviewLaunchTrace(idempotencyKey, 1, 256) {
+		return errors.New("idempotency binding is invalid")
 	}
 	return nil
 }

@@ -8,6 +8,9 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
+	"github.com/pinksaucepasta/paperboat/internal/inbox"
 )
 
 func writeInboxFile(t *testing.T, root, name string, size int, modified time.Time) {
@@ -41,7 +44,7 @@ func TestScanInboxListsDeliveredFilesNewestFirstWithoutHiddenOrNonFiles(t *testi
 	if got.Total != 2 || len(got.Items) != 2 || got.Items[0].Name != "new.txt" || got.Items[0].Size != 12 || got.Items[1].Name != "old.txt" || !got.Items[0].ReceivedAt.Equal(base.Add(time.Hour)) {
 		t.Fatalf("listing = %+v", got)
 	}
-	if got.Items[0].ID != inboxFileID("new.txt") || got.Items[0].ID == got.Items[1].ID || len(got.Items[0].ID) != 16 {
+	if got.Items[0].ID != inbox.FileID("new.txt") || got.Items[0].ID == got.Items[1].ID || len(got.Items[0].ID) != 16 {
 		t.Fatalf("ids = %q %q", got.Items[0].ID, got.Items[1].ID)
 	}
 }
@@ -87,5 +90,26 @@ func TestInboxObservationIsSentOnChangeAndRepeatedAfterTheResendInterval(t *test
 	}
 	if none, _ := (&runtimeObservationSender{}).inboxObservationFor(now); none != nil {
 		t.Fatal("no inbox path, no listing")
+	}
+}
+
+func TestStaticPolicyBindsInboxCredentialsToTheirOperationAndSingleUse(t *testing.T) {
+	resolver := staticPolicyResolver{issuer: "https://api.example.test", environmentID: "env_1", machineID: "machine_1"}
+	for capability, want := range map[string][2]string{"inbox.read.v1": {"inbox_read", "inbox:read"}, "inbox.delete.v1": {"inbox_delete", "inbox:delete"}} {
+		policy, err := resolver.Policy(protocol.Frame{Type: "request", Capability: capability, OperationID: "operation_inbox_1"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if policy.CredentialClass != want[0] || len(policy.Scopes) != 1 || policy.Scopes[0] != want[1] || policy.OperationID != "operation_inbox_1" || !policy.SingleUse || policy.MachineID != "machine_1" {
+			t.Errorf("%s policy = %+v", capability, policy)
+		}
+	}
+	controller := &machineCapabilityController{desired: machineCapabilitySelection{FileReceive: true}}
+	if !controller.Enabled("inbox.read.v1") || !controller.Enabled("inbox.delete.v1") {
+		t.Error("inbox capabilities follow file receive")
+	}
+	controller.desired.FileReceive = false
+	if controller.Enabled("inbox.read.v1") || controller.Enabled("inbox.delete.v1") {
+		t.Error("inbox capabilities must stop when file receive is off")
 	}
 }

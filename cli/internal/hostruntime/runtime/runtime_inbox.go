@@ -5,18 +5,14 @@ package runtime
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"os"
-	"sort"
-	"strings"
 	"time"
-	"unicode/utf8"
+
+	"github.com/pinksaucepasta/paperboat/internal/inbox"
 )
 
 const (
 	// inboxObservationLimit is how many files one observation lists, newest first.
 	inboxObservationLimit = 200
-	// inboxScanLimit bounds the directory entries read, so a huge folder cannot stall a heartbeat.
-	inboxScanLimit = 5000
 	// inboxResendAfter repeats an unchanged listing, so the control plane's copy never looks abandoned.
 	inboxResendAfter = 5 * time.Minute
 )
@@ -36,44 +32,18 @@ type inboxObservation struct {
 	Items      []inboxItem `json:"items"`
 }
 
-// inboxFileID is stable for a file name, so the console can refer to it later.
-func inboxFileID(name string) string {
-	sum := sha256.Sum256([]byte(name))
-	return hex.EncodeToString(sum[:8])
-}
-
-// scanInbox lists the regular files delivered to the Inbox folder. Hidden files (the receipt
-// journal and partial downloads), folders and links are not Inbox files.
+// scanInbox lists the delivered files of the Inbox folder as an observation (newest 200 of Total).
 func scanInbox(root string, now time.Time) (*inboxObservation, error) {
-	entries, err := os.ReadDir(root)
+	files, err := inbox.Files(root)
 	if err != nil {
 		return nil, err
 	}
-	observation := &inboxObservation{ObservedAt: now.UTC(), Items: []inboxItem{}}
-	for index, entry := range entries {
-		if index >= inboxScanLimit {
+	observation := &inboxObservation{ObservedAt: now.UTC(), Total: len(files), Items: make([]inboxItem, 0, min(len(files), inboxObservationLimit))}
+	for _, file := range files {
+		if len(observation.Items) == inboxObservationLimit {
 			break
 		}
-		name := entry.Name()
-		if strings.HasPrefix(name, ".") || len(name) > 255 || !utf8.ValidString(name) || !entry.Type().IsRegular() {
-			continue
-		}
-		info, err := entry.Info()
-		if err != nil || !info.Mode().IsRegular() {
-			continue
-		}
-		observation.Total++
-		observation.Items = append(observation.Items, inboxItem{ID: inboxFileID(name), Name: name, Size: info.Size(), ReceivedAt: info.ModTime().UTC()})
-	}
-	sort.Slice(observation.Items, func(i, j int) bool {
-		a, b := observation.Items[i], observation.Items[j]
-		if !a.ReceivedAt.Equal(b.ReceivedAt) {
-			return a.ReceivedAt.After(b.ReceivedAt)
-		}
-		return a.Name < b.Name
-	})
-	if len(observation.Items) > inboxObservationLimit {
-		observation.Items = observation.Items[:inboxObservationLimit]
+		observation.Items = append(observation.Items, inboxItem{ID: file.ID, Name: file.Name, Size: file.Size, ReceivedAt: file.ReceivedAt})
 	}
 	return observation, nil
 }
