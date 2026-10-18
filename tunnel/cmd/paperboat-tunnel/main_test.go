@@ -178,3 +178,55 @@ func requestMetricValue(samples []edgetelemetry.MetricSample, name string, label
 	}
 	return 0
 }
+
+type upgradeOrigin struct {
+	io.Reader
+	written strings.Builder
+}
+
+func (o *upgradeOrigin) Write(payload []byte) (int, error) { return o.written.Write(payload) }
+func (o *upgradeOrigin) Close() error                      { return nil }
+
+// A WebSocket upgrade through the live composition must carry client bytes to
+// the origin: the carrier telemetry stream used to refuse every write on a 101.
+func TestLiveCarrierCompositionCarriesClientBytesAfterUpgrade(t *testing.T) {
+	metrics := edgetelemetry.NewMetrics()
+	events, err := edgetelemetry.NewEventLogWithQueue(64, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = events.Close() })
+	carrierTelemetry, err := datacarrier.NewCarrierTelemetry(datacarrier.CarrierTelemetryConfig{
+		Metrics: metrics, Events: events,
+		Info: datacarrier.StreamInfo{IDs: edgetelemetry.SafeIDs{EdgeNodeID: "edge_1"}, CorrelationID: "corr_edge_carrier"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	requestTelemetry, err := edgehttp.NewRequestTelemetry(edgehttp.RequestTelemetryConfig{Metrics: metrics, Events: events, Info: edgehttp.RequestInfo{IDs: edgetelemetry.SafeIDs{EdgeNodeID: "edge_1"}, RouteKind: "tunnel_https_wss"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	origin := &upgradeOrigin{Reader: strings.NewReader("frames")}
+	transport := requestTelemetry.RoundTripper(&carrierTelemetryRoundTripper{
+		Next: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusSwitchingProtocols, ProtoMajor: 1, Header: make(http.Header), Body: origin, Request: request}, nil
+		}),
+		Telemetry: carrierTelemetry, RouteKind: "tunnel_https_wss", NodeID: "edge_1",
+	})
+	request := httptest.NewRequest(http.MethodGet, "https://app.example.test/socket", nil)
+	request.Header.Set("Connection", "Upgrade")
+	request.Header.Set("Upgrade", "websocket")
+	response, err := transport.RoundTrip(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer, ok := response.Body.(io.Writer)
+	if !ok {
+		t.Fatal("101 body is not writable")
+	}
+	if _, err := writer.Write([]byte("client-frame")); err != nil || origin.written.String() != "client-frame" {
+		t.Fatalf("client bytes did not reach the origin: wrote %q err=%v", origin.written.String(), err)
+	}
+	_ = response.Body.Close()
+}

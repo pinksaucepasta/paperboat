@@ -786,7 +786,16 @@ func (s *carrierResponseStream) Read(payload []byte) (int, error) {
 	return s.body.Read(payload)
 }
 
-func (s *carrierResponseStream) Write([]byte) (int, error) { return 0, io.ErrClosedPipe }
+// Write carries the client's bytes to an upgraded (101) response; an ordinary
+// response body is read-only.
+func (s *carrierResponseStream) Write(payload []byte) (int, error) {
+	if s != nil {
+		if writer, ok := s.body.(io.Writer); ok {
+			return writer.Write(payload)
+		}
+	}
+	return 0, io.ErrClosedPipe
+}
 
 func (s *carrierResponseStream) Close() error {
 	if s == nil || s.body == nil {
