@@ -9186,6 +9186,9 @@
           },
           "display_name": {
             "type": "string"
+          },
+          "suspended": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -9196,7 +9199,8 @@
           "deleted",
           "members",
           "grants",
-          "display_name"
+          "display_name",
+          "suspended"
         ]
       },
       "TeamActivityItem": {

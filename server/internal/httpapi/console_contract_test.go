@@ -56,3 +56,32 @@ func TestOpenAPIConsoleIdentityAndMachineResponses(t *testing.T) {
 	}
 
 }
+
+func TestOpenAPITeamSchemaPublishesSuspension(t *testing.T) {
+	raw, err := os.ReadFile("../../docs/openapi.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Components struct {
+			Schemas map[string]struct {
+				Properties map[string]map[string]any
+				Required   []string
+			}
+		}
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	team := doc.Components.Schemas["TeamTeam"]
+	if team.Properties["suspended"]["type"] != "boolean" {
+		t.Fatal("TeamTeam must publish the boolean suspended field the server sends")
+	}
+	required := false
+	for _, name := range team.Required {
+		required = required || name == "suspended"
+	}
+	if !required {
+		t.Fatal("TeamTeam suspended must be required: the server always sends it")
+	}
+}
