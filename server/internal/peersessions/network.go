@@ -285,7 +285,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 		 OR (coalesce(a.terminal_role,'owner')='owner' AND a.team_id IS NOT NULL AND NOT ('private_access'=ANY(a.capabilities)) AND NOT EXISTS(
 		  SELECT 1 FROM unnest(a.capabilities) capability
 		  WHERE NOT paperboat.team_machine_capability_allowed(a.user_id,a.team_id,a.user_machine_id,capability))))
-		ORDER BY a.id LIMIT 129`, in.UserID, in.EndpointID, now, live["machine_access"])
+		ORDER BY (a.expires_at>$3) DESC, a.expires_at DESC, a.id LIMIT 129`, in.UserID, in.EndpointID, now, live["machine_access"])
 	if err != nil {
 		return NetworkConfigResult{}, err
 	}
@@ -340,9 +340,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 	if rowErr != nil {
 		return NetworkConfigResult{}, rowErr
 	}
-	if len(grants) > 128 {
-		return NetworkConfigResult{}, ErrResourceLimit
-	}
+	grants = boundGrants(grants)
 	inspectorRows, err := tx.QueryContext(ctx, `SELECT credential_id,native_cli_session_id,native_machine_id,account_id,owner_account_id,expires_at FROM paperboat.inspector_native_admissions WHERE ((native_cli_session_id=$1 AND account_id=$2) OR (native_machine_id=$1 AND owner_account_id=$2)) AND (expires_at>$3 OR credential_id=ANY($4::text[])) ORDER BY credential_id LIMIT 129`, in.EndpointID, in.UserID, now, live["inspector"])
 	if err != nil {
 		return NetworkConfigResult{}, err
@@ -362,9 +360,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 	if err != nil {
 		return NetworkConfigResult{}, err
 	}
-	if len(grants) > 128 {
-		return NetworkConfigResult{}, ErrResourceLimit
-	}
+	grants = boundGrants(grants)
 
 	compareRows, err := tx.QueryContext(ctx, `SELECT DISTINCT ON (a.assignment_id,a.native_cli_session_id,a.machine_id) a.assignment_id,a.native_cli_session_id,a.machine_id,a.account_id,a.account_id,a.expires_at
  FROM config_compare_admissions a
@@ -395,9 +391,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 	if err != nil {
 		return NetworkConfigResult{}, err
 	}
-	if len(grants) > 128 {
-		return NetworkConfigResult{}, ErrResourceLimit
-	}
+	grants = boundGrants(grants)
 	byPeer := map[string]*networkPeer{}
 	admittedPeers := map[string]bool{}
 	scopes := 0
@@ -429,8 +423,8 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 			if e != nil {
 				return NetworkConfigResult{}, e
 			}
-			if len(byPeer) >= 64 {
-				return NetworkConfigResult{}, ErrResourceLimit
+			if len(byPeer) >= maximumNetworkAccessPeers {
+				continue
 			}
 			if peerCertExpiry.After(now) && peerCertExpiry.Before(expiry) {
 				expiry = peerCertExpiry
@@ -439,8 +433,8 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 			byPeer[peerID] = p
 		}
 		for _, capability := range g.capabilities {
-			if scopes >= 128 {
-				return NetworkConfigResult{}, ErrResourceLimit
+			if scopes >= maximumNetworkAccessScopes {
+				break
 			}
 			p.Scopes = append(p.Scopes, networkScope{g.kind, g.id, 1, capability, direction, 443, g.expiry.Unix()})
 			scopes++
@@ -677,11 +671,14 @@ func relayControlPeers(self networkBinding, peers []networkPeer) ([]string, erro
 			return nil, ErrUnavailable
 		}
 		result = append(result, peer.Identity.WireGuardPublicKey)
-		if len(result) > 16 {
-			return nil, ErrResourceLimit
-		}
 	}
 	sort.Strings(result)
+	if len(result) > maximumRelayControlPeers {
+		// A relay grant names a bounded set of the account's peers. Beyond it the extra peers
+		// simply have no relay fallback (they still connect directly); the refresh must not fail.
+		slog.Warn("relay grant names a bounded subset of the account's peers", "kept", maximumRelayControlPeers, "peers", len(result))
+		result = result[:maximumRelayControlPeers]
+	}
 	return result, nil
 }
 
@@ -831,6 +828,31 @@ AND c.issued_at<=$3 AND (c.expires_at>$3 OR $4) WHERE n.user_id=$1 AND n.endpoin
 	}
 	return b, expiry, nil
 }
+
+// maximumNetworkGrants bounds the access sessions one configuration carries. Past it the
+// oldest are dropped, not the whole configuration: clients keep naming sessions that ended
+// long ago as admitted, and one account's accumulated sessions must not stop its peers from
+// refreshing their network. Live (unexpired) sessions are ordered first by the query.
+const maximumRelayControlPeers = 16
+
+const maximumNetworkGrants = 128
+
+// Application access scopes (newest first) leave room for the durable machine mesh, so
+// accumulated sessions can never push it out of the configuration.
+const (
+	maximumNetworkScopes       = 128
+	maximumNetworkAccessScopes = maximumNetworkScopes - 32
+	maximumNetworkAccessPeers  = 48
+)
+
+func boundGrants[T any](grants []T) []T {
+	if len(grants) <= maximumNetworkGrants {
+		return grants
+	}
+	slog.Warn("peer network configuration dropped the oldest access sessions", "kept", maximumNetworkGrants, "candidates", len(grants))
+	return grants[:maximumNetworkGrants]
+}
+
 func bindingMap(b networkBinding) map[string]any {
 	raw, _ := json.Marshal(b)
 	var out map[string]any
