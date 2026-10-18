@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/pinksaucepasta/paperboat-server/internal/admission"
+	"log/slog"
 	"net/netip"
 	"slices"
 	"sort"
@@ -323,6 +324,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 				continue
 			default:
 				rows.Close()
+				slog.Warn("peer network authority unavailable", "site", "network.go:326")
 				return NetworkConfigResult{}, ErrUnavailable
 			}
 			if !seenCapabilities[projected] {
@@ -490,6 +492,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 		return NetworkConfigResult{}, err
 	}
 	if len(token) > networkConfigLimit {
+		slog.Warn("peer network authority unavailable", "site", "network.go:493")
 		return NetworkConfigResult{}, ErrUnavailable
 	}
 	candidates, err := s.regionalCandidates(ctx, tx, in.UserID, in.EndpointID, generation, now, expiry)
@@ -497,6 +500,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 		return NetworkConfigResult{}, err
 	}
 	if len(candidates) > networkConfigLimit {
+		slog.Warn("peer network authority unavailable", "site", "network.go:500")
 		return NetworkConfigResult{}, ErrUnavailable
 	}
 	quotaDenied := s.relayQuotaWithheld(ctx, self.AccountID, now)
@@ -617,6 +621,7 @@ func (s *NetworkService) relayGrants(ctx context.Context, tx *sql.Tx, self netwo
 			continue
 		}
 		if peerRelayEnabled && (len(peerRelayWG) != 32 || len(peerRelayDisco) != 32 || !peerRelayAddress.Valid) {
+			slog.Warn("peer network authority unavailable", "site", "network.go:620")
 			return nil, false, ErrUnavailable
 		}
 		expires := now.Add(time.Minute)
@@ -650,6 +655,7 @@ func (s *NetworkService) relayGrants(ctx context.Context, tx *sql.Tx, self netwo
 			return nil, false, err
 		}
 		if len(grant) > networkConfigLimit {
+			slog.Warn("peer network authority unavailable", "site", "network.go:653")
 			return nil, false, ErrUnavailable
 		}
 		grants = append(grants, grant)
@@ -667,6 +673,7 @@ func relayControlPeers(self networkBinding, peers []networkPeer) ([]string, erro
 			continue
 		}
 		if peer.Identity.WireGuardPublicKey == "" {
+			slog.Warn("peer network authority unavailable", "site", "network.go:670")
 			return nil, ErrUnavailable
 		}
 		result = append(result, peer.Identity.WireGuardPublicKey)
@@ -740,6 +747,7 @@ func (s *NetworkService) regionalCandidates(ctx context.Context, tx *sql.Tx, acc
 		m := map[string]any{"node_id": n.NodeID, "node_generation": n.NodeGeneration, "process_epoch": n.ProcessEpoch, "region": n.Region, "failure_domain": n.FailureDomain, "roles": n.Roles, "transports": n.Transports, "endpoint_host": n.EndpointHost, "endpoint_tcp_port": n.EndpointTCPPort, "endpoint_quic_port": n.EndpointQUICPort, "state": n.State, "observed_at": n.ObservedAt, "expires_at": n.ExpiresAt, "capacity_limit": n.CapacityLimit, "capacity_used": n.CapacityUsed, "capacity_observed_at": n.CapacityObservedAt}
 		if len(tlsPin) > 0 {
 			if len(tlsPin) != sha256.Size {
+				slog.Warn("peer network authority unavailable", "site", "network.go:743")
 				return "", ErrUnavailable
 			}
 			m["tls_spki_sha256"] = base64.RawURLEncoding.EncodeToString(tlsPin)
@@ -783,6 +791,7 @@ AND c.issued_at<=$3 AND (c.expires_at>$3 OR $4) WHERE n.user_id=$1 AND n.endpoin
 		return b, time.Time{}, err
 	}
 	if !admitted && expiry.Unix() <= now.Unix() {
+		slog.Warn("peer network authority unavailable", "site", "network.go:786")
 		return b, time.Time{}, ErrUnavailable
 	}
 	if b.Role == "cli" {
@@ -792,12 +801,14 @@ AND c.issued_at<=$3 AND (c.expires_at>$3 OR $4) WHERE n.user_id=$1 AND n.endpoin
 			return b, time.Time{}, err
 		}
 		if !active {
+			slog.Warn("peer network authority unavailable", "site", "network.go:795")
 			return b, time.Time{}, ErrUnavailable
 		}
 	} else {
 		var gen int64
 		err = tx.QueryRowContext(ctx, `SELECT m.installation_generation FROM paperboat.user_machines m JOIN paperboat.control_environments e ON e.id=m.environment_id AND e.owner_user_id=m.user_id AND e.desired_state='active' AND e.revoked_at IS NULL WHERE m.id=$1 AND m.user_id=$2 AND m.state IN ('online','offline') AND m.seat_state='occupied' AND m.revoked_at IS NULL AND m.deleted_at IS NULL`, endpointID, userID).Scan(&gen)
 		if err == sql.ErrNoRows || err == nil && gen != b.MachineGeneration {
+			slog.Warn("peer network authority unavailable", "site", "network.go:801")
 			return b, time.Time{}, ErrUnavailable
 		}
 		if err != nil {
@@ -810,10 +821,12 @@ AND c.issued_at<=$3 AND (c.expires_at>$3 OR $4) WHERE n.user_id=$1 AND n.endpoin
 	}
 	b.QUICCertificateFingerprint = hex.EncodeToString(fingerprint)
 	if len(quicPublic) != 32 {
+		slog.Warn("peer network authority unavailable", "site", "network.go:813")
 		return b, time.Time{}, ErrUnavailable
 	}
 	b.QUICPublicKey = base64.RawURLEncoding.EncodeToString(quicPublic)
 	if _, err = netip.ParseAddr(b.VirtualAddress); err != nil {
+		slog.Warn("peer network authority unavailable", "site", "network.go:817")
 		return b, time.Time{}, ErrUnavailable
 	}
 	return b, expiry, nil
