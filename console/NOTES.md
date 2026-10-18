@@ -315,16 +315,14 @@ One server resource (`paperboat.preview-tunnel/v1`) with two lifecycles. The con
 inspects, changes and stops them (`lib/tunnels.ts`, `components/tunnels/`). Gaps:
 
 - **Previews are created from the console**: `POST /v1/previews` with the browser session and a
-  `local_lease` owner (a random `session_<uuid>`), which the server dispatches to the machine's
-  daemon (`preview_launch`); the dialog polls `GET /v1/previews/{id}` until `ready`. Run against a
-  live machine 2026-10-18: the server answers 503 `control_unavailable` (outcome uncertain), so
-  previews cannot be created from the console yet (reported to Lane B).
-- **Tunnel create from the console is UI-only for now.** New tunnel posts `POST /v1/tunnels` with
-  the browser session and `owner_machine_id`, then polls the tunnel until `summary_code` leaves
-  `pending`. The server rejects browser sessions today ("Create tunnels on the enrolled target")
-  and has no `owner_machine_id`. Needed: accept it for machines the actor may manage (owner, not
-  shared-with-you; the same authority that already opens terminals there), dispatch to the
-  machine's daemon like `previewdispatch`, and let the daemon enroll its connector locally.
+  `foreground` owner (a fresh `console_<random>` session ID), which the server dispatches to the machine's
+  daemon (`preview_launch`); the dialog polls `GET /v1/previews/{id}` until `ready`. `local_lease` sessions are only for
+  the CLI's own hostd lease; the console must send `foreground`.
+- **Tunnels are created with `pb tunnel create` on the machine.** The control plane requires the
+  machine's signed identity and local connector, so New tunnel builds the exact command (name, port,
+  `--private`, `--workspace` for a team) with a copy button instead of a form; the tunnel then appears
+  in the list. Previews are created from the console (`owner_session_kind: "foreground"`, a fresh
+  `console_<random>` session ID).
 - **Tunnel address is not editable.** The server patches only `name`, `access_mode` and `expires_at`
   (`TunnelPatchRequest`); the address is generated, so the console renames the tunnel only.
 - **Share a file (drop.new-style) is UI-only for now.** Previews has "Share a file" and a page-wide

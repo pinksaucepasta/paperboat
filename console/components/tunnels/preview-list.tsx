@@ -23,10 +23,11 @@ import { copyWithToast } from "@/lib/clipboard"
 
 type View = "live" | "ended"
 
-/** Stopped, expired, or past its deadline (a disconnected machine leaves its preview behind unmarked). */
+/** Stopped, expired, owner lost (`owner_disconnected` is terminal), or past its deadline. */
 const ended = (preview: Preview, now: number) =>
   preview.state === "expired" ||
   preview.state === "stopped" ||
+  preview.state === "owner_disconnected" ||
   Date.parse(preview.user_deadline ?? preview.lease_deadline) < now
 
 /**

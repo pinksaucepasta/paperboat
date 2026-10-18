@@ -135,10 +135,9 @@ export const previewQuery = (id: string) =>
     queryFn: () => api<Preview>(previewPath(id)),
   })
 
-/** A UUID-shaped owner session ID, as the CLI makes them (`session_<uuid>`). */
+/** A fresh owner session per create (3 to 128 characters, no whitespace); the machine binds it on first dispatch. */
 function ownerSessionId() {
-  const hex = idempotencyKey()
-  return `session_${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`
+  return `console_${idempotencyKey()}`
 }
 
 /**
@@ -163,7 +162,7 @@ export async function createPreview(input: {
         workspace: input.workspace,
         owner_machine_id: input.machineId,
         owner_session_id: ownerSessionId(),
-        owner_session_kind: "local_lease",
+        owner_session_kind: "foreground",
         target: { scheme: "http", address: `localhost:${input.port}` },
         access_mode: input.access,
         expires_at: new Date(Date.now() + input.hours * 3_600_000).toISOString(),
@@ -209,34 +208,6 @@ export const resumeTunnel = (tunnel: Tunnel) => change(`${tunnelPath(tunnel.id)}
 export const deleteTunnel = (tunnel: Tunnel) => change(tunnelPath(tunnel.id), "DELETE", { etag: tunnel.etag })
 export const patchTunnel = (tunnel: Tunnel, patch: { name?: string; access_mode?: Tunnel["access_mode"] }) =>
   change<Tunnel>(tunnelPath(tunnel.id), "PATCH", { etag: tunnel.etag, body: patch })
-
-/**
- * Creates a tunnel on a machine from the console, like a preview: the server records it and has
- * the machine's Paperboat service attach its connector (`owner_machine_id`; NOTES.md has its
- * status). Returns the tunnel's ID, from the tunnel or from the operation still creating it.
- */
-export async function createTunnel(input: {
-  machineId: string
-  workspace: string
-  name: string
-  port: number
-  access: Tunnel["access_mode"]
-}) {
-  const result = await change<{ kind: string; id: string; resource_id?: string }>(
-    `tunnels?workspace=${encodeURIComponent(input.workspace)}`,
-    "POST",
-    {
-      body: {
-        workspace: input.workspace,
-        owner_machine_id: input.machineId,
-        name: input.name,
-        access_mode: input.access,
-        origin: { scheme: "http", address: `localhost:${input.port}` },
-      },
-    },
-  )
-  return result.kind === "operation" ? result.resource_id! : result.id
-}
 
 export type RouteInput = {
   name: string
