@@ -1991,3 +1991,15 @@ Focused platform-count unit PASS (independent cells, command columns, in-progres
 2026-10-18 | Lane A fixed ENV Linux acceptance | dev26d0167 own-build install/doctor/enrollment PASS HP+Ubuntu24; C148/C149/C151/C158 L ticked: hidden+stdin/list/delete, exec+terminal delivery, personal rotation, device precedence/fallback/privacy PASS. Team read prerequisite/grant/sync PASS; Team native fixture requires explicit machine grants, authorized delivery underway. Apple signed-out/support_bf1b4a17 noted for macOS only, no device action.
 
 2026-10-18 | Lane A fixed ENV device acceptance | F10-01/F10-04 L ticked on dev26d0167/server18.14: personal/Team/device hidden+stdin/list/delete, new exec+terminal, override fallback, rotations, grant/sync/revoke/reset and privacy PASS both Linux; C145/154–157/162–166 ticked. F10-03 remains403→pending-publication misreport; all values/shares removed, original member restoration invite409 blocked8fe1e733. Both now own-installed dev09e99ee/doctor0; next USER target Ubuntu tunnel fix.
+
+2026-10-18 | Lane B final handoff; user budget stop.
+Live server is 2026.10.18.14, source 3df365b449230761692be735dcbc1f3ea2346930, schema097; keep it stable and coordinate any rollout with Lane A.
+Published but not deployed is contract-only 2d7460e, the missing top-up OpenAPI schema and reference test; no new server image is staged, and old private18.9 images are obsolete.
+The stale-preview active-list fix originally ccca5dc is already deployed as rebased6e66b97: live source requires terminal_state=active; TTL294e81e is also live.
+Tunnel carrier_tls remains open: Ubuntu4d280fa5/sessionb91403df bootstrap503 then200, both edge assignments never ready; edge CONNECT/TLS status is unavailable without edge SSH access, and retained edge8 source9e1a290 already uses HTTPService h2/h3, so raw-ALPN wiring is not the cause shown by that source.
+Resend mail096 is deployed but waits for the user API key, from-address and verified sending domain/operator configuration; no live mail was sent.
+ENV26d0167 client after_sequence repair and Linux positive delivery/rotation paths pass; F10-03 remains a client misreport of denied403 as pending publication, retaining a local operation, with supported remove/unlock recovery.
+Controlled ENV values and machine shares were removed; original Ubuntu Team membership restoration remains blocked by normal invite409 support8fe1e733, exact guard not retained; no backend bypass occurred.
+Secrets/config names are /opt/paperboat/secrets, server.env, .env, Caddyfile, server-rollout.json, local REMOTE_TESTING.md and ~/paperboat-archive/coolify-backup; protected evidence is /opt/paperboat/deployment-probes, and owner-only recovery files remain on Ubuntu.
+Deploy only an independently qualified exact image using deploy/README.md, Managed server upgrades: python3 deploy/rollout-server.py --directory /opt/paperboat --image <qualified-image> on the VPS; no deployment is authorized by this handoff.
+No B code edits, workers, tests, builds or rollouts remain running or queued; current investigation helpers are read-only temporary scripts, all finished work is pushed, and Lane B stops here.
