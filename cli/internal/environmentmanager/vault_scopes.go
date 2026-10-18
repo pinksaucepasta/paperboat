@@ -50,7 +50,7 @@ func (v PasswordVault) withVaultKeys(ctx context.Context, fn func(*config.Passwo
 	if err != nil {
 		return err
 	}
-	defer func() { resultErr = errors.Join(resultErr, unlock()) }()
+	defer func() { resultErr = joinUnlockError(resultErr, unlock) }()
 	c, err := v.dataClient()
 	if err != nil {
 		return err

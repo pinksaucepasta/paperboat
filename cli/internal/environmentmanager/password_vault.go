@@ -89,7 +89,7 @@ func (v PasswordVault) InitializeWithRecovery(ctx context.Context, password, rec
 	if err != nil {
 		return err
 	}
-	defer func() { resultErr = errors.Join(resultErr, unlock()) }()
+	defer func() { resultErr = joinUnlockError(resultErr, unlock) }()
 	local, err := v.Store.LoadPasswordVault(v.Issuer, v.AccountID)
 	defer local.Clear()
 	if err == nil {
@@ -135,7 +135,7 @@ func (v PasswordVault) Unlock(ctx context.Context, password []byte) (resultErr e
 	if err != nil {
 		return err
 	}
-	defer func() { resultErr = errors.Join(resultErr, unlock()) }()
+	defer func() { resultErr = joinUnlockError(resultErr, unlock) }()
 	local, err := v.Store.LoadPasswordVault(v.Issuer, v.AccountID)
 	defer local.Clear()
 	if err != nil && !vaultCredentialAbsentOnly(err) {
@@ -205,7 +205,7 @@ func (v PasswordVault) ChangePassword(ctx context.Context, password []byte) (res
 	if err != nil {
 		return err
 	}
-	defer func() { resultErr = errors.Join(resultErr, unlock()) }()
+	defer func() { resultErr = joinUnlockError(resultErr, unlock) }()
 	local, err := v.Store.LoadPasswordVault(v.Issuer, v.AccountID)
 	if err != nil {
 		return err
@@ -253,7 +253,7 @@ func (v PasswordVault) Resume(ctx context.Context) (resultErr error) {
 	if err != nil {
 		return err
 	}
-	defer func() { resultErr = errors.Join(resultErr, unlock()) }()
+	defer func() { resultErr = joinUnlockError(resultErr, unlock) }()
 	local, err := v.Store.LoadPasswordVault(v.Issuer, v.AccountID)
 	if err != nil {
 		return err
@@ -301,7 +301,7 @@ func (v PasswordVault) ReplaceRecovery(ctx context.Context, code []byte) (result
 	if err != nil {
 		return err
 	}
-	defer func() { resultErr = errors.Join(resultErr, unlock()) }()
+	defer func() { resultErr = joinUnlockError(resultErr, unlock) }()
 	local, err := v.Store.LoadPasswordVault(v.Issuer, v.AccountID)
 	if err != nil {
 		return err
@@ -341,7 +341,7 @@ func (v PasswordVault) Recover(ctx context.Context, code, password, replacementC
 	if err != nil {
 		return err
 	}
-	defer func() { resultErr = errors.Join(resultErr, unlock()) }()
+	defer func() { resultErr = joinUnlockError(resultErr, unlock) }()
 	local, err := v.Store.LoadPasswordVault(v.Issuer, v.AccountID)
 	defer local.Clear()
 	if err != nil && !vaultCredentialAbsentOnly(err) {
@@ -389,7 +389,7 @@ func (v PasswordVault) UpdateKeys(ctx context.Context, mutate func(*environmente
 	if err != nil {
 		return err
 	}
-	defer func() { resultErr = errors.Join(resultErr, unlock()) }()
+	defer func() { resultErr = joinUnlockError(resultErr, unlock) }()
 	local, err := v.Store.LoadPasswordVault(v.Issuer, v.AccountID)
 	if err != nil {
 		return err

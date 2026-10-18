@@ -674,3 +674,29 @@ func TestSyncTeamGrantsRejectsRevokedOrStaleMembership(t *testing.T) {
 
 var _ PasswordVaultClient = (*vaultScopesControl)(nil)
 var _ VaultDataClient = (*vaultScopesControl)(nil)
+
+type deniedScopeControl struct{ *vaultScopesControl }
+
+func (deniedScopeControl) PutVaultScope(context.Context, string, string, string, api.VaultScopePut) (api.VaultScopeState, error) {
+	return api.VaultScopeState{}, &api.APIError{Status: 403, Code: "permission_denied"}
+}
+
+// Device finding: errors.Join(err, nil) wrapped every vault operation error in
+// a join, which hid the typed API error from command recovery text.
+func TestVaultOperationErrorIsNotWrappedInAJoinWhenUnlockSucceeds(t *testing.T) {
+	v, control, _ := newVaultScopesFixture(t)
+	v.Client = deniedScopeControl{control}
+	err := v.MutateScope(context.Background(), "personal", v.AccountID, "", func(values map[string][]byte) error {
+		values["DENIED"] = []byte("value")
+		return nil
+	})
+	var rejected *api.APIError
+	if !errors.As(err, &rejected) || rejected.Code != "permission_denied" {
+		t.Fatalf("typed rejection lost: %v", err)
+	}
+	for current := err; current != nil; current = errors.Unwrap(current) {
+		if _, joined := current.(interface{ Unwrap() []error }); joined {
+			t.Fatalf("operation error wrapped in a join: %T", current)
+		}
+	}
+}

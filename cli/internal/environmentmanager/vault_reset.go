@@ -29,7 +29,7 @@ func (v PasswordVault) ResetPersonal(ctx context.Context, password, recoveryCode
 	if err != nil {
 		return err
 	}
-	defer func() { resultErr = errors.Join(resultErr, unlock()) }()
+	defer func() { resultErr = joinUnlockError(resultErr, unlock) }()
 	c, ok := v.Client.(VaultResetClient)
 	if !ok {
 		return environmente2ee.ErrInvalid
@@ -290,7 +290,7 @@ func (v PasswordVault) AbortPersonalRotation(ctx context.Context) (resultErr err
 	if err != nil {
 		return err
 	}
-	defer func() { resultErr = errors.Join(resultErr, unlock()) }()
+	defer func() { resultErr = joinUnlockError(resultErr, unlock) }()
 	local, err := v.Store.LoadPasswordVault(v.Issuer, v.AccountID)
 	if err != nil {
 		return err

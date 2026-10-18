@@ -82,3 +82,12 @@ func vaultAPIResourceAbsentOnly(err error) bool {
 		return ok && status.DiagnosticStatus() == http.StatusNotFound
 	})
 }
+
+// joinUnlockError keeps the operation's own error unwrapped: errors.Join(err, nil)
+// still returns a join, which hides typed API errors from command recovery text.
+func joinUnlockError(err error, unlock func() error) error {
+	if unlockErr := unlock(); unlockErr != nil {
+		return errors.Join(err, unlockErr)
+	}
+	return err
+}

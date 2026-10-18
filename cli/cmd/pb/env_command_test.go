@@ -7,11 +7,14 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
@@ -637,5 +640,26 @@ func TestEnvironmentVariableSharedReadOnlyActionsRemainUseful(t *testing.T) {
 	writable := environmentVariableScopeActions(metadata, true)
 	if writable[0].ID != "set" || writable[1].ID != "unset:NAME" {
 		t.Fatalf("writer actions: %+v", writable)
+	}
+}
+
+// Device finding: the real client chain (APIError -> observed HTTP failure ->
+// response fault) must still reach the code-based recovery text.
+func TestEnvironmentPermissionDeniedFromRealClientKeepsRecoveryText(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":{"code":"permission_denied","message":"secret detail","request_id":"req_1"}}`))
+	}))
+	defer server.Close()
+	client := api.New(server.URL, config.Credential{AccessToken: "token", TokenType: "Bearer", ExpiresAt: time.Now().Add(time.Hour)}, server.Client())
+	_, err := client.GetVaultGrants(context.Background())
+	var rejected *api.APIError
+	if !errors.As(err, &rejected) || rejected.Code != "permission_denied" {
+		t.Fatalf("real client error: %v", err)
+	}
+	message := safeEnvironmentVariableCommandError(err).Error()
+	if !strings.Contains(message, "do not have write access") || strings.Contains(message, "secret detail") {
+		t.Fatalf("message=%q", message)
 	}
 }
