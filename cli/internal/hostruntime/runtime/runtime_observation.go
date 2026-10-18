@@ -151,10 +151,6 @@ type runtimeObservationSender struct {
 	}
 	layers                 interface{ FlushLayerObservations(context.Context) error }
 	receiptPath            string
-	inboxPath              string
-	inboxMu                sync.Mutex
-	inboxSent              string
-	inboxSentAt            time.Time
 	installationGeneration uint64
 	workerGeneration       uint64
 	osBootID               string
@@ -190,7 +186,6 @@ func (s *runtimeObservationSender) send(ctx context.Context, mayConfirm bool) er
 			updaterState = &status
 		}
 	}
-	inboxState, inboxPrint := s.inboxObservationFor(now)
 	body, err := json.Marshal(struct {
 		MachineServices     *clientapi.MachineServicesSnapshot `json:"machine_services,omitempty"`
 		LazyRuntime         *lazyRuntimeObservation            `json:"lazy_runtime,omitempty"`
@@ -202,7 +197,6 @@ func (s *runtimeObservationSender) send(ctx context.Context, mayConfirm bool) er
 		RuntimeDiagnostics  *runtimeDiagnosticsObservation     `json:"runtime_diagnostics,omitempty"`
 		Update              *runtimeUpdateObservation          `json:"update,omitempty"`
 		MachineCapabilities *machineCapabilitiesObservation    `json:"machine_capabilities,omitempty"`
-		Inbox               *inboxObservation                  `json:"inbox,omitempty"`
 	}{
 		MachineServices:     s.machineServicesObservation(ctx),
 		LazyRuntime:         s.lazyRuntimeObservation(),
@@ -214,7 +208,6 @@ func (s *runtimeObservationSender) send(ctx context.Context, mayConfirm bool) er
 		RuntimeDiagnostics:  s.runtimeDiagnostics(now, s.layers != nil),
 		Update:              s.updateObservationFrom(now, availabilityState, updaterState, updaterErr),
 		MachineCapabilities: observedCapabilities,
-		Inbox:               inboxState,
 	})
 	if err != nil {
 		return err
@@ -260,7 +253,6 @@ func (s *runtimeObservationSender) send(ctx context.Context, mayConfirm bool) er
 		return runtimeObservationFailure{stage: "control_request", cause: errorreport.HTTPStatusFailure(response)}
 	}
 	s.applyMachineServicesPolicy(responseBody)
-	s.inboxObservationSent(inboxPrint, now)
 	if s.transferPolicy != nil {
 		if err := applyRuntimeTransferPolicy(responseBody, s.transferPolicy); err != nil {
 			return err
