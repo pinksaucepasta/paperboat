@@ -97,6 +97,25 @@ class Terminal:
         del self.pending[:end]
         return observed
 
+    def settle(self, quiet=0.5):
+        # Ctrl-D sent before the shell is back at its prompt is lost by the tty line
+        # discipline, so wait until the shell has stopped printing.
+        quiet_since = time.monotonic()
+        while time.monotonic() - quiet_since < quiet:
+            if select.select([self.fd], [], [], 0.1)[0]:
+                try:
+                    chunk = os.read(self.fd, 65536)
+                except OSError as error:
+                    if error.errno != errno.EIO:
+                        raise
+                    chunk = b''
+                if not chunk:
+                    return
+                self.answer_queries(chunk)
+                self.pending.extend(chunk)
+                self.output.extend(chunk)
+                quiet_since = time.monotonic()
+
     def marker(self, label, prefix=''):
         suffix = uuid.uuid4().hex
         token = 'PB_' + label + '_' + suffix
@@ -236,6 +255,7 @@ def qualify(pb, target, check, monitor, entry='connect', cwd=None, status_bar='o
         if check in ('main', 'apps', 'monitor', 'all'):
             applications(terminal, monitor if check in ('monitor', 'all') else None)
         terminal.expect(terminal.marker('DONE'))
+        terminal.settle()
         terminal.send(b'\x04')
         if terminal.wait_exit() != 0:
             raise RuntimeError('Ctrl-D did not end the terminal successfully')

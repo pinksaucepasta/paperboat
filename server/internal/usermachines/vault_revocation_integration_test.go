@@ -89,26 +89,28 @@ func TestExplicitMachineRevocationFencesVaultAndTeams(t *testing.T) {
 				t.Fatal(err)
 			}
 			var personalRequired, teamRequired bool
-			var fence uint64
 			if err := store.SQL().QueryRowContext(ctx, `SELECT COALESCE((SELECT rotation_required FROM paperboat.environment_vault_personal_epochs WHERE account_id=$1),false)`, account).Scan(&personalRequired); err != nil {
 				t.Fatal(err)
 			}
 			if err := store.SQL().QueryRowContext(ctx, `SELECT rotation_required FROM paperboat.environment_vault_teams WHERE team_id=$1`, team).Scan(&teamRequired); err != nil {
 				t.Fatal(err)
 			}
-			if err := store.SQL().QueryRowContext(ctx, `SELECT min(generation) FROM environment_vault_layer_fences WHERE owner_kind='personal' AND owner_id=$1`, account).Scan(&fence); err != nil {
-				t.Fatal(err)
-			}
-			if personalRequired || teamRequired || fence != 2 {
+			if personalRequired || teamRequired {
 				t.Fatal("machine removal must fence delivery without requiring key rotation")
 			}
-			var ownCount int
-			var teamFence, unrelatedFence uint64
-			if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM environment_vault_layer_fences WHERE owner_kind='personal' AND owner_id=$1 AND generation=2`, account).Scan(&ownCount); err != nil || ownCount != 3 {
-				t.Fatalf("cross-workspace private source fences count=%d err=%v", ownCount, err)
+			// Only the sources the removed machine could read are fenced: the one it
+			// sourced itself here, never the account's other private sources.
+			var ownCount, sourcedByMachine int
+			if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FILTER (WHERE generation=2),count(*) FILTER (WHERE generation=2 AND source_machine_id=$2) FROM environment_vault_layer_fences WHERE owner_kind='personal' AND owner_id=$1`, account, machine).Scan(&ownCount, &sourcedByMachine); err != nil || ownCount != 1 || sourcedByMachine != 1 {
+				t.Fatalf("private source fences advanced=%d sourced by the machine=%d err=%v, want only the machine's own", ownCount, sourcedByMachine, err)
 			}
-			if err := store.SQL().QueryRowContext(ctx, `SELECT generation FROM environment_vault_layer_fences WHERE owner_kind='team' AND owner_id=$1`, team).Scan(&teamFence); err != nil || teamFence != 2 {
-				t.Fatalf("shared source fence=%d err=%v", teamFence, err)
+			var teamFence, unrelatedFence uint64
+			wantTeamFence := uint64(2) // a machine holding a team layer fences that team
+			if deletion {
+				wantTeamFence = 1 // a deleted machine that never received a layer leaves the team alone
+			}
+			if err := store.SQL().QueryRowContext(ctx, `SELECT generation FROM environment_vault_layer_fences WHERE owner_kind='team' AND owner_id=$1`, team).Scan(&teamFence); err != nil || teamFence != wantTeamFence {
+				t.Fatalf("shared source fence=%d want %d err=%v", teamFence, wantTeamFence, err)
 			}
 			if err := store.SQL().QueryRowContext(ctx, `SELECT generation FROM environment_vault_layer_fences WHERE owner_kind='personal' AND owner_id=$1`, "unrelated_"+suffix).Scan(&unrelatedFence); err != nil || unrelatedFence != 1 {
 				t.Fatalf("unrelated source fence changed=%d err=%v", unrelatedFence, err)

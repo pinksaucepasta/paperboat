@@ -1932,7 +1932,7 @@ func TestDashboardEnrollmentDenialIsAtomicAndNonRetryable(t *testing.T) {
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users (id, workos_subject, primary_email, status) VALUES ($1,$2,$3,'active')`, userID, "workos_deny_"+suffix, "enrollment-deny-"+suffix+"@example.test"); err != nil {
 		t.Fatal(err)
 	}
-	service := New(store, audit.NewWriter(store), Policy{PairingLifetime: 10 * time.Minute, AllowedPlatforms: []string{"linux"}}, nil)
+	service := New(store, audit.NewWriter(store), Policy{PairingLifetime: 10 * time.Minute, AllowedPlatforms: []string{"linux"}}, testSeatAuthorizer{})
 	service.ConfigureInstallationEncryption("test-enrollment-key")
 	first, err := service.StartEnrollment(ctx, userID, "idem-deny-"+suffix)
 	if err != nil {
@@ -3062,7 +3062,7 @@ func TestTransferDefaultsAndBrokerPreserveMachineOwnershipAndRouteHost(t *testin
 		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_connector_generations (environment_id,machine_id,generation,edge_pool,edge_node_id,state) VALUES ($1,$2,1,'development',$3,'admitted')`, machine.environmentID, machine.id, edgeID); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_routes (id,environment_id,kind,public_host,target_host,target_port,desired_revision,applied_revision,applied_node_id,applied_generation) VALUES ($1,$2,'runtime_https_wss',$3,'127.0.0.1',8080,1,1,$4,1)`, "route_"+machine.id, machine.environmentID, publicHost, edgeID); err != nil {
+		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_routes (id,environment_id,kind,public_host,managed_public_host,target_host,target_port,desired_revision,applied_revision,applied_node_id,applied_generation) VALUES ($1,$2,'runtime_https_wss',$3,$3,'127.0.0.1',8080,1,1,$4,1)`, "route_"+machine.id, machine.environmentID, publicHost, edgeID); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -3179,8 +3179,8 @@ func TestDisconnectRevokesMintedHelperSessionsAndRetriesOfflineConnector(t *test
 		t.Fatal(err)
 	}
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.runtime_carrier_attachments
-(route_id,machine_id,account_id,installation_generation,worker_generation,process_id,generation,edge_node_id,edge_process_epoch,public_identity_key,route_revision,session_id,admission,expires_at,ready,observed_at)
-VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,'{}',now()+interval '1 hour',true,now())`, "route_revoke_"+suffix, userMachineID, userID, "process_revoke_"+suffix, edgeNodeID, "epoch_revoke_"+suffix, publicIdentityKey, "carrier_session_revoke_"+suffix); err != nil {
+(route_id,machine_id,account_id,installation_generation,worker_generation,process_id,generation,edge_node_id,edge_process_epoch,public_identity_key,route_revision,session_id,preview_session_id,admission,expires_at,ready,observed_at)
+VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,'session_00000000-0000-4000-8000-000000000001','{}',now()+interval '1 hour',true,now())`, "route_revoke_"+suffix, userMachineID, userID, "process_revoke_"+suffix, edgeNodeID, "epoch_revoke_"+suffix, publicIdentityKey, "session_00000000-0000-4000-8000-000000000002"); err != nil {
 		t.Fatal(err)
 	}
 	terminalSessionID := "umts_revoke_" + suffix
