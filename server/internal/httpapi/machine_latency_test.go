@@ -34,7 +34,9 @@ func (f *fakeLatency) SaveRelays(_ context.Context, _, _ string, samples []machi
 	return f.err
 }
 
-func (f *fakeLatency) List(context.Context, string) ([]machinelatency.Item, error) { return f.items, nil }
+func (f *fakeLatency) List(context.Context, string) ([]machinelatency.Item, error) {
+	return f.items, nil
+}
 
 func latencyRequest(method, body string) *http.Request {
 	request := httptest.NewRequest(method, "/v1/machines/m1/network-latency", strings.NewReader(body))
