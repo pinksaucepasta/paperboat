@@ -10,6 +10,7 @@ install_dir=${PAPERBOAT_INSTALL_DIR:-"${HOME}/.local/bin"}
 install_dir_requested=false
 setup=false
 pair=false
+join=true
 token=${PAPERBOAT_ENROLLMENT_TOKEN:-}
 token_file=
 machine_name=${PAPERBOAT_MACHINE_ALIAS:-${PAPERBOAT_MACHINE_NAME:-}}
@@ -30,7 +31,7 @@ Usage: install.sh [options]
   --name NAME                   Set the machine name during setup or pairing
   --ssh-port PORT               Existing SSH port used by managed SSH
   --recovery-output FILE        Save the recovery key during setup
-  --no-setup                    Install only (the default)
+  --no-setup                    Install only; do not add this computer to your account
   -h, --help                    Show this help
 EOF
 }
@@ -51,13 +52,14 @@ while [ "$#" -gt 0 ]; do
       shift 2 ;;
     --setup) setup=true; shift ;;
     --pair) pair=true; shift ;;
-    --no-setup) setup=false; pair=false; shift ;;
+    --no-setup) setup=false; pair=false; join=false; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "pb installer: unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
 done
 
 [ "$setup" != true ] || [ "$pair" != true ] || { echo "pb installer: use either --setup or --pair" >&2; exit 2; }
+if [ "$setup" = true ] || [ "$pair" = true ]; then join=false; fi
 [ -z "$token" ] || [ -z "$token_file" ] || { echo "pb installer: use only one enrollment token source" >&2; exit 2; }
 [ "$pair" != true ] || [ -n "$token" ] || [ -n "$token_file" ] || { echo "pb installer: --pair requires --enrollment-token or --enrollment-token-file" >&2; exit 2; }
 [ -z "$ssh_port" ] || [ "$setup" = true ] || [ "$pair" = true ] || { echo "pb installer: --ssh-port requires --setup or --pair" >&2; exit 2; }
@@ -226,6 +228,9 @@ elif [ "$setup" = true ]; then
   [ -z "$ssh_port" ] || set -- "$@" --ssh-port "$ssh_port"
   [ -z "$recovery_output" ] || set -- "$@" --recovery-output "$recovery_output"
   "$target" setup "$@"
+elif [ "$join" = true ]; then
+  # No token: continue into the browser approval, which adds this computer to the account.
+  "$target" login
 else
   "$target" --version
 fi

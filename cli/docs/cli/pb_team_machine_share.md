@@ -1,12 +1,12 @@
 ## pb team machine share
 
-Share your personal machine with a team; grants are separate
+Share your personal machine with a team; grants are separate. A team that approves new machines holds it until an owner or admin accepts it
 
 ### Synopsis
 
-Share your personal machine with a team; grants are separate
+Share your personal machine with a team; grants are separate. A team that approves new machines holds it until an owner or admin accepts it
 
-Share a personal machine with one team while keeping personal ownership. Members need explicit capability grants before they can use it.
+Share a personal machine with one team while keeping personal ownership. A team that approves new machines holds a member's machine until an owner or admin accepts it; owners and admins share directly. Members need explicit capability grants before they can use it.
 
 A personal machine can be shared with a team while ownership stays personal, or explicitly transferred to team ownership. Sharing and capability grants are separate decisions. Removing a team-owned machine revokes its enrollment; unsharing a personal machine withdraws that team's access.
 

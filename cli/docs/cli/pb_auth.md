@@ -33,7 +33,7 @@ pb auth [flags]
 ### SEE ALSO
 
 * [pb](pb.md)	 - Open Paperboat or connect to an environment terminal
-* [pb auth login](pb_auth_login.md)	 - Sign in through browser approval on any device
+* [pb auth login](pb_auth_login.md)	 - Add this computer to your account, or sign in again, through browser approval
 * [pb auth logout](pb_auth_logout.md)	 - Revoke and remove the active client session
 * [pb auth status](pb_auth_status.md)	 - Show the active Paperboat account
 * [pb auth switch](pb_auth_switch.md)	 - Switch the active Personal or team workspace

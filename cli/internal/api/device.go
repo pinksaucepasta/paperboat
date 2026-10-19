@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
@@ -37,6 +38,27 @@ type TokenSet struct {
 	ExpiresIn          int    `json:"expires_in"`
 	Scope              string `json:"scope"`
 	CLIClientSessionID string `json:"cli_client_session_id"`
+	// Enrollment is the one-shot machine enrollment an approved login for a joining device carries.
+	Enrollment *DeviceEnrollment `json:"enrollment,omitempty"`
+}
+
+// DeviceEnrollment is the machine enrollment minted for the workspace the account owner chose.
+type DeviceEnrollment struct {
+	BootstrapToken string    `json:"bootstrap_token"`
+	ServerURL      string    `json:"server_url"`
+	ExpiresAt      time.Time `json:"expires_at"`
+	WorkspaceID    string    `json:"workspace_id"`
+	// Admission is "pending" when the team must accept the computer before it joins.
+	Admission string `json:"admission"`
+}
+
+// DeviceJoin tells the server whether approving this login should also add the device: Enroll for
+// a device that is not a machine yet (Workspace is the destination it asks for), or the machine
+// it already is, which only signs it back in.
+type DeviceJoin struct {
+	Enroll            bool
+	EnrolledMachineID string
+	Workspace         string
 }
 
 var errPublicResponseTooLarge = errors.New("paperboat-server response exceeds the size limit")
@@ -49,9 +71,18 @@ type publicCallFailure struct {
 func (e *publicCallFailure) Error() string { return e.message }
 func (e *publicCallFailure) Unwrap() error { return e.cause }
 
-func DeviceAuthorize(ctx context.Context, baseURL, label, deviceType, osName string, hc *http.Client) (DeviceAuthorization, error) {
+func DeviceAuthorize(ctx context.Context, baseURL, label, deviceType, osName string, join DeviceJoin, hc *http.Client) (DeviceAuthorization, error) {
 	var out DeviceAuthorization
-	err := publicCall(ctx, baseURL, "/v1/auth/device/authorize", map[string]any{"client_id": ClientID, "client_label": label, "device_type": deviceType, "os": osName, "scopes": ClientScopes}, "", &out, hc)
+	body := map[string]any{"client_id": ClientID, "client_label": label, "device_type": deviceType, "os": osName, "scopes": ClientScopes}
+	if join.Enroll {
+		body["enroll"] = true
+		if join.Workspace != "" {
+			body["workspace"] = join.Workspace
+		}
+	} else if join.EnrolledMachineID != "" {
+		body["enrolled_machine_id"] = join.EnrolledMachineID
+	}
+	err := publicCall(ctx, baseURL, "/v1/auth/device/authorize", body, "", &out, hc)
 	return out, err
 }
 

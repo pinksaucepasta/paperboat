@@ -2,7 +2,7 @@
 .TH "PB-AUTH-LOGIN" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
 
 .SH NAME
-pb-auth-login - Sign in through browser approval on any device
+pb-auth-login - Add this computer to your account, or sign in again, through browser approval
 
 
 .SH SYNOPSIS
@@ -10,10 +10,10 @@ pb-auth-login - Sign in through browser approval on any device
 
 
 .SH DESCRIPTION
-Sign in through browser approval on any device
+Add this computer to your account, or sign in again, through browser approval
 
 .PP
-Print an approval link and open it when a browser is available. Sign in through WorkOS on this or another device and explicitly approve the requesting CLI. No local callback listener or copied token is needed. Interrupted attempts resume securely; the existing account remains active until replacement succeeds.
+Print an approval link and open it when a browser is available. Sign in through WorkOS on this or another device, choose the workspace and explicitly approve; a computer that is not on your account yet is added to that workspace. No local callback listener or copied token is needed. Interrupted attempts resume securely; the existing account remains active until replacement succeeds.
 
 .PP
 Sign-in credentials are stored in the selected local profile for its configured Paperboat server. Account commands use that profile; a missing or rejected session must be repaired with pb auth login before protected resources can be used.
@@ -25,6 +25,10 @@ JSON output is supported with --json.
 .SH OPTIONS
 \fB--change-account\fP[=false]
 	sign in with another account after browser approval
+
+.PP
+\fB--fresh\fP[=false]
+	remove this computer's setup and machine record, then add it again
 
 .PP
 \fB-h\fP, \fB--help\fP[=false]

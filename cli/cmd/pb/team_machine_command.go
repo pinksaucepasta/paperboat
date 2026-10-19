@@ -24,11 +24,14 @@ func teamMachineCommand() *cobra.Command {
 	for _, action := range []string{"share", "unshare", "transfer-to-team", "remove"} {
 		c.AddCommand(teamMachineActionCommand(action))
 	}
-	c.AddCommand(teamMachineGrantCommand())
+	for _, action := range []string{"approve", "decline"} {
+		c.AddCommand(teamMachineDecisionCommand(action))
+	}
+	c.AddCommand(teamMachineRequestsCommand(), teamMachineApprovalCommand(), teamMachineGrantCommand())
 	return c
 }
 func teamMachineActionCommand(action string) *cobra.Command {
-	descriptions := map[string]string{"share": "Share your personal machine with a team; grants are separate", "unshare": "Withdraw the team's grants while retaining personal ownership", "transfer-to-team": "Explicitly transfer your enrollment to team ownership", "remove": "Revoke a team-owned machine without personal takeover"}
+	descriptions := map[string]string{"share": "Share your personal machine with a team; grants are separate. A team that approves new machines holds it until an owner or admin accepts it", "unshare": "Withdraw the team's grants while retaining personal ownership", "transfer-to-team": "Explicitly transfer your enrollment to team ownership", "remove": "Revoke a team-owned machine without personal takeover"}
 	c := &cobra.Command{Use: action + " <team> <machine-id>", Short: descriptions[action], Args: commandArgs(cobra.ExactArgs(2)), RunE: func(c *cobra.Command, args []string) error {
 		generation, err := requiredTeamGeneration(c)
 		if err != nil {
@@ -131,4 +134,96 @@ func validateMachineGrantCapabilities(caps []string) error {
 		seen[capability] = true
 	}
 	return nil
+}
+
+// teamMachineDecisionCommand lets an owner or admin accept or decline a machine a member asked to add.
+func teamMachineDecisionCommand(action string) *cobra.Command {
+	short := map[string]string{"approve": "Accept a machine a member asked to add to the team", "decline": "Decline a machine a member asked to add to the team"}[action]
+	c := &cobra.Command{Use: action + " <team> <machine-id>", Short: short, Args: commandArgs(cobra.ExactArgs(2)), RunE: func(c *cobra.Command, args []string) error {
+		if !validTeamCLIIdentifier(args[0]) || !validTeamCLIIdentifier(args[1]) {
+			return localArgumentError("team and machine must be valid identifiers")
+		}
+		client, err := backendForCommand(c)
+		if err != nil {
+			return err
+		}
+		generation, _ := c.Flags().GetUint64("generation")
+		if generation == 0 {
+			current, err := client.GetTeam(c.Context(), args[0])
+			if err != nil {
+				return err
+			}
+			generation = current.Generation
+		}
+		out, err := client.MutateTeamMachine(c.Context(), args[0], api.TeamMachineRequest{OperationID: newIdempotencyKey(), ExpectedGeneration: generation, MachineID: args[1], Action: action})
+		if err != nil {
+			return err
+		}
+		j, _ := c.Flags().GetBool("json")
+		if j {
+			return writeTeamOutput(c, j, out)
+		}
+		verb := map[string]string{"approve": "Accepted", "decline": "Declined"}[action]
+		_, err = fmt.Fprintf(c.OutOrStdout(), "%s machine %s for team %s.\n", verb, args[1], args[0])
+		return err
+	}}
+	c.Flags().Uint64("generation", 0, "expected current team generation (default: the current one)")
+	c.Flags().Bool("json", false, "print canonical JSON")
+	return c
+}
+
+// teamMachineRequestsCommand lists machines waiting for the team's owners and admins.
+func teamMachineRequestsCommand() *cobra.Command {
+	c := &cobra.Command{Use: "requests <team>", Short: "List machines waiting for a team owner or admin", Args: commandArgs(cobra.ExactArgs(1)), RunE: func(c *cobra.Command, args []string) error {
+		if !validTeamCLIIdentifier(args[0]) {
+			return localArgumentError("team must be a valid identifier")
+		}
+		client, err := backendForCommand(c)
+		if err != nil {
+			return err
+		}
+		team, err := client.GetTeam(c.Context(), args[0])
+		if err != nil {
+			return err
+		}
+		if j, _ := c.Flags().GetBool("json"); j {
+			return writeCLIJSON(c.OutOrStdout(), team.MachineRequests)
+		}
+		if len(team.MachineRequests) == 0 {
+			_, err = fmt.Fprintln(c.OutOrStdout(), "No machines are waiting.")
+			return err
+		}
+		for _, request := range team.MachineRequests {
+			if _, err = fmt.Fprintf(c.OutOrStdout(), "%s\t%s\t%s\tfrom %s\n", request.MachineID, request.Alias, request.State, request.RequestedBy); err != nil {
+				return err
+			}
+		}
+		return nil
+	}}
+	c.Flags().Bool("json", false, "print JSON")
+	return c
+}
+
+// teamMachineApprovalCommand turns the team's "approve new machines" rule on or off.
+func teamMachineApprovalCommand() *cobra.Command {
+	c := &cobra.Command{Use: "approval <team> <on|off>", Short: "Set whether machines members add wait for an owner or admin", Args: commandArgs(cobra.ExactArgs(2)), RunE: func(c *cobra.Command, args []string) error {
+		if !validTeamCLIIdentifier(args[0]) || (args[1] != "on" && args[1] != "off") {
+			return localArgumentError("use: pb team machine approval <team> <on|off>")
+		}
+		client, err := backendForCommand(c)
+		if err != nil {
+			return err
+		}
+		current, err := client.GetTeam(c.Context(), args[0])
+		if err != nil {
+			return err
+		}
+		on := args[1] == "on"
+		if _, err = client.MutateTeam(c.Context(), args[0], api.TeamMutationRequest{OperationID: newIdempotencyKey(), ExpectedGeneration: current.Generation, Action: "machine_approval", ApproveNewMachines: &on}); err != nil {
+			return err
+		}
+		_, err = fmt.Fprintf(c.OutOrStdout(), "Machines members add to %s now %s.\n", args[0], map[bool]string{true: "wait for an owner or admin", false: "join right away"}[on])
+		return err
+	}}
+	return c
 }

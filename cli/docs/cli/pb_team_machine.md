@@ -31,9 +31,13 @@ pb team machine [flags]
 ### SEE ALSO
 
 * [pb team](pb_team.md)	 - Manage teams and explicit resource permissions
+* [pb team machine approval](pb_team_machine_approval.md)	 - Set whether machines members add wait for an owner or admin
+* [pb team machine approve](pb_team_machine_approve.md)	 - Accept a machine a member asked to add to the team
+* [pb team machine decline](pb_team_machine_decline.md)	 - Decline a machine a member asked to add to the team
 * [pb team machine grant](pb_team_machine_grant.md)	 - Set all-member or selected-member machine capabilities
 * [pb team machine remove](pb_team_machine_remove.md)	 - Revoke a team-owned machine without personal takeover
-* [pb team machine share](pb_team_machine_share.md)	 - Share your personal machine with a team; grants are separate
+* [pb team machine requests](pb_team_machine_requests.md)	 - List machines waiting for a team owner or admin
+* [pb team machine share](pb_team_machine_share.md)	 - Share your personal machine with a team; grants are separate. A team that approves new machines holds it until an owner or admin accepts it
 * [pb team machine transfer-to-team](pb_team_machine_transfer-to-team.md)	 - Explicitly transfer your enrollment to team ownership
 * [pb team machine unshare](pb_team_machine_unshare.md)	 - Withdraw the team's grants while retaining personal ownership
 

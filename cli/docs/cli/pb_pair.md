@@ -6,7 +6,7 @@ Enroll this machine with a one-shot token
 
 Enroll this machine with a one-shot token
 
-Enroll this machine with a one-shot token, optionally reading it from a private file. Name, shell, and state-root options target the local installation; enrollment binds a new machine identity to the account.
+Enroll this machine with a one-shot token from the dashboard Add machine command or pb machine add, optionally reading it from a private file. pb login is the way to add a computer with browser approval. Name, shell, and state-root options target the local installation; enrollment binds a new machine identity to the account.
 
 JSON output is supported with --json.
 

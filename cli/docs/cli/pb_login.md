@@ -1,12 +1,12 @@
 ## pb login
 
-Sign in through browser approval on any device
+Add this computer to your account, or sign in again, through browser approval
 
 ### Synopsis
 
-Sign in through browser approval on any device
+Add this computer to your account, or sign in again, through browser approval
 
-Alias for pb auth login. Print an approval link and sign in through WorkOS on any device, including when this machine has no browser. Credentials stay on the requesting CLI and installation or machine ownership is unchanged.
+Alias for pb auth login. Open an approval link (printed with a code when this computer has no browser) on any device, sign in, choose the workspace and approve. A computer that is not on your account yet is added to the chosen workspace; one that already is only signs in again. Use --workspace to preselect the workspace. On a computer that is already added and signed in, login says where it stands; --fresh removes this computer's local setup and its machine record, then adds it again.
 
 JSON output is supported with --json.
 
@@ -18,6 +18,7 @@ pb login [flags]
 
 ```
       --change-account   sign in with another account after browser approval
+      --fresh            remove this computer's setup and machine record, then add it again
   -h, --help             help for login
       --json             print approval and sign-in states as JSON
       --no-browser       print the approval link without opening a browser

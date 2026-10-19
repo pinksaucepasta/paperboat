@@ -23,6 +23,18 @@ type BrowserLoginState struct {
 	Cancelled         bool        `json:"cancelled,omitempty"`
 	Profile           *Profile    `json:"profile,omitempty"`
 	Credential        *Credential `json:"credential,omitempty"`
+	UserCode          string      `json:"user_code,omitempty"`
+	// Enrollment keeps the approved login's one-shot machine enrollment until the machine has
+	// paired, so a failed pairing resumes with `pb login` instead of asking for approval again.
+	Enrollment *LoginEnrollment `json:"enrollment,omitempty"`
+}
+
+// LoginEnrollment is the enrollment an approved login handed this device.
+type LoginEnrollment struct {
+	BootstrapToken string    `json:"bootstrap_token"`
+	WorkspaceID    string    `json:"workspace_id"`
+	Admission      string    `json:"admission,omitempty"`
+	ExpiresAt      time.Time `json:"expires_at"`
 }
 
 func (s ProfileStore) WithBrowserLogin(issuer string, fn func(*BrowserLoginState, func() error) error) (resultErr error) {
@@ -104,6 +116,9 @@ func validateBrowserLogin(s BrowserLoginState, issuer string) error {
 	}
 	if (s.Profile == nil) != (s.Credential == nil) {
 		return errors.New("pending login response is incomplete")
+	}
+	if e := s.Enrollment; e != nil && (s.Profile == nil || e.BootstrapToken == "" || len(e.BootstrapToken) > 512 || e.WorkspaceID == "" || len(e.WorkspaceID) > 64 || e.ExpiresAt.IsZero()) || len(s.UserCode) > 16 {
+		return errors.New("pending login enrollment is invalid")
 	}
 	if s.Profile != nil {
 		if s.Profile.Issuer != issuer || !validCredentialID(s.Profile.CLIClientSessionID) || s.Profile.Account.ID == "" || s.Profile.AccessExpiresAt.IsZero() || !s.Profile.AccessExpiresAt.Equal(s.Credential.ExpiresAt) || s.Credential.TokenType != "Bearer" {

@@ -35,7 +35,25 @@ var loginHTTPClient = func() *http.Client {
 	return &http.Client{Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 }
 
+// authBrowserLogin adds this computer to the account, or signs it in again when it is already added.
+// "Start fresh" removes the old local setup and machine record first, then adds the computer again.
 func authBrowserLogin(c *command.Context) error {
+	if c.Bool("fresh") {
+		if err := startFresh(c); err != nil {
+			return err
+		}
+	}
+	err := browserLogin(c)
+	if errors.Is(err, errStartFresh) {
+		if err = startFresh(c); err != nil {
+			return err
+		}
+		return browserLogin(c)
+	}
+	return err
+}
+
+func browserLogin(c *command.Context) error {
 	cfg, err := config.Load(c.String("config"))
 	if err != nil {
 		return err
@@ -86,21 +104,15 @@ func authBrowserLogin(c *command.Context) error {
 		}
 		if state.DeviceCode == "" {
 			if e == nil && !c.Bool("reauth") && !c.Bool("change-account") {
-				if c.Bool("json") || !workspaceTerminal() {
-					return errors.New("already signed in; use --reauth to authenticate again or --change-account to sign in as someone else")
-				}
-				choice, err := chooseLoginAction(selector.Options{Context: c.Context, Title: "Signed in as " + firstNonEmpty(old.Account.Email, old.Account.DisplayName, old.Account.ID), Items: []selector.Item{{ID: "keep", Title: "Keep current account"}, {ID: "reauth", Title: "Authenticate again"}, {ID: "change", Title: "Sign in with another account", Description: "Current login stays usable until the new sign-in succeeds"}}, Stdin: os.Stdin, Output: c.ErrWriter})
-				if errors.Is(err, selector.ErrCanceled) {
-					return nil
-				}
+				machineID, err := loginLocalMachineID(cfg)
 				if err != nil {
 					return err
 				}
-				if choice.ID == "keep" {
-					return nil
-				}
-				if choice.ID == "reauth" {
+				if machineID == "" {
+					// Signed in, but this computer is not on the account yet: add it to the same account.
 					state.ExpectedAccountID = old.Account.ID
+				} else if proceed, err := offerLoginChoices(c, store, issuer, old, machineID, state); err != nil || !proceed {
+					return err
 				}
 			} else if e == nil && c.Bool("reauth") {
 				state.ExpectedAccountID = old.Account.ID
@@ -109,7 +121,11 @@ func authBrowserLogin(c *command.Context) error {
 			if label == "" {
 				label = "Paperboat CLI"
 			}
-			a, err := api.DeviceAuthorize(c.Context, issuer, label, "desktop", runtime.GOOS, loginHTTPClient())
+			join, err := loginJoin(cfg, c.String("workspace"))
+			if err != nil {
+				return err
+			}
+			a, err := api.DeviceAuthorize(c.Context, issuer, label, "desktop", runtime.GOOS, join, loginHTTPClient())
 			if err != nil {
 				return friendlyCommandError(err)
 			}
@@ -120,6 +136,7 @@ func authBrowserLogin(c *command.Context) error {
 			state.Issuer = issuer
 			state.DeviceCode = a.DeviceCode
 			state.ApprovalURL = a.VerificationURIComplete
+			state.UserCode = a.UserCode
 			state.Interval = a.Interval
 			state.ExpiresAt = time.Now().UTC().Add(time.Duration(a.ExpiresIn) * time.Second)
 			if e == nil {
@@ -139,7 +156,7 @@ func authBrowserLogin(c *command.Context) error {
 					return err
 				}
 			} else {
-				if _, err := fmt.Fprintf(c.ErrWriter, "Open this link on any device to sign in and approve this CLI:\n\n  %s\n\nWaiting for approval…\n", state.ApprovalURL); err != nil {
+				if _, err := fmt.Fprintf(c.ErrWriter, "Open this link on any device to sign in and approve this computer:\n\n  %s\n\nCode: %s (the page shows the same code)\nWaiting for approval…\n", state.ApprovalURL, state.UserCode); err != nil {
 					return browserLoginFailure{message: "Login approval could not be displayed. Run pb login again to resume the saved approval.", cause: err}
 				}
 			}
@@ -178,6 +195,9 @@ func authBrowserLogin(c *command.Context) error {
 					if state.ExpectedAccountID != "" && me.ID != state.ExpectedAccountID {
 						state.Credential = nil
 						return abortBrowserLogin(c.Context, issuer, state, save, errors.New("approved account differs from the account being reauthenticated; use --change-account"))
+					}
+					if joined := t.Enrollment; joined != nil {
+						state.Enrollment = &config.LoginEnrollment{BootstrapToken: joined.BootstrapToken, WorkspaceID: joined.WorkspaceID, Admission: joined.Admission, ExpiresAt: joined.ExpiresAt}
 					}
 					state.Profile = &config.Profile{Issuer: issuer, Account: config.Account{ID: me.ID, Email: me.Email, DisplayName: me.DisplayName}, CLIClientSessionID: t.CLIClientSessionID, AccessExpiresAt: expires}
 					if err = save(); err != nil {
@@ -236,6 +256,13 @@ func authBrowserLogin(c *command.Context) error {
 			return browserLoginFailure{message: "Sign-in is saved, but the installed daemon could not refresh. Run pb login again to finish, or pb doctor to check recovery.", cause: err}
 		}
 		account := state.Profile.Account
+		joinedWorkspace, joinedAdmission := "", ""
+		if state.Enrollment != nil {
+			if err = pairLoginDevice(c, issuer, state.Enrollment, loginDeviceName()); err != nil {
+				return browserLoginFailure{message: "Signed in, but this computer could not be added: " + err.Error() + ". Run pb login again to retry.", cause: err}
+			}
+			joinedWorkspace, joinedAdmission = state.Enrollment.WorkspaceID, state.Enrollment.Admission
+		}
 		*state = config.BrowserLoginState{}
 		if err = save(); err != nil {
 			return fmt.Errorf("signed in; retry `pb login` to clear recovery: %w", err)
@@ -249,9 +276,21 @@ func authBrowserLogin(c *command.Context) error {
 			}
 		}
 		if c.Bool("json") {
-			return writeCLIJSON(c.Writer, map[string]any{"signed_in": true, "account": account})
+			result := map[string]any{"signed_in": true, "account": account}
+			if joinedWorkspace != "" {
+				result["added_to_workspace"] = joinedWorkspace
+				result["admission"] = joinedAdmission
+			}
+			return writeCLIJSON(c.Writer, result)
 		}
-		_, err = fmt.Fprintf(c.Writer, "Signed in as %s.\n", firstNonEmpty(account.Email, account.DisplayName, account.ID))
+		if _, err = fmt.Fprintf(c.Writer, "Signed in as %s.\n", firstNonEmpty(account.Email, account.DisplayName, account.ID)); err != nil || joinedWorkspace == "" {
+			return err
+		}
+		added := fmt.Sprintf("Added %s to %s.", firstNonEmpty(loginDeviceName(), "this computer"), workspaceLabel(joinedWorkspace))
+		if joinedAdmission == "pending" {
+			added = fmt.Sprintf("Added %s. Waiting for an owner or admin of %s to accept it.", firstNonEmpty(loginDeviceName(), "this computer"), workspaceLabel(joinedWorkspace))
+		}
+		_, err = fmt.Fprintln(c.Writer, added)
 		return err
 	})
 }

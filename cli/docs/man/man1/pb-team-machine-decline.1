@@ -1,0 +1,56 @@
+.nh
+.TH "PB-TEAM-MACHINE-DECLINE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-team-machine-decline - Decline a machine a member asked to add to the team
+
+
+.SH SYNOPSIS
+\fBpb team machine decline <team> <machine-id> [flags]\fP
+
+
+.SH DESCRIPTION
+Decline a machine a member asked to add to the team
+
+.PP
+Decline a machine a member asked to add to the team. The owner of the machine sees that it was declined and can ask again or withdraw. Owners and admins only.
+
+.PP
+A personal machine can be shared with a team while ownership stays personal, or explicitly transferred to team ownership. Sharing and capability grants are separate decisions. Removing a team-owned machine revokes its enrollment; unsharing a personal machine withdraws that team's access.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--generation\fP=0
+	expected current team generation (default: the current one)
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for decline
+
+.PP
+\fB--json\fP[=false]
+	print canonical JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-team-machine(1)\fP

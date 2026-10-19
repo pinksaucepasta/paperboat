@@ -19,10 +19,13 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/auth"
+	"github.com/pinksaucepasta/paperboat/internal/command"
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/endpointidentity"
 	"github.com/pinksaucepasta/paperboat/internal/supportref"
+	"github.com/spf13/cobra"
 )
 
 func browserLoginFixture(t *testing.T, issuer string) (string, config.ProfileStore) {
@@ -94,6 +97,10 @@ func TestBrowserLoginAliasesApprovalAndRecovery(t *testing.T) {
 				return
 			}
 			acceptBrowserPeerEnrollment(t, w, r, "usr_browser", "cls_browser")
+		case "/v1/machines":
+			writeAPIData(t, w, map[string]any{"items": []any{}, "pagination": map[string]any{"limit": 200, "offset": 0, "total": 0, "next_offset": nil}})
+		case "/v1/teams":
+			writeAPIData(t, w, []any{})
 		case "/v1/auth/device/cancel":
 			cancelled = true
 			w.WriteHeader(204)
@@ -145,8 +152,13 @@ func TestBrowserLoginAliasesApprovalAndRecovery(t *testing.T) {
 	if !strings.Contains(out, "Signed in as browser@example.test") {
 		t.Fatal(out)
 	}
-	if _, e = runBrowserLogin(t, context.Background(), path, "login", "--json"); e == nil {
-		t.Fatal("existing account unexpectedly replaced")
+	// An added, signed-in computer is told where it stands and is not signed in as someone else.
+	oldMachine := loginLocalMachineID
+	t.Cleanup(func() { loginLocalMachineID = oldMachine })
+	loginLocalMachineID = func(*config.Config) (string, error) { return "machine_added", nil }
+	again, e := runBrowserLogin(t, context.Background(), path, "login", "--json")
+	if e != nil || !strings.Contains(again, "Already signed in as browser@example.test") || authorizations != 1 {
+		t.Fatalf("existing account was not reported: %v %q grants=%d", e, again, authorizations)
 	}
 }
 func TestBrowserLoginCancelPreservesExistingAccount(t *testing.T) {
@@ -637,5 +649,160 @@ func TestBrowserLoginPollDecodeFailureRetainsCauseAndPendingGrant(t *testing.T) 
 		return nil
 	}); saveErr != nil {
 		t.Fatal(saveErr)
+	}
+}
+
+type loginDeviceFixture struct {
+	authorize  map[string]any
+	enrollment map[string]any
+}
+
+func loginDeviceServer(t *testing.T, f *loginDeviceFixture) *httptest.Server {
+	t.Helper()
+	code := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{9}, 32))
+	var srv *httptest.Server
+	srv = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/auth/device/authorize":
+			f.authorize = map[string]any{}
+			_ = json.NewDecoder(r.Body).Decode(&f.authorize)
+			writeAPIData(t, w, map[string]any{"device_code": code, "user_code": "ABCD-EFGH", "verification_uri": srv.URL + "/cli/authorize", "verification_uri_complete": srv.URL + "/cli/authorize?code=ABCD-EFGH", "expires_in": 600, "interval": 1})
+		case "/v1/auth/device/token":
+			token := map[string]any{"access_token": "test-access", "refresh_token": "test-refresh", "token_type": "Bearer", "expires_in": 3600, "cli_client_session_id": "cls_browser"}
+			if f.enrollment != nil {
+				token["enrollment"] = f.enrollment
+			}
+			writeAPIData(t, w, token)
+		case "/v1/me":
+			writeAPIData(t, w, map[string]string{"id": "usr_browser", "email": "browser@example.test", "status": "active"})
+		case "/v1/e2ee/bootstrap":
+			acceptBrowserPeerEnrollment(t, w, r, "usr_browser", "cls_browser")
+		case "/v1/machines":
+			writeAPIData(t, w, map[string]any{"items": []any{}, "pagination": map[string]any{"limit": 200, "offset": 0, "total": 0, "next_offset": nil}})
+		case "/v1/teams":
+			writeAPIData(t, w, []any{})
+		default:
+			t.Errorf("unexpected endpoint %s", r.URL.Path)
+			w.WriteHeader(404)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	oldHTTP, oldWait := loginHTTPClient, loginWait
+	t.Cleanup(func() { loginHTTPClient, loginWait = oldHTTP, oldWait })
+	loginHTTPClient = srv.Client
+	loginWait = func(context.Context, time.Duration) error { return nil }
+	return srv
+}
+
+// A device that is not a machine yet asks to join, pairs with the enrollment its approval
+// carries, and reports where it was added.
+func TestBrowserLoginAddsUnenrolledDevice(t *testing.T) {
+	f := &loginDeviceFixture{enrollment: map[string]any{"bootstrap_token": "one-shot-token", "server_url": "https://api.example.test", "expires_at": time.Now().Add(10 * time.Minute), "workspace_id": "myteam"}}
+	srv := loginDeviceServer(t, f)
+	oldMachine, oldPair := loginLocalMachineID, pairLoginDevice
+	t.Cleanup(func() { loginLocalMachineID, pairLoginDevice = oldMachine, oldPair })
+	loginLocalMachineID = func(*config.Config) (string, error) { return "", nil }
+	var pairedToken, pairedServer string
+	pairLoginDevice = func(_ *command.Context, server string, e *config.LoginEnrollment, _ string) error {
+		pairedToken, pairedServer = e.BootstrapToken, server
+		return nil
+	}
+	path, _ := browserLoginFixture(t, srv.URL)
+	out, err := runBrowserLogin(t, context.Background(), path, "login", "--no-browser", "--workspace", "myteam")
+	if err != nil {
+		t.Fatalf("login: %v\n%s", err, out)
+	}
+	if f.authorize["enroll"] != true || f.authorize["workspace"] != "myteam" || f.authorize["enrolled_machine_id"] != nil {
+		t.Fatalf("authorize body=%v", f.authorize)
+	}
+	if pairedToken != "one-shot-token" || pairedServer != srv.URL {
+		t.Fatalf("paired with token=%q server=%q", pairedToken, pairedServer)
+	}
+	if !strings.Contains(out, "Code: ABCD-EFGH") || !strings.Contains(out, "to myteam.") {
+		t.Fatalf("output=%s", out)
+	}
+}
+
+// A machine that is already added only signs in again: it names itself and never pairs.
+func TestBrowserLoginSignsInEnrolledDeviceOnly(t *testing.T) {
+	f := &loginDeviceFixture{}
+	srv := loginDeviceServer(t, f)
+	oldMachine, oldPair := loginLocalMachineID, pairLoginDevice
+	t.Cleanup(func() { loginLocalMachineID, pairLoginDevice = oldMachine, oldPair })
+	loginLocalMachineID = func(*config.Config) (string, error) { return "machine_abc", nil }
+	pairLoginDevice = func(*command.Context, string, *config.LoginEnrollment, string) error {
+		t.Fatal("an enrolled machine paired again")
+		return nil
+	}
+	path, _ := browserLoginFixture(t, srv.URL)
+	out, err := runBrowserLogin(t, context.Background(), path, "login", "--no-browser", "--workspace", "myteam")
+	if err != nil {
+		t.Fatalf("login: %v\n%s", err, out)
+	}
+	if f.authorize["enroll"] != nil || f.authorize["workspace"] != nil || f.authorize["enrolled_machine_id"] != "machine_abc" {
+		t.Fatalf("authorize body=%v", f.authorize)
+	}
+	if strings.Contains(out, "Added") {
+		t.Fatalf("output=%s", out)
+	}
+	again, err := runBrowserLogin(t, context.Background(), path, "login", "--no-browser")
+	if err != nil || !strings.Contains(again, "Already signed in as browser@example.test on Personal.") || !strings.Contains(again, "pb login --fresh") {
+		t.Fatalf("login on an added, signed-in machine: %v %s", err, again)
+	}
+}
+
+// A team that approves new machines holds the computer: login says so instead of "Added".
+func TestBrowserLoginReportsComputerWaitingForTeamAdmin(t *testing.T) {
+	f := &loginDeviceFixture{enrollment: map[string]any{"bootstrap_token": "one-shot-token", "server_url": "https://api.example.test", "expires_at": time.Now().Add(10 * time.Minute), "workspace_id": "myteam", "admission": "pending"}}
+	srv := loginDeviceServer(t, f)
+	oldMachine, oldPair := loginLocalMachineID, pairLoginDevice
+	t.Cleanup(func() { loginLocalMachineID, pairLoginDevice = oldMachine, oldPair })
+	loginLocalMachineID = func(*config.Config) (string, error) { return "", nil }
+	pairLoginDevice = func(*command.Context, string, *config.LoginEnrollment, string) error { return nil }
+	path, _ := browserLoginFixture(t, srv.URL)
+	out, err := runBrowserLogin(t, context.Background(), path, "login", "--no-browser", "--workspace", "myteam")
+	if err != nil || !strings.Contains(out, "Waiting for an owner or admin of myteam to accept it.") || strings.Contains(out, "Added hp") {
+		t.Fatalf("login: %v\n%s", err, out)
+	}
+}
+
+// --fresh removes the computer's machine record and local setup, reinstalls, then adds it again.
+func TestBrowserLoginFreshRemovesThenAdds(t *testing.T) {
+	f := &loginDeviceFixture{enrollment: map[string]any{"bootstrap_token": "one-shot-token", "server_url": "https://api.example.test", "expires_at": time.Now().Add(10 * time.Minute), "workspace_id": "personal", "admission": "accepted"}}
+	srv := loginDeviceServer(t, f)
+	oldMachine, oldPair := loginLocalMachineID, pairLoginDevice
+	oldRemove, oldCleanup, oldSource, oldInstall := removeOwnMachineRecordFunc, freshEnrollmentCleanup, runningInstallSource, installSuppliedExecutable
+	t.Cleanup(func() {
+		loginLocalMachineID, pairLoginDevice = oldMachine, oldPair
+		removeOwnMachineRecordFunc, freshEnrollmentCleanup, runningInstallSource, installSuppliedExecutable = oldRemove, oldCleanup, oldSource, oldInstall
+	})
+	var steps []string
+	removeOwnMachineRecordFunc = func(*cobra.Command) (string, error) { steps = append(steps, "remove"); return "machine_old", nil }
+	freshEnrollmentCleanup = func(*cobra.Command) error { steps = append(steps, "cleanup"); return nil }
+	runningInstallSource = func() (string, installsource.Source, error) { return "/tmp/pb", installsource.Source{}, nil }
+	installSuppliedExecutable = func(context.Context, string, installsource.Source, string) (string, error) {
+		steps = append(steps, "install")
+		return "/tmp/pb", nil
+	}
+	loginLocalMachineID = func(*config.Config) (string, error) {
+		if len(steps) == 0 {
+			return "machine_old", nil
+		}
+		return "", nil
+	}
+	pairLoginDevice = func(*command.Context, string, *config.LoginEnrollment, string) error {
+		steps = append(steps, "pair")
+		return nil
+	}
+	path, _ := browserLoginFixture(t, srv.URL)
+	out, err := runBrowserLogin(t, context.Background(), path, "login", "--no-browser", "--fresh")
+	if err != nil {
+		t.Fatalf("login --fresh: %v\n%s", err, out)
+	}
+	if strings.Join(steps, ",") != "remove,cleanup,install,pair" || f.authorize["enroll"] != true {
+		t.Fatalf("steps=%v authorize=%v", steps, f.authorize)
+	}
+	if !strings.Contains(out, "Added") {
+		t.Fatalf("output=%s", out)
 	}
 }

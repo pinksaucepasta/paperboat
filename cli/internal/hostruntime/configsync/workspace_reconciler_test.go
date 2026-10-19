@@ -313,3 +313,107 @@ func newTestFileReconciler(t *testing.T, config WorkspaceReconcilerConfig) (*Pla
 	config.Descriptor.ConfigurationRevision = effective.Revision
 	return NewPlaintextWorkspaceReconciler(config)
 }
+
+// reconcilerFixture is a repository, a home and a reconciler that has committed its first baseline.
+type reconcilerFixture struct {
+	repository     *git.Repository
+	repositoryRoot string
+	configRoot     string
+	homeRoot       string
+	stateRoot      string
+	descriptor     RuntimeDescriptor
+	reconciler     *PlaintextWorkspaceReconciler
+	base           string
+}
+
+func newReconcilerFixture(t *testing.T) reconcilerFixture {
+	t.Helper()
+	t.Setenv("PATH", t.TempDir())
+	root := resolvedTempDir(t)
+	f := reconcilerFixture{
+		repositoryRoot: filepath.Join(root, "repository"), configRoot: filepath.Join(root, "selected-config"),
+		homeRoot: filepath.Join(root, "home"), stateRoot: filepath.Join(root, "state", "pull"),
+	}
+	for _, path := range []string{f.repositoryRoot, f.homeRoot, f.stateRoot, f.configRoot} {
+		if err := os.MkdirAll(path, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, dir := range []string{f.repositoryRoot, f.configRoot} {
+		writeTestFile(t, filepath.Join(dir, "config.txt"), "one\ntwo\nthree\n")
+	}
+	var err error
+	if f.repository, err = git.PlainInit(f.repositoryRoot, false); err != nil {
+		t.Fatal(err)
+	}
+	f.base = commitAll(t, f.repository, "base")
+	f.descriptor = testRuntimeDescriptor()
+	f.descriptor.PathRules = []PathRule{{ID: "config", RepositoryPath: "config.txt", LocalPath: filepath.Join(f.configRoot, "config.txt"), Kind: "file"}}
+	f.reconciler = f.newReconciler(t, f.descriptor)
+	prepared, err := f.reconciler.Reconcile(context.Background(), f.repositoryRoot, RemoteSnapshot{Revision: f.base})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.reconciler.PublicationCommitted(context.Background(), prepared, f.base); err != nil {
+		t.Fatal(err)
+	}
+	return f
+}
+
+func (f reconcilerFixture) newReconciler(t *testing.T, descriptor RuntimeDescriptor) *PlaintextWorkspaceReconciler {
+	t.Helper()
+	reconciler, err := newTestFileReconciler(t, WorkspaceReconcilerConfig{HomeRoot: f.homeRoot, StateRoot: f.stateRoot, Descriptor: descriptor})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return reconciler
+}
+
+// A policy revision change must not strand the machine: the last synced state is still the ancestor,
+// so a repository-only edit pulls cleanly instead of failing as an invalid baseline or a conflict.
+func TestReconcilerPullsRepositoryEditAfterPolicyRevisionChange(t *testing.T) {
+	f := newReconcilerFixture(t)
+	writeTestFile(t, filepath.Join(f.repositoryRoot, "config.txt"), "one\ntwo\nTHREE\n")
+	edit := commitAll(t, f.repository, "repository edit")
+	changed := f.descriptor
+	changed.Policy.Revision = "policy-2"
+	reconciler := f.newReconciler(t, changed)
+	prepared, err := reconciler.Reconcile(context.Background(), f.repositoryRoot, RemoteSnapshot{Revision: edit})
+	if err != nil {
+		t.Fatalf("a policy revision change failed the reconcile: %v", err)
+	}
+	if conflicts := reconciler.Diagnostics().Conflicts; len(conflicts) != 0 {
+		t.Fatalf("repository-only edit conflicted after a policy change: %#v", conflicts)
+	}
+	if value, err := os.ReadFile(filepath.Join(f.configRoot, "config.txt")); err != nil || string(value) != "one\ntwo\nTHREE\n" {
+		t.Fatalf("repository edit was not pulled: %q %v", value, err)
+	}
+	if err := reconciler.PublicationCommitted(context.Background(), prepared, edit); err != nil && !errors.Is(err, ErrBaselineInvalid) {
+		t.Fatal(err)
+	}
+	baseline, err := ReadBaseline(filepath.Join(f.stateRoot, "baseline.json"))
+	if err != nil || baseline.PolicyRevision != "policy-2" {
+		t.Fatalf("baseline was not rebuilt for the new policy: %#v %v", baseline, err)
+	}
+}
+
+// A baseline recorded for another repository or assignment says nothing about this one: it is
+// dropped (a first reconciliation, where differing files conflict) instead of failing for good.
+func TestReconcilerDropsBaselineOfAnotherRepository(t *testing.T) {
+	f := newReconcilerFixture(t)
+	writeTestFile(t, filepath.Join(f.repositoryRoot, "config.txt"), "one\ntwo\nTHREE\n")
+	edit := commitAll(t, f.repository, "repository edit")
+	other := f.descriptor
+	other.RepositoryID = "another-repository"
+	reconciler := f.newReconciler(t, other)
+	if _, err := reconciler.Reconcile(context.Background(), f.repositoryRoot, RemoteSnapshot{Revision: edit}); err != nil {
+		t.Fatalf("a foreign baseline failed the reconcile: %v", err)
+	}
+	conflicts := reconciler.Diagnostics().Conflicts
+	if len(conflicts) != 1 || conflicts[0].Path != "config.txt" {
+		t.Fatalf("without a shared ancestor the differing file must conflict, not be deleted or overwritten: %#v", conflicts)
+	}
+	if value, err := os.ReadFile(filepath.Join(f.configRoot, "config.txt")); err != nil || string(value) != "one\ntwo\nthree\n" {
+		t.Fatalf("local file changed without an ancestor: %q %v", value, err)
+	}
+}

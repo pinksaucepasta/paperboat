@@ -14,7 +14,7 @@ import (
 )
 
 func TestMacOSInstallerRunsOnlyVerifiedDirectProduct(t *testing.T) {
-	for _, scenario := range []string{"valid", "wrong-hash", "wrong-length", "wrong-url", "install-failure", "reset-failure"} {
+	for _, scenario := range []string{"valid", "no-join", "wrong-hash", "wrong-length", "wrong-url", "install-failure", "reset-failure"} {
 		t.Run(scenario, func(t *testing.T) {
 			root := t.TempDir()
 			product := filepath.Join(root, "product")
@@ -34,6 +34,7 @@ install)
   cp "$0" "$CANONICAL"
   chmod 700 "$CANONICAL"
   printf '{"ok":true,"data":{"executable":"%s"}}\n' "$CANONICAL" ;;
+login) ;;
 --version) printf 'fixture version\n' ;;
 *) exit 19 ;;
 esac
@@ -73,18 +74,24 @@ esac
 			if scenario == "reset-failure" {
 				args = append(args, "--enrollment-token", "fixture-token")
 			}
+			if scenario == "no-join" {
+				args = append(args, "--no-setup")
+			}
 			command := exec.CommandContext(ctx, "sh", args...)
 			command.Env = append(os.Environ(), "PATH="+root+":"+os.Getenv("PATH"),
 				"TMPDIR="+root, "SCENARIO="+scenario, "PRODUCT="+product, "CALLS="+calls, "CANONICAL="+canonical,
 				"PAPERBOAT_INSTALL_DIR=", "PAPERBOAT_ENROLLMENT_TOKEN=")
 			output, err := command.CombinedOutput()
-			if scenario == "valid" {
+			if scenario == "valid" || scenario == "no-join" {
 				if err != nil {
 					t.Fatalf("verified direct product failed: %v: %s", err, output)
 				}
 				got, err := os.ReadFile(calls)
-				if err != nil || string(got) != "install\n--version\n" {
-					t.Fatalf("supplied install then canonical executable: %q, %v", got, err)
+				// Without a token the installer goes straight on to the browser approval that adds
+				// the computer (pb login); --no-setup only installs.
+				want := map[string]string{"valid": "install\nlogin\n", "no-join": "install\n--version\n"}[scenario]
+				if err != nil || string(got) != want {
+					t.Fatalf("supplied install then canonical executable: %q, want %q, %v", got, want, err)
 				}
 			} else if scenario == "install-failure" || scenario == "reset-failure" {
 				step := strings.TrimSuffix(scenario, "-failure")

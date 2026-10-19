@@ -12,7 +12,7 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb access tunnel](pb_access_tunnel.md) | Open private TCP access through stable hostd |
 | [pb approve](pb_approve.md) | Approve a peer machine over gRPC IPC |
 | [pb auth](pb_auth.md) | Manage Paperboat sign-in |
-| [pb auth login](pb_auth_login.md) | Sign in through browser approval on any device |
+| [pb auth login](pb_auth_login.md) | Add this computer to your account, or sign in again, through browser approval |
 | [pb auth logout](pb_auth_logout.md) | Revoke and remove the active client session |
 | [pb auth status](pb_auth_status.md) | Show the active Paperboat account |
 | [pb auth switch](pb_auth_switch.md) | Switch the active Personal or team workspace |
@@ -121,7 +121,7 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb inbox reset](pb_inbox_reset.md) |  |
 | [pb inbox set](pb_inbox_set.md) |  |
 | [pb install](pb_install.md) | Install this executable and its local service |
-| [pb login](pb_login.md) | Sign in through browser approval on any device |
+| [pb login](pb_login.md) | Add this computer to your account, or sign in again, through browser approval |
 | [pb logout](pb_logout.md) | Revoke and remove the active client session |
 | [pb machine](pb_machine.md) | Manage machines |
 | [pb machine add](pb_machine_add.md) | Print Linux/macOS and Windows machine enrollment commands |
@@ -195,9 +195,13 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb team leave](pb_team_leave.md) | Leave a team |
 | [pb team list](pb_team_list.md) | List teams |
 | [pb team machine](pb_team_machine.md) | Share machines and manage exact team access |
+| [pb team machine approval](pb_team_machine_approval.md) | Set whether machines members add wait for an owner or admin |
+| [pb team machine approve](pb_team_machine_approve.md) | Accept a machine a member asked to add to the team |
+| [pb team machine decline](pb_team_machine_decline.md) | Decline a machine a member asked to add to the team |
 | [pb team machine grant](pb_team_machine_grant.md) | Set all-member or selected-member machine capabilities |
 | [pb team machine remove](pb_team_machine_remove.md) | Revoke a team-owned machine without personal takeover |
-| [pb team machine share](pb_team_machine_share.md) | Share your personal machine with a team; grants are separate |
+| [pb team machine requests](pb_team_machine_requests.md) | List machines waiting for a team owner or admin |
+| [pb team machine share](pb_team_machine_share.md) | Share your personal machine with a team; grants are separate. A team that approves new machines holds it until an owner or admin accepts it |
 | [pb team machine transfer-to-team](pb_team_machine_transfer-to-team.md) | Explicitly transfer your enrollment to team ownership |
 | [pb team machine unshare](pb_team_machine_unshare.md) | Withdraw the team's grants while retaining personal ownership |
 | [pb team remove](pb_team_remove.md) | Remove a team member |

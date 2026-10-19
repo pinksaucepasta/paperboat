@@ -1,0 +1,52 @@
+.nh
+.TH "PB-TEAM-MACHINE-APPROVAL" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-team-machine-approval - Set whether machines members add wait for an owner or admin
+
+
+.SH SYNOPSIS
+\fBpb team machine approval <team> <on|off> [flags]\fP
+
+
+.SH DESCRIPTION
+Set whether machines members add wait for an owner or admin
+
+.PP
+Choose whether machines that members add to the team wait for an owner or admin (on, the default) or join right away (off). Owners and admins add machines directly either way. Pending requests stay pending when the rule is switched off.
+
+.PP
+A personal machine can be shared with a team while ownership stays personal, or explicitly transferred to team ownership. Sharing and capability grants are separate decisions. Removing a team-owned machine revokes its enrollment; unsharing a personal machine withdraws that team's access.
+
+.PP
+This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for approval
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-team-machine(1)\fP

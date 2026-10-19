@@ -78,7 +78,7 @@ pb [environment] [new] [flags]
 * [pb exec](pb_exec.md)	 - Execute an exact command on a machine
 * [pb inbox](pb_inbox.md)	 - Manage the Paperboat Inbox
 * [pb install](pb_install.md)	 - Install this executable and its local service
-* [pb login](pb_login.md)	 - Sign in through browser approval on any device
+* [pb login](pb_login.md)	 - Add this computer to your account, or sign in again, through browser approval
 * [pb logout](pb_logout.md)	 - Revoke and remove the active client session
 * [pb machine](pb_machine.md)	 - Manage machines
 * [pb new](pb_new.md)	 - Open a fresh terminal on this device in the current directory

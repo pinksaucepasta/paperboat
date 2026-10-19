@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -132,6 +133,9 @@ func newProductionConfigSync(config productionConfigSyncConfig) (*configsync.Sup
 			hash := sha256.Sum256([]byte(descriptor.AssignmentID))
 			assignmentRoot := filepath.Join(config.StateRoot, "config-sync", hex.EncodeToString(hash[:16]))
 			if err := os.MkdirAll(assignmentRoot, 0o700); err != nil {
+				return nil, err
+			}
+			if err := pruneOrphanedAssignmentState(filepath.Join(config.StateRoot, "config-sync"), assignmentRoot); err != nil {
 				return nil, err
 			}
 			assignmentRoot, err = filepath.EvalSymlinks(assignmentRoot)
@@ -264,4 +268,27 @@ func protectConfigSyncRuntimeState(
 	}
 	descriptor.Policy.RuntimeExclusionRoots = append(descriptor.Policy.RuntimeExclusionRoots, relative)
 	return descriptor, nil
+}
+
+// assignmentStateName matches a per-assignment state directory (16 bytes of the assignment id's hash).
+var assignmentStateName = regexp.MustCompile(`^[0-9a-f]{32}$`)
+
+// pruneOrphanedAssignmentState removes the sync state of assignments this machine no longer has: an
+// assignment keeps its id across configuration changes, so any other directory is left over from a
+// removed or replaced assignment and would only hold a stale baseline.
+func pruneOrphanedAssignmentState(root, keep string) error {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		path := filepath.Join(root, entry.Name())
+		if !entry.IsDir() || path == keep || !assignmentStateName.MatchString(entry.Name()) {
+			continue
+		}
+		if err := os.RemoveAll(path); err != nil {
+			return err
+		}
+	}
+	return nil
 }

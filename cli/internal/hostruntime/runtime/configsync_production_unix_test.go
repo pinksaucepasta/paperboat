@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -111,5 +112,31 @@ func TestStandaloneConfigWorkerWaitsForCancellation(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("standalone worker did not join its supervisor after cancellation")
+	}
+}
+
+func TestPruneOrphanedAssignmentStateKeepsCurrentAndCredentials(t *testing.T) {
+	root := t.TempDir()
+	keep := filepath.Join(root, strings.Repeat("a", 32))
+	orphan := filepath.Join(root, strings.Repeat("b", 32))
+	credentials := filepath.Join(root, "repository-credentials")
+	for _, dir := range []string{keep, orphan, credentials} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(orphan, "baseline.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := pruneOrphanedAssignmentState(root, keep); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
+		t.Fatalf("orphaned assignment state remained: %v", err)
+	}
+	for _, dir := range []string{keep, credentials} {
+		if _, err := os.Stat(dir); err != nil {
+			t.Fatalf("%s was removed: %v", dir, err)
+		}
 	}
 }

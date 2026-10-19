@@ -5371,7 +5371,7 @@ func containsString(values []string, wanted string) bool {
 
 func authCommand() *command.Spec {
 	return &command.Spec{Name: "auth", Usage: "Manage Paperboat sign-in", Subcommands: []*command.Spec{
-		{Name: "login", Usage: "Sign in through browser approval on any device", Flags: []command.Flag{&command.BoolFlag{Name: "no-browser", Usage: "print the approval link without opening a browser"}, &command.BoolFlag{Name: "reauth", Usage: "authenticate the current account again"}, &command.BoolFlag{Name: "change-account", Usage: "sign in with another account after browser approval"}, &command.BoolFlag{Name: "json", Usage: "print approval and sign-in states as JSON"}}, Action: authBrowserLogin},
+		{Name: "login", Usage: "Add this computer to your account, or sign in again, through browser approval", Flags: []command.Flag{&command.BoolFlag{Name: "no-browser", Usage: "print the approval link without opening a browser"}, &command.BoolFlag{Name: "reauth", Usage: "authenticate the current account again"}, &command.BoolFlag{Name: "change-account", Usage: "sign in with another account after browser approval"}, &command.BoolFlag{Name: "json", Usage: "print approval and sign-in states as JSON"}, &command.BoolFlag{Name: "fresh", Usage: "remove this computer's setup and machine record, then add it again"}}, Action: authBrowserLogin},
 		{Name: "status", Usage: "Show the active Paperboat account", Flags: []command.Flag{&command.BoolFlag{Name: "json"}}, Action: authStatus},
 		{Name: "logout", Usage: "Revoke and remove the active client session", Flags: []command.Flag{&command.BoolFlag{Name: "json"}}, Action: authLogout},
 	}}

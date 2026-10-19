@@ -207,11 +207,13 @@ func (r *PlaintextWorkspaceReconciler) Reconcile(ctx context.Context, repository
 		// ancestor makes differing local and remote values conflict.
 	} else if statErr != nil {
 		return PreparedPublication{}, statErr
-	} else if baseline, baselineErr := ReadBaseline(r.baselinePath); baselineErr == nil {
-		if baseline.RepositoryID != r.descriptor.RepositoryID || baseline.AssignmentID != r.descriptor.AssignmentID ||
-			baseline.PolicyRevision != r.descriptor.Policy.Revision {
-			return PreparedPublication{}, ErrBaselineInvalid
-		}
+	} else if baseline, baselineErr := ReadBaseline(r.baselinePath); baselineErr != nil {
+		return PreparedPublication{}, baselineErr
+	} else if baseline.RepositoryID == r.descriptor.RepositoryID && baseline.AssignmentID == r.descriptor.AssignmentID {
+		// A baseline recorded for another repository or assignment is no ancestor of this one, so it is
+		// ignored like a missing baseline (differing files conflict). A newer policy keeps the ancestor:
+		// files the policy no longer allows are dropped below and the baseline is rewritten with the new
+		// policy revision when the sync commits.
 		if baseline.MappingRevision == r.mapping.Revision() || len(baseline.PathDestinations) > 0 {
 			baselineFiles = baseline.Files
 			baselineRevision = baseline.RemoteRevision
@@ -233,8 +235,6 @@ func (r *PlaintextWorkspaceReconciler) Reconcile(ctx context.Context, repository
 				delete(baselineFrozen, name)
 			}
 		}
-	} else {
-		return PreparedPublication{}, baselineErr
 	}
 	effectiveMode := r.descriptor.Mode
 	writesEnabled := r.descriptor.WriteMode == "leased_writes"

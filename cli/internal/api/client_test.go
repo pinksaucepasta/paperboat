@@ -627,7 +627,7 @@ func TestDeviceAuthorizeIncompatibleVersionIsActionable(t *testing.T) {
 		_, _ = io.WriteString(w, `{"error":{"code":"incompatible_client_version","message":"upgrade pb before signing in","details":{"required_protocol":"2"}}}`)
 	}))
 	defer srv.Close()
-	_, err := DeviceAuthorize(context.Background(), srv.URL, "machine", "desktop", "darwin", nil)
+	_, err := DeviceAuthorize(context.Background(), srv.URL, "machine", "desktop", "darwin", DeviceJoin{}, nil)
 	var versionErr *ErrIncompatibleVersion
 	if !errors.As(err, &versionErr) || versionErr.Required != "2" || !strings.Contains(versionErr.Error(), "upgrade pb") {
 		t.Fatalf("err = %v", err)

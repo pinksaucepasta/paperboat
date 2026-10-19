@@ -1,0 +1,52 @@
+.nh
+.TH "PB-TEAM-MACHINE-REQUESTS" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-team-machine-requests - List machines waiting for a team owner or admin
+
+
+.SH SYNOPSIS
+\fBpb team machine requests <team> [flags]\fP
+
+
+.SH DESCRIPTION
+List machines waiting for a team owner or admin
+
+.PP
+List machines waiting for a team owner or admin, with who asked and when. Owners and admins see every request; other members see their own, including declined ones.
+
+.PP
+A personal machine can be shared with a team while ownership stays personal, or explicitly transferred to team ownership. Sharing and capability grants are separate decisions. Removing a team-owned machine revokes its enrollment; unsharing a personal machine withdraws that team's access.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for requests
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-team-machine(1)\fP

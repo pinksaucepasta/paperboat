@@ -35,6 +35,19 @@ type Team struct {
 	Grants                []TeamGrant                `json:"grants"`
 	Machines              []TeamMachineBinding       `json:"machines"`
 	MachineGrants         []TeamMachineGrant         `json:"machine_grants"`
+	// ApproveNewMachines: machines that members add wait for an owner or admin.
+	ApproveNewMachines bool                   `json:"approve_new_machines"`
+	MachineRequests    []TeamMachineAdmission `json:"machine_requests"`
+}
+
+// TeamMachineAdmission is a machine waiting for (or refused by) a team's owners and admins.
+type TeamMachineAdmission struct {
+	MachineID   string    `json:"machine_id"`
+	Alias       string    `json:"alias"`
+	RequestedBy string    `json:"requested_by"`
+	State       string    `json:"state"`
+	RequestedAt time.Time `json:"requested_at"`
+	DecidedBy   string    `json:"decided_by,omitempty"`
 }
 type TeamTerminalSessionGrant struct {
 	TerminalSessionID string `json:"terminal_session_id"`
@@ -67,6 +80,8 @@ type TeamMutationRequest struct {
 	AccountID          string `json:"account_id"`
 	Role               string `json:"role"`
 	Confirmation       string `json:"confirmation"`
+	// ApproveNewMachines is the value for the machine_approval action.
+	ApproveNewMachines *bool `json:"approve_new_machines,omitempty"`
 }
 type TeamInviteRequest struct {
 	OperationID        string `json:"operation_id"`
