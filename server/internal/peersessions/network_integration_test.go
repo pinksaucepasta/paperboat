@@ -20,12 +20,15 @@ import (
 	wire "github.com/pinksaucepasta/paperboat/shared/peeridentity"
 	"math/big"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/coder/websocket"
 
 	"github.com/pinksaucepasta/paperboat-server/internal/accessdescriptor"
 	"github.com/pinksaucepasta/paperboat-server/internal/audit"
@@ -444,9 +447,13 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 		}
 	}
 	if holdBinary == "" {
-		// Terminal sharing reads the owner's live terminal runtime generation; without the
-		// held runtime process there is no generation to grant against.
-		t.Skip("terminal-sharing section needs PAPERBOAT_TASK40_RUNTIME_HOLD_BIN (a live helper runtime); the network authority checks before it ran")
+		// Without the held runtime process, a stub speaks the helper runtime frame protocol for the
+		// one thing sharing reads from it: the owner's live terminal snapshot and its generation.
+		stubHost, stubClient := terminalSnapshotRuntime(t, ownerSharedTerminalID)
+		if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.control_routes SET public_host=$2,managed_public_host=$2 WHERE id=$1`, "network_route_"+suffix, stubHost); err != nil {
+			t.Fatal(err)
+		}
+		machineService.ConfigureTerminalSessions(4, provider, stubClient)
 	}
 	viewerTeam, err := machineService.GrantTerminalSessionSharing(ctx, userID, teamID, ownerSharedTerminalID, teams.TerminalSessionGrantRequest{OperationID: "operation_terminal_view_" + suffix, ExpectedGeneration: 1, Audience: "selected_member", AccountID: sharedUser, Role: "viewer", Active: true})
 	if err != nil {
@@ -656,7 +663,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	sshFingerprint := sha256.Sum256(sshHostPublicKey.Marshal())
 	sshClientFingerprint := sha256.Sum256(sshClientPublicKey.Marshal())
 	sshSetFingerprint := sha256.Sum256([]byte("network-shared-ssh-set-" + suffix))
-	sshSetID := "sshks_network_shared_" + suffix
+	sshSetID := "keyset_" + uuid.NewString()
 	for _, statement := range []struct {
 		query string
 		args  []any
@@ -1093,4 +1100,56 @@ func assertNoNetworkPeer(t *testing.T, token, endpointID string) {
 			t.Fatalf("unexpected peer %s", endpointID)
 		}
 	}
+}
+
+// terminalSnapshotRuntime serves the helper runtime terminal frame protocol (hello/welcome, then one
+// request answered with the session's snapshot) over TLS, and returns the host:port to use as the
+// runtime route's public host plus an HTTP client that trusts it.
+func terminalSnapshotRuntime(t *testing.T, sessionID string) (string, *http.Client) {
+	t.Helper()
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/v1/runtime" || !strings.HasPrefix(request.Header.Get("Authorization"), "Bearer ") {
+			http.Error(writer, "invalid request", http.StatusUnauthorized)
+			return
+		}
+		connection, err := websocket.Accept(writer, request, &websocket.AcceptOptions{Subprotocols: []string{"paperboat.terminal.v1"}})
+		if err != nil {
+			return
+		}
+		defer connection.Close(websocket.StatusNormalClosure, "complete")
+		type frame struct {
+			Type      string          `json:"type"`
+			RequestID string          `json:"request_id"`
+			Version   string          `json:"version"`
+			Payload   json.RawMessage `json:"payload,omitempty"`
+		}
+		read := func() (frame, bool) {
+			_, data, readErr := connection.Read(request.Context())
+			var value frame
+			return value, readErr == nil && json.Unmarshal(data, &value) == nil
+		}
+		write := func(value frame) bool {
+			encoded, _ := json.Marshal(value)
+			return connection.Write(request.Context(), websocket.MessageText, encoded) == nil
+		}
+		hello, ok := read()
+		if !ok {
+			return
+		}
+		welcome, _ := json.Marshal(map[string]any{"version": "1.0", "capabilities": []string{"terminal.v1", "health.v1"}})
+		if !write(frame{Type: "welcome", RequestID: hello.RequestID, Version: "1.0", Payload: welcome}) {
+			return
+		}
+		operation, ok := read()
+		if !ok {
+			return
+		}
+		snapshot, _ := json.Marshal(map[string]any{"result": map[string]any{
+			"id": sessionID, "name": "owner-shared-shell", "cwd": "/workspace", "dimensions": map[string]any{"columns": 80, "rows": 24},
+			"state": "running", "generation": 1, "earliest_sequence": 0, "latest_sequence": 1,
+		}, "replay": false})
+		write(frame{Type: "response", RequestID: operation.RequestID, Version: "1.0", Payload: snapshot})
+	}))
+	t.Cleanup(server.Close)
+	return strings.TrimPrefix(server.URL, "https://"), server.Client()
 }
