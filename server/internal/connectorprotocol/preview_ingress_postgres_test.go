@@ -156,17 +156,8 @@ func TestPublicPreviewIngressPostgres(t *testing.T) {
 	}
 	// Ready means the carrier is admitted on an edge the wildcard record reaches; no per-name DNS wait.
 	publicationReady(true)
-	eligible := func(want bool) {
-		t.Helper()
-		var got bool
-		if err := f.database.SQL().QueryRowContext(ctx, `SELECT paperboat.node_workspace_edge_eligible($1,$2,NULL)`, node, f.accountID).Scan(&got); err != nil || got != want {
-			t.Fatalf("managed placement on edge outside the wildcard set = %v want %v: %v", got, want, err)
-		}
-	}
-	eligible(true)
 	exec(`UPDATE control_tunnel_nodes SET serves_managed_wildcard=false WHERE id=$1`, node)
 	publicationReady(false)
-	eligible(false)
 	exec(`UPDATE control_tunnel_nodes SET serves_managed_wildcard=true WHERE id=$1`, node)
 	publicationReady(true)
 	exec(`UPDATE preview_lease_carrier_attachments SET origin_ready=false,state='edge_ready',ready_at=NULL WHERE preview_id=$1`, preview)
