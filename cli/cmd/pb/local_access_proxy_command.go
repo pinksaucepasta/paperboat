@@ -37,7 +37,7 @@ func localAccessProxyCommand() *cobra.Command {
 		if !replaced {
 			next.MachineProxies = append(next.MachineProxies, config.LocalMachineProxy{MachineAlias: machine, Port: uint16(port)})
 		}
-		return applyLocalAccessChange(command, cfg, next, "proxy-set", fmt.Sprintf("App names under %s.%s configured for proxy port %d. Add matching domains in Coolify or your reverse proxy, then open https://<app>.%s.%s. Numeric ports and explicit aliases keep their destinations. The proxy port must already be authorized.", machine, next.Domain, port, machine, next.Domain))
+		return applyLocalAccessChange(command, cfg, next, "", "proxy-set", fmt.Sprintf("App names under %s.%s configured for proxy port %d. Add matching domains in Coolify or your reverse proxy, then open https://<app>.%s.%s. Numeric ports and explicit aliases keep their destinations. The proxy port must already be authorized.", machine, localAccessDomain(command.Context()), port, machine, localAccessDomain(command.Context())))
 	}}
 	set.Flags().Bool("json", false, "print JSON")
 	unset := &cobra.Command{Use: "unset <machine-alias>", Short: "Restore the default reverse-proxy port", Long: "Remove the machine reverse-proxy override and restore automatic app-name routing through authorized port 80. Numeric URLs and explicit aliases retain their destinations. The running gateway is updated before success is reported.", Args: cobra.ExactArgs(1), RunE: func(command *cobra.Command, args []string) error {
@@ -54,7 +54,7 @@ func localAccessProxyCommand() *cobra.Command {
 			}
 		}
 		next.MachineProxies = filtered
-		return applyLocalAccessChange(command, cfg, next, "proxy-unset", fmt.Sprintf("Default app-name routing restored for %s through authorized port 80. Numeric ports and explicit aliases remain configured.", machine))
+		return applyLocalAccessChange(command, cfg, next, "", "proxy-unset", fmt.Sprintf("Default app-name routing restored for %s through authorized port 80. Numeric ports and explicit aliases remain configured.", machine))
 	}}
 	unset.Flags().Bool("json", false, "print JSON")
 	command.AddCommand(set, unset)

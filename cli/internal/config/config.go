@@ -51,11 +51,11 @@ const (
 	MaxLocalMachineProxies = 128
 )
 
-// LocalAccessConfig controls this user's local browser domain and named
-// service URLs. It does not grant access to ports; runtime publication remains
-// limited to ports already authorized for the machine.
+// LocalAccessConfig controls this user's named service URLs. The local access
+// domain is not configuration: the machine guard owns it (an old config file's
+// "domain" key is ignored). It does not grant access to ports; runtime
+// publication remains limited to ports already authorized for the machine.
 type LocalAccessConfig struct {
-	Domain         string              `json:"domain,omitempty"`
 	ServiceAliases []LocalServiceAlias `json:"service_aliases,omitempty"`
 	MachineProxies []LocalMachineProxy `json:"machine_proxies,omitempty"`
 }
@@ -369,14 +369,6 @@ func normalizeStatusWidgets(values []string) []string {
 // Validate checks the complete effective configuration. Callers that mutate a
 // loaded Config can use it before presenting success.
 func (c *Config) Validate() error {
-	// An unset domain is the deployment's own, which the machine guard records at install.
-	if c.LocalAccess.Domain != "" {
-		domain, err := splitdns.NormalizeBrowserDomain(c.LocalAccess.Domain)
-		if err != nil {
-			return fmt.Errorf("local_access.domain: %w", err)
-		}
-		c.LocalAccess.Domain = domain
-	}
 	if len(c.LocalAccess.ServiceAliases) > MaxLocalServiceAliases {
 		return fmt.Errorf("local_access.service_aliases cannot contain more than %d items", MaxLocalServiceAliases)
 	}

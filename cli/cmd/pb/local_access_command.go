@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/machineguard"
 	"github.com/pinksaucepasta/paperboat/internal/splitdns"
@@ -52,7 +51,7 @@ func localAccessConfigCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		return applyLocalAccessChange(command, cfg, cfg.LocalAccess, "apply", "Local browser settings applied.")
+		return applyLocalAccessChange(command, cfg, cfg.LocalAccess, "", "apply", "Local browser settings applied.")
 	}}
 	apply.Flags().Bool("json", false, "print JSON")
 
@@ -71,30 +70,24 @@ func localAccessDomainCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		next := cloneLocalAccess(cfg.LocalAccess)
-		next.Domain = args[0]
-		return applyLocalAccessChange(command, cfg, next, "domain-set", "")
+		domain, err := splitdns.NormalizeBrowserDomain(args[0])
+		if err != nil {
+			return localAccessFailure("the local browser domain is invalid; use a DNS domain you control, without a scheme, port or wildcard", err)
+		}
+		return applyLocalAccessChange(command, cfg, cfg.LocalAccess, domain, "domain-set", "")
 	}}
 	domainSet.Flags().Bool("json", false, "print JSON")
-	domainReset := &cobra.Command{Use: "reset", Short: "Restore the default local browser domain", Long: "Restore the server-discovered domain for this client and apply the change. The helper and trust state are reconciled before success is printed; configured named services remain attached to their existing machine ports.", Args: cobra.NoArgs, RunE: func(command *cobra.Command, _ []string) error {
+	domainReset := &cobra.Command{Use: "reset", Short: "Restore the default local browser domain", Long: "Restore the domain of your Paperboat server (recorded when Paperboat was installed) and apply the change. The helper and trust state are reconciled before success is printed; configured named services remain attached to their existing machine ports.", Args: cobra.NoArgs, RunE: func(command *cobra.Command, _ []string) error {
 		cfg, err := loadLocalAccessConfig(command)
 		if err != nil {
 			return err
 		}
-		metadata, err := api.New(cfg.ServerURL, config.Credential{}, nil).ClientConfiguration(command.Context())
-		if err != nil {
-			return localAccessFailure("retrieve the server's local browser domain; run `pb doctor` and retry", err)
+		// The server's own domain is the one the machine guard recorded at install.
+		domain := guardDeploymentDomain(command.Context())
+		if domain == "" {
+			return localAccessFailure("this computer has no local access domain; run pb install again", errors.New("machine guard records no default domain"))
 		}
-		if strings.TrimSpace(metadata.LocalAccessBaseDomain) == "" {
-			return localAccessFailure("the server did not publish a local browser domain; contact the server operator", errors.New("missing local access discovery domain"))
-		}
-		domain, err := splitdns.NormalizeBrowserDomain(metadata.LocalAccessBaseDomain)
-		if err != nil {
-			return localAccessFailure("the server published an invalid local browser domain; contact the server operator", err)
-		}
-		next := cloneLocalAccess(cfg.LocalAccess)
-		next.Domain = domain
-		return applyLocalAccessChange(command, cfg, next, "domain-reset", fmt.Sprintf("Local browser domain reset to %s.", domain))
+		return applyLocalAccessChange(command, cfg, cfg.LocalAccess, domain, "domain-reset", fmt.Sprintf("Local browser domain reset to %s.", domain))
 	}}
 	domainReset.Flags().Bool("json", false, "print JSON")
 	domain.AddCommand(domainSet, domainReset)
@@ -132,7 +125,7 @@ func localAccessAliasCommand() *cobra.Command {
 		if !replaced {
 			next.ServiceAliases = append(next.ServiceAliases, config.LocalServiceAlias{MachineAlias: machineAlias, Name: name, Port: uint16(port)})
 		}
-		return applyLocalAccessChange(command, cfg, next, "alias-set", fmt.Sprintf("Service alias %s.%s configured for port %d; Paperboat publishes it only while that port is authorized.", name, machineAlias, port))
+		return applyLocalAccessChange(command, cfg, next, "", "alias-set", fmt.Sprintf("Service alias %s.%s configured for port %d; Paperboat publishes it only while that port is authorized.", name, machineAlias, port))
 	}}
 	aliasSet.Flags().Bool("json", false, "print JSON")
 	aliasUnset := &cobra.Command{Use: "unset <machine-alias> <name>", Short: "Remove a service alias", Long: "Remove one named browser mapping for the selected machine. Paperboat withdraws the local name while preserving its machine authorization and other service aliases, then confirms only after applying the updated configuration.", Args: cobra.ExactArgs(2), RunE: func(command *cobra.Command, args []string) error {
@@ -151,7 +144,7 @@ func localAccessAliasCommand() *cobra.Command {
 			filtered = append(filtered, item)
 		}
 		next.ServiceAliases = filtered
-		return applyLocalAccessChange(command, cfg, next, "alias-unset", fmt.Sprintf("Service alias %s.%s removed.", name, machineAlias))
+		return applyLocalAccessChange(command, cfg, next, "", "alias-unset", fmt.Sprintf("Service alias %s.%s removed.", name, machineAlias))
 	}}
 	aliasUnset.Flags().Bool("json", false, "print JSON")
 	aliases.AddCommand(aliasSet, aliasUnset)
@@ -169,21 +162,22 @@ func cloneLocalAccess(value config.LocalAccessConfig) config.LocalAccessConfig {
 	return value
 }
 
-func applyLocalAccessChange(command *cobra.Command, cfg *config.Config, next config.LocalAccessConfig, action, message string) error {
+// applyLocalAccessChange applies next, and a new local access domain when domain is not empty.
+func applyLocalAccessChange(command *cobra.Command, cfg *config.Config, next config.LocalAccessConfig, domain, action, message string) error {
 	candidate := *cfg
 	candidate.LocalAccess = cloneLocalAccess(next)
 	if err := candidate.Validate(); err != nil {
 		return err
 	}
-	if err := applyLocalAccessSettings(command.Context(), cfg, candidate.LocalAccess); err != nil {
+	if err := applyLocalAccessSettings(command.Context(), cfg, candidate.LocalAccess, domain); err != nil {
 		return localAccessFailure("local browser settings could not be applied. Inspect them with `pb config local-access show` before retrying.", err)
 	}
 	if action == "domain-set" {
-		message = fmt.Sprintf("Local browser domain set to %s.", candidate.LocalAccess.Domain)
+		message = fmt.Sprintf("Local browser domain set to %s.", domain)
 	}
 	if jsonOutput, _ := command.Flags().GetBool("json"); jsonOutput {
 		if err := writeCLIJSON(command.OutOrStdout(), map[string]any{
-			"path": cfg.Path(), "action": action, "applied": true, "local_access": candidate.LocalAccess,
+			"path": cfg.Path(), "action": action, "applied": true, "domain": localAccessDomain(command.Context()), "local_access": candidate.LocalAccess,
 		}); err != nil {
 			return localAccessFailure("local browser settings were applied, but confirmation output failed", err)
 		}
@@ -195,32 +189,45 @@ func applyLocalAccessChange(command *cobra.Command, cfg *config.Config, next con
 	return nil
 }
 
-// effectiveLocalAccessDomain is the domain local URLs use: the configured one,
-// else the deployment's, which the machine guard records when it is installed.
-func effectiveLocalAccessDomain(ctx context.Context, cfg *config.Config) string {
-	if cfg.LocalAccess.Domain != "" {
-		return cfg.LocalAccess.Domain
-	}
+// localAccessGuardStatus asks the machine guard, the only owner of the local
+// access domain, for its status.
+var localAccessGuardStatus = func(ctx context.Context) (machineguard.RuntimeStatus, error) {
 	guard, err := machineguard.Connect(ctx, machineguard.DefaultSocket)
 	if err != nil {
-		return ""
+		return machineguard.RuntimeStatus{}, err
 	}
 	defer guard.Close()
-	status, err := guard.Status(ctx)
+	return guard.Status(ctx)
+}
+
+// localAccessDomain is the domain local URLs use for this user; "" means the
+// guard is not reachable or records none.
+func localAccessDomain(ctx context.Context) string {
+	status, err := localAccessGuardStatus(ctx)
 	if err != nil {
 		return ""
 	}
 	return status.BrowserDomain
 }
 
+// guardDeploymentDomain is the Paperboat server's own local access domain, as
+// the machine guard recorded it when it was installed.
+func guardDeploymentDomain(ctx context.Context) string {
+	status, err := localAccessGuardStatus(ctx)
+	if err != nil {
+		return ""
+	}
+	return status.DefaultBrowserDomain
+}
+
 func writeLocalAccessShow(command *cobra.Command, cfg *config.Config) error {
-	domain := effectiveLocalAccessDomain(command.Context(), cfg)
+	domain := localAccessDomain(command.Context())
 	if domain == "" {
 		domain = "(not set up; run pb install)"
 	}
 	if jsonOutput, _ := command.Flags().GetBool("json"); jsonOutput {
 		if err := writeCLIJSON(command.OutOrStdout(), map[string]any{
-			"path": cfg.Path(), "local_access": cfg.LocalAccess,
+			"path": cfg.Path(), "domain": localAccessDomain(command.Context()), "local_access": cfg.LocalAccess,
 		}); err != nil {
 			return localAccessFailure("local access settings view could not be written", err)
 		}

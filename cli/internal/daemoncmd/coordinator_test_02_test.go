@@ -11,6 +11,7 @@ import (
 	pbSync "github.com/pinksaucepasta/paperboat/internal/controlsync/proto"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	previewruntime "github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
+	"github.com/pinksaucepasta/paperboat/internal/machineguard"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
 	"github.com/pinksaucepasta/paperboat/internal/splitdns"
 	"github.com/pinksaucepasta/paperboat/internal/supportref"
@@ -40,7 +41,7 @@ func TestCoordinatorReconnectsNameClientOnNextSnapshot(t *testing.T) {
 	}
 	var certificateGenerations []int
 	opened := make(chan net.Conn, 1)
-	coordinator, err := NewCoordinator(CoordinatorConfig{LocalAccess: config.LocalAccessConfig{Domain: testBrowserDomain},
+	coordinator, err := NewCoordinator(CoordinatorConfig{
 		ConnectNameClient: func(context.Context) (guardedNameClient, error) {
 			if connects >= len(clients) {
 				return nil, errors.New("unexpected reconnect")
@@ -111,7 +112,7 @@ func TestCoordinatorReconnectsNameClientOnNextSnapshot(t *testing.T) {
 func TestCoordinatorGenerationCleanupHonorsReconcileDeadline(t *testing.T) {
 	release := make(chan struct{})
 	client := &generationNameClient{generation: 1, stallRelease: release}
-	coordinator, err := NewCoordinator(CoordinatorConfig{LocalAccess: config.LocalAccessConfig{Domain: testBrowserDomain}, NameClient: client, DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("unused") }})
+	coordinator, err := NewCoordinator(CoordinatorConfig{NameClient: client, DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("unused") }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +141,7 @@ func TestCoordinatorProtectedHTTPFrontDoorUsesAuthenticatedMachineDial(t *testin
 	}
 	names := &coordinatorNameClient{}
 	dialed := make(chan int, 1)
-	coordinator, err := NewCoordinator(CoordinatorConfig{LocalAccess: config.LocalAccessConfig{Domain: testBrowserDomain},
+	coordinator, err := NewCoordinator(CoordinatorConfig{
 		NameClient: names, IssueCertificate: func(_ context.Context, hostname, _ string, _ int) (tls.Certificate, error) {
 			certPEM, keyPEM, issueErr := ca.IssueCertificate([]string{hostname})
 			if issueErr != nil {
@@ -282,7 +283,7 @@ func TestCoordinatorWithdrawalCancelsActiveAndPendingRawRoutes(t *testing.T) {
 func testRawRouteCoordinator(t *testing.T, dial func(context.Context, string, int) (net.Conn, error)) (*Coordinator, *coordinatorNameClient) {
 	t.Helper()
 	names := &coordinatorNameClient{}
-	coordinator, err := NewCoordinator(CoordinatorConfig{LocalAccess: config.LocalAccessConfig{Domain: testBrowserDomain}, NameClient: names, DialMachine: dial})
+	coordinator, err := NewCoordinator(CoordinatorConfig{NameClient: names, DialMachine: dial})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -368,7 +369,7 @@ func TestCoordinatorHTTPAndTLSUseRealNativePrivateAuthority(t *testing.T) {
 		t.Fatal(err)
 	}
 	names := &coordinatorNameClient{}
-	coordinator, err := NewCoordinator(CoordinatorConfig{LocalAccess: config.LocalAccessConfig{Domain: testBrowserDomain},
+	coordinator, err := NewCoordinator(CoordinatorConfig{
 		NameClient: names, DialMachine: access.DialMachine,
 		IssueCertificate: func(_ context.Context, hostname, _ string, _ int) (tls.Certificate, error) {
 			certificate, key, issueErr := ca.IssueCertificate([]string{hostname})
@@ -465,7 +466,7 @@ func TestCoordinatorHTTPAndTLSUseRealNativePrivateAuthority(t *testing.T) {
 func TestCoordinatorGuardUnavailableFailsBeforeIPC(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "guard-start.sock")
 	guardErr := errors.New("guard unavailable")
-	coordinator, err := NewCoordinator(CoordinatorConfig{LocalAccess: config.LocalAccessConfig{Domain: testBrowserDomain}, SocketAddress: path, ConnectNameClient: func(context.Context) (guardedNameClient, error) { return nil, guardErr }, DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("must not dial") }})
+	coordinator, err := NewCoordinator(CoordinatorConfig{SocketAddress: path, ConnectNameClient: func(context.Context) (guardedNameClient, error) { return nil, guardErr }, DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("must not dial") }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -485,7 +486,7 @@ func TestCoordinatorWebOnlyPeerPublishesName(t *testing.T) {
 		t.Fatal(err)
 	}
 	names := &coordinatorNameClient{}
-	coordinator, err := NewCoordinator(CoordinatorConfig{LocalAccess: config.LocalAccessConfig{Domain: testBrowserDomain}, NameClient: names, IssueCertificate: func(_ context.Context, host, _ string, _ int) (tls.Certificate, error) {
+	coordinator, err := NewCoordinator(CoordinatorConfig{NameClient: names, IssueCertificate: func(_ context.Context, host, _ string, _ int) (tls.Certificate, error) {
 		cert, key, err := ca.IssueCertificate([]string{host})
 		if err != nil {
 			return tls.Certificate{}, err
@@ -513,7 +514,7 @@ func TestCoordinatorWebOnlyPeerPublishesName(t *testing.T) {
 
 func TestCoordinatorFailedProjectionWithdrawsIPCAddress(t *testing.T) {
 	names := &coordinatorNameClient{}
-	coordinator, err := NewCoordinator(CoordinatorConfig{LocalAccess: config.LocalAccessConfig{Domain: testBrowserDomain}, NameClient: names, DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("not dialed") }})
+	coordinator, err := NewCoordinator(CoordinatorConfig{NameClient: names, DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("not dialed") }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -550,6 +551,23 @@ func TestMapPeerSnapshotProjectsCanonicalAddressWithoutMutation(t *testing.T) {
 func (c *coordinatorNameClient) ReplaceAliases(context.Context, map[string]string) error { return nil }
 func (c *generationNameClient) ReplaceAliases(context.Context, map[string]string) error  { return nil }
 
+// The fake guards answer Status like the real one: every owner's domain is the test domain.
+func testGuardStatus(context.Context) (machineguard.RuntimeStatus, error) {
+	return machineguard.RuntimeStatus{BrowserDomain: testBrowserDomain, DefaultBrowserDomain: testBrowserDomain}, nil
+}
+func (c *coordinatorNameClient) Status(ctx context.Context) (machineguard.RuntimeStatus, error) {
+	if c.domain != "" {
+		return machineguard.RuntimeStatus{BrowserDomain: c.domain, DefaultBrowserDomain: c.domain}, nil
+	}
+	return testGuardStatus(ctx)
+}
+func (c *generationNameClient) Status(ctx context.Context) (machineguard.RuntimeStatus, error) {
+	return testGuardStatus(ctx)
+}
+func (c *coordinatorCleanupClient) Status(ctx context.Context) (machineguard.RuntimeStatus, error) {
+	return testGuardStatus(ctx)
+}
+
 func testBrowserHostname(t *testing.T, machine string, port int) string {
 	t.Helper()
 	host, err := splitdns.BrowserHostname(machine, port, testBrowserDomain)
@@ -563,7 +581,7 @@ func TestCoordinatorReportsFailedReconciliationAndWithdraws(t *testing.T) {
 	guardErr := errors.New("guard unavailable")
 	names := &coordinatorNameClient{failAcquire: guardErr}
 	var reported error
-	c, err := NewCoordinator(CoordinatorConfig{LocalAccess: config.LocalAccessConfig{Domain: testBrowserDomain}, NameClient: names, DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("unexpected dial") }, ReportReconcileError: func(err error) { reported = err }})
+	c, err := NewCoordinator(CoordinatorConfig{NameClient: names, DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("unexpected dial") }, ReportReconcileError: func(err error) { reported = err }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -587,7 +605,7 @@ func TestCoordinatorStreamingReadinessReportsFailedAndRecoveredReconciliation(t 
 	defer restore()
 	var reported error
 	firstConnection := true
-	c, err := NewCoordinator(CoordinatorConfig{LocalAccess: config.LocalAccessConfig{Domain: testBrowserDomain}, DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("unexpected dial") }, ConnectNameClient: func(context.Context) (guardedNameClient, error) {
+	c, err := NewCoordinator(CoordinatorConfig{DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("unexpected dial") }, ConnectNameClient: func(context.Context) (guardedNameClient, error) {
 		if firstConnection {
 			firstConnection = false
 			return names, nil
@@ -643,7 +661,7 @@ func TestCoordinatorMachineProxyFollowsAuthorizedExportAndRevocation(t *testing.
 	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, r.Host) }))
 	defer origin.Close()
 	names := &coordinatorNameClient{}
-	c, err := NewCoordinator(CoordinatorConfig{LocalAccess: config.LocalAccessConfig{Domain: testBrowserDomain, ServiceAliases: []config.LocalServiceAlias{{MachineAlias: "homelab", Name: "bob", Port: 8080}, {MachineAlias: "homelab", Name: "jellyfin", Port: 80}}}, NameClient: names, DialMachine: func(ctx context.Context, id string, port int) (net.Conn, error) {
+	c, err := NewCoordinator(CoordinatorConfig{LocalAccess: config.LocalAccessConfig{ServiceAliases: []config.LocalServiceAlias{{MachineAlias: "homelab", Name: "bob", Port: 8080}, {MachineAlias: "homelab", Name: "jellyfin", Port: 80}}}, NameClient: names, DialMachine: func(ctx context.Context, id string, port int) (net.Conn, error) {
 		if id != "home" || port != 80 {
 			return nil, errors.New("wrong authorized destination")
 		}
@@ -742,7 +760,7 @@ func TestCoordinatorMachineProxyFollowsAuthorizedExportAndRevocation(t *testing.
 
 func TestCoordinatorStopRetainsCleanupFailureAndRecovery(t *testing.T) {
 	names := &coordinatorCleanupClient{cause: syscall.EIO}
-	c, err := NewCoordinator(CoordinatorConfig{LocalAccess: config.LocalAccessConfig{Domain: testBrowserDomain}, NameClient: names, DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, nil }})
+	c, err := NewCoordinator(CoordinatorConfig{NameClient: names, DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, nil }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -753,7 +771,7 @@ func TestCoordinatorStopRetainsCleanupFailureAndRecovery(t *testing.T) {
 	if err := c.Stop(); err != nil {
 		t.Fatalf("cleanup was repeated: %v", err)
 	}
-	fresh, err := NewCoordinator(CoordinatorConfig{LocalAccess: config.LocalAccessConfig{Domain: testBrowserDomain}, NameClient: &coordinatorCleanupClient{}, DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, nil }})
+	fresh, err := NewCoordinator(CoordinatorConfig{NameClient: &coordinatorCleanupClient{}, DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, nil }})
 	if err != nil {
 		t.Fatal(err)
 	}

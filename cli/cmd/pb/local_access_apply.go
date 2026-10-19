@@ -20,7 +20,7 @@ var applyLocalAccessSettings = applyLocalAccessConfig
 
 // Provision trust before publishing configuration. Restore the previous namespace
 // and daemon if persistence or activation fails.
-func applyLocalAccessConfig(ctx context.Context, cfg *config.Config, next config.LocalAccessConfig) error {
+func applyLocalAccessConfig(ctx context.Context, cfg *config.Config, next config.LocalAccessConfig, domain string) error {
 	defaultConfig, err := config.Load("")
 	if err != nil {
 		return err
@@ -54,19 +54,14 @@ func applyLocalAccessConfig(ctx context.Context, cfg *config.Config, next config
 	if !state.Installed {
 		return errors.New("Paperboat is not installed; run pb install before applying local browser settings")
 	}
-	guard, err := machineguard.Connect(ctx, machineguard.DefaultSocket)
+	status, err := localAccessGuardStatus(ctx)
 	if err != nil {
 		return err
 	}
-	status, err := guard.Status(ctx)
-	_ = guard.Close()
-	if err != nil {
-		return err
-	}
-	// An unset domain is the deployment's own, which the guard records at install.
-	priorDomain, nextDomain := status.BrowserDomain, next.Domain
+	// The machine guard owns the domain; an empty domain keeps its current one.
+	priorDomain, nextDomain := status.BrowserDomain, domain
 	if nextDomain == "" {
-		nextDomain = status.DefaultBrowserDomain
+		nextDomain = priorDomain
 	}
 	if priorDomain == "" || nextDomain == "" {
 		return errors.New("this computer has no local access domain; run pb install again")

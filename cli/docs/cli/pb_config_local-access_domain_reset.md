@@ -4,7 +4,7 @@ Restore the default local browser domain
 
 ### Synopsis
 
-Restore the server-discovered domain for this client and apply the change. The helper and trust state are reconciled before success is printed; configured named services remain attached to their existing machine ports.
+Restore the domain of your Paperboat server (recorded when Paperboat was installed) and apply the change. The helper and trust state are reconciled before success is printed; configured named services remain attached to their existing machine ports.
 
 JSON output is supported with --json.
 

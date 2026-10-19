@@ -128,7 +128,7 @@ func TestRemovedNetworkOverridesAreNotLoadedOrSaved(t *testing.T) {
 	}
 }
 
-func TestLocalAccessDefaultsCanonicalizesAndPersists(t *testing.T) {
+func TestLocalAccessCanonicalizesAliasesAndIgnoresAnOldDomainKey(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	if err := os.WriteFile(path, []byte(`{"local_access":{"domain":" DEV.Example.COM ","service_aliases":[{"machine_alias":" HP ","name":"JellyFin","port":8989}]}}`), 0o600); err != nil {
 		t.Fatal(err)
@@ -137,7 +137,7 @@ func TestLocalAccessDefaultsCanonicalizesAndPersists(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.LocalAccess.Domain != "dev.example.com" || len(cfg.LocalAccess.ServiceAliases) != 1 {
+	if len(cfg.LocalAccess.ServiceAliases) != 1 {
 		t.Fatalf("local access = %+v", cfg.LocalAccess)
 	}
 	want := LocalServiceAlias{MachineAlias: "hp", Name: "jellyfin", Port: 8989}
@@ -151,21 +151,12 @@ func TestLocalAccessDefaultsCanonicalizesAndPersists(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reloaded.LocalAccess.Domain != "dev.example.com" {
-		t.Fatalf("reloaded domain = %q", reloaded.LocalAccess.Domain)
+	saved, err := os.ReadFile(path)
+	if err != nil || strings.Contains(string(saved), "dev.example.com") {
+		t.Fatalf("the machine guard owns the local access domain, but the config file keeps it: %s (%v)", saved, err)
 	}
 	if got := reloaded.LocalAccess.ServiceAliases; len(got) != 1 || got[0] != want {
 		t.Fatalf("reloaded aliases = %+v, want %+v", got, want)
-	}
-}
-
-func TestLocalAccessDomainStaysUnsetUntilChosen(t *testing.T) {
-	cfg, err := Load(filepath.Join(t.TempDir(), "missing.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.LocalAccess.Domain != "" {
-		t.Fatalf("unset browser domain = %q, want empty (the guard owns the deployment's domain)", cfg.LocalAccess.Domain)
 	}
 }
 
@@ -174,14 +165,11 @@ func TestLocalAccessValidationRejectsUnsafeOrAmbiguousSettings(t *testing.T) {
 		name string
 		cfg  LocalAccessConfig
 	}{
-		{name: "public suffix", cfg: LocalAccessConfig{Domain: "com"}},
-		{name: "scheme", cfg: LocalAccessConfig{Domain: "https://example.com"}},
-		{name: "wildcard", cfg: LocalAccessConfig{Domain: "*.example.com"}},
-		{name: "numeric service label", cfg: LocalAccessConfig{Domain: "dev.example.com", ServiceAliases: []LocalServiceAlias{{MachineAlias: "hp", Name: "8989", Port: 8989}}}},
-		{name: "invalid service label", cfg: LocalAccessConfig{Domain: "dev.example.com", ServiceAliases: []LocalServiceAlias{{MachineAlias: "hp", Name: "jellyfin.web", Port: 8989}}}},
-		{name: "invalid machine label", cfg: LocalAccessConfig{Domain: "dev.example.com", ServiceAliases: []LocalServiceAlias{{MachineAlias: "hp.other", Name: "jellyfin", Port: 8989}}}},
-		{name: "zero port", cfg: LocalAccessConfig{Domain: "dev.example.com", ServiceAliases: []LocalServiceAlias{{MachineAlias: "hp", Name: "jellyfin", Port: 0}}}},
-		{name: "duplicate after canonicalization", cfg: LocalAccessConfig{Domain: "dev.example.com", ServiceAliases: []LocalServiceAlias{{MachineAlias: "HP", Name: "Jellyfin", Port: 8989}, {MachineAlias: "hp", Name: "jellyfin", Port: 3000}}}},
+		{name: "numeric service label", cfg: LocalAccessConfig{ServiceAliases: []LocalServiceAlias{{MachineAlias: "hp", Name: "8989", Port: 8989}}}},
+		{name: "invalid service label", cfg: LocalAccessConfig{ServiceAliases: []LocalServiceAlias{{MachineAlias: "hp", Name: "jellyfin.web", Port: 8989}}}},
+		{name: "invalid machine label", cfg: LocalAccessConfig{ServiceAliases: []LocalServiceAlias{{MachineAlias: "hp.other", Name: "jellyfin", Port: 8989}}}},
+		{name: "zero port", cfg: LocalAccessConfig{ServiceAliases: []LocalServiceAlias{{MachineAlias: "hp", Name: "jellyfin", Port: 0}}}},
+		{name: "duplicate after canonicalization", cfg: LocalAccessConfig{ServiceAliases: []LocalServiceAlias{{MachineAlias: "HP", Name: "Jellyfin", Port: 8989}, {MachineAlias: "hp", Name: "jellyfin", Port: 3000}}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := &Config{LocalAccess: tc.cfg}
@@ -199,7 +187,7 @@ func TestLocalAccessAllows128AliasesAndRejects129(t *testing.T) {
 		for index := range aliases {
 			aliases[index] = LocalServiceAlias{MachineAlias: "hp", Name: fmt.Sprintf("service-%d", index), Port: 8989}
 		}
-		cfg := &Config{LocalAccess: LocalAccessConfig{Domain: "dev.example.com", ServiceAliases: aliases}}
+		cfg := &Config{LocalAccess: LocalAccessConfig{ServiceAliases: aliases}}
 		cfg.applyDefaults()
 		return cfg
 	}

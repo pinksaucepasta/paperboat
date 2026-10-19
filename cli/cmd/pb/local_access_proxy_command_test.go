@@ -23,7 +23,7 @@ func TestLocalMachineProxyCommandsPreserveAliasesAndApplyBeforeSuccess(t *testin
 	prior := applyLocalAccessSettings
 	fail := false
 	calls := 0
-	applyLocalAccessSettings = func(_ context.Context, c *config.Config, next config.LocalAccessConfig) error {
+	applyLocalAccessSettings = func(_ context.Context, c *config.Config, next config.LocalAccessConfig, _ string) error {
 		calls++
 		if fail {
 			return errors.New("protected gateway unavailable")

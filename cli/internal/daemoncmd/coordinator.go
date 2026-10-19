@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
@@ -89,6 +90,7 @@ type guardedNameClient interface {
 	Acquire(context.Context, string, netip.Addr, int) (net.Listener, error)
 	ReplaceNames(context.Context, map[string]netip.Addr) error
 	ReplaceAliases(context.Context, map[string]string) error
+	Status(context.Context) (machineguard.RuntimeStatus, error)
 	Close() error
 }
 
@@ -226,18 +228,10 @@ type Coordinator struct {
 	cleanups           []*generationCleanup
 	reportMu           sync.Mutex
 	reconcileFailed    bool
-	domainFromGuard    bool // whether the configuration left the local access domain to the guard
+	domain             atomic.Pointer[string] // the local access domain, as the machine guard reports it
 }
 
 func NewCoordinator(cfg CoordinatorConfig) (*Coordinator, error) {
-	// An unset domain is the deployment's own, read from the machine guard.
-	if cfg.LocalAccess.Domain != "" {
-		domain, err := splitdns.NormalizeBrowserDomain(cfg.LocalAccess.Domain)
-		if err != nil {
-			return nil, err
-		}
-		cfg.LocalAccess.Domain = domain
-	}
 	if cfg.SocketAddress == "" {
 		cfg.SocketAddress = daemonrpc.DefaultSocketAddress()
 	}
@@ -255,14 +249,13 @@ func NewCoordinator(cfg CoordinatorConfig) (*Coordinator, error) {
 		cfg.ReconcileTimeout = controlsync.SnapshotTimeout
 	}
 	coordinator := &Coordinator{
-		cfg:             cfg,
-		domainFromGuard: cfg.LocalAccess.Domain == "",
-		nameClient:      cfg.NameClient,
-		rpcBackend:      daemonrpc.NewLiveDaemonBackend(nil, buildinfo.Version),
-		routes:          make(map[string]*guardedRoute),
-		webRoutes:       make(map[string]guardedWebRoute),
-		connections:     make(chan struct{}, 256),
-		errors:          make(chan error, 1),
+		cfg:         cfg,
+		nameClient:  cfg.NameClient,
+		rpcBackend:  daemonrpc.NewLiveDaemonBackend(nil, buildinfo.Version),
+		routes:      make(map[string]*guardedRoute),
+		webRoutes:   make(map[string]guardedWebRoute),
+		connections: make(chan struct{}, 256),
+		errors:      make(chan error, 1),
 	}
 	coordinator.rpcBackend.SetApprovalHandler(cfg.ApprovePeer)
 	coordinator.rpcBackend.SetAccount(cfg.AccountID, cfg.AccountLabel)
@@ -657,20 +650,20 @@ func mapPeerSnapshot(peers []*pbSync.PeerUpdate, cidr string) ([]*pbSync.PeerUpd
 	return mapped, nil
 }
 
-// resolveLocalDomainLocked reads the local access domain from the machine guard
-// while the configuration leaves it unset, so a reinstall that records another
-// domain is followed without restarting the daemon.
+// localDomain is the domain this computer's local access names live under.
+func (c *Coordinator) localDomain() string {
+	if domain := c.domain.Load(); domain != nil {
+		return *domain
+	}
+	return ""
+}
+
+// resolveLocalDomainLocked reads the local access domain from the machine guard,
+// the only owner of it, on every reconcile: a reinstall or a domain change is
+// followed without restarting the daemon, and no stale copy can disagree with
+// the guard's own name validation.
 func (c *Coordinator) resolveLocalDomainLocked(ctx context.Context, nameClient guardedNameClient) error {
-	if !c.domainFromGuard {
-		return nil
-	}
-	source, ok := nameClient.(interface {
-		Status(context.Context) (machineguard.RuntimeStatus, error)
-	})
-	if !ok {
-		return errors.New("local access domain is not configured")
-	}
-	status, err := source.Status(ctx)
+	status, err := nameClient.Status(ctx)
 	if err != nil {
 		return coordinatorOperationFailure("guard_status", err)
 	}
@@ -678,7 +671,7 @@ func (c *Coordinator) resolveLocalDomainLocked(ctx context.Context, nameClient g
 	if err != nil {
 		return coordinatorFailure("This computer has no local access domain; run pb install again.", err)
 	}
-	c.cfg.LocalAccess.Domain = domain
+	c.domain.Store(&domain)
 	return nil
 }
 
@@ -721,7 +714,7 @@ func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*pbSync.
 		if err != nil {
 			continue
 		}
-		hostname := strings.ToLower(alias) + "." + c.cfg.LocalAccess.Domain
+		hostname := strings.ToLower(alias) + "." + c.localDomain()
 		if prior, exists := names[hostname]; exists && prior != ip {
 			c.resetNameGenerationLocked(ctx)
 			return errors.New("control snapshot contains an ambiguous machine alias")
@@ -744,7 +737,7 @@ func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*pbSync.
 			}
 			for _, raw := range ports {
 				port := int(raw)
-				name, err := splitdns.BrowserHostname(alias, port, c.cfg.LocalAccess.Domain)
+				name, err := splitdns.BrowserHostname(alias, port, c.localDomain())
 				if err != nil {
 					c.resetNameGenerationLocked(ctx)
 					return err
@@ -760,7 +753,7 @@ func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*pbSync.
 					return fmt.Errorf("local browser routes exceed the limit of %d; remove service aliases or exported ports", machineguard.MaxBrowserAliases)
 				}
 				if port == proxyPort {
-					pattern, err := splitdns.BrowserWildcardPattern(strings.ToLower(alias), c.cfg.LocalAccess.Domain)
+					pattern, err := splitdns.BrowserWildcardPattern(strings.ToLower(alias), c.localDomain())
 					if err != nil {
 						c.resetNameGenerationLocked(ctx)
 						return err
@@ -776,8 +769,8 @@ func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*pbSync.
 					if serviceAlias.MachineAlias != strings.ToLower(alias) || int(serviceAlias.Port) != port {
 						continue
 					}
-					aliasName := serviceAlias.Name + "." + strings.ToLower(alias) + "." + c.cfg.LocalAccess.Domain
-					_, label, err := splitdns.ParseBrowserHostname(aliasName, c.cfg.LocalAccess.Domain)
+					aliasName := serviceAlias.Name + "." + strings.ToLower(alias) + "." + c.localDomain()
+					_, label, err := splitdns.ParseBrowserHostname(aliasName, c.localDomain())
 					if err != nil || label == "" {
 						c.resetNameGenerationLocked(ctx)
 						return errors.New("invalid configured browser alias")
@@ -799,11 +792,11 @@ func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*pbSync.
 				if serviceAlias.MachineAlias != strings.ToLower(alias) {
 					continue
 				}
-				aliasName := serviceAlias.Name + "." + strings.ToLower(alias) + "." + c.cfg.LocalAccess.Domain
+				aliasName := serviceAlias.Name + "." + strings.ToLower(alias) + "." + c.localDomain()
 				if _, active := browserRoutes[aliasName]; active {
 					continue
 				}
-				if _, proxy := aliases["*."+strings.ToLower(alias)+"."+c.cfg.LocalAccess.Domain]; proxy {
+				if _, proxy := aliases["*."+strings.ToLower(alias)+"."+c.localDomain()]; proxy {
 					aliases[aliasName] = ""
 					if len(aliases) > machineguard.MaxBrowserAliases {
 						c.resetNameGenerationLocked(ctx)
@@ -964,11 +957,11 @@ func (c *Coordinator) prepareBrowserGatewayLocked(ctx context.Context, client gu
 			deniedHosts[name] = true
 		}
 	}
-	proxy, err := splitdns.NewProxy(splitdns.ProxyConfig{DeniedHosts: deniedHosts, Domain: c.cfg.LocalAccess.Domain, Routes: routes, IssueCertificate: func(certCtx context.Context, hostname string) (tls.Certificate, error) {
+	proxy, err := splitdns.NewProxy(splitdns.ProxyConfig{DeniedHosts: deniedHosts, Domain: c.localDomain(), Routes: routes, IssueCertificate: func(certCtx context.Context, hostname string) (tls.Certificate, error) {
 		if deniedHosts[hostname] {
 			return tls.Certificate{}, errors.New("configured browser alias destination is unavailable")
 		}
-		route, ok := browserRouteForHostDomain(routes, hostname, c.cfg.LocalAccess.Domain)
+		route, ok := browserRouteForHostDomain(routes, hostname, c.localDomain())
 		if !ok {
 			return tls.Certificate{}, errors.New("unregistered browser certificate route")
 		}
@@ -1306,7 +1299,7 @@ func (c *Coordinator) BrowserURLs() map[string]map[int32]string {
 	result := make(map[string]map[int32]string)
 	for _, web := range c.webRoutes {
 		for host, route := range web.browserRoutes {
-			_, label, err := splitdns.ParseBrowserHostname(host, c.cfg.LocalAccess.Domain)
+			_, label, err := splitdns.ParseBrowserHostname(host, c.localDomain())
 			if err != nil || label != strconv.Itoa(route.Port) {
 				continue
 			}
@@ -1356,7 +1349,7 @@ func (c *Coordinator) issueBrowserCertificate(ctx context.Context, client guarde
 		return tls.Certificate{}, errors.New("invalid local certificate issuer")
 	}
 	root, err := x509.ParseCertificate(rootBlock.Bytes)
-	if err != nil || !root.IsCA || !root.PermittedDNSDomainsCritical || len(root.PermittedDNSDomains) != 1 || root.PermittedDNSDomains[0] != "."+c.cfg.LocalAccess.Domain {
+	if err != nil || !root.IsCA || !root.PermittedDNSDomainsCritical || len(root.PermittedDNSDomains) != 1 || root.PermittedDNSDomains[0] != "."+c.localDomain() {
 		return tls.Certificate{}, errors.New("local certificate issuer must be namespace constrained")
 	}
 	cert, err := tls.X509KeyPair(bundle.CertificatePEM, bundle.PrivateKeyPEM)

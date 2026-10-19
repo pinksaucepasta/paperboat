@@ -138,7 +138,7 @@ func configShow(c *command.Context) error {
 	fmt.Fprintf(c.Writer, "status_bar.mode: %s\n", d.cfg.StatusBar.Mode)
 	fmt.Fprintf(c.Writer, "status_bar.fullscreen: %s\n", d.cfg.StatusBar.Fullscreen)
 	fmt.Fprintf(c.Writer, "status_bar.theme: %s\n", d.cfg.StatusBar.Theme)
-	fmt.Fprintf(c.Writer, "local_access.domain: %s\n", orNone(effectiveLocalAccessDomain(c.Context, d.cfg)))
+	fmt.Fprintf(c.Writer, "local_access.domain: %s\n", orNone(localAccessDomain(c.Context)))
 	fmt.Fprintln(c.Writer, "local_access.service_aliases:")
 	if len(d.cfg.LocalAccess.ServiceAliases) == 0 {
 		fmt.Fprintln(c.Writer, "  (none)")

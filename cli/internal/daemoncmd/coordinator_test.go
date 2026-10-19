@@ -43,7 +43,7 @@ func TestCoordinatorBrowserGatewayPortInUseKeepsNativeRoutes(t *testing.T) {
 	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer origin.Close()
 	names := &coordinatorNameClient{conflictPorts: map[int]bool{80: true}}
-	c, err := NewCoordinator(CoordinatorConfig{LocalAccess: config.LocalAccessConfig{Domain: testBrowserDomain}, NameClient: names,
+	c, err := NewCoordinator(CoordinatorConfig{NameClient: names,
 		DialMachine: func(ctx context.Context, _ string, _ int) (net.Conn, error) {
 			return (&net.Dialer{}).DialContext(ctx, "tcp", origin.Listener.Addr().String())
 		},
@@ -79,8 +79,8 @@ func testCoordinatorSharedBrowserGateway(t *testing.T, nativeConflict bool, doma
 		origins[id] = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, id) }))
 		defer origins[id].Close()
 	}
-	names := &coordinatorNameClient{conflictPorts: map[int]bool{6767: nativeConflict}}
-	c, err := NewCoordinator(CoordinatorConfig{LocalAccess: config.LocalAccessConfig{Domain: domain, ServiceAliases: []config.LocalServiceAlias{{MachineAlias: "hp", Name: "jellyfin", Port: 6767}, {MachineAlias: "hp", Name: "ungranted", Port: 6768}}}, NameClient: names, DialMachine: func(ctx context.Context, machineID string, port int) (net.Conn, error) {
+	names := &coordinatorNameClient{domain: domain, conflictPorts: map[int]bool{6767: nativeConflict}}
+	c, err := NewCoordinator(CoordinatorConfig{LocalAccess: config.LocalAccessConfig{ServiceAliases: []config.LocalServiceAlias{{MachineAlias: "hp", Name: "jellyfin", Port: 6767}, {MachineAlias: "hp", Name: "ungranted", Port: 6768}}}, NameClient: names, DialMachine: func(ctx context.Context, machineID string, port int) (net.Conn, error) {
 		origin := origins[machineID]
 		if origin == nil || port != 6767 {
 			return nil, errors.New("wrong exact machine/port")
@@ -235,7 +235,7 @@ func TestCoordinatorLifecycle(t *testing.T) {
 	sockPath := filepath.Join(tmpDir, "test-daemon.sock")
 	names := &coordinatorNameClient{}
 
-	coord, err := NewCoordinator(CoordinatorConfig{LocalAccess: config.LocalAccessConfig{Domain: testBrowserDomain},
+	coord, err := NewCoordinator(CoordinatorConfig{
 		SocketAddress: sockPath,
 		SyncAddress:   listener.Addr().String(),
 		MachineID:     "machine-local",
@@ -307,7 +307,7 @@ func TestCoordinatorFailsBeforeIPCWhenSyncCannotAuthenticate(t *testing.T) {
 		t.Fatal(err)
 	}
 	socket := filepath.Join(dir, "daemon.sock")
-	coordinator, err := NewCoordinator(CoordinatorConfig{LocalAccess: config.LocalAccessConfig{Domain: testBrowserDomain}, SocketAddress: socket, SyncAddress: "127.0.0.1", MachineID: "machine", Token: func(context.Context) (string, error) { return "token", nil }, Insecure: true})
+	coordinator, err := NewCoordinator(CoordinatorConfig{SocketAddress: socket, SyncAddress: "127.0.0.1", MachineID: "machine", Token: func(context.Context) (string, error) { return "token", nil }, Insecure: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -328,7 +328,7 @@ func TestCoordinatorGuardedNamesFollowFullSnapshots(t *testing.T) {
 		t.Fatal(err)
 	}
 	names := &coordinatorNameClient{}
-	coordinator, err := NewCoordinator(CoordinatorConfig{LocalAccess: config.LocalAccessConfig{Domain: testBrowserDomain}, SocketAddress: filepath.Join(dir, "daemon.sock"), NameClient: names, DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("not dialed") }})
+	coordinator, err := NewCoordinator(CoordinatorConfig{SocketAddress: filepath.Join(dir, "daemon.sock"), NameClient: names, DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("not dialed") }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -383,7 +383,7 @@ func TestCoordinatorGuardedNamesFollowFullSnapshots(t *testing.T) {
 
 func TestCoordinatorPortConflictPreservesOtherRoutesRecoversAndRevokes(t *testing.T) {
 	names := &coordinatorNameClient{conflictPorts: map[int]bool{5000: true}}
-	c, err := NewCoordinator(CoordinatorConfig{LocalAccess: config.LocalAccessConfig{Domain: testBrowserDomain}, NameClient: names, DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("not dialed") }})
+	c, err := NewCoordinator(CoordinatorConfig{NameClient: names, DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("not dialed") }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -451,7 +451,7 @@ func TestCoordinatorInventoryUsesAuthorizedDiscoveredPortsAndWithdrawsExpiry(t *
 		t.Fatal(err)
 	}
 	names := &coordinatorNameClient{}
-	c, err := NewCoordinator(CoordinatorConfig{LocalAccess: config.LocalAccessConfig{Domain: testBrowserDomain}, SocketAddress: filepath.Join(dir, "daemon.sock"), NameClient: names, DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("unused") }})
+	c, err := NewCoordinator(CoordinatorConfig{SocketAddress: filepath.Join(dir, "daemon.sock"), NameClient: names, DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("unused") }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -561,7 +561,7 @@ func TestCoordinatorNativePortPreservesApplicationTLSAndALPN(t *testing.T) {
 		serverDone <- err
 	}()
 	names := &coordinatorNameClient{}
-	c, err := NewCoordinator(CoordinatorConfig{LocalAccess: config.LocalAccessConfig{Domain: testBrowserDomain}, SocketAddress: filepath.Join(dir, "daemon.sock"), NameClient: names,
+	c, err := NewCoordinator(CoordinatorConfig{SocketAddress: filepath.Join(dir, "daemon.sock"), NameClient: names,
 		DialMachine: func(ctx context.Context, _ string, _ int) (net.Conn, error) {
 			return (&net.Dialer{}).DialContext(ctx, "tcp", application.Addr().String())
 		},
@@ -610,6 +610,7 @@ func TestCoordinatorNativePortPreservesApplicationTLSAndALPN(t *testing.T) {
 }
 
 type coordinatorNameClient struct {
+	domain        string // the guard's local access domain; testBrowserDomain when empty
 	mu            sync.Mutex
 	names         map[string]netip.Addr
 	failAcquire   error
@@ -682,7 +683,7 @@ func (c *coordinatorNameClient) Close() error {
 
 func TestCoordinatorBoundsGuardReconciliationAndWithdrawsNames(t *testing.T) {
 	names := &coordinatorNameClient{names: map[string]netip.Addr{"stale.local.example.test": netip.MustParseAddr("127.100.0.44")}, blockAcquire: true}
-	coordinator, err := NewCoordinator(CoordinatorConfig{LocalAccess: config.LocalAccessConfig{Domain: testBrowserDomain},
+	coordinator, err := NewCoordinator(CoordinatorConfig{
 		NameClient: names, ReconcileTimeout: 20 * time.Millisecond,
 		DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("not dialed") },
 	})
@@ -797,7 +798,7 @@ func TestCoordinatorServesMachineHostOnPublishedPorts(t *testing.T) {
 	defer origin.Close()
 	names := &coordinatorNameClient{}
 	domain := testBrowserDomain
-	c, err := NewCoordinator(CoordinatorConfig{LocalAccess: config.LocalAccessConfig{Domain: domain}, NameClient: names, DialMachine: func(ctx context.Context, _ string, port int) (net.Conn, error) {
+	c, err := NewCoordinator(CoordinatorConfig{NameClient: names, DialMachine: func(ctx context.Context, _ string, port int) (net.Conn, error) {
 		if port != 6767 {
 			return nil, errors.New("wrong exact machine/port")
 		}

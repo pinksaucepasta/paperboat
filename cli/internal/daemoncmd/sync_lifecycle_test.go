@@ -3,7 +3,6 @@ package daemoncmd
 import (
 	"context"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/config"
 	"net"
 	"os"
 	"path/filepath"
@@ -73,7 +72,7 @@ func TestCoordinatorForwardsTerminalSyncFailureAfterWithdrawal(t *testing.T) {
 	if err = os.Chmod(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	c, err := NewCoordinator(CoordinatorConfig{LocalAccess: config.LocalAccessConfig{Domain: testBrowserDomain}, SocketAddress: filepath.Join(dir, "d.sock"), SyncAddress: listener.Addr().String(), MachineID: "source", Token: func(context.Context) (string, error) { return "fixture", nil }, Insecure: true})
+	c, err := NewCoordinator(CoordinatorConfig{SocketAddress: filepath.Join(dir, "d.sock"), SyncAddress: listener.Addr().String(), MachineID: "source", Token: func(context.Context) (string, error) { return "fixture", nil }, Insecure: true})
 	if err != nil {
 		t.Fatal(err)
 	}
