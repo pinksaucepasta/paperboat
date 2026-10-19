@@ -12,6 +12,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"syscall"
 	"time"
 
@@ -634,7 +636,39 @@ func writeActivationFailure(writer io.Writer, err error, previous, candidate str
 		}
 		return "unknown"
 	}
-	_, _ = fmt.Fprintf(writer, "paperboat-update-failure phase=%s reason=%s previous=%s candidate=%s classification=%s\n", phase, reason, validVersion(previous), validVersion(candidate), classification)
+	_, _ = fmt.Fprintf(writer, "paperboat-update-failure phase=%s reason=%s previous=%s candidate=%s classification=%s chain=%s\n", phase, reason, validVersion(previous), validVersion(candidate), classification, activationErrorChain(err))
+}
+
+var errorTypeName = regexp.MustCompile(`^[*A-Za-z0-9_./]{1,80}$`)
+
+// activationErrorChain names the Go types along a bounded walk of the error tree, never their
+// messages or values, so a failure that carries no finite phase still shows which step produced it
+// (for example *exec.ExitError or hostinstall.errLifecycle...) without leaking paths or credentials.
+func activationErrorChain(err error) string {
+	queue := []error{err}
+	seen := map[string]bool{}
+	var names []string
+	for visited := 0; len(queue) > 0 && visited < 24 && len(names) < 8; visited++ {
+		current := queue[0]
+		queue = queue[1:]
+		if current == nil {
+			continue
+		}
+		if name := fmt.Sprintf("%T", current); errorTypeName.MatchString(name) && !seen[name] {
+			seen[name] = true
+			names = append(names, name)
+		}
+		switch wrapped := current.(type) {
+		case interface{ Unwrap() error }:
+			queue = append(queue, wrapped.Unwrap())
+		case interface{ Unwrap() []error }:
+			queue = append(queue, wrapped.Unwrap()...)
+		}
+	}
+	if len(names) == 0 {
+		return "none"
+	}
+	return strings.Join(names, ",")
 }
 
 type unixParticipantReadiness struct {

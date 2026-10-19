@@ -6,10 +6,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -174,11 +176,11 @@ func TestActivationFailureStderrIsBoundedAndDoesNotFormatPrivateErrors(t *testin
 		err                           error
 		previous, candidate, expected string
 	}{
-		{"joined timeout", errors.Join(participantFailure("updater_version", ErrParticipantReadiness), context.DeadlineExceeded, errors.New("private secret")), "2026.10.08.20", "2026.10.08.31", "paperboat-update-failure phase=participant reason=updater_version previous=2026.10.08.20 candidate=2026.10.08.31 classification=timeout\n"},
-		{"transport cancellation", healthFailure("transport", context.Canceled), "2026.10.08.20", "2026.10.08.31", "paperboat-update-failure phase=health reason=transport previous=2026.10.08.20 candidate=2026.10.08.31 classification=canceled\n"},
-		{"transport timeout", healthFailure("transport", os.ErrDeadlineExceeded), "2026.10.08.20", "2026.10.08.31", "paperboat-update-failure phase=health reason=transport previous=2026.10.08.20 candidate=2026.10.08.31 classification=timeout\n"},
-		{"unsafe fields", &activationFailure{phase: "private\nphase", reason: "private\nreason", cause: errors.New("private secret")}, "private\nversion", strings.Repeat("1", 100) + ".1.1.1", "paperboat-update-failure phase=activation reason=failed previous=unknown candidate=unknown classification=failure\n"},
-		{"untyped failure", errors.New("private secret"), "2026.10.08.20", "2026.10.08.31", "paperboat-update-failure phase=activation reason=failed previous=2026.10.08.20 candidate=2026.10.08.31 classification=failure\n"},
+		{"joined timeout", errors.Join(participantFailure("updater_version", ErrParticipantReadiness), context.DeadlineExceeded, errors.New("private secret")), "2026.10.08.20", "2026.10.08.31", "paperboat-update-failure phase=participant reason=updater_version previous=2026.10.08.20 candidate=2026.10.08.31 classification=timeout chain=*errors.joinError,*updated.activationFailure,context.deadlineExceededError,*errors.errorString\n"},
+		{"transport cancellation", healthFailure("transport", context.Canceled), "2026.10.08.20", "2026.10.08.31", "paperboat-update-failure phase=health reason=transport previous=2026.10.08.20 candidate=2026.10.08.31 classification=canceled chain=*updated.activationFailure,*errors.errorString\n"},
+		{"transport timeout", healthFailure("transport", os.ErrDeadlineExceeded), "2026.10.08.20", "2026.10.08.31", "paperboat-update-failure phase=health reason=transport previous=2026.10.08.20 candidate=2026.10.08.31 classification=timeout chain=*updated.activationFailure,*poll.DeadlineExceededError\n"},
+		{"unsafe fields", &activationFailure{phase: "private\nphase", reason: "private\nreason", cause: errors.New("private secret")}, "private\nversion", strings.Repeat("1", 100) + ".1.1.1", "paperboat-update-failure phase=activation reason=failed previous=unknown candidate=unknown classification=failure chain=*updated.activationFailure,*errors.errorString\n"},
+		{"untyped failure", errors.New("private secret"), "2026.10.08.20", "2026.10.08.31", "paperboat-update-failure phase=activation reason=failed previous=2026.10.08.20 candidate=2026.10.08.31 classification=failure chain=*errors.errorString\n"},
 		{"success", nil, "private", "private", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -190,3 +192,25 @@ func TestActivationFailureStderrIsBoundedAndDoesNotFormatPrivateErrors(t *testin
 		})
 	}
 }
+
+func TestActivationFailureChainNamesTypesNotMessages(t *testing.T) {
+	secret := errors.New("/home/private/credential-token-123")
+	err := errors.Join(fmt.Errorf("step failed: %w", &exec.ExitError{}), secret)
+	chain := activationErrorChain(err)
+	if !strings.Contains(chain, "*exec.ExitError") || strings.Contains(chain, "credential") || strings.Contains(chain, "private") {
+		t.Fatalf("chain=%q", chain)
+	}
+	if got := activationErrorChain(nil); got != "none" {
+		t.Fatalf("nil chain=%q", got)
+	}
+	loop := &selfCause{}
+	loop.next = loop
+	if got := activationErrorChain(loop); got == "" || len(strings.Split(got, ",")) > 8 {
+		t.Fatalf("cyclic chain was not bounded: %q", got)
+	}
+}
+
+type selfCause struct{ next *selfCause }
+
+func (e *selfCause) Error() string { return "cycle" }
+func (e *selfCause) Unwrap() error { return e.next }
