@@ -856,6 +856,8 @@ func writeTunnelResourceError(w http.ResponseWriter, r *http.Request, err error)
 		status, code, message, outcome, retryable, action = http.StatusConflict, "route_conflict", "The route conflicts with an existing route.", "unchanged", false, "choose_different_match"
 	case expectedHTTPErrorOnly(err, tunnelv1.ErrPublicListenerCapacity):
 		status, code, message, outcome, retryable, action = http.StatusServiceUnavailable, "public_listener_capacity", "No public listener port is currently available.", "unchanged", true, "retry_later"
+	case expectedHTTPErrorOnly(err, tunnelv1.ErrDomainConflict, tunnelv1.ErrDomainQuarantined) && errors.Is(err, tunnelv1.ErrDomainQuarantined):
+		status, code, message, outcome, retryable, action = http.StatusConflict, "domain_quarantined", "This domain was removed from a tunnel recently and is held for a week before it can be added again.", "unchanged", false, "choose_different_domain"
 	case expectedHTTPErrorOnly(err, tunnelv1.ErrDomainConflict):
 		status, code, message, outcome, retryable, action = http.StatusConflict, "domain_conflict", "The domain binding conflicts with an existing binding.", "unchanged", false, "inspect_domain"
 	case expectedHTTPErrorOnly(err, tunnelv1.ErrConnectorConflict):

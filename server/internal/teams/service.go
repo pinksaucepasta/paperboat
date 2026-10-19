@@ -190,6 +190,12 @@ func (s *Service) Mutate(ctx context.Context, account, team string, r MutationRe
 			}
 			_, err := tx.Exec(ctx, `UPDATE teams SET display_name=$2 WHERE team_id=$1`, team, r.Name)
 			return err
+		case "machine_approval":
+			if !administrative(actor.Role) || r.ApproveNewMachines == nil {
+				return ErrForbidden
+			}
+			_, err := tx.Exec(ctx, `UPDATE teams SET approve_new_machines=$2 WHERE team_id=$1`, team, *r.ApproveNewMachines)
+			return err
 		case "role":
 			if actor.Role != "owner" || !found || target.Role == "owner" {
 				return ErrForbidden

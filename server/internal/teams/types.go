@@ -53,17 +53,21 @@ type Grant struct {
 	Active       bool   `json:"active"`
 }
 type Team struct {
-	DisplayName           string                 `json:"display_name"`
-	Name                  string                 `json:"name"`
-	ENVStatus             string                 `json:"env_status"`
-	TeamID                string                 `json:"team_id"`
-	OwnerAccount          string                 `json:"owner_account"`
-	Generation            uint64                 `json:"generation"`
-	Deleted               bool                   `json:"deleted"`
-	Suspended             bool                   `json:"suspended"`
-	Members               []Member               `json:"members"`
-	Grants                []Grant                `json:"grants"`
-	Machines              []MachineBinding       `json:"machines"`
+	DisplayName  string           `json:"display_name"`
+	Name         string           `json:"name"`
+	ENVStatus    string           `json:"env_status"`
+	TeamID       string           `json:"team_id"`
+	OwnerAccount string           `json:"owner_account"`
+	Generation   uint64           `json:"generation"`
+	Deleted      bool             `json:"deleted"`
+	Suspended    bool             `json:"suspended"`
+	Members      []Member         `json:"members"`
+	Grants       []Grant          `json:"grants"`
+	Machines     []MachineBinding `json:"machines"`
+	// ApproveNewMachines: machines that members add wait for an owner or admin.
+	ApproveNewMachines bool `json:"approve_new_machines"`
+	// MachineRequests are machines waiting for (or refused by) an owner or admin.
+	MachineRequests       []MachineAdmission     `json:"machine_requests"`
 	MachineGrants         []MachineGrant         `json:"machine_grants"`
 	TerminalSessionGrants []TerminalSessionGrant `json:"terminal_session_grants"`
 }
@@ -112,6 +116,8 @@ type MutationRequest struct {
 	AccountID          string `json:"account_id"`
 	Role               string `json:"role"`
 	Confirmation       string `json:"confirmation"`
+	// ApproveNewMachines is the value for the machine_approval action.
+	ApproveNewMachines *bool `json:"approve_new_machines,omitempty"`
 }
 type InviteRequest struct {
 	Role               string `json:"role,omitempty"`

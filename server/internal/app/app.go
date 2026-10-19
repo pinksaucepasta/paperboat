@@ -262,6 +262,7 @@ func New(opts Options) (*App, error) {
 	checker := readinessChecker{cfg: opts.Config, db: store}
 	userMachineService := usermachines.New(store, auditWriter, usermachines.Policy{ExpiredAccessSessionRetention: opts.Config.UserMachines.ExpiredAccessSessionRetention, PairingLifetime: opts.Config.UserMachines.PairingLifetime, OfflineAfter: opts.Config.UserMachines.OfflineAfter, AllowedPlatforms: opts.Config.UserMachines.AllowedPlatforms}, workspaceBilling)
 	teamInboxService, err := teaminbox.New(store, opts.Config.Access.FileTransfer)
+	deviceAuthService.SetEnroller(usermachines.DeviceEnroller{Service: userMachineService})
 	if err != nil {
 		_ = store.Close()
 		return nil, fmt.Errorf("configure Team Inbox: %w", err)

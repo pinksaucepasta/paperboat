@@ -61,7 +61,7 @@ func TestConfigNativeRepositoryAndConsentAuthorization(t *testing.T) {
 		if e != nil {
 			t.Fatal(e)
 		}
-		if _, e = cliAuth.Decide(ctx, grant.UserCode, user, true); e != nil {
+		if _, e = cliAuth.Decide(ctx, grant.UserCode, user, true, ""); e != nil {
 			t.Fatal(e)
 		}
 		result, e := cliAuth.Poll(ctx, auth.DeviceTokenInput{ClientID: cfg.CLIAuth.ClientID, DeviceCode: grant.DeviceCode, Network: "127.0.0.1"})

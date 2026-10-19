@@ -51,8 +51,8 @@ ON CONFLICT (user_machine_id) DO UPDATE SET
 
 -- name: CreateBootstrapPairing :one
 INSERT INTO user_machine_pairings
-(id,bootstrap_owner_account,operation_id,idempotency_key,bootstrap_token_hash,bootstrap_token_ciphertext,state,installation_state,generation,expires_at)
-VALUES (sqlc.arg(id),sqlc.arg(user_id),sqlc.arg(operation_id),sqlc.arg(idempotency_key),sqlc.arg(bootstrap_token_hash),sqlc.arg(bootstrap_token_ciphertext),'awaiting_bootstrap','awaiting_bootstrap',1,sqlc.arg(expires_at))
+(id,bootstrap_owner_account,operation_id,idempotency_key,bootstrap_token_hash,bootstrap_token_ciphertext,state,installation_state,generation,expires_at,workspace_team_id)
+VALUES (sqlc.arg(id),sqlc.arg(user_id),sqlc.arg(operation_id),sqlc.arg(idempotency_key),sqlc.arg(bootstrap_token_hash),sqlc.arg(bootstrap_token_ciphertext),'awaiting_bootstrap','awaiting_bootstrap',1,sqlc.arg(expires_at),sqlc.narg(workspace_team_id))
 ON CONFLICT (bootstrap_owner_account,idempotency_key) DO UPDATE SET idempotency_key=excluded.idempotency_key
 RETURNING *;
 

@@ -22,13 +22,17 @@ func deviceAuthorize(service *auth.DeviceService, requestNetwork func(*http.Requ
 		DeviceType  string   `json:"device_type"`
 		OS          string   `json:"os"`
 		Scopes      []string `json:"scopes"`
+		// Enroll asks that approving also enroll this device; EnrolledMachineID says it already is a machine.
+		Enroll            bool   `json:"enroll"`
+		EnrolledMachineID string `json:"enrolled_machine_id"`
+		Workspace         string `json:"workspace"`
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body request
 		if !decodeStrictJSON(w, r, &body) {
 			return
 		}
-		out, err := service.Authorize(r.Context(), auth.DeviceAuthorizationInput{ClientID: body.ClientID, ClientLabel: body.ClientLabel, DeviceType: body.DeviceType, OS: body.OS, Scopes: body.Scopes, Network: requestNetwork(r)})
+		out, err := service.Authorize(r.Context(), auth.DeviceAuthorizationInput{ClientID: body.ClientID, ClientLabel: body.ClientLabel, DeviceType: body.DeviceType, OS: body.OS, Scopes: body.Scopes, Network: requestNetwork(r), Enroll: body.Enroll, EnrolledMachineID: body.EnrolledMachineID, Workspace: body.Workspace})
 		if writeDeviceError(w, r, err) {
 			return
 		}
@@ -83,19 +87,57 @@ func deviceRequest(service *auth.DeviceService, issuer string) http.HandlerFunc 
 			return
 		}
 		noStore(w)
-		writeJSON(w, http.StatusOK, SuccessResponse{Data: deviceRequestPayload(out, p.User, issuer)})
+		payload := deviceRequestPayload(out, p.User, issuer)
+		machine, enrolled, err := service.EnrolledMachine(r.Context(), p.User.ID, out.EnrolledMachineID)
+		if err != nil {
+			writeError(w, r, http.StatusInternalServerError, "internal_error", "Internal server error.", err)
+			return
+		}
+		if err := addDeviceAdmission(r.Context(), service, p.User.ID, out, payload); err != nil {
+			writeError(w, r, http.StatusInternalServerError, "internal_error", "Internal server error.", err)
+			return
+		}
+		if enrolled {
+			payload["enrolled_machine"] = map[string]any{"id": machine.ID, "alias": machine.Alias, "workspaces": machine.Workspaces}
+		}
+		writeJSON(w, http.StatusOK, SuccessResponse{Data: payload})
 	}
 }
 func deviceDecision(service *auth.DeviceService, issuer string, approve bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		p, _ := principalFromContext(r.Context())
-		out, err := service.Decide(r.Context(), r.PathValue("user_code"), p.User.ID, approve)
+		var body struct {
+			WorkspaceID string `json:"workspace_id"`
+		}
+		if r.ContentLength != 0 && !decodeStrictJSON(w, r, &body) {
+			return
+		}
+		out, err := service.Decide(r.Context(), r.PathValue("user_code"), p.User.ID, approve, body.WorkspaceID)
 		if writeDeviceError(w, r, err) {
 			return
 		}
 		noStore(w)
-		writeJSON(w, http.StatusOK, SuccessResponse{Data: deviceRequestPayload(out, p.User, issuer)})
+		payload := deviceRequestPayload(out, p.User, issuer)
+		if err := addDeviceAdmission(r.Context(), service, p.User.ID, out, payload); err != nil {
+			writeError(w, r, http.StatusInternalServerError, "internal_error", "Internal server error.", err)
+			return
+		}
+		writeJSON(w, http.StatusOK, SuccessResponse{Data: payload})
 	}
+}
+
+// addDeviceAdmission tells the approval page whether the chosen workspace accepts the computer at
+// once or waits for an owner or admin.
+func addDeviceAdmission(ctx context.Context, service *auth.DeviceService, userID string, out auth.DeviceRequest, payload map[string]any) error {
+	if !out.Enroll || out.WorkspaceID == "" {
+		return nil
+	}
+	admission, err := service.Admission(ctx, userID, out.WorkspaceID)
+	if err != nil {
+		return err
+	}
+	payload["admission"] = admission
+	return nil
 }
 
 func tokenRefresh(service *auth.DeviceService) http.HandlerFunc {
@@ -185,12 +227,17 @@ func deviceRequestPayload(out auth.DeviceRequest, user auth.User, issuer string)
 		"client_label": out.ClientLabel, "device_type": out.DeviceType, "os": out.OS,
 		"scopes": out.Scopes, "issued_at": out.IssuedAt, "expires_at": out.ExpiresAt,
 		"user_code": out.UserCode, "state": out.State, "issuer": strings.TrimRight(issuer, "/"),
+		"enroll": out.Enroll, "requested_workspace": out.RequestedWorkspace, "workspace_id": out.WorkspaceID,
 		"account": map[string]any{"id": user.ID, "email": user.PrimaryEmail, "display_name": user.DisplayName},
 	}
 }
 func writeTokenSet(w http.ResponseWriter, out auth.TokenSet) {
 	noStore(w)
-	writeJSON(w, http.StatusOK, SuccessResponse{Data: map[string]any{"access_token": out.AccessToken, "refresh_token": out.RefreshToken, "token_type": out.TokenType, "expires_in": out.ExpiresIn, "scope": out.Scope, "cli_client_session_id": out.CLIClientSessionID}})
+	data := map[string]any{"access_token": out.AccessToken, "refresh_token": out.RefreshToken, "token_type": out.TokenType, "expires_in": out.ExpiresIn, "scope": out.Scope, "cli_client_session_id": out.CLIClientSessionID}
+	if out.Enrollment != nil {
+		data["enrollment"] = map[string]any{"bootstrap_token": out.Enrollment.BootstrapToken, "server_url": out.Enrollment.ServerURL, "expires_at": out.Enrollment.ExpiresAt, "workspace_id": out.Enrollment.WorkspaceID, "admission": out.Enrollment.Admission}
+	}
+	writeJSON(w, http.StatusOK, SuccessResponse{Data: data})
 }
 func noStore(w http.ResponseWriter) {
 	w.Header().Set("Cache-Control", "no-store")
@@ -227,6 +274,11 @@ func writeDeviceError(w http.ResponseWriter, r *http.Request, err error) bool {
 	case "device_request_expired", "device_request_consumed":
 		status = http.StatusGone
 		message = "Authorization request is no longer available."
+	case "workspace_forbidden":
+		status = http.StatusForbidden
+		message = "You cannot add machines to that workspace."
+	case "workspace_required":
+		message = "Choose the workspace this device joins."
 	case "device_request_not_pending":
 		status = http.StatusConflict
 		message = "Authorization request is not pending."

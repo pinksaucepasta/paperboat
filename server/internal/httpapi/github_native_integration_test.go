@@ -75,7 +75,7 @@ func TestGitHubNativeLinkAuthenticatedLifecycle(t *testing.T) {
 		if e != nil {
 			t.Fatal(e)
 		}
-		if _, e = cliAuth.Decide(ctx, authorization.UserCode, user, true); e != nil {
+		if _, e = cliAuth.Decide(ctx, authorization.UserCode, user, true, ""); e != nil {
 			t.Fatal(e)
 		}
 		token, e := cliAuth.Poll(ctx, auth.DeviceTokenInput{ClientID: cfg.CLIAuth.ClientID, DeviceCode: authorization.DeviceCode, Network: "127.0.0.1"})

@@ -39,6 +39,12 @@ type DeviceAuthorizationInput struct {
 	ClientID, ClientLabel, DeviceType, OS string
 	Scopes                                []string
 	Network                               string
+	// Enroll is set by a device that is not yet a machine: approving the login then also
+	// enrolls it. EnrolledMachineID names the machine a device already is, so re-login only
+	// signs it back in. Workspace is the destination the device asked for ("" = none).
+	Enroll            bool
+	EnrolledMachineID string
+	Workspace         string
 }
 
 type DeviceAuthorization struct {
@@ -51,12 +57,58 @@ type DeviceTokenInput struct{ ClientID, DeviceCode, Network string }
 type TokenSet struct {
 	AccessToken, RefreshToken, TokenType, Scope, CLIClientSessionID string
 	ExpiresIn                                                       int
+	// Enrollment is the one-shot machine enrollment an approved device login mints; nil for
+	// refreshes and for devices that are already machines.
+	Enrollment *DeviceEnrollment
+}
+
+// DeviceEnrollment is returned only to the device that owns the approved grant.
+type DeviceEnrollment struct {
+	BootstrapToken string
+	ServerURL      string
+	ExpiresAt      time.Time
+	WorkspaceID    string
+	// Admission is "pending" when the chosen team must accept the machine, else "accepted".
+	Admission string
+}
+
+// ErrWorkspaceForbidden means the account may not add machines to the chosen workspace.
+var ErrWorkspaceForbidden = errors.New("workspace is unavailable for new machines")
+
+// DeviceEnroller is the machine side of a device login: it checks the destination workspace
+// at approval, mints the enrollment, and describes a machine that is already enrolled.
+type DeviceEnroller interface {
+	ValidateWorkspace(ctx context.Context, userID, workspaceID string) error
+	IssueEnrollment(ctx context.Context, userID, grantID, workspaceID, os string) (DeviceEnrollment, error)
+	EnrolledMachine(ctx context.Context, userID, machineID string) (EnrolledMachine, bool, error)
+	// Admission says whether a machine this account adds to the workspace is accepted at once or waits.
+	Admission(ctx context.Context, userID, workspaceID string) (string, error)
+}
+
+// Admission reports what adding a machine to the workspace does for the account.
+func (s *DeviceService) Admission(ctx context.Context, userID, workspaceID string) (string, error) {
+	if s.enroller == nil || workspaceID == "" {
+		return "", nil
+	}
+	return s.enroller.Admission(ctx, userID, workspaceID)
+}
+
+// EnrolledMachine describes the machine a re-login belongs to.
+type EnrolledMachine struct {
+	ID, Alias  string
+	Workspaces []string
 }
 
 type DeviceRequest struct {
 	ClientLabel, DeviceType, OS, UserCode, State string
 	Scopes                                       []string
 	IssuedAt, ExpiresAt                          time.Time
+	// Enroll reports whether approving also enrolls the device. RequestedWorkspace is what the
+	// device asked for; WorkspaceID is the approved destination ("personal" or a team id).
+	Enroll             bool
+	RequestedWorkspace string
+	WorkspaceID        string
+	EnrolledMachineID  string
 }
 
 type ClientPrincipal struct {
@@ -89,6 +141,7 @@ type DeviceService struct {
 	cfg                        config.CLIAuth
 	keys                       [][]byte
 	downstream                 DownstreamSessionRevoker
+	enroller                   DeviceEnroller
 	now                        func() time.Time
 }
 
@@ -106,6 +159,8 @@ func NewDeviceService(store *db.DB, auditWriter *audit.Writer, cfg config.CLIAut
 	return &DeviceService{db: store, audit: auditWriter, cfg: cfg, keys: keys, now: func() time.Time { return time.Now().UTC() }}
 }
 
+func (s *DeviceService) SetEnroller(enroller DeviceEnroller) { s.enroller = enroller }
+
 func (s *DeviceService) SetDownstreamRevoker(revoker DownstreamSessionRevoker) {
 	s.downstream = revoker
 }
@@ -120,6 +175,10 @@ func (s *DeviceService) Authorize(ctx context.Context, in DeviceAuthorizationInp
 	}
 	if !exactScopes(in.Scopes, s.cfg.AllowedScopes) {
 		return DeviceAuthorization{}, &DeviceError{Code: "invalid_scope"}
+	}
+	in.Workspace, in.EnrolledMachineID = strings.TrimSpace(in.Workspace), strings.TrimSpace(in.EnrolledMachineID)
+	if len(in.Workspace) > 64 || len(in.EnrolledMachineID) > 128 || in.Enroll && in.EnrolledMachineID != "" || !in.Enroll && in.Workspace != "" {
+		return DeviceAuthorization{}, &DeviceError{Code: "validation_failed"}
 	}
 	verification := strings.TrimRight(s.cfg.VerificationURL, "/")
 	u, err := url.Parse(verification)
@@ -136,7 +195,7 @@ func (s *DeviceService) Authorize(ctx context.Context, in DeviceAuthorizationInp
 	interval := max(1, int(s.cfg.PollInterval/time.Second))
 	grantID := newID("grant")
 	err = s.inTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := tx.Queries().CreateDeviceGrant(ctx, dbsqlc.CreateDeviceGrantParams{ID: grantID, ClientID: in.ClientID, ClientLabel: in.ClientLabel, DeviceType: in.DeviceType, Os: strings.TrimSpace(in.OS), Scopes: normalizedScopes(in.Scopes), DeviceCodeHash: s.hash(deviceCode), UserCodeHash: s.hashUserCode(userCode), IssuedAt: now, ExpiresAt: expires, PollIntervalSeconds: int32(interval), CreatedNetworkHash: s.hash(in.Network)}); err != nil {
+		if err := tx.Queries().CreateDeviceGrant(ctx, dbsqlc.CreateDeviceGrantParams{ID: grantID, ClientID: in.ClientID, ClientLabel: in.ClientLabel, DeviceType: in.DeviceType, Os: strings.TrimSpace(in.OS), Scopes: normalizedScopes(in.Scopes), DeviceCodeHash: s.hash(deviceCode), UserCodeHash: s.hashUserCode(userCode), IssuedAt: now, ExpiresAt: expires, PollIntervalSeconds: int32(interval), CreatedNetworkHash: s.hash(in.Network), Enroll: in.Enroll, EnrolledMachineID: nullText(in.EnrolledMachineID), RequestedWorkspace: nullText(in.Workspace)}); err != nil {
 			return err
 		}
 		return s.audit.WriteTx(ctx, tx, audit.Event{ActorType: audit.ActorSystem, EventType: "auth.device.requested", ResourceType: "device_grant", ResourceID: grantID, IdempotencyKey: "auth.device.requested:" + grantID, Metadata: map[string]any{"client_id": in.ClientID, "device_type": in.DeviceType}})
@@ -245,6 +304,17 @@ func (s *DeviceService) Poll(ctx context.Context, in DeviceTokenInput) (TokenSet
 		if err := s.takeRate(ctx, "account:"+grant.UserID, s.cfg.AccountActionsPerMinute); err != nil {
 			return err
 		}
+		var enrollment *DeviceEnrollment
+		if grant.Enroll {
+			if s.enroller == nil {
+				return errors.New("device enrollment is not configured")
+			}
+			issued, err := s.enroller.IssueEnrollment(ctx, grant.UserID, grant.ID, grant.WorkspaceTeamID.String, grant.Os)
+			if err != nil {
+				return fmt.Errorf("issue device enrollment: %w", err)
+			}
+			enrollment = &issued
+		}
 		access, refresh := randomToken(32), randomToken(32)
 		sessionID := newID("session")
 		approvedAt, err := q.GetDeviceGrantApprovedAt(ctx, grant.ID)
@@ -271,7 +341,7 @@ func (s *DeviceService) Poll(ctx context.Context, in DeviceTokenInput) (TokenSet
 		if err := s.audit.WriteTx(ctx, tx, audit.Event{ActorUserID: grant.UserID, ActorType: audit.ActorUser, EventType: "auth.device.completed", ResourceType: "device_grant", ResourceID: grant.ID, IdempotencyKey: "auth.device.completed:" + grant.ID, Metadata: map[string]any{"client_id": grant.ClientID, "cli_client_session_id": sessionID, "latency_ms": completionLatency}}); err != nil {
 			return err
 		}
-		out = TokenSet{AccessToken: access, RefreshToken: refresh, TokenType: "Bearer", ExpiresIn: int(s.cfg.AccessTokenLifetime / time.Second), Scope: grant.Scopes, CLIClientSessionID: sessionID}
+		out = TokenSet{AccessToken: access, RefreshToken: refresh, TokenType: "Bearer", ExpiresIn: int(s.cfg.AccessTokenLifetime / time.Second), Scope: grant.Scopes, CLIClientSessionID: sessionID, Enrollment: enrollment}
 		encoded, err := json.Marshal(out)
 		if err != nil {
 			return err
@@ -298,7 +368,13 @@ func (s *DeviceService) Poll(ctx context.Context, in DeviceTokenInput) (TokenSet
 
 func (s *DeviceService) Request(ctx context.Context, userCode string) (DeviceRequest, error) {
 	row, err := s.db.Queries().GetDeviceGrantRequest(ctx, s.userCodeHashList(userCode))
-	out := DeviceRequest{ClientLabel: row.ClientLabel, DeviceType: row.DeviceType, OS: row.Os, IssuedAt: row.IssuedAt, ExpiresAt: row.ExpiresAt, State: row.State}
+	out := DeviceRequest{ClientLabel: row.ClientLabel, DeviceType: row.DeviceType, OS: row.Os, IssuedAt: row.IssuedAt, ExpiresAt: row.ExpiresAt, State: row.State, Enroll: row.Enroll, RequestedWorkspace: row.RequestedWorkspace.String, EnrolledMachineID: row.EnrolledMachineID.String}
+	if row.Enroll && (row.State == "approved" || row.State == "consumed") {
+		out.WorkspaceID = "personal"
+		if row.WorkspaceTeamID.Valid {
+			out.WorkspaceID = row.WorkspaceTeamID.String
+		}
+	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return out, &DeviceError{Code: "device_request_not_found"}
 	}
@@ -319,11 +395,21 @@ func (s *DeviceService) Request(ctx context.Context, userCode string) (DeviceReq
 	return out, nil
 }
 
+// EnrolledMachine describes the machine a re-login says it already is, when it belongs to the account.
+func (s *DeviceService) EnrolledMachine(ctx context.Context, userID, machineID string) (EnrolledMachine, bool, error) {
+	if s.enroller == nil || machineID == "" {
+		return EnrolledMachine{}, false, nil
+	}
+	return s.enroller.EnrolledMachine(ctx, userID, machineID)
+}
+
 func (s *DeviceService) RateAccount(ctx context.Context, userID string) error {
 	return s.takeRate(ctx, "account:"+userID, s.cfg.AccountActionsPerMinute)
 }
 
-func (s *DeviceService) Decide(ctx context.Context, userCode, userID string, approve bool) (DeviceRequest, error) {
+// Decide records the account owner's answer. For a device that is joining (Enroll) an approval
+// must name the destination workspace: "personal" or a team the account may add machines to.
+func (s *DeviceService) Decide(ctx context.Context, userCode, userID string, approve bool, workspaceID string) (DeviceRequest, error) {
 	if err := s.takeRate(ctx, "account:"+userID, s.cfg.AccountActionsPerMinute); err != nil {
 		return DeviceRequest{}, err
 	}
@@ -351,6 +437,12 @@ func (s *DeviceService) Decide(ctx context.Context, userCode, userID string, app
 		if approve {
 			wanted = "approved"
 		}
+		var teamID sql.NullString
+		if approve && grant.State == "pending" {
+			if teamID, err = s.approvedWorkspace(ctx, grant.Enroll, userID, workspaceID); err != nil {
+				return err
+			}
+		}
 		if grant.State == wanted && grant.UserID == userID {
 			return nil
 		}
@@ -362,7 +454,7 @@ func (s *DeviceService) Decide(ctx context.Context, userCode, userID string, app
 		}
 		now := s.now()
 		if approve {
-			err = q.ApproveDeviceGrant(ctx, dbsqlc.ApproveDeviceGrantParams{ID: grant.ID, UserID: sql.NullString{String: userID, Valid: true}, ApprovedAt: sql.NullTime{Time: now, Valid: true}})
+			err = q.ApproveDeviceGrant(ctx, dbsqlc.ApproveDeviceGrantParams{ID: grant.ID, UserID: sql.NullString{String: userID, Valid: true}, ApprovedAt: sql.NullTime{Time: now, Valid: true}, WorkspaceTeamID: teamID})
 		} else {
 			err = q.DenyDeviceGrant(ctx, dbsqlc.DenyDeviceGrantParams{ID: grant.ID, UserID: sql.NullString{String: userID, Valid: true}, DeniedAt: sql.NullTime{Time: now, Valid: true}})
 		}
@@ -378,6 +470,33 @@ func (s *DeviceService) Decide(ctx context.Context, userCode, userID string, app
 		return DeviceRequest{}, outcomeErr
 	}
 	return s.Request(ctx, userCode)
+}
+
+// approvedWorkspace resolves the destination of an approval into the team to enroll into
+// (invalid for Personal). A device that is not joining takes no destination.
+func (s *DeviceService) approvedWorkspace(ctx context.Context, enroll bool, userID, workspaceID string) (sql.NullString, error) {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if !enroll {
+		if workspaceID != "" {
+			return sql.NullString{}, &DeviceError{Code: "validation_failed"}
+		}
+		return sql.NullString{}, nil
+	}
+	if workspaceID == "" {
+		return sql.NullString{}, &DeviceError{Code: "workspace_required"}
+	}
+	if s.enroller == nil {
+		return sql.NullString{}, errors.New("device enrollment is not configured")
+	}
+	if err := s.enroller.ValidateWorkspace(ctx, userID, workspaceID); errors.Is(err, ErrWorkspaceForbidden) {
+		return sql.NullString{}, &DeviceError{Code: "workspace_forbidden"}
+	} else if err != nil {
+		return sql.NullString{}, err
+	}
+	if workspaceID == "personal" {
+		return sql.NullString{}, nil
+	}
+	return sql.NullString{String: workspaceID, Valid: true}, nil
 }
 
 func (s *DeviceService) Authenticate(ctx context.Context, token string) (ClientPrincipal, error) {
@@ -695,3 +814,5 @@ func randomUserCode() string {
 	}
 	return string(b[:4]) + "-" + string(b[4:])
 }
+
+func nullText(value string) sql.NullString { return sql.NullString{String: value, Valid: value != ""} }

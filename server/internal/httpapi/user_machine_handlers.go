@@ -167,21 +167,30 @@ func userMachineEnrollmentStart(service *usermachines.Service) http.HandlerFunc 
 			return
 		}
 		var body struct {
-			Shell string `json:"shell"`
+			Shell     string `json:"shell"`
+			Workspace string `json:"workspace"`
 		}
 		if r.Body != nil {
 			decoder := json.NewDecoder(io.LimitReader(r.Body, 1025))
 			decoder.DisallowUnknownFields()
 			if err := decoder.Decode(&body); err != nil && !errors.Is(err, io.EOF) {
-				writeError(w, r, http.StatusBadRequest, "validation_failed", "Request body accepts only the installer shell.")
+				writeError(w, r, http.StatusBadRequest, "validation_failed", "Request body accepts only the installer shell and the destination workspace.")
 				return
 			}
 		}
 		if body.Shell == "" {
 			body.Shell = "posix"
 		}
-		result, err := service.StartEnrollmentWithOptions(r.Context(), p.User.ID, r.Header.Get("Idempotency-Key"), usermachines.EnrollmentOptions{Shell: body.Shell})
+		team := body.Workspace
+		if team == "personal" {
+			team = ""
+		}
+		result, err := service.StartEnrollmentWithOptions(r.Context(), p.User.ID, r.Header.Get("Idempotency-Key"), usermachines.EnrollmentOptions{Shell: body.Shell, WorkspaceTeamID: team})
 		if err != nil {
+			if errors.Is(err, usermachines.ErrWorkspaceForbidden) {
+				writeError(w, r, http.StatusForbidden, "workspace_forbidden", "You cannot add machines to that workspace.")
+				return
+			}
 			if errors.Is(err, usermachines.ErrIdempotencyKeyRequired) {
 				writeError(w, r, http.StatusBadRequest, "idempotency_key_required", "A valid Idempotency-Key header is required.")
 				return

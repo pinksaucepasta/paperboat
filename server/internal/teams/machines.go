@@ -152,7 +152,14 @@ func (s *Service) Machine(ctx context.Context, account, team string, r MachineRe
 	if !validID(r.MachineID) {
 		return Team{}, ErrInvalid
 	}
-	return s.mutate(ctx, account, team, r.OperationID, "machine_"+r.Action, r.ExpectedGeneration, r, func(ctx context.Context, tx *db.Tx, t Team, actor Member) error {
+	kind := "machine_" + r.Action
+	if r.Action == "share" {
+		// A share that has to wait for approval is its own kind of event in the team's history.
+		if admission, err := s.AdmissionFor(ctx, account, team); err == nil && admission == AdmissionPending {
+			kind = "machine_request"
+		}
+	}
+	return s.mutate(ctx, account, team, r.OperationID, kind, r.ExpectedGeneration, r, func(ctx context.Context, tx *db.Tx, t Team, actor Member) error {
 		owner, ownerTeam, err := machineOwnerTx(ctx, tx, r.MachineID)
 		if err != nil {
 			return err
@@ -162,10 +169,39 @@ func (s *Service) Machine(ctx context.Context, account, team string, r MachineRe
 			if owner != account || ownerTeam != "" {
 				return ErrForbidden
 			}
+			if (admissionFor(t, actor) == AdmissionPending) != (kind == "machine_request") {
+				return ErrConflict
+			}
+			if kind == "machine_request" {
+				return requestMachineTx(ctx, tx, team, r.MachineID, account)
+			}
 			return bindMachineTx(ctx, tx, team, r.MachineID, owner)
+		case "approve", "decline":
+			if !administrative(actor.Role) || ownerTeam != "" {
+				return ErrForbidden
+			}
+			requestedBy, err := requestRowTx(ctx, tx, team, r.MachineID)
+			if err != nil {
+				return err
+			}
+			if r.Action == "decline" {
+				_, err = tx.Exec(ctx, `UPDATE team_machine_requests SET state='declined',decided_by=$3,decided_at=now() WHERE team_id=$1 AND machine_id=$2`, team, r.MachineID, account)
+				return err
+			}
+			if requestedBy != owner {
+				return ErrConflict
+			}
+			if err = bindMachineTx(ctx, tx, team, r.MachineID, owner); err != nil {
+				return err
+			}
+			_, err = tx.Exec(ctx, `DELETE FROM team_machine_requests WHERE team_id=$1 AND machine_id=$2`, team, r.MachineID)
+			return err
 		case "unshare":
 			if ownerTeam != "" || owner != account && !administrative(actor.Role) {
 				return ErrForbidden
+			}
+			if _, err = tx.Exec(ctx, `DELETE FROM team_machine_requests WHERE team_id=$1 AND machine_id=$2`, team, r.MachineID); err != nil {
+				return err
 			}
 			return unbindMachineTx(ctx, tx, team, r.MachineID)
 		case "transfer_to_team":
@@ -216,6 +252,47 @@ func (s *Service) Machine(ctx context.Context, account, team string, r MachineRe
 			return ErrInvalid
 		}
 	})
+}
+
+// ShareEnrolledMachineTx puts a machine its owner just enrolled into one of the owner's teams, the
+// way the team's share action would: right away, or as a request an owner or admin must accept when
+// the team asks for approval. It runs inside the enrollment transaction so a machine never enrolls
+// half-placed, and returns what happened (AdmissionAccepted or AdmissionPending).
+func ShareEnrolledMachineTx(ctx context.Context, tx *db.Tx, account, team, machine string) (string, error) {
+	if !validID(team) || !validID(machine) {
+		return "", ErrInvalid
+	}
+	if err := Lock(ctx, tx); err != nil {
+		return "", err
+	}
+	t, err := ReadTx(ctx, tx, team)
+	if err != nil {
+		return "", err
+	}
+	if t.Deleted {
+		return "", ErrForbidden
+	}
+	if t.Suspended {
+		return "", ErrSuspended
+	}
+	actor, ok := member(t, account)
+	if !ok {
+		return "", ErrForbidden
+	}
+	admission, kind := admissionFor(t, actor), "machine_share"
+	if admission == AdmissionPending {
+		kind = "machine_request"
+		err = requestMachineTx(ctx, tx, team, machine, account)
+	} else {
+		err = bindMachineTx(ctx, tx, team, machine, account)
+	}
+	if err != nil {
+		return "", err
+	}
+	if err = advance(ctx, tx, team); err != nil {
+		return "", err
+	}
+	return admission, AuditTx(ctx, tx, account, team, kind, "enroll:"+machine, map[string]any{"machine_id": machine})
 }
 func bindMachineTx(ctx context.Context, tx *db.Tx, team, machine, owner string) error {
 	var count int

@@ -26,17 +26,23 @@ func (q *Queries) AdvanceDeviceGrantPoll(ctx context.Context, arg AdvanceDeviceG
 }
 
 const approveDeviceGrant = `-- name: ApproveDeviceGrant :exec
-UPDATE device_grants SET state='approved',user_id=$2,approved_at=$3,version=version+1 WHERE id=$1 AND state='pending'
+UPDATE device_grants SET state='approved',user_id=$1,approved_at=$2,workspace_team_id=$3,version=version+1 WHERE id=$4 AND state='pending'
 `
 
 type ApproveDeviceGrantParams struct {
-	ID         string
-	UserID     sql.NullString
-	ApprovedAt sql.NullTime
+	UserID          sql.NullString
+	ApprovedAt      sql.NullTime
+	WorkspaceTeamID sql.NullString
+	ID              string
 }
 
 func (q *Queries) ApproveDeviceGrant(ctx context.Context, arg ApproveDeviceGrantParams) error {
-	_, err := q.db.Exec(ctx, approveDeviceGrant, arg.ID, arg.UserID, arg.ApprovedAt)
+	_, err := q.db.Exec(ctx, approveDeviceGrant,
+		arg.UserID,
+		arg.ApprovedAt,
+		arg.WorkspaceTeamID,
+		arg.ID,
+	)
 	return err
 }
 
@@ -198,8 +204,8 @@ func (q *Queries) CreateClientSession(ctx context.Context, arg CreateClientSessi
 
 const createDeviceGrant = `-- name: CreateDeviceGrant :exec
 INSERT INTO device_grants
-(id, client_id, client_label, device_type, os, scopes, device_code_hash, user_code_hash, state, issued_at, expires_at, poll_interval_seconds, next_poll_at, created_network_hash)
-VALUES ($1, $2, $3, $4, $5, string_to_array($6,' '), $7, $8, 'pending', $9, $10, $11, $9, $12)
+(id, client_id, client_label, device_type, os, scopes, device_code_hash, user_code_hash, state, issued_at, expires_at, poll_interval_seconds, next_poll_at, created_network_hash, enroll, enrolled_machine_id, requested_workspace)
+VALUES ($1, $2, $3, $4, $5, string_to_array($6,' '), $7, $8, 'pending', $9, $10, $11, $9, $12, $13, $14, $15)
 `
 
 type CreateDeviceGrantParams struct {
@@ -215,6 +221,9 @@ type CreateDeviceGrantParams struct {
 	ExpiresAt           time.Time
 	PollIntervalSeconds int32
 	CreatedNetworkHash  string
+	Enroll              bool
+	EnrolledMachineID   sql.NullString
+	RequestedWorkspace  sql.NullString
 }
 
 func (q *Queries) CreateDeviceGrant(ctx context.Context, arg CreateDeviceGrantParams) error {
@@ -231,6 +240,9 @@ func (q *Queries) CreateDeviceGrant(ctx context.Context, arg CreateDeviceGrantPa
 		arg.ExpiresAt,
 		arg.PollIntervalSeconds,
 		arg.CreatedNetworkHash,
+		arg.Enroll,
+		arg.EnrolledMachineID,
+		arg.RequestedWorkspace,
 	)
 	return err
 }
@@ -421,17 +433,19 @@ func (q *Queries) GetDeviceGrantApprovedAt(ctx context.Context, id string) (sql.
 }
 
 const getDeviceGrantForDecision = `-- name: GetDeviceGrantForDecision :one
-SELECT id,state,coalesce(user_id,'') AS user_id,expires_at,user_code_hash,client_id
+SELECT id,state,coalesce(user_id,'') AS user_id,expires_at,user_code_hash,client_id,enroll,enrolled_machine_id
 FROM device_grants WHERE user_code_hash = ANY(string_to_array($1,' ')) FOR UPDATE
 `
 
 type GetDeviceGrantForDecisionRow struct {
-	ID           string
-	State        string
-	UserID       string
-	ExpiresAt    time.Time
-	UserCodeHash string
-	ClientID     string
+	ID                string
+	State             string
+	UserID            string
+	ExpiresAt         time.Time
+	UserCodeHash      string
+	ClientID          string
+	Enroll            bool
+	EnrolledMachineID sql.NullString
 }
 
 func (q *Queries) GetDeviceGrantForDecision(ctx context.Context, stringToArray string) (GetDeviceGrantForDecisionRow, error) {
@@ -444,12 +458,14 @@ func (q *Queries) GetDeviceGrantForDecision(ctx context.Context, stringToArray s
 		&i.ExpiresAt,
 		&i.UserCodeHash,
 		&i.ClientID,
+		&i.Enroll,
+		&i.EnrolledMachineID,
 	)
 	return i, err
 }
 
 const getDeviceGrantForPoll = `-- name: GetDeviceGrantForPoll :one
-SELECT id,client_id,state,coalesce(user_id,'') AS user_id,client_label,device_type,os,array_to_string(scopes,' ') AS scopes,issued_at,expires_at,next_poll_at,poll_interval_seconds,device_code_hash
+SELECT id,client_id,state,coalesce(user_id,'') AS user_id,client_label,device_type,os,array_to_string(scopes,' ') AS scopes,issued_at,expires_at,next_poll_at,poll_interval_seconds,device_code_hash,enroll,workspace_team_id
 FROM device_grants WHERE device_code_hash = ANY(string_to_array($1,' ')) FOR UPDATE
 `
 
@@ -467,6 +483,8 @@ type GetDeviceGrantForPollRow struct {
 	NextPollAt          time.Time
 	PollIntervalSeconds int32
 	DeviceCodeHash      string
+	Enroll              bool
+	WorkspaceTeamID     sql.NullString
 }
 
 func (q *Queries) GetDeviceGrantForPoll(ctx context.Context, stringToArray string) (GetDeviceGrantForPollRow, error) {
@@ -486,24 +504,30 @@ func (q *Queries) GetDeviceGrantForPoll(ctx context.Context, stringToArray strin
 		&i.NextPollAt,
 		&i.PollIntervalSeconds,
 		&i.DeviceCodeHash,
+		&i.Enroll,
+		&i.WorkspaceTeamID,
 	)
 	return i, err
 }
 
 const getDeviceGrantRequest = `-- name: GetDeviceGrantRequest :one
-SELECT client_label,device_type,os,array_to_string(scopes,' ') AS scopes,issued_at,expires_at,state,user_code_hash
+SELECT client_label,device_type,os,array_to_string(scopes,' ') AS scopes,issued_at,expires_at,state,user_code_hash,enroll,enrolled_machine_id,requested_workspace,workspace_team_id
 FROM device_grants WHERE user_code_hash = ANY(string_to_array($1,' '))
 `
 
 type GetDeviceGrantRequestRow struct {
-	ClientLabel  string
-	DeviceType   string
-	Os           string
-	Scopes       string
-	IssuedAt     time.Time
-	ExpiresAt    time.Time
-	State        string
-	UserCodeHash string
+	ClientLabel        string
+	DeviceType         string
+	Os                 string
+	Scopes             string
+	IssuedAt           time.Time
+	ExpiresAt          time.Time
+	State              string
+	UserCodeHash       string
+	Enroll             bool
+	EnrolledMachineID  sql.NullString
+	RequestedWorkspace sql.NullString
+	WorkspaceTeamID    sql.NullString
 }
 
 func (q *Queries) GetDeviceGrantRequest(ctx context.Context, stringToArray string) (GetDeviceGrantRequestRow, error) {
@@ -518,6 +542,10 @@ func (q *Queries) GetDeviceGrantRequest(ctx context.Context, stringToArray strin
 		&i.ExpiresAt,
 		&i.State,
 		&i.UserCodeHash,
+		&i.Enroll,
+		&i.EnrolledMachineID,
+		&i.RequestedWorkspace,
+		&i.WorkspaceTeamID,
 	)
 	return i, err
 }

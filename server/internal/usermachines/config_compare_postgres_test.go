@@ -122,19 +122,32 @@ func TestNativeConfigCompareDescriptorAndMeterPostgres(t *testing.T) {
 	if terminals != 0 {
 		t.Fatal("comparison created terminal")
 	}
-	// Assigning changed config rewrites the assignment id; the open comparison must not block it.
+	// A live assignment keeps its id when its config changes, so the machine's sync state and an open
+	// comparison stay attached to it; a revoked one starts a new lifecycle with a new id.
 	var version int64
 	var mode string
 	var rules, bindings []byte
 	if err := store.SQL().QueryRowContext(ctx, `SELECT version,mode,path_rules,repository_bindings FROM control_config_assignments WHERE id=$1`, assignment).Scan(&version, &mode, &rules, &bindings); err != nil {
 		t.Fatal(err)
 	}
-	reassigned := "cmp_reassigned_" + suffix
-	if _, err := store.Queries().SetControlConfigAssignment(ctx, dbsqlc.SetControlConfigAssignmentParams{AssignmentID: reassigned, EnvironmentID: environment, RepositoryID: sql.NullString{String: repository, Valid: true}, Mode: mode, ConsentState: "pending", WarningRevision: sql.NullString{String: "warning", Valid: true}, PathRules: rules, RepositoryBindings: bindings, ConfigurationRevision: strings.Repeat("b", 64), Now: time.Now(), ExpectedVersion: version}); err != nil {
-		t.Fatalf("assigning changed config while a comparison is open: %v", err)
+	set := func(id string, revision string, expected int64) dbsqlc.ControlConfigAssignment {
+		t.Helper()
+		row, err := store.Queries().SetControlConfigAssignment(ctx, dbsqlc.SetControlConfigAssignmentParams{AssignmentID: id, EnvironmentID: environment, RepositoryID: sql.NullString{String: repository, Valid: true}, Mode: mode, ConsentState: "pending", WarningRevision: sql.NullString{String: "warning", Valid: true}, PathRules: rules, RepositoryBindings: bindings, ConfigurationRevision: revision, Now: time.Now(), ExpectedVersion: expected})
+		if err != nil {
+			t.Fatalf("assigning config: %v", err)
+		}
+		return row
 	}
-	var followed int
-	if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM config_compare_admissions WHERE machine_id=$1 AND assignment_id=$2`, machine, reassigned).Scan(&followed); err != nil || followed == 0 {
-		t.Fatalf("comparison admissions did not follow the assignment: %d %v", followed, err)
+	updated := set("cmp_candidate_"+suffix, strings.Repeat("b", 64), version)
+	if updated.ID != assignment || updated.Version != version+1 {
+		t.Fatalf("a config change replaced the assignment id: %s (want %s) version=%d", updated.ID, assignment, updated.Version)
+	}
+	var kept int
+	if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM config_compare_admissions WHERE machine_id=$1 AND assignment_id=$2`, machine, assignment).Scan(&kept); err != nil || kept == 0 {
+		t.Fatalf("the open comparison lost its assignment: %d %v", kept, err)
+	}
+	execute(`UPDATE control_config_assignments SET revoked_at=now(), consent_state='revoked' WHERE id=$1`, assignment)
+	if fresh := set("cmp_fresh_"+suffix, strings.Repeat("c", 64), updated.Version); fresh.ID != "cmp_fresh_"+suffix {
+		t.Fatalf("a revoked assignment must start a new lifecycle: %s", fresh.ID)
 	}
 }

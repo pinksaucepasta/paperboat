@@ -4461,6 +4461,20 @@
                 "operations:write"
               ]
             }
+          },
+          "enroll": {
+            "type": "boolean",
+            "description": "The device is not a machine yet: approving the login also enrolls it."
+          },
+          "enrolled_machine_id": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "The machine this device already is; re-login only signs it back in."
+          },
+          "workspace": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "Workspace the device asked to join: personal or a team slug. Only with enroll."
           }
         }
       },
@@ -4548,6 +4562,41 @@
           },
           "cli_client_session_id": {
             "type": "string"
+          },
+          "enrollment": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "One-shot machine enrollment minted when an enrolling device login is approved; present only for that device.",
+            "required": [
+              "bootstrap_token",
+              "server_url",
+              "expires_at",
+              "workspace_id"
+            ],
+            "properties": {
+              "bootstrap_token": {
+                "type": "string"
+              },
+              "server_url": {
+                "type": "string",
+                "format": "uri"
+              },
+              "expires_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "workspace_id": {
+                "type": "string",
+                "description": "personal or the team id the machine joins."
+              },
+              "admission": {
+                "type": "string",
+                "enum": [
+                  "accepted",
+                  "pending"
+                ]
+              }
+            }
           }
         }
       },
@@ -4564,7 +4613,10 @@
           "expires_at",
           "state",
           "issuer",
-          "account"
+          "account",
+          "enroll",
+          "requested_workspace",
+          "workspace_id"
         ],
         "properties": {
           "user_code": {
@@ -4649,6 +4701,49 @@
                 "type": "string"
               }
             }
+          },
+          "enroll": {
+            "type": "boolean"
+          },
+          "requested_workspace": {
+            "type": "string",
+            "description": "Workspace the device asked for; empty when it did not."
+          },
+          "workspace_id": {
+            "type": "string",
+            "description": "Approved destination (personal or a team id); empty until approved."
+          },
+          "enrolled_machine": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "The account's machine this device already is.",
+            "required": [
+              "id",
+              "alias",
+              "workspaces"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "alias": {
+                "type": "string"
+              },
+              "workspaces": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "admission": {
+            "type": "string",
+            "enum": [
+              "accepted",
+              "pending"
+            ],
+            "description": "For an approved joining computer in a team: whether the team accepts it at once or an owner or admin must."
           }
         }
       },
@@ -9267,6 +9362,17 @@
           },
           "suspended": {
             "type": "boolean"
+          },
+          "approve_new_machines": {
+            "type": "boolean",
+            "description": "Machines that members add wait for an owner or admin to accept them."
+          },
+          "machine_requests": {
+            "type": "array",
+            "description": "Owners and admins see every request; other members see their own.",
+            "items": {
+              "$ref": "#/components/schemas/TeamMachineAdmission"
+            }
           }
         },
         "required": [
@@ -9396,7 +9502,8 @@
               "leave",
               "transfer",
               "delete",
-              "rename"
+              "rename",
+              "machine_approval"
             ]
           },
           "account_id": {
@@ -9412,6 +9519,10 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 128
+          },
+          "approve_new_machines": {
+            "type": "boolean",
+            "description": "With action machine_approval: whether machines members add need an owner or admin to accept them."
           }
         },
         "required": [
@@ -13363,6 +13474,10 @@
               "admin",
               "member"
             ]
+          },
+          "approve_new_machines": {
+            "type": "boolean",
+            "description": "Team only: machines members add wait for an owner or admin."
           }
         }
       },
@@ -15292,6 +15407,48 @@
             "items": {
               "$ref": "#/components/schemas/InboxItem"
             }
+          }
+        }
+      },
+      "TeamMachineAdmission": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "A machine that asked to join the team and is waiting for an owner or admin, or was declined.",
+        "required": [
+          "machine_id",
+          "alias",
+          "requested_by",
+          "state",
+          "requested_at"
+        ],
+        "properties": {
+          "machine_id": {
+            "type": "string"
+          },
+          "alias": {
+            "type": "string"
+          },
+          "requested_by": {
+            "type": "string",
+            "description": "Account that owns the machine."
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "declined"
+            ]
+          },
+          "requested_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "decided_by": {
+            "type": "string"
+          },
+          "decided_at": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       }
@@ -24734,9 +24891,32 @@
           },
           "410": {
             "$ref": "#/components/responses/Error"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
           }
         },
-        "operationId": "post_v1_auth_device_requests_user_code_approve"
+        "operationId": "post_v1_auth_device_requests_user_code_approve",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "workspace_id": {
+                    "type": "string",
+                    "description": "Destination for a joining device: personal or a team the account may add machines to. Required when approving a device that is joining."
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/v1/auth/device/requests/{user_code}/deny": {
@@ -24788,7 +24968,24 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "operationId": "post_v1_auth_device_requests_user_code_deny"
+        "operationId": "post_v1_auth_device_requests_user_code_deny",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "workspace_id": {
+                    "type": "string",
+                    "description": "Destination for a joining device: personal or a team the account may add machines to. Required when approving a device that is joining."
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/v1/auth/token/refresh": {
@@ -25860,9 +26057,36 @@
           },
           "400": {
             "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
           }
         },
-        "operationId": "post_v1_user_machine_enrollments"
+        "operationId": "post_v1_user_machine_enrollments",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "shell": {
+                    "type": "string",
+                    "enum": [
+                      "posix",
+                      "powershell"
+                    ]
+                  },
+                  "workspace": {
+                    "type": "string",
+                    "description": "Workspace the machine joins when it enrolls: personal (default) or a team the account may add machines to."
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/v1/machine-enrollments/{enrollment_id}": {

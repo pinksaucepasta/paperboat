@@ -147,16 +147,12 @@ SELECT sqlc.arg(assignment_id), machine.id, sqlc.arg(environment_id), sqlc.arg(r
 FROM user_machines machine
 WHERE machine.environment_id = sqlc.arg(environment_id) AND machine.deleted_at IS NULL
 ON CONFLICT (machine_id) DO UPDATE
+-- A live assignment keeps its id when its configuration changes: the machine's sync state (last
+-- synced baseline, conflicts, comparisons) is keyed by it. A revoked or adopted assignment starts a
+-- new lifecycle with a new id.
 SET id = CASE WHEN control_config_assignments.revoked_at IS NULL
                   AND control_config_assignments.consent_state <> 'revoked'
                   AND control_config_assignments.adopted_team_id IS NULL
-                  AND control_config_assignments.repository_id IS NOT DISTINCT FROM EXCLUDED.repository_id
-                  AND control_config_assignments.push_repository_id IS NOT DISTINCT FROM EXCLUDED.push_repository_id
-                  AND control_config_assignments.path_rules = EXCLUDED.path_rules
-                  AND control_config_assignments.repository_bindings = EXCLUDED.repository_bindings
-                  AND control_config_assignments.configuration_revision = EXCLUDED.configuration_revision
-                  AND control_config_assignments.mode = EXCLUDED.mode
-                  AND control_config_assignments.warning_revision IS NOT DISTINCT FROM EXCLUDED.warning_revision
              THEN control_config_assignments.id ELSE EXCLUDED.id END,
     repository_id = EXCLUDED.repository_id, push_repository_id = EXCLUDED.push_repository_id,
     mode = EXCLUDED.mode, consent_state = EXCLUDED.consent_state, automatic_updates = EXCLUDED.automatic_updates,

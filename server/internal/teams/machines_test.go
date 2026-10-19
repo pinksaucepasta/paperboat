@@ -169,6 +169,9 @@ func TestPostgresTeamMachineAuthority(t *testing.T) {
 	// Ordinary personal owners can share and withdraw, but cannot take team property.
 	machineAction(enroller, machine, "share")
 	machineAction(enroller, personal, "share")
+	// A member's machines wait for an owner or admin (the default); here the owner accepts them.
+	machineAction(owner, machine, "approve")
+	machineAction(owner, personal, "approve")
 	check(owner, team, machine, "terminal", false)
 	grant(enroller, machine, "selected_member", memberID, []string{"terminal", "files"}, true, "selected")
 	check(memberID, team, machine, "terminal", true)

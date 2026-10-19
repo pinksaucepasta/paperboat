@@ -799,8 +799,8 @@ func (r *SQLRepository) CreateResourceDomain(ctx context.Context, input DomainRe
 			return nil
 		}
 		if existing, lookupErr := q.GetTunnelDomainByHostnameV1(ctx, input.Hostname); lookupErr == nil {
-			if domainClaimBlocked(existing, input.Now) {
-				return ErrDomainConflict
+			if err := domainClaimError(existing, input.Now); err != nil {
+				return err
 			}
 		} else if !errors.Is(lookupErr, pgx.ErrNoRows) {
 			return translate(lookupErr)
@@ -849,8 +849,16 @@ func (r *SQLRepository) CreateResourceDomain(ctx context.Context, input DomainRe
 	return result, translate(err)
 }
 
-func domainClaimBlocked(existing dbsqlc.TunnelDomain, now time.Time) bool {
-	return !existing.DeletedAt.Valid || (existing.QuarantineUntil.Valid && existing.QuarantineUntil.Time.After(now))
+// domainClaimError says why a hostname cannot be bound: another binding holds it, or it was removed
+// recently and is quarantined. Nil when it can be claimed.
+func domainClaimError(existing dbsqlc.TunnelDomain, now time.Time) error {
+	switch {
+	case !existing.DeletedAt.Valid:
+		return ErrDomainConflict
+	case existing.QuarantineUntil.Valid && existing.QuarantineUntil.Time.After(now):
+		return fmt.Errorf("%w: %w", ErrDomainConflict, ErrDomainQuarantined)
+	}
+	return nil
 }
 
 func (r *SQLRepository) DeleteResourceDomain(ctx context.Context, input DomainRecord) (ResourceMutationRecord, error) {

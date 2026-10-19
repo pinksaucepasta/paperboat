@@ -62,7 +62,7 @@ func TestConfigNativeConflictResolutionAuthorization(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := cliAuth.Decide(ctx, grant.UserCode, user, true); err != nil {
+		if _, err := cliAuth.Decide(ctx, grant.UserCode, user, true, ""); err != nil {
 			t.Fatal(err)
 		}
 		result, err := cliAuth.Poll(ctx, auth.DeviceTokenInput{ClientID: cfg.CLIAuth.ClientID, DeviceCode: grant.DeviceCode, Network: "127.0.0.1"})

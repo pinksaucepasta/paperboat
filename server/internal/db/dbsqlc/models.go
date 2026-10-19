@@ -919,6 +919,10 @@ type DeviceGrant struct {
 	CreatedNetworkHash  string
 	Version             int64
 	CLIClientSessionID  sql.NullString
+	Enroll              bool
+	EnrolledMachineID   sql.NullString
+	RequestedWorkspace  sql.NullString
+	WorkspaceTeamID     sql.NullString
 }
 
 type DeviceTokenRedemption struct {
@@ -2079,14 +2083,15 @@ type SupportReport struct {
 }
 
 type Team struct {
-	TeamID       string
-	OwnerAccount string
-	Generation   int64
-	DeletedAt    sql.NullTime
-	Suspended    bool
-	SuspendedAt  sql.NullTime
-	SuspendedBy  sql.NullString
-	DisplayName  sql.NullString
+	TeamID             string
+	OwnerAccount       string
+	Generation         int64
+	DeletedAt          sql.NullTime
+	Suspended          bool
+	SuspendedAt        sql.NullTime
+	SuspendedBy        sql.NullString
+	DisplayName        sql.NullString
+	ApproveNewMachines bool
 }
 
 type TeamConfigDefault struct {
@@ -2183,6 +2188,16 @@ type TeamMachineGrant struct {
 	Capabilities []string
 	Generation   int64
 	Active       bool
+}
+
+type TeamMachineRequest struct {
+	TeamID      string
+	MachineID   string
+	RequestedBy string
+	State       string
+	RequestedAt time.Time
+	DecidedBy   sql.NullString
+	DecidedAt   sql.NullTime
 }
 
 type TeamMember struct {
@@ -2892,6 +2907,7 @@ type UserMachinePairing struct {
 	InstallationState                    string
 	Generation                           int64
 	CancelledAt                          sql.NullTime
+	WorkspaceTeamID                      sql.NullString
 	ReplacesMachineID                    sql.NullString
 }
 

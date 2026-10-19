@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net"
 	"strings"
 	"sync/atomic"
@@ -157,16 +158,16 @@ func TestOneLabelWildcardDoesNotCaptureApexOrMultipleLabels(t *testing.T) {
 
 func TestDomainClaimQuarantineIsBoundedAndLiveClaimsStayExclusive(t *testing.T) {
 	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
-	if !domainClaimBlocked(dbsqlc.TunnelDomain{}, now) {
-		t.Fatal("live claim must remain exclusive across accounts")
+	if err := domainClaimError(dbsqlc.TunnelDomain{}, now); !errors.Is(err, ErrDomainConflict) || errors.Is(err, ErrDomainQuarantined) {
+		t.Fatalf("live claim must remain exclusive across accounts: %v", err)
 	}
 	deleted := dbsqlc.TunnelDomain{DeletedAt: sql.NullTime{Time: now.Add(-time.Hour), Valid: true}, QuarantineUntil: sql.NullTime{Time: now.Add(time.Hour), Valid: true}}
-	if !domainClaimBlocked(deleted, now) {
-		t.Fatal("active quarantine must block reuse")
+	if err := domainClaimError(deleted, now); !errors.Is(err, ErrDomainConflict) || !errors.Is(err, ErrDomainQuarantined) {
+		t.Fatalf("active quarantine must block reuse and say why: %v", err)
 	}
 	deleted.QuarantineUntil.Time = now
-	if domainClaimBlocked(deleted, now) {
-		t.Fatal("expired quarantine must allow a fresh independently verified claim")
+	if err := domainClaimError(deleted, now); err != nil {
+		t.Fatalf("expired quarantine must allow a fresh independently verified claim: %v", err)
 	}
 }
 

@@ -105,6 +105,9 @@ func registerTeamRoutes(mux *http.ServeMux, service teamAPI, read, write func(ht
 				}
 				out, err = service.Attach(r.Context(), account, team, in)
 			}
+			if err == nil {
+				out = teamViewFor(out, account)
+			}
 			if writeEmailPolicyError(w, r, err) {
 				return
 			}
@@ -157,4 +160,19 @@ func registerTeamRoutes(mux *http.ServeMux, service teamAPI, read, write func(ht
 	handle("POST /v1/teams/{team_id}/invitations/{invitation_id}/cancel", "cancel", true)
 	handle("POST /v1/teams/{team_id}/grants", "grant", true)
 	handle("POST /v1/teams/{team_id}/resources", "attach", true)
+}
+
+// teamViewFor shows a caller only the machine requests they may see.
+func teamViewFor(out any, account string) any {
+	switch value := out.(type) {
+	case teams.Team:
+		return teams.ViewFor(value, account)
+	case []teams.Team:
+		views := make([]teams.Team, len(value))
+		for i, team := range value {
+			views[i] = teams.ViewFor(team, account)
+		}
+		return views
+	}
+	return out
 }

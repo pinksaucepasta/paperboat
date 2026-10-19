@@ -29,7 +29,7 @@ func configureInspectorNativeAuthority(t *testing.T, database *db.DB, linked *in
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = cliAuth.Decide(t.Context(), authorization.UserCode, linked.Descriptor["OwnerAccountID"].(string), true); err != nil {
+	if _, err = cliAuth.Decide(t.Context(), authorization.UserCode, linked.Descriptor["OwnerAccountID"].(string), true, ""); err != nil {
 		t.Fatal(err)
 	}
 	token, err := cliAuth.Poll(t.Context(), auth.DeviceTokenInput{ClientID: cfg.ClientID, DeviceCode: authorization.DeviceCode, Network: "127.0.0.1"})

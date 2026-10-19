@@ -20,6 +20,7 @@ import (
 	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
 	"github.com/pinksaucepasta/paperboat-server/internal/teaminbox"
 	"github.com/pinksaucepasta/paperboat-server/internal/workers"
+	"github.com/pinksaucepasta/paperboat-server/internal/workspace"
 	"io"
 	"net/http"
 	"regexp"
@@ -54,6 +55,7 @@ var (
 	ErrPairingPlatformUnsupported           = errors.New("machine pairing platform is unsupported")
 	ErrEnrollmentState                      = errors.New("user-machine enrollment state does not allow this operation")
 	ErrIdempotencyKeyRequired               = errors.New("user-machine enrollment idempotency key is required")
+	ErrWorkspaceForbidden                   = errors.New("machines cannot be added to that workspace")
 	ErrTerminalSessionNotFound              = errors.New("user-machine terminal session not found")
 	ErrTerminalSessionReserved              = errors.New("user-machine default terminal session is reserved")
 	ErrTerminalSessionLimit                 = errors.New("user-machine terminal session limit reached")
@@ -532,6 +534,8 @@ type EnrollmentStart struct {
 
 type EnrollmentOptions struct {
 	Shell string // posix or powershell
+	// WorkspaceTeamID is the team the machine joins when it enrolls; empty keeps it Personal.
+	WorkspaceTeamID string
 }
 
 func (s *Service) StartEnrollment(ctx context.Context, userID, idempotencyKey string) (EnrollmentStart, error) {
@@ -542,6 +546,14 @@ func (s *Service) StartEnrollmentWithOptions(ctx context.Context, userID, idempo
 	userID, idempotencyKey = strings.TrimSpace(userID), strings.TrimSpace(idempotencyKey)
 	if userID == "" || idempotencyKey == "" || len(idempotencyKey) > 128 {
 		return EnrollmentStart{}, ErrIdempotencyKeyRequired
+	}
+	if team := options.WorkspaceTeamID; team != "" {
+		if err := workspace.Validate(ctx, s.db, userID, workspace.Scope{ID: team, TeamID: team}); err != nil {
+			if errors.Is(err, workspace.ErrForbidden) || errors.Is(err, workspace.ErrInvalid) {
+				return EnrollmentStart{}, ErrWorkspaceForbidden
+			}
+			return EnrollmentStart{}, err
+		}
 	}
 	if strings.TrimSpace(s.encryptionKey) == "" {
 		return EnrollmentStart{}, errors.New("user-machine enrollment encryption is not configured")
@@ -559,6 +571,7 @@ func (s *Service) StartEnrollmentWithOptions(ctx context.Context, userID, idempo
 	row, err := s.db.Queries().CreateBootstrapPairing(ctx, dbsqlc.CreateBootstrapPairingParams{
 		ID: newID("pairing"), UserID: sql.NullString{String: userID, Valid: true}, OperationID: sql.NullString{String: newID("operation"), Valid: true}, IdempotencyKey: sql.NullString{String: idempotencyKey, Valid: true},
 		BootstrapTokenHash: hash[:], BootstrapTokenCiphertext: ciphertext, ExpiresAt: expires,
+		WorkspaceTeamID: sql.NullString{String: options.WorkspaceTeamID, Valid: options.WorkspaceTeamID != ""},
 	})
 	if err != nil {
 		return EnrollmentStart{}, err

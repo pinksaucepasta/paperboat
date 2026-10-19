@@ -158,6 +158,9 @@ func (s *Service) approve(ctx context.Context, userID, userCode string) (UserMac
 				if err != nil {
 					return err
 				}
+				if err := placeEnrolledMachine(ctx, tx, userID, pairing, row.ID); err != nil {
+					return err
+				}
 				out, pairingID = mapMachine(row), pairing.ID
 				return s.audit.WriteTx(ctx, tx, audit.Event{ActorUserID: userID, ActorType: audit.ActorUser, EventType: "user_machine.enrollment_restarted", ResourceType: "user_machine", ResourceID: row.ID, IdempotencyKey: "user_machine.enrollment_restarted:" + pairing.ID, Metadata: map[string]any{"environment_id": row.EnvironmentID, "generation": enrollment.Generation}})
 			}
@@ -224,6 +227,9 @@ func (s *Service) approve(ctx context.Context, userID, userCode string) (UserMac
 			}
 			row, err = optInUserMachineKeepAwake(ctx, tx, userID, row, pairing.KeepAwake)
 			if err != nil {
+				return err
+			}
+			if err := placeEnrolledMachine(ctx, tx, userID, pairing, row.ID); err != nil {
 				return err
 			}
 			out, pairingID = mapMachine(row), pairing.ID

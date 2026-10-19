@@ -1,10 +1,10 @@
 -- name: CreateDeviceGrant :exec
 INSERT INTO device_grants
-(id, client_id, client_label, device_type, os, scopes, device_code_hash, user_code_hash, state, issued_at, expires_at, poll_interval_seconds, next_poll_at, created_network_hash)
-VALUES (sqlc.arg(id), sqlc.arg(client_id), sqlc.arg(client_label), sqlc.arg(device_type), sqlc.arg(os), string_to_array(sqlc.arg(scopes),' '), sqlc.arg(device_code_hash), sqlc.arg(user_code_hash), 'pending', sqlc.arg(issued_at), sqlc.arg(expires_at), sqlc.arg(poll_interval_seconds), sqlc.arg(issued_at), sqlc.arg(created_network_hash));
+(id, client_id, client_label, device_type, os, scopes, device_code_hash, user_code_hash, state, issued_at, expires_at, poll_interval_seconds, next_poll_at, created_network_hash, enroll, enrolled_machine_id, requested_workspace)
+VALUES (sqlc.arg(id), sqlc.arg(client_id), sqlc.arg(client_label), sqlc.arg(device_type), sqlc.arg(os), string_to_array(sqlc.arg(scopes),' '), sqlc.arg(device_code_hash), sqlc.arg(user_code_hash), 'pending', sqlc.arg(issued_at), sqlc.arg(expires_at), sqlc.arg(poll_interval_seconds), sqlc.arg(issued_at), sqlc.arg(created_network_hash), sqlc.arg(enroll), sqlc.narg(enrolled_machine_id), sqlc.narg(requested_workspace));
 
 -- name: GetDeviceGrantForPoll :one
-SELECT id,client_id,state,coalesce(user_id,'') AS user_id,client_label,device_type,os,array_to_string(scopes,' ') AS scopes,issued_at,expires_at,next_poll_at,poll_interval_seconds,device_code_hash
+SELECT id,client_id,state,coalesce(user_id,'') AS user_id,client_label,device_type,os,array_to_string(scopes,' ') AS scopes,issued_at,expires_at,next_poll_at,poll_interval_seconds,device_code_hash,enroll,workspace_team_id
 FROM device_grants WHERE device_code_hash = ANY(string_to_array($1,' ')) FOR UPDATE;
 
 -- name: ExpireDeviceGrant :exec
@@ -39,18 +39,18 @@ INSERT INTO cli_refresh_tokens (token_hash,cli_client_session_id,state,expires_a
 UPDATE device_grants SET state='consumed',consumed_at=$2,version=version+1 WHERE id=$1 AND state='approved';
 
 -- name: GetDeviceGrantRequest :one
-SELECT client_label,device_type,os,array_to_string(scopes,' ') AS scopes,issued_at,expires_at,state,user_code_hash
+SELECT client_label,device_type,os,array_to_string(scopes,' ') AS scopes,issued_at,expires_at,state,user_code_hash,enroll,enrolled_machine_id,requested_workspace,workspace_team_id
 FROM device_grants WHERE user_code_hash = ANY(string_to_array($1,' '));
 
 -- name: GetDeviceGrantForDecision :one
-SELECT id,state,coalesce(user_id,'') AS user_id,expires_at,user_code_hash,client_id
+SELECT id,state,coalesce(user_id,'') AS user_id,expires_at,user_code_hash,client_id,enroll,enrolled_machine_id
 FROM device_grants WHERE user_code_hash = ANY(string_to_array($1,' ')) FOR UPDATE;
 
 -- name: ExpireDeviceGrantWithoutVersion :exec
 UPDATE device_grants SET state='expired' WHERE id=$1 AND state IN ('pending','approved');
 
 -- name: ApproveDeviceGrant :exec
-UPDATE device_grants SET state='approved',user_id=$2,approved_at=$3,version=version+1 WHERE id=$1 AND state='pending';
+UPDATE device_grants SET state='approved',user_id=sqlc.arg(user_id),approved_at=sqlc.arg(approved_at),workspace_team_id=sqlc.narg(workspace_team_id),version=version+1 WHERE id=sqlc.arg(id) AND state='pending';
 
 -- name: DenyDeviceGrant :exec
 UPDATE device_grants SET state='denied',user_id=$2,denied_at=$3,version=version+1 WHERE id=$1 AND state='pending';

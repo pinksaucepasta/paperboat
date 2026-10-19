@@ -295,6 +295,7 @@ func newAuthIntegrationRouter(t *testing.T) (*db.DB, http.Handler) {
 	}
 	userMachineService := usermachines.New(store, auditWriter, usermachines.Policy{PairingLifetime: 10 * time.Minute}, billingService)
 	userMachineService.ConfigureInstallationEncryption("test-enrollment-key")
+	machineService.SetEnroller(usermachines.DeviceEnroller{Service: userMachineService})
 	cfg := config.Default()
 	return store, authTestOriginHandler{next: NewRouter(Options{
 		Config: cfg,
