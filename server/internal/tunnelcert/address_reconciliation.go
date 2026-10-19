@@ -51,6 +51,28 @@ type AddressReconciler struct {
 	now      func() time.Time
 }
 
+// The budget statements take their numbers from the two constants in cloudflare_addresses.go.
+var (
+	acquireBudgetSQL = fmt.Sprintf(`INSERT INTO edge_dns_provider_budgets(zone_id,tokens,refilled_at,blocked_until)
+VALUES($1,%[1]d-1,statement_timestamp(),statement_timestamp())
+ON CONFLICT(zone_id) DO UPDATE SET
+tokens=LEAST(%[1]d,edge_dns_provider_budgets.tokens+EXTRACT(EPOCH FROM (statement_timestamp()-edge_dns_provider_budgets.refilled_at))/%[2]g)-1,
+refilled_at=statement_timestamp()
+WHERE edge_dns_provider_budgets.blocked_until<=statement_timestamp()
+  AND LEAST(%[1]d,edge_dns_provider_budgets.tokens+EXTRACT(EPOCH FROM (statement_timestamp()-edge_dns_provider_budgets.refilled_at))/%[2]g)>=1
+RETURNING tokens`, cloudflareAddressBurst, cloudflareAddressRefillSeconds)
+	reserveBudgetSQL = fmt.Sprintf(`INSERT INTO edge_dns_provider_budgets(zone_id,tokens,refilled_at,blocked_until)
+VALUES($1,%[1]d-$2,statement_timestamp(),statement_timestamp())
+ON CONFLICT(zone_id) DO UPDATE SET
+ tokens=LEAST(%[1]d,edge_dns_provider_budgets.tokens+EXTRACT(EPOCH FROM(statement_timestamp()-edge_dns_provider_budgets.refilled_at))/%[2]g)-$2,
+ refilled_at=statement_timestamp()
+WHERE edge_dns_provider_budgets.blocked_until<=statement_timestamp()
+ AND LEAST(%[1]d,edge_dns_provider_budgets.tokens+EXTRACT(EPOCH FROM(statement_timestamp()-edge_dns_provider_budgets.refilled_at))/%[2]g)>=$2
+RETURNING tokens`, cloudflareAddressBurst, cloudflareAddressRefillSeconds)
+	budgetWaitSQL   = fmt.Sprintf(`SELECT GREATEST(0,EXTRACT(EPOCH FROM (blocked_until-statement_timestamp())),(1-tokens)*%g-EXTRACT(EPOCH FROM (statement_timestamp()-refilled_at))) FROM edge_dns_provider_budgets WHERE zone_id=$1`, cloudflareAddressRefillSeconds)
+	refundBudgetSQL = fmt.Sprintf(`UPDATE edge_dns_provider_budgets SET tokens=LEAST(%d,tokens+$2) WHERE zone_id=$1`, cloudflareAddressBurst)
+)
+
 type databaseCloudflareAddressAdmission struct {
 	database *db.DB
 	zoneID   string
@@ -95,14 +117,7 @@ func (a *databaseCloudflareAddressAdmission) Acquire(ctx context.Context) (func(
 		}
 		release := databaseAdmissionRelease(conn, a.zoneID, slot)
 		var remaining float64
-		err = conn.QueryRow(ctx, `INSERT INTO edge_dns_provider_budgets(zone_id,tokens,refilled_at,blocked_until)
-VALUES($1,4,statement_timestamp(),statement_timestamp())
-ON CONFLICT(zone_id) DO UPDATE SET
-tokens=LEAST(5,edge_dns_provider_budgets.tokens+EXTRACT(EPOCH FROM (statement_timestamp()-edge_dns_provider_budgets.refilled_at))/6)-1,
-refilled_at=statement_timestamp()
-WHERE edge_dns_provider_budgets.blocked_until<=statement_timestamp()
-  AND LEAST(5,edge_dns_provider_budgets.tokens+EXTRACT(EPOCH FROM (statement_timestamp()-edge_dns_provider_budgets.refilled_at))/6)>=1
-RETURNING tokens`, a.zoneID).Scan(&remaining)
+		err = conn.QueryRow(ctx, acquireBudgetSQL, a.zoneID).Scan(&remaining)
 		if err == nil {
 			return release, nil
 		}
@@ -111,7 +126,7 @@ RETURNING tokens`, a.zoneID).Scan(&remaining)
 			return nil, err
 		}
 		var waitSeconds float64
-		if err := a.database.Pool().QueryRow(ctx, `SELECT GREATEST(0,EXTRACT(EPOCH FROM (blocked_until-statement_timestamp())),(1-tokens)*6-EXTRACT(EPOCH FROM (statement_timestamp()-refilled_at))) FROM edge_dns_provider_budgets WHERE zone_id=$1`, a.zoneID).Scan(&waitSeconds); err != nil {
+		if err := a.database.Pool().QueryRow(ctx, budgetWaitSQL, a.zoneID).Scan(&waitSeconds); err != nil {
 			return nil, err
 		}
 		wait := time.Duration(waitSeconds * float64(time.Second))
@@ -150,14 +165,7 @@ func (a *databaseCloudflareAddressAdmission) Reserve(ctx context.Context, count 
 	}
 	release := databaseAdmissionRelease(conn, a.zoneID, slot)
 	var remaining float64
-	err = conn.QueryRow(ctx, `INSERT INTO edge_dns_provider_budgets(zone_id,tokens,refilled_at,blocked_until)
-VALUES($1,5-$2,statement_timestamp(),statement_timestamp())
-ON CONFLICT(zone_id) DO UPDATE SET
- tokens=LEAST(5,edge_dns_provider_budgets.tokens+EXTRACT(EPOCH FROM(statement_timestamp()-edge_dns_provider_budgets.refilled_at))/6)-$2,
- refilled_at=statement_timestamp()
-WHERE edge_dns_provider_budgets.blocked_until<=statement_timestamp()
- AND LEAST(5,edge_dns_provider_budgets.tokens+EXTRACT(EPOCH FROM(statement_timestamp()-edge_dns_provider_budgets.refilled_at))/6)>=$2
-RETURNING tokens`, a.zoneID, count).Scan(&remaining)
+	err = conn.QueryRow(ctx, reserveBudgetSQL, a.zoneID, count).Scan(&remaining)
 	if err != nil {
 		release()
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -181,7 +189,7 @@ RETURNING tokens`, a.zoneID, count).Scan(&remaining)
 		if unused > 0 {
 			refundCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
-			_, _ = conn.Exec(refundCtx, `UPDATE edge_dns_provider_budgets SET tokens=LEAST(5,tokens+$2) WHERE zone_id=$1`, a.zoneID, unused)
+			_, _ = conn.Exec(refundCtx, refundBudgetSQL, a.zoneID, unused)
 		}
 		release()
 	}

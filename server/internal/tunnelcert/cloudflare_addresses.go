@@ -18,8 +18,12 @@ import (
 
 const (
 	cloudflareAddressCallTimeout = 5 * time.Second
-	cloudflareAddressBurst       = 5
-	cloudflareAddressResultLimit = 100
+	// The zone budget: a call every 0.5 s (a quarter of Cloudflare's 1200 requests per 5 minutes
+	// for the whole token) with room for a burst. One publish pass reserves 3 calls, so a slower
+	// refill made every new preview wait tens of seconds behind the background reconciler.
+	cloudflareAddressBurst         = 20
+	cloudflareAddressRefillSeconds = 0.5
+	cloudflareAddressResultLimit   = 100
 )
 
 // AddressRecord is the complete identity of a Paperboat-owned provider record.
@@ -114,7 +118,7 @@ func (a *cloudflareAddressAdmission) Acquire(ctx context.Context) (func(), error
 			continue
 		}
 		elapsed := now.Sub(a.updated).Seconds()
-		a.tokens += elapsed / 6 // ten calls per minute
+		a.tokens += elapsed / cloudflareAddressRefillSeconds
 		if a.tokens > cloudflareAddressBurst {
 			a.tokens = cloudflareAddressBurst
 		}
@@ -124,7 +128,7 @@ func (a *cloudflareAddressAdmission) Acquire(ctx context.Context) (func(), error
 			a.mu.Unlock()
 			break
 		}
-		wait := time.Duration((1 - a.tokens) * 6 * float64(time.Second))
+		wait := time.Duration((1 - a.tokens) * cloudflareAddressRefillSeconds * float64(time.Second))
 		a.mu.Unlock()
 		if err := waitContext(ctx, wait); err != nil {
 			return nil, err
@@ -193,7 +197,7 @@ func (a *cloudflareAddressAdmission) Reserve(ctx context.Context, count int) (co
 	}
 	a.mu.Lock()
 	now := time.Now()
-	a.tokens = min(float64(cloudflareAddressBurst), a.tokens+now.Sub(a.updated).Seconds()/6)
+	a.tokens = min(float64(cloudflareAddressBurst), a.tokens+now.Sub(a.updated).Seconds()/cloudflareAddressRefillSeconds)
 	a.updated = now
 	if now.Before(a.blocked) || a.tokens < float64(count) {
 		a.mu.Unlock()
