@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""F10-02 on headless Linux: lock, unlock, password, recovery, recover, remove and resume.
+"""F10-02 on headless Linux: lock, unlock, password, recovery, recover, remove, resume and reset.
 
 Usage: env_vault_lifecycle.py PASSWORD_FILE RECOVERY_FILE
 The signed-in account's vault is initialised with that password and recovery
@@ -42,6 +42,11 @@ def refuse(ok_receipt, step):
 def owner_only(path):
     if path.stat().st_mode & 0o077 or not path.read_text().strip():
         raise RuntimeError('secret file is not owner-only and non-empty')
+
+
+def personal_inventory():
+    out = subprocess.run([str(PB), 'env', 'list', '--json'], capture_output=True, text=True, timeout=60).stdout
+    return json.loads(out)['data']
 
 
 def account_id():
@@ -93,6 +98,24 @@ def main():
             refuse(run('password', '--password-stdin', stdin='x'), 'key operation after custody removal')
             need(unlock(original), 'unlock after custody removal')
             need(run('resume'), 'resume')
+            # Reset replaces the personal keys and deletes every personal value.
+            mark = 'PB_RESET_MARK'
+            marked = subprocess.run([str(PB), 'env', 'set', mark, '--value-stdin', '--json'], input='reset-me',
+                                    capture_output=True, text=True, timeout=60)
+            if marked.returncode:
+                raise RuntimeError('could not set the value that reset must delete')
+            before = personal_inventory()
+            if mark not in before['names']:
+                raise RuntimeError('the value reset must delete is not listed')
+            codes.append(base / 'reset-recovery')
+            need(run('reset', '--confirm', 'RESET ENV ' + account_id(), '--password-file', str(original),
+                     '--recovery-file', str(codes[-1])), 'reset')
+            owner_only(codes[-1])
+            after = personal_inventory()
+            if after['names'] or after['key_epoch'] <= before['key_epoch']:
+                raise RuntimeError('reset did not delete personal values and rotate the key epoch')
+            need(run('lock'), 'lock after reset')
+            need(unlock(original), 'unlock after reset')
         finally:
             for newest in reversed(codes):
                 if newest.exists():
@@ -100,7 +123,7 @@ def main():
                     break
     print(json.dumps({'check': 'env-vault-lifecycle', 'status': 'PASS',
                       'lock_unlock': True, 'password_rewrap': True, 'recovery_replace_recover': True,
-                      'remove_then_unlock': True, 'resume': True}), flush=True)
+                      'remove_then_unlock': True, 'resume': True, 'reset_deletes_values': True}), flush=True)
 
 
 if __name__ == '__main__':
