@@ -114,6 +114,28 @@ inside "$installer --enable $enable $endpoint" > "$work/out2" 2>&1 || { tail -30
 inside 'systemctl is-active --quiet paperboat-selfhost.service' || fail "service not active after re-run"
 [ "$before" = "$(inside 'sha256sum /var/lib/paperboat-selfhost/tls.crt')" ] || fail "re-run changed the installation identity"
 
+if [ -n "$published" ]; then
+ step "upgrade in place keeps data; a failed upgrade leaves the previous version running"
+ old_tag=${PAPERBOAT_QUALIFY_OLD_TAG:-2026.10.16.4}
+ images() { inside 'cat /var/lib/paperboat-selfhost/images.json'; }
+ current=$(images)
+ old_args=''
+ for capability in $(echo "$enable" | sed 's/both/relay tunnel/'); do
+  ref=$(printf '%s' "$current" | sed -E "s/.*\"$capability\":\"([^\"]*)\".*/\1/")
+  old_args="$old_args --$capability-image ${ref%:*}:$old_tag"
+ done
+ inside "$installer --enable $enable $endpoint $old_args" > "$work/out4" 2>&1 || { tail -30 "$work/out4"; fail "switching to the older images failed"; }
+ [ "$(images)" != "$current" ] || fail "image versions did not change"
+ inside 'systemctl is-active --quiet paperboat-selfhost.service' || fail "service not active on the older images"
+ inside "$installer --enable $enable $endpoint" > "$work/out5" 2>&1 || { tail -30 "$work/out5"; fail "upgrade to the current images failed"; }
+ [ "$(images)" = "$current" ] || fail "upgrade did not restore the current images"
+ [ "$before" = "$(inside 'sha256sum /var/lib/paperboat-selfhost/tls.crt')" ] || fail "upgrade changed the installation identity"
+ bad_args=$(echo "$old_args" | sed -E "s/:$old_tag/:no-such-tag/g")
+ if inside "$installer --enable $enable $endpoint $bad_args" > "$work/out6" 2>&1; then fail "an upgrade to a missing image succeeded"; fi
+ [ "$(images)" = "$current" ] || fail "a failed upgrade changed the image configuration"
+ inside 'systemctl is-active --quiet paperboat-selfhost.service' || fail "a failed upgrade stopped the service"
+fi
+
 step "uninstall keeps data, reinstall reuses it, confirmed removal deletes it"
 inside 'pbh uninstall' >/dev/null 2>&1 || fail "uninstall failed"
 inside '! test -e /etc/systemd/system/paperboat-selfhost.service && ! test -e /usr/local/bin/pbh && test -z "$(docker ps -aq --filter label=io.paperboat.pbh-owner)"' || fail "uninstall left service, command or containers"
