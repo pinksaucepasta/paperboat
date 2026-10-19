@@ -1464,6 +1464,14 @@ type MachineEdgePlacement struct {
 	ObservedAt             time.Time
 }
 
+type MachineNodeLatency struct {
+	MachineID  string
+	NodeID     string
+	Role       string
+	RttMs      int32
+	MeasuredAt time.Time
+}
+
 type MachineServiceDiscoveryPolicy struct {
 	MachineID                 string
 	Generation                int64
@@ -1519,6 +1527,13 @@ type MachineSshTarget struct {
 	ReconciliationVersion int64
 	CreatedAt             time.Time
 	UpdatedAt             time.Time
+}
+
+type MachineTopicGeneration struct {
+	MachineID  string
+	Topic      string
+	Generation int64
+	UpdatedAt  time.Time
 }
 
 type ManagedHostname struct {
@@ -2653,6 +2668,17 @@ type TunnelRoute struct {
 	DeletedAt               sql.NullTime
 	PublicTcpListenerID     sql.NullString
 	PublicTcpPort           sql.NullInt32
+}
+
+type TunnelRouteOriginHealth struct {
+	RouteID     string
+	ConnectorID string
+	TunnelID    string
+	SessionID   string
+	State       string
+	Code        sql.NullString
+	ObservedAt  time.Time
+	ReportedAt  time.Time
 }
 
 type UsageAccountingAuthority struct {
