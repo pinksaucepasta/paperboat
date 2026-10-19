@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -324,7 +325,14 @@ func (d *Dispatcher) call(ctx context.Context, method, class, scope string, requ
 	client.Transport = transport
 	response, err := client.Do(httpRequest)
 	if err != nil {
+		slog.WarnContext(ctx, "inbox request did not reach the machine", "class", class, "machine_id", request.MachineID, "error", err.Error())
 		return nil, errors.Join(ErrMachineUnreachable, err)
+	}
+	switch response.StatusCode {
+	case http.StatusOK, http.StatusNoContent, http.StatusNotFound, http.StatusConflict:
+	default:
+		// The user sees "the machine did not answer"; the status tells an operator why.
+		slog.WarnContext(ctx, "inbox request refused by the machine", "class", class, "machine_id", request.MachineID, "status", response.StatusCode)
 	}
 	return response, nil
 }
