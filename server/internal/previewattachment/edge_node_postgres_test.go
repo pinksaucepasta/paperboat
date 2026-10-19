@@ -71,11 +71,11 @@ func TestPreviewEdgePlacementQueryOnPostgres(t *testing.T) {
 	identity := base64.RawURLEncoding.EncodeToString(publicKey)
 	exec(`INSERT INTO paperboat.user_machines (id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,installation_generation,worker_generation,public_identity_key) VALUES ($1,$2,$3,'preview-place','linux','amd64','/workspace','online','occupied',1,1,$4)`, machine, account, environment, identity)
 	exec(`INSERT INTO paperboat.control_routes(id,environment_id,kind,public_host,target_host,target_port,desired_revision,desired_state) VALUES($1,$2,'runtime_https_wss',$3,'127.0.0.1',38080,1,'attached')`, route, environment, machine+".runtime.example.test")
-	for _, node := range []struct{ id, epoch, domain string }{{first, "epoch-a", "domain-a"}, {preferred, "epoch-z", "domain-z"}} {
-		exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port) VALUES($1,'default','1.0',$2,'ready',true,now(),'region',$3,ARRAY['edge'],ARRAY['http3','http2'],100,0,now(),now()+interval '1 hour','edge.example.test',27443,27444)`, node.id, node.epoch, node.domain)
+	for _, node := range []struct{ id, epoch, domain string }{{first, "epoch-aa", "domain-a"}, {preferred, "epoch-zz", "domain-z"}} {
+		exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,carrier_server_spki_sha256,carrier_server_certificate_chain_pem) VALUES($1,'default','1.0',$2,'ready',true,now(),'region',$3,ARRAY['edge'],ARRAY['http3','http2'],100,0,now(),now()+interval '1 hour','edge.example.test',27443,27444,'sha256:'||repeat('a',64),'pem')`, node.id, node.epoch, node.domain)
 	}
-	exec(`INSERT INTO paperboat.machine_edge_placements(machine_id,account_id,installation_generation,worker_generation,primary_node_id,primary_process_epoch,secondary_node_id,secondary_process_epoch,observed_at) VALUES($1,$2,1,1,$3,'epoch-z',$4,'epoch-a',now())`, machine, account, preferred, first)
-	exec(`INSERT INTO paperboat.runtime_carrier_attachments(route_id,machine_id,account_id,installation_generation,worker_generation,process_id,generation,edge_node_id,edge_process_epoch,public_identity_key,route_revision,session_id,preview_session_id,admission,expires_at,ready,observed_at,active) VALUES($1,$2,$3,1,1,'process',1,$4,'epoch-z',$5,1,'session_01234567-89ab-4cde-8fab-0123456789ab','session_11234567-89ab-4cde-8fab-0123456789ab','{}',now()+interval '1 hour',true,now(),true),($1,$2,$3,1,1,'process',1,$6,'epoch-a',$5,1,'session_21234567-89ab-4cde-8fab-0123456789ab','session_31234567-89ab-4cde-8fab-0123456789ab','{}',now()+interval '1 hour',true,now(),false)`, route, machine, account, preferred, identity, first)
+	exec(`INSERT INTO paperboat.machine_edge_placements(machine_id,account_id,installation_generation,worker_generation,primary_node_id,primary_process_epoch,secondary_node_id,secondary_process_epoch,observed_at) VALUES($1,$2,1,1,$3,'epoch-zz',$4,'epoch-aa',now())`, machine, account, preferred, first)
+	exec(`INSERT INTO paperboat.runtime_carrier_attachments(route_id,machine_id,account_id,installation_generation,worker_generation,process_id,generation,edge_node_id,edge_process_epoch,public_identity_key,route_revision,session_id,preview_session_id,admission,expires_at,ready,observed_at,active) VALUES($1,$2,$3,1,1,'process',1,$4,'epoch-zz',$5,1,'session_01234567-89ab-4cde-8fab-0123456789ab','session_11234567-89ab-4cde-8fab-0123456789ab','{}',now()+interval '1 hour',true,now(),true),($1,$2,$3,1,1,'process',1,$6,'epoch-aa',$5,1,'session_21234567-89ab-4cde-8fab-0123456789ab','session_31234567-89ab-4cde-8fab-0123456789ab','{}',now()+interval '1 hour',true,now(),false)`, route, machine, account, preferred, identity, first)
 	exec(`INSERT INTO paperboat.preview_leases(id,endpoint,account_id,actor_id,owner_machine_id,owner_session_id,owner_session_kind,target_scheme,target_address,lease_deadline) VALUES($1,$2,$3,$3,$4,'session','foreground','http','127.0.0.1:3000',now()+interval '1 hour')`, "preview_"+stamp, "https://fixture.preview.example.test", account, machine)
 	chosen, err := selector.SelectPreviewEdgeNode(context.Background(), PreviewEdgeNodeSelectionRequest{AccountID: account, PreviewID: "preview_" + stamp, OperationID: "operation_" + stamp, OwnerMachineID: machine, InstallationGeneration: 1})
 	if err != nil || chosen != preferred {
@@ -100,25 +100,18 @@ func TestPreviewEdgePlacementQueryOnPostgres(t *testing.T) {
 		t.Fatalf("machine carrier on an edge outside the workspace edge set was stranded: selected %q err=%v", chosen, err)
 	}
 	var valid bool
-	if err = database.SQL().QueryRowContext(context.Background(), `SELECT paperboat.runtime_carrier_valid($1,$2,'epoch-a',true)`, route, first).Scan(&valid); err != nil || !valid {
+	if err = database.SQL().QueryRowContext(context.Background(), `SELECT paperboat.runtime_carrier_valid($1,$2,'epoch-aa',true)`, route, first).Scan(&valid); err != nil || !valid {
 		t.Fatalf("existing runtime attachment on an edge outside the workspace edge set valid=%v err=%v", valid, err)
 	}
+	var offered []string
 	err = database.InTx(context.Background(), func(ctx context.Context, tx *db.Tx) error {
 		candidates, candidateErr := edgeplacement.Candidates(ctx, tx, account, sql.NullString{}, time.Now().UTC())
-		if candidateErr != nil {
-			return candidateErr
-		}
 		for _, candidate := range candidates {
-			if candidate.NodeID == first {
-				t.Fatal("edge outside the workspace edge set offered for new managed placement")
-			}
+			offered = append(offered, candidate.NodeID)
 		}
-		if len(candidates) == 0 {
-			t.Fatal("no edge offered for new managed placement")
-		}
-		return nil
+		return candidateErr
 	})
-	if err != nil {
-		t.Fatal(err)
+	if err != nil || len(offered) != 1 || offered[0] != preferred {
+		t.Fatalf("new managed placement offered %v err=%v, want only %q (the workspace edge set)", offered, err, preferred)
 	}
 }
