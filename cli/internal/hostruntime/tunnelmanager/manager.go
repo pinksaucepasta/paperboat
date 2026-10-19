@@ -191,6 +191,10 @@ type Manager struct {
 	// durable tunnel to apply the same event independently.
 	networkGeneration uint64
 	networkStates     map[string]networkRecoveryState
+	// retries holds, under opMu, the backoff of tunnels whose last scheduled
+	// reconcile failed, so a tunnel the control plane keeps refusing (for example
+	// one that was deleted) is not retried every tick.
+	retries map[string]reconcileRetry
 
 	shutdownDone chan struct{}
 	shutdownErr  error
@@ -215,7 +219,7 @@ func New(config Config) (*Manager, error) {
 	if config.ReconcileInterval <= 0 || config.ApplyTimeout <= 0 || config.DrainTimeout <= 0 {
 		return nil, ErrInvalidConfig
 	}
-	return &Manager{config: config, active: make(map[string]Active), seen: make(map[string]uint64), sessionBindings: make(map[string]controlSessionBinding), networkStates: make(map[string]networkRecoveryState), wake: make(chan struct{}, 1)}, nil
+	return &Manager{config: config, active: make(map[string]Active), seen: make(map[string]uint64), sessionBindings: make(map[string]controlSessionBinding), networkStates: make(map[string]networkRecoveryState), retries: make(map[string]reconcileRetry), wake: make(chan struct{}, 1)}, nil
 }
 
 // RecordControlSessionBinding remembers the exact authenticated session that
@@ -314,14 +318,16 @@ func (m *Manager) run() {
 	ticker := time.NewTicker(m.config.ReconcileInterval)
 	defer ticker.Stop()
 	for {
+		scheduled := false
 		select {
 		case <-m.ctx.Done():
 			return
 		case <-ticker.C:
+			scheduled = true
 		case <-m.wake:
 		}
 		ctx, cancel := context.WithTimeout(m.ctx, m.config.ApplyTimeout)
-		_ = m.ReconcileNow(ctx)
+		_ = m.reconcile(ctx, scheduled)
 		cancel()
 	}
 }
@@ -337,7 +343,12 @@ func (m *Manager) Notify() {
 	}
 }
 
-func (m *Manager) ReconcileNow(ctx context.Context) error {
+// ReconcileNow reconciles every tunnel immediately, ignoring retry backoff.
+func (m *Manager) ReconcileNow(ctx context.Context) error { return m.reconcile(ctx, false) }
+
+// reconcile applies desired state. A scheduled pass (the periodic tick) skips tunnels still in
+// their failure backoff for the same desired generation; explicit and notified passes never do.
+func (m *Manager) reconcile(ctx context.Context, scheduled bool) error {
 	if m == nil || ctx == nil {
 		return ErrInvalidConfig
 	}
@@ -392,15 +403,28 @@ func (m *Manager) ReconcileNow(ctx context.Context) error {
 			m.report(tunnel, hoststate.Connector{}, CodeConnectorUnavailable, true, connectorErr)
 			continue
 		}
+		if retry, waiting := m.retries[tunnel.ID]; scheduled && waiting && retry.generation == tunnel.DesiredGeneration && m.now().Before(retry.next) {
+			continue
+		}
 		if err := m.reconcileTunnel(ctx, tunnel, connector); err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return err
+			}
+			if errors.Is(err, ErrConnectorUnavailable) {
+				m.retries[tunnel.ID] = m.retries[tunnel.ID].failed(tunnel.DesiredGeneration, m.now(), m.config.ReconcileInterval)
 			}
 			// Runtime, origin, and generation failures are already reported for
 			// this tunnel. Untyped failures are global and must not be swallowed.
 			if !errors.Is(err, ErrOriginUnavailable) && !errors.Is(err, ErrConnectorUnavailable) && !errors.Is(err, ErrGenerationConflict) {
 				return err
 			}
+		} else {
+			delete(m.retries, tunnel.ID)
+		}
+	}
+	for id := range m.retries {
+		if _, ok := wanted[id]; !ok {
+			delete(m.retries, id)
 		}
 	}
 	for tunnelID, active := range m.snapshotActive() {
@@ -1055,4 +1079,27 @@ func validID(value string) bool {
 
 func isAlphaNumeric(char rune) bool {
 	return char >= 'a' && char <= 'z' || char >= 'A' && char <= 'Z' || char >= '0' && char <= '9'
+}
+
+// reconcileRetry is the backoff of one tunnel whose scheduled reconcile keeps failing.
+type reconcileRetry struct {
+	failures   int
+	generation uint64
+	next       time.Time
+}
+
+// failed returns the state after one more failed attempt: the retry waits one reconcile
+// interval, doubling per consecutive failure up to one minute, so an unreachable or deleted
+// tunnel costs the control plane one request per minute instead of one per tick.
+func (r reconcileRetry) failed(generation uint64, now time.Time, interval time.Duration) reconcileRetry {
+	if r.generation != generation {
+		r = reconcileRetry{generation: generation}
+	}
+	r.failures++
+	delay := interval
+	for i := 1; i < r.failures && delay < time.Minute; i++ {
+		delay *= 2
+	}
+	r.next = now.Add(min(delay, time.Minute))
+	return r
 }

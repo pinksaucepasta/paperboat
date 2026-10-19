@@ -632,7 +632,9 @@ func (s *HTTPSProductionAssemblySource) fetchAvailableCarrierDescriptor(
 			failure.Code != "carrier_unavailable" || !failure.Retryable || failure.RepairAction != "retry" {
 			return carrierBootstrapDescriptor{}, err
 		}
-		delay := min(time.Duration(attempt)*100*time.Millisecond, time.Second)
+		// 100 ms, 200 ms, ... doubling to 5 s: a connector the server keeps refusing
+		// must not be asked once a second for the whole apply window.
+		delay := min(100*time.Millisecond<<min(attempt-1, 6), 5*time.Second)
 		if failure.RetryAt != nil {
 			delay = max(delay, failure.RetryAt.Sub(s.clock.Now().UTC()))
 		}
