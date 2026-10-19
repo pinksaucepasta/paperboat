@@ -178,11 +178,11 @@ func TestActivationFailureStderrIsBoundedAndDoesNotFormatPrivateErrors(t *testin
 		err                           error
 		previous, candidate, expected string
 	}{
-		{"joined timeout", errors.Join(participantFailure("updater_version", ErrParticipantReadiness), context.DeadlineExceeded, errors.New("private secret")), "2026.10.08.20", "2026.10.08.31", "paperboat-update-failure phase=participant reason=updater_version previous=2026.10.08.20 candidate=2026.10.08.31 classification=timeout chain=*errors.joinError,*updated.activationFailure,context.deadlineExceededError,*errors.errorString io=none\n"},
-		{"transport cancellation", healthFailure("transport", context.Canceled), "2026.10.08.20", "2026.10.08.31", "paperboat-update-failure phase=health reason=transport previous=2026.10.08.20 candidate=2026.10.08.31 classification=canceled chain=*updated.activationFailure,*errors.errorString io=none\n"},
-		{"transport timeout", healthFailure("transport", os.ErrDeadlineExceeded), "2026.10.08.20", "2026.10.08.31", "paperboat-update-failure phase=health reason=transport previous=2026.10.08.20 candidate=2026.10.08.31 classification=timeout chain=*updated.activationFailure,*poll.DeadlineExceededError io=none\n"},
-		{"unsafe fields", &activationFailure{phase: "private\nphase", reason: "private\nreason", cause: errors.New("private secret")}, "private\nversion", strings.Repeat("1", 100) + ".1.1.1", "paperboat-update-failure phase=activation reason=failed previous=unknown candidate=unknown classification=failure chain=*updated.activationFailure,*errors.errorString io=none\n"},
-		{"untyped failure", errors.New("private secret"), "2026.10.08.20", "2026.10.08.31", "paperboat-update-failure phase=activation reason=failed previous=2026.10.08.20 candidate=2026.10.08.31 classification=failure chain=*errors.errorString io=none\n"},
+		{"joined timeout", errors.Join(participantFailure("updater_version", ErrParticipantReadiness), context.DeadlineExceeded, errors.New("private secret")), "2026.10.08.20", "2026.10.08.31", "paperboat-update-failure phase=participant reason=updater_version previous=2026.10.08.20 candidate=2026.10.08.31 classification=timeout chain=*errors.joinError,*updated.activationFailure,context.deadlineExceededError,*errors.errorString io=none sentinels=ParticipantReadiness\n"},
+		{"transport cancellation", healthFailure("transport", context.Canceled), "2026.10.08.20", "2026.10.08.31", "paperboat-update-failure phase=health reason=transport previous=2026.10.08.20 candidate=2026.10.08.31 classification=canceled chain=*updated.activationFailure,*errors.errorString io=none sentinels=none\n"},
+		{"transport timeout", healthFailure("transport", os.ErrDeadlineExceeded), "2026.10.08.20", "2026.10.08.31", "paperboat-update-failure phase=health reason=transport previous=2026.10.08.20 candidate=2026.10.08.31 classification=timeout chain=*updated.activationFailure,*poll.DeadlineExceededError io=none sentinels=none\n"},
+		{"unsafe fields", &activationFailure{phase: "private\nphase", reason: "private\nreason", cause: errors.New("private secret")}, "private\nversion", strings.Repeat("1", 100) + ".1.1.1", "paperboat-update-failure phase=activation reason=failed previous=unknown candidate=unknown classification=failure chain=*updated.activationFailure,*errors.errorString io=none sentinels=none\n"},
+		{"untyped failure", errors.New("private secret"), "2026.10.08.20", "2026.10.08.31", "paperboat-update-failure phase=activation reason=failed previous=2026.10.08.20 candidate=2026.10.08.31 classification=failure chain=*errors.errorString io=none sentinels=none\n"},
 		{"success", nil, "private", "private", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -198,32 +198,32 @@ func TestActivationFailureStderrIsBoundedAndDoesNotFormatPrivateErrors(t *testin
 func TestActivationFailureChainNamesTypesNotMessages(t *testing.T) {
 	secret := errors.New("/home/private/credential-token-123")
 	err := errors.Join(fmt.Errorf("step failed: %w", &exec.ExitError{}), secret)
-	chain, cause := activationErrorChain(err)
+	chain, cause, _ := activationErrorChain(err)
 	if cause != "none" {
 		t.Fatalf("no file operation was involved; io=%q", cause)
 	}
 	if !strings.Contains(chain, "*exec.ExitError") || strings.Contains(chain, "credential") || strings.Contains(chain, "private") {
 		t.Fatalf("chain=%q", chain)
 	}
-	if got, cause := activationErrorChain(nil); got != "none" || cause != "none" {
-		t.Fatalf("nil chain=%q io=%q", got, cause)
+	if got, cause, named := activationErrorChain(nil); got != "none" || cause != "none" || named != "none" {
+		t.Fatalf("nil chain=%q io=%q sentinels=%q", got, cause, named)
 	}
 	loop := &selfCause{}
 	loop.next = loop
-	if got, _ := activationErrorChain(loop); got == "" || len(strings.Split(got, ",")) > 8 {
+	if got, _, _ := activationErrorChain(loop); got == "" || len(strings.Split(got, ",")) > 8 {
 		t.Fatalf("cyclic chain was not bounded: %q", got)
 	}
 }
 
 func TestActivationFailureNamesTheFileOperationNotThePath(t *testing.T) {
 	err := errors.Join(workerupdate.ErrBlocked, &fs.PathError{Op: "lstat", Path: "/home/private/secret-token", Err: syscall.ENOENT})
-	_, cause := activationErrorChain(err)
-	if cause != "lstat:ENOENT" {
-		t.Fatalf("io=%q", cause)
+	_, cause, named := activationErrorChain(err)
+	if cause != "lstat:ENOENT" || named != "Blocked" {
+		t.Fatalf("io=%q sentinels=%q", cause, named)
 	}
 	var output strings.Builder
 	writeActivationFailure(&output, err, "2026.10.19.8", "2026.10.19.9")
-	if !strings.Contains(output.String(), " io=lstat:ENOENT\n") || strings.Contains(output.String(), "secret") {
+	if !strings.Contains(output.String(), " io=lstat:ENOENT sentinels=Blocked\n") || strings.Contains(output.String(), "secret") {
 		t.Fatalf("record=%q", output.String())
 	}
 }

@@ -13,7 +13,9 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -639,8 +641,8 @@ func writeActivationFailure(writer io.Writer, err error, previous, candidate str
 		}
 		return "unknown"
 	}
-	chain, cause := activationErrorChain(err)
-	_, _ = fmt.Fprintf(writer, "paperboat-update-failure phase=%s reason=%s previous=%s candidate=%s classification=%s chain=%s io=%s\n", phase, reason, validVersion(previous), validVersion(candidate), classification, chain, cause)
+	chain, cause, sentinels := activationErrorChain(err)
+	_, _ = fmt.Fprintf(writer, "paperboat-update-failure phase=%s reason=%s previous=%s candidate=%s classification=%s chain=%s io=%s sentinels=%s\n", phase, reason, validVersion(previous), validVersion(candidate), classification, chain, cause, sentinels)
 }
 
 var (
@@ -654,11 +656,12 @@ var (
 // (for example *exec.ExitError or hostinstall.errLifecycle...) without leaking paths or credentials.
 // The second result names the first file operation and system error in the tree (for example
 // "lstat:ENOENT"), or "none"; the path itself is never included.
-func activationErrorChain(err error) (string, string) {
+func activationErrorChain(err error) (string, string, string) {
 	queue := []error{err}
 	seen := map[string]bool{}
 	var names []string
 	operation, errno := "", ""
+	var matched []string
 	for visited := 0; len(queue) > 0 && visited < 24 && len(names) < 8; visited++ {
 		current := queue[0]
 		queue = queue[1:]
@@ -668,6 +671,11 @@ func activationErrorChain(err error) (string, string) {
 		if name := fmt.Sprintf("%T", current); errorTypeName.MatchString(name) && !seen[name] {
 			seen[name] = true
 			names = append(names, name)
+		}
+		for _, known := range knownActivationSentinels {
+			if reflect.TypeOf(current).Comparable() && current == known.err && !slices.Contains(matched, known.name) {
+				matched = append(matched, known.name)
+			}
 		}
 		switch typed := current.(type) {
 		case *fs.PathError:
@@ -693,10 +701,33 @@ func activationErrorChain(err error) (string, string) {
 	if operation != "" || errno != "" {
 		cause = operation + ":" + errno
 	}
-	if len(names) == 0 {
-		return "none", cause
+	sentinels := "none"
+	if len(matched) > 0 {
+		sentinels = strings.Join(matched, ",")
 	}
-	return strings.Join(names, ","), cause
+	if len(names) == 0 {
+		return "none", cause, sentinels
+	}
+	return strings.Join(names, ","), cause, sentinels
+}
+
+// Sentinel errors carry fixed text, so naming the ones present in a failure says which step
+// failed even though every one of them has the same Go type.
+var knownActivationSentinels = []struct {
+	name string
+	err  error
+}{
+	{"ActivationGate", workerupdate.ErrActivationGate},
+	{"Blocked", workerupdate.ErrBlocked},
+	{"ApprovalRequired", workerupdate.ErrApprovalRequired},
+	{"PreparedCandidate", workerupdate.ErrPreparedCandidate},
+	{"InvalidRelease", workerupdate.ErrInvalidRelease},
+	{"Quarantined", workerupdate.ErrQuarantined},
+	{"HostdActivationProvider", workerupdate.ErrHostdActivationProvider},
+	{"LifecycleUncertain", service.ErrLifecycleUncertain},
+	{"LifecycleNotReady", service.ErrLifecycleNotReady},
+	{"ParticipantReadiness", ErrParticipantReadiness},
+	{"InstallationPending", ErrInstallationPending},
 }
 
 type unixParticipantReadiness struct {
