@@ -779,10 +779,12 @@ elif sys.argv[2]=="doctor-lifecycle":
  assert all(r[k] for k in ("healthy_requires_exec", "failure_explained", "repair_recovers"))
 elif sys.argv[2]=="session-limit":
  assert r["limit"]==20 and r["clear_message"] and r["closed_not_counted"]
+elif sys.argv[2]=="tunnel-survival":
+ assert all(r[k] for k in ("pause_resume", "daemon_restart", "update", "host_service_restart"))
 elif sys.argv[2]=="network-inventory":
  assert r["edges_and_verified_relays"]
 elif sys.argv[2]=="tunnel-lifecycle":
- assert all(r[k] for k in ("status_doctor_logs", "capture_replay", "pause_resume", "connector_lifecycle", "credentials_rotate", "port_policy"))
+ assert all(r[k] for k in ("status_doctor_logs", "capture_replay", "pause_resume", "connector_lifecycle", "credentials_rotate", "rotate_without_downtime", "port_policy"))
 elif sys.argv[2]=="config-sync":
  assert all(r[k] for k in ("repository_connect_list", "validate_apply", "status_assignment", "force_pull", "unassign"))
 elif sys.argv[2]=="tunnel-manage":
@@ -885,6 +887,7 @@ test_device_application team-roles team_lifecycle.py --roles
 test_device_application tunnel-manage tunnel_manage.py
 test_device_application config-sync config_sync.py
 test_device_application tunnel-lifecycle tunnel_lifecycle.py
+test_device_application tunnel-survival tunnel_survival.py
 test_local_access_settings
 test_device_application doctor-lifecycle doctor_lifecycle.py
 test_device_application session-limit session_limit.py

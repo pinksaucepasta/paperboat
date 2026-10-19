@@ -96,8 +96,28 @@ def main():
             connector = connectors[0]['id']
             added = run('tunnel', 'connector', 'add', identifier)
             assert added['connector_id'] == connector and added['state'] == 'ready'
-            rotated = confirmed('tunnel', 'credentials', 'rotate', identifier)
+            # Credential rotation must not interrupt traffic: sample the public URL throughout.
+            samples = []
+            sampling = threading.Event()
+
+            def sample():
+                while not sampling.is_set():
+                    try:
+                        samples.append(urllib.request.urlopen(endpoint + '/', timeout=15).status)
+                    except OSError as error:
+                        samples.append(getattr(error, 'code', 0))
+                    sampling.wait(0.5)
+
+            sampler = threading.Thread(target=sample, daemon=True)
+            sampler.start()
+            try:
+                rotated = confirmed('tunnel', 'credentials', 'rotate', identifier)
+                time.sleep(5)
+            finally:
+                sampling.set()
+                sampler.join(timeout=20)
             assert rotated['resource_id'] == identifier
+            assert len(samples) >= 5 and set(samples) == {200}, 'rotation interrupted traffic: %s' % samples
             drained = run('tunnel', 'connector', 'drain', identifier, connector)
             assert drained['connector']['id'] == connector
             assert wait(lambda: next(c for c in run('tunnel', 'connector', 'list', identifier)['items']
@@ -136,7 +156,7 @@ def main():
     assert registration() == before
     print(json.dumps({'check': 'tunnel-lifecycle', 'status': 'PASS', 'status_doctor_logs': True,
                       'capture_replay': True, 'pause_resume': True, 'connector_lifecycle': True,
-                      'credentials_rotate': True, 'port_policy': True, 'enrollment_preserved': True}))
+                      'credentials_rotate': True, 'rotate_without_downtime': True, 'port_policy': True, 'enrollment_preserved': True}))
 
 
 if __name__ == '__main__':
