@@ -55,6 +55,39 @@ func TestFreshEnrollmentResetRemovesTheOldRecordBeforeCleanup(t *testing.T) {
 	}
 }
 
+// The removed record's ID is remembered across the wipe so the next pairing of this computer can
+// ask the server to hand over its name and address.
+func TestFreshEnrollmentResetRemembersTheRemovedRecordForTheNextPairing(t *testing.T) {
+	hostname, err := os.Hostname()
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalCleanup, originalRemove, originalSave := freshEnrollmentCleanup, removeOwnMachineRecordFunc, bootstrapSaveReplacement
+	t.Cleanup(func() {
+		freshEnrollmentCleanup, removeOwnMachineRecordFunc, bootstrapSaveReplacement = originalCleanup, originalRemove, originalSave
+	})
+	var order []string
+	freshEnrollmentCleanup = func(*cobra.Command) error { order = append(order, "cleanup"); return nil }
+	for _, removed := range []string{"machine_old", ""} {
+		order = nil
+		removeOwnMachineRecordFunc = func(*cobra.Command) (string, error) { return removed, nil }
+		bootstrapSaveReplacement = func(id string, _ time.Time) error { order = append(order, "save:"+id); return nil }
+		command := freshEnrollmentResetCommand()
+		command.SetOut(&bytes.Buffer{})
+		command.SetArgs([]string{"--confirmation", "RESET PAPERBOAT", "--hostname", hostname, "--enrollment-token-file", freshResetTokenFile(t), "--json"})
+		if err := command.Execute(); err != nil {
+			t.Fatal(err)
+		}
+		want := "cleanup"
+		if removed != "" {
+			want = "cleanup,save:machine_old"
+		}
+		if got := strings.Join(order, ","); got != want {
+			t.Fatalf("removed=%q: steps %q, want %q (the note is written after the wipe)", removed, got, want)
+		}
+	}
+}
+
 func TestFreshEnrollmentResetChangesNothingWhenTheOldRecordCannotBeRemoved(t *testing.T) {
 	hostname, err := os.Hostname()
 	if err != nil {

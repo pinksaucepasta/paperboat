@@ -92,6 +92,13 @@ func freshEnrollmentResetCommand() *cobra.Command {
 			if err := source.Verify(executable); err != nil {
 				return fmt.Errorf("reset CLI did not survive cleanup: %w", err)
 			}
+			if retired != "" {
+				// The next pairing of this computer asks the server to hand the removed record's
+				// name and local address to the new one. A request, never authority.
+				if err := bootstrapSaveReplacement(retired, time.Now()); err != nil {
+					return fmt.Errorf("remember the removed machine record for the next pairing: %w", err)
+				}
+			}
 			result := map[string]any{"reset": true, "resume": false, "executable": executable, "hostname": hostname, "inbox_preserved": true}
 			if retired != "" {
 				result["retired_machine_id"] = retired
@@ -113,6 +120,7 @@ func freshEnrollmentResetCommand() *cobra.Command {
 
 var freshEnrollmentCleanup = runFreshEnrollmentCleanup
 var removeOwnMachineRecordFunc = removeOwnMachineRecord
+var bootstrapSaveReplacement = bootstrap.SaveReplacement
 
 // removeOwnMachineRecord removes this computer's current machine record
 // (the normal machine removal: its ENV access, peer identity, SSH host keys and

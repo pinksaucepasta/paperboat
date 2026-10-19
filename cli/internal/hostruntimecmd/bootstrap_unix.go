@@ -162,12 +162,14 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 	} else {
 		material, resume, err = resumeOneShotEnrollment(ctx, oneShotResumeInput{
 			StateRoot: *stateRoot, TokenFile: *tokenFile, TokenFileErr: tokenFileErr,
-			Config: bootstrap.Config{ServerURL: *serverURL, EnrollmentToken: token, Alias: *name, WorkspaceRoot: workspace, PublicIdentityKey: publicIdentityKey, RuntimeVersions: map[string]string{"pb": buildinfo.Version}, SSHUser: pairingSSHUser, SSHPort: pairingSSHPort},
+			Config: bootstrap.Config{ServerURL: *serverURL, EnrollmentToken: token, Alias: *name, WorkspaceRoot: workspace, PublicIdentityKey: publicIdentityKey, RuntimeVersions: map[string]string{"pb": buildinfo.Version}, SSHUser: pairingSSHUser, SSHPort: pairingSSHPort, ReplacesMachineID: bootstrap.LoadReplacement(time.Now())},
 			Resume: resume, ResumeErr: resumeErr, Status: stderr,
 		}, defaultOneShotResumeOperations())
 		if err != nil {
 			return err
 		}
+		// The pairing carried the note (the server stores it); it is not needed again.
+		_ = bootstrap.ClearReplacement()
 	}
 	// Each enrollment initializes its CLI profile and durable runtime.
 	if err := completeBootstrapCLIResume(ctx, *stateRoot, *serverURL, material, &resume, installBootstrapCLI, bootstrap.SaveResume); err != nil {
