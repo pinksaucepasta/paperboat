@@ -15,8 +15,8 @@ an actionable upgrade error instead of malformed session data. See
 ## Usage
 
 Install and enroll with a command from the dashboard or from `pb machine add` on
-an authenticated machine. If Paperboat is already installed, `pb auth login`
-accepts the same 26-character token directly for CLI authentication.
+an authenticated machine. If Paperboat is already installed, `pb login` signs in (and
+adds the computer to your account if it is not on it yet) through browser approval.
 
 See the [CLI guide](docs/cli.md), [complete command reference](docs/cli/README.md),
 and [man pages](docs/man/man1) for all public commands. The Linux installer and
@@ -27,7 +27,7 @@ macOS PKG install bundled manuals automatically. For source installs, use
 pb new                       # fresh terminal on this device in the current directory
 pb <environment>             # fresh terminal on an enrolled machine
 pb environments               # list enrolled machines
-pb auth login                # enter the enrollment token directly
+pb login                     # sign in / add this computer through browser approval
 pb machine add               # print Linux/macOS and Windows install commands
 pb auth status               # show the active account for the configured server
 pb auth logout               # revoke and remove this installation's session
@@ -359,7 +359,7 @@ updater continues to use full TUF verification for future updates and rollback.
 
 ## Stack
 
-Go - distributed as native static binaries for Windows, macOS, and Linux (Cobra, Go 1.27.1).
+Go - distributed as native static binaries for Windows, macOS, and Linux (Cobra, Go 1.27.2).
 Windows amd64 and arm64 are stable after native release qualification.
 
 ## Layout
@@ -387,6 +387,10 @@ under that same OS user's permissions. Machine grants are not OS isolation and d
 allow attaching to another person's terminal.
 
 A personal owner can share and withdraw their machine. Sharing creates no use grants.
+A team can require owner/admin approval for machines its members add
+(`pb team machine approval TEAM on|off`, on by default): a shared or newly added machine
+then waits in `pb team machine requests TEAM` until an owner or admin runs
+`pb team machine approve` or `decline`. Owners and admins add machines directly either way.
 Read the current team generation with `pb team get` before each mutation:
 
 ```sh
