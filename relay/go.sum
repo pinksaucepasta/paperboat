@@ -120,8 +120,8 @@ github.com/pingcap/errors v0.11.4 h1:lFuQV/oaUMGcD2tqt+01ROSmJs75VG1ToEOkZIZ4nE4
 github.com/pingcap/errors v0.11.4/go.mod h1:Oi8TUi2kEtXXLMJk9l1cGmz20kV3TaQ0usTwv5KuLY8=
 github.com/pinksaucepasta/tailscale v1.103.0-pre.0.20260923030001-257404928376 h1:G8maHqHlL5YX2DfQZYmpes0OPG8SW4EvxLcx4WXAuaU=
 github.com/pinksaucepasta/tailscale v1.103.0-pre.0.20260923030001-257404928376/go.mod h1:Kftbp62QK8BuBWLTN7Cf32c0RMiiO0UMh5asiPiDDFM=
-github.com/pinksaucepasta/tailscale v1.103.0-pre.0.20260928002927-8c8b2e0dc313 h1:wfxgjebqmgVpixqOys7c1PW7k8yCOWYCC3EzZ/jEKrQ=
-github.com/pinksaucepasta/tailscale v1.103.0-pre.0.20260928002927-8c8b2e0dc313/go.mod h1:Kftbp62QK8BuBWLTN7Cf32c0RMiiO0UMh5asiPiDDFM=
+github.com/pinksaucepasta/tailscale v1.103.0-pre.0.20261019044951-ac1095ce5264 h1:rh/ONJr7GuYCfV8+9nwJIeqiXpR7P6QEhhhrxNnwGH4=
+github.com/pinksaucepasta/tailscale v1.103.0-pre.0.20261019044951-ac1095ce5264/go.mod h1:Kftbp62QK8BuBWLTN7Cf32c0RMiiO0UMh5asiPiDDFM=
 github.com/pires/go-proxyproto v0.15.0 h1:dTshmNbFm/D+0+sbrxUuddPOZ5Y0B7c5NhtsBkm6LqI=
 github.com/pires/go-proxyproto v0.15.0/go.mod h1:OXsCrKwrK2tXS9YrI5tkHx5xaQlO8FH3lFW76orFh24=
 github.com/pkg/errors v0.9.1 h1:FEBLx1zS214owpjy7qsBeixbURkuhQAwrK5UwLGTwt4=

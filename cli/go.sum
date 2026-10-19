@@ -296,8 +296,8 @@ github.com/pingcap/errors v0.11.4 h1:lFuQV/oaUMGcD2tqt+01ROSmJs75VG1ToEOkZIZ4nE4
 github.com/pingcap/errors v0.11.4/go.mod h1:Oi8TUi2kEtXXLMJk9l1cGmz20kV3TaQ0usTwv5KuLY8=
 github.com/pinksaucepasta/tailscale v1.103.0-pre.0.20260923030001-257404928376 h1:G8maHqHlL5YX2DfQZYmpes0OPG8SW4EvxLcx4WXAuaU=
 github.com/pinksaucepasta/tailscale v1.103.0-pre.0.20260923030001-257404928376/go.mod h1:Kftbp62QK8BuBWLTN7Cf32c0RMiiO0UMh5asiPiDDFM=
-github.com/pinksaucepasta/tailscale v1.103.0-pre.0.20260928002927-8c8b2e0dc313 h1:wfxgjebqmgVpixqOys7c1PW7k8yCOWYCC3EzZ/jEKrQ=
-github.com/pinksaucepasta/tailscale v1.103.0-pre.0.20260928002927-8c8b2e0dc313/go.mod h1:Kftbp62QK8BuBWLTN7Cf32c0RMiiO0UMh5asiPiDDFM=
+github.com/pinksaucepasta/tailscale v1.103.0-pre.0.20261019044951-ac1095ce5264 h1:rh/ONJr7GuYCfV8+9nwJIeqiXpR7P6QEhhhrxNnwGH4=
+github.com/pinksaucepasta/tailscale v1.103.0-pre.0.20261019044951-ac1095ce5264/go.mod h1:Kftbp62QK8BuBWLTN7Cf32c0RMiiO0UMh5asiPiDDFM=
 github.com/pion/dtls/v3 v3.1.5 h1:9xJtVsHwMYeSjPp5Hh1FTis4DchnQWtnOa5o+6ygqfc=
 github.com/pion/dtls/v3 v3.1.5/go.mod h1:gz1K4jg6c+fq86oQMH4pilpCEOEPwmEr2jY+VcF/mkU=
 github.com/pion/ice/v4 v4.4.0 h1:wvHDDqimaC38Y7MVpD46Y63p246ChvXd87VKoLYS5b4=

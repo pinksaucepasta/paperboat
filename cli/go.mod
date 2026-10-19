@@ -2,10 +2,10 @@ module github.com/pinksaucepasta/paperboat
 
 go 1.27.2
 
-replace tailscale.com => github.com/pinksaucepasta/tailscale v1.103.0-pre.0.20260928002927-8c8b2e0dc313
+replace tailscale.com => github.com/pinksaucepasta/tailscale v1.103.0-pre.0.20261019044951-ac1095ce5264
 
 require (
-	github.com/google/uuid v1.6.0
+	github.com/BurntSushi/toml v1.6.0
 	github.com/Microsoft/go-winio v0.6.2
 	github.com/adrg/xdg v0.5.3
 	github.com/anmitsu/go-shlex v0.0.0-20200514113438-38f4b401e2be
@@ -23,10 +23,13 @@ require (
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/fxamacker/cbor/v2 v2.9.3
 	github.com/getsentry/sentry-go v0.49.0
+	github.com/gitpod-io/xterm-go v0.0.0-20260907130418-dae5128cb6b3
+	github.com/go-git/go-billy/v5 v5.9.0
 	github.com/go-git/go-git/v5 v5.19.2
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/google/go-cmp v0.7.0
 	github.com/google/renameio/v2 v2.0.2
+	github.com/google/uuid v1.6.0
 	github.com/hashicorp/yamux v0.1.1
 	github.com/hinshun/vt10x v0.0.0-20220301184237-5011da428d02
 	github.com/junegunn/fzf v0.73.1
@@ -34,6 +37,7 @@ require (
 	github.com/libp2p/go-yamux/v5 v5.1.0
 	github.com/miekg/dns v1.1.73
 	github.com/muesli/termenv v0.16.0
+	github.com/pinksaucepasta/paperboat-relay v0.0.0-20260923013100-893985d480ea
 	github.com/pressly/goose/v3 v3.27.1
 	github.com/quic-go/quic-go v0.61.0
 	github.com/sethvargo/go-retry v0.3.0
@@ -44,6 +48,7 @@ require (
 	github.com/tailscale/squibble v0.0.0-20260411062017-141f5d618bc4
 	github.com/tailscale/wireguard-go v0.0.0-20260911194433-e3222a3340cd
 	github.com/theupdateframework/go-tuf/v2 v2.4.2
+	github.com/xanzy/ssh-agent v0.3.3
 	github.com/zalando/go-keyring v0.2.8
 	go.uber.org/goleak v1.3.0
 	go4.org/mem v0.0.0-20240501181205-ae6ca9944745
@@ -64,7 +69,6 @@ require (
 	9fans.net/go v0.0.8-0.20250307142834-96bdba94b63f // indirect
 	dario.cat/mergo v1.0.2 // indirect
 	filippo.io/edwards25519 v1.2.0 // indirect
-	github.com/BurntSushi/toml v1.6.0
 	github.com/ProtonMail/go-crypto v1.4.1 // indirect
 	github.com/akutz/memconn v0.1.0 // indirect
 	github.com/alexbrainman/sspi v0.0.0-20250919150558-7d374ff0d59e // indirect
@@ -105,9 +109,7 @@ require (
 	github.com/emirpasic/gods v1.18.1 // indirect
 	github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f // indirect
 	github.com/gaissmai/bart v0.29.0 // indirect
-	github.com/gitpod-io/xterm-go v0.0.0-20260907130418-dae5128cb6b3 // indirect
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
-	github.com/go-git/go-billy/v5 v5.9.0 // indirect
 	github.com/go-json-experiment/json v0.0.0-20260820222146-c27c302e5fc3 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/go4org/hashtriemap v0.0.0-20260824042624-45fcf11fca0e // indirect
@@ -174,7 +176,6 @@ require (
 	github.com/vishvananda/netns v0.0.5 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
-	github.com/xanzy/ssh-agent v0.3.3 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect

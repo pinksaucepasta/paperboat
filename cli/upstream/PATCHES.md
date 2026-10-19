@@ -6,8 +6,8 @@ and `upstream/licenses/tailcat-LICENSE.txt` are retained. The original compatibl
 source/module/toolchain facts remain in `foundations.tsv`; Tailcat is no longer
 a consumed module. `references/tailcat` remains read-only provenance.
 
-The consumed fork revision is `8c8b2e0dc313dd8d5db1be4a5afe7655184157b5`
-on `paperboat-stun-discovery-20260928`, based on upstream Tailscale
+The consumed fork revision is `ac1095ce526449dc809a8a5bb5749159135ebc65`
+on `paperboat-no-cloud-probe`, based on upstream Tailscale
 `610b05c58e8dff3c5ff12ffb35d68e4697216ed6`. Both Paperboat and the relay
 pin its immutable Go module version. Its LICENSE, PATENTS and other notices
 remain intact. `foundations.tsv` retains the original Tailcat-compatible
@@ -44,6 +44,7 @@ Previously downstream Tailcat patches remain owned behavior:
 | `wgengine/magicsock/endpoint.go` | Clear relay-discovery throttle with stale selected route on connectivity changes, allowing immediate rebind (`paperboat_rebind_test.go`, Task 10). | Reviewed upstream equivalent recovery behavior. |
 | `wgengine/magicsock/{derp.go,paperboat_regional_status.go}` | Preserve live inventory/carrier state, prepare/send through exact region, expose actual carrier legs; injected carriers probe liveness on socket rebind, with stale probes fenced from newer carriers (Task 13). | Equivalent upstream regional/carrier seams. |
 | `net/udprelay/server.go` | Keep the zero client discovery-key guard in the shared allocator, protecting Paperboat policy calls as well as ordinary allocations. The newer upstream base already includes the relay-manager zero server-key guard and both regressions. | Upstream shared allocator enforces the same policy. |
+| `util/cloudenv/cloudenv.go` | No metadata-server probe for old GCP, Azure or Hyper-V guests: Paperboat never uses the cloud identity and the probe cost up to 2 s on every cold start of a Hyper-V guest (2026-10-19). | Never needed upstream; remove if Paperboat starts using cloud identity. |
 
 The 2026-09-23 update rebased the one Paperboat patch commit on current upstream
 without merge conflicts. The fork now consumes WireGuard
