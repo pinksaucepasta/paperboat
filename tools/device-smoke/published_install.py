@@ -10,6 +10,7 @@ import argparse, sys
 def main():
     parser = argparse.ArgumentParser(description='Verify the published one-liner and restore the installed candidate.')
     parser.add_argument('--expect-release', required=True)
+    parser.add_argument('--keep-official', action='store_true', help='leave the official install in place instead of restoring the staged custom build')
     args = parser.parse_args()
     password = sys.stdin.readline().rstrip('\n')
     if not password:
@@ -43,7 +44,7 @@ def main():
     try:
         p.invoke(staged, '--workspace', 'personal', '__desktop', 'request', input=json.dumps({'action': 'machine.remove', 'payload': {'machine_id': before['machine_id']}}))
         removed = True
-        p.invoke(staged, 'uninstall', '--confirmation', 'UNINSTALL PAPERBOAT', '--hostname', os.uname().nodename, '--json')
+        p.invoke(staged, 'uninstall', '--confirmation', 'UNINSTALL PAPERBOAT', '--hostname', os.uname().nodename, '--json', raw=True, terminal=True, password=password)
         result = terminal_command.run(['/bin/sh', '-c', command], password=password, timeout=600)
         if result.returncode:
             diagnostic = p.command_diagnostic(['/bin/sh', '-c', command], result.stdout, result.stderr)
@@ -61,7 +62,7 @@ def main():
     except Exception as exc:
         error = exc
     finally:
-        if removed:
+        if removed and not (args.keep_official and official):
             try:
                 p.invoke(staged, 'install', '--json', raw=True, terminal=True, password=password, timeout=300)
                 if not official:
@@ -69,7 +70,7 @@ def main():
                 p.invoke(binary, 'inbox', 'set', str(inbox), '--json')
                 assert p.invoke(binary, 'doctor', '--json', timeout=60)['overall'] == 'healthy', 'restored doctor unhealthy'
             except Exception as exc:
-                print(json.dumps({'check': 'published-install', 'status': 'FAIL', 'restore_error': str(exc), 'recovery_directory': str(directory)}), flush=True)
+                print(json.dumps({'check': 'published-install', 'status': 'FAIL', 'restore_error': str(exc), 'error': str(error), 'recovery_directory': str(directory)}), flush=True)
                 raise SystemExit(1)
         sentinel.unlink(missing_ok=True)
         if error is None:
@@ -77,7 +78,7 @@ def main():
     if error:
         print(json.dumps({'check': 'published-install', 'status': 'FAIL', 'error': str(error), 'recovery_directory': str(directory)}), flush=True)
         raise SystemExit(1)
-    print(json.dumps({'check': 'published-install', 'status': 'PASS', 'version': args.expect_release, 'seconds': round(time.monotonic() - started, 1), 'account_alias_inbox_preserved': True, 'custom_build_restored': True}), flush=True)
+    print(json.dumps({'check': 'published-install', 'status': 'PASS', 'version': args.expect_release, 'seconds': round(time.monotonic() - started, 1), 'account_alias_inbox_preserved': True, 'custom_build_restored': not args.keep_official}), flush=True)
 
 
 if __name__ == "__main__":
