@@ -22,6 +22,7 @@ import (
 type fakeAddressProvider struct {
 	records             []AddressRecord
 	creates, deletes    int
+	lists               int
 	uncertainFirstWrite bool
 }
 
@@ -47,6 +48,7 @@ func (deletingFailureAddressProvider) DeleteAddressRecord(context.Context, Addre
 }
 
 func (p *fakeAddressProvider) ListAddressRecords(context.Context, string, string) ([]AddressRecord, error) {
+	p.lists++
 	return append([]AddressRecord(nil), p.records...), nil
 }
 func (p *fakeAddressProvider) CreateAddressRecord(_ context.Context, record AddressRecord, _ bool) (AddressRecord, error) {
@@ -510,8 +512,8 @@ func TestAddressPublishWritesEveryAddressWithoutWaitingForResolverOnPostgres(t *
 	if err := database.Pool().QueryRow(context.Background(), `SELECT state FROM edge_dns_publications WHERE hostname=$1`, host).Scan(&state); err != nil || state != "submitted" {
 		t.Fatalf("state after publish = %q, %v", state, err)
 	}
-	if err := reconciler.Publish(context.Background(), desired); err != nil || provider.creates != 2 || provider.deletes != 0 {
-		t.Fatalf("an unchanged publication touched the provider again: creates=%d deletes=%d err=%v", provider.creates, provider.deletes, err)
+	if err := reconciler.Publish(context.Background(), desired); err != nil || provider.creates != 2 || provider.deletes != 0 || provider.lists != 2 {
+		t.Fatalf("an unchanged publication touched the provider again: creates=%d deletes=%d lists=%d err=%v", provider.creates, provider.deletes, provider.lists, err)
 	}
 	// One edge is dropped: the other record stays, the dropped one is deleted.
 	desired.ReadinessVersion, desired.ObservedAt, desired.Addresses = "ready_2", now.Add(time.Second), []string{"8.8.8.8"}

@@ -389,11 +389,12 @@ func (r *AddressReconciler) reconcile(ctx context.Context, desired DesiredAddres
 	if err := r.markState(ctx, conn.Conn(), desired, generation, records, "submitted", ""); err != nil {
 		return err
 	}
+	if publishOnly {
+		// The provider confirmed every write above; the periodic reconcile reads them back.
+		return nil
+	}
 	if mutated {
 		return addressError(AddressPublicationPending, readbackRequiredDetail)
-	}
-	if publishOnly {
-		return nil
 	}
 	if err := r.verifyAddressResolution(ctx, host, wanted); err != nil {
 		return err
