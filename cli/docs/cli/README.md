@@ -143,7 +143,7 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb relay](pb_relay.md) | Inspect hosted and self-hosted relays |
 | [pb relay list](pb_relay_list.md) | List hosted and self-hosted relays |
 | [pb reset](pb_reset.md) | Remove the current Paperboat setup before fresh enrollment |
-| [pb resolve](pb_resolve.md) | Resolve a peer machine IP, port forwardings and tags over gRPC IPC |
+| [pb resolve](pb_resolve.md) | Resolve a peer machine IP, port forwardings over gRPC IPC |
 | [pb rsync](pb_rsync.md) | Run rsync with Paperboat machine resolution |
 | [pb scp](pb_scp.md) | Run scp with Paperboat machine resolution |
 | [pb send](pb_send.md) | Send files to a machine's Paperboat Inbox |
@@ -179,7 +179,6 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb ssh trust-host](pb_ssh_trust-host.md) | Approve a changed SSH host identity |
 | [pb status](pb_status.md) | Show local Paperboat machine status |
 | [pb switch](pb_switch.md) | Switch the active Personal or team workspace |
-| [pb tag](pb_tag.md) | Assign tags to a machine over gRPC IPC |
 | [pb team](pb_team.md) | Manage teams and explicit resource permissions |
 | [pb team accept](pb_team_accept.md) | Accept an invitation bound to this account |
 | [pb team activity](pb_team_activity.md) | View owner/admin activity from the last 90 days |

@@ -87,7 +87,7 @@ pb [environment] [new] [flags]
 * [pb preview](pb_preview.md)	 - Expose a local target through a temporary preview
 * [pb relay](pb_relay.md)	 - Inspect hosted and self-hosted relays
 * [pb reset](pb_reset.md)	 - Remove the current Paperboat setup before fresh enrollment
-* [pb resolve](pb_resolve.md)	 - Resolve a peer machine IP, port forwardings and tags over gRPC IPC
+* [pb resolve](pb_resolve.md)	 - Resolve a peer machine IP, port forwardings over gRPC IPC
 * [pb rsync](pb_rsync.md)	 - Run rsync with Paperboat machine resolution
 * [pb scp](pb_scp.md)	 - Run scp with Paperboat machine resolution
 * [pb send](pb_send.md)	 - Send files to a machine's Paperboat Inbox
@@ -98,7 +98,6 @@ pb [environment] [new] [flags]
 * [pb ssh](pb_ssh.md)	 - Connect to a machine with OpenSSH
 * [pb status](pb_status.md)	 - Show local Paperboat machine status
 * [pb switch](pb_switch.md)	 - Switch the active Personal or team workspace
-* [pb tag](pb_tag.md)	 - Assign tags to a machine over gRPC IPC
 * [pb team](pb_team.md)	 - Manage teams and explicit resource permissions
 * [pb tunnel](pb_tunnel.md)	 - Manage durable tunnels or start an ephemeral tunnel
 * [pb uninstall](pb_uninstall.md)	 - Completely remove Paperboat from this machine

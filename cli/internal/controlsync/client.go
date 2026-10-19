@@ -288,27 +288,6 @@ func (c *Client) PostureCheck() *pb.MachinePostureCheck {
 	}
 	return proto.Clone(c.postureCheck).(*pb.MachinePostureCheck)
 }
-func (c *Client) SetTags(ctx context.Context, machineID string, tags []string) error {
-	c.mu.RLock()
-	conn := c.conn
-	c.mu.RUnlock()
-	if conn == nil {
-		return errors.New("control sync unavailable; reconnect before changing tags")
-	}
-	token, err := c.token(ctx)
-	if err != nil {
-		return preserveContextCause(err, ctx)
-	}
-	rpcCtx := withSupportReference(ctx)
-	outgoing := metadata.AppendToOutgoingContext(rpcCtx, "authorization", "Bearer "+token)
-	if reference := supportref.FromContext(rpcCtx); reference != "" {
-		outgoing = metadata.AppendToOutgoingContext(outgoing, supportref.Header, reference)
-	}
-	rpcCtx, cancel := context.WithTimeout(outgoing, ConnectTimeout)
-	defer cancel()
-	_, err = pb.NewSyncServiceClient(conn).SetTags(rpcCtx, &pb.SetTagsRequest{MachineId: machineID, Tags: tags})
-	return preserveContextCause(err, ctx)
-}
 func (c *Client) Close() error {
 	c.mu.RLock()
 	cancel, done := c.cancel, c.done

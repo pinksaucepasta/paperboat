@@ -11,15 +11,28 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/daemonrpc"
+	"github.com/pinksaucepasta/paperboat/internal/resolver"
 	"github.com/spf13/cobra"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
+
+// rpcMachineFailure presents the daemon's NotFound answer as the shared unknown-machine error
+// (the same message every machine-taking command gives) and keeps every other failure behind
+// the generic coordinator message.
+func rpcMachineFailure(message, query string, err error) error {
+	if status.Code(err) == codes.NotFound {
+		return fmt.Errorf("%w: %q", resolver.ErrMachineNotFound, query)
+	}
+	return coordinatorFailure(message, err)
+}
 
 func rpcResolveCommand() *cobra.Command {
 	var jsonOutput bool
 
 	cmd := &cobra.Command{
 		Use:   "resolve <query>",
-		Short: "Resolve a peer machine IP, port forwardings and tags over gRPC IPC",
+		Short: "Resolve a peer machine IP, port forwardings over gRPC IPC",
 		Args:  commandArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) (resultErr error) {
 			ctx, cancel := context.WithTimeout(cmd.Context(), 5*time.Second)
@@ -37,7 +50,7 @@ func rpcResolveCommand() *cobra.Command {
 
 			addr, err := client.ResolveMachine(ctx, args[0])
 			if err != nil {
-				return coordinatorFailure("Could not resolve the machine through the local daemon; run pb status and retry.", err)
+				return rpcMachineFailure("Could not resolve the machine through the local daemon; run pb status and retry.", args[0], err)
 			}
 
 			if jsonOutput {
@@ -66,48 +79,11 @@ func rpcResolveCommand() *cobra.Command {
 					fmt.Fprintf(output, "  %d: %s\n", port, addr.BrowserUrls[int32(port)])
 				}
 			}
-			if len(addr.Tags) > 0 {
-				fmt.Fprintf(output, "Tags:     %s\n", strings.Join(addr.Tags, ", "))
-			}
 			return coordinatorFailure("Could not write the resolved machine; retry with writable output.", output.Flush())
 		},
 	}
 
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "output JSON format")
-	return cmd
-}
-
-func rpcTagCommand() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "tag <machine-id> <tag1> [tag2...]",
-		Short: "Assign tags to a machine over gRPC IPC",
-		Args:  commandArgs(cobra.MinimumNArgs(2)),
-		RunE: func(cmd *cobra.Command, args []string) (resultErr error) {
-			ctx, cancel := context.WithTimeout(cmd.Context(), 5*time.Second)
-			defer cancel()
-
-			client, err := daemonrpc.NewClient(ctx, "")
-			if err != nil {
-				return coordinatorFailure("Could not connect to the local Paperboat daemon; run pb status and retry.", err)
-			}
-			defer func() {
-				if closeErr := client.Close(); closeErr != nil {
-					resultErr = coordinatorFailure("Local daemon connection cleanup failed.", resultErr, closeErr)
-				}
-			}()
-
-			machineID := args[0]
-			tags := args[1:]
-
-			resp, err := client.SetMachineTags(ctx, machineID, tags)
-			if err != nil {
-				return coordinatorFailure("Could not set machine tags through the local daemon; run pb status and retry.", err)
-			}
-
-			return writeDaemonCommandResult(cmd, resp, fmt.Sprintf("Assigned tags %v to machine %s (success=%v)", resp.Tags, resp.MachineId, resp.Success))
-		},
-	}
-	cmd.Flags().Bool("json", false, "print JSON")
 	return cmd
 }
 
@@ -157,11 +133,6 @@ func rpcApproveCommand() *cobra.Command {
 // ResolveCommand creates the pb resolve command.
 func ResolveCommand() *cobra.Command {
 	return rpcResolveCommand()
-}
-
-// TagCommand creates the pb tag command.
-func TagCommand() *cobra.Command {
-	return rpcTagCommand()
 }
 
 // ApproveCommand creates the pb approve command.

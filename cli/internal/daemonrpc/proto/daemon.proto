@@ -21,7 +21,6 @@ message PeerStatus {
   bool online = 4;
   int64 latency_ms = 5;
   string connection_mode = 6;
-  repeated string tags = 7;
   bool approved = 8;
   repeated int32 forwarded_ports = 9;
   map<int32, string> browser_urls = 10;
@@ -43,19 +42,7 @@ message MachineAddress {
   string alias = 2;
   string assigned_ip = 3;
   repeated int32 forwarded_ports = 4;
-  repeated string tags = 5;
   map<int32, string> browser_urls = 6;
-}
-
-message SetMachineTagsRequest {
-  string machine_id = 1;
-  repeated string tags = 2;
-}
-
-message SetMachineTagsResponse {
-  string machine_id = 1;
-  repeated string tags = 2;
-  bool success = 3;
 }
 
 message ApprovePeerRequest {
@@ -72,6 +59,5 @@ message ApprovePeerResponse {
 service DaemonService {
   rpc StreamStatus(Empty) returns (stream StatusResponse);
   rpc ResolveMachine(MachineQuery) returns (MachineAddress);
-  rpc SetMachineTags(SetMachineTagsRequest) returns (SetMachineTagsResponse);
   rpc ApprovePeer(ApprovePeerRequest) returns (ApprovePeerResponse);
 }

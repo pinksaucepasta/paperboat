@@ -73,14 +73,6 @@ func (c *Client) ResolveMachine(ctx context.Context, query string) (*pb.MachineA
 	return c.client.ResolveMachine(rpcContext(ctx), &pb.MachineQuery{Query: query})
 }
 
-// SetMachineTags sets or replaces the tags associated with a machine.
-func (c *Client) SetMachineTags(ctx context.Context, machineID string, tags []string) (*pb.SetMachineTagsResponse, error) {
-	return c.client.SetMachineTags(rpcContext(ctx), &pb.SetMachineTagsRequest{
-		MachineId: machineID,
-		Tags:      tags,
-	})
-}
-
 // ApprovePeer approves or revokes peer access.
 func (c *Client) ApprovePeer(ctx context.Context, machineID string, approved bool) (*pb.ApprovePeerResponse, error) {
 	return c.client.ApprovePeer(rpcContext(ctx), &pb.ApprovePeerRequest{

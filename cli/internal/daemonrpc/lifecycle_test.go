@@ -84,9 +84,6 @@ func TestSnapshotWithdrawalAndConcurrentSubscriberCancellation(t *testing.T) {
 	if last != 0 {
 		t.Fatal("slow subscriber missed final withdrawal", last)
 	}
-	if err := b.SetMachineTags(context.Background(), "machine_a", []string{"tag"}); err == nil {
-		t.Fatal("unconfigured mutation reported success")
-	}
 	if err := b.ApprovePeer(context.Background(), "machine_a", true); err == nil {
 		t.Fatal("unsigned approval reported success")
 	}

@@ -52,7 +52,7 @@ func (b *LiveDaemonBackend) ApplyPeerUpdates(updates []*pbSync.PeerUpdate, revis
 		if !u.GetApproved() || !u.GetOnline() {
 			continue
 		}
-		b.peers[u.GetPeerId()] = &pb.PeerStatus{PeerId: u.GetPeerId(), Alias: u.GetAlias(), AssignedIp: u.GetAssignedIp(), Online: true, ConnectionMode: "unknown", Tags: append([]string(nil), u.GetTags()...), Approved: true, BrowserUrls: maps.Clone(browserURLs[u.GetPeerId()]), ForwardedPorts: append([]int32(nil), u.GetExportedPorts()...)}
+		b.peers[u.GetPeerId()] = &pb.PeerStatus{PeerId: u.GetPeerId(), Alias: u.GetAlias(), AssignedIp: u.GetAssignedIp(), Online: true, ConnectionMode: "unknown", Approved: true, BrowserUrls: maps.Clone(browserURLs[u.GetPeerId()]), ForwardedPorts: append([]int32(nil), u.GetExportedPorts()...)}
 	}
 	if revision == 0 {
 		b.state = "disconnected"
@@ -89,7 +89,6 @@ func (b *LiveDaemonBackend) SetApprovalHandler(handler func(context.Context, str
 func (b *LiveDaemonBackend) buildStatusResponseLocked() *pb.StatusResponse {
 	var peerList []*pb.PeerStatus
 	for _, p := range b.peers {
-		tagsCopy := append([]string(nil), p.Tags...)
 		portsCopy := append([]int32(nil), p.ForwardedPorts...)
 		peerList = append(peerList, &pb.PeerStatus{
 			PeerId:         p.PeerId,
@@ -98,7 +97,6 @@ func (b *LiveDaemonBackend) buildStatusResponseLocked() *pb.StatusResponse {
 			Online:         p.Online,
 			LatencyMs:      p.LatencyMs,
 			ConnectionMode: p.ConnectionMode,
-			Tags:           tagsCopy,
 			Approved:       p.Approved,
 			ForwardedPorts: portsCopy,
 			BrowserUrls:    maps.Clone(p.BrowserUrls),
@@ -152,30 +150,17 @@ func (b *LiveDaemonBackend) ResolveMachine(ctx context.Context, query string) (*
 	for _, p := range b.peers {
 		if p.PeerId == query || p.Alias == query {
 			portsCopy := append([]int32(nil), p.ForwardedPorts...)
-			tagsCopy := append([]string(nil), p.Tags...)
 			return &pb.MachineAddress{
 				MachineId:      p.PeerId,
 				Alias:          p.Alias,
 				AssignedIp:     p.AssignedIp,
 				ForwardedPorts: portsCopy,
 				BrowserUrls:    maps.Clone(p.BrowserUrls),
-				Tags:           tagsCopy,
 			}, nil
 		}
 	}
 
 	return nil, fmt.Errorf("%w: %q", ErrMachineNotFound, query)
-}
-
-// SetMachineTags updates machine tags via the control sync client.
-func (b *LiveDaemonBackend) SetMachineTags(ctx context.Context, machineID string, tags []string) error {
-	b.mu.RLock()
-	client := b.syncClient
-	b.mu.RUnlock()
-	if client == nil {
-		return fmt.Errorf("control sync unavailable; reconnect before changing tags")
-	}
-	return client.SetTags(ctx, machineID, tags)
 }
 
 // ApprovePeer delegates to the account-root-signed enrollment owner, never the

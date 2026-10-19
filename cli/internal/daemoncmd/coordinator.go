@@ -1081,7 +1081,7 @@ func (c *Coordinator) retireFailedRoute(route *guardedRoute, cause error) {
 					if peer.PeerId == route.machineID {
 						ports = slices.DeleteFunc(ports, func(port int32) bool { return int(port) == route.port })
 					}
-					updates = append(updates, &pbSync.PeerUpdate{PeerId: peer.PeerId, Alias: peer.Alias, AssignedIp: peer.AssignedIp, Approved: peer.Approved, Online: peer.Online, Tags: slices.Clone(peer.Tags), ExportedPorts: ports})
+					updates = append(updates, &pbSync.PeerUpdate{PeerId: peer.PeerId, Alias: peer.Alias, AssignedIp: peer.AssignedIp, Approved: peer.Approved, Online: peer.Online, ExportedPorts: ports})
 					urls[peer.PeerId] = maps.Clone(peer.BrowserUrls)
 				}
 				c.rpcBackend.ApplyPeerUpdates(updates, status.Generation, urls)

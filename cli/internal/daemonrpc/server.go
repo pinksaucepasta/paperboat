@@ -23,7 +23,6 @@ type DaemonBackend interface {
 	GetStatus(ctx context.Context) (*pb.StatusResponse, error)
 	SubscribeStatus(ctx context.Context) (<-chan *pb.StatusResponse, func(), error)
 	ResolveMachine(ctx context.Context, query string) (*pb.MachineAddress, error)
-	SetMachineTags(ctx context.Context, machineID string, tags []string) error
 	ApprovePeer(ctx context.Context, machineID string, approved bool) error
 }
 
@@ -284,24 +283,6 @@ func (s *Server) ResolveMachine(ctx context.Context, query *pb.MachineQuery) (*p
 		return nil, backendRPCFailure(ctx, "daemon could not resolve the requested machine", err)
 	}
 	return resp, nil
-}
-
-// SetMachineTags sets or updates user-defined metadata tags for a machine.
-func (s *Server) SetMachineTags(ctx context.Context, req *pb.SetMachineTagsRequest) (*pb.SetMachineTagsResponse, error) {
-	if s.backend == nil {
-		return nil, status.Error(codes.Unavailable, "backend not configured")
-	}
-	if req.GetMachineId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "machine_id is required")
-	}
-	if err := s.backend.SetMachineTags(ctx, req.GetMachineId(), req.GetTags()); err != nil {
-		return nil, backendRPCFailure(ctx, "daemon could not update machine tags", err)
-	}
-	return &pb.SetMachineTagsResponse{
-		MachineId: req.GetMachineId(),
-		Tags:      req.GetTags(),
-		Success:   true,
-	}, nil
 }
 
 // ApprovePeer handles requests to approve or revoke peer machines.

@@ -47,7 +47,6 @@ func TestServiceCommandRegistration(t *testing.T) {
 func TestRPCCommandsRegistration(t *testing.T) {
 	commands := map[string]*cobra.Command{
 		"resolve": ResolveCommand(),
-		"tag":     TagCommand(),
 		"approve": ApproveCommand(),
 	}
 	for name, cmd := range commands {

@@ -21,7 +21,6 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	DaemonService_StreamStatus_FullMethodName   = "/daemonrpc.DaemonService/StreamStatus"
 	DaemonService_ResolveMachine_FullMethodName = "/daemonrpc.DaemonService/ResolveMachine"
-	DaemonService_SetMachineTags_FullMethodName = "/daemonrpc.DaemonService/SetMachineTags"
 	DaemonService_ApprovePeer_FullMethodName    = "/daemonrpc.DaemonService/ApprovePeer"
 )
 
@@ -31,7 +30,6 @@ const (
 type DaemonServiceClient interface {
 	StreamStatus(ctx context.Context, in *Empty, opts ...grpc.CallOption) (grpc.ServerStreamingClient[StatusResponse], error)
 	ResolveMachine(ctx context.Context, in *MachineQuery, opts ...grpc.CallOption) (*MachineAddress, error)
-	SetMachineTags(ctx context.Context, in *SetMachineTagsRequest, opts ...grpc.CallOption) (*SetMachineTagsResponse, error)
 	ApprovePeer(ctx context.Context, in *ApprovePeerRequest, opts ...grpc.CallOption) (*ApprovePeerResponse, error)
 }
 
@@ -72,16 +70,6 @@ func (c *daemonServiceClient) ResolveMachine(ctx context.Context, in *MachineQue
 	return out, nil
 }
 
-func (c *daemonServiceClient) SetMachineTags(ctx context.Context, in *SetMachineTagsRequest, opts ...grpc.CallOption) (*SetMachineTagsResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(SetMachineTagsResponse)
-	err := c.cc.Invoke(ctx, DaemonService_SetMachineTags_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func (c *daemonServiceClient) ApprovePeer(ctx context.Context, in *ApprovePeerRequest, opts ...grpc.CallOption) (*ApprovePeerResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ApprovePeerResponse)
@@ -98,7 +86,6 @@ func (c *daemonServiceClient) ApprovePeer(ctx context.Context, in *ApprovePeerRe
 type DaemonServiceServer interface {
 	StreamStatus(*Empty, grpc.ServerStreamingServer[StatusResponse]) error
 	ResolveMachine(context.Context, *MachineQuery) (*MachineAddress, error)
-	SetMachineTags(context.Context, *SetMachineTagsRequest) (*SetMachineTagsResponse, error)
 	ApprovePeer(context.Context, *ApprovePeerRequest) (*ApprovePeerResponse, error)
 	mustEmbedUnimplementedDaemonServiceServer()
 }
@@ -115,9 +102,6 @@ func (UnimplementedDaemonServiceServer) StreamStatus(*Empty, grpc.ServerStreamin
 }
 func (UnimplementedDaemonServiceServer) ResolveMachine(context.Context, *MachineQuery) (*MachineAddress, error) {
 	return nil, status.Error(codes.Unimplemented, "method ResolveMachine not implemented")
-}
-func (UnimplementedDaemonServiceServer) SetMachineTags(context.Context, *SetMachineTagsRequest) (*SetMachineTagsResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method SetMachineTags not implemented")
 }
 func (UnimplementedDaemonServiceServer) ApprovePeer(context.Context, *ApprovePeerRequest) (*ApprovePeerResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ApprovePeer not implemented")
@@ -172,24 +156,6 @@ func _DaemonService_ResolveMachine_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
-func _DaemonService_SetMachineTags_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(SetMachineTagsRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DaemonServiceServer).SetMachineTags(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: DaemonService_SetMachineTags_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DaemonServiceServer).SetMachineTags(ctx, req.(*SetMachineTagsRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _DaemonService_ApprovePeer_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ApprovePeerRequest)
 	if err := dec(in); err != nil {
@@ -218,10 +184,6 @@ var DaemonService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ResolveMachine",
 			Handler:    _DaemonService_ResolveMachine_Handler,
-		},
-		{
-			MethodName: "SetMachineTags",
-			Handler:    _DaemonService_SetMachineTags_Handler,
 		},
 		{
 			MethodName: "ApprovePeer",

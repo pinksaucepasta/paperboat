@@ -64,12 +64,6 @@ func (s *snapshotTestServer) Sync(stream pb.SyncService_SyncServer) error {
 	return stream.Context().Err()
 }
 
-func (s *snapshotTestServer) SetTags(ctx context.Context, _ *pb.SetTagsRequest) (*pb.SetTagsResponse, error) {
-	md, _ := metadata.FromIncomingContext(ctx)
-	s.recordReference(md)
-	return &pb.SetTagsResponse{Success: true}, nil
-}
-
 func (s *snapshotTestServer) recordReference(md metadata.MD) {
 	s.refsMu.Lock()
 	s.refs = append(s.refs, md.Get(supportref.Header)...)
@@ -130,13 +124,10 @@ func TestSnapshotRecoveryWithdrawsAndReplaces(t *testing.T) {
 	if backend.badAuth.Load() {
 		t.Fatal("missing authenticated metadata")
 	}
-	if err = client.SetTags(ctx, "local-machine", []string{"private"}); err != nil {
-		t.Fatal(err)
-	}
 	backend.refsMu.Lock()
 	refs := append([]string(nil), backend.refs...)
 	backend.refsMu.Unlock()
-	if len(refs) != 4 {
+	if len(refs) != 3 {
 		t.Fatalf("support-reference metadata on RPCs = %v", refs)
 	}
 	for _, got := range refs {

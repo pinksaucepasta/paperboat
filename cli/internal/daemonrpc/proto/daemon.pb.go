@@ -149,7 +149,6 @@ type PeerStatus struct {
 	Online         bool                   `protobuf:"varint,4,opt,name=online,proto3" json:"online,omitempty"`
 	LatencyMs      int64                  `protobuf:"varint,5,opt,name=latency_ms,json=latencyMs,proto3" json:"latency_ms,omitempty"`
 	ConnectionMode string                 `protobuf:"bytes,6,opt,name=connection_mode,json=connectionMode,proto3" json:"connection_mode,omitempty"`
-	Tags           []string               `protobuf:"bytes,7,rep,name=tags,proto3" json:"tags,omitempty"`
 	Approved       bool                   `protobuf:"varint,8,opt,name=approved,proto3" json:"approved,omitempty"`
 	ForwardedPorts []int32                `protobuf:"varint,9,rep,packed,name=forwarded_ports,json=forwardedPorts,proto3" json:"forwarded_ports,omitempty"`
 	BrowserUrls    map[int32]string       `protobuf:"bytes,10,rep,name=browser_urls,json=browserUrls,proto3" json:"browser_urls,omitempty" protobuf_key:"varint,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
@@ -227,13 +226,6 @@ func (x *PeerStatus) GetConnectionMode() string {
 		return x.ConnectionMode
 	}
 	return ""
-}
-
-func (x *PeerStatus) GetTags() []string {
-	if x != nil {
-		return x.Tags
-	}
-	return nil
 }
 
 func (x *PeerStatus) GetApproved() bool {
@@ -375,7 +367,6 @@ type MachineAddress struct {
 	Alias          string                 `protobuf:"bytes,2,opt,name=alias,proto3" json:"alias,omitempty"`
 	AssignedIp     string                 `protobuf:"bytes,3,opt,name=assigned_ip,json=assignedIp,proto3" json:"assigned_ip,omitempty"`
 	ForwardedPorts []int32                `protobuf:"varint,4,rep,packed,name=forwarded_ports,json=forwardedPorts,proto3" json:"forwarded_ports,omitempty"`
-	Tags           []string               `protobuf:"bytes,5,rep,name=tags,proto3" json:"tags,omitempty"`
 	BrowserUrls    map[int32]string       `protobuf:"bytes,6,rep,name=browser_urls,json=browserUrls,proto3" json:"browser_urls,omitempty" protobuf_key:"varint,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
@@ -439,130 +430,11 @@ func (x *MachineAddress) GetForwardedPorts() []int32 {
 	return nil
 }
 
-func (x *MachineAddress) GetTags() []string {
-	if x != nil {
-		return x.Tags
-	}
-	return nil
-}
-
 func (x *MachineAddress) GetBrowserUrls() map[int32]string {
 	if x != nil {
 		return x.BrowserUrls
 	}
 	return nil
-}
-
-type SetMachineTagsRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	MachineId     string                 `protobuf:"bytes,1,opt,name=machine_id,json=machineId,proto3" json:"machine_id,omitempty"`
-	Tags          []string               `protobuf:"bytes,2,rep,name=tags,proto3" json:"tags,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SetMachineTagsRequest) Reset() {
-	*x = SetMachineTagsRequest{}
-	mi := &file_daemon_proto_msgTypes[6]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SetMachineTagsRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SetMachineTagsRequest) ProtoMessage() {}
-
-func (x *SetMachineTagsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[6]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SetMachineTagsRequest.ProtoReflect.Descriptor instead.
-func (*SetMachineTagsRequest) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{6}
-}
-
-func (x *SetMachineTagsRequest) GetMachineId() string {
-	if x != nil {
-		return x.MachineId
-	}
-	return ""
-}
-
-func (x *SetMachineTagsRequest) GetTags() []string {
-	if x != nil {
-		return x.Tags
-	}
-	return nil
-}
-
-type SetMachineTagsResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	MachineId     string                 `protobuf:"bytes,1,opt,name=machine_id,json=machineId,proto3" json:"machine_id,omitempty"`
-	Tags          []string               `protobuf:"bytes,2,rep,name=tags,proto3" json:"tags,omitempty"`
-	Success       bool                   `protobuf:"varint,3,opt,name=success,proto3" json:"success,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SetMachineTagsResponse) Reset() {
-	*x = SetMachineTagsResponse{}
-	mi := &file_daemon_proto_msgTypes[7]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SetMachineTagsResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SetMachineTagsResponse) ProtoMessage() {}
-
-func (x *SetMachineTagsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[7]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SetMachineTagsResponse.ProtoReflect.Descriptor instead.
-func (*SetMachineTagsResponse) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{7}
-}
-
-func (x *SetMachineTagsResponse) GetMachineId() string {
-	if x != nil {
-		return x.MachineId
-	}
-	return ""
-}
-
-func (x *SetMachineTagsResponse) GetTags() []string {
-	if x != nil {
-		return x.Tags
-	}
-	return nil
-}
-
-func (x *SetMachineTagsResponse) GetSuccess() bool {
-	if x != nil {
-		return x.Success
-	}
-	return false
 }
 
 type ApprovePeerRequest struct {
@@ -575,7 +447,7 @@ type ApprovePeerRequest struct {
 
 func (x *ApprovePeerRequest) Reset() {
 	*x = ApprovePeerRequest{}
-	mi := &file_daemon_proto_msgTypes[8]
+	mi := &file_daemon_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -587,7 +459,7 @@ func (x *ApprovePeerRequest) String() string {
 func (*ApprovePeerRequest) ProtoMessage() {}
 
 func (x *ApprovePeerRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[8]
+	mi := &file_daemon_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -600,7 +472,7 @@ func (x *ApprovePeerRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApprovePeerRequest.ProtoReflect.Descriptor instead.
 func (*ApprovePeerRequest) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{8}
+	return file_daemon_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ApprovePeerRequest) GetMachineId() string {
@@ -628,7 +500,7 @@ type ApprovePeerResponse struct {
 
 func (x *ApprovePeerResponse) Reset() {
 	*x = ApprovePeerResponse{}
-	mi := &file_daemon_proto_msgTypes[9]
+	mi := &file_daemon_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -640,7 +512,7 @@ func (x *ApprovePeerResponse) String() string {
 func (*ApprovePeerResponse) ProtoMessage() {}
 
 func (x *ApprovePeerResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_daemon_proto_msgTypes[9]
+	mi := &file_daemon_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -653,7 +525,7 @@ func (x *ApprovePeerResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApprovePeerResponse.ProtoReflect.Descriptor instead.
 func (*ApprovePeerResponse) Descriptor() ([]byte, []int) {
-	return file_daemon_proto_rawDescGZIP(), []int{9}
+	return file_daemon_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ApprovePeerResponse) GetMachineId() string {
@@ -692,7 +564,7 @@ const file_daemon_proto_rawDesc = "" +
 	"\x10observed_at_unix\x18\x04 \x01(\x03R\x0eobservedAtUnix\x12+\n" +
 	"\x05peers\x18\x05 \x03(\v2\x15.daemonrpc.PeerStatusR\x05peers\x126\n" +
 	"\vderp_relays\x18\x06 \x03(\v2\x15.daemonrpc.DERPStatusR\n" +
-	"derpRelays\"\xa0\x03\n" +
+	"derpRelays\"\x8c\x03\n" +
 	"\n" +
 	"PeerStatus\x12\x17\n" +
 	"\apeer_id\x18\x01 \x01(\tR\x06peerId\x12\x14\n" +
@@ -702,8 +574,7 @@ const file_daemon_proto_rawDesc = "" +
 	"\x06online\x18\x04 \x01(\bR\x06online\x12\x1d\n" +
 	"\n" +
 	"latency_ms\x18\x05 \x01(\x03R\tlatencyMs\x12'\n" +
-	"\x0fconnection_mode\x18\x06 \x01(\tR\x0econnectionMode\x12\x12\n" +
-	"\x04tags\x18\a \x03(\tR\x04tags\x12\x1a\n" +
+	"\x0fconnection_mode\x18\x06 \x01(\tR\x0econnectionMode\x12\x1a\n" +
 	"\bapproved\x18\b \x01(\bR\bapproved\x12'\n" +
 	"\x0fforwarded_ports\x18\t \x03(\x05R\x0eforwardedPorts\x12I\n" +
 	"\fbrowser_urls\x18\n" +
@@ -721,28 +592,18 @@ const file_daemon_proto_rawDesc = "" +
 	"\n" +
 	"latency_ms\x18\x04 \x01(\x03R\tlatencyMs\"$\n" +
 	"\fMachineQuery\x12\x14\n" +
-	"\x05query\x18\x01 \x01(\tR\x05query\"\xb2\x02\n" +
+	"\x05query\x18\x01 \x01(\tR\x05query\"\x9e\x02\n" +
 	"\x0eMachineAddress\x12\x1d\n" +
 	"\n" +
 	"machine_id\x18\x01 \x01(\tR\tmachineId\x12\x14\n" +
 	"\x05alias\x18\x02 \x01(\tR\x05alias\x12\x1f\n" +
 	"\vassigned_ip\x18\x03 \x01(\tR\n" +
 	"assignedIp\x12'\n" +
-	"\x0fforwarded_ports\x18\x04 \x03(\x05R\x0eforwardedPorts\x12\x12\n" +
-	"\x04tags\x18\x05 \x03(\tR\x04tags\x12M\n" +
+	"\x0fforwarded_ports\x18\x04 \x03(\x05R\x0eforwardedPorts\x12M\n" +
 	"\fbrowser_urls\x18\x06 \x03(\v2*.daemonrpc.MachineAddress.BrowserUrlsEntryR\vbrowserUrls\x1a>\n" +
 	"\x10BrowserUrlsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\x05R\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"J\n" +
-	"\x15SetMachineTagsRequest\x12\x1d\n" +
-	"\n" +
-	"machine_id\x18\x01 \x01(\tR\tmachineId\x12\x12\n" +
-	"\x04tags\x18\x02 \x03(\tR\x04tags\"e\n" +
-	"\x16SetMachineTagsResponse\x12\x1d\n" +
-	"\n" +
-	"machine_id\x18\x01 \x01(\tR\tmachineId\x12\x12\n" +
-	"\x04tags\x18\x02 \x03(\tR\x04tags\x12\x18\n" +
-	"\asuccess\x18\x03 \x01(\bR\asuccess\"O\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"O\n" +
 	"\x12ApprovePeerRequest\x12\x1d\n" +
 	"\n" +
 	"machine_id\x18\x01 \x01(\tR\tmachineId\x12\x1a\n" +
@@ -751,11 +612,10 @@ const file_daemon_proto_rawDesc = "" +
 	"\n" +
 	"machine_id\x18\x01 \x01(\tR\tmachineId\x12\x1a\n" +
 	"\bapproved\x18\x02 \x01(\bR\bapproved\x12\x18\n" +
-	"\asuccess\x18\x03 \x01(\bR\asuccess2\xb9\x02\n" +
+	"\asuccess\x18\x03 \x01(\bR\asuccess2\xe2\x01\n" +
 	"\rDaemonService\x12=\n" +
 	"\fStreamStatus\x12\x10.daemonrpc.Empty\x1a\x19.daemonrpc.StatusResponse0\x01\x12D\n" +
-	"\x0eResolveMachine\x12\x17.daemonrpc.MachineQuery\x1a\x19.daemonrpc.MachineAddress\x12U\n" +
-	"\x0eSetMachineTags\x12 .daemonrpc.SetMachineTagsRequest\x1a!.daemonrpc.SetMachineTagsResponse\x12L\n" +
+	"\x0eResolveMachine\x12\x17.daemonrpc.MachineQuery\x1a\x19.daemonrpc.MachineAddress\x12L\n" +
 	"\vApprovePeer\x12\x1d.daemonrpc.ApprovePeerRequest\x1a\x1e.daemonrpc.ApprovePeerResponseBDZBgithub.com/pinksaucepasta/paperboat/internal/daemonrpc/proto;protob\x06proto3"
 
 var (
@@ -770,39 +630,35 @@ func file_daemon_proto_rawDescGZIP() []byte {
 	return file_daemon_proto_rawDescData
 }
 
-var file_daemon_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_daemon_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_daemon_proto_goTypes = []any{
-	(*Empty)(nil),                  // 0: daemonrpc.Empty
-	(*StatusResponse)(nil),         // 1: daemonrpc.StatusResponse
-	(*PeerStatus)(nil),             // 2: daemonrpc.PeerStatus
-	(*DERPStatus)(nil),             // 3: daemonrpc.DERPStatus
-	(*MachineQuery)(nil),           // 4: daemonrpc.MachineQuery
-	(*MachineAddress)(nil),         // 5: daemonrpc.MachineAddress
-	(*SetMachineTagsRequest)(nil),  // 6: daemonrpc.SetMachineTagsRequest
-	(*SetMachineTagsResponse)(nil), // 7: daemonrpc.SetMachineTagsResponse
-	(*ApprovePeerRequest)(nil),     // 8: daemonrpc.ApprovePeerRequest
-	(*ApprovePeerResponse)(nil),    // 9: daemonrpc.ApprovePeerResponse
-	nil,                            // 10: daemonrpc.PeerStatus.BrowserUrlsEntry
-	nil,                            // 11: daemonrpc.MachineAddress.BrowserUrlsEntry
+	(*Empty)(nil),               // 0: daemonrpc.Empty
+	(*StatusResponse)(nil),      // 1: daemonrpc.StatusResponse
+	(*PeerStatus)(nil),          // 2: daemonrpc.PeerStatus
+	(*DERPStatus)(nil),          // 3: daemonrpc.DERPStatus
+	(*MachineQuery)(nil),        // 4: daemonrpc.MachineQuery
+	(*MachineAddress)(nil),      // 5: daemonrpc.MachineAddress
+	(*ApprovePeerRequest)(nil),  // 6: daemonrpc.ApprovePeerRequest
+	(*ApprovePeerResponse)(nil), // 7: daemonrpc.ApprovePeerResponse
+	nil,                         // 8: daemonrpc.PeerStatus.BrowserUrlsEntry
+	nil,                         // 9: daemonrpc.MachineAddress.BrowserUrlsEntry
 }
 var file_daemon_proto_depIdxs = []int32{
-	2,  // 0: daemonrpc.StatusResponse.peers:type_name -> daemonrpc.PeerStatus
-	3,  // 1: daemonrpc.StatusResponse.derp_relays:type_name -> daemonrpc.DERPStatus
-	10, // 2: daemonrpc.PeerStatus.browser_urls:type_name -> daemonrpc.PeerStatus.BrowserUrlsEntry
-	11, // 3: daemonrpc.MachineAddress.browser_urls:type_name -> daemonrpc.MachineAddress.BrowserUrlsEntry
-	0,  // 4: daemonrpc.DaemonService.StreamStatus:input_type -> daemonrpc.Empty
-	4,  // 5: daemonrpc.DaemonService.ResolveMachine:input_type -> daemonrpc.MachineQuery
-	6,  // 6: daemonrpc.DaemonService.SetMachineTags:input_type -> daemonrpc.SetMachineTagsRequest
-	8,  // 7: daemonrpc.DaemonService.ApprovePeer:input_type -> daemonrpc.ApprovePeerRequest
-	1,  // 8: daemonrpc.DaemonService.StreamStatus:output_type -> daemonrpc.StatusResponse
-	5,  // 9: daemonrpc.DaemonService.ResolveMachine:output_type -> daemonrpc.MachineAddress
-	7,  // 10: daemonrpc.DaemonService.SetMachineTags:output_type -> daemonrpc.SetMachineTagsResponse
-	9,  // 11: daemonrpc.DaemonService.ApprovePeer:output_type -> daemonrpc.ApprovePeerResponse
-	8,  // [8:12] is the sub-list for method output_type
-	4,  // [4:8] is the sub-list for method input_type
-	4,  // [4:4] is the sub-list for extension type_name
-	4,  // [4:4] is the sub-list for extension extendee
-	0,  // [0:4] is the sub-list for field type_name
+	2, // 0: daemonrpc.StatusResponse.peers:type_name -> daemonrpc.PeerStatus
+	3, // 1: daemonrpc.StatusResponse.derp_relays:type_name -> daemonrpc.DERPStatus
+	8, // 2: daemonrpc.PeerStatus.browser_urls:type_name -> daemonrpc.PeerStatus.BrowserUrlsEntry
+	9, // 3: daemonrpc.MachineAddress.browser_urls:type_name -> daemonrpc.MachineAddress.BrowserUrlsEntry
+	0, // 4: daemonrpc.DaemonService.StreamStatus:input_type -> daemonrpc.Empty
+	4, // 5: daemonrpc.DaemonService.ResolveMachine:input_type -> daemonrpc.MachineQuery
+	6, // 6: daemonrpc.DaemonService.ApprovePeer:input_type -> daemonrpc.ApprovePeerRequest
+	1, // 7: daemonrpc.DaemonService.StreamStatus:output_type -> daemonrpc.StatusResponse
+	5, // 8: daemonrpc.DaemonService.ResolveMachine:output_type -> daemonrpc.MachineAddress
+	7, // 9: daemonrpc.DaemonService.ApprovePeer:output_type -> daemonrpc.ApprovePeerResponse
+	7, // [7:10] is the sub-list for method output_type
+	4, // [4:7] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_daemon_proto_init() }
@@ -816,7 +672,7 @@ func file_daemon_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_daemon_proto_rawDesc), len(file_daemon_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   12,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

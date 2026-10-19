@@ -202,7 +202,6 @@ func (s *testControlSyncServer) Sync(stream pbSync.SyncService_SyncServer) error
 				Online:        true,
 				Approved:      true,
 				ExportedPorts: []int32{3000, 8080},
-				Tags:          []string{"dev"},
 			},
 		},
 	}); err != nil {

@@ -31,7 +31,6 @@ type mockBackend struct {
 	status      *pb.StatusResponse
 	subscribers []chan *pb.StatusResponse
 	machines    map[string]*pb.MachineAddress
-	machineTags map[string][]string
 }
 
 func newMockBackend() *mockBackend {
@@ -49,7 +48,6 @@ func newMockBackend() *mockBackend {
 					Online:         true,
 					LatencyMs:      15,
 					ConnectionMode: "direct",
-					Tags:           []string{"work", "fast"},
 				},
 			},
 			DerpRelays: []*pb.DERPStatus{
@@ -67,10 +65,8 @@ func newMockBackend() *mockBackend {
 				Alias:          "workstation",
 				AssignedIp:     "127.100.0.2",
 				ForwardedPorts: []int32{22, 8080},
-				Tags:           []string{"work", "fast"},
 			},
 		},
-		machineTags: make(map[string][]string),
 	}
 }
 
@@ -115,10 +111,6 @@ func (m *mockBackend) ResolveMachine(ctx context.Context, query string) (*pb.Mac
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if dev, ok := m.machines[query]; ok {
-		tags := m.machineTags[dev.MachineId]
-		if len(tags) > 0 {
-			dev.Tags = tags
-		}
 		return dev, nil
 	}
 	return nil, fmt.Errorf("machine %q not found", query)
@@ -127,13 +119,6 @@ func (m *mockBackend) ResolveMachine(ctx context.Context, query string) (*pb.Mac
 func (m *mockBackend) ApprovePeer(ctx context.Context, machineID string, approved bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return nil
-}
-
-func (m *mockBackend) SetMachineTags(ctx context.Context, machineID string, tags []string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.machineTags[machineID] = tags
 	return nil
 }
 
@@ -180,23 +165,6 @@ func TestDaemonRPCServerAndClient(t *testing.T) {
 	}
 	if dev.MachineId != "dev-1" || dev.AssignedIp != "127.100.0.2" {
 		t.Fatalf("unexpected resolved machine: %+v", dev)
-	}
-
-	// 2. Test SetMachineTags and then resolve again
-	tagResp, err := client.SetMachineTags(ctx, "dev-1", []string{"production", "gateway"})
-	if err != nil {
-		t.Fatalf("SetMachineTags() error: %v", err)
-	}
-	if !tagResp.Success || !reflect.DeepEqual(tagResp.Tags, []string{"production", "gateway"}) {
-		t.Fatalf("unexpected SetMachineTags response: %+v", tagResp)
-	}
-
-	dev, err = client.ResolveMachine(ctx, "workstation")
-	if err != nil {
-		t.Fatalf("ResolveMachine after tags error: %v", err)
-	}
-	if !reflect.DeepEqual(dev.Tags, []string{"production", "gateway"}) {
-		t.Fatalf("expected updated tags, got %v", dev.Tags)
 	}
 
 	// 4. Test StreamStatus
@@ -294,8 +262,7 @@ func (b *streamRaceBackend) SubscribeStatus(context.Context) (<-chan *pb.StatusR
 func (*streamRaceBackend) ResolveMachine(context.Context, string) (*pb.MachineAddress, error) {
 	return nil, nil
 }
-func (*streamRaceBackend) SetMachineTags(context.Context, string, []string) error { return nil }
-func (*streamRaceBackend) ApprovePeer(context.Context, string, bool) error        { return nil }
+func (*streamRaceBackend) ApprovePeer(context.Context, string, bool) error { return nil }
 
 func (b *streamRaceBackend) apply(status *pb.StatusResponse) {
 	b.mu.Lock()
@@ -394,8 +361,7 @@ func (b *rpcBoundaryBackend) ResolveMachine(context.Context, string) (*pb.Machin
 	return b.address, b.resolveErr
 }
 
-func (*rpcBoundaryBackend) SetMachineTags(context.Context, string, []string) error { return nil }
-func (*rpcBoundaryBackend) ApprovePeer(context.Context, string, bool) error        { return nil }
+func (*rpcBoundaryBackend) ApprovePeer(context.Context, string, bool) error { return nil }
 
 func (b *rpcBoundaryBackend) setResolve(err error, address *pb.MachineAddress) {
 	b.mu.Lock()
@@ -577,7 +543,6 @@ func TestLiveDaemonBackendAuthorizedPortsAndUnknownTransport(t *testing.T) {
 			Online:        true,
 			Approved:      true,
 			ExportedPorts: []int32{3000, 8080, 5432},
-			Tags:          []string{"backend", "staging"},
 		},
 	}
 	backend.ApplyPeerUpdates(updates, 10, nil)
