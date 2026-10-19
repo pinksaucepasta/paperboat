@@ -195,6 +195,10 @@ func classifyCLIJSONFailure(err error, failure commandFailure) cliJSONError {
 		case 408, 429, 500, 502, 503, 504:
 			result.Category, result.Retryable = "unavailable_retryable", true
 		}
+		if typed.Code == "machine_offline" || typed.Code == "machine_capability_unavailable" {
+			// The target was refused before anything was sent or started.
+			result.StateChanged = false
+		}
 		if typed.Status == 403 && typed.Code == "team_subscription_required" {
 			result.StateChanged = false
 			result.Recovery = teamSubscriptionRecovery

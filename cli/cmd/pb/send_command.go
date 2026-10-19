@@ -103,7 +103,7 @@ func sendCommand() *cobra.Command {
 				}
 			}
 			if destination.ID == sourceMachineID {
-				return errors.New("destination must be a different machine")
+				return commandRejection{reason: commandRejectSendToSameMachine}
 			}
 			if destination.State == "revoked" || destination.State == "disconnected" || destination.State == "deleted" {
 				return errors.New("destination machine is revoked")
