@@ -96,7 +96,9 @@ def explicit():
         child.wait(timeout=15)
 
 def https(form):
-    domain = json.loads(subprocess.check_output(['pb', 'config', 'local-access', 'show', '--json']))['data']['local_access']['domain']
+    shown = json.loads(subprocess.check_output(['pb', 'config', 'local-access', 'show', '--json']))['data']
+    # The effective domain comes from the machine guard; older builds kept it under local_access.
+    domain = shown.get('domain') or shown['local_access']['domain']
     host = f'{port}.{alias}.{domain}' if form == 'port-host' else f'{alias}.{domain}:{port}'
     result = subprocess.run(['curl', '-sS', '--fail', '--noproxy', '*', '--connect-timeout', '15', '--max-time', '30',
                              'https://' + host + '/'], capture_output=True, timeout=40)
