@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -26,6 +27,12 @@ func commandFailureMessage(err error, failure commandFailure) string {
 	}
 	if preference, ok := soleCommandOwner(err).(preferenceLoadFailure); ok {
 		return preference.Error()
+	}
+	// A login that signed in but could not finish names its own recovery step; a transport cause
+	// underneath must not replace it with a generic service message.
+	var login browserLoginFailure
+	if errors.As(err, &login) && login.message != "" && failure.kind != commandCanceled && failure.kind != commandInteractiveCanceled {
+		return login.message
 	}
 	if remote, ok := soleCommandOwner(err).(interface{ SupportReference() string }); ok && failure.kind == commandOperational && supportref.Valid(remote.SupportReference()) {
 		return "The remote machine could not confirm terminal creation. Check `pb session list` before retrying; run `pb doctor` if this continues. Support reference: " + remote.SupportReference() + "."
