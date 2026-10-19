@@ -10,14 +10,17 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
+	"golang.org/x/sys/unix"
 
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
@@ -636,18 +639,26 @@ func writeActivationFailure(writer io.Writer, err error, previous, candidate str
 		}
 		return "unknown"
 	}
-	_, _ = fmt.Fprintf(writer, "paperboat-update-failure phase=%s reason=%s previous=%s candidate=%s classification=%s chain=%s\n", phase, reason, validVersion(previous), validVersion(candidate), classification, activationErrorChain(err))
+	chain, cause := activationErrorChain(err)
+	_, _ = fmt.Fprintf(writer, "paperboat-update-failure phase=%s reason=%s previous=%s candidate=%s classification=%s chain=%s io=%s\n", phase, reason, validVersion(previous), validVersion(candidate), classification, chain, cause)
 }
 
-var errorTypeName = regexp.MustCompile(`^[*A-Za-z0-9_./]{1,80}$`)
+var (
+	errorTypeName = regexp.MustCompile(`^[*A-Za-z0-9_./]{1,80}$`)
+	fileOperation = regexp.MustCompile(`^[a-z]{1,16}$`)
+	errnoNameRE   = regexp.MustCompile(`^E[A-Z0-9]{1,16}$`)
+)
 
 // activationErrorChain names the Go types along a bounded walk of the error tree, never their
 // messages or values, so a failure that carries no finite phase still shows which step produced it
 // (for example *exec.ExitError or hostinstall.errLifecycle...) without leaking paths or credentials.
-func activationErrorChain(err error) string {
+// The second result names the first file operation and system error in the tree (for example
+// "lstat:ENOENT"), or "none"; the path itself is never included.
+func activationErrorChain(err error) (string, string) {
 	queue := []error{err}
 	seen := map[string]bool{}
 	var names []string
+	operation, errno := "", ""
 	for visited := 0; len(queue) > 0 && visited < 24 && len(names) < 8; visited++ {
 		current := queue[0]
 		queue = queue[1:]
@@ -658,6 +669,19 @@ func activationErrorChain(err error) string {
 			seen[name] = true
 			names = append(names, name)
 		}
+		switch typed := current.(type) {
+		case *fs.PathError:
+			if operation == "" && fileOperation.MatchString(typed.Op) {
+				operation = typed.Op
+			}
+		case syscall.Errno:
+			if errno == "" {
+				errno = unix.ErrnoName(typed)
+				if !errnoNameRE.MatchString(errno) {
+					errno = "errno" + strconv.Itoa(int(typed))
+				}
+			}
+		}
 		switch wrapped := current.(type) {
 		case interface{ Unwrap() error }:
 			queue = append(queue, wrapped.Unwrap())
@@ -665,10 +689,14 @@ func activationErrorChain(err error) string {
 			queue = append(queue, wrapped.Unwrap()...)
 		}
 	}
-	if len(names) == 0 {
-		return "none"
+	cause := "none"
+	if operation != "" || errno != "" {
+		cause = operation + ":" + errno
 	}
-	return strings.Join(names, ",")
+	if len(names) == 0 {
+		return "none", cause
+	}
+	return strings.Join(names, ","), cause
 }
 
 type unixParticipantReadiness struct {
