@@ -776,7 +776,7 @@ if sys.argv[2] in ("team-lifecycle", "team-roles"):
  assert all(r[k] for k in ("create_get_list_delete", "invite_accept_decline_cancel", "independent_verified_recipient"))
  assert sys.argv[2]!="team-roles" or r["roles_remove_leave_transfer"]
 elif sys.argv[2]=="doctor-lifecycle":
- assert all(r[k] for k in ("healthy_requires_exec", "failure_explained", "repair_recovers"))
+ assert all(r[k] for k in ("healthy_requires_terminal_and_exec", "failure_explained", "repair_recovers"))
 elif sys.argv[2]=="session-limit":
  assert r["limit"]==20 and r["clear_message"] and r["closed_not_counted"]
 elif sys.argv[2]=="tunnel-survival":
