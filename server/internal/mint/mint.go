@@ -1029,7 +1029,7 @@ func validatePreviewLaunchInput(input CredentialInput) error {
 	if input.TargetScheme != "http" && input.TargetScheme != "https" && input.TargetScheme != "h2c" && input.TargetScheme != "unix" && input.TargetScheme != "tcp" {
 		return errors.New("target scheme is invalid")
 	}
-	if input.TargetAddress == "" || len(input.TargetAddress) > 512 || strings.ContainsAny(input.TargetAddress, "\r\n") || (input.AccessMode != "public" && input.AccessMode != "private") {
+	if input.TargetAddress == "" || len(input.TargetAddress) > 512 || strings.ContainsAny(input.TargetAddress, "\r\n") || (input.AccessMode != "public" && input.AccessMode != "private" && input.AccessMode != "team") {
 		return errors.New("target binding is invalid")
 	}
 	if input.Endpoint == "" || !strings.HasPrefix(input.Endpoint, "https://") || strings.ContainsAny(input.Endpoint, "\r\n") {
@@ -1096,7 +1096,7 @@ func validatePreviewLaunchClaims(claims CredentialClaims) error {
 	if claims.TargetScheme != "http" && claims.TargetScheme != "https" && claims.TargetScheme != "h2c" && claims.TargetScheme != "unix" && claims.TargetScheme != "tcp" {
 		return errors.New("target scheme is invalid")
 	}
-	if claims.TargetAddress == "" || len(claims.TargetAddress) > 512 || strings.ContainsAny(claims.TargetAddress, "\r\n") || (claims.AccessMode != "public" && claims.AccessMode != "private") {
+	if claims.TargetAddress == "" || len(claims.TargetAddress) > 512 || strings.ContainsAny(claims.TargetAddress, "\r\n") || (claims.AccessMode != "public" && claims.AccessMode != "private" && claims.AccessMode != "team") {
 		return errors.New("target binding is invalid")
 	}
 	if claims.Endpoint == "" || !strings.HasPrefix(claims.Endpoint, "https://") || strings.ContainsAny(claims.Endpoint, "\r\n") || claims.LeaseDeadline <= claims.IssuedAt || claims.UserDeadline != nil && (*claims.UserDeadline <= claims.IssuedAt || *claims.UserDeadline > claims.LeaseDeadline) {

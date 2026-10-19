@@ -416,6 +416,22 @@ func TestPreviewLaunchCredentialBindsLeaseAndTraceFields(t *testing.T) {
 	if strings.Contains(token, "127.0.0.1:3000") {
 		t.Fatal("credential unexpectedly exposed raw target address")
 	}
+	for _, mode := range []string{"private", "team"} {
+		scoped := input
+		scoped.AccessMode = mode
+		scopedToken, err := provider.SignCredential(scoped)
+		if err != nil {
+			t.Fatalf("%s preview launch credential refused: %v", mode, err)
+		}
+		if _, err := provider.VerifyCredential(scopedToken, input.Issuer, input.CredentialClass, now); err != nil {
+			t.Fatalf("%s preview launch credential not verifiable: %v", mode, err)
+		}
+	}
+	unknown := input
+	unknown.AccessMode = "everyone"
+	if _, err := provider.SignCredential(unknown); err == nil {
+		t.Fatal("unknown access mode accepted")
+	}
 }
 
 func TestSignCredentialSSHOperationIsNotInterchangeable(t *testing.T) {
