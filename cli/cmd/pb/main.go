@@ -8403,10 +8403,18 @@ func configCommand() *command.Spec {
 					if err != nil {
 						return err
 					}
+					sshPort, sshPortSet := configuredSSHTargetPort()
 					if c.Bool("json") {
-						return json.NewEncoder(c.Writer).Encode(map[string]any{"path": d.cfg.Path(), "server_url": d.cfg.ServerURL, "auth_file_fallback": d.cfg.Auth.AllowFileFallback, "file_paste": d.cfg.FilePaste, "status_bar": d.cfg.StatusBar, "local_access": d.cfg.LocalAccess})
+						shown := map[string]any{"path": d.cfg.Path(), "server_url": d.cfg.ServerURL, "auth_file_fallback": d.cfg.Auth.AllowFileFallback, "file_paste": d.cfg.FilePaste, "status_bar": d.cfg.StatusBar, "local_access": d.cfg.LocalAccess}
+						if sshPortSet {
+							shown["ssh_target_port"] = sshPort
+						}
+						return json.NewEncoder(c.Writer).Encode(shown)
 					}
 					fmt.Fprintf(c.Writer, "server_url: %s\n", orNone(d.cfg.ServerURL))
+					if sshPortSet {
+						fmt.Fprintf(c.Writer, "ssh_target_port: %d\n", sshPort)
+					}
 					fmt.Fprintf(c.Writer, "auth.file_fallback: %t\n", d.cfg.Auth.AllowFileFallback)
 					fmt.Fprintf(c.Writer, "file_paste.max_queued_input_bytes: %d\n", d.cfg.FilePaste.MaxQueuedInputBytes)
 					fmt.Fprintf(c.Writer, "status_bar.mode: %s\n", d.cfg.StatusBar.Mode)
@@ -8426,6 +8434,31 @@ func configCommand() *command.Spec {
 			},
 		},
 	}
+}
+
+// configuredSSHTargetPort is the SSH target port `pb config set ssh-target-port` stored in this
+// machine's registration. It reports false on a machine that was never enrolled; it never creates
+// any state.
+func configuredSSHTargetPort() (uint16, bool) {
+	stateRoot := os.Getenv("PAPERBOAT_RUNTIME_STATE_ROOT")
+	if stateRoot == "" {
+		var err error
+		if stateRoot, err = helperconfig.DefaultStateRoot(os.Getenv); err != nil {
+			return 0, false
+		}
+	}
+	if info, err := os.Stat(stateRoot); err != nil || !info.IsDir() {
+		return 0, false
+	}
+	store, err := identity.Open(identity.Config{StateRoot: stateRoot})
+	if err != nil {
+		return 0, false
+	}
+	registration, err := store.Registration()
+	if err != nil || registration.SSHPort == 0 {
+		return 0, false
+	}
+	return registration.SSHPort, true
 }
 
 func configSetSSHTargetPort(c *command.Context, port uint16) error {
