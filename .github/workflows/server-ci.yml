@@ -72,6 +72,7 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-yaml python3-cryptography
       - run: python3 tools/check_domains.py && (cd tools && python3 -m unittest test_check_domains)
       - run: python3 tools/check_doc_links.py && (cd tools && python3 -m unittest test_check_doc_links)
+      - run: cd tools && python3 -m unittest test_check_server_deployed
       - run: python3 -m unittest discover -s deploy -p 'test_*.py'
 
   console:

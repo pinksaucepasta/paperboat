@@ -141,6 +141,16 @@ jobs:
           print(f'release_url={release}')
           print(f'release_host={host}')
           PY
+      - name: Require the deployed server to contain this release's server and shared commits
+        env:
+          SERVER_URL: ${{ steps.endpoints.outputs.server_url }}
+          SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Server first, then client: a client must not be released before the server that understands it is live.
+          if [ "$(git rev-parse --is-shallow-repository)" = true ]; then git fetch --quiet --filter=blob:none --unshallow origin; fi
+          python3 ../tools/check_server_deployed.py --server-url "$SERVER_URL" --release "$SOURCE_SHA"
       - name: Configure protected origin read identity
         env:
           PAPERBOAT_RELEASE_SSH_KEY: ${{ secrets.PAPERBOAT_RELEASE_SSH_KEY }}
