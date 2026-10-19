@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/originhealth"
 	"io"
 	"net"
 	"net/http"
@@ -372,6 +373,8 @@ type DataCarrierPreviewCarrier struct {
 	closeWait              time.Duration
 	observe                func(error)
 	ownHub                 bool
+	originProbeInterval    time.Duration
+	health                 *originhealth.Tracker
 
 	mu        sync.Mutex
 	closed    bool
@@ -401,6 +404,9 @@ type DataCarrierPreviewCarrierConfig struct {
 	OriginDialTimeout  time.Duration
 	OriginCloseTimeout time.Duration
 	ObserveStreamError func(error)
+	// OriginProbeInterval is how often the app is probed while the preview runs; zero selects
+	// originhealth.DefaultProbeInterval.
+	OriginProbeInterval time.Duration
 }
 
 func NewDataCarrierPreviewCarrier(config DataCarrierPreviewCarrierConfig) (*DataCarrierPreviewCarrier, error) {
@@ -443,7 +449,7 @@ func NewDataCarrierPreviewCarrier(config DataCarrierPreviewCarrierConfig) (*Data
 	if config.OriginDialTimeout <= 0 || config.OriginCloseTimeout <= 0 {
 		return nil, ErrDataCarrierPreviewInvalid
 	}
-	return &DataCarrierPreviewCarrier{hub: config.Hub, active: config.Active, identity: config.Identity, routeID: config.RouteID, dialer: config.DialOrigin, browserIngress: config.BrowserIngress, browserRouteGeneration: config.BrowserRouteGeneration, inspector: config.Inspector, registry: config.Registry, inspectorHTTP: config.InspectorHTTP, max: config.MaxStreams, dialWait: config.OriginDialTimeout, closeWait: config.OriginCloseTimeout, observe: config.ObserveStreamError, ownHub: ownHub}, nil
+	return &DataCarrierPreviewCarrier{hub: config.Hub, active: config.Active, identity: config.Identity, routeID: config.RouteID, dialer: config.DialOrigin, browserIngress: config.BrowserIngress, browserRouteGeneration: config.BrowserRouteGeneration, inspector: config.Inspector, registry: config.Registry, inspectorHTTP: config.InspectorHTTP, max: config.MaxStreams, dialWait: config.OriginDialTimeout, closeWait: config.OriginCloseTimeout, observe: config.ObserveStreamError, ownHub: ownHub, originProbeInterval: config.OriginProbeInterval}, nil
 }
 
 func (c *DataCarrierPreviewCarrier) Run(ctx context.Context, lease Lease, ready func(Lease) error) error {
@@ -535,6 +541,7 @@ func (c *DataCarrierPreviewCarrier) Run(ctx context.Context, lease Lease, ready 
 	if err := ready(observed); err != nil {
 		return err
 	}
+	c.startOriginHealth(runCtx, lease)
 	// Publish the lease's replay binding once the target is ready, so public
 	// HTTP (which carries no per-stream decision) replays against current
 	// lease authority. Browser streams use the same lease identity.
@@ -721,10 +728,42 @@ func (c *DataCarrierPreviewCarrier) isClosed() bool {
 }
 
 func (c *DataCarrierPreviewCarrier) dialOrigin(ctx context.Context, target LeaseTarget) (io.ReadWriteCloser, error) {
+	var connection io.ReadWriteCloser
+	var err error
 	if c.dialer != nil {
-		return c.dialer(ctx, target)
+		connection, err = c.dialer(ctx, target)
+	} else {
+		connection, err = dialPreviewOrigin(ctx, target)
 	}
-	return dialPreviewOrigin(ctx, target)
+	// A visitor's own cancellation says nothing about the app.
+	if ctx.Err() == nil {
+		c.mu.Lock()
+		health := c.health
+		c.mu.Unlock()
+		health.Observe("origin", err)
+	}
+	return connection, err
+}
+
+// startOriginHealth begins watching the app once the preview is ready: every origin dial counts,
+// and a small TCP probe covers the time without visitors. Changes are reported to whoever owns
+// the lease (the dispatch layer) through the report hub.
+func (c *DataCarrierPreviewCarrier) startOriginHealth(ctx context.Context, lease Lease) {
+	if lease.LazyLifecycle != nil || strings.TrimSpace(lease.Target.Address) == "" {
+		return
+	}
+	tracker := originhealth.New(func(event originhealth.Event) { previewOriginReports.report(lease.ID, event) }, 0, nil)
+	c.mu.Lock()
+	c.health = tracker
+	c.mu.Unlock()
+	target := lease.Target
+	network := "tcp"
+	if strings.EqualFold(strings.TrimSpace(target.Scheme), "unix") {
+		network = "unix"
+	}
+	go tracker.Probe(ctx, "origin", c.originProbeInterval, func(probeCtx context.Context) error {
+		return originhealth.ProbeTCP(probeCtx, network, target.Address, 3*time.Second)
+	})
 }
 
 func dialPreviewOrigin(ctx context.Context, target LeaseTarget) (io.ReadWriteCloser, error) {

@@ -64,6 +64,9 @@ func (o dispatchOwners) OwnerSessionDone(accountID, machineID, ownerSessionID, o
 	return o.done, nil
 }
 
+func (o *dispatchObserver) ObservePreviewOrigin(context.Context, DispatchReadiness, Lease, bool) (Lease, error) {
+	return Lease{}, nil
+}
 func (o *dispatchObserver) ObservePreviewReadiness(_ context.Context, readiness DispatchReadiness, lease Lease, expected int64) (Lease, error) {
 	if readiness.OperationID == "" || readiness.IdempotencyKey == "" || readiness.RequestID == "" || readiness.CorrelationID == "" {
 		return Lease{}, ErrDispatchInvalid

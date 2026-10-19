@@ -1009,7 +1009,7 @@ func validPreviewID(value string) bool {
 
 func validPreviewLeaseState(value string) bool {
 	switch value {
-	case "allocating", "connecting", "ready", "owner_disconnected", "expired", "stopped":
+	case "allocating", "connecting", "ready", "origin_unavailable", "owner_disconnected", "expired", "stopped":
 		return true
 	default:
 		return false

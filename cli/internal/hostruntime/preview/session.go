@@ -435,7 +435,7 @@ func validPreviewHTTPSURL(value string) bool {
 
 func validLeaseState(value string) bool {
 	switch value {
-	case "allocating", "connecting", "ready", "owner_disconnected", "expired", "stopped":
+	case "allocating", "connecting", "ready", "origin_unavailable", "owner_disconnected", "expired", "stopped":
 		return true
 	default:
 		return false
@@ -456,7 +456,7 @@ func validLeaseID(value string) bool {
 }
 
 func validActiveLeaseState(value string) bool {
-	return value == "allocating" || value == "connecting" || value == "ready"
+	return value == "allocating" || value == "connecting" || value == "ready" || value == "origin_unavailable"
 }
 
 func validAllocationState(value string) bool {

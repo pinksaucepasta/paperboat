@@ -103,12 +103,31 @@ func (o *HTTPDispatchReadinessObserver) ObservePreviewReadiness(ctx context.Cont
 	return Lease{}, err
 }
 
+// ObservePreviewOrigin posts the owner's origin state for a ready preview. The server projects a
+// down origin as lease state origin_unavailable and back to ready when the app returns.
+func (o *HTTPDispatchReadinessObserver) ObservePreviewOrigin(ctx context.Context, metadata DispatchReadiness, lease Lease, up bool) (Lease, error) {
+	if ctx == nil {
+		return Lease{}, ErrDispatchInvalid
+	}
+	originState := "down"
+	if up {
+		originState = "ready"
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	return o.observeLeaseWithOrigin(ctx, metadata, lease, lease.Generation, http.MethodPost, originState)
+}
+
 func (o *HTTPDispatchReadinessObserver) observeLease(ctx context.Context, metadata DispatchReadiness, lease Lease, generation int64, method string) (Lease, error) {
+	return o.observeLeaseWithOrigin(ctx, metadata, lease, generation, method, "ready")
+}
+
+func (o *HTTPDispatchReadinessObserver) observeLeaseWithOrigin(ctx context.Context, metadata DispatchReadiness, lease Lease, generation int64, method, originState string) (Lease, error) {
 	if metadata.Mutate == nil {
-		return o.readinessRequest(ctx, metadata, lease, generation, method)
+		return o.readinessRequest(ctx, metadata, lease, generation, method, originState)
 	}
 	return metadata.Mutate(func(current Lease) (Lease, error) {
-		observed, err := o.readinessRequest(ctx, metadata, current, current.Generation, method)
+		observed, err := o.readinessRequest(ctx, metadata, current, current.Generation, method, originState)
 		if err != nil {
 			return Lease{}, err
 		}
@@ -119,7 +138,7 @@ func (o *HTTPDispatchReadinessObserver) observeLease(ctx context.Context, metada
 	})
 }
 
-func (o *HTTPDispatchReadinessObserver) readinessRequest(ctx context.Context, metadata DispatchReadiness, lease Lease, expectedGeneration int64, method string) (Lease, error) {
+func (o *HTTPDispatchReadinessObserver) readinessRequest(ctx context.Context, metadata DispatchReadiness, lease Lease, expectedGeneration int64, method, originState string) (Lease, error) {
 	if o == nil || ctx == nil || expectedGeneration < 1 || metadata.OperationID == "" || metadata.IdempotencyKey == "" || metadata.RequestID == "" || metadata.CorrelationID == "" || lease.ID == "" || lease.OwnerMachineID == "" || lease.OwnerSessionID == "" || lease.ETag == "" || leaseGenerationForID(lease.ID, lease.ETag) != expectedGeneration {
 		return Lease{}, readinessFailed(method, "request", 0, ErrDispatchInvalid, nil)
 	}
@@ -129,7 +148,7 @@ func (o *HTTPDispatchReadinessObserver) readinessRequest(ctx context.Context, me
 		AllocationState string `json:"allocation_state"`
 		EdgeState       string `json:"edge_state"`
 		OriginState     string `json:"origin_state"`
-	}{lease.OwnerMachineID, lease.OwnerSessionID, "ready", "ready", "ready"})
+	}{lease.OwnerMachineID, lease.OwnerSessionID, "ready", "ready", originState})
 	if err != nil {
 		return Lease{}, readinessFailed(method, "request", 0, ErrDispatchInvalid, err)
 	}

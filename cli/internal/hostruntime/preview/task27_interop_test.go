@@ -66,6 +66,9 @@ type task27Readiness struct {
 	state task27State
 }
 
+func (o *task27Readiness) ObservePreviewOrigin(context.Context, DispatchReadiness, Lease, bool) (Lease, error) {
+	return Lease{}, nil
+}
 func (o *task27Readiness) ObservePreviewReadiness(_ context.Context, _ DispatchReadiness, lease Lease, expected int64) (Lease, error) {
 	lease = sessionReadyLease(lease)
 	lease.Generation, lease.ETag = expected+1, formatLeaseETag(lease.ID, expected+1)

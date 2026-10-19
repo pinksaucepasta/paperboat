@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/originhealth"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -101,6 +103,9 @@ type DispatchCarrierResolver interface {
 // canonical projection and strong ETag.
 type DispatchReadinessObserver interface {
 	ObservePreviewReadiness(context.Context, DispatchReadiness, Lease, int64) (Lease, error)
+	// ObservePreviewOrigin reports that the local app became unreachable (up == false) or
+	// reachable again, for a preview that was already ready.
+	ObservePreviewOrigin(context.Context, DispatchReadiness, Lease, bool) (Lease, error)
 }
 
 // DispatchReadiness carries the stable operation and trace bindings required
@@ -711,7 +716,34 @@ func (c *readinessCarrier) Run(ctx context.Context, lease Lease, ready func(Leas
 	return c.RunWithLease(ctx, func() Lease { return lease }, nil, ready)
 }
 
+// reportOrigin sends one origin change for the admitted lease through the canonical lease
+// mutation, with fresh operation identifiers (a report is never a replay of the creation).
+func (c *readinessCarrier) reportOrigin(ctx context.Context, currentLease func() Lease, mutate LeaseMutation, up bool) error {
+	operation, err := newDispatchOperationID()
+	if err != nil {
+		return err
+	}
+	metadata := c.readiness
+	metadata.Mutate = mutate
+	metadata.OperationID, metadata.IdempotencyKey, metadata.RequestID = operation, operation, "request_"+strings.TrimPrefix(operation, "operation_")
+	_, err = c.observer.ObservePreviewOrigin(ctx, metadata, currentLease(), up)
+	return err
+}
+
+func newDispatchOperationID() (string, error) {
+	id, err := uuid.NewRandom()
+	if err != nil {
+		return "", err
+	}
+	return "operation_" + id.String(), nil
+}
+
 func (c *readinessCarrier) RunWithLease(ctx context.Context, currentLease func() Lease, mutate LeaseMutation, ready func(Lease) error) error {
+	reporter := &originReporter{send: func(sendCtx context.Context, up bool) error {
+		return c.reportOrigin(sendCtx, currentLease, mutate, up)
+	}}
+	unregister := previewOriginReports.register(c.admitted.ID, func(event originhealth.Event) { go reporter.handle(ctx, event) })
+	defer unregister()
 	markReady := func(observed Lease) error {
 		// The carrier proves the attachment and origin are ready. Its public
 		// URL can be the projection captured before DNS and certificate issuance.
