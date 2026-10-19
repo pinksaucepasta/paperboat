@@ -328,7 +328,7 @@ func TestDatabaseCloudflareAddressAdmissionSharedOnPostgres(t *testing.T) {
 	}
 	// Include database-clock refill during remote round trips. Exactly two
 	// further admissions must consume the same persisted bucket.
-	wantTokens := firstTokens - 2 + lastRefilled.Sub(firstRefilled).Seconds()/6
+	wantTokens := firstTokens - 2 + lastRefilled.Sub(firstRefilled).Seconds()/cloudflareAddressRefillSeconds
 	if math.Abs(tokens-wantTokens) > 0.00001 {
 		t.Fatalf("shared tokens=%v want=%v", tokens, wantTokens)
 	}
@@ -467,7 +467,7 @@ func TestAddressReconcilerReservedWithdrawalOnPostgres(t *testing.T) {
 	if err := database.Pool().QueryRow(context.Background(), `SELECT tokens,refilled_at FROM edge_dns_provider_budgets WHERE zone_id=$1`, zone).Scan(&tokens, &refilledAt); err != nil {
 		t.Fatal(err)
 	}
-	if math.Abs(tokens-(2+refilledAt.Sub(creditedAt).Seconds()/6)) > 0.00001 {
+	if math.Abs(tokens-(2+refilledAt.Sub(creditedAt).Seconds()/cloudflareAddressRefillSeconds)) > 0.00001 {
 		t.Fatalf("unused reservation credits not returned: %f", tokens)
 	}
 }

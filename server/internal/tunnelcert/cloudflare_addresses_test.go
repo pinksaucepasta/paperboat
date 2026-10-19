@@ -369,7 +369,7 @@ func TestCloudflareAddressReservationRefundAndRetryAfter(t *testing.T) {
 	admission.mu.Lock()
 	remaining := admission.tokens
 	admission.mu.Unlock()
-	if remaining != 4 {
+	if remaining != cloudflareAddressBurst-1 { // the burst minus the one call actually made
 		t.Fatalf("unused credits not refunded exactly once: %f", remaining)
 	}
 	if len(admission.concurrent) != 0 {
