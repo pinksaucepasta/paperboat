@@ -15,6 +15,8 @@ func TestUsageErrorShowsTheFailingCommandNotTheRootHelp(t *testing.T) {
 		{[]string{"access", "machine"}, "pb access machine <machine> [flags]"},
 		{[]string{"access", "machine", "hp"}, "--port int"},
 		{[]string{"edge", "bogus"}, "pb edge [flags]"},
+		{[]string{"resolve"}, "pb resolve <query> [flags]"},
+		{[]string{"approve"}, "pb approve <machine-id> [flags]"},
 	} {
 		var output bytes.Buffer
 		code := run(context.Background(), append([]string{"--config", t.TempDir() + "/config.json"}, tc.args...), &output, &output)

@@ -13,6 +13,7 @@ import re
 import subprocess
 import sys
 
+ACCESS_ROWS = {'C002', 'C124', 'C125', 'C126', 'C139', 'C141'}
 PB = Path.home() / '.local/bin/pb'
 BAD = re.compile(r'panic|goroutine|Traceback|runtime error|nil pointer')
 
@@ -161,6 +162,7 @@ def rows(args):
     r.expect('daemon' in unit and 'ExecStart' in unit, 'user service does not start pb daemon')
     out.append(r)
 
+
     guard = Row('C005', 'daemon machine-guard'); guard.help(); guard.invalid('bogus')
     guard.expect(sh('systemctl', 'is-active', 'paperboat-machineguard')[1].strip() == 'active', 'machine guard service is not active')
     out.append(guard)
@@ -184,15 +186,70 @@ def rows(args):
     return out
 
 
+def access_rows(args):
+    out = []
+    if args.peer:
+        r = Row('C002', 'resolve'); r.help(); r.invalid(hint='Usage|usage|invalid')
+        d = r.json_ok(args.peer)
+        listed = {m['alias']: m['id'] for m in Row('C002', 'machine list').json_ok().get('machines', [])}
+        r.expect(isinstance(d, dict) and d.get('machine_id') == listed.get(args.peer) and d.get('alias') == args.peer,
+                 'resolve --json does not name the requested machine')
+        r.expect(isinstance(d, dict) and re.fullmatch(r'127\.100\.\d+\.\d+', d.get('assigned_ip', '')) is not None,
+                 'resolve --json lacks a 127.100.x.x assigned address')
+        r.expect(isinstance(d, dict) and isinstance(d.get('forwarded_ports', []), list), 'resolve --json forwarded_ports is not a list')
+        r.expect(isinstance(d, dict) and 'tags' not in d, 'resolve still reports tags')
+        human = run('resolve', args.peer)[1]
+        r.expect('Machine:' in human and 'IP:' in human and (d or {}).get('assigned_ip', 'x') in human, 'resolve human output lacks machine and IP')
+        by_id = json.loads(run('resolve', listed.get(args.peer, 'x'), '--json')[1] or '{}')
+        r.expect(by_id == d, 'resolve by ID differs from resolve by alias')
+        code, o, e = run('resolve', 'no-such-machine-zz')
+        r.expect(code != 0 and 'No machine has that name or ID' in o + e and not BAD.search(o + e), 'unknown machine gave no clear message')
+        out.append(r)
+
+        r = Row('C124', 'access'); r.help(); r.invalid('bogus')
+        code, o, e = run('access')
+        r.expect(code == 0 and 'machine' in o and 'tunnel' in o, 'pb access does not list machine and tunnel')
+        out.append(r)
+
+        r = Row('C125', 'access machine'); r.help(); r.invalid(args.peer, hint='Usage|usage|invalid')
+        code, o, e = run('access', 'machine', 'no-such-machine-zz', '--port', '80')
+        r.expect(code != 0 and 'No machine has that name or ID' in o + e, 'access to an unknown machine gave no clear message')
+        code, o, e = run('access', 'machine', args.peer, '--port', '80', '--listen', '10.0.0.1:0')
+        r.expect(code != 0 and not BAD.search(o + e), 'non-loopback --listen was accepted')
+        out.append(r)
+
+        r = Row('C126', 'access tunnel'); r.help(); r.invalid(hint='Usage|usage|invalid')
+        code, o, e = run('access', 'tunnel', 'tunnel_zz_missing', '--listen', '10.0.0.1:0')
+        r.expect(code != 0 and not BAD.search(o + e), 'non-loopback --listen was accepted')
+        out.append(r)
+
+    for ident, name, schema, key in (('C139', 'edge', 'paperboat.edge-list/v1', 'edges'), ('C141', 'relay', 'paperboat.relay-list/v1', 'relays')):
+        r = Row(ident, name); r.help(); r.invalid('bogus', hint='Usage|usage|invalid')
+        listing = Row(ident, name + ' list'); d = listing.json_ok(); r.failures += listing.failures
+        r.expect(isinstance(d, dict) and d.get('schema') == schema and d.get('pool_mode'), name + ' list --json lacks schema or pool mode')
+        items = (d or {}).get(key) or []
+        r.expect(len(items) > 0 and all(i.get('region') and i.get('status') and i.get('source') for i in items), name + ' list shows no usable ' + key)
+        human = run(name, 'list')[1].splitlines()
+        r.expect(len(human) == len(items) + 1 and human[0].split()[0] == name.upper(), name + ' list table does not match its JSON')
+        out.append(r)
+    return out
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('machine')
     parser.add_argument('--offline-alias')
+    parser.add_argument('--peer', help='another machine alias to resolve and access')
+    parser.add_argument('--only', default='', help='comma list of row ids')
     parser.add_argument('--sudo-password-stdin', action='store_true')
     args = parser.parse_args()
     args.sudo_password = sys.stdin.readline().rstrip('\n') if args.sudo_password_stdin else None
     failed = 0
-    for row in rows(args):
+    only = set(filter(None, args.only.split(',')))
+    selected = access_rows(args) if only and only <= ACCESS_ROWS else (rows(args) + access_rows(args))
+    for row in selected:
+        if only and row.ident not in only:
+            continue
         status = 'PASS' if not row.failures else 'FAIL'
         failed += status == 'FAIL'
         print(json.dumps({'check': 'command-row', 'row': row.ident, 'command': 'pb ' + ' '.join(row.command),

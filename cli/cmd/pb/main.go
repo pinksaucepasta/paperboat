@@ -3041,7 +3041,9 @@ mode, relays, and observation timestamps.`, Example: "  pb relay list\n  pb rela
 	root.AddCommand(bugreportCommand())
 	root.AddCommand(daemoncmd.NewCommand())
 	root.AddCommand(daemoncmd.ServiceCommand())
-	root.AddCommand(daemoncmd.ResolveCommand())
+	resolve := daemoncmd.ResolveCommand()
+	resolve.Args = commandArgs(resolve.Args)
+	root.AddCommand(resolve)
 	approve := daemoncmd.ApproveCommand()
 	approveRun := approve.RunE
 	approve.RunE = func(command *cobra.Command, args []string) error {
