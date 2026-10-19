@@ -226,14 +226,18 @@ type Coordinator struct {
 	cleanups           []*generationCleanup
 	reportMu           sync.Mutex
 	reconcileFailed    bool
+	domainFromGuard    bool // whether the configuration left the local access domain to the guard
 }
 
 func NewCoordinator(cfg CoordinatorConfig) (*Coordinator, error) {
-	domain, err := splitdns.NormalizeBrowserDomain(cfg.LocalAccess.Domain)
-	if err != nil {
-		return nil, err
+	// An unset domain is the deployment's own, read from the machine guard.
+	if cfg.LocalAccess.Domain != "" {
+		domain, err := splitdns.NormalizeBrowserDomain(cfg.LocalAccess.Domain)
+		if err != nil {
+			return nil, err
+		}
+		cfg.LocalAccess.Domain = domain
 	}
-	cfg.LocalAccess.Domain = domain
 	if cfg.SocketAddress == "" {
 		cfg.SocketAddress = daemonrpc.DefaultSocketAddress()
 	}
@@ -251,13 +255,14 @@ func NewCoordinator(cfg CoordinatorConfig) (*Coordinator, error) {
 		cfg.ReconcileTimeout = controlsync.SnapshotTimeout
 	}
 	coordinator := &Coordinator{
-		cfg:         cfg,
-		nameClient:  cfg.NameClient,
-		rpcBackend:  daemonrpc.NewLiveDaemonBackend(nil, buildinfo.Version),
-		routes:      make(map[string]*guardedRoute),
-		webRoutes:   make(map[string]guardedWebRoute),
-		connections: make(chan struct{}, 256),
-		errors:      make(chan error, 1),
+		cfg:             cfg,
+		domainFromGuard: cfg.LocalAccess.Domain == "",
+		nameClient:      cfg.NameClient,
+		rpcBackend:      daemonrpc.NewLiveDaemonBackend(nil, buildinfo.Version),
+		routes:          make(map[string]*guardedRoute),
+		webRoutes:       make(map[string]guardedWebRoute),
+		connections:     make(chan struct{}, 256),
+		errors:          make(chan error, 1),
 	}
 	coordinator.rpcBackend.SetApprovalHandler(cfg.ApprovePeer)
 	coordinator.rpcBackend.SetAccount(cfg.AccountID, cfg.AccountLabel)
@@ -652,6 +657,31 @@ func mapPeerSnapshot(peers []*pbSync.PeerUpdate, cidr string) ([]*pbSync.PeerUpd
 	return mapped, nil
 }
 
+// resolveLocalDomainLocked reads the local access domain from the machine guard
+// while the configuration leaves it unset, so a reinstall that records another
+// domain is followed without restarting the daemon.
+func (c *Coordinator) resolveLocalDomainLocked(ctx context.Context, nameClient guardedNameClient) error {
+	if !c.domainFromGuard {
+		return nil
+	}
+	source, ok := nameClient.(interface {
+		Status(context.Context) (machineguard.RuntimeStatus, error)
+	})
+	if !ok {
+		return errors.New("local access domain is not configured")
+	}
+	status, err := source.Status(ctx)
+	if err != nil {
+		return coordinatorOperationFailure("guard_status", err)
+	}
+	domain, err := splitdns.NormalizeBrowserDomain(status.BrowserDomain)
+	if err != nil {
+		return coordinatorFailure("This computer has no local access domain; run pb install again.", err)
+	}
+	c.cfg.LocalAccess.Domain = domain
+	return nil
+}
+
 func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*pbSync.PeerUpdate) (err error) {
 	c.mu.Lock()
 	defer func() {
@@ -673,6 +703,9 @@ func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*pbSync.
 		c.nameClient = connected
 		nameClient = connected
 	}
+	if err := c.resolveLocalDomainLocked(ctx, nameClient); err != nil {
+		return err
+	}
 	wanted := make(map[string]*guardedRoute)
 	wantedWeb := make(map[string]guardedWebRoute)
 	names := make(map[string]netip.Addr)
@@ -688,7 +721,7 @@ func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*pbSync.
 		if err != nil {
 			continue
 		}
-		hostname := strings.ToLower(alias) + "." + splitdns.BrowserSuffix
+		hostname := strings.ToLower(alias) + "." + c.cfg.LocalAccess.Domain
 		if prior, exists := names[hostname]; exists && prior != ip {
 			c.resetNameGenerationLocked(ctx)
 			return errors.New("control snapshot contains an ambiguous machine alias")
@@ -1286,12 +1319,8 @@ func (c *Coordinator) BrowserURLs() map[string]map[int32]string {
 	return result
 }
 
-// browserRouteForHost admits a base machine URL only while one exact port route
-// for that machine is registered. The base page never selects a forwarding port.
-func browserRouteForHost(routes map[string]splitdns.BrowserRoute, host string) (splitdns.BrowserRoute, bool) {
-	return browserRouteForHostDomain(routes, host, splitdns.BrowserSuffix)
-}
-
+// browserRouteForHostDomain admits a base machine URL only while one exact port
+// route for that machine is registered. The base page never selects a forwarding port.
 func browserRouteForHostDomain(routes map[string]splitdns.BrowserRoute, host, domain string) (splitdns.BrowserRoute, bool) {
 	if route, ok := splitdns.ResolveBrowserRoute(routes, host, domain); ok {
 		return route, true

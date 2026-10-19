@@ -15,19 +15,20 @@ import (
 )
 
 func TestMachineGuardReadinessRequiresVersionButNotBrowserTrust(t *testing.T) {
-	ready := machineguard.RuntimeStatus{Version: buildinfo.Version, Ready: true, TrustReady: true}
+	ready := machineguard.RuntimeStatus{Version: buildinfo.Version, Ready: true, TrustReady: true, DefaultBrowserDomain: "local.example.test"}
 	if err := validateMachineGuardStatus(ready); err != nil {
 		t.Fatalf("trusted guard status rejected: %v", err)
 	}
 	// Pending browser trust leaves the guard usable, so it must not force reinstallation.
-	pending := machineguard.RuntimeStatus{Version: buildinfo.Version, Ready: true}
+	pending := machineguard.RuntimeStatus{Version: buildinfo.Version, Ready: true, DefaultBrowserDomain: "local.example.test"}
 	if err := validateMachineGuardStatus(pending); err != nil {
 		t.Fatalf("guard with pending browser trust rejected: %v", err)
 	}
 	for name, status := range map[string]machineguard.RuntimeStatus{
-		"not ready":   {Version: buildinfo.Version, TrustReady: true},
-		"old version": {Version: "old", Ready: true, TrustReady: true},
-		"renewal due": {Version: buildinfo.Version, Ready: true, TrustReady: true, RootRenewalRequired: true},
+		"not ready":   {Version: buildinfo.Version, TrustReady: true, DefaultBrowserDomain: "local.example.test"},
+		"old version": {Version: "old", Ready: true, TrustReady: true, DefaultBrowserDomain: "local.example.test"},
+		"renewal due": {Version: buildinfo.Version, Ready: true, TrustReady: true, RootRenewalRequired: true, DefaultBrowserDomain: "local.example.test"},
+		"no domain":   {Version: buildinfo.Version, Ready: true, TrustReady: true},
 	} {
 		if err := validateMachineGuardStatus(status); err == nil {
 			t.Errorf("%s status accepted", name)
@@ -44,6 +45,7 @@ func TestMachineInstallPreservesReadyMachineGuardAndValidatesSuppliedBytes(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
+	useGuardDomains(t, "", "local.example.test", nil)
 	oldProbe, oldPrepare, oldInstall := existingMachineGuardReady, prepareMachineGuardForInstall, installMissingMachineGuard
 	t.Cleanup(func() {
 		existingMachineGuardReady = oldProbe
@@ -59,7 +61,7 @@ func TestMachineInstallPreservesReadyMachineGuardAndValidatesSuppliedBytes(t *te
 		return nil
 	}
 	prepareMachineGuardForInstall = func() error { prepared++; return nil }
-	installMissingMachineGuard = func(context.Context, string) error { installed++; return nil }
+	installMissingMachineGuard = func(context.Context, string, string) error { installed++; return nil }
 	request := Request{Executable: executable, Source: source}
 	if err := installMachineGuard(context.Background(), request); err != nil {
 		t.Fatal(err)

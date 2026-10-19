@@ -454,16 +454,19 @@ func (g *guardServer) runtimeStatus(owner ...string) *RuntimeStatus {
 	for _, lease := range g.leases {
 		owners[lease.uid] = struct{}{}
 	}
-	domain := splitdns.BrowserSuffix
 	trustReady := g.trustReady
 	renewal := g.ca != nil && !g.ca.ExpiresAt().After(time.Now().Add(localCARenewalWindow))
-	if len(owner) > 0 {
-		var err error
-		domain, err = selectedBrowserDomain(g.cfg.StateDir, owner[0])
+	domains, err := loadBrowserDomains(g.cfg.StateDir)
+	if err != nil {
+		trustReady = false
+	}
+	domain := domains.Default
+	if len(owner) > 0 && err == nil {
+		domain, err = domains.selected(owner[0])
 		if err != nil {
 			trustReady = false
 		}
-		if err == nil && domain != splitdns.BrowserSuffix {
+		if err == nil && domain != domains.Default {
 			data, e := readRenewalFile(filepath.Join(g.cfg.StateDir, "certificates", domain, "rootCA.pem"), "rootCA.pem", validateOwnedRootStateFile)
 			if e != nil {
 				trustReady = false
@@ -477,35 +480,24 @@ func (g *guardServer) runtimeStatus(owner ...string) *RuntimeStatus {
 			}
 		}
 	}
-	return &RuntimeStatus{BrowserDomain: domain, RootRenewalRequired: renewal, TrustReady: trustReady, Version: buildinfo.Version, LoopbackCIDR: g.cfg.LoopbackCIDR, Ready: true, ActiveLeases: len(g.leases), ActiveOwners: len(owners), ProtectedLoopbackCIDRs: append([]string(nil), g.cfg.ProtectedLoopbackCIDRs...)}
-}
-func validName(host string) bool {
-	if host == splitdns.BrowserGatewayHostname {
-		return true
-	}
-	suffix := "." + splitdns.BrowserSuffix
-	if len(host) > 253 || host != strings.ToLower(host) || !strings.HasSuffix(host, suffix) {
-		return false
-	}
-	labels := strings.Split(strings.TrimSuffix(host, suffix), ".")
-	if len(labels) != 1 || len(labels[0]) < 1 || len(labels[0]) > 63 || strings.HasPrefix(labels[0], "-") || strings.HasSuffix(labels[0], "-") {
-		return false
-	}
-	for _, r := range labels[0] {
-		if r != '-' && (r < 'a' || r > 'z') && (r < '0' || r > '9') {
-			return false
-		}
-	}
-	return true
+	return &RuntimeStatus{BrowserDomain: domain, DefaultBrowserDomain: domains.Default, RootRenewalRequired: renewal, TrustReady: trustReady, Version: buildinfo.Version, LoopbackCIDR: g.cfg.LoopbackCIDR, Ready: true, ActiveLeases: len(g.leases), ActiveOwners: len(owners), ProtectedLoopbackCIDRs: append([]string(nil), g.cfg.ProtectedLoopbackCIDRs...)}
 }
 
-func validSubdomainName(host string) bool {
-	parts := strings.Split(host, ".")
-	if len(parts) != 5 || host != strings.ToLower(host) || !validName(strings.Join(parts[1:], ".")) || strings.Join(parts[1:], ".") == splitdns.BrowserGatewayHostname {
+// validName admits exactly one machine label beneath the owner's local access
+// domain. The label "gateway" is reserved for the browser gateway.
+func validName(host, domain string) bool {
+	if domain == "" || len(host) > 253 || host != strings.ToLower(host) {
 		return false
 	}
-	port, err := strconv.Atoi(parts[0])
-	return err == nil && port > 0 && port <= 65535 && parts[0] == strconv.Itoa(port)
+	label, ok := strings.CutSuffix(host, "."+domain)
+	return ok && label != "gateway" && splitdns.ValidBrowserLabel(label)
+}
+
+// validSubdomainName admits <port>.<machine>.<domain> with a canonical port.
+func validSubdomainName(host, domain string) bool {
+	port, machine, ok := strings.Cut(host, ".")
+	number, err := strconv.Atoi(port)
+	return ok && err == nil && number > 0 && number <= 65535 && port == strconv.Itoa(number) && validName(machine, domain)
 }
 
 func validAddress(ip string) bool { return validAddressInCIDR(ip, machineloopback.DefaultCIDR) }
@@ -606,7 +598,11 @@ func (g *guardServer) handle(ctx context.Context, conn controlConn, uid string, 
 			return nil, errors.New("machine loopback range change is pending")
 		}
 		gateway := in.Hostname == splitdns.BrowserGatewayHostname && in.IP == splitdns.BrowserGatewayIP && gatewayPortAllowed(in.Port)
-		if !gateway && (!validName(in.Hostname) || in.Hostname == splitdns.BrowserGatewayHostname || !validAddressInCIDR(in.IP, g.cfg.LoopbackCIDR) || in.Port < 1 || in.Port > 65535) {
+		domain, err := selectedBrowserDomain(g.cfg.StateDir, uid)
+		if err != nil && !gateway {
+			return nil, err
+		}
+		if !gateway && (!validName(in.Hostname, domain) || !validAddressInCIDR(in.IP, g.cfg.LoopbackCIDR) || in.Port < 1 || in.Port > 65535) {
 			return nil, errors.New("invalid protected machine listener")
 		}
 
@@ -682,8 +678,12 @@ func (g *guardServer) handle(ctx context.Context, conn controlConn, uid string, 
 		if len(in.Names) > 128 {
 			return nil, errors.New("too many machine names")
 		}
+		domain, err := selectedBrowserDomain(g.cfg.StateDir, uid)
+		if err != nil && len(in.Names) > 0 {
+			return nil, err
+		}
 		for name, ip := range in.Names {
-			if (!validName(name) && !validSubdomainName(name)) || !validAddressInCIDR(ip, g.cfg.LoopbackCIDR) {
+			if (!validName(name, domain) && !validSubdomainName(name, domain)) || !validAddressInCIDR(ip, g.cfg.LoopbackCIDR) {
 				return nil, errors.New("invalid machine name")
 			}
 			found := false

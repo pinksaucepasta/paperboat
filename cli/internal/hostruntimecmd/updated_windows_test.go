@@ -25,7 +25,7 @@ func TestWindowsPinnedUpdaterUsesProtectedFeatureVersion(t *testing.T) {
 		Artifact: bootstrap.ArtifactTarget{
 			Version:       "2026.08.27.61",
 			Architecture:  "amd64",
-			RepositoryURL: "https://get.pprbt.dev/tuf",
+			RepositoryURL: "https://get.example.test/tuf",
 		},
 	}
 	config := windowsUpdatedConfigFor(install, layout, "2026.08.27.62")

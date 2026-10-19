@@ -6,12 +6,9 @@ import (
 	"bytes"
 	"context"
 	"crypto/rsa"
-	"crypto/sha256"
 	"crypto/x509"
-	"encoding/hex"
 	"encoding/pem"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/splitdns"
 	"io"
 	"os"
 	"path/filepath"
@@ -39,11 +36,11 @@ func PrepareLocalCARenewal(ctx context.Context, cfg Config) error {
 		return err
 	}
 	defer lock.Close()
-	domains, err := approvedBrowserDomains(cfg.StateDir)
+	domains, err := loadBrowserDomains(cfg.StateDir)
 	if err != nil {
 		return err
 	}
-	for domain := range domains {
+	for domain := range domains.approved() {
 		directory := filepath.Join(cfg.StateDir, "certificates", domain)
 		if _, err := os.Lstat(directory); os.IsNotExist(err) {
 			continue
@@ -53,12 +50,7 @@ func PrepareLocalCARenewal(ctx context.Context, cfg Config) error {
 		if err := protectedDirectory(directory, 0700); err != nil {
 			return err
 		}
-		journalName := "local-ca-renewal.pem"
-		if domain != splitdns.BrowserSuffix {
-			digest := sha256.Sum256([]byte(domain))
-			journalName = "local-ca-renewal-" + hex.EncodeToString(digest[:16]) + ".pem"
-		}
-		if err := renewLocalCA(ctx, directory, filepath.Join(cfg.StateDir, journalName), time.Now(), validateOwnedRootStateFile, func(root []byte) error { return removeLocalTrust(ctx, cfg, root) }); err != nil {
+		if err := renewLocalCA(ctx, directory, filepath.Join(cfg.StateDir, domains.renewalJournal(domain)), time.Now(), validateOwnedRootStateFile, func(root []byte) error { return removeLocalTrust(ctx, cfg, root) }); err != nil {
 			return err
 		}
 	}

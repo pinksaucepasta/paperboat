@@ -159,13 +159,13 @@ func TestLocalAccessDefaultsCanonicalizesAndPersists(t *testing.T) {
 	}
 }
 
-func TestLocalAccessDefaultsToPaperboatDomain(t *testing.T) {
+func TestLocalAccessDomainStaysUnsetUntilChosen(t *testing.T) {
 	cfg, err := Load(filepath.Join(t.TempDir(), "missing.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.LocalAccess.Domain != DefaultLocalAccessDomain {
-		t.Fatalf("default browser domain = %q, want %q", cfg.LocalAccess.Domain, DefaultLocalAccessDomain)
+	if cfg.LocalAccess.Domain != "" {
+		t.Fatalf("unset browser domain = %q, want empty (the guard owns the deployment's domain)", cfg.LocalAccess.Domain)
 	}
 }
 

@@ -21,17 +21,29 @@ import (
 
 const browserDomainSchema = "paperboat.browser-domains/v1"
 
+// browserDomains is the root-owned record of the local access domains. Default
+// is the deployment's domain, recorded when the guard is installed; an owner
+// listed in Owners chose another one. There is no built-in domain.
 type browserDomains struct {
-	Schema string            `json:"schema"`
-	Owners map[string]string `json:"owners"`
+	Schema  string            `json:"schema"`
+	Default string            `json:"default,omitempty"`
+	Owners  map[string]string `json:"owners"`
 }
+
+// ErrBrowserDomainUnset means the guard was installed without a local access
+// domain, so browser access and machine names cannot be served yet.
+var ErrBrowserDomainUnset = errors.New("local access domain is not set up; run pb install again")
+
+// validateBrowserDomainsFile is the protected-state check of the domain record;
+// unprivileged tests replace it because they cannot create root-owned files.
+var validateBrowserDomainsFile = validateOwnedRootStateFile
 
 func loadBrowserDomains(state string) (browserDomains, error) {
 	result := browserDomains{Schema: browserDomainSchema, Owners: map[string]string{}}
 	if state == "" {
 		return result, nil
 	} // In-memory guard test instances have no persistent state.
-	data, err := readRenewalFile(filepath.Join(state, "browser-domains.json"), "browser-domains.json", validateOwnedRootStateFile)
+	data, err := readRenewalFile(filepath.Join(state, "browser-domains.json"), "browser-domains.json", validateBrowserDomainsFile)
 	if errors.Is(err, os.ErrNotExist) {
 		return result, nil
 	}
@@ -53,34 +65,104 @@ func decodeBrowserDomains(data []byte) (browserDomains, error) {
 	if result.Schema != browserDomainSchema || result.Owners == nil || len(result.Owners) > 512 {
 		return result, errors.New("invalid protected browser domain selection; preserved")
 	}
+	if result.Default != "" {
+		if normalized, e := splitdns.NormalizeBrowserDomain(result.Default); e != nil || normalized != result.Default {
+			return result, errors.New("invalid protected browser domain selection; preserved")
+		}
+	}
 	for owner, domain := range result.Owners {
 		normalized, e := splitdns.NormalizeBrowserDomain(domain)
-		if !validBrowserDomainOwner(owner) || e != nil || normalized != domain || domain == splitdns.BrowserSuffix {
+		if !validBrowserDomainOwner(owner) || e != nil || normalized != domain || domain == result.Default {
 			return result, errors.New("invalid protected browser domain selection; preserved")
 		}
 	}
 	return result, nil
 }
+
+// selected is the domain owner's browser access uses: its own choice, else the deployment's.
+func (d browserDomains) selected(owner string) (string, error) {
+	if domain := d.Owners[owner]; domain != "" {
+		return domain, nil
+	}
+	if d.Default == "" {
+		return "", ErrBrowserDomainUnset
+	}
+	return d.Default, nil
+}
+
+// approved is every domain whose local CA this guard may hold.
+func (d browserDomains) approved() map[string]bool {
+	approved := map[string]bool{}
+	if d.Default != "" {
+		approved[d.Default] = true
+	}
+	for _, domain := range d.Owners {
+		approved[domain] = true
+	}
+	return approved
+}
+
+// renewalJournal names the protected renewal journal of domain's CA.
+func (d browserDomains) renewalJournal(domain string) string {
+	if domain == d.Default {
+		return "local-ca-renewal.pem"
+	}
+	digest := sha256.Sum256([]byte(domain))
+	return "local-ca-renewal-" + hex.EncodeToString(digest[:16]) + ".pem"
+}
+
 func selectedBrowserDomain(state, owner string) (string, error) {
 	domains, err := loadBrowserDomains(state)
 	if err != nil {
 		return "", err
 	}
-	if domain := domains.Owners[owner]; domain != "" {
-		return domain, nil
-	}
-	return splitdns.BrowserSuffix, nil
+	return domains.selected(owner)
 }
-func approvedBrowserDomains(state string) (map[string]bool, error) {
+
+// recordInstallBrowserDomain records the deployment's local access domain when
+// the installer knows it; an empty domain keeps what is recorded.
+func recordInstallBrowserDomain(domain string) error {
+	if domain == "" {
+		return nil
+	}
+	if err := protectedDirectory(DefaultStateDir, 0700); err != nil {
+		return err
+	}
+	return recordDefaultBrowserDomain(DefaultStateDir, domain)
+}
+
+// recordDefaultBrowserDomain stores the deployment's local access domain. An
+// empty domain keeps the recorded one. Callers hold the guard lifecycle lock.
+func recordDefaultBrowserDomain(state, domain string) error {
+	if domain == "" {
+		return nil
+	}
+	domain, err := splitdns.NormalizeBrowserDomain(domain)
+	if err != nil {
+		return err
+	}
 	domains, err := loadBrowserDomains(state)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	approved := map[string]bool{splitdns.BrowserSuffix: true}
-	for _, domain := range domains.Owners {
-		approved[domain] = true
+	if domains.Default == domain {
+		return nil
 	}
-	return approved, nil
+	domains.Default = domain
+	for owner, selected := range domains.Owners {
+		if selected == domain {
+			delete(domains.Owners, owner)
+		}
+	}
+	return writeBrowserDomains(state, domains)
+}
+
+func writeBrowserDomains(state string, domains browserDomains) error {
+	data, err := json.Marshal(domains)
+	if err != nil {
+		return err
+	}
+	return writeRenewalJournal(filepath.Join(state, "browser-domains.json"), data)
 }
 
 // InstallBrowserDomain is an explicit elevated operation. User configuration
@@ -98,7 +180,7 @@ func InstallBrowserDomain(ctx context.Context, executable, owner, domain string)
 	}
 	// The normal installer repairs and restarts the owned helper before changing
 	// its selection, and preserves its existing rollback guarantees.
-	if err := Install(ctx, executable); err != nil {
+	if err := Install(ctx, executable, ""); err != nil {
 		return nil, err
 	}
 	lifecycle, err := lockGuardLifecycle(DefaultStateDir)
@@ -117,20 +199,14 @@ func applyBrowserDomainTrust(ctx context.Context, cfg Config, owner, domain stri
 	if err != nil {
 		return nil, err
 	}
-	previous := domains.Owners[owner]
-	if previous == "" {
-		previous = splitdns.BrowserSuffix
-	}
+	previous, _ := domains.selected(owner)
 	if previous == domain {
 		return nil, nil
 	}
 	if _, ok := domains.Owners[owner]; !ok && len(domains.Owners) >= 512 {
 		return nil, errors.New("browser domain owner capacity reached")
 	}
-	approved, err := approvedBrowserDomains(cfg.StateDir)
-	if err != nil {
-		return nil, err
-	}
+	approved := domains.approved()
 	ca, err := prepareNamespaceCA(cfg.StateDir, domain, false)
 	if err != nil {
 		return nil, err
@@ -162,7 +238,7 @@ func applyBrowserDomainTrust(ctx context.Context, cfg Config, owner, domain stri
 	if err := ctx.Err(); err != nil {
 		return nil, errors.Join(err, cleanupNew())
 	}
-	if domain == splitdns.BrowserSuffix {
+	if domain == domains.Default {
 		delete(domains.Owners, owner)
 	} else {
 		domains.Owners[owner] = domain
@@ -177,7 +253,7 @@ func applyBrowserDomainTrust(ctx context.Context, cfg Config, owner, domain stri
 	if err != nil {
 		return nil, errors.Join(err, cleanupNew())
 	}
-	if previous == splitdns.BrowserSuffix {
+	if previous == "" || previous == domains.Default {
 		return nil, nil
 	}
 	for _, selected := range domains.Owners {
@@ -210,7 +286,8 @@ func applyBrowserDomainTrust(ctx context.Context, cfg Config, owner, domain stri
 // Full guard uninstall retires all system trust first, then removes only the
 // bounded protected selection and validated public renewal journals.
 func removeBrowserDomainSelection(state string) error {
-	if _, err := loadBrowserDomains(state); err != nil {
+	domains, err := loadBrowserDomains(state)
+	if err != nil {
 		return err
 	}
 	path := filepath.Join(state, "browser-domains.json")
@@ -235,12 +312,7 @@ func removeBrowserDomainSelection(state string) error {
 			return err
 		}
 		domain := localTrustDomain(cert)
-		expected := "local-ca-renewal.pem"
-		if domain != splitdns.BrowserSuffix {
-			hash := sha256.Sum256([]byte(domain))
-			expected = "local-ca-renewal-" + hex.EncodeToString(hash[:16]) + ".pem"
-		}
-		if name != expected {
+		if name != domains.renewalJournal(domain) {
 			return errors.New("unowned local CA renewal journal; preserved")
 		}
 		if err := os.Remove(filepath.Join(state, name)); err != nil {

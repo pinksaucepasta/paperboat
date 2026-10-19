@@ -14,7 +14,7 @@ func TestMachineHostsCleanupPreservesOutsideAndRemovesOnlyOwnedBlock(t *testing.
 		[]byte("127.0.0.1 localhost"),
 		[]byte("\xef\xbb\xbf# UTF-8\r\n"),
 	} {
-		owned := append([]byte(hostsStart+"\n127.100.0.4 hp.pprbt\n127.100.0.5 hp.local.pprbt.dev\n"+hostsEnd+"\n"), original...)
+		owned := append([]byte(hostsStart+"\n127.100.0.4 hp.pprbt\n127.100.0.5 hp.local.example.test\n"+hostsEnd+"\n"), original...)
 		cleaned, err := renderMachineHosts(owned)
 		if err != nil || !bytes.Equal(cleaned, original) {
 			t.Fatalf("owned block cleanup %q → %q: %v", owned, cleaned, err)

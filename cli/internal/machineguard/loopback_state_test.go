@@ -62,7 +62,7 @@ func TestRangeChangeRejectsCustomRangeAndOldAddresses(t *testing.T) {
 	if _, err := g.handle(context.Background(), owner, "0", request{Operation: "prepare_range", LoopbackCIDR: "127.212.0.0/16"}); err == nil {
 		t.Fatal("custom machine range change accepted")
 	}
-	if _, err := g.handle(context.Background(), owner, "0", request{Operation: "acquire", Hostname: "office.local.pprbt.dev", IP: "127.212.23.45", Port: 8080}); err == nil {
+	if _, err := g.handle(context.Background(), owner, "0", request{Operation: "acquire", Hostname: "office.local.example.test", IP: "127.212.23.45", Port: 8080}); err == nil {
 		t.Fatal("historical custom range accepted for active forwarding")
 	}
 }

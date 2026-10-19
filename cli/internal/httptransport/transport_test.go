@@ -69,11 +69,11 @@ func TestValidateProxySnapshotUsesTransportPolicy(t *testing.T) {
 }
 
 func TestPACOnlyAllowsOnlyExplicitNoProxyDestinations(t *testing.T) {
-	proxy, _, err := proxyFunction(ProxySnapshot{PACOnly: true, NoProxy: "api.pprbt.dev", Generation: 7})
+	proxy, _, err := proxyFunction(ProxySnapshot{PACOnly: true, NoProxy: "api.example.test", Generation: 7})
 	if err != nil {
 		t.Fatal(err)
 	}
-	controlURL, _ := url.Parse("https://api.pprbt.dev/v1/runtime-observations")
+	controlURL, _ := url.Parse("https://api.example.test/v1/runtime-observations")
 	request := &http.Request{URL: controlURL}
 	if selected, err := proxy(request); err != nil || selected != nil {
 		t.Fatalf("control bypass selected=%v err=%v", selected, err)
@@ -270,18 +270,18 @@ func TestPriorityProxySourceAndBypassComposition(t *testing.T) {
 
 func TestPriorityProxySourcePreservesAdministratorBypassWithSystemPAC(t *testing.T) {
 	source := PriorityProxySource{
-		Administrator: StaticProxySource{Value: ProxySnapshot{NoProxy: "api.pprbt.dev,get.pprbt.dev"}},
+		Administrator: StaticProxySource{Value: ProxySnapshot{NoProxy: "api.example.test,get.example.test"}},
 		System:        StaticProxySource{Value: ProxySnapshot{PACOnly: true, Generation: 9}},
 	}
 	snapshot, err := source.Snapshot(context.Background())
-	if err != nil || !snapshot.PACOnly || snapshot.NoProxy != "api.pprbt.dev,get.pprbt.dev" {
+	if err != nil || !snapshot.PACOnly || snapshot.NoProxy != "api.example.test,get.example.test" {
 		t.Fatalf("snapshot=%+v err=%v", snapshot, err)
 	}
 	selectProxy, _, err := proxyFunction(snapshot)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, raw := range []string{"https://api.pprbt.dev/healthz", "https://get.pprbt.dev/tuf/metadata/timestamp.json"} {
+	for _, raw := range []string{"https://api.example.test/healthz", "https://get.example.test/tuf/metadata/timestamp.json"} {
 		request, _ := http.NewRequest(http.MethodGet, raw, nil)
 		if selected, err := selectProxy(request); err != nil || selected != nil {
 			t.Fatalf("%s selected=%v err=%v", raw, selected, err)

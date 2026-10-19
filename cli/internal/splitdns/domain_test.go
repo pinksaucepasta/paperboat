@@ -13,7 +13,7 @@ func TestBrowserDomainRejectsBroadAndInvalidTrust(t *testing.T) {
 			t.Fatalf("unsafe domain accepted: %s", domain)
 		}
 	}
-	for _, domain := range []string{BrowserSuffix, "mynet.xyz", "private.example.co.uk"} {
+	for _, domain := range []string{testBrowserDomain, "mynet.xyz", "private.example.co.uk"} {
 		if got, err := NormalizeBrowserDomain(domain); err != nil || got != domain {
 			t.Fatalf("valid domain %s rejected: %q %v", domain, got, err)
 		}
@@ -57,5 +57,13 @@ func TestRuntimeConstrainedCALoadDoesNotCreateState(t *testing.T) {
 	}
 	if _, _, err := loaded.IssueCertificate([]string{"*.other.xyz"}); err == nil {
 		t.Fatal("root signed another namespace")
+	}
+}
+
+func TestBrowserDomainHasNoBuiltInDefault(t *testing.T) {
+	for _, empty := range []string{"", "  "} {
+		if domain, err := NormalizeBrowserDomain(empty); err == nil {
+			t.Fatalf("empty domain %q normalized to %q; the domain must come from the deployment", empty, domain)
+		}
 	}
 }

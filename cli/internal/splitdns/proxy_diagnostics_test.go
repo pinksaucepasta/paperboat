@@ -39,8 +39,8 @@ func TestProxyFailureIsDiagnosableOfflineAndRecovers(t *testing.T) {
 	defer restoreReporter()
 	var mu sync.Mutex
 	var references []string
-	proxy, err := NewProxy(ProxyConfig{
-		Routes: map[string]BrowserRoute{"3000.machine.local.pprbt.dev": {Address: netip.MustParseAddr("127.100.0.1"), Port: 3000}},
+	proxy, err := NewProxy(ProxyConfig{Domain: testBrowserDomain,
+		Routes: map[string]BrowserRoute{"3000.machine.local.example.test": {Address: netip.MustParseAddr("127.100.0.1"), Port: 3000}},
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 			mu.Lock()
 			references = append(references, supportref.FromContext(ctx))
@@ -57,7 +57,7 @@ func TestProxyFailureIsDiagnosableOfflineAndRecovers(t *testing.T) {
 	}
 	defer proxy.transport.CloseIdleConnections()
 	for attempt, status := range []int{http.StatusBadGateway, http.StatusOK} {
-		request := httptest.NewRequest(http.MethodGet, "http://3000.machine.local.pprbt.dev/", nil)
+		request := httptest.NewRequest(http.MethodGet, "http://3000.machine.local.example.test/", nil)
 		request.Header.Set(supportref.Header, "caller-controlled secret value")
 		response := httptest.NewRecorder()
 		proxy.ServeHTTP(response, request)

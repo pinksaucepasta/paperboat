@@ -169,7 +169,7 @@ public class InstallerFixture {
 					t.Fatal("invalid fixture invocation")
 				}
 				actual = append(actual, parts[1])
-				if parts[1] == "pair" && (parts[0] != installed || !strings.Contains(line, "--name\tfixture-machine") || !strings.Contains(line, "--server\thttps://api.pprbt.dev")) {
+				if parts[1] == "pair" && (parts[0] != installed || !strings.Contains(line, "--name\tfixture-machine") || !strings.Contains(line, "--server\thttps://api.example.test")) {
 					t.Fatal("pairing did not use installed executable and existing options")
 				}
 			}

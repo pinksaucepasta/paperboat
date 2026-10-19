@@ -179,7 +179,7 @@ Removing a device revokes that device and stops all future ENV delivery to it, i
 The CLI surfaces these contracts through `pb team get` (`env_status`) and
 `pb team activity TEAM [--limit N] [--cursor CURSOR] [--json]`. The dashboard exposes
 activity only to current owners/admins and shows actionable ENV rotation-pending state.
-Lifecycle details are in the CLI [`team-lifecycle.md`](../../../paperboat/docs/team-lifecycle.md)
+Lifecycle details are in the CLI [`team-lifecycle.md`](../../../cli/docs/team-lifecycle.md)
 guide.
 
 ### Configuration Sync

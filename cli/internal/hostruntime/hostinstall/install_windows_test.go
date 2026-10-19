@@ -99,7 +99,7 @@ func TestStaleWindowsRuntimeProcessScriptIncludesEveryInstalledRuntimeRole(t *te
 		{name: "config worker", line: `"C:\Program Files\Paperboat\bin\pb.exe" daemon __runtime-config --instance u123`, want: true},
 		{name: "updated", line: `"C:\\Program Files\\Paperboat\\bin\\pb.exe" __runtime-updated`, want: true},
 		{name: "local daemon supervisor", line: `"C:\\Program Files\\Paperboat\\bin\\pb.exe" __runtime-local-daemon`, want: true},
-		{name: "local daemon worker", line: `"C:\\Program Files\\Paperboat\\bin\\pb.exe" __local-daemon --server https://api.pprbt.dev`, want: true},
+		{name: "local daemon worker", line: `"C:\\Program Files\\Paperboat\\bin\\pb.exe" __local-daemon --server https://api.example.test`, want: true},
 		{name: "managed ssh", line: `"C:\\Program Files\\Paperboat\\bin\\pb.exe" __windows-sshd-service --sshd sshd.exe`, want: true},
 		{name: "unrelated pb process", line: `"C:\\Program Files\\Paperboat\\bin\\pb.exe" --version`, want: false},
 		{name: "unrelated runtime command", line: `"C:\\Program Files\\Paperboat\\bin\\pb.exe" __runtime-client`, want: false},

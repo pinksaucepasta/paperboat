@@ -74,7 +74,7 @@ func TestDarwinPartialTrustRetirementPreservesOtherNamespace(t *testing.T) {
 	}
 	state := t.TempDir()
 	cfg := Config{StateDir: state}
-	retained, err := prepareNamespaceCA(state, "local.pprbt.dev", false)
+	retained, err := prepareNamespaceCA(state, "local.example.test", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +146,7 @@ func TestDarwinPartialTrustRetirementPreservesOtherNamespace(t *testing.T) {
 	if deletes != 1 {
 		t.Fatalf("retired %d roots", deletes)
 	}
-	for _, path := range []string{pathFor(retained.CertPEM()), pathFor(retained.CertPEM()) + ".installed", filepath.Join(state, "certificates", "local.pprbt.dev", "rootCA.pem"), filepath.Join(state, "certificates", "custom.example", "rootCA.pem")} {
+	for _, path := range []string{pathFor(retained.CertPEM()), pathFor(retained.CertPEM()) + ".installed", filepath.Join(state, "certificates", "local.example.test", "rootCA.pem"), filepath.Join(state, "certificates", "custom.example", "rootCA.pem")} {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("unrelated trust or caller-owned CA state removed: %s %v", path, err)
 		}

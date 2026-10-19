@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/internal/config"
 	pbSync "github.com/pinksaucepasta/paperboat/internal/controlsync/proto"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/supportref"
@@ -49,7 +50,7 @@ func TestCoordinatorForwardRetainsConsumedFailureAndRecovers(t *testing.T) {
 func TestCoordinatorGenerationCleanupRetainsLateCause(t *testing.T) {
 	release := make(chan struct{})
 	client := &generationNameClient{generation: 1, stallRelease: release, releaseFailure: syscall.EIO}
-	c, err := NewCoordinator(CoordinatorConfig{NameClient: client, DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, nil }})
+	c, err := NewCoordinator(CoordinatorConfig{LocalAccess: config.LocalAccessConfig{Domain: testBrowserDomain}, NameClient: client, DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, nil }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +83,7 @@ func TestCoordinatorStartupRollbackRetainsOriginalCleanup(t *testing.T) {
 	if err := os.WriteFile(blocked, []byte("not a directory"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	c, err := NewCoordinator(CoordinatorConfig{NameClient: &coordinatorCleanupClient{cause: syscall.EIO}, SocketAddress: filepath.Join(blocked, "daemon.sock"), DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, nil }})
+	c, err := NewCoordinator(CoordinatorConfig{LocalAccess: config.LocalAccessConfig{Domain: testBrowserDomain}, NameClient: &coordinatorCleanupClient{cause: syscall.EIO}, SocketAddress: filepath.Join(blocked, "daemon.sock"), DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, nil }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +111,7 @@ func TestCoordinatorReconciliationReportsOneEpisodeAndRecovery(t *testing.T) {
 	ctx := supportref.WithContext(t.Context(), reference)
 	fail := true
 	presentations := 0
-	c, err := NewCoordinator(CoordinatorConfig{ConnectNameClient: func(context.Context) (guardedNameClient, error) {
+	c, err := NewCoordinator(CoordinatorConfig{LocalAccess: config.LocalAccessConfig{Domain: testBrowserDomain}, ConnectNameClient: func(context.Context) (guardedNameClient, error) {
 		client := &coordinatorCleanupClient{}
 		if fail {
 			client.replaceCause = syscall.EIO
@@ -153,7 +154,7 @@ func TestCoordinatorReconciliationReportsOneEpisodeAndRecovery(t *testing.T) {
 
 func TestCoordinatorFailedListenerWithdrawsReadinessAndReacquires(t *testing.T) {
 	names := &coordinatorNameClient{}
-	c, err := NewCoordinator(CoordinatorConfig{NameClient: names, DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, nil }})
+	c, err := NewCoordinator(CoordinatorConfig{LocalAccess: config.LocalAccessConfig{Domain: testBrowserDomain}, NameClient: names, DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, nil }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +219,7 @@ func TestCoordinatorRPCListenerFailureReachesOwnerAndRecovers(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(dir)
-	c, err := NewCoordinator(CoordinatorConfig{SocketAddress: filepath.Join(dir, "daemon.sock")})
+	c, err := NewCoordinator(CoordinatorConfig{LocalAccess: config.LocalAccessConfig{Domain: testBrowserDomain}, SocketAddress: filepath.Join(dir, "daemon.sock")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +256,7 @@ func TestCoordinatorStartRejectsUnfinishedGenerationCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(dir)
-	c, err := NewCoordinator(CoordinatorConfig{NameClient: client, SocketAddress: filepath.Join(dir, "daemon.sock"), DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, nil }})
+	c, err := NewCoordinator(CoordinatorConfig{LocalAccess: config.LocalAccessConfig{Domain: testBrowserDomain}, NameClient: client, SocketAddress: filepath.Join(dir, "daemon.sock"), DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, nil }})
 	if err != nil {
 		t.Fatal(err)
 	}

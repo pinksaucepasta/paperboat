@@ -52,8 +52,8 @@ func TestUninstallPendingInstallationDoesNotRequireEnrollment(t *testing.T) {
 }
 
 func TestWorkerEnvironmentKeepsControlAndReleasePlanesOutsideSystemPAC(t *testing.T) {
-	environment := workerEnvironment(Request{ControlURL: "https://api.pprbt.dev", Artifact: bootstrap.ArtifactTarget{RepositoryURL: "https://get.pprbt.dev/tuf"}})
-	if environment["PAPERBOAT_NO_PROXY"] != "api.pprbt.dev,get.pprbt.dev" {
+	environment := workerEnvironment(Request{ControlURL: "https://api.example.test", Artifact: bootstrap.ArtifactTarget{RepositoryURL: "https://get.example.test/tuf"}})
+	if environment["PAPERBOAT_NO_PROXY"] != "api.example.test,get.example.test" {
 		t.Fatalf("PAPERBOAT_NO_PROXY=%q", environment["PAPERBOAT_NO_PROXY"])
 	}
 }

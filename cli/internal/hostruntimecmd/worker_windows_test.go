@@ -35,7 +35,7 @@ func TestWindowsHostdWorkerEnvironmentCarriesInstalledMachine(t *testing.T) {
 		t.Fatal(err)
 	}
 	{
-		install := hostinstall.WindowsRuntimeConfig{OwnerSID: "S-1-5-21-1", TokenFile: hostinstall.WindowsHostdTokenPath(), StateRoot: `C:\State`, Workspace: `C:\Workspace`, ControlURL: "https://api.pprbt.dev", ListenAddress: "127.0.0.1:8080", MachineID: "machine"}
+		install := hostinstall.WindowsRuntimeConfig{OwnerSID: "S-1-5-21-1", TokenFile: hostinstall.WindowsHostdTokenPath(), StateRoot: `C:\State`, Workspace: `C:\Workspace`, ControlURL: "https://api.example.test", ListenAddress: "127.0.0.1:8080", MachineID: "machine"}
 		environment, err := windowsHostdWorkerEnvironment(install, layout, `C:\Program Files\Paperboat\runtime.exe`)
 		if err != nil {
 			t.Fatal(err)

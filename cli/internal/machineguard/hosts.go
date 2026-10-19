@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/splitdns"
 	"io"
 	"net/netip"
 	"os"
@@ -68,26 +69,19 @@ func renderMachineHosts(original []byte) ([]byte, error) {
 	return outside.Bytes(), nil
 }
 
-// validOwnedMachineHost accepts only formats emitted by the previous host
-// projections. The old flat .pprbt names remain parseable solely so their
-// marked block can be removed without touching administrator-owned entries.
+// validOwnedMachineHost accepts a lowercase DNS name: the marked block is
+// removed wholesale, so only stray content (not a past domain) must be refused.
 func validOwnedMachineHost(name string) bool {
-	if validName(name) {
-		return true
-	}
-	if !strings.HasSuffix(name, ".pprbt") || name != strings.ToLower(name) {
+	if len(name) > 253 || name != strings.ToLower(name) {
 		return false
 	}
-	label := strings.TrimSuffix(name, ".pprbt")
-	if len(label) < 1 || len(label) > 63 || strings.HasPrefix(label, "-") || strings.HasSuffix(label, "-") {
-		return false
-	}
-	for _, r := range label {
-		if r != '-' && (r < 'a' || r > 'z') && (r < '0' || r > '9') {
+	labels := strings.Split(name, ".")
+	for _, label := range labels {
+		if !splitdns.ValidBrowserLabel(label) {
 			return false
 		}
 	}
-	return true
+	return len(labels) >= 2
 }
 
 func removeOwnedMachineHosts(ctx context.Context, path string) error {

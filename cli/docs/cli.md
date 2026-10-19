@@ -75,7 +75,8 @@ literal argument templates. Account synchronization is deferred.
 
 ## Local browser URLs
 
-The default local browser domain is `local.pprbt.dev`; changing it affects
+The local browser domain is set by your Paperboat server (`ppr.boats` on the hosted
+service; `pb config local-access show` prints yours). Changing it affects
 browser URLs only and leaves Paperboat's native machine names unchanged. Set a
 custom domain with `pb config local-access domain set example.com`. Before using
 one, configure a DNS-only wildcard record `*.example.com` that resolves to
@@ -85,8 +86,8 @@ reporting success. These commands apply to the installed user's active config;
 check its path with `pb config path`. Applying an alternate `--config` file is
 rejected because the installed helper reads the active config. To map an
 already authorized machine port to a readable name, run
-`pb config local-access alias set studio jellyfin 8989`. With the default
-domain, this creates `https://jellyfin.studio.local.pprbt.dev`; with
+`pb config local-access alias set studio jellyfin 8989`. With the server's
+domain, this creates `https://jellyfin.studio.ppr.boats`; with
 `example.com`, the URL is `https://jellyfin.studio.example.com`. It does not
 grant access to the port, and Paperboat publishes the name only while that port
 is authorized. Use `pb config local-access show` to inspect the effective
@@ -100,9 +101,9 @@ is shown; use your own domain if you set one):
 
 | You type | What you reach |
 |---|---|
-| `https://5432.hp.local.pprbt.dev` | Port 5432 over HTTPS, WebSocket (WSS) and HTTP |
-| `https://hp.local.pprbt.dev:5432` | The same service; the port after the name selects it |
-| `https://hp.local.pprbt.dev` | A page that lists the machine's published ports |
+| `https://5432.hp.ppr.boats` | Port 5432 over HTTPS, WebSocket (WSS) and HTTP |
+| `https://hp.ppr.boats:5432` | The same service; the port after the name selects it |
+| `https://hp.ppr.boats` | A page that lists the machine's published ports |
 | the machine's own `127.100.x.y` address, port 5432 | Raw TCP of any kind (a database, SSH, a game server) |
 
 The first three go through Paperboat's local web gateway at `127.100.0.1`. It
@@ -126,15 +127,15 @@ If your reverse proxy uses another port, configure that override on the browsing
 ```console
 pb config local-access proxy set homelab 8081
 ```
-Set an application's HTTP domain in Coolify to `jellyfin.homelab.local.pprbt.dev`,
-then open `https://jellyfin.homelab.local.pprbt.dev` from this computer.
+Set an application's HTTP domain in Coolify to `jellyfin.homelab.ppr.boats`,
+then open `https://jellyfin.homelab.ppr.boats` from this computer.
 Paperboat handles local HTTPS and forwards the original hostname privately to
 Coolify, which selects the application. Keep Coolify's backend HTTP configuration;
 it does not need to obtain a public certificate for these local names.
 New app names work without another Paperboat setting. No public tunnel or DNS
 changes are required for the default local browser domain.
 
-Numeric URLs such as `8080.homelab.local.pprbt.dev` always select port 8080;
+Numeric URLs such as `8080.homelab.ppr.boats` always select port 8080;
 explicit service aliases take precedence over the proxy. The machine base URL
 keeps its service index. Only one nonnumeric app label is supported; nested app
 names are rejected. Proxy settings do not grant machine or port access and are

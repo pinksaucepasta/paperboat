@@ -63,13 +63,16 @@ func applyLocalAccessConfig(ctx context.Context, cfg *config.Config, next config
 	if err != nil {
 		return err
 	}
-	priorDomain := status.BrowserDomain
-	if priorDomain == "" {
-		priorDomain = config.DefaultLocalAccessDomain
+	// An unset domain is the deployment's own, which the guard records at install.
+	priorDomain, nextDomain := status.BrowserDomain, next.Domain
+	if nextDomain == "" {
+		nextDomain = status.DefaultBrowserDomain
+	}
+	if priorDomain == "" || nextDomain == "" {
+		return errors.New("this computer has no local access domain; run pb install again")
 	}
 	old := cloneLocalAccess(cfg.LocalAccess)
-	old.Domain = priorDomain
-	changedDomain := priorDomain != next.Domain
+	changedDomain := priorDomain != nextDomain
 	if err = localdaemon.StopCurrentUserService(ctx, executable); err != nil {
 		return err
 	}
@@ -86,7 +89,7 @@ func applyLocalAccessConfig(ctx context.Context, cfg *config.Config, next config
 		return errors.Join(cause, trustErr, saveErr, startErr)
 	}
 	if changedDomain {
-		if err = hostruntimecmd.ConfigureBrowserDomain(ctx, next.Domain); err != nil {
+		if err = hostruntimecmd.ConfigureBrowserDomain(ctx, nextDomain); err != nil {
 			return restore(err)
 		}
 		if err = machineguard.CleanupUserTrust(ctx); err != nil {

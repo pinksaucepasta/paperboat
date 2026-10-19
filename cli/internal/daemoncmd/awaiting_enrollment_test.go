@@ -117,6 +117,7 @@ func TestDaemonReportsCredentialProfileFailureBeforeReadiness(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	cfg.ServerURL = "https://api.example.test"
 	cfg.Auth.ProfileDir = filepath.Join(root, "PRIVATE_PROFILE_STORE")
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)

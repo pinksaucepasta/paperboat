@@ -38,11 +38,11 @@ func TestElevatedAdministratorLocalCAState(t *testing.T) {
 	if err := PrepareLocalCARenewal(context.Background(), cfg); err != nil {
 		t.Fatalf("administrator maintenance: %v", err)
 	}
-	caDir := filepath.Join(dir, "certificates", splitdns.BrowserSuffix)
+	caDir := filepath.Join(dir, "certificates", testBrowserDomain)
 	if err := protectedDirectory(caDir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	ca, err := splitdns.LoadOrCreateConstrainedCA(caDir, splitdns.BrowserSuffix)
+	ca, err := splitdns.LoadOrCreateConstrainedCA(caDir, testBrowserDomain)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestElevatedAdministratorLocalCAState(t *testing.T) {
 	if err := validateOwnedRootStateFile(journal, "local-ca-renewal.pem", info); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := splitdns.LoadOrCreateConstrainedCA(caDir, splitdns.BrowserSuffix); err != nil {
+	if _, err := splitdns.LoadOrCreateConstrainedCA(caDir, testBrowserDomain); err != nil {
 		t.Fatalf("restart cannot recover installer CA: %v", err)
 	}
 }

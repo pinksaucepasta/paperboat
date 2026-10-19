@@ -46,7 +46,7 @@ func TestBrowserDomainServiceElevationIsAllowlistedAndRequiresPayload(t *testing
 		OwnerSID:   "S-1-5-21-1-2-3-1001",
 		Operation:  OperationRuntimeService,
 		Action:     ActionBrowserDomain,
-		Payload:    json.RawMessage(`{"owner":"S-1-5-21-1-2-3-1001","domain":"apps.local.pprbt.dev"}`),
+		Payload:    json.RawMessage(`{"owner":"S-1-5-21-1-2-3-1001","domain":"apps.local.example.test"}`),
 		CancelPath: `C:\cancel`,
 		CreatedAt:  now,
 		ExpiresAt:  now.Add(RuntimeActivationDuration),
@@ -59,7 +59,7 @@ func TestBrowserDomainServiceElevationIsAllowlistedAndRequiresPayload(t *testing
 	if err := validateRequest(request); err == nil {
 		t.Fatal("accepted browser-domain request without payload")
 	}
-	request.Payload = json.RawMessage(`{"owner":"S-1-5-21-1-2-3-1001","domain":"apps.local.pprbt.dev"}`)
+	request.Payload = json.RawMessage(`{"owner":"S-1-5-21-1-2-3-1001","domain":"apps.local.example.test"}`)
 	request.OwnerSID = ""
 	if err := validateRequest(request); err == nil {
 		t.Fatal("accepted browser-domain request without requester owner SID")

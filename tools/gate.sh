@@ -19,6 +19,12 @@ for m in shared cli relay tunnel server helper; do
   (cd "$m" && go vet ./... && go test ./...) || { echo "FAIL: $m"; fail=1; }
 done
 
+step "no hardcoded domains (AGENTS.md)"
+python3 tools/check_domains.py && (cd tools && python3 -m unittest test_check_domains) || { echo "FAIL: hardcoded domains"; fail=1; }
+
+step "documentation links"
+python3 tools/check_doc_links.py && (cd tools && python3 -m unittest test_check_doc_links) || { echo "FAIL: documentation links"; fail=1; }
+
 step "managed deployment lifecycle tests"
 python3 -m unittest discover -s deploy -p 'test_*.py' || { echo "FAIL: deployment"; fail=1; }
 

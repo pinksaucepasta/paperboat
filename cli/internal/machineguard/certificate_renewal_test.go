@@ -19,7 +19,7 @@ import (
 func renewalFixture(t *testing.T, days int, namespace ...string) (string, string, []byte) {
 	t.Helper()
 	directory := t.TempDir()
-	domain := splitdns.BrowserSuffix
+	domain := testBrowserDomain
 	if len(namespace) > 0 {
 		domain = namespace[0]
 	}
@@ -92,7 +92,7 @@ func TestLocalCARenewalRetriesExactTrustRemovalBeforeStateDeletion(t *testing.T)
 			t.Fatal("old CA state retained after successful retirement")
 		}
 	}
-	if _, err := splitdns.LoadOrCreateConstrainedCA(directory, splitdns.BrowserSuffix); err != nil {
+	if _, err := splitdns.LoadOrCreateConstrainedCA(directory, testBrowserDomain); err != nil {
 		t.Fatal("renewal cannot recreate a usable issuer:", err)
 	}
 }
@@ -135,7 +135,7 @@ func TestCustomBrowserCARenewalRetainsExactNamespace(t *testing.T) {
 	if localTrustDomain(root) != "mynet.xyz" || bytes.Equal(renewed.CertPEM(), old) {
 		t.Fatal("custom renewal changed scope or retained expiring root")
 	}
-	if _, err := splitdns.LoadConstrainedCA(directory, splitdns.BrowserSuffix); err == nil {
+	if _, err := splitdns.LoadConstrainedCA(directory, testBrowserDomain); err == nil {
 		t.Fatal("renewed root crossed namespace")
 	}
 }

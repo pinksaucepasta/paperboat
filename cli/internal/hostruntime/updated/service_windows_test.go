@@ -76,7 +76,7 @@ func testWindowsUpdaterConfig(t *testing.T) WindowsConfig {
 		t.Fatal(err)
 	}
 	instanceRoot, _ := hostinstall.WindowsInstanceRoot(layout.Instance)
-	return WindowsConfig{StateRoot: layout.UpdateStateRoot, RuntimeStateRoot: `C:\Users\Pujan\AppData\Local\Paperboat\runtime`, Binary: layout.Binary, BinaryRollback: layout.BinaryRollback, BinaryStaged: layout.BinaryStaged, OwnerSID: "S-1-5-21-1-2-3-1001", MachineID: "machine", RepositoryURL: "https://get.pprbt.dev", TokenFile: filepath.Join(instanceRoot, "hostd.token"), InstallState: filepath.Join(instanceRoot, "runtime-install.json"), ControlSocket: `\\.\pipe\PaperboatUpdatedControl-` + layout.Instance, HostdSocket: layout.HostdSocket, HealthURL: "http://127.0.0.1:8080/healthz", ActiveVersion: "2026.08.23.1", Architecture: "amd64"}
+	return WindowsConfig{StateRoot: layout.UpdateStateRoot, RuntimeStateRoot: `C:\Users\Pujan\AppData\Local\Paperboat\runtime`, Binary: layout.Binary, BinaryRollback: layout.BinaryRollback, BinaryStaged: layout.BinaryStaged, OwnerSID: "S-1-5-21-1-2-3-1001", MachineID: "machine", RepositoryURL: "https://get.example.test", TokenFile: filepath.Join(instanceRoot, "hostd.token"), InstallState: filepath.Join(instanceRoot, "runtime-install.json"), ControlSocket: `\\.\pipe\PaperboatUpdatedControl-` + layout.Instance, HostdSocket: layout.HostdSocket, HealthURL: "http://127.0.0.1:8080/healthz", ActiveVersion: "2026.08.23.1", Architecture: "amd64"}
 }
 
 func TestWindowsUpdaterRejectsMutableTrustAndPathInputs(t *testing.T) {

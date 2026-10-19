@@ -365,7 +365,7 @@ collisions remain diagnosable; new conflicting renames and ownership transfers f
 
 Machine services use `GET /v1/machine-services` for the caller-authorized, short-lived
 port snapshot (CLI bearer or authenticated dashboard session). Each authorized port
-includes `browser_url` as `https://<port>.<alias>.local.pprbt.dev` when its alias is
+includes `browser_url` as `https://<port>.<alias>.<local access domain>` when its alias is
 unambiguous in the caller's account namespace. Listing allocates no public hostname
 or activation policy. The URL requires the signed-in native daemon, a ready local
 TLS certificate and an exact current private-access grant; it has no hosted fallback.

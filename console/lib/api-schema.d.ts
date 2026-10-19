@@ -9645,7 +9645,7 @@ export interface components {
             address_family: "ipv4" | "ipv6";
             /**
              * Format: uri
-             * @description Native HTTPS URL https://<port>.<account-scoped-machine-alias>.local.pprbt.dev. Requires the authenticated local daemon and its ready public TLS certificate; no hosted fallback. Omitted for ambiguous shared aliases. Exact native service authorization remains required.
+             * @description Native HTTPS URL https://<port>.<account-scoped-machine-alias>.<local access domain>. Requires the authenticated local daemon and its ready public TLS certificate; no hosted fallback. Omitted for ambiguous shared aliases. Exact native service authorization remains required.
              */
             browser_url?: string;
         };

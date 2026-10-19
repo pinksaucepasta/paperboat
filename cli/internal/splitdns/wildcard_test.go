@@ -19,14 +19,14 @@ func TestMachineProxyPreservesHostAndExactRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	base := "homelab." + BrowserSuffix
+	base := "homelab." + testBrowserDomain
 	fallback := BrowserRoute{Address: netip.MustParseAddr("127.0.0.1"), Port: 80}
 	exact := BrowserRoute{Address: fallback.Address, Port: 8080}
-	if _, err := NewProxy(ProxyConfig{Routes: map[string]BrowserRoute{"*." + base: fallback}, DialContext: (&net.Dialer{}).DialContext}); err == nil {
+	if _, err := NewProxy(ProxyConfig{Domain: testBrowserDomain, Routes: map[string]BrowserRoute{"*." + base: fallback}, DialContext: (&net.Dialer{}).DialContext}); err == nil {
 		t.Fatal("proxy introduced an unregistered port")
 	}
 	routes := map[string]BrowserRoute{"*." + base: fallback, "80." + base: fallback, "8080." + base: exact, "fixed." + base: exact}
-	p, err := NewProxy(ProxyConfig{Routes: routes, DialContext: func(ctx context.Context, _, addr string) (net.Conn, error) {
+	p, err := NewProxy(ProxyConfig{Domain: testBrowserDomain, Routes: routes, DialContext: func(ctx context.Context, _, addr string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "tcp", origin.Listener.Addr().String())
 	}, IssueCertificate: func(_ context.Context, name string) (tls.Certificate, error) { return ca.TLS(name) }})
 	if err != nil {
@@ -50,12 +50,12 @@ func TestMachineProxyPreservesHostAndExactRoutes(t *testing.T) {
 		t.Fatal("per-app route state")
 	}
 	for _, host := range []string{"8080." + base, "fixed." + base} {
-		r, ok := ResolveBrowserRoute(p.routes, host, BrowserSuffix)
+		r, ok := ResolveBrowserRoute(p.routes, host, testBrowserDomain)
 		if !ok || r.Port != 8080 {
 			t.Fatal("exact priority")
 		}
 	}
-	for _, name := range []string{"81." + base, "080." + base, "0." + base, "65536." + base, "foo.bar." + base, "app.other." + BrowserSuffix} {
+	for _, name := range []string{"81." + base, "080." + base, "0." + base, "65536." + base, "foo.bar." + base, "app.other." + testBrowserDomain} {
 		w := httptest.NewRecorder()
 		p.ServeHTTP(w, httptest.NewRequest("GET", "http://"+name+"/", nil))
 		if w.Code != 421 {

@@ -1,12 +1,12 @@
 <# The trusted first-party HTTPS installer pins the immutable product bytes.
    Installed updates independently verify TUF metadata and rollback policy. #>
 $ErrorActionPreference = 'Stop'
-$server = if ($env:PAPERBOAT_SERVER) { [string]$env:PAPERBOAT_SERVER } else { 'https://api.pprbt.dev' }
+$server = [string]$env:PAPERBOAT_SERVER
 $requestedVersion = if ($env:PAPERBOAT_VERSION) { [string]$env:PAPERBOAT_VERSION } else { 'latest' }
 $token = [string]$env:PAPERBOAT_ENROLLMENT_TOKEN
 $tokenSource = [string]$env:PAPERBOAT_ENROLLMENT_TOKEN_FILE
 $name = if ($env:PAPERBOAT_MACHINE_ALIAS) { [string]$env:PAPERBOAT_MACHINE_ALIAS } else { [string]$env:PAPERBOAT_MACHINE_NAME }
-if ($server -notmatch '^https://') { throw 'Paperboat server URL must use HTTPS.' }
+if ($server -and $server -notmatch '^https://') { throw 'Paperboat server URL must use HTTPS.' }
 if (-not [string]::IsNullOrWhiteSpace($token) -and -not [string]::IsNullOrWhiteSpace($tokenSource)) { throw 'Use only one Paperboat enrollment token source.' }
 $arch = if ([Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq 'Arm64') { 'arm64' } elseif ([Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq 'X64') { 'amd64' } else { throw 'Paperboat supports only Windows AMD64 and ARM64.' }
 $asset = "pb-windows-$arch.exe"
@@ -108,7 +108,9 @@ try {
     if ([string]::IsNullOrWhiteSpace($name)) { $name = [string]$env:COMPUTERNAME }
     $name = $name.Trim().ToLowerInvariant()
     # Pairing uses the installed binary and never purges an existing identity.
-    Invoke-Paperboat $installedPb @('pair', '--server', $server, '--enrollment-token-file', $tokenFile, '--name', $name) 'Paperboat pairing'
+    $pairArgs = @('pair', '--enrollment-token-file', $tokenFile, '--name', $name)
+    if ($server) { $pairArgs += @('--server', $server) }
+    Invoke-Paperboat $installedPb $pairArgs 'Paperboat pairing'
   } else {
     Invoke-Paperboat $installedPb @('--version') 'Paperboat version check'
   }

@@ -22,7 +22,7 @@ func TestWindowsUnstampedNativeOwnerUsesProtectedFeatureVersion(t *testing.T) {
 		StateRoot: `C:\Users\Pujan\AppData\Local\Paperboat\runtime`,
 		Artifact: bootstrap.ArtifactTarget{
 			Version: "2026.09.03.2", Architecture: "amd64",
-			RepositoryURL: "https://get.pprbt.dev/tuf",
+			RepositoryURL: "https://get.example.test/tuf",
 		},
 	}
 	config := windowsUpdatedConfigFor(install, layout, "dev")

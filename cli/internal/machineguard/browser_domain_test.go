@@ -14,11 +14,15 @@ func TestProtectedBrowserDomainSelectionValidation(t *testing.T) {
 	if !validBrowserDomainOwner(owner) {
 		owner = "S-1-5-21-1-2-3-1000"
 	}
-	for _, domain := range []string{"com", "co.uk", "github.io", "*.mynet.xyz", "Mynet.xyz", splitdns.BrowserSuffix} {
+	for _, domain := range []string{"com", "co.uk", "github.io", "*.mynet.xyz", "Mynet.xyz"} {
 		data, _ := json.Marshal(browserDomains{Schema: browserDomainSchema, Owners: map[string]string{owner: domain}})
 		if _, err := decodeBrowserDomains(data); err == nil {
 			t.Fatalf("accepted unsafe protected domain %q", domain)
 		}
+	}
+	shadowed, _ := json.Marshal(browserDomains{Schema: browserDomainSchema, Default: testBrowserDomain, Owners: map[string]string{owner: testBrowserDomain}})
+	if _, err := decodeBrowserDomains(shadowed); err == nil {
+		t.Fatal("accepted an owner selection equal to the deployment default")
 	}
 	for _, data := range []string{`{}`, `{"schema":"other","owners":{}}`, `{"schema":"paperboat.browser-domains/v1","owners":{"foreign owner":"mynet.xyz"}}`, `{"schema":"paperboat.browser-domains/v1","owners":null}`} {
 		if _, err := decodeBrowserDomains([]byte(data)); err == nil {
@@ -38,7 +42,7 @@ func TestNamedBrowserAliasesRequireExactNumericTarget(t *testing.T) {
 	if got := browserAliasTarget(aliases, named, domain); got != numeric {
 		t.Fatal("named route did not resolve its numeric registration")
 	}
-	for _, target := range []string{splitdns.BrowserGatewayHostname, "3000.hp." + domain, "8989.other." + domain, "8989.hp.local.pprbt.dev", named, "second.hp." + domain} {
+	for _, target := range []string{splitdns.BrowserGatewayHostname, "3000.hp." + domain, "8989.other." + domain, "8989.hp.local.example.test", named, "second.hp." + domain} {
 		aliases[named] = target
 		aliases["second.hp."+domain] = numeric
 		if browserAliasTarget(aliases, named, domain) != "" {

@@ -16,6 +16,8 @@ import time
 import urllib.request
 
 ROOT = Path(__file__).resolve().parent
+# The DNS zone this opt-in live fixture may write to; set it to your own test zone.
+LIVE_ZONE = os.environ["PAPERBOAT_TASK30_LIVE_ZONE"]
 AUX = 'paperboat-task30-live-aux'
 DB = 'paperboat-task30-live-db'
 CACHE = 'paperboat-task30-live-cache'
@@ -71,7 +73,7 @@ def publish(request_path):
     config_path, desired_path, result_path = [ROOT / name for name in ['dns-config', 'dns-desired', 'dns-result']]
     env['PAPERBOAT_TASK30_LIVE_DNS_CONFIG'] = str(config_path)
     for host in request['Hosts']:
-        if not host.startswith('task30-') or not host.endswith('.pprbt.dev'):
+        if not host.startswith('task30-') or not host.endswith('.' + LIVE_ZONE):
             raise RuntimeError('refusing non-task hostname')
         deadline = time.monotonic() + 180
         while time.monotonic() < deadline:
@@ -120,7 +122,7 @@ def run():
     request = urllib.request.Request('https://api.cloudflare.com/client/v4/zones/' + zone,
                                      headers={'Authorization': 'Bearer ' + token})
     zone_name = json.load(urllib.request.urlopen(request, timeout=5))['result']['name']
-    if zone_name != 'pprbt.dev':
+    if zone_name != LIVE_ZONE:
         raise RuntimeError('unexpected test zone')
     suffix = secrets.token_hex(4)
     parent = 'task30-live-' + suffix + '.' + zone_name

@@ -4,9 +4,8 @@ Status: current v1 decisions; implementation and deployment evidence live in TRA
 
 ## Authority
 
-The current [product plan](../../../plans/paperboat-product-and-transport-plan.md),
-server router, v1 schemas and owning-task evidence in
-[TRACKER.md](../../../plans/TRACKER.md) define the implemented boundaries.
+The current [product plan](../../../PLAN.md), the server router, the v1 schemas and the
+evidence recorded in [CHECKLIST.md](../../../CHECKLIST.md) define the implemented boundaries.
 
 ## Approved Or Draft Decisions
 
@@ -81,10 +80,8 @@ context, never proof of ownership. Automated diagnosis and issue creation are
 separate future work; this rollout does not add a help endpoint, LLM integration,
 or issue writer.
 
-Reference evidence: [Octelium's UUID helpers](../../../references/octelium/cluster/common/vutils/vutils.go),
-[NetBird's opaque XIDs](../../../references/netbird/management/server/peer.go), and
-[Tailscale's typed IDs](../../../references/tailscale/tailcfg/tailcfg.go) demonstrate
-different valid representations. Paperboat chooses one consistent prefix vocabulary
+Reference evidence: Octelium's UUID helpers, NetBird's opaque XIDs and Tailscale's typed IDs
+demonstrate different valid representations. Paperboat chooses one consistent prefix vocabulary
 and UUID representation with explicit ownership types; it does not copy their
 unrelated storage or authorization models.
 

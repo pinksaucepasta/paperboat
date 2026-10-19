@@ -22,7 +22,7 @@ func TestLocalCAAndCertificateGeneration(t *testing.T) {
 	}
 	defer os.RemoveAll(tempDir)
 
-	ca, err := LoadOrCreateConstrainedCA(tempDir, BrowserSuffix)
+	ca, err := LoadOrCreateConstrainedCA(tempDir, testBrowserDomain)
 	if err != nil {
 		t.Fatalf("LoadOrCreateCA failed: %v", err)
 	}
@@ -31,7 +31,7 @@ func TestLocalCAAndCertificateGeneration(t *testing.T) {
 		t.Fatalf("rootCA.pem not found: %v", err)
 	}
 
-	domains := []string{"homelab.local.pprbt.dev", "*.homelab.local.pprbt.dev", "3000.homelab.local.pprbt.dev"}
+	domains := []string{"homelab.local.example.test", "*.homelab.local.example.test", "3000.homelab.local.example.test"}
 	certPEM, keyPEM, err := ca.IssueCertificate(domains)
 	if err != nil {
 		t.Fatalf("IssueCertificate failed: %v", err)
@@ -55,13 +55,13 @@ func TestLocalCAAndCertificateGeneration(t *testing.T) {
 
 	opts := x509.VerifyOptions{
 		Roots:   roots,
-		DNSName: "3000.homelab.local.pprbt.dev",
+		DNSName: "3000.homelab.local.example.test",
 	}
 	if _, err := parsedLeaf.Verify(opts); err != nil {
 		t.Fatalf("leaf cert failed verification for 3000.homelab.pprbt: %v", err)
 	}
 
-	opts.DNSName = "homelab.local.pprbt.dev"
+	opts.DNSName = "homelab.local.example.test"
 	if _, err := parsedLeaf.Verify(opts); err != nil {
 		t.Fatalf("leaf cert failed verification for homelab.pprbt: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestLocalCAAndCertificateGeneration(t *testing.T) {
 
 func TestLoadOrCreateCARejectsExpiringRootWithoutRotation(t *testing.T) {
 	dir := t.TempDir()
-	ca, err := LoadOrCreateConstrainedCA(dir, BrowserSuffix)
+	ca, err := LoadOrCreateConstrainedCA(dir, testBrowserDomain)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestLoadOrCreateCARejectsExpiringRootWithoutRotation(t *testing.T) {
 		SerialNumber: big.NewInt(42), Subject: pkix.Name{CommonName: "expiring Paperboat root"},
 		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(12 * time.Hour),
 		IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
-		PermittedDNSDomainsCritical: true, PermittedDNSDomains: []string{".local.pprbt.dev"},
+		PermittedDNSDomainsCritical: true, PermittedDNSDomains: []string{".local.example.test"},
 	}
 	der, err := x509.CreateCertificate(rand.Reader, template, template, &ca.caKey.PublicKey, ca.caKey)
 	if err != nil {
@@ -88,7 +88,7 @@ func TestLoadOrCreateCARejectsExpiringRootWithoutRotation(t *testing.T) {
 	if err = os.WriteFile(path, expiring, 0644); err != nil {
 		t.Fatal(err)
 	}
-	_, err = LoadOrCreateConstrainedCA(dir, BrowserSuffix)
+	_, err = LoadOrCreateConstrainedCA(dir, testBrowserDomain)
 	if err == nil || !strings.Contains(err.Error(), "reinstall Paperboat to renew local HTTPS trust") {
 		t.Fatalf("expected actionable expiry recovery error, got %v", err)
 	}
@@ -99,23 +99,23 @@ func TestLoadOrCreateCARejectsExpiringRootWithoutRotation(t *testing.T) {
 }
 
 func TestIssueCertificateRejectsRootThatCannotOutliveLeaf(t *testing.T) {
-	ca, err := LoadOrCreateConstrainedCA(t.TempDir(), BrowserSuffix)
+	ca, err := LoadOrCreateConstrainedCA(t.TempDir(), testBrowserDomain)
 	if err != nil {
 		t.Fatal(err)
 	}
 	ca.caCert.NotAfter = time.Now().Add(minimumLeafLifetime / 2)
-	if _, _, err = ca.IssueCertificate([]string{"office.local.pprbt.dev"}); err == nil || !strings.Contains(err.Error(), "reinstall Paperboat to renew local HTTPS trust") {
+	if _, _, err = ca.IssueCertificate([]string{"office.local.example.test"}); err == nil || !strings.Contains(err.Error(), "reinstall Paperboat to renew local HTTPS trust") {
 		t.Fatalf("expected actionable root expiry error, got %v", err)
 	}
 }
 
 func TestIssueCertificateClampsLeafToRootValidity(t *testing.T) {
-	ca, err := LoadOrCreateConstrainedCA(t.TempDir(), BrowserSuffix)
+	ca, err := LoadOrCreateConstrainedCA(t.TempDir(), testBrowserDomain)
 	if err != nil {
 		t.Fatal(err)
 	}
 	ca.caCert.NotAfter = time.Now().UTC().Truncate(time.Second).Add(7 * 24 * time.Hour)
-	certPEM, _, err := ca.IssueCertificate([]string{"office.local.pprbt.dev"})
+	certPEM, _, err := ca.IssueCertificate([]string{"office.local.example.test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ func TestIssueCertificateClampsLeafToRootValidity(t *testing.T) {
 
 func TestLoadOrCreateCAPreservesPartialOrMismatchedTrust(t *testing.T) {
 	firstDir := t.TempDir()
-	first, err := LoadOrCreateConstrainedCA(firstDir, BrowserSuffix)
+	first, err := LoadOrCreateConstrainedCA(firstDir, testBrowserDomain)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +139,7 @@ func TestLoadOrCreateCAPreservesPartialOrMismatchedTrust(t *testing.T) {
 	if err = os.Remove(filepath.Join(firstDir, "rootCA-key.pem")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = LoadOrCreateConstrainedCA(firstDir, BrowserSuffix); err == nil {
+	if _, err = LoadOrCreateConstrainedCA(firstDir, testBrowserDomain); err == nil {
 		t.Fatal("partial CA was silently replaced")
 	}
 	certAfter, _ := os.ReadFile(filepath.Join(firstDir, "rootCA.pem"))
@@ -148,14 +148,14 @@ func TestLoadOrCreateCAPreservesPartialOrMismatchedTrust(t *testing.T) {
 	}
 
 	secondDir := t.TempDir()
-	if _, err = LoadOrCreateConstrainedCA(secondDir, BrowserSuffix); err != nil {
+	if _, err = LoadOrCreateConstrainedCA(secondDir, testBrowserDomain); err != nil {
 		t.Fatal(err)
 	}
 	otherKey, _ := os.ReadFile(filepath.Join(secondDir, "rootCA-key.pem"))
 	if err = os.WriteFile(filepath.Join(firstDir, "rootCA-key.pem"), otherKey, 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = LoadOrCreateConstrainedCA(firstDir, BrowserSuffix); err == nil {
+	if _, err = LoadOrCreateConstrainedCA(firstDir, testBrowserDomain); err == nil {
 		t.Fatal("mismatched CA pair was accepted")
 	}
 	_ = first
@@ -163,11 +163,11 @@ func TestLoadOrCreateCAPreservesPartialOrMismatchedTrust(t *testing.T) {
 
 func TestLoadOrCreateConstrainedCARejectsWrongOrUnconstrainedRoot(t *testing.T) {
 	dir := t.TempDir()
-	ca, err := LoadOrCreateConstrainedCA(dir, BrowserSuffix)
+	ca, err := LoadOrCreateConstrainedCA(dir, testBrowserDomain)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !ca.caCert.PermittedDNSDomainsCritical || len(ca.caCert.PermittedDNSDomains) != 1 || ca.caCert.PermittedDNSDomains[0] != ".local.pprbt.dev" {
+	if !ca.caCert.PermittedDNSDomainsCritical || len(ca.caCert.PermittedDNSDomains) != 1 || ca.caCert.PermittedDNSDomains[0] != ".local.example.test" {
 		t.Fatalf("constraints=%v critical=%v", ca.caCert.PermittedDNSDomains, ca.caCert.PermittedDNSDomainsCritical)
 	}
 	if _, err := LoadOrCreateConstrainedCA(dir, "devbox"); err == nil {
@@ -177,7 +177,7 @@ func TestLoadOrCreateConstrainedCARejectsWrongOrUnconstrainedRoot(t *testing.T) 
 	if _, err := loadOrCreateCA(unconstrained, ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadOrCreateConstrainedCA(unconstrained, BrowserSuffix); err == nil {
+	if _, err := LoadOrCreateConstrainedCA(unconstrained, testBrowserDomain); err == nil {
 		t.Fatal("unconstrained root was accepted for production TLS")
 	}
 }

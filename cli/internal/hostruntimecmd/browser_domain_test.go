@@ -7,15 +7,15 @@ import (
 )
 
 func TestDecodeBrowserDomainNormalizesDomain(t *testing.T) {
-	request, err := decodeBrowserDomain(strings.NewReader(`{"owner":"1000","domain":"Apps.Local.Pprbt.Dev"}`))
+	request, err := decodeBrowserDomain(strings.NewReader(`{"owner":"1000","domain":"Apps.Local.Example.Test"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if request.Owner != "1000" {
 		t.Fatalf("owner = %q, want %q", request.Owner, "1000")
 	}
-	if request.Domain != "apps.local.pprbt.dev" {
-		t.Fatalf("domain = %q, want %q", request.Domain, "apps.local.pprbt.dev")
+	if request.Domain != "apps.local.example.test" {
+		t.Fatalf("domain = %q, want %q", request.Domain, "apps.local.example.test")
 	}
 }
 
@@ -26,15 +26,15 @@ func TestDecodeBrowserDomainRejectsMissingOrInvalidOwner(t *testing.T) {
 	}{
 		{
 			name:    "missing",
-			payload: `{"domain":"apps.local.pprbt.dev"}`,
+			payload: `{"domain":"apps.local.example.test"}`,
 		},
 		{
 			name:    "blank",
-			payload: `{"owner":" \t ","domain":"apps.local.pprbt.dev"}`,
+			payload: `{"owner":" \t ","domain":"apps.local.example.test"}`,
 		},
 		{
 			name:    "too long",
-			payload: `{"owner":"` + strings.Repeat("x", 185) + `","domain":"apps.local.pprbt.dev"}`,
+			payload: `{"owner":"` + strings.Repeat("x", 185) + `","domain":"apps.local.example.test"}`,
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -46,7 +46,7 @@ func TestDecodeBrowserDomainRejectsMissingOrInvalidOwner(t *testing.T) {
 }
 
 func TestDecodeBrowserDomainRejectsTrailingJSON(t *testing.T) {
-	payload := `{"owner":"1000","domain":"apps.local.pprbt.dev"} {"owner":"1001","domain":"apps.local.pprbt.dev"}`
+	payload := `{"owner":"1000","domain":"apps.local.example.test"} {"owner":"1001","domain":"apps.local.example.test"}`
 	if _, err := decodeBrowserDomain(strings.NewReader(payload)); err == nil {
 		t.Fatal("accepted a second JSON value after the browser-domain request")
 	}
@@ -54,7 +54,7 @@ func TestDecodeBrowserDomainRejectsTrailingJSON(t *testing.T) {
 
 func TestDecodeBrowserDomainEnforcesPayloadLimit(t *testing.T) {
 	const maxPayloadBytes = 4096
-	request := []byte(`{"owner":"1000","domain":"apps.local.pprbt.dev"}`)
+	request := []byte(`{"owner":"1000","domain":"apps.local.example.test"}`)
 	if len(request) >= maxPayloadBytes {
 		t.Fatal("test request unexpectedly exceeds the payload limit")
 	}

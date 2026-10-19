@@ -23,7 +23,7 @@ const darwinHelperPath = "/Library/PrivilegedHelperTools/io.paperboat.machinegua
 const darwinLaunchPath = "/Library/LaunchDaemons/io.paperboat.machineguard.plist"
 const darwinLaunchMarker = "<!-- Managed by Paperboat machine guard -->"
 
-func Install(ctx context.Context, executable string) (resultErr error) {
+func Install(ctx context.Context, executable, browserDomain string) (resultErr error) {
 	if err := requirePrivilege(); err != nil {
 		return err
 	}
@@ -51,6 +51,9 @@ func Install(ctx context.Context, executable string) (resultErr error) {
 		return err
 	}
 	defer lifecycle.Close()
+	if err := recordInstallBrowserDomain(browserDomain); err != nil {
+		return err
+	}
 	oldState, err := loadLoopbackState(DefaultStateDir)
 	if err != nil {
 		return err

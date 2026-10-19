@@ -19,8 +19,9 @@ pb daemon machine-guard install [flags]
 ### Options
 
 ```
-  -h, --help   help for install
-      --json   print JSON
+      --browser-domain string   local access domain of the Paperboat server (kept when already recorded)
+  -h, --help                    help for install
+      --json                    print JSON
 ```
 
 ### Options inherited from parent commands

@@ -47,9 +47,8 @@ type Favorite struct {
 }
 
 const (
-	DefaultLocalAccessDomain = splitdns.BrowserSuffix
-	MaxLocalServiceAliases   = 128
-	MaxLocalMachineProxies   = 128
+	MaxLocalServiceAliases = 128
+	MaxLocalMachineProxies = 128
 )
 
 // LocalAccessConfig controls this user's local browser domain and named
@@ -370,11 +369,14 @@ func normalizeStatusWidgets(values []string) []string {
 // Validate checks the complete effective configuration. Callers that mutate a
 // loaded Config can use it before presenting success.
 func (c *Config) Validate() error {
-	domain, err := splitdns.NormalizeBrowserDomain(c.LocalAccess.Domain)
-	if err != nil {
-		return fmt.Errorf("local_access.domain: %w", err)
+	// An unset domain is the deployment's own, which the machine guard records at install.
+	if c.LocalAccess.Domain != "" {
+		domain, err := splitdns.NormalizeBrowserDomain(c.LocalAccess.Domain)
+		if err != nil {
+			return fmt.Errorf("local_access.domain: %w", err)
+		}
+		c.LocalAccess.Domain = domain
 	}
-	c.LocalAccess.Domain = domain
 	if len(c.LocalAccess.ServiceAliases) > MaxLocalServiceAliases {
 		return fmt.Errorf("local_access.service_aliases cannot contain more than %d items", MaxLocalServiceAliases)
 	}
@@ -383,10 +385,10 @@ func (c *Config) Validate() error {
 		alias := &c.LocalAccess.ServiceAliases[index]
 		alias.MachineAlias = strings.ToLower(strings.TrimSpace(alias.MachineAlias))
 		alias.Name = strings.ToLower(strings.TrimSpace(alias.Name))
-		if _, label, err := splitdns.ParseBrowserHostname(alias.MachineAlias+"."+domain, domain); err != nil || label != "" {
+		if !splitdns.ValidBrowserLabel(alias.MachineAlias) {
 			return fmt.Errorf("local_access.service_aliases[%d].machine_alias must be one DNS label", index)
 		}
-		if _, label, err := splitdns.ParseBrowserHostname(alias.Name+"."+alias.MachineAlias+"."+domain, domain); err != nil || label != alias.Name || localAliasNameIsNumeric(alias.Name) {
+		if !splitdns.ValidBrowserLabel(alias.Name) || localAliasNameIsNumeric(alias.Name) {
 			return fmt.Errorf("local_access.service_aliases[%d].name must be a nonnumeric DNS label", index)
 		}
 		if alias.Port == 0 {
@@ -405,7 +407,7 @@ func (c *Config) Validate() error {
 	for index := range c.LocalAccess.MachineProxies {
 		proxy := &c.LocalAccess.MachineProxies[index]
 		proxy.MachineAlias = strings.ToLower(strings.TrimSpace(proxy.MachineAlias))
-		if _, label, err := splitdns.ParseBrowserHostname(proxy.MachineAlias+"."+domain, domain); err != nil || label != "" {
+		if !splitdns.ValidBrowserLabel(proxy.MachineAlias) {
 			return fmt.Errorf("local_access.machine_proxies[%d].machine_alias must be one DNS label", index)
 		}
 		if proxy.Port == 0 {

@@ -22,6 +22,7 @@ func TestMachineInstallSucceedsWhenGuardTrustIsPending(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	useGuardDomains(t, "", "local.example.test", nil)
 	oldProbe, oldPrepare, oldInstall := existingMachineGuardReady, prepareMachineGuardForInstall, installMissingMachineGuard
 	t.Cleanup(func() {
 		existingMachineGuardReady = oldProbe
@@ -32,7 +33,7 @@ func TestMachineInstallSucceedsWhenGuardTrustIsPending(t *testing.T) {
 	prepareMachineGuardForInstall = func() error { return nil }
 	request := Request{Executable: executable, Source: source}
 
-	installMissingMachineGuard = func(context.Context, string) error {
+	installMissingMachineGuard = func(context.Context, string, string) error {
 		return fmt.Errorf("%w: approval denied", machineguard.ErrTrustPending)
 	}
 	if err := installMachineGuard(context.Background(), request); err != nil {
@@ -40,7 +41,7 @@ func TestMachineInstallSucceedsWhenGuardTrustIsPending(t *testing.T) {
 	}
 
 	cause := errors.New("guard copy failed")
-	installMissingMachineGuard = func(context.Context, string) error { return cause }
+	installMissingMachineGuard = func(context.Context, string, string) error { return cause }
 	if err := installMachineGuard(context.Background(), request); !errors.Is(err, cause) {
 		t.Fatalf("real guard installation failure was not preserved: %v", err)
 	}

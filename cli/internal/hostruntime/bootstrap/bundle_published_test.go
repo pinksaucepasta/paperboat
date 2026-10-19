@@ -18,12 +18,12 @@ func TestPublishedUpdateBundle(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	path := filepath.Join(root, "release.pb-update")
-	index, err := ExportUpdateBundle(ctx, "https://get.pprbt.dev/tuf", filepath.Join(root, "sender"), path, nil, time.Now())
+	index, err := ExportUpdateBundle(ctx, "https://get.example.test/tuf", filepath.Join(root, "sender"), path, nil, time.Now())
 	if err != nil {
 		t.Fatalf("published bundle export: %T: %v", err, err)
 	}
 	t.Logf("published version=%s platform=%s architecture=%s", index.Version, index.Platform, index.Architecture)
-	result, err := ImportUpdateBundle(ctx, "https://get.pprbt.dev/tuf", filepath.Join(root, "receiver"), path, filepath.Join(root, "staged"), time.Now())
+	result, err := ImportUpdateBundle(ctx, "https://get.example.test/tuf", filepath.Join(root, "receiver"), path, filepath.Join(root, "staged"), time.Now())
 	if err != nil {
 		t.Fatalf("published bundle offline import: %T: %v", err, err)
 	}

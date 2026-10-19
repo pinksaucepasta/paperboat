@@ -180,7 +180,7 @@ func TestArtifactRetryTransportRetriesTransientGET(t *testing.T) {
 		}
 		return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody, Header: make(http.Header), Request: request}, nil
 	}), delays: []time.Duration{0, 0}}
-	request, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://get.pprbt.dev/metadata/timestamp.json", nil)
+	request, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://get.example.test/metadata/timestamp.json", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +199,7 @@ func TestArtifactRetryTransportRetriesDialDeadlineWhileRequestIsLive(t *testing.
 		}
 		return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody, Header: make(http.Header), Request: request}, nil
 	}), delays: []time.Duration{0}}
-	request, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://get.pprbt.dev/metadata/timestamp.json", nil)
+	request, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://get.example.test/metadata/timestamp.json", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,7 +224,7 @@ func TestArtifactRetryTransportDoesNotRetryWritesOrPermanentTLSFailures(t *testi
 				calls++
 				return nil, test.err
 			}), delays: []time.Duration{0, 0}}
-			request, err := http.NewRequestWithContext(context.Background(), test.method, "https://get.pprbt.dev/metadata/timestamp.json", nil)
+			request, err := http.NewRequestWithContext(context.Background(), test.method, "https://get.example.test/metadata/timestamp.json", nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -246,7 +246,7 @@ func TestArtifactRetryTransportDoesNotRetryMixedOrCyclicFailures(t *testing.T) {
 				calls++
 				return nil, failure
 			}), delays: []time.Duration{0, 0}}
-			request, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://get.pprbt.dev/metadata/timestamp.json", nil)
+			request, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://get.example.test/metadata/timestamp.json", nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -265,7 +265,7 @@ func TestArtifactRetryTransportPreservesResponseCloseFailure(t *testing.T) {
 		calls++
 		return &http.Response{StatusCode: http.StatusBadGateway, Header: make(http.Header), Body: &bootstrapTestBody{reader: strings.NewReader("ignored"), closeErr: closeFailure}, Request: request}, transientArtifactError{}
 	}), delays: []time.Duration{0, 0}}
-	request, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://get.pprbt.dev/metadata/timestamp.json", nil)
+	request, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://get.example.test/metadata/timestamp.json", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -284,7 +284,7 @@ func TestArtifactRetryTransportStopsWhenRequestIsCanceled(t *testing.T) {
 		return nil, transientArtifactError{}
 	}), delays: []time.Duration{time.Hour}}
 	time.AfterFunc(time.Millisecond, cancel)
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://get.pprbt.dev/metadata/timestamp.json", nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://get.example.test/metadata/timestamp.json", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

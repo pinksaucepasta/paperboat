@@ -46,7 +46,7 @@ func TestWindowsMalformedPrefacesDoNotStopGuard(t *testing.T) {
 	}
 	defer client.Close()
 	ip := netip.MustParseAddr("127.123.254.233")
-	listener, err := client.Acquire(ctx, "prefaceguard.local.pprbt.dev", ip, 46393)
+	listener, err := client.Acquire(ctx, "prefaceguard.local.example.test", ip, 46393)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,12 +93,12 @@ func TestWindowsProtectedGuardAcceptance(t *testing.T) {
 	defer client.Close()
 	defer os.WriteFile(windowsGuardStop, []byte("stop"), 0600)
 	ip := netip.MustParseAddr(windowsAcceptanceIP)
-	listener, err := client.Acquire(ctx, "taskguard.local.pprbt.dev", ip, windowsAcceptancePort)
+	listener, err := client.Acquire(ctx, "taskguard.local.example.test", ip, windowsAcceptancePort)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer listener.Close()
-	if err = client.ReplaceNames(ctx, map[string]netip.Addr{"taskguard.local.pprbt.dev": ip}); err != nil {
+	if err = client.ReplaceNames(ctx, map[string]netip.Addr{"taskguard.local.example.test": ip}); err != nil {
 		t.Fatal(err)
 	}
 	status, err := client.Status(ctx)

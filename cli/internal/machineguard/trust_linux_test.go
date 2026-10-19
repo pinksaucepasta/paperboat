@@ -47,7 +47,7 @@ func TestLinuxSystemTrustInstallActivatesAndIsIdempotent(t *testing.T) {
 		t.Fatalf("system trust updater ran %d times; want once", runs)
 	}
 
-	foreignPath := linuxOwnedTrustPath(trust, localTrustSuffix)
+	foreignPath := linuxOwnedTrustPath(trust, testBrowserDomain)
 	if err = os.WriteFile(foreignPath, []byte("foreign certificate"), 0644); err != nil {
 		t.Fatal(err)
 	}

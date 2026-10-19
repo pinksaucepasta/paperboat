@@ -59,7 +59,7 @@ func TestBrowserIsolationFixture(t *testing.T) {
 	hosts := make([]string, 0, 2)
 	for _, server := range []*httptest.Server{a, b} {
 		port := server.Listener.Addr().(*net.TCPAddr).Port
-		host, err := BrowserHostname("browser-fixture-machine", port, BrowserSuffix)
+		host, err := BrowserHostname("browser-fixture-machine", port, testBrowserDomain)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -70,7 +70,7 @@ func TestBrowserIsolationFixture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	proxy, err := NewProxy(ProxyConfig{Routes: routes, IssueCertificate: func(_ context.Context, name string) (tls.Certificate, error) { return ca.TLS(name) }, DialContext: (&net.Dialer{}).DialContext})
+	proxy, err := NewProxy(ProxyConfig{Domain: testBrowserDomain, Routes: routes, IssueCertificate: func(_ context.Context, name string) (tls.Certificate, error) { return ca.TLS(name) }, DialContext: (&net.Dialer{}).DialContext})
 	if err != nil {
 		t.Fatal(err)
 	}

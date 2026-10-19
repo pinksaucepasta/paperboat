@@ -375,7 +375,7 @@ Windows amd64 and arm64 are stable after native release qualification.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](../LICENSE).
 
 ## Team machines
 

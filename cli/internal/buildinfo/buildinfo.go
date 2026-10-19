@@ -25,9 +25,10 @@ var Commit = "unknown"
 // ProtocolVersion is the control-plane contract understood by this binary.
 var ProtocolVersion = "1"
 
-// DefaultServerURL is the first-party Paperboat control plane. Private builds
-// may replace it with -ldflags, but official binaries work without setup.
-var DefaultServerURL = "https://api.pprbt.dev"
+// DefaultServerURL is the control plane this build talks to unless --server or
+// the configuration says otherwise. Every build sets it with -ldflags (the
+// Makefile and release tooling do); source has no domain of its own.
+var DefaultServerURL = ""
 
 // DefaultReleaseURL is the independent official release host, set by release
 // builds. Source builds have no update origin.

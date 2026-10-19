@@ -507,8 +507,8 @@ func TestMachineAddPrintsOneShotEnrollmentCommands(t *testing.T) {
 }
 
 func TestWindowsEnrollmentCommandRunsFromCommandPrompt(t *testing.T) {
-	const installerURL = "https://get.pprbt.dev/install?p=rpi-0123456789ABCDEFGHIJKLMNOP"
-	want := `powershell -c "iex (irm 'https://get.pprbt.dev/install?p=rpi-0123456789ABCDEFGHIJKLMNOP')"`
+	const installerURL = "https://get.example.test/install?p=rpi-0123456789ABCDEFGHIJKLMNOP"
+	want := `powershell -c "iex (irm 'https://get.example.test/install?p=rpi-0123456789ABCDEFGHIJKLMNOP')"`
 	if got := windowsEnrollmentCommand(installerURL); got != want {
 		t.Fatalf("windows enrollment command=%q, want %q", got, want)
 	}

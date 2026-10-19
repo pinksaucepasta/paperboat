@@ -54,6 +54,7 @@ type response struct {
 // that is actually active.
 type RuntimeStatus struct {
 	BrowserDomain          string   `json:"browser_domain"`
+	DefaultBrowserDomain   string   `json:"default_browser_domain"`
 	RootRenewalRequired    bool     `json:"root_renewal_required"`
 	TrustReady             bool     `json:"trust_ready"`
 	Version                string   `json:"version"`

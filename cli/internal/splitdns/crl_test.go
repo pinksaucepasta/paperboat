@@ -17,12 +17,12 @@ import (
 
 func TestLocalCRLMatchesIssuedLeafAndSurvivesRestart(t *testing.T) {
 	dir := t.TempDir()
-	ca, err := LoadOrCreateConstrainedCA(dir, BrowserSuffix)
+	ca, err := LoadOrCreateConstrainedCA(dir, testBrowserDomain)
 	if err != nil {
 		t.Fatal(err)
 	}
 	rootBefore := append([]byte(nil), ca.CertPEM()...)
-	leafPEM, key, err := ca.IssueCertificate([]string{"hp.local.pprbt.dev"})
+	leafPEM, key, err := ca.IssueCertificate([]string{"hp.local.example.test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestLocalCRLMatchesIssuedLeafAndSurvivesRestart(t *testing.T) {
 	if len(list.RevokedCertificateEntries) != 0 {
 		t.Fatal("non-revoked issuer published fictional revocations")
 	}
-	restarted, err := LoadOrCreateConstrainedCA(dir, BrowserSuffix)
+	restarted, err := LoadOrCreateConstrainedCA(dir, testBrowserDomain)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestLocalCRLMatchesIssuedLeafAndSurvivesRestart(t *testing.T) {
 	if _, err := ValidateCRL(ca.caCert.Raw, der, now.Add(25*time.Hour)); err == nil {
 		t.Fatal("expired CRL accepted")
 	}
-	foreign, err := LoadOrCreateConstrainedCA(t.TempDir(), BrowserSuffix)
+	foreign, err := LoadOrCreateConstrainedCA(t.TempDir(), testBrowserDomain)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,12 +90,12 @@ func TestLocalCRLMatchesIssuedLeafAndSurvivesRestart(t *testing.T) {
 }
 
 func TestLocalCRLEndpointNeverForwards(t *testing.T) {
-	ca, err := LoadOrCreateConstrainedCA(t.TempDir(), BrowserSuffix)
+	ca, err := LoadOrCreateConstrainedCA(t.TempDir(), testBrowserDomain)
 	if err != nil {
 		t.Fatal(err)
 	}
 	forwarded := false
-	p, err := NewProxy(ProxyConfig{Routes: map[string]BrowserRoute{"3000.hp.local.pprbt.dev": {Address: netip.MustParseAddr("127.100.0.2"), Port: 3000}}, RevocationList: func(ctx context.Context, path string) ([]byte, []byte, error) {
+	p, err := NewProxy(ProxyConfig{Domain: testBrowserDomain, Routes: map[string]BrowserRoute{"3000.hp.local.example.test": {Address: netip.MustParseAddr("127.100.0.2"), Port: 3000}}, RevocationList: func(ctx context.Context, path string) ([]byte, []byte, error) {
 		der, err := ca.RevocationList(time.Now())
 		return ca.caCert.Raw, der, err
 	}, DialContext: func(context.Context, string, string) (net.Conn, error) { forwarded = true; return nil, net.ErrClosed }})

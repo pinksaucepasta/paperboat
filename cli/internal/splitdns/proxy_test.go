@@ -26,7 +26,7 @@ func TestProxyUsesRenewableCertificateProvider(t *testing.T) {
 		t.Fatal(err)
 	}
 	calls := 0
-	proxy, err := NewProxy(ProxyConfig{Routes: map[string]BrowserRoute{"3000.studio.local.pprbt.dev": {Address: netip.MustParseAddr("127.0.0.1"), Port: 3000}}, DialContext: (&net.Dialer{}).DialContext, IssueCertificate: func(_ context.Context, hostname string) (tls.Certificate, error) {
+	proxy, err := NewProxy(ProxyConfig{Domain: testBrowserDomain, Routes: map[string]BrowserRoute{"3000.studio.local.example.test": {Address: netip.MustParseAddr("127.0.0.1"), Port: 3000}}, DialContext: (&net.Dialer{}).DialContext, IssueCertificate: func(_ context.Context, hostname string) (tls.Certificate, error) {
 		calls++
 		certificate, key, issueErr := ca.IssueCertificate([]string{hostname})
 		if issueErr != nil {
@@ -38,7 +38,7 @@ func TestProxyUsesRenewableCertificateProvider(t *testing.T) {
 		t.Fatal(err)
 	}
 	for range 2 {
-		if _, err := proxy.GetCertificate(&tls.ClientHelloInfo{ServerName: "3000.studio.local.pprbt.dev"}); err != nil {
+		if _, err := proxy.GetCertificate(&tls.ClientHelloInfo{ServerName: "3000.studio.local.example.test"}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -77,10 +77,10 @@ func TestProxySubdomainRoutingAndTLS(t *testing.T) {
 		t.Fatalf("load CA: %v", err)
 	}
 
-	proxy, err := NewProxy(ProxyConfig{
+	proxy, err := NewProxy(ProxyConfig{Domain: testBrowserDomain,
 		HTTPListenAddr:   "127.0.0.1:0",
 		HTTPSListenAddr:  "127.0.0.1:0",
-		Routes:           map[string]BrowserRoute{"3000.first.local.pprbt.dev": {Address: netip.MustParseAddr("127.0.0.1"), Port: port3000}, "3000.second.local.pprbt.dev": {Address: netip.MustParseAddr("127.0.0.1"), Port: portNextjs}},
+		Routes:           map[string]BrowserRoute{"3000.first.local.example.test": {Address: netip.MustParseAddr("127.0.0.1"), Port: port3000}, "3000.second.local.example.test": {Address: netip.MustParseAddr("127.0.0.1"), Port: portNextjs}},
 		IssueCertificate: func(_ context.Context, name string) (tls.Certificate, error) { return ca.TLS(name) },
 		DialContext:      (&net.Dialer{}).DialContext,
 	})
@@ -90,7 +90,7 @@ func TestProxySubdomainRoutingAndTLS(t *testing.T) {
 
 	// Test 1: Direct port routing (e.g. <port3000>.homelab.pprbt)
 	req := httptest.NewRequest("GET", "/", nil)
-	req.Host = "3000.first.local.pprbt.dev"
+	req.Host = "3000.first.local.example.test"
 	rec := httptest.NewRecorder()
 	proxy.ServeHTTP(rec, req)
 
@@ -102,13 +102,13 @@ func TestProxySubdomainRoutingAndTLS(t *testing.T) {
 		t.Fatalf("expected backend port-3000, got %s", resp.Header.Get("X-Backend"))
 	}
 	body, _ := io.ReadAll(resp.Body)
-	if string(body) != "hello from port 3000 (host: 3000.first.local.pprbt.dev, proto: http)" {
+	if string(body) != "hello from port 3000 (host: 3000.first.local.example.test, proto: http)" {
 		t.Fatalf("unexpected body: %s", string(body))
 	}
 
-	// Test 2: Service subdomain routing (e.g. 3000.second.local.pprbt.dev)
+	// Test 2: Service subdomain routing (e.g. 3000.second.local.example.test)
 	req2 := httptest.NewRequest("GET", "/", nil)
-	req2.Host = "3000.second.local.pprbt.dev"
+	req2.Host = "3000.second.local.example.test"
 	rec2 := httptest.NewRecorder()
 	proxy.ServeHTTP(rec2, req2)
 
@@ -122,7 +122,7 @@ func TestProxySubdomainRoutingAndTLS(t *testing.T) {
 
 	// Test 3: Dynamic TLS certificate generation via GetCertificate
 	hello := &tls.ClientHelloInfo{
-		ServerName: "3000.first.local.pprbt.dev",
+		ServerName: "3000.first.local.example.test",
 	}
 	cert, err := proxy.GetCertificate(hello)
 	if err != nil {
@@ -135,20 +135,20 @@ func TestProxySubdomainRoutingAndTLS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse leaf: %v", err)
 	}
-	if _, err := leaf.Verify(x509.VerifyOptions{Roots: roots, DNSName: "3000.first.local.pprbt.dev"}); err != nil {
+	if _, err := leaf.Verify(x509.VerifyOptions{Roots: roots, DNSName: "3000.first.local.example.test"}); err != nil {
 		t.Fatalf("leaf verification failed: %v", err)
 	}
 }
 
 func TestProxyRejectsUnauthorizedDialAndOutOfSuffixCertificate(t *testing.T) {
-	if _, err := NewProxy(ProxyConfig{}); err == nil {
+	if _, err := NewProxy(ProxyConfig{Domain: testBrowserDomain}); err == nil {
 		t.Fatal("proxy accepted no authorized dialer")
 	}
 	ca, err := testcert.New()
 	if err != nil {
 		t.Fatal(err)
 	}
-	proxy, err := NewProxy(ProxyConfig{IssueCertificate: func(_ context.Context, name string) (tls.Certificate, error) { return ca.TLS(name) }, DialContext: (&net.Dialer{}).DialContext})
+	proxy, err := NewProxy(ProxyConfig{Domain: testBrowserDomain, IssueCertificate: func(_ context.Context, name string) (tls.Certificate, error) { return ca.TLS(name) }, DialContext: (&net.Dialer{}).DialContext})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +163,7 @@ func TestProxyStartReportsBindFailureSynchronously(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer listener.Close()
-	proxy, err := NewProxy(ProxyConfig{HTTPListenAddr: listener.Addr().String(), DialContext: (&net.Dialer{}).DialContext})
+	proxy, err := NewProxy(ProxyConfig{Domain: testBrowserDomain, HTTPListenAddr: listener.Addr().String(), DialContext: (&net.Dialer{}).DialContext})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +188,7 @@ func TestProxyStartRollsBackHTTPWhenHTTPSBindFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	proxy, err := NewProxy(ProxyConfig{HTTPListenAddr: httpAddress, HTTPSListenAddr: httpsBlocker.Addr().String(), IssueCertificate: func(_ context.Context, name string) (tls.Certificate, error) { return ca.TLS(name) }, DialContext: (&net.Dialer{}).DialContext})
+	proxy, err := NewProxy(ProxyConfig{Domain: testBrowserDomain, HTTPListenAddr: httpAddress, HTTPSListenAddr: httpsBlocker.Addr().String(), IssueCertificate: func(_ context.Context, name string) (tls.Certificate, error) { return ca.TLS(name) }, DialContext: (&net.Dialer{}).DialContext})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +218,7 @@ func (l *proxyFailCloseListener) Close() error {
 func TestProxyStopRetainsDeadlineAndOwnedListenerFailure(t *testing.T) {
 	native := &os.PathError{Op: "release", Path: "PRIVATE_PROXY_LISTENER", Err: syscall.EIO}
 	started := make(chan struct{})
-	proxy, err := NewProxy(ProxyConfig{Routes: map[string]BrowserRoute{"3000.studio.local.pprbt.dev": {Address: netip.MustParseAddr("127.0.0.1"), Port: 3000}}, IssueCertificate: func(context.Context, string) (tls.Certificate, error) { return tls.Certificate{}, nil }, DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+	proxy, err := NewProxy(ProxyConfig{Domain: testBrowserDomain, Routes: map[string]BrowserRoute{"3000.studio.local.example.test": {Address: netip.MustParseAddr("127.0.0.1"), Port: 3000}}, IssueCertificate: func(context.Context, string) (tls.Certificate, error) { return tls.Certificate{}, nil }, DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		close(started)
 		<-ctx.Done()
 		return nil, ctx.Err()
@@ -246,7 +246,7 @@ func TestProxyStopRetainsDeadlineAndOwnedListenerFailure(t *testing.T) {
 	go func() {
 		defer close(requestDone)
 		request, _ := http.NewRequest(http.MethodGet, "http://"+httpListener.Addr().String()+"/", nil)
-		request.Host = "3000.studio.local.pprbt.dev"
+		request.Host = "3000.studio.local.example.test"
 		response, _ := (&http.Client{Transport: transport, Timeout: time.Second}).Do(request)
 		if response != nil {
 			response.Body.Close()
@@ -278,7 +278,7 @@ func TestProxyStopRetainsDeadlineAndOwnedListenerFailure(t *testing.T) {
 	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, "healthy") }))
 	defer origin.Close()
 	originAddress := origin.Listener.Addr().(*net.TCPAddr)
-	fresh, err := NewProxy(ProxyConfig{Routes: map[string]BrowserRoute{"3000.studio.local.pprbt.dev": {Address: netip.MustParseAddr("127.0.0.1"), Port: originAddress.Port}}, IssueCertificate: func(context.Context, string) (tls.Certificate, error) { return tls.Certificate{}, nil }, DialContext: (&net.Dialer{}).DialContext})
+	fresh, err := NewProxy(ProxyConfig{Domain: testBrowserDomain, Routes: map[string]BrowserRoute{"3000.studio.local.example.test": {Address: netip.MustParseAddr("127.0.0.1"), Port: originAddress.Port}}, IssueCertificate: func(context.Context, string) (tls.Certificate, error) { return tls.Certificate{}, nil }, DialContext: (&net.Dialer{}).DialContext})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,7 +297,7 @@ func TestProxyStopRetainsDeadlineAndOwnedListenerFailure(t *testing.T) {
 	}
 	defer fresh.Stop(context.Background())
 	request, _ := http.NewRequest(http.MethodGet, "http://"+freshHTTP.Addr().String()+"/", nil)
-	request.Host = "3000.studio.local.pprbt.dev"
+	request.Host = "3000.studio.local.example.test"
 	response, err := (&http.Client{Transport: transport, Timeout: time.Second}).Do(request)
 	if err != nil {
 		t.Fatal(err)
@@ -333,11 +333,11 @@ func TestProxyServesMachineHostOnItsPublishedPort(t *testing.T) {
 	}
 	publishedPort := published.Addr().(*net.TCPAddr).Port
 	unpublishedPort := unpublished.Addr().(*net.TCPAddr).Port
-	numeric, err := BrowserHostname("first", publishedPort, BrowserSuffix)
+	numeric, err := BrowserHostname("first", publishedPort, testBrowserDomain)
 	if err != nil {
 		t.Fatal(err)
 	}
-	proxy, err := NewProxy(ProxyConfig{
+	proxy, err := NewProxy(ProxyConfig{Domain: testBrowserDomain,
 		HTTPListenAddr: "127.0.0.1:0", HTTPSListenAddr: "127.0.0.1:0",
 		Routes:           map[string]BrowserRoute{numeric: {Address: netip.MustParseAddr("127.0.0.1"), Port: backendPort}},
 		IssueCertificate: func(_ context.Context, name string) (tls.Certificate, error) { return ca.TLS(name) },
@@ -364,14 +364,14 @@ func TestProxyServesMachineHostOnItsPublishedPort(t *testing.T) {
 	roots := x509.NewCertPool()
 	roots.AppendCertsFromPEM(ca.CertPEM())
 	client := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{
-		TLSClientConfig: &tls.Config{RootCAs: roots, ServerName: "first." + BrowserSuffix},
+		TLSClientConfig: &tls.Config{RootCAs: roots, ServerName: "first." + testBrowserDomain},
 	}}
 	get := func(port int) (*http.Response, error) {
 		request, err := http.NewRequest(http.MethodGet, fmt.Sprintf("https://127.0.0.1:%d/", port), nil)
 		if err != nil {
 			return nil, err
 		}
-		request.Host = fmt.Sprintf("first.%s:%d", BrowserSuffix, port)
+		request.Host = fmt.Sprintf("first.%s:%d", testBrowserDomain, port)
 		return client.Do(request)
 	}
 	response, err := get(publishedPort)

@@ -14,7 +14,7 @@ import (
 func NormalizeBrowserDomain(domain string) (string, error) {
 	domain = strings.ToLower(strings.TrimSpace(domain))
 	if domain == "" {
-		domain = BrowserSuffix
+		return "", errors.New("browser domain is not configured")
 	}
 	if len(domain) > 253 || strings.ContainsAny(domain, "*:/@\\\x00") || net.ParseIP(domain) != nil {
 		return "", errors.New("browser domain must be a DNS domain, without wildcard, scheme, port, or IP")

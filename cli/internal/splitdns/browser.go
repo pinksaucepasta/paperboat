@@ -7,21 +7,13 @@ import (
 	"strings"
 )
 
-// BrowserSuffix is the public DNS namespace for locally terminated browser
-// access. Its DNS-only wildcard points to BrowserGatewayIP, never a public edge.
-const BrowserSuffix = "local.pprbt.dev"
+// BrowserGatewayIP is the loopback address the browser gateway listens on. The
+// local access domain's DNS wildcard points here, never at a public edge.
 const BrowserGatewayIP = "127.100.0.1"
-const BrowserGatewayHostname = "gateway." + BrowserSuffix
 
-// IsPublicBrowserHostname admits only a canonical port and machine label in the
-// selected browser namespace. Reachability never supplies service authorization.
-func IsPublicBrowserHostname(host string) bool {
-	if host != strings.ToLower(host) || !strings.HasSuffix(host, "."+BrowserSuffix) {
-		return false
-	}
-	parts := strings.Split(strings.TrimSuffix(host, "."+BrowserSuffix), ".")
-	return len(parts) == 2 && validBrowserHost(host, BrowserSuffix)
-}
+// BrowserGatewayHostname keys the gateway's protected listener lease. It is not
+// a DNS name: the browser namespace is the deployment's configured domain.
+const BrowserGatewayHostname = "gateway.paperboat.invalid"
 
 // BrowserRoute binds one browser hostname to an explicitly authorized service.
 type BrowserRoute struct {
@@ -68,6 +60,9 @@ func validBrowserHost(host, suffix string) bool {
 	}
 	return false
 }
+
+// ValidBrowserLabel reports whether label is one lowercase DNS label.
+func ValidBrowserLabel(label string) bool { return validLabel(label) }
 
 func validLabel(label string) bool {
 	if len(label) < 1 || len(label) > 63 || strings.HasPrefix(label, "-") || strings.HasSuffix(label, "-") {

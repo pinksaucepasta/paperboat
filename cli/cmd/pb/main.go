@@ -4584,7 +4584,7 @@ func actionHomeConfig(command *cobra.Command) error {
 				return err
 			}
 		case "server":
-			value, inputErr := prompt.Text(prompt.TextOptions{Title: "Paperboat server", Description: "Control-plane URL used by this CLI", Placeholder: "https://api.pprbt.dev", Initial: cfg.ServerURL, Stdin: os.Stdin, Context: command.Context(), Output: command.ErrOrStderr(), Validate: func(value string) error {
+			value, inputErr := prompt.Text(prompt.TextOptions{Title: "Paperboat server", Description: "Control-plane URL used by this CLI", Placeholder: "https://api.example.test", Initial: cfg.ServerURL, Stdin: os.Stdin, Context: command.Context(), Output: command.ErrOrStderr(), Validate: func(value string) error {
 				if strings.TrimSpace(value) == "" {
 					return nil
 				}
@@ -8409,7 +8409,7 @@ func configCommand() *command.Spec {
 					fmt.Fprintf(c.Writer, "status_bar.mode: %s\n", d.cfg.StatusBar.Mode)
 					fmt.Fprintf(c.Writer, "status_bar.fullscreen: %s\n", d.cfg.StatusBar.Fullscreen)
 					fmt.Fprintf(c.Writer, "status_bar.theme: %s\n", d.cfg.StatusBar.Theme)
-					fmt.Fprintf(c.Writer, "local_access.domain: %s\n", d.cfg.LocalAccess.Domain)
+					fmt.Fprintf(c.Writer, "local_access.domain: %s\n", orNone(effectiveLocalAccessDomain(c.Context, d.cfg)))
 					fmt.Fprintln(c.Writer, "local_access.service_aliases:")
 					if len(d.cfg.LocalAccess.ServiceAliases) == 0 {
 						fmt.Fprintln(c.Writer, "  (none)")

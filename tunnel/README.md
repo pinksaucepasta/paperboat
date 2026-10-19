@@ -25,7 +25,7 @@ The container contains one executable, `paperboat-tunnel`; there are no external
 proxy or signaling binaries to provision.
 
 For native relay-only, tunnel-only, or combined installation, see
-[self-host installation](../relay/deploy/README.md). The `pbh` helper generates the
+[self-host installation](../helper/deploy/README.md). The `pbh` helper generates the
 strict deployment document after an authenticated dashboard claim. Installation
 and claim need no DNS domains; configured browser/public routes need domain and
 certificate readiness before publication. The checked-in JSON is a field and path
@@ -33,4 +33,4 @@ example for an already configured node.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](../LICENSE).

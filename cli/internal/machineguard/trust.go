@@ -14,8 +14,6 @@ import (
 	"strings"
 )
 
-const localTrustSuffix = "local.pprbt.dev"
-
 func parseLocalTrustRoot(certificatePEM []byte) (*x509.Certificate, error) {
 	block, rest := pem.Decode(certificatePEM)
 	if block == nil || block.Type != "CERTIFICATE" || strings.TrimSpace(string(rest)) != "" {
@@ -48,22 +46,27 @@ func localTrustNickname(certificate *x509.Certificate) string {
 }
 
 func historicalRootsExcept(state string, activePEM []byte) ([]ownedRoot, error) {
-	active, err := parseLocalTrustRoot(activePEM)
-	if err != nil {
-		return nil, err
+	// Without a recorded default domain there is no active CA to require.
+	var active *x509.Certificate
+	if activePEM != nil {
+		var err error
+		if active, err = parseLocalTrustRoot(activePEM); err != nil {
+			return nil, err
+		}
 	}
 	roots, err := uninstallRoots(state)
 	if err != nil {
 		return nil, err
 	}
-	approved, err := approvedBrowserDomains(state)
+	domains, err := loadBrowserDomains(state)
 	if err != nil {
 		return nil, err
 	}
+	approved := domains.approved()
 	retired := make([]ownedRoot, 0, len(roots))
-	foundActive := false
+	foundActive := active == nil
 	for _, root := range roots {
-		if bytes.Equal(root.certificate.Raw, active.Raw) {
+		if active != nil && bytes.Equal(root.certificate.Raw, active.Raw) {
 			foundActive = true
 			continue
 		}

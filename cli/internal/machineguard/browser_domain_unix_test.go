@@ -55,16 +55,16 @@ func TestBrowserDomainProtectedLifecycle(t *testing.T) {
 	set("1000", "mynet.xyz")
 	set("1001", "mynet.xyz")
 	g := &guardServer{cfg: cfg, trustReady: true}
-	if g.runtimeStatus("1000").BrowserDomain != "mynet.xyz" || g.runtimeStatus("1002").BrowserDomain != splitdns.BrowserSuffix {
+	if g.runtimeStatus("1000").BrowserDomain != "mynet.xyz" || g.runtimeStatus("1002").BrowserDomain != testBrowserDomain {
 		t.Fatal("status exposed another owner's domain")
 	}
-	if got := set("1000", splitdns.BrowserSuffix); len(got) != 0 || len(removed) != 0 {
+	if got := set("1000", testBrowserDomain); len(got) != 0 || len(removed) != 0 {
 		t.Fatal("shared root retired while another owner references it")
 	}
 	if _, err := os.Stat(filepath.Join(state, "certificates", "mynet.xyz", "rootCA.pem")); err != nil {
 		t.Fatal(err)
 	}
-	if got := set("1001", splitdns.BrowserSuffix); len(got) != 1 || len(removed) != 1 {
+	if got := set("1001", testBrowserDomain); len(got) != 1 || len(removed) != 1 {
 		t.Fatal("last owner did not retire its custom root")
 	}
 	if _, err := os.Stat(filepath.Join(state, "certificates", "mynet.xyz")); !os.IsNotExist(err) {
@@ -74,7 +74,7 @@ func TestBrowserDomainProtectedLifecycle(t *testing.T) {
 	if _, err := applyBrowserDomainTrust(t.Context(), cfg, "1000", "failed.xyz", func(context.Context, Config, []byte) error { return fail }, remove); !errors.Is(err, fail) {
 		t.Fatalf("wrong failure %v", err)
 	}
-	if domain, err := selectedBrowserDomain(state, "1000"); err != nil || domain != splitdns.BrowserSuffix {
+	if domain, err := selectedBrowserDomain(state, "1000"); err != nil || domain != testBrowserDomain {
 		t.Fatalf("failed trust changed selection: %s %v", domain, err)
 	}
 	if _, err := os.Stat(filepath.Join(state, "certificates", "failed.xyz")); !os.IsNotExist(err) {
@@ -87,7 +87,7 @@ func TestBrowserDomainProtectedLifecycle(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancellation: %v", err)
 	}
-	if domain, err := selectedBrowserDomain(state, "1000"); err != nil || domain != splitdns.BrowserSuffix {
+	if domain, err := selectedBrowserDomain(state, "1000"); err != nil || domain != testBrowserDomain {
 		t.Fatal("cancellation published selection")
 	}
 	if _, err := os.Stat(filepath.Join(state, "certificates", "canceled.xyz")); !os.IsNotExist(err) {
@@ -96,7 +96,7 @@ func TestBrowserDomainProtectedLifecycle(t *testing.T) {
 	// Historical cleanup must retain every referenced namespace, including those
 	// belonging to an owner other than the caller performing the installation.
 	set("1001", "shared.xyz")
-	defaultCA, err := prepareNamespaceCA(state, splitdns.BrowserSuffix, false)
+	defaultCA, err := prepareNamespaceCA(state, testBrowserDomain, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +146,7 @@ func TestBrowserDomainProtectedLifecycle(t *testing.T) {
 			t.Fatalf("authorized host %s: %v", host, err)
 		}
 	}
-	for _, host := range []string{"3000.hp.shared.xyz", "other.hp.shared.xyz", "8989.other.shared.xyz", "8989.hp.local.pprbt.dev"} {
+	for _, host := range []string{"3000.hp.shared.xyz", "other.hp.shared.xyz", "8989.other.shared.xyz", "8989.hp.local.example.test"} {
 		if _, err := approvedGuard.certificate(t.Context(), approvedConn, "1001", host); err == nil {
 			t.Fatalf("signed unauthorized host %s", host)
 		}

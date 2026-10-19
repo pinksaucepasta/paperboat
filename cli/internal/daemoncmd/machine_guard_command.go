@@ -20,12 +20,14 @@ func AddMachineGuardCommand(root *cobra.Command) {
 		if err != nil {
 			return err
 		}
-		if err := machineguard.Install(cmd.Context(), executable); err != nil {
+		domain, _ := cmd.Flags().GetString("browser-domain")
+		if err := machineguard.Install(cmd.Context(), executable, domain); err != nil {
 			return err
 		}
 		return writeDaemonCommandResult(cmd, map[string]any{"installed": true}, "Machine guard installed.")
 	}}
 	install.Flags().Bool("json", false, "print JSON")
+	install.Flags().String("browser-domain", "", "local access domain of the Paperboat server (kept when already recorded)")
 	uninstall := newMachineGuardUninstallCommand(machineguard.Uninstall)
 	command.AddCommand(run, install, uninstall)
 	addMachineGuardPlatformCommands(command)

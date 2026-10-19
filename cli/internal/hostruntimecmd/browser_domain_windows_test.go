@@ -25,7 +25,7 @@ func TestBrowserDomainDispatchBindsPayloadOwnerToRequester(t *testing.T) {
 		{name: "missing requester owner", payloadSID: requesterSID},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			payload, err := json.Marshal(BrowserDomainRequest{Owner: test.payloadSID, Domain: "apps.local.pprbt.dev"})
+			payload, err := json.Marshal(BrowserDomainRequest{Owner: test.payloadSID, Domain: "apps.local.example.test"})
 			if err != nil {
 				t.Fatal(err)
 			}

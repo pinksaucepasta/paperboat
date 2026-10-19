@@ -20,7 +20,11 @@ type cachedCertificate struct {
 }
 
 func (g *guardServer) certificate(ctx context.Context, conn controlConn, owner, hostname string) (*CertificateBundle, error) {
-	domain, err := selectedBrowserDomain(g.cfg.StateDir, owner)
+	domains, err := loadBrowserDomains(g.cfg.StateDir)
+	if err != nil {
+		return nil, err
+	}
+	domain, err := domains.selected(owner)
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +71,7 @@ func (g *guardServer) certificate(ctx context.Context, conn controlConn, owner, 
 	}
 	ca := g.ca
 	g.mu.Unlock()
-	if domain != splitdns.BrowserSuffix {
+	if domain != domains.Default {
 		ca, err = prepareNamespaceCA(g.cfg.StateDir, domain, true)
 		if err != nil {
 			return nil, err
@@ -192,15 +196,19 @@ func prepareNamespaceCA(state, domain string, existingOnly bool) (*splitdns.CA, 
 	return ca, nil
 }
 func (g *guardServer) prepareLocalCA(ctx context.Context) error {
-	approved, err := approvedBrowserDomains(g.cfg.StateDir)
+	domains, err := loadBrowserDomains(g.cfg.StateDir)
 	if err != nil {
 		return err
 	}
-	ca, err := prepareNamespaceCA(g.cfg.StateDir, splitdns.BrowserSuffix, false)
-	if err != nil {
-		return err
+	var ca *splitdns.CA
+	var active []byte
+	if domains.Default != "" {
+		if ca, err = prepareNamespaceCA(g.cfg.StateDir, domains.Default, false); err != nil {
+			return err
+		}
+		active = ca.CertPEM()
 	}
-	if err := cleanupHistoricalTrustExcept(ctx, g.cfg, ca.CertPEM()); err != nil {
+	if err := cleanupHistoricalTrustExcept(ctx, g.cfg, active); err != nil {
 		return err
 	}
 	// The CA is complete once generated. Only system trust installation may be
@@ -208,23 +216,23 @@ func (g *guardServer) prepareLocalCA(ctx context.Context) error {
 	g.ca = ca
 	g.trustReady = false
 	var trustErr error
-	for domain := range approved {
-		active := ca
-		if domain != splitdns.BrowserSuffix {
-			active, err = prepareNamespaceCA(g.cfg.StateDir, domain, false)
+	for domain := range domains.approved() {
+		current := ca
+		if domain != domains.Default {
+			current, err = prepareNamespaceCA(g.cfg.StateDir, domain, false)
 			if err != nil {
 				return err
 			}
 		}
 		// One failed trust request stops further OS trust prompts for this run.
 		if trustErr == nil {
-			trustErr = installLocalTrust(ctx, g.cfg, active.CertPEM())
+			trustErr = installLocalTrust(ctx, g.cfg, current.CertPEM())
 		}
 	}
 	if trustErr != nil {
 		return trustErr
 	}
-	g.trustReady = true
+	g.trustReady = domains.Default != ""
 	return nil
 }
 

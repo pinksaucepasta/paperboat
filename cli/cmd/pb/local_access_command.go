@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strconv"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/internal/machineguard"
 	"github.com/pinksaucepasta/paperboat/internal/splitdns"
 	"github.com/spf13/cobra"
 )
@@ -193,7 +195,29 @@ func applyLocalAccessChange(command *cobra.Command, cfg *config.Config, next con
 	return nil
 }
 
+// effectiveLocalAccessDomain is the domain local URLs use: the configured one,
+// else the deployment's, which the machine guard records when it is installed.
+func effectiveLocalAccessDomain(ctx context.Context, cfg *config.Config) string {
+	if cfg.LocalAccess.Domain != "" {
+		return cfg.LocalAccess.Domain
+	}
+	guard, err := machineguard.Connect(ctx, machineguard.DefaultSocket)
+	if err != nil {
+		return ""
+	}
+	defer guard.Close()
+	status, err := guard.Status(ctx)
+	if err != nil {
+		return ""
+	}
+	return status.BrowserDomain
+}
+
 func writeLocalAccessShow(command *cobra.Command, cfg *config.Config) error {
+	domain := effectiveLocalAccessDomain(command.Context(), cfg)
+	if domain == "" {
+		domain = "(not set up; run pb install)"
+	}
 	if jsonOutput, _ := command.Flags().GetBool("json"); jsonOutput {
 		if err := writeCLIJSON(command.OutOrStdout(), map[string]any{
 			"path": cfg.Path(), "local_access": cfg.LocalAccess,
@@ -202,7 +226,7 @@ func writeLocalAccessShow(command *cobra.Command, cfg *config.Config) error {
 		}
 		return nil
 	}
-	if _, err := fmt.Fprintf(command.OutOrStdout(), "domain: %s\nservice_aliases:\n", cfg.LocalAccess.Domain); err != nil {
+	if _, err := fmt.Fprintf(command.OutOrStdout(), "domain: %s\nservice_aliases:\n", domain); err != nil {
 		return localAccessFailure("local access settings view could not be written", err)
 	}
 	if len(cfg.LocalAccess.ServiceAliases) == 0 {
@@ -219,7 +243,7 @@ func writeLocalAccessShow(command *cobra.Command, cfg *config.Config) error {
 		return localAccessFailure("local access settings view could not be written", err)
 	}
 	for _, proxy := range cfg.LocalAccess.MachineProxies {
-		if _, err := fmt.Fprintf(command.OutOrStdout(), "  *.%s.%s -> port %d (numeric ports and explicit aliases take priority)\n", proxy.MachineAlias, cfg.LocalAccess.Domain, proxy.Port); err != nil {
+		if _, err := fmt.Fprintf(command.OutOrStdout(), "  *.%s.%s -> port %d (numeric ports and explicit aliases take priority)\n", proxy.MachineAlias, domain, proxy.Port); err != nil {
 			return localAccessFailure("local access settings view could not be written", err)
 		}
 	}

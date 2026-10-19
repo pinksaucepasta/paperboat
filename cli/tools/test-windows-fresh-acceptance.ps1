@@ -46,7 +46,8 @@ param(
 
     [string]$PbPath = '',
     [string]$InstallerPath = '',
-    [string]$Server = 'https://api.pprbt.dev',
+    [string]$Server = '',
+    [string]$InstallerHost = '',
     [string]$TUFUrl = '',
     [string]$ExpectedVersion = '',
     [string]$MachineName = '',
@@ -680,13 +681,16 @@ function Read-EnrollmentBootstrap([string]$Path) {
     # not parse or print that value; extract only the exact HTTPS endpoint from
     # either the URL itself, its p= field, or the dashboard's generated
     # PowerShell command.
-    $urlMatches = [regex]::Matches($content, '(?i)https://get\.pprbt\.dev/install\?p=[A-Za-z0-9-]+')
+    if ([string]::IsNullOrWhiteSpace($InstallerHost)) {
+        Fail 'InstallerHost (the get host of the deployment) is required with EnrollmentBootstrapFile.'
+    }
+    $urlMatches = [regex]::Matches($content, '(?i)https://' + [regex]::Escape($InstallerHost) + '/install\?p=[A-Za-z0-9-]+')
     if ($urlMatches.Count -eq 1) {
         $url = $urlMatches[0].Value
     } elseif ($content -match '^p=([A-Za-z0-9-]+)$') {
         # A protected capture containing only the dashboard's p= field is also
         # accepted, which lets an operator avoid storing the whole command.
-        $url = 'https://get.pprbt.dev/install?' + $content
+        $url = 'https://' + $InstallerHost + '/install?' + $content
     } else {
         Fail 'EnrollmentBootstrapFile must contain exactly one dashboard enrollment URL, p= field, or command.'
     }
@@ -695,7 +699,7 @@ function Read-EnrollmentBootstrap([string]$Path) {
     } catch {
         Fail 'The dashboard enrollment URL is invalid.'
     }
-    if ($uri.Scheme -cne 'https' -or $uri.Host -cne 'get.pprbt.dev' -or
+    if ($uri.Scheme -cne 'https' -or $uri.Host -cne $InstallerHost -or
         $uri.AbsolutePath -cne '/install' -or $uri.Fragment -ne '' -or
         $uri.Query -notmatch '^\?p=([A-Za-z0-9-]+)$') {
         Fail 'The dashboard enrollment URL is not an approved protected bootstrap endpoint.'

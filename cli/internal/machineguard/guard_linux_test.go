@@ -23,13 +23,13 @@ import (
 )
 
 func TestMachineGuardValidation(t *testing.T) {
-	for _, name := range []string{"office.local.pprbt.dev", "studio-1.local.pprbt.dev", splitdns.BrowserGatewayHostname} {
-		if !validName(name) {
+	for _, name := range []string{"office.local.example.test", "studio-1.local.example.test"} {
+		if !validName(name, testBrowserDomain) {
 			t.Fatalf("valid name rejected: %s", name)
 		}
 	}
-	for _, name := range []string{"office.com", "Office.local.pprbt.dev", "a.b.local.pprbt.dev", "office.pprbt", "-bad.local.pprbt.dev"} {
-		if validName(name) {
+	for _, name := range []string{"office.com", "Office.local.example.test", "a.b.local.example.test", "office.pprbt", "-bad.local.example.test", "office.example.test", "gateway.local.example.test", splitdns.BrowserGatewayHostname} {
+		if validName(name, testBrowserDomain) {
 			t.Fatalf("unsafe name accepted: %s", name)
 		}
 	}
@@ -169,7 +169,7 @@ func TestLinuxMachineGuardNamespace(t *testing.T) {
 	address := netip.MustParseAddr("127.100.23.45")
 	const port = 48086
 	destination := net.JoinHostPort(address.String(), fmt.Sprint(port))
-	listener, err := client.Acquire(t.Context(), "office.local.pprbt.dev", address, port)
+	listener, err := client.Acquire(t.Context(), "office.local.example.test", address, port)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +184,7 @@ func TestLinuxMachineGuardNamespace(t *testing.T) {
 			go func() { defer conn.Close(); _, _ = io.Copy(conn, conn) }()
 		}
 	}()
-	if err = client.ReplaceNames(t.Context(), map[string]netip.Addr{"office.local.pprbt.dev": address}); err != nil {
+	if err = client.ReplaceNames(t.Context(), map[string]netip.Addr{"office.local.example.test": address}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -274,7 +274,7 @@ func TestLinuxMachineGuardNamespace(t *testing.T) {
 	wildcard.Close()
 	// A distinct controller cannot steal an active socket; old connection closure
 	// never releases a replacement's listener. Recovery retains durable reservations.
-	listener, err = client.Acquire(t.Context(), "office.local.pprbt.dev", address, port)
+	listener, err = client.Acquire(t.Context(), "office.local.example.test", address, port)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -282,7 +282,7 @@ func TestLinuxMachineGuardNamespace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if extra, err := other.Acquire(t.Context(), "office.local.pprbt.dev", address, port); err == nil {
+	if extra, err := other.Acquire(t.Context(), "office.local.example.test", address, port); err == nil {
 		extra.Close()
 		t.Fatal("second controller stole listener")
 	}
@@ -322,7 +322,7 @@ func TestLinuxMachineGuardNamespace(t *testing.T) {
 		t.Fatal(err)
 	}
 	for len(journal.Names) < 4096 {
-		journal.Names[fmt.Sprintf("reserved%d.local.pprbt.dev", len(journal.Names))] = "0"
+		journal.Names[fmt.Sprintf("reserved%d.local.example.test", len(journal.Names))] = "0"
 	}
 	data, err = json.Marshal(journal)
 	if err != nil {
@@ -333,11 +333,11 @@ func TestLinuxMachineGuardNamespace(t *testing.T) {
 	}
 	// Restore default deny and root-owned journal after restart.
 	client, stop, done = start()
-	listener, err = client.Acquire(t.Context(), "office.local.pprbt.dev", address, port)
+	listener, err = client.Acquire(t.Context(), "office.local.example.test", address, port)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if extra, err := client.Acquire(t.Context(), "new.local.pprbt.dev", netip.MustParseAddr("127.100.23.47"), port); err == nil {
+	if extra, err := client.Acquire(t.Context(), "new.local.example.test", netip.MustParseAddr("127.100.23.47"), port); err == nil {
 		extra.Close()
 		t.Fatal("per-user permanent quota bypassed")
 	}
@@ -379,17 +379,17 @@ func TestMachineGuardOtherUserProbe(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer client.Close()
-	if stolen, err := client.Acquire(t.Context(), "office.local.pprbt.dev", netip.MustParseAddr("127.100.23.45"), 48086); err == nil {
+	if stolen, err := client.Acquire(t.Context(), "office.local.example.test", netip.MustParseAddr("127.100.23.45"), 48086); err == nil {
 		stolen.Close()
 		t.Fatal("foreign owner stole reserved name/address")
 	}
 	otherIP := netip.MustParseAddr("127.100.23.46")
-	listener, err := client.Acquire(t.Context(), "studio.local.pprbt.dev", otherIP, 48086)
+	listener, err := client.Acquire(t.Context(), "studio.local.example.test", otherIP, 48086)
 	if err != nil {
 		t.Fatalf("disjoint OS-user listener: %v", err)
 	}
 	defer listener.Close()
-	if err = client.ReplaceNames(t.Context(), map[string]netip.Addr{"studio.local.pprbt.dev": otherIP}); err != nil {
+	if err = client.ReplaceNames(t.Context(), map[string]netip.Addr{"studio.local.example.test": otherIP}); err != nil {
 		t.Fatal(err)
 	}
 	ready := make(chan error, 1)

@@ -14,31 +14,33 @@ import (
 	"golang.org/x/net/publicsuffix"
 )
 
-func TestPublicBrowserNamespaceRejectsForeignNames(t *testing.T) {
-	host, err := BrowserHostname("hp", 6767, BrowserSuffix)
-	if err != nil || host != "6767.hp.local.pprbt.dev" || !IsPublicBrowserHostname(host) {
+func TestBrowserNamespaceRejectsForeignNames(t *testing.T) {
+	host, err := BrowserHostname("hp", 6767, testBrowserDomain)
+	if err != nil {
 		t.Fatalf("public hostname %q: %v", host, err)
 	}
-	for _, bad := range []string{"06767.hp.local.pprbt.dev", "0.hp.local.pprbt.dev", "6767.hp.local.pprbt.dev.evil", "6767.hp.pprbt.dev", BrowserGatewayHostname} {
-		if IsPublicBrowserHostname(bad) {
+	if machine, label, err := ParseBrowserHostname(host, testBrowserDomain); err != nil || machine != "hp" || label != "6767" {
+		t.Fatalf("parsed %q = %q, %q: %v", host, machine, label, err)
+	}
+	for _, bad := range []string{"06767.hp.local.example.test", "0.hp.local.example.test", "6767.hp.local.example.test.evil", "6767.hp.example.test", BrowserGatewayHostname} {
+		if _, _, err := ParseBrowserHostname(bad, testBrowserDomain); err == nil {
 			t.Fatalf("accepted %q", bad)
 		}
 	}
-
 }
 
 func TestBrowserHostsUseSelectedPortMachineNames(t *testing.T) {
-	a, err := BrowserHostname("machine", 3000, BrowserSuffix)
+	a, err := BrowserHostname("machine", 3000, testBrowserDomain)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, _ := BrowserHostname("machine", 3001, BrowserSuffix)
-	again, _ := BrowserHostname("machine", 3000, BrowserSuffix)
-	if a != again || a == b || a != "3000.machine.local.pprbt.dev" || b != "3001.machine.local.pprbt.dev" {
+	b, _ := BrowserHostname("machine", 3001, testBrowserDomain)
+	again, _ := BrowserHostname("machine", 3000, testBrowserDomain)
+	if a != again || a == b || a != "3000.machine.local.example.test" || b != "3001.machine.local.example.test" {
 		t.Fatalf("bad stable browser names: %s %s", a, b)
 	}
 	for _, host := range []string{a, b} {
-		if site, err := publicsuffix.EffectiveTLDPlusOne(host); err != nil || site != "pprbt.dev" {
+		if site, err := publicsuffix.EffectiveTLDPlusOne(host); err != nil || site != "example.test" {
 			t.Fatalf("selected nested naming site %q: %v", site, err)
 		}
 	}
@@ -52,7 +54,7 @@ func TestBrowserHostsUseSelectedPortMachineNames(t *testing.T) {
 
 func TestProxyRejectsUnregisteredHostSNIAndCrossSiteAuthorityBeforeDial(t *testing.T) {
 	dialed, issued := 0, 0
-	p, err := NewProxy(ProxyConfig{Routes: map[string]BrowserRoute{"3000.first.local.pprbt.dev": {Address: netip.MustParseAddr("127.100.1.2"), Port: 3000}}, DialContext: func(context.Context, string, string) (net.Conn, error) {
+	p, err := NewProxy(ProxyConfig{Domain: testBrowserDomain, Routes: map[string]BrowserRoute{"3000.first.local.example.test": {Address: netip.MustParseAddr("127.100.1.2"), Port: 3000}}, DialContext: func(context.Context, string, string) (net.Conn, error) {
 		dialed++
 		return nil, errors.New("unexpected dial")
 	}, IssueCertificate: func(context.Context, string) (tls.Certificate, error) {
@@ -62,7 +64,7 @@ func TestProxyRejectsUnregisteredHostSNIAndCrossSiteAuthorityBeforeDial(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, host := range []string{"unknown.pprbt", "4000.other.pprbt", "3000.3000.first.local.pprbt.dev", "child.3000.first.local.pprbt.dev", "3000.first.local.pprbt.dev.evil"} {
+	for _, host := range []string{"unknown.pprbt", "4000.other.pprbt", "3000.3000.first.local.example.test", "child.3000.first.local.example.test", "3000.first.local.example.test.evil"} {
 		req := httptest.NewRequest(http.MethodGet, "http://"+host+"/", nil)
 		rec := httptest.NewRecorder()
 		p.ServeHTTP(rec, req)
@@ -73,7 +75,7 @@ func TestProxyRejectsUnregisteredHostSNIAndCrossSiteAuthorityBeforeDial(t *testi
 			t.Fatalf("unknown SNI accepted %s", host)
 		}
 	}
-	req := httptest.NewRequest(http.MethodGet, "https://3000.first.local.pprbt.dev/", nil)
+	req := httptest.NewRequest(http.MethodGet, "https://3000.first.local.example.test/", nil)
 	req.TLS = &tls.ConnectionState{ServerName: "other.pprbt"}
 	rec := httptest.NewRecorder()
 	p.ServeHTTP(rec, req)
@@ -87,19 +89,19 @@ func TestProxyRebuildsForwardedMetadataFromActualRequest(t *testing.T) {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { observed <- r.Header.Clone(); w.WriteHeader(204) }))
 	defer backend.Close()
 	address := backend.Listener.Addr().(*net.TCPAddr)
-	p, err := NewProxy(ProxyConfig{Routes: map[string]BrowserRoute{"3000.site.local.pprbt.dev": {Address: netip.MustParseAddr("127.0.0.1"), Port: address.Port}}, DialContext: (&net.Dialer{}).DialContext})
+	p, err := NewProxy(ProxyConfig{Domain: testBrowserDomain, Routes: map[string]BrowserRoute{"3000.site.local.example.test": {Address: netip.MustParseAddr("127.0.0.1"), Port: address.Port}}, DialContext: (&net.Dialer{}).DialContext})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, secure := range []bool{false, true} {
-		req := httptest.NewRequest(http.MethodGet, "http://3000.site.local.pprbt.dev/", nil)
+		req := httptest.NewRequest(http.MethodGet, "http://3000.site.local.example.test/", nil)
 		req.Header.Set("Forwarded", "for=attacker;proto=evil")
 		req.Header.Set("X-Forwarded-For", "attacker")
 		req.Header.Set("X-Forwarded-Host", "attacker.example")
 		req.Header.Set("X-Forwarded-Proto", "evil")
 		want := "http"
 		if secure {
-			req.TLS = &tls.ConnectionState{ServerName: "3000.site.local.pprbt.dev"}
+			req.TLS = &tls.ConnectionState{ServerName: "3000.site.local.example.test"}
 			want = "https"
 		}
 		rec := httptest.NewRecorder()
@@ -108,7 +110,7 @@ func TestProxyRebuildsForwardedMetadataFromActualRequest(t *testing.T) {
 			t.Fatalf("status=%d", rec.Code)
 		}
 		headers := <-observed
-		if headers.Get("Forwarded") != "" || strings.Contains(headers.Get("X-Forwarded-For"), "attacker") || headers.Get("X-Forwarded-Host") != "3000.site.local.pprbt.dev" || headers.Get("X-Forwarded-Proto") != want {
+		if headers.Get("Forwarded") != "" || strings.Contains(headers.Get("X-Forwarded-For"), "attacker") || headers.Get("X-Forwarded-Host") != "3000.site.local.example.test" || headers.Get("X-Forwarded-Proto") != want {
 			t.Fatalf("spoofed forwarding metadata: %v", headers)
 		}
 	}
@@ -117,7 +119,7 @@ func TestProxyRebuildsForwardedMetadataFromActualRequest(t *testing.T) {
 // Applying local browser configuration can stop a newly created gateway before
 // its serving goroutines have been scheduled.
 func TestProxyImmediateStopAndRestartKeepsListenerOwnership(t *testing.T) {
-	p, err := NewProxy(ProxyConfig{HTTPListenAddr: "127.0.0.1:0", HTTPSListenAddr: "127.0.0.1:0", DialContext: (&net.Dialer{}).DialContext, IssueCertificate: func(context.Context, string) (tls.Certificate, error) { return tls.Certificate{}, errors.New("unused") }})
+	p, err := NewProxy(ProxyConfig{Domain: testBrowserDomain, HTTPListenAddr: "127.0.0.1:0", HTTPSListenAddr: "127.0.0.1:0", DialContext: (&net.Dialer{}).DialContext, IssueCertificate: func(context.Context, string) (tls.Certificate, error) { return tls.Certificate{}, errors.New("unused") }})
 	if err != nil {
 		t.Fatal(err)
 	}

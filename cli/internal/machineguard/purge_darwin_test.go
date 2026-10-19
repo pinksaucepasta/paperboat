@@ -265,7 +265,7 @@ func TestPurgeDarwinRetiresOwnedLegacyStateWithoutRemovingForeignState(t *testin
 					t.Fatal(err)
 				}
 			case "bad-certificate":
-				dir := filepath.Join(f.paths.LegacyStateDir, "certificates", "local.pprbt.dev")
+				dir := filepath.Join(f.paths.LegacyStateDir, "certificates", "local.example.test")
 				if err := os.Mkdir(dir, 0700); err != nil {
 					t.Fatal(err)
 				}
@@ -414,7 +414,7 @@ func TestPurgeDarwinRetiresOrphanCertificatesInIsolatedKeychain(t *testing.T) {
 	if err := exec.Command("/usr/bin/security", "unlock-keychain", "-p", "task-owned-fixture", keychain).Run(); err != nil {
 		t.Fatal(err)
 	}
-	owned, err := splitdns.LoadOrCreateConstrainedCA(filepath.Join(root, "historical"), "local.pprbt.dev")
+	owned, err := splitdns.LoadOrCreateConstrainedCA(filepath.Join(root, "historical"), "local.example.test")
 	if err != nil {
 		t.Fatal(err)
 	}

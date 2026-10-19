@@ -183,7 +183,7 @@ up before its authorized reset, and the release-readiness plan records recovery.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](../LICENSE).
 
 ### Browser session policy
 

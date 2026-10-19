@@ -48,11 +48,11 @@ func TestDarwinGuardOtherUser(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer client.Close()
-	if listener, err := client.Acquire(ctx, "office.local.pprbt.dev", netip.MustParseAddr("127.100.253.68"), 54370); err == nil {
+	if listener, err := client.Acquire(ctx, "office.local.example.test", netip.MustParseAddr("127.100.253.68"), 54370); err == nil {
 		listener.Close()
 		t.Fatal("foreign name/address reservation stolen")
 	}
-	listener, err := client.Acquire(ctx, "other.local.pprbt.dev", netip.MustParseAddr("127.100.253.69"), 54370)
+	listener, err := client.Acquire(ctx, "other.local.example.test", netip.MustParseAddr("127.100.253.69"), 54370)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +157,7 @@ func TestDarwinGuardKernel(t *testing.T) {
 	}
 	defer client.Close()
 	address := netip.MustParseAddr("127.100.253.68")
-	listener, err := client.Acquire(ctx, "office.local.pprbt.dev", address, 54369)
+	listener, err := client.Acquire(ctx, "office.local.example.test", address, 54369)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func TestDarwinGuardKernel(t *testing.T) {
 			go func() { defer connection.Close(); _, _ = io.Copy(connection, connection) }()
 		}
 	}()
-	if err = client.ReplaceNames(ctx, map[string]netip.Addr{"office.local.pprbt.dev": address}); err != nil {
+	if err = client.ReplaceNames(ctx, map[string]netip.Addr{"office.local.example.test": address}); err != nil {
 		t.Fatal(err)
 	}
 	echo := func() {

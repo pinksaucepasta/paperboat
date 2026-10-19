@@ -52,7 +52,7 @@ func TestDarwinUninstallOwnedLifecycle(t *testing.T) {
 	if err := os.Mkdir(darwinResolverDirectory, 0755); err != nil {
 		t.Fatal(err)
 	}
-	ownedRoot := createOwnedRootFixture(t, state, "local.pprbt.dev")
+	ownedRoot := createOwnedRootFixture(t, state, "local.example.test")
 	trustDirectory := filepath.Join(state, "trusted-ca")
 	if err := os.Mkdir(trustDirectory, 0700); err != nil {
 		t.Fatal(err)
