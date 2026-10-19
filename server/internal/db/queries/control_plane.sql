@@ -1464,7 +1464,10 @@ SELECT a.assignment_id,
        a.edge_process_epoch,
        a.edge_failure_domain,
        CASE WHEN r.protocol = 'private_tcp' THEN 'tunnel_private_tcp' WHEN r.protocol = 'tcp' THEN 'tunnel_tcp' WHEN r.protocol = 'tls' THEN 'tunnel_tls' ELSE 'tunnel_http_wss' END AS kind,
-       (CASE WHEN r.match_type = 'one_label_wildcard' THEN '*.' || r.wildcard_suffix ELSE COALESCE(r.match_hostname, '') END)::text AS public_host,
+       -- An HTTP catch-all route has no hostname of its own: it answers on the tunnel's endpoint host.
+       (CASE WHEN r.match_type = 'one_label_wildcard' THEN '*.' || r.wildcard_suffix
+             WHEN r.match_type = 'catch_all' AND r.protocol = 'http' THEN substring(t.stable_endpoint from 9)
+             ELSE COALESCE(r.match_hostname, '') END)::text AS public_host,
        r.match_type,
        r.match_hostname,
        r.wildcard_suffix,

@@ -570,3 +570,56 @@ func sameTunnelEdgeAcceptanceDatabase(left, right string) bool {
 	r, re := url.Parse(right)
 	return le == nil && re == nil && strings.EqualFold(l.Hostname(), r.Hostname()) && l.Port() == r.Port() && strings.TrimPrefix(l.Path, "/") == strings.TrimPrefix(r.Path, "/")
 }
+
+// An HTTP catch-all route has no hostname of its own; the edge refuses a catch-all with an empty
+// public host (route_invalid), which failed every route reconcile on the edge and left a tunnel
+// with a second route pending forever. The projection gives it the tunnel's endpoint host.
+func TestCatchAllRouteIsProjectedOnTheTunnelEndpointHostOnPostgres(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("PAPERBOAT_TEST_DATABASE_DSN"))
+	if dsn == "" {
+		t.Skip("set PAPERBOAT_TEST_DATABASE_DSN to run the PostgreSQL acceptance")
+	}
+	if err := db.ValidateIsolatedTestDSN(dsn, os.Getenv("PAPERBOAT_DATABASE_DSN")); err != nil || !safeTunnelEdgeAcceptanceDSN(dsn) {
+		t.Fatalf("PAPERBOAT_TEST_DATABASE_DSN must name an isolated *_test database: %v", err)
+	}
+	ctx := context.Background()
+	database, err := db.Open(config.Database{Driver: "postgres", DSN: dsn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Migrate(ctx, database); err != nil {
+		_ = database.Close()
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	fixture := newTunnelEdgeAcceptanceFixture(fmt.Sprintf("%d", time.Now().UnixNano()), now)
+	t.Cleanup(func() {
+		_, _ = database.SQL().ExecContext(ctx, `DELETE FROM paperboat.users WHERE id=$1`, fixture.accountID)
+		_, _ = database.SQL().ExecContext(ctx, `DELETE FROM paperboat.control_tunnel_nodes WHERE id=$1`, fixture.nodeID)
+		_ = database.Close()
+	})
+	fixture.insertBase(t, database)
+	fixture.insertConnector(t, database, fixture.connectorOne, fixture.hostOne, fixture.sessionOne, 11)
+	fixture.markConnectorPreReady(t, database, fixture.connectorOne, fixture.sessionOne)
+	if _, err := database.SQL().ExecContext(ctx, `UPDATE paperboat.tunnels SET access_mode='private' WHERE id=$1`, fixture.tunnelID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.SQL().ExecContext(ctx, `UPDATE paperboat.tunnel_routes SET match_type='catch_all', match_hostname=NULL, path_prefix='/two' WHERE id=$1`, fixture.routeID); err != nil {
+		t.Fatal(err)
+	}
+	service := &EdgeService{store: database, clock: func() time.Time { return now }}
+	if staged, err := service.ReconcileTunnelEdgeRouteAssignments(ctx, 10); err != nil || staged != 1 {
+		t.Fatalf("reconcile = %d, %v; want the catch-all route staged", staged, err)
+	}
+	rows, err := service.ListTunnelEdgeRouteAssignmentsForNodeV1(ctx, fixture.nodeID, fixture.epoch)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("edge snapshot = %d, %v", len(rows), err)
+	}
+	var endpoint string
+	if err := database.SQL().QueryRowContext(ctx, `SELECT stable_endpoint FROM paperboat.tunnels WHERE id=$1`, fixture.tunnelID).Scan(&endpoint); err != nil {
+		t.Fatal(err)
+	}
+	if want := strings.TrimPrefix(endpoint, "https://"); rows[0].PublicHost != want || rows[0].MatchType != "catch_all" || rows[0].MatchHostname.Valid {
+		t.Fatalf("catch-all projected as host=%q match=%q hostname=%v, want host %q", rows[0].PublicHost, rows[0].MatchType, rows[0].MatchHostname, want)
+	}
+}
