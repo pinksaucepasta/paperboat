@@ -1,6 +1,6 @@
 # Configuration sync
 
-All targets are machines/machines. Configuration sync has one authoritative TOML file
+All targets are machines. Configuration sync has one authoritative TOML file
 per machine and one optional shared file in the repository. Run `pb config sync path`
 to find the machine file. Shared defaults belong in `.paperboat/config-sync.toml`.
 Both use the v1 format; an empty or comment-only file is valid. No additional include/ignore files

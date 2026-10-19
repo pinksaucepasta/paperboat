@@ -7,7 +7,7 @@ versioned `User-Agent`. Unsupported protocols must be rejected with HTTP 426 or
 retry.
 
 - Never put machine, access, or refresh tokens in URLs or logs.
-- A rejected session requires enrollment using the command from the dashboard; there is no local-shell fallback.
+- A rejected session requires signing in again with `pb login` (or the enrollment command from the dashboard); there is no local-shell fallback.
 - Upload failures are fail-open only for the affected paste. Image bytes and paths are never logged.
 - For a stolen machine, revoke its client session in the dashboard, then run `pb auth logout`.
 - During outages, use `pb doctor`; never bypass the common Paperboat transport or expose a raw
@@ -126,17 +126,18 @@ Enrollment derives a stable label, avoids reserved Paperboat command and infrast
 names, and allocates deterministic `-2`, `-3`, and later suffixes under account-scoped
 transaction serialization. Local inventory rejects absent or malformed aliases.
 
-Managed SSH uses the canonical OpenSSH host `<machine>.ppr.boats`. SSH aliases are
+Managed SSH uses the canonical OpenSSH host `<machine>.<local access domain>` (the local access
+domain is the one your Paperboat server publishes, `ppr.boats` on the hosted service; `pb config local-access show` prints it). SSH aliases are
 handled by the installed Paperboat `ProxyCommand`; they do not depend on local DNS or the
 browser gateway. `pb ssh <machine>` delegates to the system OpenSSH client as
-`<setup-user>@<machine>.ppr.boats`, where the setup user is the operating-system account that
+`<setup-user>@<machine>.<local access domain>`, where the setup user is the operating-system account that
 ran `pb setup`. That registered user is an authorization boundary: an explicit username
 is accepted only when it exactly matches the registered target, and any other username
-fails before the SSH stream opens. The installed `Host *.ppr.boats` configuration uses the
+fails before the SSH stream opens. The installed `Host *.<local access domain>` configuration uses the
 same ProxyCommand, public selector for the credential-store-backed managed identity, and
 strict host-key source for native `ssh`, `scp`, `sftp`, `rsync`, Git-over-SSH, and OpenSSH
 forwarding. Native ecosystem commands should spell the registered user explicitly, for
-example `scp file root@hn.ppr.boats:/tmp/file`.
+example `scp file root@hn.<local access domain>:/tmp/file`.
 
 ### Native editor remoting
 
@@ -144,7 +145,7 @@ Native editors use the installed managed OpenSSH configuration. They must invoke
 system `ssh` client against the canonical host, not replace it with `pb ssh`: editor
 backends need OpenSSH's normal command, dynamic-forwarding, file-operation, and reconnect
 behavior. The daemon owns the `~/.ssh/paperboat_config` include, the per-machine
-`<alias>.ppr.boats` target block, the Paperboat `ProxyCommand`, the managed identity agent,
+`<alias>.<local access domain>` target block, the Paperboat `ProxyCommand`, the managed identity agent,
 and the generation-bound `KnownHostsCommand`.
 
 The setup flow is:
@@ -154,7 +155,7 @@ The setup flow is:
    display name. `pb ssh doctor <machine>` checks OpenSSH parsing, the managed agent,
    current host-key authority, and the native SSH path.
 2. In the editor's native SSH or remote-development connection flow, select
-   `<registered-os-user>@<alias>.ppr.boats`. Keep the editor on its normal system OpenSSH
+   `<registered-os-user>@<alias>.<local access domain>`. Keep the editor on its normal system OpenSSH
    executable so it reads the Paperboat include and preserves OpenSSH forwarding.
 3. Allow the editor to start its remote backend in a task-owned workspace. Verify a
    file create/edit/save/reopen, one editor port-forward, and a reconnect after the
