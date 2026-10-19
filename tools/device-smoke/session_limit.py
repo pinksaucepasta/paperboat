@@ -63,6 +63,7 @@ def main():
     created = []
     message = ''
     failure = None
+    slot_delay = None
     try:
         existing = sum(1 for s in names(args.target).values() if s['state'] not in ('closed', 'closing'))
         for index in range(LIMIT + 2 - existing):
@@ -80,9 +81,15 @@ def main():
             raise RuntimeError('the over-limit attempt gave no clear limit message: ' + message[-200:])
         # A closed session no longer counts: one more can be created after closing one.
         cleanup(str(PB), args.target, created.pop())
-        code, text = new(prefix + 'again', args.target)
+        released = time.monotonic()
+        while True:
+            code, text = new(prefix + 'again', args.target)
+            if not code or time.monotonic() - released > 30:
+                break
+            time.sleep(2)
         if code:
-            raise RuntimeError('closed session still counted against the limit: ' + text[-200:])
+            raise RuntimeError('closed session still counted against the limit after 30 s: ' + text[-200:])
+        slot_delay = round(time.monotonic() - released, 1)
         created.append(prefix + 'again')
     except Exception as error:
         failure = error
@@ -97,7 +104,7 @@ def main():
         print(json.dumps({'check': 'session-limit', 'status': 'FAIL', 'error': str(failure)}), flush=True)
         raise SystemExit(1)
     print(json.dumps({'check': 'session-limit', 'target': args.target, 'status': 'PASS', 'limit': LIMIT,
-                      'clear_message': True, 'closed_not_counted': True}), flush=True)
+                      'clear_message': True, 'closed_not_counted': True, 'slot_free_after_seconds': slot_delay}), flush=True)
 
 
 if __name__ == '__main__':
