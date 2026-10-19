@@ -152,6 +152,9 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 		if err != nil {
 			return rollback(fmt.Errorf("installed bundle identity could not be read: %w", err))
 		}
+		// The request sent so far named no source (a bundle's source is only known once
+		// install-supplied has unpacked it); commit-supplied must verify the installed one.
+		request = suppliedCommitRequest(request, source)
 	}
 	cfg, err := config.Load("")
 	if err != nil {
@@ -195,6 +198,15 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 	}
 	installed := filepath.Join(directory, "pb")
 	return installed, nil
+}
+
+// suppliedCommitRequest is the request for commit-supplied: the installation request with the
+// identity of the executable that was actually installed. The privileged helper verifies that
+// identity against the installed binary and its install record, so an empty or stale source
+// fails an installation that already succeeded (F14-08).
+func suppliedCommitRequest(request hostinstall.Request, installed installsource.Source) hostinstall.Request {
+	request.Source = installed
+	return request
 }
 
 // Diagnostic storage belongs to the child's effective identity. Keep the
