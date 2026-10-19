@@ -7,15 +7,19 @@ import (
 	"io"
 	"net"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
-	previewruntime "github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
+	"github.com/pinksaucepasta/paperboat/internal/daemonrpc"
+	daemonpb "github.com/pinksaucepasta/paperboat/internal/daemonrpc/proto"
 	"github.com/pinksaucepasta/paperboat/internal/privatepreviewproxy"
+	"github.com/pinksaucepasta/paperboat/internal/resolver"
 	"github.com/spf13/cobra"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const accessMachineMaximumConnections = 128
@@ -38,21 +42,33 @@ type accessMachineResult struct {
 	ListenAddress string `json:"listen_address"`
 }
 
-type productionAccessMachineRuntime struct {
-	access *previewruntime.NativePrivateTCPAccess
-	close  func() error
+// machineLocator is the local daemon's view of the machines it reaches. The daemon owns the
+// machine's native peer identity, so a second process must not open its own peer session.
+type machineLocator interface {
+	ResolveMachine(context.Context, string) (*daemonpb.MachineAddress, error)
+	Close() error
 }
 
-func (r *productionAccessMachineRuntime) DialMachine(ctx context.Context, machineID string, port int) (net.Conn, error) {
-	return r.access.DialMachine(ctx, machineID, port)
+var newAccessMachineLocator = func(ctx context.Context) (machineLocator, error) {
+	return daemonrpc.NewClient(ctx, "")
 }
 
-func (r *productionAccessMachineRuntime) Close() error {
-	if r == nil || r.close == nil {
-		return nil
+// daemonAccessMachineRuntime reaches a machine service through the daemon's assigned-address
+// forward, which carries the same per-connection exact-port grant as `pb access` itself.
+type daemonAccessMachineRuntime struct {
+	locator machineLocator
+}
+
+func (r *daemonAccessMachineRuntime) DialMachine(ctx context.Context, machineID string, port int) (net.Conn, error) {
+	address, err := r.locator.ResolveMachine(ctx, machineID)
+	if err != nil {
+		return nil, err
 	}
-	return r.close()
+	var dialer net.Dialer
+	return dialer.DialContext(ctx, "tcp", net.JoinHostPort(address.GetAssignedIp(), strconv.Itoa(port)))
 }
+
+func (r *daemonAccessMachineRuntime) Close() error { return r.locator.Close() }
 
 func newProductionAccessMachineRuntime(command *cobra.Command, selector string) (accessMachineRuntime, string, error) {
 	commandContext := actionContext(command, []string{selector})
@@ -61,12 +77,14 @@ func newProductionAccessMachineRuntime(command *cobra.Command, selector string) 
 	if err != nil {
 		return nil, "", err
 	}
-	if dependencies.peerTunnel == nil {
+	if dependencies.peerTunnel != nil {
+		defer func() { _ = dependencies.peerTunnel.Close() }()
+	}
+	if dependencies.cfg.ServerURL == "" {
 		return nil, "", errors.New("Paperboat server is not configured; set server_url or use --server")
 	}
 	_, err = dependencies.auth.Credential()
 	if err != nil {
-		_ = dependencies.peerTunnel.Close()
 		if errors.Is(err, config.ErrNoCredentials) || errors.Is(err, config.ErrSecretNotFound) {
 			return nil, "", errors.New("Paperboat sign-in credentials are unavailable; run the enrollment command from the Paperboat dashboard, then retry")
 		}
@@ -74,27 +92,21 @@ func newProductionAccessMachineRuntime(command *cobra.Command, selector string) 
 	}
 	client, err := newWorkspaceAPIClient(commandContext, dependencies.cfg.ServerURL, dependencies.auth)
 	if err != nil {
-		_ = dependencies.peerTunnel.Close()
 		return nil, "", err
 	}
 	machine, err := resolveUserMachine(command.Context(), client, selector)
 	if err != nil {
-		_ = dependencies.peerTunnel.Close()
 		return nil, "", err
 	}
 	port, _ := command.Flags().GetInt("port")
-	if err := waitForMachineService(command.Context(), client, machine.ID, port); err != nil {
-		_ = dependencies.peerTunnel.Close()
-		return nil, "", err
-	}
-	access, err := previewruntime.NewNativePrivateTCPAccess(previewruntime.NativePrivateTCPAccessConfig{
-		Grants: client, DialSession: dependencies.peerTunnel.DialPrivateSession,
-	})
+	locator, err := newAccessMachineLocator(command.Context())
 	if err != nil {
-		_ = dependencies.peerTunnel.Close()
-		return nil, "", err
+		return nil, "", fmt.Errorf("reach the local Paperboat daemon: %w; run `pb service start` and retry", err)
 	}
-	return &productionAccessMachineRuntime{access: access, close: dependencies.peerTunnel.Close}, machine.ID, nil
+	if err := waitForMachineService(command.Context(), locator, machine.ID, port); err != nil {
+		return nil, "", errors.Join(err, locator.Close())
+	}
+	return &daemonAccessMachineRuntime{locator: locator}, machine.ID, nil
 }
 
 func accessMachineCobraCommandV1() *cobra.Command {
@@ -146,27 +158,22 @@ func runAccessMachine(command *cobra.Command, args []string) error {
 	return errors.Join(proxy.Wait(), proxy.Close(), runtime.Close())
 }
 
-// A just-started service is not grantable until the endpoint publishes it.
-// Wait on the authorized catalog; never retry a rejected access grant.
-func waitForMachineService(ctx context.Context, client *api.Client, machine string, port int) error {
+// A just-started service is reachable only once the daemon publishes its forward. Wait on the
+// daemon's own listing of the machine; a machine it does not list is offline or not approved.
+func waitForMachineService(ctx context.Context, locator machineLocator, machine string, port int) error {
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(config.PeerConnectTimeoutMilliseconds)*time.Millisecond)
 	defer cancel()
-	ticker := time.NewTicker(time.Duration(config.DefaultPollIntervalSeconds) * time.Second)
+	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
-		machines, err := client.MachineServices(ctx)
-		if err != nil {
-			return fmt.Errorf("read authorized machine services: %w", err)
-		}
-		for _, candidate := range machines {
-			if candidate.MachineID != machine || candidate.InstallationGeneration < 1 || !candidate.ExpiresAt.After(time.Now()) {
-				continue
-			}
-			for _, service := range candidate.Services {
-				if service.Port == port {
-					return nil
-				}
-			}
+		address, err := locator.ResolveMachine(ctx, machine)
+		switch {
+		case status.Code(err) == codes.NotFound:
+			return fmt.Errorf("%w: %q", resolver.ErrMachineNotFound, machine)
+		case err != nil && ctx.Err() == nil:
+			return fmt.Errorf("read the machine from the local daemon: %w", err)
+		case err == nil && slices.Contains(address.GetForwardedPorts(), int32(port)):
+			return nil
 		}
 		select {
 		case <-ctx.Done():
