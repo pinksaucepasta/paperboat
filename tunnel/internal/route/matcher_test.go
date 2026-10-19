@@ -317,3 +317,45 @@ func TestGenerationRegistryScopesCatchAllToItsHostname(t *testing.T) {
 		t.Fatal("a catch-all with a wildcard suffix was accepted")
 	}
 }
+
+// A route change elsewhere on the edge must not reset a download on a route that did not change:
+// the drain timeout used to cancel every stream on the old generation, so a 16 MiB tunnel download
+// died whenever any other route's state changed within its lifetime.
+func TestActivateGenerationKeepsStreamsOnUnchangedRoutesPastTheDrainTimeout(t *testing.T) {
+	registry := NewGenerationRegistry(8)
+	kept := matcherRule("kept", "kept.example.test", MatchExact, "/", 1)
+	kept.RouteID, kept.AccountID, kept.TunnelID, kept.ViewerPolicyGeneration = "kept", "account", "tunnel", 1
+	removed := matcherRule("removed", "removed.example.test", MatchExact, "/", 1)
+	repolicied := matcherRule("repolicied", "repolicied.example.test", MatchExact, "/", 1)
+	repolicied.ViewerPolicyGeneration = 1
+	activateMatcher(t, registry, 1, []RouteRule{kept, removed, repolicied})
+	acquire := func(host string) *StreamLease {
+		lease, _, err := registry.Acquire(context.Background(), host, "/")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return lease
+	}
+	keptLease, removedLease, repoliciedLease := acquire("kept.example.test"), acquire("removed.example.test"), acquire("repolicied.example.test")
+	next := kept
+	next.ObservedState, next.ConfigGeneration, next.Revision = "ready", 9, 4 // bookkeeping only
+	repolicied.ViewerPolicyGeneration = 2
+	added := matcherRule("added", "added.example.test", MatchExact, "/", 1)
+	err := registry.ApplyGeneration(context.Background(), 2, []RouteRule{next, repolicied, added}, func(context.Context, []RouteRule) error { return nil }, 10*time.Millisecond)
+	if !errors.Is(err, ErrDrainTimeout) {
+		t.Fatalf("drain error = %v, want a timeout that cancelled the removed and re-policied streams", err)
+	}
+	for name, lease := range map[string]*StreamLease{"removed": removedLease, "re-policied": repoliciedLease} {
+		select {
+		case <-lease.Context().Done():
+		case <-time.After(time.Second):
+			t.Fatalf("the stream on the %s route survived the drain", name)
+		}
+	}
+	select {
+	case <-keptLease.Context().Done():
+		t.Fatal("the stream on an unchanged route was cancelled by an unrelated route change")
+	case <-time.After(50 * time.Millisecond):
+	}
+	_ = keptLease.Close()
+}

@@ -443,11 +443,49 @@ func (g *GenerationRegistry) ActivateGeneration(ctx context.Context, generation 
 		old.cancel()
 		return ctx.Err()
 	case <-timer.C:
-		activeStreams := g.streamCount(old)
-		g.emitLifecycle(LifecycleDrainForced, old.generation, newState.generation, old.rules, activeStreams)
-		old.cancel()
+		cancelled := g.forceDrain(old, newState.rules)
+		if cancelled == 0 {
+			return nil
+		}
+		g.emitLifecycle(LifecycleDrainForced, old.generation, newState.generation, old.rules, cancelled)
 		return ErrDrainTimeout
 	}
+}
+
+// forceDrain ends the streams the new generation no longer authorizes and returns how many it
+// cancelled. A stream on a route the new generation keeps (same route, same connector, same access
+// policy) outlives the drain timeout: any route change on the edge used to reset every download
+// older than the timeout, including those on routes that did not change.
+func (g *GenerationRegistry) forceDrain(old *generationState, next []RouteRule) int {
+	g.mu.Lock()
+	var cancelled []*StreamLease
+	for lease := range old.leases {
+		if !streamSurvives(lease.match.Rule, next) {
+			cancelled = append(cancelled, lease)
+		}
+	}
+	g.mu.Unlock()
+	for _, lease := range cancelled {
+		_ = lease.Close()
+	}
+	return len(cancelled)
+}
+
+// streamSurvives reports whether a stream admitted under rule is still authorized by next: the same
+// route to the same connector with the same access policy and desired state. Config and observation
+// generations, readiness and assignment bookkeeping change without affecting a stream in flight.
+func streamSurvives(rule RouteRule, next []RouteRule) bool {
+	for _, candidate := range next {
+		if candidate.ID != rule.ID {
+			continue
+		}
+		return candidate.RouteID == rule.RouteID && candidate.AccountID == rule.AccountID && candidate.TunnelID == rule.TunnelID &&
+			candidate.HostID == rule.HostID && candidate.ConnectorID == rule.ConnectorID &&
+			candidate.MachineIdentityThumbprint == rule.MachineIdentityThumbprint &&
+			candidate.AccessMode == rule.AccessMode && candidate.ViewerPolicyGeneration == rule.ViewerPolicyGeneration &&
+			candidate.DesiredState == rule.DesiredState && candidate.Kind == rule.Kind && candidate.Target == rule.Target
+	}
+	return false
 }
 
 // ActivateGenerationFencedRoutes swaps the matcher generation, rejects all
