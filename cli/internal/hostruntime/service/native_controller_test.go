@@ -400,3 +400,22 @@ func TestLaunchdRemovalHonorsDeadlineWhileJobRemainsRegistered(t *testing.T) {
 		t.Fatalf("terminating job falsely removed: %v", err)
 	}
 }
+
+func TestSystemdUserInspectTreatsAbsentUserManagerAsNotRunning(t *testing.T) {
+	for _, output := range []string{
+		"Failed to connect to bus: No medium found",
+		"Failed to connect to user scope bus via local transport: No such file or directory",
+		"Failed to connect to bus: $DBUS_SESSION_BUS_ADDRESS and $XDG_RUNTIME_DIR not defined (consider using --machine=<user>@.host --user to connect to bus of other user)",
+	} {
+		runner := &outputCommandRunner{errors: []error{&CommandError{Tool: "systemctl", Output: output, Cause: errors.New("exit status 1")}}}
+		status, err := (SystemdController{Runner: runner, Unit: "paperboatd.service", User: true}).Inspect(context.Background(), "")
+		if err != nil || status.Running || status.Ready {
+			t.Fatalf("%q: status=%+v err=%v", output, status, err)
+		}
+	}
+	// The system manager being unreachable is a real failure, not "not running".
+	runner := &outputCommandRunner{errors: []error{&CommandError{Tool: "systemctl", Output: "Failed to connect to bus: No medium found", Cause: errors.New("exit status 1")}}}
+	if _, err := (SystemdController{Runner: runner, Unit: "paperboat-hostd-u1000.service"}).Inspect(context.Background(), ""); err == nil {
+		t.Fatal("an unreachable system manager was reported as not running")
+	}
+}

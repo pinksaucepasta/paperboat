@@ -145,6 +145,17 @@ func systemdUnitAbsent(err error) bool {
 	return strings.Contains(output, "unit") && (strings.Contains(output, "not loaded") || strings.Contains(output, "not found") || strings.Contains(output, "does not exist"))
 }
 
+// systemdUserManagerAbsent recognises systemctl --user on a host where the user's systemd instance is
+// not running (no login session and no lingering): the user's services cannot be running either.
+func systemdUserManagerAbsent(err error) bool {
+	var commandErr *CommandError
+	if !errors.As(err, &commandErr) {
+		return false
+	}
+	output := strings.ToLower(commandErr.Output)
+	return strings.Contains(output, "failed to connect to bus") || strings.Contains(output, "failed to connect to user scope bus")
+}
+
 type LaunchdController struct {
 	Runner     Runner
 	UID        int

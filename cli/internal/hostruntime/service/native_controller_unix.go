@@ -26,7 +26,7 @@ func (c SystemdController) Inspect(ctx context.Context, _ string) (NativeControl
 	}
 	output, err := runner.Output(operationCtx, "systemctl", arguments...)
 	if err != nil {
-		if systemdUnitAbsent(err) {
+		if systemdUnitAbsent(err) || c.User && systemdUserManagerAbsent(err) {
 			return NativeControllerStatus{}, nil
 		}
 		return NativeControllerStatus{}, err
