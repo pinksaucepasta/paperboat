@@ -23,6 +23,7 @@ import {
   originLabel,
   patchRoute,
   removeDomain,
+  removeRouteById,
   routeName,
   routesQuery,
   tunnelKeys,
@@ -339,7 +340,15 @@ function HostnameDialog({
       // Your own domain needs its DNS record and certificate; the tunnel's address has both.
       const keep = own && binding?.hostname === domain
       if (binding && !keep) await removeDomain(binding)
-      if (own && !keep) await addDomain(tunnel.id, domain, routeId)
+      if (own && !keep) {
+        try {
+          await addDomain(tunnel.id, domain, routeId)
+        } catch (error) {
+          // A route that was only just created would stay listed without DNS or a certificate.
+          if (!route) await removeRouteById(tunnel.id, routeId).catch(() => {})
+          throw error
+        }
+      }
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: tunnelKeys.routes(tunnel.id) })

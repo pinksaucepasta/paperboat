@@ -245,23 +245,10 @@ export const routeName = (hostname: string | null, path: string | null) =>
     .replace(/^[^A-Za-z0-9]+/, "")
     .slice(0, 63)
 
-/**
- * Publishes your own hostname on a tunnel, Cloudflare-style: a route sending it (and an optional
- * path) to a service, plus the domain binding that gets its DNS record and certificate.
- */
-export async function addPublicHostname(
-  tunnel: Tunnel,
-  input: { hostname: string; path: string | null; origin: RouteInput["origin"] },
-) {
-  const routeId = await createRoute(tunnel.id, {
-    name: routeName(input.hostname, input.path),
-    host_match: input.hostname.startsWith("*.")
-      ? { type: "one_label_wildcard", hostname: input.hostname, wildcard_labels: 1 }
-      : { type: "exact", hostname: input.hostname },
-    path_prefix: input.path,
-    origin: input.origin,
-  })
-  await addDomain(tunnel.id, input.hostname, routeId)
+/** Deletes a route by ID, reading the ETag it needs. */
+export async function removeRouteById(tunnelId: string, routeId: string) {
+  const route = await api<TunnelRoute>(`${tunnelPath(tunnelId)}/routes/${encodeURIComponent(routeId)}`)
+  await deleteRoute(route)
 }
 
 export const addDomain = (tunnelId: string, hostname: string, routeId: string) =>
