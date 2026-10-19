@@ -2990,29 +2990,12 @@ mode, relays, and observation timestamps.`, Example: "  pb relay list\n  pb rela
 	root.AddCommand(relay)
 	root.AddCommand(edgeCommand())
 
-	authTree := specTree(authCommand(), "auth")
-	authTree.AddCommand(workspaceSwitchCommand())
-	loginAlias, _, _ := specTree(authCommand(), "auth").Find([]string{"login"})
-	root.AddCommand(loginAlias)
-	authTree.RunE = func(command *cobra.Command, _ []string) error {
-		if !term.IsTerminal(int(os.Stdin.Fd())) {
-			return command.Help()
-		}
-		return actionHomeAccount(command)
-	}
-	root.AddCommand(authTree)
+	root.AddCommand(authLoginCommand())
+	root.AddCommand(authCobraCommand())
 	logout := &cobra.Command{Use: "logout", Short: "Revoke and remove the active client session", Args: commandArgs(cobra.NoArgs), RunE: actionRun(authLogout)}
 	logout.Flags().Bool("json", false, "print JSON")
 	root.AddCommand(logout)
-	configTree := specTree(configCommand(), "config")
-	configTree.RunE = func(command *cobra.Command, _ []string) error {
-		if !term.IsTerminal(int(os.Stdin.Fd())) {
-			return command.Help()
-		}
-		return actionHomeConfig(command)
-	}
-	configTree.AddCommand(statusBarConfigCommand(), localAccessConfigCommand(), configConflictCobraCommand(), configForceCobraCommand(), customizationCommand(), configRepositoryCobraCommand(), configSyncCobraCommand())
-	root.AddCommand(configTree)
+	root.AddCommand(configCobraCommand())
 	root.AddCommand(previewCobraCommandV1())
 	root.AddCommand(tunnelCobraCommandV1())
 	access := &cobra.Command{Use: "access", Short: "Open authenticated private access", Args: commandArgs(cobra.NoArgs)}
@@ -5105,91 +5088,6 @@ func validateConnectInvocation(command *cobra.Command) error {
 	return nil
 }
 
-func specTree(source *command.Spec, use string) *cobra.Command {
-	root := &cobra.Command{Use: use, Short: source.Usage, Args: commandArgs(cobra.NoArgs)}
-	if source.Action != nil {
-		root.RunE = actionRun(source.Action)
-	} else {
-		root.RunE = func(command *cobra.Command, _ []string) error { return command.Help() }
-	}
-	for _, child := range source.Subcommands {
-		child := child
-		childUse := child.Name
-		if child.ArgsUsage != "" {
-			childUse += " " + child.ArgsUsage
-		}
-		entry := &cobra.Command{Use: childUse, Short: child.Usage, Args: commandArgs(specCommandArgs(use, child.Name)), RunE: actionRun(child.Action)}
-		for _, configuredFlag := range child.Flags {
-			switch configuredFlag := configuredFlag.(type) {
-			case *command.StringFlag:
-				entry.Flags().String(configuredFlag.Name, "", configuredFlag.Usage)
-			case *command.BoolFlag:
-				entry.Flags().Bool(configuredFlag.Name, false, configuredFlag.Usage)
-			case *command.UintFlag:
-				entry.Flags().Uint(configuredFlag.Name, 0, configuredFlag.Usage)
-			case *command.Float64Flag:
-				entry.Flags().Float64(configuredFlag.Name, 0, configuredFlag.Usage)
-			}
-		}
-		if use == "config" && child.Name == "status" {
-			entry.Flags().Bool("json", false, "print JSON")
-		}
-		if use == "config" && child.Name == "unassign" {
-			entry.Flags().Bool("json", false, "print JSON")
-		}
-
-		if use == "config" && child.Name == "unassign" {
-			entry.Flags().String("confirm", "", "six-character confirmation code from the preview")
-		}
-		root.AddCommand(entry)
-	}
-	return root
-}
-
-func specCommandArgs(parent, name string) cobra.PositionalArgs {
-	if parent == "inbox" {
-		switch name {
-		case "set", "approve", "decline":
-			return cobra.ExactArgs(1)
-		case "policy":
-			return cobra.MaximumNArgs(1)
-		case "path", "reset":
-			return cobra.NoArgs
-		}
-	}
-	if parent == "config" {
-		switch name {
-		case "set":
-			return cobra.ExactArgs(2)
-		case "unset":
-			return cobra.ExactArgs(1)
-		case "assign", "enable":
-			return cobra.ExactArgs(2)
-		case "unassign", "disable":
-			return cobra.ExactArgs(1)
-		case "approve", "team-default-adopt":
-			return cobra.ExactArgs(1)
-		case "team-default-set":
-			return cobra.ExactArgs(2)
-		case "team-default-unadopt":
-			return cobra.NoArgs
-		case "status":
-			return cobra.MaximumNArgs(1)
-		}
-	}
-	if parent == "preview" {
-		switch name {
-		case "create":
-			return cobra.MaximumNArgs(1)
-		case "list":
-			return cobra.NoArgs
-		case "revoke":
-			return cobra.MaximumNArgs(1)
-		}
-	}
-	return cobra.NoArgs
-}
-
 func windowsEnrollmentCommand(installerURL string) string {
 	return "powershell -c \"iex (irm '" + installerURL + "')\""
 }
@@ -5264,14 +5162,6 @@ func containsString(values []string, wanted string) bool {
 		}
 	}
 	return false
-}
-
-func authCommand() *command.Spec {
-	return &command.Spec{Name: "auth", Usage: "Manage Paperboat sign-in", Subcommands: []*command.Spec{
-		{Name: "login", Usage: "Add this computer to your account, or sign in again, through browser approval", Flags: []command.Flag{&command.BoolFlag{Name: "no-browser", Usage: "print the approval link without opening a browser"}, &command.BoolFlag{Name: "reauth", Usage: "authenticate the current account again"}, &command.BoolFlag{Name: "change-account", Usage: "sign in with another account after browser approval"}, &command.BoolFlag{Name: "json", Usage: "print approval and sign-in states as JSON"}, &command.BoolFlag{Name: "fresh", Usage: "remove this computer's setup and machine record, then add it again"}}, Action: authBrowserLogin},
-		{Name: "status", Usage: "Show the active Paperboat account", Flags: []command.Flag{&command.BoolFlag{Name: "json"}}, Action: authStatus},
-		{Name: "logout", Usage: "Revoke and remove the active client session", Flags: []command.Flag{&command.BoolFlag{Name: "json"}}, Action: authLogout},
-	}}
 }
 
 func requireAuthConfig(c *command.Context) (*config.Config, config.ProfileStore, error) {
@@ -7875,137 +7765,6 @@ func expandDirs(dirs []string) []string {
 		out = append(out, d)
 	}
 	return out
-}
-
-func configCommand() *command.Spec {
-	return &command.Spec{
-		Name:  "config",
-		Usage: "Inspect the local CLI config",
-		Subcommands: []*command.Spec{
-			{Name: "status", ArgsUsage: "[environment]", Usage: "Show configuration synchronization status", Action: configStatus},
-			{
-				Name: "unassign", ArgsUsage: "<environment>", Usage: "Remove a config repository assignment",
-				Action: configUnassign,
-			},
-			{Name: "approve", ArgsUsage: "<environment>", Usage: "Approve the currently reviewed pull revision", Flags: []command.Flag{&command.BoolFlag{Name: "json"}}, Action: configApproveRevision},
-			{Name: "team-default-set", ArgsUsage: "<team> <repository>", Usage: "Set a team's default pull repository", Flags: []command.Flag{&command.BoolFlag{Name: "json"}}, Action: configTeamDefaultSet},
-			{Name: "team-default-adopt", ArgsUsage: "<team>", Usage: "Adopt a team default using your provider access", Flags: []command.Flag{&command.BoolFlag{Name: "json"}}, Action: configTeamDefaultAdopt},
-			{Name: "team-default-unadopt", Usage: "Stop inheriting a team configuration default", Flags: []command.Flag{&command.BoolFlag{Name: "json"}}, Action: configTeamDefaultUnadopt},
-			{
-				Name: "set", ArgsUsage: "<key> <value>", Usage: "Set a local configuration value",
-				Flags: []command.Flag{&command.BoolFlag{Name: "json"}},
-				Action: func(c *command.Context) error {
-					if c.Args().Len() != 2 {
-						return localArgumentError("usage: pb config set server <url>")
-					}
-					cfg, err := config.Load(c.String("config"))
-					if err != nil {
-						return err
-					}
-					switch c.Args().First() {
-					case "server":
-						server, err := config.NormalizeServerURL(c.Args().Get(1))
-						if err != nil {
-							return usageError{err: err, publicMessage: "The server URL is invalid. Use an absolute HTTP or HTTPS URL without credentials, a query or a fragment."}
-						}
-						cfg.ServerURL = server
-					case "ssh-target-port":
-						port, parseErr := strconv.ParseUint(c.Args().Get(1), 10, 16)
-						if parseErr != nil || port == 0 {
-							return localArgumentError("ssh-target-port must be between 1 and 65535")
-						}
-						return configSetSSHTargetPort(c, uint16(port))
-					default:
-						return localArgumentError("usage: pb config set server <url> or pb config set ssh-target-port <1-65535>")
-					}
-					if err := cfg.Save(); err != nil {
-						return err
-					}
-					if c.Bool("json") {
-						return writeCLIJSON(c.Writer, map[string]any{"path": cfg.Path(), "key": c.Args().First(), "updated": true})
-					}
-					fmt.Fprintln(c.Writer, cfg.Path())
-					return nil
-				},
-			},
-			{
-				Name: "unset", ArgsUsage: "server", Usage: "Remove a local configuration value",
-				Flags: []command.Flag{&command.BoolFlag{Name: "json"}},
-				Action: func(c *command.Context) error {
-					if c.Args().Len() != 1 || c.Args().First() != "server" {
-						return localArgumentError("usage: pb config unset server")
-					}
-					cfg, err := config.Load(c.String("config"))
-					if err != nil {
-						return err
-					}
-					cfg.ServerURL = ""
-					if err := cfg.Save(); err != nil {
-						return err
-					}
-					if c.Bool("json") {
-						return writeCLIJSON(c.Writer, map[string]any{"path": cfg.Path(), "key": "server", "unset": true})
-					}
-					fmt.Fprintln(c.Writer, cfg.Path())
-					return nil
-				},
-			},
-			{
-				Name:  "path",
-				Usage: "Print the config file path",
-				Flags: []command.Flag{&command.BoolFlag{Name: "json"}},
-				Action: func(c *command.Context) error {
-					d, err := buildDeps(c)
-					if err != nil {
-						return err
-					}
-					if c.Bool("json") {
-						return writeCLIJSON(c.Writer, map[string]any{"path": d.cfg.Path()})
-					}
-					fmt.Fprintln(c.Writer, d.cfg.Path())
-					return nil
-				},
-			},
-			{
-				Name:  "show",
-				Usage: "Print the effective config",
-				Flags: []command.Flag{&command.BoolFlag{Name: "json"}},
-				Action: func(c *command.Context) error {
-					d, err := buildDeps(c)
-					if err != nil {
-						return err
-					}
-					sshPort, sshPortSet := configuredSSHTargetPort()
-					if c.Bool("json") {
-						shown := map[string]any{"path": d.cfg.Path(), "server_url": d.cfg.ServerURL, "auth_file_fallback": d.cfg.Auth.AllowFileFallback, "file_paste": d.cfg.FilePaste, "status_bar": d.cfg.StatusBar, "local_access": d.cfg.LocalAccess}
-						if sshPortSet {
-							shown["ssh_target_port"] = sshPort
-						}
-						return json.NewEncoder(c.Writer).Encode(shown)
-					}
-					fmt.Fprintf(c.Writer, "server_url: %s\n", orNone(d.cfg.ServerURL))
-					if sshPortSet {
-						fmt.Fprintf(c.Writer, "ssh_target_port: %d\n", sshPort)
-					}
-					fmt.Fprintf(c.Writer, "auth.file_fallback: %t\n", d.cfg.Auth.AllowFileFallback)
-					fmt.Fprintf(c.Writer, "file_paste.max_queued_input_bytes: %d\n", d.cfg.FilePaste.MaxQueuedInputBytes)
-					fmt.Fprintf(c.Writer, "status_bar.mode: %s\n", d.cfg.StatusBar.Mode)
-					fmt.Fprintf(c.Writer, "status_bar.fullscreen: %s\n", d.cfg.StatusBar.Fullscreen)
-					fmt.Fprintf(c.Writer, "status_bar.theme: %s\n", d.cfg.StatusBar.Theme)
-					fmt.Fprintf(c.Writer, "local_access.domain: %s\n", orNone(effectiveLocalAccessDomain(c.Context, d.cfg)))
-					fmt.Fprintln(c.Writer, "local_access.service_aliases:")
-					if len(d.cfg.LocalAccess.ServiceAliases) == 0 {
-						fmt.Fprintln(c.Writer, "  (none)")
-					} else {
-						for _, alias := range d.cfg.LocalAccess.ServiceAliases {
-							fmt.Fprintf(c.Writer, "  %s.%s -> configured port %d\n", alias.Name, alias.MachineAlias, alias.Port)
-						}
-					}
-					return nil
-				},
-			},
-		},
-	}
 }
 
 // configuredSSHTargetPort is the SSH target port `pb config set ssh-target-port` stored in this

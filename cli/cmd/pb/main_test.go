@@ -651,32 +651,20 @@ func canceledContext() context.Context {
 	return ctx
 }
 
-func TestSpecTreeRegistersDeclaredFlagTypes(t *testing.T) {
+func TestActionBridgeCarriesCobraFlagValues(t *testing.T) {
 	called := false
-	source := &command.Spec{Name: "fixture", Subcommands: []*command.Spec{{
-		Name: "inspect", Action: func(ctx *command.Context) error {
-			called = true
-			if ctx.String("recovery-key") != "fixture-key" || !ctx.Bool("json") || ctx.String("hours") != "3.5" {
-				t.Fatalf("action values: recovery-key=%q json=%t hours=%q", ctx.String("recovery-key"), ctx.Bool("json"), ctx.String("hours"))
-			}
-			return nil
-		}, Flags: []command.Flag{
-			&command.StringFlag{Name: "recovery-key", Usage: "key file"},
-			&command.BoolFlag{Name: "json", Usage: "JSON output"},
-			&command.Float64Flag{Name: "hours", Usage: "hours"},
-		},
-	}}}
-	tree := specTree(source, source.Name)
-	entry, _, err := tree.Find([]string{"inspect"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for name, wantType := range map[string]string{"recovery-key": "string", "json": "bool", "hours": "float64"} {
-		flag := entry.Flags().Lookup(name)
-		if flag == nil || flag.Value.Type() != wantType {
-			t.Fatalf("flag %q=%v, want type %q", name, flag, wantType)
+	inspect := &cobra.Command{Use: "inspect", Args: commandArgs(cobra.NoArgs), RunE: actionRun(func(ctx *command.Context) error {
+		called = true
+		if ctx.String("recovery-key") != "fixture-key" || !ctx.Bool("json") || ctx.String("hours") != "3.5" {
+			t.Fatalf("action values: recovery-key=%q json=%t hours=%q", ctx.String("recovery-key"), ctx.Bool("json"), ctx.String("hours"))
 		}
-	}
+		return nil
+	})}
+	inspect.Flags().String("recovery-key", "", "key file")
+	inspect.Flags().Bool("json", false, "JSON output")
+	inspect.Flags().Float64("hours", 0, "hours")
+	tree := &cobra.Command{Use: "fixture"}
+	tree.AddCommand(inspect)
 	tree.SetOut(io.Discard)
 	tree.SetErr(io.Discard)
 	tree.SetArgs([]string{"inspect", "--recovery-key", "fixture-key", "--json", "--hours", "3.5"})
@@ -688,59 +676,35 @@ func TestSpecTreeRegistersDeclaredFlagTypes(t *testing.T) {
 	}
 }
 
-func TestSpecTreeRegistersEveryDeclaredBoolFlag(t *testing.T) {
-	for _, source := range []*command.Spec{authCommand(), configCommand()} {
-		tree := specTree(source, source.Name)
-		for _, childSpec := range source.Subcommands {
-			entry, _, err := tree.Find([]string{childSpec.Name})
-			if err != nil {
-				t.Fatalf("%s %s: %v", source.Name, childSpec.Name, err)
-			}
-			for _, declared := range childSpec.Flags {
-				boolFlag, ok := declared.(*command.BoolFlag)
-				if !ok {
-					continue
-				}
-				registered := entry.Flags().Lookup(boolFlag.Name)
-				if registered == nil || registered.Value.Type() != "bool" {
-					t.Fatalf("%s %s --%s=%v", source.Name, childSpec.Name, boolFlag.Name, registered)
-				}
-			}
-		}
-	}
-}
-
-func specTreeActionTestCommand(t *testing.T, source *command.Spec, childName string, action command.Action) *cobra.Command {
+// groupActionTestCommand is a command group with one child's behaviour replaced,
+// to observe the flag values that reach it.
+func groupActionTestCommand(t *testing.T, group *cobra.Command, childName string, action command.Action) *cobra.Command {
 	t.Helper()
-	for _, child := range source.Subcommands {
-		if child.Name != childName {
-			continue
-		}
-		childCopy := *child
-		childCopy.Action = action
-		return specTree(&command.Spec{Name: source.Name, Usage: source.Usage, Subcommands: []*command.Spec{&childCopy}}, source.Name)
+	child, _, err := group.Find([]string{childName})
+	if err != nil || child == group {
+		t.Fatalf("%s subcommand %q not found: %v", group.Name(), childName, err)
 	}
-	t.Fatalf("%s subcommand %q not found", source.Name, childName)
-	return nil
+	child.RunE = actionRun(action)
+	return group
 }
 
-func TestSpecTreeExecutesDeclaredFlagsIntoActions(t *testing.T) {
+func TestGroupsExecuteDeclaredFlagsIntoActions(t *testing.T) {
 	tests := []struct {
 		name        string
-		source      func() *command.Spec
+		source      func() *cobra.Command
 		child       string
 		args        []string
 		wantStrings map[string]string
 		wantBools   map[string]bool
 	}{
-		{name: "auth login json", source: authCommand, child: "login", args: []string{"login", "--json"}, wantBools: map[string]bool{"json": true}},
-		{name: "auth status json", source: authCommand, child: "status", args: []string{"status", "--json"}, wantBools: map[string]bool{"json": true}},
-		{name: "config show json", source: configCommand, child: "show", args: []string{"show", "--json"}, wantBools: map[string]bool{"json": true}},
+		{name: "auth login json", source: authCobraCommand, child: "login", args: []string{"login", "--json"}, wantBools: map[string]bool{"json": true}},
+		{name: "auth status json", source: authCobraCommand, child: "status", args: []string{"status", "--json"}, wantBools: map[string]bool{"json": true}},
+		{name: "config show json", source: configCobraCommand, child: "show", args: []string{"show", "--json"}, wantBools: map[string]bool{"json": true}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			called := false
-			tree := specTreeActionTestCommand(t, test.source(), test.child, func(ctx *command.Context) error {
+			tree := groupActionTestCommand(t, test.source(), test.child, func(ctx *command.Context) error {
 				called = true
 				for name, want := range test.wantStrings {
 					if got := ctx.String(name); got != want {

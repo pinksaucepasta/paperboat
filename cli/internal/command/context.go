@@ -63,29 +63,3 @@ func (a Args) Get(index int) string {
 	return a.values[index]
 }
 func (a Args) Len() int { return len(a.values) }
-
-// Spec is an internal command description consumed by the Cobra root. It
-// keeps workflow construction independent from Cobra's parser types.
-type Spec struct {
-	Name, Usage, ArgsUsage string
-	Flags                  []Flag
-	Action                 Action
-	Subcommands            []*Spec
-}
-
-type Flag interface{ isFlag() }
-type StringFlag struct{ Name, Usage string }
-
-func (*StringFlag) isFlag() {}
-
-type BoolFlag struct{ Name, Usage string }
-
-func (*BoolFlag) isFlag() {}
-
-type UintFlag struct{ Name, Usage string }
-
-func (*UintFlag) isFlag() {}
-
-type Float64Flag struct{ Name, Usage string }
-
-func (*Float64Flag) isFlag() {}

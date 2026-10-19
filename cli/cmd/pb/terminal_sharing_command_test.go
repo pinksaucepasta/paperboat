@@ -15,6 +15,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/supportref"
+	"github.com/spf13/cobra"
 )
 
 type terminalSharingWriterError struct{}
@@ -43,13 +44,16 @@ func TestTerminalSharingRejectsAmbiguousAudienceAndRole(t *testing.T) {
 func TestTerminalSharingBuildUnsignedFlagBridge(t *testing.T) {
 	for _, value := range []string{"7", "-1"} {
 		called := false
-		tree := specTree(&command.Spec{Name: "fixture", Subcommands: []*command.Spec{{Name: "read", Flags: []command.Flag{&command.UintFlag{Name: "generation"}}, Action: func(c *command.Context) error {
+		read := &cobra.Command{Use: "read", Args: commandArgs(cobra.NoArgs), RunE: actionRun(func(c *command.Context) error {
 			called = true
 			if c.Uint("generation") != 7 {
 				t.Fatal("generation lost")
 			}
 			return nil
-		}}}}, "fixture")
+		})}
+		read.Flags().Uint("generation", 0, "")
+		tree := &cobra.Command{Use: "fixture"}
+		tree.AddCommand(read)
 		var output bytes.Buffer
 		tree.SetOut(&output)
 		tree.SetErr(&output)
