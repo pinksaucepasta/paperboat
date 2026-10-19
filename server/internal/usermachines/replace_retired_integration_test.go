@@ -63,6 +63,13 @@ func TestAddingTheSameComputerAgainRemovesItsRetiredRecordAndKeepsTheName(t *tes
 		_, err := sshService.ObserveHost(ctx, managedssh.ObserveHostRequest{OperationID: fmt.Sprintf("operation_replace_%s_%d", machineID, time.Now().UnixNano()), UserID: userID, UserMachineID: machineID, MachineGeneration: 1, ObservationGeneration: 1, PublicKeys: keys, Now: now})
 		return err
 	}
+	slotOf := func(id string) (slot int) {
+		t.Helper()
+		if err := store.SQL().QueryRowContext(ctx, `SELECT address_slot FROM paperboat.ensure_control_sync_lease($1)`, id).Scan(&slot); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
 	state := func(id string) (alias, status string, deleted bool) {
 		t.Helper()
 		if err := store.SQL().QueryRowContext(ctx, `SELECT alias,state,deleted_at IS NOT NULL FROM paperboat.user_machines WHERE id=$1`, id).Scan(&alias, &status, &deleted); err != nil {
@@ -82,6 +89,10 @@ func TestAddingTheSameComputerAgainRemovesItsRetiredRecordAndKeepsTheName(t *tes
 		t.Fatal(err)
 	}
 	addMachine(newID, userA, "studio-2", "online")
+	oldSlot, newOwnSlot := slotOf(oldID), slotOf(newID)
+	if oldSlot == newOwnSlot {
+		t.Fatalf("both records share local address slot %d before the re-add", oldSlot)
+	}
 	if err := observe(userA, newID, keys...); err != nil {
 		t.Fatalf("the same computer added again could not record its host keys: %v", err)
 	}
@@ -90,6 +101,9 @@ func TestAddingTheSameComputerAgainRemovesItsRetiredRecordAndKeepsTheName(t *tes
 	}
 	if alias, status, _ := state(newID); alias != "studio" || status != "online" {
 		t.Fatalf("new record: alias=%q state=%q, want studio online", alias, status)
+	}
+	if got := slotOf(newID); got != oldSlot {
+		t.Fatalf("the re-added computer's local address slot changed from %d to %d", oldSlot, got)
 	}
 	var claims, history int
 	_ = store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.machine_ssh_host_key_owners WHERE user_machine_id=$1`, oldID).Scan(&claims)
@@ -102,8 +116,12 @@ func TestAddingTheSameComputerAgainRemovesItsRetiredRecordAndKeepsTheName(t *tes
 	otherRetired, otherNew := "mch_otherold_"+suffix, "mch_othernew_"+suffix
 	addMachine(otherRetired, userA, "lab", "disconnected")
 	addMachine(otherNew, userA, "lab-2", "online")
+	retiredSlot, otherSlot := slotOf(otherRetired), slotOf(otherNew)
 	if err := observe(userA, otherNew, hostKeyLine(t)); err != nil {
 		t.Fatal(err)
+	}
+	if slotOf(otherNew) != otherSlot || slotOf(otherRetired) != retiredSlot || otherSlot == retiredSlot {
+		t.Fatal("a different computer's local address was changed or shared")
 	}
 	if alias, status, deleted := state(otherRetired); status != "disconnected" || deleted || alias != "lab" {
 		t.Fatalf("an unrelated retired record was touched: %q %q %v", alias, status, deleted)

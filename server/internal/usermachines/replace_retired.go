@@ -2,8 +2,10 @@ package usermachines
 
 import (
 	"context"
+
 	"database/sql"
 	"errors"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/pinksaucepasta/paperboat-server/internal/audit"
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
@@ -56,12 +58,34 @@ func (s *Service) ReplaceRetiredMachineTx(ctx context.Context, tx *db.Tx, userID
 	if err := s.audit.WriteTx(ctx, tx, audit.Event{ActorUserID: userID, ActorType: audit.ActorUser, EventType: "user_machine.replaced", ResourceType: "user_machine", ResourceID: replacement.ID, IdempotencyKey: "user_machine.replaced:" + retired.ID + ":" + replacement.ID, Metadata: map[string]any{"replaced_machine_id": retired.ID, "alias": retired.Alias}}); err != nil {
 		return err
 	}
+	if err := adoptControlSyncLease(ctx, tx, retired.ID, replacement.ID); err != nil {
+		return err
+	}
 	if replacement.Alias != retired.Alias && isNumberedVariant(replacement.Alias, retired.Alias) {
 		if _, err := tx.Queries().RenameUserMachine(ctx, dbsqlc.RenameUserMachineParams{Alias: retired.Alias, Description: replacement.Description, ID: replacement.ID, UserID: userID}); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// adoptControlSyncLease gives the replacement the retired record's local address lease (the
+// 127.100.x.y slot users paste into connection strings), so a computer keeps its address across
+// a reset or reinstall. The replacement's own, freshly allocated lease is released.
+func adoptControlSyncLease(ctx context.Context, tx *db.Tx, retiredID, replacementID string) error {
+	var slot int
+	err := tx.QueryRow(ctx, `SELECT address_slot FROM paperboat.control_sync_leases WHERE machine_id=$1 FOR UPDATE`, retiredID).Scan(&slot)
+	if errors.Is(err, sql.ErrNoRows) || errors.Is(err, pgx.ErrNoRows) {
+		return nil // the retired record never had an address; the replacement keeps its own
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM paperboat.control_sync_leases WHERE machine_id=$1`, replacementID); err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `UPDATE paperboat.control_sync_leases SET machine_id=$1 WHERE address_slot=$2`, replacementID, slot)
+	return err
 }
 
 // isNumberedVariant reports whether alias is name with the "-N" suffix a fresh enrollment gets
