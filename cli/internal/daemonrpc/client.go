@@ -69,14 +69,15 @@ func (c *Client) StreamStatus(ctx context.Context) (pb.DaemonService_StreamStatu
 }
 
 // ResolveMachine queries the daemon to resolve a peer machine to its 127.100.x.x IP and ports.
-func (c *Client) ResolveMachine(ctx context.Context, query string) (*pb.MachineAddress, error) {
-	return c.client.ResolveMachine(rpcContext(ctx), &pb.MachineQuery{Query: query})
+func (c *Client) ResolveMachine(ctx context.Context, query, accountID string) (*pb.MachineAddress, error) {
+	return c.client.ResolveMachine(rpcContext(ctx), &pb.MachineQuery{Query: query, AccountId: accountID})
 }
 
 // ApprovePeer approves or revokes peer access.
-func (c *Client) ApprovePeer(ctx context.Context, machineID string, approved bool) (*pb.ApprovePeerResponse, error) {
+func (c *Client) ApprovePeer(ctx context.Context, machineID string, approved bool, accountID string) (*pb.ApprovePeerResponse, error) {
 	return c.client.ApprovePeer(rpcContext(ctx), &pb.ApprovePeerRequest{
 		MachineId: machineID,
 		Approved:  approved,
+		AccountId: accountID,
 	})
 }

@@ -28,6 +28,8 @@ type LiveDaemonBackend struct {
 	peers       map[string]*pb.PeerStatus
 	subscribers []chan *pb.StatusResponse
 	approve     func(context.Context, string, bool) error
+	accountID   string
+	accountName string
 }
 
 // NewLiveDaemonBackend creates a DaemonBackend backed by a real control plane sync client.
@@ -80,6 +82,20 @@ func (b *LiveDaemonBackend) SetSyncClient(client *controlsync.Client) {
 	b.syncClient = client
 	b.mu.Unlock()
 }
+// SetAccount records the signed-in account this daemon serves.
+func (b *LiveDaemonBackend) SetAccount(id, label string) {
+	b.mu.Lock()
+	b.accountID, b.accountName = id, label
+	b.mu.Unlock()
+}
+
+// Account returns the signed-in account this daemon serves.
+func (b *LiveDaemonBackend) Account() (string, string) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.accountID, b.accountName
+}
+
 func (b *LiveDaemonBackend) SetApprovalHandler(handler func(context.Context, string, bool) error) {
 	b.mu.Lock()
 	b.approve = handler

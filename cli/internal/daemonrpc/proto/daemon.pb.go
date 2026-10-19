@@ -320,6 +320,7 @@ func (x *DERPStatus) GetLatencyMs() int64 {
 type MachineQuery struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Query         string                 `protobuf:"bytes,1,opt,name=query,proto3" json:"query,omitempty"`
+	AccountId     string                 `protobuf:"bytes,2,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -357,6 +358,13 @@ func (*MachineQuery) Descriptor() ([]byte, []int) {
 func (x *MachineQuery) GetQuery() string {
 	if x != nil {
 		return x.Query
+	}
+	return ""
+}
+
+func (x *MachineQuery) GetAccountId() string {
+	if x != nil {
+		return x.AccountId
 	}
 	return ""
 }
@@ -441,6 +449,7 @@ type ApprovePeerRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	MachineId     string                 `protobuf:"bytes,1,opt,name=machine_id,json=machineId,proto3" json:"machine_id,omitempty"`
 	Approved      bool                   `protobuf:"varint,2,opt,name=approved,proto3" json:"approved,omitempty"`
+	AccountId     string                 `protobuf:"bytes,3,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -487,6 +496,13 @@ func (x *ApprovePeerRequest) GetApproved() bool {
 		return x.Approved
 	}
 	return false
+}
+
+func (x *ApprovePeerRequest) GetAccountId() string {
+	if x != nil {
+		return x.AccountId
+	}
+	return ""
 }
 
 type ApprovePeerResponse struct {
@@ -590,9 +606,11 @@ const file_daemon_proto_rawDesc = "" +
 	"regionName\x12\x1c\n" +
 	"\treachable\x18\x03 \x01(\bR\treachable\x12\x1d\n" +
 	"\n" +
-	"latency_ms\x18\x04 \x01(\x03R\tlatencyMs\"$\n" +
+	"latency_ms\x18\x04 \x01(\x03R\tlatencyMs\"C\n" +
 	"\fMachineQuery\x12\x14\n" +
-	"\x05query\x18\x01 \x01(\tR\x05query\"\x9e\x02\n" +
+	"\x05query\x18\x01 \x01(\tR\x05query\x12\x1d\n" +
+	"\n" +
+	"account_id\x18\x02 \x01(\tR\taccountId\"\x9e\x02\n" +
 	"\x0eMachineAddress\x12\x1d\n" +
 	"\n" +
 	"machine_id\x18\x01 \x01(\tR\tmachineId\x12\x14\n" +
@@ -603,11 +621,13 @@ const file_daemon_proto_rawDesc = "" +
 	"\fbrowser_urls\x18\x06 \x03(\v2*.daemonrpc.MachineAddress.BrowserUrlsEntryR\vbrowserUrls\x1a>\n" +
 	"\x10BrowserUrlsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\x05R\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"O\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"n\n" +
 	"\x12ApprovePeerRequest\x12\x1d\n" +
 	"\n" +
 	"machine_id\x18\x01 \x01(\tR\tmachineId\x12\x1a\n" +
-	"\bapproved\x18\x02 \x01(\bR\bapproved\"j\n" +
+	"\bapproved\x18\x02 \x01(\bR\bapproved\x12\x1d\n" +
+	"\n" +
+	"account_id\x18\x03 \x01(\tR\taccountId\"j\n" +
 	"\x13ApprovePeerResponse\x12\x1d\n" +
 	"\n" +
 	"machine_id\x18\x01 \x01(\tR\tmachineId\x12\x1a\n" +

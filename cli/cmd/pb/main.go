@@ -652,6 +652,9 @@ func classifyCommandFailure(err error) (failure commandFailure) {
 				remaining = append(remaining, causeFrame{err: owner.cause, status: frame.status})
 			}
 			continue
+		case daemoncmd.ErrDaemonAccountMismatch:
+			set(commandRejected, current)
+			continue
 		case usageError, unsupportedJSONOutputError, *preferences.InvalidError:
 			set(commandUsage, current)
 			continue
@@ -3042,14 +3045,19 @@ mode, relays, and observation timestamps.`, Example: "  pb relay list\n  pb rela
 	root.AddCommand(daemoncmd.ServiceCommand())
 	resolve := daemoncmd.ResolveCommand()
 	resolve.Args = commandArgs(resolve.Args)
+	resolveRun := resolve.RunE
+	resolve.RunE = func(command *cobra.Command, args []string) error {
+		return rejectDaemonAccount(resolveRun(command, args))
+	}
 	root.AddCommand(resolve)
 	approve := daemoncmd.ApproveCommand()
+	approve.Args = commandArgs(approve.Args)
 	approveRun := approve.RunE
 	approve.RunE = func(command *cobra.Command, args []string) error {
 		if revoke, _ := command.Flags().GetBool("revoke"); revoke {
 			return localArgumentError("pb approve only approves a peer. To revoke a machine, run `pb machine revoke <machine>`; it asks for a confirmation code and ends that machine's enrollment.")
 		}
-		return approveRun(command, args)
+		return rejectDaemonAccount(approveRun(command, args))
 	}
 	root.AddCommand(approve)
 	root.AddCommand(privilegedServiceOperationCommand())

@@ -239,6 +239,7 @@ func TestCoordinatorLifecycle(t *testing.T) {
 		SocketAddress: sockPath,
 		SyncAddress:   listener.Addr().String(),
 		MachineID:     "machine-local",
+		AccountID:     "user_test",
 		Token:         func(context.Context) (string, error) { return "test", nil },
 		Insecure:      true,
 		NameClient:    names,
@@ -270,7 +271,7 @@ func TestCoordinatorLifecycle(t *testing.T) {
 	// Wait for peer update from mock sync server
 	var resolvedIP string
 	for i := 0; i < 30; i++ {
-		addr, err := client.ResolveMachine(ctx, "workstation")
+		addr, err := client.ResolveMachine(ctx, "workstation", "user_test")
 		if err == nil && addr != nil && addr.AssignedIp == "127.100.0.11" {
 			resolvedIP = addr.AssignedIp
 			break

@@ -35,6 +35,7 @@ message DERPStatus {
 
 message MachineQuery {
   string query = 1;
+  string account_id = 2;
 }
 
 message MachineAddress {
@@ -48,6 +49,7 @@ message MachineAddress {
 message ApprovePeerRequest {
   string machine_id = 1;
   bool approved = 2;
+  string account_id = 3;
 }
 
 message ApprovePeerResponse {

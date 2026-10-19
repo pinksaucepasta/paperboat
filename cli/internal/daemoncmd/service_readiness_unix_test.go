@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/config"
+
 	pbSync "github.com/pinksaucepasta/paperboat/internal/controlsync/proto"
 	"github.com/pinksaucepasta/paperboat/internal/daemonrpc"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
@@ -121,11 +123,13 @@ func TestResolveCommandOutputFailureAndRecovery(t *testing.T) {
 	t.Cleanup(func() { _ = os.RemoveAll(directory) })
 	socket := filepath.Join(directory, "rpc.sock")
 	t.Setenv("PAPERBOAT_DAEMON_SOCK", socket)
+	signInTestAccount(t, "user_test")
 	listener, err := daemonrpc.Listen(socket)
 	if err != nil {
 		t.Fatal(err)
 	}
 	backend := daemonrpc.NewLiveDaemonBackend(nil, "test")
+	backend.SetAccount("user_test", "tester@example.test")
 	backend.ApplyPeerUpdates([]*pbSync.PeerUpdate{{PeerId: "machine", Alias: "office", Approved: true, Online: true, AssignedIp: "127.100.0.2"}}, 1, nil)
 	server := daemonrpc.NewServer(backend)
 	done := make(chan error, 1)
@@ -147,5 +151,56 @@ func TestResolveCommandOutputFailureAndRecovery(t *testing.T) {
 	command.SetErr(&bytes.Buffer{})
 	if err := command.Execute(); err != nil || !strings.Contains(output.String(), "127.100.0.2") {
 		t.Fatal("fresh IPC resolve did not recover", err)
+	}
+}
+
+// signInTestAccount gives the default CLI config a signed-in profile for the account.
+func signInTestAccount(t *testing.T, accountID string) {
+	t.Helper()
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	profileDir := filepath.Join(dir, "credentials")
+	server := "https://control.example.test"
+	configJSON := `{"server_url":"` + server + `","auth":{"allow_file_fallback":true,"profile_dir":"` + profileDir + `"}}`
+	if err := os.WriteFile(configPath, []byte(configJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(config.EnvConfigPath, configPath)
+	store := config.ProfileStore{Path: profileDir, Secrets: config.FileSecretStore{Dir: filepath.Join(profileDir, "secrets")}}
+	expires := time.Now().Add(time.Hour)
+	profile := config.Profile{Issuer: server, CLIClientSessionID: "cls_test", Account: config.Account{ID: accountID}, AccessExpiresAt: expires}
+	if err := store.Save(profile, config.Credential{AccessToken: "token", RefreshToken: "refresh", ExpiresAt: expires}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestResolveRefusesAnotherAccountsSession(t *testing.T) {
+	directory, err := os.MkdirTemp("", "pb-rpc-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(directory) })
+	socket := filepath.Join(directory, "rpc.sock")
+	t.Setenv("PAPERBOAT_DAEMON_SOCK", socket)
+	signInTestAccount(t, "user_visitor")
+	listener, err := daemonrpc.Listen(socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend := daemonrpc.NewLiveDaemonBackend(nil, "test")
+	backend.SetAccount("user_owner", "owner@example.test")
+	backend.ApplyPeerUpdates([]*pbSync.PeerUpdate{{PeerId: "machine", Alias: "office", Approved: true, Online: true, AssignedIp: "127.100.0.2"}}, 1, nil)
+	server := daemonrpc.NewServer(backend)
+	done := make(chan error, 1)
+	go func() { done <- server.Serve(listener) }()
+	t.Cleanup(func() { server.Stop(); <-done })
+	command := ResolveCommand()
+	command.SetContext(t.Context())
+	command.SetArgs([]string{"office"})
+	command.SetOut(&bytes.Buffer{})
+	command.SetErr(&bytes.Buffer{})
+	var mismatch ErrDaemonAccountMismatch
+	if err := command.Execute(); !errors.As(err, &mismatch) || !strings.Contains(mismatch.Message, "owner@example.test") {
+		t.Fatalf("another account's resolve was served: %v", err)
 	}
 }

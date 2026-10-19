@@ -101,6 +101,8 @@ type CoordinatorConfig struct {
 	TLSConfig            *tls.Config
 	Insecure             bool
 	NameClient           guardedNameClient
+	AccountID            string // the signed-in account this daemon serves; CLI requests must carry it
+	AccountLabel         string
 	ConnectNameClient    func(context.Context) (guardedNameClient, error)
 	DialMachine          func(context.Context, string, int) (net.Conn, error)
 	ApprovePeer          func(context.Context, string, bool) error
@@ -258,6 +260,7 @@ func NewCoordinator(cfg CoordinatorConfig) (*Coordinator, error) {
 		errors:      make(chan error, 1),
 	}
 	coordinator.rpcBackend.SetApprovalHandler(cfg.ApprovePeer)
+	coordinator.rpcBackend.SetAccount(cfg.AccountID, cfg.AccountLabel)
 	return coordinator, nil
 }
 

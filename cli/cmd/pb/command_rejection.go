@@ -1,6 +1,9 @@
 package main
 
 import (
+	"errors"
+
+	"github.com/pinksaucepasta/paperboat/internal/daemoncmd"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
 	servepkg "github.com/pinksaucepasta/paperboat/internal/serve"
@@ -33,6 +36,7 @@ const (
 	commandRejectTeamRequestInvalid
 	commandRejectTeamSeatRequired
 	commandRejectResetRetire
+	commandRejectDaemonAccount
 )
 
 // commandRejection describes a command-owned refusal. Its
@@ -44,7 +48,7 @@ type commandRejection struct {
 }
 
 func (e commandRejection) valid() bool {
-	return e.reason >= commandRejectDefaultSessionRename && e.reason <= commandRejectResetRetire
+	return e.reason >= commandRejectDefaultSessionRename && e.reason <= commandRejectDaemonAccount
 }
 func (e commandRejection) Error() string {
 	switch e.reason {
@@ -68,6 +72,11 @@ func (e commandRejection) Error() string {
 		return "The server rejected the team request. Use an available team name, at least one seat and a month or year interval."
 	case commandRejectTeamSeatRequired:
 		return "No free seat: every purchased seat is used or held by a pending invitation. Cancel a pending invitation (`pb team cancel-invite`) or add a seat in the console, then try again."
+	case commandRejectDaemonAccount:
+		var mismatch daemoncmd.ErrDaemonAccountMismatch
+		if errors.As(e.cause, &mismatch) {
+			return mismatch.Error()
+		}
 	case commandRejectResetRetire:
 		return "The old machine record could not be retired, so nothing was reset. Check your connection and run `pb reset` again."
 	case commandRejectInboxDeclined:
@@ -160,4 +169,13 @@ func signedActivationPending(err error) bool {
 	}
 	remote, ok := err.(*elevation.RemoteError)
 	return ok && remote != nil && remote.Code == "activation_pending"
+}
+
+// rejectDaemonAccount presents the local service's account refusal as a command-owned rejection.
+func rejectDaemonAccount(err error) error {
+	var mismatch daemoncmd.ErrDaemonAccountMismatch
+	if errors.As(err, &mismatch) {
+		return commandRejection{reason: commandRejectDaemonAccount, cause: err}
+	}
+	return err
 }

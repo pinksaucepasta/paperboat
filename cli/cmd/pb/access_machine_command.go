@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/internal/daemoncmd"
 	"github.com/pinksaucepasta/paperboat/internal/daemonrpc"
 	daemonpb "github.com/pinksaucepasta/paperboat/internal/daemonrpc/proto"
 	"github.com/pinksaucepasta/paperboat/internal/privatepreviewproxy"
@@ -49,8 +50,22 @@ type machineLocator interface {
 	Close() error
 }
 
-var newAccessMachineLocator = func(ctx context.Context) (machineLocator, error) {
-	return daemonrpc.NewClient(ctx, "")
+var newAccessMachineLocator = func(ctx context.Context, accountID string) (machineLocator, error) {
+	client, err := daemonrpc.NewClient(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+	return accountLocator{Client: client, accountID: accountID}, nil
+}
+
+// accountLocator asks the daemon on behalf of one signed-in account; the daemon refuses any other.
+type accountLocator struct {
+	*daemonrpc.Client
+	accountID string
+}
+
+func (l accountLocator) ResolveMachine(ctx context.Context, query string) (*daemonpb.MachineAddress, error) {
+	return l.Client.ResolveMachine(ctx, query, l.accountID)
 }
 
 // daemonAccessMachineRuntime reaches a machine service through the daemon's assigned-address
@@ -96,12 +111,16 @@ func newProductionAccessMachineRuntime(command *cobra.Command, selector string) 
 		return nil, "", err
 	}
 	port, _ := command.Flags().GetInt("port")
-	locator, err := newAccessMachineLocator(command.Context())
+	accountID, err := daemoncmd.CurrentAccountID(command)
+	if err != nil {
+		return nil, "", fmt.Errorf("read this CLI's signed-in account: %w", err)
+	}
+	locator, err := newAccessMachineLocator(command.Context(), accountID)
 	if err != nil {
 		return nil, "", fmt.Errorf("reach the local Paperboat daemon: %w; run `pb service start` and retry", err)
 	}
 	if err := waitForMachineService(command.Context(), locator, machine.ID, port); err != nil {
-		return nil, "", errors.Join(err, locator.Close())
+		return nil, "", rejectDaemonAccount(errors.Join(err, locator.Close()))
 	}
 	return &daemonAccessMachineRuntime{locator: locator}, machine.ID, nil
 }
@@ -166,6 +185,8 @@ func waitForMachineService(ctx context.Context, locator machineLocator, machine 
 	for {
 		address, err := locator.ResolveMachine(ctx, machine)
 		switch {
+		case status.Code(err) == codes.PermissionDenied:
+			return daemoncmd.DaemonRequestFailure(err)
 		case status.Code(err) == codes.NotFound:
 			return fmt.Errorf("%w: %q", resolver.ErrMachineNotFound, machine)
 		case err != nil && ctx.Err() == nil:

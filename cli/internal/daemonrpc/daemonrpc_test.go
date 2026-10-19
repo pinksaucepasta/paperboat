@@ -116,6 +116,8 @@ func (m *mockBackend) ResolveMachine(ctx context.Context, query string) (*pb.Mac
 	return nil, fmt.Errorf("machine %q not found", query)
 }
 
+func (m *mockBackend) Account() (string, string) { return "user_test", "tester@example.test" }
+
 func (m *mockBackend) ApprovePeer(ctx context.Context, machineID string, approved bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -159,7 +161,7 @@ func TestDaemonRPCServerAndClient(t *testing.T) {
 	defer client.Close()
 
 	// 1. Test ResolveMachine
-	dev, err := client.ResolveMachine(ctx, "workstation")
+	dev, err := client.ResolveMachine(ctx, "workstation", "user_test")
 	if err != nil {
 		t.Fatalf("ResolveMachine() error: %v", err)
 	}
@@ -263,6 +265,7 @@ func (*streamRaceBackend) ResolveMachine(context.Context, string) (*pb.MachineAd
 	return nil, nil
 }
 func (*streamRaceBackend) ApprovePeer(context.Context, string, bool) error { return nil }
+func (*streamRaceBackend) Account() (string, string)                      { return "user_test", "" }
 
 func (b *streamRaceBackend) apply(status *pb.StatusResponse) {
 	b.mu.Lock()
@@ -335,7 +338,7 @@ func TestResolveMachineDirectFailureRetainsCauseSafely(t *testing.T) {
 	cause := errors.Join(ErrMachineNotFound, fmt.Errorf("private endpoint /var/run/daemon-secret.sock: %w", syscall.EIO))
 	backend := &rpcBoundaryBackend{resolveErr: cause}
 	ctx := supportref.WithContext(context.Background(), "support_01234567-89ab-4def-8123-456789abcdef")
-	_, err := NewServer(backend).ResolveMachine(ctx, &pb.MachineQuery{Query: "private-query"})
+	_, err := NewServer(backend).ResolveMachine(ctx, &pb.MachineQuery{Query: "private-query", AccountId: "user_test"})
 	if !errors.Is(err, syscall.EIO) {
 		t.Fatal("server failure did not preserve its original cause")
 	}
@@ -362,6 +365,7 @@ func (b *rpcBoundaryBackend) ResolveMachine(context.Context, string) (*pb.Machin
 }
 
 func (*rpcBoundaryBackend) ApprovePeer(context.Context, string, bool) error { return nil }
+func (*rpcBoundaryBackend) Account() (string, string)                      { return "user_test", "" }
 
 func (b *rpcBoundaryBackend) setResolve(err error, address *pb.MachineAddress) {
 	b.mu.Lock()
@@ -468,7 +472,7 @@ func TestResolveMachineProjectsBackendFailuresSafelyAndRecovers(t *testing.T) {
 		fmt.Errorf("%w: hidden-machine-query", ErrMachineNotFound),
 		fmt.Errorf("private-key=/srv/secret/key: %w", syscall.EIO),
 	), nil)
-	_, err = client.ResolveMachine(rpcContext(ctx), &pb.MachineQuery{Query: "hidden-machine-query"})
+	_, err = client.ResolveMachine(rpcContext(ctx), &pb.MachineQuery{Query: "hidden-machine-query", AccountId: "user_test"})
 	if status.Code(err) != codes.Unavailable {
 		t.Fatalf("mixed lookup error code=%s err=%v", status.Code(err), err)
 	}
@@ -494,7 +498,7 @@ func TestResolveMachineProjectsBackendFailuresSafelyAndRecovers(t *testing.T) {
 	}
 
 	backend.setResolve(context.Canceled, nil)
-	_, err = client.ResolveMachine(rpcContext(ctx), &pb.MachineQuery{Query: "workstation"})
+	_, err = client.ResolveMachine(rpcContext(ctx), &pb.MachineQuery{Query: "workstation", AccountId: "user_test"})
 	if status.Code(err) != codes.Canceled {
 		t.Fatalf("canceled lookup code=%s err=%v", status.Code(err), err)
 	}
@@ -506,7 +510,7 @@ func TestResolveMachineProjectsBackendFailuresSafelyAndRecovers(t *testing.T) {
 	}
 
 	backend.setResolve(fmt.Errorf("%w: hidden-machine-query", ErrMachineNotFound), nil)
-	_, err = client.ResolveMachine(rpcContext(ctx), &pb.MachineQuery{Query: "hidden-machine-query"})
+	_, err = client.ResolveMachine(rpcContext(ctx), &pb.MachineQuery{Query: "hidden-machine-query", AccountId: "user_test"})
 	if status.Code(err) != codes.NotFound || strings.Contains(status.Convert(err).Message(), "hidden-machine-query") {
 		t.Fatalf("expected safe not-found status, got code=%s message=%q", status.Code(err), status.Convert(err).Message())
 	}
@@ -518,7 +522,7 @@ func TestResolveMachineProjectsBackendFailuresSafelyAndRecovers(t *testing.T) {
 	}
 
 	backend.setResolve(nil, &pb.MachineAddress{MachineId: "machine-123", AssignedIp: "127.100.0.2"})
-	resolved, err := client.ResolveMachine(rpcContext(ctx), &pb.MachineQuery{Query: "workstation"})
+	resolved, err := client.ResolveMachine(rpcContext(ctx), &pb.MachineQuery{Query: "workstation", AccountId: "user_test"})
 	if err != nil || resolved.GetMachineId() != "machine-123" {
 		t.Fatalf("lookup did not recover: response=%+v err=%v", resolved, err)
 	}
@@ -573,5 +577,23 @@ func TestLiveDaemonBackendAuthorizedPortsAndUnknownTransport(t *testing.T) {
 	}
 	if !reflect.DeepEqual(p.ForwardedPorts, []int32{3000, 8080, 5432}) {
 		t.Fatalf("expected status forwarded ports [3000, 8080, 5432], got %v", p.ForwardedPorts)
+	}
+}
+
+func TestDaemonServesOnlyTheAccountItIsSignedInAs(t *testing.T) {
+	backend := newMockBackend()
+	server := NewServer(backend)
+	for _, account := range []string{"", "user_other"} {
+		_, err := server.ResolveMachine(context.Background(), &pb.MachineQuery{Query: "workstation", AccountId: account})
+		if status.Code(err) != codes.PermissionDenied || !strings.Contains(err.Error(), AccountMismatchMessage("tester@example.test")) {
+			t.Fatalf("resolve for account %q: %v", account, err)
+		}
+		_, err = server.ApprovePeer(context.Background(), &pb.ApprovePeerRequest{MachineId: "dev-1", Approved: true, AccountId: account})
+		if status.Code(err) != codes.PermissionDenied {
+			t.Fatalf("approve for account %q: %v", account, err)
+		}
+	}
+	if _, err := server.ResolveMachine(context.Background(), &pb.MachineQuery{Query: "workstation", AccountId: "user_test"}); err != nil {
+		t.Fatal(err)
 	}
 }

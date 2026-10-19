@@ -24,6 +24,8 @@ type DaemonBackend interface {
 	SubscribeStatus(ctx context.Context) (<-chan *pb.StatusResponse, func(), error)
 	ResolveMachine(ctx context.Context, query string) (*pb.MachineAddress, error)
 	ApprovePeer(ctx context.Context, machineID string, approved bool) error
+	// Account is the signed-in account this daemon serves (id and a label to show people).
+	Account() (id, label string)
 }
 
 // Server exposes the daemon RPC service over local IPC.
@@ -269,6 +271,24 @@ func (s *Server) StreamStatus(_ *pb.Empty, stream pb.DaemonService_StreamStatusS
 	}
 }
 
+// AccountMismatchMessage is what a person sees when a CLI of one account reaches the local
+// service of another. The request must carry the CLI's account; the daemon never serves a
+// different one.
+func AccountMismatchMessage(label string) string {
+	return "This computer's Paperboat service is signed in as " + label + ". Use that account, or run `pb reset` to start fresh."
+}
+
+func (s *Server) requireAccount(requested string) error {
+	id, label := s.backend.Account()
+	if requested == "" || id == "" || requested != id {
+		if label == "" {
+			label = "another account"
+		}
+		return status.Error(codes.PermissionDenied, AccountMismatchMessage(label))
+	}
+	return nil
+}
+
 // ResolveMachine looks up a peer machine's internal IP, ports, and metadata.
 func (s *Server) ResolveMachine(ctx context.Context, query *pb.MachineQuery) (*pb.MachineAddress, error) {
 	if s.backend == nil {
@@ -277,6 +297,9 @@ func (s *Server) ResolveMachine(ctx context.Context, query *pb.MachineQuery) (*p
 	q := query.GetQuery()
 	if q == "" {
 		return nil, status.Error(codes.InvalidArgument, "query is required")
+	}
+	if err := s.requireAccount(query.GetAccountId()); err != nil {
+		return nil, err
 	}
 	resp, err := s.backend.ResolveMachine(ctx, q)
 	if err != nil {
@@ -292,6 +315,9 @@ func (s *Server) ApprovePeer(ctx context.Context, req *pb.ApprovePeerRequest) (*
 	}
 	if req.GetMachineId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "machine_id is required")
+	}
+	if err := s.requireAccount(req.GetAccountId()); err != nil {
+		return nil, err
 	}
 	if err := s.backend.ApprovePeer(ctx, req.GetMachineId(), req.GetApproved()); err != nil {
 		return nil, backendRPCFailure(ctx, "daemon could not update machine approval", err)

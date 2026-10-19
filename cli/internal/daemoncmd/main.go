@@ -305,6 +305,8 @@ func localDaemonCommand() *cobra.Command {
 				return credential.AccessToken, credentialErr
 			}}
 			if profileErr == nil {
+				coordinatorConfig.AccountID = profile.Account.ID
+				coordinatorConfig.AccountLabel = accountLabel(profile.Account)
 				coordinatorConfig.ApprovePeer = func(ctx context.Context, machineID string, approved bool) error {
 					credential, credentialErr := authSource.WithContext(ctx).Credential()
 					if credentialErr != nil {

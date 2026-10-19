@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
+	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/daemonrpc"
 	"github.com/pinksaucepasta/paperboat/internal/resolver"
 	"github.com/spf13/cobra"
@@ -21,6 +23,9 @@ import (
 // (the same message every machine-taking command gives) and keeps every other failure behind
 // the generic coordinator message.
 func rpcMachineFailure(message, query string, err error) error {
+	if mismatch := DaemonRequestFailure(err); mismatch != err {
+		return mismatch
+	}
 	if status.Code(err) == codes.NotFound {
 		return fmt.Errorf("%w: %q", resolver.ErrMachineNotFound, query)
 	}
@@ -48,7 +53,11 @@ func rpcResolveCommand() *cobra.Command {
 				}
 			}()
 
-			addr, err := client.ResolveMachine(ctx, args[0])
+			account, err := CurrentAccountID(cmd)
+			if err != nil {
+				return coordinatorFailure("Could not read this CLI's signed-in account; run pb doctor and retry.", err)
+			}
+			addr, err := client.ResolveMachine(ctx, args[0], account)
 			if err != nil {
 				return rpcMachineFailure("Could not resolve the machine through the local daemon; run pb status and retry.", args[0], err)
 			}
@@ -112,7 +121,14 @@ func rpcApproveCommand() *cobra.Command {
 
 			machineID := args[0]
 			approved := !revoke
-			resp, err := client.ApprovePeer(ctx, machineID, approved)
+			account, err := CurrentAccountID(cmd)
+			if err != nil {
+				return coordinatorFailure("Could not read this CLI's signed-in account; run pb doctor and retry.", err)
+			}
+			resp, err := client.ApprovePeer(ctx, machineID, approved, account)
+			if mismatch := DaemonRequestFailure(err); mismatch != err {
+				return mismatch
+			}
 			if err != nil {
 				return coordinatorFailure("Could not change peer approval through the local daemon; run pb status and retry.", err)
 			}
@@ -138,4 +154,51 @@ func ResolveCommand() *cobra.Command {
 // ApproveCommand creates the pb approve command.
 func ApproveCommand() *cobra.Command {
 	return rpcApproveCommand()
+}
+
+func accountLabel(account config.Account) string {
+	for _, label := range []string{account.Email, account.DisplayName, account.ID} {
+		if label != "" {
+			return label
+		}
+	}
+	return ""
+}
+
+// CurrentAccountID is the signed-in account of the CLI session a daemon request comes from.
+func CurrentAccountID(command *cobra.Command) (string, error) {
+	cfg, err := config.Load(configPathFlag(command))
+	if err != nil {
+		return "", err
+	}
+	if server, _ := command.Flags().GetString("server"); strings.TrimSpace(server) != "" {
+		if cfg.ServerURL, err = config.NormalizeServerURL(server); err != nil {
+			return "", err
+		}
+	}
+	if strings.TrimSpace(cfg.ServerURL) == "" {
+		cfg.ServerURL = buildinfo.DefaultServerURL
+	}
+	store, err := config.ProfileStoreFor(cfg)
+	if err != nil {
+		return "", err
+	}
+	profile, err := store.Load(cfg.ServerURL)
+	if err != nil {
+		return "", err
+	}
+	return profile.Account.ID, nil
+}
+
+// ErrDaemonAccountMismatch is a daemon refusing a request from another account's session.
+type ErrDaemonAccountMismatch struct{ Message string }
+
+func (e ErrDaemonAccountMismatch) Error() string { return e.Message }
+
+// DaemonRequestFailure turns the daemon's account refusal into its typed error.
+func DaemonRequestFailure(err error) error {
+	if status.Code(err) == codes.PermissionDenied {
+		return ErrDaemonAccountMismatch{Message: status.Convert(err).Message()}
+	}
+	return err
 }
