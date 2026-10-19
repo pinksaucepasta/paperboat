@@ -1,24 +1,24 @@
 name: CI
 
-# Manual only until S0-07 is verified.
+# Manual only until every job below is green on main (S0-07).
 on:
   workflow_dispatch:
 
 permissions:
   contents: read
 
-defaults:
-  run:
-    working-directory: server
-
 concurrency:
   group: ci-${{ github.repository }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  check:
+  server:
+    name: Server checks
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: server
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
@@ -30,7 +30,62 @@ jobs:
             cli/go.sum
             relay/go.sum
             tunnel/go.sum
+            helper/go.sum
             go.work.sum
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-yaml python3-cryptography
       - run: python3 -m unittest discover -s ../.github/tests -p 'test_*.py'
       - run: make check race reproducible-builds binary-size-check static-analysis vulnerability-check license-check
+
+  modules:
+    name: Vet and test ${{ matrix.module }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [shared, cli, relay, tunnel, helper]
+    defaults:
+      run:
+        working-directory: ${{ matrix.module }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: ${{ matrix.module }}/go.mod
+          cache: true
+          cache-dependency-path: |
+            server/go.sum
+            cli/go.sum
+            relay/go.sum
+            tunnel/go.sum
+            helper/go.sum
+            go.work.sum
+      - run: go vet ./...
+      - run: go test ./...
+
+  repository:
+    name: Repository policy checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-yaml python3-cryptography
+      - run: python3 tools/check_domains.py && (cd tools && python3 -m unittest test_check_domains)
+      - run: python3 tools/check_doc_links.py && (cd tools && python3 -m unittest test_check_doc_links)
+      - run: python3 -m unittest discover -s deploy -p 'test_*.py'
+
+  console:
+    name: Console lint and types
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: console
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: oven-sh/setup-bun@3d267786b128fe76c2f16a390aa2448b815359f3 # v2.1.2
+        with:
+          bun-version-file: console/package.json
+      - run: bun install --frozen-lockfile
+      - run: bun run lint
+      - run: bunx tsc --noEmit
