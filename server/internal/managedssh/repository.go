@@ -12,6 +12,7 @@ import (
 	wire "github.com/pinksaucepasta/paperboat/shared/managedssh"
 	"math"
 	"reflect"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -23,9 +24,23 @@ import (
 	"github.com/pinksaucepasta/paperboat-server/internal/teams"
 )
 
+// MachineReplacer removes the retired record of a computer that was added again, inside the
+// transaction that moved its SSH host keys to the new record.
+type MachineReplacer interface {
+	ReplaceRetiredMachineTx(ctx context.Context, tx *db.Tx, userID, retiredID, replacementID string) error
+}
+
+// WithMachineReplacer installs the removal run when a new machine reports host keys that a
+// retired record of the same account owned.
+func (r *SQLRepository) WithMachineReplacer(replacer MachineReplacer) *SQLRepository {
+	r.replacer = replacer
+	return r
+}
+
 type SQLRepository struct {
-	store *db.DB
-	audit *audit.Writer
+	replacer MachineReplacer
+	store    *db.DB
+	audit    *audit.Writer
 	// clientKeyWindow is how recently a CLI session must have been used for its SSH key to count.
 	clientKeyWindow time.Duration
 }
@@ -440,6 +455,7 @@ func (r *SQLRepository) ObserveHost(ctx context.Context, request ObserveHostRequ
 				return pendingErr
 			}
 		}
+		var retiredOwners []string
 		for _, key := range proposed.Keys {
 			owner, ownerErr := q.GetMachineSSHHostKeyOwner(ctx, key.Fingerprint[:])
 			if ownerErr == nil && owner.UserMachineID != request.UserMachineID {
@@ -449,6 +465,9 @@ func (r *SQLRepository) ObserveHost(ctx context.Context, request ObserveHostRequ
 					return err
 				} else if released {
 					ownerErr = pgx.ErrNoRows
+					if !slices.Contains(retiredOwners, owner.UserMachineID) {
+						retiredOwners = append(retiredOwners, owner.UserMachineID)
+					}
 				}
 			}
 			if ownerErr == nil {
@@ -462,6 +481,15 @@ func (r *SQLRepository) ObserveHost(ctx context.Context, request ObserveHostRequ
 			}
 			if _, err := q.CreateMachineSSHHostKeyOwner(ctx, dbsqlc.CreateMachineSSHHostKeyOwnerParams{Fingerprint: key.Fingerprint[:], UserMachineID: request.UserMachineID, Algorithm: key.Algorithm, PublicKey: key.PublicKey, FirstObservedAt: proposed.ObservedAt}); err != nil {
 				return err
+			}
+		}
+		// The new machine now owns host keys the retired record(s) of the same account
+		// owned: it is the same computer added again, so the dead record is removed.
+		if r.replacer != nil {
+			for _, retiredID := range retiredOwners {
+				if err := r.replacer.ReplaceRetiredMachineTx(ctx, tx, request.UserID, retiredID, request.UserMachineID); err != nil {
+					return err
+				}
 			}
 		}
 		created, err := q.CreateMachineSSHHostKeySet(ctx, dbsqlc.CreateMachineSSHHostKeySetParams{ID: proposed.ID, UserMachineID: proposed.UserMachineID, MachineGeneration: int64(proposed.MachineGeneration), ObservationGeneration: int64(proposed.ObservationGeneration), SetFingerprint: proposed.Fingerprint[:], State: state, ReconciliationVersion: int64(proposed.ReconciliationVersion), ObservedAt: proposed.ObservedAt, PromotedAt: promotedAt})

@@ -313,54 +313,24 @@ func allocateMachineAlias(ctx context.Context, queries *dbsqlc.Queries, userID, 
 }
 
 // A fresh identity must never take over an existing machine merely because its
-// host has the same name. A disconnected or revoked record only keeps its name
-// for history, so the requested name moves to the fresh machine and the retired
-// record is renamed out of the way; a live machine keeps its name and the
-// fresh one gets the next free suffix.
+// host has the same name. Keep the old machine and choose the next free name; a
+// retired record of the same computer is removed later, when its SSH host keys
+// prove it (ReplaceRetiredMachineTx), and the fresh machine then takes the name.
 func allocateFreshMachineAlias(ctx context.Context, queries *dbsqlc.Queries, userID, alias string) (string, error) {
 	if err := queries.LockUserMachineAliases(ctx, userID); err != nil {
 		return "", err
 	}
-	free := func(candidate string) (bool, error) {
-		exists, err := queries.UserMachineAliasExists(ctx, dbsqlc.UserMachineAliasExistsParams{UserID: userID, Alias: candidate})
-		return !exists, err
-	}
-	requested := machinealias.Candidate(alias, 1)
-	if ok, err := free(requested); err != nil || ok {
-		return requested, err
-	}
-	if retired, err := releaseRetiredMachineAlias(ctx, queries, userID, requested, free); err != nil || retired {
-		return requested, err
-	}
-	for ordinal := 2; ordinal <= 1000; ordinal++ {
+	for ordinal := 1; ordinal <= 1000; ordinal++ {
 		candidate := machinealias.Candidate(alias, ordinal)
-		ok, err := free(candidate)
+		exists, err := queries.UserMachineAliasExists(ctx, dbsqlc.UserMachineAliasExistsParams{UserID: userID, Alias: candidate})
 		if err != nil {
 			return "", err
 		}
-		if ok {
+		if !exists {
 			return candidate, nil
 		}
 	}
 	return "", ErrMachineNameConflict
-}
-
-// releaseRetiredMachineAlias renames the disconnected or revoked record that
-// holds alias to the next free "<alias>-old" name and reports whether it did.
-func releaseRetiredMachineAlias(ctx context.Context, queries *dbsqlc.Queries, userID, alias string, free func(string) (bool, error)) (bool, error) {
-	for ordinal := 1; ordinal <= 1000; ordinal++ {
-		candidate := machinealias.Candidate(alias+"-old", ordinal)
-		ok, err := free(candidate)
-		if err != nil {
-			return false, err
-		}
-		if !ok {
-			continue
-		}
-		renamed, err := queries.RenameRetiredUserMachineAlias(ctx, dbsqlc.RenameRetiredUserMachineAliasParams{NewAlias: candidate, UserID: userID, Alias: alias})
-		return renamed > 0, err
-	}
-	return false, nil
 }
 
 func mapCapabilities(configured, observed []string) MachineCapabilities {

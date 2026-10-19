@@ -1753,7 +1753,9 @@ func TestDashboardEnrollmentIsIdempotentSingleClaimAndIssuesMaterial(t *testing.
 	}
 }
 
-func TestFreshEnrollmentTakesTheNameOfARetiredMachine(t *testing.T) {
+// A retired record still holds its name (a fresh enrollment gets the numbered variant) until it
+// is removed; once pb reset / start fresh removes it explicitly, the new enrollment takes the exact name.
+func TestFreshEnrollmentTakesTheNameOnceTheRetiredRecordIsRemoved(t *testing.T) {
 	integrationPublicIdentityKey := newIntegrationPublicIdentityKey(t)
 	store := testStore(t)
 	ctx := context.Background()
@@ -1781,13 +1783,15 @@ func TestFreshEnrollmentTakesTheNameOfARetiredMachine(t *testing.T) {
 	service.ConfigureHelperEnrollment(func(context.Context, string, string, string, time.Duration) (HelperEnrollmentGrant, error) {
 		return HelperEnrollmentGrant{EnrollmentID: "henr_retired_" + suffix, HelperID: "hlp_retired_" + suffix, Credential: "enrollment-credential", ExpiresAt: time.Now().UTC().Add(10 * time.Minute)}, nil
 	})
+	enrollments := 0
 	enroll := func(alias, key string) string {
 		t.Helper()
-		start, err := service.StartEnrollment(ctx, userID, "idem-"+alias)
+		enrollments++
+		start, err := service.StartEnrollment(ctx, userID, fmt.Sprintf("idem-%s-%d", alias, enrollments))
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := service.CreatePairing(ctx, PairingInput{EnrollmentToken: start.BootstrapToken, Verifier: "verifier-" + alias + "-" + suffix, Alias: alias, Platform: "darwin", Architecture: "arm64", WorkspaceRoot: "/Users/paperboat", RuntimeVersions: json.RawMessage(`{"pb":"test"}`), PublicIdentityKey: key}); err != nil {
+		if _, err := service.CreatePairing(ctx, PairingInput{EnrollmentToken: start.BootstrapToken, Verifier: fmt.Sprintf("verifier-%s-%d-%s", alias, enrollments, suffix), Alias: alias, Platform: "darwin", Architecture: "arm64", WorkspaceRoot: "/Users/paperboat", RuntimeVersions: json.RawMessage(`{"pb":"test"}`), PublicIdentityKey: key}); err != nil {
 			t.Fatal(err)
 		}
 		status, err := service.Enrollment(ctx, userID, start.ID)
@@ -1805,11 +1809,19 @@ func TestFreshEnrollmentTakesTheNameOfARetiredMachine(t *testing.T) {
 		return alias
 	}
 	fresh := enroll("studio", integrationPublicIdentityKey)
-	if got := aliasOf(fresh); got != "studio" {
-		t.Fatalf("fresh machine alias=%q, want the retired machine's name studio", got)
+	if got := aliasOf(fresh); got != "studio-2" {
+		t.Fatalf("fresh machine beside a retired record alias=%q, want studio-2", got)
 	}
-	if got := aliasOf("mch_retired_0_" + suffix); got != "studio-old" {
-		t.Fatalf("retired machine alias=%q, want studio-old", got)
+	if got := aliasOf("mch_retired_0_" + suffix); got != "studio" {
+		t.Fatalf("retired machine alias=%q, want it untouched", got)
+	}
+	// pb reset / start fresh removes the old record explicitly, then the computer is added again.
+	if err := service.Delete(ctx, userID, "mch_retired_0_"+suffix); err != nil {
+		t.Fatal(err)
+	}
+	again := enroll("studio", newIntegrationPublicIdentityKey(t))
+	if got := aliasOf(again); got != "studio" {
+		t.Fatalf("machine added after the old record was removed alias=%q, want studio", got)
 	}
 	live := enroll("desk", newIntegrationPublicIdentityKey(t))
 	if got := aliasOf(live); got != "desk-2" {
