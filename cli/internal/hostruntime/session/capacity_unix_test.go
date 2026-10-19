@@ -178,3 +178,43 @@ func TestDeleteRunningSessionPurgesPersistentState(t *testing.T) {
 		t.Fatalf("persistent sessions=%v err=%v", records, err)
 	}
 }
+
+// Closed records are kept for display; only live sessions count against the limit, as on the
+// server, so a user with 19 live sessions and a few closed ones can still open the 20th.
+func TestClosedSessionsDoNotConsumeTheLiveSessionLimit(t *testing.T) {
+	const maxSessions = 4
+	var exited atomic.Int32
+	manager, err := NewManager(ManagerConfig{
+		Launch: func(pty.Command) (PTYProcess, error) {
+			return &capacityProcess{done: make(chan struct{}), exited: &exited}, nil
+		},
+		MaxSessions: maxSessions, MaxAttachments: 2, MaxInputDecisions: 2,
+		HistoryBytes: 1024, AttachmentBytes: 1024,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	create := func(name string) (Snapshot, error) {
+		return manager.Create(context.Background(), CreateRequest{Name: name, Command: pty.Command{Path: "/bin/sh", CWD: "/tmp", Dimensions: pty.Dimensions{Columns: 80, Rows: 24}}})
+	}
+	var created []Snapshot
+	for index := 0; index < maxSessions; index++ {
+		snapshot, err := create(fmt.Sprintf("live-%d", index))
+		if err != nil {
+			t.Fatal(err)
+		}
+		created = append(created, snapshot)
+	}
+	if _, err := create("overflow"); !errors.Is(err, ErrResourceLimit) {
+		t.Fatalf("limit err=%v", err)
+	}
+	if _, err := manager.Close(context.Background(), created[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := create("after-close"); err != nil {
+		t.Fatalf("a closed record still consumed the live-session limit: %v", err)
+	}
+	if _, err := create("overflow-again"); !errors.Is(err, ErrResourceLimit) {
+		t.Fatalf("limit not enforced for live sessions: %v", err)
+	}
+}

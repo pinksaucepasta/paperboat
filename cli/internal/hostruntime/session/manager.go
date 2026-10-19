@@ -376,6 +376,19 @@ func (m *Manager) launch(ctx context.Context, command pty.Command) (PTYProcess, 
 	return process, classifySessionFailure("command", err)
 }
 
+// liveSessionsLocked counts the sessions that can still hold a process. Closed records are
+// retained only for display and must not consume the live-session limit, matching the server
+// (terminal_session_limit_reached) and the session-owner router.
+func (m *Manager) liveSessionsLocked() int {
+	live := 0
+	for _, current := range m.sessions {
+		if state, _ := current.lifecycle.Snapshot(); state != Closed && state != Deleted {
+			live++
+		}
+	}
+	return live
+}
+
 func (m *Manager) Create(ctx context.Context, request CreateRequest) (Snapshot, error) {
 	if !validSessionName(request.Name) {
 		return Snapshot{}, ErrInvalidSession
@@ -393,7 +406,7 @@ func (m *Manager) Create(ctx context.Context, request CreateRequest) (Snapshot, 
 	if m.stopping {
 		return Snapshot{}, ErrManagerStopped
 	}
-	if len(m.sessions) >= m.config.MaxSessions {
+	if m.liveSessionsLocked() >= m.config.MaxSessions {
 		return Snapshot{}, ErrResourceLimit
 	}
 	if _, exists := m.names[request.Name]; exists {

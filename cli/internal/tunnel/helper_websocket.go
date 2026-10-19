@@ -42,6 +42,10 @@ type helperFrame struct {
 	Payload     json.RawMessage `json:"payload,omitempty"`
 }
 
+// terminalSessionLimitMessage is what the user sees when the machine already runs the maximum
+// number of live terminal sessions.
+const terminalSessionLimitMessage = "This machine has reached its terminal session limit. Close a terminal with `pb session close`, then retry."
+
 type helperRemoteError struct {
 	Code      string                  `json:"code"`
 	Retryable bool                    `json:"retryable"`
@@ -50,7 +54,7 @@ type helperRemoteError struct {
 
 // LocalAPICode exposes only safe, established launch-denial codes.
 func (e *helperRemoteError) LocalAPICode() string {
-	if e != nil && e.Code == "environment_unavailable" {
+	if e != nil && (e.Code == "environment_unavailable" || e.Code == "resource_limit") {
 		return e.Code
 	}
 	return ""
@@ -80,6 +84,8 @@ func (e *helperRemoteError) Error() string {
 	switch e.Code {
 	case "environment_unavailable":
 		return "Managed environment variables could not be delivered on the target. Check ENV delivery and retry."
+	case "resource_limit":
+		return terminalSessionLimitMessage
 	case "not_found_or_forbidden":
 		return "terminal resource was not found or is not permitted"
 	case "replay_gap":

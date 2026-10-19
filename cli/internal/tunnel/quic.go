@@ -82,7 +82,7 @@ func (e *terminalTransportError) TransportRetryable() bool {
 		return false
 	}
 	var remote *helperRemoteError
-	if errors.As(e.cause, &remote) && (!remote.Retryable || remote.Code == "environment_unavailable") {
+	if errors.As(e.cause, &remote) && (!remote.Retryable || remote.Code == "environment_unavailable" || remote.Code == "resource_limit") {
 		return false
 	}
 	var control *api.APIError
