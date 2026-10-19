@@ -315,6 +315,12 @@ SELECT EXISTS (
   WHERE user_id = sqlc.arg(user_id) AND owner_team_id IS NULL AND lower(alias) = lower(sqlc.arg(alias)) AND deleted_at IS NULL
 );
 
+-- name: RenameRetiredUserMachineAlias :execrows
+UPDATE user_machines
+SET alias = sqlc.arg(new_alias), updated_at = now(), version = version + 1
+WHERE user_id = sqlc.arg(user_id) AND owner_team_id IS NULL AND lower(alias) = lower(sqlc.arg(alias))
+  AND deleted_at IS NULL AND state IN ('revoked', 'disconnected');
+
 -- name: LockUserMachineAliases :exec
 SELECT pg_advisory_xact_lock(hashtextextended(sqlc.arg(user_id), 0));
 

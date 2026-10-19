@@ -4819,6 +4819,27 @@ func (q *Queries) RecordUserMachineTopupConsumption(ctx context.Context, arg Rec
 	return result.RowsAffected(), nil
 }
 
+const renameRetiredUserMachineAlias = `-- name: RenameRetiredUserMachineAlias :execrows
+UPDATE user_machines
+SET alias = $1, updated_at = now(), version = version + 1
+WHERE user_id = $2 AND owner_team_id IS NULL AND lower(alias) = lower($3)
+  AND deleted_at IS NULL AND state IN ('revoked', 'disconnected')
+`
+
+type RenameRetiredUserMachineAliasParams struct {
+	NewAlias string
+	UserID   string
+	Alias    string
+}
+
+func (q *Queries) RenameRetiredUserMachineAlias(ctx context.Context, arg RenameRetiredUserMachineAliasParams) (int64, error) {
+	result, err := q.db.Exec(ctx, renameRetiredUserMachineAlias, arg.NewAlias, arg.UserID, arg.Alias)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const renameUserMachine = `-- name: RenameUserMachine :one
 UPDATE user_machines
 SET alias = $1, description = $2, updated_at = now(), version = version + 1

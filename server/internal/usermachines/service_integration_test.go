@@ -1753,6 +1753,73 @@ func TestDashboardEnrollmentIsIdempotentSingleClaimAndIssuesMaterial(t *testing.
 	}
 }
 
+func TestFreshEnrollmentTakesTheNameOfARetiredMachine(t *testing.T) {
+	integrationPublicIdentityKey := newIntegrationPublicIdentityKey(t)
+	store := testStore(t)
+	ctx := context.Background()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	userID := "usr_retired_alias_" + suffix
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users (id, workos_subject, primary_email, status) VALUES ($1,$2,$3,'active')`, userID, "workos_"+suffix, "retired-alias-"+suffix+"@example.test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machine_entitlements (id,user_id,provider_subscription_id,product_code,state,seat_quantity,allowance_bytes,current_period_start,current_period_end) VALUES ($1,$2,$3,'connected-test','active',1,1048576,now()-interval '1 hour',now()+interval '1 hour')`, "ume_retired_alias_"+suffix, userID, "sub_retired_alias_"+suffix); err != nil {
+		t.Fatal(err)
+	}
+	for i, state := range []string{"disconnected", "offline"} {
+		alias := []string{"studio", "desk"}[i]
+		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state) VALUES ($1,$2,$3,$4,'darwin','arm64','/Users/paperboat',$5,'released')`, fmt.Sprintf("mch_retired_%d_%s", i, suffix), userID, fmt.Sprintf("env_retired_%d_%s", i, suffix), alias, state); err != nil {
+			t.Fatal(err)
+		}
+	}
+	service := New(store, audit.NewWriter(store), Policy{PairingLifetime: 10 * time.Minute, AllowedPlatforms: []string{"darwin", "linux"}}, testSeatAuthorizer{})
+	service.ConfigureInstallationEncryption("test-enrollment-key")
+	service.ConfigureAccess(nil, "https://api.paperboat.test")
+	service.ConfigureBootstrapCommand("pb machine bootstrap")
+	if err := service.ConfigureRuntimeRoute("runtime.example.test", 38080); err != nil {
+		t.Fatal(err)
+	}
+	service.ConfigureHelperEnrollment(func(context.Context, string, string, string, time.Duration) (HelperEnrollmentGrant, error) {
+		return HelperEnrollmentGrant{EnrollmentID: "henr_retired_" + suffix, HelperID: "hlp_retired_" + suffix, Credential: "enrollment-credential", ExpiresAt: time.Now().UTC().Add(10 * time.Minute)}, nil
+	})
+	enroll := func(alias, key string) string {
+		t.Helper()
+		start, err := service.StartEnrollment(ctx, userID, "idem-"+alias)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := service.CreatePairing(ctx, PairingInput{EnrollmentToken: start.BootstrapToken, Verifier: "verifier-" + alias + "-" + suffix, Alias: alias, Platform: "darwin", Architecture: "arm64", WorkspaceRoot: "/Users/paperboat", RuntimeVersions: json.RawMessage(`{"pb":"test"}`), PublicIdentityKey: key}); err != nil {
+			t.Fatal(err)
+		}
+		status, err := service.Enrollment(ctx, userID, start.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return status.UserMachineID
+	}
+	aliasOf := func(id string) string {
+		t.Helper()
+		var alias string
+		if err := store.SQL().QueryRowContext(ctx, `SELECT alias FROM paperboat.user_machines WHERE id=$1`, id).Scan(&alias); err != nil {
+			t.Fatal(err)
+		}
+		return alias
+	}
+	fresh := enroll("studio", integrationPublicIdentityKey)
+	if got := aliasOf(fresh); got != "studio" {
+		t.Fatalf("fresh machine alias=%q, want the retired machine's name studio", got)
+	}
+	if got := aliasOf("mch_retired_0_" + suffix); got != "studio-old" {
+		t.Fatalf("retired machine alias=%q, want studio-old", got)
+	}
+	live := enroll("desk", newIntegrationPublicIdentityKey(t))
+	if got := aliasOf(live); got != "desk-2" {
+		t.Fatalf("machine beside a live one alias=%q, want desk-2", got)
+	}
+	if got := aliasOf("mch_retired_1_" + suffix); got != "desk" {
+		t.Fatalf("live machine alias=%q, want desk", got)
+	}
+}
+
 func TestDashboardEnrollmentsStayBoundToTheirOwnTokenAndInstallation(t *testing.T) {
 	integrationPublicIdentityKey := newIntegrationPublicIdentityKey(t)
 	store := testStore(t)
