@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
@@ -1093,7 +1094,9 @@ func (c *Coordinator) serveRoute(route *guardedRoute) {
 	for {
 		local, err := route.listener.Accept()
 		if err != nil {
-			if route.ctx.Err() == nil || !coordinatorExpected(err, false) {
+			// While the daemon closes a route, the guard shuts the shared socket down when the
+			// lease is released, so a pending accept ends with EINVAL instead of "closed".
+			if route.ctx.Err() == nil || !(coordinatorExpected(err, false) || errors.Is(err, syscall.EINVAL)) {
 				c.retireFailedRoute(route, err)
 			}
 			return

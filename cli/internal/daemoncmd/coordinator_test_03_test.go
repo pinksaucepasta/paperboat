@@ -287,3 +287,44 @@ func TestCoordinatorStartRejectsUnfinishedGenerationCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// revokedListener fails its pending accept with EINVAL once released, as a socket the machine guard
+// shut down does.
+type revokedListener struct {
+	net.Listener
+	released chan struct{}
+}
+
+func (l *revokedListener) Accept() (net.Conn, error) {
+	<-l.released
+	return nil, &net.OpError{Op: "accept", Net: "tcp", Err: os.NewSyscallError("accept4", syscall.EINVAL)}
+}
+func (l *revokedListener) Close() error { close(l.released); return nil }
+
+// Releasing a route while it is still registered makes the machine guard shut its socket down, which
+// fails the daemon's pending accept with EINVAL. That is the daemon closing the route itself: it must
+// not retire the route as failed or degrade local access.
+func TestCoordinatorClosingARouteIsNotAListenerFailure(t *testing.T) {
+	reported := make(chan error, 1)
+	c, err := NewCoordinator(CoordinatorConfig{NameClient: &generationNameClient{generation: 1}, DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, net.ErrClosed }, ReportReconcileError: func(err error) { reported <- err }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	route := &guardedRoute{listener: &revokedListener{released: make(chan struct{})}, machineID: "peer", port: 8080, ctx: ctx, cancel: cancel}
+	c.routes["peer\x00studio\x00127.100.0.22\x008080"] = route
+	c.wg.Add(1)
+	go c.serveRoute(route)
+	if err := route.close(); err != nil {
+		t.Fatal(err)
+	}
+	c.wg.Wait()
+	select {
+	case err := <-reported:
+		t.Fatalf("closing a route degraded local access: %v", err)
+	default:
+	}
+	if len(c.routes) != 1 {
+		t.Fatalf("route was retired as failed: %d routes", len(c.routes))
+	}
+}
