@@ -11,7 +11,7 @@ import time
 from urllib.parse import urlparse
 
 from pairing_fault import PairingFaultProxy
-from pairing_lifecycle import interrupt_pair, invoke, runtime_root
+from pairing_lifecycle import FaultAbsorbed, interrupt_pair, invoke, runtime_root
 
 
 def binding(record):
@@ -71,7 +71,10 @@ def main():
             if origin.scheme != 'https':
                 raise RuntimeError('network fault requires end-to-end TLS')
             proxy = PairingFaultProxy(origin.hostname, origin.port or 443)
-            environment = interrupt_pair(binary, arguments, root, 'network', proxy)
+            try:
+                environment = interrupt_pair(binary, arguments, root, 'network', proxy)
+            except FaultAbsorbed:
+                environment = None  # setup retried through the cut connection; the rerun below must still be a no-op
     except Exception as error:
         failure = error
     try:

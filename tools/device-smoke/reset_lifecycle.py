@@ -30,6 +30,7 @@ def main():
     inbox.mkdir(parents=True, exist_ok=True)
     sentinel.write_bytes(os.urandom(32))
     started = time.monotonic()
+    had_env = bool(p.invoke(PB, 'env', 'list', '--json').get('names'))  # needs the vault unlocked
     try:
         with tempfile.TemporaryDirectory(prefix='pb-reset-') as directory:
             token = p.enrollment_file(PB, alias, Path(directory))
@@ -50,11 +51,7 @@ def main():
                         '--name', alias], root, 'none', before['server_url'], password)
         failures = []
         explained = 'managed environment variables are pending' in paired or 'ENV' in paired and 'pending' in paired.lower()
-        try:
-            has_env = bool(p.invoke(PB, 'env', 'list', '--json').get('names'))
-        except RuntimeError:
-            has_env = True  # locked vault after the reset: the account's ENV values exist
-        if has_env and not explained:
+        if had_env and not explained:
             failures.append('pair output does not explain pending managed environment variables')
         after = json.loads((root / 'machine-registration.json').read_text())
         current = machines()
@@ -78,7 +75,7 @@ def main():
     finally:
         sentinel.unlink(missing_ok=True)
     if failures:
-        print(json.dumps({'check': 'reset-lifecycle', 'status': 'FAIL', 'failures': failures, 'old_machine_id': before['machine_id'], 'new_machine_id': after['machine_id']}), flush=True)
+        print(json.dumps({'check': 'reset-lifecycle', 'status': 'FAIL', 'failures': failures, 'old_machine_id': before['machine_id'], 'pair_env_lines': [l.strip() for l in paired.splitlines() if 'nvironment' in l or 'ENV' in l][:3], 'new_machine_id': after['machine_id']}), flush=True)
         raise SystemExit(1)
     print(json.dumps({'check': 'reset-lifecycle', 'status': 'PASS', 'seconds': round(time.monotonic() - started, 1),
                       'wrong_hostname_refused': True, 'new_record_same_alias': True, 'old_record_replaced': True,

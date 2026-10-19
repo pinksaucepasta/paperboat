@@ -181,6 +181,14 @@ def enrollment_file(binary, alias, directory):
     return path
 
 
+class FaultAbsorbed(Exception):
+    """The command finished successfully despite an injected fault that really cut a connection."""
+
+    def __init__(self, output):
+        super().__init__('pairing completed despite the injected fault')
+        self.output = output
+
+
 def interrupt_pair(binary, arguments, root, mode, proxy):
     environment = dict(os.environ)
     if proxy is not None:
@@ -200,8 +208,12 @@ def interrupt_pair(binary, arguments, root, mode, proxy):
                     os.kill(process.pid, signal.SIGINT)
                 elif proxy.cut() < 1:
                     raise RuntimeError('network fault did not cut an actual connection')
-                process.communicate(timeout=40)
+                stdout, stderr = process.communicate(timeout=40)
                 if process.returncode == 0:
+                    if mode == 'network':
+                        # A cut connection that the command retries through is the better outcome,
+                        # as long as the cut was real (cut() >= 1 above) and the end state is checked.
+                        raise FaultAbsorbed((stdout + stderr).decode(errors='replace'))
                     raise RuntimeError('fault did not stop pending pairing')
                 return environment
             time.sleep(0.005)
@@ -222,7 +234,10 @@ def pair(binary, arguments, root, fault, server, password=None):
             proxy = PairingFaultProxy(origin.hostname, origin.port or 443)
         environment = None
         if fault != 'none':
-            environment = interrupt_pair(binary, arguments, root, fault, proxy)
+            try:
+                environment = interrupt_pair(binary, arguments, root, fault, proxy)
+            except FaultAbsorbed as absorbed:
+                return absorbed.output
         # Exact argv, token file and protected journal; no manual recovery edits.
         return invoke(binary, *arguments, env=environment, raw=True, terminal=True, password=password)
     finally:
