@@ -365,7 +365,21 @@ func TestRuntimeAttachmentOutlivesCredentialOutageAndRevokes(t *testing.T) {
 // from being admitted.
 func TestRuntimeCarrierConnectsWhileAnotherEdgeCandidateIsUnresponsive(t *testing.T) {
 	var document admission
+	var requestsMu sync.Mutex
+	var reportedLatency []edgeLatency
 	transport := roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		if request.Body != nil {
+			raw, _ := io.ReadAll(request.Body)
+			request.Body = io.NopCloser(bytes.NewReader(raw))
+			var sent struct {
+				EdgeLatency []edgeLatency `json:"edge_latency"`
+			}
+			if json.Unmarshal(raw, &sent) == nil && len(sent.EdgeLatency) != 0 {
+				requestsMu.Lock()
+				reportedLatency = append(reportedLatency, sent.EdgeLatency...)
+				requestsMu.Unlock()
+			}
+		}
 		payload, err := json.Marshal(struct {
 			Data admission `json:"data"`
 		}{document})
@@ -430,5 +444,24 @@ func TestRuntimeCarrierConnectsWhileAnotherEdgeCandidateIsUnresponsive(t *testin
 		defer edge.Close()
 	case <-time.After(8 * time.Second):
 		t.Fatal("runtime carrier was not admitted while another edge candidate was unresponsive")
+	}
+	// The healthy edge's probe time is reported to the server; the unresponsive one has no measurement.
+	deadline := time.Now().Add(8 * time.Second)
+	for {
+		requestsMu.Lock()
+		reported := append([]edgeLatency(nil), reportedLatency...)
+		requestsMu.Unlock()
+		if len(reported) != 0 {
+			for _, sample := range reported {
+				if sample.NodeID != "edge-test" || sample.ProcessEpoch != epoch || sample.RTTMilliseconds < 1 || sample.RTTMilliseconds > maximumLatencyMilliseconds {
+					t.Fatalf("unexpected latency report %+v", sample)
+				}
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the probe time of the healthy edge was never reported to the server")
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }
