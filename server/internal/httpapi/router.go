@@ -104,6 +104,7 @@ type Options struct {
 	ResourceUsage            *resourceusage.Service
 	NativePrivateAccess      *nativeprivateaccess.Service
 	MachineServices          *machineservices.Service
+	MachineLatency           machineLatencyService
 	ManagedSSH               *managedssh.Service
 	DiagnosticUploads        *diagnosticuploads.Service
 	OverrideHandler          http.Handler
@@ -585,6 +586,10 @@ func NewRouter(opts Options) http.Handler {
 			}
 			mux.Handle("PATCH /v1/machines/{machine_id}", userMachineAuth("machines:connect", requireCSRF(opts.Auth, userMachineRename(opts.Machines))))
 			mux.Handle("GET /v1/machines/{machine_id}/update-status", userMachineAuth("machines:read", userMachineUpdateStatus(opts.Machines)))
+			if opts.MachineLatency != nil {
+				mux.Handle("GET /v1/machines/{machine_id}/network-latency", userMachineAuth("machines:read", machineLatencyList(opts.Machines, opts.MachineLatency)))
+				mux.Handle("PUT /v1/machines/{machine_id}/network-latency", userMachineAuth("machines:connect", requireCSRF(opts.Auth, machineLatencyReport(opts.Machines, opts.MachineLatency))))
+			}
 			if opts.Inbox != nil {
 				mux.Handle("GET /v1/machines/{machine_id}/inbox", userMachineAuth("machines:read", userMachineInboxList(opts.Machines, opts.Inbox)))
 				mux.Handle("GET /v1/machines/{machine_id}/inbox/{file_id}/content", userMachineAuth("machines:read", userMachineInboxContent(opts.Machines, opts.Inbox)))

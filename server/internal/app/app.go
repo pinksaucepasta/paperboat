@@ -34,6 +34,7 @@ import (
 	"github.com/pinksaucepasta/paperboat-server/internal/jobmonitor"
 	"github.com/pinksaucepasta/paperboat-server/internal/lazyaccess"
 	"github.com/pinksaucepasta/paperboat-server/internal/machineevents"
+	"github.com/pinksaucepasta/paperboat-server/internal/machinelatency"
 	"github.com/pinksaucepasta/paperboat-server/internal/machineservices"
 	"github.com/pinksaucepasta/paperboat-server/internal/managedssh"
 	"github.com/pinksaucepasta/paperboat-server/internal/metering"
@@ -817,6 +818,7 @@ func New(opts Options) (*App, error) {
 		ConfigStatuses:            configStatusService,
 		ConfigRepositoryAccess:    configRepositoryAccessService,
 		ConfigRuntime:             configRuntimeService,
+		MachineLatency:            &machinelatency.Service{DB: store.SQL()},
 		ConfigConflicts:           configConflictService,
 		Routes:                    routeService,
 		Favorites:                 favorites.NewService(store),
