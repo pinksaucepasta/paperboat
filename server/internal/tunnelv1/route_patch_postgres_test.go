@@ -97,3 +97,48 @@ func TestPublicHTTPCatchAllRouteIsRejectedOnPostgres(t *testing.T) {
 		t.Fatalf("private catch-all HTTP route became public: %v", err)
 	}
 }
+
+// Removing a route frees its name: adding the same hostname and path again must not conflict with
+// the removed one, while two live routes still cannot share a name.
+func TestRouteNameIsReusableAfterRemovalOnPostgres(t *testing.T) {
+	f := newTRK07PostgresFixture(t)
+	ctx := context.Background()
+	account, host := f.addAccount(t, "route-name-reuse")
+	tunnel := "tun_route_reuse_" + f.suffix
+	f.createTunnel(t, account, host, tunnel, "reuse-"+f.suffix)
+	exec := func(query string, args ...any) error {
+		_, err := f.database.SQL().ExecContext(ctx, query, args...)
+		return err
+	}
+	var route string
+	if err := f.database.SQL().QueryRowContext(ctx, `SELECT id FROM paperboat.tunnel_routes WHERE tunnel_id=$1 AND deleted_at IS NULL ORDER BY id LIMIT 1`, tunnel).Scan(&route); err != nil {
+		t.Fatal(err)
+	}
+	// A copy of the route under a new id and path, as adding another hostname would create.
+	insert := func(id, path string) error {
+		tx, err := f.database.SQL().BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		if _, err = tx.ExecContext(ctx, `CREATE TEMP TABLE route_copy ON COMMIT DROP AS SELECT * FROM paperboat.tunnel_routes WHERE id=$1`, route); err != nil {
+			return err
+		}
+		if _, err = tx.ExecContext(ctx, `UPDATE route_copy SET id=$1, path_prefix=$2, deleted_at=NULL, desired_state='active'`, id, path); err != nil {
+			return err
+		}
+		if _, err = tx.ExecContext(ctx, `INSERT INTO paperboat.tunnel_routes SELECT * FROM route_copy`); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}
+	if err := insert("route_reuse_a_"+f.suffix, "/a"); err == nil {
+		t.Fatal("two live routes shared a name")
+	}
+	if err := exec(`UPDATE paperboat.tunnel_routes SET desired_state='deleted', deleted_at=now() WHERE id=$1`, route); err != nil {
+		t.Fatal(err)
+	}
+	if err := insert("route_reuse_b_"+f.suffix, "/b"); err != nil {
+		t.Fatalf("removed route's name was not reusable: %v", err)
+	}
+}
