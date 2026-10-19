@@ -15,6 +15,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machinecontrol"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelmanager"
 	"github.com/pinksaucepasta/paperboat/internal/inspector"
 )
@@ -49,6 +50,10 @@ type MachinePreviewRuntimeConfig struct {
 	Inspector     *inspector.Store
 	Registry      *inspector.Registry
 	InspectorHTTP tunnelmanager.AuthenticatedInspectorHTTP
+
+	// PlacementEvents wakes the placement watch of every carrier when a preview of this machine
+	// changes on the server; nil polls at the placement interval only.
+	PlacementEvents *machineevents.Subscription
 }
 
 // MachinePreviewRuntime owns one authenticated machine carrier source and
@@ -62,6 +67,8 @@ type MachinePreviewRuntime struct {
 	private     *PrivateAccessSource
 	auth        *machinecontrol.Source
 	machineID   string
+
+	placementEvents *machineevents.Subscription
 
 	mu     sync.Mutex
 	closed bool
@@ -140,7 +147,7 @@ func NewMachinePreviewRuntime(config MachinePreviewRuntimeConfig) (*MachinePrevi
 		_ = sessions.Close(context.WithoutCancel(config.RunContext))
 		return nil, errors.Join(ErrMachinePreviewRuntimeInvalid, err)
 	}
-	return &MachinePreviewRuntime{attachments: attachments, sessions: sessions, provider: provider, private: privateAccess, auth: auth, machineID: registration.MachineID}, nil
+	return &MachinePreviewRuntime{attachments: attachments, sessions: sessions, provider: provider, private: privateAccess, auth: auth, machineID: registration.MachineID, placementEvents: config.PlacementEvents}, nil
 }
 
 // NewCarrier creates a route-scoped lazy attachment carrier. The target is
@@ -164,7 +171,7 @@ func (r *MachinePreviewRuntime) NewCarrier(ctx context.Context, target LeaseTarg
 	}
 	r.refs++
 	r.mu.Unlock()
-	carrier, err := NewAttachmentCarrier(AttachmentCarrierConfig{Attachments: r.attachments, Provider: r.provider})
+	carrier, err := NewAttachmentCarrier(AttachmentCarrierConfig{Attachments: r.attachments, Provider: r.provider, PlacementEvents: r.placementEvents})
 	if err != nil {
 		_ = r.release(ctx)
 		return nil, err

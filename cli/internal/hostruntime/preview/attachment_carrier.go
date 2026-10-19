@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
 )
 
 var (
@@ -39,6 +40,9 @@ type AttachmentCarrierConfig struct {
 	CorrelationID         func() (string, error)
 	CloseTimeout          time.Duration
 	PlacementPollInterval time.Duration
+	// PlacementEvents wakes the placement watch when the server changed a preview of this machine;
+	// nil polls at PlacementPollInterval only.
+	PlacementEvents *machineevents.Subscription
 }
 
 // AttachmentCarrier allocates one short-lived server attachment on the first
@@ -53,6 +57,7 @@ type AttachmentCarrier struct {
 	correlation  func() (string, error)
 	closeWait    time.Duration
 	pollInterval time.Duration
+	events       *machineevents.Subscription
 
 	mu      sync.Mutex
 	closed  bool
@@ -90,6 +95,7 @@ func NewAttachmentCarrier(config AttachmentCarrierConfig) (*AttachmentCarrier, e
 		correlation:  config.CorrelationID,
 		closeWait:    config.CloseTimeout,
 		pollInterval: config.PlacementPollInterval,
+		events:       config.PlacementEvents,
 	}, nil
 }
 
@@ -205,13 +211,9 @@ func (c *AttachmentCarrier) RunWithLease(ctx context.Context, currentLease func(
 		case <-carrierCtx.Done():
 			return
 		}
-		ticker := time.NewTicker(c.pollInterval)
-		defer ticker.Stop()
 		for {
-			select {
-			case <-carrierCtx.Done():
+			if !c.events.Wait(carrierCtx, c.pollInterval) {
 				return
-			case <-ticker.C:
 			}
 			currentRequest, err := c.requestForLease(currentLease())
 			if err != nil {

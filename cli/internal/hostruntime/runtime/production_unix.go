@@ -41,6 +41,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/inspectorapi"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/inspectorauth"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machinecontrol"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
 	peeridentityenrollment "github.com/pinksaucepasta/paperboat/internal/hostruntime/peeridentity"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/process"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/runtimeattachment"
@@ -219,7 +220,19 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	if err != nil {
 		return nil, err
 	}
-	authorizationRefresh := serviceGroup{&jwksRefreshService{cache: cache, interval: time.Minute}, revocationRefresh}
+	// Machine events wake the refreshes below when the server changes what they cache. The wait is a
+	// 30 s request, so it gets its own renewable identity source instead of queueing behind the shared
+	// one; every consumer still polls at its own interval whenever the wait loop is unhealthy.
+	eventTokens, err := enrollment.NewRenewingTokenSource(enrollment.RenewingTokenConfig{ControlURL: controlURL.String(), StateRoot: runtimeConfig.StateRoot, Transport: transport, RenewBefore: 10 * time.Minute, Timeout: 15 * time.Second, Clock: func() time.Time { return time.Now().UTC() }, OperationID: operationID, Metrics: metrics})
+	if err != nil {
+		return nil, err
+	}
+	machineEvents, err := machineevents.New(machineevents.Config{ControlURL: controlURL.String(), Tokens: eventTokens, Proofs: enrollment.ProofSource{StateRoot: runtimeConfig.StateRoot}, OperationID: operationID, Transport: transport})
+	if err != nil {
+		return nil, err
+	}
+	revocationRefresh.events = machineEvents.Subscribe(machineevents.TopicMachineAccess)
+	authorizationRefresh := serviceGroup{machineEvents, &jwksRefreshService{cache: cache, interval: time.Minute}, revocationRefresh}
 	if nativeDispatch == nil {
 		authorizationRefresh = append(authorizationRefresh, newPeerEnrollmentRuntimeService(peerEnrollment, 2*time.Second))
 	}
@@ -333,7 +346,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	runtimeService := serviceGroup{availabilityService, runtimeObservation}
 	previewAssembly, err := newProductionPreviewAssembly(productionPreviewAssemblyConfig{
 		ControlURL: controlURL.String(), StateRoot: runtimeConfig.StateRoot, MachineID: machineID, InstallationGeneration: machineRegistration.InstallationGeneration, BootID: lazyBootID,
-		LocalControlToken: localControlToken, Transport: transport, RunContext: ctx,
+		LocalControlToken: localControlToken, Transport: transport, RunContext: ctx, Events: machineEvents,
 		InspectorStore: inspectorStore, InspectorRegistry: inspectorRegistry, InspectorHTTP: inspectorService,
 	})
 	if err != nil {

@@ -8,6 +8,9 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents/eventstest"
 )
 
 func TestAttachmentCarrierMovesStillConnectedPreviewOnPlacementChange(t *testing.T) {
@@ -384,4 +387,56 @@ func equalStrings(left, right []string) bool {
 		}
 	}
 	return true
+}
+
+// A preview change published by the server moves a still-connected preview at once, without waiting
+// for the placement poll.
+func TestAttachmentCarrierChecksPlacementWhenTheServerReportsAPreviewChange(t *testing.T) {
+	now := time.Now().UTC()
+	identity := testPreviewCarrierIdentity(1)
+	lease, attachment := providerTestLeaseAttachment(t, now, "preview_event", "operation_event_01", "route_event_01", identity, 1)
+	var moved atomic.Bool
+	allocator := attachmentAllocatorFunc(func(context.Context, AttachmentRequest) (Attachment, error) {
+		if moved.Load() {
+			next := attachment
+			next.Binding.EdgeNodeID = "edge_other"
+			next.AttachmentGeneration++
+			return next, nil
+		}
+		return attachment, nil
+	})
+	provider := &carrierProviderFunc{newCarrier: func() Carrier {
+		return &sessionCarrier{run: func(ctx context.Context, observed Lease, ready func(Lease) error) error {
+			if err := ready(observed); err != nil {
+				return err
+			}
+			<-ctx.Done()
+			return ctx.Err()
+		}}
+	}}
+	_, subscriptions, plane := eventstest.Start(t, time.Hour, machineevents.TopicPreviews)
+	carrier, err := NewAttachmentCarrier(AttachmentCarrierConfig{
+		Attachments: allocator, Provider: provider, PlacementPollInterval: time.Minute, PlacementEvents: subscriptions[0],
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	ready := make(chan struct{})
+	result := make(chan error, 1)
+	go func() {
+		result <- carrier.RunWithLease(ctx, func() Lease { return lease }, nil, func(Lease) error { close(ready); return nil })
+	}()
+	<-ready
+	moved.Store(true)
+	plane.Publish(machineevents.TopicPreviews)
+	select {
+	case err := <-result:
+		if !errors.Is(err, ErrAttachmentPlacementChanged) {
+			t.Fatalf("err = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the preview change was not noticed before the placement poll")
+	}
 }

@@ -114,8 +114,12 @@ func testDispatchAuthorization(request DispatchRequest, now time.Time) DispatchA
 func TestDispatchStartsExistingLeaseOnceAndReportsObservedReadiness(t *testing.T) {
 	now := time.Date(2098, 1, 2, 3, 4, 5, 0, time.UTC)
 	started := make(chan struct{})
+	// Readiness is held back until the first Dispatch has returned; otherwise a fast carrier makes
+	// that first answer "ready" instead of "accepted", which is correct but not what this test pins.
+	release := make(chan struct{})
 	carrier := &sessionCarrier{closed: make(chan struct{}), run: func(ctx context.Context, lease Lease, ready func(Lease) error) error {
 		close(started)
+		<-release
 		if err := ready(sessionReadyLease(lease)); err != nil {
 			return err
 		}
@@ -141,6 +145,7 @@ func TestDispatchStartsExistingLeaseOnceAndReportsObservedReadiness(t *testing.T
 	request := testDispatchRequest(t, now)
 	authorization := testDispatchAuthorization(request, now)
 	accepted, err := manager.Dispatch(context.Background(), authorization, request)
+	close(release)
 	if err != nil || accepted.State != "accepted" || accepted.Generation != 1 {
 		t.Fatalf("accepted=%+v err=%v", accepted, err)
 	}

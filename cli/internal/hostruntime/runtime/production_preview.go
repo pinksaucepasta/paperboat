@@ -17,6 +17,7 @@ import (
 	clientconfig "github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/privateproxyconfig"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelmanager"
@@ -50,8 +51,10 @@ type productionPreviewAssemblyConfig struct {
 	Transport              http.RoundTripper
 	RunContext             context.Context
 	Carrier                connector.DataCarrierPoolConfig
-	OriginDial             preview.PreviewOriginDialer
-	PrivatePAC             privatepreviewproxy.PACConfigurator
+	// Events wakes the placement watch when a preview of this machine changes; nil polls only.
+	Events     *machineevents.Hub
+	OriginDial preview.PreviewOriginDialer
+	PrivatePAC privatepreviewproxy.PACConfigurator
 	// InspectorStore and InspectorRegistry thread the daemon's one shared
 	// inspector capture store and replay bindings into ephemeral carriers.
 	// Nil disables ephemeral HTTP capture/replay.
@@ -65,15 +68,16 @@ func newProductionPreviewAssembly(config productionPreviewAssemblyConfig) (*prod
 		return nil, errors.Join(ErrProductionInvalid, preview.ErrMachinePreviewRuntimeInvalid)
 	}
 	runtime, err := preview.NewMachinePreviewRuntime(preview.MachinePreviewRuntimeConfig{
-		ControlURL:    config.ControlURL,
-		StateRoot:     config.StateRoot,
-		RunContext:    config.RunContext,
-		Transport:     config.Transport,
-		Carrier:       config.Carrier,
-		OriginDial:    config.OriginDial,
-		Inspector:     config.InspectorStore,
-		Registry:      config.InspectorRegistry,
-		InspectorHTTP: config.InspectorHTTP,
+		ControlURL:      config.ControlURL,
+		StateRoot:       config.StateRoot,
+		RunContext:      config.RunContext,
+		Transport:       config.Transport,
+		Carrier:         config.Carrier,
+		PlacementEvents: config.Events.Subscribe(machineevents.TopicPreviews),
+		OriginDial:      config.OriginDial,
+		Inspector:       config.InspectorStore,
+		Registry:        config.InspectorRegistry,
+		InspectorHTTP:   config.InspectorHTTP,
 		ObserveStreamError: func(err error) {
 			if err != nil {
 				errorreport.Current().CaptureFailure(config.RunContext, "paperboat-daemon", "preview", "delivery", "transport_failed", err)

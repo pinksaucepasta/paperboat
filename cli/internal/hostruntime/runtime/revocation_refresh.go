@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
 )
 
 type revocationTokenSource interface {
@@ -33,8 +34,10 @@ type revocationRefreshService struct {
 	cache       *auth.RevocationCache
 	client      *http.Client
 	interval    time.Duration
-	cancel      context.CancelFunc
-	done        chan struct{}
+	// events wakes a refresh when access changed on the server; nil means interval polling only.
+	events *machineevents.Subscription
+	cancel context.CancelFunc
+	done   chan struct{}
 }
 
 func newRevocationRefreshService(endpoint string, tokens revocationTokenSource, proofs revocationProofSource, operationID func() (string, error), cache *auth.RevocationCache, transport http.RoundTripper, interval time.Duration) (*revocationRefreshService, error) {
@@ -96,17 +99,12 @@ func (s *revocationRefreshService) Start(context.Context) error {
 	s.cancel, s.done = cancel, make(chan struct{})
 	go func() {
 		defer close(s.done)
-		timer := time.NewTimer(0)
-		defer timer.Stop()
 		for {
-			select {
-			case <-ctx.Done():
+			attemptCtx, attemptCancel := context.WithTimeout(ctx, 10*time.Second)
+			_ = s.refresh(attemptCtx)
+			attemptCancel()
+			if !s.events.Wait(ctx, s.interval) {
 				return
-			case <-timer.C:
-				attemptCtx, attemptCancel := context.WithTimeout(ctx, 10*time.Second)
-				_ = s.refresh(attemptCtx)
-				attemptCancel()
-				timer.Reset(s.interval)
 			}
 		}
 	}()

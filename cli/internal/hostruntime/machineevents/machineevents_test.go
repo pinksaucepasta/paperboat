@@ -1,0 +1,157 @@
+package machineevents_test
+
+import (
+	"context"
+	"encoding/base64"
+	"net/http"
+	"testing"
+	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents/eventstest"
+)
+
+func waitReturns(sub *machineevents.Subscription, base time.Duration) <-chan time.Duration {
+	result := make(chan time.Duration, 1)
+	go func() {
+		started := time.Now()
+		sub.Wait(context.Background(), base)
+		result <- time.Since(started)
+	}()
+	return result
+}
+
+// A published change wakes the subscriber well inside a second although its own poll is an hour away.
+func TestChangeWakesSubscriberWithoutPolling(t *testing.T) {
+	_, subs, plane := eventstest.Start(t, time.Hour, machineevents.TopicPreviews, machineevents.TopicMachineAccess)
+	waitDone := waitReturns(subs[0], time.Hour)
+	time.Sleep(50 * time.Millisecond)
+	select {
+	case elapsed := <-waitDone:
+		t.Fatalf("woke after %v without a change", elapsed)
+	default:
+	}
+	plane.Publish(machineevents.TopicPreviews)
+	select {
+	case elapsed := <-waitDone:
+		if elapsed > time.Second {
+			t.Fatalf("woke after %v", elapsed)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("subscriber was not woken by the change")
+	}
+	select {
+	case <-subs[1].Changed():
+		t.Fatal("a change to one topic woke the other topic's subscriber")
+	default:
+	}
+}
+
+// The request is signed like the other host calls and carries the generations already seen.
+func TestRequestIsSignedAndCarriesKnownGenerations(t *testing.T) {
+	_, subs, plane := eventstest.Start(t, time.Hour, machineevents.TopicPreviews)
+	waitDone := waitReturns(subs[0], time.Hour)
+	plane.Publish(machineevents.TopicPreviews)
+	<-waitDone
+	deadline := time.After(2 * time.Second)
+	for len(plane.Requests()) < 2 {
+		select {
+		case <-deadline:
+			t.Fatalf("requests=%v", plane.Requests())
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	requests := plane.Requests()
+	if requests[0]["previews"] != 0 || requests[1]["previews"] != 1 {
+		t.Fatalf("generations sent = %v", requests)
+	}
+	header := plane.Headers(0)
+	proof := plane.NextProof()
+	if header.Get("X-Paperboat-Machine-Identity") != "identity-token" || header.Get("Idempotency-Key") != proof.OperationID || proof.Method != http.MethodPost || proof.Path != machineevents.Path {
+		t.Fatalf("headers=%v proof=%+v", header, proof)
+	}
+	if raw, err := base64.RawURLEncoding.DecodeString(header.Get("X-Paperboat-Machine-Proof")); err != nil || string(raw) != "proof-bytes" {
+		t.Fatalf("proof header = %q (%v)", header.Get("X-Paperboat-Machine-Proof"), err)
+	}
+	if first, second := header.Get("Idempotency-Key"), plane.Headers(1).Get("Idempotency-Key"); first == second {
+		t.Fatalf("operation id reused: %s", first)
+	}
+}
+
+// While the loop is healthy the subscriber's own poll is the slow fallback; a subscriber without a
+// hub keeps its own interval.
+func TestPollingSlowsOnlyWhileTheLoopIsHealthy(t *testing.T) {
+	hub, subs, _ := eventstest.Start(t, 600*time.Millisecond, machineevents.TopicPreviews)
+	deadline := time.Now().Add(3 * time.Second)
+	for !hub.Healthy() {
+		if time.Now().After(deadline) {
+			t.Fatal("loop never became healthy")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if elapsed := <-waitReturns(subs[0], 20*time.Millisecond); elapsed < 500*time.Millisecond {
+		t.Fatalf("healthy loop still polled after %v", elapsed)
+	}
+	var none *machineevents.Subscription
+	started := time.Now()
+	none.Wait(t.Context(), 20*time.Millisecond)
+	if time.Since(started) > 300*time.Millisecond {
+		t.Fatalf("nil subscription waited %v", time.Since(started))
+	}
+}
+
+// After failures the loop reports unhealthy, so polls are normal again; it reconnects with what it
+// knew and is told about everything that moved while it was away.
+func TestFailureMakesPollsNormalAndReconnectCatchesUp(t *testing.T) {
+	hub, subs, plane := eventstest.Start(t, time.Hour, machineevents.TopicPreviews)
+	waitDone := waitReturns(subs[0], time.Hour)
+	plane.Publish(machineevents.TopicPreviews)
+	<-waitDone
+	plane.FailNext(1)
+	plane.Publish(machineevents.TopicPreviews) // moved while the next request fails
+	deadline := time.Now().Add(5 * time.Second)
+	for hub.Healthy() || plane.PendingFailures() != 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("loop did not report the failure")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if elapsed := <-waitReturns(subs[0], 30*time.Millisecond); elapsed > time.Second {
+		t.Fatalf("unhealthy loop delayed the subscriber's poll by %v", elapsed)
+	}
+	select {
+	case elapsed := <-waitReturns(subs[0], time.Hour):
+		if elapsed > 4*time.Second {
+			t.Fatalf("catch-up took %v", elapsed)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the change that moved during the outage was never delivered")
+	}
+}
+
+type tokenAndProof struct{}
+
+func (tokenAndProof) Token(context.Context) (string, error) { return "t", nil }
+func (tokenAndProof) Proof(context.Context, string, string, string, []byte) ([]byte, error) {
+	return []byte("p"), nil
+}
+
+func TestNewRejectsAnInsecureOrIncompleteConfiguration(t *testing.T) {
+	base := machineevents.Config{ControlURL: "https://control.example.test", Tokens: tokenAndProof{}, Proofs: tokenAndProof{}, OperationID: func() (string, error) { return "x", nil }, Transport: http.DefaultTransport}
+	if _, err := machineevents.New(base); err != nil {
+		t.Fatal(err)
+	}
+	for name, mutate := range map[string]func(*machineevents.Config){
+		"http":      func(c *machineevents.Config) { c.ControlURL = "http://control.example.test" },
+		"no tokens": func(c *machineevents.Config) { c.Tokens = nil },
+		"no proofs": func(c *machineevents.Config) { c.Proofs = nil },
+		"no op id":  func(c *machineevents.Config) { c.OperationID = nil },
+		"transport": func(c *machineevents.Config) { c.Transport = nil },
+	} {
+		config := base
+		mutate(&config)
+		if _, err := machineevents.New(config); err == nil {
+			t.Fatalf("%s accepted", name)
+		}
+	}
+}
