@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
 )
@@ -48,6 +49,31 @@ type HTTPHandler struct {
 	service      *Service
 	verifier     MachineProofVerifier
 	precondition LeasePreconditionChecker
+	publisher    AddressPublisher
+}
+
+// AddressPublisher writes the DNS record for a preview once an edge holds one of its carrier
+// attachments. Publication is best effort here: the periodic DNS reconcile writes any record the
+// request path could not, and the preview only turns ready once a record exists.
+type AddressPublisher interface {
+	PublishPreview(ctx context.Context, previewID string) error
+}
+
+// SetAddressPublisher installs the synchronous DNS writer; without one the periodic reconcile
+// publishes alone.
+func (h *HTTPHandler) SetAddressPublisher(publisher AddressPublisher) { h.publisher = publisher }
+
+const addressPublishTimeout = 4 * time.Second
+
+func (h *HTTPHandler) publishAddress(r *http.Request, previewID string) {
+	if h.publisher == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), addressPublishTimeout)
+	defer cancel()
+	if err := h.publisher.PublishPreview(ctx, previewID); err != nil {
+		slog.WarnContext(ctx, "preview DNS publication deferred to the periodic reconcile", "component", "paperboat-server", "operation", "http_previews", "stage", "dns_publish", "error_type", fmt.Sprintf("%T", err))
+	}
 }
 
 func NewHTTPHandler(service *Service, verifier MachineProofVerifier, precondition LeasePreconditionChecker) (*HTTPHandler, error) {
@@ -156,6 +182,7 @@ func (h *HTTPHandler) allocate(w http.ResponseWriter, r *http.Request, previewID
 			return
 		}
 	}
+	h.publishAddress(r, previewID)
 	status := http.StatusOK
 	if attachment.State == StatePending {
 		status = http.StatusAccepted

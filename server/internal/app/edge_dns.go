@@ -24,31 +24,73 @@ import (
 // DNS publication is part of the existing server reconciliation lifecycle.
 // Deployment-owned verified public address metadata is required before the
 // first write. Registration/heartbeats cannot populate that metadata.
-func newEdgeDNSWorker(database *db.DB, cfg config.Config) (func(context.Context) error, error) {
-	newReconciler := func(zoneID string) (*tunnelcert.AddressReconciler, error) {
-		admission, err := tunnelcert.NewDatabaseCloudflareAddressAdmission(database, zoneID)
-		if err != nil {
-			return nil, err
-		}
-		provider, err := tunnelcert.NewCloudflareDNSProvider(tunnelcert.CloudflareDNSConfig{
-			AddressAdmission: admission, ZoneID: zoneID, TokenReference: cfg.Certificates.DNSTokenReference,
-			TokenSource: tunnelcert.EnvironmentReferenceSource{Prefix: "PAPERBOAT_CERT_SECRET_", LookupEnv: os.LookupEnv},
-			HTTPClient:  providerHTTPClient("cloudflare-edge-dns", 5*time.Second),
-		})
-		if err != nil {
-			return nil, err
-		}
-		return tunnelcert.NewAddressReconciler(database, provider, net.DefaultResolver)
-	}
-	public, err := newReconciler(cfg.Certificates.PublicDNSZoneID)
+func newEdgeDNSReconciler(database *db.DB, cfg config.Config, zoneID string) (*tunnelcert.AddressReconciler, error) {
+	admission, err := tunnelcert.NewDatabaseCloudflareAddressAdmission(database, zoneID)
 	if err != nil {
 		return nil, err
 	}
-	runtime, err := newReconciler(cfg.Certificates.DNSZoneID)
+	provider, err := tunnelcert.NewCloudflareDNSProvider(tunnelcert.CloudflareDNSConfig{
+		AddressAdmission: admission, ZoneID: zoneID, TokenReference: cfg.Certificates.DNSTokenReference,
+		TokenSource: tunnelcert.EnvironmentReferenceSource{Prefix: "PAPERBOAT_CERT_SECRET_", LookupEnv: os.LookupEnv},
+		HTTPClient:  providerHTTPClient("cloudflare-edge-dns", 5*time.Second),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return tunnelcert.NewAddressReconciler(database, provider, net.DefaultResolver)
+}
+
+func newEdgeDNSWorker(database *db.DB, cfg config.Config) (func(context.Context) error, error) {
+	public, err := newEdgeDNSReconciler(database, cfg, cfg.Certificates.PublicDNSZoneID)
+	if err != nil {
+		return nil, err
+	}
+	runtime, err := newEdgeDNSReconciler(database, cfg, cfg.Certificates.DNSZoneID)
 	if err != nil {
 		return nil, err
 	}
 	return edgeDNSWorker(database, public, runtime), nil
+}
+
+// previewAddressPublisher writes a managed preview's DNS record as soon as an edge holds one of its
+// carrier attachments, so the preview never waits for the periodic reconcile to create it.
+type previewAddressPublisher struct {
+	database   *db.DB
+	reconciler *tunnelcert.AddressReconciler
+}
+
+func newPreviewAddressPublisher(database *db.DB, cfg config.Config) (*previewAddressPublisher, error) {
+	reconciler, err := newEdgeDNSReconciler(database, cfg, cfg.Certificates.PublicDNSZoneID)
+	if err != nil {
+		return nil, err
+	}
+	return &previewAddressPublisher{database: database, reconciler: reconciler}, nil
+}
+
+var errNoPublishableEdge = errors.New("no edge holds a publishable carrier attachment for the preview yet")
+
+func (p *previewAddressPublisher) PublishPreview(ctx context.Context, previewID string) error {
+	var endpoint, mode string
+	err := p.database.Pool().QueryRow(ctx, `SELECT p.endpoint,paperboat.workspace_edge_mode(p.account_id,p.owner_team_id) FROM paperboat.preview_leases p WHERE p.id=$1 AND p.terminal_state='active'`, previewID).Scan(&endpoint, &mode)
+	if errors.Is(err, pgx.ErrNoRows) || err == nil && (mode != "managed-only" || !strings.HasPrefix(endpoint, "https://")) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	host := strings.TrimPrefix(endpoint, "https://")
+	rows, err := p.database.Queries().ListReadyEdgeDNSAddressesV1(ctx, dbsqlc.ListReadyEdgeDNSAddressesV1Params{TunnelID: previewID, Hostname: host, Now: sql.NullTime{Time: time.Now().UTC(), Valid: true}})
+	if err != nil {
+		return err
+	}
+	if len(rows) == 0 {
+		return errNoPublishableEdge
+	}
+	desired, err := readyEdgePublication(previewID, host, 1, rows)
+	if err != nil {
+		return err
+	}
+	return p.reconciler.Publish(ctx, desired)
 }
 
 func edgeDNSWorker(database *db.DB, public, runtime *tunnelcert.AddressReconciler) func(context.Context) error {

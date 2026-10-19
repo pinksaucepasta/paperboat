@@ -154,7 +154,6 @@ WHERE n.ready AND n.state='ready' AND n.roles @> ARRAY['edge']::text[]
 AND n.transports @> ARRAY['http2','http3']::text[] AND n.last_heartbeat_at>now()-interval '30 seconds' AND n.registry_expires_at>now()
 AND n.capacity_observed_at>now()-interval '30 seconds' AND n.capacity_used<n.capacity_limit-n.capacity_limit/10
 AND (n.drain_deadline IS NULL OR n.drain_deadline>now()) AND paperboat.node_workspace_edge_eligible(n.id,$1,$6)
-AND (n.serves_managed_wildcard OR paperboat.workspace_edge_mode($1,$6)<>'managed-only')
 AND paperboat.workspace_edge_set_allows(n.id,$1,$6)
 AND n.carrier_endpoint_host IS NOT NULL AND n.carrier_endpoint_tcp_port IS NOT NULL AND n.carrier_endpoint_quic_port IS NOT NULL
 AND n.carrier_server_spki_sha256 IS NOT NULL AND n.carrier_server_certificate_chain_pem IS NOT NULL

@@ -469,3 +469,64 @@ func TestAddressReconcilerReservedWithdrawalOnPostgres(t *testing.T) {
 		t.Fatalf("unused reservation credits not returned: %f", tokens)
 	}
 }
+
+func TestAddressPublishWritesEveryAddressWithoutWaitingForResolverOnPostgres(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("PAPERBOAT_TEST_DATABASE_DSN"))
+	if dsn == "" {
+		t.Skip("set PAPERBOAT_TEST_DATABASE_DSN to run address publication PostgreSQL acceptance")
+	}
+	if err := db.ValidateIsolatedTestDSN(dsn, os.Getenv("PAPERBOAT_DATABASE_DSN")); err != nil {
+		t.Fatal(err)
+	}
+	database, err := db.Open(config.Database{Driver: "postgres", DSN: dsn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	if err := db.Migrate(context.Background(), database); err != nil {
+		t.Fatal(err)
+	}
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	host, owner := "publish-"+suffix+".example.test", "preview_"+suffix
+	t.Cleanup(func() {
+		_, _ = database.Pool().Exec(context.Background(), `DELETE FROM edge_dns_publications WHERE hostname=$1`, host)
+	})
+	provider := &fakeAddressProvider{}
+	// A resolver that has not seen the new records yet: publication must not wait for it.
+	resolver := &fakeAddressResolver{err: &net.DNSError{IsNotFound: true}}
+	reconciler, err := NewAddressReconciler(database, provider, resolver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	desired := DesiredAddressPublication{Owner: owner, Hostname: host, ResourceGeneration: 1, ReadinessVersion: "ready_1", ObservedAt: now, ValidUntil: now.Add(time.Minute), Addresses: []string{"8.8.8.8", "8.8.4.4"}}
+	if err := reconciler.Publish(context.Background(), desired); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	if provider.creates != 2 || len(provider.records) != 2 {
+		t.Fatalf("both edge addresses must be written in one call: creates=%d records=%v", provider.creates, provider.records)
+	}
+	var state string
+	if err := database.Pool().QueryRow(context.Background(), `SELECT state FROM edge_dns_publications WHERE hostname=$1`, host).Scan(&state); err != nil || state != "submitted" {
+		t.Fatalf("state after publish = %q, %v", state, err)
+	}
+	if err := reconciler.Publish(context.Background(), desired); err != nil || provider.creates != 2 || provider.deletes != 0 {
+		t.Fatalf("an unchanged publication touched the provider again: creates=%d deletes=%d err=%v", provider.creates, provider.deletes, err)
+	}
+	// One edge is dropped: the other record stays, the dropped one is deleted.
+	desired.ReadinessVersion, desired.ObservedAt, desired.Addresses = "ready_2", now.Add(time.Second), []string{"8.8.8.8"}
+	if err := reconciler.Publish(context.Background(), desired); err != nil || provider.deletes != 1 || len(provider.records) != 1 || provider.records[0].Address != "8.8.8.8" {
+		t.Fatalf("dropping an edge: deletes=%d records=%v err=%v", provider.deletes, provider.records, err)
+	}
+	// The periodic reconcile verifies later; until the resolver agrees it is pending, not failed.
+	if err := reconciler.Reconcile(context.Background(), desired); !isAddressErrorKind(err, AddressPublicationPending) {
+		t.Fatalf("verification before the resolver agrees = %v", err)
+	}
+	resolver.err, resolver.values = nil, []string{"8.8.8.8"}
+	if err := reconciler.Reconcile(context.Background(), desired); err != nil {
+		t.Fatalf("verification: %v", err)
+	}
+	if err := database.Pool().QueryRow(context.Background(), `SELECT state FROM edge_dns_publications WHERE hostname=$1`, host).Scan(&state); err != nil || state != "verified" {
+		t.Fatalf("state after verification = %q, %v", state, err)
+	}
+}

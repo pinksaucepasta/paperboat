@@ -87,18 +87,21 @@ func TestPreviewEdgePlacementQueryOnPostgres(t *testing.T) {
 	if err != nil || chosen != first {
 		t.Fatalf("promoted preview selected %q, want %q: %v", chosen, first, err)
 	}
-	// An edge outside the managed wildcard set takes no NEW managed placement, but a machine
+	// An edge outside the workspace's edge set takes no NEW placement, but a machine
 	// whose carrier is already active there keeps working until it reattaches: invalidating the
 	// attachment at once stranded the machine (preview create failed with edge_admission_unavailable
 	// and dispatch got EOF) for as long as its next reattach took.
-	exec(`UPDATE paperboat.control_tunnel_nodes SET serves_managed_wildcard=false WHERE id=$1`, first)
+	exec(`INSERT INTO paperboat.workspace_edge_sets(scope_kind,scope_id,mode,node_ids) VALUES('account',$1,'managed-only',ARRAY[$2]::text[])`, account, preferred)
+	defer func() {
+		_, _ = database.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.workspace_edge_sets WHERE scope_id=$1`, account)
+	}()
 	chosen, err = selector.SelectPreviewEdgeNode(context.Background(), PreviewEdgeNodeSelectionRequest{AccountID: account, PreviewID: "preview_" + stamp, OperationID: "operation_" + stamp, OwnerMachineID: machine, InstallationGeneration: 1})
 	if err != nil || chosen != first {
-		t.Fatalf("machine carrier on an edge outside the wildcard set was stranded: selected %q err=%v", chosen, err)
+		t.Fatalf("machine carrier on an edge outside the workspace edge set was stranded: selected %q err=%v", chosen, err)
 	}
 	var valid bool
 	if err = database.SQL().QueryRowContext(context.Background(), `SELECT paperboat.runtime_carrier_valid($1,$2,'epoch-a',true)`, route, first).Scan(&valid); err != nil || !valid {
-		t.Fatalf("existing runtime attachment on an edge outside the wildcard set valid=%v err=%v", valid, err)
+		t.Fatalf("existing runtime attachment on an edge outside the workspace edge set valid=%v err=%v", valid, err)
 	}
 	err = database.InTx(context.Background(), func(ctx context.Context, tx *db.Tx) error {
 		candidates, candidateErr := edgeplacement.Candidates(ctx, tx, account, sql.NullString{}, time.Now().UTC())
@@ -107,7 +110,7 @@ func TestPreviewEdgePlacementQueryOnPostgres(t *testing.T) {
 		}
 		for _, candidate := range candidates {
 			if candidate.NodeID == first {
-				t.Fatal("edge outside the wildcard set offered for new managed placement")
+				t.Fatal("edge outside the workspace edge set offered for new managed placement")
 			}
 		}
 		if len(candidates) == 0 {

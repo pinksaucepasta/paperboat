@@ -4,6 +4,7 @@ SELECT id, max(generation)::bigint AS generation FROM (
  SELECT id,generation FROM tunnels
   WHERE desired_state='active' AND deleted_at IS NULL
    AND (expires_at IS NULL OR expires_at>statement_timestamp())
+ UNION ALL SELECT id,1::bigint AS generation FROM preview_leases WHERE terminal_state='active'
  UNION ALL SELECT id,desired_revision AS generation FROM control_routes
   WHERE kind='runtime_https_wss' AND desired_state IN ('attached','replacing')
  UNION ALL SELECT owner_id AS id,resource_generation AS generation FROM edge_dns_publications
@@ -12,8 +13,7 @@ SELECT id, max(generation)::bigint AS generation FROM (
 GROUP BY id ORDER BY id LIMIT sqlc.arg(batch_size);
 
 -- name: ListEdgeDNSPublicationNamesV1 :many
--- Managed preview names resolve through the wildcard record and need no name; tunnel and runtime
--- endpoints and verified domain reservations are published under the resource's owner.
+-- Managed endpoints and verified domain reservations share the tunnel's owner.
 SELECT substring(t.stable_endpoint from 9)::text AS hostname
 FROM tunnels t WHERE t.id=sqlc.arg(tunnel_id)
 UNION
@@ -23,6 +23,9 @@ WHERE d.tunnel_id=sqlc.arg(tunnel_id) AND d.ownership_state='verified'
 UNION
 SELECT r.public_host FROM control_routes r WHERE r.id=sqlc.arg(tunnel_id)
  AND r.kind='runtime_https_wss' AND r.desired_state IN ('attached','replacing')
+UNION
+SELECT substring(p.endpoint from 9)::text FROM preview_leases p
+WHERE p.id=sqlc.arg(tunnel_id) AND paperboat.workspace_edge_mode(p.account_id,p.owner_team_id)='managed-only'
 ORDER BY hostname LIMIT 129;
 
 -- name: GetReadyRuntimeEdgeDNSAddressV1 :one
@@ -135,8 +138,8 @@ WHERE t.id=sqlc.arg(tunnel_id) AND t.desired_state='active' AND t.deleted_at IS 
 UNION ALL
 -- Preview IDs and hostnames are immutable; lease/attachment renewal counters
 -- must not rewrite DNS. Placement and process changes fence readiness instead.
--- Ephemeral previews have one exact carrier placement. Never advertise the
--- other global edge merely because it shares the wildcard certificate.
+-- A preview advertises exactly the edges that hold one of its live carrier attachments, from the
+-- moment the attachment is allocated, so the record is written before the carrier connects.
 SELECT node.id,1::bigint AS resource_generation,statement_timestamp()::timestamptz AS observed_at,
  COALESCE(host(node.public_ingress_ipv4),'')::text AS ipv4,
  COALESCE(host(node.public_ingress_ipv6),'')::text AS ipv6,
@@ -155,7 +158,7 @@ JOIN tunnel_certificate_records cert ON cert.id=distribution.certificate_id AND 
 WHERE p.id=sqlc.arg(tunnel_id) AND substring(p.endpoint from 9)=sqlc.arg(hostname)
  AND paperboat.workspace_edge_mode(p.account_id,p.owner_team_id)='managed-only'
  AND p.terminal_state='active' AND p.lease_deadline>sqlc.arg(now) AND (p.user_deadline IS NULL OR p.user_deadline>sqlc.arg(now))
- AND a.state='ready' AND a.edge_ready AND a.origin_ready AND a.expires_at>sqlc.arg(now)
+ AND a.state IN ('pending','admitted','edge_ready','ready') AND a.expires_at>sqlc.arg(now)
  AND a.lease_generation>0 AND a.lease_generation<=p.generation
  AND m.deleted_at IS NULL AND m.revoked_at IS NULL AND m.seat_state='occupied' AND m.state NOT IN ('pending','revoked','deleted')
  AND m.public_identity_key=a.machine_identity_public_key AND identity.issued_at<=sqlc.arg(now) AND identity.expires_at>sqlc.arg(now)

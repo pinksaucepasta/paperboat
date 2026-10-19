@@ -68,11 +68,13 @@ WHERE d.tunnel_id=$1 AND d.ownership_state='verified'
 UNION
 SELECT r.public_host FROM control_routes r WHERE r.id=$1
  AND r.kind='runtime_https_wss' AND r.desired_state IN ('attached','replacing')
+UNION
+SELECT substring(p.endpoint from 9)::text FROM preview_leases p
+WHERE p.id=$1 AND paperboat.workspace_edge_mode(p.account_id,p.owner_team_id)='managed-only'
 ORDER BY hostname LIMIT 129
 `
 
-// Managed preview names resolve through the wildcard record and need no name; tunnel and runtime
-// endpoints and verified domain reservations are published under the resource's owner.
+// Managed endpoints and verified domain reservations share the tunnel's owner.
 func (q *Queries) ListEdgeDNSPublicationNamesV1(ctx context.Context, tunnelID string) ([]string, error) {
 	rows, err := q.db.Query(ctx, listEdgeDNSPublicationNamesV1, tunnelID)
 	if err != nil {
@@ -98,6 +100,7 @@ SELECT id, max(generation)::bigint AS generation FROM (
  SELECT id,generation FROM tunnels
   WHERE desired_state='active' AND deleted_at IS NULL
    AND (expires_at IS NULL OR expires_at>statement_timestamp())
+ UNION ALL SELECT id,1::bigint AS generation FROM preview_leases WHERE terminal_state='active'
  UNION ALL SELECT id,desired_revision AS generation FROM control_routes
   WHERE kind='runtime_https_wss' AND desired_state IN ('attached','replacing')
  UNION ALL SELECT owner_id AS id,resource_generation AS generation FROM edge_dns_publications
@@ -244,7 +247,7 @@ JOIN tunnel_certificate_records cert ON cert.id=distribution.certificate_id AND 
 WHERE p.id=$1 AND substring(p.endpoint from 9)=$3
  AND paperboat.workspace_edge_mode(p.account_id,p.owner_team_id)='managed-only'
  AND p.terminal_state='active' AND p.lease_deadline>$2 AND (p.user_deadline IS NULL OR p.user_deadline>$2)
- AND a.state='ready' AND a.edge_ready AND a.origin_ready AND a.expires_at>$2
+ AND a.state IN ('pending','admitted','edge_ready','ready') AND a.expires_at>$2
  AND a.lease_generation>0 AND a.lease_generation<=p.generation
  AND m.deleted_at IS NULL AND m.revoked_at IS NULL AND m.seat_state='occupied' AND m.state NOT IN ('pending','revoked','deleted')
  AND m.public_identity_key=a.machine_identity_public_key AND identity.issued_at<=$2 AND identity.expires_at>$2
@@ -279,8 +282,8 @@ type ListReadyEdgeDNSAddressesV1Row struct {
 // An active connector alone is not certificate, listener or origin readiness.
 // Preview IDs and hostnames are immutable; lease/attachment renewal counters
 // must not rewrite DNS. Placement and process changes fence readiness instead.
-// Ephemeral previews have one exact carrier placement. Never advertise the
-// other global edge merely because it shares the wildcard certificate.
+// A preview advertises exactly the edges that hold one of its live carrier attachments, from the
+// moment the attachment is allocated, so the record is written before the carrier connects.
 func (q *Queries) ListReadyEdgeDNSAddressesV1(ctx context.Context, arg ListReadyEdgeDNSAddressesV1Params) ([]ListReadyEdgeDNSAddressesV1Row, error) {
 	rows, err := q.db.Query(ctx, listReadyEdgeDNSAddressesV1, arg.TunnelID, arg.Now, arg.Hostname)
 	if err != nil {

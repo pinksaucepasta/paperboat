@@ -240,6 +240,38 @@ func (r *AddressReconciler) OwnedHostnames(ctx context.Context, owner string) ([
 // provider mutation and resolver verification. Provider errors are returned
 // unchanged so pending publication is never mistaken for readiness.
 func (r *AddressReconciler) Reconcile(ctx context.Context, desired DesiredAddressPublication) error {
+	return r.reconcile(ctx, desired, false)
+}
+
+// readbackRequiredDetail marks the pass that changed provider records and stopped to read them back.
+const (
+	readbackRequiredDetail = "provider changes require independent readback"
+	notConvergedDetail     = "provider records have not converged"
+)
+
+const maxPublishPasses = 8
+
+// Publish writes the desired records to the provider and returns once the provider holds exactly
+// them, without waiting for resolver verification: a caller that must not wait on DNS (a new
+// preview) proceeds on the written record, and the periodic Reconcile verifies it afterwards. An
+// unchanged publication that is already written returns without touching the provider.
+func (r *AddressReconciler) Publish(ctx context.Context, desired DesiredAddressPublication) error {
+	for pass := 0; pass < maxPublishPasses; pass++ {
+		err := r.reconcile(ctx, desired, true)
+		var publicationError *AddressPublicationError
+		if err == nil {
+			return nil
+		}
+		// Each pass changes at most one record; both of these results mean "changed one, go on".
+		if !errors.As(err, &publicationError) || publicationError.Kind != AddressPublicationPending ||
+			publicationError.Detail != readbackRequiredDetail && publicationError.Detail != notConvergedDetail {
+			return err
+		}
+	}
+	return addressError(AddressPublicationPending, "provider records did not converge")
+}
+
+func (r *AddressReconciler) reconcile(ctx context.Context, desired DesiredAddressPublication, publishOnly bool) error {
 	if r == nil || r.database == nil || r.provider == nil || r.resolver == nil {
 		return fmt.Errorf("%w: address reconciler is unavailable", ErrInvalid)
 	}
@@ -277,6 +309,9 @@ func (r *AddressReconciler) Reconcile(ctx context.Context, desired DesiredAddres
 		return readErr
 	}
 	if current.State == "verified" && current.VerifiedAt.Valid && r.now().Sub(current.VerifiedAt.Time) < 60*time.Second {
+		return nil
+	}
+	if publishOnly && (current.State == "submitted" || current.State == "verified") && len(addresses) != 0 {
 		return nil
 	}
 	if provider, ok := r.provider.(interface {
@@ -348,14 +383,17 @@ func (r *AddressReconciler) Reconcile(ctx context.Context, desired DesiredAddres
 		mutated = true
 	}
 	if !addressRecordsMatch(records, desired.Owner, generation, wanted) {
-		err = addressError(AddressPublicationPending, "provider records have not converged")
+		err = addressError(AddressPublicationPending, notConvergedDetail)
 		return r.recordFailure(ctx, conn.Conn(), desired, generation, records, err)
 	}
 	if err := r.markState(ctx, conn.Conn(), desired, generation, records, "submitted", ""); err != nil {
 		return err
 	}
 	if mutated {
-		return addressError(AddressPublicationPending, "provider changes require independent readback")
+		return addressError(AddressPublicationPending, readbackRequiredDetail)
+	}
+	if publishOnly {
+		return nil
 	}
 	if err := r.verifyAddressResolution(ctx, host, wanted); err != nil {
 		return err

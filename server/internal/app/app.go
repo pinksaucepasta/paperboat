@@ -559,6 +559,14 @@ func New(opts Options) (*App, error) {
 		_ = store.Close()
 		return nil, fmt.Errorf("configure preview carrier host handler: %w", err)
 	}
+	if opts.Config.Certificates.Enabled && opts.Config.Certificates.PublicDNSZoneID != "" {
+		previewAddressPublisher, publisherErr := newPreviewAddressPublisher(store, opts.Config)
+		if publisherErr != nil {
+			_ = store.Close()
+			return nil, fmt.Errorf("configure preview DNS publisher: %w", publisherErr)
+		}
+		previewAttachmentHandler.SetAddressPublisher(previewAddressPublisher)
+	}
 	lazyActivator := &lazyaccess.Activator{DB: store, Leases: previewLeaseService}
 	inspectorHandlers := &httpapi.InspectorHandlers{Access: inspectaccess.NewService(store), Machine: previewAttachmentMachineVerifier}
 	var browserAccessHandlers *httpapi.BrowserAccessHandlers
