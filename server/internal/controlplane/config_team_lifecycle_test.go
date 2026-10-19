@@ -318,18 +318,23 @@ func TestTeamConfigPublicationAuditUsesAuthoritativeAdoptionAndCommitsAtomically
 	if err != nil || floor != report.SyncRevision {
 		t.Fatalf("replacement sync revision floor=%d want=%d error=%v", floor, report.SyncRevision, err)
 	}
-	oldAssignment := report.AssignmentID
+	// The replacement keeps the assignment's id; a report still describing the replaced configuration
+	// (its mode) is rejected.
+	oldAssignment, oldMode := report.AssignmentID, report.Mode
+	if replacement.ID != oldAssignment || oldMode == ConfigModePushOnly {
+		t.Fatalf("fixture: replacement id %s old %s mode %s", replacement.ID, oldAssignment, oldMode)
+	}
 	report.AssignmentID, report.Mode, report.SyncRevision = replacement.ID, ConfigModePushOnly, floor+1
 	report.LastPublishedRevision = "personal-replacement-publication"
 	if err := record("publish-status-replacement"); err != nil {
 		t.Fatalf("current replacement status rejected: %v", err)
 	}
-	report.AssignmentID = oldAssignment
+	report.AssignmentID, report.Mode = oldAssignment, oldMode
 	report.SyncRevision++
 	if err := record("publish-status-old-assignment"); !errors.Is(err, ErrConfigStatusInvalid) {
 		t.Fatalf("old assignment accepted: %v", err)
 	}
-	report.AssignmentID = replacement.ID
+	report.AssignmentID, report.Mode = replacement.ID, ConfigModePushOnly
 	report.SyncRevision = floor
 	if err := record("publish-status-old-revision"); !errors.Is(err, ErrConfigStatusStale) {
 		t.Fatalf("old sync revision accepted: %v", err)

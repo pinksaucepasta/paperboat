@@ -144,7 +144,7 @@ func TestConfigCustomRepositoryRulesAccessAndRevocation(t *testing.T) {
 		t.Fatal(err)
 	}
 	replacement, err := assignments.ConfigureProjection(ctx, user, identity.MachineID, repository.ID, pushRepository.ID, ConfigModeBidirectional, false, "warning-7", assignment.Version, []ConfigPathRule{{Source: "machine", ID: "settings", RepositoryPath: "editor/settings.json", LocalPath: "/home/owner/renamed.json", Kind: "file"}}, nil, testConfigurationRevision)
-	if err != nil || replacement.ID == assignment.ID || replacement.Version != assignment.Version+1 || replacement.ApprovedPullRevision.Valid {
+	if err != nil || replacement.ID != assignment.ID || replacement.Version != assignment.Version+1 || replacement.ApprovedPullRevision.Valid || replacement.ConsentState != "pending" {
 		t.Fatalf("mapping change failed fence: %+v %v", replacement, err)
 	}
 	if _, err = issue("old-custom-access", "push"); !errors.Is(err, ErrConfigRepositoryAccessInvalid) {

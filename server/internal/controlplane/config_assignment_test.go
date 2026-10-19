@@ -217,8 +217,8 @@ func TestConfigCredentialIsBoundReplaySafeAndRevokedWithAssignment(t *testing.T)
 	updatedAssignments := NewConfigAssignmentService(store, nil, "warning-8")
 	updatedAssignments.clock = func() time.Time { return now }
 	replacement, err := assignConfigTestProjection(updatedAssignments, ctx, user, identity.MachineID, repository.ID, ConfigModePullOnly, "warning-8", assignment.Version)
-	if err != nil || replacement.ID == assignment.ID {
-		t.Fatalf("replacement = %#v, %v", replacement, err)
+	if err != nil || replacement.ID != assignment.ID || replacement.Version <= assignment.Version {
+		t.Fatalf("a live assignment keeps its id when replaced and its version moves: %#v, %v", replacement, err)
 	}
 	if _, err := credentials.Issue(ctx, identity.Credential, proof, body, "POST", "/v1/config/credentials"); !errors.Is(err, ErrConfigCredentialReplay) {
 		t.Fatalf("replaced assignment replay error = %v", err)
@@ -557,7 +557,9 @@ func TestConfigUpdatePolicyPreservesBaselineIdentity(t *testing.T) {
 	updatedAssignments := NewConfigAssignmentService(store, nil, "warning-8")
 	updatedAssignments.clock = func() time.Time { return now }
 	replacement, err := assignConfigTestProjection(updatedAssignments, ctx, user, identity.MachineID, repository.ID, ConfigModePullOnly, "warning-8", assignment.Version)
-	if err != nil || replacement.ID == assignment.ID {
+	// A live assignment keeps its id when replaced (the machine's sync state is keyed by it); the
+	// version moves and consent starts over, so the credential issued earlier cannot be replayed.
+	if err != nil || replacement.ID != assignment.ID || replacement.Version != assignment.Version+1 || replacement.ConsentState != "pending" {
 		t.Fatalf("replacement = %#v, %v", replacement, err)
 	}
 	if _, err := credentials.Issue(ctx, identity.Credential, proof, body, "POST", "/v1/config/credentials"); !errors.Is(err, ErrConfigCredentialReplay) {
@@ -617,7 +619,7 @@ func TestConfigPendingBootstrapCannotConsentAndProjectionDigestFencesIdentity(t 
 		t.Fatal(err)
 	}
 	changed, err := service.ConfigureProjection(ctx, user, machine, repository.ID, "", ConfigModePullOnly, false, "warning-1", accepted.Version, nil, nil, strings.Repeat("b", 64))
-	if err != nil || changed.ID == accepted.ID || changed.ConsentState != "pending" || changed.AcceptedAt.Valid || changed.ConfigurationRevision != strings.Repeat("b", 64) {
+	if err != nil || changed.ID != accepted.ID || changed.Version != accepted.Version+1 || changed.ConsentState != "pending" || changed.AcceptedAt.Valid || changed.ConfigurationRevision != strings.Repeat("b", 64) {
 		t.Fatal("file configuration digest change failed authority fence")
 	}
 }
