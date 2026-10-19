@@ -154,14 +154,31 @@ func TestPublicPreviewIngressPostgres(t *testing.T) {
 			t.Fatalf("preview publication ready=%v want=%v: %v", !lease.ManagedDNSPending, want, err)
 		}
 	}
+	pendingPublication := func(want bool) {
+		t.Helper()
+		pending, err := f.database.Queries().ListPendingEdgeDNSPublicationResourcesV1(ctx, 1000)
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, owner := range pending {
+			found = found || owner.ID == preview
+		}
+		if found != want {
+			t.Fatalf("preview in pending DNS publication listing = %v, want %v", found, want)
+		}
+	}
 	publicationReady(false)
+	pendingPublication(true)
 	exec(`INSERT INTO edge_dns_publications(hostname,owner_id,resource_generation,readiness_version,observed_at,valid_until,publication_generation,desired_addresses,state,created_at,updated_at,verified_at) VALUES($1,$2,1,'fixture',$3,$4,1,'["8.8.8.8"]','submitted',$3,$3,NULL)`, hostname, preview, now, now.Add(time.Hour))
 	t.Cleanup(func() {
 		_, _ = f.database.SQL().ExecContext(ctx, `DELETE FROM edge_dns_publications WHERE owner_id=$1`, preview)
 	})
 	publicationReady(false)
+	pendingPublication(true)
 	exec(`UPDATE edge_dns_publications SET state='verified',verified_at=$2 WHERE owner_id=$1`, preview, now)
 	publicationReady(true)
+	pendingPublication(false)
 	exec(`UPDATE edge_dns_publications SET desired_addresses='["8.8.4.4"]' WHERE owner_id=$1`, preview)
 	publicationReady(false)
 	exec(`UPDATE edge_dns_publications SET desired_addresses='["8.8.8.8"]',valid_until=now()-interval '1 second' WHERE owner_id=$1`, preview)

@@ -36,3 +36,24 @@ func TestRegionalDNSProjectionFencesReadyIdentity(t *testing.T) {
 		t.Fatal("unavailable resource needs empty withdrawal")
 	}
 }
+
+func TestPrioritizeEdgeDNSOwnersBoundsAStalledOwner(t *testing.T) {
+	now := time.Date(2026, 10, 19, 0, 0, 0, 0, time.UTC)
+	since := map[string]time.Time{}
+	pending := []dbsqlc.ListPendingEdgeDNSPublicationResourcesV1Row{{ID: "preview_a", Generation: 1}, {ID: "tunnel_b", Generation: 3}}
+	if got := prioritizeEdgeDNSOwners(now, since, pending); len(got) != 2 {
+		t.Fatalf("new pending owners must be prioritized, got %v", got)
+	}
+	if got := prioritizeEdgeDNSOwners(now.Add(pendingEdgeDNSPriorityWindow-time.Second), since, pending[:1]); len(got) != 1 || got[0].ID != "preview_a" {
+		t.Fatalf("owner inside the window stays prioritized, got %v", got)
+	}
+	if _, kept := since["tunnel_b"]; kept {
+		t.Fatal("an owner that left the pending set must be forgotten")
+	}
+	if got := prioritizeEdgeDNSOwners(now.Add(pendingEdgeDNSPriorityWindow), since, pending[:1]); len(got) != 0 {
+		t.Fatalf("a stalled owner falls back to round-robin, got %v", got)
+	}
+	if got := prioritizeEdgeDNSOwners(now.Add(2*pendingEdgeDNSPriorityWindow), since, nil); len(got) != 0 || len(since) != 0 {
+		t.Fatalf("settled owners are forgotten, got %v since=%v", got, since)
+	}
+}
