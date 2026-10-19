@@ -182,14 +182,19 @@ not perform shell expansion or execute local shell statements.
 ## Authentication and recovery
 
 Install and enroll using the dashboard command, or generate both Linux/macOS and
-Windows install commands with `pb machine add` on an authenticated machine.
-There is no shell selector.
+Windows install commands with `pb machine add [--name NAME]` on an authenticated machine.
+There is no shell selector. An installer run without an enrollment token finishes by
+running `pb login`, which adds the computer to your account.
 
 Run `pb login` (alias for `pb auth login`) to sign in through WorkOS and explicitly
-approve this CLI. The command prints a short-lived approval link and opens it when
-possible. On a headless or remote machine, open that link on another device; there is
-no localhost callback listener or token to paste. `--no-browser` prints the same link
-without trying to launch a browser. `--json` emits approval and completion states.
+approve this CLI. The command prints a short-lived approval link (with a code when the
+computer has no browser) and opens it when possible. On a headless or remote machine,
+open that link on another device, sign in, choose the workspace (`--workspace`
+preselects it) and approve; there is no localhost callback listener or token to paste.
+A computer that is not on your account yet is added to the chosen workspace; one that
+already is only signs in again. `--no-browser` prints the same link without trying to
+launch a browser. `--json` emits approval and completion states. `pb login --fresh`
+removes this computer's local setup and its machine record, then adds it again.
 
 If already signed in, choose to keep the current account, authenticate it again, or
 sign in with another account. Non-interactive callers choose `--reauth` or
@@ -199,8 +204,8 @@ team for new commands without moving existing resources or machine ownership.
 
 Interrupted login resumes the same approval when you rerun `pb login`. Ctrl+C and
 `pb logout` cancel the pending request; cancellation that cannot reach the server is
-retained for retry. Dashboard `get.pprbt.dev/install?token=…` bootstrap keeps its direct
-installation-token flow, issuing the same account/session credentials as browser approval.
+retained for retry. The dashboard's install command keeps its direct enrollment-token
+flow, issuing the same account/session credentials as browser approval.
 
 Use `pb auth status` to inspect the current account and `pb doctor` for
 diagnostics. `--server` selects the control plane;
@@ -241,6 +246,11 @@ Review the reported version, platform, size and SHA-256 digest, then install wit
 `pb update --approve <candidate-id>`. Interactive `pb update` presents the same
 download for confirmation; JSON and noninteractive use only download unless an
 exact candidate ID is supplied.
+
+`pb update --from PATH_OR_HTTPS_URL` installs a local or HTTPS executable, package or
+verified offline bundle; `pb update bundle` saves an official update with its signed
+proof for offline installation; `--force` allows interrupting work that cannot be
+preserved (artifact verification and rollback protection still apply).
 
 Official installations have scheduled updates enabled by default. Custom builds
 require a fresh official installation before they can use updates. Scheduled
