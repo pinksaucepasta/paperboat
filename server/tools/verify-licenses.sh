@@ -21,4 +21,5 @@ cp "$root/go.sum" "$snapshot/go.sum"
 cd "$root"
 GOTOOLCHAIN=local go run github.com/google/go-licenses@v1.6.0 check \
 	--disallowed_types=forbidden,restricted,unknown \
+	--ignore github.com/pinksaucepasta/paperboat \
 	./cmd/paperboat-server
