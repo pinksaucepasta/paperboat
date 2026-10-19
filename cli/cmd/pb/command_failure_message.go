@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -21,6 +20,29 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/tunnel"
 )
 
+// boundedBrowserLoginFailure looks for a browserLoginFailure in an error chain without trusting its
+// shape: the walk is breadth-first and capped, so a self-referencing cause cannot hang the command.
+func boundedBrowserLoginFailure(err error) (browserLoginFailure, bool) {
+	queue := []error{err}
+	for visited := 0; len(queue) > 0 && visited < 64; visited++ {
+		current := queue[0]
+		queue = queue[1:]
+		if current == nil {
+			continue
+		}
+		if login, ok := current.(browserLoginFailure); ok {
+			return login, true
+		}
+		switch wrapped := current.(type) {
+		case interface{ Unwrap() error }:
+			queue = append(queue, wrapped.Unwrap())
+		case interface{ Unwrap() []error }:
+			queue = append(queue, wrapped.Unwrap()...)
+		}
+	}
+	return browserLoginFailure{}, false
+}
+
 func commandFailureMessage(err error, failure commandFailure) string {
 	if err == nil {
 		return ""
@@ -30,8 +52,7 @@ func commandFailureMessage(err error, failure commandFailure) string {
 	}
 	// A login that signed in but could not finish names its own recovery step; a transport cause
 	// underneath must not replace it with a generic service message.
-	var login browserLoginFailure
-	if errors.As(err, &login) && login.message != "" && failure.kind != commandCanceled && failure.kind != commandInteractiveCanceled {
+	if login, ok := boundedBrowserLoginFailure(err); ok && login.message != "" && failure.kind != commandCanceled && failure.kind != commandInteractiveCanceled {
 		return login.message
 	}
 	if remote, ok := soleCommandOwner(err).(interface{ SupportReference() string }); ok && failure.kind == commandOperational && supportref.Valid(remote.SupportReference()) {
@@ -196,6 +217,9 @@ func typedCommandOwnerMessage(owner error, failure commandFailure) string {
 	case *localapi.RemoteError:
 		if owner.Code == "environment_unavailable" {
 			return "Managed environment variables could not be delivered on the target. Check ENV delivery and retry."
+		}
+		if owner.Code == "terminal_session_limit_reached" {
+			return owner.Message
 		}
 		return "The local Paperboat service could not complete the request. Check its status with `pb status`, then retry; run `pb doctor` if this continues."
 	case *TunnelCreateExistingError:
