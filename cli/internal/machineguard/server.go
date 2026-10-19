@@ -515,7 +515,14 @@ func validProtectedBindAddress(address, cidr string) bool {
 	if err != nil {
 		return false
 	}
-	return validAddressInCIDR(host, cidr) || host == splitdns.BrowserGatewayIP && (port == "80" || port == "443")
+	number, _ := strconv.Atoi(port)
+	return validAddressInCIDR(host, cidr) || host == splitdns.BrowserGatewayIP && gatewayPortAllowed(number)
+}
+
+// gatewayPortAllowed is the set of ports the browser gateway address may serve: the web ports
+// and unprivileged ports, where https://<machine>.<domain>:<port> reaches a machine service.
+func gatewayPortAllowed(port int) bool {
+	return port == 80 || port == 443 || port >= 1024 && port <= 65535
 }
 
 func protectedLoopbackCIDRs(cfg Config) []string {
@@ -598,7 +605,7 @@ func (g *guardServer) handle(ctx context.Context, conn controlConn, uid string, 
 		if g.rangeChangeOwner != nil && g.rangeChangeOwner != conn {
 			return nil, errors.New("machine loopback range change is pending")
 		}
-		gateway := in.Hostname == splitdns.BrowserGatewayHostname && in.IP == splitdns.BrowserGatewayIP && (in.Port == 80 || in.Port == 443)
+		gateway := in.Hostname == splitdns.BrowserGatewayHostname && in.IP == splitdns.BrowserGatewayIP && gatewayPortAllowed(in.Port)
 		if !gateway && (!validName(in.Hostname) || in.Hostname == splitdns.BrowserGatewayHostname || !validAddressInCIDR(in.IP, g.cfg.LoopbackCIDR) || in.Port < 1 || in.Port > 65535) {
 			return nil, errors.New("invalid protected machine listener")
 		}

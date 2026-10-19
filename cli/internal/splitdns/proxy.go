@@ -50,6 +50,9 @@ type Proxy struct {
 	issueCertificate func(context.Context, string) (tls.Certificate, error)
 	httpListener     net.Listener
 	httpsListener    net.Listener
+	portServers      []*http.Server
+	portListeners    []net.Listener
+	servedPorts      map[int]int // local listener port -> published machine port
 	started          bool
 	stopErr          error
 }
@@ -142,13 +145,31 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	host = strings.TrimSuffix(strings.ToLower(host), ".")
+	routeHost := host
+	// https://<machine>.<domain>:<port> arrives on a listener bound to that port; the
+	// listener's port selects the same numeric route as https://<port>.<machine>.<domain>.
+	if port, ok := p.servedLocalPort(r); ok {
+		numeric, err := BrowserHostname(strings.TrimSuffix(host, "."+p.domain), port, p.domain)
+		if err != nil || !strings.HasSuffix(host, "."+p.domain) {
+			http.Error(w, "Unknown or mismatched Paperboat browser host", http.StatusMisdirectedRequest)
+			return
+		}
+		routeHost = numeric
+	}
 	p.certCacheMu.RLock()
-	route, found := ResolveBrowserRoute(p.routes, host, p.domain)
-	if p.deniedHosts[host] {
+	route, found := ResolveBrowserRoute(p.routes, routeHost, p.domain)
+	if p.deniedHosts[routeHost] {
 		found = false
 	}
 	services, machine := p.machines[host]
+	if routeHost != host {
+		machine = false
+	}
 	p.certCacheMu.RUnlock()
+	if routeHost != host && !found {
+		http.Error(w, "No service is published on this port of the machine", http.StatusNotFound)
+		return
+	}
 	if (!found && !machine) || (r.TLS != nil && !strings.EqualFold(strings.TrimSuffix(r.TLS.ServerName, "."), host)) {
 		http.Error(w, "Unknown or mismatched Paperboat browser host", http.StatusMisdirectedRequest)
 		return
@@ -253,6 +274,55 @@ func (p *Proxy) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, er
 		return nil, errors.New("browser certificate is expired or does not cover this route")
 	}
 	return &cert, nil
+}
+
+// servedLocalPort reports the local port of a request that arrived on one of the per-port TLS listeners.
+func (p *Proxy) servedLocalPort(r *http.Request) (int, bool) {
+	address, ok := r.Context().Value(http.LocalAddrContextKey).(net.Addr)
+	if !ok {
+		return 0, false
+	}
+	tcp, ok := address.(*net.TCPAddr)
+	if !ok {
+		return 0, false
+	}
+	p.certCacheMu.RLock()
+	defer p.certCacheMu.RUnlock()
+	port, served := p.servedPorts[tcp.Port]
+	return port, served
+}
+
+// AddPortListener serves TLS for https://<machine>.<domain>:<port> on a protected listener bound
+// to that port. The listener must be added after the proxy has started; Stop closes it.
+func (p *Proxy) AddPortListener(port int, listener net.Listener) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.started || p.httpsServer == nil {
+		return errors.New("splitdns proxy: port listeners need a started HTTPS proxy")
+	}
+	local, ok := listener.Addr().(*net.TCPAddr)
+	if !ok || port < 1024 || port > 65535 {
+		return errors.New("splitdns proxy: invalid port listener")
+	}
+	p.certCacheMu.Lock()
+	if _, exists := p.servedPorts[local.Port]; exists {
+		p.certCacheMu.Unlock()
+		return errors.New("splitdns proxy: duplicate port listener")
+	}
+	if p.servedPorts == nil {
+		p.servedPorts = map[int]int{}
+	}
+	// The protected listener is bound to the published port itself; the lookup is keyed by the
+	// listener's own port so a request can never select a port other than the one it arrived on.
+	p.servedPorts[local.Port] = port
+	p.certCacheMu.Unlock()
+	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: p.GetCertificate}
+	bound := tls.NewListener(listener, tlsConfig)
+	server := &http.Server{Handler: p, TLSConfig: tlsConfig, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 32 << 10}
+	p.portServers = append(p.portServers, server)
+	p.portListeners = append(p.portListeners, bound)
+	go func() { _ = server.Serve(bound) }()
+	return nil
 }
 
 // Start starts the HTTP and HTTPS reverse-proxy servers.
@@ -378,7 +448,7 @@ func (p *Proxy) Stop(ctx context.Context) error {
 			errs = append(errs, err)
 		}
 	}
-	for _, server := range []*http.Server{p.httpServer, p.httpsServer} {
+	for _, server := range append([]*http.Server{p.httpServer, p.httpsServer}, p.portServers...) {
 		if server != nil {
 			if err := server.Shutdown(ctx); err != nil {
 				record(err)
@@ -394,6 +464,13 @@ func (p *Proxy) Stop(ctx context.Context) error {
 		record(p.httpsListener.Close())
 		p.httpsListener = nil
 	}
+	for _, listener := range p.portListeners {
+		record(listener.Close())
+	}
+	p.portServers, p.portListeners = nil, nil
+	p.certCacheMu.Lock()
+	p.servedPorts = nil
+	p.certCacheMu.Unlock()
 	p.transport.CloseIdleConnections()
 	p.started = false
 	if err := errors.Join(errs...); err != nil {

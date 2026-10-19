@@ -79,7 +79,7 @@ The default local browser domain is `local.pprbt.dev`; changing it affects
 browser URLs only and leaves Paperboat's native machine names unchanged. Set a
 custom domain with `pb config local-access domain set example.com`. Before using
 one, configure a DNS-only wildcard record `*.example.com` that resolves to
-`127.100.0.1`; Paperboat does not run a DNS server or edit resolver/hosts files.
+`127.100.0.1`; Paperboat does not run a DNS server or edit DNS, resolver, hosts or VPN settings.
 The command applies local certificate trust and helper configuration before
 reporting success. These commands apply to the installed user's active config;
 check its path with `pb config path`. Applying an alternate `--config` file is
@@ -92,6 +92,30 @@ grant access to the port, and Paperboat publishes the name only while that port
 is authorized. Use `pb config local-access show` to inspect the effective
 settings, `alias unset` to remove a mapping, and `apply` after editing the
 `local_access` section of the config file directly.
+
+### Machine names and ports
+
+For a machine named `hp` and a published port `5432` (the default domain
+is shown; use your own domain if you set one):
+
+| You type | What you reach |
+|---|---|
+| `https://5432.hp.local.pprbt.dev` | Port 5432 over HTTPS, WebSocket (WSS) and HTTP |
+| `https://hp.local.pprbt.dev:5432` | The same service; the port after the name selects it |
+| `https://hp.local.pprbt.dev` | A page that lists the machine's published ports |
+| the machine's own `127.100.x.y` address, port 5432 | Raw TCP of any kind (a database, SSH, a game server) |
+
+The first three go through Paperboat's local web gateway at `127.100.0.1`. It
+ends TLS on this computer with the local certificate Paperboat trusts for the
+domain and forwards the request as plain HTTP to the port, so they are for
+HTTP, HTTPS and WebSocket services only. Anything else, such as a database
+connection string, must use the machine's own address: `pb machine list` and
+the console show it, and `pb access machine hp --port 5432 --listen
+127.0.0.1:5432` forwards the same port to a local one. Names never resolve to
+that address, because Paperboat does not change this computer's DNS, resolver,
+hosts file or VPN settings. The `host:port` form serves ports from 1024
+upward; privileged ports (below 1024) other than 80 and 443 are not served
+under a name. Use the machine's address or `pb access machine` for those.
 
 ### Coolify and other reverse proxies
 

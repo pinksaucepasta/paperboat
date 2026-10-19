@@ -986,7 +986,41 @@ func (c *Coordinator) prepareBrowserGatewayLocked(ctx context.Context, client gu
 	}
 	web = guardedWebRoute{proxy: proxy, base: base, browserRoutes: routes}
 	c.webRoutes[base] = web
+	c.addBrowserPortListeners(ctx, client, ip, routes, proxy)
 	return web, nil
+}
+
+// addBrowserPortListeners makes https://<machine>.<domain>:<port> work for every published port
+// of a machine by serving the gateway address on that port. A port that cannot be served (in use,
+// or an older machine guard) is reported and skipped; it never degrades the other browser URLs.
+func (c *Coordinator) addBrowserPortListeners(ctx context.Context, client guardedNameClient, ip netip.Addr, routes map[string]splitdns.BrowserRoute, proxy *splitdns.Proxy) {
+	ports := make(map[int]bool)
+	privileged := 0
+	for name, route := range routes {
+		if strings.HasPrefix(name, "*.") || route.Port == 80 || route.Port == 443 {
+			continue
+		}
+		if route.Port < 1024 {
+			privileged++
+			continue
+		}
+		ports[route.Port] = true
+	}
+	if privileged > 0 {
+		diagnosticlog.TryInfo("browser port URLs skip privileged machine ports; use the numeric browser URL or pb access machine", "count", privileged)
+	}
+	for _, port := range slices.Sorted(maps.Keys(ports)) {
+		listener, err := client.Acquire(ctx, splitdns.BrowserGatewayHostname, ip, port)
+		if err != nil {
+			diagnosticlog.TryInfo("browser port URL unavailable for a machine port", "port", port, "port_in_use", errors.Is(err, machineguard.ErrPortInUse))
+			continue
+		}
+		limited := &limitedListener{Listener: listener, permits: c.connections, ctx: context.WithoutCancel(ctx)}
+		if err := proxy.AddPortListener(port, limited); err != nil {
+			_ = limited.Close()
+			diagnosticlog.TryInfo("browser port URL could not start for a machine port", "port", port)
+		}
+	}
 }
 
 func (c *Coordinator) withdrawGuardedLocked() {

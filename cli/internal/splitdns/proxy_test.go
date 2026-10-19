@@ -311,3 +311,84 @@ func TestProxyStopRetainsDeadlineAndOwnedListenerFailure(t *testing.T) {
 		t.Fatal("healthy shutdown reported normal closed-listener teardown")
 	}
 }
+
+func TestProxyServesMachineHostOnItsPublishedPort(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "backend host=%s", r.Host)
+	}))
+	defer backend.Close()
+	var backendPort int
+	fmt.Sscanf(backend.Listener.Addr().String(), "127.0.0.1:%d", &backendPort)
+	ca, err := testcert.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	published, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	unpublished, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	publishedPort := published.Addr().(*net.TCPAddr).Port
+	unpublishedPort := unpublished.Addr().(*net.TCPAddr).Port
+	numeric, err := BrowserHostname("first", publishedPort, BrowserSuffix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy, err := NewProxy(ProxyConfig{
+		HTTPListenAddr: "127.0.0.1:0", HTTPSListenAddr: "127.0.0.1:0",
+		Routes:           map[string]BrowserRoute{numeric: {Address: netip.MustParseAddr("127.0.0.1"), Port: backendPort}},
+		IssueCertificate: func(_ context.Context, name string) (tls.Certificate, error) { return ca.TLS(name) },
+		DialContext:      (&net.Dialer{}).DialContext,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := proxy.AddPortListener(publishedPort, published); err == nil {
+		t.Fatal("port listener accepted before the proxy started")
+	}
+	if err := proxy.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = proxy.Stop(context.Background()) })
+	for port, listener := range map[int]net.Listener{publishedPort: published, unpublishedPort: unpublished} {
+		if err := proxy.AddPortListener(port, listener); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := proxy.AddPortListener(80, published); err == nil {
+		t.Fatal("privileged port accepted")
+	}
+	roots := x509.NewCertPool()
+	roots.AppendCertsFromPEM(ca.CertPEM())
+	client := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{
+		TLSClientConfig: &tls.Config{RootCAs: roots, ServerName: "first." + BrowserSuffix},
+	}}
+	get := func(port int) (*http.Response, error) {
+		request, err := http.NewRequest(http.MethodGet, fmt.Sprintf("https://127.0.0.1:%d/", port), nil)
+		if err != nil {
+			return nil, err
+		}
+		request.Host = fmt.Sprintf("first.%s:%d", BrowserSuffix, port)
+		return client.Do(request)
+	}
+	response, err := get(publishedPort)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(response.Body)
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK || !strings.HasPrefix(string(body), "backend host=") {
+		t.Fatalf("published port: %d %q", response.StatusCode, body)
+	}
+	response, err = get(unpublishedPort)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusNotFound {
+		t.Fatalf("port without a published service answered %d", response.StatusCode)
+	}
+}

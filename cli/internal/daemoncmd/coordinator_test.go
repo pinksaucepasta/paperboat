@@ -616,12 +616,17 @@ type coordinatorNameClient struct {
 	conflictPorts map[int]bool
 	blockAcquire  bool
 	addresses     map[int]string
+	gateway       map[int]string // gateway-address listeners by port
+	gatewayPorts  []int          // every gateway acquisition attempted, in order
 	failReplace   bool
 	closed        bool
 }
 
-func (c *coordinatorNameClient) Acquire(ctx context.Context, _ string, _ netip.Addr, requestedPort int) (net.Listener, error) {
+func (c *coordinatorNameClient) Acquire(ctx context.Context, hostname string, _ netip.Addr, requestedPort int) (net.Listener, error) {
 	c.mu.Lock()
+	if hostname == splitdns.BrowserGatewayHostname {
+		c.gatewayPorts = append(c.gatewayPorts, requestedPort)
+	}
 	fail := c.failAcquire
 	conflict := c.conflictPorts[requestedPort]
 	block := c.blockAcquire
@@ -642,7 +647,15 @@ func (c *coordinatorNameClient) Acquire(ctx context.Context, _ string, _ netip.A
 		if c.addresses == nil {
 			c.addresses = make(map[int]string)
 		}
-		c.addresses[requestedPort] = listener.Addr().String()
+		if hostname == splitdns.BrowserGatewayHostname {
+			if c.gateway == nil {
+				c.gateway = make(map[int]string)
+			}
+			c.gateway[requestedPort] = listener.Addr().String()
+		}
+		if hostname != splitdns.BrowserGatewayHostname || requestedPort == 80 || requestedPort == 443 {
+			c.addresses[requestedPort] = listener.Addr().String()
+		}
 		c.mu.Unlock()
 	}
 	return listener, err
@@ -712,7 +725,7 @@ type generationNameClient struct {
 	activeListeners []net.Listener
 }
 
-func (c *generationNameClient) Acquire(_ context.Context, _ string, _ netip.Addr, port int) (net.Listener, error) {
+func (c *generationNameClient) Acquire(_ context.Context, hostname string, _ netip.Addr, port int) (net.Listener, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed {
@@ -725,7 +738,9 @@ func (c *generationNameClient) Acquire(_ context.Context, _ string, _ netip.Addr
 	if c.addresses == nil {
 		c.addresses = make(map[int]string)
 	}
-	c.addresses[port] = listener.Addr().String()
+	if hostname != splitdns.BrowserGatewayHostname || port == 80 || port == 443 {
+		c.addresses[port] = listener.Addr().String()
+	}
 	c.acquires++
 	wrapped := &generationListener{Listener: listener, owner: c}
 	c.activeListeners = append(c.activeListeners, wrapped)
@@ -771,4 +786,58 @@ func (l *generationListener) Close() error {
 		l.owner.mu.Unlock()
 	})
 	return errors.Join(err, l.owner.releaseFailure)
+}
+
+func TestCoordinatorServesMachineHostOnPublishedPorts(t *testing.T) {
+	ca, err := testcert.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, "app on "+r.Host) }))
+	defer origin.Close()
+	names := &coordinatorNameClient{}
+	domain := splitdns.BrowserSuffix
+	c, err := NewCoordinator(CoordinatorConfig{LocalAccess: config.LocalAccessConfig{Domain: domain}, NameClient: names, DialMachine: func(ctx context.Context, _ string, port int) (net.Conn, error) {
+		if port != 6767 {
+			return nil, errors.New("wrong exact machine/port")
+		}
+		return (&net.Dialer{}).DialContext(ctx, "tcp", origin.Listener.Addr().String())
+	}, IssueCertificate: func(_ context.Context, name, _ string, _ int) (tls.Certificate, error) {
+		cert, key, err := ca.IssueCertificate([]string{name})
+		if err != nil {
+			return tls.Certificate{}, err
+		}
+		return tls.X509KeyPair(cert, key)
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.ctx = t.Context()
+	defer c.Stop()
+	peers := []*pbSync.PeerUpdate{{PeerId: "first", Alias: "hp", AssignedIp: "127.100.0.4", Approved: true, Online: true, ExportedPorts: []int32{22, 6767}}}
+	if err := c.replaceGuardedRoutes(t.Context(), peers); err != nil {
+		t.Fatal(err)
+	}
+	names.mu.Lock()
+	gatewayPorts, address := slices.Clone(names.gatewayPorts), names.gateway[6767]
+	names.mu.Unlock()
+	if !slices.Contains(gatewayPorts, 6767) || slices.Contains(gatewayPorts, 22) {
+		t.Fatalf("gateway acquired ports %v: want 6767 served and privileged 22 skipped", gatewayPorts)
+	}
+	roots := x509.NewCertPool()
+	roots.AppendCertsFromPEM(ca.CertPEM())
+	host := "hp." + domain
+	transport := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, ServerName: host, MinVersion: tls.VersionTLS12}}
+	defer transport.CloseIdleConnections()
+	request, _ := http.NewRequest(http.MethodGet, "https://"+address+"/", nil)
+	request.Host = host + ":6767"
+	response, err := (&http.Client{Transport: transport}).Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(response.Body)
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK || !strings.HasPrefix(string(body), "app on ") {
+		t.Fatalf("https://%s:6767 answered %d %q", host, response.StatusCode, body)
+	}
 }

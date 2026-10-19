@@ -101,7 +101,9 @@ func TestCoordinatorReconnectsNameClientOnNextSnapshot(t *testing.T) {
 	second.mu.Lock()
 	secondAcquires, secondReleases := second.acquires, second.releases
 	second.mu.Unlock()
-	if connects != 2 || firstReleases != 3 || secondAcquires != 3 || secondReleases != 0 || !slices.Equal(slices.Compact(certificateGenerations), []int{1, 2}) {
+	// Four listeners per generation: the native port, the gateway on 80 and 443, and the gateway's own
+	// listener on the machine port 8080 that serves https://<machine>.<domain>:8080.
+	if connects != 2 || firstReleases != 4 || secondAcquires != 4 || secondReleases != 0 || !slices.Equal(slices.Compact(certificateGenerations), []int{1, 2}) {
 		t.Fatalf("connects=%d first releases=%d second acquires=%d releases=%d certificate generations=%v", connects, firstReleases, secondAcquires, secondReleases, certificateGenerations)
 	}
 }
