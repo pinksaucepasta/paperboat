@@ -50,15 +50,15 @@ type MachineGrantRequest struct {
 	Active             bool     `json:"active"`
 }
 
+// MachineCapabilities is every capability an owner can grant on a shared machine. The CLI offers
+// the same set; TestCLIOffersExactlyTheServersMachineCapabilities keeps the two from drifting.
+var MachineCapabilities = []string{"terminal", "exec", "managed_ssh", "files", "preview_manage", "tunnel_manage", "private_access"}
+
 func ValidMachineCapability(capability string) bool {
-	switch capability {
-	case "terminal", "exec", "managed_ssh", "files", "preview_manage", "tunnel_manage", "private_access":
-		return true
-	}
-	return false
+	return slices.Contains(MachineCapabilities, capability)
 }
 func validMachineGrant(r MachineGrantRequest) bool {
-	if !validID(r.MachineID) || len(r.Capabilities) < 1 || len(r.Capabilities) > 7 {
+	if !validID(r.MachineID) || len(r.Capabilities) < 1 || len(r.Capabilities) > len(MachineCapabilities) {
 		return false
 	}
 	if r.Audience != "all_members" && r.Audience != "selected_member" || r.Audience == "all_members" && r.AccountID != "" || r.Audience == "selected_member" && !validID(r.AccountID) {

@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
@@ -112,21 +114,24 @@ func teamMachineGrantCommand() *cobra.Command {
 	teamGenerationFlag(c)
 	c.Flags().Bool("all-members", false, "grant every current and future accepted team member")
 	c.Flags().String("member", "", "grant only this accepted member account")
-	c.Flags().StringSlice("capability", nil, "exact capabilities: terminal,exec,managed_ssh,files,preview_manage,tunnel_manage")
+	c.Flags().StringSlice("capability", nil, "exact capabilities: "+strings.Join(teamMachineCapabilities, ","))
 	c.Flags().Bool("active", true, "set false to revoke this grant")
 	c.Flags().Bool("json", false, "print canonical JSON")
 	return c
 }
+
+// teamMachineCapabilities are the capabilities an owner can grant on a shared machine. The server
+// accepts exactly this set (teams.MachineCapabilities); a test in the server module keeps them equal.
+var teamMachineCapabilities = []string{"terminal", "exec", "managed_ssh", "files", "preview_manage", "tunnel_manage", "private_access"}
+
 func validateMachineGrantCapabilities(caps []string) error {
-	if len(caps) < 1 || len(caps) > 6 {
-		return localArgumentError("provide one to six exact --capability values")
+	if len(caps) < 1 || len(caps) > len(teamMachineCapabilities) {
+		return localArgumentError("provide one to " + strconv.Itoa(len(teamMachineCapabilities)) + " exact --capability values")
 	}
 	seen := map[string]bool{}
 	for _, capability := range caps {
-		switch capability {
-		case "terminal", "exec", "managed_ssh", "files", "preview_manage", "tunnel_manage":
-		default:
-			return localArgumentError("capability must be terminal, exec, managed_ssh, files, preview_manage, or tunnel_manage")
+		if !slices.Contains(teamMachineCapabilities, capability) {
+			return localArgumentError("capability must be one of " + strings.Join(teamMachineCapabilities, ", "))
 		}
 		if seen[capability] {
 			return localArgumentError("capabilities must not contain duplicates")

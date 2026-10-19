@@ -21,7 +21,7 @@ pb team machine grant <team> <machine-id> [flags]
 ```
       --active               set false to revoke this grant (default true)
       --all-members          grant every current and future accepted team member
-      --capability strings   exact capabilities: terminal,exec,managed_ssh,files,preview_manage,tunnel_manage
+      --capability strings   exact capabilities: terminal,exec,managed_ssh,files,preview_manage,tunnel_manage,private_access
       --generation uint      expected current team generation
   -h, --help                 help for grant
       --json                 print canonical JSON
