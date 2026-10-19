@@ -111,6 +111,7 @@ var publicAPIMessages = map[string]string{
 	"rate_limited":                   "The server rate limit was reached. Wait before trying again.",
 	"service_unavailable":            "The service is unavailable. Try again shortly.",
 	"slow_down":                      "Authorization polling is too frequent. Wait before trying again.",
+	"team_subscription_active":       "This team still has an active subscription or a pending checkout. Cancel the subscription or resolve the checkout under Billing in the Paperboat console, then delete the team.",
 	"team_subscription_required":     "An active team subscription is required. Check team billing before trying again.",
 	"tunnel_unavailable":             "The secure tunnel is not available yet. Try again shortly.",
 	"unauthenticated":                "The server rejected the credential. Run `pb login` and try again.",

@@ -524,3 +524,25 @@ func TestTeamInviteExplainsSeatRequiredFromTheErrorCode(t *testing.T) {
 		t.Fatalf("exit=%d output=%s", code, output.String())
 	}
 }
+
+// F12-01: deleting a team that still has a subscription says what to do, not "state changed".
+func TestTeamDeleteWithActiveSubscriptionSaysHowToProceed(t *testing.T) {
+	supportedTeamFixtureVersion(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if teamFixtureUpdatePolicy(w, r) {
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": "team_subscription_active", "message": "Cancel the team subscription."}})
+	}))
+	defer server.Close()
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	writeTestProfile(t, dir, configPath, server.URL)
+	var out bytes.Buffer
+	code := run(t.Context(), []string{"team", "delete", "team_1", "--generation", "3", "--confirm", "team_1", "--server", server.URL, "--config", configPath}, &out, &out)
+	if code == 0 || !strings.Contains(out.String(), "active subscription") || !strings.Contains(out.String(), "Billing") || strings.Contains(out.String(), "state changed") {
+		t.Fatalf("code=%d output=%q", code, out.String())
+	}
+}
