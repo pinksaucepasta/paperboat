@@ -240,9 +240,14 @@ func configureProxyDiagnostics(proxy *httputil.ReverseProxy, observe func(contex
 			http.Error(writer, "This address has used up its bandwidth allowance. Its owner can add bandwidth, or it resumes when the allowance resets.", http.StatusTooManyRequests)
 			return
 		}
-		http.Error(writer, http.StatusText(http.StatusBadGateway), http.StatusBadGateway)
+		// A visitor hitting an address whose app is not running should learn that, not just "Bad Gateway".
+		// The reason is deliberately generic: it never carries the underlying cause.
+		writer.Header().Set("X-Paperboat-Error", "upstream_unavailable")
+		http.Error(writer, upstreamUnavailableMessage, http.StatusBadGateway)
 	}
 }
+
+const upstreamUnavailableMessage = "Paperboat could not reach the app behind this address. If it is yours, start it and reload the page."
 
 type retryPreviewTransport struct{ next http.RoundTripper }
 

@@ -30,7 +30,7 @@ func TestProxyAnswersQuotaRefusalWithTypedTooManyRequests(t *testing.T) {
 		t.Fatalf("quota refusal: %d %q %q", quota.Code, quota.Header().Get("X-Paperboat-Error"), quota.Body.String())
 	}
 	other := serve(errors.New("connection refused"))
-	if other.Code != http.StatusBadGateway || other.Header().Get("X-Paperboat-Error") != "" {
-		t.Fatalf("ordinary upstream failure: %d %q", other.Code, other.Header().Get("X-Paperboat-Error"))
+	if other.Code != http.StatusBadGateway || other.Header().Get("X-Paperboat-Error") != "upstream_unavailable" || strings.Contains(other.Body.String(), "connection refused") || !strings.Contains(other.Body.String(), "could not reach the app") {
+		t.Fatalf("ordinary upstream failure: %d %q %q", other.Code, other.Header().Get("X-Paperboat-Error"), other.Body.String())
 	}
 }

@@ -366,7 +366,7 @@ func TestProxyFailureOwnerPreservesCauseAndRecoveryWithoutFormatting(t *testing.
 	})
 	first := httptest.NewRecorder()
 	proxy.ServeHTTP(first, httptest.NewRequest(http.MethodGet, "http://public.example.test", nil).WithContext(ctx))
-	if first.Code != 502 || first.Body.String() != "Bad Gateway\n" || observed != 1 || cause.calls != 0 {
+	if first.Code != 502 || first.Body.String() != upstreamUnavailableMessage+"\n" || first.Header().Get("X-Paperboat-Error") != "upstream_unavailable" || strings.Contains(first.Body.String(), "EIO") || observed != 1 || cause.calls != 0 {
 		t.Fatalf("status=%d observed=%d formatted=%d", first.Code, observed, cause.calls)
 	}
 	second := httptest.NewRecorder()
