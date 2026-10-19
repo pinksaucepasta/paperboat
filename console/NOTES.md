@@ -43,8 +43,15 @@ owns it.
 - **Sign-in return path.** The server only signs `return_to` values under `/dashboard`
   (`validDashboardReturnTo` in `internal/auth/auth.go`). The console keeps its own
   `pb-return` cookie instead.
-- **CLI approval pages.** `pb login` machine approval and logout-return pages lived in the old
-  `paperboat-dashboard` and do not exist in the console yet.
+- **Adding a computer.** Three ways, one result. The dashboard "Add machine" dialog picks a
+  workspace and shows one command with a pairing token (`POST /v1/machine-enrollments` with
+  `workspace`). The installer without a token, and `pb login`, open `/cli/authorize?code=`: the
+  page shows "<name> (<os>) wants to join your Paperboat account", a workspace picker (the
+  `/v1/workspaces` list: Personal and every team you belong to) and Add. Approving
+  (`POST /v1/auth/device/requests/{code}/approve` with `workspace_id`) makes the server mint the same
+  enrollment and hand it only to that computer's login, which pairs automatically. A computer that is
+  already added (the request carries `enrolled_machine`) only signs in again and shows where it lives.
+  The logout-return page does not exist in the console yet.
 - **Machine list paging.** The console requests one page of 200 machines; past that the table
   says "Showing 200 of N" and typing searches the whole workspace on the server (`?q=`).
 - **Machine hostname.** The payload carries no hostname; the console builds `<alias>.<domain>` from
@@ -197,9 +204,12 @@ Product decisions so far, and what the console will show:
 - **Invites are always by email**, including people without an account yet.
 - **Roles:** owner (billing, delete, transfer ownership), admin (members, machines, access),
   member (uses what they are granted).
-- **Adding a machine** in a team enrolls it straight into the team (team-owned). Owners and admins
-  add directly; a member's new machine waits for approval (team setting, on by default), like
-  Tailscale's device approval.
+- **Adding a machine** to a team shares a machine its member owns (a machine is always owned by
+  the person who adds it; `transfer_to_team` stays an explicit, separate action). Owners and admins
+  add directly. With the team setting "Approve new machines" on (the default) a member's machine
+  waits as a request until an owner or admin accepts it on the team page ("Machines waiting") or
+  with `pb team machine approve|decline`; the member sees it waiting, can withdraw it, and sees a
+  decline. Activity records the request and the answer. Access still needs separate grants.
 - **Default access is shown while enrolling:** "Who can use it: everyone in the team" with what
   they can do (terminal, files, SSH, previews, tunnels), changeable there and later on the
   machine's Access section.
@@ -219,7 +229,7 @@ Backend gaps against this (current behaviour in brackets):
 - Invites by email, for people without accounts, with a longer expiry [account ID only,
   `InvitationLifetime` 24 h, everyone joins as member].
 - Enroll straight into a team [`POST /v1/machine-enrollments` takes only `shell`].
-- Machine approval state and a team setting for it [none].
+- Machine approval: built (`approve_new_machines`, `machine_requests`, share/approve/decline actions).
 - A default grant applied when a machine joins a team, settable at enrollment [grants are
   separate `POST /v1/teams/{id}/machine-grants`; a bound machine without one is unusable].
 - Team → personal transfer [only `share`, `unshare`, `transfer_to_team`, `remove`].

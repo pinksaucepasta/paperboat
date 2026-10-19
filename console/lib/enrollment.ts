@@ -70,11 +70,18 @@ export function installCommand(installUrl: string, shell: Shell, token?: string,
   return shell === "posix" ? `curl -fsSL '${url}' | bash` : `powershell -c "iex (irm '${url}')"`
 }
 
-export async function startEnrollment(shell: Shell): Promise<EnrollmentStart> {
+/** `workspace` is "personal" (the default) or the team the machine joins when it pairs. */
+export async function startEnrollment({
+  shell,
+  workspace,
+}: {
+  shell: Shell
+  workspace: string
+}): Promise<EnrollmentStart> {
   return api<EnrollmentStart>("machine-enrollments", {
     method: "POST",
     headers: { "content-type": "application/json", "idempotency-key": idempotencyKey() },
-    body: JSON.stringify({ shell }),
+    body: JSON.stringify(workspace === "personal" ? { shell } : { shell, workspace }),
   })
 }
 

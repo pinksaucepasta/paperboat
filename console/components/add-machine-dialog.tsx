@@ -4,7 +4,7 @@ import { CheckCircleIcon, CircleNotchIcon, PlusIcon } from "@phosphor-icons/reac
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import Link from "next/link"
 import { useEffect, useRef, useState } from "react"
-import { machineOverviewQuery, useApiQuery, useWorkspace } from "@/lib/api"
+import { machineOverviewQuery, useApiQuery, useWorkspace, workspacesQuery, type Workspace } from "@/lib/api"
 import {
   cancelEnrollment,
   describeMachine,
@@ -16,21 +16,20 @@ import {
   startEnrollment,
 } from "@/lib/enrollment"
 import { CopyIcons, useCopy } from "@/components/copy-button"
-import { ShareMachineDialog } from "@/components/share-machine-dialog"
+import { ShareMachine } from "@/components/share-machine-dialog"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { WorkspacePicker } from "@/components/workspace-picker"
 
-/** Shown only in Personal, where the control plane publishes the installer. */
-/** Personal: install on a new computer. Team: add one of your machines (see ShareMachineDialog). */
+/** Install on a new computer in any workspace; in a team, also share one of your machines. */
 export function AddMachineDialog() {
   const workspace = useWorkspace()
-  const { data } = useApiQuery({ ...machineOverviewQuery, enabled: workspace?.kind === "personal" })
+  const { data } = useApiQuery(machineOverviewQuery)
   const installUrl = installUrlFrom(data?.bootstrap_command)
   const [open, setOpen] = useState(false)
-  if (workspace?.kind === "team") return <ShareMachineDialog team={workspace} />
-  if (!installUrl || workspace?.kind !== "personal") return null
+  if (!installUrl || !workspace) return null
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -42,20 +41,74 @@ export function AddMachineDialog() {
         <DialogHeader>
           <DialogTitle>Add a machine</DialogTitle>
         </DialogHeader>
-        {/* Mounted only while open, so closing ends (and cancels) the enrollment. */}
-        {open && <AddMachine installUrl={installUrl} onDone={() => setOpen(false)} />}
+        {open && <AddMachineChoices installUrl={installUrl} workspace={workspace} onDone={() => setOpen(false)} />}
       </DialogContent>
     </Dialog>
   )
 }
 
-function AddMachine({ installUrl, onDone }: { installUrl: string; onDone: () => void }) {
+/** Where the machine goes, then its command. Changing the workspace starts a new enrollment. */
+function AddMachineChoices({
+  installUrl,
+  workspace,
+  onDone,
+}: {
+  installUrl: string
+  workspace: Workspace
+  onDone: () => void
+}) {
+  const { data: workspaces } = useApiQuery(workspacesQuery)
+  const [target, setTarget] = useState(workspace.id)
+  const [plain, setPlain] = useState(false)
+  const [sharing, setSharing] = useState(false)
+  if (sharing && workspace.kind === "team") return <ShareMachine team={workspace} onDone={onDone} />
+  return (
+    <div className="flex flex-col gap-4">
+      {!plain && workspaces && workspaces.length > 1 && (
+        <Field className="gap-1.5">
+          <FieldLabel>Workspace</FieldLabel>
+          <WorkspacePicker workspaces={workspaces} value={target} onChange={setTarget} />
+        </Field>
+      )}
+      <AddMachine
+        key={target}
+        installUrl={installUrl}
+        workspace={target}
+        plain={plain}
+        onTogglePlain={() => setPlain(!plain)}
+        onDone={onDone}
+      />
+      {workspace.kind === "team" && (
+        <button
+          type="button"
+          onClick={() => setSharing(true)}
+          className="self-start text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+        >
+          Share a machine you already have
+        </button>
+      )}
+    </div>
+  )
+}
+
+function AddMachine({
+  installUrl,
+  workspace,
+  plain,
+  onTogglePlain,
+  onDone,
+}: {
+  installUrl: string
+  workspace: string
+  plain: boolean
+  onTogglePlain: () => void
+  onDone: () => void
+}) {
   const queryClient = useQueryClient()
   // Launch is macOS and Linux only; Windows comes in the first update (PLAN.md 1.1).
   const shell = "posix"
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
-  const [plain, setPlain] = useState(false)
 
   // The command is the point of this dialog, so a pairing token is requested as soon as it opens.
   const start = useMutation({ mutationFn: startEnrollment })
@@ -65,8 +118,8 @@ function AddMachine({ installUrl, onDone }: { installUrl: string; onDone: () => 
     // Exactly one request, even when effects run twice in development.
     if (requested.current) return
     requested.current = true
-    start.mutate(shell)
-  }, [start])
+    start.mutate({ shell, workspace })
+  }, [start, workspace])
 
   const live = useApiQuery({ ...enrollmentQuery(enrollment?.id ?? ""), enabled: Boolean(enrollment) })
   const state = live.data?.state ?? enrollment?.state
@@ -120,20 +173,18 @@ function AddMachine({ installUrl, onDone }: { installUrl: string; onDone: () => 
         )}
         <div className="flex min-h-5 items-center justify-between gap-3 text-xs text-muted-foreground">
           {plain ? (
-            <span>
-              Installs only. Pair later with <code className="font-mono">pb setup</code>.
-            </span>
+            <span>Installs, then opens your browser to sign in, choose the workspace and approve.</span>
           ) : start.isError ? (
             <span className="text-destructive">{start.error.message}</span>
           ) : (
-            <EnrollmentStatus state={state} onRetry={() => start.mutate(shell)} />
+            <EnrollmentStatus state={state} onRetry={() => start.mutate({ shell, workspace })} />
           )}
           <button
             type="button"
-            onClick={() => setPlain(!plain)}
+            onClick={onTogglePlain}
             className="shrink-0 underline-offset-4 hover:text-foreground hover:underline"
           >
-            {plain ? "Pair this machine" : "Install without pairing"}
+            {plain ? "Use a pairing command" : "Approve in browser instead"}
           </button>
         </div>
       </div>

@@ -7,6 +7,7 @@ import { useState } from "react"
 import { meQuery, useApiQuery, useWorkspace, workspacesQuery, type Me, type Workspace } from "@/lib/api"
 import { billingKey, billingQuery, notLiveTitle } from "@/lib/billing"
 import {
+  answerMachine,
   cancelInvitation,
   resendInvitation,
   memberEmails,
@@ -31,6 +32,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Switch } from "@/components/ui/switch"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -135,6 +137,8 @@ export function TeamManage({ workspace }: { workspace: Workspace }) {
 
       {team.data.suspended && <SuspendedNotice owner={actor === "owner"} />}
 
+      <MachineRequests team={team.data} admin={admin} me={me.data} />
+
       <section className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <ViewToggle
@@ -156,7 +160,7 @@ export function TeamManage({ workspace }: { workspace: Workspace }) {
         )}
       </section>
 
-      {actor === "owner" && <TeamSettings team={team.data} />}
+      {admin && <TeamSettings team={team.data} owner={actor === "owner"} />}
       <DangerZone team={team.data} owner={actor === "owner"} />
       <InviteDialog
         team={team.data}
@@ -490,7 +494,78 @@ function Delivery({ invitation }: { invitation: TeamInvitation }) {
   )
 }
 
-function TeamSettings({ team }: { team: Team }) {
+/**
+ * Machines that asked to join the team: owners and admins accept or decline them; a member sees
+ * where their own stand and can withdraw them.
+ */
+function MachineRequests({ team, admin, me }: { team: Team; admin: boolean; me: Me | undefined }) {
+  const refresh = useRefreshTeam(team.team_id)
+  const queryClient = useQueryClient()
+  const answer = useMutation({
+    mutationFn: ({ machineId, action }: { machineId: string; action: "approve" | "decline" | "unshare" }) =>
+      answerMachine(team, machineId, action),
+    onSuccess: async () => {
+      await refresh()
+      await queryClient.invalidateQueries({ queryKey: ["machines"] })
+    },
+  })
+  const requests = team.machine_requests ?? []
+  if (!requests.length) return null
+  return (
+    <Section title="Machines waiting">
+      <ul className="flex flex-col">
+        {requests.map((request) => {
+          const mine = request.requested_by === me?.id
+          return (
+            <li key={request.machine_id} className="flex min-h-12 flex-wrap items-center gap-3 py-2 text-sm">
+              <span className="min-w-0 flex-1">
+                <span className="font-medium">{request.alias}</span>
+                <span className="text-muted-foreground">
+                  {request.state === "declined"
+                    ? mine
+                      ? " was declined by an owner or admin"
+                      : " was declined"
+                    : mine
+                      ? " is waiting for an owner or admin"
+                      : " asked to join"}
+                </span>
+              </span>
+              {admin && request.state === "pending" && (
+                <>
+                  <Button
+                    variant="outline"
+                    disabled={answer.isPending}
+                    onClick={() => answer.mutate({ machineId: request.machine_id, action: "decline" })}
+                  >
+                    Decline
+                  </Button>
+                  <Button
+                    disabled={answer.isPending}
+                    onClick={() => answer.mutate({ machineId: request.machine_id, action: "approve" })}
+                  >
+                    Accept
+                  </Button>
+                </>
+              )}
+              {mine && (
+                <Button
+                  variant="outline"
+                  disabled={answer.isPending}
+                  onClick={() => answer.mutate({ machineId: request.machine_id, action: "unshare" })}
+                >
+                  Withdraw
+                </Button>
+              )}
+            </li>
+          )
+        })}
+      </ul>
+      {answer.isError && <p className="py-2 text-sm text-destructive">{answer.error.message}</p>}
+    </Section>
+  )
+}
+
+function TeamSettings({ team, owner }: { team: Team; owner: boolean }) {
   const refresh = useRefreshTeam(team.team_id)
   const queryClient = useQueryClient()
   const [name, setName] = useState(team.display_name || team.team_id)
@@ -502,29 +577,51 @@ function TeamSettings({ team }: { team: Team }) {
     },
   })
   const changed = name.trim() !== (team.display_name || team.team_id)
+  const approval = useMutation({
+    mutationFn: (on: boolean) => teamAction(team, "machine_approval", { approve_new_machines: on }),
+    onSuccess: async () => {
+      await refresh()
+      await queryClient.invalidateQueries({ queryKey: workspacesQuery.queryKey })
+    },
+  })
   return (
     <Section title="Settings">
-      <Row label="Team name" htmlFor="team-name">
-        <form
-          className="flex items-center gap-2"
-          onSubmit={(event) => {
-            event.preventDefault()
-            if (changed && name.trim()) rename.mutate()
-          }}
-          title={teamLive.rename ? undefined : notLiveTitle}
-        >
-          <Input
-            id="team-name"
-            className="w-56"
-            value={name}
-            disabled={!teamLive.rename}
-            onChange={(event) => setName(event.target.value)}
-          />
-          <Button type="submit" variant="outline" disabled={!teamLive.rename || !changed || rename.isPending}>
-            Save
-          </Button>
-        </form>
+      <Row label="Approve new machines" htmlFor="team-approval">
+        <Switch
+          id="team-approval"
+          checked={team.approve_new_machines ?? true}
+          disabled={approval.isPending}
+          onCheckedChange={(on) => approval.mutate(on)}
+          aria-label="Approve new machines"
+        />
       </Row>
+      <p className="pb-2 text-xs text-muted-foreground">
+        Machines that members add wait for an owner or admin to accept them. Owners and admins add machines directly.
+      </p>
+      {approval.isError && <p className="py-2 text-sm text-destructive">{approval.error.message}</p>}
+      {owner && (
+        <Row label="Team name" htmlFor="team-name">
+          <form
+            className="flex items-center gap-2"
+            onSubmit={(event) => {
+              event.preventDefault()
+              if (changed && name.trim()) rename.mutate()
+            }}
+            title={teamLive.rename ? undefined : notLiveTitle}
+          >
+            <Input
+              id="team-name"
+              className="w-56"
+              value={name}
+              disabled={!teamLive.rename}
+              onChange={(event) => setName(event.target.value)}
+            />
+            <Button type="submit" variant="outline" disabled={!teamLive.rename || !changed || rename.isPending}>
+              Save
+            </Button>
+          </form>
+        </Row>
+      )}
       <Row label="Team ID">
         <span className="flex items-center gap-1 font-mono text-code">
           {team.team_id}

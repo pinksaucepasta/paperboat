@@ -9,7 +9,8 @@ export type TeamMember = Schemas["TeamMember"]
 /** The server sends `suspended` but OpenAPI omits it (NOTES.md). */
 export type Team = Schemas["TeamTeam"] & { suspended?: boolean }
 export type TeamInvitation = Schemas["TeamInvitationSummary"]
-export type TeamAction = "role" | "remove" | "leave" | "transfer" | "delete" | "rename"
+export type MachineAdmission = Schemas["TeamMachineAdmission"]
+export type TeamAction = "role" | "remove" | "leave" | "transfer" | "delete" | "rename" | "machine_approval"
 export type TeamRole = "owner" | "admin" | "member"
 
 /** Team features whose server side is not deployed yet; their controls render disabled. */
@@ -126,12 +127,35 @@ export function answerInvitation(invitation: string, answer: "accept" | "decline
 export function teamAction(
   team: Team,
   action: TeamAction,
-  fields: { account_id?: string; role?: string; confirmation?: string; name?: string } = {},
+  fields: {
+    account_id?: string
+    role?: string
+    confirmation?: string
+    name?: string
+    approve_new_machines?: boolean
+  } = {},
 ) {
   return api<Team>(`${teamPath(team.team_id)}/actions`, {
     method: "POST",
     headers: json,
     body: JSON.stringify({ operation_id: idempotencyKey(), expected_generation: team.generation, action, ...fields }),
+  })
+}
+
+/**
+ * An owner or admin answers a machine a member asked to add ("approve", "decline"); its owner can
+ * withdraw the request ("unshare").
+ */
+export function answerMachine(team: Team, machineId: string, action: "approve" | "decline" | "unshare") {
+  return api<Team>(`${teamPath(team.team_id)}/machines`, {
+    method: "POST",
+    headers: json,
+    body: JSON.stringify({
+      operation_id: idempotencyKey(),
+      expected_generation: team.generation,
+      machine_id: machineId,
+      action,
+    }),
   })
 }
 

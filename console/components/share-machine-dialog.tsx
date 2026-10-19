@@ -1,8 +1,7 @@
 "use client"
 
-import { CircleNotchIcon, PlusIcon } from "@phosphor-icons/react"
+import { CircleNotchIcon } from "@phosphor-icons/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { useState } from "react"
 import { toast } from "sonner"
 import {
   api,
@@ -18,33 +17,13 @@ import {
 } from "@/lib/api"
 import { useMachineDomains } from "@/lib/machine-domains"
 import { StatusDot } from "@/components/machine-status"
-import { Button } from "@/components/ui/button"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Skeleton } from "@/components/ui/skeleton"
 
 /**
- * A team's "Add machine": machines join a team by being shared from their owner's personal
- * machines (`POST /v1/teams/{team}/machines`, action `share`), so this lists yours to pick from.
+ * Share one of your machines with a team: machines join a team by being shared from their owner's
+ * personal machines (`POST /v1/teams/{team}/machines`, action `share`), so this lists yours to pick from.
  */
-export function ShareMachineDialog({ team }: { team: Workspace }) {
-  const [open, setOpen] = useState(false)
-  return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={<Button size="lg" />}>
-        <PlusIcon data-icon="inline-start" />
-        Add machine
-      </DialogTrigger>
-      <DialogContent className="gap-4 sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Add a machine to {team.name}</DialogTitle>
-        </DialogHeader>
-        {open && <ShareMachine team={team} onDone={() => setOpen(false)} />}
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-function ShareMachine({ team, onDone }: { team: Workspace; onDone: () => void }) {
+export function ShareMachine({ team, onDone }: { team: Workspace; onDone: () => void }) {
   const queryClient = useQueryClient()
   const { primary: primaryDomain } = useMachineDomains()
   const { data: me } = useApiQuery(meQuery)
@@ -62,7 +41,7 @@ function ShareMachine({ team, onDone }: { team: Workspace; onDone: () => void })
       const path = `teams/${encodeURIComponent(team.id)}`
       // Team changes are fenced by the team's generation, read just before the change.
       const current = await api<Team>(path)
-      return api(`${path}/machines`, {
+      return api<Team>(`${path}/machines`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -73,9 +52,15 @@ function ShareMachine({ team, onDone }: { team: Workspace; onDone: () => void })
         }),
       })
     },
-    onSuccess: async (_, machine) => {
+    onSuccess: async (updated, machine) => {
       await queryClient.invalidateQueries({ queryKey: ["machines"] })
-      toast.success(`${machine.alias} added to ${team.name}`)
+      await queryClient.invalidateQueries({ queryKey: ["team", team.id] })
+      const waiting = updated.machine_requests?.some((r) => r.machine_id === machine.id && r.state === "pending")
+      toast.success(
+        waiting
+          ? `${machine.alias} is waiting for an owner or admin of ${team.name}`
+          : `${machine.alias} added to ${team.name}`,
+      )
       onDone()
     },
   })

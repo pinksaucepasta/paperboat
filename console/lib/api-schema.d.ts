@@ -1624,6 +1624,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/tunnels/{tunnel_id}/connectors/{connector_id}/origin-health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tunnel_id: components["parameters"]["TunnelID"];
+                connector_id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report whether the local app behind each route is reachable
+         * @description Host-only, authenticated like carrier bootstrap by the current renewable machine identity and a detached proof over the exact method, path and body; Idempotency-Key binds the proof operation. The host reports a change between reachable and unreachable immediately and repeats an unreachable state every 30 seconds; a report older than 60 seconds no longer holds the tunnel's origin down. The latest state per route is stored; routes that do not belong to the tunnel are ignored.
+         */
+        post: operations["post_v1_tunnels_tunnel_id_connectors_connector_id_origin_health"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/tunnels/{tunnel_id}/connectors/{connector_id}/carrier-bootstrap": {
         parameters: {
             query?: never;
@@ -7144,6 +7167,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/machines/{machine_id}/inbox": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                machine_id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * List a machine's Paperboat Inbox, live
+         * @description The machine answers live and the server stores nothing: names and sizes exist only in this response. Newest first, at most 200 files. Only the machine's owner, or an owner or admin of its team, may list it. An offline machine answers 409 machine_offline.
+         */
+        get: operations["get_v1_user_machines_machine_id_inbox"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/machines/{machine_id}/inbox/{file_id}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                machine_id: string;
+                file_id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Download one Paperboat Inbox file from the machine
+         * @description The machine answers live and the server stores no bytes: the file is streamed through with its exact size (Content-Length), as an attachment. Only the machine's owner, or an owner or admin of its team, may download. Files over 2 GiB are refused; a machine that stops sending ends the download after 30 seconds.
+         */
+        get: operations["get_v1_user_machines_machine_id_inbox_file_id_content"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/machines/{machine_id}/inbox/{file_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                machine_id: string;
+                file_id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete one Paperboat Inbox file on the machine
+         * @description The machine deletes the file live. Requires an Idempotency-Key and the CSRF token. Errors: 404 inbox_file_not_found, 409 machine_offline, 503 machine_unreachable.
+         */
+        delete: operations["delete_v1_user_machines_machine_id_inbox_file_id"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -8187,6 +8278,12 @@ export interface components {
             device_type: "desktop" | "server" | "container";
             os: string;
             scopes: ("account:read" | "clients:revoke" | "machines:read" | "machines:connect" | "session:refresh" | "diagnostics:upload" | "previews:read" | "previews:write" | "tunnels:read" | "tunnels:write" | "operations:read" | "operations:write")[];
+            /** @description The device is not a machine yet: approving the login also enrolls it. */
+            enroll?: boolean;
+            /** @description The machine this device already is; re-login only signs it back in. */
+            enrolled_machine_id?: string;
+            /** @description Workspace the device asked to join: personal or a team slug. Only with enroll. */
+            workspace?: string;
         };
         DeviceAuthorization: {
             device_code: string;
@@ -8213,6 +8310,18 @@ export interface components {
             /** @constant */
             scope: "account:read clients:revoke diagnostics:upload operations:read operations:write previews:read previews:write machines:connect machines:read session:refresh tunnels:read tunnels:write";
             cli_client_session_id: string;
+            /** @description One-shot machine enrollment minted when an enrolling device login is approved; present only for that device. */
+            enrollment?: {
+                bootstrap_token: string;
+                /** Format: uri */
+                server_url: string;
+                /** Format: date-time */
+                expires_at: string;
+                /** @description personal or the team id the machine joins. */
+                workspace_id: string;
+                /** @enum {string} */
+                admission?: "accepted" | "pending";
+            };
         };
         DeviceRequest: {
             user_code: string;
@@ -8235,6 +8344,22 @@ export interface components {
                 email: string;
                 display_name: string;
             };
+            enroll: boolean;
+            /** @description Workspace the device asked for; empty when it did not. */
+            requested_workspace: string;
+            /** @description Approved destination (personal or a team id); empty until approved. */
+            workspace_id: string;
+            /** @description The account's machine this device already is. */
+            enrolled_machine?: {
+                id: string;
+                alias: string;
+                workspaces: string[];
+            };
+            /**
+             * @description For an approved joining computer in a team: whether the team accepts it at once or an owner or admin must.
+             * @enum {string}
+             */
+            admission?: "accepted" | "pending";
         };
         EnvironmentConnectionDescriptor: {
             /** @constant */
@@ -8784,6 +8909,26 @@ export interface components {
             /** @enum {string} */
             protocol?: "http" | "tcp";
         };
+        ConnectorOriginHealthRequest: {
+            /** @constant */
+            schema: "paperboat.origin-health/v1";
+            session_id: string;
+            process_generation: number;
+            config_generation: number;
+            content_hash: string;
+            routes: {
+                route_id: string;
+                /** @enum {string} */
+                state: "ready" | "unreachable";
+                /**
+                 * @description Required when state is unreachable, absent when ready.
+                 * @enum {string}
+                 */
+                code?: "refused" | "timeout" | "unreachable" | "tls";
+                /** Format: date-time */
+                observed_at: string;
+            }[];
+        };
         ConnectorCarrierBootstrapRequest: {
             /** @constant */
             schema: "paperboat.connector-bootstrap/v1";
@@ -9321,6 +9466,11 @@ export interface components {
             members: components["schemas"]["TeamMember"][];
             grants: components["schemas"]["TeamGrant"][];
             display_name: string;
+            suspended: boolean;
+            /** @description Machines that members add wait for an owner or admin to accept them. */
+            approve_new_machines?: boolean;
+            /** @description Owners and admins see every request; other members see their own. */
+            machine_requests?: components["schemas"]["TeamMachineAdmission"][];
         };
         TeamActivityItem: {
             id: string;
@@ -9352,11 +9502,13 @@ export interface components {
             operation_id: string;
             expected_generation: number;
             /** @enum {string} */
-            action: "role" | "remove" | "leave" | "transfer" | "delete" | "rename";
+            action: "role" | "remove" | "leave" | "transfer" | "delete" | "rename" | "machine_approval";
             account_id?: string;
             role?: string;
             confirmation?: string;
             name?: string;
+            /** @description With action machine_approval: whether machines members add need an owner or admin to accept them. */
+            approve_new_machines?: boolean;
         };
         TeamInviteRequest: {
             operation_id: string;
@@ -10363,6 +10515,8 @@ export interface components {
             kind: "personal" | "team";
             /** @enum {string} */
             role: "owner" | "admin" | "member";
+            /** @description Team only: machines members add wait for an owner or admin. */
+            approve_new_machines?: boolean;
         };
         ResourceBandwidthHistory: {
             /** Format: date-time */
@@ -10847,6 +11001,33 @@ export interface components {
             success_url: string;
             /** Format: uri */
             cancel_url: string;
+        };
+        InboxItem: {
+            id: string;
+            name: string;
+            /** Format: int64 */
+            size: number;
+            /** Format: date-time */
+            received_at: string;
+        };
+        MachineInbox: {
+            /** @description Files in the Inbox; may exceed items. */
+            total: number;
+            items: components["schemas"]["InboxItem"][];
+        };
+        /** @description A machine that asked to join the team and is waiting for an owner or admin, or was declined. */
+        TeamMachineAdmission: {
+            machine_id: string;
+            alias: string;
+            /** @description Account that owns the machine. */
+            requested_by: string;
+            /** @enum {string} */
+            state: "pending" | "declined";
+            /** Format: date-time */
+            requested_at: string;
+            decided_by?: string;
+            /** Format: date-time */
+            decided_at?: string;
         };
     };
     responses: {
@@ -14112,6 +14293,43 @@ export interface operations {
             };
         };
     };
+    post_v1_tunnels_tunnel_id_connectors_connector_id_origin_health: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description Durable host identity credential used with the signed machine proof. */
+                "X-Paperboat-Machine-Identity": components["parameters"]["MachineIdentity"];
+                /** @description Strict unpadded base64url proof over the exact request body and idempotency key. */
+                "X-Paperboat-Machine-Proof": components["parameters"]["MachineProof"];
+            };
+            path: {
+                tunnel_id: components["parameters"]["TunnelID"];
+                connector_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConnectorOriginHealthRequest"];
+            };
+        };
+        responses: {
+            /** @description The report was recorded. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            415: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
     post_v1_tunnels_tunnel_id_connectors_connector_id_carrier_bootstrap: {
         parameters: {
             query?: {
@@ -15892,7 +16110,14 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** @description Destination for a joining device: personal or a team the account may add machines to. Required when approving a device that is joining. */
+                    workspace_id?: string;
+                };
+            };
+        };
         responses: {
             /** @description Machine request approved. */
             200: {
@@ -15905,6 +16130,8 @@ export interface operations {
                     } & components["schemas"]["SuccessResponse"];
                 };
             };
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
             410: components["responses"]["Error"];
@@ -15919,7 +16146,14 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** @description Destination for a joining device: personal or a team the account may add machines to. Required when approving a device that is joining. */
+                    workspace_id?: string;
+                };
+            };
+        };
         responses: {
             /** @description Machine request denied. */
             200: {
@@ -16486,7 +16720,16 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    shell?: "posix" | "powershell";
+                    /** @description Workspace the machine joins when it enrolls: personal (default) or a team the account may add machines to. */
+                    workspace?: string;
+                };
+            };
+        };
         responses: {
             /** @description Enrollment operation and one-time bootstrap handoff. */
             201: {
@@ -16496,6 +16739,7 @@ export interface operations {
                 content?: never;
             };
             400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
         };
     };
     get_v1_user_machine_enrollments_enrollment_id: {
@@ -26412,6 +26656,99 @@ export interface operations {
                 };
             };
             500: components["responses"]["Error"];
+        };
+    };
+    get_v1_user_machines_machine_id_inbox: {
+        parameters: {
+            query?: {
+                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
+                workspace?: string;
+            };
+            header?: never;
+            path: {
+                machine_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The Inbox right now. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: components["schemas"]["MachineInbox"];
+                    } & components["schemas"]["SuccessResponse"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    get_v1_user_machines_machine_id_inbox_file_id_content: {
+        parameters: {
+            query?: {
+                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
+                workspace?: string;
+            };
+            header?: never;
+            path: {
+                machine_id: string;
+                file_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The file. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": string;
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            413: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    delete_v1_user_machines_machine_id_inbox_file_id: {
+        parameters: {
+            query?: {
+                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
+                workspace?: string;
+            };
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                machine_id: string;
+                file_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            503: components["responses"]["Error"];
         };
     };
 }
