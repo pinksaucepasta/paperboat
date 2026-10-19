@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"io"
@@ -56,5 +57,16 @@ func TestInstallUpgradeRetainsProtectedSettingsWithoutRepeatingFlags(t *testing.
 	saved, err = selfhost.ReadConfig(dir)
 	if err != nil || !reflect.DeepEqual(saved, cfg) {
 		t.Fatal("rejected configuration change modified retained settings")
+	}
+}
+
+func TestEnsureRuntimeImagesRefusesBeforeAnyChange(t *testing.T) {
+	var out bytes.Buffer
+	err := ensureRuntimeImages(context.Background(), containers.Images{Relay: "not a valid reference"}, []string{"relay"}, &out)
+	if err == nil {
+		t.Fatal("an invalid image reference was accepted")
+	}
+	if out.Len() != 0 {
+		t.Fatalf("installer reported preparing an invalid image: %q", out.String())
 	}
 }
