@@ -24,6 +24,20 @@ var lazyPolicyClientForCommand = func(command *cobra.Command) (lazyPolicyClient,
 	return tunnelClientForCommand(command)
 }
 
+// lazyPolicyMachineID turns a machine name or ID into the stable machine ID the policy API stores.
+var lazyPolicyMachineID = func(command *cobra.Command, requested string) (string, error) {
+	ctx := actionContext(command, []string{requested})
+	client, err := backendClient(ctx)
+	if err != nil {
+		return "", err
+	}
+	machine, err := resolveUserMachine(ctx.Context, client, requested)
+	if err != nil {
+		return "", err
+	}
+	return machine.ID, nil
+}
+
 func tunnelPolicyCommand() *cobra.Command {
 	root := &cobra.Command{Use: "policy", Short: "Manage permission to activate a private port on demand", Args: commandArgs(cobra.NoArgs), Long: "Manage on-demand private or team access to an exact host port. A replacement application listening on the same approved port inherits access. Paperboat does not start the application."}
 	root.AddCommand(tunnelPolicyAllowCommand(), tunnelPolicyGetCommand(), tunnelPolicyRevokeCommand())
@@ -49,11 +63,15 @@ func tunnelPolicyAllowCommand() *cobra.Command {
 		if (policyID == "") != (expected == 0) || expected < 0 {
 			return invocationError(errors.New("id and generation must be provided together when updating a policy"))
 		}
+		machineID, err := lazyPolicyMachineID(command, args[0])
+		if err != nil {
+			return err
+		}
 		client, err := lazyPolicyClientForCommand(command)
 		if err != nil {
 			return err
 		}
-		out, err := client.UpsertLazyPolicy(command.Context(), api.LazyPolicyUpsertRequest{ID: policyID, MachineID: args[0], ExpectedGeneration: expected, Target: api.LazyPolicyTarget{Scheme: target.Scheme, Address: target.Address}, AccessMode: access, OwnershipMode: "persistent_port", ExpiresAt: time.Now().UTC().Add(lifetime)})
+		out, err := client.UpsertLazyPolicy(command.Context(), api.LazyPolicyUpsertRequest{ID: policyID, MachineID: machineID, ExpectedGeneration: expected, Target: api.LazyPolicyTarget{Scheme: target.Scheme, Address: target.Address}, AccessMode: access, OwnershipMode: "persistent_port", ExpiresAt: time.Now().UTC().Add(lifetime)})
 		if err != nil {
 			return err
 		}
