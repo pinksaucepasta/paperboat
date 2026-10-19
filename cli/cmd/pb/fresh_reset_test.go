@@ -24,7 +24,61 @@ func freshResetTokenFile(t *testing.T) string {
 	return path
 }
 
+// noRetire keeps a reset test from reaching the real machine record or server.
+func noRetire(t *testing.T) {
+	t.Helper()
+	original := retireOwnMachineRecord
+	t.Cleanup(func() { retireOwnMachineRecord = original })
+	retireOwnMachineRecord = func(*cobra.Command) (string, error) { return "", nil }
+}
+
+func TestFreshEnrollmentResetRetiresTheOldRecordBeforeCleanup(t *testing.T) {
+	hostname, err := os.Hostname()
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalCleanup := freshEnrollmentCleanup
+	originalRetire := retireOwnMachineRecord
+	t.Cleanup(func() { freshEnrollmentCleanup, retireOwnMachineRecord = originalCleanup, originalRetire })
+	var order []string
+	retireOwnMachineRecord = func(*cobra.Command) (string, error) { order = append(order, "retire"); return "machine_old", nil }
+	freshEnrollmentCleanup = func(*cobra.Command) error { order = append(order, "cleanup"); return nil }
+	var output bytes.Buffer
+	command := freshEnrollmentResetCommand()
+	command.SetOut(&output)
+	command.SetArgs([]string{"--confirmation", "RESET PAPERBOAT", "--hostname", hostname, "--enrollment-token-file", freshResetTokenFile(t), "--json"})
+	if err := command.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(order, ",") != "retire,cleanup" || !strings.Contains(output.String(), `"retired_machine_id":"machine_old"`) {
+		t.Fatalf("order=%v output=%s", order, output.String())
+	}
+}
+
+func TestFreshEnrollmentResetChangesNothingWhenTheOldRecordCannotBeRetired(t *testing.T) {
+	hostname, err := os.Hostname()
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalCleanup := freshEnrollmentCleanup
+	originalRetire := retireOwnMachineRecord
+	t.Cleanup(func() { freshEnrollmentCleanup, retireOwnMachineRecord = originalCleanup, originalRetire })
+	retireOwnMachineRecord = func(*cobra.Command) (string, error) { return "", commandRejection{reason: commandRejectResetRetire} }
+	freshEnrollmentCleanup = func(*cobra.Command) error {
+		t.Fatal("local state was removed although the old record stayed online")
+		return nil
+	}
+	command := freshEnrollmentResetCommand()
+	command.SetArgs([]string{"--confirmation", "RESET PAPERBOAT", "--hostname", hostname, "--enrollment-token-file", freshResetTokenFile(t), "--json"})
+	err = command.Execute()
+	failure := classifyCommandFailure(err)
+	if err == nil || failure.kind != commandRejected || !strings.Contains(commandFailureMessage(err, failure), "nothing was reset") {
+		t.Fatalf("kind=%v message=%q err=%v", failure.kind, commandFailureMessage(err, failure), err)
+	}
+}
+
 func TestFreshEnrollmentResetRequiresCleanupBeforeSuccess(t *testing.T) {
+	noRetire(t)
 	hostname, err := os.Hostname()
 	if err != nil {
 		t.Fatal(err)
@@ -47,6 +101,7 @@ func TestFreshEnrollmentResetRequiresCleanupBeforeSuccess(t *testing.T) {
 }
 
 func TestFreshEnrollmentResetReportsOnlyAfterCleanup(t *testing.T) {
+	noRetire(t)
 	hostname, err := os.Hostname()
 	if err != nil {
 		t.Fatal(err)
@@ -117,6 +172,7 @@ func TestFreshEnrollmentCleanupRetainsStateAfterServiceFailure(t *testing.T) {
 }
 
 func TestFreshEnrollmentResetPreservesMatchingResume(t *testing.T) {
+	noRetire(t)
 	hostname, err := os.Hostname()
 	if err != nil {
 		t.Fatal(err)

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
 	helperconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
@@ -80,6 +82,10 @@ func freshEnrollmentResetCommand() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("verify reset CLI before cleanup: %w", err)
 			}
+			retired, err := retireOwnMachineRecord(command)
+			if err != nil {
+				return err
+			}
 			if err := freshEnrollmentCleanup(command); err != nil {
 				return err
 			}
@@ -87,6 +93,9 @@ func freshEnrollmentResetCommand() *cobra.Command {
 				return fmt.Errorf("reset CLI did not survive cleanup: %w", err)
 			}
 			result := map[string]any{"reset": true, "resume": false, "executable": executable, "hostname": hostname, "inbox_preserved": true}
+			if retired != "" {
+				result["retired_machine_id"] = retired
+			}
 			if asJSON {
 				return writeCLIJSON(command.OutOrStdout(), result)
 			}
@@ -103,6 +112,38 @@ func freshEnrollmentResetCommand() *cobra.Command {
 }
 
 var freshEnrollmentCleanup = runFreshEnrollmentCleanup
+var retireOwnMachineRecord = disconnectOwnMachineRecord
+
+// disconnectOwnMachineRecord retires this computer's current machine record
+// before its local credentials are deleted, so the fresh enrollment replaces it
+// instead of leaving a second online record and a suffixed name. It returns the
+// retired machine ID, or "" when there is nothing to retire (never enrolled,
+// signed out, or already retired). The server revokes the machine's own CLI
+// session with the record, so this is the last server call reset makes.
+func disconnectOwnMachineRecord(command *cobra.Command) (string, error) {
+	machineID, err := configuredMachineID()
+	if err != nil || machineID == "" {
+		return "", nil
+	}
+	ctx := actionContext(command, nil)
+	client, err := backendClient(ctx)
+	switch {
+	case err == nil:
+	case errors.Is(err, config.ErrNoCredentials), errors.Is(err, commandRejection{reason: commandRejectMissingServer}):
+		return "", nil
+	default:
+		return "", commandRejection{reason: commandRejectResetRetire}
+	}
+	err = client.DisconnectUserMachine(ctx.Context, machineID)
+	switch {
+	case err == nil:
+		return machineID, nil
+	case api.IsNotFound(err), errors.Is(err, api.ErrUnauthenticated):
+		return "", nil
+	}
+	return "", commandRejection{reason: commandRejectResetRetire}
+}
+
 var resolveFreshEnrollmentExecutable = existingFreshEnrollmentExecutable
 
 func runFreshEnrollmentCleanup(command *cobra.Command) error {

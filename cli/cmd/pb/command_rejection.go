@@ -32,6 +32,7 @@ const (
 	commandRejectTeamReserved
 	commandRejectTeamRequestInvalid
 	commandRejectTeamSeatRequired
+	commandRejectResetRetire
 )
 
 // commandRejection describes a command-owned refusal. Its
@@ -43,7 +44,7 @@ type commandRejection struct {
 }
 
 func (e commandRejection) valid() bool {
-	return e.reason >= commandRejectDefaultSessionRename && e.reason <= commandRejectTeamSeatRequired
+	return e.reason >= commandRejectDefaultSessionRename && e.reason <= commandRejectResetRetire
 }
 func (e commandRejection) Error() string {
 	switch e.reason {
@@ -67,6 +68,8 @@ func (e commandRejection) Error() string {
 		return "The server rejected the team request. Use an available team name, at least one seat and a month or year interval."
 	case commandRejectTeamSeatRequired:
 		return "No free seat: every purchased seat is used or held by a pending invitation. Cancel a pending invitation (`pb team cancel-invite`) or add a seat in the console, then try again."
+	case commandRejectResetRetire:
+		return "The old machine record could not be retired, so nothing was reset. Check your connection and run `pb reset` again."
 	case commandRejectInboxDeclined:
 		return "The recipient declined this transfer. Contact them before sending again."
 	case commandRejectDefaultSessionRename:
