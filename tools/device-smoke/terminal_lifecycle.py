@@ -226,8 +226,17 @@ def qualify(pb, target, check, monitor, entry='connect', cwd=None, status_bar='o
             terminal.expect('PB_ARITH_42')
             terminal.expect('PB_UNICODE_λ船')
             terminal.resize(37, 109)
-            terminal.send("printf '\\nPB_SIZE_'; stty size\r")
-            terminal.expect('PB_SIZE_' + ('36' if status_bar == 'on' else '37') + ' 109')
+            # Resize travels pb -> daemon -> host; it is applied within a fraction of a second, not instantly.
+            wanted = 'PB_SIZE_' + ('36' if status_bar == 'on' else '37') + ' 109'
+            deadline = time.monotonic() + 5
+            while True:
+                terminal.send("printf '\\nPB_SIZE_'; stty size\r")
+                try:
+                    terminal.expect(wanted, timeout=0.6)
+                    break
+                except RuntimeError:
+                    if time.monotonic() > deadline:
+                        raise RuntimeError('terminal size did not follow the local resize within 5 s')
             terminal.send("printf '\\033[31mPB_COLOUR\\033[0m\\n'\r")
             terminal.expect(b'\x1b[31mPB_COLOUR\x1b[0m')
             for control, label in [(b'\x03', 'INTERRUPTED'), (b'\x1a', 'STOPPED')]:
