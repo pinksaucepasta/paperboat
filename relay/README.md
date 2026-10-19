@@ -33,6 +33,8 @@ The command requires these flags, supplied from registered relay configuration:
 | `-control-credential-file` | Owner-only control credential file |
 | `-node-state` | Durable, owner-only startup generation/epoch state |
 
+Optionally, `-control-ca` names a CA bundle to trust for the control-plane HTTPS connection.
+
 An authenticated dashboard claim provisions the registry row, endpoints, region, scope policy,
 capacity and optional peer-relay service identity. Startup cannot create or widen that
 authority. The command uses the authenticated native lifecycle APIs to claim the next
