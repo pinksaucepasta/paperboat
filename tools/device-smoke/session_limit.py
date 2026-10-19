@@ -73,9 +73,10 @@ def main():
                 break
             created.append(name)
         total = existing + len(created)
-        if total != LIMIT:
-            raise RuntimeError('limit hit at %d live sessions, expected %d; message: %s; diagnostics: %s' % (total, LIMIT, message[-200:], ' | '.join(diagnostics_tail())))
-        if not message or ('20' not in message and 'limit' not in message.lower()) or 'Traceback' in message:
+        # The machine's default terminal session counts against the same cap but is not a record we create.
+        if total not in (LIMIT - 1, LIMIT):
+            raise RuntimeError('limit hit at %d live sessions, expected %d (or %d plus the default session); message: %s; diagnostics: %s' % (total, LIMIT, LIMIT - 1, message[-200:], ' | '.join(diagnostics_tail())))
+        if 'terminal session limit' not in message or 'pb session close' not in message or 'Traceback' in message:
             raise RuntimeError('the over-limit attempt gave no clear limit message: ' + message[-200:])
         # A closed session no longer counts: one more can be created after closing one.
         cleanup(str(PB), args.target, created.pop())

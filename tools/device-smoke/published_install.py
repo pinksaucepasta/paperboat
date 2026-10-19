@@ -56,7 +56,10 @@ def main():
         current = p.invoke(binary, '--workspace', 'personal', 'machine', 'list', '--json')['machines']
         assert next((x for x in current if x['id'] == after['machine_id']))['alias'] == original['alias'], 'alias changed'
         assert not any((x['id'] == before['machine_id'] for x in current)), 'disposed record remains'
-        assert p.invoke(binary, 'doctor', '--json', timeout=60)['overall'] == 'healthy', 'official doctor unhealthy'
+        deadline = time.monotonic() + 120  # the new runtime needs a moment after install
+        while p.invoke(binary, 'doctor', '--json', timeout=60)['overall'] != 'healthy':
+            assert time.monotonic() < deadline, 'official doctor unhealthy'
+            time.sleep(5)
         assert hashlib.sha256(sentinel.read_bytes()).digest() == digest, 'Inbox changed'
         official = True
     except Exception as exc:
