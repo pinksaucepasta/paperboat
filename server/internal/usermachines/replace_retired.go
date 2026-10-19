@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"github.com/jackc/pgx/v5"
+	"strings"
 
 	"github.com/pinksaucepasta/paperboat-server/internal/audit"
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
@@ -49,13 +50,10 @@ func (s *Service) ReplaceRetiredMachineTx(ctx context.Context, tx *db.Tx, userID
 	if retired.OwnerTeamID.Valid != replacement.OwnerTeamID.Valid {
 		return nil // a personal record never replaces a team one
 	}
-	if err := s.revokeUserMachineControlTx(ctx, tx, userID, retired, true); err != nil {
+	if err := s.removeRetiredMachineTx(ctx, tx, userID, retired, replacement.ID); err != nil {
 		return err
 	}
-	if err := s.audit.WriteTx(ctx, tx, audit.Event{ActorUserID: userID, ActorType: audit.ActorUser, EventType: "user_machine.deleted", ResourceType: "user_machine", ResourceID: retired.ID, IdempotencyKey: "user_machine.deleted:" + retired.ID, Metadata: map[string]any{"replaced_by": replacement.ID}}); err != nil {
-		return err
-	}
-	if err := s.audit.WriteTx(ctx, tx, audit.Event{ActorUserID: userID, ActorType: audit.ActorUser, EventType: "user_machine.replaced", ResourceType: "user_machine", ResourceID: replacement.ID, IdempotencyKey: "user_machine.replaced:" + retired.ID + ":" + replacement.ID, Metadata: map[string]any{"replaced_machine_id": retired.ID, "alias": retired.Alias}}); err != nil {
+	if err := s.auditReplacedTx(ctx, tx, userID, retired, replacement.ID); err != nil {
 		return err
 	}
 	if err := adoptControlSyncLease(ctx, tx, retired.ID, replacement.ID); err != nil {
@@ -97,4 +95,76 @@ func isNumberedVariant(alias, name string) bool {
 		}
 	}
 	return false
+}
+
+// removeRetiredMachineTx removes a retired record through the normal removal: ENV fence, peer
+// authority, host-key claims, sessions and control credentials are released and its audit
+// history stays (the row is soft-deleted).
+func (s *Service) removeRetiredMachineTx(ctx context.Context, tx *db.Tx, userID string, retired dbsqlc.UserMachine, replacementID string) error {
+	if err := s.revokeUserMachineControlTx(ctx, tx, userID, retired, true); err != nil {
+		return err
+	}
+	return s.audit.WriteTx(ctx, tx, audit.Event{ActorUserID: userID, ActorType: audit.ActorUser, EventType: "user_machine.deleted", ResourceType: "user_machine", ResourceID: retired.ID, IdempotencyKey: "user_machine.deleted:" + retired.ID, Metadata: map[string]any{"replaced_by": replacementID}})
+}
+
+func (s *Service) auditReplacedTx(ctx context.Context, tx *db.Tx, userID string, retired dbsqlc.UserMachine, replacementID string) error {
+	return s.audit.WriteTx(ctx, tx, audit.Event{ActorUserID: userID, ActorType: audit.ActorUser, EventType: "user_machine.replaced", ResourceType: "user_machine", ResourceID: replacementID, IdempotencyKey: "user_machine.replaced:" + retired.ID + ":" + replacementID, Metadata: map[string]any{"replaced_machine_id": retired.ID, "alias": retired.Alias}})
+}
+
+// retireForFreshEnrollmentTx honours a pairing's replaces_machine_id hint when a fresh machine is
+// about to be created (start fresh deletes the old record first; the new install arrives later).
+// The hint is a request, never authority: only a retired (disconnected, revoked or already removed)
+// personal record of the same account is acted on; anything else, including live machines, other
+// accounts' records and unknown ids, is ignored. A record that is not yet removed is removed first,
+// which frees its exact name. It returns the retired id whose local address the new machine adopts.
+func (s *Service) retireForFreshEnrollmentTx(ctx context.Context, tx *db.Tx, userID, hint, newID string) (string, error) {
+	hint = strings.TrimSpace(hint)
+	if hint == "" || hint == newID {
+		return "", nil
+	}
+	var state string
+	var team sql.NullString
+	var removed bool
+	err := tx.QueryRow(ctx, `SELECT state,owner_team_id,deleted_at IS NOT NULL FROM paperboat.user_machines WHERE id=$1 AND user_id=$2 FOR UPDATE`, hint, userID).Scan(&state, &team, &removed)
+	if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if team.Valid {
+		return "", nil
+	}
+	if removed {
+		return hint, nil
+	}
+	if state != "disconnected" && state != "revoked" {
+		return "", nil
+	}
+	if err := environment.LockVaultMutationsTx(ctx, tx); err != nil {
+		return "", err
+	}
+	if err := tx.Queries().LockUserMachineAliases(ctx, userID); err != nil {
+		return "", err
+	}
+	retired, err := tx.Queries().GetUserMachineForUpdate(ctx, dbsqlc.GetUserMachineForUpdateParams{ID: hint, UserID: userID})
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if err := s.removeRetiredMachineTx(ctx, tx, userID, retired, newID); err != nil {
+		return "", err
+	}
+	return hint, nil
+}
+
+// finishFreshReplacementTx runs once the replacement exists: it takes over the retired record's
+// local address and records the replacement in the audit history.
+func (s *Service) finishFreshReplacementTx(ctx context.Context, tx *db.Tx, userID, retiredID string, replacement dbsqlc.UserMachine) error {
+	if err := adoptControlSyncLease(ctx, tx, retiredID, replacement.ID); err != nil {
+		return err
+	}
+	return s.auditReplacedTx(ctx, tx, userID, dbsqlc.UserMachine{ID: retiredID, Alias: replacement.Alias}, replacement.ID)
 }

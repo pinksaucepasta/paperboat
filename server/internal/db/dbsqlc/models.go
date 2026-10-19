@@ -2892,6 +2892,7 @@ type UserMachinePairing struct {
 	InstallationState                    string
 	Generation                           int64
 	CancelledAt                          sql.NullTime
+	ReplacesMachineID                    sql.NullString
 }
 
 type UserMachinePairingReset struct {
@@ -2967,4 +2968,13 @@ type UserTransferDestinationDefault struct {
 	Version   int64
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+
+type WorkspaceEdgeSet struct {
+	ScopeKind  string
+	ScopeID    string
+	Mode       string
+	NodeIds    []string
+	Generation int64
+	AssignedAt time.Time
 }

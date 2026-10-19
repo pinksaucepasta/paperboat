@@ -171,6 +171,10 @@ func (s *Service) approve(ctx context.Context, userID, userCode string) (UserMac
 				return err
 			}
 			machineID := newID("machine")
+			retiredID, err := s.retireForFreshEnrollmentTx(ctx, tx, userID, pairing.ReplacesMachineID.String, machineID)
+			if err != nil {
+				return err
+			}
 			alias, err := allocateFreshMachineAlias(ctx, tx.Queries(), userID, pairing.RequestedAlias.String)
 			if err != nil {
 				return err
@@ -199,6 +203,11 @@ func (s *Service) approve(ctx context.Context, userID, userCode string) (UserMac
 			row, err = tx.Queries().UpdateUserMachineInstallation(ctx, dbsqlc.UpdateUserMachineInstallationParams{ID: row.ID, UserID: userID, Alias: alias, Description: pairing.RequestedDescription, WorkspaceRoot: pairing.WorkspaceRoot.String, RuntimeVersions: pairing.RuntimeVersions})
 			if err != nil {
 				return err
+			}
+			if retiredID != "" {
+				if err := s.finishFreshReplacementTx(ctx, tx, userID, retiredID, row); err != nil {
+					return err
+				}
 			}
 
 			if err := s.ensureHelperRoute(ctx, tx, row.ID, row.EnvironmentID); err != nil {

@@ -2,12 +2,12 @@
 INSERT INTO user_machine_pairings (
   id, verifier_hash, user_code, requested_alias, requested_description, platform, architecture,
   workspace_root, runtime_versions, public_identity_key, ssh_user, ssh_port,
-  can_reuse_runtime_identity, keep_awake, installation_state, generation, expires_at
+  can_reuse_runtime_identity, keep_awake, installation_state, generation, expires_at, replaces_machine_id
 ) VALUES (
   sqlc.arg(id), sqlc.arg(verifier_hash), sqlc.arg(user_code), sqlc.arg(requested_alias), sqlc.arg(requested_description),
   sqlc.arg(platform), sqlc.arg(architecture), sqlc.arg(workspace_root), sqlc.arg(runtime_versions), sqlc.arg(public_identity_key),
   sqlc.narg(ssh_user), sqlc.narg(ssh_port), sqlc.arg(can_reuse_runtime_identity), sqlc.arg(keep_awake),
-  'awaiting_approval', 1, sqlc.arg(expires_at)
+  'awaiting_approval', 1, sqlc.arg(expires_at), sqlc.narg(replaces_machine_id)
 ) RETURNING *;
 
 -- name: CreateAuthenticatedMachineInstallationPairing :one
@@ -71,7 +71,7 @@ SET state='pending',installation_state='awaiting_approval',
     platform=sqlc.arg(platform),architecture=sqlc.arg(architecture),workspace_root=sqlc.arg(workspace_root),
     runtime_versions=sqlc.arg(runtime_versions),public_identity_key=sqlc.arg(public_identity_key),
     ssh_user=sqlc.arg(ssh_user),ssh_port=sqlc.arg(ssh_port),
-    can_reuse_runtime_identity=sqlc.arg(can_reuse_runtime_identity),keep_awake=sqlc.arg(keep_awake),updated_at=now()
+    can_reuse_runtime_identity=sqlc.arg(can_reuse_runtime_identity),keep_awake=sqlc.arg(keep_awake),replaces_machine_id=sqlc.narg(replaces_machine_id),updated_at=now()
 WHERE id=sqlc.arg(id) AND state='awaiting_bootstrap' AND installation_state='awaiting_bootstrap' AND expires_at>now()
 RETURNING *;
 

@@ -289,7 +289,7 @@ func (s *Service) CreatePairing(ctx context.Context, in PairingInput) (Pairing, 
 		in.RuntimeVersions = json.RawMessage(`{}`)
 	}
 	expires := s.now().UTC().Add(s.policy.PairingLifetime)
-	params := dbsqlc.CreateUserMachinePairingParams{VerifierHash: verifierHash[:], UserCode: sql.NullString{String: code, Valid: true}, RequestedAlias: sql.NullString{String: strings.TrimSpace(in.Alias), Valid: true}, RequestedDescription: strings.TrimSpace(in.Description), Platform: sql.NullString{String: strings.ToLower(strings.TrimSpace(in.Platform)), Valid: true}, Architecture: sql.NullString{String: strings.ToLower(strings.TrimSpace(in.Architecture)), Valid: true}, WorkspaceRoot: sql.NullString{String: in.WorkspaceRoot, Valid: true}, RuntimeVersions: in.RuntimeVersions, PublicIdentityKey: sql.NullString{String: strings.TrimSpace(in.PublicIdentityKey), Valid: true}, CanReuseRuntimeIdentity: in.CanReuseRuntimeIdentity, KeepAwake: in.KeepAwake, ExpiresAt: expires}
+	params := dbsqlc.CreateUserMachinePairingParams{VerifierHash: verifierHash[:], UserCode: sql.NullString{String: code, Valid: true}, RequestedAlias: sql.NullString{String: strings.TrimSpace(in.Alias), Valid: true}, RequestedDescription: strings.TrimSpace(in.Description), Platform: sql.NullString{String: strings.ToLower(strings.TrimSpace(in.Platform)), Valid: true}, Architecture: sql.NullString{String: strings.ToLower(strings.TrimSpace(in.Architecture)), Valid: true}, WorkspaceRoot: sql.NullString{String: in.WorkspaceRoot, Valid: true}, RuntimeVersions: in.RuntimeVersions, PublicIdentityKey: sql.NullString{String: strings.TrimSpace(in.PublicIdentityKey), Valid: true}, CanReuseRuntimeIdentity: in.CanReuseRuntimeIdentity, KeepAwake: in.KeepAwake, ExpiresAt: expires, ReplacesMachineID: sql.NullString{String: strings.TrimSpace(in.ReplacesMachineID), Valid: strings.TrimSpace(in.ReplacesMachineID) != ""}}
 	if in.SSHUser != "" || in.SSHPort != 0 {
 		params.SshUser = sql.NullString{String: strings.TrimSpace(in.SSHUser), Valid: true}
 		params.SshPort = sql.NullInt32{Int32: int32(in.SSHPort), Valid: true}
@@ -341,7 +341,7 @@ func (s *Service) CreatePairing(ctx context.Context, in PairingInput) (Pairing, 
 				Platform: params.Platform, Architecture: params.Architecture, WorkspaceRoot: params.WorkspaceRoot,
 				RuntimeVersions: params.RuntimeVersions, PublicIdentityKey: params.PublicIdentityKey,
 				SshUser: params.SshUser, SshPort: params.SshPort,
-				CanReuseRuntimeIdentity: params.CanReuseRuntimeIdentity, KeepAwake: params.KeepAwake,
+				CanReuseRuntimeIdentity: params.CanReuseRuntimeIdentity, KeepAwake: params.KeepAwake, ReplacesMachineID: params.ReplacesMachineID,
 			})
 			if errors.Is(err, sql.ErrNoRows) {
 				return ErrEnrollmentTokenExpired

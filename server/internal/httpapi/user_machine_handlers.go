@@ -30,6 +30,7 @@ func userMachinePairings(service *usermachines.Service) http.HandlerFunc {
 		SSHPort                 uint16          `json:"ssh_port,omitempty"`
 		CanReuseRuntimeIdentity bool            `json:"can_reuse_runtime_identity,omitempty"`
 		KeepAwake               bool            `json:"keep_awake,omitempty"`
+		ReplacesMachineID       string          `json:"replaces_machine_id,omitempty"`
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body request
@@ -37,7 +38,7 @@ func userMachinePairings(service *usermachines.Service) http.HandlerFunc {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "Request body must be valid JSON.")
 			return
 		}
-		pairing, err := service.CreatePairing(r.Context(), usermachines.PairingInput{Verifier: body.Verifier, EnrollmentToken: body.EnrollmentToken, Alias: body.Alias, Description: body.Description, Platform: body.Platform, Architecture: body.Architecture, WorkspaceRoot: body.WorkspaceRoot, RuntimeVersions: body.RuntimeVersions, PublicIdentityKey: body.PublicIdentityKey, AcceptBetaPlatform: body.AcceptBetaPlatform, SSHUser: body.SSHUser, SSHPort: body.SSHPort, CanReuseRuntimeIdentity: body.CanReuseRuntimeIdentity, KeepAwake: body.KeepAwake})
+		pairing, err := service.CreatePairing(r.Context(), usermachines.PairingInput{Verifier: body.Verifier, EnrollmentToken: body.EnrollmentToken, Alias: body.Alias, Description: body.Description, Platform: body.Platform, Architecture: body.Architecture, WorkspaceRoot: body.WorkspaceRoot, RuntimeVersions: body.RuntimeVersions, PublicIdentityKey: body.PublicIdentityKey, AcceptBetaPlatform: body.AcceptBetaPlatform, SSHUser: body.SSHUser, SSHPort: body.SSHPort, CanReuseRuntimeIdentity: body.CanReuseRuntimeIdentity, KeepAwake: body.KeepAwake, ReplacesMachineID: body.ReplacesMachineID})
 		if err != nil {
 			if writePairingRejection(w, r, err) {
 				return

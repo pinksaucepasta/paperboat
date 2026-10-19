@@ -44,7 +44,7 @@ WHERE id = $3
   AND state IN ('consumed', 'expired')
   AND installation_config_consumed_at IS NOT NULL
   AND installation_config_consumed_at > $6
-RETURNING id, verifier_hash, user_code, requested_alias, platform, architecture, workspace_root, runtime_versions, state, approved_by_user_id, user_machine_id, installation_config_ciphertext, installation_config_nonce, installation_config_consumed_at, expires_at, approved_at, denied_at, created_at, updated_at, public_identity_key, ssh_user, ssh_port, can_reuse_runtime_identity, installation_recovery_operation_key, authenticated_setup_cli_session_id, authenticated_setup_operation_id, authenticated_setup_generation, authenticated_setup_helper_enrollment_id, keep_awake, requested_description, bootstrap_owner_account, operation_id, idempotency_key, bootstrap_token_hash, bootstrap_token_ciphertext, installation_state, generation, cancelled_at
+RETURNING id, verifier_hash, user_code, requested_alias, platform, architecture, workspace_root, runtime_versions, state, approved_by_user_id, user_machine_id, installation_config_ciphertext, installation_config_nonce, installation_config_consumed_at, expires_at, approved_at, denied_at, created_at, updated_at, public_identity_key, ssh_user, ssh_port, can_reuse_runtime_identity, installation_recovery_operation_key, authenticated_setup_cli_session_id, authenticated_setup_operation_id, authenticated_setup_generation, authenticated_setup_helper_enrollment_id, keep_awake, requested_description, bootstrap_owner_account, operation_id, idempotency_key, bootstrap_token_hash, bootstrap_token_ciphertext, installation_state, generation, cancelled_at, replaces_machine_id
 `
 
 type BeginUserMachineInstallationRecoveryParams struct {
@@ -105,6 +105,7 @@ func (q *Queries) BeginUserMachineInstallationRecovery(ctx context.Context, arg 
 		&i.InstallationState,
 		&i.Generation,
 		&i.CancelledAt,
+		&i.ReplacesMachineID,
 	)
 	return i, err
 }
@@ -320,9 +321,9 @@ SET state='pending',installation_state='awaiting_approval',
     platform=$5,architecture=$6,workspace_root=$7,
     runtime_versions=$8,public_identity_key=$9,
     ssh_user=$10,ssh_port=$11,
-    can_reuse_runtime_identity=$12,keep_awake=$13,updated_at=now()
-WHERE id=$14 AND state='awaiting_bootstrap' AND installation_state='awaiting_bootstrap' AND expires_at>now()
-RETURNING id, verifier_hash, user_code, requested_alias, platform, architecture, workspace_root, runtime_versions, state, approved_by_user_id, user_machine_id, installation_config_ciphertext, installation_config_nonce, installation_config_consumed_at, expires_at, approved_at, denied_at, created_at, updated_at, public_identity_key, ssh_user, ssh_port, can_reuse_runtime_identity, installation_recovery_operation_key, authenticated_setup_cli_session_id, authenticated_setup_operation_id, authenticated_setup_generation, authenticated_setup_helper_enrollment_id, keep_awake, requested_description, bootstrap_owner_account, operation_id, idempotency_key, bootstrap_token_hash, bootstrap_token_ciphertext, installation_state, generation, cancelled_at
+    can_reuse_runtime_identity=$12,keep_awake=$13,replaces_machine_id=$14,updated_at=now()
+WHERE id=$15 AND state='awaiting_bootstrap' AND installation_state='awaiting_bootstrap' AND expires_at>now()
+RETURNING id, verifier_hash, user_code, requested_alias, platform, architecture, workspace_root, runtime_versions, state, approved_by_user_id, user_machine_id, installation_config_ciphertext, installation_config_nonce, installation_config_consumed_at, expires_at, approved_at, denied_at, created_at, updated_at, public_identity_key, ssh_user, ssh_port, can_reuse_runtime_identity, installation_recovery_operation_key, authenticated_setup_cli_session_id, authenticated_setup_operation_id, authenticated_setup_generation, authenticated_setup_helper_enrollment_id, keep_awake, requested_description, bootstrap_owner_account, operation_id, idempotency_key, bootstrap_token_hash, bootstrap_token_ciphertext, installation_state, generation, cancelled_at, replaces_machine_id
 `
 
 type ClaimBootstrapPairingParams struct {
@@ -339,6 +340,7 @@ type ClaimBootstrapPairingParams struct {
 	SshPort                 sql.NullInt32
 	CanReuseRuntimeIdentity bool
 	KeepAwake               bool
+	ReplacesMachineID       sql.NullString
 	ID                      string
 }
 
@@ -357,6 +359,7 @@ func (q *Queries) ClaimBootstrapPairing(ctx context.Context, arg ClaimBootstrapP
 		arg.SshPort,
 		arg.CanReuseRuntimeIdentity,
 		arg.KeepAwake,
+		arg.ReplacesMachineID,
 		arg.ID,
 	)
 	var i UserMachinePairing
@@ -399,6 +402,7 @@ func (q *Queries) ClaimBootstrapPairing(ctx context.Context, arg ClaimBootstrapP
 		&i.InstallationState,
 		&i.Generation,
 		&i.CancelledAt,
+		&i.ReplacesMachineID,
 	)
 	return i, err
 }
@@ -680,7 +684,7 @@ INSERT INTO user_machine_pairings (
 ON CONFLICT (authenticated_setup_cli_session_id, authenticated_setup_operation_id)
   WHERE authenticated_setup_cli_session_id IS NOT NULL
 DO UPDATE SET authenticated_setup_operation_id = excluded.authenticated_setup_operation_id
-RETURNING id, verifier_hash, user_code, requested_alias, platform, architecture, workspace_root, runtime_versions, state, approved_by_user_id, user_machine_id, installation_config_ciphertext, installation_config_nonce, installation_config_consumed_at, expires_at, approved_at, denied_at, created_at, updated_at, public_identity_key, ssh_user, ssh_port, can_reuse_runtime_identity, installation_recovery_operation_key, authenticated_setup_cli_session_id, authenticated_setup_operation_id, authenticated_setup_generation, authenticated_setup_helper_enrollment_id, keep_awake, requested_description, bootstrap_owner_account, operation_id, idempotency_key, bootstrap_token_hash, bootstrap_token_ciphertext, installation_state, generation, cancelled_at
+RETURNING id, verifier_hash, user_code, requested_alias, platform, architecture, workspace_root, runtime_versions, state, approved_by_user_id, user_machine_id, installation_config_ciphertext, installation_config_nonce, installation_config_consumed_at, expires_at, approved_at, denied_at, created_at, updated_at, public_identity_key, ssh_user, ssh_port, can_reuse_runtime_identity, installation_recovery_operation_key, authenticated_setup_cli_session_id, authenticated_setup_operation_id, authenticated_setup_generation, authenticated_setup_helper_enrollment_id, keep_awake, requested_description, bootstrap_owner_account, operation_id, idempotency_key, bootstrap_token_hash, bootstrap_token_ciphertext, installation_state, generation, cancelled_at, replaces_machine_id
 `
 
 type CreateAuthenticatedMachineInstallationPairingParams struct {
@@ -769,6 +773,7 @@ func (q *Queries) CreateAuthenticatedMachineInstallationPairing(ctx context.Cont
 		&i.InstallationState,
 		&i.Generation,
 		&i.CancelledAt,
+		&i.ReplacesMachineID,
 	)
 	return i, err
 }
@@ -778,7 +783,7 @@ INSERT INTO user_machine_pairings
 (id,bootstrap_owner_account,operation_id,idempotency_key,bootstrap_token_hash,bootstrap_token_ciphertext,state,installation_state,generation,expires_at)
 VALUES ($1,$2,$3,$4,$5,$6,'awaiting_bootstrap','awaiting_bootstrap',1,$7)
 ON CONFLICT (bootstrap_owner_account,idempotency_key) DO UPDATE SET idempotency_key=excluded.idempotency_key
-RETURNING id, verifier_hash, user_code, requested_alias, platform, architecture, workspace_root, runtime_versions, state, approved_by_user_id, user_machine_id, installation_config_ciphertext, installation_config_nonce, installation_config_consumed_at, expires_at, approved_at, denied_at, created_at, updated_at, public_identity_key, ssh_user, ssh_port, can_reuse_runtime_identity, installation_recovery_operation_key, authenticated_setup_cli_session_id, authenticated_setup_operation_id, authenticated_setup_generation, authenticated_setup_helper_enrollment_id, keep_awake, requested_description, bootstrap_owner_account, operation_id, idempotency_key, bootstrap_token_hash, bootstrap_token_ciphertext, installation_state, generation, cancelled_at
+RETURNING id, verifier_hash, user_code, requested_alias, platform, architecture, workspace_root, runtime_versions, state, approved_by_user_id, user_machine_id, installation_config_ciphertext, installation_config_nonce, installation_config_consumed_at, expires_at, approved_at, denied_at, created_at, updated_at, public_identity_key, ssh_user, ssh_port, can_reuse_runtime_identity, installation_recovery_operation_key, authenticated_setup_cli_session_id, authenticated_setup_operation_id, authenticated_setup_generation, authenticated_setup_helper_enrollment_id, keep_awake, requested_description, bootstrap_owner_account, operation_id, idempotency_key, bootstrap_token_hash, bootstrap_token_ciphertext, installation_state, generation, cancelled_at, replaces_machine_id
 `
 
 type CreateBootstrapPairingParams struct {
@@ -841,6 +846,7 @@ func (q *Queries) CreateBootstrapPairing(ctx context.Context, arg CreateBootstra
 		&i.InstallationState,
 		&i.Generation,
 		&i.CancelledAt,
+		&i.ReplacesMachineID,
 	)
 	return i, err
 }
@@ -1214,13 +1220,13 @@ const createUserMachinePairing = `-- name: CreateUserMachinePairing :one
 INSERT INTO user_machine_pairings (
   id, verifier_hash, user_code, requested_alias, requested_description, platform, architecture,
   workspace_root, runtime_versions, public_identity_key, ssh_user, ssh_port,
-  can_reuse_runtime_identity, keep_awake, installation_state, generation, expires_at
+  can_reuse_runtime_identity, keep_awake, installation_state, generation, expires_at, replaces_machine_id
 ) VALUES (
   $1, $2, $3, $4, $5,
   $6, $7, $8, $9, $10,
   $11, $12, $13, $14,
-  'awaiting_approval', 1, $15
-) RETURNING id, verifier_hash, user_code, requested_alias, platform, architecture, workspace_root, runtime_versions, state, approved_by_user_id, user_machine_id, installation_config_ciphertext, installation_config_nonce, installation_config_consumed_at, expires_at, approved_at, denied_at, created_at, updated_at, public_identity_key, ssh_user, ssh_port, can_reuse_runtime_identity, installation_recovery_operation_key, authenticated_setup_cli_session_id, authenticated_setup_operation_id, authenticated_setup_generation, authenticated_setup_helper_enrollment_id, keep_awake, requested_description, bootstrap_owner_account, operation_id, idempotency_key, bootstrap_token_hash, bootstrap_token_ciphertext, installation_state, generation, cancelled_at
+  'awaiting_approval', 1, $15, $16
+) RETURNING id, verifier_hash, user_code, requested_alias, platform, architecture, workspace_root, runtime_versions, state, approved_by_user_id, user_machine_id, installation_config_ciphertext, installation_config_nonce, installation_config_consumed_at, expires_at, approved_at, denied_at, created_at, updated_at, public_identity_key, ssh_user, ssh_port, can_reuse_runtime_identity, installation_recovery_operation_key, authenticated_setup_cli_session_id, authenticated_setup_operation_id, authenticated_setup_generation, authenticated_setup_helper_enrollment_id, keep_awake, requested_description, bootstrap_owner_account, operation_id, idempotency_key, bootstrap_token_hash, bootstrap_token_ciphertext, installation_state, generation, cancelled_at, replaces_machine_id
 `
 
 type CreateUserMachinePairingParams struct {
@@ -1239,6 +1245,7 @@ type CreateUserMachinePairingParams struct {
 	CanReuseRuntimeIdentity bool
 	KeepAwake               bool
 	ExpiresAt               time.Time
+	ReplacesMachineID       sql.NullString
 }
 
 func (q *Queries) CreateUserMachinePairing(ctx context.Context, arg CreateUserMachinePairingParams) (UserMachinePairing, error) {
@@ -1258,6 +1265,7 @@ func (q *Queries) CreateUserMachinePairing(ctx context.Context, arg CreateUserMa
 		arg.CanReuseRuntimeIdentity,
 		arg.KeepAwake,
 		arg.ExpiresAt,
+		arg.ReplacesMachineID,
 	)
 	var i UserMachinePairing
 	err := row.Scan(
@@ -1299,6 +1307,7 @@ func (q *Queries) CreateUserMachinePairing(ctx context.Context, arg CreateUserMa
 		&i.InstallationState,
 		&i.Generation,
 		&i.CancelledAt,
+		&i.ReplacesMachineID,
 	)
 	return i, err
 }
@@ -1741,7 +1750,7 @@ func (q *Queries) GetActiveUserMachineSeatQuantity(ctx context.Context, userID s
 }
 
 const getBootstrapPairingForTokenUpdate = `-- name: GetBootstrapPairingForTokenUpdate :one
-SELECT id, verifier_hash, user_code, requested_alias, platform, architecture, workspace_root, runtime_versions, state, approved_by_user_id, user_machine_id, installation_config_ciphertext, installation_config_nonce, installation_config_consumed_at, expires_at, approved_at, denied_at, created_at, updated_at, public_identity_key, ssh_user, ssh_port, can_reuse_runtime_identity, installation_recovery_operation_key, authenticated_setup_cli_session_id, authenticated_setup_operation_id, authenticated_setup_generation, authenticated_setup_helper_enrollment_id, keep_awake, requested_description, bootstrap_owner_account, operation_id, idempotency_key, bootstrap_token_hash, bootstrap_token_ciphertext, installation_state, generation, cancelled_at FROM user_machine_pairings WHERE bootstrap_token_hash=$1 FOR UPDATE
+SELECT id, verifier_hash, user_code, requested_alias, platform, architecture, workspace_root, runtime_versions, state, approved_by_user_id, user_machine_id, installation_config_ciphertext, installation_config_nonce, installation_config_consumed_at, expires_at, approved_at, denied_at, created_at, updated_at, public_identity_key, ssh_user, ssh_port, can_reuse_runtime_identity, installation_recovery_operation_key, authenticated_setup_cli_session_id, authenticated_setup_operation_id, authenticated_setup_generation, authenticated_setup_helper_enrollment_id, keep_awake, requested_description, bootstrap_owner_account, operation_id, idempotency_key, bootstrap_token_hash, bootstrap_token_ciphertext, installation_state, generation, cancelled_at, replaces_machine_id FROM user_machine_pairings WHERE bootstrap_token_hash=$1 FOR UPDATE
 `
 
 func (q *Queries) GetBootstrapPairingForTokenUpdate(ctx context.Context, bootstrapTokenHash []byte) (UserMachinePairing, error) {
@@ -1786,12 +1795,13 @@ func (q *Queries) GetBootstrapPairingForTokenUpdate(ctx context.Context, bootstr
 		&i.InstallationState,
 		&i.Generation,
 		&i.CancelledAt,
+		&i.ReplacesMachineID,
 	)
 	return i, err
 }
 
 const getBootstrapPairingForUser = `-- name: GetBootstrapPairingForUser :one
-SELECT id, verifier_hash, user_code, requested_alias, platform, architecture, workspace_root, runtime_versions, state, approved_by_user_id, user_machine_id, installation_config_ciphertext, installation_config_nonce, installation_config_consumed_at, expires_at, approved_at, denied_at, created_at, updated_at, public_identity_key, ssh_user, ssh_port, can_reuse_runtime_identity, installation_recovery_operation_key, authenticated_setup_cli_session_id, authenticated_setup_operation_id, authenticated_setup_generation, authenticated_setup_helper_enrollment_id, keep_awake, requested_description, bootstrap_owner_account, operation_id, idempotency_key, bootstrap_token_hash, bootstrap_token_ciphertext, installation_state, generation, cancelled_at FROM user_machine_pairings
+SELECT id, verifier_hash, user_code, requested_alias, platform, architecture, workspace_root, runtime_versions, state, approved_by_user_id, user_machine_id, installation_config_ciphertext, installation_config_nonce, installation_config_consumed_at, expires_at, approved_at, denied_at, created_at, updated_at, public_identity_key, ssh_user, ssh_port, can_reuse_runtime_identity, installation_recovery_operation_key, authenticated_setup_cli_session_id, authenticated_setup_operation_id, authenticated_setup_generation, authenticated_setup_helper_enrollment_id, keep_awake, requested_description, bootstrap_owner_account, operation_id, idempotency_key, bootstrap_token_hash, bootstrap_token_ciphertext, installation_state, generation, cancelled_at, replaces_machine_id FROM user_machine_pairings
 WHERE id=$1 AND bootstrap_owner_account=$2
 `
 
@@ -1842,6 +1852,7 @@ func (q *Queries) GetBootstrapPairingForUser(ctx context.Context, arg GetBootstr
 		&i.InstallationState,
 		&i.Generation,
 		&i.CancelledAt,
+		&i.ReplacesMachineID,
 	)
 	return i, err
 }
@@ -3089,7 +3100,7 @@ func (q *Queries) GetUserMachineInstallationConfigForReplay(ctx context.Context,
 }
 
 const getUserMachinePairingByID = `-- name: GetUserMachinePairingByID :one
-SELECT id, verifier_hash, user_code, requested_alias, platform, architecture, workspace_root, runtime_versions, state, approved_by_user_id, user_machine_id, installation_config_ciphertext, installation_config_nonce, installation_config_consumed_at, expires_at, approved_at, denied_at, created_at, updated_at, public_identity_key, ssh_user, ssh_port, can_reuse_runtime_identity, installation_recovery_operation_key, authenticated_setup_cli_session_id, authenticated_setup_operation_id, authenticated_setup_generation, authenticated_setup_helper_enrollment_id, keep_awake, requested_description, bootstrap_owner_account, operation_id, idempotency_key, bootstrap_token_hash, bootstrap_token_ciphertext, installation_state, generation, cancelled_at FROM user_machine_pairings WHERE id = $1
+SELECT id, verifier_hash, user_code, requested_alias, platform, architecture, workspace_root, runtime_versions, state, approved_by_user_id, user_machine_id, installation_config_ciphertext, installation_config_nonce, installation_config_consumed_at, expires_at, approved_at, denied_at, created_at, updated_at, public_identity_key, ssh_user, ssh_port, can_reuse_runtime_identity, installation_recovery_operation_key, authenticated_setup_cli_session_id, authenticated_setup_operation_id, authenticated_setup_generation, authenticated_setup_helper_enrollment_id, keep_awake, requested_description, bootstrap_owner_account, operation_id, idempotency_key, bootstrap_token_hash, bootstrap_token_ciphertext, installation_state, generation, cancelled_at, replaces_machine_id FROM user_machine_pairings WHERE id = $1
 `
 
 func (q *Queries) GetUserMachinePairingByID(ctx context.Context, id string) (UserMachinePairing, error) {
@@ -3134,12 +3145,13 @@ func (q *Queries) GetUserMachinePairingByID(ctx context.Context, id string) (Use
 		&i.InstallationState,
 		&i.Generation,
 		&i.CancelledAt,
+		&i.ReplacesMachineID,
 	)
 	return i, err
 }
 
 const getUserMachinePairingForCode = `-- name: GetUserMachinePairingForCode :one
-SELECT id, verifier_hash, user_code, requested_alias, platform, architecture, workspace_root, runtime_versions, state, approved_by_user_id, user_machine_id, installation_config_ciphertext, installation_config_nonce, installation_config_consumed_at, expires_at, approved_at, denied_at, created_at, updated_at, public_identity_key, ssh_user, ssh_port, can_reuse_runtime_identity, installation_recovery_operation_key, authenticated_setup_cli_session_id, authenticated_setup_operation_id, authenticated_setup_generation, authenticated_setup_helper_enrollment_id, keep_awake, requested_description, bootstrap_owner_account, operation_id, idempotency_key, bootstrap_token_hash, bootstrap_token_ciphertext, installation_state, generation, cancelled_at FROM user_machine_pairings
+SELECT id, verifier_hash, user_code, requested_alias, platform, architecture, workspace_root, runtime_versions, state, approved_by_user_id, user_machine_id, installation_config_ciphertext, installation_config_nonce, installation_config_consumed_at, expires_at, approved_at, denied_at, created_at, updated_at, public_identity_key, ssh_user, ssh_port, can_reuse_runtime_identity, installation_recovery_operation_key, authenticated_setup_cli_session_id, authenticated_setup_operation_id, authenticated_setup_generation, authenticated_setup_helper_enrollment_id, keep_awake, requested_description, bootstrap_owner_account, operation_id, idempotency_key, bootstrap_token_hash, bootstrap_token_ciphertext, installation_state, generation, cancelled_at, replaces_machine_id FROM user_machine_pairings
 WHERE user_code = $1 FOR UPDATE
 `
 
@@ -3185,12 +3197,13 @@ func (q *Queries) GetUserMachinePairingForCode(ctx context.Context, userCode sql
 		&i.InstallationState,
 		&i.Generation,
 		&i.CancelledAt,
+		&i.ReplacesMachineID,
 	)
 	return i, err
 }
 
 const getUserMachinePairingForVerifier = `-- name: GetUserMachinePairingForVerifier :one
-SELECT id, verifier_hash, user_code, requested_alias, platform, architecture, workspace_root, runtime_versions, state, approved_by_user_id, user_machine_id, installation_config_ciphertext, installation_config_nonce, installation_config_consumed_at, expires_at, approved_at, denied_at, created_at, updated_at, public_identity_key, ssh_user, ssh_port, can_reuse_runtime_identity, installation_recovery_operation_key, authenticated_setup_cli_session_id, authenticated_setup_operation_id, authenticated_setup_generation, authenticated_setup_helper_enrollment_id, keep_awake, requested_description, bootstrap_owner_account, operation_id, idempotency_key, bootstrap_token_hash, bootstrap_token_ciphertext, installation_state, generation, cancelled_at FROM user_machine_pairings
+SELECT id, verifier_hash, user_code, requested_alias, platform, architecture, workspace_root, runtime_versions, state, approved_by_user_id, user_machine_id, installation_config_ciphertext, installation_config_nonce, installation_config_consumed_at, expires_at, approved_at, denied_at, created_at, updated_at, public_identity_key, ssh_user, ssh_port, can_reuse_runtime_identity, installation_recovery_operation_key, authenticated_setup_cli_session_id, authenticated_setup_operation_id, authenticated_setup_generation, authenticated_setup_helper_enrollment_id, keep_awake, requested_description, bootstrap_owner_account, operation_id, idempotency_key, bootstrap_token_hash, bootstrap_token_ciphertext, installation_state, generation, cancelled_at, replaces_machine_id FROM user_machine_pairings
 WHERE verifier_hash = $1 FOR UPDATE
 `
 
@@ -3236,6 +3249,7 @@ func (q *Queries) GetUserMachinePairingForVerifier(ctx context.Context, verifier
 		&i.InstallationState,
 		&i.Generation,
 		&i.CancelledAt,
+		&i.ReplacesMachineID,
 	)
 	return i, err
 }
@@ -4988,7 +5002,7 @@ SET state='awaiting_bootstrap',installation_state='awaiting_bootstrap',generatio
 WHERE id=$4 AND bootstrap_owner_account=$5
   AND authenticated_setup_cli_session_id IS NULL
   AND installation_state IN ('cancelled','expired','denied','failed_retryable')
-RETURNING id, verifier_hash, user_code, requested_alias, platform, architecture, workspace_root, runtime_versions, state, approved_by_user_id, user_machine_id, installation_config_ciphertext, installation_config_nonce, installation_config_consumed_at, expires_at, approved_at, denied_at, created_at, updated_at, public_identity_key, ssh_user, ssh_port, can_reuse_runtime_identity, installation_recovery_operation_key, authenticated_setup_cli_session_id, authenticated_setup_operation_id, authenticated_setup_generation, authenticated_setup_helper_enrollment_id, keep_awake, requested_description, bootstrap_owner_account, operation_id, idempotency_key, bootstrap_token_hash, bootstrap_token_ciphertext, installation_state, generation, cancelled_at
+RETURNING id, verifier_hash, user_code, requested_alias, platform, architecture, workspace_root, runtime_versions, state, approved_by_user_id, user_machine_id, installation_config_ciphertext, installation_config_nonce, installation_config_consumed_at, expires_at, approved_at, denied_at, created_at, updated_at, public_identity_key, ssh_user, ssh_port, can_reuse_runtime_identity, installation_recovery_operation_key, authenticated_setup_cli_session_id, authenticated_setup_operation_id, authenticated_setup_generation, authenticated_setup_helper_enrollment_id, keep_awake, requested_description, bootstrap_owner_account, operation_id, idempotency_key, bootstrap_token_hash, bootstrap_token_ciphertext, installation_state, generation, cancelled_at, replaces_machine_id
 `
 
 type RetryBootstrapPairingParams struct {
@@ -5047,6 +5061,7 @@ func (q *Queries) RetryBootstrapPairing(ctx context.Context, arg RetryBootstrapP
 		&i.InstallationState,
 		&i.Generation,
 		&i.CancelledAt,
+		&i.ReplacesMachineID,
 	)
 	return i, err
 }

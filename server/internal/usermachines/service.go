@@ -497,6 +497,9 @@ type PairingInput struct {
 	AcceptBetaPlatform                                                                                      bool
 	CanReuseRuntimeIdentity                                                                                 bool
 	KeepAwake                                                                                               bool
+	// ReplacesMachineID names the record of the computer this install starts over from. It is a
+	// request: approval only acts on a retired record of the same account.
+	ReplacesMachineID string
 }
 
 type Enrollment struct {
