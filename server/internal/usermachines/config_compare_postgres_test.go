@@ -4,11 +4,13 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"database/sql"
 	"encoding/base64"
 	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat-server/internal/config"
 	"github.com/pinksaucepasta/paperboat-server/internal/controlplane"
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat-server/internal/mint"
 	"github.com/pinksaucepasta/paperboat-server/internal/usermachines"
 	"github.com/pinksaucepasta/paperboat-server/internal/workspace"
@@ -119,5 +121,20 @@ func TestNativeConfigCompareDescriptorAndMeterPostgres(t *testing.T) {
 	}
 	if terminals != 0 {
 		t.Fatal("comparison created terminal")
+	}
+	// Assigning changed config rewrites the assignment id; the open comparison must not block it.
+	var version int64
+	var mode string
+	var rules, bindings []byte
+	if err := store.SQL().QueryRowContext(ctx, `SELECT version,mode,path_rules,repository_bindings FROM control_config_assignments WHERE id=$1`, assignment).Scan(&version, &mode, &rules, &bindings); err != nil {
+		t.Fatal(err)
+	}
+	reassigned := "cmp_reassigned_" + suffix
+	if _, err := store.Queries().SetControlConfigAssignment(ctx, dbsqlc.SetControlConfigAssignmentParams{AssignmentID: reassigned, EnvironmentID: environment, RepositoryID: sql.NullString{String: repository, Valid: true}, Mode: mode, ConsentState: "pending", WarningRevision: sql.NullString{String: "warning", Valid: true}, PathRules: rules, RepositoryBindings: bindings, ConfigurationRevision: strings.Repeat("b", 64), Now: time.Now(), ExpectedVersion: version}); err != nil {
+		t.Fatalf("assigning changed config while a comparison is open: %v", err)
+	}
+	var followed int
+	if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM config_compare_admissions WHERE machine_id=$1 AND assignment_id=$2`, machine, reassigned).Scan(&followed); err != nil || followed == 0 {
+		t.Fatalf("comparison admissions did not follow the assignment: %d %v", followed, err)
 	}
 }
