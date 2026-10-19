@@ -2,6 +2,7 @@
 access-machine:hp-hp
 cleanup-preview:hp
 config-sync:hp
+doctor-lifecycle:hp
 exec-long:hp
 exec-main:hp-hp
 exec:hp

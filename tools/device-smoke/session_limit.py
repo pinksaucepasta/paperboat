@@ -35,6 +35,21 @@ def new(name, target):
         terminal.close()
 
 
+def diagnostics_tail(count=12):
+    events = []
+    for path in sorted((Path.home() / '.local/state/paperboat/diagnostics').glob('*.ndjson'))[-2:]:
+        for line in path.read_text(errors='replace').splitlines()[-4000:]:
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            if event.get('severity') in ('error', 'warning') and event.get('code') != 'unclassified_log':
+                fields = event.get('fields', {})
+                events.append('%s %s/%s op=%s cause=%s chain=%s fn=%s' % (event['at'][11:19], event['category'], event['code'],
+                              fields.get('operation'), fields.get('cause'), str(fields.get('error_chain'))[:90], str(fields.get('source_function'))[-40:]))
+    return events[-count:]
+
+
 def names(target):
     out = subprocess.run([str(PB), 'session', 'list', target, '--json'], capture_output=True, text=True, timeout=60).stdout
     return {s['name']: s for s in json.loads(out)['sessions']}
@@ -59,7 +74,7 @@ def main():
             created.append(name)
         total = existing + len(created)
         if total != LIMIT:
-            raise RuntimeError('limit hit at %d live sessions, expected %d; message: %s' % (total, LIMIT, message[-200:]))
+            raise RuntimeError('limit hit at %d live sessions, expected %d; message: %s; diagnostics: %s' % (total, LIMIT, message[-200:], ' | '.join(diagnostics_tail())))
         if not message or ('20' not in message and 'limit' not in message.lower()) or 'Traceback' in message:
             raise RuntimeError('the over-limit attempt gave no clear limit message: ' + message[-200:])
         # A closed session no longer counts: one more can be created after closing one.

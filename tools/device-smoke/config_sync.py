@@ -20,7 +20,8 @@ def run(*args, expect_ok=True):
     except ValueError:
         raise RuntimeError('command did not return JSON: ' + ' '.join(args)) from None
     if expect_ok and (result.returncode or value.get('ok') is False):
-        raise RuntimeError('command failed: ' + ' '.join(args))
+        error = value.get('error', {})
+        raise RuntimeError('command failed: ' + ' '.join(args) + ' -> ' + str(error.get('code')) + ': ' + str(error.get('message')))
     return value.get('data', value)
 
 

@@ -762,16 +762,23 @@ test_device_application() {
       record "$id" FAIL 0 "could not stage the device fixture"
       continue
     fi
-    case "$group" in team-lifecycle|team-roles) flags+=" --team $SMOKE_TEAM" ;; esac
+    case "$group" in
+      team-lifecycle|team-roles) flags+=" --team $SMOKE_TEAM" ;;
+      doctor-lifecycle|session-limit) flags=$device ;;
+    esac
     out=$(on "$device" "python3 /tmp/$RUN_ID/$script $flags" 2>&1); status=$?
     if [ "$status" = 0 ] && python3 -c '
 import json,sys
 r=json.loads(sys.argv[1])
 assert r["check"]==sys.argv[2] and r["status"]=="PASS"
-assert r["enrollment_preserved"]
+assert r.get("enrollment_preserved") or sys.argv[2] in ("doctor-lifecycle", "session-limit")
 if sys.argv[2] in ("team-lifecycle", "team-roles"):
  assert all(r[k] for k in ("create_get_list_delete", "invite_accept_decline_cancel", "independent_verified_recipient"))
  assert sys.argv[2]!="team-roles" or r["roles_remove_leave_transfer"]
+elif sys.argv[2]=="doctor-lifecycle":
+ assert all(r[k] for k in ("healthy_requires_exec", "failure_explained", "repair_recovers"))
+elif sys.argv[2]=="session-limit":
+ assert r["limit"]==20 and r["clear_message"] and r["closed_not_counted"]
 elif sys.argv[2]=="network-inventory":
  assert r["edges_and_verified_relays"]
 elif sys.argv[2]=="tunnel-lifecycle":
@@ -879,6 +886,8 @@ test_device_application tunnel-manage tunnel_manage.py
 test_device_application config-sync config_sync.py
 test_device_application tunnel-lifecycle tunnel_lifecycle.py
 test_local_access_settings
+test_device_application doctor-lifecycle doctor_lifecycle.py
+test_device_application session-limit session_limit.py
 test_device_application network-inventory network_inventory.py
 test_preview_protocols
 for t in "${TLIST[@]}"; do
