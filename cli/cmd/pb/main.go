@@ -430,8 +430,12 @@ func runWithReporter(ctx context.Context, args []string, stdout, stderr io.Write
 			_ = writeCLIJSONError(stdout, err)
 		} else {
 			fmt.Fprintln(stderr, "pb:", commandFailureMessage(err, failure))
-			root.SetOut(stderr)
-			_ = root.Usage()
+			usage := root
+			if executed != nil {
+				usage = executed
+			}
+			usage.SetOut(stderr)
+			_ = usage.Usage()
 		}
 		return 2
 	}

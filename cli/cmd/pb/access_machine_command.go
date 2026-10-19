@@ -118,6 +118,7 @@ func accessMachineCobraCommandV1() *cobra.Command {
 		RunE:  runAccessMachine,
 	}
 	command.Flags().Int("port", 0, "remote machine TCP port")
+	_ = command.MarkFlagRequired("port")
 	command.Flags().String("listen", "127.0.0.1:0", "literal-loopback listen address")
 	tunnelJSONFlag(command)
 	return command
