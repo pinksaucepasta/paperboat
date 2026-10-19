@@ -2041,3 +2041,6 @@ Rollback: edge pbh install --relay-image ghcr.io/pinksaucepasta/paperboat/relay:
 
 2026-10-18 | Lane B peer-network config outage | 18:39Z–23:00Z machine-peer-network/config 503 on ~99% of refreshes: relayControlPeers failed past 16 same-account peers (22 after test machines); fixed in 0f042ff (bounded grants/scopes/peers, no refresh failure), server 2026.10.18.21 live, 200s only after deploy. Relay quota gate stays off (lock-free redesign 91fde2c by Lane E, not enabled).
 Rollback target .20. Client retry loops (config, terminal-sessions, ssh-target 404, ssh-host-keys 409, deleted-tunnel carrier-bootstrap) need backoff: Lane F.
+
+2026-10-19 | Lane B anvit edge out of rotation | anvit edge down since 22:51Z (node draining): Coolify's coolify-proxy started 22:53:56Z on anvit holds :80/:443, so the edge container fails address_in_use (pbh upgrade deadline_exceeded for .6 and .5). Removed anvit's static wildcard A records (*.pprbt.app, *.runtime.pprbt.dev; restore data in /opt/paperboat/deployment-probes/dns-anvit-wildcards-removed-*.json); per-name publications already listed oracle only.
+Waits for USER: free :80/:443 on anvit (stop/move coolify-proxy) so the edge restarts, or retire anvit; edge .6 (typed 429 for previews) waits on that. Oracle stays on edge .5, server .23.
