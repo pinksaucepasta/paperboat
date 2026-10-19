@@ -292,6 +292,10 @@ func withCleanup(message string, primary error, cleanups ...error) error {
 	return errors.Join(primary, cleanup)
 }
 
+// errAdministratorApproval marks the refusal of the sudo approval pairing needs, for example
+// when there is no terminal to ask for a password.
+var errAdministratorApproval = errors.New("administrator approval was not granted")
+
 type installationStageError struct {
 	Stage string
 	Cause error
