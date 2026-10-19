@@ -1,15 +1,17 @@
-# Reviewed 2026-09-01 for TRK-38 against the 2026-08-06 baseline. Exact Go 1.26.6
-# Make binary-size builds changed linux/amd64 23330978 -> 30314658
-# (+6983680, +29.93%) and linux/arm64 21364898 -> 27459746 (+6094848,
-# +28.53%). Reproducible `go tool nm -size` attribution against the checkpoint
-# source identifies non-TLS growth in httpapi (+453265), connectorprotocol
-# (+443141), tunnelv1 (+346731), dbsqlc (+296110), miekg/dns (+246934),
-# previewattachment (+208195), environment (+183405), fxamacker/cbor (+138180),
-# telemetry (+126042), usermachines (+109986), privateaccess (+100018),
-# previewdomain (+84648), previewtunnelstore (+66733), previewv1 (+62383),
-# and x/net/idna (+45444) bytes. Certificate/TLS packages are measured but
-# excluded from this non-TLS ownership attribution per TRK-38 scope. The
-# remaining measured growth includes Go runtime/linker/static data and newly
-# reachable feature code. Updating a size requires this attribution.
-linux	amd64	30314658
-linux	arm64	27459746
+# Reviewed 2026-10-19 (S0-07) for the monorepo at 86eeb33d against the 2026-09-01 checkpoint
+# b404312 of the former server repository, both built with the same current Go toolchain and these exact flags
+# (checkpoint 27066631 bytes, linux/amd64). linux/amd64 30314658 -> 46678176
+# (+16363518, +53.98%) and linux/arm64 27459746 -> 42205344 (+14745598, +53.70%).
+# `go tool nm -size` attribution of the file-backed symbols (+9028 KB of the growth; the rest is
+# pclntab and type metadata that scale with code) names the aws-sdk-go-v2 S3 client for
+# backup and object storage (+2483375, plus sts +170003, signin +173340, ssooidc +61785),
+# httpapi (+476398), protobuf runtime (+386484 impl, +98879 filedesc), httpsnoop
+# (+252240), shared/connectorprotocol (+204485), usermachines (+181274), grpc (+176876
+# and +164320 transport), sentry-go (+163168), environment (+157998), teams
+# (+123177), operatorreporting (+114564), browseraccess (+107118), supportreport
+# (+106364), tunnelcert (+102207), billing (+100844), controlplane (+99245), selfhost
+# (+78149), go-github (+64257) and miekg/dns (+86305) bytes, i.e. features added since
+# the checkpoint (teams, billing, browser access, ENV, self-host, support reports,
+# object storage). Updating a size requires this attribution.
+linux	amd64	46678176
+linux	arm64	42205344
