@@ -15451,6 +15451,62 @@
             "format": "date-time"
           }
         }
+      },
+      "MachineNetworkLatencyItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "node_id",
+          "role",
+          "region",
+          "self_hosted",
+          "rtt_ms",
+          "measured_at"
+        ],
+        "description": "The connect time this machine measured to one edge or relay it can use. Display data: it never selects a path or confers access.",
+        "properties": {
+          "node_id": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "edge",
+              "relay"
+            ]
+          },
+          "region": {
+            "type": "string"
+          },
+          "self_hosted": {
+            "type": "boolean"
+          },
+          "rtt_ms": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "measured_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "MachineNetworkLatencyList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 64,
+            "items": {
+              "$ref": "#/components/schemas/MachineNetworkLatencyItem"
+            }
+          }
+        }
       }
     },
     "responses": {
@@ -45979,6 +46035,159 @@
             "$ref": "#/components/responses/Error"
           }
         }
+      }
+    },
+    "/v1/machines/{machine_id}/network-latency": {
+      "parameters": [
+        {
+          "name": "machine_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "summary": "List a machine's measured latency to edges and relays",
+        "description": "Fresh (under one hour) connect times the machine measured. Edges are reported on its runtime attachment, relays by its signed-in daemon.",
+        "security": [
+          {
+            "cookieSession": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:read"
+        ],
+        "responses": {
+          "200": {
+            "description": "Measured latency, edges first, fastest first inside each role.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/SuccessResponse"
+                    }
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/MachineNetworkLatencyList"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "operationId": "get_v1_user_machines_machine_id_network_latency",
+        "parameters": [
+          {
+            "name": "workspace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 63
+            },
+            "description": "Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field."
+          }
+        ]
+      },
+      "put": {
+        "summary": "Report a machine's relay latency",
+        "description": "Sent by the machine's signed-in daemon. Each relay must be one this account may use; times are 0 to 10000 ms. The caller must be able to manage the machine.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:connect"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "relays"
+                ],
+                "properties": {
+                  "relays": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 64,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "node_id",
+                        "rtt_ms"
+                      ],
+                      "properties": {
+                        "node_id": {
+                          "type": "string",
+                          "maxLength": 128
+                        },
+                        "rtt_ms": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 10000
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Measurements stored."
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "operationId": "put_v1_user_machines_machine_id_network_latency",
+        "parameters": [
+          {
+            "name": "workspace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 63
+            },
+            "description": "Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field."
+          }
+        ]
       }
     }
   }
