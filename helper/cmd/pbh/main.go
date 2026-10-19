@@ -211,13 +211,19 @@ func install(ctx context.Context, args []string, out io.Writer) error {
 		*enable = installationMode(c)
 	}
 	images := containers.Images{Relay: *relayImage, Tunnel: *tunnelImage}
-	for _, capability := range strings.Split(strings.ReplaceAll(*enable, "both", "relay,tunnel"), ",") {
+	selected := strings.Split(strings.ReplaceAll(*enable, "both", "relay,tunnel"), ",")
+	for _, capability := range selected {
 		if _, err := images.Image(capability); err != nil {
 			return fmt.Errorf("%w: %w", commandError("configure the selected runtime image; use the release installer"), err)
 		}
 	}
 	if _, err := exec.LookPath("docker"); err != nil {
 		return commandError("Docker is required; run the self-host installer first")
+	}
+	if !*noService {
+		if err := ensureRuntimeImages(ctx, images, selected, out); err != nil {
+			return err
+		}
 	}
 	if !existing {
 		c, err = freshInstallConfig(ctx, fs)

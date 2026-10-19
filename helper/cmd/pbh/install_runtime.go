@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -135,4 +136,24 @@ func stopInstallation(ctx context.Context) error {
 	bounded, cancel := context.WithTimeout(ctx, serviceCommandTimeout)
 	defer cancel()
 	return exec.CommandContext(bounded, "systemctl", "stop", "paperboat-selfhost.service").Run()
+}
+
+// ensureRuntimeImages pulls the selected images before anything is changed, so
+// an unreachable registry or wrong architecture fails the install while the
+// previous version (if any) is still running.
+func ensureRuntimeImages(ctx context.Context, images containers.Images, capabilities []string, out io.Writer) error {
+	for _, capability := range capabilities {
+		image, err := images.Image(capability)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "Preparing %s image %s\n", capability, image)
+		pull, cancel := context.WithTimeout(ctx, 5*time.Minute)
+		err = containers.EnsureImage(pull, image)
+		cancel()
+		if err != nil {
+			return fmt.Errorf("%w: %w", commandError("runtime image is not available; check network access to the image registry and rerun, nothing was changed"), err)
+		}
+	}
+	return nil
 }

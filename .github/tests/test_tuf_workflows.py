@@ -133,8 +133,9 @@ class TUFWorkflowSignerTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             tool = directory / "publisher"
-            subprocess.run(["go", "build", "-o", str(tool), "./cli/tools/tuf-repository"],
-                           cwd=ROOT, capture_output=True, check=True, timeout=120)
+            built = subprocess.run(["go", "build", "-o", str(tool), "./cli/tools/tuf-repository"],
+                                   cwd=ROOT, capture_output=True, text=True, timeout=120)
+            self.assertEqual(built.returncode, 0, built.stderr)
             offline, online = Ed25519PrivateKey.generate(), Ed25519PrivateKey.generate()
             keys = {}
             ids = []

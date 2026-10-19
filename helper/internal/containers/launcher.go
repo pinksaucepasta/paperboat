@@ -31,9 +31,6 @@ func (l *Launcher) Validate(ctx context.Context, capability, componentDir string
 	if err != nil {
 		return err
 	}
-	if _, err := exec.LookPath("docker"); err != nil {
-		return errors.New("Docker is unavailable; run the self-host installer")
-	}
 	if filepath.Dir(componentDir) != l.StateDir || filepath.Base(componentDir) != capability {
 		return errors.New("runtime directory does not belong to this installation")
 	}
@@ -42,10 +39,20 @@ func (l *Launcher) Validate(ctx context.Context, capability, componentDir string
 		return err
 	}
 	defer client.http.CloseIdleConnections()
+	return EnsureImage(ctx, image)
+}
+
+// EnsureImage pulls image when absent and requires it to match this Linux host,
+// so a bad reference or registry failure surfaces before anything is changed.
+func EnsureImage(ctx context.Context, image string) error {
+	if _, err := exec.LookPath("docker"); err != nil {
+		return errors.New("Docker is unavailable; run the self-host installer")
+	}
 	if _, err := docker(ctx, "info", "--format", "{{.ServerVersion}}"); err != nil {
 		return errors.New("connect Docker daemon failed; start Docker and retry")
 	}
-	b, err := docker(ctx, "image", "inspect", "--format", `{"Os":{{json .Os}},"Architecture":{{json .Architecture}}}`, image)
+	const format = `{"Os":{{json .Os}},"Architecture":{{json .Architecture}}}`
+	b, err := docker(ctx, "image", "inspect", "--format", format, image)
 	if err != nil {
 		pull, cancel := context.WithTimeout(ctx, 2*time.Minute)
 		_, err = dockerWithDeadline(pull, "pull", image)
@@ -53,7 +60,7 @@ func (l *Launcher) Validate(ctx context.Context, capability, componentDir string
 		if err != nil {
 			return errors.New("pull runtime image failed; check registry access and image configuration")
 		}
-		b, err = docker(ctx, "image", "inspect", "--format", `{"Os":{{json .Os}},"Architecture":{{json .Architecture}}}`, image)
+		b, err = docker(ctx, "image", "inspect", "--format", format, image)
 	}
 	if err != nil {
 		return errors.New("inspect runtime image failed")

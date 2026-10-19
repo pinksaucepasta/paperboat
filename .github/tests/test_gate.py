@@ -19,6 +19,9 @@ class SmokePrerequisiteTest(unittest.TestCase):
             (root / "console").mkdir()
             (root / "cli").mkdir()
             (root / "bin").mkdir()
+            (root / "deploy").mkdir()
+            (root / "deploy/test_fixture.py").write_text(
+                "import unittest\n\nclass Fixture(unittest.TestCase):\n    def test_ok(self):\n        pass\n")
             shutil.copy2(GATE, root / "tools/gate.sh")
             (root / "CHECKLIST.md").write_text(checklist)
             if smoke is not None:
