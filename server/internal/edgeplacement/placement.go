@@ -32,6 +32,7 @@ AND n.registry_expires_at>$2 AND n.capacity_observed_at>$2::timestamptz-interval
 AND n.capacity_used<n.capacity_limit-n.capacity_limit/10
 AND n.drain_deadline IS NULL AND paperboat.node_workspace_edge_eligible(n.id,$1,$4)
 AND (n.serves_managed_wildcard OR paperboat.workspace_edge_mode($1,$4)<>'managed-only')
+AND paperboat.workspace_edge_set_allows(n.id,$1,$4)
 AND n.carrier_endpoint_host IS NOT NULL AND n.carrier_endpoint_tcp_port IS NOT NULL
 AND n.carrier_server_spki_sha256 IS NOT NULL AND n.carrier_server_certificate_chain_pem IS NOT NULL
 ORDER BY n.id LIMIT $3`, accountID, now, runtimewire.MaximumEdgeCandidates, teamID)

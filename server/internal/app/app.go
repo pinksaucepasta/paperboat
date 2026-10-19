@@ -24,6 +24,7 @@ import (
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
 	serverdiagnostics "github.com/pinksaucepasta/paperboat-server/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat-server/internal/diagnosticuploads"
+	"github.com/pinksaucepasta/paperboat-server/internal/edgeset"
 	"github.com/pinksaucepasta/paperboat-server/internal/environment"
 	"github.com/pinksaucepasta/paperboat-server/internal/favorites"
 	pbgithub "github.com/pinksaucepasta/paperboat-server/internal/github"
@@ -901,6 +902,21 @@ func New(opts Options) (*App, error) {
 		serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_edge_assignments", edgeControlService.TunnelEdgeAssignmentWorker(opts.Config.TerminalSessions.WorkerInterval, 100), progress))
 		serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_stale_nodes", edgeControlService.StaleNodeWorker(opts.Config.TerminalSessions.WorkerInterval, controlplane.ControlTunnelNodeStaleAfter()), progress))
 	}
+	serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_edge_sets", periodicPreviewTunnelWorker(opts.Config.TerminalSessions.WorkerInterval, func(ctx context.Context) error {
+		reconcileContext, cancel := context.WithTimeout(ctx, opts.Config.HTTP.RequestTimeout)
+		defer cancel()
+		_, err := edgeset.ReconcileAll(reconcileContext, store, time.Now().UTC())
+		workers.IterationFailure(ctx, "edge_set_reconcile", "edge_set_reconcile_failed", err)
+		outcome := "success"
+		if err != nil {
+			outcome = "failed"
+		}
+		if errors.Is(ctx.Err(), context.Canceled) {
+			outcome = "canceled"
+		}
+		supportService.Operation(ctx, "worker_edge_sets", outcome, "", -1)
+		return ctx.Err()
+	}), progress))
 	if opts.Config.Certificates.Enabled && opts.Config.Certificates.DNSZoneID != "" {
 		dnsWorker, dnsErr := newEdgeDNSWorker(store, opts.Config)
 		if dnsErr != nil {

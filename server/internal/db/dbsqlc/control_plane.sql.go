@@ -4289,6 +4289,7 @@ JOIN LATERAL (
       AND candidate_node.failure_domain IS NOT NULL
       AND paperboat.node_route_eligible(candidate_node.id,t.account_id,r.id)
       AND (candidate_node.serves_managed_wildcard OR paperboat.workspace_edge_mode(t.account_id,paperboat.publication_workspace_team('tunnel',t.id))<>'managed-only')
+      AND paperboat.workspace_edge_set_allows(candidate_node.id,t.account_id,paperboat.publication_workspace_team('tunnel',t.id))
     ORDER BY candidate_node.failure_domain, preference_rank, retained DESC, candidate_node.id
   ) ranked
   ORDER BY ranked.preference_rank, ranked.retained DESC, ranked.id
