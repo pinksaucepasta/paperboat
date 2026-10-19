@@ -23,6 +23,8 @@ const (
 	Attempts = 3
 	// MaxTargets bounds one report, matching the server.
 	MaxTargets = 64
+	// MaxBackoff caps the wait after repeated failed rounds.
+	MaxBackoff = time.Hour
 	// MaxLatency is the server's upper bound for one measurement.
 	MaxLatency = 10 * time.Second
 
@@ -135,6 +137,7 @@ func (r *Reporter) Run(ctx context.Context) {
 	if every == 0 {
 		every = Interval
 	}
+	failures := 0
 	for {
 		timer := time.NewTimer(jittered(wait))
 		select {
@@ -143,31 +146,37 @@ func (r *Reporter) Run(ctx context.Context) {
 			return
 		case <-timer.C:
 		}
-		r.once(ctx)
-		wait = every
+		// A server that cannot take reports (not deployed yet, refusing) is asked less and less often.
+		if r.once(ctx) {
+			failures, wait = 0, every
+		} else {
+			failures = min(failures+1, 4)
+			wait = min(every<<failures, MaxBackoff)
+		}
 	}
 }
 
-func (r *Reporter) once(ctx context.Context) {
-	fail := func(stage string, err error) {
+// once runs one round and reports whether it ended well (nothing to measure counts as well).
+func (r *Reporter) once(ctx context.Context) bool {
+	fail := func(stage string, err error) bool {
 		if r.OnFailure != nil && ctx.Err() == nil {
 			r.OnFailure(stage, err)
 		}
+		return false
 	}
 	targets, err := r.Targets(ctx)
 	if err != nil {
-		fail("targets", err)
-		return
+		return fail("targets", err)
 	}
 	if len(targets) == 0 {
-		return
+		return true
 	}
 	measurements := Probe(ctx, targets, r.Dial)
 	if len(measurements) == 0 {
-		fail("probe", errors.New("no relay answered"))
-		return
+		return fail("probe", errors.New("no relay answered"))
 	}
 	if err := r.Report(ctx, measurements); err != nil {
-		fail("report", err)
+		return fail("report", err)
 	}
+	return true
 }

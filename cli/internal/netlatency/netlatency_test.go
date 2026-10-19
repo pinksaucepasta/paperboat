@@ -3,6 +3,7 @@ package netlatency
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -95,5 +96,37 @@ func TestReporterReportsOnScheduleAndSurvivesFailures(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("reporter ignored cancellation")
+	}
+}
+
+func TestReporterBacksOffWhileTheServerRefusesAndRecovers(t *testing.T) {
+	var times []time.Time
+	var mu sync.Mutex
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	reporter := &Reporter{
+		Targets: func(context.Context) ([]Target, error) { return []Target{{"node_a", "a:1"}}, nil },
+		Report: func(context.Context, []Measurement) error {
+			mu.Lock()
+			defer mu.Unlock()
+			times = append(times, time.Now())
+			if len(times) < 4 {
+				return errors.New("not found")
+			}
+			cancel()
+			return nil
+		},
+		Dial:  func(context.Context, string) error { return nil },
+		First: time.Millisecond, Every: 10 * time.Millisecond,
+	}
+	reporter.Run(ctx)
+	mu.Lock()
+	defer mu.Unlock()
+	if len(times) != 4 {
+		t.Fatalf("rounds=%d", len(times))
+	}
+	first, last := times[1].Sub(times[0]), times[3].Sub(times[2])
+	if last < first+first/2 {
+		t.Fatalf("waits did not grow while failing: %v then %v", first, last)
 	}
 }
