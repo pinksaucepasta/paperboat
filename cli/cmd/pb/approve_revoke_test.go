@@ -33,9 +33,7 @@ func TestOnlyMachineRevokeAndTheDesktopActionCallTheServerDisconnect(t *testing.
 		})
 	}
 	for name := range callers {
-		// pb reset retires only this computer's own record, after its exact
-		// confirmation phrase and hostname.
-		if name != "machine_commands.go" && name != "desktop_command.go" && name != "fresh_reset.go" {
+		if name != "machine_commands.go" && name != "desktop_command.go" {
 			t.Fatalf("%s calls the server disconnect; revoking a machine is pb machine revoke with its confirmation", name)
 		}
 	}

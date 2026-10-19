@@ -82,7 +82,7 @@ func freshEnrollmentResetCommand() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("verify reset CLI before cleanup: %w", err)
 			}
-			retired, err := retireOwnMachineRecord(command)
+			retired, err := removeOwnMachineRecordFunc(command)
 			if err != nil {
 				return err
 			}
@@ -112,15 +112,17 @@ func freshEnrollmentResetCommand() *cobra.Command {
 }
 
 var freshEnrollmentCleanup = runFreshEnrollmentCleanup
-var retireOwnMachineRecord = disconnectOwnMachineRecord
+var removeOwnMachineRecordFunc = removeOwnMachineRecord
 
-// disconnectOwnMachineRecord retires this computer's current machine record
-// before its local credentials are deleted, so the fresh enrollment replaces it
-// instead of leaving a second online record and a suffixed name. It returns the
-// retired machine ID, or "" when there is nothing to retire (never enrolled,
-// signed out, or already retired). The server revokes the machine's own CLI
-// session with the record, so this is the last server call reset makes.
-func disconnectOwnMachineRecord(command *cobra.Command) (string, error) {
+// removeOwnMachineRecord removes this computer's current machine record
+// (the normal machine removal: its ENV access, peer identity, SSH host keys and
+// sessions are released; its Activity history stays) before the local credentials
+// are deleted, so the fresh enrollment takes the exact name instead of a numbered
+// one beside a dead record. It returns the removed machine ID, or "" when there is
+// nothing to remove (never enrolled, signed out, or already removed). The server
+// revokes the machine's own CLI session with the record, so this is the last
+// server call reset makes.
+func removeOwnMachineRecord(command *cobra.Command) (string, error) {
 	machineID, err := configuredMachineID()
 	if err != nil || machineID == "" {
 		return "", nil
@@ -134,7 +136,7 @@ func disconnectOwnMachineRecord(command *cobra.Command) (string, error) {
 	default:
 		return "", commandRejection{reason: commandRejectResetRetire}
 	}
-	err = client.DisconnectUserMachine(ctx.Context, machineID)
+	err = client.DeleteUserMachine(ctx.Context, machineID)
 	switch {
 	case err == nil:
 		return machineID, nil

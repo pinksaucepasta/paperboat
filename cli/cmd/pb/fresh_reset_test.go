@@ -27,21 +27,21 @@ func freshResetTokenFile(t *testing.T) string {
 // noRetire keeps a reset test from reaching the real machine record or server.
 func noRetire(t *testing.T) {
 	t.Helper()
-	original := retireOwnMachineRecord
-	t.Cleanup(func() { retireOwnMachineRecord = original })
-	retireOwnMachineRecord = func(*cobra.Command) (string, error) { return "", nil }
+	original := removeOwnMachineRecordFunc
+	t.Cleanup(func() { removeOwnMachineRecordFunc = original })
+	removeOwnMachineRecordFunc = func(*cobra.Command) (string, error) { return "", nil }
 }
 
-func TestFreshEnrollmentResetRetiresTheOldRecordBeforeCleanup(t *testing.T) {
+func TestFreshEnrollmentResetRemovesTheOldRecordBeforeCleanup(t *testing.T) {
 	hostname, err := os.Hostname()
 	if err != nil {
 		t.Fatal(err)
 	}
 	originalCleanup := freshEnrollmentCleanup
-	originalRetire := retireOwnMachineRecord
-	t.Cleanup(func() { freshEnrollmentCleanup, retireOwnMachineRecord = originalCleanup, originalRetire })
+	originalRetire := removeOwnMachineRecordFunc
+	t.Cleanup(func() { freshEnrollmentCleanup, removeOwnMachineRecordFunc = originalCleanup, originalRetire })
 	var order []string
-	retireOwnMachineRecord = func(*cobra.Command) (string, error) { order = append(order, "retire"); return "machine_old", nil }
+	removeOwnMachineRecordFunc = func(*cobra.Command) (string, error) { order = append(order, "retire"); return "machine_old", nil }
 	freshEnrollmentCleanup = func(*cobra.Command) error { order = append(order, "cleanup"); return nil }
 	var output bytes.Buffer
 	command := freshEnrollmentResetCommand()
@@ -55,15 +55,15 @@ func TestFreshEnrollmentResetRetiresTheOldRecordBeforeCleanup(t *testing.T) {
 	}
 }
 
-func TestFreshEnrollmentResetChangesNothingWhenTheOldRecordCannotBeRetired(t *testing.T) {
+func TestFreshEnrollmentResetChangesNothingWhenTheOldRecordCannotBeRemoved(t *testing.T) {
 	hostname, err := os.Hostname()
 	if err != nil {
 		t.Fatal(err)
 	}
 	originalCleanup := freshEnrollmentCleanup
-	originalRetire := retireOwnMachineRecord
-	t.Cleanup(func() { freshEnrollmentCleanup, retireOwnMachineRecord = originalCleanup, originalRetire })
-	retireOwnMachineRecord = func(*cobra.Command) (string, error) { return "", commandRejection{reason: commandRejectResetRetire} }
+	originalRetire := removeOwnMachineRecordFunc
+	t.Cleanup(func() { freshEnrollmentCleanup, removeOwnMachineRecordFunc = originalCleanup, originalRetire })
+	removeOwnMachineRecordFunc = func(*cobra.Command) (string, error) { return "", commandRejection{reason: commandRejectResetRetire} }
 	freshEnrollmentCleanup = func(*cobra.Command) error {
 		t.Fatal("local state was removed although the old record stayed online")
 		return nil

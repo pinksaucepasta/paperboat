@@ -78,7 +78,7 @@ func (e commandRejection) Error() string {
 			return mismatch.Error()
 		}
 	case commandRejectResetRetire:
-		return "The old machine record could not be retired, so nothing was reset. Check your connection and run `pb reset` again."
+		return "The old machine record could not be removed, so nothing was reset. Check your connection and run `pb reset` again."
 	case commandRejectInboxDeclined:
 		return "The recipient declined this transfer. Contact them before sending again."
 	case commandRejectDefaultSessionRename:
