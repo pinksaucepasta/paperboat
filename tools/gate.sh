@@ -25,6 +25,9 @@ python3 tools/check_domains.py && (cd tools && python3 -m unittest test_check_do
 step "documentation links"
 python3 tools/check_doc_links.py && (cd tools && python3 -m unittest test_check_doc_links) || { echo "FAIL: documentation links"; fail=1; }
 
+step "server-first check tests"
+(cd tools && python3 -m unittest test_check_server_deployed) || { echo "FAIL: server-first check"; fail=1; }
+
 step "managed deployment lifecycle tests"
 python3 -m unittest discover -s deploy -p 'test_*.py' || { echo "FAIL: deployment"; fail=1; }
 
@@ -33,6 +36,16 @@ step "console lint + build"
 
 base=$(git merge-base HEAD origin/main 2>/dev/null || git rev-list --max-parents=0 HEAD | tail -1)
 changed=$( { git diff --name-only "$base" HEAD; git diff --name-only; } | grep -E '^(cli|relay|shared)/' | head -1)
+# Server first, then client (warning only): a client push must not get ahead of the deployed server.
+if git diff --name-only "$base" HEAD | grep -q '^cli/'; then
+  step "server first: is every server/ and shared/ commit of this push deployed? (warning)"
+  if [ -n "${PAPERBOAT_SERVER_URL:-}" ]; then
+    python3 tools/check_server_deployed.py --warn --server-url "$PAPERBOAT_SERVER_URL"
+  else
+    echo "skipped: set PAPERBOAT_SERVER_URL to the server's https origin to compare with the deployed commit"
+  fi
+fi
+
 if [ -n "$changed" ]; then
   step "device smoke for HEAD: no check that ever passed may fail"
   want="dev-$(git rev-parse --short HEAD)"
