@@ -27,5 +27,6 @@ sed -e "s|{{PACKAGE_URL_AMD64}}|$base_url/paperboat-selfhost-linux-amd64.tar.gz|
     -e "s|{{PACKAGE_SHA256_ARM64}}|$arm64|" \
     -e "s|{{DOCKER_INSTALL_URL}}|$docker_url|" "$template" > "$dir/install"
 chmod 0755 "$dir/install"
+printf '{"version":"%s","packages":{"linux-amd64":{"sha256":"%s"},"linux-arm64":{"sha256":"%s"}}}\n' "$version" "$amd64" "$arm64" > "$dir/manifest.json"
 if grep -q '{{' "$dir/install"; then echo 'Unrendered installer value.' >&2; rm -f "$dir/install"; exit 1; fi
-printf '%s\n' "$dir/install"
+printf '%s\n' "$dir/install" "$dir/manifest.json"
