@@ -51,33 +51,14 @@ func newEdgeDNSWorker(database *db.DB, cfg config.Config) (func(context.Context)
 	return edgeDNSWorker(database, public, runtime), nil
 }
 
-// A resource whose first publication is in flight is reconciled on every tick,
-// not once per round-robin cycle, so a new preview's endpoint is not held back
-// behind settled resources. The window bounds provider calls for one that stalls.
-const (
-	pendingEdgeDNSPriorityWindow = time.Minute
-	pendingEdgeDNSBatch          = 16
-)
-
 func edgeDNSWorker(database *db.DB, public, runtime *tunnelcert.AddressReconciler) func(context.Context) error {
 	return func(ctx context.Context) error {
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
 		cursor := ""
-		pendingSince := map[string]time.Time{}
 		for {
 			finishProgress := workers.BeginIteration(ctx, time.Second)
 			cycleErr := func() error {
-				var firstErr error
-				pending, err := database.Queries().ListPendingEdgeDNSPublicationResourcesV1(ctx, pendingEdgeDNSBatch)
-				if err != nil {
-					firstErr = err
-				}
-				for _, owner := range prioritizeEdgeDNSOwners(time.Now(), pendingSince, pending) {
-					if err := reconcileEdgeDNSOwner(ctx, database, public, runtime, owner.ID, uint64(owner.Generation)); err != nil && firstErr == nil {
-						firstErr = err
-					}
-				}
 				rows, err := database.Queries().ListEdgeDNSPublicationResourcesV1(ctx, dbsqlc.ListEdgeDNSPublicationResourcesV1Params{AfterID: cursor, BatchSize: 1})
 				if err == nil && len(rows) == 0 {
 					cursor = ""
@@ -89,10 +70,7 @@ func edgeDNSWorker(database *db.DB, public, runtime *tunnelcert.AddressReconcile
 						break
 					}
 				}
-				if firstErr == nil {
-					firstErr = err
-				}
-				workers.IterationFailure(ctx, "edge_dns_publication", "edge_dns_reconcile_failed", firstErr)
+				workers.IterationFailure(ctx, "edge_dns_publication", "edge_dns_reconcile_failed", err)
 
 				return nil
 			}()
@@ -107,29 +85,6 @@ func edgeDNSWorker(database *db.DB, public, runtime *tunnelcert.AddressReconcile
 			}
 		}
 	}
-}
-
-// prioritizeEdgeDNSOwners returns the pending owners still inside their
-// priority window and forgets owners that are no longer pending.
-func prioritizeEdgeDNSOwners(now time.Time, since map[string]time.Time, pending []dbsqlc.ListPendingEdgeDNSPublicationResourcesV1Row) []dbsqlc.ListPendingEdgeDNSPublicationResourcesV1Row {
-	current := make(map[string]bool, len(pending))
-	prioritized := pending[:0:0]
-	for _, owner := range pending {
-		current[owner.ID] = true
-		first, seen := since[owner.ID]
-		if !seen {
-			since[owner.ID], first = now, now
-		}
-		if now.Sub(first) < pendingEdgeDNSPriorityWindow {
-			prioritized = append(prioritized, owner)
-		}
-	}
-	for id := range since {
-		if !current[id] {
-			delete(since, id)
-		}
-	}
-	return prioritized
 }
 
 func reconcileEdgeDNSOwner(ctx context.Context, database *db.DB, public, runtime *tunnelcert.AddressReconciler, owner string, generation uint64) error {

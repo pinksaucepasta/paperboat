@@ -140,50 +140,6 @@ func (q *Queries) ListEdgeDNSPublicationResourcesV1(ctx context.Context, arg Lis
 	return items, nil
 }
 
-const listPendingEdgeDNSPublicationResourcesV1 = `-- name: ListPendingEdgeDNSPublicationResourcesV1 :many
-SELECT id, max(generation)::bigint AS generation FROM (
- SELECT owner_id AS id,resource_generation AS generation FROM edge_dns_publications
-  WHERE state IN ('desired','submitted')
- UNION ALL SELECT t.id,t.generation FROM tunnels t
-  WHERE t.desired_state='active' AND t.deleted_at IS NULL
-   AND (t.expires_at IS NULL OR t.expires_at>statement_timestamp())
-   AND NOT EXISTS (SELECT 1 FROM edge_dns_publications d WHERE d.owner_id=t.id)
- UNION ALL SELECT p.id,1::bigint FROM preview_leases p
-  WHERE p.terminal_state='active'
-   AND NOT EXISTS (SELECT 1 FROM edge_dns_publications d WHERE d.owner_id=p.id)
- UNION ALL SELECT r.id,r.desired_revision FROM control_routes r
-  WHERE r.kind='runtime_https_wss' AND r.desired_state IN ('attached','replacing')
-   AND NOT EXISTS (SELECT 1 FROM edge_dns_publications d WHERE d.owner_id=r.id)
-) owners GROUP BY id ORDER BY id LIMIT $1
-`
-
-type ListPendingEdgeDNSPublicationResourcesV1Row struct {
-	ID         string
-	Generation int64
-}
-
-// Resources whose first publication is still in flight (no row yet, or desired/submitted), so a
-// new preview or tunnel is not queued behind the full round-robin of settled resources.
-func (q *Queries) ListPendingEdgeDNSPublicationResourcesV1(ctx context.Context, batchSize int32) ([]ListPendingEdgeDNSPublicationResourcesV1Row, error) {
-	rows, err := q.db.Query(ctx, listPendingEdgeDNSPublicationResourcesV1, batchSize)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListPendingEdgeDNSPublicationResourcesV1Row
-	for rows.Next() {
-		var i ListPendingEdgeDNSPublicationResourcesV1Row
-		if err := rows.Scan(&i.ID, &i.Generation); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listReadyEdgeDNSAddressesV1 = `-- name: ListReadyEdgeDNSAddressesV1 :many
 SELECT DISTINCT node.id,t.generation AS resource_generation,statement_timestamp()::timestamptz AS observed_at, COALESCE(host(node.public_ingress_ipv4),'')::text AS ipv4,
  COALESCE(host(node.public_ingress_ipv6),'')::text AS ipv6,

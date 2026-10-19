@@ -12,24 +12,6 @@ SELECT id, max(generation)::bigint AS generation FROM (
 ) owners WHERE id > sqlc.arg(after_id)::text
 GROUP BY id ORDER BY id LIMIT sqlc.arg(batch_size);
 
--- name: ListPendingEdgeDNSPublicationResourcesV1 :many
--- Resources whose first publication is still in flight (no row yet, or desired/submitted), so a
--- new preview or tunnel is not queued behind the full round-robin of settled resources.
-SELECT id, max(generation)::bigint AS generation FROM (
- SELECT owner_id AS id,resource_generation AS generation FROM edge_dns_publications
-  WHERE state IN ('desired','submitted')
- UNION ALL SELECT t.id,t.generation FROM tunnels t
-  WHERE t.desired_state='active' AND t.deleted_at IS NULL
-   AND (t.expires_at IS NULL OR t.expires_at>statement_timestamp())
-   AND NOT EXISTS (SELECT 1 FROM edge_dns_publications d WHERE d.owner_id=t.id)
- UNION ALL SELECT p.id,1::bigint FROM preview_leases p
-  WHERE p.terminal_state='active'
-   AND NOT EXISTS (SELECT 1 FROM edge_dns_publications d WHERE d.owner_id=p.id)
- UNION ALL SELECT r.id,r.desired_revision FROM control_routes r
-  WHERE r.kind='runtime_https_wss' AND r.desired_state IN ('attached','replacing')
-   AND NOT EXISTS (SELECT 1 FROM edge_dns_publications d WHERE d.owner_id=r.id)
-) owners GROUP BY id ORDER BY id LIMIT sqlc.arg(batch_size);
-
 -- name: ListEdgeDNSPublicationNamesV1 :many
 -- Managed endpoints and verified domain reservations share the tunnel's owner.
 SELECT substring(t.stable_endpoint from 9)::text AS hostname
