@@ -33,6 +33,7 @@ import (
 	"github.com/pinksaucepasta/paperboat-server/internal/inspectaccess"
 	"github.com/pinksaucepasta/paperboat-server/internal/jobmonitor"
 	"github.com/pinksaucepasta/paperboat-server/internal/lazyaccess"
+	"github.com/pinksaucepasta/paperboat-server/internal/machineevents"
 	"github.com/pinksaucepasta/paperboat-server/internal/machineservices"
 	"github.com/pinksaucepasta/paperboat-server/internal/managedssh"
 	"github.com/pinksaucepasta/paperboat-server/internal/metering"
@@ -369,6 +370,12 @@ func New(opts Options) (*App, error) {
 	if err != nil {
 		_ = store.Close()
 		return nil, fmt.Errorf("configure connector origin health: %w", err)
+	}
+	machineEventHub := machineevents.NewHub(store.Pool())
+	machineEventsHandler, err := httpapi.NewMachineEventsHandler(machineEventHub, enrollmentService)
+	if err != nil {
+		_ = store.Close()
+		return nil, fmt.Errorf("configure machine events: %w", err)
 	}
 	userMachineService.ConfigureHelperEnrollment(func(ctx context.Context, actorID, operationKey, environmentID string, lifetime time.Duration) (usermachines.HelperEnrollmentGrant, error) {
 		grant, err := enrollmentService.Issue(ctx, actorID, operationKey, environmentID, lifetime)
@@ -844,6 +851,7 @@ func New(opts Options) (*App, error) {
 		ConnectorControl:          connectorControlHandler,
 		ConnectorCarrierBootstrap: connectorCarrierBootstrapHandler,
 		ConnectorOriginHealth:     connectorOriginHealthHandler,
+		MachineEvents:             machineEventsHandler,
 		TelemetryHTTP:             telemetryHTTP,
 		TelemetryMetrics:          telemetryMetrics,
 		TelemetryDiagnostics:      telemetryDiagnostics,
@@ -918,6 +926,9 @@ func New(opts Options) (*App, error) {
 		serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_edge_assignments", edgeControlService.TunnelEdgeAssignmentWorker(opts.Config.TerminalSessions.WorkerInterval, 100), progress))
 		serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_stale_nodes", edgeControlService.StaleNodeWorker(opts.Config.TerminalSessions.WorkerInterval, controlplane.ControlTunnelNodeStaleAfter()), progress))
 	}
+	serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_machine_events", periodicPreviewTunnelWorker(25*time.Second, func(ctx context.Context) error {
+		return machineEventHub.ListenFor(ctx, 24*time.Second)
+	}), progress))
 	serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_edge_sets", periodicPreviewTunnelWorker(opts.Config.TerminalSessions.WorkerInterval, func(ctx context.Context) error {
 		reconcileContext, cancel := context.WithTimeout(ctx, opts.Config.HTTP.RequestTimeout)
 		defer cancel()

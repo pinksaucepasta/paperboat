@@ -6990,6 +6990,60 @@
           }
         }
       },
+      "MachineEventsRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "topics"
+        ],
+        "properties": {
+          "topics": {
+            "type": "object",
+            "propertyNames": {
+              "enum": [
+                "machine_access",
+                "peer_network",
+                "previews",
+                "tunnels",
+                "config",
+                "inventory"
+              ]
+            },
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "description": "The generation of each topic the host last saw; a topic that is missing counts as 0."
+          }
+        }
+      },
+      "MachineEventsResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "topics"
+        ],
+        "properties": {
+          "topics": {
+            "type": "object",
+            "propertyNames": {
+              "enum": [
+                "machine_access",
+                "peer_network",
+                "previews",
+                "tunnels",
+                "config",
+                "inventory"
+              ]
+            },
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "description": "Only the topics whose generation is higher than the one the host sent."
+          }
+        }
+      },
       "ConnectorOriginHealthRequest": {
         "type": "object",
         "additionalProperties": false,
@@ -21687,6 +21741,74 @@
           }
         },
         "operationId": "get_v1_tunnels_tunnel_id_connectors_connector_id_control"
+      }
+    },
+    "/v1/machine-events/wait": {
+      "post": {
+        "summary": "Wait for a change to something the host caches",
+        "description": "Host-only, authenticated like carrier bootstrap by the renewable machine identity and a detached proof over the exact method, path and body; Idempotency-Key binds the proof operation. The host sends the generation of each topic it last saw. The server answers 200 as soon as any topic of that machine has a higher generation, naming only those topics, or 204 after up to 30 seconds without a change. A response carries generations, never data: the host refreshes the named topic itself. Generations are persisted per machine and topic, so a reconnecting host loses nothing. Topics: machine_access, peer_network, previews, tunnels, config, inventory.",
+        "security": [],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/MachineIdentity"
+          },
+          {
+            "$ref": "#/components/parameters/MachineProof"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MachineEventsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "At least one topic changed.",
+            "headers": {
+              "Cache-Control": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MachineEventsResponse"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "No topic changed within the wait."
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "415": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "operationId": "post_v1_machine_events_wait"
       }
     },
     "/v1/tunnels/{tunnel_id}/connectors/{connector_id}/origin-health": {

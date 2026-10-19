@@ -130,6 +130,7 @@ type Options struct {
 	ConnectorControl          http.Handler
 	ConnectorCarrierBootstrap http.Handler
 	ConnectorOriginHealth     http.Handler
+	MachineEvents             http.Handler
 	TelemetryHTTP             *telemetry.HTTPObserver
 	TelemetryMetrics          *telemetry.Metrics
 	TelemetryDiagnostics      *telemetry.Diagnostics
@@ -302,6 +303,9 @@ func NewRouter(opts Options) http.Handler {
 		}
 		if opts.ConnectorCarrierBootstrap != nil {
 			mux.Handle("POST /v1/tunnels/{tunnel_id}/connectors/{connector_id}/carrier-bootstrap", opts.ConnectorCarrierBootstrap)
+		}
+		if opts.MachineEvents != nil {
+			mux.Handle("POST "+MachineEventsPath, opts.MachineEvents)
 		}
 		if opts.ConnectorOriginHealth != nil {
 			mux.Handle("POST /v1/tunnels/{tunnel_id}/connectors/{connector_id}/origin-health", opts.ConnectorOriginHealth)
