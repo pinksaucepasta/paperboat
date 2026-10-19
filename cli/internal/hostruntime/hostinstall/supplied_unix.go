@@ -135,7 +135,7 @@ func SuppliedBinary(ctx context.Context, input Request, operation string) (resul
 		return errors.New("another Paperboat installation is pending; finish or recover that installation before replacing its source")
 	}
 	bound := err == nil && !previous.EnrollmentPending
-	request := Request{Schema: input.Schema, Platform: input.Platform, User: input.User, UID: input.UID, GID: input.GID, Group: input.Group, Home: input.Home, Executable: input.Executable, Source: input.Source, EnrollmentPending: true}
+	request := unboundSuppliedRequest(input)
 	if bound {
 		request = previous
 		request.Executable, request.Source = input.Executable, input.Source
@@ -262,4 +262,11 @@ func suppliedActiveRequest(previous Request, paths installPaths) (Request, error
 		}
 	}
 	return Request{}, ErrInvalidRequest
+}
+
+// unboundSuppliedRequest is the installation a supplied binary starts when this
+// machine is not enrolled yet. It keeps the control URL: a fresh machine guard
+// reads the deployment's local access domain from that server.
+func unboundSuppliedRequest(input Request) Request {
+	return Request{Schema: input.Schema, Platform: input.Platform, User: input.User, UID: input.UID, GID: input.GID, Group: input.Group, Home: input.Home, Executable: input.Executable, Source: input.Source, ControlURL: input.ControlURL, EnrollmentPending: true}
 }
