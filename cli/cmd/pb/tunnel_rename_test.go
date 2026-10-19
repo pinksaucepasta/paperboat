@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
@@ -57,5 +58,38 @@ func TestTunnelRenameUsesCurrentResourceAndPreservesIdentity(t *testing.T) {
 				t.Fatalf("rename lost identity: output=%q error=%v", out, err)
 			}
 		})
+	}
+}
+
+// A tunnel's name is a label; its generated public address is what people open.
+// Every human view shows the address next to the name, and a rename says it is unchanged.
+func TestTunnelViewsShowThePublicAddressNextToTheName(t *testing.T) {
+	address := validCommandTunnel().StableEndpoint
+	withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
+		current := validCommandTunnel()
+		switch {
+		case r.Method == http.MethodPatch:
+			current.Name = "new-name"
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": api.TunnelMutation{Tunnel: current, Operation: validCommandOperation("tunnel", current.ID), Changed: true}})
+		case r.URL.Path == "/v1/tunnels":
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": api.TunnelPage{Items: []api.Tunnel{current}}})
+		default:
+			w.Header().Set("ETag", current.ETag)
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": current})
+		}
+	})
+	for name, args := range map[string][]string{
+		"list":   {"list"},
+		"show":   {"show", "tun_1"},
+		"rename": {"rename", "tun_1", "new-name"},
+	} {
+		out, _, err := executeAdversarialTunnelCommand(t, args...)
+		if err != nil || !strings.Contains(out, address) {
+			t.Errorf("%s output lacks the tunnel address %q: %q (%v)", name, address, out, err)
+		}
+	}
+	out, _, _ := executeAdversarialTunnelCommand(t, "rename", "tun_1", "new-name")
+	if !strings.Contains(out, "new-name") || !strings.Contains(out, "unchanged") {
+		t.Errorf("rename does not say the address is unchanged: %q", out)
 	}
 }

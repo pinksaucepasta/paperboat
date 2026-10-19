@@ -38,9 +38,9 @@ func tunnelRenameCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		return tunnelOutput(command, out, fmt.Sprintf("Renamed tunnel %s to %s", out.Tunnel.ID, out.Tunnel.Name))
+		return tunnelOutput(command, out, fmt.Sprintf("Renamed tunnel %s to %s. Its address is unchanged: %s", out.Tunnel.ID, out.Tunnel.Name, tunnelAddress(out.Tunnel)))
 	})
-	command.Long = "Rename a durable tunnel selected by its exact ID or current name. The command reads the current resource version before changing its name and reports the server's canonical result. Existing routes, connectors and access policy remain attached to the same tunnel. Refresh and retry if another writer changed it."
+	command.Long = "Rename a durable tunnel selected by its exact ID or current name. The command reads the current resource version before changing its name and reports the server's canonical result. The name is a label: the tunnel's public address never changes. Existing routes, connectors and access policy remain attached to the same tunnel. Refresh and retry if another writer changed it."
 	tunnelMutationWaitFlags(command)
 	tunnelJSONFlag(command)
 	return command

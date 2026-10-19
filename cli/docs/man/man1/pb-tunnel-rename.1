@@ -10,7 +10,7 @@ pb-tunnel-rename - Rename a durable tunnel
 
 
 .SH DESCRIPTION
-Rename a durable tunnel selected by its exact ID or current name. The command reads the current resource version before changing its name and reports the server's canonical result. Existing routes, connectors and access policy remain attached to the same tunnel. Refresh and retry if another writer changed it.
+Rename a durable tunnel selected by its exact ID or current name. The command reads the current resource version before changing its name and reports the server's canonical result. The name is a label: the tunnel's public address never changes. Existing routes, connectors and access policy remain attached to the same tunnel. Refresh and retry if another writer changed it.
 
 .PP
 JSON output is supported with --json.

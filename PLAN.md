@@ -44,14 +44,18 @@ works on Windows-only failures until after launch.
 | Use | Domain | Example |
 |---|---|---|
 | Server, API, installer, relays, edges, all infrastructure | `*.pprbt.dev` | `api.pprbt.dev`, `get.pprbt.dev` |
-| Previews and tunnels (public HTTP) | `<name>.pprbt.app` | `quiet-river-42.pprbt.app` |
+| Previews and tunnels (public HTTP) | `<generated-address>.pprbt.app` | `calm-summer-beach-3476.pprbt.app` |
 | Local device access (private, from your own devices) | `<machine>.ppr.boats` | `homelab.ppr.boats` |
 | Local device port access | `<port>.<machine>.ppr.boats` (lazy URL feature) and `<machine>.ppr.boats:<port>` | `3000.homelab.ppr.boats`, `homelab.ppr.boats:3000` |
 | Marketing site | `paperboat.cloud` | |
 | Console (web app) | `app.paperboat.cloud` | |
 
-- Previews and tunnels both get names from the existing name generator. **Preview names
-  cannot be changed. Tunnel names can be renamed** by the owner. Names are globally unique.
+- Previews and tunnels get a readable generated public address from the existing name
+  generator (`naming.PublicSlug`: three words and four digits, reserved so no address is ever
+  reused). **The address is stable and never derives from a name** (user decision 2026-10-20).
+  A preview's name cannot be changed; a tunnel's name can be renamed by the owner, but it is only a
+  label: renaming never changes the address, and names need not be unique. A custom address comes from
+  a custom domain (F8-02). The CLI and console show the address next to the name.
 - `preview.pprbt.dev`, `tunnels.pprbt.dev` and `*.local.pprbt.dev` are **removed**
   (unreleased; no compatibility, no redirects).
 - Public Suffix List submission for `pprbt.app`: the user handles it. Not in this plan.
@@ -289,7 +293,7 @@ Prerequisite: the user has formatted coolify and said so.
 
 - S1-01: **No domain is hardcoded anywhere** (AGENTS.md). Remove every domain literal from code in all modules. Find them with `grep -rnE "pprbt\.dev|pprbt\.app|ppr\.boats|paperboat\.cloud"` (today `local.pprbt.dev` ~43 files, `get.pprbt.dev` ~19, `api.pprbt.dev` ~12, `preview.pprbt.dev`/`tunnels.pprbt.dev` ~7 each). Sources: server/tunnel/relay = deployment configuration; CLI/daemon = API address from build config (`DefaultServerURL`, overridable with `--server`), all other domains from a server discovery response fetched at login/pair and cached; console = environment config + the same discovery response; marketing = site config; tests = `example.test`. Afterwards the grep returns nothing in code.
 - S1-02: Local access names: `<machine>.ppr.boats`, `<port>.<machine>.ppr.boats` (lazy URL), `<machine>.ppr.boats:<port>`; local CA name constraint and leaves use the configured local domain; OpenSSH aliases `<machine>.<local domain>`. DNS is done (not on Cloudflare; already verified 2026-10-14: `x.ppr.boats` and `3000.x.ppr.boats` → `127.100.0.1`); never automate ppr.boats DNS.
-- S1-03: Previews and tunnels at `<name>.pprbt.app`; names from the existing name generator; preview names immutable; tunnel rename in server, CLI and console; global uniqueness.
+- S1-03: Previews and tunnels at `<generated-address>.pprbt.app` (stable, from the existing name generator, never derived from a name); preview names immutable; tunnel rename (label only) in server, CLI and console with the address shown next to the name.
 - S1-04: Console origin `app.paperboat.cloud` and marketing `paperboat.cloud` configured for production (links, CORS/allowed origins, WorkOS redirects) while the dev console keeps https://oracle.newt-mermaid.ts.net — configuration only.
 - S1-05: Unit tests use the configured test domain; switching the deployment's domains in configuration works without a code change (verify once).
 - S1-06: Server stack (server, PostgreSQL 17 with migrations from zero, diagnostics store, edge/proxy for the API and get domains) deployed on the formatted coolify from the server image with the `deploy/` compose file; all domains from env.

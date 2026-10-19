@@ -2108,6 +2108,15 @@ func applyTunnelRouteOriginFlags(command *cobra.Command, origin api.TunnelRouteO
 	return origin, nil
 }
 
+// tunnelAddress is the tunnel's stable public address, shown next to its name.
+// The name is only a label: renaming never changes the address.
+func tunnelAddress(tunnel api.Tunnel) string {
+	if tunnel.StableEndpoint == "" {
+		return "-"
+	}
+	return tunnel.StableEndpoint
+}
+
 func tunnelListCommand() *cobra.Command {
 	command := tunnelCommand("list", "List durable tunnels", cobra.NoArgs, func(command *cobra.Command, _ []string) error {
 		if ephemeral, _ := command.Flags().GetBool("ephemeral"); ephemeral {
@@ -2135,7 +2144,7 @@ func tunnelListCommand() *cobra.Command {
 			return tunnelOutput(command, out, "")
 		}
 		for _, v := range out.Items {
-			if _, err := fmt.Fprintf(command.OutOrStdout(), "%s\t%s\t%s\t%s\n", v.ID, v.Name, v.AccessMode, v.DesiredState); err != nil {
+			if _, err := fmt.Fprintf(command.OutOrStdout(), "%s\t%s\t%s\t%s\t%s\n", v.ID, v.Name, tunnelAddress(v), v.AccessMode, v.DesiredState); err != nil {
 				return err
 			}
 		}
@@ -2163,7 +2172,7 @@ func tunnelShowCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		return tunnelOutput(command, out, fmt.Sprintf("%s\t%s\t%s\t%s", out.ID, out.Name, out.AccessMode, out.DesiredState))
+		return tunnelOutput(command, out, fmt.Sprintf("%s\t%s\t%s\t%s\t%s", out.ID, out.Name, tunnelAddress(out), out.AccessMode, out.DesiredState))
 	})
 	tunnelJSONFlag(command)
 	return command
