@@ -84,6 +84,14 @@ pb tunnel create api --from https://127.0.0.1:8443 --private --wait
 pb tunnel create api --port 8080 --domain api.example.com --wait --json
 ```
 
+A tunnel's public address is generated for you from the name generator (three
+readable words and four digits under the deployment's public base domain, for example
+`calm-summer-beach-3476.pprbt.app`). It is stable for the life of the tunnel and never
+derives from the name you type. The name is only a label: `pb tunnel rename api web-api`
+changes it without touching the address, names need not be unique, and `pb tunnel list`
+and `pb tunnel show` print the address next to the name. A preview's name cannot be
+changed. To serve from your own address, attach a custom domain (below).
+
 Inspect the durable resource and live health:
 
 ```console
@@ -122,6 +130,9 @@ TLS server name, verification mode, CA reference, client credential reference,
 timeouts, priority, and stream limits are independent route settings. Prefer
 the defaults; use `--tls-verification insecure` only with an explicit reviewed
 exception.
+
+Change or remove a route with `pb tunnel route update api web ...` and
+`pb tunnel route remove api web --wait`; the tunnel and its connectors stay.
 
 Exact hosts beat one-label wildcards. Within one host, the longest path prefix
 then route priority wins. A public `tcp` route reserves a stable managed-hostname
