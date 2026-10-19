@@ -14,6 +14,9 @@ var ErrVaultChanged = errors.New("ENV vault changed; unlock the current vault be
 var ErrVaultLocked = errors.New("ENV vault is locked; run `pb env vault unlock` before changing ENV keys or values")
 var ErrVaultPending = errors.New("ENV vault publication is pending; run `pb env vault resume` before retrying")
 
+// ErrNoRotationInProgress means a rotation cancel found no uncommitted personal rotation.
+var ErrNoRotationInProgress = errors.New("no personal ENV key rotation is in progress")
+
 type PasswordVaultClient interface {
 	GetPasswordVault(context.Context) (api.PasswordVaultState, error)
 	PutPasswordVault(context.Context, []byte) (api.PasswordVaultState, error)

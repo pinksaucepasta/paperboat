@@ -664,3 +664,10 @@ func TestEnvironmentPermissionDeniedFromRealClientKeepsRecoveryText(t *testing.T
 		t.Fatalf("message=%q", message)
 	}
 }
+
+func TestRotationCancelWithNothingToCancelIsExplained(t *testing.T) {
+	err := safeEnvironmentVariableCommandError(environmentmanager.ErrNoRotationInProgress)
+	if !strings.Contains(err.Error(), "No personal ENV key rotation is in progress") || !strings.Contains(err.Error(), "nothing was changed") || strings.Contains(err.Error(), "pending") {
+		t.Fatalf("message=%q", err.Error())
+	}
+}

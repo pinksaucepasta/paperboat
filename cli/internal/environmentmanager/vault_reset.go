@@ -296,7 +296,10 @@ func (v PasswordVault) AbortPersonalRotation(ctx context.Context) (resultErr err
 		return err
 	}
 	defer local.Clear()
-	if local.Operation == nil || local.Operation.Kind != "personal-rotate" {
+	if local.Operation == nil {
+		return ErrNoRotationInProgress
+	}
+	if local.Operation.Kind != "personal-rotate" {
 		return ErrVaultPending
 	}
 	head, _, err := v.current(ctx)

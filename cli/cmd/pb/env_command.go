@@ -481,6 +481,8 @@ func safeEnvironmentVariableCommandError(err error) error {
 		return envCommandError(err, "ENV vault publication is pending; run `pb env vault resume` before retrying")
 	case onlyEnvironmentFailureLeaves(err, func(leaf error) bool { return errors.Is(leaf, environmentmanager.ErrVaultTeamGrantRequired) }):
 		return envCommandError(err, "ENV team access needs a key grant; ask a surviving team member to regrant access, then run `pb env grants sync`")
+	case onlyEnvironmentFailureLeaves(err, func(leaf error) bool { return errors.Is(leaf, environmentmanager.ErrNoRotationInProgress) }):
+		return envCommandError(err, "No personal ENV key rotation is in progress; nothing was changed.")
 	case onlyEnvironmentFailureLeaves(err, func(leaf error) bool { return errors.Is(leaf, environmentmanager.ErrVaultLocked) }):
 		return envCommandError(err, "ENV vault is locked; run `pb env vault unlock` before changing variables")
 	case onlyEnvironmentFailureLeaves(err, func(leaf error) bool { return errors.Is(leaf, environmentmanager.ErrVaultChanged) }):

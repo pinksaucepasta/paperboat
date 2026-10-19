@@ -290,3 +290,11 @@ func (c *personalRotationControl) PutVaultRecords(_ context.Context, coordinate 
 	}
 	return out, nil
 }
+
+func TestAbortPersonalRotationWithoutRotationSaysNothingToCancel(t *testing.T) {
+	v, _, _ := newVaultScopesFixture(t)
+	err := v.AbortPersonalRotation(context.Background())
+	if !errors.Is(err, ErrNoRotationInProgress) || errors.Is(err, ErrVaultPending) {
+		t.Fatalf("cancel with no rotation = %v, want ErrNoRotationInProgress", err)
+	}
+}
