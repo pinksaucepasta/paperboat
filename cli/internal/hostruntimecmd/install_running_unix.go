@@ -31,6 +31,13 @@ func InstallRunningBinary(ctx context.Context, executable string, source install
 func InstallUpdateSource(ctx context.Context, executable string, source installsource.Source, bundlePath string, force bool, directory string) (string, error) {
 	return installUpdateSource(ctx, executable, source, bundlePath, force, directory, true)
 }
+// supplyInstallRequest is the request every supplied install or update sends to the
+// privileged service. ControlURL lets a fresh machine guard learn the deployment's
+// local access domain from the server.
+func supplyInstallRequest(account *user.User, uid, gid int, group, executable string, source installsource.Source, bundlePath string, force, explicitUpdate bool, controlURL string) hostinstall.Request {
+	return hostinstall.Request{Schema: hostinstall.SchemaV1, Platform: runtime.GOOS, User: account.Username, UID: uid, GID: gid, Group: group, Home: account.HomeDir, Executable: executable, Source: source, EnrollmentPending: true, UpdateBundle: bundlePath, Force: force, SuppliedUpdate: explicitUpdate, ControlURL: controlURL}
+}
+
 func installUpdateSource(ctx context.Context, executable string, source installsource.Source, bundlePath string, force bool, directory string, explicitUpdate bool) (installedPath string, resultErr error) {
 	if ctx == nil {
 		return "", hostinstall.ErrInvalidRequest
@@ -96,7 +103,11 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 			resultErr = withCleanup("installation finished or failed, but releasing its operation lock failed", resultErr, err)
 		}
 	}()
-	request := hostinstall.Request{Schema: hostinstall.SchemaV1, Platform: runtime.GOOS, User: account.Username, UID: uid, GID: gid, Group: group.Name, Home: account.HomeDir, Executable: executable, Source: source, EnrollmentPending: true, UpdateBundle: bundlePath, Force: force, SuppliedUpdate: explicitUpdate}
+	cfg, err := config.Load("")
+	if err != nil {
+		return "", err
+	}
+	request := supplyInstallRequest(account, uid, gid, group.Name, executable, source, bundlePath, force, explicitUpdate, cfg.ServerURL)
 	installerExecutable, err := os.Executable()
 	if err != nil {
 		return "", err
@@ -155,10 +166,6 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 		// The request sent so far named no source (a bundle's source is only known once
 		// install-supplied has unpacked it); commit-supplied must verify the installed one.
 		request = suppliedCommitRequest(request, source)
-	}
-	cfg, err := config.Load("")
-	if err != nil {
-		return rollback(err)
 	}
 	if restoreService, err = localdaemon.ReplaceCurrentUserService(ctx, layout.Binary, cfg.Path(), cfg.ServerURL); err != nil {
 		return rollback(err)
