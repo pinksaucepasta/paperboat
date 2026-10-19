@@ -98,12 +98,12 @@ The sidebar has these sections; each needs the listed control-plane support.
 - **Self-hosted edges** are excluded from `GET /v1/edges` (`edgeplacement` skips
   `selfhost_installations`); the list needs a hosting field so they can appear marked
   "Self-hosted".
-- **Latency** from each machine to each edge and relay is measured by the daemon but not
-  reported (below); the Network section shows "—" until it is.
-- **Development samples.** Under `next dev` only, when a machine reports no relays, the Network
-  section fills in sample relays and edge latencies (one of each marked self-hosted) so the layout
-  can be reviewed (`sampleRelays` in `components/machine-overview.tsx`). The UI does not label
-  them; production builds show only reported data. Remove them once machines report latency.
+- **Latency** from each machine to each edge and relay is measured by the machine and read from
+  `GET /v1/machines/{id}/network-latency` (`machineLatencyQuery`). Edge times arrive on the
+  machine's runtime attachment (the server keeps only candidates it issued), relay times from its
+  signed-in daemon every ~5 min; the server shows measurements under an hour old. The Network
+  section shows "—" for an edge and "Not reported yet" for relays until the machine reports. There
+  are no sample numbers. `scripts/check-network-latency.js` compares the page with the API.
 
 ## Machine domains (dummy UI)
 
@@ -450,8 +450,8 @@ Tailscale-grade machine page would also need, reported by the daemon and stored 
 
 - **Connectivity:** the daemon already measures per-peer latency and connection mode
   (`PeerStatus.LatencyMs` / `ConnectionMode` in `cli/internal/daemonrpc/backend.go`, shown by
-  `pb status`) and probes edge latency for placement (`internal/edgeplacement`), but none of it
-  is sent to the control plane. Reporting it needs a bounded, privacy-reviewed heartbeat field
+  `pb status`); edge and relay connect times are reported (see Edges and relays above), per-peer
+  data is not sent to the control plane. Reporting it needs a bounded, privacy-reviewed heartbeat field
   (peer graph and endpoints are sensitive). Also wanted: preferred relay
   region, relay latencies, NAT type, UDP reachability, IPv6, port-mapping support (UPnP, NAT-PMP,
   PCP), and local endpoints.

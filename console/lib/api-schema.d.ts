@@ -1624,6 +1624,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/machine-events/wait": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Wait for a change to something the host caches
+         * @description Host-only, authenticated like carrier bootstrap by the renewable machine identity and a detached proof over the exact method, path and body; Idempotency-Key binds the proof operation. The host sends the generation of each topic it last saw. The server answers 200 as soon as any topic of that machine has a higher generation, naming only those topics, or 204 after up to 30 seconds without a change. A response carries generations, never data: the host refreshes the named topic itself. Generations are persisted per machine and topic, so a reconnecting host loses nothing. Topics: machine_access, peer_network, previews, tunnels, config, inventory.
+         */
+        post: operations["post_v1_machine_events_wait"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/tunnels/{tunnel_id}/connectors/{connector_id}/origin-health": {
         parameters: {
             query?: never;
@@ -7235,6 +7255,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/machines/{machine_id}/network-latency": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                machine_id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * List a machine's measured latency to edges and relays
+         * @description Fresh (under one hour) connect times the machine measured. Edges are reported on its runtime attachment, relays by its signed-in daemon.
+         */
+        get: operations["get_v1_user_machines_machine_id_network_latency"];
+        /**
+         * Report a machine's relay latency
+         * @description Sent by the machine's signed-in daemon. Each relay must be one this account may use; times are 0 to 10000 ms. The caller must be able to manage the machine.
+         */
+        put: operations["put_v1_user_machines_machine_id_network_latency"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -8908,6 +8954,18 @@ export interface components {
             assignment_generation?: number;
             /** @enum {string} */
             protocol?: "http" | "tcp";
+        };
+        MachineEventsRequest: {
+            /** @description The generation of each topic the host last saw; a topic that is missing counts as 0. */
+            topics: {
+                [key: string]: number;
+            };
+        };
+        MachineEventsResponse: {
+            /** @description Only the topics whose generation is higher than the one the host sent. */
+            topics: {
+                [key: string]: number;
+            };
         };
         ConnectorOriginHealthRequest: {
             /** @constant */
@@ -11028,6 +11086,20 @@ export interface components {
             decided_by?: string;
             /** Format: date-time */
             decided_at?: string;
+        };
+        /** @description The connect time this machine measured to one edge or relay it can use. Display data: it never selects a path or confers access. */
+        MachineNetworkLatencyItem: {
+            node_id: string;
+            /** @enum {string} */
+            role: "edge" | "relay";
+            region: string;
+            self_hosted: boolean;
+            rtt_ms: number;
+            /** Format: date-time */
+            measured_at: string;
+        };
+        MachineNetworkLatencyList: {
+            items: components["schemas"]["MachineNetworkLatencyItem"][];
         };
     };
     responses: {
@@ -14291,6 +14363,49 @@ export interface operations {
                 };
                 content?: never;
             };
+        };
+    };
+    post_v1_machine_events_wait: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description Durable host identity credential used with the signed machine proof. */
+                "X-Paperboat-Machine-Identity": components["parameters"]["MachineIdentity"];
+                /** @description Strict unpadded base64url proof over the exact request body and idempotency key. */
+                "X-Paperboat-Machine-Proof": components["parameters"]["MachineProof"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MachineEventsRequest"];
+            };
+        };
+        responses: {
+            /** @description At least one topic changed. */
+            200: {
+                headers: {
+                    "Cache-Control": "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MachineEventsResponse"];
+                };
+            };
+            /** @description No topic changed within the wait. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            415: components["responses"]["Error"];
+            503: components["responses"]["Error"];
         };
     };
     post_v1_tunnels_tunnel_id_connectors_connector_id_origin_health: {
@@ -26749,6 +26864,71 @@ export interface operations {
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
             503: components["responses"]["Error"];
+        };
+    };
+    get_v1_user_machines_machine_id_network_latency: {
+        parameters: {
+            query?: {
+                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
+                workspace?: string;
+            };
+            header?: never;
+            path: {
+                machine_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Measured latency, edges first, fastest first inside each role. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: components["schemas"]["MachineNetworkLatencyList"];
+                    } & components["schemas"]["SuccessResponse"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    put_v1_user_machines_machine_id_network_latency: {
+        parameters: {
+            query?: {
+                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
+                workspace?: string;
+            };
+            header?: never;
+            path: {
+                machine_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    relays: {
+                        node_id: string;
+                        rtt_ms: number;
+                    }[];
+                };
+            };
+        };
+        responses: {
+            /** @description Measurements stored. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
 }

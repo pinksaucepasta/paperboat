@@ -1,7 +1,7 @@
 "use client"
 
 import { CaretDownIcon, HardDrivesIcon } from "@phosphor-icons/react"
-import { machineOwner, edgesQuery, meQuery, useApiQuery, type Machine } from "@/lib/api"
+import { machineOwner, edgesQuery, machineLatencyQuery, meQuery, useApiQuery, type Machine } from "@/lib/api"
 import { formatPlatform, placeName } from "@/lib/format"
 import { MachineAddressDetail } from "@/components/machine-address"
 import { Time } from "@/components/time"
@@ -91,20 +91,22 @@ function UpdateHealth({ machine }: { machine: Machine }) {
   )
 }
 
-/** A relay this machine can reach, as reported by the machine (not reported yet; see NOTES.md). */
+/** What the machine measured to the edges and relays it can use; empty until it has reported. */
 type Relay = { id: string; region: string; self_hosted?: boolean; latency_ms?: number }
 
 /**
  * Where this machine's traffic goes: the account's two edges (previews and tunnels) and the
- * relays used when a direct path is not possible. Latency fills in once machines report it.
+ * relays used when a direct path is not possible. Times are the machine's own connect times,
+ * reported every few minutes, and show a dash until the machine has reported.
  */
 function Network() {
   const machine = useCurrentMachine()
   const { data: edges, isPending, isError } = useApiQuery(edgesQuery)
-  const reported = (machine as Machine & { connectivity?: { relays?: Relay[] } }).connectivity?.relays
-  // Nothing reports latency yet; development shows samples (see NOTES.md).
-  const samples = process.env.NODE_ENV === "development" && !reported?.length
-  const relays = samples ? sampleRelays : reported
+  const { data: measured } = useApiQuery(machineLatencyQuery(machine.id))
+  const edgeLatency = new Map((measured ?? []).filter((item) => item.role === "edge").map((item) => [item.node_id, item]))
+  const relays: Relay[] = (measured ?? [])
+    .filter((item) => item.role === "relay")
+    .map((item) => ({ id: item.node_id, region: item.region, self_hosted: item.self_hosted, latency_ms: item.rtt_ms }))
 
   return (
     <Section title="Network">
@@ -116,48 +118,29 @@ function Network() {
               Array.from({ length: 2 }, (_, index) => <Skeleton key={index} className="h-[5.5rem] rounded-lg" />)}
             {isError && <p className="text-sm text-muted-foreground">Couldn’t load edges</p>}
             {edges?.length === 0 && <p className="text-sm text-muted-foreground">No edges assigned</p>}
-            {edges?.map((edge, index) => (
+            {edges?.map((edge) => (
               <EdgeTile
                 key={edge.id}
                 region={edge.region}
                 status={edge.status}
-                latency={samples ? sampleEdgeLatency[index % sampleEdgeLatency.length] : undefined}
-                selfHosted={samples && index === 1}
+                latency={edgeLatency.get(edge.id)?.rtt_ms}
+                selfHosted={edgeLatency.get(edge.id)?.self_hosted}
               />
             ))}
           </div>
         </div>
         <div className="flex flex-col gap-2">
           <h3 className="text-xs text-muted-foreground">Relays</h3>
-          {relays && relays.length > 0 ? (
+          {relays.length > 0 ? (
             <RelayList relays={relays} />
           ) : (
-            <p className="text-sm text-muted-foreground">Not reported</p>
+            <p className="text-sm text-muted-foreground">Not reported yet</p>
           )}
         </div>
       </div>
     </Section>
   )
 }
-
-const sampleEdgeLatency = [31, 148]
-const sampleRelays: Relay[] = [
-  ["in-mumbai", 28],
-  ["in-bangalore", 34, true],
-  ["sg-singapore", 63],
-  ["hk-hong-kong", 91],
-  ["jp-tokyo", 112],
-  ["de-frankfurt", 142],
-  ["nl-amsterdam", 146],
-  ["fi-helsinki", 151],
-  ["gb-london", 158],
-  ["us-new-york", 221],
-].map(([region, latency_ms, self_hosted], index) => ({
-  id: `sample-${index}`,
-  region: region as string,
-  latency_ms: latency_ms as number,
-  self_hosted: Boolean(self_hosted),
-}))
 
 function Hosting({ selfHosted, className }: { selfHosted?: boolean; className?: string }) {
   return selfHosted ? (

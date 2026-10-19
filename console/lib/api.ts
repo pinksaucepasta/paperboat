@@ -321,6 +321,19 @@ export const edgesQuery = queryOptions({
   staleTime: 60_000,
 })
 
+/** How long this machine took to reach an edge or relay, as the machine measured it. Display only. */
+export type NodeLatency = Data<"/v1/machines/{machine_id}/network-latency">["items"][number]
+
+export const machineLatencyQuery = (machineId: string) =>
+  queryOptions({
+    queryKey: ["machine-latency", machineId],
+    queryFn: async () =>
+      (await api<Data<"/v1/machines/{machine_id}/network-latency">>(`machines/${encodeURIComponent(machineId)}/network-latency`))
+        .items,
+    staleTime: 60_000,
+    refetchInterval: 120_000,
+  })
+
 /** Name and description are set together; the server validates both (`Rename` in usermachines). */
 export function updateMachine(id: string, alias: string, description: string): Promise<Machine> {
   return api<Machine>(`machines/${encodeURIComponent(id)}`, {
