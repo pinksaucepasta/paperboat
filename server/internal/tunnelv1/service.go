@@ -526,6 +526,13 @@ func projectHealth(tunnel dbsqlc.Tunnel, correlationID string, now time.Time) He
 		dimensions.Service = HealthDimension{Status: "ready", Code: "connector_ready"}
 		dimensions.Edge = HealthDimension{Status: "ready", Code: "edge_connected"}
 		dimensions.Origin = HealthDimension{Status: "unknown", Code: "origin_unverified"}
+	} else if tunnel.SummaryCode == "origin_unreachable" {
+		overallCode = "origin_unreachable"
+		summary = "The tunnel is connected but its local app is not reachable."
+		repairAction = "The connector cannot reach the app behind this tunnel. Start it, then wait a few seconds."
+		dimensions.Service = HealthDimension{Status: "ready", Code: "connector_ready"}
+		dimensions.Edge = HealthDimension{Status: "ready", Code: "edge_connected"}
+		dimensions.Origin = HealthDimension{Status: "down", Code: "origin_unreachable"}
 	} else if tunnel.SummaryCode == "ready" {
 		overallCode = "ready"
 		summary = "Tunnel is ready to accept traffic."

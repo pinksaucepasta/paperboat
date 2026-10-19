@@ -129,6 +129,7 @@ type Options struct {
 	PrivateAccessRoutes       http.Handler
 	ConnectorControl          http.Handler
 	ConnectorCarrierBootstrap http.Handler
+	ConnectorOriginHealth     http.Handler
 	TelemetryHTTP             *telemetry.HTTPObserver
 	TelemetryMetrics          *telemetry.Metrics
 	TelemetryDiagnostics      *telemetry.Diagnostics
@@ -302,6 +303,10 @@ func NewRouter(opts Options) http.Handler {
 		if opts.ConnectorCarrierBootstrap != nil {
 			mux.Handle("POST /v1/tunnels/{tunnel_id}/connectors/{connector_id}/carrier-bootstrap", opts.ConnectorCarrierBootstrap)
 		}
+		if opts.ConnectorOriginHealth != nil {
+			mux.Handle("POST /v1/tunnels/{tunnel_id}/connectors/{connector_id}/origin-health", opts.ConnectorOriginHealth)
+		}
+
 		if opts.DiagnosticUploads == nil || opts.DeviceAuth == nil {
 			unavailable := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				writeError(w, r, http.StatusServiceUnavailable, "diagnostic_upload_unavailable", "Diagnostic upload service is temporarily unavailable.")

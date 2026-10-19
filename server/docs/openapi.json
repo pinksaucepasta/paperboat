@@ -6895,6 +6895,84 @@
           }
         }
       },
+      "ConnectorOriginHealthRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schema",
+          "session_id",
+          "process_generation",
+          "config_generation",
+          "content_hash",
+          "routes"
+        ],
+        "properties": {
+          "schema": {
+            "const": "paperboat.origin-health/v1"
+          },
+          "session_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          },
+          "process_generation": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "config_generation": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "content_hash": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "routes": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 64,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "route_id",
+                "state",
+                "observed_at"
+              ],
+              "properties": {
+                "route_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "ready",
+                    "unreachable"
+                  ]
+                },
+                "code": {
+                  "type": "string",
+                  "enum": [
+                    "refused",
+                    "timeout",
+                    "unreachable",
+                    "tls"
+                  ],
+                  "description": "Required when state is unreachable, absent when ready."
+                },
+                "observed_at": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            }
+          }
+        }
+      },
       "ConnectorCarrierBootstrapRequest": {
         "type": "object",
         "additionalProperties": false,
@@ -21396,6 +21474,74 @@
           }
         },
         "operationId": "get_v1_tunnels_tunnel_id_connectors_connector_id_control"
+      }
+    },
+    "/v1/tunnels/{tunnel_id}/connectors/{connector_id}/origin-health": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TunnelID"
+        },
+        {
+          "name": "connector_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          }
+        }
+      ],
+      "post": {
+        "summary": "Report whether the local app behind each route is reachable",
+        "description": "Host-only, authenticated like carrier bootstrap by the current renewable machine identity and a detached proof over the exact method, path and body; Idempotency-Key binds the proof operation. The host reports a change between reachable and unreachable immediately and repeats an unreachable state every 30 seconds; a report older than 60 seconds no longer holds the tunnel's origin down. The latest state per route is stored; routes that do not belong to the tunnel are ignored.",
+        "security": [],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/MachineIdentity"
+          },
+          {
+            "$ref": "#/components/parameters/MachineProof"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectorOriginHealthRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "The report was recorded."
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "415": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "operationId": "post_v1_tunnels_tunnel_id_connectors_connector_id_origin_health"
       }
     },
     "/v1/tunnels/{tunnel_id}/connectors/{connector_id}/carrier-bootstrap": {

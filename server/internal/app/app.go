@@ -364,6 +364,11 @@ func New(opts Options) (*App, error) {
 		_ = store.Close()
 		return nil, fmt.Errorf("configure connector carrier bootstrap: %w", err)
 	}
+	connectorOriginHealthHandler, err := httpapi.NewConnectorOriginHealthHandler(connectorControlTransport.Sessions(), tunnelRepository, enrollmentService)
+	if err != nil {
+		_ = store.Close()
+		return nil, fmt.Errorf("configure connector origin health: %w", err)
+	}
 	userMachineService.ConfigureHelperEnrollment(func(ctx context.Context, actorID, operationKey, environmentID string, lifetime time.Duration) (usermachines.HelperEnrollmentGrant, error) {
 		grant, err := enrollmentService.Issue(ctx, actorID, operationKey, environmentID, lifetime)
 		return usermachines.HelperEnrollmentGrant{EnrollmentID: grant.EnrollmentID, HelperID: grant.HelperID, Credential: grant.Credential, ExpiresAt: grant.ExpiresAt}, err
@@ -837,6 +842,7 @@ func New(opts Options) (*App, error) {
 		PrivateAccessRoutes:       privateAccessRoutesHandler,
 		ConnectorControl:          connectorControlHandler,
 		ConnectorCarrierBootstrap: connectorCarrierBootstrapHandler,
+		ConnectorOriginHealth:     connectorOriginHealthHandler,
 		TelemetryHTTP:             telemetryHTTP,
 		TelemetryMetrics:          telemetryMetrics,
 		TelemetryDiagnostics:      telemetryDiagnostics,

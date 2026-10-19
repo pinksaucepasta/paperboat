@@ -68,6 +68,42 @@ func TestTunnelHealthFollowsObservedRoutesOnPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	assert("ready", "succeeded")
+
+	// The host reports its local app: unreachable holds the tunnel in origin_unreachable (the create
+	// operation stays succeeded), a stale report ages out, and a ready report clears it.
+	repository, err := tunnelv1.NewRepository(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := func(state, code string, observed time.Time) {
+		t.Helper()
+		if err := repository.RecordOriginHealth(ctx, f.accountID, f.tunnelID, f.connectorOne, f.sessionOne, "cor_origin_"+f.suffix, []tunnelv1.OriginRouteReport{{RouteID: f.routeID, State: state, Code: code, ObservedAt: observed}}, now); err != nil {
+			t.Fatal(err)
+		}
+		if err := tunnelv1.RefreshHealth(ctx, database.Pool(), f.accountID, []string{f.tunnelID}, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	report("unreachable", "refused", now.Add(-90*time.Second))
+	assert("ready", "succeeded") // older than the refresh window: aged out
+	report("unreachable", "refused", now)
+	assert("origin_unreachable", "succeeded")
+	report("unreachable", "refused", now.Add(time.Millisecond)) // the 30 s heartbeat repeat is not a new event
+	assert("origin_unreachable", "succeeded")
+	report("ready", "", now.Add(2*time.Millisecond))
+	assert("ready", "succeeded")
+	other := tunnelv1.OriginRouteReport{RouteID: "route_of_another_tunnel_" + f.suffix, State: "unreachable", Code: "refused", ObservedAt: now}
+	if err := repository.RecordOriginHealth(ctx, f.accountID, f.tunnelID, f.connectorOne, f.sessionOne, "cor_origin_"+f.suffix, []tunnelv1.OriginRouteReport{other}, now); err != nil {
+		t.Fatal(err)
+	}
+	var stored int
+	if err := database.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.tunnel_route_origin_health WHERE route_id=$1`, other.RouteID).Scan(&stored); err != nil || stored != 0 {
+		t.Fatalf("a route outside the tunnel was stored: %d %v", stored, err)
+	}
+	var unreachableLogs, recoveredLogs int
+	if err := database.SQL().QueryRowContext(ctx, `SELECT count(*) FILTER (WHERE code='tunnel_origin_unreachable'),count(*) FILTER (WHERE code='tunnel_origin_recovered') FROM paperboat.tunnel_log_entries WHERE tunnel_id=$1`, f.tunnelID).Scan(&unreachableLogs, &recoveredLogs); err != nil || unreachableLogs != 1 || recoveredLogs != 1 {
+		t.Fatalf("tunnel logs: unreachable=%d recovered=%d want 1 and 1 (repeats are not new events): %v", unreachableLogs, recoveredLogs, err)
+	}
 	for _, boundary := range []struct{ name, deny, restore, id string }{
 		{"seat", `UPDATE paperboat.user_machines SET seat_state='released' WHERE id=$1`, `UPDATE paperboat.user_machines SET seat_state='occupied' WHERE id=$1`, f.hostOne},
 		{"machine", `UPDATE paperboat.user_machines SET state='pending' WHERE id=$1`, `UPDATE paperboat.user_machines SET state='online' WHERE id=$1`, f.hostOne},
