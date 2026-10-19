@@ -5,14 +5,17 @@
 #   qualify-fresh-host.sh --base ubuntu:20.04 --expect-refusal
 #   qualify-fresh-host.sh --base ubuntu:24.04 --enable both --published https://<get host>/selfhost/install
 #     (the real published one-liner and its auto-detected address instead of the local origin)
+#   qualify-fresh-host.sh --ssh HOST --enable both --published URL
+#     (the same run on a real machine reached over ssh with passwordless sudo, e.g. amd64 hardware;
+#      Docker stays installed afterwards, everything pbh created is removed)
 # Needs docker (set DOCKER="sudo docker" if required), PAPERBOAT_SELFHOST_RELAY_IMAGE and
 # PAPERBOAT_SELFHOST_TUNNEL_IMAGE (published images). Everything it creates is removed on exit.
 set -eu
-base=ubuntu:24.04 enable=relay platform='' refusal=false published=''
+base=ubuntu:24.04 enable=relay platform='' refusal=false published='' ssh=''
 while [ "$#" -gt 0 ]; do
  case "$1" in
   --base) base=$2; shift 2;; --enable) enable=$2; shift 2;; --platform) platform=$2; shift 2;;
-  --published) published=$2; shift 2;; --expect-refusal) refusal=true; shift;; *) echo "unknown argument: $1" >&2; exit 2;;
+  --published) published=$2; shift 2;; --ssh) ssh=$2; shift 2;; --expect-refusal) refusal=true; shift;; *) echo "unknown argument: $1" >&2; exit 2;;
  esac
 done
 docker=${DOCKER:-docker}
@@ -27,7 +30,16 @@ cleanup() { fresh_host_down; rm -rf "$work"; }
 trap cleanup EXIT HUP INT TERM
 . "$repo/tools/fresh-host.sh"
 
-arch=$(${docker} run --rm ${platform:+--platform "$platform"} "$base" uname -m)
+if [ -n "$ssh" ]; then
+ [ -n "$published" ] || { echo '--ssh needs --published' >&2; exit 2; }
+ inside() { printf '%s\n' "$1" | ssh -o BatchMode=yes -o ConnectTimeout=20 "$ssh" sudo sh; }
+ fresh_host_up() { :; }
+ fresh_host_down() { :; }
+ base=$ssh
+ arch=$(ssh -o BatchMode=yes "$ssh" uname -m)
+else
+ arch=$($docker run --rm ${platform:+--platform "$platform"} "$base" uname -m)
+fi
 case "$arch" in x86_64) arch=amd64;; aarch64) arch=arm64;; *) fail "unexpected architecture $arch";; esac
 if [ -z "$published" ]; then
 step "build the $arch package and installer"

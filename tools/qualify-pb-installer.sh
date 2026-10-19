@@ -25,7 +25,7 @@ trap 'fresh_host_down; rm -rf "$work"' EXIT HUP INT TERM
 
 step "fresh $base host"
 fresh_host_up
-one_liner="curl -fsSL '$PAPERBOAT_INSTALLER_URL' | sh"
+one_liner="curl -fsSL '$PAPERBOAT_INSTALLER_URL' | sh -s -- --no-setup"
 
 step "published one-liner installs the release"
 inside_user "$one_liner" > "$work/out" 2>&1 || { tail -30 "$work/out"; fail "one-liner failed"; }
@@ -34,6 +34,14 @@ inside_user 'systemctl --user is-active --quiet paperboatd.service' || fail "dae
 inside 'systemctl is-active --quiet paperboat-machineguard.service' || fail "machine guard is not running"
 inside_user '~/.local/bin/pb doctor --json' > "$work/doctor" 2>&1 || true
 grep -q '"checks"\|"name"' "$work/doctor" || { head -c 400 "$work/doctor"; fail "pb doctor did not report"; }
+
+step "the default ending of the one-liner reaches the browser approval link"
+# The bare one-liner continues into `pb login`; on a fresh host it must print an approval link.
+inside_user '~/.local/bin/pb login --no-browser' > "$work/login" 2>&1 &
+login_pid=$!
+for _ in $(seq 1 20); do grep -q 'https://' "$work/login" 2>/dev/null && break; sleep 1; done
+grep -q 'https://' "$work/login" || { head -c 400 "$work/login"; kill "$login_pid" 2>/dev/null || true; fail "pb login printed no approval link"; }
+inside 'pkill -f "pb login" || true'; kill "$login_pid" 2>/dev/null || true; wait "$login_pid" 2>/dev/null || true
 
 step "re-running the one-liner keeps a working install"
 inside_user "$one_liner" > "$work/out2" 2>&1 || { tail -30 "$work/out2"; fail "re-run failed"; }
