@@ -15,6 +15,7 @@ import (
 
 	yamux "github.com/libp2p/go-yamux/v5"
 	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/internal/diagnosticlog"
 )
 
 // Data-carrier limits are deliberately small.  They bound both the number of
@@ -245,6 +246,31 @@ type DataCarrierSession interface {
 
 // DataCarrier owns one transport-native session and its bounded stream
 // permits.
+// DataCarrierCloseReason says, in a finite vocabulary, why a data carrier ended. It is recorded
+// once per carrier and written to the host log, so a stream cut can be tied to the carrier event
+// that caused it.
+type DataCarrierCloseReason string
+
+const (
+	// CloseHealthPingMissed: the pool's periodic health ping went unanswered.
+	CloseHealthPingMissed DataCarrierCloseReason = "health_ping_missed"
+	// CloseSessionClosed: the transport session closed (the peer or the network ended it).
+	CloseSessionClosed DataCarrierCloseReason = "session_closed"
+	// CloseSessionError: accepting a stream failed with a session error.
+	CloseSessionError DataCarrierCloseReason = "session_error"
+	// CloseContextDone: the carrier's own context ended.
+	CloseContextDone DataCarrierCloseReason = "context_done"
+	// CloseTargetRemoved: the edge target this carrier ran to is no longer assigned.
+	CloseTargetRemoved DataCarrierCloseReason = "target_removed"
+	// ClosePoolShutdown: the pool was closed or drained.
+	ClosePoolShutdown DataCarrierCloseReason = "pool_shutdown"
+	// ClosePoolDialFailed: the pool discarded a freshly dialed carrier (failed first ping or pool
+	// already closed).
+	ClosePoolDialFailed DataCarrierCloseReason = "pool_dial_failed"
+	// CloseLocal: closed by the caller without a more specific reason.
+	CloseLocal DataCarrierCloseReason = "local_close"
+)
+
 type DataCarrier struct {
 	id        string
 	ctx       context.Context
@@ -259,6 +285,8 @@ type DataCarrier struct {
 	closeOnce sync.Once
 	closeErr  error
 	active    atomic.Int64
+	started   time.Time
+	reason    DataCarrierCloseReason
 }
 
 type dataCarrierAcceptResult struct {
@@ -360,6 +388,7 @@ func newDataCarrierWithSession(ctx context.Context, session DataCarrierSession, 
 		openings:  make(chan struct{}, config.QueueDepth),
 		accepted:  make(chan dataCarrierAcceptResult, config.QueueDepth),
 		done:      make(chan struct{}),
+		started:   time.Now(),
 	}
 	go c.watch(ctx)
 	go c.acceptLoop()
@@ -498,9 +527,9 @@ func (s *yamuxDataCarrierSession) CloseChan() <-chan struct{} {
 func (c *DataCarrier) watch(ctx context.Context) {
 	select {
 	case <-ctx.Done():
-		c.shutdown(ctx.Err())
+		c.shutdownFor(CloseContextDone, ctx.Err())
 	case <-c.session.CloseChan():
-		c.shutdown(ErrDataCarrierClosed)
+		c.shutdownFor(CloseSessionClosed, ErrDataCarrierClosed)
 	}
 }
 
@@ -510,7 +539,11 @@ func (c *DataCarrier) acceptLoop() {
 		raw, err := c.session.AcceptStream(c.ctx)
 		if err != nil {
 			if !c.closed() {
-				c.shutdown(err)
+				reason := CloseSessionError
+				if c.ctx.Err() != nil {
+					reason = CloseContextDone
+				}
+				c.shutdownFor(reason, err)
 			}
 			return
 		}
@@ -808,12 +841,31 @@ func (c *DataCarrier) releasePermit() {
 	}
 }
 
-func (c *DataCarrier) shutdown(err error) {
+func (c *DataCarrier) shutdown(err error) { c.shutdownFor(CloseLocal, err) }
+
+// shutdownFor ends the carrier once; the first reason wins and is logged with the streams that
+// were still open, which are the ones the close cut.
+func (c *DataCarrier) shutdownFor(reason DataCarrierCloseReason, err error) {
 	c.closeOnce.Do(func() {
 		c.closeErr = err
+		c.reason = reason
+		openStreams := c.active.Load()
 		close(c.done)
 		_ = c.session.Close()
+		age := time.Duration(0)
+		if !c.started.IsZero() {
+			age = time.Since(c.started).Round(time.Second)
+		}
+		diagnosticlog.TryWarn("data carrier closed", "reason", string(reason), "open_streams", openStreams, "age", age.String())
 	})
+}
+
+// CloseReason returns why the carrier ended, or "" while it is open.
+func (c *DataCarrier) CloseReason() DataCarrierCloseReason {
+	if c == nil || !c.closed() {
+		return ""
+	}
+	return c.reason
 }
 
 func (c *DataCarrier) Close() error {
@@ -821,6 +873,15 @@ func (c *DataCarrier) Close() error {
 		return nil
 	}
 	c.shutdown(nil)
+	return c.closeErr
+}
+
+// closeFor closes the carrier and records the pool's reason.
+func (c *DataCarrier) closeFor(reason DataCarrierCloseReason) error {
+	if c == nil {
+		return nil
+	}
+	c.shutdownFor(reason, nil)
 	return c.closeErr
 }
 
@@ -1324,7 +1385,7 @@ func (p *DataCarrierPool) Connect(ctx context.Context) error {
 				p.carriers = kept
 				p.mu.Unlock()
 				for _, carrier := range removed {
-					_ = carrier.Close()
+					_ = carrier.closeFor(CloseTargetRemoved)
 				}
 			}
 		}
@@ -1388,7 +1449,7 @@ func (p *DataCarrierPool) Connect(ctx context.Context) error {
 		cancel()
 		stopAttempt()
 		if err != nil {
-			_ = carrier.Close()
+			_ = carrier.closeFor(ClosePoolDialFailed)
 			errs = append(errs, err)
 			p.retrySlot(slot)
 			if len(p.targets) == 0 {
@@ -1399,7 +1460,7 @@ func (p *DataCarrierPool) Connect(ctx context.Context) error {
 		p.mu.Lock()
 		if p.state == DataCarrierPoolClosed {
 			p.mu.Unlock()
-			_ = carrier.Close()
+			_ = carrier.closeFor(ClosePoolShutdown)
 			return ErrDataCarrierClosed
 		}
 		delete(p.retries, slot)
@@ -1498,7 +1559,7 @@ func (p *DataCarrierPool) monitorCarrier(carrier *DataCarrier, interval, timeout
 		}
 		misses++
 		if misses >= 3 || !time.Now().Before(staleAt) {
-			_ = carrier.Close()
+			_ = carrier.closeFor(CloseHealthPingMissed)
 			p.removeClosed()
 			return
 		}
@@ -1890,7 +1951,7 @@ func (p *DataCarrierPool) Close() error {
 		p.readyOnce.Do(func() { close(p.ready) })
 		for _, pooled := range carriers {
 			if pooled != nil && pooled.carrier != nil {
-				_ = pooled.carrier.Close()
+				_ = pooled.carrier.closeFor(ClosePoolShutdown)
 			}
 		}
 		p.workers.Wait()

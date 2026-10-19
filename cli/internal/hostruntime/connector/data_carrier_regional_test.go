@@ -227,6 +227,9 @@ func TestRegionalCarrierSilentPeerMissesResetAndExposeSurvivor(t *testing.T) {
 		t.Fatal("silent open peer stayed ready")
 	}
 	pool.workers.Wait()
+	if reason := first.CloseReason(); reason != CloseHealthPingMissed {
+		t.Fatalf("silent peer closed for %q, want %q", reason, CloseHealthPingMissed)
+	}
 	silent.mu.Lock()
 	calls := silent.calls
 	silent.mu.Unlock()
