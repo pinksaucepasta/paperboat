@@ -112,6 +112,22 @@ func (s *runtimeObservationSender) machineServicesObservation(ctx context.Contex
 	}
 	return &api.MachineServicesSnapshot{Schema: "paperboat.machine-services/v1", InstallationGeneration: s.installationGeneration, BootID: s.lazyBootID, StartedAt: s.lazyStartedAt.UTC(), Generation: s.machineServicesGeneration, Services: append([]api.MachineServicePort{}, ports...)}
 }
+
+// machineServicesChanged re-reads the local listening ports and reports whether the announced set
+// differs from the one last sent, so the loop can announce it without waiting for the next periodic
+// observation.
+func (s *runtimeObservationSender) machineServicesChanged(ctx context.Context) bool {
+	s.machineServicesMu.Lock()
+	before := s.machineServicesGeneration
+	s.machineServicesMu.Unlock()
+	if s.machineServicesObservation(ctx) == nil {
+		return false
+	}
+	s.machineServicesMu.Lock()
+	defer s.machineServicesMu.Unlock()
+	return s.machineServicesGeneration != before
+}
+
 func (s *runtimeObservationSender) applyMachineServicesPolicy(body []byte) {
 	var response struct {
 		Data struct {

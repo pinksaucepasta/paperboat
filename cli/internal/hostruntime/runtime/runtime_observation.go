@@ -35,9 +35,16 @@ type runtimeObservationService struct {
 	sender   *runtimeObservationSender
 	interval time.Duration
 	timeout  time.Duration
-	cancel   context.CancelFunc
-	done     chan struct{}
+	// servicesWatch is how often local listening ports are compared with the last announcement;
+	// zero uses machineServicesWatchInterval.
+	servicesWatch time.Duration
+	cancel        context.CancelFunc
+	done          chan struct{}
 }
+
+// machineServicesWatchInterval bounds how long a newly listening port waits before it is announced:
+// the periodic observation alone would make other computers wait for the next one.
+const machineServicesWatchInterval = 2 * time.Second
 
 func (s *runtimeObservationService) Start(ctx context.Context) error {
 	if s.sender == nil || s.interval <= 0 || s.timeout <= 0 {
@@ -89,16 +96,29 @@ func (s *runtimeObservationService) loop(ctx context.Context, done chan<- struct
 	defer close(done)
 	ticker := time.NewTicker(s.interval)
 	defer ticker.Stop()
+	watchEvery := s.servicesWatch
+	if watchEvery <= 0 {
+		watchEvery = machineServicesWatchInterval
+	}
+	watch := time.NewTicker(watchEvery)
+	defer watch.Stop()
+	send := func() {
+		sendCtx, cancel := context.WithTimeout(ctx, s.timeout)
+		defer cancel()
+		if err := s.sender.Send(sendCtx); err != nil {
+			reportRuntimeObservationAttempt(sendCtx, err)
+		}
+	}
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			sendCtx, cancel := context.WithTimeout(ctx, s.timeout)
-			if err := s.sender.Send(sendCtx); err != nil {
-				reportRuntimeObservationAttempt(sendCtx, err)
+			send()
+		case <-watch.C:
+			if s.sender.machineServicesChanged(ctx) {
+				send()
 			}
-			cancel()
 		}
 	}
 }
