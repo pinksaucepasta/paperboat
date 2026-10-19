@@ -21,9 +21,9 @@ id=$(basename "$work" | tr 'A-Z.' 'a-z-')
 name=pbh-qualify-$id
 step() { printf '== %s\n' "$*"; }
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
-cleanup() { $docker rm -f "$name" >/dev/null 2>&1 || true; $docker volume rm "$name" >/dev/null 2>&1 || true; $docker rmi "$name" >/dev/null 2>&1 || true; rm -rf "$work"; }
+cleanup() { fresh_host_down; rm -rf "$work"; }
 trap cleanup EXIT HUP INT TERM
-inside() { $docker exec "$name" sh -c "$1"; }
+. "$repo/tools/fresh-host.sh"
 
 arch=$(${docker} run --rm ${platform:+--platform "$platform"} "$base" uname -m)
 case "$arch" in x86_64) arch=amd64;; aarch64) arch=arm64;; *) fail "unexpected architecture $arch";; esac
@@ -55,20 +55,7 @@ context.load_cert_chain("/srv/rig/srv.crt", "/srv/rig/srv.key")
 server.socket = context.wrap_socket(server.socket, server_side=True)
 server.serve_forever()
 PY
-cat > "$work/Dockerfile" <<EOF
-FROM $base
-ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y --no-install-recommends systemd systemd-sysv dbus ca-certificates curl sudo iproute2 iptables kmod procps python3 \\
- && rm -rf /var/lib/apt/lists/* \\
- && systemctl mask getty.target console-getty.service systemd-udevd.service systemd-udevd-kernel.socket systemd-udevd-control.socket systemd-modules-load.service sys-kernel-config.mount sys-kernel-debug.mount sys-kernel-tracing.mount; true
-STOPSIGNAL SIGRTMIN+3
-CMD ["/sbin/init"]
-EOF
-$docker build -q ${platform:+--platform "$platform"} -t "$name" "$work" >/dev/null
-$docker volume create "$name" >/dev/null
-$docker run -d --name "$name" ${platform:+--platform "$platform"} --privileged --cgroupns=host --tmpfs /run --tmpfs /run/lock \
- -v /sys/fs/cgroup:/sys/fs/cgroup:rw -v "$name:/var/lib/docker" --add-host pkg.example.test:127.0.0.1 "$name" >/dev/null
-for _ in $(seq 1 30); do inside 'systemctl is-system-running 2>/dev/null | grep -qE "running|degraded"' && break; sleep 1; done
+fresh_host_up --add-host pkg.example.test:127.0.0.1
 inside 'mkdir -p /srv/site /srv/rig'
 $docker cp "$work/site/." "$name:/srv/site/"
 for f in srv.crt srv.key serve.py; do $docker cp "$work/$f" "$name:/srv/rig/$f"; done
