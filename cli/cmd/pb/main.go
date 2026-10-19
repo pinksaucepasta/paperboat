@@ -794,6 +794,10 @@ func nativeFileTransferClient(ctx context.Context, local *localapi.Client, targe
 	if ctx == nil || local == nil || target.TargetKind != "machine" || target.MachineID == "" || target.MachineGeneration == 0 || target.Terminal == nil || target.Terminal.EnvironmentID == "" || target.FileTransfer == nil || target.FileTransfer.Auth.ResourceID == "" || operationID == "" {
 		return nil, nil, errors.New("native file transfer target is invalid")
 	}
+	if target.FileTransfer.SourceMachineID == target.FileTransfer.DestinationMachineID {
+		// Connecting a computer to itself: the files are already there, so there is nothing to transfer.
+		return nil, nil, nil
+	}
 	deadline := parseAuthExpiry(target.FileTransfer.Auth.ExpiresAt)
 	lease, err := local.PrepareFileTransfer(ctx, localapi.FileTransferRequest{Schema: localapi.FileTransferSchemaV1, MachineID: target.MachineID, EnvironmentID: target.Terminal.EnvironmentID, MachineGeneration: target.MachineGeneration, OperationID: operationID, Credential: target.FileTransfer.Auth.Token, AccessSessionID: target.FileTransfer.Auth.ResourceID, Deadline: deadline, MaximumBytes: uint64(target.FileTransfer.Policy.MaxFileBytes)})
 	if err != nil {
