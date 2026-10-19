@@ -1111,15 +1111,15 @@ func TestPreviewDomainProjectionOverflowIsInternalAndRecovers(t *testing.T) {
 }
 
 func TestPreviewReadinessWaitsForManagedDNS(t *testing.T) {
-	row := previewtunnelstore.PreviewLeaseRecord{PreviewLease: dbsqlc.PreviewLease{Endpoint: "https://preview.example.test", TerminalState: "active", AllocationState: "ready", EdgeState: "ready", OriginState: "ready"}, ManagedDNSPending: true}
+	row := previewtunnelstore.PreviewLeaseRecord{PreviewLease: dbsqlc.PreviewLease{Endpoint: "https://preview.example.test", TerminalState: "active", AllocationState: "ready", EdgeState: "ready", OriginState: "ready"}, ManagedRoutePending: true}
 	if got := previewView(row); got.State != "connecting" || got.EdgeState != "pending" || got.Endpoint != row.Endpoint {
 		t.Fatal("unpublished preview reported ready")
 	}
-	row.ManagedDNSPending = false
+	row.ManagedRoutePending = false
 	if got := previewView(row); got.State != "ready" || got.EdgeState != "ready" {
 		t.Fatal("verified publication did not become ready")
 	}
-	row.ManagedDNSPending = true
+	row.ManagedRoutePending = true
 	row.TerminalState = "stopped"
 	if got := previewView(row); got.State != "stopped" {
 		t.Fatal("DNS pending hid explicit stop")

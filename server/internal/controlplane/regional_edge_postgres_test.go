@@ -130,11 +130,12 @@ func TestRegionalEdgeAssignmentsOnPostgres(t *testing.T) {
 	addresses(1)
 	// Verified withdrawal can transfer a reserved name to its current resource,
 	// but a delayed old owner cannot reclaim it or reset publication generation.
+	// The managed endpoint resolves through the wildcard record: no per-name publication.
 	names, err := database.Queries().ListEdgeDNSPublicationNamesV1(ctx, f.tunnelID)
-	if err != nil || len(names) == 0 {
-		t.Fatalf("managed name: %v", err)
+	if err != nil || len(names) != 0 {
+		t.Fatalf("managed name published: %v %v", names, err)
 	}
-	hostname := names[0]
+	hostname := readinessHostname
 	exec(`INSERT INTO paperboat.edge_dns_publications(hostname,owner_id,resource_generation,readiness_version,observed_at,publication_generation,desired_addresses,provider_records,state,created_at,updated_at,verified_at)
  VALUES($1,'previous_owner',3,'previous',$2,9,'[]','[]','verified',$2,$2,$2)`, hostname, now.Add(-time.Second))
 	t.Cleanup(func() {

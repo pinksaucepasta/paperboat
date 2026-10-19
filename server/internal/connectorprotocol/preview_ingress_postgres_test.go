@@ -100,10 +100,10 @@ func TestPublicPreviewIngressPostgres(t *testing.T) {
 	if got, err := quotaSource.Edge(ctx, node, epoch); err != nil || len(got) != 1 || len(denied) != 0 {
 		t.Fatalf("restored preview decisions=%d denied=%+v err=%v, want 1 and none", len(got), denied, err)
 	}
-	// A preview is attached to one edge, so wildcard DNS pointing at every
-	// global edge cannot deliver it. The DNS worker must enumerate its exact name.
+	// A managed preview name resolves through the wildcard record, so the DNS worker
+	// publishes nothing for it and never visits the preview.
 	names, err := f.database.Queries().ListEdgeDNSPublicationNamesV1(ctx, preview)
-	if err != nil || len(names) != 1 || names[0] != hostname {
+	if err != nil || len(names) != 0 {
 		t.Fatalf("preview DNS names=%v: %v", names, err)
 	}
 	owners, err := f.database.Queries().ListEdgeDNSPublicationResourcesV1(ctx, dbsqlc.ListEdgeDNSPublicationResourcesV1Params{AfterID: preview[:len(preview)-1], BatchSize: 100})
@@ -116,8 +116,8 @@ func TestPublicPreviewIngressPostgres(t *testing.T) {
 			found = true
 		}
 	}
-	if !found {
-		t.Fatal("active preview omitted from DNS reconciliation")
+	if found {
+		t.Fatal("active managed preview queued for per-name DNS reconciliation")
 	}
 	dns := func(want int) {
 		t.Helper()
@@ -150,25 +150,29 @@ func TestPublicPreviewIngressPostgres(t *testing.T) {
 	publicationReady := func(want bool) {
 		t.Helper()
 		lease, err := publicationStore.GetPreviewLeaseV1(ctx, f.accountID, preview)
-		if err != nil || lease.ManagedDNSPending == want {
-			t.Fatalf("preview publication ready=%v want=%v: %v", !lease.ManagedDNSPending, want, err)
+		if err != nil || lease.ManagedRoutePending == want {
+			t.Fatalf("preview publication ready=%v want=%v: %v", !lease.ManagedRoutePending, want, err)
 		}
 	}
-	publicationReady(false)
-	exec(`INSERT INTO edge_dns_publications(hostname,owner_id,resource_generation,readiness_version,observed_at,valid_until,publication_generation,desired_addresses,state,created_at,updated_at,verified_at) VALUES($1,$2,1,'fixture',$3,$4,1,'["8.8.8.8"]','submitted',$3,$3,NULL)`, hostname, preview, now, now.Add(time.Hour))
-	t.Cleanup(func() {
-		_, _ = f.database.SQL().ExecContext(ctx, `DELETE FROM edge_dns_publications WHERE owner_id=$1`, preview)
-	})
-	publicationReady(false)
-	exec(`UPDATE edge_dns_publications SET state='verified',verified_at=$2 WHERE owner_id=$1`, preview, now)
+	// Ready means the carrier is admitted on an edge the wildcard record reaches; no per-name DNS wait.
 	publicationReady(true)
-	exec(`UPDATE edge_dns_publications SET desired_addresses='["8.8.4.4"]' WHERE owner_id=$1`, preview)
+	eligible := func(want bool) {
+		t.Helper()
+		var got bool
+		if err := f.database.SQL().QueryRowContext(ctx, `SELECT paperboat.node_workspace_edge_eligible($1,$2,NULL)`, node, f.accountID).Scan(&got); err != nil || got != want {
+			t.Fatalf("managed placement on edge outside the wildcard set = %v want %v: %v", got, want, err)
+		}
+	}
+	eligible(true)
+	exec(`UPDATE control_tunnel_nodes SET serves_managed_wildcard=false WHERE id=$1`, node)
 	publicationReady(false)
-	exec(`UPDATE edge_dns_publications SET desired_addresses='["8.8.8.8"]',valid_until=now()-interval '1 second' WHERE owner_id=$1`, preview)
-	publicationReady(false)
-	exec(`UPDATE edge_dns_publications SET valid_until=$2 WHERE owner_id=$1`, preview, now.Add(time.Hour))
+	eligible(false)
+	exec(`UPDATE control_tunnel_nodes SET serves_managed_wildcard=true WHERE id=$1`, node)
 	publicationReady(true)
-	exec(`DELETE FROM edge_dns_publications WHERE owner_id=$1`, preview)
+	exec(`UPDATE preview_lease_carrier_attachments SET origin_ready=false,state='edge_ready',ready_at=NULL WHERE preview_id=$1`, preview)
+	publicationReady(false)
+	exec(`UPDATE preview_lease_carrier_attachments SET origin_ready=true,state='ready',ready_at=issued_at WHERE preview_id=$1`, preview)
+	publicationReady(true)
 	beforeRenewal, err := f.database.Queries().ListReadyEdgeDNSAddressesV1(ctx, dbsqlc.ListReadyEdgeDNSAddressesV1Params{TunnelID: preview, Hostname: hostname, Now: sql.NullTime{Time: now, Valid: true}})
 	if err != nil {
 		t.Fatal(err)
@@ -178,15 +182,6 @@ func TestPublicPreviewIngressPostgres(t *testing.T) {
 	afterRenewal, err := f.database.Queries().ListReadyEdgeDNSAddressesV1(ctx, dbsqlc.ListReadyEdgeDNSAddressesV1Params{TunnelID: preview, Hostname: hostname, Now: sql.NullTime{Time: now, Valid: true}})
 	if err != nil || len(afterRenewal) != 1 || afterRenewal[0].ResourceGeneration != beforeRenewal[0].ResourceGeneration || afterRenewal[0].ReadinessVersion != beforeRenewal[0].ReadinessVersion {
 		t.Fatal("lease renewal changed unchanged DNS placement identity")
-	}
-	owners, err = f.database.Queries().ListEdgeDNSPublicationResourcesV1(ctx, dbsqlc.ListEdgeDNSPublicationResourcesV1Params{AfterID: preview[:len(preview)-1], BatchSize: 100})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, owner := range owners {
-		if owner.ID == preview && owner.Generation != afterRenewal[0].ResourceGeneration {
-			t.Fatal("DNS worker generation disagrees with renewed preview placement")
-		}
 	}
 	exec(`UPDATE preview_leases SET generation=generation-1 WHERE id=$1`, preview)
 	exec(`UPDATE preview_lease_carrier_attachments SET attachment_generation=attachment_generation-1 WHERE preview_id=$1`, preview)

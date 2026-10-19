@@ -49,9 +49,9 @@ const (
 type PreviewLeaseRecord struct {
 	dbsqlc.PreviewLease
 	// PublicEndpoint is a presentation projection; Endpoint remains activation identity.
-	PublicEndpoint    *string
-	EdgeMode          EdgeMode
-	ManagedDNSPending bool
+	PublicEndpoint      *string
+	EdgeMode            EdgeMode
+	ManagedRoutePending bool
 }
 
 type CreatePreviewLeaseV1Input struct {
@@ -1209,14 +1209,10 @@ func (s *Store) decoratePreviewEndpoints(ctx context.Context, records []PreviewL
 	}
 	rows, err := s.db.Pool().Query(ctx, `SELECT p.id,paperboat.workspace_edge_mode(p.account_id,p.owner_team_id),CASE WHEN paperboat.workspace_edge_mode(p.account_id,p.owner_team_id)='self-hosted-only' THEN coalesce((SELECT 'https://'||d.hostname FROM paperboat.preview_domains d WHERE d.preview_id=p.id AND d.account_id=p.account_id AND d.deleted_at IS NULL AND d.match_type='exact' AND d.ownership_state='verified' AND d.conflict_state='clear' AND d.certificate_state='ready' AND d.certificate_reference IS NOT NULL AND d.preview_generation=p.generation ORDER BY d.hostname LIMIT 1),'') ELSE NULL END,
  paperboat.workspace_edge_mode(p.account_id,p.owner_team_id)='managed-only' AND NOT EXISTS (
- SELECT 1 FROM paperboat.edge_dns_publications d
- JOIN paperboat.preview_lease_carrier_attachments a ON a.preview_id=p.id AND a.account_id=p.account_id
+ SELECT 1 FROM paperboat.preview_lease_carrier_attachments a
  JOIN paperboat.control_tunnel_nodes n ON n.id=a.edge_node_id AND n.process_epoch=a.edge_process_epoch
- WHERE d.owner_id=p.id AND d.hostname=substring(p.endpoint from 9)
- AND d.resource_generation=1 AND d.state='verified' AND d.verified_at IS NOT NULL
- AND d.valid_until>now() AND a.state='ready' AND a.edge_ready AND a.origin_ready AND a.expires_at>now()
- AND ((n.public_ingress_ipv4 IS NOT NULL AND d.desired_addresses ? host(n.public_ingress_ipv4))
- OR (n.public_ingress_ipv6 IS NOT NULL AND d.desired_addresses ? host(n.public_ingress_ipv6))))
+ WHERE a.preview_id=p.id AND a.account_id=p.account_id
+ AND a.state='ready' AND a.edge_ready AND a.origin_ready AND a.expires_at>now() AND n.serves_managed_wildcard)
  FROM paperboat.preview_leases p WHERE p.id=ANY($1::text[])`, ids)
 	if err != nil {
 		return err
@@ -1226,13 +1222,13 @@ func (s *Store) decoratePreviewEndpoints(ctx context.Context, records []PreviewL
 		var id string
 		var endpoint *string
 		var mode EdgeMode
-		var dnsPending bool
-		if err := rows.Scan(&id, &mode, &endpoint, &dnsPending); err != nil {
+		var routePending bool
+		if err := rows.Scan(&id, &mode, &endpoint, &routePending); err != nil {
 			return err
 		}
 		records[indices[id]].PublicEndpoint = endpoint
 		records[indices[id]].EdgeMode = mode
-		records[indices[id]].ManagedDNSPending = dnsPending
+		records[indices[id]].ManagedRoutePending = routePending
 	}
 	return rows.Err()
 }
