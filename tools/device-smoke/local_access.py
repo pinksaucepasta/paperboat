@@ -102,7 +102,26 @@ def https(form):
                              'https://' + host + '/'], capture_output=True, timeout=40)
     assert result.returncode == 0 and result.stdout == expected, (result.returncode, result.stderr[:160])
 
+def paths(expected):
+    # pb ping reports the carrier of each sample: direct or relay.
+    end = time.time() + 120
+    while True:
+        report = json.loads(subprocess.check_output(['pb', 'ping', alias, '--json'], timeout=90))
+        report = report.get('data', report)
+        seen = {sample['path'] for sample in report['samples'] if not sample['lost']}
+        if seen and (seen == {'direct'} if expected == 'direct' else 'direct' not in seen):
+            return
+        assert time.time() < end, 'ping paths %s, wanted only %s' % (sorted(seen), expected)
+        time.sleep(2)
+
+def on_path(expected):
+    paths(expected)
+    exchange((ip, port))
+    paths(expected)
+
 actions = {
+    'path-direct': lambda: on_path('direct'),
+    'path-relay': lambda: on_path('relay'),
     'private-address': lambda: exchange((ip, port)),
     'explicit-listen': explicit,
     'https-port-host': lambda: https('port-host'),
@@ -151,7 +170,22 @@ CHECKS = [
     ('explicit-listen', 'tcp', 'F9-02 / C125 pb access machine --port --listen, foreground owner'),
     ('https-port-host', 'http', 'F9-01 https://<port>.<m>.<local domain>'),
     ('https-host-port', 'http', 'F9-01 https://<m>.<local domain>:<port>'),
+    ('path-direct', 'tcp', 'F9-05 flow over a direct P2P path (pb ping reports only direct)'),
+    ('path-relay', 'tcp', 'F9-05 flow over relay fallback (outgoing UDP blocked on the controller)'),
 ]
+
+BLOCK = 'OUTPUT ! -o lo -p udp ! --dport 53 -j REJECT'
+
+
+def block_udp(controller):
+    # A timer removes the rules even if this runner dies; the finally path removes them first.
+    script = ('for t in iptables ip6tables; do sudo -n $t -I %s; done; '
+              '(sleep 420; for t in iptables ip6tables; do sudo -n $t -D %s; done) >/dev/null 2>&1 &' % (BLOCK, BLOCK))
+    assert ssh(controller, script).returncode == 0, 'could not block UDP on the controller'
+
+
+def unblock_udp(controller):
+    ssh(controller, 'for t in iptables ip6tables; do sudo -n $t -D %s 2>/dev/null; done; true' % BLOCK)
 
 
 def main():
@@ -173,8 +207,14 @@ def main():
                 continue
             started = time.time()
             port = origin.ports[kind]
+            if name == 'path-relay':
+                block_udp(args.controller)
             command = ['python3', '-I', '-c', PROBE, name, machine['assigned_ip'], str(port), machine['alias'], machine['id'], origin.marker]
-            result = ssh(args.controller, ' '.join(shlex.quote(c) for c in command), timeout=180)
+            try:
+                result = ssh(args.controller, ' '.join(shlex.quote(c) for c in command), timeout=240)
+            finally:
+                if name == 'path-relay':
+                    unblock_udp(args.controller)
             ok = result.returncode == 0 and 'PROBE_OK' in result.stdout
             failed += not ok
             detail = '' if ok else (result.stderr.strip().splitlines() or ['failed'])[-1][:200]
