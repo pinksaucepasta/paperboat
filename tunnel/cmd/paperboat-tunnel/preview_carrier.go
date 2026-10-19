@@ -31,7 +31,7 @@ func previewCarrierState(nodeID, processEpoch string, deployment config.Deployme
 	worker, err := edgeruntime.NewPreviewCarrierWorker(edgeruntime.PreviewCarrierWorkerConfig{
 		Reporter: reporter, Source: source, Expected: expected, Registry: routes, NodeID: nodeID,
 		ProcessEpoch: processEpoch,
-		Interval:     deployment.ControlInterval, Timeout: deployment.ControlTimeout,
+		Interval:     deployment.PreviewCarrierPollInterval(), Timeout: deployment.ControlTimeout,
 	})
 	if err != nil {
 		_ = routes.Close()

@@ -62,6 +62,11 @@ type Deployment struct {
 	ControlTimeout    time.Duration `json:"control_timeout"`
 	MaxBodyBytes      int64         `json:"max_body_bytes"`
 	MaxHeaderBytes    int64         `json:"max_header_bytes"`
+
+	// PreviewCarrierInterval is how often the edge pulls new preview carrier admissions. A new
+	// preview waits for the next pull, so it is much shorter than ControlInterval; zero means
+	// DefaultPreviewCarrierInterval.
+	PreviewCarrierInterval time.Duration `json:"preview_carrier_interval,omitempty"`
 }
 
 type PublicRoute struct {
@@ -206,6 +211,9 @@ func (d Deployment) validate() error {
 			return errors.New("public route cannot strip an empty prefix")
 		}
 	}
+	if d.PreviewCarrierInterval < 0 || d.PreviewCarrierInterval > d.ControlInterval && d.PreviewCarrierInterval != 0 || d.PreviewCarrierInterval != 0 && d.PreviewCarrierInterval < 50*time.Millisecond {
+		return errors.New("preview carrier interval is invalid")
+	}
 	if d.NodeCapacity == 0 || d.NodeCapacity > 10000 || d.ControlInterval <= 0 || d.ControlInterval > time.Minute || d.ControlTimeout <= 0 || d.ControlTimeout > 30*time.Second || d.MaxBodyBytes < 1 || d.MaxHeaderBytes < 1024 || d.MaxHeaderBytes > maximumGatewayHeaderBytes {
 		return errors.New("deployment bounds are invalid")
 	}
@@ -273,4 +281,15 @@ func privateRouteEndpoint(address string) error {
 		return errors.New("private route service name is invalid")
 	}
 	return nil
+}
+
+// DefaultPreviewCarrierInterval keeps a new preview's wait for edge admission well under a second.
+const DefaultPreviewCarrierInterval = 500 * time.Millisecond
+
+// PreviewCarrierPollInterval is the effective preview admission pull interval.
+func (d Deployment) PreviewCarrierPollInterval() time.Duration {
+	if d.PreviewCarrierInterval == 0 {
+		return DefaultPreviewCarrierInterval
+	}
+	return d.PreviewCarrierInterval
 }

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestDeploymentExampleLoads(t *testing.T) {
@@ -164,6 +165,26 @@ func TestDeploymentAllowsSharedPublicBaseAndRejectsRuntimeOverlap(t *testing.T) 
 		}
 		if _, err := LoadDeployment(path); err == nil {
 			t.Fatal("runtime authority overlapped public namespace")
+		}
+	}
+}
+
+func TestPreviewCarrierIntervalDefaultsBelowControlInterval(t *testing.T) {
+	deployment, err := LoadDeployment(writeDeployment(t, validDeploymentJSON()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := deployment.PreviewCarrierPollInterval(); got != DefaultPreviewCarrierInterval || got >= deployment.ControlInterval {
+		t.Fatalf("default preview carrier interval = %s with control interval %s", got, deployment.ControlInterval)
+	}
+	explicit := strings.TrimSuffix(validDeploymentJSON(), "}") + `,"preview_carrier_interval":200000000}`
+	deployment, err = LoadDeployment(writeDeployment(t, explicit))
+	if err != nil || deployment.PreviewCarrierPollInterval() != 200*time.Millisecond {
+		t.Fatalf("explicit preview carrier interval = %v, %v", deployment.PreviewCarrierPollInterval(), err)
+	}
+	for _, bad := range []string{`,"preview_carrier_interval":-1}`, `,"preview_carrier_interval":1000000}`, `,"preview_carrier_interval":3600000000000}`} {
+		if _, err := LoadDeployment(writeDeployment(t, strings.TrimSuffix(validDeploymentJSON(), "}")+bad)); err == nil {
+			t.Fatalf("accepted preview carrier interval %s", bad)
 		}
 	}
 }
