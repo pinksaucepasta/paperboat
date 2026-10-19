@@ -55,6 +55,7 @@ type Service struct {
 	selector    edgeplacement.Selector
 	preference  *edgeplacement.Preference
 	lastProbe   time.Time
+	latency     []edgeLatency                       // edge probe times to send with the next control request
 	probeDial   func(context.Context, string) error // tests only; nil dials TCP
 	mu          sync.Mutex
 	cancel      context.CancelFunc
@@ -243,6 +244,7 @@ func (s *Service) run(ctx context.Context) {
 		if err == nil && len(response.EdgeCandidates) != 0 && (s.lastProbe.IsZero() || time.Since(s.lastProbe) >= 30*time.Second) {
 			measurements, probeFailure := edgeplacement.Probe(checkCtx, response.EdgeCandidates, s.probeDial)
 			s.lastProbe = time.Now()
+			s.latency = edgeLatencies(measurements)
 			if probeFailure != nil {
 				// Placement is an optimization: connect with the server's own
 				// ordering and report the probe failure afterwards.
@@ -435,6 +437,10 @@ func (s *Service) fetch(ctx context.Context, activeNode, activeEpoch string) (ou
 	if s.preference != nil {
 		request["edge_preference"] = s.preference
 	}
+	if len(s.latency) != 0 {
+		// The server shows these to the person; one report per probe is enough.
+		request["edge_latency"], s.latency = s.latency, nil
+	}
 	if activeNode != "" {
 		request["active_edge_node_id"], request["active_edge_process_epoch"] = activeNode, activeEpoch
 	}
@@ -564,3 +570,30 @@ func randomID(noun string) (string, error) {
 	}
 	return noun + "_" + id.String(), nil
 }
+
+// edgeLatencies turns successful probe times into the report the server stores. A probe that failed
+// has no measurement and is simply absent.
+func edgeLatencies(measurements []edgeplacement.Measurement) []edgeLatency {
+	out := make([]edgeLatency, 0, len(measurements))
+	for _, measurement := range measurements {
+		millis := max(1, measurement.RTT.Milliseconds())
+		if millis > maximumLatencyMilliseconds || len(out) == maximumEdgeLatencies {
+			continue
+		}
+		out = append(out, edgeLatency{NodeID: measurement.Candidate.NodeID, ProcessEpoch: measurement.Candidate.ProcessEpoch, RTTMilliseconds: millis})
+	}
+	return out
+}
+
+// edgeLatency is the machine's connect time to one edge candidate, in the server's wire shape.
+type edgeLatency struct {
+	NodeID          string `json:"node_id"`
+	ProcessEpoch    string `json:"process_epoch"`
+	RTTMilliseconds int64  `json:"rtt_ms"`
+}
+
+// The server's bounds on one report: it ignores anything above them.
+const (
+	maximumLatencyMilliseconds = 10000
+	maximumEdgeLatencies       = 32
+)
