@@ -734,7 +734,7 @@ func (t *DataCarrierPreviewTransport) RoundTrip(request *http.Request) (*http.Re
 	stopHeader := context.AfterFunc(headerContext, func() { _ = application.Close() })
 	headerReader := &boundedPreviewResponseHeaderReader{reader: application, maximum: dataCarrierPreviewMaxResponseHeader}
 	responseReader := bufio.NewReader(headerReader)
-	response, err := http.ReadResponse(responseReader, out)
+	response, err := readFinalHTTPResponse(responseReader, out)
 	headerTimedOut := headerWait.finish()
 	stopHeader()
 	cancelHeader()

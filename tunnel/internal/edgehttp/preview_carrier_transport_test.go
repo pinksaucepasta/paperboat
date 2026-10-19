@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -910,5 +911,52 @@ func TestPreviewProxyChainBridgesWebSocketUpgrade(t *testing.T) {
 		if _, err := io.ReadFull(reader, echo); err != nil || string(echo) != frame {
 			t.Fatalf("echo=%q want %q err=%v observed=%v", echo, frame, err, observed)
 		}
+	}
+}
+
+// A client that sends Expect: 100-continue made the origin's HTTP server answer "100 Continue"
+// before the final response. The transport read that interim response as the final one: the proxy
+// relayed a second 100 and the real response was cut off.
+func TestDataCarrierPreviewTransportSkipsInterimContinueAndReturnsTheFinalResponse(t *testing.T) {
+	identity := testEdgePreviewIdentity(1, 1)
+	server, client := testEdgePreviewCarrierPair(t, identity)
+	defer client.Close()
+	defer server.Close()
+	registry, err := NewDataCarrierPreviewRegistry(DataCarrierPreviewRegistryConfig{BaseDomain: "preview.example.test", ProcessEpoch: "edge_epoch_1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer registry.Close()
+	if err := registry.Attach(DataCarrierPreviewRoute{RouteID: "preview_01", Hostname: "app.preview.example.test", Kind: dataCarrierPreviewRouteKind, EdgeProcessEpoch: "edge_epoch_1", Revision: 1, Server: server}); err != nil {
+		t.Fatal(err)
+	}
+	transport, err := NewDataCarrierPreviewTransport(DataCarrierPreviewTransportConfig{Registry: registry, StreamOpenTimeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		stream, _, acceptErr := client.AcceptStream(context.Background())
+		if acceptErr != nil {
+			return
+		}
+		_ = datacarrier.ServeHTTPStream(context.Background(), stream, http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			received, _ := io.Copy(io.Discard, request.Body)
+			body := fmt.Sprintf("received %d bytes", received)
+			writer.Header().Set("Content-Length", fmt.Sprint(len(body)))
+			_, _ = io.WriteString(writer, body)
+		}), 4096, time.Second)
+	}()
+	payload := strings.Repeat("x", 1<<20)
+	request := httptest.NewRequest(http.MethodPost, "https://app.preview.example.test/upload", strings.NewReader(payload))
+	request.Host = "app.preview.example.test"
+	request.Header.Set("Expect", "100-continue")
+	response, err := transport.RoundTrip(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(response.Body)
+	_ = response.Body.Close()
+	if err != nil || response.StatusCode != http.StatusOK || string(body) != fmt.Sprintf("received %d bytes", len(payload)) {
+		t.Fatalf("status=%d body=%q err=%v, want the final 200 with the full response", response.StatusCode, body, err)
 	}
 }

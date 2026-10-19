@@ -747,7 +747,7 @@ func (t *DataCarrierRouteTransport) RoundTrip(request *http.Request) (*http.Resp
 		writeDone <- writeErr
 	}()
 	responseReader := bufio.NewReader(&boundedPreviewResponseHeaderReader{reader: stream, maximum: maximumDataCarrierProbeHeader})
-	response, err := http.ReadResponse(responseReader, out)
+	response, err := readFinalHTTPResponse(responseReader, out)
 	if err != nil {
 		stopCancel()
 		closeErr := stream.Close()
