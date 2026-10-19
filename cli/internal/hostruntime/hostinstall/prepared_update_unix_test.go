@@ -324,3 +324,34 @@ func TestPreparedUpdateRecoveryProofBindsProtectedInstallation(t *testing.T) {
 		})
 	}
 }
+
+// The staged candidate is consumed when it becomes the worker. Pins for the
+// new generation are copied after that point, so the request must name the
+// installed worker; the staging path is gone (pbvm1 official update failed
+// with lstat ENOENT on it, rolling every update back).
+func TestPreparedCandidateActivationLeavesTheRequestPointingAtTheWorker(t *testing.T) {
+	request := validRequest(t)
+	image, err := os.ReadFile(request.Executable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := t.TempDir()
+	paths := installPaths{worker: filepath.Join(parent, "pb"), workerNext: filepath.Join(parent, "pb.staged")}
+	if err = os.WriteFile(paths.workerNext, image, 0755); err != nil {
+		t.Fatal(err)
+	}
+	request.Executable = paths.workerNext
+	got, err := activatePreparedCandidate(request, paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = os.Lstat(paths.workerNext); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("the staged candidate was not consumed", err)
+	}
+	if got.Executable != paths.worker {
+		t.Fatalf("request still names %q after the staged file was consumed", got.Executable)
+	}
+	if err = got.Source.Verify(got.Executable); err != nil {
+		t.Fatal("later pin staging cannot verify the installed worker:", err)
+	}
+}

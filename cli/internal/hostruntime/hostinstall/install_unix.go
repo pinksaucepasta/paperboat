@@ -237,7 +237,8 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 		if intent == unixPreparedUpdate {
 			// The native lifecycle has captured and verified the prior source pin;
 			// it owns restoration, so no competing binary rollback journal is made.
-			if err := os.Rename(paths.workerNext, paths.worker); err != nil {
+			request, err = activatePreparedCandidate(request, paths)
+			if err != nil {
 				return err
 			}
 		} else if err := activateBinary(paths.worker, paths.workerNext, paths.workerRollback); err != nil {
@@ -1197,6 +1198,18 @@ func stageBinary(source, destination string, identity installsource.Source) (res
 		return err
 	}
 	return nil
+}
+
+// activatePreparedCandidate moves the staged candidate into the fixed worker slot. The staged file
+// is consumed by the move, so the returned request names the installed worker: every later step
+// (session-owner and carrier pins) copies from it, never from the staging path that no longer exists.
+func activatePreparedCandidate(request Request, paths installPaths) (Request, error) {
+	//paperboat:allow-source-policy atomic-replacement owner=host-install reason=verified-binary-activation
+	if err := os.Rename(paths.workerNext, paths.worker); err != nil {
+		return request, err
+	}
+	request.Executable = paths.worker
+	return request, nil
 }
 
 func activateBinary(current, next, rollback string) error {
