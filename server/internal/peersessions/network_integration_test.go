@@ -443,6 +443,11 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	if holdBinary == "" {
+		// Terminal sharing reads the owner's live terminal runtime generation; without the
+		// held runtime process there is no generation to grant against.
+		t.Skip("terminal-sharing section needs PAPERBOAT_TASK40_RUNTIME_HOLD_BIN (a live helper runtime); the network authority checks before it ran")
+	}
 	viewerTeam, err := machineService.GrantTerminalSessionSharing(ctx, userID, teamID, ownerSharedTerminalID, teams.TerminalSessionGrantRequest{OperationID: "operation_terminal_view_" + suffix, ExpectedGeneration: 1, Audience: "selected_member", AccountID: sharedUser, Role: "viewer", Active: true})
 	if err != nil {
 		t.Fatal(err)
