@@ -24,7 +24,7 @@ func managedSSHAliasTargets(ctx context.Context, client *api.Client) ([]manageds
 	sem := make(chan struct{}, 8)
 	var wg sync.WaitGroup
 	for _, machine := range machines {
-		if machine.State == "revoked" || machine.State == "deleted" || machine.InstallationGeneration < 1 {
+		if machine.State == "revoked" || machine.State == "disconnected" || machine.State == "deleted" || machine.InstallationGeneration < 1 {
 			continue
 		}
 		wg.Add(1)
