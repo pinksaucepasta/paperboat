@@ -774,6 +774,8 @@ if sys.argv[2] in ("team-lifecycle", "team-roles"):
  assert sys.argv[2]!="team-roles" or r["roles_remove_leave_transfer"]
 elif sys.argv[2]=="network-inventory":
  assert r["edges_and_verified_relays"]
+elif sys.argv[2]=="tunnel-lifecycle":
+ assert all(r[k] for k in ("status_doctor_logs", "capture_replay", "pause_resume", "connector_lifecycle", "credentials_rotate", "port_policy"))
 elif sys.argv[2]=="config-sync":
  assert all(r[k] for k in ("repository_connect_list", "validate_apply", "status_assignment", "force_pull", "unassign"))
 elif sys.argv[2]=="tunnel-manage":
@@ -875,6 +877,7 @@ test_device_application team-lifecycle team_lifecycle.py
 test_device_application team-roles team_lifecycle.py --roles
 test_device_application tunnel-manage tunnel_manage.py
 test_device_application config-sync config_sync.py
+test_device_application tunnel-lifecycle tunnel_lifecycle.py
 test_local_access_settings
 test_device_application network-inventory network_inventory.py
 test_preview_protocols
