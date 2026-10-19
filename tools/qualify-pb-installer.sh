@@ -41,7 +41,8 @@ inside_user '~/.local/bin/pb login --no-browser' > "$work/login" 2>&1 &
 login_pid=$!
 for _ in $(seq 1 20); do grep -q 'https://' "$work/login" 2>/dev/null && break; sleep 1; done
 grep -q 'https://' "$work/login" || { head -c 400 "$work/login"; kill "$login_pid" 2>/dev/null || true; fail "pb login printed no approval link"; }
-inside 'pkill -f "pb login" || true'; kill "$login_pid" 2>/dev/null || true; wait "$login_pid" 2>/dev/null || true
+kill "$login_pid" 2>/dev/null || true
+wait "$login_pid" 2>/dev/null || true
 
 step "re-running the one-liner keeps a working install"
 inside_user "$one_liner" > "$work/out2" 2>&1 || { tail -30 "$work/out2"; fail "re-run failed"; }
