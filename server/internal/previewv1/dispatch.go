@@ -263,7 +263,7 @@ func validDispatchETag(raw, id string, expected int64) bool {
 }
 
 func validDispatchState(state, allocation, edge, origin string) bool {
-	return (state == "allocating" || state == "connecting" || state == "ready") &&
+	return (state == "allocating" || state == "connecting" || state == "ready" || state == "origin_unavailable") &&
 		(allocation == "pending" || allocation == "ready" || allocation == "failed" || allocation == "released") &&
 		(edge == "pending" || edge == "ready" || edge == "degraded" || edge == "down") &&
 		(origin == "unknown" || origin == "ready" || origin == "unavailable")

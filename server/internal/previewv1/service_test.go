@@ -1125,3 +1125,60 @@ func TestPreviewReadinessWaitsForManagedDNS(t *testing.T) {
 		t.Fatal("DNS pending hid explicit stop")
 	}
 }
+
+func TestPreviewReportsAStoppedLocalAppAsOriginUnavailable(t *testing.T) {
+	row := previewtunnelstore.PreviewLeaseRecord{PreviewLease: dbsqlc.PreviewLease{Endpoint: "https://preview.example.test", TerminalState: "active", AllocationState: "ready", EdgeState: "ready", OriginState: "down"}}
+	if got := previewView(row); got.State != "origin_unavailable" || got.OriginState != "unavailable" || got.EdgeState != "ready" {
+		t.Fatalf("stopped app view = state %q origin %q edge %q", got.State, got.OriginState, got.EdgeState)
+	}
+	row.OriginState = "ready"
+	if got := previewView(row); got.State != "ready" || got.OriginState != "ready" {
+		t.Fatalf("recovered app view = state %q origin %q", got.State, got.OriginState)
+	}
+	// Before the edge is ready a missing origin is still just connecting.
+	row.EdgeState, row.OriginState = "pending", "down"
+	if got := previewView(row); got.State != "connecting" {
+		t.Fatalf("pending edge with a down origin = %q, want connecting", got.State)
+	}
+	row.EdgeState, row.TerminalState = "ready", "stopped"
+	if got := previewView(row); got.State != "stopped" {
+		t.Fatal("a down origin hid an explicit stop")
+	}
+	if !validDispatchState("origin_unavailable", "ready", "ready", "unavailable") {
+		t.Fatal("a lease with a stopped app cannot be dispatched to its host")
+	}
+}
+
+func TestHostReportsItsLocalAppDownAndBack(t *testing.T) {
+	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
+	fake := newPreviewLeaseFake()
+	fake.owners["acct_1:machine_1"] = true
+	service := testPreviewLeaseService(t, fake, now)
+	service.attachmentReadiness = &attachmentReadinessFake{}
+	created, err := service.Create(context.Background(), browserRequest(), createInput("machine_1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	observe := func(etag string, origin string) PreviewResult {
+		t.Helper()
+		result, err := service.ObserveMachineReadiness(context.Background(), machineRequest("machine_1"), created.Preview.ID, created.Operation.ID, "machine_1", "session_1", etag, generationFromETag(etag), "ready", "ready", origin)
+		if err != nil {
+			t.Fatalf("origin %s: %v", origin, err)
+		}
+		return result
+	}
+	ready := observe(created.ETag, "ready")
+	down := observe(ready.ETag, "down")
+	if down.Preview.State != "origin_unavailable" || down.Preview.OriginState != "unavailable" || down.Preview.EdgeState != "ready" {
+		t.Fatalf("stopped app = state %q origin %q edge %q", down.Preview.State, down.Preview.OriginState, down.Preview.EdgeState)
+	}
+	back := observe(down.ETag, "ready")
+	if back.Preview.State != "ready" || back.Preview.OriginState != "ready" {
+		t.Fatalf("recovered app = state %q origin %q", back.Preview.State, back.Preview.OriginState)
+	}
+	for _, invalid := range []string{"unavailable", "degraded", "unknown", ""} {
+		if _, err := service.ObserveMachineReadiness(context.Background(), machineRequest("machine_1"), created.Preview.ID, created.Operation.ID, "machine_1", "session_1", back.ETag, generationFromETag(back.ETag), "ready", "ready", invalid); !errors.Is(err, ErrInvalidInput) {
+			t.Fatalf("origin %q accepted from the host: %v", invalid, err)
+		}
+	}
+}

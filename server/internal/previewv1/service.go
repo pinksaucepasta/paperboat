@@ -833,8 +833,9 @@ func (s *Service) ObserveMachineReadiness(ctx context.Context, request previewtu
 	if strings.TrimSpace(ownerMachineID) == "" || strings.TrimSpace(ownerSessionID) == "" || strings.TrimSpace(previewID) == "" || strings.TrimSpace(operationID) == "" || expectedGeneration < 1 {
 		return PreviewResult{}, fmt.Errorf("%w: readiness identity and generation are required", ErrInvalidInput)
 	}
-	if allocationState != "ready" || edgeState != "ready" || originState != "ready" {
-		return PreviewResult{}, fmt.Errorf("%w: readiness requires ready allocation, edge, and origin", ErrInvalidInput)
+	// The host reports its local app going down and coming back; allocation and edge stay ready.
+	if allocationState != "ready" || edgeState != "ready" || (originState != "ready" && originState != "down") {
+		return PreviewResult{}, fmt.Errorf("%w: readiness requires ready allocation and edge and an origin that is ready or down", ErrInvalidInput)
 	}
 	ownerMachineID = strings.TrimSpace(ownerMachineID)
 	ownerSessionID = strings.TrimSpace(ownerSessionID)
@@ -1047,6 +1048,9 @@ func previewView(row previewtunnelstore.PreviewLeaseRecord) Preview {
 		switch {
 		case allocationState != "ready":
 			state = "allocating"
+		case edgeState == "ready" && originState == "unavailable":
+			// The preview is attached and its edge works, but the local app is not running.
+			state = "origin_unavailable"
 		case edgeState != "ready" || originState != "ready":
 			state = "connecting"
 		default:
