@@ -689,7 +689,7 @@ func TestSpecTreeRegistersDeclaredFlagTypes(t *testing.T) {
 }
 
 func TestSpecTreeRegistersEveryDeclaredBoolFlag(t *testing.T) {
-	for _, source := range []*command.Spec{authCommand(), configCommand(), inboxCommand()} {
+	for _, source := range []*command.Spec{authCommand(), configCommand()} {
 		tree := specTree(source, source.Name)
 		for _, childSpec := range source.Subcommands {
 			entry, _, err := tree.Find([]string{childSpec.Name})

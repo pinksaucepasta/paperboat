@@ -36,8 +36,21 @@ import (
 	"time"
 )
 
-func TestInboxSpecTreeRegistersJSONForPathSetAndReset(t *testing.T) {
-	tree := specTree(inboxCommand(), "inbox")
+// inboxActionTestCommand is `pb inbox` with one child's behaviour replaced, to
+// observe which arguments reach it.
+func inboxActionTestCommand(t *testing.T, childName string, action command.Action) *cobra.Command {
+	t.Helper()
+	tree := inboxCobraCommand()
+	child, _, err := tree.Find([]string{childName})
+	if err != nil || child == tree {
+		t.Fatalf("inbox %s: %v", childName, err)
+	}
+	child.RunE = actionRun(action)
+	return tree
+}
+
+func TestInboxRegistersJSONForPathSetAndReset(t *testing.T) {
+	tree := inboxCobraCommand()
 	for _, name := range []string{"path", "set", "reset"} {
 		entry, _, err := tree.Find([]string{name})
 		if err != nil {
@@ -50,10 +63,10 @@ func TestInboxSpecTreeRegistersJSONForPathSetAndReset(t *testing.T) {
 	}
 }
 
-func TestInboxSpecTreeEnforcesPositionalArguments(t *testing.T) {
+func TestInboxEnforcesPositionalArguments(t *testing.T) {
 	const directory = "fixture-inbox-directory"
 	called := false
-	tree := specTreeActionTestCommand(t, inboxCommand(), "set", func(ctx *command.Context) error {
+	tree := inboxActionTestCommand(t, "set", func(ctx *command.Context) error {
 		called = true
 		if ctx.Args().Len() != 1 || ctx.Args().First() != directory {
 			t.Fatalf("set args len=%d first=%q", ctx.Args().Len(), ctx.Args().First())
@@ -82,7 +95,7 @@ func TestInboxSpecTreeEnforcesPositionalArguments(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			actionCalled := false
-			commandTree := specTreeActionTestCommand(t, inboxCommand(), test.child, func(*command.Context) error {
+			commandTree := inboxActionTestCommand(t, test.child, func(*command.Context) error {
 				actionCalled = true
 				return nil
 			})

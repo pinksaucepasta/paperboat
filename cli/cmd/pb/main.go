@@ -2964,16 +2964,7 @@ recovery instructions before retrying an operation that may have created resourc
 	sshKnownHostsCommand.Flags().String("port", "", "")
 	root.AddCommand(sshKnownHostsCommand)
 
-	environments := &cobra.Command{Use: "environments", Short: "List enrolled machines available to this account", Args: commandArgs(cobra.NoArgs), RunE: func(command *cobra.Command, args []string) error {
-		jsonOutput, _ := command.Flags().GetBool("json")
-		if !jsonOutput && term.IsTerminal(int(os.Stdin.Fd())) {
-			return actionEnvironmentsList(command)
-		}
-		return actionRun(environmentsCommand().Action)(command, args)
-	}}
-	environments.Flags().Bool("json", false, "print JSON")
-	inventoryFilterFlags(environments)
-	root.AddCommand(environments)
+	root.AddCommand(environmentsCobraCommand())
 	root.AddCommand(workspaceSwitchCommand())
 	root.AddCommand(environmentVariablesCobraCommand())
 	root.AddCommand(teamCobraCommand())
@@ -3028,7 +3019,7 @@ mode, relays, and observation timestamps.`, Example: "  pb relay list\n  pb rela
 	access.AddCommand(accessTunnelCobraCommandV1())
 	access.AddCommand(accessMachineCobraCommandV1())
 	root.AddCommand(access)
-	root.AddCommand(specTree(inboxCommand(), "inbox"))
+	root.AddCommand(inboxCobraCommand())
 	root.AddCommand(sessionCobraCommand())
 	root.AddCommand(userMachineCobraCommand())
 	root.AddCommand(pairCommand())
@@ -6060,38 +6051,6 @@ func nativeSnapshotPath(path string) string {
 	}
 }
 
-func environmentsCommand() *command.Spec {
-	return &command.Spec{
-		Name:  "environments",
-		Usage: "List enrolled machines available to this account",
-		Flags: []command.Flag{&command.BoolFlag{Name: "json"}},
-		Action: func(c *command.Context) error {
-			client, err := backendClient(c)
-			if err != nil {
-				return err
-			}
-			machines, err := client.ListUserMachinesFiltered(c.Context, commandInventoryFilters(c))
-			if err != nil {
-				return err
-			}
-			if c.Bool("json") {
-				return json.NewEncoder(c.Writer).Encode(map[string]any{"machines": machines})
-			}
-			w := tabwriter.NewWriter(c.Writer, 0, 4, 2, ' ', 0)
-			fmt.Fprintln(w, "NAME\tSTATE\tPLATFORM\tID")
-			for _, machine := range machines {
-				state := machine.State
-				if machine.Online && state == "" {
-					state = "online"
-				}
-				platform := strings.Trim(strings.Join([]string{machine.Platform, machine.Architecture}, "/"), "/")
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", machine.Alias, state, platform, machine.ID)
-			}
-			return w.Flush()
-		},
-	}
-}
-
 var errOwnerOnlyFileInvalid = errors.New("invalid owner-only file")
 
 func readOwnerOnlyFile(path string, limit int64) (data []byte, resultErr error) {
@@ -6133,18 +6092,6 @@ func readOwnerOnlyFile(path string, limit int64) (data []byte, resultErr error) 
 		return nil, errOwnerOnlyFileInvalid
 	}
 	return data, nil
-}
-
-func inboxCommand() *command.Spec {
-	return &command.Spec{Name: "inbox", Usage: "Manage the Paperboat Inbox", Subcommands: []*command.Spec{
-		{Name: "path", Flags: []command.Flag{&command.BoolFlag{Name: "json"}}, Action: inboxPathCommand},
-		{Name: "set", ArgsUsage: "<directory>", Flags: []command.Flag{&command.BoolFlag{Name: "json"}}, Action: inboxSetCommand},
-		{Name: "reset", Flags: []command.Flag{&command.BoolFlag{Name: "json"}}, Action: inboxResetCommand},
-		{Name: "requests", Usage: "List team file requests", Flags: []command.Flag{&command.BoolFlag{Name: "json"}}, Action: inboxRequestsCommand},
-		{Name: "approve", ArgsUsage: "<request-id>", Usage: "Approve an exact team file request", Flags: []command.Flag{&command.UintFlag{Name: "generation"}, &command.BoolFlag{Name: "json"}}, Action: func(c *command.Context) error { return inboxDecisionCommand(c, "approve") }},
-		{Name: "decline", ArgsUsage: "<request-id>", Usage: "Decline an exact team file request", Flags: []command.Flag{&command.UintFlag{Name: "generation"}, &command.BoolFlag{Name: "json"}}, Action: func(c *command.Context) error { return inboxDecisionCommand(c, "decline") }},
-		{Name: "policy", ArgsUsage: "[manual|automatic]", Usage: "Show or update team file acceptance", Flags: []command.Flag{&command.BoolFlag{Name: "receipt-email"}, &command.BoolFlag{Name: "json"}}, Action: inboxPolicyCommand},
-	}}
 }
 
 func inboxRequestsCommand(c *command.Context) error {
