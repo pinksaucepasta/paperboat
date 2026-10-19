@@ -20,6 +20,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/api"
+
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 )
 
@@ -1291,4 +1293,43 @@ func TestPeerStreamServiceShutdownPreservesAuthoritativeFailures(t *testing.T) {
 			}
 		})
 	}
+}
+
+type inspectorFake struct{ got InspectorRequest }
+
+func (f *inspectorFake) InspectorRequest(_ context.Context, _ Peer, request InspectorRequest) (InspectorResult, error) {
+	f.got = request
+	return InspectorResult{Status: 200, Payload: []byte(`{"records":[]}`)}, nil
+}
+
+// pb tunnel inspect must reach the machine through the daemon's native session, never by
+// opening a second one from the CLI process.
+func TestInspectorRequestGoesThroughTheDaemon(t *testing.T) {
+	socket := filepath.Join(localAPITestDir(t), "inspector.sock")
+	fake := &inspectorFake{}
+	server, err := NewServer(ServerConfig{SocketPath: socket, OwnerUID: os.Geteuid(), OwnerGID: os.Getegid(), Source: snapshotSourceFunc(func(context.Context) (Snapshot, error) { return validSnapshot(), nil }), InspectorRequests: fake})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- server.Run(ctx) }()
+	waitForSocket(t, socket)
+	client, err := NewClient(socket, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := client.InspectorRequest(t.Context(), InspectorRequest{Access: api.InspectorAccess{MachineID: "machine_1", ResourceKind: "tunnel", ResourceID: "tun_1", RouteID: "route_1"}, Grant: "grant-token", Method: "GET", Path: "/v1/inspector/records", Query: "limit=20"})
+	if err != nil || result.Status != 200 || string(result.Payload) != `{"records":[]}` {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	if fake.got.Access.MachineID != "machine_1" || fake.got.Query != "limit=20" || fake.got.Grant != "grant-token" {
+		t.Fatalf("daemon received %+v", fake.got)
+	}
+	if _, err := client.InspectorRequest(t.Context(), InspectorRequest{Grant: "g", Method: "GET", Path: "/v1/other"}); !errors.Is(err, ErrInvalidConfig) {
+		t.Fatalf("a non-inspector path was accepted: %v", err)
+	}
+	cancel()
+	<-done
 }

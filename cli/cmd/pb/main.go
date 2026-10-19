@@ -9,7 +9,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -5824,7 +5823,6 @@ type deps struct {
 	auth             config.AuthSource
 	resolver         resolver.MachineResolver
 	tunnel           tunnel.Tunnel
-	peerTunnel       *tunnel.PeerTerminalTunnel
 	peerLocal        *localapi.Client
 	peerApplications peerApplicationTunnel
 	telemetry        telemetry.Sink
@@ -5862,28 +5860,9 @@ func buildDeps(c *command.Context) (*deps, error) {
 		}
 	}
 	var selectedTunnel tunnel.Tunnel
-	var peerTunnel *tunnel.PeerTerminalTunnel
 	var peerApplications peerApplicationTunnel
 	var peerLocal *localapi.Client
 	if cfg.ServerURL != "" {
-		store, storeErr := config.ProfileStoreFor(cfg)
-		if storeErr != nil {
-			return nil, storeErr
-		}
-		transportConfig := httptransport.DevelopmentConfig()
-		if transportConfig.TLSConfig == nil {
-			transportConfig.TLSConfig = &tls.Config{}
-		}
-		transportConfig.TLSConfig.MinVersion = tls.VersionTLS13
-		peerTransport, transportErr := httptransport.New(transportConfig)
-		if transportErr != nil {
-			return nil, transportErr
-		}
-		var peerErr error
-		peerTunnel, peerErr = tunnel.NewPeerTerminalTunnel(tunnel.PeerTerminalConfig{Issuer: cfg.ServerURL, Store: store, Auth: authSource, TLS: transportConfig.TLSConfig, HTTPClient: &http.Client{Transport: peerTransport}, OutputQueueChunks: cfg.Connect.TerminalOutputQueueChunks})
-		if peerErr != nil {
-			return nil, peerErr
-		}
 		paths, pathsErr := currentLocalDaemonPaths()
 		if pathsErr != nil {
 			return nil, pathsErr
@@ -5902,7 +5881,6 @@ func buildDeps(c *command.Context) (*deps, error) {
 		auth:             authSource,
 		resolver:         nil,
 		tunnel:           selectedTunnel,
-		peerTunnel:       peerTunnel,
 		peerLocal:        peerLocal,
 		peerApplications: peerApplications,
 	}, nil
@@ -7650,9 +7628,6 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 
 	var info resolver.ConnectInfo
 	var conn tunnel.Conn
-	if d.peerTunnel != nil {
-		defer d.peerTunnel.Close()
-	}
 	var lastTerminalSequence atomic.Int64
 	recordTerminalSequence := func(sequence int) {
 		for {

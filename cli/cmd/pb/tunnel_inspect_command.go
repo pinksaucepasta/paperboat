@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
-	"github.com/pinksaucepasta/paperboat/internal/tunnel"
+	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/spf13/cobra"
 )
 
@@ -31,8 +31,12 @@ type inspectorCaller interface {
 	do(context.Context, string, string, string, any, url.Values) ([]byte, int, error)
 }
 
+// inspectorNativeClient sends inspector calls to the local daemon, which owns the one native
+// peer session of this identity; the CLI process never opens a second one.
 type inspectorNativeClient struct {
-	peer   *tunnel.PeerTerminalTunnel
+	daemon interface {
+		InspectorRequest(context.Context, localapi.InspectorRequest) (localapi.InspectorResult, error)
+	}
 	access api.InspectorAccess
 }
 
@@ -45,7 +49,11 @@ func (c *inspectorNativeClient) do(ctx context.Context, grant, method, path stri
 			return nil, 0, err
 		}
 	}
-	return c.peer.InspectorRequest(ctx, c.access, grant, method, path, payload, query)
+	result, err := c.daemon.InspectorRequest(ctx, localapi.InspectorRequest{Access: c.access, Grant: grant, Method: method, Path: path, Query: query.Encode(), Body: payload})
+	if err != nil {
+		return nil, 0, err
+	}
+	return result.Payload, result.Status, nil
 }
 
 // inspectorDaemonError preserves the daemon's stable error code so callers
@@ -179,22 +187,19 @@ func productionInspectorClients(command *cobra.Command) (*inspectorClients, erro
 	if err != nil {
 		return nil, err
 	}
-	peer := d.peerTunnel
-	if peer == nil {
+	if d.peerLocal == nil {
 		return nil, errInspectorDaemonUnavailable
 	}
 	_, err = d.auth.Credential()
 	if err != nil {
-		_ = peer.Close()
 		return nil, err
 	}
 	server, err := newWorkspaceAPIClient(actionContext(command, nil), d.cfg.ServerURL, d.auth)
 	if err != nil {
-		_ = peer.Close()
 		return nil, err
 	}
-	remote := &inspectorNativeClient{peer: peer}
-	return &inspectorClients{server: server, daemon: remote, ctx: command.Context(), close: peer.Close,
+	remote := &inspectorNativeClient{daemon: d.peerLocal}
+	return &inspectorClients{server: server, daemon: remote, ctx: command.Context(),
 		prepare: func(ctx context.Context, grant api.InspectorCredential, target inspectorTarget, action string) error {
 			access, err := server.ResolveInspectorAccess(ctx, grant.Token, target.kind, target.resource, target.route, action, "native")
 			if err == nil {

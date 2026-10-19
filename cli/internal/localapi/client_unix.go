@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -513,6 +514,46 @@ func (c *Client) ProbePeer(ctx context.Context, value PeerStreamRequest) (PeerPr
 	}
 	if response.Header.Get("Content-Type") != "application/json" || decodeStrictJSON(io.LimitReader(response.Body, maxJSONBytes+1), &result) != nil || !validNativeProbePath(result.Path) || result.ConnectionNanoseconds < 0 {
 		return PeerProbeResult{}, ErrInvalidResponse
+	}
+	return result, nil
+}
+
+// InspectorRequest sends one inspector call through the daemon, which owns the native peer
+// session for this identity.
+func (c *Client) InspectorRequest(ctx context.Context, value InspectorRequest) (InspectorResult, error) {
+	var result InspectorResult
+	if c == nil || ctx == nil || value.Grant == "" || !strings.HasPrefix(value.Path, "/v1/inspector/") {
+		return result, ErrInvalidConfig
+	}
+	body, err := json.Marshal(value)
+	if err != nil || len(body) > maxJSONBytes {
+		return result, ErrInvalidConfig
+	}
+	deadline := 50 * time.Second
+	if c.timeout > deadline {
+		deadline = c.timeout
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, deadline)
+	defer cancel()
+	request, err := http.NewRequestWithContext(requestCtx, http.MethodPost, "http://paperboat.local/v1/inspector-requests", bytes.NewReader(body))
+	if err != nil {
+		return result, err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-Paperboat-Request-ID", localRequestID())
+	response, err := c.http.Do(request)
+	if err != nil {
+		return result, err
+	}
+	defer response.Body.Close()
+	if response.Header.Get("X-Paperboat-Protocol") != ProtocolV1 {
+		return result, ErrVersionMismatch
+	}
+	if response.StatusCode != http.StatusOK {
+		return result, decodeRemoteError(response)
+	}
+	if response.Header.Get("Content-Type") != "application/json" || decodeStrictJSON(io.LimitReader(response.Body, maxInspectorResponseBytes+1), &result) != nil || result.Status < 100 || result.Status > 599 || len(result.Payload) > 2<<20 {
+		return InspectorResult{}, ErrInvalidResponse
 	}
 	return result, nil
 }

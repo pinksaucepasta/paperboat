@@ -28,6 +28,7 @@ type DaemonConfig struct {
 	ManagedSSH              *ManagedSSHConfig
 	OpenPeerStream          func(context.Context, localapi.Peer, localapi.PeerStreamRequest) (net.Conn, error)
 	ProbePeer               func(context.Context, localapi.Peer, localapi.PeerStreamRequest) (localapi.PeerProbeResult, error)
+	InspectorRequest        func(context.Context, localapi.Peer, localapi.InspectorRequest) (localapi.InspectorResult, error)
 	RelayInventory          func(context.Context) (localapi.RelayInventory, error)
 	InvalidatePeerAuthority func(string)
 	WarmPeerMetadata        func(context.Context, []api.UserMachine) error
@@ -147,6 +148,7 @@ func Run(ctx context.Context, config DaemonConfig) (runErr error) {
 		Observations:         observations,
 		PeerStreams:          peerStreamBroker{open: config.OpenPeerStream, issue: config.IssuePeerStream},
 		PeerProbes:           peerProbeBroker{probe: config.ProbePeer},
+		InspectorRequests:    inspectorBroker(config.InspectorRequest),
 		RelayInventory:       config.RelayInventory,
 		FileTransfers:        config.FileTransfers,
 		VaultCustody:         vaultCustody,

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"reflect"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
@@ -48,6 +49,17 @@ type PeerProbeBroker interface {
 	ProbePeer(context.Context, Peer, PeerStreamRequest) (PeerProbeResult, error)
 }
 
+type InspectorBroker interface {
+	InspectorRequest(context.Context, Peer, InspectorRequest) (InspectorResult, error)
+}
+
+// InspectorBrokerFunc adapts a function to InspectorBroker.
+type InspectorBrokerFunc func(context.Context, Peer, InspectorRequest) (InspectorResult, error)
+
+func (f InspectorBrokerFunc) InspectorRequest(ctx context.Context, peer Peer, request InspectorRequest) (InspectorResult, error) {
+	return f(ctx, peer, request)
+}
+
 type FileTransferBroker interface {
 	PrepareFileTransfer(context.Context, Peer, FileTransferRequest) (FileTransferResult, error)
 	OpenFileTransferStream(context.Context, Peer, string) (net.Conn, error)
@@ -73,6 +85,7 @@ type ServerConfig struct {
 	Observations         ObservationSink
 	PeerStreams          PeerStreamBroker
 	PeerProbes           PeerProbeBroker
+	InspectorRequests    InspectorBroker
 	RelayInventory       func(context.Context) (RelayInventory, error)
 	FileTransfers        FileTransferBroker
 	VaultCustody         *VaultCustodyStore
@@ -254,6 +267,10 @@ func (s *Server) handler() http.Handler {
 		}
 		if request.URL.Path == "/v1/peer-probes" {
 			s.peerProbe(writer, request, requestID, peer)
+			return
+		}
+		if request.URL.Path == "/v1/inspector-requests" {
+			s.inspectorRequest(writer, request, requestID, peer)
 			return
 		}
 		if request.URL.Path == "/v1/relay-inventory" {
@@ -457,6 +474,45 @@ func (s *Server) peerProbe(writer http.ResponseWriter, request *http.Request, re
 	encoded, err := json.Marshal(result)
 	if err != nil {
 		writeError(writer, http.StatusInternalServerError, requestID, "peer_probe_unavailable", "peer probe is unavailable")
+		return
+	}
+	writer.Header().Set("Content-Type", "application/json")
+	writer.Header().Set("X-Paperboat-Protocol", ProtocolV1)
+	_, _ = writer.Write(append(encoded, '\n'))
+}
+
+const (
+	maxInspectorBodyBytes     = 64 << 10
+	maxInspectorResponseBytes = 4 << 20 // a 2 MiB payload, base64 encoded, plus the envelope
+)
+
+func (s *Server) inspectorRequest(writer http.ResponseWriter, request *http.Request, requestID string, peer Peer) {
+	if request.Method != http.MethodPost || request.URL.RawQuery != "" || request.Header.Get("Content-Type") != "application/json" || request.ContentLength < 0 || request.ContentLength > maxJSONBytes || s.config.InspectorRequests == nil {
+		writeError(writer, http.StatusBadRequest, requestID, "invalid_request", "inspector request is invalid")
+		return
+	}
+	var value InspectorRequest
+	if err := decodeStrictJSON(io.LimitReader(request.Body, maxJSONBytes+1), &value); err != nil || !strings.HasPrefix(value.Path, "/v1/inspector/") || len(value.Body) > maxInspectorBodyBytes || value.Grant == "" || (value.Method != http.MethodGet && value.Method != http.MethodPost && value.Method != http.MethodPut && value.Method != http.MethodDelete) {
+		writeError(writer, http.StatusBadRequest, requestID, "invalid_inspector_request", "inspector request is invalid")
+		return
+	}
+	result, err := s.config.InspectorRequests.InspectorRequest(request.Context(), peer, value)
+	if err != nil {
+		if IsPermissionFailure(err) {
+			writeError(writer, http.StatusForbidden, requestID, "permission_denied", "inspector authority was denied; refresh the target and its authorization")
+			return
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			writeError(writer, http.StatusGatewayTimeout, requestID, "deadline_exceeded", "inspector request deadline expired")
+			return
+		}
+		errorreport.Current().CaptureFailure(request.Context(), "paperboatd", "inspector", "peer_connect", "native_private_failed", err)
+		writeError(writer, http.StatusServiceUnavailable, requestID, "inspector_unavailable", "inspector request failed; check target connectivity with pb doctor")
+		return
+	}
+	encoded, err := json.Marshal(result)
+	if err != nil || len(encoded) > maxInspectorResponseBytes {
+		writeError(writer, http.StatusServiceUnavailable, requestID, "inspector_unavailable", "inspector response is unavailable")
 		return
 	}
 	writer.Header().Set("Content-Type", "application/json")

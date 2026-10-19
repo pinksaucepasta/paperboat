@@ -77,9 +77,6 @@ func newProductionAccessMachineRuntime(command *cobra.Command, selector string) 
 	if err != nil {
 		return nil, "", err
 	}
-	if dependencies.peerTunnel != nil {
-		defer func() { _ = dependencies.peerTunnel.Close() }()
-	}
 	if dependencies.cfg.ServerURL == "" {
 		return nil, "", errors.New("Paperboat server is not configured; set server_url or use --server")
 	}

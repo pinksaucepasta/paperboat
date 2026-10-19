@@ -6,6 +6,7 @@ import (
 	"errors"
 	"github.com/pinksaucepasta/paperboat-relay/admission"
 	"net"
+	"net/url"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
@@ -110,6 +111,33 @@ func TunnelPeerProbe(peerTunnel *tunnel.PeerTerminalTunnel) func(context.Context
 			return localapi.PeerProbeResult{}, peerProbeFailure(ctx, err)
 		}
 		return localapi.PeerProbeResult{Path: result.Path, ConnectionNanoseconds: result.Connection.Nanoseconds()}, nil
+	}
+}
+
+// inspectorBroker returns nil when the daemon was given no inspector support, so the local API
+// refuses the route instead of calling a nil function.
+func inspectorBroker(call func(context.Context, localapi.Peer, localapi.InspectorRequest) (localapi.InspectorResult, error)) localapi.InspectorBroker {
+	if call == nil {
+		return nil
+	}
+	return localapi.InspectorBrokerFunc(call)
+}
+
+// TunnelInspectorRequest runs an inspector call on the daemon's own native peer session.
+func TunnelInspectorRequest(peerTunnel *tunnel.PeerTerminalTunnel) func(context.Context, localapi.Peer, localapi.InspectorRequest) (localapi.InspectorResult, error) {
+	return func(ctx context.Context, _ localapi.Peer, request localapi.InspectorRequest) (localapi.InspectorResult, error) {
+		if ctx == nil || peerTunnel == nil {
+			return localapi.InspectorResult{}, ErrInvalidInventoryConfig
+		}
+		query, err := url.ParseQuery(request.Query)
+		if err != nil {
+			return localapi.InspectorResult{}, ErrInvalidInventoryConfig
+		}
+		payload, status, err := peerTunnel.InspectorRequest(ctx, request.Access, request.Grant, request.Method, request.Path, request.Body, query)
+		if err != nil {
+			return localapi.InspectorResult{}, err
+		}
+		return localapi.InspectorResult{Status: status, Payload: payload}, nil
 	}
 }
 

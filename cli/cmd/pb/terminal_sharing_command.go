@@ -183,9 +183,6 @@ func joinSharedTerminal(c *cobra.Command, args []string) (result error) {
 	if err != nil {
 		return err
 	}
-	if d.peerTunnel != nil {
-		defer func() { result = terminalSharingWithCleanup(result, d.peerTunnel.Close()) }()
-	}
 	source, err := configuredMachineID()
 	if err != nil {
 		return err

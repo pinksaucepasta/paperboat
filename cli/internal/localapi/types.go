@@ -76,6 +76,23 @@ type PeerTerminalPayload struct {
 	InputAttachmentID   string            `json:"input_attachment_id,omitempty"`
 }
 
+// InspectorRequest is one explicit inspector call. The daemon owns the CLI-role peer identity,
+// so the CLI process sends the call here instead of opening a second native session on it.
+type InspectorRequest struct {
+	Access api.InspectorAccess `json:"access"`
+	Grant  string              `json:"grant"`
+	Method string              `json:"method"`
+	Path   string              `json:"path"`
+	Query  string              `json:"query,omitempty"`
+	Body   []byte              `json:"body,omitempty"`
+}
+
+// InspectorResult is the inspector endpoint's HTTP status and body.
+type InspectorResult struct {
+	Status  int    `json:"status"`
+	Payload []byte `json:"payload"`
+}
+
 type PeerProbeResult struct {
 	Path                  string `json:"path"`
 	ConnectionNanoseconds int64  `json:"connection_nanoseconds"`
