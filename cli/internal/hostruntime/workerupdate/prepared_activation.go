@@ -35,10 +35,7 @@ func (m *Manager) applyPrepared(ctx context.Context, journal updateflow.Journal,
 	if err := m.authorizeRecovery(ctx, m.active, previousExecutable); err != nil {
 		return result, err
 	}
-	source := installsource.Source{Version: payload.Version, Platform: payload.Platform, Architecture: payload.Architecture, SHA256: payload.SHA256, Length: payload.Length, Distribution: installsource.Official}
-	if m.active.LocalSource != nil {
-		source.AutomaticUpdates = m.active.LocalSource.AutomaticUpdates
-	}
+	source := m.candidateSource(payload)
 	activation := PreparedActivation{Signed: signed, Candidate: candidate, Executable: m.config.BinaryStaged, Source: source, Force: m.config.ForceActivation}
 	prepared := false
 	validationStarted := false
@@ -136,6 +133,24 @@ func (m *Manager) applyPrepared(ctx context.Context, journal updateflow.Journal,
 		}
 		return result, err
 	}
+	return m.finishCommitted(ctx, journal, signed, payload, committed)
+}
+
+// candidateSource is the official install identity the native owner commits for payload.
+func (m *Manager) candidateSource(payload Release) installsource.Source {
+	source := installsource.Source{Version: payload.Version, Platform: payload.Platform, Architecture: payload.Architecture, SHA256: payload.SHA256, Length: payload.Length, Distribution: installsource.Official}
+	if m.active.LocalSource != nil {
+		source.AutomaticUpdates = m.active.LocalSource.AutomaticUpdates
+	}
+	return source
+}
+
+// finishCommitted completes everything that follows the native commit: the hostd ledger commit,
+// manual refresh and the idle journal. It is idempotent, so a helper that restarts after an
+// interrupted finish runs it again instead of needing the staged payload, which the commit consumed.
+func (m *Manager) finishCommitted(ctx context.Context, journal updateflow.Journal, signed, payload Release, committed installsource.Source) (Result, error) {
+	result := Result{Version: m.active.Version}
+	source := m.candidateSource(payload)
 	if committed.Version != source.Version || committed.Platform != source.Platform || committed.Architecture != source.Architecture || committed.SHA256 != source.SHA256 || committed.Length != source.Length || committed.Distribution != installsource.Official {
 		return result, ErrInvalidRelease
 	}

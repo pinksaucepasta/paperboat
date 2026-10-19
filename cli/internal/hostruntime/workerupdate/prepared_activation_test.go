@@ -182,3 +182,54 @@ func TestCompletedNativeRollbackRetiresItsGateTransaction(t *testing.T) {
 		})
 	}
 }
+
+// The native move consumes the staged payload. A helper that restarts after a failed finish
+// (manual refresh, ledger commit) must complete it from the installed worker; it cannot ask
+// for the staged file again. pbvm1 looped forever here with the update installed but pending.
+func TestRetryAfterInterruptedFinishCompletesWithoutTheStagedPayload(t *testing.T) {
+	f := newFixture(t)
+	finalizeFails := true
+	f.manager.config.FinalizePrepared = func(context.Context, installsource.Source) error {
+		if finalizeFails {
+			return errors.New("manual refresh is pending")
+		}
+		return nil
+	}
+	nativeCalls := 0
+	f.manager.config.ApplyPrepared = func(ctx context.Context, a PreparedActivation) (installsource.Source, error) {
+		nativeCalls++
+		if err := a.Prepare(ctx); err != nil {
+			return installsource.Source{}, err
+		}
+		body, err := os.ReadFile(a.Executable)
+		if err != nil {
+			return installsource.Source{}, err
+		}
+		if err := os.WriteFile(f.paths.current, body, 0700); err != nil {
+			return installsource.Source{}, err
+		}
+		if err := os.Remove(a.Executable); err != nil {
+			return installsource.Source{}, err
+		}
+		f.hostd.active = hostdproto.Status{State: hostdproto.StateActive, WorkerID: workerID(a.Source.Version), APIVersion: 1, Epoch: 42}
+		if err := a.Validate(ctx); err != nil {
+			return installsource.Source{}, err
+		}
+		return a.Source, nil
+	}
+	previous := f.manager.active
+	if _, err := activatePrepared(context.Background(), f.manager, f.candidate); err == nil {
+		t.Fatal("the failing finish was not reported")
+	}
+	// Restart: the helper starts from the previous release again; the journal still holds the receipt.
+	f.manager.setActive(previous)
+	finalizeFails = false
+	result, err := f.manager.Activate(context.Background(), f.candidate)
+	if err != nil || !result.Updated || nativeCalls != 1 {
+		t.Fatalf("retry did not finish the interrupted update: %+v %v native=%d", result, err, nativeCalls)
+	}
+	journal, err := updateflow.Load(f.paths.journal)
+	if err != nil || journal.Stage != updateflow.StageIdle || journal.ActiveVersion != f.candidate.Version {
+		t.Fatalf("receipt not retired by the retry: %+v %v", journal, err)
+	}
+}

@@ -276,11 +276,20 @@ func (m *Manager) Activate(ctx context.Context, release Release) (Result, error)
 	if journal.Stage != updateflow.StageAwaitingApproval || journal.CandidateID != prepared.ID || journal.ApprovedCandidateID != prepared.ID {
 		return Result{Version: m.active.Version}, ErrApprovalRequired
 	}
+	localRelease := release
+	localRelease.SHA256, localRelease.Length = journal.CandidateDigest, journal.CandidateLength
+	if m.config.ApplyPrepared != nil && regularMatches(m.config.Binary, journal.CandidateLength, journal.CandidateDigest) && stagedConsumed(journal.StagedPath) {
+		// The native owner already installed this exact payload and consumed the staged file.
+		// Finish the interrupted post-commit steps; verifying the staged payload cannot succeed.
+		source := m.candidateSource(localRelease)
+		if err = source.Verify(m.config.Binary); err != nil {
+			return Result{Version: m.active.Version}, errors.Join(ErrPreparedCandidate, err)
+		}
+		return m.finishCommitted(ctx, journal, release, localRelease, source)
+	}
 	if err = m.verifyPrepared(ctx, journal); err != nil {
 		return Result{Version: m.active.Version}, err
 	}
-	localRelease := release
-	localRelease.SHA256, localRelease.Length = journal.CandidateDigest, journal.CandidateLength
 	return m.applyPrepared(ctx, journal, release, localRelease, prepared)
 }
 
@@ -290,6 +299,13 @@ func (m *Manager) Recover(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.recoverLocked(ctx)
+}
+
+// stagedConsumed reports that the staged payload no longer exists, which is how a completed
+// native move of the candidate into the worker slot looks.
+func stagedConsumed(path string) bool {
+	_, err := os.Lstat(path)
+	return errors.Is(err, os.ErrNotExist)
 }
 
 func (m *Manager) recoverLocked(ctx context.Context) error {
