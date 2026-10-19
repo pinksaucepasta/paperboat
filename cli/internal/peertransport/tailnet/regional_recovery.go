@@ -25,6 +25,9 @@ import (
 // scheduler. Existing magicsock preference and discovery own all data paths.
 const regionalProbeTimeout = 5 * time.Second
 const regionalProbeInterval = 3 * time.Second
+
+// regionalStaleRetry is how soon recovery looks again after finding no usable relay.
+const regionalStaleRetry = time.Second
 const regionalDwell = 10 * time.Second
 const regionalShortlist = 4
 
@@ -355,7 +358,11 @@ func (r *regionalRecovery) receive(ctx context.Context) {
 			return
 		case in := <-r.inbox:
 			nodes, peers, generation, err := r.snapshot()
-			if err != nil {
+			if err != nil || len(nodes) == 0 {
+				// Relay health observations are only valid for 15 seconds but an idle
+				// host renews every 30: renew now so the peer's next probe (it repeats
+				// every 250 ms) is answered instead of waiting for the next cycle.
+				r.authority.RequestRefresh()
 				continue
 			}
 			if _, ok := peers[in.peer]; !ok {
@@ -471,7 +478,9 @@ func (r *regionalRecovery) run(ctx context.Context) {
 			r.mu.Lock()
 			r.status = RegionalStatus{Redundancy: RedundancyNone, Reason: "no_authorized_common_node"}
 			r.mu.Unlock()
-			timer.Reset(regionalProbeDelay())
+			// Stale health observations are the usual cause: renew and look again soon.
+			r.authority.RequestRefresh()
+			timer.Reset(regionalStaleRetry)
 			continue
 		}
 		// A fresh signed grant may recover relay admission even when its pair

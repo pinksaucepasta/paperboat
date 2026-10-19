@@ -144,12 +144,26 @@ func (a *Authority) Run(ctx context.Context, client NetworkAPI, report func(erro
 	}()
 	timer := time.NewTimer(0)
 	defer timer.Stop()
+	var lastRefresh time.Time
+	failures := 0
 	for {
 		select {
 		case <-a.done:
 			return nil
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-a.refreshNow:
+			if failures > 0 {
+				// The server is failing: the backoff schedule already decides when to retry.
+				continue
+			}
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(max(0, onDemandRefreshSpacing-time.Since(lastRefresh)))
 		case <-a.refreshWake:
 			if !timer.Stop() {
 				select {
@@ -161,7 +175,13 @@ func (a *Authority) Run(ctx context.Context, client NetworkAPI, report func(erro
 		case <-timer.C:
 			request, cancel := context.WithTimeout(ctx, 10*time.Second)
 			err := a.Refresh(request, client)
+			lastRefresh = time.Now()
 			cancel()
+			if err != nil {
+				failures++
+			} else {
+				failures = 0
+			}
 			if err != nil && report != nil {
 				report(err)
 			}
@@ -179,15 +199,35 @@ func (a *Authority) Run(ctx context.Context, client NetworkAPI, report func(erro
 			}
 			// A signed configuration may be much shorter than the regional cadence.
 			// Reserve half its remaining lifetime (at most the request bound) for
-			// renewal. Failed refreshes retry within one second; cached authority
-			// still expires independently, including while a request is pending.
-			if err != nil && delay > time.Second {
-				delay = time.Second
+			// renewal. A failed refresh retries after a short, growing, jittered
+			// delay; cached authority still expires independently, including while a
+			// request is pending.
+			if err != nil {
+				delay = min(delay, refreshRetryDelay(failures))
 			}
 			timer.Reset(a.refreshDelay(delay))
 		}
 	}
 }
+
+// refreshRetryDelay is the wait after the failures-th consecutive failed refresh: one second,
+// then doubling to a one-minute ceiling, with up to 25% added jitter so clients that failed
+// together do not retry together.
+func refreshRetryDelay(failures int) time.Duration {
+	delay := time.Minute
+	if failures >= 1 && failures <= 6 {
+		delay = time.Second << (failures - 1)
+	}
+	delay = min(delay, time.Minute)
+	var random [1]byte
+	if _, err := rand.Read(random[:]); err == nil {
+		delay += delay / 4 * time.Duration(random[0]) / 255
+	}
+	return delay
+}
+
+// onDemandRefreshSpacing bounds how often RequestRefresh can make Run call the server.
+const onDemandRefreshSpacing = time.Second
 
 func regionalRefreshDelay() time.Duration {
 	var random [1]byte

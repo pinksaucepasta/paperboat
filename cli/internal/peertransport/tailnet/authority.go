@@ -118,6 +118,7 @@ type Authority struct {
 	recoveryWorkers sync.WaitGroup
 	refreshSlot     chan struct{}
 	refreshWake     chan struct{}
+	refreshNow      chan struct{}
 }
 
 type authorizedClient struct {
@@ -136,12 +137,22 @@ func (a *Authority) EligibleRegionalNodes(role, transport string, allowedRegions
 	return a.regional.Eligible(role, transport, allowedRegions, now)
 }
 
+// RequestRefresh asks Run to renew the signed configuration now, for example when a peer's
+// regional probe arrives while the relay health observations have gone stale. Requests collapse
+// and Run spaces the renewals it starts for them.
+func (a *Authority) RequestRefresh() {
+	select {
+	case a.refreshNow <- struct{}{}:
+	default:
+	}
+}
+
 func NewAuthority(options AuthorityOptions) (*Authority, error) {
 	issuer, err := config.NormalizeIssuer(options.Issuer)
 	if err != nil || issuer != options.Issuer || options.Keys == nil || !validLocalBinding(options.Self) {
 		return nil, ErrAuthority
 	}
-	return &Authority{options: options, done: make(chan struct{}), refreshSlot: make(chan struct{}, 1), refreshWake: make(chan struct{}, 1)}, nil
+	return &Authority{options: options, done: make(chan struct{}), refreshSlot: make(chan struct{}, 1), refreshWake: make(chan struct{}, 1), refreshNow: make(chan struct{}, 1)}, nil
 }
 
 func validID(id string) bool {
