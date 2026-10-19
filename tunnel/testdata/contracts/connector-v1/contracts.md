@@ -273,7 +273,7 @@ The payload is exactly a `tunnel_config_snapshot` object:
   "name":"...",
   "desired_state":"active|paused|deleted",
   "access_mode":"public|private",
-  "stable_endpoint":"https://<quality>-<atmosphere>-<waypoint>-<four-digits>.tunnels.pprbt.dev",
+  "stable_endpoint":"https://<quality>-<atmosphere>-<waypoint>-<four-digits>.<public base domain>",
   "expires_at":null,
   "routes":[{"id":"...","name":"...","protocol":"http|tls|tcp_private", "match_type":"managed_exact|exact|one_label_wildcard|catch_all", "match_hostname":"...", "wildcard_suffix":"...", "path_prefix":null, "origin_scheme":"http|https|h2c|unix|tcp", "origin_address":"...", "preserve_host":true, "host_override":null, "tls_verification":"not_applicable|system|custom_ca|mutual_tls|insecure_development", "tls_server_name":null, "ca_reference":null, "mtls_credential_reference":null, "connect_timeout_ms":10000, "idle_timeout_ms":90000, "max_concurrent_streams":128, "desired_state":"active|disabled|deleted"}]
 }

@@ -71,8 +71,8 @@ selected for this lease and bound to the selected machine and create operation. 
   preview. Machine-authenticated local CLI creation uses the machine identity path and
   the verified machine ID, never a CLI client-session ID as `owner_machine_id`.
 
-The managed preview endpoint is `https://<quality>-<atmosphere>-<waypoint>-<four-digits>.preview.pprbt.dev` in production
-(or that label under the configured development base). The server selects each of
+The managed preview endpoint is `https://<quality>-<atmosphere>-<waypoint>-<four-digits>.<public base domain>` (the
+deployment's configured preview/tunnel base, `pprbt.app` in production). The server selects each of
 three words independently with cryptographic randomness from disjoint 64-word lists
 and a uniformly random `0000`–`9999` suffix. Labels are allocated once, persisted,
 reserved atomically across managed URL producers, and stable for the lease. They
@@ -92,8 +92,8 @@ A tunnel is created only by a host-scoped actor. It has stable `id` and
 multiple connectors. Connector loss never deletes the tunnel, route, domain binding,
 DNS state, or certificate state.
 
-The managed tunnel endpoint uses the same random word/digit format under
-`tunnels.pprbt.dev` (or a configured development base). The readable hostname and
+The managed tunnel endpoint uses the same random word/digit format under the same
+configured public base domain. The readable hostname and
 opaque `stable_endpoint_id` are independent. The endpoint ID uses canonical
 `endpoint_UUIDv4` used by signed connector/runtime bindings; consumers must read the
 persisted ID rather than infer it from the hostname. Both the URL and ID persist
@@ -481,8 +481,8 @@ format defined above. Display names are not DNS identity. No managed label is ev
 reassigned to another resource/account, including after deletion.
 
 The chosen deployment prerequisite is Public Suffix List PRIVATE entries for
-`pprbt.dev`, `preview.pprbt.dev`, and `tunnels.pprbt.dev`. Together they prevent
-application cookies scoped to either the hosting suffix or its parent and make
+the public base domain (`pprbt.app` in production). It prevents
+application cookies scoped to the hosting suffix or its parent and makes
 individual managed hosts separate browser sites. No untrusted content is served
 at these suffix apexes or at trusted API/login/dashboard origins. Reserve internal
 hostnames in server configuration. DNS/TLS readiness alone does not satisfy this
