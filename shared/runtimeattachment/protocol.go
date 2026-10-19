@@ -26,6 +26,17 @@ type EdgePreference struct {
 	SecondaryProcessEpoch string `json:"secondary_process_epoch,omitempty"`
 }
 
+// EdgeLatency is the machine's measured connect time to one server-issued edge candidate. The
+// server accepts it only for a candidate it issued; it is display data and never confers access.
+type EdgeLatency struct {
+	NodeID          string `json:"node_id"`
+	ProcessEpoch    string `json:"process_epoch"`
+	RTTMilliseconds int64  `json:"rtt_ms"`
+}
+
+// MaximumLatencyMilliseconds bounds an accepted measurement; slower paths are reported as failed probes.
+const MaximumLatencyMilliseconds = 10000
+
 type Request struct {
 	OperationID            string          `json:"operation_id"`
 	ProcessID              string          `json:"process_id"`
@@ -35,6 +46,7 @@ type Request struct {
 	EdgePreference         *EdgePreference `json:"edge_preference,omitempty"`
 	ActiveEdgeNodeID       string          `json:"active_edge_node_id,omitempty"`
 	ActiveEdgeProcessEpoch string          `json:"active_edge_process_epoch,omitempty"`
+	EdgeLatency            []EdgeLatency   `json:"edge_latency,omitempty"`
 }
 type Binding struct {
 	AccountID                            string `json:"account_id"`
