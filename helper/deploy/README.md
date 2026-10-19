@@ -14,12 +14,16 @@ curl -fsSL https://get.pprbt.dev/selfhost/install | sh -s -- --enable both
 ```
 
 The installer downloads the configured immutable package, verifies its SHA256,
-installs `pbh`, installs Docker from the configured official source when missing, and enables a protected system service. The helper runs the configured relay/tunnel images with host networking and a protected state mount. Runtime binaries are not installed on the host.
-An optional `--endpoint-host` accepts a public IP or DNS name; otherwise configure `PAPERBOAT_SELFHOST_ADDRESS_URL` with the deployment's
-public-address endpoint before running `pbh`. Address detection has no embedded
-Paperboat domain. No domain is required to
-install or claim. Public browser and runtime routes require customer-owned domain
-configuration in the dashboard before publication; do not use a Paperboat-managed
+installs `pbh`, installs Docker from the configured official source when missing, pulls
+the selected relay/tunnel images (an unreachable registry or wrong architecture stops the
+install before anything changes) and enables a protected system service. The helper runs
+the images with host networking and a protected state mount; runtime binaries are not
+installed on the host. Re-running the same command upgrades in place and keeps data.
+Official packages know the public-address endpoint of the deployment they were built for,
+so the host's public IP is detected automatically. Pass `--endpoint-host` (a public IP or
+DNS name) to override it, for example behind NAT or on a multi-homed host. No domain is
+required to install or claim. Public browser and runtime routes require customer-owned
+domain configuration in the dashboard before publication; do not use a Paperboat-managed
 domain for a self-hosted route.
 
 Paste the printed claim address and expiring code into **Dashboard → Network →

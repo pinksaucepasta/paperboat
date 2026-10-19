@@ -88,4 +88,5 @@ jobs:
           bun-version-file: console/package.json
       - run: bun install --frozen-lockfile
       - run: bun run lint
+      - run: bunx next typegen
       - run: bunx tsc --noEmit
