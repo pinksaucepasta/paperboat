@@ -37,7 +37,6 @@ require (
 	github.com/libp2p/go-yamux/v5 v5.1.0
 	github.com/miekg/dns v1.1.73
 	github.com/muesli/termenv v0.16.0
-	github.com/pinksaucepasta/paperboat-relay v0.0.0-20260923013100-893985d480ea
 	github.com/pressly/goose/v3 v3.27.1
 	github.com/quic-go/quic-go v0.61.0
 	github.com/sethvargo/go-retry v0.3.0
