@@ -12,6 +12,7 @@ import threading
 import time
 import uuid
 
+from tunnel_lifecycle import confirmed
 from install_lifecycle import registration
 from pairing_lifecycle import invoke
 from preview_receipt import PREVIEW_COMMAND_TIMEOUT, receipt_value
@@ -116,7 +117,9 @@ class ProtocolOrigin(http.server.BaseHTTPRequestHandler):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('target')
+    parser.add_argument('--tunnel', action='store_true', help='probe a durable tunnel instead of a preview')
     args = parser.parse_args()
+    check = 'tunnel-protocols' if args.tunnel else 'preview-protocols'
     before = registration()
     binary = Path.home() / '.local/bin/pb'
     server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), ProtocolOrigin)
@@ -128,8 +131,14 @@ def main():
     try:
         with tempfile.TemporaryDirectory(prefix='paperboat-preview-protocol-') as directory:
             root = Path(directory)
-            lease = invoke(binary, 'preview', str(server.server_port), '--background', '--ttl', '5m', '--json', timeout=PREVIEW_COMMAND_TIMEOUT)
-            endpoint = receipt_value(lease, 'endpoint')
+            if args.tunnel:
+                lease = invoke(binary, 'tunnel', 'create', 'smoke-protocols-' + uuid.uuid4().hex[:10], '--port',
+                               str(server.server_port), '--duration', '30m', '--wait', '--timeout', '90s', '--json',
+                               timeout=PREVIEW_COMMAND_TIMEOUT)['tunnel']
+                endpoint = lease['stable_endpoint']
+            else:
+                lease = invoke(binary, 'preview', str(server.server_port), '--background', '--ttl', '5m', '--json', timeout=PREVIEW_COMMAND_TIMEOUT)
+                endpoint = receipt_value(lease, 'endpoint')
             gate, refused = root / 'verified', root / 'failed'
             print(json.dumps({'state': 'preview_protocol_required', 'target': args.target,
                               'url': endpoint, 'marker': server.marker,
@@ -146,7 +155,9 @@ def main():
         raise
     finally:
         try:
-            if lease is not None:
+            if lease is not None and args.tunnel:
+                confirmed('tunnel', 'delete', lease['id'])
+            elif lease is not None:
                 invoke(binary, 'preview', 'stop', lease['id'], '--json', timeout=30)
         except Exception as error:
             if failure is None:
@@ -158,7 +169,7 @@ def main():
             thread.join(timeout=5)
     if registration() != before:
         raise RuntimeError('preview protocol probe changed the enrolled identity')
-    print(json.dumps({'check': 'preview-protocols', 'target': args.target, 'status': 'PASS',
+    print(json.dumps({'check': check, 'target': args.target, 'status': 'PASS',
                       'enrollment_unchanged': True, 'exact_cleanup': True}), flush=True)
 
 

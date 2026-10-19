@@ -26,4 +26,6 @@ terminal-main:hp-hp
 terminal-new:hp
 terminal:hp
 tunnel-manage:hp
+tunnel-protocols:hp
 tunnel-survival:hp
+tunnel-transfer:hp

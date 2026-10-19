@@ -779,6 +779,8 @@ elif sys.argv[2]=="doctor-lifecycle":
  assert all(r[k] for k in ("healthy_requires_terminal_and_exec", "failure_explained", "repair_recovers"))
 elif sys.argv[2]=="session-limit":
  assert r["limit"]==20 and r["clear_message"] and r["closed_not_counted"]
+elif sys.argv[2]=="tunnel-transfer":
+ assert r["upload_16mib"] and r["download_16mib"]
 elif sys.argv[2]=="tunnel-survival":
  assert all(r[k] for k in ("pause_resume", "daemon_restart", "update", "host_service_restart"))
 elif sys.argv[2]=="network-inventory":
@@ -802,7 +804,9 @@ else:
 # The origin stays on its enrolled device; TLS/ALPN/body/WebSocket probes run
 # here, independently of that device's network and client credentials.
 test_preview_protocols() {
-  skipped preview-protocols && return
+  local kind=${1:-preview} flag=""
+  [ "$kind" = tunnel ] && flag=" --tunnel"
+  skipped $kind-protocols && return
   local probe_root probe device id tag phase url marker output parent status success command t0
   probe_root=$(mktemp -d)
   probe="$probe_root/protocol-client"
@@ -812,14 +816,14 @@ test_preview_protocols() {
     return
   fi
   for device in "${TLIST[@]}"; do
-    id="preview-protocols:$device"
+    id="$kind-protocols:$device"
     skipped "$id" && continue
-    t0=$(now); tag="preview-protocols-$device"; success=0; output=""
+    t0=$(now); tag="$kind-protocols-$device"; success=0; output=""
     if ! stage_terminal_fixtures "$device"; then
       record "$id" FAIL 0 "could not stage compressed protocol fixture"
       continue
     fi
-    printf '%s\n' "python3 /tmp/$RUN_ID/preview_protocols.py $device && echo PREVIEW_PROTOCOLS_OK" | device_job "$device" "$tag"
+    printf '%s\n' "python3 /tmp/$RUN_ID/preview_protocols.py $device$flag && echo PREVIEW_PROTOCOLS_OK" | device_job "$device" "$tag"
     phase=$(on "$device" "python3 /tmp/$RUN_ID/session_controller.py wait --job /tmp/$RUN_ID/$tag --expected-state preview_protocol_required" 2>&1); status=$?
     output="$phase"
     if [ "$status" = 0 ]; then
@@ -888,11 +892,13 @@ test_device_application tunnel-manage tunnel_manage.py
 test_device_application config-sync config_sync.py
 test_device_application tunnel-lifecycle tunnel_lifecycle.py
 test_device_application tunnel-survival tunnel_survival.py
+test_device_application tunnel-transfer tunnel_transfer.py
 test_local_access_settings
 test_device_application doctor-lifecycle doctor_lifecycle.py
 test_device_application session-limit session_limit.py
 test_device_application network-inventory network_inventory.py
 test_preview_protocols
+test_preview_protocols tunnel
 for t in "${TLIST[@]}"; do
   skipped ssh-long || collect "ssh-long:$t" "long-ssh-$t" SSHFINAL "$LONG_SSH"
   skipped exec-long || collect "exec-long:$t" "long-exec-$t" FINAL "$LONG_EXEC"
