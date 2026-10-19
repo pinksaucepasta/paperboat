@@ -778,7 +778,7 @@ func rulesOverlap(left, right RouteRule) bool {
 
 func hostsOverlap(left, right RouteRule) bool {
 	if left.MatchType == MatchCatchAll || right.MatchType == MatchCatchAll {
-		return true
+		return catchAllHostsOverlap(left, right)
 	}
 	if isExactMatchType(left.MatchType) && isExactMatchType(right.MatchType) {
 		return left.Hostname == right.Hostname
@@ -793,6 +793,22 @@ func hostsOverlap(left, right RouteRule) bool {
 		return exactFallsUnderWildcard(right.Hostname, left.WildcardSuffix)
 	}
 	return false
+}
+
+// catchAllHostsOverlap: a catch-all without a hostname matches every name; a tunnel's catch-all is
+// scoped to the tunnel's own hostname and overlaps only rules that can match that name.
+func catchAllHostsOverlap(left, right RouteRule) bool {
+	if left.MatchType != MatchCatchAll {
+		left, right = right, left
+	}
+	if left.Hostname == "" {
+		return true
+	}
+	if right.MatchType == MatchCatchAll {
+		return right.Hostname == "" || right.Hostname == left.Hostname
+	}
+	_, _, ok := hostMatch(right, left.Hostname)
+	return ok
 }
 
 func isExactMatchType(matchType string) bool {
@@ -812,6 +828,11 @@ func overlapHost(rule RouteRule) string {
 		return rule.Hostname
 	case MatchOneLabelWildcard:
 		return "edge." + rule.WildcardSuffix
+	case MatchCatchAll:
+		if rule.Hostname != "" {
+			return rule.Hostname
+		}
+		return "edge.example.test"
 	default:
 		return "edge.example.test"
 	}
@@ -864,11 +885,17 @@ func normalizeRule(generation uint64, rule RouteRule) (RouteRule, error) {
 		}
 		rule.Hostname, rule.WildcardSuffix = "", suffix
 	case MatchCatchAll:
-		if rule.Hostname != "" || rule.WildcardSuffix != "" {
+		// A tunnel route is scoped to its own hostname; without one it matches every name.
+		if rule.WildcardSuffix != "" || strings.Contains(rule.Hostname, "*") {
 			return RouteRule{}, ErrInvalid
 		}
-		rule.Hostname = ""
-		rule.WildcardSuffix = ""
+		if rule.Hostname != "" {
+			host, err := normalizeMatchHost(rule.Hostname)
+			if err != nil {
+				return RouteRule{}, ErrInvalid
+			}
+			rule.Hostname = host
+		}
 	default:
 		return RouteRule{}, ErrInvalid
 	}

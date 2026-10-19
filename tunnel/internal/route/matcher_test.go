@@ -290,3 +290,30 @@ func TestHTTPSHostnameAuthorityIgnoresPathsButNotPublicationBounds(t *testing.T)
 		})
 	}
 }
+
+// A tunnel's catch-all route carries the tunnel's own hostname: the edge used to reject it as an
+// invalid route, which failed every route reconcile on that edge and left the tunnel pending.
+func TestGenerationRegistryScopesCatchAllToItsHostname(t *testing.T) {
+	registry := NewGenerationRegistry(16)
+	activateMatcher(t, registry, 1, []RouteRule{
+		matcherRule("default", "one.example.test", MatchManagedExact, "", 100),
+		matcherRule("two", "one.example.test", MatchCatchAll, "/two", 100),
+		matcherRule("other-two", "other.example.test", MatchCatchAll, "/two", 100),
+	})
+	for _, test := range []struct{ host, path, id string }{
+		{"one.example.test", "/two/x", "two"},
+		{"one.example.test", "/", "default"},
+		{"other.example.test", "/two", "other-two"},
+	} {
+		match, err := registry.Match(test.host, test.path)
+		if err != nil || match.Rule.ID != test.id {
+			t.Fatalf("match %s%s = %s/%v, want %s", test.host, test.path, match.Rule.ID, err, test.id)
+		}
+	}
+	if match, err := registry.Match("third.example.test", "/two"); err == nil {
+		t.Fatalf("a host-scoped catch-all answered another tenant's name: %s", match.Rule.ID)
+	}
+	if err := registry.StageGeneration(2, []RouteRule{{ID: "w", Kind: TunnelHTTPSWSS, MatchType: MatchCatchAll, WildcardSuffix: "example.test", Target: "r", ObservedState: "ready"}}); err == nil {
+		t.Fatal("a catch-all with a wildcard suffix was accepted")
+	}
+}

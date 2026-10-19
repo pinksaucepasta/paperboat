@@ -135,6 +135,10 @@ func hostMatch(rule RouteRule, host string) (int, int, bool) {
 		}
 		return 2, strings.Count(rule.WildcardSuffix, ".") + 1, true
 	case MatchCatchAll:
+		if rule.Hostname != "" {
+			// A tunnel's catch-all is scoped to its own name and ranks like an exact match on it.
+			return 3, 0, rule.Hostname == host
+		}
 		return 1, 0, true
 	default:
 		return 0, 0, false
