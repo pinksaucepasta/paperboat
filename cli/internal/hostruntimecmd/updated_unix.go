@@ -244,7 +244,7 @@ func runNotifiedUpdater(ctx context.Context, runner updaterRunner, notifier proc
 			drainErr := notifier.Draining()
 			cancel()
 			runErr := <-done
-			return runtimeFailureIfAny("updater shutdown failed", runtimeContextFailure(ctx), drainErr, runErr, notifier.Stopping())
+			return updaterShutdownResult(ctx, drainErr, runErr, notifier.Stopping())
 		}
 	}
 
@@ -266,7 +266,7 @@ running:
 			drainErr := notifier.Draining()
 			cancel()
 			runErr := <-done
-			return runtimeFailureIfAny("updater shutdown failed", runtimeContextFailure(ctx), drainErr, runErr, notifier.Stopping())
+			return updaterShutdownResult(ctx, drainErr, runErr, notifier.Stopping())
 		case <-watchdog:
 			if err := notifier.Watchdog(); err != nil {
 				degradedErr := notifier.Degraded("updater watchdog notification failed")
@@ -278,6 +278,24 @@ running:
 			}
 		}
 	}
+}
+
+// updaterShutdownResult reports a stop that the service manager requested as a clean exit. systemd
+// stops the old updater during every update; counting the cancellation itself as a failure exited the
+// unit with status 1 and made the activation fail with drain_failed. Any other shutdown cause fails.
+func updaterShutdownResult(ctx context.Context, causes ...error) error {
+	failures := []error{withoutCancellation(runtimeContextFailure(ctx))}
+	for _, cause := range causes {
+		failures = append(failures, withoutCancellation(cause))
+	}
+	return runtimeFailureIfAny("updater shutdown failed", failures...)
+}
+
+func withoutCancellation(err error) error {
+	if err != nil && runtimeCausesOnly(err, context.Canceled) {
+		return nil
+	}
+	return err
 }
 
 func validRuntimeIdentity(uid, gid int) bool {
