@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -35,7 +36,13 @@ func TestApproveAdministratorStillRequiresApprovalWhenSudoNeedsAPassword(t *test
 	previous := sudoExecutable
 	sudoExecutable = fake
 	t.Cleanup(func() { sudoExecutable = previous })
-	if err := approveAdministrator(t.Context(), bytes.NewReader(nil), &bytes.Buffer{}); err == nil {
+	err := approveAdministrator(t.Context(), bytes.NewReader(nil), &bytes.Buffer{})
+	if err == nil {
 		t.Fatal("a refused sudo must fail administrator approval")
+	}
+	// A pair without a terminal must say it needs sudo, not "installing system services".
+	message := (&installationStageError{Stage: "service_install", Cause: err}).Error()
+	if !strings.Contains(message, "administrator approval (sudo)") || !strings.Contains(message, "passwordless sudo") {
+		t.Fatalf("pairing message does not name the sudo step: %q", message)
 	}
 }

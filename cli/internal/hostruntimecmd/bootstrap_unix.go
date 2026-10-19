@@ -498,6 +498,10 @@ func removeNewEnrollmentCredentials(stateRoot string) error {
 
 var sudoExecutable = "/usr/bin/sudo"
 
+// errAdministratorApproval marks the refusal of the sudo approval pairing needs, for example
+// when there is no terminal to ask for a password.
+var errAdministratorApproval = errors.New("administrator approval was not granted")
+
 // approveAdministrator obtains sudo credentials before any bounded privileged
 // step, so a slow password entry cannot consume an installation deadline.
 func approveAdministrator(ctx context.Context, stdin io.Reader, stderr io.Writer) error {
@@ -511,7 +515,7 @@ func approveAdministrator(ctx context.Context, stdin io.Reader, stderr io.Writer
 	command.Stdin = stdin
 	command.Stderr = stderr
 	if err := command.Run(); err != nil {
-		return runtimeFailure("administrator approval was not granted", err, runtimeContextFailure(ctx))
+		return runtimeFailure("administrator approval was not granted", errAdministratorApproval, err, runtimeContextFailure(ctx))
 	}
 	return nil
 }

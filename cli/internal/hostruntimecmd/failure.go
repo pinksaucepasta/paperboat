@@ -298,6 +298,9 @@ type installationStageError struct {
 }
 
 func (e *installationStageError) Error() string {
+	if e != nil && e.Stage == "service_install" && errors.Is(e.Cause, errAdministratorApproval) {
+		return "Machine pairing needs administrator approval (sudo) to install its system service, and sudo could not get it. Run pair from a terminal where sudo can ask for your password, or allow passwordless sudo for this account, then retry pairing with the same enrollment token file."
+	}
 	step := "an internal installation step"
 	if e != nil {
 		switch e.Stage {
