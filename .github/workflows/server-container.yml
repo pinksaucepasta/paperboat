@@ -71,6 +71,7 @@ jobs:
           tags: ghcr.io/${{ github.repository }}/${{ matrix.service }}:${{ inputs.release_tag }}
           build-args: |
             PAPERBOAT_VERSION=${{ inputs.release_tag }}
+            PAPERBOAT_COMMIT=${{ steps.source.outputs.sha }}
             PAPERBOAT_SENTRY_DSN=${{ vars[matrix.sentry_variable] }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}

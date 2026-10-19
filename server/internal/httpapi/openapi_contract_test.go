@@ -728,6 +728,7 @@ func TestOpenAPIDocumentCoversPublicAndFrozenTargetPaths(t *testing.T) {
 		"/.well-known/jwks.json":                                             {"get"},
 		"/v1/client-configuration":                                           {"get"},
 		"/healthz":                                                           {"get"},
+		"/v1/server-version":                                                 {"get"},
 		"/metrics":                                                           {"get"},
 		"/readyz":                                                            {"get"},
 		"/v1/config/credentials":                                             {"post"},

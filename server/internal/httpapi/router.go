@@ -13,6 +13,7 @@ import (
 	"github.com/pinksaucepasta/paperboat-server/internal/backupreport"
 	"github.com/pinksaucepasta/paperboat-server/internal/billing"
 	"github.com/pinksaucepasta/paperboat-server/internal/browserterminal"
+	"github.com/pinksaucepasta/paperboat-server/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat-server/internal/config"
 	"github.com/pinksaucepasta/paperboat-server/internal/controlplane"
 	serverdiagnostics "github.com/pinksaucepasta/paperboat-server/internal/diagnostics"
@@ -186,6 +187,7 @@ func NewRouter(opts Options) http.Handler {
 		registerOperatorRoutes(mux, opts)
 		registerOperatorAuthentication(mux, opts)
 		mux.HandleFunc("GET /healthz", health)
+		mux.HandleFunc("GET /v1/server-version", serverVersion)
 		if opts.ReleaseFiles != nil {
 			mux.Handle("GET /install", installScript(opts.ReleaseFiles))
 			mux.Handle("GET /selfhost/install", selfhostInstaller(opts.ReleaseFiles))
@@ -725,6 +727,15 @@ func correlationID(next http.Handler) http.Handler {
 func health(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, SuccessResponse{Data: map[string]any{
 		"status": "healthy",
+	}})
+}
+
+// serverVersion tells release tooling which build is deployed, so a client is never released
+// ahead of the server commits it depends on.
+func serverVersion(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, SuccessResponse{Data: map[string]any{
+		"version": buildinfo.Version,
+		"commit":  buildinfo.Commit,
 	}})
 }
 

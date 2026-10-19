@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat-server/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat-server/internal/config"
 	serverdiagnostics "github.com/pinksaucepasta/paperboat-server/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat-server/internal/telemetry"
@@ -487,5 +488,23 @@ func TestRouterPreservesStreamingFlushSupport(t *testing.T) {
 	}
 	if !rec.Flushed {
 		t.Fatal("streaming response was not flushed through router stack")
+	}
+}
+
+func TestServerVersionReportsTheBuildWithoutAuthentication(t *testing.T) {
+	previous := [2]string{buildinfo.Version, buildinfo.Commit}
+	buildinfo.Version, buildinfo.Commit = "2026.10.19.5", strings.Repeat("a", 40)
+	t.Cleanup(func() { buildinfo.Version, buildinfo.Commit = previous[0], previous[1] })
+	router := NewRouter(Options{Config: config.Default(), Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/server-version", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Data struct{ Version, Commit string } `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || body.Data.Version != "2026.10.19.5" || body.Data.Commit != strings.Repeat("a", 40) {
+		t.Fatalf("body = %s err=%v", rec.Body.String(), err)
 	}
 }

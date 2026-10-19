@@ -17,13 +17,12 @@ import (
 
 	"github.com/pinksaucepasta/paperboat-server/internal/app"
 	"github.com/pinksaucepasta/paperboat-server/internal/audit"
+	"github.com/pinksaucepasta/paperboat-server/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat-server/internal/config"
 	"github.com/pinksaucepasta/paperboat-server/internal/controlplane"
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
 	"github.com/pinksaucepasta/paperboat-server/internal/teaminbox"
 )
-
-var version = "development"
 
 func main() {
 	if err := run(os.Args, os.Stdout, os.Stderr); err != nil {
@@ -40,7 +39,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 
 	switch args[1] {
 	case "version", "--version":
-		_, err := fmt.Fprintf(stdout, "paperboat-server %s\n", version)
+		_, err := fmt.Fprintf(stdout, "paperboat-server %s\n", buildinfo.Version)
 		return err
 	case "serve":
 		return runServe(args[2:], stdout, stderr)

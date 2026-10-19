@@ -17217,6 +17217,25 @@
         "operationId": "get_healthz"
       }
     },
+    "/v1/server-version": {
+      "get": {
+        "summary": "Deployed server build",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Release tag and 40-hex source commit of the running server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse"
+                }
+              }
+            }
+          }
+        },
+        "operationId": "get_server_version"
+      }
+    },
     "/v1/edge/assignments/current": {
       "post": {
         "summary": "Fetch current connector assignment",
