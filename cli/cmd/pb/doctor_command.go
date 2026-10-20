@@ -162,6 +162,10 @@ func doctorProbes(command *cobra.Command, snapshot localapi.Snapshot, machine *l
 			if snapshot.DaemonState != "ready" {
 				status = doctorpkg.StatusWarning
 				recovery = "Restart the Paperboat local service and run pb doctor again."
+				if snapshot.DaemonState == "awaiting_enrollment" {
+					// Waiting to be added again is not a service fault: restarting cannot help.
+					recovery = dashboardEnrollmentGuidance + " Then run `pb doctor` again."
+				}
 			}
 			return doctorpkg.Check{Category: "local", Code: "daemon", Status: status, Summary: "The local daemon is " + snapshot.DaemonState + ".", Recovery: recovery}
 		}},
@@ -266,7 +270,8 @@ func doctorPeerCheck(result tunnel.NativeProbe) doctorpkg.Check {
 // console) is named as such; a missing sign-in points at pb login too.
 func doctorCredentialFailure(check doctorpkg.Check, err error) doctorpkg.Check {
 	var signedOut *sessionauth.SignedOutError
-	if errors.As(err, &signedOut) {
+	// The server rejecting the stored credential at refresh is the same fact as a signed-out sign-in.
+	if errors.As(err, &signedOut) || errors.Is(err, api.ErrUnauthenticated) {
 		check.Summary = "This computer is signed out of Paperboat: its sign-in was revoked, for example because the computer was removed from the account."
 		check.Recovery = dashboardEnrollmentGuidance + " That signs in again and adds this computer back. Then run `pb doctor` again."
 		return check
