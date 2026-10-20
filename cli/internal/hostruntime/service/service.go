@@ -573,9 +573,11 @@ func renderSystemd(config Config) ([]byte, error) {
 	}
 	options = append(options, unit.NewUnitOption("Service", "NoNewPrivileges", noNewPrivileges))
 	privateTmp := "true"
-	if config.Kind == DaemonKind {
+	if config.Kind == DaemonKind || config.Kind == ConfigKind {
 		// User-service mount isolation also creates a user namespace on Linux.
-		// Unmapped root appears as nobody and cannot authenticate machineguard.
+		// Unmapped root appears as nobody and cannot authenticate machineguard, and on
+		// Ubuntu 24.04 AppArmor confines that namespace so the config worker cannot even
+		// open "/" (EACCES), which left config sync pending forever.
 		privateTmp = "false"
 	}
 	options = append(options, unit.NewUnitOption("Service", "PrivateTmp", privateTmp))

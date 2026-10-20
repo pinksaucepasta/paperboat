@@ -90,6 +90,18 @@ func TestSystemdDaemonPreservesRootPeerCredentials(t *testing.T) {
 	}
 }
 
+// On Ubuntu 24.04 the user namespace PrivateTmp creates in a user service is confined by AppArmor
+// (profile unprivileged_userns denies open of "/"), so the config sync worker never started.
+func TestSystemdConfigWorkerDoesNotCreateAUserNamespace(t *testing.T) {
+	body, err := renderSystemd(Config{Kind: ConfigKind, Executable: "/opt/pb", Arguments: []string{"daemon", "__runtime-config"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "PrivateTmp=false") {
+		t.Fatalf("config worker would run in a confined user namespace:\n%s", body)
+	}
+}
+
 func TestSystemdWorkerUsesPrivateTmp(t *testing.T) {
 	body, err := renderSystemd(Config{Kind: WorkerKind, User: "paperboat", Group: "paperboat", Executable: "/opt/pb", Arguments: []string{"run"}})
 	if err != nil {
