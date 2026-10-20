@@ -459,7 +459,7 @@ test_application_pairs() {
   for source in "${TLIST[@]}"; do
     for target in "${TLIST[@]}"; do
       case "$kind" in
-        transfer-multi|exec-repeat|ssh-tools|transfer-manage|exec-cancel|ssh-doctor|inbox-manage)
+        transfer-multi|exec-repeat|ssh-tools|transfer-manage|exec-cancel|ssh-doctor|inbox-manage|transfer-resume)
           [ "$source" != "$target" ] || continue ;;
         preview-manage|preview-inspect) [ "$source" = "$target" ] || continue ;;
       esac
@@ -880,6 +880,7 @@ test_application_pairs exec-main exec_lifecycle.py exec
 test_application_pairs ssh-main ssh_lifecycle.py
 test_application_pairs ssh-tools ssh_tools_lifecycle.py
 test_application_pairs transfer-multi transfer_lifecycle.py
+test_application_pairs transfer-resume transfer_resume.py
 test_application_pairs exec-repeat exec_lifecycle.py repeated
 test_application_pairs readiness-main exec_lifecycle.py readiness
 test_application_pairs exec-cancel exec_cancel.py
