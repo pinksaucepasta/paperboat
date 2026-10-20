@@ -110,6 +110,24 @@ func (s *Store) GetOperation(ctx context.Context, accountID, operationID string)
 			operation, err = s.db.Queries().GetPreviewTunnelOperation(ctx, dbsqlc.GetPreviewTunnelOperationParams{ID: operationID, AccountID: accountID})
 		}
 	}
+	if err == nil && (operation.OperationType == "route.create" || operation.OperationType == "route.patch") && (operation.State == "pending" || operation.State == "running") {
+		// Adding or changing a route is done when the edge serves its current generation, which is
+		// also what the tunnel status reports as ready. Nothing else marks these operations
+		// succeeded, so a --wait on `route add` never ended.
+		result, refreshErr := s.db.Pool().Exec(ctx, `UPDATE operations o
+ SET state='succeeded',phase='ready',progress=100,outcome='changed',retrying=false,next_retry_at=NULL,error_code=NULL,completed_at=$3,updated_at=$3
+ FROM tunnel_routes r JOIN tunnels t ON t.id=r.tunnel_id
+ WHERE o.id=$2 AND o.account_id=$1 AND o.resource_kind='route' AND o.resource_id=r.id
+ AND o.operation_type IN ('route.create','route.patch') AND o.state IN ('pending','running') AND t.account_id=$1
+ AND r.deleted_at IS NULL AND r.desired_state='active'
+ AND EXISTS (SELECT 1 FROM tunnel_edge_route_assignments a WHERE a.route_id=r.id AND a.state='active' AND a.observed_state='ready' AND a.route_generation=r.generation)`, accountID, operationID, s.now())
+		if refreshErr != nil {
+			return dbsqlc.Operation{}, translate(refreshErr)
+		}
+		if result.RowsAffected() == 1 {
+			operation, err = s.db.Queries().GetPreviewTunnelOperation(ctx, dbsqlc.GetPreviewTunnelOperationParams{ID: operationID, AccountID: accountID})
+		}
+	}
 	return operation, translate(err)
 }
 
