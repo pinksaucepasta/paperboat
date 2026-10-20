@@ -461,7 +461,7 @@ test_application_pairs() {
       case "$kind" in
         transfer-multi|exec-repeat|ssh-tools|transfer-manage|exec-cancel|ssh-doctor|inbox-manage|transfer-resume)
           [ "$source" != "$target" ] || continue ;;
-        preview-manage|preview-inspect|send-self) [ "$source" = "$target" ] || continue ;;
+        preview-manage|preview-inspect|send-self|preview-access) [ "$source" = "$target" ] || continue ;;
       esac
       id="$kind:$source-$target"
       skipped "$id" && continue
@@ -917,6 +917,7 @@ test_application_pairs transfer-manage transfer_manage.py
 test_application_pairs preview-manage preview_manage.py
 test_application_pairs preview-inspect preview_inspect.py
 test_application_pairs send-self send_self.py
+test_application_pairs preview-access preview_access.py
 test_device_application team-lifecycle team_lifecycle.py
 test_device_application team-roles team_lifecycle.py --roles
 test_device_application tunnel-manage tunnel_manage.py
