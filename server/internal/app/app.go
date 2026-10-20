@@ -175,6 +175,7 @@ func New(opts Options) (*App, error) {
 		CursorKey:        cursorKey[:],
 		PublicTCPPortMin: int32(opts.Config.Tunnel.PublicTCPPortMin),
 		PublicTCPPortMax: int32(opts.Config.Tunnel.PublicTCPPortMax),
+		BandwidthDenied:  bandwidthgate.New(store).Denied,
 	})
 	if err != nil {
 		_ = store.Close()

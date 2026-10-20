@@ -35,6 +35,8 @@ type fakeTunnelRepository struct {
 	createResult     MutationRecord
 	patchResult      MutationRecord
 	stateResult      MutationRecord
+	facts            HealthFacts
+	factsErr         error
 }
 
 func (f *fakeTunnelRepository) VerifyHost(_ context.Context, accountID, hostID string) error {
@@ -105,6 +107,10 @@ func (f *fakeTunnelRepository) Transition(_ context.Context, input StateRecord) 
 		return MutationRecord{}, f.transitionErr
 	}
 	return f.stateResult, nil
+}
+
+func (f *fakeTunnelRepository) HealthFacts(context.Context, string, string, time.Time) (HealthFacts, error) {
+	return f.facts, f.factsErr
 }
 
 func (f *fakeTunnelRepository) ReconcileExpired(context.Context, ExpiryRecord) ([]MutationRecord, error) {

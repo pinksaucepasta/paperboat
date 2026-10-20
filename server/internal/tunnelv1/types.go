@@ -1,6 +1,7 @@
 package tunnelv1
 
 import (
+	"context"
 	"crypto/sha256"
 	"time"
 
@@ -137,6 +138,9 @@ type Config struct {
 	NewEndpointID    func() (string, error)
 	PublicTCPPortMin int32
 	PublicTCPPortMax int32
+	// BandwidthDenied, when set, reports whether the account's workspaces are out of bandwidth
+	// allowance so status can say so. It must fail open.
+	BandwidthDenied func(ctx context.Context, accountID string, at time.Time) bool
 }
 
 type ExpiryReconcileRequest struct {

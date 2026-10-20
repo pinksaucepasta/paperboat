@@ -67,6 +67,7 @@ type TunnelRepository interface {
 	Patch(context.Context, PatchRecord) (MutationRecord, error)
 	Transition(context.Context, StateRecord) (MutationRecord, error)
 	ReconcileExpired(context.Context, ExpiryRecord) ([]MutationRecord, error)
+	HealthFacts(ctx context.Context, accountID, tunnelID string, now time.Time) (HealthFacts, error)
 }
 
 type CreateRecord struct {

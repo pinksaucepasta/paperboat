@@ -36,6 +36,7 @@ type Service struct {
 	newEndpointID    func() (string, error)
 	publicTCPPortMin int32
 	publicTCPPortMax int32
+	bandwidthDenied  func(ctx context.Context, accountID string, at time.Time) bool
 }
 
 // API is the narrow lifecycle surface consumed by the HTTP router. Route,
@@ -80,7 +81,7 @@ func NewService(repository TunnelRepository, config Config) (*Service, error) {
 	if config.PublicTCPPortMin < 1024 || config.PublicTCPPortMax > 65535 || config.PublicTCPPortMin > config.PublicTCPPortMax {
 		return nil, errors.New("public TCP port range is invalid")
 	}
-	return &Service{repository: repository, endpoint: config.EndpointBuilder, cursors: cursors, now: now, newID: idGenerator, newEndpointID: endpointIDGenerator, publicTCPPortMin: config.PublicTCPPortMin, publicTCPPortMax: config.PublicTCPPortMax}, nil
+	return &Service{repository: repository, endpoint: config.EndpointBuilder, cursors: cursors, now: now, newID: idGenerator, newEndpointID: endpointIDGenerator, publicTCPPortMin: config.PublicTCPPortMin, publicTCPPortMax: config.PublicTCPPortMax, bandwidthDenied: config.BandwidthDenied}, nil
 }
 
 // NewEndpointBuilder creates a deployment-specific stable hostname builder.
@@ -386,7 +387,16 @@ func (s *Service) Status(ctx context.Context, request previewtunnelapi.RequestCo
 	if err != nil {
 		return HealthView{}, err
 	}
-	return projectHealth(tunnel, request.CorrelationID, s.now().UTC()), nil
+	now := s.now().UTC()
+	view := projectHealth(tunnel, request.CorrelationID, now)
+	facts, err := s.repository.HealthFacts(ctx, request.Actor.AccountID, tunnelID, now)
+	if err != nil {
+		return HealthView{}, err
+	}
+	if s.bandwidthDenied != nil {
+		facts.BandwidthExhausted = s.bandwidthDenied(ctx, request.Actor.AccountID, now)
+	}
+	return explainHealth(view, facts), nil
 }
 
 // ReconcileExpired performs the server-side expiry sweep. Expiry changes only
