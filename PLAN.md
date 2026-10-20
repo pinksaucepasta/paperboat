@@ -2067,3 +2067,5 @@ Lane B request to Lane A/F (B2): after I deploy `POST preview attachment` return
 F6-06 still waits: Inbox GET to online hp/dadape/pbvm2 is 503 because the machine answers the server 400 (Lane B told). F11 and F2-07 wait for Lane A/U.
 2026-10-20 | Lane E F13-02 | Ticked L: F13-02 (usage_categories.py PASS pbvm2->dadape: every category recorded per path, billing == managed relay + edge); 21 MB gap on pprbtdev is history (not chased) | pb exec fails above ~1 MB output (sent to coordinator); F9-04 needs team-shared machines in the daemon topology (option C, Lane B first)
 
+2026-10-20 | Lane B deploy 3 | Server 2026.10.20.7 (9cadbd16), migration 115 live: team setting allow_private_access (private_access reaches shared machines only with grant + setting; `team_private_access_off` reason; per-machine team_auto_enabled removed), previews keep the DNS-named edge, superseded detach commands acked (412 loop gone), code-join guest removal. Rollback: server .6.
+Waits: Lane A rerun preview-protocols:hp/preview:hp/tunnel-transfer:hp on .7; Lane C toggle next to "Approve new machines" + denied text; Lane E F9-04 rerun; Lane A/F B2 (second preview carrier per edge).
