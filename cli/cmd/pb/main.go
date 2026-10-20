@@ -702,7 +702,7 @@ func addSendManagementCommands(root *cobra.Command) {
 	root.AddCommand(destination, list, status, cancelTransfer)
 }
 
-func transferClientForCommand(cobraCommand *cobra.Command, args []string) (*filetransfer.NativeClient, api.UserMachine, io.Closer, error) {
+func transferClientForCommand(cobraCommand *cobra.Command, args []string) (transferHistory, api.UserMachine, io.Closer, error) {
 	destinationRef, _ := cobraCommand.Flags().GetString("on")
 	if strings.TrimSpace(destinationRef) == "" {
 		return nil, api.UserMachine{}, nil, invocationError(errors.New("--on is required"))
@@ -719,6 +719,14 @@ func transferClientForCommand(cobraCommand *cobra.Command, args []string) (*file
 	destination, err := resolveUserMachine(ctx.Context, backend, destinationRef)
 	if err != nil {
 		return nil, api.UserMachine{}, nil, friendlyCommandError(err)
+	}
+	if destination.ID == sourceMachineID {
+		// Files sent to this computer are copied into its own Inbox: the Inbox is the history.
+		root, err := configuredInboxPath()
+		if err != nil {
+			return nil, api.UserMachine{}, nil, err
+		}
+		return thisComputerTransfers{root: root, machineID: sourceMachineID, userID: destination.OwnerAccount}, destination, noopCloser{}, nil
 	}
 	sessionID, _ := cobraCommand.Flags().GetString("session")
 	descriptor, err := backend.MachineFileTransferDescriptor(ctx.Context, destination.ID, sourceMachineID, sessionID)

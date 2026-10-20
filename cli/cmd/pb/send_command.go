@@ -169,7 +169,7 @@ func sendCommand() *cobra.Command {
 			var batch filetransfer.Batch
 			if destination.ID == sourceMachineID {
 				// This computer is the destination: the files are copied into its own Inbox, with no transfer.
-				batch, err = deliverToThisComputer(batchID, sourceMachineID, destination.ID, prepared.Sources)
+				batch, err = deliverToThisComputer(batchID, sourceMachineID, destination.ID, destination.OwnerAccount, prepared.Sources)
 				if err != nil {
 					return err
 				}

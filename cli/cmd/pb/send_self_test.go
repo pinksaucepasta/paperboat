@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -42,7 +43,7 @@ func TestSendToThisComputerCopiesIntoItsOwnInbox(t *testing.T) {
 		requests = append(requests, r.URL.Path)
 		switch r.URL.Path {
 		case "/v1/machines":
-			machine := api.UserMachine{ID: registration.MachineID, Alias: "thiscomputer", State: "ready", Online: true, Capabilities: api.MachineCapabilities{FileReceive: api.MachineCapability{Configured: true, Observed: true}}}
+			machine := api.UserMachine{ID: registration.MachineID, Alias: "thiscomputer", OwnerAccount: "user_1", State: "ready", Online: true, Capabilities: api.MachineCapabilities{FileReceive: api.MachineCapability{Configured: true, Observed: true}}}
 			writeAPIData(t, w, api.UserMachinePage{Items: []api.UserMachine{machine}, Pagination: api.Pagination{Limit: 200, Total: 1}})
 		case "/v1/team-inbox/requests":
 			writeAPIData(t, w, api.TeamInboxRequest{RequestID: "request_self", Status: "not_required"})
@@ -69,6 +70,20 @@ func TestSendToThisComputerCopiesIntoItsOwnInbox(t *testing.T) {
 	}
 	waitForCommandSocket(t, paths.SocketPath)
 
+	run := func(args ...string) string {
+		t.Helper()
+		command := newRootCommand()
+		var out, stderr bytes.Buffer
+		command.SetOut(&out)
+		command.SetErr(&stderr)
+		command.SetArgs(append([]string{"--config", configPath, "--no-customization"}, args...))
+		commandCtx, finish := context.WithTimeout(context.Background(), 10*time.Second)
+		defer finish()
+		if err := command.ExecuteContext(commandCtx); err != nil {
+			t.Fatalf("%v failed: %v (%s)", args, err, stderr.String())
+		}
+		return out.String()
+	}
 	send := func() cliJSONEnvelope {
 		t.Helper()
 		command := newRootCommand()
@@ -87,8 +102,37 @@ func TestSendToThisComputerCopiesIntoItsOwnInbox(t *testing.T) {
 		}
 		return receipt
 	}
+	var receipt struct {
+		Data struct {
+			Transfers []struct {
+				TransferID       string `json:"transfer_id"`
+				InitiatingUserID string `json:"initiating_user_id"`
+				State            string `json:"state"`
+			} `json:"transfers"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(run("send", file, "--to", "thiscomputer", "--json")), &receipt); err != nil || len(receipt.Data.Transfers) != 1 {
+		t.Fatalf("receipt: %v %+v", err, receipt)
+	}
+	first := receipt.Data.Transfers[0]
+	if first.TransferID == "" || first.InitiatingUserID != "user_1" || first.State != "delivered" {
+		t.Fatalf("receipt lacks its identity: %+v", first)
+	}
 	send()
-	send()
+	// The receipt's transfer id is valid for the transfer history afterwards.
+	var history struct {
+		Data struct {
+			Items []struct {
+				TransferID string `json:"transfer_id"`
+			} `json:"items"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(run("send", "list", "--on", "thiscomputer", "--json")), &history); err != nil || len(history.Data.Items) != 2 {
+		t.Fatalf("history: %v %+v", err, history)
+	}
+	if status := run("send", "status", first.TransferID, "--on", "thiscomputer"); !strings.Contains(status, first.TransferID) || !strings.Contains(status, "delivered") {
+		t.Fatalf("status: %q", status)
+	}
 	for _, name := range []string{"notes.txt", "notes (2).txt"} {
 		content, err := os.ReadFile(filepath.Join(inboxPath, name))
 		if err != nil || string(content) != "notes for later" {
