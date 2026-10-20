@@ -330,3 +330,74 @@ func TestNSSOutputLimit(t *testing.T) {
 		t.Fatal("NSS output was not bounded")
 	}
 }
+
+// A browser database that returns several certificates for one nickname still holds our root.
+func TestLinuxNSSRootPresentWhenTheNicknameListsSeveralCertificates(t *testing.T) {
+	_, _, otherPEM := renewalFixture(t, 365)
+	_, _, rootPEM := renewalFixture(t, 365)
+	root, err := parseLocalTrustRoot(rootPEM)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nickname := localTrustNickname(root)
+	present, err := nssLocalRootPresent(t.Context(), "fixture", root, func(_ context.Context, args ...string) ([]byte, error) {
+		for _, arg := range args {
+			if arg == "-a" {
+				return append(append([]byte(nil), otherPEM...), rootPEM...), nil
+			}
+		}
+		return []byte(nickname + " C,,\n"), nil
+	})
+	if err != nil || !present {
+		t.Fatalf("root among several certificates: present=%v err=%v", present, err)
+	}
+}
+
+// A retired Paperboat root whose browser entry cannot be retired safely must not stop the current
+// root from being installed: the entry is left alone and the active root is trusted.
+func TestLinuxUserTrustInstallsTheActiveRootDespiteAnUnretirableOldEntry(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("user-scoped browser trust test must not run as root")
+	}
+	_, _, oldPEM := renewalFixture(t, 365)
+	oldRoot, err := parseLocalTrustRoot(oldPEM)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, activePEM := renewalFixture(t, 365)
+	activeRoot, err := parseLocalTrustRoot(activePEM)
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("XDG_DATA_HOME", "")
+	bin := t.TempDir()
+	if err = os.WriteFile(filepath.Join(bin, "certutil"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	profile := filepath.Join(home, ".local", "share", "pki", "nssdb")
+	database := []linuxNSSDatabase{{Path: profile, Create: true}}
+	fake := &fakeNSSDatabase{}
+	uid := uint32(os.Geteuid())
+	if err = installLinuxUserTrustDatabases(t.Context(), home, uid, oldRoot, oldPEM, database, fake.run); err != nil {
+		t.Fatal(err)
+	}
+	// The old nickname now holds material that is not the old root (what the device showed).
+	_, _, strangerPEM := renewalFixture(t, 365)
+	stranger := append(append([]byte(nil), strangerPEM...), strangerPEM...)
+	fake.certificates[profile+"\x00"+localTrustNickname(oldRoot)] = stranger
+
+	if err = installLinuxUserTrust(t.Context(), activePEM, fake.run); err != nil {
+		t.Fatalf("an old Paperboat entry blocked the active root: %v", err)
+	}
+	present, err := nssLocalRootPresent(t.Context(), profile, activeRoot, fake.run)
+	if err != nil || !present {
+		t.Fatalf("active root not installed: present=%v err=%v", present, err)
+	}
+	if !bytes.Equal(fake.certificates[profile+"\x00"+localTrustNickname(oldRoot)], stranger) {
+		t.Fatal("foreign material under an old nickname was changed")
+	}
+}

@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -97,7 +98,8 @@ func installLinuxUserTrust(ctx context.Context, certificatePEM []byte, run nssCo
 	}
 	linuxUserTrustCache.Unlock()
 	if err = cleanupLinuxUserTrustExcept(ctx, certificate, run); err != nil {
-		return err
+		// Retiring older Paperboat roots is housekeeping: it must not keep the active root untrusted.
+		slog.Warn("older Paperboat browser trust could not be retired", "error", err)
 	}
 	if len(databases) == 0 {
 		cacheLinuxUserTrust(cacheKey, paths)
@@ -337,6 +339,10 @@ func removeLinuxUserTrustReceipt(ctx context.Context, certificate *x509.Certific
 			return err
 		}
 		present, checkErr := nssLocalRootPresent(ctx, path, certificate, run)
+		if errors.Is(checkErr, errNSSNicknameForeign) {
+			// Not our root any more: leave the entry alone and stop tracking it.
+			continue
+		}
 		if checkErr != nil {
 			return fmt.Errorf("inspect browser certificate database %s: %w", filepath.Base(path), checkErr)
 		}
@@ -659,6 +665,25 @@ func nssLocalRootPresent(ctx context.Context, database string, certificate *x509
 func nssLocalRootTrusted(ctx context.Context, database string, certificate *x509.Certificate, run nssCommand) (bool, error) {
 	return nssLocalRoot(ctx, database, certificate, run, true)
 }
+
+// errNSSNicknameForeign means a Paperboat nickname holds something other than the expected root.
+var errNSSNicknameForeign = errors.New("Paperboat NSS certificate nickname is occupied by foreign material; preserved")
+
+// pemContainsCertificate reports whether any certificate block of data is der. certutil may print
+// several certificates for one nickname, so the exact root only has to be among them.
+func pemContainsCertificate(data, der []byte) bool {
+	for {
+		block, rest := pem.Decode(data)
+		if block == nil {
+			return false
+		}
+		if block.Type == "CERTIFICATE" && bytes.Equal(block.Bytes, der) {
+			return true
+		}
+		data = rest
+	}
+}
+
 func nssLocalRoot(ctx context.Context, database string, certificate *x509.Certificate, run nssCommand, requireSSLTrust bool) (bool, error) {
 	nickname := localTrustNickname(certificate)
 	listing, err := run(ctx, "-L", "-d", "sql:"+database)
@@ -674,9 +699,8 @@ func nssLocalRoot(ctx context.Context, database string, certificate *x509.Certif
 		if err != nil {
 			return false, fmt.Errorf("read existing NSS certificate: %w", err)
 		}
-		block, rest := pem.Decode(encoded)
-		if block == nil || block.Type != "CERTIFICATE" || strings.TrimSpace(string(rest)) != "" || !bytes.Equal(block.Bytes, certificate.Raw) {
-			return false, errors.New("Paperboat NSS certificate nickname is occupied by foreign material; preserved")
+		if !pemContainsCertificate(encoded, certificate.Raw) {
+			return false, errNSSNicknameForeign
 		}
 		trust := strings.Split(fields[len(fields)-1], ",")
 		if requireSSLTrust && (len(trust) != 3 || !strings.Contains(trust[0], "C")) {
