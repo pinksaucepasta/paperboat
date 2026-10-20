@@ -53,6 +53,11 @@ func runTunnelLogs(command *cobra.Command, args []string) error {
 		if err := writeTunnelLogs(command, page, follow); err != nil {
 			return err
 		}
+		if len(page.Items) == 0 && cursor == "" && !follow {
+			if err := writeEmptyTunnelLogsState(command, client, tunnelID); err != nil {
+				return err
+			}
+		}
 		previousCursor := cursor
 		if page.NextCursor != "" {
 			cursor = page.NextCursor
@@ -104,4 +109,18 @@ func writeTunnelLogs(command *cobra.Command, page api.TunnelLogPage, follow bool
 		}
 	}
 	return nil
+}
+
+// writeEmptyTunnelLogsState explains an empty log: the tunnel's current state and what to do, so
+// "no entries" is never mistaken for "nothing is wrong".
+func writeEmptyTunnelLogsState(command *cobra.Command, client *api.Client, tunnelID string) error {
+	if jsonOutput, _ := command.Flags().GetBool("json"); jsonOutput {
+		return nil
+	}
+	health, err := client.TunnelStatusV1(command.Context(), tunnelID)
+	if err != nil {
+		return nil // the status line is only a courtesy; the empty log itself is the answer
+	}
+	_, err = fmt.Fprintf(command.OutOrStdout(), "No log entries yet.\n%s\n", tunnelStatusText(health))
+	return err
 }

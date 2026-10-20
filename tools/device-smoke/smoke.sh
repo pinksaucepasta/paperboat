@@ -783,6 +783,10 @@ elif sys.argv[2]=="tunnel-transfer":
  assert r["upload_16mib"] and r["download_16mib"]
 elif sys.argv[2]=="tunnel-survival":
  assert all(r[k] for k in ("pause_resume", "daemon_restart", "update", "host_service_restart"))
+elif sys.argv[2]=="preview-survival":
+ assert all(r[k] for k in ("daemon_restart", "origin_unavailable", "origin_recovers", "stop_ends"))
+elif sys.argv[2]=="tunnel-failures":
+ assert r["origin_stopped"] and r["host_stopped"]
 elif sys.argv[2]=="network-inventory":
  assert r["edges_and_verified_relays"]
 elif sys.argv[2]=="tunnel-lifecycle":
@@ -893,6 +897,8 @@ test_device_application tunnel-manage tunnel_manage.py
 test_device_application config-sync config_sync.py
 test_device_application tunnel-lifecycle tunnel_lifecycle.py
 test_device_application tunnel-survival tunnel_survival.py
+test_device_application tunnel-failures tunnel_failures.py
+test_device_application preview-survival preview_survival.py
 test_device_application tunnel-transfer tunnel_transfer.py
 test_local_access_settings
 test_device_application doctor-lifecycle doctor_lifecycle.py

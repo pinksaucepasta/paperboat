@@ -146,6 +146,22 @@ func tunnelStatusCommand() *cobra.Command {
 	return command
 }
 
+// tunnelStatusText is the human status: the unchanged "id code summary" line, then, when the tunnel is
+// not ready, what to do about it and whether Paperboat keeps retrying by itself.
+func tunnelStatusText(health api.TunnelHealth) string {
+	text := fmt.Sprintf("%s\t%s\t%s", health.ResourceID, health.OverallCode, health.Summary)
+	if health.OverallCode == "ready" {
+		return text
+	}
+	if health.RepairAction != "" && health.RepairAction != "No action required." {
+		text += "\n  What to do: " + health.RepairAction
+	}
+	if health.Retrying {
+		text += "\n  Paperboat keeps retrying; this clears by itself once the cause is fixed."
+	}
+	return text
+}
+
 func runTunnelStatus(command *cobra.Command, args []string) error {
 	watch, _ := command.Flags().GetBool("watch")
 	interval, _ := command.Flags().GetDuration("interval")
@@ -174,7 +190,7 @@ func runTunnelStatus(command *cobra.Command, args []string) error {
 		}
 		signature := string(signatureBytes)
 		if !watch || signature != last {
-			if e = tunnelOutput(command, out, fmt.Sprintf("%s\t%s\t%s", out.ResourceID, out.OverallCode, out.Summary)); e != nil {
+			if e = tunnelOutput(command, out, tunnelStatusText(out)); e != nil {
 				return e
 			}
 			last = signature
