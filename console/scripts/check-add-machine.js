@@ -6,7 +6,7 @@
 // command without a token) and back, and closing the dialog cancels the unused enrollment.
 //
 // With `window.__connect = <loopback sink URL>` it keeps the dialog open after the first checks,
-// sends the one-shot token to that sink (a loopback listener that stores it for `pb pair
+// sends the pairing command (one-shot token inside) to that sink (a loopback listener that stores it for the machine to run; `pb pair
 // --enrollment-token-file`; the token is never printed or kept in the steps), and waits up to four
 // minutes for the dialog to turn into "Machine connected" with an Open machine link, then checks
 // the machine exists on the server. `window.__machineId` holds its id for cleanup. Prints the steps.
@@ -103,8 +103,8 @@
     pass("switching back shows the pairing command", Boolean(await until(() => /\?p=/.test(command()))))
 
     if (sink) {
-      await fetch(sink, { method: "POST", mode: "no-cors", body: token })
-      pass("the token went to the loopback sink", true)
+      await fetch(sink, { method: "POST", mode: "no-cors", body: withToken })
+      pass("the command went to the loopback sink", true)
       const connected = await until(() => /Machine connected/.test(dialog()?.innerText ?? "") || null, 240000)
       pass("the dialog turns into Machine connected when the machine pairs", Boolean(connected))
       const open = dialog() && [...dialog().querySelectorAll("a")].find((a) => a.textContent.trim() === "Open machine")
