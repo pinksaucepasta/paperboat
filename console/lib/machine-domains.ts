@@ -2,7 +2,7 @@
 
 import { queryOptions } from "@tanstack/react-query"
 import { useMemo, useSyncExternalStore } from "react"
-import { ApiError, clientConfigQuery, useApiQuery } from "@/lib/api"
+import { ApiError, clientConfigQuery, send, useApiQuery } from "@/lib/api"
 
 /**
  * Domains machines are reachable under (`<name>.<domain>`). Paperboat's own domain is always
@@ -134,7 +134,7 @@ export const domainCheckQuery = (domain: string) =>
   queryOptions({
     queryKey: ["domain-check", domain],
     queryFn: async (): Promise<DomainCheck> => {
-      const response = await fetch(`/api/domain-check?${new URLSearchParams({ domain })}`)
+      const response = await send(`/api/domain-check?${new URLSearchParams({ domain })}`)
       const body = (await response.json().catch(() => null)) as {
         data?: DomainCheck
         error?: { code?: string; message?: string }

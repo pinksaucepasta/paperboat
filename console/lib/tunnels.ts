@@ -1,7 +1,7 @@
 "use client"
 
 import { queryOptions } from "@tanstack/react-query"
-import { api, ApiError, idempotencyKey, type Data } from "@/lib/api"
+import { api, ApiError, idempotencyKey, send, type Data } from "@/lib/api"
 import { uploadFile } from "@/lib/upload"
 
 /*
@@ -120,7 +120,7 @@ function change<T = unknown>(path: string, method: string, options: { etag?: str
  * it first; a preview that changed in between is still the one being stopped.
  */
 export async function stopPreview(id: string) {
-  const response = await fetch(`/api/v1/${previewPath(id)}`, { headers: { accept: "application/json" } })
+  const response = await send(`/api/v1/${previewPath(id)}`, { headers: { accept: "application/json" } })
   const etag = response.headers.get("etag")
   if (!response.ok || !etag) {
     if (response.status === 404) return
