@@ -399,9 +399,17 @@ func localDaemonCommand() *cobra.Command {
 						if err != nil {
 							return fmt.Errorf("refresh local machine access credentials: %w", err)
 						}
+						scoped := func(workspace string) (*api.Client, error) {
+							client := api.New(cfg.ServerURL, credential, &http.Client{Transport: peerHTTPTransport})
+							return client, client.SetWorkspace(workspace)
+						}
 						services, err := api.New(cfg.ServerURL, credential, &http.Client{Transport: peerHTTPTransport}).MachineServices(ctx)
 						if err != nil {
 							return fmt.Errorf("refresh authorized local browser services: %w", err)
+						}
+						machines, err = withTeamSharedMachines(ctx, machines, scoped)
+						if err != nil {
+							return fmt.Errorf("refresh machines shared by teams: %w", err)
 						}
 						return coordinator.ApplyMachines(ctx, machines, services)
 					},
