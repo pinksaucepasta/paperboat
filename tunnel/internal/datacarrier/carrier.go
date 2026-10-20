@@ -529,7 +529,8 @@ type openResult struct {
 func (s *Server) finishCanceledOpen(result <-chan openResult) {
 	opened := <-result
 	<-s.openings
-	if opened.stream != nil {
+	// A failed open can return a typed-nil stream inside the interface; only a successful open owns one.
+	if opened.err == nil && opened.stream != nil {
 		_ = opened.stream.Close()
 	}
 	s.releasePermit()
