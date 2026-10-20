@@ -43,27 +43,27 @@ type SharedTerminalSharing struct {
 	RecentOutputWarning string                `json:"recent_output_warning"`
 }
 type SharedTerminalSession struct {
-	CurrentDirectory      string                      `json:"current_directory,omitempty"`
-	ForegroundProcess     string                      `json:"foreground_process,omitempty"`
-	ID                    string                      `json:"id"`
-	Name                  string                      `json:"name"`
-	Title                 string                      `json:"title"`
-	Machine               string                      `json:"machine"`
-	StartedIn             string                      `json:"started_in"`
-	State                 string                      `json:"state"`
-	DesiredState          string                      `json:"desired_state"`
-	RuntimeState          string                      `json:"runtime_state"`
-	LastActiveAt          *time.Time                  `json:"last_active_at"`
-	ExpiresAt             *time.Time                  `json:"expires_at,omitempty"`
-	Target                SharedTerminalTarget        `json:"target"`
-	OwnerAccount          string                      `json:"owner_account"`
-	CanManage             bool                        `json:"can_manage"`
-	Role                  string                      `json:"role"`
-	BrowserOnly           bool                        `json:"browser_only"`
-	Sharing               SharedTerminalSharing       `json:"sharing"`
-	Participants          []helperruntime.Participant `json:"participants"`
-	ParticipantsAvailable bool                        `json:"participants_available"`
-	RuntimeGeneration     uint64                      `json:"-"`
+	CurrentDirectory      string                `json:"current_directory,omitempty"`
+	ForegroundProcess     string                `json:"foreground_process,omitempty"`
+	ID                    string                `json:"id"`
+	Name                  string                `json:"name"`
+	Title                 string                `json:"title"`
+	Machine               string                `json:"machine"`
+	StartedIn             string                `json:"started_in"`
+	State                 string                `json:"state"`
+	DesiredState          string                `json:"desired_state"`
+	RuntimeState          string                `json:"runtime_state"`
+	LastActiveAt          *time.Time            `json:"last_active_at"`
+	ExpiresAt             *time.Time            `json:"expires_at,omitempty"`
+	Target                SharedTerminalTarget  `json:"target"`
+	OwnerAccount          string                `json:"owner_account"`
+	CanManage             bool                  `json:"can_manage"`
+	Role                  string                `json:"role"`
+	BrowserOnly           bool                  `json:"browser_only"`
+	Sharing               SharedTerminalSharing `json:"sharing"`
+	Participants          []SessionParticipant  `json:"participants"`
+	ParticipantsAvailable bool                  `json:"participants_available"`
+	RuntimeGeneration     uint64                `json:"-"`
 }
 
 func (s *Service) TerminalSessionCatalog(ctx context.Context, account string) ([]SharedTerminalSession, error) {
@@ -182,7 +182,7 @@ func (s *Service) terminalSessionInventory(ctx context.Context, account, exactSe
 		}
 		v.Sharing.RecentOutputWarning = terminalRecentOutputWarning
 		v.Sharing.Grants = []SharedTerminalGrant{}
-		v.Participants = []helperruntime.Participant{}
+		v.Participants = []SessionParticipant{}
 		if v.Sharing.TeamID == "" {
 			v.Sharing.Audience = "none"
 		} else if allMembers {
@@ -362,9 +362,14 @@ func (s *Service) TerminalSessionSharing(ctx context.Context, account, sessionID
 		value := snap.LastActiveAt.UTC()
 		item.LastActiveAt = &value
 	}
-	item.Participants = snap.Participants
-	if item.Participants == nil {
-		item.Participants = []helperruntime.Participant{}
+	item.Participants, err = s.describeParticipants(ctx, account, item.OwnerAccount, item.ID, snap.Participants)
+	if err != nil {
+		// Names are a courtesy: the live list must not disappear because they could not be resolved.
+		supportreport.CaptureFromContext(ctx, "paperboat-server", "http_terminal", "service_error", "terminal_host_unavailable", err)
+		item.Participants = make([]SessionParticipant, 0, len(snap.Participants))
+		for _, participant := range snap.Participants {
+			item.Participants = append(item.Participants, SessionParticipant{Participant: participant, Kind: "member"})
+		}
 	}
 	item.ParticipantsAvailable = true
 	item.RuntimeState = snap.State
@@ -372,7 +377,7 @@ func (s *Service) TerminalSessionSharing(ctx context.Context, account, sessionID
 	item.RuntimeGeneration = snap.Generation
 	if snap.State == "closed" || snap.State == "exited" || snap.State == "deleted" {
 		item.Sharing = SharedTerminalSharing{Audience: "none", Grants: []SharedTerminalGrant{}, RecentOutputWarning: terminalRecentOutputWarning}
-		item.Participants = []helperruntime.Participant{}
+		item.Participants = []SessionParticipant{}
 	}
 	return item, nil
 }

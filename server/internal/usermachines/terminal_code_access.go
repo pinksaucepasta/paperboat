@@ -15,7 +15,6 @@ import (
 
 	"github.com/pinksaucepasta/paperboat-server/internal/audit"
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/helperruntime"
 	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
 )
 
@@ -293,7 +292,7 @@ func (s *Service) TerminalBrowserSession(ctx context.Context, accountID, guestID
 	out.Target = SharedTerminalTarget{Kind: "machine", ID: decision.MachineID, MachineID: decision.MachineID, EnvironmentID: decision.EnvironmentID}
 	out.Sharing.RecentOutputWarning = terminalRecentOutputWarning
 	out.Sharing.Grants = []SharedTerminalGrant{}
-	out.Participants = []helperruntime.Participant{}
+	out.Participants = []SessionParticipant{}
 	err = s.db.Pool().QueryRow(ctx, `SELECT t.name,t.runtime_state,m.alias,t.launch_cwd FROM user_machine_terminal_sessions t JOIN user_machines m ON m.id=t.user_machine_id WHERE t.id=$1`, sessionID).Scan(&out.Name, &out.State, &out.Target.Name, &out.StartedIn)
 	if err != nil {
 		return SharedTerminalSession{}, err

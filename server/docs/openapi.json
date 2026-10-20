@@ -598,7 +598,8 @@
                 "account_id",
                 "client_id",
                 "role",
-                "connected_at"
+                "connected_at",
+                "kind"
               ],
               "properties": {
                 "attachment_id": {
@@ -620,6 +621,21 @@
                 "connected_at": {
                   "type": "string",
                   "format": "date-time"
+                },
+                "kind": {
+                  "enum": [
+                    "member",
+                    "guest"
+                  ],
+                  "description": "member is a signed-in account; guest joined with the terminal code."
+                },
+                "display_name": {
+                  "type": "string",
+                  "description": "The account's name, or what a guest typed. Present only for the session owner and for the participant themselves."
+                },
+                "email": {
+                  "type": "string",
+                  "description": "Present only when the viewer is the owner or the participant and may already know it: the participant's own, a shared team's, or an address the owner allowed for this terminal."
                 }
               }
             }
