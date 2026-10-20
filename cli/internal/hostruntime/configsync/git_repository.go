@@ -346,8 +346,17 @@ func (r *GitRepository) open(ctx context.Context) (accessResult RepositoryAccess
 		return RepositoryAccess{}, nil, errors.Join(ErrGitRepositoryInvalid, sanitizeGitError(err))
 	}
 	remote, err := repository.Remote("origin")
-	if err != nil || len(remote.Config().URLs) != 1 || remote.Config().URLs[0] != repositoryURL {
+	if err != nil {
 		return RepositoryAccess{}, nil, errors.Join(ErrGitRepositoryInvalid, sanitizeGitError(err))
+	}
+	if urls := remote.Config().URLs; len(urls) != 1 || urls[0] != repositoryURL {
+		// The clone only caches the repository this assignment currently names. When the machine
+		// is pointed at another repository the cache is stale, not invalid: drop it and clone
+		// afresh (a baseline of another repository is already ignored by the reconciler).
+		if removeErr := os.RemoveAll(r.root); removeErr != nil {
+			return RepositoryAccess{}, nil, repositoryUnavailableFailure(removeErr)
+		}
+		return r.open(ctx)
 	}
 	return access, repository, nil
 }

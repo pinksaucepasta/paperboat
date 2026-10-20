@@ -159,3 +159,65 @@ func stringContains(value, fragment string) bool {
 	}
 	return false
 }
+
+func seededBareRepository(t *testing.T, root, name string) (string, string) {
+	t.Helper()
+	bare := filepath.Join(root, name+".git")
+	if _, err := git.PlainInit(bare, true); err != nil {
+		t.Fatal(err)
+	}
+	seedPath := filepath.Join(root, name+"-seed")
+	seed, err := git.PlainInit(seedPath, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(seedPath, "file"), []byte(name), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	worktree, _ := seed.Worktree()
+	if _, err := worktree.Add("file"); err != nil {
+		t.Fatal(err)
+	}
+	hash, err := worktree.Commit("seed "+name, &git.CommitOptions{Author: &object.Signature{Name: "Paperboat", Email: "config@paperboat.invalid", When: time.Unix(1, 0).UTC()}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := seed.CreateRemote(&config.RemoteConfig{Name: "origin", URLs: []string{bare}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := seed.Push(&git.PushOptions{RemoteName: "origin"}); err != nil {
+		t.Fatal(err)
+	}
+	return bare, hash.String()
+}
+
+// Pointing a machine at another repository leaves the assignment's clone cache aimed at the old
+// one. That used to make every later sync fail forever with "invalid config Git repository".
+func TestGitRepositoryRecloneWhenTheAssignmentNamesAnotherRepository(t *testing.T) {
+	initRepositoryTransports()
+	t.Setenv("PATH", "")
+	root := t.TempDir()
+	first, _ := seededBareRepository(t, root, "first")
+	second, secondHead := seededBareRepository(t, root, "second")
+	checkout := filepath.Join(root, "checkout")
+	open := func(url string) *GitRepository {
+		repository, err := NewGitRepository(GitRepositoryConfig{
+			Root: checkout, Access: staticAccessSource{RepositoryAccess{
+				RepositoryID: "repository", AssignmentID: "assignment", EnvironmentID: "environment", MachineID: "helper",
+				CloneURL: url, PublishURL: url, Branch: "master", Transport: "local",
+				Capability: "repository_contents_read", ExpiresAt: time.Now().Add(time.Hour),
+			}}, Reconciler: committingReconciler{},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return repository
+	}
+	if _, err := open(first).Fetch(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	remote, err := open(second).Fetch(context.Background())
+	if err != nil || remote.Revision != secondHead {
+		t.Fatalf("fetch after switching repository = %#v, %v; want head %s", remote, err, secondHead)
+	}
+}
