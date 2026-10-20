@@ -49,7 +49,7 @@ func TestPreviewLeaseScopedPoolAdmissionOnPostgres(t *testing.T) {
 	// Another account's tunnel policy and this account's relay policy must
 	// not restrict its managed preview URLs.
 	exec(t, `INSERT INTO paperboat.selfhost_pool_policies(scope_kind,scope_id,capability,mode) VALUES('account',$1,'tunnel','self-hosted-only'),('account',$2,'relay','self-hosted-only')`, other, account)
-	for index, mode := range []string{"unset", "mixed", "self-hosted-only"} {
+	for index, mode := range []string{"unset", "managed-only", "self-hosted-only"} {
 		t.Run(mode, func(t *testing.T) {
 			if mode != "unset" {
 				exec(t, `INSERT INTO paperboat.selfhost_pool_policies(scope_kind,scope_id,capability,mode) VALUES('account',$1,'tunnel',$2) ON CONFLICT(scope_kind,scope_id,capability) DO UPDATE SET mode=EXCLUDED.mode`, account, mode)
