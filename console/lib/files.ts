@@ -14,7 +14,7 @@ import { uploadFile } from "@/lib/upload"
  */
 
 /** Which Inbox endpoints the deployed server answers. Flip one when its deploy is logged. */
-export const inboxLive = { upload: false, content: false, remove: false } as const
+export const inboxLive = { upload: false, content: true, remove: true, send: false, share: false } as const
 
 export type InboxFile = {
   id: string
