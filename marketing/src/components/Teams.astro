@@ -78,11 +78,13 @@ const shared = [
 <style>
   .teams {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: 16px;
     align-items: start;
   }
 
   .card {
+    min-width: 0;
     background: var(--background);
     border-radius: 12px;
     box-shadow: 0 0 0 1px var(--rule), 0 16px 40px -24px rgb(16 24 64 / 0.18);
@@ -143,11 +145,16 @@ const shared = [
   }
 
   .mono-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     font-family: var(--font-mono);
     font-size: 13px;
   }
 
   .detail {
+    flex-shrink: 0;
     color: var(--fog);
     font-size: 13px;
   }
@@ -204,7 +211,7 @@ const shared = [
     }
 
     .teams {
-      grid-template-columns: 340px 1fr;
+      grid-template-columns: 340px minmax(0, 1fr);
       gap: 24px;
     }
   }
