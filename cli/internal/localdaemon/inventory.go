@@ -3,6 +3,7 @@ package localdaemon
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
 	"sort"
 	"sync"
 	"time"
@@ -38,6 +39,9 @@ type InventoryConfig struct {
 	ReconcileMachines func(context.Context, []api.UserMachine) error
 	OnMachines        func(context.Context, []api.UserMachine)
 	OnRefresh         func(error)
+	// Events wakes a refresh when the server reports an inventory change; while its wait loop is
+	// healthy the periodic refresh becomes a safety net. Nil refreshes on the interval only.
+	Events *machineevents.Subscription
 }
 
 type Inventory struct {
@@ -49,6 +53,7 @@ type Inventory struct {
 	reconcileMachines func(context.Context, []api.UserMachine) error
 	onMachines        func(context.Context, []api.UserMachine)
 	onRefresh         func(error)
+	events            *machineevents.Subscription
 	mu                sync.Mutex
 	completionMu      sync.RWMutex
 	completion        localapi.CompletionSnapshot
@@ -79,6 +84,7 @@ func NewInventory(config InventoryConfig) (*Inventory, error) {
 		reconcileMachines: config.ReconcileMachines,
 		onMachines:        config.OnMachines,
 		onRefresh:         config.OnRefresh,
+		events:            config.Events,
 	}, nil
 }
 
@@ -92,15 +98,11 @@ func (i *Inventory) Run(ctx context.Context) error {
 }
 
 func (i *Inventory) runTicker(ctx context.Context) error {
-	ticker := time.NewTicker(i.refreshInterval)
-	defer ticker.Stop()
 	for {
-		select {
-		case <-ctx.Done():
+		if !i.events.Wait(ctx, i.refreshInterval) {
 			return ctx.Err()
-		case <-ticker.C:
-			_ = i.Refresh(ctx)
 		}
+		_ = i.Refresh(ctx)
 	}
 }
 

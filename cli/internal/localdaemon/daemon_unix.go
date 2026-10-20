@@ -13,6 +13,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/supportref"
 )
@@ -36,6 +37,8 @@ type DaemonConfig struct {
 	FileTransfers           localapi.FileTransferBroker
 	ReconcileMachines       func(context.Context, []api.UserMachine) error
 	OnMachines              func(context.Context, []api.UserMachine)
+	// InventoryEvents wakes the machine inventory refresh when the server reports a change.
+	InventoryEvents *machineevents.Subscription
 }
 
 func Run(ctx context.Context, config DaemonConfig) (runErr error) {
@@ -107,7 +110,7 @@ func Run(ctx context.Context, config DaemonConfig) (runErr error) {
 		return err
 	}
 	diagnosticAPI := &diagnosticService{recorder: recorder, store: store, stateRoot: config.Paths.StateRoot, ownerUID: config.OwnerUID, clock: diagnosticClock}
-	inventory, err := NewInventory(InventoryConfig{Source: config.Source, Store: store, RefreshInterval: config.RefreshInterval, RequestTimeout: config.RequestTimeout, Clock: config.Clock, ReconcileMachines: config.ReconcileMachines, OnRefresh: inventoryRefreshObserver(ctx, recorder), OnMachines: func(refreshCtx context.Context, machines []api.UserMachine) {
+	inventory, err := NewInventory(InventoryConfig{Source: config.Source, Store: store, RefreshInterval: config.RefreshInterval, RequestTimeout: config.RequestTimeout, Clock: config.Clock, ReconcileMachines: config.ReconcileMachines, Events: config.InventoryEvents, OnRefresh: inventoryRefreshObserver(ctx, recorder), OnMachines: func(refreshCtx context.Context, machines []api.UserMachine) {
 		if config.OnMachines != nil {
 			config.OnMachines(refreshCtx, machines)
 		}

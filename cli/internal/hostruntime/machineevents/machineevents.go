@@ -48,6 +48,8 @@ const (
 	DefaultFallbackInterval = time.Minute
 	// requestTimeout exceeds the 30 s the server holds a request, with room for the round trip.
 	requestTimeout = 40 * time.Second
+	// WaitTimeout bounds one wait made by a caller's own client; see requestTimeout.
+	WaitTimeout = requestTimeout
 	minBackoff     = time.Second
 	maxBackoff     = 30 * time.Second
 	responseLimit  = 4 << 10
@@ -71,18 +73,14 @@ type Config struct {
 	FallbackInterval time.Duration
 }
 
+// WaitFunc performs one wait request: it returns the topics whose generation is above the one given,
+// or none after the server's hold time.
+type WaitFunc func(ctx context.Context, known map[Topic]int64) (map[Topic]int64, error)
+
 // Hub runs the wait loop and wakes subscribers.
 type Hub struct {
-	endpoint string
-	tokens   interface {
-		Token(context.Context) (string, error)
-	}
-	proofs interface {
-		Proof(ctx context.Context, operationID, method, path string, body []byte) ([]byte, error)
-	}
-	operationID func() (string, error)
-	client      *http.Client
-	fallback    time.Duration
+	wait     WaitFunc
+	fallback time.Duration
 
 	mu      sync.Mutex
 	subs    map[Topic][]*Subscription
@@ -93,27 +91,55 @@ type Hub struct {
 	done    chan struct{}
 }
 
-// New validates the configuration. The loop starts with Start.
+// New builds a hub for a host that authenticates with its machine identity. The loop starts with Start.
 func New(config Config) (*Hub, error) {
 	parsed, err := url.Parse(config.ControlURL)
 	if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || parsed.User != nil || config.Tokens == nil || config.Proofs == nil || config.OperationID == nil || config.Transport == nil {
 		return nil, ErrInvalid
 	}
-	if config.FallbackInterval == 0 {
-		config.FallbackInterval = DefaultFallbackInterval
-	}
-	if config.FallbackInterval < 0 {
-		return nil, ErrInvalid
-	}
 	endpoint := strings.TrimRight(config.ControlURL, "/") + Path
-	return &Hub{
+	signed := &signedWaiter{
 		endpoint: endpoint, tokens: config.Tokens, proofs: config.Proofs, operationID: config.OperationID,
 		client: &http.Client{
 			Transport: errorreport.TransportOperation(config.Transport, endpoint, "machine_events"), Timeout: requestTimeout,
 			CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("machine events redirect refused") },
 		},
-		fallback: config.FallbackInterval, subs: make(map[Topic][]*Subscription), known: make(map[Topic]int64), changed: make(chan struct{}),
-	}, nil
+	}
+	return NewWithWaiter(signed.wait, config.FallbackInterval)
+}
+
+// UserWaiter adapts a wait that speaks plain topic names (the CLI's API client) to a WaitFunc and
+// bounds each request by WaitTimeout.
+func UserWaiter(wait func(ctx context.Context, known map[string]int64) (map[string]int64, error)) WaitFunc {
+	return func(ctx context.Context, known map[Topic]int64) (map[Topic]int64, error) {
+		names := make(map[string]int64, len(known))
+		for topic, generation := range known {
+			names[string(topic)] = generation
+		}
+		ctx, cancel := context.WithTimeout(ctx, WaitTimeout)
+		defer cancel()
+		moved, err := wait(ctx, names)
+		if err != nil {
+			return nil, err
+		}
+		topics := make(map[Topic]int64, len(moved))
+		for name, generation := range moved {
+			topics[Topic(name)] = generation
+		}
+		return topics, nil
+	}
+}
+
+// NewWithWaiter builds a hub around any wait request, for callers that authenticate another way
+// (the signed-in CLI daemon waits with the user's credential). A zero fallback uses the default.
+func NewWithWaiter(wait WaitFunc, fallback time.Duration) (*Hub, error) {
+	if wait == nil || fallback < 0 {
+		return nil, ErrInvalid
+	}
+	if fallback == 0 {
+		fallback = DefaultFallbackInterval
+	}
+	return &Hub{wait: wait, fallback: fallback, subs: make(map[Topic][]*Subscription), known: make(map[Topic]int64), changed: make(chan struct{})}, nil
 }
 
 // Subscribe registers interest in a topic. Subscribe before Start, or at any time; a topic that is
@@ -248,9 +274,21 @@ func (h *Hub) deliver(moved map[Topic]int64) {
 	}
 }
 
-// wait performs one request: it returns the topics that moved, or none after the server's hold time.
-func (h *Hub) wait(ctx context.Context, topics map[Topic]int64) (map[Topic]int64, error) {
-	operationID, err := h.operationID()
+// signedWaiter is the machine-identity wait request.
+type signedWaiter struct {
+	endpoint string
+	tokens   interface {
+		Token(context.Context) (string, error)
+	}
+	proofs interface {
+		Proof(ctx context.Context, operationID, method, path string, body []byte) ([]byte, error)
+	}
+	operationID func() (string, error)
+	client      *http.Client
+}
+
+func (w *signedWaiter) wait(ctx context.Context, topics map[Topic]int64) (map[Topic]int64, error) {
+	operationID, err := w.operationID()
 	if err != nil || operationID == "" {
 		return nil, fmt.Errorf("machine events operation id: %w", errors.Join(ErrInvalid, err))
 	}
@@ -260,15 +298,15 @@ func (h *Hub) wait(ctx context.Context, topics map[Topic]int64) (map[Topic]int64
 	if err != nil {
 		return nil, err
 	}
-	token, err := h.tokens.Token(ctx)
+	token, err := w.tokens.Token(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("machine events identity: %w", err)
 	}
-	proof, err := h.proofs.Proof(ctx, operationID, http.MethodPost, Path, body)
+	proof, err := w.proofs.Proof(ctx, operationID, http.MethodPost, Path, body)
 	if err != nil {
 		return nil, fmt.Errorf("machine events proof: %w", err)
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, h.endpoint, bytes.NewReader(body))
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, w.endpoint, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -277,7 +315,7 @@ func (h *Hub) wait(ctx context.Context, topics map[Topic]int64) (map[Topic]int64
 	request.Header.Set("Idempotency-Key", operationID)
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json")
-	response, err := h.client.Do(request)
+	response, err := w.client.Do(request)
 	if err != nil {
 		return nil, err
 	}

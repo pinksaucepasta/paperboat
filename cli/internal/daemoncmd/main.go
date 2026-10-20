@@ -20,6 +20,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	helperconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
 	previewruntime "github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntimecmd"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntimeentry"
@@ -355,8 +356,29 @@ func localDaemonCommand() *cobra.Command {
 				go newRelayLatencyReporter(cfg.ServerURL, source.SourceMachineID, peerHTTPTransport, func(ctx context.Context) (config.Credential, error) {
 					return authSource.WithContext(ctx).Credential()
 				}, peerTunnel.NativeRelayCandidates).Run(ctx)
+				// The server tells the daemon when the machine list changed, so inventory refreshes at
+				// once; without a machine id (never enrolled) or while the wait fails it polls as before.
+				var inventoryEvents *machineevents.Subscription
+				if source.SourceMachineID != "" {
+					events, eventsErr := machineevents.NewWithWaiter(machineevents.UserWaiter(func(waitCtx context.Context, known map[string]int64) (map[string]int64, error) {
+						credential, credentialErr := authSource.WithContext(waitCtx).Credential()
+						if credentialErr != nil {
+							return nil, credentialErr
+						}
+						return api.New(cfg.ServerURL, credential, &http.Client{Transport: peerHTTPTransport}).WaitMachineEvents(waitCtx, source.SourceMachineID, known)
+					}), 0)
+					if eventsErr != nil {
+						return eventsErr
+					}
+					inventoryEvents = events.Subscribe(machineevents.TopicInventory)
+					if eventsErr = events.Start(ctx); eventsErr != nil {
+						return eventsErr
+					}
+					defer func() { _ = events.Shutdown(context.WithoutCancel(ctx)) }()
+				}
 				return localdaemon.Run(ctx, localdaemon.DaemonConfig{
-					Paths: paths, Source: source, ManagedSSH: managedConfig, IssuePeerStream: source.IssuePeerStream,
+					InventoryEvents: inventoryEvents,
+					Paths:           paths, Source: source, ManagedSSH: managedConfig, IssuePeerStream: source.IssuePeerStream,
 					OwnerUID: os.Geteuid(), OwnerGID: os.Getegid(),
 					ReconcileMachines: func(ctx context.Context, machines []api.UserMachine) error {
 						if cfg.ControlSyncAddress != "" {

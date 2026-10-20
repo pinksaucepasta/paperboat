@@ -138,41 +138,37 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body, out a
 	return c.doRequestMeta(ctx, method, path, body, out, headers, strict, nil)
 }
 
-// doRequestMeta is the same authenticated request path used by the rest of
-// the client, with response headers exposed to callers that need optimistic
-// concurrency metadata. Keeping this as a narrow extension avoids making
-// ETags or other transport headers part of every existing API method.
-func (c *Client) doRequestMeta(ctx context.Context, method, path string, body, out any, headers http.Header, strict bool, responseHeaders *http.Header) error {
+// newRequest builds one authenticated request of the shared client: workspace routing, client
+// identification headers, a support reference and the user's credential.
+func (c *Client) newRequest(ctx context.Context, method, path string, body any, headers http.Header) (req *http.Request, encodedBody []byte, requestSupportReference, resolvedPath string, err error) {
 	if strings.TrimSpace(c.baseURL) == "" {
-		return errors.New("paperboat-server base URL is not configured")
+		return nil, nil, "", path, errors.New("paperboat-server base URL is not configured")
 	}
-	var err error
 	path, err = c.workspaceRequestPath(path)
 	if err != nil {
-		return err
+		return nil, nil, "", path, err
 	}
 
 	var reader io.Reader
-	var encodedBody []byte
 	if body != nil {
-		encoded, err := json.Marshal(body)
-		if err != nil {
-			return fmt.Errorf("encode request body: %w", err)
+		encoded, marshalErr := json.Marshal(body)
+		if marshalErr != nil {
+			return nil, nil, "", path, fmt.Errorf("encode request body: %w", marshalErr)
 		}
 		encodedBody = encoded
 		reader = bytes.NewReader(encoded)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reader)
+	req, err = http.NewRequestWithContext(ctx, method, c.baseURL+path, reader)
 	if err != nil {
-		return err
+		return nil, nil, "", path, err
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "paperboat/"+buildinfo.Version)
 	req.Header.Set("X-Paperboat-Client", "paperboat")
 	req.Header.Set("X-Paperboat-Distribution", buildinfo.Distribution)
 	req.Header.Set("X-Paperboat-Protocol", buildinfo.ProtocolVersion)
-	requestSupportReference := supportref.FromContext(ctx)
+	requestSupportReference = supportref.FromContext(ctx)
 	if requestSupportReference == "" {
 		requestSupportReference = supportref.New()
 	}
@@ -183,12 +179,24 @@ func (c *Client) doRequestMeta(ctx context.Context, method, path string, body, o
 		req.Header.Set("Content-Type", "application/json")
 	}
 	if err := c.authorizeUserRequest(req); err != nil {
-		return err
+		return nil, nil, "", path, err
 	}
 	for key, values := range headers {
 		for _, value := range values {
 			req.Header.Add(key, value)
 		}
+	}
+	return req, encodedBody, requestSupportReference, path, nil
+}
+
+// doRequestMeta is the same authenticated request path used by the rest of
+// the client, with response headers exposed to callers that need optimistic
+// concurrency metadata. Keeping this as a narrow extension avoids making
+// ETags or other transport headers part of every existing API method.
+func (c *Client) doRequestMeta(ctx context.Context, method, path string, body, out any, headers http.Header, strict bool, responseHeaders *http.Header) error {
+	req, encodedBody, requestSupportReference, path, err := c.newRequest(ctx, method, path, body, headers)
+	if err != nil {
+		return err
 	}
 	if c.machineAuth != nil && machineAuthorizedRequest(method, req.URL.Path) {
 		token, err := c.machineAuth.Token(ctx)
@@ -228,36 +236,13 @@ func (c *Client) doRequestMeta(ctx context.Context, method, path string, body, o
 		return nil
 	}
 
-	var envelope struct {
-		Data  json.RawMessage `json:"data"`
-		Error struct {
-			Code             string         `json:"code"`
-			Message          string         `json:"message"`
-			SupportReference string         `json:"support_reference"`
-			Details          map[string]any `json:"details"`
-		} `json:"error"`
-	}
+	var envelope apiEnvelope
 	// A body is expected for every documented response; a decode failure on a
 	// 2xx is a real protocol error, so surface it rather than silently succeed.
 	decodeErr := json.NewDecoder(resp.Body).Decode(&envelope)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		if (resp.StatusCode == http.StatusUpgradeRequired && envelope.Error.Code != "update_required") || envelope.Error.Code == "incompatible_client_version" {
-			required, _ := envelope.Error.Details["required_protocol"].(string)
-			return &ErrIncompatibleVersion{Required: safeRequiredProtocol(required), Message: apiErrorMessage("incompatible_client_version", resp.StatusCode)}
-		}
-		responseSupportReference := resp.Header.Get(supportref.Header)
-		if !supportref.Valid(responseSupportReference) {
-			responseSupportReference = envelope.Error.SupportReference
-		}
-		if !supportref.Valid(responseSupportReference) {
-			responseSupportReference = requestSupportReference
-		}
-		cause := errorreport.HTTPStatusFailure(resp)
-		if decodeErr != nil {
-			cause = errors.Join(cause, &ResponseDecodeError{Err: decodeErr})
-		}
-		return c.workspaceRequestError(path, &APIError{Status: resp.StatusCode, Code: envelope.Error.Code, Message: apiErrorMessageFor(envelope.Error.Code, resp.StatusCode, envelope.Error.Details), RequestID: responseRequestID(resp.Header), SupportReference: responseSupportReference, Details: envelope.Error.Details, cause: cause})
+		return c.responseError(resp, path, requestSupportReference, envelope, decodeErr)
 	}
 	if decodeErr != nil {
 		return &ResponseDecodeError{Err: decodeErr}
@@ -283,6 +268,37 @@ func (c *Client) doRequestMeta(ctx context.Context, method, path string, body, o
 		return fmt.Errorf("decode %s %s data: trailing JSON", method, path)
 	}
 	return nil
+}
+
+// apiEnvelope is the shared response body: data on success, error otherwise.
+type apiEnvelope struct {
+	Data  json.RawMessage `json:"data"`
+	Error struct {
+		Code             string         `json:"code"`
+		Message          string         `json:"message"`
+		SupportReference string         `json:"support_reference"`
+		Details          map[string]any `json:"details"`
+	} `json:"error"`
+}
+
+// responseError turns a non-2xx response into the client's typed error.
+func (c *Client) responseError(resp *http.Response, path, requestSupportReference string, envelope apiEnvelope, decodeErr error) error {
+	if (resp.StatusCode == http.StatusUpgradeRequired && envelope.Error.Code != "update_required") || envelope.Error.Code == "incompatible_client_version" {
+		required, _ := envelope.Error.Details["required_protocol"].(string)
+		return &ErrIncompatibleVersion{Required: safeRequiredProtocol(required), Message: apiErrorMessage("incompatible_client_version", resp.StatusCode)}
+	}
+	responseSupportReference := resp.Header.Get(supportref.Header)
+	if !supportref.Valid(responseSupportReference) {
+		responseSupportReference = envelope.Error.SupportReference
+	}
+	if !supportref.Valid(responseSupportReference) {
+		responseSupportReference = requestSupportReference
+	}
+	cause := errorreport.HTTPStatusFailure(resp)
+	if decodeErr != nil {
+		cause = errors.Join(cause, &ResponseDecodeError{Err: decodeErr})
+	}
+	return c.workspaceRequestError(path, &APIError{Status: resp.StatusCode, Code: envelope.Error.Code, Message: apiErrorMessageFor(envelope.Error.Code, resp.StatusCode, envelope.Error.Details), RequestID: responseRequestID(resp.Header), SupportReference: responseSupportReference, Details: envelope.Error.Details, cause: cause})
 }
 
 func safeRequestID(value string) string {

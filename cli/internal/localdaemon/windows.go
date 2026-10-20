@@ -4,6 +4,7 @@ package localdaemon
 
 import (
 	"context"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
 	"net"
 	"time"
 
@@ -44,6 +45,8 @@ type DaemonConfig struct {
 	FileTransfers           localapi.FileTransferBroker
 	ReconcileMachines       func(context.Context, []api.UserMachine) error
 	OnMachines              func(context.Context, []api.UserMachine)
+	// InventoryEvents wakes the machine inventory refresh when the server reports a change.
+	InventoryEvents *machineevents.Subscription
 }
 
 func Run(ctx context.Context, config DaemonConfig) error { return runWindowsDaemon(ctx, config) }

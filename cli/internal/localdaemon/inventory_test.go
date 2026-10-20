@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents/eventstest"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 )
 
@@ -506,5 +509,41 @@ func TestInventoryRejectsInvalidConfiguration(t *testing.T) {
 	}
 	if _, err := NewInventory(InventoryConfig{Source: &scriptedMachineSource{results: []machineResult{{}}}, Store: store, RefreshInterval: time.Millisecond}); !errors.Is(err, ErrInvalidInventoryConfig) {
 		t.Fatalf("short interval err=%v", err)
+	}
+}
+
+// An inventory change published by the server refreshes the machine list at once, although the
+// periodic refresh is far away.
+func TestInventoryRefreshesWhenTheServerReportsAChange(t *testing.T) {
+	source := &scriptedMachineSource{results: []machineResult{{machines: []api.UserMachine{{ID: "machine_1", Alias: "studio"}}}}}
+	var refreshes atomic.Int32
+	store, err := localapi.NewSnapshotStore(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, subscriptions, plane := eventstest.Start(t, time.Hour, machineevents.TopicInventory)
+	inventory, err := NewInventory(InventoryConfig{Source: source, Store: store, RefreshInterval: time.Hour, RequestTimeout: time.Second, Events: subscriptions[0], OnRefresh: func(error) { refreshes.Add(1) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- inventory.Run(ctx) }()
+	waitFor := func(want int32) {
+		t.Helper()
+		deadline := time.Now().Add(2 * time.Second)
+		for refreshes.Load() < want {
+			if time.Now().After(deadline) {
+				t.Fatalf("refreshes=%d, want %d", refreshes.Load(), want)
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+	waitFor(1)
+	plane.Publish(machineevents.TopicInventory)
+	waitFor(2)
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("run ended with %v", err)
 	}
 }
