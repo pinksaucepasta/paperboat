@@ -115,20 +115,30 @@ func (i *Inventory) Refresh(ctx context.Context) (refreshErr error) {
 		}
 	}()
 
-	requestCtx, cancel := context.WithTimeout(ctx, i.requestTimeout)
-	machines, sourceErr := i.source.ListUserMachines(requestCtx)
+	// Each stage gets its own budget: on a slow control plane the machine list alone can use
+	// most of one, and the local reconcile (which withdraws every machine route when it fails)
+	// must not be cut off because the network was slow.
+	stage := func(run func(context.Context)) {
+		stageCtx, cancel := context.WithTimeout(ctx, i.requestTimeout)
+		defer cancel()
+		run(stageCtx)
+	}
+	var machines []api.UserMachine
+	var sourceErr error
+	stage(func(stageCtx context.Context) { machines, sourceErr = i.source.ListUserMachines(stageCtx) })
 	var reconcileErr error
 	if sourceErr == nil && i.reconcileMachines != nil {
-		reconcileErr = i.reconcileMachines(requestCtx, machines)
+		stage(func(stageCtx context.Context) { reconcileErr = i.reconcileMachines(stageCtx, machines) })
 	}
 	var completionItems []localapi.CompletionItem
 	var completionErr error
 	if sourceErr == nil {
 		if source, ok := i.source.(CompletionInventorySource); ok {
-			completionItems, completionErr = source.ListCompletionItems(requestCtx, machines)
+			stage(func(stageCtx context.Context) {
+				completionItems, completionErr = source.ListCompletionItems(stageCtx, machines)
+			})
 		}
 	}
-	cancel()
 	for _, failure := range []error{sourceErr, reconcileErr, completionErr} {
 		if failure == nil {
 			continue

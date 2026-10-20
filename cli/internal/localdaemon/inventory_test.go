@@ -547,3 +547,40 @@ func TestInventoryRefreshesWhenTheServerReportsAChange(t *testing.T) {
 		t.Fatalf("run ended with %v", err)
 	}
 }
+
+type slowMachineSource struct{ delay time.Duration }
+
+func (s slowMachineSource) ListUserMachines(ctx context.Context) ([]api.UserMachine, error) {
+	select {
+	case <-time.After(s.delay):
+		return []api.UserMachine{{ID: "machine_1", Alias: "studio"}}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// On a slow control plane the machine list uses most of a request budget. The local reconcile that
+// follows must still get a whole budget; before, it inherited the remainder, timed out, and the
+// daemon withdrew every machine route.
+func TestInventoryReconcileDoesNotInheritTheListingsTimeBudget(t *testing.T) {
+	store, _ := localapi.NewSnapshotStore(nil)
+	var reconcileErr error
+	inventory, err := NewInventory(InventoryConfig{
+		Source: slowMachineSource{delay: 120 * time.Millisecond}, Store: store, RefreshInterval: time.Second, RequestTimeout: 200 * time.Millisecond,
+		Clock: time.Now,
+		ReconcileMachines: func(ctx context.Context, _ []api.UserMachine) error {
+			select {
+			case <-time.After(120 * time.Millisecond):
+			case <-ctx.Done():
+				reconcileErr = ctx.Err()
+			}
+			return reconcileErr
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := inventory.Refresh(context.Background()); err != nil || reconcileErr != nil {
+		t.Fatalf("refresh err = %v, reconcile err = %v; want both stages inside their own budgets", err, reconcileErr)
+	}
+}
