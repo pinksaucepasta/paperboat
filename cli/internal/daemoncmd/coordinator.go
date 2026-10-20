@@ -119,11 +119,16 @@ func (c *Coordinator) Start(parent context.Context) (err error) {
 		client, err := c.cfg.ConnectNameClient(connectCtx)
 		cancel()
 		if err != nil {
-			return coordinatorFailure("protected machine-name service connection failed", coordinatorOperationFailure("guard_connect", err), c.stopStarted())
+			// The protected machine-name service being down must not stop the daemon: a daemon that
+			// exits at start is restarted in a loop and can no longer be updated or inspected.
+			// It runs degraded without local machine names, and every reconciliation retries the
+			// connection until the service returns.
+			c.observe(parent, "guard_connect", coordinatorOperationFailure("guard_connect", err))
+		} else {
+			c.mu.Lock()
+			c.nameClient = client
+			c.mu.Unlock()
 		}
-		c.mu.Lock()
-		c.nameClient = client
-		c.mu.Unlock()
 	}
 	if c.cfg.SyncAddress != "" {
 		client := controlsync.NewClient(controlsync.ClientConfig{ServerAddr: c.cfg.SyncAddress, MachineID: c.cfg.MachineID, Token: c.cfg.Token, TLSConfig: c.cfg.TLSConfig, Insecure: c.cfg.Insecure, OnPeerUpdate: c.applySnapshot, OnError: func(err error) {

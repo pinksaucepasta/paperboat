@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -463,20 +464,43 @@ func TestCoordinatorHTTPAndTLSUseRealNativePrivateAuthority(t *testing.T) {
 	}
 }
 
-func TestCoordinatorGuardUnavailableFailsBeforeIPC(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "guard-start.sock")
-	guardErr := errors.New("guard unavailable")
-	coordinator, err := NewCoordinator(CoordinatorConfig{SocketAddress: path, ConnectNameClient: func(context.Context) (guardedNameClient, error) { return nil, guardErr }, DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("must not dial") }})
+// The protected machine-name service being down must not keep the daemon from starting: a daemon
+// that exits at start crash-loops, so it cannot be updated or inspected. It starts degraded, and a
+// reconciliation connects once the service is back.
+func TestCoordinatorStartsWithoutTheGuardAndConnectsWhenItReturns(t *testing.T) {
+	dir, err := os.MkdirTemp("", "pb-rpc-")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = coordinator.Start(t.Context()); !errors.Is(err, guardErr) {
-		coordinator.Stop()
-		t.Fatalf("startup did not report the helper failure: %v", err)
+	defer os.RemoveAll(dir)
+	path := filepath.Join(dir, "guard-start.sock")
+	guardErr := errors.New("guard unavailable")
+	guardUp := false
+	names := &coordinatorNameClient{}
+	coordinator, err := NewCoordinator(CoordinatorConfig{SocketAddress: path, ConnectNameClient: func(context.Context) (guardedNameClient, error) {
+		if !guardUp {
+			return nil, guardErr
+		}
+		return names, nil
+	}, DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("must not dial") }})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if conn, err := net.Dial("unix", path); err == nil {
+	if err = coordinator.Start(t.Context()); err != nil {
+		t.Fatalf("the daemon must start while the guard is down: %v", err)
+	}
+	defer coordinator.Stop()
+	if conn, err := net.Dial("unix", path); err != nil {
+		t.Fatalf("daemon IPC is unavailable: %v", err)
+	} else {
 		conn.Close()
-		t.Fatal("IPC became available after failed startup")
+	}
+	if err = coordinator.replaceGuardedRoutes(t.Context(), nil); !errors.Is(err, guardErr) {
+		t.Fatalf("reconciliation did not report the guard failure: %v", err)
+	}
+	guardUp = true
+	if err = coordinator.replaceGuardedRoutes(t.Context(), nil); err != nil {
+		t.Fatalf("reconciliation did not recover when the guard returned: %v", err)
 	}
 }
 
