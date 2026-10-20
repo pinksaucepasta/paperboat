@@ -204,6 +204,24 @@ func (s *Service) Run(ctx context.Context) error {
 	return s.run(ctx, nil)
 }
 
+// abandonUnavailableCandidate ends a resumed activation whose approved payload no longer exists.
+// A rolled-back installation consumes it, so retrying on every start would restart-loop the updater
+// for good. The approval is reset to an idle journal that records the failure and the helper is
+// retired; any other failure is returned unchanged.
+func (s *Service) abandonUnavailableCandidate(ctx context.Context, cause error) error {
+	if !errors.Is(cause, workerupdate.ErrPreparedCandidate) {
+		return cause
+	}
+	abandoned, err := s.currentManager().AbandonUnavailableCandidate(ctx)
+	if err != nil {
+		return errors.Join(cause, err)
+	}
+	if !abandoned {
+		return cause
+	}
+	return retireUnixHandoff(ctx, s.config.StateRoot, s.config.ActivationController)
+}
+
 // RunWithReady is the service-manager entry point for Unix service
 // declarations using Type=notify. The callback runs only after the updater's
 // authenticated control listener has been created, so READY=1 cannot race
@@ -275,7 +293,9 @@ func (s *Service) run(ctx context.Context, ready func() error) (resultErr error)
 					return err
 				}
 			} else if err = s.config.ActivationController.Install(ctx, filepath.Join(s.config.StateRoot, "activation", "pb"), s.config.Environment); err != nil {
-				return err
+				if err = s.abandonUnavailableCandidate(ctx, err); err != nil {
+					return err
+				}
 			}
 		}
 		if err := releaseLock(); err != nil {

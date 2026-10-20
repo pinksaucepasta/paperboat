@@ -301,6 +301,28 @@ func (m *Manager) Recover(ctx context.Context) error {
 	return m.recoverLocked(ctx)
 }
 
+// AbandonUnavailableCandidate resets an approved candidate whose staged payload no longer exists to an
+// idle journal that records the failure. A rolled-back or never-started installation consumes the
+// payload; the approval for it can never be used, and retrying it on every service start would
+// restart-loop the updater and block checking for a replacement. It does nothing, and reports
+// false, when the candidate is installed, still staged, or the journal is not an approved candidate.
+func (m *Manager) AbandonUnavailableCandidate(ctx context.Context) (bool, error) {
+	if ctx == nil {
+		return false, ErrInvalidConfig
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	journal, err := updateflow.Load(m.config.StatePath)
+	if err != nil {
+		return false, err
+	}
+	if journal.Stage != updateflow.StageAwaitingApproval || journal.ApprovedCandidateID == "" ||
+		!stagedConsumed(journal.StagedPath) || m.candidateInstalled(journal) {
+		return false, nil
+	}
+	return true, m.write(m.idleJournal(journal, updateflow.FailureCandidate, ""))
+}
+
 // candidateInstalled reports that the native owner already moved the approved payload into the
 // worker slot: the worker has the candidate's bytes and the staged file no longer exists.
 func (m *Manager) candidateInstalled(journal updateflow.Journal) bool {

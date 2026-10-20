@@ -245,3 +245,45 @@ func TestRetryAfterInterruptedFinishCompletesWithoutTheStagedPayload(t *testing.
 		t.Fatalf("receipt not retired by the retry: %+v %v", journal, err)
 	}
 }
+
+// A rolled-back or never-started installation consumes the staged payload. The approval for it can
+// then never be used: it is reset to idle with a failure so the updater stops retrying it on every
+// start (a restart loop that also blocked checking for a replacement).
+func TestApprovedCandidateWhoseStagedPayloadIsGoneIsAbandoned(t *testing.T) {
+	f := newFixture(t)
+	candidate, err := f.manager.Prepare(context.Background(), f.candidate)
+	if err != nil || candidate.ID == "" {
+		t.Fatalf("prepare: %+v %v", candidate, err)
+	}
+	if abandoned, err := f.manager.AbandonUnavailableCandidate(context.Background()); abandoned || err != nil {
+		t.Fatalf("a candidate that is not approved was abandoned: %v %v", abandoned, err)
+	}
+	if err := f.manager.Approve(context.Background(), candidate.ID); err != nil {
+		t.Fatal(err)
+	}
+	if abandoned, err := f.manager.AbandonUnavailableCandidate(context.Background()); abandoned || err != nil {
+		t.Fatalf("an approved candidate that is still staged was abandoned: %v %v", abandoned, err)
+	}
+	journal, err := updateflow.Load(f.paths.journal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The worker slot still holds the previous release, not the candidate's bytes.
+	if err := os.WriteFile(f.paths.current, []byte("previous release"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(journal.StagedPath); err != nil {
+		t.Fatal(err)
+	}
+	abandoned, err := f.manager.AbandonUnavailableCandidate(context.Background())
+	if !abandoned || err != nil {
+		t.Fatalf("an approved candidate with no payload was kept: %v %v", abandoned, err)
+	}
+	journal, err = updateflow.Load(f.paths.journal)
+	if err != nil || journal.Stage != updateflow.StageIdle || journal.LastFailure != updateflow.FailureCandidate || journal.CandidateID != "" {
+		t.Fatalf("journal not reset to idle with the failure: %+v %v", journal, err)
+	}
+	if _, err := f.manager.Prepare(context.Background(), f.candidate); err != nil {
+		t.Fatalf("a replacement candidate cannot be prepared after the reset: %v", err)
+	}
+}
