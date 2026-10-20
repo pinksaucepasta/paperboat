@@ -291,6 +291,9 @@ func TestTask44ConnectedCollaboration(t *testing.T) {
 	if len(descriptor.Capabilities) != 1 || descriptor.Capabilities[0] != "terminal" {
 		t.Fatalf("shared descriptor advertises %v, want only terminal", descriptor.Capabilities)
 	}
+	if descriptor.MachineGeneration < 1 {
+		t.Fatalf("shared descriptor carries machine_generation %d; the CLI refuses a shared descriptor without one", descriptor.MachineGeneration)
+	}
 	token := descriptor.Terminal["auth"].(map[string]any)["token"].(string)
 	actionWithFields := func(id, operation string, fields map[string]string) {
 		t.Helper()

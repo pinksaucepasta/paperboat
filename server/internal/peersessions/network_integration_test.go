@@ -463,6 +463,9 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	if err != nil || !viewerTerminalDescriptor.Connectable {
 		t.Fatalf("viewer terminal connectable=%v status=%q reason=%q err=%v", viewerTerminalDescriptor.Connectable, viewerTerminalDescriptor.Status, viewerTerminalDescriptor.Reason, err)
 	}
+	if viewerTerminalDescriptor.MachineGeneration < 1 {
+		t.Fatalf("shared terminal descriptor machine_generation = %d; the CLI refuses a shared descriptor without one", viewerTerminalDescriptor.MachineGeneration)
+	}
 	viewerAccessID := viewerTerminalDescriptor.Terminal["auth"].(map[string]any)["access_session_id"].(string)
 	var viewerJTI string
 	if err = store.SQL().QueryRowContext(ctx, `SELECT helper_terminal_session_id FROM paperboat.user_machine_access_sessions WHERE id=$1`, viewerAccessID).Scan(&viewerJTI); err != nil {
