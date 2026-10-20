@@ -10,6 +10,18 @@ import (
 // their delivery is pending or unavailable. The launch itself still runs.
 const LaunchNoticePending = "environment_pending"
 
+// LaunchNoticeUndeliverable says delivery was attempted and failed, which a pending delivery is not.
+const LaunchNoticeUndeliverable = "environment_undeliverable"
+
+// LaunchNoticeFor names the notice for an ENV delivery failure: pending when the target has not
+// received its environment yet, undeliverable when delivery itself failed.
+func LaunchNoticeFor(err error) string {
+	if errors.Is(err, ErrNotReady) {
+		return LaunchNoticePending
+	}
+	return LaunchNoticeUndeliverable
+}
+
 type launchNoticeKey struct{}
 
 // LaunchNotices collects what a launch learned about managed ENV so the caller

@@ -33,3 +33,14 @@ func TestExecStartedEventShowsOnePendingEnvironmentLine(t *testing.T) {
 		t.Fatalf("json=%s stderr=%q err=%v", out.String(), errOut.String(), err)
 	}
 }
+
+func TestUndeliverableEnvironmentLaunchPointsAtHostShowNotVaultUnlock(t *testing.T) {
+	pending := launchWarningLine([]string{"environment_pending"})
+	failed := launchWarningLine([]string{"environment_undeliverable"})
+	if !strings.Contains(pending, "pending") || !strings.Contains(pending, "pb env vault unlock") {
+		t.Fatalf("pending line=%q", pending)
+	}
+	if !strings.Contains(failed, "failed") || !strings.Contains(failed, "pb env host show") || strings.Contains(failed, "pending") {
+		t.Fatalf("undeliverable line=%q", failed)
+	}
+}

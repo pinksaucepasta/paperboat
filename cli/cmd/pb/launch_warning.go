@@ -8,13 +8,19 @@ type launchWarning struct {
 	Message string `json:"message"`
 }
 
-const environmentPendingMessage = "Paperboat ENV not applied: delivery to this machine is pending. The command ran without your managed values; run `pb env vault unlock` on any of your devices."
+const (
+	environmentPendingMessage       = "Paperboat ENV not applied: delivery to this machine is pending. The command ran without your managed values; run `pb env vault unlock` on any of your devices."
+	environmentUndeliverableMessage = "Paperboat ENV not applied: delivery to this machine failed. The command ran without your managed values; run `pb env host show` to see its delivery state."
+)
 
 func launchWarnings(codes []string) []launchWarning {
 	var out []launchWarning
 	for _, code := range codes {
-		if code == envinject.LaunchNoticePending {
+		switch code {
+		case envinject.LaunchNoticePending:
 			out = append(out, launchWarning{Code: code, Message: environmentPendingMessage})
+		case envinject.LaunchNoticeUndeliverable:
+			out = append(out, launchWarning{Code: code, Message: environmentUndeliverableMessage})
 		}
 	}
 	return out

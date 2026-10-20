@@ -669,7 +669,7 @@ func managedEnvironmentForLaunch(source envinject.EnvironmentSource) func(contex
 		// cannot be delivered the process runs without those values and the
 		// caller is told once through the launch notices.
 		if err != nil && ctx.Err() == nil && envinject.Undeliverable(err) {
-			envinject.NoteLaunch(ctx, envinject.LaunchNoticePending)
+			envinject.NoteLaunch(ctx, envinject.LaunchNoticeFor(err))
 			return nil, nil
 		}
 		return values, err

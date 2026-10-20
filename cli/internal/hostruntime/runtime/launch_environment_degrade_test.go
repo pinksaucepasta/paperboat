@@ -42,11 +42,15 @@ func (r *recordingSessions) Create(ctx context.Context, _ session.CreateRequest)
 // Pending or undeliverable values start the exec or terminal without them and
 // leave one notice for the caller to show.
 func TestLaunchesRunWithoutUndeliverableManagedEnvironmentAndNoteIt(t *testing.T) {
-	for name, cause := range map[string]error{
-		"not ready": envinject.ErrNotReady,
-		"delivery":  &envinject.DeliveryError{Cause: errors.New("private ENV failure")},
-		"joined":    errors.Join(errors.New("transport"), &envinject.DeliveryError{Cause: envinject.ErrNotReady}),
+	for name, tc := range map[string]struct {
+		cause error
+		want  string
+	}{
+		"not ready": {envinject.ErrNotReady, envinject.LaunchNoticePending},
+		"delivery":  {&envinject.DeliveryError{Cause: errors.New("private ENV failure")}, envinject.LaunchNoticeUndeliverable},
+		"joined":    {errors.Join(errors.New("transport"), &envinject.DeliveryError{Cause: envinject.ErrNotReady}), envinject.LaunchNoticePending},
 	} {
+		cause := tc.cause
 		t.Run(name, func(t *testing.T) {
 			source := pendingEnvironment{err: cause}
 			ctx, notices := envinject.WithLaunchNotices(t.Context())
@@ -58,8 +62,8 @@ func TestLaunchesRunWithoutUndeliverableManagedEnvironmentAndNoteIt(t *testing.T
 			if _, err := (launchSessions{Service: sessions, source: source}).Create(ctx, session.CreateRequest{}); err != nil || !sessions.called || len(sessions.launch) != 0 {
 				t.Fatalf("terminal create err=%v called=%v env=%v", err, sessions.called, sessions.launch)
 			}
-			if codes := notices.Codes(); len(codes) != 1 || codes[0] != envinject.LaunchNoticePending {
-				t.Fatalf("notices=%v, want exactly one pending notice", codes)
+			if codes := notices.Codes(); len(codes) != 1 || codes[0] != tc.want {
+				t.Fatalf("notices=%v, want exactly %s", codes, tc.want)
 			}
 		})
 	}
