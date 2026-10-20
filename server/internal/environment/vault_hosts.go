@@ -31,7 +31,7 @@ func vaultHostKeyID(public []byte) string {
 func authorizeVaultHostTx(ctx context.Context, tx *db.Tx, account, machine string) (uint64, error) {
 	var generation uint64
 	var capabilities []string
-	err := tx.QueryRow(ctx, `SELECT installation_generation,configured_capabilities FROM user_machines WHERE id=$1 AND user_id=$2 AND deleted_at IS NULL AND revoked_at IS NULL AND state NOT IN('revoked','deleted')`, machine, account).Scan(&generation, &capabilities)
+	err := tx.QueryRow(ctx, `SELECT installation_generation,configured_capabilities FROM user_machines WHERE id=$1 AND user_id=$2 AND deleted_at IS NULL AND revoked_at IS NULL AND state NOT IN('revoked','deleted','disconnected')`, machine, account).Scan(&generation, &capabilities)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, ErrMachineNotFound
 	}
