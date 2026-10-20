@@ -509,7 +509,12 @@ type MarkLostPreviewLeasesV1Params struct {
 }
 
 func (q *Queries) MarkLostPreviewLeasesV1(ctx context.Context, arg MarkLostPreviewLeasesV1Params) ([]string, error) {
-	rows, err := q.db.Query(ctx, markLostPreviewLeasesV1, arg.Now, arg.OwnerCutoff, arg.BackgroundOwnerCutoff, arg.RowLimit)
+	rows, err := q.db.Query(ctx, markLostPreviewLeasesV1,
+		arg.Now,
+		arg.OwnerCutoff,
+		arg.BackgroundOwnerCutoff,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
