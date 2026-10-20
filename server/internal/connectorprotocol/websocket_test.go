@@ -409,3 +409,29 @@ func writeTestFrameBytes(writer io.Writer, data []byte) error {
 	}
 	return nil
 }
+
+// A host retried the control stream of every tunnel it had deleted, several times a second: the
+// upgrade succeeded and the rejection came afterwards as a close the host could not tell from an outage.
+func TestWebSocketHandlerAnswersGoneBeforeUpgradeForADeletedConnector(t *testing.T) {
+	serve := func(gone ConnectorGoneFunc) *httptest.ResponseRecorder {
+		handler := (&WebSocketHandler{transport: &ControlTransport{}}).WithGoneCheck(gone)
+		request := httptest.NewRequest(http.MethodGet, "/v1/tunnels/tunnel_01/connectors/connector_01/control", nil)
+		request.SetPathValue("tunnel_id", "tunnel_01")
+		request.SetPathValue("connector_id", "connector_01")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		return response
+	}
+	if r := serve(func(context.Context, string, string) (bool, error) { return true, nil }); r.Code != http.StatusGone ||
+		!strings.Contains(r.Body.String(), `"code":"connector_gone"`) || !strings.Contains(r.Body.String(), `"retryable":false`) {
+		t.Fatalf("deleted connector: status=%d body=%s", r.Code, r.Body.String())
+	}
+	for name, gone := range map[string]ConnectorGoneFunc{
+		"live connector": func(context.Context, string, string) (bool, error) { return false, nil },
+		"lookup failure": func(context.Context, string, string) (bool, error) { return true, errors.New("database unavailable") },
+	} {
+		if r := serve(gone); r.Code == http.StatusGone {
+			t.Errorf("%s was answered 410", name)
+		}
+	}
+}

@@ -355,6 +355,9 @@ func New(opts Options) (*App, error) {
 		return nil, fmt.Errorf("configure connector control transport: %w", err)
 	}
 	connectorControlHandler, err := connectorprotocol.NewWebSocketHandler(connectorControlTransport)
+	if err == nil {
+		connectorControlHandler.WithGoneCheck(connectorprotocol.SQLConnectorGone(store))
+	}
 	if err != nil {
 		_ = store.Close()
 		return nil, fmt.Errorf("configure connector control websocket: %w", err)

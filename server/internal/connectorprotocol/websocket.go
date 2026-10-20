@@ -10,6 +10,7 @@ import (
 	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 
 	"github.com/coder/websocket"
+	"github.com/pinksaucepasta/paperboat-server/internal/db"
 	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
 )
 
@@ -20,6 +21,27 @@ const ControlWebSocketSubprotocol = "paperboat.connector.v1"
 // browser origin, cookie, query credential, or bearer fallback is accepted.
 type WebSocketHandler struct {
 	transport *ControlTransport
+	gone      ConnectorGoneFunc
+}
+
+// ConnectorGoneFunc reports whether the connector's tunnel was deleted or the connector revoked.
+type ConnectorGoneFunc func(ctx context.Context, tunnelID, connectorID string) (bool, error)
+
+// WithGoneCheck makes the handler refuse a connector that can never be served again with 410 before
+// the upgrade, so a host stops reconnecting instead of retrying a rejected stream forever.
+func (h *WebSocketHandler) WithGoneCheck(gone ConnectorGoneFunc) *WebSocketHandler {
+	h.gone = gone
+	return h
+}
+
+// SQLConnectorGone answers ConnectorGoneFunc from the database. A connector that is unknown counts as gone.
+func SQLConnectorGone(database *db.DB) ConnectorGoneFunc {
+	return func(ctx context.Context, tunnelID, connectorID string) (bool, error) {
+		var served bool
+		err := database.Pool().QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM tunnel_connectors c JOIN tunnels t ON t.id = c.tunnel_id
+ WHERE t.id = $1 AND c.id = $2 AND t.deleted_at IS NULL AND c.revoked_at IS NULL AND c.desired_state <> 'revoked')`, tunnelID, connectorID).Scan(&served)
+		return !served, err
+	}
 }
 
 func NewWebSocketHandler(transport *ControlTransport) (*WebSocketHandler, error) {
@@ -38,6 +60,14 @@ func (h *WebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if wire.ValidateIdentifier(tunnelID) != nil || wire.ValidateIdentifier(connectorID) != nil || r.URL.RawQuery != "" {
 		http.Error(w, "invalid connector control request", http.StatusBadRequest)
 		return
+	}
+	if h.gone != nil {
+		if gone, err := h.gone(r.Context(), tunnelID, connectorID); err == nil && gone {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusGone)
+			_, _ = w.Write([]byte(`{"code":"connector_gone","message":"The tunnel was deleted or the connector was revoked; remove it from this machine.","retryable":false}`))
+			return
+		}
 	}
 	connection, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		Subprotocols:    []string{ControlWebSocketSubprotocol},
