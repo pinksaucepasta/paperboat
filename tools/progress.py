@@ -4,23 +4,31 @@
 Usage: tools/progress.py [--listen HOST:PORT]   (default 127.0.0.1:8090)
 Shows independently verified completion for Linux, macOS and Windows.
 """
-import argparse, html, re, subprocess, time
+import argparse, html, re, subprocess, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 MARKS = ("[x]", "[ ]", "[!]", "[~]", "n/a", "—")
 FETCH_EVERY = 60
-_last_fetch = 0.0
+_page = "progress: first read of CHECKLIST.md still running, reload in a minute"
 
 
 def checklist() -> str:
-    global _last_fetch
-    if time.time() - _last_fetch > FETCH_EVERY:
-        subprocess.run(["git", "-C", str(REPO), "fetch", "-q", "origin", "main"], timeout=30)
-        _last_fetch = time.time()
+    subprocess.run(["git", "-C", str(REPO), "fetch", "-q", "origin", "main"], timeout=120)
     return subprocess.run(["git", "-C", str(REPO), "show", "origin/main:CHECKLIST.md"],
-                          capture_output=True, text=True, timeout=30, check=True).stdout
+                          capture_output=True, text=True, timeout=60, check=True).stdout
+
+
+def refresh_forever():
+    """Rebuild the page in the background so a slow git never blocks a page load."""
+    global _page
+    while True:
+        try:
+            _page = render(parse(checklist()))
+        except Exception as error:  # keep serving the last good page; say why it is stale
+            _page = _page.replace("updated ", f"refresh failed ({error}); last updated ", 1)
+        time.sleep(FETCH_EVERY)
 
 
 def parse(text):
@@ -89,11 +97,8 @@ h2{{font-size:18px;margin:0 0 8px}} .row{{display:flex;gap:12px;margin-top:10px}
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
-        try:
-            body, status = render(parse(checklist())).encode(), 200
-        except Exception as error:  # show the failing step instead of a blank page
-            body, status = f"progress: reading CHECKLIST.md failed: {error}".encode(), 500
-        self.send_response(status)
+        body = _page.encode()
+        self.send_response(200)
         self.send_header("content-type", "text/html; charset=utf-8")
         self.send_header("cache-control", "no-store")
         self.end_headers()
@@ -107,4 +112,5 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--listen", default="127.0.0.1:8090")
     host, port = parser.parse_args().listen.rsplit(":", 1)
+    threading.Thread(target=refresh_forever, daemon=True).start()
     ThreadingHTTPServer((host, int(port)), Handler).serve_forever()
