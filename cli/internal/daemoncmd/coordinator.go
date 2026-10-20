@@ -48,7 +48,9 @@ type Coordinator struct {
 	cleanups           []*generationCleanup
 	reportMu           sync.Mutex
 	reconcileFailed    bool
-	domain             atomic.Pointer[string] // the local access domain, as the machine guard reports it
+	// browserTrustReported is set once a browser certificate failure has been recorded.
+	browserTrustReported bool
+	domain               atomic.Pointer[string] // the local access domain, as the machine guard reports it
 }
 
 func NewCoordinator(cfg CoordinatorConfig) (*Coordinator, error) {

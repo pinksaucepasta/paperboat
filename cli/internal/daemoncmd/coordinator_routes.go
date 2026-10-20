@@ -241,6 +241,11 @@ func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*pbSync.
 			// are withdrawn, so a busy port must not degrade the whole daemon.
 			diagnosticlog.TryInfo("browser gateway ports are in use by another program; browser URLs are unavailable")
 			aliases = map[string]string{}
+		case browserCertificateFailure(err):
+			// Browser trust (for example NSS certutil on Linux) is a prerequisite of browser URLs
+			// only: native machine access and names keep working without them.
+			c.observeBrowserTrustFailure(ctx, err)
+			aliases = map[string]string{}
 		case err != nil:
 			c.resetNameGenerationLocked(ctx)
 			return err

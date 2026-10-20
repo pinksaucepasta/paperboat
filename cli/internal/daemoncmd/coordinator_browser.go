@@ -137,6 +137,25 @@ func (c *Coordinator) prepareBrowserGatewayLocked(ctx context.Context, client gu
 	return web, nil
 }
 
+// browserCertificateFailure reports whether the browser gateway could not start only because a
+// browser certificate or its trust could not be installed.
+func browserCertificateFailure(err error) bool {
+	var operation coordinatorOperationError
+	return errors.As(err, &operation) && operation.operation == "browser_certificate"
+}
+
+// observeBrowserTrustFailure records the failure once until browser URLs work again.
+func (c *Coordinator) observeBrowserTrustFailure(ctx context.Context, err error) {
+	c.reportMu.Lock()
+	reported := c.browserTrustReported
+	c.browserTrustReported = true
+	c.reportMu.Unlock()
+	if !reported {
+		c.observe(ctx, "browser_certificate", err)
+	}
+	diagnosticlog.TryInfo("browser URLs are unavailable: the local browser certificate could not be installed; machine access is unaffected")
+}
+
 // addBrowserPortListeners makes https://<machine>.<domain>:<port> work for every published port
 // of a machine by serving the gateway address on that port. A port that cannot be served (in use,
 // or an older machine guard) is reported and skipped; it never degrades the other browser URLs.
