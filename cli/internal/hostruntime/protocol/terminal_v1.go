@@ -36,6 +36,15 @@ type CompressionMetrics struct {
 
 var terminalCompressionCounters compressionCounters
 
+// ResetTerminalCompressionMetrics zeroes the process-wide compression counters. Metric snapshots
+// include them, so tests that assert an exact set of series start from zero.
+func ResetTerminalCompressionMetrics() {
+	c := &terminalCompressionCounters
+	for _, counter := range []*atomic.Uint64{&c.smallFrames, &c.insufficientFrames, &c.compressedFrames, &c.rawBytes, &c.encodedBytes, &c.encodeFailures, &c.decodeFailures, &c.encodeNanos, &c.decodeNanos} {
+		counter.Store(0)
+	}
+}
+
 func TerminalCompressionMetrics() CompressionMetrics {
 	return CompressionMetrics{
 		SmallFrames:        terminalCompressionCounters.smallFrames.Load(),

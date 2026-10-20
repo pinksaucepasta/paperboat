@@ -15,7 +15,16 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
 )
 
+// isolateCompressionMetrics gives a test its own zeroed view of the process-wide compression counters
+// that every registry snapshot includes.
+func isolateCompressionMetrics(t *testing.T) {
+	t.Helper()
+	protocol.ResetTerminalCompressionMetrics()
+	t.Cleanup(protocol.ResetTerminalCompressionMetrics)
+}
+
 func TestMetricsHandlerRendersDeterministicPrometheusText(t *testing.T) {
+	isolateCompressionMetrics(t)
 	registry, err := NewRegistry(DefaultDescriptors())
 	if err != nil {
 		t.Fatal(err)
@@ -58,6 +67,7 @@ func TestLoggerAcceptsOnlySafeStructuredFields(t *testing.T) {
 }
 
 func TestMetricsRejectUnknownLabelsAndBoundSeries(t *testing.T) {
+	isolateCompressionMetrics(t)
 	registry, err := NewRegistry(DefaultDescriptors())
 	if err != nil {
 		t.Fatal(err)
@@ -81,6 +91,7 @@ func TestMetricsRejectUnknownLabelsAndBoundSeries(t *testing.T) {
 }
 
 func TestDefaultMetricVocabularyHasFixedCardinality(t *testing.T) {
+	isolateCompressionMetrics(t)
 	registry, err := NewRegistry(DefaultDescriptors())
 	if err != nil {
 		t.Fatal(err)
@@ -139,6 +150,7 @@ func TestServeLatencyIsPrometheusHistogram(t *testing.T) {
 }
 
 func TestTerminalCompressionMetricsUseOnlyBoundedLabels(t *testing.T) {
+	isolateCompressionMetrics(t)
 	_, _ = protocol.EncodeTerminalOutputAdaptive(protocol.TerminalOutputFrame{Channel: protocol.TerminalStdout, StreamID: 1, Data: []byte("ok")}, nil)
 	_, _ = protocol.EncodeTerminalOutputAdaptive(protocol.TerminalOutputFrame{Channel: protocol.TerminalStdout, StreamID: 1, Data: bytes.Repeat([]byte("agent output\r\n"), 200)}, nil)
 	registry, err := NewRegistry(DefaultDescriptors())

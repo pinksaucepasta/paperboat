@@ -3,6 +3,7 @@ package telemetry
 import "testing"
 
 func TestExportSnapshotsKeepCumulativeValuesAndFixedDimensions(t *testing.T) {
+	isolateCompressionMetrics(t)
 	r, err := NewRegistry(DefaultDescriptors())
 	if err != nil {
 		t.Fatal(err)
