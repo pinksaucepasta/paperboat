@@ -434,6 +434,16 @@ func (s *Service) RemoveTerminalParticipant(ctx context.Context, account, sessio
 		return SharedTerminalSession{}, ErrTerminalSessionNotFound
 	}
 
+	// A guest who joined with the join code is a session of this terminal, not an account: removing
+	// it deletes the session, which ends its connection at the next ticket check; no team is involved.
+	removed, err := s.db.SQL().ExecContext(ctx, `DELETE FROM terminal_guest_sessions WHERE terminal_session_id=$1 AND id=$2`, sessionID, target)
+	if err != nil {
+		return SharedTerminalSession{}, err
+	}
+	if n, _ := removed.RowsAffected(); n > 0 {
+		return s.TerminalSessionSharing(ctx, account, sessionID)
+	}
+
 	var team string
 	workspaceSet, workspaceTeamID := workspaceTeamArgument(ctx)
 	if err := s.db.SQL().QueryRowContext(ctx, `SELECT team_id FROM team_resource_bindings WHERE resource_kind='terminal_session' AND resource_id=$1 AND active AND owner_account=$2 AND (NOT $3::boolean OR $4::text IS NULL OR team_id=$4)`, sessionID, account, workspaceSet, workspaceTeamID).Scan(&team); err != nil {
