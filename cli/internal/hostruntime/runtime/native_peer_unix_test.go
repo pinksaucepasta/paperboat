@@ -351,3 +351,15 @@ func TestProductionNativePeerRecoversInitialControlFailure(t *testing.T) {
 		t.Fatal("recovery did not activate peer generation")
 	}
 }
+
+func TestNativePeerRestartDelayBacksOffToAMinute(t *testing.T) {
+	want := []time.Duration{time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 16 * time.Second, 32 * time.Second, time.Minute, time.Minute}
+	for failures, expected := range want {
+		if got := nativePeerRestartDelay(failures); got != expected {
+			t.Fatalf("after %d failures: %v, want %v", failures, got, expected)
+		}
+	}
+	if got := nativePeerRestartDelay(100); got != time.Minute {
+		t.Fatalf("many failures: %v", got)
+	}
+}

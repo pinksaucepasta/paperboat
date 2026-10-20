@@ -83,6 +83,19 @@ type productionNativePeerGeneration struct {
 
 const productionNativePeerRestartDelay = time.Second
 
+// productionNativePeerMaxRestartDelay bounds the wait between failing generation starts.
+const productionNativePeerMaxRestartDelay = time.Minute
+
+// nativePeerRestartDelay is the wait before the next start after failures consecutive failed
+// starts: the base delay, doubling to the maximum, so a machine whose identity was revoked does
+// not ask the server every second forever.
+func nativePeerRestartDelay(failures int) time.Duration {
+	if failures >= 6 {
+		return productionNativePeerMaxRestartDelay
+	}
+	return min(productionNativePeerRestartDelay<<failures, productionNativePeerMaxRestartDelay)
+}
+
 var errNativePeerPending = errors.New("machine endpoint certificate is pending")
 
 type nativePeerListenerError struct{ cause error }
@@ -409,19 +422,23 @@ func (s *productionNativePeerService) supervise(ctx context.Context, generation 
 	if generation == nil {
 		// Initial approval uses the same bounded retry loop as a renewed
 		// certificate. Cancellation interrupts the wait and closes done.
-		ticker := time.NewTicker(productionNativePeerRestartDelay)
-		defer ticker.Stop()
+		timer := time.NewTimer(productionNativePeerRestartDelay)
+		defer timer.Stop()
+		failures := 0
 		for generation == nil {
 			select {
 			case <-ctx.Done():
 				return
-			case <-ticker.C:
+			case <-timer.C:
 			}
 			next, err := s.startGeneration(ctx)
 			s.recordPeerState(ctx, next, err)
 			if err == nil {
 				generation = next
+				continue
 			}
+			failures++
+			timer.Reset(nativePeerRestartDelay(failures))
 		}
 	}
 	for {
@@ -476,14 +493,14 @@ func (s *productionNativePeerService) supervise(ctx context.Context, generation 
 			return
 		case <-timer.C:
 		}
-		for {
+		for failures := 1; ; failures++ {
 			next, err := s.startGeneration(ctx)
 			s.recordPeerState(ctx, next, err)
 			if err == nil {
 				generation = next
 				break
 			}
-			timer.Reset(productionNativePeerRestartDelay)
+			timer.Reset(nativePeerRestartDelay(failures))
 			select {
 			case <-ctx.Done():
 				timer.Stop()
