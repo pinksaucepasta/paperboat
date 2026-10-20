@@ -31,6 +31,27 @@ import { navGroups } from "../nav"
         )
       }
     </nav>
+    <details class="mobile-menu">
+      <summary aria-label="Menu"><Icon name="list" size={22} /></summary>
+      <nav class="mobile-panel" aria-label="Menu">
+        {
+          navGroups.map((group) =>
+            group.links.length ? (
+              <div class="mobile-group">
+                <div class="mobile-title">{group.title}</div>
+                {group.links.map((link) => (
+                  <a href={link.href}>{link.label}</a>
+                ))}
+              </div>
+            ) : (
+              <a class="mobile-title" href={group.href}>
+                {group.title}
+              </a>
+            ),
+          )
+        }
+      </nav>
+    </details>
     <div class="nav-actions">
       <a class="nav-signin" href={consoleUrl}>Sign in</a>
       <a class="button button-primary nav-cta" href="/#install">Install</a>
@@ -133,9 +154,72 @@ import { navGroups } from "../nav"
     padding-inline: 14px;
   }
 
+  /* On a phone the groups live behind a menu button; it opens without script. */
+  .mobile-menu {
+    margin-left: auto;
+    order: 3;
+  }
+
+  .mobile-menu summary {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    margin-left: 4px;
+    cursor: pointer;
+    list-style: none;
+    color: var(--ink);
+  }
+
+  .mobile-menu summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .mobile-panel {
+    position: absolute;
+    top: var(--header);
+    left: 0;
+    right: 0;
+    display: grid;
+    gap: 4px;
+    padding: 12px var(--gutter) 20px;
+    background: var(--background);
+    box-shadow: 0 1px 0 var(--rule), 0 24px 40px -24px rgb(16 24 64 / 0.18);
+    font-size: 1rem;
+  }
+
+  .mobile-group {
+    display: grid;
+    padding-bottom: 8px;
+  }
+
+  .mobile-title {
+    padding: 10px 0;
+    color: var(--ink);
+    font-weight: 500;
+  }
+
+  .mobile-panel a:not(.mobile-title) {
+    padding: 8px 0 8px 12px;
+    color: var(--fog);
+  }
+
+  .nav-actions {
+    margin-left: auto;
+  }
+
+  .mobile-menu {
+    margin-left: 0;
+  }
+
   @media (min-width: 860px) {
     .nav-links {
       display: flex;
+    }
+
+    .mobile-menu {
+      display: none;
     }
   }
 </style>

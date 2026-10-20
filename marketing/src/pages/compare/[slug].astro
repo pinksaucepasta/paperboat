@@ -31,8 +31,8 @@ const { compare } = Astro.props
             compare.rows.map((row) => (
               <tr>
                 <th scope="row">{row.feature}</th>
-                <td>{row.them}</td>
-                <td>{row.us}</td>
+                <td data-label={compare.name}>{row.them}</td>
+                <td data-label="Paperboat">{row.us}</td>
               </tr>
             ))
           }
@@ -120,6 +120,46 @@ const { compare } = Astro.props
     max-width: 640px;
     list-style: decimal;
     padding-left: 1.25rem;
+  }
+
+  /* On a phone each row becomes a small block: the feature, then both answers with their names. */
+  @media (max-width: 719px) {
+    .compare-table {
+      min-width: 0;
+    }
+
+    .compare-table thead {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+    }
+
+    .compare-table tr,
+    .compare-table th,
+    .compare-table td {
+      display: block;
+    }
+
+    .compare-table tbody tr {
+      padding-block: 16px;
+      border-bottom: 1px solid var(--rule);
+    }
+
+    .compare-table th,
+    .compare-table td {
+      padding: 4px 0;
+      border: 0;
+      width: auto;
+    }
+
+    .compare-table td::before {
+      content: attr(data-label);
+      display: block;
+      font-size: 0.8125rem;
+      color: var(--ink);
+    }
   }
 
   @media (min-width: 860px) {
