@@ -734,15 +734,16 @@ func (c *readinessCarrier) Run(ctx context.Context, lease Lease, ready func(Leas
 }
 
 // reportOrigin sends one origin change for the admitted lease through the canonical lease
-// mutation, with fresh operation identifiers (a report is never a replay of the creation).
+// mutation. The server binds a machine's readiness report to the lease's create operation, so the
+// report carries that operation; only its request ID is new.
 func (c *readinessCarrier) reportOrigin(ctx context.Context, currentLease func() Lease, mutate LeaseMutation, up bool) error {
-	operation, err := newDispatchOperationID()
+	request, err := newDispatchOperationID()
 	if err != nil {
 		return err
 	}
 	metadata := c.readiness
 	metadata.Mutate = mutate
-	metadata.OperationID, metadata.IdempotencyKey, metadata.RequestID = operation, operation, "request_"+strings.TrimPrefix(operation, "operation_")
+	metadata.RequestID = "request_" + strings.TrimPrefix(request, "operation_")
 	_, err = c.observer.ObservePreviewOrigin(ctx, metadata, currentLease(), up)
 	return err
 }

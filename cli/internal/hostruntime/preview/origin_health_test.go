@@ -154,3 +154,32 @@ func TestObservePreviewOriginPostsTheOriginStateAndReturnsTheCanonicalLease(t *t
 		}
 	}
 }
+
+type originMetadataRecorder struct {
+	dispatchObserver
+	metadata DispatchReadiness
+}
+
+func (o *originMetadataRecorder) ObservePreviewOrigin(_ context.Context, metadata DispatchReadiness, lease Lease, _ bool) (Lease, error) {
+	o.metadata = metadata
+	return lease, nil
+}
+
+// The server only accepts a machine's readiness report for the lease's create operation, so an
+// origin report must carry that operation (a fresh one is refused and the app's state never shows).
+func TestOriginReportCarriesTheLeasesCreateOperation(t *testing.T) {
+	recorder := &originMetadataRecorder{}
+	creation := DispatchReadiness{OperationID: "operation_dispatch_1", IdempotencyKey: "operation_dispatch_1", RequestID: "request_dispatch_1", CorrelationID: "correlation_dispatch_1"}
+	carrier := &readinessCarrier{observer: recorder, readiness: creation}
+	lease := Lease{ID: "prv_dispatch_1"}
+	if err := carrier.reportOrigin(context.Background(), func() Lease { return lease }, nil, false); err != nil {
+		t.Fatal(err)
+	}
+	got := recorder.metadata
+	if got.OperationID != creation.OperationID || got.IdempotencyKey != creation.IdempotencyKey || got.CorrelationID != creation.CorrelationID {
+		t.Fatalf("origin report used %+v, want the creation operation %+v", got, creation)
+	}
+	if got.RequestID == "" || got.RequestID == creation.RequestID {
+		t.Fatalf("origin report request id %q must be new", got.RequestID)
+	}
+}
