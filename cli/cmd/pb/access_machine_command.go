@@ -122,6 +122,11 @@ func newProductionAccessMachineRuntime(command *cobra.Command, selector string) 
 	}
 	if err := waitForMachineService(command.Context(), locator, machine.ID, port); err != nil {
 		err = explainTeamPrivateAccess(command.Context(), client, machine, err)
+		if rejection, refused := err.(commandRejection); refused {
+			// The refusal is the whole answer; only a failed cleanup may accompany it.
+			rejection.cause = locator.Close()
+			return nil, "", rejection
+		}
 		return nil, "", rejectDaemonAccount(errors.Join(err, locator.Close()))
 	}
 	return &daemonAccessMachineRuntime{locator: locator}, machine.ID, nil
@@ -221,11 +226,11 @@ func explainTeamPrivateAccess(ctx context.Context, client teamAccessReader, mach
 		return cause
 	}
 	if !slices.Contains(machine.Permissions, "private_access") {
-		return commandRejection{reason: commandRejectPrivateAccessNoPermission, cause: cause}
+		return commandRejection{reason: commandRejectPrivateAccessNoPermission}
 	}
 	team, err := client.GetTeam(ctx, workspace)
 	if err == nil && !team.AllowPrivateAccess {
-		return commandRejection{reason: commandRejectPrivateAccessTeamOff, cause: cause}
+		return commandRejection{reason: commandRejectPrivateAccessTeamOff}
 	}
 	return cause
 }
