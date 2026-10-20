@@ -367,6 +367,10 @@ func (s *HTTPSProductionAssemblySource) openControlStream(ctx context.Context, r
 		if ctx.Err() != nil {
 			return nil, safeEnrollmentFailure("tunnel control stream setup was interrupted", ctx.Err(), err, responseCloseErr)
 		}
+		if response != nil && response.StatusCode == http.StatusGone {
+			// The tunnel was deleted or the connector revoked: terminal, never retried.
+			return nil, safeEnrollmentFailure("tunnel connector no longer exists", tunnelmanager.ErrConnectorGone, &ActivationDiagnostic{Code: ActivationDiagnosticControlHTTPUnavailable, Cause: err}, responseCloseErr)
+		}
 		if response != nil {
 			code := ActivationDiagnosticControlHTTPUnavailable
 			switch response.StatusCode {

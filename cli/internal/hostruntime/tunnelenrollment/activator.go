@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connectorrotation"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hoststate"
@@ -42,6 +43,11 @@ type ProductionAssemblyBinder interface {
 type ProductionAssemblySourceLifecycle interface {
 	Start(context.Context) error
 	Shutdown(context.Context) error
+}
+
+// ConnectorRemover forgets a connector's durable record and credential.
+type ConnectorRemover interface {
+	RemoveConnector(context.Context, ActivationRequest) error
 }
 
 type ProductionAssemblyUnbinder interface {
@@ -157,6 +163,14 @@ func (a *ProductionAssemblyActivator) activate(ctx context.Context, request Acti
 		return Projection{}, nil, activationFailure(err)
 	}
 
+	// The control plane answering "gone" ends the connector for good: stop it and forget it locally.
+	previousGone := config.OnConnectorGone
+	config.OnConnectorGone = func() {
+		if previousGone != nil {
+			previousGone()
+		}
+		a.retireGone(request)
+	}
 	ready := make(chan tunnelmanager.ActiveChange, 1)
 	previousObserver := config.Production.ActiveObserver
 	config.Production.ActiveObserver = func(change tunnelmanager.ActiveChange) {
@@ -198,6 +212,10 @@ func (a *ProductionAssemblyActivator) activate(ctx context.Context, request Acti
 		return a.readyProjection(request, config), assembly, nil
 	}
 	select {
+	case <-assembly.ConnectorGone():
+		err := errors.Join(tunnelmanager.ErrConnectorGone, assembly.Shutdown(context.Background()))
+		a.unbindFailedAssembly(request, assembly)
+		return Projection{}, nil, err
 	case change := <-ready:
 		if change.Current.Generation() == 0 || change.Current.ContentHash() == "" {
 			err := errors.Join(ErrActivation, assembly.Shutdown(context.Background()))
@@ -211,6 +229,35 @@ func (a *ProductionAssemblyActivator) activate(ctx context.Context, request Acti
 		return Projection{}, nil, err
 	}
 }
+
+// retireGone removes a connector the control plane reported gone: its running assembly, then its
+// durable record and credential. It runs once per connector and logs what it could not clean up.
+func (a *ProductionAssemblyActivator) retireGone(request ActivationRequest) {
+	key := request.HostID + "\x00" + request.TunnelID
+	a.mu.Lock()
+	current := a.assemblies[key]
+	if current != nil && sameActivation(current.request, request) {
+		delete(a.assemblies, key)
+	} else {
+		current = nil
+	}
+	a.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), retireGoneTimeout)
+	defer cancel()
+	var err error
+	if current != nil && current.assembly != nil {
+		err = current.assembly.Shutdown(ctx)
+		a.unbindFailedAssembly(request, current.assembly)
+	}
+	if remover, ok := a.credentials.(ConnectorRemover); ok {
+		err = errors.Join(err, remover.RemoveConnector(ctx, request))
+	}
+	if err != nil {
+		errorreport.Current().ObserveFailure(ctx, "paperboat-daemon", "tunnel_connector", "reconciliation", "service_failed", err)
+	}
+}
+
+const retireGoneTimeout = 30 * time.Second
 
 func (a *ProductionAssemblyActivator) unbindFailedAssembly(request ActivationRequest, assembly *tunnelmanager.ProductionAssembly) {
 	if unbinder, ok := a.source.(ProductionAssemblyUnbinder); ok {

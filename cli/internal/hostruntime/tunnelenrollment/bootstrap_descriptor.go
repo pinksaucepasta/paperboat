@@ -12,6 +12,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"io"
+	jitterrand "math/rand/v2"
 	"mime"
 	"net"
 	"net/http"
@@ -213,9 +214,7 @@ func (s *HTTPSProductionAssemblySource) fetchAvailableCarrierDescriptor(
 			failure.Code != "carrier_unavailable" || !failure.Retryable || failure.RepairAction != "retry" {
 			return carrierBootstrapDescriptor{}, err
 		}
-		// 100 ms, 200 ms, ... doubling to 5 s: a connector the server keeps refusing
-		// must not be asked once a second for the whole apply window.
-		delay := min(100*time.Millisecond<<min(attempt-1, 6), 5*time.Second)
+		delay := carrierBootstrapRetryDelay(attempt)
 		if failure.RetryAt != nil {
 			delay = max(delay, failure.RetryAt.Sub(s.clock.Now().UTC()))
 		}
@@ -227,6 +226,14 @@ func (s *HTTPSProductionAssemblySource) fetchAvailableCarrierDescriptor(
 		case <-timer.C:
 		}
 	}
+}
+
+// carrierBootstrapRetryDelay is 100 ms, 200 ms, ... doubling to 4 s, plus up to a quarter of random
+// spread: a connector the server keeps refusing must not be asked once a second for the whole apply
+// window, and connectors that fail together must not ask together.
+func carrierBootstrapRetryDelay(attempt int) time.Duration {
+	delay := min(100*time.Millisecond<<min(max(attempt, 1)-1, 6), 4*time.Second)
+	return delay + time.Duration(jitterrand.Int64N(int64(delay/4)+1))
 }
 
 func (s *HTTPSProductionAssemblySource) fetchCarrierDescriptor(ctx context.Context, request ActivationRequest, body []byte) (result carrierBootstrapDescriptor, resultErr error) {

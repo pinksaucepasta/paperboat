@@ -95,6 +95,10 @@ func (a *ProductionAssembly) acquireInitialControl(ctx context.Context) (io.Read
 		if err == nil {
 			err = ErrProductionControlMissing
 		}
+		if errors.Is(err, ErrConnectorGone) {
+			a.markConnectorGone()
+			return nil, err
+		}
 		failure := errors.Join(ErrProductionControlMissing, err)
 		a.reportControlFailure(failure, attempt)
 		if err := waitProductionControlReconnect(ctx, productionControlReconnectDelay(attempt, a.connectorID)); err != nil {
@@ -314,6 +318,11 @@ func (a *ProductionAssembly) reconnectControl(ctx context.Context, done chan str
 			if err == nil {
 				err = ErrProductionControlMissing
 			}
+			if errors.Is(err, ErrConnectorGone) {
+				a.markConnectorGone()
+				a.finishControl(done, err)
+				return err
+			}
 			a.reportControlFailure(errors.Join(ErrProductionControlMissing, err), attempt+1)
 			continue
 		}
@@ -321,6 +330,7 @@ func (a *ProductionAssembly) reconnectControl(ctx context.Context, done chan str
 		a.Control = control
 		a.controlRunner = runner
 		a.controlMu.Unlock()
+		connected := time.Now()
 		if err := a.runControlAttempt(ctx, runner, stream, a.helloRequestID); err == nil && ctx.Err() == nil {
 			cause = ErrProductionControlDisconnected
 		} else if ctx.Err() != nil {
@@ -328,6 +338,10 @@ func (a *ProductionAssembly) reconnectControl(ctx context.Context, done chan str
 			return ctx.Err()
 		} else {
 			cause = err
+		}
+		if time.Since(connected) >= productionControlHealthyAfter {
+			// A connection that stayed up is not part of the failure streak: start the backoff over.
+			attempt = 0
 		}
 		a.reportControlFailure(cause, attempt+1)
 	}
@@ -385,22 +399,27 @@ func (a *ProductionAssembly) reportControlFailure(err error, nextAttempt int) {
 	a.Manager.config.Report(Observation{TunnelID: tunnelID, ConnectorID: connectorID, Code: CodeControlUnavailable, Retryable: true, NextRetryAt: now.Add(productionControlReconnectDelay(nextAttempt, connectorID)), ObservedAt: now, Err: err})
 }
 
+// productionControlHealthyAfter is how long a control connection must stay up before a later
+// disconnect starts the reconnect backoff over.
+const productionControlHealthyAfter = 30 * time.Second
+
+// productionControlMaxReconnectDelay caps the reconnect backoff: a connector the control plane keeps
+// refusing costs it about one request a minute instead of several a second. The doubling stops at
+// two thirds of the cap so the per-connector spread (up to half again) still fits under it.
+const productionControlMaxReconnectDelay = time.Minute
+
 func productionControlReconnectDelay(attempt int, identity string) time.Duration {
 	if attempt < 1 {
 		attempt = 1
 	}
-	if attempt > 6 {
-		attempt = 6
+	base := productionControlMaxReconnectDelay * 2 / 3
+	if attempt <= 10 {
+		base = min(100*time.Millisecond*time.Duration(1<<(attempt-1)), base)
 	}
-	base := 100 * time.Millisecond * time.Duration(1<<(attempt-1))
 	// Derive a stable per-connector spread so independent connectors do not all
 	// reconnect on the same tick while lifecycle tests remain reproducible.
 	hash := fnv.New32a()
 	_, _ = hash.Write([]byte(identity))
 	spreadPercent := (hash.Sum32() + uint32(attempt*37)) % 50
-	spread := time.Duration(spreadPercent) * base / 100
-	if base+spread > 5*time.Second {
-		return 5 * time.Second
-	}
-	return base + spread
+	return base + time.Duration(spreadPercent)*base/100
 }

@@ -601,3 +601,26 @@ func productionActivationRequest(t *testing.T) (ActivationRequest, ed25519.Priva
 func rpath(request ActivationRequest) string {
 	return "/v1/tunnels/" + request.TunnelID + "/connectors/" + request.ConnectorID + "/carrier-bootstrap"
 }
+
+// The control plane answers 410 connector_gone for a deleted tunnel or revoked connector: that is a
+// terminal outcome the manager can recognise, not a transient control outage to retry.
+func TestHTTPSProductionAssemblySourceControlGoneIsTerminal(t *testing.T) {
+	now := time.Now().UTC()
+	request, _ := productionActivationRequest(t)
+	var hits atomic.Int32
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusGone)
+		_, _ = w.Write([]byte(`{"code":"connector_gone","message":"The tunnel was deleted or the connector was revoked; remove it from this machine.","retryable":false}`))
+	}))
+	defer server.Close()
+	source := newBootstrapSourceForTest(t, server, now, &bootstrapMachineAuth{})
+	_, err := source.openControlStream(context.Background(), request)
+	if !errors.Is(err, tunnelmanager.ErrConnectorGone) || errors.Is(err, ErrUnavailable) {
+		t.Fatalf("410 was classified as %v", err)
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("control requests = %d", hits.Load())
+	}
+}

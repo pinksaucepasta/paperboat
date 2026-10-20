@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hoststate"
@@ -209,17 +210,25 @@ type reconcileRetry struct {
 }
 
 // failed returns the state after one more failed attempt: the retry waits one reconcile
-// interval, doubling per consecutive failure up to one minute, so an unreachable or deleted
-// tunnel costs the control plane one request per minute instead of one per tick.
-func (r reconcileRetry) failed(generation uint64, now time.Time, interval time.Duration) reconcileRetry {
+// interval, doubling per consecutive failure up to 48 s, plus a per-tunnel spread of up to a
+// quarter, so an unreachable or deleted tunnel costs the control plane about one request a minute
+// instead of one per tick and tunnels that fail together do not retry together.
+func (r reconcileRetry) failed(generation uint64, now time.Time, interval time.Duration, identity string) reconcileRetry {
 	if r.generation != generation {
 		r = reconcileRetry{generation: generation}
 	}
 	r.failures++
 	delay := interval
-	for i := 1; i < r.failures && delay < time.Minute; i++ {
+	for i := 1; i < r.failures && delay < reconcileRetryDoublingCap; i++ {
 		delay *= 2
 	}
-	r.next = now.Add(min(delay, time.Minute))
+	delay = min(delay, reconcileRetryDoublingCap)
+	hash := fnv.New32a()
+	_, _ = hash.Write([]byte(identity))
+	spread := time.Duration((hash.Sum32()+uint32(r.failures*37))%25) * delay / 100
+	r.next = now.Add(delay + spread)
 	return r
 }
+
+// reconcileRetryDoublingCap keeps the longest retry wait, spread included, within a minute.
+const reconcileRetryDoublingCap = 48 * time.Second

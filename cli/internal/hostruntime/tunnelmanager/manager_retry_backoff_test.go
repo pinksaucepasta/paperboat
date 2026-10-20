@@ -32,12 +32,12 @@ func TestScheduledReconcileBacksOffAFailingTunnelButExplicitReconcileDoesNot(t *
 	if attempts() != 1 {
 		t.Fatalf("scheduled pass inside the backoff retried: attempts=%d", attempts())
 	}
-	now = now.Add(6 * time.Second)
+	now = now.Add(7 * time.Second) // the first wait is 5 s plus at most a quarter
 	pass(true)
 	if attempts() != 2 {
 		t.Fatalf("scheduled pass after the first backoff attempts=%d", attempts())
 	}
-	now = now.Add(6 * time.Second) // second failure doubled the wait to 10 s
+	now = now.Add(6 * time.Second) // second failure doubled the wait to 10 s or more
 	pass(true)
 	if attempts() != 2 {
 		t.Fatalf("backoff did not grow: attempts=%d", attempts())
@@ -48,17 +48,24 @@ func TestScheduledReconcileBacksOffAFailingTunnelButExplicitReconcileDoesNot(t *
 	}
 }
 
-func TestReconcileRetryBackoffDoublesToAMinute(t *testing.T) {
+func TestReconcileRetryBackoffDoublesToAMinuteWithASpread(t *testing.T) {
 	now := time.Date(2026, 10, 19, 1, 0, 0, 0, time.UTC)
 	var r reconcileRetry
-	want := []time.Duration{5 * time.Second, 10 * time.Second, 20 * time.Second, 40 * time.Second, time.Minute, time.Minute}
-	for i, delay := range want {
-		r = r.failed(7, now, 5*time.Second)
-		if got := r.next.Sub(now); got != delay {
-			t.Fatalf("failure %d waits %v, want %v", i+1, got, delay)
+	base := []time.Duration{5 * time.Second, 10 * time.Second, 20 * time.Second, 40 * time.Second, 48 * time.Second, 48 * time.Second}
+	for i, want := range base {
+		r = r.failed(7, now, 5*time.Second, "tunnel_a")
+		if got := r.next.Sub(now); got < want || got > want+want/4 || got > time.Minute {
+			t.Fatalf("failure %d waits %v, want %v plus at most a quarter", i+1, got, want)
 		}
 	}
-	if r = r.failed(8, now, 5*time.Second); r.failures != 1 {
+	other := reconcileRetry{}
+	for range base {
+		other = other.failed(7, now, 5*time.Second, "tunnel_b")
+	}
+	if r.next == other.next {
+		t.Fatal("two tunnels share one retry time at the cap")
+	}
+	if r = r.failed(8, now, 5*time.Second, "tunnel_a"); r.failures != 1 {
 		t.Fatalf("a new desired generation kept the old backoff: %+v", r)
 	}
 }

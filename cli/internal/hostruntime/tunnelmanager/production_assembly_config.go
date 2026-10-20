@@ -26,6 +26,9 @@ var (
 	ErrProductionControlStarted         = errors.New("production tunnel control loop is already started")
 	ErrProductionControlDisconnected    = errors.New("production tunnel control stream disconnected")
 	ErrProductionControlRestartRequired = errors.New("production tunnel control requires a fresh authenticated session")
+	// ErrConnectorGone means the control plane says the tunnel was deleted or the connector revoked.
+	// It is terminal: the connector must not reconnect and its local record is removed.
+	ErrConnectorGone = errors.New("tunnel connector no longer exists on the control plane")
 )
 
 // ProductionAssemblyConfig is the complete host-side connector-v1 assembly
@@ -75,6 +78,9 @@ type ProductionAssemblyConfig struct {
 	ControlStream  func(context.Context) (io.ReadWriteCloser, error)
 	ObserveWelcome func(connectorprotocol.Welcome) error
 	HelloRequestID string
+	// OnConnectorGone runs once, on its own goroutine, when the control plane reports the connector
+	// gone (ErrConnectorGone from the control stream). The owner removes the local connector.
+	OnConnectorGone func()
 
 	// NetworkReplacerFactory resolves an authenticated replacer for each
 	// active durable connector. When omitted, this assembly supplies the one
@@ -118,6 +124,22 @@ type ProductionAssembly struct {
 	activeControl   io.ReadWriteCloser
 	activeSession   string
 	networkRecovery *NetworkRecoveryCoordinator
+
+	onGone   func()
+	goneOnce sync.Once
+	gone     chan struct{}
+}
+
+// ConnectorGone is closed when the control plane has reported this connector gone.
+func (a *ProductionAssembly) ConnectorGone() <-chan struct{} { return a.gone }
+
+func (a *ProductionAssembly) markConnectorGone() {
+	a.goneOnce.Do(func() {
+		close(a.gone)
+		if a.onGone != nil {
+			go a.onGone()
+		}
+	})
 }
 
 // OpenProductionAssembly builds the complete durable host-side composition.
@@ -214,6 +236,8 @@ func OpenProductionAssembly(config ProductionAssemblyConfig) (*ProductionAssembl
 		connectorID:     config.Control.Hello.ConnectorID,
 		hostID:          config.Control.Hello.HostID,
 		networkRecovery: networkRecovery,
+		onGone:          config.OnConnectorGone,
+		gone:            make(chan struct{}),
 	}
 	if deferred != nil {
 		deferred.reconnect = assembly.reconnectStaleSession

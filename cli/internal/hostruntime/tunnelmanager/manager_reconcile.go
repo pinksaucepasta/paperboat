@@ -73,7 +73,7 @@ func (m *Manager) reconcile(ctx context.Context, scheduled bool) error {
 				return err
 			}
 			if errors.Is(err, ErrConnectorUnavailable) {
-				m.retries[tunnel.ID] = m.retries[tunnel.ID].failed(tunnel.DesiredGeneration, m.now(), m.config.ReconcileInterval)
+				m.retries[tunnel.ID] = m.retries[tunnel.ID].failed(tunnel.DesiredGeneration, m.now(), m.config.ReconcileInterval, tunnel.ID)
 			}
 			// Runtime, origin, and generation failures are already reported for
 			// this tunnel. Untyped failures are global and must not be swallowed.

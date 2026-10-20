@@ -103,6 +103,39 @@ func (s *FileCredentialStore) Delete(ctx context.Context, reference string) erro
 	return nil
 }
 
+// RemoveConnector forgets a connector the control plane no longer has: its journal record, its
+// signing key and any enrollment token left behind. A record that is already gone or now belongs to
+// another connector is left alone.
+func (s *FileCredentialStore) RemoveConnector(ctx context.Context, request ActivationRequest) error {
+	if s == nil || ctx == nil || !validActivationRequest(request) {
+		return ErrInvalid
+	}
+	s.mu.Lock()
+	state, err := s.loadJournalLocked()
+	if err != nil {
+		s.mu.Unlock()
+		return err
+	}
+	recordValue, ok := state.Records[request.TunnelID]
+	if !ok || recordValue.HostID != request.HostID || recordValue.ConnectorID != request.ConnectorID {
+		s.mu.Unlock()
+		return nil
+	}
+	delete(state.Records, request.TunnelID)
+	err = s.saveJournalLocked(state)
+	s.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	cleanup := []error{s.Delete(ctx, recordValue.Credential.Reference)}
+	for _, token := range append([]string{recordValue.TokenReference}, recordValue.PendingTokenCleanup...) {
+		if token != "" {
+			cleanup = append(cleanup, s.DeleteEnrollmentToken(ctx, token))
+		}
+	}
+	return errors.Join(cleanup...)
+}
+
 func (s *FileCredentialStore) Sign(ctx context.Context, reference string, payload []byte) ([]byte, error) {
 	if s == nil || ctx == nil || connectorprotocol.ValidateCredentialReference(reference) != nil || len(payload) == 0 || len(payload) > 64<<10 {
 		return nil, ErrInvalid

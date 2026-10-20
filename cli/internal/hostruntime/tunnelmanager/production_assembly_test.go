@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -497,9 +498,15 @@ func TestProductionAssemblyShutdownCancelsControlReconnectBackoff(t *testing.T) 
 func TestProductionControlReconnectDelayIsBoundedAndConnectorScoped(t *testing.T) {
 	for attempt := 1; attempt <= 64; attempt++ {
 		delay := productionControlReconnectDelay(attempt, "connector-a")
-		if delay <= 0 || delay > 5*time.Second {
+		if delay <= 0 || delay > time.Minute {
 			t.Fatalf("attempt %d delay=%s outside bounded range", attempt, delay)
 		}
+		if attempt >= 10 && delay < 40*time.Second {
+			t.Fatalf("attempt %d delay=%s: the backoff must reach its cap", attempt, delay)
+		}
+	}
+	if productionControlReconnectDelay(64, "connector-a") == productionControlReconnectDelay(64, "connector-b") {
+		t.Fatal("connectors share one reconnect time at the cap")
 	}
 	if productionControlReconnectDelay(3, "connector-a") == productionControlReconnectDelay(3, "connector-b") {
 		t.Fatal("distinct connector identities must not share the same deterministic reconnect spread")
@@ -858,4 +865,109 @@ type assemblyCloseFailureConn struct{ net.Conn }
 
 func (c assemblyCloseFailureConn) Close() error {
 	return errors.Join(c.Conn.Close(), syscall.EIO)
+}
+
+// A connector the control plane reports gone (tunnel deleted, connector revoked) is terminal: the
+// assembly asks its owner to remove it and never opens another stream.
+func TestProductionAssemblyStopsAndReportsAConnectorTheControlPlaneSaysIsGone(t *testing.T) {
+	config := newProductionAssemblyConfig(t)
+	var streamCalls atomic.Int32
+	config.ControlStream = func(context.Context) (io.ReadWriteCloser, error) {
+		streamCalls.Add(1)
+		return nil, ErrConnectorGone
+	}
+	config.ControlSessionFactory = func(context.Context, *CoordinatedConfigApplier) (connectorrotation.ControlSessionConfig, error) {
+		return config.Control, nil
+	}
+	gone := make(chan struct{}, 4)
+	config.OnConnectorGone = func() { gone <- struct{}{} }
+	assembly, _, err := OpenProductionAssembly(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := assembly.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-gone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the owner was not told the connector is gone")
+	}
+	select {
+	case <-assembly.ConnectorGone():
+	default:
+		t.Fatal("ConnectorGone is not closed")
+	}
+	assembly.controlMu.Lock()
+	done := assembly.controlDone
+	assembly.controlMu.Unlock()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the control loop kept retrying a gone connector")
+	}
+	time.Sleep(300 * time.Millisecond)
+	if calls := streamCalls.Load(); calls != 1 || len(gone) != 0 {
+		t.Fatalf("stream opened %d times, owner told %d extra times", calls, len(gone))
+	}
+	if err := assembly.Shutdown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The same applies when the connector disappears while it is connected: the reconnect that follows
+// the disconnect is answered gone and ends the loop.
+func TestProductionAssemblyStopsReconnectingWhenTheConnectorIsRemovedWhileConnected(t *testing.T) {
+	config, private := newProductionAssemblyConfigWithSigner(t)
+	firstServer, firstClient := net.Pipe()
+	defer firstServer.Close()
+	var streamCalls atomic.Int32
+	config.ControlStream = func(ctx context.Context) (io.ReadWriteCloser, error) {
+		if streamCalls.Add(1) == 1 {
+			return firstClient, nil
+		}
+		return nil, ErrConnectorGone
+	}
+	config.ControlSessionFactory = func(context.Context, *CoordinatedConfigApplier) (connectorrotation.ControlSessionConfig, error) {
+		fresh := config.Control
+		fresh.Hello.ProcessGeneration++
+		auth := fresh.Hello.Auth
+		auth.ProcessGeneration = fresh.Hello.ProcessGeneration
+		auth.Nonce = "reconnect-auth-nonce-gone"
+		auth.IssuedAt = config.Clock.Now()
+		auth.ExpiresAt = config.Clock.Now().Add(time.Minute)
+		var err error
+		auth, err = connectorprotocol.SignAuthProof(auth, func(payload []byte) []byte { return ed25519.Sign(private, payload) })
+		if err != nil {
+			return connectorrotation.ControlSessionConfig{}, err
+		}
+		fresh.Hello.Auth = auth
+		return fresh, nil
+	}
+	gone := make(chan struct{}, 4)
+	config.OnConnectorGone = func() { gone <- struct{}{} }
+	assembly, _, err := OpenProductionAssembly(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := assembly.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := connectorprotocol.ReadFrame(firstServer); err != nil {
+		t.Fatalf("read hello: %v", err)
+	}
+	if err := firstServer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-gone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the reconnect that was answered gone did not end the loop")
+	}
+	if err := assembly.Shutdown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if calls := streamCalls.Load(); calls != 2 {
+		t.Fatalf("stream opened %d times, want 2", calls)
+	}
 }
