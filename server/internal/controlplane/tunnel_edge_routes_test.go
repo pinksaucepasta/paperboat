@@ -138,3 +138,22 @@ func TestTunnelEdgeRouteJSONIsOpaqueAndCarriesExactFence(t *testing.T) {
 		t.Fatalf("opaque target = %#v", value["target"])
 	}
 }
+
+// The edge accepts a private TCP route only as an access-only binding without match type or
+// priority; the stored catch-all match and default priority made it reject the route
+// (route_invalid), so the route stayed pending and the tunnel never became ready.
+func TestTunnelEdgeRouteJSONPrivateTCPCarriesNoMatchOrPriority(t *testing.T) {
+	row := dbsqlc.ListTunnelEdgeRouteAssignmentsForNodeV1Row{
+		AssignmentID: "asn_route_02", RouteID: "rte_02", AccountID: "acct_01", TunnelID: "tun_01",
+		ConfigContentHash: make([]byte, 32), AccessMode: "private", Kind: "tunnel_private_tcp",
+		MatchType: "catch_all", Priority: 100, Protocol: "private_tcp", OriginScheme: "tcp", State: "staged", ObservedState: "pending",
+	}
+	value := tunnelEdgeRouteJSON(row)
+	if value["match_type"] != "" || value["priority"] != 0 || value["public_host"] != "" || value["path_prefix"] != nil {
+		t.Fatalf("private tcp binding = match=%#v priority=%#v host=%#v path=%#v", value["match_type"], value["priority"], value["public_host"], value["path_prefix"])
+	}
+	row.Protocol, row.Kind = "http", "tunnel_http_wss"
+	if value = tunnelEdgeRouteJSON(row); value["match_type"] != "catch_all" || value["priority"] != int32(100) {
+		t.Fatalf("an http route lost its match: match=%#v priority=%#v", value["match_type"], value["priority"])
+	}
+}
