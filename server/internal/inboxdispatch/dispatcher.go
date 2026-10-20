@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -246,8 +247,18 @@ func (d *Dispatcher) Open(ctx context.Context, request Request) (File, error) {
 		response.Body.Close()
 		return File{}, ErrFileTooLarge
 	}
-	name, _ := url.PathUnescape(response.Header.Get("X-Paperboat-Inbox-File-Name"))
+	name := fileNameFromDisposition(response.Header.Get("Content-Disposition"))
 	return File{Body: &limitedBody{ReadCloser: response.Body, remaining: size}, Size: size, Name: name}, nil
+}
+
+// fileNameFromDisposition reads the file name the machine announced in Content-Disposition (the edge
+// strips private X-Paperboat-* response headers, so the name cannot travel in one).
+func fileNameFromDisposition(value string) string {
+	_, params, err := mime.ParseMediaType(value)
+	if err != nil {
+		return ""
+	}
+	return params["filename"]
 }
 
 // Delete removes one Inbox file.

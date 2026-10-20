@@ -68,7 +68,7 @@ func TestOpenStreamsTheFileWithABoundSingleUseCredential(t *testing.T) {
 			t.Errorf("path=%s claims=%+v", r.URL.Path, claims)
 		}
 		w.Header().Set("Content-Length", "11")
-		w.Header().Set("X-Paperboat-Inbox-File-Name", "report%20final.pdf")
+		w.Header().Set("Content-Disposition", "attachment; filename*=UTF-8''r%C3%A9sum%C3%A9%20%281%29.txt")
 		_, _ = w.Write([]byte("hello inbox"))
 	}}
 	dispatcher, _ := dispatcherFor(t, machine)
@@ -78,7 +78,7 @@ func TestOpenStreamsTheFileWithABoundSingleUseCredential(t *testing.T) {
 	}
 	defer file.Body.Close()
 	body, err := io.ReadAll(file.Body)
-	if err != nil || string(body) != "hello inbox" || file.Size != 11 || file.Name != "report final.pdf" {
+	if err != nil || string(body) != "hello inbox" || file.Size != 11 || file.Name != "résumé (1).txt" {
 		t.Fatalf("body=%q size=%d name=%q err=%v", body, file.Size, file.Name, err)
 	}
 	if machine.claims.MachineID != "machine_1" || machine.claims.UserID != "actor_1" || machine.claims.OperationID != "operation_inbox_1" || machine.claims.AccountID != "owner_1" || machine.claims.EnvironmentID != "env_1" || machine.claims.IdempotencyKey != "" {

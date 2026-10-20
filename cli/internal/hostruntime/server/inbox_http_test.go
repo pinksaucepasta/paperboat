@@ -74,7 +74,7 @@ func TestInboxHandlerStreamsTheFileBoundByTheCredential(t *testing.T) {
 	body, _ := io.ReadAll(recorder.Result().Body)
 	if recorder.Code != http.StatusOK || string(body) != "hello inbox" || recorder.Header().Get("Content-Length") != "11" ||
 		recorder.Header().Get("Content-Type") != "application/octet-stream" || recorder.Header().Get("X-Content-Type-Options") != "nosniff" ||
-		recorder.Header().Get(inboxFileNameHeader) != "report%20final.pdf" {
+		recorder.Header().Get("Content-Disposition") != "attachment; filename*=UTF-8''report%20final.pdf" {
 		t.Fatalf("status=%d headers=%v body=%q", recorder.Code, recorder.Header(), body)
 	}
 }
@@ -243,5 +243,17 @@ func TestInboxHandlerListNeedsItsOwnCredential(t *testing.T) {
 	handler.ServeHTTP(recorder, inboxRequest(http.MethodDelete, ""))
 	if recorder.Code != http.StatusMethodNotAllowed {
 		t.Errorf("delete of the collection: status=%d", recorder.Code)
+	}
+}
+
+func TestInboxDispositionNameEncodesForAnExtendedFilename(t *testing.T) {
+	for name, want := range map[string]string{
+		"report final.pdf": "report%20final.pdf",
+		"résumé (1).txt":   "r%C3%A9sum%C3%A9%20%281%29.txt",
+		"a;b=c'd.txt":      "a%3Bb%3Dc%27d.txt",
+	} {
+		if got := inboxDispositionName(name); got != want {
+			t.Errorf("%q -> %q, want %q", name, got, want)
+		}
 	}
 }

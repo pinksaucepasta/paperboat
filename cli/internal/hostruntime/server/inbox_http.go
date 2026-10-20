@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -22,7 +22,6 @@ const (
 	inboxListPath         = "/v1/inbox-files"
 	inboxListLimit        = 200
 	inboxOperationHeader  = "X-Paperboat-Operation-Id"
-	inboxFileNameHeader   = "X-Paperboat-Inbox-File-Name"
 	inboxReadCapability   = "inbox.read.v1"
 	inboxDeleteCapability = "inbox.delete.v1"
 	inboxListCapability   = "inbox.list.v1"
@@ -175,7 +174,9 @@ func serveInboxRead(ctx context.Context, writer http.ResponseWriter, root, id st
 	header.Set("Content-Length", strconv.FormatInt(file.Size, 10))
 	header.Set("Cache-Control", "no-store")
 	header.Set("X-Content-Type-Options", "nosniff")
-	header.Set(inboxFileNameHeader, url.PathEscape(file.Name))
+	// The file name travels in the standard header: the edge removes X-Paperboat-* headers from every
+	// response, so a private header never reached the control plane.
+	header.Set("Content-Disposition", "attachment; filename*=UTF-8''"+inboxDispositionName(file.Name))
 	writer.WriteHeader(http.StatusOK)
 	// Exactly the announced size: a file that grows while it is read is cut off, not extended.
 	if _, err := io.Copy(writer, io.LimitReader(&contextReader{ctx: ctx, reader: handle}, file.Size)); err != nil {
@@ -201,4 +202,19 @@ func rejectInbox(writer http.ResponseWriter, status int, code, stage string) {
 	writer.Header().Set("Cache-Control", "no-store")
 	writer.WriteHeader(status)
 	_ = json.NewEncoder(writer).Encode(map[string]any{"error": map[string]any{"code": code}})
+}
+
+// inboxDispositionName percent-encodes a file name for an RFC 5987 extended filename parameter.
+func inboxDispositionName(name string) string {
+	const unreserved = "!#$&+-.^_`|~"
+	var encoded strings.Builder
+	for _, b := range []byte(name) {
+		switch {
+		case b >= 'a' && b <= 'z', b >= 'A' && b <= 'Z', b >= '0' && b <= '9', strings.IndexByte(unreserved, b) >= 0:
+			encoded.WriteByte(b)
+		default:
+			fmt.Fprintf(&encoded, "%%%02X", b)
+		}
+	}
+	return encoded.String()
 }
