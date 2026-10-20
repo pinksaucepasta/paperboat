@@ -173,7 +173,10 @@ type ReconcilePreviewLeasesV1Input struct {
 	RequestID     string
 	Now           time.Time
 	OwnerGrace    time.Duration
-	Limit         int32
+	// BackgroundOwnerGrace is how long a background preview (host-owned, with a user deadline)
+	// survives without an owner heartbeat, so a restarting host runtime can resume it.
+	BackgroundOwnerGrace time.Duration
+	Limit                int32
 }
 
 type ReconcilePreviewLeasesV1Result struct {
@@ -804,6 +807,9 @@ func (s *Store) ReconcilePreviewLeasesV1(ctx context.Context, input ReconcilePre
 	if strings.TrimSpace(input.ActorID) == "" || !validActorType(input.ActorType) || strings.TrimSpace(input.CorrelationID) == "" || strings.TrimSpace(input.RequestID) == "" || input.OwnerGrace <= 0 || input.Now.IsZero() || input.Limit < 1 || input.Limit > 500 {
 		return ReconcilePreviewLeasesV1Result{}, ErrInvalidInput
 	}
+	if input.BackgroundOwnerGrace < input.OwnerGrace {
+		input.BackgroundOwnerGrace = input.OwnerGrace
+	}
 	now := input.Now.UTC()
 	var result ReconcilePreviewLeasesV1Result
 	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
@@ -839,7 +845,7 @@ func (s *Store) ReconcilePreviewLeasesV1(ctx context.Context, input ReconcilePre
 			}
 		}
 		ownerLostIDs, err := q.MarkLostPreviewLeasesV1(ctx, dbsqlc.MarkLostPreviewLeasesV1Params{
-			Now: sql.NullTime{Time: now, Valid: true}, OwnerCutoff: now.Add(-input.OwnerGrace), RowLimit: input.Limit,
+			Now: sql.NullTime{Time: now, Valid: true}, OwnerCutoff: now.Add(-input.OwnerGrace), BackgroundOwnerCutoff: now.Add(-input.BackgroundOwnerGrace), RowLimit: input.Limit,
 		})
 		if err != nil {
 			return translate(err)

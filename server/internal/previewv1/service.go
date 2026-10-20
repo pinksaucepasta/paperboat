@@ -33,15 +33,19 @@ import (
 )
 
 const (
-	Schema                  = "paperboat.preview-tunnel/v1"
-	Kind                    = "preview_lease"
-	DefaultLease            = 30 * time.Minute
-	DefaultMaxLease         = 24 * time.Hour
-	DefaultOwnerGrace       = 30 * time.Second
-	ReconcileBatchSize      = 100
-	maxPreviewCursorPayload = 1024
-	maxPreviewCursorEncoded = 2048
-	maximumCreateTries      = 8
+	Schema            = "paperboat.preview-tunnel/v1"
+	Kind              = "preview_lease"
+	DefaultLease      = 30 * time.Minute
+	DefaultMaxLease   = 24 * time.Hour
+	DefaultOwnerGrace = 30 * time.Second
+	// DefaultBackgroundOwnerGrace is how long a background preview (host-owned, with a user
+	// deadline) survives without an owner heartbeat: the host runtime restarts for updates and
+	// resumes its previews with the same URL.
+	DefaultBackgroundOwnerGrace = 5 * time.Minute
+	ReconcileBatchSize          = 100
+	maxPreviewCursorPayload     = 1024
+	maxPreviewCursorEncoded     = 2048
+	maximumCreateTries          = 8
 )
 
 var (
@@ -78,32 +82,34 @@ type Repository interface {
 }
 
 type Config struct {
-	EndpointDomain      string
-	CursorKey           []byte
-	LeaseDuration       time.Duration
-	MaxLease            time.Duration
-	OwnerGrace          time.Duration
-	Dispatcher          Dispatcher
-	AttachmentReadiness AttachmentReadiness
-	PreviewDomains      PreviewDomainReader
-	Now                 func() time.Time
-	NewID               func(prefix string) (string, error)
-	Random              io.Reader
+	EndpointDomain       string
+	CursorKey            []byte
+	LeaseDuration        time.Duration
+	MaxLease             time.Duration
+	OwnerGrace           time.Duration
+	BackgroundOwnerGrace time.Duration
+	Dispatcher           Dispatcher
+	AttachmentReadiness  AttachmentReadiness
+	PreviewDomains       PreviewDomainReader
+	Now                  func() time.Time
+	NewID                func(prefix string) (string, error)
+	Random               io.Reader
 }
 
 type Service struct {
-	repository          Repository
-	endpointDomain      string
-	cursors             *cursorCodec
-	leaseDuration       time.Duration
-	maxLease            time.Duration
-	ownerGrace          time.Duration
-	dispatcher          Dispatcher
-	attachmentReadiness AttachmentReadiness
-	previewDomains      PreviewDomainReader
-	now                 func() time.Time
-	newID               func(prefix string) (string, error)
-	random              io.Reader
+	repository           Repository
+	endpointDomain       string
+	cursors              *cursorCodec
+	leaseDuration        time.Duration
+	maxLease             time.Duration
+	ownerGrace           time.Duration
+	backgroundOwnerGrace time.Duration
+	dispatcher           Dispatcher
+	attachmentReadiness  AttachmentReadiness
+	previewDomains       PreviewDomainReader
+	now                  func() time.Time
+	newID                func(prefix string) (string, error)
+	random               io.Reader
 }
 
 type PreviewDomainReader interface {
@@ -260,6 +266,13 @@ func NewService(repository Repository, config Config) (*Service, error) {
 	if ownerGrace == 0 {
 		ownerGrace = DefaultOwnerGrace
 	}
+	backgroundOwnerGrace := config.BackgroundOwnerGrace
+	if backgroundOwnerGrace == 0 {
+		backgroundOwnerGrace = DefaultBackgroundOwnerGrace
+	}
+	if backgroundOwnerGrace < ownerGrace {
+		backgroundOwnerGrace = ownerGrace
+	}
 	if leaseDuration <= 0 || maxLease < leaseDuration || ownerGrace <= 0 {
 		return nil, errors.New("preview lease durations must be positive and max lease must cover the default lease")
 	}
@@ -273,7 +286,7 @@ func NewService(repository Repository, config Config) (*Service, error) {
 	}
 	return &Service{
 		repository: repository, endpointDomain: domain, cursors: cursors,
-		leaseDuration: leaseDuration, maxLease: maxLease, ownerGrace: ownerGrace,
+		leaseDuration: leaseDuration, maxLease: maxLease, ownerGrace: ownerGrace, backgroundOwnerGrace: backgroundOwnerGrace,
 		dispatcher: config.Dispatcher, attachmentReadiness: config.AttachmentReadiness, previewDomains: config.PreviewDomains,
 		now: now, newID: idGenerator, random: randomSource,
 	}, nil
@@ -760,7 +773,7 @@ func (s *Service) Reconcile(ctx context.Context, actorID, correlationID, request
 	now := s.now().UTC()
 	result, err := s.repository.ReconcilePreviewLeasesV1(ctx, previewtunnelstore.ReconcilePreviewLeasesV1Input{
 		ActorID: actorID, ActorType: "system", CorrelationID: correlationID, RequestID: requestID,
-		Now: now, OwnerGrace: s.ownerGrace, Limit: ReconcileBatchSize,
+		Now: now, OwnerGrace: s.ownerGrace, BackgroundOwnerGrace: s.backgroundOwnerGrace, Limit: ReconcileBatchSize,
 	})
 	if err != nil {
 		return ReconcileResult{}, err

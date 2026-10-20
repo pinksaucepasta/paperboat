@@ -461,7 +461,12 @@ WITH candidates AS (
   FROM preview_leases AS source
   WHERE source.terminal_state = 'active'
     AND source.lease_deadline > $1
-    AND (source.owner_last_seen_at <= $2
+    AND ((source.owner_last_seen_at <= $2
+        AND NOT (source.owner_session_kind='local_lease' AND source.user_deadline IS NOT NULL))
+      -- A background preview is owned by the host runtime, which may be restarting (an update);
+      -- it keeps its URL for a longer grace so the runtime can resume it.
+      OR (source.owner_last_seen_at <= $3
+        AND source.owner_session_kind='local_lease' AND source.user_deadline IS NOT NULL)
       OR (source.owner_session_kind='lazy_runtime' AND NOT EXISTS (
         SELECT 1 FROM lazy_access_policies policy
         JOIN lazy_runtime_owners runtime ON runtime.machine_id=policy.machine_id
@@ -483,7 +488,7 @@ WITH candidates AS (
           AND machine.user_id=policy.account_id AND machine.deleted_at IS NULL AND machine.revoked_at IS NULL
       )))
   ORDER BY source.owner_last_seen_at, source.id
-  LIMIT $3
+  LIMIT $4
 )
 UPDATE preview_leases AS p
 SET allocation_state = 'released',
@@ -497,13 +502,14 @@ RETURNING p.id
 `
 
 type MarkLostPreviewLeasesV1Params struct {
-	Now         sql.NullTime
-	OwnerCutoff time.Time
-	RowLimit    int32
+	Now                   sql.NullTime
+	OwnerCutoff           time.Time
+	BackgroundOwnerCutoff time.Time
+	RowLimit              int32
 }
 
 func (q *Queries) MarkLostPreviewLeasesV1(ctx context.Context, arg MarkLostPreviewLeasesV1Params) ([]string, error) {
-	rows, err := q.db.Query(ctx, markLostPreviewLeasesV1, arg.Now, arg.OwnerCutoff, arg.RowLimit)
+	rows, err := q.db.Query(ctx, markLostPreviewLeasesV1, arg.Now, arg.OwnerCutoff, arg.BackgroundOwnerCutoff, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}

@@ -209,7 +209,12 @@ WITH candidates AS (
   FROM preview_leases AS source
   WHERE source.terminal_state = 'active'
     AND source.lease_deadline > sqlc.arg(now)
-    AND (source.owner_last_seen_at <= sqlc.arg(owner_cutoff)
+    AND ((source.owner_last_seen_at <= sqlc.arg(owner_cutoff)
+        AND NOT (source.owner_session_kind='local_lease' AND source.user_deadline IS NOT NULL))
+      -- A background preview is owned by the host runtime, which may be restarting (an update);
+      -- it keeps its URL for a longer grace so the runtime can resume it.
+      OR (source.owner_last_seen_at <= sqlc.arg(background_owner_cutoff)
+        AND source.owner_session_kind='local_lease' AND source.user_deadline IS NOT NULL)
       OR (source.owner_session_kind='lazy_runtime' AND NOT EXISTS (
         SELECT 1 FROM lazy_access_policies policy
         JOIN lazy_runtime_owners runtime ON runtime.machine_id=policy.machine_id
