@@ -52,7 +52,7 @@ func (p *Plane) Publish(topic machineevents.Topic) {
 	p.wake <- struct{}{}
 }
 
-// FailNext makes the next n requests answer 503.
+// FailNext makes the next n requests answer 503, including a wait that is being held now.
 func (p *Plane) FailNext(n int32) { p.failures.Store(n) }
 
 // PendingFailures is how many scripted failures have not been served yet.
@@ -87,12 +87,14 @@ func (p *Plane) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	p.requests = append(p.requests, request.Topics)
 	p.headers = append(p.headers, r.Header.Clone())
 	p.mu.Unlock()
-	if p.failures.Load() > 0 {
-		p.failures.Add(-1)
-		http.Error(w, "unavailable", http.StatusServiceUnavailable)
-		return
-	}
 	for {
+		// A scripted failure also ends a wait that is already held, so a test that calls FailNext and
+		// then publishes gets the outage it asked for whichever request was in flight.
+		if p.failures.Load() > 0 {
+			p.failures.Add(-1)
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+			return
+		}
 		p.mu.Lock()
 		moved := map[string]int64{}
 		for topic, known := range request.Topics {
