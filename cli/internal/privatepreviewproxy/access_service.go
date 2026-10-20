@@ -146,15 +146,16 @@ func (s *AccessService) PACURL() (string, bool) {
 
 func (s *AccessService) monitor(ctx context.Context, proxy *AccessProxy, done chan struct{}, failureEpisode bool) {
 	defer close(done)
-	ticker := time.NewTicker(s.config.PollInterval)
-	defer ticker.Stop()
+	timer := time.NewTimer(s.config.PollInterval)
+	defer timer.Stop()
 	var pending string
 	recoverInstall := false
+	delay := s.config.PollInterval
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-timer.C:
 		}
 		if ctx.Err() != nil {
 			return
@@ -205,7 +206,23 @@ func (s *AccessService) monitor(ctx context.Context, proxy *AccessProxy, done ch
 			errorreport.Current().Lifecycle(ctx, "config", "preview_attachment", "recovered", "success")
 		}
 		cancel()
+		// A failing poll backs off (a revoked or signed-out machine would otherwise ask the
+		// server every few seconds forever); the first success returns to the normal cadence.
+		delay = nextPollDelay(delay, s.config.PollInterval, err != nil)
+		timer.Reset(delay)
 	}
+}
+
+// maxFailedPollDelay bounds the wait between failing private-access polls.
+const maxFailedPollDelay = time.Minute
+
+// nextPollDelay is the wait before the next poll: the base interval after a success, doubling up
+// to maxFailedPollDelay after each consecutive failure.
+func nextPollDelay(current, base time.Duration, failed bool) time.Duration {
+	if !failed {
+		return base
+	}
+	return min(max(current*2, base), maxFailedPollDelay)
 }
 
 func observePrivateAccessAttempt(ctx context.Context, err error) {

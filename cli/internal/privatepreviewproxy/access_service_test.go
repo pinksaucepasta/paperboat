@@ -547,3 +547,22 @@ func TestAccessServiceShutdownJoinsUnpublishedDiscovery(t *testing.T) {
 		t.Fatalf("unpublished lifecycle mutated PAC: %v", got)
 	}
 }
+
+func TestFailedPrivateAccessPollsBackOffAndRecover(t *testing.T) {
+	base := 2 * time.Second
+	delay := base
+	var seen []time.Duration
+	for range 8 {
+		delay = nextPollDelay(delay, base, true)
+		seen = append(seen, delay)
+	}
+	want := []time.Duration{4 * time.Second, 8 * time.Second, 16 * time.Second, 32 * time.Second, time.Minute, time.Minute, time.Minute, time.Minute}
+	for i := range want {
+		if seen[i] != want[i] {
+			t.Fatalf("delays %v, want %v", seen, want)
+		}
+	}
+	if got := nextPollDelay(time.Minute, base, false); got != base {
+		t.Fatalf("a success returned to %v, want %v", got, base)
+	}
+}
