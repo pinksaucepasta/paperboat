@@ -188,6 +188,11 @@ function AccessForm({
               <span className="flex flex-col">
                 <span className="font-medium">{capability.label}</span>
                 <span className="text-xs text-muted-foreground">{capability.hint}</span>
+                {capability.id === "private_access" && !team.allow_private_access && (
+                  <span className="text-xs text-muted-foreground">
+                    The team has not allowed private access yet. An owner or admin turns it on in Settings.
+                  </span>
+                )}
               </span>
             </label>
           </li>

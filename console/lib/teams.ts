@@ -10,7 +10,8 @@ export type TeamMember = Schemas["TeamMember"]
 export type Team = Schemas["TeamTeam"] & { suspended?: boolean }
 export type TeamInvitation = Schemas["TeamInvitationSummary"]
 export type MachineAdmission = Schemas["TeamMachineAdmission"]
-export type TeamAction = "role" | "remove" | "leave" | "transfer" | "delete" | "rename" | "machine_approval"
+export type TeamAction =
+  "role" | "remove" | "leave" | "transfer" | "delete" | "rename" | "machine_approval" | "private_access"
 export type TeamRole = "owner" | "admin" | "member"
 
 /** Team features whose server side is not deployed yet; their controls render disabled. */
@@ -140,6 +141,7 @@ export async function teamAction(
     confirmation?: string
     name?: string
     approve_new_machines?: boolean
+    allow_private_access?: boolean
   } = {},
 ) {
   const expected_generation = await freshGeneration(team)

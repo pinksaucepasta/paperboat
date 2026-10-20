@@ -156,6 +156,7 @@ const phrases: Record<string, string> = {
   "team.machine_approve": "accepted a machine into the team",
   "team.machine_decline": "declined a machine for the team",
   "team.machine_approval": "changed whether new machines need approval",
+  "team.private_access": "changed whether members may use private access",
   "team.machine_grant": "gave a member access to a machine",
   "team.inbox_request": "asked to send files",
   "team.inbox_decide": "answered a file request",
