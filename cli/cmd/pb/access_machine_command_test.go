@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/api"
 	daemonpb "github.com/pinksaucepasta/paperboat/internal/daemonrpc/proto"
 	"github.com/pinksaucepasta/paperboat/internal/resolver"
 	"github.com/spf13/cobra"
@@ -311,5 +312,42 @@ func TestDaemonAccessRuntimeDialsTheAssignedAddressOfTheExactPort(t *testing.T) 
 	<-accepted
 	if err := runtime.Close(); err != nil || !locator.closed {
 		t.Fatalf("daemon connection was not released: closed=%v err=%v", locator.closed, err)
+	}
+}
+
+type fakeTeamAccess struct {
+	workspace string
+	team      api.Team
+	err       error
+}
+
+func (f fakeTeamAccess) Workspace() string { return f.workspace }
+func (f fakeTeamAccess) GetTeam(context.Context, string) (api.Team, error) {
+	return f.team, f.err
+}
+
+func TestTeamMemberIsToldWhyASharedMachinePortIsNotOffered(t *testing.T) {
+	cause := errors.New("wait for machine service on port 80")
+	granted := api.UserMachine{Permissions: []string{"terminal", "private_access"}}
+	for _, test := range []struct {
+		name    string
+		client  fakeTeamAccess
+		machine api.UserMachine
+		reason  commandRejectionReason
+	}{
+		{"no permission", fakeTeamAccess{workspace: "team-a", team: api.Team{AllowPrivateAccess: true}}, api.UserMachine{Permissions: []string{"terminal"}}, commandRejectPrivateAccessNoPermission},
+		{"team setting off", fakeTeamAccess{workspace: "team-a"}, granted, commandRejectPrivateAccessTeamOff},
+	} {
+		var rejection commandRejection
+		err := explainTeamPrivateAccess(context.Background(), test.client, test.machine, cause)
+		if !errors.As(err, &rejection) || rejection.reason != test.reason {
+			t.Fatalf("%s: error = %v, want rejection %v", test.name, err, test.reason)
+		}
+	}
+	// A personal machine, or an allowed team, keeps the original cause.
+	for _, client := range []fakeTeamAccess{{workspace: "personal"}, {workspace: "team-a", team: api.Team{AllowPrivateAccess: true}}} {
+		if err := explainTeamPrivateAccess(context.Background(), client, granted, cause); err != cause {
+			t.Fatalf("error = %v, want the original cause for %+v", err, client)
+		}
 	}
 }

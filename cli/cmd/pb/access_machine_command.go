@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/daemoncmd"
 	"github.com/pinksaucepasta/paperboat/internal/daemonrpc"
@@ -120,6 +121,7 @@ func newProductionAccessMachineRuntime(command *cobra.Command, selector string) 
 		return nil, "", fmt.Errorf("reach the local Paperboat daemon: %w; run `pb service start` and retry", err)
 	}
 	if err := waitForMachineService(command.Context(), locator, machine.ID, port); err != nil {
+		err = explainTeamPrivateAccess(command.Context(), client, machine, err)
 		return nil, "", rejectDaemonAccount(errors.Join(err, locator.Close()))
 	}
 	return &daemonAccessMachineRuntime{locator: locator}, machine.ID, nil
@@ -200,4 +202,30 @@ func waitForMachineService(ctx context.Context, locator machineLocator, machine 
 		case <-ticker.C:
 		}
 	}
+}
+
+// teamAccessReader is the part of the API client that explains why a shared machine's port is
+// not offered to this account.
+type teamAccessReader interface {
+	Workspace() string
+	GetTeam(context.Context, string) (api.Team, error)
+}
+
+// explainTeamPrivateAccess replaces "service not published" with the real reason when the machine
+// is reached through a team: the member lacks the machine's private_access permission, or the team
+// has private access turned off. Both make the server leave the machine's ports out of what the
+// daemon is offered, which otherwise looks like a service that is simply not running.
+func explainTeamPrivateAccess(ctx context.Context, client teamAccessReader, machine api.UserMachine, cause error) error {
+	workspace := client.Workspace()
+	if workspace == "" || workspace == "personal" {
+		return cause
+	}
+	if !slices.Contains(machine.Permissions, "private_access") {
+		return commandRejection{reason: commandRejectPrivateAccessNoPermission, cause: cause}
+	}
+	team, err := client.GetTeam(ctx, workspace)
+	if err == nil && !team.AllowPrivateAccess {
+		return commandRejection{reason: commandRejectPrivateAccessTeamOff, cause: cause}
+	}
+	return cause
 }

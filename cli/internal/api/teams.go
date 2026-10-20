@@ -38,6 +38,8 @@ type Team struct {
 	// ApproveNewMachines: machines that members add wait for an owner or admin.
 	ApproveNewMachines bool                   `json:"approve_new_machines"`
 	MachineRequests    []TeamMachineAdmission `json:"machine_requests"`
+	// AllowPrivateAccess: members may reach the ports of machines shared into the team.
+	AllowPrivateAccess bool `json:"allow_private_access"`
 }
 
 // TeamMachineAdmission is a machine waiting for (or refused by) a team's owners and admins.

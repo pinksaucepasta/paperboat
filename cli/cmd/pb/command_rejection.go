@@ -34,6 +34,8 @@ const (
 	commandRejectConfigRepositoryInvalid
 	commandRejectConfigRepositoryUnavailable
 	commandRejectConfigRepositoryCredentials
+	commandRejectPrivateAccessNoPermission
+	commandRejectPrivateAccessTeamOff
 	commandRejectTeamReserved
 	commandRejectTeamRequestInvalid
 	commandRejectTeamSeatRequired
@@ -73,6 +75,10 @@ func (e commandRejection) Error() string {
 		return "This machine cannot reach the config repository. A local repository exists only on the machine that holds its path; connect a repository this machine can reach (an SSH or HTTPS URL, or a mounted path), then retry."
 	case commandRejectConfigRepositoryCredentials:
 		return "This machine has no usable credentials for the config repository. Save them with `pb config repository credentials set <repository> --file <profile>`, then retry."
+	case commandRejectPrivateAccessNoPermission:
+		return "You do not have private access to this machine in this team. Ask a team owner or admin to give you its private_access permission."
+	case commandRejectPrivateAccessTeamOff:
+		return "Private access is turned off for this team, so its machines' ports are not reachable. A team owner or admin can turn it on in the team settings."
 	case commandRejectTeamReserved:
 		return "That team name is already reserved. Choose another name, or run the original `pb team create` command again to reuse its payment."
 	case commandRejectTeamRequestInvalid:
