@@ -9,7 +9,8 @@
 //   - empty states ("No …", "Nothing …", "Not set up") without a button or link to act on,
 //   - API calls that failed (>= 400, except 401/404 probes) whose page shows a raw code or no
 //     human sentence at all.
-// `window.__machine` (default: the first online machine) picks the machine whose tabs are visited;
+// `window.__only` limits the run to a list of routes; `window.__fail` (503 or "network") makes every
+// API read fail to see what people are told. `window.__machine` (default: the first online machine) picks the machine whose tabs are visited;
 // `window.__tunnel` the tunnel. Findings are in window.__findings (also returned); progress in
 // window.__checkSteps. Nothing is left changed.
 ;(async () => {
@@ -28,6 +29,8 @@
     }
     return null
   }
+  const inject = window.__fail
+  delete window.__fail
   const machineId = window.__machine
   const tunnelId = window.__tunnel
   delete window.__machine
@@ -48,6 +51,24 @@
   const realFetch = window.fetch
   window.fetch = async (input, init) => {
     const url = typeof input === "string" ? input : input.url
+    // Failure mode (window.__fail = 503 or "network"): every API read fails, to see what people see.
+    const method = (init?.method ?? (typeof input === "string" ? "GET" : input.method) ?? "GET").toUpperCase()
+    if (inject && method === "GET" && /\/api\/v1\//.test(url) && !/\/api\/v1\/me(\?|$)/.test(url)) {
+      if (inject === "network") {
+        failures.push({ url: url.replace(/^.*\/api\/v1\//, ""), status: 0, code: "Failed to fetch" })
+        throw new TypeError("Failed to fetch")
+      }
+      failures.push({ url: url.replace(/^.*\/api\/v1\//, ""), status: inject, code: "internal_error" })
+      return new Response(
+        JSON.stringify({
+          error: { code: "internal_error", message: "Paperboat hit a problem. Try again in a moment." },
+        }),
+        {
+          status: inject,
+          headers: { "content-type": "application/json" },
+        },
+      )
+    }
     try {
       const response = await realFetch(input, init)
       if (response.status >= 400 && /\/api\/v1\//.test(url) && ![401, 404].includes(response.status)) {
@@ -98,8 +119,13 @@
   ]
   const snake = /\b[a-z]{2,}(?:_[a-z0-9]+)+\b/g
 
+  // A skeleton counts only when it can be seen: hidden sections keep theirs mounted.
+  const busy = () =>
+    [...document.querySelectorAll("main .animate-pulse, main [aria-busy=true]")].some(
+      (e) => e.getClientRects().length > 0,
+    )
   const loaded = async () => {
-    await until(() => !document.querySelector("main .animate-pulse, main [aria-busy=true]"), 20000)
+    await until(() => !busy(), 20000)
     await sleep(1200)
   }
   const visited = new Set()
@@ -117,6 +143,7 @@
       return
     }
     await loaded()
+    if (inject && busy()) flag(route, "still loading after the failure", "a skeleton never went away")
     visited.add(route)
     steps.push({ step: `visited ${route}`, ok: true, detail: location.pathname })
     for (const message of errors) flag(route, "console error", message)
@@ -145,6 +172,12 @@
     // Failed calls must read as something a person can act on.
     const page = texts.join(" ")
     for (const failure of failures) {
+      // The machine list also feeds the header picker; a page that never mentions machines owes no sentence about it.
+      if (
+        /^machines\?/.test(failure.url) &&
+        !/machine/i.test((document.querySelector("main main") ?? document.querySelector("main")).innerText)
+      )
+        continue
       const human =
         /Couldn’t|Couldn't|Could not|Try again|isn’t|offline|unavailable|didn’t|failed|expired|not available|went wrong|Retry/i.test(
           page,
@@ -196,7 +229,9 @@
   }
   if (tunnelId) routes.push(`/tunnels/${tunnelId}`)
   routes.push("/cli/authorize")
-  for (const route of routes) {
+  const only = window.__only
+  delete window.__only
+  for (const route of only ?? routes) {
     try {
       await visit(route)
     } catch (error) {
