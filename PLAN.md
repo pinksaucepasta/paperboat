@@ -580,6 +580,78 @@ console Activity feed.
 - S3-05: User and operator docs (`cli/docs`, `server/docs`, READMEs) match behaviour (each feature's docs fixed when the feature is verified).
 - S3-06: Operator admin frontend: **USER DECIDES**.
 
+### 3a. Shared endpoint engine: server and edge design (Lane B, awaiting approval, no code yet)
+
+Decision (user, 2026-10-20): previews and tunnels run on ONE engine after Linux, before macOS; the UX stays distinct
+(tunnels like Cloudflare Tunnel: persistent, named, many routes and protocols; previews like ngrok: one command, ephemeral,
+one URL). Both-edges serving is a property of the engine, not of either feature.
+
+**Today (three attach flows over one carrier listener).** Previews: a lease + one fresh edge carrier per preview, an
+attachment row with an outbox the edge drains, per-preview DNS, ~5.2k lines `previewattachment` + 2k `previewtunnelstore` +
+edge `runtime/preview_carrier.go` + CLI `hostruntime/preview` AttachmentCarrier. Tunnels: tunnel + connector + session +
+config generations + `tunnel_edge_route_assignments`, connector credentials, durable carrier admission (~8.4k `tunnelv1`,
+~7.3k `controlplane`, ~6.3k `connectorprotocol`). Runtime hostnames: a per-machine carrier to BOTH edges (primary active,
+standby ready), already active-active. Each flow has its own lifetime, readiness, DNS rule and cleanup, which is why a
+preview flips edges under its URL and a tunnel's second route stalled.
+
+**Model.** One resource, `endpoints(id, kind preview|tunnel, account, owner_team, agent_id, access_mode, lifetime
+lease|persistent, lease_deadline, desired_state, generation)`, with `endpoint_routes` (hostname or generated name,
+protocol http|ws|tcp|tls|private_tcp, match, origin on the agent, access policy) and `endpoint_hostnames` (generated under
+the platform wildcard; custom domains for tunnels only). Kind is a policy preset, not a code path: preview = one http route,
+lease with renewal, generated immutable name, deleted on expiry; tunnel = many routes, persistent, rename is a label,
+custom domains, connector rotation. `/v1/previews/*` and `/v1/tunnels/*` stay as thin facades over `endpoints`.
+
+**Carriers belong to the agent, not the endpoint.** An *agent* (a machine's daemon identity; optionally a headless
+connector token, see Questions) holds N carriers (default 2: active + warm) to EACH edge of its workspace's edge set. These
+are today's runtime carriers, extended. An endpoint never opens a carrier: creating or changing it pushes a route
+generation over carriers that already exist, so a preview is ready in one control round trip (no TLS/QUIC dial, no
+admission outbox). Streams for any endpoint multiplex over any ready carrier of that edge.
+
+**Placement.** The edge set (`workspace_edge_sets`, 2 edges, distinct failure domains, managed or own servers, never mixed,
+dead member replaced after 10 min) is the only placement input. A reconciler creates
+`endpoint_edge_assignments(endpoint_id, edge_node_id, route_set_generation, desired, observed, observed_at)` for every edge of
+the set where the agent has a ready carrier; the edge pulls ONE complete snapshot of its assignments (complete:true, last
+known good on failure; today's preview admission shape) and reports observed state. Serving = at least one assignment
+observed ready; healthy = all edges of the set.
+
+**DNS.** `edge_dns_publications` stays; one query lists the IPs of edges with an observed-ready assignment (TTL 60), so the
+record can never name an edge that lacks the route, and a created endpoint's URL is returned only after the record is
+written and at least one assignment is ready (the second edge may follow within seconds). Edge loss: the edge leaves the
+record at once (ready flag), the set replaces it after 10 min, the agent opens carriers to the new member, assignments
+follow, DNS follows. No edge-to-edge forwarding.
+
+**Health, lifetime, cleanup (one owner each).** One lease reaper (preview deadline, user stop, owner machine revoked); tunnel
+desired_state/delete; both end by setting `desired=removed` on assignments, the edge acks removal, then rows and DNS go.
+Origin health (`tunnel_route_origin_health`) and usage/bandwidth keep their keys (endpoint_id replaces tunnel_id/preview_id).
+
+**Removed.** Server: `preview_lease_carrier_attachments`, `preview_carrier_attachment_outbox`, per-preview carrier issuer and
+edge-node selector, `previewattachment` (5.2k), `previewtunnelstore` (2k), preview DNS special cases (intent/attachment
+branches), `tunnel_connector_sessions` as a per-connector session (agent carrier session replaces it),
+`tunnel_connector_activations`, `serves_*` placement leftovers, duplicate readiness paths. Edge: preview admission worker,
+durable-connector admission registry (one admission type remains: agent carrier), preview alias reconciliation in its own
+registry (routes come from assignments). CLI (Lane A/F, same series): `hostruntime/preview` AttachmentCarrier, the
+tunnel connector's own carrier dial; both become "register routes with the agent daemon". Estimate: about -9k/+4k server,
+-3k/+1k edge.
+
+**Migration.** Existing rows move in the server migration series: tunnels, routes, domains, config generations map 1:1 to
+`endpoints`/`endpoint_routes`/`endpoint_hostnames` (ids kept, so URLs and DNS do not change); connectors become agent
+bindings; assignments are recomputed by the reconciler; live preview leases are ended at cut-over (minutes-long, pre-release);
+certificate and DNS tables are untouched. Forward-only migrations numbered by whoever lands them, each rehearsed on a
+restored production backup.
+
+**Order (each step deployable server-first, every historical smoke check stays green).**
+1. Agent carrier model: N carriers per edge; carriers advertise `endpoints` capability; PG + edge tests with two edges.
+2. Tables + reconciler + edge snapshot/observation for `kind=preview` only; new `/v1/endpoints`; preview facade switched, old
+   attachment path deleted in the same series (no dual path kept).
+3. CLI: preview via the agent daemon (Lane A/F); smoke preview, preview-protocols, preview-private.
+4. Tunnels onto endpoints (routes, domains, rotation, private_tcp, catch-all); CLI tunnel manager; smoke tunnel*, tcp_private.
+5. Deletion commits for everything in "Removed"; DNS/health/failover runbook rewritten; chaos test: kill one edge mid-traffic.
+
+**Questions for the coordinator/user.** (a) Headless tunnel connectors (a token that runs without a Paperboat machine, like
+`cloudflared`): keep as a second agent identity, or tunnels require a machine? Keeping it costs the credential/rotation
+tables and one more admission path. (b) Carriers per edge: 2 (proposed) or 1. (c) Preview URL return rule: wait for one edge
+ready (proposed) or both. (d) Custom domains for previews: no (proposed).
+
 ## 4. Handoff notes
 
 All open items from the Phase B handoff (2026-10-14) are filed in S0 (smoke suite), F4
