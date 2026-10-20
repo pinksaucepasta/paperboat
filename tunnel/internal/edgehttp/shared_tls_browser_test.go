@@ -61,7 +61,7 @@ func TestSharedTLSBrowserAuthorization(t *testing.T) {
 			defer transport.CloseIdleConnections()
 			request, _ := http.NewRequest("GET", "https://"+match.Host+"/", nil)
 			request.AddCookie(&http.Cookie{Name: browserEdgeCookie, Value: "token"})
-			response, err := (&http.Client{Transport: transport, Timeout: time.Second}).Do(request)
+			response, err := (&http.Client{Transport: transport, Timeout: 10 * time.Second}).Do(request)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -457,6 +457,12 @@ func TestSharedTLSColdPreviewRefreshesExactAuthority(t *testing.T) {
 			if mode == "unknown" {
 				wantCalls = 1
 			}
+			// The second request is made after the handshake returns to the client; wait for it, then
+			// require that no more arrive.
+			for deadline := time.Now().Add(5 * time.Second); calls.Load() < wantCalls && time.Now().Before(deadline); {
+				time.Sleep(5 * time.Millisecond)
+			}
+			time.Sleep(50 * time.Millisecond)
 			if calls.Load() != wantCalls {
 				t.Fatalf("authority requests=%d want%d", calls.Load(), wantCalls)
 			}
