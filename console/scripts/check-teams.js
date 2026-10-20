@@ -28,6 +28,8 @@
     if ((now.display_name || now.name) !== saved.name) await call({ action: "rename", name: saved.name })
     if (now.approve_new_machines !== saved.approve)
       await call({ action: "machine_approval", approve_new_machines: saved.approve })
+    if (Boolean(now.allow_private_access) !== saved.privateAccess)
+      await call({ action: "private_access", allow_private_access: saved.privateAccess })
   }
   try {
     return await (async () => {
@@ -85,7 +87,12 @@
       pass("team page opens", Boolean(header))
       if (!header) return steps
       const team = await get(`teams/${encodeURIComponent(teamId)}`)
-      Object.assign(saved, { id: teamId, name: team.display_name || team.name, approve: team.approve_new_machines })
+      Object.assign(saved, {
+        id: teamId,
+        name: team.display_name || team.name,
+        approve: team.approve_new_machines,
+        privateAccess: Boolean(team.allow_private_access),
+      })
       const active = team.members.filter((member) => member.active)
       pass("member count matches the server", header.includes(`${active.length} members`), `${active.length} active`)
       const names = active.map((member) => member.email)
@@ -178,12 +185,46 @@
           async () => (await get(`teams/${encodeURIComponent(teamId)}`)).approve_new_machines === !current,
         )
         pass("turning it off/on is saved on the server", Boolean(flipped))
+        // Restore only once the page shows the new value and the switch can be used again.
+        await until(() => {
+          const now = main().querySelector('[role="switch"][aria-label="Approve new machines"]')
+          return now && !now.hasAttribute("data-disabled") && now.getAttribute("aria-checked") === String(!current)
+        })
         ;(main().querySelector('[role="switch"][aria-label="Approve new machines"]') ?? toggle).click()
         pass(
           "switch restored",
           Boolean(
             await until(
               async () => (await get(`teams/${encodeURIComponent(teamId)}`)).approve_new_machines === current,
+            ),
+          ),
+        )
+      }
+      // Allow private access (team-level): shown, matches the server, saved and restored.
+      const privateSwitch = () => main().querySelector('[role="switch"][aria-label="Allow private access"]')
+      pass("Allow private access switch is shown", Boolean(privateSwitch()))
+      if (privateSwitch()) {
+        const before = Boolean((await get(`teams/${encodeURIComponent(teamId)}`)).allow_private_access)
+        pass(
+          "it shows the server's value",
+          privateSwitch().getAttribute("aria-checked") === String(before),
+          `server=${before}`,
+        )
+        privateSwitch().click()
+        const changed = await until(
+          async () => Boolean((await get(`teams/${encodeURIComponent(teamId)}`)).allow_private_access) === !before,
+        )
+        pass("turning it on/off is saved on the server", Boolean(changed))
+        await until(() => {
+          const now = privateSwitch()
+          return now && !now.hasAttribute("data-disabled") && now.getAttribute("aria-checked") === String(!before)
+        })
+        privateSwitch()?.click()
+        pass(
+          "private access setting restored",
+          Boolean(
+            await until(
+              async () => Boolean((await get(`teams/${encodeURIComponent(teamId)}`)).allow_private_access) === before,
             ),
           ),
         )
