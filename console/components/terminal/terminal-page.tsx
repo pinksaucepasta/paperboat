@@ -223,7 +223,7 @@ export function TerminalRoom({ session, guest = false }: { session: TerminalSess
                     <PersonAvatar
                       key={person.accountId}
                       accountId={person.accountId}
-                      name={personName(person.accountId, session, me?.id)}
+                      name={personName(person, session, me?.id)}
                     />
                   ))}
                 </span>
