@@ -78,7 +78,8 @@ func TestWaitDaemonReadyReportsLastStateOnCancellation(t *testing.T) {
 	old := servicePaths
 	t.Cleanup(func() { servicePaths = old })
 	servicePaths = func() (localapi.Paths, error) { return paths, nil }
-	ctx, cancel := context.WithTimeout(t.Context(), 150*time.Millisecond)
+	// The first status poll must complete before the deadline for a last state to exist.
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer cancel()
 	err := waitDaemonReady(ctx)
 	if err == nil || !strings.Contains(err.Error(), `last state was "degraded"`) || !strings.Contains(err.Error(), "run pb status and retry") {

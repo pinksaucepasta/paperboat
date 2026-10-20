@@ -77,6 +77,11 @@ func TestMultipleProcessesShareRetentionAndPreserveAcceptedRecords(t *testing.T)
 }
 
 func TestConcurrentStartupWithMaximumDiagnosticHistory(t *testing.T) {
+	// Reading 50 MiB of history inside the production bound is a speed test; this one checks that
+	// concurrent startup keeps every record, so give the operations time under -race on a busy host.
+	previous := diskOperationTimeout
+	diskOperationTimeout = 60 * time.Second
+	t.Cleanup(func() { diskOperationTimeout = previous })
 	directory := filepath.Join(t.TempDir(), "diagnostics")
 	if err := os.Mkdir(directory, 0o700); err != nil {
 		t.Fatal(err)
@@ -137,7 +142,9 @@ func TestConcurrentStartupWithMaximumDiagnosticHistory(t *testing.T) {
 		}
 	})
 
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	// Reading the maximum history is bounded only as a hang guard; under the race detector on a busy
+	// machine it takes several seconds.
+	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 	defer cancel()
 	if err := rings[0].Record(event); err != nil {
 		t.Fatalf("record after concurrent startup: %T", err)

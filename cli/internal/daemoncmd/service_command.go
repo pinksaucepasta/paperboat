@@ -72,7 +72,9 @@ func waitDaemonReady(ctx context.Context) error {
 			if snapshot.DaemonState == "ready" {
 				return nil
 			}
-		} else {
+		} else if ctx.Err() == nil {
+			// A request cut short by the caller's own deadline says nothing new about the daemon;
+			// keep the last real observation for the message.
 			lastErr = snapshotErr
 		}
 		select {

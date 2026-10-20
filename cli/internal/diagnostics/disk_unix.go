@@ -23,8 +23,11 @@ const (
 	DefaultRetention     = 7 * 24 * time.Hour
 	defaultSegmentBytes  = 1 << 20
 	defaultQueueCapacity = 256
-	diskOperationTimeout = 2 * time.Second
 )
+
+// diskOperationTimeout bounds every disk operation. It is a variable only so a test of a
+// maximum-size history can lift it under the race detector; no production code assigns it.
+var diskOperationTimeout = 2 * time.Second
 
 type DiskConfig struct {
 	Directory string

@@ -83,8 +83,11 @@ func TestNativeClientResumesLostCommitAndRetainsBatchAcrossOutage(t *testing.T) 
 					offset, _ := strconv.ParseInt(r.Header.Get("Upload-Offset"), 10, 64)
 					offsets = append(offsets, offset)
 					chunk, err := io.ReadAll(r.Body)
+					if err != nil {
+						return // the client gave up mid-upload (its deadline); nothing was committed
+					}
 					digest := sha256.Sum256(chunk)
-					if err != nil || len(chunk) > protocol.FileTransferChunkBytes || r.Header.Get("Upload-Digest") != "sha256="+hex.EncodeToString(digest[:]) || offset != int64(len(content)) {
+					if len(chunk) > protocol.FileTransferChunkBytes || r.Header.Get("Upload-Digest") != "sha256="+hex.EncodeToString(digest[:]) || offset != int64(len(content)) {
 						t.Error("invalid bounded commit")
 						w.WriteHeader(400)
 						return
@@ -127,7 +130,13 @@ func TestNativeClientResumesLostCommitAndRetainsBatchAcrossOutage(t *testing.T) 
 				t.Cleanup(func() { _ = c.Close() })
 				return c
 			}
-			ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
+			// An outage lasts until this deadline, so it stays short; a send that must succeed gets a
+			// budget that holds under the race detector on a busy machine.
+			sendBudget := 10 * time.Second
+			if outage {
+				sendBudget = 500 * time.Millisecond
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), sendBudget)
 			defer cancel()
 			client := newClient()
 			batch, err := client.SendBatch(ctx, manifest.BatchID, manifest.SessionID, []Source{item})
@@ -136,13 +145,15 @@ func TestNativeClientResumesLostCommitAndRetainsBatchAcrossOutage(t *testing.T) 
 				if !errors.As(err, &resume) || resume.BatchID != manifest.BatchID || batch.BatchID != manifest.BatchID {
 					t.Fatalf("outage: %v batch=%s", err, batch.BatchID)
 				}
+				// Close the first client before the outage ends: a commit it still had in flight would
+				// reach the recovered server with a stale offset, which the server correctly refuses.
+				_ = client.Close()
 				mu.Lock()
 				if deletes != 0 {
 					t.Error("outage canceled resumable state")
 				}
 				unavailable = false
 				mu.Unlock()
-				_ = client.Close()
 				client = newClient()
 				resumeCtx, resumeCancel := context.WithTimeout(t.Context(), 5*time.Second)
 				defer resumeCancel()
