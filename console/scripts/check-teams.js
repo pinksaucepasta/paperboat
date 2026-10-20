@@ -15,7 +15,7 @@
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
   const until = async (test, ms = 15000) => {
     for (let waited = 0; waited < ms; waited += 200) {
-      const found = test()
+      const found = await test()
       if (found) return found
       await sleep(200)
     }

@@ -9427,6 +9427,18 @@
             "items": {
               "$ref": "#/components/schemas/TeamMachineAdmission"
             }
+          },
+          "machines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TeamMachine"
+            }
+          },
+          "machine_grants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TeamMachineGrant"
+            }
           }
         },
         "required": [
@@ -15559,6 +15571,164 @@
             "items": {
               "$ref": "#/components/schemas/MachineNetworkLatencyItem"
             }
+          }
+        }
+      },
+      "TeamMachine": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "A machine in the team.",
+        "required": [
+          "machine_id",
+          "owner_account",
+          "alias",
+          "state",
+          "online",
+          "configured_capabilities",
+          "generation",
+          "active"
+        ],
+        "properties": {
+          "machine_id": {
+            "type": "string"
+          },
+          "owner_account": {
+            "type": "string"
+          },
+          "owner_team_id": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "alias": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "online": {
+            "type": "boolean"
+          },
+          "configured_capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "generation": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "active": {
+            "type": "boolean"
+          }
+        }
+      },
+      "TeamMachineGrant": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "What members may do on a team machine: everyone in the team, or one member.",
+        "required": [
+          "machine_id",
+          "audience",
+          "capabilities",
+          "generation",
+          "active"
+        ],
+        "properties": {
+          "machine_id": {
+            "type": "string"
+          },
+          "audience": {
+            "type": "string",
+            "enum": [
+              "all_members",
+              "selected_member"
+            ]
+          },
+          "account_id": {
+            "type": "string"
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "terminal",
+                "exec",
+                "managed_ssh",
+                "files",
+                "preview_manage",
+                "tunnel_manage",
+                "private_access"
+              ]
+            }
+          },
+          "generation": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "active": {
+            "type": "boolean"
+          }
+        }
+      },
+      "TeamMachineGrantRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Sets what an audience may do on a team machine. Capabilities are the complete set; an inactive grant removes the access.",
+        "required": [
+          "operation_id",
+          "expected_generation",
+          "machine_id",
+          "audience",
+          "capabilities",
+          "active"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string"
+          },
+          "expected_generation": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "machine_id": {
+            "type": "string"
+          },
+          "audience": {
+            "type": "string",
+            "enum": [
+              "all_members",
+              "selected_member"
+            ]
+          },
+          "account_id": {
+            "type": "string",
+            "description": "With audience selected_member only."
+          },
+          "capabilities": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "enum": [
+                "terminal",
+                "exec",
+                "managed_ssh",
+                "files",
+                "preview_manage",
+                "tunnel_manage",
+                "private_access"
+              ]
+            }
+          },
+          "active": {
+            "type": "boolean"
           }
         }
       }
@@ -46416,6 +46586,90 @@
               "maxLength": 63
             },
             "description": "Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field."
+          }
+        ]
+      }
+    },
+    "/v1/teams/{team_id}/machine-grants": {
+      "post": {
+        "operationId": "team_machine_grant",
+        "summary": "Team machine grant",
+        "security": [
+          {
+            "cookieSession": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:connect"
+        ],
+        "responses": {
+          "200": {
+            "description": "Authenticated current state or exact committed operation result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/TeamTeam"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "description": "Conflict, including team_suspended after team or invitation authorization. Ask the team owner to restore billing or resume the team.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "412": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "Owners and admins, and the machine's owner, set what the whole team or one member may do on a team machine. Roles do not grant use by themselves.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TeamMachineGrantRequest"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "team_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
           }
         ]
       }

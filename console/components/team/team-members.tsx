@@ -26,6 +26,7 @@ import { CopyButton } from "@/components/copy-button"
 import { InviteDialog } from "@/components/team/invite-dialog"
 import { ConfirmAction, SearchField, ViewToggle } from "@/components/list-toolbar"
 import { Time } from "@/components/time"
+import { MachineAccess } from "@/components/team/machine-access"
 import { Row, Section } from "@/components/section"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
@@ -138,6 +139,7 @@ export function TeamManage({ workspace }: { workspace: Workspace }) {
       {team.data.suspended && <SuspendedNotice owner={actor === "owner"} />}
 
       <MachineRequests team={team.data} admin={admin} me={me.data} />
+      <MachineAccess team={team.data} admin={admin} accountId={me.data.id} emails={emails} />
 
       <section className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center gap-2">

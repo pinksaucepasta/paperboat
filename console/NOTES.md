@@ -210,6 +210,10 @@ Product decisions so far, and what the console will show:
   waits as a request until an owner or admin accepts it on the team page ("Machines waiting") or
   with `pb team machine approve|decline`; the member sees it waiting, can withdraw it, and sees a
   decline. Activity records the request and the answer. Access still needs separate grants.
+- **Machine access** (team page, owners/admins and a machine's owner): per team machine, "Manage
+  access" sets what everyone in the team, or one member, may use: terminal, run commands, SSH/SCP/SFTP,
+  files, previews, tunnels and Private network access (`POST /v1/teams/{team}/machine-grants`). Nothing
+  is allowed until granted; unticking everything switches the grant off.
 - **Default access is shown while enrolling:** "Who can use it: everyone in the team" with what
   they can do (terminal, files, SSH, previews, tunnels), changeable there and later on the
   machine's Access section.

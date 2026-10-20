@@ -398,6 +398,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/server-version": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Deployed server build */
+        get: operations["get_server_version"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/edge/assignments/current": {
         parameters: {
             query?: never;
@@ -1638,6 +1655,28 @@ export interface paths {
          * @description Host-only, authenticated like carrier bootstrap by the renewable machine identity and a detached proof over the exact method, path and body; Idempotency-Key binds the proof operation. The host sends the generation of each topic it last saw. The server answers 200 as soon as any topic of that machine has a higher generation, naming only those topics, or 204 after up to 30 seconds without a change. A response carries generations, never data: the host refreshes the named topic itself. Generations are persisted per machine and topic, so a reconnecting host loses nothing. Topics: machine_access, peer_network, previews, tunnels, config, inventory.
          */
         post: operations["post_v1_machine_events_wait"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/machines/{machine_id}/events/wait": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                machine_id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Wait for a change to something a machine caches (signed-in user)
+         * @description The same wait as /v1/machine-events/wait for the signed-in CLI daemon, which holds the user's credential rather than a machine identity. The user may wait only on a machine of their own account. Answers 200 with the topics that moved past the sent generations, or 204 after up to 30 seconds. Generations only, never data.
+         */
+        post: operations["post_v1_user_machines_machine_id_events_wait"];
         delete?: never;
         options?: never;
         head?: never;
@@ -7281,6 +7320,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/teams/{team_id}/machine-grants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Team machine grant
+         * @description Owners and admins, and the machine's owner, set what the whole team or one member may do on a team machine. Roles do not grant use by themselves.
+         */
+        post: operations["team_machine_grant"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -9529,6 +9588,8 @@ export interface components {
             approve_new_machines?: boolean;
             /** @description Owners and admins see every request; other members see their own. */
             machine_requests?: components["schemas"]["TeamMachineAdmission"][];
+            machines?: components["schemas"]["TeamMachine"][];
+            machine_grants?: components["schemas"]["TeamMachineGrant"][];
         };
         TeamActivityItem: {
             id: string;
@@ -11101,6 +11162,41 @@ export interface components {
         MachineNetworkLatencyList: {
             items: components["schemas"]["MachineNetworkLatencyItem"][];
         };
+        /** @description A machine in the team. */
+        TeamMachine: {
+            machine_id: string;
+            owner_account: string;
+            owner_team_id?: string;
+            description?: string;
+            alias: string;
+            state: string;
+            online: boolean;
+            configured_capabilities: string[];
+            generation: number;
+            active: boolean;
+        };
+        /** @description What members may do on a team machine: everyone in the team, or one member. */
+        TeamMachineGrant: {
+            machine_id: string;
+            /** @enum {string} */
+            audience: "all_members" | "selected_member";
+            account_id?: string;
+            capabilities: ("terminal" | "exec" | "managed_ssh" | "files" | "preview_manage" | "tunnel_manage" | "private_access")[];
+            generation: number;
+            active: boolean;
+        };
+        /** @description Sets what an audience may do on a team machine. Capabilities are the complete set; an inactive grant removes the access. */
+        TeamMachineGrantRequest: {
+            operation_id: string;
+            expected_generation: number;
+            machine_id: string;
+            /** @enum {string} */
+            audience: "all_members" | "selected_member";
+            /** @description With audience selected_member only. */
+            account_id?: string;
+            capabilities: ("terminal" | "exec" | "managed_ssh" | "files" | "preview_manage" | "tunnel_manage" | "private_access")[];
+            active: boolean;
+        };
     };
     responses: {
         /** @description Structured API error. */
@@ -11881,6 +11977,26 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description Service process is healthy. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SuccessResponse"];
+                };
+            };
+        };
+    };
+    get_server_version: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Release tag and 40-hex source commit of the running server. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -14404,6 +14520,48 @@ export interface operations {
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
+            415: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    post_v1_user_machines_machine_id_events_wait: {
+        parameters: {
+            query?: {
+                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
+                workspace?: string;
+            };
+            header?: never;
+            path: {
+                machine_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MachineEventsRequest"];
+            };
+        };
+        responses: {
+            /** @description At least one topic changed. */
+            200: {
+                headers: {
+                    "Cache-Control": "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MachineEventsResponse"];
+                };
+            };
+            /** @description No topic changed within the wait. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
             415: components["responses"]["Error"];
             503: components["responses"]["Error"];
         };
@@ -26929,6 +27087,48 @@ export interface operations {
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
+        };
+    };
+    team_machine_grant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                team_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TeamMachineGrantRequest"];
+            };
+        };
+        responses: {
+            /** @description Authenticated current state or exact committed operation result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["TeamTeam"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            /** @description Conflict, including team_suspended after team or invitation authorization. Ask the team owner to restore billing or resume the team. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            412: components["responses"]["Error"];
         };
     };
 }

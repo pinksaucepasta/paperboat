@@ -159,5 +159,48 @@ export function answerMachine(team: Team, machineId: string, action: "approve" |
   })
 }
 
+/** What a member can do on a team machine, in the order the grant dialog lists them. */
+export const machineCapabilities = [
+  { id: "terminal", label: "Terminal", hint: "Open terminals and see their output." },
+  { id: "exec", label: "Run commands", hint: "Run a command and read its output." },
+  { id: "managed_ssh", label: "SSH, SCP and SFTP", hint: "Connect with ssh and copy files with scp, sftp and rsync." },
+  { id: "files", label: "Files and transfers", hint: "Send files to and receive files from the machine." },
+  { id: "preview_manage", label: "Previews", hint: "Create and stop previews of its ports." },
+  { id: "tunnel_manage", label: "Tunnels", hint: "Create, change and remove its tunnels." },
+  {
+    id: "private_access",
+    label: "Private network access",
+    hint: "Reach its services (ports 1024 and up) over the private network, encrypted end to end.",
+  },
+] as const
+
+export type MachineCapability = (typeof machineCapabilities)[number]["id"]
+
+/**
+ * Sets what the whole team (`account` empty) or one member may do on a team machine. `capabilities`
+ * is the complete set; turning access off sends the previous set with `active: false`.
+ */
+export function grantMachine(
+  team: Team,
+  machineId: string,
+  audience: { account?: string },
+  capabilities: string[],
+  active: boolean,
+) {
+  return api<Team>(`${teamPath(team.team_id)}/machine-grants`, {
+    method: "POST",
+    headers: json,
+    body: JSON.stringify({
+      operation_id: idempotencyKey(),
+      expected_generation: team.generation,
+      machine_id: machineId,
+      audience: audience.account ? "selected_member" : "all_members",
+      ...(audience.account ? { account_id: audience.account } : {}),
+      capabilities,
+      active,
+    }),
+  })
+}
+
 /** The server's team ID rule: lowercase letters, digits and inner dashes, 1–63. */
 export const teamIdPattern = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/
