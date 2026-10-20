@@ -28,21 +28,24 @@ SELECT substring(p.endpoint from 9)::text FROM preview_leases p
 WHERE p.id=sqlc.arg(tunnel_id) AND paperboat.workspace_edge_mode(p.account_id,p.owner_team_id)='managed-only'
 ORDER BY hostname LIMIT 129;
 
--- name: GetReadyRuntimeEdgeDNSAddressV1 :one
--- Only the active, exact, freshly observed carrier may receive a browser URL.
+-- name: ListReadyRuntimeEdgeDNSAddressesV1 :many
+-- Every edge that holds an exact, freshly observed carrier of the route may receive a browser URL:
+-- a machine keeps a carrier to each edge of its set and either one serves the host. The primary
+-- (applied) carrier must exist, so a route that is not applied yet is advertised nowhere.
 SELECT n.id, r.desired_revision AS resource_generation, statement_timestamp()::timestamptz AS observed_at,
  COALESCE(host(n.public_ingress_ipv4),'')::text AS ipv4,
  COALESCE(host(n.public_ingress_ipv6),'')::text AS ipv6,
  (n.process_epoch || '/' || a.session_id || '/' || a.generation::text)::text AS readiness_version,
  LEAST(a.expires_at,n.registry_expires_at,n.last_heartbeat_at+interval '30 seconds',a.observed_at+interval '30 seconds')::timestamptz AS valid_until
 FROM control_routes r
-JOIN runtime_carrier_attachments a ON a.route_id=r.id AND a.active
+JOIN runtime_carrier_attachments a ON a.route_id=r.id
 JOIN control_tunnel_nodes n ON n.id=a.edge_node_id AND n.process_epoch=a.edge_process_epoch
 WHERE r.id=sqlc.arg(route_id) AND r.public_host=sqlc.arg(hostname)
- AND r.applied_node_id=n.id AND r.applied_revision=r.desired_revision
+ AND r.applied_node_id IS NOT NULL AND r.applied_revision=r.desired_revision
  AND paperboat.runtime_carrier_valid(r.id,n.id,n.process_epoch,true)
  AND n.public_ingress_verified_at IS NOT NULL
- AND (n.public_ingress_ipv4 IS NOT NULL OR n.public_ingress_ipv6 IS NOT NULL);
+ AND (n.public_ingress_ipv4 IS NOT NULL OR n.public_ingress_ipv6 IS NOT NULL)
+ORDER BY n.id;
 
 -- name: ListReadyEdgeDNSAddressesV1 :many
 -- Every route in the serving config sharing the hostname must be usable on the advertised node.

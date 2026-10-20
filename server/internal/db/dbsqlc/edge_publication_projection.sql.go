@@ -11,53 +11,6 @@ import (
 	"time"
 )
 
-const getReadyRuntimeEdgeDNSAddressV1 = `-- name: GetReadyRuntimeEdgeDNSAddressV1 :one
-SELECT n.id, r.desired_revision AS resource_generation, statement_timestamp()::timestamptz AS observed_at,
- COALESCE(host(n.public_ingress_ipv4),'')::text AS ipv4,
- COALESCE(host(n.public_ingress_ipv6),'')::text AS ipv6,
- (n.process_epoch || '/' || a.session_id || '/' || a.generation::text)::text AS readiness_version,
- LEAST(a.expires_at,n.registry_expires_at,n.last_heartbeat_at+interval '30 seconds',a.observed_at+interval '30 seconds')::timestamptz AS valid_until
-FROM control_routes r
-JOIN runtime_carrier_attachments a ON a.route_id=r.id AND a.active
-JOIN control_tunnel_nodes n ON n.id=a.edge_node_id AND n.process_epoch=a.edge_process_epoch
-WHERE r.id=$1 AND r.public_host=$2
- AND r.applied_node_id=n.id AND r.applied_revision=r.desired_revision
- AND paperboat.runtime_carrier_valid(r.id,n.id,n.process_epoch,true)
- AND n.public_ingress_verified_at IS NOT NULL
- AND (n.public_ingress_ipv4 IS NOT NULL OR n.public_ingress_ipv6 IS NOT NULL)
-`
-
-type GetReadyRuntimeEdgeDNSAddressV1Params struct {
-	RouteID  string
-	Hostname string
-}
-
-type GetReadyRuntimeEdgeDNSAddressV1Row struct {
-	ID                 string
-	ResourceGeneration int64
-	ObservedAt         time.Time
-	Ipv4               string
-	Ipv6               string
-	ReadinessVersion   string
-	ValidUntil         time.Time
-}
-
-// Only the active, exact, freshly observed carrier may receive a browser URL.
-func (q *Queries) GetReadyRuntimeEdgeDNSAddressV1(ctx context.Context, arg GetReadyRuntimeEdgeDNSAddressV1Params) (GetReadyRuntimeEdgeDNSAddressV1Row, error) {
-	row := q.db.QueryRow(ctx, getReadyRuntimeEdgeDNSAddressV1, arg.RouteID, arg.Hostname)
-	var i GetReadyRuntimeEdgeDNSAddressV1Row
-	err := row.Scan(
-		&i.ID,
-		&i.ResourceGeneration,
-		&i.ObservedAt,
-		&i.Ipv4,
-		&i.Ipv6,
-		&i.ReadinessVersion,
-		&i.ValidUntil,
-	)
-	return i, err
-}
-
 const listEdgeDNSPublicationNamesV1 = `-- name: ListEdgeDNSPublicationNamesV1 :many
 SELECT substring(t.stable_endpoint from 9)::text AS hostname
 FROM tunnels t WHERE t.id=$1
@@ -293,6 +246,69 @@ func (q *Queries) ListReadyEdgeDNSAddressesV1(ctx context.Context, arg ListReady
 	var items []ListReadyEdgeDNSAddressesV1Row
 	for rows.Next() {
 		var i ListReadyEdgeDNSAddressesV1Row
+		if err := rows.Scan(
+			&i.ID,
+			&i.ResourceGeneration,
+			&i.ObservedAt,
+			&i.Ipv4,
+			&i.Ipv6,
+			&i.ReadinessVersion,
+			&i.ValidUntil,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listReadyRuntimeEdgeDNSAddressesV1 = `-- name: ListReadyRuntimeEdgeDNSAddressesV1 :many
+SELECT n.id, r.desired_revision AS resource_generation, statement_timestamp()::timestamptz AS observed_at,
+ COALESCE(host(n.public_ingress_ipv4),'')::text AS ipv4,
+ COALESCE(host(n.public_ingress_ipv6),'')::text AS ipv6,
+ (n.process_epoch || '/' || a.session_id || '/' || a.generation::text)::text AS readiness_version,
+ LEAST(a.expires_at,n.registry_expires_at,n.last_heartbeat_at+interval '30 seconds',a.observed_at+interval '30 seconds')::timestamptz AS valid_until
+FROM control_routes r
+JOIN runtime_carrier_attachments a ON a.route_id=r.id
+JOIN control_tunnel_nodes n ON n.id=a.edge_node_id AND n.process_epoch=a.edge_process_epoch
+WHERE r.id=$1 AND r.public_host=$2
+ AND r.applied_node_id IS NOT NULL AND r.applied_revision=r.desired_revision
+ AND paperboat.runtime_carrier_valid(r.id,n.id,n.process_epoch,true)
+ AND n.public_ingress_verified_at IS NOT NULL
+ AND (n.public_ingress_ipv4 IS NOT NULL OR n.public_ingress_ipv6 IS NOT NULL)
+ORDER BY n.id
+`
+
+type ListReadyRuntimeEdgeDNSAddressesV1Params struct {
+	RouteID  string
+	Hostname string
+}
+
+type ListReadyRuntimeEdgeDNSAddressesV1Row struct {
+	ID                 string
+	ResourceGeneration int64
+	ObservedAt         time.Time
+	Ipv4               string
+	Ipv6               string
+	ReadinessVersion   string
+	ValidUntil         time.Time
+}
+
+// Every edge that holds an exact, freshly observed carrier of the route may receive a browser URL:
+// a machine keeps a carrier to each edge of its set and either one serves the host. The primary
+// (applied) carrier must exist, so a route that is not applied yet is advertised nowhere.
+func (q *Queries) ListReadyRuntimeEdgeDNSAddressesV1(ctx context.Context, arg ListReadyRuntimeEdgeDNSAddressesV1Params) ([]ListReadyRuntimeEdgeDNSAddressesV1Row, error) {
+	rows, err := q.db.Query(ctx, listReadyRuntimeEdgeDNSAddressesV1, arg.RouteID, arg.Hostname)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListReadyRuntimeEdgeDNSAddressesV1Row
+	for rows.Next() {
+		var i ListReadyRuntimeEdgeDNSAddressesV1Row
 		if err := rows.Scan(
 			&i.ID,
 			&i.ResourceGeneration,

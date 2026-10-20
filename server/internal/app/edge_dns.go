@@ -166,22 +166,13 @@ func reconcileEdgeDNSOwner(ctx context.Context, database *db.DB, public, runtime
 		desired := tunnelcert.DesiredAddressPublication{Owner: owner, Hostname: host, ResourceGeneration: generation, ObservedAt: time.Now().UTC()}
 		if active[host] {
 			if runtimeRoute {
-				row, queryErr := database.Queries().GetReadyRuntimeEdgeDNSAddressV1(ctx, dbsqlc.GetReadyRuntimeEdgeDNSAddressV1Params{RouteID: owner, Hostname: host})
-				if queryErr != nil && queryErr != pgx.ErrNoRows {
+				rows, queryErr := database.Queries().ListReadyRuntimeEdgeDNSAddressesV1(ctx, dbsqlc.ListReadyRuntimeEdgeDNSAddressesV1Params{RouteID: owner, Hostname: host})
+				if queryErr != nil {
 					return queryErr
 				}
-				if queryErr == nil {
-					if row.ResourceGeneration != int64(generation) {
-						return errors.New("runtime DNS route changed during projection")
-					}
-					desired.ObservedAt, desired.ValidUntil = row.ObservedAt, row.ValidUntil
-					desired.ReadinessVersion = row.ID + "/" + row.ReadinessVersion
-					if row.Ipv4 != "" {
-						desired.Addresses = append(desired.Addresses, row.Ipv4)
-					}
-					if row.Ipv6 != "" {
-						desired.Addresses = append(desired.Addresses, row.Ipv6)
-						desired.IPv6ReachabilityVerified = true
+				if len(rows) != 0 {
+					if desired, queryErr = readyRuntimePublication(owner, host, generation, rows); queryErr != nil {
+						return queryErr
 					}
 				}
 			} else {
@@ -211,6 +202,30 @@ func reconcileEdgeDNSOwner(ctx context.Context, database *db.DB, public, runtime
 		}
 	}
 	return nil
+}
+
+// readyRuntimePublication publishes the addresses of every edge holding a fresh carrier of the route.
+func readyRuntimePublication(owner, host string, generation uint64, rows []dbsqlc.ListReadyRuntimeEdgeDNSAddressesV1Row) (tunnelcert.DesiredAddressPublication, error) {
+	d := tunnelcert.DesiredAddressPublication{Owner: owner, Hostname: host, ResourceGeneration: generation, ObservedAt: rows[0].ObservedAt}
+	versions := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if row.ResourceGeneration != int64(generation) {
+			return d, errors.New("runtime DNS route changed during projection")
+		}
+		if d.ValidUntil.IsZero() || row.ValidUntil.Before(d.ValidUntil) {
+			d.ValidUntil = row.ValidUntil
+		}
+		versions = append(versions, row.ID+"/"+row.ReadinessVersion)
+		if row.Ipv4 != "" {
+			d.Addresses = append(d.Addresses, row.Ipv4)
+		}
+		if row.Ipv6 != "" {
+			d.Addresses = append(d.Addresses, row.Ipv6)
+			d.IPv6ReachabilityVerified = true
+		}
+	}
+	d.ReadinessVersion = strings.Join(versions, ",")
+	return d, nil
 }
 
 func readyEdgePublication(owner, host string, generation uint64, rows []dbsqlc.ListReadyEdgeDNSAddressesV1Row) (tunnelcert.DesiredAddressPublication, error) {

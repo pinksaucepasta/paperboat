@@ -1,6 +1,7 @@
 package app
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
@@ -34,5 +35,25 @@ func TestRegionalDNSProjectionFencesReadyIdentity(t *testing.T) {
 	d, err = readyEdgePublication("tunnel_1", "stable.example.test", 7, nil)
 	if err != nil || len(d.Addresses) != 0 {
 		t.Fatal("unavailable resource needs empty withdrawal")
+	}
+}
+
+func TestReadyRuntimePublicationListsEveryReadyEdge(t *testing.T) {
+	soon, later := time.Now().Add(20*time.Second).UTC(), time.Now().Add(time.Minute).UTC()
+	rows := []dbsqlc.ListReadyRuntimeEdgeDNSAddressesV1Row{
+		{ID: "edge_a", ResourceGeneration: 4, Ipv4: "192.0.2.10", ReadinessVersion: "epoch_a/session_a/1", ValidUntil: later},
+		{ID: "edge_b", ResourceGeneration: 4, Ipv4: "192.0.2.11", Ipv6: "2001:db8::11", ReadinessVersion: "epoch_b/session_b/2", ValidUntil: soon},
+	}
+	got, err := readyRuntimePublication("route_1", "machine.runtime.example.test", 4, rows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got.Addresses, []string{"192.0.2.10", "192.0.2.11", "2001:db8::11"}) || !got.IPv6ReachabilityVerified ||
+		got.ReadinessVersion != "edge_a/epoch_a/session_a/1,edge_b/epoch_b/session_b/2" || !got.ValidUntil.Equal(soon) {
+		t.Fatalf("publication = %+v", got)
+	}
+	rows[1].ResourceGeneration = 5
+	if _, err := readyRuntimePublication("route_1", "machine.runtime.example.test", 4, rows); err == nil {
+		t.Fatal("a route that changed during the projection was published")
 	}
 }

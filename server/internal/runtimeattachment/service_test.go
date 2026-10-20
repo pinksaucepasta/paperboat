@@ -262,9 +262,22 @@ VALUES($1,'default','1.0','epoch_backup','ready',true,now(),'second-region','sec
 		}
 	}
 	ready(false)
-	dnsArgs := dbsqlc.GetReadyRuntimeEdgeDNSAddressV1Params{RouteID: route, Hostname: machine + ".runtime.example.test"}
-	if _, err := database.Queries().GetReadyRuntimeEdgeDNSAddressV1(ctx, dnsArgs); err == nil {
-		t.Fatal("unobserved runtime edge was advertised in DNS")
+	dnsArgs := dbsqlc.ListReadyRuntimeEdgeDNSAddressesV1Params{RouteID: route, Hostname: machine + ".runtime.example.test"}
+	// dnsAddresses is what DNS would hold for the host: every edge with a fresh carrier, node -> IPv4.
+	dnsAddresses := func() map[string]string {
+		t.Helper()
+		rows, err := database.Queries().ListReadyRuntimeEdgeDNSAddressesV1(ctx, dnsArgs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]string{}
+		for _, row := range rows {
+			out[row.ID] = row.Ipv4
+		}
+		return out
+	}
+	if got := dnsAddresses(); len(got) != 0 {
+		t.Fatalf("unobserved runtime edge was advertised in DNS: %v", got)
 	}
 	verifier, err := previewattachment.NewDBPreviewEdgeRequestVerifier(database, "runtime-test-edge-credential-0000000000000000")
 	if err != nil {
@@ -308,8 +321,8 @@ VALUES($1,'default','1.0','epoch_backup','ready',true,now(),'second-region','sec
 		t.Fatal(err)
 	}
 	ready(true)
-	if publication, err := database.Queries().GetReadyRuntimeEdgeDNSAddressV1(ctx, dnsArgs); err != nil || publication.ID != node || publication.Ipv4 != "192.0.2.10" {
-		t.Fatalf("active DNS address node=%q IPv4=%q error=%v", publication.ID, publication.Ipv4, err)
+	if got := dnsAddresses(); len(got) != 1 || got[node] != "192.0.2.10" {
+		t.Fatalf("DNS after the first carrier is ready = %v, want only %s", got, node)
 	}
 	backupEdge := previewattachment.PreviewEdgeIdentity{NodeID: backupNode, ProcessEpoch: "epoch_backup"}
 	backupAdmissions, err := service.Pull(ctx, backupEdge)
@@ -320,8 +333,9 @@ VALUES($1,'default','1.0','epoch_backup','ready',true,now(),'second-region','sec
 	if err = service.Observe(ctx, backupEdge, []runtimewire.Observation{backupObservation}); err != nil {
 		t.Fatal(err)
 	}
-	if publication, err := database.Queries().GetReadyRuntimeEdgeDNSAddressV1(ctx, dnsArgs); err != nil || publication.ID != node {
-		t.Fatalf("standby changed DNS route to %q: %v", publication.ID, err)
+	// Both edges serve: the second carrier joins the DNS record without moving the primary route.
+	if got := dnsAddresses(); len(got) != 2 || got[node] != "192.0.2.10" || got[backupNode] != "192.0.2.11" {
+		t.Fatalf("DNS with both carriers ready = %v, want %s and %s", got, node, backupNode)
 	}
 	var appliedNode string
 	if err = database.SQL().QueryRowContext(ctx, `SELECT applied_node_id FROM control_routes WHERE id=$1`, route).Scan(&appliedNode); err != nil || appliedNode != node {
@@ -423,8 +437,8 @@ VALUES($1,'default','1.0','epoch_backup','ready',true,now(),'second-region','sec
 	if _, err = database.Queries().GetActiveHelperRouteForEnvironment(ctx, env); err != nil {
 		t.Fatalf("promoted browser route is unavailable: %v", err)
 	}
-	if publication, err := database.Queries().GetReadyRuntimeEdgeDNSAddressV1(ctx, dnsArgs); err != nil || publication.ID != backupNode || publication.Ipv4 != "192.0.2.11" {
-		t.Fatalf("promoted DNS address node=%q IPv4=%q error=%v", publication.ID, publication.Ipv4, err)
+	if got := dnsAddresses(); got[backupNode] != "192.0.2.11" {
+		t.Fatalf("promoted edge missing from DNS: %v", got)
 	}
 	observation.Ready = false
 	if err = service.Observe(ctx, edge, []runtimewire.Observation{observation}); err != nil {
@@ -438,7 +452,7 @@ VALUES($1,'default','1.0','epoch_backup','ready',true,now(),'second-region','sec
 	exec(`UPDATE control_tunnel_nodes SET last_heartbeat_at=now(),capacity_observed_at=now() WHERE id IN ($1,$2)`, node, backupNode)
 	exec(`UPDATE runtime_carrier_attachments SET expires_at=now()-interval '1 second' WHERE route_id=$1`, route)
 	ready(true)
-	if _, err := database.Queries().GetReadyRuntimeEdgeDNSAddressV1(ctx, dnsArgs); err != nil {
+	if got := dnsAddresses(); len(got) == 0 {
 		t.Fatal("admitted runtime edge lost DNS on credential expiry")
 	}
 	if err = service.Observe(ctx, backupEdge, []runtimewire.Observation{backupObservation}); err != nil {
@@ -461,8 +475,8 @@ VALUES($1,'default','1.0','epoch_backup','ready',true,now(),'second-region','sec
 	exec(`UPDATE user_machines SET public_identity_key=$2 WHERE id=$1`, machine, key)
 	exec(`UPDATE user_machines SET revoked_at=now() WHERE id=$1`, machine)
 	ready(false)
-	if _, err := database.Queries().GetReadyRuntimeEdgeDNSAddressV1(ctx, dnsArgs); err == nil {
-		t.Fatal("revoked runtime edge remained advertised in DNS")
+	if got := dnsAddresses(); len(got) != 0 {
+		t.Fatalf("revoked runtime edge remained advertised in DNS: %v", got)
 	}
 	admission, err = service.Pull(ctx, edge)
 	if err != nil || len(admission) != 0 {
@@ -508,8 +522,8 @@ VALUES($1,'default','1.0','epoch_backup','ready',true,now(),'second-region','sec
 	exec(`UPDATE control_tunnel_nodes SET tls_spki_sha256=$2 WHERE id=$1`, backupNode, []byte(public))
 	exec(`INSERT INTO selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete) VALUES($1,$2,$3,$3,'fixture','runtime edge','tunnel','account',$4,$1,true)`, prefix+"_installation", backupNode, []byte(public), account)
 	ready(false)
-	if _, err := database.Queries().GetReadyRuntimeEdgeDNSAddressV1(ctx, dnsArgs); err == nil {
-		t.Fatal("customer edge remained advertised for managed runtime hostname")
+	if got := dnsAddresses(); len(got) != 0 {
+		t.Fatalf("customer edge remained advertised for managed runtime hostname: %v", got)
 	}
 	if admissions, err := service.Pull(ctx, backupEdge); err != nil || len(admissions) != 0 {
 		t.Fatalf("customer edge retained runtime authority: count=%d err=%v", len(admissions), err)
