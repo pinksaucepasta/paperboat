@@ -14,8 +14,11 @@ const (
 )
 
 type Descriptor struct {
-	Schema            string        `json:"schema"`
-	Issuer            string        `json:"issuer"`
+	Schema string `json:"schema"`
+	Issuer string `json:"issuer"`
+	// MachineGeneration is the machine's installation generation; the CLI binds a shared-session
+	// join to it and refuses a descriptor that does not carry one.
+	MachineGeneration int64         `json:"machine_generation,omitempty"`
 	Connectable       bool          `json:"connectable"`
 	ExpiresAt         time.Time     `json:"expires_at"`
 	Environment       Environment   `json:"environment"`

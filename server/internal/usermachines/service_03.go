@@ -145,7 +145,7 @@ func (r ConnectionDescriptor) MarshalJSON() ([]byte, error) {
 	if env.Kind == "" || env.ResourceID == "" || env.Alias == "" || env.State == "" {
 		return nil, errors.New("canonical environment descriptor is incomplete")
 	}
-	out := accessdescriptor.Descriptor{Schema: r.Schema, Issuer: r.Issuer, Connectable: r.Connectable, ExpiresAt: r.ExpiresAt, Environment: env, Capabilities: slices.Clone(r.Capabilities), Status: r.Status, Reason: r.Reason, RetryAfterSeconds: r.RetryAfterSeconds}
+	out := accessdescriptor.Descriptor{Schema: r.Schema, Issuer: r.Issuer, MachineGeneration: r.MachineGeneration, Connectable: r.Connectable, ExpiresAt: r.ExpiresAt, Environment: env, Capabilities: slices.Clone(r.Capabilities), Status: r.Status, Reason: r.Reason, RetryAfterSeconds: r.RetryAfterSeconds}
 	if r.Terminal != nil && r.Terminal["auth"] != nil {
 		terminal, err := decodeCanonical[accessdescriptor.Terminal](r.Terminal)
 		if err != nil {

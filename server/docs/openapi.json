@@ -4785,6 +4785,12 @@
             "format": "uri",
             "pattern": "^https://"
           },
+          "machine_generation": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991,
+            "description": "The machine's installation generation; a shared-session join binds to it."
+          },
           "connectable": {
             "type": "boolean"
           },
