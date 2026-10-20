@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -634,6 +635,7 @@ func sharedTerminalConnectionDescriptor(service *usermachines.Service) http.Hand
 		case err != nil:
 			writeError(w, r, http.StatusServiceUnavailable, "connector_unavailable", "Terminal credentials are unavailable.", err)
 		default:
+			slog.InfoContext(r.Context(), "shared terminal descriptor issued", "component", "paperboat-server", "operation", "http_machines", "stage", "shared_descriptor", "machine_generation", response.MachineGeneration, "connectable", response.Connectable, "capabilities", len(response.Capabilities))
 			writeJSON(w, http.StatusOK, SuccessResponse{Data: response})
 		}
 	}
