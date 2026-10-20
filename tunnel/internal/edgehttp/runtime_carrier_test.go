@@ -388,3 +388,54 @@ func TestRuntimeCarrierTransportPreservesWebSocketUpgrade(t *testing.T) {
 		t.Fatal("upgrade did not finish")
 	}
 }
+
+// The Inbox listing carries its single-use operation in X-Paperboat-Operation-Id; the host rejects a
+// request without it (400 invalid_request), so the edge must deliver it through the carrier.
+func TestRuntimeCarrierDeliversTheOperationHeaderToTheHost(t *testing.T) {
+	hostname := "machine.runtime.example.test"
+	identity := testEdgePreviewIdentity(1, 1)
+	server, client := testEdgePreviewCarrierPair(t, identity)
+	registry, err := NewDataCarrierPreviewRegistry(DataCarrierPreviewRegistryConfig{BaseDomain: "runtime.example.test", ProcessEpoch: "edge_epoch_1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer registry.Close()
+	value := DataCarrierPreviewRoute{RouteID: "runtime_route", Hostname: hostname, Kind: runtimewire.RouteKind, EdgeProcessEpoch: "edge_epoch_1", Revision: 1, AttachmentGeneration: 1, Server: server, ExpiresAt: time.Now().Add(time.Minute)}
+	if err = registry.Attach(value); err != nil {
+		t.Fatal(err)
+	}
+	matcher := NewPreviewCarrierRouteMatcher(registry)
+	transport, err := NewDataCarrierPreviewTransport(DataCarrierPreviewTransportConfig{Registry: registry, StreamOpenTimeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gateway, err := NewGatewayWithTransports(Config{PreviewBaseDomain: "preview.example.test", TunnelBaseDomain: "tunnels.example.test", RuntimeBaseDomain: "runtime.example.test", MaxHeaderBytes: 4096, MaxBodyBytes: 4096, Routes: matcher, RuntimeCarrierTransport: transport, HelperAccess: helperAccessFunc(func(_ context.Context, token string) (admission.Claims, error) {
+		return admission.Claims{JTI: "test", EnvironmentID: "machine", MachineID: identity.HostID, CredentialClass: "inbox_list", ExpiresAt: time.Now().Add(time.Minute)}, nil
+	}), Revocations: revocationFunc(func(context.Context, admission.Claims) (bool, error) { return false, nil }), RevocationCheckInterval: time.Second}, "", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := make(chan string, 1)
+	go func() {
+		stream, _, err := client.AcceptStream(context.Background())
+		if err != nil {
+			seen <- "accept: " + err.Error()
+			return
+		}
+		_ = datacarrier.ServeHTTPStream(context.Background(), stream, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			seen <- r.Header.Get("X-Paperboat-Operation-Id")
+			_, _ = io.WriteString(w, "ok")
+		}), 4096, time.Second)
+	}()
+	req := httptest.NewRequest("GET", "https://"+hostname+"/v1/inbox-files", nil)
+	req.Header.Set("Authorization", "Bearer inbox-token")
+	req.Header.Set("X-Paperboat-Operation-Id", "inbox-0123456789abcdef")
+	rec := httptest.NewRecorder()
+	gateway.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := <-seen; got != "inbox-0123456789abcdef" {
+		t.Fatalf("the host saw operation header %q", got)
+	}
+}
