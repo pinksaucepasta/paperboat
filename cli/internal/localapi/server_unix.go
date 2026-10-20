@@ -343,6 +343,9 @@ func (s *Server) fileTransfer(writer http.ResponseWriter, request *http.Request,
 			_ = s.config.FileTransfers.ReleaseFileTransfer(peer, result.Handle)
 		}
 		errorreport.Current().CaptureFailure(request.Context(), "paperboatd", "transfer", "stream_open", "file_transfer_failed", err)
+		if writeRelayQuotaRefusal(writer, requestID, err) {
+			return
+		}
 		writeError(writer, http.StatusServiceUnavailable, requestID, "file_transfer_unavailable", "file transfer setup failed; retry the transfer")
 		return
 	}
@@ -404,6 +407,9 @@ func (s *Server) fileTransferStream(writer http.ResponseWriter, request *http.Re
 			_ = stream.Close()
 		}
 		errorreport.Current().CaptureFailure(request.Context(), "paperboatd", "transfer", "stream_open", "file_transfer_failed", err)
+		if writeRelayQuotaRefusal(writer, requestID, err) {
+			return
+		}
 		writeError(writer, http.StatusServiceUnavailable, requestID, "file_transfer_stream_unavailable", "file transfer stream could not open; refresh the target and retry the transfer")
 		return
 	}
@@ -464,6 +470,9 @@ func (s *Server) peerProbe(writer http.ResponseWriter, request *http.Request, re
 			return
 		}
 		errorreport.Current().CaptureFailure(request.Context(), "paperboatd", "peer_probe", "peer_connect", "native_private_failed", err)
+		if writeRelayQuotaRefusal(writer, requestID, err) {
+			return
+		}
 		writeError(writer, http.StatusServiceUnavailable, requestID, "peer_probe_unavailable", "peer probe failed; check target connectivity with pb doctor")
 		return
 	}
@@ -507,6 +516,9 @@ func (s *Server) inspectorRequest(writer http.ResponseWriter, request *http.Requ
 			return
 		}
 		errorreport.Current().CaptureFailure(request.Context(), "paperboatd", "inspector", "peer_connect", "native_private_failed", err)
+		if writeRelayQuotaRefusal(writer, requestID, err) {
+			return
+		}
 		writeError(writer, http.StatusServiceUnavailable, requestID, "inspector_unavailable", "inspector request failed; check target connectivity with pb doctor")
 		return
 	}
@@ -559,6 +571,9 @@ func (s *Server) peerStream(writer http.ResponseWriter, request *http.Request, r
 			_ = stream.Close()
 		}
 		errorreport.Current().CaptureFailure(request.Context(), "paperboatd", "peer_stream", "stream_open", "native_private_failed", err)
+		if writeRelayQuotaRefusal(writer, requestID, err) {
+			return
+		}
 		message := "peer stream could not open; refresh the target and check connectivity with pb doctor"
 		code := "peer_stream_unavailable"
 		var transport interface{ TransportRetryable() bool }

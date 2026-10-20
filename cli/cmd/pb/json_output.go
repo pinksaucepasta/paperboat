@@ -14,6 +14,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/environmentmanager"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
+	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/preferences"
 	"github.com/pinksaucepasta/paperboat/internal/supportref"
 	"github.com/spf13/cobra"
@@ -208,6 +209,12 @@ func classifyCLIJSONFailure(err error, failure commandFailure) cliJSONError {
 			result.Category, result.StateChanged = "conflict", false
 			result.Message = typed.Error()
 			result.Recovery = "Run `pb update` to install a supported official release."
+		}
+	case *localapi.RemoteError:
+		if typed.Code == localapi.RelayQuotaCode {
+			// The connection was refused before anything was sent or started.
+			result.Code, result.Category, result.StateChanged = localapi.RelayQuotaCode, "authorization_or_entitlement", false
+			result.Recovery = "Add bandwidth or upgrade under Billing in the Paperboat console, or wait for the next allowance period."
 		}
 	case commandRejection:
 		if failure.kind == commandRejected && typed.valid() {

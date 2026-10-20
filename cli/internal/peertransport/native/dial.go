@@ -53,5 +53,8 @@ func (o *Owner) Dial(ctx context.Context, descriptor mesh.Addr, peerID string, c
 		session, err = o.dialOnce(ctx, descriptor, peerID, class)
 		return err
 	})
+	if err != nil && ctx.Err() == nil {
+		err = relayQuotaFailure(o.authority, err)
+	}
 	return session, err
 }
