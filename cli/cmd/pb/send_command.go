@@ -102,9 +102,6 @@ func sendCommand() *cobra.Command {
 					return errors.New("no default transfer destination is configured; use --to or `pb send destination set <machine>`")
 				}
 			}
-			if destination.ID == sourceMachineID {
-				return commandRejection{reason: commandRejectSendToSameMachine}
-			}
 			if destination.State == "revoked" || destination.State == "disconnected" || destination.State == "deleted" {
 				return errors.New("destination machine is revoked")
 			}
@@ -169,72 +166,80 @@ func sendCommand() *cobra.Command {
 			if acceptance.Status != "approved" && acceptance.Status != "not_required" {
 				return fmt.Errorf("file transfer was not accepted: %s", acceptance.Status)
 			}
-			descriptorRequestID, descriptorDigest := acceptance.RequestID, acceptance.ManifestDigest
-			if acceptance.Status == "not_required" {
-				descriptorRequestID, descriptorDigest = "", ""
-			}
-			descriptor, err := client.MachineFileTransferDescriptorForRequest(ctx.Context, destination.ID, sourceMachineID, sessionID, descriptorRequestID, descriptorDigest)
-			if err != nil {
-				return friendlyCommandError(err)
-			}
-			target := &resolver.FileTransferTarget{
-				Endpoint: descriptor.Endpoint, SourceMachineID: descriptor.SourceMachineID,
-				DestinationMachineID: descriptor.DestinationMachineID, InitiatingUserID: descriptor.InitiatingUserID,
-				Auth:   resolver.AuthTarget{Method: descriptor.Auth.Method, Token: descriptor.Auth.Token, ExpiresAt: descriptor.Auth.ExpiresAt.UTC().Format(time.RFC3339Nano), ResourceID: descriptor.Auth.AccessSessionID},
-				Policy: descriptor.Policy,
-			}
-			if err := filetransfer.ValidateSources(prepared.Sources, fileTransferLimits(target)); err != nil {
-				return err
-			}
-			if target.Endpoint == "" || target.Auth.Method != "bearer" || target.Auth.Token == "" {
-				return errors.New("server returned an invalid file transfer descriptor")
-			}
-			retention := time.Duration(target.Policy.RetentionSeconds) * time.Second
-			if retention <= 0 || retention > 7*24*time.Hour {
-				retention = 7 * 24 * time.Hour
-			}
-			expiresAt := time.Now().UTC().Truncate(time.Second).Add(retention)
 			var batch filetransfer.Batch
-			if localSender, localErr := localFileTransferSenderFromEnvironment(); localErr != nil {
-				return localErr
-			} else if localSender != nil {
-				if sessionID == "" {
-					return errors.New("host-local file delivery requires a Paperboat terminal session")
+			if destination.ID == sourceMachineID {
+				// This computer is the destination: the files are copied into its own Inbox, with no transfer.
+				batch, err = deliverToThisComputer(batchID, sourceMachineID, destination.ID, prepared.Sources)
+				if err != nil {
+					return err
 				}
-				batch, err = localSender.SendNativeBatch(ctx.Context, batchID, sourceMachineID, destination.ID, descriptor.InitiatingUserID, sessionID, prepared.Sources, expiresAt)
 			} else {
-				if dependencies.peerLocal == nil {
-					return errors.New("local daemon transport is unavailable for native file transfer")
+				descriptorRequestID, descriptorDigest := acceptance.RequestID, acceptance.ManifestDigest
+				if acceptance.Status == "not_required" {
+					descriptorRequestID, descriptorDigest = "", ""
 				}
-				grantForDescriptor := func(grantCtx context.Context, current api.FileTransfer) (filetransfer.NativeGrant, error) {
-					if current.Endpoint != descriptor.Endpoint || current.SourceMachineID != descriptor.SourceMachineID || current.DestinationMachineID != descriptor.DestinationMachineID || current.InitiatingUserID != descriptor.InitiatingUserID || current.Policy != descriptor.Policy || current.Auth.Method != "bearer" || current.Auth.Token == "" || !current.Auth.ExpiresAt.After(time.Now()) {
-						return filetransfer.NativeGrant{}, errors.New("renewed transfer authorization changed the approved resource or policy")
+				descriptor, err := client.MachineFileTransferDescriptorForRequest(ctx.Context, destination.ID, sourceMachineID, sessionID, descriptorRequestID, descriptorDigest)
+				if err != nil {
+					return friendlyCommandError(err)
+				}
+				target := &resolver.FileTransferTarget{
+					Endpoint: descriptor.Endpoint, SourceMachineID: descriptor.SourceMachineID,
+					DestinationMachineID: descriptor.DestinationMachineID, InitiatingUserID: descriptor.InitiatingUserID,
+					Auth:   resolver.AuthTarget{Method: descriptor.Auth.Method, Token: descriptor.Auth.Token, ExpiresAt: descriptor.Auth.ExpiresAt.UTC().Format(time.RFC3339Nano), ResourceID: descriptor.Auth.AccessSessionID},
+					Policy: descriptor.Policy,
+				}
+				if err := filetransfer.ValidateSources(prepared.Sources, fileTransferLimits(target)); err != nil {
+					return err
+				}
+				if target.Endpoint == "" || target.Auth.Method != "bearer" || target.Auth.Token == "" {
+					return errors.New("server returned an invalid file transfer descriptor")
+				}
+				retention := time.Duration(target.Policy.RetentionSeconds) * time.Second
+				if retention <= 0 || retention > 7*24*time.Hour {
+					retention = 7 * 24 * time.Hour
+				}
+				expiresAt := time.Now().UTC().Truncate(time.Second).Add(retention)
+				if localSender, localErr := localFileTransferSenderFromEnvironment(); localErr != nil {
+					return localErr
+				} else if localSender != nil {
+					if sessionID == "" {
+						return errors.New("host-local file delivery requires a Paperboat terminal session")
 					}
-					lease, leaseErr := dependencies.peerLocal.PrepareFileTransfer(grantCtx, localapi.FileTransferRequest{Schema: localapi.FileTransferSchemaV1, MachineID: destination.ID, EnvironmentID: destination.EnvironmentID, MachineGeneration: uint64(destination.InstallationGeneration), OperationID: batchID, Credential: current.Auth.Token, AccessSessionID: current.Auth.AccessSessionID, Deadline: current.Auth.ExpiresAt, MaximumBytes: uint64(current.Policy.MaxFileBytes)})
-					if leaseErr != nil {
-						return filetransfer.NativeGrant{}, leaseErr
+					batch, err = localSender.SendNativeBatch(ctx.Context, batchID, sourceMachineID, destination.ID, descriptor.InitiatingUserID, sessionID, prepared.Sources, expiresAt)
+				} else {
+					if dependencies.peerLocal == nil {
+						return errors.New("local daemon transport is unavailable for native file transfer")
 					}
-					return filetransfer.NativeGrant{Endpoint: current.Endpoint, Auth: filetransfer.Auth{Token: current.Auth.Token, ExpiresAt: current.Auth.ExpiresAt}, Binding: filetransfer.Binding{SourceMachineID: current.SourceMachineID, DestinationMachineID: current.DestinationMachineID, InitiatingUserID: current.InitiatingUserID}, Policy: descriptorFileTransferPolicy(&resolver.FileTransferTarget{Policy: current.Policy}), Lease: lease}, nil
-				}
-				initialGrant, grantErr := grantForDescriptor(ctx.Context, descriptor)
-				if grantErr != nil {
-					return grantErr
-				}
-				nativeClient, nativeErr := filetransfer.NewRenewableNativeClient(initialGrant, func(renewCtx context.Context) (filetransfer.NativeGrant, error) {
-					fresh, renewErr := client.MachineFileTransferDescriptorForRequest(renewCtx, destination.ID, sourceMachineID, sessionID, descriptorRequestID, descriptorDigest)
-					if renewErr != nil {
-						return filetransfer.NativeGrant{}, renewErr
+					grantForDescriptor := func(grantCtx context.Context, current api.FileTransfer) (filetransfer.NativeGrant, error) {
+						if current.Endpoint != descriptor.Endpoint || current.SourceMachineID != descriptor.SourceMachineID || current.DestinationMachineID != descriptor.DestinationMachineID || current.InitiatingUserID != descriptor.InitiatingUserID || current.Policy != descriptor.Policy || current.Auth.Method != "bearer" || current.Auth.Token == "" || !current.Auth.ExpiresAt.After(time.Now()) {
+							return filetransfer.NativeGrant{}, errors.New("renewed transfer authorization changed the approved resource or policy")
+						}
+						lease, leaseErr := dependencies.peerLocal.PrepareFileTransfer(grantCtx, localapi.FileTransferRequest{Schema: localapi.FileTransferSchemaV1, MachineID: destination.ID, EnvironmentID: destination.EnvironmentID, MachineGeneration: uint64(destination.InstallationGeneration), OperationID: batchID, Credential: current.Auth.Token, AccessSessionID: current.Auth.AccessSessionID, Deadline: current.Auth.ExpiresAt, MaximumBytes: uint64(current.Policy.MaxFileBytes)})
+						if leaseErr != nil {
+							return filetransfer.NativeGrant{}, leaseErr
+						}
+						return filetransfer.NativeGrant{Endpoint: current.Endpoint, Auth: filetransfer.Auth{Token: current.Auth.Token, ExpiresAt: current.Auth.ExpiresAt}, Binding: filetransfer.Binding{SourceMachineID: current.SourceMachineID, DestinationMachineID: current.DestinationMachineID, InitiatingUserID: current.InitiatingUserID}, Policy: descriptorFileTransferPolicy(&resolver.FileTransferTarget{Policy: current.Policy}), Lease: lease}, nil
 					}
-					return grantForDescriptor(renewCtx, fresh)
-				})
-				if nativeErr != nil {
-					return errors.Join(nativeErr, initialGrant.Lease.Close())
+					initialGrant, grantErr := grantForDescriptor(ctx.Context, descriptor)
+					if grantErr != nil {
+						return grantErr
+					}
+					nativeClient, nativeErr := filetransfer.NewRenewableNativeClient(initialGrant, func(renewCtx context.Context) (filetransfer.NativeGrant, error) {
+						fresh, renewErr := client.MachineFileTransferDescriptorForRequest(renewCtx, destination.ID, sourceMachineID, sessionID, descriptorRequestID, descriptorDigest)
+						if renewErr != nil {
+							return filetransfer.NativeGrant{}, renewErr
+						}
+						return grantForDescriptor(renewCtx, fresh)
+					})
+					if nativeErr != nil {
+						return errors.Join(nativeErr, initialGrant.Lease.Close())
+					}
+					batch, err = nativeClient.SendBatch(ctx.Context, batchID, sessionID, prepared.Sources)
+					err = errors.Join(err, nativeClient.Close())
 				}
-				batch, err = nativeClient.SendBatch(ctx.Context, batchID, sessionID, prepared.Sources)
-				err = errors.Join(err, nativeClient.Close())
-			}
-			if err != nil {
-				return err
+				if err != nil {
+					return err
+				}
 			}
 			if acceptance.Status == "approved" {
 				if err := client.CompleteTeamInboxRequest(ctx.Context, acceptance.RequestID, acceptance.ManifestDigest); err != nil {

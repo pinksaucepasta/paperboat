@@ -37,7 +37,6 @@ const (
 	commandRejectTeamSeatRequired
 	commandRejectResetRetire
 	commandRejectDaemonAccount
-	commandRejectSendToSameMachine
 	commandRejectInspector
 )
 
@@ -86,8 +85,6 @@ func (e commandRejection) Error() string {
 		if errors.As(e.cause, &daemonErr) {
 			return daemonErr.Error()
 		}
-	case commandRejectSendToSameMachine:
-		return "That is this computer. Choose another computer with --to; run pb machine list to see them."
 	case commandRejectInboxDeclined:
 		return "The recipient declined this transfer. Contact them before sending again."
 	case commandRejectDefaultSessionRename:
