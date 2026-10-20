@@ -128,6 +128,14 @@ type Execution struct {
 	waitErr         error
 	readers         map[uint64]uint64
 	nextReader      uint64
+	// delivered is the first sequence no reader has taken yet: output before it has reached a
+	// client at least once and may be dropped from the replay buffer; output at or after it has not
+	// and is never dropped, so the producer waits instead.
+	delivered uint64
+	// abort is closed when the execution is being canceled or has finished; a producer waiting for
+	// a reader gives up then.
+	abort     chan struct{}
+	abortOnce sync.Once
 }
 
 type Reader struct {
@@ -263,7 +271,7 @@ func (m *Manager) Start(ctx context.Context, request Request) (ExecutionService,
 			return recovered, true, nil
 		}
 	}
-	execution := &Execution{launchEnvironment: LaunchEnvironment(ctx), manager: m, request: request, hash: hash, state: StateAuthorized, earliest: 1, next: 1, wake: make(chan struct{}), done: make(chan struct{}), streamSequences: make(map[string]uint64), readers: make(map[uint64]uint64)}
+	execution := &Execution{launchEnvironment: LaunchEnvironment(ctx), manager: m, request: request, hash: hash, state: StateAuthorized, earliest: 1, next: 1, wake: make(chan struct{}), done: make(chan struct{}), abort: make(chan struct{}), streamSequences: make(map[string]uint64), readers: make(map[uint64]uint64)}
 	m.operations[request.OperationID] = execution
 	m.active++
 	m.mu.Unlock()
@@ -510,6 +518,7 @@ func (e *Execution) advanceReader(id, next uint64) {
 	e.mu.Lock()
 	if _, ok := e.readers[id]; ok {
 		e.readers[id] = next
+		e.delivered = max(e.delivered, next)
 		e.evictLocked()
 		e.signalLocked()
 	}
@@ -581,6 +590,7 @@ func (e *Execution) Cancel(ctx context.Context) error {
 	if terminal {
 		return nil
 	}
+	e.stopOutput()
 	if process == nil {
 		return nil
 	}
@@ -681,6 +691,7 @@ func (e *Execution) run(parent context.Context) {
 	result, err := process.Wait(ctx)
 	state, code := StateExited, ""
 	if ctx.Err() != nil {
+		e.stopOutput()
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), e.manager.config.CancelGrace+5*time.Second)
 		var terminateErr error
 		result, terminateErr = process.Terminate(cleanupCtx, e.manager.config.CancelGrace)
@@ -713,15 +724,24 @@ func (e *Execution) output(stream string, data []byte) {
 	sequence := e.streamSequences[stream]
 	e.streamSequences[stream] += uint64(len(data))
 	e.appendLocked(Event{Stream: stream, StreamSequence: sequence, Data: append([]byte(nil), data...)})
-	for e.eventBytes > e.manager.config.ReplayBytes && len(e.readers) > 0 {
+	// Output nobody has taken yet is never dropped: when the buffer is full of it, the process waits
+	// (as a pipe writer does) until a client reads, whether or not one is attached right now.
+	for e.eventBytes > e.manager.config.ReplayBytes && len(e.events) > 1 && e.earliest >= e.evictBoundaryLocked() {
 		wake := e.wake
 		e.mu.Unlock()
-		<-wake
+		select {
+		case <-wake:
+		case <-e.abort:
+			return
+		}
 		e.mu.Lock()
 		e.evictLocked()
 	}
 	e.mu.Unlock()
 }
+
+// stopOutput releases any producer waiting for a reader; the execution is ending.
+func (e *Execution) stopOutput() { e.abortOnce.Do(func() { close(e.abort) }) }
 
 func (e *Execution) transition(state State, result *Result, code string) {
 	e.mu.Lock()
@@ -738,6 +758,7 @@ func (e *Execution) transition(state State, result *Result, code string) {
 }
 
 func (e *Execution) finish(ctx context.Context, state State, result Result, code string) {
+	e.stopOutput()
 	e.doneOnce.Do(func() {
 		var persistenceErr error
 		if e.manager.config.Store != nil {
@@ -804,7 +825,7 @@ func (m *Manager) executionFromRecord(ctx context.Context, record store.Operatio
 	}
 	var hash [sha256.Size]byte
 	copy(hash[:], record.RequestHash)
-	execution := &Execution{manager: m, request: Request{OperationID: operationID}, hash: hash, earliest: 1, next: 1, wake: make(chan struct{}), done: make(chan struct{}), streamSequences: make(map[string]uint64), readers: make(map[uint64]uint64)}
+	execution := &Execution{manager: m, request: Request{OperationID: operationID}, hash: hash, earliest: 1, next: 1, wake: make(chan struct{}), done: make(chan struct{}), abort: make(chan struct{}), streamSequences: make(map[string]uint64), readers: make(map[uint64]uint64)}
 	var snapshot Snapshot
 	if record.State == "completed" {
 		if json.Unmarshal(record.Result, &snapshot) != nil || snapshot.OperationID != operationID || !terminalState(snapshot.State) || snapshot.Result == nil {
@@ -844,14 +865,24 @@ func (e *Execution) appendLocked(event Event) {
 	e.signalLocked()
 }
 
-func (e *Execution) evictLocked() {
-	minimum := e.next
-	for _, next := range e.readers {
-		if next < minimum {
-			minimum = next
+// evictBoundaryLocked is the first sequence that must stay in the replay buffer: everything before
+// it has been read by every attached reader (or, with none attached, by some reader).
+func (e *Execution) evictBoundaryLocked() uint64 {
+	boundary := e.delivered
+	if len(e.readers) > 0 {
+		boundary = e.next
+		for _, next := range e.readers {
+			if next < boundary {
+				boundary = next
+			}
 		}
 	}
-	for e.eventBytes > e.manager.config.ReplayBytes && len(e.events) > 1 && (len(e.readers) == 0 || e.earliest < minimum) {
+	return boundary
+}
+
+func (e *Execution) evictLocked() {
+	boundary := e.evictBoundaryLocked()
+	for e.eventBytes > e.manager.config.ReplayBytes && len(e.events) > 1 && e.earliest < boundary {
 		e.eventBytes -= len(e.events[0].Data)
 		e.events = e.events[1:]
 		e.earliest++

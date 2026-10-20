@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import subprocess
 import tempfile
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 
@@ -35,6 +36,35 @@ def run(binary, *arguments, input=b'', expected=0):
     return output, errors
 
 
+def large_output(binary, target):
+    """Output that starts at once and is far larger than the host's replay buffer arrives whole.
+
+    The command prints before the client has attached and without waiting for input, so the host must
+    hold the output for the client instead of dropping it; a second run reads slowly for a while.
+    """
+    size = 8 << 20
+    argv = ['exec', target, '--timeout', '60s', '--', 'sh', '-c', 'head -c %d /dev/zero' % size]
+    output, _ = run(binary, *argv)
+    if output != bytes(size):
+        raise RuntimeError('exec lost or changed immediate large output (%d of %d bytes)' % (len(output), size))
+    command = [str(binary), *argv]
+    received = 0
+    with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL) as process:
+        try:
+            time.sleep(3)  # a slow consumer: the host output backs up while nothing reads
+            while True:
+                chunk = process.stdout.read(1 << 16)
+                if not chunk:
+                    break
+                received += len(chunk)
+            process.wait(timeout=60)
+        except BaseException:
+            process.kill()
+            raise
+    if process.returncode != 0 or received != size:
+        raise RuntimeError('exec failed for a slow reader of large output (exit %s, %d of %d bytes)' % (process.returncode, received, size))
+
+
 def execute(binary, target):
     nonce = uuid.uuid4().hex
     incoming = ('PB_INPUT_' + nonce + '_λ船\n').encode() + bytes(range(256)) * 64
@@ -52,6 +82,7 @@ def execute(binary, target):
     expected = bytes(range(256)) * 65536 + 'PB_UNICODE_λ船\n'.encode()
     if output != expected or errors != 'PB_STDERR_λ船\n'.encode():
         raise RuntimeError('exec changed exact binary stdout, Unicode or separate stderr')
+    large_output(binary, target)
     code = "import sys; print('PB_JSON_OUT'); print('PB_JSON_ERR',file=sys.stderr); raise SystemExit(19)"
     output, errors = run(binary, 'exec', target, '--timeout', '60s', '--json', '--', 'python3', '-c', code, expected=19)
     events = [json.loads(line) for line in output.splitlines()]

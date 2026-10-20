@@ -439,18 +439,116 @@ func TestPTYMergesOutputAndReportsExit(t *testing.T) {
 	}
 }
 
-func TestReplayBoundRejectsEvictedSequence(t *testing.T) {
+// Output nobody has read yet is never dropped: a client that attaches after the buffer filled (a slow
+// dial, a reconnect) gets every byte, and the process waits meanwhile instead of losing output.
+func TestUnreadOutputIsNeverEvictedWhileNoReaderIsAttached(t *testing.T) {
+	root := t.TempDir()
+	manager := testManager(t, root, func(config *Config) { config.ReplayBytes = 64 << 10; config.ChunkBytes = 1024 })
+	execution, _, err := manager.Start(context.Background(), Request{OperationID: "operation_unread", Argv: []string{"/bin/sh", "-c", `head -c 131072 /dev/zero`}, CWD: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitCtx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	if _, err := execution.Wait(waitCtx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("the process finished although no client had read its output: %v", err)
+	}
+	reader, err := execution.OpenReader(1)
+	if err != nil {
+		t.Fatalf("unread output was evicted: %v", err)
+	}
+	defer reader.Close()
+	if got := readAll(t, reader); got != 131072 {
+		t.Fatalf("bytes=%d", got)
+	}
+}
+
+// Output a client has read stays available for reconnect only within the replay bound.
+func TestReplayBoundRejectsEvictedSequenceOnceRead(t *testing.T) {
 	root := t.TempDir()
 	manager := testManager(t, root, func(config *Config) { config.ReplayBytes = 64 << 10; config.ChunkBytes = 1024 })
 	execution, _, err := manager.Start(context.Background(), Request{OperationID: "operation_replay", Argv: []string{"/bin/sh", "-c", `head -c 131072 /dev/zero`}, CWD: root})
 	if err != nil {
 		t.Fatal(err)
 	}
+	reader, err := execution.OpenReader(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := readAll(t, reader); got != 131072 {
+		t.Fatalf("bytes=%d", got)
+	}
+	_ = reader.Close()
 	if _, err := execution.Wait(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := execution.Next(context.Background(), 1); !errors.Is(err, ErrReplayUnavailable) {
 		t.Fatalf("replay err=%v", err)
+	}
+}
+
+// A command printing far more than the replay buffer reaches a slow reader whole: the process waits
+// for the reader (as a pipe writer does) and nothing is dropped, even across a detach and reattach.
+func TestLargeOutputReachesASlowReaderAcrossAReattach(t *testing.T) {
+	root := t.TempDir()
+	manager := testManager(t, root, func(config *Config) { config.ReplayBytes = 1 << 20; config.ChunkBytes = 32 << 10 })
+	const total = 8 << 20
+	execution, _, err := manager.Start(context.Background(), Request{OperationID: "operation_large", Argv: []string{"/bin/sh", "-c", `head -c 8388608 /dev/zero | tr '\0' x`}, CWD: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(200 * time.Millisecond) // the client attaches late: the buffer is already full
+	var received int
+	next := uint64(1)
+	for attach := 0; ; attach++ {
+		reader, err := execution.OpenReader(next)
+		if err != nil {
+			t.Fatalf("attach %d from %d: %v", attach, next, err)
+		}
+		done := false
+		for step := 0; step < 40 && !done; step++ {
+			event, release, nextErr := reader.Next(context.Background())
+			if errors.Is(nextErr, io.EOF) {
+				done = true
+				break
+			}
+			if nextErr != nil {
+				t.Fatal(nextErr)
+			}
+			received += len(event.Data)
+			next = event.Sequence + 1
+			release()
+			time.Sleep(time.Millisecond) // a slow consumer
+			if terminalState(event.State) {
+				done = true
+			}
+		}
+		_ = reader.Close() // detach; the client reconnects with its own next sequence
+		if done {
+			break
+		}
+	}
+	if received != total {
+		t.Fatalf("received %d of %d bytes", received, total)
+	}
+}
+
+func readAll(t *testing.T, reader ReaderService) int {
+	t.Helper()
+	var total int
+	for {
+		event, release, err := reader.Next(context.Background())
+		if errors.Is(err, io.EOF) {
+			return total
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		total += len(event.Data)
+		release()
+		if terminalState(event.State) {
+			return total
+		}
 	}
 }
 
