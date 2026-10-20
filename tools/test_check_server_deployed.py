@@ -81,6 +81,31 @@ class ServerFirstTest(unittest.TestCase):
         self.assertEqual(warn_code, 0)
         self.assertIn("WARNING", warn_err)
 
+    def test_documentation_tests_and_ci_tooling_never_need_a_deploy(self):
+        deployed = self.commit("server/a.go")
+        self.commit("server/docs/openapi.json")
+        self.commit("server/internal/x/x_test.go")
+        self.commit("server/internal/x/testdata/case.json")
+        self.commit("server/README.md")
+        self.commit("shared/wire/README.md")
+        self.commit("shared/wire/wire_test.go")
+        self.commit("server/tools/verify.sh")
+        with fake_server({"data": {"version": "1", "commit": deployed}}) as url:
+            code, out, err = self.main(url)
+        self.assertEqual(code, 0, err)
+
+    def test_anything_that_ships_in_the_server_still_counts(self):
+        deployed = self.commit("server/a.go")
+        self.commit("server/docs/openapi.json")
+        for path in ("server/internal/db/migrations/120_x.sql", "server/internal/db/queries/q.sql", "server/deploy/Dockerfile",
+                     "server/go.mod", "shared/wire/wire.go", "server/internal/x/docs.go"):
+            self.commit(path)
+        with fake_server({"data": {"version": "1", "commit": deployed}}) as url:
+            code, _, err = self.main(url)
+        self.assertEqual(code, 1)
+        self.assertIn("6 server/shared commit", err)
+        self.assertNotIn("openapi.json", err)
+
     def test_unreadable_or_unknown_server_fails_closed_and_warns_in_the_gate(self):
         self.commit("server/a.go")
         for body, status in [({"data": {}}, 200), ({"data": {"commit": "development"}}, 200), ({}, 404)]:

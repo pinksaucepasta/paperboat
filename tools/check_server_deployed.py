@@ -5,7 +5,8 @@ of the commit being released or pushed.
 Usage: tools/check_server_deployed.py --server-url URL [--release REV] [--warn]
 
 Reads the running server's source commit from GET /v1/server-version and lists the commits of
-server/ and shared/ in DEPLOYED..REV (default HEAD). Any such commit is not live yet, so a client
+server/ and shared/ in DEPLOYED..REV (default HEAD), ignoring commits that only touch documentation,
+tests, test data or CI tooling (NON_RUNTIME). Any other such commit is not live yet, so a client
 built from REV could talk to a server that does not understand it. Exit 1 when there are some
 (or the server cannot be read, which fails closed); with --warn the same findings only print
 and the exit status is 0 (the `make gate` warning step).
@@ -22,6 +23,14 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 PATHS = ("server", "shared")
+# Paths that never ship in the server binary, its image or its migrations: documentation, tests, test
+# data and CI tooling. A commit that only touches these needs no deploy. Everything else under server/
+# and shared/ (Go sources, SQL migrations and queries, deploy files, go.mod) is counted, so the check
+# stays fail-closed for anything that can change what the server does.
+NON_RUNTIME = (
+    ":(exclude)server/docs", ":(exclude)server/tools", ":(exclude,glob)**/testdata/**",
+    ":(exclude,glob)**/*_test.go", ":(exclude,glob)**/*.md",
+)
 COMMIT = re.compile(r"^[0-9a-f]{40}$")
 
 
@@ -61,7 +70,7 @@ def undeployed(repo: Path, deployed: str, release: str) -> list[str]:
     except Refusal:
         raise Refusal(f"the deployed commit {deployed[:12]} is not in this clone; fetch the full history")
     git(repo, "rev-parse", "--verify", release + "^{commit}")
-    return git(repo, "log", "--format=%h %s", f"{deployed}..{release}", "--", *PATHS).splitlines()
+    return git(repo, "log", "--format=%h %s", f"{deployed}..{release}", "--", *PATHS, *NON_RUNTIME).splitlines()
 
 
 def main(argv: list[str]) -> int:
