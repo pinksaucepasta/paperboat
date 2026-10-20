@@ -147,3 +147,26 @@ Checking by hand: `control_tunnel_nodes` (state, `last_heartbeat_at`), `workspac
 `failure_code`). The server trusts forwarded client addresses only from `trusted_proxy_cidrs`; if the
 proxy's Docker network address changes (a new Compose network), update that CIDR and redeploy the
 server with a changed image label so the container is actually replaced.
+
+## Shared endpoint engine: rehearsal plan and chaos-test spec (PLAN.md 3a; no code yet)
+
+**Migration rehearsal (every migration of the series).** Run `./backup-database.sh`; restore the newest dump into a new
+database in the isolated test PostgreSQL (`pg_restore --no-owner --no-privileges`); run `db.Migrate` against it and assert:
+goose version, row counts of `tunnels`, `tunnel_routes`, `tunnel_domains`, `tunnel_config_generations` equal the
+`endpoints`/`endpoint_routes`/`endpoint_hostnames` counts for kind=tunnel, ids unchanged, every live
+`edge_dns_publications` hostname still maps to exactly one endpoint, no orphan certificate distribution, live preview leases
+ended with `terminal_state` set. Take the lock-heavy statements (`ALTER`/`DROP` on `user_machines`, `tunnels`,
+`preview_leases`) from the 115 experience: a DROP COLUMN on a busy table deadlocked once, so give each such step a
+`lock_timeout` and retry the rollout; migrations stay transactional. Keep the previous image running as the rollback target.
+
+**Chaos test (kill one edge mid-traffic).** Fixture: an account edge set of two edges, one agent with 2 carriers per edge,
+one preview and one tunnel with an HTTP route and a private_tcp route, a client holding 20 requests per second and one long
+stream on each. Steps: (1) stop edge A's process; assert within 15 s the DNS record lists only B, in-flight streams on A
+reset (no hang), new requests succeed on B with zero failures after the record change plus TTL; (2) keep A down 10 min
+(fake clock): the set replaces A with C, the agent opens carriers to C, assignments appear on C, the record lists B and C;
+(3) A returns with a new process epoch: it is not in the set, serves nothing, and its stale assignments are removed on its
+first snapshot; (4) kill B instead and repeat; (5) kill the agent's active carrier on one edge: the warm carrier takes the
+streams, no route change, no DNS change. Pass criteria: no request fails after convergence, no endpoint is ever listed on
+an edge without a ready assignment, no goroutine/stream leak on the edge (leak test), observed state matches desired
+within one pull interval. Runs in the isolated test PostgreSQL with in-process edges; the device smoke suite repeats (1) once
+against the real pair.
