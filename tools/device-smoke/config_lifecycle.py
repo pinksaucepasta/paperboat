@@ -6,6 +6,7 @@ Phase `set` records originals under STATE_DIR and applies the changes. Phase `ve
 """
 import argparse
 import json
+import re
 from pathlib import Path
 import subprocess
 import tempfile
@@ -84,7 +85,11 @@ def main():
     finally:
         if originals['port'] is not None:
             run('config', 'set', 'ssh-target-port', str(originals['port']))
-        run('config', 'customize', 'reset')
+        # Reset is a two-step action: the first call only previews and prints a confirmation code.
+        preview = run('config', 'customize', 'reset')[1]
+        code = re.search(r'--confirm ([A-Z0-9]{6})', preview)
+        if code:
+            run('config', 'customize', 'reset', '--confirm', code.group(1))
     if preferences() != originals['preferences']:
         raise RuntimeError('reset did not restore the original preferences')
     state.unlink()
