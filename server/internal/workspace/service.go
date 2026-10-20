@@ -14,8 +14,6 @@ type Item struct {
 	Role string `json:"role"`
 	// ApproveNewMachines is set for a team that asks an owner or admin to accept machines members add.
 	ApproveNewMachines bool `json:"approve_new_machines,omitempty"`
-	// AllowPrivateAccess is set for a team that lets members reach the ports of machines shared into it.
-	AllowPrivateAccess bool `json:"allow_private_access,omitempty"`
 }
 
 type Service struct{ db *db.DB }
@@ -45,7 +43,7 @@ func (s *Service) List(ctx context.Context, account string) ([]Item, error) {
 		if !active {
 			return ErrForbidden
 		}
-		rows, err := tx.Query(ctx, `SELECT t.team_id,coalesce(t.display_name,t.team_id),CASE WHEN t.owner_account=$1 THEN 'owner' ELSE m.role END,t.approve_new_machines,t.allow_private_access
+		rows, err := tx.Query(ctx, `SELECT t.team_id,coalesce(t.display_name,t.team_id),CASE WHEN t.owner_account=$1 THEN 'owner' ELSE m.role END,t.approve_new_machines
 			FROM teams t JOIN team_members m USING(team_id)
 			WHERE m.account_id=$1 AND m.active AND t.deleted_at IS NULL AND NOT t.suspended
 			ORDER BY t.team_id LIMIT $2`, account, teams.MaximumMembers+1)
@@ -54,12 +52,12 @@ func (s *Service) List(ctx context.Context, account string) ([]Item, error) {
 		}
 		for rows.Next() {
 			var teamID, name, role string
-			var approve, allow bool
-			if err := rows.Scan(&teamID, &name, &role, &approve, &allow); err != nil {
+			var approve bool
+			if err := rows.Scan(&teamID, &name, &role, &approve); err != nil {
 				rows.Close()
 				return err
 			}
-			out = append(out, Item{ID: teamID, Name: name, Kind: "team", Role: role, ApproveNewMachines: approve, AllowPrivateAccess: allow})
+			out = append(out, Item{ID: teamID, Name: name, Kind: "team", Role: role, ApproveNewMachines: approve})
 		}
 		if err := rows.Err(); err != nil {
 			rows.Close()

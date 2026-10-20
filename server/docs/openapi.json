@@ -13561,10 +13561,6 @@
           "approve_new_machines": {
             "type": "boolean",
             "description": "Team only: machines members add wait for an owner or admin."
-          },
-          "allow_private_access": {
-            "type": "boolean",
-            "description": "Team only: members may reach the ports of machines shared into the team (with a private_access grant)."
           }
         }
       },
