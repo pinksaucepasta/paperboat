@@ -493,11 +493,18 @@ func TestServiceObservesLocalGatewayOutageOnceAndRecovers(t *testing.T) {
 		}
 		time.Sleep(time.Millisecond)
 	}
-	listener, err := net.Listen("unix", socket)
+	// The service retries concurrently. Listening on the final path would expose a bound socket that
+	// is not listening yet (connection refused, a second distinct outage); renaming a listening
+	// socket makes the gateway appear in one step.
+	pending := filepath.Join(filepath.Dir(socket), "pending.sock")
+	listener, err := net.Listen("unix", pending)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer listener.Close()
+	if err := os.Rename(pending, socket); err != nil {
+		t.Fatal(err)
+	}
 	serveDone := make(chan struct{})
 	go func() {
 		defer close(serveDone)
