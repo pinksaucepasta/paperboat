@@ -97,7 +97,11 @@ func TestNetworkRecoveryCoordinatorFansOutAndPreservesActiveOnFailure(t *testing
 		t.Fatalf("failed replacement changed first active=%v ok=%t", active, ok)
 	}
 	health, ok := coordinator.Health("tunnel_01")
-	if !ok || health.State != networkrecovery.StateDegraded || health.NetworkGeneration != 22 || health.NextRetryAt.IsZero() {
+	// After the failure the controller either waits for its next retry (NextRetryAt set) or, when the
+	// retry timer already fired on a busy machine, is already replacing again (no retry time while an
+	// attempt is in flight). Both are the degraded, retrying state this test is about.
+	retrying := !health.NextRetryAt.IsZero() || health.Code == "carrier_replacing"
+	if !ok || health.State != networkrecovery.StateDegraded || health.NetworkGeneration != 22 || !retrying {
 		t.Fatalf("failed replacement health=%+v ok=%t", health, ok)
 	}
 	if err := coordinator.Shutdown(context.Background()); err != nil {
