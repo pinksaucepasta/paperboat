@@ -160,7 +160,8 @@ func TestCarrierAssemblyTelemetryWrapsAuthenticatedPeerLifetime(t *testing.T) {
 		t.Fatalf("active authenticated carriers = %d", got)
 	}
 	close(release)
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	// Shutdown is bounded as a hang guard; it takes longer than a second under -race on a busy machine.
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := assembly.Shutdown(shutdownCtx); err != nil {
 		t.Fatal(err)
@@ -168,17 +169,32 @@ func TestCarrierAssemblyTelemetryWrapsAuthenticatedPeerLifetime(t *testing.T) {
 	if got := runtimeMetricValue(metrics.Snapshot(), edgetelemetry.MetricActiveStreams); got != 0 {
 		t.Fatalf("active authenticated carriers after shutdown = %d", got)
 	}
-	var accepted, closed int
-	for _, event := range events.Snapshot() {
-		switch event.Name {
-		case "carrier_stream_accepted":
-			accepted++
-		case "carrier_stream_closed":
-			closed++
+	// Events are queued asynchronously: wait for the pair, then require that nothing more arrives.
+	count := func() (accepted, closed int) {
+		for _, event := range events.Snapshot() {
+			switch event.Name {
+			case "carrier_stream_accepted":
+				accepted++
+			case "carrier_stream_closed":
+				closed++
+			}
 		}
+		return accepted, closed
 	}
-	if accepted != 1 || closed != 1 {
-		t.Fatalf("authenticated carrier telemetry accepted=%d closed=%d", accepted, closed)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if accepted, closed := count(); accepted == 1 && closed == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			accepted, closed := count()
+			t.Fatalf("authenticated carrier telemetry accepted=%d closed=%d", accepted, closed)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if accepted, closed := count(); accepted != 1 || closed != 1 {
+		t.Fatalf("duplicate authenticated carrier telemetry accepted=%d closed=%d", accepted, closed)
 	}
 }
 
