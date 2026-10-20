@@ -47,7 +47,7 @@ func timeout(duration time.Duration, logger *slog.Logger, next http.Handler) htt
 		return next
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if isStreamingRequest(r) || isReleaseDownload(r) || r.URL.Path == MachineEventsPath {
+		if isStreamingRequest(r) || isReleaseDownload(r) || isMachineEventsWait(r.URL.Path) {
 			next.ServeHTTP(w, r)
 			return
 		}

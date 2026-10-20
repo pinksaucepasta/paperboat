@@ -21830,6 +21830,95 @@
         "operationId": "post_v1_machine_events_wait"
       }
     },
+    "/v1/machines/{machine_id}/events/wait": {
+      "parameters": [
+        {
+          "name": "machine_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "summary": "Wait for a change to something a machine caches (signed-in user)",
+        "description": "The same wait as /v1/machine-events/wait for the signed-in CLI daemon, which holds the user's credential rather than a machine identity. The user may wait only on a machine of their own account. Answers 200 with the topics that moved past the sent generations, or 204 after up to 30 seconds. Generations only, never data.",
+        "security": [
+          {
+            "cookieSession": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:read"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MachineEventsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "At least one topic changed.",
+            "headers": {
+              "Cache-Control": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MachineEventsResponse"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "No topic changed within the wait."
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "415": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "operationId": "post_v1_user_machines_machine_id_events_wait",
+        "parameters": [
+          {
+            "name": "workspace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 63
+            },
+            "description": "Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field."
+          }
+        ]
+      }
+    },
     "/v1/tunnels/{tunnel_id}/connectors/{connector_id}/origin-health": {
       "parameters": [
         {

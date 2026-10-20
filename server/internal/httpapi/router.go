@@ -133,6 +133,7 @@ type Options struct {
 	ConnectorCarrierBootstrap http.Handler
 	ConnectorOriginHealth     http.Handler
 	MachineEvents             http.Handler
+	MachineEventWaiter        machineEventWaiter
 	TelemetryHTTP             *telemetry.HTTPObserver
 	TelemetryMetrics          *telemetry.Metrics
 	TelemetryDiagnostics      *telemetry.Diagnostics
@@ -568,6 +569,9 @@ func NewRouter(opts Options) http.Handler {
 			mux.Handle("POST /v1/machine-enrollments/{enrollment_id}/cancel", userMachineAuth("machines:connect", requireCSRF(opts.Auth, userMachineEnrollmentCancel(opts.Machines))))
 			mux.Handle("POST /v1/machine-enrollments/{enrollment_id}/retry", userMachineAuth("machines:connect", requireCSRF(opts.Auth, userMachineEnrollmentRetry(opts.Machines))))
 			mux.Handle("GET /v1/machines/overview", userMachineAuth("machines:read", userMachineOverview(opts.Machines)))
+			if opts.MachineEventWaiter != nil {
+				mux.Handle("POST /v1/machines/{machine_id}/events/wait", userMachineAuth("machines:read", machineEventsWaitForUser(opts.Machines, opts.MachineEventWaiter)))
+			}
 			mux.Handle("GET /v1/machines/update-summary", userMachineAuth("machines:read", userMachineUpdateSummary(opts.Machines)))
 			mux.Handle("GET /v1/transfer-destination-default", userMachineAuth("machines:read", transferDestinationDefault(opts.Machines)))
 			mux.Handle("PUT /v1/transfer-destination-default", userMachineAuth("machines:connect", transferDestinationDefault(opts.Machines)))

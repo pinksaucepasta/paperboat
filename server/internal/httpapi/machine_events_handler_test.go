@@ -9,7 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat-server/internal/auth"
 	"github.com/pinksaucepasta/paperboat-server/internal/controlplane"
+	"github.com/pinksaucepasta/paperboat-server/internal/usermachines"
 )
 
 type machineEventWaiterFake struct {
@@ -72,4 +74,40 @@ func TestMachineEventsWaitAuthenticatesAndAnswersChangesOrNothing(t *testing.T) 
 	other = claims
 	other.MachineID = ""
 	reject("no machine in the proof", http.StatusForbidden, bootstrapVerifier{claims: other}, body, nil)
+}
+
+type machineLookupFake struct{ owner, machine string }
+
+func (f machineLookupFake) Get(_ context.Context, userID, machineID string) (usermachines.UserMachine, error) {
+	if userID != f.owner || machineID != f.machine {
+		return usermachines.UserMachine{}, usermachines.ErrNotFound
+	}
+	return usermachines.UserMachine{ID: machineID}, nil
+}
+
+func TestMachineEventsWaitForUserIsLimitedToTheUsersOwnMachine(t *testing.T) {
+	send := func(user, machine string) (*httptest.ResponseRecorder, *machineEventWaiterFake) {
+		waiter := &machineEventWaiterFake{changed: map[string]int64{"inventory": 3}}
+		mux := http.NewServeMux()
+		mux.Handle("POST /v1/machines/{machine_id}/events/wait", machineEventsWaitForUser(machineLookupFake{owner: "account_01", machine: "machine_01"}, waiter))
+		request := httptest.NewRequest(http.MethodPost, "/v1/machines/"+machine+"/events/wait", strings.NewReader(`{"topics":{"inventory":1}}`))
+		request.Header.Set("Content-Type", "application/json")
+		request = request.WithContext(context.WithValue(request.Context(), authContextKey{}, principal{User: auth.User{ID: user}}))
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, request)
+		return response, waiter
+	}
+	if r, waiter := send("account_01", "machine_01"); r.Code != http.StatusOK || waiter.machine != "machine_01" || waiter.known["inventory"] != 1 {
+		t.Fatalf("own machine: status=%d body=%s waiter=%+v", r.Code, r.Body.String(), waiter)
+	}
+	for name, args := range map[string][2]string{"another account": {"account_02", "machine_01"}, "another machine": {"account_01", "machine_02"}} {
+		if r, waiter := send(args[0], args[1]); r.Code != http.StatusNotFound || waiter.calls != 0 {
+			t.Errorf("%s: status=%d waited=%v, want 404 and no wait", name, r.Code, waiter.calls != 0)
+		}
+	}
+	for path, want := range map[string]bool{MachineEventsPath: true, "/v1/machines/machine_01/events/wait": true, "/v1/machines/a/b/events/wait": false, "/v1/machines/machine_01": false} {
+		if isMachineEventsWait(path) != want {
+			t.Errorf("isMachineEventsWait(%q) = %v, want %v", path, !want, want)
+		}
+	}
 }

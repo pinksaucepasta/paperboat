@@ -858,6 +858,7 @@ func New(opts Options) (*App, error) {
 		ConnectorCarrierBootstrap: connectorCarrierBootstrapHandler,
 		ConnectorOriginHealth:     connectorOriginHealthHandler,
 		MachineEvents:             machineEventsHandler,
+		MachineEventWaiter:        machineEventHub,
 		TelemetryHTTP:             telemetryHTTP,
 		TelemetryMetrics:          telemetryMetrics,
 		TelemetryDiagnostics:      telemetryDiagnostics,
