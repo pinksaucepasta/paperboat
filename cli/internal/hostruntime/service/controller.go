@@ -34,12 +34,31 @@ func (runner ExecRunner) Output(ctx context.Context, name string, arguments ...s
 	output := &boundedCommandOutput{limit: 8 << 10}
 	command := exec.CommandContext(ctx, name, arguments...)
 	command.Env = runner.Environment
+	if command.Env == nil {
+		command.Env = withoutServiceManagerProtocol(os.Environ())
+	}
 	processlaunch.ConfigureBackground(command)
 	command.Stdout, command.Stderr = output, output
 	if err := command.Run(); err != nil {
 		return output.String(), &CommandError{Tool: name, Output: output.String(), Cause: err}
 	}
 	return output.String(), nil
+}
+
+// withoutServiceManagerProtocol drops the variables a service manager sets for the service's own main
+// process. A child that inherits them (systemctl, for one) sends notifications that the manager
+// rejects as coming from a process other than the main one, logging it every time.
+func withoutServiceManagerProtocol(environment []string) []string {
+	kept := make([]string, 0, len(environment))
+	for _, entry := range environment {
+		name, _, _ := strings.Cut(entry, "=")
+		switch name {
+		case "NOTIFY_SOCKET", "WATCHDOG_PID", "WATCHDOG_USEC", "LISTEN_PID", "LISTEN_FDS", "LISTEN_FDNAMES":
+			continue
+		}
+		kept = append(kept, entry)
+	}
+	return kept
 }
 
 type CommandError struct {
