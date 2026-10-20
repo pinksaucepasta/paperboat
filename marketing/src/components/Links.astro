@@ -1,14 +1,13 @@
 ---
 import Section from "./Section.astro"
 import Icon from "./Icon.astro"
-import { previewDomain } from "../site"
+import { previewDomain, tunnelDomain } from "../site"
 ---
 
-<Section id="links" title="Share what you’re running.">
+<Section id="links" title="Share a port.">
   <Fragment slot="text">
     <p>
-      Turn a port into a link with one command. Keep it for an afternoon, or give a service a permanent address
-      on your own domain. It’s served straight from your machine; nothing gets deployed.
+      One command gives the app on your machine a public link. Nothing to deploy.
     </p>
   </Fragment>
 
@@ -16,11 +15,11 @@ import { previewDomain } from "../site"
     <article class="card surface-pattern">
       <div class="card-head">
         <h3 class="subtitle">Previews</h3>
-        <p class="body">A link for an hour, a day, or until you stop it. Open to anyone, just you, or your team.</p>
+        <p class="body">A quick link to a port, until you stop it. Open to anyone, just you, or your team.</p>
       </div>
       <pre class="out"><span class="dollar">$</span> pb preview 3000
 Preview ready
-<span class="url">https://quiet-river-42.{previewDomain}</span> -&gt; http://127.0.0.1:3000
+<span class="url">https://quiet-river-lantern-4821.{previewDomain}</span> -&gt; http://127.0.0.1:3000
 
 <span class="dim">Press Ctrl+C to stop</span></pre>
     </article>
@@ -28,12 +27,12 @@ Preview ready
     <article class="card surface-pattern">
       <div class="card-head">
         <h3 class="subtitle">Tunnels</h3>
-        <p class="body">An address that stays put. Add your own domains, wildcards included, and the certificates are handled for you.</p>
+        <p class="body">A permanent address for a service. Use your own domain if you like; we handle the certificates.</p>
       </div>
       <pre class="out"><span class="dollar">$</span> pb tunnel create api --port 8080
 Created tunnel api (tunnel_4kq81zc2)
 Connector connector_9d2f7a is ready
-<span class="url">https://calm-harbor-17.{previewDomain}</span> -&gt; http://127.0.0.1:8080
+<span class="url">https://calm-summer-beach-3476.{tunnelDomain}</span> -&gt; http://127.0.0.1:8080
 Status: ready</pre>
     </article>
   </div>
@@ -42,19 +41,19 @@ Status: ready</pre>
     <div class="extra">
       <Icon name="file-arrow-up" size={20} class="extra-icon" />
       <div>
-        <h3 class="extra-title">Drop a file, get a link.</h3>
+        <h3 class="extra-title">Send files between machines.</h3>
         <p class="body">
-          Drag a file onto the console and one of your machines serves it. Or send it straight to another machine
-          with <code>pb send ./file --to studio</code>.
+          Run <code>pb send ./report.pdf --to homelab</code>, or drop a file into a machine’s Inbox from the
+          console.
         </p>
       </div>
     </div>
     <div class="extra">
       <Icon name="hard-drives" size={20} class="extra-icon" />
       <div>
-        <h3 class="extra-title">Host the tunnels yourself.</h3>
+        <h3 class="extra-title">Run your own edge.</h3>
         <p class="body">
-          Serve previews and tunnels from your own servers, on your own domains.
+          Serve previews and tunnels from your own server, on your own domain.
         </p>
         <a class="more" href="/#selfhost">Set one up <span aria-hidden="true">→</span></a>
       </div>

@@ -13,6 +13,7 @@ const config = (await response.json()).data as {
   installer_base_url: string
   local_access_base_domain: string
   preview_base_domain: string
+  tunnel_base_domain: string
 }
 
 export const consoleUrl = config.console_url
@@ -20,6 +21,7 @@ export const installUrl = `${config.installer_base_url}/install`
 export const selfhostInstallUrl = `${config.installer_base_url}/selfhost/install`
 export const localDomain = config.local_access_base_domain
 export const previewDomain = config.preview_base_domain
+export const tunnelDomain = config.tunnel_base_domain
 
 /** Launch platforms (PLAN 1.1): macOS on Apple Silicon and Linux; Windows follows after launch. */
 export const installCommand = `curl -fsSL ${installUrl} | bash`
@@ -31,21 +33,21 @@ export const plans = [
     price: "$0",
     period: "",
     bandwidth: "5 GB",
-    detail: "Everything Paperboat does, for your personal machines.",
+    detail: "Every feature, for your own machines.",
   },
   {
     name: "Pro",
     price: "$8",
     period: "/month, or $80/year",
     bandwidth: "100 GB",
-    detail: "More relay and edge bandwidth for your personal workspace. Top up in 100 GB units any time.",
+    detail: "More bandwidth for your own machines. Add 100 GB any time.",
   },
   {
     name: "Team",
     price: "$15",
     period: "/seat/month, or $150/seat/year",
     bandwidth: "100 GB per seat",
-    detail: "A shared workspace with roles, shared secrets and config. Top-ups go into a team pool.",
+    detail: "For teams: roles, shared secrets and shared config. Extra bandwidth goes to the whole team.",
   },
 ] as const
 

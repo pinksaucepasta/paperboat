@@ -7,11 +7,11 @@ const paths = [
 ]
 ---
 
-<Section id="network" title="Peer to peer, end to end.">
+<Section id="network" title="Direct and encrypted.">
   <Fragment slot="text">
     <p>
-      Your machines talk to each other directly whenever they can, and through a relay when they can’t. Either
-      way, only your machines can read what they send.
+      Your machines connect straight to each other. When they can’t, traffic goes through a relay, still
+      encrypted so only your machines can read it.
     </p>
   </Fragment>
 
@@ -42,10 +42,9 @@ const paths = [
 
   <div class="selfhost surface-pattern" id="selfhost" data-reveal>
     <div>
-      <h3 class="subtitle">Run your own relays.</h3>
+      <h3 class="subtitle">Run your own relay.</h3>
       <p class="body">
-        Put a relay, a tunnel server or both on any Linux box you control and pair it from the console. Your
-        traffic, your servers.
+        Install a relay, a tunnel server or both on any Linux box you own, then add it from the console.
       </p>
     </div>
     <code class="selfhost-cmd" data-copy={`curl -fsSL ${selfhostInstallUrl} | sh`}>

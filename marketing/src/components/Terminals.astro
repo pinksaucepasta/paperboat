@@ -1,14 +1,13 @@
 ---
 import Section from "./Section.astro"
 import TerminalRoom from "./TerminalRoom.astro"
-import { localDomain } from "../site"
 ---
 
-<Section id="terminals" title="Terminals that keep running.">
+<Section id="terminals" title="Terminals that don’t die.">
   <Fragment slot="text">
     <p>
-      Shells live on the machine, so a dropped connection is just a pause. Open the same terminal from your
-      terminal app, a browser or your phone, and share it like a meeting link when you want company.
+      Your shell keeps running on the machine. Close the laptop or lose Wi-Fi, and it’s still there when you
+      come back. Open it from your terminal, a browser or your phone, and share it when you want help.
     </p>
   </Fragment>
   <div data-reveal>
@@ -17,15 +16,16 @@ import { localDomain } from "../site"
 
   <div class="ssh" data-reveal>
     <div>
-      <h3 class="subtitle">And plain SSH, for everything else.</h3>
+      <h3 class="subtitle">Plain SSH works too.</h3>
       <p class="body">
-        Every machine gets an SSH name that works in VS Code, Cursor, Zed or any tool that speaks SSH. Paperboat
-        looks after the keys.
+        Use <code>pb ssh</code>, or plain <code>ssh</code> from VS Code, Cursor, Zed or any other tool.
+        Paperboat handles the keys.
       </p>
     </div>
     <div class="ssh-lines">
-      <code><span class="dollar">$</span> ssh studio.{localDomain}</code>
-      <code><span class="dollar">$</span> rsync -a ./site homelab.{localDomain}:/srv</code>
+      <code><span class="dollar">$</span> pb ssh homelab</code>
+      <code><span class="dollar">$</span> ssh homelab.pprbt</code>
+      <code><span class="dollar">$</span> rsync -a ./site homelab.pprbt:/srv</code>
     </div>
   </div>
 </Section>
