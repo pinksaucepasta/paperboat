@@ -36,7 +36,7 @@ def main():
     parser.add_argument('--member-cmd', required=True)
     parser.add_argument('--member-machine', default='', help='member machine id for the approval/transfer/remove flow')
     parser.add_argument('--suspend-cmd', default='', help='command that takes SQL on stdin and runs it on the server database')
-    parser.add_argument('--skip', default='', help='comma separated sections to skip: share,approval,resources,suspension')
+    parser.add_argument('--skip', default='', help='comma separated sections to skip: share,approval,resources,suspension,transfer')
     args = parser.parse_args()
     skip = set(filter(None, args.skip.split(',')))
     team, machine = args.team, args.machine
@@ -87,8 +87,13 @@ def main():
         raise Failure('member account is not an active team member')
 
     def member_view(machine_id):
-        listed = member('--workspace', team, 'machine', 'list')['machines']
-        return next((m for m in listed if m['id'] == machine_id), None)
+        code, value = parse(*member_raw('--workspace', team, 'machine', 'list', '--json'))
+        if code != 0:
+            # A suspended team's workspace is unavailable to its members: nothing is visible.
+            if isinstance(value, dict) and value.get('error', {}).get('code') == 'workspace_unavailable':
+                return None
+            raise Failure(f'member machine list: {value}')
+        return next((m for m in value['machines'] if m['id'] == machine_id), None)
 
     def check(name, function):
         started = time.time()
@@ -143,6 +148,28 @@ def main():
         if any(m['machine_id'] == mm and m['active'] for m in owner('team', 'get', team)['machines']):
             raise Failure('a declined machine is active in the team')
 
+    def transfer_and_remove():
+        """Destroys the member's machine (its CLI credentials end with it): run last."""
+        if not args.member_machine:
+            raise Failure('--member-machine is required')
+        mm = args.member_machine
+        # Only a team owner or admin may hand a machine to the team; a plain member is refused.
+        denied = refused('member', 'team', 'machine', 'transfer-to-team', team, mm, '--confirm', mm, '--generation', str(member('team', 'get', team)['generation']))
+        if denied != 'forbidden':
+            raise Failure(f'a plain member transferring a machine to the team got {denied!r}, want forbidden')
+        owner('team', 'role', team, member_id, 'admin', '--generation', generation())
+        cleanup.append(lambda: owner('team', 'role', team, member_id, 'member', '--generation', generation()))
+        member('team', 'machine', 'share', team, mm, '--generation', str(member('team', 'get', team)['generation']))
+        member('team', 'machine', 'transfer-to-team', team, mm, '--confirm', mm, '--generation', str(member('team', 'get', team)['generation']))
+        listed = [m for m in owner('team', 'get', team)['machines'] if m['machine_id'] == mm]
+        if not listed or not listed[0]['active']:
+            raise Failure(f'a transferred machine is not an active team machine: {listed}')
+        owner('team', 'machine', 'remove', team, mm, '--confirm', mm, '--generation', generation())
+        if any(m['machine_id'] == mm and m['active'] for m in owner('team', 'get', team)['machines']):
+            raise Failure('a removed team machine is still active')
+        # `auth status` reads the local credential file; only a real server call shows the credential is dead.
+        refused('member', 'team', 'list')
+
     def resources():
         tunnel = None
         code, value = parse(*owner_raw('tunnel', 'create', f'lane-b-f12-{int(time.time())}', '--port', '8123', '--json'))
@@ -156,16 +183,41 @@ def main():
             raise Failure('a grant on an unattached tunnel gave no error code')
         owner('team', 'attach', team, 'tunnel', tunnel, '--generation', generation())
         owner('team', 'grant', team, member_id, 'tunnel', tunnel, 'use', '--generation', generation())
-        seen = member('--workspace', team, 'tunnel', 'list')
-        items = seen if isinstance(seen, list) else seen.get('items') or seen.get('tunnels') or []
-        if not any(t.get('id') == tunnel for t in items):
-            raise Failure(f'the member does not see the attached, granted tunnel: {seen}')
+        # A resource grant authorizes browser use of the tunnel; listing/management of someone else's tunnel is the
+        # separate tunnel_manage machine capability. The member reads their own grant from the team.
+        def mine():
+            return [g for g in member('team', 'get', team).get('grants', []) if g.get('resource_kind') == 'tunnel' and g.get('resource_id') == tunnel and g.get('account_id') == member_id]
+        granted = mine()
+        if not granted or not any(g['active'] and g['permission'] == 'use' for g in granted):
+            raise Failure(f'the member does not see the active tunnel grant: {granted}')
+        kinds = {e['action'] for e in owner('team', 'activity', team, '--limit', '100')['items']}
+        if not {'attach', 'grant'} <= kinds:
+            raise Failure(f'owner activity lacks the attach/grant events: {sorted(kinds)}')
         owner('team', 'grant', team, member_id, 'tunnel', tunnel, 'use', '--active=false', '--generation', generation())
-        seen = member('--workspace', team, 'tunnel', 'list')
-        items = seen if isinstance(seen, list) else seen.get('items') or seen.get('tunnels') or []
-        if any(t.get('id') == tunnel for t in items):
-            raise Failure('a revoked tunnel grant still shows the tunnel')
+        if any(g['active'] for g in mine()):
+            raise Failure('a revoked tunnel grant is still active for the member')
         owner('team', 'attach', team, 'tunnel', tunnel, '--active=false', '--generation', generation())
+
+    def preview_resource():
+        run(['ssh', args.owner_ssh, 'nohup python3 -m http.server 8124 --bind 127.0.0.1 >/dev/null 2>&1 &'])
+        preview = None
+        cleanup.append(lambda: run(['ssh', args.owner_ssh, 'pkill -f "http.server 8124"; true']))
+        code, value = parse(*owner_raw('preview', '8124', '--background', '--private', '--ttl', '15m', '--json', timeout=180))
+        if isinstance(value, dict):
+            preview = value.get('id') or (value.get('preview') or {}).get('id')
+        if not preview:
+            raise Failure(f'could not start the throwaway preview: {value}')
+        def stop():
+            owner_raw('preview', 'stop', preview, '--json')
+            owner_raw('preview', 'delete', preview, '--json')
+        cleanup.append(stop)
+        owner('team', 'attach', team, 'preview', preview, '--generation', generation())
+        owner('team', 'grant', team, member_id, 'preview', preview, 'use', '--generation', generation())
+        mine = [g for g in member('team', 'get', team).get('grants', []) if g.get('resource_kind') == 'preview' and g.get('resource_id') == preview and g.get('active')]
+        if not mine:
+            raise Failure('the member does not see the active preview grant')
+        owner('team', 'grant', team, member_id, 'preview', preview, 'use', '--active=false', '--generation', generation())
+        owner('team', 'attach', team, 'preview', preview, '--active=false', '--generation', generation())
 
     def delete_tunnel(tunnel):
         code, value = parse(*owner_raw('tunnel', 'delete', tunnel, '--json'))
@@ -196,28 +248,33 @@ def main():
         owner('team', 'machine', 'grant', team, machine, '--member', member_id, '--capability', 'terminal', '--generation', generation())
         if member_view(machine) is None:
             raise Failure('precondition: the member should see the machine')
-        run_sql(f"update paperboat.teams set suspended=true,suspended_at=now(),suspended_by=owner_account,generation=generation+1 where team_id='{team}';")
+        run_sql(f"set search_path to paperboat; update paperboat.teams set suspended=true,suspended_at=now(),suspended_by=owner_account,generation=generation+1 where team_id='{team}';")
         resumed = []
-        cleanup.append(lambda: run_sql(f"update paperboat.teams set suspended=false,suspended_at=null,suspended_by=null,generation=generation+1 where team_id='{team}';"))
+        cleanup.append(lambda: run_sql(f"set search_path to paperboat; update paperboat.teams set suspended=false,suspended_at=null,suspended_by=null,generation=generation+1 where team_id='{team}';"))
         resumed.append(True)
         view = member('team', 'get', team)
         if view.get('suspended') is not True:
             raise Failure('a current member does not see suspended=true')
+        unnamed = []
         for who in ('owner', 'member'):
             raw = owner_raw if who == 'owner' else member_raw
             code, value = parse(*raw('team', 'machine', 'grant', team, machine, '--all-members', '--capability', 'files', '--generation', str(view['generation']), '--json'))
             error = value.get('error', {}) if isinstance(value, dict) else {}
-            if code == 0 or 'suspend' not in json.dumps(error).lower():
-                raise Failure(f'{who} mutation during suspension did not name the suspension: {value}')
+            if code == 0:
+                raise Failure(f'{who} mutation succeeded during suspension')
+            if 'suspend' not in json.dumps(error).lower():
+                unnamed.append(f'{who}: {error.get("code")} {error.get("message", "")[:80]}')
         if member_view(machine) is not None:
             raise Failure('suspended team still exposes the machine to the member')
-        run_sql(f"update paperboat.teams set suspended=false,suspended_at=null,suspended_by=null,generation=generation+1 where team_id='{team}';")
+        run_sql(f"set search_path to paperboat; update paperboat.teams set suspended=false,suspended_at=null,suspended_by=null,generation=generation+1 where team_id='{team}';")
         cleanup.pop()
         recovered = member_view(machine)
         if recovered is None or 'terminal' not in recovered['permissions']:
             raise Failure('access did not return after the team resumed')
         owner('team', 'machine', 'grant', team, machine, '--all-members', '--capability', 'files', '--generation', generation())
         owner('team', 'machine', 'grant', team, machine, '--all-members', '--capability', 'files', '--active=false', '--generation', generation())
+        if unnamed:
+            raise Failure('the CLI does not name the suspension (server answers 409 team_suspended): ' + '; '.join(unnamed))
 
     try:
         if 'share' not in skip:
@@ -226,10 +283,14 @@ def main():
             check('F12-04 member-shared machine waits for approval; approve; decline', member_machine_flow)
         if 'resources' not in skip:
             check('F12-05 attach tunnel, explicit grant, revoke, detach', resources)
+        if 'resources' not in skip:
+            check('F12-05 attach preview, explicit grant, revoke, detach', preview_resource)
         if 'share' not in skip:
             check('F12-05 owner activity lists the changes; member refused', activity)
         if 'suspension' not in skip:
             check('F12-06 suspension: named error, access fenced, recovery', suspension)
+        if 'transfer' not in skip:
+            check('F12-04 transfer-to-team, then owner removes the team machine', transfer_and_remove)
     finally:
         while cleanup:
             try:
