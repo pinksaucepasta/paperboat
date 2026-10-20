@@ -32,7 +32,7 @@ type WorkspacePage struct {
 // cannot prevent the user from finding another one.
 func (c *Client) ListWorkspaces(ctx context.Context) (WorkspacePage, error) {
 	var page WorkspacePage
-	if err := c.doStrict(ctx, http.MethodGet, "/v1/workspaces", nil, &page); err != nil {
+	if err := c.doChecked(ctx, http.MethodGet, "/v1/workspaces", nil, &page); err != nil {
 		return WorkspacePage{}, err
 	}
 	if page.Items == nil {

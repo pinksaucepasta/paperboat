@@ -206,7 +206,7 @@ func TestWorkspaceAccessErrorUsesOnlyCanonicalSelectorErrorCodes(t *testing.T) {
 // fail, which reported local machine access as unavailable.
 func TestWorkspaceListAcceptsTheTeamMachineApprovalFlag(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = io.WriteString(w, `{"data":{"items":[{"id":"personal","name":"Personal","kind":"personal","role":"owner"},{"id":"team-a","name":"Team A","kind":"team","role":"owner","approve_new_machines":true}]}}`)
+		_, _ = io.WriteString(w, `{"data":{"future_top_level":1,"items":[{"id":"personal","name":"Personal","kind":"personal","role":"owner","future_field":{"a":1}},{"id":"team-a","name":"Team A","kind":"team","role":"owner","approve_new_machines":true}]}}`)
 	}))
 	defer server.Close()
 	client := New(server.URL, config.Credential{AccessToken: "session"}, server.Client())

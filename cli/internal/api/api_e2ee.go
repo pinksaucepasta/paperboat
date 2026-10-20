@@ -96,7 +96,7 @@ type CLIEndpointRequestInput struct {
 
 func (c *Client) E2EERoot(ctx context.Context) (E2EERoot, error) {
 	var out E2EERoot
-	if err := c.doStrict(ctx, http.MethodGet, "/v1/e2ee/root", nil, &out); err != nil {
+	if err := c.doChecked(ctx, http.MethodGet, "/v1/e2ee/root", nil, &out); err != nil {
 		return E2EERoot{}, err
 	}
 	return out, nil
@@ -106,7 +106,7 @@ func (c *Client) E2EERoot(ctx context.Context) (E2EERoot, error) {
 // These public keys grant no authority over ENV vault data.
 func (c *Client) PeerTransportKeys(ctx context.Context) (PeerTransportKeySet, error) {
 	var out PeerTransportKeySet
-	if err := c.doStrict(ctx, http.MethodGet, "/v1/peer-keys", nil, &out); err != nil {
+	if err := c.doChecked(ctx, http.MethodGet, "/v1/peer-keys", nil, &out); err != nil {
 		return PeerTransportKeySet{}, err
 	}
 	return out, nil
@@ -114,7 +114,7 @@ func (c *Client) PeerTransportKeys(ctx context.Context) (PeerTransportKeySet, er
 
 func (c *Client) PendingE2EEEndpoints(ctx context.Context) ([]PendingEndpointIdentity, error) {
 	var out []PendingEndpointIdentity
-	if err := c.doStrict(ctx, http.MethodGet, "/v1/e2ee/pending-endpoints", nil, &out); err != nil {
+	if err := c.doChecked(ctx, http.MethodGet, "/v1/e2ee/pending-endpoints", nil, &out); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -149,7 +149,7 @@ func (c *Client) EndpointCertificate(ctx context.Context, endpointID string, gen
 	}
 	var out EndpointCertificateDocument
 	path := "/v1/endpoints/" + url.PathEscape(endpointID) + "/certificates/" + fmt.Sprintf("%d", generation)
-	if err := c.doStrict(ctx, http.MethodGet, path, nil, &out); err != nil {
+	if err := c.doChecked(ctx, http.MethodGet, path, nil, &out); err != nil {
 		return EndpointCertificateDocument{}, err
 	}
 	return out, nil

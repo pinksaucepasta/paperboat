@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/wirejson"
 	"io"
 	"math"
 	"net/http"
@@ -134,24 +135,18 @@ type tunnelWireEnvelope struct {
 	Error tunnelWireError `json:"error"`
 }
 
-// decodeTunnelJSONStrict rejects duplicate object keys as well as unknown or
-// trailing fields. encoding/json alone rejects unknown fields but silently
-// accepts duplicates, which is unsafe for signed/idempotent request and
-// response documents.
-func decodeTunnelJSONStrict(raw []byte, out any) error {
+// decodeTunnelJSON rejects duplicate object keys and trailing data, and ignores fields it does
+// not know so a newer server never breaks an older client. encoding/json silently accepts
+// duplicate keys, which is unsafe for signed/idempotent response documents.
+func decodeTunnelJSON(raw []byte, out any) error {
 	if err := rejectTunnelDuplicateJSON(raw); err != nil {
 		return err
 	}
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(out); err != nil {
-		return err
-	}
-	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		if err == nil {
+	if err := wirejson.Decode(raw, out); err != nil {
+		if errors.Is(err, wirejson.ErrTrailingData) {
 			return errors.New("trailing JSON")
 		}
-		return fmt.Errorf("trailing JSON: %w", err)
+		return err
 	}
 	return nil
 }
@@ -226,7 +221,7 @@ func decodeTunnelData(raw json.RawMessage, out any) error {
 	if len(raw) == 0 || string(raw) == "null" {
 		return errors.New("empty response data")
 	}
-	return decodeTunnelJSONStrict(raw, out)
+	return decodeTunnelJSON(raw, out)
 }
 
 func (c *Client) doTunnelRequest(ctx context.Context, method, requestPath string, body any, out any, headers http.Header, responseHeaders *http.Header) error {
@@ -340,7 +335,7 @@ func (c *Client) doTunnelRequest(ctx context.Context, method, requestPath string
 		return nil
 	}
 	var envelope tunnelWireEnvelope
-	if err := decodeTunnelJSONStrict(raw, &envelope); err != nil {
+	if err := decodeTunnelJSON(raw, &envelope); err != nil {
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			return &APIError{Status: resp.StatusCode, Code: "invalid_server_response", Message: "paperboat-server returned an invalid error response", RequestID: responseRequestID(resp.Header), SupportReference: responseOrRequestSupportReference(resp.Header, "", requestSupportReference), cause: errors.Join(errorreport.HTTPStatusFailure(resp), &ResponseDecodeError{Err: err})}
 		}
@@ -407,18 +402,18 @@ func (m *TunnelMutation) UnmarshalJSON(raw []byte) error {
 	}
 	switch kind {
 	case "tunnel":
-		if err := decodeTunnelJSONStrict(raw, &m.Tunnel); err != nil {
+		if err := decodeTunnelJSON(raw, &m.Tunnel); err != nil {
 			return err
 		}
 	case "operation":
-		if err := decodeTunnelJSONStrict(raw, &m.Operation); err != nil {
+		if err := decodeTunnelJSON(raw, &m.Operation); err != nil {
 			return err
 		}
 		m.Tunnel.ID = m.Operation.ResourceID
 	default:
 		type plain TunnelMutation
 		var value plain
-		if err := decodeTunnelJSONStrict(raw, &value); err != nil {
+		if err := decodeTunnelJSON(raw, &value); err != nil {
 			return err
 		}
 		*m = TunnelMutation(value)
@@ -434,18 +429,18 @@ func (m *TunnelRouteMutation) UnmarshalJSON(raw []byte) error {
 	}
 	switch kind {
 	case "route":
-		if err := decodeTunnelJSONStrict(raw, &m.Route); err != nil {
+		if err := decodeTunnelJSON(raw, &m.Route); err != nil {
 			return err
 		}
 	case "operation":
-		if err := decodeTunnelJSONStrict(raw, &m.Operation); err != nil {
+		if err := decodeTunnelJSON(raw, &m.Operation); err != nil {
 			return err
 		}
 		m.Route.ID = m.Operation.ResourceID
 	default:
 		type plain TunnelRouteMutation
 		var value plain
-		if err := decodeTunnelJSONStrict(raw, &value); err != nil {
+		if err := decodeTunnelJSON(raw, &value); err != nil {
 			return err
 		}
 		*m = TunnelRouteMutation(value)
@@ -461,18 +456,18 @@ func (m *TunnelDomainMutation) UnmarshalJSON(raw []byte) error {
 	}
 	switch kind {
 	case "domain_binding":
-		if err := decodeTunnelJSONStrict(raw, &m.Domain); err != nil {
+		if err := decodeTunnelJSON(raw, &m.Domain); err != nil {
 			return err
 		}
 	case "operation":
-		if err := decodeTunnelJSONStrict(raw, &m.Operation); err != nil {
+		if err := decodeTunnelJSON(raw, &m.Operation); err != nil {
 			return err
 		}
 		m.Domain.ID = m.Operation.ResourceID
 	default:
 		type plain TunnelDomainMutation
 		var value plain
-		if err := decodeTunnelJSONStrict(raw, &value); err != nil {
+		if err := decodeTunnelJSON(raw, &value); err != nil {
 			return err
 		}
 		*m = TunnelDomainMutation(value)
@@ -488,18 +483,18 @@ func (m *TunnelConnectorMutation) UnmarshalJSON(raw []byte) error {
 	}
 	switch kind {
 	case "connector":
-		if err := decodeTunnelJSONStrict(raw, &m.Connector); err != nil {
+		if err := decodeTunnelJSON(raw, &m.Connector); err != nil {
 			return err
 		}
 	case "operation":
-		if err := decodeTunnelJSONStrict(raw, &m.Operation); err != nil {
+		if err := decodeTunnelJSON(raw, &m.Operation); err != nil {
 			return err
 		}
 		m.Connector.ID = m.Operation.ResourceID
 	default:
 		type plain TunnelConnectorMutation
 		var value plain
-		if err := decodeTunnelJSONStrict(raw, &value); err != nil {
+		if err := decodeTunnelJSON(raw, &value); err != nil {
 			return err
 		}
 		*m = TunnelConnectorMutation(value)

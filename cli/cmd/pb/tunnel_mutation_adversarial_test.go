@@ -284,7 +284,8 @@ func TestTunnelMutationSelectorsRejectCursorCyclesAndOversizePages(t *testing.T)
 	})
 }
 
-func TestTunnelMutationRejectsSecretBearingUnknownSuccessFields(t *testing.T) {
+// A newer server may add fields to a success response. They are dropped, never printed.
+func TestTunnelMutationDropsSecretBearingUnknownSuccessFieldsWithoutEchoingThem(t *testing.T) {
 	withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet && r.URL.Path == "/v1/tunnels/tun_1" {
 			tunnel := validCommandTunnel()
@@ -303,11 +304,10 @@ func TestTunnelMutationRejectsSecretBearingUnknownSuccessFields(t *testing.T) {
 		}})
 	})
 	stdout, stderr, err := executeAdversarialTunnelCommand(t, "route", "add", "tun_1", "--name", "api", "--to", "http://127.0.0.1:8080", "--json")
-	var decodeFailure *api.ResponseDecodeError
-	if !errors.As(err, &decodeFailure) || !strings.Contains(decodeFailure.Err.Error(), "unknown field") || stdout != "" || stderr != "" {
-		t.Fatalf("error=%v stdout=%q stderr=%q", err, stdout, stderr)
+	if err != nil || !strings.Contains(stdout, `"route_1"`) {
+		t.Fatalf("an added response field broke the command: error=%v stdout=%q stderr=%q", err, stdout, stderr)
 	}
-	assertNoTunnelMutationSecret(t, stdout, stderr, err.Error())
+	assertNoTunnelMutationSecret(t, stdout, stderr, "")
 	if got := apiErrorFallback(&api.APIError{Status: http.StatusForbidden, Message: tunnelMutationSecretCanary}); strings.Contains(got, tunnelMutationSecretCanary) {
 		t.Fatalf("forbidden mapping exposed server message: %q", got)
 	}

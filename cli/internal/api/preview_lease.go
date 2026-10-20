@@ -1,12 +1,10 @@
 package api
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
+	"github.com/pinksaucepasta/paperboat/internal/wirejson"
 	"net"
 	"net/http"
 	"net/url"
@@ -19,14 +17,13 @@ import (
 	"golang.org/x/net/idna"
 )
 
-func decodePreviewLeaseStrict(raw []byte, out any) error {
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(out); err != nil {
+// decodePreviewLease decodes a lease document from the server, ignoring fields it does not know.
+func decodePreviewLease(raw []byte, out any) error {
+	if err := wirejson.Decode(raw, out); err != nil {
+		if errors.Is(err, wirejson.ErrTrailingData) {
+			return fmt.Errorf("%w: trailing response data", ErrPreviewLeaseInvalid)
+		}
 		return err
-	}
-	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		return fmt.Errorf("%w: trailing response data", ErrPreviewLeaseInvalid)
 	}
 	return nil
 }
@@ -152,7 +149,7 @@ func (c *Client) GetPreviewDomainDNSInstructions(ctx context.Context, previewID,
 	}
 	path := "/v1/previews/" + url.PathEscape(previewID) + "/domains/" + url.PathEscape(domainID) + "/instructions"
 	var instructions PreviewDNSInstructions
-	if err := c.doStrict(ctx, http.MethodGet, path, nil, &instructions); err != nil {
+	if err := c.doChecked(ctx, http.MethodGet, path, nil, &instructions); err != nil {
 		return PreviewDNSInstructions{}, err
 	}
 	hostname, err := NormalizePreviewDomain(instructions.Hostname)
@@ -287,7 +284,7 @@ func (c *Client) ListPreviewLeasesFiltered(ctx context.Context, cursor string, l
 	}
 	var page PreviewLeasePage
 	path := "/v1/previews?" + values.Encode()
-	if err := c.doStrict(ctx, http.MethodGet, path, nil, &page); err != nil {
+	if err := c.doChecked(ctx, http.MethodGet, path, nil, &page); err != nil {
 		return PreviewLeasePage{}, err
 	}
 	if len(page.Items) > limit {

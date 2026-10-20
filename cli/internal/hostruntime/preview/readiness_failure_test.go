@@ -49,7 +49,7 @@ func testReadinessFailureDiagnostic(t *testing.T, method, stage string) {
 				return
 			case "json_decode":
 				w.Header().Set("ETag", formatLeaseETag(lease.ID, generation))
-				_, _ = w.Write([]byte(`{"PRIVATE_RESPONSE_CANARY":true}`))
+				_, _ = w.Write([]byte(`{"data":{"id":["PRIVATE_RESPONSE_CANARY"]}}`))
 				return
 			case "identity_changed":
 				observed.OwnerMachineID = "foreign-machine"

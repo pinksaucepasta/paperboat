@@ -426,7 +426,7 @@ func (c *Client) TunnelDomainInstructionsV1(ctx context.Context, tunnel, id stri
 		return TunnelDNSInstructions{}, e
 	}
 	var out TunnelDNSInstructions
-	e = c.doStrict(ctx, http.MethodGet, p+"/instructions", nil, &out)
+	e = c.doChecked(ctx, http.MethodGet, p+"/instructions", nil, &out)
 	if e == nil {
 		if out.Schema != TunnelV1Schema || out.Kind != "dns_instructions" || out.TunnelID != tunnel || out.DomainID != id || validateDomainHostname(out.Hostname) != nil || out.Provider == "" || len(out.Provider) > 64 || out.CertificateStrategy == "" || len(out.CertificateStrategy) > 64 || out.VerificationState == "" || len(out.VerificationState) > 64 || len(out.Records) > 32 || len(out.Note) > 2000 || out.PublicTCPPort < 0 || out.PublicTCPPort > 65535 || (out.PublicTCPPort > 0 && out.PublicTCPPort < 1024) || containsTunnelControl(out.Provider+out.CertificateStrategy+out.VerificationState+out.Note) {
 			e = ErrUnsafeTunnelResponse

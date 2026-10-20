@@ -32,7 +32,7 @@ func TestReadinessOwnerFailuresSurviveMutationAndRetryExhaustion(t *testing.T) {
 				defer mu.Unlock()
 				if r.Method == http.MethodGet {
 					reads++
-					_, _ = w.Write([]byte(`{"PRIVATE_RESPONSE_CANARY":true}`))
+					_, _ = w.Write([]byte(`{"data":{"id":["PRIVATE_RESPONSE_CANARY"]}}`))
 					return
 				}
 				posts++

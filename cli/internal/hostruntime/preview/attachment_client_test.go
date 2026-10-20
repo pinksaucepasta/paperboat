@@ -168,7 +168,7 @@ func TestAttachmentClientRejectsDuplicateUnknownOversizedAndRedirectResponses(t 
 		body string
 	}{
 		{name: "duplicate envelope", body: `{"data":` + string(validBody[len(`{"data":`):len(validBody)-1]) + `,"data":{}}`},
-		{name: "unknown envelope", body: `{"data":` + string(validBody[len(`{"data":`):len(validBody)-1]) + `,"secret":"do-not-accept"}`},
+		{name: "wrongly typed envelope", body: `{"data":"do-not-accept"}`},
 	}
 	for _, tc := range responses {
 		t.Run(tc.name, func(t *testing.T) {

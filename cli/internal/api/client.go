@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/wirejson"
 	"io"
 	"net/http"
 	"strings"
@@ -130,7 +131,7 @@ func (c *Client) doWithHeaders(ctx context.Context, method, path string, body, o
 	return c.doRequest(ctx, method, path, body, out, headers, false)
 }
 
-func (c *Client) doStrict(ctx context.Context, method, path string, body, out any) error {
+func (c *Client) doChecked(ctx context.Context, method, path string, body, out any) error {
 	return c.doRequest(ctx, method, path, body, out, nil, true)
 }
 
@@ -259,13 +260,11 @@ func (c *Client) doRequestMeta(ctx context.Context, method, path string, body, o
 		}
 		return nil
 	}
-	decoder := json.NewDecoder(bytes.NewReader(envelope.Data))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(out); err != nil {
+	if err := wirejson.Decode(envelope.Data, out); err != nil {
+		if errors.Is(err, wirejson.ErrTrailingData) {
+			return fmt.Errorf("decode %s %s data: trailing JSON", method, path)
+		}
 		return &ResponseDecodeError{Err: err}
-	}
-	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		return fmt.Errorf("decode %s %s data: trailing JSON", method, path)
 	}
 	return nil
 }

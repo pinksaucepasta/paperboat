@@ -152,7 +152,6 @@ func (c *privateAccessGrantClient) issue(ctx context.Context, request privateAcc
 		return privateAccessGrantResponse{}, privatepreviewproxy.ErrAccessTemporarilyUnavailable
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
 	var result privateAccessGrantResponse
 	if decoder.Decode(&result) != nil || decoder.Decode(&struct{}{}) != io.EOF || result.Schema != connectorprotocol.PrivateAccessSchema || result.Kind != privateAccessGrantKind || result.Request.Validate(c.now()) != nil || result.Grant == "" || result.ExpiresAt != result.Request.ExpiresAt || result.RequestID != request.RequestID || result.CorrelationID != request.CorrelationID {
 		return privateAccessGrantResponse{}, privatepreviewproxy.ErrAccessTemporarilyUnavailable

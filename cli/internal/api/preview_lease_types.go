@@ -182,13 +182,13 @@ func (r *previewLeaseCreateResponse) UnmarshalJSON(raw []byte) error {
 	switch discriminator.Kind {
 	case "preview_lease":
 		var lease PreviewLease
-		if err := decodePreviewLeaseStrict(raw, &lease); err != nil {
+		if err := decodePreviewLease(raw, &lease); err != nil {
 			return err
 		}
 		r.Lease = &lease
 	case "operation":
 		var operation PreviewLeaseOperation
-		if err := decodePreviewLeaseStrict(raw, &operation); err != nil {
+		if err := decodePreviewLease(raw, &operation); err != nil {
 			return err
 		}
 		r.Operation = &operation

@@ -197,7 +197,6 @@ func (c *accessorDiscoveryClient) snapshot(ctx context.Context) ([]accessorAdmis
 		return nil, privatepreviewproxy.ErrAccessTemporarilyUnavailable
 	}
 	d := json.NewDecoder(bytes.NewReader(raw))
-	d.DisallowUnknownFields()
 	var out accessorSnapshot
 	if d.Decode(&out) != nil || d.Decode(&struct{}{}) != io.EOF || !out.Complete || out.Schema != "paperboat.preview-tunnel/v1" || out.Kind != "private_access_carrier_snapshot" || out.Admissions == nil || len(out.Admissions) > privateAccessMaximumAdmissions {
 		return nil, privatepreviewproxy.ErrAccessTemporarilyUnavailable

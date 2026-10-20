@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/wirejson"
 	"io"
 	"net/http"
 	"net/url"
@@ -125,16 +126,11 @@ func readMachineControlResponse(response *http.Response) ([]byte, bool, error) {
 }
 
 func decodeMachineControlResponse(raw []byte, out any) error {
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(out); err != nil {
-		return err
-	}
-	if err := decoder.Decode(&struct{}{}); err != io.EOF {
-		if err != nil {
-			return err
+	if err := wirejson.Decode(raw, out); err != nil {
+		if errors.Is(err, wirejson.ErrTrailingData) {
+			return errInvalidMachineControlDoc
 		}
-		return errInvalidMachineControlDoc
+		return err
 	}
 	return nil
 }

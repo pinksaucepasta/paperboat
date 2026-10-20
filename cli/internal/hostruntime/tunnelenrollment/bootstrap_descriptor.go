@@ -302,7 +302,6 @@ func (s *HTTPSProductionAssemblySource) fetchCarrierDescriptor(ctx context.Conte
 		Data json.RawMessage `json:"data"`
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&envelope); err != nil {
 		return carrierBootstrapDescriptor{}, safeEnrollmentFailure("carrier bootstrap response is invalid", ErrUnavailable, err)
 	}
@@ -318,7 +317,6 @@ func (s *HTTPSProductionAssemblySource) fetchCarrierDescriptor(ctx context.Conte
 	stage = "descriptor_decode"
 	var descriptor carrierBootstrapDescriptor
 	decoder = json.NewDecoder(bytes.NewReader(envelope.Data))
-	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&descriptor); err != nil {
 		return carrierBootstrapDescriptor{}, safeEnrollmentFailure("carrier bootstrap response is invalid", ErrUnavailable, err)
 	}
@@ -393,7 +391,6 @@ func decodeCarrierBootstrapError(raw []byte) (carrierBootstrapErrorPayload, bool
 	}
 	var response carrierBootstrapErrorResponse
 	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
 	if decoder.Decode(&response) != nil || decoder.Decode(&struct{}{}) != io.EOF {
 		return carrierBootstrapErrorPayload{}, false
 	}

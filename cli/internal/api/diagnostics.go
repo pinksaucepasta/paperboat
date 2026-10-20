@@ -55,7 +55,7 @@ func (c *Client) CompleteDiagnosticUploadIntent(ctx context.Context, intentID st
 	if strings.TrimSpace(intentID) == "" {
 		return result, errors.New("invalid diagnostic upload intent")
 	}
-	err := c.doStrict(ctx, http.MethodPost, "/v1/diagnostic-upload-intents/"+url.PathEscape(intentID)+"/complete", struct{}{}, &result)
+	err := c.doChecked(ctx, http.MethodPost, "/v1/diagnostic-upload-intents/"+url.PathEscape(intentID)+"/complete", struct{}{}, &result)
 	if err != nil {
 		return DiagnosticUploadIntent{}, err
 	}

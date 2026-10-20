@@ -65,13 +65,13 @@ func TestStructuredAuthFailurePreservesStatusReferenceAndSafeRecovery(t *testing
 
 func TestProtocolDecodeErrorPreservesCauseWithoutDisplayingPayload(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		io.WriteString(w, `{"data":{"private_credential_name":"private-value"}}`)
+		io.WriteString(w, `{"data":{"id":{"private_credential_name":"private-value"}}}`)
 	}))
 	defer server.Close()
 	var out struct {
 		ID string `json:"id"`
 	}
-	err := New(server.URL, config.Credential{}, server.Client()).doStrict(context.Background(), http.MethodGet, "/v1/test", nil, &out)
+	err := New(server.URL, config.Credential{}, server.Client()).doChecked(context.Background(), http.MethodGet, "/v1/test", nil, &out)
 	var decodeErr *ResponseDecodeError
 	if !errors.As(err, &decodeErr) || errors.Unwrap(decodeErr) == nil || strings.Contains(err.Error(), "private") {
 		t.Fatalf("decode error unsafe/lost cause: %T", err)

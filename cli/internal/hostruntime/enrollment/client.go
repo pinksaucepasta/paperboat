@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/wirejson"
 	"io"
 	"net/http"
 	"net/url"
@@ -159,7 +160,7 @@ func LoadConfig(path string) (Config, error) {
 		return Config{}, unavailableEnrollment(err)
 	}
 	var config Config
-	if err := strictJSON(body, &config); err != nil {
+	if err := decodeResponseJSON(body, &config); err != nil {
 		return Config{}, unavailableEnrollment(err)
 	}
 	if !filepath.IsAbs(config.StateRoot) || config.ControlCAFile != "" && !filepath.IsAbs(config.ControlCAFile) || len(config.EnrollmentCredential) < 32 || len(config.EnrollmentCredential) > 16<<10 {
@@ -248,7 +249,7 @@ func (c *Client) enroll(ctx context.Context, config Config, endpointPath string,
 	var envelope struct {
 		Data RuntimeIdentity `json:"data"`
 	}
-	if err := strictJSON(responseBody, &envelope); err != nil {
+	if err := decodeResponseJSON(responseBody, &envelope); err != nil {
 		return RuntimeIdentity{}, unavailableEnrollment(err)
 	}
 	result := envelope.Data
@@ -361,7 +362,7 @@ func loadRuntimeIdentity(root string, now time.Time, expiryGrace time.Duration) 
 		return RuntimeIdentity{}, unavailableEnrollment(err)
 	}
 	var value RuntimeIdentity
-	if err := strictJSON(body, &value); err != nil {
+	if err := decodeResponseJSON(body, &value); err != nil {
 		return RuntimeIdentity{}, unavailableEnrollment(err)
 	}
 	validExpiry := expiryGrace < 0 || value.ExpiresAt.After(now.Add(-expiryGrace))
@@ -378,21 +379,15 @@ func loadRuntimeIdentity(root string, now time.Time, expiryGrace time.Duration) 
 	return value, nil
 }
 
-func strictJSON(data []byte, target any) error {
+func decodeResponseJSON(data []byte, target any) error {
 	if err := rejectDuplicateJSON(data); err != nil {
 		return err
 	}
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(target); err != nil {
-		return err
-	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		if err != nil {
-			return err
+	if err := wirejson.Decode(data, target); err != nil {
+		if errors.Is(err, wirejson.ErrTrailingData) {
+			return ErrInvalid
 		}
-		return ErrInvalid
+		return err
 	}
 	return nil
 }

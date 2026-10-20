@@ -27,7 +27,6 @@ func decodeAttachmentEnvelope(data []byte, now time.Time) (Attachment, error) {
 		Data json.RawMessage `json:"data"`
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&envelope); err != nil || len(envelope.Data) == 0 {
 		return Attachment{}, fmt.Errorf("%w: invalid response envelope", ErrAttachmentClientInvalid)
 	}
@@ -39,7 +38,6 @@ func decodeAttachmentEnvelope(data []byte, now time.Time) (Attachment, error) {
 	}
 	var attachment Attachment
 	attachmentDecoder := json.NewDecoder(bytes.NewReader(envelope.Data))
-	attachmentDecoder.DisallowUnknownFields()
 	if err := attachmentDecoder.Decode(&attachment); err != nil {
 		return Attachment{}, fmt.Errorf("%w: invalid attachment", ErrAttachmentClientInvalid)
 	}

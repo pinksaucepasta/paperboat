@@ -179,6 +179,9 @@ Goal: every main-path row on L and M `[x]`, as fast as possible.
   configuration only for the initial API address. Tests use a configured test domain
   (e.g. `example.test`), never a real one.
 - Changeable values (limits, prices, policies) live in one configuration place, not copied.
+- Clients ignore unknown fields in server responses (`internal/wirejson`) and keep checking types and
+  required values; servers may stay strict on requests. Signed authorization claims stay exact, because
+  an unknown claim could be a restriction the client does not understand.
 - No stubs, placeholders or TODOs standing in for required behaviour.
 
 ## Testing

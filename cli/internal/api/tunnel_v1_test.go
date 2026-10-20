@@ -362,9 +362,8 @@ func TestTunnelV1AcceptsCanonicalServerResourceShapesAndRedactsFailure(t *testin
 	}
 }
 
-func TestTunnelV1RejectsUnknownAndTrailingResponseJSON(t *testing.T) {
+func TestTunnelV1RejectsTrailingResponseJSON(t *testing.T) {
 	for _, body := range []string{
-		`{"data":{"schema":"paperboat.preview-tunnel/v1","kind":"tunnel","id":"tun_1","unknown":"value"}}`,
 		`{"data":{"schema":"paperboat.preview-tunnel/v1","kind":"tunnel","id":"tun_1"} {}}`,
 	} {
 		t.Run(body[:20], func(t *testing.T) {

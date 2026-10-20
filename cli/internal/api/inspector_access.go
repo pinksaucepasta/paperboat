@@ -45,7 +45,7 @@ type InspectorAccess struct {
 
 func (c *Client) ResolveInspectorAccess(ctx context.Context, token, kind, resource, route, action, transport string) (InspectorAccess, error) {
 	var out InspectorAccess
-	err := c.doStrict(ctx, http.MethodPost, "/v1/inspector/access", map[string]string{"credential_token": token, "resource_kind": kind, "resource_id": resource, "route_id": route, "action": action, "transport": transport}, &out)
+	err := c.doChecked(ctx, http.MethodPost, "/v1/inspector/access", map[string]string{"credential_token": token, "resource_kind": kind, "resource_id": resource, "route_id": route, "action": action, "transport": transport}, &out)
 	if err != nil {
 		return InspectorAccess{}, err
 	}
@@ -70,7 +70,7 @@ type InspectorTarget struct {
 
 func (c *Client) ResolveInspectorTargets(ctx context.Context, selector, action string) ([]InspectorTarget, error) {
 	var out []InspectorTarget
-	if err := c.doStrict(ctx, http.MethodPost, "/v1/inspector/targets", map[string]string{"selector": selector, "action": action}, &out); err != nil {
+	if err := c.doChecked(ctx, http.MethodPost, "/v1/inspector/targets", map[string]string{"selector": selector, "action": action}, &out); err != nil {
 		return nil, err
 	}
 	if len(out) == 0 || len(out) > 128 {

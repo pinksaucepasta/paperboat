@@ -148,7 +148,7 @@ func (s *RenewingTokenSource) Token(ctx context.Context) (token string, resultEr
 	var envelope struct {
 		Data RuntimeIdentity `json:"data"`
 	}
-	if err := strictJSON(encoded, &envelope); err != nil {
+	if err := decodeResponseJSON(encoded, &envelope); err != nil {
 		return "", unavailableEnrollment(err)
 	}
 	renewed := envelope.Data

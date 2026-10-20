@@ -219,7 +219,6 @@ func (o *HTTPDispatchReadinessObserver) readinessRequest(ctx context.Context, me
 		Data api.PreviewLease `json:"data"`
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&envelope); err != nil {
 		return Lease{}, readinessFailed(method, "json_decode", response.StatusCode, ErrDispatchInvalid, err)
 	}

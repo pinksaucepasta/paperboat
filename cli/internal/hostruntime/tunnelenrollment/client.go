@@ -186,7 +186,6 @@ func (c *serverClient) do(ctx context.Context, method, path, key string, body []
 		Data json.RawMessage `json:"data"`
 	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.DisallowUnknownFields()
 	if err := dec.Decode(&envelope); err != nil {
 		return resp.StatusCode, safeEnrollmentFailure("tunnel enrollment control response is invalid", ErrUnavailable, err)
 	}
@@ -200,7 +199,6 @@ func (c *serverClient) do(ctx context.Context, method, path, key string, body []
 		return resp.StatusCode, ErrUnavailable
 	}
 	dec = json.NewDecoder(bytes.NewReader(envelope.Data))
-	dec.DisallowUnknownFields()
 	if err := dec.Decode(out); err != nil {
 		return resp.StatusCode, safeEnrollmentFailure("tunnel enrollment control response is invalid", ErrUnavailable, err)
 	}

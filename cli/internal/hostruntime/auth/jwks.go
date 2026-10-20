@@ -283,7 +283,6 @@ func decodeJWKS(encoded []byte, maxKeys int) (map[string]ed25519.PublicKey, erro
 		return nil, ErrJWKSInvalid
 	}
 	decoder := json.NewDecoder(bytes.NewReader(encoded))
-	decoder.DisallowUnknownFields()
 	var document jwksDocument
 	if err := decoder.Decode(&document); err != nil {
 		return nil, ErrJWKSInvalid
