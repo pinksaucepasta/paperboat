@@ -30,7 +30,15 @@ def main():
         copy = Path(directory) / 'pb'
         shutil.copy2(PB, copy)
         os.chmod(copy, 0o700)
-        phase('set', state)
+        try:
+            phase('set', state)
+        except Exception:
+            # The set phase may have changed settings before failing: put the originals back.
+            try:
+                phase('verify', state)
+            except Exception:
+                pass
+            raise
         try:
             subprocess.run([str(PB), 'update', '--from', str(copy)], check=True, timeout=300, capture_output=True)
         finally:

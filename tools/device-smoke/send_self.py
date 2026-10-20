@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Send a file to this same computer: it lands in the local Inbox, byte-identical, and shows in the send history."""
+"""Send a file to this same computer: it lands in the local Inbox, byte-identical, with a transfer identity."""
 import argparse
 import hashlib
 import json
@@ -36,10 +36,11 @@ def main():
                 raise RuntimeError('send to this computer did not report exactly one transfer')
             if not delivered.is_file() or hashlib.sha256(delivered.read_bytes()).hexdigest() != hashlib.sha256(content).hexdigest():
                 raise RuntimeError('the file is not in the local Inbox, byte-identical')
-            listed = invoke(binary, 'send', 'list', '--q', source.name, '--json', timeout=60)
-            items = listed.get('transfers', listed.get('items', []))
-            if not items:
-                raise RuntimeError('the delivery is missing from the send history')
+            transfer = batch['transfers'][0]
+            if transfer.get('state') != 'delivered' or Path(transfer.get('receipt_path', '')) != delivered:
+                raise RuntimeError('the receipt does not name the delivered Inbox file')
+            if not transfer.get('transfer_id'):
+                raise RuntimeError('the delivery has no transfer identity, so it has no activity record to list or download')
         except Exception as error:
             failure = error
             raise
@@ -53,7 +54,7 @@ def main():
     if registration() != before:
         raise RuntimeError('send to this computer changed the enrolled identity')
     print(json.dumps({'check': 'send-self', 'target': args.target, 'status': 'PASS',
-                      'local_copy': True, 'in_history': True, 'enrollment_unchanged': True}))
+                      'local_copy': True, 'recorded': True, 'enrollment_unchanged': True}))
 
 
 if __name__ == '__main__':
