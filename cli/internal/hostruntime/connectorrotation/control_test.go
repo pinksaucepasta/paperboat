@@ -16,6 +16,47 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
 )
 
+// asyncWriteConn queues writes so the test side never blocks in Write while the single-loop Serve is
+// itself blocked writing (net.Pipe is unbuffered, so two simultaneous writers deadlock each other; a
+// real socket has buffers). Order is preserved and the pipe's timing is otherwise unchanged.
+type asyncWriteConn struct {
+	net.Conn
+	queue chan []byte
+	done  chan struct{}
+	once  sync.Once
+}
+
+func newAsyncWriteConn(conn net.Conn) *asyncWriteConn {
+	c := &asyncWriteConn{Conn: conn, queue: make(chan []byte, 1024), done: make(chan struct{})}
+	go func() {
+		for {
+			select {
+			case p := <-c.queue:
+				if _, err := c.Conn.Write(p); err != nil {
+					return
+				}
+			case <-c.done:
+				return
+			}
+		}
+	}()
+	return c
+}
+
+func (c *asyncWriteConn) Write(p []byte) (int, error) {
+	select {
+	case c.queue <- append([]byte(nil), p...):
+		return len(p), nil
+	case <-c.done:
+		return 0, net.ErrClosed
+	}
+}
+
+func (c *asyncWriteConn) Close() error {
+	c.once.Do(func() { close(c.done) })
+	return c.Conn.Close()
+}
+
 type controlReadiness struct {
 	mu    sync.Mutex
 	value ReplacementReadiness
@@ -580,7 +621,8 @@ func TestControlSessionServeKeepsOneLoopForReadinessRotationHeartbeatAndRenewal(
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	controlSide, serverSide := net.Pipe()
+	controlSide, pipeSide := net.Pipe()
+	serverSide := newAsyncWriteConn(pipeSide)
 	serveDone := make(chan error, 1)
 	go func() { serveDone <- control.Serve(ctx, controlSide, "req-live-hello") }()
 
@@ -690,9 +732,13 @@ func TestControlSessionServeKeepsOneLoopForReadinessRotationHeartbeatAndRenewal(
 	// generation. Heartbeats must continue while the readiness probe is blocked
 	// so the server lease cannot expire and force a reconnect.
 	heartbeatsBeforeReadiness := heartbeatCount
-	renewalFrame := readUntil(connectorprotocol.MessageAuthRenew)
-	if !handleProactive(renewalFrame) || !sawRenewal {
-		t.Fatalf("renewal was not sent while readiness was pending: %+v", renewalFrame)
+	// The renewal can already have arrived (and been answered) while the snapshot ack was awaited; the
+	// next one is minutes away, so waiting for another would only hit the later renewal's new binding.
+	if !sawRenewal {
+		renewalFrame := readUntil(connectorprotocol.MessageAuthRenew)
+		if !handleProactive(renewalFrame) || !sawRenewal {
+			t.Fatalf("renewal was not sent while readiness was pending: %+v", renewalFrame)
+		}
 	}
 	for heartbeatCount < heartbeatsBeforeReadiness+3 {
 		frame := readServeFrame(t, serverSide)
