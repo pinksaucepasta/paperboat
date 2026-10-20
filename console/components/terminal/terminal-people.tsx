@@ -23,12 +23,25 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 
 export const roleLabels = { owner: "Owner", interactive: "Can type", viewer: "Watching" } as const
 
+/**
+ * What the server adds to a participant once it resolves identities: the account's name and whether
+ * they came in with an account ("member") or with a join code ("guest"). Absent from older servers.
+ */
+type Identity = { display_name?: string; kind?: "member" | "guest" }
+
 /** One row per person: two tabs of the same account are one participant with two windows. */
-type Person = { accountId: string; role: Participant["role"]; windows: number; since: string }
+type Person = {
+  accountId: string
+  role: Participant["role"]
+  windows: number
+  since: string
+  displayName?: string
+  guest: boolean
+}
 
 export function peopleIn(session: TerminalSession): Person[] {
   const byAccount = new Map<string, Person>()
-  for (const participant of session.participants) {
+  for (const participant of session.participants as (Participant & Identity)[]) {
     const existing = byAccount.get(participant.account_id)
     if (existing) {
       existing.windows++
@@ -39,6 +52,8 @@ export function peopleIn(session: TerminalSession): Person[] {
         role: participant.role,
         windows: 1,
         since: participant.connected_at,
+        displayName: participant.display_name?.trim() || undefined,
+        guest: participant.kind === "guest",
       })
     }
   }
@@ -49,18 +64,30 @@ export function peopleIn(session: TerminalSession): Person[] {
 }
 
 /**
- * The server identifies participants by account id only (NOTES.md: Terminals), so people other
- * than you and the owner show a short, stable tag until it sends names.
+ * The name shown for someone: the server's `display_name` when it sends one, else "You" or "Owner"
+ * for the two people the console can tell apart, "Guest" for a code join without a name, and a short
+ * stable tag as the last resort.
  */
-export function personName(accountId: string, session: TerminalSession, meId: string | undefined) {
-  if (accountId === meId) return "You"
-  if (accountId === session.owner_account) return "Owner"
-  return `Participant ${accountId.slice(-4)}`
+export function personName(
+  person: Pick<Person, "accountId" | "displayName" | "guest">,
+  session: TerminalSession,
+  meId: string | undefined,
+) {
+  if (person.accountId === meId) return "You"
+  if (person.displayName) return person.displayName
+  if (person.accountId === session.owner_account) return "Owner"
+  if (person.guest) return "Guest"
+  return `Participant ${person.accountId.slice(-4)}`
 }
 
 /** A letter tile, the same as the workspace switcher's, so people look like the rest of the console. */
 export function PersonAvatar({ name, className }: { accountId?: string; name: string; className?: string }) {
-  const letter = name === "You" || name === "Owner" ? name[0] : name.at(-1)?.toUpperCase()
+  const letter =
+    name === "You" || name === "Owner" || name === "Guest"
+      ? name[0]
+      : /^Participant /.test(name)
+        ? name.at(-1)?.toUpperCase()
+        : name[0]?.toUpperCase()
   return (
     <span
       aria-hidden
@@ -106,7 +133,7 @@ export function TerminalPeople({
         ) : (
           <ul className="divide-y divide-divider border-b border-divider">
             {people.map((person) => {
-              const name = personName(person.accountId, session, meId)
+              const name = personName(person, session, meId)
               const removable = isOwner && person.accountId !== session.owner_account
               return (
                 <li
@@ -121,6 +148,7 @@ export function TerminalPeople({
                     </span>
                     <span className="truncate text-xs text-muted-foreground">
                       {roleLabels[person.role]}
+                      {person.guest && " · Guest"}
                       {person.windows > 1 && ` · ${person.windows} windows`}
                     </span>
                   </span>
@@ -159,7 +187,7 @@ export function TerminalPeople({
         <RemoveParticipant
           session={session}
           person={removing}
-          name={personName(removing.accountId, session, meId)}
+          name={personName(removing, session, meId)}
           onClose={() => setRemoving(null)}
         />
       )}
