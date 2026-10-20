@@ -142,6 +142,9 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 			if err := installMachineGuard(ctx, request); err != nil {
 				return err
 			}
+			if err := ensureUserLinger(ctx, request, paths); err != nil {
+				return err
+			}
 		}
 		if err := ensureHostdToken(paths, request); err != nil {
 			return err

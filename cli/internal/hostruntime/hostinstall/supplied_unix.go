@@ -158,6 +158,9 @@ func SuppliedBinary(ctx context.Context, input Request, operation string) (resul
 		if err = installMachineGuard(ctx, request); err != nil {
 			return err
 		}
+		if err = ensureUserLinger(ctx, request, paths); err != nil {
+			return err
+		}
 		if err = ensureSharedUserParents(paths); err != nil {
 			return err
 		}

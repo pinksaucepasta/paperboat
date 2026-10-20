@@ -141,6 +141,9 @@ func uninstallValidated(ctx context.Context, request Request, paths installPaths
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		if err := restoreUserLinger(ctx, request, paths); err != nil {
+			return withUninstallStage("uninstall_linger", err)
+		}
 		return withUninstallStage("uninstall_files", removeInstalledFiles(ctx, paths))
 	}
 	hostd, updater, err := pendingInstallers(request, paths)
@@ -205,6 +208,9 @@ func finalizeUninstall(ctx context.Context, request Request, paths installPaths,
 	}
 	if err := restorePower(ctx); err != nil {
 		return withUninstallStage("uninstall_power", err)
+	}
+	if err := restoreUserLinger(ctx, request, paths); err != nil {
+		return withUninstallStage("uninstall_linger", err)
 	}
 	journal, journalErr := loadJournal(paths.journal)
 	if journalErr == nil {

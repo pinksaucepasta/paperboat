@@ -173,6 +173,7 @@ func doctorProbes(command *cobra.Command, snapshot localapi.Snapshot, machine *l
 			return probeDoctorUDP(ctx, "udp6", "[::]:0", "udp_ipv6", "IPv6")
 		}},
 	}
+	probes = append(probes, doctorLingerProbes()...)
 	if machine != nil {
 		probes = append(probes, doctorMachineProbes(*machine)...)
 		probes = append(probes, doctorPathReachabilityProbes(command, machine.ID)...)
