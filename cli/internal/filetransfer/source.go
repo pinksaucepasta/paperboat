@@ -20,6 +20,32 @@ type PreparedBatch struct {
 	files   []*os.File
 }
 
+// Scopes of a transfer limit.
+const (
+	LimitFileBytes  = "file_bytes"
+	LimitBatchFiles = "batch_files"
+	LimitBatchBytes = "batch_bytes"
+)
+
+// LimitError is a batch that exceeds the transfer policy. Nothing was sent; callers branch on it
+// to tell the user which limit was hit and by how much.
+type LimitError struct {
+	Scope string
+	Name  string // the file, for LimitFileBytes
+	Value int64
+	Limit int64
+}
+
+func (e *LimitError) Error() string {
+	switch e.Scope {
+	case LimitBatchFiles:
+		return fmt.Sprintf("file batch contains %d files; limit is %d", e.Value, e.Limit)
+	case LimitBatchBytes:
+		return fmt.Sprintf("file batch is %d bytes; limit is %d", e.Value, e.Limit)
+	}
+	return fmt.Sprintf("file %s is %d bytes; limit is %d", e.Name, e.Value, e.Limit)
+}
+
 // ValidateSources applies a server-returned policy to an already opened and
 // hashed batch without reopening caller paths after an approval wait.
 func ValidateSources(sources []Source, limits Limits) error {
@@ -33,16 +59,16 @@ func ValidateSources(sources []Source, limits Limits) error {
 		limits.MaxBatchBytes = 500 << 20
 	}
 	if len(sources) < 1 || len(sources) > limits.MaxBatchFiles {
-		return fmt.Errorf("file batch contains %d files; limit is %d", len(sources), limits.MaxBatchFiles)
+		return &LimitError{Scope: LimitBatchFiles, Value: int64(len(sources)), Limit: int64(limits.MaxBatchFiles)}
 	}
 	var total int64
 	for _, source := range sources {
 		if source.Reader == nil || source.Size < 0 || source.Size > limits.MaxFileBytes {
-			return fmt.Errorf("file %s is %d bytes; limit is %d", source.Basename, source.Size, limits.MaxFileBytes)
+			return &LimitError{Scope: LimitFileBytes, Name: source.Basename, Value: source.Size, Limit: limits.MaxFileBytes}
 		}
 		total += source.Size
 		if total > limits.MaxBatchBytes {
-			return fmt.Errorf("file batch is %d bytes; limit is %d", total, limits.MaxBatchBytes)
+			return &LimitError{Scope: LimitBatchBytes, Value: total, Limit: limits.MaxBatchBytes}
 		}
 	}
 	return nil
@@ -68,7 +94,7 @@ func Prepare(paths []string, limits Limits) (*PreparedBatch, error) {
 		limits.MaxBatchBytes = 500 << 20
 	}
 	if len(paths) < 1 || len(paths) > limits.MaxBatchFiles {
-		return nil, fmt.Errorf("file batch contains %d paths; limit is %d", len(paths), limits.MaxBatchFiles)
+		return nil, &LimitError{Scope: LimitBatchFiles, Value: int64(len(paths)), Limit: int64(limits.MaxBatchFiles)}
 	}
 	batch := &PreparedBatch{Sources: make([]Source, 0, len(paths))}
 	failed := true
@@ -102,11 +128,11 @@ func Prepare(paths []string, limits Limits) (*PreparedBatch, error) {
 			return nil, fmt.Errorf("file changed while opening: %s", path)
 		}
 		if opened.Size() < 0 || opened.Size() > limits.MaxFileBytes {
-			return nil, fmt.Errorf("file %s is %d bytes; limit is %d", path, opened.Size(), limits.MaxFileBytes)
+			return nil, &LimitError{Scope: LimitFileBytes, Name: filepath.Base(path), Value: opened.Size(), Limit: limits.MaxFileBytes}
 		}
 		total += opened.Size()
 		if total > limits.MaxBatchBytes {
-			return nil, fmt.Errorf("file batch is %d bytes; limit is %d", total, limits.MaxBatchBytes)
+			return nil, &LimitError{Scope: LimitBatchBytes, Value: total, Limit: limits.MaxBatchBytes}
 		}
 		hash := sha256.New()
 		read, err := io.CopyBuffer(hash, io.LimitReader(file, limits.MaxFileBytes+1), make([]byte, 32<<10))
@@ -147,7 +173,7 @@ func PrepareDescriptors(paths []string, files []*os.File, limits Limits) ([]Sour
 		limits.MaxBatchBytes = 500 << 20
 	}
 	if len(paths) > limits.MaxBatchFiles {
-		return nil, fmt.Errorf("file batch contains %d paths; limit is %d", len(paths), limits.MaxBatchFiles)
+		return nil, &LimitError{Scope: LimitBatchFiles, Value: int64(len(paths)), Limit: int64(limits.MaxBatchFiles)}
 	}
 	sources := make([]Source, 0, len(paths))
 	var total int64
@@ -164,11 +190,11 @@ func PrepareDescriptors(paths []string, files []*os.File, limits Limits) ([]Sour
 			return nil, fmt.Errorf("file changed while opening: %s", path)
 		}
 		if opened.Size() < 0 || opened.Size() > limits.MaxFileBytes {
-			return nil, fmt.Errorf("file %s is %d bytes; limit is %d", path, opened.Size(), limits.MaxFileBytes)
+			return nil, &LimitError{Scope: LimitFileBytes, Name: filepath.Base(path), Value: opened.Size(), Limit: limits.MaxFileBytes}
 		}
 		total += opened.Size()
 		if total > limits.MaxBatchBytes {
-			return nil, fmt.Errorf("file batch is %d bytes; limit is %d", total, limits.MaxBatchBytes)
+			return nil, &LimitError{Scope: LimitBatchBytes, Value: total, Limit: limits.MaxBatchBytes}
 		}
 		if _, err := files[index].Seek(0, io.SeekStart); err != nil {
 			return nil, err

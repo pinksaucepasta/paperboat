@@ -15,6 +15,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/daemoncmd"
 	"github.com/pinksaucepasta/paperboat/internal/environmentmanager"
+	"github.com/pinksaucepasta/paperboat/internal/filetransfer"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntimecmd"
@@ -290,7 +291,7 @@ func classifyCommandFailure(err error) (failure commandFailure) {
 				set(commandRejected, current)
 			}
 			continue
-		case *TunnelCreateExistingError, *TunnelCreateChangedError, *TunnelOperationOutcomeError:
+		case *TunnelCreateExistingError, *TunnelCreateChangedError, *TunnelOperationOutcomeError, *filetransfer.LimitError:
 			set(commandRejected, current)
 			continue
 		case *TunnelOperationWaitTimeoutError:
@@ -446,7 +447,7 @@ func soleCommandOwner(err error) error {
 			return commandRejection{reason: commandRejectUpdateVerification}
 		}
 		switch err.(type) {
-		case *sessionauth.CredentialFailure, commandRejection, *envCommandFailure, *envHostRefreshFailure, *configComparisonFailure, updateCompletionFailure, setupFailureError, commandPreparationFailure, *api.APIError, *localapi.RemoteError, *TunnelCreateExistingError, *TunnelCreateChangedError, *TunnelOperationOutcomeError, *TunnelOperationWaitTimeoutError, uninstallCleanupError, preferenceLoadFailure, usageError, unsupportedJSONOutputError, managedssh.NativeExitError, managedssh.NativeLaunchError, exitCodeError, jsonFailureExitCodeError:
+		case *sessionauth.CredentialFailure, *filetransfer.LimitError, commandRejection, *envCommandFailure, *envHostRefreshFailure, *configComparisonFailure, updateCompletionFailure, setupFailureError, commandPreparationFailure, *api.APIError, *localapi.RemoteError, *TunnelCreateExistingError, *TunnelCreateChangedError, *TunnelOperationOutcomeError, *TunnelOperationWaitTimeoutError, uninstallCleanupError, preferenceLoadFailure, usageError, unsupportedJSONOutputError, managedssh.NativeExitError, managedssh.NativeLaunchError, exitCodeError, jsonFailureExitCodeError:
 			return err
 		}
 		wrapper, ok := err.(interface{ Unwrap() error })

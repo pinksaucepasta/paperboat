@@ -13,6 +13,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/environmentmanager"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/internal/filetransfer"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/preferences"
@@ -210,6 +211,10 @@ func classifyCLIJSONFailure(err error, failure commandFailure) cliJSONError {
 			result.Message = typed.Error()
 			result.Recovery = "Run `pb update` to install a supported official release."
 		}
+	case *filetransfer.LimitError:
+		// The batch was refused before anything was sent.
+		result.Code, result.Category, result.StateChanged = "file_transfer_limit_exceeded", "conflict", false
+		result.Recovery = "Send fewer or smaller files."
 	case *localapi.RemoteError:
 		if typed.Code == localapi.RelayQuotaCode {
 			// The connection was refused before anything was sent or started.

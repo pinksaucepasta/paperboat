@@ -9,6 +9,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	sessionauth "github.com/pinksaucepasta/paperboat/internal/auth"
 	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/internal/filetransfer"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntimecmd"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/localwait"
@@ -222,6 +223,8 @@ func typedCommandOwnerMessage(owner error, failure commandFailure) string {
 			return owner.Message
 		}
 		return "The local Paperboat service could not complete the request. Check its status with `pb status`, then retry; run `pb doctor` if this continues."
+	case *filetransfer.LimitError:
+		return transferLimitMessage(owner)
 	case *TunnelCreateExistingError:
 		return "A tunnel with this name already exists; nothing was changed. Inspect it with `pb tunnel status <tunnel>`."
 	case *TunnelCreateChangedError:
@@ -238,4 +241,26 @@ func typedCommandOwnerMessage(owner error, failure commandFailure) string {
 		return "The wait for the tunnel operation timed out. The operation remains active; inspect it with `pb tunnel status <tunnel>`."
 	}
 	return ""
+}
+
+// transferLimitMessage says which transfer limit a send exceeded and by how much. Nothing was sent.
+func transferLimitMessage(limit *filetransfer.LimitError) string {
+	switch limit.Scope {
+	case filetransfer.LimitBatchFiles:
+		return fmt.Sprintf("That is %d files and one send takes at most %d. Send them in smaller groups; nothing was sent.", limit.Value, limit.Limit)
+	case filetransfer.LimitBatchBytes:
+		return fmt.Sprintf("Those files total %s and one send takes at most %s. Send them in smaller groups; nothing was sent.", transferSize(limit.Value), transferSize(limit.Limit))
+	}
+	return fmt.Sprintf("%s is %s and a single file can be at most %s. Nothing was sent.", limit.Name, transferSize(limit.Value), transferSize(limit.Limit))
+}
+
+func transferSize(bytes int64) string {
+	const mib = 1 << 20
+	if bytes >= mib {
+		if bytes%mib == 0 {
+			return fmt.Sprintf("%d MiB", bytes/mib)
+		}
+		return fmt.Sprintf("%.1f MiB", float64(bytes)/mib)
+	}
+	return fmt.Sprintf("%d bytes", bytes)
 }
