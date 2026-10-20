@@ -331,10 +331,19 @@ func (d *Dispatcher) call(ctx context.Context, method, class, scope string, requ
 	switch response.StatusCode {
 	case http.StatusOK, http.StatusNoContent, http.StatusNotFound, http.StatusConflict:
 	default:
-		// The user sees "the machine did not answer"; the status tells an operator why.
-		slog.WarnContext(ctx, "inbox request refused by the machine", "class", class, "machine_id", request.MachineID, "status", response.StatusCode)
+		// The user sees "the machine did not answer"; the status tells an operator why. The start of
+		// the body names the refusing party (the daemon answers a JSON error code, the edge text).
+		head, _ := io.ReadAll(io.LimitReader(response.Body, 256))
+		response.Body = readCloser{Reader: io.MultiReader(bytes.NewReader(head), response.Body), Closer: response.Body}
+		slog.WarnContext(ctx, "inbox request refused by the machine", "class", class, "machine_id", request.MachineID, "status", response.StatusCode,
+			"refusal", strings.ToValidUTF8(strings.Join(strings.Fields(string(head)), " "), "?"), "server_header", response.Header.Get("Server"))
 	}
 	return response, nil
+}
+
+type readCloser struct {
+	io.Reader
+	io.Closer
 }
 
 // inboxEndpoint builds the machine's file URL from its ingress base: the base may be a bare host or
