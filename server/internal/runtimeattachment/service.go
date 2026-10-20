@@ -24,6 +24,7 @@ import (
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
 	"github.com/pinksaucepasta/paperboat-server/internal/edgeplacement"
 	"github.com/pinksaucepasta/paperboat-server/internal/edgeset"
+	"github.com/pinksaucepasta/paperboat-server/internal/machinelatency"
 	"github.com/pinksaucepasta/paperboat-server/internal/previewattachment"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
@@ -141,6 +142,10 @@ ORDER BY r.id LIMIT 1 FOR UPDATE OF m,r`, proof.MachineID, proof.UserID, proof.I
 			if _, err := edgeplacement.Save(ctx, tx, proof.UserID, proof.MachineID, request.InstallationGeneration, request.WorkerGeneration, *request.EdgePreference, candidates, time.Now().UTC()); err != nil {
 				return err
 			}
+		}
+		// Latency is display data: a bad sample never fails an attachment.
+		if err := machinelatency.SaveEdgesTx(ctx, tx, proof.MachineID, request.EdgeLatency, candidates, time.Now().UTC()); err != nil && !errors.Is(err, machinelatency.ErrInvalid) {
+			return err
 		}
 		type edgeRow struct {
 			node, epoch, domain, endpoint, browserHost, pin, chain string
