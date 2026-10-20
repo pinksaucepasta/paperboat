@@ -261,6 +261,24 @@ func doctorPeerCheck(result tunnel.NativeProbe) doctorpkg.Check {
 	return check
 }
 
+// doctorCredentialFailure says what is wrong when the saved sign-in cannot be used. A sign-in the
+// server rejected for good (the usual result of removing the computer from the account in the
+// console) is named as such; a missing sign-in points at pb login too.
+func doctorCredentialFailure(check doctorpkg.Check, err error) doctorpkg.Check {
+	var signedOut *sessionauth.SignedOutError
+	if errors.As(err, &signedOut) {
+		check.Summary = "This computer is signed out of Paperboat: its sign-in was revoked, for example because the computer was removed from the account."
+		check.Recovery = dashboardEnrollmentGuidance + " That signs in again and adds this computer back. Then run `pb doctor` again."
+		return check
+	}
+	if onlyEnvironmentFailureLeaves(err, func(leaf error) bool {
+		return leaf == config.ErrNoCredentials || leaf == config.ErrSecretNotFound || leaf == api.ErrUnauthenticated
+	}) {
+		check.Recovery = dashboardEnrollmentGuidance + " Then run `pb doctor` again."
+	}
+	return check
+}
+
 func probeDoctorAuthentication(ctx context.Context, command *cobra.Command) doctorpkg.Check {
 	check := doctorpkg.Check{Category: "control", Code: "authentication", Status: doctorpkg.StatusFail, Summary: "Paperboat authentication is unavailable.", Recovery: "Check local credential storage and the Paperboat service, then run `pb doctor` again."}
 	cfg, err := config.Load(configPathFlag(command))
@@ -291,12 +309,7 @@ func probeDoctorAuthentication(ctx context.Context, command *cobra.Command) doct
 	credential, err := auth.Credential()
 	if err != nil {
 		errorreport.Current().ObserveFailure(ctx, "pb", "doctor", "command", "command_failed", err)
-		if onlyEnvironmentFailureLeaves(err, func(leaf error) bool {
-			return leaf == config.ErrNoCredentials || leaf == config.ErrSecretNotFound || leaf == api.ErrUnauthenticated
-		}) {
-			check.Recovery = dashboardEnrollmentGuidance + " Then run `pb doctor` again."
-		}
-		return check
+		return doctorCredentialFailure(check, err)
 	}
 	if _, err := api.New(cfg.ServerURL, credential, nil).Me(ctx); err != nil {
 		if diagnosis, ok := doctorProxyDiagnosis(err); ok {

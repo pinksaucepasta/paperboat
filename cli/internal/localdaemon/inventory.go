@@ -180,7 +180,7 @@ func (i *Inventory) Refresh(ctx context.Context) (refreshErr error) {
 			if inventoryAuthenticationRequired(sourceErr) {
 				desired.DaemonState = "awaiting_enrollment"
 				desired.Machines = nil
-				desired.Health = []localapi.HealthItem{{Code: "authentication_required", Severity: "info", Title: "Paperboat is installed and waiting for sign-in", Recovery: "Enroll this machine from the Paperboat dashboard", ETag: "authentication_required"}}
+				desired.Health = []localapi.HealthItem{{Code: "authentication_required", Severity: "info", Title: "Paperboat is signed out on this computer (not added yet, or removed from the account)", Recovery: "Run `pb login` to sign in and add this computer", ETag: "authentication_required"}}
 			}
 		}
 		return desired, nil
