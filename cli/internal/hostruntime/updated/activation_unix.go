@@ -672,6 +672,11 @@ func activationErrorChain(err error) (string, string, string) {
 			seen[name] = true
 			names = append(names, name)
 		}
+		if named, ok := current.(interface{ GateOperationName() string }); ok && fileOperation.MatchString(named.GateOperationName()) {
+			if label := "GateOperation_" + named.GateOperationName(); !slices.Contains(matched, label) {
+				matched = append(matched, label)
+			}
+		}
 		for _, known := range knownActivationSentinels {
 			if reflect.TypeOf(current).Comparable() && current == known.err && !slices.Contains(matched, known.name) {
 				matched = append(matched, known.name)

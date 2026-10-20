@@ -278,7 +278,7 @@ func (m *Manager) Activate(ctx context.Context, release Release) (Result, error)
 	}
 	localRelease := release
 	localRelease.SHA256, localRelease.Length = journal.CandidateDigest, journal.CandidateLength
-	if m.config.ApplyPrepared != nil && regularMatches(m.config.Binary, journal.CandidateLength, journal.CandidateDigest) && stagedConsumed(journal.StagedPath) {
+	if m.candidateInstalled(journal) {
 		// The native owner already installed this exact payload and consumed the staged file.
 		// Finish the interrupted post-commit steps; verifying the staged payload cannot succeed.
 		source := m.candidateSource(localRelease)
@@ -299,6 +299,12 @@ func (m *Manager) Recover(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.recoverLocked(ctx)
+}
+
+// candidateInstalled reports that the native owner already moved the approved payload into the
+// worker slot: the worker has the candidate's bytes and the staged file no longer exists.
+func (m *Manager) candidateInstalled(journal updateflow.Journal) bool {
+	return m.config.ApplyPrepared != nil && regularMatches(m.config.Binary, journal.CandidateLength, journal.CandidateDigest) && stagedConsumed(journal.StagedPath)
 }
 
 // stagedConsumed reports that the staged payload no longer exists, which is how a completed

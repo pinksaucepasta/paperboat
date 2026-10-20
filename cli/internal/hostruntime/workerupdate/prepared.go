@@ -164,8 +164,11 @@ func (m *Manager) PreparedRelease(ctx context.Context) (signed Release, payload 
 	if journal.Stage != updateflow.StageAwaitingApproval || journal.CandidateID == "" || journal.ApprovedCandidateID != journal.CandidateID {
 		return Release{}, Release{}, ErrApprovalRequired
 	}
-	if err := m.verifyPrepared(ctx, journal); err != nil {
-		return Release{}, Release{}, err
+	// An installed candidate has no staged payload left to verify; Activate finishes it.
+	if !m.candidateInstalled(journal) {
+		if err := m.verifyPrepared(ctx, journal); err != nil {
+			return Release{}, Release{}, err
+		}
 	}
 	payload = releaseFromJournal(journal)
 	signed = payload

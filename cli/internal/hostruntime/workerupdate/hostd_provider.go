@@ -10,6 +10,15 @@ import (
 
 var ErrHostdActivationProvider = errors.New("hostd update activation provider failed")
 
+// GateOperationError names the hostd update-gate operation that failed. hostd's own rejection
+// arrives as plain text, so this is what tells the failure record which step it was.
+type GateOperationError struct{ Operation string }
+
+func (e GateOperationError) Error() string {
+	return "hostd update gate operation " + e.Operation + " failed"
+}
+func (e GateOperationError) GateOperationName() string { return e.Operation }
+
 type HostdUpdateGateClient interface {
 	UpdateGate(context.Context, hostdproto.UpdateGateRequest) (hostdproto.UpdateGateResponse, error)
 }
@@ -66,7 +75,7 @@ func (p HostdDeploymentProvider) call(ctx context.Context, request hostdproto.Up
 	}
 	response, err := p.Client.UpdateGate(ctx, request)
 	if err != nil {
-		return hostdproto.UpdateGateResponse{}, errors.Join(ErrHostdActivationProvider, err)
+		return hostdproto.UpdateGateResponse{}, errors.Join(ErrHostdActivationProvider, GateOperationError{Operation: request.Operation}, err)
 	}
 	if _, err := deploymentTargetFromHostd(response.Target); err != nil {
 		return hostdproto.UpdateGateResponse{}, err

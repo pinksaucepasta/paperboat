@@ -188,6 +188,10 @@ func TestCompletedNativeRollbackRetiresItsGateTransaction(t *testing.T) {
 // for the staged file again. pbvm1 looped forever here with the update installed but pending.
 func TestRetryAfterInterruptedFinishCompletesWithoutTheStagedPayload(t *testing.T) {
 	f := newFixture(t)
+	var completeErr error
+	if f.candidate, completeErr = completeJournalRelease(f.candidate); completeErr != nil {
+		t.Fatal(completeErr)
+	}
 	finalizeFails := true
 	f.manager.config.FinalizePrepared = func(context.Context, installsource.Source) error {
 		if finalizeFails {
@@ -224,6 +228,10 @@ func TestRetryAfterInterruptedFinishCompletesWithoutTheStagedPayload(t *testing.
 	// Restart: the helper starts from the previous release again; the journal still holds the receipt.
 	f.manager.setActive(previous)
 	finalizeFails = false
+	// The helper first asks the manager for the approved release, as resolveUnixPreparedRelease does.
+	if _, _, err := f.manager.PreparedRelease(context.Background()); err != nil {
+		t.Fatalf("approved release unavailable once its payload is installed: %v", err)
+	}
 	result, err := f.manager.Activate(context.Background(), f.candidate)
 	if err != nil || !result.Updated || nativeCalls != 1 {
 		t.Fatalf("retry did not finish the interrupted update: %+v %v native=%d", result, err, nativeCalls)

@@ -228,6 +228,15 @@ func TestActivationFailureNamesTheFileOperationNotThePath(t *testing.T) {
 	}
 }
 
+func TestActivationFailureNamesTheHostdGateOperation(t *testing.T) {
+	err := errors.Join(workerupdate.ErrActivationGate, errors.Join(workerupdate.ErrHostdActivationProvider, workerupdate.GateOperationError{Operation: "commit"}, errors.New("private remote text")))
+	var output strings.Builder
+	writeActivationFailure(&output, err, "2026.10.19.8", "2026.10.19.9")
+	if !strings.Contains(output.String(), "GateOperation_commit") || strings.Contains(output.String(), "private") {
+		t.Fatalf("record=%q", output.String())
+	}
+}
+
 type selfCause struct{ next *selfCause }
 
 func (e *selfCause) Error() string { return "cycle" }
