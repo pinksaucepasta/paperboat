@@ -108,3 +108,42 @@ Changes that remove schema or change wire contracts must preserve the prior serv
 version for the drain window. Back up the database before rollout as described above.
 This controller upgrades the control plane; edge carrier rolling replacement is a
 separate lifecycle and must also retain its admitted streams.
+
+## Building and deploying images
+
+Every image builds from the repository root as its context (the Go modules reference each other
+through `go.work`), taken from a clean checkout of the commit being deployed:
+
+```sh
+git archive HEAD -- . ':!console' ':!marketing' ':!tools' | tar x -C "$dir"
+cd "$dir" && docker build --build-arg PAPERBOAT_VERSION=<YYYY.MM.DD.N> -t <name>:<tag> -f <service>/deploy/Dockerfile .
+```
+
+The server also needs `--build-arg PAPERBOAT_COMMIT=<40-hex HEAD>`; it is the commit that
+`GET /v1/server-version` reports and the image build refuses anything else. Take a database backup
+(`./backup-database.sh`) and rehearse any new migration against a restored copy in the isolated
+test PostgreSQL before rolling out. Never run test suites against the production database.
+
+Edges are `pbh`-managed. Copy the image to the host (`docker save | ssh host docker load`) and run,
+one host at a time, `/usr/local/lib/paperboat-selfhost/pbh install -relay-image <relay> -tunnel-image
+<tunnel>`: both images must be named, and the installation keeps its ownership and configuration.
+After each host, check that its node row heartbeats (`control_tunnel_nodes.last_heartbeat_at`) and
+the edge logs show no `route_invalid`/`tunnel_route_reconcile_failed` before touching the next.
+Rolling back is the same command with the previous image tags.
+
+## Edge failover
+
+Every workspace is served by an edge set of two edges in distinct failure domains (managed pool, or
+its own self-hosted servers; never mixed). What the system does without help:
+
+- an edge whose heartbeat stops is no longer offered for new placement and its DNS addresses drop
+  out within the record TTL (60 s);
+- after 10 minutes without it, the workspace's set replaces it: a managed workspace takes another
+  managed edge, a self-hosted one another selected installation, otherwise it keeps the remaining
+  edge (`worker_edge_sets`).
+
+Checking by hand: `control_tunnel_nodes` (state, `last_heartbeat_at`), `workspace_edge_sets`
+(the set per workspace), `edge_dns_publications` (what DNS holds; `failed` rows carry a
+`failure_code`). The server trusts forwarded client addresses only from `trusted_proxy_cidrs`; if the
+proxy's Docker network address changes (a new Compose network), update that CIDR and redeploy the
+server with a changed image label so the container is actually replaced.
