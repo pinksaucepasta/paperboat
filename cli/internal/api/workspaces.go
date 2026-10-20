@@ -17,6 +17,8 @@ type Workspace struct {
 	Name string `json:"name"`
 	Kind string `json:"kind"`
 	Role string `json:"role"`
+	// ApproveNewMachines is set for a team that holds members' new machines until an owner or admin accepts them.
+	ApproveNewMachines bool `json:"approve_new_machines,omitempty"`
 }
 
 // WorkspacePage is the authenticated workspace inventory returned by the

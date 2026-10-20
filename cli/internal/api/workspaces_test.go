@@ -200,3 +200,18 @@ func TestWorkspaceAccessErrorUsesOnlyCanonicalSelectorErrorCodes(t *testing.T) {
 		}
 	}
 }
+
+// The server marks a team that holds members' new machines for approval. A workspace list that
+// carries that field must still be accepted: rejecting it made every daemon's inventory refresh
+// fail, which reported local machine access as unavailable.
+func TestWorkspaceListAcceptsTheTeamMachineApprovalFlag(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"data":{"items":[{"id":"personal","name":"Personal","kind":"personal","role":"owner"},{"id":"team-a","name":"Team A","kind":"team","role":"owner","approve_new_machines":true}]}}`)
+	}))
+	defer server.Close()
+	client := New(server.URL, config.Credential{AccessToken: "session"}, server.Client())
+	page, err := client.ListWorkspaces(context.Background())
+	if err != nil || len(page.Items) != 2 || !page.Items[1].ApproveNewMachines {
+		t.Fatalf("workspaces = %#v, err=%v", page, err)
+	}
+}
