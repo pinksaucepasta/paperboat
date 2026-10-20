@@ -13,6 +13,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"github.com/google/uuid"
+	"log/slog"
 
 	"encoding/json"
 	"errors"
@@ -105,6 +106,7 @@ type Service struct {
 	ownerGrace           time.Duration
 	backgroundOwnerGrace time.Duration
 	dispatcher           Dispatcher
+	addressPublisher     AddressPublisher
 	attachmentReadiness  AttachmentReadiness
 	previewDomains       PreviewDomainReader
 	now                  func() time.Time
@@ -381,6 +383,9 @@ func (s *Service) Create(ctx context.Context, request previewtunnelapi.RequestCo
 			}
 			createResult := CreateResult{Preview: view, Operation: operationView(result.Operation, request.RequestID),
 				ETag: previewtunnelapi.ETag(Kind, result.Lease.ID, result.Lease.Generation), Replayed: result.Replayed}
+			if !result.Replayed {
+				s.publishAddress(ctx, result.Lease.ID)
+			}
 			if s.dispatcher != nil && createOperationNeedsDispatch(createResult.Operation, result.Replayed) {
 				if dispatchErr := s.dispatchCreatedLease(ctx, request, input.IdempotencyKey, createResult, input.Lazy, result.Lease.Endpoint); dispatchErr != nil {
 					return CreateResult{}, dispatchErr
@@ -393,6 +398,34 @@ func (s *Service) Create(ctx context.Context, request previewtunnelapi.RequestCo
 		}
 	}
 	return CreateResult{}, fmt.Errorf("%w: unable to allocate a unique preview endpoint", previewtunnelstore.ErrConflict)
+}
+
+// AddressPublisher writes a new preview's DNS record before its URL is returned, so no client can look
+// the name up and cache the shared wildcard answer.
+type AddressPublisher interface {
+	PublishPreview(ctx context.Context, previewID string) error
+}
+
+// ConfigureAddressPublisher installs the synchronous DNS writer; without one the periodic reconcile
+// publishes alone.
+func (s *Service) ConfigureAddressPublisher(publisher AddressPublisher) {
+	if s != nil {
+		s.addressPublisher = publisher
+	}
+}
+
+const addressPublishTimeout = 4 * time.Second
+
+// publishAddress is best effort: a failure leaves the record to the periodic reconcile.
+func (s *Service) publishAddress(ctx context.Context, leaseID string) {
+	if s.addressPublisher == nil {
+		return
+	}
+	publishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), addressPublishTimeout)
+	defer cancel()
+	if err := s.addressPublisher.PublishPreview(publishCtx, leaseID); err != nil {
+		slog.WarnContext(publishCtx, "preview DNS publication at creation deferred to the periodic reconcile", "component", "paperboat-server", "operation", "http_previews", "stage", "dns_publish", "error_type", fmt.Sprintf("%T", err))
+	}
 }
 
 // ConfigureDispatcher installs the post-commit host dispatcher. Keeping this

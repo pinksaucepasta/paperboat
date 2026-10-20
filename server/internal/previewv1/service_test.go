@@ -1182,3 +1182,38 @@ func TestHostReportsItsLocalAppDownAndBack(t *testing.T) {
 		}
 	}
 }
+
+type recordingAddressPublisher struct {
+	previews []string
+	err      error
+}
+
+func (p *recordingAddressPublisher) PublishPreview(_ context.Context, previewID string) error {
+	p.previews = append(p.previews, previewID)
+	return p.err
+}
+
+// The preview's URL must not exist without its DNS record: a resolver that looked the name up first
+// would cache the shared wildcard answer, which can be the edge that does not hold the route.
+func TestCreatePublishesTheDNSRecordBeforeReturningTheURL(t *testing.T) {
+	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
+	fake := newPreviewLeaseFake()
+	fake.owners["acct_1:machine_1"] = true
+	service := testPreviewLeaseService(t, fake, now)
+	publisher := &recordingAddressPublisher{}
+	service.ConfigureAddressPublisher(publisher)
+	input := createInput("machine_1")
+	first, err := service.Create(context.Background(), browserRequest(), input)
+	if err != nil || len(publisher.previews) != 1 || publisher.previews[0] != first.Preview.ID {
+		t.Fatalf("published %v for %+v (%v)", publisher.previews, first.Preview, err)
+	}
+	if _, err = service.Create(context.Background(), browserRequest(), input); err != nil || len(publisher.previews) != 1 {
+		t.Fatalf("an idempotent replay published again: %v (%v)", publisher.previews, err)
+	}
+	publisher.err = errors.New("provider unavailable")
+	other := createInput("machine_1")
+	other.IdempotencyKey = "another-create"
+	if _, err = service.Create(context.Background(), browserRequest(), other); err != nil {
+		t.Fatalf("a publication failure failed the create: %v", err)
+	}
+}

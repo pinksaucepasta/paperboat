@@ -211,6 +211,34 @@ WHERE p.id=$1 AND substring(p.endpoint from 9)=$3
  AND node.public_ingress_verified_at IS NOT NULL AND (node.public_ingress_ipv4 IS NOT NULL OR node.public_ingress_ipv6 IS NOT NULL)
  AND cert.state='active' AND cert.revoked_at IS NULL AND cert.not_before<=$2 AND cert.expires_at>$2
  AND left(cert.hostname,2)='*.' AND substring($3::text from position('.' in $3::text))=substring(cert.hostname from 2)
+UNION ALL
+SELECT node.id,1::bigint,statement_timestamp()::timestamptz,
+ COALESCE(host(node.public_ingress_ipv4),'')::text,
+ COALESCE(host(node.public_ingress_ipv6),'')::text,
+ (node.process_epoch||'/intent/'||p.id||'/'||cert.id)::text,
+ LEAST(p.lease_deadline,p.user_deadline,p.created_at+interval '2 minutes',node.registry_expires_at,node.last_heartbeat_at+interval '15 seconds',cert.expires_at)::timestamptz
+FROM preview_leases p
+JOIN user_machines m ON m.id=p.owner_machine_id AND m.user_id=p.account_id
+JOIN runtime_carrier_attachments carrier ON carrier.machine_id=m.id AND carrier.account_id=p.account_id
+ AND carrier.installation_generation=m.installation_generation AND carrier.active AND carrier.ready
+ AND paperboat.runtime_carrier_valid(carrier.route_id,carrier.edge_node_id,carrier.edge_process_epoch,true)
+JOIN control_tunnel_nodes node ON node.id=carrier.edge_node_id AND node.process_epoch=carrier.edge_process_epoch
+JOIN tunnel_certificate_edge_distributions distribution ON distribution.edge_node_id=node.id AND distribution.edge_process_epoch=node.process_epoch AND distribution.state IN ('ready','active')
+JOIN tunnel_certificate_records cert ON cert.id=distribution.certificate_id AND cert.target_kind='platform_wildcard'
+ AND cert.certificate_generation=distribution.observed_certificate_generation
+WHERE p.id=$1 AND substring(p.endpoint from 9)=$3
+ AND paperboat.workspace_edge_mode(p.account_id,p.owner_team_id)='managed-only'
+ AND p.terminal_state='active' AND p.lease_deadline>$2 AND (p.user_deadline IS NULL OR p.user_deadline>$2)
+ AND p.created_at>$2::timestamptz-interval '2 minutes'
+ AND NOT EXISTS (SELECT 1 FROM preview_lease_carrier_attachments live WHERE live.account_id=p.account_id AND live.preview_id=p.id AND live.state NOT IN ('failed','released'))
+ AND m.deleted_at IS NULL AND m.revoked_at IS NULL AND m.seat_state='occupied' AND m.state NOT IN ('pending','revoked','deleted')
+ AND (p.owner_team_id IS NULL OR (paperboat.team_paid_entitled(p.owner_team_id) AND paperboat.workspace_preview_management_allowed(p.account_id,p.owner_team_id,p.id)))
+ AND paperboat.node_preview_eligible(node.id,p.account_id,p.id)
+ AND node.state='ready' AND node.ready AND node.drain_deadline IS NULL AND node.roles @> ARRAY['edge']::text[]
+ AND node.registry_expires_at>$2 AND node.last_heartbeat_at>$2::timestamptz-interval '15 seconds'
+ AND node.public_ingress_verified_at IS NOT NULL AND (node.public_ingress_ipv4 IS NOT NULL OR node.public_ingress_ipv6 IS NOT NULL)
+ AND cert.state='active' AND cert.revoked_at IS NULL AND cert.not_before<=$2 AND cert.expires_at>$2
+ AND left(cert.hostname,2)='*.' AND substring($3::text from position('.' in $3::text))=substring(cert.hostname from 2)
 ORDER BY id LIMIT 3
 `
 
@@ -237,6 +265,9 @@ type ListReadyEdgeDNSAddressesV1Row struct {
 // must not rewrite DNS. Placement and process changes fence readiness instead.
 // A preview advertises exactly the edges that hold one of its live carrier attachments, from the
 // moment the attachment is allocated, so the record is written before the carrier connects.
+// Until the host attaches (seconds after creation) the record already points at the edge that will hold
+// the carrier, the machine's primary one: the URL is never known without its record. A resolver that looked
+// the name up earlier would cache the shared wildcard answer, which can be the other edge, for its TTL.
 func (q *Queries) ListReadyEdgeDNSAddressesV1(ctx context.Context, arg ListReadyEdgeDNSAddressesV1Params) ([]ListReadyEdgeDNSAddressesV1Row, error) {
 	rows, err := q.db.Query(ctx, listReadyEdgeDNSAddressesV1, arg.TunnelID, arg.Now, arg.Hostname)
 	if err != nil {

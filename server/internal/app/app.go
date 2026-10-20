@@ -584,6 +584,7 @@ func New(opts Options) (*App, error) {
 			return nil, fmt.Errorf("configure preview DNS publisher: %w", publisherErr)
 		}
 		previewAttachmentHandler.SetAddressPublisher(previewAddressPublisher)
+		previewLeaseService.ConfigureAddressPublisher(previewAddressPublisher)
 	}
 	lazyActivator := &lazyaccess.Activator{DB: store, Leases: previewLeaseService}
 	inspectorHandlers := &httpapi.InspectorHandlers{Access: inspectaccess.NewService(store), Machine: previewAttachmentMachineVerifier}

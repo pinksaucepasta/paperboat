@@ -1891,6 +1891,7 @@ type PreviewLeaseCarrierAttachment struct {
 	EdgeProcessEpoch                     string
 	EdgeCarrierServerSpkiSha256          sql.NullString
 	EdgeCarrierServerCertificateChainPem sql.NullString
+	EdgeSlot                             int16
 }
 
 type PreviewLeaseCreateOperation struct {
@@ -1898,6 +1899,7 @@ type PreviewLeaseCreateOperation struct {
 	PreviewID   string
 	OperationID string
 	CreatedAt   time.Time
+	Slot        int16
 }
 
 type ProviderEvent struct {
