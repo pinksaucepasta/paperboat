@@ -289,3 +289,11 @@ useful for temporary previews and persistent tunnels before changing the public 
 Preserve existing protocol support, access controls and privacy boundaries: private
 native access remains end-to-end encrypted; browser HTTP terminates TLS at the edge.
 This is a post-launch design item, not new implementation work or a launch requirement.
+
+## Tunnel-only mode without a Paperboat machine
+
+`pb tunnel run --token <token>` for a Docker container, Kubernetes pod or CI job, like
+`cloudflared tunnel run --token`: nothing joins the account and nothing installs into
+the system; it only forwards a tunnel to the app next to it. Needs a tunnel token with
+rotation and one more admission path. Decision (2026-10-20): not for launch; until then
+every tunnel runs on an enrolled Paperboat machine.
