@@ -61,6 +61,37 @@ func (c *Cache) Resolve(ctx context.Context, request Request) (Authority, error)
 	return resolved, nil
 }
 
+// ResolveLocal caches this endpoint's own verified identity. Remote peers, including a
+// teammate's shared machine, are authenticated by the native network bindings, so no machine
+// is named here and nothing account-private to its owner is read.
+func (c *Cache) ResolveLocal(ctx context.Context, request Request) (Authority, error) {
+	if c == nil {
+		return ResolveLocal(ctx, request)
+	}
+	key := cacheKey{account: request.AccountID, client: request.CLIClientSessionID}
+	now := request.Now.UTC()
+	c.mu.Lock()
+	if cached, ok := c.entries[key]; ok && !now.Before(cached.refreshedAt) &&
+		now.Sub(cached.refreshedAt) < trustRefreshInterval &&
+		cached.authority.LocalCertificate.Claims.ExpiresAt.After(now.Add(time.Second)) {
+		clone := cloneAuthority(cached.authority)
+		c.mu.Unlock()
+		return clone, nil
+	}
+	c.mu.Unlock()
+	resolved, err := ResolveLocal(ctx, request)
+	if err != nil {
+		return Authority{}, err
+	}
+	c.mu.Lock()
+	if previous, ok := c.entries[key]; ok {
+		previous.authority.Clear()
+	}
+	c.entries[key] = cacheEntry{authority: cloneAuthority(resolved), refreshedAt: now}
+	c.mu.Unlock()
+	return resolved, nil
+}
+
 func (c *Cache) InvalidateMachine(machineID string) {
 	if c == nil || machineID == "" {
 		return

@@ -94,7 +94,7 @@ func (t *PeerTerminalTunnel) ProbeNative(ctx context.Context, machineID string, 
 		return NativeProbe{}, err
 	}
 	client := api.New(t.config.Issuer, credential, t.config.HTTPClient)
-	authority, err := t.authorities.Resolve(ctx, clientauthority.Request{Store: t.config.Store, Client: client, Issuer: t.config.Issuer, AccountID: profile.Account.ID, CLIClientSessionID: profile.CLIClientSessionID, MachineID: machineID, MachineGeneration: generation, Now: t.config.Now().UTC()})
+	authority, err := t.authorities.ResolveLocal(ctx, clientauthority.Request{Store: t.config.Store, Client: client, Issuer: t.config.Issuer, AccountID: profile.Account.ID, CLIClientSessionID: profile.CLIClientSessionID, Now: t.config.Now().UTC()})
 	if err != nil {
 		return NativeProbe{}, err
 	}
@@ -481,7 +481,7 @@ func (t *PeerTerminalTunnel) NativeRelayCandidates(ctx context.Context) ([]tailn
 		return nil, err
 	}
 	client := api.New(t.config.Issuer, credential, t.config.HTTPClient)
-	identity, err := clientauthority.ResolveLocal(ctx, clientauthority.Request{Store: t.config.Store, Client: client, Issuer: t.config.Issuer, AccountID: profile.Account.ID, CLIClientSessionID: profile.CLIClientSessionID, Now: t.config.Now().UTC()})
+	identity, err := t.authorities.ResolveLocal(ctx, clientauthority.Request{Store: t.config.Store, Client: client, Issuer: t.config.Issuer, AccountID: profile.Account.ID, CLIClientSessionID: profile.CLIClientSessionID, Now: t.config.Now().UTC()})
 	if err != nil {
 		return nil, err
 	}

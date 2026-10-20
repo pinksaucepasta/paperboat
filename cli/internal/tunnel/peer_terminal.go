@@ -77,40 +77,24 @@ func (t *PeerTerminalTunnel) WarmMachines(ctx context.Context, machines []api.Us
 	warmCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	stopClose := context.AfterFunc(t.lifetime, cancel)
 	defer func() { stopClose(); cancel() }()
-	const maximumConcurrentAuthorityLookups = 8
-	semaphore := make(chan struct{}, maximumConcurrentAuthorityLookups)
-	var wait sync.WaitGroup
-	var result error
-	var resultMu sync.Mutex
+	reachable := false
 	for _, machine := range machines {
-		if !machine.Online || machine.InstallationGeneration <= 0 || machine.State == "revoked" || machine.State == "deleted" {
-			continue
+		if machine.Online && machine.InstallationGeneration > 0 && machine.State != "revoked" && machine.State != "deleted" {
+			reachable = true
+			break
 		}
-		machine := machine
-		wait.Add(1)
-		go func() {
-			defer wait.Done()
-			select {
-			case semaphore <- struct{}{}:
-				defer func() { <-semaphore }()
-			case <-warmCtx.Done():
-				return
-			}
-			authority, resolveErr := t.authorities.Resolve(warmCtx, clientauthority.Request{Store: t.config.Store, Client: client, Issuer: t.config.Issuer, AccountID: profile.Account.ID, CLIClientSessionID: profile.CLIClientSessionID, MachineID: machine.ID, MachineGeneration: uint64(machine.InstallationGeneration), Now: t.config.Now().UTC()})
-			if resolveErr == nil {
-				authority.Clear()
-				return
-			}
-			resultMu.Lock()
-			result = errors.Join(result, resolveErr)
-			resultMu.Unlock()
-		}()
 	}
-	wait.Wait()
-	if result == nil && warmCtx.Err() != nil {
-		return warmCtx.Err()
+	if !reachable {
+		return nil
 	}
-	return result
+	// Remote peers are authenticated by the native network bindings, so one verified local
+	// identity serves every machine; warming it is the only lookup to make.
+	authority, err := t.authorities.ResolveLocal(warmCtx, clientauthority.Request{Store: t.config.Store, Client: client, Issuer: t.config.Issuer, AccountID: profile.Account.ID, CLIClientSessionID: profile.CLIClientSessionID, Now: t.config.Now().UTC()})
+	if err != nil {
+		return err
+	}
+	authority.Clear()
+	return warmCtx.Err()
 }
 
 func (t *PeerTerminalTunnel) Close() error {
@@ -165,7 +149,7 @@ func (t *PeerTerminalTunnel) dial(ctx context.Context, info resolver.ConnectInfo
 		return nil, err
 	}
 	client := api.New(t.config.Issuer, credential, t.config.HTTPClient)
-	authority, err := t.authorities.Resolve(ctx, clientauthority.Request{Store: t.config.Store, Client: client, Issuer: t.config.Issuer, AccountID: profile.Account.ID, CLIClientSessionID: profile.CLIClientSessionID, MachineID: info.MachineID, MachineGeneration: info.MachineGeneration, Now: t.config.Now().UTC()})
+	authority, err := t.authorities.ResolveLocal(ctx, clientauthority.Request{Store: t.config.Store, Client: client, Issuer: t.config.Issuer, AccountID: profile.Account.ID, CLIClientSessionID: profile.CLIClientSessionID, Now: t.config.Now().UTC()})
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, contextOperationError(ctx)
