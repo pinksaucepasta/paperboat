@@ -89,6 +89,18 @@ sleep 60
 inside_user 'cat ~/.local/state/paperboat/diagnostics/events-*.ndjson 2>/dev/null | grep -c control_request_failed' > "$work/after" || true
 growth=$(( $(tr -d '\n' < "$work/after" | sed 's/^$/0/') - $(tr -d '\n' < "$work/before" | sed 's/^$/0/') ))
 echo "failed control requests in 60 s: $growth"
+if [ "$growth" -gt 12 ]; then
+ inside_user 'cat ~/.local/state/paperboat/diagnostics/events-*.ndjson | python3 -c "
+import sys,json,collections
+c=collections.Counter()
+for l in sys.stdin:
+    try: d=json.loads(l)
+    except Exception: continue
+    if d.get(\"code\")==\"control_request_failed\":
+        f=d.get(\"fields\",{}); c[(f.get(\"operation\"),f.get(\"cause\"),f.get(\"error_chain\"))]+=1
+for k,v in c.most_common(6): print(v,k)
+"'
+fi
 [ "$growth" -le 12 ] || fail "the revoked computer retries too often: $growth failed requests in 60 s"
 inside_user 'systemctl --user is-active --quiet paperboatd.service' || fail "daemon stopped instead of waiting signed out"
 echo "PASS revoked machine says so and does not spin ($machine, statement after $(( $(date +%s) - start )) s)"
