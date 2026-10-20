@@ -1,7 +1,7 @@
 "use client"
 
 import { queryOptions } from "@tanstack/react-query"
-import { api, apiAction, ApiError, idempotencyKey, type Data } from "@/lib/api"
+import { api, apiAction, ApiError, idempotencyKey, send, type Data } from "@/lib/api"
 import type { TerminalSession } from "@/lib/terminal/use-terminal-connection"
 
 export type AccessPolicy = Data<"/v1/terminal-sessions/{session_id}/browser-access-policy">
@@ -118,7 +118,7 @@ export function closeTerminal(machineId: string, sessionId: string) {
  * reason to send them to sign-in, since they have no account.
  */
 export async function guestApi<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`/api/v1/${path}`, {
+  const response = await send(`/api/v1/${path}`, {
     ...init,
     cache: "no-store",
     headers: { accept: "application/json", ...init?.headers },

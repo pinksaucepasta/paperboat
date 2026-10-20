@@ -19,14 +19,27 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * A request that never got an answer (offline, a dropped connection) fails in the browser with
+ * "Failed to fetch"; people are told what happened instead. Cancelled requests stay cancelled.
+ */
+export async function send(input: string, init?: RequestInit): Promise<Response> {
+  try {
+    return await fetch(input, init)
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") throw error
+    throw new ApiError(0, "network", "Couldn’t reach Paperboat. Check your connection and try again.")
+  }
+}
+
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`/api/v1/${path}`, {
+  const response = await send(`/api/v1/${path}`, {
     ...init,
     headers: { accept: "application/json", ...init?.headers },
   })
   if (response.status === 401) {
     // Unknown paths also answer 401 (NOTES.md), so only an ended session goes to sign-in.
-    const session = await fetch("/api/v1/me", { headers: { accept: "application/json" } })
+    const session = await send("/api/v1/me", { headers: { accept: "application/json" } })
     if (session.status !== 401) throw new ApiError(404, "not_found", "This isn't available yet.")
     const here = window.location.pathname + window.location.search
     // Sign-in is a route handler that redirects to WorkOS, so it needs a full navigation.
@@ -50,7 +63,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
 
 /** For actions the server answers without a body (200/202/204), such as closing a terminal. */
 export async function apiAction(path: string, init: RequestInit): Promise<void> {
-  const response = await fetch(`/api/v1/${path}`, {
+  const response = await send(`/api/v1/${path}`, {
     ...init,
     headers: { accept: "application/json", "idempotency-key": idempotencyKey(), ...init.headers },
   })
@@ -328,8 +341,11 @@ export const machineLatencyQuery = (machineId: string) =>
   queryOptions({
     queryKey: ["machine-latency", machineId],
     queryFn: async () =>
-      (await api<Data<"/v1/machines/{machine_id}/network-latency">>(`machines/${encodeURIComponent(machineId)}/network-latency`))
-        .items,
+      (
+        await api<Data<"/v1/machines/{machine_id}/network-latency">>(
+          `machines/${encodeURIComponent(machineId)}/network-latency`,
+        )
+      ).items,
     staleTime: 60_000,
     refetchInterval: 120_000,
   })
