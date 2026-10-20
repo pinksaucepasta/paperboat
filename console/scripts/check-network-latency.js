@@ -23,6 +23,11 @@
     items.some((i) => i.role === "relay") || /Not reported yet/.test(section?.innerText ?? ""),
     "",
   )
+  check(
+    "operator nodes are not labelled self-hosted",
+    !/Self-hosted/.test(section?.innerText ?? "") && items.every((item) => item.self_hosted === false),
+    JSON.stringify(items.map((item) => item.self_hosted)),
+  )
   console.table(steps)
   return steps.every((s) => s.ok)
 })()
