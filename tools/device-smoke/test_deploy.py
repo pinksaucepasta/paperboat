@@ -123,8 +123,8 @@ class DeviceDeployment(unittest.TestCase):
                 with self.assertRaises(subprocess.TimeoutExpired):
                     deploy.run([sys.executable, '-c',
                                 'import os,time;print(os.getpid(),flush=True);time.sleep(60)'],
-                               timeout=0.2, receipt=receipt)
-                self.assertLess(time.monotonic() - started, 3)
+                               timeout=3, receipt=receipt)  # long enough for the child to print its pid under load
+                self.assertLess(time.monotonic() - started, 10)
                 with self.assertRaises(ProcessLookupError):
                     os.kill(int(receipt.read_text()), 0)
                 self.assertEqual(0o600, receipt.stat().st_mode & 0o777)

@@ -3,7 +3,7 @@
 
 Example: deploy.py --device hp --ssh-target user@host --binary .build/dev-HASH/pb-linux-amd64
   --version dev-HASH --receipts /private/path
-For Apple, supply DEVICE_PASSWORD in the environment (sshpass must be installed).
+For apple and dadape, supply DEVICE_PASSWORD in the environment (sshpass must be installed).
 Upload budgets scale with compressed size at 128 KiB/s plus connection/setup slack.
 No enrollment, credentials, OS approval policies or existing identity are changed.
 """
@@ -22,6 +22,8 @@ import tempfile
 import uuid
 
 HERE = Path(__file__).resolve().parent
+# Devices without key login: the password comes from DEVICE_PASSWORD and never reaches argv.
+PASSWORD_DEVICES = ('apple', 'dadape')
 
 
 def run(argv, *, timeout, receipt, env=None, payload=None):
@@ -45,9 +47,9 @@ def deploy(args):
     prefix = []
     env = dict(os.environ)
     password = env.pop('DEVICE_PASSWORD', '')
-    if args.device == 'apple':
+    if args.device in PASSWORD_DEVICES:
         if not password:
-            raise RuntimeError('macOS installation requires DEVICE_PASSWORD')
+            raise RuntimeError(args.device + ' installation requires DEVICE_PASSWORD')
         env['SSHPASS'] = password
         prefix = ['sshpass', '-e']
     digest = hashlib.sha256(args.binary.read_bytes()).hexdigest()
@@ -99,7 +101,7 @@ def deploy(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--device', required=True, choices=['hp', 'apple', 'ubuntu24'])
+    parser.add_argument('--device', required=True, choices=['hp', 'apple', 'dadape', 'ubuntu24'])
     parser.add_argument('--ssh-target', required=True)
     parser.add_argument('--binary', required=True, type=Path)
     parser.add_argument('--version', required=True)
