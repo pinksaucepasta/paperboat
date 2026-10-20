@@ -127,7 +127,8 @@ def repeated(binary, target):
         output, errors = run(binary, 'exec', target, '--timeout', '30s', '--',
                              'printf', '%s', marker)
         if output != marker.encode() or errors:
-            raise RuntimeError('short exec lost or mixed its exact output')
+            raise RuntimeError('short exec lost or mixed its exact output: marker=%s got=%r stderr=%r'
+                               % (marker, output[:80], errors[:200]))
     for index in range(50):
         one(index)
     with ThreadPoolExecutor(max_workers=10) as pool:
