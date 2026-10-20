@@ -1,6 +1,5 @@
 "use client"
 
-import { BookOpenIcon } from "@phosphor-icons/react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { navigationGroups, type Section } from "@/lib/sections"
@@ -32,15 +31,6 @@ export function AppSidebar({ navigation }: { navigation: React.ReactNode }) {
         <div className="flex flex-col py-2">{navigation}</div>
       </SidebarContent>
       <SidebarFooter className="gap-0 p-0">
-        <SidebarMenu className="px-2 pb-2">
-          <SidebarMenuItem>
-            {/* Placeholder until the docs site exists. */}
-            <SidebarMenuButton render={<a href="#" onClick={(event) => event.preventDefault()} />}>
-              <BookOpenIcon />
-              <span>Docs</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
         <div className="border-t p-2">
           <UserMenu />
         </div>
