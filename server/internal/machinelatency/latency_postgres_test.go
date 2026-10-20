@@ -2,6 +2,7 @@ package machinelatency_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
@@ -57,6 +58,12 @@ func TestMachineLatencyPostgresLifecycle(t *testing.T) {
 		exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,allowed_account_ids)
 VALUES($1,'p','v1','epoch_1','india','fd-1',$2,ARRAY['http2'],10,0,now(),now()+interval '1 hour',$3)`, node.id, []string{node.role}, node.allowed)
 	}
+	// Paperboat's own nodes are installed with the self-host tool too (global scope); only a customer's
+	// account-scoped installation makes a node "self-hosted" in the listing.
+	for node, scope := range map[string]string{relayNode: "global", privateRelay: "account", edgeNode: "global"} {
+		installationKey := sha256.Sum256([]byte("lat-key-" + node))
+		exec(`INSERT INTO paperboat.selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete) VALUES($1,$2,$3,$3,'fixture','lat node','relay',$4,$5,$1,true)`, "lat-inst-"+node, node, installationKey[:], scope, map[string]string{"global": "global", "account": other}[scope])
+	}
 	now := time.Now().UTC()
 	service := &machinelatency.Service{DB: store.SQL(), Now: func() time.Time { return now }}
 
@@ -92,6 +99,9 @@ VALUES($1,'p','v1','epoch_1','india','fd-1',$2,ARRAY['http2'],10,0,now(),now()+i
 	if items, err := service.List(ctx, machine); err != nil || len(items) != 1 {
 		t.Fatalf("another machine's report leaked into this listing: %v %v", items, err)
 	}
+	if items, err := service.List(ctx, otherMachine); err != nil || len(items) != 1 || !items[0].SelfHosted {
+		t.Fatalf("a customer's account-scoped relay must be listed as self-hosted: %+v %v", items, err)
+	}
 
 	// Edge reports ride the runtime attachment: only candidates issued in that request count.
 	candidates := []runtimewire.EdgeCandidate{{NodeID: edgeNode, ProcessEpoch: "epoch_1", Region: "india"}}
@@ -109,6 +119,9 @@ VALUES($1,'p','v1','epoch_1','india','fd-1',$2,ARRAY['http2'],10,0,now(),now()+i
 	items, err := service.List(ctx, machine)
 	if err != nil || len(items) != 2 {
 		t.Fatalf("items=%v err=%v", items, err)
+	}
+	if items[0].SelfHosted || items[1].SelfHosted {
+		t.Fatalf("Paperboat's own (global) nodes were listed as self-hosted: %+v", items)
 	}
 	if items[0].Role != "edge" || items[0].RTTMillis != 20 || items[0].Region != "india" || items[1].Role != "relay" || items[1].RTTMillis != 42 {
 		t.Fatalf("listing wrong or unordered: %+v", items)

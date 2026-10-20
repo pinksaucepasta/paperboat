@@ -11,9 +11,10 @@
   const response = await fetch(`/api/v1/machines/${id}/network-latency?workspace=${encodeURIComponent(workspace)}`)
   check("latency endpoint answers", response.ok, `HTTP ${response.status}`)
   const items = response.ok ? (await response.json()).data.items : []
-  const section = [...document.querySelectorAll("section")].find((s) => s.querySelector("h2")?.innerText === "Network")
+  const heading = [...document.querySelectorAll("h2")].find((h) => h.innerText.trim() === "Network")
+  const section = heading?.closest("section")
   check("Network section is on the page", Boolean(section), "")
-  const shown = [...(section?.innerText.matchAll(/(\d+) ms/g) ?? [])].map((m) => Number(m[1])).sort((a, b) => a - b)
+  const shown = [...(section?.innerText.matchAll(/(\d+)\s*ms/g) ?? [])].map((m) => Number(m[1])).sort((a, b) => a - b)
   const reported = items.map((item) => item.rtt_ms).sort((a, b) => a - b)
   check("every reported time is shown", reported.every((ms) => shown.includes(ms)), `API ${reported}, page ${shown}`)
   check("no time is shown that was not reported", shown.length === reported.length, `API ${reported}, page ${shown}`)

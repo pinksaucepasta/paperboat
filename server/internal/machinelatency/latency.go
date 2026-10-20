@@ -27,7 +27,7 @@ type Item struct {
 	NodeID     string    `json:"node_id"`
 	Role       string    `json:"role"`
 	Region     string    `json:"region"`
-	SelfHosted bool      `json:"self_hosted"`
+	SelfHosted bool      `json:"self_hosted"` // run by a customer; Paperboat's own pbh nodes have global scope and are not
 	RTTMillis  int       `json:"rtt_ms"`
 	MeasuredAt time.Time `json:"measured_at"`
 }
@@ -97,7 +97,7 @@ ON CONFLICT(machine_id,node_id) DO UPDATE SET role='relay',rtt_ms=EXCLUDED.rtt_m
 // List returns a machine's fresh measurements, edges first, fastest first inside each role.
 func List(ctx context.Context, database *sql.DB, machineID string, now time.Time) ([]Item, error) {
 	rows, err := database.QueryContext(ctx, `SELECT l.node_id,l.role,coalesce(n.region,''),
-  EXISTS(SELECT 1 FROM selfhost_installations i WHERE i.node_id=l.node_id),l.rtt_ms,l.measured_at
+  EXISTS(SELECT 1 FROM selfhost_installations i WHERE i.node_id=l.node_id AND i.scope_kind<>'global'),l.rtt_ms,l.measured_at
 FROM machine_node_latency l JOIN control_tunnel_nodes n ON n.id=l.node_id
 WHERE l.machine_id=$1 AND l.measured_at>$2::timestamptz-make_interval(secs=>$3::float8)
 ORDER BY l.role,l.rtt_ms,l.node_id LIMIT $4`, machineID, now, Fresh.Seconds(), MaxItems)
