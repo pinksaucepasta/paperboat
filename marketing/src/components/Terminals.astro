@@ -10,11 +10,11 @@ import TerminalRoom from "./TerminalRoom.astro"
       come back. Open it from your terminal, a browser or your phone, and share it when you want help.
     </p>
   </Fragment>
-  <div data-reveal>
+  <div>
     <TerminalRoom />
   </div>
 
-  <div class="ssh" data-reveal>
+  <div class="ssh">
     <div>
       <h3 class="subtitle">Plain SSH works too.</h3>
       <p class="body">
@@ -34,7 +34,7 @@ import TerminalRoom from "./TerminalRoom.astro"
   .ssh {
     display: grid;
     gap: 24px 64px;
-    margin-top: clamp(56px, 7vw, 88px);
+    margin-top: clamp(40px, 5vw, 56px);
     padding-top: 32px;
     border-top: 1px solid var(--rule);
   }

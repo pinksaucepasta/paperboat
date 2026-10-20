@@ -10,7 +10,7 @@ const { id, title, tone = "plain" } = Astro.props
 
 <section class:list={["section", `section-${tone}`]} id={id} aria-labelledby={`${id}-title`}>
   <div class="wrap">
-    <header class="section-head" data-reveal>
+    <header class="section-head">
       <h2 class="title" id={`${id}-title`}>{title}</h2>
       <div class="lede section-text"><slot name="text" /></div>
     </header>
@@ -20,7 +20,7 @@ const { id, title, tone = "plain" } = Astro.props
 
 <style>
   .section {
-    padding-block: clamp(88px, 11vw, 152px);
+    padding-block: clamp(64px, 7vw, 96px);
   }
 
   .section-surface {
@@ -31,7 +31,7 @@ const { id, title, tone = "plain" } = Astro.props
     display: grid;
     gap: 18px;
     max-width: 640px;
-    margin-bottom: clamp(44px, 5.5vw, 72px);
+    margin-bottom: clamp(40px, 5vw, 56px);
   }
 
   .section-text {
