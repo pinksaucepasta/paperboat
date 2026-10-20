@@ -52,13 +52,20 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     error?: { code?: string; message?: string }
   } | null
   if (!response.ok || !body || body.data === undefined) {
+    const code = body?.error?.code ?? "unavailable"
     throw new ApiError(
       response.status,
-      body?.error?.code ?? "unavailable",
-      body?.error?.message ?? "Paperboat is temporarily unavailable.",
+      code,
+      sentences[code] ?? body?.error?.message ?? "Paperboat is temporarily unavailable.",
     )
   }
   return body.data
+}
+
+/** Errors the console words itself, because it knows what the person can do next. */
+const sentences: Record<string, string> = {
+  team_private_access_off:
+    "The team has not allowed private access to its shared machines. Ask a team owner or admin to turn it on.",
 }
 
 /** For actions the server answers without a body (200/202/204), such as closing a terminal. */
