@@ -108,7 +108,7 @@ func TestFailureMakesPollsNormalAndReconnectCatchesUp(t *testing.T) {
 	plane.Publish(machineevents.TopicPreviews)
 	<-waitDone
 	plane.FailNext(1)
-	plane.Publish(machineevents.TopicPreviews) // moved while the next request fails
+	// The request already held open finishes first; the failure hits the one after it.
 	deadline := time.Now().Add(5 * time.Second)
 	for hub.Healthy() || plane.PendingFailures() != 0 {
 		if time.Now().After(deadline) {
@@ -116,6 +116,7 @@ func TestFailureMakesPollsNormalAndReconnectCatchesUp(t *testing.T) {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
+	plane.Publish(machineevents.TopicPreviews) // moved while the loop is backing off
 	if elapsed := <-waitReturns(subs[0], 30*time.Millisecond); elapsed > time.Second {
 		t.Fatalf("unhealthy loop delayed the subscriber's poll by %v", elapsed)
 	}
