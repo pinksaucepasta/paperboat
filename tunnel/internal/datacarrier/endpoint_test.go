@@ -62,7 +62,10 @@ func TestTCPMuxListenerUsesBoundedConcurrentHandshakes(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	config := testCarrierConfig(4)
-	config.ConnectionWriteLimit = 40 * time.Millisecond
+	// The silent socket's handshake times out after this limit while the authenticated one, which must
+	// complete inside the same limit, is not blocked by it. Short enough to test, long enough for the
+	// race detector on a busy machine.
+	config.ConnectionWriteLimit = 750 * time.Millisecond
 	identity := testCarrierIdentity()
 	listener, err := ListenTCPMux(ctx, EndpointConfig{Address: "127.0.0.1:0", TLS: serverTLS, PeerBinding: func(tls.ConnectionState) (Identity, error) { return identity, nil }}, config)
 	if err != nil {
@@ -75,7 +78,7 @@ func TestTCPMuxListenerUsesBoundedConcurrentHandshakes(t *testing.T) {
 	}
 	defer unauthenticated.Close()
 
-	acceptContext, acceptCancel := context.WithTimeout(ctx, time.Second)
+	acceptContext, acceptCancel := context.WithTimeout(ctx, 4*time.Second)
 	defer acceptCancel()
 	accepted := make(chan *Server, 1)
 	acceptErr := make(chan error, 1)

@@ -92,22 +92,37 @@ func TestCarrierTelemetryOpenCloseCountsBytesAndIsExactlyOnce(t *testing.T) {
 	if got := carrierMetricValue(samples, edgetelemetry.MetricActiveStreams); got != 0 {
 		t.Fatalf("active streams = %d", got)
 	}
-	closed := 0
-	opened := 0
-	for _, event := range events.Snapshot() {
-		switch event.Name {
-		case carrierStreamClosed:
-			closed++
-		case carrierStreamOpened:
-			opened++
+	// Events are queued asynchronously: wait for the pair to appear, then require that nothing more
+	// arrives (exactly once).
+	count := func() (opened, closed int) {
+		for _, event := range events.Snapshot() {
+			switch event.Name {
+			case carrierStreamClosed:
+				closed++
+			case carrierStreamOpened:
+				opened++
+			}
+			encoded, _ := json.Marshal(event)
+			if bytes.Contains(encoded, []byte("carrier-ingress")) || bytes.Contains(encoded, []byte("secret")) {
+				t.Fatalf("event leaked application data: %s", encoded)
+			}
 		}
-		encoded, _ := json.Marshal(event)
-		if bytes.Contains(encoded, []byte("carrier-ingress")) || bytes.Contains(encoded, []byte("secret")) {
-			t.Fatalf("event leaked application data: %s", encoded)
-		}
+		return opened, closed
 	}
-	if opened != 1 || closed != 1 {
-		t.Fatalf("opened=%d closed=%d", opened, closed)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if opened, closed := count(); opened == 1 && closed == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			opened, closed := count()
+			t.Fatalf("opened=%d closed=%d", opened, closed)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if opened, closed := count(); opened != 1 || closed != 1 {
+		t.Fatalf("duplicate events: opened=%d closed=%d", opened, closed)
 	}
 }
 
