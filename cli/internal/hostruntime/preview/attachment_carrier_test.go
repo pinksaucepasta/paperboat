@@ -440,3 +440,31 @@ func TestAttachmentCarrierChecksPlacementWhenTheServerReportsAPreviewChange(t *t
 		t.Fatal("the preview change was not noticed before the placement poll")
 	}
 }
+
+// The server binds an attachment to the hash of its request, trace IDs included. A carrier created
+// after a host runtime restart must therefore send the same request as the one that allocated it, or
+// the server refuses the re-attach (409) and the preview ends.
+func TestAttachmentRequestIsTheSameForACarrierCreatedAfterARestart(t *testing.T) {
+	now := time.Date(2098, 1, 2, 3, 4, 5, 0, time.UTC)
+	identity := testPreviewCarrierIdentity(1)
+	lease, _ := providerTestLeaseAttachment(t, now, "preview_restart", "operation_restart_01", "route_restart_01", identity, 1)
+	var requests []AttachmentRequest
+	for range 2 {
+		carrier, err := NewAttachmentCarrier(AttachmentCarrierConfig{
+			Attachments: attachmentAllocatorFunc(func(context.Context, AttachmentRequest) (Attachment, error) { return Attachment{}, errors.New("not called") }),
+			Provider:    &carrierProviderFunc{newCarrier: func() Carrier { return &sessionCarrier{} }},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		request, err := carrier.requestForLease(lease)
+		if err != nil {
+			t.Fatal(err)
+		}
+		requests = append(requests, request)
+	}
+	first, second := requests[0], requests[1]
+	if first.RequestID != second.RequestID || first.CorrelationID != second.CorrelationID || first.IdempotencyKey != second.IdempotencyKey {
+		t.Fatalf("a restarted carrier sent a different request: %+v vs %+v", first, second)
+	}
+}

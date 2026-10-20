@@ -58,6 +58,10 @@ type AttachmentCarrier struct {
 	closeWait    time.Duration
 	pollInterval time.Duration
 	events       *machineevents.Subscription
+	// derivedTrace makes the request and correlation IDs a function of the lease's create
+	// operation. The server binds the attachment to the hash of its request, trace IDs included, so
+	// a carrier created after a host runtime restart must send the same IDs to re-attach.
+	derivedTrace bool
 
 	mu      sync.Mutex
 	closed  bool
@@ -82,6 +86,7 @@ func NewAttachmentCarrier(config AttachmentCarrierConfig) (*AttachmentCarrier, e
 	if config.PlacementPollInterval < 10*time.Millisecond || config.PlacementPollInterval > time.Minute {
 		return nil, ErrAttachmentCarrierInvalid
 	}
+	derived := config.RequestID == nil && config.CorrelationID == nil
 	if config.RequestID == nil {
 		config.RequestID = func() (string, error) { return newAttachmentTraceID("request") }
 	}
@@ -89,6 +94,7 @@ func NewAttachmentCarrier(config AttachmentCarrierConfig) (*AttachmentCarrier, e
 		config.CorrelationID = func() (string, error) { return newAttachmentTraceID("correlation") }
 	}
 	return &AttachmentCarrier{
+		derivedTrace: derived,
 		attachments:  config.Attachments,
 		provider:     config.Provider,
 		requestID:    config.RequestID,
@@ -324,13 +330,18 @@ func (c *AttachmentCarrier) requestForLease(lease Lease) (AttachmentRequest, err
 		}
 		return c.request, nil
 	}
-	requestID, err := c.requestID()
-	if err != nil {
-		return AttachmentRequest{}, errors.Join(ErrAttachmentCarrierUnavailable, err)
-	}
-	correlationID, err := c.correlation()
-	if err != nil {
-		return AttachmentRequest{}, errors.Join(ErrAttachmentCarrierUnavailable, err)
+	var requestID, correlationID string
+	if c.derivedTrace {
+		suffix := strings.TrimPrefix(lease.CreateOperationID, "operation_")
+		requestID, correlationID = "request_"+suffix, "correlation_"+suffix
+	} else {
+		var err error
+		if requestID, err = c.requestID(); err != nil {
+			return AttachmentRequest{}, errors.Join(ErrAttachmentCarrierUnavailable, err)
+		}
+		if correlationID, err = c.correlation(); err != nil {
+			return AttachmentRequest{}, errors.Join(ErrAttachmentCarrierUnavailable, err)
+		}
 	}
 	request, err := AttachmentRequestForLease(lease, strings.TrimSpace(requestID), strings.TrimSpace(correlationID))
 	if err != nil {
