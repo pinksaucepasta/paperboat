@@ -222,6 +222,35 @@ func TestConfigCustomRepositoryRulesAccessAndRevocation(t *testing.T) {
 	if failedMarkerState != "pending" {
 		t.Fatalf("failed uncertain marker changed state unexpectedly: %q", failedMarkerState)
 	}
+	// Unassigning forgets what the machine reported for the assignment it no longer has: the frozen conflict
+	// stays out of the account status instead of showing a conflict on a machine that is Off.
+	statusService := NewConfigStatusService(store, nil, nil, 10)
+	conflictsOf := func() int {
+		t.Helper()
+		account, statusErr := statusService.Account(ctx, user)
+		if statusErr != nil {
+			t.Fatal(statusErr)
+		}
+		for _, machine := range account.Environments {
+			if machine.MachineID == identity.MachineID {
+				return len(machine.Conflicts)
+			}
+		}
+		return -1
+	}
+	if conflictsOf() != 1 {
+		t.Fatalf("precondition: the reported conflict is visible while assigned: %d", conflictsOf())
+	}
+	current, err := assignments.Assignment(ctx, user, identity.MachineID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = assignments.Clear(ctx, user, identity.MachineID, current.Version); err != nil {
+		t.Fatalf("unassign: %v", err)
+	}
+	if got := conflictsOf(); got > 0 {
+		t.Fatalf("an unassigned machine still reports %d conflicts", got)
+	}
 	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET installation_generation=installation_generation+1 WHERE id=$1`, identity.MachineID); err != nil {
 		t.Fatal(err)
 	}
