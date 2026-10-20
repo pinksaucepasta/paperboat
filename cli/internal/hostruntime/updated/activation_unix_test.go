@@ -20,6 +20,7 @@ import (
 	nativeService "github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updateflow"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
+	"github.com/pinksaucepasta/paperboat/internal/liveconnections"
 )
 
 func TestUnixParticipantReadinessPreservesUsableBaseline(t *testing.T) {
@@ -59,6 +60,12 @@ type participantFixture struct {
 	probe    UnixParticipantProbe
 	restarts int
 	probeErr error
+	open     liveconnections.Counts
+	openErr  error
+}
+
+func (p *participantFixture) OpenConnections(context.Context) (liveconnections.Counts, error) {
+	return p.open, p.openErr
 }
 
 func (p *participantFixture) Probe(context.Context) (UnixParticipantProbe, error) {
@@ -492,6 +499,10 @@ func TestPreparedNativeActivationUpdatesAndRestoresRoutingDaemon(t *testing.T) {
 			}
 		})
 	}
+}
+
+func (p *preparedRoutingFixture) OpenConnections(context.Context) (liveconnections.Counts, error) {
+	return liveconnections.Counts{}, nil
 }
 
 type preparedRoutingFixture struct {

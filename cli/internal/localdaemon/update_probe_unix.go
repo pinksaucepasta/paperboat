@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -40,27 +41,8 @@ type UpdateProbe struct {
 // privileged updater's HOME, TMPDIR or XDG namespace.
 func ProbeCurrentUserForUpdate(ctx context.Context) (UpdateProbe, error) {
 	result := UpdateProbe{Schema: UpdateProbeSchema}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return result, err
-	}
-	environment, err := updateServiceEnvironment(runtime.GOOS, home, os.Geteuid())
-	if errors.Is(err, os.ErrNotExist) {
-		return result, nil
-	}
-	if err != nil {
-		return result, err
-	}
-	status, err := updateDaemonController().Inspect(ctx, "")
-	if err != nil || !status.Running {
-		return result, err
-	}
-	paths, err := localapi.ResolvePaths(func(key string) string { return environment[key] }, home, os.Geteuid())
-	if err != nil {
-		return result, err
-	}
-	client, err := localapi.NewClient(paths.SocketPath, time.Second)
-	if err != nil {
+	client, err := currentUserDaemonClient(ctx)
+	if err != nil || client == nil {
 		return result, err
 	}
 	snapshot, err := client.Snapshot(ctx)
@@ -71,6 +53,48 @@ func ProbeCurrentUserForUpdate(ctx context.Context) (UpdateProbe, error) {
 	result.Machines = uint32(len(snapshot.Machines))
 	result.ControlPlaneUnavailableOnly = len(snapshot.Health) == 1 && snapshot.Health[0].Code == "control_plane_unavailable"
 	return result, nil
+}
+
+// OpenConnectionsCurrentUser reports the SSH-family streams and access forwards the enrolled user's
+// running daemon carries, which an update would end. A daemon that is not running carries none. A
+// daemon too old to know the question is reported as carrying none: the answer must never block an
+// update that no connection can be shown to be blocking.
+func OpenConnectionsCurrentUser(ctx context.Context) (localapi.OpenConnections, error) {
+	client, err := currentUserDaemonClient(ctx)
+	if err != nil || client == nil {
+		return localapi.OpenConnections{Schema: localapi.OpenConnectionsSchemaV1}, err
+	}
+	connections, err := client.OpenConnections(ctx)
+	var remote *localapi.RemoteError
+	if errors.As(err, &remote) && remote.StatusCode == http.StatusNotFound {
+		return localapi.OpenConnections{Schema: localapi.OpenConnectionsSchemaV1}, nil
+	}
+	return connections, err
+}
+
+// currentUserDaemonClient returns a local API client for the enrolled user's daemon, or nil when it
+// is not installed or not running.
+func currentUserDaemonClient(ctx context.Context) (*localapi.Client, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+	environment, err := updateServiceEnvironment(runtime.GOOS, home, os.Geteuid())
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	status, err := updateDaemonController().Inspect(ctx, "")
+	if err != nil || !status.Running {
+		return nil, err
+	}
+	paths, err := localapi.ResolvePaths(func(key string) string { return environment[key] }, home, os.Geteuid())
+	if err != nil {
+		return nil, err
+	}
+	return localapi.NewClient(paths.SocketPath, time.Second)
 }
 
 func RestartCurrentUserForUpdate(ctx context.Context) error {

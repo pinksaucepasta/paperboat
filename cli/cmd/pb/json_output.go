@@ -211,6 +211,10 @@ func classifyCLIJSONFailure(err error, failure commandFailure) cliJSONError {
 			result.Message = typed.Error()
 			result.Recovery = "Run `pb update` to install a supported official release."
 		}
+	case updateOpenConnectionsRefusal:
+		// The updater refused before changing anything.
+		result.Code, result.Category, result.StateChanged, result.Retryable = "update_busy", "conflict", false, true
+		result.Recovery = "Close the SSH connections and port forwards or wait for them to finish, then retry; `pb update --force` ends them."
 	case *filetransfer.LimitError:
 		// The batch was refused before anything was sent.
 		result.Code, result.Category, result.StateChanged = "file_transfer_limit_exceeded", "conflict", false
@@ -429,6 +433,7 @@ func classifyUpdaterControlJSONError(result cliJSONError, failure *updated.Contr
 		result.Category = "conflict"
 		result.Message = "The update is blocked while terminal sessions are active."
 		result.Recovery = "Close the active sessions or wait for them to finish, then check `pb update status`."
+
 	case "activation_unavailable":
 		result.Category, result.Retryable = "unavailable_retryable", true
 		result.Message = "The local updater is unavailable or recovering."

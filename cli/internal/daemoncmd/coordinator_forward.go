@@ -11,6 +11,7 @@ import (
 	"syscall"
 
 	pbSync "github.com/pinksaucepasta/paperboat/internal/controlsync/proto"
+	"github.com/pinksaucepasta/paperboat/internal/liveconnections"
 )
 
 func (c *Coordinator) serveRoute(route *guardedRoute) {
@@ -117,6 +118,7 @@ func (c *Coordinator) forward(ctx context.Context, local net.Conn, machineID str
 		causes = append(causes, err)
 		return
 	}
+	defer liveconnections.TrackForward()()
 	stage = "delivery"
 	done := make(chan error, 2)
 	go func() {

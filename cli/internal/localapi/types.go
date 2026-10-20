@@ -100,6 +100,17 @@ type PeerProbeResult struct {
 
 const RelayInventorySchemaV1 = "paperboat.relay-inventory/v1"
 
+// OpenConnectionsSchemaV1 versions the answer to GET /v1/connections.
+const OpenConnectionsSchemaV1 = "paperboat.open-connections/v1"
+
+// OpenConnections is what the daemon carries for commands right now. An update replaces the daemon
+// and ends these, so it asks first.
+type OpenConnections struct {
+	Schema   string `json:"schema"`
+	SSH      int    `json:"ssh"`
+	Forwards int    `json:"forwards"`
+}
+
 type RelayCandidate struct {
 	NodeID     string   `json:"node_id"`
 	Region     string   `json:"region"`

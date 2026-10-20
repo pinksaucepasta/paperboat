@@ -544,7 +544,7 @@ install. The update code has duplicate paths (`cli/internal/hostruntime/{updated
 simplify while fixing. **Highest-risk feature.**
 
 - F14-01: `pb update --from <build>` on L, M, W succeeds and reports the new version.
-- F14-02: During an update, afterwards without user action: idle and foreground terminals reconnect to the same shell, an open `pb ssh` session stays connected, a running exec returns its result, a running transfer finishes or resumes, previews and tunnels come back on the same URL — on L, M, W (smoke `--update`).
+- F14-02: During an update, afterwards without user action: idle and foreground terminals reconnect to the same shell, an update never silently ends open `pb ssh`/forward connections (manual refuses unless --force, scheduled waits until none are open; user decision 2026-10-21), a running exec returns its result, a running transfer finishes or resumes, previews and tunnels come back on the same URL — on L, M, W (smoke `--update`).
 - F14-03: Any failure (bad file, wrong platform, killed mid-update, failed restart, disk full) leaves the previous version working with a clear error — on L, M, W.
 - F14-04: Old session-owner generations stop and are removed after their last session closes.
 - F14-05: Real signed release → `pb update` and `--force` on L, M, W; tampered metadata or file rejected.

@@ -18,6 +18,8 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
+	"github.com/pinksaucepasta/paperboat/internal/liveconnections"
+	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
 )
 
@@ -41,7 +43,7 @@ func newUnixUpdateParticipants(binary string, uid, gid int) (updated.UnixPartici
 
 func (p *unixUpdateParticipants) Probe(ctx context.Context) (updated.UnixParticipantProbe, error) {
 	var result updated.UnixParticipantProbe
-	body, err := p.run(ctx, false)
+	body, err := p.run(ctx)
 	if err != nil {
 		return result, err
 	}
@@ -56,11 +58,26 @@ func (p *unixUpdateParticipants) Probe(ctx context.Context) (updated.UnixPartici
 }
 
 func (p *unixUpdateParticipants) Restart(ctx context.Context) error {
-	_, err := p.run(ctx, true)
+	_, err := p.run(ctx, "--restart")
 	return err
 }
 
-func (p *unixUpdateParticipants) run(ctx context.Context, restart bool) ([]byte, error) {
+func (p *unixUpdateParticipants) OpenConnections(ctx context.Context) (liveconnections.Counts, error) {
+	body, err := p.run(ctx, "--connections")
+	if err != nil {
+		return liveconnections.Counts{}, err
+	}
+	var reported localapi.OpenConnections
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	var extra any
+	if decoder.Decode(&reported) != nil || decoder.Decode(&extra) != io.EOF || reported.Schema != localapi.OpenConnectionsSchemaV1 || reported.SSH < 0 || reported.Forwards < 0 {
+		return liveconnections.Counts{}, errors.New("invalid enrolled daemon open connections report")
+	}
+	return liveconnections.Counts{SSH: reported.SSH, Forwards: reported.Forwards}, nil
+}
+
+func (p *unixUpdateParticipants) run(ctx context.Context, flags ...string) ([]byte, error) {
 	if ctx == nil || p == nil || !filepath.IsAbs(p.binary) || p.uid < 0 || p.gid < 0 {
 		return nil, updated.ErrInvalidConfig
 	}
@@ -71,10 +88,7 @@ func (p *unixUpdateParticipants) run(ctx context.Context, restart bool) ([]byte,
 	if owner.GID != p.gid {
 		return nil, updated.ErrInvalidConfig
 	}
-	arguments := []string{"daemon", "__update-probe"}
-	if restart {
-		arguments = append(arguments, "--restart")
-	}
+	arguments := append([]string{"daemon", "__update-probe"}, flags...)
 	command := exec.CommandContext(ctx, p.binary, arguments...)
 	command.Env = []string{"HOME=" + owner.Home, "USER=" + owner.User, "LOGNAME=" + owner.User, "PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"}
 	if runtime.GOOS == "linux" {

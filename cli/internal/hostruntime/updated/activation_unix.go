@@ -31,6 +31,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updateflow"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
+	"github.com/pinksaucepasta/paperboat/internal/liveconnections"
 )
 
 var ErrActivationPending = errors.New("verified update activation is owned by the persistent recovery helper")
@@ -48,6 +49,9 @@ type UnixParticipantProbe struct {
 type UnixParticipants interface {
 	Probe(context.Context) (UnixParticipantProbe, error)
 	Restart(context.Context) error
+	// OpenConnections counts the SSH streams and access forwards the enrolled daemon carries. An
+	// update replaces the daemon and ends them.
+	OpenConnections(context.Context) (liveconnections.Counts, error)
 }
 
 // UnixActivationController operates fixed native jobs, never a release-selected
@@ -352,6 +356,9 @@ func (s *Service) queueActivationWithApproval(ctx context.Context, approvalID st
 		return result, errors.Join(ErrParticipantReadiness, err)
 	}
 	if err = unixParticipantReady(baseline, s.config.Active.Version, baseline, baseline.Machines > 0 || baseline.State == "ready"); err != nil {
+		return result, err
+	}
+	if err = s.refuseWhileConnectionsAreOpen(ctx, release.Version, force); err != nil {
 		return result, err
 	}
 	if err = manager.Approve(ctx, approvalID); err != nil {

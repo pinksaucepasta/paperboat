@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/autoupdate"
@@ -165,5 +166,20 @@ func updateControlFailure(operation string, err error) error {
 	if errors.As(err, &remote) && remote.Code == "custom_installation" {
 		return commandRejection{reason: commandRejectCustomUpdate}
 	}
+	if errors.As(err, &remote) && openConnectionsRefusal(remote) {
+		return updateOpenConnectionsRefusal{message: remote.Message}
+	}
 	return fmt.Errorf("%s: %w", operation, err)
+}
+
+// updateOpenConnectionsRefusal is an update refused because SSH connections or access forwards are
+// open. Nothing was changed; the message says how many are open and that --force ends them.
+type updateOpenConnectionsRefusal struct{ message string }
+
+func (e updateOpenConnectionsRefusal) Error() string { return e.message }
+
+// openConnectionsRefusal reports an update the updater refused because SSH connections or access
+// forwards are open; its message already says how many and what to do.
+func openConnectionsRefusal(failure *updated.ControlError) bool {
+	return failure != nil && failure.Code == "active_terminal_sessions" && strings.HasPrefix(failure.Message, "Paperboat is busy:")
 }

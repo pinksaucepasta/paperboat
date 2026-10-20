@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
 	"github.com/spf13/cobra"
 )
 
@@ -74,5 +75,25 @@ func TestUpdateFromSaysWhenItIsAlreadyOnThatVersion(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), `"changed":false`) {
 		t.Fatalf("json %q does not say nothing changed", out.String())
+	}
+}
+
+// F14-02: an update refused because SSH connections are open says how many and that --force ends
+// them, in text and in JSON, and it is a retryable refusal that changed nothing.
+func TestUpdateRefusedForOpenConnectionsNamesThemAndForce(t *testing.T) {
+	refusal := &updated.ControlError{Code: "active_terminal_sessions", Message: "Paperboat is busy: 2 open SSH connections. Wait, close them, or use --force."}
+	err := updateControlFailure("install approved update", refusal)
+	failure := classifyCommandFailure(err)
+	if failure.kind != commandRejected || commandFailureMessage(err, failure) != refusal.Message {
+		t.Fatalf("kind=%v message=%q", failure.kind, commandFailureMessage(err, failure))
+	}
+	result := classifyCLIJSONError(err)
+	if result.StateChanged != false || !result.Retryable || result.Message != refusal.Message || !strings.Contains(result.Recovery, "--force") {
+		t.Fatalf("json = %+v", result)
+	}
+	// Terminal sessions keep their own, older wording.
+	terminal := updateControlFailure("install approved update", &updated.ControlError{Code: "active_terminal_sessions", Message: "update is waiting for running or detached terminal sessions to finish"})
+	if strings.Contains(commandFailureMessage(terminal, classifyCommandFailure(terminal)), "open SSH") {
+		t.Fatal("terminal-session refusal gained ssh wording")
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/google/uuid"
+	"github.com/pinksaucepasta/paperboat/internal/liveconnections"
 	"io"
 	"log"
 	"net"
@@ -271,6 +272,10 @@ func (s *Server) handler() http.Handler {
 		}
 		if request.URL.Path == "/v1/inspector-requests" {
 			s.inspectorRequest(writer, request, requestID, peer)
+			return
+		}
+		if request.URL.Path == "/v1/connections" {
+			s.openConnections(writer, request, requestID)
 			return
 		}
 		if request.URL.Path == "/v1/relay-inventory" {
@@ -625,7 +630,13 @@ func (s *Server) peerStream(writer http.ResponseWriter, request *http.Request, r
 	// is canceled by either endpoint closing, not by credential expiry.
 	streamCtx, cancel := context.WithCancel(context.WithoutCancel(request.Context()))
 	go watchPeerHangup(streamCtx, local, peer, cancel)
-	go func() { defer cancel(); bridgePeerStream(streamCtx, local, stream) }()
+	go func() {
+		defer cancel()
+		if value.Consumer == "ssh" {
+			defer liveconnections.TrackSSH()()
+		}
+		bridgePeerStream(streamCtx, local, stream)
+	}()
 }
 
 type localHandlerPanic struct{}
@@ -679,6 +690,22 @@ func bridgePeerStream(ctx context.Context, local, remote net.Conn) {
 	if failure != nil && !normalPeerStreamTermination(failure) {
 		errorreport.Current().CaptureFailure(ctx, "paperboatd", "peer_stream", "delivery", "native_private_failed", failure)
 	}
+}
+
+func (s *Server) openConnections(writer http.ResponseWriter, request *http.Request, requestID string) {
+	if request.Method != http.MethodGet {
+		writer.Header().Set("Allow", http.MethodGet)
+		writeError(writer, http.StatusMethodNotAllowed, requestID, "method_not_allowed", "open connections method not allowed")
+		return
+	}
+	if request.URL.RawQuery != "" || request.ContentLength != 0 || request.Header.Get("Content-Type") != "" {
+		writeError(writer, http.StatusBadRequest, requestID, "invalid_request", "open connections request is invalid")
+		return
+	}
+	current := liveconnections.Current()
+	writer.Header().Set("Content-Type", "application/json")
+	writer.Header().Set("X-Paperboat-Protocol", ProtocolV1)
+	_ = json.NewEncoder(writer).Encode(OpenConnections{Schema: OpenConnectionsSchemaV1, SSH: current.SSH, Forwards: current.Forwards})
 }
 
 func (s *Server) relayInventory(writer http.ResponseWriter, request *http.Request, requestID string) {

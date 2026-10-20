@@ -595,6 +595,19 @@ func (c *Client) RelayInventory(ctx context.Context) (RelayInventory, error) {
 	return inventory, nil
 }
 
+// OpenConnections reports the SSH-family streams and access forwards the daemon carries now. An
+// older daemon does not know the route and answers not_found.
+func (c *Client) OpenConnections(ctx context.Context) (OpenConnections, error) {
+	var result OpenConnections
+	if err := c.getJSON(ctx, "/v1/connections", &result); err != nil {
+		return OpenConnections{}, err
+	}
+	if result.Schema != OpenConnectionsSchemaV1 || result.SSH < 0 || result.Forwards < 0 {
+		return OpenConnections{}, ErrInvalidResponse
+	}
+	return result, nil
+}
+
 func (c *Client) PublishTransportObservation(ctx context.Context, observation TransportObservation) error {
 	if observation.Validate() != nil {
 		return ErrInvalidConfig

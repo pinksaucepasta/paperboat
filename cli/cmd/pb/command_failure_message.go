@@ -225,6 +225,8 @@ func typedCommandOwnerMessage(owner error, failure commandFailure) string {
 		return "The local Paperboat service could not complete the request. Check its status with `pb status`, then retry; run `pb doctor` if this continues."
 	case *filetransfer.LimitError:
 		return transferLimitMessage(owner)
+	case updateOpenConnectionsRefusal:
+		return owner.message
 	case *TunnelCreateExistingError:
 		return "A tunnel with this name already exists; nothing was changed. Inspect it with `pb tunnel status <tunnel>`."
 	case *TunnelCreateChangedError:

@@ -19,10 +19,17 @@ import (
 func init() { platformUpdateProbeCommand = updateProbeCommand }
 
 func updateProbeCommand() *cobra.Command {
-	var restart bool
+	var restart, connections bool
 	command := &cobra.Command{Use: "__update-probe", Hidden: true, Args: cobra.NoArgs, RunE: func(command *cobra.Command, _ []string) error {
 		if restart {
 			return localdaemon.RestartCurrentUserForUpdate(command.Context())
+		}
+		if connections {
+			open, err := localdaemon.OpenConnectionsCurrentUser(command.Context())
+			if err != nil {
+				return err
+			}
+			return json.NewEncoder(command.OutOrStdout()).Encode(open)
 		}
 		probe, err := localdaemon.ProbeCurrentUserForUpdate(command.Context())
 		if err != nil {
@@ -35,6 +42,7 @@ func updateProbeCommand() *cobra.Command {
 		return json.NewEncoder(command.OutOrStdout()).Encode(probe)
 	}}
 	command.Flags().BoolVar(&restart, "restart", false, "restart the enrolled user's daemon")
+	command.Flags().BoolVar(&connections, "connections", false, "report the SSH and forward connections the enrolled user's daemon carries")
 	return command
 }
 
