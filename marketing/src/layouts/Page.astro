@@ -1,0 +1,19 @@
+---
+/** The one layout for every page: same header, same footer, the page between them. */
+import Base from "./Base.astro"
+import Nav from "../components/Nav.astro"
+import Footer from "../components/Footer.astro"
+interface Props {
+  title?: string
+  description?: string
+}
+const { title, description } = Astro.props
+---
+
+<Base title={title} description={description}>
+  <Nav />
+  <main>
+    <slot />
+  </main>
+  <Footer />
+</Base>

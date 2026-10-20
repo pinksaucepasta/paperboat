@@ -1,0 +1,63 @@
+---
+import Section from "./Section.astro"
+import Icon from "./Icon.astro"
+import { faq } from "../pricing-data"
+---
+
+<Section id="faq" title="Questions" tone="surface">
+  <div class="faq">
+    {
+      faq.map((item) => (
+        <details class="item">
+          <summary>
+            <span class="question">{item.question}</span>
+            <Icon name="plus" size={16} class="open-icon" />
+          </summary>
+          <p class="body answer">{item.answer}</p>
+        </details>
+      ))
+    }
+  </div>
+</Section>
+
+<style>
+  .faq {
+    display: grid;
+    max-width: 760px;
+    border-top: 1px solid var(--rule);
+  }
+
+  .item {
+    border-bottom: 1px solid var(--rule);
+  }
+
+  summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding-block: 20px;
+    cursor: pointer;
+    list-style: none;
+  }
+
+  summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .question {
+    font-family: var(--font-brand);
+    font-weight: 600;
+    font-size: 1.125rem;
+    color: var(--ink);
+  }
+
+  .item[open] :global(.open-icon) {
+    transform: rotate(45deg);
+  }
+
+  .answer {
+    padding-bottom: 20px;
+    max-width: 62ch;
+  }
+</style>

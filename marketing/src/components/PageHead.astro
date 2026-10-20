@@ -1,0 +1,28 @@
+---
+/** The top of an inner page: the page's one h1 and a line under it, in the same rhythm as a section. */
+interface Props {
+  title: string
+}
+const { title } = Astro.props
+---
+
+<section class="page-head">
+  <div class="wrap">
+    <header class="page-head-text">
+      <h1 class="display">{title}</h1>
+      <div class="lede page-head-lede"><slot /></div>
+    </header>
+  </div>
+</section>
+
+<style>
+  .page-head {
+    padding-block: clamp(64px, 7vw, 96px) 0;
+  }
+
+  .page-head-text {
+    display: grid;
+    gap: 18px;
+    max-width: 640px;
+  }
+</style>

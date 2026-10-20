@@ -1,0 +1,85 @@
+---
+import Section from "./Section.astro"
+import Icon from "./Icon.astro"
+import { features, planNames, bandwidthRow } from "../pricing-data"
+---
+
+<Section id="compare-plans" title="Everything is on every plan." tone="surface">
+  <Fragment slot="text">
+    <p>TODO-COPY: one line saying every plan has every feature and only the bandwidth changes.</p>
+  </Fragment>
+  <div class="table-scroll">
+    <table class="plans-table">
+      <thead>
+        <tr>
+          <th scope="col"><span class="visually-hidden">Feature</span></th>
+          {planNames.map((name) => <th scope="col">{name}</th>)}
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="bandwidth-row">
+          <th scope="row">Relay and edge bandwidth a month</th>
+          {bandwidthRow.map((value) => <td>{value}</td>)}
+        </tr>
+        {
+          features.map((feature) => (
+            <tr>
+              <th scope="row">{feature}</th>
+              {planNames.map(() => (
+                <td>
+                  <Icon name="check" size={18} class="yes" />
+                  <span class="visually-hidden">Included</span>
+                </td>
+              ))}
+            </tr>
+          ))
+        }
+      </tbody>
+    </table>
+  </div>
+</Section>
+
+<style>
+  .table-scroll {
+    overflow-x: auto;
+  }
+
+  .plans-table {
+    width: 100%;
+    min-width: 560px;
+    border-collapse: collapse;
+    font-size: 0.9375rem;
+  }
+
+  th,
+  td {
+    padding: 14px 16px;
+    text-align: left;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  thead th {
+    font-family: var(--font-brand);
+    font-weight: 600;
+    color: var(--ink);
+  }
+
+  tbody th {
+    font-weight: 400;
+    color: var(--text);
+  }
+
+  td {
+    color: var(--ink);
+  }
+
+  .bandwidth-row th,
+  .bandwidth-row td {
+    font-weight: 500;
+    color: var(--ink);
+  }
+
+  .plans-table :global(.yes) {
+    color: var(--success);
+  }
+</style>

@@ -1,0 +1,45 @@
+---
+import Page from "../../layouts/Page.astro"
+import PageHead from "../../components/PageHead.astro"
+import Section from "../../components/Section.astro"
+import { compares } from "../../compare-data"
+---
+
+<Page title="Compare — Paperboat" description="TODO-COPY: one line for search results.">
+  <PageHead title="Compare">
+    <p>TODO-COPY: one plain line before the list.</p>
+  </PageHead>
+  <Section id="compare-list" title="Paperboat and…">
+    <ul class="list">
+      {
+        compares.map((compare) => (
+          <li>
+            <a class="item surface-pattern" href={`/compare/${compare.slug}`}>
+              <span class="subtitle">{compare.title}</span>
+              <span class="body">{compare.summary}</span>
+            </a>
+          </li>
+        ))
+      }
+    </ul>
+  </Section>
+</Page>
+
+<style>
+  .list {
+    display: grid;
+    gap: 16px;
+  }
+
+  .item {
+    display: grid;
+    gap: 8px;
+    padding: clamp(24px, 3.2vw, 36px);
+  }
+
+  @media (min-width: 860px) {
+    .list {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+</style>

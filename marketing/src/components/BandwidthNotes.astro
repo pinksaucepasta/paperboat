@@ -1,0 +1,39 @@
+---
+import Section from "./Section.astro"
+import { bandwidthNotes } from "../pricing-data"
+---
+
+<Section id="bandwidth" title="How bandwidth works">
+  <Fragment slot="text">
+    <p>TODO-COPY: two plain sentences on what bandwidth is here.</p>
+  </Fragment>
+  <dl class="notes">
+    {
+      bandwidthNotes.map((note) => (
+        <div class="note">
+          <dt class="subtitle">{note.title}</dt>
+          <dd class="body">{note.text}</dd>
+        </div>
+      ))
+    }
+  </dl>
+</Section>
+
+<style>
+  .notes {
+    display: grid;
+    gap: 32px 40px;
+  }
+
+  .note {
+    display: grid;
+    gap: 8px;
+    align-content: start;
+  }
+
+  @media (min-width: 860px) {
+    .notes {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+</style>

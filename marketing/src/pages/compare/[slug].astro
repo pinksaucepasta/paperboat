@@ -1,0 +1,130 @@
+---
+import Page from "../../layouts/Page.astro"
+import PageHead from "../../components/PageHead.astro"
+import Section from "../../components/Section.astro"
+import Closing from "../../components/Closing.astro"
+import { compares } from "../../compare-data"
+
+export function getStaticPaths() {
+  return compares.map((compare) => ({ params: { slug: compare.slug }, props: { compare } }))
+}
+const { compare } = Astro.props
+---
+
+<Page title={`${compare.title} — Paperboat`} description={compare.summary}>
+  <PageHead title={compare.title}>
+    <p>{compare.summary}</p>
+  </PageHead>
+
+  <Section id="table" title="Side by side">
+    <div class="table-scroll">
+      <table class="compare-table">
+        <thead>
+          <tr>
+            <th scope="col"><span class="visually-hidden">Feature</span></th>
+            <th scope="col">{compare.name}</th>
+            <th scope="col">Paperboat</th>
+          </tr>
+        </thead>
+        <tbody>
+          {
+            compare.rows.map((row) => (
+              <tr>
+                <th scope="row">{row.feature}</th>
+                <td>{row.them}</td>
+                <td>{row.us}</td>
+              </tr>
+            ))
+          }
+        </tbody>
+      </table>
+    </div>
+  </Section>
+
+  <Section id="picks" title="Which one to pick" tone="surface">
+    <div class="picks">
+      <div class="pick">
+        <h3 class="subtitle">When to pick {compare.name}</h3>
+        <ul class="points">{compare.themWhen.map((point) => <li class="body">{point}</li>)}</ul>
+      </div>
+      <div class="pick">
+        <h3 class="subtitle">When to pick Paperboat</h3>
+        <ul class="points">{compare.usWhen.map((point) => <li class="body">{point}</li>)}</ul>
+      </div>
+    </div>
+  </Section>
+
+  <Section id="switching" title={`Switching from ${compare.name}`}>
+    <ol class="steps">
+      {compare.switching.map((step) => <li class="body">{step}</li>)}
+    </ol>
+  </Section>
+
+  <Closing />
+</Page>
+
+<style>
+  .table-scroll {
+    overflow-x: auto;
+  }
+
+  .compare-table {
+    width: 100%;
+    min-width: 640px;
+    border-collapse: collapse;
+    font-size: 0.9375rem;
+  }
+
+  th,
+  td {
+    padding: 14px 16px;
+    text-align: left;
+    vertical-align: top;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  thead th {
+    font-family: var(--font-brand);
+    font-weight: 600;
+    color: var(--ink);
+  }
+
+  tbody th {
+    width: 28%;
+    font-weight: 500;
+    color: var(--ink);
+  }
+
+  td {
+    color: var(--fog);
+  }
+
+  .picks {
+    display: grid;
+    gap: 40px;
+  }
+
+  .pick {
+    display: grid;
+    gap: 16px;
+    align-content: start;
+  }
+
+  .points,
+  .steps {
+    display: grid;
+    gap: 12px;
+  }
+
+  .steps {
+    max-width: 640px;
+    list-style: decimal;
+    padding-left: 1.25rem;
+  }
+
+  @media (min-width: 860px) {
+    .picks {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+</style>

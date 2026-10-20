@@ -1,20 +1,35 @@
 ---
 import Lockup from "./Lockup.astro"
+import Icon from "./Icon.astro"
 import { consoleUrl } from "../site"
-const links = [
-  { href: "/#terminals", label: "Terminals" },
-  { href: "/#links", label: "Previews" },
-  { href: "/#teams", label: "Teams" },
-  { href: "/#network", label: "Network" },
-  { href: "/pricing", label: "Pricing" },
-]
+import { navGroups } from "../nav"
 ---
 
 <header class="nav">
   <div class="wrap nav-inner">
     <Lockup />
     <nav class="nav-links" aria-label="Main">
-      {links.map((link) => <a href={link.href}>{link.label}</a>)}
+      {
+        navGroups.map((group) =>
+          group.links.length ? (
+            <div class="group">
+              <button type="button" class="group-title" aria-haspopup="true">
+                {group.title}
+                <Icon name="caret-down" size={12} />
+              </button>
+              <div class="menu">
+                {group.links.map((link) => (
+                  <a href={link.href}>{link.label}</a>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <a class="group-title" href={group.href}>
+              {group.title}
+            </a>
+          ),
+        )
+      }
     </nav>
     <div class="nav-actions">
       <a class="nav-signin" href={consoleUrl}>Sign in</a>
@@ -44,11 +59,58 @@ const links = [
   .nav-links {
     display: none;
     gap: 28px;
-    margin-left: 48px;
+    margin-left: 40px;
     font-size: 0.9375rem;
     color: var(--fog);
   }
 
+  .nav-links {
+    align-items: center;
+  }
+
+  .group {
+    position: relative;
+  }
+
+  .group-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: var(--header);
+    font-size: inherit;
+    color: inherit;
+  }
+
+  /* The menu opens on hover and on keyboard focus, with no script. */
+  .menu {
+    position: absolute;
+    top: calc(100% - 8px);
+    left: -14px;
+    display: none;
+    min-width: 240px;
+    padding: 8px;
+    background: var(--background);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-frame);
+  }
+
+  .group:hover .menu,
+  .group:focus-within .menu {
+    display: grid;
+  }
+
+  .menu a {
+    padding: 8px 12px;
+    border-radius: 6px;
+    white-space: nowrap;
+  }
+
+  .menu a:hover {
+    background: var(--surface);
+  }
+
+  .nav-links .group-title:hover,
+  .group:hover .group-title,
   .nav-links a:hover,
   .nav-signin:hover {
     color: var(--ink);

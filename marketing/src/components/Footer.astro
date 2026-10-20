@@ -1,22 +1,14 @@
 ---
 import Lockup from "./Lockup.astro"
-import { consoleUrl } from "../site"
-const groups = [
-  {
-    title: "Product",
-    links: [
-      { href: "/#terminals", label: "Terminals" },
-      { href: "/#links", label: "Previews and tunnels" },
-      { href: "/#teams", label: "Teams" },
-      { href: "/#network", label: "Network" },
-      { href: "/pricing", label: "Pricing" },
-    ],
-  },
+import { navGroups, getStartedLinks } from "../nav"
+// Groups with links become columns; single links (Pricing, Docs) share one column.
+const columns = [
+  ...navGroups.filter((group) => group.links.length).map((group) => ({ title: group.title, links: group.links })),
   {
     title: "Get started",
     links: [
-      { href: "/#install", label: "Install" },
-      { href: consoleUrl, label: "Console" },
+      ...navGroups.filter((group) => !group.links.length).map((group) => ({ href: group.href!, label: group.title })),
+      ...getStartedLinks,
     ],
   },
 ]
@@ -26,7 +18,7 @@ const groups = [
   <div class="wrap footer-inner">
     <div class="footer-brand"><Lockup /></div>
     {
-      groups.map((group) => (
+      columns.map((group) => (
         <nav aria-label={group.title}>
           <div class="group-title">{group.title}</div>
           <ul>
@@ -88,7 +80,7 @@ const groups = [
 
   @media (min-width: 760px) {
     .footer-inner {
-      grid-template-columns: 2fr 1fr 1fr;
+      grid-template-columns: 2fr repeat(3, 1fr);
     }
   }
 </style>
