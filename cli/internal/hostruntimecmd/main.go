@@ -235,7 +235,7 @@ func serviceFailureExitCode(err error) int {
 	if runtimeCausesOnly(err, hostinstall.ErrLegacyCarrierRunning) {
 		return LegacyCarrierRunningExitCode
 	}
-	if err == hostdproto.ErrMaintenanceBusy {
+	if _, busyTimeout := err.(*hostinstall.MaintenanceBusyTimeoutError); err == hostdproto.ErrMaintenanceBusy || busyTimeout {
 		return MaintenanceBusyExitCode
 	}
 	if err == hostinstall.ErrUpdateVerificationFailed {

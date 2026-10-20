@@ -78,6 +78,16 @@ func PrepareSuppliedMaintenance(ctx context.Context, socket, tokenFile string, f
 	return func() { _ = abort() }, nil
 }
 
+// MaintenanceBusyTimeoutError means running work did not finish within the wait before an update
+// stopped anything. It is the busy refusal (ErrMaintenanceBusy) and carries the timeout that ended
+// the wait; nothing was changed, so callers may report it as a plain refusal.
+type MaintenanceBusyTimeoutError struct{ Cause error }
+
+func (e *MaintenanceBusyTimeoutError) Error() string { return hostdproto.ErrMaintenanceBusy.Error() }
+func (e *MaintenanceBusyTimeoutError) Unwrap() []error {
+	return []error{hostdproto.ErrMaintenanceBusy, e.Cause}
+}
+
 func prepareMaintenance(ctx context.Context, socket, tokenFile string, force bool, timeout time.Duration) (func() error, error) {
 	info, err := os.Lstat(tokenFile)
 	if err != nil {
@@ -111,7 +121,7 @@ func prepareMaintenance(ctx context.Context, socket, tokenFile string, force boo
 		// Waiting for running finite work is bounded by timeout. Running out
 		// of that wait is the busy outcome, not a failed installation step.
 		if ctx.Err() == nil && (errors.Is(err, os.ErrDeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) || timeoutError(err)) {
-			return nil, errors.Join(hostdproto.ErrMaintenanceBusy, err)
+			return nil, &MaintenanceBusyTimeoutError{Cause: err}
 		}
 		return nil, err
 	}

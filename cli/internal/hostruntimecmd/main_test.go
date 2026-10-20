@@ -167,6 +167,7 @@ func TestServiceRefusalExitStatusPreservesIndependentFailures(t *testing.T) {
 		exit    int
 	}{
 		{"pre-stop refusal", hostdproto.ErrMaintenanceBusy, 75},
+		{"pre-stop wait ran out", &hostinstall.MaintenanceBusyTimeoutError{Cause: context.DeadlineExceeded}, 75},
 		{"pre-stop verification", hostinstall.ErrUpdateVerificationFailed, 76},
 		{"cold carrier refusal", hostinstall.ErrLegacyCarrierRunning, 77},
 		{"wrapped cold carrier refusal", runtimeFailure("safe owner context", hostinstall.ErrLegacyCarrierRunning), 77},

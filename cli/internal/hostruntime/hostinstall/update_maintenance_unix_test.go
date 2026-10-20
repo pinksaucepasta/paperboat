@@ -118,7 +118,8 @@ func TestSuppliedMaintenanceWaitTimeoutIsTheBusyOutcome(t *testing.T) {
 	}
 	start := time.Now()
 	_, err = prepareMaintenance(context.Background(), socket, tokenPath, false, 300*time.Millisecond)
-	if !errors.Is(err, hostdproto.ErrMaintenanceBusy) || time.Since(start) > 3*time.Second {
+	var busy *MaintenanceBusyTimeoutError
+	if !errors.Is(err, hostdproto.ErrMaintenanceBusy) || !errors.As(err, &busy) || time.Since(start) > 3*time.Second {
 		t.Fatalf("running work past the wait bound: err=%v after %s", err, time.Since(start))
 	}
 }
