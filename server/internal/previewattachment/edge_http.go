@@ -435,9 +435,20 @@ func (h *EdgeHTTPHandler) detach(w http.ResponseWriter, r *http.Request, identit
 			writeAttachmentServiceError(w, r, err)
 			return
 		}
-		if current.Binding != detachment.Binding || detachment.AttachmentGeneration > current.AttachmentGeneration {
+		if detachment.AttachmentGeneration > current.AttachmentGeneration {
 			writeAttachmentServiceError(w, r, ErrStaleBinding)
 			return
+		}
+		if current.Binding != detachment.Binding {
+			// The attachment has been re-bound since this command was queued (a new carrier session or
+			// edge process), so the command no longer names anything the edge holds. Acknowledge it:
+			// rejecting it made the edge replay the same command every second, for as long as it was
+			// queued, and failed every other detachment in the batch with it.
+			if err := h.outbox.AcknowledgePreviewCarrierOutbox(r.Context(), identity.NodeID, identity.ProcessEpoch, detachment.Binding.AccountID, detachment.Binding.OperationID, detachment.AttachmentGeneration, "detach"); err != nil && !errors.Is(err, ErrNotFound) {
+				writeAttachmentServiceError(w, r, err)
+				return
+			}
+			continue
 		}
 		// Release increments the attachment generation and writes a detach
 		// intent in the same transaction. ACK it when the edge reports that

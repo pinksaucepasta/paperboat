@@ -232,6 +232,48 @@ func TestEdgeDetachmentRejectsReplacementProcessEpoch(t *testing.T) {
 	}
 }
 
+func TestEdgeDetachmentOfARebornAttachmentIsAcknowledgedNotRejected(t *testing.T) {
+	now := testNow()
+	resolution := testResolution(now)
+	req := testRequest()
+	hash, err := req.Hash(resolution.Lease.AccountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attachment := attachmentFromResolution(req, hash, resolution, now)
+	attachment.AttachmentGeneration = 9
+	repository := &serviceRepositoryFake{current: attachment}
+	// A detach queued for an earlier carrier session of the same operation: it names nothing the
+	// attachment holds now. Answering 412 made the edge replay it every second for as long as it
+	// stayed queued, and failed every other detachment in the batch.
+	old := PreviewCarrierDetachment{Schema: Schema, Kind: Kind, Binding: attachment.Binding, AttachmentGeneration: 4, Reason: "server_detach", ObservedAt: now}
+	old.Binding.SessionID = "session_" + "previous"
+	outbox := &edgeOutboxFake{}
+	service, err := NewService(repository, &testAuthority{resolution: resolution}, &testPublisher{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.SetClock(func() time.Time { return now }); err != nil {
+		t.Fatal(err)
+	}
+	handler, err := NewEdgeHTTPHandler(service, outbox, edgeVerifierFake{nodeID: attachment.EdgeNodeID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := json.Marshal(edgeDetachmentBatch{EdgeNodeID: attachment.EdgeNodeID, ProcessEpoch: attachment.EdgeProcessEpoch, Detachments: []PreviewCarrierDetachment{old}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, EdgeDetachmentPath, bytes.NewReader(body)))
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("detachment of a re-bound attachment status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if len(outbox.acks) != 1 || !strings.HasSuffix(outbox.acks[0], "/4/detach") {
+		t.Fatalf("acks = %#v, want the superseded command acknowledged once", outbox.acks)
+	}
+}
+
 func TestEdgeAdmissionAckAcceptsCanonicalBatchAboveHostRequestLimit(t *testing.T) {
 	now := testNow()
 	resolution := testResolution(now)

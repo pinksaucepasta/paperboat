@@ -112,6 +112,18 @@ func TestPreviewEdgePlacementQueryOnPostgres(t *testing.T) {
 		t.Fatalf("first attachment moved to %q (%v) while the second holds the other edge", chosen, err)
 	}
 	exec(`UPDATE paperboat.preview_lease_carrier_attachments SET state='released',released_at=now() WHERE account_id=$1 AND preview_id=$2`, account, "preview_"+stamp)
+	// A published URL stays on the edge its DNS record names even when the other edge's carrier is the
+	// active one: a resolver that cached the record would otherwise reach an edge without the route.
+	exec(`UPDATE paperboat.control_tunnel_nodes SET public_ingress_ipv4=$2 WHERE id=$1`, preferred, "192.0.2.77")
+	exec(`INSERT INTO paperboat.edge_dns_publications(hostname,owner_id,resource_generation,readiness_version,observed_at,publication_generation,desired_addresses,provider_records,state,created_at,updated_at) VALUES('fixture.preview.example.test',$1,1,'v',now(),1,'["192.0.2.77"]','[]','submitted',now(),now())`, "preview_"+stamp)
+	defer func() {
+		_, _ = database.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.edge_dns_publications WHERE hostname='fixture.preview.example.test'`)
+	}()
+	chosen, err = selector.SelectPreviewEdgeNode(context.Background(), PreviewEdgeNodeSelectionRequest{AccountID: account, PreviewID: "preview_" + stamp, OperationID: "operation_" + stamp, OwnerMachineID: machine, InstallationGeneration: 1})
+	if err != nil || chosen != preferred {
+		t.Fatalf("placement left the published edge: selected %q, want %q: %v", chosen, preferred, err)
+	}
+	exec(`DELETE FROM paperboat.edge_dns_publications WHERE hostname='fixture.preview.example.test'`)
 	// An edge outside the workspace's edge set takes no NEW placement, but a machine
 	// whose carrier is already active there keeps working until it reattaches: invalidating the
 	// attachment at once stranded the machine (preview create failed with edge_admission_unavailable

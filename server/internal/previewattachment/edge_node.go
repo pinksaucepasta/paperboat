@@ -69,7 +69,9 @@ func (s *DBPreviewEdgeNodeSelector) clock() time.Time {
 // The preview rides a fresh carrier the machine holds to the edge (any edge of its set, not only
 // the one its runtime route calls primary). Slot 0 prefers the primary edge; slot 1 takes another
 // edge in a different failure domain from the live slot-0 attachment and exists only beside one.
-// Neither slot takes the edge the other holds.
+// Neither slot takes the edge the other holds. A placement is sticky: the edge already holding the slot's
+// attachment, then the edge the preview's DNS record already names, come before the primary one, so a
+// primary that flips while the host attaches never moves a published URL to an edge resolvers have not seen.
 const selectPreviewEdgeNodeSQL = `
 SELECT node.id
 FROM control_tunnel_nodes AS node
@@ -95,6 +97,12 @@ WHERE node.state = 'ready'
   AND ($6::smallint=0 OR EXISTS (
     SELECT 1 FROM preview_lease_carrier_attachments primary_row
     WHERE primary_row.account_id=$4 AND primary_row.preview_id=$5 AND primary_row.edge_slot=0 AND primary_row.state NOT IN ('failed','released')))
-ORDER BY (carrier.active IS TRUE) DESC, node.id
+ORDER BY
+  EXISTS (SELECT 1 FROM preview_lease_carrier_attachments mine WHERE mine.account_id=$4 AND mine.preview_id=$5
+    AND mine.edge_slot=$6::smallint AND mine.state NOT IN ('failed','released') AND mine.edge_node_id=node.id) DESC,
+  EXISTS (SELECT 1 FROM preview_leases p JOIN edge_dns_publications pub ON pub.hostname=substring(p.endpoint from 9)
+    WHERE p.id=$5 AND p.account_id=$4 AND $6::smallint=0 AND node.public_ingress_ipv4 IS NOT NULL
+    AND pub.desired_addresses ? host(node.public_ingress_ipv4)) DESC,
+  (carrier.active IS TRUE) DESC, node.id
 LIMIT 1
 FOR UPDATE OF node SKIP LOCKED`
