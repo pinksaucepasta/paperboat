@@ -530,3 +530,20 @@ func TestConfigSyncProjectionWithoutARepositoryExplainsTheChoice(t *testing.T) {
 		t.Fatalf("message=%q err=%v", message, err)
 	}
 }
+
+// A local repository is registered with the path it has on the machine that created it. Another
+// machine of the account must be told it cannot reach it, not that Paperboat "could not finish".
+func TestConfigSyncValidateNamesARepositoryThisMachineCannotReach(t *testing.T) {
+	backend := configSyncSourceBackendFixture(t, map[string]string{"elsewhere": ""})
+	if err := os.RemoveAll(backend.repos[0].ExternalRef); err != nil {
+		t.Fatal(err)
+	}
+	_, err := buildConfigSyncProjection(context.Background(), backend, configsync.SourceConfig{}, "elsewhere", api.ConfigAssignment{}, t.TempDir(), "", t.TempDir())
+	var rejection commandRejection
+	if !errors.As(err, &rejection) || rejection.reason != commandRejectConfigRepositoryUnavailable {
+		t.Fatalf("error = %v, want the unreachable-repository refusal", err)
+	}
+	if message := rejection.Error(); !strings.Contains(message, "cannot reach the config repository") || strings.Contains(message, backend.repos[0].ExternalRef) {
+		t.Fatalf("refusal = %q, want a message without the other machine's path", message)
+	}
+}

@@ -3,6 +3,7 @@
 import json
 import os
 from pathlib import Path
+import socket
 import subprocess
 import tempfile
 
@@ -10,7 +11,8 @@ from install_lifecycle import registration
 from pairing_lifecycle import command_result
 
 PB = Path.home() / '.local/bin/pb'
-FIXTURE_NAME = 'smoke-config-fixture'
+# A local repository exists only at its creator's path, so every machine registers its own.
+FIXTURE_NAME = 'smoke-config-fixture-' + socket.gethostname()
 
 
 def run(*args, expect_ok=True):

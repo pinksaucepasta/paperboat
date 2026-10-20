@@ -180,6 +180,10 @@ func configRepositoryReadFailure(err error) error {
 		return commandRejection{reason: commandRejectConfigRepositoryBranch}
 	case errors.Is(err, configsync.ErrGitRepositoryInvalid):
 		return commandRejection{reason: commandRejectConfigRepositoryInvalid}
+	case errors.Is(err, configsync.ErrRepositoryCredentials):
+		return commandRejection{reason: commandRejectConfigRepositoryCredentials}
+	case errors.Is(err, configsync.ErrRepositoryUnavailable):
+		return commandRejection{reason: commandRejectConfigRepositoryUnavailable}
 	}
 	return err
 }

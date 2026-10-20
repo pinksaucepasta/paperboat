@@ -32,6 +32,8 @@ const (
 	commandRejectConfigRepositoryEmpty
 	commandRejectConfigRepositoryBranch
 	commandRejectConfigRepositoryInvalid
+	commandRejectConfigRepositoryUnavailable
+	commandRejectConfigRepositoryCredentials
 	commandRejectTeamReserved
 	commandRejectTeamRequestInvalid
 	commandRejectTeamSeatRequired
@@ -67,6 +69,10 @@ func (e commandRejection) Error() string {
 		return "The config repository does not have the sync branch. Create that branch (or pick the repository's existing branch in the machine configuration), then retry."
 	case commandRejectConfigRepositoryInvalid:
 		return "The config repository could not be read. Check that it exists and that its saved credentials still work; a local repository must be a bare Git repository at a path without symbolic links. Then retry."
+	case commandRejectConfigRepositoryUnavailable:
+		return "This machine cannot reach the config repository. A local repository exists only on the machine that holds its path; connect a repository this machine can reach (an SSH or HTTPS URL, or a mounted path), then retry."
+	case commandRejectConfigRepositoryCredentials:
+		return "This machine has no usable credentials for the config repository. Save them with `pb config repository credentials set <repository> --file <profile>`, then retry."
 	case commandRejectTeamReserved:
 		return "That team name is already reserved. Choose another name, or run the original `pb team create` command again to reuse its payment."
 	case commandRejectTeamRequestInvalid:
