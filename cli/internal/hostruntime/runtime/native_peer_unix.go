@@ -19,6 +19,7 @@ import (
 	clientconfig "github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/nativesession"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
 	"github.com/pinksaucepasta/paperboat/internal/inspector"
@@ -50,6 +51,9 @@ type productionNativePeerConfig struct {
 	inspector                                http.Handler
 	inspectorStore                           *inspector.Store
 	usage                                    *bandwidth.Recorder
+	// networkEvents wakes the signed-network renewal when the server reports a peer or key change;
+	// nil leaves the periodic renewal alone.
+	networkEvents *machineevents.Subscription
 }
 
 type productionNativePeerService struct {
@@ -70,9 +74,11 @@ type productionNativePeerGeneration struct {
 	errors              chan error
 	identityFingerprint string
 	authority           *tailnet.Authority
-	control             tailnet.NetworkAPI
-	done                sync.WaitGroup
-	once                sync.Once
+	// requestRefresh renews the signed network now; nil in generations built without an authority.
+	requestRefresh func()
+	control        tailnet.NetworkAPI
+	done           sync.WaitGroup
+	once           sync.Once
 }
 
 const productionNativePeerRestartDelay = time.Second
@@ -336,7 +342,7 @@ func (s *productionNativePeerService) buildGeneration(ctx context.Context) (*pro
 		return nil, nativePeerListenerError{cause: errors.Join(err, owner.Close())}
 	}
 	runCtx, cancel := context.WithCancel(ctx)
-	generation := &productionNativePeerGeneration{cancel: cancel, owner: owner, apps: apps, errors: make(chan error, 2), identityFingerprint: certificate.Fingerprint(), authority: authority, control: control}
+	generation := &productionNativePeerGeneration{cancel: cancel, owner: owner, apps: apps, errors: make(chan error, 2), identityFingerprint: certificate.Fingerprint(), authority: authority, requestRefresh: authority.RequestRefresh, control: control}
 	generation.done.Add(2)
 	go func() {
 		defer generation.done.Done()
@@ -437,6 +443,10 @@ func (s *productionNativePeerService) supervise(ctx context.Context, generation 
 			s.mu.Lock()
 			s.lastErr = errors.Join(s.lastErr, stopErr)
 			s.mu.Unlock()
+		case <-s.config.networkEvents.Changed():
+			if generation.requestRefresh != nil {
+				generation.requestRefresh()
+			}
 		case <-identityCheck.C:
 			fingerprint, err := s.currentIdentityFingerprint()
 			if err == nil && fingerprint == generation.identityFingerprint {

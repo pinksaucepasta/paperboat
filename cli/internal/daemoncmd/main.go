@@ -371,6 +371,17 @@ func localDaemonCommand() *cobra.Command {
 						return eventsErr
 					}
 					inventoryEvents = events.Subscribe(machineevents.TopicInventory)
+					networkEvents := events.Subscribe(machineevents.TopicPeerNetwork)
+					go func() {
+						for {
+							select {
+							case <-ctx.Done():
+								return
+							case <-networkEvents.Changed():
+								peerTunnel.RefreshNetwork()
+							}
+						}
+					}()
 					if eventsErr = events.Start(ctx); eventsErr != nil {
 						return eventsErr
 					}

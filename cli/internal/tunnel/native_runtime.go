@@ -452,6 +452,20 @@ func (t *PeerTerminalTunnel) acquireNativeRuntime(ctx context.Context, accountID
 	return runtime, true, nil
 }
 
+// RefreshNetwork renews the daemon's signed peer network now, for example when the server reports
+// that a peer joined, left or changed its keys. Without a native runtime there is nothing to renew.
+func (t *PeerTerminalTunnel) RefreshNetwork() {
+	if t == nil {
+		return
+	}
+	t.nativeMu.Lock()
+	runtime := t.nativeRuntime
+	t.nativeMu.Unlock()
+	if runtime != nil && runtime.authority != nil {
+		runtime.authority.RequestRefresh()
+	}
+}
+
 // NativeRelayCandidates reads the same signed relay inventory used by native
 // sessions. It initializes the daemon's shared native authority if needed.
 func (t *PeerTerminalTunnel) NativeRelayCandidates(ctx context.Context) ([]tailnet.RegionalNode, error) {
