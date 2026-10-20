@@ -98,7 +98,7 @@ func TestPublicMessagesRejectArbitraryVersionAndRequestMetadata(t *testing.T) {
 }
 
 func TestPublicAPICodePreservesKnownMeaningAndDropsUnknownPayload(t *testing.T) {
-	for _, code := range []string{"machine_offline", "machine_revoked", "workspace_unavailable", "team_subscription_required", "favorite_limit_reached"} {
+	for _, code := range []string{"machine_offline", "machine_revoked", "workspace_unavailable", "team_subscription_required", "team_suspended", "favorite_limit_reached"} {
 		if got := (&APIError{Code: code}).PublicCode(); got != code {
 			t.Fatalf("known code lost: %s", code)
 		}
@@ -158,5 +158,22 @@ func TestPeerNetworkRelayDenialIsTypedAndOnlyForQuota(t *testing.T) {
 	}
 	if (PeerNetworkConfigurationResult{}).RelayDenial() != nil || (PeerNetworkConfigurationResult{RelayDenied: "something_else"}).RelayDenial() != nil {
 		t.Fatal("an unknown or absent denial produced an error")
+	}
+}
+
+// F12-06: a team mutation while the team is suspended (409 team_suspended) says the team is
+// suspended and what to do, not the generic "resource state changed".
+func TestTeamSuspendedHasAuthoredRecoveryMessage(t *testing.T) {
+	err := &APIError{Status: http.StatusConflict, Code: "team_suspended", Message: apiErrorMessage("team_suspended", http.StatusConflict)}
+	if err.PublicCode() != "team_suspended" {
+		t.Fatalf("code = %q", err.PublicCode())
+	}
+	for _, want := range []string{"suspended", "restore billing", "resumes"} {
+		if !strings.Contains(err.Message, want) {
+			t.Fatalf("message %q lacks %q", err.Message, want)
+		}
+	}
+	if strings.Contains(err.Message, "Refresh it and try again") {
+		t.Fatal("still the generic conflict message")
 	}
 }

@@ -60,3 +60,15 @@ func TestSendOverTheTransferLimitsIsACodedRefusal(t *testing.T) {
 		})
 	}
 }
+
+// F12-06: a team change while the team is suspended names the suspension in text and JSON.
+func TestTeamSuspendedRefusalNamesTheSuspension(t *testing.T) {
+	err := &api.APIError{Status: http.StatusConflict, Code: "team_suspended"}
+	failure := classifyCommandFailure(err)
+	message := commandFailureMessage(err, failure)
+	result := classifyCLIJSONError(err)
+	if !strings.Contains(message, "This team is suspended") || strings.Contains(message, "Refresh it") ||
+		result.Code != "team_suspended" || result.Category != "conflict" || result.StateChanged != false || !strings.Contains(result.Message, "suspended") {
+		t.Fatalf("message=%q json=%+v", message, result)
+	}
+}

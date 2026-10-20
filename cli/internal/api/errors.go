@@ -74,6 +74,9 @@ func apiErrorMessageFor(code string, status int, details map[string]any) string 
 	return message
 }
 
+// PublicMessage is the authored recovery advice for an audited protocol code, or "".
+func PublicMessage(code string) string { return publicAPIMessages[code] }
+
 // PublicCode projects only audited protocol codes. The raw Code remains
 // available for internal branching and is never made safe by identifier syntax.
 func (e *APIError) PublicCode() string {
@@ -113,6 +116,7 @@ var publicAPIMessages = map[string]string{
 	"slow_down":                      "Authorization polling is too frequent. Wait before trying again.",
 	"team_subscription_active":       "This team still has an active subscription or a pending checkout. Cancel the subscription or resolve the checkout under Billing in the Paperboat console, then delete the team.",
 	"team_subscription_required":     "An active team subscription is required. Check team billing before trying again.",
+	"team_suspended":                 "This team is suspended, so it cannot be changed. Ask a team owner to restore billing; access returns when the team resumes.",
 	"tunnel_unavailable":             "The secure tunnel is not available yet. Try again shortly.",
 	"unauthenticated":                "The server rejected the credential. Run `pb login` and try again.",
 	"workspace_unavailable":          "The selected workspace is unavailable. Run `pb switch personal` or choose another workspace.",

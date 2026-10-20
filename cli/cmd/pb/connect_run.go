@@ -774,6 +774,8 @@ func friendlyAPIError(err error) string {
 	switch apiErr.Code {
 	case "team_subscription_required":
 		return "An active team subscription is required. " + teamSubscriptionRecovery + " No resource was created."
+	case "team_suspended":
+		return api.PublicMessage(apiErr.Code)
 	case "credits_exhausted":
 		return "credits are exhausted; top up credits in Paperboat, then retry"
 	case "entitlement_lost", "payment_required":
