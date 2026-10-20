@@ -1,0 +1,119 @@
+#!/usr/bin/env python3
+"""Pre-push: build and vet the Go modules a push touches, on a clean checkout of the pushed commit.
+
+A file left out of a commit (the usual way main stops compiling) passes in a working tree that still
+has it, so this builds each pushed commit from `git worktree add` instead. Installed by `make hooks`.
+Only modules with changes are checked; a push that touches none is instant. PB_PREPUSH_SKIP=1 skips
+(do not push a tree you have not built). PB_PREPUSH_CROSS=1 also builds the cli for darwin and windows.
+"""
+import fcntl
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+ZERO = "0" * 40
+MODULES = ("cli", "relay", "tunnel", "server", "helper", "shared")
+TIMEOUT = 600
+
+
+def git(*args, cwd=None, check=True):
+    result = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
+    if check and result.returncode:
+        raise RuntimeError(f"git {' '.join(args)}: {result.stderr.strip()}")
+    return result.stdout
+
+
+def changed_paths(local, remote):
+    if remote != ZERO and subprocess.run(["git", "cat-file", "-e", remote + "^{commit}"], capture_output=True).returncode == 0:
+        base = remote
+    else:
+        # A new branch or an unknown remote tip: compare with what origin/main already has.
+        base = git("merge-base", local, "origin/main", check=False).strip()
+    if not base:
+        return None
+    return [p for p in git("diff", "--name-only", f"{base}..{local}").splitlines() if p]
+
+
+def touched(paths):
+    if paths is None or any(p in ("go.work", "go.work.sum") for p in paths):
+        return list(MODULES)
+    return [m for m in MODULES if any(p.startswith(m + "/") for p in paths)]
+
+
+def run(argv, cwd, env=None):
+    result = subprocess.run(argv, cwd=cwd, capture_output=True, text=True, timeout=TIMEOUT, env=env)
+    return result.returncode, (result.stdout + result.stderr).strip()
+
+
+def checkout_tree(commit):
+    """One persistent detached worktree per repository: a stable path keeps Go's build cache warm."""
+    common = Path(git("rev-parse", "--path-format=absolute", "--git-common-dir").strip())
+    tree = common / "pb-prepush-tree"
+    if tree.exists():
+        git("checkout", "--detach", "--force", "--quiet", commit, cwd=tree)
+    else:
+        git("worktree", "add", "--detach", "--quiet", str(tree), commit)
+    git("clean", "-fdxq", cwd=tree)
+    return tree
+
+
+def check(commit, modules, paths):
+    failures = []
+    common = Path(git("rev-parse", "--path-format=absolute", "--git-common-dir").strip())
+    with open(common / "pb-prepush.lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)  # concurrent pushes from several worktrees take turns
+        tree = checkout_tree(commit)
+        for module in modules:
+            if not (tree / module / "go.mod").exists():
+                continue
+            code, output = run(["go", "build", "./..."], tree / module)
+            if code:
+                failures.append(f"{module}: go build ./... failed\n{output}")
+                continue
+            changed_go = sorted({str(Path(p).parent.relative_to(module)) for p in (paths or []) if p.startswith(module + "/") and p.endswith(".go")}) if paths is not None else ["."]
+            if changed_go:
+                packages = ["./" + d if d != "." else "." for d in changed_go]
+                code, output = run(["go", "vet", *packages], tree / module)
+                if code:
+                    failures.append(f"{module}: go vet failed\n{output}")
+            if module == "cli" and os.environ.get("PB_PREPUSH_CROSS") == "1":
+                for goos in ("darwin", "windows"):
+                    code, output = run(["go", "build", "./..."], tree / module, dict(os.environ, GOOS=goos, CGO_ENABLED="0"))
+                    if code:
+                        failures.append(f"cli: GOOS={goos} go build ./... failed\n{output}")
+    return failures
+
+
+def main():
+    if os.environ.get("PB_PREPUSH_SKIP") == "1":
+        print("pre-push: skipped (PB_PREPUSH_SKIP=1)", file=sys.stderr)
+        return 0
+    failed = False
+    for line in sys.stdin.read().splitlines():
+        parts = line.split()
+        if len(parts) != 4:
+            continue
+        _, local, _, remote = parts
+        if local == ZERO:
+            continue  # deleting a ref
+        try:
+            paths = changed_paths(local, remote)
+            modules = touched(paths)
+            if not modules:
+                continue
+            print(f"pre-push: building {', '.join(modules)} at {local[:10]} on a clean checkout", file=sys.stderr)
+            failures = check(local, modules, paths)
+        except (RuntimeError, subprocess.TimeoutExpired) as error:
+            failures = [f"could not check the pushed commit: {error}"]
+        for failure in failures:
+            failed = True
+            print(f"pre-push: {failure}", file=sys.stderr)
+    if failed:
+        print("pre-push: push refused. Fix the build (did a file miss `git add`?) and push again.", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

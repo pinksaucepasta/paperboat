@@ -72,6 +72,12 @@ Regressions are the most expensive failure in this project. They are prevented m
 4. Before changing shared code (transport, daemon, auth, server APIs used by several
    features), list the features that use it and include their checks in the run.
 
+**Pre-push hook.** `make hooks` (once per clone) installs `tools/hooks/pre-push`: it builds and vets the Go
+modules your push touches on a clean checkout of the commit being pushed, so a file left out of the commit
+cannot reach `main` (the working tree it passes in still has the file). The first run in a clone takes about a
+minute, later runs a few seconds. `PB_PREPUSH_CROSS=1` also builds the cli for darwin and windows;
+`PB_PREPUSH_SKIP=1` skips it (never push a tree you have not built).
+
 ## Lanes (parallel sessions)
 
 Several sessions may work at once only in separate lanes. A lane only edits the paths it
