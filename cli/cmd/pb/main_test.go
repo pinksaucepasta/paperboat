@@ -22,6 +22,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -144,14 +145,17 @@ func TestUpdateWithProgressReportsHumanProgressOnStderr(t *testing.T) {
 		t.Fatal(err)
 	}
 	command.SetContext(context.Background())
-	var stderr bytes.Buffer
-	command.SetErr(&stderr)
+	stderr := &progressBuffer{}
+	command.SetErr(stderr)
 	started := make(chan struct{})
 	resultCh := make(chan updated.ControlResponse, 1)
 	go func() {
 		response, updateErr := updateWithProgress(command, command.Context(), func(context.Context) (updated.ControlResponse, error) {
 			close(started)
-			time.Sleep(5 * time.Millisecond)
+			// Finish only after a progress line was written; a fixed sleep races the ticker on a loaded machine.
+			for deadline := time.Now().Add(10 * time.Second); !strings.Contains(stderr.String(), "still in progress") && time.Now().Before(deadline); {
+				time.Sleep(time.Millisecond)
+			}
 			return updated.ControlResponse{Version: "2026.08.27.47"}, nil
 		})
 		if updateErr != nil {
@@ -167,6 +171,24 @@ func TestUpdateWithProgressReportsHumanProgressOnStderr(t *testing.T) {
 	if !strings.Contains(stderr.String(), "Processing the signed Paperboat update") || !strings.Contains(stderr.String(), "still in progress") {
 		t.Fatalf("progress output = %q", stderr.String())
 	}
+}
+
+// progressBuffer is a bytes.Buffer that the progress goroutine and the test can use together.
+type progressBuffer struct {
+	mu   sync.Mutex
+	data bytes.Buffer
+}
+
+func (b *progressBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.data.Write(p)
+}
+
+func (b *progressBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.data.String()
 }
 
 func TestUpdateWithProgressDoesNotWriteJSONStdout(t *testing.T) {
