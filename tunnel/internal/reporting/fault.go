@@ -13,7 +13,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -721,18 +720,14 @@ func validErrorType(value string) bool {
 	return true
 }
 
-var localLoggerOnce sync.Once
-var localLogger *slog.Logger
-
 func writeLocalFault(fault Fault) {
-	localLoggerOnce.Do(func() {
-		localLogger = slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{ReplaceAttr: func(_ []string, value slog.Attr) slog.Attr {
-			if value.Key == slog.TimeKey {
-				return slog.Attr{}
-			}
-			return value
-		}}))
-	})
+	// The destination is os.Stderr at the time of the fault, not at the first fault of the process.
+	localLogger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{ReplaceAttr: func(_ []string, value slog.Attr) slog.Attr {
+		if value.Key == slog.TimeKey {
+			return slog.Attr{}
+		}
+		return value
+	}}))
 	level := slog.LevelError
 	if fault.Severity == "info" {
 		level = slog.LevelInfo
