@@ -1,0 +1,51 @@
+---
+import { localDomain, previewDomain, tunnelDomain, selfhostInstallUrl } from "../site"
+/**
+ * A real command and its output as the CLI prints it. `{previewDomain}` and the other names are
+ * the server's configured addresses, filled in when the site builds; "$ " lines are what you type.
+ */
+interface Props {
+  text: string
+}
+const { text } = Astro.props
+const values: Record<string, string> = { localDomain, previewDomain, tunnelDomain, selfhostInstallUrl }
+const escape = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+/** One string, so the page adds no stray whitespace inside the <pre>. */
+const html = text
+  .replace(/\{(\w+)\}/g, (_, name: string) => values[name] ?? `{${name}}`)
+  .split("\n")
+  .map((line) => {
+    if (line.startsWith("$ ")) return `<span class="dollar">$ </span>${escape(line.slice(2))}`
+    if (line.startsWith("https://")) {
+      const [address, ...rest] = line.split(" -> ")
+      return `<span class="url">${escape(address)}</span>${rest.length ? escape(` -> ${rest.join(" -> ")}`) : ""}`
+    }
+    return escape(line)
+  })
+  .join("\n")
+---
+
+<pre class="example"><code set:html={html} /></pre>
+
+<style>
+  .example {
+    margin: 0;
+    padding: 20px 24px;
+    border-radius: 10px;
+    background: var(--background);
+    box-shadow: 0 0 0 1px var(--rule);
+    font-size: 0.8125rem;
+    line-height: 1.7;
+    color: var(--ink);
+    overflow-x: auto;
+    max-width: 760px;
+  }
+
+  .example :global(.dollar) {
+    color: var(--faint);
+  }
+
+  .example :global(.url) {
+    color: var(--cobalt);
+  }
+</style>

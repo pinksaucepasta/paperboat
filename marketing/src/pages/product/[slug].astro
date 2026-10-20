@@ -1,0 +1,109 @@
+---
+import Page from "../../layouts/Page.astro"
+import PageHead from "../../components/PageHead.astro"
+import Section from "../../components/Section.astro"
+import CommandExample from "../../components/CommandExample.astro"
+import Closing from "../../components/Closing.astro"
+import { products } from "../../product-data"
+import { compares } from "../../compare-data"
+
+export function getStaticPaths() {
+  return products.map((product) => ({ params: { slug: product.slug }, props: { product } }))
+}
+const { product } = Astro.props
+const related = compares.filter((compare) => product.compare.includes(compare.slug))
+---
+
+<Page title={`${product.name} — Paperboat`} description={product.summary}>
+  <PageHead title={product.headline} eyebrow={product.name}>
+    <p>{product.summary}</p>
+  </PageHead>
+
+  <Section id="benefits">
+    <div class="benefits">
+      {
+        product.benefits.map((benefit) => (
+          <div class="benefit">
+            <h2 class="subtitle">{benefit.title}</h2>
+            <p class="body">{benefit.text}</p>
+          </div>
+        ))
+      }
+    </div>
+  </Section>
+
+  <Section id="example" title={product.example.title} tone="surface">
+    <CommandExample text={product.example.text} />
+  </Section>
+
+  <Section id="how" title="How it works">
+    <ol class="steps">
+      {
+        product.steps.map((step) => (
+          <li class="step">
+            <h3 class="subtitle">{step.title}</h3>
+            <p class="body">{step.text}</p>
+          </li>
+        ))
+      }
+    </ol>
+  </Section>
+
+  <Section id="more" title="Keep going" tone="surface">
+    <ul class="more">
+      <li><a class="text-link" href="/docs">Read the docs <span class="arrow">→</span></a></li>
+      {
+        related.map((compare) => (
+          <li>
+            <a class="text-link" href={`/compare/${compare.slug}`}>
+              {compare.title} <span class="arrow">→</span>
+            </a>
+          </li>
+        ))
+      }
+    </ul>
+  </Section>
+
+  <Closing />
+</Page>
+
+<style>
+  .benefits,
+  .steps {
+    display: grid;
+    gap: 32px;
+  }
+
+  .benefit,
+  .step {
+    display: grid;
+    gap: 10px;
+    align-content: start;
+  }
+
+  .steps {
+    counter-reset: step;
+  }
+
+  .step {
+    counter-increment: step;
+  }
+
+  .step .subtitle::before {
+    content: counter(step) ". ";
+    color: var(--cobalt);
+  }
+
+  .more {
+    display: grid;
+    gap: 14px;
+  }
+
+  @media (min-width: 860px) {
+    .benefits,
+    .steps {
+      grid-template-columns: repeat(3, 1fr);
+      gap: 40px;
+    }
+  }
+</style>

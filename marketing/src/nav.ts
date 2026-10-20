@@ -1,5 +1,7 @@
 import { consoleUrl } from "./site"
 import { compares } from "./compare-data"
+import { products } from "./product-data"
+import { legalPages } from "./legal-data"
 
 /** The site's navigation, in one place: the header and the footer both read it. */
 export type NavLink = { href: string; label: string }
@@ -8,12 +10,7 @@ export type NavGroup = { title: string; href?: string; links: NavLink[] }
 export const navGroups: NavGroup[] = [
   {
     title: "Product",
-    links: [
-      { href: "/#terminals", label: "Terminals" },
-      { href: "/#links", label: "Previews and tunnels" },
-      { href: "/#teams", label: "Teams" },
-      { href: "/#network", label: "Network" },
-    ],
+    links: products.map((product) => ({ href: `/product/${product.slug}`, label: product.name })),
   },
   {
     title: "Compare",
@@ -26,4 +23,10 @@ export const navGroups: NavGroup[] = [
 export const getStartedLinks: NavLink[] = [
   { href: "/#install", label: "Install" },
   { href: consoleUrl, label: "Console" },
+]
+
+/** The footer's last column: security and the legal pages. */
+export const legalLinks: NavLink[] = [
+  { href: "/security", label: "Security" },
+  ...legalPages.map((page) => ({ href: `/legal/${page.slug}`, label: page.title })),
 ]

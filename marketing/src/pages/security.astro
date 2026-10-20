@@ -1,0 +1,21 @@
+---
+import Page from "../layouts/Page.astro"
+import PageHead from "../components/PageHead.astro"
+import Section from "../components/Section.astro"
+import { securitySections } from "../security-data"
+---
+
+<Page title="Security — Paperboat" description="TODO-COPY: one line for search results.">
+  <PageHead title="Security">
+    <p>TODO-COPY: one plain line about how Paperboat treats your data.</p>
+  </PageHead>
+  {
+    securitySections.map((section, index) => (
+      <Section id={section.id} title={section.title} tone={index % 2 === 0 ? "plain" : "surface"}>
+        <Fragment slot="text">
+          <p>{section.text}</p>
+        </Fragment>
+      </Section>
+    ))
+  }
+</Page>

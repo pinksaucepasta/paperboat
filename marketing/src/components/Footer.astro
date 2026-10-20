@@ -1,6 +1,6 @@
 ---
 import Lockup from "./Lockup.astro"
-import { navGroups, getStartedLinks } from "../nav"
+import { navGroups, getStartedLinks, legalLinks } from "../nav"
 // Groups with links become columns; single links (Pricing, Docs) share one column.
 const columns = [
   ...navGroups.filter((group) => group.links.length).map((group) => ({ title: group.title, links: group.links })),
@@ -11,6 +11,7 @@ const columns = [
       ...getStartedLinks,
     ],
   },
+  { title: "Legal", links: legalLinks },
 ]
 ---
 
@@ -80,7 +81,7 @@ const columns = [
 
   @media (min-width: 760px) {
     .footer-inner {
-      grid-template-columns: 2fr repeat(3, 1fr);
+      grid-template-columns: 2fr repeat(4, 1fr);
     }
   }
 </style>

@@ -2,18 +2,23 @@
 /** A section: a short title and a line or two under it, then whatever shows it. */
 interface Props {
   id: string
-  title: string
+  /** Left out, the section is just its content (the benefits block has no heading). */
+  title?: string
   tone?: "plain" | "surface"
 }
 const { id, title, tone = "plain" } = Astro.props
 ---
 
-<section class:list={["section", `section-${tone}`]} id={id} aria-labelledby={`${id}-title`}>
+<section class:list={["section", `section-${tone}`]} id={id} aria-labelledby={title ? `${id}-title` : undefined}>
   <div class="wrap">
-    <header class="section-head">
-      <h2 class="title" id={`${id}-title`}>{title}</h2>
-      <div class="lede section-text"><slot name="text" /></div>
-    </header>
+    {
+      title && (
+        <header class="section-head">
+          <h2 class="title" id={`${id}-title`}>{title}</h2>
+          <div class="lede section-text"><slot name="text" /></div>
+        </header>
+      )
+    }
     <slot />
   </div>
 </section>

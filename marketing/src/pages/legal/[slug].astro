@@ -1,0 +1,20 @@
+---
+import Page from "../../layouts/Page.astro"
+import PageHead from "../../components/PageHead.astro"
+import Section from "../../components/Section.astro"
+import { legalPages } from "../../legal-data"
+
+export function getStaticPaths() {
+  return legalPages.map((page) => ({ params: { slug: page.slug }, props: { page } }))
+}
+const { page } = Astro.props
+---
+
+<Page title={`${page.title} — Paperboat`} description="TODO-COPY: one line for search results.">
+  <PageHead title={page.title}>
+    <p>TODO-COPY: when this text was last updated.</p>
+  </PageHead>
+  <Section id="text">
+    <p class="body">{page.text}</p>
+  </Section>
+</Page>

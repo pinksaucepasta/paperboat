@@ -2,13 +2,16 @@
 /** The top of an inner page: the page's one h1 and a line under it, in the same rhythm as a section. */
 interface Props {
   title: string
+  /** A small label above the title, such as the product's name. */
+  eyebrow?: string
 }
-const { title } = Astro.props
+const { title, eyebrow } = Astro.props
 ---
 
 <section class="page-head">
   <div class="wrap">
     <header class="page-head-text">
+      {eyebrow && <p class="chapter">{eyebrow}</p>}
       <h1 class="display">{title}</h1>
       <div class="lede page-head-lede"><slot /></div>
     </header>
