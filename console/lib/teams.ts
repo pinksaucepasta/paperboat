@@ -29,6 +29,12 @@ const minute = 60_000
 const json = { "content-type": "application/json" }
 const teamPath = (team: string) => `teams/${encodeURIComponent(team)}`
 
+/**
+ * Team changes are fenced by the team's generation. The page's copy can be a moment behind its own
+ * previous change, so a change reads the generation just before it is sent.
+ */
+const freshGeneration = async (team: Team) => (await api<Team>(teamPath(team.team_id))).generation
+
 export const teamQuery = (team: string) =>
   queryOptions({
     queryKey: ["team", team],
@@ -98,11 +104,12 @@ export function inviteMember(team: Team, email: string, role: TeamRole = "member
   })
 }
 
-export function cancelInvitation(team: Team, invitation: string) {
+export async function cancelInvitation(team: Team, invitation: string) {
+  const expected_generation = await freshGeneration(team)
   return api<unknown>(`${teamPath(team.team_id)}/invitations/${encodeURIComponent(invitation)}/cancel`, {
     method: "POST",
     headers: json,
-    body: JSON.stringify({ operation_id: idempotencyKey(), expected_generation: team.generation }),
+    body: JSON.stringify({ operation_id: idempotencyKey(), expected_generation }),
   })
 }
 
@@ -124,7 +131,7 @@ export function answerInvitation(invitation: string, answer: "accept" | "decline
 }
 
 /** Role change, remove, leave, transfer ownership and delete: one endpoint, fenced by generation. */
-export function teamAction(
+export async function teamAction(
   team: Team,
   action: TeamAction,
   fields: {
@@ -135,10 +142,11 @@ export function teamAction(
     approve_new_machines?: boolean
   } = {},
 ) {
+  const expected_generation = await freshGeneration(team)
   return api<Team>(`${teamPath(team.team_id)}/actions`, {
     method: "POST",
     headers: json,
-    body: JSON.stringify({ operation_id: idempotencyKey(), expected_generation: team.generation, action, ...fields }),
+    body: JSON.stringify({ operation_id: idempotencyKey(), expected_generation, action, ...fields }),
   })
 }
 
@@ -146,13 +154,14 @@ export function teamAction(
  * An owner or admin answers a machine a member asked to add ("approve", "decline"); its owner can
  * withdraw the request ("unshare").
  */
-export function answerMachine(team: Team, machineId: string, action: "approve" | "decline" | "unshare") {
+export async function answerMachine(team: Team, machineId: string, action: "approve" | "decline" | "unshare") {
+  const expected_generation = await freshGeneration(team)
   return api<Team>(`${teamPath(team.team_id)}/machines`, {
     method: "POST",
     headers: json,
     body: JSON.stringify({
       operation_id: idempotencyKey(),
-      expected_generation: team.generation,
+      expected_generation,
       machine_id: machineId,
       action,
     }),
@@ -180,19 +189,20 @@ export type MachineCapability = (typeof machineCapabilities)[number]["id"]
  * Sets what the whole team (`account` empty) or one member may do on a team machine. `capabilities`
  * is the complete set; turning access off sends the previous set with `active: false`.
  */
-export function grantMachine(
+export async function grantMachine(
   team: Team,
   machineId: string,
   audience: { account?: string },
   capabilities: string[],
   active: boolean,
 ) {
+  const expected_generation = await freshGeneration(team)
   return api<Team>(`${teamPath(team.team_id)}/machine-grants`, {
     method: "POST",
     headers: json,
     body: JSON.stringify({
       operation_id: idempotencyKey(),
-      expected_generation: team.generation,
+      expected_generation,
       machine_id: machineId,
       audience: audience.account ? "selected_member" : "all_members",
       ...(audience.account ? { account_id: audience.account } : {}),
