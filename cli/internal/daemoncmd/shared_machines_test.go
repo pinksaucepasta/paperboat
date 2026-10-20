@@ -46,7 +46,7 @@ func TestTeamSharedMachinesJoinTopologyOnlyWithPrivateAccess(t *testing.T) {
 		client := api.New(server.URL, config.Credential{AccessToken: "session"}, server.Client())
 		return client, client.SetWorkspace(workspace)
 	}
-	machines, err := withTeamSharedMachines(context.Background(), []api.UserMachine{own}, scoped)
+	machines, err := (&teamSharedMachines{}).join(context.Background(), []api.UserMachine{own}, scoped)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,8 +67,30 @@ func TestTeamSharedMachinesSkipAWorkspaceThatIsNoLongerAvailable(t *testing.T) {
 		client := api.New(server.URL, config.Credential{AccessToken: "session"}, server.Client())
 		return client, client.SetWorkspace(workspace)
 	}
-	machines, err := withTeamSharedMachines(context.Background(), nil, scoped)
+	machines, err := (&teamSharedMachines{}).join(context.Background(), nil, scoped)
 	if err != nil || len(machines) != 1 || machines[0].ID != "machine_shared" {
 		t.Fatalf("machines = %v, err = %v; the team that disappeared must not hide the other team's machine", machines, err)
+	}
+}
+
+func TestFailedTeamLookupKeepsTheMachinesAlreadyOffered(t *testing.T) {
+	shared := api.UserMachine{ID: "machine_shared", Alias: "shared", Permissions: []string{"private_access"}}
+	healthy := sharedMachinesServer(t, map[string][]api.UserMachine{"team-a": {shared}, "team-b": {}})
+	defer healthy.Close()
+	cache := &teamSharedMachines{}
+	scopedTo := func(server *httptest.Server) func(string) (*api.Client, error) {
+		return func(workspace string) (*api.Client, error) {
+			client := api.New(server.URL, config.Credential{AccessToken: "session"}, server.Client())
+			return client, client.SetWorkspace(workspace)
+		}
+	}
+	if machines, err := cache.join(context.Background(), nil, scopedTo(healthy)); err != nil || len(machines) != 1 {
+		t.Fatalf("first lookup = %v, %v", machines, err)
+	}
+	broken := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusBadGateway) }))
+	defer broken.Close()
+	machines, err := cache.join(context.Background(), []api.UserMachine{{ID: "machine_own"}}, scopedTo(broken))
+	if err == nil || len(machines) != 2 {
+		t.Fatalf("machines = %v, err = %v; want the own and the already shared machine plus the failure", machines, err)
 	}
 }

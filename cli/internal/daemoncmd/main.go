@@ -387,6 +387,7 @@ func localDaemonCommand() *cobra.Command {
 					}
 					defer func() { _ = events.Shutdown(context.WithoutCancel(ctx)) }()
 				}
+				teamShared := &teamSharedMachines{}
 				return localdaemon.Run(ctx, localdaemon.DaemonConfig{
 					InventoryEvents: inventoryEvents,
 					Paths:           paths, Source: source, ManagedSSH: managedConfig, IssuePeerStream: source.IssuePeerStream,
@@ -408,10 +409,10 @@ func localDaemonCommand() *cobra.Command {
 							return fmt.Errorf("refresh authorized local browser services: %w", err)
 						}
 						// A team lookup failure must not take the account's own machines offline.
-						if shared, sharedErr := withTeamSharedMachines(ctx, machines, scoped); sharedErr != nil {
-							diagnosticlog.TryWarn("machines shared by teams are unavailable; own machines stay reachable", "error", sharedErr)
-						} else {
-							machines = shared
+						var sharedErr error
+						machines, sharedErr = teamShared.join(ctx, machines, scoped)
+						if sharedErr != nil {
+							diagnosticlog.TryWarn("machines shared by teams are unavailable; keeping the last known ones", "error", sharedErr)
 						}
 						return coordinator.ApplyMachines(ctx, machines, services)
 					},
