@@ -28,6 +28,10 @@ type OriginHTTPTransport struct {
 	TLS                      OriginTLSProvider
 	AllowInsecureDevelopment bool
 	Observe                  func(OriginProbeObservation)
+	// KeepControlPlaneHeaders lets X-Paperboat-* headers through in both directions. It is for the
+	// machine's own runtime listener, where the control plane sends an operation id and reads a file
+	// name; a user's origin never sees or sets those headers.
+	KeepControlPlaneHeaders bool
 
 	mu         sync.Mutex
 	transports map[string]originRoundTripper
@@ -71,13 +75,13 @@ func (t *OriginHTTPTransport) RoundTrip(ctx context.Context, route hoststate.Tun
 		out.Host = route.OriginAddress
 	}
 	webSocketUpgrade := validWebSocketUpgrade(out)
-	sanitizeOriginRequestHeaders(out.Header, webSocketUpgrade)
+	sanitizeOriginRequestHeaders(out.Header, webSocketUpgrade, t.KeepControlPlaneHeaders)
 	response, err := transport.RoundTrip(out)
 	if err != nil {
 		return nil, errors.Join(ErrOriginUnavailable, err)
 	}
 	responseUpgrade := webSocketUpgrade && response.StatusCode == http.StatusSwitchingProtocols && headerHasToken(response.Header, "Connection", "upgrade") && strings.EqualFold(strings.TrimSpace(response.Header.Get("Upgrade")), "websocket")
-	sanitizeOriginResponseHeaders(response.Header, responseUpgrade)
+	sanitizeOriginResponseHeaders(response.Header, responseUpgrade, t.KeepControlPlaneHeaders)
 	return response, nil
 }
 
@@ -168,7 +172,7 @@ func (t *OriginHTTPTransport) newGeneration() *OriginHTTPTransport {
 	if t == nil {
 		return nil
 	}
-	return &OriginHTTPTransport{Dialer: t.Dialer, TLS: t.TLS, AllowInsecureDevelopment: t.AllowInsecureDevelopment, Observe: t.Observe, transports: make(map[string]originRoundTripper)}
+	return &OriginHTTPTransport{Dialer: t.Dialer, TLS: t.TLS, AllowInsecureDevelopment: t.AllowInsecureDevelopment, Observe: t.Observe, KeepControlPlaneHeaders: t.KeepControlPlaneHeaders, transports: make(map[string]originRoundTripper)}
 }
 
 func (t *OriginHTTPTransport) CloseIdleConnections() {
@@ -185,7 +189,7 @@ func (t *OriginHTTPTransport) CloseIdleConnections() {
 	}
 }
 
-func sanitizeOriginRequestHeaders(header http.Header, preserveWebSocketUpgrade bool) {
+func sanitizeOriginRequestHeaders(header http.Header, preserveWebSocketUpgrade, keepControlPlane bool) {
 	if header == nil {
 		return
 	}
@@ -200,7 +204,11 @@ func sanitizeOriginRequestHeaders(header http.Header, preserveWebSocketUpgrade b
 	}
 	for name := range header {
 		lower := strings.ToLower(name)
-		if strings.HasPrefix(lower, "x-paperboat-") || strings.HasPrefix(lower, "paperboat-") || strings.HasPrefix(lower, "x-forwarded-") {
+		control := strings.HasPrefix(lower, "x-paperboat-")
+		if control && keepControlPlane {
+			continue
+		}
+		if control || strings.HasPrefix(lower, "paperboat-") || strings.HasPrefix(lower, "x-forwarded-") {
 			header.Del(name)
 		}
 	}
@@ -211,7 +219,7 @@ func sanitizeOriginRequestHeaders(header http.Header, preserveWebSocketUpgrade b
 	}
 }
 
-func sanitizeOriginResponseHeaders(header http.Header, preserveWebSocketUpgrade bool) {
+func sanitizeOriginResponseHeaders(header http.Header, preserveWebSocketUpgrade, keepControlPlane bool) {
 	if header == nil {
 		return
 	}
@@ -225,7 +233,7 @@ func sanitizeOriginResponseHeaders(header http.Header, preserveWebSocketUpgrade 
 	}
 	for name := range header {
 		lower := strings.ToLower(name)
-		if strings.HasPrefix(lower, "x-paperboat-") || strings.HasPrefix(lower, "paperboat-") {
+		if (strings.HasPrefix(lower, "x-paperboat-") && !keepControlPlane) || strings.HasPrefix(lower, "paperboat-") {
 			header.Del(name)
 		}
 	}

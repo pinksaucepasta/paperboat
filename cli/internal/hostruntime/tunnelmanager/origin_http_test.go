@@ -290,7 +290,7 @@ func TestOriginHTTPHeaderSanitizationPreservesApplicationCredentials(t *testing.
 		"Paperboat-Grant":     {"secret"},
 		"Cookie":              {"session=application; Paperboat-access=secret; __Host-Paperboat_csrf=secret; theme=dark"},
 	}
-	sanitizeOriginRequestHeaders(request, false)
+	sanitizeOriginRequestHeaders(request, false, false)
 	if request.Get("Authorization") != "Bearer application" || request.Get("Cookie") != "session=application; theme=dark" {
 		t.Fatalf("application credentials changed: auth=%q cookie=%q", request.Get("Authorization"), request.Get("Cookie"))
 	}
@@ -305,7 +305,7 @@ func TestOriginHTTPHeaderSanitizationPreservesApplicationCredentials(t *testing.
 		"Paperboat-Decision":   {"secret"},
 		"Set-Cookie":           {"session=application; Path=/", "Paperboat-access=secret; Path=/", "__Secure-Paperboat_csrf=secret; Path=/"},
 	}
-	sanitizeOriginResponseHeaders(response, false)
+	sanitizeOriginResponseHeaders(response, false, false)
 	if got := response.Values("Set-Cookie"); len(got) != 1 || got[0] != "session=application; Path=/" {
 		t.Fatalf("sanitized response cookies=%q", got)
 	}
@@ -328,8 +328,39 @@ func TestOriginHTTPOnlyPreservesValidatedWebSocketUpgrade(t *testing.T) {
 	if validWebSocketUpgrade(invalid) {
 		t.Fatal("invalid WebSocket upgrade accepted")
 	}
-	sanitizeOriginRequestHeaders(invalid.Header, false)
+	sanitizeOriginRequestHeaders(invalid.Header, false, false)
 	if invalid.Header.Get("Connection") != "" || invalid.Header.Get("Upgrade") != "" {
 		t.Fatal("invalid upgrade survived sanitization")
+	}
+}
+
+// The machine's own runtime listener is served through the same forwarder, and the control plane's
+// inbox request carries its operation id in X-Paperboat-Operation-Id and reads the file name from
+// X-Paperboat-Inbox-File-Name. A user's origin never sees or sets such headers; the runtime listener must.
+func TestOriginHTTPTransportKeepsControlPlaneHeadersOnlyWhenAsked(t *testing.T) {
+	var seen string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		seen = request.Header.Get("X-Paperboat-Operation-Id")
+		writer.Header().Set("X-Paperboat-Inbox-File-Name", "report.txt")
+		writer.Header().Set("Paperboat-Decision", "internal")
+		writer.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	route := hoststate.TunnelConfigRoute{ID: "route_01", Protocol: "http", OriginScheme: "http", OriginAddress: server.Listener.Addr().String(), PreserveHost: true, TLSVerification: "not_applicable", ConnectTimeoutMs: 1000, IdleTimeoutMs: 2000, DesiredState: "active"}
+	for _, keep := range []bool{false, true} {
+		seen = ""
+		request, _ := http.NewRequest(http.MethodGet, "http://public.example.test/v1/inbox-files", nil)
+		request.Header.Set("X-Paperboat-Operation-Id", "inbox-12345678")
+		response, err := (&OriginHTTPTransport{KeepControlPlaneHeaders: keep}).RoundTrip(context.Background(), route, request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if keep != (seen == "inbox-12345678") || keep != (response.Header.Get("X-Paperboat-Inbox-File-Name") == "report.txt") {
+			t.Fatalf("keep=%v: origin saw operation id %q, response file name %q", keep, seen, response.Header.Get("X-Paperboat-Inbox-File-Name"))
+		}
+		if response.Header.Get("Paperboat-Decision") != "" {
+			t.Fatal("an internal decision header reached the client")
+		}
 	}
 }

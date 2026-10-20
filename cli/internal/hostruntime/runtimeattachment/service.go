@@ -524,7 +524,7 @@ func (s *Service) connect(ctx context.Context, a admissionBinding, key string) (
 	if err != nil {
 		return nil, carrierFailure(err)
 	}
-	forwarder := tunnelmanager.OriginStreamForwarder{Transport: &tunnelmanager.OriginHTTPTransport{}}
+	forwarder := runtimeOriginForwarder()
 	route := hoststate.TunnelConfigRoute{ID: b.RouteID, Protocol: "http", MatchType: "exact", MatchHostname: a.Hostname, OriginScheme: "http", OriginAddress: s.config.ListenAddress, PreserveHost: true, TLSVerification: "not_applicable", ConnectTimeoutMs: 5000, IdleTimeoutMs: 3600000, MaxConcurrentStreams: 256, DesiredState: "active"}
 	streams, err := forwarder.Start(ctx, carrier.Active, []hoststate.TunnelConfigRoute{route})
 	if err != nil {
@@ -545,6 +545,13 @@ func (s *Service) connect(ctx context.Context, a admissionBinding, key string) (
 		})
 	})
 	return &live{key: key, active: carrier.Active, streams: streams, release: carrier.Release, open: opener}, nil
+}
+
+// runtimeOriginForwarder serves the machine's own runtime listener over the carrier. The control
+// plane's requests to it (inbox listing, read and delete) carry X-Paperboat-* headers that the
+// forwarder would strip for a user's origin.
+func runtimeOriginForwarder() tunnelmanager.OriginStreamForwarder {
+	return tunnelmanager.OriginStreamForwarder{Transport: &tunnelmanager.OriginHTTPTransport{KeepControlPlaneHeaders: true}}
 }
 
 func closeLive(l *live) error {
