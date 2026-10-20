@@ -157,6 +157,13 @@ export function TeamManage({ workspace }: { workspace: Workspace }) {
         </div>
         {view === "members" ? (
           <MembersTable team={team.data} members={shownMembers} emails={emails} me={me.data} actor={actor} />
+        ) : invitations.isError ? (
+          <div className="flex items-center justify-center gap-3 py-12 text-sm text-muted-foreground">
+            Couldn’t load invitations.
+            <Button variant="outline" size="sm" onClick={() => invitations.refetch()}>
+              Retry
+            </Button>
+          </div>
         ) : (
           <InvitationsTable team={team.data} invitations={shownInvites} emails={emails} me={me.data} />
         )}
