@@ -141,6 +141,12 @@ func (m *Manager) PreparedCandidate() (PreparedCandidate, error) {
 	if journal.Stage != updateflow.StageAwaitingApproval {
 		return PreparedCandidate{}, nil
 	}
+	if m.candidateInstalled(journal) {
+		// Installed and waiting only for its finish steps: there is no candidate left to review, and
+		// status must keep answering because hostd's commit check reads it (a failing status
+		// rejected the commit of every official update).
+		return PreparedCandidate{}, nil
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), m.config.RollbackTimeout)
 	defer cancel()
 	if err = m.verifyPrepared(ctx, journal); err != nil {

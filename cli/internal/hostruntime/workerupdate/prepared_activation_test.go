@@ -225,6 +225,10 @@ func TestRetryAfterInterruptedFinishCompletesWithoutTheStagedPayload(t *testing.
 	if _, err := activatePrepared(context.Background(), f.manager, f.candidate); err == nil {
 		t.Fatal("the failing finish was not reported")
 	}
+	// hostd's commit check reads updater status, which asks for the prepared candidate: it must answer.
+	if candidate, err := f.manager.PreparedCandidate(); err != nil || candidate.ID != "" {
+		t.Fatalf("status cannot describe an installed candidate: %+v %v", candidate, err)
+	}
 	// Restart: the helper starts from the previous release again; the journal still holds the receipt.
 	f.manager.setActive(previous)
 	finalizeFails = false
