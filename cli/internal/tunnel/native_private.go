@@ -52,7 +52,10 @@ func (t *PeerTerminalTunnel) DialPrivateSession(ctx context.Context, machineID s
 		return nil, ErrPeerTerminalInvalid
 	}
 
-	identity, err := t.authorities.Resolve(ctx, clientauthority.Request{Store: t.config.Store, Client: client, Issuer: t.config.Issuer, AccountID: profile.Account.ID, CLIClientSessionID: profile.CLIClientSessionID, MachineID: machineID, MachineGeneration: generation, Now: t.config.Now().UTC()})
+	// Native network bindings authenticate the remote peer, including a teammate's machine that
+	// is shared into a team. Its endpoint certificate is private to the owner's account, so
+	// loading it here would reject exactly the shared machines this path exists for.
+	identity, err := clientauthority.ResolveLocal(ctx, clientauthority.Request{Store: t.config.Store, Client: client, Issuer: t.config.Issuer, AccountID: profile.Account.ID, CLIClientSessionID: profile.CLIClientSessionID, Now: t.config.Now().UTC()})
 	if err != nil {
 		return nil, err
 	}
