@@ -38,6 +38,7 @@ const (
 	commandRejectResetRetire
 	commandRejectDaemonAccount
 	commandRejectSendToSameMachine
+	commandRejectInspector
 )
 
 // commandRejection describes a command-owned refusal. Its
@@ -49,7 +50,7 @@ type commandRejection struct {
 }
 
 func (e commandRejection) valid() bool {
-	return e.reason >= commandRejectDefaultSessionRename && e.reason <= commandRejectSendToSameMachine
+	return e.reason >= commandRejectDefaultSessionRename && e.reason <= commandRejectInspector
 }
 func (e commandRejection) Error() string {
 	switch e.reason {
@@ -80,6 +81,11 @@ func (e commandRejection) Error() string {
 		}
 	case commandRejectResetRetire:
 		return "The old machine record could not be removed, so nothing was reset. Check your connection and run `pb reset` again."
+	case commandRejectInspector:
+		var daemonErr *inspectorDaemonError
+		if errors.As(e.cause, &daemonErr) {
+			return daemonErr.Error()
+		}
 	case commandRejectSendToSameMachine:
 		return "That is this computer. Choose another computer with --to; run pb machine list to see them."
 	case commandRejectInboxDeclined:

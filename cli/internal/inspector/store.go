@@ -675,7 +675,11 @@ func (s *Store) authorizeRetrieval(credential Credential, want Action) (Resource
 		return ResourcePolicy{}, ErrStaleAuthority
 	}
 	policy, ok := s.policies[credential.ResourceID]
-	if !ok || policy.Revoked {
+	if !ok {
+		// Capture was never enabled for this resource, or its captures were purged.
+		return ResourcePolicy{}, ErrDisabled
+	}
+	if policy.Revoked {
 		return ResourcePolicy{}, ErrStaleAuthority
 	}
 	if policy.ResourceGeneration != 0 && credential.ResourceGeneration != policy.ResourceGeneration ||

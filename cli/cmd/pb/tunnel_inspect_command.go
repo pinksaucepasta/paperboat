@@ -104,7 +104,13 @@ func decodeInspectorDaemonError(status int, payload []byte) error {
 	if decoder.Decode(&envelope) != nil || strings.TrimSpace(envelope.Code) == "" {
 		return errInspectorDaemonUnavailable
 	}
-	return &inspectorDaemonError{Status: status, Code: envelope.Code, Reason: envelope.Reason}
+	return commandRejection{reason: commandRejectInspector, cause: &inspectorDaemonError{Status: status, Code: envelope.Code, Reason: envelope.Reason}}
+}
+
+// inspectorNotEnabled reports whether the daemon said capture was never enabled for the resource.
+func inspectorNotEnabled(err error) bool {
+	var daemonErr *inspectorDaemonError
+	return errors.As(err, &daemonErr) && daemonErr.Code == "inspector_not_enabled"
 }
 
 type inspectorCapture struct {
@@ -456,14 +462,17 @@ func runInspectorView(command *cobra.Command, clients *inspectorClients, target 
 			if err != nil {
 				return false, err
 			}
-			if status != http.StatusOK {
-				return daemonDenied(status, payload), decodeInspectorDaemonError(status, payload)
-			}
 			var page struct {
 				Records    []inspectorCapture `json:"records"`
 				NextCursor string             `json:"next_cursor"`
 			}
-			if err := decodeInspectorPayload(payload, &page); err != nil {
+			if status != http.StatusOK {
+				// A resource whose capture was never enabled (or was purged) simply has no captures.
+				if err := decodeInspectorDaemonError(status, payload); !inspectorNotEnabled(err) {
+					return daemonDenied(status, payload), err
+				}
+				page.Records = []inspectorCapture{}
+			} else if err := decodeInspectorPayload(payload, &page); err != nil {
 				return false, err
 			}
 			if jsonOutput, _ := command.Flags().GetBool("json"); jsonOutput {

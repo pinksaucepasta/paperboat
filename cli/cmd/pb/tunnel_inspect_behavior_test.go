@@ -237,3 +237,16 @@ func TestTunnelReplayTransportFailurePreservesGeneratedRecoveryKey(t *testing.T)
 		t.Fatalf("ambiguous request retried %d times", hits.Load())
 	}
 }
+
+// F7-07: a preview whose capture was never enabled (or was purged) has no captures; listing says so.
+func TestTunnelInspectListWithCaptureNeverEnabledShowsNoCaptures(t *testing.T) {
+	client, _ := newInspectorTestServer(t, http.StatusOK, inspectorTestRouteJSON)
+	var hits atomic.Int32
+	var grant string
+	inspectorTestDaemon(t, daemonListHandler(t, &hits, &grant, http.StatusNotFound, `{"schema":"paperboat.inspector/v1","kind":"error","code":"inspector_not_enabled"}`))
+	wireInspectorTestClients(client)
+	output, err := runInspectorCommand(t, tunnelCobraCommandV1, "inspect", "tun_01")
+	if err != nil || !strings.Contains(output, "No captures retained") || !strings.Contains(output, "Enable capture first") {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+}

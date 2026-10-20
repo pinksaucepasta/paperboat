@@ -223,6 +223,10 @@ func classifyCommandFailure(err error) (failure commandFailure) {
 		case daemoncmd.ErrDaemonAccountMismatch:
 			set(commandRejected, current)
 			continue
+		case *inspectorDaemonError:
+			// The daemon's stable inspector refusal carries its own message and next step.
+			set(commandRejected, current)
+			continue
 		case usageError, unsupportedJSONOutputError, *preferences.InvalidError:
 			set(commandUsage, current)
 			continue

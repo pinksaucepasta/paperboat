@@ -547,3 +547,21 @@ func TestSanitizerBoundsAdversarialJSONAndURLInput(t *testing.T) {
 		t.Fatalf("oversized URL = %q, %v", got, truncated)
 	}
 }
+
+// A resource with no policy (capture never enabled, or purged) is "not enabled", not a stale credential.
+func TestRetrievalWithoutAPolicyReportsCaptureNotEnabled(t *testing.T) {
+	now := time.Now().UTC()
+	store := NewStore()
+	store.now = func() time.Time { return now }
+	credential := testCredential("tunnel_01", "user_01", ActionInspect, now)
+	if _, err := store.List(context.Background(), credential, "", 10); err != ErrDisabled {
+		t.Fatalf("never enabled: %v", err)
+	}
+	if err := store.SetPolicy("tunnel_01", testPolicy()); err != nil {
+		t.Fatal(err)
+	}
+	store.Revoke("tunnel_01")
+	if _, err := store.List(context.Background(), credential, "", 10); err != ErrDisabled {
+		t.Fatalf("after purge: %v", err)
+	}
+}

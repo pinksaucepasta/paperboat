@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"slices"
@@ -221,6 +222,14 @@ func classifyCLIJSONFailure(err error, failure commandFailure) cliJSONError {
 			}
 			if typed.cause == nil {
 				result.StateChanged = false
+			}
+			var inspectorErr *inspectorDaemonError
+			if typed.reason == commandRejectInspector && errors.As(typed.cause, &inspectorErr) {
+				// Every daemon refusal happens before a replay is sent, except an ambiguous replay.
+				result.Code, result.StateChanged = inspectorErr.Code, false
+				if inspectorErr.Code == "inspector_replay_ambiguous" {
+					result.StateChanged, result.OutcomeUncertain = "unknown", true
+				}
 			}
 			if typed.reason == commandRejectInboxDeclined {
 				// The request was created and declined; file delivery never began.
