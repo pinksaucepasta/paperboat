@@ -32,7 +32,7 @@ def main():
     parser.add_argument('target')
     parser.add_argument('--expect', required=True, choices=['empty', 'applied', 'pending', 'undeliverable'])
     args = parser.parse_args()
-    code, out, err = run('env', 'host', 'show', args.target, '--json')
+    code, out, err = run('env', 'host', 'show', '--machine', args.target, '--json')
     if code:
         raise RuntimeError('env host show failed')
     host = json.loads(out)
