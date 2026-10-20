@@ -15,7 +15,7 @@ def main():
     binary = Path.home() / '.local/bin/pb'
     before = registration()
     shown = invoke(binary, 'config', 'local-access', 'show', '--json')
-    original = shown['local_access']
+    original = {'domain': shown['domain'], **shown['local_access']}
     configuration = json.loads((runtime_root() / 'machine-registration.json').read_text())
     with urllib.request.urlopen(configuration['server_url'].rstrip('/') + '/v1/client-configuration', timeout=20) as response:
         metadata = json.load(response)
@@ -37,6 +37,10 @@ def main():
         assert receipt['local_access'] == effective
         return effective
 
+    def current_domain():
+        # The machine guard owns the domain; show reports it beside the aliases.
+        return invoke(binary, 'config', 'local-access', 'show', '--json')['domain']
+
     try:
         configured = change('alias', 'set', name, 'app', '49151')
         assert any(item['machine_alias'] == name and item['name'] == 'app' and item['port'] == 49151
@@ -44,12 +48,12 @@ def main():
         configured = change('proxy', 'set', name, '49152')
         assert any(item['machine_alias'] == name and item['port'] == 49152
                    for item in configured['machine_proxies'])
-        configured = change('apply')
-        assert configured['domain'] == original['domain']
-        configured = change('domain', 'reset')
-        assert configured['domain'] == discovered
-        configured = change('domain', 'set', configured['domain'])
-        assert configured['domain'] == discovered
+        change('apply')
+        assert current_domain() == original['domain']
+        change('domain', 'reset')
+        assert current_domain() == discovered
+        change('domain', 'set', discovered)
+        assert current_domain() == discovered
     finally:
         primary = sys.exc_info()[1]
         cleanup_errors = []
@@ -63,8 +67,9 @@ def main():
             if primary is None:
                 raise cleanup_errors[0]
             print('Local settings cleanup also failed; inspect the protected command receipts.', file=sys.stderr)
-    final = invoke(binary, 'config', 'local-access', 'show', '--json')['local_access']
-    assert final['domain'] == original['domain']
+    shown_final = invoke(binary, 'config', 'local-access', 'show', '--json')
+    final = shown_final['local_access']
+    assert shown_final['domain'] == original['domain']
     assert final.get('service_aliases') == original.get('service_aliases')
     assert final.get('machine_proxies') == original.get('machine_proxies')
     assert registration() == before
