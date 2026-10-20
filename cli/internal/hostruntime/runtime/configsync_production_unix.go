@@ -228,10 +228,7 @@ type combinedConfigDiagnostics struct {
 }
 
 func (d combinedConfigDiagnostics) Diagnostics() configsync.ReconciliationDiagnostics {
-	pull, push := d.pull.Diagnostics(), d.push.Diagnostics()
-	push.LastAppliedRevision = pull.LastAppliedRevision
-	push.Skipped = append(pull.Skipped, push.Skipped...)
-	return push
+	return configsync.CombineDirectionalDiagnostics(d.pull.Diagnostics(), d.push.Diagnostics())
 }
 func (d combinedConfigDiagnostics) CurrentManifest() configsync.Manifest {
 	return d.pull.CurrentManifest()

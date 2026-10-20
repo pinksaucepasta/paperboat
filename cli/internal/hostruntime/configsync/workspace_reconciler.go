@@ -45,6 +45,17 @@ type ReconciliationDiagnostics struct {
 	LastPublishedRevision string
 }
 
+// CombineDirectionalDiagnostics reports a bidirectional assignment's two reconcilers as one:
+// a conflict found while pulling is as real as one found while pushing, and a pulled-then-applied
+// revision is what the user sees as the last applied one.
+func CombineDirectionalDiagnostics(pull, push ReconciliationDiagnostics) ReconciliationDiagnostics {
+	push.LastAppliedRevision = pull.LastAppliedRevision
+	push.Skipped = append(append([]PathSummary(nil), pull.Skipped...), push.Skipped...)
+	push.Conflicts = append(append([]PathSummary(nil), pull.Conflicts...), push.Conflicts...)
+	push.PendingCleanPathCount += pull.PendingCleanPathCount
+	return push
+}
+
 type DiagnosticsSource interface {
 	Diagnostics() ReconciliationDiagnostics
 }

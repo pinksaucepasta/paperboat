@@ -417,3 +417,21 @@ func TestReconcilerDropsBaselineOfAnotherRepository(t *testing.T) {
 		t.Fatalf("local file changed without an ancestor: %q %v", value, err)
 	}
 }
+
+// A bidirectional assignment runs a pull and a push reconciler. The pull side's conflict was
+// dropped, so the machine reported "healthy" while its file silently stopped syncing.
+func TestBidirectionalDiagnosticsKeepAConflictFoundWhilePulling(t *testing.T) {
+	pull := ReconciliationDiagnostics{
+		Conflicts:             []PathSummary{{Path: "ecfg", Reason: "concurrent_update"}},
+		Skipped:               []PathSummary{{Path: "skipped-pull"}},
+		PendingCleanPathCount: 2, LastAppliedRevision: "applied",
+	}
+	push := ReconciliationDiagnostics{Skipped: []PathSummary{{Path: "skipped-push"}}, PendingCleanPathCount: 1, LastPublishedRevision: "published"}
+	combined := CombineDirectionalDiagnostics(pull, push)
+	if len(combined.Conflicts) != 1 || combined.Conflicts[0].Path != "ecfg" {
+		t.Fatalf("conflicts = %+v, want the pull conflict", combined.Conflicts)
+	}
+	if combined.PendingCleanPathCount != 3 || combined.LastAppliedRevision != "applied" || combined.LastPublishedRevision != "published" || len(combined.Skipped) != 2 {
+		t.Fatalf("combined = %+v", combined)
+	}
+}
