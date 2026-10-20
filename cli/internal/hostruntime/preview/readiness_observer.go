@@ -103,6 +103,18 @@ func (o *HTTPDispatchReadinessObserver) ObservePreviewReadiness(ctx context.Cont
 	return Lease{}, err
 }
 
+// CurrentLease reads the server's present projection of a lease this machine
+// owns, with its current ETag. A lease that is no longer active is an error.
+func (o *HTTPDispatchReadinessObserver) CurrentLease(ctx context.Context, stored Lease) (Lease, error) {
+	operation, err := newDispatchOperationID()
+	if err != nil {
+		return Lease{}, err
+	}
+	trace := "request_" + strings.TrimPrefix(operation, "operation_")
+	metadata := DispatchReadiness{OperationID: operation, IdempotencyKey: operation, RequestID: trace, CorrelationID: trace}
+	return o.readinessRequest(ctx, metadata, stored, stored.Generation, http.MethodGet, "ready")
+}
+
 // ObservePreviewOrigin posts the owner's origin state for a ready preview. The server projects a
 // down origin as lease state origin_unavailable and back to ready when the app returns.
 func (o *HTTPDispatchReadinessObserver) ObservePreviewOrigin(ctx context.Context, metadata DispatchReadiness, lease Lease, up bool) (Lease, error) {

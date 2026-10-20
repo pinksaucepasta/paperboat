@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""F7-04: a background preview survives a daemon restart and reports a stopped app, then recovers.
+"""F7-04: a background preview survives a daemon and a host-service restart and reports a stopped app, then recovers.
 
   1. background preview serves the marker
   2. `pb service restart` (the user daemon): the same URL serves again and the lease stays ready
   3. the local app stops: the lease becomes origin_unavailable and the URL stops serving it
   4. the app returns on the same port: the lease is ready again and the URL serves the marker
   5. `preview stop` ends it: state stopped and the URL no longer serves
-Also records (does not assert) what a host-service restart does to the preview.
+  6. Linux: a second background preview survives a restart of the host service (an update
+     restarts it): the same URL serves again and the lease stays ready; `preview stop` ends it
 """
 import functools
 import http.server
@@ -102,8 +103,13 @@ def main():
                 identifier, endpoint = lease['id'], receipt_value(lease, 'endpoint')
                 wait_for(lambda: marker in body(endpoint), 'the second preview to serve')
                 sudo('systemctl', 'restart', 'paperboat-hostd-u%d.service' % os.getuid())
-                time.sleep(20)
-                result['host_restart'] = state(identifier)
+                time.sleep(5)
+                wait_for(lambda: marker in body(endpoint) and state(identifier) == 'ready', 'the same URL after a host-service restart')
+                result['host_restart'] = 'survived'
+                stopped = invoke(PB, 'preview', 'stop', identifier, '--json', timeout=60)
+                receipt_value(stopped, 'stopped', identifier)
+                identifier_stopped, identifier = identifier, None
+                wait_for(lambda: marker not in body(endpoint), 'the second preview to stop serving')
         except BaseException as error:
             primary_error = error
             raise

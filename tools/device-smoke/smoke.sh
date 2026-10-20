@@ -784,7 +784,7 @@ elif sys.argv[2]=="tunnel-transfer":
 elif sys.argv[2]=="tunnel-survival":
  assert all(r[k] for k in ("pause_resume", "daemon_restart", "update", "host_service_restart"))
 elif sys.argv[2]=="preview-survival":
- assert all(r[k] for k in ("daemon_restart", "origin_unavailable", "origin_recovers", "stop_ends"))
+ assert all(r[k] for k in ("daemon_restart", "origin_unavailable", "origin_recovers", "stop_ends")) and r["host_restart"] in ("survived", "not_run")
 elif sys.argv[2]=="tunnel-failures":
  assert r["origin_stopped"] and r["host_stopped"]
 elif sys.argv[2]=="network-inventory":

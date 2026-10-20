@@ -388,6 +388,18 @@ func (m *OwnerSessionLeaseManager) findOwnerSessionLocked(ownerSessionID string)
 	return nil, false
 }
 
+// IsBackground reports whether the session's local owner lease was handed to
+// the host runtime, so its preview needs no CLI process to stay alive.
+func (m *OwnerSessionLeaseManager) IsBackground(ownerSessionID string) bool {
+	if m == nil {
+		return false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	entry, ok := m.findOwnerSessionLocked(ownerSessionID)
+	return ok && entry.lease.Background
+}
+
 func (m *OwnerSessionLeaseManager) Close() error {
 	if m == nil {
 		return nil

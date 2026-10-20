@@ -209,8 +209,9 @@ invitation with `pb team invitation ID`; accept with `pb team accept ID`, or can
 with `pb team cancel-invite TEAM ID`. The Teams home menu provides these actions.
 
 Use `pb preview list` or `pb preview status <preview>` to inspect ephemeral tunnels;
-`stop` and `delete` both withdraw one. Background ownership defaults to 30 minutes, is
-capped at 24 hours, and is not restored after reboot. `--domain` attaches a verified
+`stop` and `delete` both withdraw one. Background ownership defaults to 30 minutes and is
+capped at 24 hours; it keeps the same URL through a daemon or host-service restart and is
+not restored after reboot. `--domain` attaches a verified
 custom domain and may be repeated. Private preview
 hostnames are routed through the narrow local Paperboat proxy; browsers receive no
 Paperboat credential, cookie, or redirect flow.

@@ -37,6 +37,7 @@ type productionPreviewAssembly struct {
 	privateAccess *privatepreviewproxy.AccessService
 	privateTCP    *preview.PrivateTCPAccessManager
 	cancel        context.CancelFunc
+	runCtx        context.Context
 	runtimeDone   chan struct{}
 	once          sync.Once
 }
@@ -47,10 +48,12 @@ type productionPreviewAssemblyConfig struct {
 	MachineID              string
 	InstallationGeneration int64
 	BootID                 string
-	LocalControlToken      string
-	Transport              http.RoundTripper
-	RunContext             context.Context
-	Carrier                connector.DataCarrierPoolConfig
+	// OSBootID identifies this boot of the machine; background previews are resumed only within it.
+	OSBootID          string
+	LocalControlToken string
+	Transport         http.RoundTripper
+	RunContext        context.Context
+	Carrier           connector.DataCarrierPoolConfig
 	// Events wakes the placement watch when a preview of this machine changes; nil polls only.
 	Events     *machineevents.Hub
 	OriginDial preview.PreviewOriginDialer
@@ -154,6 +157,12 @@ func newProductionPreviewAssembly(config productionPreviewAssemblyConfig) (*prod
 		_ = runtime.Close(context.WithoutCancel(config.RunContext))
 		return nil, errors.Join(ErrProductionInvalid, err)
 	}
+	background := &preview.BackgroundResume{
+		Store:        preview.NewBackgroundStore(filepath.Join(config.StateRoot, "preview", "background-previews.json")),
+		OSBootID:     config.OSBootID,
+		IsBackground: ownerLeases.IsBackground,
+		Current:      readiness.CurrentLease,
+	}
 	dispatcher, err := preview.NewDispatchManager(preview.DispatchManagerConfig{
 		MachineID:              config.MachineID,
 		InstallationGeneration: config.InstallationGeneration,
@@ -163,6 +172,7 @@ func newProductionPreviewAssembly(config productionPreviewAssemblyConfig) (*prod
 		Readiness:              readiness,
 		Owners:                 owners,
 		RunContext:             ctx,
+		Background:             background,
 	})
 	if err != nil {
 		_ = ownerLeases.Close()
@@ -180,7 +190,7 @@ func newProductionPreviewAssembly(config productionPreviewAssemblyConfig) (*prod
 		_ = runtime.Close(context.WithoutCancel(config.RunContext))
 		return nil, errors.Join(ErrProductionInvalid, err)
 	}
-	return &productionPreviewAssembly{runtime: runtime, dispatcher: dispatcher, owners: owners, ownerLeases: ownerLeases, privateAccess: privateService, privateTCP: privateTCP, cancel: cancel, runtimeDone: runtimeDone}, nil
+	return &productionPreviewAssembly{runtime: runtime, dispatcher: dispatcher, owners: owners, ownerLeases: ownerLeases, privateAccess: privateService, privateTCP: privateTCP, cancel: cancel, runCtx: ctx, runtimeDone: runtimeDone}, nil
 }
 
 func controlHostname(raw string) string {
@@ -202,6 +212,8 @@ func (a *productionPreviewAssembly) Start(ctx context.Context) error {
 	if a == nil || a.privateAccess == nil || ctx == nil {
 		return ErrProductionInvalid
 	}
+	// Resuming background previews waits for the control plane, so it must not hold up the start.
+	go a.dispatcher.RestoreBackground(a.runCtx)
 	return startPreviewPrivateAccess(ctx, a.privateAccess)
 }
 

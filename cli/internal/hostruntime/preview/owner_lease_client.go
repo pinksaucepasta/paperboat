@@ -73,8 +73,9 @@ func (c *LocalOwnerSessionClient) Acquire(ctx context.Context, ownerSessionID st
 }
 
 // AcquireBackground atomically transfers the local owner lifetime to hostd
-// until the absolute deadline. It requires no CLI heartbeat and is lost when
-// hostd exits, so it cannot be mistaken for durable tunnel ownership.
+// until the absolute deadline. It requires no CLI heartbeat. A restart of hostd
+// resumes the preview (BackgroundResume); a reboot does not, so it cannot be
+// mistaken for durable tunnel ownership.
 func (c *LocalOwnerSessionClient) AcquireBackground(ctx context.Context, ownerSessionID string, target LeaseTarget, expiresAt time.Time) (OwnerSessionLease, error) {
 	key, err := newSessionIdempotencyKey(nil)
 	if err != nil {

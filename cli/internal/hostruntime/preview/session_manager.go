@@ -26,9 +26,9 @@ type sessionOwnerKey struct {
 	OwnerSessionID string
 }
 
-// SessionManager tracks only live foreground sessions. It intentionally has
-// no state path, recovery scan, or serialization hook: reboot restoration is
-// not valid for preview leases.
+// SessionManager tracks only live sessions. It has no state path or recovery
+// scan: a preview is never restored after a reboot. Resuming a background
+// preview after a host runtime restart belongs to DispatchManager.
 type SessionManager struct {
 	mu       sync.RWMutex
 	sessions map[SessionKey]*Session
@@ -180,8 +180,8 @@ func (m *SessionManager) Count() int {
 	return len(m.sessions)
 }
 
-// Shutdown stops all tracked sessions and prevents new registration. It does
-// not persist or restore any preview state.
+// Shutdown stops all tracked sessions and prevents new registration. Background
+// previews are detached instead: their lease keeps running for the next start.
 func (m *SessionManager) Shutdown(ctx context.Context) error {
 	if m == nil {
 		return nil
@@ -206,6 +206,10 @@ func (m *SessionManager) Shutdown(ctx context.Context) error {
 	results := make(chan error, len(sessions))
 	for _, session := range sessions {
 		go func(session *Session) {
+			if session.survivesRestart.Load() {
+				results <- session.Detach(ctx)
+				return
+			}
 			results <- session.Stop(ctx)
 		}(session)
 	}

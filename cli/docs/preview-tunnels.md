@@ -37,7 +37,8 @@ pb preview 3000 --json
 ```
 
 Background mode transfers ownership to the running daemon before returning. It
-defaults to 30 minutes, is capped at 24 hours, and is not restored after reboot.
+defaults to 30 minutes and is capped at 24 hours. It keeps the same URL through a restart of
+the daemon or the host service (an update restarts it), and is not restored after reboot.
 `--duration` remains a deprecated spelling of `--ttl`. `--domain` is repeatable.
 The managed Paperboat URL becomes usable as soon as
 the preview is ready; a custom alias remains pending until its ownership, DNS,

@@ -153,11 +153,14 @@ type DispatchManagerConfig struct {
 	RunContext             context.Context
 	LazyIdleTimeout        time.Duration
 	LazyMaxStreamLifetime  time.Duration
+	// Background lets previews owned by a background local lease outlive a
+	// restart of this host runtime. Nil keeps every preview tied to the process.
+	Background *BackgroundResume
 }
 
 // DispatchManager owns dashboard-created previews in memory for the lifetime
-// of the stable host runtime. It deliberately has no persistence or recovery
-// path, so a reboot can never restore a temporary preview.
+// of the stable host runtime. Only background previews are written down (see
+// BackgroundResume) so a restart resumes them; a reboot never restores one.
 type DispatchManager struct {
 	config DispatchManagerConfig
 	ctx    context.Context
@@ -237,6 +240,10 @@ func NewDispatchManager(config DispatchManagerConfig) (*DispatchManager, error) 
 // readiness; the wrapped carrier records readiness asynchronously and only
 // then lets Session publish the lease as ready.
 func (m *DispatchManager) Dispatch(ctx context.Context, authorization DispatchAuthorization, request DispatchRequest) (DispatchOutcome, error) {
+	return m.dispatch(ctx, authorization, request, false)
+}
+
+func (m *DispatchManager) dispatch(ctx context.Context, authorization DispatchAuthorization, request DispatchRequest, resumed bool) (DispatchOutcome, error) {
 	if m == nil || ctx == nil {
 		return DispatchOutcome{}, ErrDispatchInvalid
 	}
@@ -335,6 +342,10 @@ func (m *DispatchManager) Dispatch(ctx context.Context, authorization DispatchAu
 	baseSessionConfig.Carrier = wrapped
 	baseSessionConfig.OwnerDone = ownerDone
 	session, err := StartExisting(m.ctx, baseSessionConfig, lease)
+	background := err == nil && m.isBackground(request, resumed)
+	if background {
+		session.survivesRestart.Store(true)
+	}
 	if err != nil {
 		m.releaseReservation(request.OperationID, hash)
 		lazyLifecycle.Stop()
@@ -374,6 +385,9 @@ func (m *DispatchManager) Dispatch(ctx context.Context, authorization DispatchAu
 	current.session = session
 	m.operations[request.OperationID] = current
 	m.mu.Unlock()
+	if background {
+		m.rememberBackground(request)
+	}
 	go m.observeSession(request.OperationID, hash, session, !lazy)
 	return dispatchOutcome(request, current), nil
 }
@@ -430,6 +444,9 @@ func (m *DispatchManager) observeSession(operationID, hash string, session *Sess
 	lease := session.currentLease()
 	if releaseOwner {
 		m.releaseOwnerSession(lease.AccountID, lease.OwnerMachineID, lease.OwnerSessionID)
+	}
+	if session.survivesRestart.Load() && !session.leaseOutlivesSession() {
+		m.forgetBackground(operationID)
 	}
 	m.mu.Lock()
 	if current, ok := m.operations[operationID]; ok && current.hash == hash && current.session == session {

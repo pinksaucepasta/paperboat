@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -204,8 +205,15 @@ type Session struct {
 	closeMu   sync.Mutex
 	closeErr  error
 	stopOnce  sync.Once
-	managerMu sync.Mutex
-	managers  map[*SessionManager]struct{}
+	// detached ends the session without stopping the server lease, so a
+	// restarted host runtime can resume the same preview and URL.
+	detached atomic.Bool
+	// survivesRestart marks a background preview that outlives a host runtime restart:
+	// when the host runtime itself shuts down, its lease is left running.
+	survivesRestart atomic.Bool
+	parent          context.Context
+	managerMu       sync.Mutex
+	managers        map[*SessionManager]struct{}
 }
 
 // Start creates the server-owned lease, starts carrier and renewal loops, and
@@ -327,7 +335,7 @@ func prepareSessionConfig(config SessionConfig) (SessionConfig, error) {
 func startSession(ctx context.Context, config SessionConfig, lease Lease) *Session {
 	runCtx, cancel := context.WithCancel(ctx)
 	session := &Session{
-		config: config, ctx: runCtx, cancel: cancel, stopIdempotencyKey: config.StopIdempotencyKey, lease: lease,
+		config: config, ctx: runCtx, cancel: cancel, parent: ctx, stopIdempotencyKey: config.StopIdempotencyKey, lease: lease,
 		readyDone: make(chan struct{}), done: make(chan struct{}), closeDone: make(chan struct{}), managers: make(map[*SessionManager]struct{}),
 	}
 	if config.OwnerDone != nil {
@@ -510,7 +518,7 @@ func (s *Session) run() {
 	carrierCloseErr := s.closeCarrier(carrierCloseCtx)
 	cancelCarrierClose()
 	var leaseStopErr error
-	if s.config.LeaseLifecycle == LeaseLifecycleOwned {
+	if s.config.LeaseLifecycle == LeaseLifecycleOwned && !s.leaseOutlivesSession() {
 		leaseStopCtx, cancelLeaseStop := context.WithTimeout(context.Background(), s.config.ShutdownTimeout)
 		leaseStopErr = stopLease(leaseStopCtx, s.config.LeaseClient, s.currentLease(), s.stopIdempotencyKey)
 		cancelLeaseStop()
@@ -840,6 +848,17 @@ func (s *Session) Stop(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+func (s *Session) leaseOutlivesSession() bool {
+	return s.detached.Load() || s.survivesRestart.Load() && s.parent.Err() != nil
+}
+
+// Detach ends the local session and leaves the server lease running. The caller
+// owns resuming it (or letting the server release it after the owner grace).
+func (s *Session) Detach(ctx context.Context) error {
+	s.detached.Store(true)
+	return s.Stop(ctx)
 }
 
 func newSessionIdempotencyKey(source io.Reader) (string, error) {
