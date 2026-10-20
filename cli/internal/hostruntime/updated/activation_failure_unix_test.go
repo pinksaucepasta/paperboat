@@ -161,7 +161,13 @@ func TestUnixParticipantFiniteFailureReasonsPreserveReadiness(t *testing.T) {
 	if err := unixParticipantReady(degraded, version, degraded, false); err != nil {
 		t.Fatalf("lost existing degraded recovery exception: %v", err)
 	}
-	assertActivationFailure(t, unixParticipantReady(degraded, version, degraded, true), "participant", "daemon_state", ErrParticipantReadiness)
+	// A daemon that had machines cached must not come back without them: the cache has to survive.
+	cached := degraded
+	cached.Machines = 1
+	assertActivationFailure(t, unixParticipantReady(degraded, version, cached, true), "participant", "daemon_state", ErrParticipantReadiness)
+	if err := unixParticipantReady(cached, version, cached, true); err != nil {
+		t.Fatalf("an unreachable control plane blocked updating a daemon that kept its cache: %v", err)
+	}
 }
 
 func assertActivationFailure(t *testing.T, err error, phase, reason string, cause error) {

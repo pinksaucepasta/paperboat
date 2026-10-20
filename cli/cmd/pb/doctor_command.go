@@ -320,6 +320,9 @@ func probeDoctorAuthentication(ctx context.Context, command *cobra.Command) doct
 		if diagnosis, ok := doctorProxyDiagnosis(err); ok {
 			check.Summary = "The Paperboat server is unreachable through the configured proxy."
 			check.Recovery = diagnosis.Recovery
+		} else if outdated := doctorUnsupportedVersion(err); outdated != nil {
+			check.Summary = "This Paperboat version is no longer supported by the server."
+			check.Recovery = "Run `pb update` to install a supported release, then run pb doctor again."
 		} else {
 			check.Summary = "The Paperboat server did not accept the authenticated health check."
 			check.Recovery = "Check network access and sign in again if needed, then run pb doctor again."
@@ -799,4 +802,18 @@ func doctorUserMachine(ctx context.Context, client *api.Client, machineID string
 		}
 	}
 	return api.UserMachine{}, errors.New("resolved machine is missing from the account")
+}
+
+// doctorUnsupportedVersion returns the server's refusal of an out-of-date client (426 update_required
+// or an incompatible protocol), whose cure is `pb update`, not a new sign-in.
+func doctorUnsupportedVersion(err error) error {
+	var refusal *api.APIError
+	if errors.As(err, &refusal) && (refusal.Code == "update_required" || refusal.Code == "incompatible_client_version") {
+		return refusal
+	}
+	var incompatible *api.ErrIncompatibleVersion
+	if errors.As(err, &incompatible) {
+		return incompatible
+	}
+	return nil
 }

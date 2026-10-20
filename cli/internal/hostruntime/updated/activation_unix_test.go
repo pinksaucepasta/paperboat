@@ -37,6 +37,8 @@ func TestUnixParticipantReadinessPreservesUsableBaseline(t *testing.T) {
 		{"empty offline recovers online", offline, ready, false, true},
 		{"other degradation is not readiness", offline, UnixParticipantProbe{Running: true, Version: "1", UpdaterVersion: "1", State: "degraded"}, false, false},
 		{"cached inventory must recover", UnixParticipantProbe{Running: true, Version: "1", UpdaterVersion: "1", State: "degraded", Machines: 2, ControlPlaneUnavailableOnly: true}, offline, true, false},
+		// The control plane refusing an out-of-date client (426) looks like this; the update is the cure.
+		{"cached inventory behind an unreachable control plane can still be updated", UnixParticipantProbe{Running: true, Version: "1", UpdaterVersion: "1", State: "degraded", Machines: 2, ControlPlaneUnavailableOnly: true}, UnixParticipantProbe{Running: true, Version: "1", UpdaterVersion: "1", State: "degraded", Machines: 2, ControlPlaneUnavailableOnly: true}, true, true},
 		{"unhealthy for a local reason can still be updated", UnixParticipantProbe{Running: true, Version: "1", UpdaterVersion: "1", State: "degraded", Machines: 2}, UnixParticipantProbe{Running: true, Version: "1", UpdaterVersion: "1", State: "degraded", Machines: 2}, true, true},
 		{"unhealthy for a local reason recovers", UnixParticipantProbe{Running: true, Version: "1", UpdaterVersion: "1", State: "degraded", Machines: 2}, ready, true, true},
 		{"unhealthy still needs the new daemon version", UnixParticipantProbe{Running: true, Version: "1", UpdaterVersion: "1", State: "degraded", Machines: 2}, UnixParticipantProbe{Running: true, Version: "0", UpdaterVersion: "1", State: "degraded", Machines: 2}, true, false},

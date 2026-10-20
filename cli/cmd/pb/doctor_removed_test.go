@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -48,4 +49,26 @@ func TestDoctorSendsAComputerAwaitingEnrollmentToPbLogin(t *testing.T) {
 		return
 	}
 	t.Fatal("no daemon probe")
+}
+
+// F14-07: a server that refuses an out-of-date client is answered with `pb update`, not with advice
+// to sign in again.
+func TestDoctorNamesAnUnsupportedVersionInsteadOfAFailedLogin(t *testing.T) {
+	for name, err := range map[string]error{
+		"update_required": &api.APIError{Status: http.StatusUpgradeRequired, Code: "update_required"},
+		"wrapped":         fmt.Errorf("health check: %w", &api.APIError{Status: http.StatusUpgradeRequired, Code: "update_required"}),
+		"incompatible":    &api.ErrIncompatibleVersion{Required: "2"},
+	} {
+		if doctorUnsupportedVersion(err) == nil {
+			t.Fatalf("%s: not recognized as an unsupported version", name)
+		}
+	}
+	for name, err := range map[string]error{
+		"unauthorized": &api.APIError{Status: http.StatusUnauthorized, Code: "unauthenticated"},
+		"timeout":      context.DeadlineExceeded,
+	} {
+		if doctorUnsupportedVersion(err) != nil {
+			t.Fatalf("%s: wrongly treated as an unsupported version", name)
+		}
+	}
 }

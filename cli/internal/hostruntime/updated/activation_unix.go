@@ -617,7 +617,10 @@ func unixParticipantReady(probe UnixParticipantProbe, version string, baseline U
 	if baseline.State != "ready" && !baseline.ControlPlaneUnavailableOnly {
 		return nil
 	}
-	if !requireInventory && baseline.State == "degraded" && baseline.Machines == 0 && baseline.ControlPlaneUnavailableOnly && probe.State == "degraded" && probe.Machines == 0 && probe.ControlPlaneUnavailableOnly {
+	// A control plane that cannot be reached, or that refuses this version (the very case an update
+	// repairs), must not make the update impossible: the daemon may come back degraded for that same
+	// reason as long as it kept the machines it had cached.
+	if baseline.State == "degraded" && baseline.ControlPlaneUnavailableOnly && probe.State == "degraded" && probe.ControlPlaneUnavailableOnly && probe.Machines >= baseline.Machines {
 		return nil
 	}
 	return participantFailure("daemon_state", ErrParticipantReadiness)
