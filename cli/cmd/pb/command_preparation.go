@@ -19,6 +19,7 @@ const (
 	prepareInboxPreservation
 	prepareSelectedFile
 	prepareOpenSSH
+	prepareMachineNotAdded
 )
 
 // Only finite local phases become public prose. The original error remains
@@ -33,6 +34,8 @@ func (e commandPreparationFailure) Error() string {
 	switch e.step {
 	case prepareMachineRegistration:
 		return "Paperboat could not read this machine's registration. Run `pb doctor`, then repair the state or run `pb setup`."
+	case prepareMachineNotAdded:
+		return "This computer has not been added to Paperboat yet. Run `pb login` (or `pb setup`) to add it, then retry."
 	case prepareInboxRegistration:
 		return "Paperboat could not read the Inbox registration. Run `pb doctor`, then retry the Inbox command."
 	case prepareMachineUser:

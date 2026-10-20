@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -120,6 +121,9 @@ func configuredMachineID() (string, error) {
 		return "", err
 	}
 	registration, err := store.Registration()
+	if errors.Is(err, os.ErrNotExist) {
+		return "", commandPreparationFailure{step: prepareMachineNotAdded, cause: err}
+	}
 	if err != nil || registration.MachineID == "" {
 		return "", commandPreparationFailure{step: prepareMachineRegistration, cause: err}
 	}

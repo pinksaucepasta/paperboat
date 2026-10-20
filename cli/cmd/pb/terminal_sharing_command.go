@@ -111,6 +111,11 @@ func terminalSharingCommand(action string) *cobra.Command {
 			if jsonOutput {
 				return terminalSharingOutputFailure(json.NewEncoder(c.OutOrStdout()).Encode(sessions))
 			}
+			if len(sessions) == 0 {
+				// Sessions a team shared belong to that team's workspace, not to the personal one.
+				_, err := fmt.Fprintln(c.ErrOrStderr(), "No sessions in this workspace are shared with you. Sessions shared by a team are listed with `pb session shared --workspace <team>`.")
+				return terminalSharingOutputFailure(err)
+			}
 			for _, s := range sessions {
 				if _, err := fmt.Fprintf(c.OutOrStdout(), "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", s.ID, selector.SanitizeText(s.Name), sessionActivityLabel(api.TerminalSession{Title: s.Title, ForegroundProcess: s.ForegroundProcess}), sessionDirectoryLabel(api.TerminalSession{CurrentDirectory: s.CurrentDirectory, StartedIn: s.StartedIn}), s.Target.Name, s.Role, s.Sharing.Audience); err != nil {
 					return terminalSharingOutputFailure(err)
