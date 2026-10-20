@@ -407,9 +407,11 @@ func localDaemonCommand() *cobra.Command {
 						if err != nil {
 							return fmt.Errorf("refresh authorized local browser services: %w", err)
 						}
-						machines, err = withTeamSharedMachines(ctx, machines, scoped)
-						if err != nil {
-							return fmt.Errorf("refresh machines shared by teams: %w", err)
+						// A team lookup failure must not take the account's own machines offline.
+						if shared, sharedErr := withTeamSharedMachines(ctx, machines, scoped); sharedErr != nil {
+							diagnosticlog.TryWarn("machines shared by teams are unavailable; own machines stay reachable", "error", sharedErr)
+						} else {
+							machines = shared
 						}
 						return coordinator.ApplyMachines(ctx, machines, services)
 					},
