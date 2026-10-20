@@ -603,6 +603,13 @@ func unixParticipantReady(probe UnixParticipantProbe, version string, baseline U
 	if probe.State == "ready" {
 		return nil
 	}
+	// An installation that was already unhealthy before the update, for a reason other than the
+	// control plane being unreachable (a broken local access setup, say), can only be repaired by
+	// updating it. The updater must work when the app is broken: the daemon has to come back
+	// running the right version, not ready, or the fix could never reach the machine.
+	if baseline.State != "ready" && !baseline.ControlPlaneUnavailableOnly {
+		return nil
+	}
 	if !requireInventory && baseline.State == "degraded" && baseline.Machines == 0 && baseline.ControlPlaneUnavailableOnly && probe.State == "degraded" && probe.Machines == 0 && probe.ControlPlaneUnavailableOnly {
 		return nil
 	}
