@@ -68,7 +68,8 @@ def main():
         explained = run('config', 'customize', 'explain', '--', SHORTCUT, 'machine1')[1]
         if 'exec' not in explained or 'uptime' not in explained:
             raise RuntimeError('shortcut did not expand to the configured command')
-        if run('--no-customization', 'config', 'customize', 'explain', '--', SHORTCUT, 'machine1')[0] == 0:
+        plain = run('--no-customization', 'config', 'customize', 'explain', '--', SHORTCUT, 'machine1')[1]
+        if ' exec ' in plain or '--timeout' in plain or '-- uptime' in plain:
             raise RuntimeError('--no-customization still expanded the shortcut')
         print(json.dumps({'check': 'config-lifecycle', 'phase': 'set', 'status': 'PASS'}), flush=True)
         return

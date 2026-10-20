@@ -815,6 +815,8 @@ elif sys.argv[2]=="tunnel-lifecycle":
  assert all(r[k] for k in ("status_doctor_logs", "capture_replay", "pause_resume", "connector_lifecycle", "credentials_rotate", "rotate_without_downtime", "port_policy"))
 elif sys.argv[2]=="config-sync":
  assert all(r[k] for k in ("repository_connect_list", "validate_apply", "status_assignment", "force_pull", "unassign"))
+elif sys.argv[2]=="config-survival":
+ assert all(r[k] for k in ("config_set_survives_update", "customization_survives_update", "reset_restores"))
 elif sys.argv[2]=="tunnel-manage":
  assert all(r[k] for k in ("create_show_list_delete", "route_add_update_remove", "rename"))
 else:
