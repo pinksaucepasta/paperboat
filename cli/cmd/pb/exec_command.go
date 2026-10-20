@@ -10,6 +10,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/command"
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/internal/resolver"
 	"github.com/pinksaucepasta/paperboat/internal/tunnel"
 	"golang.org/x/term"
 	"os"
@@ -68,6 +69,12 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 	}
 	if err != nil {
 		err = friendlyCommandError(err)
+		switch {
+		case errors.Is(err, resolver.ErrMachineNotFound):
+			return fail(255, "machine_not_found", false, false, err)
+		case errors.Is(err, resolver.ErrMachineAmbiguous):
+			return fail(255, "machine_ambiguous", false, false, err)
+		}
 		return fail(255, "machine_resolution_failed", false, false, err)
 	}
 	if !machine.Online {
@@ -404,6 +411,12 @@ func retryableExecReattachment(err error) bool {
 func safeExecError(err error) string {
 	if err == nil {
 		return ""
+	}
+	if errors.Is(err, resolver.ErrMachineNotFound) {
+		return "No machine has that name or ID. Run `pb machine list` to see your machines."
+	}
+	if errors.Is(err, resolver.ErrMachineAmbiguous) {
+		return "More than one machine has that name. Run `pb machine list` and retry with the machine ID."
 	}
 	if remote, ok := err.(*api.APIError); ok && remote.Code == "machine_offline" {
 		return sentence(friendlyAPIError(remote))
