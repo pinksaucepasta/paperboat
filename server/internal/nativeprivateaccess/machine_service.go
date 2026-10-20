@@ -29,6 +29,9 @@ func (r *SQLResolver) resolveMachineService(ctx context.Context, in Request) (ta
 	authority, e := machineservices.ResolveTx(ctx, tx, in.UserID, in.ResourceID, port)
 	if e != nil {
 		if pureNativeRejection(e, machineservices.ErrDenied) {
+			if off, offErr := machineservices.TeamPrivateAccessOffTx(ctx, tx, in.UserID, in.ResourceID); offErr == nil && off {
+				return Target{}, machineservices.ErrTeamPrivateAccessOff
+			}
 			return Target{}, ErrDenied
 		}
 		return Target{}, e

@@ -144,6 +144,9 @@ func (s *Service) mutate(ctx context.Context, account, team, op, kind string, ex
 		case MutationRequest:
 			metadata["target_account"] = r.AccountID
 			metadata["role"] = r.Role
+			if r.Action == "private_access" && r.AllowPrivateAccess != nil {
+				metadata["active"] = *r.AllowPrivateAccess
+			}
 		case GrantRequest:
 			metadata["target_account"] = r.AccountID
 			metadata["resource_kind"] = r.ResourceKind
@@ -195,6 +198,15 @@ func (s *Service) Mutate(ctx context.Context, account, team string, r MutationRe
 				return ErrForbidden
 			}
 			_, err := tx.Exec(ctx, `UPDATE teams SET approve_new_machines=$2 WHERE team_id=$1`, team, *r.ApproveNewMachines)
+			return err
+		case "private_access":
+			if !administrative(actor.Role) || r.AllowPrivateAccess == nil {
+				return ErrForbidden
+			}
+			// The team generation moves with every mutation, which fences the team's active
+			// private-access sessions (machine_service_team_fence includes it): turning this off
+			// ends them like a revoked grant.
+			_, err := tx.Exec(ctx, `UPDATE teams SET allow_private_access=$2 WHERE team_id=$1`, team, *r.AllowPrivateAccess)
 			return err
 		case "role":
 			if actor.Role != "owner" || !found || target.Role == "owner" {

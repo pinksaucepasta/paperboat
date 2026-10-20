@@ -2,6 +2,7 @@ package machineservices_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"testing"
@@ -10,6 +11,8 @@ import (
 	"github.com/pinksaucepasta/paperboat-server/internal/config"
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
 	"github.com/pinksaucepasta/paperboat-server/internal/machineservices"
+	"github.com/pinksaucepasta/paperboat-server/internal/nativeprivateaccess"
+	"github.com/pinksaucepasta/paperboat-server/internal/teams"
 	wire "github.com/pinksaucepasta/paperboat/shared/machineservices"
 )
 
@@ -83,20 +86,18 @@ func TestListShowsTeamSharedMachinesOnlyWithPrivateAccessOnPostgres(t *testing.T
 			t.Fatalf("%s: %s sees the machine %d times, want %d", step, actor, got, n)
 		}
 	}
-	policy, e := s.GetPolicy(ctx, owner, machine)
-	if e != nil {
-		t.Fatal(e)
-	}
 	want("shared without a grant", member, 0)
 	exec(`INSERT INTO paperboat.team_machine_grants(team_id,machine_id,audience,account_id,capabilities) VALUES($1,$2,'selected_member',$3,ARRAY['terminal'])`, teamA, machine, member)
 	want("terminal-only grant", member, 0)
 	exec(`UPDATE paperboat.team_machine_grants SET capabilities=ARRAY['terminal','private_access'],generation=generation+1 WHERE team_id=$1`, teamA)
-	// The host owner's team-discovery switch gates every team port.
-	want("team discovery off", member, 0)
-	if _, e = s.UpdatePolicy(ctx, owner, machine, wire.PolicyUpdate{ExpectedGeneration: policy.Generation, TeamAutoEnabled: true}); e != nil {
-		t.Fatal(e)
-	}
+	// The team's own setting gates every team port, whatever the grants say.
+	want("team private access off", member, 0)
+	exec(`UPDATE paperboat.teams SET allow_private_access=true WHERE team_id=$1`, teamA)
 	want("private_access member grant", member, 1)
+	exec(`UPDATE paperboat.teams SET allow_private_access=false WHERE team_id=$1`, teamA)
+	want("team setting turned off", member, 0)
+	exec(`UPDATE paperboat.teams SET allow_private_access=true WHERE team_id=$1`, teamA)
+	want("team setting turned back on", member, 1)
 	want("outsider", outsider, 0)
 	exec(`UPDATE paperboat.team_machine_grants SET active=false,generation=generation+1 WHERE team_id=$1`, teamA)
 	want("grant removed", member, 0)
@@ -118,6 +119,50 @@ func TestListShowsTeamSharedMachinesOnlyWithPrivateAccessOnPostgres(t *testing.T
 	want("team entitlement lapsed", member, 0)
 	exec(`UPDATE paperboat.billing_workspaces SET state='active' WHERE team_id=$1`, teamA)
 	want("entitlement restored", member, 1)
+
+	// The team setting through the real mutation: only an owner or admin can change it; turning it off
+	// names the reason to the member and ends the session they were already admitted with.
+	exec(`INSERT INTO paperboat.cli_client_sessions(id,user_id,client_id,client_label,device_type,os,scopes,state,created_at,approved_at) VALUES($1,$1,$1,'team list','desktop','linux',ARRAY['machines:connect'],'active',now(),now())`, member)
+	resolver, e := nativeprivateaccess.NewSQLResolver(store)
+	if e != nil {
+		t.Fatal(e)
+	}
+	request := nativeprivateaccess.Request{AccountID: member, UserID: member, CLIClientSessionID: member, OperationID: "tl-op", ResourceKind: "machine_service", ResourceID: machine, RouteID: "tcp:5432", Protocol: "tcp"}
+	target, e := resolver.ResolveNativePrivate(ctx, request)
+	if e != nil {
+		t.Fatalf("member with the grant and the setting on: %v", e)
+	}
+	teamService := teams.NewService(store)
+	setting := func(actor string, allow bool, op string) error {
+		var generation uint64
+		if e := store.SQL().QueryRowContext(ctx, `SELECT generation FROM paperboat.teams WHERE team_id=$1`, teamA).Scan(&generation); e != nil {
+			t.Fatal(e)
+		}
+		_, e := teamService.Mutate(ctx, actor, teamA, teams.MutationRequest{OperationID: op, ExpectedGeneration: generation, Action: "private_access", AllowPrivateAccess: &allow})
+		return e
+	}
+	if e := setting(member, false, "tl-member-off"); !errors.Is(e, teams.ErrForbidden) {
+		t.Fatalf("a plain member changed the team setting: %v", e)
+	}
+	if e := setting(owner, false, "tl-off"); e != nil {
+		t.Fatal(e)
+	}
+	want("setting turned off through the mutation", member, 0)
+	if _, e := resolver.ResolveNativePrivate(ctx, request); !errors.Is(e, machineservices.ErrTeamPrivateAccessOff) {
+		t.Fatalf("off setting reported %v, want the reason", e)
+	}
+	if _, e := resolver.MachineServiceCurrent(ctx, request, target.AccessSessionID, target); !errors.Is(e, nativeprivateaccess.ErrDenied) {
+		t.Fatalf("session admitted before the setting went off still current: %v", e)
+	}
+	var events int
+	if e := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.audit_events WHERE resource_id=$1 AND event_type='team.private_access'`, teamA).Scan(&events); e != nil || events != 1 {
+		t.Fatalf("activity events for the change: %d %v", events, e)
+	}
+	if e := setting(owner, true, "tl-on"); e != nil {
+		t.Fatal(e)
+	}
+	want("setting turned on through the mutation", member, 1)
+
 	exec(`UPDATE paperboat.user_machines SET revoked_at=now() WHERE id=$1`, machine)
 	want("machine revoked", member, 0)
 }

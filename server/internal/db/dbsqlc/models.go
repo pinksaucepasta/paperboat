@@ -2108,6 +2108,7 @@ type Team struct {
 	SuspendedBy        sql.NullString
 	DisplayName        sql.NullString
 	ApproveNewMachines bool
+	AllowPrivateAccess bool
 }
 
 type TeamConfigDefault struct {
@@ -2777,7 +2778,6 @@ type UserMachine struct {
 	OwnerTeamID                    sql.NullString
 	Description                    string
 	PersonalAutoEnabled            bool
-	TeamAutoEnabled                bool
 	MachineServicePolicyGeneration int64
 }
 

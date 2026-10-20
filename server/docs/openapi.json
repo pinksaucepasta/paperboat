@@ -9437,6 +9437,10 @@
             "type": "boolean",
             "description": "Machines that members add wait for an owner or admin to accept them."
           },
+          "allow_private_access": {
+            "type": "boolean",
+            "description": "Members may reach the ports of machines shared into the team when their grant includes private_access. Off by default; an owner or admin changes it with action private_access."
+          },
           "machine_requests": {
             "type": "array",
             "description": "Owners and admins see every request; other members see their own.",
@@ -9585,7 +9589,8 @@
               "transfer",
               "delete",
               "rename",
-              "machine_approval"
+              "machine_approval",
+              "private_access"
             ]
           },
           "account_id": {
@@ -9605,6 +9610,10 @@
           "approve_new_machines": {
             "type": "boolean",
             "description": "With action machine_approval: whether machines members add need an owner or admin to accept them."
+          },
+          "allow_private_access": {
+            "type": "boolean",
+            "description": "With action private_access: whether members may reach the ports of machines shared into the team (needs a private_access grant too)."
           }
         },
         "required": [
@@ -10444,17 +10453,13 @@
           },
           "personal_auto_enabled": {
             "type": "boolean"
-          },
-          "team_auto_enabled": {
-            "type": "boolean"
           }
         },
         "required": [
           "schema",
           "machine_id",
           "generation",
-          "personal_auto_enabled",
-          "team_auto_enabled"
+          "personal_auto_enabled"
         ]
       },
       "MachineServicePolicyUpdate": {
@@ -10468,15 +10473,11 @@
           },
           "personal_auto_enabled": {
             "type": "boolean"
-          },
-          "team_auto_enabled": {
-            "type": "boolean"
           }
         },
         "required": [
           "expected_generation",
-          "personal_auto_enabled",
-          "team_auto_enabled"
+          "personal_auto_enabled"
         ]
       },
       "MachineServicesSnapshot": {
@@ -13560,6 +13561,10 @@
           "approve_new_machines": {
             "type": "boolean",
             "description": "Team only: machines members add wait for an owner or admin."
+          },
+          "allow_private_access": {
+            "type": "boolean",
+            "description": "Team only: members may reach the ports of machines shared into the team (with a private_access grant)."
           }
         }
       },

@@ -25,6 +25,10 @@ const MaxBrowserPolicies = 32
 const SnapshotLifetime = 30 * time.Second
 
 var ErrDenied = errors.New("machine service access denied")
+
+// ErrTeamPrivateAccessOff is a denial with a reason the caller can act on: the machine is shared into
+// the caller's team with a private_access grant, but the team does not allow private access yet.
+var ErrTeamPrivateAccessOff = errors.New("team private access is off")
 var ErrConflict = errors.New("machine service generation conflict")
 
 type Authority struct {
@@ -120,9 +124,18 @@ func ResolveTx(ctx context.Context, tx *sql.Tx, actor, machine string, port int)
 	}
 	return out, nil
 }
+
+// TeamPrivateAccessOffTx reports whether the actor holds a private_access grant on the machine through
+// a team that has not turned private access on: the only thing between them and the ports.
+func TeamPrivateAccessOffTx(ctx context.Context, tx *sql.Tx, actor, machine string) (bool, error) {
+	var off bool
+	e := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.team_resource_bindings b JOIN paperboat.teams t ON t.team_id=b.team_id AND t.deleted_at IS NULL AND NOT t.allow_private_access
+ WHERE b.resource_kind='machine' AND b.resource_id=$2 AND b.active AND paperboat.team_machine_capability_allowed($1,b.team_id,$2,'private_access'))`, actor, machine).Scan(&off)
+	return off, e
+}
 func (s *Service) GetPolicy(ctx context.Context, actor, machine string) (wire.Policy, error) {
 	p := wire.Policy{Schema: "paperboat.machine-service-policy/v1", MachineID: machine}
-	e := s.DB.QueryRowContext(ctx, `SELECT machine_service_policy_generation,personal_auto_enabled,team_auto_enabled FROM paperboat.user_machines WHERE id=$1 AND paperboat.machine_management_allowed($2,id)`, machine, actor).Scan(&p.Generation, &p.PersonalAutoEnabled, &p.TeamAutoEnabled)
+	e := s.DB.QueryRowContext(ctx, `SELECT machine_service_policy_generation,personal_auto_enabled FROM paperboat.user_machines WHERE id=$1 AND paperboat.machine_management_allowed($2,id)`, machine, actor).Scan(&p.Generation, &p.PersonalAutoEnabled)
 	if machineServiceRowMissing(e) {
 		e = ErrDenied
 	}
@@ -148,8 +161,8 @@ func (s *Service) UpdatePolicy(ctx context.Context, actor, machine string, in wi
 	if gen != in.ExpectedGeneration {
 		return wire.Policy{}, ErrConflict
 	}
-	p := wire.Policy{Schema: "paperboat.machine-service-policy/v1", MachineID: machine, Generation: gen + 1, PersonalAutoEnabled: in.PersonalAutoEnabled, TeamAutoEnabled: in.TeamAutoEnabled}
-	_, e = tx.ExecContext(ctx, `UPDATE paperboat.user_machines SET personal_auto_enabled=$2,team_auto_enabled=$3,machine_service_policy_generation=$4 WHERE id=$1`, machine, in.PersonalAutoEnabled, in.TeamAutoEnabled, p.Generation)
+	p := wire.Policy{Schema: "paperboat.machine-service-policy/v1", MachineID: machine, Generation: gen + 1, PersonalAutoEnabled: in.PersonalAutoEnabled}
+	_, e = tx.ExecContext(ctx, `UPDATE paperboat.user_machines SET personal_auto_enabled=$2,machine_service_policy_generation=$3 WHERE id=$1`, machine, in.PersonalAutoEnabled, p.Generation)
 	if e != nil {
 		return wire.Policy{}, e
 	}
@@ -168,7 +181,7 @@ func (s *Service) RuntimePolicy(ctx context.Context, environment, machine string
 		return p, e
 	}
 	defer captureServiceRollback(tx, &resultErr)
-	e = tx.QueryRowContext(ctx, `SELECT (owner_team_id IS NULL AND personal_auto_enabled) OR (team_auto_enabled AND EXISTS(SELECT 1 FROM paperboat.team_machine_grants g JOIN paperboat.team_members member ON member.team_id=g.team_id AND member.active WHERE g.machine_id=m.id AND paperboat.team_machine_capability_allowed(member.account_id,g.team_id,m.id,'private_access'))) FROM paperboat.user_machines m WHERE id=$1 AND environment_id=$2 AND deleted_at IS NULL AND revoked_at IS NULL FOR UPDATE`, machine, environment).Scan(&p.AutomaticDiscoveryEnabled)
+	e = tx.QueryRowContext(ctx, `SELECT (owner_team_id IS NULL AND personal_auto_enabled) OR EXISTS(SELECT 1 FROM paperboat.team_machine_grants g JOIN paperboat.teams t ON t.team_id=g.team_id AND t.allow_private_access JOIN paperboat.team_members member ON member.team_id=g.team_id AND member.active WHERE g.machine_id=m.id AND paperboat.team_machine_capability_allowed(member.account_id,g.team_id,m.id,'private_access')) FROM paperboat.user_machines m WHERE id=$1 AND environment_id=$2 AND deleted_at IS NULL AND revoked_at IS NULL FOR UPDATE`, machine, environment).Scan(&p.AutomaticDiscoveryEnabled)
 	if machineServiceRowMissing(e) {
 		return p, ErrDenied
 	}

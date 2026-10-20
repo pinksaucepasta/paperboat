@@ -95,7 +95,7 @@ func TestMachineServicePostgresAuthorityLifecycle(t *testing.T) {
 		t.Fatalf("outsider list %v %v", items, e)
 	}
 	policy, e := s.GetPolicy(ctx, owner, machine)
-	if e != nil || !policy.PersonalAutoEnabled || policy.TeamAutoEnabled {
+	if e != nil || !policy.PersonalAutoEnabled {
 		t.Fatalf("defaults %+v %v", policy, e)
 	}
 	if _, e = s.UpdatePolicy(ctx, other, machine, wire.PolicyUpdate{ExpectedGeneration: 1}); !errors.Is(e, machineservices.ErrDenied) {
@@ -165,10 +165,7 @@ func TestMachineServicePostgresAuthorityLifecycle(t *testing.T) {
 	exec(`UPDATE paperboat.user_machines SET owner_team_id=$2 WHERE id=$1`, machine, team)
 	denied(owner, 5432)
 	denied(other, 5432)
-	_, e = s.UpdatePolicy(ctx, owner, machine, wire.PolicyUpdate{ExpectedGeneration: 3, PersonalAutoEnabled: true, TeamAutoEnabled: true})
-	if e != nil {
-		t.Fatal(e)
-	}
+	exec(`UPDATE paperboat.teams SET allow_private_access=true WHERE team_id=$1`, team)
 	denied(owner, 5432)
 	beforeAudience, e := s.RuntimePolicy(ctx, environment, machine)
 	if e != nil || beforeAudience.AutomaticDiscoveryEnabled {
@@ -180,7 +177,7 @@ func TestMachineServicePostgresAuthorityLifecycle(t *testing.T) {
 		t.Fatalf("team audience discovery did not advance: %+v %v", afterAudience, e)
 	}
 	machinePolicy, e = s.GetPolicy(ctx, owner, machine)
-	if e != nil || machinePolicy.Generation != 4 {
+	if e != nil || machinePolicy.Generation != 3 {
 		t.Fatalf("audience discovery changed native policy generation: %+v %v", machinePolicy, e)
 	}
 	snapshot.Generation++

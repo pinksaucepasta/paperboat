@@ -371,10 +371,13 @@ or activation policy. The URL requires the signed-in native daemon, a ready loca
 TLS certificate and an exact current private-access grant; it has no hosted fallback.
 Ambiguous shared aliases retain service metadata but omit the browser URL.
 `GET`/`PUT /v1/machines/{machine_id}/private-access-policy` provides
-metadata-manage-authorized automatic-access settings. Personal automatic access
-starts enabled and applies only to personal ownership. Team automatic access starts
-disabled and additionally requires an explicit machine `private_access` audience
-grant; administrative membership alone never grants use. Explicit lazy-port policies
+metadata-manage-authorized personal automatic-access settings (it starts enabled and
+applies only to personal ownership). Team members reach the ports of a machine shared into
+a team only when the machine's `private_access` grant (member or all-members) applies to them
+and the team setting `allow_private_access` is on (default off; a team owner or admin changes it
+with the `private_access` team mutation, which moves the team generation and so ends the sessions
+already admitted). With the setting off the admission request answers 403 `team_private_access_off`.
+Administrative membership alone never grants use. Explicit lazy-port policies
 and private TCP routes remain independent allowances, including ports below 1024.
 
 The returned discovery-policy generation is persisted independently of native source

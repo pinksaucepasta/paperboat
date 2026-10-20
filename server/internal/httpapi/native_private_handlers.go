@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/pinksaucepasta/paperboat-server/internal/machineservices"
 	"github.com/pinksaucepasta/paperboat-server/internal/nativeprivateaccess"
 )
 
@@ -38,6 +39,8 @@ func nativePrivateGrant(service *nativeprivateaccess.Service) http.HandlerFunc {
 		switch {
 		case err == nativeprivateaccess.ErrInvalid:
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "Native private access request is invalid.")
+		case err == machineservices.ErrTeamPrivateAccessOff:
+			writeError(w, r, http.StatusForbidden, "team_private_access_off", "The team has not allowed private access to its shared machines. Ask a team owner or admin to turn it on.")
 		case err == nativeprivateaccess.ErrDenied:
 			writeError(w, r, http.StatusForbidden, "forbidden", "Native private access is not allowed.")
 		case err != nil:

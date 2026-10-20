@@ -66,6 +66,9 @@ type Team struct {
 	Machines     []MachineBinding `json:"machines"`
 	// ApproveNewMachines: machines that members add wait for an owner or admin.
 	ApproveNewMachines bool `json:"approve_new_machines"`
+	// AllowPrivateAccess: members may reach the ports of machines shared into the team, given a
+	// private_access grant. Off until an owner or admin turns it on.
+	AllowPrivateAccess bool `json:"allow_private_access"`
 	// MachineRequests are machines waiting for (or refused by) an owner or admin.
 	MachineRequests       []MachineAdmission     `json:"machine_requests"`
 	MachineGrants         []MachineGrant         `json:"machine_grants"`
@@ -118,6 +121,8 @@ type MutationRequest struct {
 	Confirmation       string `json:"confirmation"`
 	// ApproveNewMachines is the value for the machine_approval action.
 	ApproveNewMachines *bool `json:"approve_new_machines,omitempty"`
+	// AllowPrivateAccess is the value for the private_access action.
+	AllowPrivateAccess *bool `json:"allow_private_access,omitempty"`
 }
 type InviteRequest struct {
 	Role               string `json:"role,omitempty"`

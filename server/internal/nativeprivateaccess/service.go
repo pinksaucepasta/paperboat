@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/pinksaucepasta/paperboat-server/internal/admission"
+	"github.com/pinksaucepasta/paperboat-server/internal/machineservices"
 	"net"
 	"reflect"
 	"strconv"
@@ -65,6 +66,9 @@ func (s Service) Issue(ctx context.Context, request Request) (Grant, error) {
 	}
 	target, err := s.Resolver.ResolveNativePrivate(ctx, request)
 	if err != nil {
+		if err == machineservices.ErrTeamPrivateAccessOff {
+			return Grant{}, err
+		}
 		if pureNativeRejection(err, ErrDenied) {
 			return Grant{}, ErrDenied
 		}
@@ -95,7 +99,7 @@ func (s Service) Issue(ctx context.Context, request Request) (Grant, error) {
 func (s Service) Revalidate(ctx context.Context, request Request, expected Target) error {
 	current, err := s.Resolver.ResolveNativePrivate(ctx, request)
 	if err != nil {
-		if pureNativeRejection(err, ErrDenied) {
+		if err == machineservices.ErrTeamPrivateAccessOff || pureNativeRejection(err, ErrDenied) {
 			return ErrDenied
 		}
 		return err

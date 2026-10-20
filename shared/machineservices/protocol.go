@@ -35,12 +35,10 @@ type Policy struct {
 	MachineID           string `json:"machine_id"`
 	Generation          int64  `json:"generation"`
 	PersonalAutoEnabled bool   `json:"personal_auto_enabled"`
-	TeamAutoEnabled     bool   `json:"team_auto_enabled"`
 }
 type PolicyUpdate struct {
 	ExpectedGeneration  int64 `json:"expected_generation"`
 	PersonalAutoEnabled bool  `json:"personal_auto_enabled"`
-	TeamAutoEnabled     bool  `json:"team_auto_enabled"`
 }
 type RuntimePolicy struct {
 	Generation                int64  `json:"generation"`
