@@ -10,9 +10,9 @@ export function getStaticPaths() {
 const { page } = Astro.props
 ---
 
-<Page title={`${page.title} — Paperboat`} description="TODO-COPY: one line for search results.">
+<Page title={`${page.title} — Paperboat`} description={`${page.title} for Paperboat.`}>
   <PageHead title={page.title}>
-    <p>TODO-COPY: when this text was last updated.</p>
+    <p>Not published yet.</p>
   </PageHead>
   <Section id="text">
     <p class="body">{page.text}</p>
