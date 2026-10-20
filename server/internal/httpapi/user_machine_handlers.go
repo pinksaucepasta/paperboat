@@ -942,6 +942,9 @@ func userMachineTerminalSessionError(w http.ResponseWriter, r *http.Request, err
 		writeError(w, r, http.StatusConflict, "machine_capability_unavailable", "This machine is not configured to host terminals.")
 	case errors.Is(err, usermachines.ErrMachineOffline):
 		writeError(w, r, http.StatusConflict, "machine_offline", "This terminal host is offline.")
+	case expectedHTTPErrorOnly(err, context.Canceled):
+		// The caller went away (a CLI exiting after its batch); nobody reads a reply, and it is not a
+		// server fault worth an error line.
 	default:
 		writeError(w, r, http.StatusInternalServerError, "internal_error", "Internal server error.", err)
 	}
