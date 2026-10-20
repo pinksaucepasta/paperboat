@@ -95,6 +95,18 @@ func (a *IngressAuthority) ResolveDecision(ctx context.Context, candidate connec
 	return connectorprotocol.IngressDecision{}, connectorprotocol.ErrIngressDenied
 }
 
+// QuotaDenied reports whether the hostname's route exists but the last server snapshot left it out
+// only because its workspace is out of bandwidth allowance. The edge then still completes TLS for
+// that name so the request can be refused with the typed 429, instead of a silent connection close.
+func (a *IngressAuthority) QuotaDenied(hostname string) bool {
+	if a == nil {
+		return false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.quotaDenied[hostname]
+}
+
 func (a *IngressAuthority) Resolve(ctx context.Context, r route.RouteRule) (connectorprotocol.IngressDecision, error) {
 	if a == nil || a.Client == nil || ctx == nil {
 		return connectorprotocol.IngressDecision{}, ErrControlInvalid

@@ -518,3 +518,47 @@ func TestSharedTLSRestrictedDurableCarrierAuthority(t *testing.T) {
 		})
 	}
 }
+
+type quotaDeniedAuthority struct {
+	tlsAuthorityFixture
+	denied map[string]bool
+}
+
+func (a *quotaDeniedAuthority) QuotaDenied(host string) bool { return a.denied[host] }
+
+// An exhausted workspace's route must still complete TLS so the request can be answered with the
+// typed 429; before this a quota-denied name looked like an unknown one and the connection was
+// closed during the handshake (live check, 2026-10-20). A name that is simply unknown stays closed.
+func TestSharedTLSQuotaDeniedRouteCompletesTLSAndUnknownNameDoesNot(t *testing.T) {
+	match, _ := browserTestMatch()
+	clientTLS, serverTLS, _, _, _ := task24Certificates(t, match.Host)
+	clientTLS.ServerName = match.Host
+	raw, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
+	defer registry.Close()
+	authority := &quotaDeniedAuthority{denied: map[string]bool{match.Host: true}}
+	// The route matcher knows the managed hostname; the snapshot has no decision for it.
+	shared, err := NewSharedTLSListener(raw, authority, registry, func(host string) bool { return host == match.Host }, 4, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &http.Server{TLSConfig: serverTLS, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+	})}
+	defer server.Close()
+	go server.ServeTLS(shared, "", "")
+	connection, err := tls.DialWithDialer(&net.Dialer{Timeout: time.Second}, "tcp", raw.Addr().String(), clientTLS)
+	if err != nil {
+		t.Fatalf("a quota-denied route did not complete TLS: %v", err)
+	}
+	connection.Close()
+	authority.denied = nil
+	connection, err = tls.DialWithDialer(&net.Dialer{Timeout: time.Second}, "tcp", raw.Addr().String(), clientTLS)
+	if err == nil {
+		connection.Close()
+		t.Fatal("a route with no decision and no quota denial completed TLS")
+	}
+}

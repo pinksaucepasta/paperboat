@@ -113,6 +113,13 @@ func (l *SharedTLSListener) dispatch(conn net.Conn) {
 			authorizedHTTPS = true
 		}
 	}
+	// A route that exists but is withheld only for bandwidth quota still gets TLS: the HTTP layer
+	// answers it with the typed refusal (429, bandwidth_quota_exhausted) rather than a dead connection.
+	if !authorizedHTTPS && https {
+		if denied, ok := l.authority.(interface{ QuotaDenied(string) bool }); ok && denied.QuotaDenied(host) {
+			authorizedHTTPS = true
+		}
+	}
 	// The locally admitted public preview may become ready after the cached
 	// complete snapshot was fetched. Refresh its exact authority before any TLS
 	// writes, then inspect the entire current snapshot for protocol conflicts.
