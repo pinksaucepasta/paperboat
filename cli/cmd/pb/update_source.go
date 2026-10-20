@@ -86,10 +86,21 @@ func installStagedUpdateSource(command *cobra.Command, ctx context.Context, stag
 	if bundle != "" {
 		actual.Distribution, actual.AutomaticUpdates = installsource.Official, true
 	}
+	return writeUpdateFromResult(command, buildinfo.Version, installed, actual)
+}
+
+// writeUpdateFromResult says what the install did. Installing the build that is already
+// running replaces its files with identical ones, which is not an update.
+func writeUpdateFromResult(command *cobra.Command, previousVersion, installed string, actual installsource.Source) error {
+	changed := actual.Version != previousVersion
 	if updateJSON(command) {
-		return writeCLIJSON(command.OutOrStdout(), map[string]any{"executable": installed, "version": actual.Version, "distribution": actual.Distribution, "automatic_update_checks": actual.AutomaticUpdates, "sha256": actual.SHA256, "enrollment": "unchanged"})
+		return writeCLIJSON(command.OutOrStdout(), map[string]any{"executable": installed, "version": actual.Version, "previous_version": previousVersion, "changed": changed, "distribution": actual.Distribution, "automatic_update_checks": actual.AutomaticUpdates, "sha256": actual.SHA256, "enrollment": "unchanged"})
 	}
-	_, err = fmt.Fprintf(command.OutOrStdout(), "Updated Paperboat to %s.\n", actual.Version)
+	if !changed {
+		_, err := fmt.Fprintf(command.OutOrStdout(), "Paperboat is already on %s; reinstalled it from the supplied file.\n", actual.Version)
+		return err
+	}
+	_, err := fmt.Fprintf(command.OutOrStdout(), "Updated Paperboat from %s to %s.\n", previousVersion, actual.Version)
 	return err
 }
 

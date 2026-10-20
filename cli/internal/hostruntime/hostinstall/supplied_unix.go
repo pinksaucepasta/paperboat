@@ -132,7 +132,7 @@ func SuppliedBinary(ctx context.Context, input Request, operation string) (resul
 		input.Executable = paths.worker
 	}
 	if journalErr == nil && journal.Source != input.Source {
-		return errors.New("another Paperboat installation is pending; finish or recover that installation before replacing its source")
+		return hostInstallFailure("another Paperboat installation is pending; finish or recover it before replacing its source", ErrInvalidRequest)
 	}
 	bound := err == nil && !previous.EnrollmentPending
 	request := unboundSuppliedRequest(input)
@@ -188,7 +188,7 @@ func SuppliedBinary(ctx context.Context, input Request, operation string) (resul
 	case "commit-supplied":
 		request.Executable = paths.worker
 		if err = request.Source.Verify(paths.worker); err != nil {
-			return err
+			return hostInstallFailure("the installed executable does not match the update being committed", err)
 		}
 		if bound {
 			if err = Validate(request, invokingUID()); err != nil {

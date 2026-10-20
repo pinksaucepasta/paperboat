@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -44,5 +45,34 @@ func TestUpdateFromReportsFailuresAfterTheInstallLanded(t *testing.T) {
 	raw, _ := json.Marshal(encoded)
 	if encoded.Code != "update_installed_unverified" || encoded.StateChanged != true || !strings.Contains(string(raw), "do not repeat") {
 		t.Fatalf("json=%s", raw)
+	}
+}
+
+func TestUpdateFromSaysWhenItIsAlreadyOnThatVersion(t *testing.T) {
+	actual := installsource.Source{Version: "2026.10.20.12", Distribution: installsource.Official}
+	for _, test := range []struct{ previous, want string }{
+		{"2026.10.20.12", "Paperboat is already on 2026.10.20.12"},
+		{"2026.10.20.8", "Updated Paperboat from 2026.10.20.8 to 2026.10.20.12."},
+	} {
+		var out bytes.Buffer
+		command := &cobra.Command{Use: "update"}
+		command.Flags().Bool("json", false, "")
+		command.SetOut(&out)
+		if err := writeUpdateFromResult(command, test.previous, "/home/u/.local/bin/pb", actual); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(out.String(), test.want) {
+			t.Fatalf("previous %s: output %q lacks %q", test.previous, out.String(), test.want)
+		}
+	}
+	var out bytes.Buffer
+	command := &cobra.Command{Use: "update"}
+	command.Flags().Bool("json", true, "")
+	command.SetOut(&out)
+	if err := writeUpdateFromResult(command, actual.Version, "/x/pb", actual); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), `"changed":false`) {
+		t.Fatalf("json %q does not say nothing changed", out.String())
 	}
 }

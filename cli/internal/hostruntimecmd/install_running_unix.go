@@ -210,8 +210,13 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 // suppliedCommitRequest is the request for commit-supplied: the installation request with the
 // identity of the executable that was actually installed. The privileged helper verifies that
 // identity against the installed binary and its install record, so an empty or stale source
-// fails an installation that already succeeded (F14-08).
+// fails an installation that already succeeded (F14-08). A bundle is official however its
+// executable inspects: the inspection cannot know the signed provenance, and a source that
+// differs from the one the install step journaled makes the commit refuse.
 func suppliedCommitRequest(request hostinstall.Request, installed installsource.Source) hostinstall.Request {
+	if request.UpdateBundle != "" {
+		installed.Distribution, installed.AutomaticUpdates = installsource.Official, true
+	}
 	request.Source = installed
 	return request
 }

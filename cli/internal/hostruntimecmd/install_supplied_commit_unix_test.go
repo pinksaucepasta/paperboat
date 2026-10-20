@@ -15,10 +15,14 @@ import (
 // reported as 'installation commit could not be confirmed'.
 func TestSuppliedCommitRequestCarriesTheInstalledBundleIdentity(t *testing.T) {
 	request := hostinstall.Request{Schema: hostinstall.SchemaV1, UID: 1000, UpdateBundle: "/tmp/paperboat.pb-update", SuppliedUpdate: true}
-	installed := installsource.Source{Version: "2026.10.19.4", SHA256: "8473fa44da589a5b0ce1e1beab4b520031d64c9d3a5439b77da3a50ca8125535", Length: 93000000, Platform: "linux", Architecture: "amd64", Distribution: installsource.Official}
+	// Inspecting an installed executable reports it as a custom build with no automatic
+	// updates; the install step journaled the bundle's source as official with them.
+	installed := installsource.Source{Version: "2026.10.19.4", SHA256: "8473fa44da589a5b0ce1e1beab4b520031d64c9d3a5439b77da3a50ca8125535", Length: 93000000, Platform: "linux", Architecture: "amd64", Distribution: installsource.Custom}
+	journaled := installed
+	journaled.Distribution, journaled.AutomaticUpdates = installsource.Official, true
 	got := suppliedCommitRequest(request, installed)
-	if got.Source != installed {
-		t.Fatalf("commit request source = %+v, want the installed %+v", got.Source, installed)
+	if got.Source != journaled {
+		t.Fatalf("commit request source = %+v, want the journaled %+v", got.Source, journaled)
 	}
 	if got.UpdateBundle != request.UpdateBundle || got.UID != request.UID || !got.SuppliedUpdate {
 		t.Fatalf("commit request changed other fields: %+v", got)

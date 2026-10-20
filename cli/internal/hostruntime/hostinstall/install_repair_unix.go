@@ -26,6 +26,17 @@ func commitPreparedInstallation(ctx context.Context, request Request, paths inst
 	return commitPreparedInstallationLocked(ctx, request, paths, false)
 }
 
+// checkPendingInstallation says why a pending installation cannot be committed as requested.
+func checkPendingInstallation(journal installJournal, request Request) error {
+	if journal.Stage != "services_started" {
+		return hostInstallFailure("the pending installation has not started its services yet", ErrInvalidRequest)
+	}
+	if journal.Source != request.Source {
+		return hostInstallFailure("the pending installation is a different executable than the one being committed", ErrInvalidRequest)
+	}
+	return nil
+}
+
 func commitPreparedInstallationLocked(ctx context.Context, request Request, paths installPaths, nativeLockHeld bool) (resultErr error) {
 	journal, err := loadJournal(paths.journal)
 	if installNotExistOnly(err) {
@@ -34,15 +45,15 @@ func commitPreparedInstallationLocked(ctx context.Context, request Request, path
 			return err
 		}
 		if installed.Source != request.Source || installed.SessionOwnerGeneration != request.Source.SHA256[:32] {
-			return ErrInvalidRequest
+			return hostInstallFailure("the recorded installation is not the executable being committed", ErrInvalidRequest)
 		}
-		return installed.Source.Verify(paths.worker)
+		return hostInstallFailure("the installed executable no longer matches its record", installed.Source.Verify(paths.worker))
 	}
 	if err != nil {
 		return hostInstallFailure("inspecting installation state failed", ErrInvalidRequest, err)
 	}
-	if journal.Stage != "services_started" || journal.Source != request.Source {
-		return ErrInvalidRequest
+	if err := checkPendingInstallation(journal, request); err != nil {
+		return err
 	}
 	if _, statErr := os.Lstat(paths.updateState); statErr == nil {
 		if !nativeLockHeld {
