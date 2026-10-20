@@ -43,6 +43,7 @@ type Coordinator struct {
 	reconcileErr       error
 	inventoryMu        sync.Mutex
 	inventoryRevision  uint64
+	inventoryMachines  []api.UserMachine
 	inventoryTimer     *time.Timer
 	stopInventoryTimer func() bool
 	cleanups           []*generationCleanup
@@ -169,6 +170,23 @@ func (c *Coordinator) Start(parent context.Context) (err error) {
 	return nil
 }
 
+// ApplyServices renews the announced-service leases against the machines of the last inventory.
+// A lease lasts only a few seconds, so it is refreshed on its own short cadence: waiting for the
+// next full inventory refresh left every forwarded port withdrawn between a lease's end and the
+// refresh that renewed it, which looked like a listener that came and went every half minute.
+func (c *Coordinator) ApplyServices(ctx context.Context, services []api.MachineServicesMachine) error {
+	if c == nil {
+		return errors.New("local access coordinator is unavailable")
+	}
+	c.inventoryMu.Lock()
+	machines := slices.Clone(c.inventoryMachines)
+	c.inventoryMu.Unlock()
+	if machines == nil {
+		return nil
+	}
+	return c.ApplyMachines(ctx, machines, services)
+}
+
 // ApplyMachines projects authenticated, unexpired service discovery when the
 // optional streaming topology endpoint is not configured.
 func (c *Coordinator) ApplyMachines(ctx context.Context, machines []api.UserMachine, services []api.MachineServicesMachine) error {
@@ -198,6 +216,7 @@ func (c *Coordinator) ApplyMachines(ctx context.Context, machines []api.UserMach
 	if c.stopInventoryTimer != nil {
 		c.stopInventoryTimer()
 	}
+	c.inventoryMachines = slices.Clone(machines)
 	byID := make(map[string]api.MachineServicesMachine, len(services))
 	var expiry time.Time
 	for _, service := range services {

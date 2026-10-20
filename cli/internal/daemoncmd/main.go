@@ -353,6 +353,9 @@ func localDaemonCommand() *cobra.Command {
 				return err
 			}
 			return runWithSyncFailure(command.Context(), coordinator.Errors(), func(ctx context.Context) error {
+				if cfg.ControlSyncAddress == "" {
+					go refreshMachineServices(ctx, coordinator, cfg.ServerURL, authSource, peerHTTPTransport)
+				}
 				go newRelayLatencyReporter(cfg.ServerURL, source.SourceMachineID, peerHTTPTransport, func(ctx context.Context) (config.Credential, error) {
 					return authSource.WithContext(ctx).Credential()
 				}, peerTunnel.NativeRelayCandidates).Run(ctx)

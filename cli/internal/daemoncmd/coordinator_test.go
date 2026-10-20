@@ -842,3 +842,38 @@ func TestCoordinatorServesMachineHostOnPublishedPorts(t *testing.T) {
 		t.Fatalf("https://%s:6767 answered %d %q", host, response.StatusCode, body)
 	}
 }
+
+func TestCoordinatorServiceLeaseRenewalKeepsTheForwardedPortsUp(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	names := &coordinatorNameClient{}
+	c, err := NewCoordinator(CoordinatorConfig{SocketAddress: filepath.Join(dir, "daemon.sock"), NameClient: names, DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("unused") }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Stop() })
+	machines := []api.UserMachine{{ID: "machine", Alias: "studio", AssignedIP: "127.100.0.22", State: "online", Online: true, NetworkApproved: true, InstallationGeneration: 2}}
+	services := []api.MachineServicesMachine{{MachineID: "machine", InstallationGeneration: 2, ExpiresAt: time.Now().Add(100 * time.Millisecond), Services: []api.MachineServicePort{{Port: 45678, AddressFamily: "ipv4"}}}}
+	if err := c.ApplyMachines(t.Context(), machines, services); err != nil {
+		t.Fatal(err)
+	}
+	// Renew the lease before it ends, as the daemon's own short cadence does, and wait past the
+	// first lease: the forwarded port must not have been withdrawn.
+	renewed := []api.MachineServicesMachine{services[0]}
+	renewed[0].ExpiresAt = time.Now().Add(time.Hour)
+	if err := c.ApplyServices(t.Context(), renewed); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(300 * time.Millisecond)
+	names.mu.Lock()
+	_, kept := names.addresses[45678]
+	names.mu.Unlock()
+	if !kept {
+		t.Fatal("a renewed lease still withdrew the forwarded port when the first one ended")
+	}
+}
