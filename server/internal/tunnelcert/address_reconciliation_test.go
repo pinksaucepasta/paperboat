@@ -532,3 +532,17 @@ func TestAddressPublishWritesEveryAddressWithoutWaitingForResolverOnPostgres(t *
 		t.Fatalf("state after verification = %q, %v", state, err)
 	}
 }
+
+func TestWaitingForDNSIsOnlyThePropagationWait(t *testing.T) {
+	for detail, want := range map[string]bool{
+		readbackRequiredDetail: true, notConvergedDetail: true, resolverWaitDetail: true,
+		"authoritative address lookup failed": false, "provider step budget unavailable": false,
+	} {
+		if got := WaitingForDNS(addressError(AddressPublicationPending, detail)); got != want {
+			t.Fatalf("WaitingForDNS(%q) = %v, want %v", detail, got, want)
+		}
+	}
+	if WaitingForDNS(addressError(AddressPublicationConflict, readbackRequiredDetail)) || WaitingForDNS(errors.New("boom")) || WaitingForDNS(nil) {
+		t.Fatal("a conflict, a plain error or no error counted as waiting")
+	}
+}

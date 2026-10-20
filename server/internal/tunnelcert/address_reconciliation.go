@@ -255,9 +255,20 @@ func (r *AddressReconciler) Reconcile(ctx context.Context, desired DesiredAddres
 const (
 	readbackRequiredDetail = "provider changes require independent readback"
 	notConvergedDetail     = "provider records have not converged"
+	resolverWaitDetail     = "authoritative address results have not converged"
 )
 
 const maxPublishPasses = 8
+
+// WaitingForDNS reports whether err only means that DNS has not caught up with records the provider
+// holds yet (a normal state for about one TTL after every change), as opposed to a failure.
+func WaitingForDNS(err error) bool {
+	var typed *AddressPublicationError
+	if !errors.As(err, &typed) || typed.Kind != AddressPublicationPending {
+		return false
+	}
+	return typed.Detail == readbackRequiredDetail || typed.Detail == notConvergedDetail || typed.Detail == resolverWaitDetail
+}
 
 // Publish writes the desired records to the provider and returns once the provider holds exactly
 // them, without waiting for resolver verification: a caller that must not wait on DNS (a new
@@ -421,7 +432,7 @@ func (r *AddressReconciler) verifyAddressResolution(ctx context.Context, host st
 		// fresh sibling before accepting that inherited response as withdrawal.
 		_, parent, exact := strings.Cut(host, ".")
 		if len(wanted) != 0 || !exact || strings.HasPrefix(host, "*.") {
-			return addressError(AddressPublicationPending, "authoritative address results have not converged")
+			return addressError(AddressPublicationPending, resolverWaitDetail)
 		}
 		inherited, err := r.resolver.LookupHost(ctx, addressLookupHostname("*."+parent))
 		if err != nil {

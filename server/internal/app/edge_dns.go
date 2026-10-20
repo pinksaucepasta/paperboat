@@ -112,7 +112,9 @@ func edgeDNSWorker(database *db.DB, public, runtime *tunnelcert.AddressReconcile
 						break
 					}
 				}
-				workers.IterationFailure(ctx, "edge_dns_publication", "edge_dns_reconcile_failed", err)
+				if !tunnelcert.WaitingForDNS(err) {
+					workers.IterationFailure(ctx, "edge_dns_publication", "edge_dns_reconcile_failed", err)
+				}
 
 				return nil
 			}()
