@@ -601,8 +601,7 @@ the platform wildcard; custom domains for tunnels only). Kind is a policy preset
 lease with renewal, generated immutable name, deleted on expiry; tunnel = many routes, persistent, rename is a label,
 custom domains, connector rotation. `/v1/previews/*` and `/v1/tunnels/*` stay as thin facades over `endpoints`.
 
-**Carriers belong to the agent, not the endpoint.** An *agent* (a machine's daemon identity; optionally a headless
-connector token, see Questions) holds N carriers (default 2: active + warm) to EACH edge of its workspace's edge set. These
+**Carriers belong to the agent, not the endpoint.** An *agent* (an enrolled machine's daemon identity; no headless connectors, user decision) holds N carriers to EACH edge of its workspace's edge set. These
 are today's runtime carriers, extended. An endpoint never opens a carrier: creating or changing it pushes a route
 generation over carriers that already exist, so a preview is ready in one control round trip (no TLS/QUIC dial, no
 admission outbox). Streams for any endpoint multiplex over any ready carrier of that edge.
@@ -626,16 +625,16 @@ Origin health (`tunnel_route_origin_health`) and usage/bandwidth keep their keys
 
 **Removed.** Server: `preview_lease_carrier_attachments`, `preview_carrier_attachment_outbox`, per-preview carrier issuer and
 edge-node selector, `previewattachment` (5.2k), `previewtunnelstore` (2k), preview DNS special cases (intent/attachment
-branches), `tunnel_connector_sessions` as a per-connector session (agent carrier session replaces it),
-`tunnel_connector_activations`, `serves_*` placement leftovers, duplicate readiness paths. Edge: preview admission worker,
-durable-connector admission registry (one admission type remains: agent carrier), preview alias reconciliation in its own
+branches), the whole connector identity stack: `tunnel_connectors`, `tunnel_connector_enrollments`,
+`tunnel_connector_credential_generations`, `tunnel_connector_rotation_targets`, `tunnel_connector_activations`,
+`tunnel_connector_sessions` (the agent's carrier session replaces them; tunnels use the machine identity), `serves_*` placement leftovers, duplicate readiness paths. Edge: preview admission worker,
+durable-connector admission registry and connector credential rotation (one admission type remains: the agent carrier), preview alias reconciliation in its own
 registry (routes come from assignments). CLI (Lane A/F, same series): `hostruntime/preview` AttachmentCarrier, the
 tunnel connector's own carrier dial; both become "register routes with the agent daemon". Estimate: about -9k/+4k server,
 -3k/+1k edge.
 
 **Migration.** Existing rows move in the server migration series: tunnels, routes, domains, config generations map 1:1 to
-`endpoints`/`endpoint_routes`/`endpoint_hostnames` (ids kept, so URLs and DNS do not change); connectors become agent
-bindings; assignments are recomputed by the reconciler; live preview leases are ended at cut-over (minutes-long, pre-release);
+`endpoints`/`endpoint_routes`/`endpoint_hostnames` (ids kept, so URLs and DNS do not change); connectors collapse into their machine's agent identity (a tunnel is owned by the machine that created it); assignments are recomputed by the reconciler; live preview leases are ended at cut-over (minutes-long, pre-release);
 certificate and DNS tables are untouched. Forward-only migrations numbered by whoever lands them, each rehearsed on a
 restored production backup.
 
@@ -647,10 +646,8 @@ restored production backup.
 4. Tunnels onto endpoints (routes, domains, rotation, private_tcp, catch-all); CLI tunnel manager; smoke tunnel*, tcp_private.
 5. Deletion commits for everything in "Removed"; DNS/health/failover runbook rewritten; chaos test: kill one edge mid-traffic.
 
-**Questions for the coordinator/user.** (a) Headless tunnel connectors (a token that runs without a Paperboat machine, like
-`cloudflared`): keep as a second agent identity, or tunnels require a machine? Keeping it costs the credential/rotation
-tables and one more admission path. (b) Carriers per edge: 2 (proposed) or 1. (c) Preview URL return rule: wait for one edge
-ready (proposed) or both. (d) Custom domains for previews: no (proposed).
+**Decided.** No headless connectors (tunnels run on enrolled machines only); 2 carriers per edge; the URL is returned when one
+edge is ready; no custom domains for previews. Timing: engine work starts after Linux is done, before macOS.
 
 ## 4. Handoff notes
 

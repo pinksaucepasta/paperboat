@@ -279,6 +279,10 @@ Must fail quietly when the vault is locked and never slow shell startup. Build o
 
 ## Unify tunnels and previews — later
 
+**Moved to PLAN.md section 3a (2026-10-20, user decision): built right after Linux, before macOS.
+Headless tunnel connectors (a token that runs without a Paperboat machine) are NOT part of it; they stay here as a
+post-launch idea. Tunnels run only on enrolled Paperboat machines.**
+
 Recorded 2026-10-18 at the user's direction.
 
 Explore one underlying implementation and consistent user workflow for tunnels and
