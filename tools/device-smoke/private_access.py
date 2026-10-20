@@ -85,6 +85,10 @@ def origin(args):
                       'enrollment_unchanged': True, 'origin_closed': True}), flush=True)
 
 
+class ExchangeMismatch(AssertionError):
+    pass
+
+
 def exchange(address, phase):
     with socket.create_connection(address, timeout=20) as connection:
         connection.sendall(PAYLOAD)
@@ -96,7 +100,25 @@ def exchange(address, phase):
             if not chunk:
                 break
             received.extend(chunk)
-        assert bytes(received) == expected, 'private TCP changed bytes or lost half-close delivery'
+        if bytes(received) != expected:
+            # The marker and digest are synthetic, so the received prefix is safe to record.
+            raise ExchangeMismatch('private TCP changed bytes or lost half-close delivery: received %d of %d bytes, first 64 %r'
+                                   % (len(received), len(expected), bytes(received[:64])))
+
+
+def connectivity(binary):
+    """What this computer could reach when a check failed, for the private diagnostics."""
+    try:
+        result = subprocess.run([str(binary), 'doctor', '--json'], capture_output=True, timeout=45)
+        return 'doctor exit %d\n%s%s' % (result.returncode, result.stdout.decode(errors='replace'),
+                                        result.stderr.decode(errors='replace'))
+    except (OSError, subprocess.SubprocessError) as error:
+        return 'doctor could not run: %r' % (error,)
+
+
+def failure_diagnostic(binary, arguments, output, errors, error):
+    detail = '%s: %s\n--- connectivity at failure ---\n%s' % (type(error).__name__, error, connectivity(binary))
+    return command_diagnostic(arguments, output, errors + b'\n' + detail.encode())
 
 
 def forward(binary, phase):
@@ -126,7 +148,7 @@ def forward(binary, phase):
             assert child.poll() is None, 'machine access ended while its foreground owner was live'
         except BaseException as error:
             errors.seek(0)
-            path = command_diagnostic(arguments, output, errors.read(1 << 20))
+            path = failure_diagnostic(binary, arguments, output, errors.read(1 << 20), error)
             raise RuntimeError('private machine access failed; private diagnostics: ' + str(path)) from error
         finally:
             if child.poll() is None:
@@ -178,6 +200,9 @@ def probe(args):
                 if error.errno not in (errno.ECONNREFUSED, errno.EADDRNOTAVAIL) or time.monotonic() >= deadline:
                     raise
                 time.sleep(.25)
+            except ExchangeMismatch as error:
+                path = failure_diagnostic(binary, ['exchange', str(address), str(phase['port'])], b'', b'', error)
+                raise RuntimeError('private address exchange failed; private diagnostics: ' + str(path)) from error
     assert registration() == before
     print(json.dumps({'check': args.check, 'target': phase['target'], 'status': 'PASS',
                       'exact_bytes': True, 'half_close': args.check != 'private-https',
