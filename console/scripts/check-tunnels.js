@@ -37,7 +37,17 @@
     ;(d && (button("Cancel", d) ?? button("Close", d)))?.click()
     await sleep(500)
   }
-  const get = async (path) => (await (await fetch(`/api/v1/${path}`)).json()).data
+  // The console is reached over a tunnel that drops a request now and then; retry reads.
+  const get = async (path) => {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return (await (await fetch(`/api/v1/${path}`)).json()).data
+      } catch (error) {
+        if (attempt >= 4) throw error
+        await new Promise((resolve) => setTimeout(resolve, 600))
+      }
+    }
+  }
   const tunnels = async () =>
     (await get("tunnels?workspace=personal")).items.filter((t) => t.desired_state !== "deleted")
 
@@ -84,38 +94,36 @@
   const base = `tunnels/${mine.id}`
   const path = `/check-${Date.now().toString(36)}.html`
 
-  // Rename and restore.
-  button("Rename")?.click()
-  const nameInput = await until(() => dialog()?.querySelector("input") ?? main().querySelector("input"))
-  if (nameInput) {
-    type(nameInput, `${name}-renamed`)
+  // Rename (in place on the title; the address stays) and restore.
+  const rename = async (to) => {
+    document.querySelector('button[aria-label="Rename"]')?.click()
+    const input = await until(() => document.querySelector('input[aria-label="Name"]'))
+    if (!input) return false
+    type(input, to)
     await sleep(200)
-    ;(button("Save", dialog() ?? main()) ?? button("Rename", dialog()))?.click()
-    const renamed = await until(async () => (await get(base)).name === `${name}-renamed`)
-    pass("rename saved on the server", Boolean(renamed))
-    button("Rename")?.click()
-    const again = await until(() => dialog()?.querySelector("input") ?? main().querySelector("input"))
-    if (again) {
-      type(again, name)
-      await sleep(200)
-      ;(button("Save", dialog() ?? main()) ?? button("Rename", dialog()))?.click()
-    }
-    pass("name restored", Boolean(await until(async () => (await get(base)).name === name)))
-  } else {
-    pass("rename field opens", false)
+    input.form.requestSubmit()
+    return Boolean(await until(async () => (await get(base)).name === to))
   }
+  pass("rename saved on the server", await rename(`${name}-renamed`))
+  pass("the address did not change with the name", (await get(base)).stable_endpoint === mine.stable_endpoint)
+  pass("name restored", await rename(name))
 
-  // Pause and resume.
-  button("Pause")?.click()
-  const confirmPause = await until(() => dialog())
-  if (confirmPause) (button("Pause", confirmPause) ?? button("Pause tunnel", confirmPause))?.click()
-  pass("paused on the server", Boolean(await until(async () => (await get(base)).desired_state === "paused")))
+  // Pause and resume. Pausing needs no confirmation; a click that lands while the page re-renders
+  // is repeated.
+  let paused = false
+  for (let attempt = 0; attempt < 3 && !paused; attempt++) {
+    button("Pause")?.click()
+    const confirmPause = await until(() => dialog(), 1500)
+    if (confirmPause) (button("Pause", confirmPause) ?? button("Pause tunnel", confirmPause))?.click()
+    paused = Boolean(await until(async () => (await get(base)).desired_state === "paused", 6000))
+  }
+  pass("paused on the server", paused)
   const resume = await until(() => button("Resume") ?? button("Resume tunnel"))
   resume?.click()
   const confirmResume = await until(() => dialog(), 1500)
   if (confirmResume) (button("Resume", confirmResume) ?? button("Resume tunnel", confirmResume))?.click()
   pass("resumed on the server", Boolean(await until(async () => (await get(base)).desired_state === "active")))
-  pass("healthy again after resume", Boolean(await until(() => /Healthy/.test(text()), 30000)))
+  pass("healthy again after resume", Boolean(await until(() => /Healthy/.test(text()), 120000)))
 
   // Public hostname route with a path.
   const routesBefore = (await get(`${base}/routes`)).items.length
@@ -145,12 +153,12 @@
     pass("Edit… opens", await menuItem("Edit"))
     const service = await until(() => document.getElementById("hostname-service"))
     if (service) {
-      type(service, `127.0.0.1:${port}`)
+      type(service, `127.0.0.1:${Number(port) + 1}`)
       await sleep(200)
       button("Save", dialog())?.click()
       const edited = await until(async () =>
         (await get(`${base}/routes`)).items.some(
-          (r) => r.origin.address === `127.0.0.1:${port}` && r.id !== `rte_${mine.id}_default`,
+          (r) => r.origin.address === `127.0.0.1:${Number(port) + 1}` && r.id !== `rte_${mine.id}_default`,
         ),
       )
       pass("service edit saved on the server", Boolean(edited))

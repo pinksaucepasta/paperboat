@@ -35,7 +35,17 @@
     x?.click()
     await sleep(500)
   }
-  const get = async (path) => (await (await fetch(`/api/v1/${path}`)).json()).data
+  // The console is reached over a tunnel that drops a request now and then; retry reads.
+  const get = async (path) => {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return (await (await fetch(`/api/v1/${path}`)).json()).data
+      } catch (error) {
+        if (attempt >= 4) throw error
+        await new Promise((resolve) => setTimeout(resolve, 600))
+      }
+    }
+  }
 
   const list = await until(() => (main()?.innerText.includes("Your teams") ? main() : null))
   pass("teams list shown with Create team", Boolean(list) && Boolean(button(main(), (t) => t === "Create team")))
@@ -112,6 +122,37 @@
   } else {
     pass("settings show the team name", false)
   }
+
+  // Approve new machines: shown for owners/admins, flips on the server and is restored.
+  const toggle = main().querySelector('[role="switch"][aria-label="Approve new machines"], #team-approval')
+  pass("Approve new machines switch is shown", Boolean(toggle))
+  if (toggle) {
+    const current = (await get(`teams/${encodeURIComponent(teamId)}`)).approve_new_machines
+    pass(
+      "switch shows the server's value",
+      toggle.getAttribute("aria-checked") === String(Boolean(current)),
+      `server=${current}`,
+    )
+    toggle.click()
+    const flipped = await until(
+      async () => (await get(`teams/${encodeURIComponent(teamId)}`)).approve_new_machines === !current,
+    )
+    pass("turning it off/on is saved on the server", Boolean(flipped))
+    ;(main().querySelector('[role="switch"][aria-label="Approve new machines"], #team-approval') ?? toggle).click()
+    pass(
+      "switch restored",
+      Boolean(
+        await until(async () => (await get(`teams/${encodeURIComponent(teamId)}`)).approve_new_machines === current),
+      ),
+    )
+  }
+  const waiting = main().innerText.includes("Machines waiting")
+  const requests = (await get(`teams/${encodeURIComponent(teamId)}`)).machine_requests ?? []
+  pass(
+    "Machines waiting appears exactly when there are requests",
+    waiting === requests.length > 0,
+    `${requests.length} requests`,
+  )
 
   // Member menu opens (no action taken).
   const actions = [...main().querySelectorAll("button")].find((b) =>

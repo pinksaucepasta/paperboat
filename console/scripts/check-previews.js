@@ -28,7 +28,17 @@
   const dialog = () => document.querySelector("[role=dialog], [role=alertdialog]")
   const button = (label, root = main()) =>
     [...root.querySelectorAll("button")].find((b) => b.textContent.trim() === label)
-  const get = async (path) => (await (await fetch(`/api/v1/${path}`)).json()).data
+  // The console is reached over a tunnel that drops a request now and then; retry reads.
+  const get = async (path) => {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return (await (await fetch(`/api/v1/${path}`)).json()).data
+      } catch (error) {
+        if (attempt >= 4) throw error
+        await new Promise((resolve) => setTimeout(resolve, 600))
+      }
+    }
+  }
   const previews = async () => (await get("previews?workspace=personal")).items
   const liveBefore = new Set((await previews()).filter((p) => p.state === "ready").map((p) => p.id))
 

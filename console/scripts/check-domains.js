@@ -35,7 +35,17 @@
     return text.slice(text.indexOf("Public hostnames"), text.indexOf("Danger zone")).replace(/\s+/g, " ")
   }
   const tunnelId = location.pathname.split("/").at(-1)
-  const domains = async () => (await (await fetch(`/api/v1/tunnels/${tunnelId}/domains`)).json()).data.items
+  // The console is reached over a tunnel that drops a request now and then; retry reads.
+  const domains = async () => {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return (await (await fetch(`/api/v1/tunnels/${tunnelId}/domains`)).json()).data.items
+      } catch (error) {
+        if (attempt >= 4) throw error
+        await new Promise((resolve) => setTimeout(resolve, 600))
+      }
+    }
+  }
   const mine = async () => (await domains()).find((d) => d.hostname === domain)
 
   pass("a test hostname was given", Boolean(domain), domain ?? "")
