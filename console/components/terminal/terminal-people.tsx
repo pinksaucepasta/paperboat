@@ -24,10 +24,11 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 export const roleLabels = { owner: "Owner", interactive: "Can type", viewer: "Watching" } as const
 
 /**
- * What the server adds to a participant once it resolves identities: the account's name and whether
- * they came in with an account ("member") or with a join code ("guest"). Absent from older servers.
+ * What the server adds to a participant once it resolves identities: the account's name, its email
+ * where the viewer may already know it, and whether they came in with an account ("member") or with
+ * a join code ("guest"). The name falls back to the email, then to a short tag.
  */
-type Identity = { display_name?: string; kind?: "member" | "guest" }
+type Identity = { display_name?: string; email?: string; kind?: "member" | "guest" }
 
 /** One row per person: two tabs of the same account are one participant with two windows. */
 type Person = {
@@ -52,7 +53,7 @@ export function peopleIn(session: TerminalSession): Person[] {
         role: participant.role,
         windows: 1,
         since: participant.connected_at,
-        displayName: participant.display_name?.trim() || undefined,
+        displayName: participant.display_name?.trim() || participant.email?.trim() || undefined,
         guest: participant.kind === "guest",
       })
     }
