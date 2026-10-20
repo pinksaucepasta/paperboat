@@ -62,9 +62,13 @@ def main():
             raise RuntimeError('new record is on another account')
         if new['alias'] != alias:
             failures.append('new record alias is %s, not %s' % (new['alias'], alias))
+        # Decision: adding the same computer again REMOVES its old record (not disconnected, not renamed).
         old = next((m for m in current if m['id'] == before['machine_id']), None)
-        if old is not None and old['state'] not in ('disconnected', 'revoked'):
-            failures.append('old machine record %s is still %s after reset + pair' % (before['machine_id'], old['state']))
+        if old is not None:
+            failures.append('old machine record %s still exists (%s) after reset + pair' % (before['machine_id'], old['state']))
+        # ... and the new record keeps the computer's local address, so pasted connection strings still work.
+        if original.get('assigned_ip') and new.get('assigned_ip') != original['assigned_ip']:
+            failures.append('local address changed from %s to %s' % (original['assigned_ip'], new.get('assigned_ip')))
         deadline = time.monotonic() + 120
         while time.monotonic() < deadline and p.command_result(PB, 'exec', alias, '--', 'true').returncode:
             time.sleep(4)
@@ -78,7 +82,7 @@ def main():
         print(json.dumps({'check': 'reset-lifecycle', 'status': 'FAIL', 'failures': failures, 'old_machine_id': before['machine_id'], 'pair_env_lines': [l.strip() for l in paired.splitlines() if 'nvironment' in l or 'ENV' in l][:3], 'new_machine_id': after['machine_id']}), flush=True)
         raise SystemExit(1)
     print(json.dumps({'check': 'reset-lifecycle', 'status': 'PASS', 'seconds': round(time.monotonic() - started, 1),
-                      'wrong_hostname_refused': True, 'new_record_same_alias': True, 'old_record_replaced': True,
+                      'wrong_hostname_refused': True, 'new_record_same_alias': True, 'old_record_removed': True, 'local_address_kept': True,
                       'inbox_preserved': True}), flush=True)
 
 
