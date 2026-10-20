@@ -401,6 +401,11 @@ func TestManagerCloseRecoversPersistenceFailures(t *testing.T) {
 					t.Fatal(err)
 				}
 				defer db.Close()
+				// The manager writes to the same file concurrently; wait for its lock instead of failing at once.
+				db.SetMaxOpenConns(1)
+				if _, err = db.Exec(`PRAGMA busy_timeout = 10000`); err != nil {
+					t.Fatal(err)
+				}
 				_, err = db.Exec(`CREATE TRIGGER reject_close BEFORE UPDATE OF state ON sessions WHEN NEW.state IN ('closing','closed') BEGIN SELECT RAISE(ABORT,'injected lifecycle failure'); END`)
 				if err != nil {
 					t.Fatal(err)

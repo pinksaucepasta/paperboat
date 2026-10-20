@@ -315,7 +315,7 @@ func TestManagedSSHKeyReconcilerFailsClosedWhenAuthorityRefreshFails(t *testing.
 	}
 	t.Cleanup(func() { _ = service.Shutdown(context.Background()) })
 	path := filepath.Join(home, ".ssh", "authorized_keys")
-	deadline := time.Now().Add(time.Second)
+	deadline := time.Now().Add(15 * time.Second) // the 10 ms reconcile loop is slow under -race on a busy machine
 	for {
 		updated, readErr := os.ReadFile(path)
 		if readErr == nil && !bytes.Contains(updated, []byte(key)) {

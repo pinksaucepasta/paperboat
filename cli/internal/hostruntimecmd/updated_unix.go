@@ -230,12 +230,19 @@ func runNotifiedUpdater(ctx context.Context, runner updaterRunner, notifier proc
 			select {
 			case readyErr := <-readyDone:
 				if readyErr == nil {
+					if ctx.Err() != nil {
+						return updaterShutdownResult(ctx, runErr, notifier.Stopping())
+					}
 					return errors.Join(runErr, notifier.Stopping())
 				}
 				degradedErr := notifier.Degraded("updater readiness notification failed")
 				stoppingErr := notifier.Stopping()
 				return errors.Join(runErr, readyErr, degradedErr, stoppingErr)
 			default:
+				if ctx.Err() != nil {
+					// Stopped by the service manager before it became ready: a requested stop, not a failure.
+					return updaterShutdownResult(ctx, runErr, notifier.Stopping())
+				}
 				degradedErr := notifier.Degraded("updater exited before readiness")
 				stoppingErr := notifier.Stopping()
 				return errors.Join(errUpdaterExitedBeforeReadiness, runErr, degradedErr, stoppingErr)
@@ -261,6 +268,10 @@ running:
 	for {
 		select {
 		case err := <-done:
+			if ctx.Err() != nil {
+				// The stop request cancels the runner too, so its return can win the select against ctx.Done.
+				return updaterShutdownResult(ctx, notifier.Draining(), err, notifier.Stopping())
+			}
 			return errors.Join(err, notifier.Stopping())
 		case <-ctx.Done():
 			drainErr := notifier.Draining()

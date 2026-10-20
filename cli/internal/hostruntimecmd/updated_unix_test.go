@@ -173,3 +173,23 @@ func TestUpdaterStopRequestedByTheServiceManagerIsNotAFailure(t *testing.T) {
 		t.Fatal("a failed shutdown step was hidden")
 	}
 }
+
+// The stop request cancels the runner as well, so the runner's return can arrive together with the
+// context's cancellation; whichever the loop sees first, a requested stop is not a failure.
+func TestUpdaterStopIsCleanWhicheverCancellationArrivesFirst(t *testing.T) {
+	for range 300 {
+		ctx, cancel := context.WithCancel(context.Background())
+		runner := updaterRunnerFunc(func(runCtx context.Context, ready func() error) error {
+			if err := ready(); err != nil {
+				return err
+			}
+			cancel() // the service manager's stop and the runner's own return become visible together
+			<-runCtx.Done()
+			return runCtx.Err()
+		})
+		notifier := &recordingProcessNotifier{watchdogSeen: make(chan struct{}, 1)}
+		if err := runNotifiedUpdater(ctx, runner, notifier); err != nil {
+			t.Fatalf("a requested stop exited with failure: %v", err)
+		}
+	}
+}
