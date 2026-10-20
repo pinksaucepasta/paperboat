@@ -30,7 +30,13 @@ def main():
     inbox.mkdir(parents=True, exist_ok=True)
     sentinel.write_bytes(os.urandom(32))
     started = time.monotonic()
-    had_env = bool(p.invoke(PB, 'env', 'list', '--json').get('names'))  # needs the vault unlocked
+    # Listing needs the vault unlocked; a locked vault means no environment names are known, so the
+    # pending-environment explanation is not required of pair.
+    listed = p.command_result(PB, 'env', 'list', '--json')
+    try:
+        had_env = listed.returncode == 0 and bool(json.loads(listed.stdout).get('names'))
+    except ValueError:
+        had_env = False
     try:
         with tempfile.TemporaryDirectory(prefix='pb-reset-') as directory:
             token = p.enrollment_file(PB, alias, Path(directory))
