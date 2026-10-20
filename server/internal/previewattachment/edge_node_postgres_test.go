@@ -87,6 +87,31 @@ func TestPreviewEdgePlacementQueryOnPostgres(t *testing.T) {
 	if err != nil || chosen != first {
 		t.Fatalf("promoted preview selected %q, want %q: %v", chosen, first, err)
 	}
+	// The second attachment of a preview lives on the other edge: it needs a live first attachment, takes
+	// an edge in another failure domain, and neither slot takes the edge the other holds.
+	second := PreviewEdgeNodeSelectionRequest{AccountID: account, PreviewID: "preview_" + stamp, OperationID: "operation_" + stamp + SecondaryOperationSuffix, OwnerMachineID: machine, InstallationGeneration: 1}
+	if _, err = selector.SelectPreviewEdgeNode(context.Background(), second); !errors.Is(err, ErrAdmissionUnavailable) {
+		t.Fatalf("a second attachment without a first was placed: %v", err)
+	}
+	attach := func(operation, edge string, slot int) {
+		t.Helper()
+		exec(`INSERT INTO paperboat.operations(id,account_id,idempotency_key,request_hash,operation_type,resource_kind,resource_id,phase,state,progress,outcome,correlation_id,completed_at) VALUES($1,$2,$1,decode(repeat('ab',32),'hex'),'preview.attachment_secondary','preview_lease',$3,'ready','succeeded',100,'unchanged',$1,now()) ON CONFLICT DO NOTHING`, operation, account, "preview_"+stamp)
+		exec(`INSERT INTO paperboat.preview_lease_create_operations(account_id,preview_id,operation_id,slot) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, account, "preview_"+stamp, operation, slot)
+		exec(`INSERT INTO paperboat.preview_lease_carrier_attachments(account_id,preview_id,operation_id,idempotency_key,request_id,correlation_id,request_hash,owner_machine_id,owner_session_id,host_id,edge_node_id,machine_identity_public_key,machine_identity_thumbprint,lease_generation,tunnel_id,connector_id,connector_session_id,process_generation,config_generation,config_content_hash,route_id,route_generation,edge_endpoints,edge_process_epoch,edge_carrier_server_spki_sha256,edge_carrier_server_certificate_chain_pem,state,issued_at,expires_at,edge_slot)
+ VALUES($1,$2,$3,$3,$3,$3,decode(repeat('ab',32),'hex'),$4,'session',$4,$5,$6,$7,1,'tunnel_x','connector_x','session_x',1,1,'sha256:'||repeat('a',64),$8,1,ARRAY['tcp://edge.example.test:24001','quic://edge.example.test:24002'],$9,'sha256:'||repeat('b',64),'test-certificate','pending',now(),now()+interval '1 hour',$10)`,
+			account, "preview_"+stamp, operation, machine, edge, identity, "sha256:"+base64.RawURLEncoding.EncodeToString(make([]byte, 32)), route, map[string]string{first: "epoch-aa", preferred: "epoch-zz"}[edge], slot)
+	}
+	attach("operation_"+stamp, first, 0)
+	other, err := selector.SelectPreviewEdgeNode(context.Background(), second)
+	if err != nil || other != preferred {
+		t.Fatalf("second attachment placed on %q (%v), want the other edge %q", other, err, preferred)
+	}
+	attach("operation_"+stamp+SecondaryOperationSuffix, preferred, 1)
+	chosen, err = selector.SelectPreviewEdgeNode(context.Background(), PreviewEdgeNodeSelectionRequest{AccountID: account, PreviewID: "preview_" + stamp, OperationID: "operation_" + stamp, OwnerMachineID: machine, InstallationGeneration: 1})
+	if err != nil || chosen != first {
+		t.Fatalf("first attachment moved to %q (%v) while the second holds the other edge", chosen, err)
+	}
+	exec(`UPDATE paperboat.preview_lease_carrier_attachments SET state='released',released_at=now() WHERE account_id=$1 AND preview_id=$2`, account, "preview_"+stamp)
 	// An edge outside the workspace's edge set takes no NEW placement, but a machine
 	// whose carrier is already active there keeps working until it reattaches: invalidating the
 	// attachment at once stranded the machine (preview create failed with edge_admission_unavailable

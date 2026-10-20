@@ -105,6 +105,21 @@ func TestSharedPreviewSignedLifecycleOnPostgres(t *testing.T) {
 	if resolved.MachineAccountID != owner || resolved.AccountID != member {
 		t.Fatal("attachment identity conflated issuer and resource owner")
 	}
+	// The second attachment of the preview is proven through the same lease and gets its own
+	// operation, registered for the lease, so the attachment table accepts it.
+	secondLookup := lookup
+	secondLookup.OperationID = dispatch.OperationID + previewattachment.SecondaryOperationSuffix
+	second, err := resolver.ResolvePreviewLease(ctx, secondLookup)
+	if err != nil || second.OperationID != secondLookup.OperationID || second.PreviewID != resolved.PreviewID || second.AccountID != resolved.AccountID {
+		t.Fatalf("second attachment lease = %+v, %v", second, err)
+	}
+	var registered, completed int
+	if err := f.database.SQL().QueryRowContext(ctx, `SELECT (SELECT count(*) FROM paperboat.preview_lease_create_operations WHERE account_id=$1 AND preview_id=$2 AND operation_id=$3 AND slot=1),(SELECT count(*) FROM paperboat.operations WHERE account_id=$1 AND id=$3 AND state='succeeded' AND operation_type='preview.attachment_secondary')`, second.AccountID, second.PreviewID, second.OperationID).Scan(&registered, &completed); err != nil || registered != 1 || completed != 1 {
+		t.Fatalf("second attachment operation registered=%d completed=%d err=%v", registered, completed, err)
+	}
+	if _, err := resolver.ResolvePreviewLease(ctx, secondLookup); err != nil {
+		t.Fatalf("resolving the second attachment again: %v", err)
+	}
 	machineRequest := actor
 	machineRequest.Actor.AccountID = owner
 	machineRequest.Actor.ActorID = owner

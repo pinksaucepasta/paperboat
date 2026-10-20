@@ -49,9 +49,12 @@ func (r *DBPreviewLeaseResolver) ResolvePreviewLease(ctx context.Context, in Lea
 	now := r.clock()
 	var lease LeaseSnapshot
 	err := r.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		// The second attachment's operation is the create operation plus a suffix; the lease is
+		// proven through the create operation itself.
+		createOperation, slot := SplitOperationSlot(in.OperationID)
 		row := tx.QueryRow(ctx, resolvePreviewLeaseSQL,
 			in.UserID, in.MachineID, in.InstallationGeneration, in.PreviewID,
-			in.OwnerSessionID, in.OperationID, now,
+			in.OwnerSessionID, createOperation, now,
 		)
 		var publicKey string
 		err := row.Scan(
@@ -77,6 +80,17 @@ func (r *DBPreviewLeaseResolver) ResolvePreviewLease(ctx context.Context, in Lea
 				return err
 			}
 		}
+		if slot == 1 {
+			// FK target of the attachment row; already complete, nothing for operation workers to do.
+			if _, err := tx.Exec(ctx, secondaryAttachmentOperationSQL, in.OperationID, lease.AccountID, createOperation, now); err != nil {
+				return err
+			}
+			// The attachment table accepts only operations registered for the lease.
+			if _, err := tx.Exec(ctx, `INSERT INTO preview_lease_create_operations(account_id,preview_id,operation_id,slot) VALUES($1,$2,$3,1) ON CONFLICT DO NOTHING`, lease.AccountID, in.PreviewID, in.OperationID); err != nil {
+				return err
+			}
+			lease.OperationID = in.OperationID
+		}
 		thumbprint, ok := machineIdentityThumbprint(publicKey)
 		if !ok {
 			return ErrUnauthorized
@@ -100,6 +114,15 @@ func (r *DBPreviewLeaseResolver) clock() time.Time {
 	}
 	return r.now().UTC()
 }
+
+const secondaryAttachmentOperationSQL = `
+INSERT INTO operations (id, account_id, idempotency_key, request_hash, operation_type, resource_kind, resource_id,
+                        phase, state, progress, outcome, correlation_id, created_at, updated_at, completed_at)
+SELECT $1, o.account_id, $1, o.request_hash, 'preview.attachment_secondary', o.resource_kind, o.resource_id,
+       'ready', 'succeeded', 100, 'unchanged', o.correlation_id, $4, $4, $4
+FROM operations AS o
+WHERE o.id = $3 AND o.account_id = $2
+ON CONFLICT DO NOTHING`
 
 const resolvePreviewLeaseSQL = `
 SELECT p.account_id, p.actor_id, m.user_id, p.id, o.id,

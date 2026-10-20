@@ -61,6 +61,7 @@ func (s *SQLRepository) CreatePending(ctx context.Context, attachment Attachment
 		return Attachment{}, fmt.Errorf("%w: invalid request hash", ErrInvalid)
 	}
 	now := s.clock()
+	_, slot := SplitOperationSlot(attachment.OperationID)
 	var result Attachment
 	err = s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		command, err := tx.Exec(ctx, insertAttachmentSQL,
@@ -71,7 +72,7 @@ func (s *SQLRepository) CreatePending(ctx context.Context, attachment Attachment
 			attachment.LeaseGeneration, attachment.TunnelID, attachment.ConnectorID,
 			attachment.SessionID, attachment.ProcessGeneration, attachment.ConfigGeneration,
 			attachment.ConfigContentHash, attachment.RouteID, attachment.RouteGeneration,
-			attachment.EdgeEndpoints, attachment.EdgeProcessEpoch, attachment.EdgeCarrierServerSPKISHA256, attachment.EdgeCarrierServerCertificateChainPEM, attachment.IssuedAt.UTC(), attachment.ExpiresAt.UTC(), now, now,
+			attachment.EdgeEndpoints, attachment.EdgeProcessEpoch, attachment.EdgeCarrierServerSPKISHA256, attachment.EdgeCarrierServerCertificateChainPEM, attachment.IssuedAt.UTC(), attachment.ExpiresAt.UTC(), now, now, slot,
 		)
 		if err != nil {
 			return err
@@ -602,8 +603,8 @@ INSERT INTO preview_lease_carrier_attachments (
   tunnel_id, connector_id, connector_session_id, process_generation,
   config_generation, config_content_hash, route_id, route_generation,
 	  edge_endpoints, edge_process_epoch, edge_carrier_server_spki_sha256, edge_carrier_server_certificate_chain_pem, attachment_generation, state, edge_ready, origin_ready,
-	  issued_at, expires_at, created_at, updated_at
-) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'preview_ephemeral',$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,1,'pending',false,false,$27,$28,$29,$30)
+	  issued_at, expires_at, created_at, updated_at, edge_slot
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'preview_ephemeral',$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,1,'pending',false,false,$27,$28,$29,$30,$31)
 ON CONFLICT DO NOTHING`
 
 const admitAttachmentSQL = `

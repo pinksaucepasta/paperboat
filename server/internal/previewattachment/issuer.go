@@ -177,7 +177,7 @@ JOIN user_machines AS machine
 LEFT JOIN runtime_carrier_attachments AS active
   ON active.machine_id=machine.id AND active.account_id=$3
  AND active.installation_generation=$5 AND active.worker_generation=machine.worker_generation
- AND active.active AND active.ready AND active.edge_node_id=node.id
+ AND active.ready AND active.edge_node_id=node.id
  AND active.edge_process_epoch=node.process_epoch
  AND paperboat.runtime_carrier_valid(active.route_id,active.edge_node_id,active.edge_process_epoch,true)
 WHERE node.id = $1
