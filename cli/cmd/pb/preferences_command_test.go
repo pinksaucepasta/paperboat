@@ -295,3 +295,38 @@ func TestPreferenceArgumentParserRejectsIncompleteInputAndNeverExpands(t *testin
 		t.Fatalf("args=%q err=%v", got, err)
 	}
 }
+
+// With --no-customization the shortcut and the defaults are not expanded, and explain says so by
+// showing the arguments exactly as given.
+func TestCustomizationExplainHonoursNoCustomization(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	path, _ := preferences.Path(configPath)
+	doc := preferences.Default()
+	doc.Shortcuts = map[string]preferences.Shortcut{"smokeuptime": {Command: []string{"exec"}, Args: []string{"{1}", "--", "uptime"}}}
+	if err := preferences.Save(path, doc); err != nil {
+		t.Fatal(err)
+	}
+	explain := func(extra ...string) []string {
+		var out, stderr bytes.Buffer
+		args := append(append([]string{"--config", configPath}, extra...), "config", "customize", "explain", "--json", "--", "smokeuptime", "machine1")
+		if code := run(context.Background(), args, &out, &stderr); code != 0 {
+			t.Fatalf("explain %v: %d %s %s", extra, code, &out, &stderr)
+		}
+		var result struct {
+			Data struct {
+				Argv []string `json:"argv"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		return result.Data.Argv
+	}
+	if argv := explain(); !slices.Contains(argv, "exec") || slices.Contains(argv, "smokeuptime") {
+		t.Fatalf("shortcut not expanded without the flag: %v", argv)
+	}
+	if argv := explain("--no-customization"); slices.Contains(argv, "exec") || !slices.Contains(argv, "smokeuptime") {
+		t.Fatalf("--no-customization still expanded the shortcut: %v", argv)
+	}
+}

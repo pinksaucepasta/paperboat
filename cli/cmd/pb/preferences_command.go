@@ -131,6 +131,10 @@ the invalid file. --json displays preferences without starting the editor.`
 		if err = validatePreferencesCommands(root, doc); err != nil {
 			return err
 		}
+		if bypass, _ := c.Flags().GetBool("no-customization"); bypass {
+			// With --no-customization nothing is expanded, so explain shows the arguments as given.
+			doc = preferences.Default()
+		}
 		resolution, err := explainPreferences(root, doc, interactiveArgs(c, args))
 		if err != nil {
 			return err
