@@ -9,6 +9,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat-server/internal/config"
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat-server/internal/testutil"
 )
 
 func TestHostIsToldAboutAChangeWithoutPollingOnPostgres(t *testing.T) {
@@ -72,9 +73,21 @@ func TestHostIsToldAboutAChangeWithoutPollingOnPostgres(t *testing.T) {
 	}
 	wait := func(machineID string, known map[string]int64, maxWait time.Duration) <-chan result {
 		out := make(chan result, 1)
+		// Creating the machines published their inventory; the host in this test has seen that already.
+		seen := map[string]int64{}
+		for topic, generation := range known {
+			seen[topic] = generation
+		}
+		if _, ok := seen[TopicInventory]; !ok {
+			var inventory int64
+			if err := database.SQL().QueryRowContext(ctx, `SELECT coalesce((SELECT generation FROM paperboat.machine_topic_generations WHERE machine_id=$1 AND topic='inventory'),0)`, machineID).Scan(&inventory); err != nil {
+				t.Error(err)
+			}
+			seen[TopicInventory] = inventory
+		}
 		started := time.Now()
 		go func() {
-			changed, err := hub.Wait(ctx, machineID, known, maxWait)
+			changed, err := hub.Wait(ctx, machineID, seen, maxWait)
 			out <- result{changed, err, time.Since(started)}
 		}()
 		return out
@@ -140,4 +153,128 @@ func TestHostIsToldAboutAChangeWithoutPollingOnPostgres(t *testing.T) {
 			t.Fatalf("unknown topic %q accepted", bad)
 		}
 	}
+}
+
+func TestWritesThatChangeWhatAHostCachesPublishTheirTopicsOnPostgres(t *testing.T) {
+	dsn := os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
+	if dsn == "" {
+		t.Skip("requires isolated PostgreSQL")
+	}
+	if err := db.ValidateIsolatedTestDSN(dsn, os.Getenv("PAPERBOAT_DATABASE_DSN")); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	database, err := db.Open(config.Database{Driver: "postgres", DSN: dsn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	if err = db.Migrate(ctx, database); err != nil {
+		t.Fatal(err)
+	}
+	stamp := fmt.Sprint(time.Now().UnixNano())
+	account, stranger := "topics_account_"+stamp, "topics_stranger_"+stamp
+	laptop, server, outsider := "topics_laptop_"+stamp, "topics_server_"+stamp, "topics_outsider_"+stamp
+	exec := func(query string, args ...any) {
+		t.Helper()
+		if _, err := database.SQL().ExecContext(ctx, query, args...); err != nil {
+			t.Fatalf("%v: %s", err, query)
+		}
+	}
+	generation := func(machine, topic string) int64 {
+		t.Helper()
+		var value int64
+		err := database.SQL().QueryRowContext(ctx, `SELECT coalesce((SELECT generation FROM paperboat.machine_topic_generations WHERE machine_id=$1 AND topic=$2),0)`, machine, topic).Scan(&value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return value
+	}
+	// moved runs write and reports which of the machines saw the topic move.
+	moved := func(topic string, machines []string, write func()) map[string]bool {
+		t.Helper()
+		before := map[string]int64{}
+		for _, machine := range machines {
+			before[machine] = generation(machine, topic)
+		}
+		write()
+		result := map[string]bool{}
+		for _, machine := range machines {
+			result[machine] = generation(machine, topic) > before[machine]
+		}
+		return result
+	}
+	expect := func(name string, got map[string]bool, want map[string]bool) {
+		t.Helper()
+		for machine, w := range want {
+			if got[machine] != w {
+				t.Errorf("%s: machine %s moved=%v, want %v", name, machine[:len(machine)-len(stamp)-1], got[machine], w)
+			}
+		}
+	}
+	for _, id := range []string{account, stranger} {
+		exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$2,'active')`, id, id+"@example.test")
+	}
+	t.Cleanup(func() {
+		for _, id := range []string{account, stranger} {
+			_, _ = database.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.users WHERE id=$1`, id)
+		}
+	})
+	addMachine := func(id, owner, alias string) {
+		exec(`INSERT INTO paperboat.user_machines (id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state) VALUES ($1,$2,$3,$4,'linux','amd64','/workspace','online','occupied')`, id, owner, "env_"+id, alias)
+	}
+	addMachine(laptop, account, "laptop")
+	addMachine(outsider, stranger, "outsider")
+	all := []string{laptop, server, outsider}
+
+	// inventory: a new machine tells the account's other machines, and nobody else.
+	expect("new machine", moved(TopicInventory, []string{laptop, outsider}, func() { addMachine(server, account, "server") }), map[string]bool{laptop: true, outsider: false})
+	expect("rename", moved(TopicInventory, all, func() { exec(`UPDATE paperboat.user_machines SET alias='renamed' WHERE id=$1`, server) }), map[string]bool{laptop: true, server: true, outsider: false})
+	expect("presence", moved(TopicInventory, all, func() { exec(`UPDATE paperboat.user_machines SET online=NOT online WHERE id=$1`, server) }), map[string]bool{laptop: true, outsider: false})
+	expect("heartbeat only", moved(TopicInventory, all, func() { exec(`UPDATE paperboat.user_machines SET last_seen_at=now() WHERE id=$1`, server) }), map[string]bool{laptop: false, server: false})
+	services := func(list string) {
+		exec(`INSERT INTO paperboat.machine_service_snapshots(machine_id,installation_generation,boot_id,started_at,generation,services,expires_at,updated_at) VALUES($1,1,'boot-012345678901',now(),1,$2::jsonb,now()+interval '1 hour',now())
+ ON CONFLICT(machine_id) DO UPDATE SET services=EXCLUDED.services,expires_at=EXCLUDED.expires_at,updated_at=now()`, server, list)
+	}
+	expect("services appear", moved(TopicInventory, all, func() { services(`[{"port":3000,"address_family":"ipv4"}]`) }), map[string]bool{laptop: true, outsider: false})
+	expect("services unchanged", moved(TopicInventory, all, func() { services(`[{"port":3000,"address_family":"ipv4"}]`) }), map[string]bool{laptop: false, server: false})
+	expect("services change", moved(TopicInventory, all, func() { services(`[]`) }), map[string]bool{laptop: true, outsider: false})
+
+	// previews: every machine that can see the owner machine learns of a preview, not only the owner.
+	expect("preview", moved(TopicPreviews, all, func() {
+		exec(`INSERT INTO paperboat.preview_leases(id,endpoint,account_id,actor_id,owner_machine_id,owner_session_id,owner_session_kind,target_scheme,target_address,lease_deadline) VALUES($1,$2,$3,$3,$4,'session','foreground','http','127.0.0.1:3000',now()+interval '1 hour')`, "preview_"+stamp, "https://p-"+stamp+".preview.example.test", account, server)
+	}), map[string]bool{laptop: true, server: true, outsider: false})
+
+	// peer_network: new keys or a revocation reach the account's machines.
+	exec(`INSERT INTO paperboat.peer_endpoint_certificates(fingerprint,user_id,endpoint_id,role,generation,serial,certificate,quic_public_key,issued_at,expires_at,key_id,signer_public_key)
+ VALUES(decode(repeat('02',32),'hex'),$1,$2,'machine',1,1,decode(repeat('aa',200),'hex'),decode(repeat('bb',32),'hex'),now(),now()+interval '1 day','key_01',decode(repeat('cc',32),'hex'))`, account, server)
+	expect("peer identity", moved(TopicPeerNetwork, all, func() {
+		exec(`INSERT INTO paperboat.peer_network_identities(user_id,endpoint_id,role,machine_id,endpoint_generation,machine_generation,key_generation,wireguard_public_key,quic_certificate_fingerprint,virtual_address,created_at,updated_at) VALUES($1,$2,'machine',$2,1,1,1,decode(repeat('01',32),'hex'),decode(repeat('02',32),'hex'),'100.64.0.9',now(),now())`, account, server)
+	}), map[string]bool{laptop: true, server: true, outsider: false})
+	expect("peer key rotation", moved(TopicPeerNetwork, all, func() {
+		exec(`UPDATE paperboat.peer_network_identities SET wireguard_public_key=decode(repeat('03',32),'hex'),key_generation=2 WHERE endpoint_id=$1`, server)
+	}), map[string]bool{laptop: true, outsider: false})
+
+	// config: only the machine whose assignment changed.
+	exec(`INSERT INTO paperboat.control_environments(id,workspace_id,owner_user_id,desired_state) VALUES($1,$1,$2,'active')`, "env_"+laptop, account)
+	expect("config assignment", moved(TopicConfig, all, func() {
+		exec(`INSERT INTO paperboat.control_config_assignments(id,environment_id,machine_id) VALUES($1,$2,$3)`, "assignment_"+stamp, "env_"+laptop, laptop)
+	}), map[string]bool{laptop: true, server: false, outsider: false})
+	expect("config version", moved(TopicConfig, all, func() {
+		exec(`UPDATE paperboat.control_config_assignments SET version=version+1 WHERE id=$1`, "assignment_"+stamp)
+	}), map[string]bool{laptop: true, server: false})
+
+	// tunnels: the machines hosting the tunnel's connectors.
+	tunnel := "tunnel_" + stamp
+	endpointID := testutil.EndpointID("topics:" + stamp)
+	exec(`INSERT INTO paperboat.tunnels (id,account_id,name,desired_state,access_mode,generation,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id,summary_code) VALUES ($1,$2,$3,'active','public',1,$4,$5,$6,$2,'pending')`, tunnel, account, "t-"+stamp, endpointID, "https://"+testutil.EndpointLabel(endpointID)+".tunnels.example.test", laptop)
+	expect("connector", moved(TopicTunnels, all, func() {
+		exec(`INSERT INTO paperboat.tunnel_connectors (id,tunnel_id,host_id,credential_reference,credential_thumbprint,rotation_generation,desired_state,protocol_version,last_applied_config_generation,drain_state,generation) VALUES ($1,$2,$3,'keychain://x','thumb',1,'active','1.0',0,'accepting',1)`, "connector_"+stamp, tunnel, server)
+	}), map[string]bool{server: true, outsider: false})
+	expect("tunnel config", moved(TopicTunnels, all, func() {
+		exec(`INSERT INTO paperboat.tunnel_config_generations (tunnel_id,generation,content_hash,snapshot,activation_state,created_by_actor_id,retained_until) VALUES ($1,1,$2,'{}','pending',$3,now()+interval '1 hour')`, tunnel, make([]byte, 32), account)
+	}), map[string]bool{server: true, laptop: true, outsider: false})
+	expect("tunnel deleted", moved(TopicTunnels, all, func() {
+		exec(`UPDATE paperboat.tunnels SET desired_state='deleted',deleted_at=now() WHERE id=$1`, tunnel)
+	}), map[string]bool{server: true, laptop: true, outsider: false})
 }
