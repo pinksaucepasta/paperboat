@@ -835,9 +835,12 @@ func (s *Service) revokeUserMachineControlTx(ctx context.Context, tx *db.Tx, use
 		if _, err := tx.Queries().RevokeUserMachineAccessSessions(ctx, dbsqlc.RevokeUserMachineAccessSessionsParams{UserMachineID: machine.ID, Reason: sql.NullString{String: "user_machine_deleted", Valid: true}}); err != nil {
 			return err
 		}
-		if err := db.CleanupMachineMachineTx(ctx, tx, machine.UserID, machine.ID, now); err != nil {
-			return err
-		}
+	}
+	// Revoking (disconnecting) a machine fences every credential it holds in the same transaction, exactly as
+	// deleting it does: its CLI sessions, access and refresh tokens, E2EE keys and peer authority. Leaving the
+	// pair-time CLI session alive let a revoked machine keep acting as the account until the token expired.
+	if err := db.CleanupMachineMachineTx(ctx, tx, machine.UserID, machine.ID, now); err != nil {
+		return err
 	}
 	if err := expireAuthenticatedMachineInstallationPairingsTx(ctx, tx, machine.ID, now); err != nil {
 		return err
