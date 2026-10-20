@@ -461,7 +461,7 @@ test_application_pairs() {
       case "$kind" in
         transfer-multi|exec-repeat|ssh-tools|transfer-manage|exec-cancel|ssh-doctor|inbox-manage|transfer-resume)
           [ "$source" != "$target" ] || continue ;;
-        preview-manage|preview-inspect) [ "$source" = "$target" ] || continue ;;
+        preview-manage|preview-inspect|send-self) [ "$source" = "$target" ] || continue ;;
       esac
       id="$kind:$source-$target"
       skipped "$id" && continue
@@ -750,6 +750,28 @@ test_local_access_settings() {
   done
 }
 
+test_reset_lifecycle() {
+  skipped reset-lifecycle && return
+  local device id out status t0 password
+  for device in "${TLIST[@]}"; do
+    id="reset-lifecycle:$device"
+    skipped "$id" && continue
+    t0=$(now)
+    if ! stage_terminal_fixtures "$device"; then
+      record "$id" FAIL 0 "could not stage the reset fixture"
+      continue
+    fi
+    password=""
+    [ "$device" != apple ] || password="$APPLE_PASS"
+    out=$(printf '%s\n' "$password" | on "$device" "python3 /tmp/$RUN_ID/reset_lifecycle.py" 2>&1); status=$?
+    if [ "$status" = 0 ] && python3 -c 'import json,sys;r=json.loads(sys.argv[1]);assert r["check"]=="reset-lifecycle" and r["status"]=="PASS" and r["old_record_removed"] and r["local_address_kept"] and r["new_record_same_alias"] and r["inbox_preserved"]' "$out" 2>/dev/null; then
+      record "$id" PASS $(( $(now)-t0 )) "reset then pair: same name and local address, old record removed, Inbox kept"
+    else
+      record_command_failure "$id" $(( $(now)-t0 )) "$out"
+    fi
+  done
+}
+
 test_device_application() {
   local group=$1 script=$2 flags=${3:-}
   skipped "$group" && return
@@ -892,10 +914,13 @@ test_private_access
 test_application_pairs transfer-manage transfer_manage.py
 test_application_pairs preview-manage preview_manage.py
 test_application_pairs preview-inspect preview_inspect.py
+test_application_pairs send-self send_self.py
 test_device_application team-lifecycle team_lifecycle.py
 test_device_application team-roles team_lifecycle.py --roles
 test_device_application tunnel-manage tunnel_manage.py
 test_device_application config-sync config_sync.py
+test_device_application config-survival config_survival.py
+test_reset_lifecycle
 test_device_application tunnel-lifecycle tunnel_lifecycle.py
 test_device_application tunnel-survival tunnel_survival.py
 test_device_application tunnel-failures tunnel_failures.py
