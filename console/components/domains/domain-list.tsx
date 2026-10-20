@@ -180,6 +180,26 @@ export function DomainList() {
       {text && !shown.length && (
         <p className="py-12 text-center text-sm text-muted-foreground">No domains match “{search.trim()}”</p>
       )}
+      {(tunnels.isError || previews.isError) && (
+        <div className="flex items-center justify-center gap-3 py-12 text-sm text-muted-foreground">
+          Couldn’t load everything that uses your domains.
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              if (tunnels.isError) void tunnels.refetch()
+              if (previews.isError) void previews.refetch()
+            }}
+          >
+            Retry
+          </Button>
+        </div>
+      )}
+      {!text && !entries.length && tunnels.isSuccess && previews.isSuccess && (
+        <p className="py-12 text-center text-sm text-muted-foreground">
+          No domains yet. Add one to give your previews and tunnels an address on your own name.
+        </p>
+      )}
 
       {adding && (
         <AddDomainDialog
