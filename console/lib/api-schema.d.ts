@@ -7484,6 +7484,15 @@ export interface components {
                 role: "owner" | "viewer" | "interactive";
                 /** Format: date-time */
                 connected_at: string;
+                /**
+                 * @description member is a signed-in account; guest joined with the terminal code.
+                 * @enum {unknown}
+                 */
+                kind: "member" | "guest";
+                /** @description The account's name, or what a guest typed. Present only for the session owner and for the participant themselves. */
+                display_name?: string;
+                /** @description Present only when the viewer is the owner or the participant and may already know it: the participant's own, a shared team's, or an address the owner allowed for this terminal. */
+                email?: string;
             }[];
             participants_available: boolean;
             /** @description Live directory observed by the terminal host; omitted when unavailable. */
@@ -9586,6 +9595,8 @@ export interface components {
             suspended: boolean;
             /** @description Machines that members add wait for an owner or admin to accept them. */
             approve_new_machines?: boolean;
+            /** @description Members may reach the ports of machines shared into the team when their grant includes private_access. Off by default; an owner or admin changes it with action private_access. */
+            allow_private_access?: boolean;
             /** @description Owners and admins see every request; other members see their own. */
             machine_requests?: components["schemas"]["TeamMachineAdmission"][];
             machines?: components["schemas"]["TeamMachine"][];
@@ -9621,13 +9632,15 @@ export interface components {
             operation_id: string;
             expected_generation: number;
             /** @enum {string} */
-            action: "role" | "remove" | "leave" | "transfer" | "delete" | "rename" | "machine_approval";
+            action: "role" | "remove" | "leave" | "transfer" | "delete" | "rename" | "machine_approval" | "private_access";
             account_id?: string;
             role?: string;
             confirmation?: string;
             name?: string;
             /** @description With action machine_approval: whether machines members add need an owner or admin to accept them. */
             approve_new_machines?: boolean;
+            /** @description With action private_access: whether members may reach the ports of machines shared into the team (needs a private_access grant too). */
+            allow_private_access?: boolean;
         };
         TeamInviteRequest: {
             operation_id: string;
@@ -9844,12 +9857,10 @@ export interface components {
             machine_id: string;
             generation: number;
             personal_auto_enabled: boolean;
-            team_auto_enabled: boolean;
         };
         MachineServicePolicyUpdate: {
             expected_generation: number;
             personal_auto_enabled: boolean;
-            team_auto_enabled: boolean;
         };
         MachineServicesSnapshot: {
             /** @constant */
@@ -10636,6 +10647,8 @@ export interface components {
             role: "owner" | "admin" | "member";
             /** @description Team only: machines members add wait for an owner or admin. */
             approve_new_machines?: boolean;
+            /** @description Team only: members may reach the ports of machines shared into the team (with a private_access grant). */
+            allow_private_access?: boolean;
         };
         ResourceBandwidthHistory: {
             /** Format: date-time */

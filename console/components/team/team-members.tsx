@@ -586,6 +586,13 @@ function TeamSettings({ team, owner }: { team: Team; owner: boolean }) {
     },
   })
   const changed = name.trim() !== (team.display_name || team.team_id)
+  const privateAccess = useMutation({
+    mutationFn: (on: boolean) => teamAction(team, "private_access", { allow_private_access: on }),
+    onSuccess: async () => {
+      await refresh()
+      await queryClient.invalidateQueries({ queryKey: workspacesQuery.queryKey })
+    },
+  })
   const approval = useMutation({
     mutationFn: (on: boolean) => teamAction(team, "machine_approval", { approve_new_machines: on }),
     onSuccess: async () => {
@@ -608,6 +615,20 @@ function TeamSettings({ team, owner }: { team: Team; owner: boolean }) {
         Machines that members add wait for an owner or admin to accept them. Owners and admins add machines directly.
       </p>
       {approval.isError && <p className="py-2 text-sm text-destructive">{approval.error.message}</p>}
+      <Row label="Allow private access" htmlFor="team-private-access">
+        <Switch
+          id="team-private-access"
+          checked={team.allow_private_access ?? false}
+          disabled={privateAccess.isPending}
+          onCheckedChange={(on) => privateAccess.mutate(on)}
+          aria-label="Allow private access"
+        />
+      </Row>
+      <p className="pb-2 text-xs text-muted-foreground">
+        Lets members reach the ports of the team’s shared machines over the private network, on top of the Private
+        network access you grant on each machine. Off by default.
+      </p>
+      {privateAccess.isError && <p className="py-2 text-sm text-destructive">{privateAccess.error.message}</p>}
       {owner && (
         <Row label="Team name" htmlFor="team-name">
           <form
