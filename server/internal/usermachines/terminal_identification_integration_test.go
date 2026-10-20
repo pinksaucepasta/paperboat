@@ -153,9 +153,30 @@ func TestPostgresTerminalLiveIdentificationAuthorization(t *testing.T) {
 		t.Fatalf("Personal end sharing: %+v error=%v", shared.Sharing, err)
 	}
 
+	// A grant to one member must show up in the owner's view, not only an all-members grant.
+	selected := teams.TerminalSessionGrantRequest{OperationID: "sel_" + suffix, ExpectedGeneration: 0, Audience: "selected_member", AccountID: stranger, Role: "viewer", Active: true}
+	if err = store.SQL().QueryRowContext(ctx, `SELECT generation FROM paperboat.teams WHERE team_id=$1`, team).Scan(&selected.ExpectedGeneration); err != nil {
+		t.Fatal(err)
+	}
+	shared, err = service.GrantTerminalSessionSharing(personal, owner, team, session, selected)
+	if err != nil || shared.Sharing.TeamID != team || len(shared.Sharing.Grants) != 1 || shared.Sharing.Grants[0].AccountID != stranger || !shared.Sharing.Grants[0].Active {
+		t.Fatalf("selected-member grant not visible: %+v error=%v", shared.Sharing, err)
+	}
+	if _, err = service.EndTerminalSessionSharing(personal, owner, session, "end2_"+suffix, shared.Sharing.Generation); err != nil {
+		t.Fatalf("ending the selected-member share: %v", err)
+	}
+
 	// An accepted close can precede the host's last running snapshot. Neither
 	// exact detail nor global paging may turn it back into an attachable session.
 	insert(`UPDATE user_machine_terminal_sessions SET desired_state='closed',runtime_state='closing' WHERE id=$1`, session)
+	closedShare := grant
+	closedShare.OperationID = "closed_" + suffix
+	if err = store.SQL().QueryRowContext(ctx, `SELECT generation FROM paperboat.teams WHERE team_id=$1`, team).Scan(&closedShare.ExpectedGeneration); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.GrantTerminalSessionSharing(personal, owner, team, session, closedShare); !errors.Is(err, ErrTerminalSessionEnded) {
+		t.Fatalf("a closing session was shared: %v", err)
+	}
 	item, err = service.TerminalSessionSharing(ctx, owner, session)
 	if err != nil || item.State != "closing" || item.DesiredState != "closed" || item.RuntimeState != "running" {
 		t.Fatalf("close intent lost during live enrichment: %+v err%v", item, err)

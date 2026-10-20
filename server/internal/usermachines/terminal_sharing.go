@@ -393,12 +393,21 @@ func (s *Service) GrantTerminalSessionSharing(ctx context.Context, account, team
 		}
 		return SharedTerminalSession{}, ErrTerminalSessionNotFound
 	}
+	if in.Active && (current.State == "closed" || current.State == "closing" || current.State == "failed") {
+		return SharedTerminalSession{}, ErrTerminalSessionEnded
+	}
 	in.TerminalSessionID = sessionID
 	in.RuntimeGeneration = current.RuntimeGeneration
 	if _, err := teams.NewService(s.db).GrantTerminalSession(ctx, account, teamID, in); err != nil {
 		return SharedTerminalSession{}, err
 	}
-	return s.TerminalSessionSharing(ctx, account, sessionID)
+	shared, err := s.TerminalSessionSharing(ctx, account, sessionID)
+	if err == nil && in.Active && shared.Sharing.TeamID != teamID {
+		// The mutation was accepted but the session is not bound to the team now (for example it closed
+		// in between): saying so beats printing a successful share that shares nothing.
+		return SharedTerminalSession{}, ErrTerminalSharingNotApplied
+	}
+	return shared, err
 }
 func (s *Service) EndTerminalSessionSharing(ctx context.Context, account, sessionID, operation string, expected uint64) (SharedTerminalSession, error) {
 	// Personal owners can manage a Team grant on their Personal terminal, while

@@ -57,6 +57,8 @@ var (
 	ErrIdempotencyKeyRequired               = errors.New("user-machine enrollment idempotency key is required")
 	ErrWorkspaceForbidden                   = errors.New("machines cannot be added to that workspace")
 	ErrTerminalSessionNotFound              = errors.New("user-machine terminal session not found")
+	ErrTerminalSessionEnded                 = errors.New("user-machine terminal session has closed")
+	ErrTerminalSharingNotApplied            = errors.New("terminal sharing was not applied")
 	ErrTerminalSessionReserved              = errors.New("user-machine default terminal session is reserved")
 	ErrTerminalSessionLimit                 = errors.New("user-machine terminal session limit reached")
 	ErrTerminalSessionConflict              = errors.New("user-machine terminal session name conflict")
