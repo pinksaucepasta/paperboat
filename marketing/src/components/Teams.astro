@@ -11,16 +11,16 @@ const shared = [
   { icon: "laptop", name: "build-01", detail: "Machine" },
   { icon: "terminal-window", name: "api-build", detail: "Terminal" },
   { icon: "plugs", name: "api.northwind.dev", detail: "Tunnel" },
-  { icon: "eye", name: `quiet-river-42.${previewDomain}`, detail: "Preview" },
+  { icon: "eye", name: `quiet-river-lantern-4821.${previewDomain}`, detail: "Preview" },
   { icon: "key", name: "staging", detail: "Secrets" },
 ]
 ---
 
-<Section id="teams" title="Bring your team along." tone="surface">
+<Section id="teams" title="Share with your team." tone="surface">
   <Fragment slot="text">
     <p>
-      Everyone has a personal workspace for their own machines. Start a team and share exactly what it needs: a
-      build box, a terminal, a preview, the staging secrets. Your laptop stays yours.
+      Your machines stay yours. Make a team and share only what it needs: a machine, a terminal, a preview, some
+      secrets.
     </p>
   </Fragment>
 
@@ -63,15 +63,13 @@ const shared = [
     <div class="org-item">
       <h3 class="org-title">Shared secrets</h3>
       <p class="body">
-        Environment variables for each team, encrypted end to end and delivered to the machines that need them.
-        Rotate a key without retyping a value.
+        Environment variables, encrypted end to end. Only your machines can read them.
       </p>
     </div>
     <div class="org-item">
-      <h3 class="org-title">Config that stays in sync</h3>
+      <h3 class="org-title">Same config everywhere</h3>
       <p class="body">
-        Keep dotfiles and settings the same on every machine from a Git repository, so a new machine is ready
-        the moment it joins.
+        Keep your dotfiles in sync on every machine from a Git repo.
       </p>
     </div>
   </div>
