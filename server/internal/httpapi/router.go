@@ -799,8 +799,12 @@ func notFound(w http.ResponseWriter, r *http.Request) {
 
 func registerAuthRoutes(mux *http.ServeMux, opts Options) {
 	if opts.SupportReports != nil {
-		mux.Handle("GET /v1/admin/support/{reference}", operatorRoute(opts, supportLookup(opts.SupportReports, true, opts.Config.Reporting.IssueURL)))
-		mux.Handle("GET /v1/support/{reference}", requireAnyAuth(opts.Auth, opts.DeviceAuth, supportLookup(opts.SupportReports, false, "")))
+		var uploadLookup supportUploadLookup // a nil *Service must not become a non-nil interface
+		if opts.DiagnosticUploads != nil {
+			uploadLookup = opts.DiagnosticUploads
+		}
+		mux.Handle("GET /v1/admin/support/{reference}", operatorRoute(opts, supportLookup(opts.SupportReports, nil, true, opts.Config.Reporting.IssueURL)))
+		mux.Handle("GET /v1/support/{reference}", requireAnyAuth(opts.Auth, opts.DeviceAuth, supportLookup(opts.SupportReports, uploadLookup, false, "")))
 	}
 	userAuth := func(scope string, next http.Handler) http.Handler {
 		next = requireWorkspaceSelection(opts.Workspaces, next)

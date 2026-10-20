@@ -105,7 +105,12 @@ func logHTTPRejection(r *http.Request, status int, code string, err error) {
 	serverdiagnostics.LoggerWithRequest(r.Context(), logger).WarnContext(r.Context(), "HTTP request rejected", fault.LogAttrs()...)
 }
 
-func supportLookup(service *supportreport.Service, operator bool, issueURL string) http.Handler {
+// supportUploadLookup tells whether the caller uploaded a diagnostic bundle under a support reference.
+type supportUploadLookup interface {
+	Uploaded(ctx context.Context, userID, reference string) (bool, error)
+}
+
+func supportLookup(service *supportreport.Service, uploads supportUploadLookup, operator bool, issueURL string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		p, ok := principalFromContext(r.Context())
@@ -139,6 +144,16 @@ func supportLookup(service *supportreport.Service, operator bool, issueURL strin
 			if len(records) > 0 {
 				state = "recorded"
 				reporting = records[0].Reporting
+			} else if uploads != nil {
+				// A bundle uploaded by `pb bugreport --upload` is recorded although it is not a fault.
+				uploaded, uploadErr := uploads.Uploaded(r.Context(), p.User.ID, ref)
+				if uploadErr != nil {
+					writeError(w, r, 503, "support_unavailable", "Support evidence is unavailable. Keep the reference and try again later.", uploadErr)
+					return
+				}
+				if uploaded {
+					state, reporting = "recorded", "diagnostic_bundle"
+				}
 			}
 			writeJSON(w, 200, SuccessResponse{Data: map[string]any{"support_reference": ref, "status": state, "reporting": reporting, "message": "Keep this reference when contacting support. Unavailable evidence may be local, expired, or not recorded."}})
 			return

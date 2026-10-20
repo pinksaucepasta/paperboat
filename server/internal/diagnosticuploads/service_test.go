@@ -29,6 +29,10 @@ func (r *memoryRepository) Get(_ context.Context, userID, intentID string) (Inte
 	}
 	return r.intent, nil
 }
+func (r *memoryRepository) UploadedForCorrelation(_ context.Context, userID, correlationID string) (bool, error) {
+	return r.intent.UserID == userID && r.intent.CorrelationID == correlationID && r.intent.State == "uploaded", nil
+}
+
 func (r *memoryRepository) Complete(_ context.Context, userID, intentID string, metadata ObjectMetadata, now time.Time) (Intent, error) {
 	if r.intent.UserID != userID || r.intent.ID != intentID {
 		return Intent{}, ErrNotFound
@@ -73,6 +77,10 @@ func (r *cleanupRepository) Reserve(context.Context, CreateRequest, [32]byte, In
 func (r *cleanupRepository) Get(context.Context, string, string) (Intent, error) {
 	return Intent{}, ErrInvalid
 }
+func (r *cleanupRepository) UploadedForCorrelation(context.Context, string, string) (bool, error) {
+	return false, nil
+}
+
 func (r *cleanupRepository) Complete(context.Context, string, string, ObjectMetadata, time.Time) (Intent, error) {
 	return Intent{}, ErrInvalid
 }

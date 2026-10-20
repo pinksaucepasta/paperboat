@@ -49,7 +49,7 @@ func TestSupportLookupAuthorityAndDisclosure(t *testing.T) {
 		req.Pattern = "GET /v1/admin/support/{reference}"
 		req = req.WithContext(context.WithValue(req.Context(), authContextKey{}, principal{User: auth.User{ID: "usr_operator", Role: role}, Session: auth.Session{OperatorAuthenticatedAt: time.Now()}}))
 		rr := httptest.NewRecorder()
-		operatorGuard(&operatorAuditFake{}, supportLookup(service, true, "https://sentry.example/issues/")).ServeHTTP(rr, req)
+		operatorGuard(&operatorAuditFake{}, supportLookup(service, nil, true, "https://sentry.example/issues/")).ServeHTTP(rr, req)
 		if role == auth.RoleUser {
 			if rr.Code != 403 || store.looked {
 				t.Fatal("nonoperator accessed evidence")
@@ -61,7 +61,7 @@ func TestSupportLookupAuthorityAndDisclosure(t *testing.T) {
 		}
 		store.fail = true
 		rr = httptest.NewRecorder()
-		operatorGuard(&operatorAuditFake{}, supportLookup(service, true, "")).ServeHTTP(rr, req)
+		operatorGuard(&operatorAuditFake{}, supportLookup(service, nil, true, "")).ServeHTTP(rr, req)
 		if rr.Code != 503 || strings.Contains(rr.Body.String(), "012345678901") {
 			t.Fatal("audit failure disclosed evidence")
 		}
@@ -72,7 +72,7 @@ func TestSupportLookupAuthorityAndDisclosure(t *testing.T) {
 	req.SetPathValue("reference", ref)
 	req = req.WithContext(context.WithValue(req.Context(), authContextKey{}, principal{User: auth.User{ID: "usr_owner"}}))
 	rr := httptest.NewRecorder()
-	supportLookup(service, false, "").ServeHTTP(rr, req)
+	supportLookup(service, nil, false, "").ServeHTTP(rr, req)
 	if rr.Code != 200 || strings.Contains(rr.Body.String(), "sentry") || strings.Contains(rr.Body.String(), "internal_error") || strings.Contains(rr.Body.String(), "usr_owner") {
 		t.Fatal("self lookup leaked internal evidence")
 	}
@@ -299,4 +299,53 @@ func TestTelemetryDiagnosticsSerializationFailureRetainsCause(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatal("diagnostics failure was not reported")
+}
+
+type noFaultSupportStore struct{ supportTestStore }
+
+func (s *noFaultSupportStore) Lookup(context.Context, string, string, string, bool) ([]supportreport.Record, error) {
+	return nil, nil
+}
+
+type uploadLookupFake struct {
+	uploaded bool
+	err      error
+	asked    string
+}
+
+func (f *uploadLookupFake) Uploaded(_ context.Context, userID, _ string) (bool, error) {
+	f.asked = userID
+	return f.uploaded, f.err
+}
+
+// F15-02: a reference printed by `pb bugreport --upload` resolves for the person who uploaded it,
+// although the upload is not a fault; a reference nobody uploaded stays unavailable.
+func TestSupportLookupResolvesAnUploadedBugreportReference(t *testing.T) {
+	ref := supportreport.NewReference()
+	lookup := func(uploads supportUploadLookup) *httptest.ResponseRecorder {
+		service, _ := supportreport.New(&noFaultSupportStore{}, supportreport.Config{})
+		req := httptest.NewRequest("GET", "/v1/support/"+ref, nil)
+		req.SetPathValue("reference", ref)
+		req = req.WithContext(context.WithValue(req.Context(), authContextKey{}, principal{User: auth.User{ID: "usr_owner"}}))
+		rr := httptest.NewRecorder()
+		supportLookup(service, uploads, false, "").ServeHTTP(rr, req)
+		return rr
+	}
+	uploaded := &uploadLookupFake{uploaded: true}
+	rr := lookup(uploaded)
+	if rr.Code != 200 || !strings.Contains(rr.Body.String(), `"status":"recorded"`) || !strings.Contains(rr.Body.String(), `"reporting":"diagnostic_bundle"`) || uploaded.asked != "usr_owner" {
+		t.Fatalf("uploaded reference: %d %s (asked %q)", rr.Code, rr.Body.String(), uploaded.asked)
+	}
+	if strings.Contains(rr.Body.String(), "usr_owner") {
+		t.Fatal("lookup leaked the owner id")
+	}
+	if rr := lookup(&uploadLookupFake{}); rr.Code != 200 || !strings.Contains(rr.Body.String(), `"status":"unavailable"`) {
+		t.Fatalf("unknown reference: %d %s", rr.Code, rr.Body.String())
+	}
+	if rr := lookup(&uploadLookupFake{err: errors.New("database down")}); rr.Code != 503 {
+		t.Fatalf("upload lookup failure: %d %s", rr.Code, rr.Body.String())
+	}
+	if rr := lookup(nil); rr.Code != 200 || !strings.Contains(rr.Body.String(), `"status":"unavailable"`) {
+		t.Fatalf("no upload service: %d %s", rr.Code, rr.Body.String())
+	}
 }

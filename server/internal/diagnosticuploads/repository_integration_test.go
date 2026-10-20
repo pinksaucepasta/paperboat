@@ -100,6 +100,9 @@ func TestSQLRepositoryDiagnosticUploadLifecycle(t *testing.T) {
 	if _, err := service.Complete(ctx, userB, intent.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("cross-user completion=%v", err)
 	}
+	if found, err := service.Uploaded(ctx, userA, request.CorrelationID); err != nil || found {
+		t.Fatalf("a pending upload resolved as uploaded: %v %v", found, err)
+	}
 	objects.metadata[intent.ObjectKey] = ObjectMetadata{Bytes: intent.Bytes, SHA256: intent.SHA256, ETag: "etag-integration"}
 	const workers = 8
 	errorsByWorker := make(chan error, workers)
@@ -121,6 +124,12 @@ func TestSQLRepositoryDiagnosticUploadLifecycle(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+	}
+	if found, err := service.Uploaded(ctx, userA, request.CorrelationID); err != nil || !found {
+		t.Fatalf("the uploader's reference does not resolve: %v %v", found, err)
+	}
+	if found, err := service.Uploaded(ctx, userB, request.CorrelationID); err != nil || found {
+		t.Fatalf("another account's reference resolved: %v %v", found, err)
 	}
 	var completionAudits int
 	if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.audit_events WHERE resource_type='diagnostic_upload' AND resource_id=$1 AND event_type='diagnostic_upload.completed'`, intent.ID).Scan(&completionAudits); err != nil {

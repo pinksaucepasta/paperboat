@@ -25,6 +25,10 @@ type diagnosticRepositoryStub struct {
 	completeErr error
 }
 
+func (s *diagnosticRepositoryStub) UploadedForCorrelation(context.Context, string, string) (bool, error) {
+	return false, nil
+}
+
 func (s *diagnosticRepositoryStub) Reserve(_ context.Context, request diagnosticuploads.CreateRequest, hash [32]byte, proposed diagnosticuploads.Intent) (diagnosticuploads.Intent, error) {
 	if s.reserveErr != nil {
 		return diagnosticuploads.Intent{}, s.reserveErr

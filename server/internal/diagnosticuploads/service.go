@@ -78,6 +78,8 @@ type Repository interface {
 	Reserve(context.Context, CreateRequest, [32]byte, Intent) (Intent, error)
 	Get(context.Context, string, string) (Intent, error)
 	Complete(context.Context, string, string, ObjectMetadata, time.Time) (Intent, error)
+	// UploadedForCorrelation reports whether the user has a completed upload with this support reference.
+	UploadedForCorrelation(ctx context.Context, userID, correlationID string) (bool, error)
 }
 
 type ObjectStore interface {
@@ -165,6 +167,15 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (Intent, Up
 		return Intent{}, UploadAuthority{}, errors.Join(ErrUnavailable, err)
 	}
 	return intent, authority, nil
+}
+
+// Uploaded reports whether the user uploaded a diagnostic bundle under this support reference, so
+// the reference resolves in the support lookup although the upload is not a fault.
+func (s *Service) Uploaded(ctx context.Context, userID, reference string) (bool, error) {
+	if s == nil || !supportreport.ValidReference(reference) || !validIdentifier(userID, 1, 128) {
+		return false, ErrInvalid
+	}
+	return s.repository.UploadedForCorrelation(ctx, userID, reference)
 }
 
 func (s *Service) Complete(ctx context.Context, userID, intentID string) (Intent, error) {

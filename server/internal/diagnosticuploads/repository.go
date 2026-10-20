@@ -77,6 +77,12 @@ func (r *SQLRepository) Get(ctx context.Context, userID, intentID string) (Inten
 	return result, err
 }
 
+func (r *SQLRepository) UploadedForCorrelation(ctx context.Context, userID, correlationID string) (bool, error) {
+	var found bool
+	err := r.store.SQL().QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM paperboat.diagnostic_upload_intents WHERE user_id=$1 AND correlation_id=$2 AND state='uploaded')`, userID, correlationID).Scan(&found)
+	return found, err
+}
+
 func (r *SQLRepository) Complete(ctx context.Context, userID, intentID string, metadata ObjectMetadata, now time.Time) (Intent, error) {
 	var result Intent
 	err := r.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
