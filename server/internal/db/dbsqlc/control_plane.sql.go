@@ -1615,7 +1615,7 @@ UPDATE control_tunnel_nodes
 SET state = 'draining', ready = false, drain_deadline = $1,
     version = version + 1, updated_at = $2
 WHERE id = $3 AND version = $4 AND state IN ('registered','ready')
-RETURNING id, edge_pool, protocol_version, process_epoch, endpoint_host, endpoint_tcp_port, endpoint_quic_port, state, ready, capacity, observation, last_heartbeat_at, drain_deadline, version, created_at, updated_at, carrier_endpoint_host, carrier_endpoint_tcp_port, carrier_endpoint_quic_port, carrier_server_spki_sha256, carrier_server_certificate_chain_pem, node_generation, region, failure_domain, roles, transports, capacity_limit, capacity_used, capacity_observed_at, registry_expires_at, allowed_account_ids, peer_relay_wireguard_public_key, peer_relay_disco_public_key, peer_relay_virtual_address, public_ingress_ipv4, public_ingress_ipv6, public_ingress_verified_at, tls_spki_sha256, serves_managed_wildcard
+RETURNING id, edge_pool, protocol_version, process_epoch, endpoint_host, endpoint_tcp_port, endpoint_quic_port, state, ready, capacity, observation, last_heartbeat_at, drain_deadline, version, created_at, updated_at, carrier_endpoint_host, carrier_endpoint_tcp_port, carrier_endpoint_quic_port, carrier_server_spki_sha256, carrier_server_certificate_chain_pem, node_generation, region, failure_domain, roles, transports, capacity_limit, capacity_used, capacity_observed_at, registry_expires_at, allowed_account_ids, peer_relay_wireguard_public_key, peer_relay_disco_public_key, peer_relay_virtual_address, public_ingress_ipv4, public_ingress_ipv6, public_ingress_verified_at, tls_spki_sha256
 `
 
 type DrainControlTunnelNodeParams struct {
@@ -1672,7 +1672,6 @@ func (q *Queries) DrainControlTunnelNode(ctx context.Context, arg DrainControlTu
 		&i.PublicIngressIpv6,
 		&i.PublicIngressVerifiedAt,
 		&i.TlsSpkiSha256,
-		&i.ServesManagedWildcard,
 	)
 	return i, err
 }
@@ -3515,7 +3514,7 @@ WHERE control_tunnel_nodes.id = $5 AND control_tunnel_nodes.process_epoch = $6 A
   AND (NOT EXISTS (SELECT 1 FROM managed_node_authority m WHERE m.node_id=control_tunnel_nodes.id)
     OR EXISTS (SELECT 1 FROM managed_node_authority m JOIN operator_regions r ON r.id=m.region_id
       WHERE m.node_id=control_tunnel_nodes.id AND m.retired_at IS NULL AND r.enabled))
-RETURNING id, edge_pool, protocol_version, process_epoch, endpoint_host, endpoint_tcp_port, endpoint_quic_port, state, ready, capacity, observation, last_heartbeat_at, drain_deadline, version, created_at, updated_at, carrier_endpoint_host, carrier_endpoint_tcp_port, carrier_endpoint_quic_port, carrier_server_spki_sha256, carrier_server_certificate_chain_pem, node_generation, region, failure_domain, roles, transports, capacity_limit, capacity_used, capacity_observed_at, registry_expires_at, allowed_account_ids, peer_relay_wireguard_public_key, peer_relay_disco_public_key, peer_relay_virtual_address, public_ingress_ipv4, public_ingress_ipv6, public_ingress_verified_at, tls_spki_sha256, serves_managed_wildcard
+RETURNING id, edge_pool, protocol_version, process_epoch, endpoint_host, endpoint_tcp_port, endpoint_quic_port, state, ready, capacity, observation, last_heartbeat_at, drain_deadline, version, created_at, updated_at, carrier_endpoint_host, carrier_endpoint_tcp_port, carrier_endpoint_quic_port, carrier_server_spki_sha256, carrier_server_certificate_chain_pem, node_generation, region, failure_domain, roles, transports, capacity_limit, capacity_used, capacity_observed_at, registry_expires_at, allowed_account_ids, peer_relay_wireguard_public_key, peer_relay_disco_public_key, peer_relay_virtual_address, public_ingress_ipv4, public_ingress_ipv6, public_ingress_verified_at, tls_spki_sha256
 `
 
 type HeartbeatControlTunnelNodeParams struct {
@@ -3576,7 +3575,6 @@ func (q *Queries) HeartbeatControlTunnelNode(ctx context.Context, arg HeartbeatC
 		&i.PublicIngressIpv6,
 		&i.PublicIngressVerifiedAt,
 		&i.TlsSpkiSha256,
-		&i.ServesManagedWildcard,
 	)
 	return i, err
 }
@@ -4258,8 +4256,8 @@ JOIN tunnel_config_generations AS config
   ON config.tunnel_id = t.id AND config.generation = session.applied_config_generation
  AND EXISTS (SELECT 1 FROM jsonb_array_elements(convert_from(config.snapshot,'UTF8')::jsonb->'routes') configured_route WHERE configured_route->>'id'=r.id)
 JOIN LATERAL (
-  SELECT ranked.id, ranked.edge_pool, ranked.protocol_version, ranked.process_epoch, ranked.endpoint_host, ranked.endpoint_tcp_port, ranked.endpoint_quic_port, ranked.state, ranked.ready, ranked.capacity, ranked.observation, ranked.last_heartbeat_at, ranked.drain_deadline, ranked.version, ranked.created_at, ranked.updated_at, ranked.carrier_endpoint_host, ranked.carrier_endpoint_tcp_port, ranked.carrier_endpoint_quic_port, ranked.carrier_server_spki_sha256, ranked.carrier_server_certificate_chain_pem, ranked.node_generation, ranked.region, ranked.failure_domain, ranked.roles, ranked.transports, ranked.capacity_limit, ranked.capacity_used, ranked.capacity_observed_at, ranked.registry_expires_at, ranked.allowed_account_ids, ranked.peer_relay_wireguard_public_key, ranked.peer_relay_disco_public_key, ranked.peer_relay_virtual_address, ranked.public_ingress_ipv4, ranked.public_ingress_ipv6, ranked.public_ingress_verified_at, ranked.tls_spki_sha256, ranked.serves_managed_wildcard, ranked.preference_rank, ranked.retained FROM (
-    SELECT DISTINCT ON (candidate_node.failure_domain) candidate_node.id, candidate_node.edge_pool, candidate_node.protocol_version, candidate_node.process_epoch, candidate_node.endpoint_host, candidate_node.endpoint_tcp_port, candidate_node.endpoint_quic_port, candidate_node.state, candidate_node.ready, candidate_node.capacity, candidate_node.observation, candidate_node.last_heartbeat_at, candidate_node.drain_deadline, candidate_node.version, candidate_node.created_at, candidate_node.updated_at, candidate_node.carrier_endpoint_host, candidate_node.carrier_endpoint_tcp_port, candidate_node.carrier_endpoint_quic_port, candidate_node.carrier_server_spki_sha256, candidate_node.carrier_server_certificate_chain_pem, candidate_node.node_generation, candidate_node.region, candidate_node.failure_domain, candidate_node.roles, candidate_node.transports, candidate_node.capacity_limit, candidate_node.capacity_used, candidate_node.capacity_observed_at, candidate_node.registry_expires_at, candidate_node.allowed_account_ids, candidate_node.peer_relay_wireguard_public_key, candidate_node.peer_relay_disco_public_key, candidate_node.peer_relay_virtual_address, candidate_node.public_ingress_ipv4, candidate_node.public_ingress_ipv6, candidate_node.public_ingress_verified_at, candidate_node.tls_spki_sha256, candidate_node.serves_managed_wildcard,
+  SELECT ranked.id, ranked.edge_pool, ranked.protocol_version, ranked.process_epoch, ranked.endpoint_host, ranked.endpoint_tcp_port, ranked.endpoint_quic_port, ranked.state, ranked.ready, ranked.capacity, ranked.observation, ranked.last_heartbeat_at, ranked.drain_deadline, ranked.version, ranked.created_at, ranked.updated_at, ranked.carrier_endpoint_host, ranked.carrier_endpoint_tcp_port, ranked.carrier_endpoint_quic_port, ranked.carrier_server_spki_sha256, ranked.carrier_server_certificate_chain_pem, ranked.node_generation, ranked.region, ranked.failure_domain, ranked.roles, ranked.transports, ranked.capacity_limit, ranked.capacity_used, ranked.capacity_observed_at, ranked.registry_expires_at, ranked.allowed_account_ids, ranked.peer_relay_wireguard_public_key, ranked.peer_relay_disco_public_key, ranked.peer_relay_virtual_address, ranked.public_ingress_ipv4, ranked.public_ingress_ipv6, ranked.public_ingress_verified_at, ranked.tls_spki_sha256, ranked.preference_rank, ranked.retained FROM (
+    SELECT DISTINCT ON (candidate_node.failure_domain) candidate_node.id, candidate_node.edge_pool, candidate_node.protocol_version, candidate_node.process_epoch, candidate_node.endpoint_host, candidate_node.endpoint_tcp_port, candidate_node.endpoint_quic_port, candidate_node.state, candidate_node.ready, candidate_node.capacity, candidate_node.observation, candidate_node.last_heartbeat_at, candidate_node.drain_deadline, candidate_node.version, candidate_node.created_at, candidate_node.updated_at, candidate_node.carrier_endpoint_host, candidate_node.carrier_endpoint_tcp_port, candidate_node.carrier_endpoint_quic_port, candidate_node.carrier_server_spki_sha256, candidate_node.carrier_server_certificate_chain_pem, candidate_node.node_generation, candidate_node.region, candidate_node.failure_domain, candidate_node.roles, candidate_node.transports, candidate_node.capacity_limit, candidate_node.capacity_used, candidate_node.capacity_observed_at, candidate_node.registry_expires_at, candidate_node.allowed_account_ids, candidate_node.peer_relay_wireguard_public_key, candidate_node.peer_relay_disco_public_key, candidate_node.peer_relay_virtual_address, candidate_node.public_ingress_ipv4, candidate_node.public_ingress_ipv6, candidate_node.public_ingress_verified_at, candidate_node.tls_spki_sha256,
       CASE WHEN candidate_node.id=placement.primary_node_id AND candidate_node.process_epoch=placement.primary_process_epoch THEN 0
            WHEN candidate_node.id=placement.secondary_node_id AND candidate_node.process_epoch=placement.secondary_process_epoch THEN 1
            ELSE 2 END AS preference_rank,
@@ -4519,7 +4517,7 @@ func (q *Queries) ListRevokedControlSigningKeyIDs(ctx context.Context, rowLimit 
 }
 
 const listStaleControlTunnelNodesForUpdate = `-- name: ListStaleControlTunnelNodesForUpdate :many
-SELECT id, edge_pool, protocol_version, process_epoch, endpoint_host, endpoint_tcp_port, endpoint_quic_port, state, ready, capacity, observation, last_heartbeat_at, drain_deadline, version, created_at, updated_at, carrier_endpoint_host, carrier_endpoint_tcp_port, carrier_endpoint_quic_port, carrier_server_spki_sha256, carrier_server_certificate_chain_pem, node_generation, region, failure_domain, roles, transports, capacity_limit, capacity_used, capacity_observed_at, registry_expires_at, allowed_account_ids, peer_relay_wireguard_public_key, peer_relay_disco_public_key, peer_relay_virtual_address, public_ingress_ipv4, public_ingress_ipv6, public_ingress_verified_at, tls_spki_sha256, serves_managed_wildcard FROM control_tunnel_nodes
+SELECT id, edge_pool, protocol_version, process_epoch, endpoint_host, endpoint_tcp_port, endpoint_quic_port, state, ready, capacity, observation, last_heartbeat_at, drain_deadline, version, created_at, updated_at, carrier_endpoint_host, carrier_endpoint_tcp_port, carrier_endpoint_quic_port, carrier_server_spki_sha256, carrier_server_certificate_chain_pem, node_generation, region, failure_domain, roles, transports, capacity_limit, capacity_used, capacity_observed_at, registry_expires_at, allowed_account_ids, peer_relay_wireguard_public_key, peer_relay_disco_public_key, peer_relay_virtual_address, public_ingress_ipv4, public_ingress_ipv6, public_ingress_verified_at, tls_spki_sha256 FROM control_tunnel_nodes
 WHERE state IN ('registered','ready') AND (last_heartbeat_at IS NULL OR last_heartbeat_at <= $1)
 ORDER BY coalesce(last_heartbeat_at, created_at), id
 FOR UPDATE SKIP LOCKED LIMIT $2
@@ -4578,7 +4576,6 @@ func (q *Queries) ListStaleControlTunnelNodesForUpdate(ctx context.Context, arg 
 			&i.PublicIngressIpv6,
 			&i.PublicIngressVerifiedAt,
 			&i.TlsSpkiSha256,
-			&i.ServesManagedWildcard,
 		); err != nil {
 			return nil, err
 		}
@@ -5307,7 +5304,7 @@ WHERE (NOT EXISTS (SELECT 1 FROM selfhost_installations i WHERE i.node_id=contro
          AND EXCLUDED.carrier_endpoint_host=control_tunnel_nodes.endpoint_host
          AND EXCLUDED.carrier_endpoint_tcp_port=control_tunnel_nodes.endpoint_tcp_port
          AND EXCLUDED.carrier_endpoint_quic_port=control_tunnel_nodes.endpoint_quic_port)
-RETURNING id, edge_pool, protocol_version, process_epoch, endpoint_host, endpoint_tcp_port, endpoint_quic_port, state, ready, capacity, observation, last_heartbeat_at, drain_deadline, version, created_at, updated_at, carrier_endpoint_host, carrier_endpoint_tcp_port, carrier_endpoint_quic_port, carrier_server_spki_sha256, carrier_server_certificate_chain_pem, node_generation, region, failure_domain, roles, transports, capacity_limit, capacity_used, capacity_observed_at, registry_expires_at, allowed_account_ids, peer_relay_wireguard_public_key, peer_relay_disco_public_key, peer_relay_virtual_address, public_ingress_ipv4, public_ingress_ipv6, public_ingress_verified_at, tls_spki_sha256, serves_managed_wildcard
+RETURNING id, edge_pool, protocol_version, process_epoch, endpoint_host, endpoint_tcp_port, endpoint_quic_port, state, ready, capacity, observation, last_heartbeat_at, drain_deadline, version, created_at, updated_at, carrier_endpoint_host, carrier_endpoint_tcp_port, carrier_endpoint_quic_port, carrier_server_spki_sha256, carrier_server_certificate_chain_pem, node_generation, region, failure_domain, roles, transports, capacity_limit, capacity_used, capacity_observed_at, registry_expires_at, allowed_account_ids, peer_relay_wireguard_public_key, peer_relay_disco_public_key, peer_relay_virtual_address, public_ingress_ipv4, public_ingress_ipv6, public_ingress_verified_at, tls_spki_sha256
 `
 
 type RegisterControlTunnelNodeParams struct {
@@ -5384,7 +5381,6 @@ func (q *Queries) RegisterControlTunnelNode(ctx context.Context, arg RegisterCon
 		&i.PublicIngressIpv6,
 		&i.PublicIngressVerifiedAt,
 		&i.TlsSpkiSha256,
-		&i.ServesManagedWildcard,
 	)
 	return i, err
 }
@@ -6188,7 +6184,7 @@ func (q *Queries) RevokeUnboundAuthenticatedHostHelperEnrollment(ctx context.Con
 }
 
 const selectReadyControlTunnelNode = `-- name: SelectReadyControlTunnelNode :one
-SELECT id, edge_pool, protocol_version, process_epoch, endpoint_host, endpoint_tcp_port, endpoint_quic_port, state, ready, capacity, observation, last_heartbeat_at, drain_deadline, version, created_at, updated_at, carrier_endpoint_host, carrier_endpoint_tcp_port, carrier_endpoint_quic_port, carrier_server_spki_sha256, carrier_server_certificate_chain_pem, node_generation, region, failure_domain, roles, transports, capacity_limit, capacity_used, capacity_observed_at, registry_expires_at, allowed_account_ids, peer_relay_wireguard_public_key, peer_relay_disco_public_key, peer_relay_virtual_address, public_ingress_ipv4, public_ingress_ipv6, public_ingress_verified_at, tls_spki_sha256, serves_managed_wildcard FROM control_tunnel_nodes
+SELECT id, edge_pool, protocol_version, process_epoch, endpoint_host, endpoint_tcp_port, endpoint_quic_port, state, ready, capacity, observation, last_heartbeat_at, drain_deadline, version, created_at, updated_at, carrier_endpoint_host, carrier_endpoint_tcp_port, carrier_endpoint_quic_port, carrier_server_spki_sha256, carrier_server_certificate_chain_pem, node_generation, region, failure_domain, roles, transports, capacity_limit, capacity_used, capacity_observed_at, registry_expires_at, allowed_account_ids, peer_relay_wireguard_public_key, peer_relay_disco_public_key, peer_relay_virtual_address, public_ingress_ipv4, public_ingress_ipv6, public_ingress_verified_at, tls_spki_sha256 FROM control_tunnel_nodes
 WHERE (edge_pool = $1 OR EXISTS (SELECT 1 FROM selfhost_installations i WHERE i.node_id=control_tunnel_nodes.id)) AND state = 'ready' AND ready = true
   AND EXISTS (SELECT 1 FROM tunnels t JOIN tunnel_routes r ON r.tunnel_id=t.id WHERE t.account_id=$2::text AND t.deleted_at IS NULL AND r.deleted_at IS NULL AND paperboat.node_route_eligible(control_tunnel_nodes.id,t.account_id,r.id))
   AND last_heartbeat_at > $3
@@ -6244,7 +6240,6 @@ func (q *Queries) SelectReadyControlTunnelNode(ctx context.Context, arg SelectRe
 		&i.PublicIngressIpv6,
 		&i.PublicIngressVerifiedAt,
 		&i.TlsSpkiSha256,
-		&i.ServesManagedWildcard,
 	)
 	return i, err
 }

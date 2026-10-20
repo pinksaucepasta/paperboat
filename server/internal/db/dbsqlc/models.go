@@ -838,7 +838,6 @@ type ControlTunnelNode struct {
 	PublicIngressIpv6                *netip.Addr
 	PublicIngressVerifiedAt          sql.NullTime
 	TlsSpkiSha256                    []byte
-	ServesManagedWildcard            bool
 }
 
 type ControlUsageCounter struct {
