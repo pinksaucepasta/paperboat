@@ -510,7 +510,7 @@ mode, relays, and observation timestamps.`, Example: "  pb relay list\n  pb rela
 		if revoke, _ := command.Flags().GetBool("revoke"); revoke {
 			return localArgumentError("pb approve only approves a peer. To revoke a machine, run `pb machine revoke <machine>`; it asks for a confirmation code and ends that machine's enrollment.")
 		}
-		return rejectDaemonAccount(approveRun(command, args))
+		return rejectApprovalRefusal(rejectDaemonAccount(approveRun(command, args)))
 	}
 	root.AddCommand(approve)
 	root.AddCommand(privilegedServiceOperationCommand())

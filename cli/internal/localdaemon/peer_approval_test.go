@@ -259,10 +259,13 @@ func TestApproveOwnedMachineEnrollmentRequiresExactOwnedPendingMachine(t *testin
 		machines   []api.UserMachine
 		pending    []api.PendingEndpointIdentity
 		wantSigner bool
+		wantCode   string
 	}{
 		{name: "exact", machines: []api.UserMachine{{ID: "machine_1", State: "active"}}, pending: []api.PendingEndpointIdentity{{RequestID: "per_machine_012345", EndpointID: "machine_1", Role: "machine", State: "pending", SafetyCode: "abcde-fghij"}}, wantSigner: true},
-		{name: "not owned", machines: []api.UserMachine{{ID: "machine_2", State: "active"}}, pending: []api.PendingEndpointIdentity{{RequestID: "per_machine_012345", EndpointID: "machine_1", Role: "machine", State: "pending", SafetyCode: "abcde-fghij"}}},
-		{name: "cli request excluded", machines: []api.UserMachine{{ID: "machine_1", State: "active"}}, pending: []api.PendingEndpointIdentity{{RequestID: "per_machine_012345", EndpointID: "machine_1", Role: "cli", State: "pending", SafetyCode: "abcde-fghij"}}},
+		{name: "not owned", machines: []api.UserMachine{{ID: "machine_2", State: "active"}}, pending: []api.PendingEndpointIdentity{{RequestID: "per_machine_012345", EndpointID: "machine_1", Role: "machine", State: "pending", SafetyCode: "abcde-fghij"}}, wantCode: RefusalMachineNotFound},
+		{name: "cli request excluded", machines: []api.UserMachine{{ID: "machine_1", State: "active"}}, pending: []api.PendingEndpointIdentity{{RequestID: "per_machine_012345", EndpointID: "machine_1", Role: "cli", State: "pending", SafetyCode: "abcde-fghij"}}, wantCode: RefusalApprovalNotPending},
+		{name: "already approved", machines: []api.UserMachine{{ID: "machine_1", State: "active"}}, wantCode: RefusalApprovalNotPending},
+		{name: "two pending requests", machines: []api.UserMachine{{ID: "machine_1", State: "active"}}, pending: []api.PendingEndpointIdentity{{RequestID: "per_machine_012345", EndpointID: "machine_1", Role: "machine", State: "pending", SafetyCode: "abcde-fghij"}, {RequestID: "per_machine_067890", EndpointID: "machine_1", Role: "machine", State: "pending", SafetyCode: "klmno-pqrst"}}, wantCode: RefusalApprovalAmbiguous},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -288,6 +291,10 @@ func TestApproveOwnedMachineEnrollmentRequiresExactOwnedPendingMachine(t *testin
 			var unavailable *PeerApprovalSignerUnavailableError
 			if got := errors.As(err, &unavailable); got != test.wantSigner {
 				t.Fatalf("signer unavailable=%v want=%v err=%v", got, test.wantSigner, err)
+			}
+			var refusal *EnrollmentRefusal
+			if got := errors.As(err, &refusal); got != (test.wantCode != "") || got && refusal.Code != test.wantCode {
+				t.Fatalf("refusal=%v want code %q err=%v", refusal, test.wantCode, err)
 			}
 		})
 	}

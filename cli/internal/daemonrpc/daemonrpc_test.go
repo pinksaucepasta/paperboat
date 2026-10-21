@@ -597,3 +597,36 @@ func TestDaemonServesOnlyTheAccountItIsSignedInAs(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+type refusingApprovalBackend struct {
+	*mockBackend
+	err error
+}
+
+func (b refusingApprovalBackend) ApprovePeer(context.Context, string, bool) error { return b.err }
+
+type testRefusal string
+
+func (r testRefusal) Error() string       { return "private detail about " + string(r) }
+func (r testRefusal) RefusalCode() string { return string(r) }
+
+func TestApprovePeerRefusalReachesTheCallerAsACode(t *testing.T) {
+	for _, test := range []struct {
+		code string
+		want codes.Code
+	}{{"approval_not_pending", codes.FailedPrecondition}, {"machine_not_found", codes.NotFound}} {
+		server := NewServer(refusingApprovalBackend{newMockBackend(), fmt.Errorf("wrapped: %w", testRefusal(test.code))})
+		_, err := server.ApprovePeer(context.Background(), &pb.ApprovePeerRequest{MachineId: "dev-1", Approved: true, AccountId: "user_test"})
+		if status.Code(err) != test.want || strings.Contains(err.Error(), "private") || strings.Contains(err.Error(), "support reference") {
+			t.Fatalf("%s: %v", test.code, err)
+		}
+		if code, ok := RefusalCode(err); !ok || code != test.code {
+			t.Fatalf("%s: received %q %v", test.code, code, ok)
+		}
+	}
+	server := NewServer(refusingApprovalBackend{newMockBackend(), errors.New("database exploded")})
+	_, err := server.ApprovePeer(context.Background(), &pb.ApprovePeerRequest{MachineId: "dev-1", Approved: true, AccountId: "user_test"})
+	if _, ok := RefusalCode(err); ok || strings.Contains(err.Error(), "exploded") {
+		t.Fatalf("an ordinary failure must stay masked: %v", err)
+	}
+}

@@ -13,6 +13,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/daemonrpc"
+	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
 	"github.com/pinksaucepasta/paperboat/internal/resolver"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc/codes"
@@ -129,15 +130,14 @@ func rpcApproveCommand() *cobra.Command {
 			if mismatch := DaemonRequestFailure(err); mismatch != err {
 				return mismatch
 			}
+			if code, refused := daemonrpc.RefusalCode(err); refused {
+				return &ApprovalRefusal{Code: code, Machine: printableMachineArg(machineID)}
+			}
 			if err != nil {
 				return coordinatorFailure("Could not change peer approval through the local daemon; run pb status and retry.", err)
 			}
 
-			action := "approved"
-			if !approved {
-				action = "revoked"
-			}
-			return writeDaemonCommandResult(cmd, resp, fmt.Sprintf("Peer %s %s successfully (success: %v)", resp.MachineId, action, resp.Success))
+			return writeDaemonCommandResult(cmd, resp, fmt.Sprintf("Approved machine %s: it can now connect to your other machines.", resp.MachineId))
 		},
 	}
 	cmd.Flags().BoolVar(&revoke, "revoke", false, "not supported here: revoking a machine is pb machine revoke")
@@ -190,6 +190,23 @@ func CurrentAccountID(command *cobra.Command) (string, error) {
 	return profile.Account.ID, nil
 }
 
+// ApprovalRefusal is the daemon saying why a machine could not be approved. Nothing changed.
+type ApprovalRefusal struct{ Code, Machine string }
+
+func (e *ApprovalRefusal) Error() string {
+	switch e.Code {
+	case localdaemon.RefusalMachineNotFound:
+		return e.Machine + " is not an active machine of this account. Run `pb machine list` to see your machines."
+	case localdaemon.RefusalApprovalNotPending:
+		return e.Machine + " has no pending approval: it is already approved, or it has not asked to join yet. Nothing changed."
+	case localdaemon.RefusalApprovalAmbiguous:
+		return e.Machine + " has more than one pending approval request. Wait a minute and retry; if this stays, run `pb doctor`."
+	case localdaemon.RefusalSignerUnavailable:
+		return "This computer cannot approve machines: it does not hold the account's signing key. Approve " + e.Machine + " from a computer that does, or run `pb doctor`."
+	}
+	return "The daemon refused to approve " + e.Machine + " (" + e.Code + ")."
+}
+
 // ErrDaemonAccountMismatch is a daemon refusing a request from another account's session.
 type ErrDaemonAccountMismatch struct{ Message string }
 
@@ -201,4 +218,18 @@ func DaemonRequestFailure(err error) error {
 		return ErrDaemonAccountMismatch{Message: status.Convert(err).Message()}
 	}
 	return err
+}
+
+// printableMachineArg keeps a typed argument safe to repeat in a message.
+func printableMachineArg(value string) string {
+	clean := strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, value)
+	if len(clean) > 64 {
+		clean = clean[:64] + "…"
+	}
+	return clean
 }

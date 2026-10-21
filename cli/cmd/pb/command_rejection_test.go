@@ -22,10 +22,12 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/internal/daemoncmd"
 	"github.com/pinksaucepasta/paperboat/internal/environmentmanager"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
+	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
 	"github.com/pinksaucepasta/paperboat/internal/supportref"
 	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
 	"github.com/spf13/cobra"
@@ -359,5 +361,27 @@ func TestCommandGenericENVFailureInheritsCause(t *testing.T) {
 	}
 	if classifyCommandFailure(&envHostRefreshFailure{cause: errors.Join(environmentmanager.ErrVaultLocked, syscall.EIO)}).kind != commandUnexpected {
 		t.Fatal("phase-owned recovery hid independent IO")
+	}
+}
+
+func TestApproveRefusalsAreCodedAndChangeNothing(t *testing.T) {
+	for _, test := range []struct {
+		code, category, want string
+		retryable            bool
+	}{
+		{localdaemon.RefusalMachineNotFound, "conflict", "pb machine list", false},
+		{localdaemon.RefusalApprovalNotPending, "conflict", "already approved", false},
+		{localdaemon.RefusalApprovalAmbiguous, "conflict", "more than one pending", true},
+		{localdaemon.RefusalSignerUnavailable, "authorization_or_entitlement", "signing key", false},
+	} {
+		err := rejectApprovalRefusal(&daemoncmd.ApprovalRefusal{Code: test.code, Machine: "machine_x"})
+		result := classifyCLIJSONError(err)
+		if classifyCommandFailure(err).kind != commandRejected || result.Code != test.code || result.Category != test.category || result.StateChanged != false || result.Retryable != test.retryable || result.Target != "machine_x" || !strings.Contains(result.Message, test.want) || !strings.Contains(result.Message, "machine_x") {
+			t.Fatalf("%s: %+v", test.code, result)
+		}
+	}
+	other := errors.New("unrelated")
+	if rejectApprovalRefusal(other) != other {
+		t.Fatal("an ordinary failure must not be presented as an approval refusal")
 	}
 }

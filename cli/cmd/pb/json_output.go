@@ -11,11 +11,13 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/internal/daemoncmd"
 	"github.com/pinksaucepasta/paperboat/internal/environmentmanager"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/filetransfer"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
 	"github.com/pinksaucepasta/paperboat/internal/preferences"
 	"github.com/pinksaucepasta/paperboat/internal/supportref"
 	"github.com/spf13/cobra"
@@ -258,6 +260,15 @@ func classifyCLIJSONFailure(err error, failure commandFailure) cliJSONError {
 				if inspectorErr.Code == "inspector_replay_ambiguous" {
 					result.StateChanged, result.OutcomeUncertain = "unknown", true
 				}
+			}
+			var approvalRefusal *daemoncmd.ApprovalRefusal
+			if typed.reason == commandRejectApproval && errors.As(typed.cause, &approvalRefusal) {
+				// The daemon checks ownership and the pending request before it signs anything.
+				result.Code, result.StateChanged, result.Target = approvalRefusal.Code, false, approvalRefusal.Machine
+				if approvalRefusal.Code == localdaemon.RefusalSignerUnavailable {
+					result.Category = "authorization_or_entitlement"
+				}
+				result.Retryable = approvalRefusal.Code == localdaemon.RefusalApprovalAmbiguous
 			}
 			if typed.reason == commandRejectInboxDeclined {
 				// The request was created and declined; file delivery never began.

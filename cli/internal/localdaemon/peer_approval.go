@@ -11,6 +11,24 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/trustedkeys"
 )
 
+// Refusal codes of ApproveOwnedMachineEnrollment. The caller can act on each, so
+// they travel to the user instead of being masked as a daemon failure.
+const (
+	RefusalMachineNotFound    = "machine_not_found"
+	RefusalApprovalNotPending = "approval_not_pending"
+	RefusalApprovalAmbiguous  = "approval_ambiguous"
+	RefusalSignerUnavailable  = "approval_signer_unavailable"
+)
+
+// EnrollmentRefusal is a precise reason a machine could not be approved.
+type EnrollmentRefusal struct{ Code, Detail string }
+
+func (e *EnrollmentRefusal) Error() string       { return e.Detail }
+func (e *EnrollmentRefusal) RefusalCode() string { return e.Code }
+
+// RefusalCode reports that approval needs a signing key this profile lacks.
+func (e *PeerApprovalSignerUnavailableError) RefusalCode() string { return RefusalSignerUnavailable }
+
 var ErrPeerApprovalSignerUnavailable = errors.New("peer enrollment signer is unavailable")
 
 // PeerApprovalSignerUnavailableError is a non-fatal local capability result:
@@ -111,7 +129,7 @@ func ApproveOwnedMachineEnrollment(ctx context.Context, store config.ProfileStor
 		}
 	}
 	if !owned {
-		return errors.New("machine is not an active machine owned by this account")
+		return &EnrollmentRefusal{Code: RefusalMachineNotFound, Detail: "machine is not an active machine owned by this account"}
 	}
 	pending, err := client.PendingE2EEEndpoints(ctx)
 	if err != nil {
@@ -124,12 +142,12 @@ func ApproveOwnedMachineEnrollment(ctx context.Context, store config.ProfileStor
 			continue
 		}
 		if selected != nil {
-			return errors.New("multiple pending enrollment requests exist for this machine")
+			return &EnrollmentRefusal{Code: RefusalApprovalAmbiguous, Detail: "multiple pending enrollment requests exist for this machine"}
 		}
 		selected = request
 	}
 	if selected == nil {
-		return errors.New("no pending machine enrollment exists for this machine")
+		return &EnrollmentRefusal{Code: RefusalApprovalNotPending, Detail: "no pending machine enrollment exists for this machine"}
 	}
 	seed, err := store.PeerApprovalSigningKey(profile.Issuer, profile.Account.ID, profile.CLIClientSessionID)
 	if errors.Is(err, config.ErrSecretNotFound) {

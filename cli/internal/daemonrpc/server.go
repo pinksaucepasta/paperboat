@@ -2,6 +2,7 @@ package daemonrpc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -320,6 +321,10 @@ func (s *Server) ApprovePeer(ctx context.Context, req *pb.ApprovePeerRequest) (*
 		return nil, err
 	}
 	if err := s.backend.ApprovePeer(ctx, req.GetMachineId(), req.GetApproved()); err != nil {
+		var refusal Refusal
+		if errors.As(err, &refusal) {
+			return nil, refusalStatus(refusal)
+		}
 		return nil, backendRPCFailure(ctx, "daemon could not update machine approval", err)
 	}
 	return &pb.ApprovePeerResponse{

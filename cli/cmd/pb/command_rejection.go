@@ -44,6 +44,7 @@ const (
 	commandRejectInspector
 	commandRejectInsufficientSpace
 	commandRejectUpdateNotReady
+	commandRejectApproval
 )
 
 // commandRejection describes a command-owned refusal. Its
@@ -55,7 +56,7 @@ type commandRejection struct {
 }
 
 func (e commandRejection) valid() bool {
-	return e.reason >= commandRejectDefaultSessionRename && e.reason <= commandRejectUpdateNotReady
+	return e.reason >= commandRejectDefaultSessionRename && e.reason <= commandRejectApproval
 }
 func (e commandRejection) Error() string {
 	switch e.reason {
@@ -91,6 +92,11 @@ func (e commandRejection) Error() string {
 		var mismatch daemoncmd.ErrDaemonAccountMismatch
 		if errors.As(e.cause, &mismatch) {
 			return mismatch.Error()
+		}
+	case commandRejectApproval:
+		var refusal *daemoncmd.ApprovalRefusal
+		if errors.As(e.cause, &refusal) {
+			return refusal.Error()
 		}
 	case commandRejectResetRetire:
 		return "The old machine record could not be removed, so nothing was reset. Check your connection and run `pb reset` again."
@@ -200,6 +206,15 @@ func rejectDaemonAccount(err error) error {
 	var mismatch daemoncmd.ErrDaemonAccountMismatch
 	if errors.As(err, &mismatch) {
 		return commandRejection{reason: commandRejectDaemonAccount, cause: err}
+	}
+	return err
+}
+
+// rejectApprovalRefusal presents the daemon's reason for not approving a machine.
+func rejectApprovalRefusal(err error) error {
+	var refusal *daemoncmd.ApprovalRefusal
+	if errors.As(err, &refusal) {
+		return commandRejection{reason: commandRejectApproval, cause: err}
 	}
 	return err
 }
