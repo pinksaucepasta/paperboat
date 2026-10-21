@@ -649,6 +649,66 @@ restored production backup.
 **Decided.** No headless connectors (tunnels run on enrolled machines only); 2 carriers per edge; the URL is returned when one
 edge is ready; no custom domains for previews. Timing: engine work starts after Linux is done, before macOS.
 
+**CLI and host half (Lane F draft, docs only; code waits for Linux done and for Lane B's step 1 on the server).**
+
+*Today on a machine.* The worker holds the runtime-hostname carriers: `runtimeattachment.Service` (~0.7k lines) asks
+`/v1/runtime/carrier-attachment` for edges, `edgeplacement.Selector` picks them, and a `connector.DataCarrierPool`
+keeps them (primary active, standby ready). Previews and tunnels do NOT use these: `hostruntime/preview` (11.4k lines; leases,
+owner sessions, dispatch/proxy, private access, origin health) dials one carrier per lease through `AttachmentCarrier`
+(`attachment_*`, `carrier_provider`, `lease_observer_carrier`, `data_carrier`, `machine_runtime`, `lazy`: ~4.3k), and `tunnelmanager` (6.2k) plus
+`tunnelenrollment` (4.3k) and `connector` admission/supervisor/manager (~1.1k of 4.2k) run a connector identity with its
+own carrier and credential rotation. Three attach flows, three lifecycles, which is why a preview flips edges and a second
+tunnel route stalls.
+
+*Target: one `agent` package in the worker.* It is the renamed `runtimeattachment` + pool and is the ONLY thing that
+dials edges: 2 carriers per edge of the workspace's edge set (set and replacement come from the server's edge-set answer),
+reconnect with the existing bounded backoff, per-carrier readiness reported to the server (`PUT` of observed carriers, so the
+reconciler only assigns to edges where this agent is ready). It exposes a small in-process API used by everything that
+serves a URL, nothing else dials:
+
+    Register(ctx, EndpointSpec{ID, Kind, AccessMode, Routes[]{Protocol, Match, Origin, Policy}}) (Handle, error)
+    Handle.Update(routes) / Handle.Release() / Handle.Ready() <-chan struct{} (>=1 assignment observed)
+
+`Register`/`Update` call the server's `/v1/endpoints` with the machine identity; the server fans assignments out to the
+edges (Lane B above). The agent never pushes routes to an edge. Inbound streams carry `(endpoint_id, route_id)` in their
+first frame; the agent looks the route up in its registry and hands the stream to the route's origin handler, failing
+closed (stream reset, one rate-limited diagnostic) for an unknown or expired route. State needed to re-register after a
+worker or daemon restart (endpoint ids, routes, lease deadlines) is persisted in the existing worker state root, so
+previews/tunnels return on the same URL after restart or update (F14-02).
+
+*Preview (step 3).* `pb preview <port>` -> local API -> worker: `Register(kind=preview, one http route, lease)`; the URL is
+printed when `Handle.Ready()` fires (one control round trip, no dial); the lease renews through the same call
+(`owner_lease*`, `owner_sessions`, `session_renew` become the endpoint lease renewer); stop/expiry = `Release`. Private/team
+previews keep today's access checks (`private_access`, binding validation) inside the route policy; origin health and
+`dispatch.go` proxying move unchanged into `agent/origin` (shared with tunnels).
+
+*Tunnels (step 4).* The manager reduces to: read desired routes for this agent from the server, `Register`/`Update` them,
+report origin health. Connector enrollment, activation, credential generations and rotation, admission registry and the
+connector's own carrier dial are deleted; a tunnel is owned by the machine that created it, so `pb tunnel` commands and
+their JSON do not change except that `connector` fields disappear (CLI contract change made together with the server
+facades, no compatibility shim).
+
+*Deleted from the CLI (estimate -13k / +3k lines, tests -8k / +2.5k):* `preview/attachment_*`, `carrier_provider`,
+`lease_observer_carrier`, per-lease `data_carrier`, `machine_runtime`, `lazy` (~4.3k); all of `tunnelenrollment` (4.3k);
+`tunnelmanager/{production*,data_carrier,factory,update_gate}` and connector identity state (~3.6k); `connector/{admission_source,
+supervisor,manager}` (~1.1k). Kept: the data-carrier protocol (`connector/data_carrier*`), `edgeplacement`, dispatch/proxy,
+private access, origin health, inspector streams, usage accounting.
+
+*Order and compatibility.* CLI steps follow the server steps (server-first, each deployable). Software is pre-release: when the
+server drops `/v1/previews` attachment and connector routes, older CLIs lose previews/tunnels until `pb update` (the
+minimum-version floor makes that an actionable message, F14-07); no dual path is kept. Every historical smoke check
+(preview, preview-protocols, preview-private/access, tunnel*, tcp_private, update_continuity) stays the gate for each step.
+
+*Tests per step.* Agent: register/update/release lifecycle; ready only after an observed assignment; reconnect to a restarted
+edge; second edge joining later; unknown route fails closed; restart re-registers the same ids. Fault test: drop all carriers
+of one edge mid-stream, traffic continues on the other and the dropped streams error cleanly. Preview: the existing
+`preview_*` Python checks plus a two-edge URL check from Lane A. Windows/macOS: no platform code in the agent (pure network
+and in-process); platform risk is only service lifecycle, already covered by the daemon/launchd/systemd tests.
+
+*Open for Lane B (needed before code):* the exact edge-set answer (is it `carrier-attachment`'s response or a new
+`/v1/agent/edges`), the observed-carriers report shape, whether `endpoint_id` goes in the stream header or the first frame,
+and the capability flag name the agent advertises so the server can refuse a CLI that cannot serve endpoints.
+
 ## 4. Handoff notes
 
 All open items from the Phase B handoff (2026-10-14) are filed in S0 (smoke suite), F4
@@ -2140,3 +2200,5 @@ F6-06 still waits: Inbox GET to online hp/dadape/pbvm2 is 503 because the machin
 Waits: Lane A rerun preview-protocols:hp/preview:hp/tunnel-transfer:hp on .7; Lane C toggle next to "Approve new machines" + denied text; Lane E F9-04 rerun; Lane A/F B2 (second preview carrier per edge).
 2026-10-20 | Lane B B2 request (replaces the carriers[] text above) | Server side is live (114): for each preview the CLI sends a SECOND ordinary carrier-attachment request whose operation_id/Idempotency-Key is `<create operation>.b` (same body otherwise, own signed proof); the server places it on another edge of the set and the preview's DNS then lists both edges. No response field changed. | Lane A/F: hold both carriers, report readiness for each, release both; a lone `.b` failure must not fail the preview. Tell Lane B when it ships.
 2026-10-20 | Lane F F13-03 request to Lane B | CLI side pushed (386d30b0): peer-backed commands print the plan-limit message + billing link on bandwidth_quota_exhausted. Public tunnel/preview status cannot show it: please add `bandwidth_quota_exhausted` (code + billing_url) to the tunnel and preview status/list responses when the workspace allowance is used up; then the CLI prints it.
+2026-10-21 | Lane F macOS readiness audit (code only) | pending | — | The Linux fixes of the week share darwin||linux code or already have darwin counterparts (install ControlURL and guard domain, update activation and helper reset, open-connections busy check, revoked-computer backoff, send-to-self, disk-full refusals; `GOOS=darwin go vet ./...` clean). One real gap fixed: failing to retire old local roots no longer keeps the active root untrusted on any OS (machineguard/certificate.go, TestPreparingTheLocalCAIgnoresAFailureToRetireOldRoots).
+Mac-only proofs still open: (1) the user daemon is a LaunchAgent in gui/<uid>: does it survive logout, and start with no console login? (candidate fallback: user/<uid>); (2) Firefox ignores the System keychain, so browser trust may need enterprise_roots or an NSS import; (3) `security add-trusted-cert` admin approval and the trustPending path; (4) Application Firewall and macOS 15 Local Network prompts for direct QUIC; (5) Gatekeeper/quarantine for browser-downloaded `--from` files; (6) 127.100.x loopback aliases and PF after reboot and sleep; (7) launchd bootstrap/kickstart races during an update restart; (8) APFS free space (statfs) vs purgeable space for the full-disk refusal.
