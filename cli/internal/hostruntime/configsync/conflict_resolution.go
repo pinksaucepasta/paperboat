@@ -97,14 +97,17 @@ func safeConflictRevision(value string) bool {
 	return conflictRevisionPattern.MatchString(value)
 }
 
-func identifyConflicts(repositoryID, assignmentID, _ string, baseline, local, remote map[string]FileState, conflicts []PathSummary) []PathSummary {
+// identifyConflicts names each conflict by the two sides in dispute. The ancestor is left out on
+// purpose: the pull and the push reconciler of one assignment keep different baselines, and the same
+// disagreement must carry the same identity from both or it is listed, and resolved, twice.
+func identifyConflicts(repositoryID, assignmentID, _ string, local, remote map[string]FileState, conflicts []PathSummary) []PathSummary {
 	result := append([]PathSummary(nil), conflicts...)
 	for index := range result {
 		path := result[index].Path
 		hash := sha256.New()
 		for _, value := range []string{
 			repositoryID, assignmentID, path,
-			stateIdentity(baseline, path), stateIdentity(local, path), stateIdentity(remote, path),
+			stateIdentity(local, path), stateIdentity(remote, path),
 		} {
 			_, _ = hash.Write([]byte(value))
 			_, _ = hash.Write([]byte{0})

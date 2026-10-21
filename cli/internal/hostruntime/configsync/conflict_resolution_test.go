@@ -8,15 +8,14 @@ import (
 )
 
 func TestConflictRevisionIsStableAcrossUnrelatedHeadsAndChangesWithSides(t *testing.T) {
-	base := map[string]FileState{"path": {Hash: "base"}}
 	local := map[string]FileState{"path": {Hash: "local"}}
 	remote := map[string]FileState{"path": {Hash: "remote"}}
 	conflict := []PathSummary{{Path: "path", Reason: "concurrent_update"}}
-	first := identifyConflicts("repo", "assignment", "head-1", base, local, remote, conflict)
-	replayed := identifyConflicts("repo", "assignment", "head-1", base, local, remote, conflict)
-	moved := identifyConflicts("repo", "assignment", "head-2", base, local, remote, conflict)
+	first := identifyConflicts("repo", "assignment", "head-1", local, remote, conflict)
+	replayed := identifyConflicts("repo", "assignment", "head-1", local, remote, conflict)
+	moved := identifyConflicts("repo", "assignment", "head-2", local, remote, conflict)
 	remote["path"] = FileState{Hash: "remote-2"}
-	changed := identifyConflicts("repo", "assignment", "head-2", base, local, remote, conflict)
+	changed := identifyConflicts("repo", "assignment", "head-2", local, remote, conflict)
 	if len(first) != 1 || !safeConflictRevision(first[0].Revision) ||
 		first[0].Revision != replayed[0].Revision || first[0].Revision != moved[0].Revision ||
 		first[0].Revision == changed[0].Revision {

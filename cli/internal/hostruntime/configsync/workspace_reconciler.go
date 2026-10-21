@@ -312,7 +312,7 @@ func (r *PlaintextWorkspaceReconciler) Reconcile(ctx context.Context, repository
 	if len(plan.Conflicts) > 0 || r.resolutions != nil {
 		plan.Conflicts = identifyConflicts(
 			r.descriptor.RepositoryID, r.descriptor.AssignmentID, remote.Revision,
-			baselineFiles, localFiles.Files, remoteFiles.Files, plan.Conflicts,
+			localFiles.Files, remoteFiles.Files, plan.Conflicts,
 		)
 		resolved := make([]ConflictResolution, 0)
 		forcedPaths := make(map[string]string)
@@ -374,7 +374,7 @@ func (r *PlaintextWorkspaceReconciler) Reconcile(ctx context.Context, repository
 				}
 				plan.Conflicts = identifyConflicts(
 					r.descriptor.RepositoryID, r.descriptor.AssignmentID, remote.Revision,
-					baselineFiles, localFiles.Files, remoteFiles.Files, plan.Conflicts,
+					localFiles.Files, remoteFiles.Files, plan.Conflicts,
 				)
 			}
 		}
