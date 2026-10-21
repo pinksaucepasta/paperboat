@@ -98,7 +98,9 @@ kind = "file"
         assert mine['mode'] == 'bidirectional' and mine['assignment_version'] >= 1
         forced = confirmed('config', 'force', 'pull', mine['alias'])
         assert forced['outcome'] == 'queued' and forced['operation']['action'] == 'force_pull'
-        assert run('config', 'conflict', 'list')['conflicts'] == []
+        # The list is account-wide: only this computer's conflicts belong to this check.
+        assert [c for c in run('config', 'conflict', 'list')['conflicts']
+                if c.get('environment_id') == before['machine_id']] == []
         removed = confirmed('config', 'unassign', mine['alias'])
         assert removed['state'] == 'unassigned'
         assigned = False
