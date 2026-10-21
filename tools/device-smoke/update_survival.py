@@ -33,7 +33,7 @@ import terminal_command
 
 PB = Path.home() / '.local/bin/pb'
 FILES = 2
-FILE_SIZE = 40 << 20
+FILE_SIZE = 40 << 20  # default; --mib overrides
 GAP_SECONDS = 240
 
 
@@ -71,10 +71,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('target')
     parser.add_argument('peer')
+    parser.add_argument('--mib', type=int, default=40, help='size of each of the two transferred files')
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument('--approve', action='store_true')
     mode.add_argument('--from', dest='source')
     args = parser.parse_args()
+    global FILE_SIZE
+    FILE_SIZE = args.mib << 20
     password = sys.stdin.readline().rstrip('\n')
     before = registration()
     marker = 'PB_UPDATE_SURVIVE_' + uuid.uuid4().hex
