@@ -311,3 +311,20 @@ machines. One policy per workspace, edited in the console (and as a file), valid
 before it is saved, with an audit trail and a "test this rule" preview. Today's
 per-machine grants and team settings would become the simple default view of it.
 Not for launch (user, 2026-10-21).
+
+## Console talks to the local `pb` (browser ↔ local daemon bridge)
+
+When the console runs on a computer that has `pb` signed in to the same account, the page
+could use that local `pb` instead of our servers and edges. Candidate uses:
+- terminals and exec straight over the peer-to-peer path (lower latency, no edge bandwidth);
+- file transfers and Inbox downloads machine to machine, and drag-and-drop uploads from the page;
+- private previews and private ports opened through the local `pb` (127.100.x.x) without
+  browser sign-in at the edge;
+- ENV vault unlock and config-sync conflict compare done by the local `pb` (keys never in the page);
+- live machine status, diagnostics and `pb doctor` results shown from the local daemon;
+- "Open in terminal / VS Code" buttons that hand off to the local `pb`.
+
+Open questions before building: browser rules for a public page reaching a local port (Chrome
+Private Network Access, Safari blocks), pairing so other websites can't use it, origin checks,
+fallback to the normal path when no local `pb` is present, and not ending up with two code
+paths per feature. Not for launch (user, 2026-10-21).
