@@ -142,6 +142,9 @@ func sendCommand() *cobra.Command {
 			operationID := newIdempotencyKey()
 			acceptance, err := client.CreateTeamInboxRequest(ctx.Context, api.TeamInboxRequest{RequestID: requestID, SourceMachineID: sourceMachineID, DestinationMachineID: destination.ID, BatchID: batchID, Files: requestFiles, ExpiresAt: time.Now().UTC().Add(10 * time.Minute)}, operationID)
 			if err != nil {
+				if limit := serverTransferLimit(err, prepared.Sources); limit != nil {
+					return limit
+				}
 				return friendlyCommandError(err)
 			}
 			if acceptance.Status == "pending" {

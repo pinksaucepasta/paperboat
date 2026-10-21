@@ -1,9 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 
+	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/filetransfer"
 )
 
@@ -32,4 +34,30 @@ func destinationStorageFull(machine string, err error) error {
 		return err
 	}
 	return destinationStorageFullError{machine: machine, needed: remote.NeededBytes, free: remote.FreeBytes, cause: err}
+}
+
+// serverTransferLimit turns the server's 413 file_transfer_limit_exceeded (a team policy can be
+// stricter than the CLI's defaults) into the same typed refusal a local check produces, naming the
+// limit that was actually exceeded. It returns nil for any other error or when no limit is hit.
+func serverTransferLimit(err error, sources []filetransfer.Source) error {
+	var refusal *api.APIError
+	if len(sources) == 0 || !errors.As(err, &refusal) || refusal.Code != "file_transfer_limit_exceeded" {
+		return nil
+	}
+	number := func(key string) int64 {
+		switch value := refusal.Details[key].(type) {
+		case float64:
+			return int64(value)
+		case json.Number:
+			parsed, _ := value.Int64()
+			return parsed
+		}
+		return 0
+	}
+	limits := filetransfer.Limits{MaxFileBytes: number("max_file_bytes"), MaxBatchFiles: int(number("max_batch_files")), MaxBatchBytes: number("max_batch_bytes")}
+	var limit *filetransfer.LimitError
+	if errors.As(filetransfer.ValidateSources(sources, limits), &limit) {
+		return limit
+	}
+	return nil
 }
