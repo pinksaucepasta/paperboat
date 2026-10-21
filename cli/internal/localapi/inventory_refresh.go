@@ -3,12 +3,19 @@ package localapi
 import (
 	"context"
 	"io"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"net/http"
 )
 
 type inventoryRefresher interface{ Refresh(context.Context) error }
+
+// inventoryRefreshTimeout bounds one requested refresh. The refresh runs its stages (machine list,
+// local reconcile, completion items) with a budget each, so it can legitimately take longer than the
+// ordinary request timeout; a refresh the caller asked for must not be cut off by that timeout (a
+// sign-in waits for it).
+const inventoryRefreshTimeout = 45 * time.Second
 
 func (s *Server) refreshInventory(w http.ResponseWriter, r *http.Request, requestID string, peer Peer) {
 	if !s.ownsPeer(peer) {
@@ -24,7 +31,7 @@ func (s *Server) refreshInventory(w http.ResponseWriter, r *http.Request, reques
 		writeError(w, http.StatusServiceUnavailable, requestID, "inventory_unavailable", "inventory refresh is unavailable")
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), s.config.Timeout)
+	ctx, cancel := context.WithTimeout(r.Context(), inventoryRefreshTimeout)
 	defer cancel()
 	if err := source.Refresh(ctx); err != nil {
 		errorreport.Current().CaptureFailure(ctx, "paperboatd", "login", "local_gateway", "local_gateway_failed", err)

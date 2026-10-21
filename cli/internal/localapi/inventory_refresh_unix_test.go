@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 type refreshingSnapshotSource struct{ calls int }
@@ -51,5 +52,36 @@ func TestInventoryRefreshRequiresOwnerAndEmptyMutation(t *testing.T) {
 				t.Fatalf("unauthorized or malformed request changed inventory: calls=%d want=%d", source.calls, want)
 			}
 		})
+	}
+}
+
+type deadlineSource struct {
+	refreshingSnapshotSource
+	budget time.Duration
+}
+
+func (s *deadlineSource) Refresh(ctx context.Context) error {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return context.DeadlineExceeded
+	}
+	s.budget = time.Until(deadline)
+	return nil
+}
+
+// A refresh the caller asked for gets a budget for all its stages, not the ordinary request timeout:
+// a sign-in on a large account failed because the refresh was cut off after 5 seconds.
+func TestInventoryRefreshHasItsOwnLongTimeout(t *testing.T) {
+	source := &deadlineSource{}
+	server, err := NewServer(ServerConfig{SocketPath: filepath.Join(localAPITestDir(t), "api.sock"), OwnerUID: os.Geteuid(), OwnerGID: os.Getegid(), Source: source, Authorize: func(Peer) bool { return true }, Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/v1/inventory/refresh", nil)
+	request = request.WithContext(context.WithValue(request.Context(), peerContextKey{}, Peer{UID: os.Geteuid()}))
+	response := httptest.NewRecorder()
+	server.handler().ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent || source.budget < 30*time.Second {
+		t.Fatalf("status=%d budget=%v, want 204 and at least 30s", response.Code, source.budget)
 	}
 }
