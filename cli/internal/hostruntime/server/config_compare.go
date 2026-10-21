@@ -117,7 +117,9 @@ func (s *configComparisonStream) Next(ctx context.Context) (protocol.BinaryFrame
 		if end > len(content) {
 			end = len(content)
 		}
-		frame := protocol.BinaryFrame{Channel: channel, StartSequence: uint64(s.offset), Data: content[s.offset:end]}
+		// The frame is written after Next returns, while Close may already be clearing the
+		// comparison; a frame must own its bytes or the reader gets zeroes (integrity failure).
+		frame := protocol.BinaryFrame{Channel: channel, StartSequence: uint64(s.offset), Data: append([]byte(nil), content[s.offset:end]...)}
 		s.offset = end
 		return frame, nil
 	}
