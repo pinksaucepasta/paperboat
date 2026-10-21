@@ -60,7 +60,10 @@ want=sys.argv[1]
 sys.exit(0 if any(m["alias"]==want and m["online"] for m in json.load(sys.stdin)["machines"]) else 1)' "$machine"; do
  i=$((i+1)); [ "$i" -le 30 ] || fail "$machine did not come online"; sleep 4
 done
-inside_user '~/.local/bin/pb status' | grep -q 'Daemon: ready' || fail "throwaway is not ready before revoke"
+i=0
+until inside_user '~/.local/bin/pb status' | grep -q 'Daemon: ready'; do
+ i=$((i+1)); [ "$i" -le 20 ] || fail "throwaway is not ready before revoke"; sleep 3
+done
 
 step "owner revokes $machine by exact name"
 code=$(owner_pb machine revoke "$machine" --json | python3 -c 'import sys,json;d=json.load(sys.stdin);d=d.get("data",d);print(d["confirmation_token"])')
