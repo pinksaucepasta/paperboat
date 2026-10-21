@@ -480,8 +480,10 @@ func TestPostgresVaultLayersFanoutSignedPublicationAndWorkspaceIsolation(t *test
 	for _, r := range list(owner, personal, "pending", 20, 0, 1) {
 		publish(owner, global, r)
 	}
-	for _, r := range list(owner, device, "pending", 20, 0, 1) {
-		publish(owner, deviceSource, r)
+	// Removing a machine fences only the sources it could read. ownerB never received ownerA's device
+	// source, so that delivery stays current and nothing is pending for it.
+	if pending := list(owner, device, "pending", 20, 0, 0); len(pending) != 0 {
+		t.Fatalf("removal fenced a source the removed machine could not read: %+v", pending)
 	}
 	contextFor(owner, ownerA, owner, "personal", 2)
 	teamState, err := service.GetVaultTeam(ctx, owner, team)
