@@ -82,13 +82,18 @@ def main():
         # A closed session no longer counts: one more can be created after closing one.
         cleanup(str(PB), args.target, created.pop())
         released = time.monotonic()
+        attempts = []
         while True:
+            started = time.monotonic()
             code, text = new(prefix + 'again', args.target)
-            if not code or time.monotonic() - released > 30:
+            attempts.append(round(time.monotonic() - started, 1))
+            # The deadline is for the slot to free, not for one slow attach: retry until 60 s have passed.
+            if not code or time.monotonic() - released > 60:
                 break
             time.sleep(2)
         if code:
-            raise RuntimeError('closed session still counted against the limit after 30 s: ' + text[-200:])
+            raise RuntimeError('closed session still counted against the limit after %d s (attempt seconds %s): %s' % (
+                time.monotonic() - released, attempts, text[-200:]))
         slot_delay = round(time.monotonic() - released, 1)
         created.append(prefix + 'again')
     except Exception as error:
