@@ -597,7 +597,7 @@ func (f platformAcceptanceFixture) edgeTuples() []platformAcceptanceEdge {
 func (f platformAcceptanceFixture) insertEdges(t *testing.T, database *db.DB, now time.Time) {
 	t.Helper()
 	for _, edge := range f.edgeTuples() {
-		if _, err := database.SQL().ExecContext(context.Background(), `INSERT INTO paperboat.control_tunnel_nodes (id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,version) VALUES ($1,'default','v1',$2,'ready',true,$3,1)`, edge.nodeID, edge.processEpoch, now); err != nil {
+		if _, err := database.SQL().ExecContext(context.Background(), `INSERT INTO paperboat.control_tunnel_nodes (id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,version,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at) VALUES ($1,'default','v1',$2,'ready',true,$3,1,'test-region','domain-'||$1,ARRAY['edge']::text[],ARRAY['http2']::text[],10,0,$3,$3::timestamptz+interval '1 hour')`, edge.nodeID, edge.processEpoch, now); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -630,7 +630,7 @@ func (f platformAcceptanceFixture) insertPreviewDomain(t *testing.T, database *d
 		args  []any
 	}{
 		{`INSERT INTO paperboat.users (id,workos_subject,primary_email,status) VALUES ($1,$2,$3,'active')`, []any{f.previewAccountID, "subject_preview_" + f.suffix, "preview-" + f.suffix + "@example.test"}},
-		{`INSERT INTO paperboat.preview_leases (owner_session_kind,id,endpoint_id,endpoint,account_id,actor_id,owner_machine_id,owner_session_id,target_scheme,target_address,access_mode,lease_deadline,user_deadline,allocation_state,edge_state,origin_state,terminal_state,created_at,ready_at,last_renewed_at) VALUES ('foreground',$1,$2,$3,$4,$5,$6,$7,'http','127.0.0.1:3000','public',$8,$9,'ready','ready','ready','active',$10,$10,$10)`, []any{f.previewLeaseID, "endpoint-" + f.suffix, "https://preview-" + f.suffix + ".preview.example.test", f.previewAccountID, f.previewAccountID, "machine-" + f.suffix, "session-" + f.suffix, now.Add(24 * time.Hour), now.Add(12 * time.Hour), now}},
+		{`INSERT INTO paperboat.preview_leases (owner_session_kind,id,endpoint,account_id,actor_id,owner_machine_id,owner_session_id,target_scheme,target_address,access_mode,lease_deadline,user_deadline,allocation_state,edge_state,origin_state,terminal_state,created_at,ready_at,last_renewed_at) VALUES ('foreground',$1,$2,$3,$4,$5,$6,'http','127.0.0.1:3000','public',$7,$8,'ready','ready','ready','active',$9,$9,$9)`, []any{f.previewLeaseID, "https://preview-" + f.suffix + ".preview.example.test", f.previewAccountID, f.previewAccountID, "machine-" + f.suffix, "session-" + f.suffix, now.Add(24 * time.Hour), now.Add(12 * time.Hour), now}},
 		{`INSERT INTO paperboat.preview_domains (id,account_id,preview_id,preview_generation,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,observed_records,dns_provider,expected_records,dns_next_check_at,dns_ttl_seconds,verification_attempts,certificate_strategy,certificate_state,caa_state,conflict_state,generation,created_at,updated_at) VALUES ($1,$2,$3,1,$4,'exact','dns-preview-platform','verified','target.preview.example.test','[]'::jsonb,'generic','[]'::jsonb,$5,300,0,'managed','issuing','ready','clear',1,$5,$5)`, []any{f.previewDomainID, f.previewAccountID, f.previewLeaseID, f.previewHostname, now}},
 	}
 	for _, item := range queries {

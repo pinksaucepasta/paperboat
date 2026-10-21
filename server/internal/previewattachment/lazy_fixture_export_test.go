@@ -3,6 +3,7 @@ package previewattachment
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
 	"strings"
 	"time"
@@ -87,14 +88,17 @@ func ApplyLazyReadyFixture(ctx context.Context, database *db.DB, a Attachment) e
 		return err
 	}
 	now := time.Now().UTC()
-	insert := strings.Replace(insertAttachmentSQL, "issued_at, expires_at, created_at, updated_at", "issued_at, expires_at, created_at, updated_at, ready_at", 1)
-	insert = strings.Replace(insert, "1,'pending',false,false,$27,$28,$29,$30)", "1,'ready',true,true,$27,$28,$29,$30,$29)", 1)
+	insert := strings.Replace(insertAttachmentSQL, "issued_at, expires_at, created_at, updated_at, edge_slot", "issued_at, expires_at, created_at, updated_at, ready_at, edge_slot", 1)
+	insert = strings.Replace(insert, "1,'pending',false,false,$27,$28,$29,$30,$31)", "1,'ready',true,true,$27,$28,$29,$30,$29,$31)", 1)
+	if !strings.Contains(insert, "ready_at, edge_slot") || !strings.Contains(insert, "$29,$31)") {
+		return errors.New("lazy ready fixture no longer matches the attachment insert; update it with the column list")
+	}
 	query := `WITH ready AS (UPDATE preview_leases SET allocation_state='ready',edge_state='ready',origin_state='ready',ready_at=now(),generation=generation+1 WHERE id=$2 AND terminal_state='active' RETURNING id) ` + insert
 	_, err = database.Pool().Exec(ctx, query,
 		a.AccountID, a.PreviewID, a.OperationID, a.IdempotencyKey, a.RequestID, a.CorrelationID, hash,
 		a.OwnerMachineID, a.OwnerSessionID, a.HostID, a.EdgeNodeID, a.MachineIdentityPublicKey, a.MachineIdentityThumbprint,
 		a.LeaseGeneration+1, a.TunnelID, a.ConnectorID, a.SessionID, a.ProcessGeneration, a.ConfigGeneration, a.ConfigContentHash,
 		a.RouteID, a.RouteGeneration, a.EdgeEndpoints, a.EdgeProcessEpoch, a.EdgeCarrierServerSPKISHA256, a.EdgeCarrierServerCertificateChainPEM,
-		a.IssuedAt.UTC(), a.ExpiresAt.UTC(), now, now)
+		a.IssuedAt.UTC(), a.ExpiresAt.UTC(), now, now, 0)
 	return err
 }

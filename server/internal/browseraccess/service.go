@@ -609,7 +609,8 @@ func resolveBound(ctx context.Context, tx *db.Tx, account, host, kind, id, route
 func resolveResource(ctx context.Context, tx *db.Tx, host, kind, id, route string, now time.Time) (authority, error) {
 	var a authority
 	if kind == "lazy_policy" {
-		err := tx.QueryRow(ctx, lazyPolicySQL, host, id, route, now).Scan(&a.id, &a.owner, &a.mode, &a.generation, &a.expires, &a.machine, &a.ownerTeam)
+		// A lazy policy belongs to one account's machine; it has no Team owner.
+		err := tx.QueryRow(ctx, lazyPolicySQL, host, id, route, now).Scan(&a.id, &a.owner, &a.mode, &a.generation, &a.expires, &a.machine)
 		if err != nil {
 			return a, mapMissing(err)
 		}
