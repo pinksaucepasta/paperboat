@@ -1,0 +1,42 @@
+name: Cross-platform
+
+# Build and test the cli and shared modules on the platforms users run (macOS, Windows).
+# Manual until the first run is triaged; then it runs on every push to main.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cross-platform-${{ github.repository }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: ${{ matrix.module }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+        module: [shared, cli]
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ matrix.module }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: ${{ matrix.module }}/go.mod
+          cache: true
+          cache-dependency-path: |
+            cli/go.sum
+            shared/go.sum
+            go.work.sum
+      - run: go build ./...
+      - run: go vet ./...
+      - name: Tests with the race detector
+        run: go test -race -timeout 60m ./...
