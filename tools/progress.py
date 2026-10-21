@@ -77,7 +77,10 @@ def render(sections):
                          f'<em>{100*d//max(t,1)}%</em></div>{bar(d, t, b)}')
         cards.append(f'<div class="card"><h2>{name}</h2>{"".join(lines)}</div>')
     cross = [r for s in sections if s["id"] == "X" for r in s["feature"]]
-    if cross:
+    if not cross:
+        cards.append('<div class="card"><h2>Cross-platform</h2><div class="row"><span>'
+                     'Rows are being written (CHECKLIST section X)</span></div></div>')
+    else:
         lines = []
         for index, pair in ((0, "Linux ↔ macOS"), (1, "Linux ↔ Windows"), (2, "macOS ↔ Windows")):
             d, b, t = count(cross, index)
