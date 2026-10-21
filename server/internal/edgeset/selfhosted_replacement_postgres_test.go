@@ -26,7 +26,7 @@ func TestSelfHostedEdgeSetReplacesOnlyWithSelectedServersOnPostgres(t *testing.T
 	var installations []string
 	node := func(name, domain string, own bool) string {
 		id := "edgeset_sh_" + name + "_" + stamp
-		exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,carrier_server_spki_sha256,carrier_server_certificate_chain_pem,tls_spki_sha256) VALUES($1,'default','1.0','epoch','ready',true,now(),'region',$2,ARRAY['edge'],ARRAY['http3','http2'],100,0,now(),now()+interval '1 hour','edge.example.test',27443,27444,'sha256:' || repeat('ab',32),'pem',decode(repeat('ab',32),'hex'))`, id, domain)
+		exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,carrier_server_spki_sha256,carrier_server_certificate_chain_pem,tls_spki_sha256,public_ingress_verified_at) VALUES($1,'default','1.0','epoch','ready',true,now(),'region',$2,ARRAY['edge'],ARRAY['http3','http2'],100,0,now(),now()+interval '1 hour','edge.example.test',27443,27444,'sha256:' || repeat('ab',32),'pem',decode(repeat('ab',32),'hex'),now())`, id, domain)
 		t.Cleanup(func() {
 			_, _ = database.SQL().ExecContext(ctx, `DELETE FROM paperboat.control_tunnel_nodes WHERE id=$1`, id)
 		})
@@ -97,6 +97,13 @@ func TestSelfHostedEdgeSetReplacesOnlyWithSelectedServersOnPostgres(t *testing.T
 	}
 	// The workspace selects its third server: it replaces the lost one.
 	exec(`UPDATE paperboat.selfhost_pool_policies SET installation_ids=ARRAY[$2,$3,$4]::text[] WHERE scope_id=$1`, account, installations[0], installations[1], installations[2])
+	// A spare whose public ingress is not verified is kept out of the set until it is.
+	exec(`UPDATE paperboat.control_tunnel_nodes SET public_ingress_verified_at=NULL WHERE id=$1`, three)
+	reconcile()
+	if _, ids := stored(); !same(ids, two) {
+		t.Fatalf("an unverified spare entered the set: %v", ids)
+	}
+	exec(`UPDATE paperboat.control_tunnel_nodes SET public_ingress_verified_at=now() WHERE id=$1`, three)
 	reconcile()
 	if _, ids := stored(); !same(ids, two, three) {
 		t.Fatalf("after selecting a spare: %v, want %s and %s", ids, two, three)

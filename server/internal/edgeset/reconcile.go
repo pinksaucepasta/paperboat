@@ -31,6 +31,7 @@ AND n.last_heartbeat_at>$1::timestamptz-interval '15 seconds' AND n.registry_exp
 AND (n.drain_deadline IS NULL OR n.drain_deadline>$1)
 AND n.carrier_endpoint_host IS NOT NULL AND n.carrier_endpoint_tcp_port IS NOT NULL AND n.carrier_endpoint_quic_port IS NOT NULL
 AND n.carrier_server_spki_sha256 IS NOT NULL AND n.carrier_server_certificate_chain_pem IS NOT NULL
+AND n.public_ingress_verified_at IS NOT NULL
 AND paperboat.node_workspace_edge_eligible(n.id,$2,$3)
 ORDER BY n.id`
 
