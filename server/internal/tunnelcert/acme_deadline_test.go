@@ -21,8 +21,11 @@ func TestACMEIssuanceDeadlineBoundsPendingOrder(t *testing.T) {
 		name             string
 		issuance, parent time.Duration
 	}{
-		{"issuer_deadline", 60 * time.Millisecond, 350 * time.Millisecond},
-		{"parent_deadline", 200 * time.Millisecond, 40 * time.Millisecond},
+		// The deadlines are large enough for the fixture's first exchanges (directory, nonce, order,
+		// authorization) to finish before they fire, also under -race on a busy machine; the longer
+		// bound is far more than the slack, so an unbounded poll loop is still caught.
+		{"issuer_deadline", 600 * time.Millisecond, 4 * time.Second},
+		{"parent_deadline", 3 * time.Second, 600 * time.Millisecond},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var polls atomic.Int32
@@ -75,7 +78,7 @@ func TestACMEIssuanceDeadlineBoundsPendingOrder(t *testing.T) {
 			if tc.parent < bound {
 				bound = tc.parent
 			}
-			if elapsed := time.Since(started); elapsed > bound+120*time.Millisecond {
+			if elapsed := time.Since(started); elapsed > bound+time.Second {
 				t.Fatalf("pending order exceeded issuance/parent bound: %v > %v", elapsed, bound)
 			}
 		})

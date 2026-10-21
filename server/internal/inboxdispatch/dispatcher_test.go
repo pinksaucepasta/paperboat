@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,12 +20,27 @@ type fakeMachine struct {
 	t       *testing.T
 	signer  *mint.Provider
 	handler func(http.ResponseWriter, *http.Request, mint.CredentialClaims)
+	mu      sync.Mutex // the dispatcher may issue concurrent requests; these two fields are shared
 	claims  mint.CredentialClaims
 	seen    int
 }
 
+func (m *fakeMachine) lastClaims() mint.CredentialClaims {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.claims
+}
+
+func (m *fakeMachine) calls() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.seen
+}
+
 func (m *fakeMachine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	m.mu.Lock()
 	m.seen++
+	m.mu.Unlock()
 	class := map[string]string{http.MethodGet: "inbox_read", http.MethodDelete: "inbox_delete"}[r.Method]
 	if r.URL.Path == "/v1/inbox-files" {
 		class = "inbox_list"
@@ -36,7 +52,9 @@ func (m *fakeMachine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 		return
 	}
+	m.mu.Lock()
 	m.claims = claims
+	m.mu.Unlock()
 	m.handler(w, r, claims)
 }
 
@@ -49,7 +67,7 @@ func dispatcherFor(t *testing.T, machine *fakeMachine) (*Dispatcher, *httptest.S
 	machine.t, machine.signer = t, signer
 	server := httptest.NewServer(machine)
 	t.Cleanup(server.Close)
-	dispatcher := &Dispatcher{signer: signer, issuer: testIssuer, client: server.Client(), headerTimeout: 300 * time.Millisecond, maxFileBytes: 1 << 20, now: func() time.Time { return time.Now().UTC() },
+	dispatcher := &Dispatcher{signer: signer, issuer: testIssuer, client: server.Client(), headerTimeout: 10 * time.Second, maxFileBytes: 1 << 20, now: func() time.Time { return time.Now().UTC() },
 		newJTI: func() (string, error) { return "jti_" + time.Now().Format("150405.000000000"), nil }}
 	dispatcher.client.CheckRedirect = func(*http.Request, []*http.Request) error { return errors.New("redirect rejected") }
 	dispatcher.resolve = func(context.Context, Request) (route, error) {
@@ -81,8 +99,8 @@ func TestOpenStreamsTheFileWithABoundSingleUseCredential(t *testing.T) {
 	if err != nil || string(body) != "hello inbox" || file.Size != 11 || file.Name != "résumé (1).txt" {
 		t.Fatalf("body=%q size=%d name=%q err=%v", body, file.Size, file.Name, err)
 	}
-	if machine.claims.MachineID != "machine_1" || machine.claims.UserID != "actor_1" || machine.claims.OperationID != "operation_inbox_1" || machine.claims.AccountID != "owner_1" || machine.claims.EnvironmentID != "env_1" || machine.claims.IdempotencyKey != "" {
-		t.Fatalf("claims = %+v", machine.claims)
+	if machine.lastClaims().MachineID != "machine_1" || machine.lastClaims().UserID != "actor_1" || machine.lastClaims().OperationID != "operation_inbox_1" || machine.lastClaims().AccountID != "owner_1" || machine.lastClaims().EnvironmentID != "env_1" || machine.lastClaims().IdempotencyKey != "" {
+		t.Fatalf("claims = %+v", machine.lastClaims())
 	}
 }
 
@@ -153,6 +171,7 @@ func TestMachineThatAnswersTooSlowlyIsUnreachableAndRedirectsAreNotFollowed(t *t
 		w.Header().Set("Content-Length", "0")
 	}}
 	dispatcher, _ := dispatcherFor(t, slow)
+	dispatcher.headerTimeout = 300 * time.Millisecond // the machine answers after 900 ms
 	if _, err := dispatcher.Open(t.Context(), request()); !errors.Is(err, ErrMachineUnreachable) {
 		t.Fatalf("slow machine: %v", err)
 	}
@@ -179,8 +198,8 @@ func TestOfflineMachineAndMalformedRequestsDoNotReachTheNetwork(t *testing.T) {
 	if _, err := dispatcher.Open(t.Context(), empty); !errors.Is(err, ErrInvalidConfiguration) {
 		t.Fatalf("empty file id: %v", err)
 	}
-	if machine.seen != 0 {
-		t.Fatalf("machine was called %d times", machine.seen)
+	if machine.calls() != 0 {
+		t.Fatalf("machine was called %d times", machine.calls())
 	}
 	for _, base := range []string{"ftp://x", "https://user:pw@host", "https://host?x=1", "https://host/v1/runtime/a/b", "https://host/other"} {
 		if _, err := inboxEndpoint(base, "0123456789abcdef", false); err == nil {
