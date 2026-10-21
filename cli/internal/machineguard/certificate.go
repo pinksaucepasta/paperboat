@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/pinksaucepasta/paperboat/internal/splitdns"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -195,6 +196,10 @@ func prepareNamespaceCA(state, domain string, existingOnly bool) (*splitdns.CA, 
 	}
 	return ca, nil
 }
+
+// retireHistoricalTrust is the platform removal of superseded roots; tests replace it.
+var retireHistoricalTrust = cleanupHistoricalTrustExcept
+
 func (g *guardServer) prepareLocalCA(ctx context.Context) error {
 	domains, err := loadBrowserDomains(g.cfg.StateDir)
 	if err != nil {
@@ -208,8 +213,10 @@ func (g *guardServer) prepareLocalCA(ctx context.Context) error {
 		}
 		active = ca.CertPEM()
 	}
-	if err := cleanupHistoricalTrustExcept(ctx, g.cfg, active); err != nil {
-		return err
+	if err := retireHistoricalTrust(ctx, g.cfg, active); err != nil {
+		// Retiring older Paperboat roots is housekeeping: failing to remove one (a keychain that refuses,
+		// a browser database in use) must not keep the active root untrusted and local access down.
+		slog.Warn("older Paperboat local roots could not be retired", "error", err)
 	}
 	// The CA is complete once generated. Only system trust installation may be
 	// pending, so every approved namespace CA is still prepared.
