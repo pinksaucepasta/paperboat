@@ -27,7 +27,7 @@ func existingInstallConfig(dir string, fs *flag.FlagSet) (selfhost.Config, bool,
 	if err != nil {
 		return c, false, err
 	}
-	expected := map[string]string{"enable": installationMode(c), "endpoint-host": c.EndpointHost, "name": c.Name, "claim-listen": c.Listen, "preview-domain": c.PreviewDomain, "tunnel-domain": c.TunnelDomain, "runtime-domain": c.RuntimeDomain, "https-cert": c.PublicHTTPSCertFile, "https-key": c.PublicHTTPSKeyFile}
+	expected := map[string]string{"enable": installationMode(c), "endpoint-host": c.EndpointHost, "name": c.Name, "claim-listen": c.Listen, "preview-domain": c.PreviewDomain, "tunnel-domain": c.TunnelDomain, "runtime-domain": c.RuntimeDomain, "browser-login-origin": c.BrowserLoginOrigin, "https-cert": c.PublicHTTPSCertFile, "https-key": c.PublicHTTPSKeyFile}
 	fs.Visit(func(f *flag.Flag) {
 		if err != nil {
 			return
@@ -68,7 +68,7 @@ func freshInstallConfig(ctx context.Context, fs *flag.FlagSet) (selfhost.Config,
 	if failure == "" {
 		failure = host
 	}
-	c := selfhost.Config{Name: name, EndpointHost: host, Listen: value("claim-listen"), PreviewDomain: value("preview-domain"), TunnelDomain: value("tunnel-domain"), RuntimeDomain: value("runtime-domain"), PublicHTTPSCertFile: value("https-cert"), PublicHTTPSKeyFile: value("https-key")}
+	c := selfhost.Config{Name: name, EndpointHost: host, Listen: value("claim-listen"), PreviewDomain: value("preview-domain"), TunnelDomain: value("tunnel-domain"), RuntimeDomain: value("runtime-domain"), BrowserLoginOrigin: value("browser-login-origin"), PublicHTTPSCertFile: value("https-cert"), PublicHTTPSKeyFile: value("https-key")}
 	mode := value("enable")
 	if mode == "relay" || mode == "both" {
 		tcp := 443

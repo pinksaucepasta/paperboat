@@ -299,6 +299,10 @@ func (b *BrowserAccess) authorize(w http.ResponseWriter, r *http.Request, m rout
 		b.begin(w, r, m.Host)
 		return r, func() {}, false
 	}
+	if !machine && crossSiteSubresource(r) {
+		http.Error(w, "Cross-site request is not authorized", 403)
+		return r, func() {}, false
+	}
 	if !machine && (r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions || isWebSocketUpgrade(r.Header)) {
 		if len(r.Header.Values("Origin")) != 1 || r.Header.Get("Origin") != "https://"+m.Host {
 			http.Error(w, "Origin is not authorized", 403)
@@ -360,4 +364,16 @@ func (b *BrowserAccess) authorize(w http.ResponseWriter, r *http.Request, m rout
 func hasBrowserDecision(ctx context.Context, m route.RouteMatch) bool {
 	d, ok := ctx.Value(browserDecisionKey{}).(connectorprotocol.IngressDecision)
 	return ok && browserDecisionMatches(d, m)
+}
+
+// crossSiteSubresource rejects cookie-authorized requests that another site, or
+// another preview/tunnel host sharing this registrable domain, started without a
+// top-level navigation. Without a public-suffix listing those hosts are
+// same-site, so SameSite=Lax alone does not separate them.
+func crossSiteSubresource(r *http.Request) bool {
+	site := r.Header.Get("Sec-Fetch-Site")
+	if site != "same-site" && site != "cross-site" {
+		return false
+	}
+	return r.Header.Get("Sec-Fetch-Mode") != "navigate" || r.Header.Get("Sec-Fetch-Dest") != "document" || (r.Method != http.MethodGet && r.Method != http.MethodHead)
 }

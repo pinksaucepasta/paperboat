@@ -297,8 +297,13 @@ thirty-two waiters per activation. Admission exhaustion returns 429 with
 `origin_unavailable`, `activation_timeout`, `generation_conflict` and
 `forwarding_failed`. No partially forwarded request is replayed automatically.
 
-Production browser rollout still requires Task26's hostname/PSL isolation gate.
-These APIs and development checks do not waive that gate or provision DNS/TLS.
+Browser access does not depend on the public suffix list. Edge cookies are
+host-only `__Host-` cookies (Secure, Path=/, no Domain), and the edge refuses
+cookie-carrying requests that a sibling preview/tunnel host or another site
+started other than as a top-level document navigation (Sec-Fetch-Site). Listing
+the base domain on the PSL later adds browser-level isolation and needs no code
+change. These APIs do not provision DNS/TLS. Enable it on an installation with
+`pbh install --browser-login-origin https://<console origin>`.
 
 ### Shared TCP443 TLS pass-through
 

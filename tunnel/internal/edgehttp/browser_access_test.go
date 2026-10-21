@@ -197,3 +197,45 @@ func TestBrowserAuthorizationOutlivesTTLUntilRevokedAndDeniesNewAdmissions(t *te
 		t.Fatal("control loss forwarded")
 	}
 }
+
+func TestBrowserCookieRequestsFromSiblingHostsAreRefused(t *testing.T) {
+	// Without a public-suffix listing a sibling preview host is same-site, so
+	// the edge must refuse cookie-carrying requests it started other than as a
+	// top-level document navigation.
+	m, d := browserTestMatch()
+	for _, c := range []struct {
+		name, site, mode, dest, method string
+		allowed                       bool
+	}{
+		{"no fetch metadata", "", "", "", "GET", true},
+		{"same origin fetch", "same-origin", "cors", "empty", "GET", true},
+		{"typed address", "none", "navigate", "document", "GET", true},
+		{"sibling top-level navigation", "same-site", "navigate", "document", "GET", true},
+		{"cross-site top-level navigation", "cross-site", "navigate", "document", "GET", true},
+		{"sibling fetch", "same-site", "cors", "empty", "GET", false},
+		{"sibling image", "same-site", "no-cors", "image", "GET", false},
+		{"sibling websocket", "same-site", "websocket", "websocket", "GET", false},
+		{"sibling iframe", "same-site", "navigate", "iframe", "GET", false},
+		{"sibling form post", "same-site", "navigate", "document", "POST", false},
+		{"cross-site fetch", "cross-site", "cors", "empty", "GET", false},
+	} {
+		a := &browserAuthorityTest{decision: d}
+		b := BrowserAccess{Authority: a, LoginOrigin: "https://login.example.test"}
+		r := httptest.NewRequest(c.method, "https://"+m.Host+"/", nil)
+		r.AddCookie(&http.Cookie{Name: browserEdgeCookie, Value: "token"})
+		for k, v := range map[string]string{"Sec-Fetch-Site": c.site, "Sec-Fetch-Mode": c.mode, "Sec-Fetch-Dest": c.dest} {
+			if v != "" {
+				r.Header.Set(k, v)
+			}
+		}
+		if c.method == "POST" {
+			r.Header.Set("Origin", "https://"+m.Host)
+		}
+		w := httptest.NewRecorder()
+		_, finish, ok := b.authorize(w, r, m)
+		finish()
+		if ok != c.allowed || (!c.allowed && (w.Code != 403 || a.calls.Load() != 0)) {
+			t.Fatalf("%s: allowed=%v status=%d", c.name, ok, w.Code)
+		}
+	}
+}

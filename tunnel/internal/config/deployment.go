@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/strictjson"
-	"golang.org/x/net/publicsuffix"
 )
 
 const (
@@ -156,22 +155,15 @@ func (d Deployment) validate() error {
 		return errors.New("public HTTP listener is invalid")
 	}
 	if d.BrowserAccessEnabled {
+		// Isolation does not depend on the public suffix list: browser cookies
+		// are host-only __Host- cookies and the edge adds same-site request checks.
 		login, e := url.Parse(d.BrowserLoginOrigin)
 		if e != nil || login.Scheme != "https" || login.Host == "" || login.User != nil || login.Path != "" || login.RawQuery != "" || login.Fragment != "" {
-			return errors.New("browser access requires exact trusted HTTPS origin and distributed PSL hostname isolation")
+			return errors.New("browser access requires an exact trusted HTTPS login origin")
 		}
 		for _, domain := range []string{d.PreviewBaseDomain, d.TunnelBaseDomain} {
-			suffix, _ := publicsuffix.PublicSuffix(domain)
-			if suffix != domain || login.Hostname() == domain || strings.HasSuffix(login.Hostname(), "."+domain) {
-				return errors.New("browser access requires exact trusted HTTPS origin and distributed PSL hostname isolation")
-			}
-			parent := strings.SplitN(domain, ".", 2)
-			if len(parent) != 2 {
-				return errors.New("browser access requires exact trusted HTTPS origin and distributed PSL hostname isolation")
-			}
-			suffix, _ = publicsuffix.PublicSuffix(parent[1])
-			if suffix != parent[1] {
-				return errors.New("browser access requires exact trusted HTTPS origin and distributed PSL hostname isolation")
+			if login.Hostname() == domain || strings.HasSuffix(login.Hostname(), "."+domain) {
+				return errors.New("browser login origin must not be inside a preview or tunnel domain")
 			}
 		}
 	}

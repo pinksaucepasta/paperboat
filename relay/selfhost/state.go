@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,6 +24,7 @@ type Config struct {
 	PreviewDomain       string      `json:"preview_domain,omitempty"`
 	TunnelDomain        string      `json:"tunnel_domain,omitempty"`
 	RuntimeDomain       string      `json:"runtime_domain,omitempty"`
+	BrowserLoginOrigin  string      `json:"browser_login_origin,omitempty"`
 	ControlCA           string      `json:"control_ca,omitempty"`
 	PublicHTTPSCertFile string      `json:"public_https_cert_file,omitempty"`
 	PublicHTTPSKeyFile  string      `json:"public_https_key_file,omitempty"`
@@ -49,6 +51,9 @@ func validateConfig(c Config) error {
 	}
 	if c.EndpointHost == "" || strings.ContainsAny(c.EndpointHost, "/@ ") || (net.ParseIP(c.EndpointHost) == nil && strings.Contains(c.EndpointHost, ":")) {
 		return errors.New("endpoint host must be a DNS name or IP without a port")
+	}
+	if err := validateBrowserLoginOrigin(c.BrowserLoginOrigin); err != nil {
+		return err
 	}
 	if _, _, err := net.SplitHostPort(c.Listen); err != nil {
 		return errors.New("claim listen address requires host:port")
@@ -198,4 +203,15 @@ func CreateCode(dir string) (code, address string, expiry time.Time, err error) 
 	address = net.JoinHostPort(s.Config.EndpointHost, port)
 	code = fmt.Sprintf("pbh1.%s.%s", encoding.EncodeToString(pin), encoding.EncodeToString(secret))
 	return
+}
+
+func validateBrowserLoginOrigin(origin string) error {
+	if origin == "" {
+		return nil
+	}
+	u, err := url.Parse(origin)
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
+		return errors.New("browser login origin must be an https origin such as https://console.example.com")
+	}
+	return nil
 }

@@ -29,12 +29,18 @@ func TestLoadDeploymentStrictProfile(t *testing.T) {
 	}
 }
 
-func TestBrowserRolloutRequiresDistributedHostnameIsolation(t *testing.T) {
-	// Neither DNS readiness nor an operator's enable flag substitutes for the
-	// browser public-suffix boundary. Existing public/native startup stays valid.
+func TestBrowserAccessGateDoesNotNeedPublicSuffixListing(t *testing.T) {
 	base := strings.TrimSuffix(validDeploymentJSON(), "}")
-	if _, err := LoadDeployment(writeDeployment(t, base+`,"browser_access_enabled":true,"browser_login_origin":"https://login.example.test"}`)); err == nil {
-		t.Fatal("enabled browser access without PSL isolation")
+	enabled := func(origin string) string {
+		return base + `,"browser_access_enabled":true,"browser_login_origin":"` + origin + `"}`
+	}
+	if _, err := LoadDeployment(writeDeployment(t, enabled("https://login.example.test"))); err != nil {
+		t.Fatalf("browser access with an exact HTTPS login origin: %v", err)
+	}
+	for _, origin := range []string{"", "http://login.example.test", "https://login.example.test/path", "https://user@login.example.test", "https://app.preview.example.test", "https://preview.example.test", "https://x.tunnels.example.test"} {
+		if _, err := LoadDeployment(writeDeployment(t, enabled(origin))); err == nil {
+			t.Fatalf("browser access accepted login origin %q", origin)
+		}
 	}
 	if _, err := LoadDeployment(writeDeployment(t, base+`,"browser_access_enabled":false,"browser_login_origin":"https://login.example.test"}`)); err != nil {
 		t.Fatal(err)
