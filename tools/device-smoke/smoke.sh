@@ -46,6 +46,10 @@ RUN_ID="smoke$(date -u +%H%M%S)$RANDOM"
 
 EXPECT_VERSION=""
 TARGETS="hp,apple"
+# CLIENT is the Linux device that drives every pair; PEER is the second Linux device. SMOKE_CT_MAP
+# (name=host:container,...) stands a disposable systemd container on a Docker host in for a device name.
+CLIENT=${SMOKE_CLIENT:-hp}
+PEER=${SMOKE_PEER:-dadape}
 LONG_EXEC=420
 LONG_SSH=200
 SKIP=""
@@ -93,7 +97,7 @@ if [ -n "$ONLY_LIST" ]; then
 fi
 [ -z "$UPDATE_DIR" ] || [ -n "$UPDATE_VERSION" ] || { echo "--update requires --update-version" >&2; exit 2; }
 [ -n "${APPLE_PASS:-}" ] || [[ ",$TARGETS," != *,apple,* ]] || { echo "export APPLE_PASS (see REMOTE_TESTING.md)" >&2; exit 2; }
-[ -n "${DADAPE_PASS:-}" ] || [[ ",$TARGETS," != *,dadape,* ]] || { echo "export DADAPE_PASS (see REMOTE_TESTING.md)" >&2; exit 2; }
+[ -n "${DADAPE_PASS:-}" ] || [ -n "${SMOKE_CT_MAP:-}" ] || [[ ",$TARGETS," != *,dadape,* ]] || { echo "export DADAPE_PASS (see REMOTE_TESTING.md)" >&2; exit 2; }
 [ -n "${VICTUS_PASS:-}" ] || [[ ",$TARGETS," != *,victus,* ]] || { echo "export VICTUS_PASS (see REMOTE_TESTING.md)" >&2; exit 2; }
 command -v sshpass >/dev/null || { echo "sshpass is required" >&2; exit 2; }
 mkdir -p "$RESULTS_DIR"
@@ -107,10 +111,21 @@ if [[ ",$TARGETS," == *,victus,* ]]; then
 fi
 SSH_OPTS=(-o ConnectTimeout=15 -o ServerAliveInterval=30 -o StrictHostKeyChecking=accept-new)
 
+ct_of() { # ct_of DEVICE: host:container for a device that is a container, else nothing
+  local pair map=${SMOKE_CT_MAP:-}
+  for pair in ${map//,/ }; do [ "${pair%%=*}" = "$1" ] && { echo "${pair#*=}"; return 0; }; done
+  return 1
+}
+container_on() { # container_on HOST:CONTAINER CMD... : run as the enrolled user inside the container
+  local host=${1%%:*} ct=${1#*:}; shift
+  ssh "${SSH_OPTS[@]}" -o BatchMode=yes "$host" "sudo docker exec -i -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 $ct bash -lc $(printf '%q' "$*")"
+}
+
 # on DEVICE CMD... : run a POSIX shell command (hp, apple) or a PowerShell
 # command (victus) on the device and print its output.
 on() {
-  local device=$1; shift
+  local device=$1 where; shift
+  if where=$(ct_of "$device"); then container_on "$where" "$*"; return; fi
   case "$device" in
     hp) ssh "${SSH_OPTS[@]}" -o BatchMode=yes anvit@hp "$*" ;;
     ubuntu24) ssh "${SSH_OPTS[@]}" -o BatchMode=yes pujan@ubuntu24 "$*" ;;
@@ -126,6 +141,7 @@ on() {
 
 pb_on() { # pb_on DEVICE ARGS... (args are already quoted for the remote shell)
   local device=$1; shift
+  ct_of "$device" >/dev/null && { on "$device" "$PB_HP $*"; return; }
   case "$device" in
     hp) on hp "$PB_HP $*" ;;
     dadape) on dadape "$PB_HP $*" ;;
@@ -190,7 +206,7 @@ remote_echo_cmd() { # command that prints $2 on target $1
 
 test_exec() { # test_exec TARGET [ID-PREFIX]
   local t=$1 prefix=${2:-exec} marker="ex-$RUN_ID" t0 out status
-  t0=$(now); out=$(on hp "timeout 120 $PB_HP exec $t -- $(remote_echo_cmd "$t" "$marker"); echo rc=\$?" 2>&1); status=$?
+  t0=$(now); out=$(on "$CLIENT" "timeout 120 $PB_HP exec $t -- $(remote_echo_cmd "$t" "$marker"); echo rc=\$?" 2>&1); status=$?
   if command_ok "$status" "$out" && marker_present "$out" "$marker"; then record "$prefix:$t" PASS $(( $(now)-t0 ))
   else record_command_failure "$prefix:$t" $(( $(now)-t0 )) "$out"; fi
 }
@@ -205,28 +221,28 @@ device_job() { # device_job DEVICE TAG (job body on stdin)
 start_long_exec() { # start_long_exec TARGET TAG SECONDS
   local t=$1 tag=$2 secs=$3
   if [ "$t" = victus ]; then
-    printf '%s\n' "timeout $((secs+300)) $PB_HP exec $t -- powershell -NoProfile -Command \"Start-Sleep $secs; 'FINAL'\"" | device_job hp "$tag"
+    printf '%s\n' "timeout $((secs+300)) $PB_HP exec $t -- powershell -NoProfile -Command \"Start-Sleep $secs; 'FINAL'\"" | device_job "$CLIENT" "$tag"
   else
-    printf '%s\n' "timeout $((secs+300)) $PB_HP exec $t -- sh -c 'sleep $secs; echo FINAL'" | device_job hp "$tag"
+    printf '%s\n' "timeout $((secs+300)) $PB_HP exec $t -- sh -c 'sleep $secs; echo FINAL'" | device_job "$CLIENT" "$tag"
   fi
 }
 start_long_ssh() {
   local t=$1 tag=$2 secs=$3
   if [ "$t" = victus ]; then
-    printf '%s\n' "timeout $((secs+300)) $PB_HP ssh $t -- powershell -NoProfile -Command \"Start-Sleep $secs; 'SSHFINAL'\" < /dev/null" | device_job hp "$tag"
+    printf '%s\n' "timeout $((secs+300)) $PB_HP ssh $t -- powershell -NoProfile -Command \"Start-Sleep $secs; 'SSHFINAL'\" < /dev/null" | device_job "$CLIENT" "$tag"
   else
-    printf '%s\n' "timeout $((secs+300)) $PB_HP ssh $t -- \"sleep $secs; echo SSHFINAL\" < /dev/null" | device_job hp "$tag"
+    printf '%s\n' "timeout $((secs+300)) $PB_HP ssh $t -- \"sleep $secs; echo SSHFINAL\" < /dev/null" | device_job "$CLIENT" "$tag"
   fi
 }
 collect() { # collect ID TAG EXPECT-MARKER : waits for the background job
   local id=$1 tag=$2 want=$3 minimum=${4:-0} out status completed=0 deadline
   deadline=$(( $(now)+minimum+300 ))
   while [ "$(now)" -lt "$deadline" ]; do
-    if on hp "test -f /tmp/$RUN_ID/$tag.end"; then completed=1; break; fi
+    if on "$CLIENT" "test -f /tmp/$RUN_ID/$tag.end"; then completed=1; break; fi
     sleep 15
   done
   [ "$completed" = 1 ] || { record "$id" FAIL "$((minimum+300))" "job did not finish before deadline"; return; }
-  out=$(on hp "cat /tmp/$RUN_ID/$tag.out; echo; echo dur=\$(( \$(cat /tmp/$RUN_ID/$tag.end 2>/dev/null || date +%s) - \$(cat /tmp/$RUN_ID/$tag.start) ))" 2>&1)
+  out=$(on "$CLIENT" "cat /tmp/$RUN_ID/$tag.out; echo; echo dur=\$(( \$(cat /tmp/$RUN_ID/$tag.end 2>/dev/null || date +%s) - \$(cat /tmp/$RUN_ID/$tag.start) ))" 2>&1)
   status=$?
   local dur; dur=$(grep -oE 'dur=[0-9]+' <<<"$out" | cut -d= -f2)
   if [ "$status" = 0 ] && marker_present "$out" "$want" && [ "$(grep -v '^dur=' <<<"$out" | sed '/^$/d' | tail -1)" = rc=0 ] && [[ "$dur" =~ ^[0-9]+$ ]] \
@@ -236,7 +252,7 @@ collect() { # collect ID TAG EXPECT-MARKER : waits for the background job
 
 test_ssh_short() {
   local t=$1 marker="ssh-$RUN_ID" t0 out status
-  t0=$(now); out=$(on hp "timeout 120 $PB_HP ssh $t -- $(remote_echo_cmd "$t" "$marker") < /dev/null; echo rc=\$?" 2>&1); status=$?
+  t0=$(now); out=$(on "$CLIENT" "timeout 120 $PB_HP ssh $t -- $(remote_echo_cmd "$t" "$marker") < /dev/null; echo rc=\$?" 2>&1); status=$?
   if command_ok "$status" "$out" && marker_present "$out" "$marker"; then record "ssh:$t" PASS $(( $(now)-t0 ))
   else record_command_failure "ssh:$t" $(( $(now)-t0 )) "$out"; fi
 }
@@ -305,11 +321,11 @@ DRIVER_UPLOADED=0
 cleanup_terminal() { # cleanup_terminal TARGET EXACT-NAME CHECK-ID
   local t=$1 name=$2 id=$3 t0 out status
   t0=$(now)
-  if ! on hp "mkdir -p /tmp/$RUN_ID && cat > /tmp/$RUN_ID/session_cleanup.py" < "$HERE/session_cleanup.py"; then
+  if ! on "$CLIENT" "mkdir -p /tmp/$RUN_ID && cat > /tmp/$RUN_ID/session_cleanup.py" < "$HERE/session_cleanup.py"; then
     record "$id:$t" FAIL 0 "could not upload exact session cleanup helper"
     return
   fi
-  out=$(on hp "python3 /tmp/$RUN_ID/session_cleanup.py $PB_HP $t $name" 2>&1); status=$?
+  out=$(on "$CLIENT" "python3 /tmp/$RUN_ID/session_cleanup.py $PB_HP $t $name" 2>&1); status=$?
   if [ "$status" = 0 ] && marker_present "$out" SESSION_CLEANUP_OK; then
     record "$id:$t" PASS $(( $(now)-t0 ))
   else
@@ -320,12 +336,12 @@ cleanup_terminal() { # cleanup_terminal TARGET EXACT-NAME CHECK-ID
 test_terminal() { # test_terminal TARGET [ID-PREFIX]
   local t=$1 prefix=${2:-terminal} t0 out status marker="tm$RUN_ID$RANDOM" line
   if [ $DRIVER_UPLOADED = 0 ]; then
-    printf '%s\n' "$TERM_DRIVER" | on hp "mkdir -p /tmp/$RUN_ID && cat > /tmp/$RUN_ID/term.py" && DRIVER_UPLOADED=1
+    printf '%s\n' "$TERM_DRIVER" | on "$CLIENT" "mkdir -p /tmp/$RUN_ID && cat > /tmp/$RUN_ID/term.py" && DRIVER_UPLOADED=1
   fi
   # POSIX shells and PowerShell both print MARKER-42 for these lines.
   if [ "$t" = victus ]; then line="echo $marker-\$(6*7)"; else line="echo $marker-\$((6*7))"; fi
   t0=$(now)
-  out=$(on hp "python3 /tmp/$RUN_ID/term.py $PB_HP $t smoke-$marker '$line' $marker-42" 2>&1); status=$?
+  out=$(on "$CLIENT" "python3 /tmp/$RUN_ID/term.py $PB_HP $t smoke-$marker '$line' $marker-42" 2>&1); status=$?
   if [ "$status" = 0 ] && marker_present "$out" TERMINAL_OK; then record "$prefix:$t" PASS $(( $(now)-t0 ))
   else record "$prefix:$t" FAIL $(( $(now)-t0 )) "terminal or transport failed; output withheld"; fi
   cleanup_terminal "$t" "smoke-$marker" "cleanup-$prefix"
@@ -335,13 +351,13 @@ test_transfer() {
   local t=$1
   local name="smoke-$RUN_ID-$t.bin" t0 src_sha out dst_sha status
   t0=$(now)
-  src_sha=$(on hp "mkdir -p /tmp/$RUN_ID && head -c 52428800 /dev/urandom > /tmp/$RUN_ID/$name && sha256sum /tmp/$RUN_ID/$name | cut -d' ' -f1")
-  out=$(on hp "timeout 900 $PB_HP send /tmp/$RUN_ID/$name --to $t; echo rc=\$?" 2>&1); status=$?
+  src_sha=$(on "$CLIENT" "mkdir -p /tmp/$RUN_ID && head -c 52428800 /dev/urandom > /tmp/$RUN_ID/$name && sha256sum /tmp/$RUN_ID/$name | cut -d' ' -f1")
+  out=$(on "$CLIENT" "timeout 900 $PB_HP send /tmp/$RUN_ID/$name --to $t; echo rc=\$?" 2>&1); status=$?
   if ! command_ok "$status" "$out"; then record_command_failure "transfer:$t" $(( $(now)-t0 )) "$out"; return; fi
   case "$t" in
     victus) dst_sha=$(on victus "\$f = Get-ChildItem -Path \$HOME -Recurse -Filter '$name' -ErrorAction SilentlyContinue -Depth 3 | Select-Object -First 1; if (\$f) { (Get-FileHash \$f.FullName -Algorithm SHA256).Hash.ToLower(); Remove-Item \$f.FullName }" | tr -d '\r') ;;
     apple) dst_sha=$(on apple "f=\$(find ~ -maxdepth 3 -name '$name' 2>/dev/null | head -1); [ -n \"\$f\" ] && shasum -a 256 \"\$f\" | cut -d' ' -f1 && rm -f \"\$f\"") ;;
-    hp|dadape) dst_sha=$(on "$t" "f=\$(find ~ -maxdepth 3 -name '$name' -not -path '/tmp/*' 2>/dev/null | grep -v '^/tmp' | head -1); [ -n \"\$f\" ] && sha256sum \"\$f\" | cut -d' ' -f1 && rm -f \"\$f\"") ;;
+    *) dst_sha=$(on "$t" "f=\$(find ~ -maxdepth 3 -name '$name' -not -path '/tmp/*' 2>/dev/null | grep -v '^/tmp' | head -1); [ -n \"\$f\" ] && sha256sum \"\$f\" | cut -d' ' -f1 && rm -f \"\$f\"") ;;
   esac
   if [ -n "$dst_sha" ] && [ "$dst_sha" = "$src_sha" ]; then record "transfer:$t" PASS $(( $(now)-t0 ))
   else record "transfer:$t" FAIL $(( $(now)-t0 )) "received sha '${dst_sha:-missing}' != source"; fi
@@ -380,7 +396,7 @@ start_update_terminal() {
   local t=$1
   local before="before-$RUN_ID-$t" after="after-$RUN_ID-$t" line next
   if [ "$DRIVER_UPLOADED" = 0 ]; then
-    printf '%s\n' "$TERM_DRIVER" | on hp "mkdir -p /tmp/$RUN_ID && cat > /tmp/$RUN_ID/term.py" || return 1
+    printf '%s\n' "$TERM_DRIVER" | on "$CLIENT" "mkdir -p /tmp/$RUN_ID && cat > /tmp/$RUN_ID/term.py" || return 1
     DRIVER_UPLOADED=1
   fi
   if [ "$t" = victus ]; then
@@ -390,10 +406,10 @@ start_update_terminal() {
     line="pb_smoke=\$\$; echo $before-\$((6*7))"
     next="[ \"\$pb_smoke\" = \"\$\$\" ] && echo $after-\$((6*7))"
   fi
-  printf '%s\n' "python3 /tmp/$RUN_ID/term.py $PB_HP $t smoke-update-$RUN_ID '$line' $before-42 /tmp/$RUN_ID/upd-term-$t.ready /tmp/$RUN_ID/upd-term-$t.resume '$next' $after-42" | device_job hp "upd-term-$t"
+  printf '%s\n' "python3 /tmp/$RUN_ID/term.py $PB_HP $t smoke-update-$RUN_ID '$line' $before-42 /tmp/$RUN_ID/upd-term-$t.ready /tmp/$RUN_ID/upd-term-$t.resume '$next' $after-42" | device_job "$CLIENT" "upd-term-$t"
   local deadline=$(( $(now) + 120 ))
   while [ "$(now)" -lt "$deadline" ]; do
-    on hp "test -f /tmp/$RUN_ID/upd-term-$t.ready" && return 0
+    on "$CLIENT" "test -f /tmp/$RUN_ID/upd-term-$t.ready" && return 0
     sleep 1
   done
   return 1
@@ -415,7 +431,7 @@ update_target() { # update TARGET with the build in UPDATE_DIR while work is liv
   # Verify shell identity before activation, then query that same PTY after it.
   if ! start_update_terminal "$t"; then
     record "during-update-terminal:$t" FAIL 120 "terminal did not become ready before update"
-    on hp "touch /tmp/$RUN_ID/upd-term-$t.resume" >/dev/null
+    on "$CLIENT" "touch /tmp/$RUN_ID/upd-term-$t.resume" >/dev/null
     collect "reap-update-terminal:$t" "upd-term-$t" TERMINAL_OK
     cleanup_terminal "$t" "smoke-update-$RUN_ID" cleanup-update-terminal
     return
@@ -431,7 +447,7 @@ update_target() { # update TARGET with the build in UPDATE_DIR while work is liv
   local ver; ver=$(pb_on "$t" --version 2>&1)
   if grep -q "$UPDATE_VERSION" <<<"$ver"; then record "update:$t" PASS $(( $(now)-t0 ))
   else record "update:$t" FAIL $(( $(now)-t0 )) "$(tr '\n' ' ' <<<"$out" | tail -c 200)"; fi
-  on hp "touch /tmp/$RUN_ID/upd-term-$t.resume" >/dev/null
+  on "$CLIENT" "touch /tmp/$RUN_ID/upd-term-$t.resume" >/dev/null
   collect "during-update-terminal:$t" "upd-term-$t" TERMINAL_OK
   cleanup_terminal "$t" "smoke-update-$RUN_ID" cleanup-update-terminal
   collect "during-update-ssh:$t" "upd-ssh-$t" SSHFINAL 240
@@ -581,8 +597,8 @@ test_terminal_features() {
         status-bar) script=status_bar_lifecycle.py ;;
         session-sharing-owner) script=session_sharing_lifecycle.py ;;
       esac
-      if [ "$kind" != session-sharing-owner ] && [[ ",$TARGETS," == *,hp,* && ",$TARGETS," == *,apple,* ]]; then
-        [ "$source" != hp ] && target=hp || target=apple
+      if [ "$kind" != session-sharing-owner ] && [[ ",$TARGETS," == *,$CLIENT,* && ",$TARGETS," == *,apple,* ]]; then
+        [ "$source" != "$CLIENT" ] && target=$CLIENT || target=apple
       fi
       t0=$(now)
       if ! stage_terminal_fixtures "$source"; then
@@ -610,9 +626,9 @@ test_terminal_replay() {
   local target out status t0 staged=1 id tag phase command controller_ok parent parent_status
   # The second enrolled device is apple when selected, else dadape (Linux pair).
   local controller=""
-  for target in apple dadape; do [[ ",$TARGETS," == *,$target,* ]] && controller=$target; done
-  [[ ",$TARGETS," == *,hp,* && -n "$controller" ]] || return 0
-  stage_terminal_fixtures hp || staged=0
+  for target in apple dadape "$PEER"; do [[ ",$TARGETS," == *,$target,* ]] && controller=$target; done
+  [[ ",$TARGETS," == *,$CLIENT,* && -n "$controller" ]] || return 0
+  stage_terminal_fixtures "$CLIENT" || staged=0
   stage_terminal_fixtures "$controller" || staged=0
   for target in "${TLIST[@]}"; do
     id="terminal-replay:$target"
@@ -622,8 +638,8 @@ test_terminal_replay() {
       continue
     fi
     t0=$(now); tag="terminal-replay-$target"; controller_ok=0
-    printf '%s\n' "python3 /tmp/$RUN_ID/session_lifecycle.py $target --check cross && echo TERMINAL_REPLAY_OK" | device_job hp "$tag"
-    phase=$(on hp "python3 /tmp/$RUN_ID/session_controller.py wait --job /tmp/$RUN_ID/$tag" 2>&1); status=$?
+    printf '%s\n' "python3 /tmp/$RUN_ID/session_lifecycle.py $target --check cross && echo TERMINAL_REPLAY_OK" | device_job "$CLIENT" "$tag"
+    phase=$(on "$CLIENT" "python3 /tmp/$RUN_ID/session_controller.py wait --job /tmp/$RUN_ID/$tag" 2>&1); status=$?
     out="$phase"
     if [ "$status" = 0 ]; then
       command=$(python3 "$HERE/session_controller.py" command --phase "$phase" --script "/tmp/$RUN_ID/session_lifecycle.py")
@@ -637,9 +653,9 @@ assert receipt["same_shell"] is True and receipt["replayed_output"] is True
         controller_ok=1
       fi
       command=$(python3 "$HERE/session_controller.py" signal --phase "$phase" --success "$controller_ok")
-      on hp "$command" >/dev/null 2>&1 || controller_ok=0
+      on "$CLIENT" "$command" >/dev/null 2>&1 || controller_ok=0
     fi
-    parent=$(on hp "python3 /tmp/$RUN_ID/session_controller.py finish --job /tmp/$RUN_ID/$tag" 2>&1); parent_status=$?
+    parent=$(on "$CLIENT" "python3 /tmp/$RUN_ID/session_controller.py finish --job /tmp/$RUN_ID/$tag" 2>&1); parent_status=$?
     if [ "$controller_ok" = 1 ] && command_ok "$parent_status" "$parent" && marker_present "$parent" TERMINAL_REPLAY_OK; then
       record "$id" PASS $(( $(now)-t0 ))
     else

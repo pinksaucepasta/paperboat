@@ -447,6 +447,29 @@ exit "$FAILED"
                 self.assertEqual(result.returncode, int(stop_exit != 0 or stop_id != "preview_owned" or stop_state != "stopped" or create_exit != 0), result.stdout + result.stderr)
                 self.assertIn('preview:hp', result.stdout)
 
+    def test_a_container_stands_in_for_a_device_name(self):
+        # SMOKE_CT_MAP sends a device's commands through ssh to `docker exec` in its container; devices
+        # that are not mapped keep their own transport.
+        prefix = (HERE / 'smoke.sh').read_text().split('# ---------------------------------------------------------------- run')[0]
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            ssh = root / 'ssh'
+            ssh.write_text('#!/bin/sh\nfor a in "$@"; do last=$a; done\nprintf \'%s\\n\' "$last" > "$SSH_LAST"\n')
+            ssh.chmod(0o700)
+            script = root / 'smoke.sh'
+            self.write_script(script, prefix + '\non box-a "echo \'hi there\'"\nct_of box-b || echo unmapped\n')
+            last = root / 'last'
+            result = subprocess.run(['bash', str(script), '--expect-version', 'test', '--targets', 'hp'],
+                                    env=dict(os.environ, PATH=str(root) + os.pathsep + os.environ['PATH'], SSH_LAST=str(last),
+                                             SMOKE_CT_MAP='box-a=dockerhost:ct-a,box-c=dockerhost:ct-c'),
+                                    capture_output=True, text=True, timeout=15)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            command = last.read_text()
+            self.assertIn('sudo docker exec -i -u pbt', command)
+            self.assertIn(' ct-a bash -lc ', command)
+            self.assertIn('hi\\ there', command)
+            self.assertIn('unmapped', result.stdout)
+
     def run_exec(self, exit_code, forged_receipt=False, transport_failure=False):
         # Exercise the smoke owner through a local shell transport; the command
         # really runs and returns the requested status, including a forged stdout receipt.
