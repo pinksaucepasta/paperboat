@@ -34,11 +34,11 @@ def refresh_forever():
 def parse(text):
     sections, current = [], None
     for line in text.splitlines():
-        if m := re.match(r"^## ((?:F|S)\d+)\. (.+)", line):
+        if m := re.match(r"^## ((?:F|S)\d+|X)\. (.+)", line):
             current = {"id": m[1], "name": m[2], "feature": [], "command": []}
             sections.append(current)
             continue
-        m = re.match(r"^\|\s*((F|S)\d+-\d+|C\d+)\s*\|", line)
+        m = re.match(r"^\|\s*((F|S|X)\d*-\d+|C\d+)\s*\|", line)
         if not (m and current):
             continue
         cells = [c.strip() for c in line.strip().strip("|").split("|")]
@@ -46,7 +46,7 @@ def parse(text):
         marks = cells[start:start + 3]
         if len(marks) != 3 or any(mark not in MARKS for mark in marks):
             continue
-        row = {"id": cells[0], "text": cells[1] if cells[0].startswith(("F", "S")) else f"{cells[1]} — {cells[2]}",
+        row = {"id": cells[0], "text": cells[1] if cells[0].startswith(("F", "S", "X")) else f"{cells[1]} — {cells[2]}",
                "platforms": marks[:3], "evidence": cells[-1]}
         current["command" if cells[0].startswith("C") else "feature"].append(row)
     return sections
@@ -76,6 +76,14 @@ def render(sections):
             lines.append(f'<div class="row"><span>{label}</span><b>{d}/{t}</b>'
                          f'<em>{100*d//max(t,1)}%</em></div>{bar(d, t, b)}')
         cards.append(f'<div class="card"><h2>{name}</h2>{"".join(lines)}</div>')
+    cross = [r for s in sections if s["id"] == "X" for r in s["feature"]]
+    if cross:
+        lines = []
+        for index, pair in ((0, "Linux ↔ macOS"), (1, "Linux ↔ Windows"), (2, "macOS ↔ Windows")):
+            d, b, t = count(cross, index)
+            lines.append(f'<div class="row"><span>{pair}</span><b>{d}/{t}</b>'
+                         f'<em>{100*d//max(t,1)}%</em></div>{bar(d, t, b)}')
+        cards.append(f'<div class="card"><h2>Cross-platform</h2>{"".join(lines)}</div>')
     return PAGE.format(content="".join(cards), stamp=time.strftime("%H:%M %Z"))
 
 
