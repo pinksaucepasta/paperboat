@@ -160,6 +160,15 @@ func configApproveRevision(c *command.Context) error {
 	return nil
 }
 
+// requireGitHubTeamDefault explains the server's rule (a team default needs the provider's repository
+// identity, which only GitHub repositories have) instead of letting it surface as "state changed".
+func requireGitHubTeamDefault(repository api.ConfigRepository) error {
+	if repository.Provider == "github" {
+		return nil
+	}
+	return configSyncRefusal("A team default must be a GitHub repository, because each member adopts it with their own GitHub access. Custom Git repositories can be assigned to machines, not set as a team default.")
+}
+
 func configTeamDefaultSet(c *command.Context) error {
 	client, err := backendClient(c)
 	if err != nil {
@@ -171,6 +180,9 @@ func configTeamDefaultSet(c *command.Context) error {
 	}
 	repository, err := resolveConfigRepository(repositories, c.Args().Get(1))
 	if err != nil {
+		return err
+	}
+	if err := requireGitHubTeamDefault(repository); err != nil {
 		return err
 	}
 	version := int64(0)
