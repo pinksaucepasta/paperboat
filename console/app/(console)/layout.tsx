@@ -1,5 +1,6 @@
 import { Suspense } from "react"
 import { ActiveNavigation, AppSidebar, Navigation } from "@/components/app-sidebar"
+import { QuotaBanner } from "@/components/quota-banner"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 
 export default function ConsoleLayout({ children }: LayoutProps<"/">) {
@@ -13,7 +14,10 @@ export default function ConsoleLayout({ children }: LayoutProps<"/">) {
           </Suspense>
         }
       />
-      <SidebarInset className="min-w-0">{children}</SidebarInset>
+      <SidebarInset className="min-w-0">
+        <QuotaBanner />
+        {children}
+      </SidebarInset>
     </SidebarProvider>
   )
 }

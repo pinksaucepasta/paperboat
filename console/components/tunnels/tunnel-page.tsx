@@ -174,6 +174,16 @@ function HealthNotice({ tunnel }: { tunnel: Tunnel }) {
       <div className="flex min-w-0 flex-col gap-0.5">
         <p className="font-medium">{health.data.summary}</p>
         {health.data.repair_action && <p className="text-muted-foreground">{health.data.repair_action}</p>}
+        {health.data.overall_code === "bandwidth_exhausted" && (
+          <p className="flex gap-3 pt-1">
+            <Link href="/billing" className="font-medium underline-offset-4 hover:underline">
+              Add bandwidth
+            </Link>
+            <Link href="/billing" className="font-medium underline-offset-4 hover:underline">
+              Change plan
+            </Link>
+          </p>
+        )}
       </div>
     </div>
   )

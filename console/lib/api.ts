@@ -64,6 +64,8 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
 
 /** Errors the console words itself, because it knows what the person can do next. */
 const sentences: Record<string, string> = {
+  bandwidth_quota_exhausted:
+    "This workspace's hosted bandwidth is used up. Direct machine-to-machine access still works. Add bandwidth or change plan under Billing, or wait for the next allowance period.",
   team_private_access_off:
     "The team has not allowed private access to its shared machines. Ask a team owner or admin to turn it on.",
 }

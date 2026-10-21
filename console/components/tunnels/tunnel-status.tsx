@@ -16,6 +16,8 @@ export function tunnelState(tunnel: Tunnel): { healthy: boolean; label: string }
       return { healthy: false, label: "Connecting" }
     case "route_unavailable":
       return { healthy: false, label: "Can’t reach the service" }
+    case "bandwidth_exhausted":
+      return { healthy: false, label: "Bandwidth used up" }
     case "custom_domain_required":
       return { healthy: false, label: "Needs a domain" }
     case "expired":
