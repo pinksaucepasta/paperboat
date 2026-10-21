@@ -133,6 +133,8 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 					return hostinstall.ErrLegacyCarrierRunning
 				case InsufficientSpaceExitCode:
 					return hostinstall.ErrInsufficientSpace
+				case UpdateNotReadyExitCode:
+					return hostinstall.ErrUpdateNotReady
 				}
 			}
 			return runtimeFailure("installing the supplied Paperboat executable failed; approve administrator access when prompted, then rerun `pb install`", err, runtimeContextFailure(callCtx))
@@ -152,6 +154,11 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 			linkErr = link.Rollback()
 		}
 		binaryErr := invoke(recovery, "rollback-supplied")
+		if binaryErr != nil {
+			// The installation was already committed (a bound update commits inside install-supplied), so
+			// there is no journal to undo it with: say what state the machine is in instead.
+			binaryErr = runtimeFailure("the update is installed but its background service did not start; run pb doctor to see why, then try the update again or reinstall the previous version", binaryErr)
+		}
 		var serviceErr error
 		if restoreService != nil {
 			serviceErr = restoreService(recovery)

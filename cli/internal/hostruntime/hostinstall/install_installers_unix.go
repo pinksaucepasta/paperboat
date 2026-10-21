@@ -3,6 +3,7 @@
 package hostinstall
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -137,6 +138,20 @@ func newLifecycleManagerWithRestorePolicy(request Request, paths installPaths, h
 		// authenticated hostd/update control transaction are the readiness
 		// boundary; do not invent a second loopback endpoint.
 		UpdaterProbe: nil,
+		// hostd, the worker role, the updater and the privileged host service run the worker slot; the
+		// carrier runs a pinned executable and must keep its connections.
+		RunsReplacedImage: func(status service.NativeComponentStatus) bool {
+			return bytes.Contains(status.Definition, []byte(paths.worker))
+		},
+		// The baseline names the executable that was installed; the slot holding anything else means the
+		// replacement reached the executable and roles may be running the candidate's image.
+		ImageSwapped: func(captured []byte) bool {
+			var baseline unixCarrierBaseline
+			if decodeInstallJSON(bytes.NewReader(captured), &baseline, 256<<10) != nil || baseline.Worker == nil {
+				return false
+			}
+			return baseline.Worker.Verify(paths.worker) != nil
+		},
 	})
 }
 

@@ -236,6 +236,12 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 		if err := writeJournal(paths.journal, journal); err != nil {
 			return err
 		}
+		if intent == unixSuppliedInstall && hooks.Validate != nil {
+			// Nothing is committed yet, so failing here restores the previous installation.
+			if err := hooks.Validate(ctx); err != nil {
+				return hostInstallFailure("the new version did not become ready; restoring the previous version", ErrUpdateNotReady, err)
+			}
+		}
 		return commitPreparedInstallationLocked(ctx, request, paths, true)
 	})
 	if resultErr == nil && intent == unixSuppliedInstall {

@@ -155,3 +155,17 @@ func TestUpdateFromRefusesWhileSSHConnectionsAreOpen(t *testing.T) {
 		t.Fatalf("an idle daemon or one that cannot answer blocked the install: installs=%d", installs)
 	}
 }
+
+// F14-03: an update whose new version's daemon cannot start is rolled back and says so plainly.
+func TestUpdateWhoseDaemonCannotStartIsReportedAsRolledBack(t *testing.T) {
+	err := fmt.Errorf("install: %w", hostinstall.ErrUpdateNotReady)
+	failure := classifyCommandFailure(err)
+	message := commandFailureMessage(err, failure)
+	if failure.kind != commandRejected || !strings.Contains(message, "previous version was restored") || !strings.Contains(message, "nothing was changed") || strings.Contains(message, "administrator") {
+		t.Fatalf("kind=%v message=%q", failure.kind, message)
+	}
+	result := classifyCLIJSONError(err)
+	if result.Code != "update_rolled_back" || result.StateChanged != false || !result.Retryable {
+		t.Fatalf("json = %+v", result)
+	}
+}

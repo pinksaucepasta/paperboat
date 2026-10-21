@@ -18,6 +18,10 @@ var ErrLegacyCarrierRunning = errors.New("This first update requires the existin
 // file being staged. Staging removes its partial file, so nothing was changed.
 var ErrInsufficientSpace = errors.New("there is not enough free disk space to stage the installation")
 
+// ErrUpdateNotReady is an installation whose new version did not come up healthy before it was
+// committed; the previous version was restored.
+var ErrUpdateNotReady = errors.New("the new version did not become ready, so the previous version was restored")
+
 // diskFull reports a write that failed because the disk or the user's quota is full.
 func diskFull(err error) bool {
 	return errors.Is(err, syscall.ENOSPC) || errors.Is(err, syscall.EDQUOT)

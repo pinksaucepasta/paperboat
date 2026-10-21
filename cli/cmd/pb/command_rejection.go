@@ -43,6 +43,7 @@ const (
 	commandRejectDaemonAccount
 	commandRejectInspector
 	commandRejectInsufficientSpace
+	commandRejectUpdateNotReady
 )
 
 // commandRejection describes a command-owned refusal. Its
@@ -54,7 +55,7 @@ type commandRejection struct {
 }
 
 func (e commandRejection) valid() bool {
-	return e.reason >= commandRejectDefaultSessionRename && e.reason <= commandRejectInsufficientSpace
+	return e.reason >= commandRejectDefaultSessionRename && e.reason <= commandRejectUpdateNotReady
 }
 func (e commandRejection) Error() string {
 	switch e.reason {
@@ -114,6 +115,8 @@ func (e commandRejection) Error() string {
 		return hostinstall.ErrLegacyCarrierRunning.Error()
 	case commandRejectUpdateVerification:
 		return "The official update could not be verified; the installed version is unchanged. Download a fresh official update bundle and retry. Force cannot bypass verification."
+	case commandRejectUpdateNotReady:
+		return "The new version's background service did not start, so the previous version was restored and nothing was changed. Run `pb doctor` to see why the service cannot start, then try the update again."
 	case commandRejectInsufficientSpace:
 		return "There is not enough free disk space to stage the update. Free space on the disk that holds the Paperboat installation (often /usr/local or the system disk), then run the command again. Nothing was changed."
 	case commandRejectActivationPending:

@@ -78,6 +78,15 @@ type LifecycleConfig struct {
 	Components         []TransactionalComponent
 	Now                func() time.Time
 	RollbackTimeout    time.Duration
+	// RunsReplacedImage reports whether a component's definition runs the executable that a
+	// replacement swaps. After a failed replacement restores the previous executable, such a component
+	// is restarted even when its definition and state look unchanged: its process may still be the
+	// candidate's image. Components that run a pinned executable (the carrier) are left alone.
+	RunsReplacedImage func(NativeComponentStatus) bool
+	// ImageSwapped reports, from the captured pre-replacement installation, whether the executable was
+	// actually replaced when a rollback begins. A replacement that failed before touching the executable
+	// restarts nothing.
+	ImageSwapped func(captured []byte) bool
 }
 
 type LifecycleManager struct {
@@ -88,6 +97,8 @@ type LifecycleManager struct {
 	components         []TransactionalComponent
 	now                func() time.Time
 	rollbackTimeout    time.Duration
+	runsReplacedImage  func(NativeComponentStatus) bool
+	imageSwapped       func([]byte) bool
 }
 
 type lifecycleOperation string
@@ -145,6 +156,8 @@ func NewLifecycleManager(config LifecycleConfig) (*LifecycleManager, error) {
 		components:         components,
 		now:                now,
 		rollbackTimeout:    rollbackTimeout,
+		runsReplacedImage:  config.RunsReplacedImage,
+		imageSwapped:       config.ImageSwapped,
 	}, nil
 }
 
@@ -443,6 +456,8 @@ func validLifecycleOperation(operation lifecycleOperation) bool {
 }
 
 func (m *LifecycleManager) rollback(ctx context.Context, journal lifecycleJournal) error {
+	// Decided before the installation is restored: afterwards the executable looks unchanged.
+	swapped := journal.Operation == lifecycleReplace && m.runsReplacedImage != nil && m.imageSwapped != nil && m.imageSwapped(journal.NativeInstallation)
 	if journal.Operation == lifecycleReplace {
 		if m.nativeInstallation == nil {
 			return ErrLifecycleInvalid
@@ -471,9 +486,19 @@ func (m *LifecycleManager) rollback(ctx context.Context, journal lifecycleJourna
 		}
 		before := journal.Before[index]
 		before.Definition = append([]byte(nil), before.Definition...)
+		// A role that runs the replaced executable may still be running the candidate's image even when
+		// its unit and state look unchanged (or were changed and then restored without a restart):
+		// stop it so the restore below starts it on the restored executable.
+		restart := swapped && before.Running && m.runsReplacedImage(before)
 		current, inspectErr := component.Inspect(ctx)
-		if inspectErr == nil && sameComponentStatus(current, before) {
+		if !restart && inspectErr == nil && sameComponentStatus(current, before) {
 			continue
+		}
+		if restart {
+			if err := component.Stop(ctx); err != nil {
+				joined = errors.Join(joined, fmt.Errorf("restart %s on the restored executable: %w", component.ID(), err))
+				continue
+			}
 		}
 		if err := component.Restore(ctx, before); err != nil {
 			joined = errors.Join(joined, fmt.Errorf("restore %s: %w", component.ID(), err))

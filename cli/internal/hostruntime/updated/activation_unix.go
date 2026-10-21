@@ -1013,3 +1013,10 @@ func resolveUnixActivationRelease(ctx context.Context, handoff *unixActivationHa
 	}
 	return release, nil
 }
+
+// ParticipantReady reports whether the enrolled user's daemon (and the updater) came back usable on
+// version, given how it was before the change. A daemon that was already unhealthy for a local reason
+// only has to run the right version; see unixParticipantReady.
+func ParticipantReady(probe UnixParticipantProbe, version string, baseline UnixParticipantProbe, requireInventory bool) error {
+	return unixParticipantReady(probe, version, baseline, requireInventory)
+}

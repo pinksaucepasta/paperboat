@@ -236,6 +236,10 @@ func classifyCLIJSONFailure(err error, failure commandFailure) cliJSONError {
 				result.Code, result.StateChanged, result.Retryable = "update_verification_failed", false, false
 				result.Recovery = "Download a fresh official update bundle and retry. Force cannot bypass verification."
 			}
+			if typed.reason == commandRejectUpdateNotReady {
+				result.Code, result.StateChanged, result.Retryable = "update_rolled_back", false, true
+				result.Recovery = "Run `pb doctor` to see why the background service cannot start, then try the update again."
+			}
 			if typed.reason == commandRejectInsufficientSpace {
 				result.Code, result.StateChanged, result.Retryable = "insufficient_disk_space", false, false
 				result.Recovery = "Free disk space on the disk that holds the Paperboat installation, then retry."

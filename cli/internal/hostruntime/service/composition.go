@@ -38,6 +38,9 @@ type HostLifecycleConfig struct {
 	HostProbe          func(context.Context) error
 	HostdProbe         func(context.Context) error
 	UpdaterProbe       func(context.Context) error
+	// RunsReplacedImage identifies roles that execute the replaced worker executable; see LifecycleConfig.
+	RunsReplacedImage func(NativeComponentStatus) bool
+	ImageSwapped      func(captured []byte) bool
 }
 
 // NewHostLifecycleManager constructs the durable hostd+updater transaction.
@@ -101,7 +104,7 @@ func NewHostLifecycleManager(config HostLifecycleConfig) (*LifecycleManager, err
 		copy(components[offset+1:], components[offset:])
 		components[offset] = carrier
 	}
-	return NewLifecycleManager(LifecycleConfig{StateRoot: config.StateRoot, Components: components, NativeInstallation: config.NativeInstallation})
+	return NewLifecycleManager(LifecycleConfig{StateRoot: config.StateRoot, Components: components, NativeInstallation: config.NativeInstallation, RunsReplacedImage: config.RunsReplacedImage, ImageSwapped: config.ImageSwapped})
 }
 
 // NativeComponent exposes an installer through the transactional native

@@ -20,7 +20,10 @@ import (
 // SuppliedBinary uses the same fixed paths, binary journal and enrolled service
 // transaction as enrollment. An unbound installation starts only the user daemon;
 // account-dependent roles are installed when enrollment supplies their identity.
-func SuppliedBinary(ctx context.Context, input Request, operation string) (resultErr error) {
+// SuppliedBinary runs one step of installing a supplied executable. validate, when given, proves the
+// new version's non-privileged parts (the user's daemon) healthy after the roles were replaced and before
+// anything is committed; a failure restores the previous installation.
+func SuppliedBinary(ctx context.Context, input Request, operation string, validate func(context.Context) error) (resultErr error) {
 	if os.Geteuid() != 0 {
 		return ErrNotPrivileged
 	}
@@ -152,7 +155,7 @@ func SuppliedBinary(ctx context.Context, input Request, operation string) (resul
 	switch operation {
 	case "install-supplied":
 		if bound {
-			return installWithMaintenance(ctx, request, true, &input.Force)
+			return installWithIntent(ctx, request, true, unixSuppliedInstall, &input.Force, PreparedUpdateHooks{Validate: validate})
 		}
 
 		if err = installMachineGuard(ctx, request); err != nil {

@@ -198,6 +198,10 @@ func classifyCommandFailure(err error) (failure commandFailure) {
 			set(commandRejected, commandRejection{reason: commandRejectInsufficientSpace})
 			continue
 		}
+		if current == hostinstall.ErrUpdateNotReady {
+			set(commandRejected, commandRejection{reason: commandRejectUpdateNotReady})
+			continue
+		}
 		switch owner := current.(type) {
 		case accessTunnelCauseError:
 			switch owner.classification {
@@ -453,6 +457,9 @@ func soleCommandOwner(err error) error {
 		}
 		if errors.Is(err, hostinstall.ErrInsufficientSpace) {
 			return commandRejection{reason: commandRejectInsufficientSpace}
+		}
+		if errors.Is(err, hostinstall.ErrUpdateNotReady) {
+			return commandRejection{reason: commandRejectUpdateNotReady}
 		}
 		switch err.(type) {
 		case *sessionauth.CredentialFailure, *filetransfer.LimitError, updateOpenConnectionsRefusal, destinationStorageFullError, commandRejection, *envCommandFailure, *envHostRefreshFailure, *configComparisonFailure, updateCompletionFailure, setupFailureError, commandPreparationFailure, *api.APIError, *localapi.RemoteError, *TunnelCreateExistingError, *TunnelCreateChangedError, *TunnelOperationOutcomeError, *TunnelOperationWaitTimeoutError, uninstallCleanupError, preferenceLoadFailure, usageError, unsupportedJSONOutputError, managedssh.NativeExitError, managedssh.NativeLaunchError, exitCodeError, jsonFailureExitCodeError:
