@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,6 +20,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/endpointbinary"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	helperconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/controlbackoff"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
 	previewruntime "github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
@@ -291,8 +293,11 @@ func localDaemonCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			source.HTTPClient = &http.Client{Transport: peerHTTPTransport}
-			peerTunnel, err := tunnel.NewPeerTerminalTunnel(tunnel.PeerTerminalConfig{Issuer: cfg.ServerURL, Store: store, Auth: authSource, TLS: transportConfig.TLSConfig, HTTPClient: &http.Client{Transport: peerHTTPTransport}, OutputQueueChunks: cfg.Connect.TerminalOutputQueueChunks})
+			// Every control-plane call shares one backoff, so a computer the account no longer accepts asks
+			// about it rarely instead of once per loop iteration.
+			controlTransport := &controlbackoff.Transport{Base: peerHTTPTransport, Host: controlHost(cfg.ServerURL)}
+			source.HTTPClient = &http.Client{Transport: controlTransport}
+			peerTunnel, err := tunnel.NewPeerTerminalTunnel(tunnel.PeerTerminalConfig{Issuer: cfg.ServerURL, Store: store, Auth: authSource, TLS: transportConfig.TLSConfig, HTTPClient: &http.Client{Transport: controlTransport}, OutputQueueChunks: cfg.Connect.TerminalOutputQueueChunks})
 			if err != nil {
 				return err
 			}
@@ -313,7 +318,7 @@ func localDaemonCommand() *cobra.Command {
 					if credentialErr != nil {
 						return credentialErr
 					}
-					client := api.New(cfg.ServerURL, credential, &http.Client{Transport: peerHTTPTransport})
+					client := api.New(cfg.ServerURL, credential, &http.Client{Transport: controlTransport})
 					if !approved {
 						// Revoking an enrollment is a server-side, account-wide action. It lives only
 						// in `pb machine revoke`, which asks for a confirmation code.
@@ -322,7 +327,7 @@ func localDaemonCommand() *cobra.Command {
 					return localdaemon.ApproveOwnedMachineEnrollment(ctx, store, profile, client, machineID)
 				}
 			}
-			issuer := dynamicNativePrivateGrantIssuer{serverURL: cfg.ServerURL, auth: authSource, client: &http.Client{Transport: peerHTTPTransport}}
+			issuer := dynamicNativePrivateGrantIssuer{serverURL: cfg.ServerURL, auth: authSource, client: &http.Client{Transport: controlTransport}}
 			access, accessErr := previewruntime.NewNativePrivateTCPAccess(previewruntime.NativePrivateTCPAccessConfig{Grants: issuer, DialSession: peerTunnel.DialPrivateSession})
 			if accessErr != nil {
 				return accessErr
@@ -354,9 +359,9 @@ func localDaemonCommand() *cobra.Command {
 			}
 			return runWithSyncFailure(command.Context(), coordinator.Errors(), func(ctx context.Context) error {
 				if cfg.ControlSyncAddress == "" {
-					go refreshMachineServices(ctx, coordinator, cfg.ServerURL, authSource, peerHTTPTransport)
+					go refreshMachineServices(ctx, coordinator, cfg.ServerURL, authSource, controlTransport)
 				}
-				go newRelayLatencyReporter(cfg.ServerURL, source.SourceMachineID, peerHTTPTransport, func(ctx context.Context) (config.Credential, error) {
+				go newRelayLatencyReporter(cfg.ServerURL, source.SourceMachineID, controlTransport, func(ctx context.Context) (config.Credential, error) {
 					return authSource.WithContext(ctx).Credential()
 				}, peerTunnel.NativeRelayCandidates).Run(ctx)
 				// The server tells the daemon when the machine list changed, so inventory refreshes at
@@ -368,7 +373,7 @@ func localDaemonCommand() *cobra.Command {
 						if credentialErr != nil {
 							return nil, credentialErr
 						}
-						return api.New(cfg.ServerURL, credential, &http.Client{Transport: peerHTTPTransport}).WaitMachineEvents(waitCtx, source.SourceMachineID, known)
+						return api.New(cfg.ServerURL, credential, &http.Client{Transport: controlTransport}).WaitMachineEvents(waitCtx, source.SourceMachineID, known)
 					}), 0)
 					if eventsErr != nil {
 						return eventsErr
@@ -404,10 +409,10 @@ func localDaemonCommand() *cobra.Command {
 							return fmt.Errorf("refresh local machine access credentials: %w", err)
 						}
 						scoped := func(workspace string) (*api.Client, error) {
-							client := api.New(cfg.ServerURL, credential, &http.Client{Transport: peerHTTPTransport})
+							client := api.New(cfg.ServerURL, credential, &http.Client{Transport: controlTransport})
 							return client, client.SetWorkspace(workspace)
 						}
-						services, err := api.New(cfg.ServerURL, credential, &http.Client{Transport: peerHTTPTransport}).MachineServices(ctx)
+						services, err := api.New(cfg.ServerURL, credential, &http.Client{Transport: controlTransport}).MachineServices(ctx)
 						if err != nil {
 							return fmt.Errorf("refresh authorized local browser services: %w", err)
 						}
@@ -572,4 +577,13 @@ func carrierRuntimeCommand() *cobra.Command {
 		}
 		return nil
 	}, SilenceUsage: true, SilenceErrors: true}
+}
+
+// controlHost is the control plane's host, with its port, as it appears in request URLs.
+func controlHost(serverURL string) string {
+	parsed, err := url.Parse(serverURL)
+	if err != nil {
+		return ""
+	}
+	return parsed.Host
 }

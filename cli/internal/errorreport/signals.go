@@ -306,7 +306,12 @@ func (t ownedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		observed.observed.Store(true)
 	}
 	if err != nil {
-		r.ObserveFailure(ctx, component, t.operation, "control_request", "control_request_failed", err)
+		// A refusal made locally and already explained (a revoked identity waiting out its backoff)
+		// is not a failed control request: counting each held-back retry is the noise it prevents.
+		var quiet interface{ QuietFailure() bool }
+		if !errors.As(err, &quiet) || !quiet.QuietFailure() {
+			r.ObserveFailure(ctx, component, t.operation, "control_request", "control_request_failed", err)
+		}
 		err = RecordedHTTPFailure(err)
 	} else if response.StatusCode >= 400 {
 		r.ObserveFailure(ctx, component, t.operation, "control_request", "control_request_failed", responseFault(response.StatusCode))

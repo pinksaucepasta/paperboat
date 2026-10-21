@@ -16,6 +16,7 @@ import (
 	clientconfig "github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
 	runtimeconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/controlbackoff"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/enrollment"
 	runtimeidentity "github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 	peeridentityenrollment "github.com/pinksaucepasta/paperboat/internal/hostruntime/peeridentity"
@@ -51,6 +52,7 @@ func NewProductionCarrier(ctx context.Context, version string, environ func(stri
 	if err != nil {
 		return nil, err
 	}
+	transport = &controlbackoff.Transport{Base: transport, Host: controlURL.Host}
 	identity, err := enrollment.LoadRuntimeIdentityForRenewal(config.StateRoot, time.Now().UTC())
 	if err != nil || identity.MachineID != environ("PAPERBOAT_MACHINE_ID") {
 		return nil, errors.Join(ErrProductionInvalid, err)

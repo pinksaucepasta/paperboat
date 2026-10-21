@@ -33,6 +33,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/availability"
 	runtimeconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/controlbackoff"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/enrollment"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/envinject"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/environmentkey"
@@ -120,6 +121,9 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	if err != nil {
 		return nil, err
 	}
+	// Every control-plane loop shares this transport, so a computer removed from the account asks the
+	// control plane about its identity rarely instead of once per loop iteration.
+	transport = &controlbackoff.Transport{Base: transport, Host: controlURL.Host}
 	operationID := func() (string, error) {
 		id, err := uuid.NewRandom()
 		if err != nil {
