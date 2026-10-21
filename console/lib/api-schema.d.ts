@@ -10551,10 +10551,10 @@ export interface components {
             /** @description Repository-relative glob selectors: *, ?, [], **. Exclusions win. */
             exclude: string[];
             /**
-             * @description Explicit projection ownership priority: machine > matching OS > shared; independent of array order.
+             * @description Explicit projection ownership priority: machine file > the shared file's [machine.<name>] section > matching OS > shared; independent of array order.
              * @enum {string}
              */
-            source: "shared" | "os" | "machine";
+            source: "shared" | "os" | "machine_section" | "machine";
         };
         ConfigRepositoryBinding: {
             repository_id: string;

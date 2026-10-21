@@ -108,3 +108,19 @@ func TestConfigRuleSourcePriorityProjectionValidation(t *testing.T) {
 		t.Fatal("missing source silently inferred")
 	}
 }
+
+func TestConfigMachineRuleSources(t *testing.T) {
+	rule := ConfigPathRule{ID: "editor", RepositoryPath: "editor", LocalPath: "~/editor", Kind: "directory"}
+	for _, source := range []string{"shared", "os", "machine_section", "machine"} {
+		rule.Source = source
+		if err := ValidateConfigMachineRules([]ConfigPathRule{rule}, nil, "repo", ""); err != nil {
+			t.Errorf("source %q rejected: %v", source, err)
+		}
+	}
+	for _, source := range []string{"", "machine_file", "Machine", "section"} {
+		rule.Source = source
+		if ValidateConfigMachineRules([]ConfigPathRule{rule}, nil, "repo", "") == nil {
+			t.Errorf("source %q accepted", source)
+		}
+	}
+}

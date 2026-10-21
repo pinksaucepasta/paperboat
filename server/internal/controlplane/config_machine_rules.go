@@ -119,13 +119,23 @@ func validSelector(s string) bool {
 	}
 	return true
 }
+// validConfigRuleSource lists where an effective rule came from, lowest priority
+// first: the shared file, its [os.<os>] section, its [machine.<name>] section and
+// the machine's own file.
+func validConfigRuleSource(source string) bool {
+	switch source {
+	case "shared", "os", "machine_section", "machine":
+		return true
+	}
+	return false
+}
 func ValidateConfigMachineRules(rules []ConfigPathRule, bindings []ConfigRepositoryBinding, pull, push string) error {
 	if len(rules) > 256 || len(bindings) > 2 {
 		return ErrAssignmentInvalid
 	}
 	ids := map[string]bool{}
 	for _, r := range rules {
-		if (r.Source != "shared" && r.Source != "os" && r.Source != "machine") || !safeCoordinateText(r.ID) || len(r.ID) > 128 || ids[r.ID] || !validRepositoryPath(r.RepositoryPath) || !validConfigDestination(r.LocalPath, r.Kind) || (r.Kind != "file" && r.Kind != "directory") || len(r.Include)+len(r.Exclude) > 64 {
+		if !validConfigRuleSource(r.Source) || !safeCoordinateText(r.ID) || len(r.ID) > 128 || ids[r.ID] || !validRepositoryPath(r.RepositoryPath) || !validConfigDestination(r.LocalPath, r.Kind) || (r.Kind != "file" && r.Kind != "directory") || len(r.Include)+len(r.Exclude) > 64 {
 			return ErrAssignmentInvalid
 		}
 		if r.RepositoryPath == "." && r.Kind != "directory" {

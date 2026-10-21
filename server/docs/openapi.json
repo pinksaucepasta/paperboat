@@ -13228,9 +13228,10 @@
             "enum": [
               "shared",
               "os",
+              "machine_section",
               "machine"
             ],
-            "description": "Explicit projection ownership priority: machine > matching OS > shared; independent of array order."
+            "description": "Explicit projection ownership priority: machine file > the shared file's [machine.<name>] section > matching OS > shared; independent of array order."
           }
         }
       },
