@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/autoupdate"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
@@ -40,6 +41,19 @@ func actionUpdateFrom(command *cobra.Command, input string, force bool) error {
 
 var installUpdateSourceForCommand = hostruntimecmd.InstallUpdateSource
 
+var openConnectionsFromDaemon = openConnectionsForUpdate
+
+// updateOpenConnectionsFromFile keeps an installation from a file from silently ending open SSH
+// connections and access forwards, as the signed updater does: replacing the daemon closes them.
+// A daemon that cannot answer never blocks the install (the updater must work when the app is broken).
+func updateOpenConnectionsFromFile(ctx context.Context) error {
+	open, err := openConnectionsFromDaemon(ctx)
+	if err != nil || open.Total() == 0 {
+		return nil
+	}
+	return updateOpenConnectionsRefusal{message: (&autoupdate.ActiveTerminalSessionsError{SSH: open.SSH, Forwards: open.Forwards}).Error()}
+}
+
 // updateCompletionFailure reports a step that failed after the update was installed.
 type updateCompletionFailure struct {
 	stage string
@@ -64,6 +78,11 @@ func installStagedUpdateSource(command *cobra.Command, ctx context.Context, stag
 		source, err = installsource.InspectCandidate(ctx, executable)
 		if err != nil {
 			return err
+		}
+	}
+	if !force {
+		if refusal := updateOpenConnectionsFromFile(ctx); refusal != nil {
+			return refusal
 		}
 	}
 	installed, err := installUpdateSourceForCommand(ctx, executable, source, bundle, force, "")

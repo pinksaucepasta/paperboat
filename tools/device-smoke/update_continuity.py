@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""F14-02/F14-04: an update keeps a held terminal and a running exec, then retires the old session owner.
+"""F14-02/F14-04: an update refuses while a `pb ssh` connection is open, keeps a held terminal and a running exec, then retires the old session owner.
 
 Usage: update_continuity.py TARGET CANDIDATE (sudo password on stdin). CANDIDATE is a different build.
 A shell is held open in a real PTY, an exec is running, `pb update --from CANDIDATE` runs, and
@@ -39,6 +39,42 @@ def wait(predicate, seconds, step):
     raise RuntimeError(step + ' did not happen within ' + str(seconds) + 's')
 
 
+def ssh_blocks_update(target, candidate, password):
+    """F14-02 (user decision): an update never silently ends an open `pb ssh` connection.
+
+    With a connection open, `pb update --from` refuses (busy, naming the connection) and changes nothing;
+    once it is closed the update is allowed again (the caller runs it next)."""
+    import re
+    import select
+    version = p.invoke(PB, '--version', raw=True)
+    ssh = subprocess.Popen([str(PB), 'ssh', target, '--', 'sh', '-c', 'echo PB_SSH_UP; sleep 600'],
+                           stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    try:
+        deadline = time.monotonic() + 90
+        up = ''
+        while 'PB_SSH_UP' not in up:
+            if time.monotonic() > deadline or ssh.poll() is not None:
+                raise RuntimeError('the held pb ssh connection did not come up')
+            if select.select([ssh.stdout], [], [], 1)[0]:
+                up += ssh.stdout.readline()
+        refused = p.command_result(PB, 'update', '--from', candidate, '--json', timeout=120,
+                                   terminal=True, password=password)
+        text = re.sub(r'\x1b\[[0-9;?]*[a-zA-Z]', '', refused.stdout)
+        if not refused.returncode or 'open SSH connection' not in text or 'update_busy' not in text or '"state_changed":false' not in text.replace(' ', ''):
+            raise RuntimeError('update with an open pb ssh connection was not refused as busy: rc=%s %s' % (refused.returncode, text[-400:]))
+        if p.invoke(PB, '--version', raw=True) != version:
+            raise RuntimeError('a refused update changed the installed version')
+        if ssh.poll() is not None:
+            raise RuntimeError('the refused update ended the pb ssh connection')
+    finally:
+        ssh.terminate()
+        try:
+            ssh.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            ssh.kill()
+            ssh.wait(timeout=5)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('target')
@@ -67,6 +103,7 @@ def main():
             exec_process = subprocess.Popen([str(PB), 'exec', args.target, '--', 'sh', '-c',
                                              'sleep %d; echo EXEC_FINISHED' % args.exec_seconds], stdout=subprocess.PIPE,
                                             stderr=subprocess.PIPE, text=True)
+        ssh_blocks_update(args.target, args.candidate, password)
         time.sleep(5)
         result = p.command_result(PB, 'update', '--from', args.candidate, '--json', timeout=420,
                                   terminal=True, password=password)
@@ -104,7 +141,7 @@ def main():
             pass
     print(json.dumps({'check': 'update-continuity', 'target': args.target, 'status': 'PASS',
                       'same_shell_after_update': True, 'exec_finished': True,
-                      'old_owner_retired': True}), flush=True)
+                      'old_owner_retired': True, 'busy_while_ssh_open': True}), flush=True)
 
 
 if __name__ == '__main__':

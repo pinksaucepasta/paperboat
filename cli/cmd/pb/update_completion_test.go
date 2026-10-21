@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
+	"github.com/pinksaucepasta/paperboat/internal/liveconnections"
 	"github.com/spf13/cobra"
 )
 
@@ -112,5 +114,44 @@ func TestUpdateOnAFullDiskNamesTheDiskAndNothingChanged(t *testing.T) {
 	result := classifyCLIJSONError(err)
 	if result.Code != "insufficient_disk_space" || result.StateChanged != false || result.Retryable || !strings.Contains(result.Recovery, "Free disk space") {
 		t.Fatalf("json = %+v", result)
+	}
+}
+
+// F14-02: `pb update --from` ends open SSH connections too, so it refuses unless forced, and installs
+// when none are open or the daemon cannot say.
+func TestUpdateFromRefusesWhileSSHConnectionsAreOpen(t *testing.T) {
+	previousInstall, previousOpen := installUpdateSourceForCommand, openConnectionsFromDaemon
+	t.Cleanup(func() { installUpdateSourceForCommand, openConnectionsFromDaemon = previousInstall, previousOpen })
+	installs := 0
+	installUpdateSourceForCommand = func(context.Context, string, installsource.Source, string, bool, string) (string, error) {
+		installs++
+		return "", errors.New("stop after the install was attempted")
+	}
+	bundle := filepath.Join(t.TempDir(), "release.pb-update")
+	if err := os.WriteFile(bundle, []byte("bundle"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	command := &cobra.Command{Use: "update"}
+	command.Flags().Bool("json", false, "")
+
+	openConnectionsFromDaemon = func(context.Context) (liveconnections.Counts, error) {
+		return liveconnections.Counts{SSH: 2}, nil
+	}
+	err := installStagedUpdateSource(command, t.Context(), bundle, false)
+	failure := classifyCommandFailure(err)
+	if installs != 0 || failure.kind != commandRejected || commandFailureMessage(err, failure) != "Paperboat is busy: 2 open SSH connections. Wait, close them, or use --force." {
+		t.Fatalf("installs=%d kind=%v message=%q", installs, failure.kind, commandFailureMessage(err, failure))
+	}
+	if err = installStagedUpdateSource(command, t.Context(), bundle, true); installs != 1 {
+		t.Fatalf("--force did not proceed: installs=%d err=%v", installs, err)
+	}
+	openConnectionsFromDaemon = func(context.Context) (liveconnections.Counts, error) { return liveconnections.Counts{}, nil }
+	_ = installStagedUpdateSource(command, t.Context(), bundle, false)
+	openConnectionsFromDaemon = func(context.Context) (liveconnections.Counts, error) {
+		return liveconnections.Counts{SSH: 5}, errors.New("daemon cannot answer")
+	}
+	_ = installStagedUpdateSource(command, t.Context(), bundle, false)
+	if installs != 3 {
+		t.Fatalf("an idle daemon or one that cannot answer blocked the install: installs=%d", installs)
 	}
 }
