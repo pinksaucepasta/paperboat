@@ -215,7 +215,7 @@ func (s *HTTPSProductionAssemblySource) resolveProductionAssembly(ctx context.Co
 			Report: s.report, InspectorPurge: s.inspectorPurge,
 		},
 		StableEndpointID: request.StableEndpointID,
-		Clock:            s.clock, Origins: s.origins, OriginStreamsForGeneration: originStreamsFor,
+		Clock:            s.clock, Origins: s.origins, OriginStreamsForGeneration: originStreamsFor, OriginHealth: s,
 		CarrierDescriptorSource: descriptors,
 		InitialConnector: &hoststate.Connector{
 			ID: request.ConnectorID, TunnelID: request.TunnelID, HostID: request.HostID,

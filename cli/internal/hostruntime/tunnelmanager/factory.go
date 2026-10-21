@@ -8,6 +8,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hoststate"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/originhealth"
 )
 
 // OriginProber performs a safe, non-mutating readiness probe for one route.
@@ -39,6 +40,8 @@ type RuntimeFactoryConfig struct {
 	// OriginStreamsForGeneration scopes ingress authority to the candidate lifetime.
 	OriginStreamsForGeneration func(ApplyRequest, connector.DataCarrierIdentity) *OriginStreamForwarder
 	MaximumOriginProbes        int
+	// OriginHealth, when set, receives the reachability of each active route's local app.
+	OriginHealth OriginHealthReporter
 }
 
 // RuntimeFactory is the production TunnelManager factory boundary. It keeps
@@ -72,7 +75,7 @@ func (f *RuntimeFactory) Prepare(ctx context.Context, request ApplyRequest) (Can
 	routes := append([]hoststate.TunnelConfigRoute(nil), request.Decoded.Routes...)
 	sort.Slice(routes, func(i, j int) bool { return routes[i].ID < routes[j].ID })
 	originStreams := f.config.OriginStreams
-	return &runtimeCandidate{request: request, prepared: prepared, prober: f.config.Origins, originStreams: originStreams, originStreamsForGeneration: f.config.OriginStreamsForGeneration, maximumProbes: f.config.MaximumOriginProbes, routes: routes}, nil
+	return &runtimeCandidate{request: request, prepared: prepared, prober: f.config.Origins, originStreams: originStreams, originStreamsForGeneration: f.config.OriginStreamsForGeneration, maximumProbes: f.config.MaximumOriginProbes, routes: routes, originHealth: f.config.OriginHealth}, nil
 }
 
 type runtimeCandidate struct {
@@ -83,6 +86,7 @@ type runtimeCandidate struct {
 	maximumProbes              int
 	originStreamsForGeneration func(ApplyRequest, connector.DataCarrierIdentity) *OriginStreamForwarder
 	routes                     []hoststate.TunnelConfigRoute
+	originHealth               OriginHealthReporter
 }
 
 func (c *runtimeCandidate) ProbeOrigins(ctx context.Context) (ProbeResult, error) {
@@ -186,7 +190,32 @@ func (c *runtimeCandidate) Activate(ctx context.Context) (Active, error) {
 		}
 		running = originStreamRunningCarrier{RunningCarrier: running, streams: streams}
 	}
-	return &runtimeActive{request: c.request, running: running}, nil
+	active := &runtimeActive{request: c.request, running: running}
+	active.stopOriginHealth = c.startOriginHealth(running)
+	return active, nil
+}
+
+// startOriginHealth reports route reachability for the activated generation; it needs the
+// authenticated carrier's session identity, which only the data-carrier runtime has.
+func (c *runtimeCandidate) startOriginHealth(running RunningCarrier) func() {
+	if c.originHealth == nil || c.prober == nil {
+		return nil
+	}
+	provider, ok := running.(interface {
+		ActiveDataCarrier() *connector.ActiveDataCarrier
+	})
+	if !ok || provider.ActiveDataCarrier() == nil {
+		return nil
+	}
+	carrier, ok := provider.ActiveDataCarrier().Identity()
+	if !ok {
+		return nil
+	}
+	identity := originHealthIdentity{
+		tunnelID: c.request.Tunnel.ID, connectorID: c.request.Connector.ID, sessionID: carrier.SessionID,
+		processGeneration: carrier.ProcessGeneration, generation: carrier.Generation, contentHash: c.request.Snapshot.ContentHash,
+	}
+	return startOriginHealth(context.Background(), identity, c.routes, c.prober, c.originHealth, originhealth.DefaultProbeInterval)
 }
 
 type originStreamRunningCarrier struct {
@@ -220,8 +249,10 @@ func (c *runtimeCandidate) Abort(ctx context.Context) error {
 }
 
 type runtimeActive struct {
-	request ApplyRequest
-	running RunningCarrier
+	request          ApplyRequest
+	running          RunningCarrier
+	stopOriginHealth func()
+	stopOnce         sync.Once
 }
 
 func (a *runtimeActive) TunnelID() string    { return a.request.Tunnel.ID }
@@ -244,8 +275,23 @@ func (a *runtimeActive) activeRouteIDs() []string {
 	}
 	return ids
 }
-func (a *runtimeActive) Drain(ctx context.Context) error { return a.running.Drain(ctx) }
-func (a *runtimeActive) Close(ctx context.Context) error { return a.running.Close(ctx) }
+func (a *runtimeActive) Drain(ctx context.Context) error {
+	a.stopHealth()
+	return a.running.Drain(ctx)
+}
+func (a *runtimeActive) Close(ctx context.Context) error {
+	a.stopHealth()
+	return a.running.Close(ctx)
+}
+
+// stopHealth ends route reachability reporting for this generation (safe to call repeatedly).
+func (a *runtimeActive) stopHealth() {
+	a.stopOnce.Do(func() {
+		if a.stopOriginHealth != nil {
+			a.stopOriginHealth()
+		}
+	})
+}
 
 func (a *runtimeActive) updateGateRoute() (string, string, uint64, bool) {
 	if a == nil {

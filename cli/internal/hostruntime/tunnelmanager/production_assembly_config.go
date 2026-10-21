@@ -59,6 +59,8 @@ type ProductionAssemblyConfig struct {
 	Origins                    OriginProber
 	OriginStreams              *OriginStreamForwarder
 	OriginStreamsForGeneration func(ApplyRequest, connector.DataCarrierIdentity) *OriginStreamForwarder
+	// OriginHealth receives route reachability for each activated generation; nil disables it.
+	OriginHealth OriginHealthReporter
 
 	Control connectorrotation.ControlSessionConfig
 
@@ -159,7 +161,7 @@ func OpenProductionAssembly(config ProductionAssemblyConfig) (*ProductionAssembl
 	} else {
 		sessionSource = liveDataCarrierSessionSource{source: config.SessionSource, expectedAccountID: config.Control.Hello.AccountID}
 	}
-	factory, err := NewRuntimeFactory(RuntimeFactoryConfig{Builder: DataCarrierBuilder{Sessions: sessionSource}, Origins: config.Origins, OriginStreams: config.OriginStreams, OriginStreamsForGeneration: config.OriginStreamsForGeneration})
+	factory, err := NewRuntimeFactory(RuntimeFactoryConfig{Builder: DataCarrierBuilder{Sessions: sessionSource}, Origins: config.Origins, OriginStreams: config.OriginStreams, OriginStreamsForGeneration: config.OriginStreamsForGeneration, OriginHealth: config.OriginHealth})
 	if err != nil {
 		return nil, hoststate.StartupStatus{}, errors.Join(ErrProductionAssemblyInvalid, err)
 	}
