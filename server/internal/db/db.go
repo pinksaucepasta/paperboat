@@ -64,6 +64,9 @@ func Open(cfg config.Database) (*DB, error) {
 		return nil, fmt.Errorf("parse postgres dsn: %w", err)
 	}
 	poolConfig.ConnConfig.RuntimeParams["search_path"] = "paperboat"
+	// JIT compilation costs ~1 s on a query like the machine inventory's (plpgsql lateral calls inflate its estimated
+	// cost past jit_above_cost) and never pays off for this OLTP workload: the same statement runs in ~18 ms without it.
+	poolConfig.ConnConfig.RuntimeParams["jit"] = "off"
 	poolConfig.MaxConns = 20
 	poolConfig.MaxConnLifetime = 30 * time.Minute
 	observer := &queryObserver{}

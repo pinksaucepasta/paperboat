@@ -1235,6 +1235,10 @@ AND (machine_management_allowed(sqlc.arg(user_id),m.id) OR EXISTS(
  SELECT 1 FROM unnest(ARRAY['terminal','exec','managed_ssh','files','preview_manage','tunnel_manage']) capability
  WHERE machine_capability_allowed(sqlc.arg(user_id),m.id,capability)));
 
+-- name: ListUserMachinesByIDs :many
+-- The inventory has already decided which machines the caller may see; this loads exactly those rows in one query.
+SELECT m.* FROM user_machines m WHERE m.id=ANY(sqlc.arg(ids)::text[]) AND m.deleted_at IS NULL;
+
 -- name: GetVisibleUserMachineInWorkspace :one
 SELECT m.* FROM user_machines m WHERE m.id=sqlc.arg(id) AND m.deleted_at IS NULL AND (
   (NOT sqlc.arg(workspace_set)::boolean AND (machine_management_allowed(sqlc.arg(user_id),m.id) OR EXISTS(

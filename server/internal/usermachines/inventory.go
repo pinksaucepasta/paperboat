@@ -60,13 +60,30 @@ func (s *Service) ListInventory(ctx context.Context, account string, opts Invent
 	if err != nil {
 		return nil, 0, err
 	}
+	// One query for the rows and one for their access description, not a Get (two queries, ~15 function calls
+	// per machine) for each of up to 200 machines: an account with ~50 machines paid seconds per list.
+	loaded, err := s.db.Queries().ListUserMachinesByIDs(ctx, ids)
+	if err != nil {
+		return nil, 0, err
+	}
+	byID := make(map[string]dbsqlc.UserMachine, len(loaded))
+	for _, row := range loaded {
+		byID[row.ID] = row
+	}
 	out := make([]UserMachine, 0, len(ids))
 	for _, id := range ids {
-		item, e := s.Get(ctx, account, id)
-		if e != nil {
-			return nil, 0, fmt.Errorf("machine inventory changed: %w", e)
+		row, ok := byID[id]
+		if !ok {
+			return nil, 0, fmt.Errorf("machine inventory changed: %w", ErrNotFound)
 		}
-		out = append(out, item)
+		out = append(out, mapMachine(row))
+	}
+	items := make([]*UserMachine, len(out))
+	for i := range out {
+		items[i] = &out[i]
+	}
+	if err := s.describeMachineAccess(ctx, account, items...); err != nil {
+		return nil, 0, err
 	}
 	return out, total, nil
 }

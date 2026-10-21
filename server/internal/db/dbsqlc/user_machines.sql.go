@@ -4193,6 +4193,84 @@ func (q *Queries) ListUserMachineTerminalSessionsInWorkspace(ctx context.Context
 	return items, nil
 }
 
+const listUserMachinesByIDs = `-- name: ListUserMachinesByIDs :many
+SELECT m.id, m.user_id, m.environment_id, m.platform, m.architecture, m.workspace_root, m.state, m.seat_state, m.online, m.provider_route_route_id, m.provider_route_client_id, m.provider_route_http_base_url, m.provider_route_websocket_base_url, m.runtime_versions, m.enrolled_at, m.last_seen_at, m.revoked_at, m.disconnected_at, m.deleted_at, m.version, m.created_at, m.updated_at, m.availability_mode, m.availability_desired_version, m.availability_observed_mode, m.availability_observed_version, m.availability_observed_at, m.availability_status, m.availability_error_code, m.host_service_version, m.host_service_scope, m.worker_generation, m.os_boot_id, m.worker_service_scope, m.connector_state, m.connector_generation, m.host_update_rollbacks, m.runtime_diagnostics_observed_at, m.public_identity_key, m.installation_generation, m.configured_capabilities, m.observed_capabilities, m.alias, m.update_health, m.capabilities_desired_version, m.capabilities_observed_version, m.capabilities_status, m.capabilities_error_code, m.owner_team_id, m.description, m.personal_auto_enabled, m.machine_service_policy_generation FROM user_machines m WHERE m.id=ANY($1::text[]) AND m.deleted_at IS NULL
+`
+
+// The inventory has already decided which machines the caller may see; this loads exactly those rows in one query.
+func (q *Queries) ListUserMachinesByIDs(ctx context.Context, ids []string) ([]UserMachine, error) {
+	rows, err := q.db.Query(ctx, listUserMachinesByIDs, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []UserMachine
+	for rows.Next() {
+		var i UserMachine
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.EnvironmentID,
+			&i.Platform,
+			&i.Architecture,
+			&i.WorkspaceRoot,
+			&i.State,
+			&i.SeatState,
+			&i.Online,
+			&i.ProviderRouteRouteID,
+			&i.ProviderRouteClientID,
+			&i.ProviderRouteHttpBaseUrl,
+			&i.ProviderRouteWebsocketBaseUrl,
+			&i.RuntimeVersions,
+			&i.EnrolledAt,
+			&i.LastSeenAt,
+			&i.RevokedAt,
+			&i.DisconnectedAt,
+			&i.DeletedAt,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.AvailabilityMode,
+			&i.AvailabilityDesiredVersion,
+			&i.AvailabilityObservedMode,
+			&i.AvailabilityObservedVersion,
+			&i.AvailabilityObservedAt,
+			&i.AvailabilityStatus,
+			&i.AvailabilityErrorCode,
+			&i.HostServiceVersion,
+			&i.HostServiceScope,
+			&i.WorkerGeneration,
+			&i.OsBootID,
+			&i.WorkerServiceScope,
+			&i.ConnectorState,
+			&i.ConnectorGeneration,
+			&i.HostUpdateRollbacks,
+			&i.RuntimeDiagnosticsObservedAt,
+			&i.PublicIdentityKey,
+			&i.InstallationGeneration,
+			&i.ConfiguredCapabilities,
+			&i.ObservedCapabilities,
+			&i.Alias,
+			&i.UpdateHealth,
+			&i.CapabilitiesDesiredVersion,
+			&i.CapabilitiesObservedVersion,
+			&i.CapabilitiesStatus,
+			&i.CapabilitiesErrorCode,
+			&i.OwnerTeamID,
+			&i.Description,
+			&i.PersonalAutoEnabled,
+			&i.MachineServicePolicyGeneration,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUserMachinesForUser = `-- name: ListUserMachinesForUser :many
 SELECT id, user_id, environment_id, platform, architecture, workspace_root, state, seat_state, online, provider_route_route_id, provider_route_client_id, provider_route_http_base_url, provider_route_websocket_base_url, runtime_versions, enrolled_at, last_seen_at, revoked_at, disconnected_at, deleted_at, version, created_at, updated_at, availability_mode, availability_desired_version, availability_observed_mode, availability_observed_version, availability_observed_at, availability_status, availability_error_code, host_service_version, host_service_scope, worker_generation, os_boot_id, worker_service_scope, connector_state, connector_generation, host_update_rollbacks, runtime_diagnostics_observed_at, public_identity_key, installation_generation, configured_capabilities, observed_capabilities, alias, update_health, capabilities_desired_version, capabilities_observed_version, capabilities_status, capabilities_error_code, owner_team_id, description, personal_auto_enabled, machine_service_policy_generation FROM user_machines
 WHERE (machine_management_allowed($1,id) OR EXISTS(SELECT 1 FROM unnest(ARRAY['terminal','exec','managed_ssh','files','preview_manage','tunnel_manage']) cap WHERE machine_capability_allowed($1,id,cap))) AND deleted_at IS NULL
