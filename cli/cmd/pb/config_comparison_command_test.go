@@ -3,6 +3,9 @@ package main
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/configsync"
+	"github.com/pinksaucepasta/paperboat/internal/tunnel"
+	"io"
 	"strings"
 	"syscall"
 	"testing"
@@ -27,5 +30,16 @@ func TestConfigComparisonMixedCancellationRetainsCauseUnderStaticMessage(t *test
 	}
 	if got := protectConfigComparisonReadError(false, private); got != private {
 		t.Fatalf("pre-read error changed: %T", got)
+	}
+}
+
+func TestOnlyAnUncertainPeerStartIsRetriedForAComparison(t *testing.T) {
+	if !retryableConfigComparison(&configComparisonFailure{cause: &tunnel.ExecStartUncertainError{Cause: io.EOF}}) {
+		t.Fatal("a comparison whose peer start was uncertain must be retried (it is read-only)")
+	}
+	for _, err := range []error{nil, errors.New("comparison integrity failed; refresh and retry"), &configComparisonFailure{cause: configsync.ErrConflictComparisonStale}} {
+		if retryableConfigComparison(err) {
+			t.Fatalf("%v must not be retried", err)
+		}
 	}
 }

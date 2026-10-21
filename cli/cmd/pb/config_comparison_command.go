@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/command"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/configsync"
@@ -35,7 +36,27 @@ func protectConfigComparisonReadError(reading bool, err error) error {
 	}
 }
 
-func configConflictCompare(c *command.Context) (resultErr error) {
+// configComparisonAttempts bounds how often a read-only comparison is repeated when the encrypted
+// peer connection drops before the host answered; the read changes nothing, so repeating it is safe.
+const configComparisonAttempts = 3
+
+func configConflictCompare(c *command.Context) error {
+	var err error
+	for attempt := 0; attempt < configComparisonAttempts; attempt++ {
+		if err = configConflictCompareOnce(c); !retryableConfigComparison(err) || c.Context.Err() != nil {
+			return err
+		}
+		time.Sleep(time.Second)
+	}
+	return err
+}
+
+func retryableConfigComparison(err error) bool {
+	var uncertain *tunnel.ExecStartUncertainError
+	return errors.As(err, &uncertain)
+}
+
+func configConflictCompareOnce(c *command.Context) (resultErr error) {
 	reading := false
 	defer func() {
 		resultErr = protectConfigComparisonReadError(reading, resultErr)
