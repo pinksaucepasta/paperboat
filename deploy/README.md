@@ -170,3 +170,22 @@ streams, no route change, no DNS change. Pass criteria: no request fails after c
 an edge without a ready assignment, no goroutine/stream leak on the edge (leak test), observed state matches desired
 within one pull interval. Runs in the isolated test PostgreSQL with in-process edges; the device smoke suite repeats (1) once
 against the real pair.
+
+## Public Suffix List entry for the preview/tunnel domain (filed by the owner after the landing page is live)
+
+Browser access works without the listing (host-only `__Host-` cookies plus the edge's same-site request checks);
+the listing adds browser-level isolation between previews and needs no code change.
+
+1. Prove control of the domain: add a TXT record `_psl.pprbt.app` whose value is the URL of the pull request
+   (`https://github.com/publicsuffix/list/pull/<number>`), in the zone that serves `pprbt.app`.
+2. Open a pull request against `publicsuffix/list`, adding `pprbt.app` in the PRIVATE DOMAINS section, in
+   alphabetical position, with the block comment:
+   ```
+   // Paperboat : https://paperboat.cloud
+   // Submitted by Paperboat <contact address of the owner>
+   pprbt.app
+   ```
+   Description: what the domain serves (user-controlled preview and tunnel subdomains of one service, so every
+   label is a separate security boundary), the organisation's site, that the domain is registered for at least two
+   years, and a link to the `_psl` TXT record check (`dig +short TXT _psl.pprbt.app`).
+3. Publication takes weeks; browsers pick it up with their releases. Nothing in Paperboat waits for it.
