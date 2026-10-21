@@ -56,6 +56,8 @@ func TestListShowsTeamSharedMachinesOnlyWithPrivateAccessOnPostgres(t *testing.T
 	if e = s.RecordMachineServices(ctx, environment, machine, snapshot, time.Now().UTC()); e != nil {
 		t.Fatal(e)
 	}
+	// The announcement must not expire mid-test whatever the database latency.
+	exec(`UPDATE paperboat.machine_service_snapshots SET expires_at=now()+interval '1 hour' WHERE machine_id=$1`, machine)
 	for _, team := range []string{teamA, teamB} {
 		exec(`INSERT INTO paperboat.teams(team_id,owner_account,generation) VALUES($1,$2,1)`, team, owner)
 		exec(`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'admin',true),($1,$3,1,'member',true)`, team, owner, member)
