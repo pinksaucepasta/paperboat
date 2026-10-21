@@ -2002,7 +2002,7 @@ func TestDashboardEnrollmentApprovalFailureIsRetryable(t *testing.T) {
 	}
 }
 
-func TestDashboardEnrollmentDenialIsAtomicAndNonRetryable(t *testing.T) {
+func TestEnrollmentDenialAndImmediateApprovalOnPostgres(t *testing.T) {
 	integrationPublicIdentityKey := newIntegrationPublicIdentityKey(t)
 	store := testStore(t)
 	ctx := context.Background()
@@ -2013,12 +2013,18 @@ func TestDashboardEnrollmentDenialIsAtomicAndNonRetryable(t *testing.T) {
 	}
 	service := New(store, audit.NewWriter(store), Policy{PairingLifetime: 10 * time.Minute, AllowedPlatforms: []string{"linux"}}, testSeatAuthorizer{})
 	service.ConfigureInstallationEncryption("test-enrollment-key")
-	first, err := service.StartEnrollment(ctx, userID, "idem-deny-"+suffix)
-	if err != nil {
+	service.ConfigureAccess(nil, "https://api.paperboat.test")
+	service.ConfigureBootstrapCommand("pb machine bootstrap")
+	if err := service.ConfigureRuntimeRoute("runtime.example.test", 38080); err != nil {
 		t.Fatal(err)
 	}
+	service.ConfigureHelperEnrollment(func(context.Context, string, string, string, time.Duration) (HelperEnrollmentGrant, error) {
+		return HelperEnrollmentGrant{EnrollmentID: "henr_deny_" + suffix, HelperID: "hlp_deny_" + suffix, Credential: "deny-credential", ExpiresAt: time.Now().UTC().Add(10 * time.Minute)}, nil
+	})
+	// An interactively requested pairing (no dashboard enrollment token) waits for the account owner: denying it
+	// is atomic, final and replay-safe, and its installation material is never released.
 	verifier := "verifier-deny-" + suffix
-	pairing, err := service.CreatePairing(ctx, PairingInput{EnrollmentToken: first.BootstrapToken, Verifier: verifier, Alias: "denied-host", Platform: "linux", Architecture: "amd64", WorkspaceRoot: "/workspace", PublicIdentityKey: integrationPublicIdentityKey})
+	pairing, err := service.CreatePairing(ctx, PairingInput{Verifier: verifier, Alias: "denied-host", Platform: "linux", Architecture: "amd64", WorkspaceRoot: "/workspace", PublicIdentityKey: integrationPublicIdentityKey})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2031,21 +2037,30 @@ func TestDashboardEnrollmentDenialIsAtomicAndNonRetryable(t *testing.T) {
 	if _, err := service.ConsumeInstallation(ctx, verifier); !errors.Is(err, ErrInstallationDenied) {
 		t.Fatalf("denied installation material error = %v", err)
 	}
-	var pairingState, enrollmentState string
-	if err := store.SQL().QueryRowContext(ctx, `SELECT state FROM paperboat.user_machine_pairings WHERE id=$1`, pairing.ID).Scan(&pairingState); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.SQL().QueryRowContext(ctx, `SELECT installation_state FROM paperboat.user_machine_pairings WHERE id=$1`, first.ID).Scan(&enrollmentState); err != nil {
-		t.Fatal(err)
-	}
-	if pairingState != "denied" || enrollmentState != "denied" {
-		t.Fatalf("pairing=%q enrollment=%q", pairingState, enrollmentState)
+	var pairingState string
+	if err := store.SQL().QueryRowContext(ctx, `SELECT state FROM paperboat.user_machine_pairings WHERE id=$1`, pairing.ID).Scan(&pairingState); err != nil || pairingState != "denied" {
+		t.Fatalf("pairing=%q err=%v", pairingState, err)
 	}
 	if err := service.Deny(ctx, userID, pairing.UserCode); !errors.Is(err, ErrPairingUsed) {
 		t.Fatalf("denial replay error = %v", err)
 	}
-	if _, err := service.RetryEnrollment(ctx, userID, first.ID); err != nil {
-		t.Fatalf("denied enrollment was not retryable: %v", err)
+
+	// A dashboard-issued enrollment token is already authenticated by the account owner, so claiming it approves the
+	// pairing at once (a pasted command is one-shot): there is nothing left to deny.
+	first, err := service.StartEnrollment(ctx, userID, "idem-deny-"+suffix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := service.CreatePairing(ctx, PairingInput{EnrollmentToken: first.BootstrapToken, Verifier: "verifier-claimed-" + suffix, Alias: "claimed-host", Platform: "linux", Architecture: "amd64", WorkspaceRoot: "/workspace", PublicIdentityKey: newIntegrationPublicIdentityKey(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var claimedState string
+	if err := store.SQL().QueryRowContext(ctx, `SELECT state FROM paperboat.user_machine_pairings WHERE id=$1`, claimed.ID).Scan(&claimedState); err != nil || claimedState != "approved" {
+		t.Fatalf("a claimed enrollment token left the pairing %q (%v), want approved at once", claimedState, err)
+	}
+	if err := service.Deny(ctx, userID, claimed.UserCode); !errors.Is(err, ErrPairingUsed) {
+		t.Fatalf("denying an already approved pairing = %v, want ErrPairingUsed", err)
 	}
 }
 
@@ -3135,13 +3150,22 @@ func TestTransferDefaultsAndBrokerPreserveMachineOwnershipAndRouteHost(t *testin
 		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_helpers (id,environment_id,state) VALUES ($1,$2,'active')`, helperID, machine.environmentID); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_tunnel_nodes (id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at) VALUES ($1,'development','1.0',$2,'ready',true,now())`, edgeID, "epoch_"+machine.id); err != nil {
+		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_tunnel_nodes (id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,roles,transports,registry_expires_at,region,failure_domain,capacity_limit,capacity_observed_at) VALUES ($1,'development','1.0',$2,'ready',true,now(),ARRAY['edge'],ARRAY['http2','http3'],now()+interval '1 hour','test-region','test-domain-'||$1,100,now())`, edgeID, "epoch_"+machine.id); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_connector_generations (environment_id,machine_id,generation,edge_pool,edge_node_id,state) VALUES ($1,$2,1,'development',$3,'admitted')`, machine.environmentID, machine.id, edgeID); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_routes (id,environment_id,kind,public_host,managed_public_host,target_host,target_port,desired_revision,applied_revision,applied_node_id,applied_generation) VALUES ($1,$2,'runtime_https_wss',$3,$3,'127.0.0.1',8080,1,1,$4,1)`, "route_"+machine.id, machine.environmentID, publicHost, edgeID); err != nil {
+			t.Fatal(err)
+		}
+		identityKey := newIntegrationPublicIdentityKey(t)
+		if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET public_identity_key=$2,worker_generation=1 WHERE id=$1`, machine.id, identityKey); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.runtime_carrier_attachments
+(route_id,machine_id,account_id,installation_generation,worker_generation,process_id,generation,edge_node_id,edge_process_epoch,public_identity_key,route_revision,session_id,preview_session_id,admission,expires_at,ready,observed_at,active)
+VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now(),true)`, "route_"+machine.id, machine.id, machine.ownerID, "process_"+machine.id, edgeID, "epoch_"+machine.id, identityKey, "session_"+uuid.NewString(), "session_"+uuid.NewString()); err != nil {
 			t.Fatal(err)
 		}
 	}
