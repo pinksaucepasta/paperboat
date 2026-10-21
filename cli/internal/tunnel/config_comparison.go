@@ -49,56 +49,68 @@ func (t *PeerTerminalTunnel) DialConfigComparison(ctx context.Context, info reso
 		}
 		reader, writer := io.Pipe()
 		connection := &comparisonPipe{reader: reader, message: message}
-		go func() {
-			defer writer.Close()
-			defer message.Close()
-			raw, _ := json.Marshal(response.Result)
-			if _, err := writer.Write(append(raw, '\n')); err != nil {
-				return
-			}
-			var offsets [2]int64
-			for {
-				kind, data, err := message.ReadMessage(ctx)
-				if err != nil {
-					writer.CloseWithError(err)
-					return
-				}
-				if kind == helperBinaryMessage {
-					output, err := protocol.DecodeTerminalOutput(data)
-					index := int(output.Channel) - 1
-					if err != nil || output.StreamID != response.Result.StreamID || index < 0 || index > 1 || output.StartSequence != uint64(offsets[index]) {
-						writer.CloseWithError(errors.New("invalid comparison content stream"))
-						return
-					}
-					expected := response.Result.Local.Bytes
-					if index == 1 {
-						expected = response.Result.Managed.Bytes
-					}
-					offsets[index] += int64(len(output.Data))
-					if offsets[index] > expected {
-						writer.CloseWithError(errors.New("comparison exceeds declared bytes"))
-						return
-					}
-					if err := protocol.WriteBinaryFrame(writer, protocol.BinaryFrame{Channel: output.Channel, StartSequence: output.StartSequence, Data: output.Data}); err != nil {
-						return
-					}
-				} else {
-					frame, err := decodeHelperFrame(data)
-					var end struct {
-						Type     string `json:"type"`
-						StreamID uint32 `json:"stream_id"`
-					}
-					if err != nil || frame.Type != "event" || json.Unmarshal(frame.Payload, &end) != nil || end.Type != "comparison_complete" || end.StreamID != response.Result.StreamID || offsets[0] != response.Result.Local.Bytes || offsets[1] != response.Result.Managed.Bytes {
-						writer.CloseWithError(errors.New("comparison did not complete"))
-						return
-					}
-					return
-				}
-			}
-		}()
+		go relayComparisonContent(ctx, message, writer, response.Result)
 		return connection, nil
 	}})
 }
+
+// relayComparisonContent forwards the comparison bytes to the reader. The end event and the content
+// frames travel on different channels of the peer connection and the end event can overtake the last
+// content, so a complete end event received before every declared byte is not an error: the relay
+// keeps reading until the declared bytes have arrived, and only a closed connection first fails it.
+func relayComparisonContent(ctx context.Context, message helperMessageConnection, writer *io.PipeWriter, result ComparisonMetadata) {
+	defer writer.Close()
+	defer message.Close()
+	raw, _ := json.Marshal(result)
+	if _, err := writer.Write(append(raw, '\n')); err != nil {
+		return
+	}
+	var offsets [2]int64
+	complete := func() bool { return offsets[0] == result.Local.Bytes && offsets[1] == result.Managed.Bytes }
+	ended := false
+	for !ended || !complete() {
+		kind, data, err := message.ReadMessage(ctx)
+		if err != nil {
+			if ended {
+				err = errors.New("comparison did not complete")
+			}
+			writer.CloseWithError(err)
+			return
+		}
+		if kind == helperBinaryMessage {
+			output, err := protocol.DecodeTerminalOutput(data)
+			index := int(output.Channel) - 1
+			if err != nil || output.StreamID != result.StreamID || index < 0 || index > 1 || output.StartSequence != uint64(offsets[index]) {
+				writer.CloseWithError(errors.New("invalid comparison content stream"))
+				return
+			}
+			expected := result.Local.Bytes
+			if index == 1 {
+				expected = result.Managed.Bytes
+			}
+			offsets[index] += int64(len(output.Data))
+			if offsets[index] > expected {
+				writer.CloseWithError(errors.New("comparison exceeds declared bytes"))
+				return
+			}
+			if err := protocol.WriteBinaryFrame(writer, protocol.BinaryFrame{Channel: output.Channel, StartSequence: output.StartSequence, Data: output.Data}); err != nil {
+				return
+			}
+			continue
+		}
+		frame, err := decodeHelperFrame(data)
+		var end struct {
+			Type     string `json:"type"`
+			StreamID uint32 `json:"stream_id"`
+		}
+		if err != nil || frame.Type != "event" || json.Unmarshal(frame.Payload, &end) != nil || end.Type != "comparison_complete" || end.StreamID != result.StreamID {
+			writer.CloseWithError(errors.New("comparison did not complete"))
+			return
+		}
+		ended = true
+	}
+}
+
 func validComparisonMetadata(m ComparisonMetadata, request configsync.ConflictComparisonRequest) bool {
 	return m.ConflictComparisonRequest == request && m.StreamID != 0 && m.Local.Bytes >= 0 && m.Managed.Bytes >= 0 && m.Local.Bytes <= MaxComparisonSideBytes && m.Managed.Bytes <= MaxComparisonSideBytes
 }
