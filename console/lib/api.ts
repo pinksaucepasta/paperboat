@@ -258,12 +258,12 @@ export const usageQuery = (workspace: string, period: UsagePeriod) =>
     staleTime: 5 * minute,
   })
 
-/** Usage from `start` until now, for a window that is not one of the card's periods. */
+/** Usage from `start` until now: the billing period, shared by the allowance and bandwidth cards. */
 export const usageSinceQuery = (workspace: string, start: string) =>
   queryOptions({
     queryKey: ["usage-since", workspace, start],
     queryFn: () =>
-      api<Usage>(`usage?${new URLSearchParams({ start, end: new Date().toISOString(), limit: "1", workspace })}`),
+      api<Usage>(`usage?${new URLSearchParams({ start, end: new Date().toISOString(), limit: "200", workspace })}`),
     enabled: Boolean(workspace && start),
     staleTime: 5 * minute,
   })

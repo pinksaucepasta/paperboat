@@ -58,6 +58,14 @@ export function allowanceWindow(billing: BillingWorkspace): { start?: string; en
   return { start: billing.period_start, end: billing.period_end }
 }
 
+/**
+ * Where this period's usage starts: the allowance window, or the calendar month when there is none.
+ * The allowance and bandwidth cards both count from here, so their figures agree.
+ */
+export function usageWindowStart(billing: BillingWorkspace, now = new Date()): string {
+  return allowanceWindow(billing).start ?? new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
+}
+
 /** Plans this workspace can buy, with verified prices. Personal sees Pro, a team sees Team. */
 export const billingProductsQuery = (workspace: Workspace | undefined) =>
   queryOptions({

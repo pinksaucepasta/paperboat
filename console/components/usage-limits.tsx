@@ -22,7 +22,7 @@ import {
   type TrafficSource,
   type Usage,
 } from "@/lib/api"
-import { allowanceWindow, billingQuery, type BillingWorkspace } from "@/lib/billing"
+import { allowanceWindow, billingQuery, usageWindowStart, type BillingWorkspace } from "@/lib/billing"
 import { formatBytes, formatPlatform } from "@/lib/format"
 import { filterKeys, parseQuery, platformToken, withFilter, type FilterKey } from "@/lib/machine-filter"
 import { cn } from "@/lib/utils"
@@ -47,9 +47,24 @@ export function UsageLimits() {
   const workspace = useWorkspace()
   const machines = useMachines()
   const billing = useApiQuery(billingQuery(workspace))
-  const [period, setPeriod] = useState<UsagePeriod>(defaultUsagePeriod)
+  const [chosen, setPeriod] = useState<UsagePeriod | "billing">()
   const [source, setSource] = useState<TrafficSource>("all")
-  const usage = useApiQuery({ ...usageQuery(workspace?.id ?? "", period), enabled: Boolean(workspace) })
+  // The bandwidth card opens on the billing period, the window the allowance card counts, so the
+  // two agree; the other periods are one click away.
+  const period = chosen ?? (billing.data ? "billing" : defaultUsagePeriod)
+  const periodStart = billing.data ? usageWindowStart(billing.data) : ""
+  const fixed = useApiQuery({
+    ...usageQuery(workspace?.id ?? "", period === "billing" ? defaultUsagePeriod : period),
+    enabled: Boolean(workspace) && period !== "billing",
+  })
+  const since = useApiQuery(usageSinceQuery(workspace?.id ?? "", periodStart))
+  const usage = period === "billing" ? since : fixed
+  const periods: Record<string, string> = {
+    ...(billing.data && {
+      billing: allowanceWindow(billing.data).start ? "This billing period" : "This month",
+    }),
+    ...Object.fromEntries(Object.entries(usagePeriods).map(([key, { label }]) => [key, label])),
+  }
 
   return (
     // Machines and what is left of the hosted allowance first, then bandwidth across the other half.
@@ -65,14 +80,10 @@ export function UsageLimits() {
         action={
           <span className="flex items-center gap-3">
             <Menu value={source} options={sources} onChange={setSource} />
-            <Menu
-              value={period}
-              options={Object.fromEntries(Object.entries(usagePeriods).map(([key, { label }]) => [key, label]))}
-              onChange={(next) => setPeriod(next as UsagePeriod)}
-            />
+            <Menu value={period} options={periods} onChange={setPeriod} />
           </span>
         }
-        loading={!workspace || usage.isPending}
+        loading={!workspace || (chosen === undefined && billing.isPending) || usage.isPending}
         failed={usage.isError}
         className="sm:col-span-2"
       >
@@ -209,10 +220,8 @@ function Allowance({ billing, workspace }: { billing: BillingWorkspace; workspac
   const allowance = billing.allowance_bytes
   const window = allowanceWindow(billing)
   const resets = window.end ? `Resets ${resetFormat.format(new Date(window.end))}` : null
-  // The period's hosted traffic by path; before a period exists, this calendar month.
-  const now = new Date()
-  const start = window.start ?? new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
-  const usage = useApiQuery(usageSinceQuery(workspace, start))
+  // The period's hosted traffic by path, from the same start as the bandwidth card's default.
+  const usage = useApiQuery(usageSinceQuery(workspace, usageWindowStart(billing)))
   const split = usage.data && trafficBreakdown(usage.data.totals.by_path, "managed").byPath
   const hosted = split ? split.relay + split.edge : 0
   const share = allowance === null ? 0 : allowance > 0 ? Math.min(1, used / allowance) : 1
