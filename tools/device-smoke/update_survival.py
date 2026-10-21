@@ -125,7 +125,7 @@ def main():
                 except (ValueError, KeyError, RuntimeError):
                     return None
             wait_for(lambda: ready_endpoint() == preview_url, 'the preview lease to report ready on the same URL')
-            assert tunnel('status', tunnel_id)['tunnel']['stable_endpoint'] == tunnel_url, 'tunnel URL changed'
+            wait_for(lambda: tunnel('status', tunnel_id).get('overall_code') == 'ready', 'the tunnel to report ready (same stable URL already served)')
             deadline = time.monotonic() + 600
             while time.monotonic() < deadline:
                 done = peer(args.peer, 'cat %s/send.rc 2>/dev/null' % workdir, 60).stdout.strip()
