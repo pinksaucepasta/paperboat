@@ -120,6 +120,12 @@ func defaultEnvironment(ctx context.Context, client *api.Client, rememberedID, w
 	if err != nil {
 		return "", friendlyCommandError(err)
 	}
+	return defaultEnvironmentFrom(machines, rememberedID, workspace)
+}
+
+// defaultEnvironmentFrom chooses the terminal machine to use when none was named, from machines
+// the caller already fetched.
+func defaultEnvironmentFrom(machines []api.UserMachine, rememberedID, workspace string) (string, error) {
 	machines = terminalHostMachines(machines)
 	if rememberedID = strings.TrimSpace(rememberedID); rememberedID != "" {
 		for _, machine := range machines {
@@ -143,6 +149,16 @@ func defaultEnvironment(ctx context.Context, client *api.Client, rememberedID, w
 }
 
 func defaultWorkspaceEnvironment(ctx context.Context, commandContext *command.Context, client *api.Client, cfg *config.Config) (string, error) {
+	machines, err := client.ListUserMachines(ctx)
+	if err != nil {
+		return "", friendlyCommandError(err)
+	}
+	return defaultWorkspaceEnvironmentFrom(commandContext, client, cfg, machines)
+}
+
+// defaultWorkspaceEnvironmentFrom is defaultWorkspaceEnvironment over machines already fetched, so a
+// command that then resolves the chosen machine does not list them a second time.
+func defaultWorkspaceEnvironmentFrom(commandContext *command.Context, client *api.Client, cfg *config.Config, machines []api.UserMachine) (string, error) {
 	workspace := client.Workspace()
 	if workspace == "" {
 		var err error
@@ -162,7 +178,7 @@ func defaultWorkspaceEnvironment(ctx context.Context, commandContext *command.Co
 			return "", err
 		}
 	}
-	return defaultEnvironment(ctx, client, rememberedID, workspace)
+	return defaultEnvironmentFrom(machines, rememberedID, workspace)
 }
 
 func resolveEnvironmentTarget(ctx context.Context, client *api.Client, requested string) (environmentTarget, error) {
@@ -175,6 +191,28 @@ func resolveEnvironmentTarget(ctx context.Context, client *api.Client, requested
 
 func resolveTerminalEnvironmentTarget(ctx context.Context, client *api.Client, requested string) (environmentTarget, error) {
 	machine, err := resolveUserMachine(ctx, client, requested)
+	if err != nil {
+		return environmentTarget{}, err
+	}
+	if err := terminalHostError(machine); err != nil {
+		return environmentTarget{}, err
+	}
+	return environmentTarget{kind: environmentUserMachine, id: machine.ID, name: machine.Alias}, nil
+}
+
+// resolveTerminalTargetOrDefault names the terminal machine a command works on: the one requested, or
+// the default for the workspace, using a single listing of the account's machines for both steps.
+func resolveTerminalTargetOrDefault(ctx context.Context, commandContext *command.Context, client *api.Client, cfg *config.Config, requested string) (environmentTarget, error) {
+	machines, err := client.ListUserMachines(ctx)
+	if err != nil {
+		return environmentTarget{}, friendlyCommandError(err)
+	}
+	if requested == "" {
+		if requested, err = defaultWorkspaceEnvironmentFrom(commandContext, client, cfg, machines); err != nil {
+			return environmentTarget{}, err
+		}
+	}
+	machine, err := resolveUserMachineIn(machines, requested)
 	if err != nil {
 		return environmentTarget{}, err
 	}
@@ -271,6 +309,11 @@ func resolveUserMachine(ctx context.Context, client *api.Client, requested strin
 	if err != nil {
 		return api.UserMachine{}, err
 	}
+	return resolveUserMachineIn(machines, requested)
+}
+
+// resolveUserMachineIn finds the one machine a user named, by ID or by name, among machines already fetched.
+func resolveUserMachineIn(machines []api.UserMachine, requested string) (api.UserMachine, error) {
 	for _, machine := range machines {
 		if machine.ID == requested {
 			return machine, nil

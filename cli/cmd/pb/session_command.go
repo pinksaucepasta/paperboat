@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/config"
 	"os"
 	"slices"
 	"strings"
@@ -37,21 +38,21 @@ func sessionCobraCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		environmentRef := ""
 		sessionRef := ""
+		var target environmentTarget
 		switch len(args) {
 		case 2:
-			environmentRef, sessionRef = args[0], args[1]
+			sessionRef = args[1]
+			target, err = resolveTerminalTargetOrDefault(ctx.Context, ctx, client, d.cfg, args[0])
 		case 1:
 			sessionRef = args[0]
-			environmentRef, err = defaultWorkspaceEnvironment(ctx.Context, ctx, client, d.cfg)
+			target, err = resolveTerminalTargetOrDefault(ctx.Context, ctx, client, d.cfg, "")
 		default:
-			environmentRef, err = selectEnvironment(ctx.Context, client, "Choose an environment")
+			var environmentRef string
+			if environmentRef, err = selectEnvironment(ctx.Context, client, "Choose an environment"); err == nil {
+				target, err = resolveTerminalEnvironmentTarget(ctx.Context, client, environmentRef)
+			}
 		}
-		if err != nil {
-			return err
-		}
-		target, err := resolveTerminalEnvironmentTarget(ctx.Context, client, environmentRef)
 		if err != nil {
 			return err
 		}
@@ -69,7 +70,7 @@ func sessionCobraCommand() *cobra.Command {
 		if err := cobraCommand.Flags().Set("session", sessionRef); err != nil {
 			return err
 		}
-		return actionConnectTarget(actionContext(cobraCommand, nil), environmentRef)
+		return actionConnectTarget(actionContext(cobraCommand, nil), target.id)
 	}}
 	attach.Flags().String("session", "", "")
 	_ = attach.Flags().MarkHidden("session")
@@ -111,17 +112,14 @@ func sessionList(c *command.Context) error {
 		return err
 	}
 	requested := strings.TrimSpace(c.Args().First())
+	var cfg *config.Config
 	if requested == "" {
-		cfg, loadErr := workspaceConfig(c.String("config"), c.String("server"))
-		if loadErr != nil {
+		var loadErr error
+		if cfg, loadErr = workspaceConfig(c.String("config"), c.String("server")); loadErr != nil {
 			return loadErr
 		}
-		requested, err = defaultWorkspaceEnvironment(c.Context, c, client, cfg)
-		if err != nil {
-			return err
-		}
 	}
-	target, err := resolveTerminalEnvironmentTarget(c.Context, client, requested)
+	target, err := resolveTerminalTargetOrDefault(c.Context, c, client, cfg, requested)
 	if err != nil {
 		return err
 	}
