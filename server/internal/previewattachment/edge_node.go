@@ -105,4 +105,4 @@ ORDER BY
     AND pub.desired_addresses ? host(node.public_ingress_ipv4)) DESC,
   (carrier.active IS TRUE) DESC, node.id
 LIMIT 1
-FOR UPDATE OF node SKIP LOCKED`
+FOR KEY SHARE OF node`

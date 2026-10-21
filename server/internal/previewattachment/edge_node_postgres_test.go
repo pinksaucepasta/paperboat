@@ -81,6 +81,20 @@ func TestPreviewEdgePlacementQueryOnPostgres(t *testing.T) {
 	if err != nil || chosen != preferred {
 		t.Fatalf("preview selected %q, want preferred %q: %v", chosen, preferred, err)
 	}
+	// A heartbeat or observation that is updating the preferred edge's row must not push the placement
+	// to the other edge: the published DNS record would then name an edge without the route.
+	busy, err := database.SQL().BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = busy.ExecContext(context.Background(), `UPDATE paperboat.control_tunnel_nodes SET last_heartbeat_at=now() WHERE id=$1`, preferred); err != nil {
+		t.Fatal(err)
+	}
+	chosen, err = selector.SelectPreviewEdgeNode(context.Background(), PreviewEdgeNodeSelectionRequest{AccountID: account, PreviewID: "preview_" + stamp, OperationID: "operation_" + stamp, OwnerMachineID: machine, InstallationGeneration: 1})
+	_ = busy.Rollback()
+	if err != nil || chosen != preferred {
+		t.Fatalf("placement skipped the edge whose row was being updated: selected %q, want %q: %v", chosen, preferred, err)
+	}
 	exec(`UPDATE paperboat.runtime_carrier_attachments SET active=false WHERE route_id=$1 AND active`, route)
 	exec(`UPDATE paperboat.runtime_carrier_attachments SET active=true WHERE route_id=$1 AND edge_node_id=$2`, route, first)
 	chosen, err = selector.SelectPreviewEdgeNode(context.Background(), PreviewEdgeNodeSelectionRequest{AccountID: account, PreviewID: "preview_" + stamp, OperationID: "operation_" + stamp, OwnerMachineID: machine, InstallationGeneration: 1})
