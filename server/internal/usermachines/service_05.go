@@ -326,6 +326,12 @@ func (s *Service) createTerminalSession(ctx context.Context, userID, sourceMachi
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return TerminalSession{}, err
 	}
+	// Sessions the host no longer has must not hold the limit: ask the host before refusing.
+	if live, countErr := s.db.Queries().CountLiveUserMachineTerminalSessions(ctx, userMachineID); countErr == nil && int(live) >= maxActive {
+		if _, reconcileErr := s.reconcileLiveTerminalSessions(ctx, userID, userMachineID); reconcileErr != nil {
+			supportreport.CaptureFromContext(ctx, "paperboat-server", "http_terminal", "service_error", "terminal_host_unavailable", reconcileErr)
+		}
+	}
 	id := newID("terminal")
 	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		if err := teams.Lock(ctx, tx); err != nil {
@@ -696,6 +702,10 @@ func (s *Service) applyTerminalSessionOperation(ctx context.Context, operationID
 			}
 		} else {
 			observed, err = s.controlRuntime.Terminal(ctx, route, credential, action, terminalSessionID, operationID)
+		}
+		if err != nil && (action == "close" || action == "delete") && helperruntime.IsSessionUnknown(err) {
+			// The host has no such session: what the operation wanted is already true.
+			err, observed.State = nil, "closed"
 		}
 		if err == nil && action == "close" && observed.State != "closed" {
 			err = fmt.Errorf("helper runtime acknowledged close in state %q", observed.State)

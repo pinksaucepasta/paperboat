@@ -350,6 +350,9 @@ func (s *Service) TerminalSessionSharing(ctx context.Context, account, sessionID
 	}
 	snap, err := s.controlRuntime.Terminal(ctx, httpIngressURL, token, "snapshot", item.ID, newID("operation"))
 	if err != nil {
+		if helperruntime.IsSessionUnknown(err) && s.markTerminalSessionAbsent(ctx, item.ID) == nil {
+			item.RuntimeState, item.State = "closed", terminalDisplayState(item.DesiredState, "closed", true, 0)
+		}
 		return item, nil
 	}
 	var closedAt sql.NullTime

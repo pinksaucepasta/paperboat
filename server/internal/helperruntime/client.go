@@ -111,6 +111,16 @@ func (e *remoteError) DiagnosticErrno() int {
 	return details.Errno
 }
 
+// DiagnosticProtocolCode reports the host's finite error code, never its message.
+func (e *remoteError) DiagnosticProtocolCode() string { return e.Code }
+
+// IsSessionUnknown reports that the host answered a terminal request with "no such session for this account",
+// the host's one answer for a session it does not have.
+func IsSessionUnknown(err error) bool {
+	var coded interface{ DiagnosticProtocolCode() string }
+	return errors.As(err, &coded) && coded.DiagnosticProtocolCode() == "not_found_or_forbidden"
+}
+
 func (e *remoteError) Error() string {
 	if e.Code == "terminal_create_failed" {
 		return "terminal creation failed on host"
