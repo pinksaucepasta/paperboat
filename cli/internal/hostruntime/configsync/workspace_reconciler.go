@@ -45,15 +45,46 @@ type ReconciliationDiagnostics struct {
 	LastPublishedRevision string
 }
 
+// leavesToOtherDirection reports a resolution that only the other half of a split (pull plus push)
+// assignment can carry out. The pull reconciler used to take "keep the machine's version" and
+// "force push" too: it acknowledged them without publishing anything, or tried to publish and
+// failed the whole sync, so the conflict never resolved and could not be resolved again.
+func (r *PlaintextWorkspaceReconciler) leavesToOtherDirection(resolution ConflictResolution) bool {
+	switch r.descriptor.Mode {
+	case ModePullOnly:
+		return r.descriptor.PushRepositoryID != "" && (resolution.Action == "keep_local" || resolution.Action == "force_push")
+	case ModePushOnly:
+		return r.descriptor.PullRepositoryID != "" && (resolution.Action == "keep_remote" || resolution.Action == "force_pull")
+	}
+	return false
+}
+
 // CombineDirectionalDiagnostics reports a bidirectional assignment's two reconcilers as one:
 // a conflict found while pulling is as real as one found while pushing, and a pulled-then-applied
 // revision is what the user sees as the last applied one.
 func CombineDirectionalDiagnostics(pull, push ReconciliationDiagnostics) ReconciliationDiagnostics {
 	push.LastAppliedRevision = pull.LastAppliedRevision
 	push.Skipped = append(append([]PathSummary(nil), pull.Skipped...), push.Skipped...)
-	push.Conflicts = append(append([]PathSummary(nil), pull.Conflicts...), push.Conflicts...)
+	push.Conflicts = uniquePathSummaries(append(append([]PathSummary(nil), pull.Conflicts...), push.Conflicts...))
 	push.PendingCleanPathCount += pull.PendingCleanPathCount
 	return push
+}
+
+// uniquePathSummaries keeps one entry per path, reason and revision: when the pull and the push
+// repository are the same one, both reconcilers see (and report) the same conflict.
+func uniquePathSummaries(values []PathSummary) []PathSummary {
+	type key struct{ path, reason, revision string }
+	seen := make(map[key]bool, len(values))
+	result := values[:0:0]
+	for _, value := range values {
+		k := key{value.Path, value.Reason, value.Revision}
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
+		result = append(result, value)
+	}
+	return result
 }
 
 type DiagnosticsSource interface {
@@ -292,6 +323,9 @@ func (r *PlaintextWorkspaceReconciler) Reconcile(ctx context.Context, repository
 				return PreparedPublication{}, resolutionErr
 			}
 			for _, resolution := range resolutions {
+				if r.leavesToOtherDirection(resolution) {
+					continue
+				}
 				if !resolution.Valid() || resolution.ExpectedRemoteRevision != remote.Revision {
 					continue
 				}

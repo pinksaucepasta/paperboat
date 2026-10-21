@@ -426,12 +426,38 @@ func TestBidirectionalDiagnosticsKeepAConflictFoundWhilePulling(t *testing.T) {
 		Skipped:               []PathSummary{{Path: "skipped-pull"}},
 		PendingCleanPathCount: 2, LastAppliedRevision: "applied",
 	}
-	push := ReconciliationDiagnostics{Skipped: []PathSummary{{Path: "skipped-push"}}, PendingCleanPathCount: 1, LastPublishedRevision: "published"}
+	push := ReconciliationDiagnostics{
+		Conflicts: []PathSummary{{Path: "ecfg", Reason: "concurrent_update"}},
+		Skipped:   []PathSummary{{Path: "skipped-push"}}, PendingCleanPathCount: 1, LastPublishedRevision: "published",
+	}
 	combined := CombineDirectionalDiagnostics(pull, push)
 	if len(combined.Conflicts) != 1 || combined.Conflicts[0].Path != "ecfg" {
-		t.Fatalf("conflicts = %+v, want the pull conflict", combined.Conflicts)
+		t.Fatalf("conflicts = %+v, want the one conflict both reconcilers report, listed once", combined.Conflicts)
 	}
 	if combined.PendingCleanPathCount != 3 || combined.LastAppliedRevision != "applied" || combined.LastPublishedRevision != "published" || len(combined.Skipped) != 2 {
 		t.Fatalf("combined = %+v", combined)
+	}
+}
+
+func TestOnlyTheMatchingHalfOfASplitAssignmentCarriesOutAResolution(t *testing.T) {
+	split := func(mode AssignmentMode) *PlaintextWorkspaceReconciler {
+		return &PlaintextWorkspaceReconciler{descriptor: RuntimeDescriptor{Mode: mode, PullRepositoryID: "repository", PushRepositoryID: "repository"}}
+	}
+	for _, test := range []struct {
+		mode        AssignmentMode
+		action      string
+		leavesToOth bool
+	}{
+		{ModePullOnly, "keep_local", true}, {ModePullOnly, "force_push", true}, {ModePullOnly, "keep_remote", false}, {ModePullOnly, "force_pull", false},
+		{ModePushOnly, "keep_remote", true}, {ModePushOnly, "force_pull", true}, {ModePushOnly, "keep_local", false}, {ModePushOnly, "force_push", false},
+	} {
+		if got := split(test.mode).leavesToOtherDirection(ConflictResolution{Action: test.action}); got != test.leavesToOth {
+			t.Fatalf("%s engine, %s: leaves to the other half = %v, want %v", test.mode, test.action, got, test.leavesToOth)
+		}
+	}
+	// A plain pull-only assignment has no other half: it carries out keep_local itself.
+	alone := &PlaintextWorkspaceReconciler{descriptor: RuntimeDescriptor{Mode: ModePullOnly, PullRepositoryID: "repository"}}
+	if alone.leavesToOtherDirection(ConflictResolution{Action: "keep_local"}) {
+		t.Fatal("a standalone pull-only assignment must handle keep_local")
 	}
 }
