@@ -270,6 +270,17 @@ installation wait for manual action. The manual `pb update check`, `download`, a
 `--approve` flows remain available; `pb update download` stages a verified release
 without installing it.
 
+A manual update refuses to run while it would end work it cannot keep: with open SSH
+connections or port forwards it says "Paperboat is busy: N open SSH connections. Wait, close
+them, or use --force." and leaves the installed version unchanged; with other active work or
+another update running it says the same and tells you to retry. `--force` interrupts that work.
+Any failure leaves the previous version working and says what to do: an unverifiable update is
+rejected ("the installed version is unchanged"); a new version whose background service does
+not start is rolled back ("the previous version was restored and nothing was changed"; run
+`pb doctor`); too little free disk space to stage it reports "not enough free disk space to
+stage the update ... Nothing was changed" (free space on the disk that holds the Paperboat
+installation and run it again).
+
 Ordinary updates replace the feature worker while the process owner keeps shells
 and commands alive. Connections briefly interrupt and reconnect. A rare update
 that replaces the process owner announces a bounded deadline; running terminals

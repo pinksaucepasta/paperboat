@@ -10,6 +10,11 @@ retry.
 - A rejected session requires signing in again with `pb login` (or the enrollment command from the dashboard); there is no local-shell fallback.
 - Upload failures are fail-open only for the affected paste. Image bytes and paths are never logged.
 - For a stolen machine, revoke its client session in the dashboard, then run `pb auth logout`.
+- A machine revoked with `pb machine revoke <machine>` or in the dashboard loses access at once.
+  On that machine a command fails with "Your Paperboat session is no longer valid. Run `pb login`
+  ...", `pb status` says the same and `pb doctor` reports "signed out: its sign-in was revoked".
+  The machine stops retrying (credential refresh and private-access polling back off, then stop at
+  that signed-out state) instead of looping; run `pb login` to add it again.
 - During outages, use `pb doctor`; never bypass the common Paperboat transport or expose a raw
   machine port. `pb ssh` is allowed only when its stream succeeds through the normal selected
   direct/relay/WSS carrier and terminates at the machine's system `sshd`.

@@ -177,6 +177,16 @@ name=value`, `--pty`, and `--json`. Non-PTY execution keeps stdout and stderr se
 PTY mode merges them and forwards terminal resize events. JSON mode emits the versioned
 `paperboat.exec-event/v1` JSON Lines stream and returns the remote process exit status.
 
+A machine without managed ENV runs commands normally. When ENV is assigned but could not
+be applied to a launch, the command still runs and Paperboat says so once on stderr (in
+JSON mode as an entry in the event's `warnings` list with the same `code`):
+`environment_pending` ("delivery to this machine is pending") means the machine has not
+received its values yet; run `pb env vault unlock` on any of your devices.
+`environment_undeliverable` ("delivery to this machine failed") means delivery was
+attempted and failed; `pb env host show` shows the machine's delivery state. Values are
+applied only when a process launches, so `pb env host show` reports a delivery as applied
+after the next command or terminal starts, not before.
+
 ## Preview a local target
 
 `pb preview <port|url|path>` exposes a local service through a
@@ -280,7 +290,12 @@ Use `pb send <path>... --to <machine>` to deliver files to another machine's con
 Paperboat Inbox. Session and user defaults are explicit, multi-attachment ambiguity never
 selects the latest writer, and the sender exits successfully only after the destination
 verifies size and SHA-256, fsyncs the file, avoids name collisions, and records a durable
-receipt. Inbox files remain until the user removes them.
+receipt. Inbox files remain until the user removes them. Sending to the computer you are on
+(`--to` this machine) copies the files into its own Inbox without a transfer; it still has a
+transfer ID and shows in `pb send list`, `status` and `cancel`. A destination whose Inbox disk
+cannot hold the files is refused up front ("<machine> has no room for this in its Inbox (needs
+N, M free) ... Nothing was delivered"; JSON code `destination_storage_full`, nothing changed,
+not retryable): free space there or move its Inbox with `pb inbox set`, then send again.
 
 Use `pb send destination set <machine>` for a default recipient, and `pb send list`,
 `pb send status <transfer-id>`, or `pb send cancel <transfer-id>` with `--on <machine>`

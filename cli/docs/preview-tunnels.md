@@ -103,6 +103,26 @@ pb tunnel status api --watch
 pb tunnel logs api --follow
 ```
 
+When a tunnel is not serving, `pb tunnel status`, `pb tunnel logs` and `pb tunnel doctor`
+name the failing step and what to do about it; `--json` carries the same code in
+`overall_code`. The codes are:
+
+| Code | Meaning | What to do |
+|---|---|---|
+| `connector_missing` | No connector serves this tunnel | `pb tunnel connector add <tunnel>` on the machine that runs the app |
+| `connector_offline` | The host that runs the tunnel is off or its service is stopped | Make sure the machine is on (`pb environments`) and run `pb doctor` on it; the tunnel reconnects by itself |
+| `edge_unavailable` | The host is connected but no edge is ready | Nothing to change; if it lasts several minutes run `pb tunnel doctor` and send the support reference |
+| `dns_pending` | A custom domain is not verified yet | Add the records from `pb tunnel domain instructions`, then `pb tunnel domain verify` |
+| `certificate_pending` | The certificate is still being issued | Wait; issuance starts after DNS is verified (`pb tunnel domain list`) |
+| `origin_refused` | The app is not listening on the route's port | Start it, or fix the port with `pb tunnel route update`; the tunnel recovers within seconds |
+| `origin_timeout` | The app is running but did not answer in time | Check that it is healthy and not behind a firewall |
+| `origin_unreachable` | The host cannot reach the route's address | Check the address with `pb tunnel route list` |
+| `origin_tls` | The app's TLS certificate was not accepted | Trust it with the route's custom CA setting, or use an http origin |
+| `route_unavailable` | The edge rejected the route | Fix the origin address with `pb tunnel route update` |
+
+An empty `pb tunnel logs` is not left unexplained: it prints the tunnel's current state and
+what to do about it.
+
 Pausing withdraws new traffic without deleting the tunnel. Resuming reconciles
 the saved desired state. Deleting is an explicit destructive operation.
 
