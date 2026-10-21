@@ -6,11 +6,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
 	"github.com/spf13/cobra"
@@ -95,5 +97,20 @@ func TestUpdateRefusedForOpenConnectionsNamesThemAndForce(t *testing.T) {
 	terminal := updateControlFailure("install approved update", &updated.ControlError{Code: "active_terminal_sessions", Message: "update is waiting for running or detached terminal sessions to finish"})
 	if strings.Contains(commandFailureMessage(terminal, classifyCommandFailure(terminal)), "open SSH") {
 		t.Fatal("terminal-session refusal gained ssh wording")
+	}
+}
+
+// F14-03: an update that cannot be staged because the disk is full says so and that nothing changed,
+// instead of telling the user to approve administrator access.
+func TestUpdateOnAFullDiskNamesTheDiskAndNothingChanged(t *testing.T) {
+	err := fmt.Errorf("install: %w", hostinstall.ErrInsufficientSpace)
+	failure := classifyCommandFailure(err)
+	message := commandFailureMessage(err, failure)
+	if failure.kind != commandRejected || !strings.Contains(message, "not enough free disk space") || !strings.Contains(message, "Nothing was changed") || strings.Contains(message, "administrator") {
+		t.Fatalf("kind=%v message=%q", failure.kind, message)
+	}
+	result := classifyCLIJSONError(err)
+	if result.Code != "insufficient_disk_space" || result.StateChanged != false || result.Retryable || !strings.Contains(result.Recovery, "Free disk space") {
+		t.Fatalf("json = %+v", result)
 	}
 }

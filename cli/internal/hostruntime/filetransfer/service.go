@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
+	"github.com/pinksaucepasta/paperboat/internal/diskspace"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/store"
 )
@@ -34,10 +35,10 @@ func New(config Config) (*Service, error) {
 		return nil, &Error{Code: InvalidPath}
 	}
 	if err := os.MkdirAll(config.Root, 0o700); err != nil {
-		return nil, &Error{Code: StorageUnavailable, Cause: err}
+		return nil, storageFailure(err)
 	}
 	if err := os.Chmod(config.Root, 0o700); err != nil {
-		return nil, &Error{Code: StorageUnavailable, Cause: err}
+		return nil, storageFailure(err)
 	}
 	return &Service{config: config}, nil
 }
@@ -176,7 +177,7 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) ([]store.Fi
 		}
 		id, err := s.newID()
 		if err != nil {
-			return nil, &Error{Code: StorageUnavailable, Cause: err}
+			return nil, storageFailure(err)
 		}
 		expiresAt := now.Add(time.Duration(policy.RetentionSeconds) * time.Second)
 		if request.DestinationMachineID != s.config.LocalMachineID {
@@ -184,27 +185,32 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) ([]store.Fi
 		}
 		transfers[i] = store.FileTransfer{ID: id, BatchID: request.BatchID, SourceMachineID: request.SourceMachineID, DestinationMachineID: request.DestinationMachineID, InitiatingUserID: request.InitiatingUserID, SessionID: request.SessionID, DeliveryClientID: request.DeliveryClientID, Basename: file.Basename, Size: file.Size, SHA256: file.SHA256, State: "created", CreatedAt: now, ExpiresAt: expiresAt}
 	}
+	if request.DestinationMachineID == s.config.LocalMachineID {
+		if err := s.requireRoom(uint64(total)); err != nil {
+			return nil, err
+		}
+	}
 	if err := s.config.Store.CreateFileTransfersWithinLimits(ctx, transfers, policy.MaxPendingSpoolBytes, policy.MaxConcurrentTransfers); err != nil {
 		if errors.Is(err, store.ErrConflict) {
 			return nil, &Error{Code: ResourceLimit, Cause: err}
 		}
-		return nil, &Error{Code: StorageUnavailable, Cause: err}
+		return nil, storageFailure(err)
 	}
 	for _, transfer := range transfers {
 		s.cancelSignal(transfer.ID)
 		file, err := os.OpenFile(s.partialPath(transfer.ID), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 		if err != nil {
 			_ = s.cancelBatch(context.Background(), transfers)
-			return nil, &Error{Code: StorageUnavailable, Cause: err}
+			return nil, storageFailure(err)
 		}
 		if err := file.Close(); err != nil {
 			_ = s.cancelBatch(context.Background(), transfers)
-			return nil, &Error{Code: StorageUnavailable, Cause: err}
+			return nil, storageFailure(err)
 		}
 	}
 	if err := syncDir(s.config.Root); err != nil {
 		_ = s.cancelBatch(context.Background(), transfers)
-		return nil, &Error{Code: StorageUnavailable, Cause: err}
+		return nil, storageFailure(err)
 	}
 	return transfers, nil
 }
@@ -267,14 +273,14 @@ func (s *Service) append(ctx context.Context, id string, offset int64, body io.R
 	}
 	file, err := os.OpenFile(s.partialPath(id), os.O_WRONLY, 0)
 	if err != nil {
-		return transfer, &Error{Code: StorageUnavailable, Cause: err}
+		return transfer, storageFailure(err)
 	}
 	defer file.Close()
 	if err := file.Truncate(offset); err != nil {
-		return transfer, &Error{Code: StorageUnavailable, Cause: err}
+		return transfer, storageFailure(err)
 	}
 	if _, err := file.Seek(offset, io.SeekStart); err != nil {
-		return transfer, &Error{Code: StorageUnavailable, Cause: err}
+		return transfer, storageFailure(err)
 	}
 	remaining := transfer.Size - offset
 	canceled := s.cancelSignal(id)
@@ -301,7 +307,7 @@ func (s *Service) append(ctx context.Context, id string, offset int64, body io.R
 		return transfer, &Error{Code: InvalidSize}
 	}
 	if err := file.Sync(); err != nil {
-		return transfer, &Error{Code: StorageUnavailable, Cause: err}
+		return transfer, storageFailure(err)
 	}
 	if err := s.config.Store.CommitFileTransferOffset(ctx, id, offset, offset+written); err != nil {
 		return transfer, &Error{Code: OffsetConflict, Cause: err}
@@ -372,7 +378,7 @@ func (s *Service) Complete(ctx context.Context, id string) (store.FileTransfer, 
 		}
 		file, openErr := os.Open(contentPath)
 		if openErr != nil {
-			return requested, &Error{Code: StorageUnavailable, Cause: openErr}
+			return requested, storageFailure(openErr)
 		}
 		hash := sha256.New()
 		written, copyErr := io.Copy(hash, &contextReader{ctx: ctx, reader: file, canceled: s.cancelSignal(transfer.ID)})
@@ -396,15 +402,15 @@ func (s *Service) Complete(ctx context.Context, id string) (store.FileTransfer, 
 				//paperboat:allow-source-policy atomic-replacement owner=file-transfer reason=batch-commit-rollback
 				_ = os.Rename(s.contentPath(renamed[index].ID), s.partialPath(renamed[index].ID))
 			}
-			return requested, &Error{Code: StorageUnavailable, Cause: renameErr}
+			return requested, storageFailure(renameErr)
 		}
 		renamed = append(renamed, transfer)
 	}
 	if err := syncDir(s.config.Root); err != nil {
-		return requested, &Error{Code: StorageUnavailable, Cause: err}
+		return requested, storageFailure(err)
 	}
 	if err := s.config.Store.CompleteFileTransferBatch(ctx, requested.BatchID, s.config.LocalMachineID); err != nil {
-		return requested, &Error{Code: StorageUnavailable, Cause: err}
+		return requested, storageFailure(err)
 	}
 	for _, transfer := range transfers {
 		if transfer.DestinationMachineID == s.config.LocalMachineID {
@@ -482,14 +488,14 @@ func (s *Service) cancelBatchLocked(ctx context.Context, transfers []store.FileT
 			if errors.Is(err, store.ErrConflict) {
 				return &Error{Code: StateConflict, Cause: err}
 			}
-			return &Error{Code: StorageUnavailable, Cause: err}
+			return storageFailure(err)
 		}
 	}
 	for _, transfer := range transfers {
 		s.signalCancel(transfer.ID)
 	}
 	if err := s.waitForWrites(ctx, transfers); err != nil {
-		return errors.Join(result, &Error{Code: StorageUnavailable, Cause: err})
+		return errors.Join(result, storageFailure(err))
 	}
 	for _, transfer := range transfers {
 		for _, path := range []string{s.partialPath(transfer.ID), s.contentPath(transfer.ID), s.publishedPath(transfer)} {
@@ -585,9 +591,45 @@ func (r *contextReader) Read(p []byte) (int, error) {
 		return r.reader.Read(p)
 	}
 }
+
+// storageFailure is a failed write: a full disk is its own permanent code, anything else is a
+// storage problem the sender may retry.
+func storageFailure(err error) *Error {
+	if diskFull(err) {
+		return &Error{Code: InsufficientStorage, Cause: err}
+	}
+	return &Error{Code: StorageUnavailable, Cause: err}
+}
+
 func classifyIO(err error) error {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return err
 	}
-	return &Error{Code: StorageUnavailable, Cause: err}
+	return storageFailure(err)
+}
+
+// requireRoom refuses a batch the receiving disk cannot hold before a single byte is sent, so the
+// sender learns at once instead of failing mid-upload. It checks the spool the bytes land in and the
+// Inbox they are published to, which may be on another disk.
+func (s *Service) requireRoom(needed uint64) error {
+	roots := []string{s.config.Root}
+	if s.config.PublishRoot != nil {
+		if root, err := s.config.PublishRoot(); err == nil {
+			roots = append(roots, root)
+		}
+	}
+	freeSpace := s.config.FreeSpace
+	if freeSpace == nil {
+		freeSpace = diskspace.Available
+	}
+	for _, root := range roots {
+		free, err := freeSpace(root)
+		if err != nil {
+			continue // an unreadable disk is reported by the write itself
+		}
+		if free < needed {
+			return &Error{Code: InsufficientStorage, NeededBytes: needed, FreeBytes: free}
+		}
+	}
+	return nil
 }

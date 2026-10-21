@@ -3,6 +3,8 @@
 package hostruntimecmd
 
 import (
+	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
@@ -29,5 +31,15 @@ func TestSuppliedCommitRequestCarriesTheInstalledBundleIdentity(t *testing.T) {
 	}
 	if request.Source != (installsource.Source{}) {
 		t.Fatal("the original request was modified")
+	}
+}
+
+func TestInsufficientSpaceKeepsItsOwnExitStatusAcrossElevation(t *testing.T) {
+	refusal := fmt.Errorf("install: %w", hostinstall.ErrInsufficientSpace)
+	if got := serviceFailureExitCode(refusal); got != InsufficientSpaceExitCode {
+		t.Fatalf("exit status = %d, want %d", got, InsufficientSpaceExitCode)
+	}
+	if got := serviceFailureExitCode(errors.New("other")); got != 1 {
+		t.Fatalf("an ordinary failure got status %d", got)
 	}
 }

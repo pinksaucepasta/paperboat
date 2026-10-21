@@ -31,6 +31,7 @@ func InstallRunningBinary(ctx context.Context, executable string, source install
 func InstallUpdateSource(ctx context.Context, executable string, source installsource.Source, bundlePath string, force bool, directory string) (string, error) {
 	return installUpdateSource(ctx, executable, source, bundlePath, force, directory, true)
 }
+
 // supplyInstallRequest is the request every supplied install or update sends to the
 // privileged service. ControlURL lets a fresh machine guard learn the deployment's
 // local access domain from the server.
@@ -130,6 +131,8 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 					return hostinstall.ErrUpdateVerificationFailed
 				case LegacyCarrierRunningExitCode:
 					return hostinstall.ErrLegacyCarrierRunning
+				case InsufficientSpaceExitCode:
+					return hostinstall.ErrInsufficientSpace
 				}
 			}
 			return runtimeFailure("installing the supplied Paperboat executable failed; approve administrator access when prompted, then rerun `pb install`", err, runtimeContextFailure(callCtx))

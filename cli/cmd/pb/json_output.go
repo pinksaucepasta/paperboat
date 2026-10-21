@@ -215,6 +215,10 @@ func classifyCLIJSONFailure(err error, failure commandFailure) cliJSONError {
 		// The updater refused before changing anything.
 		result.Code, result.Category, result.StateChanged, result.Retryable = "update_busy", "conflict", false, true
 		result.Recovery = "Close the SSH connections and port forwards or wait for them to finish, then retry; `pb update --force` ends them."
+	case destinationStorageFullError:
+		// Nothing was delivered; the partial upload is discarded by the receiver.
+		result.Code, result.Category, result.StateChanged, result.Retryable = "destination_storage_full", "conflict", false, false
+		result.Recovery = "Free space on the destination or move its Inbox with `pb inbox set`, then send again."
 	case *filetransfer.LimitError:
 		// The batch was refused before anything was sent.
 		result.Code, result.Category, result.StateChanged = "file_transfer_limit_exceeded", "conflict", false
@@ -231,6 +235,10 @@ func classifyCLIJSONFailure(err error, failure commandFailure) cliJSONError {
 			if typed.reason == commandRejectUpdateVerification {
 				result.Code, result.StateChanged, result.Retryable = "update_verification_failed", false, false
 				result.Recovery = "Download a fresh official update bundle and retry. Force cannot bypass verification."
+			}
+			if typed.reason == commandRejectInsufficientSpace {
+				result.Code, result.StateChanged, result.Retryable = "insufficient_disk_space", false, false
+				result.Recovery = "Free disk space on the disk that holds the Paperboat installation, then retry."
 			}
 			if typed.reason == commandRejectUpdateBusy {
 				result.Code, result.StateChanged, result.Retryable = "update_busy", false, true

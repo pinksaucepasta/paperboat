@@ -340,7 +340,7 @@ func (h *FileTransferHandler) serveCollection(writer http.ResponseWriter, reques
 		if createFailure != nil {
 			reportFileTransferFailure(request.Context(), "command", createFailure)
 		}
-		writeHTTPError(writer, requestID, outcome.ErrorCode, fileTransferHTTPStatus(outcome.ErrorCode), false)
+		writeHTTPErrorDetails(writer, requestID, outcome.ErrorCode, fileTransferHTTPStatus(outcome.ErrorCode), false, insufficientStorageDetails(createFailure))
 		return
 	}
 	if replay {
@@ -640,7 +640,17 @@ func writeJSON(writer http.ResponseWriter, status int, value any) {
 }
 func writeFileTransferError(ctx context.Context, stage string, writer http.ResponseWriter, requestID string, err error) {
 	code := reportFileTransferFailure(ctx, stage, err)
-	writeHTTPError(writer, requestID, code, fileTransferHTTPStatus(code), code == "storage_unavailable" || code == "resource_limit" || code == "no_active_writer")
+	writeHTTPErrorDetails(writer, requestID, code, fileTransferHTTPStatus(code), code == "storage_unavailable" || code == "resource_limit" || code == "no_active_writer", insufficientStorageDetails(err))
+}
+
+// insufficientStorageDetails carries how much room the files need and the receiver has, when the
+// shortage was measured before anything was sent, so the sender can name both.
+func insufficientStorageDetails(err error) map[string]any {
+	var transferErr *filetransfer.Error
+	if !errors.As(err, &transferErr) || transferErr == nil || transferErr.Code != filetransfer.InsufficientStorage || transferErr.NeededBytes == 0 {
+		return nil
+	}
+	return map[string]any{"needed_bytes": transferErr.NeededBytes, "free_bytes": transferErr.FreeBytes}
 }
 
 func reportFileTransferFailure(ctx context.Context, stage string, err error) string {
@@ -692,6 +702,8 @@ func fileTransferHTTPStatus(code string) int {
 		return 499
 	case "resource_limit":
 		return http.StatusTooManyRequests
+	case "insufficient_storage":
+		return http.StatusInsufficientStorage
 	default:
 		return http.StatusServiceUnavailable
 	}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"os"
@@ -193,6 +194,10 @@ func classifyCommandFailure(err error) (failure commandFailure) {
 			set(commandRejected, commandRejection{reason: commandRejectUpdateVerification})
 			continue
 		}
+		if current == hostinstall.ErrInsufficientSpace {
+			set(commandRejected, commandRejection{reason: commandRejectInsufficientSpace})
+			continue
+		}
 		switch owner := current.(type) {
 		case accessTunnelCauseError:
 			switch owner.classification {
@@ -291,7 +296,7 @@ func classifyCommandFailure(err error) (failure commandFailure) {
 				set(commandRejected, current)
 			}
 			continue
-		case *TunnelCreateExistingError, *TunnelCreateChangedError, *TunnelOperationOutcomeError, *filetransfer.LimitError, updateOpenConnectionsRefusal:
+		case *TunnelCreateExistingError, *TunnelCreateChangedError, *TunnelOperationOutcomeError, *filetransfer.LimitError, updateOpenConnectionsRefusal, destinationStorageFullError:
 			set(commandRejected, current)
 			continue
 		case *TunnelOperationWaitTimeoutError:
@@ -446,8 +451,11 @@ func soleCommandOwner(err error) error {
 		if err == hostinstall.ErrUpdateVerificationFailed {
 			return commandRejection{reason: commandRejectUpdateVerification}
 		}
+		if errors.Is(err, hostinstall.ErrInsufficientSpace) {
+			return commandRejection{reason: commandRejectInsufficientSpace}
+		}
 		switch err.(type) {
-		case *sessionauth.CredentialFailure, *filetransfer.LimitError, updateOpenConnectionsRefusal, commandRejection, *envCommandFailure, *envHostRefreshFailure, *configComparisonFailure, updateCompletionFailure, setupFailureError, commandPreparationFailure, *api.APIError, *localapi.RemoteError, *TunnelCreateExistingError, *TunnelCreateChangedError, *TunnelOperationOutcomeError, *TunnelOperationWaitTimeoutError, uninstallCleanupError, preferenceLoadFailure, usageError, unsupportedJSONOutputError, managedssh.NativeExitError, managedssh.NativeLaunchError, exitCodeError, jsonFailureExitCodeError:
+		case *sessionauth.CredentialFailure, *filetransfer.LimitError, updateOpenConnectionsRefusal, destinationStorageFullError, commandRejection, *envCommandFailure, *envHostRefreshFailure, *configComparisonFailure, updateCompletionFailure, setupFailureError, commandPreparationFailure, *api.APIError, *localapi.RemoteError, *TunnelCreateExistingError, *TunnelCreateChangedError, *TunnelOperationOutcomeError, *TunnelOperationWaitTimeoutError, uninstallCleanupError, preferenceLoadFailure, usageError, unsupportedJSONOutputError, managedssh.NativeExitError, managedssh.NativeLaunchError, exitCodeError, jsonFailureExitCodeError:
 			return err
 		}
 		wrapper, ok := err.(interface{ Unwrap() error })

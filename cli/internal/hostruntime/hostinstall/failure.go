@@ -7,11 +7,21 @@ import (
 	"io"
 	"os"
 	"reflect"
+	"syscall"
 )
 
 // ErrLegacyCarrierRunning is a refusal to perform the first independent
 // carrier transition while the installation still runs an embedded peer.
 var ErrLegacyCarrierRunning = errors.New("This first update requires the existing Paperboat runtime to be stopped. Finish active sessions and SSH connections before stopping the native service, then retry.")
+
+// ErrInsufficientSpace is a refusal because the disk that holds the installation has no room for the
+// file being staged. Staging removes its partial file, so nothing was changed.
+var ErrInsufficientSpace = errors.New("there is not enough free disk space to stage the installation")
+
+// diskFull reports a write that failed because the disk or the user's quota is full.
+func diskFull(err error) bool {
+	return errors.Is(err, syscall.ENOSPC) || errors.Is(err, syscall.EDQUOT)
+}
 
 // installFailure keeps diagnostics available to the existing final caller while
 // excluding paths, process output, identities and parser input from presentation.

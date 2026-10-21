@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"syscall"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/store"
 )
@@ -22,11 +23,16 @@ const (
 	ResourceLimit      Code = "resource_limit"
 	Canceled           Code = "canceled"
 	DeliveryTimeout    Code = "delivery_timeout"
+	// InsufficientStorage means the receiving disk has no room for the files. It is permanent until
+	// space is freed, so a sender must not keep retrying it.
+	InsufficientStorage Code = "insufficient_storage"
 )
 
 type Error struct {
 	Code  Code
 	Cause error
+	// NeededBytes and FreeBytes accompany InsufficientStorage when the shortage is known up front.
+	NeededBytes, FreeBytes uint64
 }
 
 func (e *Error) Error() string {
@@ -40,10 +46,18 @@ func lookupFailure(err error) error {
 		return err
 	}
 	code := StorageUnavailable
+	if diskFull(err) {
+		code = InsufficientStorage
+	}
 	if errors.Is(err, store.ErrNotFound) {
 		code = InvalidPath
 	}
 	return &Error{Code: code, Cause: err}
+}
+
+// diskFull reports a write that failed because the disk or the user's quota is full.
+func diskFull(err error) bool {
+	return errors.Is(err, syscall.ENOSPC) || errors.Is(err, syscall.EDQUOT) || diskFullPlatform(err)
 }
 
 type cleanupFailure struct{ cause error }

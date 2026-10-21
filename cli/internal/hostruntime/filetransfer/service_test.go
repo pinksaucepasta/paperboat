@@ -960,7 +960,8 @@ func TestAppendReportsDiskFullWithoutCommittingOffset(t *testing.T) {
 		t.Fatal(err)
 	}
 	updated, err := service.Append(context.Background(), created[0].ID, 0, diskFullReader{})
-	if !hasCode(err, StorageUnavailable) || !errors.Is(err, syscall.ENOSPC) {
+	// A full disk is its own permanent code (the sender must not retry it as a storage hiccup).
+	if !hasCode(err, InsufficientStorage) || !errors.Is(err, syscall.ENOSPC) {
 		t.Fatalf("disk full err=%v", err)
 	}
 	if updated.CommittedOffset != 0 {

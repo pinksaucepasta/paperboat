@@ -272,6 +272,9 @@ func stageBinary(source, destination string, identity installsource.Source) (res
 	defer func() { resultErr = withCleanup("installation cleanup failed", resultErr, input.Close()) }()
 	//paperboat:allow-source-policy atomic-replacement owner=host-install reason=streamed-binary-staging
 	temporary, err := os.CreateTemp(filepath.Dir(destination), ".binary-*")
+	if diskFull(err) {
+		return hostInstallFailure("staging installation failed: no free disk space", ErrInsufficientSpace, err)
+	}
 	if err != nil {
 		return err
 	}
@@ -283,13 +286,22 @@ func stageBinary(source, destination string, identity installsource.Source) (res
 		return hostInstallFailure("staging installation failed", err, temporary.Close())
 	}
 	written, err := io.Copy(temporary, io.LimitReader(input, 256<<20+1))
+	if diskFull(err) {
+		return hostInstallFailure("staging installation failed: no free disk space", ErrInsufficientSpace, err, temporary.Close())
+	}
 	if err != nil || written < 1 || written > 256<<20 {
 		return hostInstallFailure("staging installation failed", ErrInvalidRequest, err, temporary.Close())
 	}
 	if err := temporary.Sync(); err != nil {
+		if diskFull(err) {
+			return hostInstallFailure("staging installation failed: no free disk space", ErrInsufficientSpace, err, temporary.Close())
+		}
 		return hostInstallFailure("staging installation failed", err, temporary.Close())
 	}
 	if err := temporary.Close(); err != nil {
+		if diskFull(err) {
+			return hostInstallFailure("staging installation failed: no free disk space", ErrInsufficientSpace, err)
+		}
 		return err
 	}
 	if err := identity.Verify(path); err != nil {

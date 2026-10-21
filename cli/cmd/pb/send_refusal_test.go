@@ -72,3 +72,29 @@ func TestTeamSuspendedRefusalNamesTheSuspension(t *testing.T) {
 		t.Fatalf("message=%q json=%+v", message, result)
 	}
 }
+
+// F6-05: a receiver whose disk is full refuses at once and the sender names it, in text and JSON.
+func TestSendToAFullDiskNamesTheComputerAndStopsRetrying(t *testing.T) {
+	remote := &filetransfer.Error{Code: "insufficient_storage", StatusCode: http.StatusInsufficientStorage, NeededBytes: 20 << 20, FreeBytes: 4 << 20}
+	err := destinationStorageFull("hp", fmt.Errorf("send batch: %w", remote))
+	failure := classifyCommandFailure(err)
+	message := commandFailureMessage(err, failure)
+	for _, want := range []string{"hp has no room for this in its Inbox", "needs 20 MiB, 4 MiB free", "pb inbox set", "Nothing was delivered"} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("message %q lacks %q", message, want)
+		}
+	}
+	result := classifyCLIJSONError(err)
+	if failure.kind != commandRejected || result.Code != "destination_storage_full" || result.StateChanged != false || result.Retryable {
+		t.Fatalf("kind=%v json=%+v", failure.kind, result)
+	}
+	// It ran out of room while receiving (the size was not known up front).
+	late := destinationStorageFull("hp", &filetransfer.Error{Code: "insufficient_storage", StatusCode: http.StatusInsufficientStorage})
+	if m := commandFailureMessage(late, classifyCommandFailure(late)); !strings.Contains(m, "ran out of room in its Inbox while receiving") {
+		t.Fatalf("late message %q", m)
+	}
+	other := &filetransfer.Error{Code: "storage_unavailable", StatusCode: http.StatusServiceUnavailable}
+	if destinationStorageFull("hp", other) != error(other) {
+		t.Fatal("another failure was converted")
+	}
+}

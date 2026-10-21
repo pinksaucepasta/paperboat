@@ -86,6 +86,8 @@ type Config struct {
 	Random                   io.Reader
 	Policy                   *PolicyStore
 	CancellationDrainTimeout time.Duration
+	// FreeSpace reports the bytes available on the disk holding a path; zero uses the real disk.
+	FreeSpace func(string) (uint64, error)
 }
 
 type Service struct {

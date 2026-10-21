@@ -21,6 +21,9 @@ const MaintenanceBusyExitCode = 75
 const UpdateVerificationExitCode = 76
 const LegacyCarrierRunningExitCode = 77
 
+// InsufficientSpaceExitCode preserves a staging refusal for lack of disk space across Unix elevation.
+const InsufficientSpaceExitCode = 78
+
 const usage = `pb daemon internal host runtime.
 
 Usage:
@@ -240,6 +243,9 @@ func serviceFailureExitCode(err error) int {
 	}
 	if err == hostinstall.ErrUpdateVerificationFailed {
 		return UpdateVerificationExitCode
+	}
+	if errors.Is(err, hostinstall.ErrInsufficientSpace) {
+		return InsufficientSpaceExitCode
 	}
 	return 1
 }

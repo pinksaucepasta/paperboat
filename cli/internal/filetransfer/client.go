@@ -85,7 +85,10 @@ type Error struct {
 	StatusCode int    `json:"-"`
 	RequestID  string `json:"requestId,omitempty"`
 	Retryable  bool   `json:"retryable"`
-	cause      error
+	// NeededBytes and FreeBytes come with "insufficient_storage" when the receiver measured the
+	// shortage before accepting the files.
+	NeededBytes, FreeBytes uint64 `json:"-"`
+	cause                  error
 }
 
 func (e *Error) Error() string {
@@ -793,6 +796,10 @@ func decodeError(response *http.Response) error {
 		Code      string `json:"code"`
 		RequestID string `json:"requestId"`
 		Retryable bool   `json:"retryable"`
+		Details   struct {
+			NeededBytes uint64 `json:"needed_bytes"`
+			FreeBytes   uint64 `json:"free_bytes"`
+		} `json:"details"`
 	}
 	decodeErr := json.NewDecoder(io.LimitReader(response.Body, 64<<10)).Decode(&envelope)
 	if decodeErr == nil {
@@ -803,6 +810,9 @@ func decodeError(response *http.Response) error {
 			failure.RequestID = envelope.RequestID
 		}
 		failure.Retryable = envelope.Retryable
+		if failure.Code == "insufficient_storage" {
+			failure.NeededBytes, failure.FreeBytes = envelope.Details.NeededBytes, envelope.Details.FreeBytes
+		}
 	} else if decodeErr != io.EOF {
 		failure.cause = decodeErr
 	}
