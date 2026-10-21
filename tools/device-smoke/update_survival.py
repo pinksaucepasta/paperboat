@@ -2,10 +2,10 @@
 """F14-02: during an update, a running file transfer finishes byte-identical and a preview and a tunnel come back on the same URL.
 
 Usage: update_survival.py TARGET PEER (--approve | --from FILE) (sudo password on stdin).
-Runs on TARGET (the machine that is updated). PEER is another machine of the same account whose
-`pb` sends two 40 MiB files to TARGET. While the transfer runs, the update is started
+Runs on TARGET (the machine that is updated). PEER is another machine of the same account that receives;
+TARGET sends two 40 MiB files to PEER. While the transfer runs, the update is started
 (`pb update --approve <downloaded candidate> --force`, or `pb update --from FILE --force`).
-Afterwards: the sender exits 0 and both files in TARGET's Inbox match the sender's SHA-256 digests;
+Afterwards: the sender exits 0 and both files in PEER's Inbox match the sender's SHA-256 digests;
 the preview URL and the tunnel URL are unchanged and serve their marker again (a gap while the runtime restarts is allowed).
 """
 import argparse
@@ -16,6 +16,7 @@ import json
 import os
 from pathlib import Path
 import re
+import subprocess
 import sys
 import tempfile
 import threading
@@ -79,7 +80,6 @@ def main():
     marker = 'PB_UPDATE_SURVIVE_' + uuid.uuid4().hex
     name = 'smoke-usurvive-' + uuid.uuid4().hex[:8]
     prefix = 'paperboat-usurvive-' + uuid.uuid4().hex[:10]
-    workdir = '/tmp/' + prefix
     preview_id = tunnel_id = None
     result = {'check': 'update-survival', 'target': args.target, 'peer': args.peer}
     error = None
@@ -95,15 +95,24 @@ def main():
             tunnel_id, tunnel_url = created['tunnel']['id'], created['tunnel']['stable_endpoint']
             wait_for(lambda: marker in body(preview_url), 'the preview to serve', 120)
             wait_for(lambda: marker in body(tunnel_url), 'the tunnel to serve', 120)
-            # Peer creates the files and starts the transfer in the background.
-            make = ('set -e; mkdir -p {d}; cd {d}; for i in 0 1; do head -c {n} /dev/urandom > {p}-$i.bin; done; '
-                    'sha256sum {p}-*.bin | cut -d" " -f1,3 > sums.txt; '
-                    '(nohup sh -c "~/.local/bin/pb send {p}-0.bin {p}-1.bin --to {t} --json > send.out 2>&1; echo $? > send.rc" >/dev/null 2>&1 &); sleep 1; echo STARTED'
-                    ).format(d=workdir, n=FILE_SIZE, p=prefix, t=args.target)
-            started = peer(args.peer, make)
-            if 'STARTED' not in started.stdout:
-                raise RuntimeError('the peer could not start the transfer: ' + started.stdout[-200:])
+            # TARGET creates two random files and starts sending them to PEER; the update restarts TARGET's runtime meanwhile.
+            hashes = {}
+            send_files = []
+            for number in range(FILES):
+                path = Path(directory) / ('%s-%d.bin' % (prefix, number))
+                digest = hashlib.sha256()
+                with path.open('wb') as handle:
+                    for _ in range(FILE_SIZE >> 20):
+                        block = os.urandom(1 << 20)
+                        digest.update(block)
+                        handle.write(block)
+                hashes[path.name] = digest.hexdigest()
+                send_files.append(str(path))
+            sender = subprocess.Popen([str(PB), 'send', *send_files, '--to', args.peer, '--json'],
+                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             time.sleep(10)
+            if sender.poll() is not None:
+                raise RuntimeError('the transfer ended before the update started: ' + sender.communicate()[0].decode()[-200:])
             if args.approve:
                 status = json.loads(command_result(PB, 'update', 'status', '--json', timeout=60).stdout)['data']
                 candidate = status['candidate']['id']
@@ -126,36 +135,25 @@ def main():
                     return None
             wait_for(lambda: ready_endpoint() == preview_url, 'the preview lease to report ready on the same URL')
             wait_for(lambda: tunnel('status', tunnel_id).get('overall_code') == 'ready', 'the tunnel to report ready (same stable URL already served)')
-            deadline = time.monotonic() + 600
-            while time.monotonic() < deadline:
-                done = peer(args.peer, 'cat %s/send.rc 2>/dev/null' % workdir, 60).stdout.strip()
-                if done:
-                    break
-                time.sleep(5)
-            else:
+            try:
+                out, errs = sender.communicate(timeout=600)
+            except subprocess.TimeoutExpired:
+                sender.kill()
                 raise RuntimeError('the transfer did not finish within 10 minutes of the update')
-            if done != '0':
-                raise RuntimeError('the transfer failed after the update (rc %s): %s' % (
-                    done, peer(args.peer, 'tail -c 300 %s/send.out' % workdir, 60).stdout))
-            sums = dict(line.split()[::-1] for line in peer(args.peer, 'cat %s/sums.txt' % workdir, 60).stdout.splitlines() if line.strip())
-            inbox = Path.home() / 'Paperboat/Inbox'
-            for file_name, digest in sums.items():
-                file_name = Path(file_name).name
-                received = inbox / file_name
-                actual = hashlib.sha256(received.read_bytes()).hexdigest()
-                if actual != digest.lstrip('*'):
-                    raise RuntimeError('received file differs: ' + file_name)
-            result['transfer_byte_identical'] = len(sums) == FILES
-            if len(sums) != FILES:
-                raise RuntimeError('not every file arrived')
+            if sender.returncode != 0:
+                raise RuntimeError('the transfer failed after the update (rc %s): %s' % (sender.returncode, (out + errs).decode()[-300:]))
+            listing = peer(args.peer, 'cd ~/Paperboat/Inbox && sha256sum %s-*.bin' % prefix, 120).stdout
+            received = {line.split()[1].lstrip('*'): line.split()[0] for line in listing.splitlines() if len(line.split()) == 2}
+            if received != hashes:
+                raise RuntimeError('received files differ from the sent ones: %r vs %r' % (sorted(received), sorted(hashes)))
+            result['transfer_byte_identical'] = True
         except BaseException as caught:
             error = caught
             raise
         finally:
             for step in (
                 lambda: invoke(PB, 'preview', 'stop', preview_id, '--json', timeout=60) if preview_id else None,
-                lambda: peer(args.peer, 'rm -rf %s' % workdir, 60),
-                lambda: [p.unlink() for p in (Path.home() / 'Paperboat/Inbox').glob(prefix + '*')],
+                lambda: peer(args.peer, 'rm -f ~/Paperboat/Inbox/%s-*.bin' % prefix, 60),
             ):
                 try:
                     step()
