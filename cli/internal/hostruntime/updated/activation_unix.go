@@ -505,17 +505,28 @@ func (s *Service) RunActivationHelper(ctx context.Context) (resultErr error) {
 		}
 		release, resolveErr := s.resolveUnixPreparedRelease(ctx, handoff, manager)
 		if resolveErr != nil {
-			return resolveErr
-		}
-		if s.config.ApplyPrepared != nil {
-			// Native replacement may stop participants before the signed gate
-			// observes Active. Persist that ownership before entering it.
-			handoff.ParticipantsTouched = true
-			if err = writeUnixHandoff(s.config.StateRoot, handoff); err != nil {
-				return err
+			// An earlier attempt that was rolled back consumed the approved payload, so this
+			// start can never activate it. End the attempt (journal reset to idle, installation
+			// left on the previous version) instead of failing the same way on every restart.
+			if !errors.Is(resolveErr, workerupdate.ErrPreparedCandidate) {
+				return resolveErr
 			}
+			abandoned, abandonErr := manager.AbandonUnavailableCandidate(ctx)
+			if abandonErr != nil || !abandoned {
+				return errors.Join(resolveErr, abandonErr)
+			}
+			err = resolveErr
+		} else {
+			if s.config.ApplyPrepared != nil {
+				// Native replacement may stop participants before the signed gate
+				// observes Active. Persist that ownership before entering it.
+				handoff.ParticipantsTouched = true
+				if err = writeUnixHandoff(s.config.StateRoot, handoff); err != nil {
+					return err
+				}
+			}
+			_, err = manager.Activate(ctx, release)
 		}
-		_, err = manager.Activate(ctx, release)
 	}
 	activationErr = err
 	state, stateErr := manager.TransactionState()
