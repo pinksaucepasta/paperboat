@@ -7,11 +7,14 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/pinksaucepasta/paperboat-relay/admission"
+	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/nativeprivate"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"time"
 )
 
@@ -24,8 +27,11 @@ func (s *runtimeObservationSender) validateMachineService(ctx context.Context, b
 	if err := binding.ValidateShape(); err != nil {
 		return errors.Join(admission.ErrRevoked, err)
 	}
+	// An unrelated service starting or stopping advances the announcement generation (for access to
+	// this very machine, `pb access`'s own listener does), so the binding's generation only has to be
+	// no newer than the current one; what must hold is that its exact target is still announced.
 	s.machineServicesMu.Lock()
-	announced := binding.AnnouncementGeneration == int64(s.machineServicesGeneration)
+	announced := binding.AnnouncementGeneration <= int64(s.machineServicesGeneration) && machineServiceAnnounced(s.machineServicesPorts, binding.TargetAddress)
 	s.machineServicesMu.Unlock()
 	if !announced {
 		return admission.ErrRevoked
@@ -96,4 +102,24 @@ func (s *runtimeObservationSender) validateMachineService(ctx context.Context, b
 		return errors.New("machine service authority response invalid")
 	}
 	return nil
+}
+
+// machineServiceAnnounced reports whether the announced set holds the loopback target address
+// ("127.0.0.1:5432" or "[::1]:5432") of a binding.
+func machineServiceAnnounced(ports []api.MachineServicePort, address string) bool {
+	host, portText, err := net.SplitHostPort(address)
+	port, portErr := strconv.Atoi(portText)
+	if err != nil || portErr != nil {
+		return false
+	}
+	family := "ipv4"
+	if host == "::1" {
+		family = "ipv6"
+	}
+	for _, announced := range ports {
+		if announced.Port == port && announced.AddressFamily == family {
+			return true
+		}
+	}
+	return false
 }

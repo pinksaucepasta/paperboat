@@ -141,6 +141,24 @@ func TestMachineServicePostgresAuthorityLifecycle(t *testing.T) {
 	if _, e = resolver.MachineServiceCurrent(ctx, request(owner, 22), explicit.AccessSessionID, explicit); e != nil {
 		t.Fatalf("automatic toggle revoked explicit: %v", e)
 	}
+	// An unrelated service starting advances the announcement generation (for access to a machine's own
+	// service, `pb access`'s own listener does). Access to a service that is still announced survives
+	// it, and ends when that very service is withdrawn.
+	snapshot.Generation++
+	snapshot.Services = []wire.Port{{Port: 22, AddressFamily: "ipv4"}, {Port: 8080, AddressFamily: "ipv4"}}
+	announce()
+	if _, e = resolver.MachineServiceCurrent(ctx, request(owner, 22), explicit.AccessSessionID, explicit); e != nil {
+		t.Fatalf("an unrelated service starting ended access to a service still announced: %v", e)
+	}
+	snapshot.Generation++
+	snapshot.Services = []wire.Port{{Port: 8080, AddressFamily: "ipv4"}}
+	announce()
+	if _, e = resolver.MachineServiceCurrent(ctx, request(owner, 22), explicit.AccessSessionID, explicit); !errors.Is(e, nativeprivateaccess.ErrDenied) {
+		t.Fatalf("a withdrawn service stayed reachable: %v", e)
+	}
+	snapshot.Generation++
+	snapshot.Services = []wire.Port{{Port: 22, AddressFamily: "ipv4"}}
+	announce()
 	// A changed generation cannot be refreshed with different content; stale boot
 	// and signed observation replay cannot extend the current announcement.
 	bad := snapshot

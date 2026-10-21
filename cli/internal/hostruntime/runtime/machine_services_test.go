@@ -119,7 +119,7 @@ func TestMachineServiceCurrentAuthorityExactBinding(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"expires_at": deadline}})
 	}))
 	defer server.Close()
-	s := &runtimeObservationSender{endpoint: server.URL + "/v1/runtime-observations", machineID: "machine_a", environmentID: "env_a", installationGeneration: 7, lazyBootID: "boot_a", machineServicesGeneration: 3, tokens: livenessObservationTokenSource{}, proofs: livenessObservationProofSource{}, operationID: func() (string, error) { return "operation_a", nil }, client: server.Client()}
+	s := &runtimeObservationSender{endpoint: server.URL + "/v1/runtime-observations", machineID: "machine_a", environmentID: "env_a", installationGeneration: 7, lazyBootID: "boot_a", machineServicesGeneration: 3, machineServicesPorts: []api.MachineServicePort{{Port: 3000, AddressFamily: "ipv4"}}, tokens: livenessObservationTokenSource{}, proofs: livenessObservationProofSource{}, operationID: func() (string, error) { return "operation_a", nil }, client: server.Client()}
 	b := nativeprivate.Binding{Schema: nativeprivate.SchemaV1, ResourceKind: "machine_service", ResourceID: "machine_a", OwnerEndpointID: "machine_a", RouteID: "tcp:3000", ResourceGeneration: 1, RouteGeneration: 1, TargetGeneration: 1, Protocol: "tcp", TargetScheme: "tcp", TargetAddress: "127.0.0.1:3000", ExpiresAt: time.Now().Add(time.Minute), InstallationGeneration: 7, BootID: "boot_a", PolicyGeneration: 2, AnnouncementGeneration: 3, UserID: "user_a", CLIClientSessionID: "cli_a", AccessSessionID: "access_a"}
 	if err := s.validateMachineService(context.Background(), b); err != nil {
 		t.Fatal(err)
@@ -136,9 +136,24 @@ func TestMachineServiceCurrentAuthorityExactBinding(t *testing.T) {
 	if err := s.validateMachineService(context.Background(), b); !errors.Is(err, admission.ErrRevoked) {
 		t.Fatal("revocation accepted")
 	}
-	b.AnnouncementGeneration--
-	if err := s.validateMachineService(context.Background(), b); err == nil || calls != 4 {
-		t.Fatal("stale snapshot reached authority", err, calls)
+	// A binding from a newer announcement than this host has made is not one it can vouch for.
+	b.AnnouncementGeneration = 4
+	if err := s.validateMachineService(context.Background(), b); !errors.Is(err, admission.ErrRevoked) || calls != 4 {
+		t.Fatal("a binding newer than the announcement reached authority", err, calls)
+	}
+	// An unrelated service starting or stopping advances the generation (for access to this very
+	// machine, `pb access`'s own listener does). A binding issued before that still works while its
+	// exact service is announced, and stops working the moment it is not.
+	s.machineServicesGeneration = 5
+	s.machineServicesPorts = append(s.machineServicesPorts, api.MachineServicePort{Port: 41807, AddressFamily: "ipv4"})
+	status = http.StatusOK
+	b.AnnouncementGeneration = 3
+	if err := s.validateMachineService(context.Background(), b); err != nil || calls != 5 {
+		t.Fatal("an unrelated service change ended access to a service that is still announced", err, calls)
+	}
+	s.machineServicesPorts = []api.MachineServicePort{{Port: 41807, AddressFamily: "ipv4"}}
+	if err := s.validateMachineService(context.Background(), b); !errors.Is(err, admission.ErrRevoked) || calls != 5 {
+		t.Fatal("a withdrawn service stayed reachable", err, calls)
 	}
 }
 
