@@ -1217,3 +1217,32 @@ func TestCreatePublishesTheDNSRecordBeforeReturningTheURL(t *testing.T) {
 		t.Fatalf("a publication failure failed the create: %v", err)
 	}
 }
+
+type addressWaiterFake struct{ published, awaited int }
+
+func (f *addressWaiterFake) PublishPreview(context.Context, string) error { f.published++; return nil }
+func (f *addressWaiterFake) AwaitPreviewAddress(context.Context, string)  { f.awaited++ }
+
+// The URL is announced as ready only after resolvers can find the right edge for it: the first ready
+// transition waits for the published address, a replay of it does not.
+func TestReadinessWaitsForThePublishedAddressOnce(t *testing.T) {
+	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
+	fake := newPreviewLeaseFake()
+	fake.owners["acct_1:machine_1"] = true
+	service := testPreviewLeaseService(t, fake, now)
+	waiter := &addressWaiterFake{}
+	service.ConfigureAddressPublisher(waiter)
+	created, err := service.Create(context.Background(), browserRequest(), createInput("machine_1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.attachmentReadiness = &attachmentReadinessFake{}
+	for i := 0; i < 2; i++ {
+		if _, err := service.ObserveMachineReadiness(context.Background(), machineRequest("machine_1"), created.Preview.ID, created.Operation.ID, "machine_1", "session_1", created.ETag, 1, "ready", "ready", "ready"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if waiter.published != 1 || waiter.awaited != 1 {
+		t.Fatalf("published=%d awaited=%d, want 1 and 1", waiter.published, waiter.awaited)
+	}
+}

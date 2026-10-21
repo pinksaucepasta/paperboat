@@ -406,6 +406,19 @@ type AddressPublisher interface {
 	PublishPreview(ctx context.Context, previewID string) error
 }
 
+// AddressPropagationWaiter is optionally implemented by the AddressPublisher: it returns once the provider's
+// authoritative servers answer with the preview's published addresses (or its bounded wait ends), because a
+// resolver that looks the name up before then is answered by the shared wildcard, which can be the other edge.
+type AddressPropagationWaiter interface {
+	AwaitPreviewAddress(ctx context.Context, previewID string)
+}
+
+func (s *Service) awaitPreviewAddress(ctx context.Context, previewID string) {
+	if waiter, ok := s.addressPublisher.(AddressPropagationWaiter); ok {
+		waiter.AwaitPreviewAddress(ctx, previewID)
+	}
+}
+
 // ConfigureAddressPublisher installs the synchronous DNS writer; without one the periodic reconcile
 // publishes alone.
 func (s *Service) ConfigureAddressPublisher(publisher AddressPublisher) {
@@ -943,6 +956,10 @@ func (s *Service) ObserveMachineReadiness(ctx context.Context, request previewtu
 			return PreviewResult{Preview: view, ETag: previewtunnelapi.ETag(Kind, current.ID, current.Generation)}, nil
 		}
 		return PreviewResult{}, previewtunnelstore.ErrGenerationConflict
+	}
+	if allocationState == "ready" && edgeState == "ready" && originState == "ready" && !current.ReadyAt.Valid {
+		// The URL is announced as ready only when resolvers can find the right edge for it.
+		s.awaitPreviewAddress(ctx, previewID)
 	}
 	auditID, err := s.newID("event")
 	if err != nil {
