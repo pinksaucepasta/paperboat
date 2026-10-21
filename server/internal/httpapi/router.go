@@ -690,7 +690,8 @@ func NewRouter(opts Options) http.Handler {
 		if opts.MeteringRepo != nil {
 			mux.HandleFunc("POST /v1/runtime-observations", runtimeObservation(opts.MeteringRepo, opts.RuntimeIdentity, opts.Config.ConfigSync.SummaryLimit, opts.Machines, opts.EnvironmentVariables, opts.LazyActivation, opts.MachineServices))
 		}
-		if opts.Auth != nil && opts.Config.Secrets.WorkOSActionsSecret != "" {
+		if opts.Auth != nil {
+			// Registered even without the secret (503 until it is set) so WorkOS reaches a handler, never a 404.
 			mux.HandleFunc("POST /v1/webhooks/workos/registration", workOSRegistrationAction(opts.Auth, opts.Config.Secrets.WorkOSActionsSecret, time.Now))
 		}
 		mux.HandleFunc("/", notFound)
