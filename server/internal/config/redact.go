@@ -24,6 +24,7 @@ func (c Config) RedactedJSON() string {
 	redacted.Secrets.EncryptionKey = redact(redacted.Secrets.EncryptionKey)
 	redacted.Secrets.WorkOSAPIKey = redact(redacted.Secrets.WorkOSAPIKey)
 	redacted.Secrets.WorkOSClientID = redact(redacted.Secrets.WorkOSClientID)
+	redacted.Secrets.WorkOSActionsSecret = redact(redacted.Secrets.WorkOSActionsSecret)
 	redacted.Secrets.StripeAPIKey = redact(redacted.Secrets.StripeAPIKey)
 	redacted.Secrets.StripeWebhookSecret = redact(redacted.Secrets.StripeWebhookSecret)
 	redacted.Secrets.GitHubClientID = redact(redacted.Secrets.GitHubClientID)

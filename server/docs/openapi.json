@@ -35526,6 +35526,46 @@
         }
       }
     },
+    "/v1/webhooks/workos/registration": {
+      "post": {
+        "operationId": "workos_registration_action",
+        "summary": "Answer WorkOS AuthKit's User Registration Action: deny a sign-up whose address is an alias of an existing account",
+        "parameters": [
+          {
+            "name": "WorkOS-Signature",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Signed Allow or Deny verdict."
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/machines/{machine_id}/private-access-policy": {
       "get": {
         "operationId": "get_v1_machines_machine_id_private_access_policy",

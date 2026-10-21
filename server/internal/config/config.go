@@ -320,6 +320,7 @@ type Secrets struct {
 	EncryptionKey         string   `json:"encryption_key"`
 	WorkOSAPIKey          string   `json:"workos_api_key"`
 	WorkOSClientID        string   `json:"workos_client_id"`
+	WorkOSActionsSecret   string   `json:"workos_actions_secret"`
 	StripeAPIKey          string   `json:"stripe_api_key"`
 	StripeWebhookSecret   string   `json:"stripe_webhook_secret"`
 	GitHubClientID        string   `json:"github_client_id"`

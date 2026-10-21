@@ -435,6 +435,9 @@ func overlayEnv(c *Config, lookup func(string) (string, bool), readFile func(str
 	if err := setSecret("PAPERBOAT_WORKOS_CLIENT_ID", &c.Secrets.WorkOSClientID); err != nil {
 		return err
 	}
+	if err := setSecret("PAPERBOAT_WORKOS_ACTIONS_SECRET", &c.Secrets.WorkOSActionsSecret); err != nil {
+		return err
+	}
 	if err := setSecret("PAPERBOAT_STRIPE_API_KEY", &c.Secrets.StripeAPIKey); err != nil {
 		return err
 	}
