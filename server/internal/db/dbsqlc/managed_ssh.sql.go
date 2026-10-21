@@ -274,7 +274,7 @@ const deleteRetiredMachineSSHHostKeyOwner = `-- name: DeleteRetiredMachineSSHHos
 DELETE FROM machine_ssh_host_key_owners o
 USING user_machines m
 WHERE o.fingerprint = $1 AND m.id = o.user_machine_id AND m.user_id = $2
-  AND m.state IN ('revoked', 'disconnected', 'deleted')
+  AND (m.state IN ('revoked', 'disconnected', 'deleted') OR (m.state = 'offline' AND NOT m.online))
 `
 
 type DeleteRetiredMachineSSHHostKeyOwnerParams struct {
@@ -294,7 +294,7 @@ const deleteRetiredMachineSSHHostKeys = `-- name: DeleteRetiredMachineSSHHostKey
 DELETE FROM machine_ssh_host_keys k
 USING user_machines m
 WHERE k.fingerprint = $1 AND m.id = k.user_machine_id AND m.user_id = $2
-  AND m.state IN ('revoked', 'disconnected', 'deleted')
+  AND (m.state IN ('revoked', 'disconnected', 'deleted') OR (m.state = 'offline' AND NOT m.online))
 `
 
 type DeleteRetiredMachineSSHHostKeysParams struct {

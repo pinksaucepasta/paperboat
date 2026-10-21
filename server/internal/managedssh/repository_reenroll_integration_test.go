@@ -16,6 +16,15 @@ import (
 // The same computer enrolled again (pb reset, reinstall) gets a new machine record but keeps its
 // SSH host keys. The retired record must not hold them against the new one forever.
 func TestSQLRepositoryHostKeysMoveToTheMachineThatReplacedARetiredRecord(t *testing.T) {
+	hostKeysMoveToTheReplacement(t, "disconnected")
+}
+
+// An OFFLINE record of the same account that cannot answer is released the same way: the computer was added again.
+func TestSQLRepositoryHostKeysMoveFromAnOfflineRecordOfTheSameAccount(t *testing.T) {
+	hostKeysMoveToTheReplacement(t, "offline")
+}
+
+func hostKeysMoveToTheReplacement(t *testing.T, retiredState string) {
 	dsn := os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
 	if dsn == "" {
 		t.Skip("set PAPERBOAT_TEST_DATABASE_DSN to run managed SSH repository integration tests")
@@ -62,7 +71,7 @@ func TestSQLRepositoryHostKeysMoveToTheMachineThatReplacedARetiredRecord(t *test
 	if err := observe("operation_reenroll_live", user, liveID, hostKey); !errors.Is(err, ErrConflict) {
 		t.Fatalf("a live machine's host key was handed to another machine: %v", err)
 	}
-	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET state='disconnected' WHERE id=$1`, oldID); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET state=$2,online=false WHERE id=$1`, oldID, retiredState); err != nil {
 		t.Fatal(err)
 	}
 	if err := observe("operation_reenroll_foreign", other, otherID, hostKey); !errors.Is(err, ErrConflict) {
