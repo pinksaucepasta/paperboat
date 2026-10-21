@@ -9,6 +9,7 @@ import { BrandScreen, brandPrimary, brandSecondary } from "@/components/brand-sc
 import { Button } from "@/components/ui/button"
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { NewMachineAccess } from "@/components/team/new-machine-access"
 import { WorkspacePicker } from "@/components/workspace-picker"
 
 type DeviceRequest = Data<"/v1/auth/device/requests/{user_code}">
@@ -144,6 +145,7 @@ function Pending({
   const [choice, setChoice] = useState<string>()
   const asked = workspaces.some((workspace) => workspace.id === data.requested_workspace)
   const workspaceId = choice ?? (asked ? data.requested_workspace : "personal")
+  const chosen = workspaces.find((workspace) => workspace.id === workspaceId)
   const machine = data.enrolled_machine
 
   return (
@@ -168,6 +170,7 @@ function Pending({
             onChange={setChoice}
             disabled={busy}
           />
+          {chosen?.kind === "team" && <NewMachineAccess team={chosen} tone="brand" />}
         </Field>
       )}
       {machine && (

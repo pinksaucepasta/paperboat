@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { NewMachineAccess } from "@/components/team/new-machine-access"
 import { WorkspacePicker } from "@/components/workspace-picker"
 
 /** Install on a new computer in any workspace; in a team, also share one of your machines. */
@@ -61,6 +62,8 @@ function AddMachineChoices({
   const [target, setTarget] = useState(workspace.id)
   const [plain, setPlain] = useState(false)
   const [sharing, setSharing] = useState(false)
+  const destination =
+    workspaces?.find((entry) => entry.id === target) ?? (target === workspace.id ? workspace : undefined)
   if (sharing && workspace.kind === "team") return <ShareMachine team={workspace} onDone={onDone} />
   return (
     <div className="flex flex-col gap-4">
@@ -78,6 +81,9 @@ function AddMachineChoices({
         onTogglePlain={() => setPlain(!plain)}
         onDone={onDone}
       />
+      {destination?.kind === "team" && (
+        <NewMachineAccess team={destination} current={destination.id === workspace.id} />
+      )}
       {workspace.kind === "team" && (
         <button
           type="button"
@@ -111,7 +117,21 @@ function AddMachine({
   const [description, setDescription] = useState("")
 
   // The command is the point of this dialog, so a pairing token is requested as soon as it opens.
-  const start = useMutation({ mutationFn: startEnrollment })
+  // A token that arrives after the dialog or workspace choice is gone is cancelled on arrival.
+  const alive = useRef(true)
+  useEffect(() => {
+    alive.current = true
+    return () => {
+      alive.current = false
+    }
+  }, [])
+  const start = useMutation({
+    mutationFn: async (input: Parameters<typeof startEnrollment>[0]) => {
+      const created = await startEnrollment(input)
+      if (!alive.current) void cancelEnrollment(created.id).catch(() => {})
+      return created
+    },
+  })
   const enrollment = start.data
   const requested = useRef(false)
   useEffect(() => {
