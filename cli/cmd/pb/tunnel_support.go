@@ -380,6 +380,11 @@ func tunnelMutationWaitFlags(command *cobra.Command) {
 }
 
 func waitForTunnelOperation(command *cobra.Command, client *api.Client, initial api.TunnelOperation) (api.TunnelOperation, error) {
+	// The server finished the change while answering and returned the resource itself (for example
+	// a removed domain): there is no operation to wait for.
+	if initial.Schema == "" {
+		return initial, nil
+	}
 	wantWait, _ := command.Flags().GetBool("wait")
 	if !wantWait {
 		switch initial.State {
@@ -453,7 +458,7 @@ func waitForTunnelOperation(command *cobra.Command, client *api.Client, initial 
 }
 
 func tunnelOperationHuman(operation api.TunnelOperation) string {
-	if operation.State == "succeeded" {
+	if operation.State == "succeeded" || operation.Schema == "" {
 		return "ready"
 	}
 	return fmt.Sprintf("%s (%s, operation %s)", operation.Phase, operation.State, operation.ID)
