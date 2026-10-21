@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"net"
 	"net/http"
 	"os"
@@ -455,10 +454,10 @@ func soleCommandOwner(err error) error {
 		if err == hostinstall.ErrUpdateVerificationFailed {
 			return commandRejection{reason: commandRejectUpdateVerification}
 		}
-		if errors.Is(err, hostinstall.ErrInsufficientSpace) {
+		if err == hostinstall.ErrInsufficientSpace {
 			return commandRejection{reason: commandRejectInsufficientSpace}
 		}
-		if errors.Is(err, hostinstall.ErrUpdateNotReady) {
+		if err == hostinstall.ErrUpdateNotReady {
 			return commandRejection{reason: commandRejectUpdateNotReady}
 		}
 		switch err.(type) {
