@@ -236,8 +236,17 @@ func (p *CloudflareDNSProvider) ReserveAddressStep(ctx context.Context) (context
 	return p.addressAdmission.Reserve(ctx, 3)
 }
 
+// providerBlockDelay is how long a 429's Retry-After holds back every write to the zone. The provider's rate-limit
+// window is five minutes, so a longer value never describes real throttling; honouring one blocked all preview
+// DNS writes for 94 minutes, during which new previews resolved through the shared wildcard to the wrong edge.
+const cloudflareAddressMaxBlock = 5 * time.Minute
+
+func providerBlockDelay(retryAfter string, now time.Time) time.Duration {
+	return min(parseRetryAfter(retryAfter, now), cloudflareAddressMaxBlock)
+}
+
 func (a *cloudflareAddressAdmission) Block(_ context.Context, retryAfter string) error {
-	delay := parseRetryAfter(retryAfter, time.Now().UTC())
+	delay := providerBlockDelay(retryAfter, time.Now().UTC())
 	if delay <= 0 {
 		return nil
 	}

@@ -212,7 +212,7 @@ func databaseAdmissionRelease(conn *pgxpool.Conn, zoneID string, slot int) func(
 }
 
 func (a *databaseCloudflareAddressAdmission) Block(_ context.Context, retryAfter string) error {
-	delay := parseRetryAfter(retryAfter, time.Now().UTC())
+	delay := providerBlockDelay(retryAfter, time.Now().UTC())
 	if delay <= 0 {
 		return nil
 	}
