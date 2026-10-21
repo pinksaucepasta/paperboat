@@ -119,8 +119,10 @@ def main():
             result['preview_same_url'] = True
             wait_for(lambda: marker in body(tunnel_url), 'the tunnel URL to serve again after the update')
             result['tunnel_same_url'] = True
+            wait_for(lambda: invoke(PB, 'preview', 'status', preview_id, '--json', timeout=30)['state'] == 'ready',
+                     'the preview lease to report ready again')
             after_preview = invoke(PB, 'preview', 'status', preview_id, '--json', timeout=30)
-            assert after_preview['state'] == 'ready' and receipt_value(after_preview, 'endpoint') == preview_url, 'preview URL changed'
+            assert receipt_value(after_preview, 'endpoint') == preview_url, 'preview URL changed'
             assert tunnel('status', tunnel_id)['tunnel']['stable_endpoint'] == tunnel_url, 'tunnel URL changed'
             deadline = time.monotonic() + 600
             while time.monotonic() < deadline:
