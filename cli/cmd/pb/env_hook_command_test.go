@@ -14,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/spf13/cobra"
 )
 
 func TestEnvHookLineRunsPbByAbsolutePathForEachShell(t *testing.T) {
@@ -214,5 +216,23 @@ func TestEnvHookLineStaysSilentWhenPbIsOldOrBroken(t *testing.T) {
 	out, err := exec.Command(bash, "-c", envHookLine("bash", old)+"\necho ok").CombinedOutput()
 	if err != nil || string(out) != "ok\n" {
 		t.Fatalf("old pb leaked into shell startup: %q %v", out, err)
+	}
+}
+
+func TestEnvHookEmitSkipsTheRootPreRun(t *testing.T) {
+	root := newRootCommand()
+	hook, _, err := root.Find([]string{"env", "hook"})
+	if err != nil || hook.PersistentPreRunE == nil {
+		t.Fatalf("env hook pre-run missing: %v", err)
+	}
+	called := false
+	root.PersistentPreRunE = func(*cobra.Command, []string) error { called = true; return nil }
+	_ = hook.Flags().Set("emit", "bash")
+	if err := hook.PersistentPreRunE(hook, nil); err != nil || called {
+		t.Fatalf("emit ran the root pre-run (update check): called=%v err=%v", called, err)
+	}
+	_ = hook.Flags().Set("emit", "")
+	if err := hook.PersistentPreRunE(hook, nil); err != nil || !called {
+		t.Fatalf("install/status must keep the root pre-run: called=%v err=%v", called, err)
 	}
 }

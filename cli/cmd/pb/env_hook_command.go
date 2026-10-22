@@ -42,6 +42,14 @@ func addEnvironmentHookCommand(root *cobra.Command) {
 			"--uninstall removes it. VS Code Remote-SSH: after installing, run \"Remote-SSH: Kill VS Code Server on Host\" and reconnect.",
 		Args: commandArgs(cobra.MaximumNArgs(1)),
 		RunE: runEnvironmentHook,
+		// --emit runs at every shell start: it skips the root pre-run, whose
+		// update-service check alone costs ~180 ms and may print notices.
+		PersistentPreRunE: func(command *cobra.Command, args []string) error {
+			if shell, _ := command.Flags().GetString("emit"); shell != "" {
+				return nil
+			}
+			return command.Root().PersistentPreRunE(command, args)
+		},
 	}
 	hook.Flags().Bool("install", false, "add the hook line to the shell startup file and record the account and workspace")
 	hook.Flags().Bool("uninstall", false, "remove the hook line from every shell startup file and forget the recorded choice")
