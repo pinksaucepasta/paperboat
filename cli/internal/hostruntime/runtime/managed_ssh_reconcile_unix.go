@@ -30,6 +30,7 @@ type managedSSHKeyReconciler struct {
 	timeout          time.Duration
 	sequence         atomic.Uint64
 	ready            atomic.Bool
+	hostKeyInUse     atomic.Bool
 
 	mu     sync.Mutex
 	cancel context.CancelFunc
@@ -53,10 +54,16 @@ func (s *managedSSHKeyReconciler) Start(ctx context.Context) error {
 	}
 	if err != nil {
 		var unavailable *managedSSHAuthorityUnavailable
-		if !errors.As(err, &unavailable) {
+		var inUse *managedSSHHostKeyInUse
+		switch {
+		case errors.As(err, &inUse):
+			// Everything except managed SSH keeps working; the owner regenerates this machine's keys.
+			slog.Warn("managed SSH disabled: this machine's SSH host keys are already another machine's; regenerate them, then run pb repair")
+		case !errors.As(err, &unavailable):
 			return errors.Join(ErrManagedSSHUnavailable, err)
+		default:
+			slog.Warn("managed SSH authority unavailable at startup; managed keys removed, retrying")
 		}
-		slog.Warn("managed SSH authority unavailable at startup; managed keys removed, retrying")
 	}
 	workerCtx, cancel := context.WithCancel(context.Background())
 	s.cancel = cancel
@@ -67,13 +74,13 @@ func (s *managedSSHKeyReconciler) Start(ctx context.Context) error {
 
 func (s *managedSSHKeyReconciler) run(ctx context.Context, done chan<- struct{}) {
 	defer close(done)
-	ticker := time.NewTicker(s.interval)
-	defer ticker.Stop()
+	timer := time.NewTimer(s.nextReconcile())
+	defer timer.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-timer.C:
 			reconcileCtx, cancel := context.WithTimeout(ctx, s.timeout)
 			if err := s.reconcile(reconcileCtx); err != nil {
 				// A managed key is only authoritative while the host can obtain a
@@ -83,6 +90,7 @@ func (s *managedSSHKeyReconciler) run(ctx context.Context, done chan<- struct{})
 				slog.Warn("managed SSH authority refresh failed", "error", err)
 			}
 			cancel()
+			timer.Reset(s.nextReconcile())
 		}
 	}
 }
@@ -92,8 +100,12 @@ func (s *managedSSHKeyReconciler) reconcile(ctx context.Context) error {
 	sequence := s.sequence.Add(1)
 	suffix := s.registration.MachineID + "-" + strconv.FormatUint(uint64(s.registration.InstallationGeneration), 10) + "-" + strconv.FormatUint(s.workerGeneration, 10) + "-refresh-" + strconv.FormatUint(sequence, 10)
 	keys, active, err := reconcileManagedSSHAuthorityWithOperations(ctx, s.client, s.identity, s.registration, s.workerGeneration, s.publicKeys, "managed-ssh-observe-"+suffix, "managed-ssh-keys-"+suffix)
+	s.hostKeyInUse.Store(hostKeysInUseElsewhere(err))
 	if err != nil {
 		_, cleanupErr := reconcilePlatformAuthorizedKeys(s.home, s.ownerUID, nil)
+		if cleanupErr == nil && s.hostKeyInUse.Load() {
+			return &managedSSHHostKeyInUse{cause: err}
+		}
 		if cleanupErr == nil && retryableManagedSSHAuthorityError(err) {
 			return &managedSSHAuthorityUnavailable{cause: err}
 		}
@@ -154,5 +166,33 @@ func (s *managedSSHKeyReconciler) CapabilityHealth() health.Capability {
 	if s.ready.Load() {
 		return health.Capability{State: health.Ready}
 	}
+	if s.hostKeyInUse.Load() {
+		return health.Capability{State: health.Unavailable, Reason: managedSSHHostKeyInUseCode, RetryAfterMs: uint64(managedSSHHostKeyInUseRetry / time.Millisecond)}
+	}
 	return health.Capability{State: health.Unavailable, Reason: "authority_unavailable", RetryAfterMs: uint64(s.interval / time.Millisecond)}
+}
+
+// managedSSHHostKeyInUseCode is the server's refusal of host keys another machine already uses (a
+// cloned VM or container image). It does not change by retrying, so the machine asks rarely.
+const managedSSHHostKeyInUseCode = "ssh_host_key_in_use"
+
+const managedSSHHostKeyInUseRetry = 10 * time.Minute
+
+type managedSSHHostKeyInUse struct{ cause error }
+
+func (e *managedSSHHostKeyInUse) Error() string {
+	return "this machine's SSH host keys are already another machine's"
+}
+func (e *managedSSHHostKeyInUse) Unwrap() error { return e.cause }
+
+func hostKeysInUseElsewhere(err error) bool {
+	var response *clientapi.APIError
+	return errors.As(err, &response) && response.Status == http.StatusConflict && response.Code == managedSSHHostKeyInUseCode
+}
+
+func (s *managedSSHKeyReconciler) nextReconcile() time.Duration {
+	if s.hostKeyInUse.Load() {
+		return max(s.interval, managedSSHHostKeyInUseRetry)
+	}
+	return s.interval
 }

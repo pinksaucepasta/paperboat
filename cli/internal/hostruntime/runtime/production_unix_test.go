@@ -497,3 +497,25 @@ func TestPeerEnrollmentRuntimeServicePersistsApprovalAfterStartup(t *testing.T) 
 		t.Fatal(err)
 	}
 }
+
+// Cloned host keys (another machine already uses them) keep the runtime up, ask the control plane
+// rarely instead of every interval, and report the typed reason.
+func TestManagedSSHKeyReconcilerBacksOffWhenHostKeysAreAnotherMachines(t *testing.T) {
+	inUse := &clientapi.APIError{Status: http.StatusConflict, Code: "ssh_host_key_in_use"}
+	client := &rotatingManagedSSHClient{observeErrors: []error{inUse, inUse, inUse, inUse}}
+	service := &managedSSHKeyReconciler{client: client, identity: &refreshingManagedSSHIdentity{}, registration: runtimeidentity.Registration{MachineID: "machine_1", InstallationGeneration: 4}, workerGeneration: 14, publicKeys: []string{"ssh-ed25519 AAAA host"}, home: managedSSHRuntimeTestHome(t), ownerUID: uint32(os.Getuid()), interval: 10 * time.Millisecond, timeout: time.Second}
+	if err := service.Start(t.Context()); err != nil {
+		t.Fatalf("cloned host keys stopped the runtime: %v", err)
+	}
+	t.Cleanup(func() { _ = service.Shutdown(context.Background()) })
+	time.Sleep(150 * time.Millisecond)
+	client.mu.Lock()
+	calls := client.hostCalls
+	client.mu.Unlock()
+	if calls != 1 {
+		t.Fatalf("host keys observed %d times in 150 ms; the refusal must back off", calls)
+	}
+	if got := service.CapabilityHealth(); got.Reason != "ssh_host_key_in_use" || got.RetryAfterMs != uint64((10*time.Minute)/time.Millisecond) {
+		t.Fatalf("health = %#v", got)
+	}
+}
