@@ -1,8 +1,12 @@
 name: Cross-platform
 
 # Build and test the cli and shared modules on the platforms users run (macOS, Windows).
-# Manual until the first run is triaged; then it runs on every push to main.
+# macOS must be green. Windows is post-launch (PLAN 1.1) and still has a known backlog, so its job
+# reports but does not fail the workflow; remove continue-on-error once it is green.
 on:
+  push:
+    branches: [main]
+  pull_request:
   workflow_dispatch:
     inputs:
       packages:
@@ -23,6 +27,7 @@ jobs:
   test:
     name: ${{ matrix.module }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.os == 'windows-latest' }}
     timeout-minutes: 90
     strategy:
       fail-fast: false
