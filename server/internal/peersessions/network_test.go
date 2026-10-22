@@ -32,25 +32,32 @@ func TestPersonalNetworkScopeHasReciprocalPairAndNoApplicationCapability(t *test
 	}
 }
 
-func TestRelayGrantKeepsThePeersInUseAheadOfTheBound(t *testing.T) {
-	self := networkBinding{AccountID: "account", EndpointID: "self", Role: "machine"}
+func TestRelayGrantsCarryEveryPeerInChunksOfTheRelayBound(t *testing.T) {
 	var peers []networkPeer
-	for i := range maximumRelayGrantPeers + 6 {
-		id := fmt.Sprintf("peer_%03d", i)
-		peers = append(peers, networkPeer{Identity: networkBinding{AccountID: "account", EndpointID: id, Role: "machine"}, Scopes: []networkScope{{ResourceKind: "machine_network"}}})
+	for i := range 2*maximumRelayGrantPeers + 5 {
+		peers = append(peers, networkPeer{Identity: networkBinding{EndpointID: fmt.Sprintf("peer_%03d", i), WireGuardPublicKey: fmt.Sprintf("key_%03d", (i*37)%1000)}})
 	}
-	last := peers[len(peers)-1].Identity
-	sessionPeer := peers[len(peers)-2].Identity.EndpointID
-	peers[len(peers)-2].Scopes = append(peers[len(peers)-2].Scopes, networkScope{ResourceKind: "machine_access"})
-	ordered := relayPriority(self, peers, map[string]bool{}, []string{personalNetworkScopeID(self, last)})
-	kept := map[string]bool{}
-	for _, peer := range ordered[:maximumRelayGrantPeers] {
-		kept[peer.Identity.EndpointID] = true
+	chunks := relayGrantChunks(peers)
+	if len(chunks) != 3 {
+		t.Fatalf("chunks = %d, want 3", len(chunks))
 	}
-	if !kept[last.EndpointID] || !kept[sessionPeer] {
-		t.Fatalf("bounded relay grant dropped a peer in use: live network %v, session %v", kept[last.EndpointID], kept[sessionPeer])
+	seen := map[string]bool{}
+	for _, chunk := range chunks {
+		if len(chunk) == 0 || len(chunk) > maximumRelayGrantPeers {
+			t.Fatalf("chunk of %d peers", len(chunk))
+		}
+		for _, entry := range chunk {
+			key := entry["wireguard_public_key"].(string)
+			if seen[key] {
+				t.Fatalf("peer %s in two chunks", key)
+			}
+			seen[key] = true
+		}
 	}
-	if len(relayGrantPeers(ordered)) != maximumRelayGrantPeers {
-		t.Fatal("relay grant is not bounded")
+	if len(seen) != len(peers) {
+		t.Fatalf("chunks carry %d of %d peers", len(seen), len(peers))
+	}
+	if empty := relayGrantChunks(nil); len(empty) != 1 || len(empty[0]) != 0 {
+		t.Fatal("an endpoint without peers still gets one grant per node")
 	}
 }

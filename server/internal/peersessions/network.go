@@ -15,6 +15,7 @@ import (
 	"net/netip"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -501,7 +502,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 		return NetworkConfigResult{}, ErrUnavailable
 	}
 	quotaDenied := s.relayQuotaWithheld(ctx, self.AccountID, now)
-	relayGrants, withheld, err := s.relayGrants(ctx, tx, self, relayPriority(self, peers, admittedPeers, live["machine_network"]), generation, now, expiry, quotaDenied)
+	relayGrants, withheld, err := s.relayGrants(ctx, tx, self, peers, generation, now, expiry, quotaDenied)
 	if err != nil {
 		return NetworkConfigResult{}, err
 	}
@@ -599,12 +600,15 @@ func (s *NetworkService) relayGrants(ctx context.Context, tx *sql.Tx, self netwo
 		return nil, false, err
 	}
 	defer rows.Close()
-	grants := make([]string, 0, 32)
+	chunks := relayGrantChunks(peers)
+	grants := make([]string, 0, len(chunks))
 	withheld := false
+	nodes := 0
 	for rows.Next() {
-		if len(grants) == 32 {
+		if nodes == 32 {
 			return nil, false, ErrResourceLimit
 		}
+		nodes++
 		var nodeID, processEpoch string
 		var nodeGeneration int64
 		var nodeExpiry time.Time
@@ -630,34 +634,39 @@ func (s *NetworkService) relayGrants(ctx context.Context, tx *sql.Tx, self netwo
 		if nodeExpiry.Before(expires) {
 			expires = nodeExpiry
 		}
-		relayPeers := relayGrantPeers(peers)
-		claims := map[string]any{"version": 1, "iss": s.issuer, "aud": "paperboat-relay", "iat": now.Unix(), "exp": expires.Unix(), "generation": generation, "account_id": self.AccountID, "endpoint_id": self.EndpointID, "wireguard_public_key": self.WireGuardPublicKey, "quic_certificate_fingerprint": self.QUICCertificateFingerprint, "quic_public_key": self.QUICPublicKey, "node_id": nodeID, "node_generation": nodeGeneration, "process_epoch": processEpoch, "peers": relayPeers}
-		if len(self.AdmittedCertificateFingerprints) > 0 {
-			claims["admitted_certificate_fingerprints"] = self.AdmittedCertificateFingerprints
-		}
-		if self.DiscoPublicKey != "" {
-			claims["disco_public_key"] = self.DiscoPublicKey
-		}
-		peerRelayReady := peerRelayEnabled && self.DiscoPublicKey != "" && peersHaveDiscoKeys(peers)
-		if peerRelayReady && len(controlPeers) != 0 {
-			claims["relay_control_peers"] = controlPeers
-		}
-		if peerRelayReady {
-			claims["peer_relay"] = map[string]any{
-				"wireguard_public_key": base64.RawURLEncoding.EncodeToString(peerRelayWG),
-				"disco_public_key":     base64.RawURLEncoding.EncodeToString(peerRelayDisco),
-				"virtual_address":      peerRelayAddress.String,
+		// One grant per chunk of at most maximumRelayGrantPeers peers, all with
+		// identical identity, iat, exp and generation; the relay and the CLI merge
+		// them. Relay control and the peer relay ride in the first chunk only.
+		for i, chunk := range chunks {
+			first := i == 0
+			claims := map[string]any{"version": 1, "iss": s.issuer, "aud": "paperboat-relay", "iat": now.Unix(), "exp": expires.Unix(), "generation": generation, "account_id": self.AccountID, "endpoint_id": self.EndpointID, "wireguard_public_key": self.WireGuardPublicKey, "quic_certificate_fingerprint": self.QUICCertificateFingerprint, "quic_public_key": self.QUICPublicKey, "node_id": nodeID, "node_generation": nodeGeneration, "process_epoch": processEpoch, "peers": chunk}
+			if len(self.AdmittedCertificateFingerprints) > 0 {
+				claims["admitted_certificate_fingerprints"] = self.AdmittedCertificateFingerprints
 			}
+			if self.DiscoPublicKey != "" {
+				claims["disco_public_key"] = self.DiscoPublicKey
+			}
+			peerRelayReady := peerRelayEnabled && self.DiscoPublicKey != "" && peersHaveDiscoKeys(peers)
+			if first && peerRelayReady && len(controlPeers) != 0 {
+				claims["relay_control_peers"] = controlPeers
+			}
+			if first && peerRelayReady {
+				claims["peer_relay"] = map[string]any{
+					"wireguard_public_key": base64.RawURLEncoding.EncodeToString(peerRelayWG),
+					"disco_public_key":     base64.RawURLEncoding.EncodeToString(peerRelayDisco),
+					"virtual_address":      peerRelayAddress.String,
+				}
+			}
+			grant, err := s.signer.SignRelayGrant(claims)
+			if err != nil {
+				return nil, false, err
+			}
+			if len(grant) > networkConfigLimit {
+				slog.Warn("peer network authority unavailable", "site", "network.go:653")
+				return nil, false, ErrUnavailable
+			}
+			grants = append(grants, grant)
 		}
-		grant, err := s.signer.SignRelayGrant(claims)
-		if err != nil {
-			return nil, false, err
-		}
-		if len(grant) > networkConfigLimit {
-			slog.Warn("peer network authority unavailable", "site", "network.go:653")
-			return nil, false, ErrUnavailable
-		}
-		grants = append(grants, grant)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, false, err
@@ -687,53 +696,27 @@ func relayControlPeers(self networkBinding, peers []networkPeer) ([]string, erro
 	return result, nil
 }
 
-// relayPriority orders the peers a relay grant names when it cannot name them
-// all: peers this endpoint is using now (an admitted session or grant, or a live
-// personal network scope) come first, so a bounded grant never drops them.
-func relayPriority(self networkBinding, peers []networkPeer, admittedPeers map[string]bool, liveNetworks []string) []networkPeer {
-	inUse := func(peer networkPeer) bool {
-		if admittedPeers[peer.Identity.EndpointID] || slices.Contains(liveNetworks, personalNetworkScopeID(self, peer.Identity)) {
-			return true
-		}
-		for _, scope := range peer.Scopes {
-			if scope.ResourceKind != "machine_network" {
-				return true
-			}
-		}
-		return false
-	}
-	ordered := slices.Clone(peers)
-	slices.SortStableFunc(ordered, func(a, b networkPeer) int {
-		switch ia, ib := inUse(a), inUse(b); {
-		case ia && !ib:
-			return -1
-		case ib && !ia:
-			return 1
-		}
-		return 0
-	})
-	return ordered
-}
-
 // maximumRelayGrantPeers is the relay's bound on one grant (relay derpquic
-// authority and mint both refuse more). Beyond it the extra peers have no relay
-// fallback but still connect directly; the configuration must not fail.
+// authority and mint both refuse more); more peers are carried in more grants.
 const maximumRelayGrantPeers = 64
 
-func relayGrantPeers(peers []networkPeer) []map[string]any {
-	if len(peers) > maximumRelayGrantPeers {
-		slog.Warn("relay grant names a bounded subset of the account's peers", "kept", maximumRelayGrantPeers, "peers", len(peers))
-		peers = peers[:maximumRelayGrantPeers]
-	}
-	result := make([]map[string]any, 0, len(peers))
-	for _, peer := range peers {
+func relayGrantChunks(peers []networkPeer) [][]map[string]any {
+	ordered := slices.Clone(peers)
+	slices.SortStableFunc(ordered, func(a, b networkPeer) int {
+		return strings.Compare(a.Identity.WireGuardPublicKey, b.Identity.WireGuardPublicKey)
+	})
+	chunks := [][]map[string]any{{}}
+	for _, peer := range ordered {
+		if len(chunks[len(chunks)-1]) == maximumRelayGrantPeers {
+			chunks = append(chunks, nil)
+		}
 		entry := map[string]any{"wireguard_public_key": peer.Identity.WireGuardPublicKey, "scopes": peer.Scopes}
 		if peer.Identity.DiscoPublicKey != "" {
 			entry["disco_public_key"] = peer.Identity.DiscoPublicKey
 		}
-		result = append(result, entry)
+		chunks[len(chunks)-1] = append(chunks[len(chunks)-1], entry)
 	}
-	return result
+	return chunks
 }
 
 func peersHaveDiscoKeys(peers []networkPeer) bool {
