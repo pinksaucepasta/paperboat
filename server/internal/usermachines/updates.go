@@ -229,8 +229,12 @@ func (s *Service) FleetUpdateSummary(ctx context.Context, userID string, options
 		return result, err
 	}
 	defer tx.Rollback()
+	// The team candidate clause (owned by or bound to the team) is a superset of the access rule below and is
+	// indexed; without it the team summary ran the access functions on every machine in the database.
 	const predicate = ` FROM user_machines m LEFT JOIN user_machine_update_observations o ON o.user_machine_id=m.id AND o.environment_id=m.environment_id
- WHERE m.deleted_at IS NULL AND (
+ WHERE m.deleted_at IS NULL
+ AND ($4::text IS NULL OR m.owner_team_id=$4 OR m.id IN (SELECT b.resource_id FROM team_resource_bindings b WHERE b.team_id=$4 AND b.resource_kind='machine'))
+ AND (
  ($4::text IS NULL AND m.user_id=$1 AND m.owner_team_id IS NULL)
  OR ($4::text IS NOT NULL AND EXISTS(
   SELECT 1 FROM teams t JOIN team_members member USING(team_id)
