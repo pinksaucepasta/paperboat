@@ -1,18 +1,20 @@
 "use client"
 
-import { TerminalIcon } from "@phosphor-icons/react"
+import { ShareNetworkIcon, TerminalIcon } from "@phosphor-icons/react"
 import Link from "next/link"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { createContext, useContext, useEffect, useState, useSyncExternalStore } from "react"
-import { useMachine, type Machine } from "@/lib/api"
+import { meQuery, useApiQuery, useMachine, type Machine } from "@/lib/api"
 import { formatPlatform } from "@/lib/format"
 import { machineTabs } from "@/lib/sections"
+import { useWorkspaceId } from "@/lib/workspace"
 import { cn } from "@/lib/utils"
 import { MachineAddress } from "@/components/machine-address"
 import { MachinePicker } from "@/components/machine-picker"
 import { MachineTitle } from "@/components/machine-identity"
 import { MachineStatus } from "@/components/machine-status"
 import { CrumbLink, PageHeader } from "@/components/page-header"
+import { TeamsUpgradeDialog } from "@/components/team/teams-upgrade"
 import { MinimizedTerminal, QuickTerminal, useTerminalSession, type TerminalDock } from "@/components/quick-terminal"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { Button } from "@/components/ui/button"
@@ -47,6 +49,10 @@ export function MachineShell({ machineId, children }: { machineId: string; child
   }, [terminalRequested, pathname, router])
   const session = useTerminalSession(machine, terminal !== "closed")
   const dock = useTerminalDock()
+  // In Personal, sharing your machine with people is a Teams feature: the button explains it.
+  const [sharing, setSharing] = useState(false)
+  const me = useApiQuery(meQuery).data
+  const personalOwner = useWorkspaceId() === "personal" && Boolean(me) && machine?.owner_account === me?.id
   const isMobile = useIsMobile()
 
   const base = `/machines/${machineId}`
@@ -103,6 +109,12 @@ export function MachineShell({ machineId, children }: { machineId: string; child
               <MachineAddress machine={machine} />
             </div>
           </div>
+          {personalOwner && (
+            <Button variant="outline" size="lg" onClick={() => setSharing(true)}>
+              <ShareNetworkIcon data-icon="inline-start" />
+              Share
+            </Button>
+          )}
           <Button variant="secondary" size="lg" onClick={() => setTerminal("open")} disabled={terminal === "open"}>
             <TerminalIcon data-icon="inline-start" />
             Quick terminal
@@ -177,6 +189,7 @@ export function MachineShell({ machineId, children }: { machineId: string; child
           onClose={() => setTerminal("closed")}
         />
       )}
+      <TeamsUpgradeDialog reason="machine" open={sharing} onOpenChange={setSharing} />
     </MachineContext>
   )
 }

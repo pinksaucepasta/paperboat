@@ -2,12 +2,14 @@
 
 import { CircleNotchIcon, EnvelopeSimpleIcon, MinusIcon, PlusIcon, UsersThreeIcon } from "@phosphor-icons/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useRouter, useSearchParams } from "next/navigation"
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import { idempotencyKey, meQuery, useApiQuery, useWorkspace, workspacesQuery } from "@/lib/api"
-import { billingLive, notLiveTitle } from "@/lib/billing"
+import { billingLive, billingQuery, notLiveTitle, teamTrialDays } from "@/lib/billing"
 import { answerInvitation, createPaidTeam, createTeam, myInvitationsQuery, teamIdPattern } from "@/lib/teams"
 import { setWorkspace } from "@/lib/workspace"
 import { TeamManage } from "@/components/team/team-members"
+import { TeamsUpgradeDialog } from "@/components/team/teams-upgrade"
 import { Time } from "@/components/time"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
@@ -62,7 +64,21 @@ function Teams() {
   const workspaces = useApiQuery(workspacesQuery)
   const confirming = useConfirmedTeam(workspaces.data?.map((workspace) => workspace.id))
   const invitations = useApiQuery(myInvitationsQuery)
+  // `?create=1` (from the Teams prompt elsewhere) opens Create team once.
+  const router = useRouter()
+  const createRequested = useSearchParams().get("create") === "1"
   const [creating, setCreating] = useState(false)
+  const [adding, setAdding] = useState(false)
+  // Handled once per arrival: closing the dialog must not reopen it before the URL is cleaned.
+  const [handledCreate, setHandledCreate] = useState(false)
+  if (createRequested && !handledCreate) {
+    setHandledCreate(true)
+    setCreating(true)
+  }
+  if (!createRequested && handledCreate) setHandledCreate(false)
+  useEffect(() => {
+    if (createRequested) router.replace("/team", { scroll: false })
+  }, [createRequested, router])
   const teams = workspaces.data?.filter((workspace) => workspace.kind === "team") ?? []
   const me = useApiQuery(meQuery).data
   // The list also holds invitations you sent; only those addressed to you belong here.
@@ -79,6 +95,9 @@ function Teams() {
     <div className="flex flex-col gap-10">
       <header className="flex items-center gap-4">
         <h1 className="flex-1 font-heading text-2xl font-semibold tracking-tight">Teams</h1>
+        <Button variant="outline" size="lg" onClick={() => setAdding(true)}>
+          Add member
+        </Button>
         <Button size="lg" onClick={() => setCreating(true)}>
           Create team
         </Button>
@@ -149,6 +168,7 @@ function Teams() {
       </section>
 
       <CreateTeamDialog open={creating} onOpenChange={setCreating} />
+      <TeamsUpgradeDialog reason="member" open={adding} onOpenChange={setAdding} />
     </div>
   )
 }
@@ -206,6 +226,8 @@ function CreateTeamForm() {
   const [seats, setSeats] = useState(1)
   const [period, setPeriod] = useState<"month" | "year">("month")
   const paid = billingLive.paidTeamCreate
+  const personal = useApiQuery(workspacesQuery).data?.find((workspace) => workspace.kind === "personal")
+  const trial = teamTrialDays(useApiQuery(billingQuery(personal)).data)
   // One operation per distinct order: changing the team, seats or interval is a new order.
   const key = useMemo(() => idempotencyKey(), [id, seats, period]) // eslint-disable-line react-hooks/exhaustive-deps
   const valid = teamIdPattern.test(id)
@@ -278,7 +300,9 @@ function CreateTeamForm() {
           </ToggleGroup>
         </div>
         <span className="text-xs text-muted-foreground">
-          {paid
+          {paid && trial
+            ? `You take one seat. Free for ${trial} days with your card on file; billing begins on day ${trial + 1}, and cancelling before then costs nothing.`
+            : paid
             ? "You take one seat. Add more any time; new seats are charged for the rest of the period."
             : `${notLiveTitle}: teams are created free for now.`}
         </span>
@@ -286,7 +310,13 @@ function CreateTeamForm() {
       {create.isError && <p className="text-sm text-destructive">{create.error.message}</p>}
       <DialogFooter>
         <Button type="submit" size="lg" disabled={!valid || create.isPending}>
-          {create.isPending ? "Creating…" : paid ? "Continue to payment" : "Create team"}
+          {create.isPending
+            ? "Creating…"
+            : paid && trial
+              ? `Start ${trial}-day free trial`
+              : paid
+                ? "Continue to payment"
+                : "Create team"}
         </Button>
       </DialogFooter>
     </form>

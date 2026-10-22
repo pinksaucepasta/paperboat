@@ -17,6 +17,8 @@ export const billingLive = {
   seats: true,
   topups: true,
   paidTeamCreate: true,
+  /** `team_trial_days` on the personal overview and a trial in Team Checkout (Lane O). */
+  teamTrial: false,
 } as const
 export const notLiveTitle = "Not available yet"
 
@@ -38,6 +40,15 @@ function billingPath(workspace: Workspace) {
 }
 
 export const billingKey = (workspace: string) => ["billing", workspace] as const
+
+/**
+ * Days of free trial a new team would get (the personal overview's `team_trial_days`; 0 once used).
+ * Undefined until the trial is live, so the console never promises one the server won't give.
+ */
+export function teamTrialDays(billing: BillingWorkspace | undefined): number | undefined {
+  if (!billingLive.teamTrial || !billing) return undefined
+  return (billing as BillingWorkspace & { team_trial_days?: number }).team_trial_days
+}
 
 /** The workspace's plan and its hosted relay + edge allowance for the current period. */
 export const billingQuery = (workspace: Workspace | undefined) =>
