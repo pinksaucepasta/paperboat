@@ -3,6 +3,7 @@ package configsync
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"os"
 	"path/filepath"
@@ -217,8 +218,30 @@ func TestWorkspaceReconcilerPublishesCleanMergeFromPersistedBase(t *testing.T) {
 		ExpectedRemoteRevision: baseRevision,
 	}}}
 	reconciler.resolutions = authority
-	if _, err := reconciler.Reconcile(context.Background(), repositoryRoot, RemoteSnapshot{Revision: prepared.CommitID}); err != nil || len(reconciler.Diagnostics().Conflicts) != 1 || len(authority.acknowledged) != 0 {
+	stale, err := reconciler.Reconcile(context.Background(), repositoryRoot, RemoteSnapshot{Revision: prepared.CommitID})
+	if err != nil || len(reconciler.Diagnostics().Conflicts) != 1 || len(authority.acknowledged) != 0 {
 		t.Fatalf("stale path resolution applied: diagnostics = %#v, acknowledgements = %#v, %v", reconciler.Diagnostics(), authority.acknowledged, err)
+	}
+	if err := reconciler.PublicationCommitted(context.Background(), stale, stale.CommitID); err != nil {
+		t.Fatal(err)
+	}
+	// The listed revision may be the other half's (TestSplitHalvesListAConflictOnceAndResolveItByPath):
+	// at the current head, the path decides.
+	otherHalf := strings.Repeat("c", 64)
+	if otherHalf == diagnostics.Conflicts[0].Revision {
+		t.Fatal("fixture revision collision")
+	}
+	byPath := &testResolutionAuthority{items: []ConflictResolution{{
+		ID: "other-half-resolution", Path: "config.txt", Scope: "path", Action: "keep_remote",
+		ConflictRevision: otherHalf, ExpectedRemoteRevision: prepared.CommitID,
+	}}}
+	reconciler.resolutions = byPath
+	resolvedByPath, err := reconciler.Reconcile(context.Background(), repositoryRoot, RemoteSnapshot{Revision: prepared.CommitID})
+	if err != nil || len(reconciler.Diagnostics().Conflicts) != 0 {
+		t.Fatalf("resolution by path not applied: diagnostics = %#v, %v", reconciler.Diagnostics(), err)
+	}
+	if err := reconciler.PublicationCommitted(context.Background(), resolvedByPath, resolvedByPath.CommitID); err != nil || len(byPath.acknowledged) != 1 {
+		t.Fatalf("resolution by path not acknowledged: %#v, %v", byPath.acknowledged, err)
 	}
 	// A confirmed force of the whole configuration takes the current remote, even when the
 	// repository moved after the status the user saw (pbvm3 lanel-a, 2026-10-23: it was never applied).
@@ -471,5 +494,17 @@ func TestOnlyTheMatchingHalfOfASplitAssignmentCarriesOutAResolution(t *testing.T
 	alone := &PlaintextWorkspaceReconciler{descriptor: RuntimeDescriptor{Mode: ModePullOnly, PullRepositoryID: "repository"}}
 	if alone.leavesToOtherDirection(ConflictResolution{Action: "keep_local"}) {
 		t.Fatal("a standalone pull-only assignment must handle keep_local")
+	}
+}
+
+// The pull and push halves may name one disagreement with two revisions when they saw the
+// repository at different moments (lanel-a, 2026-10-23): it is listed once, and the half that
+// must carry out the resolution applies it although the listed revision is the other half's.
+func TestSplitHalvesListAConflictOnceAndResolveItByPath(t *testing.T) {
+	pull := ReconciliationDiagnostics{Conflicts: []PathSummary{{Path: "cfg/value.txt", Reason: "concurrent_update", Revision: strings.Repeat("a", 64)}}}
+	push := ReconciliationDiagnostics{Conflicts: []PathSummary{{Path: "cfg/value.txt", Reason: "concurrent_update", Revision: strings.Repeat("b", 64)}}}
+	combined := CombineDirectionalDiagnostics(pull, push)
+	if len(combined.Conflicts) != 1 || combined.Conflicts[0].Revision != strings.Repeat("a", 64) {
+		t.Fatalf("conflicts = %+v, want one entry, the pull half's", combined.Conflicts)
 	}
 }

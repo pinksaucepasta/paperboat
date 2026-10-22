@@ -70,18 +70,19 @@ func CombineDirectionalDiagnostics(pull, push ReconciliationDiagnostics) Reconci
 	return push
 }
 
-// uniquePathSummaries keeps one entry per path, reason and revision: when the pull and the push
-// repository are the same one, both reconcilers see (and report) the same conflict.
+// uniquePathSummaries keeps one entry per path, the first one given (the pull half's). The two
+// halves keep separate clones and may see the repository at different moments, so one
+// disagreement can carry two revisions; listing both made the user resolve an entry the half that
+// must carry it out did not recognise (lanel-a, 2026-10-23). Halves match path resolutions by
+// path for the same reason.
 func uniquePathSummaries(values []PathSummary) []PathSummary {
-	type key struct{ path, reason, revision string }
-	seen := make(map[key]bool, len(values))
+	seen := make(map[string]bool, len(values))
 	result := values[:0:0]
 	for _, value := range values {
-		k := key{value.Path, value.Reason, value.Revision}
-		if seen[k] {
+		if seen[value.Path] {
 			continue
 		}
-		seen[k] = true
+		seen[value.Path] = true
 		result = append(result, value)
 	}
 	return result
@@ -345,7 +346,9 @@ func (r *PlaintextWorkspaceReconciler) Reconcile(ctx context.Context, repository
 					continue
 				}
 				for _, conflict := range plan.Conflicts {
-					if resolution.Path != conflict.Path || resolution.ConflictRevision != conflict.Revision {
+					// By path, not revision: see uniquePathSummaries. The remote head is still fenced
+					// above and the server accepts only a revision it listed for this path.
+					if resolution.Path != conflict.Path {
 						continue
 					}
 					switch resolution.Action {
