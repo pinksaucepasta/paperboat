@@ -12,6 +12,7 @@ import { useListScope, ViewToggle } from "@/components/list-toolbar"
 import { useCurrentMachine } from "@/components/machine-shell"
 import { smoothPath } from "@/components/usage-limits"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useTimeFormat } from "@/lib/use-time-format"
 
 /*
  * How much traffic Paperboat carried and which way it went: directly between machines, through a
@@ -261,13 +262,12 @@ function Figure({ children }: { children: React.ReactNode }) {
   return <span className="font-heading text-2xl font-semibold tracking-tight tabular-nums">{children}</span>
 }
 
-const dayFormat = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" })
-const hourFormat = new Intl.DateTimeFormat(undefined, { hour: "numeric" })
 
 /** Traffic over the period, hourly or daily as the server buckets it, with the busiest point marked. */
 function Chart({ usage, period }: { usage: Usage; period: UsagePeriod }) {
   const gradient = useId()
   const [hover, setHover] = useState<number>()
+  const time = useTimeFormat()
   const values = usage.series.map((point) => point.upload_bytes + point.download_bytes)
   if (values.length < 2) return null
   const peak = Math.max(1, ...values)
@@ -276,7 +276,7 @@ function Chart({ usage, period }: { usage: Usage; period: UsagePeriod }) {
     40 - (value / peak) * 36,
   ])
   const line = smoothPath(points)
-  const label = (iso: string) => (period === "24h" ? hourFormat : dayFormat).format(new Date(iso))
+  const label = (iso: string) => time.date(iso, period === "24h" ? "hour" : "day")
   const shown = hover ?? values.indexOf(Math.max(...values))
   const ticks = [...new Set([0, Math.floor((values.length - 1) / 2), values.length - 1])]
 

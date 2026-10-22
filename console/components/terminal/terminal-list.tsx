@@ -6,7 +6,6 @@ import { Fragment, useDeferredValue, useState } from "react"
 import { toast } from "sonner"
 import { useApiQuery, type Machine } from "@/lib/api"
 import { formatRelative } from "@/lib/format"
-import { useNow } from "@/lib/use-now"
 import { closeTerminal, terminalKeys, terminalsQuery } from "@/lib/terminal/queries"
 import { terminalCanAttach, type TerminalSession } from "@/lib/terminal/use-terminal-connection"
 import { useCurrentMachine } from "@/components/machine-shell"
@@ -19,10 +18,9 @@ import { Button } from "@/components/ui/button"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
 import { copyWithToast } from "@/lib/clipboard"
+import { useTimeFormat } from "@/lib/use-time-format"
 
 const day = 86_400_000
-const shortDate = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" })
-const monthYear = new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" })
 /** Closed terminals are kept for 30 days after closing (`expires_at`), which dates the close. */
 const retention = 30 * day
 
@@ -39,7 +37,11 @@ function lastUsed(session: TerminalSession, now: number): number {
 }
 
 /** Google Photos-style groups: Today, Yesterday, earlier this week, earlier this month, then months. */
-function groupOf(time: number, now: number): { key: string; label: string } {
+function groupOf(
+  time: number,
+  now: number,
+  date: (iso: string, style: "month") => string,
+): { key: string; label: string } {
   if (!time) return { key: "older", label: "Earlier" }
   const today = new Date(now)
   today.setHours(0, 0, 0, 0)
@@ -50,7 +52,7 @@ function groupOf(time: number, now: number): { key: string; label: string } {
   if (time >= start - 6 * day) return { key: "week", label: "Earlier this week" }
   if (when.getMonth() === today.getMonth() && when.getFullYear() === today.getFullYear())
     return { key: "month", label: "Earlier this month" }
-  return { key: `${when.getFullYear()}-${when.getMonth()}`, label: monthYear.format(when) }
+  return { key: `${when.getFullYear()}-${when.getMonth()}`, label: date(when.toISOString(), "month") }
 }
 
 type View = "open" | "closed"
@@ -67,7 +69,7 @@ export function MachineTerminals() {
 export function TerminalList({ machine: tabMachine }: { machine?: Machine }) {
   const { scope, machine } = useListScope(tabMachine)
   const query = useApiQuery(terminalsQuery)
-  const now = useNow(60_000)
+  const { now, date } = useTimeFormat(60_000)
   const [view, setView] = useState<View>("open")
   const [search, setSearch] = useState("")
   const text = useDeferredValue(search.trim().toLowerCase())
@@ -92,7 +94,7 @@ export function TerminalList({ machine: tabMachine }: { machine?: Machine }) {
   if (view === "open" && shown.length) groups.push({ key: "open", label: "", rows: shown })
   else
     for (const row of shown) {
-      const { key, label } = groupOf(row.time, now)
+      const { key, label } = groupOf(row.time, now, date)
       const group = groups.at(-1)
       if (group?.key === key) group.rows.push(row)
       else groups.push({ key, label, rows: [row] })
@@ -246,11 +248,12 @@ function Row({ session, now, showMachine }: { session: TerminalSession; now: num
   // What's running: the app's own window title, or the foreground program.
   const activity = session.title || session.foreground_process
   const href = `/terminals/${encodeURIComponent(session.id)}`
+  const time = useTimeFormat()
   const lastUsedLabel =
     session.last_active_at && now > 0
       ? now - Date.parse(session.last_active_at) < day
         ? formatRelative(session.last_active_at, now)
-        : shortDate.format(new Date(session.last_active_at))
+        : time.date(session.last_active_at, "day")
       : "—"
 
   const entries: Entry[] = open

@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { useMachineQuery } from "@/components/machine-query"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useTimeFormat } from "@/lib/use-time-format"
 
 const sources: Record<TrafficSource, string> = {
   all: "Combined",
@@ -209,7 +210,6 @@ function Stat({
     </div>
   )
 }
-const resetFormat = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" })
 
 /**
  * What is left of this period's allowance for traffic through Paperboat's hosted relays and
@@ -219,7 +219,8 @@ function Allowance({ billing, workspace }: { billing: BillingWorkspace; workspac
   const used = billing.usage_bytes
   const allowance = billing.allowance_bytes
   const window = allowanceWindow(billing)
-  const resets = window.end ? `Resets ${resetFormat.format(new Date(window.end))}` : null
+  const time = useTimeFormat()
+  const resets = window.end ? `Resets ${time.date(window.end, "day")}` : null
   // The period's hosted traffic by path, from the same start as the bandwidth card's default.
   const usage = useApiQuery(usageSinceQuery(workspace, usageWindowStart(billing)))
   const split = usage.data && trafficBreakdown(usage.data.totals.by_path, "managed").byPath

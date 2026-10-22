@@ -207,6 +207,7 @@ export function Starting({
   label?: string
   onDone: () => void
 }) {
+  // eslint-disable-next-line no-restricted-syntax -- this dialog opens on a click, never in a server render
   const startedAt = useState(() => Date.now())[0]
   const now = useNow(1_000)
   const preview = useQuery({

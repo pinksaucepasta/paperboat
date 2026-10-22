@@ -21,7 +21,10 @@ const steps: [Intl.RelativeTimeFormatUnit, number][] = [
   ["minute", 60],
 ]
 
-export function formatRelative(iso: string, now = Date.now()): string {
+/** "3 minutes ago" from `now`. In components use `useTimeFormat` (it supplies a hydration-safe now). */
+export function formatRelative(iso: string, now: number): string {
+  // useNow() is 0 until hydration: no clock yet, so the stable form.
+  if (!now) return formatStable(iso)
   const seconds = Math.round((new Date(iso).getTime() - now) / 1000)
   for (const [unit, size] of steps) {
     if (Math.abs(seconds) >= size) return relative.format(Math.round(seconds / size), unit)
@@ -47,6 +50,54 @@ const exactUtc = new Intl.DateTimeFormat(undefined, {
   timeStyle: "long",
   timeZone: "UTC",
 })
+
+/** Dates in the viewer's locale and zone, by purpose. */
+const dateStyles = {
+  /** Oct 22 */
+  day: { month: "short", day: "numeric" },
+  /** Oct 22, 2026 */
+  date: { year: "numeric", month: "short", day: "numeric" },
+  /** Thursday, October 22 */
+  weekday: { weekday: "long", month: "long", day: "numeric" },
+  /** 7:34 PM */
+  time: { hour: "numeric", minute: "2-digit" },
+  /** 19:34:05, for request logs */
+  seconds: { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false },
+  /** 7 PM */
+  hour: { hour: "numeric" },
+  /** October 2026 */
+  month: { month: "long", year: "numeric" },
+} satisfies Record<string, Intl.DateTimeFormatOptions>
+export type DateStyle = keyof typeof dateStyles
+const dateFormatters = Object.fromEntries(
+  Object.entries(dateStyles).map(([style, options]) => [style, new Intl.DateTimeFormat(undefined, options)]),
+) as Record<DateStyle, Intl.DateTimeFormat>
+
+/** A date in the viewer's locale and zone. In components use `useTimeFormat().date`. */
+export function formatDate(iso: string, style: DateStyle): string {
+  return dateFormatters[style].format(new Date(iso))
+}
+
+/** The same date in a form that needs no locale or zone (UTC), for the first render. */
+export function formatDateStable(iso: string, style: DateStyle): string {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return ""
+  const text = date.toISOString()
+  if (style === "time") return `${text.slice(11, 16)} UTC`
+  if (style === "seconds") return `${text.slice(11, 19)} UTC`
+  if (style === "hour") return `${text.slice(11, 13)}:00 UTC`
+  if (style === "month") return text.slice(0, 7)
+  return text.slice(0, 10)
+}
+
+/**
+ * "2026-08-31 23:56 UTC": the same on the server and every browser, for the first render before
+ * the viewer's clock, zone and locale may be used (they differ between server and browser).
+ */
+export function formatStable(iso: string): string {
+  const date = new Date(iso)
+  return Number.isNaN(date.getTime()) ? "" : `${date.toISOString().slice(0, 16).replace("T", " ")} UTC`
+}
 
 /** "Aug 31, 2026, 5:26 AM GMT+5:30" in the viewer's zone. */
 export function formatDateTime(iso: string): string {

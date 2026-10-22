@@ -13,23 +13,23 @@ import { Choice } from "@/components/tunnels/share-file"
 import { Button } from "@/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useTimeFormat } from "@/lib/use-time-format"
 
 /** The machine page's Activity tab. */
 export function MachineActivity() {
   return <ActivityPage machine={useCurrentMachine()} />
 }
 
-const dayFormat = new Intl.DateTimeFormat(undefined, { weekday: "long", month: "long", day: "numeric" })
-const timeFormat = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" })
-
-function dayLabel(iso: string) {
+/** "Today", "Yesterday" or the weekday and date; the stable date until hydrated (`now` 0). */
+function dayLabel(iso: string, now: number, date: (iso: string, style: "weekday") => string) {
+  if (!now) return date(iso, "weekday")
   const day = new Date(iso)
-  const today = new Date()
+  const today = new Date(now)
   today.setHours(0, 0, 0, 0)
   const start = new Date(day)
   start.setHours(0, 0, 0, 0)
   const diff = Math.round((today.getTime() - start.getTime()) / 86_400_000)
-  return diff === 0 ? "Today" : diff === 1 ? "Yesterday" : dayFormat.format(day)
+  return diff === 0 ? "Today" : diff === 1 ? "Yesterday" : date(iso, "weekday")
 }
 
 /**
@@ -38,6 +38,7 @@ function dayLabel(iso: string) {
  */
 export function ActivityPage({ machine: tabMachine }: { machine?: Machine }) {
   const workspace = useWorkspace()
+  const time = useTimeFormat(60_000)
   const { scope } = useListScope(tabMachine)
   const { data: me } = useApiQuery(meQuery)
   const { data: team } = useApiQuery({ ...teamQuery(workspace?.id ?? ""), enabled: workspace?.kind === "team" })
@@ -53,7 +54,7 @@ export function ActivityPage({ machine: tabMachine }: { machine?: Machine }) {
 
   const groups: { label: string; events: typeof events }[] = []
   for (const event of events) {
-    const label = dayLabel(event.occurred_at)
+    const label = dayLabel(event.occurred_at, time.now, time.date)
     const group = groups.at(-1)
     if (group?.label === label) group.events.push(event)
     else groups.push({ label, events: [event] })
@@ -110,8 +111,8 @@ export function ActivityPage({ machine: tabMachine }: { machine?: Machine }) {
                   return (
                     <li key={event.id} className="flex min-h-12 items-center gap-4 py-2 text-sm">
                       <span className="w-16 shrink-0 text-xs text-muted-foreground tabular-nums">
-                        <time dateTime={event.occurred_at} title={new Date(event.occurred_at).toLocaleString()}>
-                          {timeFormat.format(new Date(event.occurred_at))}
+                        <time dateTime={event.occurred_at} title={time.dateTime(event.occurred_at)}>
+                          {time.date(event.occurred_at, "time")}
                         </time>
                       </span>
                       <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-primary/12 text-xs font-medium text-primary">

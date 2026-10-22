@@ -23,10 +23,10 @@ import { formatBytes } from "@/lib/format"
 import { Row, Section } from "@/components/section"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { useTimeFormat } from "@/lib/use-time-format"
 
 const gigabyte = 1e9
 
-const dateFormat = new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric" })
 
 /** Refetches the plan after any change so every row shows the server's state. */
 function useRefreshBilling(workspace: Workspace) {
@@ -36,13 +36,14 @@ function useRefreshBilling(workspace: Workspace) {
 
 /** "Charged now $X · then $Y on Nov 18": the line every paid change shows before it is confirmed. */
 function PreviewLine({ preview, pending }: { preview?: ChangePreview; pending: boolean }) {
+  const time = useTimeFormat()
   if (!billingLive.seats) return null
   if (pending || !preview) return <span className="text-muted-foreground">Calculating…</span>
   return (
     <span className="text-muted-foreground">
       {formatMoney(preview.amount_due_now, preview.currency)} now · then{" "}
       {formatMoney(preview.next_invoice_amount, preview.currency)} on{" "}
-      {dateFormat.format(new Date(preview.next_invoice_at))}
+      {time.date(preview.next_invoice_at, "date")}
     </span>
   )
 }

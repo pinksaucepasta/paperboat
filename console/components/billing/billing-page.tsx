@@ -21,8 +21,8 @@ import { Row, Section } from "@/components/section"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { useTimeFormat } from "@/lib/use-time-format"
 
-const dateFormat = new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric" })
 const intervals: Record<BillingInterval, string> = { month: "Monthly", year: "Yearly" }
 /** How long the page waits for Stripe's webhook to activate a plan after Checkout returns. */
 const confirmFor = 60_000
@@ -54,7 +54,8 @@ function useConfirmingCheckout(workspace: Workspace | undefined, billing: Billin
   // Read once on the first client render; nothing shows before hydration (the plan is loading).
   const [since, setSince] = useState(() =>
     typeof window !== "undefined" && new URL(window.location.href).searchParams.get("checkout") === "done"
-      ? Date.now()
+      ? // eslint-disable-next-line no-restricted-syntax -- browser only (window check); nothing renders from it before hydration
+        Date.now()
       : null,
   )
   useEffect(() => {
@@ -67,6 +68,7 @@ function useConfirmingCheckout(workspace: Workspace | undefined, billing: Billin
   useEffect(() => {
     if (!active || !workspace) return
     const timer = setInterval(() => {
+      // eslint-disable-next-line no-restricted-syntax -- in an interval, not during render
       if (Date.now() - since! > confirmFor) return setSince(null)
       void queryClient.invalidateQueries({ queryKey: billingQuery(workspace).queryKey })
     }, 2000)
@@ -88,12 +90,13 @@ function Plan({
     mutationFn: () => openPortal(workspace, idempotencyKey()),
     onSuccess: (url) => window.location.assign(url),
   })
+  const time = useTimeFormat()
   // Stripe keeps retrying a failed renewal; paid features last until `paid_benefits_until`.
   const failed = ["past_due", "unpaid", "suspended"].includes(billing.state)
   const benefits = billing.paid_benefits_until
   // Yearly plans renew once a year but their bandwidth resets monthly.
   const resets = allowanceWindow(billing).end
-  const end = billing.period_end && dateFormat.format(new Date(billing.period_end))
+  const end = billing.period_end && time.date(billing.period_end, "date")
   const manage = billing.product_code && billing.can_manage && (
     <Button variant="outline" disabled={portal.isPending} onClick={() => portal.mutate()}>
       {portal.isPending && <CircleNotchIcon className="animate-spin" />}
@@ -117,8 +120,8 @@ function Plan({
       {failed ? (
         <div className="flex items-center justify-between gap-6 border-b border-divider py-3 text-sm">
           <span className="text-destructive">
-            {benefits && new Date(benefits) > new Date()
-              ? `Payment failed. Paid features stay until ${dateFormat.format(new Date(benefits))}.`
+            {benefits && time.now && Date.parse(benefits) > time.now
+              ? `Payment failed. Paid features stay until ${time.date(benefits, "date")}.`
               : "Payment failed. Paid features are paused until payment succeeds."}
           </span>
           {billing.can_manage && (
@@ -136,7 +139,7 @@ function Plan({
         </Row>
       )}
       {resets && resets !== billing.period_end && billing.product_code && (
-        <Row label="Bandwidth resets">{dateFormat.format(new Date(resets))}</Row>
+        <Row label="Bandwidth resets">{time.date(resets, "date")}</Row>
       )}
       <Row label="Hosted allowance">
         {billing.allowance_bytes === null

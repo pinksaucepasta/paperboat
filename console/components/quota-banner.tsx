@@ -5,8 +5,8 @@ import { WarningCircleIcon } from "@phosphor-icons/react"
 import { allowanceWindow, billingQuery } from "@/lib/billing"
 import { useApiQuery, useWorkspace } from "@/lib/api"
 import { formatBytes } from "@/lib/format"
+import { useTimeFormat } from "@/lib/use-time-format"
 
-const dateFormat = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" })
 
 /**
  * Shown on every page while this workspace's hosted bandwidth is used up: previews, tunnels and
@@ -16,10 +16,11 @@ const dateFormat = new Intl.DateTimeFormat(undefined, { month: "short", day: "nu
 export function QuotaBanner() {
   const workspace = useWorkspace()
   const billing = useApiQuery(billingQuery(workspace))
+  const time = useTimeFormat()
   const data = billing.data
   if (!workspace || !data || data.allowance_bytes === null || data.usage_bytes < data.allowance_bytes) return null
   const window = allowanceWindow(data)
-  const renews = window.end ? ` It renews ${dateFormat.format(new Date(window.end))}.` : ""
+  const renews = window.end ? ` It renews ${time.date(window.end, "day")}.` : ""
   const plan = data.product?.name ?? "Free"
   const canBuy = workspace.kind === "personal" || workspace.role === "owner" || workspace.role === "admin"
   return (

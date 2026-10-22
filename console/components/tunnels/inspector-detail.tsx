@@ -6,6 +6,7 @@ import { toast } from "sonner"
 import type { Capture } from "@/lib/inspector/feed"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { useTimeFormat } from "@/lib/use-time-format"
 
 /** Path and query of a captured URL (the daemon may send an absolute URL or a path). */
 export function pathOf(url: string) {
@@ -23,9 +24,9 @@ export function durationOf(record: Capture) {
   return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(2)} s`
 }
 
-export function timeOf(record: Capture) {
-  const at = new Date(record.started_at)
-  return Number.isNaN(at.getTime()) ? "—" : at.toLocaleTimeString(undefined, { hour12: false })
+/** The capture's start time; `date` is `useTimeFormat().date`, so the first render is stable. */
+export function timeOf(record: Capture, date: (iso: string, style: "seconds") => string) {
+  return Number.isNaN(Date.parse(record.started_at)) ? "—" : date(record.started_at, "seconds")
 }
 
 export function statusTone(status: number) {
@@ -46,6 +47,7 @@ export function CaptureRow({
   selected: boolean
   onSelect: () => void
 }) {
+  const time = useTimeFormat()
   return (
     <tr
       data-capture-id={record.id}
@@ -66,7 +68,7 @@ export function CaptureRow({
         {record.response_status || record.error_code || "—"}
       </td>
       <td className="hidden text-right text-muted-foreground sm:table-cell">{durationOf(record)}</td>
-      <td className="hidden text-right text-muted-foreground md:table-cell">{timeOf(record)}</td>
+      <td className="hidden text-right text-muted-foreground md:table-cell">{timeOf(record, time.date)}</td>
     </tr>
   )
 }

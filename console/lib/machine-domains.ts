@@ -29,9 +29,12 @@ function readRaw(): string | null {
 
 /** Paperboat's own domain (from the server's client configuration) first, then the added ones. */
 function build(stored: Stored, managed: string | undefined): MachineDomains {
+  // One entry per name. A browser could store Paperboat's own domain (added before the client
+  // configuration loaded, when it wasn't known yet) or the same name twice; the managed entry wins.
+  const names = new Set(managed ? [managed] : [])
   const domains = [
     ...(managed ? [{ name: managed, managed: true }] : []),
-    ...stored.added.map((name) => ({ name, managed: false })),
+    ...stored.added.filter((name) => !names.has(name) && names.add(name)).map((name) => ({ name, managed: false })),
   ]
   const primary = domains.some((domain) => domain.name === stored.primary) ? stored.primary : (managed ?? "")
   return { domains, primary }
