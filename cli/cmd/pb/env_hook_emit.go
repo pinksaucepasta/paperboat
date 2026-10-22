@@ -16,7 +16,6 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/runtime"
 	"github.com/spf13/cobra"
-	"golang.org/x/term"
 )
 
 // envHookBudget bounds the whole hook so shell startup never waits longer.
@@ -59,9 +58,7 @@ func emitEnvironmentHook(command *cobra.Command, shell string) {
 		return
 	}
 	if result.reason != "" {
-		if term.IsTerminal(int(os.Stderr.Fd())) {
-			fmt.Fprintf(command.ErrOrStderr(), "Paperboat ENV not loaded: %s. Run `pb env hook --status`.\n", result.reason)
-		}
+		writeEnvHookNotice(fmt.Sprintf("Paperboat ENV not loaded: %s. Run `pb env hook --status`.\n", result.reason))
 		return
 	}
 	var out strings.Builder
@@ -217,3 +214,18 @@ func fishSingleQuote(value string) string {
 	return "'" + strings.NewReplacer(`\`, `\\`, `'`, `\'`).Replace(value) + "'"
 }
 
+
+// envHookTerminal is where the one-line notice goes. The hook line discards
+// pb's stderr so an old or broken pb never adds noise to shell startup; the
+// notice goes to the controlling terminal, which non-interactive ssh and VS
+// Code's environment probe do not have.
+var envHookTerminal = "/dev/tty"
+
+func writeEnvHookNotice(message string) {
+	tty, err := os.OpenFile(envHookTerminal, os.O_WRONLY, 0)
+	if err != nil {
+		return
+	}
+	_, _ = io.WriteString(tty, message)
+	_ = tty.Close()
+}

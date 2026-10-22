@@ -103,9 +103,9 @@ func envHookShell(args []string) (string, error) {
 func envHookLine(shell, pb string) string {
 	quoted := shellSingleQuote(pb)
 	if shell == "fish" {
-		return fmt.Sprintf("test -x %s; and %s env hook --emit fish | source %s", quoted, quoted, envHookMarker)
+		return fmt.Sprintf("test -x %s; and %s env hook --emit fish 2>/dev/null | source %s", quoted, quoted, envHookMarker)
 	}
-	return fmt.Sprintf("[ -x %s ] && eval \"$(%s env hook --emit %s)\" %s", quoted, quoted, shell, envHookMarker)
+	return fmt.Sprintf("[ -x %s ] && eval \"$(%s env hook --emit %s 2>/dev/null)\" %s", quoted, quoted, shell, envHookMarker)
 }
 
 // envHookExecutable prefers the stable pb on PATH over this process's

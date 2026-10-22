@@ -18,9 +18,9 @@ import (
 
 func TestEnvHookLineRunsPbByAbsolutePathForEachShell(t *testing.T) {
 	for shell, want := range map[string]string{
-		"bash": `[ -x '/opt/p b/pb' ] && eval "$('/opt/p b/pb' env hook --emit bash)" # paperboat-env-hook`,
-		"zsh":  `[ -x '/opt/p b/pb' ] && eval "$('/opt/p b/pb' env hook --emit zsh)" # paperboat-env-hook`,
-		"fish": `test -x '/opt/p b/pb'; and '/opt/p b/pb' env hook --emit fish | source # paperboat-env-hook`,
+		"bash": `[ -x '/opt/p b/pb' ] && eval "$('/opt/p b/pb' env hook --emit bash 2>/dev/null)" # paperboat-env-hook`,
+		"zsh":  `[ -x '/opt/p b/pb' ] && eval "$('/opt/p b/pb' env hook --emit zsh 2>/dev/null)" # paperboat-env-hook`,
+		"fish": `test -x '/opt/p b/pb'; and '/opt/p b/pb' env hook --emit fish 2>/dev/null | source # paperboat-env-hook`,
 	} {
 		if got := envHookLine(shell, "/opt/p b/pb"); got != want {
 			t.Fatalf("%s line = %q, want %q", shell, got, want)
@@ -177,6 +177,11 @@ func TestEnvHookEmitPrintsNothingWithoutLoginOrRuntime(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(filepath.Dir(configPath), "env-hook.json"), record, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	envHookTerminal = filepath.Join(home, "tty")
+	t.Cleanup(func() { envHookTerminal = "/dev/tty" })
+	if err := os.WriteFile(envHookTerminal, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	for _, shell := range []string{"bash", "fish", "sh"} {
 		root := newRootCommand()
 		var stdout, stderr bytes.Buffer
@@ -190,5 +195,24 @@ func TestEnvHookEmitPrintsNothingWithoutLoginOrRuntime(t *testing.T) {
 		if stdout.Len() != 0 || stderr.Len() != 0 || time.Since(started) > envHookBudget {
 			t.Fatalf("%s: stdout=%q stderr=%q", shell, stdout.String(), stderr.String())
 		}
+		notice, _ := os.ReadFile(envHookTerminal)
+		if len(notice) != 0 {
+			t.Fatalf("%s: terminal notice %q", shell, notice)
+		}
+	}
+}
+
+func TestEnvHookLineStaysSilentWhenPbIsOldOrBroken(t *testing.T) {
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash not installed")
+	}
+	old := filepath.Join(t.TempDir(), "pb")
+	if err := os.WriteFile(old, []byte("#!/bin/sh\necho 'pb: The command arguments are invalid.' >&2\nexit 1\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command(bash, "-c", envHookLine("bash", old)+"\necho ok").CombinedOutput()
+	if err != nil || string(out) != "ok\n" {
+		t.Fatalf("old pb leaked into shell startup: %q %v", out, err)
 	}
 }
