@@ -3,6 +3,7 @@ package daemoncmd
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"net"
 	"os"
 	"path/filepath"
@@ -68,7 +69,7 @@ func TestCoordinatorForwardsTerminalSyncFailureAfterWithdrawal(t *testing.T) {
 	pbSync.RegisterSyncServiceServer(server, backend)
 	go server.Serve(listener)
 	defer server.Stop()
-	dir := t.TempDir()
+	dir := shorttemp.Dir(t)
 	if err = os.Chmod(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
