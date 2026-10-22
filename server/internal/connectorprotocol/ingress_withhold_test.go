@@ -2,6 +2,7 @@ package connectorprotocol
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
 
@@ -16,7 +17,7 @@ import (
 func TestIngressRowFailureWithholdsOneRouteOnlyInAnEdgeSnapshot(t *testing.T) {
 	ctx := context.Background()
 	edge, daemon := SQLIngressSource{edge: true}, SQLIngressSource{}
-	for _, err := range []error{wire.ErrIngressDenied, wire.ErrInvalidInput, accountingauthority.ErrUnavailable, errors.Join(accountingauthority.ErrUnavailable)} {
+	for _, err := range []error{wire.ErrIngressDenied, wire.ErrInvalidInput, accountingauthority.ErrUnavailable, errors.Join(accountingauthority.ErrUnavailable), sql.ErrNoRows} {
 		if got := edge.rowFailed(ctx, "accounting", "route_01", err); got != nil {
 			t.Fatalf("edge snapshot failed on a per-route %v: %v", err, got)
 		}

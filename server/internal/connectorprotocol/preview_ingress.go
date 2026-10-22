@@ -80,7 +80,7 @@ func (s SQLIngressSource) projectPreviews(ctx context.Context, node, epoch strin
 		operation = evidence.Request.OperationID
 		lease = evidence.Request.SessionGeneration
 	}
-	rows, err := s.DB.SQL().QueryContext(ctx, publicPreviewIngressSQL, node, epoch, now, audience, publication, route, host, operation, lease)
+	rows, finish, err := queryInWrittenJoinOrder(ctx, s.DB.SQL(), publicPreviewIngressSQL, node, epoch, now, audience, publication, route, host, operation, lease)
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +90,7 @@ func (s SQLIngressSource) projectPreviews(ctx context.Context, node, epoch strin
 			return nil
 		}
 		rowsClosed = true
-		return rows.Close()
+		return finish()
 	}
 	defer func() {
 		if closeErr := closeRows(); closeErr != nil {

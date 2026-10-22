@@ -2,6 +2,7 @@ package connectorprotocol
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -38,7 +39,11 @@ type SQLIngressSource struct {
 // cannot be retained) is withheld, which denies that route alone, and the cause is named. Any other
 // failure, and every failure outside an edge snapshot, fails the projection.
 func (s SQLIngressSource) rowFailed(ctx context.Context, stage, routeID string, err error) error {
-	if !s.edge || !(errors.Is(err, wire.ErrIngressDenied) || errors.Is(err, wire.ErrInvalidInput) || errors.Is(err, accountingauthority.ErrUnavailable)) {
+	if !s.edge {
+		return err
+	}
+	if !(errors.Is(err, wire.ErrIngressDenied) || errors.Is(err, wire.ErrInvalidInput) || errors.Is(err, accountingauthority.ErrUnavailable) || errors.Is(err, sql.ErrNoRows)) {
+		slog.WarnContext(ctx, "ingress snapshot failed", "component", "paperboat-server", "operation", "edge_ingress", "stage", stage, "route_id", routeID, "cause", err.Error())
 		return err
 	}
 	slog.WarnContext(ctx, "ingress decision withheld", "component", "paperboat-server", "operation", "edge_ingress", "stage", stage, "route_id", routeID, "cause", err.Error())
@@ -142,6 +147,35 @@ WHERE ((a.state='active' AND a.observed_state='ready') OR (a.state='staged' AND 
 ORDER BY a.route_id,a.assignment_generation,a.assignment_id,publication.hostname,publication.publication_id
 LIMIT 4097`
 
+// queryInWrittenJoinOrder runs one ingress projection in a read-only transaction that keeps the
+// query's written join order. The projections join about fifteen tables, views and inlined
+// functions; the planner's join search took 4.5 s per edge pull under load (prod 2026-10-23,
+// 13 ms to execute), so edges timed out and every pull answered 503. Both projections are written
+// starting from the edge's assignments, which is also the best plan. finish closes the rows and
+// ends the transaction.
+func queryInWrittenJoinOrder(ctx context.Context, database *sql.DB, query string, args ...any) (*sql.Rows, func() error, error) {
+	tx, err := database.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, setting := range []string{`SET LOCAL join_collapse_limit=1`, `SET LOCAL from_collapse_limit=1`} {
+		if _, err = tx.ExecContext(ctx, setting); err != nil {
+			return nil, nil, errors.Join(err, tx.Rollback())
+		}
+	}
+	rows, err := tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, nil, errors.Join(err, tx.Rollback())
+	}
+	return rows, func() error {
+		closeErr := rows.Close()
+		if rollbackErr := tx.Rollback(); rollbackErr != nil && !errors.Is(rollbackErr, sql.ErrTxDone) {
+			return errors.Join(closeErr, rollbackErr)
+		}
+		return closeErr
+	}, nil
+}
+
 func (s SQLIngressSource) project(ctx context.Context, active ActiveControlSession, nodeID, epoch, audience, routeID, hostname string) (decisions []wire.IngressDecision, resultErr error) {
 	if ctx == nil || s.DB == nil || s.DB.SQL() == nil {
 		return nil, wire.ErrInvalidInput
@@ -150,7 +184,7 @@ func (s SQLIngressSource) project(ctx context.Context, active ActiveControlSessi
 	if s.Clock != nil {
 		now = s.Clock.Now().UTC()
 	}
-	rows, err := s.DB.SQL().QueryContext(ctx, ingressProjectionSQL, now, active.AccountID, active.TunnelID, active.ConnectorID, active.HostID, active.SessionID, active.ProcessGeneration, active.ConfigGeneration, active.ConfigContentHash, active.CredentialGeneration, nodeID, epoch, audience, routeID, hostname)
+	rows, finish, err := queryInWrittenJoinOrder(ctx, s.DB.SQL(), ingressProjectionSQL, now, active.AccountID, active.TunnelID, active.ConnectorID, active.HostID, active.SessionID, active.ProcessGeneration, active.ConfigGeneration, active.ConfigContentHash, active.CredentialGeneration, nodeID, epoch, audience, routeID, hostname)
 	if err != nil {
 		return nil, err
 	}
@@ -160,7 +194,7 @@ func (s SQLIngressSource) project(ctx context.Context, active ActiveControlSessi
 			return nil
 		}
 		rowsClosed = true
-		return rows.Close()
+		return finish()
 	}
 	defer func() {
 		if closeErr := closeRows(); closeErr != nil {
@@ -199,7 +233,10 @@ func (s SQLIngressSource) project(ctx context.Context, active ActiveControlSessi
 			var team string
 			var entitled bool
 			if err = s.DB.SQL().QueryRowContext(ctx, `SELECT coalesce(t.owner_team_id,m.owner_team_id,''),coalesce(t.owner_team_id,m.owner_team_id) IS NULL OR paperboat.team_paid_entitled(coalesce(t.owner_team_id,m.owner_team_id)) FROM user_machines m JOIN tunnels t ON t.id=$4 WHERE m.id=$1 AND m.environment_id=$2 AND m.user_id=$3`, b.HostID, b.EnvironmentID, b.AccountID, b.TunnelID).Scan(&team, &entitled); err != nil {
-				return nil, err
+				if err = s.rowFailed(ctx, "entitlement", b.RouteID, err); err != nil {
+					return nil, err
+				}
+				continue
 			}
 			if !entitled {
 				continue
