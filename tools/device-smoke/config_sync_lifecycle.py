@@ -243,7 +243,8 @@ def systemctl(*args):
 
 def main():
     alias = sys.argv[1]
-    ROOT.mkdir(parents=True, exist_ok=True)
+    shutil.rmtree(ROOT, ignore_errors=True)  # a killed earlier run leaves its key and repositories
+    ROOT.mkdir(parents=True)
     backup = MACHINE_FILE.read_text() if MACHINE_FILE.exists() else None
     fixture = Fixture()
     repositories = {}
