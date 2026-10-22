@@ -68,6 +68,8 @@ const sentences: Record<string, string> = {
     "This workspace's hosted bandwidth is used up. Direct machine-to-machine access still works. Add bandwidth or change plan under Billing, or wait for the next allowance period.",
   team_private_access_off:
     "The team has not allowed private access to its shared machines. Ask a team owner or admin to turn it on.",
+  team_suspended:
+    "This team is suspended, so changes are paused. Ask the team owner to restore billing or resume the team.",
 }
 
 /** For actions the server answers without a body (200/202/204), such as closing a terminal. */
