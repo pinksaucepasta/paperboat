@@ -98,6 +98,9 @@ func (s *Service) ListInventory(ctx context.Context, account string, opts Invent
 	if err := s.describeMachineAccess(ctx, account, items...); err != nil {
 		return nil, 0, err
 	}
+	if err := s.describeManagedSSH(ctx, account, items...); err != nil {
+		return nil, 0, err
+	}
 	return out, total, nil
 }
 

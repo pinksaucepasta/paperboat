@@ -15156,6 +15156,35 @@
                 "type": "string"
               }
             }
+          },
+          "ssh": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Managed SSH target of the machine's current installation; present only when the caller may use managed SSH on it. host_key_generation is 0 until the machine has active host keys.",
+            "required": [
+              "os_user",
+              "port",
+              "target_generation",
+              "host_key_generation"
+            ],
+            "properties": {
+              "os_user": {
+                "type": "string"
+              },
+              "port": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              },
+              "target_generation": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "host_key_generation": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
           }
         }
       },

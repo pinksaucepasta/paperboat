@@ -414,6 +414,7 @@ type UserMachine struct {
 	Availability           AvailabilityPolicy      `json:"availability"`
 	RuntimeDiagnostics     RuntimeDiagnostics      `json:"runtime_diagnostics"`
 	Installation           *ClientInstallation     `json:"installation,omitempty"`
+	SSH                    *MachineSSH             `json:"ssh,omitempty"`
 }
 
 type ClientInstallation struct {
