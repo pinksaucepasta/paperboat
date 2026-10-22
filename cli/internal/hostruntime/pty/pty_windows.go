@@ -133,8 +133,9 @@ func (a *Adapter) Start(command Command) (*Process, error) {
 	// PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE takes the HPCON handle value,
 	// represented as a pointer-sized value. Passing &console attaches a pointer
 	// to the local variable instead and creates a child that never exchanges
-	// input or output with the pseudoconsole.
-	if err := attributes.Update(windows.PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, unsafe.Pointer(console), unsafe.Sizeof(console)); err != nil {
+	// input or output with the pseudoconsole. The handle is reinterpreted in place because converting
+	// the uintptr with unsafe.Pointer(console) is reported by go vet.
+	if err := attributes.Update(windows.PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, *(*unsafe.Pointer)(unsafe.Pointer(&console)), unsafe.Sizeof(console)); err != nil {
 		windows.Close(job)
 		windows.ClosePseudoConsole(console)
 		closeHandles(inputWrite, outputRead)

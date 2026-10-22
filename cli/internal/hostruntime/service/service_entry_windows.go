@@ -379,7 +379,9 @@ func sessionChangeFor(request svc.ChangeRequest, sessionID uint32) bool {
 	if request.EventData == 0 {
 		return false
 	}
-	notification := (*windows.WTSSESSION_NOTIFICATION)(unsafe.Pointer(request.EventData))
+	// EventData is a pointer the service manager owns for this callback; reinterpret it in place
+	// because unsafe.Pointer(request.EventData) is reported by go vet.
+	notification := (*windows.WTSSESSION_NOTIFICATION)(*(*unsafe.Pointer)(unsafe.Pointer(&request.EventData)))
 	return notification.Size >= uint32(unsafe.Sizeof(*notification)) && notification.SessionID == sessionID
 }
 
