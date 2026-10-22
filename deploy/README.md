@@ -131,6 +131,78 @@ After each host, check that its node row heartbeats (`control_tunnel_nodes.last_
 the edge logs show no `route_invalid`/`tunnel_route_reconcile_failed` before touching the next.
 Rolling back is the same command with the previous image tags.
 
+## Deploy procedure for any lane (server and edges)
+
+Any lane may deploy its own server or edge change with this procedure. The order is fixed; skip
+nothing. Hosts: the control plane runs on `ssh root@coolify` (`/opt/paperboat`); the two edges are
+oracle (`node_fce5a4b8`, the machine the lanes run on) and anvit (`ssh anvit`, `node_e8a853d5`).
+
+**1. Gate.** The change is pushed to `main` after `make gate` (or the Go/PostgreSQL tests of the
+packages you touched) passed. Database tests run only in the isolated test PostgreSQL on oracle
+(`~/bin/lanebtest.sh <srcdir> <go test args>`, a container on `127.0.0.1:55433`), never on the
+production database.
+
+**2. Take the deploy lock.** One deploy at a time, server or edge. The lock is a file on coolify
+that names its owner; `noclobber` makes taking it atomic:
+
+```sh
+ssh root@coolify 'set -o noclobber; echo "<lane> <what> $(date -u +%FT%TZ)" > /opt/paperboat/deploy.lock' \
+  || ssh root@coolify cat /opt/paperboat/deploy.lock     # someone else deploys: wait, do not remove it
+# ... deploy ...
+ssh root@coolify rm /opt/paperboat/deploy.lock             # always release it, also after a rollback
+```
+
+A lock older than 45 minutes whose owner lane is not answering may be removed after checking
+`docker ps` on coolify and `python3 /opt/paperboat/rollout-server.py --directory /opt/paperboat --reap`
+show no rollout in progress. `rollout-server.py` also holds its own `server-rollout.lock`, so two
+rollouts cannot switch traffic together even if this file is ignored.
+
+**3. Server.** On coolify, from a clean checkout of the exact pushed commit (never the working tree):
+
+```sh
+V=2026.10.22.N                                   # next free tag: docker images paperboat-server
+C=$(git rev-parse origin/main)                   # the commit you deploy
+D=$(mktemp -d); git -C <your clone> archive $C -- . ':!console' ':!marketing' ':!tools' | tar x -C $D
+docker build --build-arg PAPERBOAT_VERSION=$V --build-arg PAPERBOAT_COMMIT=$C \
+  -t paperboat-server:$V -f $D/server/deploy/Dockerfile $D        # or copy the archive to coolify first
+cd /opt/paperboat && ./backup-database.sh                          # always, before the migration runs
+# new migration? rehearse it first in the isolated test PostgreSQL (goose up on oracle's lane-b-test-pg)
+docker inspect --format '{{.Config.Image}}' $(python3 -c "import json;print(json.load(open('server-rollout.json'))['active'])")   # PREVIOUS image: note it
+python3 rollout-server.py --directory /opt/paperboat --image paperboat-server:$V
+python3 rollout-server.py --directory /opt/paperboat --reap        # before the next deploy
+```
+
+The rollout runs additive migrations, starts a candidate, waits for `/readyz` and only then switches
+Caddy; a failed candidate leaves the serving process untouched. Check the result:
+`curl -fsS https://api.pprbt.dev/v1/server-version` must report `$C`, and `/readyz` must be 200.
+
+**4. Edges** (only when `tunnel/`, `relay/`, `helper/` or shared edge code changed). Oracle builds
+natively (arm64); anvit takes the image by `docker save | ssh anvit docker load`. One edge at a time,
+oracle first, and wait for its node row to heartbeat before the next:
+
+```sh
+sudo docker build --build-arg PAPERBOAT_VERSION=$V -t paperboat-tunnel:$V -f tunnel/deploy/Dockerfile $D
+sudo /usr/local/lib/paperboat-selfhost/pbh install --relay-image paperboat-relay:<current> --tunnel-image paperboat-tunnel:$V
+# check: select node_id,last_heartbeat_at from control_tunnel_nodes; edge logs show no route_invalid
+```
+
+If `pbh` itself changed, install the new binary to `/usr/local/lib/paperboat-selfhost/pbh` and
+`/usr/local/bin/pbh` first: the old binary regenerates `tunnel/deployment.json` from its own config on
+start and drops new fields. The current tags are in `docker ps` on each edge and in the PLAN Log.
+
+**5. Roll back** at once, without asking, when the new build breaks anything that worked before:
+`python3 rollout-server.py --directory /opt/paperboat --image paperboat-server:<previous>` (migrations are
+additive, so the previous server still runs on the new schema; a migration that removes or renames
+anything must not be deployed in the same step as the code that needs it). Edges: the same `pbh install`
+with the previous tags. Release the lock, then tell the lane that was waiting what happened.
+
+**6. Recheck and smoke.** After every deploy: public health (`/healthz`, `/readyz`), the `server-version`
+commit, one preview created and fetched through each edge, and `docker logs --since 5m` of the active
+server container with no new `level=ERROR` family. Then ask Lane A (thread "Lane A — CLI & Linux
+devices") for one smoke run against the deployed server, naming the version and what changed. A check that
+passed before and fails now is a regression: roll back first, investigate second. Add one PLAN Log
+line (rows, commit, image tag) and keep the previous image tag until the smoke run is green.
+
 ## Edge failover
 
 Every workspace is served by an edge set of two edges in distinct failure domains (managed pool, or
