@@ -118,3 +118,51 @@ are sorted by path, so the same file always gives the same list.
 | `unknown_subject` | a test's `src` is not a member |
 | `unknown_target` | a test's `dst` is not in this workspace |
 | `test_failed` | a test's expectation does not hold; the message says what the policy decides and why |
+
+## HTTP API
+
+`{ws}` is `personal` or the team slug. Every endpoint needs a signed-in session (CLI device
+session, console session or API token) whose account is an active member of `{ws}`. Errors use
+the server's envelope `{"error": {"code", "message", "details"}}`; policy errors are in
+`details.errors` as the list above. Clients ignore unknown response fields.
+
+| Method and path | Who | Request | Response |
+|---|---|---|---|
+| `GET /v1/policy/schema` | anyone | — | the JSON Schema |
+| `GET /v1/workspaces/{ws}/policy[?version=N]` | members | — | `Policy` |
+| `POST /v1/workspaces/{ws}/policy/validate` | members | `{"policy": "<file text>"}` | `Validation` |
+| `PUT /v1/workspaces/{ws}/policy` | editors | `{"policy", "expected_version", "message"?, "confirm"?}` | `Policy` |
+| `POST /v1/workspaces/{ws}/policy/explain` | members (own access), owners/admins (anyone) | `{"policy"?, "src"?, "dst"?, "action"?, "port"?, "api_token"?}` | `Explanation` |
+| `GET /v1/workspaces/{ws}/policy/versions` | members | — | `{"versions": [Version]}` newest first |
+| `POST /v1/workspaces/{ws}/policy/restore` | editors | `{"version", "expected_version", "message"?, "confirm"?}` | `Policy` |
+
+```text
+Policy      {workspace, version, policy (file text, comments kept), digest ("sha256:<hex>"),
+             updated_at, updated_by ("user:<email>"), updated_with_api_token? (name), message,
+             can_edit ("all" | "own_machines" | "none"),
+             names {users: [email], machines: [alias], previews: [name], tunnels: [name],
+                    tags: [tag], groups: [group]}}
+Validation  {valid, errors: [Error], tests: {passed, failed},
+             access_changes: [Change] (against the saved version), confirm ("sha256:<hex>")}
+Explanation {decision?: {allowed, reason, rules: ["/rules/N"], guardrail?},   // src+dst+action
+             who_can?: [Access],                                              // dst+action
+             what_can?: [Access]}                                             // src only
+Access      {subject, target, action, ports?, reason ("owner" | "rule"), rules?}
+Change      {change ("gained" | "lost"), subject, target, action, ports?, rules?}
+Version     {version, digest, created_at, author, api_token?, message, gained, lost,
+             kind ("saved" | "restored" | "rewritten" | "migrated")}
+```
+
+- **Saving** (PUT, restore): the file is validated first (422 `invalid_policy`, errors in
+  `details.errors`). A stale `expected_version` is 409 `policy_version_conflict`. When the save
+  changes anyone's access and `confirm` is missing or not the digest of that change list, it is
+  412 `policy_changes_unconfirmed` with `details.access_changes` and `details.confirm`; send the
+  same request again with that `confirm`. A save that changes no access needs no `confirm`.
+- **Editors**: owners and admins (`can_edit: "all"`); a member who owns a personal machine
+  shared into the team may save a change that only adds, removes or changes rules whose `dst`
+  is only their own machines (`can_edit: "own_machines"`; otherwise 403
+  `policy_edit_forbidden`). Personal workspace: the owner.
+- **Explain** reasons: `owner`, `rule`, `denied_by_rule`, `no_rule`, `port_not_allowed`,
+  `private_access_off`, `outside_token_scope`; `guardrail` names a failed guardrail
+  (`team_suspended`, `membership_inactive`, `machine_not_in_workspace`, `team_not_entitled`,
+  `machine_service_off`). A member asking about someone else is 403 `policy_explain_forbidden`.
