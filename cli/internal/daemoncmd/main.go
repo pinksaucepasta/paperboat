@@ -225,42 +225,25 @@ func localDaemonCommand() *cobra.Command {
 		Hidden: true,
 		Args:   commandArgs(cobra.NoArgs),
 		RunE: func(command *cobra.Command, _ []string) (resultErr error) {
-			cfg, err := config.Load(configPathFlag(command))
+			paths, err := currentLocalDaemonPaths()
 			if err != nil {
 				return err
 			}
-			if server, _ := command.Flags().GetString("server"); strings.TrimSpace(server) != "" {
-				cfg.ServerURL, err = config.NormalizeServerURL(server)
-				if err != nil {
-					return err
-				}
-			}
-			if strings.TrimSpace(cfg.ServerURL) == "" {
-				cfg.ServerURL = buildinfo.DefaultServerURL
+			cfg, machineID, err := enrolledConfig(func() (*config.Config, error) { return loadDaemonConfig(command) }, configuredMachineID, func(cfg *config.Config) error {
+				return runAwaitingEnrollment(command.Context(), cfg, paths)
+			})
+			if err != nil {
+				return err
 			}
 			authSource, err := sessionauth.NewSource(cfg)
 			if err != nil {
 				return err
 			}
 			authSource = authSource.WithContext(command.Context())
-			paths, err := currentLocalDaemonPaths()
-			if err != nil {
-				return err
-			}
-			source := &localdaemon.AuthenticatedMachineSource{ServerURL: cfg.ServerURL, Auth: authSource}
+			source := &localdaemon.AuthenticatedMachineSource{ServerURL: cfg.ServerURL, Auth: authSource, SourceMachineID: machineID}
 			source.ReportPeerApprovalSignerUnavailable = localdaemon.RateLimitedPeerApprovalReporter(time.Now, time.Minute, func(issue localdaemon.PeerApprovalSignerUnavailableError) {
 				diagnosticlog.TryInfo("peer enrollment signer unavailable", "reason", "verifier_only", "pending_requests", issue.PendingRequests)
 			})
-			source.SourceMachineID, err = configuredMachineID()
-			for errors.Is(err, os.ErrNotExist) {
-				if err = runAwaitingEnrollment(command.Context(), cfg, paths); err != nil {
-					return err
-				}
-				source.SourceMachineID, err = configuredMachineID()
-			}
-			if err != nil {
-				return err
-			}
 			store, err := config.ProfileStoreFor(cfg)
 			if err != nil {
 				return coordinatorFailure("The daemon credential store could not be opened; run pb doctor before retrying.", err)
@@ -586,4 +569,46 @@ func controlHost(serverURL string) string {
 		return ""
 	}
 	return parsed.Host
+}
+
+// loadDaemonConfig reads the saved configuration and applies the --server override.
+func loadDaemonConfig(command *cobra.Command) (*config.Config, error) {
+	cfg, err := config.Load(configPathFlag(command))
+	if err != nil {
+		return nil, err
+	}
+	if server, _ := command.Flags().GetString("server"); strings.TrimSpace(server) != "" {
+		if cfg.ServerURL, err = config.NormalizeServerURL(server); err != nil {
+			return nil, err
+		}
+	}
+	if strings.TrimSpace(cfg.ServerURL) == "" {
+		cfg.ServerURL = buildinfo.DefaultServerURL
+	}
+	return cfg, nil
+}
+
+// enrolledConfig waits until this computer is enrolled and returns the configuration to run with and the
+// machine id. Enrollment rewrites the configuration (a headless computer switches to the protected file
+// credential store), so it is read again after every wait: a daemon started before pairing that kept the
+// configuration it read then failed every control-plane call ("Control plane is unavailable") until restarted.
+func enrolledConfig(load func() (*config.Config, error), machineID func() (string, error), wait func(*config.Config) error) (*config.Config, string, error) {
+	cfg, err := load()
+	if err != nil {
+		return nil, "", err
+	}
+	id, err := machineID()
+	for errors.Is(err, os.ErrNotExist) {
+		if err = wait(cfg); err != nil {
+			return nil, "", err
+		}
+		if cfg, err = load(); err != nil {
+			return nil, "", err
+		}
+		id, err = machineID()
+	}
+	if err != nil {
+		return nil, "", err
+	}
+	return cfg, id, nil
 }
