@@ -22,17 +22,20 @@ type activeConnectorControlSessionReader interface {
 	Lookup(tunnelID, connectorID, sessionID string, processGeneration uint64) (connectorprotocol.ActiveControlSession, bool)
 }
 
-func NewConnectorCarrierBootstrapHandler(sessions *connectorprotocol.ActiveControlSessions, source connectorprotocol.CarrierBootstrapSource, identities *controlplane.EnrollmentService) (http.Handler, error) {
-	if sessions == nil || source == nil || identities == nil {
+func NewConnectorCarrierBootstrapHandler(sessions *connectorprotocol.ActiveControlSessions, source connectorprotocol.CarrierBootstrapSource, identities *controlplane.EnrollmentService, gone connectorprotocol.ConnectorGoneFunc) (http.Handler, error) {
+	if sessions == nil || source == nil || identities == nil || gone == nil {
 		return nil, wire.ErrInvalidInput
 	}
-	return connectorCarrierBootstrap(sessions, source, identities), nil
+	return connectorCarrierBootstrap(sessions, source, identities, gone), nil
 }
 
-func connectorCarrierBootstrap(sessions activeConnectorControlSessionReader, source connectorprotocol.CarrierBootstrapSource, identities machineRequestVerifier) http.HandlerFunc {
+// connectorCarrierBootstrap answers a connector's carrier request. A connector that can never be
+// served again (connectorprotocol.SQLConnectorGone: deleted or expired tunnel, revoked connector or
+// host) gets 410 connector_gone, not a retryable 503, so the host stops retrying.
+func connectorCarrierBootstrap(sessions activeConnectorControlSessionReader, source connectorprotocol.CarrierBootstrapSource, identities machineRequestVerifier, gone connectorprotocol.ConnectorGoneFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
-		if sessions == nil || source == nil || identities == nil {
+		if sessions == nil || source == nil || identities == nil || gone == nil {
 			writePreviewTunnelError(w, r, http.StatusServiceUnavailable, "connector_control_unavailable", "Connector control is temporarily unavailable.", "unchanged", true, "retry")
 			return
 		}
@@ -86,6 +89,10 @@ func connectorCarrierBootstrap(sessions activeConnectorControlSessionReader, sou
 		if claims.MachineID != active.HostID || claims.UserID != active.AccountID || claims.OperationID != strings.TrimSpace(operationValues[0]) {
 			logHTTPRejection(r, http.StatusForbidden, "connector_access_forbidden", controlplane.ErrHelperProof)
 			writePreviewTunnelError(w, r, http.StatusForbidden, "connector_access_forbidden", "This machine cannot bootstrap the connector session.", "unchanged", false, "use_authorized_host")
+			return
+		}
+		if isGone, goneErr := gone(r.Context(), active.TunnelID, active.ConnectorID); goneErr == nil && isGone {
+			writePreviewTunnelError(w, r, http.StatusGone, "connector_gone", "The tunnel was deleted or expired, or its connector or machine was revoked; remove it from this machine.", "unchanged", false, "remove_connector")
 			return
 		}
 		descriptor, err := source.Descriptor(r.Context(), active)

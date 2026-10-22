@@ -368,6 +368,7 @@ func New(opts Options) (*App, error) {
 		connectorControlTransport.Sessions(),
 		connectorprotocol.SQLCarrierBootstrapSource{DB: store, Quota: workspaceBilling},
 		enrollmentService,
+		connectorprotocol.SQLConnectorGone(store),
 	)
 	if err != nil {
 		_ = store.Close()

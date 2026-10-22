@@ -34,12 +34,18 @@ func (h *WebSocketHandler) WithGoneCheck(gone ConnectorGoneFunc) *WebSocketHandl
 	return h
 }
 
-// SQLConnectorGone answers ConnectorGoneFunc from the database. A connector that is unknown counts as gone.
+// SQLConnectorGone answers ConnectorGoneFunc from the database. A connector is gone when it is
+// unknown or revoked, its tunnel was deleted or has expired, or its host machine was revoked or
+// deleted: none of these can be served again, so the host must stop retrying.
 func SQLConnectorGone(database *db.DB) ConnectorGoneFunc {
 	return func(ctx context.Context, tunnelID, connectorID string) (bool, error) {
 		var served bool
 		err := database.Pool().QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM tunnel_connectors c JOIN tunnels t ON t.id = c.tunnel_id
- WHERE t.id = $1 AND c.id = $2 AND t.deleted_at IS NULL AND c.revoked_at IS NULL AND c.desired_state <> 'revoked')`, tunnelID, connectorID).Scan(&served)
+ JOIN user_machines m ON m.id = c.host_id
+ WHERE t.id = $1 AND c.id = $2 AND t.deleted_at IS NULL AND t.desired_state <> 'deleted'
+ AND (t.expires_at IS NULL OR t.expires_at > now())
+ AND c.revoked_at IS NULL AND c.desired_state <> 'revoked'
+ AND m.revoked_at IS NULL AND m.deleted_at IS NULL)`, tunnelID, connectorID).Scan(&served)
 		return !served, err
 	}
 }

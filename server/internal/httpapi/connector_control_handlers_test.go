@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"io"
 	"math/big"
 	"net/http"
@@ -35,10 +36,11 @@ func (r bootstrapSessionReader) Lookup(tunnelID, connectorID, sessionID string, 
 
 type bootstrapSource struct {
 	value connectorprotocol.CarrierBootstrapDescriptor
+	err   error
 }
 
 func (s bootstrapSource) Descriptor(context.Context, connectorprotocol.ActiveControlSession) (connectorprotocol.CarrierBootstrapDescriptor, error) {
-	return s.value, nil
+	return s.value, s.err
 }
 
 type bootstrapVerifier struct {
@@ -72,7 +74,7 @@ func TestConnectorCarrierBootstrapRequiresExactMachineAndSessionBinding(t *testi
 			ServerCertificateChainPEM: bootstrapTestCertificate(t),
 		}}, IssuedAt: now, ExpiresAt: now.Add(10 * time.Second),
 	}
-	handler := connectorCarrierBootstrap(bootstrapSessionReader{value: active, ok: true}, bootstrapSource{value: descriptor}, bootstrapVerifier{claims: controlplane.MachineRequestClaims{MachineID: active.HostID, UserID: active.AccountID, OperationID: "bootstrap_request_01", InstallationGeneration: 1}})
+	handler := connectorCarrierBootstrap(bootstrapSessionReader{value: active, ok: true}, bootstrapSource{value: descriptor}, bootstrapVerifier{claims: controlplane.MachineRequestClaims{MachineID: active.HostID, UserID: active.AccountID, OperationID: "bootstrap_request_01", InstallationGeneration: 1}}, notGone)
 	body, _ := json.Marshal(connectorprotocol.CarrierBootstrapRequest{Schema: connectorprotocol.CarrierBootstrapSchema, Kind: "carrier_bootstrap_request", SessionID: active.SessionID, ProcessGeneration: active.ProcessGeneration, ConfigGeneration: active.ConfigGeneration, ConfigContentHash: active.ConfigContentHash})
 	request := httptest.NewRequest(http.MethodPost, "/v1/tunnels/tunnel_01/connectors/connector_01/carrier-bootstrap", strings.NewReader(string(body)))
 	request.SetPathValue("tunnel_id", active.TunnelID)
@@ -92,7 +94,7 @@ func TestConnectorCarrierBootstrapRequiresExactMachineAndSessionBinding(t *testi
 	candidate.ConfigGeneration = 5
 	candidate.ConfigContentHash = "sha256:" + strings.Repeat("b", 64)
 	candidate.ServingConfigGeneration, candidate.ServingConfigContentHash = active.ConfigGeneration, active.ConfigContentHash
-	lkgHandler := connectorCarrierBootstrap(bootstrapSessionReader{value: candidate, ok: true}, bootstrapSource{value: descriptor}, bootstrapVerifier{claims: controlplane.MachineRequestClaims{MachineID: active.HostID, UserID: active.AccountID, OperationID: "bootstrap_request_01", InstallationGeneration: 1}})
+	lkgHandler := connectorCarrierBootstrap(bootstrapSessionReader{value: candidate, ok: true}, bootstrapSource{value: descriptor}, bootstrapVerifier{claims: controlplane.MachineRequestClaims{MachineID: active.HostID, UserID: active.AccountID, OperationID: "bootstrap_request_01", InstallationGeneration: 1}}, notGone)
 	lkgRequest := request.Clone(request.Context())
 	lkgRequest.Body = io.NopCloser(strings.NewReader(string(body)))
 	lkgResponse := httptest.NewRecorder()
@@ -110,7 +112,28 @@ func TestConnectorCarrierBootstrapRequiresExactMachineAndSessionBinding(t *testi
 	if staleResponse.Code != http.StatusConflict || !strings.Contains(staleResponse.Body.String(), "connector_session_stale") {
 		t.Fatalf("stale status=%d body=%s", staleResponse.Code, staleResponse.Body.String())
 	}
+
+	// A connector whose tunnel expired (or was deleted, or whose machine was revoked) is told it is
+	// gone instead of retrying a 503 forever; the carrier source is never asked.
+	goneHandler := connectorCarrierBootstrap(bootstrapSessionReader{value: active, ok: true}, bootstrapSource{err: errors.New("descriptor must not be read")}, bootstrapVerifier{claims: controlplane.MachineRequestClaims{MachineID: active.HostID, UserID: active.AccountID, OperationID: "bootstrap_request_01", InstallationGeneration: 1}}, func(_ context.Context, tunnelID, connectorID string) (bool, error) {
+		return tunnelID == active.TunnelID && connectorID == active.ConnectorID, nil
+	})
+	goneRequest := request.Clone(request.Context())
+	goneRequest.Body = io.NopCloser(strings.NewReader(string(body)))
+	goneResponse := httptest.NewRecorder()
+	goneHandler.ServeHTTP(goneResponse, goneRequest)
+	var goneBody struct {
+		Error struct {
+			Code      string `json:"code"`
+			Retryable bool   `json:"retryable"`
+		} `json:"error"`
+	}
+	if goneResponse.Code != http.StatusGone || json.Unmarshal(goneResponse.Body.Bytes(), &goneBody) != nil || goneBody.Error.Code != "connector_gone" || goneBody.Error.Retryable {
+		t.Fatalf("gone connector status=%d body=%s", goneResponse.Code, goneResponse.Body.String())
+	}
 }
+
+func notGone(context.Context, string, string) (bool, error) { return false, nil }
 
 func bootstrapTestCertificate(t *testing.T) string {
 	t.Helper()
