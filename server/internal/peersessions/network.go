@@ -25,6 +25,11 @@ import (
 
 const networkConfigLimit = 128 << 10
 
+// maximumAccountEndpoints is the stated product maximum of computers (machines
+// and CLI endpoints) in one account, equal to the CLI's trusted-key bound
+// (endpointidentity.MaxTrustedKeys, 2048 keys for 1024 computers).
+const maximumAccountEndpoints = 2048
+
 type NetworkRegistration struct {
 	OperationID                                                    string
 	UserID, EndpointID, Role, MachineID                            string
@@ -448,13 +453,13 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 	for _, binding := range mesh {
 		p := byPeer[binding.EndpointID]
 		if p == nil {
-			if len(byPeer) >= 64 {
+			if len(byPeer) >= maximumAccountEndpoints {
 				return NetworkConfigResult{}, ErrResourceLimit
 			}
 			p = &networkPeer{Identity: binding}
 			byPeer[binding.EndpointID] = p
 		}
-		if scopes >= 128 {
+		if scopes >= 2*maximumAccountEndpoints {
 			return NetworkConfigResult{}, ErrResourceLimit
 		}
 		p.Scopes = append(p.Scopes, personalNetworkScope(self, binding, expiry))
@@ -485,8 +490,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 		return NetworkConfigResult{}, err
 	}
 	if len(token) > networkConfigLimit {
-		slog.Warn("peer network authority unavailable", "site", "network.go:493")
-		return NetworkConfigResult{}, ErrUnavailable
+		return NetworkConfigResult{}, ErrResourceLimit
 	}
 	candidates, err := s.regionalCandidates(ctx, tx, in.UserID, in.EndpointID, generation, now, expiry)
 	if err != nil {
@@ -542,7 +546,7 @@ func personalNetworkPeers(ctx context.Context, tx *sql.Tx, self networkBinding, 
  WHERE n.user_id=$1 AND n.endpoint_id<>$2 AND n.revoked_at IS NULL AND
  ((n.role='machine' AND EXISTS(SELECT 1 FROM paperboat.user_machines m WHERE m.id=n.machine_id AND m.user_id=n.user_id AND m.owner_team_id IS NULL AND m.revoked_at IS NULL AND m.deleted_at IS NULL))
  OR ($3='machine' AND n.role='cli' AND EXISTS(SELECT 1 FROM paperboat.cli_client_sessions c WHERE c.id=n.endpoint_id AND c.user_id=n.user_id AND c.state='active' AND c.revoked_at IS NULL)))
- ORDER BY n.endpoint_id LIMIT 65`, self.AccountID, self.EndpointID, self.Role)
+ ORDER BY n.endpoint_id LIMIT $4`, self.AccountID, self.EndpointID, self.Role, maximumAccountEndpoints+1)
 	if err != nil {
 		return nil, err
 	}
@@ -560,7 +564,9 @@ func personalNetworkPeers(ctx context.Context, tx *sql.Tx, self networkBinding, 
 	if err != nil {
 		return nil, err
 	}
-	if len(ids) > 64 {
+	// Every endpoint of the account is a peer; the bound is the stated product
+	// maximum, and the signed configuration size is checked where it is built.
+	if len(ids) > maximumAccountEndpoints {
 		return nil, ErrResourceLimit
 	}
 	peers := make([]networkBinding, 0, len(ids))

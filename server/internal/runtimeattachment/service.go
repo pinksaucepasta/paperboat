@@ -395,8 +395,11 @@ func (s *Service) Observe(ctx context.Context, edge previewattachment.PreviewEdg
 	}
 	// A stale observation (its carrier was replaced) must not roll back the
 	// renewal of the edge's other carriers: those commit, then the edge hears 409.
+	// Read committed: every write below is fenced by its own WHERE (generation,
+	// session, edge epoch, active), and serializable predicate locks on these hot
+	// rows made reports from both edges fail against heartbeats and attachments.
 	stale := false
-	err := s.DB.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+	err := s.DB.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		stale = false
 		seen := map[string]bool{}
 		for _, o := range observations {

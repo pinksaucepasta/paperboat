@@ -43,6 +43,8 @@ func peerNetworkError(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, r, http.StatusConflict, "peer_network_conflict", "The peer network key generation changed. Refresh registration state before retrying rotation.")
 	case errors.Is(err, peersessions.ErrDenied):
 		writeError(w, r, http.StatusForbidden, "peer_network_denied", "Current endpoint authority no longer permits peer networking. Remove installed peers and reauthorize the endpoint.")
+	case errors.Is(err, peersessions.ErrResourceLimit):
+		writeError(w, r, http.StatusConflict, "peer_network_too_large", "This account has more computers than one peer network configuration can carry. Remove computers you no longer use (pb machine list), then retry.")
 	case errors.Is(err, peersessions.ErrInvalid):
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "Peer network request is invalid.")
 	default:

@@ -17,6 +17,81 @@ import (
 	"github.com/pinksaucepasta/paperboat-server/internal/usermachines"
 )
 
+// More than 64 computers in one account still get a configuration naming every
+// other computer (production failed every endpoint of a 69-endpoint account).
+func TestPersonalNetworkCarriesEveryComputerOfALargeAccountOnPostgres(t *testing.T) {
+	dsn := os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
+	if dsn == "" {
+		t.Skip("isolated PostgreSQL DSN required")
+	}
+	if err := db.ValidateIsolatedTestDSN(dsn, os.Getenv("PAPERBOAT_DATABASE_DSN")); err != nil {
+		t.Fatal(err)
+	}
+	store, err := db.Open(config.Database{Driver: "postgres", DSN: dsn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := t.Context()
+	if err := db.Migrate(ctx, store); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	suffix := fmt.Sprint(time.Now().UnixNano())
+	account := "personal_network_" + suffix
+	_, signer, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider, err := mint.New([]mint.Key{{ID: "personal-network", PrivateKey: signer}}, "personal-network", mint.MaxProofTTL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := NewNetworkService(store, provider, "https://api.example.test", NetworkOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$2,'active')`, account, account+"@example.test"); err != nil {
+		t.Fatal(err)
+	}
+	// Controlled enrollment records contain real signed endpoint certificates.
+	// All network registration/configuration below uses the production service.
+	var machines []string
+	for i := range 70 {
+		machines = append(machines, fmt.Sprintf("personal_%02d_%s", i, suffix))
+	}
+	for _, machine := range machines {
+		environment := "env_" + machine
+		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_environments(id,workspace_id,owner_user_id) VALUES($1,$1,$2)`, environment, account); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines(id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$3,$1,'linux','amd64','/workspace','online','occupied',true,1)`, machine, account, environment); err != nil {
+			t.Fatal(err)
+		}
+		_, _, quic := networkEndpointTLS(t, machine, now)
+		certificate, fingerprint := networkCertificateWithKeys(t, signer, account, wire.RoleMachine, machine, 1, 1, quic, now, now.Add(time.Hour))
+		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.peer_endpoint_certificates(fingerprint,user_id,endpoint_id,role,generation,serial,certificate,quic_public_key,issued_at,expires_at,key_id,signer_public_key) VALUES($1,$2,$3,'machine',1,1,$4,$5,$6,$7,'personal-network',$8)`, fingerprint[:], account, machine, certificate, quic[:], now, now.Add(time.Hour), signer.Public().(ed25519.PublicKey)); err != nil {
+			t.Fatal(err)
+		}
+		private, public := networkX25519Key(t)
+		if _, err := service.Register(ctx, NetworkRegistration{OperationID: "register_" + machine, UserID: account, EndpointID: machine, Role: "machine", MachineID: machine, EndpointGeneration: 1, MachineGeneration: 1, WireGuardPublicKey: public, DiscoPublicKey: networkDiscoPublic(t, private), QUICCertificateFingerprint: fingerprint[:]}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	configuration := func(machine string) NetworkConfigResult {
+		t.Helper()
+		result, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "configuration_" + machine, UserID: account, EndpointID: machine})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	claims := networkClaims(t, configuration(machines[0]).Configuration)
+	if peers := claims["peers"].([]any); len(peers) != len(machines)-1 {
+		t.Fatalf("configuration names %d peers, want %d", len(peers), len(machines)-1)
+	}
+}
+
 func TestPersonalNetworkAdmissionOnPostgres(t *testing.T) {
 	dsn := os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
 	if dsn == "" {
