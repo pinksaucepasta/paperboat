@@ -17,8 +17,18 @@ MODULES = ("cli", "relay", "tunnel", "server", "helper", "shared")
 TIMEOUT = 600
 
 
+# Git runs hooks with GIT_DIR (and in worktrees GIT_INDEX_FILE etc.) naming the pushing checkout.
+# Commands inside the build tree must not inherit them, or `checkout --force` moves the pushing
+# checkout's HEAD instead of the build tree's.
+REPOSITORY_VARIABLES = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_PREFIX", "GIT_OBJECT_DIRECTORY")
+
+
+def tree_env(env=None):
+    return {k: v for k, v in (env or os.environ).items() if k not in REPOSITORY_VARIABLES}
+
+
 def git(*args, cwd=None, check=True):
-    result = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
+    result = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, env=tree_env() if cwd else None)
     if check and result.returncode:
         raise RuntimeError(f"git {' '.join(args)}: {result.stderr.strip()}")
     return result.stdout
@@ -42,7 +52,7 @@ def touched(paths):
 
 
 def run(argv, cwd, env=None):
-    result = subprocess.run(argv, cwd=cwd, capture_output=True, text=True, timeout=TIMEOUT, env=env)
+    result = subprocess.run(argv, cwd=cwd, capture_output=True, text=True, timeout=TIMEOUT, env=tree_env(env))
     return result.returncode, (result.stdout + result.stderr).strip()
 
 

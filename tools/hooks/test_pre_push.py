@@ -38,6 +38,24 @@ class PrePushTest(unittest.TestCase):
         return subprocess.run([str(HOOK)], cwd=self.repo, input=f"refs/heads/main {local} refs/heads/main {remote}\n",
                               capture_output=True, text=True, env={"PATH": subprocess.os.environ["PATH"], "HOME": subprocess.os.environ["HOME"], "GOFLAGS": "-mod=mod", "GOCACHE": subprocess.os.environ.get("GOCACHE", "/tmp/pb-hook-gocache")})
 
+    def test_the_pushing_checkout_stays_on_its_branch(self):
+        # Git sets GIT_DIR for hooks; with it, the build tree's forced checkout used to detach the
+        # pushing checkout's HEAD at the pushed commit.
+        self.write("cli/a/b.go", "package a\n\nfunc B() int { return A() }\n")
+        head = self.commit("add b")
+        self.write("cli/a/c.go", "package a\n\nfunc C() int { return A() }\n")
+        second = self.commit("add c")
+        self.write("cli/a/d.go", "package a\n\nfunc D() int { return A() }\n")
+        self.commit("add d, not pushed")
+        env = {"PATH": subprocess.os.environ["PATH"], "HOME": subprocess.os.environ["HOME"], "GOFLAGS": "-mod=mod",
+               "GOCACHE": subprocess.os.environ.get("GOCACHE", "/tmp/pb-hook-gocache"), "GIT_DIR": str(self.repo / ".git")}
+        for pushed, remote in ((head, self.base), (second, head)):  # the second push reuses the build tree
+            result = subprocess.run([str(HOOK)], cwd=self.repo, input=f"refs/heads/main {pushed} refs/heads/main {remote}\n",
+                                    capture_output=True, text=True, env=env)
+            self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(git(self.repo, "symbolic-ref", "--short", "HEAD"), "main")
+        self.assertEqual(git(self.repo, "status", "--porcelain"), "")
+
     def test_a_commit_that_builds_passes(self):
         self.write("cli/a/b.go", "package a\n\nfunc B() int { return A() }\n")
         head = self.commit("add b")
