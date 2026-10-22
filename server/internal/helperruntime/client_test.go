@@ -285,3 +285,34 @@ func TestCreateTerminalPreservesRemoteErrnoWithoutLocalInterpretation(t *testing
 		})
 	}
 }
+
+// A host whose managed ENV delivery is pending still launches the terminal and says so in
+// launch_warnings; that ack is a successful creation, not create_ack_invalid.
+func TestCreateTerminalAcceptsLaunchWarnings(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		connection, err := websocket.Accept(writer, request, &websocket.AcceptOptions{Subprotocols: []string{subprotocol}})
+		if err != nil {
+			return
+		}
+		defer connection.Close(websocket.StatusNormalClosure, "complete")
+		hello, err := readFrame(request.Context(), connection)
+		if err != nil {
+			return
+		}
+		welcome, _ := json.Marshal(map[string]any{"version": protocolVersion, "capabilities": []string{"terminal.v1", "health.v1"}})
+		if writeFrame(request.Context(), connection, frame{Type: "welcome", RequestID: hello.RequestID, Version: protocolVersion, Payload: welcome}) != nil {
+			return
+		}
+		operation, err := readFrame(request.Context(), connection)
+		if err != nil {
+			return
+		}
+		payload := json.RawMessage(`{"result":{"id":"umts_1","name":"work","cwd":"/home/user","dimensions":{"columns":80,"rows":24},"state":"running","generation":1,"earliest_sequence":0,"latest_sequence":0,"terminal_modes":{},"existing":false,"launch_warnings":["environment_pending"]},"replay":false}`)
+		_ = writeFrame(request.Context(), connection, frame{Type: "response", RequestID: operation.RequestID, Version: protocolVersion, Payload: payload})
+	}))
+	defer server.Close()
+	created, err := (Client{HTTPClient: server.Client()}).CreateTerminal(context.Background(), server.URL, "signed-operation", "umts_1", "umtso_1", "work", "/home/user")
+	if err != nil || created.ID != "umts_1" || created.State != "running" {
+		t.Fatalf("created=%#v err=%v", created, err)
+	}
+}

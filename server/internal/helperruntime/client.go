@@ -296,6 +296,8 @@ func (c Client) terminalEndpoint(ctx context.Context, endpoint, credential, acti
 			var created struct {
 				Snapshot
 				Existing bool `json:"existing"`
+				// The host launched without its pending managed ENV and notes it; the launch succeeded.
+				LaunchWarnings []string `json:"launch_warnings,omitempty"`
 			}
 			if err := decodeStrict(envelope.Result, &created); err != nil {
 				return Snapshot{}, protocolError("create_ack_invalid", "helper runtime returned an invalid terminal creation", err)
