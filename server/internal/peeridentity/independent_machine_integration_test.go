@@ -63,6 +63,10 @@ func TestIndependentMachineEnrollmentWithoutAccountRootPostgres(t *testing.T) {
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.cli_client_sessions(id,user_id,client_id,client_label,device_type,os,scopes,state,created_at,approved_at) VALUES($1,$2,$3,'independent-cli','cli','linux',ARRAY['machines:read'],'active',$4,$4)`, cliID, accountID, "client_"+suffix, now); err != nil {
 		t.Fatal(err)
 	}
+	// A CLI session's key is trusted while the session can refresh.
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.cli_refresh_tokens(token_hash,cli_client_session_id,state,expires_at,created_at) VALUES($1,$2,'active',$3,$4)`, "refresh_"+cliID, cliID, now.Add(24*time.Hour), now); err != nil {
+		t.Fatal(err)
+	}
 	cliPublic, cliPrivate, err := ed25519.GenerateKey(nil)
 	if err != nil {
 		t.Fatal(err)

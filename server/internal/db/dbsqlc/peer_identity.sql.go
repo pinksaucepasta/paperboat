@@ -905,6 +905,13 @@ WHERE certificate.user_id = $1
       SELECT 1 FROM cli_client_sessions AS session
       WHERE session.id = certificate.endpoint_id AND session.user_id = certificate.user_id
         AND session.state = 'active' AND session.revoked_at IS NULL
+        -- A session that can no longer refresh is over (the refresh lifetime is the idle expiry);
+        -- its key must not keep growing the trust set every machine stores.
+        AND EXISTS (
+          SELECT 1 FROM cli_refresh_tokens AS refresh
+          WHERE refresh.cli_client_session_id = session.id AND refresh.state = 'active'
+            AND refresh.revoked_at IS NULL AND refresh.expires_at > $2
+        )
     ))
     OR (certificate.role = 'machine' AND EXISTS (
       SELECT 1 FROM user_machines AS machine

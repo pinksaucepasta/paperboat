@@ -125,6 +125,10 @@ func TestSQLRepositoryAuthenticatedMachineEnrollmentBindsSignerWithoutChangingAc
 		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.cli_client_sessions (id,user_id,client_id,client_label,device_type,os,scopes,state,created_at,approved_at,user_machine_id,fresh_e2ee_bootstrap) VALUES ($1,$2,$3,'machine identity test','desktop','windows',ARRAY['machines:connect'],'active',$4,$4,$5,false)`, clientID, userID, "client_"+clientID, now, machineID); err != nil {
 			t.Fatal(err)
 		}
+		// A CLI session's key is trusted while the session can refresh.
+		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.cli_refresh_tokens (token_hash,cli_client_session_id,state,expires_at,created_at) VALUES ($1,$2,'active',$3,$4)`, "refresh_"+clientID, clientID, now.Add(24*time.Hour), now); err != nil {
+			t.Fatal(err)
+		}
 	}
 	repository, err := NewSQLRepository(store, audit.NewWriter(store))
 	if err != nil {
