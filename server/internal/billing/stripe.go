@@ -220,6 +220,8 @@ type stripeRenewalInvoice struct {
 	Status            string `json:"status"`
 	Attempted         bool   `json:"attempted"`
 	AmountRemaining   int64  `json:"amount_remaining"`
+	CollectionMethod  string `json:"collection_method"`
+	DueDate           int64  `json:"due_date"`
 	StatusTransitions struct {
 		FinalizedAt int64 `json:"finalized_at"`
 	} `json:"status_transitions"`
@@ -275,6 +277,15 @@ func (r stripeSubscriptionResponse) subscription() (StripeSubscription, error) {
 		(invoice.Status == "open" || invoice.Status == "uncollectible") {
 		result.RenewalInvoiceID = invoice.ID
 		result.RenewalFailureAt = time.Unix(invoice.StatusTransitions.FinalizedAt, 0).UTC()
+	}
+	// Pay by invoice (F19-12): Stripe never attempts a send_invoice invoice; it is overdue from its
+	// due date, which starts the same renewal grace as a failed card payment.
+	if invoice := r.LatestInvoice; invoice != nil && (r.Status == "past_due" || r.Status == "unpaid") &&
+		invoice.CollectionMethod == "send_invoice" && invoice.DueDate > 0 && invoice.AmountRemaining > 0 &&
+		(invoice.BillingReason == "subscription_cycle" || invoice.BillingReason == "subscription_update") &&
+		(invoice.Status == "open" || invoice.Status == "uncollectible") {
+		result.RenewalInvoiceID = invoice.ID
+		result.RenewalFailureAt = time.Unix(invoice.DueDate, 0).UTC()
 	}
 	return result, nil
 }

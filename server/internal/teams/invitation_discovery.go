@@ -47,7 +47,7 @@ func (s *Service) invitationInventory(ctx context.Context, account, team, id, q,
 		return nil, 0, ErrInvalid
 	}
 	predicate := ` FROM team_invitations i JOIN teams t USING(team_id) JOIN users creator ON creator.id=i.created_by LEFT JOIN LATERAL (SELECT u.primary_email,u.display_name FROM users u WHERE u.id=i.recipient_account OR (i.recipient_account IS NULL AND u.status='active' AND u.email_verified AND paperboat.canonical_email_address(u.primary_email)=i.recipient_email) ORDER BY u.id LIMIT 1) invitee ON true JOIN users viewer ON viewer.id=$1 AND viewer.status='active' WHERE t.deleted_at IS NULL
- AND (` + invitationRecipientSQL + ` OR EXISTS(SELECT 1 FROM team_members m WHERE m.team_id=i.team_id AND m.account_id=$1 AND m.active AND (m.role='admin' OR t.owner_account=$1)))
+ AND (` + invitationRecipientSQL + ` OR EXISTS(SELECT 1 FROM team_members m WHERE m.team_id=i.team_id AND m.account_id=$1 AND m.active AND team_role_allows(CASE WHEN t.owner_account=$1 THEN 'owner' ELSE m.role END,'members.manage')))
  AND ($2='' OR i.team_id=$2) AND ($3='' OR i.invitation_id=$3)
  AND ($4='' OR position(lower($4) in lower(i.team_id||' '||coalesce(i.recipient_account,'')||' '||coalesce(i.recipient_email,'')||' '||i.invitation_id))>0)
  AND ($5='' OR CASE WHEN i.accepted_at IS NOT NULL THEN 'accepted' WHEN i.cancelled_at IS NOT NULL THEN 'cancelled' WHEN i.expires_at<=now() THEN 'expired' ELSE 'pending' END=$5)

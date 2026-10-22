@@ -12,7 +12,7 @@ import (
 
 func authorizeSMTPAdmin(ctx context.Context, tx *db.Tx, account, team string) error {
 	var allowed bool
-	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM teams t JOIN team_members m USING(team_id) WHERE t.team_id=$2 AND t.deleted_at IS NULL AND NOT t.suspended AND m.account_id=$1 AND m.active AND (t.owner_account=$1 OR m.role='admin'))`, account, team).Scan(&allowed)
+	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM teams t JOIN team_members m USING(team_id) WHERE t.team_id=$2 AND t.deleted_at IS NULL AND NOT t.suspended AND m.account_id=$1 AND m.active AND team_role_allows(CASE WHEN t.owner_account=$1 THEN 'owner' ELSE m.role END,'settings.manage'))`, account, team).Scan(&allowed)
 	if err != nil {
 		return err
 	}

@@ -30,7 +30,7 @@ type MachineAdmission struct {
 // admissionFor is what happens to a machine the actor adds: owners and admins add directly, other
 // members wait when the team asks for approval.
 func admissionFor(t Team, actor Member) string {
-	if t.ApproveNewMachines && !administrative(actor.Role) {
+	if t.ApproveNewMachines && !Allowed(actor.Role, PermissionSettingsManage) {
 		return AdmissionPending
 	}
 	return AdmissionAccepted
@@ -80,7 +80,7 @@ func readMachineRequestsTx(ctx context.Context, tx *db.Tx, team string, out *Tea
 
 // ViewFor hides other members' machine requests from members who are not owners or admins.
 func ViewFor(t Team, account string) Team {
-	if actor, ok := currentMember(t, account); ok && administrative(actor.Role) {
+	if actor, ok := currentMember(t, account); ok && Allowed(actor.Role, PermissionSettingsManage) {
 		return t
 	}
 	own := []MachineAdmission{}

@@ -94,9 +94,9 @@ func WorkspaceTx(ctx context.Context, tx *db.Tx, account, team string, manage bo
 	}
 	out.ID, out.UserID, out.CanManage = "personal:"+account, account, true
 	if team != "" {
-		var owner string
 		var member bool
-		err := tx.QueryRow(ctx, `SELECT t.owner_account,EXISTS(SELECT 1 FROM team_members m WHERE m.team_id=t.team_id AND m.account_id=$2 AND m.active),(SELECT count(*) FROM team_members m WHERE m.team_id=t.team_id AND m.active) FROM teams t WHERE t.team_id=$1 AND t.deleted_at IS NULL`, team, account).Scan(&owner, &member, &out.Members)
+		// The owner and billing admins manage billing (teams.PermissionBillingManage).
+		err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM team_members m WHERE m.team_id=t.team_id AND m.account_id=$2 AND m.active),coalesce((SELECT team_role_allows(CASE WHEN t.owner_account=$2 THEN 'owner' ELSE m.role END,'billing.manage') FROM team_members m WHERE m.team_id=t.team_id AND m.account_id=$2 AND m.active),false),(SELECT count(*) FROM team_members m WHERE m.team_id=t.team_id AND m.active) FROM teams t WHERE t.team_id=$1 AND t.deleted_at IS NULL`, team, account).Scan(&member, &out.CanManage, &out.Members)
 		if err == pgx.ErrNoRows {
 			return out, ErrWorkspaceForbidden
 		}
@@ -106,7 +106,6 @@ func WorkspaceTx(ctx context.Context, tx *db.Tx, account, team string, manage bo
 		if !member {
 			return out, ErrWorkspaceForbidden
 		}
-		out.CanManage = owner == account
 		if manage && !out.CanManage {
 			return out, ErrWorkspaceForbidden
 		}

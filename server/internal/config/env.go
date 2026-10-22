@@ -167,6 +167,13 @@ func overlayEnv(c *Config, lookup func(string) (string, bool), readFile func(str
 		}
 		c.Billing.TeamTrialDays = n
 	}
+	if value, ok := lookup("PAPERBOAT_BILLING_STRIPE_TAX"); ok {
+		on, err := strconv.ParseBool(value)
+		if err != nil {
+			return errors.New("PAPERBOAT_BILLING_STRIPE_TAX must be true or false")
+		}
+		c.Business.StripeTax = on
+	}
 	setString("PAPERBOAT_STRIPE_PERSONAL_PORTAL_CONFIGURATION_ID", &c.Billing.PersonalPortalConfigurationID)
 	setString("PAPERBOAT_STRIPE_TEAM_PORTAL_CONFIGURATION_ID", &c.Billing.TeamPortalConfigurationID)
 	setString("PAPERBOAT_GITHUB_BASE_URL", &c.Providers.GitHub.BaseURL)

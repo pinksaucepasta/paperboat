@@ -12,7 +12,7 @@ func (s *Service) Grant(ctx context.Context, account, team string, r GrantReques
 		return Team{}, ErrInvalid
 	}
 	return s.mutate(ctx, account, team, r.OperationID, "grant", r.ExpectedGeneration, r, func(ctx context.Context, tx *db.Tx, t Team, m Member) error {
-		if !administrative(m.Role) {
+		if !Allowed(m.Role, PermissionSettingsManage) {
 			return ErrForbidden
 		}
 		if _, ok := member(t, r.AccountID); !ok {
@@ -62,7 +62,7 @@ func (s *Service) Attach(ctx context.Context, account, team string, r AttachRequ
 		return Team{}, ErrInvalid
 	}
 	return s.mutate(ctx, account, team, r.OperationID, "attach", r.ExpectedGeneration, r, func(ctx context.Context, tx *db.Tx, t Team, m Member) error {
-		if !administrative(m.Role) {
+		if !Allowed(m.Role, PermissionSettingsManage) {
 			return ErrForbidden
 		}
 		query := `SELECT account_id FROM tunnels WHERE id=$1 AND (owner_team_id IS NULL OR owner_team_id=$2) AND deleted_at IS NULL FOR UPDATE`

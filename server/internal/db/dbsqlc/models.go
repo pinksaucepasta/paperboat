@@ -56,6 +56,12 @@ type AuditEvent struct {
 	ActivityMachineID   sql.NullString
 	ActivityMachineName sql.NullString
 	ActivityTargetName  sql.NullString
+	ActorEmail          sql.NullString
+	ActorTokenID        sql.NullString
+	Result              string
+	Reason              sql.NullString
+	ClientIp            sql.NullString
+	UserAgent           sql.NullString
 }
 
 type AuthRateLimit struct {

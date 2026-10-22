@@ -50,7 +50,7 @@ func (s *Service) authorizeScope(ctx context.Context, actor string, scope Scope,
 		}
 	case "team":
 		var allowed bool
-		err := s.database.SQL().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.teams t JOIN paperboat.team_members m USING(team_id) WHERE t.team_id=$1 AND t.deleted_at IS NULL AND m.account_id=$2 AND m.active AND (NOT $3 OR t.owner_account=$2 OR m.role='admin'))`, scope.ID, actor, write).Scan(&allowed)
+		err := s.database.SQL().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.teams t JOIN paperboat.team_members m USING(team_id) WHERE t.team_id=$1 AND t.deleted_at IS NULL AND m.account_id=$2 AND m.active AND (NOT $3 OR team_role_allows(CASE WHEN t.owner_account=$2 THEN 'owner' ELSE m.role END,'settings.manage')))`, scope.ID, actor, write).Scan(&allowed)
 		if err != nil {
 			return scope, err
 		}

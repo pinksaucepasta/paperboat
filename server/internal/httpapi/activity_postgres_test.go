@@ -66,7 +66,7 @@ func newActivityFixture(t *testing.T) *activityFixture {
 			t.Error(err)
 		}
 	})
-	f.handler = NewRouter(Options{Config: config.Default(), Auth: accounts, Activity: activity.New(store), Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	f.handler = NewRouter(Options{Config: config.Default(), Auth: accounts, Activity: activity.New(store, config.Default().Business), Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
 	return f
 }
 func (f *activityFixture) exec(query string, args ...any) {
@@ -155,5 +155,68 @@ func TestActivityConnectedWorkspaceHistory(t *testing.T) {
 		if code, _, _ := f.get(f.owner, "/v1/activity?workspace=personal&"+q); code != 400 {
 			t.Fatalf("invalid query accepted: %s", q)
 		}
+	}
+}
+
+func (f *activityFixture) raw(user, path string) (int, string, http.Header) {
+	f.t.Helper()
+	r := httptest.NewRequest("GET", path, nil)
+	r.AddCookie(&http.Cookie{Name: auth.DevSessionCookieName, Value: f.tokens[user]})
+	w := httptest.NewRecorder()
+	f.handler.ServeHTTP(w, r)
+	return w.Code, w.Body.String(), w.Header()
+}
+
+// PLAN F19-07..09: the audit log carries result, reason and client, filters by them, exports
+// as CSV and JSON for team workspaces, records the export, and only audit.read roles see it.
+func TestActivityAuditLogFiltersExportAndRoles(t *testing.T) {
+	f := newActivityFixture(t)
+	f.exec(`INSERT INTO teams(team_id,owner_account,generation,display_name) VALUES($1,$2,1,'Audit team')`, f.team, f.owner)
+	f.exec(`INSERT INTO team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'admin',true),($1,$3,1,'auditor',true)`, f.team, f.owner, f.other)
+	ctx := audit.WithClient(t.Context(), audit.Client{IP: "203.0.113.7", UserAgent: "pb/test"})
+	if err := f.writer.Write(ctx, audit.Event{ActorUserID: f.owner, ActorType: audit.ActorUser, EventType: "team.sso_required", ResourceType: "team", ResourceID: f.team, Result: audit.ResultDenied, Reason: "team_sso_required"}); err != nil {
+		t.Fatal(err)
+	}
+	f.write("team.renamed", "team", f.team)
+	code, page, _ := f.get(f.other, "/v1/activity?workspace="+f.team+"&result=denied")
+	if code != 200 || len(page.Items) != 1 {
+		t.Fatalf("auditor denied filter code=%d items=%d", code, len(page.Items))
+	}
+	e := page.Items[0]
+	if e.Result != "denied" || e.Reason != "team_sso_required" || e.IP != "203.0.113.7" || e.UserAgent != "pb/test" || e.Actor.Email != f.owner+"@example.test" || e.Workspace != "team:"+f.team {
+		t.Fatalf("event = %+v", e)
+	}
+	if code, p, _ := f.get(f.other, "/v1/activity?workspace="+f.team+"&action=team&actor="+f.owner+"@example.test&since=2000-01-01T00:00:00Z"); code != 200 || len(p.Items) != 2 {
+		t.Fatalf("action prefix + actor email filter code=%d items=%d", code, len(p.Items))
+	}
+	if code, p, _ := f.get(f.other, "/v1/activity?workspace="+f.team+"&until=2000-01-01T00:00:00Z"); code != 200 || len(p.Items) != 0 {
+		t.Fatal("until filter ignored")
+	}
+	code, body, header := f.raw(f.other, "/v1/activity/export?workspace="+f.team+"&format=csv")
+	if code != 200 || !strings.HasPrefix(body, "id,occurred_at,workspace,action,result") || strings.Count(body, "\n") != 3 || !strings.Contains(header.Get("Content-Disposition"), "attachment") {
+		t.Fatalf("csv export code=%d body=%q", code, body)
+	}
+	code, body, _ = f.raw(f.other, "/v1/activity/export?workspace="+f.team+"&format=json&result=denied")
+	var exported []activity.Event
+	if code != 200 || json.Unmarshal([]byte(body), &exported) != nil || len(exported) != 1 || exported[0].Reason != "team_sso_required" {
+		t.Fatalf("json export code=%d body=%q", code, body)
+	}
+	if code, p, _ := f.get(f.owner, "/v1/activity?workspace="+f.team+"&action=team.activity_exported"); code != 200 || len(p.Items) != 2 || p.Items[0].Details["format"] != "json" {
+		t.Fatalf("exports not recorded: code=%d items=%+v", code, p.Items)
+	}
+	if code, _, _ := f.raw(f.owner, "/v1/activity/export?workspace=personal&format=csv"); code != 400 {
+		t.Fatalf("personal export code=%d", code)
+	}
+	for _, q := range []string{"format=xml", "format=csv&result=maybe", "format=csv&since=yesterday"} {
+		if code, _, _ := f.raw(f.other, "/v1/activity/export?workspace="+f.team+"&"+q); code != 400 {
+			t.Fatalf("invalid export accepted: %s", q)
+		}
+	}
+	f.exec(`UPDATE team_members SET role='billing' WHERE team_id=$1 AND account_id=$2`, f.team, f.other)
+	if code, _, _ := f.get(f.other, "/v1/activity?workspace="+f.team); code != 403 {
+		t.Fatalf("billing admin read the audit log: %d", code)
+	}
+	if code, _, _ := f.raw(f.other, "/v1/activity/export?workspace="+f.team+"&format=csv"); code != 403 {
+		t.Fatalf("billing admin exported the audit log: %d", code)
 	}
 }

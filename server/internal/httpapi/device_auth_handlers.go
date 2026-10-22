@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat-server/internal/audit"
 	"io"
 	"net"
 	"net/http"
@@ -329,6 +330,8 @@ func trustedClientNetwork(trustedCIDRs []string, next http.Handler) http.Handler
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		network := resolve(r)
 		ctx := context.WithValue(r.Context(), requestNetworkContextKey{}, network)
+		// The audit log records where a signed-in action came from (PLAN F19-07).
+		ctx = audit.WithClient(ctx, audit.Client{IP: network, UserAgent: r.UserAgent()})
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

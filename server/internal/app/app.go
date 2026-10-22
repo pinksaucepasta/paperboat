@@ -224,6 +224,7 @@ func New(opts Options) (*App, error) {
 		stripeClient = billing.HTTPStripeClient{BaseURL: opts.Config.Providers.Stripe.BaseURL, APIKey: opts.Config.Secrets.StripeAPIKey}
 	}
 	workspaceBilling := billing.NewWorkspaceService(store, stripeClient, opts.Config.Secrets.EncryptionKey, billing.PortalConfigurations{Personal: opts.Config.Billing.PersonalPortalConfigurationID, Team: opts.Config.Billing.TeamPortalConfigurationID})
+	workspaceBilling.ConfigureBusiness(opts.Config.Business)
 	if err := workspaceBilling.ConfigureTopupMaxQuantity(opts.Config.Billing.TopupMaxQuantity); err != nil {
 		return nil, err
 	}
@@ -784,6 +785,7 @@ func New(opts Options) (*App, error) {
 	if reader, ok := stripeClient.(billing.PriceReader); ok {
 		priceReader = reader
 	}
+	activityLog := activity.New(store, opts.Config.Business)
 	router := httpapi.NewRouter(httpapi.Options{
 		ClientUpdatePolicy:        clientupdate.New(store, auditWriter, opts.Config.ReleaseDirectory),
 		SupportReports:            supportService,
@@ -834,7 +836,7 @@ func New(opts Options) (*App, error) {
 		PeerNetwork:               peerNetworkService,
 		MachineServices:           machineServices,
 		ResourceUsage:             resourceUsageService,
-		Activity:                  activity.New(store),
+		Activity:                  activityLog,
 		NativePrivateAccess:       nativePrivateService,
 		ManagedSSH:                managedSSHService,
 		DiagnosticUploads:         diagnosticUploadService,
@@ -884,7 +886,7 @@ func New(opts Options) (*App, error) {
 	serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_team_retention", periodicPreviewTunnelWorker(time.Minute, func(ctx context.Context) error {
 		pruneContext, cancel := context.WithTimeout(ctx, opts.Config.HTTP.RequestTimeout)
 		defer cancel()
-		_, err := teams.NewService(store).PruneActivity(pruneContext)
+		_, err := activityLog.Prune(pruneContext)
 		workers.IterationFailure(ctx, "team_retention_cleanup", "team_retention_failed", err)
 		outcome := "success"
 		if err != nil {

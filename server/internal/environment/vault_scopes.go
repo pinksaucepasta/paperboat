@@ -506,7 +506,7 @@ func (s *Service) RotateVaultTeam(ctx context.Context, account, teamID string, r
 			actor, _ := vaultMember(team, account)
 			for _, id := range request.RemoveAccountIDs {
 				target, ok := vaultMember(team, id)
-				if !ok || id == team.OwnerAccount || (actor.Role == "admin" && target.Role != "member") {
+				if !ok || id == team.OwnerAccount || (actor.Role == "admin" && (target.Role == "owner" || target.Role == "admin")) {
 					return ErrKeyAuthorizationRequired
 				}
 			}
@@ -991,7 +991,7 @@ func vaultTeamRotationAllowed(team VaultTeamState, account string, request Vault
 		if !ok || (!target.Active && !team.RotationRequired) || id == team.OwnerAccount || id == account {
 			return false
 		}
-		if member.Role == "admin" && target.Role != "member" {
+		if member.Role == "admin" && (target.Role == "owner" || target.Role == "admin") {
 			return false
 		}
 	}

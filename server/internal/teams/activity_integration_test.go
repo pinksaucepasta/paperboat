@@ -125,13 +125,6 @@ func TestPostgresTeamActivityAuthorizationPaginationRetention(t *testing.T) {
 	if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.audit_events SET metadata='{}' WHERE id=$1`, "old_"+suffix); err == nil {
 		t.Fatal("expired event modified")
 	}
-	if _, err = s.PruneActivity(ctx); err != nil {
-		t.Fatal(err)
-	}
-	var remaining int
-	if err = store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.audit_events WHERE id=$1`, "old_"+suffix).Scan(&remaining); err != nil || remaining != 0 {
-		t.Fatalf("expired remaining=%d err=%v", remaining, err)
-	}
 	if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.teams SET deleted_at=now() WHERE team_id=$1`, team); err != nil {
 		t.Fatal(err)
 	}

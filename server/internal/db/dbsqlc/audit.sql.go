@@ -12,9 +12,11 @@ import (
 
 const insertAuditEvent = `-- name: InsertAuditEvent :exec
 INSERT INTO audit_events
-	(id, actor_user_id, actor_type, event_type, resource_type, resource_id, idempotency_key, metadata, created_at)
+	(id, actor_user_id, actor_type, event_type, resource_type, resource_id, idempotency_key, metadata, created_at,
+	 actor_token_id, result, reason, client_ip, user_agent)
 VALUES
-	($1, nullif($2, ''), $3, $4, $5, $6, nullif($7, ''), $8::jsonb, now())
+	($1, nullif($2, ''), $3, $4, $5, $6, nullif($7, ''), $8::jsonb, now(),
+	 nullif($9, ''), $10, nullif($11, ''), nullif($12, ''), nullif($13, ''))
 ON CONFLICT (event_type, resource_type, resource_id, idempotency_key)
   WHERE idempotency_key IS NOT NULL
 DO NOTHING
@@ -29,6 +31,11 @@ type InsertAuditEventParams struct {
 	ResourceID     string
 	IdempotencyKey interface{}
 	Metadata       []byte
+	ActorTokenID   interface{}
+	Result         string
+	Reason         interface{}
+	ClientIp       interface{}
+	UserAgent      interface{}
 }
 
 func (q *Queries) InsertAuditEvent(ctx context.Context, arg InsertAuditEventParams) error {
@@ -41,6 +48,11 @@ func (q *Queries) InsertAuditEvent(ctx context.Context, arg InsertAuditEventPara
 		arg.ResourceID,
 		arg.IdempotencyKey,
 		arg.Metadata,
+		arg.ActorTokenID,
+		arg.Result,
+		arg.Reason,
+		arg.ClientIp,
+		arg.UserAgent,
 	)
 	return err
 }

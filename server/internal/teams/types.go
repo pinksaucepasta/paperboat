@@ -194,7 +194,6 @@ func currentMember(t Team, account string) (Member, bool) {
 	}
 	return Member{}, false
 }
-func administrative(role string) bool { return role == "owner" || role == "admin" }
 
 // permits reports whether a stored grant permission satisfies a wanted action.
 // Inspector actions are exact-match only: login, membership, viewing (use),

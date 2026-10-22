@@ -25,6 +25,7 @@ type WorkspaceService struct {
 	mail             config.TransactionalMail
 	mailEnabled      bool
 	teamTrialDays    int
+	business         config.Business
 }
 
 var ErrProductChanged = errors.New("billing product price changed")
@@ -54,7 +55,7 @@ type WorkspaceProduct struct {
 type PortalConfigurations struct{ Personal, Team string }
 
 func NewWorkspaceService(store *db.DB, stripe StripeClient, key string, portals ...PortalConfigurations) *WorkspaceService {
-	s := &WorkspaceService{store: store, stripe: stripe, key: key, topupMaxQuantity: config.Default().Billing.TopupMaxQuantity}
+	s := &WorkspaceService{store: store, stripe: stripe, key: key, topupMaxQuantity: config.Default().Billing.TopupMaxQuantity, business: config.Default().Business}
 	for _, configuration := range portals {
 		s.portals = configuration
 	}

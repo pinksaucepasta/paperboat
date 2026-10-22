@@ -901,12 +901,12 @@ never imply use"). Every role is a member and takes a seat.
 | Permission | owner | admin | billing | auditor | member |
 |---|---|---|---|---|---|
 | See team, members, machines, settings, policy | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Invite, remove members, change roles (not owner) | ✓ | ✓ | | | |
+| Invite, remove members, change roles (admins: only non-admins, never to admin) | ✓ | ✓ | | | |
 | Team settings, machine approval, edit policy (F18-08) | ✓ | ✓ | | | own machines |
 | SSO, domains, enforcement, exemptions, directory sync | ✓ | ✓ | | | |
 | Read and export the audit log; streaming status | ✓ | ✓ | | ✓ | |
 | Configure audit log streaming | ✓ | ✓ | | | |
-| Billing: plan, seats, top-ups, invoices, billing details, pay by invoice | ✓ | ✓ | ✓ | | |
+| Billing: plan, seats, top-ups, invoices, billing details, pay by invoice | ✓ | | ✓ | | |
 | Delete team, transfer ownership | ✓ | | | | |
 | Own API tokens, explain own access | ✓ | ✓ | ✓ | ✓ | ✓ |
 
@@ -988,12 +988,11 @@ activity endpoint is folded into it (one way to read). Personal workspaces have 
   top-ups, details, pay by invoice); export and streaming changes. Never contents, ENV values or
   secrets.
 - **Event shape** (documented, stable, the same in API, export and stream):
-  `{id, time, workspace, actor: {type: user|api_token|directory|system|operator, id, email},
-  action, target: {type, id, name}, result: success|denied, reason?, ip?, user_agent?,
-  request_id, details}`. Append-only (existing trigger); IP and user agent only on events from a
+  `{id, occurred_at, workspace, actor: {kind: user|api_token|directory|operator|system, id,
+  email, token_id?}, action, target: {kind, id, name}, machine?, result: success|denied, reason?,
+  ip?, user_agent?, request_id, details}` (`server/docs/teams-business.md`). Append-only (existing trigger); IP and user agent only on events from a
   signed-in request.
-- **Retention per plan** in `server/internal/config` (proposal: Free 30, Pro 90, Team 365
-  days); the prune job deletes per workspace by its plan; the DB trigger's fixed 90 days becomes
+- **Retention per plan** in `server/internal/config` (Free 30, Pro 90, Team 365 days); the prune job deletes per workspace by its plan; the DB trigger's fixed 90 days becomes
   the workspace's configured value.
 - **Search and filter** (API, console, `pb team activity`): actor, action (prefix), target,
   result, time range, free text over names and emails; cursor paging; owners/admins/auditors of a
@@ -1024,8 +1023,7 @@ Stripe is the only owner of billing details; nothing is copied into our database
   one tax ID (EU VAT, UK VAT, US EIN, and the other Stripe tax ID types) read and written through
   `GET/PUT /v1/billing/details?workspace=`; Stripe validates the tax ID and prints name, address
   and tax ID on every invoice.
-- **Pay by invoice:** for Team workspaces on the yearly price with at least N seats (config,
-  proposal 10). Billing owners switch it on or off; the subscription moves to Stripe
+- **Pay by invoice:** for Team workspaces on the yearly price with at least 10 seats (config). Billing owners switch it on or off; the subscription moves to Stripe
   `collection_method=send_invoice` with `days_until_due` (config, 30); Stripe emails each invoice
   to the billing email with a hosted payment page (card or bank transfer). An overdue invoice
   follows the existing failed-renewal path (7 days of grace, then suspension until paid, 1.3).
@@ -1042,19 +1040,17 @@ status|setup|map <group> <role>`, `pb team activity [--actor] [--action] [--targ
 [--until] -o <file>`; `pb team role` accepts the new roles. Setup commands print the Admin Portal
 link (and open it where a browser is available). Streaming and billing stay in the console.
 
-#### Open questions (USER DECIDES; recommendation first, work proceeds on it unless changed)
+#### Decisions (user, 2026-10-23)
 
-1. **WorkOS cost:** SSO and Directory Sync are billed by WorkOS per connection per month (list
-   price about $125 each), more than a small team pays us. Recommend: included in Team for teams
-   with 10+ seats (config value); smaller teams see "available from 10 seats". Alternative: all
-   Team workspaces, or a paid add-on.
-2. **Audit retention:** Free 30, Pro 90, Team 365 days (config). Export and streaming Team only.
-3. **Pay by invoice:** Team yearly with 10+ seats, net 30 (config).
-4. **Tax:** tax ID, name and address printed on invoices at launch; Stripe Tax (computing VAT /
-   sales tax) only once the business has tax registrations (dashboard step for the user).
-5. **Deprovisioning** removes the person from the team only; their Paperboat account and personal
-   workspace stay theirs (workspaces share nothing).
-6. **Seats:** every role takes a seat (Tailscale model), including billing admins and auditors.
+1. SSO and directory sync are available to Team workspaces with at least 10 seats (config
+   value; WorkOS bills per connection). Smaller teams see "available from 10 seats".
+2. Audit retention Free 30, Pro 90, Team 365 days (config); export and streaming Team only.
+3. Pay by invoice through Stripe only (`send_invoice`; no payment handling of our own): Team
+   yearly, 10+ seats, net 30 (config).
+4. Tax ID, company name and address printed on invoices now; Stripe Tax computes tax when the
+   single config switch `billing.stripe_tax` is on (the user turns it on once registered).
+5. Deprovisioning removes the person from the team only; the account and personal workspace stay.
+6. Every role takes a seat, billing admins and auditors included.
 
 #### Not in v1
 
@@ -2736,3 +2732,4 @@ Open: official releases ≤2026.10.22.0 still fail fresh pairs on the test accou
 2026-10-23 | Lane C → Lane B: machine domains API | Console Domains keeps added machine domains in browser storage (stand-in, differs per browser). Need: GET /v1/workspaces/{ws}/machine-domains → {domains:[{name, managed, primary, created_at}]}, POST {name} (validate, 409 duplicate), DELETE /{name}, PUT /primary {name}; managed = client-config local_access_base_domain, never stored. Daemon/CA/DNS must honour added names (else drop the feature). Console switches and deletes the storage when deployed.
 2026-10-23 | Lane J F16 | L ticked: F16-01..04, C243 (dev-8d8670e2 on pbvm3 container lanej-f16; env_ssh_hook.py + env_vscode_remote.py PASS). Commits d7dd6485 ae9a2c61 5b7f4b24 + offline-cache fix. M waits for Lane A: run both scripts on apple.
 2026-10-23 | Lane O F13 | F13-05 sandbox part 1 PASS (Pro purchase/refund/cancel on throwaway). F13-03: server relay refusal PASS live; CLI message missing on ping/exec/ssh/send (sent to Lane A), edge carrier lacks TCP fallback (Lane R). Test data: throwaway user_b0a5bbd7 usage seeded to 5 GB and restored to 0; account kept until F13-03 ticks.
+2026-10-23 | Lane S F19 server 1 | roles matrix (125), audit log result/client/retention/filters/export (126), business billing APIs; pre-existing PG failures on main (not F19): httpapi TestAdminBillingAdjustmentsRequireAdminAndWriteLedger, TestInspectorBrowserCredentialRouteAuthAndCSRFPostgres; selfhost TestPlacementDNS*/TestSelfhostHTTPTopology*/TestIngressReconciliation*; browseraccess TestAutomaticBrowserDormantAuthority*/TestConfiguredResourceSession* (Lane B). | Lane B: deploy with the next server build once prod is healthy.

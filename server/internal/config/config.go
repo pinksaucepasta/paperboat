@@ -58,6 +58,7 @@ type Config struct {
 	HTTP                   HTTPConfig        `json:"http"`
 	Database               Database          `json:"database"`
 	Billing                Billing           `json:"billing"`
+	Business               Business          `json:"business"`
 	UserMachines           UserMachines      `json:"user_machines"`
 	ManagedSSH             ManagedSSH        `json:"managed_ssh"`
 	TerminalSessions       TerminalSessions  `json:"terminal_sessions"`
@@ -399,6 +400,7 @@ func Default() Config {
 			DSN:    "postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable",
 		},
 		Billing:           Billing{TopupMaxQuantity: 100, TeamTrialDays: 14, PersonalAllowanceBytes: new(int64(5_000_000_000))},
+		Business:          defaultBusiness(),
 		RuntimeBaseDomain: "localhost",
 		ManagedSSH:        ManagedSSH{ClientKeyActiveWindow: 30 * 24 * time.Hour},
 		UserMachines:      UserMachines{PairingLifetime: 10 * time.Minute, OfflineAfter: 2 * time.Minute, ExpiredAccessSessionRetention: 7 * 24 * time.Hour, AllowedPlatforms: []string{"darwin", "linux", "windows"}, RuntimeListenPort: 38080},
@@ -541,6 +543,9 @@ func (c Config) Validate() error {
 	}
 	if c.Billing.TeamTrialDays < 0 || c.Billing.TeamTrialDays > 730 {
 		return errors.New("billing.team_trial_days must be between 0 and 730")
+	}
+	if err := c.Business.validate(); err != nil {
+		errs = append(errs, err)
 	}
 	if c.Billing.TopupMaxQuantity < 1 {
 		return errors.New("billing.topup_max_quantity must be positive")

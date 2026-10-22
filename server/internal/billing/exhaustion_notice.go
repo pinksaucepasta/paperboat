@@ -49,7 +49,7 @@ func (s *WorkspaceService) noticeBandwidthExhaustedTx(ctx context.Context, tx *d
 	query := `SELECT u.id,u.primary_email,'your personal workspace' FROM users u WHERE u.id=$1 AND u.status='active' AND u.email_verified AND u.primary_email<>''`
 	if kind == "team" {
 		query = `SELECT u.id,u.primary_email,coalesce(t.display_name,t.team_id) FROM teams t JOIN team_members m ON m.team_id=t.team_id AND m.active
-JOIN users u ON u.id=m.account_id WHERE t.team_id=$1 AND t.deleted_at IS NULL AND (t.owner_account=m.account_id OR m.role='admin')
+JOIN users u ON u.id=m.account_id WHERE t.team_id=$1 AND t.deleted_at IS NULL AND (team_role_allows(CASE WHEN t.owner_account=m.account_id THEN 'owner' ELSE m.role END,'members.manage') OR team_role_allows(CASE WHEN t.owner_account=m.account_id THEN 'owner' ELSE m.role END,'billing.manage'))
 AND u.status='active' AND u.email_verified AND u.primary_email<>'' ORDER BY u.id LIMIT 64`
 	}
 	rows, err := tx.Query(ctx, query, id)

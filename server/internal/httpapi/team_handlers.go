@@ -38,6 +38,8 @@ func registerTeamRoutes(mux *http.ServeMux, service teamAPI, read, write func(ht
 			switch action {
 			case "list":
 				out, err = service.List(r.Context(), account)
+			case "roles":
+				out = teams.Matrix()
 			case "activity":
 				limit := 0
 				if raw := r.URL.Query().Get("limit"); raw != "" {
@@ -152,6 +154,7 @@ func registerTeamRoutes(mux *http.ServeMux, service teamAPI, read, write func(ht
 	handle("POST /v1/teams/{team_id}/machine-grants", "machine_grant", true)
 	handle("POST /v1/teams/{team_id}/terminal-session-grants", "terminal_session_grant", true)
 	handle("GET /v1/teams", "list", false)
+	handle("GET /v1/team-roles", "roles", false)
 	handle("GET /v1/teams/{team_id}/activity", "activity", false)
 	handle("GET /v1/teams/{team_id}", "get", false)
 	handle("POST /v1/teams/{team_id}/actions", "mutate", true)

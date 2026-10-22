@@ -8788,6 +8788,8 @@
             "enum": [
               "owner",
               "admin",
+              "billing",
+              "auditor",
               "member"
             ]
           },
@@ -9332,6 +9334,8 @@
             "enum": [
               "owner",
               "admin",
+              "billing",
+              "auditor",
               "member"
             ]
           },
@@ -9652,7 +9656,9 @@
             "type": "string",
             "enum": [
               "member",
-              "admin"
+              "admin",
+              "billing",
+              "auditor"
             ],
             "default": "member",
             "description": "Only the owner may invite an admin."
@@ -13562,6 +13568,8 @@
             "enum": [
               "owner",
               "admin",
+              "billing",
+              "auditor",
               "member"
             ]
           },
@@ -15264,6 +15272,10 @@
             "type": "string",
             "format": "date-time"
           },
+          "workspace": {
+            "type": "string",
+            "description": "personal:<account> or team:<team>."
+          },
           "action": {
             "type": "string"
           },
@@ -15275,10 +15287,19 @@
                 "type": "string",
                 "enum": [
                   "user",
+                  "api_token",
+                  "directory",
+                  "operator",
                   "system"
                 ]
               },
               "id": {
+                "type": "string"
+              },
+              "email": {
+                "type": "string"
+              },
+              "token_id": {
                 "type": "string"
               }
             },
@@ -15321,14 +15342,42 @@
               "id",
               "name"
             ]
+          },
+          "result": {
+            "type": "string",
+            "enum": [
+              "success",
+              "denied"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "description": "Stable code of a denial."
+          },
+          "ip": {
+            "type": "string"
+          },
+          "user_agent": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "details": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Documented detail keys only."
           }
         },
         "required": [
           "id",
           "occurred_at",
+          "workspace",
           "action",
           "actor",
-          "target"
+          "target",
+          "result",
+          "details"
         ]
       },
       "ActivityPage": {
@@ -15753,6 +15802,240 @@
           },
           "active": {
             "type": "boolean"
+          }
+        }
+      },
+      "TeamRoleMatrix": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "roles",
+          "permissions",
+          "grants"
+        ],
+        "properties": {
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "permissions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "grants": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "description": "Team roles and their administrative permissions (PLAN F19). Roles never imply using machines, ENV, previews or tunnels; the workspace policy decides use."
+      },
+      "BillingInvoice": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "number",
+          "status",
+          "currency",
+          "total",
+          "tax",
+          "amount_due",
+          "created_at",
+          "period_start",
+          "period_end"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "number": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "description": "open, paid, void or uncollectible (drafts are not listed)."
+          },
+          "currency": {
+            "type": "string"
+          },
+          "total": {
+            "type": "integer",
+            "description": "Minor currency unit."
+          },
+          "tax": {
+            "type": "integer"
+          },
+          "amount_due": {
+            "type": "integer"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "period_start": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "period_end": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "due_date": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "hosted_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Stripe page to view and pay the invoice."
+          },
+          "pdf_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Invoice PDF download."
+          }
+        }
+      },
+      "BillingInvoicePage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BillingInvoice"
+            }
+          },
+          "next_cursor": {
+            "type": "string"
+          }
+        }
+      },
+      "BillingDetails": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "email",
+          "name",
+          "address",
+          "tax_id"
+        ],
+        "description": "Printed on every invoice; email receives invoices and receipts. Stored only on the Stripe customer.",
+        "properties": {
+          "email": {
+            "type": "string",
+            "maxLength": 254
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Company or person name."
+          },
+          "address": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "line1",
+              "line2",
+              "city",
+              "state",
+              "postal_code",
+              "country"
+            ],
+            "properties": {
+              "line1": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "line2": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "city": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "state": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "postal_code": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "country": {
+                "type": "string",
+                "description": "ISO 3166-1 alpha-2; required with any address line."
+              }
+            }
+          },
+          "tax_id": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "type",
+                  "value"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "description": "Stripe tax ID type, e.g. eu_vat, gb_vat, us_ein."
+                  },
+                  "value": {
+                    "type": "string"
+                  },
+                  "verification": {
+                    "type": "string",
+                    "description": "Read only: Stripe verification status."
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "BillingPayByInvoice": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "pay_by_invoice",
+          "eligible",
+          "min_seats",
+          "default_days_until_due"
+        ],
+        "properties": {
+          "pay_by_invoice": {
+            "type": "boolean"
+          },
+          "days_until_due": {
+            "type": "integer"
+          },
+          "eligible": {
+            "type": "boolean",
+            "description": "Active yearly Team plan with at least min_seats seats."
+          },
+          "min_seats": {
+            "type": "integer"
+          },
+          "default_days_until_due": {
+            "type": "integer"
           }
         }
       }
@@ -33217,6 +33500,63 @@
         ]
       }
     },
+    "/v1/team-roles": {
+      "get": {
+        "operationId": "team_roles",
+        "summary": "Team roles and permission matrix",
+        "security": [
+          {
+            "cookieSession": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:read"
+        ],
+        "responses": {
+          "200": {
+            "description": "Authenticated current state or exact committed operation result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/TeamRoleMatrix"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "412": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "The permission matrix for team roles: which administrative permissions each role holds."
+      }
+    },
     "/v1/teams/{team_id}": {
       "get": {
         "operationId": "team_get",
@@ -35145,6 +35485,185 @@
         }
       }
     },
+    "/v1/billing/workspaces/personal/invoices": {
+      "get": {
+        "operationId": "workspace_personal_invoices",
+        "summary": "List personal workspace invoices",
+        "description": "Owner or billing admin (billing.manage). Stripe is the only store of this data.",
+        "security": [
+          {
+            "cookieSession": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "account:read"
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 255
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/BillingInvoicePage"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/billing/workspaces/personal/details": {
+      "get": {
+        "operationId": "workspace_personal_billing_details",
+        "summary": "Read personal billing details",
+        "description": "Owner or billing admin (billing.manage). Stripe is the only store of this data.",
+        "security": [
+          {
+            "cookieSession": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "account:read"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Authorized result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/BillingDetails"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "operationId": "workspace_personal_billing_details_update",
+        "summary": "Update personal billing details",
+        "description": "Owner or billing admin (billing.manage). Stripe is the only store of this data.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/BillingDetails"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BillingDetails"
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/billing/workspaces/teams/{team_id}": {
       "get": {
         "operationId": "workspace_team_overview",
@@ -35479,6 +35998,351 @@
                 "properties": {
                   "return_url": {
                     "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing/workspaces/teams/{team_id}/invoices": {
+      "get": {
+        "operationId": "workspace_team_invoices",
+        "summary": "List team workspace invoices",
+        "description": "Owner or billing admin (billing.manage). Stripe is the only store of this data.",
+        "security": [
+          {
+            "cookieSession": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "account:read"
+        ],
+        "parameters": [
+          {
+            "name": "team_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 255
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/BillingInvoicePage"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/billing/workspaces/teams/{team_id}/details": {
+      "get": {
+        "operationId": "workspace_team_billing_details",
+        "summary": "Read team billing details",
+        "description": "Owner or billing admin (billing.manage). Stripe is the only store of this data.",
+        "security": [
+          {
+            "cookieSession": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "account:read"
+        ],
+        "parameters": [
+          {
+            "name": "team_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/BillingDetails"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "operationId": "workspace_team_billing_details_update",
+        "summary": "Update team billing details",
+        "description": "Owner or billing admin (billing.manage). Stripe is the only store of this data.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "team_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/BillingDetails"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BillingDetails"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing/workspaces/teams/{team_id}/pay-by-invoice": {
+      "get": {
+        "operationId": "workspace_team_pay_by_invoice",
+        "summary": "Read how the team pays",
+        "description": "Owner or billing admin (billing.manage). Stripe is the only store of this data.",
+        "security": [
+          {
+            "cookieSession": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "account:read"
+        ],
+        "parameters": [
+          {
+            "name": "team_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/BillingPayByInvoice"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "operationId": "workspace_team_pay_by_invoice_update",
+        "summary": "Turn pay by invoice on or off",
+        "description": "Owner or billing admin (billing.manage). Stripe is the only store of this data.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "team_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/BillingPayByInvoice"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "pay_by_invoice"
+                ],
+                "properties": {
+                  "pay_by_invoice": {
+                    "type": "boolean"
                   }
                 }
               }
@@ -43931,7 +44795,7 @@
         },
         "responses": {
           "204": {
-            "description": "Cancelled; a consumed grant\u2019s client session is revoked."
+            "description": "Cancelled; a consumed grant’s client session is revoked."
           },
           "400": {
             "description": "Invalid client or device code."
@@ -45727,8 +46591,8 @@
     "/v1/activity": {
       "get": {
         "operationId": "get_v1_activity",
-        "summary": "Read recent workspace activity",
-        "description": "Cookie session or account:read bearer scope. Active workspace owner/admin required for team administrative activity. Scope, machine identity and target name are snapshotted when supported resource audits are written; earlier unscoped events and raw audit metadata are omitted. Retains the last 90 days. Newest first with opaque workspace-bound cursor; rechecks current authorization for each page. Machine, terminal, preview, tunnel, team, user and machine-environment resource audit events are supported. Unknown resource kinds and internal operational events are omitted.",
+        "summary": "Search the workspace audit log",
+        "description": "Cookie session or account:read bearer scope. The owner of a personal workspace, or a team member whose role holds audit.read (owner, admin, auditor). Events are kept per workspace plan (server config business.audit_retention_*: Free 30, Pro 90, Team 365 days). Newest first with an opaque workspace-bound cursor; authorization is rechecked for each page. Details hold only documented keys; raw audit metadata and internal operational events are never returned. Event shape and action catalog: server/docs/teams-business.md.",
         "security": [
           {
             "cookieSession": []
@@ -45795,6 +46659,66 @@
               "maximum": 200,
               "default": 50
             }
+          },
+          {
+            "in": "query",
+            "name": "actor",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 320,
+              "description": "Account ID, email or API token ID."
+            }
+          },
+          {
+            "in": "query",
+            "name": "action",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128,
+              "description": "Exact action or a dotted prefix (team matches team.*)."
+            }
+          },
+          {
+            "in": "query",
+            "name": "target",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 256,
+              "description": "Target resource ID or machine ID."
+            }
+          },
+          {
+            "in": "query",
+            "name": "result",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "success",
+                "denied"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "in": "query",
+            "name": "until",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
           }
         ],
         "responses": {
@@ -45813,6 +46737,165 @@
                   "required": [
                     "data"
                   ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/activity/export": {
+      "get": {
+        "operationId": "get_v1_activity_export",
+        "summary": "Export the team audit log",
+        "description": "Team workspaces only; role with audit.read. Streams every matching event (newest first, at most business.audit_export_max_rows) as a CSV file (columns: id, occurred_at, workspace, action, result, reason, actor_kind, actor_id, actor_email, actor_token_id, target_kind, target_id, target_name, machine_id, machine_name, ip, user_agent, request_id, details) or one JSON array of ActivityEvent. The export is recorded as team.activity_exported.",
+        "security": [
+          {
+            "cookieSession": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "account:read"
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "workspace",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "machine_id",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 256
+            }
+          },
+          {
+            "in": "query",
+            "name": "area",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated machine, terminal, preview, tunnel, file, environment, config, team, share, account."
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          {
+            "in": "query",
+            "name": "actor",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 320,
+              "description": "Account ID, email or API token ID."
+            }
+          },
+          {
+            "in": "query",
+            "name": "action",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128,
+              "description": "Exact action or a dotted prefix (team matches team.*)."
+            }
+          },
+          {
+            "in": "query",
+            "name": "target",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 256,
+              "description": "Target resource ID or machine ID."
+            }
+          },
+          {
+            "in": "query",
+            "name": "result",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "success",
+                "denied"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "in": "query",
+            "name": "until",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "csv",
+                "json"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The export file (Content-Disposition attachment).",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ActivityEvent"
+                  }
                 }
               }
             }
@@ -46064,7 +47147,7 @@
             }
           }
         },
-        "description": "Paid workspaces only. Integer quantity 1..product.max_quantity buys quantity \u00d7 unit_bytes (100 GB each). Credits NEVER EXPIRE and are consumed after the plan allowance. Checkout uses the exact quantity and verified unit price; only signed provider-confirmed paid events credit the workspace once. Requires Idempotency-Key and configured-origin return URLs. invalid_quantity rejects missing/zero/over-limit quantity."
+        "description": "Paid workspaces only. Integer quantity 1..product.max_quantity buys quantity × unit_bytes (100 GB each). Credits NEVER EXPIRE and are consumed after the plan allowance. Checkout uses the exact quantity and verified unit price; only signed provider-confirmed paid events credit the workspace once. Requires Idempotency-Key and configured-origin return URLs. invalid_quantity rejects missing/zero/over-limit quantity."
       }
     },
     "/v1/billing/workspaces/teams/{team_id}/topups": {
@@ -46144,7 +47227,7 @@
             }
           }
         },
-        "description": "Paid workspaces only. Integer quantity 1..product.max_quantity buys quantity \u00d7 unit_bytes (100 GB each). Credits NEVER EXPIRE and are consumed after the plan allowance. Checkout uses the exact quantity and verified unit price; only signed provider-confirmed paid events credit the workspace once. Requires Idempotency-Key and configured-origin return URLs. invalid_quantity rejects missing/zero/over-limit quantity."
+        "description": "Paid workspaces only. Integer quantity 1..product.max_quantity buys quantity × unit_bytes (100 GB each). Credits NEVER EXPIRE and are consumed after the plan allowance. Checkout uses the exact quantity and verified unit price; only signed provider-confirmed paid events credit the workspace once. Requires Idempotency-Key and configured-origin return URLs. invalid_quantity rejects missing/zero/over-limit quantity."
       }
     },
     "/v1/teams/{team_id}/invitations/{invitation_id}/resend": {

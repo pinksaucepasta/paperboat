@@ -1,8 +1,10 @@
 -- name: InsertAuditEvent :exec
 INSERT INTO audit_events
-	(id, actor_user_id, actor_type, event_type, resource_type, resource_id, idempotency_key, metadata, created_at)
+	(id, actor_user_id, actor_type, event_type, resource_type, resource_id, idempotency_key, metadata, created_at,
+	 actor_token_id, result, reason, client_ip, user_agent)
 VALUES
-	(sqlc.arg(id), nullif(sqlc.arg(actor_user_id), ''), sqlc.arg(actor_type), sqlc.arg(event_type), sqlc.arg(resource_type), sqlc.arg(resource_id), nullif(sqlc.arg(idempotency_key), ''), sqlc.arg(metadata)::jsonb, now())
+	(sqlc.arg(id), nullif(sqlc.arg(actor_user_id), ''), sqlc.arg(actor_type), sqlc.arg(event_type), sqlc.arg(resource_type), sqlc.arg(resource_id), nullif(sqlc.arg(idempotency_key), ''), sqlc.arg(metadata)::jsonb, now(),
+	 nullif(sqlc.arg(actor_token_id), ''), sqlc.arg(result), nullif(sqlc.arg(reason), ''), nullif(sqlc.arg(client_ip), ''), nullif(sqlc.arg(user_agent), ''))
 ON CONFLICT (event_type, resource_type, resource_id, idempotency_key)
   WHERE idempotency_key IS NOT NULL
 DO NOTHING;

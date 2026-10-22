@@ -67,7 +67,7 @@ func (s *Service) ResendInvitation(ctx context.Context, account, team, id string
 			return err
 		}
 		m, ok := currentMember(t, account)
-		if !ok || t.Deleted || !administrative(m.Role) {
+		if !ok || t.Deleted || !Allowed(m.Role, PermissionMembersManage) {
 			return ErrForbidden
 		}
 		if t.Suspended {
@@ -83,7 +83,7 @@ func (s *Service) ResendInvitation(ctx context.Context, account, team, id string
 		if err != nil {
 			return err
 		}
-		if role == "admin" && m.Role != "owner" {
+		if !mayGrantRole(m.Role, role) {
 			return ErrForbidden
 		}
 		if !usable {

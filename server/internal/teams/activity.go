@@ -60,7 +60,7 @@ func activityMetadata(input map[string]any, strict bool) (map[string]any, error)
 	out := make(map[string]any)
 	for key, value := range input {
 		switch key {
-		case "generation", "epoch", "revision", "target_account", "recipient_account", "sender_account", "role", "resource_kind", "resource_id", "permission", "active", "machine_id", "audience", "capabilities", "terminal_session_id", "action", "access_session_id", "attachment_id", "request_id", "source_machine_id", "destination_machine_id", "status", "decision", "repository_id", "version", "published_revision", "assignment_id", "default_version", "previous_owner", "new_owner", "adopted_version":
+		case "generation", "epoch", "revision", "target_account", "recipient_account", "sender_account", "role", "resource_kind", "resource_id", "permission", "active", "machine_id", "audience", "capabilities", "terminal_session_id", "action", "access_session_id", "attachment_id", "request_id", "source_machine_id", "destination_machine_id", "status", "decision", "repository_id", "version", "published_revision", "assignment_id", "default_version", "previous_owner", "new_owner", "adopted_version", "format", "rows", "since", "until", "tax_id", "intent", "required", "session_seconds", "jit", "exempt", "group_id", "mapped_only", "reason":
 		default:
 			if strict {
 				return nil, ErrInvalid
@@ -108,6 +108,16 @@ func activityMetadata(input map[string]any, strict bool) (map[string]any, error)
 	return out, nil
 }
 
+// ProjectActivityMetadata returns only the documented metadata keys of an audit event, for
+// the audit log's details. Unknown or malformed values are dropped, never returned.
+func ProjectActivityMetadata(input map[string]any) map[string]any {
+	out, err := activityMetadata(input, false)
+	if err != nil {
+		return map[string]any{}
+	}
+	return out
+}
+
 func (s *Service) Activity(ctx context.Context, account, team, cursor string, limit int) (ActivityPage, error) {
 	out := ActivityPage{Items: []ActivityItem{}}
 	if !validID(team) || limit < 0 || limit > MaximumActivityLimit {
@@ -136,7 +146,7 @@ func (s *Service) Activity(ctx context.Context, account, team, cursor string, li
 		if !ok || !m.Active {
 			return ErrNotFound
 		}
-		if account != t.OwnerAccount && m.Role != "admin" {
+		if !Allowed(m.Role, PermissionAuditRead) {
 			return ErrForbidden
 		}
 		rows, err := tx.Query(ctx, `SELECT id,coalesce(actor_user_id,''),event_type,created_at,metadata,cursor_sequence FROM audit_events WHERE resource_type='team' AND resource_id=$1 AND created_at>=now()-interval '90 days' AND ($2::bigint=0 OR cursor_sequence<$2) ORDER BY cursor_sequence DESC LIMIT $3`, team, before, limit+1)
@@ -169,14 +179,4 @@ func (s *Service) Activity(ctx context.Context, account, team, cursor string, li
 		return rows.Err()
 	})
 	return out, err
-}
-
-// PruneActivity removes a bounded expired batch; the database trigger independently
-// enforces the same retention boundary while rejecting all updates and fresh deletions.
-func (s *Service) PruneActivity(ctx context.Context) (int64, error) {
-	result, err := s.db.SQL().ExecContext(ctx, `DELETE FROM paperboat.audit_events WHERE id IN (SELECT id FROM paperboat.audit_events WHERE resource_type='team' AND created_at<now()-interval '90 days' ORDER BY created_at,id LIMIT 200 FOR UPDATE SKIP LOCKED)`)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected()
 }

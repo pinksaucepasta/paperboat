@@ -114,7 +114,7 @@ func (s *Service) GrantMachine(ctx context.Context, account, team string, r Mach
 		if err != nil {
 			return err
 		}
-		if !administrative(actor.Role) && !(ownerTeam == "" && owner == account) {
+		if !Allowed(actor.Role, PermissionSettingsManage) && !(ownerTeam == "" && owner == account) {
 			return ErrForbidden
 		}
 		if ownerTeam != "" && ownerTeam != team {
@@ -177,7 +177,7 @@ func (s *Service) Machine(ctx context.Context, account, team string, r MachineRe
 			}
 			return bindMachineTx(ctx, tx, team, r.MachineID, owner)
 		case "approve", "decline":
-			if !administrative(actor.Role) || ownerTeam != "" {
+			if !Allowed(actor.Role, PermissionSettingsManage) || ownerTeam != "" {
 				return ErrForbidden
 			}
 			requestedBy, err := requestRowTx(ctx, tx, team, r.MachineID)
@@ -197,7 +197,7 @@ func (s *Service) Machine(ctx context.Context, account, team string, r MachineRe
 			_, err = tx.Exec(ctx, `DELETE FROM team_machine_requests WHERE team_id=$1 AND machine_id=$2`, team, r.MachineID)
 			return err
 		case "unshare":
-			if ownerTeam != "" || owner != account && !administrative(actor.Role) {
+			if ownerTeam != "" || owner != account && !Allowed(actor.Role, PermissionSettingsManage) {
 				return ErrForbidden
 			}
 			if _, err = tx.Exec(ctx, `DELETE FROM team_machine_requests WHERE team_id=$1 AND machine_id=$2`, team, r.MachineID); err != nil {
@@ -205,7 +205,7 @@ func (s *Service) Machine(ctx context.Context, account, team string, r MachineRe
 			}
 			return unbindMachineTx(ctx, tx, team, r.MachineID)
 		case "transfer_to_team":
-			if ownerTeam != "" || owner != account || !administrative(actor.Role) {
+			if ownerTeam != "" || owner != account || !Allowed(actor.Role, PermissionSettingsManage) {
 				return ErrForbidden
 			}
 			if r.Confirmation != r.MachineID {
@@ -238,7 +238,7 @@ func (s *Service) Machine(ctx context.Context, account, team string, r MachineRe
 			}
 			return err
 		case "remove":
-			if ownerTeam != team || !administrative(actor.Role) {
+			if ownerTeam != team || !Allowed(actor.Role, PermissionSettingsManage) {
 				return ErrForbidden
 			}
 			if r.Confirmation != r.MachineID {

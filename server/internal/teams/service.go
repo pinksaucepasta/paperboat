@@ -185,7 +185,7 @@ func (s *Service) Mutate(ctx context.Context, account, team string, r MutationRe
 		target, found := member(t, r.AccountID)
 		switch r.Action {
 		case "rename":
-			if !administrative(actor.Role) {
+			if !Allowed(actor.Role, PermissionSettingsManage) {
 				return ErrForbidden
 			}
 			if !validTeamName(r.Name) {
@@ -194,13 +194,13 @@ func (s *Service) Mutate(ctx context.Context, account, team string, r MutationRe
 			_, err := tx.Exec(ctx, `UPDATE teams SET display_name=$2 WHERE team_id=$1`, team, r.Name)
 			return err
 		case "machine_approval":
-			if !administrative(actor.Role) || r.ApproveNewMachines == nil {
+			if !Allowed(actor.Role, PermissionSettingsManage) || r.ApproveNewMachines == nil {
 				return ErrForbidden
 			}
 			_, err := tx.Exec(ctx, `UPDATE teams SET approve_new_machines=$2 WHERE team_id=$1`, team, *r.ApproveNewMachines)
 			return err
 		case "private_access":
-			if !administrative(actor.Role) || r.AllowPrivateAccess == nil {
+			if !Allowed(actor.Role, PermissionSettingsManage) || r.AllowPrivateAccess == nil {
 				return ErrForbidden
 			}
 			// The team generation moves with every mutation, which fences the team's active
@@ -209,13 +209,13 @@ func (s *Service) Mutate(ctx context.Context, account, team string, r MutationRe
 			_, err := tx.Exec(ctx, `UPDATE teams SET allow_private_access=$2 WHERE team_id=$1`, team, *r.AllowPrivateAccess)
 			return err
 		case "role":
-			if actor.Role != "owner" || !found || target.Role == "owner" {
-				return ErrForbidden
-			}
-			if r.Role != "admin" && r.Role != "member" {
+			if !assignableRole(r.Role) {
 				return ErrInvalid
 			}
-			if r.Role == "member" {
+			if !found || !mayManageMember(actor.Role, target.Role) || !mayGrantRole(actor.Role, r.Role) {
+				return ErrForbidden
+			}
+			if !Allowed(r.Role, PermissionMembersManage) {
 				if _, err := tx.Exec(ctx, `UPDATE team_invitations SET cancelled_at=now() WHERE team_id=$1 AND created_by=$2 AND accepted_at IS NULL AND cancelled_at IS NULL`, team, r.AccountID); err != nil {
 					return err
 				}
@@ -223,7 +223,7 @@ func (s *Service) Mutate(ctx context.Context, account, team string, r MutationRe
 			_, err := tx.Exec(ctx, `UPDATE team_members SET role=$3 WHERE team_id=$1 AND account_id=$2`, team, r.AccountID, r.Role)
 			return err
 		case "remove":
-			if !administrative(actor.Role) || !found || target.Role == "owner" || (actor.Role == "admin" && target.Role != "member") {
+			if !found || !mayManageMember(actor.Role, target.Role) {
 				return ErrForbidden
 			}
 			return RemoveMemberTx(ctx, tx, team, r.AccountID)
@@ -286,7 +286,7 @@ func (s *Service) Invite(ctx context.Context, account, team string, r InviteRequ
 	if r.Role == "" {
 		r.Role = "member"
 	}
-	if r.Role != "member" && r.Role != "admin" {
+	if !assignableRole(r.Role) {
 		return out, ErrInvalid
 	}
 	if !validID(team) || (r.AccountID == "") == (r.Email == "") || (r.AccountID != "" && !validID(r.AccountID)) {
@@ -322,7 +322,7 @@ func (s *Service) Invite(ctx context.Context, account, team string, r InviteRequ
 		}
 		if done {
 			m, ok := member(t, account)
-			if !ok || t.Deleted || !administrative(m.Role) || (r.Role == "admin" && m.Role != "owner") {
+			if !ok || t.Deleted || !mayGrantRole(m.Role, r.Role) {
 				return ErrForbidden
 			}
 			return nil
@@ -331,7 +331,7 @@ func (s *Service) Invite(ctx context.Context, account, team string, r InviteRequ
 		if err != nil {
 			return err
 		}
-		if !administrative(m.Role) || (r.Role == "admin" && m.Role != "owner") {
+		if !mayGrantRole(m.Role, r.Role) {
 			return ErrForbidden
 		}
 		if _, ok := member(t, r.AccountID); ok {
@@ -446,7 +446,7 @@ func (s *Service) Accept(ctx context.Context, account, id string, r AcceptReques
 }
 func (s *Service) CancelInvite(ctx context.Context, account, team, id string, r MutationRequest) (Team, error) {
 	return s.mutate(ctx, account, team, r.OperationID, "cancel_invite", r.ExpectedGeneration, []any{id, r}, func(ctx context.Context, tx *db.Tx, t Team, m Member) error {
-		if !administrative(m.Role) {
+		if !Allowed(m.Role, PermissionMembersManage) {
 			return ErrForbidden
 		}
 		tag, err := tx.Exec(ctx, `UPDATE team_invitations SET cancelled_at=now() WHERE team_id=$1 AND invitation_id=$2 AND accepted_at IS NULL AND cancelled_at IS NULL`, team, id)
@@ -485,19 +485,16 @@ func replayAuthority(current, result Team, account, kind string, request any) er
 		return ErrForbidden
 	}
 	actor, ok := member(current, account)
-	if !ok || current.Deleted || !administrative(actor.Role) {
+	if !ok || current.Deleted || !Allowed(actor.Role, PermissionSettingsManage) {
 		return ErrForbidden
 	}
-	if kind == "role" && actor.Role != "owner" {
-		return ErrForbidden
-	}
-	if kind == "remove" && actor.Role == "admin" {
+	if kind == "role" || kind == "remove" {
 		r, ok := request.(MutationRequest)
 		if !ok {
 			return ErrInvalid
 		}
 		for _, m := range current.Members {
-			if m.AccountID == r.AccountID && m.Role != "member" {
+			if m.AccountID == r.AccountID && !mayManageMember(actor.Role, m.Role) {
 				return ErrForbidden
 			}
 		}

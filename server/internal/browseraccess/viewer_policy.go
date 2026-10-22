@@ -330,7 +330,7 @@ func requirePolicyManager(ctx context.Context, tx *db.Tx, actor, kind, id, owner
   SELECT 1 FROM team_resource_bindings b JOIN teams t ON t.team_id=b.team_id
   LEFT JOIN team_members m ON m.team_id=t.team_id AND m.account_id=actor.id AND m.active
   WHERE b.resource_kind=$2 AND b.resource_id=$4 AND b.owner_account=owner.id AND b.active
-   AND t.deleted_at IS NULL AND NOT t.suspended AND (t.owner_account=actor.id OR m.role='admin')
+   AND t.deleted_at IS NULL AND NOT t.suspended AND team_role_allows(CASE WHEN t.owner_account=actor.id THEN 'owner' ELSE m.role END,'settings.manage')
  ))
 )`, actor, kind, owner, id).Scan(&allowed); err != nil {
 		return err
@@ -352,7 +352,7 @@ func requireBoundPolicyTeam(ctx context.Context, tx *db.Tx, actor, kind, id, own
  LEFT JOIN team_members m ON m.team_id=t.team_id AND m.account_id=$1 AND m.active
  WHERE t.team_id=$5 AND t.deleted_at IS NULL AND NOT t.suspended
   AND (t.owner_account=$1 OR m.account_id=$1)
-  AND ($1=$4 OR t.owner_account=$1 OR m.role='admin')
+  AND ($1=$4 OR team_role_allows(CASE WHEN t.owner_account=$1 THEN 'owner' ELSE m.role END,'settings.manage'))
 )`, actor, kind, id, owner, team).Scan(&allowed)
 	if err != nil {
 		return err
