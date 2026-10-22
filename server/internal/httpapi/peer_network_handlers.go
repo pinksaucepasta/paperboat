@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -48,6 +49,9 @@ func peerNetworkError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, peersessions.ErrInvalid):
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "Peer network request is invalid.")
 	default:
+		// The causes here are package sentinels (no keys or addresses), and the
+		// step that failed is otherwise invisible in the error-type chain.
+		slog.Warn("peer network configuration unavailable", "error", err.Error())
 		writeError(w, r, http.StatusServiceUnavailable, "peer_network_unavailable", "Peer network authority is temporarily unavailable. Retry before the current configuration expires.", err)
 	}
 }

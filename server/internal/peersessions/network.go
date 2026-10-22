@@ -687,7 +687,16 @@ func relayControlPeers(self networkBinding, peers []networkPeer) ([]string, erro
 	return result, nil
 }
 
+// maximumRelayGrantPeers is the relay's bound on one grant (relay derpquic
+// authority and mint both refuse more). Beyond it the extra peers have no relay
+// fallback but still connect directly; the configuration must not fail.
+const maximumRelayGrantPeers = 64
+
 func relayGrantPeers(peers []networkPeer) []map[string]any {
+	if len(peers) > maximumRelayGrantPeers {
+		slog.Warn("relay grant names a bounded subset of the account's peers", "kept", maximumRelayGrantPeers, "peers", len(peers))
+		peers = peers[:maximumRelayGrantPeers]
+	}
 	result := make([]map[string]any, 0, len(peers))
 	for _, peer := range peers {
 		entry := map[string]any{"wireguard_public_key": peer.Identity.WireGuardPublicKey, "scopes": peer.Scopes}
