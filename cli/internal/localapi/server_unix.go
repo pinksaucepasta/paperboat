@@ -470,14 +470,15 @@ func (s *Server) peerProbe(writer http.ResponseWriter, request *http.Request, re
 			writeError(writer, http.StatusForbidden, requestID, "permission_denied", "peer probe authority was denied; refresh the target and its authorization")
 			return
 		}
+		// The plan limit explains a timed-out probe too: without a relay the peer cannot be reached.
+		if writeRelayQuotaRefusal(writer, requestID, err) {
+			return
+		}
 		if errors.Is(err, context.DeadlineExceeded) {
 			writeError(writer, http.StatusGatewayTimeout, requestID, "deadline_exceeded", "peer probe deadline expired")
 			return
 		}
 		errorreport.Current().CaptureFailure(request.Context(), "paperboatd", "peer_probe", "peer_connect", "native_private_failed", err)
-		if writeRelayQuotaRefusal(writer, requestID, err) {
-			return
-		}
 		writeError(writer, http.StatusServiceUnavailable, requestID, "peer_probe_unavailable", "peer probe failed; check target connectivity with pb doctor")
 		return
 	}
@@ -516,14 +517,14 @@ func (s *Server) inspectorRequest(writer http.ResponseWriter, request *http.Requ
 			writeError(writer, http.StatusForbidden, requestID, "permission_denied", "inspector authority was denied; refresh the target and its authorization")
 			return
 		}
+		if writeRelayQuotaRefusal(writer, requestID, err) {
+			return
+		}
 		if errors.Is(err, context.DeadlineExceeded) {
 			writeError(writer, http.StatusGatewayTimeout, requestID, "deadline_exceeded", "inspector request deadline expired")
 			return
 		}
 		errorreport.Current().CaptureFailure(request.Context(), "paperboatd", "inspector", "peer_connect", "native_private_failed", err)
-		if writeRelayQuotaRefusal(writer, requestID, err) {
-			return
-		}
 		writeError(writer, http.StatusServiceUnavailable, requestID, "inspector_unavailable", "inspector request failed; check target connectivity with pb doctor")
 		return
 	}

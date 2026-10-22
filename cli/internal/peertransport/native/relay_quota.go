@@ -1,7 +1,9 @@
 package native
 
 import (
+	"context"
 	"errors"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 )
@@ -27,11 +29,24 @@ type relayDenier interface{ RelayDenial() *api.APIError }
 // admission rejections have their own meaning and cancellation is the caller's.
 func relayQuotaFailure(denier relayDenier, err error) error {
 	var failure *peerOperationFailure
-	if err == nil || denier == nil || !errors.As(err, &failure) || failure.stage != "peer_connect" {
+	connect := errors.As(err, &failure) && failure.stage == "peer_connect"
+	if err == nil || denier == nil || !connect && !errors.Is(err, context.DeadlineExceeded) {
 		return err
 	}
 	if denial := denier.RelayDenial(); denial != nil {
 		return &RelayQuotaError{Denial: denial, Err: err}
 	}
 	return err
+}
+
+// relayAnswerMargin is kept before the caller's deadline when relays are withheld, so the dial's own
+// failure is reported (as the plan limit) before the caller times out.
+const relayAnswerMargin = 2 * time.Second
+
+func relayWithheldDeadline(ctx context.Context, denier relayDenier) (context.Context, context.CancelFunc) {
+	deadline, ok := ctx.Deadline()
+	if !ok || denier == nil || denier.RelayDenial() == nil || time.Until(deadline) <= 2*relayAnswerMargin {
+		return context.WithCancel(ctx)
+	}
+	return context.WithDeadline(ctx, deadline.Add(-relayAnswerMargin))
 }

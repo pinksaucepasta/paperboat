@@ -39,8 +39,12 @@ func (o *Owner) failedPeerDial(ctx context.Context, peerID string, client *tailn
 func (o *Owner) Dial(ctx context.Context, descriptor mesh.Addr, peerID string, class peerquic.Class) (*Session, error) {
 	var session *Session
 	attempts := 0
+	// Without a relay a peer that is not reachable directly cannot be dialed at all. Leave time
+	// before the caller's deadline to answer with the plan-limit refusal instead of a timeout.
+	dialCtx, cancel := relayWithheldDeadline(ctx, o.authority)
+	defer cancel()
 	recovery := reattach.New(reattach.Policy{Attempts: 2, Retryable: retryablePeerDial})
-	err := recovery.Run(ctx, func(ctx context.Context) error {
+	err := recovery.Run(dialCtx, func(ctx context.Context) error {
 		if attempts > 0 {
 			fresh, err := o.authority.Descriptor(peerID)
 			if err != nil {

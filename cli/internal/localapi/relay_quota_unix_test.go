@@ -3,11 +3,14 @@
 package localapi
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -49,5 +52,29 @@ func TestLocalAPIPeerStreamOpenReportsAnExhaustedRelayAllowance(t *testing.T) {
 	var remote *RemoteError
 	if !errors.As(err, &remote) || remote.StatusCode != http.StatusTooManyRequests || remote.Code != RelayQuotaCode || remote.Message != message {
 		t.Fatalf("error = %#v", err)
+	}
+}
+
+// F13-03: a probe (pb ping) that timed out because relays are withheld names the plan limit, not a
+// deadline.
+func TestPeerProbeTimedOutWithRelaysWithheldNamesThePlanLimit(t *testing.T) {
+	const message = "Hosted relay bandwidth is used up. Add bandwidth or use your own relay."
+	request, err := NewPeerStreamRequest("machine_test", "environment_test", 1, "health_probe", "operation_test", "credential_test", time.Now().Add(time.Minute), 1024, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := json.Marshal(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := httptest.NewRequest(http.MethodPost, "/v1/peer-probes", bytes.NewReader(body))
+	input.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	cause := errors.Join(quotaTransportError{message}, context.DeadlineExceeded)
+	server := &Server{config: ServerConfig{PeerProbes: failingProbe{cause}}}
+	server.peerProbe(response, input, localRequestID(), Peer{})
+	remote, ok := decodeRemoteErrorReader(response.Code, response.Body).(*RemoteError)
+	if !ok || response.Code != http.StatusTooManyRequests || remote.Code != RelayQuotaCode || remote.Message != message {
+		t.Fatalf("status %d remote %#v", response.Code, remote)
 	}
 }

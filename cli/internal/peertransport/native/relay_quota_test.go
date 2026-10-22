@@ -3,8 +3,10 @@ package native
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 )
@@ -38,5 +40,34 @@ func TestConnectionFailureWithRelayAllowanceUsedUpNamesThePlanLimit(t *testing.T
 		if out := relayQuotaFailure(test.denier, test.err); out != test.err {
 			t.Fatalf("%s: changed the error to %#v", name, out)
 		}
+	}
+}
+
+// F13-03: with relays withheld a dial that runs out of time is the plan limit, and the dial stops early
+// enough for the daemon to say so before the caller's own deadline.
+func TestTimedOutDialWithRelaysWithheldIsThePlanLimit(t *testing.T) {
+	denial := &api.APIError{Status: http.StatusConflict, Code: "bandwidth_quota_exhausted", Message: "Hosted relay bandwidth is used up."}
+	timedOut := fmt.Errorf("dial: %w", context.DeadlineExceeded)
+	var quota *RelayQuotaError
+	if !errors.As(relayQuotaFailure(fixedDenier{denial}, timedOut), &quota) {
+		t.Fatal("a timed-out dial with relays withheld was not named as the plan limit")
+	}
+	if out := relayQuotaFailure(fixedDenier{}, timedOut); out != timedOut {
+		t.Fatal("a timeout with relays available changed")
+	}
+	parent, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	want, _ := parent.Deadline()
+	shorter, stop := relayWithheldDeadline(parent, fixedDenier{denial})
+	got, _ := shorter.Deadline()
+	stop()
+	if !got.Equal(want.Add(-relayAnswerMargin)) {
+		t.Fatalf("dial deadline %v, want %v", got, want.Add(-relayAnswerMargin))
+	}
+	same, stop := relayWithheldDeadline(parent, fixedDenier{})
+	got, _ = same.Deadline()
+	stop()
+	if !got.Equal(want) {
+		t.Fatal("the dial deadline changed although relays are available")
 	}
 }
