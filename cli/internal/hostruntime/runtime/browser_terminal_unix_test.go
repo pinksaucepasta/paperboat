@@ -306,7 +306,8 @@ func TestBrowserTerminalCredentialUsesRealHostProtocolAndPTY(t *testing.T) {
 	if err := owner.Write(ctx, websocket.MessageBinary, keySequenceInput); err != nil {
 		t.Fatal(err)
 	}
-	if got := readBrowserTerminalOutput(t, ctx, owner, "INPUT_BYTES="); !bytes.Contains(got, []byte("04 03 1b 5b 41 78")) {
+	// BSD od pads each byte with extra spaces, so compare the bytes, not the spacing.
+	if got := readBrowserTerminalOutput(t, ctx, owner, "INPUT_BYTES="); !bytes.Contains(bytes.Join(bytes.Fields(got), []byte(" ")), []byte("04 03 1b 5b 41 78")) {
 		t.Fatalf("PTY program did not receive the exact control/escape/ordinary input bytes: %q", got)
 	}
 	if afterEOT, snapshotErr := sessions.SnapshotAtGeneration(created.ID, created.Generation); snapshotErr != nil || afterEOT.State != session.Running {
