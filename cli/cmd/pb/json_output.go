@@ -151,6 +151,10 @@ func classifyCLIJSONFailure(err error, failure commandFailure) cliJSONError {
 			result.StateChanged = false
 			result.OutcomeUncertain = false
 		}
+		if typed.cause == environmentmanager.ErrVaultNotSetUp {
+			result.Code, result.Category, result.StateChanged = "env_not_set_up", "conflict", false
+			result.Recovery = "Run `pb env vault unlock` if this account already uses ENV, or `pb env vault init` to set it up."
+		}
 		if onlyEnvironmentFailureLeaves(typed.cause, func(leaf error) bool {
 			return leaf == environmentmanager.ErrVaultLocked || leaf == environmentmanager.ErrVaultPending || leaf == environmentmanager.ErrVaultChanged || leaf == environmentmanager.ErrVaultTeamGrantRequired || leaf == environmentmanager.ErrVariableNotConfigured
 		}) {

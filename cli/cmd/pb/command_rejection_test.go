@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -383,5 +384,22 @@ func TestApproveRefusalsAreCodedAndChangeNothing(t *testing.T) {
 	other := errors.New("unrelated")
 	if rejectApprovalRefusal(other) != other {
 		t.Fatal("an ordinary failure must not be presented as an approval refusal")
+	}
+}
+
+// An ENV command on a computer that holds no vault for the account (the record is absent) says ENV is
+// not set up and how to set it up; it is not an authentication failure.
+func TestENVNotSetUpIsNamedNotAuthentication(t *testing.T) {
+	for _, cause := range []error{config.ErrSecretNotFound, fmt.Errorf("load vault: %w", config.ErrSecretNotFound)} {
+		err := safeEnvironmentVariableCommandError(cause)
+		failure := classifyCommandFailure(err)
+		result := classifyCLIJSONFailure(err, failure)
+		if failure.kind != commandRejected || result.Code != "env_not_set_up" || result.StateChanged != false || result.Retryable {
+			t.Fatalf("kind=%v code=%q state=%v", failure.kind, result.Code, result.StateChanged)
+		}
+		message := userFacingError(err)
+		if !strings.Contains(message, "ENV is not set up") || !strings.Contains(message, "pb env vault init") || !strings.Contains(message, "pb env vault unlock") || strings.Contains(message, "update failed") {
+			t.Fatalf("message %q", message)
+		}
 	}
 }

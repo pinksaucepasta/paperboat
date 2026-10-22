@@ -483,6 +483,9 @@ func safeEnvironmentVariableCommandError(err error) error {
 		return envCommandError(err, "ENV vault publication is pending; run `pb env vault resume` before retrying")
 	case onlyEnvironmentFailureLeaves(err, func(leaf error) bool { return errors.Is(leaf, environmentmanager.ErrVaultTeamGrantRequired) }):
 		return envCommandError(err, "ENV team access needs a key grant; ask a surviving team member to regrant access, then run `pb env grants sync`")
+	case onlyEnvironmentFailureLeaves(err, func(leaf error) bool { return leaf == config.ErrSecretNotFound }):
+		// The account's vault record is absent here: ENV was never set up or unlocked on this computer.
+		return envCommandError(environmentmanager.ErrVaultNotSetUp, envNotSetUpMessage)
 	case onlyEnvironmentFailureLeaves(err, func(leaf error) bool { return errors.Is(leaf, environmentmanager.ErrNoRotationInProgress) }):
 		return envCommandError(err, "No personal ENV key rotation is in progress; nothing was changed.")
 	case onlyEnvironmentFailureLeaves(err, func(leaf error) bool { return errors.Is(leaf, config.ErrSecretNotFound) }):
@@ -523,6 +526,8 @@ func safeEnvironmentVariableCommandError(err error) error {
 	// error text, even if it was escaped or embedded in structured details.
 	return envCommandError(err, "environment variable update failed")
 }
+
+const envNotSetUpMessage = "ENV is not set up for this account on this computer; nothing was changed. Run `pb env vault unlock` if this account already uses ENV, or `pb env vault init` to set it up."
 
 func environmentVariableScopeLabel(target environmentVariableTarget) string {
 	if target.machineID == "" {
