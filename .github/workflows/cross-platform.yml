@@ -43,6 +43,14 @@ jobs:
             cli/go.sum
             shared/go.sum
             go.work.sum
+      # windows-latest exports TEMP as an 8.3 short path (C:\Users\RUNNER~1\...). The credential and
+      # state stores refuse a path that resolves to a different name, as designed, so every test that
+      # keeps its fixtures under TEMP failed on that alone. Use the real path the runner provides.
+      - name: Use the long temp path
+        if: runner.os == 'Windows'
+        run: |
+          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
       - run: go build ./...
       - run: go vet ./...
       # Runs even when vet fails so one run reports every problem.
