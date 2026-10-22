@@ -125,7 +125,10 @@ func (s SQLIngressSource) projectPreviews(ctx context.Context, node, epoch strin
 		if b.OriginScheme != "unix" {
 			host, port, err := net.SplitHostPort(b.OriginAddress)
 			if err != nil {
-				return nil, wire.ErrIngressDenied
+				if err = s.rowFailed(ctx, "preview_origin", b.RouteID, wire.ErrIngressDenied); err != nil {
+					return nil, err
+				}
+				continue
 			}
 			if host == "localhost" {
 				host = "127.0.0.1"
@@ -148,7 +151,10 @@ func (s SQLIngressSource) projectPreviews(ctx context.Context, node, epoch strin
 			}
 		}
 		if err := d.Validate(now); err != nil {
-			return nil, err
+			if err = s.rowFailed(ctx, "preview_projection", b.RouteID, err); err != nil {
+				return nil, err
+			}
+			continue
 		}
 		out = append(out, d)
 		teams = append(teams, team)
@@ -176,7 +182,10 @@ func (s SQLIngressSource) projectPreviews(ctx context.Context, node, epoch strin
 			continue
 		}
 		if err != nil {
-			return nil, err
+			if err = s.rowFailed(ctx, "preview_accounting", b.RouteID, err); err != nil {
+				return nil, err
+			}
+			continue
 		}
 		admitted = append(admitted, d)
 	}

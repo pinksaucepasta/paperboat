@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"time"
 
@@ -27,6 +28,21 @@ type SQLIngressSource struct {
 	// QuotaDenied, when set, receives each public route left out of a projection solely
 	// because its workspace is out of bandwidth allowance (never an authority).
 	QuotaDenied *[]wire.IngressQuotaDenial
+	// edge marks an edge's complete snapshot (Edge): there one route whose decision cannot be
+	// issued is withheld and named in the log instead of failing every route on that edge.
+	edge bool
+}
+
+// rowFailed handles one route's failure inside a projection. In an edge snapshot a route whose
+// own data cannot yield a decision (ErrIngressDenied, ErrInvalidInput, an accounting binding that
+// cannot be retained) is withheld, which denies that route alone, and the cause is named. Any other
+// failure, and every failure outside an edge snapshot, fails the projection.
+func (s SQLIngressSource) rowFailed(ctx context.Context, stage, routeID string, err error) error {
+	if !s.edge || !(errors.Is(err, wire.ErrIngressDenied) || errors.Is(err, wire.ErrInvalidInput) || errors.Is(err, accountingauthority.ErrUnavailable)) {
+		return err
+	}
+	slog.WarnContext(ctx, "ingress decision withheld", "component", "paperboat-server", "operation", "edge_ingress", "stage", stage, "route_id", routeID, "cause", err.Error())
+	return nil
 }
 
 func (s SQLIngressSource) Daemon(ctx context.Context, active ActiveControlSession) ([]wire.IngressDecision, error) {
@@ -40,6 +56,7 @@ func (s SQLIngressSource) Edge(ctx context.Context, nodeID, epoch string) ([]wir
 	if wire.ValidateIdentifier(nodeID) != nil || wire.ValidateOpaqueEpoch(epoch) != nil {
 		return nil, wire.ErrInvalidInput
 	}
+	s.edge = true
 	durable, err := s.project(ctx, ActiveControlSession{}, nodeID, epoch, "public", "", "")
 	if err != nil {
 		return nil, err
@@ -162,7 +179,10 @@ func (s SQLIngressSource) project(ctx context.Context, active ActiveControlSessi
 			return nil, err
 		}
 		if err = completeIngressProjection(&d, now); err != nil {
-			return nil, err
+			if err = s.rowFailed(ctx, "projection", d.Binding.RouteID, err); err != nil {
+				return nil, err
+			}
+			continue
 		}
 		out = append(out, d)
 	}
@@ -191,7 +211,10 @@ func (s SQLIngressSource) project(ctx context.Context, active ActiveControlSessi
 					}
 					continue
 				}
-				return nil, err
+				if err = s.rowFailed(ctx, "accounting", b.RouteID, err); err != nil {
+					return nil, err
+				}
+				continue
 			}
 			admitted = append(admitted, d)
 		}
