@@ -451,6 +451,20 @@ func TestForwardRateBurstRecovery(t *testing.T) {
 	}
 }
 
+func TestForwardBudgetCarriesFullSizePacketsAtLinkRate(t *testing.T) {
+	var r rate
+	now, forwarded := time.Now(), 0
+	// 1280-byte packets offered at 1 Gbit/s for one second.
+	for i := range 97656 {
+		if r.allow(now.Add(time.Duration(i)*10240*time.Nanosecond), dataPacketsPerSecond, dataPacketBurst) {
+			forwarded++
+		}
+	}
+	if mbit := float64(forwarded) * 1280 * 8 / 1e6; mbit < 450 || mbit > 600 {
+		t.Fatalf("one second forwarded %.0f Mbit", mbit)
+	}
+}
+
 func TestAllocationReplyFencedWhenOtherPeerRevoked(t *testing.T) {
 	f := newFixture(t, nil)
 	entered := make(chan error, 1)

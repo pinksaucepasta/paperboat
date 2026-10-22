@@ -19,6 +19,13 @@ import (
 const MaxAllocations = 128
 const MaxAccountAllocations = 16
 
+// Per-account forwarding budget, in packets because the upstream limiter hook
+// does not see sizes: sized for full 1280-byte WireGuard packets, ~500 Mbit/s.
+const (
+	dataPacketsPerSecond = 48 << 10
+	dataPacketBurst      = 4 << 10
+)
+
 type Config struct {
 	Service      derpquic.ServiceDescriptor
 	DiscoPrivate key.DiscoPrivate
@@ -286,7 +293,7 @@ func (s *Server) allowForward(a, b key.DiscoPublic) bool {
 		limit = new(rate)
 		s.dataRates[account] = limit
 	}
-	if !limit.allow(time.Now(), 4096, 256) {
+	if !limit.allow(time.Now(), dataPacketsPerSecond, dataPacketBurst) {
 		s.denied.Add(1)
 		return false
 	}
