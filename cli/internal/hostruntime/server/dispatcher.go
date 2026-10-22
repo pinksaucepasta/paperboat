@@ -57,6 +57,7 @@ type DispatcherConfig struct {
 	Exec               execprocess.Service
 	SSH                *managedssh.Host
 	Capabilities       CapabilityGate
+	Inspector          BrowserInspector
 }
 
 type Dispatcher struct {
@@ -93,6 +94,9 @@ func (d *Dispatcher) Capabilities() []string {
 	}
 	if d.config.SSH != nil {
 		capabilities = append(capabilities, "ssh.v1")
+	}
+	if d.config.Inspector != nil {
+		capabilities = append(capabilities, "inspector.v1")
 	}
 	return capabilities
 }
@@ -146,6 +150,8 @@ func (d *Dispatcher) handle(ctx context.Context, authorization Authorization, ca
 		return d.exec(ctx, payload)
 	case "ssh.v1":
 		return d.sshRequest(payload)
+	case "inspector.v1":
+		return d.browserInspector(ctx, authorization, payload)
 	default:
 		return failure("capability_required")
 	}

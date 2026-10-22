@@ -27,7 +27,7 @@ const (
 	innerALPN            = "paperboat.browser-terminal.e2ee.v1"
 
 	identityEnvelopeMax = 8 << 10
-	appStructuredMax    = protocol.MaxStructuredFrame
+	appStructuredMax    = protocol.MaxBrowserResponseFrame
 	appBinaryMax        = protocol.MaxBinaryFrame
 	websocketMessageMax = 256 << 10
 	clientCertLifetime  = 10 * time.Minute
@@ -262,11 +262,16 @@ func readStructuredFrame(reader io.Reader) (protocol.Frame, error) {
 }
 
 func decodeStructuredFrame(payload []byte) (protocol.Frame, error) {
-	if len(payload) > protocol.MaxStructuredFrame {
+	if len(payload) > protocol.MaxBrowserResponseFrame {
 		return protocol.Frame{}, errors.New("structured terminal frame is too large")
 	}
 	wire := make([]byte, 4, 4+len(payload))
 	binary.BigEndian.PutUint32(wire, uint32(len(payload)))
 	wire = append(wire, payload...)
-	return protocol.ReadFrame(bytes.NewReader(wire))
+	frame, err := protocol.ReadFrameLimit(bytes.NewReader(wire), protocol.MaxBrowserResponseFrame)
+	// Only responses (inspector results) may exceed the ordinary frame limit.
+	if err == nil && len(payload) > protocol.MaxStructuredFrame && frame.Type != "response" {
+		return protocol.Frame{}, errors.New("structured terminal frame is too large")
+	}
+	return frame, err
 }

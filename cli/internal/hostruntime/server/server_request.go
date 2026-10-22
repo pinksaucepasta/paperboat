@@ -80,7 +80,8 @@ func (s *Server) startRequest(frame protocol.Frame, writer *lockedWriter, author
 		}
 		var outcome operation.Outcome
 		var replay bool
-		if frame.Capability == "config.compare.v1" {
+		// Inspector results carry captured traffic: they are never journaled.
+		if frame.Capability == "config.compare.v1" || frame.Capability == "inspector.v1" {
 			outcome = execute(opCtx)
 		} else {
 			outcome, replay, err = s.config.Journal.Execute(opCtx, journalOperationID, journalRequest, execute)

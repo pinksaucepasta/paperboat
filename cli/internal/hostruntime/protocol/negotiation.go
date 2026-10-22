@@ -38,7 +38,7 @@ var requiredCapabilities = map[string]bool{"terminal.v1": true, "health.v1": tru
 
 var allowedCapabilities = map[string]bool{
 	"terminal.v1": true, "health.v1": true, "exec.v1": true, "ssh.v1": true,
-	"config.compare.v1": true, "config.apply.v1": true, "update.tuf.v1": true, "file-transfer.v1": true,
+	"config.compare.v1": true, "config.apply.v1": true, "update.tuf.v1": true, "file-transfer.v1": true, "inspector.v1": true,
 }
 
 type Negotiator struct {

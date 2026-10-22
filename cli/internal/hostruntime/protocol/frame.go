@@ -12,6 +12,10 @@ import (
 
 const MaxStructuredFrame = 64 << 10
 
+// MaxBrowserResponseFrame bounds a response frame from the daemon to the
+// console over the E2EE browser channel; it carries inspector records.
+const MaxBrowserResponseFrame = 3 << 20
+
 type Code string
 
 const (
@@ -147,7 +151,10 @@ func rejectDuplicateKeys(data []byte) error {
 	return nil
 }
 
-func ReadFrame(r io.Reader) (Frame, error) {
+func ReadFrame(r io.Reader) (Frame, error) { return ReadFrameLimit(r, MaxStructuredFrame) }
+
+// ReadFrameLimit reads one structured frame of at most limit bytes.
+func ReadFrameLimit(r io.Reader, limit uint32) (Frame, error) {
 	var prefix [4]byte
 	if _, err := io.ReadFull(r, prefix[:]); err != nil {
 		return Frame{}, err
@@ -156,7 +163,7 @@ func ReadFrame(r io.Reader) (Frame, error) {
 	if n == 0 {
 		return Frame{}, &Error{Code: Malformed, Cause: errors.New("empty frame")}
 	}
-	if n > MaxStructuredFrame {
+	if n > limit {
 		return Frame{}, &Error{Code: Oversized}
 	}
 	b := make([]byte, n)

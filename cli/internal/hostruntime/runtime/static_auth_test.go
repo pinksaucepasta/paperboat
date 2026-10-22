@@ -106,7 +106,7 @@ func TestStaticAuthorizerBindsBrowserTerminalCredentialToTerminalOnly(t *testing
 	if !ok {
 		t.Fatal("browser authorizer does not expose the verified TLS key binding")
 	}
-	if pin, err := keyAuthorizer.BrowserTerminalPublicKeySHA256(context.Background()); err != nil || pin != claims.BrowserPublicKeySHA256 {
+	if pin, inspectorChannel, err := keyAuthorizer.BrowserTerminalPublicKeySHA256(context.Background()); err != nil || inspectorChannel || pin != claims.BrowserPublicKeySHA256 {
 		t.Fatalf("browser client key pin=%q err=%v", pin, err)
 	}
 	plainFactory, err := NewCredentialAuthorizer(config)
@@ -254,5 +254,92 @@ func TestBrowserFileTransferAuthorizationIsOwnerAndBrowserTransportOnly(t *testi
 				t.Fatal("plain transport accepted browser file grant")
 			}
 		})
+	}
+}
+
+func TestStaticAuthorizerBindsBrowserInspectorCredentialToInspectorOnly(t *testing.T) {
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 10, 22, 0, 0, 0, 0, time.UTC)
+	verifier := auth.Verifier{Keys: staticKeys{keys: map[string]ed25519.PublicKey{"key-1": public}}, Clock: staticClock{now}, ClockSkew: time.Minute}
+	config := CredentialAuthConfig{Issuer: "https://control.test", EnvironmentID: "env_test", MachineID: "machine_test", HelperID: "hlp_test", Verifier: verifier}
+	factory, err := NewBrowserTerminalCredentialAuthorizer(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims := auth.Claims{Issuer: "https://control.test", Audience: "paperboat-machine", Subject: "usr_test", JTI: "jti_browser_inspector", IssuedAt: now.Add(-time.Minute).Unix(), ExpiresAt: now.Add(time.Minute).Unix(), Scope: []string{"inspector:use"}, CredentialClass: "browser_inspector_operation", EnvironmentID: "env_test", AccountID: "usr_test", UserID: "usr_test", MachineID: "machine_test", BrowserAttachmentID: "att_inspector_test", BrowserPublicKeySHA256: base64.RawURLEncoding.EncodeToString(make([]byte, 32))}
+	authorizer, err := factory(signStaticCredential(t, private, "key-1", claims))
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyAuthorizer := authorizer.(server.BrowserTerminalCredentialKey)
+	if pin, inspectorChannel, err := keyAuthorizer.BrowserTerminalPublicKeySHA256(context.Background()); err != nil || !inspectorChannel || pin != claims.BrowserPublicKeySHA256 {
+		t.Fatalf("inspector pin=%q inspector=%v err=%v", pin, inspectorChannel, err)
+	}
+	got, err := authorizer.Authorize(context.Background(), protocol.Frame{Type: "request", Capability: "inspector.v1"})
+	if err != nil || !got.BrowserInspector || got.BrowserTerminal || got.UserID != "usr_test" || got.ClientID != claims.BrowserAttachmentID || got.SessionID != "" {
+		t.Fatalf("inspector authorization=%#v err=%v", got, err)
+	}
+	for _, frame := range []protocol.Frame{{Type: "request", Capability: "terminal.v1"}, {Type: "request", Capability: "file-transfer.v1"}, {Type: "ack"}, {Type: "detach"}, {Type: "request", Capability: "health.v1"}, {Type: "request", Capability: server.BrowserAdmissionCapability}} {
+		if _, err := authorizer.Authorize(context.Background(), frame); err == nil {
+			t.Fatalf("inspector credential authorized %+v", frame)
+		}
+	}
+	plainFactory, err := NewCredentialAuthorizer(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, err := plainFactory(signStaticCredential(t, private, "key-1", claims))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := plain.Authorize(context.Background(), protocol.Frame{Type: "request", Capability: "inspector.v1"}); err == nil {
+		t.Fatal("plaintext runtime accepted a browser inspector credential")
+	}
+	for name, mutate := range map[string]func(*auth.Claims){
+		"missing_attachment":  func(value *auth.Claims) { value.BrowserAttachmentID = "" },
+		"missing_browser_key": func(value *auth.Claims) { value.BrowserPublicKeySHA256 = "" },
+		"terminal_session":    func(value *auth.Claims) { value.SessionID = "ses_x" },
+		"generation":          func(value *auth.Claims) { value.ExpectedGeneration = 1 },
+		"account_mismatch":    func(value *auth.Claims) { value.AccountID = "usr_other" },
+		"terminal_scope":      func(value *auth.Claims) { value.Scope = []string{"terminal:operate"} },
+	} {
+		t.Run(name, func(t *testing.T) {
+			invalid := claims
+			mutate(&invalid)
+			candidate, err := factory(signStaticCredential(t, private, "key-1", invalid))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := candidate.(server.BrowserTerminalCredentialKey).BrowserTerminalPublicKeySHA256(context.Background()); err == nil {
+				t.Fatal("invalid inspector credential admitted")
+			}
+			if _, err := candidate.Authorize(context.Background(), protocol.Frame{Type: "request", Capability: "inspector.v1"}); err == nil {
+				t.Fatal("invalid inspector credential authorized")
+			}
+		})
+	}
+}
+
+func TestStaticAuthorizerKeepsBrowserTerminalCredentialOffInspector(t *testing.T) {
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 10, 22, 0, 0, 0, 0, time.UTC)
+	verifier := auth.Verifier{Keys: staticKeys{keys: map[string]ed25519.PublicKey{"key-1": public}}, Clock: staticClock{now}, ClockSkew: time.Minute}
+	factory, err := NewBrowserTerminalCredentialAuthorizer(CredentialAuthConfig{Issuer: "https://control.test", EnvironmentID: "env_test", MachineID: "machine_test", HelperID: "hlp_test", Verifier: verifier})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims := auth.Claims{Issuer: "https://control.test", Audience: "paperboat-machine", Subject: "usr_test", JTI: "jti_browser_terminal", IssuedAt: now.Add(-time.Minute).Unix(), ExpiresAt: now.Add(time.Minute).Unix(), Scope: []string{"terminal:operate"}, CredentialClass: "browser_terminal_operation", EnvironmentID: "env_test", AccountID: "usr_test", UserID: "usr_test", MachineID: "machine_test", SessionID: "ses_browser", BrowserAttachmentID: "att_browser_test", BrowserPublicKeySHA256: base64.RawURLEncoding.EncodeToString(make([]byte, 32)), ExpectedGeneration: 3, PolicyGeneration: 7}
+	authorizer, err := factory(signStaticCredential(t, private, "key-1", claims))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := authorizer.Authorize(context.Background(), protocol.Frame{Type: "request", Capability: "inspector.v1"}); err == nil {
+		t.Fatal("browser terminal credential reached inspector.v1")
 	}
 }

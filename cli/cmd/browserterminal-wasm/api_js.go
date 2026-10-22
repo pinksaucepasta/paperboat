@@ -75,7 +75,7 @@ func apiConnect(_ js.Value, args []js.Value) any {
 		zero(identity.PrivateKey)
 		return errorObject("connection_failed", "The encrypted connection could not be started.")
 	}
-	connection := &browserTerminal{id: id, identity: identity, callback: args[2], config: config, writes: newTerminalWriterQueue(), fileRequests: make(map[string]chan protocol.Frame), fileDone: make(chan struct{})}
+	connection := &browserTerminal{id: id, identity: identity, callback: args[2], config: config, writes: newTerminalWriterQueue(), fileRequests: make(map[string]chan protocol.Frame), inspectorCalls: make(map[string]chan protocol.Frame), fileDone: make(chan struct{})}
 	browserRuntime.Lock()
 	browserRuntime.connections[id] = connection
 	browserRuntime.Unlock()

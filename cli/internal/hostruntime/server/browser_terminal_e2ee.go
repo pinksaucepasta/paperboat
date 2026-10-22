@@ -55,7 +55,7 @@ type BrowserTerminalIdentityProvider func(context.Context) (BrowserTerminalIdent
 // used for the dedicated E2EE browser endpoint. It verifies the signed
 // browser-terminal JWT before TLS and returns its canonical SPKI pin.
 type BrowserTerminalCredentialKey interface {
-	BrowserTerminalPublicKeySHA256(context.Context) (string, error)
+	BrowserTerminalPublicKeySHA256(context.Context) (digest string, inspector bool, err error)
 }
 
 type BrowserTerminalWebSocketHandlerConfig struct {
@@ -110,7 +110,7 @@ func (h *BrowserTerminalWebSocketHandler) ServeHTTP(writer http.ResponseWriter, 
 		http.Error(writer, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 		return
 	}
-	pinnedDigest, err := keyAuthorizer.BrowserTerminalPublicKeySHA256(request.Context())
+	pinnedDigest, inspectorChannel, err := keyAuthorizer.BrowserTerminalPublicKeySHA256(request.Context())
 	if err != nil {
 		if reportAuthorizationFailure(request.Context(), err) {
 			http.Error(writer, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
@@ -190,9 +190,12 @@ func (h *BrowserTerminalWebSocketHandler) ServeHTTP(writer http.ResponseWriter, 
 	var plaintext net.Conn = tlsConnection
 	if h.config.Bandwidth != nil {
 		capability, consumer := "terminal.v1", "terminal"
+		if inspectorChannel {
+			capability, consumer = "inspector.v1", "inspector"
+		}
 		authorization, authorizeErr := authorizer.Authorize(request.Context(), protocol.Frame{Capability: capability})
 		bindingID := authorization.BrowserAttachmentID
-		if authorizeErr != nil || bindingID == "" || !authorization.BrowserTerminal {
+		if authorizeErr != nil || bindingID == "" || authorization.BrowserTerminal == inspectorChannel || authorization.BrowserInspector != inspectorChannel {
 			authorityUnavailable := reportAuthorizationFailure(request.Context(), authorizeErr)
 			if closer, ok := authorizer.(AuthorizationCloser); ok {
 				closer.CloseAuthorization()
@@ -494,7 +497,13 @@ func (c *browserTerminalApplicationConnection) WriteStructured(frame protocol.Fr
 	if err != nil {
 		return err
 	}
-	return c.writeApplicationRecord(1, encoded, protocol.MaxStructuredFrame)
+	limit := protocol.MaxStructuredFrame
+	if frame.Type == "response" {
+		// Inspector results exceed the request frame limit; only responses
+		// toward the browser may use the larger response limit.
+		limit = protocol.MaxBrowserResponseFrame
+	}
+	return c.writeApplicationRecord(1, encoded, limit)
 }
 
 func (c *browserTerminalApplicationConnection) WriteBinary(frame protocol.BinaryFrame) error {

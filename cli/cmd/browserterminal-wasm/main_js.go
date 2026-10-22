@@ -33,6 +33,7 @@ var browserRuntime = struct {
 }{identities: make(map[string]*browserIdentity), connections: make(map[string]*browserTerminal)}
 
 type terminalConfig struct {
+	Mode              string
 	URL               string
 	Subprotocols      []string
 	OwnerAccountID    string
@@ -61,6 +62,8 @@ type browserTerminal struct {
 	resizeSequence  uint64
 	cursorRequestID string
 	fileRequests    map[string]chan protocol.Frame
+	inspectorCalls  map[string]chan protocol.Frame
+	inspectorReady  bool
 	fileDone        chan struct{}
 	fileCloseOnce   sync.Once
 	filesAvailable  bool
@@ -111,6 +114,7 @@ func main() {
 	api.Set("cursor", js.FuncOf(apiCursor))
 	api.Set("hashFile", js.FuncOf(apiHashFile))
 	api.Set("fileRequest", js.FuncOf(apiFileRequest))
+	api.Set("inspectorRequest", js.FuncOf(apiInspectorRequest))
 	api.Set("leave", js.FuncOf(apiLeave))
 	js.Global().Set("paperboatBrowserTerminal", api)
 	select {}

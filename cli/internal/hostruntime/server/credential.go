@@ -16,6 +16,11 @@ import (
 
 var ErrCredentialPolicy = errors.New("credential policy unavailable")
 
+// BrowserAdmissionCapability names the pre-TLS policy of the E2EE browser
+// endpoint. It admits either browser credential class; it is never a frame
+// capability, and every application frame is authorized by its own policy.
+const BrowserAdmissionCapability = "browser.admission"
+
 type CredentialVerifier interface {
 	Verify(context.Context, string, auth.Policy) (auth.Claims, error)
 }
@@ -45,6 +50,9 @@ func (a *CredentialAuthorizer) Authorize(ctx context.Context, frame protocol.Fra
 	if a.Verifier == nil || a.Resolver == nil || a.Token == "" {
 		return Authorization{}, ErrCredentialPolicy
 	}
+	if frame.Capability == BrowserAdmissionCapability {
+		return Authorization{}, ErrCredentialPolicy
+	}
 	policy, err := a.Resolver.Policy(frame)
 	if err != nil {
 		return Authorization{}, err
@@ -64,6 +72,10 @@ func (a *CredentialAuthorizer) Authorize(ctx context.Context, frame protocol.Fra
 	terminalFrame := frame.Capability == "terminal.v1" || frame.Type == "ack" || frame.Type == "detach"
 	browserUpload := frame.Capability == "file-transfer.v1" && role == TerminalRoleOwner
 	if browserTerminal && ((!terminalFrame && !browserUpload) || !validBrowserTerminalClaims(claims)) {
+		return Authorization{}, ErrCredentialPolicy
+	}
+	browserInspector := claims.CredentialClass == "browser_inspector_operation"
+	if (browserInspector || frame.Capability == "inspector.v1") && (frame.Capability != "inspector.v1" || frame.Type == "ack" || frame.Type == "detach" || !validBrowserInspectorClaims(claims)) {
 		return Authorization{}, ErrCredentialPolicy
 	}
 	if claims.CredentialClass == "config_compare" {
@@ -101,7 +113,7 @@ func (a *CredentialAuthorizer) Authorize(ctx context.Context, frame protocol.Fra
 		accountID = claims.UserID
 	}
 	clientID := claims.CLIClientSessionID
-	if browserTerminal {
+	if browserTerminal || browserInspector {
 		clientID = claims.BrowserAttachmentID
 	}
 	if (claims.CredentialClass == "codex_manage" || claims.CredentialClass == "codex_connect") && resourceID == "" {
@@ -121,6 +133,7 @@ func (a *CredentialAuthorizer) Authorize(ctx context.Context, frame protocol.Fra
 		TerminalRole:        role,
 		TerminalGeneration:  uint64(claims.ExpectedGeneration),
 		BrowserTerminal:     browserTerminal,
+		BrowserInspector:    browserInspector,
 		BrowserAttachmentID: claims.BrowserAttachmentID,
 		PolicyGeneration:    uint64(claims.PolicyGeneration),
 		ResourceID:          resourceID,
@@ -153,25 +166,36 @@ func (a *CredentialAuthorizer) verifiedClaims(ctx context.Context, policy auth.P
 	return claims, err
 }
 
-// BrowserTerminalPublicKeySHA256 verifies the terminal credential before TLS
-// starts and returns its browser client certificate pin. The credential is
-// verified again when ServeAuthenticated authorizes application frames.
-func (a *CredentialAuthorizer) BrowserTerminalPublicKeySHA256(ctx context.Context) (string, error) {
+// BrowserTerminalPublicKeySHA256 verifies the browser terminal or inspector
+// credential before TLS starts and returns its browser client certificate pin
+// and whether it is an inspector credential. The credential is verified again
+// when ServeAuthenticated authorizes application frames.
+func (a *CredentialAuthorizer) BrowserTerminalPublicKeySHA256(ctx context.Context) (string, bool, error) {
 	if a.Verifier == nil || a.Resolver == nil || a.Token == "" {
-		return "", ErrCredentialPolicy
+		return "", false, ErrCredentialPolicy
 	}
-	policy, err := a.Resolver.Policy(protocol.Frame{Capability: "terminal.v1"})
+	policy, err := a.Resolver.Policy(protocol.Frame{Capability: BrowserAdmissionCapability})
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	claims, err := a.verifiedClaims(ctx, policy)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
-	if claims.CredentialClass != "browser_terminal_operation" || !validBrowserTerminalClaims(claims) {
-		return "", ErrCredentialPolicy
+	switch {
+	case claims.CredentialClass == "browser_terminal_operation" && validBrowserTerminalClaims(claims):
+		return claims.BrowserPublicKeySHA256, false, nil
+	case claims.CredentialClass == "browser_inspector_operation" && validBrowserInspectorClaims(claims):
+		return claims.BrowserPublicKeySHA256, true, nil
+	default:
+		return "", false, ErrCredentialPolicy
 	}
-	return claims.BrowserPublicKeySHA256, nil
+}
+
+// validBrowserInspectorClaims accepts a machine-scoped inspector channel: it
+// names a browser and its key but no terminal session or generation.
+func validBrowserInspectorClaims(claims auth.Claims) bool {
+	return claims.CredentialClass == "browser_inspector_operation" && len(claims.Scope) == 1 && claims.Scope[0] == "inspector:use" && claims.EnvironmentID != "" && claims.UserID != "" && claims.AccountID == claims.UserID && claims.MachineID != "" && claims.BrowserAttachmentID != "" && claims.BrowserPublicKeySHA256 != "" && claims.SessionID == "" && claims.ExpectedGeneration == 0 && claims.PolicyGeneration == 0
 }
 
 func validBrowserTerminalClaims(claims auth.Claims) bool {

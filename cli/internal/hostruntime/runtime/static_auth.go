@@ -109,7 +109,10 @@ type staticPolicyResolver struct {
 
 func (r staticPolicyResolver) Policy(frame protocol.Frame) (auth.Policy, error) {
 	base := auth.Policy{Issuer: r.issuer, Audience: "paperboat-machine", EnvironmentID: r.environmentID, MachineID: r.machineID}
-	if r.browserTerminalOnly && frame.Type != "ack" && frame.Type != "detach" && frame.Capability != "terminal.v1" && frame.Capability != "file-transfer.v1" {
+	if r.browserTerminalOnly && frame.Type != "ack" && frame.Type != "detach" && frame.Capability != "terminal.v1" && frame.Capability != "file-transfer.v1" && frame.Capability != "inspector.v1" && frame.Capability != server.BrowserAdmissionCapability {
+		return auth.Policy{}, ErrStaticAuthInvalid
+	}
+	if !r.browserTerminalOnly && (frame.Capability == "inspector.v1" || frame.Capability == server.BrowserAdmissionCapability) {
 		return auth.Policy{}, ErrStaticAuthInvalid
 	}
 	if frame.Type == "ack" || frame.Type == "detach" {
@@ -118,6 +121,15 @@ func (r staticPolicyResolver) Policy(frame protocol.Frame) (auth.Policy, error) 
 		return base, nil
 	}
 	switch frame.Capability {
+	case server.BrowserAdmissionCapability:
+		// Pre-TLS admission accepts either browser class; every later frame
+		// is checked against its own capability's exact class and scope.
+		base.CredentialClass = "browser_terminal_operation"
+		base.AllowedCredentialClasses = []string{"browser_inspector_operation"}
+		base.AnyScopes = [][]string{{"terminal:operate"}, {"terminal:view"}, {"terminal:control"}, {"inspector:use"}}
+	case "inspector.v1":
+		base.CredentialClass = "browser_inspector_operation"
+		base.Scopes = []string{"inspector:use"}
 	case "terminal.v1":
 		base.CredentialClass = r.terminalCredentialClass()
 		base.AnyScopes = [][]string{{"terminal:operate"}, {"terminal:view"}, {"terminal:control"}}

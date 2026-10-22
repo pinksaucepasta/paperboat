@@ -23,6 +23,7 @@ import (
 
 func parseTerminalConfig(value js.Value) (terminalConfig, error) {
 	config := terminalConfig{
+		Mode:              stringProperty(value, "mode"),
 		URL:               stringProperty(value, "url"),
 		OwnerAccountID:    stringProperty(value, "owner_account_id"),
 		MachineID:         stringProperty(value, "machine_id"),
@@ -49,7 +50,15 @@ func parseTerminalConfig(value js.Value) (terminalConfig, error) {
 	for index := 0; index < protocolValues.Get("length").Int(); index++ {
 		config.Subprotocols = append(config.Subprotocols, protocolValues.Index(index).String())
 	}
-	if config.Role != "owner" && config.Role != "viewer" && config.Role != "interactive" {
+	if config.Mode == "" {
+		config.Mode = connectionModeTerminal
+	}
+	if config.Mode != connectionModeTerminal && config.Mode != connectionModeInspector {
+		return terminalConfig{}, errors.New("invalid connection mode")
+	}
+	if config.Mode == connectionModeInspector {
+		config.Role, config.TerminalSessionID = "", ""
+	} else if config.Role != "owner" && config.Role != "viewer" && config.Role != "interactive" {
 		return terminalConfig{}, errors.New("invalid browser terminal role")
 	}
 	if len(config.RootPublicKey) == 0 || len(config.RootFingerprint) != 64 || config.RootKeyID == "" {
@@ -75,7 +84,7 @@ func parseTerminalConfig(value js.Value) (terminalConfig, error) {
 	if err != nil || len(ticketBytes) != 32 || base64.RawURLEncoding.EncodeToString(ticketBytes) != ticket {
 		return terminalConfig{}, errors.New("invalid browser stream ticket")
 	}
-	if config.OwnerAccountID == "" || config.MachineID == "" || config.TerminalSessionID == "" {
+	if config.OwnerAccountID == "" || config.MachineID == "" || config.Mode == connectionModeTerminal && config.TerminalSessionID == "" {
 		return terminalConfig{}, errors.New("missing terminal identity")
 	}
 	return config, nil
@@ -155,6 +164,16 @@ func (connection *browserTerminal) connectAndServe() error {
 		if capability == "file-transfer.v1" {
 			connection.filesAvailable = true
 		}
+		if capability == inspectorCapability {
+			connection.inspectorReady = true
+		}
+	}
+	if connection.config.Mode == connectionModeInspector {
+		connection.mu.Lock()
+		connection.attached = true
+		connection.mu.Unlock()
+		connection.emit("state", map[string]any{"state": "connected"})
+		return connection.readTerminalStream(clientTLS)
 	}
 	requestID, err := randomID("request")
 	if err != nil {
@@ -273,8 +292,7 @@ func (connection *browserTerminal) sendHello(writer io.Writer) error {
 	if err != nil {
 		return err
 	}
-	payload := json.RawMessage(`{"min_version":"1.0","max_version":"1.0","capabilities":["terminal.v1","health.v1","file-transfer.v1"]}`)
-	return writeStructuredFrame(writer, protocol.Frame{Type: "hello", RequestID: requestID, Version: protocol.ProtocolVersion, Payload: payload})
+	return writeStructuredFrame(writer, protocol.Frame{Type: "hello", RequestID: requestID, Version: protocol.ProtocolVersion, Payload: helloPayload(connection.config.Mode)})
 }
 
 type terminalAttachState struct {
@@ -380,7 +398,7 @@ func (connection *browserTerminal) readTerminalStream(stream io.Reader) error {
 		if decodeErr != nil {
 			return &terminalConnectError{state: "transport-error", code: "invalid_frame", message: "The machine sent an invalid terminal frame."}
 		}
-		if connection.deliverFileResponse(frame) {
+		if connection.deliverFileResponse(frame) || connection.deliverInspectorResponse(frame) {
 			continue
 		}
 		connection.mu.Lock()

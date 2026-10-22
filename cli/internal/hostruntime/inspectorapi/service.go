@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
@@ -507,6 +508,27 @@ func (s *Service) ServeAuthenticatedHTTP(writer http.ResponseWriter, request *ht
 	}
 }
 
+type principalKey struct{}
+
+type principalBinding struct {
+	principal string
+	mismatch  atomic.Bool
+}
+
+// ServeForPrincipal serves like ServeAuthenticatedHTTP for a caller already
+// authenticated as principal (the console inspector channel). Every grant
+// must resolve to that principal; it reports whether a grant was refused
+// because it belongs to someone else.
+func (s *Service) ServeForPrincipal(principal string, writer http.ResponseWriter, request *http.Request) (mismatch bool) {
+	if principal == "" || request == nil {
+		writeError(requestContext(request), writer, http.StatusUnauthorized, "inspector_unauthorized", nil)
+		return false
+	}
+	binding := &principalBinding{principal: principal}
+	s.ServeAuthenticatedHTTP(writer, request.WithContext(context.WithValue(request.Context(), principalKey{}, binding)))
+	return binding.mismatch.Load()
+}
+
 func validQueryResource(value string) bool {
 	value = strings.TrimSpace(value)
 	if value == "" || len(value) > 256 {
@@ -586,6 +608,10 @@ func (s *Service) authorizeOp(ctx context.Context, request *http.Request, kind, 
 			err = unexpectedAuthorityFailure(err)
 		}
 		return inspector.Credential{}, err
+	}
+	if binding, ok := ctx.Value(principalKey{}).(*principalBinding); ok && decision.Principal != binding.principal {
+		binding.mismatch.Store(true)
+		return inspector.Credential{}, ErrDenied
 	}
 	now := s.currentTime()
 	if decision.Principal == "" || decision.ResourceKind != kind || decision.ResourceID != resource || decision.RouteID != route ||

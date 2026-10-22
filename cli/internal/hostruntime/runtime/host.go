@@ -318,6 +318,7 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 		ConfigCompare: dependencies.ConfigCompare,
 		FileTransfers: transferService, Writers: writers, Exec: executions,
 		SSH: dependencies.ManagedSSH, Capabilities: dependencies.Capabilities,
+		Inspector: browserInspector(dependencies.Inspector),
 	})
 	if err != nil {
 		return nil, err
@@ -981,4 +982,13 @@ func (s *runtimeHealthSource) Snapshot() (snapshot health.Snapshot) {
 		}
 	}
 	return snapshot
+}
+
+// browserInspector keeps a nil service a nil interface so the dispatcher
+// advertises inspector.v1 only when the inspector is configured.
+func browserInspector(service *inspectorapi.Service) server.BrowserInspector {
+	if service == nil {
+		return nil
+	}
+	return service
 }

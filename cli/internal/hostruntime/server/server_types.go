@@ -80,6 +80,7 @@ type Authorization struct {
 	TerminalRole        TerminalRole
 	TerminalGeneration  uint64
 	BrowserTerminal     bool
+	BrowserInspector    bool
 	BrowserAttachmentID string
 	PolicyGeneration    uint64
 	ResourceID          string
