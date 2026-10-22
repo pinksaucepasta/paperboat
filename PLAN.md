@@ -646,11 +646,15 @@ fewer moving parts (no per-role login lists, no deny lists).
   `role:member` (every active member, any role), `*` (every member and token).
 - **Targets (on what).** `machine:<alias>` (a machine in this workspace), `tag:<name>`
   (machines carrying the tag), `machine:*` (every machine in this workspace); for ENV,
-  `env:team` (the team ENV scope; today ENV grants are team-wide, `team_resource_grants` kind
+  `preview:<name>` / `tunnel:<name>` (one preview or tunnel, for `inspect`/`replay` only); for
+  ENV, `env:team` (the team ENV scope; today ENV grants are team-wide, `team_resource_grants` kind
   `env` with resource_id = team). Personal ENV scopes stay the owner's alone.
 - **Actions.** Exactly today's machine capabilities (`teams.MachineCapabilities`, one owner):
   `terminal`, `exec`, `managed_ssh` (pb ssh/scp/sftp/rsync), `files` (send and Inbox),
-  `preview_manage`, `tunnel_manage`, `private_access`; plus `env_read`, `env_write` on the
+  `preview_manage`, `tunnel_manage`, `private_access`; `inspect` and `replay` (the F17
+  preview inspector and `pb preview inspect/replay`, also for tunnels; on a machine or tag they
+  cover every preview and tunnel published from it, exact-match as today: no other action
+  implies them and `inspect` does not imply `replay`); plus `env_read`, `env_write` on the
   `env:team` target. `private_access` takes an optional `ports` list (`[5432, "8000-8100"]`; default
   all ports ≥1024, today's rule). Shortcut `"*"` = every machine action (not ENV).
 - **Tags** are assigned in the file: `"tags": {"tag:prod": ["machine:db1", "machine:web1"]}`.
@@ -672,8 +676,9 @@ fewer moving parts (no per-role login lists, no deny lists).
    enrolled and bound to this workspace; the machine's own on-device service switches
    (`pb machine capabilities`) allow the service. Any guardrail fails → deny, and explain
    names the guardrail.
-2. **Owner of a personal machine** in the personal workspace: allowed for every action,
-   always (you cannot lock yourself out of your own machine). Tokens never get this.
+2. **Owners:** the owner of a personal machine is allowed every action on it, and the owner
+   of a preview or tunnel may `inspect`/`replay` it, always (you cannot lock yourself out).
+   Tokens never get this.
 3. **Rules:** allowed if at least one rule matches (subject in `src`, machine in `dst`,
    action in `allow`, port in `ports` when given). No match → deny. There are no deny rules,
    so rule order never matters and explain lists every matching rule.
@@ -706,7 +711,10 @@ the same way a grant revoke does today.
 **Migration, zero behaviour change.** One migration writes version 1 of each team's policy
 from its rows: an `all_members` grant → `{"src": ["role:member"], "dst": ["machine:<alias>"],
 "allow": [...]}`, a `selected_member` grant → `user:<email>`; inactive grants are dropped;
-`allow_private_access` is copied. Personal workspaces start with an empty policy (only the
+`allow_private_access` is copied; preview/tunnel `inspect` and `replay` grants
+(`team_resource_grants`, the grants F17 mints inspector credentials from) → `{"src":
+["user:<email>"], "dst": ["preview:<name>"], "allow": ["inspect"]}`, and the inspector
+credential path (Lane I) asks `workspace_capability_allowed` instead of reading the grant. Personal workspaces start with an empty policy (only the
 owner, as today). The migration test compiles every team's v1 and asserts the compiled table
 equals the old function's answer for every member × machine × capability before the old
 function is dropped.
@@ -813,12 +821,12 @@ explain "who can" answers bounded to 1000 rows (paginated).
 **Not in v1** (WHITEBOARD if wanted): deny/exclude rules, conditions on source device,
 network or time, tags applied at enrolment (`pb pair --tag`), tag owners for non-admins,
 per-resource sharing, which stays as it is and is shown read-only in the Simple view:
-preview/tunnel/lazy-policy grants (`pb team grant`, `team_resource_grants`) and shared
+preview/tunnel `use`/`manage` and lazy-policy grants (`pb team grant`, `team_resource_grants`) and shared
 terminal sessions (`pb session share`, viewer/interactive).
 
 - F18-01: Policy file format, JSON Schema served and printed, validation with stable path+code errors, limits; invalid files and failing tests are never saved.
-- F18-02: Enforcement on the server: every machine capability (terminal, browser terminal, exec, managed SSH, files, preview/tunnel manage, private access with ports) follows the compiled policy; tags and groups work; removing access ends active sessions as a grant revoke does today.
-- F18-03: Migration: every team's existing machine grants and private-access setting become policy v1 with identical access (compiled table equals the old answer for every member × machine × capability); personal workspaces unchanged.
+- F18-02: Enforcement on the server: every machine capability (terminal, browser terminal, exec, managed SSH, files, preview/tunnel manage, private access with ports) and preview/tunnel inspect/replay (F17 inspector credentials) follows the compiled policy; tags and groups work; removing access ends active sessions as a grant revoke does today.
+- F18-03: Migration: every team's existing machine grants, inspect/replay grants and private-access setting become policy v1 with identical access (compiled table equals the old answer for every member × machine × capability); personal workspaces unchanged.
 - F18-04: Explain and test: allow/deny with matched rule or guardrail, who-can and what-can, on the saved policy and on a draft; in-file tests run on validate and save.
 - F18-05: Versions, access-change review before save, restore, audit events; stale saves refused; renames and removals rewrite references with an audit event.
 - F18-06: Agent tokens: create/list/revoke, no access unless a rule names them, capped by the creator's access, used by `PB_TOKEN` with `pb exec` and the other commands, every use attributed; solo personal workspace "token may only exec on tag:ci" works.
