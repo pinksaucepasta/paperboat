@@ -33,23 +33,45 @@ export const plans = [
     price: "$0",
     period: "",
     bandwidth: "5 GB",
-    detail: "Every feature, for your own machines.",
+    detail: "Everything for one person, on your own machines.",
   },
   {
     name: "Pro",
     price: "$8",
     period: "/month, or $80/year",
     bandwidth: "100 GB",
-    detail: "More bandwidth for your own machines. Add 100 GB any time.",
+    detail: "Everything in Free, with more bandwidth. Add 100 GB any time.",
   },
   {
     name: "Team",
     price: "$15",
     period: "/seat/month, or $150/seat/year",
     bandwidth: "100 GB per seat",
-    detail: "For teams: roles, shared secrets and shared config. Extra bandwidth goes to the whole team.",
+    detail: "Members, and lasting access to each other's machines. Try it free for 14 days.",
   },
 ] as const
+
+/** The comparison under the plans: what each plan includes (true), not (false), or a note. */
+export const compare: { feature: string; free: boolean | string; pro: boolean | string; team: boolean | string }[] = [
+  { feature: "Machines", free: "Unlimited", pro: "Unlimited", team: "Unlimited" },
+  { feature: "Relay and edge bandwidth a month", free: "5 GB", pro: "100 GB", team: "100 GB per seat" },
+  { feature: "Direct machine-to-machine traffic", free: "Free", pro: "Free", team: "Free" },
+  { feature: "Terminals, files, SSH, ENV, config sync", free: true, pro: true, team: true },
+  { feature: "Previews and tunnels", free: "Unlimited", pro: "Unlimited", team: "Unlimited" },
+  { feature: "Custom domains", free: true, pro: true, team: true },
+  { feature: "Tags and access rules", free: true, pro: true, team: true },
+  { feature: "Share a terminal session or a preview link", free: true, pro: true, team: true },
+  { feature: "Team members", free: false, pro: false, team: true },
+  { feature: "Lasting access to each other's machines", free: false, pro: false, team: true },
+  { feature: "Roles", free: false, pro: false, team: "Coming" },
+  { feature: "SSO and SCIM", free: false, pro: false, team: "Coming" },
+  { feature: "Audit log export", free: false, pro: false, team: "Coming" },
+  { feature: "Invoices", free: false, pro: false, team: "Coming" },
+]
+
+/** The Team plan's trial, said once wherever it is mentioned. */
+export const teamTrial =
+  "Team starts with a 14-day trial. Your card is taken at the start and billing begins on day 15. We remind you 3 days before, and cancelling during the trial costs nothing."
 
 /** The mark: a paper boat on a 10 × 6 cell grid, 60 units per cell (brand guidelines 02). */
 export const boatPath =
