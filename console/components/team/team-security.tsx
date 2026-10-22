@@ -8,6 +8,7 @@ import { ApiError, useApiQuery } from "@/lib/api"
 import {
   identityQuery,
   openPortal,
+  providerName,
   setExempt,
   updateDirectory,
   updateSso,
@@ -102,7 +103,8 @@ function State({ ok, children }: { ok: boolean; children: React.ReactNode }) {
   )
 }
 
-const ready = (state?: string) => !state || ["active", "verified", "linked"].includes(state)
+const ready = (state: string) => state === "active" || state === "verified" || state === "linked"
+const domainStates: Record<string, string> = { verified: "Verified", pending: "Waiting for DNS", failed: "Couldn’t be verified" }
 
 function Domains({ team, identity }: { team: Team; identity: TeamIdentity }) {
   const domains = identity.sso.domains
@@ -118,7 +120,7 @@ function Domains({ team, identity }: { team: Team; identity: TeamIdentity }) {
       {domains.length ? (
         domains.map((domain) => (
           <Row key={domain.domain} label={domain.domain}>
-            <State ok={ready(domain.state)}>{ready(domain.state) ? "Verified" : "Waiting for DNS"}</State>
+            <State ok={ready(domain.state)}>{domainStates[domain.state] ?? domain.state}</State>
           </Row>
         ))
       ) : (
@@ -164,7 +166,9 @@ function SingleSignOn({ team, identity, emails }: { team: Team; identity: TeamId
       <Row label="Identity provider">
         {sso.connections.length ? (
           <State ok={connected}>
-            {sso.connections.map((connection) => connection.name || connection.type || connection.id).join(", ")}
+            {sso.connections
+              .map((connection) => providerName(connection.type) + (connection.state === "active" ? "" : ` (${connection.state})`))
+              .join(", ")}
           </State>
         ) : (
           <span className="text-muted-foreground">Not set up</span>
@@ -338,7 +342,7 @@ function Directory({ team, identity }: { team: Team; identity: TeamIdentity }) {
         <>
           <Row label="Directory">
             <State ok={!directory.error && ready(directory.directory.state)}>
-              {directory.directory.name || directory.directory.type || "Connected"} · {directory.users}{" "}
+              {providerName(directory.directory.type)} · {directory.users}{" "}
               {directory.users === 1 ? "person" : "people"}
             </State>
           </Row>

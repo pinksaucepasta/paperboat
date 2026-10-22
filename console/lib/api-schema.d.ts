@@ -7697,6 +7697,106 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/teams/{team_id}/identity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Team SSO and directory status
+         * @description Owners and admins (security.manage) and auditors (audit.read).
+         */
+        get: operations["team_identity_status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/teams/{team_id}/identity/portal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Open the WorkOS Admin Portal
+         * @description Creates the team WorkOS organization on first use and returns a short-lived Admin Portal link. Team needs business.sso_min_seats seats.
+         */
+        post: operations["team_identity_portal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/teams/{team_id}/identity/sso": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Require SSO, session length, JIT
+         * @description Turning Require SSO on answers 409 sso_review_required with details.members and details.digest until confirm equals that digest.
+         */
+        put: operations["team_identity_sso"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/teams/{team_id}/identity/exempt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Mark a member SSO exempt
+         * @description Break-glass members (at most business.sso_exempt_max).
+         */
+        put: operations["team_identity_exempt"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/teams/{team_id}/identity/directory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Directory group roles
+         * @description Map directory groups to roles ("" removes) and choose whether only mapped groups are provisioned.
+         */
+        put: operations["team_identity_directory"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -9932,6 +10032,10 @@ export interface components {
             display_name: string;
             /** Format: date-time */
             joined_at: string;
+            /** @description The company directory owns this member (role and membership change only there). */
+            directory_managed?: boolean;
+            /** @description May reach a Require-SSO team without SSO (break-glass). */
+            sso_exempt?: boolean;
         };
         TeamGrant: {
             account_id: string;
@@ -9960,6 +10064,9 @@ export interface components {
             machine_requests?: components["schemas"]["TeamMachineAdmission"][];
             machines?: components["schemas"]["TeamMachine"][];
             machine_grants?: components["schemas"]["TeamMachineGrant"][];
+            sso_required?: boolean;
+            /** @description For the viewer: whether their SSO sign-in satisfies the team. Without it the team lists only its name. */
+            sso_signed_in?: boolean;
         };
         TeamActivityItem: {
             id: string;
@@ -11409,6 +11516,13 @@ export interface components {
                 control_url: string;
                 helper_listen_address: string;
             };
+            /** @description Managed SSH target of the machine's current installation; present only when the caller may use managed SSH on it. host_key_generation is 0 until the machine has active host keys. */
+            ssh?: {
+                os_user: string;
+                port: number;
+                target_generation: number;
+                host_key_generation: number;
+            };
         };
         MeResponse: {
             data: components["schemas"]["Me"];
@@ -11652,6 +11766,51 @@ export interface components {
             eligible: boolean;
             min_seats: number;
             default_days_until_due: number;
+        };
+        /** @description Team SSO and directory sync (PLAN F19), as last read from WorkOS. */
+        TeamIdentityStatus: {
+            eligible: boolean;
+            min_seats: number;
+            seats: number;
+            organization: boolean;
+            can_manage: boolean;
+            sso: {
+                connections?: {
+                    id?: string;
+                    type?: string;
+                    state?: string;
+                }[];
+                domains?: {
+                    domain?: string;
+                    state?: string;
+                }[];
+                required?: boolean;
+                session_seconds?: number;
+                session_min_seconds?: number;
+                session_max_seconds?: number;
+                jit?: boolean;
+                exempt?: string[];
+                exempt_max?: number;
+            };
+            directory: {
+                directory?: null | {
+                    id?: string;
+                    type?: string;
+                    state?: string;
+                };
+                users?: number;
+                groups?: {
+                    id?: string;
+                    name?: string;
+                    role?: string;
+                }[];
+                mapped_only?: boolean;
+                /** Format: date-time */
+                synced_at?: string;
+                error?: string;
+            };
+        } & {
+            [key: string]: unknown;
         };
     };
     responses: {
@@ -28249,6 +28408,191 @@ export interface operations {
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    team_identity_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                team_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["TeamIdentityStatus"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    team_identity_portal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                team_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    intent: "domain_verification" | "sso" | "dsync";
+                };
+            };
+        };
+        responses: {
+            /** @description Result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            /** Format: uri */
+                            url: string;
+                        };
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    team_identity_sso: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                team_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    required?: boolean;
+                    session_seconds?: number;
+                    jit?: boolean;
+                    confirm?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["TeamIdentityStatus"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    team_identity_exempt: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                team_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    account_id: string;
+                    exempt: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description Result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["TeamIdentityStatus"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    team_identity_directory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                team_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    mapped_only?: boolean;
+                    group_roles?: {
+                        [key: string]: "" | "admin" | "billing" | "auditor" | "member";
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description Result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["TeamIdentityStatus"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
             503: components["responses"]["Error"];
         };
     };
