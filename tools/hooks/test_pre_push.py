@@ -53,7 +53,7 @@ class PrePushTest(unittest.TestCase):
         self.assertEqual(subprocess.run(["go", "build", "./..."], cwd=self.repo / "cli", capture_output=True).returncode, 0, "the working tree builds")
         result = self.push(head, self.base)
         self.assertEqual(result.returncode, 1, result.stderr)
-        self.assertIn("go build ./... failed", result.stderr)
+        self.assertIn("go build failed", result.stderr)
         self.assertIn("undefined: Helper", result.stderr)
 
     def test_a_vet_failure_in_a_changed_package_is_refused(self):

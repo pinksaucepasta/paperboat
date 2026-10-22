@@ -86,9 +86,15 @@ def check(commit, modules, paths):
             if not (tree / module / "go.mod").exists():
                 continue
             before = len(failures)
-            code, output = run(["go", "build", "./..."], tree / module)
+            # Only the packages the push changed: a file left out of a commit breaks its own package,
+            # and building every package of a module took 15-30 min at load 50 on the shared 4-CPU box.
+            # Breakage further up the import graph is CI's job (.github/workflows).
+            targets = ["./" + d if d != "." else "." for d in changed_go] if changed_go else []
+            if not targets:
+                continue
+            code, output = run(["go", "build", *targets], tree / module)
             if code:
-                failures.append(f"{module}: go build ./... failed\n{output}")
+                failures.append(f"{module}: go build failed\n{output}")
                 continue
             if changed_go:
                 packages = ["./" + d if d != "." else "." for d in changed_go]
