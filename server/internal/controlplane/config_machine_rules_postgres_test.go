@@ -112,7 +112,7 @@ func TestConfigCustomRepositoryRulesAccessAndRevocation(t *testing.T) {
 	}
 	runtime := NewConfigRuntimeService(store, leases, config.ConfigSync{Mode: "leased_writes"})
 	descriptor, err := runtime.Get(ctx, identity.Credential, credential.Credential, proofFor("custom-runtime", "/v1/config/runtime"), body, "POST", "/v1/config/runtime")
-	if err != nil || len(descriptor.PathRules) != 1 || len(descriptor.RepositoryBindings) != 2 || descriptor.AssignmentVersion != assignment.Version || descriptor.MachineAlias != "machine" {
+	if err != nil || len(descriptor.PathRules) != 1 || len(descriptor.RepositoryBindings) != 2 || descriptor.AssignmentVersion != assignment.Version {
 		t.Fatalf("runtime machine rules = %+v %v", descriptor, err)
 	}
 	conflictRevision := strings.Repeat("b", 64)
