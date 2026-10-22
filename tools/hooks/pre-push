@@ -58,20 +58,38 @@ def checkout_tree(commit):
     return tree
 
 
+def go_key(commit, module, packages):
+    """What a module's build and vet depend on: every Go module's tree, go.work and the vetted packages.
+
+    A rebase that only brings in console, docs or CHECKLIST commits keeps the key, so a push that lost a
+    race is not rebuilt from scratch.
+    """
+    parts = [git("rev-parse", "--verify", "--quiet", f"{commit}:{name}", check=False).strip() for name in (*MODULES, "go.work", "go.work.sum")]
+    return " ".join([module, *parts, *packages])
+
+
 def check(commit, modules, paths):
     failures = []
     common = Path(git("rev-parse", "--path-format=absolute", "--git-common-dir").strip())
+    passed = common / "pb-prepush-passed"
     with open(common / "pb-prepush.lock", "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)  # concurrent pushes from several worktrees take turns
-        tree = checkout_tree(commit)
+        known = set(passed.read_text().splitlines()) if passed.exists() else set()
+        tree = None
         for module in modules:
+            changed_go = sorted({str(Path(p).parent.relative_to(module)) for p in (paths or []) if p.startswith(module + "/") and p.endswith(".go")}) if paths is not None else ["."]
+            key = go_key(commit, module, changed_go)
+            if key in known:
+                print(f"pre-push: {module} unchanged since it last passed; not rebuilt", file=sys.stderr)
+                continue
+            tree = tree or checkout_tree(commit)
             if not (tree / module / "go.mod").exists():
                 continue
+            before = len(failures)
             code, output = run(["go", "build", "./..."], tree / module)
             if code:
                 failures.append(f"{module}: go build ./... failed\n{output}")
                 continue
-            changed_go = sorted({str(Path(p).parent.relative_to(module)) for p in (paths or []) if p.startswith(module + "/") and p.endswith(".go")}) if paths is not None else ["."]
             if changed_go:
                 packages = ["./" + d if d != "." else "." for d in changed_go]
                 code, output = run(["go", "vet", *packages], tree / module)
@@ -82,6 +100,9 @@ def check(commit, modules, paths):
                     code, output = run(["go", "build", "./..."], tree / module, dict(os.environ, GOOS=goos, CGO_ENABLED="0"))
                     if code:
                         failures.append(f"cli: GOOS={goos} go build ./... failed\n{output}")
+            if len(failures) == before and os.environ.get("PB_PREPUSH_CROSS") != "1":
+                with open(passed, "a") as record:
+                    record.write(key + "\n")
     return failures
 
 

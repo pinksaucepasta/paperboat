@@ -71,6 +71,21 @@ class PrePushTest(unittest.TestCase):
         self.assertNotIn("building", result.stderr)
         self.assertEqual(self.push("0" * 40, head).returncode, 0)
 
+    def test_a_rebase_over_non_go_commits_is_not_rebuilt_but_a_go_change_is(self):
+        self.write("cli/a/b.go", "package a\n\nfunc B() int { return A() }\n")
+        first = self.commit("add b")
+        self.assertEqual(self.push(first, self.base).returncode, 0)
+        self.write("README.md", "someone else's docs commit\n")
+        rebased = self.commit("docs")
+        result = self.push(rebased, self.base)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("not rebuilt", result.stderr)
+        self.write("cli/a/c.go", "package a\n\nfunc C() int { return Missing() }\n")
+        broken = self.commit("go change")
+        result = self.push(broken, self.base)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("undefined: Missing", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
