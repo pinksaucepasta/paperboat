@@ -90,6 +90,19 @@ func TestPersonalNetworkCarriesEveryComputerOfALargeAccountOnPostgres(t *testing
 	if peers := claims["peers"].([]any); len(peers) != len(machines)-1 {
 		t.Fatalf("configuration names %d peers, want %d", len(peers), len(machines)-1)
 	}
+	// A wake burst: several configuration requests for one endpoint at once all succeed.
+	errs := make(chan error, 6)
+	for i := range 6 {
+		go func() {
+			_, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: fmt.Sprintf("burst_%d_%s", i, suffix), UserID: account, EndpointID: machines[1]})
+			errs <- err
+		}()
+	}
+	for range 6 {
+		if err := <-errs; err != nil {
+			t.Fatalf("concurrent configuration failed: %v", err)
+		}
+	}
 }
 
 func TestPersonalNetworkAdmissionOnPostgres(t *testing.T) {
