@@ -21,7 +21,7 @@ import (
 	"tailscale.com/tstest/integration"
 )
 
-var tailcatOperationTimeout = flag.Duration("tailcat-operation-timeout", 30*time.Second, "Tailcat stream workload deadline; allow instrumentation overhead under -race")
+var tailcatOperationTimeout = flag.Duration("tailcat-operation-timeout", 90*time.Second, "Tailcat stream workload deadline; allow race-detector and shared CI runner overhead (macOS runners need over 25s)")
 
 // Tests use real WireGuard/netstack UDP and Paperboat's actual QUIC entrypoints.
 // The in-process upstream DERP/STUN fixture binds only remote-host loopback.
