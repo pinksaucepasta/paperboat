@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/binarytarget"
@@ -101,14 +102,57 @@ func (s Source) Verify(path string) error {
 	if err := s.Validate(); err != nil {
 		return err
 	}
-	length, digest, err := digestFile(path)
-	if err != nil {
-		return err
-	}
-	if length != s.Length || digest != s.SHA256 {
-		return ErrInvalid
+	identity, cacheable := fileIdentityOf(path)
+	if !cacheable || !verifiedFiles.matches(path, identity, s) {
+		length, digest, err := digestFile(path)
+		if err != nil {
+			return err
+		}
+		if length != s.Length || digest != s.SHA256 {
+			return ErrInvalid
+		}
+		if after, ok := fileIdentityOf(path); cacheable && ok && after == identity {
+			verifiedFiles.remember(path, identity, s)
+		}
 	}
 	return binarytarget.Validate(path, s.Platform, s.Architecture)
+}
+
+// verifiedFiles remembers files whose bytes matched a source, keyed by their exact on-disk
+// identity (device, inode, size, mtime and ctime), so the updater's 5 s reconciliation does not
+// re-hash two ~100 MB executables on every pass (~13% of a core and ~1,000 wakeups/s idle).
+// Any write, replacement, chmod or chown changes the identity and forces a full hash; forging
+// ctime takes root, which already controls these root-owned files.
+var verifiedFiles = &verificationCache{entries: map[string]verifiedFile{}}
+
+const maxVerifiedFiles = 16
+
+type verifiedFile struct {
+	identity       fileIdentity
+	length         int64
+	sha256         string
+	platform, arch string
+}
+
+type verificationCache struct {
+	mu      sync.Mutex
+	entries map[string]verifiedFile
+}
+
+func (c *verificationCache) matches(path string, identity fileIdentity, s Source) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entry, ok := c.entries[path]
+	return ok && entry == verifiedFile{identity, s.Length, s.SHA256, s.Platform, s.Architecture}
+}
+
+func (c *verificationCache) remember(path string, identity fileIdentity, s Source) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, ok := c.entries[path]; !ok && len(c.entries) >= maxVerifiedFiles {
+		clear(c.entries)
+	}
+	c.entries[path] = verifiedFile{identity, s.Length, s.SHA256, s.Platform, s.Architecture}
 }
 
 func digestFile(path string) (length int64, digest string, resultErr error) {
