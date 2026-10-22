@@ -153,7 +153,9 @@ func (a *Authority) ApplyRelayGrants(ctx context.Context, tokens []string) (resu
 			grants = nil
 			return ErrAuthority
 		}
-		if len(g.Peers) != len(cfg.Peers) {
+		// A grant names at most a bounded subset of this endpoint's peers (the relay's per-grant
+		// bound); every peer it names must be a configured peer with exactly its configured scopes.
+		if len(g.Peers) > len(cfg.Peers) {
 			next = nil
 			grants = nil
 			return ErrAuthority
@@ -170,19 +172,21 @@ func (a *Authority) ApplyRelayGrants(ctx context.Context, tokens []string) (resu
 			seenControl[peerKey] = true
 			controlSet[peer] = true
 		}
-		for i, p := range g.Peers {
-			if p.WireGuardPublicKey != cfg.Peers[i].Identity.WireGuardPublicKey {
-				next = nil
-				grants = nil
-				return ErrAuthority
-			}
-			expected, _ := json.Marshal(cfg.Peers[i].Scopes)
+		configured := make(map[string]string, len(cfg.Peers))
+		for _, peer := range cfg.Peers {
+			scopes, _ := json.Marshal(peer.Scopes)
+			configured[peer.Identity.WireGuardPublicKey] = string(scopes)
+		}
+		seenPeer := make(map[string]bool, len(g.Peers))
+		for _, p := range g.Peers {
+			expected, ok := configured[p.WireGuardPublicKey]
 			actual, _ := json.Marshal(p.Scopes)
-			if string(expected) != string(actual) {
+			if !ok || seenPeer[p.WireGuardPublicKey] || expected != string(actual) {
 				next = nil
 				grants = nil
 				return ErrAuthority
 			}
+			seenPeer[p.WireGuardPublicKey] = true
 		}
 		next[g.NodeID] = token
 		grants[g.NodeID] = g
