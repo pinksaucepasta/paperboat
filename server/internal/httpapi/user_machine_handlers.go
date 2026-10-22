@@ -325,6 +325,9 @@ func machinesList(service *usermachines.Service) http.HandlerFunc {
 			return
 		}
 		items, total, err := service.ListInventory(personalWorkspaceContext(r.Context()), p.User.ID, usermachines.InventoryOptions{Limit: query.Limit, Offset: query.Offset, Q: query.Q, State: query.State, Owner: query.Owner})
+		if expectedHTTPErrorOnly(err, context.Canceled) {
+			return // the caller gave up (daemons wait 2 s); nobody reads a reply and it is not a server fault
+		}
 		if err != nil {
 			writeError(w, r, 500, "internal_error", "Unable to list machines.", err)
 			return

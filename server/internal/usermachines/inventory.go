@@ -38,7 +38,7 @@ func (s *Service) ListInventory(ctx context.Context, account string, opts Invent
  AND (m.user_id=$1 OR m.owner_team_id IN (SELECT tm.team_id FROM team_members tm WHERE tm.account_id=$1 AND tm.active)
   OR m.id IN (SELECT b.resource_id FROM team_members tm JOIN team_resource_bindings b ON b.team_id=tm.team_id AND b.resource_kind='machine' WHERE tm.account_id=$1 AND tm.active))
  AND (
- (NOT $2::boolean AND (machine_management_allowed($1,m.id) OR EXISTS(SELECT 1 FROM unnest(ARRAY['terminal','exec','managed_ssh','files','preview_manage','tunnel_manage']) cap WHERE machine_capability_allowed($1,m.id,cap))))
+ (NOT $2::boolean AND ((m.owner_team_id IS NULL AND m.user_id=$1) OR machine_management_allowed($1,m.id) OR EXISTS(SELECT 1 FROM unnest(ARRAY['terminal','exec','managed_ssh','files','preview_manage','tunnel_manage']) cap WHERE machine_capability_allowed($1,m.id,cap))))
  OR ($2::boolean AND $3::text IS NULL AND m.user_id=$1 AND m.owner_team_id IS NULL)
  OR ($2::boolean AND $3::text IS NOT NULL AND EXISTS(SELECT 1 FROM teams t JOIN team_members member USING(team_id) WHERE t.team_id=$3 AND t.deleted_at IS NULL AND NOT t.suspended AND member.account_id=$1 AND member.active)
  AND ((m.owner_team_id=$3 AND machine_management_allowed($1,m.id)) OR EXISTS(SELECT 1 FROM unnest(ARRAY['terminal','exec','managed_ssh','files','preview_manage','tunnel_manage']) cap WHERE team_machine_capability_allowed($1,$3,m.id,cap)))))
@@ -46,7 +46,9 @@ func (s *Service) ListInventory(ctx context.Context, account string, opts Invent
  AND ($5='' OR m.state=$5)
  AND ($6='' OR ($6='mine' AND m.user_id=$1 AND m.owner_team_id IS NULL) OR ($6='shared' AND (m.user_id<>$1 OR m.owner_team_id IS NOT NULL)) OR m.user_id=$6)`
 	args := []any{account, scoped, teamID, opts.Q, opts.State, opts.Owner}
-	// One pass computes the page and the total; a page past the end has no row to carry the total, so count then.
+	// One pass computes the page and the total; only a page past the end (offset > 0, no rows) needs a count.
+	// The account's own personal machines short-circuit the access functions with their first branch (own,
+	// personal, not deleted), which is what they would return: the functions cost ~1 ms per machine under load.
 	total := -1
 	rows, err := s.db.SQL().QueryContext(ctx, "SELECT m.id,count(*) OVER ()"+predicate+" ORDER BY lower(m.alias),m.id LIMIT $7 OFFSET $8", append(args, opts.Limit, opts.Offset)...)
 	if err != nil {
@@ -64,7 +66,9 @@ func (s *Service) ListInventory(ctx context.Context, account string, opts Invent
 	if err != nil {
 		return nil, 0, err
 	}
-	if total < 0 {
+	if total < 0 && opts.Offset == 0 {
+		total = 0
+	} else if total < 0 {
 		if err := s.db.SQL().QueryRowContext(ctx, "SELECT count(*)"+predicate, args...).Scan(&total); err != nil {
 			return nil, 0, err
 		}

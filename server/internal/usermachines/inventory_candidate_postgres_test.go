@@ -2,6 +2,7 @@ package usermachines
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -67,6 +68,10 @@ configured_capabilities,observed_capabilities) VALUES($1,$2,$1,$3,'linux','amd64
 	machine("team_picked", owner, team, "offline")
 	machine("team_none", member, team, "online")
 	machine("other_team", owner, other, "online")
+	// Shortcut edges: a revoked own machine, and a machine owned by a suspended team, must get exactly what the
+	// full access functions answer.
+	exec(`UPDATE paperboat.user_machines SET revoked_at=now() WHERE id=$1`, m("own_revoked"))
+	exec(`UPDATE paperboat.teams SET suspended=true,suspended_at=now(),suspended_by=$2 WHERE team_id=$1`, other, owner)
 	for _, id := range []string{m("team_all"), m("team_picked"), m("team_none"), m("shared")} {
 		exec(`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account,active,generation)
 SELECT $1,'machine',id,user_id,true,1 FROM paperboat.user_machines WHERE id=$2`, team, id)
@@ -97,6 +102,22 @@ SELECT $1,'machine',id,user_id,true,1 FROM paperboat.user_machines WHERE id=$2`,
 		}
 		return ids
 	}
+	// The access description as the functions alone give it (all workspaces, or Personal when personal is set).
+	describedAccess := func(actor, machine string, personal bool) (bool, []string) {
+		var manage bool
+		var raw []byte
+		if err := store.SQL().QueryRowContext(ctx, `SELECT CASE WHEN $3 THEN m.user_id=$1 AND m.owner_team_id IS NULL ELSE paperboat.machine_management_allowed($1,m.id) END,
+ coalesce(json_agg(c ORDER BY n) FILTER (WHERE CASE WHEN $3 THEN m.user_id=$1 AND m.owner_team_id IS NULL AND paperboat.machine_capability_allowed($1,m.id,c) ELSE paperboat.machine_capability_allowed($1,m.id,c) END),'[]'::json)
+ FROM paperboat.user_machines m CROSS JOIN unnest(ARRAY['terminal','exec','managed_ssh','files','preview_manage','tunnel_manage','private_access']) WITH ORDINALITY AS caps(c,n)
+ WHERE m.id=$2 GROUP BY m.id,m.user_id,m.owner_team_id`, actor, machine, personal).Scan(&manage, &raw); err != nil {
+			t.Fatal(err)
+		}
+		var permissions []string
+		if err := json.Unmarshal(raw, &permissions); err != nil {
+			t.Fatal(err)
+		}
+		return manage, permissions
+	}
 	service := New(store, nil, Policy{}, nil)
 	nonEmpty := 0
 	for _, actor := range users {
@@ -120,6 +141,12 @@ SELECT $1,'machine',id,user_id,true,1 FROM paperboat.user_machines WHERE id=$2`,
 			for _, item := range items {
 				if item.ID[len(item.ID)-len(s):] == s {
 					got = append(got, item.ID)
+					if scope == nil || scope.TeamID == "" {
+						manage, permissions := describedAccess(actor, item.ID, scope != nil)
+						if item.CanManage != manage || !slices.Equal(item.Permissions, permissions) {
+							t.Fatalf("%s in %v: %s described manage=%v %v, access functions say %v %v", actor, scope, item.ID, item.CanManage, item.Permissions, manage, permissions)
+						}
+					}
 				}
 			}
 			slices.Sort(got)
