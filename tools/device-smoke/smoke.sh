@@ -788,6 +788,32 @@ test_reset_lifecycle() {
   done
 }
 
+# Tunnel domains (C089, C100-C105, C123) need a DNS zone and its Cloudflare token: runs only when
+# SMOKE_CF_TOKEN_FILE (a local file, never printed) and SMOKE_CF_ZONE are set. The token is copied to
+# the device for the run and removed with it.
+test_tunnel_domain() {
+  skipped tunnel-domain && return
+  [ -n "${SMOKE_CF_TOKEN_FILE:-}" ] && [ -n "${SMOKE_CF_ZONE:-}" ] || return 0
+  local device id out status t0
+  for device in "${TLIST[@]}"; do
+    id="tunnel-domain:$device"
+    skipped "$id" && continue
+    t0=$(now)
+    if ! stage_terminal_fixtures "$device"; then
+      record "$id" FAIL 0 "could not stage the device fixture"
+      continue
+    fi
+    on "$device" "umask 077; cat > /tmp/$RUN_ID/cf-token" < "$SMOKE_CF_TOKEN_FILE"
+    out=$(on "$device" "python3 /tmp/$RUN_ID/tunnel_domain.py --cloudflare-token-file /tmp/$RUN_ID/cf-token --zone $SMOKE_CF_ZONE" 2>&1); status=$?
+    on "$device" "rm -f /tmp/$RUN_ID/cf-token" >/dev/null 2>&1
+    if [ "$status" = 0 ] && python3 -c 'import json,sys;r=json.loads(sys.argv[1].strip().splitlines()[-1]);assert r["check"]=="tunnel-domain" and r["status"]=="PASS" and r["domain_add_list_instructions_verify_remove"] and r["ephemeral_start_stop"] and r["served_over_https"] and r["enrollment_preserved"]' "$out" 2>/dev/null; then
+      record "$id" PASS $(( $(now)-t0 )) "C089 C100-C105 C123: domain add/list/instructions/verify/serve/remove, ephemeral start/stop"
+    else
+      record_command_failure "$id" $(( $(now)-t0 )) "$out"
+    fi
+  done
+}
+
 test_device_application() {
   local group=$1 script=$2 flags=${3:-}
   skipped "$group" && return
@@ -938,6 +964,7 @@ test_application_pairs preview-access preview_access.py
 test_device_application team-lifecycle team_lifecycle.py
 test_device_application team-roles team_lifecycle.py --roles
 test_device_application tunnel-manage tunnel_manage.py
+test_tunnel_domain
 test_device_application config-sync config_sync.py
 test_device_application config-survival config_survival.py
 test_reset_lifecycle
