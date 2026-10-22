@@ -54,9 +54,13 @@ VALUES($1,'preview',$2,$3,$4,$5,'lease',$1)`, p.LeaseID, p.AccountID, team, p.Ag
 }
 
 // liveEndpoint is the SQL predicate for an endpoint that should be served now. A preview is live
-// while its lease is active and unexpired.
-const liveEndpoint = `e.desired_state='active' AND (e.kind<>'preview' OR EXISTS(SELECT 1 FROM preview_leases p
-WHERE p.id=e.preview_lease_id AND p.terminal_state='active' AND p.lease_deadline>now()))`
+// while its lease is active and unexpired, and only while it does not run on its own per-preview
+// carrier: an agent that kept a preview on the old path (its edges did not all serve endpoints
+// yet) must not also get an endpoint route for the same hostname on an edge.
+const liveEndpoint = `e.desired_state='active' AND (e.kind<>'preview' OR (EXISTS(SELECT 1 FROM preview_leases p
+WHERE p.id=e.preview_lease_id AND p.terminal_state='active' AND p.lease_deadline>now())
+AND NOT EXISTS(SELECT 1 FROM preview_lease_carrier_attachments la WHERE la.preview_id=e.preview_lease_id
+AND la.account_id=e.account_id AND la.state NOT IN ('failed','released'))))`
 
 // ReconcileAgentTx makes the agent's assignments match its live endpoints times the runtime
 // carriers it holds that can serve endpoints. A changed carrier session or edge epoch fences the

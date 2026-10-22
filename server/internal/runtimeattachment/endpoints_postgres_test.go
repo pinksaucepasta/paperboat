@@ -233,6 +233,24 @@ VALUES($1,$2,$3,$3,$4,'owner_session_endpoint','foreground','http','127.0.0.1:30
 	if got := assignments(); got[node] != "active/true" {
 		t.Fatalf("renewal reset a ready assignment: %v", got)
 	}
+	// A preview that runs on its own per-preview carrier (its agent chose the old path) never also
+	// gets an endpoint route for the same hostname.
+	// The fixture row stands for a live attachment; its ownership triggers and foreign keys are
+	// not what this test is about.
+	if err := database.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		if _, err := tx.Exec(ctx, `SET LOCAL session_replication_role=replica`); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `INSERT INTO preview_lease_carrier_attachments(account_id,preview_id,operation_id,idempotency_key,request_id,correlation_id,request_hash,owner_machine_id,owner_session_id,host_id,edge_node_id,machine_identity_public_key,machine_identity_thumbprint,lease_generation,tunnel_id,connector_id,connector_session_id,process_generation,config_generation,route_id,route_generation,config_content_hash,edge_endpoints,expires_at,edge_process_epoch,edge_carrier_server_spki_sha256,edge_carrier_server_certificate_chain_pem)
+VALUES($1,$2,'operation_legacy','operation_legacy','request_legacy','correlation_legacy',decode(repeat('ab',32),'hex'),$3,'owner_session_endpoint',$3,$4,$5,'sha256:'||repeat('A',43),1,'tunnel_legacy','connector_legacy','session_legacy',1,1,'route_legacy',1,'sha256:'||repeat('a',64),ARRAY['h2://edge.example.test:1','h3://edge.example.test:2'],now()+interval '5 minutes','epoch_endpoint','sha256:'||repeat('1',64),'fixture')`, account, lease, machine, node, key)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if values, err := service.Pull(ctx, edge, capable); err != nil || len(values) != 1 {
+		t.Fatalf("preview on its own carrier also got an endpoint route: %d admissions, %v", len(values), err)
+	}
+	exec(`DELETE FROM preview_lease_carrier_attachments WHERE preview_id=$1`, lease)
 	// The lease ends: the route leaves the edge snapshot at once and the next reconcile removes it.
 	exec(`UPDATE preview_leases SET terminal_state='stopped',stopped_at=now() WHERE id=$1`, lease)
 	if values, err := service.Pull(ctx, edge, capable); err != nil || len(values) != 1 {
