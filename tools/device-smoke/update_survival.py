@@ -72,6 +72,7 @@ def main():
     parser.add_argument('target')
     parser.add_argument('peer')
     parser.add_argument('--mib', type=int, default=40, help='size of each of the two transferred files')
+    parser.add_argument('--transfer-only', action='store_true', help='skip the preview and tunnel checks')
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument('--approve', action='store_true')
     mode.add_argument('--from', dest='source')
@@ -92,12 +93,13 @@ def main():
         threading.Thread(target=server.serve_forever, daemon=True).start()
         port = server.server_port
         try:
-            lease = invoke(PB, 'preview', str(port), '--background', '--ttl', '40m', '--json', timeout=PREVIEW_COMMAND_TIMEOUT)
-            preview_id, preview_url = lease['id'], receipt_value(lease, 'endpoint')
-            created = tunnel('create', name, '--port', str(port), '--duration', '40m', '--wait', '--timeout', '90s')
-            tunnel_id, tunnel_url = created['tunnel']['id'], created['tunnel']['stable_endpoint']
-            wait_for(lambda: marker in body(preview_url), 'the preview to serve', 120)
-            wait_for(lambda: marker in body(tunnel_url), 'the tunnel to serve', 120)
+            if not args.transfer_only:
+                lease = invoke(PB, 'preview', str(port), '--background', '--ttl', '40m', '--json', timeout=PREVIEW_COMMAND_TIMEOUT)
+                preview_id, preview_url = lease['id'], receipt_value(lease, 'endpoint')
+                created = tunnel('create', name, '--port', str(port), '--duration', '40m', '--wait', '--timeout', '90s')
+                tunnel_id, tunnel_url = created['tunnel']['id'], created['tunnel']['stable_endpoint']
+                wait_for(lambda: marker in body(preview_url), 'the preview to serve', 120)
+                wait_for(lambda: marker in body(tunnel_url), 'the tunnel to serve', 120)
             # TARGET creates two random files and starts sending them to PEER; the update restarts TARGET's runtime meanwhile.
             hashes = {}
             send_files = []
@@ -127,17 +129,18 @@ def main():
             if update_result.returncode:
                 raise RuntimeError('update failed rc=%s: %s' % (update_result.returncode, text[-400:]))
             result['update_started'] = True
-            wait_for(lambda: marker in body(preview_url), 'the preview URL to serve again after the update')
-            result['preview_same_url'] = True
-            wait_for(lambda: marker in body(tunnel_url), 'the tunnel URL to serve again after the update')
-            result['tunnel_same_url'] = True
-            def ready_endpoint():
-                try:
-                    return receipt_value(invoke(PB, 'preview', 'status', preview_id, '--json', timeout=30), 'endpoint')
-                except (ValueError, KeyError, RuntimeError):
-                    return None
-            wait_for(lambda: ready_endpoint() == preview_url, 'the preview lease to report ready on the same URL')
-            wait_for(lambda: tunnel('status', tunnel_id).get('overall_code') == 'ready', 'the tunnel to report ready (same stable URL already served)')
+            if not args.transfer_only:
+                wait_for(lambda: marker in body(preview_url), 'the preview URL to serve again after the update')
+                result['preview_same_url'] = True
+                wait_for(lambda: marker in body(tunnel_url), 'the tunnel URL to serve again after the update')
+                result['tunnel_same_url'] = True
+                def ready_endpoint():
+                    try:
+                        return receipt_value(invoke(PB, 'preview', 'status', preview_id, '--json', timeout=30), 'endpoint')
+                    except (ValueError, KeyError, RuntimeError):
+                        return None
+                wait_for(lambda: ready_endpoint() == preview_url, 'the preview lease to report ready on the same URL')
+                wait_for(lambda: tunnel('status', tunnel_id).get('overall_code') == 'ready', 'the tunnel to report ready (same stable URL already served)')
             try:
                 out, errs = sender.communicate(timeout=600)
             except subprocess.TimeoutExpired:
