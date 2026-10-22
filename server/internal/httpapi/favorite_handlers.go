@@ -91,7 +91,7 @@ func writeFavoriteSetError(w http.ResponseWriter, r *http.Request, err error) {
 }
 
 func writeFavoriteWorkspaceError(w http.ResponseWriter, r *http.Request, err error) bool {
-	if expectedHTTPErrorOnly(err, workspace.ErrInvalid) || expectedHTTPErrorOnly(err, workspace.ErrForbidden) {
+	if expectedHTTPErrorOnly(err, workspace.ErrInvalid) || expectedHTTPErrorOnly(err, workspace.ErrForbidden, workspace.ErrSSORequired) {
 		writeWorkspaceError(w, r, err)
 		return true
 	}

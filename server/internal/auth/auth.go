@@ -70,10 +70,12 @@ type WorkOSProfile struct {
 	EmailVerified        bool
 	DisplayName          string
 	AuthenticationMethod string
-	Impersonator         bool
-	SessionID            string
-	RefreshToken         string
-	AccessExpiresAt      time.Time
+	// OrganizationID is the WorkOS organization the user signed in to (SSO).
+	OrganizationID  string
+	Impersonator    bool
+	SessionID       string
+	RefreshToken    string
+	AccessExpiresAt time.Time
 }
 
 type WorkOSVerifier interface {
@@ -167,6 +169,9 @@ func (s *Service) VerifyCallback(ctx context.Context, input CallbackInput) (User
 			return err
 		}
 		user = User{ID: row.ID, WorkOSSubject: row.WorkosSubject, PrimaryEmail: row.PrimaryEmail, EmailVerified: row.EmailVerified, DisplayName: row.DisplayName, Status: row.Status, Role: Role(row.Role), CreatedAt: row.CreatedAt}
+		if err = recordTeamSignInTx(ctx, tx, user.ID, canonical, profile); err != nil {
+			return err
+		}
 		err = q.CreateBrowserSession(ctx, dbsqlc.CreateBrowserSessionParams{ID: sessionID, UserID: user.ID, SessionHash: sessionHash, CsrfHash: csrfHash, ExpiresAt: expiresAt, WorkosSessionID: sql.NullString{String: profile.SessionID, Valid: profile.SessionID != ""}, WorkosSubject: sql.NullString{String: profile.Subject, Valid: true}, WorkosRefreshTokenCiphertext: refreshCiphertext, WorkosAccessExpiresAt: sql.NullTime{Time: profile.AccessExpiresAt, Valid: !profile.AccessExpiresAt.IsZero()}})
 		if err != nil {
 			return err

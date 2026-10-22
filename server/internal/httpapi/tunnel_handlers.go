@@ -442,7 +442,7 @@ func writeTunnelMutation(w http.ResponseWriter, result tunnelv1.MutationResult, 
 }
 
 func writeTunnelError(w http.ResponseWriter, r *http.Request, err error) {
-	if expectedHTTPErrorOnly(err, workspace.ErrForbidden) || expectedHTTPErrorOnly(err, workspace.ErrInvalid) {
+	if expectedHTTPErrorOnly(err, workspace.ErrForbidden, workspace.ErrSSORequired) || expectedHTTPErrorOnly(err, workspace.ErrInvalid) {
 		writeWorkspaceError(w, r, err)
 		return
 	}

@@ -75,6 +75,8 @@ type HTTPStripeClient struct {
 	APIKey    string
 	Client    *http.Client
 	AllowLive bool
+	// AutomaticTax turns on Stripe Tax for new checkouts (config business.stripe_tax).
+	AutomaticTax bool
 }
 
 func (c HTTPStripeClient) CreateCustomer(ctx context.Context, workspaceID, email, key string) (string, error) {
@@ -113,6 +115,7 @@ func (c HTTPStripeClient) CreateSubscriptionCheckout(ctx context.Context, in Str
 		v.Set("payment_method_collection", "always")
 		v.Set("subscription_data[trial_settings][end_behavior][missing_payment_method]", "cancel")
 	}
+	c.businessCheckout(v)
 	var out struct {
 		ID, URL, Customer string
 		Livemode          bool `json:"livemode"`

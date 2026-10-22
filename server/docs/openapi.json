@@ -9352,6 +9352,14 @@
           "joined_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "directory_managed": {
+            "type": "boolean",
+            "description": "The company directory owns this member (role and membership change only there)."
+          },
+          "sso_exempt": {
+            "type": "boolean",
+            "description": "May reach a Require-SSO team without SSO (break-glass)."
           }
         },
         "required": [
@@ -9469,6 +9477,13 @@
             "items": {
               "$ref": "#/components/schemas/TeamMachineGrant"
             }
+          },
+          "sso_required": {
+            "type": "boolean"
+          },
+          "sso_signed_in": {
+            "type": "boolean",
+            "description": "For the viewer: whether their SSO sign-in satisfies the team. Without it the team lists only its name."
           }
         },
         "required": [
@@ -16065,6 +16080,153 @@
           },
           "default_days_until_due": {
             "type": "integer"
+          }
+        }
+      },
+      "TeamIdentityStatus": {
+        "type": "object",
+        "description": "Team SSO and directory sync (PLAN F19), as last read from WorkOS.",
+        "additionalProperties": true,
+        "required": [
+          "eligible",
+          "min_seats",
+          "seats",
+          "organization",
+          "sso",
+          "directory",
+          "can_manage"
+        ],
+        "properties": {
+          "eligible": {
+            "type": "boolean"
+          },
+          "min_seats": {
+            "type": "integer"
+          },
+          "seats": {
+            "type": "integer"
+          },
+          "organization": {
+            "type": "boolean"
+          },
+          "can_manage": {
+            "type": "boolean"
+          },
+          "sso": {
+            "type": "object",
+            "properties": {
+              "connections": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "domains": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "domain": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "required": {
+                "type": "boolean"
+              },
+              "session_seconds": {
+                "type": "integer"
+              },
+              "session_min_seconds": {
+                "type": "integer"
+              },
+              "session_max_seconds": {
+                "type": "integer"
+              },
+              "jit": {
+                "type": "boolean"
+              },
+              "exempt": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "exempt_max": {
+                "type": "integer"
+              }
+            }
+          },
+          "directory": {
+            "type": "object",
+            "properties": {
+              "directory": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "type": "string"
+                      },
+                      "state": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                ]
+              },
+              "users": {
+                "type": "integer"
+              },
+              "groups": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "role": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "mapped_only": {
+                "type": "boolean"
+              },
+              "synced_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "error": {
+                "type": "string"
+              }
+            }
           }
         }
       }
@@ -48503,6 +48665,450 @@
           }
         },
         "description": "By its creator or an owner/admin."
+      }
+    },
+    "/v1/teams/{team_id}/identity": {
+      "get": {
+        "operationId": "team_identity_status",
+        "summary": "Team SSO and directory status",
+        "description": "Owners and admins (security.manage) and auditors (audit.read).",
+        "security": [
+          {
+            "cookieSession": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:read"
+        ],
+        "parameters": [
+          {
+            "name": "team_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/TeamIdentityStatus"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/teams/{team_id}/identity/portal": {
+      "post": {
+        "operationId": "team_identity_portal",
+        "summary": "Open the WorkOS Admin Portal",
+        "description": "Creates the team WorkOS organization on first use and returns a short-lived Admin Portal link. Team needs business.sso_min_seats seats.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:connect"
+        ],
+        "parameters": [
+          {
+            "name": "team_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "url"
+                      ],
+                      "properties": {
+                        "url": {
+                          "type": "string",
+                          "format": "uri"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "intent"
+                ],
+                "properties": {
+                  "intent": {
+                    "type": "string",
+                    "enum": [
+                      "domain_verification",
+                      "sso",
+                      "dsync"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/teams/{team_id}/identity/sso": {
+      "put": {
+        "operationId": "team_identity_sso",
+        "summary": "Require SSO, session length, JIT",
+        "description": "Turning Require SSO on answers 409 sso_review_required with details.members and details.digest until confirm equals that digest.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:connect"
+        ],
+        "parameters": [
+          {
+            "name": "team_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/TeamIdentityStatus"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "required": {
+                    "type": "boolean"
+                  },
+                  "session_seconds": {
+                    "type": "integer"
+                  },
+                  "jit": {
+                    "type": "boolean"
+                  },
+                  "confirm": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/teams/{team_id}/identity/exempt": {
+      "put": {
+        "operationId": "team_identity_exempt",
+        "summary": "Mark a member SSO exempt",
+        "description": "Break-glass members (at most business.sso_exempt_max).",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:connect"
+        ],
+        "parameters": [
+          {
+            "name": "team_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/TeamIdentityStatus"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "account_id",
+                  "exempt"
+                ],
+                "properties": {
+                  "account_id": {
+                    "type": "string"
+                  },
+                  "exempt": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/teams/{team_id}/identity/directory": {
+      "put": {
+        "operationId": "team_identity_directory",
+        "summary": "Directory group roles",
+        "description": "Map directory groups to roles (\"\" removes) and choose whether only mapped groups are provisioned.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:connect"
+        ],
+        "parameters": [
+          {
+            "name": "team_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/TeamIdentityStatus"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "mapped_only": {
+                    "type": "boolean"
+                  },
+                  "group_roles": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string",
+                      "enum": [
+                        "",
+                        "admin",
+                        "billing",
+                        "auditor",
+                        "member"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     }
   }

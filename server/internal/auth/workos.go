@@ -165,6 +165,7 @@ func (v HTTPWorkOSVerifier) authenticate(ctx context.Context, payload map[string
 			Name          string `json:"name"`
 		} `json:"user"`
 		AuthenticationMethod string    `json:"authentication_method"`
+		OrganizationID       string    `json:"organization_id"`
 		Impersonator         *struct{} `json:"impersonator"`
 	}
 	raw, err := io.ReadAll(io.LimitReader(res.Body, (1<<20)+1))
@@ -192,5 +193,5 @@ func (v HTTPWorkOSVerifier) authenticate(ctx context.Context, payload map[string
 	if name == "" {
 		name = strings.TrimSpace(response.User.FirstName + " " + response.User.LastName)
 	}
-	return WorkOSProfile{Subject: subject, Email: response.User.Email, EmailVerified: response.User.EmailVerified, DisplayName: name, AuthenticationMethod: response.AuthenticationMethod, Impersonator: response.Impersonator != nil, SessionID: sessionID, RefreshToken: response.RefreshToken, AccessExpiresAt: tokenExpiry}, nil
+	return WorkOSProfile{Subject: subject, Email: response.User.Email, EmailVerified: response.User.EmailVerified, DisplayName: name, AuthenticationMethod: response.AuthenticationMethod, OrganizationID: response.OrganizationID, Impersonator: response.Impersonator != nil, SessionID: sessionID, RefreshToken: response.RefreshToken, AccessExpiresAt: tokenExpiry}, nil
 }

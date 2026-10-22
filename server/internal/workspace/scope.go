@@ -15,7 +15,17 @@ import (
 var (
 	ErrInvalid   = errors.New("invalid workspace selector")
 	ErrForbidden = errors.New("workspace is unavailable to this account")
+	// ErrSSORequired: the team requires a recent SSO sign-in (PLAN F19-04). It is also an
+	// ErrForbidden and a teams.ErrSSORequired, so every existing caller still refuses.
+	ErrSSORequired error = ssoRequired{}
 )
+
+type ssoRequired struct{}
+
+func (ssoRequired) Error() string { return teams.ErrSSORequired.Error() }
+func (ssoRequired) Is(target error) bool {
+	return target == ErrForbidden || target == teams.ErrSSORequired
+}
 
 var teamSlug = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
 
@@ -89,7 +99,7 @@ func ValidateTx(ctx context.Context, tx *db.Tx, account string, scope Scope) err
 	if !member {
 		return ErrForbidden
 	}
-	return nil
+	return teams.SSOGuardTx(ctx, tx, scope.TeamID, account)
 }
 
 func validScope(scope Scope) bool {

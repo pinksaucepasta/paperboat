@@ -77,6 +77,16 @@ func (s *Service) ExplainPolicy(ctx context.Context, account, ws string, r Polic
 			} else if g != "" && d.Reason != "owner" {
 				d.Allowed, d.Guardrail = false, g
 			}
+			if d.Allowed && sc.w.TeamID != "" {
+				// Require SSO (F19-04) is per member: the same guardrail team_machine_bound_for applies.
+				var ssoOK bool
+				if err := tx.QueryRow(ctx, `SELECT team_member_sso_ok($1,$2)`, sc.w.TeamID, src).Scan(&ssoOK); err != nil {
+					return err
+				}
+				if !ssoOK {
+					d.Allowed, d.Guardrail = false, "team_sso_required"
+				}
+			}
 			out.Decision = &d
 		case r.Dst != "" && r.Action != "":
 			out.WhoCan = limitRows(c.WhoCan(target, r.Action), s.policy.ExplainMaxRows)

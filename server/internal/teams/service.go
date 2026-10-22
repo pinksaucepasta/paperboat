@@ -129,6 +129,11 @@ func (s *Service) mutate(ctx context.Context, account, team, op, kind string, ex
 		if err != nil {
 			return err
 		}
+		if kind != "leave" {
+			if err = SSOGuardTx(ctx, tx, team, account); err != nil {
+				return err
+			}
+		}
 		if err = apply(ctx, tx, t, m); err != nil {
 			return err
 		}
@@ -214,6 +219,9 @@ func (s *Service) Mutate(ctx context.Context, account, team string, r MutationRe
 			if !found || !mayManageMember(actor.Role, target.Role) || !mayGrantRole(actor.Role, r.Role) {
 				return ErrForbidden
 			}
+			if target.DirectoryManaged {
+				return ErrDirectoryManaged
+			}
 			if !Allowed(r.Role, PermissionMembersManage) {
 				if _, err := tx.Exec(ctx, `UPDATE team_invitations SET cancelled_at=now() WHERE team_id=$1 AND created_by=$2 AND accepted_at IS NULL AND cancelled_at IS NULL`, team, r.AccountID); err != nil {
 					return err
@@ -225,10 +233,16 @@ func (s *Service) Mutate(ctx context.Context, account, team string, r MutationRe
 			if !found || !mayManageMember(actor.Role, target.Role) {
 				return ErrForbidden
 			}
+			if target.DirectoryManaged {
+				return ErrDirectoryManaged
+			}
 			return RemoveMemberTx(ctx, tx, team, r.AccountID)
 		case "leave":
 			if actor.Role == "owner" {
 				return ErrForbidden
+			}
+			if actor.DirectoryManaged {
+				return ErrDirectoryManaged
 			}
 			if r.AccountID != "" && r.AccountID != account {
 				return ErrInvalid
@@ -332,6 +346,9 @@ func (s *Service) Invite(ctx context.Context, account, team string, r InviteRequ
 		}
 		if !mayGrantRole(m.Role, r.Role) {
 			return ErrForbidden
+		}
+		if err = SSOGuardTx(ctx, tx, team, account); err != nil {
+			return err
 		}
 		if _, ok := member(t, r.AccountID); ok {
 			return ErrConflict

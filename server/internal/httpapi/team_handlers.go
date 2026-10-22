@@ -134,6 +134,12 @@ func registerTeamRoutes(mux *http.ServeMux, service teamAPI, read, write func(ht
 				writeError(w, r, http.StatusConflict, "invitation_unavailable", "Invitation expired, was cancelled or has already been accepted.")
 			case expectedHTTPErrorOnly(err, teams.ErrInvalid):
 				writeError(w, r, http.StatusBadRequest, "invalid_request", "Check the team action, resource permission and confirmation.")
+			case expectedHTTPErrorOnly(err, teams.ErrSSORequired):
+				writeError(w, r, http.StatusForbidden, "team_sso_required", "This team requires signing in through your company's SSO. Sign in again (pb login, or sign out and in on the console) with your work email.")
+			case expectedHTTPErrorOnly(err, teams.ErrDirectoryManaged):
+				writeError(w, r, http.StatusConflict, "directory_managed", teams.ErrDirectoryManaged.Error())
+			case expectedHTTPErrorOnly(err, teams.ErrDomainNotVerified):
+				writeError(w, r, http.StatusBadRequest, "invitation_domain_not_verified", teams.ErrDomainNotVerified.Error())
 			case expectedHTTPErrorOnly(err, teams.ErrSeatRequired):
 				writeError(w, r, http.StatusConflict, "seat_required", teams.ErrSeatRequired.Error())
 			case expectedHTTPErrorOnly(err, teams.ErrLimit):

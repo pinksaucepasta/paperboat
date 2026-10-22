@@ -42,6 +42,7 @@ func (c HTTPStripeClient) CreateTopupCheckout(ctx context.Context, in StripeTopu
 		suffix[i] = 'a' + hash[i]%26
 	}
 	v.Set("integration_identifier", "paperboat_topup_"+string(suffix))
+	c.businessCheckout(v)
 	var out struct{ ID, URL, Customer string }
 	if err := c.do(ctx, http.MethodPost, "/v1/checkout/sessions", in.IdempotencyKey, v, &out); err != nil {
 		return CheckoutSession{}, err

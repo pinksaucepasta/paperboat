@@ -43,6 +43,10 @@ type Member struct {
 	MembershipGeneration uint64    `json:"membership_generation"`
 	Role                 string    `json:"role"`
 	Active               bool      `json:"active"`
+	// DirectoryManaged: the company directory owns this member's role and membership.
+	DirectoryManaged bool `json:"directory_managed"`
+	// SSOExempt: may reach a Require-SSO team without SSO (break-glass).
+	SSOExempt bool `json:"sso_exempt"`
 }
 type Grant struct {
 	AccountID    string `json:"account_id"`
@@ -69,6 +73,10 @@ type Team struct {
 	// AllowPrivateAccess: members may reach the ports of machines shared into the team, given a
 	// private_access grant. Off until an owner or admin turns it on.
 	AllowPrivateAccess bool `json:"allow_private_access"`
+	// SSORequired: members reach the team only after a recent SSO sign-in (PLAN F19-04).
+	SSORequired bool `json:"sso_required"`
+	// SSOSignedIn tells the viewer whether their SSO sign-in currently satisfies the team.
+	SSOSignedIn *bool `json:"sso_signed_in,omitempty"`
 	// MachineRequests are machines waiting for (or refused by) an owner or admin.
 	MachineRequests       []MachineAdmission     `json:"machine_requests"`
 	MachineGrants         []MachineGrant         `json:"machine_grants"`

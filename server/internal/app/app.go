@@ -62,6 +62,7 @@ import (
 	"github.com/pinksaucepasta/paperboat-server/internal/selfhost"
 	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
 	syncpkg "github.com/pinksaucepasta/paperboat-server/internal/sync"
+	"github.com/pinksaucepasta/paperboat-server/internal/teamidentity"
 	"github.com/pinksaucepasta/paperboat-server/internal/teaminbox"
 	"github.com/pinksaucepasta/paperboat-server/internal/teams"
 	"github.com/pinksaucepasta/paperboat-server/internal/telemetry"
@@ -222,7 +223,7 @@ func New(opts Options) (*App, error) {
 	deviceAuthService.ConfigureAuthorizationEncryptionKey(opts.Config.Secrets.EncryptionKey)
 	var stripeClient billing.StripeClient
 	if opts.Config.Secrets.StripeAPIKey != "" {
-		stripeClient = billing.HTTPStripeClient{BaseURL: opts.Config.Providers.Stripe.BaseURL, APIKey: opts.Config.Secrets.StripeAPIKey}
+		stripeClient = billing.HTTPStripeClient{BaseURL: opts.Config.Providers.Stripe.BaseURL, APIKey: opts.Config.Secrets.StripeAPIKey, AutomaticTax: opts.Config.Business.StripeTax}
 	}
 	workspaceBilling := billing.NewWorkspaceService(store, stripeClient, opts.Config.Secrets.EncryptionKey, billing.PortalConfigurations{Personal: opts.Config.Billing.PersonalPortalConfigurationID, Team: opts.Config.Billing.TeamPortalConfigurationID})
 	workspaceBilling.ConfigureBusiness(opts.Config.Business)
@@ -789,6 +790,12 @@ func New(opts Options) (*App, error) {
 		priceReader = reader
 	}
 	activityLog := activity.New(store, opts.Config.Business)
+	// Team SSO and directory sync (PLAN F19); without a WorkOS API key the status still reads.
+	var workOSOrganizations teamidentity.WorkOS
+	if opts.Config.Secrets.WorkOSAPIKey != "" {
+		workOSOrganizations = teamidentity.HTTPWorkOS{BaseURL: opts.Config.Providers.WorkOS.BaseURL, APIKey: opts.Config.Secrets.WorkOSAPIKey}
+	}
+	teamIdentity := teamidentity.New(store, workOSOrganizations, opts.Config.Business, strings.TrimRight(opts.Config.HTTP.BrowserLoginOrigin, "/")+"/team", workspaceBilling)
 	router := httpapi.NewRouter(httpapi.Options{
 		ClientUpdatePolicy:        clientupdate.New(store, auditWriter, opts.Config.ReleaseDirectory),
 		SupportReports:            supportService,
@@ -842,6 +849,7 @@ func New(opts Options) (*App, error) {
 		MachineServices:           machineServices,
 		ResourceUsage:             resourceUsageService,
 		Activity:                  activityLog,
+		TeamIdentity:              teamIdentity,
 		NativePrivateAccess:       nativePrivateService,
 		ManagedSSH:                managedSSHService,
 		DiagnosticUploads:         diagnosticUploadService,
@@ -932,6 +940,15 @@ func New(opts Options) (*App, error) {
 				outcome = "canceled"
 			}
 			supportService.Operation(ctx, "worker_team_billing", outcome, "", -1)
+			return ctx.Err()
+		}), progress))
+	}
+	if workOSOrganizations != nil {
+		serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_team_identity", periodicPreviewTunnelWorker(teamIdentity.Interval(), func(ctx context.Context) error {
+			syncContext, cancel := context.WithTimeout(ctx, 2*time.Minute)
+			defer cancel()
+			err := teamIdentity.Sync(syncContext)
+			workers.IterationFailure(ctx, "team_identity_sync", "team_identity_sync_failed", err)
 			return ctx.Err()
 		}), progress))
 	}

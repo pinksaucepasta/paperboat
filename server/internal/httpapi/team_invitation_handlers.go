@@ -76,6 +76,10 @@ func registerTeamInvitationRoutes(mux *http.ServeMux, service teamAPI, read, wri
 			writeError(w, r, 400, "invalid_request", "Provide a valid operation_id.")
 		case errors.Is(err, teams.ErrSuspended):
 			writeError(w, r, 409, "team_suspended", teams.ErrSuspended.Error())
+		case errors.Is(err, teams.ErrSSORequired):
+			writeError(w, r, 403, "team_sso_required", "This team requires signing in through your company's SSO. Sign in again (pb login, or sign out and in on the console) with your work email.")
+		case errors.Is(err, teams.ErrDomainNotVerified):
+			writeError(w, r, 400, "invitation_domain_not_verified", teams.ErrDomainNotVerified.Error())
 		case errors.Is(err, teams.ErrSeatRequired):
 			writeError(w, r, 409, "seat_required", teams.ErrSeatRequired.Error())
 		case errors.Is(err, teams.ErrExpired), errors.Is(err, teams.ErrConflict), errors.Is(err, teams.ErrLimit):

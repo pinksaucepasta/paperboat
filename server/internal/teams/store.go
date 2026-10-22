@@ -45,17 +45,17 @@ func AuditTx(ctx context.Context, tx *db.Tx, account, team, action, operation st
 }
 func ReadTx(ctx context.Context, tx *db.Tx, id string) (Team, error) {
 	out := Team{TeamID: id, Members: []Member{}, Grants: []Grant{}, Machines: []MachineBinding{}, MachineGrants: []MachineGrant{}, MachineRequests: []MachineAdmission{}, TerminalSessionGrants: []TerminalSessionGrant{}}
-	err := tx.QueryRow(ctx, `SELECT approve_new_machines,coalesce((SELECT p.allow_private_access FROM workspace_policies p WHERE p.team_id=$1),false),coalesce(display_name,team_id),coalesce(display_name,team_id),owner_account,generation,deleted_at IS NOT NULL,suspended,CASE WHEN deleted_at IS NOT NULL THEN 'deleted' WHEN suspended THEN 'suspended' ELSE coalesce((SELECT CASE WHEN rotation_required THEN 'rotation_pending' ELSE 'ready' END FROM environment_vault_teams WHERE team_id=$1),'not_initialized') END FROM teams WHERE team_id=$1 FOR UPDATE`, id).Scan(&out.ApproveNewMachines, &out.AllowPrivateAccess, &out.Name, &out.DisplayName, &out.OwnerAccount, &out.Generation, &out.Deleted, &out.Suspended, &out.ENVStatus)
+	err := tx.QueryRow(ctx, `SELECT sso_required,approve_new_machines,coalesce((SELECT p.allow_private_access FROM workspace_policies p WHERE p.team_id=$1),false),coalesce(display_name,team_id),coalesce(display_name,team_id),owner_account,generation,deleted_at IS NOT NULL,suspended,CASE WHEN deleted_at IS NOT NULL THEN 'deleted' WHEN suspended THEN 'suspended' ELSE coalesce((SELECT CASE WHEN rotation_required THEN 'rotation_pending' ELSE 'ready' END FROM environment_vault_teams WHERE team_id=$1),'not_initialized') END FROM teams WHERE team_id=$1 FOR UPDATE`, id).Scan(&out.SSORequired, &out.ApproveNewMachines, &out.AllowPrivateAccess, &out.Name, &out.DisplayName, &out.OwnerAccount, &out.Generation, &out.Deleted, &out.Suspended, &out.ENVStatus)
 	if err != nil {
 		return out, mapTeamReadNotFound(err)
 	}
-	rows, err := tx.Query(ctx, `SELECT m.account_id,m.membership_generation,CASE WHEN m.account_id=$2 THEN 'owner' ELSE m.role END,m.active,u.primary_email,u.display_name,m.joined_at FROM team_members m JOIN users u ON u.id=m.account_id WHERE m.team_id=$1 ORDER BY m.account_id`, id, out.OwnerAccount)
+	rows, err := tx.Query(ctx, `SELECT m.account_id,m.membership_generation,CASE WHEN m.account_id=$2 THEN 'owner' ELSE m.role END,m.active,u.primary_email,u.display_name,m.joined_at,m.directory_user_id IS NOT NULL,m.sso_exempt FROM team_members m JOIN users u ON u.id=m.account_id WHERE m.team_id=$1 ORDER BY m.account_id`, id, out.OwnerAccount)
 	if err != nil {
 		return out, err
 	}
 	for rows.Next() {
 		var m Member
-		if err = rows.Scan(&m.AccountID, &m.MembershipGeneration, &m.Role, &m.Active, &m.Email, &m.DisplayName, &m.JoinedAt); err != nil {
+		if err = rows.Scan(&m.AccountID, &m.MembershipGeneration, &m.Role, &m.Active, &m.Email, &m.DisplayName, &m.JoinedAt, &m.DirectoryManaged, &m.SSOExempt); err != nil {
 			rows.Close()
 			return out, err
 		}
@@ -307,7 +307,7 @@ func (s *Service) Get(ctx context.Context, account, team string) (Team, error) {
 		if _, ok := currentMember(out, account); !ok || out.Deleted {
 			return ErrForbidden
 		}
-		return nil
+		return SSOGuardTx(ctx, tx, team, account)
 	})
 	return out, err
 }
@@ -343,6 +343,18 @@ func (s *Service) List(ctx context.Context, account string) ([]Team, error) {
 			t, err := ReadTx(ctx, tx, id)
 			if err != nil {
 				return err
+			}
+			if t.SSORequired {
+				var ok bool
+				if err = tx.QueryRow(ctx, `SELECT team_member_sso_ok($1,$2)`, id, account).Scan(&ok); err != nil {
+					return err
+				}
+				t.SSOSignedIn = &ok
+				if !ok {
+					// Without a recent SSO sign-in the team shows only that it needs one.
+					t = Team{TeamID: t.TeamID, Name: t.Name, DisplayName: t.DisplayName, Generation: t.Generation, SSORequired: true, SSOSignedIn: &ok,
+						Members: []Member{}, Grants: []Grant{}, Machines: []MachineBinding{}, MachineGrants: []MachineGrant{}, MachineRequests: []MachineAdmission{}, TerminalSessionGrants: []TerminalSessionGrant{}}
+				}
 			}
 			out = append(out, t)
 		}

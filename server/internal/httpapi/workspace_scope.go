@@ -175,6 +175,8 @@ func requireWorkspaceSelection(service *workspace.Service, next http.Handler) ht
 
 func writeWorkspaceError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
+	case expectedHTTPErrorOnly(err, workspace.ErrSSORequired):
+		writeError(w, r, http.StatusForbidden, "team_sso_required", "This team requires signing in through your company's SSO. Sign in again (pb login, or sign out and in on the console) with your work email.")
 	case expectedHTTPErrorOnly(err, workspace.ErrInvalid):
 		writeError(w, r, http.StatusBadRequest, "invalid_workspace", "Choose Personal or one canonical team workspace.")
 	case expectedHTTPErrorOnly(err, workspace.ErrForbidden):

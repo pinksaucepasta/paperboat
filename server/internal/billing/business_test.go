@@ -117,3 +117,16 @@ func TestSendInvoiceOverdueStartsGraceAtDueDate(t *testing.T) {
 		t.Fatalf("subscription=%+v err=%v", s, err)
 	}
 }
+
+func TestCheckoutCollectsTaxIDAndTaxOnlyWithTheSwitch(t *testing.T) {
+	for _, on := range []bool{false, true} {
+		v := url.Values{}
+		HTTPStripeClient{AutomaticTax: on}.businessCheckout(v)
+		if v.Get("tax_id_collection[enabled]") != "true" || v.Get("customer_update[address]") != "auto" {
+			t.Fatalf("tax id collection missing: %v", v)
+		}
+		if (v.Get("automatic_tax[enabled]") == "true") != on {
+			t.Fatalf("automatic tax with switch %v: %v", on, v)
+		}
+	}
+}

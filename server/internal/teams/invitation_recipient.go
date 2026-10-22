@@ -35,6 +35,13 @@ func checkNewInvitation(ctx context.Context, tx *db.Tx, team string, r InviteReq
 			return ErrConflict
 		}
 	}
+	var verifiedDomain bool
+	if err = tx.QueryRow(ctx, `SELECT NOT t.sso_required OR EXISTS(SELECT 1 FROM team_sso_domains d WHERE d.team_id=t.team_id AND d.domain=lower(split_part($2,'@',2)) AND $2<>'') FROM teams t WHERE t.team_id=$1`, team, email).Scan(&verifiedDomain); err != nil {
+		return err
+	}
+	if !verifiedDomain {
+		return ErrDomainNotVerified
+	}
 	if _, err = tx.Exec(ctx, `UPDATE team_invitations SET cancelled_at=now() WHERE team_id=$1 AND expires_at<=now() AND accepted_at IS NULL AND cancelled_at IS NULL`, team); err != nil {
 		return err
 	}

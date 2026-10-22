@@ -48,6 +48,67 @@ The matrix is served by the API at `GET /v1/team-roles`. Change a role with
 In the workspace policy, `role:billing` and `role:auditor` name the people holding those roles;
 `role:member` is every active member, whatever their role.
 
+## Single sign-on (SAML and OIDC)
+
+Teams with at least `business.sso_min_seats` seats (10) can sign their members in through their
+company identity provider: Okta, Microsoft Entra ID, Google Workspace, OneLogin, JumpCloud or any
+SAML 2.0 or OpenID Connect provider. Paperboat uses WorkOS for this; the company's IT admin sets
+it up in the WorkOS Admin Portal, which has a step-by-step guide for every provider. Paperboat
+never sees SAML metadata or provider credentials.
+
+**Set up** (owners and admins, console team **Security**, or `pb team sso setup`):
+
+1. **Verify your domain.** Open the Admin Portal link for domain verification and add the DNS TXT
+   record it shows (e.g. for `example.com`). A domain belongs to one team.
+2. **Connect your identity provider.** Open the SSO link and follow the guide for your provider.
+3. **Sign in through SSO.** From then on, anyone signing in with an email in a verified domain is
+   sent to your provider, from the console and from `pb login` alike. Signing in from the
+   provider's app launcher (IdP-initiated) works too.
+
+**Require SSO.** When turned on, members reach the team (console, API, CLI, API tokens, new
+connections) only after an SSO sign-in within the team's **SSO session length** (default 7 days,
+1–30). Without one, requests get `403 team_sso_required`; the member signs in again with their
+work email. Connections already open keep running. While Require SSO is on, invitations go only
+to addresses in verified domains. Before turning it on, Paperboat lists the members who would lose
+access until they sign in through SSO; you confirm that list.
+
+**Break-glass.** The owner, and up to `business.sso_exempt_max` (5) members marked **SSO exempt**,
+keep access without SSO, so a broken provider never locks the team out; the owner can always turn
+Require SSO off. Each access without SSO is recorded (`team.sso_bypassed`, once a day per person).
+
+**JIT provisioning** (off by default): people with an email in a verified domain who sign in
+through the team's SSO become members automatically (a seat is added).
+
+## Directory sync (SCIM)
+
+Connect your directory from the same Security page (`pb team scim setup`). Paperboat then follows
+it within seconds:
+
+- Active directory users become members. Someone without a Paperboat account gets a seat held
+  for them and becomes a member at their first sign-in with that email.
+- **Group → role:** map directory groups to `admin`, `billing`, `auditor` or `member`
+  (`pb team scim map <group> <role>`). Someone in several mapped groups gets the highest role
+  (admin > billing > auditor > member); everyone else is a member, or is left out when
+  **Only provision mapped groups** is on.
+- Members the directory provisioned are **managed by the directory**: their role and membership
+  change only there (`409 directory_managed` otherwise).
+- **Deprovisioning:** a user deleted or suspended in the directory (or removed from every mapped
+  group, with Only provision mapped groups) is removed from the team exactly like `pb team
+  remove`: their open sessions end at once, their team API tokens stop working and their shared
+  machines leave the team. Their own Paperboat account and personal workspace stay theirs. The
+  owner is never removed by the directory.
+- Seats are added automatically when the directory adds people (a normal seat change).
+- Disconnecting the directory keeps everyone; they become ordinary members.
+
+Every provisioning step is in the audit log with the actor `directory`.
+
+### WorkOS dashboard settings (Paperboat operators)
+
+Done once in the WorkOS dashboard, never by code: SSO and Directory Sync enabled for the
+environment; AuthKit Single Sign-On enabled; Admin Portal domain verification allowed and its
+return URL set to the console's `/team` page; the server's API key may use organizations, Admin
+Portal, SSO, Directory Sync and Events.
+
 ## Audit log
 
 Every workspace has an audit log: console **Activity**, `pb team activity`, and the API

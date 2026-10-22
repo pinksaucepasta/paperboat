@@ -20,6 +20,18 @@ type StripeBusinessClient interface {
 	SetCollection(ctx context.Context, subscriptionID string, in Collection, key string) (Collection, error)
 }
 
+// businessCheckout lets a company enter its tax ID, name and billing address at Checkout (stored
+// on the Stripe customer, printed on invoices) and, with Stripe Tax on, has Stripe compute tax.
+func (c HTTPStripeClient) businessCheckout(v url.Values) {
+	v.Set("tax_id_collection[enabled]", "true")
+	v.Set("customer_update[name]", "auto")
+	v.Set("customer_update[address]", "auto")
+	if c.AutomaticTax {
+		v.Set("automatic_tax[enabled]", "true")
+		v.Set("billing_address_collection", "required")
+	}
+}
+
 // Invoice is one Stripe invoice as the console shows it. Amounts are in the currency's minor unit.
 type Invoice struct {
 	ID          string     `json:"id"`
