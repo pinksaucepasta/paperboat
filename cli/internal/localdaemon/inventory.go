@@ -19,6 +19,11 @@ const (
 	minimumRefreshInterval = time.Second
 )
 
+// FirstRefreshBudget bounds how long a newly started daemon with the default configuration takes to
+// publish its first state: a refresh runs up to three stages (machine list, local reconcile, completion),
+// each with its own defaultRequestTimeout. Until then it reports "starting".
+const FirstRefreshBudget = 3 * defaultRequestTimeout
+
 var ErrInvalidInventoryConfig = errors.New("invalid local daemon inventory configuration")
 
 type MachineSource interface {

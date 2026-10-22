@@ -308,7 +308,7 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 			}
 			// Runtime startup and commit may consume their readiness budget.
 			// Canonical daemon cutover gets its own bounded readiness window.
-			daemonCtx, daemonCancel := context.WithTimeout(ctx, 45*time.Second)
+			daemonCtx, daemonCancel := context.WithTimeout(ctx, daemonBindWindow)
 			err := bindBootstrapDaemon(daemonCtx, material.ControlURL, source.Version)
 			daemonCancel()
 			if err != nil {

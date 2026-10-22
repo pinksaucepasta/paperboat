@@ -4,6 +4,7 @@ package hostruntimecmd
 
 import (
 	"testing"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
 )
@@ -28,5 +29,13 @@ func TestBoundDaemonServesWhenOnlyTheControlPlaneIsUnreachable(t *testing.T) {
 		if got := boundDaemonServing(test.probe, version); got != test.want {
 			t.Errorf("%s: serving=%t, want %t", name, got, test.want)
 		}
+	}
+}
+
+// Pairing must wait at least for the new daemon's first refresh, or a slow control plane makes a
+// successful pair report failure while the daemon still says "starting".
+func TestPairingWaitsForTheDaemonsFirstRefresh(t *testing.T) {
+	if daemonBindWindow < localdaemon.FirstRefreshBudget+20*time.Second {
+		t.Fatalf("bind window %v leaves no room for service start before the daemon's first refresh (%v)", daemonBindWindow, localdaemon.FirstRefreshBudget)
 	}
 }
