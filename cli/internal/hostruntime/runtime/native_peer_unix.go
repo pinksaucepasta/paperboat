@@ -217,13 +217,18 @@ func (s *productionNativePeerService) Start(ctx context.Context) error {
 
 // Approval and transient control failures keep the existing supervisor alive.
 // Invalid identity, protocol, or authorization still fails startup closed.
+// A peer network the server refuses to configure (the account's configuration is too large, or the
+// key generation moved during registration) leaves only peer networking down: the carrier keeps
+// serving exec, terminals and previews through the edge and retries peer networking. Exiting instead
+// stopped every fresh pair on a large account (2026-10-22).
 func transientNativePeerStart(err error) bool {
 	if errors.Is(err, errNativePeerPending) || errors.Is(err, context.DeadlineExceeded) {
 		return true
 	}
 	var response *clientapi.APIError
 	if errors.As(err, &response) {
-		return response.Status == 408 || response.Status == 429 || response.Status >= 500
+		return response.Status == 408 || response.Status == 429 || response.Status >= 500 ||
+			response.Status == 409 && (response.Code == "peer_network_too_large" || response.Code == "peer_network_conflict")
 	}
 	var network net.Error
 	return errors.As(err, &network) && (network.Timeout() || network.Temporary())

@@ -90,6 +90,8 @@ func (e *APIError) PublicCode() string {
 }
 
 var publicAPIMessages = map[string]string{
+	"peer_network_too_large":          "This account has more computers than one peer network configuration can carry, so direct and relayed peer connections are off on this computer; exec, terminals and previews keep working through Paperboat. Remove computers you no longer use (`pb machine list`, then `pb machine revoke`).",
+	"peer_network_conflict":           "This computer's peer network key changed while it was registering. Paperboat retries automatically.",
 	"update_required":                 "This Paperboat version is no longer supported. Run `pb update` to continue.",
 	"access_denied":                   "Access was denied. Sign in with an authorized account.",
 	"authorization_pending":           "Authorization is pending. Complete sign-in in the browser.",
