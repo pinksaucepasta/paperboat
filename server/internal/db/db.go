@@ -265,7 +265,15 @@ func (d *DB) runInTx(ctx context.Context, isolation pgx.TxIsoLevel, fn func(cont
 		return fmt.Errorf("begin tx: %w", err)
 	}
 	wrapped := &Tx{tx: tx, q: dbsqlc.New(tx)}
-	if _, err := wrapped.Exec(ctx, `SET LOCAL search_path TO paperboat`); err != nil {
+	setup := `SET LOCAL search_path TO paperboat`
+	if isolation == pgx.Serializable {
+		// A sequential scan takes a predicate lock on the whole table (PostgreSQL docs, Serializable Isolation), and
+		// the planner picks one for every small table, which most of ours are. Every concurrent write to such a
+		// table then conflicts with the transaction: pairing failed all ten retries against the account's daemons.
+		// Index scans lock only the rows and pages they read.
+		setup += `; SET LOCAL enable_seqscan TO off`
+	}
+	if _, err := wrapped.Exec(ctx, setup); err != nil {
 		if rollbackErr := tx.Rollback(ctx); rollbackErr != nil {
 			return &transactionCleanupFailure{operation: err, rollback: rollbackErr}
 		}
