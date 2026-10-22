@@ -326,7 +326,10 @@ func (r *PlaintextWorkspaceReconciler) Reconcile(ctx context.Context, repository
 				if r.leavesToOtherDirection(resolution) {
 					continue
 				}
-				if !resolution.Valid() || resolution.ExpectedRemoteRevision != remote.Revision {
+				// A path resolution names one disagreement at one remote head, so a stale one waits.
+				// A confirmed force of the whole configuration takes whatever the remote is now:
+				// the head the user saw may already have moved, and waiting for it never ends.
+				if !resolution.Valid() || resolution.Scope != "config" && resolution.ExpectedRemoteRevision != remote.Revision {
 					continue
 				}
 				if resolution.Scope == "config" {

@@ -210,10 +210,22 @@ func TestWorkspaceReconcilerPublishesCleanMergeFromPersistedBase(t *testing.T) {
 		t.Fatalf("isolated baseline = %#v, %v", baseline, err)
 	}
 
+	// A path resolution names one disagreement at one remote head; a stale one is left alone.
 	authority := &testResolutionAuthority{items: []ConflictResolution{{
-		ID: "force-resolution", Path: "config.txt", Scope: "path", Action: "force_pull",
+		ID: "stale-path-resolution", Path: "config.txt", Scope: "path", Action: "force_pull",
 		ConflictRevision:       diagnostics.Conflicts[0].Revision,
-		ExpectedRemoteRevision: prepared.CommitID,
+		ExpectedRemoteRevision: baseRevision,
+	}}}
+	reconciler.resolutions = authority
+	if _, err := reconciler.Reconcile(context.Background(), repositoryRoot, RemoteSnapshot{Revision: prepared.CommitID}); err != nil || len(reconciler.Diagnostics().Conflicts) != 1 || len(authority.acknowledged) != 0 {
+		t.Fatalf("stale path resolution applied: diagnostics = %#v, acknowledgements = %#v, %v", reconciler.Diagnostics(), authority.acknowledged, err)
+	}
+	// A confirmed force of the whole configuration takes the current remote, even when the
+	// repository moved after the status the user saw (pbvm3 lanel-a, 2026-10-23: it was never applied).
+	authority = &testResolutionAuthority{items: []ConflictResolution{{
+		ID: "force-resolution", Path: ".", Scope: "config", Action: "force_pull",
+		ConflictRevision:       diagnostics.Conflicts[0].Revision,
+		ExpectedRemoteRevision: baseRevision,
 	}}}
 	reconciler.resolutions = authority
 	forced, err := reconciler.Reconcile(context.Background(), repositoryRoot, RemoteSnapshot{Revision: prepared.CommitID})
