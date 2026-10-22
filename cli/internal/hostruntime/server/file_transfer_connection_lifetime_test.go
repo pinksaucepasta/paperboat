@@ -40,9 +40,10 @@ func TestAdmittedTransferHTTPConnectionOutlivesCredentialAndRevokesBlockedIO(t *
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	held := make(chan struct{})
+	var holdOnce sync.Once // the transport may retry the held request on a fresh connection
 	application := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-Fixture-Hold") == "1" {
-			close(held)
+			holdOnce.Do(func() { close(held) })
 			<-r.Context().Done()
 			return
 		}
