@@ -1218,6 +1218,40 @@ and in-process); platform risk is only service lifecycle, already covered by the
 `/v1/agent/edges`), the observed-carriers report shape, whether `endpoint_id` goes in the stream header or the first frame,
 and the capability flag name the agent advertises so the server can refuse a CLI that cannot serve endpoints.
 
+### 3b. Performance
+
+One section, two owners: **data plane** (Lane R: `pb` CLI, daemon/hostd/carriers, P2P and relay, edge
+data path) and **API/DB** (Lane Q: server handlers, queries, pagination, retention). Rows: CHECKLIST
+section P. A client loop that costs the server is fixed in the client by Lane R; a slow endpoint by Lane Q.
+
+#### Data plane (Lane R, measured 2026-10-22/23)
+
+| What | Before | After / now | Reference | Check |
+|---|---|---|---|---|
+| Relay DERP-over-QUIC forwarding, per account | ~10 Mbit/s (budget counted datagrams, 4096/s; a dropped fragment wasted its pair) | 20–31 MB/s lossless in-process | Tailscale peer relay ≈ line rate | PR-01 |
+| Peer-relay (UDP) forwarding cap, per account | 4096 pkt/s ≈ 42 Mbit/s | 48 Ki pkt/s ≈ 500 Mbit/s | upstream udprelay: no cap | PR-01 |
+| Edge carrier on UDP-blocked networks | no carrier (immediate EPERM/ENETUNREACH treated as terminal) → exec/ssh 409 | h3 → h2 fallback on any non-authorization failure; h2 preferred 5 min after a fallback | Cloudflare Tunnel: QUIC → HTTP/2 | PR-02 |
+| Idle usage reports per machine | 360 POST + 360 state writes /h | 120 /h | — | PR-03 |
+| Inventory refresh, account with N machines | 1 + 2N (ssh-target, ssh-host-keys) + N (terminal sessions) requests per daemon | 1 + 1 | Tailscale: one streamed netmap | PR-04 |
+| `pb send` round trips per 1 MiB chunk | 2 (HEAD + PATCH) | 1 | scp/rsync: streaming | PR-05 |
+| Edge data carrier, one stream at 50 ms RTT | 38 Mbit/s (window pinned 256 KiB) | pending (4 MiB max window measured 248 Mbit/s; waits for Lane M) | Cloudflare Tunnel / ngrok 100+ Mbit/s | PR-06 |
+| `pb --version` / `pb help` cold start | 33 / 38 ms, 47 MB RSS | — | tailscale CLI ~20 ms | PR-07 |
+| `pb status` / `pb machine list` | 1.16 / 1.18 s (TLS + ~150 KB list at 170 ms RTT) | — | `tailscale status` local ~20 ms | PR-07 |
+| Idle API traffic, one machine | 88–162 MB/h (user daemon 54, worker 24, carrier 10 MB/h) | re-measure after PR-04 ships | Tailscale idle: KB/min | PR-03 |
+| Server load from the fleet | 135 req/s (~3–4 per machine) | re-measure after PR-04 ships | — | PR-03 |
+
+Budgets, one place each: relay byte budgets `relay/derpquic/wire.go` (64 MiB/s per carrier, 128 MiB/s
+per account, 4 MiB burst) and `relay/peerrelay/server.go` (48 Ki pkt/s, 4 Ki burst); carrier fallback
+`connector.preferFallbackFor` (5 min); usage reporting `bandwidth.idleReportInterval` (30 s); device
+budgets (exec latency, send/scp/rsync throughput, small files/s per path type) in
+`tools/device-smoke/perf_budgets.py`, set from the first L/M run of `perf_dataplane.py` and enforced by
+it after that. Open: daemon's 1 s carrier-attachment poll (Lane P), 8 s machine-services poll (needs a
+push topic, server first), live upgrade of an h2 carrier back to QUIC (Lane M's agent carriers).
+
+#### API/DB (Lane Q)
+
+Lane Q adds its budgets and results here.
+
 ## 4. Handoff notes
 
 All open items from the Phase B handoff (2026-10-14) are filed in S0 (smoke suite), F4

@@ -749,6 +749,18 @@ Behaviour that only matters when platforms mix. The three cells are platform **p
 
 ---
 
+## P. Performance (PLAN 3b)
+
+| ID | Scenario | L | M | W | Evidence |
+|---|---|---|---|---|---|
+| PR-01 | Relay forwarding (DERP-over-QUIC and peer relay) is not capped below ~500 Mbit/s per account; budgets count bytes, incomplete fragments stay bounded. | [ ] | [ ] | [ ] | workspace: TestBudgetBoundAndRecovery, BenchmarkRelayForward (relay/derpquic), TestForwardBudgetCarriesFullSizePacketsAtLinkRate (relay/peerrelay) PASS. Device relay throughput waits for the relay rollout and perf_dataplane.py. |
+| PR-02 | On a network that blocks outbound UDP (except 53/443) the edge carrier comes up over HTTP/2 and `pb exec` works. | [ ] | [ ] | [ ] | workspace: TestHTTP3FailureFallsBackOnImmediateUDPRefusal, TestDataCarrierPoolPrefersHTTP2WhileUDPIsRefused PASS (3da9d8bf). Device: tools/device-smoke/udp_blocked.py on a container (waits for Lane A's device build). |
+| PR-03 | An idle machine stays within its control-traffic budget (requests/hour and bytes/hour to the API). | [ ] | [ ] | [ ] | workspace: TestIdleRecorderReportsOnlyForCoverage PASS (7f0b8982). Device measurement (ss deltas per process) after PR-04 ships. |
+| PR-04 | An inventory/completion refresh makes no per-machine request (SSH targets and terminal sessions come from account-wide lists). | [ ] | [ ] | [ ] | workspace: TestAuthenticatedMachineSourceReconcilesSSHAuthority, TestManagedSSHAliasTargetsReconcilesChangedAndRemovedMachines, TestCompletionInventoryListsSessionsInOneCatalogRequest PASS; server f694b86b live in 2026.10.23.8, 49800f7a pending deploy. Device: server-log request count per machine after a build with 42a563c6 + 56447f6a. |
+| PR-05 | `pb send`, managed scp/rsync and `pb exec true` stay within their per-path budgets. | [ ] | [ ] | [ ] | workspace: TestNativeClientResumesLostCommitAndRetainsBatchAcrossOutage counts 1 offset query per failure (7e4fbece). Device: perf_dataplane.py (first run sets perf_budgets.py). |
+| PR-06 | One preview/tunnel stream through the edge sustains ≥150 Mbit/s at 50 ms RTT. | [ ] | [ ] | [ ] | in-process measurement 38 Mbit/s today (window pinned 256 KiB); fix waits for Lane M. |
+| PR-07 | Local `pb` commands start within 50 ms; `pb status` does not wait on a full machine-list download. | [ ] | [ ] | [ ] | measured pbvm2: --version 33 ms, help 38 ms, status 1.16 s. |
+
 ## S2. Marketing site
 
 | ID | Scenario | L | M | W | Evidence |
