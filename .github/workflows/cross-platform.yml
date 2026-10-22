@@ -4,12 +4,19 @@ name: Cross-platform
 # Manual until the first run is triaged; then it runs on every push to main.
 on:
   workflow_dispatch:
+    inputs:
+      packages:
+        description: Packages to test (default all), for example ./internal/hostruntime/hostdproto
+        default: ./...
+      run:
+        description: Only tests matching this regular expression
+        default: ''
 
 permissions:
   contents: read
 
 concurrency:
-  group: cross-platform-${{ github.repository }}-${{ github.event.pull_request.number || github.sha }}
+  group: cross-platform-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || '' }}
   cancel-in-progress: false
 
 jobs:
@@ -41,4 +48,8 @@ jobs:
       # Runs even when vet fails so one run reports every problem.
       - name: Tests with the race detector
         if: ${{ !cancelled() }}
-        run: go test -race -timeout 15m ./...
+        env:
+          # A package list given by hand names cli packages.
+          PACKAGES: ${{ (matrix.module == 'cli' && inputs.packages) || './...' }}
+          RUN: ${{ inputs.run }}
+        run: go test -race -timeout 15m ${RUN:+-run "$RUN"} $PACKAGES
