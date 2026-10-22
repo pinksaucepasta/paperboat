@@ -614,7 +614,7 @@ can cover them later).
 - *Ticket (server, new):* `POST /v1/inspector/browser-ticket {credential_id, browser_public_key_sha256}`
   (browser session + CSRF). The credential must be the caller's, live, and for a preview; the
   ticket is single-use, 30 s, bound to user + preview + the preview's machine
-  (`preview_leases.owner_device_id`), stored in `browser_terminal_tickets` with
+  (`preview_leases.owner_machine_id`), stored in `browser_terminal_tickets` with
   `purpose='inspector'`. Same response shape as the terminal browser-ticket (edge stream URL,
   subprotocols, owner root key) and the same edge route as terminals.
 - *Edge admission (server):* the existing edge control socket redeems it, re-resolves the
@@ -2513,3 +2513,4 @@ Mac-only proofs still open: (1) the user daemon is a LaunchAgent in gui/<uid>: d
 2026-10-22 | Lane N deploy | server 2026.10.22.1 (08cc1630: 215d5bc9 join peer_network wake; no migration), previous 2026.10.21.13 kept; health/ready200, no ERROR. Preview-per-edge recheck and smoke asked of Lane A.
 2026-10-22 | Lane P fresh pair / carrier exit 1 / stuck control plane | b2dacfa5 trust-set cap from MaxTrustedKeys=2048 (peer-endpoint.json was refused over 16 KiB at 92 keys); 2d888c1f daemon re-reads config after pairing; b5ffaa56 server counts only CLI sessions that can refresh + migration 118. Server 2026.10.22.2 live 19:34Z (rollback .22.1); dev-2d888c1f sent to lanes.
 Open: official releases ≤2026.10.22.0 still fail fresh pairs on the test account (68 keys > old ~63) until a release contains b2dacfa5 (Lane U). TestTailcatQUIC fails under -race before and after these commits (not a regression). Lane A: smoke on 2026.10.22.2.
+2026-10-23 | Lane I F17 server | — | — | Lane B FYI: browser inspector ticket (POST /v1/inspector/browser-ticket), JWT class browser_inspector_operation, migration 119; touched browserterminal, inspectaccess, usermachines, mint, httpapi, app. Fixed rotten fixture in TestInspectorAuthorizationPostgres (tunnel endpoint id); it still fails on main at 'mate issue replay' (team grant), unrelated to F17: Lane B please look.

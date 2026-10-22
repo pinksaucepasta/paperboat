@@ -634,6 +634,7 @@ func NewRouter(opts Options) http.Handler {
 			if opts.BrowserTerminal != nil {
 				mux.HandleFunc("POST /v1/terminal-sessions/{session_id}/guest-browser-ticket", terminalGuestBrowserTicket(opts.Machines, opts.Auth, opts.BrowserTerminal, opts.PeerIdentity))
 				mux.Handle("POST /v1/terminal-sessions/{session_id}/browser-ticket", requireAuth(opts.Auth, requireCSRF(opts.Auth, terminalBrowserTicket(opts.BrowserTerminal, opts.PeerIdentity))))
+				mux.Handle("POST /v1/inspector/browser-ticket", requireAuth(opts.Auth, requireCSRF(opts.Auth, inspectorBrowserTicket(opts.BrowserTerminal, opts.PeerIdentity))))
 			}
 			mux.Handle("GET /v1/machines/{machine_id}/terminal-sessions", userMachineAuth("machines:read", userMachineTerminalSessionsList(opts.Machines)))
 			mux.Handle("POST /v1/machines/{machine_id}/terminal-sessions", userMachineAuth("machines:connect", requireCSRF(opts.Auth, userMachineTerminalSessionsCreate(opts.Machines))))

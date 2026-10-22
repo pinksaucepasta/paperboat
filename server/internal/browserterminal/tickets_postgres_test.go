@@ -125,3 +125,77 @@ func TestBrowserTerminalTicketIsSingleUseAndSessionBoundPostgres(t *testing.T) {
 		t.Fatalf("revoked session ticket: %v", err)
 	}
 }
+
+func TestBrowserInspectorTicketIsBoundToItsCredentialPostgres(t *testing.T) {
+	dsn := os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
+	if dsn == "" {
+		t.Skip("set PAPERBOAT_TEST_DATABASE_DSN")
+	}
+	if err := db.ValidateIsolatedTestDSN(dsn, os.Getenv("PAPERBOAT_DATABASE_DSN")); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	store, err := db.Open(config.Database{Driver: "postgres", DSN: dsn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := db.Migrate(ctx, store); err != nil {
+		t.Fatal(err)
+	}
+	suffix := fmt.Sprint(time.Now().UnixNano())
+	userID, browserSessionID, credentialID := "usr_bit_"+suffix, "ses_bit_"+suffix, "credential_bit_"+suffix
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := store.SQL().ExecContext(ctx, q, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exec(`INSERT INTO users (id,workos_subject,primary_email,status) VALUES ($1,$1,$1||'@example.test','active')`, userID)
+	defer store.SQL().ExecContext(ctx, `DELETE FROM users WHERE id=$1`, userID)
+	defer store.SQL().ExecContext(ctx, `DELETE FROM inspector_credentials WHERE credential_id=$1`, credentialID)
+	exec(`INSERT INTO sessions (id,user_id,session_hash,csrf_hash,expires_at) VALUES ($1,$2,$3,$4,now()+interval '1 hour')`, browserSessionID, userID, "session_hash_"+suffix, "csrf_hash_"+suffix)
+	exec(`INSERT INTO inspector_credentials (credential_id,token_hash,account_id,resource_kind,resource_id,route_id,action,resource_generation,route_generation,target_generation,owner_account_id,issued_at,expires_at) VALUES ($1,$2,$3,'preview','prv_x','prv_x','inspect',1,1,1,$3,now(),now()+interval '4 minutes')`, credentialID, []byte(fmt.Sprintf("%-32.32s", suffix)), userID)
+	tickets := TicketStore{DB: store}
+	base := Ticket{UserID: userID, BrowserSessionID: browserSessionID, InspectorCredentialID: credentialID, Origin: "https://dashboard.example.test", Role: RoleInspector, PolicyGeneration: 1, BrowserPublicKeySHA256: testBrowserKeyDigest}
+	issued, err := tickets.Issue(ctx, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An inspector ticket never opens a terminal: the terminal-bound consume
+	// path cannot redeem it.
+	if _, err := tickets.Consume(ctx, issued.Value, issued.Origin, "term_any"); !errors.Is(err, ErrTicketInvalid) {
+		t.Fatalf("inspector ticket redeemed for a terminal: %v", err)
+	}
+	used, err := tickets.ConsumeEdge(ctx, issued.Value, issued.Origin)
+	if err != nil || used.Role != RoleInspector || used.InspectorCredentialID != credentialID || used.TerminalSessionID != "" || used.UserID != userID {
+		t.Fatalf("consumed inspector ticket = %#v, %v", used, err)
+	}
+	if _, err := tickets.ConsumeEdge(ctx, issued.Value, issued.Origin); !errors.Is(err, ErrTicketInvalid) {
+		t.Fatalf("replayed inspector ticket: %v", err)
+	}
+	for name, mutate := range map[string]func(*Ticket){
+		"terminal session too": func(in *Ticket) { in.TerminalSessionID = "term_x" },
+		"no credential":        func(in *Ticket) { in.InspectorCredentialID = "" },
+		"terminal role":        func(in *Ticket) { in.Role = "owner" },
+	} {
+		invalid := base
+		mutate(&invalid)
+		if _, err := tickets.Issue(ctx, invalid); !errors.Is(err, ErrTicketInvalid) {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+	// The database enforces the same shape.
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO browser_terminal_tickets (token_hash,user_id,browser_session_id,origin,role,policy_generation,browser_public_key_sha256,expires_at) VALUES ($1,$2,$3,'https://dashboard.example.test','inspector',1,$4,now()+interval '30 seconds')`, make([]byte, 32), userID, browserSessionID, testBrowserKeyDigest); err == nil {
+		t.Fatal("database accepted an inspector ticket without a credential")
+	}
+	// Revoking (deleting) the credential removes its tickets.
+	second, err := tickets.Issue(ctx, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec(`DELETE FROM inspector_credentials WHERE credential_id=$1`, credentialID)
+	if _, err := tickets.ConsumeEdge(ctx, second.Value, second.Origin); !errors.Is(err, ErrTicketInvalid) {
+		t.Fatalf("ticket outlived its credential: %v", err)
+	}
+}

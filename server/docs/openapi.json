@@ -46737,6 +46737,137 @@
           }
         ]
       }
+    },
+    "/v1/inspector/browser-ticket": {
+      "post": {
+        "summary": "Issue one-use encrypted browser inspector ticket",
+        "description": "Authenticated, CSRF-protected (F17). Opens the console's end-to-end encrypted inspector channel to a preview's machine for one of the caller's own live inspector credentials (preview only). The ticket is single-use, lasts 30 seconds and is bound to the user, browser login, origin, browser key and credential. Captures never pass through the server; every request on the channel carries its own inspector grant, re-verified by the machine.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "credential_id",
+                  "browser_public_key_sha256"
+                ],
+                "properties": {
+                  "credential_id": {
+                    "type": "string",
+                    "description": "An inspector credential issued to the caller by POST /v1/inspector/credentials."
+                  },
+                  "browser_public_key_sha256": {
+                    "type": "string",
+                    "description": "Canonical unpadded base64url SHA-256 digest of ephemeral browser TLS public-key SPKI.",
+                    "minLength": 43,
+                    "maxLength": 43
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "One-use ticket and opaque WSS stream URL for the inspector channel.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "stream_url",
+                        "subprotocols",
+                        "expires_at",
+                        "role",
+                        "machine_id",
+                        "owner_account_id",
+                        "root_key_id",
+                        "root_public_key",
+                        "root_fingerprint"
+                      ],
+                      "properties": {
+                        "stream_url": {
+                          "type": "string"
+                        },
+                        "subprotocols": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "expires_at": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "role": {
+                          "type": "string",
+                          "enum": [
+                            "inspector"
+                          ]
+                        },
+                        "machine_id": {
+                          "type": "string"
+                        },
+                        "owner_account_id": {
+                          "type": "string"
+                        },
+                        "root_key_id": {
+                          "type": "string"
+                        },
+                        "root_public_key": {
+                          "type": "string"
+                        },
+                        "root_fingerprint": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "operationId": "inspector_browser_ticket_issue",
+        "parameters": [
+          {
+            "name": "workspace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 63
+            },
+            "description": "Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field."
+          }
+        ]
+      }
     }
   }
 }

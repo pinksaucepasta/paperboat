@@ -444,3 +444,65 @@ func orZero(v *int64) int64 {
 	}
 	return *v
 }
+
+// BrowserCredential is the current authority behind one inspector credential
+// presented by its own holder, for a console inspector channel to the
+// preview's machine.
+type BrowserCredential struct {
+	Decision
+	Action      string
+	MachineID   string
+	WorkspaceID string
+}
+
+// ResolveBrowserCredential re-resolves an inspector credential by ID for its
+// holder. Only previews are supported. Every drift fails closed exactly as
+// Authorize does; the daemon still verifies each request's own grant.
+func (s *Service) ResolveBrowserCredential(ctx context.Context, account, credentialID string) (BrowserCredential, error) {
+	if !validID(account) || !validID(credentialID) {
+		return BrowserCredential{}, ErrInvalid
+	}
+	now := s.now()
+	var out BrowserCredential
+	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		var kind, id, action, owner string
+		var team *string
+		var resourceGen int64
+		var tg, mg, bg, gg *int64
+		var expiry time.Time
+		if e := tx.QueryRow(ctx, `SELECT resource_kind,resource_id,action,resource_generation,owner_account_id,team_id,team_generation,membership_generation,binding_generation,grant_generation,expires_at FROM inspector_credentials WHERE credential_id=$1 AND account_id=$2 AND revoked_at IS NULL`, credentialID, account).Scan(&kind, &id, &action, &resourceGen, &owner, &team, &tg, &mg, &bg, &gg, &expiry); e != nil {
+			return mapMissing(e)
+		}
+		if kind != "preview" || !expiry.After(now) {
+			return ErrNotAuthorized
+		}
+		a, e := resolveResource(ctx, tx, kind, id, id, now)
+		if e != nil {
+			return e
+		}
+		if a.owner != owner || a.resourceGeneration != uint64(resourceGen) {
+			return ErrNotAuthorized
+		}
+		if team != nil {
+			if err := teams.Lock(ctx, tx); err != nil {
+				return err
+			}
+			d, e := teams.AuthorizeTx(ctx, tx, account, *team, a.kind, a.id, action)
+			if e != nil {
+				return normalizeAuthorizationError(e)
+			}
+			if d.TeamGeneration != uint64(orZero(tg)) || d.MembershipGeneration != uint64(orZero(mg)) || d.BindingGeneration != uint64(orZero(bg)) || d.GrantGeneration != uint64(orZero(gg)) {
+				return ErrNotAuthorized
+			}
+		} else if _, e := resolvePrincipal(ctx, tx, a, account, action); e != nil {
+			return normalizeAuthorizationError(e)
+		}
+		if e := tx.QueryRow(ctx, `SELECT p.owner_machine_id,coalesce(p.owner_team_id,'personal') FROM preview_leases p JOIN user_machines m ON m.id=p.owner_machine_id AND m.deleted_at IS NULL AND m.revoked_at IS NULL WHERE p.id=$1`, id).Scan(&out.MachineID, &out.WorkspaceID); e != nil {
+			return mapMissing(e)
+		}
+		out.Decision = Decision{AccountID: account, OwnerAccountID: owner, ResourceKind: kind, ResourceID: id, RouteID: id, ResourceGeneration: a.resourceGeneration, CredentialID: credentialID, IssuedAt: now, ExpiresAt: minTime(expiry, a.expires)}
+		out.Action = action
+		return nil
+	})
+	return out, err
+}

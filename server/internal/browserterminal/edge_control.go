@@ -65,6 +65,14 @@ func (g *Gateway) admitEdge(ctx context.Context, input EdgeControlRequest, nodeI
 		release()
 		return edgeAdmission{}, nil, ErrForbidden
 	}
+	if ticket.Role == RoleInspector {
+		admitted, err := g.admitInspectorEdge(ticket, decision)
+		if err != nil {
+			release()
+			return edgeAdmission{}, nil, err
+		}
+		return admitted, release, nil
+	}
 	snapshotCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	processGeneration, err := g.Authorizer.SnapshotProcess(snapshotCtx, decision)
 	cancel()
@@ -163,7 +171,7 @@ func (g *Gateway) ServeEdgeControl(w http.ResponseWriter, r *http.Request, nodeI
 		Credential        string `json:"credential"`
 		TerminalSessionID string `json:"terminal_session_id"`
 		AttachmentID      string `json:"attachment_id"`
-	}{admission.Credential, admission.Ticket.TerminalSessionID, admission.AttachmentID})
+	}{admission.Credential, edgeHubKey(admission), admission.AttachmentID})
 	if err != nil || connection.Write(r.Context(), websocket.MessageText, response) != nil {
 		return
 	}
@@ -226,4 +234,14 @@ func edgeAdmissionReason(err error) string {
 		return "host_unavailable"
 	}
 	return "internal_unavailable"
+}
+
+// edgeHubKey is the edge's broadcast key for this connection: the terminal
+// session, or the attachment itself for an inspector channel (nothing is
+// broadcast to it).
+func edgeHubKey(a edgeAdmission) string {
+	if a.Ticket.Role == RoleInspector {
+		return a.AttachmentID
+	}
+	return a.Ticket.TerminalSessionID
 }

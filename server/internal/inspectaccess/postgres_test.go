@@ -112,7 +112,7 @@ func TestInspectorAuthorizationPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	exec(`UPDATE paperboat.preview_lease_carrier_attachments SET state='ready',edge_ready=true,origin_ready=true,ready_at=$3 WHERE account_id=$1 AND preview_id=$2`, owner, lease, now)
-	exec(`INSERT INTO paperboat.tunnels(id,account_id,name,desired_state,access_mode,generation,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id,created_at,updated_at) VALUES($1,$2,$1,'active','team',3,$3,$4,'host',$2,$5,$5)`, tunnel, owner, strings.TrimSuffix(host, ".tunnels.example.test"), "https://"+host, now)
+	exec(`INSERT INTO paperboat.tunnels(id,account_id,name,desired_state,access_mode,generation,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id,created_at,updated_at) VALUES($1,$2,$1,'active','team',3,$3,$4,'host',$2,$5,$5)`, tunnel, owner, "endpoint_00000000-0000-4000-8000-"+suffix[len(suffix)-12:], "https://"+host, now)
 	exec(`INSERT INTO paperboat.tunnel_routes(id,tunnel_id,name,protocol,match_type,origin_scheme,origin_address,generation,desired_state,created_by_actor_id,updated_by_actor_id,created_at,updated_at) VALUES($1,$2,'web','http','catch_all','http','127.0.0.1:3000',7,'active',$3,$3,$4,$4)`, route, tunnel, owner, now)
 	exec(`INSERT INTO paperboat.teams(team_id,owner_account,generation) VALUES($1,$2,1)`, team, owner)
 	exec(`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'member',true),($1,$3,1,'member',true),($1,$4,1,'member',true),($1,$5,1,'member',true)`, team, owner, mate, viewer, exm)
@@ -158,6 +158,23 @@ func TestInspectorAuthorizationPostgres(t *testing.T) {
 		t.Fatalf("owner issue tunnel replay: %v", err)
 	}
 
+	// Console inspector channel (F17): a credential resolves only for its own
+	// holder, only for previews, to the preview's machine.
+	ownerBrowser, err := svc.ResolveBrowserCredential(ctx, owner, ownerPreview.CredentialID)
+	if err != nil || ownerBrowser.MachineID != machine || ownerBrowser.WorkspaceID != "personal" || ownerBrowser.Action != "inspect" || ownerBrowser.ResourceGeneration != 7 || ownerBrowser.OwnerAccountID != owner {
+		t.Fatalf("owner browser credential=%+v err=%v", ownerBrowser, err)
+	}
+	if _, err := svc.ResolveBrowserCredential(ctx, stranger, ownerPreview.CredentialID); err != ErrNotAuthorized {
+		t.Fatalf("another user's credential resolved: %v", err)
+	}
+	ownerTunnel, err := issue(owner, "tunnel", tunnel, route, "inspect")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ResolveBrowserCredential(ctx, owner, ownerTunnel.CredentialID); err != ErrNotAuthorized {
+		t.Fatalf("tunnel credential opened a console inspector channel: %v", err)
+	}
+
 	// Authorized teammate holds both actions on both resources.
 	matePreviewReplay, err := issue(mate, "preview", lease, lease, "replay")
 	if err != nil {
@@ -168,6 +185,9 @@ func TestInspectorAuthorizationPostgres(t *testing.T) {
 	}
 	if _, err = issue(mate, "tunnel", tunnel, route, "inspect"); err != nil {
 		t.Fatalf("mate issue tunnel inspect: %v", err)
+	}
+	if mateBrowser, err := svc.ResolveBrowserCredential(ctx, mate, matePreviewReplay.CredentialID); err != nil || mateBrowser.Action != "replay" || mateBrowser.MachineID != machine {
+		t.Fatalf("granted teammate browser credential=%+v err=%v", mateBrowser, err)
 	}
 
 	// View-only teammate and unrelated user are denied without side effects.

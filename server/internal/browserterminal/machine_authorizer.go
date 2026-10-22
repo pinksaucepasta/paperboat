@@ -5,10 +5,14 @@ import (
 	"math"
 	"reflect"
 
+	"github.com/pinksaucepasta/paperboat-server/internal/inspectaccess"
 	"github.com/pinksaucepasta/paperboat-server/internal/usermachines"
 )
 
-type MachineAuthorizer struct{ Service *usermachines.Service }
+type MachineAuthorizer struct {
+	Service   *usermachines.Service
+	Inspector *inspectaccess.Service
+}
 
 func (a MachineAuthorizer) ResolveRole(ctx context.Context, userID, terminalSessionID string) (Decision, error) {
 	if a.Service == nil {

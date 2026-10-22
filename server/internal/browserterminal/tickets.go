@@ -22,6 +22,7 @@ type Ticket struct {
 	UserID                 string
 	BrowserSessionID       string
 	TerminalSessionID      string
+	InspectorCredentialID  string
 	Origin                 string
 	Role                   string
 	PolicyGeneration       int64
@@ -37,7 +38,7 @@ type TicketStore struct{ DB *db.DB }
 // Issue creates a short-lived, single-use admission for an already authorized
 // browser account. The browser's Paperboat session is checked again at redemption.
 func (s TicketStore) Issue(ctx context.Context, in Ticket) (result Ticket, resultErr error) {
-	if s.DB == nil || !in.validPrincipal() || in.TerminalSessionID == "" || in.Origin == "" || in.PolicyGeneration < 1 || in.TeamGeneration < 0 || in.MembershipGeneration < 0 || in.BindingGeneration < 0 || !validRole(in.Role) || !validPublicKeySHA256(in.BrowserPublicKeySHA256) {
+	if s.DB == nil || !in.validPrincipal() || !in.validResource() || in.Origin == "" || in.PolicyGeneration < 1 || in.TeamGeneration < 0 || in.MembershipGeneration < 0 || in.BindingGeneration < 0 || !validRole(in.Role) || !validPublicKeySHA256(in.BrowserPublicKeySHA256) {
 		return Ticket{}, ErrTicketInvalid
 	}
 	secret := make([]byte, 32)
@@ -100,8 +101,8 @@ func (s TicketStore) Issue(ctx context.Context, in Ticket) (result Ticket, resul
 	if pending >= 8 {
 		return Ticket{}, ErrTicketInvalid
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO browser_terminal_tickets (token_hash,user_id,browser_session_id,terminal_session_id,origin,role,policy_generation,team_generation,membership_generation,binding_generation,browser_public_key_sha256,expires_at,guest_session_id)
-		VALUES ($1,nullif($2,''),nullif($3,''),$4,$5,$6,$7,$8,$9,$10,$11,$12,nullif($13,''))`, hash[:], in.UserID, in.BrowserSessionID, in.TerminalSessionID, in.Origin, in.Role, in.PolicyGeneration, in.TeamGeneration, in.MembershipGeneration, in.BindingGeneration, in.BrowserPublicKeySHA256, in.ExpiresAt, in.GuestSessionID); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO browser_terminal_tickets (token_hash,user_id,browser_session_id,terminal_session_id,origin,role,policy_generation,team_generation,membership_generation,binding_generation,browser_public_key_sha256,expires_at,guest_session_id,inspector_credential_id)
+		VALUES ($1,nullif($2,''),nullif($3,''),nullif($4,''),$5,$6,$7,$8,$9,$10,$11,$12,nullif($13,''),nullif($14,''))`, hash[:], in.UserID, in.BrowserSessionID, in.TerminalSessionID, in.Origin, in.Role, in.PolicyGeneration, in.TeamGeneration, in.MembershipGeneration, in.BindingGeneration, in.BrowserPublicKeySHA256, in.ExpiresAt, in.GuestSessionID, in.InspectorCredentialID); err != nil {
 		return Ticket{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -147,7 +148,7 @@ func (s TicketStore) consume(ctx context.Context, value, origin, terminalSession
     SELECT 1 FROM terminal_guest_sessions g JOIN terminal_code_access c ON c.terminal_session_id=g.terminal_session_id
     WHERE g.id=ticket.guest_session_id AND g.terminal_session_id=ticket.terminal_session_id AND g.expires_at>now()
     AND c.enabled AND c.expires_at>now() AND c.generation=g.code_generation AND c.generation=ticket.policy_generation AND c.role=ticket.role)))
-  RETURNING coalesce(ticket.user_id,''),coalesce(ticket.browser_session_id,''),ticket.terminal_session_id,ticket.origin,ticket.role,ticket.policy_generation,ticket.team_generation,ticket.membership_generation,ticket.binding_generation,ticket.browser_public_key_sha256,ticket.expires_at,coalesce(ticket.guest_session_id,'')`, hash[:], origin, terminalSessionID).Scan(&out.UserID, &out.BrowserSessionID, &out.TerminalSessionID, &out.Origin, &out.Role, &out.PolicyGeneration, &out.TeamGeneration, &out.MembershipGeneration, &out.BindingGeneration, &out.BrowserPublicKeySHA256, &out.ExpiresAt, &out.GuestSessionID)
+  RETURNING coalesce(ticket.user_id,''),coalesce(ticket.browser_session_id,''),coalesce(ticket.terminal_session_id,''),coalesce(ticket.inspector_credential_id,''),ticket.origin,ticket.role,ticket.policy_generation,ticket.team_generation,ticket.membership_generation,ticket.binding_generation,ticket.browser_public_key_sha256,ticket.expires_at,coalesce(ticket.guest_session_id,'')`, hash[:], origin, terminalSessionID).Scan(&out.UserID, &out.BrowserSessionID, &out.TerminalSessionID, &out.InspectorCredentialID, &out.Origin, &out.Role, &out.PolicyGeneration, &out.TeamGeneration, &out.MembershipGeneration, &out.BindingGeneration, &out.BrowserPublicKeySHA256, &out.ExpiresAt, &out.GuestSessionID)
 	if err == sql.ErrNoRows {
 		return Ticket{}, ErrTicketInvalid
 	}
@@ -187,7 +188,18 @@ func (s TicketStore) SessionActive(ctx context.Context, userID, browserSessionID
 	return active, err
 }
 
-func validRole(role string) bool { return role == "owner" || role == "viewer" || role == "interactive" }
+func validRole(role string) bool {
+	return role == "owner" || role == "viewer" || role == "interactive" || role == RoleInspector
+}
+
+// validResource: a terminal ticket names its terminal session; an inspector
+// ticket names one inspector credential and has an account principal.
+func (t Ticket) validResource() bool {
+	if t.Role == RoleInspector {
+		return t.TerminalSessionID == "" && t.InspectorCredentialID != "" && t.GuestSessionID == ""
+	}
+	return t.TerminalSessionID != "" && t.InspectorCredentialID == ""
+}
 
 func validPublicKeySHA256(value string) bool {
 	decoded, err := base64.RawURLEncoding.Strict().DecodeString(value)

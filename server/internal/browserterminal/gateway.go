@@ -18,22 +18,23 @@ var ErrHostUnavailable = errors.New("browser terminal host is unavailable")
 var ErrBrowserKeyInvalid = errors.New("browser terminal key digest is invalid")
 
 type Decision struct {
-	GuestSessionID       string
-	UserID               string
-	OwnerAccountID       string
-	WorkspaceID          string
-	TerminalSessionID    string
-	MachineID            string
-	EnvironmentID        string
-	HostWSSURL           string
-	EdgeNodeID           string
-	EdgeProcessEpoch     string
-	EdgeEndpointHost     string
-	Role                 string
-	PolicyGeneration     int64
-	TeamGeneration       int64
-	MembershipGeneration int64
-	BindingGeneration    int64
+	GuestSessionID        string
+	UserID                string
+	OwnerAccountID        string
+	WorkspaceID           string
+	TerminalSessionID     string
+	InspectorCredentialID string
+	MachineID             string
+	EnvironmentID         string
+	HostWSSURL            string
+	EdgeNodeID            string
+	EdgeProcessEpoch      string
+	EdgeEndpointHost      string
+	Role                  string
+	PolicyGeneration      int64
+	TeamGeneration        int64
+	MembershipGeneration  int64
+	BindingGeneration     int64
 }
 
 // Authorizer owns current browser policy and the host's observed PTY process
@@ -70,6 +71,9 @@ func (g *Gateway) IssueGuest(ctx context.Context, guestID, terminalSessionID, or
 }
 func (g *Gateway) issue(ctx context.Context, in Ticket) (Ticket, string, Decision, error) {
 	userID, terminalSessionID, origin, browserPublicKeySHA256 := in.subjectID(), in.TerminalSessionID, in.Origin, in.BrowserPublicKeySHA256
+	if !in.validResource() {
+		return Ticket{}, "", Decision{}, ErrForbidden
+	}
 	if !validPublicKeySHA256(browserPublicKeySHA256) {
 		return Ticket{}, "", Decision{}, ErrBrowserKeyInvalid
 	}
@@ -83,7 +87,7 @@ func (g *Gateway) issue(ctx context.Context, in Ticket) (Ticket, string, Decisio
 		}
 		return Ticket{}, "", Decision{}, unavailableCause(err)
 	}
-	if !validDecision(decision, userID, terminalSessionID) {
+	if !validDecision(decision, userID, terminalSessionID) || decision.InspectorCredentialID != in.InspectorCredentialID {
 		return Ticket{}, "", Decision{}, ErrForbidden
 	}
 	if decision.HostWSSURL == "" {
@@ -97,7 +101,7 @@ func (g *Gateway) issue(ctx context.Context, in Ticket) (Ticket, string, Decisio
 		return Ticket{}, "", Decision{}, ErrHostUnavailable
 	}
 	streamURL := (&url.URL{Scheme: "wss", Host: decision.EdgeEndpointHost, Path: "/v1/browser-terminal/" + runtimeURL.Hostname()}).String()
-	ticket, err := g.Tickets.Issue(ctx, Ticket{GuestSessionID: in.GuestSessionID, UserID: in.UserID, BrowserSessionID: in.BrowserSessionID, TerminalSessionID: terminalSessionID, Origin: origin, Role: decision.Role, PolicyGeneration: decision.PolicyGeneration, TeamGeneration: decision.TeamGeneration, MembershipGeneration: decision.MembershipGeneration, BindingGeneration: decision.BindingGeneration, BrowserPublicKeySHA256: browserPublicKeySHA256})
+	ticket, err := g.Tickets.Issue(ctx, Ticket{GuestSessionID: in.GuestSessionID, UserID: in.UserID, BrowserSessionID: in.BrowserSessionID, TerminalSessionID: terminalSessionID, InspectorCredentialID: in.InspectorCredentialID, Origin: origin, Role: decision.Role, PolicyGeneration: decision.PolicyGeneration, TeamGeneration: decision.TeamGeneration, MembershipGeneration: decision.MembershipGeneration, BindingGeneration: decision.BindingGeneration, BrowserPublicKeySHA256: browserPublicKeySHA256})
 	return ticket, streamURL, decision, err
 }
 
@@ -106,7 +110,7 @@ func validDecision(d Decision, userID, terminalSessionID string) bool {
 }
 
 func sameDecision(a, b Decision) bool {
-	return validDecision(b, a.UserID, a.TerminalSessionID) && a.GuestSessionID == b.GuestSessionID && a.Role == b.Role && a.PolicyGeneration == b.PolicyGeneration && a.TeamGeneration == b.TeamGeneration && a.MembershipGeneration == b.MembershipGeneration && a.BindingGeneration == b.BindingGeneration && a.MachineID == b.MachineID && a.EnvironmentID == b.EnvironmentID && a.HostWSSURL == b.HostWSSURL && a.EdgeNodeID == b.EdgeNodeID && a.EdgeProcessEpoch == b.EdgeProcessEpoch && a.EdgeEndpointHost == b.EdgeEndpointHost && a.OwnerAccountID == b.OwnerAccountID && a.WorkspaceID == b.WorkspaceID
+	return validDecision(b, a.UserID, a.TerminalSessionID) && a.GuestSessionID == b.GuestSessionID && a.Role == b.Role && a.PolicyGeneration == b.PolicyGeneration && a.TeamGeneration == b.TeamGeneration && a.MembershipGeneration == b.MembershipGeneration && a.BindingGeneration == b.BindingGeneration && a.MachineID == b.MachineID && a.InspectorCredentialID == b.InspectorCredentialID && a.EnvironmentID == b.EnvironmentID && a.HostWSSURL == b.HostWSSURL && a.EdgeNodeID == b.EdgeNodeID && a.EdgeProcessEpoch == b.EdgeProcessEpoch && a.EdgeEndpointHost == b.EdgeEndpointHost && a.OwnerAccountID == b.OwnerAccountID && a.WorkspaceID == b.WorkspaceID
 }
 
 func scopeForRole(role string) string {
@@ -163,6 +167,20 @@ type GuestSessionAuthority interface {
 }
 
 func (g *Gateway) resolveTicketRole(ctx context.Context, ticket Ticket) (Decision, error) {
+	if ticket.Role == RoleInspector {
+		a, ok := g.Authorizer.(InspectorAuthorizer)
+		if !ok || ticket.GuestSessionID != "" {
+			return Decision{}, ErrForbidden
+		}
+		d, err := a.ResolveInspector(ctx, ticket.UserID, ticket.InspectorCredentialID)
+		if err != nil {
+			return d, err
+		}
+		if d.Role != RoleInspector || d.InspectorCredentialID != ticket.InspectorCredentialID {
+			return Decision{}, ErrForbidden
+		}
+		return d, nil
+	}
 	if ticket.GuestSessionID != "" {
 		a, ok := g.Authorizer.(GuestAuthorizer)
 		if !ok {

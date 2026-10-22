@@ -527,23 +527,24 @@ var credentialPolicies = map[string]struct {
 	scopes   []string
 	maxTTL   time.Duration
 }{
-	"helper_enrollment":          {audience: "paperboat-enrollment", scopes: []string{"helper:enroll"}, maxTTL: 10 * time.Minute},
-	"helper_identity":            {audience: "paperboat-control", scopes: []string{"helper:connect", "helper:renew"}, maxTTL: time.Hour},
-	"machine_control":            {audience: "paperboat-control", scopes: []string{"machine:connect", "machine:renew"}, maxTTL: time.Hour},
-	"connector_admission":        {audience: "paperboat-edge", scopes: []string{"connector:admit"}, maxTTL: 5 * time.Minute},
-	"config_compare":             {audience: "paperboat-machine", scopes: []string{"config:compare"}, maxTTL: 2 * time.Minute},
-	"config_sync":                {audience: "paperboat-machine", scopes: []string{"config:pull", "config:apply", "config:report"}, maxTTL: 5 * time.Minute},
-	"terminal_operation":         {audience: "paperboat-machine", maxTTL: 5 * time.Minute},
-	"browser_terminal_operation": {audience: "paperboat-machine", maxTTL: 5 * time.Minute},
-	"exec_operation":             {audience: "paperboat-machine", scopes: []string{"exec:operate"}, maxTTL: 5 * time.Minute},
-	"ssh_operation":              {audience: "paperboat-machine", scopes: []string{"ssh:operate"}, maxTTL: 5 * time.Minute},
-	"preview_launch":             {audience: "paperboat-machine", scopes: []string{"preview:launch"}, maxTTL: 5 * time.Minute},
-	"inbox_read":                 {audience: "paperboat-machine", scopes: []string{"inbox:read"}, maxTTL: 2 * time.Minute},
-	"inbox_delete":               {audience: "paperboat-machine", scopes: []string{"inbox:delete"}, maxTTL: 2 * time.Minute},
-	"inbox_list":                 {audience: "paperboat-machine", scopes: []string{"inbox:list"}, maxTTL: 2 * time.Minute},
-	"private_access":             {audience: "paperboat-edge", scopes: []string{"private:access"}, maxTTL: 2 * time.Minute},
-	"native_private":             {audience: "paperboat-machine", scopes: []string{"private:native"}, maxTTL: 5 * time.Minute},
-	"file_transfer":              {audience: "paperboat-machine", scopes: []string{"file:transfer"}, maxTTL: 5 * time.Minute},
+	"helper_enrollment":           {audience: "paperboat-enrollment", scopes: []string{"helper:enroll"}, maxTTL: 10 * time.Minute},
+	"helper_identity":             {audience: "paperboat-control", scopes: []string{"helper:connect", "helper:renew"}, maxTTL: time.Hour},
+	"machine_control":             {audience: "paperboat-control", scopes: []string{"machine:connect", "machine:renew"}, maxTTL: time.Hour},
+	"connector_admission":         {audience: "paperboat-edge", scopes: []string{"connector:admit"}, maxTTL: 5 * time.Minute},
+	"config_compare":              {audience: "paperboat-machine", scopes: []string{"config:compare"}, maxTTL: 2 * time.Minute},
+	"config_sync":                 {audience: "paperboat-machine", scopes: []string{"config:pull", "config:apply", "config:report"}, maxTTL: 5 * time.Minute},
+	"terminal_operation":          {audience: "paperboat-machine", maxTTL: 5 * time.Minute},
+	"browser_terminal_operation":  {audience: "paperboat-machine", maxTTL: 5 * time.Minute},
+	"browser_inspector_operation": {audience: "paperboat-machine", scopes: []string{"inspector:use"}, maxTTL: 5 * time.Minute},
+	"exec_operation":              {audience: "paperboat-machine", scopes: []string{"exec:operate"}, maxTTL: 5 * time.Minute},
+	"ssh_operation":               {audience: "paperboat-machine", scopes: []string{"ssh:operate"}, maxTTL: 5 * time.Minute},
+	"preview_launch":              {audience: "paperboat-machine", scopes: []string{"preview:launch"}, maxTTL: 5 * time.Minute},
+	"inbox_read":                  {audience: "paperboat-machine", scopes: []string{"inbox:read"}, maxTTL: 2 * time.Minute},
+	"inbox_delete":                {audience: "paperboat-machine", scopes: []string{"inbox:delete"}, maxTTL: 2 * time.Minute},
+	"inbox_list":                  {audience: "paperboat-machine", scopes: []string{"inbox:list"}, maxTTL: 2 * time.Minute},
+	"private_access":              {audience: "paperboat-edge", scopes: []string{"private:access"}, maxTTL: 2 * time.Minute},
+	"native_private":              {audience: "paperboat-machine", scopes: []string{"private:native"}, maxTTL: 5 * time.Minute},
+	"file_transfer":               {audience: "paperboat-machine", scopes: []string{"file:transfer"}, maxTTL: 5 * time.Minute},
 }
 
 // private_access grants use the audience for the concrete edge protocol. The
@@ -753,6 +754,14 @@ func (p *Provider) SignCredential(input CredentialInput) (string, error) {
 		claims["machine_id"], claims["user_id"], claims["account_id"], claims["session_id"] = input.MachineID, input.UserID, input.AccountID, input.SessionID
 		claims["browser_attachment_id"], claims["expected_generation"], claims["policy_generation"] = input.BrowserAttachmentID, input.ExpectedGeneration, input.PolicyGeneration
 		claims["browser_public_key_sha256"] = input.BrowserPublicKeySHA256
+	case "browser_inspector_operation":
+		// A console inspector channel: no terminal session. Every request on it
+		// still carries a per-action inspector grant the machine re-verifies.
+		if input.MachineID == "" || input.UserID == "" || input.AccountID != input.UserID || input.BrowserAttachmentID == "" || !validBrowserKeyDigest(input.BrowserPublicKeySHA256) || input.SessionID != "" || input.ExpectedGeneration != 0 || input.PolicyGeneration != 0 || input.CLIClientSessionID != "" || input.SourceMachineID != "" {
+			return "", errors.New("browser inspector bindings are required")
+		}
+		claims["machine_id"], claims["user_id"], claims["account_id"] = input.MachineID, input.UserID, input.AccountID
+		claims["browser_attachment_id"], claims["browser_public_key_sha256"] = input.BrowserAttachmentID, input.BrowserPublicKeySHA256
 	case "exec_operation":
 		if input.MachineID == "" || input.SourceMachineID == "" || input.UserID == "" || input.CLIClientSessionID == "" || !validOperationID(input.OperationID) {
 			return "", errors.New("exec operation bindings are required")
@@ -957,6 +966,10 @@ func (p *Provider) verifyCredential(token, expectedIssuer, expectedClass string,
 		}
 	case "browser_terminal_operation":
 		if claims.MachineID == "" || claims.UserID == "" || claims.AccountID != claims.UserID || claims.SessionID == "" || claims.BrowserAttachmentID == "" || !validBrowserKeyDigest(claims.BrowserPublicKeySHA256) || claims.ExpectedGeneration < 1 || claims.PolicyGeneration < 1 || claims.CLIClientSessionID != "" || claims.SourceMachineID != "" {
+			return CredentialClaims{}, CredentialVerificationError{Code: CredentialClaimsInvalid}
+		}
+	case "browser_inspector_operation":
+		if claims.MachineID == "" || claims.UserID == "" || claims.AccountID != claims.UserID || claims.BrowserAttachmentID == "" || !validBrowserKeyDigest(claims.BrowserPublicKeySHA256) || claims.SessionID != "" || claims.ExpectedGeneration != 0 || claims.PolicyGeneration != 0 || claims.CLIClientSessionID != "" || claims.SourceMachineID != "" {
 			return CredentialClaims{}, CredentialVerificationError{Code: CredentialClaimsInvalid}
 		}
 	case "exec_operation":

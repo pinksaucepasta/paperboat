@@ -519,3 +519,19 @@ func (s *Service) resolveTerminalBrowserDecision(ctx context.Context, want Termi
 	}
 	return s.ResolveTerminalBrowserRole(ctx, want.AccountID, want.SessionID)
 }
+
+// ResolveMachineBrowserRoute returns the current browser route to a live
+// machine's runtime: the same edge and host endpoint a browser terminal uses.
+// Callers authorize the resource themselves (the console inspector does it
+// through its inspector credential).
+func (s *Service) ResolveMachineBrowserRoute(ctx context.Context, machineID string) (TerminalBrowserDecision, error) {
+	var decision TerminalBrowserDecision
+	err := s.db.Pool().QueryRow(ctx, `SELECT id,environment_id FROM user_machines WHERE id=$1 AND deleted_at IS NULL AND revoked_at IS NULL`, machineID).Scan(&decision.MachineID, &decision.EnvironmentID)
+	if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
+		return TerminalBrowserDecision{}, ErrMachineCapabilityUnavailable
+	}
+	if err != nil {
+		return TerminalBrowserDecision{}, err
+	}
+	return s.completeTerminalBrowserRoute(ctx, decision)
+}

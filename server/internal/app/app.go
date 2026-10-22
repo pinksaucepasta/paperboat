@@ -771,7 +771,7 @@ func New(opts Options) (*App, error) {
 		AdmissionLifetime:    opts.Config.CLIAuth.MintProofLifetime,
 		RecordUsageAdmission: resourceUsageService.RecordBrowserAdmission,
 		Tickets:              browserterminal.TicketStore{DB: store},
-		Authorizer:           browserterminal.MachineAuthorizer{Service: userMachineService},
+		Authorizer:           browserterminal.MachineAuthorizer{Service: userMachineService, Inspector: inspectorHandlers.Access},
 		Signer:               mintKeys,
 		Issuer:               normalizeHelperIssuer(opts.Config.HTTP.PublicBaseURL),
 		AllowedOrigins:       append([]string(nil), opts.Config.HTTP.AllowedOrigins...),

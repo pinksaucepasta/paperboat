@@ -54,3 +54,34 @@ func writeTerminalBrowserTicket(w http.ResponseWriter, r *http.Request, signer b
 		writeJSON(w, http.StatusOK, SuccessResponse{Data: map[string]any{"stream_url": streamURL, "subprotocols": []string{browserterminal.Subprotocol, "pb-ticket." + ticket.Value}, "expires_at": ticket.ExpiresAt, "role": ticket.Role, "machine_id": decision.MachineID, "edge_node_id": decision.EdgeNodeID, "owner_account_id": decision.OwnerAccountID, "root_key_id": machineKey.KeyID, "root_public_key": base64.RawURLEncoding.EncodeToString(machineKey.PublicKey), "root_fingerprint": hex.EncodeToString(machineKey.Fingerprint[:])}})
 	}
 }
+
+// inspectorBrowserTicket admits a console inspector channel (F17) for one of
+// the caller's own inspector credentials. Captures never pass through here:
+// the ticket only opens the E2E browser channel to the preview's machine.
+func inspectorBrowserTicket(gateway *browserterminal.Gateway, signer browserMachineSignerReader) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		p, ok := principalFromContext(r.Context())
+		if !ok || p.Session.ID == "" || p.Client != nil {
+			writeError(w, r, http.StatusUnauthorized, "unauthenticated", "A browser sign-in is required.")
+			return
+		}
+		var input struct {
+			CredentialID           string `json:"credential_id"`
+			BrowserPublicKeySHA256 string `json:"browser_public_key_sha256"`
+		}
+		if !decodeStrictJSON(w, r, &input) {
+			return
+		}
+		ticket, streamURL, decision, err := gateway.IssueInspector(r.Context(), p.User.ID, p.Session.ID, input.CredentialID, r.Header.Get("Origin"), input.BrowserPublicKeySHA256)
+		switch {
+		case expectedHTTPErrorOnly(err, browserterminal.ErrBrowserKeyInvalid):
+			writeError(w, r, http.StatusBadRequest, "invalid_browser_key", "Create a new browser key and retry.")
+		case expectedHTTPErrorOnly(err, browserterminal.ErrForbidden, browserterminal.ErrTicketInvalid):
+			writeError(w, r, http.StatusForbidden, "inspector_not_authorized", "You cannot inspect this preview. Ask its owner for inspect access.")
+		case expectedHTTPErrorOnly(err, browserterminal.ErrHostUnavailable):
+			writeError(w, r, http.StatusConflict, "machine_unavailable", "The preview's machine is offline. Start Paperboat on it and retry.")
+		default:
+			writeTerminalBrowserTicket(w, r, signer, ticket, streamURL, decision, err)
+		}
+	}
+}
