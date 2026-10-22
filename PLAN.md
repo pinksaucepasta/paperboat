@@ -612,6 +612,221 @@ console/ (C), keeping each change small and logging what it touched.
 - F17-05: Console: turn capture on/off (with or without bodies) and clear captures; clear states for capture off, no requests yet, preview stopped and machine offline.
 - F17-06: Losing the connection or the machine restarting reconnects and resumes the live list without duplicates; losing access mid-view ends it with a clear message.
 
+### F18. Workspace policy: tags and access rules (Lane K, user decision 2026-10-22)
+
+**What:** one access policy per workspace (personal or team, **every plan**, user decision
+2026-10-22): machines get tags (`tag:prod`), people and agent tokens get groups
+(`group:oncall`), and rules say who may use what on which machines. Edited in the console
+(a simple grid and a file editor) and as a file with `pb policy`; validated before it is
+saved; tests inside the file; a dry-run "who can do X on Y, and why"; every change audited
+and versioned. Today's per-machine grants and the team setting "Allow private access" become
+the simple view of the same policy, with no behaviour change on migration. The solo case is
+first-class: one person limiting their own agent tokens ("this token may only exec on tag:ci").
+**Surfaces:** `pb policy get|set|test|explain|versions|restore|schema`, `pb token
+create|list|revoke`; console workspace → Access (Simple, Policy file, Test, History);
+server policy store, compiler and explain API; JSON Schema published by the server.
+**Owner:** Lane K across server/ + shared/ (B), cli/ (A) and console/ (C), each change small
+and logged in section 5; Lane B deploys server builds.
+
+**What we took from whom.** Tailscale: one HuJSON file per network, tags, groups,
+autogroups, `tests` that block a bad save, allow-only grants that are order-independent.
+AWS IAM: the policy simulator (explain against a draft before saving), but not its
+explicit-deny precedence, which makes rules order- and context-dependent and hard to read.
+Cloudflare Access: one decision page that says which rule matched. Google IAP/BeyondCorp:
+access is decided per request by the server from identity + resource, never by network
+position. GitHub rulesets: "evaluate" mode = our review of access changes before save.
+Teleport: roles are labels on resources and named sets of actions; we keep the same idea with
+fewer moving parts (no per-role login lists, no deny lists).
+
+#### Model
+
+- **Subjects (who).** `user:<email>` (an active member; in a personal workspace only the
+  owner), `group:<name>` (defined in the file; holds users and tokens), `token:<name>` (an
+  agent token of this workspace), `role:owner`, `role:admin` (owners and admins),
+  `role:member` (every active member, any role), `*` (every member and token).
+- **Targets (on what).** `machine:<alias>` (a machine in this workspace), `tag:<name>`
+  (machines carrying the tag), `machine:*` (every machine in this workspace); for ENV,
+  `env:team` (the team ENV scope; today ENV grants are team-wide, `team_resource_grants` kind
+  `env` with resource_id = team). Personal ENV scopes stay the owner's alone.
+- **Actions.** Exactly today's machine capabilities (`teams.MachineCapabilities`, one owner):
+  `terminal`, `exec`, `managed_ssh` (pb ssh/scp/sftp/rsync), `files` (send and Inbox),
+  `preview_manage`, `tunnel_manage`, `private_access`; plus `env_read`, `env_write` on the
+  `env:team` target. `private_access` takes an optional `ports` list (`[5432, "8000-8100"]`; default
+  all ports ≥1024, today's rule). Shortcut `"*"` = every machine action (not ENV).
+- **Tags** are assigned in the file: `"tags": {"tag:prod": ["machine:db1", "machine:web1"]}`.
+  A machine can carry many tags. Tags are for machines only; groups are for people and tokens.
+- **Agent tokens** (new, `pb token create <name> [--expires 90d]`): a non-interactive
+  credential for scripts and agents, belonging to one workspace and one creator. It has
+  **no access unless a rule names it** (directly, through a group or `*`), and never more
+  than its creator has at that moment (checked on every use: creator removed or demoted →
+  token loses that access). Shown once, stored hashed, revocable, max lifetime from config,
+  every use attributed to the token in Activity. Works the same in personal and team
+  workspaces.
+
+#### Evaluation (one function, server side)
+
+`allowed(subject, workspace, machine, action, port)`:
+1. **Guardrails, outside the policy, unchanged:** account active; signed-in session or
+   unexpired, unrevoked token; team not deleted or suspended; team paid entitlement where it
+   applies today (`team_paid_entitled`, no new plan gate); membership active; machine active,
+   enrolled and bound to this workspace; the machine's own on-device service switches
+   (`pb machine capabilities`) allow the service. Any guardrail fails → deny, and explain
+   names the guardrail.
+2. **Owner of a personal machine** in the personal workspace: allowed for every action,
+   always (you cannot lock yourself out of your own machine). Tokens never get this.
+3. **Rules:** allowed if at least one rule matches (subject in `src`, machine in `dst`,
+   action in `allow`, port in `ports` when given). No match → deny. There are no deny rules,
+   so rule order never matters and explain lists every matching rule.
+4. **Tokens:** step 3 must match for the token **and** the creator must be allowed the same
+   action by steps 1–3.
+5. **Team switch** `"allow_private_access": false` (today's team setting, default false)
+   removes `private_access` from every rule of the team, as today.
+
+Administrative rights are not policy actions: owners/admins edit the policy and settings,
+roles never imply use (today's rule, `machines.go` "Administrative roles govern mutations").
+
+**Where it is enforced.** The policy is compiled at save into one table,
+`workspace_policy_access(workspace, subject_kind, subject_id, machine_id, action, ports)`,
+recompiled in the same transaction whenever an input changes (policy save, member
+join/leave/role change, machine bind/unbind/rename/removal, token create/revoke). The two SQL
+checks the authorizations call today, `team_machine_capability_allowed` (team) and
+`machine_capability_allowed` (personal or team), become one
+`workspace_capability_allowed(actor, token, workspace, machine, capability, port)` reading that
+table; every caller (terminal and browser terminal, exec, managed SSH, files/Inbox, preview
+and tunnel management, private access in `machine_service_authorities`, signed grants issued
+by `teams.AuthorizeMachineTx`) switches to it in the same change, and the old function and
+`team_machine_grants` are dropped (one owner of state). ENV (`environment/vault_scopes.go`
+`authorizeVaultScopeTx`, today `team_resource_grants` kind `env`): the server refuses a vault
+member grant the policy does not allow, and a policy change that removes `env_read` revokes the grant
+exactly like `pb env team revoke` today (rotation required); key delivery still needs a key
+holder's client (`pb env grants sync`), and explain says "allowed, key not delivered yet".
+Any save that removes access advances the workspace generation, which fences active sessions
+the same way a grant revoke does today.
+
+**Migration, zero behaviour change.** One migration writes version 1 of each team's policy
+from its rows: an `all_members` grant → `{"src": ["role:member"], "dst": ["machine:<alias>"],
+"allow": [...]}`, a `selected_member` grant → `user:<email>`; inactive grants are dropped;
+`allow_private_access` is copied. Personal workspaces start with an empty policy (only the
+owner, as today). The migration test compiles every team's v1 and asserts the compiled table
+equals the old function's answer for every member × machine × capability before the old
+function is dropped.
+
+#### File format
+
+JSON with comments and trailing commas (HuJSON, the same as Tailscale; plain JSON is valid
+too, so agents can write it with any JSON library). Stored verbatim (comments kept) with its
+canonical JSON next to it. Unknown keys are errors. Example:
+
+```jsonc
+{
+  "$schema": "<server>/v1/policy/schema",   // optional; editors use it for completion
+  "allow_private_access": true,              // team workspaces only
+  "groups": {"group:oncall": ["user:ana@example.test", "token:pager-bot"]},
+  "tags":   {"tag:prod": ["machine:db1", "machine:web1"], "tag:ci": ["machine:runner"]},
+  "rules": [
+    {"src": ["role:member"], "dst": ["tag:ci"], "allow": ["terminal", "exec", "files"]},
+    {"src": ["group:oncall"], "dst": ["tag:prod"], "allow": ["*"]},
+    {"src": ["group:oncall"], "dst": ["tag:prod"], "allow": ["private_access"], "ports": [5432]},
+    {"src": ["token:ci-bot"], "dst": ["tag:ci"], "allow": ["exec"], "note": "CI deploys"},
+    {"src": ["group:oncall"], "dst": ["env:team"], "allow": ["env_read"]}
+  ],
+  "tests": [
+    {"src": "token:ci-bot", "dst": "machine:runner", "allow": ["exec"], "deny": ["terminal"]},
+    {"src": "user:ana@example.test", "dst": "machine:db1", "allow": ["private_access:5432"]}
+  ]
+}
+```
+
+- **Schema:** JSON Schema 2020-12, one source in `shared/policy/schema.json`, served at
+  `GET /v1/policy/schema` and printed by `pb policy schema`; reference doc with every field,
+  rule and error code in `shared/policy/README.md`.
+- **Tests** name one `src` and one `dst`; `allow`/`deny` list actions, `private_access:<port>` for a port.
+- **Validation** (one Go package `shared/policy`, used by server, CLI and, through the
+  server, the console): parse → schema → references (every user, token, machine, group, tag,
+  env scope exists in this workspace) → limits → compile → tests. Errors are a sorted list
+  `{path: "/rules/3/dst/0", code: "unknown_machine", message: "machine 'db2' is not in this
+  workspace"}` with stable codes; the same input always gives the same list. A file with a
+  failing test is never saved.
+- **References stay correct:** renaming a machine or removing a member/machine/token rewrites
+  the references in the stored policy in the same transaction (new version, audit event
+  "policy updated by rename of db2 → db3"), so a name can never pass to another machine.
+
+#### Explain and test API
+
+- `POST /v1/workspaces/{ws}/policy/validate` `{policy}` → errors, test results, compiled
+  counts. Dry run, nothing stored.
+- `POST /v1/workspaces/{ws}/policy/explain` `{policy?, src?, dst?, action?, port?}`: with all
+  three fields → `{decision, matched_rules: [{path, rule}], guardrail?, token_cap?}`; with only
+  `dst` + `action` → who can; with only `src` → what they can. `policy` optional = evaluate a
+  draft. Members may explain their own access; owners/admins anyone's.
+- `PUT /v1/workspaces/{ws}/policy` `{policy, expected_version, message?}` → validates, then
+  returns `access_changes` (gained/lost per subject × machine × action) and saves only when
+  called with `confirm: <digest of that change list>`; a stale `expected_version` is 409.
+
+#### Who may change what
+
+Owners and admins edit everything. A member who owns a personal machine shared into the team
+keeps today's right to set access for that machine: their save is accepted only if every rule
+it adds, removes or changes targets only their own machines and nothing else changes (the
+console's per-machine "Manage access" uses exactly this). Members can read the policy and
+explain their own access. In a personal workspace the owner edits everything.
+
+#### Versions, audit, rollback
+
+Every save is a new version (number, author or token, time, message, digest, access changes
+summary). `pb policy versions` / console History lists them; restore = save of an old version
+as a new one (same validation and change review). The last N versions are kept (config).
+Audit/Activity: `policy.updated`, `policy.restored`, `policy.rewritten` (rename/removal),
+`token.created|revoked`, and per-decision denials in the existing access-denied events with
+the rule path when one matched.
+
+#### Console (Lane C work done by Lane K)
+
+Workspace → **Access**:
+- **Simple** (default): machines × people grid with today's capability checkboxes (the
+  current "Manage access" dialog, unchanged for users), tag chips on machines, groups, the
+  "Allow private access" switch, tokens list. Rules the grid cannot show (tags, groups,
+  ports, tokens) appear as read-only rows "from the policy file" with an Edit link.
+- **Policy file:** code editor with schema completion, inline errors at the exact path,
+  Format, and **Review changes** (who gains/loses what) before **Save**.
+- **Test:** pick who / machine / action / port → Allowed or Denied with the matched rule or
+  the guardrail, against the saved policy or the unsaved draft; runs the file's `tests`.
+- **History:** versions with author, message, change summary, Diff and Restore.
+
+#### CLI (Lane A paths)
+
+`pb policy get [--version N] [--json]` (HuJSON to stdout), `pb policy set <file|->
+[--message] [--yes]` (validates, prints access changes, asks; `--dry-run` stops there),
+`pb policy test [<file>]` (validate + run tests against the server, nothing saved),
+`pb policy explain --src <s> [--dst <m>] [--action <a>] [--port <p>] [--file <draft>]`,
+`pb policy versions`, `pb policy restore <N>`, `pb policy schema`; `pb token create <name>
+[--expires]`, `pb token list`, `pb token revoke <name>`; tokens are used with
+`PB_TOKEN=<token> pb exec …` on any machine with `pb` installed. All take `--workspace`
+and `--json`; errors print the path and code.
+
+#### Limits (one config place, `server/internal/config`, same for every plan)
+
+Policy file 256 KiB, 1000 rules, 500 tags, 200 groups, 500 entries per group/tag, 500 tests,
+100 versions kept, 100 tokens per workspace, token lifetime max 365 days (default 90),
+explain "who can" answers bounded to 1000 rows (paginated).
+
+**Not in v1** (WHITEBOARD if wanted): deny/exclude rules, conditions on source device,
+network or time, tags applied at enrolment (`pb pair --tag`), tag owners for non-admins,
+per-resource sharing, which stays as it is and is shown read-only in the Simple view:
+preview/tunnel/lazy-policy grants (`pb team grant`, `team_resource_grants`) and shared
+terminal sessions (`pb session share`, viewer/interactive).
+
+- F18-01: Policy file format, JSON Schema served and printed, validation with stable path+code errors, limits; invalid files and failing tests are never saved.
+- F18-02: Enforcement on the server: every machine capability (terminal, browser terminal, exec, managed SSH, files, preview/tunnel manage, private access with ports) follows the compiled policy; tags and groups work; removing access ends active sessions as a grant revoke does today.
+- F18-03: Migration: every team's existing machine grants and private-access setting become policy v1 with identical access (compiled table equals the old answer for every member × machine × capability); personal workspaces unchanged.
+- F18-04: Explain and test: allow/deny with matched rule or guardrail, who-can and what-can, on the saved policy and on a draft; in-file tests run on validate and save.
+- F18-05: Versions, access-change review before save, restore, audit events; stale saves refused; renames and removals rewrite references with an audit event.
+- F18-06: Agent tokens: create/list/revoke, no access unless a rule names them, capped by the creator's access, used by `PB_TOKEN` with `pb exec` and the other commands, every use attributed; solo personal workspace "token may only exec on tag:ci" works.
+- F18-07: ENV scopes in rules: env_read/env_write decide vault member grants; removing access revokes as `pb env team revoke` does; explain reports "allowed, key not delivered yet".
+- F18-08: Who may edit: owners/admins edit all; a member edits only rules for their own shared machines; members read and explain their own access.
+- F18-09: Console Access page: Simple grid (today's grants, private-access switch, tags, groups, tokens), Policy file editor with inline errors and Review changes, Test, History with Diff/Restore (scripted browser check).
+- F18-10: CLI `pb policy` and `pb token` commands work end to end against the live server (device check on the victus VMs).
+
 ### S2. Marketing site
 
 - S2-01: Content matches the product (features, platforms 1.1, pricing 1.3, domains 1.2); install instructions use the configured installer host; builds; hosting **USER DECIDES**.
@@ -2249,3 +2464,4 @@ Waits: Lane A rerun preview-protocols:hp/preview:hp/tunnel-transfer:hp on .7; La
 Mac-only proofs still open: (1) the user daemon is a LaunchAgent in gui/<uid>: does it survive logout, and start with no console login? (candidate fallback: user/<uid>); (2) Firefox ignores the System keychain, so browser trust may need enterprise_roots or an NSS import; (3) `security add-trusted-cert` admin approval and the trustPending path; (4) Application Firewall and macOS 15 Local Network prompts for direct QUIC; (5) Gatekeeper/quarantine for browser-downloaded `--from` files; (6) 127.100.x loopback aliases and PF after reboot and sleep; (7) launchd bootstrap/kickstart races during an update restart; (8) APFS free space (statfs) vs purgeable space for the full-disk refusal.
 2026-10-22 | Lane J F16 | Design + rows added (PLAN F16, CHECKLIST F16-01..04, C243). Touches cli/ (Lane A) and F10 ENV (Lane E): new `pb env hook` command only; logged per commit here.
 2026-10-22 | Lane I F17 | — | — | New feature F17 (console preview inspector) from WHITEBOARD; Lane I owns it across cli/ (A), server/ (B), console/ (C), each change logged here.
+2026-10-22 | Lane K F18 | Design + rows (PLAN F18, CHECKLIST F18-01..10, C244-C253), moved from WHITEBOARD; every plan (coordinator 2026-10-22). Server first: Lane K writes server/+shared/ changes, Lane B please deploy each server build Lane K logs here; then cli/, console/.

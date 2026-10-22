@@ -294,16 +294,6 @@ the system; it only forwards a tunnel to the app next to it. Needs a tunnel toke
 rotation and one more admission path. Decision (2026-10-20): not for launch; until then
 every tunnel runs on an enrolled Paperboat machine.
 
-## Workspace policy: tags and access rules
-
-Tailscale-style policy for teams: owners and admins tag machines and members (for
-example `tag:prod`, `group:oncall`) and write rules for who may use what (terminal,
-SSH, exec, files, previews, tunnels, private ports, ENV scopes) on which tagged
-machines. One policy per workspace, edited in the console (and as a file), validated
-before it is saved, with an audit trail and a "test this rule" preview. Today's
-per-machine grants and team settings would become the simple default view of it.
-Not for launch (user, 2026-10-21).
-
 ## Console talks to the local `pb` (browser ↔ local daemon bridge)
 
 When the console runs on a computer that has `pb` signed in to the same account, the page
