@@ -2,7 +2,7 @@
 .TH "PB-TEAM-ACTIVITY" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
 
 .SH NAME
-pb-team-activity - View owner/admin activity from the last 90 days
+pb-team-activity - Search the team audit log (owners, admins, auditors)
 
 
 .SH SYNOPSIS
@@ -10,7 +10,7 @@ pb-team-activity - View owner/admin activity from the last 90 days
 
 
 .SH DESCRIPTION
-View owner/admin activity from the last 90 days
+Search the team audit log, newest first. Owners, admins and auditors can read it. Filter by actor (account ID, email or API token), action or action prefix, target, result (success or denied) and time range, or search text. Each event shows when, who, what, the result and the target. Use --json for the documented event shape and the next page cursor.
 
 .PP
 Read recent owner/admin activity for one team, with cursor and limit for pagination. Entries support review of membership and grant changes within the retention window.
@@ -23,6 +23,14 @@ JSON output is supported with --json.
 
 
 .SH OPTIONS
+\fB--action\fP=""
+	action, or a prefix such as team or billing
+
+.PP
+\fB--actor\fP=""
+	account ID, email or API token ID
+
+.PP
 \fB--cursor\fP=""
 	next_cursor from the previous page
 
@@ -32,11 +40,31 @@ JSON output is supported with --json.
 
 .PP
 \fB--json\fP[=false]
-	print canonical JSON including metadata and next_cursor
+	print the events as JSON, with next_cursor
 
 .PP
 \fB--limit\fP=50
 	maximum events, 1–200
+
+.PP
+\fB--result\fP=""
+	success or denied
+
+.PP
+\fB--search\fP=""
+	text in the action, target name or actor email
+
+.PP
+\fB--since\fP=""
+	start: RFC 3339 time or a duration ago such as 24h or 7d
+
+.PP
+\fB--target\fP=""
+	target resource or machine ID
+
+.PP
+\fB--until\fP=""
+	end: RFC 3339 time or a duration ago
 
 
 .SH OPTIONS INHERITED FROM PARENT COMMANDS
@@ -57,4 +85,4 @@ JSON output is supported with --json.
 
 
 .SH SEE ALSO
-\fBpb-team(1)\fP
+\fBpb-team(1)\fP, \fBpb-team-activity-export(1)\fP

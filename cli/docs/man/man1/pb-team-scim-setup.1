@@ -1,0 +1,46 @@
+.nh
+.TH "PB-TEAM-SCIM-SETUP" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-team-scim-setup - Open the WorkOS Admin Portal to connect your directory
+
+
+.SH SYNOPSIS
+\fBpb team scim setup <team> [flags]\fP
+
+
+.SH DESCRIPTION
+Print, and open in a browser where possible, a short-lived WorkOS Admin Portal link to connect your company directory with SCIM. Your IT admin follows the guide for your directory there. Once connected, Paperboat provisions members within seconds; map groups to roles with pb team scim map. The team needs enough seats.
+
+.PP
+This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for setup
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-team-scim(1)\fP

@@ -1,0 +1,50 @@
+.nh
+.TH "PB-TEAM-SCIM-MAP" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-team-scim-map - Map a directory group to a team role
+
+
+.SH SYNOPSIS
+\fBpb team scim map <team> <group> <admin|billing|auditor|member|none> [flags]\fP
+
+
+.SH DESCRIPTION
+Map a directory group, by name or ID, to a team role: admin, billing, auditor or member, or none to remove the mapping. Someone in several mapped groups gets the highest role. With --mapped-only, only members of mapped groups are provisioned and everyone else is removed. Members managed by the directory change only through it.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for map
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+.PP
+\fB--mapped-only\fP[=false]
+	provision only members of mapped groups
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-team-scim(1)\fP

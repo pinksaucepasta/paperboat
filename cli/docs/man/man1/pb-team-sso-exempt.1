@@ -1,0 +1,50 @@
+.nh
+.TH "PB-TEAM-SSO-EXEMPT" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-team-sso-exempt - Mark or unmark a member as SSO exempt (break-glass)
+
+
+.SH SYNOPSIS
+\fBpb team sso exempt <team> <account> [flags]\fP
+
+
+.SH DESCRIPTION
+Mark a member as SSO exempt so they keep access to the team without SSO, for contractors and emergency admins, or remove the mark with --remove. The owner is always exempt. Only a few members may be exempt, and every access without SSO is recorded in the audit log once a day per person.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for exempt
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+.PP
+\fB--remove\fP[=false]
+	remove the exemption
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-team-sso(1)\fP

@@ -1,0 +1,82 @@
+.nh
+.TH "PB-TEAM-ACTIVITY-EXPORT" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-team-activity-export - Export the team audit log as CSV or JSON
+
+
+.SH SYNOPSIS
+\fBpb team activity export <team> [flags]\fP
+
+
+.SH DESCRIPTION
+Download every audit log event that matches the filters, newest first, as a CSV file or a JSON array, for an archive or a SIEM. The same filters as pb team activity apply. The file is written to a temporary name and renamed when complete, so a failed download never leaves a partial file. Each export is itself recorded in the audit log.
+
+.PP
+This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
+
+
+.SH OPTIONS
+\fB--action\fP=""
+	action, or a prefix such as team or billing
+
+.PP
+\fB--actor\fP=""
+	account ID, email or API token ID
+
+.PP
+\fB--format\fP="csv"
+	csv or json
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for export
+
+.PP
+\fB-o\fP, \fB--output\fP=""
+	file to write, or - for standard output
+
+.PP
+\fB--result\fP=""
+	success or denied
+
+.PP
+\fB--search\fP=""
+	text in the action, target name or actor email
+
+.PP
+\fB--since\fP=""
+	start: RFC 3339 time or a duration ago such as 24h or 7d
+
+.PP
+\fB--target\fP=""
+	target resource or machine ID
+
+.PP
+\fB--until\fP=""
+	end: RFC 3339 time or a duration ago
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-team-activity(1)\fP

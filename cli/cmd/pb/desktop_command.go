@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"runtime"
 	"strings"
 	"time"
@@ -241,7 +242,11 @@ func handleDesktop(c *cobra.Command, in desktopRequest) (any, error) {
 		case "team.accept":
 			return client.AcceptTeamInvitation(ctx, p.InvitationID, api.TeamAcceptRequest{OperationID: newIdempotencyKey()})
 		case "team.activity":
-			return client.TeamActivity(ctx, p.TeamID, p.Cursor, 50)
+			filters := url.Values{"limit": {"50"}}
+			if p.Cursor != "" {
+				filters.Set("cursor", p.Cursor)
+			}
+			return client.Activity(ctx, p.TeamID, filters)
 		}
 	case "sessions.list":
 		var p struct {

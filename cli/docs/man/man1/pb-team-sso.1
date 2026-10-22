@@ -1,0 +1,46 @@
+.nh
+.TH "PB-TEAM-SSO" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-team-sso - Single sign-on for a team (owners and admins)
+
+
+.SH SYNOPSIS
+\fBpb team sso [flags]\fP
+
+
+.SH DESCRIPTION
+Single sign-on for a team through WorkOS, with SAML or OpenID Connect and any identity provider such as Okta, Entra ID or Google Workspace. Verify your domain, connect the identity provider in the WorkOS Admin Portal, then optionally require SSO so members reach the team only after signing in through it. The owner and SSO-exempt members are the break-glass accounts.
+
+.PP
+With --json, this command group lists its available commands.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for sso
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-team(1)\fP, \fBpb-team-sso-enforce(1)\fP, \fBpb-team-sso-exempt(1)\fP, \fBpb-team-sso-setup(1)\fP, \fBpb-team-sso-status(1)\fP

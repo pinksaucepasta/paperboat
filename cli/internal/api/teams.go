@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"net/url"
-	"strconv"
 	"time"
 )
 
@@ -219,26 +218,6 @@ func (c *Client) MutateTeamMachine(ctx context.Context, team string, in TeamMach
 func (c *Client) GrantTeamMachine(ctx context.Context, team string, in TeamMachineGrantRequest) (Team, error) {
 	var out Team
 	err := c.doWithHeaders(ctx, http.MethodPost, "/v1/teams/"+url.PathEscape(team)+"/machine-grants", in, &out, teamHeaders(in.OperationID))
-	return out, err
-}
-
-// TeamActivity contains administrative metadata only, never resource payloads.
-type TeamActivity struct {
-	ID           string         `json:"id"`
-	ActorAccount string         `json:"actor_account"`
-	Action       string         `json:"action"`
-	CreatedAt    time.Time      `json:"created_at"`
-	Metadata     map[string]any `json:"metadata"`
-}
-type TeamActivityPage struct {
-	Items      []TeamActivity `json:"items"`
-	NextCursor string         `json:"next_cursor"`
-}
-
-func (c *Client) TeamActivity(ctx context.Context, team, cursor string, limit int) (TeamActivityPage, error) {
-	var out TeamActivityPage
-	query := url.Values{"cursor": {cursor}, "limit": {strconv.Itoa(limit)}}
-	err := c.do(ctx, http.MethodGet, "/v1/teams/"+url.PathEscape(team)+"/activity?"+query.Encode(), nil, &out)
 	return out, err
 }
 

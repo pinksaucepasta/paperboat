@@ -1,0 +1,54 @@
+.nh
+.TH "PB-TEAM-SSO-ENFORCE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-team-sso-enforce - Turn Require SSO on or off (shows who loses access first)
+
+
+.SH SYNOPSIS
+\fBpb team sso enforce <team> <on|off> [flags]\fP
+
+
+.SH DESCRIPTION
+Turn Require SSO on or off. When on, members reach the team only after an SSO sign-in within the SSO session length, set with --session. Turning it on first lists the members who would lose access until they sign in through SSO and prints the exact command with --confirm to proceed. Open connections keep running.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--confirm\fP=""
+	the review code printed when turning Require SSO on
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for enforce
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+.PP
+\fB--session\fP=""
+	SSO session length, e.g. 24h or 7d (1–30 days)
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-team-sso(1)\fP

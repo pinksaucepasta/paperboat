@@ -1,10 +1,10 @@
 ## pb team activity
 
-View owner/admin activity from the last 90 days
+Search the team audit log (owners, admins, auditors)
 
 ### Synopsis
 
-View owner/admin activity from the last 90 days
+Search the team audit log, newest first. Owners, admins and auditors can read it. Filter by actor (account ID, email or API token), action or action prefix, target, result (success or denied) and time range, or search text. Each event shows when, who, what, the result and the target. Use --json for the documented event shape and the next page cursor.
 
 Read recent owner/admin activity for one team, with cursor and limit for pagination. Entries support review of membership and grant changes within the retention window.
 
@@ -19,10 +19,17 @@ pb team activity <team> [flags]
 ### Options
 
 ```
+      --action string   action, or a prefix such as team or billing
+      --actor string    account ID, email or API token ID
       --cursor string   next_cursor from the previous page
   -h, --help            help for activity
-      --json            print canonical JSON including metadata and next_cursor
+      --json            print the events as JSON, with next_cursor
       --limit int       maximum events, 1–200 (default 50)
+      --result string   success or denied
+      --search string   text in the action, target name or actor email
+      --since string    start: RFC 3339 time or a duration ago such as 24h or 7d
+      --target string   target resource or machine ID
+      --until string    end: RFC 3339 time or a duration ago
 ```
 
 ### Options inherited from parent commands
@@ -37,4 +44,5 @@ pb team activity <team> [flags]
 ### SEE ALSO
 
 * [pb team](pb_team.md)	 - Manage teams and explicit resource permissions
+* [pb team activity export](pb_team_activity_export.md)	 - Export the team audit log as CSV or JSON
 

@@ -182,7 +182,8 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb switch](pb_switch.md) | Switch the active Personal or team workspace |
 | [pb team](pb_team.md) | Manage teams and explicit resource permissions |
 | [pb team accept](pb_team_accept.md) | Accept an invitation bound to this account |
-| [pb team activity](pb_team_activity.md) | View owner/admin activity from the last 90 days |
+| [pb team activity](pb_team_activity.md) | Search the team audit log (owners, admins, auditors) |
+| [pb team activity export](pb_team_activity_export.md) | Export the team audit log as CSV or JSON |
 | [pb team attach](pb_team_attach.md) | Attach or detach an explicitly selected personal resource |
 | [pb team cancel-invite](pb_team_cancel-invite.md) | Cancel an outstanding invitation |
 | [pb team create](pb_team_create.md) | Create a team by paying for its seats |
@@ -207,6 +208,15 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb team machine unshare](pb_team_machine_unshare.md) | Withdraw the team's grants while retaining personal ownership |
 | [pb team remove](pb_team_remove.md) | Remove a team member |
 | [pb team role](pb_team_role.md) | Change a team member's role |
+| [pb team scim](pb_team_scim.md) | Directory sync (SCIM) for a team (owners and admins) |
+| [pb team scim map](pb_team_scim_map.md) | Map a directory group to a team role |
+| [pb team scim setup](pb_team_scim_setup.md) | Open the WorkOS Admin Portal to connect your directory |
+| [pb team scim status](pb_team_scim_status.md) | Show directory sync state, last sync and group roles |
+| [pb team sso](pb_team_sso.md) | Single sign-on for a team (owners and admins) |
+| [pb team sso enforce](pb_team_sso_enforce.md) | Turn Require SSO on or off (shows who loses access first) |
+| [pb team sso exempt](pb_team_sso_exempt.md) | Mark or unmark a member as SSO exempt (break-glass) |
+| [pb team sso setup](pb_team_sso_setup.md) | Open the WorkOS Admin Portal to verify a domain and connect your identity provider |
+| [pb team sso status](pb_team_sso_status.md) | Show SSO connection, verified domains, Require SSO and exemptions |
 | [pb team transfer](pb_team_transfer.md) | Transfer team ownership |
 | [pb tunnel](pb_tunnel.md) | Manage durable tunnels or start an ephemeral tunnel |
 | [pb tunnel connector](pb_tunnel_connector.md) | Manage tunnel connectors |

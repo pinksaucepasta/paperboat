@@ -37,7 +37,7 @@ func teamCobraCommand() *cobra.Command {
 		teamInvitationsCommand(), teamInvitationShowCommand(), teamActivityCommand(), teamReadCommand("list"), teamReadCommand("get"), teamCreateCommand(), teamInviteCommand(),
 		teamAcceptCommand(), teamDeclineCommand(), teamCancelInviteCommand(), teamMutationCommand("role"),
 		teamMutationCommand("remove"), teamMutationCommand("leave"), teamMutationCommand("transfer"),
-		teamMutationCommand("delete"), teamGrantCommand(), teamAttachCommand(), teamMachineCommand(),
+		teamMutationCommand("delete"), teamGrantCommand(), teamAttachCommand(), teamMachineCommand(), teamSSOCommand(), teamSCIMCommand(),
 	)
 	nameSuspendedTeam(root)
 	return root
@@ -569,41 +569,6 @@ func writeTeamPermissions(c *cobra.Command, team api.Team) error {
 		}
 	}
 	return nil
-}
-
-func teamActivityCommand() *cobra.Command {
-	c := &cobra.Command{Use: "activity <team>", Short: "View owner/admin activity from the last 90 days", Args: commandArgs(cobra.ExactArgs(1)), RunE: func(c *cobra.Command, args []string) error {
-		limit, _ := c.Flags().GetInt("limit")
-		cursor, _ := c.Flags().GetString("cursor")
-		if !validTeamCLIIdentifier(args[0]) || limit < 1 || limit > 200 {
-			return localArgumentError("use a valid team and limit between 1 and 200")
-		}
-		client, err := backendForCommand(c)
-		if err != nil {
-			return err
-		}
-		page, err := client.TeamActivity(c.Context(), args[0], cursor, limit)
-		if err != nil {
-			return err
-		}
-		jsonOutput, _ := c.Flags().GetBool("json")
-		if jsonOutput {
-			return json.NewEncoder(c.OutOrStdout()).Encode(page)
-		}
-		for _, item := range page.Items {
-			if _, err = fmt.Fprintf(c.OutOrStdout(), "%s\t%s\t%s\n", item.CreatedAt.Format("2006-01-02T15:04:05Z07:00"), item.ActorAccount, item.Action); err != nil {
-				return err
-			}
-		}
-		if page.NextCursor != "" {
-			_, err = fmt.Fprintf(c.OutOrStdout(), "Next page: pb team activity %s --cursor %s --limit %d\n", args[0], page.NextCursor, limit)
-		}
-		return err
-	}}
-	c.Flags().Int("limit", 50, "maximum events, 1–200")
-	c.Flags().String("cursor", "", "next_cursor from the previous page")
-	c.Flags().Bool("json", false, "print canonical JSON including metadata and next_cursor")
-	return c
 }
 
 func teamInvitationsCommand() *cobra.Command {

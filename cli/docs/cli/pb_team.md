@@ -32,7 +32,7 @@ pb team [flags]
 
 * [pb](pb.md)	 - Open Paperboat or connect to an environment terminal
 * [pb team accept](pb_team_accept.md)	 - Accept an invitation bound to this account
-* [pb team activity](pb_team_activity.md)	 - View owner/admin activity from the last 90 days
+* [pb team activity](pb_team_activity.md)	 - Search the team audit log (owners, admins, auditors)
 * [pb team attach](pb_team_attach.md)	 - Attach or detach an explicitly selected personal resource
 * [pb team cancel-invite](pb_team_cancel-invite.md)	 - Cancel an outstanding invitation
 * [pb team create](pb_team_create.md)	 - Create a team by paying for its seats
@@ -48,5 +48,7 @@ pb team [flags]
 * [pb team machine](pb_team_machine.md)	 - Share machines and manage exact team access
 * [pb team remove](pb_team_remove.md)	 - Remove a team member
 * [pb team role](pb_team_role.md)	 - Change a team member's role
+* [pb team scim](pb_team_scim.md)	 - Directory sync (SCIM) for a team (owners and admins)
+* [pb team sso](pb_team_sso.md)	 - Single sign-on for a team (owners and admins)
 * [pb team transfer](pb_team_transfer.md)	 - Transfer team ownership
 

@@ -1,0 +1,46 @@
+.nh
+.TH "PB-TEAM-SSO-STATUS" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-team-sso-status - Show SSO connection, verified domains, Require SSO and exemptions
+
+
+.SH SYNOPSIS
+\fBpb team sso status <team> [flags]\fP
+
+
+.SH DESCRIPTION
+Show the team's single sign-on state as last read from WorkOS: the identity provider connection and its state, verified and pending domains, whether Require SSO is on and its SSO session length, JIT provisioning, and the members marked SSO exempt. Owners, admins and auditors can read it. Use --json for every field.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for status
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-team-sso(1)\fP
