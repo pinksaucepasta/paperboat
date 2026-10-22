@@ -90,6 +90,8 @@ func (s *Service) terminalSessionInventory(ctx context.Context, account, exactSe
 	if workspaceTeamID.Valid {
 		teamID = workspaceTeamID.String
 	}
+	// sessions holds only candidates (own, bound to an active team of the account, browser policy); the role checks
+	// below decide. Without the candidate clause terminal_session_role ran for every terminal in the database.
 	query := `WITH browser_candidates AS (
  SELECT p.terminal_session_id id FROM terminal_browser_access_policies p
  JOIN user_machine_terminal_sessions target ON target.id=p.terminal_session_id
@@ -105,7 +107,9 @@ func (s *Service) terminalSessionInventory(ctx context.Context, account, exactSe
     WHERE team.team_id=p.team_id AND team.deleted_at IS NULL AND NOT team.suspended)))
 
 ), sessions AS (
- SELECT s.id,s.name,s.launch_cwd,s.desired_state,s.runtime_state,s.last_activity_at,s.closed_at,s.is_default,s.owner_account,s.owner_team_id,'machine'::text kind,m.id target_id,m.alias target_name,m.id machine_id,m.environment_id,m.installation_generation,m.state,m.online,m.configured_capabilities @> ARRAY['terminal_host'] AND m.observed_capabilities @> ARRAY['terminal_host'] terminal_ready FROM user_machine_terminal_sessions s JOIN user_machines m ON m.id=s.user_machine_id WHERE s.deleted_at IS NULL AND m.deleted_at IS NULL)
+ SELECT s.id,s.name,s.launch_cwd,s.desired_state,s.runtime_state,s.last_activity_at,s.closed_at,s.is_default,s.owner_account,s.owner_team_id,'machine'::text kind,m.id target_id,m.alias target_name,m.id machine_id,m.environment_id,m.installation_generation,m.state,m.online,m.configured_capabilities @> ARRAY['terminal_host'] AND m.observed_capabilities @> ARRAY['terminal_host'] terminal_ready FROM user_machine_terminal_sessions s JOIN user_machines m ON m.id=s.user_machine_id WHERE s.deleted_at IS NULL AND m.deleted_at IS NULL
+ AND (s.owner_account=$1 OR s.id IN (SELECT id FROM browser_candidates) OR s.id IN (SELECT b.resource_id FROM team_resource_bindings b
+  JOIN team_members tm ON tm.team_id=b.team_id AND tm.account_id=$1 AND tm.active WHERE b.resource_kind='terminal_session' AND b.active)))
 	 SELECT x.id,x.name,x.launch_cwd,x.desired_state,x.runtime_state,x.last_activity_at,x.closed_at,x.is_default,x.owner_account,x.kind,x.target_id,x.target_name,x.machine_id,x.environment_id,x.installation_generation,x.state,x.online,x.terminal_ready,coalesce(b.team_id,''),coalesce(t.generation,0),coalesce(terminal_session_role($1,x.id),''),x.owner_account=$1,EXISTS(SELECT 1 FROM team_terminal_session_grants ag WHERE ag.team_id=b.team_id AND ag.terminal_session_id=x.id AND ag.audience='all_members' AND ag.active),bc.id IS NOT NULL
 	 FROM sessions x LEFT JOIN team_resource_bindings b ON b.resource_kind='terminal_session' AND b.resource_id=x.id AND b.active LEFT JOIN teams t ON t.team_id=b.team_id AND t.deleted_at IS NULL
 	 LEFT JOIN browser_candidates bc ON bc.id=x.id
@@ -215,11 +219,7 @@ func (s *Service) terminalSessionInventory(ctx context.Context, account, exactSe
 	}
 	out = authorized
 	if exactSession == "" {
-		ids := make([]string, len(out))
-		for index := range out {
-			ids[index] = out[index].ID
-		}
-		for index, observed := range s.terminalInventoryObservations(ctx, account, ids) {
+		for index, observed := range s.describeTerminalPage(ctx, account, out) {
 			if observed != nil {
 				out[index] = *observed
 			}
@@ -234,6 +234,20 @@ func (s *Service) terminalSessionInventory(ctx context.Context, account, exactSe
 // room for authorization/database reads and returns unavailable rows on slow hosts.
 const terminalInventoryObservationBudget = 3 * time.Second
 const terminalInventoryObservationConcurrency = 4
+
+// The page rows are already authorized: describe them as they are instead of looking each one up again
+// (that per-row catalog query made a 50-row page cost ~550 queries).
+func (s *Service) describeTerminalPage(ctx context.Context, account string, items []SharedTerminalSession) []*SharedTerminalSession {
+	ids := make([]string, len(items))
+	byID := make(map[string]SharedTerminalSession, len(items))
+	for index, item := range items {
+		ids[index] = item.ID
+		byID[item.ID] = item
+	}
+	return boundedTerminalInventoryObservations(ctx, ids, func(ctx context.Context, id string) (SharedTerminalSession, error) {
+		return s.describeTerminalSession(ctx, account, byID[id])
+	})
+}
 
 func (s *Service) terminalInventoryObservations(ctx context.Context, account string, ids []string) []*SharedTerminalSession {
 	return boundedTerminalInventoryObservations(ctx, ids, func(ctx context.Context, id string) (SharedTerminalSession, error) {
@@ -293,6 +307,12 @@ func (s *Service) TerminalSessionSharing(ctx context.Context, account, sessionID
 	if !found {
 		return item, ErrTerminalSessionNotFound
 	}
+	return s.describeTerminalSession(ctx, account, item)
+}
+
+// describeTerminalSession adds grants and live host metadata to an authorized catalog row.
+func (s *Service) describeTerminalSession(ctx context.Context, account string, item SharedTerminalSession) (SharedTerminalSession, error) {
+	sessionID := item.ID
 	if item.BrowserOnly {
 		decision, decisionErr := s.ResolveTerminalBrowserRole(ctx, account, sessionID)
 		if decisionErr != nil {
