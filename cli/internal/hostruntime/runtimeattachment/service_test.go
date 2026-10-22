@@ -277,24 +277,19 @@ func newRuntimeAttachmentTestService(t *testing.T, transport http.RoundTripper) 
 	return service
 }
 
-func TestRuntimeAttachmentOutlivesCredentialOutageAndRevokes(t *testing.T) {
-	var calls atomic.Int32
-	var revoked atomic.Bool
+// startConnectedRuntimeCarrier runs the service against a control plane whose attachment response
+// status is status() and whose admission expires at expiry, and returns the admitted edge carrier.
+func startConnectedRuntimeCarrier(t *testing.T, ctx context.Context, expiry time.Time, status func() int) (*Service, *connector.DataCarrier) {
+	t.Helper()
 	var document admission
 	transport := roundTripperFunc(func(request *http.Request) (*http.Response, error) {
-		status := http.StatusOK
-		if revoked.Load() {
-			status = http.StatusForbidden
-		} else if calls.Add(1) > 1 {
-			status = http.StatusServiceUnavailable
-		}
 		payload, err := json.Marshal(struct {
 			Data admission `json:"data"`
 		}{document})
 		if err != nil {
 			return nil, err
 		}
-		return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(payload)), Request: request}, nil
+		return &http.Response{StatusCode: status(), Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(payload)), Request: request}, nil
 	})
 	service := newRuntimeAttachmentTestService(t, transport)
 	store, err := identity.Open(identity.Config{StateRoot: service.config.StateRoot})
@@ -304,14 +299,11 @@ func TestRuntimeAttachmentOutlivesCredentialOutageAndRevokes(t *testing.T) {
 	public := store.Current().Public()
 	digest := sha256.Sum256(public)
 	trust := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
-	defer trust.Close()
+	t.Cleanup(trust.Close)
 	pin := sha256.Sum256(trust.Certificate().RawSubjectPublicKeyInfo)
-	expiry := time.Now().Add(2 * time.Second)
 	document = admission{Schema: "paperboat.runtime-carrier/v1", RouteKind: "runtime_https_wss", Hostname: "runtime.example.test", EdgeEndpoints: []string{"h2://edge.example.test:8443"}, ExpiresAt: expiry,
 		ActiveEdgeNodeID: "edge-test", ActiveEdgeProcessEpoch: "epoch-1234567890123456789012345678",
 		Binding: binding{AccountID: "account-test", HostID: "machine-test", TunnelID: "machine-test", ConnectorID: "machine-test", SessionID: "session-test", ProcessGeneration: 1, ConfigGeneration: 1, InstallationGeneration: 1, RouteID: "route-test", EdgeNodeID: "edge-test", EdgeProcessEpoch: "epoch-1234567890123456789012345678", MachineIdentityPublicKey: base64.RawURLEncoding.EncodeToString(public), MachineIdentityThumbprint: "sha256:" + base64.RawURLEncoding.EncodeToString(digest[:]), EdgeCarrierServerSPKISHA256: "sha256:" + hex.EncodeToString(pin[:]), EdgeCarrierServerCertificateChainPEM: string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: trust.Certificate().Raw}))}}
-	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
-	defer cancel()
 	connected := make(chan *connector.DataCarrier, 1)
 	source, err := preview.NewMachineAttachmentSessionSource(preview.MachineAttachmentSessionSourceConfig{StateRoot: service.config.StateRoot, SessionFactory: func(got connector.DataCarrierIdentity, config connector.DataCarrierPoolConfig, _ connector.NetworkDialerConfig) (connector.DataCarrierSessionSource, error) {
 		local, remote := net.Pipe()
@@ -333,17 +325,34 @@ func TestRuntimeAttachmentOutlivesCredentialOutageAndRevokes(t *testing.T) {
 	if err := service.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { cancel(); _ = service.Shutdown(context.Background()) }()
-	var edge *connector.DataCarrier
+	t.Cleanup(func() { _ = service.Shutdown(context.Background()) })
 	select {
-	case edge = <-connected:
+	case edge := <-connected:
+		t.Cleanup(func() { edge.Close() })
+		if err := edge.Ping(ctx); err != nil {
+			t.Fatal(err)
+		}
+		return service, edge
 	case <-ctx.Done():
 		t.Fatal("runtime carrier was not admitted")
 	}
-	defer edge.Close()
-	if err := edge.Ping(ctx); err != nil {
-		t.Fatal(err)
-	}
+	return nil, nil
+}
+
+func TestRuntimeAttachmentOutlivesCredentialOutageAndRevokes(t *testing.T) {
+	var calls atomic.Int32
+	var revoked atomic.Bool
+	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
+	defer cancel()
+	expiry := time.Now().Add(2 * time.Second)
+	_, edge := startConnectedRuntimeCarrier(t, ctx, expiry, func() int {
+		if revoked.Load() {
+			return http.StatusForbidden
+		} else if calls.Add(1) > 1 {
+			return http.StatusServiceUnavailable
+		}
+		return http.StatusOK
+	})
 	select {
 	case <-edge.Done():
 		t.Fatal("credential expiry/outage closed admitted runtime carrier")
@@ -357,6 +366,47 @@ func TestRuntimeAttachmentOutlivesCredentialOutageAndRevokes(t *testing.T) {
 	case <-edge.Done():
 	case <-ctx.Done():
 		t.Fatal("explicit runtime revocation did not close carrier")
+	}
+}
+
+// Every machine POSTed its carrier attachment once per second even while healthy (2026-10-22: ~21/s
+// fleet-wide, the main writer of runtime_carrier_attachments during the storm). A healthy carrier
+// with a long admission asks again only after healthyRecheck.
+func TestHealthyRuntimeCarrierDoesNotAskForItsAttachmentEverySecond(t *testing.T) {
+	var calls atomic.Int32
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	_, edge := startConnectedRuntimeCarrier(t, ctx, time.Now().Add(time.Hour), func() int { calls.Add(1); return http.StatusOK })
+	settled := calls.Load()
+	time.Sleep(3500 * time.Millisecond)
+	if extra := calls.Load() - settled; extra != 0 {
+		t.Fatalf("healthy carrier made %d attachment requests in 3.5 s", extra)
+	}
+	if err := edge.Ping(ctx); err != nil {
+		t.Fatal("carrier unusable", err)
+	}
+}
+
+func TestRoundPacerRechecksHealthyCarriersAndRunsAtOnceWhenOneDrops(t *testing.T) {
+	now := time.Now()
+	var pacer roundPacer
+	if !pacer.due(now, false) {
+		t.Fatal("first round must run")
+	}
+	pacer.finished(now, true, now.Add(time.Hour))
+	if pacer.due(now.Add(time.Second), true) || !pacer.due(now.Add(healthyRecheck), true) {
+		t.Fatal("healthy carriers must be rechecked after healthyRecheck, not every tick")
+	}
+	if !pacer.due(now.Add(time.Second), false) {
+		t.Fatal("a carrier that is no longer ready must run a round at once")
+	}
+	pacer.finished(now, true, now.Add(10*time.Second))
+	if pacer.due(now.Add(4*time.Second), true) || !pacer.due(now.Add(5*time.Second), true) {
+		t.Fatal("a short admission must be rechecked at half its remaining life")
+	}
+	pacer.finished(now, false, now.Add(time.Hour))
+	if !pacer.due(now.Add(time.Millisecond), true) {
+		t.Fatal("after an unhealthy round every tick runs (the admission poll paces failures)")
 	}
 }
 

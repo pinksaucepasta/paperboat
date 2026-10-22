@@ -212,6 +212,7 @@ func (s *Service) run(ctx context.Context) {
 	retries := map[string]retryState{}
 	publisherKey := ""
 	var lastFailure *failureClass
+	var pacer roundPacer
 	defer func() {
 		var cleanupErr error
 		if s.broadcaster != nil {
@@ -237,8 +238,12 @@ func (s *Service) run(ctx context.Context) {
 		// unresponsive candidate would then fail the whole check on every poll
 		// and keep the carrier from ever connecting. Each attachment check owns
 		// a bounded context derived from the service lifetime instead.
+		if !pacer.due(time.Now(), carriersReady(lives, publisherKey)) {
+			return nil
+		}
 		checkCtx, cancelCheck := context.WithTimeout(ctx, attachmentCheckTimeout)
 		defer cancelCheck()
+		wantedCount := 0
 		response, err := s.fetch(checkCtx, "", "")
 		var probeErr error
 		if err == nil && len(response.EdgeCandidates) != 0 && (s.lastProbe.IsZero() || time.Since(s.lastProbe) >= 30*time.Second) {
@@ -285,6 +290,7 @@ func (s *Service) run(ctx context.Context) {
 				key := carrierKey(admission)
 				wanted[key] = true
 			}
+			wantedCount = len(wanted)
 			for key, item := range lives {
 				if !wanted[key] || item.active.Pool().State() != connector.DataCarrierPoolReady {
 					if publisherKey == key && s.broadcaster != nil {
@@ -373,6 +379,11 @@ func (s *Service) run(ctx context.Context) {
 			}
 			delete(lives, key)
 		}
+		expiresAt := response.ExpiresAt
+		if response.Backup != nil && response.Backup.ExpiresAt.Before(expiresAt) {
+			expiresAt = response.Backup.ExpiresAt
+		}
+		pacer.finished(time.Now(), err == nil && wantedCount > 0 && len(lives) == wantedCount && carriersReady(lives, publisherKey), expiresAt)
 		if err != nil {
 			s.lastProbe = time.Time{}
 			lastFailure = s.observeFailure(ctx, err, lastFailure)
@@ -384,6 +395,19 @@ func (s *Service) run(ctx context.Context) {
 	})
 	defer stopPoll()
 	<-ctx.Done()
+}
+
+// carriersReady reports whether every connected carrier is ready and one of them publishes.
+func carriersReady(lives map[string]*live, publisherKey string) bool {
+	if len(lives) == 0 || publisherKey == "" {
+		return false
+	}
+	for _, item := range lives {
+		if item.active.Pool().State() != connector.DataCarrierPoolReady {
+			return false
+		}
+	}
+	return true
 }
 
 func chooseLive(ordered []admissionBinding, lives map[string]*live, activeNode, activeEpoch string) (*live, admissionBinding) {
