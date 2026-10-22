@@ -25,14 +25,14 @@ import (
 )
 
 type fixture struct {
-	t        *testing.T
+	t        testing.TB
 	signing  ed25519.PrivateKey
 	verifier Verifier
 	tls      *tls.Config
 	roots    *x509.CertPool
 }
 
-func certificate(t *testing.T) tls.Certificate {
+func certificate(t testing.TB) tls.Certificate {
 	t.Helper()
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -53,7 +53,7 @@ func certificate(t *testing.T) tls.Certificate {
 	}
 	return tls.Certificate{Certificate: [][]byte{raw}, PrivateKey: priv, Leaf: leaf}
 }
-func newFixture(t *testing.T) *fixture {
+func newFixture(t testing.TB) *fixture {
 	t.Helper()
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -123,7 +123,7 @@ func (f *fixture) client(address string, cert tls.Certificate, g Grant) *Client 
 	f.t.Cleanup(func() { c.Close() })
 	return c
 }
-func eventually(t *testing.T, condition func() bool) {
+func eventually(t testing.TB, condition func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
 	for !condition() {
@@ -133,7 +133,7 @@ func eventually(t *testing.T, condition func() bool) {
 		time.Sleep(5 * time.Millisecond)
 	}
 }
-func connect(t *testing.T, c *Client) {
+func connect(t testing.TB, c *Client) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()

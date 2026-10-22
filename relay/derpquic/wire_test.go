@@ -117,17 +117,27 @@ func TestFrameAndControlBounds(t *testing.T) {
 	}
 }
 func TestBudgetBoundAndRecovery(t *testing.T) {
-	var b budget
+	b := newBudget(carrierBytesPerSecond)
 	now := time.Now()
-	for range 256 {
-		if !b.allow(now) {
+	for range budgetBurstBytes / budgetMinimumCost {
+		if !b.allow(now, 1) {
 			t.Fatal("burst ended early")
 		}
 	}
-	if b.allow(now) {
+	if b.allow(now, 1) {
 		t.Fatal("burst exceeded bound")
 	}
-	if !b.allow(now.Add(time.Second)) {
+	if !b.allow(now.Add(time.Second), MaxControl) {
 		t.Fatal("budget did not recover")
+	}
+	// A second of traffic is bounded by the rate plus the burst, counted in bytes.
+	b, sent := newBudget(carrierBytesPerSecond), 0
+	for at := now; at.Before(now.Add(time.Second)); at = at.Add(time.Microsecond) {
+		if b.allow(at, 1400) {
+			sent += 1400
+		}
+	}
+	if sent > carrierBytesPerSecond+budgetBurstBytes || sent < carrierBytesPerSecond {
+		t.Fatalf("one second forwarded %d bytes", sent)
 	}
 }

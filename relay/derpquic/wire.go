@@ -173,25 +173,38 @@ func (r *reassembler) accept(b []byte, now time.Time, authorize func(key.NodePub
 	return packet{peer, data, false}, true, nil
 }
 
-// budget bounds authenticated work, including fragments that never complete.
+// Forwarding budgets bound authenticated work per carrier and per account. Every
+// datagram or frame costs its size, at least budgetMinimumCost, so incomplete
+// fragments and tiny frames are bounded too.
+const (
+	carrierBytesPerSecond = 64 << 20  // 512 Mbit/s per carrier
+	accountBytesPerSecond = 128 << 20 // shared by an account's carriers on one relay
+	budgetBurstBytes      = 4 << 20
+	budgetMinimumCost     = fragmentHeader + fragmentPayload
+)
+
 type budget struct {
 	mu     sync.Mutex
+	rate   float64
 	at     time.Time
 	tokens float64
 }
 
-func (b *budget) allow(now time.Time) bool {
+func newBudget(bytesPerSecond float64) *budget { return &budget{rate: bytesPerSecond} }
+
+func (b *budget) allow(now time.Time, size int) bool {
+	cost := float64(max(size, budgetMinimumCost))
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.at.IsZero() {
-		b.tokens = 256
+		b.tokens = budgetBurstBytes
 	} else {
-		b.tokens = min(256, b.tokens+now.Sub(b.at).Seconds()*4096)
+		b.tokens = min(budgetBurstBytes, b.tokens+now.Sub(b.at).Seconds()*b.rate)
 	}
 	b.at = now
-	if b.tokens < 1 {
+	if b.tokens < cost {
 		return false
 	}
-	b.tokens--
+	b.tokens -= cost
 	return true
 }

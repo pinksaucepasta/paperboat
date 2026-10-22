@@ -65,7 +65,7 @@ type peerConn struct {
 	grant    Grant
 	out      chan queued
 	control  chan []byte
-	rate     budget
+	rate     *budget
 	sequence atomic.Uint64
 }
 
@@ -182,7 +182,7 @@ func (s *Server) serveConn(c *quic.Conn) {
 	if err != nil {
 		return
 	}
-	p := &peerConn{conn: c, stream: stream, out: make(chan queued, queueDepth), control: make(chan []byte, 8)}
+	p := &peerConn{conn: c, stream: stream, rate: newBudget(carrierBytesPerSecond), out: make(chan queued, queueDepth), control: make(chan []byte, 8)}
 	s.servePeer(p)
 }
 
@@ -258,7 +258,7 @@ func (s *Server) servePeer(p *peerConn) {
 		s.mu.Lock()
 		accountBudget := s.accounts[p.grant.AccountID]
 		s.mu.Unlock()
-		if !p.rate.allow(time.Now()) || accountBudget == nil || !accountBudget.allow(time.Now()) {
+		if now := time.Now(); !p.rate.allow(now, len(b)) || accountBudget == nil || !accountBudget.allow(now, len(b)) {
 			s.reject(p, ErrOverload)
 			return
 		}
@@ -399,7 +399,7 @@ func (s *Server) admit(p *peerConn, token string) error {
 				}
 			}
 		}
-		s.accounts[g.AccountID] = new(budget)
+		s.accounts[g.AccountID] = newBudget(accountBytesPerSecond)
 	}
 	return nil
 }
@@ -437,7 +437,7 @@ func (s *Server) readDatagrams(p *peerConn) {
 		s.mu.Lock()
 		account := s.accounts[p.grant.AccountID]
 		s.mu.Unlock()
-		if !p.rate.allow(now) || account == nil || !account.allow(now) {
+		if !p.rate.allow(now, len(b)) || account == nil || !account.allow(now, len(b)) {
 			s.dropped.Add(1)
 			continue
 		}

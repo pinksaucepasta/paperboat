@@ -39,7 +39,7 @@ func (s *Server) WSSHandler() http.Handler {
 		ctx, cancel := context.WithCancel(r.Context())
 		c.SetReadLimit(MaxControl + 5)
 		nc := wsconn.NetConn(ctx, c, websocket.MessageBinary, r.RemoteAddr)
-		p := &peerConn{stream: nc, ctx: ctx, cancel: cancel, tlsState: *r.TLS, out: make(chan queued, queueDepth), control: make(chan []byte, 8)}
+		p := &peerConn{stream: nc, ctx: ctx, cancel: cancel, tlsState: *r.TLS, rate: newBudget(carrierBytesPerSecond), out: make(chan queued, queueDepth), control: make(chan []byte, 8)}
 		var closeOnce sync.Once
 		p.closeFn = func(code uint64, reason string) {
 			closeOnce.Do(func() {
