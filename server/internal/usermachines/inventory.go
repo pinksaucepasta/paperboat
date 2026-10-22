@@ -31,7 +31,13 @@ func (s *Service) ListInventory(ctx context.Context, account string, opts Invent
 	if team.Valid {
 		teamID = team.String
 	}
-	predicate := ` FROM user_machines m WHERE m.deleted_at IS NULL AND (
+	// The candidate clause is a superset of every access rule below (own machines, machines owned by or bound to a
+	// team the account is an active member of) and is served by indexes. Without it the access functions ran for
+	// every machine in the database: 28 s for one list at 5k machines.
+	predicate := ` FROM user_machines m WHERE m.deleted_at IS NULL
+ AND (m.user_id=$1 OR m.owner_team_id IN (SELECT tm.team_id FROM team_members tm WHERE tm.account_id=$1 AND tm.active)
+  OR m.id IN (SELECT b.resource_id FROM team_members tm JOIN team_resource_bindings b ON b.team_id=tm.team_id AND b.resource_kind='machine' WHERE tm.account_id=$1 AND tm.active))
+ AND (
  (NOT $2::boolean AND (machine_management_allowed($1,m.id) OR EXISTS(SELECT 1 FROM unnest(ARRAY['terminal','exec','managed_ssh','files','preview_manage','tunnel_manage']) cap WHERE machine_capability_allowed($1,m.id,cap))))
  OR ($2::boolean AND $3::text IS NULL AND m.user_id=$1 AND m.owner_team_id IS NULL)
  OR ($2::boolean AND $3::text IS NOT NULL AND EXISTS(SELECT 1 FROM teams t JOIN team_members member USING(team_id) WHERE t.team_id=$3 AND t.deleted_at IS NULL AND NOT t.suspended AND member.account_id=$1 AND member.active)
@@ -40,18 +46,16 @@ func (s *Service) ListInventory(ctx context.Context, account string, opts Invent
  AND ($5='' OR m.state=$5)
  AND ($6='' OR ($6='mine' AND m.user_id=$1 AND m.owner_team_id IS NULL) OR ($6='shared' AND (m.user_id<>$1 OR m.owner_team_id IS NOT NULL)) OR m.user_id=$6)`
 	args := []any{account, scoped, teamID, opts.Q, opts.State, opts.Owner}
-	var total int
-	if err := s.db.SQL().QueryRowContext(ctx, "SELECT count(*)"+predicate, args...).Scan(&total); err != nil {
-		return nil, 0, err
-	}
-	rows, err := s.db.SQL().QueryContext(ctx, "SELECT m.id"+predicate+" ORDER BY lower(m.alias),m.id LIMIT $7 OFFSET $8", append(args, opts.Limit, opts.Offset)...)
+	// One pass computes the page and the total; a page past the end has no row to carry the total, so count then.
+	total := -1
+	rows, err := s.db.SQL().QueryContext(ctx, "SELECT m.id,count(*) OVER ()"+predicate+" ORDER BY lower(m.alias),m.id LIMIT $7 OFFSET $8", append(args, opts.Limit, opts.Offset)...)
 	if err != nil {
 		return nil, 0, err
 	}
 	ids := []string{}
 	for rows.Next() {
 		var id string
-		if err = rows.Scan(&id); err != nil {
+		if err = rows.Scan(&id, &total); err != nil {
 			return nil, 0, errors.Join(err, rows.Close())
 		}
 		ids = append(ids, id)
@@ -59,6 +63,11 @@ func (s *Service) ListInventory(ctx context.Context, account string, opts Invent
 	err = errors.Join(rows.Err(), rows.Close())
 	if err != nil {
 		return nil, 0, err
+	}
+	if total < 0 {
+		if err := s.db.SQL().QueryRowContext(ctx, "SELECT count(*)"+predicate, args...).Scan(&total); err != nil {
+			return nil, 0, err
+		}
 	}
 	// One query for the rows and one for their access description, not a Get (two queries, ~15 function calls
 	// per machine) for each of up to 200 machines: an account with ~50 machines paid seconds per list.
