@@ -66,50 +66,28 @@ def count(rows, platform):
 
 
 def render(sections):
-    core = [s for s in sections if not is_added(s)]
-    added = [s for s in sections if is_added(s)]
-    cards = [platform_card(name, index, core) for index, name in PLATFORMS]
-    if added:
-        cards += [platform_card(f"{name}: features added after the plan ({ids(added)})", index, added)
-                  for index, name in PLATFORMS[:2]]
-    cards.append(cross_card(sections))
-    return PAGE.format(content="".join(cards), stamp=time.strftime("%H:%M %Z"))
-
-
-PLATFORMS = ((0, "Linux"), (1, "macOS"), (2, "Windows"))
-FIRST_ADDED = 16  # F16 onward were added on 2026-10-22, after the launch plan was set
-
-
-def is_added(section):
-    return section["id"].startswith("F") and int(section["id"][1:]) >= FIRST_ADDED
-
-
-def ids(sections):
-    return ", ".join(s["id"] for s in sections)
-
-
-def platform_card(name, index, sections):
     feats = [r for s in sections if s["id"].startswith("F") for r in s["feature"]]
     cmds = [r for s in sections for r in s["command"]]
-    lines = []
-    for label, rows in (("Features", feats), ("Commands", cmds)):
+    cards = []
+    for index, name in ((0, "Linux"), (1, "macOS"), (2, "Windows")):
+        lines = []
+        for label, rows in (("Features", feats), ("Commands", cmds)):
             d, b, t = count(rows, index)
             lines.append(f'<div class="row"><span>{label}</span><b>{d}/{t}</b>'
                          f'<em>{100*d//max(t,1)}%</em></div>{bar(d, t, b)}')
-    return f'<div class="card"><h2>{name}</h2>{"".join(lines)}</div>'
-
-
-def cross_card(sections):
+        cards.append(f'<div class="card"><h2>{name}</h2>{"".join(lines)}</div>')
     cross = [r for s in sections if s["id"] == "X" for r in s["feature"]]
     if not cross:
-        return ('<div class="card"><h2>Cross-platform</h2><div class="row"><span>'
-                'Rows are being written (CHECKLIST section X)</span></div></div>')
-    lines = []
-    for index, pair in ((0, "Linux ↔ macOS"), (1, "Linux ↔ Windows"), (2, "macOS ↔ Windows")):
-        d, b, t = count(cross, index)
-        lines.append(f'<div class="row"><span>{pair}</span><b>{d}/{t}</b>'
-                     f'<em>{100*d//max(t,1)}%</em></div>{bar(d, t, b)}')
-    return f'<div class="card"><h2>Cross-platform</h2>{"".join(lines)}</div>'
+        cards.append('<div class="card"><h2>Cross-platform</h2><div class="row"><span>'
+                     'Rows are being written (CHECKLIST section X)</span></div></div>')
+    else:
+        lines = []
+        for index, pair in ((0, "Linux ↔ macOS"), (1, "Linux ↔ Windows"), (2, "macOS ↔ Windows")):
+            d, b, t = count(cross, index)
+            lines.append(f'<div class="row"><span>{pair}</span><b>{d}/{t}</b>'
+                         f'<em>{100*d//max(t,1)}%</em></div>{bar(d, t, b)}')
+        cards.append(f'<div class="card"><h2>Cross-platform</h2>{"".join(lines)}</div>')
+    return PAGE.format(content="".join(cards), stamp=time.strftime("%H:%M %Z"))
 
 
 PAGE = """<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="60">
