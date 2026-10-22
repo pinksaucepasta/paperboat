@@ -16,6 +16,7 @@ func authLoginCommand() *cobra.Command {
 	login.Flags().Bool("change-account", false, "sign in with another account after browser approval")
 	login.Flags().Bool("json", false, "print approval and sign-in states as JSON")
 	login.Flags().Bool("fresh", false, "remove this computer's setup and machine record, then add it again")
+	login.Flags().String("api-token-file", "", "sign in with an API token read from this file (- for stdin) instead of browser approval")
 	return login
 }
 

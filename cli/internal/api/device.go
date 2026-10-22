@@ -231,3 +231,10 @@ func PollDeviceLogin(ctx context.Context, baseURL, deviceCode string, hc *http.C
 func CancelDeviceLogin(ctx context.Context, baseURL, deviceCode string, hc *http.Client) error {
 	return publicCall(ctx, baseURL, "/v1/auth/device/cancel", map[string]string{"client_id": ClientID, "device_code": deviceCode}, "", nil, hc)
 }
+
+// StartAPITokenSession exchanges an API token for a CLI session of its creator that carries the
+// token (PLAN F18-06): the token is the request's bearer and is not stored by the caller.
+func StartAPITokenSession(ctx context.Context, baseURL, apiToken, label, deviceType, osName string, hc *http.Client) (out TokenSet, err error) {
+	err = publicCall(ctx, baseURL, "/v1/auth/api-token-sessions", map[string]string{"client_label": label, "device_type": deviceType, "os": osName}, apiToken, &out, hc)
+	return
+}

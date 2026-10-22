@@ -17,12 +17,13 @@ pb login [flags]
 ### Options
 
 ```
-      --change-account   sign in with another account after browser approval
-      --fresh            remove this computer's setup and machine record, then add it again
-  -h, --help             help for login
-      --json             print approval and sign-in states as JSON
-      --no-browser       print the approval link without opening a browser
-      --reauth           authenticate the current account again
+      --api-token-file string   sign in with an API token read from this file (- for stdin) instead of browser approval
+      --change-account          sign in with another account after browser approval
+      --fresh                   remove this computer's setup and machine record, then add it again
+  -h, --help                    help for login
+      --json                    print approval and sign-in states as JSON
+      --no-browser              print the approval link without opening a browser
+      --reauth                  authenticate the current account again
 ```
 
 ### Options inherited from parent commands

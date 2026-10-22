@@ -38,6 +38,12 @@ var loginHTTPClient = func() *http.Client {
 // authBrowserLogin adds this computer to the account, or signs it in again when it is already added.
 // "Start fresh" removes the old local setup and machine record first, then adds the computer again.
 func authBrowserLogin(c *command.Context) error {
+	if path := strings.TrimSpace(c.String("api-token-file")); path != "" {
+		if c.Bool("fresh") || c.Bool("reauth") || c.Bool("change-account") || c.Bool("no-browser") {
+			return localArgumentError("--api-token-file signs in without the browser; it cannot be combined with --fresh, --reauth, --change-account or --no-browser")
+		}
+		return apiTokenLogin(c, path)
+	}
 	if c.Bool("fresh") {
 		if err := startFresh(c); err != nil {
 			return err
