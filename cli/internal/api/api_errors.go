@@ -43,7 +43,10 @@ type APIError struct {
 	RequestID        string
 	SupportReference string
 	Details          map[string]any
-	cause            error
+	// Team is set by the CLI command that knows which team the request was about; it is never decoded
+	// from the response. A team_suspended refusal names it.
+	Team  string
+	cause error
 }
 
 func (e *APIError) Unwrap() error {
@@ -73,6 +76,9 @@ func IsNotFound(err error) bool {
 func (e *APIError) Error() string {
 	if e == nil {
 		return "paperboat-server request failed"
+	}
+	if e.Code == "team_suspended" && e.Team != "" {
+		return fmt.Sprintf("Team %q is suspended, so it cannot be changed. Ask a team owner to restore billing in the console; access returns when the team resumes.", e.Team)
 	}
 	return apiErrorMessage(e.Code, e.Status)
 }

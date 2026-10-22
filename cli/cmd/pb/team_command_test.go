@@ -546,3 +546,34 @@ func TestTeamDeleteWithActiveSubscriptionSaysHowToProceed(t *testing.T) {
 		t.Fatalf("code=%d output=%q", code, out.String())
 	}
 }
+
+// F12-06: a change refused with team_suspended names the team and says the owner restores billing.
+func TestSuspendedTeamIsNamedInTheRefusal(t *testing.T) {
+	supportedTeamFixtureVersion(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if teamFixtureUpdatePolicy(w, r) {
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"error":{"code":"team_suspended","message":"Ask the team owner to restore billing or resume the team."}}`))
+	}))
+	defer server.Close()
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	writeTestProfile(t, dir, configPath, server.URL)
+	for name, args := range map[string][]string{
+		"invite":  {"team", "invite", "team_1", "new.member@example.test", "--generation", "3"},
+		"machine": {"team", "machine", "share", "team_1", "machine_1", "--generation", "3"},
+		"json":    {"team", "invite", "team_1", "new.member@example.test", "--generation", "3", "--json"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var output bytes.Buffer
+			code := run(t.Context(), append(args, "--server", server.URL, "--config", configPath), &output, &output)
+			text := strings.ReplaceAll(output.String(), `\"`, `"`)
+			if code == 0 || !strings.Contains(text, `"team_1" is suspended`) || !strings.Contains(text, "restore billing") || strings.Contains(text, "Refresh it and try again") {
+				t.Fatalf("exit=%d output=%q", code, text)
+			}
+		})
+	}
+}

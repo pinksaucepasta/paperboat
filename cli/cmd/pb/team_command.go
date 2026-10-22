@@ -38,7 +38,29 @@ func teamCobraCommand() *cobra.Command {
 		teamMutationCommand("remove"), teamMutationCommand("leave"), teamMutationCommand("transfer"),
 		teamMutationCommand("delete"), teamGrantCommand(), teamAttachCommand(), teamMachineCommand(),
 	)
+	nameSuspendedTeam(root)
 	return root
+}
+
+// nameSuspendedTeam makes the leaf commands that take a team as their first argument say which team
+// is suspended when the server refuses a change with team_suspended (F12-06).
+func nameSuspendedTeam(command *cobra.Command) {
+	subcommands := command.Commands()
+	for _, sub := range subcommands {
+		nameSuspendedTeam(sub)
+	}
+	if len(subcommands) != 0 || command.RunE == nil || !strings.Contains(command.Use, "<team>") {
+		return
+	}
+	run := command.RunE
+	command.RunE = func(c *cobra.Command, args []string) error {
+		err := run(c, args)
+		var apiErr *api.APIError
+		if errors.As(err, &apiErr) && apiErr.Code == "team_suspended" && len(args) > 0 && validTeamCLIIdentifier(args[0]) {
+			apiErr.Team = args[0]
+		}
+		return err
+	}
 }
 
 func teamReadCommand(action string) *cobra.Command {
