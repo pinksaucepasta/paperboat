@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -15,7 +16,7 @@ import (
 // updater or supervisor from the wrong version outlives the rollback. Roles that run the replaced
 // executable are restarted on rollback; a role on a pinned executable (the carrier) is left alone.
 func TestLifecycleRollbackRestartsRolesThatRunTheReplacedExecutable(t *testing.T) {
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	image := filepath.Join(root, "image")
 	worker := "/opt/paperboat/bin/pb"
 	swapped := true
@@ -78,7 +79,7 @@ func writeFile(path, content string) error {
 // A replacement that failed before the executable was swapped restarts nothing: the roles still run
 // the image they started with.
 func TestLifecycleRollbackLeavesRolesAloneWhenTheExecutableWasNeverSwapped(t *testing.T) {
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	image := filepath.Join(root, "image")
 	if err := writeFile(image, "prior exact image and configuration"); err != nil {
 		t.Fatal(err)

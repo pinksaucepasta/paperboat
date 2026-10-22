@@ -4,6 +4,7 @@ package localdaemon
 
 import (
 	"context"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,7 +37,7 @@ func (r *serviceRunner) Run(_ context.Context, name string, arguments ...string)
 
 func serviceExecutable(t *testing.T) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "pb")
+	path := filepath.Join(shorttemp.Dir(t), "pb")
 	if err := os.WriteFile(path, []byte("binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}

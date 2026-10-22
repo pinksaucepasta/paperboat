@@ -3,6 +3,7 @@ package daemoncmd
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"net"
 	"os"
 	"path/filepath"
@@ -26,7 +27,7 @@ func (c *guardDomainClient) Status(context.Context) (machineguard.RuntimeStatus,
 
 func newUnsetDomainCoordinator(t *testing.T, client guardedNameClient) *Coordinator {
 	t.Helper()
-	dir := t.TempDir()
+	dir := shorttemp.Dir(t)
 	if err := os.Chmod(dir, 0700); err != nil {
 		t.Fatal(err)
 	}

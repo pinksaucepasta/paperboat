@@ -2,6 +2,7 @@ package endpointbinary
 
 import (
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -10,7 +11,7 @@ import (
 )
 
 func TestCurrentExecutableIsUsedWithoutPATHFallback(t *testing.T) {
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	suffix := ""
 	if runtime.GOOS == "windows" {
 		suffix = ".exe"
@@ -39,7 +40,7 @@ func TestCurrentExecutableIsUsedWithoutPATHFallback(t *testing.T) {
 }
 
 func TestDaemonRemovalPathDoesNotRequireDaemonArtifact(t *testing.T) {
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	suffix := ""
 	if runtime.GOOS == "windows" {
 		suffix = ".exe"
@@ -58,7 +59,7 @@ func TestDaemonRemovalPathDoesNotRequireDaemonArtifact(t *testing.T) {
 }
 
 func TestMissingExecutableRetainsNativeCauseWithoutPrivatePathAndRecovers(t *testing.T) {
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	path := filepath.Join(root, "PRIVATE_EXECUTABLE_PATH")
 	for _, resolve := range []func(string) (string, error){CLI, Daemon, DaemonPathForRemoval} {
 		value, err := resolve(path)

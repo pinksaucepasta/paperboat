@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -23,7 +24,7 @@ func TestAdmittedResumePreservesCurrentCLIProfile(t *testing.T) {
 			name = "expired"
 		}
 		t.Run(name, func(t *testing.T) {
-			now, root := time.Now().UTC(), t.TempDir()
+			now, root := time.Now().UTC(), shorttemp.Dir(t)
 			loadNow := now
 			if expired {
 				loadNow = now.Add(2 * time.Hour)

@@ -5,12 +5,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"strings"
 	"testing"
 )
 
 func TestMergeRegularText(t *testing.T) {
-	t.Setenv("PATH", t.TempDir())
+	t.Setenv("PATH", shorttemp.Dir(t))
 	tests := []struct {
 		name   string
 		base   string

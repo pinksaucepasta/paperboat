@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,7 +17,7 @@ import (
 )
 
 func TestRepositoryCredentialProfileFailuresKeepCausesAndHidePaths(t *testing.T) {
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	if err := EnsureRepositoryCredentialRoot(root); err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +70,7 @@ func (*cyclicRepositoryReferenceError) Error() string   { return "cyclic referen
 func (e *cyclicRepositoryReferenceError) Unwrap() error { return e }
 
 func TestRepositoryCredentialStorageFailuresAreUnavailableWithOriginalCause(t *testing.T) {
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	if err := EnsureRepositoryCredentialRoot(root); err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +107,7 @@ func TestRepositoryCredentialStorageFailuresAreUnavailableWithOriginalCause(t *t
 }
 
 func TestSaveRepositoryCredentialProfilePreservesRootFilesystemFailure(t *testing.T) {
-	parent := t.TempDir()
+	parent := shorttemp.Dir(t)
 	blocker := filepath.Join(parent, "file")
 	if err := os.WriteFile(blocker, []byte("not a directory"), 0o600); err != nil {
 		t.Fatal(err)
@@ -119,7 +120,7 @@ func TestSaveRepositoryCredentialProfilePreservesRootFilesystemFailure(t *testin
 }
 
 func TestRepositoryReferenceMissingCauseKeepsCredentialClassification(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "missing-reference")
+	path := filepath.Join(shorttemp.Dir(t), "missing-reference")
 	_, err := readRepositoryReference(path, true)
 	var pathErr *os.PathError
 	if !errors.Is(err, ErrRepositoryCredentials) || !errors.Is(err, os.ErrNotExist) || !errors.As(err, &pathErr) || strings.Contains(err.Error(), path) {
@@ -128,7 +129,7 @@ func TestRepositoryReferenceMissingCauseKeepsCredentialClassification(t *testing
 }
 
 func TestRepositoryRootAndSharedReadFailuresKeepFilesystemCause(t *testing.T) {
-	base := t.TempDir()
+	base := shorttemp.Dir(t)
 	blocker := filepath.Join(base, "file")
 	if err := os.WriteFile(blocker, []byte("not a directory"), 0o600); err != nil {
 		t.Fatal(err)

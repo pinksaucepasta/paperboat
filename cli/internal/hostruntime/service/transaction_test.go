@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -124,7 +125,7 @@ func (f *fakeTransactionalComponent) Restore(_ context.Context, status NativeCom
 func lifecycleForTest(t *testing.T, components ...TransactionalComponent) *LifecycleManager {
 	t.Helper()
 	manager, err := NewLifecycleManager(LifecycleConfig{
-		StateRoot: filepath.Join(t.TempDir(), "service-state"), Components: components,
+		StateRoot: filepath.Join(shorttemp.Dir(t), "service-state"), Components: components,
 		Now: func() time.Time { return time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC) },
 	})
 	if err != nil {
@@ -233,7 +234,7 @@ func TestLifecycleCrossProcessLockRejectsConcurrentMutation(t *testing.T) {
 	release := make(chan struct{})
 	component := newFakeTransactionalComponent("hostd", &calls, &callMu)
 	component.started, component.block = started, release
-	stateRoot := filepath.Join(t.TempDir(), "service-state")
+	stateRoot := filepath.Join(shorttemp.Dir(t), "service-state")
 	first, err := NewLifecycleManager(LifecycleConfig{StateRoot: stateRoot, Components: []TransactionalComponent{component}})
 	if err != nil {
 		t.Fatal(err)
@@ -244,7 +245,11 @@ func TestLifecycleCrossProcessLockRejectsConcurrentMutation(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() { done <- first.Install(context.Background()) }()
-	<-started
+	select {
+	case <-started:
+	case err := <-done:
+		t.Fatalf("install ended before the component started: %v", err)
+	}
 	if err := second.Repair(context.Background()); !errors.Is(err, ErrLifecycleBusy) {
 		t.Fatalf("concurrent err=%v", err)
 	}
@@ -348,7 +353,7 @@ func (s *authorizedInstallationState) AuthorizeRecovery(ctx context.Context, sna
 }
 
 func TestLifecycleReplacementRecoveryRequiresOwningAuthorization(t *testing.T) {
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	image := filepath.Join(root, "native-installation")
 	prior := []byte("prior exact image and configuration")
 	if err := os.WriteFile(image, prior, 0600); err != nil {
@@ -456,7 +461,7 @@ func (f readyDependentComponent) Restore(ctx context.Context, status NativeCompo
 func TestLifecycleReplacementRestoresNativeInstallation(t *testing.T) {
 	for _, interruption := range []string{"stage failure", "readiness failure", "process interruption"} {
 		t.Run(interruption, func(t *testing.T) {
-			root := t.TempDir()
+			root := shorttemp.Dir(t)
 			image := filepath.Join(root, "native-installation")
 			prior := []byte("prior exact image and configuration")
 			if err := os.WriteFile(image, prior, 0600); err != nil {
@@ -557,7 +562,7 @@ func TestLifecycleReplacementRestoresNativeInstallation(t *testing.T) {
 func TestLifecycleRecoveryRejectsUncapturedActiveAuthority(t *testing.T) {
 	for _, active := range []bool{false, true} {
 		t.Run(fmt.Sprint(active), func(t *testing.T) {
-			root := t.TempDir()
+			root := shorttemp.Dir(t)
 			image := filepath.Join(root, "image")
 			if err := os.WriteFile(image, []byte("prior exact image and configuration"), 0600); err != nil {
 				t.Fatal(err)
@@ -630,7 +635,7 @@ func TestLifecycleRecoveryRejectsUncapturedActiveAuthority(t *testing.T) {
 }
 
 func TestLifecycleRollbackPreservesUnchangedCarrier(t *testing.T) {
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	image := filepath.Join(root, "image")
 	if err := os.WriteFile(image, []byte("prior exact image and configuration"), 0600); err != nil {
 		t.Fatal(err)

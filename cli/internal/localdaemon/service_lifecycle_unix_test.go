@@ -5,6 +5,7 @@ package localdaemon
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,7 +44,7 @@ func (r *stoppedLaunchdRunner) Output(ctx context.Context, tool string, args ...
 
 func TestDarwinStoppedDeclarationCanStartWithoutReinstall(t *testing.T) {
 	runner := &stoppedLaunchdRunner{}
-	config := serviceConfig{Platform: "darwin", Home: t.TempDir(), Executable: serviceExecutable(t), Username: "test", Group: "staff", UID: os.Geteuid(), Runner: runner}
+	config := serviceConfig{Platform: "darwin", Home: shorttemp.Dir(t), Executable: serviceExecutable(t), Username: "test", Group: "staff", UID: os.Geteuid(), Runner: runner}
 	installer, err := newServiceInstaller(config)
 	if err != nil {
 		t.Fatal(err)
@@ -96,7 +97,7 @@ func TestDarwinStoppedDeclarationCanStartWithoutReinstall(t *testing.T) {
 }
 
 func TestDarwinInstalledDeclarationRejectsUnsafeFiles(t *testing.T) {
-	config := serviceConfig{Platform: "darwin", Home: t.TempDir(), Executable: serviceExecutable(t), Username: "test", Group: "staff", UID: os.Geteuid(), Runner: &stoppedLaunchdRunner{}}
+	config := serviceConfig{Platform: "darwin", Home: shorttemp.Dir(t), Executable: serviceExecutable(t), Username: "test", Group: "staff", UID: os.Geteuid(), Runner: &stoppedLaunchdRunner{}}
 	installer, err := newServiceInstaller(config)
 	if err != nil {
 		t.Fatal(err)

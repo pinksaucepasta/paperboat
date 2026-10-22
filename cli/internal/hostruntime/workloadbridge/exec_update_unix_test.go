@@ -5,6 +5,7 @@ package workloadbridge
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"path/filepath"
 	"testing"
 	"time"
@@ -16,7 +17,7 @@ import (
 )
 
 func TestBridgeCanceledExecUpdateDrainReopensAdmission(t *testing.T) {
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	adapter, err := pty.NewShellAdapter(root)
 	if err != nil {
 		t.Fatal(err)
@@ -47,7 +48,7 @@ func TestBridgeCanceledExecUpdateDrainReopensAdmission(t *testing.T) {
 	token := make([]byte, 32)
 	token[0] = 0x64
 	server := &Server{
-		Endpoint: filepath.Join(t.TempDir(), "socket", "owner.sock"), Token: token,
+		Endpoint: filepath.Join(shorttemp.Dir(t), "socket", "owner.sock"), Token: token,
 		Sessions: sessions, Executions: &execprocess.RemoteServer{Manager: executions, MaximumReaders: 2},
 		MaximumConcurrent: 8, Ready: make(chan error, 1),
 		Fence: func() hostdproto.Status {

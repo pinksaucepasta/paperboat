@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -19,7 +20,7 @@ import (
 // The actual private wire must authenticate readiness, refuse exec access,
 // leave a live shell usable after retirement refusal, and fence it after close.
 func TestIndependentOwnerRetirementOverPrivateWire(t *testing.T) {
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	adapter, err := pty.NewShellAdapter(root)
 	if err != nil {
 		t.Fatal(err)

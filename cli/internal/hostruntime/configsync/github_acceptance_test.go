@@ -3,6 +3,7 @@ package configsync
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"os"
 	"path/filepath"
 	"testing"
@@ -52,7 +53,7 @@ func TestGitHubProviderAcceptance(t *testing.T) {
 		}}
 	}
 	open := func(name, repositoryID, repositoryURL, capability string) *GitRepository {
-		root := filepath.Join(t.TempDir(), name)
+		root := filepath.Join(shorttemp.Dir(t), name)
 		repository, err := NewGitRepository(GitRepositoryConfig{
 			Root: root, Access: access(repositoryID, repositoryURL, capability), Reconciler: committingReconciler{}, PushTarget: true,
 		})
@@ -114,7 +115,7 @@ func TestGitHubProviderRejectsProtectedPush(t *testing.T) {
 	if token == "" || repositoryURL == "" {
 		t.Skip("set a disposable protected GitHub acceptance repository and token")
 	}
-	root := filepath.Join(t.TempDir(), "protected")
+	root := filepath.Join(shorttemp.Dir(t), "protected")
 	repository, err := NewGitRepository(GitRepositoryConfig{Root: root, PushTarget: true,
 		Access: staticAccessSource{RepositoryAccess{Transport: "https",
 			RepositoryID: "task42-protected", AssignmentID: "task42-acceptance", EnvironmentID: "task42-environment",

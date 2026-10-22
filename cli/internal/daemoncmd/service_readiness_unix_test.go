@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"net"
 	"os"
 	"path/filepath"
@@ -90,7 +91,7 @@ func TestWaitDaemonReadyReportsLastStateOnCancellation(t *testing.T) {
 func TestWaitDaemonReadyRetainsSocketFailureAndRecovers(t *testing.T) {
 	old := servicePaths
 	t.Cleanup(func() { servicePaths = old })
-	missing := filepath.Join(t.TempDir(), "PRIVATE_READINESS_SOCKET")
+	missing := filepath.Join(shorttemp.Dir(t), "PRIVATE_READINESS_SOCKET")
 	servicePaths = func() (localapi.Paths, error) { return localapi.Paths{SocketPath: missing}, nil }
 	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 	defer cancel()
@@ -158,7 +159,7 @@ func TestResolveCommandOutputFailureAndRecovery(t *testing.T) {
 // signInTestAccount gives the default CLI config a signed-in profile for the account.
 func signInTestAccount(t *testing.T, accountID string) {
 	t.Helper()
-	dir := t.TempDir()
+	dir := shorttemp.Dir(t)
 	configPath := filepath.Join(dir, "config.json")
 	profileDir := filepath.Join(dir, "credentials")
 	server := "https://control.example.test"

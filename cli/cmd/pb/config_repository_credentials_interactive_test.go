@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -23,7 +24,7 @@ import (
 )
 
 func TestConfigCredentialInteractiveExplicitFileValidation(t *testing.T) {
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	file := filepath.Join(root, "reference")
 	if err := os.WriteFile(file, []byte("reference"), 0600); err != nil {
 		t.Fatal(err)
@@ -66,7 +67,7 @@ func TestConfigCredentialInteractiveSSHKeyAndPassphraseValidation(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	keyFile := filepath.Join(root, "key")
 	hostsFile := filepath.Join(root, "known_hosts")
 	os.WriteFile(keyFile, pem.EncodeToMemory(block), 0600)
@@ -100,7 +101,7 @@ func TestConfigCredentialInteractiveCACertificateValidation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(t.TempDir(), "ca.pem")
+	path := filepath.Join(shorttemp.Dir(t), "ca.pem")
 	os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0600)
 	profile := configsync.RepositoryCredentialProfile{Transport: "https", Auth: "anonymous", CAFile: path}
 	if err := validateCredentialInteractiveProfileReferences(profile); err != nil {

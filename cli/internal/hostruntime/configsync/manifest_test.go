@@ -2,6 +2,7 @@ package configsync
 
 import (
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -86,7 +87,7 @@ func TestManifestCannotNegateBeyondAllowlistOrHardExclusions(t *testing.T) {
 }
 
 func TestTakeManifestSnapshotSelectsRootsAndNewDescendants(t *testing.T) {
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	root, err := filepath.EvalSymlinks(root)
 	if err != nil {
 		t.Fatal(err)
@@ -116,7 +117,7 @@ func TestTakeManifestSnapshotSelectsRootsAndNewDescendants(t *testing.T) {
 }
 
 func TestTakeManifestSnapshotEmptyDoesNotTraverseHome(t *testing.T) {
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	root, err := filepath.EvalSymlinks(root)
 	if err != nil {
 		t.Fatal(err)
@@ -136,12 +137,12 @@ func TestTakeManifestSnapshotEmptyDoesNotTraverseHome(t *testing.T) {
 }
 
 func TestTakeManifestSnapshotRejectsSymlinkedAncestor(t *testing.T) {
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	root, err := filepath.EvalSymlinks(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	target := t.TempDir()
+	target := shorttemp.Dir(t)
 	if err := os.Symlink(target, filepath.Join(root, "linked")); err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +156,7 @@ func TestTakeManifestSnapshotRejectsSymlinkedAncestor(t *testing.T) {
 }
 
 func TestTakeManifestSnapshotTraversesParentsOfExplicitFile(t *testing.T) {
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	directory := filepath.Join(root, ".config", "tool")
 	if err := os.MkdirAll(directory, 0700); err != nil {
 		t.Fatal(err)

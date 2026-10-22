@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"io"
 	"net"
 	"net/http"
@@ -76,7 +77,7 @@ func TestFileTransferAdmissionEndsAtResponseAndFencesIdleAssociation(t *testing.
 		return s
 	}
 	active := activate("worker")
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	adapter, err := pty.NewShellAdapter(root)
 	if err != nil {
 		t.Fatal(err)

@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"io"
 	"net"
 	"path/filepath"
@@ -32,7 +33,7 @@ type updateSettingsControlFixture struct {
 
 func startUpdateSettingsControlFixture(t *testing.T) *updateSettingsControlFixture {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "updater.sock")
+	path := filepath.Join(shorttemp.Dir(t), "updater.sock")
 	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
 	if err != nil {
 		t.Fatal(err)

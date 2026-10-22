@@ -17,6 +17,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/protocol/packp"
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/go-git/go-git/v5/plumbing/transport/server"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"io"
 	"math/big"
 	"net"
@@ -33,7 +34,7 @@ import (
 func transportFixture(t *testing.T) (string, *git.Repository) {
 	t.Helper()
 	initRepositoryTransports()
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	if err := EnsureRepositoryCredentialRoot(root); err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +144,7 @@ func smartGitHandler(t *testing.T, bare string, user, password string) http.Hand
 }
 func newTransportRepository(t *testing.T, endpoint, kind, credentials string) *GitRepository {
 	t.Helper()
-	r, err := NewGitRepository(GitRepositoryConfig{Root: filepath.Join(t.TempDir(), "checkout"), CredentialRoot: credentials, Access: staticAccessSource{RepositoryAccess{RepositoryID: "repo", CloneURL: endpoint, PublishURL: endpoint, Branch: "master", Transport: kind, Capability: "repository_contents_write", ExpiresAt: time.Now().Add(time.Minute)}}, Reconciler: committingReconciler{}})
+	r, err := NewGitRepository(GitRepositoryConfig{Root: filepath.Join(shorttemp.Dir(t), "checkout"), CredentialRoot: credentials, Access: staticAccessSource{RepositoryAccess{RepositoryID: "repo", CloneURL: endpoint, PublishURL: endpoint, Branch: "master", Transport: kind, Capability: "repository_contents_write", ExpiresAt: time.Now().Add(time.Minute)}}, Reconciler: committingReconciler{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +155,7 @@ func TestCustomHTTPSNoGitTrustAuthPublish(t *testing.T) {
 	srv := httptest.NewTLSServer(smartGitHandler(t, bare, "alice", "private-password"))
 	defer srv.Close()
 	t.Setenv("PATH", "")
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	if err := EnsureRepositoryCredentialRoot(root); err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +199,7 @@ func TestCustomHTTPSNoGitTrustAuthPublish(t *testing.T) {
 	}
 }
 func TestRepositoryHTTPOptInRedirectCredentials(t *testing.T) {
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	if err := EnsureRepositoryCredentialRoot(root); err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +223,7 @@ func TestRepositoryHTTPOptInRedirectCredentials(t *testing.T) {
 	}
 }
 func TestCredentialProfilesPrivateIdentityAndInvalid(t *testing.T) {
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	if err := EnsureRepositoryCredentialRoot(root); err != nil {
 		t.Fatal(err)
 	}
@@ -271,11 +272,11 @@ func TestLocalMissingUnsafeAndStalePublication(t *testing.T) {
 	if _, err := repo.Publish(context.Background(), prepared, 1); !errors.Is(err, ErrRemoteRevisionChanged) {
 		t.Fatal("stale publication accepted", err)
 	}
-	missing := newTransportRepository(t, filepath.Join(t.TempDir(), "missing.git"), "local", "")
+	missing := newTransportRepository(t, filepath.Join(shorttemp.Dir(t), "missing.git"), "local", "")
 	if _, err := missing.Fetch(context.Background()); !errors.Is(err, ErrRepositoryUnavailable) {
 		t.Fatal("missing repository", err)
 	}
-	nonbare := filepath.Join(t.TempDir(), "worktree")
+	nonbare := filepath.Join(shorttemp.Dir(t), "worktree")
 	git.PlainInit(nonbare, false)
 	if _, err := openLocalRepository(nonbare); err == nil {
 		t.Fatal("nonbare push target accepted")
@@ -294,7 +295,7 @@ func TestConcurrentRepositoryHTTPSProfilesIsolated(t *testing.T) {
 		password := []string{"alice-secret", "bob-secret"}[i]
 		srv := uniqueTLSServer(t, smartGitHandler(t, bare, user, password))
 		defer srv.Close()
-		root := t.TempDir()
+		root := shorttemp.Dir(t)
 		if err := EnsureRepositoryCredentialRoot(root); err != nil {
 			t.Fatal(err)
 		}
@@ -387,7 +388,7 @@ func TestRepositoryEndpointValidation(t *testing.T) {
 			t.Errorf("invalid endpoint accepted: %s", raw)
 		}
 	}
-	for _, raw := range []string{"https://example.test/repo.git", "http://127.0.0.1:1234/repo.git", "ssh://git@192.168.1.2:2222/repo.git", "git@192.168.1.2:repo.git", "C:\\Users\\User\\repo.git", "\\\\host\\share\\repo.git", "file://localhost/srv/repo.git", filepath.Join(t.TempDir(), "repo.git")} {
+	for _, raw := range []string{"https://example.test/repo.git", "http://127.0.0.1:1234/repo.git", "ssh://git@192.168.1.2:2222/repo.git", "git@192.168.1.2:repo.git", "C:\\Users\\User\\repo.git", "\\\\host\\share\\repo.git", "file://localhost/srv/repo.git", filepath.Join(shorttemp.Dir(t), "repo.git")} {
 		if _, _, err := NormalizeRepositoryEndpoint(raw); err != nil {
 			t.Errorf("valid endpoint rejected: %s", raw)
 		}
@@ -412,7 +413,7 @@ func TestCustomHTTPSAmbiguousPushObservedWithoutRetry(t *testing.T) {
 		handler.ServeHTTP(w, r)
 	}))
 	defer srv.Close()
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	if err := EnsureRepositoryCredentialRoot(root); err != nil {
 		t.Fatal(err)
 	}
@@ -443,7 +444,7 @@ func TestRepositoryExpiredGrantAndFailedCloneRecovery(t *testing.T) {
 	handler := smartGitHandler(t, bare, "alice", "secret")
 	srv := httptest.NewTLSServer(handler)
 	defer srv.Close()
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	if err := EnsureRepositoryCredentialRoot(root); err != nil {
 		t.Fatal(err)
 	}
@@ -532,7 +533,7 @@ func TestLocalMountUnavailableAndRecoveryPreservesCheckout(t *testing.T) {
 }
 
 func TestCredentialProfileStrictDataAndRootProtection(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "credentials")
+	root := filepath.Join(shorttemp.Dir(t), "credentials")
 	if err := EnsureRepositoryCredentialRoot(root); err != nil {
 		t.Fatal(err)
 	}
@@ -595,7 +596,7 @@ func TestGitOperationsOutliveAdmissionAndHonorWithdrawal(t *testing.T) {
 		handler.ServeHTTP(w, r)
 	}))
 	defer srv.Close()
-	credentials := t.TempDir()
+	credentials := shorttemp.Dir(t)
 	if err := EnsureRepositoryCredentialRoot(credentials); err != nil {
 		t.Fatal(err)
 	}
@@ -639,7 +640,7 @@ func TestGitOperationsOutliveAdmissionAndHonorWithdrawal(t *testing.T) {
 	readAccess.ExpiresAt = time.Now().Add(150 * time.Millisecond)
 	deadline.Store(readAccess.ExpiresAt.UnixNano())
 	delay.Store(true)
-	if _, revision, err := ReadSharedRepositoryConfig(t.Context(), t.TempDir(), credentials, readAccess, DefaultSourceConfigLimits()); err != nil || revision == "" {
+	if _, revision, err := ReadSharedRepositoryConfig(t.Context(), shorttemp.Dir(t), credentials, readAccess, DefaultSourceConfigLimits()); err != nil || revision == "" {
 		t.Fatal("admitted bootstrap read ended at credential expiry", err)
 	}
 	for len(entered) > 0 {

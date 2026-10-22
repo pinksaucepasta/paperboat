@@ -5,6 +5,7 @@ package daemonrpc
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -94,11 +95,7 @@ func TestExplicitCleanupRejectsHeldAndMalformedLocks(t *testing.T) {
 
 func testSocket(t *testing.T) string {
 	t.Helper()
-	dir, err := os.MkdirTemp("/tmp", "pb-daemonrpc-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	dir := shorttemp.Dir(t)
 	if err := os.Chmod(dir, 0700); err != nil {
 		t.Fatal(err)
 	}

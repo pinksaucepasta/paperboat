@@ -5,6 +5,7 @@ package workloadbridge
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"path/filepath"
 	"testing"
 	"time"
@@ -18,7 +19,7 @@ import (
 func TestAcceptedFeatureAdmissionHoldsNativeMaintenanceUntilReleased(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	adapter, err := pty.NewShellAdapter(root)
 	if err != nil {
 		t.Fatal(err)

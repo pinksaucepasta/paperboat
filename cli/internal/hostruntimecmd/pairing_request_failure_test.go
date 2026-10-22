@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -19,7 +20,7 @@ func TestPairingServerFailureNamesRequestAndStatusWithoutPrivateBody(t *testing.
 	}))
 	defer server.Close()
 	_, err := bootstrap.CreatePairing(t.Context(), bootstrap.Config{
-		ServerURL: server.URL, HTTP: server.Client(), Alias: "test-machine", WorkspaceRoot: t.TempDir(),
+		ServerURL: server.URL, HTTP: server.Client(), Alias: "test-machine", WorkspaceRoot: shorttemp.Dir(t),
 		EnrollmentToken: strings.Repeat("T", 26), Verifier: strings.Repeat("V", 32),
 		PublicIdentityKey: base64.RawURLEncoding.EncodeToString(make([]byte, ed25519.PublicKeySize)),
 	})

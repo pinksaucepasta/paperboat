@@ -12,6 +12,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"github.com/pinksaucepasta/paperboat/internal/supportref"
 	"net"
 	"net/http"
@@ -26,7 +27,7 @@ import (
 )
 
 func TestOwnerBridgePreservesRealShellChildReplayAndInputAcrossWorkerReplacement(t *testing.T) {
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	adapter, err := pty.NewShellAdapter(root)
 	if err != nil {
 		t.Fatal(err)
@@ -213,7 +214,7 @@ func TestOwnerBridgeDoesNotHideOperationalFailureBehindWireRejection(t *testing.
 		t.Fatal(err)
 	}
 	defer manager.Shutdown(context.Background())
-	executions, err := execprocess.New(execprocess.Config{WorkspaceRoot: t.TempDir(), BaseEnvironment: []string{"PATH=/usr/bin:/bin"}, MaximumActive: 2, MaximumOperations: 4, ReplayBytes: 64 << 10, CancelGrace: 100 * time.Millisecond})
+	executions, err := execprocess.New(execprocess.Config{WorkspaceRoot: shorttemp.Dir(t), BaseEnvironment: []string{"PATH=/usr/bin:/bin"}, MaximumActive: 2, MaximumOperations: 4, ReplayBytes: 64 << 10, CancelGrace: 100 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,7 +224,7 @@ func TestOwnerBridgeDoesNotHideOperationalFailureBehindWireRejection(t *testing.
 	defer cancel()
 	service := &bridgeFailureSessions{Service: manager, failure: session.ErrSessionUnknown}
 	token := make([]byte, 32)
-	server := &Server{Endpoint: filepath.Join(t.TempDir(), "socket", "owner.sock"), Token: token, Sessions: service, Executions: &execprocess.RemoteServer{Manager: executions, MaximumReaders: 2}, MaximumConcurrent: 2, Ready: make(chan error, 1), Fence: func() hostdproto.Status {
+	server := &Server{Endpoint: filepath.Join(shorttemp.Dir(t), "socket", "owner.sock"), Token: token, Sessions: service, Executions: &execprocess.RemoteServer{Manager: executions, MaximumReaders: 2}, MaximumConcurrent: 2, Ready: make(chan error, 1), Fence: func() hostdproto.Status {
 		return hostdproto.Status{State: hostdproto.StateActive, WorkerID: "worker", Epoch: 1}
 	}}
 	done := make(chan error, 1)
@@ -286,7 +287,7 @@ func TestOwnerBridgeDoesNotHideOperationalFailureBehindWireRejection(t *testing.
 }
 
 func TestOwnerBridgeClientKeepsLocalTransportAndParserCausesPrivate(t *testing.T) {
-	endpoint := filepath.Join(t.TempDir(), "socket", "owner.sock")
+	endpoint := filepath.Join(shorttemp.Dir(t), "socket", "owner.sock")
 	client, err := NewClient(endpoint, make([]byte, 32), "worker", 1)
 	if err != nil {
 		t.Fatal(err)
@@ -390,7 +391,7 @@ func (bridgeFaultTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 }
 
 func TestOwnerBridgeCallerCancellationKeepsJoinedNativeFailure(t *testing.T) {
-	client, err := NewClient(filepath.Join(t.TempDir(), "owner.sock"), make([]byte, 32), "worker", 1)
+	client, err := NewClient(filepath.Join(shorttemp.Dir(t), "owner.sock"), make([]byte, 32), "worker", 1)
 	if err != nil {
 		t.Fatal(err)
 	}

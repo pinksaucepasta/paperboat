@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"encoding/pem"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"io"
 	"net"
 	"os"
@@ -138,7 +139,7 @@ func TestCustomSSHNoGitStrictHostKeyAndAuth(t *testing.T) {
 		mu.Unlock()
 		wg.Wait()
 	}()
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	if err := EnsureRepositoryCredentialRoot(root); err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +179,7 @@ func TestCustomSSHNoGitStrictHostKeyAndAuth(t *testing.T) {
 		if err := ring.Add(agent.AddedKey{PrivateKey: raw}); err != nil {
 			t.Fatal(err)
 		}
-		socket := filepath.Join(t.TempDir(), "agent.sock")
+		socket := filepath.Join(shorttemp.Dir(t), "agent.sock")
 		listener, err := net.Listen("unix", socket)
 		if err != nil {
 			t.Fatal(err)

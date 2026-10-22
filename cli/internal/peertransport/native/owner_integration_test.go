@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"io"
 	"math/big"
 	"net"
@@ -387,7 +388,7 @@ func TestRealTerminalAndFileProtocolsOverNativeTailnet(t *testing.T) {
 
 func runRealTerminalAndFileProtocols(t *testing.T, clientOwner, serverOwner *native.Owner, serverAuthority *tailnet.Authority, region *tailcfg.DERPRegion, beforeProtocols func(mesh.Addr), afterProtocol ...func(string)) func(context.Context) error {
 	t.Helper()
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	adapter, err := pty.NewAdapter(root)
 	if err != nil {
 		t.Fatal(err)

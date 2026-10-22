@@ -2,6 +2,7 @@ package configsync
 
 import (
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -62,8 +63,8 @@ func TestApplyJournalRestoresOriginalsAndRemovesCreatedPaths(t *testing.T) {
 }
 
 func TestWorkspaceRollbackRestoresLastSuccessfulPreimage(t *testing.T) {
-	home := t.TempDir()
-	state := t.TempDir()
+	home := shorttemp.Dir(t)
+	state := shorttemp.Dir(t)
 	target := filepath.Join(home, "config.txt")
 	if err := os.WriteFile(target, []byte("before\n"), 0o600); err != nil {
 		t.Fatal(err)

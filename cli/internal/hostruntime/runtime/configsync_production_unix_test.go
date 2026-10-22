@@ -5,6 +5,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,7 +16,7 @@ import (
 )
 
 func TestProductionConfigRepositoryDefersMappedIOAndPreservesOutputObservation(t *testing.T) {
-	home, state, credentials := t.TempDir(), t.TempDir(), t.TempDir()
+	home, state, credentials := shorttemp.Dir(t), shorttemp.Dir(t), shorttemp.Dir(t)
 	// An unapproved destination must not be inspected while assembling the
 	// runtime. The reconciler checks the actual files before resolving it.
 	destination := filepath.Join(home, "settings")
@@ -95,8 +96,8 @@ func TestStandaloneConfigWorkerWaitsForCancellation(t *testing.T) {
 	finished := make(chan error, 1)
 	go func() {
 		finished <- RunProductionConfigWorker(ctx, ProductionConfigWorkerConfig{
-			ControlURL: "https://api.example.invalid", StateRoot: filepath.Join(t.TempDir(), "state"),
-			HomeRoot: t.TempDir(), RepositoryHosts: []string{"github.com"},
+			ControlURL: "https://api.example.invalid", StateRoot: filepath.Join(shorttemp.Dir(t), "state"),
+			HomeRoot: shorttemp.Dir(t), RepositoryHosts: []string{"github.com"},
 		})
 	}()
 	select {
@@ -116,7 +117,7 @@ func TestStandaloneConfigWorkerWaitsForCancellation(t *testing.T) {
 }
 
 func TestPruneOrphanedAssignmentStateKeepsCurrentAndCredentials(t *testing.T) {
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	keep := filepath.Join(root, strings.Repeat("a", 32))
 	orphan := filepath.Join(root, strings.Repeat("b", 32))
 	credentials := filepath.Join(root, "repository-credentials")

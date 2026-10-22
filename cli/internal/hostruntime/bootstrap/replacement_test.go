@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"context"
 	"encoding/json"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,8 +12,8 @@ import (
 )
 
 func TestReplacementNoteSurvivesTheWipeAndExpires(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", shorttemp.Dir(t))
+	t.Setenv("HOME", shorttemp.Dir(t))
 	now := time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
 	if got := LoadReplacement(now); got != "" {
 		t.Fatalf("no note yet, got %q", got)
@@ -46,7 +47,7 @@ func TestCreatePairingCarriesTheMachineItReplaces(t *testing.T) {
 		_, _ = w.Write([]byte(`{"data":{"id":"pairing_1","user_code":"ABCD-EFGH","expires_at":"` + time.Now().Add(time.Hour).UTC().Format(time.RFC3339) + `"}}`))
 	}))
 	defer server.Close()
-	config := Config{ServerURL: server.URL, EnrollmentToken: "ABCDEFGHIJKLMNOPQRSTUVWXYZ", Alias: "laptop", WorkspaceRoot: t.TempDir(), Verifier: "0123456789012345678901234567890123456789", PublicIdentityKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", HTTP: server.Client()}
+	config := Config{ServerURL: server.URL, EnrollmentToken: "ABCDEFGHIJKLMNOPQRSTUVWXYZ", Alias: "laptop", WorkspaceRoot: shorttemp.Dir(t), Verifier: "0123456789012345678901234567890123456789", PublicIdentityKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", HTTP: server.Client()}
 	if _, err := CreatePairing(context.Background(), config); err != nil {
 		t.Fatal(err)
 	}

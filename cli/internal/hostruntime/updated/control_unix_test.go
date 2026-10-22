@@ -5,6 +5,7 @@ package updated
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"net"
 	"os"
 	"path/filepath"
@@ -295,7 +296,7 @@ func TestControlClientRejectsUnprivilegedImpersonation(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("requires an unprivileged impersonating peer")
 	}
-	path := filepath.Join(t.TempDir(), "updater.sock")
+	path := filepath.Join(shorttemp.Dir(t), "updater.sock")
 	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
 	if err != nil {
 		t.Fatal(err)

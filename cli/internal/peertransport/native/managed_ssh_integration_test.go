@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"io"
 	"net"
 	"os"
@@ -246,7 +247,7 @@ func TestSystemOpenSSHOverNativeTailnet(t *testing.T) {
 
 func startNativeTestSSHD(t *testing.T) (uint16, string, string, string) {
 	t.Helper()
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	current, err := user.Current()
 	if err != nil {
 		t.Fatal(err)

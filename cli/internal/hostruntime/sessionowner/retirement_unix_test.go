@@ -3,6 +3,7 @@
 package sessionowner
 
 import (
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"net"
 	"os"
 	"path/filepath"
@@ -10,7 +11,7 @@ import (
 )
 
 func TestRetiredEndpointCleanupPreservesArchiveAndOtherGeneration(t *testing.T) {
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	if err := os.Chmod(root, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +52,7 @@ func TestRetiredEndpointCleanupPreservesArchiveAndOtherGeneration(t *testing.T) 
 func TestRetiredEndpointCleanupRejectsUnsafeAndUnknownContent(t *testing.T) {
 	for _, kind := range []string{"symlink", "hardlink", "file", "unknown"} {
 		t.Run(kind, func(t *testing.T) {
-			root := t.TempDir()
+			root := shorttemp.Dir(t)
 			if err := os.Chmod(root, 0700); err != nil {
 				t.Fatal(err)
 			}

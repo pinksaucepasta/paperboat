@@ -3,6 +3,7 @@ package configsync
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"io"
 	"net"
 	"path/filepath"
@@ -81,7 +82,7 @@ func TestRepositorySSHBlockedOperationCancellation(t *testing.T) {
 				close(entered)
 				_ = server.Wait()
 			}()
-			root := filepath.Join(t.TempDir(), "private")
+			root := filepath.Join(shorttemp.Dir(t), "private")
 			if err := EnsureRepositoryCredentialRoot(root); err != nil {
 				t.Fatal(err)
 			}

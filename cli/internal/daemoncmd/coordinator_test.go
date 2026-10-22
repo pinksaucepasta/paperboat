@@ -10,6 +10,7 @@ import (
 	pbSync "github.com/pinksaucepasta/paperboat/internal/controlsync/proto"
 	"github.com/pinksaucepasta/paperboat/internal/daemonrpc"
 	"github.com/pinksaucepasta/paperboat/internal/machineguard"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"github.com/pinksaucepasta/paperboat/internal/splitdns"
 	"github.com/pinksaucepasta/paperboat/internal/testcert"
 	"google.golang.org/grpc"
@@ -228,7 +229,7 @@ func TestCoordinatorLifecycle(t *testing.T) {
 	defer grpcServer.Stop()
 
 	// 2. Setup Coordinator with a protected local IPC socket.
-	tmpDir := t.TempDir()
+	tmpDir := shorttemp.Dir(t)
 	if err := os.Chmod(tmpDir, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -302,7 +303,7 @@ func TestCoordinatorLifecycle(t *testing.T) {
 }
 
 func TestCoordinatorFailsBeforeIPCWhenSyncCannotAuthenticate(t *testing.T) {
-	dir := t.TempDir()
+	dir := shorttemp.Dir(t)
 	if err := os.Chmod(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -323,7 +324,7 @@ func TestCoordinatorFailsBeforeIPCWhenSyncCannotAuthenticate(t *testing.T) {
 }
 
 func TestCoordinatorGuardedNamesFollowFullSnapshots(t *testing.T) {
-	dir := t.TempDir()
+	dir := shorttemp.Dir(t)
 	if err := os.Chmod(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -446,7 +447,7 @@ func TestCoordinatorPortConflictPreservesOtherRoutesRecoversAndRevokes(t *testin
 }
 
 func TestCoordinatorInventoryUsesAuthorizedDiscoveredPortsAndWithdrawsExpiry(t *testing.T) {
-	dir := t.TempDir()
+	dir := shorttemp.Dir(t)
 	if err := os.Chmod(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -527,7 +528,7 @@ func TestCoordinatorRawForwardPreservesServerFirstBytes(t *testing.T) {
 }
 
 func TestCoordinatorNativePortPreservesApplicationTLSAndALPN(t *testing.T) {
-	dir := t.TempDir()
+	dir := shorttemp.Dir(t)
 	if err := os.Chmod(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -844,7 +845,7 @@ func TestCoordinatorServesMachineHostOnPublishedPorts(t *testing.T) {
 }
 
 func TestCoordinatorServiceLeaseRenewalKeepsTheForwardedPortsUp(t *testing.T) {
-	dir := t.TempDir()
+	dir := shorttemp.Dir(t)
 	if err := os.Chmod(dir, 0700); err != nil {
 		t.Fatal(err)
 	}

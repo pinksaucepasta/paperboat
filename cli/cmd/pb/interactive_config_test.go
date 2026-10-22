@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -125,7 +126,7 @@ func TestOnlyNotExistCauseRejectsMalformedChains(t *testing.T) {
 }
 
 func TestConfigSyncSourceInspectionRetainsCauseAndDiagnosticPhase(t *testing.T) {
-	missingPath := filepath.Join(t.TempDir(), "missing-config.json")
+	missingPath := filepath.Join(shorttemp.Dir(t), "missing-config.json")
 	if exists, err := configSyncSourceExists(missingPath); exists || err != nil {
 		t.Fatalf("missing source exists=%t err=%v", exists, err)
 	}

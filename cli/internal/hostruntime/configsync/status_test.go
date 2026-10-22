@@ -3,6 +3,7 @@ package configsync
 import (
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,7 +12,7 @@ import (
 )
 
 func TestStatusRoundTripAndCanonicalStates(t *testing.T) {
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	path := filepath.Join(root, "status.json")
 	now := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
 	status := Status{
@@ -53,7 +54,7 @@ func TestStatusRejectsLeakingOrInconsistentSummaries(t *testing.T) {
 }
 
 func TestReadStatusRejectsSymlinkAndPermissiveFile(t *testing.T) {
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	target := filepath.Join(root, "target.json")
 	if err := os.WriteFile(target, []byte("{}"), 0o644); err != nil {
 		t.Fatal(err)
@@ -71,7 +72,7 @@ func TestReadStatusRejectsSymlinkAndPermissiveFile(t *testing.T) {
 }
 
 func TestReadStatusKeepsDecodeCauseWithoutEchoingInput(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "status.json")
+	path := filepath.Join(shorttemp.Dir(t), "status.json")
 	const malformed = `{"state":"healthy","sync_revision":"private"}`
 	if err := os.WriteFile(path, []byte(malformed), 0o600); err != nil {
 		t.Fatal(err)

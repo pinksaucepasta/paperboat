@@ -3,6 +3,7 @@ package hostruntimecmd
 import (
 	"context"
 	"encoding/base64"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -21,7 +22,7 @@ func serverBootstrapOutcome(t *testing.T, status int, code string) error {
 		_, _ = w.Write([]byte(`{"error":{"code":"` + code + `","message":"server outcome"}}`))
 	}))
 	t.Cleanup(server.Close)
-	config := bootstrap.Config{ServerURL: server.URL, Alias: "laptop", WorkspaceRoot: t.TempDir(), Verifier: base64.RawURLEncoding.EncodeToString(make([]byte, 32)), PublicIdentityKey: base64.RawURLEncoding.EncodeToString(make([]byte, 32)), HTTP: server.Client()}
+	config := bootstrap.Config{ServerURL: server.URL, Alias: "laptop", WorkspaceRoot: shorttemp.Dir(t), Verifier: base64.RawURLEncoding.EncodeToString(make([]byte, 32)), PublicIdentityKey: base64.RawURLEncoding.EncodeToString(make([]byte, 32)), HTTP: server.Client()}
 	_, err := bootstrap.RecoverMaterial(context.Background(), config, false)
 	if err == nil {
 		t.Fatal("server outcome was accepted")
@@ -31,7 +32,7 @@ func serverBootstrapOutcome(t *testing.T, status int, code string) error {
 
 func TestOneShotFreshPairingCreatesPairingAfterServerUnknownVerifier(t *testing.T) {
 	now := time.Now().UTC()
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	server := "https://api.example.test"
 	publicKey := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
 	token := "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP"

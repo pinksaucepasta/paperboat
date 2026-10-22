@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"net"
 	"os"
 	"path/filepath"
@@ -20,7 +21,7 @@ import (
 )
 
 func TestUpdaterControlFailureUsesFiniteJSONAndOmitsRemoteMessage(t *testing.T) {
-	listener, err := net.Listen("unix", filepath.Join(t.TempDir(), "updater.sock"))
+	listener, err := net.Listen("unix", filepath.Join(shorttemp.Dir(t), "updater.sock"))
 	if err != nil {
 		t.Fatal(err)
 	}

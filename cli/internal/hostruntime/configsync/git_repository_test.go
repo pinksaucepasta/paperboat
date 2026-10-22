@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"os"
 	"path/filepath"
 	"strings"
@@ -66,7 +67,7 @@ func (committingReconciler) Reconcile(_ context.Context, root string, remote Rem
 func TestGitRepositoryFetchPublishAndObserve(t *testing.T) {
 	initRepositoryTransports()
 	t.Setenv("PATH", "")
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	barePath := filepath.Join(root, "remote.git")
 	if _, err := git.PlainInit(barePath, true); err != nil {
 		t.Fatal(err)
@@ -196,7 +197,7 @@ func seededBareRepository(t *testing.T, root, name string) (string, string) {
 func TestGitRepositoryRecloneWhenTheAssignmentNamesAnotherRepository(t *testing.T) {
 	initRepositoryTransports()
 	t.Setenv("PATH", "")
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	first, _ := seededBareRepository(t, root, "first")
 	second, secondHead := seededBareRepository(t, root, "second")
 	checkout := filepath.Join(root, "checkout")

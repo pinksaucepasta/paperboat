@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"io"
 	"net"
 	"net/http"
@@ -464,7 +465,7 @@ func TestServiceObservesLocalGatewayOutageOnceAndRecovers(t *testing.T) {
 	})
 	defer restoreObserver()
 
-	socket := filepath.Join(t.TempDir(), "host.sock")
+	socket := filepath.Join(shorttemp.Dir(t), "host.sock")
 	host, err := NewHostClient(socket, time.Second)
 	if err != nil {
 		t.Fatal(err)

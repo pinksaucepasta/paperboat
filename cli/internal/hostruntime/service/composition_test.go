@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -158,7 +159,7 @@ func TestHTTPReadinessProbeDisablesRedirects(t *testing.T) {
 }
 
 func TestHostLifecycleManagerRollsBackExactBothComponentStateAfterProbeFailure(t *testing.T) {
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	layout := Layout{
 		Platform:        "linux",
 		InstallRoot:     filepath.Join(root, "install"),
@@ -231,7 +232,7 @@ func TestHostLifecycleManagerRollsBackExactBothComponentStateAfterProbeFailure(t
 }
 
 func TestHostLifecycleManagerIncludesPrivilegedHostBeforeSupervisor(t *testing.T) {
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	layout := Layout{
 		Platform:        "linux",
 		InstallRoot:     filepath.Join(root, "install"),
@@ -274,7 +275,7 @@ func TestHostLifecycleManagerIncludesPrivilegedHostBeforeSupervisor(t *testing.T
 }
 
 func TestHostLifecycleManagerRollsBackPrivilegedHostWithSupervisorAndUpdater(t *testing.T) {
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	layout := Layout{
 		Platform:        "linux",
 		InstallRoot:     filepath.Join(root, "install"),
@@ -341,7 +342,7 @@ func TestHostLifecycleManagerRollsBackPrivilegedHostWithSupervisorAndUpdater(t *
 }
 
 func TestLifecycleManagerRepairsMissingThirdComponentAtomically(t *testing.T) {
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	binary := filepath.Join(root, "pb")
 	if err := os.WriteFile(binary, []byte("binary"), 0o700); err != nil {
 		t.Fatal(err)
@@ -392,7 +393,7 @@ func TestLifecycleManagerRepairsMissingThirdComponentAtomically(t *testing.T) {
 }
 
 func TestLifecycleManagerRollsBackFirstTwoAfterThirdComponentFailure(t *testing.T) {
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	binary := filepath.Join(root, "pb")
 	if err := os.WriteFile(binary, []byte("binary"), 0o700); err != nil {
 		t.Fatal(err)
@@ -449,7 +450,7 @@ func bytesEqual(left, right []byte) bool {
 
 func TestHostLifecycleCanceledDefinitionPublicationRestoresRunningCarrier(t *testing.T) {
 	ctx := context.Background()
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	controllers := make([]*fakeNativeController, 0, 3)
 	installers := make([]*Installer, 0, 3)
 	originals := make([][]byte, 0, 3)

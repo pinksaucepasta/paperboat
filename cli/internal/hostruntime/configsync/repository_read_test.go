@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -40,7 +41,7 @@ func setSharedSource(t *testing.T, bare string, data []byte) {
 }
 func assertBootstrapRead(t *testing.T, url, kind, credentials string) {
 	t.Helper()
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	source, revision, err := ReadSharedRepositoryConfig(context.Background(), root, credentials, readGrant(url, kind), DefaultSourceConfigLimits())
 	if err != nil || !plumbing.IsHash(revision) {
 		t.Fatalf("read revision=%q error=%v", revision, err)
@@ -61,7 +62,7 @@ func TestRepositoryReadLocalOptionalInvalidAndAuthority(t *testing.T) {
 "enabled" = true
 `))
 	before, _ := target.Head()
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	source, rev, err := ReadSharedRepositoryConfig(context.Background(), root, "", readGrant(bare, "local"), DefaultSourceConfigLimits())
 	if err != nil || source.Enabled == nil || !*source.Enabled || rev != before.Hash().String() {
 		t.Fatal("source read", err)
@@ -101,7 +102,7 @@ func TestRepositoryReadHTTPS(t *testing.T) {
 `))
 	srv := httptest.NewTLSServer(smartGitHandler(t, bare, "reader", "read-secret"))
 	defer srv.Close()
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	EnsureRepositoryCredentialRoot(root)
 	cert, err := x509.ParseCertificate(srv.Certificate().Raw)
 	if err != nil {
@@ -129,7 +130,7 @@ func TestRepositoryReadRejectsOversizedInflatedPack(t *testing.T) {
 	bare, _ := transportFixture(t)
 	setSharedSource(t, bare, bytes.Repeat([]byte(" "), int(repositoryReadMaxObjectBytes)+1))
 	t.Setenv("PATH", "")
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	_, _, err := ReadSharedRepositoryConfig(context.Background(), root, "", readGrant(bare, "local"), DefaultSourceConfigLimits())
 	if !errors.Is(err, ErrRepositoryReadLimit) {
 		t.Fatal("oversized inflated object accepted", err)
@@ -144,11 +145,11 @@ func TestRepositoryReadMachineGrantReadWriteIdentity(t *testing.T) {
 	bare, _ := transportFixture(t)
 	t.Setenv("PATH", "")
 	access := RepositoryAccess{RepositoryID: "repo", AssignmentID: "assignment", EnvironmentID: "environment", MachineID: "machine", CloneURL: bare, Branch: "master", Transport: "local", Capability: "repository_contents_write", ExpiresAt: time.Now().Add(time.Minute)}
-	if _, revision, err := ReadSharedAuthorizedRepositoryConfig(context.Background(), t.TempDir(), "", access, DefaultSourceConfigLimits()); err != nil || !plumbing.IsHash(revision) {
+	if _, revision, err := ReadSharedAuthorizedRepositoryConfig(context.Background(), shorttemp.Dir(t), "", access, DefaultSourceConfigLimits()); err != nil || !plumbing.IsHash(revision) {
 		t.Fatal("actual write capability could not read source", err)
 	}
 	access.MachineID = ""
-	if _, _, err := ReadSharedAuthorizedRepositoryConfig(context.Background(), t.TempDir(), "", access, DefaultSourceConfigLimits()); !errors.Is(err, ErrAuthorization) {
+	if _, _, err := ReadSharedAuthorizedRepositoryConfig(context.Background(), shorttemp.Dir(t), "", access, DefaultSourceConfigLimits()); !errors.Is(err, ErrAuthorization) {
 		t.Fatal("unbound machine grant accepted", err)
 	}
 }
@@ -164,14 +165,14 @@ func TestRepositoryReadNamesEmptyRepositoryAndMissingBranch(t *testing.T) {
 	}
 	access := readGrant(empty, "local")
 	access.Branch = "main"
-	_, _, err = ReadSharedRepositoryConfig(context.Background(), t.TempDir(), "", access, DefaultSourceConfigLimits())
+	_, _, err = ReadSharedRepositoryConfig(context.Background(), shorttemp.Dir(t), "", access, DefaultSourceConfigLimits())
 	if !errors.Is(err, ErrRepositoryEmpty) || !errors.Is(err, ErrGitRepositoryInvalid) {
 		t.Fatalf("empty repository: %v", err)
 	}
 	bare, _ := transportFixture(t)
 	access = readGrant(bare, "local")
 	access.Branch = "trunk"
-	_, _, err = ReadSharedRepositoryConfig(context.Background(), t.TempDir(), "", access, DefaultSourceConfigLimits())
+	_, _, err = ReadSharedRepositoryConfig(context.Background(), shorttemp.Dir(t), "", access, DefaultSourceConfigLimits())
 	if !errors.Is(err, ErrRepositoryBranchMissing) || !errors.Is(err, ErrGitRepositoryInvalid) {
 		t.Fatalf("missing branch: %v", err)
 	}

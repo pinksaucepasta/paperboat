@@ -5,6 +5,7 @@ package carriercontrol
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"io"
 	"net"
 	"os"
@@ -46,7 +47,7 @@ func TestPrivateCarrierRetirementPreservesAcceptedConnection(t *testing.T) {
 	}
 	controller, workerID, workerEpoch := activeControlWorker(t)
 	lost := make(chan struct{})
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	if err := os.Chmod(root, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +277,7 @@ func TestDisableSSHCancelsOnWorkerLeaseLossAndJoinsWatcher(t *testing.T) {
 	controller, workerID, workerEpoch := activeControlWorker(t)
 	lost := make(chan struct{})
 	releaseReturned := make(chan struct{})
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	if err := os.Chmod(root, 0700); err != nil {
 		t.Fatal(err)
 	}

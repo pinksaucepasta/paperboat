@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"os"
 	"path/filepath"
 	"testing"
@@ -16,7 +17,7 @@ func TestLifecycleRecoveryRejectsUntrustedFilesystem(t *testing.T) {
 			if attack == "foreign-parent" && os.Geteuid() != 0 {
 				t.Skip("requires root to exercise separate-account custody")
 			}
-			root := t.TempDir()
+			root := shorttemp.Dir(t)
 			if err := os.Chmod(root, 0700); err != nil {
 				t.Fatal(err)
 			}

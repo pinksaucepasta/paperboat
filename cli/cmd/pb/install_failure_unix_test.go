@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,11 +17,7 @@ import (
 )
 
 func TestSuppliedInstallFailureKeepsSafeStepAndPrivateCause(t *testing.T) {
-	home, err := os.MkdirTemp("", "pb-refusal-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.RemoveAll(home) })
+	home := shorttemp.Dir(t)
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "state"))
 	t.Setenv("XDG_RUNTIME_DIR", home)

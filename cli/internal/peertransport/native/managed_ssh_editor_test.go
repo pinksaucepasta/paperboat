@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"io"
 	"net"
 	"os"
@@ -24,7 +25,7 @@ import (
 // over those forwarded streams, not through a separate SSH file protocol.
 func checkRemoteSSHOperations(t *testing.T, ctx context.Context, common []string, target, echoAddress string, disconnect func()) {
 	args := func(extra ...string) []string { return append(append([]string{}, common...), extra...) }
-	root := filepath.Join(t.TempDir(), "backend with spaces")
+	root := filepath.Join(shorttemp.Dir(t), "backend with spaces")
 	pidFile := filepath.Join(root, "pid")
 	t.Cleanup(func() {
 		data, _ := os.ReadFile(pidFile)
@@ -67,7 +68,7 @@ func checkRemoteSSHOperations(t *testing.T, ctx context.Context, common []string
 		}
 	})
 	t.Run("EditorSocketForward", func(t *testing.T) {
-		listener, err := net.Listen("unix", filepath.Join(t.TempDir(), "backend.sock"))
+		listener, err := net.Listen("unix", filepath.Join(shorttemp.Dir(t), "backend.sock"))
 		if err != nil {
 			t.Fatal(err)
 		}
