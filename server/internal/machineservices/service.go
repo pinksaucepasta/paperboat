@@ -319,7 +319,16 @@ func (s *Service) List(ctx context.Context, actor string) (items []wire.Item, re
 		return nil, e
 	}
 	defer captureServiceRollback(tx, &resultErr)
-	rows, e := tx.QueryContext(ctx, `SELECT m.id,m.alias,m.description,s.installation_generation,s.boot_id,m.machine_service_policy_generation,s.generation,s.expires_at,s.services FROM paperboat.user_machines m JOIN paperboat.machine_service_snapshots s ON s.machine_id=m.id AND s.installation_generation=m.installation_generation WHERE s.expires_at>now() AND m.online AND m.state='online' AND m.deleted_at IS NULL AND m.revoked_at IS NULL AND EXISTS(SELECT 1 FROM jsonb_array_elements(s.services) p CROSS JOIN LATERAL paperboat.machine_service_authorities($1,m.id,(p->>'port')::integer) a) ORDER BY m.id LIMIT $2`, actor, MaxMachines+1)
+	// Candidates are the only machines machine_service_authorities can grant: the actor's own, machines bound to an
+	// active team of the actor, and hosts of lazy policies or tunnels bound to such a team. Without them every
+	// daemon's 8-second poll evaluated the authorities for every online machine in the database.
+	rows, e := tx.QueryContext(ctx, `WITH teams AS (SELECT tm.team_id FROM paperboat.team_members tm WHERE tm.account_id=$1 AND tm.active),
+bound AS (SELECT b.resource_kind,b.resource_id FROM paperboat.team_resource_bindings b JOIN teams USING(team_id) WHERE b.active AND b.resource_kind IN ('machine','lazy_policy','tunnel')),
+candidates AS (SELECT m.id FROM paperboat.user_machines m WHERE m.user_id=$1
+ UNION SELECT resource_id FROM bound WHERE resource_kind='machine'
+ UNION SELECT p.machine_id FROM paperboat.lazy_access_policies p JOIN bound ON bound.resource_kind='lazy_policy' AND bound.resource_id=p.id
+ UNION SELECT t.created_by_host_id FROM paperboat.tunnels t JOIN bound ON bound.resource_kind='tunnel' AND bound.resource_id=t.id)
+SELECT m.id,m.alias,m.description,s.installation_generation,s.boot_id,m.machine_service_policy_generation,s.generation,s.expires_at,s.services FROM paperboat.user_machines m JOIN paperboat.machine_service_snapshots s ON s.machine_id=m.id AND s.installation_generation=m.installation_generation WHERE m.id IN (SELECT id FROM candidates) AND s.expires_at>now() AND m.online AND m.state='online' AND m.deleted_at IS NULL AND m.revoked_at IS NULL AND EXISTS(SELECT 1 FROM jsonb_array_elements(s.services) p CROSS JOIN LATERAL paperboat.machine_service_authorities($1,m.id,(p->>'port')::integer) a) ORDER BY m.id LIMIT $2`, actor, MaxMachines+1)
 	if e != nil {
 		return nil, e
 	}
