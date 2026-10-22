@@ -2,21 +2,33 @@
 -- can evolve independently from preview leases and route/connector APIs.
 
 -- name: ListPreviewTunnelsV1 :many
-SELECT *
-FROM tunnels
-WHERE tunnel_management_allowed(sqlc.arg(account_id)::text, id)
- AND (NOT sqlc.arg(workspace_set)::boolean OR workspace_tunnel_management_allowed(sqlc.arg(account_id)::text, sqlc.narg(workspace_team_id)::text, id))
-  AND (
-    sqlc.narg(after_created_at)::timestamptz IS NULL
-    OR (created_at, id) < (
-      sqlc.narg(after_created_at)::timestamptz,
-      sqlc.narg(after_id)::text
+-- Every way to manage a tunnel needs its creating host to be the account's own personal machine or one with a
+-- tunnel_manage grant for the account in one of its active teams (see ListPreviewLeasesV1): candidates come from
+-- that host set by index, and the exact access functions run only until the page is full.
+WITH hosts AS (
+  SELECT m.id FROM user_machines AS m WHERE m.user_id = sqlc.arg(account_id) AND m.owner_team_id IS NULL
+  UNION
+  SELECT g.machine_id FROM team_machine_grants AS g
+  JOIN team_members AS tm ON tm.team_id = g.team_id AND tm.account_id = sqlc.arg(account_id) AND tm.active
+  WHERE g.active AND 'tunnel_manage' = ANY(g.capabilities) AND (g.audience = 'all_members' OR g.account_id = sqlc.arg(account_id))
+), candidates AS MATERIALIZED (
+  SELECT t.* FROM tunnels AS t
+  WHERE t.created_by_host_id IN (SELECT hosts.id FROM hosts)
+    AND (
+      sqlc.narg(after_created_at)::timestamptz IS NULL
+      OR (t.created_at, t.id) < (sqlc.narg(after_created_at)::timestamptz, sqlc.narg(after_id)::text)
     )
-  )
- AND (sqlc.arg(q)::text='' OR position(lower(sqlc.arg(q)) in lower(id||' '||name||' '||stable_endpoint||' '||created_by_host_id))>0)
- AND (sqlc.arg(state)::text='' OR desired_state=sqlc.arg(state))
- AND (sqlc.arg(owner)::text='' OR (sqlc.arg(owner)='mine' AND account_id=sqlc.arg(account_id)) OR (sqlc.arg(owner)='shared' AND account_id<>sqlc.arg(account_id)) OR account_id=sqlc.arg(owner))
-ORDER BY created_at DESC, id DESC
+    AND (sqlc.arg(q)::text='' OR position(lower(sqlc.arg(q)) in lower(t.id||' '||t.name||' '||t.stable_endpoint||' '||t.created_by_host_id))>0)
+    AND (sqlc.arg(state)::text='' OR t.desired_state=sqlc.arg(state))
+    AND (sqlc.arg(owner)::text='' OR (sqlc.arg(owner)='mine' AND t.account_id=sqlc.arg(account_id)) OR (sqlc.arg(owner)='shared' AND t.account_id<>sqlc.arg(account_id)) OR t.account_id=sqlc.arg(owner))
+  ORDER BY t.created_at DESC, t.id DESC
+)
+SELECT c.id, c.account_id, c.name, c.desired_state, c.access_mode, c.generation, c.stable_endpoint_id, c.stable_endpoint,
+       c.created_by_host_id, c.created_by_actor_id, c.expires_at, c.summary_code, c.summary_transitioned_at, c.created_at,
+       c.updated_at, c.deleted_at, c.access_generation, c.owner_team_id
+FROM candidates AS c
+WHERE tunnel_management_allowed(sqlc.arg(account_id)::text, c.id)
+ AND (NOT sqlc.arg(workspace_set)::boolean OR workspace_tunnel_management_allowed(sqlc.arg(account_id)::text, sqlc.narg(workspace_team_id)::text, c.id))
 LIMIT sqlc.arg(row_limit);
 
 -- name: UpdatePreviewTunnelFieldsV1 :one

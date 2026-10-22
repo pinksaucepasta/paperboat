@@ -111,57 +111,90 @@ func (q *Queries) ListExpiredPreviewTunnelsV1(ctx context.Context, arg ListExpir
 
 const listPreviewTunnelsV1 = `-- name: ListPreviewTunnelsV1 :many
 
-SELECT id, account_id, name, desired_state, access_mode, generation, stable_endpoint_id, stable_endpoint, created_by_host_id, created_by_actor_id, expires_at, summary_code, summary_transitioned_at, created_at, updated_at, deleted_at, access_generation, owner_team_id
-FROM tunnels
-WHERE tunnel_management_allowed($1::text, id)
- AND (NOT $2::boolean OR workspace_tunnel_management_allowed($1::text, $3::text, id))
-  AND (
-    $4::timestamptz IS NULL
-    OR (created_at, id) < (
-      $4::timestamptz,
-      $5::text
+WITH hosts AS (
+  SELECT m.id FROM user_machines AS m WHERE m.user_id = $1 AND m.owner_team_id IS NULL
+  UNION
+  SELECT g.machine_id FROM team_machine_grants AS g
+  JOIN team_members AS tm ON tm.team_id = g.team_id AND tm.account_id = $1 AND tm.active
+  WHERE g.active AND 'tunnel_manage' = ANY(g.capabilities) AND (g.audience = 'all_members' OR g.account_id = $1)
+), candidates AS MATERIALIZED (
+  SELECT t.id, t.account_id, t.name, t.desired_state, t.access_mode, t.generation, t.stable_endpoint_id, t.stable_endpoint, t.created_by_host_id, t.created_by_actor_id, t.expires_at, t.summary_code, t.summary_transitioned_at, t.created_at, t.updated_at, t.deleted_at, t.access_generation, t.owner_team_id FROM tunnels AS t
+  WHERE t.created_by_host_id IN (SELECT hosts.id FROM hosts)
+    AND (
+      $5::timestamptz IS NULL
+      OR (t.created_at, t.id) < ($5::timestamptz, $6::text)
     )
-  )
- AND ($6::text='' OR position(lower($6) in lower(id||' '||name||' '||stable_endpoint||' '||created_by_host_id))>0)
- AND ($7::text='' OR desired_state=$7)
- AND ($8::text='' OR ($8='mine' AND account_id=$1) OR ($8='shared' AND account_id<>$1) OR account_id=$8)
-ORDER BY created_at DESC, id DESC
-LIMIT $9
+    AND ($7::text='' OR position(lower($7) in lower(t.id||' '||t.name||' '||t.stable_endpoint||' '||t.created_by_host_id))>0)
+    AND ($8::text='' OR t.desired_state=$8)
+    AND ($9::text='' OR ($9='mine' AND t.account_id=$1) OR ($9='shared' AND t.account_id<>$1) OR t.account_id=$9)
+  ORDER BY t.created_at DESC, t.id DESC
+)
+SELECT c.id, c.account_id, c.name, c.desired_state, c.access_mode, c.generation, c.stable_endpoint_id, c.stable_endpoint,
+       c.created_by_host_id, c.created_by_actor_id, c.expires_at, c.summary_code, c.summary_transitioned_at, c.created_at,
+       c.updated_at, c.deleted_at, c.access_generation, c.owner_team_id
+FROM candidates AS c
+WHERE tunnel_management_allowed($1::text, c.id)
+ AND (NOT $2::boolean OR workspace_tunnel_management_allowed($1::text, $3::text, c.id))
+LIMIT $4
 `
 
 type ListPreviewTunnelsV1Params struct {
 	AccountID       string
 	WorkspaceSet    bool
 	WorkspaceTeamID sql.NullString
+	RowLimit        int32
 	AfterCreatedAt  sql.NullTime
 	AfterID         sql.NullString
 	Q               string
 	State           string
 	Owner           string
-	RowLimit        int32
+}
+
+type ListPreviewTunnelsV1Row struct {
+	ID                    string
+	AccountID             string
+	Name                  string
+	DesiredState          string
+	AccessMode            string
+	Generation            int64
+	StableEndpointID      string
+	StableEndpoint        string
+	CreatedByHostID       string
+	CreatedByActorID      string
+	ExpiresAt             sql.NullTime
+	SummaryCode           string
+	SummaryTransitionedAt time.Time
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
+	DeletedAt             sql.NullTime
+	AccessGeneration      int64
+	OwnerTeamID           sql.NullString
 }
 
 // Tunnel lifecycle queries are kept in their own sqlc input so tunnel API work
 // can evolve independently from preview leases and route/connector APIs.
-func (q *Queries) ListPreviewTunnelsV1(ctx context.Context, arg ListPreviewTunnelsV1Params) ([]Tunnel, error) {
+// Every way to manage a tunnel needs its creating host to be the account's own personal machine or one with a
+// tunnel_manage grant for the account in one of its active teams (see ListPreviewLeasesV1): candidates come from
+// that host set by index, and the exact access functions run only until the page is full.
+func (q *Queries) ListPreviewTunnelsV1(ctx context.Context, arg ListPreviewTunnelsV1Params) ([]ListPreviewTunnelsV1Row, error) {
 	rows, err := q.db.Query(ctx, listPreviewTunnelsV1,
 		arg.AccountID,
 		arg.WorkspaceSet,
 		arg.WorkspaceTeamID,
+		arg.RowLimit,
 		arg.AfterCreatedAt,
 		arg.AfterID,
 		arg.Q,
 		arg.State,
 		arg.Owner,
-		arg.RowLimit,
 	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Tunnel
+	var items []ListPreviewTunnelsV1Row
 	for rows.Next() {
-		var i Tunnel
+		var i ListPreviewTunnelsV1Row
 		if err := rows.Scan(
 			&i.ID,
 			&i.AccountID,

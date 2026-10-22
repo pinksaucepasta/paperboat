@@ -231,9 +231,10 @@ func (r *SQLRepository) List(ctx context.Context, accountID string, after *ListP
 	}
 	ws, selected := workspace.FromContext(ctx)
 	filters := workspace.InventoryFiltersFromContext(ctx)
-	items, err := r.db.Queries().ListPreviewTunnelsV1(ctx, dbsqlc.ListPreviewTunnelsV1Params{
+	params := dbsqlc.ListPreviewTunnelsV1Params{
 		AccountID: accountID, AfterCreatedAt: afterCreatedAt, AfterID: afterID, RowLimit: int32(limit), WorkspaceSet: selected, WorkspaceTeamID: nullableString(ws.TeamID), Q: filters.Q, State: filters.State, Owner: filters.Owner,
-	})
+	}
+	items, err := r.listTunnelPage(ctx, params)
 	if err != nil {
 		return nil, translate(err)
 	}
@@ -251,12 +252,24 @@ func (r *SQLRepository) List(ctx context.Context, accountID string, after *ListP
 				return nil, err
 			}
 		}
-		items, err = r.db.Queries().ListPreviewTunnelsV1(ctx, dbsqlc.ListPreviewTunnelsV1Params{AccountID: accountID, AfterCreatedAt: afterCreatedAt, AfterID: afterID, RowLimit: int32(limit), WorkspaceSet: selected, WorkspaceTeamID: nullableString(ws.TeamID), Q: filters.Q, State: filters.State, Owner: filters.Owner})
+		items, err = r.listTunnelPage(ctx, params)
 	}
 	if err == nil {
 		err = r.decoratePublicEndpoints(ctx, items)
 	}
 	return items, translate(err)
+}
+
+func (r *SQLRepository) listTunnelPage(ctx context.Context, params dbsqlc.ListPreviewTunnelsV1Params) ([]dbsqlc.Tunnel, error) {
+	rows, err := r.db.Queries().ListPreviewTunnelsV1(ctx, params)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]dbsqlc.Tunnel, len(rows))
+	for i, row := range rows {
+		items[i] = dbsqlc.Tunnel(row)
+	}
+	return items, nil
 }
 
 func (r *SQLRepository) Create(ctx context.Context, input CreateRecord) (MutationRecord, error) {

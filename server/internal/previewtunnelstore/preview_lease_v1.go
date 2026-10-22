@@ -290,7 +290,7 @@ func (s *Store) ListPreviewLeasesV1(ctx context.Context, input ListPreviewLeases
 	}
 	items := make([]PreviewLeaseRecord, 0, len(rows))
 	for _, row := range rows {
-		items = append(items, previewLeaseRecordFromRow(row))
+		items = append(items, previewLeaseRecordFromRow(dbsqlc.PreviewLease(row)))
 	}
 	if err := s.decoratePreviewEndpoints(ctx, items); err != nil {
 		return nil, err
