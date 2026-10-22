@@ -7,6 +7,7 @@ import (
 	"net"
 	"os/user"
 	"strconv"
+	"syscall"
 
 	"github.com/tailscale/peercred"
 )
@@ -21,6 +22,12 @@ type Identity struct {
 
 func Get(connection net.Conn) (Identity, error) {
 	credentials, err := peercred.Get(connection)
+	if errors.Is(err, syscall.ENOTCONN) {
+		// The peer hung up before its credentials were read. Callers still deny it, but it is an
+		// ordinary disconnect, not an unverifiable peer (macOS gives ENOTCONN here; Linux keeps the
+		// credentials after close).
+		return Identity{}, err
+	}
 	if err != nil {
 		return Identity{}, errors.Join(ErrUnverified, err)
 	}

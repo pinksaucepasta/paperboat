@@ -91,7 +91,7 @@ func expectedSocketRequestLeaf(err error) bool {
 		return true
 	}
 	if errno, ok := err.(syscall.Errno); ok {
-		return errno == syscall.EPIPE || errno == syscall.ECONNRESET
+		return errno == syscall.EPIPE || errno == syscall.ECONNRESET || errno == syscall.ENOTCONN
 	}
 	return false
 }
