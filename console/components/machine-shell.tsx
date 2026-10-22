@@ -138,7 +138,6 @@ export function MachineShell({ machineId, children }: { machineId: string; child
       <div className="min-h-0 flex-1">
         {terminal === "open" && !isMobile ? (
           <ResizablePanelGroup
-            key={dock.value}
             orientation={dock.value === "bottom" ? "vertical" : "horizontal"}
             className="h-[calc(100svh-var(--header-height))]"
           >
