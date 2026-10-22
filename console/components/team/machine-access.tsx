@@ -103,7 +103,7 @@ export function MachineAccess({
   )
 }
 
-function AccessForm({
+export function AccessForm({
   team,
   machineId,
   alias,
