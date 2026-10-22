@@ -115,8 +115,9 @@ func (c *Client) ensure(ctx context.Context) (*clientConn, error) {
 		c.fatal = retainDecision(ErrAdmission, err)
 		return nil, c.fatal
 	}
-	if token == "" || len(token) > MaxControl {
-		return nil, ErrAdmission
+	parts, err := grantParts(token)
+	if err != nil {
+		return nil, err
 	}
 	config := c.config.TLS.Clone()
 	config.NextProtos = []string{ALPN}
@@ -144,7 +145,7 @@ func (c *Client) ensure(ctx context.Context) (*clientConn, error) {
 		return fail(err)
 	}
 	stream.SetDeadline(time.Now().Add(5 * time.Second))
-	if err = writeFrame(stream, frameAuth, []byte(token)); err != nil {
+	if err = writeFrame(stream, frameAuth, []byte(parts[0])); err != nil {
 		return fail(err)
 	}
 	kind, b, err := readFrame(stream)
@@ -153,6 +154,11 @@ func (c *Client) ensure(ctx context.Context) (*clientConn, error) {
 	}
 	if kind != frameReady || len(b) != 0 {
 		return fail(ErrProtocol)
+	}
+	for _, part := range parts[1:] {
+		if err = writeFrame(stream, frameAuth, []byte(part)); err != nil {
+			return fail(err)
+		}
 	}
 	stream.SetDeadline(time.Time{})
 	c.generation++
@@ -355,7 +361,7 @@ func (c *Client) readData(cc *clientConn) {
 }
 func (c *Client) refresh(cc *clientConn) {
 	defer cc.workers.Done()
-	watchCarrierAuthority(cc.conn.Context(), c.config.Credential, func(token string) error { return cc.frame(frameAuth, []byte(token)) }, func() {
+	watchCarrierAuthority(cc.conn.Context(), c.config.Credential, func(token string) error { return sendGrantParts(token, cc.frame) }, func() {
 		cc.conn.CloseWithError(quic.ApplicationErrorCode(ErrAdmission.Code), "relay authority revoked")
 	})
 }

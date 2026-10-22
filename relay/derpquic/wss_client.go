@@ -118,7 +118,11 @@ func (c *WSSClient) ensure(ctx context.Context) (*wssClientConn, error) {
 	stop := context.AfterFunc(c.ctx, cancel)
 	defer stop()
 	token, err := c.config.Credential(dialCtx)
-	if err != nil || token == "" || len(token) > MaxControl {
+	var parts []string
+	if err == nil {
+		parts, err = grantParts(token)
+	}
+	if err != nil {
 		if dialCtx.Err() != nil {
 			return nil, dialCtx.Err()
 		}
@@ -161,7 +165,7 @@ func (c *WSSClient) ensure(ctx context.Context) (*wssClientConn, error) {
 		return nil, err
 	}
 	_ = nc.SetDeadline(time.Now().Add(5 * time.Second))
-	if err = writeFrame(nc, frameAuth, []byte(token)); err != nil {
+	if err = writeFrame(nc, frameAuth, []byte(parts[0])); err != nil {
 		return fail(err)
 	}
 	kind, b, err := readFrame(nc)
@@ -170,6 +174,11 @@ func (c *WSSClient) ensure(ctx context.Context) (*wssClientConn, error) {
 	}
 	if kind != frameReady || len(b) != 0 {
 		return fail(ErrProtocol)
+	}
+	for _, part := range parts[1:] {
+		if err = writeFrame(nc, frameAuth, []byte(part)); err != nil {
+			return fail(err)
+		}
 	}
 	_ = nc.SetDeadline(time.Time{})
 	c.generation++
@@ -354,5 +363,5 @@ func (c *WSSClient) read(cc *wssClientConn) {
 }
 func (c *WSSClient) refresh(cc *wssClientConn) {
 	defer cc.workers.Done()
-	watchCarrierAuthority(cc.ctx, c.config.Credential, func(token string) error { return cc.frame(frameAuth, []byte(token)) }, cc.cancel)
+	watchCarrierAuthority(cc.ctx, c.config.Credential, func(token string) error { return sendGrantParts(token, cc.frame) }, cc.cancel)
 }

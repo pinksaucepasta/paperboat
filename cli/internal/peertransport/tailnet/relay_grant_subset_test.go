@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -63,5 +64,18 @@ func TestRelayGrantNamingASubsetOfThePeersIsAccepted(t *testing.T) {
 		if err := a.ApplyRelayGrants(t.Context(), []string{sign(peers)}); !errors.Is(err, ErrAuthority) {
 			t.Fatalf("%s: err = %v", name, err)
 		}
+	}
+	// Chunks: one grant per chunk of peers for the same node add up and are sent together.
+	if err := a.ApplyRelayGrants(t.Context(), []string{sign(nil), sign([]derpquic.Peer{configured(0)})}); err != nil {
+		t.Fatalf("chunked grants refused: %v", err)
+	}
+	a.relay.mu.Lock()
+	joined, merged := a.relay.tokens[node.NodeID], a.relay.grants[node.NodeID]
+	a.relay.mu.Unlock()
+	if strings.Count(joined, "\n") != 1 || len(merged.Peers) != 1 {
+		t.Fatalf("chunks not combined: %d parts, %d peers", strings.Count(joined, "\n")+1, len(merged.Peers))
+	}
+	if err := a.ApplyRelayGrants(t.Context(), []string{sign([]derpquic.Peer{configured(0)}), sign([]derpquic.Peer{configured(0)})}); !errors.Is(err, ErrAuthority) {
+		t.Fatalf("a peer named in two chunks: err = %v", err)
 	}
 }

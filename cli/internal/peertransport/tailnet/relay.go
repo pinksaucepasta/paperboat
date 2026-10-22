@@ -148,7 +148,7 @@ func (a *Authority) ApplyRelayGrants(ctx context.Context, tokens []string) (resu
 			Type      string `json:"typ"`
 			KeyID     string `json:"kid"`
 		}
-		if strictDecode(header, &fullHeader) != nil || fullHeader.Algorithm != "EdDSA" || fullHeader.Type != "paperboat-relay-grant+jwt" || strictDecode(body, &g) != nil || g.Version != 1 || g.Issuer != a.options.Issuer || g.Audience != "paperboat-relay" || g.AccountID != cfg.Self.AccountID || g.EndpointID != cfg.Self.EndpointID || g.WireGuardPublicKey != cfg.Self.WireGuardPublicKey || g.CertificateFingerprint != cfg.Self.QUICCertificateFingerprint || g.QUICPublicKey != cfg.Self.QUICPublicKey || g.Generation != cfg.Generation || g.NodeGeneration != node.NodeGeneration || g.ProcessEpoch != node.ProcessEpoch || g.IssuedAt > time.Now().Add(derpquic.MaxClockSkew).Unix() || g.ExpiresAt <= time.Now().Unix() || g.ExpiresAt-g.IssuedAt > 60 || g.ExpiresAt > cfg.ExpiresAt || g.ExpiresAt > node.ExpiresAt || next[g.NodeID] != "" {
+		if strictDecode(header, &fullHeader) != nil || fullHeader.Algorithm != "EdDSA" || fullHeader.Type != "paperboat-relay-grant+jwt" || strictDecode(body, &g) != nil || g.Version != 1 || g.Issuer != a.options.Issuer || g.Audience != "paperboat-relay" || g.AccountID != cfg.Self.AccountID || g.EndpointID != cfg.Self.EndpointID || g.WireGuardPublicKey != cfg.Self.WireGuardPublicKey || g.CertificateFingerprint != cfg.Self.QUICCertificateFingerprint || g.QUICPublicKey != cfg.Self.QUICPublicKey || g.Generation != cfg.Generation || g.NodeGeneration != node.NodeGeneration || g.ProcessEpoch != node.ProcessEpoch || g.IssuedAt > time.Now().Add(derpquic.MaxClockSkew).Unix() || g.ExpiresAt <= time.Now().Unix() || g.ExpiresAt-g.IssuedAt > 60 || g.ExpiresAt > cfg.ExpiresAt || g.ExpiresAt > node.ExpiresAt {
 			next = nil
 			grants = nil
 			return ErrAuthority
@@ -172,12 +172,25 @@ func (a *Authority) ApplyRelayGrants(ctx context.Context, tokens []string) (resu
 			seenControl[peerKey] = true
 			controlSet[peer] = true
 		}
+		// An endpoint with more peers than one grant names gets one grant per chunk of peers for a node;
+		// together they name each configured peer at most once.
+		earlier, chunk := grants[g.NodeID], next[g.NodeID] != ""
+		if chunk && (len(strings.Split(next[g.NodeID], "\n")) >= derpquic.MaxGrantParts || earlier.ExpiresAt != g.ExpiresAt || earlier.IssuedAt != g.IssuedAt) {
+			next = nil
+			grants = nil
+			return ErrAuthority
+		}
 		configured := make(map[string]string, len(cfg.Peers))
 		for _, peer := range cfg.Peers {
 			scopes, _ := json.Marshal(peer.Scopes)
 			configured[peer.Identity.WireGuardPublicKey] = string(scopes)
 		}
-		seenPeer := make(map[string]bool, len(g.Peers))
+		seenPeer := make(map[string]bool, len(g.Peers)+len(earlier.Peers))
+		if chunk {
+			for _, p := range earlier.Peers {
+				seenPeer[p.WireGuardPublicKey] = true
+			}
+		}
 		for _, p := range g.Peers {
 			expected, ok := configured[p.WireGuardPublicKey]
 			actual, _ := json.Marshal(p.Scopes)
@@ -187,6 +200,17 @@ func (a *Authority) ApplyRelayGrants(ctx context.Context, tokens []string) (resu
 				return ErrAuthority
 			}
 			seenPeer[p.WireGuardPublicKey] = true
+		}
+		if chunk {
+			merged := earlier
+			merged.Peers = append(append([]derpquic.Peer(nil), earlier.Peers...), g.Peers...)
+			merged.RelayControlPeers = append(append([]string(nil), earlier.RelayControlPeers...), g.RelayControlPeers...)
+			if merged.PeerRelay == nil {
+				merged.PeerRelay = g.PeerRelay
+			}
+			next[g.NodeID] += "\n" + token
+			grants[g.NodeID] = merged
+			continue
 		}
 		next[g.NodeID] = token
 		grants[g.NodeID] = g
@@ -262,22 +286,24 @@ func (a *Authority) configureRegionalRelays(config *tls.Config, only string) ([]
 			}
 			controlSet[peer] = true
 		}
-		parts := strings.Split(a.relay.tokens[node.NodeID], ".")
-		if len(parts) != 3 {
-			return nil, ErrAuthority
-		}
-		header, _ := base64.RawURLEncoding.DecodeString(parts[0])
-		var h struct {
-			KeyID string `json:"kid"`
-		}
-		_ = json.Unmarshal(header, &h)
-		pub, found, e := a.options.Keys.Lookup(context.Background(), h.KeyID)
-		if e != nil || !found {
-			return nil, ErrAuthority
-		}
-		verifier := derpquic.Verifier{Issuer: a.options.Issuer, NodeID: node.NodeID, NodeGeneration: node.NodeGeneration, ProcessEpoch: node.ProcessEpoch, Keys: map[string]ed25519.PublicKey{h.KeyID: pub}}
-		if _, e = verifier.Verify(a.relay.tokens[node.NodeID], tls.ConnectionState{PeerCertificates: []*x509.Certificate{cert}}, time.Now()); e != nil {
-			return nil, e
+		for _, token := range strings.Split(a.relay.tokens[node.NodeID], "\n") {
+			parts := strings.Split(token, ".")
+			if len(parts) != 3 {
+				return nil, ErrAuthority
+			}
+			header, _ := base64.RawURLEncoding.DecodeString(parts[0])
+			var h struct {
+				KeyID string `json:"kid"`
+			}
+			_ = json.Unmarshal(header, &h)
+			pub, found, e := a.options.Keys.Lookup(context.Background(), h.KeyID)
+			if e != nil || !found {
+				return nil, ErrAuthority
+			}
+			verifier := derpquic.Verifier{Issuer: a.options.Issuer, NodeID: node.NodeID, NodeGeneration: node.NodeGeneration, ProcessEpoch: node.ProcessEpoch, Keys: map[string]ed25519.PublicKey{h.KeyID: pub}}
+			if _, e = verifier.Verify(token, tls.ConnectionState{PeerCertificates: []*x509.Certificate{cert}}, time.Now()); e != nil {
+				return nil, e
+			}
 		}
 		id := regionalID(node.NodeID)
 		if _, exists := selected[id]; exists {

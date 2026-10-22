@@ -222,6 +222,48 @@ func allowedPairExpiry(a, b Grant, now time.Time) int64 {
 	return latest
 }
 
+// MaxMergedPeers bounds the peers one endpoint's grants name together: the account's endpoint bound
+// (the CLI's endpointidentity.MaxTrustedKeys).
+const MaxMergedPeers = 2048
+
+// sameGrantIdentity reports whether two grants were issued for the same endpoint, relay process and
+// authorization generation, so their peers may be combined.
+func sameGrantIdentity(a, b Grant) bool {
+	return a.Issuer == b.Issuer && a.Generation == b.Generation && a.AccountID == b.AccountID && a.EndpointID == b.EndpointID &&
+		a.WireGuardPublicKey == b.WireGuardPublicKey && a.DiscoPublicKey == b.DiscoPublicKey && a.CertificateFingerprint == b.CertificateFingerprint &&
+		a.QUICPublicKey == b.QUICPublicKey && a.NodeID == b.NodeID && a.NodeGeneration == b.NodeGeneration && a.ProcessEpoch == b.ProcessEpoch
+}
+
+// mergeGrants adds the peers of a further grant of the same identity. A peer named again takes the
+// newer grant's scopes (a refreshed chunk); the result stays within MaxMergedPeers.
+func mergeGrants(current, next Grant) (Grant, error) {
+	merged := next
+	index := make(map[string]int, len(current.Peers)+len(next.Peers))
+	merged.Peers = make([]Peer, 0, len(current.Peers)+len(next.Peers))
+	for _, peer := range append(append([]Peer(nil), current.Peers...), next.Peers...) {
+		if i, ok := index[peer.WireGuardPublicKey]; ok {
+			merged.Peers[i] = peer
+			continue
+		}
+		index[peer.WireGuardPublicKey] = len(merged.Peers)
+		merged.Peers = append(merged.Peers, peer)
+	}
+	if len(merged.Peers) > MaxMergedPeers {
+		return Grant{}, ErrAdmission
+	}
+	merged.RelayControlPeers = current.RelayControlPeers
+	for _, peer := range next.RelayControlPeers {
+		if !slices.Contains(merged.RelayControlPeers, peer) {
+			merged.RelayControlPeers = append(merged.RelayControlPeers, peer)
+		}
+	}
+	if merged.PeerRelay == nil {
+		merged.PeerRelay = current.PeerRelay
+	}
+	merged.ExpiresAt = max(current.ExpiresAt, next.ExpiresAt)
+	return merged, nil
+}
+
 func allowedAdmitted(a, b Grant) bool {
 	matched := false
 	reciprocalScopes(a, b, func(Scope, Scope) { matched = true })

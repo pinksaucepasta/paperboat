@@ -330,6 +330,14 @@ func (s *Server) admit(p *peerConn, token string) error {
 	k, _ := ParseKey(g.WireGuardPublicKey)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// An endpoint with more peers than one grant names sends one grant per chunk of peers, all of the
+	// same generation; on its admitted connection they add up.
+	merging := !p.key.IsZero() && p.grant.Generation == g.Generation && p.grant.signedHash != g.signedHash && sameGrantIdentity(p.grant, g)
+	if merging {
+		if g, err = mergeGrants(p.grant, g); err != nil {
+			return err
+		}
+	}
 	if s.draining && (p.key.IsZero() || !now.Before(s.deadline)) {
 		return ErrOverload
 	}
@@ -344,7 +352,7 @@ func (s *Server) admit(p *peerConn, token string) error {
 			delete(s.fences, id)
 		}
 	}
-	if previous, ok := s.fences[id]; ok && (g.Generation < previous.Generation || g.Generation == previous.Generation && g.signedHash != previous.signedHash) {
+	if previous, ok := s.fences[id]; ok && (g.Generation < previous.Generation || !merging && g.Generation == previous.Generation && g.signedHash != previous.signedHash) {
 		return ErrAdmission
 	}
 	if !p.key.IsZero() && (p.key != k || p.grant.AccountID != g.AccountID || p.grant.EndpointID != g.EndpointID) {
