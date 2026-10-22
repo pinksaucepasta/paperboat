@@ -30,6 +30,10 @@ type standaloneUpdateGateConfig struct {
 	BeginUpdate func(context.Context, string) error
 	EndUpdate   func(string) error
 	Now         func() time.Time
+	// FenceLease bounds how long this process keeps the transfer admission
+	// fence for a drained update that is never committed or rolled back.
+	// Zero means hostdproto.MaximumUpdateGateDuration.
+	FenceLease time.Duration
 }
 
 type standaloneUpdateGate struct {
@@ -37,6 +41,7 @@ type standaloneUpdateGate struct {
 	mu              sync.Mutex
 	transactions    map[string]standaloneUpdateTransaction
 	heldTransaction string
+	fenceTimer      *time.Timer
 }
 
 type standaloneUpdateTransaction struct {
@@ -70,6 +75,9 @@ func newStandaloneUpdateGate(config standaloneUpdateGateConfig) (*standaloneUpda
 	if config.Now == nil {
 		config.Now = time.Now
 	}
+	if config.FenceLease <= 0 {
+		config.FenceLease = hostdproto.MaximumUpdateGateDuration
+	}
 	if err := os.MkdirAll(filepath.Dir(config.StatePath), 0o700); err != nil {
 		return nil, err
 	}
@@ -88,7 +96,7 @@ func newStandaloneUpdateGate(config standaloneUpdateGateConfig) (*standaloneUpda
 			if err != nil {
 				return nil, err
 			}
-			gate.heldTransaction = id
+			gate.holdAdmission(id)
 		}
 	}
 	return gate, nil
@@ -139,17 +147,25 @@ func (g *standaloneUpdateGate) HandleUpdateGate(ctx context.Context, request hos
 			return hostdproto.UpdateGateResponse{}, errStandaloneUpdateGate
 		}
 		if g.config.BeginUpdate != nil {
+			// Updates are serialized by the updater's journal, so a drain for a new
+			// transaction means the one still holding the fence was abandoned
+			// (its helper died or its rollback never reached this gate).
+			if g.heldTransaction != "" && g.heldTransaction != request.TransactionID {
+				if err := g.abandonHeld(); err != nil {
+					return hostdproto.UpdateGateResponse{}, err
+				}
+			}
 			drainCtx, cancel := context.WithTimeout(ctx, time.Duration(request.TimeoutMillis)*time.Millisecond)
 			err := g.config.BeginUpdate(drainCtx, request.TransactionID)
 			cancel()
 			if err != nil {
 				return hostdproto.UpdateGateResponse{}, err
 			}
-			g.heldTransaction = request.TransactionID
+			g.holdAdmission(request.TransactionID)
 		}
 		workloads := g.config.Workloads()
 		if workloads.Generation == 0 && workloads.Protected != 0 {
-			return hostdproto.UpdateGateResponse{}, errStandaloneUpdateGate
+			return hostdproto.UpdateGateResponse{}, errors.Join(errStandaloneUpdateGate, g.releaseAdmission(request.TransactionID))
 		}
 		// Executable activation restarts hostd. Terminal owners have independent
 		// lifetimes; worker transfer mutations were fenced and drained above.
@@ -218,6 +234,13 @@ func (g *standaloneUpdateGate) HandleUpdateGate(ctx context.Context, request hos
 		return hostdproto.UpdateGateResponse{}, errStandaloneUpdateGate
 	}
 	if err := g.persist(); err != nil {
+		if request.Operation == hostdproto.UpdateGateDrain {
+			// The drain is not durable, so the helper will not trust it: do not keep
+			// refusing transfers for it.
+			transaction.Drained = false
+			g.transactions[request.TransactionID] = transaction
+			err = errors.Join(err, g.releaseAdmission(request.TransactionID))
+		}
 		return hostdproto.UpdateGateResponse{}, err
 	}
 	if request.Operation == hostdproto.UpdateGateCommit || request.Operation == hostdproto.UpdateGateRollback {
@@ -228,6 +251,16 @@ func (g *standaloneUpdateGate) HandleUpdateGate(ctx context.Context, request hos
 	return hostdproto.UpdateGateResponse{Target: target}, nil
 }
 
+// holdAdmission records that the transfer fence is held for id and arms the
+// lease that releases it if the update never finishes.
+func (g *standaloneUpdateGate) holdAdmission(id string) {
+	if g.fenceTimer != nil {
+		g.fenceTimer.Stop()
+	}
+	g.heldTransaction = id
+	g.fenceTimer = time.AfterFunc(g.config.FenceLease, func() { g.expireAdmission(id) })
+}
+
 func (g *standaloneUpdateGate) releaseAdmission(id string) error {
 	if g.heldTransaction != id {
 		return nil
@@ -235,8 +268,39 @@ func (g *standaloneUpdateGate) releaseAdmission(id string) error {
 	if err := g.config.EndUpdate(id); err != nil {
 		return err
 	}
+	if g.fenceTimer != nil {
+		g.fenceTimer.Stop()
+		g.fenceTimer = nil
+	}
 	g.heldTransaction = ""
 	return nil
+}
+
+// abandonHeld gives up the fence of a drained update that was neither
+// committed nor rolled back and records it as rolled back. A later rollback
+// receipt for that transaction is still accepted.
+func (g *standaloneUpdateGate) abandonHeld() error {
+	id := g.heldTransaction
+	if err := g.releaseAdmission(id); err != nil {
+		return err
+	}
+	if transaction, ok := g.transactions[id]; ok && !transaction.Committed {
+		transaction.Drained, transaction.RolledBack = false, true
+		g.transactions[id] = transaction
+	}
+	return nil
+}
+
+// expireAdmission runs when a drained update has held the fence for the whole
+// lease. Without it an update whose helper died after the drain would refuse
+// every file transfer on this machine until the next update attempt.
+func (g *standaloneUpdateGate) expireAdmission(id string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.heldTransaction != id || g.abandonHeld() != nil {
+		return
+	}
+	_ = g.persist()
 }
 
 func (g *standaloneUpdateGate) probe(ctx context.Context, request hostdproto.UpdateGateRequest) error {

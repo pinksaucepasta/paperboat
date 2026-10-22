@@ -192,3 +192,23 @@ func TestServiceRefusalExitStatusPreservesIndependentFailures(t *testing.T) {
 		})
 	}
 }
+
+// A carrier that failed to start under the service manager used to leave only the
+// generic sentence in the journal, so the cause needed strace to find.
+func TestServiceFailuresLogTheirCauseAndInteractiveOnesDoNot(t *testing.T) {
+	failure := runtimeFailure("hostd lifecycle socket could not bind", syscall.EADDRINUSE)
+	for _, operation := range []string{"hostd", "worker", "session-owner", "carrier", "updated"} {
+		var output bytes.Buffer
+		if code := finishRuntimeCommand(context.Background(), operation, &output, failure, 1); code != 1 {
+			t.Fatalf("%s exit %d", operation, code)
+		}
+		if !strings.Contains(output.String(), "pb: cause: ") || !strings.Contains(output.String(), "address already in use") {
+			t.Fatalf("%s hid its cause: %q", operation, output.String())
+		}
+	}
+	var output bytes.Buffer
+	finishRuntimeCommand(context.Background(), "bootstrap", &output, failure, 1)
+	if strings.Contains(output.String(), "cause") || strings.Contains(output.String(), "address already in use") {
+		t.Fatalf("interactive command printed internals: %q", output.String())
+	}
+}

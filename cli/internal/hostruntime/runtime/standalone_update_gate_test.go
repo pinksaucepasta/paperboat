@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -294,6 +295,137 @@ func TestHostsAlwaysExposeUpdateGate(t *testing.T) {
 	defer host.Shutdown(context.Background())
 	if host.UpdateGate() == nil {
 		t.Fatal("machine runtime omitted standalone update gate")
+	}
+}
+
+// fenceFixture mimics the transfer service: one transaction at a time may hold
+// the mutation fence, and another one's drain is refused while it is held.
+type fenceFixture struct {
+	mu   sync.Mutex
+	held string
+}
+
+func (f *fenceFixture) holder() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.held
+}
+
+func (f *fenceFixture) config(statePath string, lease time.Duration) standaloneUpdateGateConfig {
+	health := http.NewServeMux()
+	registerHostLivenessAndDiagnostics(health, nil, nil, nil, nil, nil)
+	return standaloneUpdateGateConfig{MachineID: "machine_01", StatePath: statePath, Health: health, FenceLease: lease,
+		Workloads: func() hostdproto.WorkloadStatus { return hostdproto.WorkloadStatus{Generation: 1} },
+		BeginUpdate: func(_ context.Context, id string) error {
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			if f.held != "" && f.held != id {
+				return &filetransfer.Error{Code: filetransfer.ResourceLimit}
+			}
+			f.held = id
+			return nil
+		},
+		EndUpdate: func(id string) error {
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			if f.held == id {
+				f.held = ""
+			}
+			return nil
+		}}
+}
+
+func drainedGate(t *testing.T, gate *standaloneUpdateGate, id string) hostdproto.UpdateGateTargetBinding {
+	t.Helper()
+	with := func(request hostdproto.UpdateGateRequest) hostdproto.UpdateGateRequest {
+		request.TransactionID = id
+		return request
+	}
+	response, err := gate.HandleUpdateGate(context.Background(), with(standaloneGateRequest(hostdproto.UpdateGateTarget, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := response.Target
+	for _, operation := range []string{hostdproto.UpdateGateCandidate, hostdproto.UpdateGateDrain} {
+		if _, err := gate.HandleUpdateGate(context.Background(), with(standaloneGateRequest(operation, &target))); err != nil {
+			t.Fatalf("%s %s: %v", id, operation, err)
+		}
+	}
+	return target
+}
+
+// An update whose helper died after the drain (the candidate failed to start and
+// the native rollback never reached the gate) left its transaction drained. Every
+// later drain, and every file transfer, was then refused for good.
+func TestStandaloneUpdateGateNewDrainSupersedesAbandonedTransaction(t *testing.T) {
+	fence := &fenceFixture{}
+	statePath := filepath.Join(t.TempDir(), "gate.json")
+	gate, err := newStandaloneUpdateGate(fence.config(statePath, time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := drainedGate(t, gate, "transaction_stale")
+	// hostd restarts into the restored fence, as it does after the failed update.
+	gate, err = newStandaloneUpdateGate(fence.config(statePath, time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fence.holder() != "transaction_stale" {
+		t.Fatalf("restart did not restore the fence: %q", fence.holder())
+	}
+	drainedGate(t, gate, "transaction_next")
+	if fence.holder() != "transaction_next" || !gate.transactions["transaction_stale"].RolledBack || gate.transactions["transaction_stale"].Drained {
+		t.Fatalf("holder=%q stale=%+v", fence.holder(), gate.transactions["transaction_stale"])
+	}
+	rollback := standaloneGateRequest(hostdproto.UpdateGateRollback, &stale)
+	rollback.TransactionID = "transaction_stale"
+	if _, err := gate.HandleUpdateGate(context.Background(), rollback); err != nil {
+		t.Fatalf("late rollback receipt for the abandoned transaction: %v", err)
+	}
+	if fence.holder() != "transaction_next" {
+		t.Fatalf("rollback of the abandoned transaction released the new fence: %q", fence.holder())
+	}
+	if _, err := newStandaloneUpdateGate(fence.config(statePath, time.Hour)); err != nil {
+		t.Fatalf("state with an abandoned transaction does not reload: %v", err)
+	}
+}
+
+func TestStandaloneUpdateGateFenceLeaseReleasesAbandonedDrain(t *testing.T) {
+	fence := &fenceFixture{}
+	statePath := filepath.Join(t.TempDir(), "gate.json")
+	gate, err := newStandaloneUpdateGate(fence.config(statePath, 50*time.Millisecond))
+	if err != nil {
+		t.Fatal(err)
+	}
+	drainedGate(t, gate, "transaction_01")
+	waitFenceReleased(t, fence)
+	reloaded, err := newStandaloneUpdateGate(fence.config(statePath, 50*time.Millisecond))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fence.holder() != "" || !reloaded.transactions["transaction_01"].RolledBack {
+		t.Fatalf("expired lease was not recorded: holder=%q %+v", fence.holder(), reloaded.transactions["transaction_01"])
+	}
+	// A restarted hostd gets a fresh lease for a transaction that is still pending.
+	drainedGate(t, reloaded, "transaction_02")
+	reloaded, err = newStandaloneUpdateGate(fence.config(statePath, 50*time.Millisecond))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fence.holder() != "transaction_02" {
+		t.Fatal("restart lost the fence of a pending update")
+	}
+	waitFenceReleased(t, fence)
+}
+
+func waitFenceReleased(t *testing.T, fence *fenceFixture) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for fence.holder() != "" {
+		if time.Now().After(deadline) {
+			t.Fatal("fence lease never released an abandoned drain")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 

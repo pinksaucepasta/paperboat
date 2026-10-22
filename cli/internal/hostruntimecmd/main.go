@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
+	"strings"
 
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
@@ -203,6 +205,7 @@ func finishRuntimeCommand(ctx context.Context, operation string, output io.Write
 	if err == nil {
 		return code
 	}
+	serviceOperation := operation
 	switch operation {
 	case "bootstrap":
 		operation = "pair"
@@ -216,7 +219,14 @@ func finishRuntimeCommand(ctx context.Context, operation string, output io.Write
 		operation = errorreport.Operation(operation)
 	}
 	outputFailed := false
-	if _, writeErr := fmt.Fprintln(output, "pb: "+runtimeFailureMessage(err)); writeErr != nil {
+	message := "pb: " + runtimeFailureMessage(err)
+	if longRunningRuntimeService(serviceOperation) {
+		// These run under the service manager with nobody to ask. The journal is
+		// the only place their real cause can be found, and support references
+		// alone do not carry it.
+		message += "\npb: cause: " + failureCauseText(err)
+	}
+	if _, writeErr := fmt.Fprintln(output, message); writeErr != nil {
 		outputFailed = true
 		if code == LegacyCarrierRunningExitCode {
 			code = 1
@@ -255,4 +265,45 @@ func serviceFailureExitCode(err error) int {
 		return UpdateNotReadyExitCode
 	}
 	return 1
+}
+
+// longRunningRuntimeService reports the commands that systemd or launchd starts.
+func longRunningRuntimeService(operation string) bool {
+	switch operation {
+	case "hostd", "worker", "session-owner", "carrier", "updated":
+		return true
+	}
+	return false
+}
+
+// failureCauseText lists the distinct leaf errors under err, bounded in depth
+// and length. A CommandFailure's own message is public prose; the leaves are
+// the diagnostic causes it retains.
+func failureCauseText(err error) string {
+	var leaves []string
+	var walk func(error, int)
+	walk = func(current error, depth int) {
+		if current == nil || len(leaves) >= 8 {
+			return
+		}
+		var children []error
+		if joined, ok := current.(interface{ Unwrap() []error }); ok {
+			children = joined.Unwrap()
+		}
+		if len(children) == 0 || depth >= 6 {
+			text := current.Error()
+			if len(text) > 300 {
+				text = text[:300] + "..."
+			}
+			if !slices.Contains(leaves, text) {
+				leaves = append(leaves, text)
+			}
+			return
+		}
+		for _, child := range children {
+			walk(child, depth+1)
+		}
+	}
+	walk(err, 0)
+	return strings.Join(leaves, "; ")
 }
