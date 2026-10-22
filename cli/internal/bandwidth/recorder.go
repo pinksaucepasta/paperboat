@@ -20,6 +20,12 @@ const maxCounters = 8192
 const maxStateBytes = 8 << 20
 const retention = 7 * 24 * time.Hour
 
+// Pending bytes are delivered every flushInterval. With nothing new, a report
+// still goes out every idleReportInterval: the server marks a machine's usage
+// coverage stale after a minute without one.
+const flushInterval = 10 * time.Second
+const idleReportInterval = 30 * time.Second
+
 type Sink interface {
 	ReportNativeUsage(context.Context, []api.NativeUsageReport, int64, int64, bool) error
 }
@@ -44,6 +50,10 @@ type Recorder struct {
 	observeError func(error)
 	cancel       context.CancelFunc
 	done         chan struct{}
+	// revision counts recorded additions; delivered is the revision of the last
+	// successful report, sent at reported.
+	revision, delivered uint64
+	reported            time.Time
 }
 
 // Open recovers pending absolute counters. Only one recorder owns a host's
@@ -94,13 +104,16 @@ func Open(path string, sink Sink, observeError func(error)) (*Recorder, error) {
 	r.cancel = cancel
 	go func() {
 		defer close(r.done)
-		ticker := time.NewTicker(10 * time.Second)
+		ticker := time.NewTicker(flushInterval)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case <-ticker.C:
+			case now := <-ticker.C:
+				if r.idle(now) {
+					continue
+				}
 				request, stop := context.WithTimeout(ctx, 5*time.Second)
 				err := r.Flush(request)
 				stop()
@@ -113,6 +126,13 @@ func Open(path string, sink Sink, observeError func(error)) (*Recorder, error) {
 	return r, nil
 }
 
+// idle reports whether a periodic flush has nothing to deliver yet.
+func (r *Recorder) idle(now time.Time) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.revision == r.delivered && now.Sub(r.reported) < idleReportInterval
+}
+
 func key(report api.NativeUsageReport) string {
 	value, _ := json.Marshal([]string{report.AccessSessionID, report.StreamID, report.Consumer, report.Mode, report.NodeID, report.IntervalStart.Format(time.RFC3339)})
 	return fmt.Sprintf("%x", sha256.Sum256(value))
@@ -121,6 +141,7 @@ func key(report api.NativeUsageReport) string {
 func (r *Recorder) add(binding Binding, path Path, n int64, upload bool, now time.Time) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.revision++
 	start := now.Truncate(time.Minute)
 	report := api.NativeUsageReport{AccessSessionID: binding.AccessSessionID, StreamID: binding.StreamID, Consumer: binding.Consumer, Mode: path.Mode, NodeID: path.NodeID, IntervalStart: start, IntervalEnd: now}
 	id := key(report)
@@ -183,6 +204,7 @@ func (r *Recorder) flush(ctx context.Context, cleanShutdown bool) error {
 		r.state.CleanShutdown = true
 	}
 	now := time.Now().UTC()
+	revision := r.revision
 	for id, c := range r.state.Counters {
 		if now.Sub(c.Report.IntervalStart) > retention {
 			if c.Dirty {
@@ -208,6 +230,7 @@ func (r *Recorder) flush(ctx context.Context, cleanShutdown bool) error {
 		if err := r.sink.ReportNativeUsage(ctx, []api.NativeUsageReport{}, status.UnrecordedBytes, status.ExpiredBytes, status.Incomplete); err != nil {
 			return recorderFailure{"control_request", err}
 		}
+		r.markReported(revision)
 		return nil
 	}
 	for len(keys) > 0 {
@@ -238,7 +261,16 @@ func (r *Recorder) flush(ctx context.Context, cleanShutdown bool) error {
 		}
 		keys = keys[count:]
 	}
+	r.markReported(revision)
 	return nil
+}
+
+// markReported records a successful report covering additions up to revision.
+func (r *Recorder) markReported(revision uint64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.delivered = max(r.delivered, revision)
+	r.reported = time.Now()
 }
 
 func (r *Recorder) Close(ctx context.Context) error {

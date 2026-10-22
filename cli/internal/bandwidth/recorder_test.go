@@ -284,3 +284,44 @@ func TestFlushPreservesPrivateStorageAndDeliveryCauses(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestIdleRecorderReportsOnlyForCoverage(t *testing.T) {
+	sink := &testSink{}
+	r := newTestRecorder(t, sink)
+	now := time.Now()
+	if r.idle(now) {
+		t.Fatal("a recorder that never reported skipped its first report")
+	}
+	if err := r.Flush(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !r.idle(now.Add(flushInterval)) {
+		t.Fatal("an idle recorder reported again within the coverage interval")
+	}
+	if r.idle(now.Add(idleReportInterval + time.Second)) {
+		t.Fatal("an idle recorder let coverage go stale")
+	}
+	b := Binding{AccessSessionID: "access", StreamID: "stream", Consumer: "terminal"}
+	r.add(b, Path{Mode: "direct"}, 100, true, now)
+	if r.idle(now.Add(flushInterval)) {
+		t.Fatal("recorded bytes waited for the coverage interval")
+	}
+	sink.mu.Lock()
+	sink.fail = true
+	sink.mu.Unlock()
+	if err := r.Flush(context.Background()); err == nil {
+		t.Fatal("offline delivery failure hidden")
+	}
+	if r.idle(now.Add(flushInterval)) {
+		t.Fatal("undelivered bytes were not retried on the next flush")
+	}
+	sink.mu.Lock()
+	sink.fail = false
+	sink.mu.Unlock()
+	if err := r.Flush(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !r.idle(time.Now().Add(flushInterval)) {
+		t.Fatal("delivered bytes were reported again")
+	}
+}
