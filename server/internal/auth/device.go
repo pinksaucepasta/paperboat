@@ -115,6 +115,10 @@ type ClientPrincipal struct {
 	SessionID string
 	User      User
 	Scopes    []string
+	// APITokenID is set for a session started from an API token (StartAPITokenSession);
+	// APITokenScoped when that token has a scope.
+	APITokenID     string
+	APITokenScoped bool
 }
 
 func (p ClientPrincipal) HasScope(scope string) bool { return slices.Contains(p.Scopes, scope) }
@@ -507,7 +511,7 @@ func (s *DeviceService) Authenticate(ctx context.Context, token string) (ClientP
 		}
 		return ClientPrincipal{}, fmt.Errorf("authenticate client access token: %w", err)
 	}
-	p := ClientPrincipal{SessionID: row.ID, Scopes: strings.Fields(row.Scopes), User: User{ID: row.UserID, WorkOSSubject: row.WorkosSubject, PrimaryEmail: row.PrimaryEmail, DisplayName: row.DisplayName, Status: row.Status, Role: Role(row.Role), CreatedAt: row.CreatedAt}}
+	p := ClientPrincipal{SessionID: row.ID, APITokenID: row.ApiTokenID, APITokenScoped: row.ApiTokenScoped, Scopes: strings.Fields(row.Scopes), User: User{ID: row.UserID, WorkOSSubject: row.WorkosSubject, PrimaryEmail: row.PrimaryEmail, DisplayName: row.DisplayName, Status: row.Status, Role: Role(row.Role), CreatedAt: row.CreatedAt}}
 	touchInterval := int32(s.cfg.ClientSessionTouchInterval / time.Second)
 	if touchInterval < 1 {
 		touchInterval = 1

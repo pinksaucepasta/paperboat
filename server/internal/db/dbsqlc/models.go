@@ -50,6 +50,15 @@ type ApiToken struct {
 	RevokedBy  sql.NullString
 }
 
+type ApiTokenScopeRule struct {
+	TokenID    string
+	Entry      int32
+	TargetKind string
+	TargetID   string
+	Action     string
+	Ports      pgtype.Range[pgtype.Int4]
+}
+
 type AuditEvent struct {
 	ID                  string
 	ActorUserID         sql.NullString
@@ -431,6 +440,7 @@ type CLIClientSession struct {
 	Version            int64
 	FreshE2eeBootstrap bool
 	UserMachineID      sql.NullString
+	ApiTokenID         sql.NullString
 }
 
 type CLIRefreshToken struct {

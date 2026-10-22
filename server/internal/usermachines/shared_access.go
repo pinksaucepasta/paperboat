@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat-server/internal/auth"
 	"slices"
 
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
@@ -287,14 +288,32 @@ func lockTransferSession(ctx context.Context, tx *db.Tx, userID, sessionID strin
 	return machineID, nil
 }
 
+// getMachineForCapability is the one machine authorization of terminal, exec, managed SSH and
+// files. A request made with an API token is also held to the token's scope (PLAN F18-06).
 func getMachineForCapability(ctx context.Context, q *dbsqlc.Queries, in dbsqlc.GetUserMachineForCapabilityParams) (dbsqlc.UserMachine, error) {
+	var row dbsqlc.UserMachine
+	var err error
 	workspaceSet, teamID := workspaceTeamArgument(ctx)
 	if !workspaceSet {
-		return q.GetUserMachineForCapability(ctx, in)
+		row, err = q.GetUserMachineForCapability(ctx, in)
+	} else {
+		row, err = q.GetUserMachineForCapabilityInWorkspace(ctx, dbsqlc.GetUserMachineForCapabilityInWorkspaceParams{
+			ID: in.ID, UserID: in.UserID, Capability: in.Capability, WorkspaceSet: true, WorkspaceTeamID: teamID,
+		})
 	}
-	return q.GetUserMachineForCapabilityInWorkspace(ctx, dbsqlc.GetUserMachineForCapabilityInWorkspaceParams{
-		ID: in.ID, UserID: in.UserID, Capability: in.Capability, WorkspaceSet: true, WorkspaceTeamID: teamID,
-	})
+	if err != nil {
+		return row, err
+	}
+	if token, ok := auth.APITokenFromContext(ctx); ok {
+		allowed, err := q.APITokenScopeAllows(ctx, dbsqlc.APITokenScopeAllowsParams{TokenID: token, MachineID: row.ID, Capability: in.Capability})
+		if err != nil {
+			return dbsqlc.UserMachine{}, err
+		}
+		if !allowed {
+			return dbsqlc.UserMachine{}, auth.ErrOutsideTokenScope
+		}
+	}
+	return row, nil
 }
 
 func getTerminalSession(ctx context.Context, q *dbsqlc.Queries, in dbsqlc.GetUserMachineTerminalSessionParams) (dbsqlc.UserMachineTerminalSession, error) {

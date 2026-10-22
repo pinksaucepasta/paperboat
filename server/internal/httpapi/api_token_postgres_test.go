@@ -56,11 +56,12 @@ func TestAPITokenBearerRequests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	memberToken, secret, err := tokens.Create(t.Context(), member, teamScope, apitokens.CreateInput{Name: "ci", Scope: json.RawMessage(`[{"dst":["tag:ci"],"allow":["exec"]}]`)})
+	memberToken, secret, err := tokens.Create(t.Context(), member, teamScope, apitokens.CreateInput{Name: "ci", Scope: json.RawMessage(`[{"dst":["machine:*"],"allow":["exec"]}]`)})
 	if err != nil {
 		t.Fatal(err)
 	}
 	handler := NewRouter(Options{Config: config.Default(), Auth: auth.NewService(store, writer, nil, []string{"test-api-token-key"}, false),
+		DeviceAuth: auth.NewDeviceService(store, writer, config.Default().CLIAuth, []string{"test-api-token-session-key"}),
 		Workspaces: workspace.New(store), APITokens: tokens, Favorites: favorites.NewService(store), Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
 	do := func(method, path, bearer, body string) (int, map[string]any) {
 		t.Helper()
@@ -96,10 +97,38 @@ func TestAPITokenBearerRequests(t *testing.T) {
 	if status, out = do(http.MethodGet, "/v1/favorites", ownerSecret, ""); status != http.StatusOK {
 		t.Fatalf("an unscoped token acts as its creator in its workspace = %d %v", status, out)
 	}
-	// This token has a scope; until per-machine scope checks exist (F18-06) a scoped token is
-	// refused outside the policy and API-token routes rather than widened.
-	if status, out = do(http.MethodGet, "/v1/favorites", secret, ""); status != http.StatusForbidden || code(out) != "outside_token_scope" {
-		t.Fatalf("scoped token outside its routes = %d %v", status, out)
+	// This token has a scope: it reads as its creator, and changes only what its scope is
+	// checked on (machine actions); anything else is refused rather than widened.
+	if status, out = do(http.MethodGet, "/v1/favorites", secret, ""); status != http.StatusOK {
+		t.Fatalf("scoped token read = %d %v", status, out)
+	}
+	if status, out = do(http.MethodPut, "/v1/favorites", secret, `{}`); status != http.StatusForbidden || code(out) != "outside_token_scope" {
+		t.Fatalf("scoped token change outside its scope = %d %v", status, out)
+	}
+	// pb signs in with a token: the exchange returns a CLI session of the creator that carries it.
+	session := func(bearer string) string {
+		t.Helper()
+		status, out := do(http.MethodPost, "/v1/auth/api-token-sessions", bearer, `{"client_label":"ci runner","device_type":"server","os":"linux"}`)
+		data, _ := out["data"].(map[string]any)
+		access, _ := data["access_token"].(string)
+		if status != http.StatusOK || access == "" || data["refresh_token"] == "" {
+			t.Fatalf("api token session = %d %v", status, out)
+		}
+		return access
+	}
+	scopedSession := session(secret)
+	if status, out = do(http.MethodGet, "/v1/favorites", scopedSession, ""); status != http.StatusOK {
+		t.Fatalf("a scoped token's session reads as its creator = %d %v", status, out)
+	}
+	if status, out = do(http.MethodPut, "/v1/favorites", scopedSession, `{}`); status != http.StatusForbidden || code(out) != "outside_token_scope" {
+		t.Fatalf("a scoped token's session changes outside its scope = %d %v", status, out)
+	}
+	ownerSession := session(ownerSecret)
+	if status, out = do(http.MethodGet, "/v1/favorites", ownerSession, ""); status != http.StatusOK {
+		t.Fatalf("an unscoped token's session = %d %v", status, out)
+	}
+	if status, out = do(http.MethodPost, "/v1/auth/api-token-sessions", ownerSession, `{"client_label":"x","device_type":"server","os":"linux"}`); status != http.StatusUnauthorized || code(out) != "api_token_required" {
+		t.Fatalf("a session cannot start another session = %d %v", status, out)
 	}
 	if status, out = do(http.MethodPost, "/v1/workspaces/"+team+"/api-tokens", secret, `{"name":"more"}`); status != http.StatusForbidden || code(out) != "forbidden" {
 		t.Fatalf("token creates token = %d %v", status, out)
@@ -109,6 +138,9 @@ func TestAPITokenBearerRequests(t *testing.T) {
 	}
 	if status, out = do(http.MethodDelete, "/v1/workspaces/"+team+"/api-tokens/"+memberToken.ID, secret, ""); status != http.StatusOK || out["api_token"].(map[string]any)["revoked_at"] == nil {
 		t.Fatalf("revoke own = %d %v", status, out)
+	}
+	if status, out = do(http.MethodGet, "/v1/favorites", scopedSession, ""); status != http.StatusUnauthorized {
+		t.Fatalf("the session ends with its token = %d %v", status, out)
 	}
 	var metadata []byte
 	if err := store.SQL().QueryRowContext(t.Context(), `SELECT metadata FROM audit_events WHERE resource_id=$1 AND event_type='api_token.revoked'`, memberToken.ID).Scan(&metadata); err != nil {

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/pinksaucepasta/paperboat-server/internal/apitokens"
+	"github.com/pinksaucepasta/paperboat-server/internal/audit"
 	"github.com/pinksaucepasta/paperboat-server/internal/auth"
 )
 
@@ -202,8 +203,12 @@ func requireAnyAuth(service *auth.Service, machines *auth.DeviceService, next ht
 				writeDeviceAuthenticationError(w, r, err)
 				return
 			}
+			if client.APITokenScoped && !scopedTokenRoute(r) {
+				writeError(w, r, http.StatusForbidden, "outside_token_scope", "This API token's scope does not cover this request.")
+				return
+			}
 			bindSupportOwner(r.Context(), client.User.ID)
-			ctx := context.WithValue(r.Context(), authContextKey{}, principal{User: client.User, Client: &client})
+			ctx := clientContext(r.Context(), client)
 			next.ServeHTTP(w, r.WithContext(ctx))
 			return
 		}
@@ -227,8 +232,12 @@ func requireBearerAuth(machines *auth.DeviceService, next http.Handler) http.Han
 			writeDeviceAuthenticationError(w, r, err)
 			return
 		}
+		if client.APITokenScoped && !scopedTokenRoute(r) {
+			writeError(w, r, http.StatusForbidden, "outside_token_scope", "This API token's scope does not cover this request.")
+			return
+		}
 		bindSupportOwner(r.Context(), client.User.ID)
-		ctx := context.WithValue(r.Context(), authContextKey{}, principal{User: client.User, Client: &client})
+		ctx := clientContext(r.Context(), client)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -305,4 +314,13 @@ func unsafeMethod(method string) bool {
 	default:
 		return true
 	}
+}
+
+// clientContext carries an authenticated CLI session; a session started from an API token also
+// carries the token, so machine authorizations check its scope and audit names it.
+func clientContext(ctx context.Context, client auth.ClientPrincipal) context.Context {
+	if client.APITokenID != "" {
+		ctx = auth.WithAPIToken(audit.WithAPIToken(ctx, client.APITokenID), client.APITokenID)
+	}
+	return context.WithValue(ctx, authContextKey{}, principal{User: client.User, Client: &client})
 }

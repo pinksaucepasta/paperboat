@@ -103,3 +103,17 @@ func TestInternalizeAndExternalizeRoundTrip(t *testing.T) {
 		t.Fatal(errs)
 	}
 }
+
+func TestScopeRowsAreSymbolic(t *testing.T) {
+	c := mustCompile(t, `{"tags": {"tag:ci": ["machine:runner"]}}`, team())
+	rows, errs := c.ScopeRows([]ScopeEntry{{Dst: []string{"tag:ci", "machine:db1"}, Allow: []string{"exec"}}, {Dst: []string{"machine:*"}, Allow: []string{"private_access"}, Ports: []PortRange{{From: 5432, To: 5432}}}})
+	if len(errs) > 0 || len(rows) != 3 {
+		t.Fatalf("%v %+v", errs, rows)
+	}
+	if rows[0].TargetKind != "tag" || rows[0].TargetID != "tag:ci" || rows[1].TargetID != "m-db1" || rows[2].TargetKind != "all_machines" || portsLabel(rows[2].Ports) != "5432" || portsLabel(rows[0].Ports) != "1-65535" {
+		t.Fatalf("%+v", rows)
+	}
+	if _, errs := c.ScopeRows([]ScopeEntry{{Dst: []string{"tag:nope"}, Allow: []string{"exec"}}}); len(errs) != 1 || errs[0].Code != "unknown_tag" {
+		t.Fatal(errs)
+	}
+}

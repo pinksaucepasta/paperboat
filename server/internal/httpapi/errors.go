@@ -2,11 +2,13 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"reflect"
 	"time"
 
 	"github.com/getsentry/sentry-go"
+	"github.com/pinksaucepasta/paperboat-server/internal/auth"
 	"github.com/pinksaucepasta/paperboat-server/internal/controlplane"
 	serverdiagnostics "github.com/pinksaucepasta/paperboat-server/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat-server/internal/previewattachment"
@@ -131,6 +133,14 @@ func writePreviewMachineProofFailure(w http.ResponseWriter, r *http.Request, err
 }
 
 func writeErrorDetails(w http.ResponseWriter, r *http.Request, status int, code, message string, details map[string]any, causes ...error) {
+	// An API token's scope refusal can come out of any machine authorization; every handler
+	// reports it the same way.
+	for _, cause := range causes {
+		if errors.Is(cause, auth.ErrOutsideTokenScope) {
+			status, code, message, causes = http.StatusForbidden, "outside_token_scope", "This API token's scope does not cover this machine action.", nil
+			break
+		}
+	}
 	captureSupportFailure(r, status, code, sentry.NewStacktrace(), causes...)
 	writeJSON(w, status, ErrorResponse{Error: APIError{
 		SupportReference: supportReference(r.Context()),

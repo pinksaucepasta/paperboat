@@ -194,7 +194,11 @@ APIToken {id, name, workspace, created_by ("user:<email>"), created_at, expires_
   the token's workspace only (another workspace is 403 `workspace_unavailable`), and every
   authorization also checks the scope (`outside_token_scope`). Expired or revoked: 401
   `api_token_invalid`.
-- Status (F18-06): a scoped token can so far call only the policy and API-token endpoints and
-  is refused (`outside_token_scope`) everywhere else; per-machine scope checks on terminal, exec,
-  SSH and files, and `pb` commands that use a token, come next. An unscoped token
-  works on every endpoint.
+- Scoped tokens: a request made with a scoped token (directly, or through a pb session made from
+  it) reads as the creator; machine actions (terminal, exec, managed SSH, files) are checked
+  against the scope (`outside_token_scope`); other changes are refused, except the policy's
+  explain/validate, the API-token routes and the connection plumbing pb needs.
+- `POST /v1/auth/api-token-sessions` (bearer: the API token) `{"client_label", "device_type":
+  "desktop|server|container", "os"}` returns a CLI token set for a session of the creator that
+  carries the token; it ends when the token is revoked or expires. A session cannot start
+  another (401 `api_token_required`).

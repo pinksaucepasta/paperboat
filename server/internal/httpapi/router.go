@@ -877,6 +877,9 @@ func registerAuthRoutes(mux *http.ServeMux, opts Options) {
 		mux.Handle("POST /v1/workspaces/{ws}/api-tokens", accountRead(requireCSRF(opts.Auth, apiTokenCreate(opts.APITokens))))
 		mux.Handle("GET /v1/workspaces/{ws}/api-tokens", accountRead(apiTokenList(opts.APITokens)))
 		mux.Handle("DELETE /v1/workspaces/{ws}/api-tokens/{id}", accountRead(requireCSRF(opts.Auth, apiTokenRevoke(opts.APITokens))))
+		if opts.DeviceAuth != nil {
+			mux.Handle("POST /v1/auth/api-token-sessions", apiTokenSessionCreate(opts.DeviceAuth))
+		}
 	}
 	if opts.Favorites != nil {
 		mux.Handle("GET /v1/favorites", accountRead(favoritesList(opts.Favorites)))

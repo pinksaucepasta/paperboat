@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/pinksaucepasta/paperboat-server/internal/audit"
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat-server/internal/teams"
 	"github.com/pinksaucepasta/paperboat-server/internal/workspace"
 	"github.com/pinksaucepasta/paperboat/shared/policy"
 )
@@ -50,8 +51,20 @@ func (s *Service) Create(ctx context.Context, actor string, ws workspace.Scope, 
 		if err := workspace.ValidateTx(ctx, tx, actor, ws); err != nil {
 			return err
 		}
-		if err := s.validateScopeNames(ctx, tx, ws, scope); err != nil {
-			return err
+		var scopeRows []policy.Row
+		if scope != nil {
+			w := teams.Workspace{TeamID: ws.TeamID}
+			if ws.TeamID == "" {
+				w.Owner = actor
+			}
+			rows, errs, err := teams.TokenScopeRowsTx(ctx, tx, w, scope)
+			if err != nil {
+				return err
+			}
+			if len(errs) > 0 {
+				return &ScopeError{Errors: errs}
+			}
+			scopeRows = rows
 		}
 		// The user row lock serializes the per-member count with concurrent creates.
 		if _, err := tx.Exec(ctx, `SELECT 1 FROM users WHERE id=$1 FOR UPDATE`, actor); err != nil {
@@ -69,6 +82,14 @@ func (s *Service) Create(ctx context.Context, actor string, ws workspace.Scope, 
 		if _, err := tx.Exec(ctx, `INSERT INTO api_tokens(id, account_id, team_id, name, secret_hash, scope, created_at, expires_at)
 		 VALUES($1,$2,nullif($3,''),$4,$5,$6,$7,$8)`, id, actor, ws.TeamID, in.Name, hash, scopeJSON, now, now.Add(lifetime)); err != nil {
 			return mapInsertError(err)
+		}
+		for _, r := range scopeRows {
+			for _, p := range r.Ports {
+				if _, err := tx.Exec(ctx, `INSERT INTO api_token_scope_rules(token_id,entry,target_kind,target_id,action,ports) VALUES($1,$2,$3,$4,$5,int4range($6,$7,'[]'))`,
+					id, r.Rule, r.TargetKind, r.TargetID, r.Action, p.From, p.To); err != nil {
+					return err
+				}
+			}
 		}
 		if token, err = getTx(ctx, tx, id, false); err != nil {
 			return err
@@ -144,6 +165,10 @@ func (s *Service) Revoke(ctx context.Context, actor string, ws workspace.Scope, 
 			return nil
 		}
 		if _, err := tx.Exec(ctx, `UPDATE api_tokens SET revoked_at=$2, revoked_by=$3 WHERE id=$1`, id, s.now().UTC(), actor); err != nil {
+			return err
+		}
+		// Its pb sessions end with it.
+		if _, err := tx.Exec(ctx, `UPDATE cli_client_sessions SET state='revoked',revoked_at=$2,revocation_reason='api_token_revoked',version=version+1 WHERE api_token_id=$1 AND state='active'`, id, s.now().UTC()); err != nil {
 			return err
 		}
 		if token, err = getTx(ctx, tx, id, false); err != nil {

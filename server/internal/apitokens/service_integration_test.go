@@ -64,9 +64,18 @@ func TestAPITokenLifecycle(t *testing.T) {
 	f := openFixture(t, ctx)
 	s := New(f.store, audit.NewWriter(f.store), config.APITokens{MaxLifetimeDays: 365, DefaultLifetimeDays: 90, MaxPerMember: 2})
 
-	token, secret, err := s.Create(ctx, f.member, f.team, CreateInput{Name: "ci", Scope: json.RawMessage(`[{"dst":["tag:ci"],"allow":["exec"]}]`)})
+	// Scope names are checked against the workspace's policy; the scope is stored as rows.
+	var scopeErr *ScopeError
+	if _, _, err := s.Create(ctx, f.member, f.team, CreateInput{Name: "bad", Scope: json.RawMessage(`[{"dst":["tag:ci"],"allow":["exec"]}]`)}); !errors.As(err, &scopeErr) || scopeErr.Errors[0].Code != "unknown_tag" {
+		t.Fatalf("unknown tag in scope: %v", err)
+	}
+	token, secret, err := s.Create(ctx, f.member, f.team, CreateInput{Name: "ci", Scope: json.RawMessage(`[{"dst":["machine:*"],"allow":["exec"]}]`)})
 	if err != nil {
 		t.Fatal(err)
+	}
+	var rules int
+	if err := f.store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.api_token_scope_rules WHERE token_id=$1 AND target_kind='all_machines' AND action='exec'`, token.ID).Scan(&rules); err != nil || rules != 1 {
+		t.Fatalf("scope rows %d %v", rules, err)
 	}
 	if token.CreatedBy != "user:"+f.member+"@example.test" || token.Workspace != f.team || len(token.Scope) != 1 {
 		t.Fatalf("token = %+v", token)
@@ -116,7 +125,7 @@ func TestAPITokenLifecycle(t *testing.T) {
 	if _, _, err := s.Create(ctx, f.member, f.team, CreateInput{Name: "long", ExpiresInDays: 366}); !errors.Is(err, ErrInvalidLifetime) {
 		t.Fatalf("lifetime: %v", err)
 	}
-	var scopeErr *ScopeError
+	scopeErr = nil
 	if _, _, err := s.Create(ctx, f.member, f.team, CreateInput{Name: "bad-scope", Scope: json.RawMessage(`[]`)}); !errors.As(err, &scopeErr) {
 		t.Fatalf("scope: %v", err)
 	}

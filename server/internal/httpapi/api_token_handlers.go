@@ -10,6 +10,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat-server/internal/apitokens"
 	"github.com/pinksaucepasta/paperboat-server/internal/audit"
+	"github.com/pinksaucepasta/paperboat-server/internal/auth"
 	"github.com/pinksaucepasta/paperboat-server/internal/workspace"
 	"github.com/pinksaucepasta/paperboat/shared/policy"
 )
@@ -52,6 +53,7 @@ func apiTokenAuth(tokens *apitokens.Service, next http.Handler) http.Handler {
 		ctx = workspace.WithContext(ctx, token.Workspace)
 		ctx = apitokens.WithPrincipal(ctx, token)
 		ctx = audit.WithAPIToken(ctx, token.TokenID)
+		ctx = auth.WithAPIToken(ctx, token.TokenID)
 		ctx = context.WithValue(ctx, authContextKey{}, principal{User: token.User, APIToken: &token})
 		bindSupportOwner(ctx, token.User.ID)
 		next.ServeHTTP(w, r.WithContext(ctx))
@@ -196,18 +198,70 @@ func writeAPITokenError(w http.ResponseWriter, r *http.Request, tokens *apitoken
 	}
 }
 
-// scopedTokenRoute lists what a scoped API token may call: reading and explaining its
-// workspace's policy and the API-token routes.
+// scopedTokenRoute is what a scoped API token may call, directly or through a pb session made
+// from it: every read (as its creator), the machine actions whose authorization checks the
+// scope (usermachines.getMachineForCapability), the connection plumbing pb needs for them, the
+// policy's read-only explain and validate, and the API-token routes (whose handlers forbid a
+// token from making tokens). Any other change is refused rather than widened.
 func scopedTokenRoute(r *http.Request) bool {
+	if r.Method == http.MethodGet || r.Method == http.MethodHead {
+		return true
+	}
+	p := r.URL.Path
 	switch {
-	case r.Method == http.MethodGet && r.URL.Path == "/v1/policy/schema":
+	case strings.HasPrefix(p, "/v1/workspaces/") && (strings.HasSuffix(p, "/policy/explain") || strings.HasSuffix(p, "/policy/validate")):
 		return true
-	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/workspaces/") && (strings.HasSuffix(r.URL.Path, "/policy") || strings.HasSuffix(r.URL.Path, "/policy/versions")):
+	case strings.HasPrefix(p, "/v1/workspaces/") && (strings.HasSuffix(p, "/api-tokens") || strings.Contains(p, "/api-tokens/")):
 		return true
-	case strings.HasPrefix(r.URL.Path, "/v1/workspaces/") && (strings.HasSuffix(r.URL.Path, "/api-tokens") || strings.Contains(r.URL.Path, "/api-tokens/")):
-		return true // the handlers decide (a token cannot create tokens; it can revoke itself)
-	case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/v1/workspaces/") && (strings.HasSuffix(r.URL.Path, "/policy/explain") || strings.HasSuffix(r.URL.Path, "/policy/validate")):
+	case p == "/v1/auth/api-token-sessions", p == "/v1/peer-network/config", p == "/v1/peer-network/register":
+		return true
+	case r.Method == http.MethodPut && strings.HasPrefix(p, "/v1/ssh/client-keys/"):
+		return true
+	}
+	if r.Method != http.MethodPost {
+		return false
+	}
+	parts := strings.Split(strings.TrimPrefix(p, "/v1/"), "/")
+	switch {
+	case len(parts) == 3 && parts[0] == "machines" && (parts[2] == "exec-descriptor" || parts[2] == "ssh-descriptor" || parts[2] == "file-transfer-descriptor" ||
+		parts[2] == "connection-descriptor" || parts[2] == "terminal-sessions" || parts[2] == "events"):
+		return true
+	case len(parts) == 4 && parts[0] == "machines" && parts[2] == "events" && parts[3] == "wait":
+		return true
+	case len(parts) == 3 && parts[0] == "terminal-sessions" && parts[2] == "connection-descriptor":
+		return true
+	case len(parts) == 5 && parts[0] == "machines" && parts[2] == "terminal-sessions" && parts[4] == "close":
 		return true
 	}
 	return false
+}
+
+// apiTokenSessionCreate exchanges an API token (the request's bearer) for a token-backed CLI
+// session of its creator: pb signs in with a token this way (PLAN F18-06).
+func apiTokenSessionCreate(machines *auth.DeviceService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		noStore(w)
+		p, ok := apiTokenPrincipal(r)
+		if !ok {
+			writeError(w, r, http.StatusUnauthorized, "api_token_required", "Send the API token as Authorization: Bearer to start a session with it.")
+			return
+		}
+		var in struct {
+			ClientLabel string `json:"client_label"`
+			DeviceType  string `json:"device_type"`
+			OS          string `json:"os"`
+		}
+		if !decodeStrictJSON(w, r, &in) {
+			return
+		}
+		out, err := machines.StartAPITokenSession(r.Context(), auth.APITokenSessionRequest{TokenID: p.APIToken.TokenID, Account: p.User.ID, Label: in.ClientLabel, DeviceType: in.DeviceType, OS: in.OS})
+		if errors.Is(err, auth.ErrAPITokenUnusable) {
+			writeAPITokenInvalid(w, r)
+			return
+		}
+		if writeDeviceError(w, r, err) {
+			return
+		}
+		writeTokenSet(w, out)
+	}
 }

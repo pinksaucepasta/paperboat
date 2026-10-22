@@ -45126,7 +45126,7 @@
         },
         "responses": {
           "204": {
-            "description": "Cancelled; a consumed grant’s client session is revoked."
+            "description": "Cancelled; a consumed grant\u2019s client session is revoked."
           },
           "400": {
             "description": "Invalid client or device code."
@@ -47478,7 +47478,7 @@
             }
           }
         },
-        "description": "Paid workspaces only. Integer quantity 1..product.max_quantity buys quantity × unit_bytes (100 GB each). Credits NEVER EXPIRE and are consumed after the plan allowance. Checkout uses the exact quantity and verified unit price; only signed provider-confirmed paid events credit the workspace once. Requires Idempotency-Key and configured-origin return URLs. invalid_quantity rejects missing/zero/over-limit quantity."
+        "description": "Paid workspaces only. Integer quantity 1..product.max_quantity buys quantity \u00d7 unit_bytes (100 GB each). Credits NEVER EXPIRE and are consumed after the plan allowance. Checkout uses the exact quantity and verified unit price; only signed provider-confirmed paid events credit the workspace once. Requires Idempotency-Key and configured-origin return URLs. invalid_quantity rejects missing/zero/over-limit quantity."
       }
     },
     "/v1/billing/workspaces/teams/{team_id}/topups": {
@@ -47558,7 +47558,7 @@
             }
           }
         },
-        "description": "Paid workspaces only. Integer quantity 1..product.max_quantity buys quantity × unit_bytes (100 GB each). Credits NEVER EXPIRE and are consumed after the plan allowance. Checkout uses the exact quantity and verified unit price; only signed provider-confirmed paid events credit the workspace once. Requires Idempotency-Key and configured-origin return URLs. invalid_quantity rejects missing/zero/over-limit quantity."
+        "description": "Paid workspaces only. Integer quantity 1..product.max_quantity buys quantity \u00d7 unit_bytes (100 GB each). Credits NEVER EXPIRE and are consumed after the plan allowance. Checkout uses the exact quantity and verified unit price; only signed provider-confirmed paid events credit the workspace once. Requires Idempotency-Key and configured-origin return URLs. invalid_quantity rejects missing/zero/over-limit quantity."
       }
     },
     "/v1/teams/{team_id}/invitations/{invitation_id}/resend": {
@@ -49585,6 +49585,43 @@
             "$ref": "#/components/responses/Error"
           }
         }
+      }
+    },
+    "/v1/auth/api-token-sessions": {
+      "post": {
+        "operationId": "post_v1_auth_api_token_sessions",
+        "summary": "Start a CLI session with an API token",
+        "security": [
+          {
+            "bearerAccess": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "{client_label, device_type (desktop|server|container), os}"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "CLI token set (access_token, refresh_token, expires_in, scope, cli_client_session_id) for a session of the token's creator that carries the token."
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "The bearer is an API token (pbat_\u2026). The session ends when the token is revoked or expires; a scoped token's session is held to the scope."
       }
     }
   }

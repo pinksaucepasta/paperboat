@@ -69,11 +69,6 @@ type Principal struct {
 	Scope     []policy.ScopeEntry
 }
 
-// NameValidator resolves the names in a shape-checked scope against the workspace (members,
-// tags, machines, previews, tunnels), in the creating transaction. It returns policy errors
-// with paths under /scope.
-type NameValidator func(ctx context.Context, tx *db.Tx, ws workspace.Scope, scope []policy.ScopeEntry) policy.Errors
-
 type CreateInput struct {
 	Name string
 	// ExpiresInDays 0 takes the configured default.
@@ -85,27 +80,11 @@ type Service struct {
 	db     *db.DB
 	audit  *audit.Writer
 	limits config.APITokens
-	names  NameValidator
 	now    func() time.Time
 }
 
 func New(store *db.DB, writer *audit.Writer, limits config.APITokens) *Service {
 	return &Service{db: store, audit: writer, limits: limits, now: time.Now}
-}
-
-// SetNameValidator installs the workspace name resolution that validateScopeNames runs.
-func (s *Service) SetNameValidator(v NameValidator) { s.names = v }
-
-// validateScopeNames is where scope names are resolved against the workspace. Until the
-// policy store installs its NameValidator, only the shape checked by ParseScope applies.
-func (s *Service) validateScopeNames(ctx context.Context, tx *db.Tx, ws workspace.Scope, scope []policy.ScopeEntry) error {
-	if s.names == nil || scope == nil {
-		return nil
-	}
-	if errs := s.names(ctx, tx, ws, scope); len(errs) > 0 {
-		return &ScopeError{Errors: sortErrors(errs)}
-	}
-	return nil
 }
 
 func (s *Service) lifetime(days int) (time.Duration, error) {
