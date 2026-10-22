@@ -256,7 +256,7 @@ func TestGateCachesAndFailsOpen(t *testing.T) {
 		t.Fatal("a failure was retried on every call instead of being cached briefly")
 	}
 	gate.mu.Lock()
-	gate.cache["account_a"] = entry{true, time.Now().Add(-time.Second)}
+	gate.cache["account_a"] = entry{denied: true, until: time.Now().Add(-time.Second)}
 	gate.mu.Unlock()
 	failing.Store(false)
 	gate.Denied(ctx, "account_a", time.Now())
@@ -319,5 +319,41 @@ func TestGateDeniedAmongBoundsFreshLookups(t *testing.T) {
 	var nilGate *Gate
 	if nilGate.DeniedAmong(context.Background(), accounts, time.Now(), 10) != nil {
 		t.Fatal("a nil gate listed accounts")
+	}
+}
+
+// A lookup that fails after the account was answered "denied" must not reopen it
+// (relay grants were re-issued over the cap within a minute when lookups timed out).
+func TestGateKeepsARecentDenialWhenALookupFails(t *testing.T) {
+	failing := atomic.Bool{}
+	gate := &Gate{timeout: time.Second, lookup: func(context.Context, string, time.Time) (bool, error) {
+		if failing.Load() {
+			return false, errors.New("lookup timed out")
+		}
+		return true, nil
+	}}
+	ctx := context.Background()
+	if !gate.Denied(ctx, "account_over", time.Now()) {
+		t.Fatal("exhausted account was not withheld")
+	}
+	failing.Store(true)
+	expire := func(age time.Duration) {
+		gate.mu.Lock()
+		e := gate.cache["account_over"]
+		e.until = time.Now().Add(-time.Second)
+		e.deniedAt = time.Now().Add(-age)
+		gate.cache["account_over"] = e
+		gate.mu.Unlock()
+	}
+	expire(time.Minute)
+	if !gate.Denied(ctx, "account_over", time.Now()) {
+		t.Fatal("a failed lookup reopened an account denied a minute ago")
+	}
+	expire(knownDeniedHold + time.Second)
+	if gate.Denied(ctx, "account_over", time.Now()) {
+		t.Fatal("a denial older than the hold still withheld grants after lookups failed")
+	}
+	if gate.Denied(ctx, "account_never_denied", time.Now()) {
+		t.Fatal("an account never answered denied was withheld by a failing lookup")
 	}
 }

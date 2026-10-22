@@ -1,8 +1,9 @@
 // Package bandwidthgate answers one question for hot paths that must never wait on billing:
 // is every workspace an account can use out of bandwidth allowance? It is one read-only
 // statement (MVCC: no write, no row lock, so it cannot queue behind usage debits) with a
-// short timeout and a per-account cache, and any failure answers "not denied" (fail open):
-// connectivity never depends on billing; flows are still metered and charged when admitted.
+// short timeout and a per-account cache. A failure answers "not denied" (fail open) unless the
+// account was answered "denied" within knownDeniedHold: connectivity never depends on billing,
+// but a slow lookup cannot reopen an account known to be over its allowance.
 package bandwidthgate
 
 import (
@@ -20,12 +21,18 @@ const (
 	defaultLookupTimeout = 150 * time.Millisecond
 	answerTTL            = 10 * time.Second
 	failureTTL           = 5 * time.Second
-	cacheMax             = 4096
+	// knownDeniedHold is how long a failed lookup keeps an account's last "denied"
+	// answer: an account known to be over its allowance stays refused while billing
+	// is slow (fail closed), but only for a bounded time without a fresh answer.
+	knownDeniedHold = 2 * time.Minute
+	cacheMax        = 4096
 )
 
 type entry struct {
 	denied bool
 	until  time.Time
+	// deniedAt is when a lookup last answered "denied" (zero if never).
+	deniedAt time.Time
 }
 
 // Gate is safe for concurrent use.
@@ -54,16 +61,24 @@ func (g *Gate) Denied(ctx context.Context, account string, at time.Time) bool {
 	}
 	now := time.Now()
 	g.mu.Lock()
-	if e, ok := g.cache[account]; ok && now.Before(e.until) {
+	previous, ok := g.cache[account]
+	if ok && now.Before(previous.until) {
 		g.mu.Unlock()
-		return e.denied
+		return previous.denied
 	}
 	g.mu.Unlock()
 	lookupCtx, cancel := context.WithTimeout(ctx, g.timeout)
 	defer cancel()
 	denied, err := g.lookup(lookupCtx, account, at)
 	ttl := answerTTL
-	if err != nil {
+	deniedAt := previous.deniedAt
+	switch {
+	case err == nil && denied:
+		deniedAt = now
+	case err != nil && !deniedAt.IsZero() && now.Sub(deniedAt) < knownDeniedHold:
+		slog.WarnContext(ctx, "bandwidth gate unavailable; keeping the account's recent denial", "error_type", fmt.Sprintf("%T", err))
+		denied, ttl = true, failureTTL
+	case err != nil:
 		slog.WarnContext(ctx, "bandwidth gate unavailable; treating the account as within allowance", "error_type", fmt.Sprintf("%T", err))
 		denied, ttl = false, failureTTL
 	}
@@ -71,7 +86,7 @@ func (g *Gate) Denied(ctx context.Context, account string, at time.Time) bool {
 	if g.cache == nil || len(g.cache) >= cacheMax {
 		g.cache = make(map[string]entry)
 	}
-	g.cache[account] = entry{denied, now.Add(ttl)}
+	g.cache[account] = entry{denied: denied, until: now.Add(ttl), deniedAt: deniedAt}
 	g.mu.Unlock()
 	return denied
 }
