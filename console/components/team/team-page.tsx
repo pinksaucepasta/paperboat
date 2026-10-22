@@ -4,9 +4,16 @@ import { CircleNotchIcon, EnvelopeSimpleIcon, MinusIcon, PlusIcon, UsersThreeIco
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react"
-import { idempotencyKey, meQuery, useApiQuery, useWorkspace, workspacesQuery } from "@/lib/api"
+import { idempotencyKey, meQuery, needsSso, useApiQuery, useWorkspace, workspacesQuery } from "@/lib/api"
 import { billingLive, billingQuery, notLiveTitle, teamTrialDays } from "@/lib/billing"
-import { answerInvitation, createPaidTeam, createTeam, myInvitationsQuery, teamIdPattern } from "@/lib/teams"
+import {
+  answerInvitation,
+  createPaidTeam,
+  createTeam,
+  myInvitationsQuery,
+  roleLabels,
+  teamIdPattern,
+} from "@/lib/teams"
 import { setWorkspace } from "@/lib/workspace"
 import { TeamManage } from "@/components/team/team-members"
 import { TeamsUpgradeDialog } from "@/components/team/teams-upgrade"
@@ -19,10 +26,17 @@ import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 
-const roleLabels: Record<string, string> = { owner: "Owner", admin: "Admin", member: "Member" }
 
 export function TeamPage() {
   const workspace = useWorkspace()
+  // `?team=<id>` (the WorkOS Admin Portal returns to /team?team=<id>&tab=security) opens that
+  // team when it is one of yours; the server still checks every request.
+  const wanted = useSearchParams().get("team")
+  const workspaces = useApiQuery(workspacesQuery).data
+  useEffect(() => {
+    if (wanted && wanted !== workspace?.id && workspaces?.some((item) => item.kind === "team" && item.id === wanted))
+      setWorkspace(wanted)
+  }, [wanted, workspace?.id, workspaces])
   if (!workspace) return <Skeleton className="h-40 w-full" />
   return workspace.kind === "team" ? <TeamManage workspace={workspace} /> : <Teams />
 }
@@ -156,8 +170,9 @@ function Teams() {
                 <span className="flex min-w-0 flex-1 flex-col">
                   <span className="truncate font-medium">{team.name}</span>
                   <span className="truncate text-xs text-muted-foreground">
-                    {roleLabels[team.role]}
-                    {team.name !== team.id && ` · ${team.id}`}
+                    {needsSso(team)
+                      ? "Sign in with your work email to open this team"
+                      : `${roleLabels[team.role]}${team.name !== team.id ? ` · ${team.id}` : ""}`}
                   </span>
                 </span>
                 <span className="text-muted-foreground">Open</span>

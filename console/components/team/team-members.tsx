@@ -3,14 +3,19 @@
 import { CaretDownIcon, DotsThreeIcon } from "@phosphor-icons/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import Link from "next/link"
+import { useSearchParams } from "next/navigation"
 import { useState } from "react"
 import { meQuery, useApiQuery, useWorkspace, workspacesQuery, type Me, type Workspace } from "@/lib/api"
 import { billingKey, billingQuery, notLiveTitle } from "@/lib/billing"
 import {
   answerMachine,
+  assignableRoles,
   cancelInvitation,
   resendInvitation,
   memberEmails,
+  roleDescriptions,
+  roleLabels,
+  roleOrder,
   teamAction,
   teamInvitationsQuery,
   teamLive,
@@ -24,6 +29,7 @@ import { setWorkspace } from "@/lib/workspace"
 import { cn } from "@/lib/utils"
 import { CopyButton } from "@/components/copy-button"
 import { InviteDialog } from "@/components/team/invite-dialog"
+import { TeamSecurity } from "@/components/team/team-security"
 import { ConfirmAction, SearchField, ViewToggle } from "@/components/list-toolbar"
 import { Time } from "@/components/time"
 import { MachineAccess } from "@/components/team/machine-access"
@@ -43,17 +49,19 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 
-const roleLabels: Record<string, string> = { owner: "Owner", admin: "Admin", member: "Member" }
-const roleOrder: Record<string, number> = { owner: 0, admin: 1, member: 2 }
-
-/** Who can do what, from the server's rules (teams/service.go Mutate). */
+/**
+ * Who can do what, from the server's rules (teams/service.go Mutate, teams-business.md). A member
+ * managed by the company directory changes role or leaves only through the directory.
+ */
 function permissions(actor: TeamRole, target: TeamMember, you: boolean) {
   const owner = actor === "owner"
+  const managed = Boolean(target.directory_managed)
+  const roles = you || managed ? [] : assignableRoles(actor, target.role)
   return {
-    changeRole: owner && !you && target.role !== "owner",
-    transfer: owner && !you,
-    remove: !you && target.role !== "owner" && (owner || (actor === "admin" && target.role === "member")),
-    leave: you && actor !== "owner",
+    roles,
+    transfer: owner && !you && !managed,
+    remove: !you && !managed && target.role !== "owner" && (owner || (actor === "admin" && target.role !== "admin")),
+    leave: you && actor !== "owner" && !managed,
   }
 }
 
@@ -76,6 +84,7 @@ export function TeamManage({ workspace }: { workspace: Workspace }) {
   const [view, setView] = useState<"members" | "invitations">("members")
   const [search, setSearch] = useState("")
   const [inviting, setInviting] = useState(false)
+  const tab = useSearchParams().get("tab") === "security" ? "security" : "members"
 
   if (team.isPending || me.isPending) return <TeamSkeleton />
   if (team.isError) return <p className="text-sm text-muted-foreground">{team.error.message}</p>
@@ -84,7 +93,8 @@ export function TeamManage({ workspace }: { workspace: Workspace }) {
   const emails = memberEmails(team.data, invitations.data)
   emails.set(me.data.id, me.data.email)
   const actor = (team.data.members.find((m) => m.account_id === me.data!.id)?.role ?? "member") as TeamRole
-  const admin = actor !== "member"
+  // Members and settings are managed by the owner and admins; billing admins and auditors only see them.
+  const admin = actor === "owner" || actor === "admin"
   const query = search.trim().toLowerCase()
   const members = team.data.members
     .filter((m) => m.active)
@@ -102,6 +112,8 @@ export function TeamManage({ workspace }: { workspace: Workspace }) {
   const usedSeats = billing.data?.seats_used ?? members.length
   const freeSeats = billing.data ? Math.max(0, billing.data.seats_bought - billing.data.seats_used) : undefined
   const name = team.data.display_name || team.data.team_id
+  // Security (SSO, directory) is for the owner and admins to change and auditors to see.
+  const securityTab = teamLive.businessRoles && ["owner", "admin", "auditor"].includes(actor)
 
   return (
     <div className="flex flex-col gap-10">
@@ -138,39 +150,62 @@ export function TeamManage({ workspace }: { workspace: Workspace }) {
 
       {team.data.suspended && <SuspendedNotice owner={actor === "owner"} />}
 
-      <MachineRequests team={team.data} admin={admin} me={me.data} />
-      <MachineAccess team={team.data} admin={admin} accountId={me.data.id} emails={emails} />
+      {securityTab && (
+        <nav className="-mb-4 flex gap-1 border-b border-divider" aria-label="Team">
+          {(["members", "security"] as const).map((value) => (
+            <Link
+              key={value}
+              href={value === "security" ? `/team?team=${encodeURIComponent(team.data.team_id)}&tab=security` : "/team"}
+              scroll={false}
+              className={cn(
+                "-mb-px border-b-2 border-transparent px-2.5 pb-2.5 text-sm text-muted-foreground hover:text-foreground",
+                tab === value && "border-foreground text-foreground",
+              )}
+            >
+              {value === "security" ? "Security" : "Members"}
+            </Link>
+          ))}
+        </nav>
+      )}
+      {securityTab && tab === "security" ? (
+        <TeamSecurity team={team.data} emails={emails} />
+      ) : (
+        <>
+        <MachineRequests team={team.data} admin={admin} me={me.data} />
+        <MachineAccess team={team.data} admin={admin} accountId={me.data.id} emails={emails} />
 
-      <section className="flex flex-col gap-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <ViewToggle
-            value={view}
-            onChange={setView}
-            views={[
-              { value: "members", label: "Members", count: members.length },
-              ...(admin ? [{ value: "invitations" as const, label: "Invitations", count: pending.length }] : []),
-            ]}
-          />
-          <div className="ml-auto w-full max-w-sm">
-            <SearchField value={search} onChange={setSearch} placeholder="Search by name or email" />
+        <section className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <ViewToggle
+              value={view}
+              onChange={setView}
+              views={[
+                { value: "members", label: "Members", count: members.length },
+                ...(admin ? [{ value: "invitations" as const, label: "Invitations", count: pending.length }] : []),
+              ]}
+            />
+            <div className="ml-auto w-full max-w-sm">
+              <SearchField value={search} onChange={setSearch} placeholder="Search by name or email" />
+            </div>
           </div>
-        </div>
-        {view === "members" ? (
-          <MembersTable team={team.data} members={shownMembers} emails={emails} me={me.data} actor={actor} />
-        ) : invitations.isError ? (
-          <div className="flex items-center justify-center gap-3 py-12 text-sm text-muted-foreground">
-            Couldn’t load invitations.
-            <Button variant="outline" size="sm" onClick={() => invitations.refetch()}>
-              Retry
-            </Button>
-          </div>
-        ) : (
-          <InvitationsTable team={team.data} invitations={shownInvites} emails={emails} me={me.data} />
-        )}
-      </section>
+          {view === "members" ? (
+            <MembersTable team={team.data} members={shownMembers} emails={emails} me={me.data} actor={actor} />
+          ) : invitations.isError ? (
+            <div className="flex items-center justify-center gap-3 py-12 text-sm text-muted-foreground">
+              Couldn’t load invitations.
+              <Button variant="outline" size="sm" onClick={() => invitations.refetch()}>
+                Retry
+              </Button>
+            </div>
+          ) : (
+            <InvitationsTable team={team.data} invitations={shownInvites} emails={emails} me={me.data} />
+          )}
+        </section>
 
-      {admin && <TeamSettings team={team.data} owner={actor === "owner"} />}
-      <DangerZone team={team.data} owner={actor === "owner"} />
+        {admin && <TeamSettings team={team.data} owner={actor === "owner"} />}
+        <DangerZone team={team.data} owner={actor === "owner"} />
+        </>
+      )}
       <InviteDialog
         team={team.data}
         owner={actor === "owner"}
@@ -309,7 +344,7 @@ function MemberRow({
         <Person email={email} name={member.display_name} you={you} />
       </td>
       <td>
-        {can.changeRole ? (
+        {can.roles.length ? (
           <DropdownMenu>
             <DropdownMenuTrigger className="flex items-center gap-1 rounded-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/30">
               {roleLabels[member.role]}
@@ -317,23 +352,24 @@ function MemberRow({
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="min-w-64">
               <DropdownMenuRadioGroup value={member.role} onValueChange={(next) => role.mutate(next as string)}>
-                <DropdownMenuRadioItem value="admin">
-                  <span className="flex flex-col">
-                    Admin
-                    <span className="text-xs text-muted-foreground">Invites, removes members, manages machines</span>
-                  </span>
-                </DropdownMenuRadioItem>
-                <DropdownMenuRadioItem value="member">
-                  <span className="flex flex-col">
-                    Member
-                    <span className="text-xs text-muted-foreground">Uses what the team gives them</span>
-                  </span>
-                </DropdownMenuRadioItem>
+                {can.roles.map((value) => (
+                  <DropdownMenuRadioItem key={value} value={value}>
+                    <span className="flex flex-col">
+                      {roleLabels[value]}
+                      <span className="text-xs text-muted-foreground">{roleDescriptions[value]}</span>
+                    </span>
+                  </DropdownMenuRadioItem>
+                ))}
               </DropdownMenuRadioGroup>
             </DropdownMenuContent>
           </DropdownMenu>
         ) : (
-          <span className="text-muted-foreground">{roleLabels[member.role]}</span>
+          <span className="text-muted-foreground">{roleLabels[member.role] ?? member.role}</span>
+        )}
+        {member.directory_managed && (
+          <Badge variant="outline" className="mt-1 block w-fit font-normal text-muted-foreground">
+            Managed by directory
+          </Badge>
         )}
         {role.isError && <span className="block text-xs text-destructive">{role.error.message}</span>}
       </td>

@@ -2,13 +2,14 @@
 
 import { useRouter } from "next/navigation"
 import { useState } from "react"
-import { useApiQuery, useWorkspace, workspacesQuery } from "@/lib/api"
+import { needsSso, useApiQuery, useWorkspace, workspacesQuery } from "@/lib/api"
 import { setWorkspace } from "@/lib/workspace"
 import { cn } from "@/lib/utils"
 import { CrumbPickerTrigger, pickerOption } from "@/components/crumb-picker"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { Popover, PopoverContent } from "@/components/ui/popover"
 import { Skeleton } from "@/components/ui/skeleton"
+import { roleLabels } from "@/lib/teams"
 
 /**
  * First breadcrumb on every page: which workspace everything to its right belongs to. Built
@@ -63,7 +64,9 @@ export function WorkspaceSwitcher() {
                   >
                     <WorkspaceAvatar name={workspace.name} />
                     <span className="min-w-0 flex-1 truncate-x trim-cap">{workspace.name}</span>
-                    <span className="text-xs font-normal text-muted-foreground">{roleLabel[workspace.role]}</span>
+                    <span className="text-xs font-normal text-muted-foreground">
+                      {needsSso(workspace) ? "Needs SSO sign-in" : roleLabels[workspace.role]}
+                    </span>
                   </CommandItem>
                 ))}
               </CommandGroup>
@@ -75,7 +78,6 @@ export function WorkspaceSwitcher() {
   )
 }
 
-const roleLabel = { owner: "Owner", admin: "Admin", member: "Member" } as const
 
 function WorkspaceAvatar({ name }: { name: string }) {
   return (

@@ -5,6 +5,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
 import { ApiError, idempotencyKey, useApiQuery, useWorkspace, type Workspace } from "@/lib/api"
 import {
+  billingLive,
   billingProductsQuery,
   allowanceWindow,
   billingQuery,
@@ -16,6 +17,7 @@ import {
   type BillingWorkspace,
 } from "@/lib/billing"
 import { formatBytes } from "@/lib/format"
+import { BillingDetailsSection, Invoices, PayByInvoiceSection } from "@/components/billing/billing-business"
 import { PlanActions, Seats, TopUps } from "@/components/billing/billing-sections"
 import { Row, Section } from "@/components/section"
 import { Button } from "@/components/ui/button"
@@ -41,6 +43,13 @@ export function BillingPage() {
       {!subscribed && !confirming && <Plans workspace={workspace} billing={billing.data} />}
       {subscribed && workspace.kind === "team" && <Seats workspace={workspace} billing={billing.data} />}
       <TopUps workspace={workspace} billing={billing.data} />
+      {billingLive.business && billing.data.can_manage && (
+        <>
+          {workspace.kind === "team" && <PayByInvoiceSection workspace={workspace} billing={billing.data} />}
+          <Invoices workspace={workspace} />
+          <BillingDetailsSection workspace={workspace} />
+        </>
+      )}
     </div>
   )
 }

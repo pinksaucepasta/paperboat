@@ -13,7 +13,22 @@ export type ActivityEvent = {
   occurred_at: string
   /** The audit event type, e.g. `auth.login`, `tunnel.created`, `user_machine.renamed`. */
   action: string
-  actor: { kind: "user" | "machine" | "system"; id: string; name?: string; email?: string }
+  /**
+   * `api_token`: a person acting through one of their API tokens (`token_id`); `directory`: the
+   * company directory (SSO directory sync); `operator`: Paperboat support.
+   */
+  actor: {
+    kind: "user" | "api_token" | "directory" | "operator" | "machine" | "system"
+    id: string
+    name?: string
+    email?: string
+    token_id?: string
+  }
+  /** `denied` with a stable `reason` code for refused requests (F19 audit log). */
+  result?: "success" | "denied"
+  reason?: string
+  ip?: string
+  request_id?: string
   /** What it happened to; its name as it was then. */
   target?: { kind: string; id: string; name?: string }
   machine?: { id: string; name: string }
@@ -43,14 +58,52 @@ const areaActions: Record<Exclude<ActivityArea, "all">, string> = {
   account: "account",
 }
 
-export const activityQuery = (input: { workspace: string; machineId?: string | null; area: ActivityArea; q: string }) =>
+/** The audit log's filters and export (F19); off until that server is deployed. */
+export const activityLive = { filters: false, export: false } as const
+
+export const activityPeriods = { all: "Any time", day: "Last 24 hours", week: "Last 7 days", month: "Last 30 days" } as const
+export type ActivityPeriod = keyof typeof activityPeriods
+const periodMs: Record<ActivityPeriod, number> = { all: 0, day: 86_400_000, week: 604_800_000, month: 2_592_000_000 }
+
+/** The start of a period chosen at `now`; fixed when chosen, so the list doesn't refetch as time passes. */
+export const periodStart = (period: ActivityPeriod, now: number) =>
+  period === "all" || !now ? undefined : new Date(now - periodMs[period]).toISOString()
+
+export type ActivityFilter = {
+  workspace: string
+  machineId?: string | null
+  area: ActivityArea
+  q: string
+  /** Only refused requests. */
+  denied?: boolean
+  /** RFC 3339; from `periodStart`. */
+  since?: string
+}
+
+/** The query string for a filter, shared by the list and the export. */
+export function activityParams(input: ActivityFilter): URLSearchParams {
+  const params = new URLSearchParams({ workspace: input.workspace })
+  if (input.machineId) params.set("machine_id", input.machineId)
+  if (input.area !== "all") params.set("area", areaActions[input.area])
+  if (input.q) params.set("q", input.q)
+  if (activityLive.filters && input.denied) params.set("result", "denied")
+  if (activityLive.filters && input.since) params.set("since", input.since)
+  return params
+}
+
+/** The download address of the filtered audit log (team workspaces; owners, admins, auditors). */
+export function activityExportHref(input: ActivityFilter, format: "csv" | "json") {
+  const params = activityParams(input)
+  params.set("format", format)
+  return `/api/v1/activity/export?${params}`
+}
+
+export const activityQuery = (input: ActivityFilter) =>
   infiniteQueryOptions({
-    queryKey: ["activity", input.workspace, input.machineId ?? "", input.area, input.q] as const,
+    queryKey: ["activity", activityParams(input).toString()] as const,
     queryFn: ({ pageParam }) => {
-      const params = new URLSearchParams({ workspace: input.workspace, limit: "50" })
-      if (input.machineId) params.set("machine_id", input.machineId)
-      if (input.area !== "all") params.set("area", areaActions[input.area])
-      if (input.q) params.set("q", input.q)
+      const params = activityParams(input)
+      params.set("limit", "50")
       if (pageParam) params.set("cursor", pageParam)
       return api<{ items: ActivityEvent[]; next_cursor?: string }>(`activity?${params}`)
     },
@@ -166,6 +219,11 @@ const phrases: Record<string, string> = {
   "team.config_default_adopted": "adopted the team's config default",
   "team.config_default_unadopted": "stopped using the team's config default",
   "team.config_default_deleted": "removed the team's config default",
+  "team.sso_required": "changed whether the team requires SSO",
+  "team.jit_provisioned": "joined the team through SSO",
+  "team.activity_exported": "exported the audit log",
+  "billing.details_updated": "updated the billing details",
+  "billing.pay_by_invoice_changed": "changed whether the team pays by invoice",
   "team.env.initialize": "set up the team's environment",
   "team.env.key_grant": "gave a member access to the team's environment",
   "team.env.rotate": "rotated the team's environment key",
@@ -182,13 +240,25 @@ const phrases: Record<string, string> = {
 }
 
 /** Unknown types read as their verb part: `user_machine.foo_bar` → "did foo bar". */
+/** Families of actions named by prefix (the server adds members to them over time). */
+const prefixPhrases: [string, string][] = [
+  ["team.sso_", "changed the team's SSO settings"],
+  ["team.directory_", "changed the team's directory sync"],
+]
+
 export function describe(event: ActivityEvent): string {
-  return phrases[event.action] ?? `did ${event.action.split(".").slice(1).join(" ").replace(/_/g, " ")}`
+  return (
+    phrases[event.action] ??
+    prefixPhrases.find(([prefix]) => event.action.startsWith(prefix))?.[1] ??
+    `did ${event.action.split(".").slice(1).join(" ").replace(/_/g, " ")}`
+  )
 }
 
 export function actorName(event: ActivityEvent, meId?: string, memberNames?: ReadonlyMap<string, string | undefined>) {
   if (event.actor.kind === "user" && event.actor.id === meId) return "You"
   if (event.actor.kind === "system") return "Paperboat"
+  if (event.actor.kind === "directory") return "Directory sync"
+  if (event.actor.kind === "operator") return "Paperboat support"
   return (
     event.actor.name ??
     event.actor.email ??
@@ -196,6 +266,9 @@ export function actorName(event: ActivityEvent, meId?: string, memberNames?: Rea
     (event.actor.kind === "machine" ? "A machine" : "Someone")
   )
 }
+
+/** "through an API token" for events done with one. */
+export const viaToken = (event: ActivityEvent) => event.actor.kind === "api_token" || Boolean(event.actor.token_id)
 
 /** Where a target opens in the console, when it has a page. */
 export function targetHref(event: ActivityEvent): string | undefined {

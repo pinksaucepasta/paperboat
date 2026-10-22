@@ -1,16 +1,32 @@
 "use client"
 
-import { ClockCounterClockwiseIcon } from "@phosphor-icons/react"
+import { ClockCounterClockwiseIcon, DownloadSimpleIcon } from "@phosphor-icons/react"
 import { useInfiniteQuery } from "@tanstack/react-query"
 import Link from "next/link"
 import { Fragment, useDeferredValue, useState } from "react"
 import { meQuery, useApiQuery, useWorkspace, type Machine } from "@/lib/api"
 import { teamQuery } from "@/lib/teams"
-import { activityAreas, activityQuery, actorName, describe, targetHref, type ActivityArea } from "@/lib/activity"
+import {
+  activityAreas,
+  activityExportHref,
+  activityLive,
+  activityPeriods,
+  activityQuery,
+  actorName,
+  describe,
+  periodStart,
+  targetHref,
+  viaToken,
+  type ActivityArea,
+  type ActivityFilter,
+  type ActivityPeriod,
+} from "@/lib/activity"
 import { SearchField, useListScope } from "@/components/list-toolbar"
 import { useCurrentMachine } from "@/components/machine-shell"
 import { Choice } from "@/components/tunnels/share-file"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useTimeFormat } from "@/lib/use-time-format"
@@ -45,11 +61,15 @@ export function ActivityPage({ machine: tabMachine }: { machine?: Machine }) {
   const memberNames = new Map(team?.members?.map((member) => [member.account_id, member.display_name || member.email]))
   const [area, setArea] = useState<ActivityArea>("all")
   const [search, setSearch] = useState("")
+  const [denied, setDenied] = useState(false)
+  const [period, setPeriod] = useState<{ name: ActivityPeriod; since?: string }>({ name: "all" })
   const q = useDeferredValue(search.trim())
-  const activity = useInfiniteQuery({
-    ...activityQuery({ workspace: workspace?.id ?? "", machineId: scope, area, q }),
-    enabled: Boolean(workspace),
-  })
+  const filter: ActivityFilter = { workspace: workspace?.id ?? "", machineId: scope, area, q, denied, since: period.since }
+  const activity = useInfiniteQuery({ ...activityQuery(filter), enabled: Boolean(workspace) })
+  // The audit log is exported by the owner, admins and auditors of a team (teams-business.md).
+  const canExport =
+    activityLive.export && workspace?.kind === "team" && ["owner", "admin", "auditor"].includes(workspace.role ?? "")
+  const filtered = q || area !== "all" || denied || period.name !== "all"
   const events = activity.data?.pages.flatMap((page) => page.items) ?? []
 
   const groups: { label: string; events: typeof events }[] = []
@@ -73,6 +93,39 @@ export function ActivityPage({ machine: tabMachine }: { machine?: Machine }) {
             onChange={(value) => setArea(value as ActivityArea)}
           />
         </span>
+        {activityLive.filters && (
+          <>
+            <Choice
+              label={activityPeriods[period.name]}
+              value={period.name}
+              options={Object.entries(activityPeriods).map(([value, label]) => ({ value, label }))}
+              onChange={(value) =>
+                setPeriod({ name: value as ActivityPeriod, since: periodStart(value as ActivityPeriod, time.now) })
+              }
+            />
+            <Choice
+              label={denied ? "Only denied" : "All results"}
+              value={denied ? "denied" : "all"}
+              options={[
+                { value: "all", label: "All results" },
+                { value: "denied", label: "Only denied" },
+              ]}
+              onChange={(value) => setDenied(value === "denied")}
+            />
+          </>
+        )}
+        {canExport && (
+          <DropdownMenu>
+            <DropdownMenuTrigger render={<Button variant="outline" className="ml-auto" />}>
+              <DownloadSimpleIcon data-icon="inline-start" />
+              Export
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem render={<a href={activityExportHref(filter, "csv")} download />}>CSV (spreadsheets)</DropdownMenuItem>
+              <DropdownMenuItem render={<a href={activityExportHref(filter, "json")} download />}>JSON</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
       </div>
 
       {activity.isPending ? (
@@ -91,9 +144,9 @@ export function ActivityPage({ machine: tabMachine }: { machine?: Machine }) {
             <EmptyMedia variant="icon">
               <ClockCounterClockwiseIcon />
             </EmptyMedia>
-            <EmptyTitle>{q || area !== "all" ? "Nothing matches" : "No activity yet"}</EmptyTitle>
+            <EmptyTitle>{filtered ? "Nothing matches" : "No activity yet"}</EmptyTitle>
             <EmptyDescription>
-              {q || area !== "all"
+              {filtered
                 ? "Try another search or show all activity."
                 : "Machines added, terminals opened, tunnels created and other changes show up here."}
             </EmptyDescription>
@@ -119,7 +172,9 @@ export function ActivityPage({ machine: tabMachine }: { machine?: Machine }) {
                         {actor.charAt(0).toUpperCase()}
                       </span>
                       <p className="min-w-0 flex-1 truncate">
-                        <span className="font-medium">{actor}</span> {describe(event)}
+                        <span className="font-medium">{actor}</span>
+                        {viaToken(event) && <span className="text-muted-foreground"> with an API token</span>}{" "}
+                        {event.result === "denied" ? `was refused: ${describe(event)}` : describe(event)}
                         {event.target?.name && (
                           <>
                             {" "}
@@ -145,6 +200,11 @@ export function ActivityPage({ machine: tabMachine }: { machine?: Machine }) {
                           </span>
                         )}
                       </p>
+                      {event.result === "denied" && (
+                        <Badge variant="destructive" className="shrink-0 font-normal" title={event.reason}>
+                          Denied
+                        </Badge>
+                      )}
                       {event.source && (
                         <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">
                           {event.source === "cli"

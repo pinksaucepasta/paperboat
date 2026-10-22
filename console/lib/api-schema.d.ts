@@ -4448,6 +4448,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/team-roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Team roles and permission matrix
+         * @description The permission matrix for team roles: which administrative permissions each role holds.
+         */
+        get: operations["team_roles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/teams/{team_id}": {
         parameters: {
             query?: never;
@@ -4922,6 +4942,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/billing/workspaces/personal/invoices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List personal workspace invoices
+         * @description Owner or billing admin (billing.manage). Stripe is the only store of this data.
+         */
+        get: operations["workspace_personal_invoices"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/billing/workspaces/personal/details": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read personal billing details
+         * @description Owner or billing admin (billing.manage). Stripe is the only store of this data.
+         */
+        get: operations["workspace_personal_billing_details"];
+        /**
+         * Update personal billing details
+         * @description Owner or billing admin (billing.manage). Stripe is the only store of this data.
+         */
+        put: operations["workspace_personal_billing_details_update"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/billing/workspaces/teams/{team_id}": {
         parameters: {
             query?: never;
@@ -4990,6 +5054,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/billing/workspaces/teams/{team_id}/invoices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List team workspace invoices
+         * @description Owner or billing admin (billing.manage). Stripe is the only store of this data.
+         */
+        get: operations["workspace_team_invoices"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/billing/workspaces/teams/{team_id}/details": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read team billing details
+         * @description Owner or billing admin (billing.manage). Stripe is the only store of this data.
+         */
+        get: operations["workspace_team_billing_details"];
+        /**
+         * Update team billing details
+         * @description Owner or billing admin (billing.manage). Stripe is the only store of this data.
+         */
+        put: operations["workspace_team_billing_details_update"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/billing/workspaces/teams/{team_id}/pay-by-invoice": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read how the team pays
+         * @description Owner or billing admin (billing.manage). Stripe is the only store of this data.
+         */
+        get: operations["workspace_team_pay_by_invoice"];
+        /**
+         * Turn pay by invoice on or off
+         * @description Owner or billing admin (billing.manage). Stripe is the only store of this data.
+         */
+        put: operations["workspace_team_pay_by_invoice_update"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/webhooks/stripe": {
         parameters: {
             query?: never;
@@ -5001,6 +5133,23 @@ export interface paths {
         put?: never;
         /** Reconcile a signed Stripe test subscription event */
         post: operations["stripe_workspace_webhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/webhooks/workos/registration": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Answer WorkOS AuthKit's User Registration Action: deny a sign-up whose address is an alias of an existing account */
+        post: operations["workos_registration_action"];
         delete?: never;
         options?: never;
         head?: never;
@@ -7120,10 +7269,30 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Read recent workspace activity
-         * @description Cookie session or account:read bearer scope. Active workspace owner/admin required for team administrative activity. Scope, machine identity and target name are snapshotted when supported resource audits are written; earlier unscoped events and raw audit metadata are omitted. Retains the last 90 days. Newest first with opaque workspace-bound cursor; rechecks current authorization for each page. Machine, terminal, preview, tunnel, team, user and machine-environment resource audit events are supported. Unknown resource kinds and internal operational events are omitted.
+         * Search the workspace audit log
+         * @description Cookie session or account:read bearer scope. The owner of a personal workspace, or a team member whose role holds audit.read (owner, admin, auditor). Events are kept per workspace plan (server config business.audit_retention_*: Free 30, Pro 90, Team 365 days). Newest first with an opaque workspace-bound cursor; authorization is rechecked for each page. Details hold only documented keys; raw audit metadata and internal operational events are never returned. Event shape and action catalog: server/docs/teams-business.md.
          */
         get: operations["get_v1_activity"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/activity/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export the team audit log
+         * @description Team workspaces only; role with audit.read. Streams every matching event (newest first, at most business.audit_export_max_rows) as a CSV file (columns: id, occurred_at, workspace, action, result, reason, actor_kind, actor_id, actor_email, actor_token_id, target_kind, target_id, target_name, machine_id, machine_name, ip, user_agent, request_id, details) or one JSON array of ActivityEvent. The export is recorded as team.activity_exported.
+         */
+        get: operations["get_v1_activity_export"];
         put?: never;
         post?: never;
         delete?: never;
@@ -7335,6 +7504,194 @@ export interface paths {
          */
         post: operations["team_machine_grant"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/inspector/browser-ticket": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Issue one-use encrypted browser inspector ticket
+         * @description Authenticated, CSRF-protected (F17). Opens the console's end-to-end encrypted inspector channel to a preview's machine for one of the caller's own live inspector credentials (preview only). The ticket is single-use, lasts 30 seconds and is bound to the user, browser login, origin, browser key and credential. Captures never pass through the server; every request on the channel carries its own inspector grant, re-verified by the machine.
+         */
+        post: operations["inspector_browser_ticket_issue"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/policy/schema": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Workspace policy JSON Schema
+         * @description Public; the same schema as shared/policy/schema.json.
+         */
+        get: operations["get_v1_policy_schema"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the workspace policy
+         * @description Policy file with current names, version, can_edit and names for completion. ?version=N reads a kept version.
+         */
+        get: operations["get_v1_workspace_policy"];
+        /**
+         * Save the workspace policy
+         * @description Validates (422 invalid_policy), checks expected_version (409 policy_version_conflict) and asks to confirm access changes (412 policy_changes_unconfirmed with details.access_changes and details.confirm).
+         */
+        put: operations["put_v1_workspace_policy"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/policy/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Validate a policy file (dry run)
+         * @description Errors with JSON Pointer paths and stable codes, test results and access changes against the saved version.
+         */
+        post: operations["post_v1_workspace_policy_validate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/policy/explain": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Explain access
+         * @description src+dst+action: decision with the deciding rule or guardrail; dst+action: who can; src: what they can. Optional draft policy and api_token.
+         */
+        post: operations["post_v1_workspace_policy_explain"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/policy/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List policy versions
+         * @description Newest first with author, message and access change counts.
+         */
+        get: operations["get_v1_workspace_policy_versions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/policy/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore a policy version
+         * @description Saves an earlier version as a new one, with the same validation and confirmation as PUT.
+         */
+        post: operations["post_v1_workspace_policy_restore"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/api-tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List API tokens
+         * @description Members see their own tokens, owners and admins all.
+         */
+        get: operations["get_v1_workspace_api_tokens"];
+        put?: never;
+        /**
+         * Create an API token
+         * @description Returns the secret once. The token acts as its creator in this workspace, narrowed by an optional scope.
+         */
+        post: operations["post_v1_workspace_api_tokens"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/api-tokens/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Revoke an API token
+         * @description By its creator or an owner/admin.
+         */
+        delete: operations["delete_v1_workspace_api_token"];
         options?: never;
         head?: never;
         patch?: never;
@@ -8480,6 +8837,8 @@ export interface components {
             schema: "paperboat.environment-connection/v1";
             /** Format: uri */
             issuer: string;
+            /** @description The machine's installation generation; a shared-session join binds to it. */
+            machine_generation?: number;
             connectable: boolean;
             /** Format: date-time */
             expires_at: string;
@@ -9441,7 +9800,7 @@ export interface components {
             account_id: string;
             membership_generation: number;
             /** @enum {string} */
-            role: "owner" | "admin" | "member";
+            role: "owner" | "admin" | "billing" | "auditor" | "member";
             active: boolean;
             grant_epoch: number;
             /** @enum {string} */
@@ -9566,7 +9925,7 @@ export interface components {
             account_id: string;
             membership_generation: number;
             /** @enum {string} */
-            role: "owner" | "admin" | "member";
+            role: "owner" | "admin" | "billing" | "auditor" | "member";
             active: boolean;
             /** Format: email */
             email: string;
@@ -9653,7 +10012,7 @@ export interface components {
              * @default member
              * @enum {string}
              */
-            role: "member" | "admin";
+            role: "member" | "admin" | "billing" | "auditor";
         } & (unknown | unknown);
         TeamAcceptRequest: {
             operation_id: string;
@@ -10644,11 +11003,9 @@ export interface components {
             /** @enum {string} */
             kind: "personal" | "team";
             /** @enum {string} */
-            role: "owner" | "admin" | "member";
+            role: "owner" | "admin" | "billing" | "auditor" | "member";
             /** @description Team only: machines members add wait for an owner or admin. */
             approve_new_machines?: boolean;
-            /** @description Team only: members may reach the ports of machines shared into the team (with a private_access grant). */
-            allow_private_access?: boolean;
         };
         ResourceBandwidthHistory: {
             /** Format: date-time */
@@ -11084,11 +11441,15 @@ export interface components {
             id: string;
             /** Format: date-time */
             occurred_at: string;
+            /** @description personal:<account> or team:<team>. */
+            workspace: string;
             action: string;
             actor: {
                 /** @enum {string} */
-                kind: "user" | "system";
+                kind: "user" | "api_token" | "directory" | "operator" | "system";
                 id: string;
+                email?: string;
+                token_id?: string;
             };
             target: {
                 kind: string;
@@ -11098,6 +11459,17 @@ export interface components {
             machine?: {
                 id: string;
                 name: string;
+            };
+            /** @enum {string} */
+            result: "success" | "denied";
+            /** @description Stable code of a denial. */
+            reason?: string;
+            ip?: string;
+            user_agent?: string;
+            request_id?: string;
+            /** @description Documented detail keys only. */
+            details: {
+                [key: string]: unknown;
             };
         };
         ActivityPage: {
@@ -11209,6 +11581,77 @@ export interface components {
             account_id?: string;
             capabilities: ("terminal" | "exec" | "managed_ssh" | "files" | "preview_manage" | "tunnel_manage" | "private_access")[];
             active: boolean;
+        };
+        /** @description Team roles and their administrative permissions (PLAN F19). Roles never imply using machines, ENV, previews or tunnels; the workspace policy decides use. */
+        TeamRoleMatrix: {
+            roles: string[];
+            permissions: string[];
+            grants: {
+                [key: string]: string[];
+            };
+        };
+        BillingInvoice: {
+            id: string;
+            number: string;
+            /** @description open, paid, void or uncollectible (drafts are not listed). */
+            status: string;
+            currency: string;
+            /** @description Minor currency unit. */
+            total: number;
+            tax: number;
+            amount_due: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            period_start: string;
+            /** Format: date-time */
+            period_end: string;
+            /** Format: date-time */
+            due_date?: string;
+            /**
+             * Format: uri
+             * @description Stripe page to view and pay the invoice.
+             */
+            hosted_url?: string;
+            /**
+             * Format: uri
+             * @description Invoice PDF download.
+             */
+            pdf_url?: string;
+        };
+        BillingInvoicePage: {
+            items: components["schemas"]["BillingInvoice"][];
+            next_cursor?: string;
+        };
+        /** @description Printed on every invoice; email receives invoices and receipts. Stored only on the Stripe customer. */
+        BillingDetails: {
+            email: string;
+            /** @description Company or person name. */
+            name: string;
+            address: {
+                line1: string;
+                line2: string;
+                city: string;
+                state: string;
+                postal_code: string;
+                /** @description ISO 3166-1 alpha-2; required with any address line. */
+                country: string;
+            };
+            tax_id: null | {
+                /** @description Stripe tax ID type, e.g. eu_vat, gb_vat, us_ein. */
+                type: string;
+                value: string;
+                /** @description Read only: Stripe verification status. */
+                verification?: string;
+            };
+        };
+        BillingPayByInvoice: {
+            pay_by_invoice: boolean;
+            days_until_due?: number;
+            /** @description Active yearly Team plan with at least min_seats seats. */
+            eligible: boolean;
+            min_seats: number;
+            default_days_until_due: number;
         };
     };
     responses: {
@@ -20263,6 +20706,34 @@ export interface operations {
             503: components["responses"]["Error"];
         };
     };
+    team_roles: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Authenticated current state or exact committed operation result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["TeamRoleMatrix"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            412: components["responses"]["Error"];
+        };
+    };
     team_get: {
         parameters: {
             query?: never;
@@ -21219,6 +21690,95 @@ export interface operations {
             503: components["responses"]["Error"];
         };
     };
+    workspace_personal_invoices: {
+        parameters: {
+            query?: {
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Authorized result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["BillingInvoicePage"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    workspace_personal_billing_details: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Authorized result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["BillingDetails"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    workspace_personal_billing_details_update: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BillingDetails"];
+            };
+        };
+        responses: {
+            /** @description Authorized result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["BillingDetails"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
     workspace_team_overview: {
         parameters: {
             query?: never;
@@ -21367,6 +21927,167 @@ export interface operations {
             503: components["responses"]["Error"];
         };
     };
+    workspace_team_invoices: {
+        parameters: {
+            query?: {
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                team_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Authorized result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["BillingInvoicePage"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    workspace_team_billing_details: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                team_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Authorized result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["BillingDetails"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    workspace_team_billing_details_update: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                team_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BillingDetails"];
+            };
+        };
+        responses: {
+            /** @description Authorized result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["BillingDetails"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    workspace_team_pay_by_invoice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                team_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Authorized result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["BillingPayByInvoice"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    workspace_team_pay_by_invoice_update: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                team_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    pay_by_invoice: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description Authorized result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["BillingPayByInvoice"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
     stripe_workspace_webhook: {
         parameters: {
             query?: never;
@@ -21383,6 +22104,33 @@ export interface operations {
         };
         responses: {
             /** @description Processed or duplicate event. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    workos_registration_action: {
+        parameters: {
+            query?: never;
+            header: {
+                "WorkOS-Signature": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Signed Allow or Deny verdict. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -26706,6 +27454,12 @@ export interface operations {
                 q?: string;
                 cursor?: string;
                 limit?: number;
+                actor?: string;
+                action?: string;
+                target?: string;
+                result?: "success" | "denied";
+                since?: string;
+                until?: string;
             };
             header?: never;
             path?: never;
@@ -26722,6 +27476,43 @@ export interface operations {
                     "application/json": {
                         data: components["schemas"]["ActivityPage"];
                     };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            500: components["responses"]["Error"];
+        };
+    };
+    get_v1_activity_export: {
+        parameters: {
+            query: {
+                workspace?: string;
+                machine_id?: string;
+                area?: string;
+                q?: string;
+                actor?: string;
+                action?: string;
+                target?: string;
+                result?: "success" | "denied";
+                since?: string;
+                until?: string;
+                format: "csv" | "json";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The export file (Content-Disposition attachment). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                    "application/json": components["schemas"]["ActivityEvent"][];
                 };
             };
             400: components["responses"]["Error"];
@@ -27142,6 +27933,323 @@ export interface operations {
                 };
             };
             412: components["responses"]["Error"];
+        };
+    };
+    inspector_browser_ticket_issue: {
+        parameters: {
+            query?: {
+                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
+                workspace?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description An inspector credential issued to the caller by POST /v1/inspector/credentials. */
+                    credential_id: string;
+                    /** @description Canonical unpadded base64url SHA-256 digest of ephemeral browser TLS public-key SPKI. */
+                    browser_public_key_sha256: string;
+                };
+            };
+        };
+        responses: {
+            /** @description One-use ticket and opaque WSS stream URL for the inspector channel. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: {
+                            stream_url: string;
+                            subprotocols: string[];
+                            /** Format: date-time */
+                            expires_at: string;
+                            /** @enum {string} */
+                            role: "inspector";
+                            machine_id: string;
+                            owner_account_id: string;
+                            root_key_id: string;
+                            root_public_key: string;
+                            root_fingerprint: string;
+                        };
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    get_v1_policy_schema: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description JSON Schema 2020-12 of the policy file (application/schema+json). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_v1_workspace_policy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ws: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description JSON body as documented in shared/policy/README.md. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    put_v1_workspace_policy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ws: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description JSON body as documented in shared/policy/README.md. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            412: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    post_v1_workspace_policy_validate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ws: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description JSON body as documented in shared/policy/README.md. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    post_v1_workspace_policy_explain: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ws: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description JSON body as documented in shared/policy/README.md. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    get_v1_workspace_policy_versions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ws: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description JSON body as documented in shared/policy/README.md. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    post_v1_workspace_policy_restore: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ws: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description JSON body as documented in shared/policy/README.md. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            412: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    get_v1_workspace_api_tokens: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ws: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description JSON body as documented in shared/policy/README.md. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    post_v1_workspace_api_tokens: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ws: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description JSON body as documented in shared/policy/README.md. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    delete_v1_workspace_api_token: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ws: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description JSON body as documented in shared/policy/README.md. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            503: components["responses"]["Error"];
         };
     };
 }

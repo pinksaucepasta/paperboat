@@ -5,17 +5,50 @@ import { api, idempotencyKey } from "@/lib/api"
 import type { components } from "@/lib/api-schema"
 
 type Schemas = components["schemas"]
-export type TeamMember = Schemas["TeamMember"]
+/** F19 adds `directory_managed` and `sso_exempt` (until the OpenAPI document carries them). */
+export type TeamMember = Schemas["TeamMember"] & { directory_managed?: boolean; sso_exempt?: boolean }
 /** The server sends `suspended` but OpenAPI omits it (NOTES.md). */
 export type Team = Schemas["TeamTeam"] & { suspended?: boolean }
 export type TeamInvitation = Schemas["TeamInvitationSummary"]
 export type MachineAdmission = Schemas["TeamMachineAdmission"]
 export type TeamAction =
   "role" | "remove" | "leave" | "transfer" | "delete" | "rename" | "machine_approval" | "private_access"
-export type TeamRole = "owner" | "admin" | "member"
+export type TeamRole = "owner" | "admin" | "billing" | "auditor" | "member"
 
-/** Team features whose server side is not deployed yet; their controls render disabled. */
-export const teamLive = { inviteRole: true, rename: true, mail: true } as const
+/**
+ * Team features whose server side is not deployed yet; their controls render disabled.
+ * `businessRoles`: billing and auditor roles, directory-managed members and SSO (F19).
+ */
+export const teamLive = { inviteRole: true, rename: true, mail: true, businessRoles: false } as const
+
+/** Role names and what each is for (server/docs/teams-business.md "Roles"). */
+export const roleLabels: Record<string, string> = {
+  owner: "Owner",
+  admin: "Admin",
+  billing: "Billing admin",
+  auditor: "Auditor",
+  member: "Member",
+}
+export const roleDescriptions: Record<string, string> = {
+  admin: "Runs the team: members, settings, machines and security",
+  billing: "Plan, seats, invoices and billing details",
+  auditor: "Sees what an admin sees, without changing it; reads the audit log",
+  member: "Uses what the team gives them",
+}
+export const roleOrder: Record<string, number> = { owner: 0, admin: 1, billing: 2, auditor: 3, member: 4 }
+
+/**
+ * The roles `actor` may give `target` (teams-business.md): the owner gives any role but owner;
+ * an admin manages only people without member management (not owners or admins) and never makes
+ * an admin. Empty when the actor may not change the target's role.
+ */
+export function assignableRoles(actor: string, target: string): string[] {
+  const all = teamLive.businessRoles ? ["admin", "billing", "auditor", "member"] : ["admin", "member"]
+  if (target === "owner") return []
+  if (actor === "owner") return all
+  if (actor === "admin" && teamLive.businessRoles && target !== "admin") return all.filter((role) => role !== "admin")
+  return []
+}
 
 /** Account ID → email, from members' own fields or else the invitations they accepted. */
 export function memberEmails(team: Team, invitations: TeamInvitation[] | undefined) {

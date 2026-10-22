@@ -14,6 +14,8 @@ export class ApiError extends Error {
     readonly status: number,
     readonly code: string,
     message: string,
+    /** The error's `details`, for errors whose next step needs them (e.g. sso_review_required). */
+    readonly details?: unknown,
   ) {
     super(message)
   }
@@ -49,7 +51,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   }
   const body = (await response.json().catch(() => null)) as {
     data?: T
-    error?: { code?: string; message?: string }
+    error?: { code?: string; message?: string; details?: unknown }
   } | null
   if (!response.ok || !body || body.data === undefined) {
     const code = body?.error?.code ?? "unavailable"
@@ -57,6 +59,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
       response.status,
       code,
       sentences[code] ?? body?.error?.message ?? "Paperboat is temporarily unavailable.",
+      body?.error?.details,
     )
   }
   return body.data
@@ -68,6 +71,7 @@ const sentences: Record<string, string> = {
     "This workspace's hosted bandwidth is used up. Direct machine-to-machine access still works. Add bandwidth or change plan under Billing, or wait for the next allowance period.",
   team_private_access_off:
     "The team has not allowed private access to its shared machines. Ask a team owner or admin to turn it on.",
+  team_sso_required: "This team requires your company's SSO. Sign out and sign in with your work email.",
   team_suspended:
     "This team is suspended, so changes are paused. Ask the team owner to restore billing or resume the team.",
 }
@@ -207,7 +211,14 @@ export const clientConfigQuery = queryOptions({
   staleTime: Infinity,
 })
 
-export type Workspace = Schemas["Workspace"]
+/**
+ * `sso_required`/`sso_signed_in` (F19): a team that requires SSO you haven't signed in with lists
+ * only its name until you do.
+ */
+export type Workspace = Schemas["Workspace"] & { sso_required?: boolean; sso_signed_in?: boolean }
+
+/** Whether a team waits for an SSO sign-in before it can be opened. */
+export const needsSso = (workspace: Workspace) => workspace.sso_required === true && workspace.sso_signed_in === false
 
 const personal: Workspace = { id: "personal", name: "Personal", kind: "personal", role: "owner" }
 

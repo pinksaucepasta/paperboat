@@ -1,6 +1,6 @@
 "use client"
 
-import { queryOptions } from "@tanstack/react-query"
+import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query"
 import { api, idempotencyKey, type Workspace } from "@/lib/api"
 import type { components } from "@/lib/api-schema"
 
@@ -19,6 +19,8 @@ export const billingLive = {
   paidTeamCreate: true,
   /** `team_trial_days` on the personal overview and a trial in Team Checkout (Lane O). */
   teamTrial: false,
+  /** Invoices, billing details and pay by invoice (F19, Lane S). */
+  business: false,
 } as const
 export const notLiveTitle = "Not available yet"
 
@@ -170,4 +172,56 @@ export function formatMoney(amount: number, currency: string) {
     currency: currency.toUpperCase(),
     minimumFractionDigits: amount % 100 ? 2 : 0,
   }).format(amount / 100)
+}
+
+export type BillingInvoice = components["schemas"]["BillingInvoice"]
+export type BillingDetails = components["schemas"]["BillingDetails"]
+export type PayByInvoice = components["schemas"]["BillingPayByInvoice"]
+
+/** Finalized invoices, newest first, a page at a time (`next_cursor`). */
+export const invoicesQuery = (workspace: Workspace) =>
+  infiniteQueryOptions({
+    queryKey: [...billingKey(workspace.id), "invoices"],
+    queryFn: ({ pageParam }) =>
+      api<{ items: BillingInvoice[]; next_cursor?: string }>(
+        `${billingPath(workspace)}/invoices${pageParam ? `?${new URLSearchParams({ cursor: pageParam })}` : ""}`,
+      ),
+    initialPageParam: "",
+    getNextPageParam: (page) => page.next_cursor || undefined,
+    enabled: billingLive.business,
+    staleTime: minute,
+  })
+
+/** What Stripe prints on invoices and where it sends them. */
+export const billingDetailsQuery = (workspace: Workspace) =>
+  queryOptions({
+    queryKey: [...billingKey(workspace.id), "details"],
+    queryFn: () => api<BillingDetails>(`${billingPath(workspace)}/details`),
+    enabled: billingLive.business,
+    staleTime: minute,
+  })
+
+export function saveBillingDetails(workspace: Workspace, details: Omit<BillingDetails, "tax_id"> & { tax_id: BillingDetails["tax_id"] }, key: string) {
+  return api<BillingDetails>(`${billingPath(workspace)}/details`, {
+    method: "PUT",
+    headers: { "content-type": "application/json", "idempotency-key": key },
+    body: JSON.stringify(details),
+  })
+}
+
+/** Team only: invoices by email instead of card payments (yearly Team plan, enough seats). */
+export const payByInvoiceQuery = (workspace: Workspace) =>
+  queryOptions({
+    queryKey: [...billingKey(workspace.id), "pay-by-invoice"],
+    queryFn: () => api<PayByInvoice>(`${billingPath(workspace)}/pay-by-invoice`),
+    enabled: billingLive.business && workspace.kind === "team",
+    staleTime: minute,
+  })
+
+export function setPayByInvoice(workspace: Workspace, on: boolean, key: string) {
+  return api<PayByInvoice>(`${billingPath(workspace)}/pay-by-invoice`, {
+    method: "PUT",
+    headers: { "content-type": "application/json", "idempotency-key": key },
+    body: JSON.stringify({ pay_by_invoice: on }),
+  })
 }

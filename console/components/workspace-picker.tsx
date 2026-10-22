@@ -3,8 +3,8 @@
 import { CheckCircleIcon, CircleIcon } from "@phosphor-icons/react"
 import type { Workspace } from "@/lib/api"
 import { cn } from "@/lib/utils"
+import { roleLabels } from "@/lib/teams"
 
-const roleLabel: Record<string, string> = { owner: "Owner", admin: "Admin", member: "Member" }
 
 /**
  * Choose where a new machine goes: Personal or one of your teams. `brand` is for the blue approval
@@ -50,7 +50,7 @@ export function WorkspacePicker({
               <span className={cn("text-xs trim-cap", brand ? "text-white/75" : "text-muted-foreground")}>
                 {workspace.approve_new_machines && workspace.role === "member"
                   ? "Needs an owner or admin to accept"
-                  : (roleLabel[workspace.role] ?? workspace.role)}
+                  : (roleLabels[workspace.role] ?? workspace.role)}
               </span>
             )}
           </button>
