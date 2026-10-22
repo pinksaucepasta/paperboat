@@ -131,6 +131,8 @@ type Billing struct {
 	PersonalAllowanceBytes        *int64 `json:"personal_allowance_bytes,omitempty"`
 	TeamAllowanceBytes            *int64 `json:"team_allowance_bytes,omitempty"`
 	PersonalMachineLimit          *int32 `json:"personal_machine_limit,omitempty"`
+	// TeamTrialDays is the Team plan's free trial for an account's first team; 0 disables it.
+	TeamTrialDays int `json:"team_trial_days"`
 }
 
 // ManagedSSH bounds how long an idle CLI session keeps counting toward SSH client-key capacity
@@ -396,7 +398,7 @@ func Default() Config {
 			Driver: "postgres",
 			DSN:    "postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable",
 		},
-		Billing:           Billing{TopupMaxQuantity: 100, PersonalAllowanceBytes: new(int64(5_000_000_000))},
+		Billing:           Billing{TopupMaxQuantity: 100, TeamTrialDays: 14, PersonalAllowanceBytes: new(int64(5_000_000_000))},
 		RuntimeBaseDomain: "localhost",
 		ManagedSSH:        ManagedSSH{ClientKeyActiveWindow: 30 * 24 * time.Hour},
 		UserMachines:      UserMachines{PairingLifetime: 10 * time.Minute, OfflineAfter: 2 * time.Minute, ExpiredAccessSessionRetention: 7 * 24 * time.Hour, AllowedPlatforms: []string{"darwin", "linux", "windows"}, RuntimeListenPort: 38080},
@@ -536,6 +538,9 @@ func (c Config) Validate() error {
 		errs = append(errs, fmt.Errorf("database.driver and database.dsn are required"))
 	} else if c.Database.Driver != "postgres" && c.Database.Driver != "pgx" {
 		errs = append(errs, fmt.Errorf("database.driver must be postgres"))
+	}
+	if c.Billing.TeamTrialDays < 0 || c.Billing.TeamTrialDays > 730 {
+		return errors.New("billing.team_trial_days must be between 0 and 730")
 	}
 	if c.Billing.TopupMaxQuantity < 1 {
 		return errors.New("billing.topup_max_quantity must be positive")

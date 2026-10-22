@@ -55,6 +55,9 @@ type StripeCheckoutInput struct {
 	CustomerID, PriceID                   string
 	Quantity                              int
 	SuccessURL, CancelURL, IdempotencyKey string
+	// TrialDays > 0 starts the subscription in a trial. The card is still collected
+	// at Checkout; a trial that ends without one cancels instead of charging.
+	TrialDays int
 }
 
 type StripeSubscription struct {
@@ -105,6 +108,11 @@ func (c HTTPStripeClient) CreateSubscriptionCheckout(ctx context.Context, in Str
 	}
 	v.Set("integration_identifier", "paperboat_"+string(suffix))
 	v.Set("managed_payments[enabled]", "false")
+	if in.TrialDays > 0 {
+		v.Set("subscription_data[trial_period_days]", strconv.Itoa(in.TrialDays))
+		v.Set("payment_method_collection", "always")
+		v.Set("subscription_data[trial_settings][end_behavior][missing_payment_method]", "cancel")
+	}
 	var out struct {
 		ID, URL, Customer string
 		Livemode          bool `json:"livemode"`

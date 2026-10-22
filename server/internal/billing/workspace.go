@@ -70,10 +70,12 @@ type Workspace struct {
 	PeriodStart          *time.Time        `json:"period_start,omitempty"`
 	PeriodEnd            *time.Time        `json:"period_end,omitempty"`
 	CancelAtPeriodEnd    bool              `json:"cancel_at_period_end"`
-	CustomerID           string            `json:"-"`
-	SubscriptionID       string            `json:"-"`
-	ItemID               string            `json:"-"`
-	Revision             int64             `json:"-"`
+	// TeamTrialDays, on the personal overview only, is the trial a new team would get.
+	TeamTrialDays  *int   `json:"team_trial_days,omitempty"`
+	CustomerID     string `json:"-"`
+	SubscriptionID string `json:"-"`
+	ItemID         string `json:"-"`
+	Revision       int64  `json:"-"`
 }
 
 // WorkspaceTx revalidates current role authority even when replaying a provider

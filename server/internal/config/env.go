@@ -160,6 +160,13 @@ func overlayEnv(c *Config, lookup func(string) (string, bool), readFile func(str
 		}
 		c.Billing.TopupMaxQuantity = n
 	}
+	if value, ok := lookup("PAPERBOAT_BILLING_TEAM_TRIAL_DAYS"); ok {
+		n, err := strconv.Atoi(value)
+		if err != nil {
+			return errors.New("PAPERBOAT_BILLING_TEAM_TRIAL_DAYS must be an integer")
+		}
+		c.Billing.TeamTrialDays = n
+	}
 	setString("PAPERBOAT_STRIPE_PERSONAL_PORTAL_CONFIGURATION_ID", &c.Billing.PersonalPortalConfigurationID)
 	setString("PAPERBOAT_STRIPE_TEAM_PORTAL_CONFIGURATION_ID", &c.Billing.TeamPortalConfigurationID)
 	setString("PAPERBOAT_GITHUB_BASE_URL", &c.Providers.GitHub.BaseURL)

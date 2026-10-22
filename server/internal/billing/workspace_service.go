@@ -24,6 +24,7 @@ type WorkspaceService struct {
 	portals          PortalConfigurations
 	mail             config.TransactionalMail
 	mailEnabled      bool
+	teamTrialDays    int
 }
 
 var ErrProductChanged = errors.New("billing product price changed")
@@ -82,6 +83,13 @@ func (s *WorkspaceService) Overview(ctx context.Context, account, team string) (
 		out.TopupBytesRemaining, err = WorkspaceTopupRemainingTx(ctx, tx, out.ID, time.Now().UTC())
 		if err != nil {
 			return err
+		}
+		if team == "" {
+			days, err := s.teamTrialDaysTx(ctx, tx, account)
+			if err != nil {
+				return err
+			}
+			out.TeamTrialDays = &days
 		}
 		return s.usageOverviewTx(ctx, tx, &out)
 	})
@@ -484,6 +492,13 @@ func (s *WorkspaceService) HandleWebhook(ctx context.Context, event StripeWebhoo
 	subscriptionID := event.SubscriptionID()
 	if subscriptionID == "" {
 		return false, nil
+	}
+	if event.Type == TrialWillEndEvent {
+		// Before reconciling: reconciliation records the event, and a redelivery
+		// after a failed notice must still queue it (the notice is idempotent).
+		if err := s.noticeTeamTrialEnding(ctx, subscriptionID); err != nil {
+			return false, err
+		}
 	}
 	return s.reconcileSubscription(ctx, subscriptionID, &event)
 }

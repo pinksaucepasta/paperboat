@@ -94,7 +94,11 @@ func (s *WorkspaceService) handleTeamCreationWebhook(ctx context.Context, event 
 		err = s.expireTeamOrder(ctx, key)
 		return true, err == nil, err
 	}
-	if checkout.Status != "complete" || paid != "paid" || checkout.SubscriptionID == "" {
+	wantPayment, wantStatus := "paid", "active"
+	if req.TrialDays > 0 {
+		wantPayment, wantStatus = "no_payment_required", "trialing"
+	}
+	if checkout.Status != "complete" || paid != wantPayment || checkout.SubscriptionID == "" {
 		return true, false, ErrCheckoutPending
 	}
 	if event.Data.Object.Object != "checkout.session" && event.SubscriptionID() != checkout.SubscriptionID {
@@ -104,7 +108,7 @@ func (s *WorkspaceService) handleTeamCreationWebhook(ctx context.Context, event 
 	if err != nil {
 		return true, false, err
 	}
-	if sub.ID != checkout.SubscriptionID || sub.CustomerID != req.CustomerID || sub.PriceID != req.PriceID || sub.Quantity != req.Input.Seats || sub.CheckoutOperation != "team-create:"+key || sub.Status != "active" || sub.ItemID == "" || !sub.PeriodEnd.After(sub.PeriodStart) {
+	if sub.ID != checkout.SubscriptionID || sub.CustomerID != req.CustomerID || sub.PriceID != req.PriceID || sub.Quantity != req.Input.Seats || sub.CheckoutOperation != "team-create:"+key || sub.Status != wantStatus || sub.ItemID == "" || !sub.PeriodEnd.After(sub.PeriodStart) {
 		return true, false, ErrProviderOutcomeUnknown
 	}
 	processed, err := s.materializePaidTeam(ctx, event, key, id, req, sub)
