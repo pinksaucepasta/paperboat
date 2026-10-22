@@ -167,3 +167,35 @@ func TestEnsureRegistersMachineOwnedMachineKeyWithoutPairedCLI(t *testing.T) {
 		t.Fatalf("endpoint identity changed during renewal: %v", err)
 	}
 }
+
+// The approval response carries the whole account trust set; at the supported maximum it is far over the
+// 32 KiB this client used to read, so a machine on a large account could never finish enrolling.
+func TestApprovalResponseWithTheLargestTrustSetIsRead(t *testing.T) {
+	keys := make([]api.E2EEKey, endpointidentity.MaxTrustedKeys)
+	for index := range keys {
+		public, _, _ := ed25519.GenerateKey(nil)
+		fingerprint := sha256.Sum256(public)
+		keys[index] = api.E2EEKey{KeyID: "aek_" + hex.EncodeToString(fingerprint[:]), PublicKey: base64.RawURLEncoding.EncodeToString(public), Fingerprint: hex.EncodeToString(fingerprint[:]), Generation: 1}
+	}
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"state": "approved", "trusted_keys": keys}})
+	}))
+	defer server.Close()
+	stateRoot := filepath.Join(t.TempDir(), "identity")
+	if _, err := identitystore.Open(identitystore.Config{StateRoot: stateRoot}); err != nil {
+		t.Fatal(err)
+	}
+	client, err := New(Config{ControlURL: server.URL, StateRoot: stateRoot, Transport: server.Client().Transport}, staticCredentials{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var approved struct {
+		State       string        `json:"state"`
+		TrustedKeys []api.E2EEKey `json:"trusted_keys"`
+	}
+	status, err := client.post(context.Background(), "/v1/machine-peer-identity/status", "op_peer_machine_status_test", []byte(`{}`), &approved)
+	if err != nil || status != http.StatusOK || len(approved.TrustedKeys) != endpointidentity.MaxTrustedKeys {
+		t.Fatalf("status=%d keys=%d err=%v", status, len(approved.TrustedKeys), err)
+	}
+}

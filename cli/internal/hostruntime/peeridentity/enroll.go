@@ -235,7 +235,8 @@ func (c *Client) post(ctx context.Context, path, operationID string, body []byte
 	var envelope struct {
 		Data json.RawMessage `json:"data"`
 	}
-	decoder := json.NewDecoder(io.LimitReader(response.Body, 32<<10))
+	// The approval response carries the whole account trust set.
+	decoder := json.NewDecoder(io.LimitReader(response.Body, endpointidentity.MaxTrustedKeySetBytes+32<<10))
 	if decoder.Decode(&envelope) != nil || decoder.Decode(&struct{}{}) != io.EOF || len(envelope.Data) == 0 || json.Unmarshal(envelope.Data, out) != nil {
 		return response.StatusCode, fmt.Errorf("HTTP %d response format: %w", response.StatusCode, ErrInvalid)
 	}

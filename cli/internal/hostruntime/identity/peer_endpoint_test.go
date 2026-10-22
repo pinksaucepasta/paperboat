@@ -3,9 +3,13 @@ package identity
 import (
 	"bytes"
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -116,4 +120,79 @@ func TestPeerEndpointRecoversMalformedUnsignedState(t *testing.T) {
 	if _, err := store.PeerEndpoint(); err == nil {
 		t.Fatal("malformed certified endpoint state was regenerated")
 	}
+}
+
+// An account with many computers sends a trust set of one key per machine and CLI session. On pbvm2 a
+// 92-key set (23.7 KB) was saved but refused on the next load (16 KiB cap), so the carrier exited 1 on
+// every fresh pair. Every size up to the supported maximum must round-trip; one more key is refused at
+// save, leaving the file that was there.
+func TestPeerEndpointTrustSetRoundTripsUpToTheSupportedMaximum(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "identity")
+	store, err := Open(Config{StateRoot: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 10, 22, 17, 0, 0, 0, time.UTC)
+	key := store.Current()
+	if err := store.SaveRegistration(Registration{ServerURL: "https://api.example.test", MachineID: "machine_01", EnvironmentID: "env_01", PublicKeyID: key.ID, PublicIdentityKey: base64.RawURLEncoding.EncodeToString(key.Public()), InboxPath: filepath.Join(root, "inbox"), InstallationGeneration: 1, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	endpoint, err := store.PeerEndpoint()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootPublic, rootPrivate, _ := ed25519.GenerateKey(nil)
+	certificate, err := endpointidentity.Sign(rootPrivate, endpointidentity.Claims{AccountID: "account_01", Role: endpointidentity.RoleMachine, EndpointID: "machine_01", QUICPublicKey: endpoint.QUICPublicKey(), Generation: 1, Serial: 1, IssuedAt: now, ExpiresAt: now.Add(time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := certificate.MarshalBinary()
+	trustSet := func(count int) []endpointidentity.TrustedKey {
+		keys := []endpointidentity.TrustedKey{trustedKeyFor(rootPublic)}
+		for len(keys) < count {
+			public, _, _ := ed25519.GenerateKey(nil)
+			keys = append(keys, trustedKeyFor(public))
+		}
+		return keys
+	}
+	path := filepath.Join(root, "peer-endpoint.json")
+	for _, count := range []int{92, endpointidentity.MaxTrustedKeys} {
+		if err := store.SavePeerEndpointCertificateWithTrustedKeys(rootPublic, trustSet(count), raw, now); err != nil {
+			t.Fatalf("save %d keys: %v", count, err)
+		}
+		reopened, err := Open(Config{StateRoot: root, Clock: fixedClock{now}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		loaded, err := reopened.PeerEndpoint()
+		if err != nil || len(loaded.TrustedKeys) != count || !bytes.Equal(loaded.Certificate, raw) {
+			t.Fatalf("load %d keys: got %d err=%v", count, len(loaded.TrustedKeys), err)
+		}
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = store.SavePeerEndpointCertificateWithTrustedKeys(rootPublic, trustSet(endpointidentity.MaxTrustedKeys+1), raw, now)
+	if !errors.Is(err, ErrInvalidStore) || !errors.Is(err, endpointidentity.ErrTrustedKeySet) || !strings.Contains(err.Error(), "2049 active keys") {
+		t.Fatalf("over-limit save err=%v", err)
+	}
+	if after, _ := os.ReadFile(path); !bytes.Equal(before, after) {
+		t.Fatal("refused save replaced peer-endpoint.json")
+	}
+
+	// A file larger than this version reads names itself and its size.
+	if err := os.WriteFile(path, bytes.Repeat([]byte{' '}, maxPeerEndpointBytes+1), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.PeerEndpoint()
+	var sizeErr *PeerEndpointSizeError
+	if !errors.As(err, &sizeErr) || !errors.Is(err, ErrInvalidStore) || sizeErr.Path != path || sizeErr.Size != maxPeerEndpointBytes+1 || !strings.Contains(err.Error(), "peer-endpoint.json is ") {
+		t.Fatalf("oversized load err=%v", err)
+	}
+}
+
+func trustedKeyFor(public ed25519.PublicKey) endpointidentity.TrustedKey {
+	fingerprint := sha256.Sum256(public)
+	return endpointidentity.TrustedKey{KeyID: "aek_" + hex.EncodeToString(fingerprint[:]), PublicKey: public, Fingerprint: fingerprint, Generation: 1}
 }

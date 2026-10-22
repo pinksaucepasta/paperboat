@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -17,6 +18,23 @@ import (
 )
 
 var errPeerEndpointGeneration = errors.New("peer endpoint generation changed")
+
+// maxPeerEndpointBytes is the largest peer-endpoint.json: the account trust set at its supported maximum
+// plus the endpoint's own seed, certificate and root fields.
+const maxPeerEndpointBytes = endpointidentity.MaxTrustedKeySetBytes + 16<<10
+
+// PeerEndpointSizeError reports a peer-endpoint.json larger than maxPeerEndpointBytes. It is an
+// ErrInvalidStore, so callers that branch on an invalid store keep doing so.
+type PeerEndpointSizeError struct {
+	Path        string
+	Size, Limit int64
+}
+
+func (e *PeerEndpointSizeError) Error() string {
+	return fmt.Sprintf("%s is %d bytes, more than the %d this version reads; update Paperboat", e.Path, e.Size, e.Limit)
+}
+
+func (e *PeerEndpointSizeError) Unwrap() error { return ErrInvalidStore }
 
 type PeerEndpoint struct {
 	Generation     uint64
@@ -81,7 +99,7 @@ func (s *Store) PeerEndpoint() (PeerEndpoint, error) {
 func (s *Store) recoverableUnsignedPeerEndpoint(generation uint64) bool {
 	path := filepath.Join(s.config.StateRoot, "peer-endpoint.json")
 	info, err := os.Lstat(path)
-	if err != nil || !secureIdentityPath(path, info, true) || info.Size() > 16<<10 {
+	if err != nil || !secureIdentityPath(path, info, true) || info.Size() > maxPeerEndpointBytes {
 		return false
 	}
 	body, err := os.ReadFile(path)
@@ -142,8 +160,11 @@ func (s *Store) loadPeerEndpoint(generation uint64, machineID string) (PeerEndpo
 	if err != nil {
 		return PeerEndpoint{}, err
 	}
-	if !secureIdentityPath(path, info, true) || info.Size() > 16<<10 {
+	if !secureIdentityPath(path, info, true) {
 		return PeerEndpoint{}, ErrInvalidStore
+	}
+	if info.Size() > maxPeerEndpointBytes {
+		return PeerEndpoint{}, &PeerEndpointSizeError{Path: path, Size: info.Size(), Limit: maxPeerEndpointBytes}
 	}
 	encoded, err := os.ReadFile(path)
 	if err != nil {
@@ -227,6 +248,11 @@ func (s *Store) writePeerEndpoint(value PeerEndpoint) error {
 	if err != nil {
 		return err
 	}
+	// Refuse before replacing the file: a document this version cannot read back would stop every
+	// runtime process on the next start.
+	if len(encoded) > maxPeerEndpointBytes {
+		return &PeerEndpointSizeError{Path: filepath.Join(s.config.StateRoot, "peer-endpoint.json"), Size: int64(len(encoded)), Limit: maxPeerEndpointBytes}
+	}
 	return s.writePrivateDocument("peer-endpoint.json", ".peer-endpoint-*", encoded)
 }
 
@@ -238,7 +264,7 @@ func normalizeTrustedKeys(rootPublic ed25519.PublicKey, trusted []endpointidenti
 	}
 	validated, err := endpointidentity.ValidateTrustedKeySet(trusted)
 	if err != nil {
-		return nil, ErrInvalidStore
+		return nil, fmt.Errorf("%w: %w", ErrInvalidStore, err)
 	}
 	for _, key := range validated {
 		fingerprint := sha256.Sum256(key.PublicKey)
