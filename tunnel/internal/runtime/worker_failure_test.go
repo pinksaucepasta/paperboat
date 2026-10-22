@@ -39,7 +39,7 @@ func TestWorkerFailuresAreSafeAndRecoveryRetainsAuthority(t *testing.T) {
 		}
 		defer routes.Close()
 		source := &runtimeSourceFake{admissions: []runtimewire.Admission{a}}
-		worker := &RuntimeCarrierWorker{Reporter: reporter, Source: source, Expected: expected, Routes: routes, Timeout: time.Second}
+		worker := &RuntimeCarrierWorker{Reporter: reporter, Source: source, Expected: expected, Routes: routes, Endpoints: endpointRegistry(t, a.Binding.EdgeProcessEpoch), Timeout: time.Second}
 		if err := worker.reconcile(ctx); err != nil || len(expected.Snapshot()) != 1 {
 			t.Fatal("initial runtime authority was not installed")
 		}

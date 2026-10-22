@@ -216,6 +216,9 @@ func (w *PreviewCarrierWorker) detachRemoved(expected []datacarrier.ExpectedAdmi
 		allowed[admission.OperationID+"\x00"+admission.RouteID] = admission
 	}
 	for _, route := range w.registry.Snapshot() {
+		if route.EndpointRoute {
+			continue
+		}
 		key := route.OperationID + "\x00" + route.RouteID
 		current, exists := allowed[key]
 		if exists && current.Identity == route.Identity && current.AttachmentGeneration == route.AttachmentGeneration && current.RouteRevision == route.Revision {
@@ -236,7 +239,7 @@ func (w *PreviewCarrierWorker) applyServerDetachments(ctx context.Context, detac
 	}
 	for _, detachment := range detachments {
 		for _, route := range w.registry.Snapshot() {
-			if route.OperationID != detachment.Binding.OperationID || route.RouteID != detachment.Binding.RouteID || route.Identity.AccountID != detachment.Binding.AccountID || route.Identity.HostID != detachment.Binding.HostID || route.Identity.TunnelID != detachment.Binding.TunnelID || route.Identity.ConnectorID != detachment.Binding.ConnectorID || route.Identity.SessionID != detachment.Binding.SessionID || route.Identity.ProcessGeneration != detachment.Binding.ProcessGeneration || route.Identity.Generation != detachment.Binding.ConfigGeneration || route.Revision != detachment.Binding.RouteGeneration || route.OwnerMachineID != detachment.Binding.OwnerMachineID || route.OwnerSessionID != detachment.Binding.OwnerSessionID || route.AttachmentGeneration >= detachment.AttachmentGeneration {
+			if route.EndpointRoute || route.OperationID != detachment.Binding.OperationID || route.RouteID != detachment.Binding.RouteID || route.Identity.AccountID != detachment.Binding.AccountID || route.Identity.HostID != detachment.Binding.HostID || route.Identity.TunnelID != detachment.Binding.TunnelID || route.Identity.ConnectorID != detachment.Binding.ConnectorID || route.Identity.SessionID != detachment.Binding.SessionID || route.Identity.ProcessGeneration != detachment.Binding.ProcessGeneration || route.Identity.Generation != detachment.Binding.ConfigGeneration || route.Revision != detachment.Binding.RouteGeneration || route.OwnerMachineID != detachment.Binding.OwnerMachineID || route.OwnerSessionID != detachment.Binding.OwnerSessionID || route.AttachmentGeneration >= detachment.AttachmentGeneration {
 				continue
 			}
 			_ = w.registry.Detach(route.RouteID, route.Identity, route.Revision)
@@ -347,6 +350,9 @@ func (w *PreviewCarrierWorker) Shutdown(ctx context.Context) error {
 	routes := w.registry.Snapshot()
 	observations := make([]control.PreviewCarrierObservation, 0, len(routes))
 	for _, route := range routes {
+		if route.EndpointRoute {
+			continue
+		}
 		_ = w.registry.Detach(route.RouteID, route.Identity, route.Revision)
 		observations = append(observations, observationFromRoute(route, now, "detached", "edge_shutdown"))
 	}

@@ -13,7 +13,11 @@ import (
 
 func ExpectedRuntimeAdmission(a runtimewire.Admission, nodeID, epoch string, now time.Time) (datacarrier.ExpectedAdmission, error) {
 	b := a.Binding
-	if a.Schema != runtimewire.Schema || a.RouteKind != runtimewire.RouteKind || b.EdgeProcessEpoch != epoch || a.RouteRevision != b.RouteGeneration || len(a.EdgeEndpoints) != 2 {
+	endpoint := a.RouteKind == runtimewire.EndpointPublicRouteKind || a.RouteKind == runtimewire.EndpointRestrictedRouteKind
+	if endpoint != (a.EndpointID != "") || endpoint != (a.AccessMode != "") {
+		return datacarrier.ExpectedAdmission{}, ErrControlInvalid
+	}
+	if a.Schema != runtimewire.Schema || (a.RouteKind != runtimewire.RouteKind && !endpoint) || b.EdgeProcessEpoch != epoch || a.RouteRevision != b.RouteGeneration || len(a.EdgeEndpoints) != 2 {
 		return datacarrier.ExpectedAdmission{}, ErrControlInvalid
 	}
 	seen := map[string]bool{}
@@ -40,6 +44,9 @@ func ExpectedRuntimeAdmission(a runtimewire.Admission, nodeID, epoch string, now
 		EdgeCarrierServerSPKISHA256: b.EdgeCarrierServerSPKISHA256, EdgeCarrierServerCertificateChainPEM: b.EdgeCarrierServerCertificateChainPEM,
 		MachineIdentityPublicKey: b.MachineIdentityPublicKey, MachineIdentityThumbprint: b.MachineIdentityThumbprint, Admitted: true,
 	}
+	if endpoint {
+		value.PreviewID, value.OperationID, value.AccessMode = a.EndpointID, b.RouteID, a.AccessMode
+	}
 	if err := value.Validate(now, nodeID); err != nil {
 		return datacarrier.ExpectedAdmission{}, err
 	}
@@ -56,7 +63,7 @@ func (c *HTTPClient) RuntimeCarrierAdmissions(ctx context.Context, nodeID, epoch
 		return nil, ErrControlInvalid
 	}
 	var result runtimewire.Snapshot
-	if err := c.postNodeWithMaximumAndIdentity(ctx, runtimewire.EdgePullPath, nodeID, epoch, runtimewire.EdgeRequest{NodeID: nodeID, ProcessEpoch: epoch}, &result, maxPreviewCarrierSnapshotBytes); err != nil {
+	if err := c.postNodeWithMaximumAndIdentity(ctx, runtimewire.EdgePullPath, nodeID, epoch, runtimewire.EdgeRequest{NodeID: nodeID, ProcessEpoch: epoch, Capabilities: []string{runtimewire.CapabilityEndpoints}}, &result, maxPreviewCarrierSnapshotBytes); err != nil {
 		return nil, err
 	}
 	if result.Schema != runtimewire.Schema || !result.Complete || result.Admissions == nil || len(*result.Admissions) > runtimewire.MaximumAdmissions {

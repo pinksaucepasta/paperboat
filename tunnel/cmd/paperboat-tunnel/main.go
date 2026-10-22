@@ -350,7 +350,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		}
 		reporter.ObserveFailure(ctx, "browser_terminal_stream", cause)
 	}
-	runtimeWorker := &edgeruntime.RuntimeCarrierWorker{Reporter: reporter, Source: client, Expected: runtimeExpected, Routes: runtimeRoutes, BrowserTerminalHub: browserTerminalHub, Interval: deployment.ControlInterval, Timeout: deployment.ControlTimeout}
+	runtimeWorker := &edgeruntime.RuntimeCarrierWorker{Reporter: reporter, Source: client, Expected: runtimeExpected, Routes: runtimeRoutes, Endpoints: previewRoutes, BrowserTerminalHub: browserTerminalHub, Interval: deployment.ControlInterval, Timeout: deployment.ControlTimeout}
 	runtimeTransport, err := edgehttp.NewDataCarrierPreviewTransport(edgehttp.DataCarrierPreviewTransportConfig{Registry: runtimeRoutes, StreamOpenTimeout: deployment.ControlTimeout})
 	if err != nil {
 		return nil, err

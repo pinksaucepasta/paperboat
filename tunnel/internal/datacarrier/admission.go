@@ -81,8 +81,14 @@ func restrictedPreviewAccess(mode string) bool {
 
 func (a ExpectedAdmission) Validate(now time.Time, nodeID string) error {
 	runtime := a.Schema == runtimewire.Schema && a.Kind == "" && a.RouteKind == runtimewire.RouteKind
-	if !runtime && (a.Schema != PreviewCarrierSchema || a.Kind != PreviewCarrierKind) {
+	// An endpoint route (PLAN 3a) rides on the agent's runtime carrier: runtime schema and identity,
+	// preview route kind and access mode, PreviewID = endpoint id, OperationID = route id.
+	endpoint := a.EndpointRoute()
+	if !runtime && !endpoint && (a.Schema != PreviewCarrierSchema || a.Kind != PreviewCarrierKind) {
 		return fmt.Errorf("%w: schema or kind is invalid", ErrAdmissionNotExpected)
+	}
+	if endpoint && (a.InstallationGeneration == 0 || a.OperationID != a.RouteID || a.OwnerMachineID != "" || a.OwnerSessionID != "" || a.LeaseGeneration != 0) {
+		return fmt.Errorf("%w: endpoint route binding is invalid", ErrAdmissionNotExpected)
 	}
 	if nodeID == "" || a.EdgeNodeID != nodeID || connectorprotocol.ValidateIdentifier(a.EdgeNodeID) != nil || connectorprotocol.ValidateOpaqueEpoch(a.EdgeProcessEpoch) != nil {
 		return fmt.Errorf("%w: edge node binding is invalid", ErrAdmissionNotExpected)
@@ -91,6 +97,9 @@ func (a ExpectedAdmission) Validate(now time.Time, nodeID string) error {
 		"preview_id": a.PreviewID, "operation_id": a.OperationID,
 		"route_id": a.RouteID, "owner_machine_id": a.OwnerMachineID,
 		"owner_session_id": a.OwnerSessionID,
+	}
+	if endpoint {
+		identifiers = map[string]string{"route_id": a.RouteID, "preview_id": a.PreviewID}
 	}
 	if runtime {
 		identifiers = map[string]string{"route_id": a.RouteID}
@@ -106,10 +115,10 @@ func (a ExpectedAdmission) Validate(now time.Time, nodeID string) error {
 	if err := a.Identity.Validate(); err != nil {
 		return fmt.Errorf("%w: carrier identity is invalid", ErrAdmissionNotExpected)
 	}
-	if !runtime && a.Identity.HostID != a.OwnerMachineID {
+	if !runtime && !endpoint && a.Identity.HostID != a.OwnerMachineID {
 		return fmt.Errorf("%w: host and owner machine differ", ErrAdmissionConflict)
 	}
-	if (!runtime && a.LeaseGeneration == 0) || a.ConfigGeneration == 0 || a.RouteRevision == 0 || a.AttachmentGeneration == 0 {
+	if (!runtime && !endpoint && a.LeaseGeneration == 0) || a.ConfigGeneration == 0 || a.RouteRevision == 0 || a.AttachmentGeneration == 0 {
 		return fmt.Errorf("%w: generations must be positive", ErrAdmissionNotExpected)
 	}
 	if !runtime && a.AccessMode != PreviewCarrierAccessPublic && !restrictedPreviewAccess(a.AccessMode) {
@@ -147,6 +156,11 @@ func (a ExpectedAdmission) Validate(now time.Time, nodeID string) error {
 		return err
 	}
 	return nil
+}
+
+// EndpointRoute reports whether the admission is an endpoint route on an agent's runtime carrier.
+func (a ExpectedAdmission) EndpointRoute() bool {
+	return a.Schema == runtimewire.Schema && a.Kind == "" && (a.RouteKind == runtimewire.EndpointPublicRouteKind || a.RouteKind == runtimewire.EndpointRestrictedRouteKind)
 }
 
 func (a ExpectedAdmission) key() string {

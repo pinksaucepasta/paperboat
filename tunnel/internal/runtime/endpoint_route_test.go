@@ -1,0 +1,127 @@
+package runtime
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
+
+	"github.com/pinksaucepasta/paperboat-tunnel/internal/control"
+	"github.com/pinksaucepasta/paperboat-tunnel/internal/datacarrier"
+	"github.com/pinksaucepasta/paperboat-tunnel/internal/edgehttp"
+)
+
+func endpointRegistry(t *testing.T, epoch string) *edgehttp.DataCarrierPreviewRegistry {
+	t.Helper()
+	r, err := edgehttp.NewDataCarrierPreviewRegistry(edgehttp.DataCarrierPreviewRegistryConfig{BaseDomain: "preview.example.test", ProcessEpoch: epoch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = r.Close() })
+	return r
+}
+
+// endpointAdmission is a preview endpoint route on the same runtime carrier as runtime.
+func endpointAdmission(runtime runtimewire.Admission, access string) runtimewire.Admission {
+	a := runtime
+	a.Binding.RouteID, a.Binding.RouteGeneration, a.RouteRevision = "route_endpoint", 1, 1
+	a.AttachmentGeneration, a.Hostname, a.EndpointID, a.AccessMode = 7, "bright-otter.preview.example.test", "preview_endpoint", access
+	a.RouteKind = runtimewire.EndpointPublicRouteKind
+	if access != "public" {
+		a.RouteKind = runtimewire.EndpointRestrictedRouteKind
+	}
+	return a
+}
+
+// PLAN 3a: an endpoint route rides on the agent's runtime carrier. It is served from the preview
+// registry (so preview hostnames, readiness and inspection keep working), reported ready like the
+// runtime route, never touched by the preview carrier worker, and removed when the server
+// withdraws it while the runtime route stays.
+func TestEndpointRouteRidesOnTheAgentRuntimeCarrier(t *testing.T) {
+	runtimeRoute := runtimeAdmission(t)
+	endpoint := endpointAdmission(runtimeRoute, "team")
+	epoch := runtimeRoute.Binding.EdgeProcessEpoch
+	ea, err := control.ExpectedRuntimeAdmission(endpoint, runtimeRoute.Binding.EdgeNodeID, epoch, time.Now())
+	if err != nil {
+		t.Fatalf("endpoint admission rejected: %v", err)
+	}
+	if !ea.EndpointRoute() || ea.PreviewID != "preview_endpoint" || ea.OperationID != "route_endpoint" || ea.AccessMode != "team" {
+		t.Fatalf("endpoint admission = %+v", ea)
+	}
+	for _, bad := range []func(*runtimewire.Admission){
+		func(a *runtimewire.Admission) { a.EndpointID = "" },
+		func(a *runtimewire.Admission) { a.AccessMode = "" },
+		func(a *runtimewire.Admission) { a.RouteKind = runtimewire.EndpointPublicRouteKind },
+	} {
+		value := endpoint
+		bad(&value)
+		if _, err := control.ExpectedRuntimeAdmission(value, runtimeRoute.Binding.EdgeNodeID, epoch, time.Now()); err == nil {
+			t.Fatalf("inconsistent endpoint admission accepted: %+v", value)
+		}
+	}
+	source := &runtimeSourceFake{admissions: []runtimewire.Admission{runtimeRoute, endpoint}}
+	expected, err := datacarrier.NewExpectedAdmissionRegistry(datacarrier.ExpectedAdmissionRegistryConfig{NodeID: runtimeRoute.Binding.EdgeNodeID, ProcessEpoch: epoch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	routes, err := edgehttp.NewDataCarrierPreviewRegistry(edgehttp.DataCarrierPreviewRegistryConfig{BaseDomain: "runtime.example.test", ProcessEpoch: epoch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoints := endpointRegistry(t, epoch)
+	w := &RuntimeCarrierWorker{Source: source, Expected: expected, Routes: routes, Endpoints: endpoints, Interval: 20 * time.Millisecond, Timeout: time.Second}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := w.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = w.Shutdown(context.Background()) }()
+	waitRuntime(t, func() bool { return len(expected.Snapshot()) == 2 })
+	server := newPreviewCarrierTestServer(t, ea.Identity)
+	go func() { _ = w.Handle(ctx, server) }()
+	readyRoutes := func() map[string]bool {
+		source.mu.Lock()
+		defer source.mu.Unlock()
+		out := map[string]bool{}
+		for _, o := range source.observations {
+			out[o.RouteID] = o.Ready
+		}
+		return out
+	}
+	waitRuntime(t, func() bool { r := readyRoutes(); return r["route_endpoint"] && r[runtimeRoute.Binding.RouteID] })
+	route, ok := endpoints.Lookup("bright-otter.preview.example.test")
+	if !ok || !route.EndpointRoute || route.Server != server || route.PreviewID != "preview_endpoint" || route.AccessMode != "team" {
+		t.Fatalf("endpoint route not served from the preview registry: %+v %v", route, ok)
+	}
+	if routes.Len() != 1 {
+		t.Fatalf("runtime registry holds %d routes, want only the runtime route", routes.Len())
+	}
+
+	// The preview carrier worker's complete snapshot does not list endpoint routes; it must keep them.
+	previews := &previewCarrierSourceFake{}
+	previewExpected, err := datacarrier.NewExpectedAdmissionRegistry(datacarrier.ExpectedAdmissionRegistryConfig{NodeID: runtimeRoute.Binding.EdgeNodeID, ProcessEpoch: epoch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	previewWorker, err := NewPreviewCarrierWorker(PreviewCarrierWorkerConfig{Source: previews, Expected: previewExpected, Registry: endpoints, NodeID: runtimeRoute.Binding.EdgeNodeID, ProcessEpoch: epoch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = previewWorker.reconcile(ctx)
+	if err := previewWorker.Shutdown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := endpoints.Lookup("bright-otter.preview.example.test"); !ok {
+		t.Fatal("preview carrier worker removed an endpoint route it does not own")
+	}
+
+	// The server withdraws the endpoint (preview stopped): the route leaves, the runtime route stays.
+	source.mu.Lock()
+	source.admissions = []runtimewire.Admission{runtimeRoute}
+	source.mu.Unlock()
+	waitRuntime(t, func() bool { _, ok := endpoints.Lookup("bright-otter.preview.example.test"); return !ok })
+	if routes.Len() != 1 {
+		t.Fatal("withdrawing the endpoint route detached the runtime route")
+	}
+}

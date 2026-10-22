@@ -66,6 +66,9 @@ type DataCarrierPreviewRoute struct {
 	ExpiresAt                            time.Time
 	MachineIdentityPublicKey             string
 	MachineIdentityThumbprint            string
+	// EndpointRoute marks an endpoint route on an agent's runtime carrier (PLAN 3a). The runtime
+	// carrier worker owns it; the preview carrier worker never detaches it.
+	EndpointRoute bool
 }
 
 type DataCarrierPreviewRegistryConfig struct {
@@ -149,7 +152,7 @@ func (r *DataCarrierPreviewRegistry) Attach(route DataCarrierPreviewRoute) error
 		// and active streams; renewal is not an attachment replacement.
 		previous := old.route
 		previous.ExpiresAt = validated.ExpiresAt
-		if validated.Kind == runtimewire.RouteKind && sameDataCarrierPreviewRoute(previous, validated) {
+		if (validated.Kind == runtimewire.RouteKind || validated.EndpointRoute) && sameDataCarrierPreviewRoute(previous, validated) {
 			old.route.ExpiresAt = validated.ExpiresAt
 			r.mu.Unlock()
 			return nil
@@ -210,7 +213,7 @@ func (r *DataCarrierPreviewRegistry) AttachAdmission(admission datacarrier.Expec
 		LeaseGeneration:                      admission.LeaseGeneration, AttachmentGeneration: admission.AttachmentGeneration,
 		ConfigContentHash: admission.ConfigContentHash, Endpoint: admission.Endpoint,
 		ExpiresAt: admission.ExpiresAt, MachineIdentityPublicKey: admission.MachineIdentityPublicKey,
-		MachineIdentityThumbprint: admission.MachineIdentityThumbprint,
+		MachineIdentityThumbprint: admission.MachineIdentityThumbprint, EndpointRoute: admission.EndpointRoute(),
 	})
 }
 
@@ -252,8 +255,14 @@ func (r *DataCarrierPreviewRegistry) validateRoute(route DataCarrierPreviewRoute
 	}
 	route.Hostname = host
 	route.Identity = identity
+	if route.EndpointRoute && (route.Kind == runtimewire.RouteKind || route.AttachmentGeneration == 0 || route.OwnerMachineID != "" || route.OwnerSessionID != "" || route.LeaseGeneration != 0) {
+		return DataCarrierPreviewRoute{}, ErrDataCarrierPreviewRegistryInvalid
+	}
 	if route.AttachmentGeneration != 0 && route.Kind != runtimewire.RouteKind {
-		if connectorprotocol.ValidateIdentifier(route.OperationID) != nil || connectorprotocol.ValidateIdentifier(route.PreviewID) != nil || connectorprotocol.ValidateIdentifier(route.OwnerMachineID) != nil || connectorprotocol.ValidateIdentifier(route.OwnerSessionID) != nil || route.OwnerMachineID != identity.HostID || route.LeaseGeneration == 0 || route.ConfigContentHash == "" || route.Endpoint == "" || route.ExpiresAt.IsZero() || !route.ExpiresAt.After(time.Now().UTC()) {
+		// An endpoint route has no preview owner session or lease generation: the agent's runtime
+		// carrier and the server's assignment generation fence it.
+		owner := route.EndpointRoute || connectorprotocol.ValidateIdentifier(route.OwnerMachineID) == nil && connectorprotocol.ValidateIdentifier(route.OwnerSessionID) == nil && route.OwnerMachineID == identity.HostID && route.LeaseGeneration != 0
+		if connectorprotocol.ValidateIdentifier(route.OperationID) != nil || connectorprotocol.ValidateIdentifier(route.PreviewID) != nil || !owner || route.ConfigContentHash == "" || route.Endpoint == "" || route.ExpiresAt.IsZero() || !route.ExpiresAt.After(time.Now().UTC()) {
 			return DataCarrierPreviewRoute{}, ErrDataCarrierPreviewRegistryInvalid
 		}
 		if route.MachineIdentityPublicKey == "" || route.MachineIdentityThumbprint == "" {
@@ -464,7 +473,7 @@ func (r *DataCarrierPreviewRegistry) Close() error {
 }
 
 func sameDataCarrierPreviewRoute(left, right DataCarrierPreviewRoute) bool {
-	return left.RouteID == right.RouteID && left.Hostname == right.Hostname && left.Kind == right.Kind && left.Revision == right.Revision && left.Identity == right.Identity && left.Server == right.Server && left.PreviewID == right.PreviewID && left.OperationID == right.OperationID && left.OwnerMachineID == right.OwnerMachineID && left.OwnerSessionID == right.OwnerSessionID && left.AccessMode == right.AccessMode && left.EdgeNodeID == right.EdgeNodeID && left.EdgeProcessEpoch == right.EdgeProcessEpoch && left.LeaseGeneration == right.LeaseGeneration && left.AttachmentGeneration == right.AttachmentGeneration && left.ConfigContentHash == right.ConfigContentHash && left.Endpoint == right.Endpoint && left.ExpiresAt.Equal(right.ExpiresAt) && left.MachineIdentityPublicKey == right.MachineIdentityPublicKey && left.MachineIdentityThumbprint == right.MachineIdentityThumbprint
+	return left.RouteID == right.RouteID && left.Hostname == right.Hostname && left.Kind == right.Kind && left.Revision == right.Revision && left.Identity == right.Identity && left.Server == right.Server && left.PreviewID == right.PreviewID && left.OperationID == right.OperationID && left.OwnerMachineID == right.OwnerMachineID && left.OwnerSessionID == right.OwnerSessionID && left.AccessMode == right.AccessMode && left.EdgeNodeID == right.EdgeNodeID && left.EdgeProcessEpoch == right.EdgeProcessEpoch && left.LeaseGeneration == right.LeaseGeneration && left.AttachmentGeneration == right.AttachmentGeneration && left.ConfigContentHash == right.ConfigContentHash && left.Endpoint == right.Endpoint && left.EndpointRoute == right.EndpointRoute && left.ExpiresAt.Equal(right.ExpiresAt) && left.MachineIdentityPublicKey == right.MachineIdentityPublicKey && left.MachineIdentityThumbprint == right.MachineIdentityThumbprint
 }
 
 func newerDataCarrierPreviewRoute(old, next DataCarrierPreviewRoute) bool {

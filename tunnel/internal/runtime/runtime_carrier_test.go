@@ -64,7 +64,7 @@ func TestRuntimeCarrierReadinessRevocationExpiryAndRecovery(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			w := &RuntimeCarrierWorker{Source: source, Expected: expected, Routes: routes, Interval: 20 * time.Millisecond, Timeout: time.Second}
+			w := &RuntimeCarrierWorker{Source: source, Expected: expected, Routes: routes, Endpoints: endpointRegistry(t, a.Binding.EdgeProcessEpoch), Interval: 20 * time.Millisecond, Timeout: time.Second}
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			if err = w.Start(ctx); err != nil {

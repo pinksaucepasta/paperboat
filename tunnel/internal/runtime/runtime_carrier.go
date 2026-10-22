@@ -13,7 +13,9 @@ import (
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/reporting"
 )
 
-// RuntimeCarrierWorker owns runtime-only admissions and routes. A successful
+// RuntimeCarrierWorker owns the admissions of agents' runtime carriers and their routes: the
+// runtime route (Routes) and the endpoint routes riding on the same carrier (Endpoints, the preview
+// registry, PLAN 3a). A successful
 // complete pull replaces authority; a failed pull preserves admitted carriers until explicit withdrawal.
 // Runtime endpoints authenticate the forwarded helper credential themselves.
 type RuntimeCarrierWorker struct {
@@ -21,6 +23,7 @@ type RuntimeCarrierWorker struct {
 	Source             control.RuntimeCarrierSource
 	Expected           *datacarrier.ExpectedAdmissionRegistry
 	Routes             *edgehttp.DataCarrierPreviewRegistry
+	Endpoints          *edgehttp.DataCarrierPreviewRegistry
 	BrowserTerminalHub *edgehttp.BrowserTerminalHub
 	Interval           time.Duration
 	Timeout            time.Duration
@@ -32,7 +35,7 @@ type RuntimeCarrierWorker struct {
 }
 
 func (w *RuntimeCarrierWorker) Start(ctx context.Context) error {
-	if ctx == nil || w.Source == nil || w.Expected == nil || w.Routes == nil || w.Interval <= 0 || w.Timeout <= 0 || w.Interval > 5*time.Minute || w.Timeout > time.Minute {
+	if ctx == nil || w.Source == nil || w.Expected == nil || w.Routes == nil || w.Endpoints == nil || w.Interval <= 0 || w.Timeout <= 0 || w.Interval > 5*time.Minute || w.Timeout > time.Minute {
 		return ErrProcessInvalid
 	}
 	if err := ctx.Err(); err != nil {
@@ -64,6 +67,43 @@ func (w *RuntimeCarrierWorker) Start(ctx context.Context) error {
 		}
 	}()
 	return nil
+}
+
+// registry is where an admission's route lives.
+func (w *RuntimeCarrierWorker) registry(a datacarrier.ExpectedAdmission) *edgehttp.DataCarrierPreviewRegistry {
+	if a.EndpointRoute() {
+		return w.Endpoints
+	}
+	return w.Routes
+}
+
+// routes is every route this worker owns.
+func (w *RuntimeCarrierWorker) routes() []edgehttp.DataCarrierPreviewRoute {
+	out := w.Routes.Snapshot()
+	for _, r := range w.Endpoints.Snapshot() {
+		if r.EndpointRoute {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+func (w *RuntimeCarrierWorker) detachRoute(r edgehttp.DataCarrierPreviewRoute) {
+	if r.EndpointRoute {
+		_ = w.Endpoints.Detach(r.RouteID, r.Identity, r.Revision)
+		return
+	}
+	_ = w.Routes.Detach(r.RouteID, r.Identity, r.Revision)
+	if w.BrowserTerminalHub != nil {
+		w.BrowserTerminalHub.DeactivateRoute(r.RouteID, edgehttp.BrowserTerminalRouteFence{Identity: r.Identity, Revision: r.Revision, AttachmentGeneration: r.AttachmentGeneration})
+	}
+}
+
+func (w *RuntimeCarrierWorker) detachAdmission(a datacarrier.ExpectedAdmission) {
+	_ = w.registry(a).DetachAdmission(a)
+	if w.BrowserTerminalHub != nil && !a.EndpointRoute() {
+		w.BrowserTerminalHub.DeactivateRoute(a.RouteID, browserTerminalFence(a))
+	}
 }
 
 func (w *RuntimeCarrierWorker) changed() {
@@ -103,13 +143,10 @@ func (w *RuntimeCarrierWorker) reconcile(parent context.Context) (failure error)
 			allowed[a.RouteID] = a
 		}
 	}
-	for _, r := range w.Routes.Snapshot() {
+	for _, r := range w.routes() {
 		a, ok := allowed[r.RouteID]
 		if !ok || a.Identity != r.Identity || a.AttachmentGeneration != r.AttachmentGeneration || a.RouteRevision != r.Revision {
-			_ = w.Routes.Detach(r.RouteID, r.Identity, r.Revision)
-			if w.BrowserTerminalHub != nil {
-				w.BrowserTerminalHub.DeactivateRoute(r.RouteID, edgehttp.BrowserTerminalRouteFence{Identity: r.Identity, Revision: r.Revision, AttachmentGeneration: r.AttachmentGeneration})
-			}
+			w.detachRoute(r)
 		}
 	}
 	w.observe(parent)
@@ -120,7 +157,7 @@ func (w *RuntimeCarrierWorker) observe(parent context.Context) (failure error) {
 	defer func() { observeWorkerFailure(parent, w.Reporter, "runtime_observation", failure) }()
 	observations := make([]runtimewire.Observation, 0)
 	for _, a := range w.Expected.Snapshot() {
-		r, ok := w.Routes.Route(a.RouteID)
+		r, ok := w.registry(a).Route(a.RouteID)
 		ready := ok && r.Identity == a.Identity && r.AttachmentGeneration == a.AttachmentGeneration && r.Revision == a.RouteRevision
 		if ready {
 			select {
@@ -144,10 +181,7 @@ func (w *RuntimeCarrierWorker) Handle(ctx context.Context, server *datacarrier.S
 	var outputErrors chan error
 	defer func() {
 		for _, a := range attached {
-			_ = w.Routes.DetachAdmission(a)
-			if w.BrowserTerminalHub != nil {
-				w.BrowserTerminalHub.DeactivateRoute(a.RouteID, browserTerminalFence(a))
-			}
+			w.detachAdmission(a)
 		}
 		w.changed()
 	}()
@@ -165,25 +199,22 @@ func (w *RuntimeCarrierWorker) Handle(ctx context.Context, server *datacarrier.S
 				previous := a
 				previous.ExpiresAt = next.ExpiresAt
 				if previewCarrierAdmissionEqual(previous, next) {
-					if err := w.Routes.AttachAdmission(next, server); err == nil {
+					if err := w.registry(next).AttachAdmission(next, server); err == nil {
 						attached[key] = next
 						continue
 					}
 				}
 			}
 			if !ok || !previewCarrierAdmissionEqual(a, next) {
-				_ = w.Routes.DetachAdmission(a)
-				if w.BrowserTerminalHub != nil {
-					w.BrowserTerminalHub.DeactivateRoute(a.RouteID, browserTerminalFence(a))
-				}
+				w.detachAdmission(a)
 				delete(attached, key)
 				changed = true
 			}
 		}
 		for key, a := range desired {
 			if _, ok := attached[key]; !ok {
-				if err := w.Routes.AttachAdmission(a, server); err == nil {
-					if w.BrowserTerminalHub != nil {
+				if err := w.registry(a).AttachAdmission(a, server); err == nil {
+					if w.BrowserTerminalHub != nil && !a.EndpointRoute() {
 						if err := w.BrowserTerminalHub.ActivateRoute(a.RouteID, browserTerminalFence(a)); err != nil {
 							_ = w.Routes.DetachAdmission(a)
 							continue
@@ -238,6 +269,12 @@ func (w *RuntimeCarrierWorker) Shutdown(ctx context.Context) error {
 	// Clear authorization first to prevent a live carrier reattaching during stop.
 	admissions := w.Expected.Snapshot()
 	_ = w.Expected.Close()
+	// The endpoint registry is shared with the preview worker: detach only this worker's routes.
+	for _, r := range w.Endpoints.Snapshot() {
+		if r.EndpointRoute {
+			_ = w.Endpoints.Detach(r.RouteID, r.Identity, r.Revision)
+		}
+	}
 	err := w.Routes.Close()
 	if w.BrowserTerminalHub != nil {
 		err = errors.Join(err, w.BrowserTerminalHub.Close())
