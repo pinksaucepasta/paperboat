@@ -859,6 +859,8 @@ elif sys.argv[2]=="config-sync":
  assert all(r[k] for k in ("repository_connect_list", "validate_apply", "status_assignment", "force_pull", "unassign"))
 elif sys.argv[2]=="config-survival":
  assert all(r[k] for k in ("config_set_survives_update", "customization_survives_update", "reset_restores"))
+elif sys.argv[2]=="approve-refusals":
+ assert r["refusals"] == ["machine_not_found", "approval_not_pending"]
 elif sys.argv[2]=="tunnel-manage":
  assert all(r[k] for k in ("create_show_list_delete", "route_add_update_remove", "rename"))
 else:
@@ -964,6 +966,7 @@ test_application_pairs preview-access preview_access.py
 test_device_application team-lifecycle team_lifecycle.py
 test_device_application team-roles team_lifecycle.py --roles
 test_device_application tunnel-manage tunnel_manage.py
+test_device_application approve-refusals approve_refusals.py
 test_tunnel_domain
 test_device_application config-sync config_sync.py
 test_device_application config-survival config_survival.py
