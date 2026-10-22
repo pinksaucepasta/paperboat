@@ -32,24 +32,26 @@ type ConfigRuntimePolicy struct {
 }
 
 type ConfigRuntimeDescriptor struct {
-	PathRules              []ConfigPathRule          `json:"path_rules"`
-	RepositoryBindings     []ConfigRepositoryBinding `json:"repository_bindings"`
-	ConfigurationRevision  string                    `json:"configuration_revision"`
-	AssignmentVersion      int64                     `json:"assignment_version"`
-	WriteMode              string                    `json:"write_mode"`
-	Mode                   string                    `json:"mode"`
-	RepositoryID           string                    `json:"repository_id"`
-	PullRepositoryID       string                    `json:"pull_repository_id,omitempty"`
-	PushRepositoryID       string                    `json:"push_repository_id,omitempty"`
-	AutomaticUpdates       bool                      `json:"automatic_updates"`
-	ApprovedPullRevision   string                    `json:"approved_pull_revision,omitempty"`
-	AssignmentID           string                    `json:"assignment_id"`
-	EnvironmentID          string                    `json:"environment_id"`
-	MachineID              string                    `json:"machine_id"`
-	InstallationGeneration int64                     `json:"installation_generation"`
-	SyncRevisionFloor      int64                     `json:"sync_revision_floor"`
-	WarningRevision        string                    `json:"warning_revision"`
-	Policy                 ConfigRuntimePolicy       `json:"policy"`
+	PathRules             []ConfigPathRule          `json:"path_rules"`
+	RepositoryBindings    []ConfigRepositoryBinding `json:"repository_bindings"`
+	ConfigurationRevision string                    `json:"configuration_revision"`
+	AssignmentVersion     int64                     `json:"assignment_version"`
+	WriteMode             string                    `json:"write_mode"`
+	Mode                  string                    `json:"mode"`
+	RepositoryID          string                    `json:"repository_id"`
+	PullRepositoryID      string                    `json:"pull_repository_id,omitempty"`
+	PushRepositoryID      string                    `json:"push_repository_id,omitempty"`
+	AutomaticUpdates      bool                      `json:"automatic_updates"`
+	ApprovedPullRevision  string                    `json:"approved_pull_revision,omitempty"`
+	AssignmentID          string                    `json:"assignment_id"`
+	EnvironmentID         string                    `json:"environment_id"`
+	MachineID             string                    `json:"machine_id"`
+	// MachineAlias selects the shared file's [machine.<name>] section.
+	MachineAlias           string              `json:"machine_alias"`
+	InstallationGeneration int64               `json:"installation_generation"`
+	SyncRevisionFloor      int64               `json:"sync_revision_floor"`
+	WarningRevision        string              `json:"warning_revision"`
+	Policy                 ConfigRuntimePolicy `json:"policy"`
 }
 
 type ConfigRuntimeService struct {
@@ -92,12 +94,18 @@ func (s *ConfigRuntimeService) Get(ctx context.Context, identityToken, credentia
 	} else if err != nil {
 		return ConfigRuntimeDescriptor{}, err
 	}
+	machine, err := s.store.Queries().GetActiveUserMachineForControl(ctx, holder.MachineID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ConfigRuntimeDescriptor{}, ErrConfigRuntimeInvalid
+	} else if err != nil {
+		return ConfigRuntimeDescriptor{}, err
+	}
 	return ConfigRuntimeDescriptor{
 		WriteMode: s.policy.Mode, Mode: assignment.Mode, PathRules: ConfigAssignmentRules(assignment.PathRules), RepositoryBindings: ConfigAssignmentBindings(assignment.RepositoryBindings), AssignmentVersion: assignment.Version, ConfigurationRevision: assignment.ConfigurationRevision,
 		RepositoryID: statusRepositoryID(assignment), PullRepositoryID: pullRepositoryID(assignment), PushRepositoryID: pushRepositoryID(assignment),
 		AutomaticUpdates: assignment.AutomaticUpdates, ApprovedPullRevision: nullStringValue(assignment.ApprovedPullRevision),
 		AssignmentID: holder.AssignmentID, EnvironmentID: holder.EnvironmentID,
-		MachineID: holder.MachineID, WarningRevision: assignment.WarningRevision.String,
+		MachineID: holder.MachineID, MachineAlias: machine.Alias, WarningRevision: assignment.WarningRevision.String,
 		InstallationGeneration: holder.InstallationGeneration, SyncRevisionFloor: syncRevisionFloor,
 		Policy: ConfigRuntimePolicy{
 			Format: "paperboat-config-plaintext-v1", Revision: s.policy.PolicyRevision,
