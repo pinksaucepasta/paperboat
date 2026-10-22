@@ -3,6 +3,8 @@ package peersessions
 import (
 	"bytes"
 	"fmt"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -59,5 +61,31 @@ func TestRelayGrantsCarryEveryPeerInChunksOfTheRelayBound(t *testing.T) {
 	}
 	if empty := relayGrantChunks(nil); len(empty) != 1 || len(empty[0]) != 0 {
 		t.Fatal("an endpoint without peers still gets one grant per node")
+	}
+}
+
+func TestKeyedLocksSerializeOneKeyAndForgetIt(t *testing.T) {
+	var locks keyedLocks
+	var inside, maximum int32
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			unlock := locks.lock("endpoint")
+			if n := atomic.AddInt32(&inside, 1); n > atomic.LoadInt32(&maximum) {
+				atomic.StoreInt32(&maximum, n)
+			}
+			time.Sleep(2 * time.Millisecond)
+			atomic.AddInt32(&inside, -1)
+			unlock()
+		}()
+	}
+	wg.Wait()
+	if maximum != 1 {
+		t.Fatalf("%d builds of one endpoint ran at once", maximum)
+	}
+	if len(locks.locks) != 0 {
+		t.Fatal("lock entries outlived their holders")
 	}
 }

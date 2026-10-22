@@ -16,6 +16,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -59,9 +60,10 @@ type NetworkConfigResult struct {
 type NetworkOptions struct{ STUNServers []string }
 
 type NetworkService struct {
-	stunServers []string
-	store       *db.DB
-	signer      interface {
+	endpointBuilds keyedLocks
+	stunServers    []string
+	store          *db.DB
+	signer         interface {
 		SignNetworkConfiguration(map[string]any) (string, error)
 		SignRegionalCandidates(map[string]any) (string, error)
 		SignRelayGrant(map[string]any) (string, error)
@@ -224,6 +226,11 @@ type networkPeer struct {
 func (s *NetworkService) Configuration(ctx context.Context, in NetworkConfigRequest) (NetworkConfigResult, error) {
 	// Match the database owner's bounded serializable retry policy. A failed
 	// attempt is fully rolled back, including its configuration generation.
+	// Wake bursts send several configuration requests for one endpoint at once;
+	// built concurrently they all bump the same generation row and abort each
+	// other past the retry budget. One build per endpoint at a time instead.
+	unlock := s.endpointBuilds.lock(in.EndpointID)
+	defer unlock()
 	for attempt := 1; ; attempt++ {
 		result, err := s.configuration(ctx, in)
 		var pg *pgconn.PgError
@@ -897,4 +904,39 @@ func validWireGuardPublicKey(key []byte) bool {
 	}
 	_, err := curve25519.X25519(scalar[:], key)
 	return err == nil
+}
+
+// keyedLocks serializes work per key within this process; entries are removed
+// when their last holder leaves, so it never grows beyond the keys in use.
+type keyedLocks struct {
+	mu    sync.Mutex
+	locks map[string]*keyedLock
+}
+
+type keyedLock struct {
+	mu   sync.Mutex
+	refs int
+}
+
+func (k *keyedLocks) lock(key string) func() {
+	k.mu.Lock()
+	if k.locks == nil {
+		k.locks = map[string]*keyedLock{}
+	}
+	l := k.locks[key]
+	if l == nil {
+		l = &keyedLock{}
+		k.locks[key] = l
+	}
+	l.refs++
+	k.mu.Unlock()
+	l.mu.Lock()
+	return func() {
+		l.mu.Unlock()
+		k.mu.Lock()
+		if l.refs--; l.refs == 0 {
+			delete(k.locks, key)
+		}
+		k.mu.Unlock()
+	}
 }
