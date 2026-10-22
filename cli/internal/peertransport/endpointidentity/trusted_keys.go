@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 )
 
 // TrustedKey is public account trust metadata for one independently enrolled
@@ -24,7 +26,7 @@ type TrustedKey struct {
 // computers with their pairing sessions. Every store and response that carries the set sizes itself from
 // these two values, so the set cannot be accepted by one step and refused by the next.
 const (
-	MaxTrustedKeys = 2048
+	MaxTrustedKeys = peernetwork.MaxEndpoints
 	// MaxTrustedKeyBytes bounds the JSON encoding of one key (id, public key, fingerprint, generation and
 	// field names); real keys encode to about 260 bytes.
 	MaxTrustedKeyBytes = 384

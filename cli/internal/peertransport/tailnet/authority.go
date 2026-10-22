@@ -20,8 +20,8 @@ import (
 	"github.com/pinksaucepasta/paperboat-relay/derpquic"
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/endpointidentity"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=network-key-custody
 	"tailscale.com/types/key"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=network-fault-injection
@@ -30,15 +30,13 @@ import (
 	"tailscale.com/wgengine/magicsock"
 )
 
-const MaxConfigurationBytes = 128 << 10
-
-// A configuration names every other endpoint of the account with its scopes, up to the stated
-// account maximum the server also enforces (endpointidentity.MaxTrustedKeys); the signed size above
-// is the practical bound. Engine socket limits (MaxFlows) and the client's own scope request limit
-// (api.MaxAdmittedNetworkScopes) are not configuration bounds.
+// A configuration names every other endpoint of the account with its scopes. Its bounds are the ones
+// the server issues under (shared/peernetwork). Engine socket limits (MaxFlows) and the client's own
+// scope request limit (api.MaxAdmittedNetworkScopes) are not configuration bounds.
 const (
-	MaxConfigurationPeers  = endpointidentity.MaxTrustedKeys
-	MaxConfigurationScopes = 2 * MaxConfigurationPeers
+	MaxConfigurationBytes  = peernetwork.MaxConfigurationBytes
+	MaxConfigurationPeers  = peernetwork.MaxEndpoints
+	MaxConfigurationScopes = peernetwork.MaxScopes
 )
 const RefreshInterval = 30 * time.Second
 const NetworkPort = 443

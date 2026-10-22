@@ -1118,13 +1118,13 @@ func TestNetworkReceiptPrunesExpiredScopesAfterSignedValidation(t *testing.T) {
 }
 
 // The server sends every computer of the account (9ef2e3be); the shared test account has 69. This
-// client refused any configuration over 64 peers or 128 scopes with a bare ErrAuthority, so fresh
-// carriers on that account exited 1 at start and existing ones stopped refreshing (2026-10-22).
+// client refused any configuration over 64 peers or 128 scopes with a bare ErrAuthority, and any over
+// 128 KiB (about 100 peers), so fresh carriers on that account exited 1 at start (2026-10-22).
 func TestNetworkAuthorityAcceptsAConfigurationForALargeAccount(t *testing.T) {
 	a, c, signer, _ := networkTestAuthority(t)
 	template := c.Peers[0]
 	c.Peers = nil
-	for index := range 100 {
+	for index := range 150 {
 		peer := template
 		peer.Identity = networkTestBinding("machine", fmt.Sprintf("machine_%03d", index), fmt.Sprintf("fd7a:115c:a1e0::%x", index+16), key.NewNode())
 		terminal := template.Scopes[0]
@@ -1133,10 +1133,14 @@ func TestNetworkAuthorityAcceptsAConfigurationForALargeAccount(t *testing.T) {
 		peer.Scopes = []NetworkScope{terminal, exec}
 		c.Peers = append(c.Peers, peer)
 	}
-	if err := a.Apply(t.Context(), networkToken(t, signer, c)); err != nil {
-		t.Fatalf("configuration with %d peers and %d scopes: %v", len(c.Peers), 2*len(c.Peers), err)
+	token := networkToken(t, signer, c)
+	if len(token) <= 128<<10 {
+		t.Fatalf("fixture token is %d bytes; it must exceed the old 128 KiB bound", len(token))
 	}
-	if !a.Allows("machine_099", "grant_test", "exec", "dial") {
+	if err := a.Apply(t.Context(), token); err != nil {
+		t.Fatalf("configuration with %d peers, %d scopes, %d bytes: %v", len(c.Peers), 2*len(c.Peers), len(token), err)
+	}
+	if !a.Allows("machine_149", "grant_test", "exec", "dial") {
 		t.Fatal("the last peer of a large configuration is not admitted")
 	}
 }
