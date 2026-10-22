@@ -567,6 +567,33 @@ console Activity feed.
 - F15-05: Shell completion for bash, zsh, fish, PowerShell installs and completes commands and machine names.
 - F15-06: Console Activity feed shows real events.
 
+### F16. ENV in plain SSH and VS Code (Lane J, user decision 2026-10-22)
+
+**What:** ENV values reach shells that Paperboat does not launch: `pb ssh`, plain `ssh` and VS Code
+Remote-SSH (today they get only sshd's environment). Opt-in shell hook, the direnv / 1Password
+shell-plugin pattern.
+**Surfaces:** `pb env hook <bash|zsh|fish>` (prints the snippet), `pb env hook --install`,
+`pb env hook --uninstall`, `pb env hook --status`.
+**Design:**
+- `--install` adds one marked line to the user's rc file (`~/.bashrc` and `~/.bash_profile`
+  sourcing check, `~/.zshrc`, `~/.config/fish/config.fish`); idempotent; `--uninstall` removes
+  exactly that line.
+- Whose values: only the Paperboat account logged in to pb for that same unix user on that
+  machine, and only the workspace and scope it picked; `--install` records the choice in the pb
+  config. Never guessed from the SSH login; no pb login for that unix user loads nothing, quietly.
+- Values come from the local daemon over its local socket (same delivery as `pb exec`), are
+  printed only as shell `export` statements on the hook's stdout, never written to disk or logs.
+- Fails quietly and fast: locked vault, stopped daemon, no network or no login add nothing, with
+  at most one short line on interactive shells; hard time budget (target <50 ms cached, bounded
+  timeout otherwise); never blocks shell startup.
+- VS Code Remote-SSH resolves the login shell environment for its server; documented reload step:
+  "Remote-SSH: Kill VS Code Server on Host", then reconnect.
+
+- F16-01: `pb env hook <shell>` prints a correct snippet for bash, zsh and fish; `--install` is idempotent and `--uninstall` removes only its line.
+- F16-02: Plain `ssh host` interactive login and non-interactive `ssh host env` see the workspace values of the logged-in pb account; `pb ssh` too; values never in logs, files or diagnostics.
+- F16-03: Locked vault, stopped daemon, no network and no pb login: the shell starts within the time budget, nothing is loaded, at most one short line on interactive shells.
+- F16-04: VS Code Remote-SSH terminals and tasks see the values after the documented reload step.
+
 ### S2. Marketing site
 
 - S2-01: Content matches the product (features, platforms 1.1, pricing 1.3, domains 1.2); install instructions use the configured installer host; builds; hosting **USER DECIDES**.
@@ -2202,3 +2229,4 @@ Waits: Lane A rerun preview-protocols:hp/preview:hp/tunnel-transfer:hp on .7; La
 2026-10-20 | Lane F F13-03 request to Lane B | CLI side pushed (386d30b0): peer-backed commands print the plan-limit message + billing link on bandwidth_quota_exhausted. Public tunnel/preview status cannot show it: please add `bandwidth_quota_exhausted` (code + billing_url) to the tunnel and preview status/list responses when the workspace allowance is used up; then the CLI prints it.
 2026-10-21 | Lane F macOS readiness audit (code only) | pending | — | The Linux fixes of the week share darwin||linux code or already have darwin counterparts (install ControlURL and guard domain, update activation and helper reset, open-connections busy check, revoked-computer backoff, send-to-self, disk-full refusals; `GOOS=darwin go vet ./...` clean). One real gap fixed: failing to retire old local roots no longer keeps the active root untrusted on any OS (machineguard/certificate.go, TestPreparingTheLocalCAIgnoresAFailureToRetireOldRoots).
 Mac-only proofs still open: (1) the user daemon is a LaunchAgent in gui/<uid>: does it survive logout, and start with no console login? (candidate fallback: user/<uid>); (2) Firefox ignores the System keychain, so browser trust may need enterprise_roots or an NSS import; (3) `security add-trusted-cert` admin approval and the trustPending path; (4) Application Firewall and macOS 15 Local Network prompts for direct QUIC; (5) Gatekeeper/quarantine for browser-downloaded `--from` files; (6) 127.100.x loopback aliases and PF after reboot and sleep; (7) launchd bootstrap/kickstart races during an update restart; (8) APFS free space (statfs) vs purgeable space for the full-disk refusal.
+2026-10-22 | Lane J F16 | Design + rows added (PLAN F16, CHECKLIST F16-01..04, C243). Touches cli/ (Lane A) and F10 ENV (Lane E): new `pb env hook` command only; logged per commit here.

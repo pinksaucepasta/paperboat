@@ -623,6 +623,23 @@ that use them; say which in Evidence.
 
 ---
 
+## F16. ENV in plain SSH and VS Code
+
+| ID | Scenario | L | M | W | Evidence |
+|---|---|---|---|---|---|
+| F16-01 | `pb env hook <shell>` prints a correct snippet for bash, zsh and fish; `--install` is idempotent and `--uninstall` removes only its line. | [ ] | [ ] | n/a | Windows: no POSIX shell rc files; after launch (PLAN 1.1). |
+| F16-02 | Plain `ssh host` interactive and non-interactive `ssh host env` see the workspace values of the logged-in pb account; `pb ssh` too; values never in logs, files or diagnostics. | [ ] | [ ] | n/a | Windows after launch. |
+| F16-03 | Locked vault, stopped daemon, no network, no pb login: shell starts within the time budget, nothing loaded, at most one short line on interactive shells. | [ ] | [ ] | n/a | Windows after launch. |
+| F16-04 | VS Code Remote-SSH terminals and tasks see the values after the documented reload step. | [ ] | [ ] | n/a | Windows after launch. |
+
+**Commands**
+
+| ID | Command | Purpose | L | M | W | Evidence |
+|---|---|---|---|---|---|---|
+| C243 | `pb env hook` | Print or install the shell hook that loads ENV in plain SSH shells | [ ] | [ ] | n/a | Windows after launch. |
+
+---
+
 ## X. Cross-platform
 
 Behaviour that only matters when platforms mix. The three cells are platform **pairs**, not platforms: **L↔M** (Linux and macOS), **L↔W** (Linux and Windows), **M↔W** (macOS and Windows). A pair is `[x]` only when the check passed in **both directions** between two real devices of those platforms (A→B and B→A), with the exact evidence named in the Evidence column; single-platform behaviour stays in F1–F15. Pair devices: L = hp / pbvm* / ubuntu24, M = apple, W = victus. Rows are written from how the code actually works (config sync: `cli/internal/hostruntime/configsync`; layers, path rules and manifest limits are quoted where they decide the check). Windows pairs follow the launch gate rules (PLAN 1.1): they are checked after launch.

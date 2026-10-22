@@ -271,6 +271,8 @@ through the server. Needs CLI, server authorization and console work. Not in thi
 
 ## ENV in plain SSH and VS Code — later
 
+**Moved to PLAN.md F16 (2026-10-22, user decision): built now.**
+
 ENV reaches Paperboat terminals and `pb exec` only; `pb ssh`, plain `ssh` and VS Code Remote-SSH
 get the machine's own sshd environment. An opt-in shell hook (`pb env hook` adding one line to
 bash/zsh/fish startup) would cover them. Open question first: a plain SSH login identifies only a
