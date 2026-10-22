@@ -3,7 +3,8 @@
 // or run it on that machine's page). It opens the quick terminal, waits until it is connected, then
 // switches the dock to the side, back to the bottom and to the side again, and checks that:
 //   - the panel orientation really changed each time (the separator turns vertical <-> horizontal),
-//   - no new WebSocket was opened and none was closed (the connection is the same one),
+//   - no new connection was opened and none was left (the socket lives in the terminal Worker, so
+//     the check counts the page's "connect" and "leave" messages to it),
 //   - the terminal's host element is the same DOM node (the terminal was not remounted),
 //   - the "Reconnecting" / "Connecting" / "Catching up" status never appeared while docking.
 // It restores the dock it found and closes the quick terminal (which ends nothing remote: the
@@ -26,15 +27,25 @@
   delete window.__machine
   if (!machine) return [{ step: "on a machine page", ok: false, detail: location.pathname }]
 
-  // Count sockets from now on.
-  const Native = window.WebSocket
+  // Count connections from now on. The socket is in the terminal Worker: a remount would send a
+  // new "connect" (and "leave" the old one) or start a new Worker; closing terminates it.
+  const post = Worker.prototype.postMessage
+  const terminate = Worker.prototype.terminate
+  const NativeWorker = window.Worker
   const sockets = { opened: 0, closed: 0 }
-  window.WebSocket = new Proxy(Native, {
+  Worker.prototype.postMessage = function (message, ...rest) {
+    if (message?.type === "call" && message.method === "connect") sockets.opened++
+    if (message?.type === "leave") sockets.closed++
+    return post.call(this, message, ...rest)
+  }
+  Worker.prototype.terminate = function () {
+    sockets.closed++
+    return terminate.call(this)
+  }
+  window.Worker = new Proxy(NativeWorker, {
     construct(target, args) {
-      const socket = new target(...args)
       sockets.opened++
-      socket.addEventListener("close", () => sockets.closed++)
-      return socket
+      return new target(...args)
     },
   })
   const busy = []
@@ -57,10 +68,10 @@
     if (!opened) return steps
     // Connected: sockets opened and the status line has gone away.
     const settled = await until(
-      () => sockets.opened > 0 && !document.querySelector("[role=status][aria-live=polite]") && sockets,
+      () => !document.querySelector("[role=status][aria-live=polite]") && sockets,
       45000,
     )
-    pass("the terminal connects", Boolean(settled), `sockets opened ${sockets.opened}`)
+    pass("the terminal connects", Boolean(settled), `connections opened ${sockets.opened}`)
     if (!settled) return steps
     await sleep(2000)
     const originalDock = dockLabel()
@@ -79,7 +90,7 @@
     }
     pass("the same terminal element is kept", host() === element)
     pass(
-      "no WebSocket opened or closed while docking",
+      "no connection opened or left while docking",
       sockets.opened === before.opened && sockets.closed === before.closed,
       `opened ${sockets.opened - before.opened}, closed ${sockets.closed - before.closed}`,
     )
@@ -88,10 +99,15 @@
     // Leave things as found.
     if (dockLabel() !== originalDock) click(button(originalDock === "side" ? "Dock to side" : "Dock to bottom"))
     await sleep(500)
+    const left = sockets.closed
     click(button("Close terminal"))
+    // Control: closing ends the connection (leave or terminate), so the counter would have seen a reconnect.
+    pass("closing the terminal leaves its connection (the counter works)", Boolean(await until(() => sockets.closed > left, 8000)))
   } finally {
     watcher.disconnect()
-    window.WebSocket = Native
+    Worker.prototype.postMessage = post
+    Worker.prototype.terminate = terminate
+    window.Worker = NativeWorker
   }
   return steps
 })()
