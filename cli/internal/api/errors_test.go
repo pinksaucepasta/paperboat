@@ -177,3 +177,14 @@ func TestTeamSuspendedHasAuthoredRecoveryMessage(t *testing.T) {
 		t.Fatal("still the generic conflict message")
 	}
 }
+
+// Both 409s of the config compare connection must say which one happened: a
+// stale conflict needs a fresh list, an offline host needs Paperboat started.
+func TestConfigCompareRefusalsHaveAuthoredRecoveryMessages(t *testing.T) {
+	for code, want := range map[string]string{"config_compare_stale": "pb config conflict list", "config_compare_host_unavailable": "Start Paperboat"} {
+		err := &APIError{Status: http.StatusConflict, Code: code, Message: apiErrorMessage(code, http.StatusConflict)}
+		if err.PublicCode() != code || !strings.Contains(err.Message, want) || strings.Contains(err.Message, "Refresh it and try again") {
+			t.Fatalf("%s: code=%q message=%q", code, err.PublicCode(), err.Message)
+		}
+	}
+}
