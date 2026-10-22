@@ -1245,7 +1245,9 @@ section P. A client loop that costs the server is fixed in the client by Lane R;
 | Edge data carrier, one stream at 50 ms RTT | 38 Mbit/s (window pinned 256 KiB) | pending (4 MiB max window measured 248 Mbit/s; waits for Lane M) | Cloudflare Tunnel / ngrok 100+ Mbit/s | PR-06 |
 | `pb --version` / `pb help` cold start | 33 / 38 ms, 47 MB RSS | — | tailscale CLI ~20 ms | PR-07 |
 | `pb status` / `pb machine list` | 1.16 / 1.18 s (TLS + ~150 KB list at 170 ms RTT) | — | `tailscale status` local ~20 ms | PR-07 |
-| Idle API traffic, one machine | 88–162 MB/h (user daemon 54, worker 24, carrier 10 MB/h) | re-measure after PR-04 ships | Tailscale idle: KB/min | PR-03 |
+| Idle API traffic, one machine | 88–162 MB/h (user daemon 54, worker 24, carrier 10 MB/h) | 147–172 MB/h with the ssh fix (laner-b, dev-86b79b40, prod degraded); responses were uncompressed (250 KB machine list → 16 KB gzip): Lane B adds path-scoped compression; peer-network config stays uncompressed (bearer relay grants) | Tailscale idle: KB/min | PR-03 |
+| Idle CPU / wakeups, all 8 `pb` processes of one machine | 17–20% of a core, ~1,680 wakeups/s (updater re-hashed both ~94 MB binaries every 5 s: 13.7%, 1,056/s) | 2.8–3.2%, 340–410/s, ~190 MB RSS (laner-b, dev-86b79b40) | tailscaled idle ~0%, 30–50 MB | PR-03 |
+| Plain ssh on the same link (container to container, pbvm2) | — | `ssh true` 0.32 s, scp 50 MiB 564 Mbit/s, rsync 500 × 4 KiB 1,127 files/s | baseline for PR-05 | PR-05 |
 | Server load from the fleet | 135 req/s (~3–4 per machine) | re-measure after PR-04 ships | — | PR-03 |
 
 Budgets, one place each: relay byte budgets `relay/derpquic/wire.go` (64 MiB/s per carrier, 128 MiB/s
