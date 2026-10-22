@@ -87,6 +87,7 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb env](pb_env.md) | Manage automatic global ENV and device overrides |
 | [pb env grants](pb_env_grants.md) | Reconcile encrypted ENV team grants |
 | [pb env grants sync](pb_env_grants_sync.md) | Accept pending team grants into this account's encrypted vault |
+| [pb env hook](pb_env_hook.md) | Load ENV in plain ssh and VS Code shells through a shell startup hook |
 | [pb env host](pb_env_host.md) | Inspect automatic workspace ENV delivery |
 | [pb env host show](pb_env_host_show.md) | Show published ENV delivery and observed application on a host |
 | [pb env list](pb_env_list.md) | List configured environment-variable metadata |

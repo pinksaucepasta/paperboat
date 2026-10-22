@@ -34,6 +34,7 @@ pb env [flags]
 
 * [pb](pb.md)	 - Open Paperboat or connect to an environment terminal
 * [pb env grants](pb_env_grants.md)	 - Reconcile encrypted ENV team grants
+* [pb env hook](pb_env_hook.md)	 - Load ENV in plain ssh and VS Code shells through a shell startup hook
 * [pb env host](pb_env_host.md)	 - Inspect automatic workspace ENV delivery
 * [pb env list](pb_env_list.md)	 - List configured environment-variable metadata
 * [pb env rotate](pb_env_rotate.md)	 - Rotate personal ENV scope keys while preserving values

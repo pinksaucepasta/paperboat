@@ -1,0 +1,58 @@
+.nh
+.TH "PB-ENV-HOOK" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-env-hook - Load ENV in plain ssh and VS Code shells through a shell startup hook
+
+
+.SH SYNOPSIS
+\fBpb env hook [bash|zsh|fish] [flags]\fP
+
+
+.SH DESCRIPTION
+Without flags, print the hook line for a shell. --install adds that line to the shell's startup file (~/.bashrc, ~/.zshenv or ~/.config/fish/config.fish) for the account logged in here and the active workspace; --uninstall removes it. VS Code Remote-SSH: after installing, run "Remote-SSH: Kill VS Code Server on Host" and reconnect.
+
+.PP
+This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for hook
+
+.PP
+\fB--install\fP[=false]
+	add the hook line to the shell startup file and record the account and workspace
+
+.PP
+\fB--status\fP[=false]
+	show whether the hook is installed and whose ENV it loads
+
+.PP
+\fB--uninstall\fP[=false]
+	remove the hook line from every shell startup file and forget the recorded choice
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-env(1)\fP

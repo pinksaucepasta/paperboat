@@ -480,6 +480,11 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 	if dependencies.TunnelEnrollment != nil && dependencies.LocalControlToken != "" {
 		mux.Handle("/v1/tunnel-connectors/enroll", dependencies.TunnelEnrollment)
 	}
+	if source, ok := dependencies.ManagedEnvironment.(ownerShellEnvironment); ok {
+		if handler := newShellEnvironmentHandler(source, dependencies.LocalControlToken); handler != nil {
+			mux.Handle(ShellEnvironmentPath, handler)
+		}
+	}
 	if dependencies.Inspector != nil && dependencies.LocalControlToken != "" {
 		mux.Handle("/v1/inspector/", dependencies.Inspector)
 	}
