@@ -15,6 +15,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/api"
 )
 
 type quotaTransportError struct{ message string }
@@ -76,5 +78,39 @@ func TestPeerProbeTimedOutWithRelaysWithheldNamesThePlanLimit(t *testing.T) {
 	remote, ok := decodeRemoteErrorReader(response.Code, response.Body).(*RemoteError)
 	if !ok || response.Code != http.StatusTooManyRequests || remote.Code != RelayQuotaCode || remote.Message != message {
 		t.Fatalf("status %d remote %#v", response.Code, remote)
+	}
+}
+
+// F13-03: exec and ssh at the plan limit are refused by the control plane when the connection
+// descriptor is requested (409 bandwidth_quota_exhausted with the billing link); the command gets that
+// refusal, not "the local service could not complete the request".
+func TestPeerStreamRefusedAtThePlanLimitByTheControlPlaneNamesIt(t *testing.T) {
+	const message = "This workspace's hosted relay and edge bandwidth is used up. Add bandwidth: https://console.example.test/billing"
+	refused := &api.APIError{Status: http.StatusConflict, Code: RelayQuotaCode, Message: message}
+	socket := filepath.Join(localAPITestDir(t), "quota-descriptor.sock")
+	server, err := NewServer(ServerConfig{SocketPath: socket, OwnerUID: os.Geteuid(), OwnerGID: os.Getegid(),
+		Source: snapshotSourceFunc(func(context.Context) (Snapshot, error) { return validSnapshot(), nil }),
+		PeerStreams: peerStreamBrokerFunc(func(context.Context, Peer, PeerStreamRequest) (net.Conn, error) {
+			return nil, fmt.Errorf("exec descriptor: %w", refused)
+		})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	go func() { _ = server.Run(ctx) }()
+	waitForSocket(t, socket)
+	client, err := NewClient(socket, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, err := NewPeerStreamRequest("machine_1", "environment_1", 2, "exec", "operation_1", "credential", time.Now().Add(time.Minute), 1024, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.OpenPeerStream(context.Background(), request)
+	var remote *RemoteError
+	if !errors.As(err, &remote) || remote.StatusCode != http.StatusTooManyRequests || remote.Code != RelayQuotaCode || remote.Message != message {
+		t.Fatalf("error = %#v", err)
 	}
 }
