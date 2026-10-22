@@ -155,7 +155,13 @@ export function useInspectorChannel(previewId: string, machineId: string, enable
       }
       if (["reconnecting", "closed", "transport-error"].includes(event.state ?? "")) {
         connection.current = ""
-        retry("The connection to the machine was lost. Reconnecting…")
+        // A machine running an older Paperboat refuses the inspector channel
+        // before it opens, which looks like a transport error every time.
+        retry(
+          attempt.current >= 2
+            ? "Still cannot open the encrypted channel. If this continues, update Paperboat on the machine (pb update)."
+            : "The connection to the machine was lost. Reconnecting…",
+        )
       }
     },
     [retry],
@@ -272,7 +278,14 @@ export function useInspectorChannel(previewId: string, machineId: string, enable
       if (query) payload.query = query
       if (body !== undefined) payload.body = body
       const reply = await browser.current.inspectorRequest(id, payload)
-      if (reply.error) throw new InspectorError(0, reply.error, reply.message ?? "The machine did not answer.")
+      if (reply.error) {
+        // The machine re-checks every grant live; a refusal means access ended.
+        if (reply.error === "not_found_or_forbidden") {
+          setPhase("denied")
+          setMessage("Your access to this preview's inspector ended.")
+        }
+        throw new InspectorError(0, reply.error, reply.message ?? "The machine did not answer.")
+      }
       const result = reply.result as DaemonReply
       if (result.status >= 400) {
         const code = (result.body as { code?: string } | null)?.code ?? "inspector_unavailable"
