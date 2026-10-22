@@ -880,7 +880,8 @@ func (q *Queries) ResolveMachineSSHManagementAuthorityForUpdate(ctx context.Cont
 const resolveMachineSSHUseAuthority = `-- name: ResolveMachineSSHUseAuthority :one
 SELECT m.id FROM user_machines m WHERE m.id=$1
 AND m.installation_generation=$2
-AND (machine_capability_allowed($3,m.id,'managed_ssh') OR machine_management_allowed($3,m.id))
+AND ((m.owner_team_id IS NULL AND m.user_id=$3 AND m.deleted_at IS NULL)
+  OR machine_capability_allowed($3,m.id,'managed_ssh') OR machine_management_allowed($3,m.id))
 AND m.state NOT IN ('revoked','disconnected','deleted')
 `
 
@@ -892,6 +893,7 @@ type ResolveMachineSSHUseAuthorityParams struct {
 
 // Reads for GET ssh-target / ssh-host-keys: one read-only snapshot, no row locks. Every daemon polls these for
 // every reachable machine, so the locking variants above serialized ~50 transactions/s on user_machines.
+// The account's own personal machine is answered by machine_management_allowed's first branch without calling it.
 func (q *Queries) ResolveMachineSSHUseAuthority(ctx context.Context, arg ResolveMachineSSHUseAuthorityParams) (string, error) {
 	row := q.db.QueryRow(ctx, resolveMachineSSHUseAuthority, arg.MachineID, arg.MachineGeneration, arg.UserID)
 	var id string

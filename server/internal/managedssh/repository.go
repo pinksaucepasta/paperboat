@@ -343,10 +343,9 @@ func (r *SQLRepository) UpdateTargetPort(ctx context.Context, request UpdateTarg
 
 func (r *SQLRepository) GetTarget(ctx context.Context, request GetTargetRequest) (MachineTarget, error) {
 	var result MachineTarget
+	// The target is read first: a missing or stale target answers ErrUnavailable exactly like a refused authority,
+	// so nothing leaks, and the access functions run only when there is something to return.
 	err := r.store.InReadOnlySnapshot(ctx, func(ctx context.Context, q *dbsqlc.Queries) error {
-		if _, err := q.ResolveMachineSSHUseAuthority(ctx, dbsqlc.ResolveMachineSSHUseAuthorityParams{MachineID: request.UserMachineID, UserID: request.ActorUserID, MachineGeneration: int64(request.MachineGeneration)}); err != nil {
-			return authorityError(err)
-		}
 		row, err := q.GetMachineSSHTarget(ctx, request.UserMachineID)
 		if err == pgx.ErrNoRows {
 			return ErrUnavailable
@@ -356,6 +355,9 @@ func (r *SQLRepository) GetTarget(ctx context.Context, request GetTargetRequest)
 		}
 		if row.MachineGeneration != int64(request.MachineGeneration) {
 			return ErrUnavailable
+		}
+		if _, err := q.ResolveMachineSSHUseAuthority(ctx, dbsqlc.ResolveMachineSSHUseAuthorityParams{MachineID: request.UserMachineID, UserID: request.ActorUserID, MachineGeneration: int64(request.MachineGeneration)}); err != nil {
+			return authorityError(err)
 		}
 		result, err = machineTargetFromRow(row)
 		return err
@@ -596,10 +598,9 @@ func (r *SQLRepository) GetPendingHost(ctx context.Context, request GetHostKeySe
 
 func (r *SQLRepository) getHost(ctx context.Context, request GetHostKeySetRequest, pending bool) (HostKeySet, error) {
 	var result HostKeySet
+	// As in GetTarget: a missing or stale set answers ErrUnavailable like a refused authority, before the access
+	// functions run.
 	err := r.store.InReadOnlySnapshot(ctx, func(ctx context.Context, q *dbsqlc.Queries) error {
-		if _, err := q.ResolveMachineSSHUseAuthority(ctx, dbsqlc.ResolveMachineSSHUseAuthorityParams{MachineID: request.UserMachineID, UserID: request.ActorUserID, MachineGeneration: int64(request.MachineGeneration)}); err != nil {
-			return authorityError(err)
-		}
 		var row dbsqlc.MachineSshHostKeySet
 		var err error
 		if pending {
@@ -615,6 +616,9 @@ func (r *SQLRepository) getHost(ctx context.Context, request GetHostKeySetReques
 		}
 		if row.MachineGeneration != int64(request.MachineGeneration) {
 			return ErrUnavailable
+		}
+		if _, err := q.ResolveMachineSSHUseAuthority(ctx, dbsqlc.ResolveMachineSSHUseAuthorityParams{MachineID: request.UserMachineID, UserID: request.ActorUserID, MachineGeneration: int64(request.MachineGeneration)}); err != nil {
+			return authorityError(err)
 		}
 		result, err = loadHostKeySet(ctx, q, row)
 		return err
