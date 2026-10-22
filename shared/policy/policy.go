@@ -6,6 +6,8 @@
 package policy
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"sort"
@@ -97,6 +99,28 @@ func (p PortRange) MarshalJSON() ([]byte, error) {
 		return []byte(fmt.Sprint(p.From)), nil
 	}
 	return []byte(`"` + p.String() + `"`), nil
+}
+
+// UnmarshalJSON reads a port (5432) or a range ("8000-8100"), as in a policy file.
+func (p *PortRange) UnmarshalJSON(b []byte) error {
+	var n int
+	if err := json.Unmarshal(b, &n); err == nil {
+		*p = PortRange{From: n, To: n}
+	} else {
+		var s string
+		if err := json.Unmarshal(b, &s); err != nil {
+			return errors.New("a port is a number or a range like \"8000-8100\"")
+		}
+		r, ok := parsePortRange(s)
+		if !ok {
+			return errors.New("a port is a number or a range like \"8000-8100\"")
+		}
+		*p = r
+	}
+	if p.From < 1 || p.To > 65535 || p.From > p.To {
+		return errors.New("ports are from 1 to 65535")
+	}
+	return nil
 }
 
 func (p PortRange) contains(port int) bool { return port >= p.From && port <= p.To }

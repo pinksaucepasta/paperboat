@@ -47951,6 +47951,530 @@
           }
         ]
       }
+    },
+    "/v1/policy/schema": {
+      "get": {
+        "operationId": "get_v1_policy_schema",
+        "summary": "Workspace policy JSON Schema",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "JSON Schema 2020-12 of the policy file (application/schema+json)."
+          }
+        },
+        "description": "Public; the same schema as shared/policy/schema.json."
+      }
+    },
+    "/v1/workspaces/{ws}/policy": {
+      "get": {
+        "operationId": "get_v1_workspace_policy",
+        "summary": "Read the workspace policy",
+        "security": [
+          {
+            "bearerAccess": []
+          },
+          {
+            "cookieSession": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:read"
+        ],
+        "parameters": [
+          {
+            "name": "ws",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON body as documented in shared/policy/README.md."
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "Policy file with current names, version, can_edit and names for completion. ?version=N reads a kept version."
+      },
+      "put": {
+        "operationId": "put_v1_workspace_policy",
+        "summary": "Save the workspace policy",
+        "security": [
+          {
+            "bearerAccess": []
+          },
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:connect"
+        ],
+        "parameters": [
+          {
+            "name": "ws",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "{policy, expected_version, message?, confirm?}"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "JSON body as documented in shared/policy/README.md."
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "412": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "Validates (422 invalid_policy), checks expected_version (409 policy_version_conflict) and asks to confirm access changes (412 policy_changes_unconfirmed with details.access_changes and details.confirm)."
+      }
+    },
+    "/v1/workspaces/{ws}/policy/validate": {
+      "post": {
+        "operationId": "post_v1_workspace_policy_validate",
+        "summary": "Validate a policy file (dry run)",
+        "security": [
+          {
+            "bearerAccess": []
+          },
+          {
+            "cookieSession": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:read"
+        ],
+        "parameters": [
+          {
+            "name": "ws",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "{policy}"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "JSON body as documented in shared/policy/README.md."
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "Errors with JSON Pointer paths and stable codes, test results and access changes against the saved version."
+      }
+    },
+    "/v1/workspaces/{ws}/policy/explain": {
+      "post": {
+        "operationId": "post_v1_workspace_policy_explain",
+        "summary": "Explain access",
+        "security": [
+          {
+            "bearerAccess": []
+          },
+          {
+            "cookieSession": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:read"
+        ],
+        "parameters": [
+          {
+            "name": "ws",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "{policy?, src?, dst?, action?, port?, api_token?}"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "JSON body as documented in shared/policy/README.md."
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "src+dst+action: decision with the deciding rule or guardrail; dst+action: who can; src: what they can. Optional draft policy and api_token."
+      }
+    },
+    "/v1/workspaces/{ws}/policy/versions": {
+      "get": {
+        "operationId": "get_v1_workspace_policy_versions",
+        "summary": "List policy versions",
+        "security": [
+          {
+            "bearerAccess": []
+          },
+          {
+            "cookieSession": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:read"
+        ],
+        "parameters": [
+          {
+            "name": "ws",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON body as documented in shared/policy/README.md."
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "Newest first with author, message and access change counts."
+      }
+    },
+    "/v1/workspaces/{ws}/policy/restore": {
+      "post": {
+        "operationId": "post_v1_workspace_policy_restore",
+        "summary": "Restore a policy version",
+        "security": [
+          {
+            "bearerAccess": []
+          },
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:connect"
+        ],
+        "parameters": [
+          {
+            "name": "ws",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "{version, expected_version, message?, confirm?}"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "JSON body as documented in shared/policy/README.md."
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "412": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "Saves an earlier version as a new one, with the same validation and confirmation as PUT."
+      }
+    },
+    "/v1/workspaces/{ws}/api-tokens": {
+      "get": {
+        "operationId": "get_v1_workspace_api_tokens",
+        "summary": "List API tokens",
+        "security": [
+          {
+            "bearerAccess": []
+          },
+          {
+            "cookieSession": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "account:read"
+        ],
+        "parameters": [
+          {
+            "name": "ws",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON body as documented in shared/policy/README.md."
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "Members see their own tokens, owners and admins all."
+      },
+      "post": {
+        "operationId": "post_v1_workspace_api_tokens",
+        "summary": "Create an API token",
+        "security": [
+          {
+            "bearerAccess": []
+          },
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "account:read"
+        ],
+        "parameters": [
+          {
+            "name": "ws",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "{name, expires_in_days, scope?}"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "JSON body as documented in shared/policy/README.md."
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "Returns the secret once. The token acts as its creator in this workspace, narrowed by an optional scope."
+      }
+    },
+    "/v1/workspaces/{ws}/api-tokens/{id}": {
+      "delete": {
+        "operationId": "delete_v1_workspace_api_token",
+        "summary": "Revoke an API token",
+        "security": [
+          {
+            "bearerAccess": []
+          },
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "account:read"
+        ],
+        "parameters": [
+          {
+            "name": "ws",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON body as documented in shared/policy/README.md."
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "By its creator or an owner/admin."
+      }
     }
   }
 }

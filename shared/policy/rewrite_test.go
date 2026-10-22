@@ -67,3 +67,39 @@ func TestStoreKeepsSubjectsAndTargetsSymbolic(t *testing.T) {
 		t.Fatalf("%+v", first)
 	}
 }
+
+func TestInternalizeAndExternalizeRoundTrip(t *testing.T) {
+	inv := team()
+	src := []byte(`{
+	// ids survive renames
+	"tags": {"tag:prod": ["machine:db1"]},
+	"rules": [{"src": ["user:Cy@example.test", "role:member"], "dst": ["machine:web1", "machine:*"], "allow": ["exec"], "note": "user:cy@example.test"}],
+	"tests": [{"src": "user:cy@example.test", "dst": "machine:db1", "allow": ["exec"]}],
+}`)
+	in, err := Internalize(src, inv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(in)
+	for _, want := range []string{`"machine:#m-db1"`, `"user:#cy"`, `"machine:#m-web1"`, `"machine:*"`, `"note": "user:cy@example.test"`, "// ids survive renames"} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("missing %s:\n%s", want, s)
+		}
+	}
+	inv.Machines[0].Alias = "db9"
+	out, err := Externalize(in, inv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), `"machine:db9"`) || !strings.Contains(string(out), `"user:cy@example.test"`) {
+		t.Fatalf("rename shows the new name:\n%s", out)
+	}
+	inv.Members = inv.Members[:2]
+	out, _ = Externalize(in, inv)
+	if strings.Contains(string(out), `["user:cy`) || strings.Contains(string(out), `"src": "user`) || !strings.Contains(string(out), `"src": ["role:member"]`) {
+		t.Fatalf("a departed member's references and tests are dropped:\n%s", out)
+	}
+	if _, errs := Parse(out); len(errs) > 0 {
+		t.Fatal(errs)
+	}
+}

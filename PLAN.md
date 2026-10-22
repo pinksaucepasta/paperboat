@@ -838,7 +838,7 @@ actions), list (last used, expiry), revoke.
 (validate + tests on the server, nothing saved), `pb policy explain --src <user> [--dst <m>]
 [--action <a>] [--port <p>] [--file <draft>]`, `pb policy versions`, `pb policy restore <N>`,
 `pb policy schema`; `pb api-token create <name> [--expires] [--scope]`, `pb api-token list`,
-`pb api-token revoke <name>`. A token is used with `PB_API_TOKEN=<token> pb exec …` (any
+`pb api-token revoke <name>`. A token is used with `PAPERBOAT_API_TOKEN=<token> pb exec …` (any
 command) on any computer with `pb`. All take `--workspace` and `--json`; errors print path
 and code.
 
@@ -859,7 +859,7 @@ Simple view (user decision 2026-10-22): preview/tunnel `use`/`manage` and lazy-p
 - F18-03: Migration: every team's existing machine grants, inspect/replay grants and private-access setting become policy v1 with identical access (compiled table equals the old answer for every member × machine × capability); personal workspaces unchanged.
 - F18-04: Explain and test: allowed/denied with the deciding rule or guardrail, who-can and what-can, on the saved policy and on a draft; in-file tests run on validate and save; the owner guard holds against any deny.
 - F18-05: Versions, access-change review before save, restore, audit events; stale saves refused; renames and removals rewrite references with an audit event.
-- F18-06: API tokens: create/list/revoke with expiry, act as their creator, optional scope narrows (solo personal workspace "token may only exec on tag:ci" works), creator losing access takes it from the token, used with `PB_API_TOKEN` by any command, every use attributed.
+- F18-06: API tokens: create/list/revoke with expiry, act as their creator, optional scope narrows (solo personal workspace "token may only exec on tag:ci" works), creator losing access takes it from the token, used with `PAPERBOAT_API_TOKEN` by any command, every use attributed.
 - F18-07: ENV in rules: env_read/env_write decide team ENV grants; removing access revokes as `pb env team revoke` does; explain reports "allowed, key not delivered yet".
 - F18-08: Who may edit: owners/admins edit all; a member edits only rules for their own shared machines; members read and explain their own access.
 - F18-09: Console Access page (Simple grid with today's grants, private-access switch, tags, groups; Policy file editor with inline errors and Review changes; Test; History with Diff/Restore) and Settings → API tokens (scripted browser check).
@@ -2734,3 +2734,4 @@ Open: official releases ≤2026.10.22.0 still fail fresh pairs on the test accou
 2026-10-23 | Lane O F13 | F13-05 sandbox part 1 PASS (Pro purchase/refund/cancel on throwaway). F13-03: server relay refusal PASS live; CLI message missing on ping/exec/ssh/send (sent to Lane A), edge carrier lacks TCP fallback (Lane R). Test data: throwaway user_b0a5bbd7 usage seeded to 5 GB and restored to 0; account kept until F13-03 ticks.
 2026-10-23 | Lane S F19 server 1 | roles matrix (125), audit log result/client/retention/filters/export (126), business billing APIs; pre-existing PG failures on main (not F19): httpapi TestAdminBillingAdjustmentsRequireAdminAndWriteLedger, TestInspectorBrowserCredentialRouteAuthAndCSRFPostgres; selfhost TestPlacementDNS*/TestSelfhostHTTPTopology*/TestIngressReconciliation*; browseraccess TestAutomaticBrowserDormantAuthority*/TestConfiguredResourceSession* (Lane B). | Lane B: deploy with the next server build once prod is healthy.
 2026-10-23 | Lane J F16 | Rerun on shared dev-a798537a (lanej-f16b): env_ssh_hook.py + env_vscode_remote.py PASS, F16-01..04/C243 L stay [x]. First pair of a fresh container failed at system services (carrier exit 1), passed on retry: not repeated.
+2026-10-23 | Lane K F18 server | Policy store, explain/validate/save API, API tokens, migrations 120 (api_tokens) + 121 (policy; keeps team_machine_grants/teams.allow_private_access unread for rollback, dropped later). Lane K deploys it (deploy/README) and logs the tag. Pre-existing PG failures on main, not F18 (Lane B): httpapi 17 (GitHub OAuth, inspector $3 type, CSRF, billing adjustment, client update, pairing reset), tunnelv1 TestSharedTunnelManagementOnPostgres + certificate worker, usermachines TestExpiredInstallationRecovery, previewattachment TestLazyActivationReadyPostgres.

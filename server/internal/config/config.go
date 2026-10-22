@@ -59,6 +59,7 @@ type Config struct {
 	Database               Database          `json:"database"`
 	Billing                Billing           `json:"billing"`
 	Business               Business          `json:"business"`
+	APITokens              APITokens         `json:"api_tokens"`
 	UserMachines           UserMachines      `json:"user_machines"`
 	ManagedSSH             ManagedSSH        `json:"managed_ssh"`
 	TerminalSessions       TerminalSessions  `json:"terminal_sessions"`
@@ -77,6 +78,7 @@ type Config struct {
 	ReleaseDirectory       string            `json:"release_directory"`
 	ReleaseBaseURL         string            `json:"release_base_url"`
 	ReleaseAuthority       ReleaseAuthority  `json:"release_authority"`
+	WorkspacePolicy        WorkspacePolicy   `json:"workspace_policy"`
 }
 
 type HTTPConfig struct {
@@ -123,6 +125,13 @@ func NormalizeIssuer(raw string) string {
 type Database struct {
 	Driver string `json:"driver"`
 	DSN    string `json:"dsn"`
+}
+
+// APITokens bounds workspace API tokens (F18).
+type APITokens struct {
+	MaxLifetimeDays     int `json:"max_lifetime_days"`
+	DefaultLifetimeDays int `json:"default_lifetime_days"`
+	MaxPerMember        int `json:"max_per_member"`
 }
 
 type Billing struct {
@@ -399,8 +408,10 @@ func Default() Config {
 			Driver: "postgres",
 			DSN:    "postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable",
 		},
+		APITokens:         APITokens{MaxLifetimeDays: 365, DefaultLifetimeDays: 90, MaxPerMember: 100},
 		Billing:           Billing{TopupMaxQuantity: 100, TeamTrialDays: 14, PersonalAllowanceBytes: new(int64(5_000_000_000))},
 		Business:          defaultBusiness(),
+		WorkspacePolicy:   defaultWorkspacePolicy(),
 		RuntimeBaseDomain: "localhost",
 		ManagedSSH:        ManagedSSH{ClientKeyActiveWindow: 30 * 24 * time.Hour},
 		UserMachines:      UserMachines{PairingLifetime: 10 * time.Minute, OfflineAfter: 2 * time.Minute, ExpiredAccessSessionRetention: 7 * 24 * time.Hour, AllowedPlatforms: []string{"darwin", "linux", "windows"}, RuntimeListenPort: 38080},
@@ -540,6 +551,12 @@ func (c Config) Validate() error {
 		errs = append(errs, fmt.Errorf("database.driver and database.dsn are required"))
 	} else if c.Database.Driver != "postgres" && c.Database.Driver != "pgx" {
 		errs = append(errs, fmt.Errorf("database.driver must be postgres"))
+	}
+	if err := c.WorkspacePolicy.validate(); err != nil {
+		errs = append(errs, err)
+	}
+	if t := c.APITokens; t.MaxLifetimeDays < 1 || t.DefaultLifetimeDays < 1 || t.DefaultLifetimeDays > t.MaxLifetimeDays || t.MaxPerMember < 1 {
+		errs = append(errs, fmt.Errorf("api_tokens limits must be positive and default_lifetime_days at most max_lifetime_days"))
 	}
 	if c.Billing.TeamTrialDays < 0 || c.Billing.TeamTrialDays > 730 {
 		return errors.New("billing.team_trial_days must be between 0 and 730")

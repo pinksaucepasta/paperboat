@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat-server/internal/teams/teamstest"
 	"os"
 	"testing"
 	"time"
@@ -66,7 +67,7 @@ func TestExistingSharedPreviewManagementOnPostgres(t *testing.T) {
 	exec(`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'admin',true),($1,$3,1,'member',true)`, team, owner, member)
 	exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,description,platform,architecture,workspace_root,state,online,configured_capabilities) VALUES($1,$2,$1,$1,'linux','amd64','/workspace','online',true,ARRAY['preview_launch']::text[])`, machine, owner)
 	exec(`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account) VALUES($1,'machine',$2,$3)`, team, machine, owner)
-	exec(`INSERT INTO paperboat.team_machine_grants(team_id,machine_id,audience,account_id,capabilities) VALUES($1,$2,'selected_member',$3,ARRAY['preview_manage']::text[])`, team, machine, member)
+	teamstest.SetMachineAccess(t, database, team, machine, member, "preview_manage")
 	now := time.Now().UTC()
 	created, err := store.CreatePreviewLeaseV1(ctx, CreatePreviewLeaseV1Input{
 		OperationID: "op_pm_" + suffix, LeaseID: "prv_pm_" + suffix, AuditEventID: "aud_pm_" + suffix, AccountID: owner, ActorID: owner, ActorType: "user", OwnerMachineID: machine, OwnerSessionID: "session_" + suffix, OwnerSessionKind: "foreground",
@@ -89,11 +90,11 @@ func TestExistingSharedPreviewManagementOnPostgres(t *testing.T) {
 		t.Fatalf("shared preview list count=%d err=%v", len(rows), err)
 	}
 	stop := StopPreviewLeaseV1Input{ManagementAccountID: member, OperationID: "op_stop_pm_" + suffix, AuditEventID: "aud_stop_pm_" + suffix, AccountID: owner, ActorID: member, ActorType: "user", PreviewID: created.Lease.ID, OwnerMachineID: machine, OwnerSessionID: created.Lease.OwnerSessionID, ExpectedGeneration: 1, RequestHash: sha256Bytes("stop" + suffix), IdempotencyKey: "stop_" + suffix, CorrelationID: "cor_" + suffix, RequestID: "req_" + suffix, SourceMachineID: "client_" + suffix, Now: now.Add(time.Second)}
-	exec(`UPDATE paperboat.team_machine_grants SET active=false WHERE team_id=$1`, team)
+	teamstest.SetMachineAccess(t, database, team, machine, member)
 	if _, err := store.StopPreviewLeaseV1(ctx, stop); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("withdrawn grant after resolution: %v", err)
 	}
-	exec(`UPDATE paperboat.team_machine_grants SET active=true WHERE team_id=$1`, team)
+	teamstest.SetMachineAccess(t, database, team, machine, member, "preview_manage")
 	exec(`UPDATE paperboat.preview_leases SET access_mode='public' WHERE id=$1`, created.Lease.ID)
 	if _, err := store.ResolvePreviewManagementAccountV1(ctx, member, created.Lease.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("public management from machine grant: %v", err)

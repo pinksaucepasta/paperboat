@@ -134,7 +134,7 @@ the server's envelope `{"error": {"code", "message", "details"}}`; policy errors
 | `GET /v1/workspaces/{ws}/policy[?version=N]` | members | — | `Policy` |
 | `POST /v1/workspaces/{ws}/policy/validate` | members | `{"policy": "<file text>"}` | `Validation` |
 | `PUT /v1/workspaces/{ws}/policy` | editors | `{"policy", "expected_version", "message"?, "confirm"?}` | `Policy` |
-| `POST /v1/workspaces/{ws}/policy/explain` | members (own access), owners/admins (anyone) | `{"policy"?, "src"?, "dst"?, "action"?, "port"?, "api_token"?}` | `Explanation` |
+| `POST /v1/workspaces/{ws}/policy/explain` | members (own access), owners, admins and auditors (anyone) | `{"policy"?, "src"?, "dst"?, "action"?, "port"?, "api_token"?}` | `Explanation` |
 | `GET /v1/workspaces/{ws}/policy/versions` | members | — | `{"versions": [Version]}` newest first |
 | `POST /v1/workspaces/{ws}/policy/restore` | editors | `{"version", "expected_version", "message"?, "confirm"?}` | `Policy` |
 
@@ -191,5 +191,9 @@ APIToken {id, name, workspace, created_by ("user:<email>"), created_at, expires_
   A bad scope is 422 `invalid_api_token_scope` with `details.errors`.
 - Use: `Authorization: Bearer pbat_…` on any API request; the request acts as the creator in
   the token's workspace only (another workspace is 403 `workspace_unavailable`), and every
-  authorization also checks the scope (`outside_token_scope`). The CLI reads the token from
-  `PB_API_TOKEN`. Expired or revoked: 401 `api_token_invalid`.
+  authorization also checks the scope (`outside_token_scope`). Expired or revoked: 401
+  `api_token_invalid`.
+- Status (F18-06): a scoped token can so far call only the policy and API-token endpoints and
+  is refused (`outside_token_scope`) everywhere else; per-machine scope checks on terminal, exec,
+  SSH and files, and `pb` commands that use a token, come next. An unscoped token
+  works on every endpoint.

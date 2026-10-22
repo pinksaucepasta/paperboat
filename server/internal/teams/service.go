@@ -203,11 +203,10 @@ func (s *Service) Mutate(ctx context.Context, account, team string, r MutationRe
 			if !Allowed(actor.Role, PermissionSettingsManage) || r.AllowPrivateAccess == nil {
 				return ErrForbidden
 			}
-			// The team generation moves with every mutation, which fences the team's active
-			// private-access sessions (machine_service_team_fence includes it): turning this off
-			// ends them like a revoked grant.
-			_, err := tx.Exec(ctx, `UPDATE teams SET allow_private_access=$2 WHERE team_id=$1`, team, *r.AllowPrivateAccess)
-			return err
+			// The switch lives in the team's policy file. The team generation moves with every
+			// mutation, which fences the team's active private-access sessions
+			// (machine_service_team_fence includes it): turning this off ends them like a revoked grant.
+			return SetAllowPrivateAccessTx(ctx, tx, s.policy, team, account, *r.AllowPrivateAccess)
 		case "role":
 			if !assignableRole(r.Role) {
 				return ErrInvalid
@@ -270,7 +269,7 @@ func (s *Service) Mutate(ctx context.Context, account, team string, r MutationRe
 			if err := revokeDepartingResourcesTx(ctx, tx, team, ""); err != nil {
 				return err
 			}
-			for _, q := range []string{`UPDATE team_terminal_session_grants SET active=false,generation=generation+1 WHERE team_id=$1 AND active`, `UPDATE team_machine_grants SET active=false,generation=generation+1 WHERE team_id=$1 AND active`, `UPDATE teams SET deleted_at=now() WHERE team_id=$1`, `UPDATE team_members SET active=false,membership_generation=membership_generation+1 WHERE team_id=$1 AND active`, `UPDATE team_resource_grants SET active=false,generation=generation+1 WHERE team_id=$1 AND active`, `UPDATE team_resource_bindings SET active=false,generation=generation+1 WHERE team_id=$1 AND active`, `UPDATE team_invitations SET cancelled_at=now() WHERE team_id=$1 AND accepted_at IS NULL AND cancelled_at IS NULL`, `DELETE FROM environment_vault_team_grants WHERE team_id=$1`, `DELETE FROM environment_vault_team_members WHERE team_id=$1`, `DELETE FROM environment_vault_scopes WHERE owner_kind='team' AND owner_id=$1`, `DELETE FROM environment_vault_teams WHERE team_id=$1`} {
+			for _, q := range []string{`UPDATE team_terminal_session_grants SET active=false,generation=generation+1 WHERE team_id=$1 AND active`, `UPDATE teams SET deleted_at=now() WHERE team_id=$1`, `UPDATE team_members SET active=false,membership_generation=membership_generation+1 WHERE team_id=$1 AND active`, `UPDATE team_resource_grants SET active=false,generation=generation+1 WHERE team_id=$1 AND active`, `UPDATE team_resource_bindings SET active=false,generation=generation+1 WHERE team_id=$1 AND active`, `UPDATE team_invitations SET cancelled_at=now() WHERE team_id=$1 AND accepted_at IS NULL AND cancelled_at IS NULL`, `DELETE FROM environment_vault_team_grants WHERE team_id=$1`, `DELETE FROM environment_vault_team_members WHERE team_id=$1`, `DELETE FROM environment_vault_scopes WHERE owner_kind='team' AND owner_id=$1`, `DELETE FROM environment_vault_teams WHERE team_id=$1`} {
 				if _, err := tx.Exec(ctx, q, team); err != nil {
 					return err
 				}

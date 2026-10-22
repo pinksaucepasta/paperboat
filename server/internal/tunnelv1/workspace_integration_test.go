@@ -8,6 +8,7 @@ import (
 	"github.com/pinksaucepasta/paperboat-server/internal/previewattachment"
 	"github.com/pinksaucepasta/paperboat-server/internal/previewtunnelapi"
 	"github.com/pinksaucepasta/paperboat-server/internal/previewtunnelstore"
+	"github.com/pinksaucepasta/paperboat-server/internal/teams/teamstest"
 	"github.com/pinksaucepasta/paperboat-server/internal/testutil"
 	"github.com/pinksaucepasta/paperboat-server/internal/workspace"
 	"strings"
@@ -102,7 +103,7 @@ func TestPublisherWorkspaceOwnershipOnPostgres(t *testing.T) {
 		t.Fatalf("membership granted host execution: %v", err)
 	}
 	exec(`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account) VALUES($1,'machine',$2,$3)`, teamA, host, owner)
-	exec(`INSERT INTO paperboat.team_machine_grants(team_id,machine_id,audience,account_id,capabilities) VALUES($1,$2,'selected_member',$3,ARRAY['tunnel_manage'])`, teamA, host, member)
+	teamstest.SetMachineAccess(t, f.database, teamA, host, member, "tunnel_manage")
 	request := previewtunnelapi.RequestContext{Actor: previewtunnelapi.Actor{AccountID: member, ActorID: member, Role: "user"}}
 	scoped, mapped, _, err := scopeTunnelManagement(ctxA, f.repository, request, ids[0])
 	if err != nil || mapped.Actor.AccountID != owner || mapped.Actor.ActorID != member {
@@ -111,7 +112,7 @@ func TestPublisherWorkspaceOwnershipOnPostgres(t *testing.T) {
 	if _, _, err := f.repository.ResolveManagementAccount(ctxB, member, ids[1]); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("other-team grant borrowed: %v", err)
 	}
-	exec(`UPDATE paperboat.team_machine_grants SET active=false WHERE team_id=$1 AND machine_id=$2`, teamA, host)
+	teamstest.SetMachineAccess(t, f.database, teamA, host, member)
 	if err := f.database.InTx(scoped, func(ctx context.Context, tx *db.Tx) error { return authorizeTunnelManagementTx(ctx, tx) }); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("revoked resolved management: %v", err)
 	}

@@ -180,7 +180,9 @@ func (x *index) qualified(m Machine) string {
 	return ""
 }
 
-// machineName is the alias when it is unique in the workspace, else the qualified name.
+// machineName is the alias, except for a personal machine whose alias another machine of the
+// workspace also has: that one is "<owner email>/<alias>". A team-owned machine (team aliases
+// are unique) always keeps its plain alias.
 func (x *index) machineName(m Machine) string {
 	if len(x.byName[m.Alias]) > 1 {
 		if q := x.qualified(m); q != "" {
@@ -196,6 +198,17 @@ func (x *index) machine(name string) (Machine, string) {
 		name = strings.ToLower(a) + "/" + b
 	}
 	ms := x.byName[name]
+	if len(ms) > 1 {
+		var team []Machine
+		for _, m := range ms {
+			if m.PersonalOwner == "" {
+				team = append(team, m)
+			}
+		}
+		if len(team) == 1 {
+			ms = team
+		}
+	}
 	switch {
 	case len(ms) == 0:
 		return Machine{}, "unknown_machine"

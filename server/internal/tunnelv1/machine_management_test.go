@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat-server/internal/teams/teamstest"
 	"os"
 	"testing"
 
@@ -31,7 +32,7 @@ func TestSharedTunnelManagementOnPostgres(t *testing.T) {
 	})
 	exec(`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'member',true)`, team, member)
 	exec(`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account) VALUES($1,'machine',$2,$3)`, team, host, owner)
-	exec(`INSERT INTO paperboat.team_machine_grants(team_id,machine_id,audience,capabilities) VALUES($1,$2,'all_members',ARRAY['preview_manage'])`, team, host)
+	teamstest.SetMachineAccess(t, f.database, team, host, "", "preview_manage")
 	check := func(want bool) {
 		t.Helper()
 		account, shared, err := f.repository.ResolveManagementAccount(ctx, member, tunnel)
@@ -46,7 +47,7 @@ func TestSharedTunnelManagementOnPostgres(t *testing.T) {
 	check(false)
 	exec(`UPDATE paperboat.tunnels SET access_mode='private' WHERE id=$1`, tunnel)
 	check(false) // A preview grant is not tunnel management.
-	exec(`UPDATE paperboat.team_machine_grants SET capabilities=ARRAY['tunnel_manage'] WHERE team_id=$1`, team)
+	teamstest.SetMachineAccess(t, f.database, team, host, "", "tunnel_manage")
 	check(true)
 	request := testRequest(false)
 	request.Actor.AccountID = member
@@ -100,7 +101,7 @@ func TestSharedTunnelManagementOnPostgres(t *testing.T) {
 	if err != nil || len(listed) != 1 || listed[0].ID != tunnel {
 		t.Fatalf("shared list: %+v %v", listed, err)
 	}
-	exec(`UPDATE paperboat.team_machine_grants SET active=false WHERE team_id=$1`, team)
+	teamstest.SetMachineAccess(t, f.database, team, host, "")
 	if err = f.database.InTx(scoped, func(ctx context.Context, tx *db.Tx) error { return authorizeTunnelManagementTx(ctx, tx) }); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("stale resolved authority survives revocation: %v", err)
 	}
@@ -108,7 +109,7 @@ func TestSharedTunnelManagementOnPostgres(t *testing.T) {
 		t.Fatalf("revoked mutation replay: %v", err)
 	}
 	check(false)
-	exec(`UPDATE paperboat.team_machine_grants SET active=true WHERE team_id=$1`, team)
+	teamstest.SetMachineAccess(t, f.database, team, host, "", "tunnel_manage")
 	exec(`UPDATE paperboat.user_machines SET configured_capabilities='{}' WHERE id=$1`, host)
 	check(false)
 	exec(`UPDATE paperboat.user_machines SET configured_capabilities=ARRAY['preview_launch'],owner_team_id=$2 WHERE id=$1`, host, team)

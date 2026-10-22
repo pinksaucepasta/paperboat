@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"encoding/json"
 	"reflect"
 	"slices"
 	"strings"
@@ -365,5 +366,27 @@ func TestSameAliasNeedsTheOwnerQualifiedName(t *testing.T) {
 	}
 	if got := inv.MachineName("m-db1"); got != "db1" {
 		t.Fatalf("name %q", got)
+	}
+	inv.Machines = append(inv.Machines, Machine{ID: "m-db1b", Alias: "db1", PersonalOwner: "bo"})
+	c = mustCompile(t, `{"rules": [{"src": ["*"], "dst": ["machine:db1"], "allow": ["exec"]}]}`, inv)
+	if d := c.Decide("ana", machine("m-db1"), ActionExec, 0); !d.Allowed || c.Decide("ana", machine("m-db1b"), ActionExec, 0).Allowed {
+		t.Fatal("the team-owned machine keeps the plain alias")
+	}
+	if inv.MachineName("m-db1") != "db1" || inv.MachineName("m-db1b") != "bo@example.test/db1" {
+		t.Fatal(inv.MachineName("m-db1"), inv.MachineName("m-db1b"))
+	}
+}
+
+func TestPortRangeJSONRoundTrip(t *testing.T) {
+	var got []PortRange
+	if err := json.Unmarshal([]byte(`[22, "8000-8100"]`), &got); err != nil || len(got) != 2 || got[1].To != 8100 {
+		t.Fatal(got, err)
+	}
+	out, _ := json.Marshal(got)
+	if string(out) != `[22,"8000-8100"]` {
+		t.Fatal(string(out))
+	}
+	if err := json.Unmarshal([]byte(`[0]`), &got); err == nil {
+		t.Fatal("port 0 accepted")
 	}
 }

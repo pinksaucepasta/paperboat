@@ -99,7 +99,9 @@ func AuthorizeMachineTx(ctx context.Context, tx *db.Tx, account, team, machine, 
 	if !allowed {
 		return d, ErrForbidden
 	}
-	err = tx.QueryRow(ctx, `SELECT t.generation,m.membership_generation,CASE WHEN t.owner_account=$1 THEN 'owner' ELSE m.role END,b.generation,max(g.generation) FROM teams t JOIN team_members m USING(team_id) JOIN team_resource_bindings b USING(team_id) JOIN team_machine_grants g ON g.team_id=b.team_id AND g.machine_id=b.resource_id WHERE t.team_id=$2 AND m.account_id=$1 AND b.resource_kind='machine' AND b.resource_id=$3 AND g.active AND (g.audience='all_members' OR g.account_id=$1) AND $4=ANY(g.capabilities) GROUP BY t.generation,m.membership_generation,t.owner_account,m.role,b.generation`, account, team, machine, capability).Scan(&d.TeamGeneration, &d.MembershipGeneration, &d.Role, &d.BindingGeneration, &d.GrantGeneration)
+	// The grant generation is the team policy's version: a saved policy fences decisions as a
+	// grant change did.
+	err = tx.QueryRow(ctx, `SELECT t.generation,m.membership_generation,CASE WHEN t.owner_account=$1 THEN 'owner' ELSE m.role END,b.generation,coalesce((SELECT p.version FROM workspace_policies p WHERE p.team_id=t.team_id),1) FROM teams t JOIN team_members m USING(team_id) JOIN team_resource_bindings b USING(team_id) WHERE t.team_id=$2 AND m.account_id=$1 AND b.resource_kind='machine' AND b.resource_id=$3`, account, team, machine).Scan(&d.TeamGeneration, &d.MembershipGeneration, &d.Role, &d.BindingGeneration, &d.GrantGeneration)
 	return d, err
 }
 
@@ -132,12 +134,7 @@ func (s *Service) GrantMachine(ctx context.Context, account, team string, r Mach
 		if !bound {
 			return ErrForbidden
 		}
-		if r.Audience == "all_members" {
-			_, err = tx.Exec(ctx, `INSERT INTO team_machine_grants(team_id,machine_id,audience,capabilities,active) VALUES($1,$2,'all_members',$3,$4) ON CONFLICT(team_id,machine_id) WHERE audience='all_members' DO UPDATE SET capabilities=EXCLUDED.capabilities,active=EXCLUDED.active,generation=team_machine_grants.generation+1`, team, r.MachineID, r.Capabilities, r.Active)
-		} else {
-			_, err = tx.Exec(ctx, `INSERT INTO team_machine_grants(team_id,machine_id,audience,account_id,capabilities,active) VALUES($1,$2,'selected_member',$3,$4,$5) ON CONFLICT(team_id,machine_id,account_id) WHERE audience='selected_member' DO UPDATE SET capabilities=EXCLUDED.capabilities,active=EXCLUDED.active,generation=team_machine_grants.generation+1`, team, r.MachineID, r.AccountID, r.Capabilities, r.Active)
-		}
-		return err
+		return ApplyMachineAccessTx(ctx, tx, s.policy, team, account, r)
 	})
 }
 func machineOwnerTx(ctx context.Context, tx *db.Tx, machine string) (string, string, error) {
@@ -221,15 +218,22 @@ func (s *Service) Machine(ctx context.Context, account, team string, r MachineRe
 			if err = bindMachineTx(ctx, tx, team, r.MachineID, owner); err != nil {
 				return err
 			}
-			// Other personal shares cannot silently become grants over team property.
-			if _, err = tx.Exec(ctx, `UPDATE teams SET generation=generation+1 WHERE team_id IN (SELECT team_id FROM team_resource_bindings WHERE resource_kind='machine' AND resource_id=$1 AND team_id<>$2 AND active)`, r.MachineID, team); err != nil {
+			// Other personal shares cannot silently become grants over team property: those teams
+			// lose the machine and their policies forget it.
+			var others []string
+			if err = tx.QueryRow(ctx, `SELECT coalesce(array_agg(team_id),'{}') FROM team_resource_bindings WHERE resource_kind='machine' AND resource_id=$1 AND team_id<>$2 AND active`, r.MachineID, team).Scan(&others); err != nil {
+				return err
+			}
+			if _, err = tx.Exec(ctx, `UPDATE teams SET generation=generation+1 WHERE team_id=ANY($1)`, others); err != nil {
 				return err
 			}
 			if _, err = tx.Exec(ctx, `UPDATE team_resource_bindings SET active=false,generation=generation+1 WHERE resource_kind='machine' AND resource_id=$1 AND team_id<>$2 AND active`, r.MachineID, team); err != nil {
 				return err
 			}
-			if _, err = tx.Exec(ctx, `UPDATE team_machine_grants SET active=false,generation=generation+1 WHERE machine_id=$1 AND team_id<>$2 AND active`, r.MachineID, team); err != nil {
-				return err
+			for _, other := range others {
+				if err = refreshPolicyTx(ctx, tx, Workspace{TeamID: other}, account); err != nil {
+					return err
+				}
 			}
 			_, err = tx.Exec(ctx, `UPDATE user_machines SET owner_team_id=$2,version=version+1,updated_at=now() WHERE id=$1`, r.MachineID, team)
 			var conflict *pgconn.PgError
@@ -310,8 +314,8 @@ func unbindMachineTx(ctx context.Context, tx *db.Tx, team, machine string) error
 	if _, err := tx.Exec(ctx, `UPDATE team_resource_bindings SET active=false,generation=generation+1 WHERE team_id=$1 AND resource_kind='machine' AND resource_id=$2 AND active`, team, machine); err != nil {
 		return err
 	}
-	_, err := tx.Exec(ctx, `UPDATE team_machine_grants SET active=false,generation=generation+1 WHERE team_id=$1 AND machine_id=$2 AND active`, team, machine)
-	return err
+	// The policy forgets the machine: sharing it again starts with no access, as before.
+	return refreshPolicyTx(ctx, tx, Workspace{TeamID: team}, "")
 }
 
 func readMachinesTx(ctx context.Context, tx *db.Tx, team string, out *Team) error {
@@ -334,19 +338,8 @@ func readMachinesTx(ctx context.Context, tx *db.Tx, team string, out *Team) erro
 	if err != nil {
 		return err
 	}
-	rows, err = tx.Query(ctx, `SELECT machine_id,audience,coalesce(account_id,''),capabilities,generation,active FROM team_machine_grants WHERE team_id=$1 ORDER BY machine_id,audience,account_id`, team)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var g MachineGrant
-		if err = rows.Scan(&g.MachineID, &g.Audience, &g.AccountID, &g.Capabilities, &g.Generation, &g.Active); err != nil {
-			return err
-		}
-		out.MachineGrants = append(out.MachineGrants, g)
-	}
-	return rows.Err()
+	out.MachineGrants, err = machineGrantsTx(ctx, tx, team)
+	return err
 }
 
 // The same credential, ENV and runtime cleanup serves personal and team removal.

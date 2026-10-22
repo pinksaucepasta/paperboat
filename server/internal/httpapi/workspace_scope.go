@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/pinksaucepasta/paperboat-server/internal/apitokens"
 	"github.com/pinksaucepasta/paperboat-server/internal/workspace"
 )
 
@@ -121,6 +122,15 @@ func personalWorkspaceContext(ctx context.Context) context.Context {
 // has established the account or signed machine principal. It is shared by
 // ordinary user routes and signed publisher handlers.
 func ValidateWorkspaceSelection(ctx context.Context, service *workspace.Service, account string) (workspace.Scope, bool, error) {
+	scope, present, err := validateWorkspaceSelection(ctx, service, account)
+	if token, ok := apitokens.FromContext(ctx); ok && err == nil && (!present || scope != token.Workspace) {
+		// An API token acts only in its own workspace (apiTokenAuth selects it).
+		return workspace.Scope{}, false, workspace.ErrForbidden
+	}
+	return scope, present, err
+}
+
+func validateWorkspaceSelection(ctx context.Context, service *workspace.Service, account string) (workspace.Scope, bool, error) {
 	if selection, ok := ctx.Value(workspaceQueryKey{}).(workspaceQuerySelection); ok {
 		if selection.err != nil {
 			return workspace.Scope{}, false, workspace.ErrInvalid

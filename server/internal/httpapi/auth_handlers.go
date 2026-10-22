@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/pinksaucepasta/paperboat-server/internal/apitokens"
 	"github.com/pinksaucepasta/paperboat-server/internal/auth"
 )
 
@@ -16,6 +17,8 @@ type principal struct {
 	User    auth.User
 	Session auth.Session
 	Client  *auth.ClientPrincipal
+	// APIToken is set when an API token authenticated the request (see apiTokenAuth).
+	APIToken *apitokens.Principal
 }
 
 func workOSState(service *auth.Service) http.HandlerFunc {
@@ -149,6 +152,10 @@ func mePayload(user auth.User) map[string]any {
 
 func requireAuth(service *auth.Service, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := apiTokenPrincipal(r); ok {
+			next.ServeHTTP(w, r)
+			return
+		}
 		if unsafeMethod(r.Method) {
 			if err := service.ValidateBrowserRequest(r); err != nil {
 				writeError(w, r, http.StatusForbidden, "origin_failed", "Browser origin validation failed.")
@@ -185,6 +192,10 @@ func requireAuth(service *auth.Service, next http.Handler) http.Handler {
 
 func requireAnyAuth(service *auth.Service, machines *auth.DeviceService, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := apiTokenPrincipal(r); ok {
+			next.ServeHTTP(w, r)
+			return
+		}
 		if token, ok := bearerToken(r); ok {
 			client, err := machines.Authenticate(r.Context(), token)
 			if err != nil {
@@ -251,7 +262,7 @@ func shouldRotateForRequest(r *http.Request) bool {
 
 func requireCSRF(service *auth.Service, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if p, ok := principalFromContext(r.Context()); ok && p.Client != nil {
+		if p, ok := principalFromContext(r.Context()); ok && (p.Client != nil || p.APIToken != nil) {
 			next.ServeHTTP(w, r)
 			return
 		}

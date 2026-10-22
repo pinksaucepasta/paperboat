@@ -203,7 +203,7 @@ VALUES($1,'terminal_session',$2,$3,1)`, team, session, owner)
 	if err = store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.team_terminal_session_grants WHERE terminal_session_id=$1`, session).Scan(&nativeTerminalGrants); err != nil {
 		t.Fatal(err)
 	}
-	if err = store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.team_machine_grants WHERE machine_id=$1`, machine).Scan(&nativeMachineGrants); err != nil {
+	if err = store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.workspace_policy_rules WHERE target_kind='machine' AND target_id=$1`, machine).Scan(&nativeMachineGrants); err != nil {
 		t.Fatal(err)
 	}
 	if nativeTerminalGrants != 0 || nativeMachineGrants != 0 {

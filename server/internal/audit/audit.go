@@ -48,6 +48,14 @@ type Event struct {
 	CreatedAt      time.Time
 }
 
+type apiTokenKey struct{}
+
+// WithAPIToken attributes every audit event written under ctx to the API token that
+// authenticated the request.
+func WithAPIToken(ctx context.Context, tokenID string) context.Context {
+	return context.WithValue(ctx, apiTokenKey{}, tokenID)
+}
+
 type Writer struct {
 	db *db.DB
 }
@@ -80,6 +88,9 @@ func write(ctx context.Context, q *dbsqlc.Queries, event Event) error {
 	event.Metadata = maps.Clone(event.Metadata)
 	if event.Metadata == nil {
 		event.Metadata = make(map[string]any)
+	}
+	if tokenID, ok := ctx.Value(apiTokenKey{}).(string); ok {
+		event.Metadata["api_token_id"] = tokenID
 	}
 	if requestID := serverdiagnostics.NormalizeRequestID(serverdiagnostics.RequestID(ctx)); requestID != "" {
 		event.Metadata["request_id"] = requestID

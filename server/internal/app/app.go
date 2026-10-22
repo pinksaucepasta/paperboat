@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"github.com/pinksaucepasta/paperboat-server/internal/accessdescriptor"
 	"github.com/pinksaucepasta/paperboat-server/internal/activity"
+	"github.com/pinksaucepasta/paperboat-server/internal/apitokens"
 	"github.com/pinksaucepasta/paperboat-server/internal/audit"
 	"github.com/pinksaucepasta/paperboat-server/internal/auth"
 	"github.com/pinksaucepasta/paperboat-server/internal/backupreport"
@@ -758,6 +759,7 @@ func New(opts Options) (*App, error) {
 	}
 	teamService := teams.NewService(store)
 	teamService.ConfigureMail(opts.Config.Mail, opts.Config.Secrets.ResendAPIKey != "")
+	teamService.ConfigurePolicy(opts.Config.WorkspacePolicy)
 	workspaceBilling.ConfigureNotificationMail(opts.Config.Mail, opts.Config.Secrets.ResendAPIKey != "")
 	workspaceBilling.ConfigureTeamTrial(opts.Config.Billing.TeamTrialDays)
 	mailService := &transactionalmail.Service{DB: store, Endpoint: opts.Config.Mail.Endpoint, Key: opts.Config.Secrets.ResendAPIKey}
@@ -809,6 +811,7 @@ func New(opts Options) (*App, error) {
 		GitHub:                    githubService,
 		EnvironmentVariables:      environmentVariableService,
 		Teams:                     teamService,
+		Policy:                    teamService,
 		TeamInbox:                 teamInboxService,
 		MeteringRepo:              metering.NewRuntimeRepository(store, opts.Config.Secrets.EncryptionKey, opts.Config.ConfigSync.StaleHeartbeatAfter),
 		RuntimeIdentity:           enrollmentService,
@@ -830,6 +833,7 @@ func New(opts Options) (*App, error) {
 		ConfigConflicts:           configConflictService,
 		Routes:                    routeService,
 		Favorites:                 favorites.NewService(store),
+		APITokens:                 apitokens.New(store, auditWriter, opts.Config.APITokens),
 		ControlDiagnostics:        controlDiagnostics,
 		OperationRecovery:         operationRecovery,
 		PeerIdentity:              peerIdentityService,

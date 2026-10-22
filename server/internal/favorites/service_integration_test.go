@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat-server/internal/teams/teamstest"
 	"os"
 	"testing"
 	"time"
@@ -69,10 +70,7 @@ VALUES($1,'machine',$2,$3,true,1)`, team, sharedMachine, hostOwner); err != nil 
 			t.Fatal(err)
 		}
 	}
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.team_machine_grants(team_id,machine_id,audience,account_id,capabilities,generation,active)
-VALUES($1,$2,'selected_member',$3,ARRAY['terminal'],1,true)`, teamOne, sharedMachine, actor); err != nil {
-		t.Fatal(err)
-	}
+	teamstest.SetMachineAccess(t, store, teamOne, sharedMachine, actor, "terminal")
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cleanupCancel()
@@ -81,7 +79,6 @@ VALUES($1,$2,'selected_member',$3,ARRAY['terminal'],1,true)`, teamOne, sharedMac
 			args  []any
 		}{
 			{`DELETE FROM paperboat.user_favorites WHERE user_id=$1`, []any{actor}},
-			{`DELETE FROM paperboat.team_machine_grants WHERE machine_id=$1`, []any{sharedMachine}},
 			{`DELETE FROM paperboat.team_resource_bindings WHERE resource_kind='machine' AND resource_id=$1`, []any{sharedMachine}},
 			{`DELETE FROM paperboat.billing_workspaces WHERE team_id=ANY($1::text[])`, []any{[]string{teamOne, teamTwo}}},
 			{`DELETE FROM paperboat.team_members WHERE team_id=ANY($1::text[])`, []any{[]string{teamOne, teamTwo}}},

@@ -10,6 +10,7 @@ import (
 	"github.com/pinksaucepasta/paperboat-server/internal/config"
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
 	"github.com/pinksaucepasta/paperboat-server/internal/previewtunnelapi"
+	"github.com/pinksaucepasta/paperboat-server/internal/teams/teamstest"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -49,7 +50,7 @@ func TestSharedPreviewSignedLifecycleOnPostgres(t *testing.T) {
 	t.Cleanup(func() { exec(`DELETE FROM paperboat.billing_workspaces WHERE team_id=$1`, team) })
 	exec(`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'member',true)`, team, member)
 	exec(`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account) VALUES($1,'machine',$2,$3)`, team, machine, owner)
-	exec(`INSERT INTO paperboat.team_machine_grants(team_id,machine_id,audience,capabilities) VALUES($1,$2,'all_members',ARRAY['preview_manage'])`, team, machine)
+	teamstest.SetMachineAccess(t, f.database, team, machine, "", "preview_manage")
 	exec(`UPDATE paperboat.user_machines SET online=true,installation_generation=1,observed_capabilities=ARRAY['preview_launch'] WHERE id=$1`, machine)
 	signer, err := mint.NewEphemeral(time.Minute)
 	if err != nil {
@@ -133,7 +134,7 @@ func TestSharedPreviewSignedLifecycleOnPostgres(t *testing.T) {
 	if renewed.Preview.AccountID != member {
 		t.Fatal("renewal changed resource owner")
 	}
-	exec(`UPDATE paperboat.team_machine_grants SET active=false WHERE team_id=$1`, team)
+	teamstest.SetMachineAccess(t, f.database, team, machine, "")
 	if _, err = resolver.ResolvePreviewLease(ctx, lookup); !errors.Is(err, previewattachment.ErrUnauthorized) {
 		t.Fatalf("revoked attachment: %v", err)
 	}

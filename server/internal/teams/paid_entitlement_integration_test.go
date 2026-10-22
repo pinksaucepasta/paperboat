@@ -55,7 +55,14 @@ func TestPostgresTeamPaidEntitlementAdmissionExpiryAndRecovery(t *testing.T) {
 	exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,description,platform,architecture,workspace_root,state,seat_state,online,configured_capabilities,observed_capabilities) VALUES($1,$2,$3,'paid-host','Paid team host','linux','amd64','/workspace','online','occupied',true,ARRAY['terminal_host'],ARRAY['terminal_host'])`, machine, owner, "env_"+suffix)
 	exec(`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account) VALUES($1,'env',$1,$2),($1,'machine',$3,$2)`, team, owner, machine)
 	exec(`INSERT INTO paperboat.team_resource_grants(team_id,account_id,resource_kind,resource_id,permission,generation,active) VALUES($1,$2,'env',$1,'read',1,true)`, team, member)
-	exec(`INSERT INTO paperboat.team_machine_grants(team_id,machine_id,audience,account_id,capabilities) VALUES($1,$2,'selected_member',$3,ARRAY['terminal'])`, team, machine, member)
+	if err = store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		if err := Lock(ctx, tx); err != nil {
+			return err
+		}
+		return ApplyMachineAccessTx(ctx, tx, config.Default().WorkspacePolicy, team, "", MachineGrantRequest{MachineID: machine, Audience: "selected_member", AccountID: member, Capabilities: []string{"terminal"}, Active: true})
+	}); err != nil {
+		t.Fatal(err)
+	}
 	exec(`INSERT INTO paperboat.user_machine_terminal_sessions(id,user_machine_id,owner_account,name,idempotency_key,launch_cwd) VALUES($1,$2,$3,'shared',$1,'/workspace')`, terminal, machine, owner)
 	exec(`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account,terminal_process_generation) VALUES($1,'terminal_session',$2,$3,1)`, team, terminal, owner)
 	exec(`INSERT INTO paperboat.team_terminal_session_grants(team_id,terminal_session_id,audience,account_id,role) VALUES($1,$2,'selected_member',$3,'viewer')`, team, terminal, member)

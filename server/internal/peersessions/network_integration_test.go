@@ -17,6 +17,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"github.com/google/uuid"
+	"github.com/pinksaucepasta/paperboat-server/internal/teams/teamstest"
 	wire "github.com/pinksaucepasta/paperboat/shared/peeridentity"
 	"math/big"
 	"net/http"
@@ -312,7 +313,6 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 		{`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'admin',true)`, []any{teamID, userID}},
 		{`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'member',true)`, []any{teamID, sharedUser}},
 		{`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account) VALUES($1,'machine',$2,$3)`, []any{teamID, machineID, userID}},
-		{`INSERT INTO paperboat.team_machine_grants(team_id,machine_id,audience,account_id,capabilities) VALUES($1,$2,'selected_member',$3,ARRAY['terminal','exec','managed_ssh','files'])`, []any{teamID, machineID, sharedUser}},
 		{`INSERT INTO paperboat.user_machines(id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$3,'Shared source','linux','amd64','/source','online','occupied',true,1)`, []any{"network_shared_source_" + suffix, sharedUser, "network_shared_source_env_" + suffix}},
 		{`INSERT INTO paperboat.user_machines(id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$3,'Owner source','linux','amd64','/owner-source','online','occupied',true,1)`, []any{"network_owner_source_" + suffix, userID, "network_owner_source_env_" + suffix}},
 		{`UPDATE paperboat.user_machines SET observed_capabilities=configured_capabilities,worker_generation=1,public_identity_key=$2 WHERE id=$1`, []any{machineID, runtimeIdentity}},
@@ -326,6 +326,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	teamstest.SetMachineAccess(t, store, teamID, machineID, sharedUser, "terminal", "exec", "managed_ssh", "files")
 	// Keep only this fixture's live carrier observations fresh while the test
 	// exercises descriptors and revocation; never change its authority or grants.
 	refreshRuntimeCarrier := func() {
@@ -442,9 +443,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	if os.Getenv("PAPERBOAT_TERMINAL_SHARING_FIXTURE") != "" {
-		if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.team_machine_grants SET active=false WHERE team_id=$1 AND machine_id=$2 AND account_id=$3`, teamID, machineID, sharedUser); err != nil {
-			t.Fatal(err)
-		}
+		teamstest.SetMachineAccess(t, store, teamID, machineID, sharedUser)
 	}
 	if holdBinary == "" {
 		// Without the held runtime process, a stub speaks the helper runtime frame protocol for the
@@ -455,7 +454,11 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 		}
 		machineService.ConfigureTerminalSessions(4, provider, stubClient)
 	}
-	viewerTeam, err := machineService.GrantTerminalSessionSharing(ctx, userID, teamID, ownerSharedTerminalID, teams.TerminalSessionGrantRequest{OperationID: "operation_terminal_view_" + suffix, ExpectedGeneration: 1, Audience: "selected_member", AccountID: sharedUser, Role: "viewer", Active: true})
+	sharingTeam, err := teams.NewService(store).Get(ctx, userID, teamID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	viewerTeam, err := machineService.GrantTerminalSessionSharing(ctx, userID, teamID, ownerSharedTerminalID, teams.TerminalSessionGrantRequest{OperationID: "operation_terminal_view_" + suffix, ExpectedGeneration: sharingTeam.Generation, Audience: "selected_member", AccountID: sharedUser, Role: "viewer", Active: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -734,9 +737,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	if _, err = machineService.FileTransferDescriptor(sharedScope, sharedUser, "network_shared_source_"+suffix, machineID, sharedCLI, ""); !errors.Is(err, usermachines.ErrMachineCapabilityUnavailable) {
 		t.Fatalf("disabled file receive descriptor error=%v", err)
 	}
-	if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.team_machine_grants SET active=false WHERE team_id=$1 AND machine_id=$2 AND account_id=$3`, teamID, machineID, sharedUser); err != nil {
-		t.Fatal(err)
-	}
+	teamstest.SetMachineAccess(t, store, teamID, machineID, sharedUser)
 	withdrawnShared, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "operation_shared_withdrawn_" + suffix, UserID: sharedUser, EndpointID: sharedCLI})
 	if err != nil {
 		t.Fatal(err)
@@ -747,9 +748,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertNoNetworkPeer(t, machineWithdrawnConfig.Configuration, sharedCLI)
-	if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.team_machine_grants SET active=true WHERE team_id=$1 AND machine_id=$2 AND account_id=$3`, teamID, machineID, sharedUser); err != nil {
-		t.Fatal(err)
-	}
+	teamstest.SetMachineAccess(t, store, teamID, machineID, sharedUser, "terminal", "exec", "managed_ssh", "files")
 	if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET owner_team_id=$2 WHERE id=$1`, machineID, teamID); err != nil {
 		t.Fatal(err)
 	}

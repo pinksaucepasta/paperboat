@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat-server/internal/teams/teamstest"
 	"slices"
 	"testing"
 	"time"
@@ -152,12 +153,12 @@ func TestPostgresSharedMachineSessionIsolationAndRevocation(t *testing.T) {
 		{`INSERT INTO paperboat.teams(team_id,owner_account,generation) VALUES($1,$2,1)`, []any{secondTeam, owner}},
 		{`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'member',true),($1,$3,1,'member',true)`, []any{secondTeam, owner, member}},
 		{`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account) VALUES($1,'machine',$2,$3)`, []any{secondTeam, machine, owner}},
-		{`INSERT INTO paperboat.team_machine_grants(team_id,machine_id,audience,account_id,capabilities) VALUES($1,$2,'selected_member',$3,ARRAY['terminal'])`, []any{secondTeam, machine, member}},
 	} {
 		if _, err = store.SQL().ExecContext(ctx, statement.query, statement.args...); err != nil {
 			t.Fatal(err)
 		}
 	}
+	teamstest.SetMachineAccess(t, store, secondTeam, machine, member, "terminal")
 	if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.billing_workspaces(id,team_id,state,product_code,quantity,period_start,period_end) VALUES($1,$2,'trialing','team-pro',2,$3,$4)`, "bw_"+secondTeam, secondTeam, now.Add(-time.Hour), now.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}

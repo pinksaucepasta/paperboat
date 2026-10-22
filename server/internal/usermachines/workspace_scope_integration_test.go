@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
+	"github.com/pinksaucepasta/paperboat-server/internal/teams/teamstest"
 	"testing"
 	"time"
 
@@ -78,7 +79,6 @@ func newWorkspaceDescriptorFixture(t *testing.T) (workspaceMachineFixture, strin
 		query string
 		args  []any
 	}{
-		{`UPDATE paperboat.team_machine_grants SET capabilities=ARRAY['terminal','exec'] WHERE team_id=$1 AND machine_id=$2`, []any{f.teamOne, f.machine}},
 		{`UPDATE paperboat.user_machines SET configured_capabilities=ARRAY['terminal_host','file_receive','preview_launch'], observed_capabilities=ARRAY['terminal_host','file_receive','preview_launch'],public_identity_key=$2,worker_generation=1 WHERE id=$1`, []any{f.machine, publicKey}},
 		{`INSERT INTO paperboat.user_machines(id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online) VALUES($1,$2,$3,'Source','linux','amd64','/workspace','online','occupied',true)`, []any{source, f.account, "env_source_" + f.suffix}},
 		{`INSERT INTO paperboat.control_environments(id,workspace_id,owner_user_id,desired_state) VALUES($1,$2,$3,'active')`, []any{env, f.machine, f.account}},
@@ -102,6 +102,7 @@ func newWorkspaceDescriptorFixture(t *testing.T) (workspaceMachineFixture, strin
 			t.Error(err)
 		}
 	})
+	teamstest.SetMachineAccess(t, f.store, f.teamOne, f.machine, "", "terminal", "exec")
 	for _, statement := range statements {
 		if _, err := f.store.SQL().ExecContext(f.ctx, statement.query, statement.args...); err != nil {
 			t.Fatal(err)
@@ -149,10 +150,7 @@ VALUES($1,$2,'active','team-pro',2,$3,$4)`, "bw_"+team, team, time.Now().Add(-ti
 			t.Fatal(err)
 		}
 	}
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.team_machine_grants(team_id,machine_id,audience,capabilities,generation,active)
-VALUES($1,$2,'all_members',ARRAY['terminal','files'],1,true)`, teamOne, machine); err != nil {
-		t.Fatal(err)
-	}
+	teamstest.SetMachineAccess(t, store, teamOne, machine, "", "terminal", "files")
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cleanupCancel()
@@ -163,7 +161,6 @@ VALUES($1,$2,'all_members',ARRAY['terminal','files'],1,true)`, teamOne, machine)
 			{`DELETE FROM paperboat.user_machine_terminal_session_operations WHERE user_machine_id=$1`, []any{machine}},
 			{`DELETE FROM paperboat.user_machine_access_sessions WHERE user_machine_id=$1`, []any{machine}},
 			{`DELETE FROM paperboat.user_machine_terminal_sessions WHERE user_machine_id=$1`, []any{machine}},
-			{`DELETE FROM paperboat.team_machine_grants WHERE machine_id=$1`, []any{machine}},
 			{`DELETE FROM paperboat.team_resource_bindings WHERE resource_kind='machine' AND resource_id=$1`, []any{machine}},
 			{`DELETE FROM paperboat.billing_workspaces WHERE team_id=ANY($1::text[])`, []any{[]string{teamOne, teamTwo}}},
 			{`DELETE FROM paperboat.team_members WHERE team_id=ANY($1::text[])`, []any{[]string{teamOne, teamTwo}}},
@@ -352,7 +349,6 @@ func TestFilesOnlyTeamInventoryRequiresPaidEntitlement(t *testing.T) {
 	f := newWorkspaceMachineFixture(t)
 	member := "files_member_" + f.suffix
 	t.Cleanup(func() {
-		_, _ = f.store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.team_machine_grants WHERE account_id=$1`, member)
 		_, _ = f.store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.team_members WHERE account_id=$1`, member)
 		_, _ = f.store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.users WHERE id=$1`, member)
 	})
@@ -362,13 +358,13 @@ func TestFilesOnlyTeamInventoryRequiresPaidEntitlement(t *testing.T) {
 	}{
 		{`INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@example.test','active')`, []any{member}},
 		{`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'member',true)`, []any{f.teamOne, member}},
-		{`UPDATE paperboat.team_machine_grants SET active=false WHERE team_id=$1 AND machine_id=$2`, []any{f.teamOne, f.machine}},
-		{`INSERT INTO paperboat.team_machine_grants(team_id,machine_id,audience,account_id,capabilities,generation,active) VALUES($1,$2,'selected_member',$3,ARRAY['files'],1,true)`, []any{f.teamOne, f.machine, member}},
 	} {
 		if _, err := f.store.SQL().ExecContext(f.ctx, statement.sql, statement.args...); err != nil {
 			t.Fatal(err)
 		}
 	}
+	teamstest.SetMachineAccess(t, f.store, f.teamOne, f.machine, "")
+	teamstest.SetMachineAccess(t, f.store, f.teamOne, f.machine, member, "files")
 	team := workspace.WithContext(f.ctx, workspace.Scope{ID: f.teamOne, TeamID: f.teamOne})
 	check := func(want int) {
 		t.Helper()
@@ -400,8 +396,6 @@ func TestFilesOnlyTeamInventoryRequiresPaidEntitlement(t *testing.T) {
 		t.Fatal(err)
 	}
 	check(1)
-	if _, err := f.store.SQL().ExecContext(f.ctx, `UPDATE paperboat.team_machine_grants SET active=false WHERE team_id=$1 AND account_id=$2`, f.teamOne, member); err != nil {
-		t.Fatal(err)
-	}
+	teamstest.SetMachineAccess(t, f.store, f.teamOne, f.machine, member)
 	check(0)
 }

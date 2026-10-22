@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat-server/internal/activity"
+	"github.com/pinksaucepasta/paperboat-server/internal/apitokens"
 	"github.com/pinksaucepasta/paperboat-server/internal/auth"
 	"github.com/pinksaucepasta/paperboat-server/internal/backupreport"
 	"github.com/pinksaucepasta/paperboat-server/internal/billing"
@@ -68,6 +69,7 @@ type Options struct {
 	BrowserAccess            *BrowserAccessHandlers
 	Inspector                *InspectorHandlers
 	Teams                    teamAPI
+	Policy                   policyAPI
 	TeamInbox                *teaminbox.Service
 	Config                   config.Config
 	Logger                   *slog.Logger
@@ -97,6 +99,7 @@ type Options struct {
 	ConfigConflicts          *controlplane.ConfigConflictService
 	Routes                   *controlplane.RouteService
 	Favorites                *favorites.Service
+	APITokens                *apitokens.Service
 	ControlDiagnostics       *controlplane.DiagnosticsService
 	OperationRecovery        *controlplane.OperationRecoveryService
 	PeerIdentity             *peeridentity.Service
@@ -514,6 +517,9 @@ func NewRouter(opts Options) http.Handler {
 					return requireAuth(opts.Auth, next)
 				}
 				registerTeamRoutes(mux, opts.Teams, func(h http.Handler) http.Handler { return secure("machines:read", h) }, func(h http.Handler) http.Handler { return secure("machines:connect", requireCSRF(opts.Auth, h)) })
+				if opts.Policy != nil {
+					registerPolicyRoutes(mux, opts.Policy, func(h http.Handler) http.Handler { return secure("machines:read", h) }, func(h http.Handler) http.Handler { return secure("machines:connect", requireCSRF(opts.Auth, h)) })
+				}
 
 				if opts.TeamInbox != nil {
 					registerTeamInboxRoutes(mux, opts.TeamInbox, func(h http.Handler) http.Handler { return secure("machines:read", h) }, func(h http.Handler) http.Handler { return secure("machines:connect", requireCSRF(opts.Auth, h)) })
@@ -698,6 +704,7 @@ func NewRouter(opts Options) http.Handler {
 		handler = mux
 	}
 	handler = clientUpdatePolicyGuard(opts.ClientUpdatePolicy, time.Now, handler)
+	handler = apiTokenAuth(opts.APITokens, handler)
 	handler = workspaceQueryContext(handler)
 	handler = secureHeaders(handler)
 	handler = cors(opts.Config.HTTP.AllowedOrigins, handler)
@@ -856,6 +863,11 @@ func registerAuthRoutes(mux *http.ServeMux, opts Options) {
 		meHandler = requireAnyAuth(opts.Auth, opts.DeviceAuth, me(opts.Auth))
 	}
 	mux.Handle("GET /v1/me", meHandler)
+	if opts.APITokens != nil {
+		mux.Handle("POST /v1/workspaces/{ws}/api-tokens", accountRead(requireCSRF(opts.Auth, apiTokenCreate(opts.APITokens))))
+		mux.Handle("GET /v1/workspaces/{ws}/api-tokens", accountRead(apiTokenList(opts.APITokens)))
+		mux.Handle("DELETE /v1/workspaces/{ws}/api-tokens/{id}", accountRead(requireCSRF(opts.Auth, apiTokenRevoke(opts.APITokens))))
+	}
 	if opts.Favorites != nil {
 		mux.Handle("GET /v1/favorites", accountRead(favoritesList(opts.Favorites)))
 		mux.Handle("PUT /v1/favorites", accountRead(requireCSRF(opts.Auth, favoriteSet(opts.Favorites))))

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat-server/internal/teams/teamstest"
 	wire "github.com/pinksaucepasta/paperboat/shared/machineservices"
 	"os"
 	"testing"
@@ -183,13 +184,13 @@ func TestMachineServicePostgresAuthorityLifecycle(t *testing.T) {
 	exec(`UPDATE paperboat.user_machines SET owner_team_id=$2 WHERE id=$1`, machine, team)
 	denied(owner, 5432)
 	denied(other, 5432)
-	exec(`UPDATE paperboat.teams SET allow_private_access=true WHERE team_id=$1`, team)
+	teamstest.SetPrivateAccess(t, store, team, true)
 	denied(owner, 5432)
 	beforeAudience, e := s.RuntimePolicy(ctx, environment, machine)
 	if e != nil || beforeAudience.AutomaticDiscoveryEnabled {
 		t.Fatalf("ungranted team discovery enabled: %+v %v", beforeAudience, e)
 	}
-	exec(`INSERT INTO paperboat.team_machine_grants(team_id,machine_id,audience,account_id,capabilities) VALUES($1,$2,'selected_member',$3,ARRAY['private_access'])`, team, machine, other)
+	teamstest.SetMachineAccess(t, store, team, machine, other, "private_access")
 	afterAudience, e := s.RuntimePolicy(ctx, environment, machine)
 	if e != nil || !afterAudience.AutomaticDiscoveryEnabled || afterAudience.Generation != beforeAudience.Generation+1 {
 		t.Fatalf("team audience discovery did not advance: %+v %v", afterAudience, e)
@@ -206,11 +207,11 @@ func TestMachineServicePostgresAuthorityLifecycle(t *testing.T) {
 		t.Fatalf("team caller identity %+v %v", shared, e)
 	}
 	denied(owner, 5432)
-	exec(`UPDATE paperboat.team_machine_grants SET active=false,generation=generation+1 WHERE team_id=$1`, team)
+	teamstest.SetMachineAccess(t, store, team, machine, other)
 	if _, e = resolver.MachineServiceCurrent(ctx, request(other, 5432), shared.AccessSessionID, shared); !errors.Is(e, nativeprivateaccess.ErrDenied) {
 		t.Fatalf("team revocation %v", e)
 	}
-	exec(`UPDATE paperboat.team_machine_grants SET active=true,generation=generation+1 WHERE team_id=$1`, team)
+	teamstest.SetMachineAccess(t, store, team, machine, other, "private_access")
 	shared, e = resolver.ResolveNativePrivate(ctx, request(other, 5432))
 	if e != nil {
 		t.Fatal(e)

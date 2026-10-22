@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat-server/internal/teams/teamstest"
 	"os"
 	"testing"
 	"time"
@@ -89,25 +90,28 @@ func TestListShowsTeamSharedMachinesOnlyWithPrivateAccessOnPostgres(t *testing.T
 		}
 	}
 	want("shared without a grant", member, 0)
-	exec(`INSERT INTO paperboat.team_machine_grants(team_id,machine_id,audience,account_id,capabilities) VALUES($1,$2,'selected_member',$3,ARRAY['terminal'])`, teamA, machine, member)
+	teamstest.SetMachineAccess(t, store, teamA, machine, member, "terminal")
 	want("terminal-only grant", member, 0)
-	exec(`UPDATE paperboat.team_machine_grants SET capabilities=ARRAY['terminal','private_access'],generation=generation+1 WHERE team_id=$1`, teamA)
+	teamstest.SetMachineAccess(t, store, teamA, machine, member, "terminal", "private_access")
 	// The team's own setting gates every team port, whatever the grants say.
 	want("team private access off", member, 0)
-	exec(`UPDATE paperboat.teams SET allow_private_access=true WHERE team_id=$1`, teamA)
+	teamstest.SetPrivateAccess(t, store, teamA, true)
 	want("private_access member grant", member, 1)
-	exec(`UPDATE paperboat.teams SET allow_private_access=false WHERE team_id=$1`, teamA)
+	teamstest.SetPrivateAccess(t, store, teamA, false)
 	want("team setting turned off", member, 0)
-	exec(`UPDATE paperboat.teams SET allow_private_access=true WHERE team_id=$1`, teamA)
+	teamstest.SetPrivateAccess(t, store, teamA, true)
 	want("team setting turned back on", member, 1)
 	want("outsider", outsider, 0)
-	exec(`UPDATE paperboat.team_machine_grants SET active=false,generation=generation+1 WHERE team_id=$1`, teamA)
+	teamstest.SetMachineAccess(t, store, teamA, machine, member)
 	want("grant removed", member, 0)
-	exec(`UPDATE paperboat.team_machine_grants SET active=true,audience='all_members',account_id=NULL,generation=generation+1 WHERE team_id=$1`, teamA)
+	teamstest.SetMachineAccess(t, store, teamA, machine, "", "terminal", "private_access")
 	want("all-members grant", member, 1)
 	// A second team whose binding is not active does not leak the machine.
 	exec(`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account,active,generation) VALUES($1,'machine',$2,$3,false,1)`, teamB, machine, owner)
-	exec(`INSERT INTO paperboat.team_machine_grants(team_id,machine_id,audience,capabilities) VALUES($1,$2,'all_members',ARRAY['private_access'])`, teamB, machine)
+	// The policy cannot name a machine outside the team; a rule for every machine must still
+	// not reach it through the inactive binding.
+	exec(`WITH p AS (INSERT INTO paperboat.workspace_policies(team_id,version,source,digest,allow_private_access) VALUES($1,1,'{}','test',true) RETURNING id)
+INSERT INTO paperboat.workspace_policy_rules(policy_id,rule,deny,subject_kind,subject_id,target_kind,target_id,action,ports) SELECT id,0,false,'all','','all_machines','','private_access',int4range(1,65536) FROM p`, teamB)
 	want("second team grant on an inactive binding", member, 1)
 	exec(`UPDATE paperboat.team_members SET active=false,membership_generation=membership_generation+1 WHERE team_id=$1 AND account_id=$2`, teamA, member)
 	want("member removed from the owning team", member, 0)

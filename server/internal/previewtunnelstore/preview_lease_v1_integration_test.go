@@ -338,7 +338,10 @@ func TestSharedPreviewMachineAuthorityOnPostgres(t *testing.T) {
 	if _, err = tx.Exec(ctx, `INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account) VALUES($1,'machine',$2,$3)`, team, machine, owner); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO paperboat.team_machine_grants(team_id,machine_id,audience,account_id,capabilities) VALUES($1,$2,'selected_member',$3,ARRAY['preview_manage']::text[])`, team, machine, member); err != nil {
+	// The member's preview_manage rule in the team policy (stored rows only; this test
+	// checks the authority query inside one rolled-back transaction).
+	if _, err = tx.Exec(ctx, `WITH p AS (INSERT INTO paperboat.workspace_policies(team_id,version,source,digest) VALUES($1,1,'{}','test') RETURNING id)
+INSERT INTO paperboat.workspace_policy_rules(policy_id,rule,deny,subject_kind,subject_id,target_kind,target_id,action,ports) SELECT id,0,false,'account',$3,'machine',$2,'preview_manage',int4range(1,65536) FROM p`, team, machine, member); err != nil {
 		t.Fatal(err)
 	}
 	check := func(actor, mode string, wantShared bool, wantErr error) {
