@@ -16129,7 +16129,12 @@
                     "state": {
                       "type": "string"
                     }
-                  }
+                  },
+                  "required": [
+                    "id",
+                    "type",
+                    "state"
+                  ]
                 }
               },
               "domains": {
@@ -16143,7 +16148,11 @@
                     "state": {
                       "type": "string"
                     }
-                  }
+                  },
+                  "required": [
+                    "domain",
+                    "state"
+                  ]
                 }
               },
               "required": {
@@ -16170,7 +16179,18 @@
               "exempt_max": {
                 "type": "integer"
               }
-            }
+            },
+            "required": [
+              "connections",
+              "domains",
+              "required",
+              "session_seconds",
+              "session_min_seconds",
+              "session_max_seconds",
+              "jit",
+              "exempt",
+              "exempt_max"
+            ]
           },
           "directory": {
             "type": "object",
@@ -16192,7 +16212,12 @@
                       "state": {
                         "type": "string"
                       }
-                    }
+                    },
+                    "required": [
+                      "id",
+                      "type",
+                      "state"
+                    ]
                   }
                 ]
               },
@@ -16213,7 +16238,12 @@
                     "role": {
                       "type": "string"
                     }
-                  }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "role"
+                  ]
                 }
               },
               "mapped_only": {
@@ -16226,7 +16256,107 @@
               "error": {
                 "type": "string"
               }
-            }
+            },
+            "required": [
+              "directory",
+              "users",
+              "groups",
+              "mapped_only"
+            ]
+          }
+        }
+      },
+      "AuditStreamDestination": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "url",
+          "pending"
+        ],
+        "description": "A SIEM destination of the team audit log (PLAN F19-10). Credentials are never returned.",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "https",
+              "s3"
+            ]
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "HTTPS endpoint, or the S3-compatible endpoint."
+          },
+          "header_name": {
+            "type": "string"
+          },
+          "region": {
+            "type": "string"
+          },
+          "bucket": {
+            "type": "string"
+          },
+          "prefix": {
+            "type": "string"
+          },
+          "access_key_id": {
+            "type": "string"
+          },
+          "last_delivered_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_error": {
+            "type": "string"
+          },
+          "failing_since": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "pending": {
+            "type": "integer",
+            "description": "Events not delivered yet."
+          },
+          "signing_secret": {
+            "type": "string",
+            "description": "HTTPS only, returned once when created."
+          }
+        }
+      },
+      "AuditStreamInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "url"
+        ],
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "header_name": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "header_value": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "region": {
+            "type": "string"
+          },
+          "bucket": {
+            "type": "string"
+          },
+          "prefix": {
+            "type": "string"
+          },
+          "access_key_id": {
+            "type": "string"
+          },
+          "secret_access_key": {
+            "type": "string"
           }
         }
       }
@@ -49107,6 +49237,342 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/v1/teams/{team_id}/audit-streams": {
+      "get": {
+        "operationId": "team_audit_streams",
+        "summary": "List audit log streams",
+        "description": "Team plan; owners, admins and auditors (audit.read).",
+        "security": [
+          {
+            "cookieSession": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:read"
+        ],
+        "parameters": [
+          {
+            "name": "team_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AuditStreamDestination"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "502": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/teams/{team_id}/audit-streams/{kind}": {
+      "put": {
+        "operationId": "team_audit_stream_configure",
+        "summary": "Configure an audit log stream",
+        "description": "Owners and admins (audit.stream). Creates or replaces the stream of this kind; a new stream starts at the end of the audit log. Empty secret fields keep stored ones.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:connect"
+        ],
+        "parameters": [
+          {
+            "name": "team_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "https",
+                "s3"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/AuditStreamDestination"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "502": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuditStreamInput"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "team_audit_stream_remove",
+        "summary": "Remove an audit log stream",
+        "description": "Owners and admins (audit.stream).",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:connect"
+        ],
+        "parameters": [
+          {
+            "name": "team_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "https",
+                "s3"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "removed": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "502": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/teams/{team_id}/audit-streams/{kind}/test": {
+      "post": {
+        "operationId": "team_audit_stream_test",
+        "summary": "Send a test event",
+        "description": "Sends one team.activity_stream_test event now; 502 audit_stream_delivery_failed says why it was refused.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:connect"
+        ],
+        "parameters": [
+          {
+            "name": "team_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "https",
+                "s3"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "delivered": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "502": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }

@@ -188,3 +188,36 @@ transfer; seat changes are invoiced the same way. An invoice not paid by its due
 same 7-day grace as a failed card payment, after which the team's paid features pause until it is
 paid. Turning pay by invoice off returns to automatic card payment. Changes are recorded as
 `billing.pay_by_invoice_changed`.
+
+### Streaming to a SIEM (Team plan)
+
+Owners and admins (`audit.stream`) send the team audit log to their SIEM as it happens; at most
+one destination of each kind (`GET/PUT/DELETE /v1/teams/<team>/audit-streams/{https|s3}`,
+console Activity → Streaming). A new stream starts with events after it was set up. Events are
+delivered at least once and in order (use `id` to drop duplicates), within a few seconds and at
+most 30 seconds after they happen.
+
+**HTTPS** (`url`, optional `header_name` / `header_value`): Paperboat POSTs batches of up to
+`business.audit_stream_batch_bytes` (1 MiB) as NDJSON, one event per line,
+`Content-Type: application/x-ndjson`. The optional header carries your SIEM's credential, for
+example `Authorization: Splunk <HEC token>` (Splunk HEC raw endpoint), `DD-API-KEY: <key>`
+(Datadog logs), `Authorization: Bearer <token>` (Axiom, Cribl, Panther, Elastic). Any 2xx answer
+counts as delivered.
+
+Every request carries `Paperboat-Signature: t=<unix seconds>,v1=<hex>` where `v1` is
+HMAC-SHA256 with your signing secret (shown once when you create the stream) over
+`<t>.<request body>`. To verify: recompute it, compare in constant time, and reject a `t` older
+than 5 minutes.
+
+**S3-compatible** (`url` = endpoint such as `https://s3.eu-central-1.amazonaws.com` or your
+Cloudflare R2, Backblaze B2 or MinIO endpoint, `region`, `bucket`, optional `prefix`,
+`access_key_id`, `secret_access_key`): each batch is one gzip NDJSON object at
+`<prefix>/team-<team>/YYYY/MM/DD/<first>-<last>.ndjson.gz` (path-style URL, SigV4). The key only
+needs permission to put objects into that prefix.
+
+Destinations must be on the public internet over https. On failure Paperboat retries with
+exponential backoff up to `business.audit_stream_max_backoff` (1 hour); events wait until
+delivered or until their retention ends. The stream status shows the last delivery, the last
+error and how many events wait. After `business.audit_stream_alert_after` (1 hour) of failures
+the owners and admins get one email, and `team.activity_stream_failing` is recorded. **Send test
+event** (`POST .../test`) delivers one `team.activity_stream_test` event right away.

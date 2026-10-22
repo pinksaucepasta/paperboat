@@ -8,6 +8,8 @@ import (
 	"database/sql"
 	"net/netip"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type AccountE2eeKey struct {
@@ -32,6 +34,20 @@ type AccountE2eeRoot struct {
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 	RevokedAt   sql.NullTime
+}
+
+type ApiToken struct {
+	ID         string
+	AccountID  string
+	TeamID     sql.NullString
+	Name       string
+	SecretHash []byte
+	Scope      []byte
+	CreatedAt  time.Time
+	ExpiresAt  time.Time
+	LastUsedAt sql.NullTime
+	RevokedAt  sql.NullTime
+	RevokedBy  sql.NullString
 }
 
 type AuditEvent struct {
@@ -62,6 +78,26 @@ type AuditEvent struct {
 	Reason              sql.NullString
 	ClientIp            sql.NullString
 	UserAgent           sql.NullString
+}
+
+type AuditStreamDestination struct {
+	TeamID          string
+	Kind            string
+	Url             string
+	HeaderName      sql.NullString
+	Region          sql.NullString
+	Bucket          sql.NullString
+	Prefix          sql.NullString
+	AccessKeyID     sql.NullString
+	Secrets         []byte
+	CursorSequence  int64
+	NextAttemptAt   time.Time
+	Attempts        int32
+	LastDeliveredAt sql.NullTime
+	LastError       sql.NullString
+	FailingSince    sql.NullTime
+	AlertedAt       sql.NullTime
+	CreatedAt       time.Time
 }
 
 type AuthRateLimit struct {
@@ -1813,6 +1849,15 @@ type PeerNetworkRegistrationOperation struct {
 	CreatedAt     time.Time
 }
 
+type PolicyMigration struct {
+	TeamID       string
+	MachineID    string
+	Audience     string
+	AccountID    sql.NullString
+	Capabilities interface{}
+	Rule         int32
+}
+
 // Replayable edge admission/detach intents containing safe binding metadata only.
 type PreviewCarrierAttachmentOutbox struct {
 	AccountID            string
@@ -2142,16 +2187,21 @@ type SupportReport struct {
 }
 
 type Team struct {
-	TeamID             string
-	OwnerAccount       string
-	Generation         int64
-	DeletedAt          sql.NullTime
-	Suspended          bool
-	SuspendedAt        sql.NullTime
-	SuspendedBy        sql.NullString
-	DisplayName        sql.NullString
-	ApproveNewMachines bool
-	AllowPrivateAccess bool
+	TeamID               string
+	OwnerAccount         string
+	Generation           int64
+	DeletedAt            sql.NullTime
+	Suspended            bool
+	SuspendedAt          sql.NullTime
+	SuspendedBy          sql.NullString
+	DisplayName          sql.NullString
+	ApproveNewMachines   bool
+	AllowPrivateAccess   bool
+	WorkosOrganizationID sql.NullString
+	SsoRequired          bool
+	SsoSessionSeconds    sql.NullInt32
+	SsoJit               bool
+	DirectoryMappedOnly  bool
 }
 
 type TeamConfigDefault struct {
@@ -2171,6 +2221,24 @@ type TeamConfigDefaultAdoption struct {
 	DefaultVersion int64
 	RepositoryID   string
 	AdoptedAt      time.Time
+}
+
+type TeamDirectoryGroupRole struct {
+	TeamID  string
+	GroupID string
+	Role    string
+}
+
+type TeamIdentityState struct {
+	TeamID          string
+	Domains         []byte
+	Connections     []byte
+	Directory       []byte
+	DirectoryGroups []byte
+	DirectoryUsers  int32
+	SyncedAt        sql.NullTime
+	SyncError       sql.NullString
+	Dirty           bool
 }
 
 type TeamInboxPolicy struct {
@@ -2237,6 +2305,13 @@ type TeamInvitation struct {
 	CreatedAt        time.Time
 	MailRequestedAt  sql.NullTime
 	LatestMailID     sql.NullString
+	DirectoryUserID  sql.NullString
+}
+
+type TeamJitRequest struct {
+	TeamID    string
+	AccountID string
+	CreatedAt time.Time
 }
 
 type TeamMachineGrant struct {
@@ -2267,6 +2342,10 @@ type TeamMember struct {
 	Role                 string
 	Active               bool
 	JoinedAt             time.Time
+	SsoVerifiedAt        sql.NullTime
+	SsoExempt            bool
+	SsoBypassRecordedAt  sql.NullTime
+	DirectoryUserID      sql.NullString
 }
 
 type TeamOperation struct {
@@ -2307,6 +2386,11 @@ type TeamResourceGrant struct {
 	Permission   string
 	Generation   int64
 	Active       bool
+}
+
+type TeamSsoDomain struct {
+	Domain string
+	TeamID string
 }
 
 type TeamTerminalSessionGrant struct {
@@ -3056,6 +3140,12 @@ type UserTransferDestinationDefault struct {
 	UpdatedAt time.Time
 }
 
+type WorkosEventCursor struct {
+	Singleton  bool
+	AfterEvent string
+	UpdatedAt  time.Time
+}
+
 type WorkspaceEdgeSet struct {
 	ScopeKind  string
 	ScopeID    string
@@ -3063,4 +3153,56 @@ type WorkspaceEdgeSet struct {
 	NodeIds    []string
 	Generation int64
 	AssignedAt time.Time
+}
+
+type WorkspacePolicy struct {
+	ID                  int64
+	TeamID              sql.NullString
+	OwnerAccount        sql.NullString
+	Version             int64
+	Source              string
+	Digest              string
+	AllowPrivateAccess  bool
+	UpdatedAt           time.Time
+	UpdatedBy           sql.NullString
+	UpdatedWithApiToken sql.NullString
+	Message             string
+}
+
+type WorkspacePolicyGroup struct {
+	PolicyID  int64
+	GroupName string
+	AccountID string
+}
+
+type WorkspacePolicyRule struct {
+	PolicyID    int64
+	Rule        int32
+	Deny        bool
+	SubjectKind string
+	SubjectID   string
+	TargetKind  string
+	TargetID    string
+	Action      string
+	Ports       pgtype.Range[pgtype.Int4]
+}
+
+type WorkspacePolicyTag struct {
+	PolicyID  int64
+	Tag       string
+	MachineID string
+}
+
+type WorkspacePolicyVersion struct {
+	PolicyID  int64
+	Version   int64
+	Kind      string
+	Source    string
+	Digest    string
+	CreatedAt time.Time
+	Author    sql.NullString
+	ApiToken  sql.NullString
+	Message   string
+	Gained    int32
+	Lost      int32
 }

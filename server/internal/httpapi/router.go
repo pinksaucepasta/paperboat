@@ -10,6 +10,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat-server/internal/activity"
 	"github.com/pinksaucepasta/paperboat-server/internal/apitokens"
+	"github.com/pinksaucepasta/paperboat-server/internal/auditstream"
 	"github.com/pinksaucepasta/paperboat-server/internal/auth"
 	"github.com/pinksaucepasta/paperboat-server/internal/backupreport"
 	"github.com/pinksaucepasta/paperboat-server/internal/billing"
@@ -56,6 +57,7 @@ type ReadinessChecker interface {
 type Options struct {
 	Activity                 *activity.Service
 	TeamIdentity             *teamidentity.Service
+	AuditStreams             *auditstream.Service
 	ClientUpdatePolicy       ClientUpdatePolicyAPI
 	OperatorInfrastructure   *operatorinfra.Service
 	OperatorBackups          *backupreport.Service
@@ -521,6 +523,9 @@ func NewRouter(opts Options) http.Handler {
 				registerTeamRoutes(mux, opts.Teams, func(h http.Handler) http.Handler { return secure("machines:read", h) }, func(h http.Handler) http.Handler { return secure("machines:connect", requireCSRF(opts.Auth, h)) })
 				if opts.Policy != nil {
 					registerPolicyRoutes(mux, opts.Policy, func(h http.Handler) http.Handler { return secure("machines:read", h) }, func(h http.Handler) http.Handler { return secure("machines:connect", requireCSRF(opts.Auth, h)) })
+				}
+				if opts.AuditStreams != nil {
+					registerAuditStreamRoutes(mux, opts.AuditStreams, func(h http.Handler) http.Handler { return secure("machines:read", h) }, func(h http.Handler) http.Handler { return secure("machines:connect", requireCSRF(opts.Auth, h)) })
 				}
 				if opts.TeamIdentity != nil {
 					registerTeamIdentityRoutes(mux, opts.TeamIdentity, func(h http.Handler) http.Handler { return secure("machines:read", h) }, func(h http.Handler) http.Handler { return secure("machines:connect", requireCSRF(opts.Auth, h)) })

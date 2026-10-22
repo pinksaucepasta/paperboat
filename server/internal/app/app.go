@@ -11,6 +11,7 @@ import (
 	"github.com/pinksaucepasta/paperboat-server/internal/activity"
 	"github.com/pinksaucepasta/paperboat-server/internal/apitokens"
 	"github.com/pinksaucepasta/paperboat-server/internal/audit"
+	"github.com/pinksaucepasta/paperboat-server/internal/auditstream"
 	"github.com/pinksaucepasta/paperboat-server/internal/auth"
 	"github.com/pinksaucepasta/paperboat-server/internal/backupreport"
 	"github.com/pinksaucepasta/paperboat-server/internal/bandwidthgate"
@@ -790,6 +791,7 @@ func New(opts Options) (*App, error) {
 		priceReader = reader
 	}
 	activityLog := activity.New(store, opts.Config.Business)
+	auditStreams := auditstream.New(store, activityLog, opts.Config.Business, opts.Config.Secrets.EncryptionKey, opts.Config.Mail, opts.Config.Secrets.ResendAPIKey != "")
 	// Team SSO and directory sync (PLAN F19); without a WorkOS API key the status still reads.
 	var workOSOrganizations teamidentity.WorkOS
 	if opts.Config.Secrets.WorkOSAPIKey != "" {
@@ -850,6 +852,7 @@ func New(opts Options) (*App, error) {
 		ResourceUsage:             resourceUsageService,
 		Activity:                  activityLog,
 		TeamIdentity:              teamIdentity,
+		AuditStreams:              auditStreams,
 		NativePrivateAccess:       nativePrivateService,
 		ManagedSSH:                managedSSHService,
 		DiagnosticUploads:         diagnosticUploadService,
@@ -943,6 +946,13 @@ func New(opts Options) (*App, error) {
 			return ctx.Err()
 		}), progress))
 	}
+	serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_audit_streams", periodicPreviewTunnelWorker(opts.Config.Business.AuditStreamBatchWindow, func(ctx context.Context) error {
+		deliverContext, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		defer cancel()
+		err := auditStreams.Deliver(deliverContext)
+		workers.IterationFailure(ctx, "audit_stream_delivery", "audit_stream_delivery_failed", err)
+		return ctx.Err()
+	}), progress))
 	if workOSOrganizations != nil {
 		serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_team_identity", periodicPreviewTunnelWorker(teamIdentity.Interval(), func(ctx context.Context) error {
 			syncContext, cancel := context.WithTimeout(ctx, 2*time.Minute)

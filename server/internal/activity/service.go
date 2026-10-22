@@ -191,40 +191,49 @@ func scan(ctx context.Context, tx *db.Tx, ws string, retention time.Duration, be
 	defer rows.Close()
 	var last int64
 	for rows.Next() {
-		event := Event{Workspace: ws}
-		var machine Machine
-		var actorType string
-		var metadata []byte
-		if err := rows.Scan(&event.ID, &event.OccurredAt, &event.Action, &actorType, &event.Actor.ID, &event.Actor.Email, &event.Actor.TokenID,
-			&event.Target.Kind, &event.Target.ID, &event.Target.Name, &machine.ID, &machine.Name,
-			&event.Result, &event.Reason, &event.IP, &event.UserAgent, &metadata, &event.sequence); err != nil {
+		event, err := decode(rows, ws)
+		if err != nil {
 			return 0, err
 		}
-		event.Actor.Kind = actorKind(actorType, event.Actor.TokenID)
-		if event.Actor.Kind == "system" {
-			event.Actor = Actor{Kind: "system"}
-		}
-		switch event.Target.Kind {
-		case "user_machine":
-			event.Target.Kind = "machine"
-		case "preview_lease":
-			event.Target.Kind = "preview"
-		}
-		if machine.ID != "" {
-			event.Machine = &machine
-		}
-		var raw map[string]any
-		if json.Unmarshal(metadata, &raw) == nil {
-			event.RequestID, _ = raw["request_id"].(string)
-		}
-		event.Details = teams.ProjectActivityMetadata(raw)
-		delete(event.Details, "request_id")
 		last = event.sequence
 		if !emit(event) {
 			break
 		}
 	}
 	return last, rows.Err()
+}
+
+// decode reads one event row in the column order of eventsSQL.
+func decode(rows interface{ Scan(...any) error }, ws string) (Event, error) {
+	event := Event{Workspace: ws}
+	var machine Machine
+	var actorType string
+	var metadata []byte
+	if err := rows.Scan(&event.ID, &event.OccurredAt, &event.Action, &actorType, &event.Actor.ID, &event.Actor.Email, &event.Actor.TokenID,
+		&event.Target.Kind, &event.Target.ID, &event.Target.Name, &machine.ID, &machine.Name,
+		&event.Result, &event.Reason, &event.IP, &event.UserAgent, &metadata, &event.sequence); err != nil {
+		return event, err
+	}
+	event.Actor.Kind = actorKind(actorType, event.Actor.TokenID)
+	if event.Actor.Kind == "system" {
+		event.Actor = Actor{Kind: "system"}
+	}
+	switch event.Target.Kind {
+	case "user_machine":
+		event.Target.Kind = "machine"
+	case "preview_lease":
+		event.Target.Kind = "preview"
+	}
+	if machine.ID != "" {
+		event.Machine = &machine
+	}
+	var raw map[string]any
+	if json.Unmarshal(metadata, &raw) == nil {
+		event.RequestID, _ = raw["request_id"].(string)
+	}
+	event.Details = teams.ProjectActivityMetadata(raw)
+	delete(event.Details, "request_id")
+	return event, nil
 }
 
 // actorKind maps the stored actor type to the documented one.
