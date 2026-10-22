@@ -1,0 +1,313 @@
+{
+ "read_p50_ms": 50,
+ "iterations": 15,
+ "endpoints": [
+  {
+   "actor": "user_perf_0001",
+   "path": "/v1/me",
+   "max_queries": 6
+  },
+  {
+   "actor": "user_perf_0002",
+   "path": "/v1/workspaces",
+   "max_queries": 8
+  },
+  {
+   "actor": "user_perf_0001",
+   "path": "/v1/machines",
+   "max_queries": 12
+  },
+  {
+   "actor": "user_perf_0002",
+   "path": "/v1/machines",
+   "max_queries": 12
+  },
+  {
+   "actor": "user_perf_0003",
+   "path": "/v1/machines",
+   "max_queries": 12
+  },
+  {
+   "actor": "user_perf_0002",
+   "path": "/v1/machines?limit=200",
+   "max_queries": 12,
+   "p50_ms": 310,
+   "reason": "200 machines with their access description; per-machine permission functions (Lane Q pagination step)"
+  },
+  {
+   "actor": "user_perf_0001",
+   "path": "/v1/machines?workspace=perf-team-001",
+   "max_queries": 20,
+   "p50_ms": 820,
+   "reason": "1000 team machines filtered by the access functions per candidate; set-based team access (Lane Q next)"
+  },
+  {
+   "actor": "user_perf_0003",
+   "path": "/v1/machines?workspace=perf-team-001",
+   "max_queries": 20,
+   "p50_ms": 920,
+   "reason": "same as the team owner's team list"
+  },
+  {
+   "actor": "user_perf_0001",
+   "path": "/v1/machines?workspace=perf-team-001&limit=200",
+   "max_queries": 20,
+   "p50_ms": 3660,
+   "reason": "200 team machines: per-machine access description; set-based team access (Lane Q next)"
+  },
+  {
+   "actor": "user_perf_0003",
+   "path": "/v1/machines?workspace=perf-team-001&limit=200",
+   "max_queries": 20,
+   "p50_ms": 2710,
+   "reason": "same as the team owner's 200-row team list"
+  },
+  {
+   "actor": "user_perf_0001",
+   "path": "/v1/machines/overview",
+   "max_queries": 8
+  },
+  {
+   "actor": "user_perf_0001",
+   "path": "/v1/machines/update-summary",
+   "max_queries": 8
+  },
+  {
+   "actor": "user_perf_0002",
+   "path": "/v1/machines/{solo_machine}",
+   "max_queries": 12
+  },
+  {
+   "actor": "user_perf_0001",
+   "path": "/v1/machines/{team_machine}?workspace=perf-team-001",
+   "max_queries": 12,
+   "p50_ms": 60,
+   "reason": "measured 22 ms p50 on the loaded gate host"
+  },
+  {
+   "actor": "user_perf_0003",
+   "path": "/v1/machines/{team_machine}?workspace=perf-team-001",
+   "max_queries": 12
+  },
+  {
+   "actor": "user_perf_0002",
+   "path": "/v1/machines/{solo_machine}/terminal-sessions",
+   "max_queries": 90,
+   "p50_ms": 280,
+   "reason": "per-session live description (grants, helper route) for each row"
+  },
+  {
+   "actor": "user_perf_0001",
+   "path": "/v1/machines/{team_machine}/terminal-sessions?workspace=perf-team-001",
+   "max_queries": 16,
+   "p50_ms": 70,
+   "reason": "measured 26 ms p50 on the loaded gate host"
+  },
+  {
+   "actor": "user_perf_0001",
+   "path": "/v1/terminal-sessions",
+   "max_queries": 12,
+   "p50_ms": 60,
+   "reason": "measured 22 ms p50 on the loaded gate host"
+  },
+  {
+   "actor": "user_perf_0002",
+   "path": "/v1/terminal-sessions",
+   "max_queries": 115,
+   "p50_ms": 280,
+   "reason": "per-row grants and helper route lookups (batched next)"
+  },
+  {
+   "actor": "user_perf_0003",
+   "path": "/v1/terminal-sessions",
+   "max_queries": 65,
+   "p50_ms": 150,
+   "reason": "measured 58 ms p50 on the loaded gate host"
+  },
+  {
+   "actor": "user_perf_0001",
+   "path": "/v1/terminal-sessions?workspace=perf-team-001",
+   "max_queries": 55,
+   "p50_ms": 250,
+   "reason": "per-row grants and helper route lookups (batched next)"
+  },
+  {
+   "actor": "user_perf_0003",
+   "path": "/v1/terminal-sessions?workspace=perf-team-001",
+   "max_queries": 85,
+   "p50_ms": 280,
+   "reason": "per-row grants and helper route lookups (batched next)"
+  },
+  {
+   "actor": "user_perf_0001",
+   "path": "/v1/previews",
+   "max_queries": 4
+  },
+  {
+   "actor": "user_perf_0002",
+   "path": "/v1/previews",
+   "max_queries": 110,
+   "p50_ms": 600,
+   "reason": "per-preview view decoration (batched next)"
+  },
+  {
+   "actor": "user_perf_0003",
+   "path": "/v1/previews",
+   "max_queries": 35,
+   "p50_ms": 100,
+   "reason": "measured 37 ms p50 on the loaded gate host"
+  },
+  {
+   "actor": "user_perf_0003",
+   "path": "/v1/previews?workspace=perf-team-001",
+   "max_queries": 10
+  },
+  {
+   "actor": "user_perf_0002",
+   "path": "/v1/previews/{solo_preview}",
+   "max_queries": 8
+  },
+  {
+   "actor": "user_perf_0002",
+   "path": "/v1/tunnels",
+   "max_queries": 8,
+   "p50_ms": 150,
+   "reason": "tunnel health refresh before listing"
+  },
+  {
+   "actor": "user_perf_0003",
+   "path": "/v1/tunnels",
+   "max_queries": 8
+  },
+  {
+   "actor": "user_perf_0003",
+   "path": "/v1/tunnels?workspace=perf-team-001",
+   "max_queries": 10
+  },
+  {
+   "actor": "user_perf_0002",
+   "path": "/v1/tunnels/{solo_tunnel}",
+   "max_queries": 8
+  },
+  {
+   "actor": "user_perf_0002",
+   "path": "/v1/tunnels/{solo_tunnel}/routes",
+   "max_queries": 5
+  },
+  {
+   "actor": "user_perf_0001",
+   "path": "/v1/teams",
+   "max_queries": 16,
+   "p50_ms": 4220,
+   "reason": "team view embeds every member, machine and grant (6.4 MB); paginated team endpoints planned with Lane A/C"
+  },
+  {
+   "actor": "user_perf_0003",
+   "path": "/v1/teams",
+   "max_queries": 24,
+   "p50_ms": 3450,
+   "reason": "same 6.4 MB team view"
+  },
+  {
+   "actor": "user_perf_0001",
+   "path": "/v1/teams/perf-team-001",
+   "max_queries": 16,
+   "p50_ms": 2780,
+   "reason": "same 6.4 MB team view"
+  },
+  {
+   "actor": "user_perf_0001",
+   "path": "/v1/teams/perf-team-001/activity",
+   "max_queries": 16,
+   "p50_ms": 1720,
+   "reason": "team activity audit scan (Lane Q next)"
+  },
+  {
+   "actor": "user_perf_0001",
+   "path": "/v1/activity",
+   "max_queries": 9
+  },
+  {
+   "actor": "user_perf_0001",
+   "path": "/v1/activity?workspace=perf-team-001",
+   "max_queries": 11
+  },
+  {
+   "actor": "user_perf_0001",
+   "path": "/v1/usage?start=2026-09-22T00:00:00Z&end=2026-10-22T00:00:00Z",
+   "max_queries": 13
+  },
+  {
+   "actor": "user_perf_0003",
+   "path": "/v1/usage?workspace=perf-team-001&start=2026-09-22T00:00:00Z&end=2026-10-22T00:00:00Z",
+   "max_queries": 14
+  },
+  {
+   "actor": "user_perf_0002",
+   "path": "/v1/billing/workspaces/personal",
+   "max_queries": 18
+  },
+  {
+   "actor": "user_perf_0003",
+   "path": "/v1/billing/workspaces/teams/perf-team-001",
+   "max_queries": 20
+  },
+  {
+   "actor": "user_perf_0002",
+   "path": "/v1/team-inbox/requests",
+   "max_queries": 8
+  },
+  {
+   "actor": "user_perf_0003",
+   "path": "/v1/team-inbox/requests",
+   "max_queries": 8
+  },
+  {
+   "actor": "user_perf_0002",
+   "path": "/v1/team-invitations",
+   "max_queries": 5
+  },
+  {
+   "actor": "user_perf_0001",
+   "path": "/v1/teams/perf-team-001/invitations",
+   "max_queries": 5
+  },
+  {
+   "actor": "user_perf_0003",
+   "path": "/v1/favorites",
+   "max_queries": 10
+  },
+  {
+   "actor": "user_perf_0002",
+   "path": "/v1/auth/cli-client-sessions",
+   "max_queries": 5
+  },
+  {
+   "actor": "user_perf_0001",
+   "path": "/v1/environment/scopes",
+   "max_queries": 10
+  },
+  {
+   "actor": "user_perf_0002",
+   "path": "/v1/config-sync/status",
+   "max_queries": 15,
+   "p50_ms": 60,
+   "reason": "measured 22 ms p50 on the loaded gate host"
+  },
+  {
+   "actor": "user_perf_0003",
+   "path": "/v1/machine-services",
+   "max_queries": 6
+  },
+  {
+   "actor": "user_perf_0003",
+   "path": "/v1/machine-services?workspace=perf-team-001",
+   "max_queries": 12
+  },
+  {
+   "actor": "user_perf_0002",
+   "path": "/v1/config-repositories",
+   "max_queries": 5
+  }
+ ]
+}

@@ -19,6 +19,13 @@ for m in shared cli relay tunnel server helper; do
   (cd "$m" && go vet ./... && go test ./...) || { echo "FAIL: $m"; fail=1; }
 done
 
+step "server performance budgets on the seeded PostgreSQL (internal/perf/budgets.json)"
+if [ -n "${PAPERBOAT_PERF_DATABASE_DSN:-}" ]; then
+  (cd server && go test -count=1 -timeout 30m -run TestPerformanceBudgetsOnSeededPostgres ./internal/app) || { echo "FAIL: performance budgets"; fail=1; }
+else
+  echo "skipped: set PAPERBOAT_PERF_DATABASE_DSN to an isolated *_test database (tools/perfdb.sh prints it on oracle)"
+fi
+
 step "no hardcoded domains (AGENTS.md)"
 python3 tools/check_domains.py && (cd tools && python3 -m unittest test_check_domains) || { echo "FAIL: hardcoded domains"; fail=1; }
 

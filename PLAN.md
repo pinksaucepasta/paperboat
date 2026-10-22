@@ -1248,9 +1248,49 @@ budgets (exec latency, send/scp/rsync throughput, small files/s per path type) i
 it after that. Open: daemon's 1 s carrier-attachment poll (Lane P), 8 s machine-services poll (needs a
 push topic, server first), live upgrade of an h2 carrier back to QUIC (Lane M's agent carriers).
 
-#### API/DB (Lane Q)
+#### API/DB (Lane Q, measured 2026-10-22/23)
 
-Lane Q adds its budgets and results here.
+**Scale** (`server/internal/perf/seed.sql`, isolated test PostgreSQL only): 1200 accounts, 100 paid teams (team 1:
+200 members, 1000 team machines), 5000 machines, 50k browser sessions, 20k CLI sessions with tokens, 200k audit
+events, 50k terminal sessions, 50k access sessions, 20k preview leases, 5k tunnels, 200k bandwidth events; three
+actors (team owner, solo user with 100 machines, team member).
+
+**Budgets**, one place: `server/internal/perf/budgets.json`. Every listed read, through the real router, has a
+median budget (default 50 ms) and a maximum number of database queries per request (the N+1 guard). The gate host
+is shared with every lane's builds, so its p95 measures their load: the check enforces the median with headroom and
+the query count and reports p95 (target p95 < 100 ms on an idle host). An endpoint above the default names its
+reason; each fix lowers its line. Check: `TestPerformanceBudgetsOnSeededPostgres` (internal/app), run by
+`tools/gate.sh` when `PAPERBOAT_PERF_DATABASE_DSN` is set (`tools/perfdb.sh` on oracle).
+
+**Rules.** (1) A list starts from an indexed candidate set that is a superset of its access rule (own; owned by or
+bound to an active team of the account; hosts the account may manage) and runs the exact access functions only on
+candidates, until the page is full; the account's own personal machines take the functions' first branch without
+calling them. (2) Polled reads take no row locks and no serializable predicate locks (`db.InReadOnlySnapshot`).
+(3) Serializable transactions use index scans (`SET LOCAL enable_seqscan TO off` in `db.InTx`): on our small
+tables a sequential scan takes a table-wide predicate lock and every concurrent write then conflicts. (4) Every
+lookup a trigger or access function makes has an index.
+
+| What | Before | After | Commit |
+|---|---|---|---|
+| GET /v1/machines, team owner, all workspaces (seeded) | 57 s (count 28.5 s, run twice) | 82 ms count, one pass | 44f18cec |
+| GET /v1/machines?workspace=team (seeded) | >5 s | 103 ms count | 44f18cec |
+| GET /v1/machines (prod) | 1,954 ms avg, 500 at the daemons' 2 s timeout ~21/min | own machines skip the access functions; 0 5xx after deploy | 683a7410 |
+| GET /v1/previews, every actor (seeded) | >5 s timeout (33 s query) | 1.3–70 ms p50 | a30a9c4e |
+| GET /v1/tunnels (seeded) | >5 s timeout (9.4 s query) | 6.6–66 ms p50 | a30a9c4e |
+| GET /v1/terminal-sessions, solo / team (seeded) | 0.74 s, 555 queries / >5 s | 57–100 ms p50, 105 queries | 92825315 |
+| GET /v1/machines/update-summary?workspace=team (seeded) | >5 s | indexed team candidates | fc97a9e2 |
+| GET /v1/machine-services (8 s daemon poll; prod 1,261 ms) | every online machine evaluated | candidates first | 045ca58a |
+| POST /v1/machines/{id}/disconnect (prod) | 503 after 7.7 s, serialization pivot | index-page predicate locks only (migration 123) | 90ca7e63 |
+| POST /v1/machines/pairings (prod) | 500 after 9.3 s, serialization pivot vs daemons' peer config | 1–5/20 → 0/20 under concurrent load (migration 131) | f3ec3bc2 |
+| GET ssh-target / ssh-host-keys (prod, ~48/s from old daemons) | serializable + FOR UPDATE, access functions on every call | read-only snapshot, row first, own-machine branch | 1d81dcf5, 28f943d4 |
+
+Open, in order: the team view embeds every member, machine and grant (`/v1/teams` 6.4 MB, ~0.7 s; paginated team
+endpoints, contract with Lane A/C); keyset cursors with server-side search/filter/sort and cheap totals for every
+list, per-machine running counts, then console `allPages()` and CLI paging (coordinator 2026-10-23, server first);
+team machine list at limit=200 (~1 s; set-based access description once Lane K's compiled access table is the
+source); per-row preview/terminal enrichment (~100 queries per page, batched); retention bounds for audit events,
+sessions, access sessions and usage records; the machine presence fan-out (each online/state change writes one
+topic row per machine in its audience).
 
 ## 4. Handoff notes
 
@@ -2779,3 +2819,4 @@ Lane B: relay rollout (oracle, anvit) needed for the relay numbers to apply; Lan
 2026-10-23 | Lane L F11 | Ticked L: F11-01, F11-02, C178 (85fddf18). F11-03/F11-04 L [!]: self-compare peer stream fails, duplicate conflict listing, force 400 with an open conflict; adopt/unadopt need GitHub creds. | Regression: my machine_alias (bec3fd6b) broke strict config workers on server 2026.10.23.5; reverted 57ce5863, cleared on 2026.10.23.6.
 2026-10-23 | Lane O F13 | F13-05 [x]: sandbox Pro purchase/refund/cancel + Team 14-day trial Checkout (fix 377ffdac live in 2026.10.23.8). Test data: throwaway team laneo-f13-trial (trialing, cancelled at period end) kept until F13-03 ticks, then removed with the account.
 2026-10-23 | Lane S F19-10 | audit log streaming to HTTPS/S3 (migration 130, worker_audit_streams every 5 s, SSRF-safe public-only client). Part 1 live in 2026.10.23.8; SSO (129) + streaming (130) wait for Lane B next deploy.
+2026-10-23 | Lane Q perf | PLAN 3b API/DB filled (budgets, rules, results, open list); gate step TestPerformanceBudgetsOnSeededPostgres (PAPERBOAT_PERF_DATABASE_DSN, tools/perfdb.sh). Waiting for deploy: f3ec3bc2 (pairing, migration 131), 28f943d4 (SSH reads). Rows PQ-01..PQ-04.

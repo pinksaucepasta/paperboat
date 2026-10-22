@@ -760,6 +760,10 @@ Behaviour that only matters when platforms mix. The three cells are platform **p
 | PR-05 | `pb send`, managed scp/rsync and `pb exec true` stay within their per-path budgets. | [ ] | [ ] | [ ] | workspace: TestNativeClientResumesLostCommitAndRetainsBatchAcrossOutage counts 1 offset query per failure (7e4fbece). Device: perf_dataplane.py (first run sets perf_budgets.py). |
 | PR-06 | One preview/tunnel stream through the edge sustains ≥150 Mbit/s at 50 ms RTT. | [ ] | [ ] | [ ] | in-process measurement 38 Mbit/s today (window pinned 256 KiB); fix waits for Lane M. |
 | PR-07 | Local `pb` commands start within 50 ms; `pb status` does not wait on a full machine-list download. | [ ] | [ ] | [ ] | measured pbvm2: --version 33 ms, help 38 ms, status 1.16 s. |
+| PQ-01 | Every budgeted server read in server/internal/perf/budgets.json stays within its median and query-count budget at seeded scale (real router, seeded test PostgreSQL). | [x] | n/a | n/a | TestPerformanceBudgetsOnSeededPostgres PASS 114 s, 53 endpoints, lane-b-test-pg paperboat_perf_test (Lane Q 2026-10-23). Server-only, so M/W do not apply. |
+| PQ-02 | Machine, preview, tunnel and terminal lists return exactly what the access functions allow (candidate clauses and the own-machine branch never hide or add a row or a permission). | [x] | n/a | n/a | TestMachineInventoryCandidatesMatchTheAccessRulesOnPostgres, TestPublicationListCandidatesMatchTheAccessRulesOnPostgres PASS (lane-b-test-pg). |
+| PQ-03 | Disconnect and pairing succeed while the account's daemons refresh peer config (no table-wide predicate lock in serializable transactions). | [x] | n/a | n/a | TestPeerNetworkTriggersTakeNoTableWidePredicateLockOnPostgres, TestPairingSurvivesConcurrentPeerConfigRefreshesOnPostgres, TestPairingSeatUpdateLocksOnlyTheIdentitiesItChangesOnPostgres PASS (fail without migrations 123/131 and the index-scan setting). |
+| PQ-04 | Every list endpoint pages with a keyset cursor, server-side search/filter/sort and a cheap total; console and CLI use it (no allPages()). | [ ] | [ ] | n/a | Server first (Lane Q), then Lane C console and Lane A CLI. |
 
 ## S2. Marketing site
 
