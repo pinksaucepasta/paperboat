@@ -76,6 +76,7 @@ func TestInspectorAuthorizationPostgres(t *testing.T) {
 	t.Cleanup(func() {
 		c := context.Background()
 		_, _ = store.SQL().ExecContext(c, `DELETE FROM paperboat.inspector_credentials WHERE account_id IN($1,$2,$3,$4,$5)`, owner, mate, viewer, stranger, exm)
+		_, _ = store.SQL().ExecContext(c, `DELETE FROM paperboat.billing_workspaces WHERE team_id=$1`, team)
 		_, _ = store.SQL().ExecContext(c, `DELETE FROM paperboat.teams WHERE team_id=$1`, team)
 		_, _ = store.SQL().ExecContext(c, `DELETE FROM paperboat.preview_leases WHERE id=$1`, lease)
 		_, _ = store.SQL().ExecContext(c, `DELETE FROM paperboat.operations WHERE id=$1`, operation)
@@ -115,6 +116,8 @@ func TestInspectorAuthorizationPostgres(t *testing.T) {
 	exec(`INSERT INTO paperboat.tunnels(id,account_id,name,desired_state,access_mode,generation,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id,created_at,updated_at) VALUES($1,$2,$1,'active','team',3,$3,$4,'host',$2,$5,$5)`, tunnel, owner, "endpoint_00000000-0000-4000-8000-"+suffix[len(suffix)-12:], "https://"+host, now)
 	exec(`INSERT INTO paperboat.tunnel_routes(id,tunnel_id,name,protocol,match_type,origin_scheme,origin_address,generation,desired_state,created_by_actor_id,updated_by_actor_id,created_at,updated_at) VALUES($1,$2,'web','http','catch_all','http','127.0.0.1:3000',7,'active',$3,$3,$4,$4)`, route, tunnel, owner, now)
 	exec(`INSERT INTO paperboat.teams(team_id,owner_account,generation) VALUES($1,$2,1)`, team, owner)
+	// Team grants authorize only on a paid team.
+	exec(`INSERT INTO paperboat.billing_workspaces(id,team_id,state,product_code,quantity,period_start,period_end) VALUES($1,$2,'active','team-pro',3,$3,$4)`, "bw_"+team, team, now.Add(-time.Hour), now.Add(time.Hour))
 	exec(`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'member',true),($1,$3,1,'member',true),($1,$4,1,'member',true),($1,$5,1,'member',true)`, team, owner, mate, viewer, exm)
 	exec(`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account,active,generation) VALUES($1,'preview',$2,$3,true,1),($1,'tunnel',$4,$3,true,1)`, team, lease, owner, tunnel)
 	// The view-only teammate holds use grants: viewing must never imply
