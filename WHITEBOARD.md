@@ -286,7 +286,7 @@ Preserve existing protocol support, access controls and privacy boundaries: priv
 native access remains end-to-end encrypted; browser HTTP terminates TLS at the edge.
 This is a post-launch design item, not new implementation work or a launch requirement.
 
-## Tunnel-only mode without a Paperboat machine
+## Tunnel-only mode without a Paperboat machine (and an official container image)
 
 `pb tunnel run --token <token>` for a Docker container, Kubernetes pod or CI job, like
 `cloudflared tunnel run --token`: nothing joins the account and nothing installs into
@@ -316,3 +316,9 @@ paths per feature. Not for launch (user, 2026-10-21).
 Recorded 2026-10-23 at the user's direction (a Pro extra, not affordable yet). More managed relay
 regions with priority capacity for paid plans, so relay-only paths stay fast far from today's edges.
 Revisit once revenue covers the extra servers.
+
+Container mode, recorded 2026-10-23 with the entry above: today `pb` runs in Docker only as a full
+systemd container (`--privileged`, systemd as PID 1). The standard shape (Tailscale, cloudflared) is an
+official image: `pb daemon` in the foreground as the main process, pairing from a one-time key in an
+environment variable, state on a volume, no extra privileges. Covers Docker hosts, Kubernetes and CI.
+
