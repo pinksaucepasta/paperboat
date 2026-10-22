@@ -2,168 +2,214 @@
 import Page from "../../layouts/Page.astro"
 import PageHead from "../../components/PageHead.astro"
 import Section from "../../components/Section.astro"
+import CompareTable from "../../components/CompareTable.astro"
+import CommandExample from "../../components/CommandExample.astro"
 import Closing from "../../components/Closing.astro"
-import { compares } from "../../compare-data"
+import { paperboat, products } from "../../compare-data"
 
 export function getStaticPaths() {
-  return compares.map((compare) => ({ params: { slug: compare.slug }, props: { compare } }))
+  return products.map((product) => ({ params: { slug: product.slug }, props: { product } }))
 }
-const { compare } = Astro.props
+const { product } = Astro.props
+const title = `Paperboat vs ${product.name}`
 ---
 
-<Page title={`${compare.title} — Paperboat`} description={compare.summary}>
-  <PageHead title={compare.title}>
-    <p>{compare.summary}</p>
+<Page title={`${title} — Paperboat`} description={product.summary}>
+  <PageHead title={title}>
+    <p>{product.summary}</p>
+    <p class="back"><a href={`/compare?vs=${product.slug}`}>Compare with other tools</a></p>
   </PageHead>
 
-  <Section id="table" title="Side by side">
-    <div class="table-scroll">
-      <table class="compare-table">
-        <thead>
-          <tr>
-            <th scope="col"><span class="visually-hidden">Feature</span></th>
-            <th scope="col">{compare.name}</th>
-            <th scope="col">Paperboat</th>
-          </tr>
-        </thead>
-        <tbody>
-          {
-            compare.rows.map((row) => (
-              <tr>
-                <th scope="row">{row.feature}</th>
-                <td data-label={compare.name}>{row.them}</td>
-                <td data-label="Paperboat">{row.us}</td>
-              </tr>
-            ))
-          }
-        </tbody>
-      </table>
+  <Section id="differences" title="Key differences">
+    <div class="differences">
+      {
+        product.differences.map((difference) => (
+          <article class="difference">
+            <div class="difference-text">
+              <h3 class="subtitle">{difference.title}</h3>
+              {difference.body.map((paragraph) => (
+                <p class="body">{paragraph}</p>
+              ))}
+            </div>
+            {(difference.them || difference.us) && (
+              <div class="difference-code">
+                {difference.them && (
+                  <figure>
+                    <figcaption>{product.label}</figcaption>
+                    <CommandExample text={difference.them} />
+                  </figure>
+                )}
+                {difference.us && (
+                  <figure>
+                    <figcaption>Paperboat</figcaption>
+                    <CommandExample text={difference.us} />
+                  </figure>
+                )}
+              </div>
+            )}
+          </article>
+        ))
+      }
     </div>
   </Section>
 
-  <Section id="picks" title="Which one to pick" tone="surface">
-    <div class="picks">
-      <div class="pick">
-        <h3 class="subtitle">When to pick {compare.name}</h3>
-        <ul class="points">{compare.themWhen.map((point) => <li class="body">{point}</li>)}</ul>
+  <Section id="table" title="Feature by feature" tone="surface">
+    <CompareTable products={[product]} picked={[product.slug]} />
+  </Section>
+
+  <Section id="choose" title="Which to choose">
+    <div class="pair">
+      <div>
+        <h3 class="subtitle">Choose {product.label} when</h3>
+        <ul class="points">{product.chooseThem.map((point) => <li class="body">{point}</li>)}</ul>
       </div>
-      <div class="pick">
-        <h3 class="subtitle">When to pick Paperboat</h3>
-        <ul class="points">{compare.usWhen.map((point) => <li class="body">{point}</li>)}</ul>
+      <div>
+        <h3 class="subtitle">Choose Paperboat when</h3>
+        <ul class="points">{product.chooseUs.map((point) => <li class="body">{point}</li>)}</ul>
       </div>
     </div>
   </Section>
 
-  <Section id="switching" title={`Switching from ${compare.name}`}>
-    <ol class="steps">
-      {compare.switching.map((step) => <li class="body">{step}</li>)}
-    </ol>
+  <Section id="pricing" title="Pricing" tone="surface">
+    <div class="pair">
+      <div>
+        <h3 class="subtitle">{product.label}</h3>
+        <ul class="points">{product.pricing.lines.map((line) => <li class="body">{line}</li>)}</ul>
+        <p class="source">
+          <a href={product.pricing.source} rel="noopener">Source: {product.pricing.source.replace(/^https:\/\//, "")}</a>
+        </p>
+      </div>
+      <div>
+        <h3 class="subtitle">Paperboat</h3>
+        <ul class="points">{paperboat.pricing.map((line) => <li class="body">{line}</li>)}</ul>
+        <p class="source"><a href="/pricing">Pricing</a></p>
+      </div>
+    </div>
+  </Section>
+
+  <Section id="switching" title={`Switching from ${product.name}`}>
+    <ol class="steps">{product.switching.map((step) => <li class="body">{step}</li>)}</ol>
+  </Section>
+
+  <Section id="faq" title="Questions" tone="surface">
+    <dl class="faq">
+      {
+        product.faq.map((item) => (
+          <div>
+            <dt class="subtitle">{item.q}</dt>
+            <dd class="body">{item.a}</dd>
+          </div>
+        ))
+      }
+    </dl>
   </Section>
 
   <Closing />
 </Page>
 
 <style>
-  .table-scroll {
-    overflow-x: auto;
+  .back {
+    margin-top: 8px;
   }
 
-  .compare-table {
-    width: 100%;
-    min-width: 640px;
-    border-collapse: collapse;
-    font-size: 0.9375rem;
+  .back a {
+    color: var(--link);
   }
 
-  th,
-  td {
-    padding: 14px 16px;
-    text-align: left;
-    vertical-align: top;
-    border-bottom: 1px solid var(--rule);
+  .differences {
+    display: grid;
+    gap: clamp(48px, 6vw, 72px);
   }
 
-  thead th {
-    font-family: var(--font-brand);
-    font-weight: 600;
-    color: var(--ink);
+  .difference {
+    display: grid;
+    gap: 24px;
+    align-items: start;
   }
 
-  tbody th {
-    width: 28%;
-    font-weight: 500;
-    color: var(--ink);
+  .difference-text {
+    display: grid;
+    gap: 12px;
+    max-width: 560px;
   }
 
-  td {
+  .difference-code {
+    display: grid;
+    gap: 16px;
+    min-width: 0;
+  }
+
+  figure {
+    display: grid;
+    gap: 8px;
+    margin: 0;
+    min-width: 0;
+  }
+
+  figcaption {
+    font-size: 0.8125rem;
     color: var(--fog);
   }
 
-  .picks {
+  .pair {
     display: grid;
     gap: 40px;
   }
 
-  .pick {
+  .pair > div {
     display: grid;
     gap: 16px;
     align-content: start;
   }
 
-  .points,
+  .points {
+    display: grid;
+    gap: 10px;
+    margin: 0;
+    padding-left: 1.1em;
+  }
+
+  .source {
+    margin: 0;
+    font-size: 0.8125rem;
+  }
+
+  .source a {
+    color: var(--fog);
+    word-break: break-all;
+  }
+
   .steps {
     display: grid;
     gap: 12px;
-  }
-
-  .steps {
     max-width: 640px;
-    list-style: decimal;
+    margin: 0;
     padding-left: 1.25rem;
   }
 
-  /* On a phone each row becomes a small block: the feature, then both answers with their names. */
-  @media (max-width: 719px) {
-    .compare-table {
-      min-width: 0;
-    }
-
-    .compare-table thead {
-      position: absolute;
-      width: 1px;
-      height: 1px;
-      overflow: hidden;
-      clip: rect(0 0 0 0);
-    }
-
-    .compare-table tr,
-    .compare-table th,
-    .compare-table td {
-      display: block;
-    }
-
-    .compare-table tbody tr {
-      padding-block: 16px;
-      border-bottom: 1px solid var(--rule);
-    }
-
-    .compare-table th,
-    .compare-table td {
-      padding: 4px 0;
-      border: 0;
-      width: auto;
-    }
-
-    .compare-table td::before {
-      content: attr(data-label);
-      display: block;
-      font-size: 0.8125rem;
-      color: var(--ink);
-    }
+  .faq {
+    display: grid;
+    gap: 32px;
+    max-width: 720px;
+    margin: 0;
   }
 
-  @media (min-width: 860px) {
-    .picks {
+  .faq div {
+    display: grid;
+    gap: 8px;
+  }
+
+  .faq dd {
+    margin: 0;
+  }
+
+  @media (min-width: 960px) {
+    .difference {
+      grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+      gap: 48px;
+    }
+
+    .pair {
       grid-template-columns: repeat(2, 1fr);
     }
   }

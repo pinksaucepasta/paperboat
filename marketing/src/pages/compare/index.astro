@@ -2,76 +2,38 @@
 import Page from "../../layouts/Page.astro"
 import PageHead from "../../components/PageHead.astro"
 import Section from "../../components/Section.astro"
+import CompareTable from "../../components/CompareTable.astro"
 import Closing from "../../components/Closing.astro"
-import { compares, rowNames, usMatrix } from "../../compare-data"
-
-/** Column headings: "an enterprise VPN" reads as "Enterprise VPN" in a table. */
-const label = (name: string) =>
-  /^an? /.test(name) ? name.replace(/^an? (.)/, (_, c: string) => c.toUpperCase()) : name
+import { defaultPicks, products } from "../../compare-data"
 ---
 
 <Page
   title="Compare — Paperboat"
-  description="How Paperboat compares with Tailscale, ngrok, Cloudflare, Teleport, NetBird, ZeroTier, Twingate, enterprise VPNs, plain SSH and VS Code Remote Tunnels."
+  description="Paperboat side by side with Tailscale, ngrok, Cloudflare, Teleport, NetBird, ZeroTier, Twingate, enterprise VPNs, SSH and VS Code Remote Tunnels: terminals, SSH, files, ENV, previews, tunnels, encryption, teams and pricing."
 >
   <PageHead title="Compare">
     <p>
-      Paperboat is for working on your own machines: terminals that survive a dropped connection, SSH and files,
-      previews and tunnels, and machines that reach each other directly. Most tools below do one of these well. Here
-      is what each does, from its own documentation.
+      Pick up to two tools and see them beside Paperboat, feature by feature. Every answer about another product
+      links to its own documentation.
     </p>
   </PageHead>
 
-  <Section id="matrix" title="At a glance">
-    <div class="matrix-scroll" tabindex="0" aria-label="Comparison table, scrolls sideways">
-      <table class="matrix">
-        <thead>
-          <tr>
-            <th scope="col"><span class="visually-hidden">Feature</span></th>
-            <th scope="col" class="us">Paperboat</th>
-            {
-              compares.map((compare) => (
-                <th scope="col">
-                  <a href={`/compare/${compare.slug}`}>{label(compare.name)}</a>
-                </th>
-              ))
-            }
-          </tr>
-        </thead>
-        <tbody>
-          {
-            rowNames.map((row, index) => (
-              <tr>
-                <th scope="row">{row}</th>
-                <td class="us">{usMatrix[index]}</td>
-                {compares.map((compare) => (
-                  <td>{compare.matrix[index]}</td>
-                ))}
-              </tr>
-            ))
-          }
-        </tbody>
-      </table>
-    </div>
+  <Section id="table">
+    <CompareTable products={products} picked={defaultPicks} picker />
   </Section>
 
-  <Section id="picks" title="Which one to pick" tone="surface">
+  <Section id="pages" title="Side by side, in more detail" tone="surface">
     <Fragment slot="text">
-      <p>Each tool is good at something. One line each way; the full side-by-side is one click away.</p>
+      <p>What is different, which to choose, pricing and how to switch.</p>
     </Fragment>
-    <ul class="picks">
+    <ul class="pages">
       {
-        compares.map((compare) => (
-          <li class="pick">
-            <h3 class="subtitle">
-              <a href={`/compare/${compare.slug}`}>Paperboat vs {label(compare.name)}</a>
-            </h3>
-            <p class="body">
-              <strong>Pick Paperboat when</strong> {compare.usWhen[0].replace(/^./, (c) => c.toLowerCase())}
-            </p>
-            <p class="body">
-              <strong>Pick {label(compare.name)} when</strong> {compare.themWhen[0].replace(/^./, (c) => c.toLowerCase())}
-            </p>
+        products.map((product) => (
+          <li>
+            <a href={`/compare/${product.slug}`}>
+              <span class="page-name">Paperboat vs {product.label}</span>
+              <span class="page-line">{product.summary.split(". ")[0]}.</span>
+            </a>
           </li>
         ))
       }
@@ -82,97 +44,43 @@ const label = (name: string) =>
 </Page>
 
 <style>
-  .matrix-scroll {
-    overflow-x: auto;
-    border-radius: 12px;
-    box-shadow: 0 0 0 1px var(--rule);
+  .pages {
+    display: grid;
+    gap: 0 48px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
   }
 
-  .matrix {
-    border-collapse: collapse;
-    font-size: 0.875rem;
-    min-width: 100%;
+  .pages a {
+    display: grid;
+    gap: 4px;
+    padding-block: 18px;
+    border-top: 1px solid var(--rule);
+    color: inherit;
+    text-decoration: none;
   }
 
-  .matrix th,
-  .matrix td {
-    padding: 12px 14px;
-    text-align: left;
-    vertical-align: top;
-    border-bottom: 1px solid var(--rule);
-    min-width: 128px;
-  }
-
-  .matrix thead th {
+  .page-name {
     font-family: var(--font-brand);
     font-weight: 600;
+    font-size: 1.0625rem;
     color: var(--ink);
-    white-space: nowrap;
   }
 
-  .matrix thead a {
-    color: inherit;
+  .pages a:hover .page-name {
+    color: var(--cobalt);
   }
 
-  .matrix thead a:hover {
-    color: var(--link);
-  }
-
-  /* The feature names stay in view while the table scrolls sideways. */
-  .matrix tbody th,
-  .matrix thead th:first-child {
-    position: sticky;
-    left: 0;
-    z-index: 1;
-    background: var(--background);
-    min-width: 168px;
-    font-weight: 500;
-    color: var(--ink);
-    box-shadow: 1px 0 0 var(--rule);
-  }
-
-  .matrix td {
+  .page-line {
     color: var(--fog);
-  }
-
-  .matrix .us {
-    color: var(--ink);
-    background: var(--surface);
-  }
-
-  .matrix tbody tr:last-child th,
-  .matrix tbody tr:last-child td {
-    border-bottom: 0;
-  }
-
-  .picks {
-    display: grid;
-    gap: 32px;
-  }
-
-  .pick {
-    display: grid;
-    gap: 8px;
-    align-content: start;
-  }
-
-  .pick a {
-    color: inherit;
-  }
-
-  .pick a:hover {
-    color: var(--link);
-  }
-
-  .pick strong {
-    font-weight: 500;
-    color: var(--ink);
+    font-size: 0.9375rem;
+    max-width: 52ch;
   }
 
   @media (min-width: 860px) {
-    .picks {
+    .pages {
       grid-template-columns: repeat(2, 1fr);
-      gap: 40px 48px;
     }
   }
 </style>

@@ -1,0 +1,390 @@
+---
+/**
+ * Products side by side, grouped by what you do with them (sections in compare-data.ts). Each
+ * column is a product; a claim about another product carries a footnote number that links to the
+ * page that says it, listed under the table per product. With `picker`, every product is
+ * rendered and the column headings are menus: compare-picker.ts shows the chosen ones and keeps
+ * them in the URL (?vs=). Without it, only the given columns are rendered.
+ */
+import { paperboat, sections, type Cell, type Product } from "../compare-data"
+
+interface Props {
+  /** The other products, in column order. */
+  products: Product[]
+  /** Slugs shown first (the rest are rendered hidden for the picker). */
+  picked: string[]
+  picker?: boolean
+  /** All products, for the picker's menus. */
+  options?: Product[]
+}
+const { products, picked, picker = false, options = products } = Astro.props
+
+/** Per product, its sources in order of first use, so a footnote is "3" within that product. */
+const footnotes = new Map<string, string[]>()
+for (const product of products) {
+  const list: string[] = []
+  for (const section of sections)
+    for (const row of section.rows) {
+      const source = product.cells[row.id].source
+      if (source && !list.includes(source)) list.push(source)
+    }
+  footnotes.set(product.slug, list)
+}
+const note = (product: Product, cell: Cell) =>
+  cell.source ? footnotes.get(product.slug)!.indexOf(cell.source) + 1 : undefined
+
+const shown = (slug: string) => slug === "paperboat" || picked.includes(slug)
+/** Grid order of a product's cells: Paperboat, then the picks in order. */
+const order = (slug: string) => (picked.includes(slug) ? picked.indexOf(slug) + 2 : 9)
+// The picker's two menus: the first picked product, then the second (or none).
+const slots = picker ? [picked[0], picked[1] ?? ""] : []
+const empty = (text: string) => text === "—" || text === "No"
+---
+
+<div
+  class="compare"
+  data-compare
+  data-picker={picker ? "" : undefined}
+  style={`--count: ${picker ? 3 : 1 + products.length}`}
+>
+  <div class="heads" data-heads>
+    <div class="heads-track" data-heads-track>
+      <div class="corner" aria-hidden="true"></div>
+      <div class="head us" style="order: 1"><span class="head-name">Paperboat</span></div>
+      {
+        picker
+          ? slots.map((value, index) => (
+              <label class="head slot" style={`order: ${index + 2}`}>
+                <span class="visually-hidden">{index === 0 ? "Compare with" : "And with"}</span>
+                <select data-pick={index}>
+                  {index === 1 && <option value="">Choose a product</option>}
+                  {options.map((option) => (
+                    <option value={option.slug} selected={option.slug === value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ))
+          : products.map((product, index) => (
+              <div class="head" style={`order: ${index + 2}`}>
+                <span class="head-name">{product.label}</span>
+              </div>
+            ))
+      }
+    </div>
+  </div>
+
+  <div class="body" data-body>
+    <div class="body-track">
+      {
+        sections.map((section) => (
+          <section class="group" aria-labelledby={`group-${section.id}`}>
+            <header class="group-head">
+              <h3 class="group-title" id={`group-${section.id}`}>
+                {section.title}
+              </h3>
+              <p class="group-sentence">{section.sentence}</p>
+            </header>
+            {section.rows.map((row) => (
+              <div class="row" role="row">
+                <div class="label" role="rowheader">
+                  {row.label}
+                </div>
+                <div class="cell us" role="cell" style="order: 1">
+                  {paperboat.cells[row.id].text}
+                </div>
+                {products.map((product) => {
+                  const cell = product.cells[row.id]
+                  const n = note(product, cell)
+                  return (
+                    <div
+                      class:list={["cell", empty(cell.text) && "none"]}
+                      role="cell"
+                      data-col={product.slug}
+                      hidden={!shown(product.slug)}
+                      style={`order: ${order(product.slug)}`}
+                    >
+                      {cell.text}
+                      {n && (
+                        <a class="fn" href={`#src-${product.slug}-${n}`} aria-label={`Source ${n} for ${product.label}`}>
+                          {n}
+                        </a>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            ))}
+          </section>
+        ))
+      }
+    </div>
+  </div>
+
+  <div class="sources">
+    <h3 class="sources-title">Sources</h3>
+    <p class="sources-note">
+      What each product does, from its own documentation, checked on 23 October 2026. “No” means its documentation
+      describes no such feature.
+    </p>
+    {
+      products.map((product) => (
+        <div class="source-list" data-col={product.slug} hidden={!shown(product.slug)}>
+          <h4>{product.label}</h4>
+          <ol>
+            {footnotes.get(product.slug)!.map((url, index) => (
+              <li id={`src-${product.slug}-${index + 1}`}>
+                <a href={url} rel="noopener">
+                  {url.replace(/^https:\/\//, "")}
+                </a>
+              </li>
+            ))}
+          </ol>
+        </div>
+      ))
+    }
+  </div>
+</div>
+
+<script>
+  import { mountCompare } from "../compare-picker"
+  document.querySelectorAll<HTMLElement>("[data-compare]").forEach(mountCompare)
+</script>
+
+<style>
+  .compare {
+    --label: 200px;
+    --colmin: 168px;
+    position: relative;
+  }
+
+  /* Column headings stay in view while the table scrolls; on a phone they slide with the columns. */
+  .heads {
+    position: sticky;
+    top: var(--header);
+    z-index: 5;
+    background: rgb(255 255 255 / 0.94);
+    backdrop-filter: saturate(1.6) blur(14px);
+    -webkit-backdrop-filter: saturate(1.6) blur(14px);
+    box-shadow: 0 1px 0 var(--rule);
+    overflow: hidden;
+  }
+
+  :global(.section-surface) .heads {
+    background: rgb(246 246 247 / 0.94);
+  }
+
+  .heads-track,
+  .row {
+    display: grid;
+    grid-template-columns: var(--label) repeat(var(--count), minmax(var(--colmin), 1fr));
+    column-gap: 24px;
+  }
+
+  /* The picker renders every product; only the chosen ones take a column. */
+  [hidden] {
+    display: none !important;
+  }
+
+  .head {
+    display: flex;
+    align-items: center;
+    min-height: 64px;
+    font-family: var(--font-brand);
+    font-weight: 600;
+    font-size: 1.0625rem;
+    letter-spacing: -0.01em;
+    color: var(--ink);
+  }
+
+  .label {
+    order: 0;
+  }
+
+  .head.us .head-name {
+    color: var(--cobalt);
+  }
+
+  /* The menu's text lines up with the column's answers; its tint sits just outside. */
+  .slot select {
+    appearance: none;
+    width: calc(100% + 12px);
+    margin-left: -12px;
+    padding: 8px 32px 8px 12px;
+    border: 0;
+    border-radius: 8px;
+    background: var(--surface)
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5 6 7.5 9 4.5' fill='none' stroke='%236b6f76' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+      no-repeat right 10px center;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+  }
+
+  .slot select:hover {
+    background-color: var(--surface-strong);
+  }
+
+  .slot select:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+
+  .body {
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .body::-webkit-scrollbar {
+    display: none;
+  }
+
+  .group {
+    padding-top: 48px;
+  }
+
+  .group-head {
+    display: grid;
+    gap: 4px;
+    padding-bottom: 12px;
+    max-width: 560px;
+  }
+
+  .group-title {
+    margin: 0;
+    font-family: var(--font-brand);
+    font-weight: 600;
+    font-size: 1.375rem;
+    letter-spacing: -0.02em;
+    color: var(--ink);
+  }
+
+  .group-sentence {
+    margin: 0;
+    color: var(--fog);
+    font-size: 0.9375rem;
+  }
+
+  .row {
+    padding-block: 14px;
+    border-top: 1px solid var(--divider);
+    font-size: 0.9375rem;
+    line-height: 1.45;
+  }
+
+  .label {
+    color: var(--fog);
+  }
+
+  .cell {
+    color: var(--ink);
+  }
+
+  .cell.none {
+    color: var(--faint);
+  }
+
+  .fn {
+    margin-left: 3px;
+    font-size: 0.6875rem;
+    vertical-align: super;
+    line-height: 0;
+    color: var(--fog);
+    text-decoration: none;
+  }
+
+  .fn:hover {
+    color: var(--cobalt);
+  }
+
+  .sources {
+    display: grid;
+    gap: 16px;
+    margin-top: 64px;
+    padding-top: 24px;
+    border-top: 1px solid var(--rule);
+    font-size: 0.8125rem;
+    color: var(--fog);
+  }
+
+  .sources-title {
+    margin: 0;
+    font-family: var(--font-brand);
+    font-weight: 600;
+    font-size: 1rem;
+    color: var(--ink);
+  }
+
+  .sources-note {
+    margin: 0;
+    max-width: 640px;
+  }
+
+  .source-list h4 {
+    margin: 0 0 6px;
+    font-weight: 500;
+    color: var(--ink);
+  }
+
+  .source-list ol {
+    margin: 0;
+    padding-left: 1.5em;
+    display: grid;
+    gap: 2px;
+  }
+
+  .source-list a {
+    color: inherit;
+    word-break: break-all;
+  }
+
+  .source-list li:target {
+    color: var(--ink);
+    background: var(--hull);
+  }
+
+  /*
+   * Phones: the row's name goes above its answers (as on Apple's compare pages) and the product
+   * columns keep a readable width; with more than fit, they swipe sideways, headings with them.
+   */
+  @media (max-width: 719px) {
+    .compare {
+      --colmin: 136px;
+    }
+
+    .heads-track,
+    .row {
+      grid-template-columns: repeat(var(--count), minmax(var(--colmin), 1fr));
+      column-gap: 16px;
+      min-width: calc(var(--count) * var(--colmin) + (var(--count) - 1) * 16px);
+    }
+
+    .corner {
+      display: none;
+    }
+
+    .label {
+      grid-column: 1 / -1;
+      padding-bottom: 6px;
+      font-size: 0.8125rem;
+    }
+
+    .group-head {
+      position: sticky;
+      left: 0;
+      max-width: calc(100vw - 2 * var(--gutter));
+    }
+
+    .label {
+      position: sticky;
+      left: 0;
+      max-width: calc(100vw - 2 * var(--gutter));
+    }
+
+    .head {
+      font-size: 0.9375rem;
+      min-height: 56px;
+    }
+  }
+</style>
