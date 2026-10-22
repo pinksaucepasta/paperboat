@@ -385,11 +385,19 @@ func (s *Service) Pull(ctx context.Context, edge previewattachment.PreviewEdgeId
 	return append(out, routes...), nil
 }
 
+// observationRefresh is how often an unchanged ready observation is written
+// again; readers treat a ready carrier as fresh for 30 seconds.
+const observationRefresh = 10 * time.Second
+
 func (s *Service) Observe(ctx context.Context, edge previewattachment.PreviewEdgeIdentity, observations []runtimewire.Observation) error {
 	if len(observations) > runtimewire.MaximumAdmissions {
 		return ErrInvalid
 	}
-	return s.DB.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+	// A stale observation (its carrier was replaced) must not roll back the
+	// renewal of the edge's other carriers: those commit, then the edge hears 409.
+	stale := false
+	err := s.DB.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		stale = false
 		seen := map[string]bool{}
 		for _, o := range observations {
 			if connectorprotocol.ValidateIdentifier(o.RouteID) != nil || connectorprotocol.ValidateIdentifier(o.SessionID) != nil || o.AttachmentGeneration == 0 || seen[o.RouteID] {
@@ -406,15 +414,30 @@ func (s *Service) Observe(ctx context.Context, edge previewattachment.PreviewEdg
 				}
 				continue
 			}
-			var active bool
-			err = tx.QueryRow(ctx, `UPDATE runtime_carrier_attachments SET ready=$6,observed_at=now() WHERE route_id=$1 AND generation=$2 AND session_id=$3 AND edge_node_id=$4 AND edge_process_epoch=$5 AND (NOT $6 OR paperboat.runtime_carrier_valid(route_id,edge_node_id,edge_process_epoch,false)) RETURNING active`, o.RouteID, o.AttachmentGeneration, o.SessionID, edge.NodeID, edge.ProcessEpoch, o.Ready).Scan(&active)
+			// Edges repeat every observation every few seconds. An unchanged, recently
+			// written one is only read: rewriting it (and the route rows below) on each
+			// report made concurrent serializable edge reports collide and fail.
+			var active, unchanged, current bool
+			err = tx.QueryRow(ctx, `SELECT active,COALESCE(ready=$6,false),COALESCE(observed_at>now()-$7::interval,false) FROM runtime_carrier_attachments WHERE route_id=$1 AND generation=$2 AND session_id=$3 AND edge_node_id=$4 AND edge_process_epoch=$5`, o.RouteID, o.AttachmentGeneration, o.SessionID, edge.NodeID, edge.ProcessEpoch, o.Ready, observationRefresh.String()).Scan(&active, &unchanged, &current)
 			if errors.Is(err, pgx.ErrNoRows) {
-				return ErrStale
+				stale = true
+				continue
 			}
 			if err != nil {
 				return err
 			}
-			if !active {
+			if unchanged && current {
+				continue
+			}
+			err = tx.QueryRow(ctx, `UPDATE runtime_carrier_attachments SET ready=$6,observed_at=now() WHERE route_id=$1 AND generation=$2 AND session_id=$3 AND edge_node_id=$4 AND edge_process_epoch=$5 AND (NOT $6 OR paperboat.runtime_carrier_valid(route_id,edge_node_id,edge_process_epoch,false)) RETURNING active`, o.RouteID, o.AttachmentGeneration, o.SessionID, edge.NodeID, edge.ProcessEpoch, o.Ready).Scan(&active)
+			if errors.Is(err, pgx.ErrNoRows) {
+				stale = true
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			if !active || unchanged {
 				continue
 			}
 			// Existing browser consumers retain their generation checks. Their queries
@@ -431,6 +454,10 @@ func (s *Service) Observe(ctx context.Context, edge previewattachment.PreviewEdg
 		}
 		return nil
 	})
+	if err == nil && stale {
+		return ErrStale
+	}
+	return err
 }
 
 func newCarrierSessionID(random io.Reader) (string, error) {

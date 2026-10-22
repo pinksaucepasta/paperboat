@@ -321,6 +321,20 @@ VALUES($1,'default','1.0','epoch_backup','ready',true,now(),'second-region','sec
 		t.Fatal(err)
 	}
 	ready(true)
+	// A repeated unchanged observation is read, not written: no row version changes.
+	versions := func() (routeVersion, attachmentVersion string) {
+		if err := database.SQL().QueryRowContext(ctx, `SELECT (SELECT xmin::text FROM control_routes WHERE id=$1),(SELECT xmin::text FROM runtime_carrier_attachments WHERE route_id=$1 AND edge_node_id=$2)`, route, node).Scan(&routeVersion, &attachmentVersion); err != nil {
+			t.Fatal(err)
+		}
+		return routeVersion, attachmentVersion
+	}
+	routeBefore, attachmentBefore := versions()
+	if err = service.Observe(ctx, edge, []runtimewire.Observation{observation}); err != nil {
+		t.Fatal(err)
+	}
+	if routeAfter, attachmentAfter := versions(); routeAfter != routeBefore || attachmentAfter != attachmentBefore {
+		t.Fatalf("unchanged observation rewrote rows: route %s->%s attachment %s->%s", routeBefore, routeAfter, attachmentBefore, attachmentAfter)
+	}
 	if got := dnsAddresses(); len(got) != 1 || got[node] != "192.0.2.10" {
 		t.Fatalf("DNS after the first carrier is ready = %v, want only %s", got, node)
 	}
