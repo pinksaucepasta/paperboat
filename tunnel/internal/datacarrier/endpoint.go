@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	quic "github.com/quic-go/quic-go"
 )
 
@@ -407,7 +408,7 @@ func endpointQUICConfig(config Config) *quic.Config {
 		MaxIncomingStreams:             int64(config.MaximumStreams + config.QueueDepth + 1),
 		MaxIncomingUniStreams:          -1,
 		InitialStreamReceiveWindow:     uint64(config.StreamWindow),
-		MaxStreamReceiveWindow:         uint64(config.StreamWindow),
+		MaxStreamReceiveWindow:         uint64(max(config.StreamWindow, connectorprotocol.DataCarrierMaxStreamWindow)),
 		InitialConnectionReceiveWindow: uint64(config.StreamWindow) * uint64(config.MaximumStreams+config.QueueDepth+1),
 		MaxConnectionReceiveWindow:     uint64(config.StreamWindow) * uint64(config.MaximumStreams+config.QueueDepth+1),
 	}

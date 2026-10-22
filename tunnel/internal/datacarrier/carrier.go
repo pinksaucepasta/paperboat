@@ -956,7 +956,7 @@ func newYamuxSession(link io.ReadWriteCloser, config Config, client bool) (Sessi
 	yamuxConfig.EnableKeepAlive = true
 	yamuxConfig.KeepAliveInterval = config.KeepAliveInterval
 	yamuxConfig.ConnectionWriteTimeout = config.ConnectionWriteLimit
-	yamuxConfig.MaxStreamWindowSize = config.StreamWindow
+	yamuxConfig.MaxStreamWindowSize = max(config.StreamWindow, connectorprotocol.DataCarrierMaxStreamWindow)
 	yamuxConfig.InitialStreamWindowSize = config.StreamWindow
 	yamuxConfig.MaxIncomingStreams = uint32(config.MaximumStreams)
 	connection := asCarrierNetConn(link)

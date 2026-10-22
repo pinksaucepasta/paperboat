@@ -7,6 +7,7 @@ import (
 	"time"
 
 	yamux "github.com/libp2p/go-yamux/v5"
+	sharedprotocol "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 type yamuxDataCarrierSession struct {
@@ -20,7 +21,7 @@ func newYamuxDataCarrierSession(link io.ReadWriteCloser, config DataCarrierConfi
 	yamuxConfig.EnableKeepAlive = true
 	yamuxConfig.KeepAliveInterval = config.KeepAliveInterval
 	yamuxConfig.ConnectionWriteTimeout = config.ConnectionWriteLimit
-	yamuxConfig.MaxStreamWindowSize = config.StreamWindow
+	yamuxConfig.MaxStreamWindowSize = max(config.StreamWindow, sharedprotocol.DataCarrierMaxStreamWindow)
 	yamuxConfig.InitialStreamWindowSize = config.StreamWindow
 	yamuxConfig.MaxIncomingStreams = uint32(config.MaximumStreams)
 	connection := asDataCarrierNetConn(link)
