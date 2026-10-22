@@ -106,7 +106,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 400, "invalid_request")
 			return
 		}
-		admissions, err := h.Service.Pull(r.Context(), edge)
+		admissions, err := h.Service.Pull(r.Context(), edge, request.Capabilities)
 		if err != nil {
 			serviceError(w, r, err)
 			return
@@ -122,6 +122,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_, _ = w.Write(encoded)
+		return
+	}
+	if len(request.Capabilities) != 0 {
+		writeError(w, 400, "invalid_request")
 		return
 	}
 	if err := h.Service.Observe(r.Context(), edge, request.Observations); err != nil {

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat-server/internal/endpoints"
 	"net"
 	"net/url"
 	"path"
@@ -389,6 +390,9 @@ func (s *Store) CreatePreviewLeaseV1(ctx context.Context, input CreatePreviewLea
 		})
 		if err != nil {
 			return translatePreviewLeaseCreateError(err)
+		}
+		if err := endpoints.RegisterPreviewTx(ctx, tx, endpoints.Preview{LeaseID: input.LeaseID, AccountID: input.AccountID, OwnerTeamID: ws.TeamID, AgentMachineID: input.OwnerMachineID, AccessMode: input.AccessMode, Endpoint: input.Endpoint}); err != nil {
+			return err
 		}
 		if selected && ws.TeamID != "" {
 			if err := BindWorkspacePublisherTx(ctx, tx, ws.TeamID, "preview", input.LeaseID, input.AccountID); err != nil {

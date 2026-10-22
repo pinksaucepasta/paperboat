@@ -334,7 +334,7 @@ type BrowserTerminalTicket struct {
 	TokenHash              []byte
 	UserID                 sql.NullString
 	BrowserSessionID       sql.NullString
-	TerminalSessionID      string
+	TerminalSessionID      sql.NullString
 	Origin                 string
 	Role                   string
 	PolicyGeneration       int64
@@ -346,6 +346,7 @@ type BrowserTerminalTicket struct {
 	ConsumedAt             sql.NullTime
 	BrowserPublicKeySha256 string
 	GuestSessionID         sql.NullString
+	InspectorCredentialID  sql.NullString
 }
 
 type BrowserViewerPolicy struct {
@@ -973,6 +974,41 @@ type EdgeDnsPublication struct {
 	CreatedAt             time.Time
 	UpdatedAt             time.Time
 	VerifiedAt            sql.NullTime
+}
+
+type Endpoint struct {
+	ID             string
+	Kind           string
+	AccountID      string
+	OwnerTeamID    sql.NullString
+	AgentMachineID string
+	AccessMode     string
+	Lifetime       string
+	PreviewLeaseID sql.NullString
+	DesiredState   string
+	Generation     int64
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+type EndpointEdgeAssignment struct {
+	RouteID          string
+	EndpointID       string
+	EdgeNodeID       string
+	EdgeProcessEpoch string
+	CarrierSessionID string
+	Generation       int64
+	Desired          string
+	ObservedReady    bool
+	ObservedAt       sql.NullTime
+}
+
+type EndpointRoute struct {
+	ID         string
+	EndpointID string
+	Hostname   string
+	Protocol   string
+	Revision   int64
 }
 
 type EnvironmentAuthority struct {
@@ -2007,6 +2043,7 @@ type RuntimeCarrierAttachment struct {
 	ObservedAt             sql.NullTime
 	Active                 bool
 	PreviewSessionID       string
+	AgentCapabilities      []string
 }
 
 type SelfhostInstallation struct {

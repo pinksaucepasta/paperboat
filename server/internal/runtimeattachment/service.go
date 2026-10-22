@@ -24,6 +24,7 @@ import (
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
 	"github.com/pinksaucepasta/paperboat-server/internal/edgeplacement"
 	"github.com/pinksaucepasta/paperboat-server/internal/edgeset"
+	"github.com/pinksaucepasta/paperboat-server/internal/endpoints"
 	"github.com/pinksaucepasta/paperboat-server/internal/machinelatency"
 	"github.com/pinksaucepasta/paperboat-server/internal/previewattachment"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
@@ -48,8 +49,20 @@ type Service struct {
 	AdmissionLifetime time.Duration
 }
 
+func validCapabilities(values []string) bool {
+	if len(values) > 1 {
+		return false
+	}
+	for _, value := range values {
+		if value != runtimewire.CapabilityEndpoints {
+			return false
+		}
+	}
+	return true
+}
+
 func validRequest(p previewattachment.MachineProof, r runtimewire.Request) bool {
-	return p.Validate() == nil && r.OperationID == p.OperationID && connectorprotocol.ValidateOpaqueEpoch(r.ProcessID) == nil && r.WorkerGeneration > 0 && r.WorkerGeneration <= 1<<62 && r.InstallationGeneration == p.InstallationGeneration && r.RuntimeListenPort >= 1024 && r.RuntimeListenPort <= 65535 && ((r.ActiveEdgeNodeID == "" && r.ActiveEdgeProcessEpoch == "") || (connectorprotocol.ValidateIdentifier(r.ActiveEdgeNodeID) == nil && connectorprotocol.ValidateOpaqueEpoch(r.ActiveEdgeProcessEpoch) == nil))
+	return p.Validate() == nil && validCapabilities(r.Capabilities) && r.OperationID == p.OperationID && connectorprotocol.ValidateOpaqueEpoch(r.ProcessID) == nil && r.WorkerGeneration > 0 && r.WorkerGeneration <= 1<<62 && r.InstallationGeneration == p.InstallationGeneration && r.RuntimeListenPort >= 1024 && r.RuntimeListenPort <= 65535 && ((r.ActiveEdgeNodeID == "" && r.ActiveEdgeProcessEpoch == "") || (connectorprotocol.ValidateIdentifier(r.ActiveEdgeNodeID) == nil && connectorprotocol.ValidateOpaqueEpoch(r.ActiveEdgeProcessEpoch) == nil))
 }
 
 func (s *Service) Attach(ctx context.Context, proof previewattachment.MachineProof, request runtimewire.Request) (runtimewire.HostAdmission, error) {
@@ -220,6 +233,7 @@ WHEN n.id=$2 THEN 2 ELSE 3 END,n.id LIMIT 32 FOR SHARE OF n`, proof.UserID, acti
 			}
 			host = nextHost
 		}
+		capabilities := append([]string{}, request.Capabilities...)
 		digest := sha256.Sum256(key)
 		thumb := "sha256:" + base64.RawURLEncoding.EncodeToString(digest[:])
 		out.EdgeCandidates = candidates
@@ -253,9 +267,9 @@ WHEN n.id=$2 THEN 2 ELSE 3 END,n.id LIMIT 32 FOR SHARE OF n`, proof.UserID, acti
 			if err != nil {
 				return err
 			}
-			_, err = tx.Exec(ctx, `INSERT INTO runtime_carrier_attachments(route_id,machine_id,account_id,installation_generation,worker_generation,process_id,generation,edge_node_id,edge_process_epoch,public_identity_key,route_revision,session_id,preview_session_id,admission,expires_at)
-VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
-ON CONFLICT(route_id,edge_node_id) DO UPDATE SET machine_id=EXCLUDED.machine_id,account_id=EXCLUDED.account_id,installation_generation=EXCLUDED.installation_generation,worker_generation=EXCLUDED.worker_generation,process_id=EXCLUDED.process_id,generation=EXCLUDED.generation,edge_process_epoch=EXCLUDED.edge_process_epoch,public_identity_key=EXCLUDED.public_identity_key,route_revision=EXCLUDED.route_revision,session_id=EXCLUDED.session_id,preview_session_id=EXCLUDED.preview_session_id,admission=EXCLUDED.admission,expires_at=EXCLUDED.expires_at,ready=CASE WHEN $16 THEN runtime_carrier_attachments.ready ELSE false END,observed_at=CASE WHEN $16 THEN runtime_carrier_attachments.observed_at ELSE NULL END`, route, proof.MachineID, proof.UserID, request.InstallationGeneration, request.WorkerGeneration, request.ProcessID, rowGeneration, edge.node, edge.epoch, publicKey, revision, binding.SessionID, previewSessionID, encoded, admission.ExpiresAt, same)
+			_, err = tx.Exec(ctx, `INSERT INTO runtime_carrier_attachments(route_id,machine_id,account_id,installation_generation,worker_generation,process_id,generation,edge_node_id,edge_process_epoch,public_identity_key,route_revision,session_id,preview_session_id,admission,expires_at,agent_capabilities)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$17)
+ON CONFLICT(route_id,edge_node_id) DO UPDATE SET machine_id=EXCLUDED.machine_id,account_id=EXCLUDED.account_id,installation_generation=EXCLUDED.installation_generation,worker_generation=EXCLUDED.worker_generation,process_id=EXCLUDED.process_id,generation=EXCLUDED.generation,edge_process_epoch=EXCLUDED.edge_process_epoch,public_identity_key=EXCLUDED.public_identity_key,route_revision=EXCLUDED.route_revision,session_id=EXCLUDED.session_id,preview_session_id=EXCLUDED.preview_session_id,admission=EXCLUDED.admission,expires_at=EXCLUDED.expires_at,agent_capabilities=EXCLUDED.agent_capabilities,ready=CASE WHEN $16 THEN runtime_carrier_attachments.ready ELSE false END,observed_at=CASE WHEN $16 THEN runtime_carrier_attachments.observed_at ELSE NULL END`, route, proof.MachineID, proof.UserID, request.InstallationGeneration, request.WorkerGeneration, request.ProcessID, rowGeneration, edge.node, edge.epoch, publicKey, revision, binding.SessionID, previewSessionID, encoded, admission.ExpiresAt, same, capabilities)
 			if err != nil {
 				return err
 			}
@@ -321,12 +335,17 @@ ON CONFLICT(route_id,edge_node_id) DO UPDATE SET machine_id=EXCLUDED.machine_id,
 			return err
 		}
 		out.ActiveEdgeNodeID, out.ActiveEdgeProcessEpoch = activeNode, activeEpoch
-		return nil
+		return endpoints.ReconcileAgentTx(ctx, tx, proof.MachineID)
 	})
 	return out, err
 }
 
-func (s *Service) Pull(ctx context.Context, edge previewattachment.PreviewEdgeIdentity) ([]runtimewire.Admission, error) {
+// Pull returns the edge's complete runtime snapshot: the runtime route admissions and, for an edge
+// that advertised runtimewire.CapabilityEndpoints, the endpoint routes riding on those carriers.
+func (s *Service) Pull(ctx context.Context, edge previewattachment.PreviewEdgeIdentity, capabilities []string) ([]runtimewire.Admission, error) {
+	if !validCapabilities(capabilities) {
+		return nil, ErrInvalid
+	}
 	rows, err := s.DB.Pool().Query(ctx, `SELECT admission FROM runtime_carrier_attachments WHERE edge_node_id=$1 AND edge_process_epoch=$2 AND paperboat.runtime_carrier_valid(route_id,edge_node_id,edge_process_epoch,false) ORDER BY route_id LIMIT $3`, edge.NodeID, edge.ProcessEpoch, runtimewire.MaximumAdmissions+1)
 	if err != nil {
 		return nil, err
@@ -353,7 +372,17 @@ func (s *Service) Pull(ctx context.Context, edge previewattachment.PreviewEdgeId
 			return nil, ErrUnavailable
 		}
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil || len(capabilities) == 0 {
+		return out, err
+	}
+	routes, err := endpoints.EdgeAdmissions(ctx, s.DB.Pool(), edge.NodeID, edge.ProcessEpoch, admission.Deadline(time.Now(), s.AdmissionLifetime), runtimewire.MaximumAdmissions-len(out))
+	if err != nil {
+		return nil, err
+	}
+	if len(out)+len(routes) > runtimewire.MaximumAdmissions {
+		return nil, ErrUnavailable
+	}
+	return append(out, routes...), nil
 }
 
 func (s *Service) Observe(ctx context.Context, edge previewattachment.PreviewEdgeIdentity, observations []runtimewire.Observation) error {
@@ -367,8 +396,18 @@ func (s *Service) Observe(ctx context.Context, edge previewattachment.PreviewEdg
 				return ErrInvalid
 			}
 			seen[o.RouteID] = true
+			endpointRoute, err := endpoints.IsRouteTx(ctx, tx, o.RouteID)
+			if err != nil {
+				return err
+			}
+			if endpointRoute {
+				if _, err := endpoints.ObserveTx(ctx, tx, edge.NodeID, edge.ProcessEpoch, o); err != nil {
+					return err
+				}
+				continue
+			}
 			var active bool
-			err := tx.QueryRow(ctx, `UPDATE runtime_carrier_attachments SET ready=$6,observed_at=now() WHERE route_id=$1 AND generation=$2 AND session_id=$3 AND edge_node_id=$4 AND edge_process_epoch=$5 AND (NOT $6 OR paperboat.runtime_carrier_valid(route_id,edge_node_id,edge_process_epoch,false)) RETURNING active`, o.RouteID, o.AttachmentGeneration, o.SessionID, edge.NodeID, edge.ProcessEpoch, o.Ready).Scan(&active)
+			err = tx.QueryRow(ctx, `UPDATE runtime_carrier_attachments SET ready=$6,observed_at=now() WHERE route_id=$1 AND generation=$2 AND session_id=$3 AND edge_node_id=$4 AND edge_process_epoch=$5 AND (NOT $6 OR paperboat.runtime_carrier_valid(route_id,edge_node_id,edge_process_epoch,false)) RETURNING active`, o.RouteID, o.AttachmentGeneration, o.SessionID, edge.NodeID, edge.ProcessEpoch, o.Ready).Scan(&active)
 			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrStale
 			}

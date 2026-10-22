@@ -308,7 +308,7 @@ VALUES($1,'default','1.0','epoch_backup','ready',true,now(),'second-region','sec
 		}
 
 	}
-	admission, err := service.Pull(ctx, edge)
+	admission, err := service.Pull(ctx, edge, nil)
 	if err != nil || len(admission) != 1 {
 		t.Fatalf("pull count=%d error=%v", len(admission), err)
 	}
@@ -325,7 +325,7 @@ VALUES($1,'default','1.0','epoch_backup','ready',true,now(),'second-region','sec
 		t.Fatalf("DNS after the first carrier is ready = %v, want only %s", got, node)
 	}
 	backupEdge := previewattachment.PreviewEdgeIdentity{NodeID: backupNode, ProcessEpoch: "epoch_backup"}
-	backupAdmissions, err := service.Pull(ctx, backupEdge)
+	backupAdmissions, err := service.Pull(ctx, backupEdge, nil)
 	if err != nil || len(backupAdmissions) != 1 || backupAdmissions[0].Binding.EdgeNodeID != backupNode {
 		t.Fatalf("backup pull count=%d error=%v", len(backupAdmissions), err)
 	}
@@ -458,7 +458,7 @@ VALUES($1,'default','1.0','epoch_backup','ready',true,now(),'second-region','sec
 	if err = service.Observe(ctx, backupEdge, []runtimewire.Observation{backupObservation}); err != nil {
 		t.Fatal("admitted runtime edge heartbeat rejected after credential expiry")
 	}
-	values, err := service.Pull(ctx, backupEdge)
+	values, err := service.Pull(ctx, backupEdge, nil)
 	if err != nil || len(values) == 0 || !values[0].ExpiresAt.After(time.Now()) {
 		t.Fatal("current carrier did not receive fresh admission metadata")
 	}
@@ -478,7 +478,7 @@ VALUES($1,'default','1.0','epoch_backup','ready',true,now(),'second-region','sec
 	if got := dnsAddresses(); len(got) != 0 {
 		t.Fatalf("revoked runtime edge remained advertised in DNS: %v", got)
 	}
-	admission, err = service.Pull(ctx, edge)
+	admission, err = service.Pull(ctx, edge, nil)
 	if err != nil || len(admission) != 0 {
 		t.Fatal("revoked machine remains in edge snapshot")
 	}
@@ -525,7 +525,7 @@ VALUES($1,'default','1.0','epoch_backup','ready',true,now(),'second-region','sec
 	if got := dnsAddresses(); len(got) != 0 {
 		t.Fatalf("customer edge remained advertised for managed runtime hostname: %v", got)
 	}
-	if admissions, err := service.Pull(ctx, backupEdge); err != nil || len(admissions) != 0 {
+	if admissions, err := service.Pull(ctx, backupEdge, nil); err != nil || len(admissions) != 0 {
 		t.Fatalf("customer edge retained runtime authority: count=%d err=%v", len(admissions), err)
 	}
 	managed, err := service.Attach(ctx, proof, request)

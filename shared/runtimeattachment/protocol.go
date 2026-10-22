@@ -5,6 +5,15 @@ import "time"
 
 const Schema = "paperboat.runtime-carrier/v1"
 const RouteKind = "runtime_https_wss"
+
+// Endpoint route kinds and capabilities (PLAN 3a). An agent advertises CapabilityEndpoints in
+// Request.Capabilities and an edge in EdgeRequest.Capabilities; the server sends endpoint routes
+// to an edge only when both did.
+const (
+	EndpointPublicRouteKind     = "preview_public_https_wss"
+	EndpointRestrictedRouteKind = "preview_private_https_wss"
+	CapabilityEndpoints         = "endpoints"
+)
 const MaximumAdmissions = 4096
 const MaximumEdgeCandidates = 32
 const HostPath = "/v1/runtime/carrier-attachment"
@@ -47,6 +56,7 @@ type Request struct {
 	ActiveEdgeNodeID       string          `json:"active_edge_node_id,omitempty"`
 	ActiveEdgeProcessEpoch string          `json:"active_edge_process_epoch,omitempty"`
 	EdgeLatency            []EdgeLatency   `json:"edge_latency,omitempty"`
+	Capabilities           []string        `json:"capabilities,omitempty"`
 }
 type Binding struct {
 	AccountID                            string `json:"account_id"`
@@ -76,6 +86,10 @@ type Admission struct {
 	RouteKind            string    `json:"route_kind"`
 	RouteRevision        uint64    `json:"route_revision"`
 	ExpiresAt            time.Time `json:"expires_at"`
+	// Endpoint routes (PLAN 3a) ride on the agent's runtime carrier: same Binding identity, their
+	// own route id, hostname and kind (EndpointPublicRouteKind or EndpointRestrictedRouteKind).
+	EndpointID string `json:"endpoint_id,omitempty"`
+	AccessMode string `json:"access_mode,omitempty"`
 }
 type HostAdmission struct {
 	Admission
@@ -94,6 +108,7 @@ type EdgeRequest struct {
 	NodeID       string        `json:"edge_node_id"`
 	ProcessEpoch string        `json:"process_epoch"`
 	Observations []Observation `json:"observations,omitempty"`
+	Capabilities []string      `json:"capabilities,omitempty"`
 }
 
 // Snapshot requires an explicit admissions array, including when empty.
