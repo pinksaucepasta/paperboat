@@ -27,6 +27,10 @@ const ShellEnvironmentPath = "/v1/shell-environment"
 // control plane. Values stay in this process's memory only.
 const shellEnvironmentTTL = 60 * time.Second
 
+// shellEnvironmentFailureTTL keeps a failed delivery (no network, pending)
+// answering at once, so only the first shell after it waits for the timeout.
+const shellEnvironmentFailureTTL = 30 * time.Second
+
 const shellEnvironmentTimeout = 5 * time.Second
 
 // ownerShellEnvironment is the runtime's ENV source for its own account. The
@@ -41,11 +45,14 @@ type shellEnvironmentHandler struct {
 	token  string
 	now    func() time.Time
 	mu     sync.Mutex
-	cached map[string]shellEnvironmentEntry
+	cached map[string]*shellEnvironmentEntry
 }
 
+// shellEnvironmentEntry is one fetch: done closes when values/err are set.
 type shellEnvironmentEntry struct {
+	done    chan struct{}
 	values  []string
+	err     error
 	expires time.Time
 }
 
@@ -58,7 +65,7 @@ func newShellEnvironmentHandler(source ownerShellEnvironment, token string) http
 	if source == nil || strings.TrimSpace(token) == "" {
 		return nil
 	}
-	return &shellEnvironmentHandler{source: source, token: token, now: time.Now, cached: map[string]shellEnvironmentEntry{}}
+	return &shellEnvironmentHandler{source: source, token: token, now: time.Now, cached: map[string]*shellEnvironmentEntry{}}
 }
 
 func (h *shellEnvironmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -91,23 +98,47 @@ func (h *shellEnvironmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 var errShellEnvironmentAccount = errors.New("shell environment account is not this runtime's account")
 
 func (h *shellEnvironmentHandler) environment(ctx context.Context, in shellEnvironmentRequest) ([]string, error) {
+	entry := h.entry(in)
+	select {
+	case <-entry.done:
+		return entry.values, entry.err
+	case <-ctx.Done():
+		return nil, &envinject.DeliveryError{Cause: ctx.Err()}
+	}
+}
+
+// entry returns the cached or in-flight fetch for one request, starting a
+// fetch that outlives a caller who gives up so its answer is cached.
+func (h *shellEnvironmentHandler) entry(in shellEnvironmentRequest) *shellEnvironmentEntry {
 	key := in.WorkspaceID + "\x00" + in.AccountID
 	h.mu.Lock()
-	entry, ok := h.cached[key]
-	h.mu.Unlock()
-	if ok && h.now().Before(entry.expires) {
-		return entry.values, nil
+	defer h.mu.Unlock()
+	if entry := h.cached[key]; entry != nil {
+		select {
+		case <-entry.done:
+			if h.now().Before(entry.expires) {
+				return entry
+			}
+		default:
+			return entry
+		}
 	}
-	ctx, cancel := context.WithTimeout(ctx, shellEnvironmentTimeout)
-	defer cancel()
-	values, err := h.source.OwnerShellEnvironment(ctx, in.WorkspaceID, in.AccountID)
-	if err != nil {
-		return nil, err
-	}
-	h.mu.Lock()
-	h.cached[key] = shellEnvironmentEntry{values: values, expires: h.now().Add(shellEnvironmentTTL)}
-	h.mu.Unlock()
-	return values, nil
+	entry := &shellEnvironmentEntry{done: make(chan struct{})}
+	h.cached[key] = entry
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), shellEnvironmentTimeout)
+		defer cancel()
+		values, err := h.source.OwnerShellEnvironment(ctx, in.WorkspaceID, in.AccountID)
+		h.mu.Lock()
+		entry.values, entry.err = values, err
+		entry.expires = h.now().Add(shellEnvironmentTTL)
+		if err != nil {
+			entry.expires = h.now().Add(shellEnvironmentFailureTTL)
+		}
+		h.mu.Unlock()
+		close(entry.done)
+	}()
+	return entry
 }
 
 func decodeShellEnvironmentRequest(body io.Reader) (shellEnvironmentRequest, error) {

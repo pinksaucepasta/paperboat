@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,13 +15,20 @@ import (
 )
 
 type fakeOwnerShellEnvironment struct {
+	mu     sync.Mutex
+	block  chan struct{}
 	calls  int
 	values []string
 	err    error
 }
 
 func (f *fakeOwnerShellEnvironment) OwnerShellEnvironment(_ context.Context, workspace, account string) ([]string, error) {
+	f.mu.Lock()
 	f.calls++
+	f.mu.Unlock()
+	if f.block != nil {
+		<-f.block
+	}
 	if account != "acct_owner" {
 		return nil, errShellEnvironmentAccount
 	}
@@ -81,5 +89,25 @@ func TestShellEnvironmentReportsPendingAndRejectsBadBodies(t *testing.T) {
 		if got := serveShellEnvironment(handler, "secret", body); got.Code != http.StatusBadRequest {
 			t.Fatalf("%s: %d", body, got.Code)
 		}
+	}
+}
+
+func TestShellEnvironmentFetchOutlivesAnImpatientCallerAndCachesFailure(t *testing.T) {
+	source := &fakeOwnerShellEnvironment{block: make(chan struct{}), err: &envinject.DeliveryError{Cause: envinject.ErrNotReady}}
+	handler := newShellEnvironmentHandler(source, "secret").(*shellEnvironmentHandler)
+	in := shellEnvironmentRequest{WorkspaceID: "personal", AccountID: "acct_owner"}
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer cancel()
+	if _, err := handler.environment(ctx, in); !envinject.Undeliverable(err) {
+		t.Fatalf("impatient caller: %v", err)
+	}
+	close(source.block)
+	<-handler.entry(in).done
+	started := time.Now()
+	if _, err := handler.environment(t.Context(), in); err == nil || time.Since(started) > 10*time.Millisecond {
+		t.Fatalf("cached failure: %v after %v", err, time.Since(started))
+	}
+	if source.calls != 1 {
+		t.Fatalf("one fetch expected, got %d", source.calls)
 	}
 }
