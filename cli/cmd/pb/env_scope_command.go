@@ -215,6 +215,9 @@ func setEnvironmentVariableForScope(command *cobra.Command, team, requestedMachi
 		return err
 	}
 	defer clear(value)
+	if manager.WindowsNames, err = scopeReachesWindows(command.Context(), client, target); err != nil {
+		return err
+	}
 	if err := manager.SetScopeVariable(command.Context(), target.kind, target.owner, target.machine, name, value); err != nil {
 		return safeEnvironmentVariableCommandError(err)
 	}
@@ -318,6 +321,36 @@ func vaultScopeTargetForCommand(command *cobra.Command, client *api.Client, acco
 		label = "personal machine " + environmentVariableScopeLabel(target)
 	}
 	return vaultScopeTarget{kind: "personal", owner: accountID, machine: target.machineID, label: label}, nil
+}
+
+// scopeReachesWindows reports whether the scope is delivered to a Windows
+// machine. Windows environment names ignore case, so such a scope may not hold
+// two names that differ only by case. A device scope reaches that one machine;
+// every other scope reaches each machine of its workspace that this account can
+// list. The server only ever sees ciphertext, so this cannot be checked there.
+func scopeReachesWindows(ctx context.Context, client *api.Client, target vaultScopeTarget) (bool, error) {
+	machines, err := client.ListUserMachines(ctx)
+	if err != nil {
+		return false, friendlyCommandError(err)
+	}
+	if target.machine == "" {
+		for _, machine := range machines {
+			if strings.EqualFold(machine.Platform, "windows") {
+				return true, nil
+			}
+		}
+		return false, nil
+	}
+	for _, machine := range machines {
+		if machine.ID == target.machine {
+			return strings.EqualFold(machine.Platform, "windows"), nil
+		}
+	}
+	personal := *client
+	if err := personal.SetWorkspace("personal"); err != nil {
+		return false, err
+	}
+	return scopeReachesWindows(ctx, &personal, target)
 }
 
 func validateVaultScopeFlags(team, requestedMachine string) error {

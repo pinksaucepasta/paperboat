@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
@@ -123,6 +124,43 @@ type configSyncProjection struct {
 	AutomaticUpdates   bool                          `json:"automatic_updates"`
 	PathRules          []api.ConfigPathRule          `json:"path_rules"`
 	RepositoryBindings []api.ConfigRepositoryBinding `json:"repository_bindings"`
+	// Warnings are advice about the source files, not part of the approved
+	// configuration, so they are left out of the confirmation scope.
+	Warnings []string `json:"warnings,omitempty"`
+}
+
+// configSyncMachineNames carries this machine's Paperboat name, which selects
+// the shared file's [machine.<name>] section, and every machine name the
+// account can see, which lets validate point out sections that match none.
+type configSyncMachineNames struct {
+	Own string
+	All []string
+}
+
+func (n configSyncMachineNames) unknownSections(shared configsync.SourceConfig) []string {
+	known := map[string]bool{}
+	for _, name := range n.All {
+		known[name] = true
+	}
+	var warnings []string
+	for name := range shared.Machine {
+		if !known[name] {
+			warnings = append(warnings, fmt.Sprintf("The shared configuration has a [machine.%s] section, but no machine of yours is named %q. Check the name with `pb machine list`.", name, name))
+		}
+	}
+	sort.Strings(warnings)
+	return warnings
+}
+
+func configSyncMachineNamesFor(machines []api.UserMachine, machineID string) configSyncMachineNames {
+	var names configSyncMachineNames
+	for _, machine := range machines {
+		names.All = append(names.All, machine.Alias)
+		if machine.ID == machineID {
+			names.Own = machine.Alias
+		}
+	}
+	return names
 }
 
 func stringPointerValue(value *string) string {
@@ -202,7 +240,7 @@ func configAssignmentMissingOnly(err error) bool {
 	return commandAPIStatusMetadataOnly(err, response.Status)
 }
 
-func buildConfigSyncProjection(ctx context.Context, backend configSyncSourceBackend, machine configsync.SourceConfig, requested string, current api.ConfigAssignment, cacheRoot, credentialRoot, home string) (configSyncProjection, error) {
+func buildConfigSyncProjection(ctx context.Context, backend configSyncSourceBackend, machine configsync.SourceConfig, requested string, current api.ConfigAssignment, names configSyncMachineNames, cacheRoot, credentialRoot, home string) (configSyncProjection, error) {
 	repos, err := backend.ListConfigRepositories(ctx)
 	if err != nil {
 		return configSyncProjection{}, friendlyCommandError(err)
@@ -261,7 +299,7 @@ func buildConfigSyncProjection(ctx context.Context, backend configSyncSourceBack
 				return configSyncProjection{}, configRepositoryReadFailure(err)
 			}
 		}
-		effective, err = configsync.MergeSourceConfigs(shared, machine)
+		effective, err = configsync.MergeSourceConfigs(shared, machine, names.Own)
 		if err != nil {
 			return configSyncProjection{}, err
 		}
@@ -281,7 +319,7 @@ func buildConfigSyncProjection(ctx context.Context, backend configSyncSourceBack
 	if _, err := configsync.ResolveEffectiveConfig(home, effective); err != nil {
 		return configSyncProjection{}, err
 	}
-	projection := configSyncProjection{Revision: effective.Revision, SharedRevision: sharedRevision, Enabled: effective.Enabled, Mode: string(effective.Mode), AutomaticUpdates: effective.AutomaticUpdates, PathRules: []api.ConfigPathRule{}, RepositoryBindings: []api.ConfigRepositoryBinding{}}
+	projection := configSyncProjection{Revision: effective.Revision, SharedRevision: sharedRevision, Enabled: effective.Enabled, Mode: string(effective.Mode), AutomaticUpdates: effective.AutomaticUpdates, PathRules: []api.ConfigPathRule{}, RepositoryBindings: []api.ConfigRepositoryBinding{}, Warnings: names.unknownSections(shared)}
 	for _, rule := range effective.PathRules {
 		projection.PathRules = append(projection.PathRules, api.ConfigPathRule{ID: rule.ID, Source: rule.Source, RepositoryPath: rule.RepositoryPath, LocalPath: rule.LocalPath, Kind: rule.Kind, Include: rule.Include, Exclude: rule.Exclude})
 	}
@@ -375,6 +413,10 @@ func runConfigSyncSourceCommandWithService(cmd *cobra.Command, args []string, ap
 	if err != nil && !configAssignmentMissingOnly(err) {
 		return friendlyCommandError(err)
 	}
+	machines, err := client.ListUserMachines(cmd.Context())
+	if err != nil {
+		return friendlyCommandError(err)
+	}
 	credentialRoot, err := configRepositoryCredentialRoot()
 	if err != nil {
 		return err
@@ -388,7 +430,7 @@ func runConfigSyncSourceCommandWithService(cmd *cobra.Command, args []string, ap
 		return err
 	}
 	requested, _ := cmd.Flags().GetString("repository")
-	projection, err := buildConfigSyncProjection(cmd.Context(), client, machine, requested, current, filepath.Join(stateRoot, "config-sync", "repository-read"), credentialRoot, home)
+	projection, err := buildConfigSyncProjection(cmd.Context(), client, machine, requested, current, configSyncMachineNamesFor(machines, registration.MachineID), filepath.Join(stateRoot, "config-sync", "repository-read"), credentialRoot, home)
 	if err != nil {
 		return err
 	}
@@ -436,6 +478,9 @@ func runConfigSyncSourceCommandWithService(cmd *cobra.Command, args []string, ap
 		return writeCLIJSON(cmd.OutOrStdout(), projection)
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "Machine configuration: %s\nRevision: %s\nEnabled: %t · %s · %d path rules\n", path, projection.Revision, projection.Enabled, projection.Mode, len(projection.PathRules))
+	for _, warning := range projection.Warnings {
+		fmt.Fprintln(cmd.OutOrStdout(), "Warning: "+warning)
+	}
 	if apply {
 		fmt.Fprintln(cmd.OutOrStdout(), "Configuration applied to this machine.")
 	}
@@ -443,6 +488,7 @@ func runConfigSyncSourceCommandWithService(cmd *cobra.Command, args []string, ap
 }
 
 func configSyncProjectionConfirmationScope(machineID string, version int64, projection configSyncProjection) string {
+	projection.Warnings = nil
 	data, _ := json.Marshal(projection)
 	digest := sha256.Sum256(data)
 	return fmt.Sprintf("config-sync-source:%s:%d:%x", machineID, version, digest)

@@ -29,7 +29,7 @@ func TestWindowsSourceAndExplicitDestinationAcceptStoredCaseSpelling(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	effective, err := MergeSourceConfigsForOS(source, SourceConfig{}, "windows")
+	effective, err := MergeSourceConfigsForOS(source, SourceConfig{}, "windows", "")
 	if err != nil {
 		t.Fatal(err)
 	}

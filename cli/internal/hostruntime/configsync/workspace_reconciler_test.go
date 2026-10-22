@@ -306,7 +306,7 @@ func newTestFileReconciler(t *testing.T, config WorkspaceReconcilerConfig) (*Pla
 	if err != nil {
 		t.Fatal(err)
 	}
-	effective, err := MergeSourceConfigs(SourceConfig{}, config.MachineSource)
+	effective, err := MergeSourceConfigs(SourceConfig{}, config.MachineSource, "")
 	if err != nil {
 		t.Fatal(err)
 	}

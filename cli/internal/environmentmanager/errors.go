@@ -15,6 +15,15 @@ var (
 	ErrIntegrity             = errors.New("ENV encrypted state failed verification")
 )
 
+// NameCaseConflict refuses a variable whose name differs only by letter case
+// from another variable of a scope delivered to a Windows machine. Both names
+// are variable names, never values.
+type NameCaseConflict struct{ Name, Existing string }
+
+func (e *NameCaseConflict) Error() string {
+	return "environment variable name " + e.Name + " differs only by letter case from " + e.Existing + " in the same scope"
+}
+
 // vaultFailureLeavesOnly proves an expected absence only when every bounded
 // terminal cause agrees. Mixed failures, cycles, typed nils, and oversized
 // trees cannot authorize treating custody or a remote resource as missing.

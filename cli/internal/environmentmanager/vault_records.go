@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"sort"
+	"strings"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
@@ -229,6 +230,11 @@ func (v PasswordVault) mutateScopeRecord(ctx context.Context, kind, owner, machi
 		if err != nil {
 			return err
 		}
+		if v.WindowsNames && !deleted {
+			if err := v.refuseWindowsNameCollision(ctx, keys, anchor, name); err != nil {
+				return err
+			}
+		}
 		coordinate := recordCoordinate(anchor)
 		previous, err := records.GetVaultRecord(ctx, coordinate, id)
 		if !vaultAPIResourceAbsentOnly(err) && err != nil {
@@ -302,6 +308,23 @@ func (v PasswordVault) publishRecordsOperation(ctx context.Context, local *confi
 	for i := range want {
 		if want[i] != got[i] {
 			return ErrIntegrity
+		}
+	}
+	return nil
+}
+
+// refuseWindowsNameCollision reads the scope's current names and refuses name
+// when another one differs from it only by case. Setting an existing name
+// again is a normal update.
+func (v PasswordVault) refuseWindowsNameCollision(ctx context.Context, keys *env.VaultKeys, anchor env.VaultScope, name string) error {
+	values, _, err := v.readScopeRecords(ctx, keys, anchor)
+	if err != nil {
+		return err
+	}
+	defer clearVaultValues(values)
+	for existing := range values {
+		if existing != name && strings.EqualFold(existing, name) {
+			return &NameCaseConflict{Name: name, Existing: existing}
 		}
 	}
 	return nil

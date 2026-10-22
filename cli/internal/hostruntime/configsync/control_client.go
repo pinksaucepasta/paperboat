@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/wirejson"
 	"io"
 	"net/http"
 	"net/url"
@@ -147,6 +148,7 @@ type RuntimeDescriptor struct {
 	AssignmentID           string              `json:"assignment_id"`
 	EnvironmentID          string              `json:"environment_id"`
 	MachineID              string              `json:"machine_id"`
+	MachineAlias           string              `json:"machine_alias,omitempty"`
 	InstallationGeneration int64               `json:"installation_generation"`
 	SyncRevisionFloor      int64               `json:"sync_revision_floor"`
 	WarningRevision        string              `json:"warning_revision"`
@@ -786,13 +788,12 @@ func decodeBoundedJSON(reader io.Reader, target any) error {
 	if len(data) > maxControlResponseBytes {
 		return ErrControlClientInvalid
 	}
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(target); err != nil {
+	// The server may add response fields; older workers must keep syncing.
+	if err := wirejson.Decode(data, target); err != nil {
+		if errors.Is(err, wirejson.ErrTrailingData) {
+			return ErrControlClientInvalid
+		}
 		return err
-	}
-	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		return ErrControlClientInvalid
 	}
 	return nil
 }

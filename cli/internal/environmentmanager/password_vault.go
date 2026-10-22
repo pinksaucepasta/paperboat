@@ -32,6 +32,10 @@ type PasswordVault struct {
 	Store       config.ProfileStore
 	Issuer      string
 	AccountID   string
+	// WindowsNames is set while editing a scope that reaches a Windows machine,
+	// where environment variable names are case-insensitive: two names of one
+	// scope that differ only by case would be one variable there.
+	WindowsNames bool
 }
 
 // vaultIntegrityFailure owns an in-memory API verification failure, preserving

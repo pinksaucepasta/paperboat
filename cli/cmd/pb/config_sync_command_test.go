@@ -155,7 +155,7 @@ func TestConfigSyncSourceProjectionActualFilesOnlyAndMachineOverride(t *testing.
 		t.Fatal(err)
 	}
 	home := shorttemp.Dir(t)
-	projection, err := buildConfigSyncProjection(context.Background(), backend, machine, "one", api.ConfigAssignment{}, shorttemp.Dir(t), "", home)
+	projection, err := buildConfigSyncProjection(context.Background(), backend, machine, "one", api.ConfigAssignment{}, configSyncMachineNames{}, shorttemp.Dir(t), "", home)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +166,7 @@ func TestConfigSyncSourceProjectionActualFilesOnlyAndMachineOverride(t *testing.
 "local_path" = "~/editor.json"
 "kind" = "file"
 `), configsync.DefaultSourceConfigLimits())
-	effective, _ := configsync.MergeSourceConfigs(shared, machine)
+	effective, _ := configsync.MergeSourceConfigs(shared, machine, "")
 	if projection.Revision != effective.Revision || projection.PullRepositoryID != "one" || projection.PushRepositoryID != "one" || len(projection.PathRules) != 1 || projection.PathRules[0].LocalPath != "~/local.json" || !projection.AutomaticUpdates {
 		t.Fatalf("bad projection %+v", projection)
 	}
@@ -181,7 +181,7 @@ func TestConfigSyncSourceRedirectPrimaryBoundedAndBranchStrict(t *testing.T) {
 `, "two": `["pull"]
 "repository_id" = "two"
 `})
-	projection, err := buildConfigSyncProjection(context.Background(), backend, configsync.SourceConfig{}, "one", api.ConfigAssignment{}, shorttemp.Dir(t), "", shorttemp.Dir(t))
+	projection, err := buildConfigSyncProjection(context.Background(), backend, configsync.SourceConfig{}, "one", api.ConfigAssignment{}, configSyncMachineNames{}, shorttemp.Dir(t), "", shorttemp.Dir(t))
 	if err != nil || projection.PullRepositoryID != "two" {
 		t.Fatal("author-selected primary not followed", err)
 	}
@@ -190,7 +190,7 @@ func TestConfigSyncSourceRedirectPrimaryBoundedAndBranchStrict(t *testing.T) {
 `, "two": `["pull"]
 "repository_id" = "one"
 `})
-	if _, err := buildConfigSyncProjection(context.Background(), backend, configsync.SourceConfig{}, "one", api.ConfigAssignment{}, shorttemp.Dir(t), "", shorttemp.Dir(t)); err == nil || !strings.Contains(err.Error(), "repeatedly") {
+	if _, err := buildConfigSyncProjection(context.Background(), backend, configsync.SourceConfig{}, "one", api.ConfigAssignment{}, configSyncMachineNames{}, shorttemp.Dir(t), "", shorttemp.Dir(t)); err == nil || !strings.Contains(err.Error(), "repeatedly") {
 		t.Fatal("primary loop accepted", err)
 	}
 	backend = configSyncSourceBackendFixture(t, map[string]string{"one": ""})
@@ -198,7 +198,7 @@ func TestConfigSyncSourceRedirectPrimaryBoundedAndBranchStrict(t *testing.T) {
 "repository_id" = "one"
 "branch" = "other"
 `), configsync.DefaultSourceConfigLimits())
-	if _, err := buildConfigSyncProjection(context.Background(), backend, machine, "", api.ConfigAssignment{}, shorttemp.Dir(t), "", shorttemp.Dir(t)); err == nil {
+	if _, err := buildConfigSyncProjection(context.Background(), backend, machine, "", api.ConfigAssignment{}, configSyncMachineNames{}, shorttemp.Dir(t), "", shorttemp.Dir(t)); err == nil {
 		t.Fatal("unauthorized branch accepted")
 	}
 }
@@ -207,7 +207,7 @@ func TestConfigSyncSourceNoOpDisabledAndConfirmationFencing(t *testing.T) {
 	backend := configSyncSourceBackendFixture(t, map[string]string{"one": "", "two": ""})
 	one, two := "one", "two"
 	current := api.ConfigAssignment{PullRepositoryID: &one, PushRepositoryID: &two}
-	projection, err := buildConfigSyncProjection(context.Background(), backend, configsync.SourceConfig{}, "", current, shorttemp.Dir(t), "", shorttemp.Dir(t))
+	projection, err := buildConfigSyncProjection(context.Background(), backend, configsync.SourceConfig{}, "", current, configSyncMachineNames{}, shorttemp.Dir(t), "", shorttemp.Dir(t))
 	if err != nil || len(projection.PathRules) != 0 || projection.PullRepositoryID != "one" || projection.PushRepositoryID != "two" {
 		t.Fatal("empty file projection/current distinct target", err)
 	}
@@ -223,7 +223,7 @@ func TestConfigSyncSourceNoOpDisabledAndConfirmationFencing(t *testing.T) {
 		t.Fatal("stale machine/version scope accepted")
 	}
 	enabled := false
-	disabled, err := buildConfigSyncProjection(context.Background(), &configSyncSourceFixture{}, configsync.SourceConfig{Enabled: &enabled}, "", api.ConfigAssignment{}, shorttemp.Dir(t), "", shorttemp.Dir(t))
+	disabled, err := buildConfigSyncProjection(context.Background(), &configSyncSourceFixture{}, configsync.SourceConfig{Enabled: &enabled}, "", api.ConfigAssignment{}, configSyncMachineNames{}, shorttemp.Dir(t), "", shorttemp.Dir(t))
 	if err != nil || disabled.Enabled {
 		t.Fatal("disable requires repository", err)
 	}
@@ -268,6 +268,8 @@ func TestConfigSyncSourceCommandPreviewConsentAndStaleConfirmation(t *testing.T)
 				t.Error("wrong optimistic version")
 			}
 			writeAPIData(t, w, map[string]any{"id": "assignment", "version": version + 1, "consent_state": "pending"})
+		case "GET /v1/machines":
+			writeAPIData(t, w, api.UserMachinePage{Items: []api.UserMachine{{ID: "machine", Alias: "machine", Platform: "linux"}}, Pagination: api.Pagination{Limit: 200, Total: 1}})
 		case "GET /v1/machines/machine/config-assignment/warning":
 			writeAPIData(t, w, map[string]any{"revision": "warning-exact", "repository_visibility": "ordinary plaintext", "history_retention": "Git history retains old values", "access_consequence": "collaborators can read content"})
 		case "POST /v1/machines/machine/config-assignment/consent":
@@ -386,7 +388,7 @@ func TestConfigSyncSourceCommandPreviewConsentAndStaleConfirmation(t *testing.T)
 "local_path" = "~/editor.json"
 "kind" = "file"
 `), configsync.DefaultSourceConfigLimits())
-	effective, _ := configsync.MergeSourceConfigs(shared, configsync.SourceConfig{})
+	effective, _ := configsync.MergeSourceConfigs(shared, configsync.SourceConfig{}, "")
 	if submitted["configuration_revision"] != effective.Revision {
 		t.Fatal("API configuration revision differs from actual files")
 	}
@@ -419,7 +421,7 @@ func TestConfigSyncSourcePushOnlyIgnoresInheritedPull(t *testing.T) {
 "repository_id" = "active-push"
 `,
 	})
-	projection, err := buildConfigSyncProjection(context.Background(), backend, configsync.SourceConfig{}, "bootstrap", api.ConfigAssignment{}, shorttemp.Dir(t), "", shorttemp.Dir(t))
+	projection, err := buildConfigSyncProjection(context.Background(), backend, configsync.SourceConfig{}, "bootstrap", api.ConfigAssignment{}, configSyncMachineNames{}, shorttemp.Dir(t), "", shorttemp.Dir(t))
 	if err != nil || projection.PullRepositoryID != "" || projection.PushRepositoryID != "active-push" {
 		t.Fatalf("push-only primary used inactive pull: projection=%+v error=%v", projection, err)
 	}
@@ -434,7 +436,7 @@ func TestConfigSyncSourcePushOnlyIgnoresInheritedPull(t *testing.T) {
 ["push"]
 "repository_id" = "active-push"
 `), configsync.DefaultSourceConfigLimits())
-	if _, err := buildConfigSyncProjection(context.Background(), backend, machine, "", api.ConfigAssignment{}, shorttemp.Dir(t), "", shorttemp.Dir(t)); err != nil {
+	if _, err := buildConfigSyncProjection(context.Background(), backend, machine, "", api.ConfigAssignment{}, configSyncMachineNames{}, shorttemp.Dir(t), "", shorttemp.Dir(t)); err != nil {
 		t.Fatal("inactive machine pull selected for bootstrap", err)
 	}
 }
@@ -510,7 +512,7 @@ func TestConfigSyncProjectionExplainsEmptyRepositoryAndMissingBranch(t *testing.
 	missing.Branch = "trunk"
 	backend.grants["branch"] = missing
 	for repository, want := range map[string]string{"empty": "no commits", "branch": "does not have the sync branch"} {
-		_, err := buildConfigSyncProjection(context.Background(), backend, configsync.SourceConfig{}, repository, api.ConfigAssignment{}, shorttemp.Dir(t), "", shorttemp.Dir(t))
+		_, err := buildConfigSyncProjection(context.Background(), backend, configsync.SourceConfig{}, repository, api.ConfigAssignment{}, configSyncMachineNames{}, shorttemp.Dir(t), "", shorttemp.Dir(t))
 		failure := classifyCommandFailure(err)
 		if err == nil || failure.kind != commandRejected || !strings.Contains(commandFailureMessage(err, failure), want) {
 			t.Fatalf("%s: kind=%v message=%q err=%v", repository, failure.kind, commandFailureMessage(err, failure), err)
@@ -524,7 +526,7 @@ func TestConfigSyncProjectionExplainsEmptyRepositoryAndMissingBranch(t *testing.
 func TestConfigSyncProjectionWithoutARepositoryExplainsTheChoice(t *testing.T) {
 	t.Setenv("PATH", "")
 	backend := configSyncSourceBackendFixture(t, map[string]string{"one": ""})
-	_, err := buildConfigSyncProjection(context.Background(), backend, configsync.SourceConfig{}, "", api.ConfigAssignment{}, shorttemp.Dir(t), "", shorttemp.Dir(t))
+	_, err := buildConfigSyncProjection(context.Background(), backend, configsync.SourceConfig{}, "", api.ConfigAssignment{}, configSyncMachineNames{}, shorttemp.Dir(t), "", shorttemp.Dir(t))
 	failure := classifyCommandFailure(err)
 	message := commandFailureMessage(err, failure)
 	if err == nil || !strings.Contains(message, "--repository") || !strings.Contains(message, "pb config sync path") || strings.Contains(message, "could not finish") {
@@ -539,7 +541,7 @@ func TestConfigSyncValidateNamesARepositoryThisMachineCannotReach(t *testing.T) 
 	if err := os.RemoveAll(backend.repos[0].ExternalRef); err != nil {
 		t.Fatal(err)
 	}
-	_, err := buildConfigSyncProjection(context.Background(), backend, configsync.SourceConfig{}, "elsewhere", api.ConfigAssignment{}, shorttemp.Dir(t), "", shorttemp.Dir(t))
+	_, err := buildConfigSyncProjection(context.Background(), backend, configsync.SourceConfig{}, "elsewhere", api.ConfigAssignment{}, configSyncMachineNames{}, shorttemp.Dir(t), "", shorttemp.Dir(t))
 	var rejection commandRejection
 	if !errors.As(err, &rejection) || rejection.reason != commandRejectConfigRepositoryUnavailable {
 		t.Fatalf("error = %v, want the unreachable-repository refusal", err)

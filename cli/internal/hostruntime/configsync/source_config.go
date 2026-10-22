@@ -15,6 +15,7 @@ import (
 const SharedSourceConfigPath = ".paperboat/config-sync.toml"
 
 var ErrSourceConfigInvalid = errors.New("invalid config sync source configuration")
+var ErrMachineNameUnavailable = errors.New("config sync shared file has [machine.<name>] sections but this machine's Paperboat name is not known yet; update pb on every machine and run pb config sync apply again")
 var ErrConfigurationChanged = errors.New("config sync configuration changed; run pb config sync apply to approve the current files")
 
 type RepositoryTarget struct {
@@ -24,6 +25,7 @@ type RepositoryTarget struct {
 }
 type SourceConfig struct {
 	OS               map[string]SourceConfig `json:"os,omitempty" toml:"os"`
+	Machine          map[string]SourceConfig `json:"machine,omitempty" toml:"machine"`
 	Enabled          *bool                   `json:"enabled,omitempty" toml:"enabled"`
 	Pull             *RepositoryTarget       `json:"pull,omitempty" toml:"pull"`
 	Push             *RepositoryTarget       `json:"push,omitempty" toml:"push"`
@@ -84,7 +86,7 @@ func ParseSourceConfig(data []byte, limits SourceConfigLimits) (SourceConfig, er
 	}
 	for _, key := range metadata.Keys() {
 		parts := []string(key)
-		if parts[0] == "os" && len(parts) >= 3 {
+		if (parts[0] == "os" || parts[0] == "machine") && len(parts) >= 3 {
 			parts = parts[2:]
 		}
 		expected := "Hash"
@@ -112,7 +114,7 @@ func ParseSourceConfig(data []byte, limits SourceConfigLimits) (SourceConfig, er
 					expected = "Array"
 				}
 			}
-		case "os":
+		case "os", "machine":
 		default:
 			return SourceConfig{}, ErrSourceConfigInvalid
 		}
@@ -135,7 +137,15 @@ func validateSourceConfig(config SourceConfig, limits SourceConfigLimits) error 
 		}
 	}
 	for platform, section := range config.OS {
-		if platform != "linux" && platform != "darwin" && platform != "windows" || section.OS != nil {
+		if platform != "linux" && platform != "darwin" && platform != "windows" || section.OS != nil || section.Machine != nil {
+			return ErrSourceConfigInvalid
+		}
+		if err := validateSourceConfig(section, limits); err != nil {
+			return err
+		}
+	}
+	for name, section := range config.Machine {
+		if !validMachineName(name) || section.OS != nil || section.Machine != nil {
 			return ErrSourceConfigInvalid
 		}
 		if err := validateSourceConfig(section, limits); err != nil {
@@ -180,10 +190,31 @@ func validateSourceConfig(config SourceConfig, limits SourceConfigLimits) error 
 	}
 	return nil
 }
-func MergeSourceConfigs(shared, machine SourceConfig) (EffectiveConfig, error) {
-	return MergeSourceConfigsForOS(shared, machine, runtime.GOOS)
+
+// validMachineName accepts the syntax of a Paperboat machine name: lowercase
+// letters, digits and hyphens, 1-63 characters, no leading or trailing hyphen.
+func validMachineName(name string) bool {
+	if name == "" || len(name) > 63 || name[0] == '-' || name[len(name)-1] == '-' {
+		return false
+	}
+	for _, character := range name {
+		if character != '-' && (character < 'a' || character > 'z') && (character < '0' || character > '9') {
+			return false
+		}
+	}
+	return true
 }
-func MergeSourceConfigsForOS(shared, machine SourceConfig, goos string) (EffectiveConfig, error) {
+
+// MergeSourceConfigs layers the shared file and this machine's own file.
+// machineName is this machine's Paperboat name; it selects the shared file's
+// [machine.<name>] section and may be empty only when the file has none.
+func MergeSourceConfigs(shared, machine SourceConfig, machineName string) (EffectiveConfig, error) {
+	return MergeSourceConfigsForOS(shared, machine, runtime.GOOS, machineName)
+}
+
+// MergeSourceConfigsForOS layers, lowest to highest: shared, [os.<goos>],
+// [machine.<machineName>], then the machine-local file.
+func MergeSourceConfigsForOS(shared, machine SourceConfig, goos, machineName string) (EffectiveConfig, error) {
 	limits := DefaultSourceConfigLimits()
 	if err := validateSourceConfig(shared, limits); err != nil {
 		return EffectiveConfig{}, err
@@ -191,7 +222,13 @@ func MergeSourceConfigsForOS(shared, machine SourceConfig, goos string) (Effecti
 	if err := validateSourceConfig(machine, limits); err != nil {
 		return EffectiveConfig{}, err
 	}
-	if len(machine.OS) > 0 {
+	if len(machine.OS) > 0 || len(machine.Machine) > 0 {
+		return EffectiveConfig{}, ErrSourceConfigInvalid
+	}
+	if machineName == "" && len(shared.Machine) > 0 {
+		return EffectiveConfig{}, ErrMachineNameUnavailable
+	}
+	if machineName != "" && !validMachineName(machineName) {
 		return EffectiveConfig{}, ErrSourceConfigInvalid
 	}
 	if goos != "linux" && goos != "darwin" && goos != "windows" {
@@ -203,7 +240,7 @@ func MergeSourceConfigsForOS(shared, machine SourceConfig, goos string) (Effecti
 	for _, layer := range []struct {
 		source string
 		config SourceConfig
-	}{{"shared", shared}, {"os", shared.OS[goos]}, {"machine", machine}} {
+	}{{"shared", shared}, {"os", shared.OS[goos]}, {"machine_section", shared.Machine[machineName]}, {"machine", machine}} {
 		c := layer.config
 		if c.Pull != nil {
 			target := *c.Pull

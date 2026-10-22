@@ -478,6 +478,10 @@ func safeEnvironmentVariableCommandError(err error) error {
 	}) {
 		return &envHostRefreshFailure{cause: err}
 	}
+	var nameConflict *environmentmanager.NameCaseConflict
+	if errors.As(err, &nameConflict) {
+		return envCommandError(err, fmt.Sprintf("Windows treats %s and %s as the same variable, so one scope delivered to a Windows machine cannot hold both. Nothing was changed; unset %s or choose another name.", nameConflict.Name, nameConflict.Existing, nameConflict.Existing))
+	}
 	switch {
 	case onlyEnvironmentFailureLeaves(err, func(leaf error) bool { return errors.Is(leaf, environmentmanager.ErrVaultPending) }):
 		return envCommandError(err, "ENV vault publication is pending; run `pb env vault resume` before retrying")
@@ -755,7 +759,10 @@ func runEnvironmentVariableScopeTUI(command *cobra.Command, client *api.Client, 
 			if valueErr != nil {
 				return valueErr
 			}
-			setErr := manager.SetScopeVariable(command.Context(), scope.kind, scope.owner, scope.machine, name, value)
+			var setErr error
+			if manager.WindowsNames, setErr = scopeReachesWindows(command.Context(), client, scope); setErr == nil {
+				setErr = manager.SetScopeVariable(command.Context(), scope.kind, scope.owner, scope.machine, name, value)
+			}
 			clear(value)
 			if setErr != nil {
 				return safeEnvironmentVariableCommandError(setErr)

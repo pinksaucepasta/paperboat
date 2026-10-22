@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -137,7 +138,7 @@ func TestEnvironmentVariableSetCommandEncryptsLocallyAndHidesInput(t *testing.T)
 	previousBackend := environmentVariableBackendForCommand
 	previousVault := passwordVaultForCommand
 	environmentVariableBackendForCommand = func(*cobra.Command) (*api.Client, error) {
-		return api.New("https://api.example.test", config.Credential{AccessToken: "token"}, nil), nil
+		return api.New("https://api.example.test", config.Credential{AccessToken: "token"}, linuxMachinesOnlyClient(t)), nil
 	}
 	passwordVaultForCommand = func(*cobra.Command) (environmentmanager.PasswordVault, error) {
 		return fixture.manager, nil
@@ -191,7 +192,7 @@ func TestEnvironmentVariableSetCommandRoutesTeamScopeWithoutPlaintext(t *testing
 	previousBackend := environmentVariableBackendForCommand
 	previousVault := passwordVaultForCommand
 	environmentVariableBackendForCommand = func(*cobra.Command) (*api.Client, error) {
-		return api.New("https://api.example.test", config.Credential{}, nil), nil
+		return api.New("https://api.example.test", config.Credential{}, linuxMachinesOnlyClient(t)), nil
 	}
 	passwordVaultForCommand = func(*cobra.Command) (environmentmanager.PasswordVault, error) {
 		return fixture.manager, nil
@@ -670,4 +671,28 @@ func TestRotationCancelWithNothingToCancelIsExplained(t *testing.T) {
 	if !strings.Contains(err.Error(), "No personal ENV key rotation is in progress") || !strings.Contains(err.Error(), "nothing was changed") || strings.Contains(err.Error(), "pending") {
 		t.Fatalf("message=%q", err.Error())
 	}
+}
+
+// linuxMachinesOnlyClient answers the machine list with one Linux machine, which
+// the scope's Windows-name check reads before a variable is set.
+func linuxMachinesOnlyClient(t *testing.T) *http.Client {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/machines" {
+			t.Errorf("unexpected endpoint %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		writeAPIData(t, w, api.UserMachinePage{Items: []api.UserMachine{{ID: "machine_linux", Alias: "linux", Platform: "linux"}}, Pagination: api.Pagination{Limit: 200, Total: 1}})
+	}))
+	t.Cleanup(server.Close)
+	target, _ := url.Parse(server.URL)
+	return &http.Client{Transport: rewriteHostTransport{target: target}}
+}
+
+type rewriteHostTransport struct{ target *url.URL }
+
+func (r rewriteHostTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	request = request.Clone(request.Context())
+	request.URL.Scheme, request.URL.Host = r.target.Scheme, r.target.Host
+	return http.DefaultTransport.RoundTrip(request)
 }

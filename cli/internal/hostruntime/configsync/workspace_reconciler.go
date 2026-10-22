@@ -192,7 +192,7 @@ func (r *PlaintextWorkspaceReconciler) Reconcile(ctx context.Context, repository
 		r.diagnostics.ManifestHealth = "invalid"
 		return PreparedPublication{}, err
 	}
-	effective, err := MergeSourceConfigs(shared, r.machineSource)
+	effective, err := MergeSourceConfigs(shared, r.machineSource, r.descriptor.MachineAlias)
 	if err != nil {
 		return PreparedPublication{}, err
 	}

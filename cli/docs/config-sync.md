@@ -54,10 +54,36 @@ kind = "file"
 ```
 
 These paths are chosen by the user; Paperboat never translates or infers destinations.
-Precedence is **machine file → matching OS section → shared defaults**. An empty machine
-file inherits applicable defaults. To change only one machine setting, add that setting
-locally; all other defaults remain inherited. The machine file cannot contain OS sections.
-OS keys are `linux`, `darwin`, and `windows`.
+Precedence is **machine file → `[machine.<name>]` section → matching OS section → shared
+defaults**. An empty machine file inherits applicable defaults. To change only one machine
+setting, add that setting locally; all other defaults remain inherited. The machine file
+cannot contain OS or machine sections. OS keys are `linux`, `darwin`, and `windows`.
+
+A device-specific difference that every machine of the repository should know about goes
+in a `[machine.<name>]` section of the shared file, where `<name>` is the machine's
+Paperboat name (shown by `pb machine list`; lowercase letters, digits and hyphens). It
+takes the same keys as an OS section and applies only to that machine, on top of the OS
+section:
+
+```toml
+[os.linux.paths."myapp/settings.json"]
+local_path = "~/.config/myapp/settings.json"
+kind = "file"
+
+[machine.build-server]
+mode = "pull_only"
+
+[machine.build-server.paths."myapp/settings.json"]
+local_path = "/srv/myapp/settings.json"
+```
+
+If a machine is renamed, its section no longer matches and the machine falls back to the
+OS section and shared defaults; its configuration revision changes, so config sync pauses
+until you run `pb config sync apply` again. `pb config sync validate` and `apply` warn
+about a `[machine.<name>]` section that matches none of your machines, usually a
+misspelled name. A shared file with machine sections needs pb with this feature on every
+machine that reads it; older releases reject the file until they are updated. While a
+machine's name is not yet known to its daemon, sync stays paused instead of guessing.
 
 Rules are keyed by repository-relative file or directory path. For the same path, an
 explicit field overrides the inherited field; omitted fields stay inherited, and empty

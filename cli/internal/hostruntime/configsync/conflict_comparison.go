@@ -211,7 +211,7 @@ func (r *PlaintextWorkspaceReconciler) loadComparisonState(ctx context.Context, 
 	if err != nil {
 		return status, nil, err
 	}
-	effective, err := MergeSourceConfigs(shared, r.machineSource)
+	effective, err := MergeSourceConfigs(shared, r.machineSource, r.descriptor.MachineAlias)
 	if err != nil {
 		return status, nil, err
 	}

@@ -44,7 +44,7 @@ func TestSourceConfigStrictPresentAndOptionalMissing(t *testing.T) {
 }
 func TestSourceConfigPresenceInheritanceAndOSPrecedence(t *testing.T) {
 	shared := SourceConfig{Mode: modePointer(ModePullOnly), AutomaticUpdates: boolPointer(true), Pull: &RepositoryTarget{RepositoryID: "shared"}, Paths: map[string]RuleConfig{"editor": {LocalPath: stringPointer("~/default"), Kind: stringPointer("directory"), Include: patternsPointer("*.json"), Exclude: patternsPointer("private/**")}}, OS: map[string]SourceConfig{"windows": {Paths: map[string]RuleConfig{"editor": {LocalPath: stringPointer("%APPDATA%/editor")}}}}}
-	inherited, err := MergeSourceConfigsForOS(shared, SourceConfig{}, "windows")
+	inherited, err := MergeSourceConfigsForOS(shared, SourceConfig{}, "windows", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestSourceConfigPresenceInheritanceAndOSPrecedence(t *testing.T) {
 		t.Fatalf("shared/OS inheritance %#v", inherited)
 	}
 	machine := SourceConfig{AutomaticUpdates: boolPointer(false), Pull: &RepositoryTarget{RepositoryID: "machine"}, Paths: map[string]RuleConfig{"editor": {Exclude: patternsPointer(), Include: patternsPointer(), LocalPath: stringPointer("~/custom")}}}
-	effective, err := MergeSourceConfigsForOS(shared, machine, "windows")
+	effective, err := MergeSourceConfigsForOS(shared, machine, "windows", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,11 +61,11 @@ func TestSourceConfigPresenceInheritanceAndOSPrecedence(t *testing.T) {
 	if effective.AutomaticUpdates || effective.Mode != ModePullOnly || rule.Source != "machine" || rule.Kind != "directory" || len(rule.Include)+len(rule.Exclude) != 0 || effective.Pull.RepositoryID != "machine" {
 		t.Fatalf("presence override %#v", effective)
 	}
-	defaults, err := MergeSourceConfigsForOS(SourceConfig{}, SourceConfig{}, "linux")
+	defaults, err := MergeSourceConfigsForOS(SourceConfig{}, SourceConfig{}, "linux", "")
 	if err != nil || defaults.Mode != ModeBidirectional || defaults.AutomaticUpdates || !defaults.Enabled || len(defaults.PathRules) != 0 {
 		t.Fatalf("empty defaults %#v %v", defaults, err)
 	}
-	if _, err := MergeSourceConfigsForOS(shared, SourceConfig{OS: map[string]SourceConfig{"linux": {}}}, "linux"); !errors.Is(err, ErrSourceConfigInvalid) {
+	if _, err := MergeSourceConfigsForOS(shared, SourceConfig{OS: map[string]SourceConfig{"linux": {}}}, "linux", ""); !errors.Is(err, ErrSourceConfigInvalid) {
 		t.Fatal("machine OS section accepted")
 	}
 }
@@ -76,7 +76,7 @@ func TestSourceOwnershipWinsBeforeSelectorWithoutFallback(t *testing.T) {
 	machineRoot := resolvedTempDir(t)
 	shared := SourceConfig{Paths: map[string]RuleConfig{"configs": completeRule(sharedRoot, "directory")}, OS: map[string]SourceConfig{"linux": {Paths: map[string]RuleConfig{"configs/editor": {LocalPath: stringPointer(osRoot), Kind: stringPointer("directory"), Exclude: patternsPointer("*.secret")}}}}}
 	machine := SourceConfig{Paths: map[string]RuleConfig{"configs/editor/file.json": {LocalPath: stringPointer(filepath.Join(machineRoot, "renamed")), Kind: stringPointer("file")}}}
-	effective, err := MergeSourceConfigsForOS(shared, machine, "linux")
+	effective, err := MergeSourceConfigsForOS(shared, machine, "linux", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestSourceOwnershipWinsBeforeSelectorWithoutFallback(t *testing.T) {
 	// A less-specific machine directory owns every descendant, including a
 	// previously more-specific shared or OS file.
 	machine = SourceConfig{Paths: map[string]RuleConfig{"configs": {LocalPath: stringPointer(machineRoot), Kind: stringPointer("directory"), Include: patternsPointer("*.txt")}}}
-	effective, err = MergeSourceConfigsForOS(shared, machine, "linux")
+	effective, err = MergeSourceConfigsForOS(shared, machine, "linux", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +149,7 @@ func TestSourceNestedOverrideAtCorrespondingDestination(t *testing.T) {
 	destination := filepath.Join(home, "foo")
 	shared := SourceConfig{Mode: modePointer(ModePullOnly), Paths: map[string]RuleConfig{"foo": completeRule(destination, "directory")}}
 	machine := SourceConfig{Paths: map[string]RuleConfig{"foo/settings.json": completeRule(filepath.Join(destination, "settings.json"), "file")}}
-	effective, err := MergeSourceConfigs(shared, machine)
+	effective, err := MergeSourceConfigs(shared, machine, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +158,7 @@ func TestSourceNestedOverrideAtCorrespondingDestination(t *testing.T) {
 	}
 	for _, invalid := range []string{filepath.Join(destination, "other.json"), destination} {
 		machine.Paths["foo/settings.json"] = completeRule(invalid, "file")
-		bad, err := MergeSourceConfigs(shared, machine)
+		bad, err := MergeSourceConfigs(shared, machine, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -227,7 +227,7 @@ func TestSharedFileDefaultsWithEmptyMachineFileReconcileWithoutCopyingDefaults(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	effective, err := MergeSourceConfigs(shared, machine)
+	effective, err := MergeSourceConfigs(shared, machine, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,7 +267,7 @@ func TestDirectionalChildUsesParentSourceApprovalAndPrimarySharedCallback(t *tes
 	state := resolvedTempDir(t)
 	repoRoot := resolvedTempDir(t)
 	source := SourceConfig{Mode: modePointer(ModeBidirectional), Paths: map[string]RuleConfig{"config": completeRule(filepath.Join(home, "config"), "file")}}
-	effective, err := MergeSourceConfigs(source, SourceConfig{})
+	effective, err := MergeSourceConfigs(source, SourceConfig{}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,7 +297,7 @@ func TestPresentInvalidSharedSourceCannotFallBackToApprovedMachineRules(t *testi
 	state := resolvedTempDir(t)
 	repoRoot := resolvedTempDir(t)
 	source := SourceConfig{Paths: map[string]RuleConfig{"config": completeRule(filepath.Join(home, "config"), "file")}}
-	effective, err := MergeSourceConfigs(SourceConfig{}, source)
+	effective, err := MergeSourceConfigs(SourceConfig{}, source, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -356,7 +356,7 @@ func TestNestedSourceOwnersReconcileRealFilesWithoutReadingLosingPayload(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	effective, err := MergeSourceConfigs(shared, machine)
+	effective, err := MergeSourceConfigs(shared, machine, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -417,5 +417,88 @@ exclude = []
 	}
 	if rule := source.Paths["shell/config"]; rule.Include != nil || rule.Exclude == nil || len(*rule.Exclude) != 0 {
 		t.Fatalf("array presence lost: %#v", rule)
+	}
+}
+
+const machineSectionSource = `
+[paths.editor]
+local_path = "~/default"
+kind = "directory"
+
+[os.linux.paths.editor]
+local_path = "~/os"
+
+[machine.hp.paths.editor]
+local_path = "~/hp"
+
+[machine.hp]
+mode = "pull_only"
+
+[machine.laptop.paths.editor]
+exclude = ["private/**"]
+`
+
+func TestMachineSectionPrecedenceBetweenOSAndMachineFile(t *testing.T) {
+	shared, err := ParseSourceConfig([]byte(machineSectionSource), DefaultSourceConfigLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if shared.Machine["hp"].Mode == nil || *shared.Machine["hp"].Mode != ModePullOnly || shared.Machine["laptop"].Paths["editor"].Exclude == nil {
+		t.Fatalf("machine sections not parsed: %#v", shared.Machine)
+	}
+	cases := []struct {
+		name, machineName, wantLocal, wantSource string
+		wantMode                                 AssignmentMode
+	}{
+		{"named section beats os", "hp", "~/hp", "machine_section", ModePullOnly},
+		{"other machine keeps os", "desktop", "~/os", "os", ModeBidirectional},
+		{"section only changes what it sets", "laptop", "~/os", "machine_section", ModeBidirectional},
+	}
+	for _, tc := range cases {
+		effective, err := MergeSourceConfigsForOS(shared, SourceConfig{}, "linux", tc.machineName)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		rule := effective.PathRules[0]
+		if rule.LocalPath != tc.wantLocal || rule.Source != tc.wantSource || effective.Mode != tc.wantMode || rule.Kind != "directory" {
+			t.Fatalf("%s: %#v mode=%s", tc.name, rule, effective.Mode)
+		}
+	}
+	machine := SourceConfig{Paths: map[string]RuleConfig{"editor": {LocalPath: stringPointer("~/mine")}}}
+	effective, err := MergeSourceConfigsForOS(shared, machine, "linux", "hp")
+	if err != nil || effective.PathRules[0].LocalPath != "~/mine" || effective.PathRules[0].Source != "machine" || effective.Mode != ModePullOnly {
+		t.Fatalf("machine file must beat the machine section: %#v %v", effective, err)
+	}
+	if sourceRank("machine") <= sourceRank("machine_section") || sourceRank("machine_section") <= sourceRank("os") || sourceRank("os") <= sourceRank("shared") {
+		t.Fatal("path ownership ranks do not follow the precedence")
+	}
+	hp, _ := MergeSourceConfigsForOS(shared, SourceConfig{}, "linux", "hp")
+	desktop, _ := MergeSourceConfigsForOS(shared, SourceConfig{}, "linux", "desktop")
+	if hp.Revision == desktop.Revision {
+		t.Fatal("configuration revision ignores the machine section")
+	}
+}
+
+func TestMachineSectionNeedsMachineNameAndKnownSyntax(t *testing.T) {
+	shared, err := ParseSourceConfig([]byte(machineSectionSource), DefaultSourceConfigLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := MergeSourceConfigsForOS(shared, SourceConfig{}, "linux", ""); !errors.Is(err, ErrMachineNameUnavailable) {
+		t.Fatalf("unknown machine name must fail closed, not apply the wrong configuration: %v", err)
+	}
+	if _, err := MergeSourceConfigsForOS(SourceConfig{}, SourceConfig{}, "linux", ""); err != nil {
+		t.Fatalf("a file without machine sections never needs the name: %v", err)
+	}
+	if _, err := MergeSourceConfigsForOS(shared, SourceConfig{Machine: map[string]SourceConfig{"hp": {}}}, "linux", "hp"); !errors.Is(err, ErrSourceConfigInvalid) {
+		t.Fatal("machine file accepted a [machine] section")
+	}
+	for _, data := range []string{"[machine.HP]", "[machine.-hp]", "[machine.hp-]", "[machine.'a b']", "[machine.hp.os.linux]", "[machine.hp.machine.other]", "[os.linux.machine.hp]", "machine = 3", "[machine.hp]\nmode = 3", "[machine.hp]\nunknown = 1", "[machine.hp.pull]\nrepository_id = 3"} {
+		if _, err := ParseSourceConfig([]byte(data), DefaultSourceConfigLimits()); !errors.Is(err, ErrSourceConfigInvalid) {
+			t.Fatalf("accepted %q: %v", data, err)
+		}
+	}
+	if _, err := ParseSourceConfig([]byte("[machine.hp.pull]\nrepository_id = 'r'\n[machine.hp.paths.a]\nlocal_path = 'x'\nkind = 'file'"), DefaultSourceConfigLimits()); err != nil {
+		t.Fatalf("valid section rejected: %v", err)
 	}
 }

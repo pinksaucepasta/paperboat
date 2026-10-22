@@ -496,6 +496,8 @@ func (m *PathMapping) RepositoryPath(full string) (string, bool) {
 func sourceRank(source string) int {
 	switch source {
 	case "machine":
+		return 4
+	case "machine_section":
 		return 3
 	case "os":
 		return 2

@@ -195,3 +195,33 @@ func TestDeniedRecordWriteIsReportedAndNotLeftPending(t *testing.T) {
 		t.Fatalf("next edit after denial: %v", err)
 	}
 }
+
+// Windows treats Path and PATH as one variable, so a scope delivered to a Windows
+// machine must not hold both; any other machine keeps names case-sensitive.
+func TestWindowsScopeRefusesNamesDifferingOnlyByCase(t *testing.T) {
+	ctx := context.Background()
+	v, c, _ := newVaultScopesFixture(t)
+	if err := v.SetScopeVariable(ctx, "personal", v.AccountID, "", "Path", []byte("one")); err != nil {
+		t.Fatal(err)
+	}
+	v.WindowsNames = true
+	puts := len(c.recordPuts)
+	err := v.SetScopeVariable(ctx, "personal", v.AccountID, "", "PATH", []byte("two"))
+	var conflict *NameCaseConflict
+	if !errors.As(err, &conflict) || conflict.Name != "PATH" || conflict.Existing != "Path" {
+		t.Fatalf("case collision accepted on a Windows scope: %v", err)
+	}
+	if len(c.recordPuts) != puts {
+		t.Fatal("refused name was still written")
+	}
+	if err := v.SetScopeVariable(ctx, "personal", v.AccountID, "", "Path", []byte("again")); err != nil {
+		t.Fatalf("updating the same name must stay allowed: %v", err)
+	}
+	if err := v.SetScopeVariable(ctx, "personal", v.AccountID, "", "OTHER", []byte("x")); err != nil {
+		t.Fatalf("unrelated name refused: %v", err)
+	}
+	v.WindowsNames = false
+	if err := v.SetScopeVariable(ctx, "personal", v.AccountID, "", "PATH", []byte("unix")); err != nil {
+		t.Fatalf("Unix scopes stay case-sensitive: %v", err)
+	}
+}
