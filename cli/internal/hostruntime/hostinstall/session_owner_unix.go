@@ -172,7 +172,18 @@ func InstalledSessionOwnerRecorded(ctx context.Context, uid int, source installs
 	return SessionOwnerRecorded(ctx, request)
 }
 
-// preflightUnixCarrier refuses a running pre-carrier authority before mutation.
+// carrierNotServingError reports a retained, verified carrier that did not become ready: it serves no
+// streams (for example its pinned binary exits on current state), so an install may replace it after
+// the drain instead of refusing; see replaceUnservingUnixCarrier.
+type carrierNotServingError struct{ cause error }
+
+func (e *carrierNotServingError) Error() string {
+	return "the installed carrier is not serving; it will be replaced by the new version"
+}
+func (e *carrierNotServingError) Unwrap() error { return e.cause }
+
+// preflightUnixCarrier refuses a running pre-carrier authority before mutation. A retained carrier that
+// verifies but does not become ready returns *carrierNotServingError.
 func preflightUnixCarrier(ctx context.Context, request Request, paths installPaths) (bool, error) {
 	c, err := readCarrierConfigFile(ctx, paths.instance)
 	if err == nil {
@@ -195,7 +206,7 @@ func preflightUnixCarrier(ctx context.Context, request Request, paths installPat
 			if err := verifyCarrierNativeCustody(c, installer); err != nil {
 				return false, err
 			}
-			return false, waitCarrierReady(ctx, c)
+			return false, carrierReadiness(waitCarrierReady(ctx, c))
 		}
 	}
 	if err != nil && !installNotExistOnly(err) {
@@ -262,6 +273,49 @@ func cleanupPreparedUnixCarrier(ctx context.Context, paths installPaths, cause e
 		return errors.Join(cause, err)
 	}
 	return cleanupCarrierStartup(ctx, installer, cause)
+}
+
+// carrierReadiness turns a retained carrier's readiness failure into *carrierNotServingError; an
+// interrupted install (canceled context) stays its own error.
+func carrierReadiness(err error) error {
+	if err == nil || errors.Is(err, context.Canceled) {
+		return err
+	}
+	return &carrierNotServingError{cause: err}
+}
+
+// replaceUnservingUnixCarrier swaps a retained carrier that did not become ready for the candidate's
+// pin. Update would otherwise keep that carrier and wait for it forever, so a carrier broken by its own
+// binary could never be updated (dadape 2026-10-22: an old pin that refused its trust file). It runs
+// inside the lifecycle transaction after the drain; if the candidate carrier does not become ready the
+// transaction fails and Restore puts the captured carrier back.
+func replaceUnservingUnixCarrier(ctx context.Context, request Request, paths installPaths) error {
+	retained, err := readCarrierConfigFile(ctx, paths.instance)
+	if err != nil {
+		return err
+	}
+	installer, err := carrierInstaller(retained)
+	if err != nil {
+		return err
+	}
+	native, ok := installerController(retained).(service.NativeLifecycleController)
+	if !ok {
+		return service.ErrInvalidDefinition
+	}
+	if err := installer.Uninstall(ctx); err != nil {
+		return err
+	}
+	status, err := native.Inspect(ctx, installer.DefinitionPath())
+	if err != nil {
+		return err
+	}
+	if status.Registered || status.Running {
+		return service.ErrLifecycleUncertain
+	}
+	if err := os.Remove(carrierConfigPath(paths.instance)); err != nil && !installNotExistOnly(err) {
+		return err
+	}
+	return prepareCarrierLocked(ctx, request)
 }
 
 func prepareColdUnixCarrier(ctx context.Context, request Request, paths installPaths) error {

@@ -81,6 +81,11 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 	}
 
 	coldCarrier, err := preflightUnixCarrier(ctx, request, paths)
+	var notServing *carrierNotServingError
+	replaceCarrier := errors.As(err, &notServing)
+	if replaceCarrier {
+		err = nil
+	}
 	if err != nil {
 		return err
 	}
@@ -223,6 +228,10 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 		if coldCarrier {
 			if err := prepareColdUnixCarrier(ctx, request, paths); err != nil {
 				return err
+			}
+		} else if replaceCarrier {
+			if err := replaceUnservingUnixCarrier(ctx, request, paths); err != nil {
+				return hostInstallFailure("the installed carrier was not serving and its replacement did not become ready; restoring the previous version", err)
 			}
 		}
 		if err := applyUnixNativeRoles(ctx, legacyHost, hostd, updater, request.HelperListenAddress, false); err != nil {
