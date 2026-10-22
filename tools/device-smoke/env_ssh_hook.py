@@ -19,6 +19,11 @@ import time
 
 PB = '$HOME/.local/bin/pb'
 PROBE = 'PB_ENV_HOOK_PROBE'
+# `pb env unset` previews first and needs the preview's confirmation code.
+UNSET = (f'c=$({PB} env unset {PROBE} --json 2>/dev/null | python3 -c "import json,sys;'
+         f'print(json.load(sys.stdin).get(\'data\',{{}}).get(\'confirmation_token\',\'\'))");'
+         f' [ -n "$c" ] && {PB} env unset {PROBE} --json --confirm "$c" >/dev/null 2>&1')
+
 MARKER = '# paperboat-env-hook'
 
 
@@ -75,7 +80,7 @@ def main():
                         and report['quiet_output_bytes'] == 0 and quiet_ms < 3000
                         and report['uninstall_restores_rc'])
     finally:
-        ssh(host, f'{PB} env hook --uninstall >/dev/null 2>&1; {PB} env unset {PROBE} >/dev/null 2>&1')
+        ssh(host, f'{PB} env hook --uninstall >/dev/null 2>&1; {UNSET}')
     print(json.dumps(report, sort_keys=True))
     return 0 if report.get('ok') else 1
 
