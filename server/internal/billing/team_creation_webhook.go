@@ -94,11 +94,13 @@ func (s *WorkspaceService) handleTeamCreationWebhook(ctx context.Context, event 
 		err = s.expireTeamOrder(ctx, key)
 		return true, err == nil, err
 	}
-	wantPayment, wantStatus := "paid", "active"
+	// A trial Checkout that collected a card reports "paid" (Stripe sandbox, 2026-10-23);
+	// one without a first charge may report "no_payment_required". Both start a trial.
+	paymentOK, wantStatus := paid == "paid", "active"
 	if req.TrialDays > 0 {
-		wantPayment, wantStatus = "no_payment_required", "trialing"
+		paymentOK, wantStatus = paid == "paid" || paid == "no_payment_required", "trialing"
 	}
-	if checkout.Status != "complete" || paid != wantPayment || checkout.SubscriptionID == "" {
+	if checkout.Status != "complete" || !paymentOK || checkout.SubscriptionID == "" {
 		return true, false, ErrCheckoutPending
 	}
 	if event.Data.Object.Object != "checkout.session" && event.SubscriptionID() != checkout.SubscriptionID {

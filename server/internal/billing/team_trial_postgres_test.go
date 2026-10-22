@@ -46,6 +46,8 @@ func TestTeamTrialFirstTeamOnlyWithCardAndReminder(t *testing.T) {
 		}
 	})
 	var trialForms []string
+	// Stripe reports a card-collecting trial Checkout as paid.
+	checkoutPayment := "paid"
 	customers := 0
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -58,7 +60,7 @@ func TestTeamTrialFirstTeamOnlyWithCardAndReminder(t *testing.T) {
 			trialForms = append(trialForms, r.Form.Get("subscription_data[trial_period_days]")+"|"+r.Form.Get("payment_method_collection")+"|"+r.Form.Get("subscription_data[trial_settings][end_behavior][missing_payment_method]"))
 			json.NewEncoder(w).Encode(map[string]any{"id": session + strings.Repeat("x", len(trialForms)-1), "customer": r.Form.Get("customer"), "url": "https://checkout.example.test/s"})
 		case r.Method == "GET" && r.URL.Path == "/v1/checkout/sessions/"+session:
-			json.NewEncoder(w).Encode(map[string]any{"id": session, "customer": customer, "status": "complete", "mode": "subscription", "payment_status": "no_payment_required", "subscription": subscription, "metadata": map[string]string{"paperboat_checkout_operation": "team-create:" + key}, "line_items": map[string]any{"data": []any{map[string]any{"quantity": 2, "price": map[string]string{"id": price}}}}})
+			json.NewEncoder(w).Encode(map[string]any{"id": session, "customer": customer, "status": "complete", "mode": "subscription", "payment_status": checkoutPayment, "subscription": subscription, "metadata": map[string]string{"paperboat_checkout_operation": "team-create:" + key}, "line_items": map[string]any{"data": []any{map[string]any{"quantity": 2, "price": map[string]string{"id": price}}}}})
 		case r.Method == "GET" && r.URL.Path == "/v1/subscriptions/"+subscription:
 			json.NewEncoder(w).Encode(map[string]any{"id": subscription, "customer": customer, "status": "trialing", "metadata": map[string]string{"paperboat_checkout_operation": "team-create:" + key}, "items": map[string]any{"data": []any{map[string]any{"id": "si_t" + suffix, "quantity": 2, "current_period_start": time.Now().Unix() - 60, "current_period_end": time.Now().Unix() + 14*86400, "price": map[string]string{"id": price}}}}})
 		default:
