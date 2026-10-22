@@ -501,7 +501,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 		return NetworkConfigResult{}, ErrUnavailable
 	}
 	quotaDenied := s.relayQuotaWithheld(ctx, self.AccountID, now)
-	relayGrants, withheld, err := s.relayGrants(ctx, tx, self, peers, generation, now, expiry, quotaDenied)
+	relayGrants, withheld, err := s.relayGrants(ctx, tx, self, relayPriority(self, peers, admittedPeers, live["machine_network"]), generation, now, expiry, quotaDenied)
 	if err != nil {
 		return NetworkConfigResult{}, err
 	}
@@ -685,6 +685,34 @@ func relayControlPeers(self networkBinding, peers []networkPeer) ([]string, erro
 		result = result[:maximumRelayControlPeers]
 	}
 	return result, nil
+}
+
+// relayPriority orders the peers a relay grant names when it cannot name them
+// all: peers this endpoint is using now (an admitted session or grant, or a live
+// personal network scope) come first, so a bounded grant never drops them.
+func relayPriority(self networkBinding, peers []networkPeer, admittedPeers map[string]bool, liveNetworks []string) []networkPeer {
+	inUse := func(peer networkPeer) bool {
+		if admittedPeers[peer.Identity.EndpointID] || slices.Contains(liveNetworks, personalNetworkScopeID(self, peer.Identity)) {
+			return true
+		}
+		for _, scope := range peer.Scopes {
+			if scope.ResourceKind != "machine_network" {
+				return true
+			}
+		}
+		return false
+	}
+	ordered := slices.Clone(peers)
+	slices.SortStableFunc(ordered, func(a, b networkPeer) int {
+		switch ia, ib := inUse(a), inUse(b); {
+		case ia && !ib:
+			return -1
+		case ib && !ia:
+			return 1
+		}
+		return 0
+	})
+	return ordered
 }
 
 // maximumRelayGrantPeers is the relay's bound on one grant (relay derpquic
