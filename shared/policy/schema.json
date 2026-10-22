@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Paperboat workspace policy",
+  "description": "Who may use what on which machines of one workspace. Rules allow or deny; a deny wins over an allow; anything no rule allows is denied. The owner of a personal machine always keeps access to it. Reference: shared/policy/README.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {"type": "string", "description": "Optional; editors use it for completion."},
+    "allow_private_access": {"type": "boolean", "description": "Team workspaces only. When false (the default), no rule gives private_access."},
+    "groups": {
+      "type": "object",
+      "description": "Named sets of members, used in src.",
+      "propertyNames": {"pattern": "^group:[a-z0-9][a-z0-9._-]{0,62}$"},
+      "additionalProperties": {"type": "array", "items": {"$ref": "#/$defs/user"}}
+    },
+    "tags": {
+      "type": "object",
+      "description": "Machine tags, used in dst.",
+      "propertyNames": {"pattern": "^tag:[a-z0-9][a-z0-9._-]{0,62}$"},
+      "additionalProperties": {"type": "array", "items": {"type": "string", "pattern": "^machine:[^*]+$"}}
+    },
+    "rules": {"type": "array", "items": {"$ref": "#/$defs/rule"}},
+    "tests": {"type": "array", "items": {"$ref": "#/$defs/test"}}
+  },
+  "$defs": {
+    "user": {"type": "string", "pattern": "^user:.+@.+$"},
+    "subject": {
+      "type": "string",
+      "description": "user:<email>, group:<name>, role:owner, role:admin (owners and admins), role:member (everyone) or * (every member).",
+      "pattern": "^(\\*|user:.+@.+|group:[a-z0-9][a-z0-9._-]{0,62}|role:(owner|admin|member))$"
+    },
+    "target": {
+      "type": "string",
+      "description": "machine:<alias>, machine:*, tag:<name>, preview:<name>, tunnel:<name> or env:team. One rule's dst is all machines/tags, all previews/tunnels, or env:team.",
+      "pattern": "^(machine:.+|tag:[a-z0-9][a-z0-9._-]{0,62}|preview:.+|tunnel:.+|env:team)$"
+    },
+    "action": {
+      "type": "string",
+      "description": "Machine actions (machine:, tag:): terminal, exec, managed_ssh, files, preview_manage, tunnel_manage, private_access, inspect, replay, or * for all of them. Preview/tunnel actions: inspect, replay. ENV actions (env:team): env_read, env_write.",
+      "enum": ["*", "terminal", "exec", "managed_ssh", "files", "preview_manage", "tunnel_manage", "private_access", "inspect", "replay", "env_read", "env_write"]
+    },
+    "port": {
+      "description": "A port (5432) or an inclusive range (\"8000-8100\").",
+      "oneOf": [
+        {"type": "integer", "minimum": 1, "maximum": 65535},
+        {"type": "string", "pattern": "^[0-9]{1,5}(-[0-9]{1,5})?$"}
+      ]
+    },
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["src", "dst"],
+      "oneOf": [{"required": ["allow"]}, {"required": ["deny"]}],
+      "properties": {
+        "src": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/subject"}},
+        "dst": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/target"}},
+        "allow": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/action"}},
+        "deny": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/action"}},
+        "ports": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/port"}, "description": "Only with allow or deny exactly [\"private_access\"]. Default: an allow covers 1024-65535, a deny every port."},
+        "note": {"type": "string"}
+      }
+    },
+    "test": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["src", "dst"],
+      "anyOf": [{"required": ["allow"]}, {"required": ["deny"]}],
+      "properties": {
+        "src": {"$ref": "#/$defs/user"},
+        "dst": {"type": "string", "pattern": "^(machine:[^*]+|preview:.+|tunnel:.+|env:team)$"},
+        "allow": {"type": "array", "items": {"type": "string", "description": "An action, or private_access:<port>."}},
+        "deny": {"type": "array", "items": {"type": "string", "description": "An action, or private_access:<port>."}}
+      }
+    }
+  }
+}

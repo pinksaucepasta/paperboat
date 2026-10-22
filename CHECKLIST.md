@@ -689,15 +689,15 @@ Behaviour that only matters when platforms mix. The three cells are platform **p
 | ID | Scenario | L | M | W | Evidence |
 |---|---|---|---|---|---|
 | F18-01 | Policy file format, JSON Schema served and printed, validation with stable path+code errors, limits; invalid files and failing tests are never saved. | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
-| F18-02 | Enforcement on the server: every machine capability (terminal, browser terminal, exec, managed SSH, files, preview/tunnel manage, private access with ports) and preview/tunnel inspect/replay (F17 inspector credentials) follows the compiled policy; tags and groups work; removing access ends active sessions as a grant revoke does today. | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
+| F18-02 | Enforcement on the server: every machine capability (terminal, browser terminal, exec, managed SSH, files, preview/tunnel manage, private access with ports) and preview/tunnel inspect/replay (F17 inspector credentials) follows the compiled policy, deny over allow; tags and groups work; removing access ends active sessions as a grant revoke does today. | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
 | F18-03 | Migration: every team's existing machine grants, inspect/replay grants and private-access setting become policy v1 with identical access (compiled table equals the old answer for every member × machine × capability); personal workspaces unchanged. | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
-| F18-04 | Explain and test: allow/deny with matched rule or guardrail, who-can and what-can, on the saved policy and on a draft; in-file tests run on validate and save. | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
+| F18-04 | Explain and test: allowed/denied with the deciding rule or guardrail, who-can and what-can, on the saved policy and on a draft; in-file tests run on validate and save; the owner guard holds against any deny. | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
 | F18-05 | Versions, access-change review before save, restore, audit events; stale saves refused; renames and removals rewrite references with an audit event. | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
-| F18-06 | Agent tokens: create/list/revoke, no access unless a rule names them, capped by the creator's access, used by `PB_TOKEN` with `pb exec` and the other commands, every use attributed; solo personal workspace "token may only exec on tag:ci" works. | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
-| F18-07 | ENV scopes in rules: env_read/env_write decide vault member grants; removing access revokes as `pb env team revoke` does; explain reports "allowed, key not delivered yet". | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
+| F18-06 | API tokens: create/list/revoke with expiry, act as their creator, optional scope narrows (solo personal workspace "token may only exec on tag:ci" works), creator losing access takes it from the token, used with `PB_API_TOKEN` by any command, every use attributed. | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
+| F18-07 | ENV in rules: env_read/env_write decide team ENV grants; removing access revokes as `pb env team revoke` does; explain reports "allowed, key not delivered yet". | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
 | F18-08 | Who may edit: owners/admins edit all; a member edits only rules for their own shared machines; members read and explain their own access. | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
-| F18-09 | Console Access page: Simple grid (today's grants, private-access switch, tags, groups, tokens), Policy file editor with inline errors and Review changes, Test, History with Diff/Restore (scripted browser check). | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
-| F18-10 | CLI `pb policy` and `pb token` commands work end to end against the live server (device check on the victus VMs). | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
+| F18-09 | Console Access page (Simple grid with today's grants, private-access switch, tags, groups; Policy file editor with inline errors and Review changes; Test; History with Diff/Restore) and Settings → API tokens (scripted browser check). | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
+| F18-10 | CLI `pb policy` and `pb api-token` commands work end to end against the live server (device check on the victus VMs). | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
 
 **Commands**
 
@@ -710,9 +710,9 @@ Behaviour that only matters when platforms mix. The three cells are platform **p
 | C248 | `pb policy versions` | List policy versions with author and change summary | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
 | C249 | `pb policy restore` | Restore an earlier policy version as a new version | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
 | C250 | `pb policy schema` | Print the policy JSON Schema | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
-| C251 | `pb token create` | Create an agent token for this workspace | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
-| C252 | `pb token list` | List agent tokens | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
-| C253 | `pb token revoke` | Revoke an agent token | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
+| C251 | `pb api-token create` | Create an API token (acts as you; optional scope and expiry) | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
+| C252 | `pb api-token list` | List API tokens | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
+| C253 | `pb api-token revoke` | Revoke an API token | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
 
 ---
 

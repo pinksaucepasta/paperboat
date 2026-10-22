@@ -1,0 +1,120 @@
+# Workspace policy reference
+
+One policy per workspace (personal or team) says who may use what on which machines. It is a
+JSON file; comments (`//`, `/* */`) and trailing commas are allowed (HuJSON). The JSON Schema is
+[`schema.json`](schema.json), served at `GET /v1/policy/schema` and printed by
+`pb policy schema`. Design: PLAN.md F18.
+
+```jsonc
+{
+  // Team workspaces only; false (the default) means no rule gives private_access.
+  "allow_private_access": true,
+  "groups": {"group:oncall": ["user:cy@example.test"]},
+  "tags": {
+    "tag:prod": ["machine:db1", "machine:web2"],
+    "tag:ci": ["machine:runner"],
+  },
+  "rules": [
+    {"src": ["role:member"], "dst": ["tag:ci"], "allow": ["terminal", "exec", "files"]},
+    {"src": ["group:oncall"], "dst": ["tag:prod"], "allow": ["*"]},
+    {"src": ["*"], "dst": ["tag:prod"], "deny": ["managed_ssh"], "note": "no SSH on prod"},
+    {"src": ["group:oncall"], "dst": ["tag:prod"], "allow": ["private_access"], "ports": [5432]},
+    {"src": ["user:bo@example.test"], "dst": ["preview:p1"], "allow": ["inspect"]},
+    {"src": ["group:oncall"], "dst": ["env:team"], "allow": ["env_read"]},
+  ],
+  "tests": [
+    {"src": "user:cy@example.test", "dst": "machine:db1", "allow": ["exec", "private_access:5432"], "deny": ["managed_ssh"]},
+    {"src": "user:bo@example.test", "dst": "machine:db1", "deny": ["terminal"]},
+  ],
+}
+```
+
+## How a request is decided
+
+1. **Guardrails** outside the policy: signed in, account active, team not suspended, member
+   active, machine enrolled and in this workspace, the machine's own service switches
+   (`pb machine capabilities`). Any of them failing denies.
+2. **Owner:** the owner of a personal machine may do everything on it in the personal
+   workspace, and the owner of a preview or tunnel (or of the personal machine it runs on) may
+   always `inspect` and `replay` it. No rule can take this away.
+3. **Deny:** a deny rule that matches decides: denied.
+4. **Allow:** an allow rule that matches decides: allowed.
+5. Otherwise denied.
+
+Rule order never matters. Explain (`pb policy explain`) names the rule that decided.
+
+**API tokens** act as the member who created them. A token created with a scope
+(`[{"dst": ["tag:ci"], "allow": ["exec"]}]`, the same names as a rule) may only do what the
+scope lists, and never more than its creator may do at that moment.
+
+## Fields
+
+| Field | Meaning |
+|---|---|
+| `allow_private_access` | Team only. When false (the default), no rule gives `private_access`. |
+| `groups` | `group:<name>` → list of `user:<email>`. |
+| `tags` | `tag:<name>` → list of `machine:<alias>`. A machine may carry many tags. |
+| `rules[]` | `src`, `dst`, exactly one of `allow` / `deny`, optional `ports`, optional `note`. |
+| `tests[]` | `src` (one `user:<email>`), `dst` (one machine, preview, tunnel or `env:team`), `allow` and/or `deny` lists of actions; `private_access:<port>` checks one port. A failing test stops the save. |
+
+Names after `group:` and `tag:` use lowercase letters, digits, `.`, `_` and `-` (up to 63).
+
+**Subjects (`src`):** `user:<email>`, `group:<name>`, `role:owner`, `role:admin` (owners and
+admins), `role:member` (every member), `*` (every member).
+
+**Targets (`dst`):** `machine:<alias>`, `machine:*` (every machine of the workspace),
+`tag:<name>`, `preview:<name>`, `tunnel:<name>`, `env:team` (team ENV). One rule's targets
+are all machines/tags, all previews/tunnels, or `env:team`.
+
+**Actions:**
+
+| Action | Targets | Meaning |
+|---|---|---|
+| `terminal` | machines | open terminals, including the browser terminal |
+| `exec` | machines | `pb exec` |
+| `managed_ssh` | machines | `pb ssh`, `scp`, `sftp`, `rsync` |
+| `files` | machines | send files to the machine's Inbox |
+| `preview_manage` | machines | start and stop previews on the machine |
+| `tunnel_manage` | machines | create and change tunnels on the machine |
+| `private_access` | machines | reach the machine's ports privately; `ports` narrows it (an allow defaults to 1024-65535, a deny to every port) |
+| `inspect` | machines, previews, tunnels | read captured requests (on a machine: every preview and tunnel it publishes) |
+| `replay` | machines, previews, tunnels | replay a captured request; `inspect` does not imply it |
+| `*` | machines | all of the above |
+| `env_read`, `env_write` | `env:team` | receive or change the team ENV |
+
+## Error codes
+
+Every error has a JSON Pointer `path` into the file, a stable `code` and a `message`. Errors
+are sorted by path, so the same file always gives the same list.
+
+| Code | Meaning |
+|---|---|
+| `syntax` | not JSON / HuJSON |
+| `too_large` | the file is larger than the limit |
+| `wrong_type` | a value has the wrong type |
+| `unknown_field` | a key the format does not have |
+| `duplicate_key` | a key appears twice in one object |
+| `required` | a required key is missing |
+| `allow_or_deny` | a rule needs exactly one of `allow` and `deny` |
+| `empty` | a list must have at least one entry |
+| `limit` | more rules, tags, groups, tests or entries than the limit |
+| `invalid_name` | a group or tag name is not `group:<name>` / `tag:<name>` |
+| `invalid_subject` | not a valid `src` entry (or a group entry that is not `user:`) |
+| `invalid_target` | not a valid `dst` entry |
+| `invalid_port` | a port outside 1-65535 or a bad range |
+| `unknown_user` | the email is not a member of this workspace |
+| `unknown_group` | the group is not defined in `groups` |
+| `unknown_role` | not `role:owner`, `role:admin` or `role:member` |
+| `unknown_machine` | no machine with that alias in this workspace |
+| `unknown_tag` | the tag is not defined in `tags` |
+| `unknown_preview`, `unknown_tunnel` | no preview / tunnel with that name in this workspace |
+| `unknown_env_scope` | the ENV target is `env:team` |
+| `not_allowed_in_tag` | a tag lists something other than `machine:<alias>` |
+| `team_only` | `allow_private_access` or `env:team` in a personal workspace |
+| `mixed_targets` | one rule mixes machines, previews/tunnels and `env:team` |
+| `unknown_action` | not an action |
+| `action_not_for_target` | the action does not apply to the rule's targets |
+| `ports_need_private_access` | `ports` on a rule whose actions are not exactly `private_access` |
+| `unknown_subject` | a test's `src` is not a member |
+| `unknown_target` | a test's `dst` is not in this workspace |
+| `test_failed` | a test's expectation does not hold; the message says what the policy decides and why |
