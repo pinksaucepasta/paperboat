@@ -101,6 +101,10 @@ func cancelExecAttachment(ctx context.Context, connection tunnel.ExecConn) execC
 		if abortErr != nil {
 			observeExecFailure(ctx, abortErr)
 		}
+		if cancelErr != nil && terminal.Result != nil && (tunnel.PeerDisconnected(cancelErr) || errors.Is(cancelErr, tunnel.ErrTransportLost)) {
+			// The command finished before the cancel reached it; its retained result is the outcome.
+			code, cancelErr = terminal.Result.Code, nil
+		}
 		return execCancelOutcome{code: code, err: cancelErr, terminal: terminal}
 	}
 	return execCancelOutcome{code: code, err: appendExecFailure(appendExecFailure(cancelErr, abortErr), ctx.Err())}

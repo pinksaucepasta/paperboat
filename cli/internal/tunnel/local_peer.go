@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -413,13 +414,21 @@ func serveLocalPeerConn(ctx context.Context, local net.Conn, remote Conn, includ
 	}()
 	select {
 	case err := <-done:
-		if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) {
+		if PeerDisconnected(err) {
 			return nil
 		}
 		return err
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// PeerDisconnected reports whether err only says the other end of a local connection is gone: a
+// client that leaves after its result (or while a final frame is being written) is not a failure.
+// net.Pipe reports that as io.ErrClosedPipe, sockets as EPIPE or ECONNRESET.
+func PeerDisconnected(err error) bool {
+	return errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) || errors.Is(err, io.ErrClosedPipe) ||
+		errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ECONNRESET)
 }
 
 type localPeerConn struct {

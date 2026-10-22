@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -258,5 +259,27 @@ func TestExecInputWriteFailureAbortsItsOwnedAttachment(t *testing.T) {
 	}
 	if execInputClosedOnly(errors.Join(syscall.EPIPE, syscall.EIO)) || !execInputClosedOnly(syscall.EPIPE) {
 		t.Fatal("independent I/O failure was treated as a closed input")
+	}
+}
+
+// A cancel that races a command which already finished finds the connection closed. The retained
+// terminal result is the outcome; the closed-pipe error from the cancel write is not a failure.
+type execFinishedBeforeCancelConn struct {
+	execInputTestConn
+	events chan tunnel.ExecEvent
+}
+
+func (c *execFinishedBeforeCancelConn) Cancel() error {
+	return fmt.Errorf("write cancel: %w", io.ErrClosedPipe)
+}
+func (c *execFinishedBeforeCancelConn) Events() <-chan tunnel.ExecEvent { return c.events }
+
+func TestExecCancelAfterTheCommandFinishedKeepsItsExitCode(t *testing.T) {
+	events := make(chan tunnel.ExecEvent, 1)
+	events <- tunnel.ExecEvent{OperationID: "operation", State: "exited", Result: &tunnel.ExecResult{Code: 37}}
+	close(events)
+	outcome := cancelExecAttachment(t.Context(), &execFinishedBeforeCancelConn{events: events})
+	if outcome.err != nil || outcome.code != 37 || outcome.terminal == nil || outcome.terminal.Result == nil || outcome.terminal.Result.Code != 37 {
+		t.Fatalf("finished command lost its result after a closed-pipe cancel: %+v", outcome)
 	}
 }
