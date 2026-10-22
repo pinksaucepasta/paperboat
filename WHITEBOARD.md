@@ -259,7 +259,7 @@ API composition and dashboard consumers. Verify both standalone base operation a
 complete private edition, including security and lifecycle behavior. This is substantial
 architecture work requiring a scoped task, not a feature-flag-only packaging change.
 
-## ENV in plain SSH and VS Code — later
+## ENV in plain SSH and VS Code — moved to PLAN.md F16 (2026-10-22)
 
 **Moved to PLAN.md F16 (2026-10-22, user decision): built now.**
 
@@ -310,3 +310,9 @@ Open questions before building: browser rules for a public page reaching a local
 Private Network Access, Safari blocks), pairing so other websites can't use it, origin checks,
 fallback to the normal path when no local `pb` is present, and not ending up with two code
 paths per feature. Not for launch (user, 2026-10-21).
+
+## Priority relays in more regions — after launch
+
+Recorded 2026-10-23 at the user's direction (a Pro extra, not affordable yet). More managed relay
+regions with priority capacity for paid plans, so relay-only paths stay fast far from today's edges.
+Revisit once revenue covers the extra servers.
