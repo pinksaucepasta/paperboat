@@ -46,7 +46,7 @@ func bindBootstrapDaemon(ctx context.Context, serverURL, expectedVersion string)
 	var lastErr error
 	for {
 		probe, err := localdaemon.ProbeCurrentUserForUpdate(ctx)
-		if err == nil && probe.Running && probe.Version == expectedVersion && probe.State == "ready" {
+		if err == nil && boundDaemonServing(probe, expectedVersion) {
 			return nil
 		}
 		if ctx.Err() == nil {
@@ -61,4 +61,15 @@ func bindBootstrapDaemon(ctx context.Context, serverURL, expectedVersion string)
 		case <-ticker.C:
 		}
 	}
+}
+
+// boundDaemonServing reports that the installed daemon runs the expected version and serves this
+// enrollment. A daemon whose only problem is reaching the control plane is serving: on a slow server or
+// a large account its first inventory refresh can fail, and pairing reported failure on a machine that
+// worked (Lane A, 2026-10-22). The update baseline accepts the same state.
+func boundDaemonServing(probe localdaemon.UpdateProbe, expectedVersion string) bool {
+	if !probe.Running || probe.Version != expectedVersion {
+		return false
+	}
+	return probe.State == "ready" || probe.State == "degraded" && probe.ControlPlaneUnavailableOnly
 }
