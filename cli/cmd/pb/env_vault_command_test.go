@@ -13,6 +13,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
@@ -700,4 +701,15 @@ func (c *commandVaultControl) PutVaultRecords(_ context.Context, coordinate api.
 	c.records[key] = next
 	c.recordRequests = append(c.recordRequests, in)
 	return out, nil
+}
+
+func TestVaultUnlockWithTheWrongPasswordSaysSo(t *testing.T) {
+	got := vaultCredentialCommandError(fmt.Errorf("unlock: %w", environmente2ee.ErrVaultUnlock))
+	if !errors.Is(got, environmente2ee.ErrVaultUnlock) || !strings.Contains(got.Error(), "pb env vault recover") {
+		t.Fatalf("wrong password = %v, want password guidance", got)
+	}
+	mixed := errors.Join(environmente2ee.ErrVaultUnlock, syscall.EIO)
+	if vaultCredentialCommandError(mixed) != mixed {
+		t.Fatal("an I/O failure was reported as a wrong password")
+	}
 }

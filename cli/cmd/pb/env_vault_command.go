@@ -186,7 +186,7 @@ func addPasswordVaultCommands(root *cobra.Command) {
 				if recoverySaved {
 					return fmt.Errorf("%w; retain the new recovery file: activation is unconfirmed; run `pb env vault resume` to reconcile any pending publication before retrying", err)
 				}
-				return err
+				return vaultCredentialCommandError(err)
 			}
 			if action == "init" || action == "unlock" || action == "resume" || action == "recover" {
 				if err := refreshENVLayers(command, manager, false); err != nil {
@@ -341,4 +341,13 @@ func saveNewVaultRecoveryCode(path string) ([]byte, error) {
 }
 func confirmedVaultPassword(command *cobra.Command) ([]byte, error) {
 	return vaultPasswordForOperation(command, "New master password", true)
+}
+
+// vaultCredentialCommandError names a wrong password or recovery code; the
+// vault deliberately does not say which check failed.
+func vaultCredentialCommandError(err error) error {
+	if onlyEnvironmentFailureLeaves(err, func(leaf error) bool { return errors.Is(leaf, environmente2ee.ErrVaultUnlock) }) {
+		return envCommandError(err, "That password or recovery code does not open this account's ENV vault; nothing was changed. Retry with the right one, or run `pb env vault recover` with your recovery code.")
+	}
+	return err
 }
