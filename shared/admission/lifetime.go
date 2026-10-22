@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"math/rand/v2"
 	"sync"
 	"time"
 )
@@ -134,10 +135,20 @@ func (l *Lease) start(work func()) bool {
 // polling. Notifications should be used instead wherever they are available.
 const RevocationInterval = time.Second
 
+// MaxPollBackoff bounds the wait between lookups after consecutive transient failures, and
+// MaxPollRetryAfter bounds a server's Retry-After hint.
+const (
+	MaxPollBackoff    = 30 * time.Second
+	MaxPollRetryAfter = 5 * time.Minute
+)
+
 // Poll adapts authoritative state without notifications. Only ErrRevoked ends
 // admitted work; transient lookup errors retain it. Each lookup is bounded,
 // cancellation interrupts it, and stop waits for the worker to exit. Check must
 // honor its context and use Revoke rather than Close from inside the worker.
+// After the first transient failure the next lookup still follows on the next
+// tick; further consecutive failures back off with jitter (see pollFailureDelay),
+// so a fleet does not retry an unavailable control plane every second.
 func (l *Lease) Poll(check func(context.Context) error) func() {
 	ctx, cancel := context.WithCancel(l.ctx)
 	done := make(chan struct{})
@@ -145,6 +156,7 @@ func (l *Lease) Poll(check func(context.Context) error) func() {
 		defer close(done)
 		ticker := time.NewTicker(RevocationInterval)
 		defer ticker.Stop()
+		failures := 0
 		for {
 			if ctx.Err() != nil {
 				return
@@ -156,14 +168,46 @@ func (l *Lease) Poll(check func(context.Context) error) func() {
 				l.Revoke()
 				return
 			}
+			if err == nil {
+				failures = 0
+			} else {
+				failures++
+			}
+			wake, timer := ticker.C, (*time.Timer)(nil)
+			if delay := pollFailureDelay(failures, err); delay > 0 {
+				timer = time.NewTimer(delay)
+				wake = timer.C
+			}
 			select {
 			case <-ctx.Done():
-				return
-			case <-ticker.C:
+			case <-wake:
+			}
+			if timer != nil {
+				timer.Stop()
 			}
 		}
 	}) {
 		close(done)
 	}
 	return func() { cancel(); <-done }
+}
+
+// pollFailureDelay is how long Poll waits after a lookup instead of the next tick: zero while
+// lookups succeed and after the first failure, then RevocationInterval doubled per consecutive
+// failure up to MaxPollBackoff with equal jitter. A failure that carries a Retry-After hint
+// (RetryAfter() time.Duration) waits at least that long, up to MaxPollRetryAfter.
+func pollFailureDelay(failures int, err error) time.Duration {
+	if err == nil {
+		return 0
+	}
+	var delay time.Duration
+	if failures > 1 {
+		base := min(RevocationInterval<<min(failures-1, 16), MaxPollBackoff)
+		delay = base/2 + rand.N(base/2+1)
+	}
+	var hint interface{ RetryAfter() time.Duration }
+	if errors.As(err, &hint) {
+		delay = max(delay, min(hint.RetryAfter(), MaxPollRetryAfter))
+	}
+	return delay
 }

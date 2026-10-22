@@ -4,12 +4,19 @@ import (
 	"net"
 	"net/http"
 	"reflect"
+	"strconv"
+	"strings"
+	"time"
 )
 
 type observedHTTPFailure struct {
-	cause    error
-	observed bool
+	cause      error
+	observed   bool
+	retryAfter time.Duration
 }
+
+// RetryAfter is the server's Retry-After hint for a 429 or 503 response, or zero.
+func (failure observedHTTPFailure) RetryAfter() time.Duration { return failure.retryAfter }
 
 func (observedHTTPFailure) Error() string                     { return "control request failed" }
 func (failure observedHTTPFailure) Unwrap() error             { return failure.cause }
@@ -84,5 +91,17 @@ func HTTPStatusFailure(response *http.Response) error {
 			observed = attempt.observed.Load()
 		}
 	}
-	return observedHTTPFailure{cause: responseFault(response.StatusCode), observed: observed}
+	return observedHTTPFailure{cause: responseFault(response.StatusCode), observed: observed, retryAfter: retryAfter(response)}
+}
+
+// retryAfter reads a delta-seconds Retry-After header of a 429 or 503 response, at most an hour.
+func retryAfter(response *http.Response) time.Duration {
+	if response.StatusCode != http.StatusTooManyRequests && response.StatusCode != http.StatusServiceUnavailable {
+		return 0
+	}
+	seconds, err := strconv.Atoi(strings.TrimSpace(response.Header.Get("Retry-After")))
+	if err != nil || seconds <= 0 {
+		return 0
+	}
+	return time.Duration(min(seconds, 3600)) * time.Second
 }

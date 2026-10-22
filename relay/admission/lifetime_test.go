@@ -3,6 +3,7 @@ package admission
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"sync/atomic"
@@ -183,5 +184,50 @@ func TestConcurrentCloseJoinsOwnedRelease(t *testing.T) {
 		case <-time.After(time.Second):
 			t.Fatal("Close did not join owned release")
 		}
+	}
+}
+
+type retryAfterFailure time.Duration
+
+func (retryAfterFailure) Error() string               { return "control plane unavailable" }
+func (f retryAfterFailure) RetryAfter() time.Duration { return time.Duration(f) }
+
+// A fleet polled a 503-ing control plane once per second per machine (2026-10-22 storm): consecutive
+// transient failures must back off with jitter, up to MaxPollBackoff.
+func TestPollFailureDelayBacksOffConsecutiveFailures(t *testing.T) {
+	failure := errors.New("unavailable")
+	if pollFailureDelay(0, nil) != 0 || pollFailureDelay(1, failure) != 0 {
+		t.Fatal("a success or the first failure must keep the normal cadence")
+	}
+	for failures, bounds := range map[int][2]time.Duration{2: {time.Second, 2 * time.Second}, 3: {2 * time.Second, 4 * time.Second}, 6: {MaxPollBackoff / 2, MaxPollBackoff}, 40: {MaxPollBackoff / 2, MaxPollBackoff}} {
+		for range 50 {
+			if delay := pollFailureDelay(failures, failure); delay < bounds[0] || delay > bounds[1] {
+				t.Fatalf("failures=%d delay=%v, want within %v", failures, delay, bounds)
+			}
+		}
+	}
+	if delay := pollFailureDelay(1, fmt.Errorf("wrapped: %w", retryAfterFailure(time.Hour))); delay != MaxPollRetryAfter {
+		t.Fatalf("Retry-After hint delay=%v, want capped at %v", delay, MaxPollRetryAfter)
+	}
+}
+
+func TestPollWaitsForRetryAfterBeforeTheNextLookup(t *testing.T) {
+	lease, err := Admit(t.Context(), time.Time{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lease.Close()
+	var calls atomic.Int32
+	stop := lease.Poll(func(context.Context) error {
+		calls.Add(1)
+		return retryAfterFailure(3 * RevocationInterval)
+	})
+	time.Sleep(2*RevocationInterval + RevocationInterval/2)
+	stop()
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("lookups during Retry-After=%d, want 1", got)
+	}
+	if err := lease.Check(); err != nil {
+		t.Fatal("transient failure revoked work", err)
 	}
 }

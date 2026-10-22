@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"syscall"
 	"testing"
+	"time"
 )
 
 func TestHTTPAttemptOwnershipDoesNotSuppressIndependentFailure(t *testing.T) {
@@ -61,5 +62,27 @@ func TestHTTPStatusOwnershipPreservesBodyAndRawTransportFailures(t *testing.T) {
 	}
 	if HTTPAttemptObserved(HTTPStatusFailure(response)) || HTTPAttemptObserved(errors.Join(failure, syscall.ENOSPC)) {
 		t.Fatal("raw response or independent local failure was suppressed")
+	}
+}
+
+// Retry-After on a 429/503 reaches retry loops through the error chain (the admission poll honours it).
+func TestHTTPStatusFailureCarriesRetryAfter(t *testing.T) {
+	for _, test := range []struct {
+		status int
+		header string
+		want   time.Duration
+	}{
+		{http.StatusServiceUnavailable, "7", 7 * time.Second},
+		{http.StatusTooManyRequests, " 2 ", 2 * time.Second},
+		{http.StatusServiceUnavailable, "999999", time.Hour},
+		{http.StatusServiceUnavailable, "Wed, 21 Oct 2026 07:28:00 GMT", 0},
+		{http.StatusInternalServerError, "7", 0},
+	} {
+		response := &http.Response{StatusCode: test.status, Header: http.Header{"Retry-After": {test.header}}}
+		var hint interface{ RetryAfter() time.Duration }
+		err := fmt.Errorf("refresh: %w", errors.Join(HTTPStatusFailure(response)))
+		if !errors.As(err, &hint) || hint.RetryAfter() != test.want {
+			t.Fatalf("status=%d header=%q hint=%v", test.status, test.header, hint)
+		}
 	}
 }
