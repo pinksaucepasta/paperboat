@@ -84,17 +84,17 @@ func ruleSubjects(c *collector, x *index, groups map[string][]string, p string, 
 				add(a)
 			}
 		case kind == "role":
-			if name != "owner" && name != "admin" && name != "member" {
-				c.add(ep, "unknown_role", "roles are role:owner, role:admin (owners and admins) and role:member (everyone)")
+			if !slices.Contains(Roles, name) {
+				c.add(ep, "unknown_role", "roles are role:owner, role:admin (owners and admins), role:billing, role:auditor and role:member (everyone)")
 				continue
 			}
 			for _, m := range x.inv.Members {
-				if name == "member" || m.Role == "owner" || (name == "admin" && m.Role == "admin") {
+				if RoleMatches(name, m.Role) {
 					add(m.AccountID)
 				}
 			}
 		default:
-			c.add(ep, "invalid_subject", "%q is not a subject; use user:<email>, group:<name>, role:<owner|admin|member> or *", e)
+			c.add(ep, "invalid_subject", "%q is not a subject; use user:<email>, group:<name>, role:<owner|admin|billing|auditor|member> or *", e)
 		}
 	}
 	return out
@@ -184,4 +184,14 @@ func ruleActions(c *collector, family, p string, allow []string) []string {
 	}
 	slices.Sort(out)
 	return slices.Compact(out)
+}
+
+// Roles are the role:<name> subjects. Roles give admin rights only; machine use comes from rules.
+var Roles = []string{"owner", "admin", "billing", "auditor", "member"}
+
+// RoleMatches reports whether a member with role has the role subject name: role:member is
+// every member, role:admin owners and admins, the others match exactly. The server's SQL check
+// (workspace_policy_rule_ports) uses the same rule.
+func RoleMatches(name, role string) bool {
+	return name == "member" || name == role || (name == "admin" && role == "owner")
 }

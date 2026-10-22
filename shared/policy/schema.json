@@ -26,8 +26,8 @@
     "user": {"type": "string", "pattern": "^user:.+@.+$"},
     "subject": {
       "type": "string",
-      "description": "user:<email>, group:<name>, role:owner, role:admin (owners and admins), role:member (everyone) or * (every member).",
-      "pattern": "^(\\*|user:.+@.+|group:[a-z0-9][a-z0-9._-]{0,62}|role:(owner|admin|member))$"
+      "description": "user:<email>, group:<name>, role:owner, role:admin (owners and admins), role:billing, role:auditor (exact role), role:member (everyone) or * (every member).",
+      "pattern": "^(\\*|user:.+@.+|group:[a-z0-9][a-z0-9._-]{0,62}|role:(owner|admin|billing|auditor|member))$"
     },
     "target": {
       "type": "string",

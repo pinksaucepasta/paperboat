@@ -60,7 +60,8 @@ scope lists, and never more than its creator may do at that moment.
 Names after `group:` and `tag:` use lowercase letters, digits, `.`, `_` and `-` (up to 63).
 
 **Subjects (`src`):** `user:<email>`, `group:<name>`, `role:owner`, `role:admin` (owners and
-admins), `role:member` (every member), `*` (every member).
+admins), `role:billing` and `role:auditor` (exactly that role), `role:member` (every member),
+`*` (every member). Roles are admin rights only; machine use comes from rules.
 
 **Targets (`dst`):** `machine:<alias>` (or `machine:<owner email>/<alias>` when two machines
 shared into a team have the same alias), `machine:*` (every machine of the workspace),
@@ -105,7 +106,7 @@ are sorted by path, so the same file always gives the same list.
 | `invalid_port` | a port outside 1-65535 or a bad range |
 | `unknown_user` | the email is not a member of this workspace |
 | `unknown_group` | the group is not defined in `groups` |
-| `unknown_role` | not `role:owner`, `role:admin` or `role:member` |
+| `unknown_role` | not `role:owner`, `role:admin`, `role:billing`, `role:auditor` or `role:member` |
 | `unknown_machine` | no machine with that alias in this workspace |
 | `ambiguous_machine` | two machines of the team have that alias; use `machine:<owner email>/<alias>` |
 | `unknown_tag` | the tag is not defined in `tags` |

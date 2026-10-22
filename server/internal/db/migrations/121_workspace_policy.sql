@@ -129,7 +129,7 @@ CREATE FUNCTION paperboat.workspace_policy_rule_ports(actor text, team text, mac
   WHERE r.action = capability
    AND (r.subject_kind = 'all'
      OR (r.subject_kind = 'account' AND r.subject_id = actor)
-     OR (r.subject_kind = 'role' AND (r.subject_id = 'member' OR (r.subject_id = 'admin' AND a.role IN ('owner', 'admin')) OR (r.subject_id = 'owner' AND a.role = 'owner')))
+     OR (r.subject_kind = 'role' AND (r.subject_id = 'member' OR r.subject_id = a.role OR (r.subject_id = 'admin' AND a.role = 'owner')))
      OR (r.subject_kind = 'group' AND EXISTS(SELECT 1 FROM workspace_policy_groups g WHERE g.policy_id = p.id AND g.group_name = r.subject_id AND g.account_id = actor)))
    AND (r.target_kind = 'all_machines'
      OR (r.target_kind = 'machine' AND r.target_id = machine)

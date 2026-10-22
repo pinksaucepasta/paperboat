@@ -390,3 +390,22 @@ func TestPortRangeJSONRoundTrip(t *testing.T) {
 		t.Fatal("port 0 accepted")
 	}
 }
+
+func TestExactRolesMatchOnlyThatRole(t *testing.T) {
+	inv := team()
+	inv.Members = append(inv.Members, Member{AccountID: "di", Email: "di@example.test", Role: "billing"})
+	c := mustCompile(t, `{"rules": [{"src": ["role:billing"], "dst": ["machine:db1"], "allow": ["exec"]}]}`, inv)
+	for account, want := range map[string]bool{"di": true, "ana": false, "bo": false, "cy": false} {
+		if got := c.Decide(account, machine("m-db1"), ActionExec, 0).Allowed; got != want {
+			t.Errorf("%s: %v", account, got)
+		}
+	}
+	for _, r := range []struct {
+		name, role string
+		want       bool
+	}{{"member", "billing", true}, {"admin", "owner", true}, {"admin", "billing", false}, {"owner", "admin", false}, {"auditor", "auditor", true}} {
+		if RoleMatches(r.name, r.role) != r.want {
+			t.Errorf("RoleMatches(%s, %s)", r.name, r.role)
+		}
+	}
+}
