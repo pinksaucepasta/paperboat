@@ -47,7 +47,10 @@ def main():
         return run(['ssh', args.owner_ssh, ' '.join([PB] + [shlex.quote(a) for a in arguments])], timeout)
 
     def member_raw(*arguments, timeout=120):
-        return run(member_prefix + ['bash', '-lc', ' '.join([PB] + [shlex.quote(a) for a in arguments])], timeout)
+        command = ' '.join([PB] + [shlex.quote(a) for a in arguments])
+        # ssh joins its arguments into one remote shell line, so the bash -lc script must be quoted for it.
+        script = shlex.quote(command) if member_prefix[0] == 'ssh' else command
+        return run(member_prefix + ['bash', '-lc', script], timeout)
 
     def parse(code, out, err):
         text = out.strip() or err.strip()
