@@ -5,6 +5,7 @@ package hostinstall
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/carriercontrol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
@@ -206,7 +207,7 @@ func preflightUnixCarrier(ctx context.Context, request Request, paths installPat
 			if err := verifyCarrierNativeCustody(c, installer); err != nil {
 				return false, err
 			}
-			return false, carrierReadiness(waitCarrierReady(ctx, c))
+			return false, carrierReadiness(ctx, waitCarrierReady(ctx, c))
 		}
 	}
 	if err != nil && !installNotExistOnly(err) {
@@ -275,10 +276,12 @@ func cleanupPreparedUnixCarrier(ctx context.Context, paths installPaths, cause e
 	return cleanupCarrierStartup(ctx, installer, cause)
 }
 
-// carrierReadiness turns a retained carrier's readiness failure into *carrierNotServingError; an
-// interrupted install (canceled context) stays its own error.
-func carrierReadiness(err error) error {
-	if err == nil || errors.Is(err, context.Canceled) {
+// carrierReadiness turns "the retained carrier never answered" into *carrierNotServingError: its own
+// readiness wait ran out while the control endpoint stayed unavailable and the install itself is still
+// live. Any other failure (unreadable capability, a wrong pin or capability answering, the install's
+// own deadline or cancellation) stays a hard failure, so a carrier that may be healthy is never replaced.
+func carrierReadiness(ctx context.Context, err error) error {
+	if err == nil || ctx.Err() != nil || !errors.Is(err, context.DeadlineExceeded) || !errors.Is(err, carriercontrol.ErrUnavailable) {
 		return err
 	}
 	return &carrierNotServingError{cause: err}
