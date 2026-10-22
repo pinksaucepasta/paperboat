@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -119,6 +120,9 @@ func TestAdmittedTransferHTTPConnectionOutlivesCredentialAndRevokesBlockedIO(t *
 	go func() {
 		r := request("token")
 		r.Header.Set("X-Fixture-Hold", "1")
+		// A body without GetBody makes the request non-replayable: otherwise the transport re-sends
+		// it on a new connection when revocation closes the first one, and that copy blocks again.
+		r.Method, r.Body = http.MethodPost, io.NopCloser(strings.NewReader("hold"))
 		response, err := client.Do(r)
 		if response != nil {
 			response.Body.Close()
