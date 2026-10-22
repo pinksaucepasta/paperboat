@@ -38,6 +38,7 @@ type DataCarrierPool struct {
 	targetExpiry    time.Time
 	maximumCarriers int
 	retries         map[int]carrierSlotRetry
+	fallbackUntil   time.Time
 }
 
 // Identity returns a copy of the exact authenticated session binding used by
@@ -358,30 +359,47 @@ func (p *DataCarrierPool) repair() {
 	}
 }
 
+// preferFallbackFor is how long a pool whose preferred transport failed (UDP
+// blocked) dials the fallback first, so reconnecting costs no failed QUIC
+// attempt; the first connection after it tries the preferred transport again.
+const preferFallbackFor = 5 * time.Minute
+
 func (p *DataCarrierPool) dialWithFallback(ctx context.Context, slot int) (DataCarrierDialResult, Transport, int, error) {
-	preferred := p.config.Preferred
-	preferredRequest := DataCarrierDialRequest{Transport: preferred, Slot: slot, Attempt: 1, EdgeID: p.target(slot).EdgeID, ProcessEpoch: p.target(slot).ProcessEpoch, FailureDomain: p.target(slot).FailureDomain, Identity: p.config.Session}
-	result, err := p.dial(ctx, preferredRequest)
+	first, second := p.config.Preferred, p.config.Fallback
+	if time.Now().Before(p.fallbackUntil) {
+		first, second = second, first
+	}
+	request := func(transport Transport, attempt int) DataCarrierDialRequest {
+		target := p.target(slot)
+		return DataCarrierDialRequest{Transport: transport, Slot: slot, Attempt: attempt, EdgeID: target.EdgeID, ProcessEpoch: target.ProcessEpoch, FailureDomain: target.FailureDomain, Identity: p.config.Session}
+	}
+	firstRequest := request(first, 1)
+	result, err := p.dial(ctx, firstRequest)
 	if err == nil {
-		if err := validateDataCarrierDialResult(preferredRequest, result); err != nil {
-			return DataCarrierDialResult{}, preferred, 1, err
+		if err := validateDataCarrierDialResult(firstRequest, result); err != nil {
+			return DataCarrierDialResult{}, first, 1, err
 		}
-		return result, preferred, 1, nil
+		return result, first, 1, nil
 	}
-	if p.config.Fallback == preferred || !transportFallbackAllowed(err) {
-		return DataCarrierDialResult{}, preferred, 1, &TransportDialError{Transport: preferred, Err: err, Fallback: false}
+	if second == first || !transportFallbackAllowed(err) {
+		return DataCarrierDialResult{}, first, 1, &TransportDialError{Transport: first, Err: err, Fallback: false}
 	}
-	fallbackRequest := DataCarrierDialRequest{Transport: p.config.Fallback, Slot: slot, Attempt: 2, EdgeID: p.target(slot).EdgeID, ProcessEpoch: p.target(slot).ProcessEpoch, FailureDomain: p.target(slot).FailureDomain, Identity: p.config.Session}
-	fallbackResult, fallbackErr := p.dial(ctx, fallbackRequest)
-	if fallbackErr == nil {
-		if err := validateDataCarrierDialResult(fallbackRequest, fallbackResult); err != nil {
-			return DataCarrierDialResult{}, p.config.Fallback, 2, err
+	secondRequest := request(second, 2)
+	secondResult, secondErr := p.dial(ctx, secondRequest)
+	if secondErr == nil {
+		if err := validateDataCarrierDialResult(secondRequest, secondResult); err != nil {
+			return DataCarrierDialResult{}, second, 2, err
 		}
-		return fallbackResult, p.config.Fallback, 2, nil
+		if second == p.config.Fallback {
+			p.fallbackUntil = time.Now().Add(preferFallbackFor)
+		} else {
+			p.fallbackUntil = time.Time{}
+		}
+		return secondResult, second, 2, nil
 	}
-	return DataCarrierDialResult{}, preferred, 1, errors.Join(
-		&TransportDialError{Transport: preferred, Err: err, Fallback: true},
-		&TransportDialError{Transport: p.config.Fallback, Err: fallbackErr, Fallback: false},
+	return DataCarrierDialResult{}, first, 1, errors.Join(
+		&TransportDialError{Transport: first, Err: err, Fallback: true},
+		&TransportDialError{Transport: second, Err: secondErr, Fallback: false},
 	)
 }
 

@@ -349,14 +349,15 @@ func TestDataCarrierPoolFallbackAndLifecycle(t *testing.T) {
 	gotRequests := append([]DataCarrierDialRequest(nil), requests...)
 	serverCarriers := append([]*DataCarrier(nil), servers...)
 	mu.Unlock()
-	if len(gotCalls) != 4 || gotCalls[0] != QUIC || gotCalls[1] != TCPMux || gotCalls[2] != QUIC || gotCalls[3] != TCPMux {
-		t.Fatalf("dial sequence = %v, want QUIC/TCPMux twice", gotCalls)
+	// Once QUIC failed and TCP worked, the next slot dials TCP first.
+	if len(gotCalls) != 3 || gotCalls[0] != QUIC || gotCalls[1] != TCPMux || gotCalls[2] != TCPMux {
+		t.Fatalf("dial sequence = %v, want QUIC, TCPMux, then TCPMux first", gotCalls)
 	}
-	if gotRequests[0].Slot != 0 || gotRequests[0].Attempt != 1 || gotRequests[0].FailureDomain != "domain-a" || gotRequests[1].Slot != 0 || gotRequests[1].Attempt != 2 || gotRequests[1].FailureDomain != "domain-a" || gotRequests[2].Slot != 1 || gotRequests[2].Attempt != 1 || gotRequests[2].FailureDomain != "domain-b" || gotRequests[3].Slot != 1 || gotRequests[3].Attempt != 2 || gotRequests[3].FailureDomain != "domain-b" {
+	if gotRequests[0].Slot != 0 || gotRequests[0].Attempt != 1 || gotRequests[0].FailureDomain != "domain-a" || gotRequests[1].Slot != 0 || gotRequests[1].Attempt != 2 || gotRequests[1].FailureDomain != "domain-a" || gotRequests[2].Slot != 1 || gotRequests[2].Attempt != 1 || gotRequests[2].FailureDomain != "domain-b" {
 		t.Fatalf("dial requests = %+v, want slot/domain/attempt binding", gotRequests)
 	}
 	for _, info := range pool.Snapshot() {
-		if info.EdgeID != "edge-a" || (info.Slot == 0 && info.FailureDomain != "domain-a") || (info.Slot == 1 && info.FailureDomain != "domain-b") || info.Attempt != 2 {
+		if info.EdgeID != "edge-a" || (info.Slot == 0 && (info.FailureDomain != "domain-a" || info.Attempt != 2)) || (info.Slot == 1 && (info.FailureDomain != "domain-b" || info.Attempt != 1)) {
 			t.Fatalf("carrier info = %+v, want explicit identity", info)
 		}
 	}

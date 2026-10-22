@@ -52,6 +52,9 @@ func NewHTTPNetworkDialer(config NetworkDialerConfig) DataCarrierDialer {
 		if h3 && errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
 			return DataCarrierDialResult{}, &TransportDialError{Transport: request.Transport, Err: ErrHTTP3Unavailable, Fallback: true}
 		}
+		if h3 && http3FailureFallsBack(ctx, err) {
+			return DataCarrierDialResult{}, &TransportDialError{Transport: request.Transport, Err: err, Fallback: true}
+		}
 		if err != nil {
 			return DataCarrierDialResult{}, newTransportDialError(request.Transport, err)
 		}
@@ -61,6 +64,15 @@ func NewHTTPNetworkDialer(config NetworkDialerConfig) DataCarrierDialer {
 		}
 		return DataCarrierDialResult{Link: link, PeerIdentity: identity, Transport: request.Transport, EdgeID: request.EdgeID, FailureDomain: request.FailureDomain}, nil
 	}
+}
+
+// http3FailureFallsBack reports whether a failed HTTP/3 dial may be retried over
+// HTTP/2. A network that blocks UDP fails QUIC at once (EPERM from a local
+// firewall's drop, ENETUNREACH, EHOSTUNREACH) as often as it times out, so every
+// failure falls back except the caller's own cancellation and a refusal of this
+// endpoint or identity, which HTTP/2 would meet too.
+func http3FailureFallsBack(ctx context.Context, err error) bool {
+	return err != nil && ctx.Err() == nil && !errors.Is(err, ErrInvalidDataCarrierEndpoint) && !errors.Is(err, ErrDataCarrierAdmission)
 }
 
 func dialHTTPCarrier(ctx context.Context, endpoint DataCarrierEndpointConfig, h3 bool) (io.ReadWriteCloser, DataCarrierIdentity, error) {
