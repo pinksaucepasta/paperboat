@@ -3,6 +3,7 @@ package shorttemp
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -13,7 +14,7 @@ func TestDirIsShortSymlinkFreeAndRemoved(t *testing.T) {
 		if real, err := filepath.EvalSymlinks(dir); err != nil || real != dir {
 			t.Fatalf("dir %q is not its own real path: %q, %v", dir, real, err)
 		}
-		if len(dir) > 40 {
+		if runtime.GOOS != "windows" && len(dir) > 40 { // Windows has no unix socket path limit to protect
 			t.Fatalf("dir %q is too long for socket paths", dir)
 		}
 	})
