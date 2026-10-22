@@ -21,7 +21,7 @@ SELECT m.environment_id,p.account_id,a.tunnel_id,a.route_generation,a.route_id,a
  publication.hostname,p.target_scheme,p.target_address,a.edge_node_id,a.edge_process_epoch,a.connector_id,a.connector_session_id,
  a.process_generation,a.config_generation,a.route_generation,p.id,coalesce(p.owner_team_id,''),
  LEAST($3::timestamptz+interval '10 seconds',a.expires_at,p.lease_deadline,p.user_deadline,identity.expires_at,n.registry_expires_at,n.last_heartbeat_at+interval '15 seconds')
-FROM preview_lease_carrier_attachments a
+FROM preview_routes a
 JOIN preview_leases p ON p.id=a.preview_id AND p.account_id=a.account_id
 JOIN users owner ON owner.id=p.account_id AND owner.status='active'
 JOIN user_machines m ON m.id=a.host_id AND m.id=p.owner_machine_id AND m.user_id=p.account_id

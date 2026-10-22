@@ -97,6 +97,9 @@ type HostAdmission struct {
 	Backup                 *Admission      `json:"backup,omitempty"`
 	ActiveEdgeNodeID       string          `json:"active_edge_node_id,omitempty"`
 	ActiveEdgeProcessEpoch string          `json:"active_edge_process_epoch,omitempty"`
+	// EndpointsServed: every edge of this attachment admits endpoint routes, so the agent serves
+	// its previews as endpoint routes on these carriers (PLAN 3a).
+	EndpointsServed bool `json:"endpoints_served,omitempty"`
 }
 type Observation struct {
 	RouteID              string `json:"route_id"`

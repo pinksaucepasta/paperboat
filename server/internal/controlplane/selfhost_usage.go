@@ -20,7 +20,7 @@ func (s *EdgeService) authorizeSelfhostUsage(ctx context.Context, r edgeUsageReq
  WHERE a.edge_node_id=$1 AND a.route_id=$2 AND a.route_generation=$3 AND m.environment_id=$4
  AND paperboat.node_route_eligible(a.edge_node_id,a.account_id,a.route_id)
  UNION ALL
- SELECT 1 FROM paperboat.preview_lease_carrier_attachments a
+ SELECT 1 FROM paperboat.preview_routes a
  JOIN paperboat.user_machines m ON m.id=a.owner_machine_id
  WHERE a.edge_node_id=$1 AND a.route_id=$2 AND a.route_generation=$3 AND m.environment_id=$4
  AND paperboat.node_preview_eligible(a.edge_node_id,a.account_id,a.preview_id)

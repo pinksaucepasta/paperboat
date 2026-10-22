@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 
@@ -15,6 +16,28 @@ import (
 // Querier is a pool or a transaction.
 type Querier interface {
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
+
+// Execer is a pool or a transaction.
+type Execer interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+}
+
+// RecordEdgeServes notes that this edge process admits endpoint routes (it pulled its runtime
+// snapshot advertising the capability).
+func RecordEdgeServes(ctx context.Context, db Execer, nodeID, epoch string) error {
+	_, err := db.Exec(ctx, `UPDATE control_tunnel_nodes SET endpoints_epoch=$2 WHERE id=$1 AND process_epoch=$2 AND endpoints_epoch IS DISTINCT FROM $2`, nodeID, epoch)
+	return err
+}
+
+// EdgesServeTx reports whether every given edge process admits endpoint routes.
+func EdgesServeTx(ctx context.Context, tx *db.Tx, nodes, epochs []string) (bool, error) {
+	if len(nodes) == 0 || len(nodes) != len(epochs) {
+		return false, nil
+	}
+	var served int
+	err := tx.QueryRow(ctx, `SELECT count(*) FROM control_tunnel_nodes n JOIN unnest($1::text[],$2::text[]) AS e(node,epoch) ON n.id=e.node AND n.endpoints_epoch=e.epoch`, nodes, epochs).Scan(&served)
+	return served == len(nodes), err
 }
 
 // EdgeAdmissions returns the endpoint route admissions for one edge process: each live assignment

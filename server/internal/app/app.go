@@ -27,6 +27,7 @@ import (
 	serverdiagnostics "github.com/pinksaucepasta/paperboat-server/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat-server/internal/diagnosticuploads"
 	"github.com/pinksaucepasta/paperboat-server/internal/edgeset"
+	"github.com/pinksaucepasta/paperboat-server/internal/endpoints"
 	"github.com/pinksaucepasta/paperboat-server/internal/environment"
 	"github.com/pinksaucepasta/paperboat-server/internal/favorites"
 	pbgithub "github.com/pinksaucepasta/paperboat-server/internal/github"
@@ -151,7 +152,7 @@ func New(opts Options) (*App, error) {
 	previewLeaseService, err := previewv1.NewService(previewTunnelStore, previewv1.Config{
 		EndpointDomain:      opts.Config.Preview.BaseDomain,
 		CursorKey:           cursorKey[:],
-		AttachmentReadiness: previewAttachmentProduction.Service,
+		AttachmentReadiness: endpoints.PreviewReadiness{DB: store, Attachments: previewAttachmentProduction.Service},
 		PreviewDomains:      previewDomainRepository,
 	})
 	if err != nil {

@@ -499,7 +499,7 @@ func (s *Activator) run(c activationClaim) {
 				// attachment can precede it but must never name a future revision.
 				updated, e := s.DB.Pool().Exec(ctx, `UPDATE lazy_activations SET state='ready'
 WHERE activation_id=$1 AND activation_id IN (`+currentActivationSQL+`)
- AND EXISTS(SELECT 1 FROM preview_leases v JOIN preview_lease_carrier_attachments x ON x.preview_id=v.id AND x.account_id=v.account_id
+ AND EXISTS(SELECT 1 FROM preview_leases v JOIN preview_routes x ON x.preview_id=v.id AND x.account_id=v.account_id
  WHERE v.id=lazy_activations.preview_id AND v.terminal_state='active' AND v.lease_deadline>now()
  AND (v.user_deadline IS NULL OR v.user_deadline>now()) AND x.lease_generation>0 AND x.lease_generation<=v.generation
  AND x.state='ready' AND x.edge_ready AND x.origin_ready AND x.expires_at>now())`, c.id)

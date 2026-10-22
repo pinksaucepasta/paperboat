@@ -28,7 +28,7 @@ WITH private_routes AS (
 	         ''::text AS wildcard_suffix
 	         ,a.edge_carrier_server_spki_sha256
 	         ,a.edge_carrier_server_certificate_chain_pem
-  FROM preview_lease_carrier_attachments AS a
+  FROM preview_routes AS a
   JOIN preview_leases AS p ON p.id = a.preview_id AND p.account_id = a.account_id
   JOIN control_tunnel_nodes AS n ON n.id = a.edge_node_id AND n.process_epoch = a.edge_process_epoch
   WHERE a.account_id = sqlc.arg(account_id)
@@ -115,7 +115,7 @@ WITH private_routes AS (
 	         'exact'::text AS match_type, ''::text AS wildcard_suffix
 	         ,a.edge_carrier_server_spki_sha256
 	         ,a.edge_carrier_server_certificate_chain_pem
-  FROM preview_lease_carrier_attachments AS a
+  FROM preview_routes AS a
   JOIN preview_leases AS p ON p.id = a.preview_id AND p.account_id = a.account_id
   JOIN control_tunnel_nodes AS n ON n.id = a.edge_node_id AND n.process_epoch = a.edge_process_epoch
   WHERE a.edge_node_id = sqlc.arg(edge_node_id) AND a.edge_process_epoch = sqlc.arg(edge_process_epoch)

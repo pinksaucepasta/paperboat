@@ -1200,7 +1200,7 @@ func ValidPreviewOwnerSessionKind(kind string) bool {
 // CurrentPreviewRoute exposes only the active carrier route owned by this preview.
 func (s *Store) CurrentPreviewRoute(ctx context.Context, account, previewID string) (string, error) {
 	var route string
-	err := s.db.SQL().QueryRowContext(ctx, `SELECT route_id FROM paperboat.preview_lease_carrier_attachments WHERE preview_id=$1 AND account_id=$2 AND state='ready' AND expires_at>now() ORDER BY route_generation DESC,route_id LIMIT 1`, previewID, account).Scan(&route)
+	err := s.db.SQL().QueryRowContext(ctx, `SELECT route_id FROM paperboat.preview_routes WHERE preview_id=$1 AND account_id=$2 AND state='ready' AND expires_at>now() ORDER BY route_generation DESC,route_id LIMIT 1`, previewID, account).Scan(&route)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
@@ -1220,7 +1220,7 @@ func (s *Store) decoratePreviewEndpoints(ctx context.Context, records []PreviewL
 	rows, err := s.db.Pool().Query(ctx, `SELECT p.id,paperboat.workspace_edge_mode(p.account_id,p.owner_team_id),CASE WHEN paperboat.workspace_edge_mode(p.account_id,p.owner_team_id)='self-hosted-only' THEN coalesce((SELECT 'https://'||d.hostname FROM paperboat.preview_domains d WHERE d.preview_id=p.id AND d.account_id=p.account_id AND d.deleted_at IS NULL AND d.match_type='exact' AND d.ownership_state='verified' AND d.conflict_state='clear' AND d.certificate_state='ready' AND d.certificate_reference IS NOT NULL AND d.preview_generation=p.generation ORDER BY d.hostname LIMIT 1),'') ELSE NULL END,
  paperboat.workspace_edge_mode(p.account_id,p.owner_team_id)='managed-only' AND NOT EXISTS (
  SELECT 1 FROM paperboat.edge_dns_publications d
- JOIN paperboat.preview_lease_carrier_attachments a ON a.preview_id=p.id AND a.account_id=p.account_id
+ JOIN paperboat.preview_routes a ON a.preview_id=p.id AND a.account_id=p.account_id
  JOIN paperboat.control_tunnel_nodes n ON n.id=a.edge_node_id AND n.process_epoch=a.edge_process_epoch
  WHERE d.owner_id=p.id AND d.hostname=substring(p.endpoint from 9)
  AND d.resource_generation=1 AND d.state IN ('submitted','verified') AND d.provider_records<>'[]'::jsonb

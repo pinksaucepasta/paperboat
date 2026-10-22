@@ -881,6 +881,7 @@ type ControlTunnelNode struct {
 	PublicIngressIpv6                *netip.Addr
 	PublicIngressVerifiedAt          sql.NullTime
 	TlsSpkiSha256                    []byte
+	EndpointsEpoch                   sql.NullString
 }
 
 type ControlUsageCounter struct {
@@ -1987,6 +1988,36 @@ type PreviewLeaseCreateOperation struct {
 	OperationID string
 	CreatedAt   time.Time
 	Slot        int16
+}
+
+type PreviewRoute struct {
+	PreviewID                            string
+	AccountID                            string
+	OperationID                          string
+	OwnerMachineID                       string
+	OwnerSessionID                       string
+	HostID                               string
+	TunnelID                             string
+	ConnectorID                          string
+	ConnectorSessionID                   string
+	ProcessGeneration                    int64
+	ConfigGeneration                     int64
+	RouteID                              string
+	RouteGeneration                      int64
+	LeaseGeneration                      int64
+	ConfigContentHash                    string
+	EdgeNodeID                           string
+	EdgeProcessEpoch                     string
+	AttachmentGeneration                 int64
+	MachineIdentityPublicKey             string
+	EdgeEndpoints                        []string
+	EdgeCarrierServerSpkiSha256          sql.NullString
+	EdgeCarrierServerCertificateChainPem sql.NullString
+	State                                string
+	EdgeReady                            bool
+	OriginReady                          bool
+	ExpiresAt                            time.Time
+	Endpoint                             bool
 }
 
 type ProviderEvent struct {

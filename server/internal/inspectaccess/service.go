@@ -175,7 +175,7 @@ func resolveResource(ctx context.Context, tx *db.Tx, kind, id, route string, now
 		var owner string
 		var routeGen int64
 		var expiry time.Time
-		err := tx.QueryRow(ctx, `SELECT p.account_id,x.route_id,x.route_generation,LEAST(p.lease_deadline,COALESCE(p.user_deadline,p.lease_deadline),x.expires_at) FROM preview_leases p JOIN preview_lease_carrier_attachments x ON x.preview_id=p.id AND x.account_id=p.account_id WHERE p.id=$1 AND p.terminal_state='active' AND p.lease_deadline>$2 AND x.state='ready' AND x.expires_at>$2`, id, now).Scan(&owner, &a.route, &routeGen, &expiry)
+		err := tx.QueryRow(ctx, `SELECT p.account_id,x.route_id,x.route_generation,LEAST(p.lease_deadline,COALESCE(p.user_deadline,p.lease_deadline),x.expires_at) FROM preview_leases p JOIN preview_routes x ON x.preview_id=p.id AND x.account_id=p.account_id WHERE p.id=$1 AND p.terminal_state='active' AND p.lease_deadline>$2 AND x.state='ready' AND x.expires_at>$2`, id, now).Scan(&owner, &a.route, &routeGen, &expiry)
 		if err != nil {
 			return a, mapMissing(err)
 		}

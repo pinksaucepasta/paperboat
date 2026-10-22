@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat-server/internal/endpoints"
 	"io"
 	"net/http"
 	"strings"
@@ -519,7 +520,7 @@ func writePreviewLeaseError(w http.ResponseWriter, r *http.Request, err error) {
 		status, code, message, outcome, retryable, action = http.StatusConflict, "preview_conflict", "This hostname already uses TLS pass-through on port 443. Remove the conflicting publication or choose another hostname.", "unchanged", false, "choose_different_hostname"
 	case expectedHTTPErrorOnly(err, previewtunnelstore.ErrConflict):
 		status, code, message, outcome, retryable, action = http.StatusConflict, "preview_conflict", "The preview could not be allocated without a conflict.", "unchanged", true, "retry"
-	case expectedHTTPErrorOnly(err, previewv1.ErrAttachmentNotReady):
+	case expectedHTTPErrorOnly(err, previewv1.ErrAttachmentNotReady, endpoints.ErrNotServing):
 		status, code, message, outcome, retryable, action = http.StatusConflict, "preview_attachment_not_ready", "The authenticated preview carrier is not ready yet.", "unchanged", true, "retry_readiness"
 	case expectedHTTPErrorOnly(err, previewtunnelstore.ErrPreviewLeaseTerminal, previewtunnelstore.ErrPreviewLeaseExpired, previewtunnelstore.ErrPreviewLeaseDeadlineExceeded):
 		status, code, message, outcome, retryable, action = http.StatusConflict, "preview_not_active", "The preview lease is no longer renewable.", "unchanged", false, "create_new_preview"

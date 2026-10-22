@@ -164,7 +164,7 @@ SELECT m.environment_id,p.account_id,a.tunnel_id,a.route_generation,a.route_id,a
  substring(p.endpoint from 9),p.target_scheme,p.target_address,a.edge_node_id,a.edge_process_epoch,a.connector_id,a.connector_session_id,
  a.process_generation,a.config_generation,a.route_generation,
  LEAST($6::timestamptz+interval '10 seconds',a.expires_at,p.lease_deadline,p.user_deadline,identity.expires_at)
-FROM preview_lease_carrier_attachments a
+FROM preview_routes a
 JOIN preview_leases p ON p.id=a.preview_id AND p.account_id=a.account_id
 JOIN user_machines m ON m.id=a.host_id AND m.user_id=p.account_id
 JOIN machine_control_sessions identity ON identity.machine_id=m.id AND identity.installation_generation=m.installation_generation

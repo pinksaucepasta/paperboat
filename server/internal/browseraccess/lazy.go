@@ -32,7 +32,7 @@ JOIN lazy_runtime_owners o ON o.machine_id=p.machine_id AND o.account_id=p.accou
  AND o.installation_generation=p.installation_generation AND o.boot_id=a.boot_id
 JOIN user_machines m ON m.id=p.machine_id AND m.user_id=p.account_id
 JOIN preview_leases v ON v.id=a.preview_id AND v.account_id=p.account_id
-JOIN preview_lease_carrier_attachments x ON x.preview_id=v.id AND x.account_id=v.account_id
+JOIN preview_routes x ON x.preview_id=v.id AND x.account_id=v.account_id
 WHERE p.id=$1 AND p.generation=$2 AND ($3='' OR v.id=$3) AND ($4='' OR x.route_id=$4)
  AND p.deleted_at IS NULL AND p.expires_at>$5 AND o.expires_at>$5
  AND m.environment_id=p.environment_id AND m.installation_generation=p.installation_generation

@@ -335,6 +335,15 @@ ON CONFLICT(route_id,edge_node_id) DO UPDATE SET machine_id=EXCLUDED.machine_id,
 			return err
 		}
 		out.ActiveEdgeNodeID, out.ActiveEdgeProcessEpoch = activeNode, activeEpoch
+		nodes, epochs := []string{}, []string{}
+		for _, edge := range selected {
+			nodes, epochs = append(nodes, edge.node), append(epochs, edge.epoch)
+		}
+		if len(capabilities) != 0 {
+			if out.EndpointsServed, err = endpoints.EdgesServeTx(ctx, tx, nodes, epochs); err != nil {
+				return err
+			}
+		}
 		return endpoints.ReconcileAgentTx(ctx, tx, proof.MachineID)
 	})
 	return out, err
@@ -345,6 +354,11 @@ ON CONFLICT(route_id,edge_node_id) DO UPDATE SET machine_id=EXCLUDED.machine_id,
 func (s *Service) Pull(ctx context.Context, edge previewattachment.PreviewEdgeIdentity, capabilities []string) ([]runtimewire.Admission, error) {
 	if !validCapabilities(capabilities) {
 		return nil, ErrInvalid
+	}
+	if len(capabilities) != 0 {
+		if err := endpoints.RecordEdgeServes(ctx, s.DB.Pool(), edge.NodeID, edge.ProcessEpoch); err != nil {
+			return nil, err
+		}
 	}
 	rows, err := s.DB.Pool().Query(ctx, `SELECT admission FROM runtime_carrier_attachments WHERE edge_node_id=$1 AND edge_process_epoch=$2 AND paperboat.runtime_carrier_valid(route_id,edge_node_id,edge_process_epoch,false) ORDER BY route_id LIMIT $3`, edge.NodeID, edge.ProcessEpoch, runtimewire.MaximumAdmissions+1)
 	if err != nil {

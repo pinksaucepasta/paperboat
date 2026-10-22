@@ -12,8 +12,6 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/google/uuid"
-
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
 )
 
@@ -45,8 +43,10 @@ VALUES($1,'preview',$2,$3,$4,$5,'lease',$1)`, p.LeaseID, p.AccountID, team, p.Ag
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO endpoint_routes(id,endpoint_id,hostname,protocol) VALUES($1,$2,$3,'http')`,
-		"route_"+uuid.NewString(), p.LeaseID, strings.ToLower(u.Hostname()))
+	// A preview's one route is named by the preview id, so the agent maps its streams without
+	// asking the server.
+	_, err = tx.Exec(ctx, `INSERT INTO endpoint_routes(id,endpoint_id,hostname,protocol) VALUES($1,$1,$2,'http')`,
+		p.LeaseID, strings.ToLower(u.Hostname()))
 	if err != nil {
 		return err
 	}

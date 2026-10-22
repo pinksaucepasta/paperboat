@@ -149,7 +149,7 @@ SELECT node.id,1::bigint AS resource_generation,statement_timestamp()::timestamp
  (node.process_epoch||'/'||a.operation_id||'/'||a.route_id||'/'||a.route_generation::text||'/'||a.connector_session_id||'/'||a.process_generation::text||'/'||cert.id)::text AS readiness_version,
  LEAST(p.lease_deadline,p.user_deadline,a.expires_at,identity.expires_at,node.registry_expires_at,node.last_heartbeat_at+interval '15 seconds',cert.expires_at)::timestamptz AS valid_until
 FROM preview_leases p
-JOIN preview_lease_carrier_attachments a ON a.preview_id=p.id AND a.account_id=p.account_id
+JOIN preview_routes a ON a.preview_id=p.id AND a.account_id=p.account_id
 JOIN user_machines m ON m.id=a.host_id AND m.id=p.owner_machine_id AND m.user_id=p.account_id
 JOIN users owner ON owner.id=p.account_id AND owner.status='active'
 JOIN control_environments env ON env.id=m.environment_id AND env.desired_state='active' AND env.revoked_at IS NULL
@@ -194,7 +194,7 @@ WHERE p.id=sqlc.arg(tunnel_id) AND substring(p.endpoint from 9)=sqlc.arg(hostnam
  AND paperboat.workspace_edge_mode(p.account_id,p.owner_team_id)='managed-only'
  AND p.terminal_state='active' AND p.lease_deadline>sqlc.arg(now) AND (p.user_deadline IS NULL OR p.user_deadline>sqlc.arg(now))
  AND p.created_at>sqlc.arg(now)::timestamptz-interval '2 minutes'
- AND NOT EXISTS (SELECT 1 FROM preview_lease_carrier_attachments live WHERE live.account_id=p.account_id AND live.preview_id=p.id AND live.state NOT IN ('failed','released'))
+ AND NOT EXISTS (SELECT 1 FROM preview_routes live WHERE live.account_id=p.account_id AND live.preview_id=p.id AND live.state NOT IN ('failed','released'))
  AND m.deleted_at IS NULL AND m.revoked_at IS NULL AND m.seat_state='occupied' AND m.state NOT IN ('pending','revoked','deleted')
  AND (p.owner_team_id IS NULL OR (paperboat.team_paid_entitled(p.owner_team_id) AND paperboat.workspace_preview_management_allowed(p.account_id,p.owner_team_id,p.id)))
  AND paperboat.node_preview_eligible(node.id,p.account_id,p.id)

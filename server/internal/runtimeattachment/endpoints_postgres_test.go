@@ -3,6 +3,7 @@ package runtimeattachment
 import (
 	"context"
 	"crypto/ed25519"
+	"errors"
 	"crypto/rand"
 	"encoding/base64"
 	"os"
@@ -106,12 +107,38 @@ VALUES($1,$2,$3,$3,$4,'owner_session_endpoint','foreground','http','127.0.0.1:30
 		return out
 	}
 
+	oldPath := errors.New("old attachment path")
+	readiness := endpoints.PreviewReadiness{DB: database, Attachments: attachmentReadinessFunc(func() error { return oldPath })}
+	gate := func() error {
+		return readiness.RequirePreviewAttachmentReady(ctx, account, lease, "operation_unused", machine, "owner_session_endpoint")
+	}
+	served := func() []string {
+		t.Helper()
+		rows, err := database.SQL().QueryContext(ctx, `SELECT edge_node_id||'/'||state FROM preview_routes WHERE preview_id=$1 AND endpoint ORDER BY 1`, lease)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		var out []string
+		for rows.Next() {
+			var v string
+			if err := rows.Scan(&v); err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, v)
+		}
+		return out
+	}
+
 	// An agent that does not advertise endpoints gets no assignment: its previews stay on the old path.
 	if _, err := service.Attach(ctx, proof, request); err != nil {
 		t.Fatal(err)
 	}
 	if got := assignments(); len(got) != 0 {
 		t.Fatalf("assignments for an agent without the endpoints capability: %v", got)
+	}
+	if err := gate(); !errors.Is(err, oldPath) {
+		t.Fatalf("readiness of a preview whose agent lacks the capability = %v, want the old attachment gate", err)
 	}
 	request.Capabilities = capable
 	a, err := service.Attach(ctx, proof, request)
@@ -120,6 +147,28 @@ VALUES($1,$2,$3,$3,$4,'owner_session_endpoint','foreground','http','127.0.0.1:30
 	}
 	if got := assignments(); len(got) != 2 || got[node] != "active/false" || got[backupNode] != "active/false" {
 		t.Fatalf("assignments after capable attach = %v, want both edges active and unobserved", got)
+	}
+	// No edge has advertised endpoints yet: the agent keeps its previews on the old path.
+	if a.EndpointsServed {
+		t.Fatal("endpoints served before any edge admitted them")
+	}
+	if err := gate(); !errors.Is(err, oldPath) {
+		t.Fatalf("readiness before the edges admit endpoints = %v, want the old attachment gate", err)
+	}
+	backupEdge := previewattachment.PreviewEdgeIdentity{NodeID: backupNode, ProcessEpoch: "epoch_backup"}
+	for _, e := range []previewattachment.PreviewEdgeIdentity{edge, backupEdge} {
+		if _, err := service.Pull(ctx, e, capable); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if a, err = service.Attach(ctx, proof, request); err != nil || !a.EndpointsServed {
+		t.Fatalf("attachment after both edges admit endpoints: served=%v err=%v", a.EndpointsServed, err)
+	}
+	if err := gate(); !errors.Is(err, endpoints.ErrNotServing) {
+		t.Fatalf("readiness before any edge observed the route = %v", err)
+	}
+	if got := served(); len(got) != 0 {
+		t.Fatalf("unobserved route already served: %v", got)
 	}
 	// An edge that does not advertise endpoints gets only its runtime route.
 	if values, err := service.Pull(ctx, edge, nil); err != nil || len(values) != 1 || values[0].RouteKind != runtimewire.RouteKind {
@@ -139,7 +188,7 @@ VALUES($1,$2,$3,$3,$4,'owner_session_endpoint','foreground','http','127.0.0.1:30
 		t.Fatalf("endpoint admission = %+v", endpointRoute)
 	}
 	// Same carrier identity as the runtime route, its own route id.
-	if endpointRoute.Binding.SessionID != a.Binding.SessionID || endpointRoute.Binding.TunnelID != a.Binding.TunnelID || endpointRoute.Binding.RouteID == route || endpointRoute.RouteRevision != endpointRoute.Binding.RouteGeneration {
+	if endpointRoute.Binding.SessionID != a.Binding.SessionID || endpointRoute.Binding.TunnelID != a.Binding.TunnelID || endpointRoute.Binding.RouteID != lease || endpointRoute.RouteRevision != endpointRoute.Binding.RouteGeneration {
 		t.Fatalf("endpoint route does not ride on the runtime carrier: %+v vs %+v", endpointRoute.Binding, a.Binding)
 	}
 	if _, err := service.Pull(ctx, edge, []string{"something_else"}); err != ErrInvalid {
@@ -152,6 +201,24 @@ VALUES($1,$2,$3,$3,$4,'owner_session_endpoint','foreground','http','127.0.0.1:30
 	}
 	if got := assignments(); got[node] != "active/true" || got[backupNode] != "active/false" {
 		t.Fatalf("assignments after the edge observed the route = %v", got)
+	}
+	// Served only where observed: DNS and browser access can never name the unobserved edge.
+	if got := served(); len(got) != 1 || got[0] != node+"/edge_ready" {
+		t.Fatalf("preview_routes = %v, want only %s/edge_ready", got, node)
+	}
+	if err := gate(); err != nil {
+		t.Fatalf("readiness with one serving edge = %v", err)
+	}
+	exec(`UPDATE preview_leases SET origin_state='ready' WHERE id=$1`, lease)
+	if got := served(); len(got) != 1 || got[0] != node+"/ready" {
+		t.Fatalf("preview_routes after origin ready = %v", got)
+	}
+	exec(`UPDATE endpoint_edge_assignments SET observed_at=now()-interval '31 seconds' WHERE endpoint_id=$1`, lease)
+	if got := served(); len(got) != 0 {
+		t.Fatalf("a route the edge stopped observing is still served: %v", got)
+	}
+	if err := service.Observe(ctx, edge, []runtimewire.Observation{runtimeObservation, observation}); err != nil {
+		t.Fatal(err)
 	}
 	// A stale endpoint observation is dropped without failing the runtime observation beside it.
 	stale := observation
@@ -177,4 +244,10 @@ VALUES($1,$2,$3,$3,$4,'owner_session_endpoint','foreground','http','127.0.0.1:30
 	if got := assignments(); got[node] != "removed/false" || got[backupNode] != "removed/false" {
 		t.Fatalf("assignments after the lease ended = %v", got)
 	}
+}
+
+type attachmentReadinessFunc func() error
+
+func (f attachmentReadinessFunc) RequirePreviewAttachmentReady(context.Context, string, string, string, string, string) error {
+	return f()
 }
