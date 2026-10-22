@@ -96,6 +96,9 @@ func (s *Service) fileTransferDescriptor(ctx context.Context, userID, sourceMach
 	expiresAt := admission.Expiry(s.controlSigner, s.now())
 	jti := newID("token")
 	accessSessionID := newID("session")
+	if err := s.admitRuntimeIngress(ctx, route, routeMachine, userID, accessSessionID, expiresAt); err != nil {
+		return FileTransferDescriptor{}, err
+	}
 	operationID := sessionID
 	if requestID != "" {
 		operationID = requestID
@@ -303,6 +306,9 @@ func (s *Service) ConnectSharedTerminalSession(ctx context.Context, userID, sour
 	}
 	cwd = session.LaunchCwd
 	accessID, jti := newID("session"), newID("token")
+	if err := s.admitRuntimeIngress(ctx, route, row, userID, accessID, expires); err != nil {
+		return ConnectionDescriptor{}, err
+	}
 	scope := "terminal:view"
 	if decision.Role == "interactive" {
 		scope = "terminal:control"
@@ -438,6 +444,9 @@ func (s *Service) ConnectTerminalSession(ctx context.Context, userID, sourceMach
 		return response, nil
 	}
 	accessSessionID := newID("session")
+	if err := s.admitRuntimeIngress(ctx, route, row, userID, accessSessionID, expires); err != nil {
+		return ConnectionDescriptor{}, err
+	}
 	input.AccessSessionID = accessSessionID
 	personal := row.UserID == userID && !row.OwnerTeamID.Valid
 	if scope, selected := workspace.FromContext(ctx); selected {

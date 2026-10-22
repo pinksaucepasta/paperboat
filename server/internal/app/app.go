@@ -765,6 +765,7 @@ func New(opts Options) (*App, error) {
 	teamService.ConfigurePolicy(opts.Config.WorkspacePolicy)
 	workspaceBilling.ConfigureNotificationMail(opts.Config.Mail, opts.Config.Secrets.ResendAPIKey != "")
 	workspaceBilling.ConfigureTeamTrial(opts.Config.Billing.TeamTrialDays)
+	userMachineService.ConfigureRuntimeQuota(workspaceBilling, consoleBillingURL(opts.Config.Mail.ConsoleOrigin))
 	mailService := &transactionalmail.Service{DB: store, Endpoint: opts.Config.Mail.Endpoint, Key: opts.Config.Secrets.ResendAPIKey}
 
 	operatorService := operator.NewService(store)
@@ -1049,4 +1050,12 @@ func New(opts Options) (*App, error) {
 	reporterTransferred = true
 	runtimeTransferred = true
 	return application, nil
+}
+
+// consoleBillingURL is the console's Billing page, or empty when no console origin is configured.
+func consoleBillingURL(origin string) string {
+	if origin == "" {
+		return ""
+	}
+	return strings.TrimRight(origin, "/") + "/billing"
 }

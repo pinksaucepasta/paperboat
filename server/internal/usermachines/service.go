@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/pinksaucepasta/paperboat-server/internal/access"
 	"github.com/pinksaucepasta/paperboat-server/internal/accessdescriptor"
+	"github.com/pinksaucepasta/paperboat-server/internal/accountingauthority"
 	"github.com/pinksaucepasta/paperboat-server/internal/audit"
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
 	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
@@ -256,6 +257,8 @@ type Policy struct {
 	ExpiredAccessSessionRetention time.Duration
 }
 type Service struct {
+	runtimeQuota                accountingauthority.QuotaChecker
+	runtimeBillingURL           string
 	nameRandom                  io.Reader
 	db                          *db.DB
 	audit                       *audit.Writer
