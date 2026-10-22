@@ -20,7 +20,7 @@ class PreviewPublicationBudget(unittest.TestCase):
                 if timeout < 125:
                     raise subprocess.TimeoutExpired('pb preview', timeout)
                 ttl = arguments[arguments.index('--ttl') + 1]
-                if ttl == '30s':
+                if ttl == '60s':
                     raise RuntimeError('user TTL expired while publication was pending')
                 identity = 'prv_fixture_' + str(len(leases))
                 leases[identity] = {'schema': 'paperboat.preview-tunnel/v1',
