@@ -40,10 +40,9 @@ func TestAdmittedTransferHTTPConnectionOutlivesCredentialAndRevokesBlockedIO(t *
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	held := make(chan struct{})
-	var holdOnce sync.Once // the transport may retry the held request on a fresh connection
 	application := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-Fixture-Hold") == "1" {
-			holdOnce.Do(func() { close(held) })
+			close(held)
 			<-r.Context().Done()
 			return
 		}
@@ -52,8 +51,20 @@ func TestAdmittedTransferHTTPConnectionOutlivesCredentialAndRevokesBlockedIO(t *
 	var workers sync.WaitGroup
 	var mu sync.Mutex
 	var pipes []net.Conn
+	// Each transport gets exactly one connection. After revocation cuts it, the
+	// HTTP transport retries the idempotent held request on a new connection;
+	// that retry must fail instead of reaching the fixture's hold handler,
+	// which bypasses authentication and would block until the client timeout.
 	transport := func() *http.Transport {
+		dialed := false
 		return &http.Transport{MaxConnsPerHost: 1, DialContext: func(context.Context, string, string) (net.Conn, error) {
+			mu.Lock()
+			if dialed {
+				mu.Unlock()
+				return nil, errors.New("fixture allows one connection per transport")
+			}
+			dialed = true
+			mu.Unlock()
 			client, server := net.Pipe()
 			mu.Lock()
 			pipes = append(pipes, client, server)
