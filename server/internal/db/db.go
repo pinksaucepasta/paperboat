@@ -163,6 +163,21 @@ func (d *DB) InTx(ctx context.Context, fn func(context.Context, *Tx) error) erro
 	}
 }
 
+// InReadOnlySnapshot runs reads that must agree with each other in one repeatable-read, read-only transaction.
+// It takes no row locks and no serializable predicate locks, so frequently polled reads cannot become the
+// pivot of another transaction's serialization failure. Never use it to decide a write.
+func (d *DB) InReadOnlySnapshot(ctx context.Context, fn func(context.Context, *dbsqlc.Queries) error) error {
+	tx, err := d.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return fmt.Errorf("begin read snapshot: %w", err)
+	}
+	defer tx.Rollback(context.Background())
+	if err := fn(ctx, dbsqlc.New(tx)); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
 // InReadCommittedTx is for bounded work-queue claims that use FOR UPDATE SKIP
 // LOCKED and explicit row versions. Serializable predicate locking conflicts
 // with concurrent skip-locked claimers even when their committed rows are

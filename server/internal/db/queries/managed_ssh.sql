@@ -219,3 +219,20 @@ SELECT m.id FROM user_machines m WHERE m.id=sqlc.arg(machine_id)
 AND m.installation_generation=sqlc.arg(machine_generation)
 AND machine_management_allowed(sqlc.arg(user_id),m.id)
 AND m.state NOT IN ('revoked','disconnected','deleted') FOR UPDATE;
+
+-- Reads for GET ssh-target / ssh-host-keys: one read-only snapshot, no row locks. Every daemon polls these for
+-- every reachable machine, so the locking variants above serialized ~50 transactions/s on user_machines.
+-- name: ResolveMachineSSHUseAuthority :one
+SELECT m.id FROM user_machines m WHERE m.id=sqlc.arg(machine_id)
+AND m.installation_generation=sqlc.arg(machine_generation)
+AND (machine_capability_allowed(sqlc.arg(user_id),m.id,'managed_ssh') OR machine_management_allowed(sqlc.arg(user_id),m.id))
+AND m.state NOT IN ('revoked','disconnected','deleted');
+
+-- name: GetMachineSSHTarget :one
+SELECT * FROM machine_ssh_targets WHERE user_machine_id = sqlc.arg(user_machine_id);
+
+-- name: GetActiveMachineSSHHostKeySet :one
+SELECT * FROM machine_ssh_host_key_sets WHERE user_machine_id = sqlc.arg(user_machine_id) AND state = 'active';
+
+-- name: GetPendingMachineSSHHostKeySet :one
+SELECT * FROM machine_ssh_host_key_sets WHERE user_machine_id = sqlc.arg(user_machine_id) AND state = 'pending';

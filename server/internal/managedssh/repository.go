@@ -343,12 +343,11 @@ func (r *SQLRepository) UpdateTargetPort(ctx context.Context, request UpdateTarg
 
 func (r *SQLRepository) GetTarget(ctx context.Context, request GetTargetRequest) (MachineTarget, error) {
 	var result MachineTarget
-	err := r.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		q := tx.Queries()
-		if _, err := q.ResolveMachineSSHUseAuthorityForUpdate(ctx, dbsqlc.ResolveMachineSSHUseAuthorityForUpdateParams{MachineID: request.UserMachineID, UserID: request.ActorUserID, MachineGeneration: int64(request.MachineGeneration)}); err != nil {
+	err := r.store.InReadOnlySnapshot(ctx, func(ctx context.Context, q *dbsqlc.Queries) error {
+		if _, err := q.ResolveMachineSSHUseAuthority(ctx, dbsqlc.ResolveMachineSSHUseAuthorityParams{MachineID: request.UserMachineID, UserID: request.ActorUserID, MachineGeneration: int64(request.MachineGeneration)}); err != nil {
 			return authorityError(err)
 		}
-		row, err := q.GetMachineSSHTargetForUpdate(ctx, request.UserMachineID)
+		row, err := q.GetMachineSSHTarget(ctx, request.UserMachineID)
 		if err == pgx.ErrNoRows {
 			return ErrUnavailable
 		}
@@ -597,17 +596,16 @@ func (r *SQLRepository) GetPendingHost(ctx context.Context, request GetHostKeySe
 
 func (r *SQLRepository) getHost(ctx context.Context, request GetHostKeySetRequest, pending bool) (HostKeySet, error) {
 	var result HostKeySet
-	err := r.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		q := tx.Queries()
-		if _, err := q.ResolveMachineSSHUseAuthorityForUpdate(ctx, dbsqlc.ResolveMachineSSHUseAuthorityForUpdateParams{MachineID: request.UserMachineID, UserID: request.ActorUserID, MachineGeneration: int64(request.MachineGeneration)}); err != nil {
+	err := r.store.InReadOnlySnapshot(ctx, func(ctx context.Context, q *dbsqlc.Queries) error {
+		if _, err := q.ResolveMachineSSHUseAuthority(ctx, dbsqlc.ResolveMachineSSHUseAuthorityParams{MachineID: request.UserMachineID, UserID: request.ActorUserID, MachineGeneration: int64(request.MachineGeneration)}); err != nil {
 			return authorityError(err)
 		}
 		var row dbsqlc.MachineSshHostKeySet
 		var err error
 		if pending {
-			row, err = q.GetPendingMachineSSHHostKeySetForUpdate(ctx, request.UserMachineID)
+			row, err = q.GetPendingMachineSSHHostKeySet(ctx, request.UserMachineID)
 		} else {
-			row, err = q.GetActiveMachineSSHHostKeySetForUpdate(ctx, request.UserMachineID)
+			row, err = q.GetActiveMachineSSHHostKeySet(ctx, request.UserMachineID)
 		}
 		if err == pgx.ErrNoRows {
 			return ErrUnavailable

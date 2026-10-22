@@ -783,14 +783,14 @@ func (s *Service) operationDescriptor(ctx context.Context, userID, sourceMachine
 		return ExecDescriptor{}, ErrMachineCapabilityUnavailable
 	}
 	if credentialClass == "ssh_operation" {
-		target, targetErr := s.db.Queries().GetMachineSSHTargetForUpdate(ctx, row.ID)
+		target, targetErr := s.db.Queries().GetMachineSSHTarget(ctx, row.ID)
 		if targetErr != nil || target.MachineGeneration != row.InstallationGeneration {
 			if targetErr != nil && !errors.Is(targetErr, sql.ErrNoRows) {
 				return ExecDescriptor{}, targetErr
 			}
 			return ExecDescriptor{}, ErrMachineCapabilityUnavailable
 		}
-		keys, keysErr := s.db.Queries().GetActiveMachineSSHHostKeySetForUpdate(ctx, row.ID)
+		keys, keysErr := s.db.Queries().GetActiveMachineSSHHostKeySet(ctx, row.ID)
 		if keysErr != nil || keys.MachineGeneration != row.InstallationGeneration {
 			if keysErr != nil && !errors.Is(keysErr, sql.ErrNoRows) {
 				return ExecDescriptor{}, keysErr

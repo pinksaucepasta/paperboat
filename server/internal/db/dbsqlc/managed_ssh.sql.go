@@ -307,6 +307,29 @@ func (q *Queries) DeleteRetiredMachineSSHHostKeys(ctx context.Context, arg Delet
 	return err
 }
 
+const getActiveMachineSSHHostKeySet = `-- name: GetActiveMachineSSHHostKeySet :one
+SELECT id, user_machine_id, machine_generation, observation_generation, set_fingerprint, state, reconciliation_version, observed_at, promoted_at, rejected_at, rejection_reason FROM machine_ssh_host_key_sets WHERE user_machine_id = $1 AND state = 'active'
+`
+
+func (q *Queries) GetActiveMachineSSHHostKeySet(ctx context.Context, userMachineID string) (MachineSshHostKeySet, error) {
+	row := q.db.QueryRow(ctx, getActiveMachineSSHHostKeySet, userMachineID)
+	var i MachineSshHostKeySet
+	err := row.Scan(
+		&i.ID,
+		&i.UserMachineID,
+		&i.MachineGeneration,
+		&i.ObservationGeneration,
+		&i.SetFingerprint,
+		&i.State,
+		&i.ReconciliationVersion,
+		&i.ObservedAt,
+		&i.PromotedAt,
+		&i.RejectedAt,
+		&i.RejectionReason,
+	)
+	return i, err
+}
+
 const getActiveMachineSSHHostKeySetForUpdate = `-- name: GetActiveMachineSSHHostKeySetForUpdate :one
 SELECT id, user_machine_id, machine_generation, observation_generation, set_fingerprint, state, reconciliation_version, observed_at, promoted_at, rejected_at, rejection_reason FROM machine_ssh_host_key_sets
 WHERE user_machine_id = $1 AND state = 'active'
@@ -433,6 +456,25 @@ func (q *Queries) GetMachineSSHHostKeySetByObservation(ctx context.Context, arg 
 	return i, err
 }
 
+const getMachineSSHTarget = `-- name: GetMachineSSHTarget :one
+SELECT user_machine_id, machine_generation, os_user, target_port, reconciliation_version, created_at, updated_at FROM machine_ssh_targets WHERE user_machine_id = $1
+`
+
+func (q *Queries) GetMachineSSHTarget(ctx context.Context, userMachineID string) (MachineSshTarget, error) {
+	row := q.db.QueryRow(ctx, getMachineSSHTarget, userMachineID)
+	var i MachineSshTarget
+	err := row.Scan(
+		&i.UserMachineID,
+		&i.MachineGeneration,
+		&i.OsUser,
+		&i.TargetPort,
+		&i.ReconciliationVersion,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getMachineSSHTargetForUpdate = `-- name: GetMachineSSHTargetForUpdate :one
 SELECT user_machine_id, machine_generation, os_user, target_port, reconciliation_version, created_at, updated_at FROM machine_ssh_targets
 WHERE user_machine_id = $1
@@ -495,6 +537,29 @@ func (q *Queries) GetManagedSSHOperationForUpdate(ctx context.Context, operation
 		&i.ResourceID,
 		&i.ResultRevision,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getPendingMachineSSHHostKeySet = `-- name: GetPendingMachineSSHHostKeySet :one
+SELECT id, user_machine_id, machine_generation, observation_generation, set_fingerprint, state, reconciliation_version, observed_at, promoted_at, rejected_at, rejection_reason FROM machine_ssh_host_key_sets WHERE user_machine_id = $1 AND state = 'pending'
+`
+
+func (q *Queries) GetPendingMachineSSHHostKeySet(ctx context.Context, userMachineID string) (MachineSshHostKeySet, error) {
+	row := q.db.QueryRow(ctx, getPendingMachineSSHHostKeySet, userMachineID)
+	var i MachineSshHostKeySet
+	err := row.Scan(
+		&i.ID,
+		&i.UserMachineID,
+		&i.MachineGeneration,
+		&i.ObservationGeneration,
+		&i.SetFingerprint,
+		&i.State,
+		&i.ReconciliationVersion,
+		&i.ObservedAt,
+		&i.PromotedAt,
+		&i.RejectedAt,
+		&i.RejectionReason,
 	)
 	return i, err
 }
@@ -807,6 +872,28 @@ type ResolveMachineSSHManagementAuthorityForUpdateParams struct {
 
 func (q *Queries) ResolveMachineSSHManagementAuthorityForUpdate(ctx context.Context, arg ResolveMachineSSHManagementAuthorityForUpdateParams) (string, error) {
 	row := q.db.QueryRow(ctx, resolveMachineSSHManagementAuthorityForUpdate, arg.MachineID, arg.MachineGeneration, arg.UserID)
+	var id string
+	err := row.Scan(&id)
+	return id, err
+}
+
+const resolveMachineSSHUseAuthority = `-- name: ResolveMachineSSHUseAuthority :one
+SELECT m.id FROM user_machines m WHERE m.id=$1
+AND m.installation_generation=$2
+AND (machine_capability_allowed($3,m.id,'managed_ssh') OR machine_management_allowed($3,m.id))
+AND m.state NOT IN ('revoked','disconnected','deleted')
+`
+
+type ResolveMachineSSHUseAuthorityParams struct {
+	MachineID         string
+	MachineGeneration int64
+	UserID            string
+}
+
+// Reads for GET ssh-target / ssh-host-keys: one read-only snapshot, no row locks. Every daemon polls these for
+// every reachable machine, so the locking variants above serialized ~50 transactions/s on user_machines.
+func (q *Queries) ResolveMachineSSHUseAuthority(ctx context.Context, arg ResolveMachineSSHUseAuthorityParams) (string, error) {
+	row := q.db.QueryRow(ctx, resolveMachineSSHUseAuthority, arg.MachineID, arg.MachineGeneration, arg.UserID)
 	var id string
 	err := row.Scan(&id)
 	return id, err
