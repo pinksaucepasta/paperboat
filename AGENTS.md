@@ -119,9 +119,9 @@ short table: rows done, rows `[!]` with reasons, commits. Root files no lane own
 `Makefile`, `tools/gate.sh`) are edited by the lane whose change needs them, with `make gate`;
 do not ask.
 
-**Shared branch.** All lanes push to `main`. If a push is rejected because another lane pushed,
-run `git pull --rebase`, re-run `make gate` if the incoming changes touch your paths or shared code,
-then push. Never force-push.
+**Shared branch.** All lanes push to `main`, always with `tools/push.sh`: it takes one lock shared by
+every worktree, then fetches, rebases and pushes, so pushes queue instead of racing. Re-run the
+affected tests if the rebase brought in changes to your paths or shared code. Never force-push.
 
 Contracts between lanes (server API, discovery response) are changed by the lane that owns
 the producer first, committed and pushed, then consumers update. A feature becomes `[x]`
