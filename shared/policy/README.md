@@ -166,3 +166,28 @@ Version     {version, digest, created_at, author, api_token?, message, gained, l
   `private_access_off`, `outside_token_scope`; `guardrail` names a failed guardrail
   (`team_suspended`, `membership_inactive`, `machine_not_in_workspace`, `team_not_entitled`,
   `machine_service_off`). A member asking about someone else is 403 `policy_explain_forbidden`.
+
+## API tokens
+
+An API token acts as the member who created it, in one workspace, until it expires or is
+revoked. An optional scope (a list of `{"dst", "allow", "ports"?}` entries using the names
+above, validated like rules) narrows it; a scope never widens it.
+
+| Method and path | Who | Request | Response |
+|---|---|---|---|
+| `POST /v1/workspaces/{ws}/api-tokens` | members | `{"name", "expires_in_days", "scope"?}` | `{"api_token": APIToken, "secret": "pbat_…"}` (secret shown once) |
+| `GET /v1/workspaces/{ws}/api-tokens` | members (own), owners/admins (all) | — | `{"api_tokens": [APIToken]}` |
+| `DELETE /v1/workspaces/{ws}/api-tokens/{id}` | its creator, owners/admins | — | `{"api_token": APIToken}` (revoked) |
+
+```text
+APIToken {id, name, workspace, created_by ("user:<email>"), created_at, expires_at,
+          last_used_at?, revoked_at?, scope? ([{dst, allow, ports?}])}
+```
+
+- `name`: same characters as tag names, unique per creator and workspace (409
+  `api_token_name_taken`). `expires_in_days`: 1 to the configured maximum (default 90).
+  A bad scope is 422 `invalid_api_token_scope` with `details.errors`.
+- Use: `Authorization: Bearer pbat_…` on any API request; the request acts as the creator in
+  the token's workspace only (another workspace is 403 `workspace_unavailable`), and every
+  authorization also checks the scope (`outside_token_scope`). The CLI reads the token from
+  `PB_API_TOKEN`. Expired or revoked: 401 `api_token_invalid`.
