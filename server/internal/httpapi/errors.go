@@ -3,6 +3,7 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"reflect"
 	"time"
@@ -142,6 +143,11 @@ func writeErrorDetails(w http.ResponseWriter, r *http.Request, status int, code,
 		}
 	}
 	captureSupportFailure(r, status, code, sentry.NewStacktrace(), causes...)
+	if status >= 400 && status < 500 {
+		// A refusal's code is otherwise only in the response body; the request log
+		// line has the status alone, which made account-wide 409s untraceable.
+		slog.InfoContext(r.Context(), "http_refusal", "status", status, "code", code, "path", r.URL.Path, "support_reference", supportReference(r.Context()))
+	}
 	writeJSON(w, status, ErrorResponse{Error: APIError{
 		SupportReference: supportReference(r.Context()),
 		Code:             code,
