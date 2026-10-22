@@ -605,6 +605,32 @@ browser-credential authorization. Same capture store, redaction and replay rules
 `pb preview inspect/replay` (F7-07). Lane I owns the feature across cli/ (A), server/ (B) and
 console/ (C), keeping each change small and logging what it touched.
 
+**Design (coordinator approved option B, 2026-10-22).** A machine-scoped browser channel with no
+terminal session and no hidden shell; inspect/replay stay named actions (Lane K's policy rules
+can cover them later).
+- *Grants (exists):* the console gets per-action inspector grants with `POST /v1/inspector/credentials`
+  (`inspect`, and `replay` when allowed): owner, or a team member with that exact grant
+  (`inspectaccess.resolvePrincipal`).
+- *Ticket (server, new):* `POST /v1/inspector/browser-ticket {credential_id, browser_public_key_sha256}`
+  (browser session + CSRF). The credential must be the caller's, live, and for a preview; the
+  ticket is single-use, 30 s, bound to user + preview + the preview's machine
+  (`preview_leases.owner_device_id`), stored in `browser_terminal_tickets` with
+  `purpose='inspector'`. Same response shape as the terminal browser-ticket (edge stream URL,
+  subprotocols, owner root key) and the same edge route as terminals.
+- *Edge admission (server):* the existing edge control socket redeems it, re-resolves the
+  credential, mints a JWT of class `browser_inspector_operation`, scope `inspector:use`, no
+  terminal session, and re-checks the credential every 2 s (revoked/expired closes the channel).
+  The edge itself is unchanged (the hub key is the attachment id).
+- *Daemon (cli):* accepts that class only for the new `inspector.v1` capability. Each request
+  carries `{method, path, query, body, grant}`; the daemon re-verifies the grant live against
+  the server (existing `inspectorapi`) and requires its principal to equal the JWT user, then
+  serves the existing inspector API. Captures and bodies never leave the E2E channel.
+- *WASM + console:* `connect` gets an `inspector` mode (no attach) and `inspectorRequest`.
+  Previews → Inspect page: live list (cursor poll every second while visible), detail
+  (headers/body as captured), filters (method, status class, path), replay, capture
+  on/off/bodies, clear, and clear offline/stopped/denied states.
+- Order: server + migration (Lane B deploys) → daemon → WASM/console (server-first gate).
+
 - F17-01: The daemon serves capture list, detail, live follow, enable/disable, purge and replay to an authorized console browser over the E2E browser channel; the server relays only ciphertext and never stores or sees captures.
 - F17-02: Only people allowed to manage the preview (its owner, or the machine owner) get an inspector credential; a team member without that right and a stranger are refused by the server and by the daemon.
 - F17-03: Console: open a preview's inspector, see requests arrive live (method, path, status, duration, time), open one to read request/response headers and body as captured (redacted values stay redacted), and filter by method, status class and path text.
@@ -2473,3 +2499,4 @@ Mac-only proofs still open: (1) the user daemon is a LaunchAgent in gui/<uid>: d
 2026-10-22 | Lane J F16 | Design + rows added (PLAN F16, CHECKLIST F16-01..04, C243). Touches cli/ (Lane A) and F10 ENV (Lane E): new `pb env hook` command only; logged per commit here.
 2026-10-22 | Lane I F17 | — | — | New feature F17 (console preview inspector) from WHITEBOARD; Lane I owns it across cli/ (A), server/ (B), console/ (C), each change logged here.
 2026-10-22 | Lane K F18 | Design + rows (PLAN F18, CHECKLIST F18-01..10, C244-C253), moved from WHITEBOARD; every plan (coordinator 2026-10-22). Server first: Lane K writes server/+shared/ changes, Lane B please deploy each server build Lane K logs here; then cli/, console/.
+2026-10-22 | Lane I F17 design | — | — | Option B approved. Touches server/internal/browserterminal, inspectaccess, httpapi + one migration (Lane B: please deploy when pushed), cli hostruntime server/auth/runtime + cmd/browserterminal-wasm (Lane A), console previews (Lane C).
