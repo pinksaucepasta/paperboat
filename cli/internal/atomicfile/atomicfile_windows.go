@@ -256,6 +256,10 @@ func createProtectedTemporary(parent, descriptor string) (*os.File, string, erro
 	return nil, "", windows.ERROR_FILE_EXISTS
 }
 
+// DefaultSecurityDescriptor is the protected descriptor Write applies when Options.SecurityDescriptor
+// is empty: full control for the current user, SYSTEM and Administrators, no inheritance.
+func DefaultSecurityDescriptor() (string, error) { return currentOwnerSecurityDescriptor() }
+
 func currentOwnerSecurityDescriptor() (descriptor string, resultErr error) {
 	token, err := windows.OpenCurrentProcessToken()
 	if err != nil {

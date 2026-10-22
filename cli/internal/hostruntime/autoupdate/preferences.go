@@ -206,7 +206,7 @@ func writePrivateJSON(path string, value any) error {
 	if len(data) > 4096 || !json.Valid(bytes.TrimSpace(data)) {
 		return ErrInvalidConfig
 	}
-	if err := atomicfile.Write(path, append(data, '\n'), atomicfile.Options{Mode: 0600, OwnerUID: os.Geteuid(), OwnerGID: os.Getegid()}); err != nil {
+	if err := atomicfile.Write(path, append(data, '\n'), atomicfile.CurrentOwnerOptions(0600)); err != nil {
 		return updateFailure("automatic update state could not be saved", err)
 	}
 	return nil

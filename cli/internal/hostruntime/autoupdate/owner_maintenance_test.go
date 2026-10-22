@@ -2,6 +2,7 @@ package autoupdate
 
 import (
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/atomicfile/atomicfiletest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,13 +29,7 @@ func TestPlanOwnerMaintenancePersistsAndExactRetryKeepsDeadline(t *testing.T) {
 		t.Fatalf("first notice = %+v", first)
 	}
 
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Mode().Perm() != 0o600 {
-		t.Fatalf("notice permissions = %o, want 600", info.Mode().Perm())
-	}
+	atomicfiletest.RequireOwnerOnly(t, path, 0o600)
 
 	// A process restart reloads the same notice. Retrying at the deadline and
 	// after it cannot move the original deadline forward.

@@ -3,6 +3,7 @@ package preferences
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/atomicfile/atomicfiletest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -15,10 +16,7 @@ func TestLoadSaveStrictAndPreservesExplicitEmptyPanels(t *testing.T) {
 	if err := Save(path, doc); err != nil {
 		t.Fatal(err)
 	}
-	info, _ := os.Stat(path)
-	if info.Mode().Perm() != 0600 {
-		t.Fatalf("mode = %o", info.Mode().Perm())
-	}
+	atomicfiletest.RequireOwnerOnly(t, path, 0600)
 	loaded, err := Load(path)
 	if err != nil {
 		t.Fatal(err)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/atomicfile/atomicfiletest"
 	"os"
 	"path/filepath"
 	"slices"
@@ -68,13 +69,7 @@ func TestStoreCommitReopenAndLastKnownGood(t *testing.T) {
 		t.Fatal("Snapshot returned mutable internal state")
 	}
 	for _, name := range []string{primaryFile, backupFile, lockFile} {
-		info, err := os.Stat(filepath.Join(root, name))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if info.Mode().Perm()&0o077 != 0 {
-			t.Fatalf("%s permissions = %o, want owner-only", name, info.Mode().Perm())
-		}
+		atomicfiletest.RequireOwnerOnly(t, filepath.Join(root, name), 0o600)
 	}
 }
 
