@@ -220,8 +220,8 @@ consumers. 1.4c's shared admission/reattach packages also move into `shared/`.
 
 Generic UDP, SDK, WebTransport browser terminal, remote desktop,
 PostHog, agent skill (all in WHITEBOARD.md), desktop app, e2e harness. Operator admin
-console frontend: **USER DECIDES**. Inspector capture/replay: ships only if it already works
-(F7-07 checks it); no new inspector work.
+console frontend: **USER DECIDES**. Inspector capture/replay: `pb preview inspect/replay` ships only if
+it already works (F7-07 checks it); the console inspector is F17 (user decision 2026-10-22).
 
 ---
 
@@ -593,6 +593,24 @@ shell-plugin pattern.
 - F16-02: Plain `ssh host` interactive login and non-interactive `ssh host env` see the workspace values of the logged-in pb account; `pb ssh` too; values never in logs, files or diagnostics.
 - F16-03: Locked vault, stopped daemon, no network and no pb login: the shell starts within the time budget, nothing is loaded, at most one short line on interactive shells.
 - F16-04: VS Code Remote-SSH terminals and tasks see the values after the documented reload step.
+
+### F17. Preview inspector in the console (Lane I, user decision 2026-10-22)
+
+**What:** select a preview in the console and watch its captured requests live, with replay
+(like ngrok's inspector: request list, headers/body view, replay, filters). Captures stay on
+the machine (`cli/internal/inspector`); the console reads them over the same end-to-end
+encrypted browser channel as the browser terminal, never through the server.
+**Surfaces:** console Previews → preview → Inspect; daemon browser capability; server
+browser-credential authorization. Same capture store, redaction and replay rules as
+`pb preview inspect/replay` (F7-07). Lane I owns the feature across cli/ (A), server/ (B) and
+console/ (C), keeping each change small and logging what it touched.
+
+- F17-01: The daemon serves capture list, detail, live follow, enable/disable, purge and replay to an authorized console browser over the E2E browser channel; the server relays only ciphertext and never stores or sees captures.
+- F17-02: Only people allowed to manage the preview (its owner, or the machine owner) get an inspector credential; a team member without that right and a stranger are refused by the server and by the daemon.
+- F17-03: Console: open a preview's inspector, see requests arrive live (method, path, status, duration, time), open one to read request/response headers and body as captured (redacted values stay redacted), and filter by method, status class and path text.
+- F17-04: Console: replay a captured request and see the replay's result appear in the list, marked as a replay.
+- F17-05: Console: turn capture on/off (with or without bodies) and clear captures; clear states for capture off, no requests yet, preview stopped and machine offline.
+- F17-06: Losing the connection or the machine restarting reconnects and resumes the live list without duplicates; losing access mid-view ends it with a clear message.
 
 ### S2. Marketing site
 
@@ -2230,3 +2248,4 @@ Waits: Lane A rerun preview-protocols:hp/preview:hp/tunnel-transfer:hp on .7; La
 2026-10-21 | Lane F macOS readiness audit (code only) | pending | — | The Linux fixes of the week share darwin||linux code or already have darwin counterparts (install ControlURL and guard domain, update activation and helper reset, open-connections busy check, revoked-computer backoff, send-to-self, disk-full refusals; `GOOS=darwin go vet ./...` clean). One real gap fixed: failing to retire old local roots no longer keeps the active root untrusted on any OS (machineguard/certificate.go, TestPreparingTheLocalCAIgnoresAFailureToRetireOldRoots).
 Mac-only proofs still open: (1) the user daemon is a LaunchAgent in gui/<uid>: does it survive logout, and start with no console login? (candidate fallback: user/<uid>); (2) Firefox ignores the System keychain, so browser trust may need enterprise_roots or an NSS import; (3) `security add-trusted-cert` admin approval and the trustPending path; (4) Application Firewall and macOS 15 Local Network prompts for direct QUIC; (5) Gatekeeper/quarantine for browser-downloaded `--from` files; (6) 127.100.x loopback aliases and PF after reboot and sleep; (7) launchd bootstrap/kickstart races during an update restart; (8) APFS free space (statfs) vs purgeable space for the full-disk refusal.
 2026-10-22 | Lane J F16 | Design + rows added (PLAN F16, CHECKLIST F16-01..04, C243). Touches cli/ (Lane A) and F10 ENV (Lane E): new `pb env hook` command only; logged per commit here.
+2026-10-22 | Lane I F17 | — | — | New feature F17 (console preview inspector) from WHITEBOARD; Lane I owns it across cli/ (A), server/ (B), console/ (C), each change logged here.

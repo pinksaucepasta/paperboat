@@ -259,16 +259,6 @@ API composition and dashboard consumers. Verify both standalone base operation a
 complete private edition, including security and lifecycle behavior. This is substantial
 architecture work requiring a scoped task, not a feature-flag-only packaging change.
 
-## Preview inspector in the console — later
-
-Recorded 2026-10-15 by Claude from the user's direction.
-
-Select a preview in the console and watch its captured requests live, with replay, instead of
-only `pb preview inspect/replay`. Captures stay on the machine (`cli/internal/inspector`);
-the console reads them over the same end-to-end encrypted path as the browser terminal, never
-through the server. Needs CLI, server authorization and console work. Not in this launch
-(PLAN.md 1.6).
-
 ## ENV in plain SSH and VS Code — later
 
 **Moved to PLAN.md F16 (2026-10-22, user decision): built now.**

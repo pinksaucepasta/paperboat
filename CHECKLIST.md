@@ -673,6 +673,17 @@ Behaviour that only matters when platforms mix. The three cells are platform **p
 
 ---
 
+## F17. Preview inspector in the console
+
+| ID | Scenario | L | M | W | Evidence |
+|---|---|---|---|---|---|
+| F17-01 | Daemon serves capture list, detail, live follow, enable/disable, purge and replay to an authorized console browser over the E2E browser channel; the server never sees captures. | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
+| F17-02 | Only the preview owner or machine owner gets an inspector credential; a team member without that right and a stranger are refused by server and daemon. | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
+| F17-03 | Console: inspector shows requests live (method, path, status, duration, time), request/response headers and body as captured, filters by method, status class, path text. | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
+| F17-04 | Console: replay a captured request; the replay's result appears in the list, marked as a replay. | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
+| F17-05 | Console: capture on/off (with/without bodies), clear captures; clear states for capture off, no requests, preview stopped, machine offline. | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
+| F17-06 | Connection loss or machine restart reconnects and resumes the live list without duplicates; access lost mid-view ends it with a clear message. | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
+
 ## S2. Marketing site
 
 | ID | Scenario | L | M | W | Evidence |
