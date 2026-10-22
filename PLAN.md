@@ -865,6 +865,219 @@ Simple view (user decision 2026-10-22): preview/tunnel `use`/`manage` and lazy-p
 - F18-09: Console Access page (Simple grid with today's grants, private-access switch, tags, groups; Policy file editor with inline errors and Review changes; Test; History with Diff/Restore) and Settings → API tokens (scripted browser check).
 - F18-10: CLI `pb policy` and `pb api-token` commands work end to end against the live server (device check on the victus VMs).
 
+### F19. Teams for business: SSO, directory sync, roles, audit log, invoices (Lane S, user decision 2026-10-23)
+
+**What:** what companies pay Team seats for, required at launch. Free and Pro are everything for
+one person; Team is collaboration plus these: single sign-on (SAML and OIDC) with verified domains
+and enforcement, automatic member provisioning and deprovisioning (SCIM), more roles with one
+permission matrix, a searchable and exportable audit log streamed to the customer's SIEM, and
+business billing (invoices, billing details, tax ID, pay by invoice).
+**Surfaces:** console team Settings → Security (SSO, domains, enforcement), Directory, Members
+(roles), Activity (audit log: filters, export, streaming), Billing (invoices, billing details, pay
+by invoice); `pb team sso|scim|activity|role`; server identity, teams, activity and billing;
+admin reference `server/docs/teams-business.md`.
+**Owner:** Lane S across server/ (B), cli/ (A) and console/ (C, with Lane C's help), each change
+small and logged in section 5; Lane B deploys. Billing parts in agreement with Lane O (F13);
+roles as policy subjects in agreement with Lane K (F18).
+
+**What we took from whom.** WorkOS (we already use AuthKit): SSO Connections, Directory Sync and
+the Admin Portal, so a customer's IT admin sets up Okta, Entra ID, Google Workspace, OneLogin,
+JumpCloud or any SAML/OIDC IdP themselves, with WorkOS's per-IdP guides; we never handle SAML
+metadata or SCIM endpoints ourselves. Vercel and GitHub: "SSO required for this team" checked per
+team (the account stays the person's own; workspaces share nothing), with a review of who loses
+access before turning it on. Linear: JIT provisioning on SSO sign-in, directory group → role
+mapping, directory-managed members locked against manual edits. Tailscale: roles are admin
+permissions only (Owner, Admin, Billing admin, Auditor, Member); using machines is the policy's
+job; log streaming to an HTTPS endpoint or S3-compatible storage. Stripe: invoices, customer tax
+IDs and `send_invoice` collection; Stripe is the only owner of billing details.
+
+#### Roles and permission matrix
+
+Roles stay one per member: `owner` (the single `teams.owner_account`), `admin`, `billing`
+(Billing admin), `auditor`, `member`. Roles are administrative permissions only; **using**
+machines, ENV, previews and tunnels is decided by the workspace policy (F18), as today ("roles
+never imply use"). Every role is a member and takes a seat.
+
+| Permission | owner | admin | billing | auditor | member |
+|---|---|---|---|---|---|
+| See team, members, machines, settings, policy | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Invite, remove members, change roles (not owner) | ✓ | ✓ | | | |
+| Team settings, machine approval, edit policy (F18-08) | ✓ | ✓ | | | own machines |
+| SSO, domains, enforcement, exemptions, directory sync | ✓ | ✓ | | | |
+| Read and export the audit log; streaming status | ✓ | ✓ | | ✓ | |
+| Configure audit log streaming | ✓ | ✓ | | | |
+| Billing: plan, seats, top-ups, invoices, billing details, pay by invoice | ✓ | ✓ | ✓ | | |
+| Delete team, transfer ownership | ✓ | | | | |
+| Own API tokens, explain own access | ✓ | ✓ | ✓ | ✓ | ✓ |
+
+One owner of the matrix: `teams.Allowed(member, permission)` in `server/internal/teams`; every
+team endpoint and SQL authorization that checks a role today (`m.Role != "admin"` and the like)
+switches to it in one change; the matrix is served at `GET /v1/teams/roles` for the console and
+CLI, and a test asserts the README table equals the code. Policy subjects (Lane K): `role:billing`
+and `role:auditor` are added next to `role:owner`, `role:admin`, `role:member`; `role:member` stays
+"every active member", so a billing admin or auditor uses machines only when a rule allows it.
+
+#### SSO (SAML and OIDC through WorkOS)
+
+- **Organization.** Each team that starts SSO setup gets one WorkOS Organization (created by the
+  server, id stored on the team; deleted when the team is deleted). Nothing exists for teams that
+  never use SSO.
+- **Self-serve setup.** Owners/admins click Set up SSO (or `pb team sso setup`): the server asks
+  WorkOS for an Admin Portal link (`intent` = `domain_verification`, `sso` or `dsync`, return URL
+  = the console team Security page) and the console opens it. The customer's IT admin verifies
+  the domain with a DNS TXT record and connects the IdP there.
+- **State** comes from the WorkOS Events API (`organization_domain.*`, `connection.*`,
+  `dsync.*`), read by one server worker with a stored cursor every few seconds (config), events
+  applied idempotently by event id; a full reconcile on activation and daily. No webhook to
+  configure.
+- **Sign-in.** AuthKit sends an email from a verified domain to that organization's IdP; IdP-
+  initiated sign-in also works. The authentication response's `organization_id` and
+  `authentication_method = SSO` are recorded; for every team of that organization the member row
+  gets `sso_verified_at = now`. `pb login` stays the browser device flow, so it goes through SSO
+  the same way.
+- **JIT provisioning** (team setting, default off; directory sync makes it unnecessary): a person
+  who signs in through the team's SSO and is not a member becomes a `member` (seat added as in
+  provisioning below).
+
+#### SSO enforcement and break-glass
+
+- Team setting **Require SSO** (owners/admins), available once a connection is active and a domain
+  is verified. Turning it on first shows who would lose access (members without a recent SSO
+  sign-in or outside the verified domains), like F18's access review, and is confirmed by digest.
+- While on, a member reaches the team (console, API, CLI, API tokens, new connections) only if
+  `sso_verified_at` is within the team's **SSO session length** (setting, default 7 days, 1–30,
+  limits in config). It is a guardrail in Lane K's `decide()` step 1 and in the team reads, with
+  the typed error `team_sso_required` and the sign-in URL; the CLI prints "Sign in through your
+  company's SSO: pb login". Like every credential gate (1.4c) it gates starting work only; it
+  never cuts an admitted connection. Removal (directory or admin) cuts at once.
+- Invitations go only to addresses in verified domains while enforced.
+- **Break-glass:** the owner and up to 5 members marked **SSO exempt** (owners/admins set it;
+  for contractors and emergency admins) keep access without SSO, so a broken IdP never locks the
+  team out; the owner can turn enforcement off. Every exempt access without SSO is recorded
+  (`sso.bypassed`, at most once per session per day) and shown on the Security page.
+
+#### Directory sync (SCIM through WorkOS)
+
+- Set up from the same Admin Portal (`dsync`). The console shows directory state, last sync, user
+  and group counts, and the **group → role** mapping (owners/admins edit it; precedence admin >
+  billing > auditor > member when someone is in several mapped groups; unmapped users get
+  `member` unless the setting "Only provision mapped groups" is on).
+- **Provisioning:** an active directory user whose email matches a Paperboat account becomes a
+  member with the mapped role; without an account, a directory invitation is held (seat
+  reserved, a welcome email sent) and turns into membership at their first sign-in with that
+  email. Seats are added automatically when needed (charged as a normal seat change, F13).
+- Members provisioned by the directory are marked **managed by directory**: their role and
+  membership change only through the directory (console and CLI refuse with
+  `directory_managed`). The owner is never removed or demoted by the directory (logged).
+- **Deprovisioning:** a directory user deleted, suspended or (with "Only provision mapped
+  groups") removed from every mapped group is removed from the team within one event poll,
+  exactly like `pb team remove`: the membership generation advances so active sessions end
+  immediately, their API tokens for the team are revoked, their shared personal machines leave
+  the team, the seat frees. Their Paperboat account and personal workspace are untouched.
+
+#### Audit log (Activity)
+
+One audit log, today's `audit_events` table and `GET /v1/activity` extended; the separate team
+activity endpoint is folded into it (one way to read). Personal workspaces have it too.
+- **Recorded:** every access and admin event in the workspace: sign-in, SSO verification and
+  bypass, `team_sso_required` denials; members, invitations, roles, exemptions, ownership;
+  SSO/domain/directory changes and every directory provisioning action; machine enroll, share,
+  approve, remove; policy, tokens (F18); ENV grants (never values); starting terminal, browser
+  terminal, exec, SSH/SCP/SFTP/rsync, file transfer, preview/tunnel create/delete, private access,
+  inspector use, and every authorization denial with its reason; billing changes (plan, seats,
+  top-ups, details, pay by invoice); export and streaming changes. Never contents, ENV values or
+  secrets.
+- **Event shape** (documented, stable, the same in API, export and stream):
+  `{id, time, workspace, actor: {type: user|api_token|directory|system|operator, id, email},
+  action, target: {type, id, name}, result: success|denied, reason?, ip?, user_agent?,
+  request_id, details}`. Append-only (existing trigger); IP and user agent only on events from a
+  signed-in request.
+- **Retention per plan** in `server/internal/config` (proposal: Free 30, Pro 90, Team 365
+  days); the prune job deletes per workspace by its plan; the DB trigger's fixed 90 days becomes
+  the workspace's configured value.
+- **Search and filter** (API, console, `pb team activity`): actor, action (prefix), target,
+  result, time range, free text over names and emails; cursor paging; owners/admins/auditors of a
+  team, the owner of a personal workspace.
+- **Export:** `GET /v1/activity/export?workspace=&format=csv|json&from=&to=&<filters>` streams a
+  file (JSON = one JSON array); bounded by retention and a row limit in config; the export is
+  itself recorded. Team plan.
+- **Streaming to a SIEM** (Team plan; owners/admins; at most one destination of each kind):
+  - *HTTPS:* POST of NDJSON batches (≤1 MiB or 5 s), `Content-Type: application/x-ndjson`, an
+    optional custom header (e.g. `Authorization: Splunk <token>` or a Datadog key) stored
+    encrypted, and `Paperboat-Signature: t=<unix>,v1=<HMAC-SHA256>` with a per-destination
+    signing secret shown once. Works with Splunk HEC (raw), Datadog, Elastic, Axiom, Cribl, Panther
+    and plain webhooks.
+  - *S3-compatible:* endpoint, region, bucket, prefix, access key and secret (encrypted); objects
+    `<prefix>/<workspace>/YYYY/MM/DD/<first>-<last>.ndjson.gz`, SigV4 PUT. AWS S3, Cloudflare R2,
+    Backblaze B2, MinIO, GCS (interop).
+  - At-least-once, in order, a cursor per destination; retries with backoff up to 1 h; events
+    wait until delivered or their retention ends; "Send test event"; status (last delivery, lag,
+    last error); owners/admins emailed once when a destination has failed for 1 hour.
+
+#### Invoices and business billing (with Lane O)
+
+Stripe is the only owner of billing details; nothing is copied into our database.
+- **Invoices:** `GET /v1/billing/invoices?workspace=` lists Stripe invoices (number, date, period,
+  amount, tax, status, hosted page and PDF links) for personal and team workspaces; the console
+  Billing page lists and downloads them.
+- **Billing details:** billing email (where invoices and receipts go), company name, address and
+  one tax ID (EU VAT, UK VAT, US EIN, and the other Stripe tax ID types) read and written through
+  `GET/PUT /v1/billing/details?workspace=`; Stripe validates the tax ID and prints name, address
+  and tax ID on every invoice.
+- **Pay by invoice:** for Team workspaces on the yearly price with at least N seats (config,
+  proposal 10). Billing owners switch it on or off; the subscription moves to Stripe
+  `collection_method=send_invoice` with `days_until_due` (config, 30); Stripe emails each invoice
+  to the billing email with a hosted payment page (card or bank transfer). An overdue invoice
+  follows the existing failed-renewal path (7 days of grace, then suspension until paid, 1.3).
+  The first purchase is by card Checkout as today; seat changes are invoiced immediately the same
+  way.
+- Lane S adds new files in `server/internal/billing` (invoices, details, collection) and one
+  webhook case; Lane O keeps plans, prices, Checkout, seats and grace.
+
+#### CLI (Lane A paths)
+
+`pb team sso status|setup|enforce on|off|exempt <email> [--remove]`, `pb team scim
+status|setup|map <group> <role>`, `pb team activity [--actor] [--action] [--target] [--result]
+[--since] [--until] [--search] [--json]`, `pb team activity export --format csv|json [--since]
+[--until] -o <file>`; `pb team role` accepts the new roles. Setup commands print the Admin Portal
+link (and open it where a browser is available). Streaming and billing stay in the console.
+
+#### Open questions (USER DECIDES; recommendation first, work proceeds on it unless changed)
+
+1. **WorkOS cost:** SSO and Directory Sync are billed by WorkOS per connection per month (list
+   price about $125 each), more than a small team pays us. Recommend: included in Team for teams
+   with 10+ seats (config value); smaller teams see "available from 10 seats". Alternative: all
+   Team workspaces, or a paid add-on.
+2. **Audit retention:** Free 30, Pro 90, Team 365 days (config). Export and streaming Team only.
+3. **Pay by invoice:** Team yearly with 10+ seats, net 30 (config).
+4. **Tax:** tax ID, name and address printed on invoices at launch; Stripe Tax (computing VAT /
+   sales tax) only once the business has tax registrations (dashboard step for the user).
+5. **Deprovisioning** removes the person from the team only; their Paperboat account and personal
+   workspace stay theirs (workspaces share nothing).
+6. **Seats:** every role takes a seat (Tailscale model), including billing admins and auditors.
+
+#### Not in v1
+
+Directory groups as policy subjects (`group:` filled from the directory; WHITEBOARD), several
+destinations of one kind, custom roles, SSO for personal workspaces, mandatory MFA settings (the
+IdP's job), SAML-only Paperboat accounts without email.
+
+- F19-01: Roles billing and auditor with the permission matrix in one place; every team endpoint and SQL role check uses it; `role:billing`/`role:auditor` policy subjects; change role in API, CLI and console.
+- F19-02: SSO setup: team ↔ WorkOS organization, Admin Portal links for domain verification, SSO and directory sync (owners/admins only); domain, connection and directory state follow WorkOS events.
+- F19-03: SSO sign-in: a verified-domain email signs in through the team's IdP (SP- and IdP-initiated, console and `pb login`); the SSO verification is recorded per team member; JIT provisioning when enabled.
+- F19-04: Require SSO: review of who loses access before turning on; without a recent SSO sign-in the team is refused with `team_sso_required` everywhere (console, API, CLI, API tokens, new connections) while admitted connections continue; invitations limited to verified domains; owner and SSO-exempt members keep access, each bypass recorded; turning it off restores access.
+- F19-05: Directory provisioning: directory users become members (or held invitations until first sign-in) with the role from the group mapping; seats added automatically; directory-managed members refuse manual edits; initial and daily reconcile.
+- F19-06: Directory deprovisioning: a deleted or suspended directory user is removed within one event poll; active sessions end immediately, the member's team API tokens are revoked, shared machines leave the team; the owner is never removed; the personal account is untouched.
+- F19-07: Audit log records every access and admin event of 'Recorded' with the documented shape (actor incl. API token and directory, target, result and denial reason, IP, user agent); never contents or secrets; append-only; retention per plan from config.
+- F19-08: Audit log search and filter (actor, action, target, result, time, text) with cursor paging in API, console and `pb team activity`; owners, admins and auditors only for teams.
+- F19-09: Audit log export as CSV and JSON for a time range and filters, streamed and bounded; the export is recorded.
+- F19-10: Audit log streaming to HTTPS (NDJSON, signed, custom auth header) and S3-compatible storage: in order, at least once, retries, test event, status and failure email.
+- F19-11: Invoices listed and downloadable in the console for personal and team workspaces; billing email, company name, address and tax ID edited in the console and printed on invoices.
+- F19-12: Pay by invoice for eligible Team workspaces: switch on/off, invoice emailed with due date, overdue → grace → suspension → recovery (Stripe test clock).
+- F19-13: Console: Security (SSO, domains, Require SSO with review, exemptions, bypass log), Directory (state, group → role mapping), roles in Members, Activity filters/export/streaming, Billing invoices/details/pay by invoice (scripted browser check).
+- F19-14: CLI `pb team sso`, `pb team scim`, `pb team activity` (filters, export) and new roles in `pb team role` work end to end against the live server.
+- F19-15: Admin reference `server/docs/teams-business.md`: roles matrix, SSO and SCIM setup per IdP through the Admin Portal, enforcement and break-glass, audit event catalog and shape, export and stream formats with signature verification, billing; a test keeps the roles table and event catalog equal to the code.
+
 ### S2. Marketing site
 
 - S2-01: Content matches the product (features, platforms 1.1, pricing 1.3, domains 1.2); install instructions use the configured installer host; builds; hosting **USER DECIDES**.
@@ -2519,3 +2732,4 @@ Open: official releases ≤2026.10.22.0 still fail fresh pairs on the test accou
 2026-10-22 | Lane N server | rolled .22.2 back to .22.1 (~20:00Z, 503 storm); hotfix 2026.10.22.4 = base 08cc1630 + cherry-pick e62ea86f (commit ca25cdc2, branch hotfix/2026.10.22.4): create ack accepts launch_warnings (create_ack_invalid). 503 235->13/min; main undeployable until 118/storm fixed.
 2026-10-23 | Lane M 3a step 1b (edge) | d305acaf: edge admits endpoint routes on runtime carriers | Lane B: deploy this edge ONLY after a server containing 848cc948 (migration 120) is live.
 2026-10-23 | Lane I F17 | cff8779b e888e1da ecc03391 1417c8a1 | — | All F17 code on main; server image 2026.10.22.3 built but held (main undeployable after the 503 storm). Waits for Lane B: a good server build containing cff8779b; then Lane I device check (pbvm2 lanei-ct pairing failed twice on dev-e62ea86f, handed to Lane P).
+2026-10-23 | Lane S F19 | Design + rows (PLAN F19, CHECKLIST F19-01..15, C254-C261), user decision: Teams business features required at launch. Server first (Lane B deploys once prod is healthy), then cli/ (A), console/ (C). Lane K: roles as policy subjects + SSO guardrail in decide(); Lane O: Lane S adds only billing invoices/details/collection files.

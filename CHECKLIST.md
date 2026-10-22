@@ -714,6 +714,39 @@ Behaviour that only matters when platforms mix. The three cells are platform **p
 | C252 | `pb api-token list` | List API tokens | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
 | C253 | `pb api-token revoke` | Revoke an API token | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
 
+## F19. Teams for business: SSO, directory sync, roles, audit log, invoices
+
+| ID | Scenario | L | M | W | Evidence |
+|---|---|---|---|---|---|
+| F19-01 | Roles billing and auditor with the permission matrix in one place; every team endpoint and SQL role check uses it; `role:billing`/`role:auditor` policy subjects; change role in API, CLI and console. | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
+| F19-02 | SSO setup: team ↔ WorkOS organization, Admin Portal links for domain verification, SSO and directory sync (owners/admins only); domain, connection and directory state follow WorkOS events. | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
+| F19-03 | SSO sign-in: a verified-domain email signs in through the team's IdP (SP- and IdP-initiated, console and `pb login`); the SSO verification is recorded per team member; JIT provisioning when enabled. | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
+| F19-04 | Require SSO: review of who loses access before turning on; without a recent SSO sign-in the team is refused with `team_sso_required` everywhere (console, API, CLI, API tokens, new connections) while admitted connections continue; invitations limited to verified domains; owner and SSO-exempt members keep access, each bypass recorded; turning it off restores access. | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
+| F19-05 | Directory provisioning: directory users become members (or held invitations until first sign-in) with the role from the group mapping; seats added automatically; directory-managed members refuse manual edits; initial and daily reconcile. | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
+| F19-06 | Directory deprovisioning: a deleted or suspended directory user is removed within one event poll; active sessions end immediately, the member's team API tokens are revoked, shared machines leave the team; the owner is never removed; the personal account is untouched. | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
+| F19-07 | Audit log records every access and admin event of 'Recorded' with the documented shape (actor incl. API token and directory, target, result and denial reason, IP, user agent); never contents or secrets; append-only; retention per plan from config. | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
+| F19-08 | Audit log search and filter (actor, action, target, result, time, text) with cursor paging in API, console and `pb team activity`; owners, admins and auditors only for teams. | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
+| F19-09 | Audit log export as CSV and JSON for a time range and filters, streamed and bounded; the export is recorded. | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
+| F19-10 | Audit log streaming to HTTPS (NDJSON, signed, custom auth header) and S3-compatible storage: in order, at least once, retries, test event, status and failure email. | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
+| F19-11 | Invoices listed and downloadable in the console for personal and team workspaces; billing email, company name, address and tax ID edited in the console and printed on invoices. | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
+| F19-12 | Pay by invoice for eligible Team workspaces: switch on/off, invoice emailed with due date, overdue → grace → suspension → recovery (Stripe test clock). | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
+| F19-13 | Console: Security (SSO, domains, Require SSO with review, exemptions, bypass log), Directory (state, group → role mapping), roles in Members, Activity filters/export/streaming, Billing invoices/details/pay by invoice (scripted browser check). | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
+| F19-14 | CLI `pb team sso`, `pb team scim`, `pb team activity` (filters, export) and new roles in `pb team role` work end to end against the live server. | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
+| F19-15 | Admin reference `server/docs/teams-business.md`: roles matrix, SSO and SCIM setup per IdP through the Admin Portal, enforcement and break-glass, audit event catalog and shape, export and stream formats with signature verification, billing; a test keeps the roles table and event catalog equal to the code. | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
+
+**Commands**
+
+| ID | Command | Purpose | L | M | W | Evidence |
+|---|---|---|---|---|---|---|
+| C254 | `pb team sso status` | Show SSO connection, verified domains, enforcement and exemptions | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
+| C255 | `pb team sso setup` | Print (and open) the WorkOS Admin Portal link to verify a domain and connect an IdP | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
+| C256 | `pb team sso enforce` | Turn Require SSO on or off (shows who loses access first) | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
+| C257 | `pb team sso exempt` | Mark or unmark a member as SSO exempt (break-glass) | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
+| C258 | `pb team scim status` | Show directory sync state, last sync and counts | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
+| C259 | `pb team scim setup` | Print (and open) the Admin Portal link to connect a directory | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
+| C260 | `pb team scim map` | Map a directory group to a team role | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
+| C261 | `pb team activity export` | Export the audit log as CSV or JSON | [ ] | [ ] | n/a | W: Windows after launch (PLAN 1.1). |
+
 ---
 
 ## S2. Marketing site
