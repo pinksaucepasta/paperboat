@@ -488,8 +488,6 @@ func safeEnvironmentVariableCommandError(err error) error {
 		return envCommandError(environmentmanager.ErrVaultNotSetUp, envNotSetUpMessage)
 	case onlyEnvironmentFailureLeaves(err, func(leaf error) bool { return errors.Is(leaf, environmentmanager.ErrNoRotationInProgress) }):
 		return envCommandError(err, "No personal ENV key rotation is in progress; nothing was changed.")
-	case onlyEnvironmentFailureLeaves(err, func(leaf error) bool { return errors.Is(leaf, config.ErrSecretNotFound) }):
-		return envCommandError(err, "This machine holds no ENV vault keys; run `pb env vault unlock` (or `pb env vault init` if your account has no vault yet)")
 	case onlyEnvironmentFailureLeaves(err, func(leaf error) bool { return errors.Is(leaf, environmentmanager.ErrVaultLocked) }):
 		return envCommandError(err, "ENV vault is locked; run `pb env vault unlock` before changing variables")
 	case onlyEnvironmentFailureLeaves(err, func(leaf error) bool { return errors.Is(leaf, environmentmanager.ErrVaultChanged) }):

@@ -671,10 +671,3 @@ func TestRotationCancelWithNothingToCancelIsExplained(t *testing.T) {
 		t.Fatalf("message=%q", err.Error())
 	}
 }
-
-func TestEnvironmentCommandWithoutVaultCustodyNamesUnlock(t *testing.T) {
-	got := safeEnvironmentVariableCommandError(config.ErrSecretNotFound)
-	if !errors.Is(got, config.ErrSecretNotFound) || !strings.Contains(got.Error(), "pb env vault unlock") {
-		t.Fatalf("missing vault custody = %v, want unlock guidance", got)
-	}
-}
