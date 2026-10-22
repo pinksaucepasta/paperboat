@@ -13,7 +13,7 @@ import (
 	"github.com/pressly/goose/v3"
 )
 
-// Migration 121 turns team machine grants and allow_private_access into policy version 1. Every
+// Migration 128 turns team machine grants and allow_private_access into policy version 1. Every
 // member × machine × capability answer, and private access per port, must be the same after.
 func TestWorkspacePolicyMigrationKeepsAccess(t *testing.T) {
 	dsn := os.Getenv("PAPERBOAT_MIGRATION_TEST_DATABASE_DSN")
@@ -42,7 +42,7 @@ func TestWorkspacePolicyMigrationKeepsAccess(t *testing.T) {
 	if err = goose.SetDialect("postgres"); err != nil {
 		t.Fatal(err)
 	}
-	if err = goose.UpToContext(ctx, store.SQL(), migrationsDir, 120); err != nil {
+	if err = goose.UpToContext(ctx, store.SQL(), migrationsDir, 127); err != nil {
 		t.Fatal(err)
 	}
 	s := strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
@@ -81,7 +81,7 @@ func TestWorkspacePolicyMigrationKeepsAccess(t *testing.T) {
 FROM paperboat.users a CROSS JOIN paperboat.user_machines m CROSS JOIN unnest(ARRAY['terminal','exec','managed_ssh','files','preview_manage','tunnel_manage','private_access']) cap WHERE a.id LIKE '%'||$2`, team, s)
 	exec(`CREATE TEMP TABLE before_ports AS SELECT a.id AS actor, m.id AS machine, port, EXISTS(SELECT 1 FROM paperboat.machine_service_authorities(a.id,m.id,port) WHERE source_kind='automatic' AND team_id=$1) AS allowed
 FROM paperboat.users a CROSS JOIN paperboat.user_machines m CROSS JOIN unnest(ARRAY[22,1023,1024,5432,65535]) port WHERE a.id LIKE '%'||$2`, team, s)
-	if err = goose.UpToContext(ctx, store.SQL(), migrationsDir, 121); err != nil {
+	if err = goose.UpToContext(ctx, store.SQL(), migrationsDir, 128); err != nil {
 		t.Fatal(err)
 	}
 	var changed []string
