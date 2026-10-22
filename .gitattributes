@@ -1,0 +1,2 @@
+# Checkouts use LF on every platform: tests parse README/golden files and signed content byte for byte.
+* text=auto eol=lf
