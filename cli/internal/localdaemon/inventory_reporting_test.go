@@ -25,13 +25,13 @@ func TestInventoryCompletionOutageRetainsProjectionAndReportsOncePerOwner(t *tes
 			_, _ = w.Write([]byte(`{"data":{"items":[{"id":"machine_1","alias":"studio","environment_id":"environment_1"}],"pagination":{"limit":200,"offset":0,"total":1,"next_offset":null}}}`))
 		case "/v1/previews":
 			_, _ = w.Write([]byte(`{"data":{"items":[]}}`))
-		case "/v1/machines/machine_1/terminal-sessions":
+		case "/v1/terminal-sessions":
 			if outage.Load() {
 				w.WriteHeader(503)
 				_, _ = w.Write([]byte(`{"error":{"code":"unavailable","message":"PRIVATE"}}`))
 				return
 			}
-			_, _ = w.Write([]byte(`{"data":{"items":[],"pagination":{"limit":200,"offset":0,"total":0,"next_offset":null}}}`))
+			_, _ = w.Write([]byte(`{"data":{"sessions":[],"pagination":{"limit":200,"offset":0,"total":0,"next_offset":null}}}`))
 		default:
 			http.NotFound(w, r)
 		}

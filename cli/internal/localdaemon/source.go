@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -133,47 +134,26 @@ func (s AuthenticatedMachineSource) ListCompletionItems(ctx context.Context, mac
 		return nil, err
 	}
 	items = append(items, previews...)
-	const maximumConcurrentSessionLists = 8
-	var sessionMu sync.Mutex
-	var sessionWG sync.WaitGroup
-	var sessionErr error
-	sem := make(chan struct{}, maximumConcurrentSessionLists)
-	for _, machine := range machines {
-		machine := machine
-		sessionWG.Add(1)
-		go func() {
-			defer sessionWG.Done()
-			select {
-			case sem <- struct{}{}:
-				defer func() { <-sem }()
-			case <-ctx.Done():
-				return
-			}
-			sessions, listErr := client.ListUserMachineTerminalSessions(ctx, machine.ID)
-			if listErr != nil {
-				sessionMu.Lock()
-				if sessionErr == nil {
-					sessionErr = inventorySourceFailure("completion_list", listErr)
-				}
-				sessionMu.Unlock()
-				return
-			}
-			values := make([]localapi.CompletionItem, 0, len(sessions)*2)
-			for _, session := range sessions {
-				description := completionDescription(session.Name, session.State)
-				values = append(values, localapi.CompletionItem{Kind: "session", Value: session.ID, Description: description, EnvironmentID: machine.EnvironmentID})
-				if session.Name != "" && session.Name != session.ID {
-					values = append(values, localapi.CompletionItem{Kind: "session", Value: session.Name, Description: description, EnvironmentID: machine.EnvironmentID})
-				}
-			}
-			sessionMu.Lock()
-			items = append(items, values...)
-			sessionMu.Unlock()
-		}()
+	// One catalog page for the caller's own sessions on every machine, stored rows only: listing
+	// each machine separately cost N requests per daemon per refresh (O(N²) across an account).
+	sessions, err := client.SharedTerminalSessionsFiltered(ctx, url.Values{"owner": {"mine"}, "live": {"false"}})
+	if err != nil {
+		return nil, inventorySourceFailure("completion_list", err)
 	}
-	sessionWG.Wait()
-	if ctx.Err() != nil {
-		return nil, ctx.Err()
+	environments := make(map[string]string, len(machines))
+	for _, machine := range machines {
+		environments[machine.ID] = machine.EnvironmentID
+	}
+	for _, session := range sessions {
+		environment, listed := environments[session.Target.MachineID]
+		if !listed {
+			continue
+		}
+		description := completionDescription(session.Name, session.State)
+		items = append(items, localapi.CompletionItem{Kind: "session", Value: session.ID, Description: description, EnvironmentID: environment})
+		if session.Name != "" && session.Name != session.ID {
+			items = append(items, localapi.CompletionItem{Kind: "session", Value: session.Name, Description: description, EnvironmentID: environment})
+		}
 	}
 	sort.Slice(items, func(left, right int) bool {
 		if items[left].Kind != items[right].Kind {
@@ -187,7 +167,7 @@ func (s AuthenticatedMachineSource) ListCompletionItems(ctx context.Context, mac
 	if len(items) > maximumCompletionItems {
 		items = items[:maximumCompletionItems]
 	}
-	return items, sessionErr
+	return items, nil
 }
 
 func completionDescription(values ...string) string {

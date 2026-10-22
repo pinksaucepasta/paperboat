@@ -40,6 +40,7 @@ type SharedTerminalSession struct {
 	Machine           string `json:"machine"`
 	ID                string `json:"id"`
 	Name              string `json:"name"`
+	State             string `json:"state"`
 	Target            struct {
 		Kind              string `json:"kind"`
 		ID                string `json:"id"`

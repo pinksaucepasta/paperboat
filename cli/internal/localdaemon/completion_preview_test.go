@@ -15,9 +15,9 @@ func TestCompletionInventoryReadsCanonicalPreviewPages(t *testing.T) {
 	now := time.Now().UTC()
 	calls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/v1/machines/machine_owner/terminal-sessions" {
+		if r.URL.Path == "/v1/terminal-sessions" {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"items": []any{}, "pagination": map[string]any{"limit": 200, "offset": 0, "total": 0, "next_offset": nil}}})
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"sessions": []any{}, "pagination": map[string]any{"limit": 200, "offset": 0, "total": 0, "next_offset": nil}}})
 			return
 		}
 		if r.URL.Path != "/v1/previews" {
@@ -42,5 +42,48 @@ func TestCompletionInventoryReadsCanonicalPreviewPages(t *testing.T) {
 	}
 	if calls != 2 || len(items) != 3 || items[1].Kind != "preview" || items[1].Value != "preview_first" || items[2].Value != "preview_second" || items[1].EnvironmentID != "environment_owner" {
 		t.Fatalf("preview completion did not consume canonical pages: calls=%d items=%v", calls, items)
+	}
+}
+
+// Session completions come from one catalog request for the caller's own sessions without live
+// host metadata, never from a request per machine.
+func TestCompletionInventoryListsSessionsInOneCatalogRequest(t *testing.T) {
+	catalogRequests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/previews":
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": api.PreviewLeasePage{}})
+		case "/v1/terminal-sessions":
+			catalogRequests++
+			if query := r.URL.Query(); query.Get("owner") != "mine" || query.Get("live") != "false" {
+				t.Errorf("catalog query %q, want owner=mine and live=false", r.URL.RawQuery)
+			}
+			session := func(id, name, machine string) map[string]any {
+				return map[string]any{"id": id, "name": name, "state": "running", "target": map[string]any{"kind": "machine", "id": machine, "machine_id": machine}}
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"sessions": []any{
+				session("pts_a", "build", "machine_a"), session("pts_b", "pts_b", "machine_b"), session("pts_x", "other", "machine_unlisted"),
+			}, "pagination": map[string]any{"limit": 200, "offset": 0, "total": 3, "next_offset": nil}}})
+		default:
+			t.Errorf("per-machine or unexpected request %s", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	source := AuthenticatedMachineSource{ServerURL: server.URL, Auth: &rotatingAuthSource{}, HTTPClient: server.Client()}
+	items, err := source.ListCompletionItems(context.Background(), []api.UserMachine{{ID: "machine_a", EnvironmentID: "env_a"}, {ID: "machine_b", EnvironmentID: "env_b"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sessions []string
+	for _, item := range items {
+		if item.Kind == "session" {
+			sessions = append(sessions, item.EnvironmentID+"/"+item.Value)
+		}
+	}
+	want := []string{"env_a/build", "env_a/pts_a", "env_b/pts_b"}
+	if catalogRequests != 1 || len(sessions) != len(want) || sessions[0] != want[0] || sessions[1] != want[1] || sessions[2] != want[2] {
+		t.Fatalf("catalog requests=%d sessions=%v, want 1 and %v", catalogRequests, sessions, want)
 	}
 }
