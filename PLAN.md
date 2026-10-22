@@ -694,6 +694,14 @@ parts (no per-role login lists, no conditions language).
   losing access (removed, demoted, a rule change) takes it from the token at once. Same in
   personal and team workspaces. Tokens are not policy subjects; machines are identified by
   tags. OAuth-style clients for automation are not in v1.
+- **Using a token with `pb`** (F18-06): `pb login --api-token-file <f>` (or the token on
+  stdin) exchanges the token for a token-backed CLI session (`POST /v1/auth/api-token-sessions`):
+  an ordinary CLI client session of the creator that carries the token's id, cannot outlive the
+  token and ends when the token is revoked. Every machine authorization of such a session
+  (terminal, exec, managed SSH, files: `usermachines.getMachineForCapability`) also checks the
+  token's scope with one SQL function, `api_token_scope_allows`, over the scope's rows stored
+  at token creation (machines by ID, tags and every-machine resolved per request, like policy
+  rules). Outside its scope a request is refused with `outside_token_scope`.
 
 #### Evaluation (one function, server side)
 
