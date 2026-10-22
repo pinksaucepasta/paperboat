@@ -10,6 +10,7 @@ import (
 	"github.com/pinksaucepasta/paperboat-server/internal/admission"
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
 	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat-server/internal/machineevents"
 	"github.com/pinksaucepasta/paperboat-server/internal/mint"
 	"github.com/pinksaucepasta/paperboat-server/internal/teaminbox"
 	"github.com/pinksaucepasta/paperboat-server/internal/teams"
@@ -351,6 +352,11 @@ func (s *Service) createSharedTerminalAccessSession(ctx context.Context, in dbsq
 		}
 		in.CredentialKind = string(machineCredentialSigned)
 		if err := tx.Queries().CreateUserMachineAccessSession(ctx, in); err != nil {
+			return err
+		}
+		// Neither endpoint has the other in its signed peer network yet: wake both refreshes now
+		// instead of leaving the join to wait for the next periodic refresh.
+		if err := machineevents.Publish(ctx, tx, []string{in.UserMachineID, sourceMachineID}, machineevents.TopicPeerNetwork); err != nil {
 			return err
 		}
 		return teams.AuditTx(ctx, tx, in.UserID, want.TeamID, "terminal_session_access_authorized", in.ID, map[string]any{"terminal_session_id": want.SessionID, "role": want.Role, "access_session_id": in.ID})

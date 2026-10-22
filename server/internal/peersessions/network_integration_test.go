@@ -459,9 +459,21 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	peerNetworkGenerations := func() (host, source int64) {
+		t.Helper()
+		if err := store.SQL().QueryRowContext(ctx, `SELECT coalesce((SELECT generation FROM paperboat.machine_topic_generations WHERE machine_id=$1 AND topic='peer_network'),0),coalesce((SELECT generation FROM paperboat.machine_topic_generations WHERE machine_id=$2 AND topic='peer_network'),0)`, machineID, "network_shared_source_"+suffix).Scan(&host, &source); err != nil {
+			t.Fatal(err)
+		}
+		return host, source
+	}
+	hostBefore, sourceBefore := peerNetworkGenerations()
 	viewerTerminalDescriptor, err := machineService.ConnectSharedTerminalSession(ctx, sharedUser, "network_shared_source_"+suffix, sharedCLI, ownerSharedTerminalID)
 	if err != nil || !viewerTerminalDescriptor.Connectable {
 		t.Fatalf("viewer terminal connectable=%v status=%q reason=%q err=%v", viewerTerminalDescriptor.Connectable, viewerTerminalDescriptor.Status, viewerTerminalDescriptor.Reason, err)
+	}
+	// A cross-account join is new to both endpoints' peer networks: both must refresh at once, not on their timer.
+	if hostAfter, sourceAfter := peerNetworkGenerations(); hostAfter <= hostBefore || sourceAfter <= sourceBefore {
+		t.Fatalf("shared terminal join peer_network generations host %d->%d source %d->%d; both endpoints must be woken", hostBefore, hostAfter, sourceBefore, sourceAfter)
 	}
 	if viewerTerminalDescriptor.MachineGeneration < 1 {
 		t.Fatalf("shared terminal descriptor machine_generation = %d; the CLI refuses a shared descriptor without one", viewerTerminalDescriptor.MachineGeneration)
