@@ -13,11 +13,18 @@ func terminalSessionCatalog(service *usermachines.Service) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		query, valid := readInventoryQuery(w, r, []string{"running", "closed", "unavailable"}, true)
+		query, valid := readInventoryQuery(w, r, []string{"running", "closed", "unavailable"}, true, "live")
 		if !valid {
 			return
 		}
-		items, total, err := service.TerminalSessionInventory(personalWorkspaceContext(r.Context()), account, usermachines.InventoryOptions{Limit: query.Limit, Offset: query.Offset, Q: query.Q, State: query.State, Owner: query.Owner, Closed: query.Closed})
+		// live=false returns the stored rows without probing each host (shell completion
+		// refreshes); authorization is unchanged.
+		live := r.URL.Query().Get("live")
+		if live != "" && live != "true" && live != "false" {
+			writeError(w, r, 400, "invalid_inventory_query", "Use one valid limit (1–200), nonnegative offset, and supported inventory filters.")
+			return
+		}
+		items, total, err := service.TerminalSessionInventory(personalWorkspaceContext(r.Context()), account, usermachines.InventoryOptions{Limit: query.Limit, Offset: query.Offset, Q: query.Q, State: query.State, Owner: query.Owner, Closed: query.Closed, WithoutLiveMetadata: live == "false"})
 		if err != nil {
 			writeError(w, r, 500, "internal_error", "Terminal sessions could not be loaded.", err)
 			return

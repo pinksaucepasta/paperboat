@@ -17118,6 +17118,16 @@
             "schema": {
               "type": "boolean"
             }
+          },
+          {
+            "name": "live",
+            "in": "query",
+            "required": false,
+            "description": "false returns the stored sessions without probing each host for live metadata (current directory, foreground process, participants). Authorization is unchanged.",
+            "schema": {
+              "type": "boolean",
+              "default": true
+            }
           }
         ]
       }

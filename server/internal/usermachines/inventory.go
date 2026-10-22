@@ -14,6 +14,9 @@ type InventoryOptions struct {
 	Limit, Offset   int
 	Q, State, Owner string
 	Closed          *bool
+	// WithoutLiveMetadata skips the terminal catalog's live host enrichment (current directory,
+	// foreground process, participants) for callers that need only the stored rows.
+	WithoutLiveMetadata bool
 }
 
 // ListInventory selects the authorized filtered page before describing runtime access.

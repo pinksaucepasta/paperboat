@@ -285,5 +285,19 @@ func TestPostgresTerminalLiveIdentificationAuthorization(t *testing.T) {
 			t.Fatal("slow page exceeded bounded caller deadline")
 		}
 	}
-
+	// Shell completion asks for the stored rows only (live=false): the same sessions, no host probe,
+	// so a slow host costs nothing and the page returns at once.
+	beforeCalls = runtime.calls.Load()
+	stored, total, err := service.TerminalSessionInventory(ctx, owner, InventoryOptions{Limit: 20, Owner: "mine", WithoutLiveMetadata: true})
+	if err != nil || total != 9 || len(stored) != 9 {
+		t.Fatalf("stored page without live metadata: %+v total%d err%v", stored, total, err)
+	}
+	if probes := runtime.calls.Load() - beforeCalls; probes != 0 {
+		t.Fatalf("a page without live metadata probed the runtime %d times", probes)
+	}
+	for _, item := range stored {
+		if item.Target.MachineID != machine || item.ID == "" {
+			t.Fatalf("stored page lost the session identity: %+v", item)
+		}
+	}
 }

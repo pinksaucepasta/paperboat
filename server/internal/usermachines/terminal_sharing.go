@@ -218,7 +218,7 @@ func (s *Service) terminalSessionInventory(ctx context.Context, account, exactSe
 		authorized = append(authorized, item)
 	}
 	out = authorized
-	if exactSession == "" {
+	if exactSession == "" && !opts.WithoutLiveMetadata {
 		for index, observed := range s.describeTerminalPage(ctx, account, out) {
 			if observed != nil {
 				out[index] = *observed
