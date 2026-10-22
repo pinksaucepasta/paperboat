@@ -44,6 +44,11 @@ export type BrowserTerminalAPI = {
     id: string,
     request: Record<string, unknown>,
   ): Promise<{ result?: unknown; error?: string; message?: string }>
+  /** Inspector channels only (`mode: "inspector"`): one daemon inspector API call. */
+  inspectorRequest(
+    id: string,
+    payload: Record<string, unknown>,
+  ): Promise<{ result?: unknown; error?: string; message?: string }>
   leave(id: string): void
   dispose(): void
 }
@@ -54,7 +59,7 @@ export type BrowserTerminalAPI = {
 let runtimePromise: Promise<BrowserTerminalAPI> | undefined
 
 async function startRuntime(): Promise<BrowserTerminalAPI> {
-  const worker = new Worker(`/terminal/browser-terminal-worker.js?v=20261008-conflict-details1`, {
+  const worker = new Worker(`/terminal/browser-terminal-worker.js?v=20261022-inspector1`, {
     type: "module",
     name: "paperboat-terminal",
   })
@@ -195,6 +200,12 @@ async function startRuntime(): Promise<BrowserTerminalAPI> {
       if (bytes > 48 << 10)
         return Promise.resolve({ error: "file_limit", message: "The file request exceeds the upload limit." })
       return call("fileRequest", [id, request], bytes)
+    },
+    inspectorRequest: (id, payload) => {
+      const bytes = new TextEncoder().encode(JSON.stringify(payload)).byteLength
+      if (bytes > 48 << 10)
+        return Promise.resolve({ error: "inspector_limit", message: "The inspector request is too large." })
+      return call("inspectorRequest", [id, payload], bytes)
     },
     leave: (id) => {
       const callbackID = connections.get(id)

@@ -1,6 +1,6 @@
 "use client"
 
-import { CopyIcon, EyeIcon, StopIcon } from "@phosphor-icons/react"
+import { CopyIcon, EyeIcon, MagnifyingGlassIcon, StopIcon } from "@phosphor-icons/react"
 import { useQueryClient } from "@tanstack/react-query"
 import { useDeferredValue, useState } from "react"
 import { toast } from "sonner"
@@ -225,6 +225,12 @@ function Row({ preview, now, machineName }: { preview: Preview; now: number; mac
           label: "Copy address",
           icon: CopyIcon,
           onSelect: () => void copyWithToast(preview.endpoint, "Address"),
+        },
+        {
+          kind: "item",
+          label: "Inspect",
+          icon: MagnifyingGlassIcon,
+          href: `/previews/${encodeURIComponent(preview.id)}/inspect`,
         },
         { kind: "separator" },
         { kind: "item", label: "Stop preview", icon: StopIcon, destructive: true, onSelect: () => setStopping(true) },
