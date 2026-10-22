@@ -874,8 +874,10 @@ terminal sessions (`pb session share`, viewer/interactive).
 - S3-05: User and operator docs (`cli/docs`, `server/docs`, READMEs) match behaviour (each feature's docs fixed when the feature is verified).
 - S3-06: Operator admin frontend: **USER DECIDES**.
 
-### 3a. Shared endpoint engine: server and edge design (Lane B, awaiting approval, no code yet)
+### 3a. Shared endpoint engine: server and edge design (Lane M, approved 2026-10-22)
 
+Approved (coordinator, user decision 2026-10-20; 2026-10-22): built now as written by Lane M end to end (server, edge, CLI
+carriers, deletions), server-first in small deployable steps; Lane B deploys. Rows: F7-03, F7-04, F7-05, F8-06 on Linux.
 Decision (user, 2026-10-20): previews and tunnels run on ONE engine after Linux, before macOS; the UX stays distinct
 (tunnels like Cloudflare Tunnel: persistent, named, many routes and protocols; previews like ngrok: one command, ephemeral,
 one URL). Both-edges serving is a property of the engine, not of either feature.
@@ -2501,3 +2503,4 @@ Mac-only proofs still open: (1) the user daemon is a LaunchAgent in gui/<uid>: d
 2026-10-22 | Lane K F18 | Design + rows (PLAN F18, CHECKLIST F18-01..10, C244-C253), moved from WHITEBOARD; every plan (coordinator 2026-10-22). Server first: Lane K writes server/+shared/ changes, Lane B please deploy each server build Lane K logs here; then cli/, console/.
 2026-10-22 | Lane I F17 design | — | — | Option B approved. Touches server/internal/browserterminal, inspectaccess, httpapi + one migration (Lane B: please deploy when pushed), cli hostruntime server/auth/runtime + cmd/browserterminal-wasm (Lane A), console previews (Lane C).
 2026-10-22 | Lane C | pushed e0bdc406 (team_suspended wording, F12-06 console), e1ac856a (quick terminal dock no remount; socket half of check-terminal-dock.js waits Lane A daemon fix), f9a733a4 (pricing) | F3-08 notes handed to Lane N. Lane I: Lane C is editing console/components/team/*, billing and machine-shell next (Teams upgrade/trial prompt after Lane B deploys); previews/ is yours, tell me here before touching lib/api.ts.
+2026-10-22 | Lane M 3a | 3a approved, Lane M owns it end to end (server/edge/CLI in small server-first steps, Lane B deploys each). Rows: F7-03/04/05, F8-06.
