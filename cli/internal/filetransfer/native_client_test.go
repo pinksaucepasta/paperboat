@@ -65,7 +65,7 @@ func TestNativeClientResumesLostCommitAndRetainsBatchAcrossOutage(t *testing.T) 
 			var mu sync.Mutex
 			var content []byte
 			var offsets []int64
-			lost, deletes := false, 0
+			lost, deletes, heads := false, 0, 0
 			unavailable := outage
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				mu.Lock()
@@ -78,6 +78,7 @@ func TestNativeClientResumesLostCommitAndRetainsBatchAcrossOutage(t *testing.T) 
 				case r.Method == http.MethodPost && r.URL.Path == "/v1/file-transfers":
 					_ = json.NewEncoder(w).Encode(Batch{BatchID: manifest.BatchID, Transfers: []Manifest{manifest}})
 				case r.Method == http.MethodHead:
+					heads++
 					w.Header().Set("Upload-Offset", strconv.Itoa(len(content)))
 				case r.Method == http.MethodPatch:
 					offset, _ := strconv.ParseInt(r.Header.Get("Upload-Offset"), 10, 64)
@@ -169,6 +170,11 @@ func TestNativeClientResumesLostCommitAndRetainsBatchAcrossOutage(t *testing.T) 
 			}
 			if !outage && (len(offsets) != 3 || offsets[1] != protocol.FileTransferChunkBytes) {
 				t.Fatalf("lost commit resent bytes: %v", offsets)
+			}
+			// The offset is asked at the start and after the lost response only;
+			// each successful PATCH returns the next one.
+			if !outage && heads != 2 {
+				t.Fatalf("offset queried %d times for 3 chunks", heads)
 			}
 		})
 	}

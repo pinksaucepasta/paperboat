@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -41,13 +42,19 @@ func NewNativeClient(endpoint string, auth Auth, binding Binding, open func(cont
 func (c *Client) uploadNative(ctx context.Context, manifest Manifest, source Source) error {
 	state := newNativeRecovery(ctx)
 	ctx = context.WithValue(ctx, nativeRecoveryKey{}, state)
-	var previous int64 = -1
+	// A successful PATCH returns the committed offset, so the next chunk follows
+	// without a HEAD; the offset is asked again only after a failure.
+	var previous, committed int64 = -1, -1
 	for attempt := 0; ; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return callerContextError(ctx)
 		}
 		requestCtx, requestCancel := state.requestContext(ctx)
-		offset, err := c.Offset(requestCtx, manifest.TransferID)
+		offset, err := committed, error(nil)
+		if offset < 0 {
+			offset, err = c.Offset(requestCtx, manifest.TransferID)
+		}
+		committed = -1
 		if err == nil {
 			if offset == source.Size {
 				requestCancel()
@@ -61,12 +68,13 @@ func (c *Client) uploadNative(ctx context.Context, manifest Manifest, source Sou
 				requestCancel()
 				return errors.New("committed transfer offset did not advance")
 			}
-			err = c.patchNative(requestCtx, manifest.TransferID, offset, source)
+			committed, err = c.patchNative(requestCtx, manifest.TransferID, offset, source)
 			if err == nil {
 				requestCancel()
 				previous = offset
 				continue
 			}
+			committed = -1
 		}
 		requestCancel()
 		if !retryableTransferFailure(err) {
@@ -88,18 +96,29 @@ func (c *Client) uploadNative(ctx context.Context, manifest Manifest, source Sou
 	}
 }
 
-func (c *Client) patchNative(ctx context.Context, id string, offset int64, source Source) error {
+// patchNative sends the chunk at offset and returns the receiver's committed offset.
+func (c *Client) patchNative(ctx context.Context, id string, offset int64, source Source) (int64, error) {
 	if _, err := source.Reader.Seek(offset, io.SeekStart); err != nil {
-		return &nativeSourceFailure{err}
+		return 0, &nativeSourceFailure{err}
 	}
 	chunk := make([]byte, min(source.Size-offset, int64(protocol.FileTransferChunkBytes)))
 	if _, err := io.ReadFull(source.Reader, chunk); err != nil {
-		return &nativeSourceFailure{err}
+		return 0, &nativeSourceFailure{err}
 	}
 	digest := sha256.Sum256(chunk)
 	headers := http.Header{"Upload-Digest": {"sha256=" + hex.EncodeToString(digest[:])}}
 	response, err := c.requestWithBody(ctx, http.MethodPatch, c.Endpoint+"/"+id+"/content", operationID("patch", id), contentType, offset, func() (io.Reader, error) { return bytes.NewReader(chunk), nil }, headers)
-	return errors.Join(err, closeResponseBody(response))
+	if err != nil {
+		return 0, errors.Join(err, closeResponseBody(response))
+	}
+	committed, parseErr := strconv.ParseInt(response.Header.Get("Upload-Offset"), 10, 64)
+	if closeErr := closeResponseBody(response); closeErr != nil {
+		return 0, closeErr
+	}
+	if parseErr != nil {
+		return 0, &Error{Code: "http_error", Message: "helper returned invalid Upload-Offset", cause: parseErr}
+	}
+	return committed, nil
 }
 
 // SendBatch also resumes an existing batch. Its ID and source manifests must be

@@ -112,6 +112,7 @@ func TestNativeTransferReauthorizesLostConnectionWithoutNewBatch(t *testing.T) {
 						connection.Close()
 						return
 					}
+					w.Header().Set("Upload-Offset", strconv.Itoa(len(content)))
 					w.WriteHeader(204)
 				case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/complete"):
 					manifest.CommittedOffset = int64(len(content))
