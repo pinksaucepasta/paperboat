@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/environmentmanager"
 	"github.com/pinksaucepasta/paperboat/internal/prompt"
 	"github.com/pinksaucepasta/paperboat/internal/selector"
@@ -484,6 +485,8 @@ func safeEnvironmentVariableCommandError(err error) error {
 		return envCommandError(err, "ENV team access needs a key grant; ask a surviving team member to regrant access, then run `pb env grants sync`")
 	case onlyEnvironmentFailureLeaves(err, func(leaf error) bool { return errors.Is(leaf, environmentmanager.ErrNoRotationInProgress) }):
 		return envCommandError(err, "No personal ENV key rotation is in progress; nothing was changed.")
+	case onlyEnvironmentFailureLeaves(err, func(leaf error) bool { return errors.Is(leaf, config.ErrSecretNotFound) }):
+		return envCommandError(err, "This machine holds no ENV vault keys; run `pb env vault unlock` (or `pb env vault init` if your account has no vault yet)")
 	case onlyEnvironmentFailureLeaves(err, func(leaf error) bool { return errors.Is(leaf, environmentmanager.ErrVaultLocked) }):
 		return envCommandError(err, "ENV vault is locked; run `pb env vault unlock` before changing variables")
 	case onlyEnvironmentFailureLeaves(err, func(leaf error) bool { return errors.Is(leaf, environmentmanager.ErrVaultChanged) }):

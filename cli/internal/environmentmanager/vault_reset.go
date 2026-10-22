@@ -292,6 +292,10 @@ func (v PasswordVault) AbortPersonalRotation(ctx context.Context) (resultErr err
 	}
 	defer func() { resultErr = joinUnlockError(resultErr, unlock) }()
 	local, err := v.Store.LoadPasswordVault(v.Issuer, v.AccountID)
+	if vaultCredentialAbsentOnly(err) {
+		// Rotation staging lives in local custody: none here means nothing to cancel.
+		return ErrNoRotationInProgress
+	}
 	if err != nil {
 		return err
 	}

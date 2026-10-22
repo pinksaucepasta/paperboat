@@ -6,11 +6,13 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/environmente2ee"
 )
 
@@ -296,5 +298,14 @@ func TestAbortPersonalRotationWithoutRotationSaysNothingToCancel(t *testing.T) {
 	err := v.AbortPersonalRotation(context.Background())
 	if !errors.Is(err, ErrNoRotationInProgress) || errors.Is(err, ErrVaultPending) {
 		t.Fatalf("cancel with no rotation = %v, want ErrNoRotationInProgress", err)
+	}
+}
+
+func TestAbortPersonalRotationOnAMachineWithoutCustodySaysNothingToCancel(t *testing.T) {
+	_, control, _ := newVaultScopesFixture(t)
+	store := config.ProfileStore{Path: filepath.Join(t.TempDir(), "profiles.json"), Secrets: &vaultScopesSecretStore{}}
+	v := PasswordVault{WorkspaceID: "personal", Client: control, Store: store, Issuer: control.issuer, AccountID: control.account}
+	if err := v.AbortPersonalRotation(context.Background()); !errors.Is(err, ErrNoRotationInProgress) {
+		t.Fatalf("cancel without local vault custody = %v, want ErrNoRotationInProgress", err)
 	}
 }
