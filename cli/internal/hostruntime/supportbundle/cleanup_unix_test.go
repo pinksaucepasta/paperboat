@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"syscall"
 	"testing"
 )
@@ -30,7 +31,12 @@ func TestWriteRetainsActualPublishAndCleanupFailuresThenRecovers(t *testing.T) {
 		return syscall.EIO
 	}
 	_, err = b.Write(t.Context(), p, output)
-	if !errors.Is(err, syscall.EIO) || !errors.Is(err, syscall.EISDIR) {
+	// unlink(2) of a directory fails with EISDIR on Linux and EPERM on macOS.
+	cleanupCause := syscall.EISDIR
+	if runtime.GOOS == "darwin" {
+		cleanupCause = syscall.EPERM
+	}
+	if !errors.Is(err, syscall.EIO) || !errors.Is(err, cleanupCause) {
 		t.Fatal("lost actual cleanup cause")
 	}
 	if _, err := os.Stat(output); !errors.Is(err, os.ErrNotExist) {
