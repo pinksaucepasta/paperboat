@@ -81,8 +81,26 @@ type RunningOriginStreams struct {
 	transport *OriginHTTPTransport
 }
 
+// StreamSource yields a carrier's inbound streams: the carrier itself, or one route's share of a
+// carrier whose streams are routed by a hub (the agent's runtime carrier, PLAN 3a).
+type StreamSource interface {
+	AcceptStream(context.Context) (*connector.DataCarrierStream, connector.StreamOpen, error)
+}
+
 func (f OriginStreamForwarder) Start(parent context.Context, active *connector.ActiveDataCarrier, routes []hoststate.TunnelConfigRoute) (*RunningOriginStreams, error) {
-	if parent == nil || active == nil || f.Transport == nil || len(routes) == 0 {
+	if active == nil {
+		return nil, ErrInvalidConfig
+	}
+	identity, ok := active.Identity()
+	if !ok {
+		return nil, ErrInvalidConfig
+	}
+	return f.StartFrom(parent, active, identity, routes)
+}
+
+// StartFrom serves routes from source, whose streams belong to the carrier with identity.
+func (f OriginStreamForwarder) StartFrom(parent context.Context, source StreamSource, identity connector.DataCarrierIdentity, routes []hoststate.TunnelConfigRoute) (*RunningOriginStreams, error) {
+	if parent == nil || source == nil || f.Transport == nil || len(routes) == 0 {
 		return nil, ErrInvalidConfig
 	}
 	byID := make(map[string]hoststate.TunnelConfigRoute, len(routes))
@@ -94,22 +112,18 @@ func (f OriginStreamForwarder) Start(parent context.Context, active *connector.A
 	if len(byID) == 0 {
 		return nil, ErrInvalidConfig
 	}
-	identity, ok := active.Identity()
-	if !ok {
-		return nil, ErrInvalidConfig
-	}
 	ctx, cancel := context.WithCancel(parent)
 	transport := f.Transport.newGeneration()
 	running := &RunningOriginStreams{cancel: cancel, done: make(chan struct{}), transport: transport}
 	go func() {
-		f.serve(ctx, active, identity, byID, running, transport)
+		f.serve(ctx, source, identity, byID, running, transport)
 		running.wg.Wait()
 		close(running.done)
 	}()
 	return running, nil
 }
 
-func (f OriginStreamForwarder) serve(ctx context.Context, active *connector.ActiveDataCarrier, identity connector.DataCarrierIdentity, routes map[string]hoststate.TunnelConfigRoute, running *RunningOriginStreams, transport *OriginHTTPTransport) {
+func (f OriginStreamForwarder) serve(ctx context.Context, active StreamSource, identity connector.DataCarrierIdentity, routes map[string]hoststate.TunnelConfigRoute, running *RunningOriginStreams, transport *OriginHTTPTransport) {
 	permits := make(map[string]chan struct{}, len(routes))
 	for id, route := range routes {
 		permits[id] = make(chan struct{}, max(1, int(route.MaxConcurrentStreams)))

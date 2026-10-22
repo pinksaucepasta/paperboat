@@ -204,6 +204,9 @@ func (o *HTTPDispatchReadinessObserver) readinessRequest(ctx context.Context, me
 		return Lease{}, readinessFailed(method, "response_body", response.StatusCode, ErrDispatchUnavailable, err)
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		if response.StatusCode == http.StatusConflict && previewErrorCode(data) == "preview_attachment_not_ready" {
+			return Lease{}, readinessFailed(method, "http_status", response.StatusCode, ErrDispatchNotServed, nil)
+		}
 		if response.StatusCode == http.StatusConflict || response.StatusCode == http.StatusPreconditionFailed {
 			return Lease{}, readinessFailed(method, "http_status", response.StatusCode, ErrDispatchConflict, nil)
 		}
@@ -292,3 +295,16 @@ func rejectPreviewReadinessDuplicateKeys(data []byte) error {
 }
 
 var _ DispatchReadinessObserver = (*HTTPDispatchReadinessObserver)(nil)
+
+// previewErrorCode is the error envelope's code, or "" when the body is not one.
+func previewErrorCode(data []byte) string {
+	var envelope struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(data, &envelope) != nil {
+		return ""
+	}
+	return envelope.Error.Code
+}

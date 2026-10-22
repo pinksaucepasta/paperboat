@@ -24,8 +24,10 @@ import (
 const PreviewDispatchKind = "preview_dispatch"
 
 var (
-	ErrDispatchInvalid     = errors.New("invalid preview dispatch")
-	ErrDispatchConflict    = errors.New("preview dispatch conflicts with an existing operation")
+	ErrDispatchInvalid  = errors.New("invalid preview dispatch")
+	ErrDispatchConflict = errors.New("preview dispatch conflicts with an existing operation")
+	// ErrDispatchNotServed: the server has not seen any edge serve the preview's route yet.
+	ErrDispatchNotServed   = errors.New("preview route is not served by an edge yet")
 	ErrDispatchUnavailable = errors.New("preview dispatch carrier unavailable")
 )
 

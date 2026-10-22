@@ -60,6 +60,45 @@ type Service struct {
 	mu          sync.Mutex
 	cancel      context.CancelFunc
 	done        chan struct{}
+
+	// hubs are the live carriers' stream hubs, by carrier key, for endpoint routes (PLAN 3a);
+	// hubsChanged is closed and replaced whenever the set changes.
+	hubsMu      sync.Mutex
+	hubs        map[string]*preview.DataCarrierPreviewHub
+	hubsChanged chan struct{}
+	served      bool
+}
+
+// EndpointsServed implements preview.AgentCarriers: every edge of the latest attachment admits
+// endpoint routes.
+func (s *Service) EndpointsServed() bool {
+	s.hubsMu.Lock()
+	defer s.hubsMu.Unlock()
+	return s.served
+}
+
+// Hubs implements preview.AgentCarriers: the stream hubs of the runtime carriers this agent holds
+// now, and a channel closed when that set changes.
+func (s *Service) Hubs() ([]*preview.DataCarrierPreviewHub, <-chan struct{}) {
+	s.hubsMu.Lock()
+	defer s.hubsMu.Unlock()
+	out := make([]*preview.DataCarrierPreviewHub, 0, len(s.hubs))
+	for _, hub := range s.hubs {
+		out = append(out, hub)
+	}
+	return out, s.hubsChanged
+}
+
+func (s *Service) setHub(key string, hub *preview.DataCarrierPreviewHub) {
+	s.hubsMu.Lock()
+	defer s.hubsMu.Unlock()
+	if hub == nil {
+		delete(s.hubs, key)
+	} else {
+		s.hubs[key] = hub
+	}
+	close(s.hubsChanged)
+	s.hubsChanged = make(chan struct{})
 }
 
 // BindBroadcaster connects browser output to this service's authenticated
@@ -102,6 +141,7 @@ type admission struct {
 	Backup                 *admissionBinding         `json:"backup,omitempty"`
 	ActiveEdgeNodeID       string                    `json:"active_edge_node_id,omitempty"`
 	ActiveEdgeProcessEpoch string                    `json:"active_edge_process_epoch,omitempty"`
+	EndpointsServed        bool                      `json:"endpoints_served,omitempty"`
 }
 
 type admissionBinding struct {
@@ -115,6 +155,7 @@ type admissionBinding struct {
 type live struct {
 	key     string
 	active  *connector.ActiveDataCarrier
+	hub     *preview.DataCarrierPreviewHub
 	streams *tunnelmanager.RunningOriginStreams
 	release func(context.Context) error
 	open    browserbroadcastserver.OpenPublisher
@@ -158,7 +199,7 @@ func New(config Config) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Service{config: config, auth: auth, client: &http.Client{Transport: config.Transport, Timeout: 12 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("runtime attachment redirect refused") }}, sessions: sessions, processID: processID}, nil
+	return &Service{hubs: map[string]*preview.DataCarrierPreviewHub{}, hubsChanged: make(chan struct{}), config: config, auth: auth, client: &http.Client{Transport: config.Transport, Timeout: 12 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("runtime attachment redirect refused") }}, sessions: sessions, processID: processID}, nil
 }
 
 func (s *Service) Start(ctx context.Context) error {
@@ -219,7 +260,7 @@ func (s *Service) run(ctx context.Context) {
 			s.broadcaster.SetPublisher(nil)
 		}
 		for _, item := range lives {
-			cleanupErr = errors.Join(cleanupErr, closeLive(item))
+			cleanupErr = errors.Join(cleanupErr, s.closeLive(item))
 		}
 		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -281,6 +322,9 @@ func (s *Service) run(ctx context.Context) {
 			}
 		}
 		if err == nil {
+			s.hubsMu.Lock()
+			s.served = response.EndpointsServed
+			s.hubsMu.Unlock()
 			ordered := []admissionBinding{response.primary()}
 			if response.Backup != nil {
 				ordered = append(ordered, *response.Backup)
@@ -297,7 +341,7 @@ func (s *Service) run(ctx context.Context) {
 						s.broadcaster.SetPublisher(nil)
 						publisherKey = ""
 					}
-					if closeErr := closeLive(item); closeErr != nil {
+					if closeErr := s.closeLive(item); closeErr != nil {
 						err = errors.Join(err, cleanupFailure(closeErr))
 					}
 					delete(lives, key)
@@ -374,7 +418,7 @@ func (s *Service) run(ctx context.Context) {
 				s.broadcaster.SetPublisher(nil)
 				publisherKey = ""
 			}
-			if closeErr := closeLive(item); closeErr != nil {
+			if closeErr := s.closeLive(item); closeErr != nil {
 				err = errors.Join(err, cleanupFailure(closeErr))
 			}
 			delete(lives, key)
@@ -457,7 +501,7 @@ func (s *Service) fetch(ctx context.Context, activeNode, activeEpoch string) (ou
 	}
 	_, portText, _ := net.SplitHostPort(s.config.ListenAddress)
 	port, _ := strconv.Atoi(portText) // validated by New
-	request := map[string]any{"operation_id": op, "process_id": s.processID, "worker_generation": s.config.WorkerGeneration, "installation_generation": s.config.InstallationGeneration, "runtime_listen_port": port}
+	request := map[string]any{"operation_id": op, "process_id": s.processID, "worker_generation": s.config.WorkerGeneration, "installation_generation": s.config.InstallationGeneration, "runtime_listen_port": port, "capabilities": []string{"endpoints"}}
 	if s.preference != nil {
 		request["edge_preference"] = s.preference
 	}
@@ -548,10 +592,26 @@ func (s *Service) connect(ctx context.Context, a admissionBinding, key string) (
 	if err != nil {
 		return nil, carrierFailure(err)
 	}
+	// One hub owns the carrier's inbound streams and routes them by route id: the runtime route
+	// to the origin forwarder, endpoint routes (previews) to their route carriers.
+	hub, err := preview.NewDataCarrierPreviewHub(ctx, preview.DataCarrierPreviewHubConfig{Active: carrier.Active, Identity: carrier.Identity, EdgeNodeID: b.EdgeNodeID, EdgeProcessEpoch: b.EdgeProcessEpoch})
+	if err != nil {
+		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return nil, streamOpenFailure(errors.Join(err, carrier.Release(cleanup)))
+	}
+	registration, err := hub.Register(b.RouteID)
+	if err != nil {
+		_ = hub.Close()
+		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return nil, streamOpenFailure(errors.Join(err, carrier.Release(cleanup)))
+	}
 	forwarder := runtimeOriginForwarder()
 	route := hoststate.TunnelConfigRoute{ID: b.RouteID, Protocol: "http", MatchType: "exact", MatchHostname: a.Hostname, OriginScheme: "http", OriginAddress: s.config.ListenAddress, PreserveHost: true, TLSVerification: "not_applicable", ConnectTimeoutMs: 5000, IdleTimeoutMs: 3600000, MaxConcurrentStreams: 256, DesiredState: "active"}
-	streams, err := forwarder.Start(ctx, carrier.Active, []hoststate.TunnelConfigRoute{route})
+	streams, err := forwarder.StartFrom(ctx, registration, carrier.Identity, []hoststate.TunnelConfigRoute{route})
 	if err != nil {
+		_ = hub.Close()
 		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		releaseErr := carrier.Release(cleanup)
@@ -568,7 +628,8 @@ func (s *Service) connect(ctx context.Context, a admissionBinding, key string) (
 			RouteID: b.RouteID, RequestID: terminalSessionID, Kind: "browser_terminal_output",
 		})
 	})
-	return &live{key: key, active: carrier.Active, streams: streams, release: carrier.Release, open: opener}, nil
+	s.setHub(key, hub)
+	return &live{key: key, active: carrier.Active, hub: hub, streams: streams, release: carrier.Release, open: opener}, nil
 }
 
 // runtimeOriginForwarder serves the machine's own runtime listener over the carrier. The control
@@ -578,9 +639,13 @@ func runtimeOriginForwarder() tunnelmanager.OriginStreamForwarder {
 	return tunnelmanager.OriginStreamForwarder{Transport: &tunnelmanager.OriginHTTPTransport{KeepControlPlaneHeaders: true}}
 }
 
-func closeLive(l *live) error {
+func (s *Service) closeLive(l *live) error {
 	if l == nil {
 		return nil
+	}
+	s.setHub(l.key, nil)
+	if l.hub != nil {
+		_ = l.hub.Close()
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

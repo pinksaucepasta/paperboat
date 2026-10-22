@@ -515,3 +515,38 @@ func TestRuntimeCarrierConnectsWhileAnotherEdgeCandidateIsUnresponsive(t *testin
 		time.Sleep(50 * time.Millisecond)
 	}
 }
+
+// PLAN 3a: the agent advertises that it serves endpoint routes on its runtime carriers, and uses
+// the engine for previews only when the server says every edge of the attachment admits them.
+func TestRuntimeAttachmentAdvertisesEndpointsAndReadsWhetherEdgesServeThem(t *testing.T) {
+	var sent struct {
+		Capabilities []string `json:"capabilities"`
+	}
+	served := false
+	transport := roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		raw, _ := io.ReadAll(request.Body)
+		if err := json.Unmarshal(raw, &sent); err != nil {
+			t.Fatal(err)
+		}
+		document := admission{Schema: "paperboat.runtime-carrier/v1", RouteKind: "runtime_https_wss", ExpiresAt: time.Now().Add(time.Hour), EndpointsServed: served,
+			Binding: binding{HostID: "machine-test", InstallationGeneration: 1, ProcessGeneration: 1, RouteID: "route-test", SessionID: "session-test"}}
+		payload, _ := json.Marshal(struct {
+			Data admission `json:"data"`
+		}{document})
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(payload)), Request: request}, nil
+	})
+	service := newRuntimeAttachmentTestService(t, transport)
+	for _, want := range []bool{false, true} {
+		served = want
+		out, err := service.fetch(t.Context(), "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(sent.Capabilities) != 1 || sent.Capabilities[0] != "endpoints" {
+			t.Fatalf("attachment request capabilities = %v", sent.Capabilities)
+		}
+		if out.EndpointsServed != want {
+			t.Fatalf("endpoints_served = %v, want %v", out.EndpointsServed, want)
+		}
+	}
+}

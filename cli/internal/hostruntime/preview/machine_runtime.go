@@ -70,9 +70,14 @@ type MachinePreviewRuntime struct {
 
 	placementEvents *machineevents.Subscription
 
+	// route is the template for a preview route served on one of the agent's runtime carriers
+	// (PLAN 3a); agent is set by BindAgentCarriers.
+	route DataCarrierPreviewCarrierConfig
+
 	mu     sync.Mutex
 	closed bool
 	refs   int
+	agent  AgentCarriers
 }
 
 // NewMachinePreviewRuntime validates the local registration before creating
@@ -147,7 +152,41 @@ func NewMachinePreviewRuntime(config MachinePreviewRuntimeConfig) (*MachinePrevi
 		_ = sessions.Close(context.WithoutCancel(config.RunContext))
 		return nil, errors.Join(ErrMachinePreviewRuntimeInvalid, err)
 	}
-	return &MachinePreviewRuntime{attachments: attachments, sessions: sessions, provider: provider, private: privateAccess, auth: auth, machineID: registration.MachineID, placementEvents: config.PlacementEvents}, nil
+	route := DataCarrierPreviewCarrierConfig{
+		DialOrigin: config.OriginDial, MaxStreams: config.MaxStreams, OriginDialTimeout: config.OriginDialTimeout,
+		OriginCloseTimeout: config.OriginCloseTimeout, ObserveStreamError: config.ObserveStreamError,
+		BrowserIngress: browserIngress, BrowserRouteGeneration: endpointRouteRevision,
+		Inspector: config.Inspector, Registry: config.Registry, InspectorHTTP: config.InspectorHTTP,
+	}
+	return &MachinePreviewRuntime{attachments: attachments, sessions: sessions, provider: provider, private: privateAccess, auth: auth, machineID: registration.MachineID, placementEvents: config.PlacementEvents, route: route}, nil
+}
+
+// attachPrivate lets this machine's own browser reach its private preview through the local
+// private access proxy, over the hub's runtime carrier.
+func (r *MachinePreviewRuntime) attachPrivate(hub *DataCarrierPreviewHub, lease Lease) (func(), error) {
+	if lease.AccessMode != "private" || r.private == nil {
+		return func() {}, nil
+	}
+	return r.private.registerEndpoint(lease, hub)
+}
+
+// endpointRouteRevision is the revision of a preview's one endpoint route; the server never
+// changes a preview's route.
+const endpointRouteRevision = 1
+
+// BindAgentCarriers makes every later preview an endpoint route on the agent's runtime carriers
+// instead of a carrier of its own (PLAN 3a).
+func (r *MachinePreviewRuntime) BindAgentCarriers(agent AgentCarriers) error {
+	if r == nil || agent == nil {
+		return ErrMachinePreviewRuntimeInvalid
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.agent != nil {
+		return ErrMachinePreviewRuntimeInvalid
+	}
+	r.agent = agent
+	return nil
 }
 
 // NewCarrier creates a route-scoped lazy attachment carrier. The target is
@@ -170,7 +209,21 @@ func (r *MachinePreviewRuntime) NewCarrier(ctx context.Context, target LeaseTarg
 		return nil, fmt.Errorf("%w: machine identity differs from registration", ErrMachinePreviewRuntimeInvalid)
 	}
 	r.refs++
+	agent := r.agent
 	r.mu.Unlock()
+	if agent != nil && agent.EndpointsServed() {
+		carrier, err := NewEndpointCarrier(agent, func(hub *DataCarrierPreviewHub) (*DataCarrierPreviewCarrier, error) {
+			config := r.route
+			config.Hub = hub
+			return NewDataCarrierPreviewCarrier(config)
+		})
+		if err != nil {
+			_ = r.release(ctx)
+			return nil, err
+		}
+		carrier.attach = r.attachPrivate
+		return &machinePreviewCarrier{inner: carrier, runtime: r}, nil
+	}
 	carrier, err := NewAttachmentCarrier(AttachmentCarrierConfig{Attachments: r.attachments, Provider: r.provider, PlacementEvents: r.placementEvents})
 	if err != nil {
 		_ = r.release(ctx)
@@ -257,8 +310,14 @@ func (r *MachinePreviewRuntime) release(ctx context.Context) error {
 	return nil
 }
 
+// leaseCarrier is a carrier that follows the session's current lease.
+type leaseCarrier interface {
+	Carrier
+	RunWithLease(context.Context, func() Lease, LeaseMutation, func(Lease) error) error
+}
+
 type machinePreviewCarrier struct {
-	inner   *AttachmentCarrier
+	inner   leaseCarrier
 	runtime *MachinePreviewRuntime
 	once    sync.Once
 	mu      sync.Mutex

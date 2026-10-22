@@ -383,6 +383,10 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 		if attachErr != nil {
 			return nil, attachErr
 		}
+		// Previews are endpoint routes on this agent's runtime carriers (PLAN 3a).
+		if bindErr := previewAssembly.runtime.BindAgentCarriers(attachment); bindErr != nil {
+			return nil, errors.Join(ErrProductionInvalid, bindErr)
+		}
 		dependencies.RuntimeAttachmentService = attachment
 	}
 	nativePrivateValidators := []productionNativePrivateValidator{localNativePrivateValidator(previewAssembly.dispatcher)}

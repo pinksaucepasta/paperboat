@@ -228,6 +228,50 @@ func (s *PrivateAccessSource) register(lease Lease, admission CarrierAdmission, 
 	return entry.token, nil
 }
 
+// registerEndpoint makes a private preview served as an endpoint route (PLAN 3a) reachable from
+// this machine's browser over the hub's runtime carrier. An endpoint route is named by the preview
+// id, has revision and lease generation 1, and is bound to the carrier's session and edge process.
+func (s *PrivateAccessSource) registerEndpoint(lease Lease, hub *DataCarrierPreviewHub) (func(), error) {
+	nodeID, epoch := hub.Edge()
+	identity := hub.Identity()
+	if s == nil || lease.AccessMode != "private" || nodeID == "" || epoch == "" || hub.active == nil {
+		return nil, ErrPrivateAccessInvalid
+	}
+	host, err := privateAccessEndpointHost(lease.Endpoint)
+	if err != nil {
+		return nil, err
+	}
+	expires := lease.LeaseDeadline
+	if lease.UserDeadline != nil {
+		expires = *lease.UserDeadline
+	}
+	if until := s.now().Add(privateEndpointRouteLifetime); expires.IsZero() || expires.After(until) {
+		expires = until
+	}
+	admission := CarrierAdmission{AccessMode: "private", ExpiresAt: expires, Binding: Binding{
+		AccountID: lease.AccountID, PreviewID: lease.ID, OperationID: lease.ID, RouteID: lease.ID, HostID: identity.HostID,
+		LeaseGeneration: 1, RouteGeneration: 1, TunnelID: identity.TunnelID, ConnectorID: identity.ConnectorID,
+		SessionID: identity.SessionID, ProcessGeneration: identity.ProcessGeneration, ConfigGeneration: identity.Generation,
+		EdgeNodeID: nodeID, EdgeProcessEpoch: epoch,
+	}}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return nil, ErrPrivateAccessInvalid
+	}
+	if _, conflict := s.discoveredRoutes[host]; conflict {
+		return nil, ErrPrivateAccessInvalid
+	}
+	s.next++
+	token := s.next
+	s.ownerRoutes[host] = privateAccessRoute{lease: lease, admission: admission, active: hub.active, identity: identity, token: token}
+	return func() { s.unregister(host, token) }, nil
+}
+
+// privateEndpointRouteLifetime bounds an owner-local private route between lease renewals; the
+// server's grant still checks the lease itself.
+const privateEndpointRouteLifetime = 24 * time.Hour
+
 func (s *PrivateAccessSource) unregister(host string, token uint64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

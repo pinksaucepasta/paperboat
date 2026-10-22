@@ -68,8 +68,11 @@ type PreviewOriginDialer func(context.Context, LeaseTarget) (io.ReadWriteCloser,
 type DataCarrierPreviewHub struct {
 	active   *connector.ActiveDataCarrier
 	identity connector.DataCarrierIdentity
-	queue    int
-	observe  func(error)
+	// edgeNodeID and edgeEpoch name the edge process at the other end, when known (the agent's
+	// runtime carriers, PLAN 3a); private access grants bind to it.
+	edgeNodeID, edgeEpoch string
+	queue                 int
+	observe               func(error)
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -84,6 +87,8 @@ type DataCarrierPreviewHub struct {
 type DataCarrierPreviewHubConfig struct {
 	Active             *connector.ActiveDataCarrier
 	Identity           connector.DataCarrierIdentity
+	EdgeNodeID         string
+	EdgeProcessEpoch   string
 	QueueDepth         int
 	ObserveStreamError func(error)
 }
@@ -102,7 +107,7 @@ func NewDataCarrierPreviewHub(ctx context.Context, config DataCarrierPreviewHubC
 		return nil, ErrDataCarrierPreviewInvalid
 	}
 	hubContext, cancel := context.WithCancel(ctx)
-	hub := &DataCarrierPreviewHub{active: config.Active, identity: config.Identity, queue: config.QueueDepth, observe: config.ObserveStreamError, ctx: hubContext, cancel: cancel, done: make(chan struct{}), byRoute: make(map[string]*dataCarrierPreviewRegistration)}
+	hub := &DataCarrierPreviewHub{active: config.Active, identity: config.Identity, edgeNodeID: config.EdgeNodeID, edgeEpoch: config.EdgeProcessEpoch, queue: config.QueueDepth, observe: config.ObserveStreamError, ctx: hubContext, cancel: cancel, done: make(chan struct{}), byRoute: make(map[string]*dataCarrierPreviewRegistration)}
 	// Start exactly one accept loop at construction. This makes Close safe even
 	// when a caller has not registered a preview yet and keeps ownership of
 	// ActiveDataCarrier.AcceptStream centralized from the first stream onward.
@@ -154,6 +159,11 @@ func (r *DataCarrierPreviewRegistration) Accept(ctx context.Context) (*connector
 	}
 }
 
+// AcceptStream is Accept, so a registration can feed an origin forwarder.
+func (r *DataCarrierPreviewRegistration) AcceptStream(ctx context.Context) (*connector.DataCarrierStream, connector.StreamOpen, error) {
+	return r.Accept(ctx)
+}
+
 func (r *DataCarrierPreviewRegistration) Close() error {
 	if r == nil || r.registration == nil {
 		return nil
@@ -167,6 +177,14 @@ func (h *DataCarrierPreviewHub) Identity() connector.DataCarrierIdentity {
 		return connector.DataCarrierIdentity{}
 	}
 	return h.identity
+}
+
+// Edge names the edge process at the other end of the carrier, when known.
+func (h *DataCarrierPreviewHub) Edge() (nodeID, processEpoch string) {
+	if h == nil {
+		return "", ""
+	}
+	return h.edgeNodeID, h.edgeEpoch
 }
 
 func (h *DataCarrierPreviewHub) Done() <-chan struct{} {
