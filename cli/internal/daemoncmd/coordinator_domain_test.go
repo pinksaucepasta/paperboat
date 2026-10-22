@@ -6,7 +6,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"net"
 	"os"
-	"path/filepath"
 	"testing"
 
 	pbSync "github.com/pinksaucepasta/paperboat/internal/controlsync/proto"
@@ -31,7 +30,7 @@ func newUnsetDomainCoordinator(t *testing.T, client guardedNameClient) *Coordina
 	if err := os.Chmod(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	coordinator, err := NewCoordinator(CoordinatorConfig{SocketAddress: filepath.Join(dir, "daemon.sock"), NameClient: client, DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("not dialed") }})
+	coordinator, err := NewCoordinator(CoordinatorConfig{SocketAddress: socketAddress(dir), NameClient: client, DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("not dialed") }})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -21,7 +21,6 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -233,7 +232,7 @@ func TestCoordinatorLifecycle(t *testing.T) {
 	if err := os.Chmod(tmpDir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	sockPath := filepath.Join(tmpDir, "test-daemon.sock")
+	sockPath := socketAddress(tmpDir)
 	names := &coordinatorNameClient{}
 
 	coord, err := NewCoordinator(CoordinatorConfig{
@@ -307,7 +306,7 @@ func TestCoordinatorFailsBeforeIPCWhenSyncCannotAuthenticate(t *testing.T) {
 	if err := os.Chmod(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	socket := filepath.Join(dir, "daemon.sock")
+	socket := socketAddress(dir)
 	coordinator, err := NewCoordinator(CoordinatorConfig{SocketAddress: socket, SyncAddress: "127.0.0.1", MachineID: "machine", Token: func(context.Context) (string, error) { return "token", nil }, Insecure: true})
 	if err != nil {
 		t.Fatal(err)
@@ -329,7 +328,7 @@ func TestCoordinatorGuardedNamesFollowFullSnapshots(t *testing.T) {
 		t.Fatal(err)
 	}
 	names := &coordinatorNameClient{}
-	coordinator, err := NewCoordinator(CoordinatorConfig{SocketAddress: filepath.Join(dir, "daemon.sock"), NameClient: names, DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("not dialed") }})
+	coordinator, err := NewCoordinator(CoordinatorConfig{SocketAddress: socketAddress(dir), NameClient: names, DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("not dialed") }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -452,7 +451,7 @@ func TestCoordinatorInventoryUsesAuthorizedDiscoveredPortsAndWithdrawsExpiry(t *
 		t.Fatal(err)
 	}
 	names := &coordinatorNameClient{}
-	c, err := NewCoordinator(CoordinatorConfig{SocketAddress: filepath.Join(dir, "daemon.sock"), NameClient: names, DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("unused") }})
+	c, err := NewCoordinator(CoordinatorConfig{SocketAddress: socketAddress(dir), NameClient: names, DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("unused") }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -562,7 +561,7 @@ func TestCoordinatorNativePortPreservesApplicationTLSAndALPN(t *testing.T) {
 		serverDone <- err
 	}()
 	names := &coordinatorNameClient{}
-	c, err := NewCoordinator(CoordinatorConfig{SocketAddress: filepath.Join(dir, "daemon.sock"), NameClient: names,
+	c, err := NewCoordinator(CoordinatorConfig{SocketAddress: socketAddress(dir), NameClient: names,
 		DialMachine: func(ctx context.Context, _ string, _ int) (net.Conn, error) {
 			return (&net.Dialer{}).DialContext(ctx, "tcp", application.Addr().String())
 		},
@@ -850,7 +849,7 @@ func TestCoordinatorServiceLeaseRenewalKeepsTheForwardedPortsUp(t *testing.T) {
 		t.Fatal(err)
 	}
 	names := &coordinatorNameClient{}
-	c, err := NewCoordinator(CoordinatorConfig{SocketAddress: filepath.Join(dir, "daemon.sock"), NameClient: names, DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("unused") }})
+	c, err := NewCoordinator(CoordinatorConfig{SocketAddress: socketAddress(dir), NameClient: names, DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("unused") }})
 	if err != nil {
 		t.Fatal(err)
 	}

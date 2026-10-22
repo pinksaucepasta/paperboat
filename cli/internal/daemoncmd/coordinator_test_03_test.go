@@ -218,7 +218,7 @@ func TestCoordinatorRPCListenerFailureReachesOwnerAndRecovers(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(dir)
-	c, err := NewCoordinator(CoordinatorConfig{SocketAddress: filepath.Join(dir, "daemon.sock")})
+	c, err := NewCoordinator(CoordinatorConfig{SocketAddress: socketAddress(dir)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +255,7 @@ func TestCoordinatorStartRejectsUnfinishedGenerationCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(dir)
-	c, err := NewCoordinator(CoordinatorConfig{NameClient: client, SocketAddress: filepath.Join(dir, "daemon.sock"), DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, nil }})
+	c, err := NewCoordinator(CoordinatorConfig{NameClient: client, SocketAddress: socketAddress(dir), DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, nil }})
 	if err != nil {
 		t.Fatal(err)
 	}

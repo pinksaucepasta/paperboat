@@ -22,7 +22,6 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -473,7 +472,7 @@ func TestCoordinatorStartsWithoutTheGuardAndConnectsWhenItReturns(t *testing.T) 
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(dir)
-	path := filepath.Join(dir, "guard-start.sock")
+	path := socketAddress(dir)
 	guardErr := errors.New("guard unavailable")
 	guardUp := false
 	names := &coordinatorNameClient{}
