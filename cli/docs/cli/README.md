@@ -10,6 +10,10 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb access](pb_access.md) | Open authenticated private access |
 | [pb access machine](pb_access_machine.md) | Forward a local port to an authorized machine service |
 | [pb access tunnel](pb_access_tunnel.md) | Open private TCP access through stable hostd |
+| [pb api-token](pb_api-token.md) | Create, list and revoke workspace API tokens |
+| [pb api-token create](pb_api-token_create.md) | Create an API token and print its secret once |
+| [pb api-token list](pb_api-token_list.md) | List API tokens |
+| [pb api-token revoke](pb_api-token_revoke.md) | Revoke an API token |
 | [pb approve](pb_approve.md) | Approve a peer machine over gRPC IPC |
 | [pb auth](pb_auth.md) | Manage Paperboat sign-in |
 | [pb auth login](pb_auth_login.md) | Add this computer to your account, or sign in again, through browser approval |
@@ -134,6 +138,14 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb new](pb_new.md) | Open a fresh terminal on this device in the current directory |
 | [pb pair](pb_pair.md) | Enroll this machine with a one-shot token |
 | [pb ping](pb_ping.md) | Measure authenticated connectivity to a machine |
+| [pb policy](pb_policy.md) | Read, test and change the workspace access policy |
+| [pb policy explain](pb_policy_explain.md) | Explain who can do what under the policy |
+| [pb policy get](pb_policy_get.md) | Print the saved workspace policy |
+| [pb policy restore](pb_policy_restore.md) | Restore an earlier policy version |
+| [pb policy schema](pb_policy_schema.md) | Print the policy file JSON Schema |
+| [pb policy set](pb_policy_set.md) | Validate and save a workspace policy file |
+| [pb policy test](pb_policy_test.md) | Validate a policy file and run its tests |
+| [pb policy versions](pb_policy_versions.md) | List saved policy versions |
 | [pb preview](pb_preview.md) | Expose a local target through a temporary preview |
 | [pb preview delete](pb_preview_delete.md) | Delete a temporary preview |
 | [pb preview inspect](pb_preview_inspect.md) | Show daemon-local HTTP captures |

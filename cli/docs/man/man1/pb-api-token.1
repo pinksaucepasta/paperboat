@@ -1,0 +1,49 @@
+.nh
+.TH "PB-API-TOKEN" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-api-token - Create, list and revoke workspace API tokens
+
+
+.SH SYNOPSIS
+\fBpb api-token [flags]\fP
+
+
+.SH DESCRIPTION
+An API token lets a script or service call the Paperboat API as you, in one
+workspace, until it expires or is revoked. A scope narrows what it may do using
+the policy's names; a scope never gives more access than you have. The secret
+is shown once, when the token is created.
+
+.PP
+With --json, this command group lists its available commands.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for api-token
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb(1)\fP, \fBpb-api-token-create(1)\fP, \fBpb-api-token-list(1)\fP, \fBpb-api-token-revoke(1)\fP

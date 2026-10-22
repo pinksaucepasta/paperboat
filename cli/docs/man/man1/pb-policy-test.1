@@ -1,0 +1,56 @@
+.nh
+.TH "PB-POLICY-TEST" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-policy-test - Validate a policy file and run its tests
+
+
+.SH SYNOPSIS
+\fBpb policy test [file] [flags]\fP
+
+
+.SH DESCRIPTION
+Validate a policy file on the server without saving it, run the tests it
+contains and print errors, test results and the access changes against the
+saved policy. Without a file, the saved policy is tested. The command exits
+with status 0 only when the policy is valid and every test passes.
+
+.PP
+This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for test
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb policy test
+  pb policy test policy.hujson
+.EE
+
+
+.SH SEE ALSO
+\fBpb-policy(1)\fP

@@ -1,0 +1,64 @@
+.nh
+.TH "PB-POLICY-RESTORE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-policy-restore - Restore an earlier policy version
+
+
+.SH SYNOPSIS
+\fBpb policy restore <version> [flags]\fP
+
+
+.SH DESCRIPTION
+Save an earlier policy version as the new current version. The history keeps
+every version, so a restore can itself be undone. When the restore changes
+anyone's access, the changes are printed and must be confirmed; --yes confirms
+them without asking. pb policy versions lists the versions.
+
+.PP
+This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for restore
+
+.PP
+\fB--message\fP=""
+	describe the restore in the version history
+
+.PP
+\fB--yes\fP[=false]
+	confirm the printed access changes without asking
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb policy restore 3
+  pb policy restore 3 --yes --message "undo"
+.EE
+
+
+.SH SEE ALSO
+\fBpb-policy(1)\fP

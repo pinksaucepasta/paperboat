@@ -5,6 +5,7 @@ go 1.27.2
 replace tailscale.com => github.com/pinksaucepasta/tailscale v1.103.0-pre.0.20261019044951-ac1095ce5264
 
 require (
+	github.com/pinksaucepasta/paperboat/shared v0.0.0
 	github.com/BurntSushi/toml v1.6.0
 	github.com/Microsoft/go-winio v0.6.2
 	github.com/adrg/xdg v0.5.3
@@ -196,3 +197,5 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
+
+replace github.com/pinksaucepasta/paperboat/shared => ../shared

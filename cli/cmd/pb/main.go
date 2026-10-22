@@ -154,7 +154,7 @@ func runWithReporter(ctx context.Context, args []string, stdout, stderr io.Write
 	root.SetOut(stdout)
 	root.SetErr(stderr)
 	if jsonArgumentRequested(args) {
-		if cliArgumentPresent(args, "--version", "-v") {
+		if cliArgumentPresent(args, "--version", "-v") && !subcommandOwnsVersionFlag(root, args) {
 			outcome = "success"
 			if err := writeCLIJSON(stdout, map[string]any{"command": "pb", "version": buildinfo.Version}); err != nil {
 				return 1
@@ -468,6 +468,8 @@ mode, relays, and observation timestamps.`, Example: "  pb relay list\n  pb rela
 	relay.AddCommand(relayList)
 	root.AddCommand(relay)
 	root.AddCommand(edgeCommand())
+	root.AddCommand(policyCobraCommand())
+	root.AddCommand(apiTokenCobraCommand())
 
 	root.AddCommand(authLoginCommand())
 	root.AddCommand(authCobraCommand())
@@ -835,4 +837,11 @@ func descriptorFileTransferPolicy(target *resolver.FileTransferTarget) filetrans
 	}
 	policy := target.Policy
 	return filetransfer.Policy{Revision: policy.Revision, MaxFileBytes: policy.MaxFileBytes, MaxBatchFiles: policy.MaxBatchFiles, MaxBatchBytes: policy.MaxBatchBytes, MaxConcurrentTransfers: policy.MaxConcurrentTransfers, RetentionSeconds: policy.RetentionSeconds, DeliveryTimeoutSeconds: policy.DeliveryTimeoutSeconds, MaxPendingSpoolBytes: policy.MaxPendingSpoolBytes}
+}
+
+// subcommandOwnsVersionFlag reports whether the invoked subcommand defines its own --version
+// (such as pb policy get --version N), which then is not the root's version request.
+func subcommandOwnsVersionFlag(root *cobra.Command, args []string) bool {
+	target, _, err := root.Find(args)
+	return err == nil && target != root && target.LocalNonPersistentFlags().Lookup("version") != nil
 }

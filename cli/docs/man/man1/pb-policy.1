@@ -1,0 +1,50 @@
+.nh
+.TH "PB-POLICY" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-policy - Read, test and change the workspace access policy
+
+
+.SH SYNOPSIS
+\fBpb policy [flags]\fP
+
+
+.SH DESCRIPTION
+The workspace policy is one file that says who may reach which machines,
+previews and tunnels, and how. Read it with get, check a draft with test, see
+what a change would do with set --dry-run, save it with set, explain any
+decision with explain, and go back to an earlier version with restore. Every
+save that changes anyone's access shows the changes and asks for confirmation.
+
+.PP
+With --json, this command group lists its available commands.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for policy
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb(1)\fP, \fBpb-policy-explain(1)\fP, \fBpb-policy-get(1)\fP, \fBpb-policy-restore(1)\fP, \fBpb-policy-schema(1)\fP, \fBpb-policy-set(1)\fP, \fBpb-policy-test(1)\fP, \fBpb-policy-versions(1)\fP

@@ -64,6 +64,7 @@ pb [environment] [new] [flags]
 ### SEE ALSO
 
 * [pb access](pb_access.md)	 - Open authenticated private access
+* [pb api-token](pb_api-token.md)	 - Create, list and revoke workspace API tokens
 * [pb approve](pb_approve.md)	 - Approve a peer machine over gRPC IPC
 * [pb auth](pb_auth.md)	 - Manage Paperboat sign-in
 * [pb bugreport](pb_bugreport.md)	 - Create a redacted Paperboat diagnostic bundle
@@ -84,6 +85,7 @@ pb [environment] [new] [flags]
 * [pb new](pb_new.md)	 - Open a fresh terminal on this device in the current directory
 * [pb pair](pb_pair.md)	 - Enroll this machine with a one-shot token
 * [pb ping](pb_ping.md)	 - Measure authenticated connectivity to a machine
+* [pb policy](pb_policy.md)	 - Read, test and change the workspace access policy
 * [pb preview](pb_preview.md)	 - Expose a local target through a temporary preview
 * [pb relay](pb_relay.md)	 - Inspect hosted and self-hosted relays
 * [pb reset](pb_reset.md)	 - Remove the current Paperboat setup before fresh enrollment

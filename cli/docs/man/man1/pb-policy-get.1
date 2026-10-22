@@ -1,0 +1,62 @@
+.nh
+.TH "PB-POLICY-GET" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-policy-get - Print the saved workspace policy
+
+
+.SH SYNOPSIS
+\fBpb policy get [flags]\fP
+
+
+.SH DESCRIPTION
+Print the saved policy file of the active workspace exactly as it was saved,
+comments included, so it can be edited and saved again with pb policy set.
+Use --version to print an earlier version; pb policy versions lists them. With
+--json, print the whole policy record: version, digest, author and the names
+the policy may use.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for get
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+.PP
+\fB--version\fP=0
+	print this saved version instead of the current one
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb policy get > policy.hujson
+  pb policy get --version 3
+  pb policy get --json
+.EE
+
+
+.SH SEE ALSO
+\fBpb-policy(1)\fP

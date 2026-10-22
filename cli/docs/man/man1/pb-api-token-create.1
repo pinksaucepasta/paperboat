@@ -1,0 +1,69 @@
+.nh
+.TH "PB-API-TOKEN-CREATE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-api-token-create - Create an API token and print its secret once
+
+
+.SH SYNOPSIS
+\fBpb api-token create <name> [flags]\fP
+
+
+.SH DESCRIPTION
+Create an API token in the active workspace that acts as you until it
+expires. --expires sets its lifetime in days (default 90d). --scope or
+--scope-file narrows it to a JSON list of {"dst", "allow", "ports"} entries
+using the policy's names. The secret is printed once; store it right away.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--expires\fP="90d"
+	lifetime in days, such as 30d
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for create
+
+.PP
+\fB--json\fP[=false]
+	print JSON, including the secret
+
+.PP
+\fB--scope\fP=""
+	JSON list of {dst, allow, ports} entries that narrow the token
+
+.PP
+\fB--scope-file\fP=""
+	read the scope from a JSON file
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb api-token create deploy
+  pb api-token create ci --expires 30d --scope '[{"dst":["tag:ci"],"allow":["exec"]}]'
+  pb api-token create ci --json
+.EE
+
+
+.SH SEE ALSO
+\fBpb-api-token(1)\fP

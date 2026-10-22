@@ -1,0 +1,56 @@
+.nh
+.TH "PB-POLICY-VERSIONS" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-policy-versions - List saved policy versions
+
+
+.SH SYNOPSIS
+\fBpb policy versions [flags]\fP
+
+
+.SH DESCRIPTION
+List every saved version of the workspace policy, newest first, with who
+saved it, when, how (saved, restored, rewritten or migrated), how many access
+grants it added and removed, and its message. Print one with pb policy get
+--version N and go back to one with pb policy restore N.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for versions
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb policy versions
+  pb policy versions --json
+.EE
+
+
+.SH SEE ALSO
+\fBpb-policy(1)\fP

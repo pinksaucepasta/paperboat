@@ -122,6 +122,14 @@ var publicAPIMessages = map[string]string{
 	"tunnel_unavailable":              "The secure tunnel is not available yet. Try again shortly.",
 	"unauthenticated":                 "The server rejected the credential. Run `pb login` and try again.",
 	"workspace_unavailable":           "The selected workspace is unavailable. Run `pb switch personal` or choose another workspace.",
+	"policy_version_conflict":         "The policy was changed by someone else since you read it. Run the command again to work from the latest version.",
+	"policy_changes_unconfirmed":      "This save changes who has access and was not confirmed. Review the access changes and confirm them.",
+	"invalid_policy":                  "The policy file is not valid. Fix the listed errors and try again.",
+	"policy_edit_forbidden":           "You cannot save this policy change. Owners and admins edit the policy; members may only change rules for their own machines.",
+	"policy_explain_forbidden":        "Only team owners and admins can explain another member's access.",
+	"api_token_name_taken":            "You already have an API token with this name in this workspace. Choose another name or revoke the old token.",
+	"invalid_api_token_scope":         "The API token scope is not valid. Fix the listed errors and try again.",
+	"api_token_invalid":               "The API token expired or was revoked. Create a new one with `pb api-token create`.",
 }
 
 // Operation errors are read projections, not HTTP errors. Keep typed machine

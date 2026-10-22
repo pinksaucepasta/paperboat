@@ -1,0 +1,60 @@
+.nh
+.TH "PB-API-TOKEN-REVOKE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-api-token-revoke - Revoke an API token
+
+
+.SH SYNOPSIS
+\fBpb api-token revoke <name|id> [flags]\fP
+
+
+.SH DESCRIPTION
+Revoke an API token by name or id. Requests that use it fail from then on.
+You can revoke your own tokens; owners and admins can revoke any member's.
+A name shared by several members' tokens must be given as an id. Without
+--yes, the command asks for confirmation first.
+
+.PP
+This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for revoke
+
+.PP
+\fB--yes\fP[=false]
+	revoke without asking
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb api-token revoke deploy
+  pb api-token revoke apitok_123 --yes
+.EE
+
+
+.SH SEE ALSO
+\fBpb-api-token(1)\fP

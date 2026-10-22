@@ -1,0 +1,56 @@
+.nh
+.TH "PB-API-TOKEN-LIST" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-api-token-list - List API tokens
+
+
+.SH SYNOPSIS
+\fBpb api-token list [flags]\fP
+
+
+.SH DESCRIPTION
+List the API tokens of the active workspace: your own, or every member's when
+you are an owner or admin. The table shows each token's name, id, creator,
+expiry, last use, state and whether a scope narrows it. Secrets are never
+shown again after creation.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for list
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb api-token list
+  pb api-token list --json
+.EE
+
+
+.SH SEE ALSO
+\fBpb-api-token(1)\fP

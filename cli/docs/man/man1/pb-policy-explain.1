@@ -1,0 +1,83 @@
+.nh
+.TH "PB-POLICY-EXPLAIN" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-policy-explain - Explain who can do what under the policy
+
+
+.SH SYNOPSIS
+\fBpb policy explain [flags]\fP
+
+
+.SH DESCRIPTION
+Explain an access decision. With --src, --dst and --action, print whether it
+is allowed, the reason and the rules that decided it. With --dst and --action
+only, list who can do it; with --src only, list what that user can do. --file
+explains a draft instead of the saved policy and --api-token narrows the answer
+to one of your API tokens. Members can explain their own access; owners and
+admins anyone's.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--action\fP=""
+	the action, such as exec or private_access
+
+.PP
+\fB--api-token\fP=""
+	narrow the answer to one of your API tokens, by name
+
+.PP
+\fB--dst\fP=""
+	what: machine:<alias>, preview:<name>, tunnel:<name>, tag:<tag>
+
+.PP
+\fB--file\fP=""
+	explain a draft policy file instead of the saved policy
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for explain
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+.PP
+\fB--port\fP=0
+	the port, for private_access
+
+.PP
+\fB--src\fP=""
+	who: user:<email>
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb policy explain --src user:ana@example.test --dst machine:db --action private_access --port 5432
+  pb policy explain --dst machine:db --action exec
+  pb policy explain --src user:ana@example.test --file draft.hujson
+.EE
+
+
+.SH SEE ALSO
+\fBpb-policy(1)\fP
