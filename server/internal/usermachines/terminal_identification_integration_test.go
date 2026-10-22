@@ -166,6 +166,45 @@ func TestPostgresTerminalLiveIdentificationAuthorization(t *testing.T) {
 		t.Fatalf("ending the selected-member share: %v", err)
 	}
 
+	// A plain member shares to one member who owns the team (Lane U, ubuntu24: 404 terminal_session_not_found).
+	ownedElsewhere := "ti-team-owned-" + suffix
+	insert(`INSERT INTO paperboat.teams(team_id,owner_account,generation) VALUES($1,$2,1)`, ownedElsewhere, stranger)
+	insert(`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'member',true),($1,$3,1,'member',true)`, ownedElsewhere, stranger, owner)
+	insert(`INSERT INTO paperboat.billing_workspaces(id,team_id,state,product_code,quantity,period_start,period_end) VALUES($1,$2,'active','team-pro',2,now()-interval '1 hour',now()+interval '1 hour')`, "bw_"+ownedElsewhere, ownedElsewhere)
+	// Lane U's order: share with everyone, end it, then share with the team owner alone.
+	everyone := teams.TerminalSessionGrantRequest{OperationID: "all_owned_" + suffix, Audience: "all_members", Role: "interactive", Active: true}
+	if err = store.SQL().QueryRowContext(ctx, `SELECT generation FROM paperboat.teams WHERE team_id=$1`, ownedElsewhere).Scan(&everyone.ExpectedGeneration); err != nil {
+		t.Fatal(err)
+	}
+	if shared, err = service.GrantTerminalSessionSharing(personal, owner, ownedElsewhere, session, everyone); err != nil {
+		t.Fatalf("member sharing with everyone: %v", err)
+	}
+	if _, err = service.EndTerminalSessionSharing(personal, owner, session, "end_all_owned_"+suffix, shared.Sharing.Generation); err != nil {
+		t.Fatalf("ending the all-members share: %v", err)
+	}
+	// A host that does not answer the live snapshot is unavailable, not a missing session (it said 404 before).
+	runtime.unavailable = true
+	unreachable := everyone
+	unreachable.OperationID = "unreachable_" + suffix
+	if err = store.SQL().QueryRowContext(ctx, `SELECT generation FROM paperboat.teams WHERE team_id=$1`, ownedElsewhere).Scan(&unreachable.ExpectedGeneration); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.GrantTerminalSessionSharing(personal, owner, ownedElsewhere, session, unreachable); !errors.Is(err, ErrMachineCapabilityUnavailable) {
+		t.Fatalf("sharing while the host does not answer: %v, want ErrMachineCapabilityUnavailable", err)
+	}
+	runtime.unavailable = false
+	toTeamOwner := teams.TerminalSessionGrantRequest{OperationID: "sel_owner_" + suffix, Audience: "selected_member", AccountID: stranger, Role: "interactive", Active: true}
+	if err = store.SQL().QueryRowContext(ctx, `SELECT generation FROM paperboat.teams WHERE team_id=$1`, ownedElsewhere).Scan(&toTeamOwner.ExpectedGeneration); err != nil {
+		t.Fatal(err)
+	}
+	shared, err = service.GrantTerminalSessionSharing(personal, owner, ownedElsewhere, session, toTeamOwner)
+	if err != nil || shared.Sharing.TeamID != ownedElsewhere || len(shared.Sharing.Grants) != 1 || shared.Sharing.Grants[0].AccountID != stranger {
+		t.Fatalf("member sharing to the team owner: %+v error=%v", shared.Sharing, err)
+	}
+	if _, err = service.EndTerminalSessionSharing(personal, owner, session, "end3_"+suffix, shared.Sharing.Generation); err != nil {
+		t.Fatalf("ending the share to the team owner: %v", err)
+	}
+
 	// An accepted close can precede the host's last running snapshot. Neither
 	// exact detail nor global paging may turn it back into an attachable session.
 	insert(`UPDATE user_machine_terminal_sessions SET desired_state='closed',runtime_state='closing' WHERE id=$1`, session)

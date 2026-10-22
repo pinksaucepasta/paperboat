@@ -115,6 +115,8 @@ func writeTerminalSharingMutation(w http.ResponseWriter, r *http.Request, item u
 		writeError(w, r, 409, "terminal_sharing_not_applied", "The session could not be shared; it may have just closed. Check `pb session list` and retry.")
 	case errors.Is(err, teams.ErrNotFound), errors.Is(err, usermachines.ErrTerminalSessionNotFound):
 		writeError(w, r, 404, "terminal_session_not_found", "Terminal session was not found.")
+	case errors.Is(err, usermachines.ErrMachineCapabilityUnavailable):
+		writeError(w, r, http.StatusConflict, "terminal_host_unavailable", "The machine running this session did not answer. Check it with `pb status`, then retry the same command.")
 	case err != nil:
 		writeError(w, r, 500, "internal_error", "Terminal sharing could not be changed. Retry the same operation.", err)
 	default:

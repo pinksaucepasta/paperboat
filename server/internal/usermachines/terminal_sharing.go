@@ -410,11 +410,15 @@ func (s *Service) GrantTerminalSessionSharing(ctx context.Context, account, team
 		return SharedTerminalSession{}, ErrTerminalSessionNotFound
 	}
 	current, err := s.TerminalSessionSharing(ctx, account, sessionID)
-	if err != nil || !current.CanManage || !current.ParticipantsAvailable || current.RuntimeGeneration < 1 {
-		if err != nil {
-			return SharedTerminalSession{}, err
-		}
+	if err != nil {
+		return SharedTerminalSession{}, err
+	}
+	if !current.CanManage {
 		return SharedTerminalSession{}, ErrTerminalSessionNotFound
+	}
+	if !current.ParticipantsAvailable || current.RuntimeGeneration < 1 {
+		// Sharing binds the live process generation; without the host's answer it cannot, but the session exists.
+		return SharedTerminalSession{}, ErrMachineCapabilityUnavailable
 	}
 	if in.Active && (current.State == "closed" || current.State == "closing" || current.State == "failed") {
 		return SharedTerminalSession{}, ErrTerminalSessionEnded
