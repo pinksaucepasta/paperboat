@@ -43,6 +43,9 @@ var (
 	ErrUnsupportedPlatform = errors.New("unsupported service platform")
 )
 
+// prepareServiceLogs is a variable so definition tests need not own the machine's log directory.
+var prepareServiceLogs = prepareNativeServiceLogs
+
 type Controller interface {
 	Apply(context.Context, string, bool) error
 	Remove(context.Context, string) error
@@ -304,7 +307,7 @@ func (i *Installer) writeDefinition(ctx context.Context) (previous []byte, upgra
 		return nil, false, fmt.Errorf("render service declaration: %w", err)
 	}
 	if i.config.Platform == "darwin" {
-		if err := prepareNativeServiceLogs(i.config, definition); err != nil {
+		if err := prepareServiceLogs(i.config, definition); err != nil {
 			return nil, false, fmt.Errorf("prepare service diagnostics: %w", err)
 		}
 	}

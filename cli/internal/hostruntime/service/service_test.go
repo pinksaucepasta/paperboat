@@ -173,7 +173,17 @@ func TestServiceDefinitionRejectsControlCharacters(t *testing.T) {
 	}
 }
 
+// withoutNativeServiceLogs lets a darwin definition be installed on any host: the real preparation
+// chowns files under /var/log to the enrolled account.
+func withoutNativeServiceLogs(t *testing.T) {
+	t.Helper()
+	old := prepareServiceLogs
+	prepareServiceLogs = func(Config, []byte) error { return nil }
+	t.Cleanup(func() { prepareServiceLogs = old })
+}
+
 func TestLaunchdDefinitionIsEscapedValidXML(t *testing.T) {
+	withoutNativeServiceLogs(t)
 	root := t.TempDir()
 	installer, err := New(Config{Platform: "darwin", ConfigRoot: root, Executable: executable(t), User: "test", Group: "test", Arguments: []string{"run"}, Environment: map[string]string{"HOME": "/Users/test"}, Controller: &controller{}})
 	if err != nil {
@@ -203,6 +213,7 @@ func TestLaunchdDefinitionIsEscapedValidXML(t *testing.T) {
 func TestHostServiceDefinitionsRunAsRootInBootDomain(t *testing.T) {
 	for _, platform := range []string{"linux", "darwin"} {
 		t.Run(platform, func(t *testing.T) {
+			withoutNativeServiceLogs(t)
 			root := t.TempDir()
 			installer, err := New(Config{Platform: platform, Kind: HostKind, ConfigRoot: root, Executable: executable(t), User: "root", Group: "root", Arguments: []string{"--uid", "501", "--gid", "20"}, Controller: &controller{}})
 			if err != nil {
