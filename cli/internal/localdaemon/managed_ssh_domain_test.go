@@ -47,11 +47,8 @@ func TestManagedSSHUsesDiscoveredDomainAndRefreshesAliases(t *testing.T) {
 			"local_access_base_domain": domain.Load().(string)})
 	})
 	mux.HandleFunc("GET /v1/machines", func(w http.ResponseWriter, r *http.Request) {
-		writeManagedSSHTestResponse(w, api.UserMachinePage{Items: []api.UserMachine{{ID: "machine_1", Alias: "build", State: "active", InstallationGeneration: 1}}, Pagination: api.Pagination{Limit: 200, Total: 1}})
-	})
-	mux.HandleFunc("GET /v1/machines/machine_1/ssh-target", func(w http.ResponseWriter, r *http.Request) {
-		writeManagedSSHTestResponse(w, api.ManagedSSHTarget{Type: "machine_target", Version: 1, MachineID: "machine_1",
-			MachineGeneration: 1, OSUser: "fixture-user", Port: 38222, ReconciliationVersion: 1})
+		writeManagedSSHTestResponse(w, api.UserMachinePage{Items: []api.UserMachine{{ID: "machine_1", Alias: "build", State: "active", InstallationGeneration: 1,
+			SSH: &api.MachineSSH{OSUser: "fixture-user", Port: 38222, TargetGeneration: 1}}}, Pagination: api.Pagination{Limit: 200, Total: 1}})
 	})
 	server := httptest.NewServer(mux)
 	defer server.Close()

@@ -191,24 +191,41 @@ func TestIssuePeerStreamRefreshesRejectedCredentialOnce(t *testing.T) {
 	}
 }
 
+// The SSH authority comes from the inventory item; an inventory refresh makes no request per machine.
 func TestAuthenticatedMachineSourceReconcilesSSHAuthority(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
-		switch request.URL.Path {
-		case "/v1/machines":
-			_, _ = writer.Write([]byte(`{"data":{"items":[{"id":"machine_1","alias":"studio","state":"active","online":true,"installation_generation":4}],"pagination":{"limit":200,"offset":0,"total":1,"next_offset":null}}}`))
-		case "/v1/machines/machine_1/ssh-target":
-			_, _ = writer.Write([]byte(`{"data":{"type":"machine_target","version":1,"machine_id":"machine_1","machine_generation":4,"os_user":"deploy","port":22,"reconciliation_version":2}}`))
-		case "/v1/machines/machine_1/ssh-host-keys":
-			_, _ = writer.Write([]byte(`{"data":{"type":"host_key_set","version":1,"set_id":"sshks_test","machine_id":"machine_1","machine_generation":4,"observation_generation":3,"fingerprint":"SHA256:test","keys":["ssh-ed25519 AAAA test"],"state":"active","reconciliation_version":5}}`))
-		default:
+		if request.URL.Path != "/v1/machines" {
+			t.Errorf("per-machine request %s %s; the inventory carries SSH targets", request.Method, request.URL.Path)
 			http.NotFound(writer, request)
+			return
 		}
+		_, _ = writer.Write([]byte(`{"data":{"items":[` +
+			`{"id":"machine_1","alias":"studio","state":"active","online":true,"installation_generation":4,"ssh":{"os_user":"deploy","port":22,"target_generation":4,"host_key_generation":4}},` +
+			`{"id":"machine_2","alias":"build","state":"active","online":true,"installation_generation":2,"ssh":{"os_user":"ci","port":2222,"target_generation":2,"host_key_generation":0}},` +
+			`{"id":"machine_3","alias":"old","state":"active","online":true,"installation_generation":3,"ssh":{"os_user":"x","port":22,"target_generation":2,"host_key_generation":2}},` +
+			`{"id":"machine_4","alias":"away","state":"active","online":false,"installation_generation":1,"ssh":{"os_user":"y","port":22,"target_generation":1,"host_key_generation":1}}` +
+			`],"pagination":{"limit":200,"offset":0,"total":4,"next_offset":null}}}`))
 	}))
 	defer server.Close()
 	machines, err := (AuthenticatedMachineSource{ServerURL: server.URL, Auth: &rotatingAuthSource{}}).ListUserMachines(context.Background())
-	if err != nil || len(machines) != 1 || machines[0].SSHAuthority.TargetGeneration != 4 || machines[0].SSHAuthority.HostKeyGeneration != 4 {
+	if err != nil || len(machines) != 4 {
 		t.Fatalf("machines=%+v err=%v", machines, err)
+	}
+	want := []struct {
+		user string
+		port uint16
+		auth api.SSHAuthority
+	}{
+		{"deploy", 22, api.SSHAuthority{TargetGeneration: 4, HostKeyGeneration: 4}},
+		{"ci", 2222, api.SSHAuthority{TargetGeneration: 2}},
+		{"", 0, api.SSHAuthority{}}, // target of an older installation
+		{"", 0, api.SSHAuthority{}}, // offline
+	}
+	for i, machine := range machines {
+		if machine.SSHUser != want[i].user || machine.SSHPort != want[i].port || machine.SSHAuthority != want[i].auth {
+			t.Errorf("%s: user=%q port=%d authority=%+v, want %+v", machine.Alias, machine.SSHUser, machine.SSHPort, machine.SSHAuthority, want[i])
+		}
 	}
 }
 

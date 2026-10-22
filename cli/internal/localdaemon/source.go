@@ -256,7 +256,7 @@ func (s AuthenticatedMachineSource) ListUserMachines(ctx context.Context) ([]api
 		machines[index].SSHLocalReady = s.SSHLocalReady
 		machines[index].SSHLocalCode = s.SSHLocalCode
 	}
-	return reconcileSSHAuthorities(ctx, client, machines)
+	return applyListedSSH(machines), nil
 }
 
 // RateLimitedPeerApprovalReporter bounds repeated diagnostics from inventory
@@ -287,62 +287,18 @@ func RateLimitedPeerApprovalReporter(clock func() time.Time, interval time.Durat
 	}
 }
 
-func reconcileSSHAuthorities(ctx context.Context, client *api.Client, machines []api.UserMachine) ([]api.UserMachine, error) {
-	const maximumConcurrentLookups = 8
-	lookupCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	sem := make(chan struct{}, maximumConcurrentLookups)
-	var wg sync.WaitGroup
-	var firstErr error
-	var errMu sync.Mutex
+// applyListedSSH copies each online machine's listed SSH target into the fields the local
+// status and SSH configuration use. The inventory carries it, so a refresh makes no
+// per-machine lookups (it used to cost two requests per machine on every refresh).
+func applyListedSSH(machines []api.UserMachine) []api.UserMachine {
 	for index := range machines {
 		machine := &machines[index]
-		if !machine.Online || machine.InstallationGeneration <= 0 || machine.State == "revoked" || machine.State == "deleted" {
+		ssh, ok := machine.CurrentSSH()
+		if !machine.Online || machine.State == "revoked" || machine.State == "deleted" || !ok {
 			continue
 		}
-		wg.Add(1)
-		go func(machine *api.UserMachine) {
-			defer wg.Done()
-			select {
-			case sem <- struct{}{}:
-				defer func() { <-sem }()
-			case <-lookupCtx.Done():
-				return
-			}
-			generation := uint64(machine.InstallationGeneration)
-			target, targetErr := client.ManagedSSHTarget(lookupCtx, machine.ID, generation)
-			if api.IsNotFound(targetErr) {
-				return
-			}
-			if targetErr != nil {
-				recordSSHLookupError(&errMu, &firstErr, cancel, inventorySourceFailure("ssh_target", targetErr))
-				return
-			}
-			machine.SSHUser, machine.SSHPort = target.OSUser, target.Port
-			keys, keysErr := client.ManagedSSHHostKeys(lookupCtx, machine.ID, generation)
-			if api.IsNotFound(keysErr) {
-				machine.SSHAuthority.TargetGeneration = target.MachineGeneration
-				return
-			}
-			if keysErr != nil {
-				recordSSHLookupError(&errMu, &firstErr, cancel, inventorySourceFailure("ssh_host_keys", keysErr))
-				return
-			}
-			machine.SSHAuthority = api.SSHAuthority{TargetGeneration: target.MachineGeneration, HostKeyGeneration: keys.MachineGeneration}
-		}(machine)
+		machine.SSHUser, machine.SSHPort = ssh.OSUser, ssh.Port
+		machine.SSHAuthority = api.SSHAuthority{TargetGeneration: ssh.TargetGeneration, HostKeyGeneration: ssh.HostKeyGeneration}
 	}
-	wg.Wait()
-	if firstErr != nil {
-		return nil, firstErr
-	}
-	return machines, nil
-}
-
-func recordSSHLookupError(mu *sync.Mutex, destination *error, cancel context.CancelFunc, err error) {
-	mu.Lock()
-	defer mu.Unlock()
-	if *destination == nil {
-		*destination = err
-		cancel()
-	}
+	return machines
 }

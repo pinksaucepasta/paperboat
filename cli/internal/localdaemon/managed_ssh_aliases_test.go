@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
-	"strings"
 	"sync"
 	"testing"
 
@@ -15,42 +13,23 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 )
 
+// Alias targets come from the inventory itself: one list, never a lookup per machine.
 func TestManagedSSHAliasTargetsReconcilesChangedAndRemovedMachines(t *testing.T) {
-	type targetState struct {
-		mu       sync.RWMutex
-		machines []api.UserMachine
-		targets  map[string]api.ManagedSSHTarget
-	}
-	state := &targetState{
-		machines: []api.UserMachine{{
-			ID: "machine_1", Alias: "victus", State: "active", InstallationGeneration: 1,
-		}},
-		targets: map[string]api.ManagedSSHTarget{
-			"machine_1": {Type: "machine_target", Version: 1, MachineID: "machine_1", MachineGeneration: 1, OSUser: "Pujan", Port: 38222, ReconciliationVersion: 1},
-		},
-	}
+	var mu sync.RWMutex
+	machines := []api.UserMachine{{
+		ID: "machine_1", Alias: "victus", State: "active", InstallationGeneration: 1,
+		SSH: &api.MachineSSH{OSUser: "Pujan", Port: 38222, TargetGeneration: 1},
+	}}
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		state.mu.RLock()
-		defer state.mu.RUnlock()
+		mu.RLock()
+		defer mu.RUnlock()
 		writer.Header().Set("Content-Type", "application/json")
-		switch {
-		case request.URL.Path == "/v1/machines":
-			writeManagedSSHTestResponse(writer, api.UserMachinePage{Items: append([]api.UserMachine{}, state.machines...), Pagination: api.Pagination{Limit: 200, Total: len(state.machines)}})
-		case strings.HasPrefix(request.URL.Path, "/v1/machines/") && strings.HasSuffix(request.URL.Path, "/ssh-target"):
-			machineID, err := url.PathUnescape(strings.TrimSuffix(strings.TrimPrefix(request.URL.Path, "/v1/machines/"), "/ssh-target"))
-			if err != nil {
-				http.Error(writer, "invalid machine", http.StatusBadRequest)
-				return
-			}
-			target, ok := state.targets[machineID]
-			if !ok {
-				http.NotFound(writer, request)
-				return
-			}
-			writeManagedSSHTestResponse(writer, target)
-		default:
+		if request.URL.Path != "/v1/machines" {
+			t.Errorf("per-machine request %s %s; the inventory carries SSH targets", request.Method, request.URL.Path)
 			http.NotFound(writer, request)
+			return
 		}
+		writeManagedSSHTestResponse(writer, api.UserMachinePage{Items: append([]api.UserMachine{}, machines...), Pagination: api.Pagination{Limit: 200, Total: len(machines)}})
 	}))
 	defer server.Close()
 	client := api.New(server.URL, config.Credential{AccessToken: "test-token"}, server.Client())
@@ -61,21 +40,26 @@ func TestManagedSSHAliasTargetsReconcilesChangedAndRemovedMachines(t *testing.T)
 	}
 	assertManagedSSHAliasTarget(t, got, managedSSHExpectedAliasTarget{alias: "victus", user: "Pujan", port: 38222})
 
-	state.mu.Lock()
-	state.machines[0].InstallationGeneration = 2
-	state.targets["machine_1"] = api.ManagedSSHTarget{
-		Type: "machine_target", Version: 1, MachineID: "machine_1", MachineGeneration: 2, OSUser: "Administrator", Port: 38223, ReconciliationVersion: 2,
-	}
-	state.mu.Unlock()
+	mu.Lock()
+	machines[0].InstallationGeneration = 2
+	machines[0].SSH = &api.MachineSSH{OSUser: "Administrator", Port: 38223, TargetGeneration: 2}
+	mu.Unlock()
 	got, err = managedSSHAliasTargets(context.Background(), client)
 	if err != nil {
 		t.Fatalf("changed target reconciliation: %v", err)
 	}
 	assertManagedSSHAliasTarget(t, got, managedSSHExpectedAliasTarget{alias: "victus", user: "Administrator", port: 38223})
 
-	state.mu.Lock()
-	state.machines = nil
-	state.mu.Unlock()
+	mu.Lock()
+	machines[0].InstallationGeneration = 3 // re-enrolled; its old target no longer applies
+	mu.Unlock()
+	if got, err = managedSSHAliasTargets(context.Background(), client); err != nil || len(got) != 0 {
+		t.Fatalf("a target from an older installation became an alias: %+v %v", got, err)
+	}
+
+	mu.Lock()
+	machines = nil
+	mu.Unlock()
 	got, err = managedSSHAliasTargets(context.Background(), client)
 	if err != nil {
 		t.Fatalf("removed target reconciliation: %v", err)

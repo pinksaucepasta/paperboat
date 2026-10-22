@@ -47,11 +47,35 @@ type UserMachine struct {
 	Availability           AvailabilityPolicy      `json:"availability"`
 	RuntimeDiagnostics     RuntimeDiagnostics      `json:"runtime_diagnostics"`
 	Installation           *ClientInstallation     `json:"installation,omitempty"`
-	SSHAuthority           SSHAuthority            `json:"-"`
-	SSHLocalReady          bool                    `json:"-"`
-	SSHLocalCode           string                  `json:"-"`
-	SSHUser                string                  `json:"-"`
-	SSHPort                uint16                  `json:"-"`
+	// SSH is the machine's managed SSH target for its current installation, listed only when
+	// the caller may use managed SSH there.
+	SSH           *MachineSSH  `json:"ssh,omitempty"`
+	SSHAuthority  SSHAuthority `json:"-"`
+	SSHLocalReady bool         `json:"-"`
+	SSHLocalCode  string       `json:"-"`
+	SSHUser       string       `json:"-"`
+	SSHPort       uint16       `json:"-"`
+}
+
+// MachineSSH is the managed SSH target an inventory item carries; HostKeyGeneration is 0 until
+// the machine has active host keys for that installation.
+type MachineSSH struct {
+	OSUser            string `json:"os_user"`
+	Port              uint16 `json:"port"`
+	TargetGeneration  uint64 `json:"target_generation"`
+	HostKeyGeneration uint64 `json:"host_key_generation"`
+}
+
+// CurrentSSH returns the listed SSH target when it is complete and belongs to the machine's
+// current installation.
+func (m UserMachine) CurrentSSH() (MachineSSH, bool) {
+	if m.SSH == nil || m.SSH.OSUser == "" || m.SSH.Port == 0 || m.InstallationGeneration < 1 || m.SSH.TargetGeneration != uint64(m.InstallationGeneration) {
+		return MachineSSH{}, false
+	}
+	if m.SSH.HostKeyGeneration != 0 && m.SSH.HostKeyGeneration != m.SSH.TargetGeneration {
+		return MachineSSH{}, false
+	}
+	return *m.SSH, true
 }
 
 type MachineCapabilitySelection struct {
