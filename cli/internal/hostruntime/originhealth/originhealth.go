@@ -7,6 +7,7 @@ package originhealth
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/neterr"
 	"net"
 	"sync"
 	"syscall"
@@ -59,7 +60,7 @@ func Classify(err error) Reason {
 	switch {
 	case err == nil:
 		return ""
-	case errors.Is(err, syscall.ECONNREFUSED):
+	case neterr.Refused(err):
 		return ReasonRefused
 	case errors.Is(err, context.DeadlineExceeded), errors.As(err, &timeout) && timeout.Timeout():
 		return ReasonTimeout

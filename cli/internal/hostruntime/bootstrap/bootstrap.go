@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/neterr"
 	"io"
 	"net"
 	"net/http"
@@ -291,7 +292,7 @@ func transientBootstrapLeaf(err error) bool {
 		return true
 	}
 	if errno, ok := err.(syscall.Errno); ok {
-		return errno == syscall.ECONNREFUSED || errno == syscall.ECONNRESET || errno == syscall.ECONNABORTED || errno == syscall.EPIPE
+		return neterr.Refused(errno) || neterr.Reset(errno) || neterr.Aborted(errno) || errno == syscall.EPIPE
 	}
 	return false
 }

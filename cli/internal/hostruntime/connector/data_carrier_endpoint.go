@@ -5,11 +5,11 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/neterr"
 	"io"
 	"net"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	quic "github.com/quic-go/quic-go"
@@ -282,7 +282,7 @@ func dataCarrierDialFallbackEligible(err error) bool {
 	if errors.Is(err, ErrInvalidDataCarrierEndpoint) || errors.Is(err, ErrDataCarrierAdmission) {
 		return false
 	}
-	if errors.Is(err, io.EOF) || errors.Is(err, syscall.ECONNREFUSED) {
+	if errors.Is(err, io.EOF) || neterr.Refused(err) {
 		return true
 	}
 	var networkErr net.Error

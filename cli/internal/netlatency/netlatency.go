@@ -80,21 +80,23 @@ func Probe(ctx context.Context, targets []Target, dial Dial) []Measurement {
 			case <-ctx.Done():
 				return
 			}
-			best := time.Duration(0)
+			// A dial that succeeds within the clock's resolution measures 0 (Windows ticks at about
+			// 16 ms), so success is tracked apart from the duration.
+			best, measured := time.Duration(0), false
 			for range Attempts {
 				attempt, cancel := context.WithTimeout(ctx, ProbeTimeout)
 				started := time.Now()
 				err := dial(attempt, target.Address)
 				elapsed := time.Since(started)
 				cancel()
-				if err == nil && elapsed <= MaxLatency && (best == 0 || elapsed < best) {
-					best = elapsed
+				if err == nil && elapsed <= MaxLatency && (!measured || elapsed < best) {
+					best, measured = elapsed, true
 				}
 				if ctx.Err() != nil {
 					return
 				}
 			}
-			if best == 0 {
+			if !measured {
 				return
 			}
 			mu.Lock()

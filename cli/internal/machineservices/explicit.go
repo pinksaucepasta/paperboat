@@ -3,6 +3,7 @@ package machineservices
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/neterr"
 	"net"
 	"reflect"
 	"strconv"
@@ -136,7 +137,7 @@ func explicitProbeAbsence(err error) (expected bool) {
 			pending = append(pending, child)
 			continue
 		}
-		if errno, ok := current.(syscall.Errno); ok && errno == syscall.ECONNREFUSED {
+		if errno, ok := current.(syscall.Errno); ok && neterr.Refused(errno) {
 			terminals++
 			continue
 		}
