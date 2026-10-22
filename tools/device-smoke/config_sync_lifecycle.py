@@ -371,7 +371,7 @@ def main():
                     compare = value
                     break
                 time.sleep(3)
-            assert compare is not None, 'compare never returned both versions'
+            assert compare is not None, 'compare never returned both versions: ' + (result.stdout or result.stderr)[-300:]
             assert base64.b64decode(compare['local']['content']).decode() == expected_machine, compare['local']
             assert base64.b64decode(compare['managed']['content']).decode() == expected_repository, compare['managed']
             resolved = pb_json('config', 'conflict', 'resolve', alias, path, '--keep', keep)
