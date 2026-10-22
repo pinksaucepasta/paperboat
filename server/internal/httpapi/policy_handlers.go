@@ -93,7 +93,7 @@ func policyHandler(service policyAPI, kind string) http.HandlerFunc {
 			writePolicyError(w, r, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, out)
+		writeJSON(w, http.StatusOK, SuccessResponse{Data: out})
 	}
 }
 

@@ -72,6 +72,17 @@ func TestAPITokenBearerRequests(t *testing.T) {
 		handler.ServeHTTP(rec, req)
 		var out map[string]any
 		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		// Successful responses use the server's data envelope, as every client expects.
+		if rec.Code < 300 {
+			raw, ok := out["data"]
+			if !ok {
+				t.Fatalf("%s %s: response is not in the data envelope: %s", method, path, rec.Body.String())
+			}
+			if data, isObject := raw.(map[string]any); isObject {
+				return rec.Code, data
+			}
+			return rec.Code, map[string]any{"data": raw}
+		}
 		return rec.Code, out
 	}
 	code := func(out map[string]any) string {
@@ -109,9 +120,8 @@ func TestAPITokenBearerRequests(t *testing.T) {
 	session := func(bearer string) string {
 		t.Helper()
 		status, out := do(http.MethodPost, "/v1/auth/api-token-sessions", bearer, `{"client_label":"ci runner","device_type":"server","os":"linux"}`)
-		data, _ := out["data"].(map[string]any)
-		access, _ := data["access_token"].(string)
-		if status != http.StatusOK || access == "" || data["refresh_token"] == "" {
+		access, _ := out["access_token"].(string)
+		if status != http.StatusOK || access == "" || out["refresh_token"] == "" {
 			t.Fatalf("api token session = %d %v", status, out)
 		}
 		return access

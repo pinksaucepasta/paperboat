@@ -138,7 +138,7 @@ func apiTokenCreate(tokens *apitokens.Service) http.HandlerFunc {
 			writeAPITokenError(w, r, tokens, err)
 			return
 		}
-		writeJSON(w, http.StatusCreated, map[string]any{"api_token": apiTokenView(token), "secret": secret})
+		writeJSON(w, http.StatusCreated, SuccessResponse{Data: map[string]any{"api_token": apiTokenView(token), "secret": secret}})
 	}
 }
 
@@ -157,7 +157,7 @@ func apiTokenList(tokens *apitokens.Service) http.HandlerFunc {
 		for _, t := range list {
 			out = append(out, apiTokenView(t))
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"api_tokens": out})
+		writeJSON(w, http.StatusOK, SuccessResponse{Data: map[string]any{"api_tokens": out}})
 	}
 }
 
@@ -172,7 +172,7 @@ func apiTokenRevoke(tokens *apitokens.Service) http.HandlerFunc {
 			writeAPITokenError(w, r, tokens, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"api_token": apiTokenView(token)})
+		writeJSON(w, http.StatusOK, SuccessResponse{Data: map[string]any{"api_token": apiTokenView(token)}})
 	}
 }
 
