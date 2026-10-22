@@ -3,7 +3,12 @@ import Lockup from "./Lockup.astro"
 import { navGroups, getStartedLinks, legalLinks } from "../nav"
 // Groups with links become columns; single links (Pricing, Docs) share one column.
 const columns = [
-  ...navGroups.filter((group) => group.links.length).map((group) => ({ title: group.title, links: group.links })),
+  ...navGroups
+    .filter((group) => group.links.length)
+    .map((group) => ({
+      title: group.title,
+      links: group.href ? [{ href: group.href, label: "Overview" }, ...group.links] : group.links,
+    })),
   {
     title: "Get started",
     links: [

@@ -1,6 +1,6 @@
 ---
 import Section from "./Section.astro"
-import { compare, plans, teamTrial } from "../site"
+import { plans, teamTrial } from "../site"
 ---
 
 <Section id="pricing" title="Free to start.">
@@ -27,25 +27,6 @@ import { compare, plans, teamTrial } from "../site"
     }
   </div>
   <p class="trial">{teamTrial}</p>
-  <table class="compare">
-    <thead>
-      <tr><th scope="col"><span class="sr">Feature</span></th><th scope="col">Free</th><th scope="col">Pro</th><th scope="col">Team</th></tr>
-    </thead>
-    <tbody>
-      {
-        compare.map((row) => (
-          <tr>
-            <th scope="row">{row.feature}</th>
-            {[row.free, row.pro, row.team].map((cell) => (
-              <td class={cell === "Coming" ? "coming" : undefined}>
-                {cell === true ? "Included" : cell === false ? "—" : cell}
-              </td>
-            ))}
-          </tr>
-        ))
-      }
-    </tbody>
-  </table>
 </Section>
 
 <style>
@@ -92,48 +73,6 @@ import { compare, plans, teamTrial } from "../site"
     font-size: 0.9375rem;
     color: var(--fog);
     max-width: 70ch;
-  }
-
-  .compare {
-    width: 100%;
-    margin-top: 40px;
-    border-collapse: collapse;
-    font-size: 0.9375rem;
-  }
-
-  .compare th,
-  .compare td {
-    padding: 12px 8px;
-    text-align: left;
-    border-bottom: 1px solid var(--rule);
-  }
-
-  .compare thead th {
-    font-family: var(--font-brand);
-    font-weight: 600;
-    color: var(--ink);
-  }
-
-  .compare tbody th {
-    font-weight: 400;
-    color: var(--ink);
-  }
-
-  .compare td {
-    color: var(--fog);
-    width: 18%;
-  }
-
-  .compare td.coming {
-    font-style: italic;
-  }
-
-  .sr {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
   }
 
   @media (min-width: 860px) {

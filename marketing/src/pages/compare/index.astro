@@ -2,44 +2,177 @@
 import Page from "../../layouts/Page.astro"
 import PageHead from "../../components/PageHead.astro"
 import Section from "../../components/Section.astro"
-import { compares } from "../../compare-data"
+import Closing from "../../components/Closing.astro"
+import { compares, rowNames, usMatrix } from "../../compare-data"
+
+/** Column headings: "an enterprise VPN" reads as "Enterprise VPN" in a table. */
+const label = (name: string) =>
+  /^an? /.test(name) ? name.replace(/^an? (.)/, (_, c: string) => c.toUpperCase()) : name
 ---
 
-<Page title="Compare — Paperboat" description="How Paperboat compares with Tailscale, ngrok, Cloudflare Tunnel, Teleport and NetBird.">
+<Page
+  title="Compare — Paperboat"
+  description="How Paperboat compares with Tailscale, ngrok, Cloudflare, Teleport, NetBird, ZeroTier, Twingate, enterprise VPNs, plain SSH and VS Code Remote Tunnels."
+>
   <PageHead title="Compare">
-    <p>Honest side-by-sides. Each tool is good at something; here is where Paperboat fits.</p>
+    <p>
+      Paperboat is for working on your own machines: terminals that survive a dropped connection, SSH and files,
+      previews and tunnels, and machines that reach each other directly. Most tools below do one of these well. Here
+      is what each does, from its own documentation.
+    </p>
   </PageHead>
-  <Section id="compare-list" title="Paperboat and…">
-    <ul class="list">
+
+  <Section id="matrix" title="At a glance">
+    <div class="matrix-scroll" tabindex="0" aria-label="Comparison table, scrolls sideways">
+      <table class="matrix">
+        <thead>
+          <tr>
+            <th scope="col"><span class="visually-hidden">Feature</span></th>
+            <th scope="col" class="us">Paperboat</th>
+            {
+              compares.map((compare) => (
+                <th scope="col">
+                  <a href={`/compare/${compare.slug}`}>{label(compare.name)}</a>
+                </th>
+              ))
+            }
+          </tr>
+        </thead>
+        <tbody>
+          {
+            rowNames.map((row, index) => (
+              <tr>
+                <th scope="row">{row}</th>
+                <td class="us">{usMatrix[index]}</td>
+                {compares.map((compare) => (
+                  <td>{compare.matrix[index]}</td>
+                ))}
+              </tr>
+            ))
+          }
+        </tbody>
+      </table>
+    </div>
+  </Section>
+
+  <Section id="picks" title="Which one to pick" tone="surface">
+    <Fragment slot="text">
+      <p>Each tool is good at something. One line each way; the full side-by-side is one click away.</p>
+    </Fragment>
+    <ul class="picks">
       {
         compares.map((compare) => (
-          <li>
-            <a class="item surface-pattern" href={`/compare/${compare.slug}`}>
-              <span class="subtitle">{compare.title}</span>
-              <span class="body">{compare.summary}</span>
-            </a>
+          <li class="pick">
+            <h3 class="subtitle">
+              <a href={`/compare/${compare.slug}`}>Paperboat vs {label(compare.name)}</a>
+            </h3>
+            <p class="body">
+              <strong>Pick Paperboat when</strong> {compare.usWhen[0].replace(/^./, (c) => c.toLowerCase())}
+            </p>
+            <p class="body">
+              <strong>Pick {label(compare.name)} when</strong> {compare.themWhen[0].replace(/^./, (c) => c.toLowerCase())}
+            </p>
           </li>
         ))
       }
     </ul>
   </Section>
+
+  <Closing />
 </Page>
 
 <style>
-  .list {
-    display: grid;
-    gap: 16px;
+  .matrix-scroll {
+    overflow-x: auto;
+    border-radius: 12px;
+    box-shadow: 0 0 0 1px var(--rule);
   }
 
-  .item {
+  .matrix {
+    border-collapse: collapse;
+    font-size: 0.875rem;
+    min-width: 100%;
+  }
+
+  .matrix th,
+  .matrix td {
+    padding: 12px 14px;
+    text-align: left;
+    vertical-align: top;
+    border-bottom: 1px solid var(--rule);
+    min-width: 128px;
+  }
+
+  .matrix thead th {
+    font-family: var(--font-brand);
+    font-weight: 600;
+    color: var(--ink);
+    white-space: nowrap;
+  }
+
+  .matrix thead a {
+    color: inherit;
+  }
+
+  .matrix thead a:hover {
+    color: var(--link);
+  }
+
+  /* The feature names stay in view while the table scrolls sideways. */
+  .matrix tbody th,
+  .matrix thead th:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: var(--background);
+    min-width: 168px;
+    font-weight: 500;
+    color: var(--ink);
+    box-shadow: 1px 0 0 var(--rule);
+  }
+
+  .matrix td {
+    color: var(--fog);
+  }
+
+  .matrix .us {
+    color: var(--ink);
+    background: var(--surface);
+  }
+
+  .matrix tbody tr:last-child th,
+  .matrix tbody tr:last-child td {
+    border-bottom: 0;
+  }
+
+  .picks {
+    display: grid;
+    gap: 32px;
+  }
+
+  .pick {
     display: grid;
     gap: 8px;
-    padding: clamp(24px, 3.2vw, 36px);
+    align-content: start;
+  }
+
+  .pick a {
+    color: inherit;
+  }
+
+  .pick a:hover {
+    color: var(--link);
+  }
+
+  .pick strong {
+    font-weight: 500;
+    color: var(--ink);
   }
 
   @media (min-width: 860px) {
-    .list {
+    .picks {
       grid-template-columns: repeat(2, 1fr);
+      gap: 40px 48px;
     }
   }
 </style>

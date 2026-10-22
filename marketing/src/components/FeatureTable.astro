@@ -1,12 +1,12 @@
 ---
 import Section from "./Section.astro"
 import Icon from "./Icon.astro"
-import { features, planNames, bandwidthRow } from "../pricing-data"
+import { featureRows, planNames, bandwidthRow } from "../pricing-data"
 ---
 
-<Section id="compare-plans" title="Everything is on every plan." tone="surface">
+<Section id="compare-plans" title="What each plan includes." tone="surface">
   <Fragment slot="text">
-    <p>Every plan has every feature. Only the bandwidth changes.</p>
+    <p>Free and Pro have everything for one person; only the bandwidth changes. Team adds people.</p>
   </Fragment>
   <div class="table-scroll">
     <table class="plans-table">
@@ -22,13 +22,23 @@ import { features, planNames, bandwidthRow } from "../pricing-data"
           {bandwidthRow.map((value) => <td>{value}</td>)}
         </tr>
         {
-          features.map((feature) => (
+          featureRows.map((row) => (
             <tr>
-              <th scope="row">{feature}</th>
-              {planNames.map(() => (
+              <th scope="row">{row.feature}</th>
+              {row.cells.map((cell) => (
                 <td>
-                  <Icon name="check" size={18} class="yes" />
-                  <span class="visually-hidden">Included</span>
+                  {cell === true ? (
+                    <>
+                      <Icon name="check" size={18} class="yes" />
+                      <span class="visually-hidden">Included</span>
+                    </>
+                  ) : cell === false ? (
+                    <span class="no">
+                      —<span class="visually-hidden">Not included</span>
+                    </span>
+                  ) : (
+                    <span class:list={[cell === "Coming" && "coming"]}>{cell}</span>
+                  )}
                 </td>
               ))}
             </tr>
@@ -77,6 +87,11 @@ import { features, planNames, bandwidthRow } from "../pricing-data"
   .bandwidth-row td {
     font-weight: 500;
     color: var(--ink);
+  }
+
+  .plans-table .no,
+  .plans-table .coming {
+    color: var(--fog);
   }
 
   .plans-table :global(.yes) {

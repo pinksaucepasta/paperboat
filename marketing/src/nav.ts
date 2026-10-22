@@ -5,6 +5,7 @@ import { legalPages } from "./legal-data"
 
 /** The site's navigation, in one place: the header and the footer both read it. */
 export type NavLink = { href: string; label: string }
+/** A group with an `href` is one link in the header (its own page lists the rest); the footer lists its links. */
 export type NavGroup = { title: string; href?: string; links: NavLink[] }
 
 export const navGroups: NavGroup[] = [
@@ -14,6 +15,7 @@ export const navGroups: NavGroup[] = [
   },
   {
     title: "Compare",
+    href: "/compare",
     links: compares.map((compare) => ({ href: `/compare/${compare.slug}`, label: `Paperboat vs ${compare.name}` })),
   },
   { title: "Pricing", href: "/pricing", links: [] },

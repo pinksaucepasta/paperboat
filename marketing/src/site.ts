@@ -51,24 +51,6 @@ export const plans = [
   },
 ] as const
 
-/** The comparison under the plans: what each plan includes (true), not (false), or a note. */
-export const compare: { feature: string; free: boolean | string; pro: boolean | string; team: boolean | string }[] = [
-  { feature: "Machines", free: "Unlimited", pro: "Unlimited", team: "Unlimited" },
-  { feature: "Relay and edge bandwidth a month", free: "5 GB", pro: "100 GB", team: "100 GB per seat" },
-  { feature: "Direct machine-to-machine traffic", free: "Free", pro: "Free", team: "Free" },
-  { feature: "Terminals, files, SSH, ENV, config sync", free: true, pro: true, team: true },
-  { feature: "Previews and tunnels", free: "Unlimited", pro: "Unlimited", team: "Unlimited" },
-  { feature: "Custom domains", free: true, pro: true, team: true },
-  { feature: "Tags and access rules", free: true, pro: true, team: true },
-  { feature: "Share a terminal session or a preview link", free: true, pro: true, team: true },
-  { feature: "Team members", free: false, pro: false, team: true },
-  { feature: "Lasting access to each other's machines", free: false, pro: false, team: true },
-  { feature: "Roles", free: false, pro: false, team: "Coming" },
-  { feature: "SSO and SCIM", free: false, pro: false, team: "Coming" },
-  { feature: "Audit log export", free: false, pro: false, team: "Coming" },
-  { feature: "Invoices", free: false, pro: false, team: "Coming" },
-]
-
 /** The Team plan's trial, said once wherever it is mentioned. */
 export const teamTrial =
   "Team starts with a 14-day trial. Your card is taken at the start and billing begins on day 15. We remind you 3 days before, and cancelling during the trial costs nothing."

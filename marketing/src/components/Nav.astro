@@ -11,7 +11,7 @@ import { navGroups } from "../nav"
     <nav class="nav-links" aria-label="Main">
       {
         navGroups.map((group) =>
-          group.links.length ? (
+          group.links.length && !group.href ? (
             <div class="group">
               <button type="button" class="group-title" aria-haspopup="true">
                 {group.title}
@@ -36,7 +36,7 @@ import { navGroups } from "../nav"
       <nav class="mobile-panel" aria-label="Menu">
         {
           navGroups.map((group) =>
-            group.links.length ? (
+            group.links.length && !group.href ? (
               <div class="mobile-group">
                 <div class="mobile-title">{group.title}</div>
                 {group.links.map((link) => (

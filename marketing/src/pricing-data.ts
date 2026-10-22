@@ -1,23 +1,30 @@
 /**
- * What the pricing page compares. Every feature is on every plan (PLAN 1.3); only the bandwidth
- * differs, and it comes from `plans` in site.ts.
+ * What the pricing page compares (user pricing decisions 2026-10-22). Free and Pro have everything
+ * for one person and differ only in bandwidth, which comes from `plans` in site.ts; Team adds people.
  */
-import { plans } from "./site"
+import { plans, teamTrial } from "./site"
 
-/** Features, as people name them. All included on all plans. */
-export const features = [
-  "Terminals that survive a dropped connection, with replay",
-  "Remote commands",
-  "SSH, SCP, SFTP and rsync, with managed keys",
-  "Send and receive files",
-  "Previews of local ports",
-  "Tunnels with permanent addresses and your own domains",
-  "Environment variables, end-to-end encrypted",
-  "Teams with roles and sharing",
-  "Config sync from a Git repository",
-  "The web console",
-  "Self-hosted relays and tunnel servers",
-  "Unlimited machines",
+/** One row per feature: true is included, false is not, a string is shown as it is. */
+export type PlanCell = boolean | string
+export const featureRows: { feature: string; cells: [PlanCell, PlanCell, PlanCell] }[] = [
+  { feature: "Machines", cells: ["Unlimited", "Unlimited", "Unlimited"] },
+  { feature: "Terminals that survive a dropped connection, with replay", cells: [true, true, true] },
+  { feature: "Remote commands", cells: [true, true, true] },
+  { feature: "SSH, SCP, SFTP and rsync, with managed keys", cells: [true, true, true] },
+  { feature: "Send and receive files", cells: [true, true, true] },
+  { feature: "Previews and tunnels", cells: ["Unlimited", "Unlimited", "Unlimited"] },
+  { feature: "Your own domains", cells: [true, true, true] },
+  { feature: "Environment variables, end-to-end encrypted", cells: [true, true, true] },
+  { feature: "Config sync from a Git repository", cells: [true, true, true] },
+  { feature: "Tags and access rules", cells: [true, true, true] },
+  { feature: "Share a terminal session or a preview link", cells: [true, true, true] },
+  { feature: "Self-hosted relays and tunnel servers", cells: [true, true, true] },
+  { feature: "Team members", cells: [false, false, true] },
+  { feature: "Lasting access to each other’s machines", cells: [false, false, true] },
+  { feature: "Roles", cells: [false, false, "Coming"] },
+  { feature: "SSO and SCIM", cells: [false, false, "Coming"] },
+  { feature: "Audit log export", cells: [false, false, "Coming"] },
+  { feature: "Invoices", cells: [false, false, "Coming"] },
 ]
 
 export const planNames = plans.map((plan) => plan.name)
@@ -50,7 +57,16 @@ export const faq = [
   },
   {
     question: "Are features locked behind a plan?",
-    answer: "No. Every plan has every feature. Plans only differ in bandwidth.",
+    answer:
+      "Free and Pro have everything one person needs, with no limits on previews or tunnels; they differ only in bandwidth. Team adds people: members and lasting access to each other’s machines.",
+  },
+  {
+    question: "Do I need Team to share with someone?",
+    answer: "No. Sharing a terminal session or a preview link is free on every plan. Team is for people who work on each other’s machines every day.",
+  },
+  {
+    question: "How does the Team trial work?",
+    answer: teamTrial,
   },
   {
     question: "What if I host my own relay or tunnel server?",
