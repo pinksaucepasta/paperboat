@@ -3,12 +3,14 @@
 package runtime
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"io"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -399,6 +401,7 @@ func TestStandaloneUpdateGateFenceLeaseReleasesAbandonedDrain(t *testing.T) {
 	}
 	drainedGate(t, gate, "transaction_01")
 	waitFenceReleased(t, fence)
+	waitStateRecordsRollback(t, statePath)
 	reloaded, err := newStandaloneUpdateGate(fence.config(statePath, 50*time.Millisecond))
 	if err != nil {
 		t.Fatal(err)
@@ -416,6 +419,22 @@ func TestStandaloneUpdateGateFenceLeaseReleasesAbandonedDrain(t *testing.T) {
 		t.Fatal("restart lost the fence of a pending update")
 	}
 	waitFenceReleased(t, fence)
+}
+
+// The gate frees the fence before it persists the rollback, so a test that reloads the state right
+// after the release can read the old record (it did on a slow macOS runner). Wait for the file.
+func waitStateRecordsRollback(t *testing.T, statePath string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if body, err := os.ReadFile(statePath); err == nil && bytes.Contains(body, []byte(`"RolledBack":true`)) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the abandoned drain was released but its rollback was never persisted")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func waitFenceReleased(t *testing.T, fence *fenceFixture) {
