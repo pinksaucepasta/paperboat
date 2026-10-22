@@ -16,6 +16,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/supportref"
+	"github.com/spf13/cobra"
 )
 
 func openProcessDiagnostics(ctx context.Context, args []string, reporter *errorreport.Reporter, stderr io.Writer) (context.Context, func()) {
@@ -37,10 +38,10 @@ func openProcessDiagnostics(ctx context.Context, args []string, reporter *errorr
 		// Windows helper's protected completion status retains failure metadata.
 		recorder = diagnostics.NewMemoryRecorder()
 	} else {
-		paths, err := currentLocalDaemonPaths()
-		storageErr = err
+		var directory string
+		directory, storageErr = processDiagnosticsDirectory(command)
 		if storageErr == nil {
-			recorder, storageErr = diagnostics.NewRecorder(diagnostics.DiskConfig{Directory: filepath.Join(paths.StateRoot, "diagnostics"), OwnerUID: os.Geteuid()})
+			recorder, storageErr = diagnostics.NewRecorder(diagnostics.DiskConfig{Directory: directory, OwnerUID: os.Geteuid()})
 		}
 	}
 	if storageErr != nil {
@@ -179,4 +180,21 @@ func sourceIdentifier(value string, maximum int) string {
 		value = value[:maximum]
 	}
 	return value
+}
+
+// processDiagnosticsDirectory is the user's state directory, except for the
+// root update service and its activation helper: they run under the service
+// manager with no HOME and own their own state root, so their diagnostics live
+// there instead of failing to save at every update step.
+func processDiagnosticsDirectory(command *cobra.Command) (string, error) {
+	if command != nil && command.Name() == "__runtime-updated" {
+		if root := os.Getenv("PAPERBOAT_UPDATE_STATE_ROOT"); filepath.IsAbs(root) && filepath.Clean(root) == root {
+			return filepath.Join(root, "diagnostics"), nil
+		}
+	}
+	paths, err := currentLocalDaemonPaths()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(paths.StateRoot, "diagnostics"), nil
 }
