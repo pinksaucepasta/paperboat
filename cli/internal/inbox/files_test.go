@@ -61,7 +61,11 @@ func TestOpenReadsOnlyDeliveredRegularFiles(t *testing.T) {
 	if string(buffer[:n]) != "hello" || file.Size != 5 || file.Name != "a.txt" {
 		t.Fatalf("read %q file=%+v", buffer[:n], file)
 	}
-	// Replaced by a link after the listing: refused, never followed.
+	// Replaced by a link after the listing: refused, never followed. Windows cannot delete a file
+	// that is still open, so the handle is released first.
+	if err := handle.Close(); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Remove(filepath.Join(root, "a.txt")); err != nil {
 		t.Fatal(err)
 	}

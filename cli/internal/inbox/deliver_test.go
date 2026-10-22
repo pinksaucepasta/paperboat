@@ -25,10 +25,7 @@ func TestDeliverCopiesWholeFilesWithoutReplacingExistingOnes(t *testing.T) {
 		t.Fatalf("second=%q err=%v", second, err)
 	}
 	for _, path := range []string{first, second} {
-		info, err := os.Stat(path)
-		if err != nil || info.Mode().Perm() != 0o600 {
-			t.Fatalf("%s: %v %v", path, info, err)
-		}
+		requirePrivateFile(t, path)
 		if got, _ := os.ReadFile(path); !bytes.Equal(got, content) {
 			t.Fatalf("%s holds %q", path, got)
 		}
@@ -68,7 +65,7 @@ func TestDeliverRefusesWrongBytesAndUnsafeNames(t *testing.T) {
 func ownerOnlyDir(t *testing.T) string {
 	t.Helper()
 	root := filepath.Join(t.TempDir(), "Inbox")
-	if err := os.Mkdir(root, 0o700); err != nil {
+	if err := EnsurePath(root); err != nil {
 		t.Fatal(err)
 	}
 	return root
