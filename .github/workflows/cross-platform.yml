@@ -19,8 +19,12 @@ on:
 permissions:
   contents: read
 
+# Every lane pushes to main many times an hour and a run takes 30+ minutes, so runs queued behind each
+# other for hours. One run per ref executes at a time and only the newest waiting push is kept (GitHub
+# replaces an older pending run); the run in progress always finishes, so a run is never starved by
+# later pushes. A hand dispatch has its own group.
 concurrency:
-  group: cross-platform-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || '' }}
+  group: cross-platform-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || '' }}
   cancel-in-progress: false
 
 jobs:
