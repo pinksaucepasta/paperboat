@@ -55,7 +55,7 @@ func (c *Client) ListWorkspaces(ctx context.Context) (WorkspacePage, error) {
 				return WorkspacePage{}, errors.New("paperboat-server returned an invalid Personal workspace")
 			}
 		default:
-			if item.Kind != "team" || (item.Role != "owner" && item.Role != "admin" && item.Role != "member") {
+			if item.Kind != "team" || !validTeamRole(item.Role) {
 				return WorkspacePage{}, fmt.Errorf("paperboat-server returned an invalid team workspace %q", item.ID)
 			}
 		}
@@ -64,6 +64,20 @@ func (c *Client) ListWorkspaces(ctx context.Context) (WorkspacePage, error) {
 		return WorkspacePage{}, errors.New("paperboat-server did not return the Personal workspace")
 	}
 	return page, nil
+}
+
+// validTeamRole accepts any role name the server may add (billing, auditor and
+// later ones); the server alone decides what a role may do.
+func validTeamRole(role string) bool {
+	if len(role) == 0 || len(role) > 32 {
+		return false
+	}
+	for _, r := range role {
+		if (r < 'a' || r > 'z') && r != '_' {
+			return false
+		}
+	}
+	return true
 }
 
 // SetWorkspace binds user-facing resource requests made by this API client to

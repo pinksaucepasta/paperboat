@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/mail"
 	"net/url"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -331,7 +332,7 @@ func teamMutationCommand(action string) *cobra.Command {
 	use := action + " <team>"
 	exact := 1
 	if action == "role" {
-		use = "role <team> <account> <admin|member>"
+		use = "role <team> <account> <admin|billing|auditor|member>"
 		exact = 3
 	} else if action == "remove" || action == "transfer" {
 		use = action + " <team> <account>"
@@ -356,8 +357,8 @@ func teamMutationCommand(action string) *cobra.Command {
 		}
 		in := api.TeamMutationRequest{OperationID: newIdempotencyKey(), ExpectedGeneration: generation, Action: action}
 		if action == "role" {
-			if args[2] != "admin" && args[2] != "member" {
-				return localArgumentError("role must be admin or member")
+			if !slices.Contains([]string{"admin", "billing", "auditor", "member"}, args[2]) {
+				return localArgumentError("role must be admin, billing, auditor or member")
 			}
 			in.AccountID, in.Role = args[1], args[2]
 		} else if action == "remove" || action == "transfer" {

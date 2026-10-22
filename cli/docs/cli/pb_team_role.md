@@ -13,7 +13,7 @@ Teams use explicit membership and resource grants. Membership alone does not gra
 JSON output is supported with --json.
 
 ```
-pb team role <team> <account> <admin|member> [flags]
+pb team role <team> <account> <admin|billing|auditor|member> [flags]
 ```
 
 ### Options

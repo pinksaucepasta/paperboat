@@ -284,7 +284,7 @@ func (e *engine) teamOperation(ctx context.Context, r request) (any, error) {
 		found := 0
 		for _, m := range t.Members {
 			if removed[m.Account] {
-				if actor.Role == "admin" && m.Role != "member" {
+				if actor.Role == "admin" && (m.Role == "owner" || m.Role == "admin") {
 					return nil, env.ErrInvalid
 				}
 				found++

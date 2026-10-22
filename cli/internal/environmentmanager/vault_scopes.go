@@ -630,7 +630,7 @@ func validVaultTeamRemovals(members []api.VaultTeamMember, actorRole string, rem
 		if !removed[member.AccountID] {
 			continue
 		}
-		if actorRole == "admin" && member.Role != "member" {
+		if actorRole == "admin" && (member.Role == "owner" || member.Role == "admin") {
 			return false
 		}
 		found++

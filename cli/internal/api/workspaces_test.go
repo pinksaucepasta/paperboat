@@ -215,3 +215,18 @@ func TestWorkspaceListAcceptsTheTeamMachineApprovalFlag(t *testing.T) {
 		t.Fatalf("workspaces = %#v, err=%v", page, err)
 	}
 }
+
+// Roles the server adds later (F19: billing, auditor) must not make the workspace list fail.
+func TestWorkspaceListAcceptsRolesAddedByTheServer(t *testing.T) {
+	for role, ok := range map[string]bool{"billing": true, "auditor": true, "future_role": true, "": false, "Admin": false, "x y": false} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.WriteString(w, `{"data":{"items":[{"id":"personal","name":"Personal","kind":"personal","role":"owner"},{"id":"team-a","name":"Team A","kind":"team","role":"`+role+`"}]}}`)
+		}))
+		client := New(server.URL, config.Credential{AccessToken: "session"}, server.Client())
+		_, err := client.ListWorkspaces(context.Background())
+		server.Close()
+		if (err == nil) != ok {
+			t.Errorf("role %q: err=%v, want ok=%v", role, err, ok)
+		}
+	}
+}
