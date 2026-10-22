@@ -62,7 +62,8 @@ Names after `group:` and `tag:` use lowercase letters, digits, `.`, `_` and `-` 
 **Subjects (`src`):** `user:<email>`, `group:<name>`, `role:owner`, `role:admin` (owners and
 admins), `role:member` (every member), `*` (every member).
 
-**Targets (`dst`):** `machine:<alias>`, `machine:*` (every machine of the workspace),
+**Targets (`dst`):** `machine:<alias>` (or `machine:<owner email>/<alias>` when two machines
+shared into a team have the same alias), `machine:*` (every machine of the workspace),
 `tag:<name>`, `preview:<name>`, `tunnel:<name>`, `env:team` (team ENV). One rule's targets
 are all machines/tags, all previews/tunnels, or `env:team`.
 
@@ -106,6 +107,7 @@ are sorted by path, so the same file always gives the same list.
 | `unknown_group` | the group is not defined in `groups` |
 | `unknown_role` | not `role:owner`, `role:admin` or `role:member` |
 | `unknown_machine` | no machine with that alias in this workspace |
+| `ambiguous_machine` | two machines of the team have that alias; use `machine:<owner email>/<alias>` |
 | `unknown_tag` | the tag is not defined in `tags` |
 | `unknown_preview`, `unknown_tunnel` | no preview / tunnel with that name in this workspace |
 | `unknown_env_scope` | the ENV target is `env:team` |

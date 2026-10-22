@@ -88,22 +88,27 @@ type index struct {
 	inv         Inventory
 	byEmail     map[string]Member
 	byAccount   map[string]Member
-	byAlias     map[string]Machine
+	byName      map[string][]Machine // alias and owner-email/alias
 	byMachineID map[string]Machine
 	resources   map[string]Resource // "preview:<name>" / "tunnel:<name>"
 	resourceIDs map[string]Resource // "preview:<id>"
 }
 
 func newIndex(inv Inventory) *index {
-	x := &index{inv: inv, byEmail: map[string]Member{}, byAccount: map[string]Member{}, byAlias: map[string]Machine{},
+	x := &index{inv: inv, byEmail: map[string]Member{}, byAccount: map[string]Member{}, byName: map[string][]Machine{},
 		byMachineID: map[string]Machine{}, resources: map[string]Resource{}, resourceIDs: map[string]Resource{}}
 	for _, m := range inv.Members {
 		x.byEmail[strings.ToLower(m.Email)] = m
 		x.byAccount[m.AccountID] = m
 	}
 	for _, m := range inv.Machines {
-		x.byAlias[m.Alias] = m
 		x.byMachineID[m.ID] = m
+	}
+	for _, m := range inv.Machines {
+		x.byName[m.Alias] = append(x.byName[m.Alias], m)
+		if q := x.qualified(m); q != "" {
+			x.byName[q] = append(x.byName[q], m)
+		}
 	}
 	for _, r := range inv.Resources {
 		name := r.Name
@@ -127,7 +132,7 @@ func (x *index) targetLabel(t Target) string {
 	switch t.Kind {
 	case "machine":
 		if m, ok := x.byMachineID[t.ID]; ok {
-			return "machine:" + m.Alias
+			return "machine:" + x.machineName(m)
 		}
 	case "preview", "tunnel":
 		if r, ok := x.resourceIDs[t.Kind+":"+t.ID]; ok && r.Name != "" {
@@ -154,8 +159,8 @@ func (x *index) target(s string) (Target, bool) {
 	kind, name, _ := strings.Cut(s, ":")
 	switch kind {
 	case "machine":
-		m, ok := x.byAlias[name]
-		return Target{Kind: "machine", ID: m.ID}, ok
+		m, code := x.machine(name)
+		return Target{Kind: "machine", ID: m.ID}, code == ""
 	case "preview", "tunnel":
 		r, ok := x.resources[s]
 		return Target{Kind: kind, ID: r.ID}, ok
@@ -163,4 +168,46 @@ func (x *index) target(s string) (Target, bool) {
 		return Target{Kind: "env", ID: x.inv.TeamID}, name == "team" && x.inv.Team
 	}
 	return Target{}, false
+}
+
+// qualified is "<owner email>/<alias>" for a personal machine whose owner is a member: the
+// policy name of a shared machine whose alias another machine of the team also uses (aliases
+// are unique per owner, not per team).
+func (x *index) qualified(m Machine) string {
+	if o, ok := x.byAccount[m.PersonalOwner]; ok && m.PersonalOwner != "" {
+		return strings.ToLower(o.Email) + "/" + m.Alias
+	}
+	return ""
+}
+
+// machineName is the alias when it is unique in the workspace, else the qualified name.
+func (x *index) machineName(m Machine) string {
+	if len(x.byName[m.Alias]) > 1 {
+		if q := x.qualified(m); q != "" {
+			return q
+		}
+	}
+	return m.Alias
+}
+
+// machine resolves a machine name (after "machine:"); code is "" or the error code.
+func (x *index) machine(name string) (Machine, string) {
+	if a, b, ok := strings.Cut(name, "/"); ok {
+		name = strings.ToLower(a) + "/" + b
+	}
+	ms := x.byName[name]
+	switch {
+	case len(ms) == 0:
+		return Machine{}, "unknown_machine"
+	case len(ms) > 1:
+		return Machine{}, "ambiguous_machine"
+	}
+	return ms[0], ""
+}
+
+// MachineName is the policy-file name of a machine ("db1", or "ana@example.test/laptop" when
+// two machines of the workspace are called laptop).
+func (inv Inventory) MachineName(id string) string {
+	x := newIndex(inv)
+	return x.machineName(x.byMachineID[id])
 }

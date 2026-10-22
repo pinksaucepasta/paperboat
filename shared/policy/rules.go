@@ -122,10 +122,9 @@ func ruleTargets(c *collector, x *index, tags map[string][]string, p string, dst
 				for _, m := range x.inv.Machines {
 					add(Target{Kind: "machine", ID: m.ID})
 				}
-			} else if m, ok := x.byAlias[name]; ok {
+			} else if machineError(c, ep, x, name) == "" {
+				m, _ := x.machine(name)
 				add(Target{Kind: "machine", ID: m.ID})
-			} else {
-				c.add(ep, "unknown_machine", "machine %q is not in this workspace", name)
 			}
 		case "tag":
 			f = "machine"

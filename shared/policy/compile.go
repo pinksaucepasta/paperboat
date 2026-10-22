@@ -33,6 +33,8 @@ type Compiled struct {
 	Scopes map[string][]Grant
 	x      *index
 	tags   map[string][]string
+	groups map[string][]string
+	rows   []Row
 }
 
 // Validate parses, checks against the inventory and limits, compiles, and runs the file's
@@ -70,7 +72,12 @@ func Compile(d Document, inv Inventory, limits Limits) (Compiled, Errors) {
 	if len(c.errs) > 0 {
 		return Compiled{x: x}, c.errs.sorted()
 	}
-	out := Compiled{Allows: allow.list(), Denies: deny.list(), x: x, tags: tags,
+	var rows []Row
+	for i, r := range d.Rules {
+		rows = append(rows, symbolicRows(x, i, r)...)
+	}
+	sortRows(rows)
+	out := Compiled{Allows: allow.list(), Denies: deny.list(), x: x, tags: tags, groups: groups, rows: rows,
 		AllowPrivateAccess: !inv.Team || (d.AllowPrivateAccess != nil && *d.AllowPrivateAccess)}
 	out.Grants = subtract(out.Allows, out.Denies)
 	out.Scopes = map[string][]Grant{}
@@ -180,11 +187,10 @@ func compileTags(c *collector, d Document, x *index) map[string][]string {
 				c.add(ep, "not_allowed_in_tag", "a tag holds machine:<alias> entries, not %q", e)
 				continue
 			}
-			m, ok := x.byAlias[alias]
-			if !ok {
-				c.add(ep, "unknown_machine", "machine %q is not in this workspace", alias)
+			if code := machineError(c, ep, x, alias); code != "" {
 				continue
 			}
+			m, _ := x.machine(alias)
 			machines = append(machines, m.ID)
 		}
 		out[name] = machines
@@ -313,4 +319,16 @@ func subtractPorts(a, b []PortRange) []PortRange {
 		out = next
 	}
 	return out
+}
+
+// machineError reports an unknown or ambiguous machine name and returns its code.
+func machineError(c *collector, path string, x *index, name string) string {
+	_, code := x.machine(name)
+	switch code {
+	case "unknown_machine":
+		c.add(path, code, "machine %q is not in this workspace", name)
+	case "ambiguous_machine":
+		c.add(path, code, "two machines are called %q; write machine:<owner email>/%s", name, name)
+	}
+	return code
 }

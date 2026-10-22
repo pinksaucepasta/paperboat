@@ -348,3 +348,22 @@ func TestCanonicalDropsComments(t *testing.T) {
 		t.Fatalf("%s %v", out, err)
 	}
 }
+
+func TestSameAliasNeedsTheOwnerQualifiedName(t *testing.T) {
+	inv := team()
+	inv.Machines = append(inv.Machines, Machine{ID: "m-web1b", Alias: "web1", PersonalOwner: "bo"})
+	d, _ := Parse([]byte(`{"rules": [{"src": ["*"], "dst": ["machine:web1"], "allow": ["exec"]}]}`))
+	if _, errs := Compile(d, inv, Limits{}); len(errs) != 1 || errs[0].Code != "ambiguous_machine" {
+		t.Fatalf("got %v", errs)
+	}
+	c := mustCompile(t, `{"rules": [{"src": ["*"], "dst": ["machine:Bo@example.test/web1"], "allow": ["exec"]}]}`, inv)
+	if d := c.Decide("ana", machine("m-web1b"), ActionExec, 0); !d.Allowed {
+		t.Fatalf("got %+v", d)
+	}
+	if got := inv.MachineName("m-web1"); got != "cy@example.test/web1" {
+		t.Fatalf("name %q", got)
+	}
+	if got := inv.MachineName("m-db1"); got != "db1" {
+		t.Fatalf("name %q", got)
+	}
+}
