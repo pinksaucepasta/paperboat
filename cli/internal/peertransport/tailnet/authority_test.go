@@ -319,7 +319,7 @@ func TestNetworkAuthorityRejectsInvalidBindingsAndScopes(t *testing.T) {
 		"scope_expired":        func(c *NetworkConfiguration) { c.Peers[0].Scopes[0].ExpiresAt = c.IssuedAt },
 		"address_collision":    func(c *NetworkConfiguration) { c.Peers[0].Identity.VirtualAddress = c.Self.VirtualAddress },
 		"oversized_peers": func(c *NetworkConfiguration) {
-			for len(c.Peers) <= MaxFlows {
+			for len(c.Peers) <= MaxConfigurationPeers {
 				c.Peers = append(c.Peers, c.Peers[0])
 			}
 		},
@@ -1075,7 +1075,7 @@ func TestNetworkReceiptPrunesExpiredScopesAfterSignedValidation(t *testing.T) {
 				c.Peers[1].Scopes[0].Port = 22
 			}
 			if invalid == "expired_scope_overflow" {
-				for i := 0; i < 129; i++ {
+				for i := 0; i <= MaxConfigurationScopes; i++ {
 					scope := old
 					scope.ResourceID = fmt.Sprintf("old_%d", i)
 					c.Peers[1].Scopes = append(c.Peers[1].Scopes, scope)
@@ -1114,5 +1114,29 @@ func TestNetworkReceiptPrunesExpiredScopesAfterSignedValidation(t *testing.T) {
 				t.Fatal("valid delayed retry replaced live native client", err)
 			}
 		})
+	}
+}
+
+// The server sends every computer of the account (9ef2e3be); the shared test account has 69. This
+// client refused any configuration over 64 peers or 128 scopes with a bare ErrAuthority, so fresh
+// carriers on that account exited 1 at start and existing ones stopped refreshing (2026-10-22).
+func TestNetworkAuthorityAcceptsAConfigurationForALargeAccount(t *testing.T) {
+	a, c, signer, _ := networkTestAuthority(t)
+	template := c.Peers[0]
+	c.Peers = nil
+	for index := range 100 {
+		peer := template
+		peer.Identity = networkTestBinding("machine", fmt.Sprintf("machine_%03d", index), fmt.Sprintf("fd7a:115c:a1e0::%x", index+16), key.NewNode())
+		terminal := template.Scopes[0]
+		exec := terminal
+		exec.Capability = "exec"
+		peer.Scopes = []NetworkScope{terminal, exec}
+		c.Peers = append(c.Peers, peer)
+	}
+	if err := a.Apply(t.Context(), networkToken(t, signer, c)); err != nil {
+		t.Fatalf("configuration with %d peers and %d scopes: %v", len(c.Peers), 2*len(c.Peers), err)
+	}
+	if !a.Allows("machine_099", "grant_test", "exec", "dial") {
+		t.Fatal("the last peer of a large configuration is not admitted")
 	}
 }

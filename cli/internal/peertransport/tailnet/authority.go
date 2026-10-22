@@ -20,6 +20,7 @@ import (
 	"github.com/pinksaucepasta/paperboat-relay/derpquic"
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/endpointidentity"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=network-key-custody
 	"tailscale.com/types/key"
@@ -30,6 +31,15 @@ import (
 )
 
 const MaxConfigurationBytes = 128 << 10
+
+// A configuration names every other endpoint of the account with its scopes, up to the stated
+// account maximum the server also enforces (endpointidentity.MaxTrustedKeys); the signed size above
+// is the practical bound. Engine socket limits (MaxFlows) and the client's own scope request limit
+// (api.MaxAdmittedNetworkScopes) are not configuration bounds.
+const (
+	MaxConfigurationPeers  = endpointidentity.MaxTrustedKeys
+	MaxConfigurationScopes = 2 * MaxConfigurationPeers
+)
 const RefreshInterval = 30 * time.Second
 const NetworkPort = 443
 
@@ -248,7 +258,7 @@ func (a *Authority) verify(ctx context.Context, token string, now time.Time) (Ne
 	if err != nil || !found || len(pub) != ed25519.PublicKeySize || !ed25519.Verify(pub, []byte(parts[0]+"."+parts[1]), sig) || strictDecode(body, &cfg) != nil {
 		return cfg, "", ErrAuthority
 	}
-	if cfg.Version != 1 || cfg.Issuer != a.options.Issuer || cfg.Audience != "paperboat-network" || cfg.Generation == 0 || cfg.Generation > 1<<53-1 || cfg.IssuedAt <= 0 || cfg.IssuedAt > now.Add(derpquic.MaxClockSkew).Unix() || cfg.ExpiresAt <= cfg.IssuedAt || !validBinding(cfg.Self) || len(cfg.Peers) > MaxFlows {
+	if cfg.Version != 1 || cfg.Issuer != a.options.Issuer || cfg.Audience != "paperboat-network" || cfg.Generation == 0 || cfg.Generation > 1<<53-1 || cfg.IssuedAt <= 0 || cfg.IssuedAt > now.Add(derpquic.MaxClockSkew).Unix() || cfg.ExpiresAt <= cfg.IssuedAt || !validBinding(cfg.Self) || len(cfg.Peers) > MaxConfigurationPeers {
 		return cfg, "", ErrAuthority
 	}
 	if cfg.ExpiresAt <= now.Unix() {
@@ -275,7 +285,7 @@ func (a *Authority) verify(ctx context.Context, token string, now time.Time) (Ne
 			scopes++
 			networkOnly := scope.ResourceKind == "machine_network" && scope.Capability == "connect" && b.AccountID == s.AccountID
 			validResource := networkOnly || scope.ResourceKind == "config_compare" && scope.Capability == "config_compare" || scope.ResourceKind == "inspector" && scope.Capability == "inspector" || scope.ResourceKind == "machine_access" && (scope.Capability == "terminal" || scope.Capability == "exec" || scope.Capability == "managed_ssh" || scope.Capability == "file_transfer" || scope.Capability == "private_access") || scope.ResourceKind == "codex_session" && scope.Capability == "codex"
-			if scopes > api.MaxAdmittedNetworkScopes || !validResource || !validID(scope.ResourceID) || scope.ResourceGeneration != 1 || scope.Port != NetworkPort || scope.ExpiresAt <= 0 || scope.Direction != "dial" && scope.Direction != "accept" || s.Role == "cli" && scope.Direction != "dial" || !networkOnly && (s.Role == b.Role || s.Role == "machine" && scope.Direction != "accept") {
+			if scopes > MaxConfigurationScopes || !validResource || !validID(scope.ResourceID) || scope.ResourceGeneration != 1 || scope.Port != NetworkPort || scope.ExpiresAt <= 0 || scope.Direction != "dial" && scope.Direction != "accept" || s.Role == "cli" && scope.Direction != "dial" || !networkOnly && (s.Role == b.Role || s.Role == "machine" && scope.Direction != "accept") {
 				return cfg, "", ErrAuthority
 			}
 			k := scope.ResourceID + "\x00" + scope.Capability + "\x00" + scope.Direction
