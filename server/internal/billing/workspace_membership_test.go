@@ -18,6 +18,19 @@ type membershipStripeFake struct {
 	fail    map[string]bool
 	updates map[string]int
 	results map[string]billing.SeatPreview
+	// probe runs at the start of every provider call (outside f.mu); seat tests use it to prove the
+	// call is made without holding the team write lock.
+	probe  func() error
+	probed []error
+}
+
+func (f *membershipStripeFake) runProbe() {
+	if f.probe != nil {
+		err := f.probe()
+		f.mu.Lock()
+		f.probed = append(f.probed, err)
+		f.mu.Unlock()
+	}
 }
 
 func (f *membershipStripeFake) CreateCustomer(context.Context, string, string, string) (string, error) {
@@ -52,6 +65,7 @@ func (f *membershipStripeFake) UpdateSubscriptionSeats(_ context.Context, id, it
 }
 
 func (f *membershipStripeFake) PreviewSeats(_ context.Context, in billing.SeatChange) (billing.SeatPreview, error) {
+	f.runProbe()
 	amount := int64(0)
 	if in.Quantity > in.PreviousQuantity {
 		amount = int64(in.Quantity-in.PreviousQuantity) * 750
@@ -59,6 +73,7 @@ func (f *membershipStripeFake) PreviewSeats(_ context.Context, in billing.SeatCh
 	return billing.SeatPreview{AmountDueNow: amount, Currency: "usd", NextInvoiceAmount: int64(in.Quantity) * 1500, NextInvoiceAt: in.PeriodEnd}, nil
 }
 func (f *membershipStripeFake) ChangeSeats(_ context.Context, in billing.SeatChange, key string) (billing.SeatPreview, error) {
+	f.runProbe()
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.results == nil {

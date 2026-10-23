@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/pinksaucepasta/paperboat/server/internal/billing"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/teams"
 	"testing"
 	"time"
@@ -59,6 +60,12 @@ func TestPurchasedSeatChangesReserveInvitesAndDeferRemoval(t *testing.T) {
 	sub := billing.StripeSubscription{ID: "sub_" + team, CustomerID: "cus_" + team, ItemID: "si_" + team, PriceID: price, Status: "active", Quantity: 2, PeriodStart: start, PeriodEnd: end}
 	fake := &membershipStripeFake{subs: map[string]billing.StripeSubscription{sub.ID: sub}, fail: map[string]bool{}, updates: map[string]int{}}
 	service := billing.NewWorkspaceService(store, fake, "purchased-seat-test-key")
+	// Every Stripe call must run with the team write lock free: another team write takes it meanwhile.
+	fake.probe = func() error {
+		probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		defer cancel()
+		return store.InTx(probeCtx, func(ctx context.Context, tx *db.Tx) error { return teams.Lock(ctx, tx) })
+	}
 	ts := teams.NewService(store)
 	state, err := ts.Get(ctx, owner, team)
 	if err != nil {
@@ -73,6 +80,16 @@ func TestPurchasedSeatChangesReserveInvitesAndDeferRemoval(t *testing.T) {
 	if _, err = service.ChangeSeats(ctx, admin, team, 3, "admin"+x); !errors.Is(err, billing.ErrWorkspaceForbidden) {
 		t.Fatalf("admin bought seats: %v", err)
 	}
+	defer func() {
+		if len(fake.probed) == 0 {
+			t.Error("no Stripe call was probed")
+		}
+		for _, err := range fake.probed {
+			if err != nil {
+				t.Errorf("a team write waited on a Stripe call (the call held the team lock): %v", err)
+			}
+		}
+	}()
 	quote, err := service.PreviewSeats(ctx, owner, team, 3)
 	if err != nil || quote.AmountDueNow != 750 || quote.NextInvoiceAmount != 4500 || !quote.NextInvoiceAt.Equal(end) {
 		t.Fatalf("preview=%+v err=%v", quote, err)
