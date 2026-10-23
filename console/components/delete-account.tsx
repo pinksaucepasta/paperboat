@@ -55,7 +55,7 @@ function WhatGoes({ preview }: { preview: DeletionPreview }) {
       <Row label="API tokens">{count(preview.api_tokens, "token", "tokens")}</Row>
       <Row label="Subscription">
         {preview.subscription
-          ? `${preview.subscription.plan} ends now${preview.subscription.period_end ? `, not at ${date(preview.subscription.period_end, "date")}` : ""}`
+          ? `${planLabel(preview.subscription.plan)} ends now${preview.subscription.period_end ? `, not at ${date(preview.subscription.period_end, "date")}` : ""}`
           : "None"}
       </Row>
       <Row label="Teams">
@@ -65,6 +65,13 @@ function WhatGoes({ preview }: { preview: DeletionPreview }) {
       </Row>
     </Section>
   )
+}
+
+/** A plan code from the preview ("pro-month") as people read it ("Pro, monthly"). */
+function planLabel(code: string) {
+  const [plan, interval] = code.split("-")
+  const name = plan.charAt(0).toUpperCase() + plan.slice(1)
+  return interval === "month" ? `${name}, monthly` : interval === "year" ? `${name}, yearly` : name
 }
 
 function Blocking({ teams }: { teams: DeletionPreview["teams_blocking"] }) {
