@@ -71,7 +71,9 @@
   await hit(`/${tag}/b?x=1`)
   const live = await until(() => rows().filter((row) => row.innerText.includes(tag)).length >= 2, 20000)
   pass("requests reach the preview", unsent.length === 0, unsent.join("; "))
-  pass("requests arrive live", Boolean(live))
+  pass("requests arrive live", Boolean(live), live ? "" : `listed: ${listed() || "nothing"}`)
+  // The rest needs those rows; stop here and leave capture on so the machine's own list can be read.
+  if (!live) return console.table(steps), steps
   await sleep(3000)
   pass("no duplicate rows after several polls", new Set(ids()).size === ids().length, `${ids().length} rows`)
 

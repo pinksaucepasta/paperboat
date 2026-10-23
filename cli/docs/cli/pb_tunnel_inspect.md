@@ -19,7 +19,7 @@ pb tunnel inspect <tunnel> [flags]
 ### Options
 
 ```
-      --body            capture redacted request/response bodies with --enable
+      --body            capture request/response bodies with --enable
       --cursor string   continue after a capture cursor
       --disable         disable capture for this resource
       --enable          enable capture for this resource
