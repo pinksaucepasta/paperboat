@@ -24,12 +24,18 @@ func TestDescriptorIssuanceRetriesServiceUnavailable(t *testing.T) {
 		{"recovers", []int{503, 429, 200}, 3, false},
 		{"final refusal", []int{403}, 1, true},
 		{"bounded", []int{503, 503, 503, 503, 503, 503, 503}, issuanceAttempts, true},
+		{"lost answer", []int{0, 200}, 2, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var calls atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				n := calls.Add(1)
 				status := tc.statuses[min(int(n), len(tc.statuses))-1]
+				if status == 0 { // the request arrived, then the connection dropped: the answer is lost
+					conn, _, _ := w.(http.Hijacker).Hijack()
+					_ = conn.Close()
+					return
+				}
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(status)
 				if status != 200 {

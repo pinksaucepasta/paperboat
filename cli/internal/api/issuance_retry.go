@@ -18,15 +18,13 @@ const (
 	issuanceMaxDelay   = 2 * time.Second
 )
 
-// doIssuance is do for descriptor and grant issuance: a 503 or 429 is retried with jittered backoff
-// inside ctx; any other answer is final.
+// doIssuance is do for descriptor and grant issuance: a 503 or 429, or an answer lost after the request
+// was sent, is retried with jittered backoff inside ctx; any other answer is final.
 func (c *Client) doIssuance(ctx context.Context, method, path string, body, out any, checked bool) error {
 	delay := issuanceFirstDelay
 	for attempt := 1; ; attempt++ {
 		err := c.doRequest(ctx, method, path, body, out, nil, checked)
-		var refused *APIError
-		if err == nil || attempt == issuanceAttempts || !errors.As(err, &refused) ||
-			refused.Status != http.StatusServiceUnavailable && refused.Status != http.StatusTooManyRequests {
+		if err == nil || attempt == issuanceAttempts || !retryableIssuance(err) {
 			return err
 		}
 		if !sleepContext(ctx, delay/2+rand.N(delay/2+1)) {
@@ -34,4 +32,16 @@ func (c *Client) doIssuance(ctx context.Context, method, path string, body, out 
 		}
 		delay = min(2*delay, issuanceMaxDelay)
 	}
+}
+
+// retryableIssuance reports a refusal or a lost answer that a repeat of the same operation can resolve.
+// A lost answer (Lane H: the grant's connection reset, the local gateway answered 502) is safe to repeat
+// because the request names its operation.
+func retryableIssuance(err error) bool {
+	var lost *ResponseLostError
+	if errors.As(err, &lost) {
+		return true
+	}
+	var refused *APIError
+	return errors.As(err, &refused) && (refused.Status == http.StatusServiceUnavailable || refused.Status == http.StatusTooManyRequests)
 }
