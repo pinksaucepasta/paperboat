@@ -197,6 +197,7 @@ func sameGrantAuthority(a, b Grant) bool {
 		g.ExpiresAt = 0
 		g.Generation = 0
 		g.signedHash = [32]byte{}
+		g.index = nil // derived from the lists compared below
 		peers := make([]Peer, 0, len(g.Peers))
 		for _, peer := range g.Peers {
 			scopes := make([]Scope, 0, len(peer.Scopes))

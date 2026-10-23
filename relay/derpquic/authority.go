@@ -85,7 +85,56 @@ type Grant struct {
 	Peers                  []Peer             `json:"peers"`
 	PeerRelay              *ServiceDescriptor `json:"peer_relay,omitempty"`
 	RelayControlPeers      []string           `json:"relay_control_peers,omitempty"`
+	// index finds one peer's entry and a control peer without scanning the lists; every datagram
+	// checks its pair, and a scan of both grants' peers made forwarding cost O(peers) per packet.
+	index *grantIndex
 }
+
+type grantIndex struct {
+	peers   map[string]int
+	control map[string]bool
+}
+
+// withIndex returns g with its lookup index built; a verified or merged grant is not changed after.
+func (g Grant) withIndex() Grant {
+	index := &grantIndex{peers: make(map[string]int, len(g.Peers)), control: make(map[string]bool, len(g.RelayControlPeers))}
+	for i, peer := range g.Peers {
+		if _, seen := index.peers[peer.WireGuardPublicKey]; !seen {
+			index.peers[peer.WireGuardPublicKey] = i
+		}
+	}
+	for _, peer := range g.RelayControlPeers {
+		index.control[peer] = true
+	}
+	g.index = index
+	return g
+}
+
+// peerEntry is g's entry for the peer with WireGuard key k.
+func (g Grant) peerEntry(k string) (Peer, bool) {
+	if g.index != nil {
+		i, ok := g.index.peers[k]
+		if !ok {
+			return Peer{}, false
+		}
+		return g.Peers[i], true
+	}
+	for _, peer := range g.Peers {
+		if peer.WireGuardPublicKey == k {
+			return peer, true
+		}
+	}
+	return Peer{}, false
+}
+
+// controls reports whether g names k as a peer-relay control peer.
+func (g Grant) controls(k string) bool {
+	if g.index != nil {
+		return g.index.control[k]
+	}
+	return slices.Contains(g.RelayControlPeers, k)
+}
+
 type Verifier struct {
 	Issuer, NodeID, ProcessEpoch string
 	NodeGeneration               uint64
@@ -199,7 +248,7 @@ func (v Verifier) Verify(token string, state tls.ConnectionState, now time.Time)
 		return Grant{}, ErrExpired
 	}
 	g.signedHash = sha256.Sum256(b)
-	return g, nil
+	return g.withIndex(), nil
 }
 
 func controlAllowed(a, b Grant, now time.Time) bool {
@@ -273,7 +322,7 @@ func mergeGrants(current, next Grant) (Grant, error) {
 		merged.PeerRelay = current.PeerRelay
 	}
 	merged.ExpiresAt = max(current.ExpiresAt, next.ExpiresAt)
-	return merged, nil
+	return merged.withIndex(), nil
 }
 
 func allowedAdmitted(a, b Grant) bool {
@@ -282,23 +331,21 @@ func allowedAdmitted(a, b Grant) bool {
 	return matched
 }
 func controlAdmitted(a, b Grant) bool {
-	return a.AccountID == b.AccountID && slices.Contains(a.RelayControlPeers, b.WireGuardPublicKey) && slices.Contains(b.RelayControlPeers, a.WireGuardPublicKey)
+	return a.AccountID == b.AccountID && a.controls(b.WireGuardPublicKey) && b.controls(a.WireGuardPublicKey)
 }
 func reciprocalScopes(a, b Grant, match func(Scope, Scope)) {
-	for _, p := range a.Peers {
-		if p.WireGuardPublicKey != b.WireGuardPublicKey {
-			continue
-		}
-		for _, q := range b.Peers {
-			if q.WireGuardPublicKey != a.WireGuardPublicKey {
-				continue
-			}
-			for _, s := range p.Scopes {
-				for _, t := range q.Scopes {
-					if (s.ResourceKind != "machine_network" || a.AccountID == b.AccountID) && s.ResourceKind == t.ResourceKind && s.ResourceID == t.ResourceID && s.ResourceGeneration == t.ResourceGeneration && s.Capability == t.Capability && s.Port == t.Port && s.Direction != t.Direction {
-						match(s, t)
-					}
-				}
+	p, ok := a.peerEntry(b.WireGuardPublicKey)
+	if !ok {
+		return
+	}
+	q, ok := b.peerEntry(a.WireGuardPublicKey)
+	if !ok {
+		return
+	}
+	for _, s := range p.Scopes {
+		for _, t := range q.Scopes {
+			if (s.ResourceKind != "machine_network" || a.AccountID == b.AccountID) && s.ResourceKind == t.ResourceKind && s.ResourceID == t.ResourceID && s.ResourceGeneration == t.ResourceGeneration && s.Capability == t.Capability && s.Port == t.Port && s.Direction != t.Direction {
+				match(s, t)
 			}
 		}
 	}
