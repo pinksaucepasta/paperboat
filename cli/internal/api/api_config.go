@@ -169,21 +169,35 @@ type ConfigTeamDefault struct {
 	UpdatePending        bool   `json:"update_pending,omitempty"`
 }
 
+// Team default requests go to the team they name, whatever workspace the command selected: the server
+// refuses them elsewhere with 409 workspace_target_conflict.
 func (c *Client) ConfigTeamDefault(ctx context.Context, teamID string) (ConfigTeamDefault, error) {
 	var out ConfigTeamDefault
-	err := c.do(ctx, http.MethodGet, "/v1/teams/"+url.PathEscape(teamID)+"/config-default", nil, &out)
+	scoped, err := c.teamWorkspace(teamID)
+	if err != nil {
+		return out, err
+	}
+	err = scoped.do(ctx, http.MethodGet, "/v1/teams/"+url.PathEscape(teamID)+"/config-default", nil, &out)
 	return out, err
 }
 
 func (c *Client) SetConfigTeamDefault(ctx context.Context, teamID, repositoryID string, expectedVersion int64) (ConfigTeamDefault, error) {
 	var out ConfigTeamDefault
-	err := c.do(ctx, http.MethodPut, "/v1/teams/"+url.PathEscape(teamID)+"/config-default", map[string]any{"repository_id": repositoryID, "expected_version": expectedVersion}, &out)
+	scoped, err := c.teamWorkspace(teamID)
+	if err != nil {
+		return out, err
+	}
+	err = scoped.do(ctx, http.MethodPut, "/v1/teams/"+url.PathEscape(teamID)+"/config-default", map[string]any{"repository_id": repositoryID, "expected_version": expectedVersion}, &out)
 	return out, err
 }
 
 func (c *Client) AdoptConfigTeamDefault(ctx context.Context, teamID string, version int64) (ConfigTeamDefault, error) {
 	var out ConfigTeamDefault
-	err := c.do(ctx, http.MethodPut, "/v1/config-sync/team-default-adoption", map[string]any{"team_id": teamID, "default_version": version}, &out)
+	scoped, err := c.teamWorkspace(teamID)
+	if err != nil {
+		return out, err
+	}
+	err = scoped.do(ctx, http.MethodPut, "/v1/config-sync/team-default-adoption", map[string]any{"team_id": teamID, "default_version": version}, &out)
 	return out, err
 }
 

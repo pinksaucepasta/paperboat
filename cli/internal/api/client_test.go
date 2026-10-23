@@ -994,3 +994,30 @@ func TestConfigSyncStatusRefusesAPageThatDoesNotAdvance(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+// Team default calls go to the team they name: in the personal workspace the server refused them with
+// 409 workspace_target_conflict, so `pb config team-default-set/adopt` never worked (Lane L, pbvm3).
+func TestConfigTeamDefaultCallsUseTheNamedTeamWorkspace(t *testing.T) {
+	seen := map[string]string{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen[r.Method+" "+r.URL.Path] = r.URL.Query().Get("workspace")
+		writeData(w, 200, ConfigTeamDefault{TeamID: "team-one"})
+	}))
+	defer server.Close()
+	client := New(server.URL, config.Credential{}, server.Client())
+	if err := client.SetWorkspace("personal"); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	_, _ = client.ConfigTeamDefault(ctx, "team-one")
+	_, _ = client.SetConfigTeamDefault(ctx, "team-one", "repository-1", 0)
+	_, _ = client.AdoptConfigTeamDefault(ctx, "team-one", 1)
+	for _, call := range []string{"GET /v1/teams/team-one/config-default", "PUT /v1/teams/team-one/config-default", "PUT /v1/config-sync/team-default-adoption"} {
+		if seen[call] != "team-one" {
+			t.Fatalf("%s sent in workspace %q", call, seen[call])
+		}
+	}
+	if client.Workspace() != "personal" {
+		t.Fatal("a team default call changed the command's workspace")
+	}
+}
