@@ -169,7 +169,7 @@ func TestEdgeUsageRequiresActiveNodeSignature(t *testing.T) {
 	}
 }
 
-func TestReconcileUsageDebitsMachineBandwidthAndSuspendsOnExhaustion(t *testing.T) {
+func TestReconcileUsageDebitsMachineBandwidthAndKeepsTheEnvironmentAtExhaustion(t *testing.T) {
 	store := openControlPlaneTestDB(t)
 	ctx := context.Background()
 	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
@@ -208,8 +208,10 @@ func TestReconcileUsageDebitsMachineBandwidthAndSuspendsOnExhaustion(t *testing.
 	if err := store.SQL().QueryRowContext(ctx, `SELECT desired_state FROM paperboat.control_environments WHERE id=$1`, "env_"+suffix).Scan(&desired); err != nil {
 		t.Fatal(err)
 	}
-	if desired != "suspended" {
-		t.Fatalf("environment desired state = %q, want suspended", desired)
+	// At the cap only hosted relay and edge traffic is refused (bandwidth_quota_exhausted);
+	// the environment itself is not suspended, so direct machine-to-machine access continues.
+	if desired != "active" {
+		t.Fatalf("environment desired state = %q, want active (exhaustion must not suspend the environment)", desired)
 	}
 }
 
