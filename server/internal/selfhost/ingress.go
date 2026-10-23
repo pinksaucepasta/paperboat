@@ -79,7 +79,7 @@ func (s *Service) VerifyIngress(ctx context.Context, id string) error {
 		}
 		return err
 	}
-	v4, v6, err := ProbePublicIngress(ctx, host, node, credential)
+	v4, v6, err := probeIngress(ctx, host, node, credential, s.ingressIP)
 	if err != nil {
 		return err
 	}
@@ -101,6 +101,12 @@ func (s *Service) VerifyIngress(ctx context.Context, id string) error {
 // exact node's credential over publicly trusted HTTPS, independently of its
 // pinned carrier identity. The caller must fence its state write.
 func ProbePublicIngress(ctx context.Context, host, node, credential string) (any, any, error) {
+	return probeIngress(ctx, host, node, credential, publicIngressIP)
+}
+
+// probeIngress is ProbePublicIngress with the address rule given: managed nodes stay public-only, and a
+// self-hosted node may be private when the service allows it (staging).
+func probeIngress(ctx context.Context, host, node, credential string, allowed func(netip.Addr) bool) (any, any, error) {
 	addresses, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
 	if err != nil {
 		return nil, nil, ingressProbeError(err)
@@ -112,7 +118,7 @@ func ProbePublicIngress(ctx context.Context, host, node, credential string) (any
 	seen := map[netip.Addr]bool{}
 	for _, ip := range addresses {
 		ip = ip.Unmap()
-		if !publicIngressIP(ip) || seen[ip] {
+		if !allowed(ip) || seen[ip] {
 			return nil, nil, ErrIngress
 		}
 		seen[ip] = true

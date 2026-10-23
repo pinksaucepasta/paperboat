@@ -39,9 +39,12 @@ type Service struct {
 	database                *db.DB
 	key                     string
 	now                     func() time.Time
-	ControlURL              string
-	TrustDocuments          func(context.Context) ([]byte, []byte, error)
-	DialAddress             func(context.Context, string) (string, error)
+	// allowPrivateIngress lets claim and ingress verification accept private (RFC 1918 / ULA) addresses,
+	// for a staging stack on a LAN. Production configuration refuses it (config.Selfhost).
+	allowPrivateIngress bool
+	ControlURL          string
+	TrustDocuments      func(context.Context) ([]byte, []byte, error)
+	DialAddress         func(context.Context, string) (string, error)
 	// ProbeIngress replaces VerifyIngress inside ReconcileIngress when set (tests hold probes open).
 	ProbeIngress func(context.Context, string) error
 }
@@ -49,6 +52,17 @@ type Service struct {
 func New(database *db.DB, encryptionKey string) *Service {
 	return &Service{database: database, key: encryptionKey, now: time.Now}
 }
+
+// AllowPrivateIngress accepts private node addresses for claim and ingress verification. Addresses are
+// still resolved once and pinned, and every node still proves its credential.
+func (s *Service) AllowPrivateIngress() { s.allowPrivateIngress = true }
+
+// ingressIP reports whether a node may be reached at ip: a public address, or a private one when allowed.
+func (s *Service) ingressIP(ip netip.Addr) bool {
+	ip = ip.Unmap()
+	return publicIngressIP(ip) || s.allowPrivateIngress && ip.IsPrivate()
+}
+
 func (s *Service) available() bool {
 	return s != nil && s.database != nil && s.database.SQL() != nil && len(s.key) >= 32
 }
@@ -81,12 +95,12 @@ func publicKey(v string) (ed25519.PublicKey, error) {
 func validLabel(v string, max int) bool {
 	return len(v) > 0 && len(v) <= max && strings.TrimSpace(v) == v && strings.IndexFunc(v, func(r rune) bool { return unicode.IsControl(r) || unicode.In(r, unicode.Cf) }) < 0
 }
-func validHost(v string) bool {
+func (s *Service) validHost(v string) bool {
 	if !validLabel(v, 253) {
 		return false
 	}
 	if ip, e := netip.ParseAddr(v); e == nil {
-		return publicIngressIP(ip)
+		return s.ingressIP(ip)
 	}
 	if strings.ContainsAny(v, " /:@?#\\") {
 		return false

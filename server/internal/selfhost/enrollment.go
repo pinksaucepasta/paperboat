@@ -111,7 +111,7 @@ func parseCode(code string) ([]byte, string, error) {
 	}
 	return pin, parts[2], nil
 }
-func claimTarget(ctx context.Context, address string) (host, addressPort string, err error) {
+func (s *Service) claimTarget(ctx context.Context, address string) (host, addressPort string, err error) {
 	if address == "" || len(address) > 300 || strings.ContainsAny(address, "/@?#\\ ") {
 		return "", "", ErrInvalid
 	}
@@ -134,7 +134,7 @@ func claimTarget(ctx context.Context, address string) (host, addressPort string,
 		return "", "", ErrUnreachable
 	}
 	for _, ip := range ips {
-		if !publicIngressIP(ip) {
+		if !s.ingressIP(ip) {
 			return "", "", ErrInvalid
 		}
 	}
@@ -243,7 +243,7 @@ func (s *Service) Enroll(ctx context.Context, actor string, in EnrollRequest, op
 	if e != nil {
 		return nil, e
 	}
-	host, address, e := claimTarget(ctx, in.Address)
+	host, address, e := s.claimTarget(ctx, in.Address)
 	if s.DialAddress != nil {
 		address, e = s.DialAddress(ctx, in.Address)
 		host = "localhost"
@@ -266,7 +266,7 @@ func (s *Service) Enroll(ctx context.Context, actor string, in EnrollRequest, op
 		return nil, e
 	}
 	inspection.Signature = sig
-	if inspection.Version != 1 || inspection.Nonce != nonce || !validLabel(inspection.Name, 80) || !validHost(inspection.EndpointHost) || len(inspection.Components) < 1 || len(inspection.Components) > 2 {
+	if inspection.Version != 1 || inspection.Nonce != nonce || !validLabel(inspection.Name, 80) || !s.validHost(inspection.EndpointHost) || len(inspection.Components) < 1 || len(inspection.Components) > 2 {
 		return nil, ErrInvalid
 	}
 	block, _ := pem.Decode([]byte(inspection.InfrastructureTLSCertificate))

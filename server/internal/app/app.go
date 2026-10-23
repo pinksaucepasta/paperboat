@@ -548,6 +548,9 @@ func New(opts Options) (*App, error) {
 		}
 	}
 	selfhostService := selfhost.New(store, opts.Config.Secrets.EncryptionKey)
+	if opts.Config.SelfhostAllowPrivateIngress {
+		selfhostService.AllowPrivateIngress()
+	}
 	selfhostService.ControlURL = publicBaseURL
 	selfhostService.TrustDocuments = func(ctx context.Context) ([]byte, []byte, error) {
 		keys, err := mintKeys.JWKSJSON()

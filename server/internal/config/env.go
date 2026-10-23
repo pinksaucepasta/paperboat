@@ -50,6 +50,13 @@ func overlayEnv(c *Config, lookup func(string) (string, bool), readFile func(str
 		c.Mail.InvitationLifetimeSeconds = n
 	}
 
+	if v, ok := lookup("PAPERBOAT_SELFHOST_ALLOW_PRIVATE_INGRESS"); ok && strings.TrimSpace(v) != "" {
+		parsed, err := strconv.ParseBool(v)
+		if err != nil {
+			return errors.New("PAPERBOAT_SELFHOST_ALLOW_PRIVATE_INGRESS must be boolean")
+		}
+		c.SelfhostAllowPrivateIngress = parsed
+	}
 	if v, ok := lookup("PAPERBOAT_SENTRY_ENABLED"); ok && strings.TrimSpace(v) != "" {
 		parsed, err := strconv.ParseBool(v)
 		if err != nil {
