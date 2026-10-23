@@ -16,6 +16,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connectorrotation"
 	runtimeidentity "github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machinecontrol"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/runtimeattachment"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelenrollment"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelmanager"
 	"github.com/pinksaucepasta/paperboat/internal/inspector"
@@ -27,7 +28,7 @@ import (
 // the one stable hostd lifecycle. inspectorStore/inspectorRegistry thread the
 // daemon's one shared inspector capture store and replay bindings into durable
 // forwarding; nil disables durable HTTP capture/replay.
-func newProductionTunnelEnrollmentService(controlURL, stateRoot, hostID, localControlToken string, transport http.RoundTripper, inspectorStore *inspector.Store, inspectorRegistry *inspector.Registry, inspectorHTTP tunnelmanager.AuthenticatedInspectorHTTP) (*ProductionTunnelEnrollment, error) {
+func newProductionTunnelEnrollmentService(controlURL, stateRoot, hostID, localControlToken string, transport http.RoundTripper, inspectorStore *inspector.Store, inspectorRegistry *inspector.Registry, inspectorHTTP tunnelmanager.AuthenticatedInspectorHTTP, engine *runtimeattachment.EngineTunnels) (*ProductionTunnelEnrollment, error) {
 	identityStore, err := runtimeidentity.Open(runtimeidentity.Config{StateRoot: stateRoot})
 	if err != nil {
 		return nil, err
@@ -49,10 +50,18 @@ func newProductionTunnelEnrollmentService(controlURL, stateRoot, hostID, localCo
 	originStreams.Inspector = inspectorStore
 	originStreams.Registry = inspectorRegistry
 	originStreams.InspectorHTTP = inspectorHTTP
+	// Engine tunnels (PLAN 3a step 4) forward to the same origins with the same inspector; only
+	// public routes move onto the engine, so no per-stream ingress authority is involved.
+	var engineServed func(string) bool
+	if engine != nil {
+		engine.Forwarder = *originStreams
+		engineServed = engine.Served
+	}
 	source, err := tunnelenrollment.NewHTTPSProductionAssemblySource(tunnelenrollment.HTTPSProductionAssemblySourceConfig{
 		ControlURL: controlURL, StateRoot: stateRoot, HostID: hostID, Transport: transport,
 		Auth: auth, Clock: productionClock{}, Origins: origins, OriginStreams: originStreams,
 		MachineTLSCertificate: identityStore.CurrentTLSCertificateWithURIs,
+		EngineServed:          engineServed,
 		InspectorPurge: func(routeIDs []string) {
 			// Best-effort lifecycle purge: routes that stopped forwarding
 			// lose retrieval/replay and their retained captures immediately.

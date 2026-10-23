@@ -378,6 +378,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 		}
 		return productionBrowserTerminalIdentity(runtimeConfig.StateRoot, machineID, uint64(machineRegistration.InstallationGeneration))
 	}, AuthorizationService: authorizationRefresh, Connector: connectorService, PreviewDispatcher: previewAssembly, PreviewRecovery: previewAssembly, PreviewOwnerSessions: previewAssembly.OwnerSessionLeases(), RuntimeObservationService: runtimeService, RecordTerminalJoin: runtimeObservation.sender.RecordTerminalJoin, ManagedEnvironment: managedEnvironment, Metrics: metrics, LocalControlToken: localControlToken, Inspector: inspectorService, ManagedSSH: managedSSHHost, ManagedSSHService: managedSSHService, Capabilities: capabilityController}
+	var engineTunnels *runtimeattachment.EngineTunnels
 	{
 		attachment, attachErr := runtimeattachment.New(runtimeattachment.Config{ControlURL: controlURL.String(), StateRoot: runtimeConfig.StateRoot, Transport: transport, MachineID: machineID, WorkerGeneration: bootState.Generation, InstallationGeneration: uint64(machineRegistration.InstallationGeneration), ListenAddress: listen})
 		if attachErr != nil {
@@ -388,17 +389,21 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 			return nil, errors.Join(ErrProductionInvalid, bindErr)
 		}
 		dependencies.RuntimeAttachmentService = attachment
+		engineTunnels = &runtimeattachment.EngineTunnels{Service: attachment, Events: machineEvents.Subscribe(machineevents.TopicTunnels)}
 	}
 	nativePrivateValidators := []productionNativePrivateValidator{localNativePrivateValidator(previewAssembly.dispatcher)}
 	if machineServiceObserver != nil {
 		nativePrivateValidators = append(nativePrivateValidators, machineServiceObserver.validateMachineService)
 	}
 	if tunnelProvider == nil {
-		tunnelEnrollment, enrollmentErr := newProductionTunnelEnrollmentService(controlURL.String(), runtimeConfig.StateRoot, machineID, localControlToken, transport, inspectorStore, inspectorRegistry, inspectorService)
+		tunnelEnrollment, enrollmentErr := newProductionTunnelEnrollmentService(controlURL.String(), runtimeConfig.StateRoot, machineID, localControlToken, transport, inspectorStore, inspectorRegistry, inspectorService, engineTunnels)
 		if enrollmentErr != nil {
 			return nil, errors.Join(ErrProductionInvalid, enrollmentErr)
 		}
 		dependencies.TunnelEnrollment = tunnelEnrollment
+		if engineTunnels != nil {
+			dependencies.EngineTunnels = engineTunnels
+		}
 		dependencies.TunnelEnrollmentLifecycle = platformTunnelEnrollmentLifecycle(tunnelEnrollment)
 		dependencies.TunnelManager = tunnelEnrollment
 		connectorService.status = tunnelEnrollment.Status

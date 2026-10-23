@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 	"io"
 	jitterrand "math/rand/v2"
 	"net"
@@ -68,6 +69,10 @@ type Service struct {
 	hubs        map[string]*preview.DataCarrierPreviewHub
 	hubsChanged chan struct{}
 	served      bool
+	// tunnelsServed: every edge of the attachment serves this agent's tunnels as endpoint routes
+	// (PLAN 3a step 4); tunnelsChanged is closed and replaced when it changes.
+	tunnelsServed  bool
+	tunnelsChanged chan struct{}
 	// answered is closed by the first successful attachment answer.
 	answered     chan struct{}
 	answeredOnce sync.Once
@@ -152,6 +157,7 @@ type admission struct {
 	ActiveEdgeNodeID       string                    `json:"active_edge_node_id,omitempty"`
 	ActiveEdgeProcessEpoch string                    `json:"active_edge_process_epoch,omitempty"`
 	EndpointsServed        bool                      `json:"endpoints_served,omitempty"`
+	TunnelEndpointsServed  bool                      `json:"tunnel_endpoints_served,omitempty"`
 }
 
 type admissionBinding struct {
@@ -209,7 +215,7 @@ func New(config Config) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Service{hubs: map[string]*preview.DataCarrierPreviewHub{}, hubsChanged: make(chan struct{}), answered: make(chan struct{}), config: config, auth: auth, client: &http.Client{Transport: config.Transport, Timeout: 12 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("runtime attachment redirect refused") }}, sessions: sessions, processID: processID}, nil
+	return &Service{hubs: map[string]*preview.DataCarrierPreviewHub{}, hubsChanged: make(chan struct{}), tunnelsChanged: make(chan struct{}), answered: make(chan struct{}), config: config, auth: auth, client: &http.Client{Transport: config.Transport, Timeout: 12 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("runtime attachment redirect refused") }}, sessions: sessions, processID: processID}, nil
 }
 
 func (s *Service) Start(ctx context.Context) error {
@@ -334,6 +340,11 @@ func (s *Service) run(ctx context.Context) {
 		if err == nil {
 			s.hubsMu.Lock()
 			s.served = response.EndpointsServed
+			if s.tunnelsServed != response.TunnelEndpointsServed {
+				s.tunnelsServed = response.TunnelEndpointsServed
+				close(s.tunnelsChanged)
+				s.tunnelsChanged = make(chan struct{})
+			}
 			s.hubsMu.Unlock()
 			s.answeredOnce.Do(func() { close(s.answered) })
 			ordered := []admissionBinding{response.primary()}
@@ -512,7 +523,7 @@ func (s *Service) fetch(ctx context.Context, activeNode, activeEpoch string) (ou
 	}
 	_, portText, _ := net.SplitHostPort(s.config.ListenAddress)
 	port, _ := strconv.Atoi(portText) // validated by New
-	request := map[string]any{"operation_id": op, "process_id": s.processID, "worker_generation": s.config.WorkerGeneration, "installation_generation": s.config.InstallationGeneration, "runtime_listen_port": port, "capabilities": []string{"endpoints"}}
+	request := map[string]any{"operation_id": op, "process_id": s.processID, "worker_generation": s.config.WorkerGeneration, "installation_generation": s.config.InstallationGeneration, "runtime_listen_port": port, "capabilities": []string{runtimewire.CapabilityEndpoints, runtimewire.CapabilityTunnelEndpoints}}
 	if s.preference != nil {
 		request["edge_preference"] = s.preference
 	}
@@ -523,35 +534,9 @@ func (s *Service) fetch(ctx context.Context, activeNode, activeEpoch string) (ou
 	if activeNode != "" {
 		request["active_edge_node_id"], request["active_edge_process_epoch"] = activeNode, activeEpoch
 	}
-	body, err := json.Marshal(request)
+	res, err := s.post(ctx, path, op, request)
 	if err != nil {
-		return out, controlFailure(err)
-	}
-	token, err := s.auth.Token(ctx)
-	if err != nil {
-		// A long-idle installation may have missed the renewal window. Its
-		// enrolled machine identity can recover the control credential.
-		token, err = s.auth.EnsureInitial(ctx)
-		if err != nil {
-			return out, controlFailure(err)
-		}
-	}
-	proof, err := s.auth.Proof(ctx, op, http.MethodPost, path, body)
-	if err != nil {
-		return out, controlFailure(err)
-	}
-	endpoint := strings.TrimRight(s.config.ControlURL, "/") + path
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
-	if err != nil {
-		return out, controlFailure(err)
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("X-Paperboat-Machine-Identity", token)
-	req.Header.Set("X-Paperboat-Machine-Proof", base64.RawURLEncoding.EncodeToString(proof))
-	req.Header.Set("Content-Type", "application/json")
-	res, err := s.client.Do(req)
-	if err != nil {
-		return out, controlFailure(err)
+		return out, err
 	}
 	defer func() {
 		if closeErr := res.Body.Close(); closeErr != nil {
@@ -587,6 +572,41 @@ func (s *Service) fetch(ctx context.Context, activeNode, activeEpoch string) (ou
 		return admission{}, controlFailure(preview.ErrMachineAttachmentSessionInvalid)
 	}
 	return out, nil
+}
+
+// post sends one machine-signed control request.
+func (s *Service) post(ctx context.Context, endpointPath, op string, request any) (*http.Response, error) {
+	body, err := json.Marshal(request)
+	if err != nil {
+		return nil, controlFailure(err)
+	}
+	token, err := s.auth.Token(ctx)
+	if err != nil {
+		// A long-idle installation may have missed the renewal window. Its
+		// enrolled machine identity can recover the control credential.
+		token, err = s.auth.EnsureInitial(ctx)
+		if err != nil {
+			return nil, controlFailure(err)
+		}
+	}
+	proof, err := s.auth.Proof(ctx, op, http.MethodPost, endpointPath, body)
+	if err != nil {
+		return nil, controlFailure(err)
+	}
+	endpoint := strings.TrimRight(s.config.ControlURL, "/") + endpointPath
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, controlFailure(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-Paperboat-Machine-Identity", token)
+	req.Header.Set("X-Paperboat-Machine-Proof", base64.RawURLEncoding.EncodeToString(proof))
+	req.Header.Set("Content-Type", "application/json")
+	res, err := s.client.Do(req)
+	if err != nil {
+		return nil, controlFailure(err)
+	}
+	return res, nil
 }
 
 func (a admission) primary() admissionBinding {

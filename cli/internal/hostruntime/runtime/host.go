@@ -81,17 +81,19 @@ type HostDependencies struct {
 	PreviewOwnerSessions      *preview.OwnerSessionLeaseManager
 	RuntimeObservationService Service
 	RuntimeAttachmentService  Service
-	ManagedEnvironment        envinject.EnvironmentSource
-	ConfigApply               configapply.Handler
-	ConfigCompare             server.ConfigComparisonReader
-	ConfigApplyProof          bool
-	ConfigSync                Service
-	Random                    io.Reader
-	SessionLauncherFactory    func(session.Service) (server.SessionLauncher, error)
-	HealthTracker             *health.HealthTracker
-	Metrics                   *hosttelemetry.Registry
-	EventLog                  *hosttelemetry.EventLog
-	LocalControlToken         string
+	// EngineTunnels serves the machine's tunnels on its runtime carriers (PLAN 3a step 4).
+	EngineTunnels          Service
+	ManagedEnvironment     envinject.EnvironmentSource
+	ConfigApply            configapply.Handler
+	ConfigCompare          server.ConfigComparisonReader
+	ConfigApplyProof       bool
+	ConfigSync             Service
+	Random                 io.Reader
+	SessionLauncherFactory func(session.Service) (server.SessionLauncher, error)
+	HealthTracker          *health.HealthTracker
+	Metrics                *hosttelemetry.Registry
+	EventLog               *hosttelemetry.EventLog
+	LocalControlToken      string
 	// Inspector is the daemon-local inspector HTTP service (bounded
 	// sanitized retrieval and deliberate audited replay). It is mounted at
 	// /v1/inspector/ only with a control token, on the loopback service.
@@ -591,6 +593,9 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 	stableComponents = append(stableComponents, stablehostd.Component{Name: "control_plane", Required: true, Service: httpService})
 	if dependencies.RuntimeAttachmentService != nil {
 		stableComponents = append(stableComponents, stablehostd.Component{Name: "runtime_attachment", Required: false, Service: dependencies.RuntimeAttachmentService})
+	}
+	if dependencies.EngineTunnels != nil {
+		stableComponents = append(stableComponents, stablehostd.Component{Name: "engine_tunnels", Required: false, Service: dependencies.EngineTunnels})
 	}
 	daemon, err := stablehostd.New(stablehostd.Config{
 		Workloads:  stablehostd.Workloads{Sessions: sessions, Executions: executions, Transfers: transferService, ManagedSSH: dependencies.ManagedSSH, Tunnels: dependencies.TunnelManager},

@@ -30,6 +30,8 @@ type ProductionConfig struct {
 	// InspectorPurge revokes daemon-local inspector captures for routes that
 	// stopped forwarding. Nil disables purge notification.
 	InspectorPurge func(routeIDs []string)
+	// EngineServed: see Config.EngineServed.
+	EngineServed func(tunnelID string) bool
 }
 
 // ConfigApplier returns the production connector-v1 desired-state bridge over
@@ -71,7 +73,7 @@ func OpenProduction(config ProductionConfig) (*ProductionManager, hoststate.Star
 		Refresh: config.Refresh, Report: config.Report, Clock: config.Clock,
 		ReconcileInterval: config.ReconcileInterval, ApplyTimeout: config.ApplyTimeout,
 		DrainTimeout: config.DrainTimeout, ActiveObserver: config.ActiveObserver,
-		InspectorPurge: config.InspectorPurge,
+		InspectorPurge: config.InspectorPurge, EngineServed: config.EngineServed,
 	})
 	if err != nil {
 		return nil, status, errors.Join(err, store.Close())

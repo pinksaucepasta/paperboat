@@ -158,6 +158,9 @@ type Config struct {
 	// like Report. Nil disables purge notification; captures then expire by
 	// retention and replay stays fenced by authority lifetime.
 	InspectorPurge func(routeIDs []string)
+	// EngineServed reports a tunnel served on the agent's runtime carriers (PLAN 3a step 4): it runs
+	// no connector here, and a running one is drained. Nil serves every tunnel on its connector.
+	EngineServed func(tunnelID string) bool
 }
 
 type Manager struct {

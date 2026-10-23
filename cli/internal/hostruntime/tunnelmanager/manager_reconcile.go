@@ -55,7 +55,12 @@ func (m *Manager) reconcile(ctx context.Context, scheduled bool) error {
 	tunnels := append([]hoststate.Tunnel(nil), state.Tunnels...)
 	sort.Slice(tunnels, func(i, j int) bool { return tunnels[i].ID < tunnels[j].ID })
 	wanted := make(map[string]struct{}, len(tunnels))
+	engine := map[string]struct{}{}
 	for _, tunnel := range tunnels {
+		if m.config.EngineServed != nil && m.config.EngineServed(tunnel.ID) {
+			engine[tunnel.ID] = struct{}{}
+			continue
+		}
 		wanted[tunnel.ID] = struct{}{}
 		if refreshErr != nil {
 			m.report(tunnel, hoststate.Connector{}, CodeControlUnavailable, true, refreshErr)
@@ -94,6 +99,10 @@ func (m *Manager) reconcile(ctx context.Context, scheduled bool) error {
 			continue
 		}
 		m.removeAndDrain(ctx, tunnelID, active)
+		if _, moved := engine[tunnelID]; moved {
+			// Served on the agent's carriers now; its health is the engine's, not a stopped connector.
+			continue
+		}
 		m.config.Report(Observation{TunnelID: tunnelID, ConnectorID: active.ConnectorID(), AppliedGeneration: active.Generation(), Code: CodeStopped, ObservedAt: m.now()})
 	}
 	return nil

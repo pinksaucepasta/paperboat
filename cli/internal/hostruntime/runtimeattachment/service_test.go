@@ -281,8 +281,18 @@ func newRuntimeAttachmentTestService(t *testing.T, transport http.RoundTripper) 
 // status is status() and whose admission expires at expiry, and returns the admitted edge carrier.
 func startConnectedRuntimeCarrier(t *testing.T, ctx context.Context, expiry time.Time, status func() int) (*Service, *connector.DataCarrier) {
 	t.Helper()
+	return startConnectedRuntimeCarrierWith(t, ctx, expiry, status, nil, nil)
+}
+
+// startConnectedRuntimeCarrierWith also lets tweak change the attachment answer and other answer
+// every other control path.
+func startConnectedRuntimeCarrierWith(t *testing.T, ctx context.Context, expiry time.Time, status func() int, tweak func(*admission), other http.RoundTripper) (*Service, *connector.DataCarrier) {
+	t.Helper()
 	var document admission
 	transport := roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		if other != nil && request.URL.Path != path {
+			return other.RoundTrip(request)
+		}
 		payload, err := json.Marshal(struct {
 			Data admission `json:"data"`
 		}{document})
@@ -304,6 +314,9 @@ func startConnectedRuntimeCarrier(t *testing.T, ctx context.Context, expiry time
 	document = admission{Schema: "paperboat.runtime-carrier/v1", RouteKind: "runtime_https_wss", Hostname: "runtime.example.test", EdgeEndpoints: []string{"h2://edge.example.test:8443"}, ExpiresAt: expiry,
 		ActiveEdgeNodeID: "edge-test", ActiveEdgeProcessEpoch: "epoch-1234567890123456789012345678",
 		Binding: binding{AccountID: "account-test", HostID: "machine-test", TunnelID: "machine-test", ConnectorID: "machine-test", SessionID: "session-test", ProcessGeneration: 1, ConfigGeneration: 1, InstallationGeneration: 1, RouteID: "route-test", EdgeNodeID: "edge-test", EdgeProcessEpoch: "epoch-1234567890123456789012345678", MachineIdentityPublicKey: base64.RawURLEncoding.EncodeToString(public), MachineIdentityThumbprint: "sha256:" + base64.RawURLEncoding.EncodeToString(digest[:]), EdgeCarrierServerSPKISHA256: "sha256:" + hex.EncodeToString(pin[:]), EdgeCarrierServerCertificateChainPEM: string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: trust.Certificate().Raw}))}}
+	if tweak != nil {
+		tweak(&document)
+	}
 	connected := make(chan *connector.DataCarrier, 1)
 	source, err := preview.NewMachineAttachmentSessionSource(preview.MachineAttachmentSessionSourceConfig{StateRoot: service.config.StateRoot, SessionFactory: func(got connector.DataCarrierIdentity, config connector.DataCarrierPoolConfig, _ connector.NetworkDialerConfig) (connector.DataCarrierSessionSource, error) {
 		local, remote := net.Pipe()
