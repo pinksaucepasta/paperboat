@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -22,6 +23,20 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
 )
+
+// healMachineGuard replaces a guard left on another version by an older updater (it installs the guard
+// from this installation under the all-or-nothing undo), so no user has to run pb install after an
+// update. Failure leaves the guard as it was and is logged; doctor still reports it.
+func healMachineGuard(ctx context.Context, source installsource.Source, binary string, stderr io.Writer) {
+	healCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	healed, err := hostinstall.HealMachineGuard(healCtx, source, binary)
+	if err != nil {
+		fmt.Fprintf(stderr, "paperboat-updated: machine guard runs another version and replacing it failed: %v\n", err)
+	} else if healed {
+		fmt.Fprintf(stderr, "paperboat-updated: machine guard ran another version; replaced it with %s\n", source.Version)
+	}
+}
 
 func runUpdated(ctx context.Context, args []string, _ io.Writer, stderr io.Writer) error {
 	flags := flag.NewFlagSet("updated", flag.ContinueOnError)
@@ -107,6 +122,9 @@ func runUpdated(ctx context.Context, args []string, _ io.Writer, stderr io.Write
 	}
 	if err != nil {
 		return failInitialization(err)
+	}
+	if !pending {
+		healMachineGuard(ctx, installedSource, binary, stderr)
 	}
 	environment := map[string]string{}
 	refreshManuals, err := newUnixManualRefresher(binary, uid, gid)
