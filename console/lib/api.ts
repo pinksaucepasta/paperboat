@@ -22,15 +22,23 @@ export class ApiError extends Error {
   }
 }
 
+/** How long a read may take before it fails as unanswered. */
+const readTimeoutMs = 30_000
+
 /**
  * A request that never got an answer (offline, a dropped connection) fails in the browser with
  * "Failed to fetch"; people are told what happened instead. Cancelled requests stay cancelled.
  */
 export async function send(input: string, init?: RequestInit): Promise<Response> {
+  // A read the server never answers would hang its page; writes, streams and uploads set their own.
+  const reads = !init?.method || init.method === "GET"
+  const signal = init?.signal ?? (reads ? AbortSignal.timeout(readTimeoutMs) : undefined)
   try {
-    return await fetch(input, init)
+    return await fetch(input, { ...init, signal })
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") throw error
+    if (error instanceof DOMException && error.name === "TimeoutError")
+      throw new ApiError(0, "timeout", "Paperboat took too long to answer. Try again.")
     throw new ApiError(0, "network", "Couldn’t reach Paperboat. Check your connection and try again.")
   }
 }

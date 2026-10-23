@@ -215,7 +215,13 @@ export function Starting({
   const now = useNow(1_000)
   const preview = useQuery({
     ...previewQuery(id),
-    refetchInterval: (query) => (query.state.data?.state === "ready" ? false : 1_000),
+    // Poll until it settles: ready, or a state it won't leave (expired, stopped, failed).
+    refetchInterval: (query) => {
+      const data = query.state.data
+      const settled =
+        data && (["ready", "expired", "stopped"].includes(data.state) || data.allocation_state === "failed")
+      return settled ? false : 1_000
+    },
   })
   const data = preview.data
   const failed = data && (data.state === "expired" || data.state === "stopped" || data.allocation_state === "failed")
