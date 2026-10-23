@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
+	"net/url"
 	"sort"
 	"sync"
 	"time"
@@ -210,34 +211,25 @@ func (i *Inventory) Refresh(ctx context.Context) (refreshErr error) {
 		if sourceErr == nil {
 			desired.Machines = preserveLocalObservations(mapMachines(machines), current)
 			if reconcileErr != nil {
-				brokenSince := now
-				if current != nil && len(current.Health) == 1 && current.Health[0].Code == "local_access_unavailable" && current.Health[0].BrokenSince != nil {
-					brokenSince = *current.Health[0].BrokenSince
-				}
 				desired.DaemonState = "degraded"
-				desired.Health = []localapi.HealthItem{{
-					Code:        "local_access_unavailable",
-					Severity:    "error",
-					Title:       "Local machine access is unavailable",
-					BrokenSince: &brokenSince,
-					Recovery:    "Check Paperboat local access settings and repair the installation",
-					ETag:        "local_access_unavailable",
-				}}
+				// The local reconcile asks the server too (credentials, browser services and
+				// certificates). When the server did not answer, the machine's local access is not what
+				// is broken; saying so sent people to their local settings and made updates treat a slow
+				// server as a broken installation (lanel-a, 2026-10-23).
+				if controlPlaneUnreachable(reconcileErr) {
+					desired.Health = controlPlaneUnavailableHealth(current, now)
+				} else {
+					desired.Health = []localapi.HealthItem{healthSince(current, now, localapi.HealthItem{
+						Code:     "local_access_unavailable",
+						Severity: "error",
+						Title:    "Local machine access is unavailable",
+						Recovery: "Check Paperboat local access settings and repair the installation",
+					})}
+				}
 			}
 		} else {
-			brokenSince := now
-			if current != nil && len(current.Health) == 1 && current.Health[0].Code == "control_plane_unavailable" && current.Health[0].BrokenSince != nil {
-				brokenSince = *current.Health[0].BrokenSince
-			}
 			desired.DaemonState = "degraded"
-			desired.Health = []localapi.HealthItem{{
-				Code:        "control_plane_unavailable",
-				Severity:    "error",
-				Title:       "Control plane is unavailable",
-				BrokenSince: &brokenSince,
-				Recovery:    "Check network access and Paperboat authentication",
-				ETag:        "control_plane_unavailable",
-			}}
+			desired.Health = controlPlaneUnavailableHealth(current, now)
 			if inventoryAuthenticationRequired(sourceErr) {
 				desired.DaemonState = "awaiting_enrollment"
 				desired.Machines = nil
@@ -267,6 +259,39 @@ func (i *Inventory) Refresh(ctx context.Context) (refreshErr error) {
 		i.onMachines(ctx, append([]api.UserMachine(nil), machines...))
 	}
 	return refreshErr
+}
+
+func controlPlaneUnavailableHealth(current *localapi.Snapshot, now time.Time) []localapi.HealthItem {
+	return []localapi.HealthItem{healthSince(current, now, localapi.HealthItem{
+		Code:     "control_plane_unavailable",
+		Severity: "error",
+		Title:    "Control plane is unavailable",
+		Recovery: "Check network access and Paperboat authentication",
+	})}
+}
+
+// healthSince completes a single health item, keeping when it broke if the current snapshot already
+// reports the same one.
+func healthSince(current *localapi.Snapshot, now time.Time, item localapi.HealthItem) localapi.HealthItem {
+	brokenSince := now
+	if current != nil && len(current.Health) == 1 && current.Health[0].Code == item.Code && current.Health[0].BrokenSince != nil {
+		brokenSince = *current.Health[0].BrokenSince
+	}
+	item.BrokenSince, item.ETag = &brokenSince, item.Code
+	return item
+}
+
+// controlPlaneUnreachable reports a failure of a request to the Paperboat server itself: the HTTP
+// client could not complete it (*url.Error: connection, TLS or timeout), or the server answered
+// 408/429/5xx. A local failure (the machine guard socket, or the reconcile's own deadline with no
+// request in the chain) is not the control plane.
+func controlPlaneUnreachable(err error) bool {
+	var request *url.Error
+	if errors.As(err, &request) {
+		return true
+	}
+	var response *api.APIError
+	return errors.As(err, &response) && (response.Status == 408 || response.Status == 429 || response.Status >= 500)
 }
 
 func (i *Inventory) Completions(context.Context) (localapi.CompletionSnapshot, error) {

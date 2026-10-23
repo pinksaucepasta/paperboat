@@ -3,6 +3,8 @@ package localdaemon
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/url"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -631,5 +633,45 @@ func TestInventoryReconcileDoesNotInheritTheListingsTimeBudget(t *testing.T) {
 	}
 	if err := inventory.Refresh(context.Background()); err != nil || reconcileErr != nil {
 		t.Fatalf("refresh err = %v, reconcile err = %v; want both stages inside their own budgets", err, reconcileErr)
+	}
+}
+
+// The local reconcile asks the server for credentials, browser services and certificates. When it
+// failed because the server did not answer, the daemon said "Local machine access is unavailable", which
+// sent people to their local settings and made an update treat a slow server as a broken installation
+// and roll back at once (lanel-a, 2026-10-23). It reports the control plane instead; any other reconcile
+// failure stays local.
+func TestInventoryReconcileFailureCausedByTheServerReportsTheControlPlane(t *testing.T) {
+	for name, test := range map[string]struct {
+		err  error
+		want string
+	}{
+		"server deadline":     {fmt.Errorf("refresh authorized local browser services: %w", &url.Error{Op: "Get", URL: "https://api.example.test/v1/machine-services", Err: context.DeadlineExceeded}), "control_plane_unavailable"},
+		"local deadline":      {fmt.Errorf("apply local machine access: %w", context.DeadlineExceeded), "local_access_unavailable"},
+		"server unavailable":  {fmt.Errorf("coordinator: %w", &api.APIError{Status: 503, Code: "temporarily_unavailable"}), "control_plane_unavailable"},
+		"local guard failure": {errors.New("apply local machine access: machine guard refused"), "local_access_unavailable"},
+		"server refused":      {&api.APIError{Status: 403, Code: "forbidden"}, "local_access_unavailable"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			store, err := localapi.NewSnapshotStore(nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			inventory, err := NewInventory(InventoryConfig{
+				Source:            &scriptedMachineSource{results: []machineResult{{machines: []api.UserMachine{{ID: "machine_1", Alias: "studio"}}}}},
+				Store:             store,
+				RefreshInterval:   time.Second,
+				RequestTimeout:    time.Second,
+				ReconcileMachines: func(context.Context, []api.UserMachine) error { return test.err },
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = inventory.Refresh(context.Background())
+			snapshot, err := store.Snapshot(context.Background())
+			if err != nil || snapshot.DaemonState != "degraded" || len(snapshot.Health) != 1 || snapshot.Health[0].Code != test.want || len(snapshot.Machines) != 1 {
+				t.Fatalf("snapshot=%#v err=%v, want degraded with %s and the machine kept", snapshot, err, test.want)
+			}
+		})
 	}
 }
