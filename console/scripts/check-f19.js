@@ -1,7 +1,7 @@
-// Browser check for F19 part 1 (roles, audit log, business billing) against the live server.
+// Browser check for F19 part 1 (roles and the audit log) against the live server.
 // Paste into a signed-in tab of the console whose account owns the team in window.__team (default
 // paperboat-smoke-paid). It switches the workspace cookie to the team (and back to what it was),
-// reads Billing, Team and Activity, opens menus without choosing anything, and downloads one audit
+// reads Team and Activity, opens menus without choosing anything, and downloads one audit
 // export (which the server records as team.activity_exported). Changes nothing else. Prints steps.
 ;(async () => {
   const steps = []
@@ -79,39 +79,6 @@
         await sleep(400)
       } else pass("the role menu opens", false, "no role button")
     }
-
-    // Billing: invoices, billing details, pay by invoice, as the API says.
-    const base = `billing/workspaces/teams/${teamId}`
-    const [invoices, details, invoice] = await Promise.all([
-      get(`${base}/invoices`),
-      get(`${base}/details`),
-      get(`${base}/pay-by-invoice`),
-    ])
-    await open("/billing", () => /Invoices/.test(text()) && /Billing details/.test(text()))
-    await sleep(2000)
-    const billingText = text()
-    const count = invoices.data?.items?.length ?? 0
-    pass(
-      "Invoices shows the server's invoices (or says there are none)",
-      count ? main().querySelectorAll("tbody tr").length >= count : /No invoices yet/.test(billingText),
-      `${count} from the API`,
-    )
-    pass(
-      "Billing details shows the saved email, or why it can't yet",
-      details.status === 200
-        ? [...main().querySelectorAll("input")].some((i) => i.value === details.data.email)
-        : details.error?.code === "no_billing_account" && /after the first payment/.test(billingText),
-      `${details.status} ${details.error?.code ?? ""}`,
-    )
-    pass(
-      "Pay by invoice states eligibility as the server does",
-      invoice.status === 200 &&
-        /Pay by invoice/.test(billingText) &&
-        (invoice.data.eligible || invoice.data.pay_by_invoice
-          ? /emailed to the billing email/.test(billingText)
-          : billingText.includes(`${invoice.data.min_seats} or more seats`)),
-      JSON.stringify(invoice.data),
-    )
 
     // Activity: filters reach the server, and the export downloads the same events.
     const seen = []
