@@ -201,8 +201,9 @@ var refreshMix = []string{
 
 func TestLoadIdlePollMix(t *testing.T) {
 	server := startLoadServer(t)
-	const refreshEvery = 15 * time.Second
-	const window = 60 * time.Second
+	// 15 s is today's interval with the event stream unhealthy; 300 s is the fallback once it is healthy.
+	refreshEvery := time.Duration(loadSteps("PAPERBOAT_LOAD_REFRESH_SECONDS", []int{15})[0]) * time.Second
+	window := max(60*time.Second, refreshEvery)
 	for _, daemons := range loadSteps("PAPERBOAT_LOAD_DAEMONS", []int{50, 100, 250, 500, 1000}) {
 		client := loadClient(256)
 		var mu sync.Mutex
@@ -211,6 +212,7 @@ func TestLoadIdlePollMix(t *testing.T) {
 		var transportErrors atomic.Int64
 		ctx, cancel := context.WithTimeout(context.Background(), window)
 		before := server.queries.Load()
+		busyBefore, totalBefore := hostCPU()
 		var wg sync.WaitGroup
 		for daemon := 0; daemon < daemons; daemon++ {
 			wg.Add(1)
@@ -249,6 +251,8 @@ func TestLoadIdlePollMix(t *testing.T) {
 		}
 		wg.Wait()
 		cancel()
+		busyAfter, totalAfter := hostCPU()
+		cores := float64(runtime.NumCPU()) * float64(busyAfter-busyBefore) / float64(max(1, totalAfter-totalBefore))
 		total, failed := 0, int(transportErrors.Load())
 		for status, count := range statuses {
 			total += count
@@ -265,8 +269,9 @@ func TestLoadIdlePollMix(t *testing.T) {
 			lines = append(lines, fmt.Sprintf("%s p50 %v p99 %v", path, p50.Round(time.Millisecond), p99.Round(time.Millisecond)))
 		}
 		slices.Sort(lines)
-		t.Logf("daemons=%d: %d requests (%.0f/s), %d failed, statuses %v, %.0f queries/s\n  %s", daemons, total+int(transportErrors.Load()),
-			float64(total)/window.Seconds(), failed, statuses, float64(server.queries.Load()-before)/window.Seconds(), strings.Join(lines, "\n  "))
+		t.Logf("daemons=%d refresh=%v: %d requests (%.0f/s), %d failed, statuses %v, %.0f queries/s; host busy %.2f of %d vCPU (server + PostgreSQL) = %.0f machines per busy vCPU\n  %s",
+			daemons, refreshEvery, total+int(transportErrors.Load()), float64(total)/window.Seconds(), failed, statuses,
+			float64(server.queries.Load()-before)/window.Seconds(), cores, runtime.NumCPU(), float64(daemons)/max(cores, 0.01), strings.Join(lines, "\n  "))
 		client.CloseIdleConnections()
 		if worst > 5*time.Second || failed*100 > total {
 			t.Logf("first degradation at daemons=%d (p99 %v, %d failed)", daemons, worst.Round(time.Millisecond), failed)
@@ -288,4 +293,23 @@ func loadSteps(name string, fallback []int) []int {
 		}
 	}
 	return steps
+}
+
+// hostCPU returns busy and total jiffies from /proc/stat. The staging VM runs only the server and its database, so
+// host busy time is their cost, which is what "machines per vCPU" divides by. The load generator runs in this process
+// too, so the figure is a conservative lower bound on machines per vCPU.
+func hostCPU() (busy, total uint64) {
+	data, err := os.ReadFile("/proc/stat")
+	if err != nil {
+		return 0, 0
+	}
+	fields := strings.Fields(strings.SplitN(string(data), "\n", 2)[0])
+	for index, field := range fields[1:] {
+		value, _ := strconv.ParseUint(field, 10, 64)
+		total += value
+		if index != 3 && index != 4 { // idle, iowait
+			busy += value
+		}
+	}
+	return busy, total
 }
