@@ -3,12 +3,14 @@
 package hostruntimecmd
 
 import (
+	"errors"
 	"io"
 	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/internal/liveconnections"
 )
 
 func TestUpdateProbeOutputBoundIncludesCopy(t *testing.T) {
@@ -39,5 +41,30 @@ func TestUnixParticipantsConstructionBeforeInstallCommit(t *testing.T) {
 	}
 	if _, err := newUnixUpdateParticipants(layout.Binary, -1, 1000); err == nil {
 		t.Fatal("accepted invalid owner")
+	}
+}
+
+// An open SSH connection into this machine is carried by the carrier, not the user's daemon, so an
+// update counts it too; either side that cannot answer only drops its own part.
+func TestUpdateCountsSSHConnectionsIntoThisMachine(t *testing.T) {
+	down := errors.New("unavailable")
+	for _, test := range []struct {
+		name                  string
+		daemon                liveconnections.Counts
+		daemonErr, carrierErr error
+		incoming              int
+		want                  liveconnections.Counts
+		wantErr               bool
+	}{
+		{name: "incoming only", incoming: 1, want: liveconnections.Counts{SSH: 1}},
+		{name: "both ends", daemon: liveconnections.Counts{SSH: 1, Forwards: 2}, incoming: 2, want: liveconnections.Counts{SSH: 3, Forwards: 2}},
+		{name: "old carrier", daemon: liveconnections.Counts{Forwards: 1}, carrierErr: down, incoming: 5, want: liveconnections.Counts{Forwards: 1}},
+		{name: "daemon down", daemonErr: down, daemon: liveconnections.Counts{SSH: 9}, incoming: 1, want: liveconnections.Counts{SSH: 1}},
+		{name: "neither", daemonErr: down, carrierErr: down, wantErr: true},
+	} {
+		got, err := combineOpenConnections(test.daemon, test.daemonErr, test.incoming, test.carrierErr)
+		if (err != nil) != test.wantErr || got != test.want {
+			t.Fatalf("%s: %+v, %v", test.name, got, err)
+		}
 	}
 }

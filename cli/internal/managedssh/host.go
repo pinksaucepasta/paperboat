@@ -118,6 +118,14 @@ func (h *Host) Target() (HostTarget, bool) {
 	return h.target, h.target.Generation != 0 && !h.retired && !h.disabled
 }
 
+// OpenStreams is the number of SSH bridges open now, across every source.
+func (h *Host) OpenStreams() int {
+	if h == nil {
+		return 0
+	}
+	return len(h.capacity)
+}
+
 // Retire fences new bridges only once every accepted connection has finished.
 // A busy result leaves admission open and never interrupts an existing SSH flow.
 func (h *Host) Retire() error {

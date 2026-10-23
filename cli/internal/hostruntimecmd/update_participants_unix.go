@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/carriercontrol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
@@ -62,7 +63,45 @@ func (p *unixUpdateParticipants) Restart(ctx context.Context) error {
 	return err
 }
 
+// OpenConnections counts both ends an update would cut: the SSH streams and forwards the enrolled
+// user's daemon carries as a client, and the SSH connections into this machine that the carrier
+// bridges. It fails only when neither side can answer.
 func (p *unixUpdateParticipants) OpenConnections(ctx context.Context) (liveconnections.Counts, error) {
+	daemon, daemonErr := p.daemonConnections(ctx)
+	incoming, carrierErr := carrierOpenSSH(ctx, p.uid)
+	return combineOpenConnections(daemon, daemonErr, incoming, carrierErr)
+}
+
+func combineOpenConnections(daemon liveconnections.Counts, daemonErr error, incoming int, carrierErr error) (liveconnections.Counts, error) {
+	if daemonErr != nil && carrierErr != nil {
+		return liveconnections.Counts{}, errors.Join(daemonErr, carrierErr)
+	}
+	if daemonErr != nil {
+		daemon = liveconnections.Counts{}
+	}
+	if carrierErr == nil {
+		daemon.SSH += incoming
+	}
+	return daemon, nil
+}
+
+func carrierOpenSSH(ctx context.Context, uid int) (int, error) {
+	config, err := hostinstall.ReadCarrierConfig(ctx, "u"+strconv.Itoa(uid))
+	if err != nil {
+		return 0, err
+	}
+	capability, err := hostinstall.ReadCarrierCapability(ctx, config)
+	if err != nil {
+		return 0, err
+	}
+	client, err := carriercontrol.NewClient(config.ControlEndpoint, capability, config.Source.SHA256)
+	if err != nil {
+		return 0, err
+	}
+	return client.OpenSSH(ctx)
+}
+
+func (p *unixUpdateParticipants) daemonConnections(ctx context.Context) (liveconnections.Counts, error) {
 	body, err := p.run(ctx, "--connections")
 	if err != nil {
 		return liveconnections.Counts{}, err

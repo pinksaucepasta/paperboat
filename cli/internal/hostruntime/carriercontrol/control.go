@@ -42,6 +42,8 @@ type response struct {
 	Schema string `json:"schema"`
 	SHA256 string `json:"executable_sha256"`
 	Error  string `json:"error,omitempty"`
+	// SSHStreams answers only open-ssh, so clients that never ask never see it.
+	SSHStreams *int `json:"ssh_streams,omitempty"`
 }
 
 func validHash(value string) bool {
@@ -60,7 +62,7 @@ func (r request) valid() bool {
 		return false
 	}
 	switch r.Operation {
-	case "health", "retire-ssh", "resume-ssh":
+	case "health", "retire-ssh", "resume-ssh", "open-ssh":
 		return r.SourceSHA256 == ""
 	case "retire-source":
 		return validHash(r.SourceSHA256)
@@ -139,6 +141,9 @@ func (s *Server) handler() http.Handler {
 		} else {
 			var operationErr error
 			switch req.Operation {
+			case "open-ssh":
+				open := s.SSH.OpenStreams()
+				result.SSHStreams = &open
 			case "retire-ssh":
 				operationErr = s.SSH.Retire()
 			case "resume-ssh":
@@ -301,26 +306,28 @@ func (c *Client) BindWorker(workerID string, epoch uint64) (*Client, error) {
 }
 
 func (c *Client) call(ctx context.Context, operation, sourceSHA256 string) error {
-	return c.do(ctx, request{Schema: schema, SHA256: c.sha256, Operation: operation, SourceSHA256: sourceSHA256})
+	_, err := c.do(ctx, request{Schema: schema, SHA256: c.sha256, Operation: operation, SourceSHA256: sourceSHA256})
+	return err
 }
 
 func (c *Client) callWorker(ctx context.Context, operation string) error {
 	if c == nil || c.workerID == "" || c.workerEpoch == 0 {
 		return ErrInvalid
 	}
-	return c.do(ctx, request{Schema: schema, SHA256: c.sha256, Operation: operation, WorkerID: c.workerID, WorkerEpoch: c.workerEpoch})
+	_, err := c.do(ctx, request{Schema: schema, SHA256: c.sha256, Operation: operation, WorkerID: c.workerID, WorkerEpoch: c.workerEpoch})
+	return err
 }
 
-func (c *Client) do(ctx context.Context, req request) error {
+func (c *Client) do(ctx context.Context, req request) (response, error) {
 	if c == nil || ctx == nil {
-		return ErrInvalid
+		return response{}, ErrInvalid
 	}
 	if !req.valid() {
-		return ErrInvalid
+		return response{}, ErrInvalid
 	}
 	body, err := json.Marshal(req)
 	if err != nil {
-		return ErrInvalid
+		return response{}, ErrInvalid
 	}
 	callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -330,32 +337,32 @@ func (c *Client) do(ctx context.Context, req request) error {
 	defer transport.CloseIdleConnections()
 	httpReq, err := http.NewRequestWithContext(callCtx, http.MethodPost, "http://carrier"+path, bytes.NewReader(body))
 	if err != nil {
-		return ErrInvalid
+		return response{}, ErrInvalid
 	}
 	httpReq.Header.Set("X-Paperboat-Carrier-Capability", base64.RawURLEncoding.EncodeToString(c.token))
 	httpReq.Header.Set("Content-Type", "application/json")
 	client := &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return ErrInvalid }}
 	httpResponse, err := client.Do(httpReq)
 	if err != nil {
-		return errors.Join(ErrUnavailable, err)
+		return response{}, errors.Join(ErrUnavailable, err)
 	}
 	defer httpResponse.Body.Close()
 	var result response
 	if httpResponse.StatusCode != http.StatusOK || decode(io.LimitReader(httpResponse.Body, 4097), &result) != nil || result.Schema != schema {
-		return ErrUnavailable
+		return response{}, ErrUnavailable
 	}
 	if result.SHA256 != c.sha256 {
-		return ErrFenced
+		return response{}, ErrFenced
 	}
 	switch result.Error {
 	case "":
-		return nil
+		return result, nil
 	case "busy":
-		return ErrBusy
+		return response{}, ErrBusy
 	case "fenced":
-		return ErrFenced
+		return response{}, ErrFenced
 	default:
-		return ErrUnavailable
+		return response{}, ErrUnavailable
 	}
 }
 
@@ -365,6 +372,19 @@ func (c *Client) ResumeSSH(ctx context.Context) error { return c.call(ctx, "resu
 
 func (c *Client) DisableSSH(ctx context.Context) error { return c.callWorker(ctx, "disable-ssh") }
 func (c *Client) EnableSSH(ctx context.Context) error  { return c.callWorker(ctx, "enable-ssh") }
+
+// OpenSSH is the number of SSH connections the carrier is bridging now. A carrier from before this
+// operation answers ErrUnavailable.
+func (c *Client) OpenSSH(ctx context.Context) (int, error) {
+	result, err := c.do(ctx, request{Schema: schema, SHA256: c.sha256, Operation: "open-ssh"})
+	if err != nil {
+		return 0, err
+	}
+	if result.SSHStreams == nil || *result.SSHStreams < 0 {
+		return 0, ErrUnavailable
+	}
+	return *result.SSHStreams, nil
+}
 
 func (c *Client) CheckSourceRetirement(ctx context.Context, sourceSHA256 string) error {
 	return c.call(ctx, "retire-source", sourceSHA256)

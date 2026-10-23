@@ -85,6 +85,9 @@ func TestPrivateCarrierRetirementPreservesAcceptedConnection(t *testing.T) {
 	if err := client.Health(ctx); err != nil {
 		t.Fatal(err)
 	}
+	if open, err := client.OpenSSH(ctx); err != nil || open != 0 {
+		t.Fatalf("idle carrier open SSH = %d, %v", open, err)
+	}
 	workerClient, err := client.BindWorker(workerID, workerEpoch)
 	if err != nil {
 		t.Fatal(err)
@@ -117,6 +120,13 @@ func TestPrivateCarrierRetirementPreservesAcceptedConnection(t *testing.T) {
 		}
 	}
 	echo()
+	// An update asks this before it starts: the incoming connection must be counted.
+	if open, err := client.OpenSSH(ctx); err != nil || open != 1 {
+		t.Fatalf("open SSH with one bridge = %d, %v", open, err)
+	}
+	if _, err := wrongSource.OpenSSH(ctx); !errors.Is(err, ErrFenced) {
+		t.Fatalf("wrong source open SSH: %v", err)
+	}
 	if err := wrongSource.RetireSSH(ctx); !errors.Is(err, ErrFenced) {
 		t.Fatalf("wrong source retirement: %v", err)
 	}
