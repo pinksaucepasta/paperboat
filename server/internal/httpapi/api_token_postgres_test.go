@@ -173,6 +173,17 @@ func TestAPITokenBearerRequests(t *testing.T) {
 	if status, out = do(http.MethodGet, "/v1/favorites", "pbat_garbage", ""); status != http.StatusUnauthorized || code(out) != "api_token_invalid" {
 		t.Fatalf("malformed = %d %v", status, out)
 	}
+	// F21-14: failed authentications are limited per client network (burst 10, the two above
+	// included); then the network is refused before the database is asked.
+	failures := 2
+	for ; failures < 30; failures++ {
+		if status, out = do(http.MethodGet, "/v1/favorites", "pbat_garbage", ""); status == http.StatusTooManyRequests {
+			break
+		}
+	}
+	if code(out) != "rate_limited" || failures != 10 {
+		t.Fatalf("token failures limited after %d: %d %v", failures, status, out)
+	}
 }
 
 func TestAPITokenCreateValidationErrors(t *testing.T) {

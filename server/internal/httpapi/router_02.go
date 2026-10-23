@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"github.com/pinksaucepasta/paperboat-server/internal/controlplane"
+	"github.com/pinksaucepasta/paperboat-server/internal/ratelimit"
 	"log/slog"
+	"math"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -314,4 +317,36 @@ func markResendable(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// signInRoutes present a credential before anyone is signed in. CLI device-token polling is not
+// here: it is bounded by its device code and the database limit in auth.DeviceService.
+var signInRoutes = map[string]bool{
+	"GET /v1/auth/workos/state":        true,
+	"POST /v1/auth/workos/callback":    true,
+	"POST /v1/auth/device/authorize":   true,
+	"POST /v1/auth/device/cancel":      true,
+	"POST /v1/auth/api-token-sessions": true,
+	"POST /v1/operator/login":          true,
+	"POST /v1/operator/email":          true,
+	"POST /v1/operator/setup":          true,
+}
+
+// signInLimit limits sign-in requests per client network in memory, before any database work
+// (PLAN F21-14, Lane X #15).
+func signInLimit(limiter *ratelimit.Limiter, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if signInRoutes[r.Method+" "+r.URL.Path] {
+			if ok, wait := limiter.Allow("sign-in:" + resolvedRequestNetwork(r)); !ok {
+				writeRateLimited(w, r, wait)
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func writeRateLimited(w http.ResponseWriter, r *http.Request, wait time.Duration) {
+	w.Header().Set("Retry-After", strconv.Itoa(max(1, int(math.Ceil(wait.Seconds())))))
+	writeError(w, r, http.StatusTooManyRequests, "rate_limited", "Too many attempts from your network. Wait a moment and try again.")
 }

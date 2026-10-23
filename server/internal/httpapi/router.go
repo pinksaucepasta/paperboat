@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"github.com/pinksaucepasta/paperboat-server/internal/ratelimit"
 	"log/slog"
 	"net"
 	"net/http"
@@ -715,11 +716,13 @@ func NewRouter(opts Options) http.Handler {
 		handler = mux
 	}
 	handler = clientUpdatePolicyGuard(opts.ClientUpdatePolicy, time.Now, handler)
-	handler = apiTokenAuth(opts.APITokens, handler)
+	tokenFailures := ratelimit.New(opts.Config.RateLimits.TokenFailuresPerMinute, opts.Config.RateLimits.TokenFailuresBurst, opts.Config.RateLimits.MaxClients)
+	handler = apiTokenAuth(opts.APITokens, tokenFailures, handler)
 	handler = workspaceQueryContext(handler)
 	handler = secureHeaders(handler)
 	handler = cors(opts.Config.HTTP.AllowedOrigins, handler)
 	handler = bodyLimit(opts.Config.HTTP.MaxBodyBytes, handler)
+	handler = signInLimit(ratelimit.New(opts.Config.RateLimits.SignInPerMinute, opts.Config.RateLimits.SignInBurst, opts.Config.RateLimits.MaxClients), handler)
 	handler = markResendable(handler)
 	handler = timeout(opts.Config.HTTP.RequestTimeout, opts.Logger, handler)
 	handler = recoverer(opts.Logger, handler)

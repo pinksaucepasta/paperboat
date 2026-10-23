@@ -182,6 +182,21 @@ func (s *Service) Setup(ctx context.Context, email, password string) (session Se
 }
 func (s *Service) Login(ctx context.Context, email, password string) (session Session, resultErr error) {
 	email = canonicalEmail(email)
+	// The password hash is checked with no transaction open: the row lock is held only to record
+	// the result, so slow hashing never queues other sign-ins behind it (PLAN F21-14).
+	var stored string
+	var lockedBefore sql.NullTime
+	err := s.Store.SQL().QueryRowContext(ctx, `SELECT password_hash,locked_until FROM paperboat.operator_accounts WHERE email=$1 AND status='active'`, email).Scan(&stored, &lockedBefore)
+	if operatorAuthNoRowsOnly(err) {
+		return Session{}, ErrInvalid
+	}
+	if err != nil {
+		return Session{}, err
+	}
+	if lockedBefore.Valid && time.Now().Before(lockedBefore.Time) {
+		return Session{}, ErrLocked
+	}
+	passwordOK := verifyPassword(stored, password)
 	var account Account
 	var encoded string
 	var locked sql.NullTime
@@ -202,7 +217,10 @@ func (s *Service) Login(ctx context.Context, email, password string) (session Se
 	if locked.Valid && now.Before(locked.Time) {
 		return Session{}, ErrLocked
 	}
-	if !verifyPassword(encoded, password) {
+	if encoded != stored {
+		return Session{}, ErrInvalid // the password changed meanwhile; this attempt checked the old one
+	}
+	if !passwordOK {
 		failures++
 		if failures >= 5 {
 			_, err = tx.ExecContext(ctx, `UPDATE paperboat.operator_accounts SET failed_attempts=0,locked_until=$2 WHERE id=$1`, account.ID, now.Add(15*time.Minute))

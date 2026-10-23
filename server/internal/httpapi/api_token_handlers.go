@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat-server/internal/ratelimit"
 	"net/http"
 	"strings"
 	"time"
@@ -19,7 +20,9 @@ import (
 // carries a principal acting as the token's creator, pinned to the token's workspace: no
 // selector selects it, another selector is 403 workspace_unavailable. Other credentials pass
 // through to the route's own authentication.
-func apiTokenAuth(tokens *apitokens.Service, next http.Handler) http.Handler {
+// Failed authentications are limited per client network (F21-14): a network out of attempts is
+// refused before the database is asked.
+func apiTokenAuth(tokens *apitokens.Service, failures *ratelimit.Limiter, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		secret, ok := bearerToken(r)
 		if !ok || !strings.HasPrefix(secret, apitokens.SecretPrefix) {
@@ -30,8 +33,14 @@ func apiTokenAuth(tokens *apitokens.Service, next http.Handler) http.Handler {
 			writeAPITokenInvalid(w, r)
 			return
 		}
+		client := "token:" + resolvedRequestNetwork(r)
+		if ok, wait := failures.Check(client); !ok {
+			writeRateLimited(w, r, wait)
+			return
+		}
 		token, err := tokens.Authenticate(r.Context(), secret)
 		if errors.Is(err, apitokens.ErrInvalid) {
+			failures.Allow(client)
 			writeAPITokenInvalid(w, r)
 			return
 		}

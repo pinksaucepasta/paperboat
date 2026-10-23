@@ -60,6 +60,7 @@ type Config struct {
 	Billing                Billing           `json:"billing"`
 	Business               Business          `json:"business"`
 	APITokens              APITokens         `json:"api_tokens"`
+	RateLimits             RateLimits        `json:"rate_limits"`
 	UserMachines           UserMachines      `json:"user_machines"`
 	ManagedSSH             ManagedSSH        `json:"managed_ssh"`
 	TerminalSessions       TerminalSessions  `json:"terminal_sessions"`
@@ -135,6 +136,19 @@ type APITokens struct {
 	// RetrySeconds is how long a create with an Idempotency-Key can be repeated and gets the same
 	// token and once-shown secret back (held encrypted for this window only).
 	RetrySeconds int `json:"retry_seconds"`
+}
+
+// RateLimits bound sign-in and credential attempts per client network, in memory, before any
+// database work (PLAN F21-14).
+type RateLimits struct {
+	// SignInPerMinute/SignInBurst: browser, CLI device, API-token and operator sign-in requests.
+	SignInPerMinute int `json:"sign_in_per_minute"`
+	SignInBurst     int `json:"sign_in_burst"`
+	// TokenFailuresPerMinute/TokenFailuresBurst: failed API-token authentications on any route.
+	TokenFailuresPerMinute int `json:"token_failures_per_minute"`
+	TokenFailuresBurst     int `json:"token_failures_burst"`
+	// MaxClients bounds the memory of each limiter.
+	MaxClients int `json:"max_clients"`
 }
 
 type Billing struct {
@@ -436,6 +450,7 @@ func Default() Config {
 			Driver: "postgres",
 			DSN:    "postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable",
 		},
+		RateLimits:        RateLimits{SignInPerMinute: 30, SignInBurst: 10, TokenFailuresPerMinute: 20, TokenFailuresBurst: 10, MaxClients: 100000},
 		APITokens:         APITokens{MaxLifetimeDays: 365, DefaultLifetimeDays: 90, MaxPerMember: 100, RetrySeconds: 600},
 		Billing:           Billing{TopupMaxQuantity: 100, TeamTrialDays: 14, PersonalAllowanceBytes: new(int64(5_000_000_000)), Limits: PlanLimits{Machines: PlanLimit{Free: 100, Pro: 1000, TeamCeiling: 10000}, Publications: PlanLimit{Free: 100, Pro: 1000, TeamCeiling: 10000}, BrowserTerminals: PlanLimit{Free: 10, Pro: 100, TeamCeiling: 1000}, ViewersPerSharedTerminal: 50}},
 		Business:          defaultBusiness(),
@@ -585,6 +600,9 @@ func (c Config) Validate() error {
 	}
 	if t := c.APITokens; t.MaxLifetimeDays < 1 || t.DefaultLifetimeDays < 1 || t.DefaultLifetimeDays > t.MaxLifetimeDays || t.MaxPerMember < 1 || t.RetrySeconds < 60 || t.RetrySeconds > 3600 {
 		errs = append(errs, fmt.Errorf("api_tokens limits must be positive, default_lifetime_days at most max_lifetime_days and retry_seconds between 60 and 3600"))
+	}
+	if l := c.RateLimits; l.SignInPerMinute < 1 || l.SignInBurst < 1 || l.TokenFailuresPerMinute < 1 || l.TokenFailuresBurst < 1 || l.MaxClients < 1000 {
+		errs = append(errs, errors.New("rate_limits must be positive and max_clients at least 1000"))
 	}
 	if c.Billing.TeamTrialDays < 0 || c.Billing.TeamTrialDays > 730 {
 		return errors.New("billing.team_trial_days must be between 0 and 730")
