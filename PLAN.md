@@ -1587,7 +1587,14 @@ i.e. device test runs, not a daemon loop: **R → A**, re-measure after the next
 | Previews/tunnels per account | 1,000 | server lists paged (200); completion lists page through all previews on every refresh | R (with the refresh storm) | Lane R |
 | Streams per tunnel carrier | — | datacarrier 64 streams default, 1,024 max | ? | Lane M |
 
-**ENV, config sync, console, teams/audit/usage**: bounds listed (ENV 128 records/batch, 256 KiB live; config sync
+**Console** (code read, lib/api.ts, lib/tunnels.ts, lib/terminal/queries.ts)
+
+| Dimension | Target | Bound in code | Verdict | Owner |
+|---|---|---|---|---|
+| Previews/tunnels tables, running counts | 1,000 per account | `allPages()` re-pulls up to 10 × 200 every 10–30 s per tab and silently stops at 2,000; terminals list one page of 200 | A (wrong counts above the cap; ~2 req/s per idle tab at 1,000) | Lane Q: PQ-04 cursors + running counts; Lane C: show "first N of total" meanwhile |
+| Participants of a shared terminal | 50 viewers | every viewer's tab polls `/sharing` every 4 s → 12.5 req/s per shared terminal | A | Lane Q/N: participants event; Lane C: poll ≥ 60 s after |
+
+**ENV, config sync, teams/audit/usage**: bounds listed (ENV 128 records/batch, 256 KiB live; config sync
 5 MiB/file, 1 min remote poll; team members 128; audit export 1M rows); load tests after staging is up: **?**.
 
 #### Robustness gaps vs reference implementations (Lane X, 2026-10-23)
