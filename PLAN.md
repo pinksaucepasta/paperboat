@@ -1568,8 +1568,8 @@ were dropped: the machine guard reserves each address host-wide for one OS user
    lease keeps its address and a server still running the old formula reads them right; higher slots continue with
    127.101.0.0 .. 127.127.255.255, then 127.64.0.0 .. 127.99.255.255.
 2. **Excluded addresses, one place** (`paperboat.machine_address_slot_allowed`, used by the CHECK and the
-   allocator): last octet 0 or 255, 127.100.0.0/24 (the browser gateway 127.100.0.1 and reserved), and nothing
-   outside the /10, so never 127.0.0.0/16 (127.0.0.1, systemd-resolved 127.0.0.53, Debian 127.0.1.1).
+   allocator): last octet 0 or 255, 127.100.0.0 and the browser gateway 127.100.0.1 (slots 0 and 1, as before),
+   and nothing outside the /10, so never 127.0.0.0/16 (127.0.0.1, systemd-resolved 127.0.0.53, Debian 127.0.1.1).
 3. **Order.** Lowest free slot first, so 127.100/16 fills before any other address is handed out: released daemons
    accept only 127.100/16 until Lane A's MapCanonical and guard accept the /10, and the pool leaves it only after
    64,770 live leases. Allocation stays lock-free (advisory claim of candidate slots, migration 165).
@@ -1582,8 +1582,13 @@ were dropped: the machine guard reserves each address host-wide for one OS user
    pool crosses from 127.100.255.254 to 127.101.0.1; a released address is not reused inside the quarantine and is
    after it; exhaustion (pool size lowered in the test database) answers 54000 -> ResourceExhausted; concurrent
    first allocations of 1,000 machines neither wait nor collide.
-7. **Clients (Lane A).** MapCanonical and the guard accept 127.64.0.0/10; on macOS one lo0 alias per used address as
-   today. Lane R: no change (the daemon reads assigned_ip from its own inventory).
+7. **Clients (Lane A).** The machine guard enforces a fixed 127.100.0.0/16 (persisted active range,
+   validAddressInCIDR, default-deny rules) and MapCanonical refuses anything else ("machine address is outside the
+   canonical 127.100.0.0/16 range"). A guard migration moves the fixed range to 127.64.0.0/10 (the persisted
+   127.100.0.0/16 is a subset, so no address moves), widens the Linux deny/forward rules and keeps one lo0 alias per
+   used address on macOS; MapCanonical's check widens with it. It must ship before the server's live leases pass
+   64,770. Lane R: no change (the daemon reads assigned_ip from its own inventory).
+   Server: shipped in a651265c (migration 172, TestMachineAddressPoolOnPostgres).
 *Prior art:* Tailscale gives each node one address from 100.64.0.0/10 and keeps it when the node is shared into
 another tailnet (`tailcfg/tailcfg.go:386` Sharer); headscale allocates sequentially or randomly in one prefix and
 frees on delete (`hscontrol/db/ip.go` IPAllocator, `ip_random_exhaustion_test.go`).
