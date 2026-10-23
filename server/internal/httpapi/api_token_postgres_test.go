@@ -50,13 +50,13 @@ func TestAPITokenBearerRequests(t *testing.T) {
 	exec(`INSERT INTO teams(team_id,owner_account,generation) VALUES($1,$2,1)`, team, owner)
 	exec(`INSERT INTO team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'member',true),($1,$3,1,'member',true)`, team, owner, member)
 	writer := audit.NewWriter(store)
-	tokens := apitokens.New(store, writer, config.Default().APITokens)
+	tokens := apitokens.New(store, writer, config.Default().APITokens, "test-encryption-key-0123456789abcdef")
 	teamScope := workspace.Scope{ID: team, TeamID: team}
-	ownerToken, ownerSecret, err := tokens.Create(t.Context(), owner, teamScope, apitokens.CreateInput{Name: "owner"})
+	ownerToken, ownerSecret, err := tokens.Create(t.Context(), owner, teamScope, apitokens.CreateInput{Name: "owner"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	memberToken, secret, err := tokens.Create(t.Context(), member, teamScope, apitokens.CreateInput{Name: "ci", Scope: json.RawMessage(`[{"dst":["machine:*"],"allow":["exec"]}]`)})
+	memberToken, secret, err := tokens.Create(t.Context(), member, teamScope, apitokens.CreateInput{Name: "ci", Scope: json.RawMessage(`[{"dst":["machine:*"],"allow":["exec"]}]`)}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +177,7 @@ func TestAPITokenBearerRequests(t *testing.T) {
 
 func TestAPITokenCreateValidationErrors(t *testing.T) {
 	// The handler maps service errors without a database; the request fails before storage.
-	tokens := apitokens.New(nil, nil, config.Default().APITokens)
+	tokens := apitokens.New(nil, nil, config.Default().APITokens, "")
 	for body, want := range map[string]string{
 		`{"name":"Bad Name"}`:                 "validation_failed",
 		`{"name":"ok","expires_in_days":0}`:   "validation_failed",

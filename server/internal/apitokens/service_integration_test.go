@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -62,14 +63,14 @@ func TestAPITokenLifecycle(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	t.Cleanup(cancel)
 	f := openFixture(t, ctx)
-	s := New(f.store, audit.NewWriter(f.store), config.APITokens{MaxLifetimeDays: 365, DefaultLifetimeDays: 90, MaxPerMember: 2})
+	s := New(f.store, audit.NewWriter(f.store), config.APITokens{MaxLifetimeDays: 365, DefaultLifetimeDays: 90, MaxPerMember: 2, RetrySeconds: 600}, "test-encryption-key-0123456789abcdef")
 
 	// Scope names are checked against the workspace's policy; the scope is stored as rows.
 	var scopeErr *ScopeError
-	if _, _, err := s.Create(ctx, f.member, f.team, CreateInput{Name: "bad", Scope: json.RawMessage(`[{"dst":["tag:ci"],"allow":["exec"]}]`)}); !errors.As(err, &scopeErr) || scopeErr.Errors[0].Code != "unknown_tag" {
+	if _, _, err := s.Create(ctx, f.member, f.team, CreateInput{Name: "bad", Scope: json.RawMessage(`[{"dst":["tag:ci"],"allow":["exec"]}]`)}, ""); !errors.As(err, &scopeErr) || scopeErr.Errors[0].Code != "unknown_tag" {
 		t.Fatalf("unknown tag in scope: %v", err)
 	}
-	token, secret, err := s.Create(ctx, f.member, f.team, CreateInput{Name: "ci", Scope: json.RawMessage(`[{"dst":["machine:*"],"allow":["exec"]}]`)})
+	token, secret, err := s.Create(ctx, f.member, f.team, CreateInput{Name: "ci", Scope: json.RawMessage(`[{"dst":["machine:*"],"allow":["exec"]}]`)}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,32 +114,32 @@ func TestAPITokenLifecycle(t *testing.T) {
 		t.Fatal("last_used_at moved within a minute")
 	}
 
-	if _, _, err := s.Create(ctx, f.member, f.team, CreateInput{Name: "ci"}); !errors.Is(err, ErrNameTaken) {
+	if _, _, err := s.Create(ctx, f.member, f.team, CreateInput{Name: "ci"}, ""); !errors.Is(err, ErrNameTaken) {
 		t.Fatalf("duplicate name: %v", err)
 	}
-	if _, _, err := s.Create(ctx, f.member, workspace.Scope{ID: "personal"}, CreateInput{Name: "ci"}); err != nil {
+	if _, _, err := s.Create(ctx, f.member, workspace.Scope{ID: "personal"}, CreateInput{Name: "ci"}, ""); err != nil {
 		t.Fatalf("same name in another workspace: %v", err)
 	}
-	if _, _, err := s.Create(ctx, f.member, f.team, CreateInput{Name: "Bad Name"}); !errors.Is(err, ErrInvalidName) {
+	if _, _, err := s.Create(ctx, f.member, f.team, CreateInput{Name: "Bad Name"}, ""); !errors.Is(err, ErrInvalidName) {
 		t.Fatalf("bad name: %v", err)
 	}
-	if _, _, err := s.Create(ctx, f.member, f.team, CreateInput{Name: "long", ExpiresInDays: 366}); !errors.Is(err, ErrInvalidLifetime) {
+	if _, _, err := s.Create(ctx, f.member, f.team, CreateInput{Name: "long", ExpiresInDays: 366}, ""); !errors.Is(err, ErrInvalidLifetime) {
 		t.Fatalf("lifetime: %v", err)
 	}
 	scopeErr = nil
-	if _, _, err := s.Create(ctx, f.member, f.team, CreateInput{Name: "bad-scope", Scope: json.RawMessage(`[]`)}); !errors.As(err, &scopeErr) {
+	if _, _, err := s.Create(ctx, f.member, f.team, CreateInput{Name: "bad-scope", Scope: json.RawMessage(`[]`)}, ""); !errors.As(err, &scopeErr) {
 		t.Fatalf("scope: %v", err)
 	}
-	if _, _, err := s.Create(ctx, f.other, f.team, CreateInput{Name: "x"}); !errors.Is(err, workspace.ErrForbidden) {
+	if _, _, err := s.Create(ctx, f.other, f.team, CreateInput{Name: "x"}, ""); !errors.Is(err, workspace.ErrForbidden) {
 		t.Fatalf("non-member: %v", err)
 	}
-	if _, _, err := s.Create(ctx, f.member, f.team, CreateInput{Name: "second", ExpiresInDays: 1}); err != nil {
+	if _, _, err := s.Create(ctx, f.member, f.team, CreateInput{Name: "second", ExpiresInDays: 1}, ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := s.Create(ctx, f.member, f.team, CreateInput{Name: "third"}); !errors.Is(err, ErrLimit) {
+	if _, _, err := s.Create(ctx, f.member, f.team, CreateInput{Name: "third"}, ""); !errors.Is(err, ErrLimit) {
 		t.Fatalf("limit: %v", err)
 	}
-	ownerToken, _, err := s.Create(ctx, f.owner, f.team, CreateInput{Name: "owner"})
+	ownerToken, _, err := s.Create(ctx, f.owner, f.team, CreateInput{Name: "owner"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +166,7 @@ func TestAPITokenLifecycle(t *testing.T) {
 	if _, err := s.Authenticate(ctx, secret); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("revoked token authenticates: %v", err)
 	}
-	if _, _, err := s.Create(ctx, f.member, f.team, CreateInput{Name: "ci"}); err != nil {
+	if _, _, err := s.Create(ctx, f.member, f.team, CreateInput{Name: "ci"}, ""); err != nil {
 		t.Fatalf("name reusable after revoke: %v", err)
 	}
 	var events int
@@ -181,7 +182,7 @@ func TestAPITokenAuthenticateRejectsExpiredAndInactive(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	t.Cleanup(cancel)
 	f := openFixture(t, ctx)
-	s := New(f.store, audit.NewWriter(f.store), config.APITokens{MaxLifetimeDays: 365, DefaultLifetimeDays: 90, MaxPerMember: 10})
+	s := New(f.store, audit.NewWriter(f.store), config.APITokens{MaxLifetimeDays: 365, DefaultLifetimeDays: 90, MaxPerMember: 10, RetrySeconds: 600}, "test-encryption-key-0123456789abcdef")
 	if _, err := s.Authenticate(ctx, "pbat_unknown"); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("malformed: %v", err)
 	}
@@ -192,7 +193,7 @@ func TestAPITokenAuthenticateRejectsExpiredAndInactive(t *testing.T) {
 	if _, err := s.Authenticate(ctx, unknown); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("unknown: %v", err)
 	}
-	expired, expiredSecret, err := s.Create(ctx, f.member, f.team, CreateInput{Name: "expired"})
+	expired, expiredSecret, err := s.Create(ctx, f.member, f.team, CreateInput{Name: "expired"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +203,7 @@ func TestAPITokenAuthenticateRejectsExpiredAndInactive(t *testing.T) {
 	if _, err := s.Authenticate(ctx, expiredSecret); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("expired: %v", err)
 	}
-	_, secret, err := s.Create(ctx, f.member, f.team, CreateInput{Name: "live"})
+	_, secret, err := s.Create(ctx, f.member, f.team, CreateInput{Name: "live"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,5 +212,51 @@ func TestAPITokenAuthenticateRejectsExpiredAndInactive(t *testing.T) {
 	}
 	if _, err := s.Authenticate(ctx, secret); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("inactive creator: %v", err)
+	}
+}
+
+// F21-12 (Lane X #16): a create retried with the same Idempotency-Key returns the same token and
+// once-shown secret; the secret is held only encrypted and only for the retry window.
+func TestAPITokenCreateRetryReturnsTheSameSecret(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	t.Cleanup(cancel)
+	f := openFixture(t, ctx)
+	s := New(f.store, audit.NewWriter(f.store), config.APITokens{MaxLifetimeDays: 365, DefaultLifetimeDays: 90, MaxPerMember: 5, RetrySeconds: 600}, "test-encryption-key-0123456789abcdef")
+	in := CreateInput{Name: "deploy", ExpiresInDays: 30}
+	first, secret, err := s.Create(ctx, f.member, f.team, in, "retry-key-0001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, secretAgain, err := s.Create(ctx, f.member, f.team, in, "retry-key-0001")
+	if err != nil || again.ID != first.ID || secretAgain != secret {
+		t.Fatalf("retry: id %s/%s same secret %v err %v", first.ID, again.ID, secretAgain == secret, err)
+	}
+	var tokens int
+	if err := f.store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.api_tokens WHERE account_id=$1 AND name='deploy'`, f.member).Scan(&tokens); err != nil || tokens != 1 {
+		t.Fatalf("tokens created = %d err=%v", tokens, err)
+	}
+	if _, _, err := s.Create(ctx, f.member, f.team, CreateInput{Name: "other"}, "retry-key-0001"); !errors.Is(err, ErrIdempotencyConflict) {
+		t.Fatalf("same key, different request: %v", err)
+	}
+	if _, _, err := s.Create(ctx, f.member, f.team, in, "bad key"); !errors.Is(err, ErrInvalidIdempotencyKey) {
+		t.Fatalf("invalid key: %v", err)
+	}
+	var sealed []byte
+	if err := f.store.SQL().QueryRowContext(ctx, `SELECT secret_ciphertext FROM paperboat.api_token_create_requests WHERE account_id=$1 AND idempotency_key='retry-key-0001'`, f.member).Scan(&sealed); err != nil || strings.Contains(string(sealed), secret) {
+		t.Fatalf("held secret is not encrypted (err %v)", err)
+	}
+	if _, err := f.store.SQL().ExecContext(ctx, `UPDATE paperboat.api_token_create_requests SET created_at=now()-interval '11 minutes' WHERE account_id=$1`, f.member); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PruneCreateRequests(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var held int
+	if err := f.store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.api_token_create_requests WHERE account_id=$1`, f.member).Scan(&held); err != nil || held != 0 {
+		t.Fatalf("held after the window = %d err=%v", held, err)
+	}
+	// After the window the key is free again; the name is taken, so a plain create says so.
+	if _, _, err := s.Create(ctx, f.member, f.team, in, "retry-key-0001"); !errors.Is(err, ErrNameTaken) {
+		t.Fatalf("after the window: %v", err)
 	}
 }

@@ -80,11 +80,13 @@ type Service struct {
 	db     *db.DB
 	audit  *audit.Writer
 	limits config.APITokens
-	now    func() time.Time
+	// key encrypts a created token's secret for its Idempotency-Key retry window.
+	key string
+	now func() time.Time
 }
 
-func New(store *db.DB, writer *audit.Writer, limits config.APITokens) *Service {
-	return &Service{db: store, audit: writer, limits: limits, now: time.Now}
+func New(store *db.DB, writer *audit.Writer, limits config.APITokens, encryptionKey string) *Service {
+	return &Service{db: store, audit: writer, limits: limits, key: encryptionKey, now: time.Now}
 }
 
 func (s *Service) lifetime(days int) (time.Duration, error) {

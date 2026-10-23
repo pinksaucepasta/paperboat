@@ -809,6 +809,7 @@ func New(opts Options) (*App, error) {
 		workOSOrganizations = teamidentity.HTTPWorkOS{BaseURL: opts.Config.Providers.WorkOS.BaseURL, APIKey: opts.Config.Secrets.WorkOSAPIKey}
 	}
 	teamIdentity := teamidentity.New(store, workOSOrganizations, opts.Config.Business, opts.Config.Mail.InvitationLifetimeSeconds, strings.TrimRight(opts.Config.HTTP.BrowserLoginOrigin, "/")+"/team", workspaceBilling)
+	apiTokens := apitokens.New(store, auditWriter, opts.Config.APITokens, opts.Config.Secrets.EncryptionKey)
 	router := httpapi.NewRouter(httpapi.Options{
 		ClientUpdatePolicy:        clientupdate.New(store, auditWriter, opts.Config.ReleaseDirectory),
 		SupportReports:            supportService,
@@ -854,7 +855,7 @@ func New(opts Options) (*App, error) {
 		ConfigConflicts:           configConflictService,
 		Routes:                    routeService,
 		Favorites:                 favorites.NewService(store),
-		APITokens:                 apitokens.New(store, auditWriter, opts.Config.APITokens),
+		APITokens:                 apiTokens,
 		ControlDiagnostics:        controlDiagnostics,
 		OperationRecovery:         operationRecovery,
 		PeerIdentity:              peerIdentityService,
@@ -914,6 +915,8 @@ func New(opts Options) (*App, error) {
 		pruneContext, cancel := context.WithTimeout(ctx, opts.Config.HTTP.RequestTimeout)
 		defer cancel()
 		_, err := activityLog.Prune(pruneContext)
+		// Secrets held for API token create retries never outlive their window (F21-12).
+		err = errors.Join(err, apiTokens.PruneCreateRequests(pruneContext))
 		workers.IterationFailure(ctx, "team_retention_cleanup", "team_retention_failed", err)
 		outcome := "success"
 		if err != nil {

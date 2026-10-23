@@ -85,7 +85,7 @@ func TestSecretFormat(t *testing.T) {
 }
 
 func TestLifetimeUsesConfiguredBounds(t *testing.T) {
-	s := New(nil, nil, config.APITokens{MaxLifetimeDays: 10, DefaultLifetimeDays: 3, MaxPerMember: 1})
+	s := New(nil, nil, config.APITokens{MaxLifetimeDays: 10, DefaultLifetimeDays: 3, MaxPerMember: 1}, "")
 	if d, err := s.lifetime(0); err != nil || d != 3*24*time.Hour {
 		t.Fatalf("default: %v %v", d, err)
 	}

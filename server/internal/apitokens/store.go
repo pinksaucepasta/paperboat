@@ -19,11 +19,18 @@ import (
 const tokenColumns = `t.id, t.account_id, coalesce(t.team_id,''), t.name, 'user:'||u.primary_email,
  t.created_at, t.expires_at, t.last_used_at, t.revoked_at, t.scope`
 
-// Create issues a token for actor in ws and returns it with its secret, which is never stored.
-func (s *Service) Create(ctx context.Context, actor string, ws workspace.Scope, in CreateInput) (Token, string, error) {
+// Create issues a token for actor in ws and returns it with its secret, which is only stored as
+// a hash. With an idempotency key, a repeated create (same key, same request) within
+// api_tokens.retry_seconds returns the same token and secret instead of a new token: the secret is
+// held encrypted for that window only, so a response lost on the way back is not a lost secret.
+func (s *Service) Create(ctx context.Context, actor string, ws workspace.Scope, in CreateInput, idempotencyKey string) (Token, string, error) {
 	if !policy.ValidName(in.Name) {
 		return Token{}, "", ErrInvalidName
 	}
+	if idempotencyKey != "" && !idempotencyKeyPattern.MatchString(idempotencyKey) {
+		return Token{}, "", ErrInvalidIdempotencyKey
+	}
+	requestHash := createRequestHash(ws, in)
 	lifetime, err := s.lifetime(in.ExpiresInDays)
 	if err != nil {
 		return Token{}, "", err
@@ -70,6 +77,13 @@ func (s *Service) Create(ctx context.Context, actor string, ws workspace.Scope, 
 		if _, err := tx.Exec(ctx, `SELECT 1 FROM users WHERE id=$1 FOR UPDATE`, actor); err != nil {
 			return err
 		}
+		if idempotencyKey != "" {
+			replayed, replaySecret, err := s.replayCreateTx(ctx, tx, actor, idempotencyKey, requestHash)
+			if err != nil || replaySecret != "" {
+				token, secret = replayed, replaySecret
+				return err
+			}
+		}
 		var live int
 		if err := tx.QueryRow(ctx, `SELECT count(*) FROM api_tokens WHERE account_id=$1 AND coalesce(team_id,'')=$2
 		 AND revoked_at IS NULL AND expires_at>now()`, actor, ws.TeamID).Scan(&live); err != nil {
@@ -93,6 +107,11 @@ func (s *Service) Create(ctx context.Context, actor string, ws workspace.Scope, 
 		}
 		if token, err = getTx(ctx, tx, id, false); err != nil {
 			return err
+		}
+		if idempotencyKey != "" {
+			if err := s.rememberCreateTx(ctx, tx, actor, idempotencyKey, requestHash, id, secret); err != nil {
+				return err
+			}
 		}
 		return s.audit.WriteTx(ctx, tx, audit.Event{ActorUserID: actor, ActorType: audit.ActorUser, EventType: "api_token.created",
 			ResourceType: "api_token", ResourceID: id, Metadata: map[string]any{"workspace": ws.ID, "name": in.Name,

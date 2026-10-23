@@ -134,7 +134,8 @@ func apiTokenCreate(tokens *apitokens.Service) http.HandlerFunc {
 				days = -1 // explicit 0 is out of range, not the default
 			}
 		}
-		token, secret, err := tokens.Create(r.Context(), account, ws, apitokens.CreateInput{Name: in.Name, ExpiresInDays: days, Scope: in.Scope})
+		// A retry with the same Idempotency-Key returns the same token and secret (F21-12).
+		token, secret, err := tokens.Create(r.Context(), account, ws, apitokens.CreateInput{Name: in.Name, ExpiresInDays: days, Scope: in.Scope}, r.Header.Get("Idempotency-Key"))
 		if err != nil {
 			writeAPITokenError(w, r, tokens, err)
 			return
@@ -190,6 +191,10 @@ func writeAPITokenError(w http.ResponseWriter, r *http.Request, tokens *apitoken
 		writeError(w, r, http.StatusConflict, "api_token_name_taken", "You already have a token with this name in this workspace. Choose another name or revoke it.")
 	case expectedHTTPErrorOnly(err, apitokens.ErrLimit):
 		writeError(w, r, http.StatusConflict, "api_token_limit", "You have the maximum number of tokens in this workspace. Revoke one first.")
+	case expectedHTTPErrorOnly(err, apitokens.ErrInvalidIdempotencyKey):
+		writeError(w, r, http.StatusBadRequest, "validation_failed", apitokens.ErrInvalidIdempotencyKey.Error())
+	case expectedHTTPErrorOnly(err, apitokens.ErrIdempotencyConflict):
+		writeError(w, r, http.StatusConflict, "idempotency_conflict", "This Idempotency-Key was already used for a different API token request. Use a new key.")
 	case expectedHTTPErrorOnly(err, apitokens.ErrNotFound):
 		writeError(w, r, http.StatusNotFound, "not_found", "No such API token in this workspace.")
 	case expectedHTTPErrorOnly(err, workspace.ErrInvalid), expectedHTTPErrorOnly(err, workspace.ErrForbidden):

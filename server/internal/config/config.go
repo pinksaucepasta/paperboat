@@ -132,6 +132,9 @@ type APITokens struct {
 	MaxLifetimeDays     int `json:"max_lifetime_days"`
 	DefaultLifetimeDays int `json:"default_lifetime_days"`
 	MaxPerMember        int `json:"max_per_member"`
+	// RetrySeconds is how long a create with an Idempotency-Key can be repeated and gets the same
+	// token and once-shown secret back (held encrypted for this window only).
+	RetrySeconds int `json:"retry_seconds"`
 }
 
 type Billing struct {
@@ -433,7 +436,7 @@ func Default() Config {
 			Driver: "postgres",
 			DSN:    "postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable",
 		},
-		APITokens:         APITokens{MaxLifetimeDays: 365, DefaultLifetimeDays: 90, MaxPerMember: 100},
+		APITokens:         APITokens{MaxLifetimeDays: 365, DefaultLifetimeDays: 90, MaxPerMember: 100, RetrySeconds: 600},
 		Billing:           Billing{TopupMaxQuantity: 100, TeamTrialDays: 14, PersonalAllowanceBytes: new(int64(5_000_000_000)), Limits: PlanLimits{Machines: PlanLimit{Free: 100, Pro: 1000, TeamCeiling: 10000}, Publications: PlanLimit{Free: 100, Pro: 1000, TeamCeiling: 10000}, BrowserTerminals: PlanLimit{Free: 10, Pro: 100, TeamCeiling: 1000}, ViewersPerSharedTerminal: 50}},
 		Business:          defaultBusiness(),
 		WorkspacePolicy:   defaultWorkspacePolicy(),
@@ -580,8 +583,8 @@ func (c Config) Validate() error {
 	if err := c.WorkspacePolicy.validate(); err != nil {
 		errs = append(errs, err)
 	}
-	if t := c.APITokens; t.MaxLifetimeDays < 1 || t.DefaultLifetimeDays < 1 || t.DefaultLifetimeDays > t.MaxLifetimeDays || t.MaxPerMember < 1 {
-		errs = append(errs, fmt.Errorf("api_tokens limits must be positive and default_lifetime_days at most max_lifetime_days"))
+	if t := c.APITokens; t.MaxLifetimeDays < 1 || t.DefaultLifetimeDays < 1 || t.DefaultLifetimeDays > t.MaxLifetimeDays || t.MaxPerMember < 1 || t.RetrySeconds < 60 || t.RetrySeconds > 3600 {
+		errs = append(errs, fmt.Errorf("api_tokens limits must be positive, default_lifetime_days at most max_lifetime_days and retry_seconds between 60 and 3600"))
 	}
 	if c.Billing.TeamTrialDays < 0 || c.Billing.TeamTrialDays > 730 {
 		return errors.New("billing.team_trial_days must be between 0 and 730")

@@ -36,6 +36,13 @@ type AccountE2eeRoot struct {
 	RevokedAt   sql.NullTime
 }
 
+type AccountTopicGeneration struct {
+	AccountID  string
+	Topic      string
+	Generation int64
+	UpdatedAt  time.Time
+}
+
 type ApiToken struct {
 	ID         string
 	AccountID  string
@@ -48,6 +55,15 @@ type ApiToken struct {
 	LastUsedAt sql.NullTime
 	RevokedAt  sql.NullTime
 	RevokedBy  sql.NullString
+}
+
+type ApiTokenCreateRequest struct {
+	AccountID        string
+	IdempotencyKey   string
+	RequestHash      []byte
+	TokenID          string
+	SecretCiphertext []byte
+	CreatedAt        time.Time
 }
 
 type ApiTokenScopeRule struct {
@@ -1839,6 +1855,24 @@ type PeerEndpointEnrollmentRequest struct {
 	CreatedAt              time.Time
 	ExpiresAt              time.Time
 	FulfilledAt            sql.NullTime
+}
+
+type PeerMeshAccount struct {
+	AccountID   string
+	MeshSeq     int64
+	PrunedSeq   int64
+	BuiltSignal int64
+	BuiltAt     sql.NullTime
+	ValidUntil  sql.NullTime
+}
+
+type PeerMeshLog struct {
+	AccountID  string
+	MeshSeq    int64
+	EndpointID string
+	Op         string
+	Entry      []byte
+	RecordedAt time.Time
 }
 
 type PeerNetworkIdentity struct {
