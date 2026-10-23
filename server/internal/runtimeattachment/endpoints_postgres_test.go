@@ -234,6 +234,20 @@ SELECT $1::text,sha256(convert_to($1::text,'UTF8')),$2,$2,'preview',$3,$3,'inspe
 	if !admitted() {
 		t.Fatal("native inspector credential for an endpoint-route preview has no network admission")
 	}
+	// Edge bandwidth on the endpoint route is attributed to the preview (the projection found previews
+	// only through the legacy attachments).
+	usage := prefix + "_usage"
+	t.Cleanup(func() {
+		_, _ = database.SQL().ExecContext(context.Background(), `DELETE FROM resource_bandwidth_events WHERE operation_id='edge:'||$1`, usage)
+		_, _ = database.SQL().ExecContext(context.Background(), `DELETE FROM control_usage_receipts WHERE operation_id=$1`, usage)
+	})
+	exec(`INSERT INTO control_usage_receipts(operation_id,edge_node_id,counter_epoch,environment_id,route_id,route_revision,direction,observed_bytes,delta_bytes,interval_start,interval_end,workspace_id)
+SELECT $1,$2,'epoch_usage',$3,$4,x.route_generation,'egress',4096,4096,now(),now()+interval '1 second','personal:'||$5 FROM preview_routes x WHERE x.preview_id=$4 AND x.endpoint`, usage, node, env, lease, account)
+	exec(`SELECT paperboat.project_edge_bandwidth($1)`, usage)
+	var attributed string
+	if err := database.SQL().QueryRowContext(ctx, `SELECT resource_kind||'/'||resource_id||'/'||machine_id FROM resource_bandwidth_events WHERE operation_id='edge:'||$1`, usage).Scan(&attributed); err != nil || attributed != "preview/"+lease+"/"+machine {
+		t.Fatalf("endpoint-route bandwidth attributed as %q, %v; want preview/%s/%s", attributed, err, lease, machine)
+	}
 	exec(`UPDATE endpoint_edge_assignments SET observed_at=now()-interval '31 seconds' WHERE endpoint_id=$1`, lease)
 	if got := served(); len(got) != 0 {
 		t.Fatalf("a route the edge stopped observing is still served: %v", got)
