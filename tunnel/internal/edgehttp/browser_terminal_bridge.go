@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"sync"
+	"time"
 
 	"github.com/coder/websocket"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/control"
@@ -54,11 +55,14 @@ func (p *Policy) serveBrowserTerminal(w http.ResponseWriter, request *http.Reque
 		}
 	}()
 
+	// The browser's upstream stream is accounted to its attachment, which the server records
+	// as the session's usage authority when it admits the ticket, and is closed at the cap.
+	dialCtx := browserTerminalUsage(ctx, match, admission, time.Now().UTC())
 	upstreamURL := (&url.URL{Scheme: "wss", Host: host, Path: "/v1/browser-terminal"}).String()
 	upstreamHeader := make(http.Header)
 	upstreamHeader.Set("Authorization", "Bearer "+admission.Credential)
 	upstreamClient := &http.Client{Transport: p.config.RuntimeCarrierTransport}
-	upstream, response, err := websocket.Dial(ctx, upstreamURL, &websocket.DialOptions{
+	upstream, response, err := websocket.Dial(dialCtx, upstreamURL, &websocket.DialOptions{
 		HTTPClient:      upstreamClient,
 		HTTPHeader:      upstreamHeader,
 		Subprotocols:    []string{browserTerminalSubprotocol},
@@ -262,4 +266,11 @@ func (p *Policy) observeBrowserTerminal(ctx context.Context, err error) {
 	if err != nil && p.config.OnFailure != nil && !browserTerminalExpected(err) {
 		p.config.OnFailure(ctx, err)
 	}
+}
+
+func browserTerminalUsage(ctx context.Context, match route.RouteMatch, admission control.BrowserTerminalAdmission, now time.Time) context.Context {
+	if admission.AttachmentID == "" || match.Rule.Environment == "" {
+		return ctx
+	}
+	return withRuntimeUsage(ctx, runtimeUsageBinding{Authority: admission.AttachmentID, Environment: match.Rule.Environment, IssuedAt: now})
 }

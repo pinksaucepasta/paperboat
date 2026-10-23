@@ -3,6 +3,8 @@ package edgehttp
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat-tunnel/internal/control"
+	"github.com/pinksaucepasta/paperboat-tunnel/internal/route"
 	"net"
 	"sync"
 	"testing"
@@ -88,5 +90,17 @@ func TestRuntimeUsageNeedsAnAuthority(t *testing.T) {
 	}
 	if _, ok := runtimeUsageFrom(context.Background()); ok {
 		t.Fatal("a request without a runtime credential produced a usage binding")
+	}
+}
+
+func TestBrowserTerminalUpstreamIsAccountedToItsAttachment(t *testing.T) {
+	match := route.RouteMatch{Rule: route.RouteRule{Environment: "env_1", RouteID: "route_runtime"}}
+	ctx := browserTerminalUsage(context.Background(), match, control.BrowserTerminalAdmission{AttachmentID: "attachment_a"}, time.Now())
+	binding, ok := runtimeUsageFrom(ctx)
+	if !ok || binding.Authority != "attachment_a" || binding.Environment != "env_1" {
+		t.Fatalf("browser terminal usage binding = %+v ok=%v", binding, ok)
+	}
+	if _, ok := runtimeUsageFrom(browserTerminalUsage(context.Background(), match, control.BrowserTerminalAdmission{}, time.Now())); ok {
+		t.Fatal("an admission without an attachment id produced a usage binding")
 	}
 }
