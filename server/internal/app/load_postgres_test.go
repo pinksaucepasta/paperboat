@@ -7,6 +7,8 @@ package app
 //
 //   - TestLoadHeldEventWaiters: N daemons holding the event long-poll with no changes. Reports database queries per
 //     second (the cost of holding waiters) and checks every wait answers 204 inside the client's 30 s header timeout.
+//   - TestLoadFailover: through a proxy in front of several instances, kills one mid-test and measures the failure
+//     window (tools/loadtest/run-multi-instance.sh).
 //   - TestLoadIdlePollMix: N simulated daemons each running the inventory-refresh request mix every 15 s, ramped
 //     until p99 exceeds 5 s or 1% of requests fail. Reports the first N that degrades and whether it fails with
 //     clear errors or 5xx.
@@ -25,6 +27,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"runtime"
 	"slices"
 	"strconv"
@@ -45,9 +48,23 @@ const loadOrigin = "http://console.example.test"
 type loadServer struct {
 	url, session, csrf string
 	machines           []string
-	queries            atomic.Int64
+	store              *db.DB
 }
 
+// transactions is the database's committed + rolled-back transaction count (pg_stat_database). It measures the
+// load the same way whether the server under test runs in this process or as separate instances behind a proxy.
+func (s *loadServer) transactions(t *testing.T) int64 {
+	t.Helper()
+	var count int64
+	if err := s.store.SQL().QueryRowContext(context.Background(), `SELECT xact_commit + xact_rollback FROM pg_stat_database WHERE datname = current_database()`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	return count
+}
+
+// startLoadServer seeds the perf data set and a browser session for the solo actor. With PAPERBOAT_LOAD_TARGET_URL
+// set it targets that URL (server instances started separately, e.g. several behind a proxy); otherwise it serves the
+// real router in this process.
 func startLoadServer(t *testing.T) *loadServer {
 	t.Helper()
 	dsn := os.Getenv("PAPERBOAT_PERF_DATABASE_DSN")
@@ -61,33 +78,23 @@ func startLoadServer(t *testing.T) *loadServer {
 	cfg := config.Default()
 	cfg.Database = config.Database{Driver: "postgres", DSN: dsn}
 	cfg.HTTP.BrowserLoginOrigin = loadOrigin
-	seedStore, err := db.Open(cfg.Database)
+	store, err := db.Open(cfg.Database)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = perf.Prepare(ctx, seedStore)
-	seedStore.Close()
-	if err != nil {
+	t.Cleanup(func() { _ = store.Close() })
+	if err := perf.Prepare(ctx, store); err != nil {
 		t.Fatal(err)
 	}
-	application, err := New(Options{Config: cfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = application.db.Close() })
-	server := &loadServer{session: "load-session-solo", csrf: "load-csrf-solo"}
-	application.db.SetQueryObserver(func(ctx context.Context) (context.Context, func(string)) {
-		server.queries.Add(1)
-		return ctx, func(string) {}
-	})
+	server := &loadServer{session: "load-session-solo", csrf: "load-csrf-solo", store: store}
 	hash := func(value string) string { sum := sha256.Sum256([]byte(value)); return hex.EncodeToString(sum[:]) }
-	if _, err := application.db.SQL().ExecContext(ctx, `INSERT INTO paperboat.sessions(id,user_id,session_hash,csrf_hash,expires_at,workos_session_id,workos_access_expires_at)
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.sessions(id,user_id,session_hash,csrf_hash,expires_at,workos_session_id,workos_access_expires_at)
 VALUES('session_load_solo',$1,$2,$3,now()+interval '29 days','session_load',now()+interval '1 day')
 ON CONFLICT (id) DO UPDATE SET session_hash=excluded.session_hash,csrf_hash=excluded.csrf_hash,expires_at=excluded.expires_at,revoked_at=NULL,workos_access_expires_at=excluded.workos_access_expires_at`,
 		perf.Solo, hash(server.session), hash(server.csrf)); err != nil {
 		t.Fatal(err)
 	}
-	rows, err := application.db.SQL().QueryContext(ctx, `SELECT id FROM paperboat.user_machines WHERE user_id=$1 AND owner_team_id IS NULL AND state='online' ORDER BY id`, perf.Solo)
+	rows, err := store.SQL().QueryContext(ctx, `SELECT id FROM paperboat.user_machines WHERE user_id=$1 AND owner_team_id IS NULL AND state='online' ORDER BY id`, perf.Solo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,6 +109,15 @@ ON CONFLICT (id) DO UPDATE SET session_hash=excluded.session_hash,csrf_hash=excl
 	if len(server.machines) == 0 {
 		t.Fatal("perf seed has no online solo machines")
 	}
+	if target := strings.TrimSuffix(os.Getenv("PAPERBOAT_LOAD_TARGET_URL"), "/"); target != "" {
+		server.url = target
+		return server
+	}
+	application, err := New(Options{Config: cfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = application.db.Close() })
 	listener := httptest.NewServer(application.server.Handler)
 	t.Cleanup(listener.Close)
 	server.url = listener.URL
@@ -148,7 +164,7 @@ func TestLoadHeldEventWaiters(t *testing.T) {
 		cancel()
 		var ok, noChange, failed, clientTimeout atomic.Int64
 		goroutines := runtime.NumGoroutine()
-		before := server.queries.Load()
+		before := server.transactions(t)
 		started := time.Now()
 		var wg sync.WaitGroup
 		for index := 0; index < waiters; index++ {
@@ -174,8 +190,8 @@ func TestLoadHeldEventWaiters(t *testing.T) {
 		peak := runtime.NumGoroutine() - goroutines
 		wg.Wait()
 		elapsed := time.Since(started)
-		queries := server.queries.Load() - before
-		t.Logf("waiters=%d: 204=%d 200=%d client-timeout=%d failed=%d in %v; %.0f queries/s (%.2f per waiter per s); +%d goroutines held",
+		queries := server.transactions(t) - before
+		t.Logf("waiters=%d: 204=%d 200=%d client-timeout=%d failed=%d in %v; %.0f DB transactions/s (%.2f per waiter per s); +%d goroutines held",
 			waiters, noChange.Load(), ok.Load(), clientTimeout.Load(), failed.Load(), elapsed.Round(time.Millisecond),
 			float64(queries)/elapsed.Seconds(), float64(queries)/elapsed.Seconds()/float64(waiters), peak)
 		if clientTimeout.Load() > 0 {
@@ -211,7 +227,7 @@ func TestLoadIdlePollMix(t *testing.T) {
 		statuses := map[int]int{}
 		var transportErrors atomic.Int64
 		ctx, cancel := context.WithTimeout(context.Background(), window)
-		before := server.queries.Load()
+		before := server.transactions(t)
 		busyBefore, totalBefore := hostCPU()
 		var wg sync.WaitGroup
 		for daemon := 0; daemon < daemons; daemon++ {
@@ -269,14 +285,140 @@ func TestLoadIdlePollMix(t *testing.T) {
 			lines = append(lines, fmt.Sprintf("%s p50 %v p99 %v", path, p50.Round(time.Millisecond), p99.Round(time.Millisecond)))
 		}
 		slices.Sort(lines)
-		t.Logf("daemons=%d refresh=%v: %d requests (%.0f/s), %d failed, statuses %v, %.0f queries/s; host busy %.2f of %d vCPU (server + PostgreSQL) = %.0f machines per busy vCPU\n  %s",
+		t.Logf("daemons=%d refresh=%v: %d requests (%.0f/s), %d failed, statuses %v, %.0f DB transactions/s; host busy %.2f of %d vCPU (server + PostgreSQL) = %.0f machines per busy vCPU\n  %s",
 			daemons, refreshEvery, total+int(transportErrors.Load()), float64(total)/window.Seconds(), failed, statuses,
-			float64(server.queries.Load()-before)/window.Seconds(), cores, runtime.NumCPU(), float64(daemons)/max(cores, 0.01), strings.Join(lines, "\n  "))
+			float64(server.transactions(t)-before)/window.Seconds(), cores, runtime.NumCPU(), float64(daemons)/max(cores, 0.01), strings.Join(lines, "\n  "))
 		client.CloseIdleConnections()
 		if worst > 5*time.Second || failed*100 > total {
 			t.Logf("first degradation at daemons=%d (p99 %v, %d failed)", daemons, worst.Round(time.Millisecond), failed)
 			break
 		}
+	}
+}
+
+// TestLoadSeedOnly migrates and seeds the perf database and the load session, then exits: the multi-instance runner
+// calls it before starting server instances on the same database.
+func TestLoadSeedOnly(t *testing.T) {
+	t.Setenv("PAPERBOAT_LOAD_TARGET_URL", "http://seed-only.example.test")
+	server := startLoadServer(t)
+	t.Logf("seeded: %d online solo machines", len(server.machines))
+}
+
+// TestLoadFailover is the horizontal-scaling check: server instances behind a proxy (PAPERBOAT_LOAD_TARGET_URL),
+// held event waits plus the daemon refresh mix, and PAPERBOAT_LOAD_KILL_COMMAND run once mid-test to kill one
+// instance. Each simulated daemon behaves like the real one: a failed request is retried after a backoff, a failed
+// wait is re-issued after a backoff. Reports, per second, the requests that failed and how long the failure window
+// lasted. Pass: errors only inside one short window after the kill, every wait loop back to 204/200 after it.
+func TestLoadFailover(t *testing.T) {
+	server := startLoadServer(t)
+	kill := os.Getenv("PAPERBOAT_LOAD_KILL_COMMAND")
+	if os.Getenv("PAPERBOAT_LOAD_TARGET_URL") == "" || kill == "" {
+		t.Skip("set PAPERBOAT_LOAD_TARGET_URL (proxy in front of several instances) and PAPERBOAT_LOAD_KILL_COMMAND")
+	}
+	daemons := loadSteps("PAPERBOAT_LOAD_DAEMONS", []int{200})[0]
+	const duration, killAt, backoff = 90 * time.Second, 30 * time.Second, 2 * time.Second
+	client := loadClient(512)
+	started := time.Now()
+	ctx, cancel := context.WithTimeout(context.Background(), duration)
+	defer cancel()
+	var mu sync.Mutex
+	failures := map[int]int{} // second since start → failed requests
+	successes := map[int]int{}
+	record := func(ok bool) {
+		second := int(time.Since(started) / time.Second)
+		mu.Lock()
+		if ok {
+			successes[second]++
+		} else {
+			failures[second]++
+		}
+		mu.Unlock()
+	}
+	var wg sync.WaitGroup
+	body := `{"topics":{"inventory":0,"machine_services":0,"peer_network":0}}`
+	for daemon := 0; daemon < daemons; daemon++ {
+		machine := server.machines[daemon%len(server.machines)]
+		wg.Add(2)
+		go func() { // the held event wait
+			defer wg.Done()
+			for ctx.Err() == nil {
+				requestCtx, cancelRequest := context.WithTimeout(ctx, 40*time.Second)
+				status, err := server.request(requestCtx, client, http.MethodPost, "/v1/machines/"+machine+"/events/wait", body)
+				cancelRequest()
+				if ctx.Err() != nil {
+					return
+				}
+				ok := err == nil && (status == http.StatusOK || status == http.StatusNoContent)
+				record(ok)
+				if !ok {
+					time.Sleep(backoff)
+				}
+			}
+		}()
+		go func() { // the refresh mix every 15 s, retried after a backoff on failure
+			defer wg.Done()
+			time.Sleep(time.Duration(daemon) * 15 * time.Second / time.Duration(daemons))
+			for ctx.Err() == nil {
+				next := time.Now().Add(15 * time.Second)
+				for _, path := range refreshMix {
+					for attempt := 0; attempt < 3 && ctx.Err() == nil; attempt++ {
+						requestCtx, cancelRequest := context.WithTimeout(ctx, 30*time.Second)
+						status, err := server.request(requestCtx, client, http.MethodGet, path, "")
+						cancelRequest()
+						ok := err == nil && status < 500
+						if ctx.Err() == nil {
+							record(ok)
+						}
+						if ok {
+							break
+						}
+						time.Sleep(backoff)
+					}
+				}
+				select {
+				case <-ctx.Done():
+				case <-time.After(time.Until(next)):
+				}
+			}
+		}()
+	}
+	time.Sleep(killAt)
+	output, err := exec.Command("/bin/sh", "-c", kill).CombinedOutput()
+	t.Logf("t=%v: kill command: err=%v output=%q", killAt, err, strings.TrimSpace(string(output)))
+	wg.Wait()
+	first, last, total := -1, -1, 0
+	for second := 0; second <= int(duration/time.Second); second++ {
+		if failures[second] > 0 {
+			if first < 0 {
+				first = second
+			}
+			last = second
+			total += failures[second]
+		}
+	}
+	window := 0
+	if first >= 0 {
+		window = last - first + 1
+	}
+	afterKill, afterWindow := 0, 0
+	for second, count := range successes {
+		if second >= int(killAt/time.Second) {
+			afterKill += count
+		}
+		if second > last {
+			afterWindow += count
+		}
+	}
+	t.Logf("daemons=%d: %d failed requests, failure window %ds (first at t=%ds, last at t=%ds); %d successes after the kill, %d after the window",
+		daemons, total, window, first, last, afterKill, afterWindow)
+	if window > int(2*backoff/time.Second)+5 {
+		t.Errorf("failure window %ds exceeds the clients' retry backoff (%v) plus 5 s", window, backoff)
+	}
+	if first >= 0 && first < int(killAt/time.Second) {
+		t.Errorf("requests failed before the kill (t=%ds)", first)
+	}
+	if afterWindow == 0 {
+		t.Errorf("no request succeeded after the failure window")
 	}
 }
 

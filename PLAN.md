@@ -1556,6 +1556,7 @@ i.e. device test runs, not a daemon loop: **R → A**, re-measure after the next
 | Edge pulls endpoint/carrier admissions every ~300 ms per edge node, full snapshot | 3.4 + 2.8 req/s; size grows with previews | A | Lane M: true delta (changed_at cursor, 10 s overlap, removals), full snapshot every 2 min; reports snapshot bytes at 1k/10k |
 | Server has no request admission cap, no WriteTimeout/IdleTimeout; pgxpool 20 conns (1 pinned by LISTEN), no acquire timeout | code | ? (storm test on staging) | Lane Q |
 | Machines per vCPU of one server box (server + PostgreSQL), today's 15 s refresh mix and the fixed 300 s mix | `TestLoadIdlePollMix` on pbvm4 reports daemons per busy vCPU at the last step with p99 < 5 s | ? (pbvm4 after Lane H's S3-04 run) | Lane W |
+| Horizontal scaling: 1 vs 3 server instances behind the proxy on one PostgreSQL; kill one mid-test | requests and held waits continue on the others within the clients' backoff; background workers run exactly once (no double billing/cert/DNS/edge-set work); no daemon degraded; machines per vCPU and PostgreSQL CPU at 1 and 3 instances | `tools/loadtest/run-multi-instance.sh` (Caddy round robin + health checks) running `TestLoadFailover`, `TestLoadIdlePollMix`, `TestLoadHeldEventWaiters` on pbvm4 | ? (waits for Lane B's F21-04 single worker leader, and pbvm4) | Lane W |
 
 **Terminals (native, replay/reconnect, shared, browser)**
 
