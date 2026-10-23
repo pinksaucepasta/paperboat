@@ -43317,6 +43317,58 @@
         }
       }
     },
+    "/v1/edge/runtime/endpoint-admissions": {
+      "post": {
+        "summary": "Edge pulls the endpoint routes riding on agents' runtime carriers it holds",
+        "description": "The fast path of the runtime pull: only the endpoint routes (preview routes served on an agent's runtime carrier) for the carriers this edge holds, polled every 500 ms so a new preview is served within a second instead of waiting for the full pull.",
+        "operationId": "post_v1_edge_runtime_endpoint_admissions",
+        "security": [
+          {
+            "bearerAccess": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "edge_node_id",
+                  "process_epoch"
+                ],
+                "properties": {
+                  "edge_node_id": {
+                    "type": "string"
+                  },
+                  "process_epoch": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Current authoritative result."
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/edge/runtime/carrier-observations": {
       "post": {
         "summary": "Observe authenticated runtime carrier readiness",
