@@ -38,11 +38,11 @@ func TestSelfhostHTTPTopologyPolicyOnPostgres(t *testing.T) {
 		}
 	}
 	service := New(database, "selfhost-topology-test-encryption-key")
-	if _, err = database.SQL().ExecContext(ctx, `INSERT INTO paperboat.tunnel_platform_certificate_targets(id,kind,hostname,account_id,challenge_reference) VALUES('platform_cert_preview_v1','preview_wildcard','*.managed.example.test','platform_system_v1','dns:topology-test')`); err != nil {
+	if _, err = database.SQL().ExecContext(ctx, `INSERT INTO paperboat.tunnel_platform_certificate_targets(id,kind,hostname,account_id,challenge_reference) VALUES('platform_cert_public_v1','public_wildcard','*.managed.example.test','platform_system_v1','dns:topology-test')`); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		if _, err := database.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.tunnel_platform_certificate_targets WHERE id='platform_cert_preview_v1'`); err != nil {
+		if _, err := database.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.tunnel_platform_certificate_targets WHERE id='platform_cert_public_v1'`); err != nil {
 			t.Errorf("platform target cleanup: %v", err)
 		}
 	})

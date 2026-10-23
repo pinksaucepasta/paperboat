@@ -717,10 +717,12 @@ func assertActivePlatformCertificates(t *testing.T, ctx context.Context, databas
 	if !distributor.sawStaged {
 		t.Fatal("distributor never observed an encrypted staged platform record")
 	}
-	// The first pass reaches one edge before each injected failure (3 calls),
-	// and the retry stages both edges for all three targets (6 more calls).
-	if distributor.stageCount != 9 {
-		t.Fatalf("platform stage calls across failure and retry=%d, want 9", distributor.stageCount)
+	// There are two platform targets, public and runtime (a838e10e removed the
+	// separate preview and tunnel targets). The first pass makes one stage call
+	// per target before the injected failure (2 calls), and the retry stages
+	// both edges for both targets (4 more calls).
+	if distributor.stageCount != 6 {
+		t.Fatalf("platform stage calls across failure and retry=%d, want 6", distributor.stageCount)
 	}
 	for _, target := range rows {
 		current, found, err := store.Current(ctx, target.ID)
