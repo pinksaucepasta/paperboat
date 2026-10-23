@@ -45,6 +45,7 @@ type connectedMachineAccess struct {
 	grants      atomic.Int32
 	origins     atomic.Int32
 	discoveries atomic.Int32
+	listings    atomic.Int32
 	protocols   chan bool
 	originReady chan struct{}
 	mu          sync.Mutex
@@ -91,6 +92,7 @@ func (d *connectedMachineAccess) control(r *http.Request, identity clientauthori
 	var data any
 	switch r.URL.Path {
 	case "/v1/machines":
+		d.listings.Add(1)
 		data = map[string]any{"items": []any{}, "pagination": map[string]any{"limit": 200, "offset": 0, "total": 0, "next_offset": nil}}
 	case "/v1/machine-services":
 		d.discoveries.Add(1)
@@ -246,8 +248,10 @@ func (d *connectedMachineAccess) exercise(t *testing.T, ctx context.Context, sto
 			t.Fatal("machine access replaced shared runtime")
 		}
 	}
-	if d.grants.Load() != 2 || d.discoveries.Load() != 2 {
-		t.Fatalf("fresh grants=%d service discovery=%d", d.grants.Load(), d.discoveries.Load())
+	// A private dial takes the machine installation from its grant: no machine listing and no
+	// service discovery per connection.
+	if d.grants.Load() != 2 || d.discoveries.Load() != 0 || d.listings.Load() != 0 {
+		t.Fatalf("fresh grants=%d service discovery=%d machine listings=%d", d.grants.Load(), d.discoveries.Load(), d.listings.Load())
 	}
 	c, err := access.DialMachine(ctx, "machine_connected", port)
 	if err != nil {
@@ -321,8 +325,8 @@ func (d *connectedMachineAccess) exerciseProxy(t *testing.T, ctx context.Context
 	if err != nil || string(reply) != "reply:namespace" {
 		t.Fatalf("proxy half-close reply=%q err=%v", reply, err)
 	}
-	if d.grants.Load() != 2 || d.discoveries.Load() != 2 || d.origins.Load() != 2 {
-		t.Fatalf("preflight+flow grants=%d discoveries=%d origins=%d", d.grants.Load(), d.discoveries.Load(), d.origins.Load())
+	if d.grants.Load() != 2 || d.discoveries.Load() != 0 || d.listings.Load() != 0 || d.origins.Load() != 2 {
+		t.Fatalf("preflight+flow grants=%d discoveries=%d listings=%d origins=%d", d.grants.Load(), d.discoveries.Load(), d.listings.Load(), d.origins.Load())
 	}
 	for i := 0; i < 2; i++ {
 		select {

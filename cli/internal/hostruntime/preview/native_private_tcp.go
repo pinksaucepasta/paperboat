@@ -47,8 +47,9 @@ type NativePrivateGrantIssuer interface {
 }
 
 type NativePrivateTCPAccessConfig struct {
-	Grants       NativePrivateGrantIssuer
-	DialSession  func(context.Context, string) (NativePrivateSession, error)
+	Grants NativePrivateGrantIssuer
+	// DialSession opens a session to the grant's machine at the installation generation the grant names.
+	DialSession  func(ctx context.Context, machineID string, generation uint64) (NativePrivateSession, error)
 	Now          func() time.Time
 	MaximumBytes uint64
 }
@@ -75,6 +76,9 @@ func NewNativePrivateTCPAccess(config NativePrivateTCPAccessConfig) (*NativePriv
 	return &NativePrivateTCPAccess{config: config}, nil
 }
 
+// errNativePrivateGrantInstallation refuses a grant that names no machine installation to dial.
+var errNativePrivateGrantInstallation = errors.New("the private access grant names no machine installation")
+
 func (a *NativePrivateTCPAccess) openGrant(ctx context.Context, operationID string, grant api.NativePrivateGrant) (net.Conn, error) {
 	binding, err := grant.Binding()
 	if err != nil {
@@ -84,7 +88,10 @@ func (a *NativePrivateTCPAccess) openGrant(ctx context.Context, operationID stri
 	if err != nil {
 		return nil, nativePrivateTCPFailed(ctx, "grant_issue", err)
 	}
-	session, err := a.config.DialSession(ctx, grant.Target.MachineID)
+	if grant.Target.InstallationGeneration < 1 {
+		return nil, nativePrivateTCPFailed(ctx, "grant_issue", errNativePrivateGrantInstallation)
+	}
+	session, err := a.config.DialSession(ctx, grant.Target.MachineID, uint64(grant.Target.InstallationGeneration))
 	if err != nil {
 		return nil, nativePrivateTCPFailed(ctx, "peer_connect", err)
 	}

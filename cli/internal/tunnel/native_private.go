@@ -10,9 +10,11 @@ import (
 )
 
 // DialPrivateSession shares the daemon's root-verified native runtime. Callers
-// must obtain their exact resource grant before calling this network operation.
-func (t *PeerTerminalTunnel) DialPrivateSession(ctx context.Context, machineID string) (preview.NativePrivateSession, error) {
-	if t == nil || ctx == nil || machineID == "" {
+// must obtain their exact resource grant before calling this network operation;
+// generation is the machine installation that grant names, so the dial lists
+// nothing (it listed every machine of the account per connection).
+func (t *PeerTerminalTunnel) DialPrivateSession(ctx context.Context, machineID string, generation uint64) (preview.NativePrivateSession, error) {
+	if t == nil || ctx == nil || machineID == "" || generation == 0 {
 		return nil, ErrPeerTerminalInvalid
 	}
 	credential, err := t.config.Auth.Credential()
@@ -24,33 +26,6 @@ func (t *PeerTerminalTunnel) DialPrivateSession(ctx context.Context, machineID s
 		return nil, err
 	}
 	client := api.New(t.config.Issuer, credential, t.config.HTTPClient)
-	machines, err := client.ListUserMachines(ctx)
-	if err != nil {
-		return nil, err
-	}
-	var generation uint64
-	for _, machine := range machines {
-		if machine.ID == machineID && machine.InstallationGeneration > 0 && machine.State != "revoked" && machine.State != "deleted" {
-			generation = uint64(machine.InstallationGeneration)
-			break
-		}
-	}
-
-	if generation == 0 {
-		machines, listErr := client.MachineServices(ctx)
-		if listErr != nil {
-			return nil, listErr
-		}
-		for _, machine := range machines {
-			if machine.MachineID == machineID && machine.InstallationGeneration > 0 && machine.ExpiresAt.After(t.config.Now()) {
-				generation = uint64(machine.InstallationGeneration)
-				break
-			}
-		}
-	}
-	if generation == 0 {
-		return nil, ErrPeerTerminalInvalid
-	}
 
 	// Native network bindings authenticate the remote peer, including a teammate's machine that
 	// is shared into a team. Its endpoint certificate is private to the owner's account, so

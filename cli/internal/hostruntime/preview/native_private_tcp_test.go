@@ -25,7 +25,9 @@ func TestNativePrivateTCPAccessClassifiesControlPlaneDenial(t *testing.T) {
 		Grants: nativePrivateGrantIssuerFunc(func(context.Context, api.NativePrivateGrantRequest) (api.NativePrivateGrant, error) {
 			return api.NativePrivateGrant{}, &api.APIError{Status: 403, Code: "access_forbidden"}
 		}),
-		DialSession: func(context.Context, string) (NativePrivateSession, error) { return nil, errors.New("must not dial") },
+		DialSession: func(context.Context, string, uint64) (NativePrivateSession, error) {
+			return nil, errors.New("must not dial")
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -107,7 +109,7 @@ func TestNativePrivateMachineGrantBeforeDialAndExactTarget(t *testing.T) {
 					g.Target.AnnouncementGeneration = 0
 				}
 				return g, nil
-			}), DialSession: func(context.Context, string) (NativePrivateSession, error) {
+			}), DialSession: func(context.Context, string, uint64) (NativePrivateSession, error) {
 				dials++
 				return &nativePrivateTestSession{}, nil
 			}})
@@ -164,7 +166,10 @@ func TestNativePrivateMachineCancellationClosesPendingReadiness(t *testing.T) {
 	started := make(chan struct{})
 	access, err := NewNativePrivateTCPAccess(NativePrivateTCPAccessConfig{Grants: nativePrivateGrantIssuerFunc(func(context.Context, api.NativePrivateGrantRequest) (api.NativePrivateGrant, error) {
 		return machineGrant(time.Now()), nil
-	}), DialSession: func(context.Context, string) (NativePrivateSession, error) { close(started); return session, nil }})
+	}), DialSession: func(context.Context, string, uint64) (NativePrivateSession, error) {
+		close(started)
+		return session, nil
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}

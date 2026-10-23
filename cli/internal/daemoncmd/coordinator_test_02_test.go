@@ -356,7 +356,7 @@ func TestCoordinatorHTTPAndTLSUseRealNativePrivateAuthority(t *testing.T) {
 	headers := make(chan streamauth.Header, 2)
 	access, err := previewruntime.NewNativePrivateTCPAccess(previewruntime.NativePrivateTCPAccessConfig{
 		Grants: issuer,
-		DialSession: func(context.Context, string) (previewruntime.NativePrivateSession, error) {
+		DialSession: func(context.Context, string, uint64) (previewruntime.NativePrivateSession, error) {
 			return &coordinatorNativeSession{headers: headers}, nil
 		},
 		Now: func() time.Time { return now },
