@@ -15131,10 +15131,7 @@
             "type": "boolean"
           },
           "permissions": {
-            "type": [
-              "array",
-              "null"
-            ],
+            "type": "array",
             "items": {
               "type": "string"
             }

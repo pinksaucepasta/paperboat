@@ -42,7 +42,70 @@ type SuccessResponse struct {
 func writeJSON(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(payload)
+	if payload == nil {
+		_ = json.NewEncoder(w).Encode(payload)
+		return
+	}
+	_ = json.NewEncoder(w).Encode(emptyLists(reflect.ValueOf(payload)).Interface())
+}
+
+var jsonMarshaler = reflect.TypeFor[json.Marshaler]()
+
+// emptyLists returns v with every nil slice inside it (struct fields, map values, elements, behind pointers and
+// interfaces) replaced by an empty one: a list in an API response is [], never null (a nil items slice crashed the
+// console's machine page). Values with their own JSON encoding and byte slices are left as they are.
+func emptyLists(v reflect.Value) reflect.Value {
+	if !v.IsValid() || v.Type().Implements(jsonMarshaler) {
+		return v
+	}
+	switch v.Kind() {
+	case reflect.Interface:
+		if v.IsNil() {
+			return v
+		}
+		inner := emptyLists(v.Elem())
+		out := reflect.New(v.Type()).Elem()
+		out.Set(inner)
+		return out
+	case reflect.Pointer:
+		if v.IsNil() || v.Type().Elem().Implements(jsonMarshaler) {
+			return v
+		}
+		out := reflect.New(v.Type().Elem())
+		out.Elem().Set(emptyLists(v.Elem()))
+		return out
+	case reflect.Struct:
+		out := reflect.New(v.Type()).Elem()
+		out.Set(v)
+		for i := 0; i < v.NumField(); i++ {
+			if v.Type().Field(i).IsExported() {
+				out.Field(i).Set(emptyLists(v.Field(i)))
+			}
+		}
+		return out
+	case reflect.Map:
+		if v.IsNil() {
+			return v
+		}
+		out := reflect.MakeMapWithSize(v.Type(), v.Len())
+		for it := v.MapRange(); it.Next(); {
+			out.SetMapIndex(it.Key(), emptyLists(it.Value()))
+		}
+		return out
+	case reflect.Slice:
+		if v.Type().Elem().Kind() == reflect.Uint8 {
+			return v
+		}
+		if v.IsNil() {
+			return reflect.MakeSlice(v.Type(), 0, 0)
+		}
+		out := reflect.MakeSlice(v.Type(), v.Len(), v.Len())
+		for i := 0; i < v.Len(); i++ {
+			out.Index(i).Set(emptyLists(v.Index(i)))
+		}
+		return out
+	}
+	return v
 }
 
 func writeError(w http.ResponseWriter, r *http.Request, status int, code, message string, causes ...error) {

@@ -81,7 +81,7 @@ func (f *inventoryFlights) do(ctx context.Context, key inventoryKey, compute fun
 		if flight.err != nil {
 			return nil, 0, flight.err
 		}
-		return append([]UserMachine(nil), flight.items...), flight.total, nil
+		return append(make([]UserMachine, 0, len(flight.items)), flight.items...), flight.total, nil
 	case <-ctx.Done():
 		return nil, 0, ctx.Err()
 	}
