@@ -165,6 +165,15 @@ def roles(c, team):
     return member
 
 
+def identity(c, team):
+    """F19-14 (before the WorkOS dashboard steps): SSO and directory status read the team's state."""
+    sso = c.pbj('team', 'sso', 'status', team)
+    c.step('pb team sso status reads eligibility and SSO state', isinstance(sso, dict) and sso.get('eligible') is True
+           and sso.get('seats', 0) >= sso.get('min_seats', 1) and 'required' in (sso.get('sso') or {}), sso)
+    rc, out, err = c.pb('team', 'scim', 'status', team)
+    c.step('pb team scim status reads the directory state', rc == 0 and 'Directory:' in out, out + err)
+
+
 def search(c, start, owner):
     """F19-07/08: every filter narrows the log; events carry the documented shape; paging moves on."""
     items, raw = c.activity('--action', 'team.role', '--since', start)
@@ -261,7 +270,7 @@ def stream_https(c, team, member):
     c.step('a refused batch shows the error and pending events', failing and failing[0]['pending'] >= 1 and '503' in failing[0]['last_error'], failing)
     c.run(['rm', '-f', 'f19recv.fail'])
     before = len(ids)
-    ok = wait(lambda: [d for d in c.api('GET', '/v1/teams/%s/audit-streams' % team)['data'] or [] if d['kind'] == 'https' and not d.get('last_error') and d['pending'] == 0], 240)
+    ok = wait(lambda: [d for d in c.api('GET', '/v1/teams/%s/audit-streams' % team)['data'] or [] if d['kind'] == 'https' and not d.get('last_error') and d['pending'] == 0], 600)  # backoff doubles from 5 s
     after = [e[0] for x in received(c) for e in x['events'] if not e[0].startswith('test_')]
     c.step('it is retried and delivered once the receiver is back', ok and len(after) >= before + 2 and ok[0].get('last_delivered_at'), [ok, after[-4:]])
     r = c.api('DELETE', '/v1/teams/%s/audit-streams/https' % team)
@@ -284,7 +293,7 @@ def stream_s3(c, team, member):
     touch_role(c, member)
 
     def objects():
-        done = subprocess.run(shlex.split(c.a.s3_list_cmd) + ['sh -c ' + shlex.quote('cd /tmp/vgw/%s && find f19 -name "*.ndjson.gz" -exec sh -c \'echo "== $1"; gunzip -c "$1"\' _ {} \\;' % c.a.s3_bucket)],
+        done = subprocess.run(shlex.split(c.a.s3_list_cmd) + ['sh -c ' + shlex.quote('cd %s/%s && find f19 -name "*.ndjson.gz" -exec sh -c \'echo "== $1"; gunzip -c "$1"\' _ {} \\;' % (c.a.s3_root, c.a.s3_bucket))],
                               capture_output=True, text=True, timeout=60)
         return done.stdout if 'team.role' in done.stdout else None
     out = wait(objects, 120)
@@ -301,6 +310,7 @@ def main():
     p.add_argument('--team', required=True)
     p.add_argument('--cmd', required=True)
     p.add_argument('--pb', default='/home/tester/.local/bin/pb')
+    p.add_argument('--s3-root', default='/tmp/vgw', help='the store\'s data directory in --s3-list-cmd')
     p.add_argument('--api', default='https://api.pprbt.dev')
     p.add_argument('--s3-origin', default='', help='host:port of the S3-compatible store, reachable from the machine')
     p.add_argument('--s3-list-cmd', default='')
@@ -312,6 +322,7 @@ def main():
     owner = c.pbj('team', 'get', a.team).get('owner_account')
     start = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(time.time() - 5))
     member = roles(c, a.team)
+    identity(c, a.team)
     token = 'f19-check-%d' % time.time()
     rc, out, err = c.run(['python3', '.f19helper.py', 'token', a.pb, token, a.team])
     c.step('create a one-day API token for stream setup', rc == 0 and out.strip() != '', err[-300:])
