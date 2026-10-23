@@ -45,7 +45,7 @@ func TestFleetUpdateInventoryPaginationOnPostgres(t *testing.T) {
 	exec(`INSERT INTO paperboat.teams(team_id,owner_account,generation) VALUES($1,$2,1)`, team, owner)
 	exec(`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'admin',true)`, team, owner)
 	exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state)
- SELECT $1||lpad(n::text,3,'0'),$2,$1||'environment_'||n::text,'fleet-'||lpad(n::text,3,'0'),'linux','amd64','/workspace','offline','released' FROM generate_series(1,75)n`, prefix, owner)
+ SELECT $1||lpad(n::text,3,'0'),$2,$1||'environment_'||n::text,'fleet-'||lpad(n::text,3,'0')||CASE WHEN n%5=0 THEN '-needle' ELSE '' END,'linux','amd64','/workspace','offline','released' FROM generate_series(1,75)n`, prefix, owner)
 	exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,owner_team_id,deleted_at) VALUES
  ($1||'076',$2,$1||'environment_76','fleet-team-excluded','linux','amd64','/workspace','offline','released',$4,NULL),
  ($1||'077',$3,$1||'environment_77','fleet-foreign-excluded','linux','amd64','/workspace','offline','released',NULL,NULL),

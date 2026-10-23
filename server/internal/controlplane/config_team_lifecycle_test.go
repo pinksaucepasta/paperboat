@@ -454,7 +454,7 @@ func TestUnadoptedMachineIsPersonalAgain(t *testing.T) {
 		{`INSERT INTO paperboat.teams (team_id,owner_account,generation) VALUES ($1,$2,1)`, []any{teamID, owner}},
 		{`INSERT INTO paperboat.team_members (team_id,account_id,membership_generation,role,active) VALUES ($1,$2,1,'member',true)`, []any{teamID, member}},
 		{`INSERT INTO paperboat.control_environments (id,workspace_id,owner_user_id) VALUES ($1,$2,$3)`, []any{environmentID, "workspace_" + suffix, member}},
-		{`INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,seat_state) VALUES ($1,$2,$3,'Machine','linux','unknown','/workspace','occupied')`, []any{machineID, member, environmentID}},
+		{`INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root,seat_state) VALUES ($1,$2,$3,'linux','unknown','/workspace','occupied')`, []any{machineID, member, environmentID}},
 	} {
 		if _, err := store.SQL().ExecContext(ctx, statement.query, statement.args...); err != nil {
 			t.Fatal(err)
