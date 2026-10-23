@@ -554,10 +554,10 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithCancel(r.Context())
 		defer cancel()
 		slog.InfoContext(ctx, "runtime_helper_access", "path", r.URL.Path, "credential_class", claims.CredentialClass, "assignment_present", claims.AssignmentID != "")
-		if claims.AssignmentID != "" {
-			// The session's bytes are accounted to the authority the server recorded for it.
-			ctx = withRuntimeUsage(ctx, runtimeUsageBinding{Authority: claims.AssignmentID, Environment: claims.EnvironmentID, IssuedAt: claims.IssuedAt})
-		}
+		// The edge accounts no helper stream: what a CLI or host carries (exec, ssh, terminal,
+		// file transfer, inbox, private access) is reported natively by the host runtime, which
+		// also meters it when it rides this edge. Only console browser terminals, which have no
+		// native reporter, are accounted here (browser terminal bridge).
 		r = r.WithContext(ctx)
 		go p.cancelWhenAccessRevoked(ctx, cancel, claims)
 	}

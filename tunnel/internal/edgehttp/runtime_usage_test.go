@@ -112,9 +112,9 @@ func TestBrowserTerminalUpstreamIsAccountedToItsAttachment(t *testing.T) {
 	}
 }
 
-// Through the whole gateway: a runtime-route request authorized by a credential that carries
-// assignment_id is metered under that authority (the path pb send/exec content takes).
-func TestRuntimeRouteRequestThroughTheGatewayIsMetered(t *testing.T) {
+// Through the whole gateway: a CLI file transfer riding the edge is NOT metered there; the host
+// runtime reports it natively, and counting it at the edge too would bill it twice.
+func TestCLIRuntimeTrafficThroughTheGatewayIsNotMeteredAtTheEdge(t *testing.T) {
 	identity := testEdgePreviewIdentity(1, 1)
 	server, client := testEdgePreviewCarrierPair(t, identity)
 	registry, err := NewDataCarrierPreviewRegistry(DataCarrierPreviewRegistryConfig{BaseDomain: "runtime.example.test", ProcessEpoch: "edge_epoch_1"})
@@ -161,7 +161,7 @@ func TestRuntimeRouteRequestThroughTheGatewayIsMetered(t *testing.T) {
 	usage.mu.Lock()
 	got := usage.recorded["session_a|env_machine|runtime_route"]
 	usage.mu.Unlock()
-	if got[0] < uint64(len(payload)) || got[1] < uint64(len(payload)) {
-		t.Fatalf("runtime route bytes recorded under the session = %v, want >= %d each way", got, len(payload))
+	if got != [2]uint64{} {
+		t.Fatalf("CLI runtime bytes were metered at the edge too: %v", got)
 	}
 }
