@@ -414,10 +414,12 @@ func TestAllocationDeniedSignedBindings(t *testing.T) {
 }
 func TestAllocationExpiryLifetimeAndRateBound(t *testing.T) {
 	f := newFixture(t, func(a, b *derpquic.Grant) { b.ExpiresAt = time.Now().Add(2 * time.Second).Unix() })
-	response := f.allocate(1)
+	// The bound is the grant's remaining time when the request was made; measuring it after the
+	// answer made the check depend on the round trip (flaky on a loaded host, with or without load).
 	remaining := time.Until(time.Unix(f.gb.ExpiresAt, 0))
-	if response.BindLifetime <= 0 || response.SteadyStateLifetime <= 0 || response.BindLifetime > remaining+100*time.Millisecond || response.SteadyStateLifetime > remaining+100*time.Millisecond {
-		t.Fatal("response lifetime exceeds shorter peer grant")
+	response := f.allocate(1)
+	if response.BindLifetime <= 0 || response.SteadyStateLifetime <= 0 || response.BindLifetime > remaining || response.SteadyStateLifetime > remaining {
+		t.Fatalf("response lifetime exceeds shorter peer grant: bind=%v steady=%v remaining at request=%v", response.BindLifetime, response.SteadyStateLifetime, remaining)
 	}
 	a, b := f.bound(response)
 	payload := allocationMessage(f.da, f.config.DiscoPrivate.Public(), f.da.Public(), f.db.Public(), 2)
