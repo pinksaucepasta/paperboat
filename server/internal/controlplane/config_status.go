@@ -403,12 +403,6 @@ func (s *ConfigStatusService) Record(ctx context.Context, identityToken string, 
 		if err != nil {
 			return err
 		}
-		if err := s.audit.WriteTx(ctx, tx, audit.Event{ActorType: audit.ActorSystem, EventType: "config.status_recorded",
-			ResourceType: "environment", ResourceID: report.EnvironmentID,
-			IdempotencyKey: "config.status:" + report.EnvironmentID + ":" + strings.TrimSpace(report.AssignmentID) + ":" + formatInt(report.SyncRevision),
-			Metadata:       map[string]any{"repository_id": report.RepositoryID, "assignment_id": report.AssignmentID, "state": report.State, "sync_revision": report.SyncRevision}}); err != nil {
-			return err
-		}
 		publishedRevision, newlyPublished := newlyPublishedRevision(previousPublished, report.LastPublishedRevision)
 		if !currentAssignment.AdoptedTeamID.Valid || !newlyPublished {
 			return nil
