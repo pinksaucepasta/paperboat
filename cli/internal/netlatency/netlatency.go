@@ -7,6 +7,7 @@ import (
 	"errors"
 	"math/rand/v2"
 	"net"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -16,11 +17,15 @@ const (
 	// FirstReportDelay lets the daemon finish starting before the first probe.
 	FirstReportDelay = 30 * time.Second
 	// Interval is the usual time between reports; each wait varies by up to 20% so machines spread out.
-	Interval = 5 * time.Minute
+	// The numbers are only displayed, so a fleet need not dial every relay every few minutes.
+	Interval = 15 * time.Minute
 	// ProbeTimeout bounds one connection attempt; a slower node is left out of the report.
 	ProbeTimeout = 3 * time.Second
-	// Attempts per node; the fastest successful one is reported.
-	Attempts = 3
+	// Attempts per node and round. One connect per round, and the report carries the fastest of the
+	// node's last SmoothingRounds rounds: as steady as the best of three, at a third of the connects.
+	Attempts = 1
+	// SmoothingRounds is how many rounds a node's reported time is the minimum over.
+	SmoothingRounds = 3
 	// MaxTargets bounds one report, matching the server.
 	MaxTargets = 64
 	// MaxBackoff caps the wait after repeated failed rounds.
@@ -123,6 +128,31 @@ type Reporter struct {
 	Dial      Dial
 	First     time.Duration // zero means FirstReportDelay
 	Every     time.Duration // zero means Interval
+
+	recent map[string][]int64 // the last SmoothingRounds measurements of each node still answering
+}
+
+// smooth replaces each measurement with the fastest of the node's last SmoothingRounds rounds and
+// forgets nodes that did not answer this round.
+func (r *Reporter) smooth(measurements []Measurement) []Measurement {
+	next := make(map[string][]int64, len(measurements))
+	out := make([]Measurement, 0, len(measurements))
+	for _, m := range measurements {
+		window := append(r.recent[m.NodeID], m.RTTMillis)
+		if len(window) > SmoothingRounds {
+			window = window[len(window)-SmoothingRounds:]
+		}
+		next[m.NodeID] = window
+		out = append(out, Measurement{NodeID: m.NodeID, RTTMillis: slices.Min(window)})
+	}
+	r.recent = next
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].RTTMillis != out[j].RTTMillis {
+			return out[i].RTTMillis < out[j].RTTMillis
+		}
+		return out[i].NodeID < out[j].NodeID
+	})
+	return out
 }
 
 func jittered(d time.Duration) time.Duration {
@@ -177,7 +207,7 @@ func (r *Reporter) once(ctx context.Context) bool {
 	if len(measurements) == 0 {
 		return fail("probe", errors.New("no relay answered"))
 	}
-	if err := r.Report(ctx, measurements); err != nil {
+	if err := r.Report(ctx, r.smooth(measurements)); err != nil {
 		return fail("report", err)
 	}
 	return true

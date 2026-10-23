@@ -130,3 +130,28 @@ func TestReporterBacksOffWhileTheServerRefusesAndRecovers(t *testing.T) {
 		t.Fatalf("waits did not grow while failing: %v then %v", first, last)
 	}
 }
+
+// One connect per node and round; the report keeps the node's fastest of its last rounds, so a single
+// slow handshake does not show, and a node that stops answering is dropped.
+func TestReporterSmoothsOverTheLastRounds(t *testing.T) {
+	var r Reporter
+	round := func(ms map[string]int64) map[string]int64 {
+		var in []Measurement
+		for node, rtt := range ms {
+			in = append(in, Measurement{NodeID: node, RTTMillis: rtt})
+		}
+		out := map[string]int64{}
+		for _, m := range r.smooth(in) {
+			out[m.NodeID] = m.RTTMillis
+		}
+		return out
+	}
+	round(map[string]int64{"a": 20, "b": 40})
+	if got := round(map[string]int64{"a": 90, "b": 35}); got["a"] != 20 || got["b"] != 35 {
+		t.Fatalf("second round = %v, want a=20 (fastest so far) b=35", got)
+	}
+	round(map[string]int64{"a": 80})
+	if got := round(map[string]int64{"a": 70, "b": 50}); got["a"] != 70 || got["b"] != 50 {
+		t.Fatalf("after three newer rounds = %v, want a=70 (20 left the window) and b restarted at 50", got)
+	}
+}
