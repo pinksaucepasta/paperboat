@@ -31,7 +31,14 @@ type ProxyConfig struct {
 	DialContext      func(context.Context, string, string) (net.Conn, error)
 	IssueCertificate func(context.Context, string) (tls.Certificate, error)
 	RevocationList   func(context.Context, string) ([]byte, []byte, error)
+	// AwaitRoute is asked when a TLS hello names <port>.<machine> of a known machine whose port has no
+	// route yet (a service that just started): it may refresh the machine's services and returns once
+	// a route can have arrived, within ctx. Nil fails such a hello at once.
+	AwaitRoute func(ctx context.Context, hostname string) bool
 }
+
+// awaitRouteTimeout bounds how long a TLS hello waits for a just-started service's route.
+const awaitRouteTimeout = 6 * time.Second
 
 // Proxy serves only explicitly registered browser hostnames.
 type Proxy struct {
@@ -48,6 +55,7 @@ type Proxy struct {
 	certCacheMu      sync.RWMutex
 	transport        *http.Transport
 	issueCertificate func(context.Context, string) (tls.Certificate, error)
+	awaitRoute       func(context.Context, string) bool
 	httpListener     net.Listener
 	httpsListener    net.Listener
 	portServers      []*http.Server
@@ -89,6 +97,7 @@ func NewProxy(cfg ProxyConfig) (*Proxy, error) {
 		httpsAddr:        httpsAddr,
 		transport:        &http.Transport{DialContext: cfg.DialContext, ForceAttemptHTTP2: false, MaxIdleConns: 64, MaxIdleConnsPerHost: 8, IdleConnTimeout: 30 * time.Second, ResponseHeaderTimeout: 15 * time.Second},
 		issueCertificate: cfg.IssueCertificate,
+		awaitRoute:       cfg.AwaitRoute,
 	}
 	return p, nil
 }
@@ -298,13 +307,16 @@ func gatewayFailureMessage(stage string) string {
 // GetCertificate serves a locally trusted certificate only for an active route.
 func (p *Proxy) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
 	serverName := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(hello.ServerName)), ".")
-	p.certCacheMu.RLock()
-	_, permitted := ResolveBrowserRoute(p.routes, serverName, p.domain)
-	if p.deniedHosts[serverName] {
-		permitted = false
+	permitted, machine := p.routedName(serverName)
+	if !permitted && !machine && p.awaitRoute != nil && p.knownMachinePort(serverName) {
+		// A service that just started is announced before its route reaches this gateway: wait for it
+		// rather than failing the handshake (Lane H: TLS internal error on a fresh port).
+		ctx, cancel := context.WithTimeout(hello.Context(), awaitRouteTimeout)
+		if p.awaitRoute(ctx, serverName) {
+			permitted, machine = p.routedName(serverName)
+		}
+		cancel()
 	}
-	_, machine := p.machines[serverName]
-	p.certCacheMu.RUnlock()
 	if !permitted && !machine {
 		return nil, errors.New("TLS name has no active browser route")
 	}
@@ -319,6 +331,30 @@ func (p *Proxy) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, er
 		return nil, errors.New("browser certificate is expired or does not cover this route")
 	}
 	return &cert, nil
+}
+
+// routedName reports whether name has an active route, or names a machine.
+func (p *Proxy) routedName(name string) (permitted, machine bool) {
+	p.certCacheMu.RLock()
+	defer p.certCacheMu.RUnlock()
+	_, permitted = ResolveBrowserRoute(p.routes, name, p.domain)
+	if p.deniedHosts[name] {
+		permitted = false
+	}
+	_, machine = p.machines[name]
+	return permitted, machine
+}
+
+// knownMachinePort reports whether name is <port>.<machine> for a machine this gateway routes.
+func (p *Proxy) knownMachinePort(name string) bool {
+	label, base, ok := strings.Cut(name, ".")
+	if !ok || !NumericBrowserLabel(label) {
+		return false
+	}
+	p.certCacheMu.RLock()
+	defer p.certCacheMu.RUnlock()
+	_, known := p.machines[base]
+	return known
 }
 
 // servedLocalPort reports the local port of a request that arrived on one of the per-port TLS listeners.

@@ -94,6 +94,8 @@ func (c *Coordinator) prepareBrowserGatewayLocked(ctx context.Context, client gu
 			return root.Bytes, bundle.RevocationListDER, nil
 		}
 		return nil, nil, errors.New("no active browser routes")
+	}, AwaitRoute: func(ctx context.Context, hostname string) bool {
+		return c.awaitBrowserRoute(ctx, state, hostname)
 	}, DialContext: func(ctx context.Context, _, address string) (net.Conn, error) {
 		_, addresses, _ := state.get()
 		machineID, ok := addresses[address]

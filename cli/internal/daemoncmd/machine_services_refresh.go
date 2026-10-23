@@ -37,7 +37,7 @@ func nextMachineServicesRefresh(services []api.MachineServicesMachine, now time.
 	return max(wait, machineServicesMinimumRefresh)
 }
 
-func refreshMachineServices(ctx context.Context, coordinator serviceApplier, serverURL string, auth *sessionauth.Source, transport http.RoundTripper, changed <-chan struct{}) {
+func refreshMachineServices(ctx context.Context, coordinator serviceApplier, serverURL string, auth *sessionauth.Source, transport http.RoundTripper, changed, nudge <-chan struct{}) {
 	timer := time.NewTimer(0)
 	defer timer.Stop()
 	retry := machineServicesMinimumRefresh
@@ -46,6 +46,13 @@ func refreshMachineServices(ctx context.Context, coordinator serviceApplier, ser
 		case <-ctx.Done():
 			return
 		case <-timer.C:
+		case <-nudge:
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
 		case <-changed:
 			if !timer.Stop() {
 				select {

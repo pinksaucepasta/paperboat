@@ -874,3 +874,58 @@ func TestCoordinatorBrowserGatewayAddsARouteWithoutRestarting(t *testing.T) {
 		t.Fatalf("status=%d body=%q", response.StatusCode, body)
 	}
 }
+
+// A browser request for a port of a known machine whose route has not arrived yet (the service just
+// started) waits for the route instead of failing the TLS handshake (Lane H: tlsv1 alert internal
+// error on a fresh port); the gateway asks for a services refresh meanwhile.
+func TestCoordinatorBrowserGatewayWaitsForAJustStartedServiceRoute(t *testing.T) {
+	ca, err := testcert.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, "fresh") }))
+	defer origin.Close()
+	names := &coordinatorNameClient{domain: testBrowserDomain}
+	c, err := NewCoordinator(CoordinatorConfig{NameClient: names, DialMachine: func(ctx context.Context, _ string, _ int) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "tcp", origin.Listener.Addr().String())
+	}, IssueCertificate: func(_ context.Context, name, _ string, _ int) (tls.Certificate, error) {
+		cert, key, err := ca.IssueCertificate([]string{name})
+		if err != nil {
+			return tls.Certificate{}, err
+		}
+		return tls.X509KeyPair(cert, key)
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.ctx = t.Context()
+	defer c.Stop()
+	peer := func(ports ...int32) []*pbSync.PeerUpdate {
+		return []*pbSync.PeerUpdate{{PeerId: "first", Alias: "hp", AssignedIp: "127.100.0.4", Approved: true, Online: true, ExportedPorts: ports}}
+	}
+	if err := c.replaceGuardedRoutes(t.Context(), peer(6767)); err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		<-c.ServicesNudge() // the gateway asked for a refresh; the new service's route arrives
+		time.Sleep(300 * time.Millisecond)
+		if err := c.replaceGuardedRoutes(t.Context(), peer(6767, 7000)); err != nil {
+			t.Error(err)
+		}
+	}()
+	roots := x509.NewCertPool()
+	roots.AppendCertsFromPEM(ca.CertPEM())
+	host := "7000.hp." + testBrowserDomain
+	client := &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, ServerName: host, MinVersion: tls.VersionTLS12}}}
+	request, _ := http.NewRequest(http.MethodGet, "https://"+names.addresses[443]+"/", nil)
+	request.Host = host
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatalf("request for a just-started service: %v", err)
+	}
+	body, _ := io.ReadAll(response.Body)
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK || string(body) != "fresh" {
+		t.Fatalf("status=%d body=%q", response.StatusCode, body)
+	}
+}

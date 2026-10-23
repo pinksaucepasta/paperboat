@@ -29,6 +29,7 @@ type Coordinator struct {
 	rpcListener        net.Listener
 	rpcBackend         *daemonrpc.LiveDaemonBackend
 	errors             chan error
+	servicesNudge      chan struct{}
 	nameClient         guardedNameClient
 	ctx                context.Context
 	cancel             context.CancelFunc
@@ -74,13 +75,14 @@ func NewCoordinator(cfg CoordinatorConfig) (*Coordinator, error) {
 		cfg.ReconcileTimeout = reconcileTimeout
 	}
 	coordinator := &Coordinator{
-		cfg:         cfg,
-		nameClient:  cfg.NameClient,
-		rpcBackend:  daemonrpc.NewLiveDaemonBackend(buildinfo.Version),
-		routes:      make(map[string]*guardedRoute),
-		webRoutes:   make(map[string]guardedWebRoute),
-		connections: make(chan struct{}, 256),
-		errors:      make(chan error, 1),
+		cfg:           cfg,
+		nameClient:    cfg.NameClient,
+		rpcBackend:    daemonrpc.NewLiveDaemonBackend(buildinfo.Version),
+		routes:        make(map[string]*guardedRoute),
+		webRoutes:     make(map[string]guardedWebRoute),
+		connections:   make(chan struct{}, 256),
+		errors:        make(chan error, 1),
+		servicesNudge: make(chan struct{}, 1),
 	}
 	coordinator.rpcBackend.SetApprovalHandler(cfg.ApprovePeer)
 	coordinator.rpcBackend.SetAccount(cfg.AccountID, cfg.AccountLabel)
@@ -517,3 +519,32 @@ func (c *Coordinator) Stop() error {
 
 // Errors reports a terminal control-sync or daemon RPC listener failure.
 func (c *Coordinator) Errors() <-chan error { return c.errors }
+
+// ServicesNudge wakes the machine-services refresh early (a browser request for a just-started service).
+func (c *Coordinator) ServicesNudge() <-chan struct{} { return c.servicesNudge }
+
+func (c *Coordinator) nudgeServices() {
+	select {
+	case c.servicesNudge <- struct{}{}:
+	default:
+	}
+}
+
+// awaitBrowserRoute asks for a services refresh and waits, within ctx, until hostname has a route on
+// the running gateway.
+func (c *Coordinator) awaitBrowserRoute(ctx context.Context, state *browserGatewayState, hostname string) bool {
+	c.nudgeServices()
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		routes, _, _ := state.get()
+		if _, ok := browserRouteForHostDomain(routes, hostname, c.localDomain()); ok {
+			return true
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-ticker.C:
+		}
+	}
+}
