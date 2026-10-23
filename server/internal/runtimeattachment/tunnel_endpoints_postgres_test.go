@@ -5,8 +5,10 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 
+	"github.com/pinksaucepasta/paperboat-server/internal/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat-server/internal/controlplane"
 	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat-server/internal/endpoints"
@@ -21,7 +23,7 @@ func TestTunnelsMoveOntoTheEngineOnlyWhenAgentAndEdgesServeThemOnPostgres(t *tes
 	endpointID := uuid.NewString()
 	f.exec(t, `INSERT INTO tunnels(id,account_id,name,desired_state,access_mode,generation,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id) VALUES($1,$2,$1,'active','public',1,$3,$4,$5,$2)`,
 		tunnel, f.account, "endpoint_"+endpointID, "https://"+endpointID+".tunnels.example.test", f.machine)
-	f.exec(t, `INSERT INTO tunnel_routes(id,tunnel_id,name,priority,protocol,match_type,origin_scheme,origin_address,tls_verification,generation,desired_state,created_by_actor_id,updated_by_actor_id,created_at,updated_at) VALUES($1,$2,'web',1,'http','catch_all','http','127.0.0.1:3000','not_applicable',3,'active',$3,$3,now(),now())`, route, tunnel, f.account)
+	f.exec(t, `INSERT INTO tunnel_routes(id,tunnel_id,name,priority,protocol,match_type,match_hostname,origin_scheme,origin_address,tls_verification,generation,desired_state,created_by_actor_id,updated_by_actor_id,created_at,updated_at) VALUES($1,$2,'web',1,'http','managed',$4,'http','127.0.0.1:3000','not_applicable',3,'active',$3,$3,now(),now())`, route, tunnel, f.account, endpointID+".tunnels.example.test")
 	sync := func() {
 		t.Helper()
 		if err := endpoints.SyncTunnelAgents(f.ctx, f.database, 100); err != nil {
@@ -157,6 +159,27 @@ func TestTunnelsMoveOntoTheEngineOnlyWhenAgentAndEdgesServeThemOnPostgres(t *tes
 	}
 	if rows := snapshot(); rows[0].ObservedState != "ready" {
 		t.Fatalf("engine route after the edge observed it ready = %s", rows[0].ObservedState)
+	}
+	// A live machine has a current control session, and its environment is its own workspace.
+	f.exec(t, `UPDATE control_environments SET workspace_id=$2 WHERE id=$1`, f.env, f.machine)
+	f.exec(t, `INSERT INTO machine_control_renewals(operation_id,machine_id,installation_generation,credential_jti,issued_at,expires_at,session_generation) VALUES($1,$2,1,$1,now()-interval '1 minute',now()+interval '1 hour',1)`, "renew_"+f.prefix, f.machine)
+	f.exec(t, `INSERT INTO machine_control_sessions(machine_id,installation_generation,session_generation,operation_id,credential_jti,issued_at,expires_at) SELECT machine_id,installation_generation,session_generation,operation_id,credential_jti,issued_at,expires_at FROM machine_control_renewals WHERE operation_id=$1`, "renew_"+f.prefix)
+	// The edge's public ingress authority for the route is bound to the same carrier identity its
+	// stream preface carries, and names the tunnel route and its origin.
+	decisions, err := connectorprotocol.SQLIngressSource{DB: f.database}.Edge(f.ctx, f.node, f.edge.ProcessEpoch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decision *wire.IngressDecision
+	for i := range decisions {
+		if decisions[i].Binding.RouteID == route {
+			decision = &decisions[i]
+		}
+	}
+	if decision == nil || decision.Binding.TunnelID != b.TunnelID || decision.ConnectorID != b.ConnectorID || decision.SessionID != b.SessionID ||
+		decision.ProcessGeneration != b.ProcessGeneration || decision.ConfigGeneration != b.ConfigGeneration || decision.AssignmentGeneration != uint64(row.AssignmentGeneration) ||
+		decision.Binding.Hostname != endpointID+".tunnels.example.test" || decision.Binding.OriginAddress != "127.0.0.1:3000" || decision.Binding.Audience != "public" {
+		t.Fatalf("engine ingress decision = %+v (of %d)", decision, len(decisions))
 	}
 	// Tunnel routes reach the edge with its route snapshot, never as preview admissions.
 	values, err := f.service.Pull(f.ctx, f.edge, both)

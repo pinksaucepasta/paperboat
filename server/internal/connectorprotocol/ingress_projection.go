@@ -147,6 +147,65 @@ WHERE ((a.state='active' AND a.observed_state='ready') OR (a.state='staged' AND 
 ORDER BY a.route_id,a.assignment_generation,a.assignment_id,publication.hostname,publication.publication_id
 LIMIT 4097`
 
+// engineTunnelIngressSQL projects the public (or, for a browser grant, the restricted) authority of
+// tunnel routes served on the endpoint engine (PLAN 3a step 4) for one edge process: the route
+// rides on the agent's runtime carrier, so the decision's connector, session, generations and
+// tunnel id are that carrier's identity, which is what the edge's stream preface carries. The route
+// id names the tunnel route. Parameters: now, edge node, edge epoch, audience, route, hostname.
+const engineTunnelIngressSQL = `
+SELECT t.account_id,environment.id,(ra.admission->'binding'->>'tunnel_id'),t.generation,r.id,r.generation,ra.machine_id,m.installation_generation,
+ publication.hostname,COALESCE(r.path_prefix,'/'),r.origin_scheme,r.origin_address,
+ r.tls_verification,COALESCE(r.tls_server_name,''),COALESCE(r.ca_reference,''),COALESCE(r.mtls_credential_reference,''),
+ '',0,r.protocol,
+ publication.publication_id,publication.publication_generation,
+ x.edge_node_id,x.edge_process_epoch,(ra.admission->'binding'->>'connector_id'),ra.session_id,ra.worker_generation,
+ (ra.admission->'binding'->>'config_generation')::bigint,x.generation,viewer_policy.viewer_policy_generation,
+ LEAST($1::timestamptz + interval '10 seconds',t.expires_at,identity.expires_at,ra.expires_at,node.registry_expires_at,node.last_heartbeat_at+interval '15 seconds')
+FROM endpoint_edge_assignments x
+JOIN endpoints e ON e.id=x.endpoint_id AND e.kind='tunnel' AND e.desired_state='active'
+JOIN tunnels t ON t.id=e.tunnel_id
+JOIN endpoint_routes er ON er.id=x.route_id
+JOIN tunnel_routes r ON r.id=er.tunnel_route_id AND r.tunnel_id=t.id
+JOIN paperboat.current_tunnel_route_viewer_policy viewer_policy ON viewer_policy.route_id=r.id
+LEFT JOIN LATERAL (
+ SELECT COALESCE(r.match_hostname,substring(t.stable_endpoint from 9)) AS hostname,r.id AS publication_id,r.generation AS publication_generation
+ WHERE paperboat.workspace_edge_mode(t.account_id,t.owner_team_id)='managed-only' OR r.protocol='tcp'
+ OR (r.match_type='exact' AND EXISTS(SELECT 1 FROM tunnel_domains exact_domain WHERE exact_domain.account_id=t.account_id AND exact_domain.tunnel_id=t.id AND exact_domain.route_id=r.id AND exact_domain.hostname=r.match_hostname AND exact_domain.deleted_at IS NULL AND exact_domain.ownership_state='verified' AND exact_domain.conflict_state='clear' AND exact_domain.match_type='exact' AND (r.protocol='http' OR(exact_domain.certificate_strategy='none' AND exact_domain.certificate_state='not_applicable'))))
+ UNION ALL
+ SELECT d.hostname,d.id,d.generation FROM tunnel_domains d
+ WHERE r.protocol IN ('http','tls') AND d.account_id=t.account_id
+   AND d.route_id=r.id AND d.tunnel_id=r.tunnel_id AND d.deleted_at IS NULL
+   AND d.ownership_state='verified' AND d.conflict_state='clear' AND d.match_type='exact'
+   AND d.hostname<>COALESCE(r.match_hostname,substring(t.stable_endpoint from 9))
+   AND (r.protocol='http' OR (d.certificate_strategy='none' AND d.certificate_state='not_applicable'))
+) publication ON true
+JOIN runtime_carrier_attachments ra ON ra.machine_id=e.agent_machine_id AND ra.edge_node_id=x.edge_node_id
+ AND ra.edge_process_epoch=x.edge_process_epoch AND ra.session_id=x.carrier_session_id
+ AND ra.agent_capabilities @> ARRAY['endpoints','tunnel_endpoints']::text[]
+JOIN user_machines m ON m.id=ra.machine_id AND m.user_id=t.account_id
+JOIN control_environments environment ON environment.id=m.environment_id AND environment.owner_user_id=t.account_id AND environment.workspace_id=m.id
+JOIN machine_control_sessions identity ON identity.machine_id=m.id AND identity.installation_generation=m.installation_generation
+JOIN control_tunnel_nodes node ON node.id=x.edge_node_id AND node.process_epoch=x.edge_process_epoch
+WHERE x.edge_node_id=$2 AND x.edge_process_epoch=$3 AND x.desired='active' AND node.tunnel_endpoints_epoch=x.edge_process_epoch
+ AND paperboat.runtime_carrier_valid(ra.route_id,ra.edge_node_id,ra.edge_process_epoch,false)
+ AND (t.owner_team_id IS NULL OR paperboat.workspace_tunnel_management_allowed(t.account_id,t.owner_team_id,t.id))
+ AND t.desired_state='active' AND t.deleted_at IS NULL AND (t.expires_at IS NULL OR t.expires_at>$1)
+ AND environment.desired_state='active' AND environment.revoked_at IS NULL
+ AND viewer_policy.effective_access_mode=$4
+ AND ($5::text='' OR r.id=$5)
+ AND ($6::text='' OR publication.hostname=$6)
+ AND r.desired_state='active' AND r.deleted_at IS NULL AND r.protocol='http'
+ AND (r.match_type IN ('managed','exact') OR ($4<>'public' AND r.match_type='catch_all'))
+ AND r.origin_scheme IN ('http','https','h2c') AND r.tls_verification IN ('not_applicable','system','custom_ca')
+ AND m.deleted_at IS NULL AND m.revoked_at IS NULL AND m.state NOT IN ('pending','revoked','deleted')
+ AND m.seat_state='occupied' AND m.public_identity_key=ra.public_identity_key
+ AND identity.issued_at<=$1 AND identity.expires_at>$1
+ AND node.registry_expires_at>$1 AND node.roles @> ARRAY['edge']::text[] AND node.drain_deadline IS NULL
+ AND paperboat.node_route_eligible(node.id,t.account_id,r.id)
+ AND node.state='ready' AND node.ready=true AND node.last_heartbeat_at>$1::timestamptz-interval '15 seconds'
+ORDER BY x.route_id,publication.hostname,publication.publication_id
+LIMIT 4097`
+
 // queryInWrittenJoinOrder runs one ingress projection in a read-only transaction that keeps the
 // query's written join order. The projections join about fifteen tables, views and inlined
 // functions; the planner's join search took 4.5 s per edge pull under load (prod 2026-10-23,
@@ -184,7 +243,58 @@ func (s SQLIngressSource) project(ctx context.Context, active ActiveControlSessi
 	if s.Clock != nil {
 		now = s.Clock.Now().UTC()
 	}
-	rows, finish, err := queryInWrittenJoinOrder(ctx, s.DB.SQL(), ingressProjectionSQL, now, active.AccountID, active.TunnelID, active.ConnectorID, active.HostID, active.SessionID, active.ProcessGeneration, active.ConfigGeneration, active.ConfigContentHash, active.CredentialGeneration, nodeID, epoch, audience, routeID, hostname)
+	out, err := s.scanIngressRows(ctx, now, ingressProjectionSQL, now, active.AccountID, active.TunnelID, active.ConnectorID, active.HostID, active.SessionID, active.ProcessGeneration, active.ConfigGeneration, active.ConfigContentHash, active.CredentialGeneration, nodeID, epoch, audience, routeID, hostname)
+	if err != nil {
+		return nil, err
+	}
+	if nodeID != "" {
+		// Tunnels on the endpoint engine are served by edges only, never through a connector session.
+		engine, err := s.scanIngressRows(ctx, now, engineTunnelIngressSQL, now, nodeID, epoch, audience, routeID, hostname)
+		if err != nil {
+			return nil, err
+		}
+		if len(out)+len(engine) > maximumIngressDecisions {
+			return nil, wire.ErrIngressDenied
+		}
+		out = append(out, engine...)
+	}
+	if audience == "public" {
+		admitted := out[:0]
+		for _, d := range out {
+			b := d.Binding
+			var team string
+			var entitled bool
+			if err = s.DB.SQL().QueryRowContext(ctx, `SELECT coalesce(t.owner_team_id,m.owner_team_id,''),coalesce(t.owner_team_id,m.owner_team_id) IS NULL OR paperboat.team_paid_entitled(coalesce(t.owner_team_id,m.owner_team_id)) FROM user_machines m JOIN tunnel_routes r ON r.id=$4 JOIN tunnels t ON t.id=r.tunnel_id WHERE m.id=$1 AND m.environment_id=$2 AND m.user_id=$3`, b.HostID, b.EnvironmentID, b.AccountID, b.RouteID).Scan(&team, &entitled); err != nil {
+				if err = s.rowFailed(ctx, "entitlement", b.RouteID, err); err != nil {
+					return nil, err
+				}
+				continue
+			}
+			if !entitled {
+				continue
+			}
+			if err = accountingauthority.Record(ctx, s.DB, accountingauthority.Binding{ID: fmt.Sprintf("public:%s:%d", b.PublicationID, b.PublicationGeneration), Node: d.EdgeNodeID, Environment: b.EnvironmentID, Route: b.RouteID, Revision: int64(b.RouteGeneration), User: b.AccountID, Team: team, IssuedAt: d.IssuedAt, ExpiresAt: d.ExpiresAt}, s.Quota); err != nil {
+				if isExactQuotaExhaustion(err) {
+					if s.QuotaDenied != nil {
+						*s.QuotaDenied = append(*s.QuotaDenied, wire.IngressQuotaDenial{RouteID: b.RouteID, Hostname: b.Hostname})
+					}
+					continue
+				}
+				if err = s.rowFailed(ctx, "accounting", b.RouteID, err); err != nil {
+					return nil, err
+				}
+				continue
+			}
+			admitted = append(admitted, d)
+		}
+		out = admitted
+	}
+	return out, nil
+}
+
+// scanIngressRows runs one ingress projection query and completes each row into a decision.
+func (s SQLIngressSource) scanIngressRows(ctx context.Context, now time.Time, query string, args ...any) (decisions []wire.IngressDecision, resultErr error) {
+	rows, finish, err := queryInWrittenJoinOrder(ctx, s.DB.SQL(), query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -225,37 +335,6 @@ func (s SQLIngressSource) project(ctx context.Context, active ActiveControlSessi
 	}
 	if err = closeRows(); err != nil {
 		return nil, fmt.Errorf("close connector ingress rows: %w", err)
-	}
-	if audience == "public" {
-		admitted := out[:0]
-		for _, d := range out {
-			b := d.Binding
-			var team string
-			var entitled bool
-			if err = s.DB.SQL().QueryRowContext(ctx, `SELECT coalesce(t.owner_team_id,m.owner_team_id,''),coalesce(t.owner_team_id,m.owner_team_id) IS NULL OR paperboat.team_paid_entitled(coalesce(t.owner_team_id,m.owner_team_id)) FROM user_machines m JOIN tunnels t ON t.id=$4 WHERE m.id=$1 AND m.environment_id=$2 AND m.user_id=$3`, b.HostID, b.EnvironmentID, b.AccountID, b.TunnelID).Scan(&team, &entitled); err != nil {
-				if err = s.rowFailed(ctx, "entitlement", b.RouteID, err); err != nil {
-					return nil, err
-				}
-				continue
-			}
-			if !entitled {
-				continue
-			}
-			if err = accountingauthority.Record(ctx, s.DB, accountingauthority.Binding{ID: fmt.Sprintf("public:%s:%d", b.PublicationID, b.PublicationGeneration), Node: d.EdgeNodeID, Environment: b.EnvironmentID, Route: b.RouteID, Revision: int64(b.RouteGeneration), User: b.AccountID, Team: team, IssuedAt: d.IssuedAt, ExpiresAt: d.ExpiresAt}, s.Quota); err != nil {
-				if isExactQuotaExhaustion(err) {
-					if s.QuotaDenied != nil {
-						*s.QuotaDenied = append(*s.QuotaDenied, wire.IngressQuotaDenial{RouteID: b.RouteID, Hostname: b.Hostname})
-					}
-					continue
-				}
-				if err = s.rowFailed(ctx, "accounting", b.RouteID, err); err != nil {
-					return nil, err
-				}
-				continue
-			}
-			admitted = append(admitted, d)
-		}
-		out = admitted
 	}
 	return out, nil
 }
