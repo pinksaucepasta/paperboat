@@ -172,7 +172,6 @@ func handleDesktop(c *cobra.Command, in desktopRequest) (any, error) {
 		var p struct {
 			MachineID       string                         `json:"machine_id"`
 			Alias           string                         `json:"alias"`
-			Description     string                         `json:"description"`
 			ExpectedVersion int64                          `json:"expected_version"`
 			Desired         api.MachineCapabilitySelection `json:"desired"`
 			Action          string                         `json:"action"`
@@ -193,7 +192,7 @@ func handleDesktop(c *cobra.Command, in desktopRequest) (any, error) {
 		}
 		switch in.Action {
 		case "machine.rename":
-			return client.SetMachineMetadata(ctx, p.MachineID, p.Alias, p.Description)
+			return client.RenameUserMachine(ctx, p.MachineID, p.Alias)
 		case "machine.disconnect":
 			err = client.DisconnectUserMachine(ctx, p.MachineID)
 		case "machine.remove":

@@ -32,7 +32,6 @@ type UserMachine struct {
 	Shared        bool     `json:"shared"`
 	ID            string   `json:"id"`
 	EnvironmentID string   `json:"environment_id"`
-	Description   string   `json:"description"`
 	Alias         string   `json:"alias"`
 	State         string   `json:"state"`
 	Online        bool     `json:"online"`

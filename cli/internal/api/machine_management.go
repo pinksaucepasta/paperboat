@@ -133,11 +133,6 @@ func (c *Client) MachineUpdateSummary(ctx context.Context) (map[string]any, erro
 	}
 }
 
-func (c *Client) SetMachineMetadata(ctx context.Context, id, alias, description string) (out UserMachine, err error) {
-	err = c.do(ctx, http.MethodPatch, "/v1/machines/"+url.PathEscape(id), map[string]string{"alias": alias, "description": description}, &out)
-	return
-}
-
 func (c *Client) RequestMachineMaintenance(ctx context.Context, id, operation, action, version, reason string) (out map[string]any, err error) {
 	err = c.doWithHeaders(ctx, http.MethodPost, "/v1/machines/"+url.PathEscape(id)+"/maintenance-approvals", map[string]string{"action": action, "target_version": version, "reason": reason}, &out, http.Header{"Idempotency-Key": {operation}})
 	return
