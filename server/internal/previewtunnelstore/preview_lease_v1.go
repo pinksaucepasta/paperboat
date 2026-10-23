@@ -1207,6 +1207,10 @@ func (s *Store) CurrentPreviewRoute(ctx context.Context, account, previewID stri
 	return route, err
 }
 
+// decoratePreviewEndpoints marks a managed preview's route pending until the published DNS records
+// (provider_records, what resolvers get) name an edge that serves it. A republication in flight (an
+// edge added, a carrier session renewed) keeps the records it replaces, so it does not make a serving
+// preview look pending ("connecting").
 func (s *Store) decoratePreviewEndpoints(ctx context.Context, records []PreviewLeaseRecord) error {
 	if len(records) == 0 {
 		return nil
@@ -1222,12 +1226,10 @@ func (s *Store) decoratePreviewEndpoints(ctx context.Context, records []PreviewL
  SELECT 1 FROM paperboat.edge_dns_publications d
  JOIN paperboat.preview_routes a ON a.preview_id=p.id AND a.account_id=p.account_id
  JOIN paperboat.control_tunnel_nodes n ON n.id=a.edge_node_id AND n.process_epoch=a.edge_process_epoch
- WHERE d.owner_id=p.id AND d.hostname=substring(p.endpoint from 9)
- AND d.resource_generation=1 AND d.state IN ('submitted','verified') AND d.provider_records<>'[]'::jsonb
- AND (d.valid_until IS NULL OR d.valid_until>now())
+ WHERE d.owner_id=p.id AND d.hostname=substring(p.endpoint from 9) AND d.resource_generation=1
  AND a.state='ready' AND a.edge_ready AND a.origin_ready AND a.expires_at>now()
- AND ((n.public_ingress_ipv4 IS NOT NULL AND d.desired_addresses ? host(n.public_ingress_ipv4))
- OR (n.public_ingress_ipv6 IS NOT NULL AND d.desired_addresses ? host(n.public_ingress_ipv6))))
+ AND EXISTS (SELECT 1 FROM jsonb_array_elements(d.provider_records) r
+ WHERE r->>'Address' IN (host(n.public_ingress_ipv4),host(n.public_ingress_ipv6))))
  FROM paperboat.preview_leases p WHERE p.id=ANY($1::text[])`, ids)
 	if err != nil {
 		return err
