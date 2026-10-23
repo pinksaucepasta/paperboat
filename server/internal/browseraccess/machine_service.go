@@ -47,7 +47,7 @@ func ensureMachineServicePolicy(ctx context.Context, tx *db.Tx, host, account st
 	}
 	// The browser's default scheme is HTTP. An explicitly selected existing lazy
 	// policy at this hostname remains authoritative, including HTTPS/h2c.
-	_, e = tx.Exec(ctx, `INSERT INTO lazy_access_policies(id,hostname,account_id,environment_id,machine_id,installation_generation,generation,target_scheme,target_address,access_mode,ownership_mode,expires_at,authorization_source) VALUES($1,$2,$3,$4,$5,$6,1,'http',$7,'private','persistent_port',$8,'machine_service') ON CONFLICT(hostname) DO NOTHING`, "machine_service_"+machine+"_"+portText, host, owner, environment, machine, installation, address, now.Add(100*365*24*time.Hour))
+	_, e = tx.Exec(ctx, `INSERT INTO lazy_access_policies(id,hostname,account_id,environment_id,machine_id,installation_generation,generation,target_scheme,target_address,access_mode,ownership_mode,expires_at,authorization_source) VALUES($1,$2,$3,$4,$5,$6,1,'http',$7,'private','persistent_port',$8,'machine_service') ON CONFLICT(hostname) WHERE deleted_at IS NULL DO NOTHING`, "machine_service_"+machine+"_"+portText, host, owner, environment, machine, installation, address, now.Add(100*365*24*time.Hour))
 	return e
 }
 func applyMachineServicePrincipal(ctx context.Context, tx *db.Tx, a authority, account string) (authority, bool, error) {
