@@ -356,6 +356,17 @@ func (f *Fanout) insertEventLocked(event history.Event) {
 	})
 }
 
+// Release drops the retained output of a stopped session. No later output can arrive, and a
+// stopped terminal offers none of its old output, so attachments keep only their cursors.
+func (f *Fanout) Release() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, event := range f.ring {
+		event.Release()
+	}
+	f.ring = nil
+}
+
 func (f *Fanout) compactLocked() {
 	var minimum uint64
 	haveMinimum := false

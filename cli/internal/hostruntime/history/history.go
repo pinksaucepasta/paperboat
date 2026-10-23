@@ -192,8 +192,9 @@ func (h *History) Clear() uint64 {
 	for _, event := range h.events[h.head:] {
 		event.Release()
 	}
-	clear(h.events)
-	h.events = h.events[:0]
+	// Drop the backing array too: a cleared history is usually a stopped terminal's, and the
+	// array sized for its busiest moment would otherwise outlive it.
+	h.events = nil
 	h.head = 0
 	h.bytes = 0
 	h.earliest = h.latest

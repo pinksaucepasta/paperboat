@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -305,5 +306,57 @@ func TestSlowStoreCannotMakeCloseHangOrCommitPerChunk(t *testing.T) {
 	}
 	if err := manager.Shutdown(context.Background()); err != nil {
 		t.Fatalf("shutdown while the store is slow: %v", err)
+	}
+}
+
+// Lane W load test: after closing every flooded session the heap kept ~0.9 MiB per closed
+// session, far above its 64 KiB history. A closed session keeps its listing, not its buffers.
+func TestClosedSessionsReleaseTheirOutputBuffers(t *testing.T) {
+	const sessions = 20
+	const historyBytes = 64 << 10
+	state, err := store.Open(context.Background(), store.Config{Root: filepath.Join(t.TempDir(), "state")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer state.Close()
+	manager, err := NewManager(ManagerConfig{
+		Store:       state,
+		Launch:      func(pty.Command) (PTYProcess, error) { return &floodProcess{done: make(chan struct{})}, nil },
+		MaxSessions: sessions, MaxAttachments: 4, MaxInputDecisions: 4,
+		HistoryBytes: historyBytes, AttachmentBytes: 1 << 20,
+		TerminationTimeout: 2 * time.Second, TerminationGrace: 100 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Shutdown(context.Background())
+	heap := func() uint64 {
+		runtime.GC()
+		runtime.GC()
+		var stats runtime.MemStats
+		runtime.ReadMemStats(&stats)
+		return stats.HeapAlloc
+	}
+	baseline := heap()
+	var ids []string
+	for i := 0; i < sessions; i++ {
+		created, err := manager.Create(context.Background(), CreateRequest{Name: fmt.Sprintf("released-%d", i), Command: pty.Command{Path: "/bin/sh", CWD: "/tmp", Dimensions: pty.Dimensions{Columns: 80, Rows: 24}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := manager.AttachLive(created.ID, fmt.Sprintf("att_viewer_%d", i)); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, created.ID)
+	}
+	time.Sleep(500 * time.Millisecond)
+	for _, id := range ids {
+		if _, err := manager.Close(context.Background(), id); err != nil {
+			t.Fatalf("close: %v", err)
+		}
+	}
+	retained := int64(heap()) - int64(baseline)
+	if limit := int64(sessions*historyBytes + 4<<20); retained > limit {
+		t.Fatalf("heap kept %d KiB after closing %d flooded sessions; want at most %d KiB", retained>>10, sessions, limit>>10)
 	}
 }

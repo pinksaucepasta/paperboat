@@ -248,6 +248,9 @@ func (m *Manager) clearOutputLocked(ctx context.Context, session *managedSession
 		// A stopped terminal must not offer its old output to a new attach,
 		// even if durable cleanup failed. Recovery retries durable deletion.
 		session.history.Clear()
+		if stopped {
+			session.fanout.Release()
+		}
 	}
 	if stopped && session.screen != nil {
 		session.screen.Dispose()
