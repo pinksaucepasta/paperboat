@@ -1616,6 +1616,55 @@ self-update rollback, body limits on every route, HTTP and worker panic recovery
 advisory lock, blue/green rollout with connection-count drain, gRPC/event reconnect re-reads generations (no lost
 change after a deploy).
 
+#### Offline-capable authority: "until revoked" and new sessions without the control plane (Lane B server, Lane R daemon, Lane X review; user decisions 2026-10-23)
+
+Agreed by Lane B and Lane R, reviewed by Lane X (2026-10-23, conditions folded in). Server first, after
+the peer-network delta work (contract v3) it extends.
+1. **Peer state lives until revoked (F21-01).** `machine_network` mesh scopes carry no `expires_at`. The document's `exp` becomes
+   `refresh_by`, a hint: past it the daemon keeps using the last verified state while control is unreachable and warns
+   "out of sync". Access ends only by (a) a newer state without the peer or a `remove` delta, (b) the host revocation
+   document, (c) the peer identity's own `not_after` (≤ 90 days), which every peer entry carries and the daemon enforces.
+   Per-operation scopes (machine_access, inspector, config_compare) keep their short `expires_at`.
+2. **Session rights are scopes on the peer entry (F21-11).** A peer endpoint that may start sessions on this host gets scopes
+   `{resource_kind: "machine_access", capability: terminal|exec|managed_ssh|files, direction: "accept"}` with no
+   `expires_at` and `resource_generation` = the deciding policy version. No parallel list: the v3 delta, digest, paging, 2048 cap and removal-first rule apply unchanged. The
+   server compiles them with the same functions that issue descriptors (`machine_capability_allowed`, team policy) and
+   signs them in the same document. No secrets, no ENV.
+3. **Offline admission on the host.** Online nothing changes: descriptor plus stream token, and an online refusal is final.
+   "Unreachable" is only a connect failure, a timeout, or a 503 from the API origin itself; a 5xx from one endpoint while
+   others answer counts as online. The server never answers a denial as a 5xx (test: every descriptor denial is a 4xx).
+   Offline, the client sends a new stream-header kind on the existing native session, `offline_admission {capability,
+   operation_id, nonce}`; that session already proves the peer (mutual QUIC TLS with the endpoint certificate inside
+   WireGuard keyed by the signed peer state), so the host trusts nothing the client presents. The host decides with the
+   same scope check as online admission (`Allows(peer, self, capability, "accept")`): one verifier, no second signature
+   format next to the server-signed stream token.
+4. **What offline does not skip.** The client chooses when it is offline (it can block the API), so each server-side limit is
+   decided: session count, bounded by the host's own ceiling (256); bandwidth and plan gates apply only to hosted relay and
+   edge bytes, so direct sessions are unaffected and relay grants follow point 7; per-operation approvals and step-up
+   (policy requiring them) mean the capability is not granted offline at all, scope withheld; ENV, pairing, browser
+   terminals, previews and tunnels, and policy edits are not offline and say "needs Paperboat online". Offline usage is
+   in the audit backlog so billing and audit can count it.
+5. **Audit fails closed.** The host records each offline session start and refusal, signed with its machine key, at most
+   10 000 events or 7 days, and uploads on reconnect to `POST /v1/machines/{id}/audit-backlog`. The server dedups by event id
+   and records `origin=offline` in the deciding workspace's log (F19-07). When the backlog is full, new offline sessions
+   are refused with "needs Paperboat online"; nothing is dropped.
+6. **Every way access ends changes the document, in one place.** A single service function (also used by triggers) bumps the
+   state of both endpoints, each change with a PG test: machine revoke; member removal; team suspension; policy change that
+   removes a scope or adds an approval/step-up requirement; CLI session ended or logout (peer endpoints include native CLI
+   sessions, peersessions/network.go:369-397); account disabled or deleted; SSO session revoked or SCIM deprovision (F19);
+   seat or plan change that drops a capability. On reconnect the first answer carries removals first. The host revocation
+   document stays the second path; its unfiltered LIMIT 10000 (Lane Q #3) is fixed first.
+7. **Monotonic across restores.** Versions are `(issuer_epoch, generation)`: the daemon refuses a lower pair, so old state can't
+   be replayed, and accepts a snapshot under a higher epoch. Restoring a database backup bumps the epoch
+   (deploy/verify-backup.sh restore path); test: restore, refresh, daemon recovers. Relay grants follow the same rule: the
+   relay keeps its last grant while unreachable and drops it on revocation.
+8. **Tests.** PG: a revoke issued while a host is offline is in its first answer after reconnect; session scopes equal the
+   descriptor decision for every (account, capability) on a seeded team; each item in point 6; every descriptor denial is
+   a 4xx; restore-then-refresh. Contract vectors for v3. Daemon (Lane R): fake clock 1 h past `refresh_by`; removed peer
+   refused; replay refused; offline session accepted by a scope, refused for a revoked account and when the audit backlog
+   is full; unreachable only on connect failure, timeout or origin 503. Device (F21-11, staging only, never prod): stop
+   the server, then a new exec, ssh and terminal between two paired machines work and a revoked user is refused.
+
 ## 4. Handoff notes
 
 All open items from the Phase B handoff (2026-10-14) are filed in S0 (smoke suite), F4
