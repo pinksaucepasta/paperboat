@@ -115,6 +115,16 @@ func (s *Service) ListTerminalSessionInventory(ctx context.Context, account, mac
 	if err != nil {
 		return nil, 0, err
 	}
+	// Each listed session is loaded through the terminal capability check; a machine the
+	// caller may not use for terminals (revoked, capability off) lists none instead of
+	// selecting ids it then cannot load (a revoked machine's daemon got 500s polling this).
+	var terminalAllowed bool
+	if err := s.db.SQL().QueryRowContext(ctx, `SELECT paperboat.machine_capability_allowed($1,$2,'terminal')`, account, machineID).Scan(&terminalAllowed); err != nil {
+		return nil, 0, err
+	}
+	if !terminalAllowed {
+		return []TerminalSession{}, 0, nil
+	}
 	scoped, team := workspaceTeamArgument(ctx)
 	var teamID any
 	if team.Valid {
