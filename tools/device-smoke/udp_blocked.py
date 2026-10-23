@@ -20,13 +20,16 @@ TABLE = 'pbsmoke_udp'
 RECOVERY_SECONDS = 90
 BLOCK = (
     f'table inet {TABLE} {{ chain out {{ type filter hook output priority 0; '
-    'udp dport { 53, 443 } accept; ip protocol udp drop; ip6 nexthdr udp drop; } }')
+    'udp dport { 53, 443 } accept; meta l4proto udp drop; }; }')
 
 
 def pb_exec(target, *command, timeout=60):
-    result = subprocess.run([str(PB), 'exec', target, '--timeout', '45s', '--', *command],
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                            stdin=subprocess.DEVNULL, timeout=timeout)
+    try:
+        result = subprocess.run([str(PB), 'exec', target, '--timeout', '45s', '--', *command],
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                stdin=subprocess.DEVNULL, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return False
     return result.returncode == 0
 
 
