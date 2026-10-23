@@ -40,7 +40,7 @@ export function PolicyHistory({ workspace, policy }: { workspace: string; policy
             <span className="min-w-0 flex-1">
               <span>{version.message || kinds[version.kind]}</span>
               <span className="block text-muted-foreground">
-                <Time iso={version.created_at} relative /> · {version.author.replace(/^user:/, "")}
+                <Time iso={version.created_at} relative /> · {version.author?.replace(/^user:/, "") ?? "Paperboat"}
                 {version.api_token && ` with API token ${version.api_token}`}
                 {(version.gained > 0 || version.lost > 0) && ` · ${version.gained} gained, ${version.lost} lost`}
               </span>

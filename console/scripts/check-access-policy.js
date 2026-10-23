@@ -97,7 +97,8 @@
 
   // Test: the page's answer is the server's.
   tab("Test").click()
-  const form = await until(() => document.querySelector("#test-who") && document.querySelector("form"))
+  // The Test form is the one holding the "who" field (other forms can come first on the page).
+  const form = await until(() => document.querySelector("#test-who")?.closest("form"))
   const who = document.querySelector("#test-who")?.value
   const target = document.querySelector("#test-target")?.value
   const action = document.querySelector("#test-action")?.value

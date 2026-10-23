@@ -57,7 +57,8 @@ export type PolicyVersion = {
   version: number
   digest: string
   created_at: string
-  author: string
+  /** `user:<email>`; absent for versions nobody saved (the first one, written by Paperboat). */
+  author?: string
   api_token?: string
   message: string
   gained: number
