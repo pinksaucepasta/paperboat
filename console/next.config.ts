@@ -9,6 +9,10 @@ const nextConfig: NextConfig = {
   allowedDevOrigins: publicHost ? [publicHost] : [],
   // The Funnel serves the dev server for review; the badge covers real UI. Errors still overlay.
   devIndicators: false,
+  // The preview/tunnel edge sends signed-out browsers to <console>/.paperboat/access/login (F7-03).
+  async rewrites() {
+    return [{ source: "/.paperboat/access/login", destination: "/access-login" }]
+  },
   async headers() {
     // The Ghostty core's URL carries its version, so browsers may keep it for good.
     return [
