@@ -1700,6 +1700,64 @@ dates, workspace id), with the account's email and name removed. The email may s
 Tests (PG): each removal; the owner refusal; console-only refusals (CLI session, API token, stale sign-in, wrong email);
 audit anonymization; the outbox jobs (WorkOS, Stripe, mail) retry and never block the deletion.
 
+#### PlanetScale Postgres readiness (Lane X, 2026-10-23; user decision: production DB moves to PlanetScale at launch)
+
+Source: planetscale.com/docs/postgres (compatibility, connecting, pgbouncer, connection-resilience, parameters,
+imports, plans/regions), read 2026-10-23; our code at main. Today: Hetzner Helsinki, PostgreSQL 17.11, 373 MB,
+26 connections, one pgxpool (`server/internal/db/db.go:62-71`: MaxConns 20, lifetime 30 min); tunnel and relay
+have no database. **No blocker**: every feature we use is supported. Six changes are required before cutover.
+
+| What we use | Where | PlanetScale | Connection |
+|---|---|---|---|
+| LISTEN/NOTIFY (machine-events hub; 2 `pg_notify` in triggers) | `machineevents/events.go:145-155` | supported; not through PgBouncer | **direct** (NOTIFY in triggers works pooled) |
+| Session advisory locks: migrations, team identity sync, tunnel cert address slots/hosts, planned F21-04 leader | `db/migrations.go:26`, `teamidentity/sync.go:31`, `tunnelcert/address_reconciliation.go:102,153,308` | supported; not through PgBouncer | **direct** |
+| `pg_advisory_xact_lock` (32 uses), SERIALIZABLE + 40001 retry, `SET LOCAL` (seqscan, search_path, collapse limits) | `db/db.go:133-192,301`, `connectorprotocol/ingress_projection.go:220` | supported, transaction-scoped | pooled |
+| Row and statement triggers incl. transition tables (121 CREATE TRIGGER), plpgsql/sql functions, jsonb, inet, deferrable constraints, views, LOCK TABLE / DISABLE TRIGGER on our own tables in migrations | `server/internal/db/migrations/` (135 files, 001-152) | "all trigger types", no superuser needed (owner only) | pooled; migrations direct |
+| Extensions | none (gen_random_uuid is core) | curated list; none needed | — |
+| Sequences | 204 uses | pg_dump carries setval; logical replication does not | — |
+| Roles/grants/superuser | none in migrations or code | no SUPERUSER; default role near-superuser; app should use its own role | — |
+| Startup params `search_path=paperboat`, `jit=off` | `db/db.go:66,69` | PgBouncer accepts only tracked params (`ignore_startup_parameters` default `extra_float_digits`) | **change** |
+| Named prepared statements (pgx default cache mode; 683 sqlc queries + raw SQL) | `db/db.go` (default `QueryExecModeCacheStatement`) | PgBouncer tracks them, `max_prepared_statements` default 200 | **change** |
+
+**Required changes** (owner Lane B unless noted; verify each with a test connection to a PlanetScale branch):
+1. **Two pools.** Pooled DSN (port 6432, dedicated primary PgBouncer for failover resilience) for queries. A small
+   direct pool (5432, about 4 connections per instance) for LISTEN, every session advisory lock and the migrate
+   command. Through PgBouncer these fail silently: the unlock runs on another server connection, so the lock leaks
+   on a pooled connection and other instances never get it; LISTEN never wakes the hub (falls back to its 5 s recheck).
+   Test: a CI check that every `pg_advisory_lock`/`pg_try_advisory_lock`/`LISTEN` runs on the direct pool.
+2. **Role defaults instead of startup params.** `ALTER ROLE <app> SET search_path = paperboat, jit = off` plus the
+   F21-03 timeouts (`statement_timeout`, `lock_timeout`, `idle_in_transaction_session_timeout`; PlanetScale's guide
+   recommends exactly this); drop `RuntimeParams` from the pooled DSN.
+3. **Prepared statements.** Raise the bouncer's `max_prepared_statements` to ≥ 1024, or switch pgx to
+   `QueryExecModeCacheDescribe`; measure p50 on a branch (to verify which is cheaper).
+4. **Pool sizing.** PgBouncer `default_pool_size` (20) is per user/database for the whole bouncer and `max_client_conn`
+   is 100: size them for instances × MaxConns during blue/green (3 × 20). Set `query_wait_timeout` (default 120 s)
+   to about 5 s so overload fails fast within our 15 s request timeout (Lane Q: fold into the F21-03 pool row).
+5. **App role owns the schema.** Restore with `--no-owner` as the app role (not the default `postgres` role), so
+   migrations (ALTER/DDL need ownership) and `DISABLE TRIGGER` keep working.
+6. **Failover behavior.** Planned failovers cut direct connections (a few seconds; PgBouncer PAUSEs pooled ones).
+   The hub reconnects already (24 s LISTEN sessions). A holder of a session advisory lock must treat a dropped
+   connection as a lost lock (teamidentity, tunnelcert, F21-04 leader stops its workers). Keep transactions < 3 s and
+   connections < 24 h (ours: 30 min).
+
+**Region (latency per query).** No Nordic region; nearest are AWS eu-central-1 Frankfurt and eu-west-1 Dublin,
+GCP europe-west4/west1, Azure westeurope. Measured TCP connect from the current server (Helsinki): Frankfurt
+30 ms, Dublin 44 ms, us-east-1 106 ms. At Lane Q's query counts (e.g. 105 queries for terminal sessions), 30 ms is
+about 3 s per request: **the server must move with the DB.** Options: Hetzner Nuremberg/Falkenstein next to AWS
+eu-central-1 (a few ms, to verify by measuring from a Hetzner DE host), or the server on AWS eu-central-1 itself
+(sub-ms in-region). Lane Q's per-request query budget becomes a latency budget (queries × RTT).
+
+**Migration path.** 373 MB, so pg_dump/pg_restore (PlanetScale: < 20 GB, downtime up to an hour; ours is
+estimated at 10-15 min, to measure). It copies sequences, and triggers are created after the data, so COPY fires
+none. Logical replication is not worth it: it needs `wal_level=logical` (a restart on Hetzner), does not carry
+sequences or DDL, and needs a frozen schema during the sync. Steps: (1) rehearse on a PlanetScale branch: restore,
+run the PG suites and `TestPerformanceBudgetsOnSeededPostgres` against it from the new server region; (2) **F21-01
+first**: without it, a DB window longer than 2 min stops native access fleet-wide; (3) maintenance window: stop
+the server, final dump, restore, ALTER ROLE defaults, switch both DSNs, start, then the smoke checks; (4) keep the
+Hetzner DB read-only for rollback for 7 days. Deploy changes (Lane B): compose drops the postgres service;
+`backup-database.sh`/`verify-backup.sh` move to PlanetScale backups/PITR (or run pg_dump over the direct port);
+the migrate service uses the direct DSN.
+
 ## 4. Handoff notes
 
 All open items from the Phase B handoff (2026-10-14) are filed in S0 (smoke suite), F4
@@ -3270,3 +3328,4 @@ Adopt on pprbtdev made up to 49 pending pull-only assignments; nothing approved;
 Lane H config-sync PASS on laneh-s313-a/b (revoked team row kept), dev-0f9fe843, results/20261023T132621Z.json. Not on an official release yet.
 2026-10-23 | Lane O F13-03 | [x] L: cap enforced on relay/edge only (direct P2P free), plan-limit messages on ping/exec/ssh/terminal/browser terminal, owner email via Resend. New row F13-03S (send says "Operation canceled") → Lane A.
 2026-10-23 | Lane O F12-02-mail-live | [x]: invitation + resend sent via Resend (mail_3a03b50d…, mail_c2ddadfe…), link → console Team page → joined. Found/fixed on the way: trialing teams could not change seats (11419b73).
+2026-10-23 | Lane X | PLAN 3b "PlanetScale Postgres readiness": no blocker; 6 required changes (direct pool for LISTEN/advisory locks, role defaults, prepared stmts, pool sizing, app role, failover); server must move with the DB (Helsinki→Frankfurt 30 ms/query); dump/restore after F21-01.
