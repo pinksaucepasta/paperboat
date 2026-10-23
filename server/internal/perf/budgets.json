@@ -218,9 +218,7 @@
   {
    "actor": "user_perf_0001",
    "path": "/v1/teams/perf-team-001/activity",
-   "max_queries": 16,
-   "p50_ms": 1720,
-   "reason": "team activity audit scan (Lane Q next)"
+   "max_queries": 8
   },
   {
    "actor": "user_perf_0001",

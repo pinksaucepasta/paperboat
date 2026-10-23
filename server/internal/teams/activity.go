@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
 )
 
@@ -130,23 +132,20 @@ func (s *Service) Activity(ctx context.Context, account, team, cursor string, li
 	if err != nil {
 		return out, err
 	}
-	err = s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		// Serialize authorization with membership/deletion changes for every page.
-		if err := Lock(ctx, tx); err != nil {
-			return err
+	// One read-only snapshot authorizes and reads the page: the caller's own membership is all it needs, not the
+	// whole team or the server-wide team lock.
+	err = s.db.InReadOnlySnapshot(ctx, func(ctx context.Context, tx *db.Tx) error {
+		var role string
+		err := tx.QueryRow(ctx, `SELECT CASE WHEN t.owner_account=m.account_id THEN 'owner' ELSE m.role END
+ FROM teams t JOIN team_members m ON m.team_id=t.team_id AND m.account_id=$2 AND m.active
+ WHERE t.team_id=$1 AND t.deleted_at IS NULL AND NOT t.suspended`, team, account).Scan(&role)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
 		}
-		t, err := ReadTx(ctx, tx, team)
 		if err != nil {
 			return err
 		}
-		if t.Deleted {
-			return ErrNotFound
-		}
-		m, ok := member(t, account)
-		if !ok || !m.Active {
-			return ErrNotFound
-		}
-		if !Allowed(m.Role, PermissionAuditRead) {
+		if !Allowed(role, PermissionAuditRead) {
 			return ErrForbidden
 		}
 		rows, err := tx.Query(ctx, `SELECT id,coalesce(actor_user_id,''),event_type,created_at,metadata,cursor_sequence FROM audit_events WHERE resource_type='team' AND resource_id=$1 AND created_at>=now()-interval '90 days' AND ($2::bigint=0 OR cursor_sequence<$2) ORDER BY cursor_sequence DESC LIMIT $3`, team, before, limit+1)

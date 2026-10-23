@@ -59,47 +59,73 @@ func WithContext(ctx context.Context, scope Scope) context.Context {
 
 // Validate checks current account status and exact team membership. Team
 // subscription entitlement is checked by each resource authority that uses it.
+//
+// It runs before nearly every workspace-scoped request and decides nothing it writes, so it reads one snapshot
+// without the team lock: holding that server-wide lock made every account's requests wait behind any team change
+// or team read in progress. Only a team that requires SSO needs a write (the sign-in check records a bypass), in
+// its own transaction.
 func Validate(ctx context.Context, database *db.DB, account string, scope Scope) error {
 	if database == nil {
 		return ErrForbidden
 	}
+	var ssoRequired bool
+	err := database.InReadOnlySnapshot(ctx, func(ctx context.Context, tx *db.Tx) error {
+		var err error
+		ssoRequired, err = checkTx(ctx, tx, account, scope)
+		return err
+	})
+	if err != nil || !ssoRequired {
+		return err
+	}
 	return database.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		return ValidateTx(ctx, tx, account, scope)
+		return teams.SSOGuardTx(ctx, tx, scope.TeamID, account)
 	})
 }
 
 // ValidateTx serializes the selection check with team membership, suspension,
-// and deletion changes. Callers may already hold this advisory transaction
-// lock; PostgreSQL advisory transaction locks are reentrant within a session.
+// and deletion changes, for callers that act on it in the same transaction. Callers may already hold this
+// advisory transaction lock; PostgreSQL advisory transaction locks are reentrant within a session.
 func ValidateTx(ctx context.Context, tx *db.Tx, account string, scope Scope) error {
-	if tx == nil || account == "" || !validScope(scope) {
+	if tx == nil {
 		return ErrInvalid
 	}
 	if err := teams.Lock(ctx, tx); err != nil {
 		return err
 	}
-	var active bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE id=$1 AND status='active')`, account).Scan(&active); err != nil {
+	ssoRequired, err := checkTx(ctx, tx, account, scope)
+	if err != nil || !ssoRequired {
 		return err
 	}
+	return teams.SSOGuardTx(ctx, tx, scope.TeamID, account)
+}
+
+// checkTx reports whether the account may select scope, and whether its team requires SSO.
+func checkTx(ctx context.Context, tx *db.Tx, account string, scope Scope) (ssoRequired bool, err error) {
+	if account == "" || !validScope(scope) {
+		return false, ErrInvalid
+	}
+	var active bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE id=$1 AND status='active')`, account).Scan(&active); err != nil {
+		return false, err
+	}
 	if !active {
-		return ErrForbidden
+		return false, ErrForbidden
 	}
 	if scope.TeamID == "" {
-		return nil
+		return false, nil
 	}
 	var member bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(
 	 SELECT 1 FROM teams t JOIN team_members m USING(team_id)
 	 WHERE t.team_id=$1 AND t.deleted_at IS NULL AND NOT t.suspended
 	   AND m.account_id=$2 AND m.active
-	)`, scope.TeamID, account).Scan(&member); err != nil {
-		return err
+	),coalesce((SELECT sso_required FROM teams WHERE team_id=$1),false)`, scope.TeamID, account).Scan(&member, &ssoRequired); err != nil {
+		return false, err
 	}
 	if !member {
-		return ErrForbidden
+		return false, ErrForbidden
 	}
-	return teams.SSOGuardTx(ctx, tx, scope.TeamID, account)
+	return ssoRequired, nil
 }
 
 func validScope(scope Scope) bool {

@@ -135,7 +135,7 @@ func (d *DB) InTx(ctx context.Context, fn func(context.Context, *Tx) error) erro
 	d.serializable.calls.Add(1)
 	for attempt := 1; ; attempt++ {
 		d.serializable.attempts.Add(1)
-		err := d.runInTx(ctx, pgx.Serializable, fn)
+		err := d.runInTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable}, fn)
 		if err == nil || attempt >= maxAttempts || !isSerializationFailure(err) {
 			if attempt >= maxAttempts && isSerializationFailure(err) {
 				d.serializable.exhausted.Add(1)
@@ -185,16 +185,8 @@ func BeginSerializable(ctx context.Context, database *sql.DB) (*sql.Tx, error) {
 // InReadOnlySnapshot runs reads that must agree with each other in one repeatable-read, read-only transaction.
 // It takes no row locks and no serializable predicate locks, so frequently polled reads cannot become the
 // pivot of another transaction's serialization failure. Never use it to decide a write.
-func (d *DB) InReadOnlySnapshot(ctx context.Context, fn func(context.Context, *dbsqlc.Queries) error) error {
-	tx, err := d.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
-	if err != nil {
-		return fmt.Errorf("begin read snapshot: %w", err)
-	}
-	defer tx.Rollback(context.Background())
-	if err := fn(ctx, dbsqlc.New(tx)); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
+func (d *DB) InReadOnlySnapshot(ctx context.Context, fn func(context.Context, *Tx) error) error {
+	return d.runInTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}, fn)
 }
 
 // InReadCommittedTx is for bounded work-queue claims that use FOR UPDATE SKIP
@@ -206,7 +198,7 @@ func (d *DB) InReadCommittedTx(ctx context.Context, fn func(context.Context, *Tx
 	d.readCommitted.calls.Add(1)
 	for attempt := 1; ; attempt++ {
 		d.readCommitted.attempts.Add(1)
-		err := d.runInTx(ctx, pgx.ReadCommitted, fn)
+		err := d.runInTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted}, fn)
 		if err == nil || attempt >= maxAttempts || !isSerializationFailure(err) {
 			if attempt >= maxAttempts && isSerializationFailure(err) {
 				d.readCommitted.exhausted.Add(1)
@@ -278,14 +270,14 @@ func (e *transactionCleanupFailure) Unwrap() []error {
 	return []error{e.operation, e.rollback}
 }
 
-func (d *DB) runInTx(ctx context.Context, isolation pgx.TxIsoLevel, fn func(context.Context, *Tx) error) error {
-	tx, err := d.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: isolation})
+func (d *DB) runInTx(ctx context.Context, options pgx.TxOptions, fn func(context.Context, *Tx) error) error {
+	tx, err := d.pool.BeginTx(ctx, options)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
 	wrapped := &Tx{tx: tx, q: dbsqlc.New(tx)}
 	setup := `SET LOCAL search_path TO paperboat`
-	if isolation == pgx.Serializable {
+	if options.IsoLevel == pgx.Serializable {
 		setup += "; " + serializableSetup
 	}
 	if _, err := wrapped.Exec(ctx, setup); err != nil {

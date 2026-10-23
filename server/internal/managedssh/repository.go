@@ -345,7 +345,8 @@ func (r *SQLRepository) GetTarget(ctx context.Context, request GetTargetRequest)
 	var result MachineTarget
 	// The target is read first: a missing or stale target answers ErrUnavailable exactly like a refused authority,
 	// so nothing leaks, and the access functions run only when there is something to return.
-	err := r.store.InReadOnlySnapshot(ctx, func(ctx context.Context, q *dbsqlc.Queries) error {
+	err := r.store.InReadOnlySnapshot(ctx, func(ctx context.Context, tx *db.Tx) error {
+		q := tx.Queries()
 		row, err := q.GetMachineSSHTarget(ctx, request.UserMachineID)
 		if err == pgx.ErrNoRows {
 			return ErrUnavailable
@@ -616,7 +617,8 @@ func (r *SQLRepository) getHost(ctx context.Context, request GetHostKeySetReques
 	var result HostKeySet
 	// As in GetTarget: a missing or stale set answers ErrUnavailable like a refused authority, before the access
 	// functions run.
-	err := r.store.InReadOnlySnapshot(ctx, func(ctx context.Context, q *dbsqlc.Queries) error {
+	err := r.store.InReadOnlySnapshot(ctx, func(ctx context.Context, tx *db.Tx) error {
+		q := tx.Queries()
 		var row dbsqlc.MachineSshHostKeySet
 		var err error
 		if pending {

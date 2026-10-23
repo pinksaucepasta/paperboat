@@ -32,10 +32,8 @@ func (s *Service) List(ctx context.Context, account string) ([]Item, error) {
 		return nil, ErrForbidden
 	}
 	out := []Item{{ID: "personal", Name: "Personal", Kind: "personal", Role: "owner"}}
-	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := teams.Lock(ctx, tx); err != nil {
-			return err
-		}
+	// A read of one snapshot, without the server-wide team lock (see Validate).
+	err := s.db.InReadOnlySnapshot(ctx, func(ctx context.Context, tx *db.Tx) error {
 		var active bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE id=$1 AND status='active')`, account).Scan(&active); err != nil {
 			return err

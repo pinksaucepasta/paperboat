@@ -43,9 +43,20 @@ func AuditTx(ctx context.Context, tx *db.Tx, account, team, action, operation st
 	}
 	return audit.NewWriter(nil).WriteTx(ctx, tx, audit.Event{ActorUserID: account, ActorType: audit.ActorUser, EventType: "team." + action, ResourceType: "team", ResourceID: team, IdempotencyKey: account + ":" + operation, Metadata: metadata})
 }
+
+// ReadTx reads a team and locks its row, for a change that depends on what it read.
 func ReadTx(ctx context.Context, tx *db.Tx, id string) (Team, error) {
+	return readTx(ctx, tx, id, " FOR UPDATE")
+}
+
+// readSnapshotTx reads a team without locking it, inside a read-only snapshot.
+func readSnapshotTx(ctx context.Context, tx *db.Tx, id string) (Team, error) {
+	return readTx(ctx, tx, id, "")
+}
+
+func readTx(ctx context.Context, tx *db.Tx, id, lock string) (Team, error) {
 	out := Team{TeamID: id, Members: []Member{}, Grants: []Grant{}, Machines: []MachineBinding{}, MachineGrants: []MachineGrant{}, MachineRequests: []MachineAdmission{}, TerminalSessionGrants: []TerminalSessionGrant{}}
-	err := tx.QueryRow(ctx, `SELECT sso_required,approve_new_machines,coalesce((SELECT p.allow_private_access FROM workspace_policies p WHERE p.team_id=$1),false),coalesce(display_name,team_id),coalesce(display_name,team_id),owner_account,generation,deleted_at IS NOT NULL,suspended,CASE WHEN deleted_at IS NOT NULL THEN 'deleted' WHEN suspended THEN 'suspended' ELSE coalesce((SELECT CASE WHEN rotation_required THEN 'rotation_pending' ELSE 'ready' END FROM environment_vault_teams WHERE team_id=$1),'not_initialized') END FROM teams WHERE team_id=$1 FOR UPDATE`, id).Scan(&out.SSORequired, &out.ApproveNewMachines, &out.AllowPrivateAccess, &out.Name, &out.DisplayName, &out.OwnerAccount, &out.Generation, &out.Deleted, &out.Suspended, &out.ENVStatus)
+	err := tx.QueryRow(ctx, `SELECT sso_required,approve_new_machines,coalesce((SELECT p.allow_private_access FROM workspace_policies p WHERE p.team_id=$1),false),coalesce(display_name,team_id),coalesce(display_name,team_id),owner_account,generation,deleted_at IS NOT NULL,suspended,CASE WHEN deleted_at IS NOT NULL THEN 'deleted' WHEN suspended THEN 'suspended' ELSE coalesce((SELECT CASE WHEN rotation_required THEN 'rotation_pending' ELSE 'ready' END FROM environment_vault_teams WHERE team_id=$1),'not_initialized') END FROM teams WHERE team_id=$1`+lock, id).Scan(&out.SSORequired, &out.ApproveNewMachines, &out.AllowPrivateAccess, &out.Name, &out.DisplayName, &out.OwnerAccount, &out.Generation, &out.Deleted, &out.Suspended, &out.ENVStatus)
 	if err != nil {
 		return out, mapTeamReadNotFound(err)
 	}
@@ -322,31 +333,32 @@ func check(t Team, account string, expected uint64) (Member, error) {
 	}
 	return m, nil
 }
+
+// Get and List read one snapshot without the server-wide team lock: a read decides no write, and holding the lock
+// made every team change and workspace-scoped request on the server wait for the read.
 func (s *Service) Get(ctx context.Context, account, team string) (Team, error) {
 	var out Team
-	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := Lock(ctx, tx); err != nil {
-			return err
-		}
+	err := s.db.InReadOnlySnapshot(ctx, func(ctx context.Context, tx *db.Tx) error {
 		var err error
-		out, err = ReadTx(ctx, tx, team)
+		out, err = readSnapshotTx(ctx, tx, team)
 		if err != nil {
 			return err
 		}
 		if _, ok := currentMember(out, account); !ok || out.Deleted {
 			return ErrForbidden
 		}
-		return SSOGuardTx(ctx, tx, team, account)
+		return nil
 	})
+	if err != nil || !out.SSORequired {
+		return out, err
+	}
+	// The SSO check records a bypass when it allows one, so it writes in its own transaction.
+	err = s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error { return SSOGuardTx(ctx, tx, team, account) })
 	return out, err
 }
 func (s *Service) List(ctx context.Context, account string) ([]Team, error) {
 	out := []Team{}
-	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		out = []Team{}
-		if err := Lock(ctx, tx); err != nil {
-			return err
-		}
+	err := s.db.InReadOnlySnapshot(ctx, func(ctx context.Context, tx *db.Tx) error {
 		rows, err := tx.Query(ctx, `SELECT t.team_id FROM teams t JOIN team_members m USING(team_id) WHERE m.account_id=$1 AND m.active AND t.deleted_at IS NULL ORDER BY t.team_id LIMIT 129`, account)
 		if err != nil {
 			return err
@@ -369,7 +381,7 @@ func (s *Service) List(ctx context.Context, account string) ([]Team, error) {
 			return ErrLimit
 		}
 		for _, id := range ids {
-			t, err := ReadTx(ctx, tx, id)
+			t, err := readSnapshotTx(ctx, tx, id)
 			if err != nil {
 				return err
 			}
