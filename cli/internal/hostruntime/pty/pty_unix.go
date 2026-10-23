@@ -16,6 +16,7 @@ import (
 	"time"
 
 	creackpty "github.com/creack/pty"
+	"golang.org/x/sys/unix"
 )
 
 var (
@@ -154,7 +155,19 @@ func (p *Process) Resize(dimensions Dimensions) error {
 	if !validDimensions(dimensions) {
 		return ErrInvalidDimensions
 	}
-	return creackpty.Setsize(p.file, &creackpty.Winsize{Cols: dimensions.Columns, Rows: dimensions.Rows})
+	// The ioctl runs inside the file's own reference (Control), so a concurrent CloseIO cannot close the
+	// descriptor under it; File.Fd would read it unsynchronized and also switch the file to blocking.
+	raw, err := p.file.SyscallConn()
+	if err != nil {
+		return err
+	}
+	var ioctlErr error
+	if err := raw.Control(func(fd uintptr) {
+		ioctlErr = unix.IoctlSetWinsize(int(fd), unix.TIOCSWINSZ, &unix.Winsize{Col: dimensions.Columns, Row: dimensions.Rows})
+	}); err != nil {
+		return err
+	}
+	return ioctlErr
 }
 func (p *Process) Signal(signal Signal) error {
 	native, ok := nativeSignal(signal)
