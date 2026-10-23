@@ -219,6 +219,8 @@ const phrases: Record<string, string> = {
   "team.config_default_adopted": "adopted the team's config default",
   "team.config_default_unadopted": "stopped using the team's config default",
   "team.config_default_deleted": "removed the team's config default",
+  "machine.access_started": "opened access to",
+  "machine.access_denied": "was refused access to",
   "team.sso_required": "changed whether the team requires SSO",
   "team.jit_provisioned": "joined the team through SSO",
   "team.activity_exported": "exported the audit log",

@@ -189,7 +189,9 @@ export function ActivityPage({ machine: tabMachine }: { machine?: Machine }) {
                       <p className="min-w-0 flex-1 truncate">
                         <span className="font-medium">{actor}</span>
                         {viaToken(event) && <span className="text-muted-foreground"> with an API token</span>}{" "}
-                        {event.result === "denied" ? `was refused: ${describe(event)}` : describe(event)}
+                        {event.result === "denied" && !describe(event).startsWith("was refused")
+                          ? `was refused: ${describe(event)}`
+                          : describe(event)}
                         {event.target?.name && (
                           <>
                             {" "}
