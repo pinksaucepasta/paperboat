@@ -2353,6 +2353,29 @@ and handover) comes first, right after the red server tests. Per-instance state,
   diagnostic upload storage location, any server path that must push to a connector stream synchronously (it must
   reach the holding instance); release artifacts served from each instance's local directory (deploys must be identical).
 
+#### Inspector: a fresh machine's first preview can miss its first requests (Lane I, open, 2026-10-24)
+
+Seen 2 times in about 40 runs of check-preview-inspector.js (aaf3f121 on 2026-10-23, round 21 dev-97238006): on the
+first preview of a just-paired machine, the first two requests sent after capture-on never appeared in the list for
+20 s; requests sent about 40 s later were captured. Not reproduced since in 15 deliberate first-preview runs on
+freshly paired pbvm2 containers (round 21) or in 23 earlier fresh-preview runs.
+
+Ruled out, with evidence:
+- Capture-policy timing in the daemon: SetPolicy is synchronous in the one shared store, and
+  TestInspectorPublicCaptureAndReplay sends a request the moment the policy PUT is answered on a carrier that
+  already served traffic. It is captured.
+- Grant generation drift: all inspector credentials for the failing and the passing previews carry generation 1,
+  one grant each (read-only query of inspector_credentials).
+- Edge stream reuse: the edge opens one stream per request (DataCarrierPreviewTransport.RoundTrip), and the
+  capture decision is made per stream.
+- List cursor: a real bug was found and fixed in 1fbfd9f2 (a request that finished after a later one was skipped),
+  but that skips one record, not all of them.
+
+Still open: the edge answering the first requests before the new preview's route serves them (a no-cors fetch
+resolves on an edge error too), or the carrier's run restarting (its exit Revokes the policy and captures). The
+check now reports unsent requests, stops when nothing arrives, and leaves capture on. ~/lanei/loop.sh logs the
+origin's hits and the daemon's own list (pb preview inspect), so the next occurrence names the side.
+
 ## 4. Handoff notes
 
 All open items from the Phase B handoff (2026-10-14) are filed in S0 (smoke suite), F4
