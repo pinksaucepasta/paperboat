@@ -29,6 +29,8 @@ type terminalOutputStream struct {
 	// bounds how often a busy stream looks again.
 	participants          string
 	participantsCheckedAt time.Time
+	// idleWait is how long the next wait for output lasts before the stream checks the session again.
+	idleWait time.Duration
 }
 
 // participantsInterval bounds how soon a viewer learns that someone joined, left or changed role.
@@ -75,7 +77,14 @@ func participantSignature(participants []session.Participant) string {
 	return "[" + strings.Join(entries, "\x01") + "]"
 }
 
-const terminalExitObservationInterval = 100 * time.Millisecond
+// An idle stream looks for the session's exit after terminalExitObservationInterval, then at doubling
+// intervals up to terminalIdleObservationMaximum until output arrives again: polling every 100 ms with two
+// snapshots made 1,000 idle viewers cost 20,000 snapshots a second. A shell almost always writes output
+// just before it exits, which resets the wait, so an exit is still noticed within ~100 ms.
+const (
+	terminalExitObservationInterval = 100 * time.Millisecond
+	terminalIdleObservationMaximum  = 2 * time.Second
+)
 
 func (d *Dispatcher) OpenStream(ctx context.Context, authorization Authorization, capability string, payload json.RawMessage, outcome operation.Outcome, replay bool) (OutputStream, bool, error) {
 	if capability == "config.compare.v1" && outcome.ErrorCode == "" {

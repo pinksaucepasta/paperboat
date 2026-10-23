@@ -449,11 +449,14 @@ func (s *terminalOutputStream) Next(ctx context.Context) (protocol.BinaryFrame, 
 			}
 		}
 	}
+	if _, err := s.snapshot(); err != nil {
+		return protocol.BinaryFrame{}, ErrStreamClosed
+	}
 	for {
-		if _, err := s.snapshot(); err != nil {
-			return protocol.BinaryFrame{}, ErrStreamClosed
+		if s.idleWait == 0 {
+			s.idleWait = terminalExitObservationInterval
 		}
-		waitCtx, cancel := context.WithTimeout(ctx, terminalExitObservationInterval)
+		waitCtx, cancel := context.WithTimeout(ctx, s.idleWait)
 		event, err := s.manager.WaitNext(waitCtx, s.sessionID, s.attachmentID)
 		cancel()
 		if err == nil {
@@ -461,6 +464,7 @@ func (s *terminalOutputStream) Next(ctx context.Context) (protocol.BinaryFrame, 
 				event.Release()
 				return protocol.BinaryFrame{}, ErrStreamClosed
 			}
+			s.idleWait = terminalExitObservationInterval
 			return protocol.BinaryFrame{Channel: event.Channel, StartSequence: event.StartSequence, Data: event.Data, Release: event.Release}, nil
 		}
 		if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
@@ -469,6 +473,7 @@ func (s *terminalOutputStream) Next(ctx context.Context) (protocol.BinaryFrame, 
 				return protocol.BinaryFrame{}, ErrStreamClosed
 			}
 			if snapshot.State != session.Exited && snapshot.State != session.Closed {
+				s.idleWait = min(2*s.idleWait, terminalIdleObservationMaximum)
 				continue
 			}
 			payload, marshalErr := json.Marshal(struct {
