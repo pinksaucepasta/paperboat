@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
-"""F3-05: the 20-session limit gives a clear message, and closed sessions don't count.
+"""F3-05: native terminals have no plan limit and closed sessions never count.
 
-Usage: session_limit.py TARGET. Creates smoke-limit-* sessions with `pb new`, then removes them all.
+Opens more terminals than the old 20-session limit, closes some, opens more in their place, and
+fails on any limit refusal or 409 on the way (Lane W, 2026-10-23: only the machine's protection
+ceiling of 256 remains, covered by TestRouterAttachesToEverySessionAtTheCeiling).
+Usage: session_limit.py TARGET. Creates smoke-limit-* sessions, then removes them all.
 """
 import argparse
 import json
@@ -16,7 +19,8 @@ from terminal_lifecycle import Terminal
 from session_cleanup import cleanup
 
 PB = Path.home() / '.local/bin/pb'
-LIMIT = 20
+OPEN = 25  # more than the removed 20-session limit
+CLOSE = 5
 
 
 def new(name, target):
@@ -55,47 +59,40 @@ def names(target):
     return {s['name']: s for s in json.loads(out)['sessions']}
 
 
+def refused(text):
+    return 'session limit' in text or 'ceiling' in text or '409' in text or 'resource state changed' in text.lower()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('target')
     args = parser.parse_args()
     prefix = 'smoke-limit-' + uuid.uuid4().hex[:6] + '-'
     created = []
-    message = ''
     failure = None
-    slot_delay = None
+    timings = []
     try:
-        existing = sum(1 for s in names(args.target).values() if s['state'] not in ('closed', 'closing'))
-        for index in range(LIMIT + 2 - existing):
-            name = prefix + str(index)
+        for index in range(OPEN):
+            started = time.monotonic()
+            code, text = new(prefix + str(index), args.target)
+            timings.append(round(time.monotonic() - started, 1))
+            if code:
+                kind = 'refused' if refused(text) else 'failed'
+                raise RuntimeError('terminal %d of %d %s: %s; diagnostics: %s' % (index + 1, OPEN, kind, text[-200:], ' | '.join(diagnostics_tail())))
+            created.append(prefix + str(index))
+        live = [n for n, s in names(args.target).items() if n.startswith(prefix) and s['state'] not in ('closed', 'closing')]
+        if len(live) != OPEN:
+            raise RuntimeError('%d of %d created terminals are listed as live' % (len(live), OPEN))
+        # Closed sessions never count: close some and open the same number again at once.
+        for name in created[:CLOSE]:
+            cleanup(str(PB), args.target, name)
+        del created[:CLOSE]
+        for index in range(CLOSE):
+            name = prefix + 'again-' + str(index)
             code, text = new(name, args.target)
             if code:
-                message = text
-                break
+                raise RuntimeError('terminal after closing %d was %s: %s' % (CLOSE, 'refused' if refused(text) else 'not opened', text[-200:]))
             created.append(name)
-        total = existing + len(created)
-        # The machine's default terminal session counts against the same cap but is not a record we create.
-        if total not in (LIMIT - 1, LIMIT):
-            raise RuntimeError('limit hit at %d live sessions, expected %d (or %d plus the default session); message: %s; diagnostics: %s' % (total, LIMIT, LIMIT - 1, message[-200:], ' | '.join(diagnostics_tail())))
-        if 'terminal session limit' not in message or 'pb session close' not in message or 'Traceback' in message:
-            raise RuntimeError('the over-limit attempt gave no clear limit message: ' + message[-200:])
-        # A closed session no longer counts: one more can be created after closing one.
-        cleanup(str(PB), args.target, created.pop())
-        released = time.monotonic()
-        attempts = []
-        while True:
-            started = time.monotonic()
-            code, text = new(prefix + 'again', args.target)
-            attempts.append(round(time.monotonic() - started, 1))
-            # The deadline is for the slot to free, not for one slow attach: retry until 60 s have passed.
-            if not code or time.monotonic() - released > 60:
-                break
-            time.sleep(2)
-        if code:
-            raise RuntimeError('closed session still counted against the limit after %d s (attempt seconds %s): %s' % (
-                time.monotonic() - released, attempts, text[-200:]))
-        slot_delay = round(time.monotonic() - released, 1)
-        created.append(prefix + 'again')
     except Exception as error:
         failure = error
     finally:
@@ -108,8 +105,8 @@ def main():
     if failure is not None:
         print(json.dumps({'check': 'session-limit', 'status': 'FAIL', 'error': str(failure)}), flush=True)
         raise SystemExit(1)
-    print(json.dumps({'check': 'session-limit', 'target': args.target, 'status': 'PASS', 'limit': LIMIT,
-                      'clear_message': True, 'closed_not_counted': True, 'slot_free_after_seconds': slot_delay}), flush=True)
+    print(json.dumps({'check': 'session-limit', 'target': args.target, 'status': 'PASS', 'opened': OPEN, 'closed_not_counted': True,
+                      'reopened_after_close': CLOSE, 'max_open_seconds': max(timings)}), flush=True)
 
 
 if __name__ == '__main__':
