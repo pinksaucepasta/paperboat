@@ -150,7 +150,8 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 		if remote, ok := err.(*localapi.RemoteError); ok && localapi.Refusal(remote.Code) {
 			return fail(255, remote.Code, false, false, err)
 		}
-		return fail(255, "transport_unavailable", false, false, err)
+		// The connection never opened, so nothing was started on the machine.
+		return fail(255, "transport_unavailable", false, false, &execNotStartedError{err})
 	}
 	connectionRef := newExecConnectionRef(connection)
 	workerCtx, stopWorkers := context.WithCancel(context.WithoutCancel(c.Context))
@@ -442,5 +443,15 @@ func safeExecError(err error) string {
 			return "The remote execution result is unavailable. Check the machine before retrying."
 		}
 	}
+	var notStarted *execNotStartedError
+	if errors.As(err, &notStarted) {
+		return "Paperboat could not open a connection to the machine, so the command did not run. Retry; run `pb doctor` if this continues."
+	}
 	return "Remote execution did not finish. Check the machine connection and retry; the remote outcome may be unknown."
 }
+
+// execNotStartedError is an exec whose connection to the machine never opened: the command did not run.
+type execNotStartedError struct{ cause error }
+
+func (e *execNotStartedError) Error() string { return "exec connection did not open: " + e.cause.Error() }
+func (e *execNotStartedError) Unwrap() error { return e.cause }
