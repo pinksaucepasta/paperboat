@@ -158,7 +158,7 @@ func TestReadUsesCurrentDatabaseRoleAndAuditsAvailability(t *testing.T) {
 		q    string
 		args []any
 	}{
-		{`INSERT INTO tunnels(id,account_id,name,desired_state,access_mode,generation,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id,summary_code) VALUES($1,$2,$3,'active','private',7,$4,'https://'||$4||'.tunnels.test','host-test',$2,'degraded'),($5,$2,$6,'active','private',3,$7,'https://'||$7||'.tunnels.test','host-other',$2,'ready')`, []any{tunnelID, accountID, "operator-" + suffix, endpointID, otherTunnelID, "other-" + suffix, otherEndpointID}},
+		{`INSERT INTO tunnels(id,account_id,name,desired_state,access_mode,generation,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id,summary_code) VALUES($1,$2,$3,'active','private',7,$4,$5,'host-test',$2,'degraded'),($6,$2,$7,'active','private',3,$8,$9,'host-other',$2,'ready')`, []any{tunnelID, accountID, "operator-" + suffix, endpointID, "https://operator-" + suffix + ".tunnels.test", otherTunnelID, "other-" + suffix, otherEndpointID, "https://other-" + suffix + ".tunnels.test"}},
 		{`INSERT INTO tunnel_connectors(id,tunnel_id,host_id,credential_reference,credential_thumbprint,protocol_version,last_heartbeat_at) VALUES($1,$2,'host-test',$3,$4,'1.0',now())`, []any{connectorID, tunnelID, "secret-ref-" + suffix, "thumbprint-" + suffix}},
 		{`INSERT INTO tunnel_connector_sessions(id,connector_id,process_generation,protocol_version,state,lease_deadline,last_heartbeat_at,ready_at,retained_until) VALUES($1,$2,1,'1.0','ready',now()+interval '5 minutes',now(),now(),now()+interval '1 hour')`, []any{"session_operator_" + suffix, connectorID}},
 	} {
