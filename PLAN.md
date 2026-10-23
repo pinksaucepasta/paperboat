@@ -1359,6 +1359,10 @@ lookup a trigger or access function makes has an index.
 | POST /v1/machines/{id}/disconnect (prod) | 503 after 7.7 s, serialization pivot | index-page predicate locks only (migration 123) | 90ca7e63 |
 | POST /v1/machines/pairings (prod) | 500 after 9.3 s, serialization pivot vs daemons' peer config | 1–5/20 → 0/20 under concurrent load (migration 131) | f3ec3bc2 |
 | GET ssh-target / ssh-host-keys (prod, ~48/s from old daemons) | serializable + FOR UPDATE, access functions on every call | read-only snapshot, row first, own-machine branch | 1d81dcf5, 28f943d4 |
+| Serializable transactions outside InTx (peer config etc.) | seq scans: table-wide predicate locks | db.BeginSerializable: index scans | a32f4476 |
+| GET /v1/machine-services (prod 1,261 ms → 2 s under load) | authority function twice per port, for every candidate | once per port; own machines' automatic ports skip it | bed2d87d, 759160bc |
+| Machine topic fan-out (prod ~5.7 → ~107 updates/s) | presence flips and service snapshots woke every daemon's inventory | presence ignored; snapshots move `machine_services`; hosts told only topics they wait on; daemon refresh ≤1/30 s, `pb wait` asks its own daemon | 7db75a9d, e50f8372, 960aa6a9, cfab5697 |
+| Production, whole (.12/.15 → .16) | load ~21, postgres 340–356% of 4 cores, peer config 4.3 s with 245 errors / 3 min | load 0.8, postgres 63%, peer config 153 ms with 0 errors (02:53Z; part may be a quieter device wave) | — |
 
 Open, in order: the team view embeds every member, machine and grant (`/v1/teams` 6.4 MB, ~0.7 s; paginated team
 endpoints, contract with Lane A/C); keyset cursors with server-side search/filter/sort and cheap totals for every
@@ -2907,3 +2911,4 @@ Lane B: relay rollout (oracle, anvit) needed for the relay numbers to apply; Lan
 2026-10-24 | Lane O F13-03 | round 6: CLI ping/exec/ssh/send + console cap message PASS; owner/admin email blocked: USER ITEM Resend API key (prod has none, so no transactional mail at all), Lane B sets PAPERBOAT_RESEND_API_KEY. Open-session edge metering: design sent to Lane B. Device rerun paused (victus offline).
 2026-10-23 | Lane I F17 | d3975e62 794c58b1 | — | Server: attachments survive a brief authority outage (live .16). Inspector: replay records carry replay_of, console marks replays from it. F17-01/04/05/06 wait for victus (pbvm2) to rerun check-preview-inspector.js on dev-199a454f.
 2026-10-23 | Lane M tunnel route churn | f81b39cd: a config edit no longer restarts the connector session (409 stale on the candidate config re-generated the route on every edge) | Lane B: deploy; decide retiring active assignments on lease expiry, not 15 s heartbeat (storm cut 00:58Z). Device reruns wait for victus.
+2026-10-23 | Lane Q perf | Prod .16: load 21 → 0.8, postgres ~350% → 63%, peer config 4.3 s/245 errors → 153 ms/0. Commits a32f4476 bed2d87d 7db75a9d e50f8372 759160bc f64b6af5 (server), 960aa6a9 cfab5697 (cli, in build dev-199a454f). Lane B: deploy from f64b6af5. Open: snapshot lifetime vs machine-service lease bound (decision needed).
