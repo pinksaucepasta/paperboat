@@ -83,7 +83,7 @@ func TestHostIsToldAboutAChangeWithoutPollingOnPostgres(t *testing.T) {
 		}
 		if _, ok := known[TopicInventory]; !ok {
 			var inventory int64
-			if err := database.SQL().QueryRowContext(ctx, `SELECT coalesce((SELECT generation FROM paperboat.machine_topic_generations WHERE machine_id=$1 AND topic='inventory'),0)`, machineID).Scan(&inventory); err != nil {
+			if err := database.SQL().QueryRowContext(ctx, `SELECT (coalesce((SELECT generation FROM paperboat.machine_topic_generations WHERE machine_id=$1 AND topic='inventory'),0)+coalesce((SELECT generation FROM paperboat.account_topic_generations WHERE account_id=(SELECT user_id FROM paperboat.user_machines WHERE id=$1) AND topic='inventory'),0))`, machineID).Scan(&inventory); err != nil {
 				t.Error(err)
 			}
 			seen[TopicInventory] = inventory
@@ -114,7 +114,7 @@ func TestHostIsToldAboutAChangeWithoutPollingOnPostgres(t *testing.T) {
 	}
 	// A topic the host does not wait on never wakes it.
 	var inventoryNow int64
-	if err := database.SQL().QueryRowContext(ctx, `SELECT coalesce((SELECT generation FROM paperboat.machine_topic_generations WHERE machine_id=$1 AND topic='inventory'),0)`, other).Scan(&inventoryNow); err != nil {
+	if err := database.SQL().QueryRowContext(ctx, `SELECT (coalesce((SELECT generation FROM paperboat.machine_topic_generations WHERE machine_id=$1 AND topic='inventory'),0)+coalesce((SELECT generation FROM paperboat.account_topic_generations WHERE account_id=(SELECT user_id FROM paperboat.user_machines WHERE id=$1) AND topic='inventory'),0))`, other).Scan(&inventoryNow); err != nil {
 		t.Fatal(err)
 	}
 	only := make(chan result, 1)
@@ -202,7 +202,7 @@ func TestWritesThatChangeWhatAHostCachesPublishTheirTopicsOnPostgres(t *testing.
 	generation := func(machine, topic string) int64 {
 		t.Helper()
 		var value int64
-		err := database.SQL().QueryRowContext(ctx, `SELECT coalesce((SELECT generation FROM paperboat.machine_topic_generations WHERE machine_id=$1 AND topic=$2),0)`, machine, topic).Scan(&value)
+		err := database.SQL().QueryRowContext(ctx, `SELECT (coalesce((SELECT generation FROM paperboat.machine_topic_generations WHERE machine_id=$1 AND topic=$2::text),0)+coalesce((SELECT generation FROM paperboat.account_topic_generations WHERE account_id=(SELECT user_id FROM paperboat.user_machines WHERE id=$1) AND topic=$2::text),0))`, machine, topic).Scan(&value)
 		if err != nil {
 			t.Fatal(err)
 		}

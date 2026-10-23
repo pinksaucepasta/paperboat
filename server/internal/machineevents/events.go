@@ -175,19 +175,28 @@ func (h *Hub) Wait(ctx context.Context, machineID string, known map[string]int64
 			return nil, ErrInvalid
 		}
 	}
+	// Audience-wide topics are published per account (migration 149): the machine's own row plus its
+	// account's row is its generation, and either notification wakes it.
+	var account string
+	if err := h.pool.QueryRow(ctx, `SELECT user_id FROM paperboat.user_machines WHERE id=$1`, machineID).Scan(&account); err != nil {
+		return nil, err
+	}
 	wake, unsubscribe := h.subscribe(machineID)
 	defer unsubscribe()
+	accountWake, unsubscribeAccount := h.subscribe(accountKey(account))
+	defer unsubscribeAccount()
 	deadline := time.NewTimer(maxWait)
 	defer deadline.Stop()
 	recheck := time.NewTicker(recheckInterval)
 	defer recheck.Stop()
 	for {
-		changed, err := h.changed(ctx, machineID, known)
+		changed, err := h.changed(ctx, machineID, account, known)
 		if err != nil || len(changed) > 0 {
 			return changed, err
 		}
 		select {
 		case <-wake:
+		case <-accountWake:
 		case <-recheck.C:
 		case <-deadline.C:
 			return map[string]int64{}, nil
@@ -197,8 +206,13 @@ func (h *Hub) Wait(ctx context.Context, machineID string, known map[string]int64
 	}
 }
 
-func (h *Hub) changed(ctx context.Context, machineID string, known map[string]int64) (map[string]int64, error) {
-	rows, err := h.pool.Query(ctx, `SELECT topic,generation FROM machine_topic_generations WHERE machine_id=$1`, machineID)
+// accountKey is the subscription key, and the notification payload, of an account's topics.
+func accountKey(account string) string { return "account:" + account }
+
+func (h *Hub) changed(ctx context.Context, machineID, account string, known map[string]int64) (map[string]int64, error) {
+	rows, err := h.pool.Query(ctx, `SELECT topic,sum(generation)::bigint FROM (
+ SELECT topic,generation FROM paperboat.machine_topic_generations WHERE machine_id=$1
+ UNION ALL SELECT topic,generation FROM paperboat.account_topic_generations WHERE account_id=$2) g GROUP BY topic`, machineID, account)
 	if err != nil {
 		return nil, err
 	}

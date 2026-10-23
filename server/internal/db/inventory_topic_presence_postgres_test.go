@@ -46,7 +46,7 @@ VALUES($1,$2,$1,$3,'linux','amd64','/w','offline','occupied',false)`, id, user, 
 	generation := func() int64 {
 		t.Helper()
 		var g int64
-		if err := store.SQL().QueryRowContext(ctx, `SELECT coalesce(max(generation),0) FROM paperboat.machine_topic_generations WHERE machine_id=$1 AND topic='inventory'`, peer).Scan(&g); err != nil {
+		if err := store.SQL().QueryRowContext(ctx, `SELECT (coalesce((SELECT generation FROM paperboat.machine_topic_generations WHERE machine_id=$1 AND topic='inventory'),0)+coalesce((SELECT generation FROM paperboat.account_topic_generations WHERE account_id=(SELECT user_id FROM paperboat.user_machines WHERE id=$1) AND topic='inventory'),0))`, peer).Scan(&g); err != nil {
 			t.Fatal(err)
 		}
 		return g
@@ -106,7 +106,7 @@ VALUES($1,$2,$1,$3,'linux','amd64','/w','online','occupied',true)`, id, user, fm
 	generation := func(topic string) int64 {
 		t.Helper()
 		var g int64
-		if err := store.SQL().QueryRowContext(ctx, `SELECT coalesce(max(generation),0) FROM paperboat.machine_topic_generations WHERE machine_id=$1 AND topic=$2`, peer, topic).Scan(&g); err != nil {
+		if err := store.SQL().QueryRowContext(ctx, `SELECT (coalesce((SELECT generation FROM paperboat.machine_topic_generations WHERE machine_id=$1 AND topic=$2::text),0)+coalesce((SELECT generation FROM paperboat.account_topic_generations WHERE account_id=(SELECT user_id FROM paperboat.user_machines WHERE id=$1) AND topic=$2::text),0))`, peer, topic).Scan(&g); err != nil {
 			t.Fatal(err)
 		}
 		return g

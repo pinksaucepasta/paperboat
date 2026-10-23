@@ -349,7 +349,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	refreshRuntimeCarrier()
 	hostPeerNetwork := func() (generation int64) {
 		t.Helper()
-		if err := store.SQL().QueryRowContext(ctx, `SELECT coalesce((SELECT generation FROM paperboat.machine_topic_generations WHERE machine_id=$1 AND topic='peer_network'),0)`, machineID).Scan(&generation); err != nil {
+		if err := store.SQL().QueryRowContext(ctx, `SELECT (coalesce((SELECT generation FROM paperboat.machine_topic_generations WHERE machine_id=$1 AND topic='peer_network'),0)+coalesce((SELECT generation FROM paperboat.account_topic_generations WHERE account_id=(SELECT user_id FROM paperboat.user_machines WHERE id=$1) AND topic='peer_network'),0))`, machineID).Scan(&generation); err != nil {
 			t.Fatal(err)
 		}
 		return generation
@@ -477,7 +477,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	}
 	peerNetworkGenerations := func() (host, source int64) {
 		t.Helper()
-		if err := store.SQL().QueryRowContext(ctx, `SELECT coalesce((SELECT generation FROM paperboat.machine_topic_generations WHERE machine_id=$1 AND topic='peer_network'),0),coalesce((SELECT generation FROM paperboat.machine_topic_generations WHERE machine_id=$2 AND topic='peer_network'),0)`, machineID, "network_shared_source_"+suffix).Scan(&host, &source); err != nil {
+		if err := store.SQL().QueryRowContext(ctx, `SELECT (coalesce((SELECT generation FROM paperboat.machine_topic_generations WHERE machine_id=$1 AND topic='peer_network'),0)+coalesce((SELECT generation FROM paperboat.account_topic_generations WHERE account_id=(SELECT user_id FROM paperboat.user_machines WHERE id=$1) AND topic='peer_network'),0)),(coalesce((SELECT generation FROM paperboat.machine_topic_generations WHERE machine_id=$2 AND topic='peer_network'),0)+coalesce((SELECT generation FROM paperboat.account_topic_generations WHERE account_id=(SELECT user_id FROM paperboat.user_machines WHERE id=$2) AND topic='peer_network'),0))`, machineID, "network_shared_source_"+suffix).Scan(&host, &source); err != nil {
 			t.Fatal(err)
 		}
 		return host, source
