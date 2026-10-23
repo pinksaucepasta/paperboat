@@ -2809,7 +2809,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Start GitHub OAuth */
+        /**
+         * Start GitHub OAuth
+         * @description Optional return_to: a console path (starts with /, not //) added to the result page redirect.
+         */
         post: operations["post_v1_github_oauth_start"];
         delete?: never;
         options?: never;
@@ -3050,6 +3053,26 @@ export interface paths {
         put?: never;
         /** Retry machine enrollment with a new generation */
         post: operations["post_v1_user_machine_enrollments_enrollment_id_retry"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/machines/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Count the selected workspace's machines (dashboard totals)
+         * @description Counts every machine of the workspace that GET /v1/machines would list, not one page. total and by_platform count machines in use; revoked and disconnected machines are counted only in by_state.revoked.
+         */
+        get: operations["get_v1_user_machines_summary"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -4942,50 +4965,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/billing/workspaces/personal/invoices": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List personal workspace invoices
-         * @description Owner or billing admin (billing.manage). Stripe is the only store of this data.
-         */
-        get: operations["workspace_personal_invoices"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/billing/workspaces/personal/details": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Read personal billing details
-         * @description Owner or billing admin (billing.manage). Stripe is the only store of this data.
-         */
-        get: operations["workspace_personal_billing_details"];
-        /**
-         * Update personal billing details
-         * @description Owner or billing admin (billing.manage). Stripe is the only store of this data.
-         */
-        put: operations["workspace_personal_billing_details_update"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/billing/workspaces/teams/{team_id}": {
         parameters: {
             query?: never;
@@ -5048,74 +5027,6 @@ export interface paths {
         put?: never;
         /** Manage team workspace portal */
         post: operations["workspace_team_portal"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/billing/workspaces/teams/{team_id}/invoices": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List team workspace invoices
-         * @description Owner or billing admin (billing.manage). Stripe is the only store of this data.
-         */
-        get: operations["workspace_team_invoices"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/billing/workspaces/teams/{team_id}/details": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Read team billing details
-         * @description Owner or billing admin (billing.manage). Stripe is the only store of this data.
-         */
-        get: operations["workspace_team_billing_details"];
-        /**
-         * Update team billing details
-         * @description Owner or billing admin (billing.manage). Stripe is the only store of this data.
-         */
-        put: operations["workspace_team_billing_details_update"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/billing/workspaces/teams/{team_id}/pay-by-invoice": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Read how the team pays
-         * @description Owner or billing admin (billing.manage). Stripe is the only store of this data.
-         */
-        get: operations["workspace_team_pay_by_invoice"];
-        /**
-         * Turn pay by invoice on or off
-         * @description Owner or billing admin (billing.manage). Stripe is the only store of this data.
-         */
-        put: operations["workspace_team_pay_by_invoice_update"];
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -6481,6 +6392,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/runtime/endpoint-tunnels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List the machine's tunnels served on the endpoint engine
+         * @description Returns the active config snapshot of each of the machine's tunnels that ride its runtime carriers (capability tunnel_endpoints). Requires renewable machine proof.
+         */
+        post: operations["post_v1_runtime_endpoint_tunnels"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/runtime/carrier-attachment": {
         parameters: {
             query?: never;
@@ -6515,6 +6446,26 @@ export interface paths {
          * @description Generation-fenced runtime carrier authority. Host requests require renewable machine proof. Edge requests require the exact registered edge process identity. Readiness expires after 30 seconds without an observation; admission expires after 60 seconds without renewal.
          */
         post: operations["post_v1_edge_runtime_carrier_admissions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/edge/runtime/endpoint-admissions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Edge pulls the endpoint routes riding on agents' runtime carriers it holds
+         * @description The fast path of the runtime pull: only the endpoint routes (preview routes served on an agent's runtime carrier) for the carriers this edge holds, polled every 500 ms so a new preview is served within a second instead of waiting for the full pull.
+         */
+        post: operations["post_v1_edge_runtime_endpoint_admissions"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6744,24 +6695,6 @@ export interface paths {
         post?: never;
         /** Cancel native GitHub connection */
         delete: operations["delete_github_native_link"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/github/native-links/{link_id}/launch": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Confirm native GitHub connection in its bound browser */
-        get: operations["get_github_native_launch"];
-        put?: never;
-        /** Confirm native GitHub connection in its bound browser */
-        post: operations["post_github_native_launch"];
-        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -7653,6 +7586,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{ws}/tags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the workspace tags
+         * @description The tags of the workspace policy file with their machines (IDs), and who may edit them: {tags: [{name, machines}], can_edit, policy_version}.
+         */
+        get: operations["get_v1_workspace_tags"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/machines/{machine}/tags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set a machine's tags
+         * @description Sets one machine's tags in the workspace policy file as a new version, with the same rights, review (412) and conflict (409) rules as PUT policy.
+         */
+        put: operations["put_v1_workspace_machine_tags"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{ws}/api-tokens": {
         parameters: {
             query?: never;
@@ -7881,6 +7854,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/github/native-links/{link_id}/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Review a CLI's GitHub connection request
+         * @description Read-only and repeatable. 403 github_link_other_account, 410 github_link_expired, 409 github_link_used, 404 github_link_unavailable.
+         */
+        post: operations["post_github_native_link_review"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/github/native-links/{link_id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve a CLI's GitHub connection request
+         * @description One use; binds the OAuth state server-side.
+         */
+        post: operations["post_github_native_link_approve"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/github/native-links/{link_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel a CLI's GitHub connection request
+         * @description Ends the request for the CLI too.
+         */
+        post: operations["post_github_native_link_cancel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/github/connection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Disconnect GitHub
+         * @description Revokes the stored authorization; the grant stays in the user's GitHub settings. 409 github_connection_in_use while config sync uses it.
+         */
+        delete: operations["delete_v1_github_connection"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -7980,6 +8033,11 @@ export interface components {
             state: "attached" | "detached" | "closed" | "unavailable" | "closing" | "failed";
             /** Format: date-time */
             last_active_at?: string | null;
+            is_default?: boolean;
+            /** Format: date-time */
+            created_at?: string;
+            /** Format: date-time */
+            updated_at?: string;
             /**
              * Format: date-time
              * @description Present for confirmed-closed non-default sessions; server metadata expires 30 days after close and host record deletion is queued. Updated hosts clear recent output when the process closes or exits, including during recovery, while preserving the default session identity. Offline or older hosts may retain prior output until updated and reconnected. Reserved default sessions omit this field.
@@ -11791,69 +11849,6 @@ export interface components {
             grants: {
                 [key: string]: string[];
             };
-        };
-        BillingInvoice: {
-            id: string;
-            number: string;
-            /** @description open, paid, void or uncollectible (drafts are not listed). */
-            status: string;
-            currency: string;
-            /** @description Minor currency unit. */
-            total: number;
-            tax: number;
-            amount_due: number;
-            /** Format: date-time */
-            created_at: string;
-            /** Format: date-time */
-            period_start: string;
-            /** Format: date-time */
-            period_end: string;
-            /** Format: date-time */
-            due_date?: string;
-            /**
-             * Format: uri
-             * @description Stripe page to view and pay the invoice.
-             */
-            hosted_url?: string;
-            /**
-             * Format: uri
-             * @description Invoice PDF download.
-             */
-            pdf_url?: string;
-        };
-        BillingInvoicePage: {
-            items: components["schemas"]["BillingInvoice"][];
-            next_cursor?: string;
-        };
-        /** @description Printed on every invoice; email receives invoices and receipts. Stored only on the Stripe customer. */
-        BillingDetails: {
-            email: string;
-            /** @description Company or person name. */
-            name: string;
-            address: {
-                line1: string;
-                line2: string;
-                city: string;
-                state: string;
-                postal_code: string;
-                /** @description ISO 3166-1 alpha-2; required with any address line. */
-                country: string;
-            };
-            tax_id: null | {
-                /** @description Stripe tax ID type, e.g. eu_vat, gb_vat, us_ein. */
-                type: string;
-                value: string;
-                /** @description Read only: Stripe verification status. */
-                verification?: string;
-            };
-        };
-        BillingPayByInvoice: {
-            pay_by_invoice: boolean;
-            days_until_due?: number;
-            /** @description Active yearly Team plan with at least min_seats seats. */
-            eligible: boolean;
-            min_seats: number;
-            default_days_until_due: number;
         };
         /** @description Team SSO and directory sync (PLAN F19), as last read from WorkOS. */
         TeamIdentityStatus: {
@@ -17448,16 +17443,14 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description GitHub connected. */
-            200: {
+            /** @description Redirect to the console's /github/done?result=connected&login=… or ?result=error&code=github_scope_denied|github_identity_conflict|github_oauth_failed|github_link_expired, plus return_to when set. */
+            303: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": components["schemas"]["SuccessResponse"];
-                };
+                content?: never;
             };
-            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
         };
     };
     post_v1_github_oauth_callback: {
@@ -17816,6 +17809,58 @@ export interface operations {
                 content?: never;
             };
             409: components["responses"]["Error"];
+        };
+    };
+    get_v1_user_machines_summary: {
+        parameters: {
+            query?: {
+                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
+                workspace?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Machine counts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: {
+                            /** @description Machines in use (revoked and disconnected excluded). */
+                            total: number;
+                            /** @description Machines in use by state; revoked counts revoked and disconnected machines, which total leaves out. */
+                            by_state: {
+                                online: number;
+                                offline: number;
+                                pending: number;
+                                revoked: number;
+                            } & {
+                                [key: string]: number;
+                            };
+                            /** @description Machines in use by platform. */
+                            by_platform: {
+                                linux: number;
+                                macos: number;
+                                windows: number;
+                            } & {
+                                [key: string]: number;
+                            };
+                        };
+                    };
+                };
+            };
+            /** @description A query parameter other than workspace. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     get_v1_user_machines_overview: {
@@ -21974,95 +22019,6 @@ export interface operations {
             503: components["responses"]["Error"];
         };
     };
-    workspace_personal_invoices: {
-        parameters: {
-            query?: {
-                cursor?: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Authorized result. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        data: components["schemas"]["BillingInvoicePage"];
-                    };
-                };
-            };
-            400: components["responses"]["Error"];
-            401: components["responses"]["Error"];
-            403: components["responses"]["Error"];
-            409: components["responses"]["Error"];
-            503: components["responses"]["Error"];
-        };
-    };
-    workspace_personal_billing_details: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Authorized result. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        data: components["schemas"]["BillingDetails"];
-                    };
-                };
-            };
-            400: components["responses"]["Error"];
-            401: components["responses"]["Error"];
-            403: components["responses"]["Error"];
-            409: components["responses"]["Error"];
-            503: components["responses"]["Error"];
-        };
-    };
-    workspace_personal_billing_details_update: {
-        parameters: {
-            query?: never;
-            header: {
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["BillingDetails"];
-            };
-        };
-        responses: {
-            /** @description Authorized result. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        data: components["schemas"]["BillingDetails"];
-                    };
-                };
-            };
-            400: components["responses"]["Error"];
-            401: components["responses"]["Error"];
-            403: components["responses"]["Error"];
-            409: components["responses"]["Error"];
-            503: components["responses"]["Error"];
-        };
-    };
     workspace_team_overview: {
         parameters: {
             query?: never;
@@ -22201,167 +22157,6 @@ export interface operations {
                             /** Format: uri */
                             url: string;
                         };
-                    };
-                };
-            };
-            400: components["responses"]["Error"];
-            401: components["responses"]["Error"];
-            403: components["responses"]["Error"];
-            409: components["responses"]["Error"];
-            503: components["responses"]["Error"];
-        };
-    };
-    workspace_team_invoices: {
-        parameters: {
-            query?: {
-                cursor?: string;
-            };
-            header?: never;
-            path: {
-                team_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Authorized result. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        data: components["schemas"]["BillingInvoicePage"];
-                    };
-                };
-            };
-            400: components["responses"]["Error"];
-            401: components["responses"]["Error"];
-            403: components["responses"]["Error"];
-            409: components["responses"]["Error"];
-            503: components["responses"]["Error"];
-        };
-    };
-    workspace_team_billing_details: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                team_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Authorized result. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        data: components["schemas"]["BillingDetails"];
-                    };
-                };
-            };
-            400: components["responses"]["Error"];
-            401: components["responses"]["Error"];
-            403: components["responses"]["Error"];
-            409: components["responses"]["Error"];
-            503: components["responses"]["Error"];
-        };
-    };
-    workspace_team_billing_details_update: {
-        parameters: {
-            query?: never;
-            header: {
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-            };
-            path: {
-                team_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["BillingDetails"];
-            };
-        };
-        responses: {
-            /** @description Authorized result. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        data: components["schemas"]["BillingDetails"];
-                    };
-                };
-            };
-            400: components["responses"]["Error"];
-            401: components["responses"]["Error"];
-            403: components["responses"]["Error"];
-            409: components["responses"]["Error"];
-            503: components["responses"]["Error"];
-        };
-    };
-    workspace_team_pay_by_invoice: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                team_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Authorized result. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        data: components["schemas"]["BillingPayByInvoice"];
-                    };
-                };
-            };
-            400: components["responses"]["Error"];
-            401: components["responses"]["Error"];
-            403: components["responses"]["Error"];
-            409: components["responses"]["Error"];
-            503: components["responses"]["Error"];
-        };
-    };
-    workspace_team_pay_by_invoice_update: {
-        parameters: {
-            query?: never;
-            header: {
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-            };
-            path: {
-                team_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    pay_by_invoice: boolean;
-                };
-            };
-        };
-        responses: {
-            /** @description Authorized result. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        data: components["schemas"]["BillingPayByInvoice"];
                     };
                 };
             };
@@ -25959,6 +25754,39 @@ export interface operations {
             };
         };
     };
+    post_v1_runtime_endpoint_tunnels: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Durable host identity credential used with the signed machine proof. */
+                "X-Paperboat-Machine-Identity": components["parameters"]["MachineIdentity"];
+                /** @description Strict unpadded base64url proof over the exact request body and idempotency key. */
+                "X-Paperboat-Machine-Proof": components["parameters"]["MachineProof"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    operation_id: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Engine tunnels with their active config snapshots. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
     post_v1_runtime_carrier_attachment: {
         parameters: {
             query?: never;
@@ -25997,6 +25825,35 @@ export interface operations {
         };
     };
     post_v1_edge_runtime_carrier_admissions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    edge_node_id: string;
+                    process_epoch: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Current authoritative result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    post_v1_edge_runtime_endpoint_admissions: {
         parameters: {
             query?: never;
             header?: never;
@@ -26459,64 +26316,6 @@ export interface operations {
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
-        };
-    };
-    get_github_native_launch: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                link_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Account confirmation or cancellation */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Continue to configured GitHub authorization endpoint */
-            303: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            400: components["responses"]["Error"];
-            403: components["responses"]["Error"];
-        };
-    };
-    post_github_native_launch: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                link_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Account confirmation or cancellation */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Continue to configured GitHub authorization endpoint */
-            303: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            400: components["responses"]["Error"];
-            403: components["responses"]["Error"];
         };
     };
     post_v1_config_repositories_repository_id_read_access: {
@@ -28457,6 +28256,64 @@ export interface operations {
             503: components["responses"]["Error"];
         };
     };
+    get_v1_workspace_tags: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ws: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description JSON body as documented in shared/policy/README.md. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    put_v1_workspace_machine_tags: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ws: string;
+                machine: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description JSON body as documented in shared/policy/README.md. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            412: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
     get_v1_workspace_api_tokens: {
         parameters: {
             query?: never;
@@ -28879,6 +28736,134 @@ export interface operations {
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
             503: components["responses"]["Error"];
+        };
+    };
+    post_github_native_link_review: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                link_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The token from the console link's fragment. */
+                    token: string;
+                };
+            };
+        };
+        responses: {
+            /** @description account_email, machine_name, requested_at, expires_at. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SuccessResponse"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            410: components["responses"]["Error"];
+        };
+    };
+    post_github_native_link_approve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                link_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The token from the console link's fragment. */
+                    token: string;
+                };
+            };
+        };
+        responses: {
+            /** @description authorization_url to open. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SuccessResponse"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            410: components["responses"]["Error"];
+        };
+    };
+    post_github_native_link_cancel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                link_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The token from the console link's fragment. */
+                    token: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Cancelled. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SuccessResponse"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            410: components["responses"]["Error"];
+        };
+    };
+    delete_v1_github_connection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description GitHub status, connected=false. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SuccessResponse"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
         };
     };
 }

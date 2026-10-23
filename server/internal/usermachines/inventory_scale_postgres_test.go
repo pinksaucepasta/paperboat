@@ -26,7 +26,7 @@ func TestMachineInventoryListsAHundredMachinesWithoutPerRowQueriesOnPostgres(t *
 	}
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,online,installation_generation)
  SELECT 'inv_machine_'||g||'_'||$1,$2,'inv_env_'||g||'_'||$1,'machine-'||g,'linux','amd64','/w',
-  CASE WHEN g%3=0 THEN 'revoked' WHEN g%3=1 THEN 'online' ELSE 'offline' END,
+  CASE WHEN g%3=0 THEN 'pending' WHEN g%3=1 THEN 'online' ELSE 'offline' END,
   CASE WHEN g%3=0 THEN 'released' ELSE 'occupied' END, g%3=1, 1 FROM generate_series(1,100) g`, suffix, owner); err != nil {
 		t.Fatal(err)
 	}

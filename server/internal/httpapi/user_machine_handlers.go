@@ -336,6 +336,33 @@ func machinesList(service *usermachines.Service) http.HandlerFunc {
 	}
 }
 
+// machinesSummary counts the selected workspace's machines (GET /v1/machines/summary): the dashboard's totals,
+// authorized exactly as GET /v1/machines.
+func machinesSummary(service *usermachines.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		p, ok := principalFromContext(r.Context())
+		if !ok {
+			writeError(w, r, http.StatusUnauthorized, "unauthenticated", "Authentication is required.")
+			return
+		}
+		for key := range r.URL.Query() {
+			if key != "workspace" {
+				writeError(w, r, http.StatusBadRequest, "invalid_inventory_query", "The machine summary takes only workspace.")
+				return
+			}
+		}
+		summary, err := service.Summary(personalWorkspaceContext(r.Context()), p.User.ID)
+		if expectedHTTPErrorOnly(err, context.Canceled) {
+			return
+		}
+		if err != nil {
+			writeError(w, r, http.StatusInternalServerError, "internal_error", "Unable to count machines.", err)
+			return
+		}
+		writeJSON(w, http.StatusOK, SuccessResponse{Data: summary})
+	}
+}
+
 func userMachineOverview(service *usermachines.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !requirePersonalWorkspaceTarget(w, r) {

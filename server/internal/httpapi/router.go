@@ -665,8 +665,10 @@ func NewRouter(opts Options) http.Handler {
 			mux.Handle("DELETE /v1/machines/{machine_id}", userMachineAuth("machines:connect", requireCSRF(opts.Auth, userMachineDelete(opts.Machines))))
 			if opts.DeviceAuth != nil {
 				mux.Handle("GET /v1/machines", requireAnyAuth(opts.Auth, opts.DeviceAuth, requireScope("machines:read", requireWorkspaceSelection(opts.Workspaces, machinesList(opts.Machines)))))
+				mux.Handle("GET /v1/machines/summary", requireAnyAuth(opts.Auth, opts.DeviceAuth, requireScope("machines:read", requireWorkspaceSelection(opts.Workspaces, machinesSummary(opts.Machines)))))
 			} else {
 				mux.Handle("GET /v1/machines", requireAuth(opts.Auth, requireWorkspaceSelection(opts.Workspaces, machinesList(opts.Machines))))
+				mux.Handle("GET /v1/machines/summary", requireAuth(opts.Auth, requireWorkspaceSelection(opts.Workspaces, machinesSummary(opts.Machines))))
 			}
 		}
 		if opts.ManagedSSH != nil && opts.RuntimeIdentity != nil {

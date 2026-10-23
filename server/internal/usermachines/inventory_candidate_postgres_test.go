@@ -132,6 +132,23 @@ WHERE p.team_id=$1`, team, member, m("team_all"), admin)
 		}
 		return manage, permissions
 	}
+	// Revoked and disconnected machines are left out of the default list and its total, and counted apart.
+	revoked := map[string]bool{}
+	revokedRows, err := store.SQL().QueryContext(ctx, `SELECT id FROM paperboat.user_machines WHERE id LIKE 'ic_machine_%_'||$1 AND (revoked_at IS NOT NULL OR state IN ('revoked','disconnected'))`, s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for revokedRows.Next() {
+		var id string
+		if err := revokedRows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		revoked[id] = true
+	}
+	revokedRows.Close()
+	if len(revoked) == 0 {
+		t.Fatal("fixture has no revoked machine")
+	}
 	service := New(store, nil, Policy{}, nil)
 	nonEmpty := 0
 	for _, actor := range users {
@@ -143,10 +160,16 @@ WHERE p.team_id=$1`, team, member, m("team_all"), admin)
 					teamID = scope.TeamID
 				}
 			}
-			want := expected(actor, scoped, teamID)
+			allowed := expected(actor, scoped, teamID)
+			var want []string
+			for _, id := range allowed {
+				if !revoked[id] {
+					want = append(want, id)
+				}
+			}
 			items, total, err := service.ListInventory(listCtx, actor, InventoryOptions{Limit: 200})
 			if err != nil {
-				if scope != nil && scope.TeamID != "" && len(want) == 0 {
+				if scope != nil && scope.TeamID != "" && len(allowed) == 0 {
 					continue // not a member: the workspace itself is refused
 				}
 				t.Fatalf("%s in %v: %v", actor, scope, err)
@@ -165,7 +188,21 @@ WHERE p.team_id=$1`, team, member, m("team_all"), admin)
 			}
 			slices.Sort(got)
 			if !slices.Equal(got, want) || total != len(items) {
-				t.Fatalf("%s in %v: listed %v (total %d), access rules allow %v", actor, scope, got, total, want)
+				t.Fatalf("%s in %v: listed %v (total %d), access rules allow %v (without revoked)", actor, scope, got, total, want)
+			}
+			// The summary counts what the list authorizes, the whole workspace (fixture machines are all linux).
+			summary, err := service.Summary(listCtx, actor)
+			if err != nil {
+				t.Fatalf("%s in %v: summary: %v", actor, scope, err)
+			}
+			states := 0
+			for state, n := range summary.ByState {
+				if state != "revoked" {
+					states += n
+				}
+			}
+			if summary.Total != len(want) || summary.ByState["revoked"] != len(allowed)-len(want) || summary.ByPlatform["linux"] != len(want) || states != len(want) {
+				t.Fatalf("%s in %v: summary %+v; the list allows %d machines in use and %d revoked", actor, scope, summary, len(want), len(allowed)-len(want))
 			}
 			nonEmpty += min(len(want), 1)
 		}

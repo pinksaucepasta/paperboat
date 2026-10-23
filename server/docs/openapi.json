@@ -27090,6 +27090,127 @@
         "operationId": "post_v1_user_machine_enrollments_enrollment_id_retry"
       }
     },
+    "/v1/machines/summary": {
+      "get": {
+        "summary": "Count the selected workspace's machines (dashboard totals)",
+        "description": "Counts every machine of the workspace that GET /v1/machines would list, not one page. total and by_platform count machines in use; revoked and disconnected machines are counted only in by_state.revoked.",
+        "security": [
+          {
+            "cookieSession": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:read"
+        ],
+        "parameters": [
+          {
+            "name": "workspace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 63
+            },
+            "description": "Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Machine counts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "total",
+                        "by_state",
+                        "by_platform"
+                      ],
+                      "properties": {
+                        "total": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "description": "Machines in use (revoked and disconnected excluded)."
+                        },
+                        "by_state": {
+                          "type": "object",
+                          "required": [
+                            "online",
+                            "offline",
+                            "pending",
+                            "revoked"
+                          ],
+                          "properties": {
+                            "online": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "offline": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "pending": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "revoked": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          },
+                          "additionalProperties": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "description": "Machines in use by state; revoked counts revoked and disconnected machines, which total leaves out."
+                        },
+                        "by_platform": {
+                          "type": "object",
+                          "required": [
+                            "linux",
+                            "macos",
+                            "windows"
+                          ],
+                          "properties": {
+                            "linux": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "macos": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "windows": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          },
+                          "additionalProperties": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "description": "Machines in use by platform."
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A query parameter other than workspace."
+          }
+        },
+        "operationId": "get_v1_user_machines_summary"
+      }
+    },
     "/v1/machines/overview": {
       "get": {
         "summary": "Read personal machine usage and optional quota",
