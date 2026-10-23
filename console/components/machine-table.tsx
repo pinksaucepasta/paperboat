@@ -2,7 +2,7 @@
 
 import { InfoIcon, LaptopIcon, MagnifyingGlassIcon, XIcon } from "@phosphor-icons/react"
 import Link from "next/link"
-import { useDeferredValue, useState, useSyncExternalStore } from "react"
+import { useDeferredValue, useState } from "react"
 import {
   useApiQuery,
   machineOwner,
@@ -21,7 +21,7 @@ import { tagsLive } from "@/lib/policy"
 import { TagChips } from "@/components/machine-tags"
 import { AddMachineDialog } from "@/components/add-machine-dialog"
 import { MachineRowMenus } from "@/components/machine-actions"
-import { useMachineQuery } from "@/components/machine-query"
+import { useMachineQuery, useUrlPage } from "@/components/machine-query"
 import { MachineAddressStack } from "@/components/machine-address"
 import { FilterButton, FilterChip } from "@/components/machine-filters"
 import { MachineUpdate } from "@/components/machine-update"
@@ -324,22 +324,15 @@ function NoMachines() {
 }
 
 const perPage = 50
-const noSubscription = () => () => {}
 
 /**
  * The table's page, in the URL (?page=) so a page can be shared and survives a reload. A new
  * search or filter starts again at page 1; a page past the end shows the last one.
  */
 function usePages(query: string, count: number) {
-  // The URL owns the page; it is read on every render because Next keeps this component's state
-  // across navigations, so a link to /?page=3 must win over a page chosen earlier.
-  const fromUrl = useSyncExternalStore(
-    noSubscription,
-    () => Number(new URLSearchParams(window.location.search).get("page")) || 1,
-    () => 1,
-  )
+  const fromUrl = useUrlPage()
+  // A new search or filter starts at page 1; the URL's page belongs to the search it was chosen in.
   const [pagedFor, setPagedFor] = useState(query)
-  const [, rerender] = useState(0)
   const last = Math.max(1, Math.ceil(count / perPage))
   const page = Math.min(Math.max(1, pagedFor === query ? fromUrl : 1), last)
   const go = (next: number) => {
@@ -348,7 +341,6 @@ function usePages(query: string, count: number) {
     else url.searchParams.delete("page")
     window.history.replaceState(window.history.state, "", url)
     setPagedFor(query)
-    rerender((n) => n + 1)
     document.getElementById("machines-table")?.scrollIntoView({ block: "start" })
   }
   return { page, from: (page - 1) * perPage, to: page * perPage, go }

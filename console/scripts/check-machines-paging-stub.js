@@ -49,7 +49,9 @@
     const first = await until(() => range()?.endsWith("of 130") && range())
     pass("the stubbed 130 live machines are paged", first === "1–50 of 130" && rows() === 50, `${first ?? range() ?? "none"}, ${rows()} rows`)
     const card = [...document.querySelectorAll("section > div")].find((c) => /^Machines/.test(c.innerText.trim()))
-    const numbers = await until(() => card?.innerText.match(/(\d+)\s*Online[\s\S]*?(\d+)\s*Offline/))
+    // The card refreshes on its own 15-second interval, apart from the table.
+    const read = () => card?.innerText.match(/(\d+)\s*Online[\s\S]*?(\d+)\s*Offline/)
+    const numbers = (await until(() => read()?.[1] === "40" && read())) ?? read()
     pass("the card shows 40 online / 90 offline (revoked left out)", numbers?.[1] === "40" && numbers?.[2] === "90", numbers ? `${numbers[1]}/${numbers[2]}` : "none")
 
     button("Next")?.click()
