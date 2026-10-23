@@ -21,13 +21,13 @@ import (
 
 // InstallRunningBinary stages caller-supplied bytes into Windows' fixed,
 // per-user machine-wide slot. Account enrollment remains a separate action.
-func InstallRunningBinary(ctx context.Context, sourcePath string, source installsource.Source, installDir string) (string, error) {
-	return installUpdateSource(ctx, sourcePath, source, "", false, installDir, false)
+func InstallRunningBinary(ctx context.Context, sourcePath string, source installsource.Source, installDir, controlURL string) (string, error) {
+	return installUpdateSource(ctx, sourcePath, source, "", false, installDir, false, controlURL)
 }
-func InstallUpdateSource(ctx context.Context, sourcePath string, source installsource.Source, bundlePath string, force bool, installDir string) (string, error) {
-	return installUpdateSource(ctx, sourcePath, source, bundlePath, force, installDir, true)
+func InstallUpdateSource(ctx context.Context, sourcePath string, source installsource.Source, bundlePath string, force bool, installDir, controlURL string) (string, error) {
+	return installUpdateSource(ctx, sourcePath, source, bundlePath, force, installDir, true, controlURL)
 }
-func installUpdateSource(ctx context.Context, sourcePath string, source installsource.Source, bundlePath string, force bool, installDir string, explicitUpdate bool) (installedPath string, resultErr error) {
+func installUpdateSource(ctx context.Context, sourcePath string, source installsource.Source, bundlePath string, force bool, installDir string, explicitUpdate bool, controlURL string) (installedPath string, resultErr error) {
 	if ctx == nil || bundlePath == "" && (!filepath.IsAbs(sourcePath) || filepath.Clean(sourcePath) != sourcePath) || installDir != "" {
 		return "", errors.New("invalid Windows installation source")
 	}
@@ -71,7 +71,7 @@ func installUpdateSource(ctx context.Context, sourcePath string, source installs
 	if err != nil {
 		return "", err
 	}
-	request := hostinstall.Request{Schema: hostinstall.SchemaV1, Platform: "windows", User: windowsAccountName(account.Username), Group: "Paperboat", OwnerSID: sid, Executable: sourcePath, Source: source, StateRoot: stateRoot, WorkspaceRoot: home, ControlURL: client.ServerURL, EnrollmentPending: true, UpdateBundle: bundlePath, Force: force, SuppliedUpdate: explicitUpdate}
+	request := hostinstall.Request{Schema: hostinstall.SchemaV1, Platform: "windows", User: windowsAccountName(account.Username), Group: "Paperboat", OwnerSID: sid, Executable: sourcePath, Source: source, StateRoot: stateRoot, WorkspaceRoot: home, ControlURL: firstNonEmpty(controlURL, client.ServerURL), EnrollmentPending: true, UpdateBundle: bundlePath, Force: force, SuppliedUpdate: explicitUpdate}
 	action := elevation.ActionInstall
 	if existing, loadErr := hostinstall.LoadWindowsRuntimeConfigForInstance(instance); loadErr == nil {
 		if !existing.EnrollmentPending {
@@ -81,7 +81,7 @@ func installUpdateSource(ctx context.Context, sourcePath string, source installs
 			request.Path = os.Getenv("PATH")
 			request.StateRoot = existing.StateRoot
 			request.WorkspaceRoot = existing.Workspace
-			request.ControlURL = existing.ControlURL
+			request.ControlURL = firstNonEmpty(controlURL, existing.ControlURL)
 			request.UserMachineID = existing.MachineID
 			request.Shell = filepath.Join(os.Getenv("WINDIR"), "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
 			request.HelperListenAddress = existing.ListenAddress
@@ -143,4 +143,13 @@ func stageWindowsElevationExecutable(sourcePath string) (string, func() error, e
 		return "", func() error { return nil }, withCleanup("copying or cleaning the elevation executable failed", resultErr, cleanup())
 	}
 	return path, cleanup, nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }

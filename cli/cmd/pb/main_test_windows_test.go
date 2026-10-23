@@ -437,7 +437,7 @@ func TestWindowsInstallUsesRunningBytesAndFixedLayout(t *testing.T) {
 	source := installsource.Source{Version: "dev", Platform: "windows", Architecture: "amd64", SHA256: strings.Repeat("a", 64), Length: 42, Distribution: installsource.Custom}
 	runningInstallSource = func() (string, installsource.Source, error) { return `C:\staged\pb.exe`, source, nil }
 	called := false
-	installSuppliedExecutable = func(_ context.Context, path string, got installsource.Source, directory string) (string, error) {
+	installSuppliedExecutable = func(_ context.Context, path string, got installsource.Source, directory, _ string) (string, error) {
 		called = true
 		if path != `C:\staged\pb.exe` || got != source || directory != "" {
 			t.Fatalf("install request path=%q source=%+v directory=%q", path, got, directory)

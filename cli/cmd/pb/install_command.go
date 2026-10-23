@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntimecmd"
@@ -34,7 +35,7 @@ func platformInstallCommand() *cobra.Command {
 			directory, _ := c.Flags().GetString("install-dir")
 			ctx, cancel := context.WithTimeout(c.Context(), suppliedInstallTimeout(runtime.GOOS))
 			defer cancel()
-			installed, err := installSuppliedExecutable(ctx, executable, source, directory)
+			installed, err := installSuppliedExecutable(ctx, executable, source, directory, selectedInstallServer(c))
 			if err != nil {
 				var refused *hostinstall.SuppliedExecutableError
 				if errors.As(err, &refused) {
@@ -63,4 +64,15 @@ func platformInstallCommand() *cobra.Command {
 	command.Flags().String("install-dir", "", "absolute directory for the Unix pb command")
 	command.Flags().Bool("json", false, "print installation result as JSON")
 	return command
+}
+
+// selectedInstallServer is the server chosen with --server, normalized, for the privileged install step
+// (which learns the local access domain from it); empty uses the configured server (Lane W: the install
+// read the build's default server and failed against a staging server).
+func selectedInstallServer(command *cobra.Command) string {
+	server, err := config.NormalizeServerURL(workspaceServerOverride(command))
+	if err != nil {
+		return ""
+	}
+	return server
 }

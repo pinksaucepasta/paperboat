@@ -780,7 +780,7 @@ func TestBrowserLoginFreshRemovesThenAdds(t *testing.T) {
 	removeOwnMachineRecordFunc = func(*cobra.Command) (string, error) { steps = append(steps, "remove"); return "machine_old", nil }
 	freshEnrollmentCleanup = func(*cobra.Command) error { steps = append(steps, "cleanup"); return nil }
 	runningInstallSource = func() (string, installsource.Source, error) { return "/tmp/pb", installsource.Source{}, nil }
-	installSuppliedExecutable = func(context.Context, string, installsource.Source, string) (string, error) {
+	installSuppliedExecutable = func(context.Context, string, installsource.Source, string, string) (string, error) {
 		steps = append(steps, "install")
 		return "/tmp/pb", nil
 	}

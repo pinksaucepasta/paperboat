@@ -42,7 +42,7 @@ func TestSuppliedInstallFailureKeepsSafeStepAndPrivateCause(t *testing.T) {
 	private := errors.New("PRIVATE installation supervisor failure")
 	ctx, cancel := context.WithCancelCause(t.Context())
 	cancel(private) // The real privileged child must never start in a workspace test.
-	_, failure := hostruntimecmd.InstallRunningBinary(ctx, executable, source, filepath.Join(home, "bin"))
+	_, failure := hostruntimecmd.InstallRunningBinary(ctx, executable, source, filepath.Join(home, "bin"), "")
 	if !errors.Is(failure, private) {
 		t.Fatal("installer lost its actual diagnostic cause")
 	}

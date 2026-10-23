@@ -21,7 +21,7 @@ func TestInstallSuppliesCurrentExecutableAndPropagatesFailure(t *testing.T) {
 	source := installsource.Source{Version: "custom-test", Distribution: installsource.Custom, SHA256: "source-digest"}
 	runningInstallSource = func() (string, installsource.Source, error) { return "/supplied/pb", source, nil }
 	var failure error
-	installSuppliedExecutable = func(ctx context.Context, path string, got installsource.Source, directory string) (string, error) {
+	installSuppliedExecutable = func(ctx context.Context, path string, got installsource.Source, directory, _ string) (string, error) {
 		if path != "/supplied/pb" || got != source || directory != "/commands" {
 			t.Fatal("supplied executable identity changed")
 		}
@@ -87,7 +87,7 @@ func TestInstallShowsWhyTheSuppliedExecutableWasRefused(t *testing.T) {
 		return "/tmp/pb", installsource.Source{Version: "custom-test", Distribution: installsource.Custom}, nil
 	}
 	refusal := &hostinstall.SuppliedExecutableError{Path: "/tmp/pb", Reason: "is writable by other users (mode 0775)", Fix: "run `chmod go-w /tmp/pb`"}
-	installSuppliedExecutable = func(context.Context, string, installsource.Source, string) (string, error) { return "", refusal }
+	installSuppliedExecutable = func(context.Context, string, installsource.Source, string, string) (string, error) { return "", refusal }
 	command := platformInstallCommand()
 	command.SetArgs([]string{})
 	err := command.Execute()

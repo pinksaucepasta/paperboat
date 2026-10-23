@@ -85,7 +85,7 @@ func installStagedUpdateSource(command *cobra.Command, ctx context.Context, stag
 			return refusal
 		}
 	}
-	installed, err := installUpdateSourceForCommand(ctx, executable, source, bundle, force, "")
+	installed, err := installUpdateSourceForCommand(ctx, executable, source, bundle, force, "", selectedInstallServer(command))
 	if err != nil {
 		if errors.Is(err, hostdproto.ErrMaintenanceBusy) {
 			return commandRejection{reason: commandRejectUpdateBusy, cause: err}

@@ -206,7 +206,7 @@ func startFresh(c *command.Context) error {
 	}
 	ctx, cancel := context.WithTimeout(c.Context, suppliedInstallTimeout(runtime.GOOS))
 	defer cancel()
-	if _, err = installSuppliedExecutable(ctx, executable, source, ""); err != nil {
+	if _, err = installSuppliedExecutable(ctx, executable, source, "", selectedInstallServer(cobraCommand)); err != nil {
 		return fmt.Errorf("reinstall after cleanup: %w", err)
 	}
 	_, err = fmt.Fprintln(c.ErrWriter, "Removed this computer's setup and its machine record. Adding it again.")

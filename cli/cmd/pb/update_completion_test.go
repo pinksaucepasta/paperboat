@@ -31,7 +31,7 @@ func TestUpdateFromReportsFailuresAfterTheInstallLanded(t *testing.T) {
 	if err := os.WriteFile(notAProgram, []byte("not an executable"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	installUpdateSourceForCommand = func(context.Context, string, installsource.Source, string, bool, string) (string, error) {
+	installUpdateSourceForCommand = func(context.Context, string, installsource.Source, string, bool, string, string) (string, error) {
 		return notAProgram, nil
 	}
 	bundle := filepath.Join(directory, "release.pb-update")
@@ -123,7 +123,7 @@ func TestUpdateFromRefusesWhileSSHConnectionsAreOpen(t *testing.T) {
 	previousInstall, previousOpen := installUpdateSourceForCommand, openConnectionsFromDaemon
 	t.Cleanup(func() { installUpdateSourceForCommand, openConnectionsFromDaemon = previousInstall, previousOpen })
 	installs := 0
-	installUpdateSourceForCommand = func(context.Context, string, installsource.Source, string, bool, string) (string, error) {
+	installUpdateSourceForCommand = func(context.Context, string, installsource.Source, string, bool, string, string) (string, error) {
 		installs++
 		return "", errors.New("stop after the install was attempted")
 	}

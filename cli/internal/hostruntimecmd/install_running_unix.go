@@ -25,11 +25,13 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
 )
 
-func InstallRunningBinary(ctx context.Context, executable string, source installsource.Source, directory string) (string, error) {
-	return installUpdateSource(ctx, executable, source, "", false, directory, false)
+// InstallRunningBinary installs this executable. controlURL is the selected server (pb --server); empty
+// uses the configured one.
+func InstallRunningBinary(ctx context.Context, executable string, source installsource.Source, directory, controlURL string) (string, error) {
+	return installUpdateSource(ctx, executable, source, "", false, directory, false, controlURL)
 }
-func InstallUpdateSource(ctx context.Context, executable string, source installsource.Source, bundlePath string, force bool, directory string) (string, error) {
-	return installUpdateSource(ctx, executable, source, bundlePath, force, directory, true)
+func InstallUpdateSource(ctx context.Context, executable string, source installsource.Source, bundlePath string, force bool, directory, controlURL string) (string, error) {
+	return installUpdateSource(ctx, executable, source, bundlePath, force, directory, true, controlURL)
 }
 
 // supplyInstallRequest is the request every supplied install or update sends to the
@@ -39,7 +41,7 @@ func supplyInstallRequest(account *user.User, uid, gid int, group, executable st
 	return hostinstall.Request{Schema: hostinstall.SchemaV1, Platform: runtime.GOOS, User: account.Username, UID: uid, GID: gid, Group: group, Home: account.HomeDir, Executable: executable, Source: source, EnrollmentPending: true, UpdateBundle: bundlePath, Force: force, SuppliedUpdate: explicitUpdate, ControlURL: controlURL}
 }
 
-func installUpdateSource(ctx context.Context, executable string, source installsource.Source, bundlePath string, force bool, directory string, explicitUpdate bool) (installedPath string, resultErr error) {
+func installUpdateSource(ctx context.Context, executable string, source installsource.Source, bundlePath string, force bool, directory string, explicitUpdate bool, controlURL string) (installedPath string, resultErr error) {
 	if ctx == nil {
 		return "", hostinstall.ErrInvalidRequest
 	}
@@ -108,7 +110,7 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 	if err != nil {
 		return "", err
 	}
-	request := supplyInstallRequest(account, uid, gid, group.Name, executable, source, bundlePath, force, explicitUpdate, cfg.ServerURL)
+	request := supplyInstallRequest(account, uid, gid, group.Name, executable, source, bundlePath, force, explicitUpdate, installControlURL(controlURL, cfg.ServerURL))
 	installerExecutable, err := os.Executable()
 	if err != nil {
 		return "", err
@@ -137,7 +139,8 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 					return hostinstall.ErrUpdateNotReady
 				}
 			}
-			return runtimeFailure("installing the supplied Paperboat executable failed; approve administrator access when prompted, then rerun `pb install`", err, runtimeContextFailure(callCtx))
+			// The privileged step prints its own reason first; administrator approval is only one cause.
+			return runtimeFailure("installing the supplied Paperboat executable failed (its reason is printed above); if administrator access was declined, approve it and rerun `pb install`", err, runtimeContextFailure(callCtx))
 		}
 		return nil
 	}
@@ -242,4 +245,13 @@ func privilegedInstallCommand(ctx context.Context, effectiveUID int, rootHome, i
 	}
 	args = append([]string{"-H", "--", "/usr/bin/env"}, args...)
 	return exec.CommandContext(ctx, "/usr/bin/sudo", args...)
+}
+
+// installControlURL is the server the privileged install asks for the local access domain: the one
+// selected with --server, else the configured one.
+func installControlURL(selected, configured string) string {
+	if selected != "" {
+		return selected
+	}
+	return configured
 }
