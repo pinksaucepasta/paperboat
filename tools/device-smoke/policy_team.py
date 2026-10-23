@@ -9,7 +9,8 @@ MEMBER runs pb as an accepted member of the team on another machine (MEMBER_CMD,
   works; a deny rule in the policy file -> exec is refused again and explain names the rule.
 With the deny saved it also checks F18-04 (a failing in-file test blocks a save, owner guard,
 who-can, what-can, explain on a draft), F18-05 (the review before save, audit events) and F18-08
-(a member reads, explains only themselves, and cannot add a rule on another's machine).
+(a member reads, explains only themselves, and cannot add a rule on another's machine) and F18-07
+(pb team grant ... env is the member's env:team rule; explain follows grant and revoke).
 Afterwards it restores the team policy's starting version and unshares the machine.
 
 Usage: policy_team.py --team T --machine-id ID --machine-name NAME \
@@ -90,6 +91,7 @@ def main():
         if doc is not None:
             deny_checks(a, owner, member, step, doc, marker)
             member_rights(a, owner, member, step, doc)
+            env_checks(a, owner, step, gen)
     finally:
         rc, out, err = owner('policy', 'restore', str(start), '--workspace', a.team, '--message', marker + ' cleanup', '--yes')
         step('restore the starting policy version', rc == 0, out + err)
@@ -162,6 +164,29 @@ def member_rights(a, owner, member, step, doc):
     me = 'user:' + email(a.owner_cmd, a.owner_pb)
     rc, out, err = member('policy', 'explain', '--workspace', a.team, '--src', me, '--dst', target, '--action', 'exec', '--json')
     step("F18-08 a member cannot explain someone else's access", rc != 0 and code_in(out, err, 'policy_explain_forbidden'), out[-300:] + err)
+
+
+def env_checks(a, owner, step, gen):
+    """F18-07: a team ENV grant is the member's policy rule; explain on env:team follows it."""
+    rc, out, _ = sh(a.member_cmd, a.member_pb, ['auth', 'status', '--json'])
+    d = data(out) if rc == 0 else {}
+    account = (d.get('account') or {}).get('id') or d.get('account_id') or ''
+    who = 'user:' + email(a.member_cmd, a.member_pb)
+    rc, out, err = owner('team', 'grant', a.team, account, 'env', a.team, 'read', '--generation', gen(), '--json')
+    step('F18-07 pb team grant gives the member the team ENV (team ENV must exist)', rc == 0, out[-300:] + err)
+    if rc != 0:
+        return
+    try:
+        rc, out, _ = owner('policy', 'get', '--workspace', a.team)
+        rules = json.loads(out).get('rules') or []
+        ruled = {'src': [who], 'dst': ['env:team'], 'allow': ['env_read']} in rules
+        dec = explain(owner, a.team, '--src', who, '--dst', 'env:team', '--action', 'env_read').get('decision') or {}
+        step('F18-07 the grant is the member\'s rule and explain allows env_read', ruled and dec.get('allowed') is True, str(dec))
+    finally:
+        rc, out, err = owner('team', 'grant', a.team, account, 'env', a.team, 'read', '--active=false', '--generation', gen(), '--json')
+        step('F18-07 revoking the grant removes the rule', rc == 0, out[-300:] + err)
+    dec = explain(owner, a.team, '--src', who, '--dst', 'env:team', '--action', 'env_read').get('decision') or {}
+    step('F18-07 after the revoke explain denies env_read', dec.get('allowed') is False, str(dec))
 
 
 def explain(run, team, *args):
