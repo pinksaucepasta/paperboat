@@ -38,7 +38,7 @@ func (r WorkerControlRequest) validate() error {
 		if !validWorkerID(r.WorkerID) || r.Executable != "" || r.Version != "" || r.APIMin != 0 || r.APIMax != 0 {
 			return ErrInvalidFrame
 		}
-	case "stop_active", "prepare_maintenance", "abort_maintenance", "complete_maintenance":
+	case "stop_active", "prepare_maintenance", "abort_maintenance", "complete_maintenance", "open_ssh":
 		if r.WorkerID != "" || r.Executable != "" || r.Version != "" || r.APIMin != 0 || r.APIMax != 0 {
 			return ErrInvalidFrame
 		}
@@ -51,11 +51,13 @@ func (r WorkerControlRequest) validate() error {
 type WorkerControlResponse struct {
 	Status    *Status `json:"status,omitempty"`
 	Completed bool    `json:"completed"`
+	// OpenSSH answers only open_ssh, so clients that never ask never see it.
+	OpenSSH *int `json:"open_ssh,omitempty"`
 }
 
 func (WorkerControlResponse) messageType() Type { return TypeWorkerControlResponse }
 func (r WorkerControlResponse) validate() error {
-	if !r.Completed {
+	if !r.Completed || r.OpenSSH != nil && (*r.OpenSSH < 0 || r.Status != nil) {
 		return ErrInvalidFrame
 	}
 	if r.Status != nil {

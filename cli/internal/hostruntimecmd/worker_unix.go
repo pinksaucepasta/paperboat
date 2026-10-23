@@ -24,6 +24,7 @@ type hostdHost interface {
 	ShutdownHostd(context.Context) error
 	WorkloadStatus() hostdproto.WorkloadStatus
 	UpdateGate() hostdproto.UpdateGateHandler
+	OpenSSHStreams(context.Context) (int, error)
 }
 
 type hostdHostFactory func(context.Context, string, func(string) string) (hostdHost, error)
@@ -101,7 +102,7 @@ func runHostdWith(ctx context.Context, output io.Writer, newHost hostdHostFactor
 	if err != nil {
 		return err
 	}
-	server, err := hostdproto.NewServer(hostdproto.SocketConfig{MaintenancePending: maintenancePending, VerifyMaintenanceCommitted: verifyCommit, SocketPath: socket, StatePath: filepath.Join(filepath.Dir(tokenPath), "hostd", "fence.json"), UID: os.Geteuid(), GID: os.Getegid(), Token: token, APIMin: 1, APIMax: 1, Workloads: host.WorkloadStatus, DrainExecutions: drainExecutions, UpdateGate: host.UpdateGate(), WorkerControl: owned, RequestTimeout: 31 * time.Minute})
+	server, err := hostdproto.NewServer(hostdproto.SocketConfig{MaintenancePending: maintenancePending, VerifyMaintenanceCommitted: verifyCommit, SocketPath: socket, StatePath: filepath.Join(filepath.Dir(tokenPath), "hostd", "fence.json"), UID: os.Geteuid(), GID: os.Getegid(), Token: token, APIMin: 1, APIMax: 1, Workloads: host.WorkloadStatus, OpenSSH: host.OpenSSHStreams, DrainExecutions: drainExecutions, UpdateGate: host.UpdateGate(), WorkerControl: owned, RequestTimeout: 31 * time.Minute})
 	if err != nil {
 		return err
 	}

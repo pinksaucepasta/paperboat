@@ -5,10 +5,14 @@ package updated
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/autoupdate"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/liveconnections"
 )
 
@@ -47,5 +51,45 @@ func TestUpdateRefusesWhileSSHConnectionsAreOpen(t *testing.T) {
 	participants.open, participants.openErr = liveconnections.Counts{SSH: 3}, errors.New("probe failed")
 	if err := service.refuseWhileConnectionsAreOpen(context.Background(), "v", false); err != nil {
 		t.Fatalf("a failing probe blocked the update: %v", err)
+	}
+}
+
+// An SSH connection the worker bridges itself (the operation-based path, no carrier) also makes a
+// manual update busy, read over the real hostd socket; a worker that cannot answer drops only its part.
+func TestUpdateRefusesWhileTheWorkerBridgesSSH(t *testing.T) {
+	root, err := os.MkdirTemp("/tmp", "pbup-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	token := []byte(strings.Repeat("x", 32))
+	config := hostdproto.SocketConfig{SocketPath: filepath.Join(root, "s", "hostd.sock"), StatePath: filepath.Join(root, "f", "fence.json"), UID: os.Geteuid(), GID: os.Getegid(), Token: token, APIMin: 1, APIMax: 1, RequestTimeout: time.Minute, OpenSSH: func(context.Context) (int, error) { return 1, nil }}
+	server, err := hostdproto.NewServer(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	stopped := make(chan error, 1)
+	go func() { stopped <- server.Run(ctx) }()
+	defer func() { cancel(); <-stopped }()
+	service := &Service{config: Config{Participants: &participantFixture{}, SocketPath: config.SocketPath, Token: token}}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		err = service.refuseWhileConnectionsAreOpen(context.Background(), "v", false)
+		var busy *autoupdate.ActiveTerminalSessionsError
+		if errors.As(err, &busy) && busy.SSH == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("an SSH connection bridged by the worker did not make the update busy: %v", err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err := service.refuseWhileConnectionsAreOpen(context.Background(), "v", true); err != nil {
+		t.Fatalf("--force must proceed: %v", err)
+	}
+	service.config.SocketPath = filepath.Join(root, "missing.sock")
+	if err := service.refuseWhileConnectionsAreOpen(context.Background(), "v", false); err != nil {
+		t.Fatalf("an unreachable worker blocked the update: %v", err)
 	}
 }

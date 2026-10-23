@@ -802,3 +802,33 @@ func TestSocketCanceledNativeCompletionLeavesStartupFence(t *testing.T) {
 		t.Fatalf("matching retry did not recover: %v", err)
 	}
 }
+
+// An update asks the worker for the managed SSH connections it bridges itself before it starts.
+func TestSocketReportsWorkerOpenSSHConnections(t *testing.T) {
+	config := testSocketConfig(t)
+	var open atomic.Int64
+	open.Store(2)
+	config.OpenSSH = func(context.Context) (int, error) { return int(open.Load()), nil }
+	_, cancel, done := startSocketServer(t, config)
+	defer stopSocketServer(t, cancel, done)
+	client := testSocketClient(t, config)
+	if got, err := client.OpenSSH(context.Background()); err != nil || got != 2 {
+		t.Fatalf("open SSH = %d, %v", got, err)
+	}
+	open.Store(0)
+	if got, err := client.OpenSSH(context.Background()); err != nil || got != 0 {
+		t.Fatalf("idle open SSH = %d, %v", got, err)
+	}
+	if (WorkerControlResponse{Completed: true, OpenSSH: new(int), Status: &Status{}}).validate() == nil {
+		t.Fatal("an open_ssh answer carrying a status was accepted")
+	}
+}
+
+func TestSocketWithoutOpenSSHCountRefusesTheQuery(t *testing.T) {
+	config := testSocketConfig(t)
+	_, cancel, done := startSocketServer(t, config)
+	defer stopSocketServer(t, cancel, done)
+	if _, err := testSocketClient(t, config).OpenSSH(context.Background()); err == nil {
+		t.Fatal("a worker without the count answered")
+	}
+}

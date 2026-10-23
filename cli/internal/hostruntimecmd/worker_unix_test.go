@@ -210,6 +210,8 @@ func (h *runHostdObservationHost) ShutdownHostd(context.Context) error {
 	return nil
 }
 
+func (h *runHostdObservationHost) OpenSSHStreams(context.Context) (int, error) { return 0, nil }
+
 func (h *runHostdObservationHost) WorkloadStatus() hostdproto.WorkloadStatus {
 	return hostdproto.WorkloadStatus{Generation: 1}
 }

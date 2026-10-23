@@ -682,6 +682,14 @@ func managedEnvironmentForLaunch(source envinject.EnvironmentSource) func(contex
 	}
 }
 
+// OpenSSHStreams is the number of managed SSH connections this host bridges itself.
+func (h *Host) OpenSSHStreams() int {
+	if h == nil || h.hostd == nil {
+		return 0
+	}
+	return h.hostd.Workloads().ManagedSSH.OpenStreams()
+}
+
 // WorkloadStatus is the stable host's monotonic snapshot used to fence a
 // supervisor maintenance activation. It counts ownership-bearing workloads,
 // not merely network clients, and advances whenever that set changes.

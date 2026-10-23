@@ -215,6 +215,32 @@ func (o *ProcessOwner) HandleUpdateGate(ctx context.Context, r hostdproto.Update
 	err = json.NewDecoder(http.MaxBytesReader(nil, res.Body, 64<<10)).Decode(&result)
 	return result, err
 }
+
+// OpenSSHStreams asks the active worker how many managed SSH connections it bridges. A worker from
+// before this route answers 404, which is an error here.
+func (o *ProcessOwner) OpenSSHStreams(ctx context.Context) (int, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", "http://"+o.listen+ownerOpenSSHPath, nil)
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("X-Paperboat-Owner-Capability", base64.RawURLEncoding.EncodeToString(o.token))
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer res.Body.Close()
+	if res.StatusCode != 200 {
+		return 0, ErrHostInvalid
+	}
+	var result ownerOpenSSH
+	decoder := json.NewDecoder(http.MaxBytesReader(nil, res.Body, 4<<10))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&result) != nil || result.SSH < 0 {
+		return 0, ErrHostInvalid
+	}
+	return result.SSH, nil
+}
+
 func readPersistentAgentToken(path string) (string, error) {
 	info, err := os.Lstat(path)
 	if err != nil {

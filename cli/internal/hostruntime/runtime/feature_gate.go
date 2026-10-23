@@ -43,5 +43,23 @@ func (h *Host) BindOwnerUpdateGate(capability []byte) error {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(result)
 	})
+	mux.HandleFunc(ownerOpenSSHPath, func(w http.ResponseWriter, r *http.Request) {
+		raw, err := base64.RawURLEncoding.DecodeString(r.Header.Get("X-Paperboat-Owner-Capability"))
+		if r.Method != "GET" || err != nil || subtle.ConstantTimeCompare(raw, token) != 1 {
+			http.Error(w, "unavailable", 403)
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(ownerOpenSSH{SSH: h.OpenSSHStreams()})
+	})
 	return nil
+}
+
+// ownerOpenSSHPath reports the managed SSH connections the worker bridges itself, so an update can
+// refuse while one is open.
+const ownerOpenSSHPath = "/v1/local/runtime-open-ssh"
+
+type ownerOpenSSH struct {
+	SSH int `json:"ssh"`
 }
