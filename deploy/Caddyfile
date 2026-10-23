@@ -1,4 +1,9 @@
 {$PAPERBOAT_API_HOST} {
+	# Compress only read-only lists and the public trust set: no response here carries a credential, so compressing
+	# it next to request-influenced fields cannot leak one (BREACH). Credential-minting responses, the peer-network
+	# config (relay grants) and long polls stay uncompressed.
+	@compressible expression `(method('GET') && path('/v1/machines', '/v1/machines/*/terminal-sessions', '/v1/terminal-sessions', '/v1/previews', '/v1/tunnels', '/v1/machine-services')) || (method('POST') && path('/v1/machine-peer-identity/status'))`
+	encode @compressible zstd gzip
 	reverse_proxy server:8080
 }
 {$PAPERBOAT_DOWNLOAD_HOST} {
