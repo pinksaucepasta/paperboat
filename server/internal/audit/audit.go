@@ -89,8 +89,11 @@ func write(ctx context.Context, q *dbsqlc.Queries, event Event) error {
 	if event.Metadata == nil {
 		event.Metadata = make(map[string]any)
 	}
-	if tokenID, ok := ctx.Value(apiTokenKey{}).(string); ok {
+	if tokenID, ok := ctx.Value(apiTokenKey{}).(string); ok && tokenID != "" {
 		event.Metadata["api_token_id"] = tokenID
+		if event.ActorTokenID == "" {
+			event.ActorTokenID = tokenID // the documented actor.token_id
+		}
 	}
 	if requestID := serverdiagnostics.NormalizeRequestID(serverdiagnostics.RequestID(ctx)); requestID != "" {
 		event.Metadata["request_id"] = requestID
@@ -99,9 +102,6 @@ func write(ctx context.Context, q *dbsqlc.Queries, event Event) error {
 		event.Result = ResultSuccess
 	}
 	client := ClientFrom(ctx)
-	if event.ActorTokenID == "" {
-		event.ActorTokenID = client.TokenID
-	}
 	metadata, err := json.Marshal(event.Metadata)
 	if err != nil {
 		return fmt.Errorf("marshal audit metadata: %w", err)
@@ -143,7 +143,7 @@ func (w *Writer) List(ctx context.Context, query Query) ([]Event, error) {
 // Client describes the signed-in request an event came from. HTTP middleware stores it in the
 // request context; events written outside a request have none.
 type Client struct {
-	IP, UserAgent, TokenID string
+	IP, UserAgent string
 }
 
 type clientKey struct{}

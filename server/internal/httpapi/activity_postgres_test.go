@@ -173,7 +173,8 @@ func TestActivityAuditLogFiltersExportAndRoles(t *testing.T) {
 	f := newActivityFixture(t)
 	f.exec(`INSERT INTO teams(team_id,owner_account,generation,display_name) VALUES($1,$2,1,'Audit team')`, f.team, f.owner)
 	f.exec(`INSERT INTO team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'admin',true),($1,$3,1,'auditor',true)`, f.team, f.owner, f.other)
-	ctx := audit.WithClient(t.Context(), audit.Client{IP: "203.0.113.7", UserAgent: "pb/test"})
+	// Written under an API-token session: the event names the token (F19-07 actor.token_id).
+	ctx := audit.WithAPIToken(audit.WithClient(t.Context(), audit.Client{IP: "203.0.113.7", UserAgent: "pb/test"}), "apitok_activity_test")
 	if err := f.writer.Write(ctx, audit.Event{ActorUserID: f.owner, ActorType: audit.ActorUser, EventType: "team.sso_required", ResourceType: "team", ResourceID: f.team, Result: audit.ResultDenied, Reason: "team_sso_required"}); err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +184,8 @@ func TestActivityAuditLogFiltersExportAndRoles(t *testing.T) {
 		t.Fatalf("auditor denied filter code=%d items=%d", code, len(page.Items))
 	}
 	e := page.Items[0]
-	if e.Result != "denied" || e.Reason != "team_sso_required" || e.IP != "203.0.113.7" || e.UserAgent != "pb/test" || e.Actor.Email != f.owner+"@example.test" || e.Workspace != "team:"+f.team {
+	if e.Result != "denied" || e.Reason != "team_sso_required" || e.IP != "203.0.113.7" || e.UserAgent != "pb/test" || e.Actor.Email != f.owner+"@example.test" || e.Workspace != "team:"+f.team ||
+		e.Actor.Kind != "api_token" || e.Actor.TokenID != "apitok_activity_test" {
 		t.Fatalf("event = %+v", e)
 	}
 	if code, p, _ := f.get(f.other, "/v1/activity?workspace="+f.team+"&action=team&actor="+f.owner+"@example.test&since=2000-01-01T00:00:00Z"); code != 200 || len(p.Items) != 2 {
