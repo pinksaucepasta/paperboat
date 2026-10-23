@@ -5,13 +5,15 @@ A test account's every machine and signed-in CLI session is a peer of every othe
 containers that are never removed grow its peer-network configuration until it hits the size
 bound and native access stops for the whole account. Run after each device run.
 
-Only machines whose alias matches a throwaway pattern AND that have not been seen for --stale
-(default 2 h) are revoked, together with the CLI sessions `pb pair` created for them. Protected
+A lane passes its own throwaway prefix (--prefix laner-) and only machines whose alias starts
+with it are considered; --all (every throwaway pattern of every lane) is for Lane B only. Only
+machines matching AND not seen for --stale (default 2 h) are revoked, together with the CLI sessions `pb pair` created for them. Protected
 devices (ubuntu24, pbvm*, dadape, hp, apple, victus) are never touched. Dry-run by default: it
 prints the ids it would revoke; --apply revokes them in one transaction and prints them again.
 It runs SQL on the production database through `ssh <host> docker exec psql` (operator access).
 """
 import argparse
+import re
 import subprocess
 import sys
 
@@ -53,11 +55,19 @@ def main():
     parser.add_argument("--account", action="append", help="test account id (repeatable); default: the shared test account")
     parser.add_argument("--stale", default="2 hours", help="revoke only machines unseen this long (PostgreSQL interval)")
     parser.add_argument("--apply", action="store_true", help="revoke; without it only list")
+    scope = parser.add_mutually_exclusive_group(required=True)
+    scope.add_argument("--prefix", help="this lane's throwaway alias prefix, e.g. laner- (required for lanes)")
+    scope.add_argument("--all", action="store_true", help="every lane's throwaway machines (Lane B only)")
     args = parser.parse_args()
+    throwaway = THROWAWAY
+    if args.prefix:
+        if not re.fullmatch(r"[a-z][a-z0-9]*-", args.prefix) or re.search(PROTECTED, args.prefix):
+            parser.error("--prefix must be a lane prefix like laner- (lowercase, ending in -)")
+        throwaway = "^" + re.escape(args.prefix)
     accounts = args.account or DEFAULT_ACCOUNTS
     params = {
         "accounts": "ARRAY[" + ",".join(quote(a) for a in accounts) + "]::text[]",
-        "stale": quote(args.stale), "throwaway": quote(THROWAWAY), "protected": quote(PROTECTED),
+        "stale": quote(args.stale), "throwaway": quote(throwaway), "protected": quote(PROTECTED),
     }
     sql = "\\set ON_ERROR_STOP 1\nBEGIN;\nSET LOCAL search_path TO paperboat, public;\n" + SELECT % params
     if args.apply:

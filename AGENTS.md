@@ -194,10 +194,11 @@ Goal: every main-path row on L and M `[x]`, as fast as possible.
 
 - **Unit tests** for every change, in the package that owns the behaviour. They must not
   be weakened to pass. Run the affected packages (`go vet`, `go test -race` for concurrency).
-- **After each device run**, the lane runs `tools/device-smoke/cleanup_test_account.py --apply`.
-  It revokes throwaway test machines unseen for 2 h on the shared test accounts; every machine
-  is a peer of every other, and unremoved containers otherwise grow the account until native
-  access stops for all of it. Dry-run without `--apply`.
+- **After each device run**, the lane runs `tools/device-smoke/cleanup_test_account.py --prefix
+  <its throwaway prefix, e.g. laner-> --apply`. It revokes only that lane's throwaway machines
+  unseen for 2 h on the shared test accounts; every machine is a peer of every other, and
+  unremoved containers otherwise grow the account until native access stops for all of it.
+  Dry-run without `--apply`. `--all` (every lane's throwaways) is Lane B's only.
 - **A check that passed before and fails now is found by bisection, not by reading logs alone.**
   First re-run only that check (`smoke.sh --targets <device>` with `--skip` for the rest) on the
   last build where it passed, to confirm it is a regression and not a flake. Then bisect the
