@@ -7,7 +7,9 @@ signed out at the end, when the token is revoked). The check creates a token sco
 --allowed, signs TOKEN in with `pb login --api-token-file -`, and checks that exec on --allowed works,
 exec on --other is refused as outside the token's scope, a write outside the scope (creating
 another API token) is refused, and revoking the token ends the session. The secret only passes
-from OWNER's stdout to TOKEN's stdin; it is never printed.
+from OWNER's stdout to TOKEN's stdin; it is never printed. Then the solo case: a token that may
+only exec on tag:ci works on the tagged machine, its use is attributed to it, and removing the tag
+(a policy change) takes the access from the token.
 
 Usage: policy_token.py --allowed lk-a --other lk-b \
          --owner-cmd 'ssh pbvm2 sudo docker exec -i -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 lk-a' \
@@ -86,8 +88,60 @@ def main():
         step('revoke the token', rc == 0, out + err)
     rc, out, err = holder('machine', 'list', '--json')
     step('revoking ends the token session', rc != 0, out + err)
+    tag_scope(a, owner, holder, step, name + '-ci', marker)
     print('RESULT', 'PASS' if not fails else 'FAIL ' + ','.join(fails))
     return 1 if fails else 0
+
+
+def tag_scope(a, owner, holder, step, name, marker):
+    """The solo case: a token that may only exec on tag:ci. Its use is attributed to it (last_used_at),
+    and a rule change that takes the tag from the machine takes the access from the token at once."""
+    rc, out, err = owner('policy', 'get', '--workspace', 'personal', '--json')
+    try:
+        cur = data(out)
+        start, doc = cur['version'], json.loads(cur['policy'])
+    except (ValueError, KeyError, TypeError):
+        step('read the personal policy', False, out + err)
+        return
+    doc.setdefault('tags', {})['tag:ci'] = ['machine:' + a.allowed]
+    rc, out, err = owner('policy', 'set', '-', '--workspace', 'personal', '--message', name, '--yes', stdin=json.dumps(doc))
+    step('tag the scoped machine tag:ci in the personal policy', rc == 0, out + err)
+    if rc != 0:
+        return
+    secret = ''
+    try:
+        rc, out, err = owner('api-token', 'create', name, '--expires', '1d', '--scope', json.dumps([{'dst': ['tag:ci'], 'allow': ['exec']}]), '--json')
+        try:
+            secret = data(out)['secret']
+        except (ValueError, KeyError, TypeError):
+            pass
+        step('create a token that may only exec on tag:ci', secret.startswith('pbat_'), err)
+        if not secret:
+            return
+        rc, out, err = holder('login', '--api-token-file', '-', stdin=secret + '\n')
+        secret = ''
+        step('sign in with the tag:ci token', rc == 0, out + err)
+        for attempt in range(9):
+            rc, out, err = holder('exec', a.allowed, '--', 'echo', marker)
+            if rc == 0 and marker in out:
+                break
+            time.sleep(10)
+        step('exec on the tag:ci machine works', rc == 0 and marker in out, out + err)
+        rc, out, err = owner('api-token', 'list', '--workspace', 'personal', '--json')
+        used = [t for t in (data(out).get('api_tokens') or []) if t.get('name') == name and t.get('last_used_at')] if rc == 0 else []
+        step('the use is attributed to the token (last_used_at)', len(used) == 1, out[-300:] + err)
+    finally:
+        rc, out, err = owner('policy', 'restore', str(start), '--workspace', 'personal', '--message', name + ' cleanup', '--yes')
+        step('restore the personal policy (the machine loses tag:ci)', rc == 0, out + err)
+    rc, out, err = holder('exec', a.allowed, '--', 'echo', marker)
+    step('without the tag the token may not exec there', rc != 0 and marker not in out and 'scope' in (out + err).lower(), out + err)
+    rc, out, err = owner('api-token', 'revoke', name, '--yes')
+    step('revoke the tag:ci token', rc == 0, out + err)
+
+
+def data(out):
+    d = json.loads(out)
+    return d.get('data', d) if isinstance(d, dict) else d
 
 
 if __name__ == '__main__':

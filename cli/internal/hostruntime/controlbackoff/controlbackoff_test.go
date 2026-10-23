@@ -128,3 +128,24 @@ func TestOnlyTheControlHostIsTrackedWhenOneIsGiven(t *testing.T) {
 		t.Fatalf("the relay request was held back by the control plane's rejection: %v", err)
 	}
 }
+
+// A new sign-in after the previous session was revoked (pb login, pb login --api-token-file) brings
+// a different credential: the rejection of the old one must not hold the new one back, or the
+// daemon's refresh right after the sign-in fails (F18-06 on hp).
+func TestARejectedCredentialDoesNotHoldBackANewOne(t *testing.T) {
+	clock := time.Unix(1_000_000, 0)
+	server := &identityServer{status: http.StatusUnauthorized}
+	transport := newTransport(server, &clock)
+	if _, err := transport.RoundTrip(identified()); err != nil {
+		t.Fatal(err)
+	}
+	server.status = http.StatusOK
+	fresh := identified()
+	fresh.Header.Set("Authorization", "Bearer new-session")
+	if response, err := transport.RoundTrip(fresh); err != nil || response.StatusCode != http.StatusOK || server.calls != 2 {
+		t.Fatalf("the new credential was held back by the old one's rejection: %v calls=%d", err, server.calls)
+	}
+	if _, err := transport.RoundTrip(identified()); !errors.Is(err, ErrIdentityRejected) {
+		t.Fatalf("the rejected credential is no longer held back: %v", err)
+	}
+}

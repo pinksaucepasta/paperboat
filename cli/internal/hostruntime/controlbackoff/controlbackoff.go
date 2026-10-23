@@ -1,12 +1,14 @@
 // Package controlbackoff keeps a computer whose machine identity the control plane rejects (it was
 // removed from the account) from hammering the control plane. Every runtime loop shares one
-// transport; once an identity-bearing request is answered 401, further identity-bearing requests
-// fail locally and quietly until a growing, jittered delay has passed, when exactly one request
-// probes whether the identity works again. Requests without an identity (public key sets, say) are
-// never held back, and any success closes the breaker.
+// transport; once an identity-bearing request is answered 401, further requests with that same
+// identity fail locally and quietly until a growing, jittered delay has passed, when exactly one
+// request probes whether the identity works again. Requests without an identity (public key sets,
+// say) or with another one (the credential of a new sign-in) are never held back, and a success of
+// the rejected identity closes the breaker.
 package controlbackoff
 
 import (
+	"crypto/sha256"
 	"errors"
 	"math/rand/v2"
 	"net/http"
@@ -44,10 +46,11 @@ type Transport struct {
 	Now    func() time.Time
 	Jitter func() float64
 
-	mu      sync.Mutex
-	streak  int
-	until   time.Time
-	probing bool
+	mu       sync.Mutex
+	rejected [sha256.Size]byte // the identity the streak is about
+	streak   int
+	until    time.Time
+	probing  bool
 }
 
 func (t *Transport) now() time.Time {
@@ -64,33 +67,41 @@ func (t *Transport) jitter() float64 {
 	return 0.8 + 0.4*rand.Float64()
 }
 
-// carriesIdentity reports whether a request authenticates as this machine.
-func (t *Transport) carriesIdentity(request *http.Request) bool {
+// identity names the identity a request authenticates with: the machine (its proofs differ per
+// request but name one identity) or a bearer credential. ok is false for requests without one.
+func (t *Transport) identity(request *http.Request) (key [sha256.Size]byte, ok bool) {
 	if t.Host != "" && request.URL.Host != t.Host {
-		return false
+		return key, false
 	}
-	return request.Header.Get("X-Paperboat-Machine-Proof") != "" || request.Header.Get("Authorization") != ""
+	if request.Header.Get("X-Paperboat-Machine-Proof") != "" {
+		return sha256.Sum256([]byte("machine")), true
+	}
+	if bearer := request.Header.Get("Authorization"); bearer != "" {
+		return sha256.Sum256([]byte("bearer:" + bearer)), true
+	}
+	return key, false
 }
 
 func (t *Transport) RoundTrip(request *http.Request) (*http.Response, error) {
-	if !t.carriesIdentity(request) {
+	key, ok := t.identity(request)
+	if !ok {
 		return t.Base.RoundTrip(request)
 	}
-	probe, err := t.admit()
+	probe, err := t.admit(key)
 	if err != nil {
 		return nil, err
 	}
 	response, err := t.Base.RoundTrip(request)
-	t.observe(probe, response, err)
+	t.observe(key, probe, response, err)
 	return response, err
 }
 
 // admit lets a request through, or refuses it while the delay runs. After the delay one request at
 // a time probes.
-func (t *Transport) admit() (probe bool, err error) {
+func (t *Transport) admit(key [sha256.Size]byte) (probe bool, err error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if t.streak == 0 {
+	if t.streak == 0 || key != t.rejected {
 		return false, nil
 	}
 	if t.now().Before(t.until) || t.probing {
@@ -100,7 +111,7 @@ func (t *Transport) admit() (probe bool, err error) {
 	return true, nil
 }
 
-func (t *Transport) observe(probe bool, response *http.Response, err error) {
+func (t *Transport) observe(key [sha256.Size]byte, probe bool, response *http.Response, err error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if probe {
@@ -110,13 +121,16 @@ func (t *Transport) observe(probe bool, response *http.Response, err error) {
 	case err != nil:
 		// A network failure says nothing about the identity.
 	case response.StatusCode == http.StatusUnauthorized:
+		if key != t.rejected {
+			t.rejected, t.streak, t.probing = key, 0, false
+		}
 		t.streak++
 		delay := FirstDelay << min(t.streak-1, 8)
 		if delay > MaximumDelay {
 			delay = MaximumDelay
 		}
 		t.until = t.now().Add(time.Duration(float64(delay) * t.jitter()))
-	case response.StatusCode < http.StatusBadRequest:
+	case response.StatusCode < http.StatusBadRequest && key == t.rejected:
 		t.streak = 0
 	}
 }
