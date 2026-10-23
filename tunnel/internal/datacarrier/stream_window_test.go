@@ -47,6 +47,9 @@ func (d *delayedConn) Write(p []byte) (int, error) {
 // One stream must not be held to its initial window per round trip: with the window pinned
 // at 256 KiB, 16 MiB at 50 ms RTT needs at least 64 round trips (3.2 s).
 func TestCarrierStreamWindowGrowsBeyondInitialAtRealRTT(t *testing.T) {
+	if raceEnabled {
+		t.Skip("throughput measurement: race instrumentation, not the window, bounds it (4-5 s instead of 0.9 s)")
+	}
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
