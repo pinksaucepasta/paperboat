@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -331,7 +332,14 @@ func savePolicyTx(ctx context.Context, tx *db.Tx, w Workspace, cfg config.Worksp
 	next0.allowPrivateAccess = next.AllowPrivateAccess && w.TeamID != ""
 	// Rules first: advancing the version runs the trigger that revokes sessions the new rules
 	// no longer allow, and tells the team's machines to refresh their access.
+	tagsBefore, err := tagRowsTx(ctx, tx, cur.id)
+	if err != nil {
+		return cur, nil, err
+	}
 	if err = storeRowsTx(ctx, tx, cur.id, next.Store()); err != nil {
+		return cur, nil, err
+	}
+	if err = publishTagChangesTx(ctx, tx, cur.id, tagsBefore); err != nil {
 		return cur, nil, err
 	}
 	err = tx.QueryRow(ctx, `UPDATE workspace_policies SET version=$2,source=$3,digest=$4,allow_private_access=$8,updated_at=now(),updated_by=nullif($5,''),updated_with_api_token=nullif($6,''),message=$7 WHERE id=$1 RETURNING updated_at`,
@@ -389,4 +397,51 @@ func envAccessChangedTx(ctx context.Context, tx *db.Tx, team string, changes []p
 		return FenceENVTx(ctx, tx, team)
 	}
 	return InvalidateENVTx(ctx, tx, team)
+}
+
+// tagRowsTx is a policy's stored tags as "machine|tag" entries (neither contains '|').
+func tagRowsTx(ctx context.Context, tx *db.Tx, policyID int64) (map[string]bool, error) {
+	rows, err := tx.Query(ctx, `SELECT machine_id||'|'||tag FROM workspace_policy_tags WHERE policy_id=$1`, policyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var entry string
+		if err := rows.Scan(&entry); err != nil {
+			return nil, err
+		}
+		out[entry] = true
+	}
+	return out, rows.Err()
+}
+
+// publishTagChangesTx tells every machine that lists a machine whose tags changed to refresh its
+// inventory (machine items and the daemons' status carry tags).
+func publishTagChangesTx(ctx context.Context, tx *db.Tx, policyID int64, before map[string]bool) error {
+	after, err := tagRowsTx(ctx, tx, policyID)
+	if err != nil {
+		return err
+	}
+	changed := map[string]bool{}
+	for entry := range before {
+		if !after[entry] {
+			changed[strings.SplitN(entry, "|", 2)[0]] = true
+		}
+	}
+	for entry := range after {
+		if !before[entry] {
+			changed[strings.SplitN(entry, "|", 2)[0]] = true
+		}
+	}
+	if len(changed) == 0 {
+		return nil
+	}
+	machines := make([]string, 0, len(changed))
+	for m := range changed {
+		machines = append(machines, m)
+	}
+	_, err = tx.Exec(ctx, `SELECT paperboat.publish_machine_topic(ARRAY(SELECT DISTINCT a FROM unnest($1::text[]) m, unnest(paperboat.machine_audience(m)) a), 'inventory')`, machines)
+	return err
 }

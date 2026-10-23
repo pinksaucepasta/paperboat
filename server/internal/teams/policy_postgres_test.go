@@ -542,3 +542,34 @@ func TestPolicyMachineTags(t *testing.T) {
 		t.Fatalf("after untagging db1: %+v", list.Tags)
 	}
 }
+
+// A save that changes a machine's tags tells every machine that lists it to refresh its
+// inventory, so pb status and the daemons' tags follow at once (F18-11 on device: a personal save
+// published nothing, and a team save only machine_access).
+func TestPolicyTagChangeRefreshesInventory(t *testing.T) {
+	f := newPolicyFixture(t)
+	generation := func(machine string) (g int64) {
+		t.Helper()
+		if err := f.store.SQL().QueryRowContext(f.ctx, `SELECT coalesce((SELECT generation FROM paperboat.machine_topic_generations WHERE machine_id=$1 AND topic='inventory'),0)`, machine).Scan(&g); err != nil {
+			t.Fatal(err)
+		}
+		return g
+	}
+	cur, err := f.service.Policy(f.ctx, f.owner, f.team, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := generation(f.db1)
+	if _, err = f.service.SetMachineTags(f.ctx, f.owner, f.team, f.db1, MachineTagsRequest{Tags: []string{"tag:ci"}, ExpectedVersion: cur.Version}); err != nil {
+		t.Fatal(err)
+	}
+	if after := generation(f.db1); after <= before {
+		t.Fatalf("tagging db1 left its inventory generation at %d->%d", before, after)
+	}
+	runner := generation(f.runner)
+	cur, _ = f.service.Policy(f.ctx, f.owner, f.team, 0)
+	f.save(cur.Policy) // a save with no tag change
+	if generation(f.runner) != runner {
+		t.Fatal("a save that changes no tags must not refresh inventories")
+	}
+}
