@@ -15,7 +15,6 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
-	"github.com/pinksaucepasta/paperboat/internal/controlsync"
 	pbSync "github.com/pinksaucepasta/paperboat/internal/controlsync/proto"
 	"github.com/pinksaucepasta/paperboat/internal/daemonrpc"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
@@ -29,7 +28,6 @@ type Coordinator struct {
 	rpcServer          *daemonrpc.Server
 	rpcListener        net.Listener
 	rpcBackend         *daemonrpc.LiveDaemonBackend
-	syncClient         *controlsync.Client
 	errors             chan error
 	nameClient         guardedNameClient
 	ctx                context.Context
@@ -55,12 +53,15 @@ type Coordinator struct {
 	domain               atomic.Pointer[string] // the local access domain, as the machine guard reports it
 }
 
+// connectTimeout bounds connecting to the protected machine-name service and stopping the coordinator.
+const connectTimeout = 5 * time.Second
+
+// reconcileTimeout is the default bound for applying one peer snapshot.
+const reconcileTimeout = 15 * time.Second
+
 func NewCoordinator(cfg CoordinatorConfig) (*Coordinator, error) {
 	if cfg.SocketAddress == "" {
 		cfg.SocketAddress = daemonrpc.DefaultSocketAddress()
-	}
-	if cfg.SyncAddress != "" && (cfg.MachineID == "" || cfg.Token == nil) {
-		return nil, errors.New("control sync requires machine identity and fresh authenticated credentials")
 	}
 	if cfg.NameClient != nil && cfg.ConnectNameClient != nil {
 		return nil, errors.New("configure either an injected name client or a reconnect factory")
@@ -70,12 +71,12 @@ func NewCoordinator(cfg CoordinatorConfig) (*Coordinator, error) {
 		return nil, errors.New("guarded names require an authenticated machine dialer")
 	}
 	if cfg.ReconcileTimeout <= 0 {
-		cfg.ReconcileTimeout = controlsync.SnapshotTimeout
+		cfg.ReconcileTimeout = reconcileTimeout
 	}
 	coordinator := &Coordinator{
 		cfg:         cfg,
 		nameClient:  cfg.NameClient,
-		rpcBackend:  daemonrpc.NewLiveDaemonBackend(nil, buildinfo.Version),
+		rpcBackend:  daemonrpc.NewLiveDaemonBackend(buildinfo.Version),
 		routes:      make(map[string]*guardedRoute),
 		webRoutes:   make(map[string]guardedWebRoute),
 		connections: make(chan struct{}, 256),
@@ -117,7 +118,7 @@ func (c *Coordinator) Start(parent context.Context) (err error) {
 	c.ctx, c.cancel = context.WithCancel(parent)
 	c.mu.Unlock()
 	if c.cfg.ConnectNameClient != nil {
-		connectCtx, cancel := context.WithTimeout(parent, controlsync.ConnectTimeout)
+		connectCtx, cancel := context.WithTimeout(parent, connectTimeout)
 		client, err := c.cfg.ConnectNameClient(connectCtx)
 		cancel()
 		if err != nil {
@@ -130,19 +131,6 @@ func (c *Coordinator) Start(parent context.Context) (err error) {
 			c.mu.Lock()
 			c.nameClient = client
 			c.mu.Unlock()
-		}
-	}
-	if c.cfg.SyncAddress != "" {
-		client := controlsync.NewClient(controlsync.ClientConfig{ServerAddr: c.cfg.SyncAddress, MachineID: c.cfg.MachineID, Token: c.cfg.Token, TLSConfig: c.cfg.TLSConfig, Insecure: c.cfg.Insecure, OnPeerUpdate: c.applySnapshot, OnError: func(err error) {
-			select {
-			case c.errors <- err:
-			default:
-			}
-		}})
-		c.rpcBackend.SetSyncClient(client)
-		c.syncClient = client
-		if err := client.Start(c.ctx); err != nil {
-			return coordinatorFailure("authenticated control sync could not start", err, c.stopStarted())
 		}
 	}
 	listener, err := daemonrpc.Listen(c.cfg.SocketAddress)
@@ -193,9 +181,6 @@ func (c *Coordinator) ApplyServices(ctx context.Context, services []api.MachineS
 func (c *Coordinator) ApplyMachines(ctx context.Context, machines []api.UserMachine, services []api.MachineServicesMachine) error {
 	if c == nil {
 		return errors.New("local access coordinator is unavailable")
-	}
-	if c.cfg.SyncAddress != "" {
-		return c.ReconcileStatus(ctx)
 	}
 	c.inventoryMu.Lock()
 	defer c.inventoryMu.Unlock()
@@ -472,25 +457,21 @@ func (c *Coordinator) applySnapshotLocked(parent context.Context, peers []*pbSyn
 }
 
 func (c *Coordinator) Stop() error {
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), controlsync.ConnectTimeout)
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), connectTimeout)
 	defer shutdownCancel()
 	c.mu.Lock()
 	server, listener, cancel := c.rpcServer, c.rpcListener, c.cancel
 	c.rpcServer, c.rpcListener, c.ctx, c.cancel, c.running = nil, nil, nil, nil, false
-	routes, webRoutes, nameClient, syncClient := c.routes, c.webRoutes, c.nameClient, c.syncClient
-	c.nameClient, c.syncClient = nil, nil
+	routes, webRoutes, nameClient := c.routes, c.webRoutes, c.nameClient
+	c.nameClient = nil
 	c.routes = make(map[string]*guardedRoute)
 	c.webRoutes = make(map[string]guardedWebRoute)
 	if cancel != nil {
 		cancel()
 	}
-	if server != nil || listener != nil || nameClient != nil || syncClient != nil || len(routes) > 0 || len(webRoutes) > 0 {
+	if server != nil || listener != nil || nameClient != nil || len(routes) > 0 || len(webRoutes) > 0 {
 		c.launchCleanupLocked(func() error {
 			var causes []error
-			if syncClient != nil {
-				causes = append(causes, lifecycleCleanup(syncClient.Close()))
-				c.rpcBackend.SetSyncClient(nil)
-			}
 			if nameClient != nil {
 				causes = append(causes, lifecycleCleanup(nameClient.Close()))
 			}

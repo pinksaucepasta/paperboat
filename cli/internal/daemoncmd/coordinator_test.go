@@ -13,7 +13,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"github.com/pinksaucepasta/paperboat/internal/splitdns"
 	"github.com/pinksaucepasta/paperboat/internal/testcert"
-	"google.golang.org/grpc"
 	"io"
 	"maps"
 	"net"
@@ -182,50 +181,9 @@ func testCoordinatorSharedBrowserGateway(t *testing.T, nativeConflict bool, doma
 	}
 }
 
-type testControlSyncServer struct {
-	pbSync.UnimplementedSyncServiceServer
-}
-
-func (s *testControlSyncServer) Sync(stream pbSync.SyncService_SyncServer) error {
-	_, err := stream.Recv()
-	if err != nil {
-		return err
-	}
-	if err := stream.Send(&pbSync.SyncResponse{
-		Revision:   1,
-		AssignedIp: "127.100.0.10",
-		Peers: []*pbSync.PeerUpdate{
-			{
-				PeerId:        "peer-workstation",
-				Alias:         "workstation",
-				AssignedIp:    "127.100.0.11",
-				Online:        true,
-				Approved:      true,
-				ExportedPorts: []int32{3000, 8080},
-			},
-		},
-	}); err != nil {
-		return err
-	}
-	<-stream.Context().Done()
-	return stream.Context().Err()
-}
-
 func TestCoordinatorLifecycle(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-
-	// 1. Launch a test control plane sync server
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen mock sync: %v", err)
-	}
-	defer listener.Close()
-
-	grpcServer := grpc.NewServer()
-	pbSync.RegisterSyncServiceServer(grpcServer, &testControlSyncServer{})
-	go func() { _ = grpcServer.Serve(listener) }()
-	defer grpcServer.Stop()
 
 	// 2. Setup Coordinator with a protected local IPC socket.
 	tmpDir := shorttemp.Dir(t)
@@ -237,11 +195,7 @@ func TestCoordinatorLifecycle(t *testing.T) {
 
 	coord, err := NewCoordinator(CoordinatorConfig{
 		SocketAddress: sockPath,
-		SyncAddress:   listener.Addr().String(),
-		MachineID:     "machine-local",
 		AccountID:     "user_test",
-		Token:         func(context.Context) (string, error) { return "test", nil },
-		Insecure:      true,
 		NameClient:    names,
 		DialMachine:   func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("not dialed") },
 	})
@@ -268,7 +222,8 @@ func TestCoordinatorLifecycle(t *testing.T) {
 	}
 	defer client.Close()
 
-	// Wait for peer update from mock sync server
+	coord.applySnapshot([]*pbSync.PeerUpdate{{PeerId: "peer-workstation", Alias: "workstation", AssignedIp: "127.100.0.11", Online: true, Approved: true, ExportedPorts: []int32{3000, 8080}}}, 1)
+	// Wait for the peer update
 	var resolvedIP string
 	for i := 0; i < 30; i++ {
 		addr, err := client.ResolveMachine(ctx, "workstation", "user_test")
@@ -298,27 +253,6 @@ func TestCoordinatorLifecycle(t *testing.T) {
 	// 4. Verify Coordinator Stop
 	if err := coord.Stop(); err != nil {
 		t.Fatalf("coord.Stop: %v", err)
-	}
-}
-
-func TestCoordinatorFailsBeforeIPCWhenSyncCannotAuthenticate(t *testing.T) {
-	dir := shorttemp.Dir(t)
-	if err := os.Chmod(dir, 0700); err != nil {
-		t.Fatal(err)
-	}
-	socket := socketAddress(dir)
-	coordinator, err := NewCoordinator(CoordinatorConfig{SocketAddress: socket, SyncAddress: "127.0.0.1", MachineID: "machine", Token: func(context.Context) (string, error) { return "token", nil }, Insecure: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = coordinator.Start(t.Context()); err == nil {
-		t.Fatal("invalid sync endpoint reported ready")
-	}
-	if _, statErr := os.Lstat(socket); !errors.Is(statErr, os.ErrNotExist) {
-		t.Fatalf("IPC was published after sync failure: %v", statErr)
-	}
-	if err = coordinator.Stop(); err != nil {
-		t.Fatal(err)
 	}
 }
 

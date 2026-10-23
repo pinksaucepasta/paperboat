@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/controlsync"
 	pbSync "github.com/pinksaucepasta/paperboat/internal/controlsync/proto"
 	pb "github.com/pinksaucepasta/paperboat/internal/daemonrpc/proto"
 )
@@ -21,7 +20,6 @@ var ErrMachineNotFound = errors.New("machine not found")
 // LiveDaemonBackend connects the daemon's control sync client to the local IPC gRPC service.
 type LiveDaemonBackend struct {
 	mu          sync.RWMutex
-	syncClient  *controlsync.Client
 	version     string
 	state       string
 	generation  uint64
@@ -32,10 +30,9 @@ type LiveDaemonBackend struct {
 	accountName string
 }
 
-// NewLiveDaemonBackend creates a DaemonBackend backed by a real control plane sync client.
-func NewLiveDaemonBackend(syncClient *controlsync.Client, version string) *LiveDaemonBackend {
+// NewLiveDaemonBackend creates the DaemonBackend the coordinator feeds with peer updates.
+func NewLiveDaemonBackend(version string) *LiveDaemonBackend {
 	b := &LiveDaemonBackend{
-		syncClient: syncClient,
 		version:    version,
 		state:      "disconnected",
 		generation: 0,
@@ -77,11 +74,6 @@ func (b *LiveDaemonBackend) ApplyPeerUpdates(updates []*pbSync.PeerUpdate, revis
 	}
 }
 
-func (b *LiveDaemonBackend) SetSyncClient(client *controlsync.Client) {
-	b.mu.Lock()
-	b.syncClient = client
-	b.mu.Unlock()
-}
 // SetAccount records the signed-in account this daemon serves.
 func (b *LiveDaemonBackend) SetAccount(id, label string) {
 	b.mu.Lock()

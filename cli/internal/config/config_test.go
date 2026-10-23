@@ -77,21 +77,6 @@ func TestNormalizeServerURL(t *testing.T) {
 	}
 }
 
-func TestControlSyncAddressIsExplicitAndTLS(t *testing.T) {
-	cfg := &Config{ControlSyncAddress: "sync.example.test:443"}
-	cfg.applyDefaults()
-	if err := cfg.Validate(); err != nil || cfg.ControlSyncAddress != "sync.example.test:443" {
-		t.Fatalf("valid sync address = %q, %v", cfg.ControlSyncAddress, err)
-	}
-	for _, value := range []string{"http://sync.example.test:443", "sync.example.test", "https://user@sync.example.test:443", "https://sync.example.test:443/path"} {
-		bad := &Config{ControlSyncAddress: value}
-		bad.applyDefaults()
-		if err := bad.Validate(); err == nil {
-			t.Errorf("unsafe sync address %q accepted", value)
-		}
-	}
-}
-
 func TestSaveUsesRestrictedPermissions(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	cfg := &Config{path: path, ServerURL: "https://api.example"}

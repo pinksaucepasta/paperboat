@@ -83,11 +83,6 @@ type guardedNameClient interface {
 type CoordinatorConfig struct {
 	LocalAccess          config.LocalAccessConfig
 	SocketAddress        string
-	SyncAddress          string
-	MachineID            string
-	Token                func(context.Context) (string, error)
-	TLSConfig            *tls.Config
-	Insecure             bool
 	NameClient           guardedNameClient
 	AccountID            string // the signed-in account this daemon serves; CLI requests must carry it
 	AccountLabel         string

@@ -536,7 +536,7 @@ func TestDefaultSocketAddress(t *testing.T) {
 }
 
 func TestLiveDaemonBackendAuthorizedPortsAndUnknownTransport(t *testing.T) {
-	backend := NewLiveDaemonBackend(nil, "v2.0.0")
+	backend := NewLiveDaemonBackend("v2.0.0")
 
 	// Ingest peer update with dynamic ports
 	updates := []*pbSync.PeerUpdate{

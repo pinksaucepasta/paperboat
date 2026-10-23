@@ -289,10 +289,7 @@ func localDaemonCommand() *cobra.Command {
 					resultErr = coordinatorFailure("Paperboat daemon cleanup failed", resultErr, cleanupErr)
 				}
 			}()
-			coordinatorConfig := CoordinatorConfig{LocalAccess: cfg.LocalAccess, SyncAddress: cfg.ControlSyncAddress, MachineID: source.SourceMachineID, TLSConfig: transportConfig.TLSConfig, Token: func(ctx context.Context) (string, error) {
-				credential, credentialErr := authSource.WithContext(ctx).Credential()
-				return credential.AccessToken, credentialErr
-			}}
+			coordinatorConfig := CoordinatorConfig{LocalAccess: cfg.LocalAccess}
 			if profileErr == nil {
 				coordinatorConfig.AccountID = profile.Account.ID
 				coordinatorConfig.AccountLabel = accountLabel(profile.Account)
@@ -340,7 +337,7 @@ func localDaemonCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runWithSyncFailure(command.Context(), coordinator.Errors(), func(ctx context.Context) error {
+			return runWithCoordinatorFailure(command.Context(), coordinator.Errors(), func(ctx context.Context) error {
 				go newRelayLatencyReporter(cfg.ServerURL, source.SourceMachineID, controlTransport, func(ctx context.Context) (config.Credential, error) {
 					return authSource.WithContext(ctx).Credential()
 				}, peerTunnel.NativeRelayCandidates).Run(ctx)
@@ -376,18 +373,13 @@ func localDaemonCommand() *cobra.Command {
 					}
 					defer func() { _ = events.Shutdown(context.WithoutCancel(ctx)) }()
 				}
-				if cfg.ControlSyncAddress == "" {
-					go refreshMachineServices(ctx, coordinator, cfg.ServerURL, authSource, controlTransport, servicesEvents.Changed())
-				}
+				go refreshMachineServices(ctx, coordinator, cfg.ServerURL, authSource, controlTransport, servicesEvents.Changed())
 				teamShared := &teamSharedMachines{}
 				return localdaemon.Run(ctx, localdaemon.DaemonConfig{
 					InventoryEvents: inventoryEvents,
 					Paths:           paths, Source: source, ManagedSSH: managedConfig, IssuePeerStream: source.IssuePeerStream,
 					OwnerUID: os.Geteuid(), OwnerGID: os.Getegid(),
 					ReconcileMachines: func(ctx context.Context, machines []api.UserMachine) error {
-						if cfg.ControlSyncAddress != "" {
-							return coordinator.ReconcileStatus(ctx)
-						}
 						credential, err := authSource.WithContext(ctx).Credential()
 						if err != nil {
 							return fmt.Errorf("refresh local machine access credentials: %w", err)

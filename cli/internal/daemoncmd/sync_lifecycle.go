@@ -5,9 +5,9 @@ import (
 	"errors"
 )
 
-// The local runtime owns its cleanup. A terminal sync failure stops it and waits
+// The local runtime owns its cleanup. A terminal coordinator failure stops it and waits
 // for cleanup before returning the actionable authority error to its supervisor.
-func runWithSyncFailure(ctx context.Context, failures <-chan error, run func(context.Context) error) error {
+func runWithCoordinatorFailure(ctx context.Context, failures <-chan error, run func(context.Context) error) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	done := make(chan error, 1)

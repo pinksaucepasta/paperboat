@@ -78,12 +78,9 @@ type LocalMachineProxy struct {
 // Config is the on-disk CLI configuration.
 type Config struct {
 	// ServerURL is the paperboat-server base URL. It is required for production commands.
-	ServerURL string `json:"server_url,omitempty"`
-	// ControlSyncAddress is the optional authenticated topology stream endpoint.
-	// It must be an HTTPS host:port and is never inferred from the public API URL.
-	ControlSyncAddress string     `json:"control_sync_address,omitempty"`
-	Favorites          []Favorite `json:"favorites,omitempty"`
-	Auth               AuthConfig `json:"auth,omitempty"`
+	ServerURL string     `json:"server_url,omitempty"`
+	Favorites []Favorite `json:"favorites,omitempty"`
+	Auth      AuthConfig `json:"auth,omitempty"`
 	// FilePaste configures generic file-paste detection.
 	FilePaste FilePasteConfig `json:"file_paste,omitempty"`
 	// Connect tunes the pre-connect broker + readiness polling.
@@ -409,20 +406,6 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("local_access.machine_proxies contains duplicate machine %q", proxy.MachineAlias)
 		}
 		seenProxies[proxy.MachineAlias] = struct{}{}
-	}
-	if c.ControlSyncAddress != "" {
-		value := strings.TrimSpace(c.ControlSyncAddress)
-		if !strings.HasPrefix(value, "https://") {
-			value = "https://" + value
-		}
-		u, err := url.Parse(value)
-		if err != nil || u.Scheme != "https" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
-			return errors.New("control_sync_address must be an HTTPS host:port")
-		}
-		if _, port, err := net.SplitHostPort(u.Host); err != nil || port == "" {
-			return errors.New("control_sync_address must be an HTTPS host:port")
-		}
-		c.ControlSyncAddress = u.Host
 	}
 	if len(c.Favorites) > MaxFavorites {
 		return fmt.Errorf("favorites cannot contain more than %d items", MaxFavorites)

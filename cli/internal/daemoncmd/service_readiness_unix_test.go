@@ -130,7 +130,7 @@ func TestResolveCommandOutputFailureAndRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	backend := daemonrpc.NewLiveDaemonBackend(nil, "test")
+	backend := daemonrpc.NewLiveDaemonBackend("test")
 	backend.SetAccount("user_test", "tester@example.test")
 	backend.ApplyPeerUpdates([]*pbSync.PeerUpdate{{PeerId: "machine", Alias: "office", Approved: true, Online: true, AssignedIp: "127.100.0.2"}}, 1, nil)
 	server := daemonrpc.NewServer(backend)
@@ -189,7 +189,7 @@ func TestResolveRefusesAnotherAccountsSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	backend := daemonrpc.NewLiveDaemonBackend(nil, "test")
+	backend := daemonrpc.NewLiveDaemonBackend("test")
 	backend.SetAccount("user_owner", "owner@example.test")
 	backend.ApplyPeerUpdates([]*pbSync.PeerUpdate{{PeerId: "machine", Alias: "office", Approved: true, Online: true, AssignedIp: "127.100.0.2"}}, 1, nil)
 	server := daemonrpc.NewServer(backend)

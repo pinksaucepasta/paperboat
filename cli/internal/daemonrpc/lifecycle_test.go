@@ -10,7 +10,7 @@ import (
 )
 
 func TestBrowserURLsFollowOwnedSnapshot(t *testing.T) {
-	b := NewLiveDaemonBackend(nil, "test")
+	b := NewLiveDaemonBackend("test")
 	peer := &pbSync.PeerUpdate{PeerId: "machine", Alias: "office", Approved: true, Online: true, ExportedPorts: []int32{3000}}
 	urls := map[string]map[int32]string{"machine": {3000: "https://0123456789abcdef.pprbt"}}
 	b.ApplyPeerUpdates([]*pbSync.PeerUpdate{peer}, 1, urls)
@@ -38,7 +38,7 @@ func TestBrowserURLsFollowOwnedSnapshot(t *testing.T) {
 }
 
 func TestSnapshotWithdrawalAndConcurrentSubscriberCancellation(t *testing.T) {
-	b := NewLiveDaemonBackend(nil, "test")
+	b := NewLiveDaemonBackend("test")
 	peer := &pbSync.PeerUpdate{PeerId: "machine_a", Alias: "alpha", AssignedIp: "127.100.0.2", Approved: true, Online: true}
 	b.ApplyPeerUpdates([]*pbSync.PeerUpdate{peer}, 1, nil)
 	if _, err := b.ResolveMachine(context.Background(), "alpha"); err != nil {
@@ -96,7 +96,7 @@ func TestServerStopBoundsLiveStream(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer listener.Close()
-	server := NewServer(NewLiveDaemonBackend(nil, "test"))
+	server := NewServer(NewLiveDaemonBackend("test"))
 	go func() { _ = server.Serve(listener) }()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
