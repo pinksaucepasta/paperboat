@@ -592,9 +592,6 @@ func userMachineConnectionDescriptor(service *usermachines.Service) http.Handler
 			created = &item
 		}
 		response, err := service.ConnectTerminalSession(r.Context(), p.User.ID, body.SourceMachineID, r.PathValue("machine_id"), p.Client.SessionID, terminalSessionID)
-		if writeBandwidthQuotaExhausted(w, r, err) {
-			return
-		}
 		if errors.Is(err, usermachines.ErrNotFound) {
 			writeError(w, r, http.StatusNotFound, "user_machine_not_found", "Machine was not found.")
 			return
@@ -629,9 +626,6 @@ func sharedTerminalConnectionDescriptor(service *usermachines.Service) http.Hand
 			return
 		}
 		response, err := service.ConnectSharedTerminalSession(r.Context(), p.User.ID, body.SourceMachineID, p.Client.SessionID, r.PathValue("session_id"))
-		if writeBandwidthQuotaExhausted(w, r, err) {
-			return
-		}
 		if errors.Is(err, usermachines.ErrAmbiguousTeamAccess) {
 			writeError(w, r, http.StatusConflict, "ambiguous_team_access", "More than one team grants access to this resource. Use a resource with one team grant until team selection is available.")
 			return
@@ -668,9 +662,6 @@ func userMachineExecDescriptor(service *usermachines.Service) http.HandlerFunc {
 			return
 		}
 		response, err := service.ExecDescriptor(r.Context(), p.User.ID, body.SourceMachineID, r.PathValue("machine_id"), p.Client.SessionID, body.OperationID)
-		if writeBandwidthQuotaExhausted(w, r, err) {
-			return
-		}
 		if errors.Is(err, usermachines.ErrAmbiguousTeamAccess) {
 			writeError(w, r, http.StatusConflict, "ambiguous_team_access", "More than one team grants access to this resource. Use a resource with one team grant until team selection is available.")
 			return
@@ -713,9 +704,6 @@ func userMachineSSHDescriptor(service *usermachines.Service) http.HandlerFunc {
 			return
 		}
 		response, err := service.SSHDescriptor(r.Context(), p.User.ID, body.SourceMachineID, r.PathValue("machine_id"), p.Client.SessionID, body.OperationID)
-		if writeBandwidthQuotaExhausted(w, r, err) {
-			return
-		}
 		if errors.Is(err, usermachines.ErrAmbiguousTeamAccess) {
 			writeError(w, r, http.StatusConflict, "ambiguous_team_access", "More than one team grants access to this resource. Use a resource with one team grant until team selection is available.")
 			return
@@ -758,9 +746,6 @@ func userMachineFileTransferDescriptor(service *usermachines.Service) http.Handl
 			return
 		}
 		response, err := service.FileTransferDescriptorForRequest(r.Context(), p.User.ID, body.SourceMachineID, r.PathValue("machine_id"), p.Client.SessionID, body.SessionID, body.RequestID, body.ManifestDigest)
-		if writeBandwidthQuotaExhausted(w, r, err) {
-			return
-		}
 		if errors.Is(err, usermachines.ErrAmbiguousTeamAccess) {
 			writeError(w, r, http.StatusConflict, "ambiguous_team_access", "More than one team grants access to this resource. Use a resource with one team grant until team selection is available.")
 			return
@@ -1008,17 +993,3 @@ func userMachineDelete(service *usermachines.Service) http.HandlerFunc {
 	}
 }
 
-// writeBandwidthQuotaExhausted answers a session refused because the paying workspace's relay
-// and edge allowance is used up, with the console Billing page when the deployment has one.
-func writeBandwidthQuotaExhausted(w http.ResponseWriter, r *http.Request, err error) bool {
-	var quota *usermachines.BandwidthQuotaError
-	if !errors.As(err, &quota) {
-		return false
-	}
-	details := map[string]any{}
-	if quota.BillingURL != "" {
-		details["billing_url"] = quota.BillingURL
-	}
-	writeErrorDetails(w, r, http.StatusConflict, "bandwidth_quota_exhausted", "This workspace's hosted relay and edge bandwidth is used up. Direct machine-to-machine access still works. Add bandwidth, upgrade or self-host a relay and edge, or wait for the next allowance period.", details)
-	return true
-}

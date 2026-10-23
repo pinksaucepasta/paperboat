@@ -23,10 +23,10 @@ func (f *runtimeQuotaFixture) CheckWorkspaceBandwidthTx(_ context.Context, _ *db
 	return f.exhausted, nil
 }
 
-// Exec through the edge's runtime ingress is Paperboat bandwidth like the relay: below the cap the
-// session is recorded for the payer so edge usage reports debit it; at the cap the descriptor is
-// refused with the typed error and the console Billing page, and no access session is created.
-func TestEdgeRuntimeSessionsAreAccountedAndRefusedAtTheBandwidthCap(t *testing.T) {
+// Only traffic through Paperboat's relays and edges counts against the allowance. A CLI
+// descriptor is issued at the cap (a direct connection must keep working); a browser terminal,
+// which always rides the edge, is accounted below the cap and refused at it.
+func TestCLIDescriptorsAreNeverRefusedForBandwidthButBrowserTerminalsAre(t *testing.T) {
 	store := testStore(t)
 	ctx := context.Background()
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
@@ -66,51 +66,39 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 	service := New(store, audit.NewWriter(store), Policy{}, nil)
 	service.ConfigureAccess(fakeCredentialIssuer{}, "https://api.paperboat.test")
 	service.ConfigureTerminalSessions(4, signer, nil)
-	quota := &runtimeQuotaFixture{}
+	quota := &runtimeQuotaFixture{exhausted: true}
 	service.ConfigureRuntimeQuota(quota, "https://console.example.test/billing")
-	descriptor, err := service.ExecDescriptor(ctx, userID, sourceMachineID, machineID, "cli_rq_1", "operation_rq_ok_"+suffix)
+	// At the cap a CLI descriptor is still issued: the server cannot know whether the
+	// connection will be direct, and direct machine-to-machine traffic is always free.
+	descriptor, err := service.ExecDescriptor(ctx, userID, sourceMachineID, machineID, "cli_rq_1", "operation_rq_cap_"+suffix)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("exec descriptor at the cap: %v", err)
 	}
 	accessSessionID, _ := descriptor.Auth["access_session_id"].(string)
-	var workspace, route, actor string
-	var revision int64
-	if err := store.SQL().QueryRowContext(ctx, `SELECT workspace_id,route_id,route_revision,actor_account_id FROM paperboat.usage_accounting_authorities WHERE authority_id=$1 AND edge_node_id=$2 AND environment_id=$3`, accessSessionID, edgeNodeID, environmentID).Scan(&workspace, &route, &revision, &actor); err != nil || workspace != "personal:"+userID || route != "route_rq_"+suffix || revision != 1 || actor != userID {
-		t.Fatalf("runtime session accounting workspace=%q route=%q revision=%d actor=%q err=%v", workspace, route, revision, actor, err)
+	var cliAuthorities int
+	if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.usage_accounting_authorities WHERE authority_id=$1`, accessSessionID).Scan(&cliAuthorities); err != nil || cliAuthorities != 0 {
+		t.Fatalf("CLI descriptor recorded an edge authority: %d err=%v", cliAuthorities, err)
 	}
-	if len(quota.checked) != 1 || quota.checked[0] != "personal:"+userID {
-		t.Fatalf("admission checked %v", quota.checked)
+	if _, err = service.SSHDescriptor(ctx, userID, sourceMachineID, machineID, "cli_rq_1", "operation_rq_ssh_"+suffix); errors.Is(err, ErrBandwidthQuotaExhausted) {
+		t.Fatalf("ssh descriptor refused for bandwidth: %v", err)
 	}
-	// A console browser terminal is accounted under its attachment ID on the admitting edge.
+	if len(quota.checked) != 0 {
+		t.Fatalf("CLI descriptors checked the allowance: %v", quota.checked)
+	}
+	// A console browser terminal always rides the edge: accounted below the cap, refused at it.
+	quota.exhausted = false
 	attachment := "attachment_rq_" + suffix
 	if err := service.AdmitBrowserTerminalIngress(ctx, attachment, machineID, "", edgeNodeID, time.Now().Add(time.Minute)); err != nil {
 		t.Fatalf("browser admission: %v", err)
 	}
+	var workspace, route string
 	if err := store.SQL().QueryRowContext(ctx, `SELECT workspace_id,route_id FROM paperboat.usage_accounting_authorities WHERE authority_id=$1 AND edge_node_id=$2 AND environment_id=$3`, attachment, edgeNodeID, environmentID).Scan(&workspace, &route); err != nil || workspace != "personal:"+userID || route != "route_rq_"+suffix {
 		t.Fatalf("browser accounting workspace=%q route=%q err=%v", workspace, route, err)
 	}
-	if err := service.CheckBrowserTerminalBandwidth(ctx, machineID, edgeNodeID); err != nil {
-		t.Fatalf("browser ticket under the cap: %v", err)
-	}
 	quota.exhausted = true
-	// The ticket check refuses at the cap, so the console names the limit before connecting.
-	if err := service.CheckBrowserTerminalBandwidth(ctx, machineID, edgeNodeID); !errors.Is(err, ErrBandwidthQuotaExhausted) {
-		t.Fatalf("browser ticket at the cap err=%v", err)
-	}
-	if err := service.AdmitBrowserTerminalIngress(ctx, attachment+"_cap", machineID, "", edgeNodeID, time.Now().Add(time.Minute)); !errors.Is(err, ErrBandwidthQuotaExhausted) {
-		t.Fatalf("browser admission at the cap err=%v", err)
-	}
-	_, err = service.ExecDescriptor(ctx, userID, sourceMachineID, machineID, "cli_rq_1", "operation_rq_cap_"+suffix)
+	err = service.AdmitBrowserTerminalIngress(ctx, attachment+"_cap", machineID, "", edgeNodeID, time.Now().Add(time.Minute))
 	var refusal *BandwidthQuotaError
 	if !errors.Is(err, ErrBandwidthQuotaExhausted) || !errors.As(err, &refusal) || refusal.BillingURL != "https://console.example.test/billing" {
-		t.Fatalf("at the cap err=%v", err)
-	}
-	var sessions int
-	if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.user_machine_access_sessions WHERE user_machine_id=$1`, machineID).Scan(&sessions); err != nil || sessions != 1 {
-		t.Fatalf("refused descriptor created an access session: sessions=%d err=%v", sessions, err)
-	}
-	_, err = service.SSHDescriptor(ctx, userID, sourceMachineID, machineID, "cli_rq_1", "operation_rq_ssh_"+suffix)
-	if !errors.Is(err, ErrBandwidthQuotaExhausted) && !errors.Is(err, ErrMachineCapabilityUnavailable) {
-		t.Fatalf("ssh at the cap err=%v", err)
+		t.Fatalf("browser admission at the cap err=%v", err)
 	}
 }

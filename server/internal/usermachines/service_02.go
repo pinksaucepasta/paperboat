@@ -815,9 +815,6 @@ func (s *Service) operationDescriptor(ctx context.Context, userID, sourceMachine
 	expiresAt := admission.Expiry(s.controlSigner, issuedAt)
 	operationJTI := newID("token")
 	accessSessionID := newID("session")
-	if err := s.admitRuntimeIngress(ctx, route, row, userID, accessSessionID, expiresAt); err != nil {
-		return ExecDescriptor{}, err
-	}
 	token, err := s.signProcessCredential(ctx, mint.CredentialInput{
 		Issuer: s.issuer, Audience: "paperboat-machine", Subject: userID, JTI: operationJTI,
 		IssuedAt: issuedAt, ExpiresAt: expiresAt, CredentialClass: credentialClass, Scopes: []string{scope},
