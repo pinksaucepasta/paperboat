@@ -352,7 +352,12 @@ func TestInventoryClassifiesSSHAuthorityTransitions(t *testing.T) {
 		health    string
 	}{
 		{name: "missing target", machine: base, readiness: "unavailable", health: "ssh_target_not_ready"},
-		{name: "missing host keys", machine: func() api.UserMachine { value := base; value.SSHAuthority.TargetGeneration = 4; return value }(), readiness: "degraded", health: "ssh_host_key_changed"},
+		{name: "no ssh server (no host keys ever)", machine: func() api.UserMachine { value := base; value.SSHAuthority.TargetGeneration = 4; return value }(), readiness: "degraded", health: "ssh_server_missing"},
+		{name: "changed host keys", machine: func() api.UserMachine {
+			value := base
+			value.SSHAuthority = api.SSHAuthority{TargetGeneration: 4, HostKeyGeneration: 3}
+			return value
+		}(), readiness: "degraded", health: "ssh_host_key_changed"},
 		{name: "stale generation", machine: func() api.UserMachine {
 			value := base
 			value.SSHAuthority = api.SSHAuthority{TargetGeneration: 3, HostKeyGeneration: 3}

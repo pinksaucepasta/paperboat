@@ -306,6 +306,9 @@ func mapMachines(machines []api.UserMachine) []localapi.MachineStatus {
 			status.Health = []localapi.HealthItem{{Code: code, Severity: "warning", Title: "Managed SSH is not ready", Recovery: managedSSHDoctorRecovery, ETag: code}}
 		} else if generation > 0 && machine.SSHAuthority.TargetGeneration != generation {
 			status.Health = []localapi.HealthItem{{Code: "ssh_target_not_ready", Severity: "warning", Title: "SSH target is not ready", Recovery: "Ensure the machine's existing SSH service is listening on loopback", ETag: "ssh_target_not_ready"}}
+		} else if generation > 0 && machine.SSHAuthority.HostKeyGeneration == 0 {
+			// The machine never published SSH host keys: no SSH server runs there, so there is nothing to trust.
+			status.Health = []localapi.HealthItem{{Code: "ssh_server_missing", Severity: "warning", Title: "No SSH server is running on the machine", Recovery: "Install and start an SSH server (sshd) on the machine; Paperboat publishes its host keys within a minute", ETag: "ssh_server_missing"}}
 		} else if generation > 0 && machine.SSHAuthority.HostKeyGeneration != generation {
 			status.Health = []localapi.HealthItem{{Code: "ssh_host_key_changed", Severity: "warning", Title: "SSH host identity is not ready", Recovery: "Review and approve the machine's current SSH host keys", ETag: "ssh_host_key_changed"}}
 		}
