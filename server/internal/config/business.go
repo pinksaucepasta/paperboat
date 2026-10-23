@@ -28,9 +28,6 @@ type Business struct {
 	AuditStreamMaxBackoff  time.Duration `json:"audit_stream_max_backoff"`
 	AuditStreamAlertAfter  time.Duration `json:"audit_stream_alert_after"`
 
-	// InvoiceMinSeats and InvoiceDaysUntilDue govern pay by invoice (yearly Team only).
-	InvoiceMinSeats     int `json:"invoice_min_seats"`
-	InvoiceDaysUntilDue int `json:"invoice_days_until_due"`
 	// StripeTax turns on Stripe Tax calculation; the user flips it once tax registrations exist.
 	StripeTax bool `json:"stripe_tax"`
 }
@@ -45,7 +42,6 @@ func defaultBusiness() Business {
 		AuditExportMaxRows:    1_000_000,
 		AuditStreamBatchBytes: 1 << 20, AuditStreamBatchWindow: 5 * time.Second,
 		AuditStreamMaxBackoff: time.Hour, AuditStreamAlertAfter: time.Hour,
-		InvoiceMinSeats: 10, InvoiceDaysUntilDue: 30,
 	}
 }
 
@@ -55,8 +51,8 @@ const minimumAuditRetention = 30 * day
 
 func (b Business) validate() error {
 	var errs []error
-	if b.SSOMinSeats < 1 || b.SSOExemptMax < 0 || b.InvoiceMinSeats < 1 || b.InvoiceDaysUntilDue < 1 || b.InvoiceDaysUntilDue > 365 {
-		errs = append(errs, errors.New("business seat, exemption and invoice limits must be positive"))
+	if b.SSOMinSeats < 1 || b.SSOExemptMax < 0 {
+		errs = append(errs, errors.New("business seat and exemption limits must be positive"))
 	}
 	if b.SSOSessionMin < time.Hour || b.SSOSessionMin > b.SSOSessionDefault || b.SSOSessionDefault > b.SSOSessionMax {
 		errs = append(errs, errors.New("business SSO session lengths must satisfy 1h <= min <= default <= max"))

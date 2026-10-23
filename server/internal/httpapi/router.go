@@ -697,11 +697,6 @@ func NewRouter(opts Options) http.Handler {
 			mux.Handle("POST /v1/billing/workspaces/teams/{team_id}/topups", requireAuth(opts.Auth, requireCSRF(opts.Auth, workspaceBillingMutation(opts.WorkspaceBilling, opts.Config.HTTP.AllowedOrigins, false))))
 			mux.Handle("POST /v1/billing/workspaces/teams/{team_id}/checkout", requireAuth(opts.Auth, requireCSRF(opts.Auth, workspaceBillingMutation(opts.WorkspaceBilling, opts.Config.HTTP.AllowedOrigins, false))))
 			mux.Handle("POST /v1/billing/workspaces/teams/{team_id}/portal", requireAuth(opts.Auth, requireCSRF(opts.Auth, workspaceBillingMutation(opts.WorkspaceBilling, opts.Config.HTTP.AllowedOrigins, true))))
-			registerBusinessBillingRoutes(mux, opts.WorkspaceBilling,
-				func(h http.Handler) http.Handler {
-					return requireAnyAuth(opts.Auth, opts.DeviceAuth, requireScope("account:read", h))
-				},
-				func(h http.Handler) http.Handler { return requireAuth(opts.Auth, requireCSRF(opts.Auth, h)) })
 			mux.HandleFunc("POST /v1/webhooks/stripe", stripeWorkspaceWebhook(opts.WorkspaceBilling, opts.Config.Secrets.StripeWebhookSecret))
 		}
 		if opts.MeteringRepo != nil {

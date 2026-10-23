@@ -228,7 +228,6 @@ func New(opts Options) (*App, error) {
 		stripeClient = billing.HTTPStripeClient{BaseURL: opts.Config.Providers.Stripe.BaseURL, APIKey: opts.Config.Secrets.StripeAPIKey, AutomaticTax: opts.Config.Business.StripeTax}
 	}
 	workspaceBilling := billing.NewWorkspaceService(store, stripeClient, opts.Config.Secrets.EncryptionKey, billing.PortalConfigurations{Personal: opts.Config.Billing.PersonalPortalConfigurationID, Team: opts.Config.Billing.TeamPortalConfigurationID})
-	workspaceBilling.ConfigureBusiness(opts.Config.Business)
 	if err := workspaceBilling.ConfigureTopupMaxQuantity(opts.Config.Billing.TopupMaxQuantity); err != nil {
 		return nil, err
 	}

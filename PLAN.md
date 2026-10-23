@@ -873,16 +873,16 @@ Simple view (user decision 2026-10-22): preview/tunnel `use`/`manage` and lazy-p
 - F18-09: Console Access page (Simple grid with today's grants, private-access switch, tags, groups; Policy file editor with inline errors and Review changes; Test; History with Diff/Restore) and Settings → API tokens (scripted browser check).
 - F18-10: CLI `pb policy` and `pb api-token` commands work end to end against the live server (device check on the victus VMs).
 
-### F19. Teams for business: SSO, directory sync, roles, audit log, invoices (Lane S, user decision 2026-10-23)
+### F19. Teams for business: SSO, directory sync, roles, audit log (Lane S, user decision 2026-10-23)
 
 **What:** what companies pay Team seats for, required at launch. Free and Pro are everything for
 one person; Team is collaboration plus these: single sign-on (SAML and OIDC) with verified domains
 and enforcement, automatic member provisioning and deprovisioning (SCIM), more roles with one
-permission matrix, a searchable and exportable audit log streamed to the customer's SIEM, and
-business billing (invoices, billing details, tax ID, pay by invoice).
+permission matrix, and a searchable and exportable audit log streamed to the customer's SIEM;
+invoices and billing details stay in the Stripe portal.
 **Surfaces:** console team Settings → Security (SSO, domains, enforcement), Directory, Members
-(roles), Activity (audit log: filters, export, streaming), Billing (invoices, billing details, pay
-by invoice); `pb team sso|scim|activity|role`; server identity, teams, activity and billing;
+(roles), Activity (audit log: filters, export, streaming), Billing ("Manage billing" Stripe
+portal); `pb team sso|scim|activity|role`; server identity, teams, activity and billing;
 admin reference `server/docs/teams-business.md`.
 **Owner:** Lane S across server/ (B), cli/ (A) and console/ (C, with Lane C's help), each change
 small and logged in section 5; Lane B deploys. Billing parts in agreement with Lane O (F13);
@@ -896,8 +896,8 @@ team (the account stays the person's own; workspaces share nothing), with a revi
 access before turning it on. Linear: JIT provisioning on SSO sign-in, directory group → role
 mapping, directory-managed members locked against manual edits. Tailscale: roles are admin
 permissions only (Owner, Admin, Billing admin, Auditor, Member); using machines is the policy's
-job; log streaming to an HTTPS endpoint or S3-compatible storage. Stripe: invoices, customer tax
-IDs and `send_invoice` collection; Stripe is the only owner of billing details.
+job; log streaming to an HTTPS endpoint or S3-compatible storage. Stripe: its Customer Portal for
+invoices and billing details; Stripe is the only owner of them.
 
 #### Roles and permission matrix
 
@@ -914,7 +914,7 @@ never imply use"). Every role is a member and takes a seat.
 | SSO, domains, enforcement, exemptions, directory sync | ✓ | ✓ | | | |
 | Read and export the audit log; streaming status | ✓ | ✓ | | ✓ | |
 | Configure audit log streaming | ✓ | ✓ | | | |
-| Billing: plan, seats, top-ups, invoices, billing details, pay by invoice | ✓ | | ✓ | | |
+| Billing: plan, seats, top-ups, Manage billing (Stripe portal) | ✓ | | ✓ | | |
 | Delete team, transfer ownership | ✓ | | | | |
 | Own API tokens, explain own access | ✓ | ✓ | ✓ | ✓ | ✓ |
 
@@ -993,7 +993,7 @@ activity endpoint is folded into it (one way to read). Personal workspaces have 
   approve, remove; policy, tokens (F18); ENV grants (never values); starting terminal, browser
   terminal, exec, SSH/SCP/SFTP/rsync, file transfer, preview/tunnel create/delete, private access,
   inspector use, and every authorization denial with its reason; billing changes (plan, seats,
-  top-ups, details, pay by invoice); export and streaming changes. Never contents, ENV values or
+  top-ups, portal sessions); export and streaming changes. Never contents, ENV values or
   secrets.
 - **Event shape** (documented, stable, the same in API, export and stream):
   `{id, occurred_at, workspace, actor: {kind: user|api_token|directory|operator|system, id,
@@ -1021,24 +1021,14 @@ activity endpoint is folded into it (one way to read). Personal workspaces have 
     wait until delivered or their retention ends; "Send test event"; status (last delivery, lag,
     last error); owners/admins emailed once when a destination has failed for 1 hour.
 
-#### Invoices and business billing (with Lane O)
+#### Billing (with Lane O)
 
-Stripe is the only owner of billing details; nothing is copied into our database.
-- **Invoices:** `GET /v1/billing/invoices?workspace=` lists Stripe invoices (number, date, period,
-  amount, tax, status, hosted page and PDF links) for personal and team workspaces; the console
-  Billing page lists and downloads them.
-- **Billing details:** billing email (where invoices and receipts go), company name, address and
-  one tax ID (EU VAT, UK VAT, US EIN, and the other Stripe tax ID types) read and written through
-  `GET/PUT /v1/billing/details?workspace=`; Stripe validates the tax ID and prints name, address
-  and tax ID on every invoice.
-- **Pay by invoice:** for Team workspaces on the yearly price with at least 10 seats (config). Billing owners switch it on or off; the subscription moves to Stripe
-  `collection_method=send_invoice` with `days_until_due` (config, 30); Stripe emails each invoice
-  to the billing email with a hosted payment page (card or bank transfer). An overdue invoice
-  follows the existing failed-renewal path (7 days of grace, then suspension until paid, 1.3).
-  The first purchase is by card Checkout as today; seat changes are invoiced immediately the same
-  way.
-- Lane S adds new files in `server/internal/billing` (invoices, details, collection) and one
-  webhook case; Lane O keeps plans, prices, Checkout, seats and grace.
+No invoices or billing details in our console or API (user decision 2026-10-23). "Manage billing"
+opens the Stripe Customer Portal: invoices and receipts, payment methods, billing email, company
+name, address and tax ID, printed on every invoice. Checkout collects the tax ID, name and address;
+Stripe Tax computes tax behind one config switch. Pay by invoice is set per customer in the Stripe
+dashboard (`send_invoice`); an overdue invoice follows the failed-renewal path (7 days of grace,
+then suspension until paid, 1.3). Only the owner and billing admins open the portal.
 
 #### CLI (Lane A paths)
 
@@ -1053,8 +1043,8 @@ link (and open it where a browser is available). Streaming and billing stay in t
 1. SSO and directory sync are available to Team workspaces with at least 10 seats (config
    value; WorkOS bills per connection). Smaller teams see "available from 10 seats".
 2. Audit retention Free 30, Pro 90, Team 365 days (config); export and streaming Team only.
-3. Pay by invoice through Stripe only (`send_invoice`; no payment handling of our own): Team
-   yearly, 10+ seats, net 30 (config).
+3. Pay by invoice through Stripe only, set per customer in the Stripe dashboard; no feature of
+   ours (revised 2026-10-23, see Billing).
 4. Tax ID, company name and address printed on invoices now; Stripe Tax computes tax when the
    single config switch `billing.stripe_tax` is on (the user turns it on once registered).
 5. Deprovisioning removes the person from the team only; the account and personal workspace stay.
@@ -1076,9 +1066,7 @@ IdP's job), SAML-only Paperboat accounts without email.
 - F19-08: Audit log search and filter (actor, action, target, result, time, text) with cursor paging in API, console and `pb team activity`; owners, admins and auditors only for teams.
 - F19-09: Audit log export as CSV and JSON for a time range and filters, streamed and bounded; the export is recorded.
 - F19-10: Audit log streaming to HTTPS (NDJSON, signed, custom auth header) and S3-compatible storage: in order, at least once, retries, test event, status and failure email.
-- F19-11: Invoices listed and downloadable in the console for personal and team workspaces; billing email, company name, address and tax ID edited in the console and printed on invoices.
-- F19-12: Pay by invoice for eligible Team workspaces: switch on/off, invoice emailed with due date, overdue → grace → suspension → recovery (Stripe test clock).
-- F19-13: Console: Security (SSO, domains, Require SSO with review, exemptions, bypass log), Directory (state, group → role mapping), roles in Members, Activity filters/export/streaming, Billing invoices/details/pay by invoice (scripted browser check).
+- F19-13: Console: Security (SSO, domains, Require SSO with review, exemptions, bypass log), Directory (state, group → role mapping), roles in Members, Activity filters/export/streaming (scripted browser check).
 - F19-14: CLI `pb team sso`, `pb team scim`, `pb team activity` (filters, export) and new roles in `pb team role` work end to end against the live server.
 - F19-15: Admin reference `server/docs/teams-business.md`: roles matrix, SSO and SCIM setup per IdP through the Admin Portal, enforcement and break-glass, audit event catalog and shape, export and stream formats with signature verification, billing; a test keeps the roles table and event catalog equal to the code.
 
@@ -2937,3 +2925,4 @@ Found: first connect to a just-paired peer waits ~5 s (5071, 6118 ms; then 3–6
 2026-10-23 | Lane K F18 | F18-06 L ticked (policy_token.py 15/15, hp, dev-9139daa6). Fixed on the way: 36d7cc7d (scoped E2EE bootstrap), 55a55a0c (scope refusal named), 3789067e (daemon breaker held a new sign-in back). | F18-02 L next on hp second-acct (lane-b-f12).
 2026-10-23 | Lane C | Test data: F13 throwaway account joined team lane-b-f12 as member (invited by owner pprbtdev; paperboat-smoke-paid had no free seat, 10 seats asked of Lane B); its machine second-acct on hp (machine_980173c1…, Personal) is the member-account machine for F18-02 and F3-06/08.
 2026-10-23 | Lane K F18 | F18-02/03/04/05/08 L ticked (policy_team.py 24/25 on hp, lane-b-f12, member second-acct). | F18-07 L waits: a team ENV in a test team (lane-b-f12 has none).
+2026-10-23 | Lane S F19 billing scope | User decision: no invoices/billing details in our console or API; Stripe portal ("Manage billing") covers them, pay by invoice set per customer in Stripe. F19-11/12 deleted; server endpoints removed after Lane C drops the screens. Lane O set sandbox portal customer_update (email,name,address,phone,tax_id).

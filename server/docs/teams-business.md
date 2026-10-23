@@ -14,7 +14,7 @@ Access), never by a role. Every role takes a seat.
 |---|---|
 | `owner` | The one person who owns the team. Transfer with `pb team transfer`. |
 | `admin` | Runs the team: members, settings, machines, policy, security, audit log. |
-| `billing` | Billing admin: plan, seats, top-ups, invoices, billing details. |
+| `billing` | Billing admin: plan, seats, top-ups and Manage billing (invoices, billing details). |
 | `auditor` | Read-only: sees everything an admin sees and reads/exports the audit log. |
 | `member` | Everyone else. |
 
@@ -40,7 +40,7 @@ Access), never by a role. Every role takes a seat.
 - `security.manage`: SSO, verified domains, Require SSO, SSO exemptions, directory sync.
 - `audit.read`: search and export the audit log, see streaming status.
 - `audit.stream`: configure audit log streaming.
-- `billing.manage`: plan, seats, top-ups, invoices, billing details, pay by invoice.
+- `billing.manage`: plan, seats, top-ups, Manage billing (Stripe portal).
 - `team.own`: delete the team, transfer ownership.
 
 The matrix is served by the API at `GET /v1/team-roles`. Change a role with
@@ -159,36 +159,6 @@ request_id, details` (details as JSON; cells starting with `= + - @` are prefixe
 spreadsheets never run them). JSON is one array of events. Each export is itself recorded as
 `team.activity_exported`.
 
-## Invoices and billing details
-
-The owner and billing admins (`billing.manage`) of a team, and the owner of a personal workspace,
-see and download invoices and edit billing details in the console Billing page. Stripe stores all
-of it; Paperboat keeps no copy.
-
-- **Invoices:** `GET /v1/billing/workspaces/{personal|teams/<team>}/invoices` lists finalized
-  invoices newest first (24 per page, `cursor` = `next_cursor`), each with its number, period,
-  total, tax, status, due date, a page to view and pay it (`hosted_url`) and the PDF (`pdf_url`).
-- **Billing details:** `GET`/`PUT .../details` with `email` (where invoices and receipts go),
-  `name` (company or person), `address` (country as a two-letter code, required with any address
-  line) and one `tax_id` (`type` is a Stripe tax ID type such as `eu_vat`, `gb_vat`, `us_ein`;
-  `null` removes it). Stripe checks the tax ID and prints the name, address and tax ID on every
-  later invoice. Changes are recorded as `billing.details_updated` (without the values).
-- **Tax:** Stripe Tax computes VAT and sales tax only when the server setting
-  `business.stripe_tax` (environment `PAPERBOAT_BILLING_STRIPE_TAX=true`) is on; it is turned on
-  once the business has tax registrations.
-
-## Pay by invoice
-
-Teams on the yearly Team plan with at least `business.invoice_min_seats` seats (10) can pay by
-invoice instead of card: `GET`/`PUT /v1/billing/workspaces/teams/<team>/pay-by-invoice`
-(`{"pay_by_invoice": true}`), or the console Billing page. The first purchase is by card; the
-switch applies from the next invoice. Stripe then emails each invoice to the billing email, due
-`business.invoice_days_until_due` days (30) after it is issued, with a page to pay by card or bank
-transfer; seat changes are invoiced the same way. An invoice not paid by its due date starts the
-same 7-day grace as a failed card payment, after which the team's paid features pause until it is
-paid. Turning pay by invoice off returns to automatic card payment. Changes are recorded as
-`billing.pay_by_invoice_changed`.
-
 ### Streaming to a SIEM (Team plan)
 
 Owners and admins (`audit.stream`) send the team audit log to their SIEM as it happens; at most
@@ -221,3 +191,19 @@ delivered or until their retention ends. The stream status shows the last delive
 error and how many events wait. After `business.audit_stream_alert_after` (1 hour) of failures
 the owners and admins get one email, and `team.activity_stream_failing` is recorded. **Send test
 event** (`POST .../test`) delivers one `team.activity_stream_test` event right away.
+
+## Billing
+
+The owner and billing admins (`billing.manage`) of a team, and the owner of a personal workspace,
+open **Manage billing** in the console Billing page. It is the Stripe Customer Portal: invoices
+and receipts (view, download, pay), payment methods, and the billing email, company name, address
+and tax ID printed on every later invoice. Stripe stores all of it; Paperboat keeps no copy.
+
+- **Tax:** Checkout asks companies for their tax ID, name and address. Stripe Tax computes VAT and
+  sales tax only when the server setting `business.stripe_tax` (environment
+  `PAPERBOAT_BILLING_STRIPE_TAX=true`) is on; it is turned on once the business has tax
+  registrations.
+- **Pay by invoice:** set per customer in the Stripe dashboard (Customer → subscription → payment
+  method "Email invoice"), not in Paperboat. Stripe emails each invoice with a page to pay by card
+  or bank transfer. An invoice not paid by its due date starts the same 7-day grace as a failed
+  card payment, after which the team's paid features pause until it is paid.

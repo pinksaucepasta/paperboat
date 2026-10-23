@@ -10,7 +10,7 @@ func TestBusinessDefaultsMatchTheUserDecisions(t *testing.T) {
 	if err := b.validate(); err != nil {
 		t.Fatal(err)
 	}
-	if b.SSOMinSeats != 10 || b.InvoiceMinSeats != 10 || b.InvoiceDaysUntilDue != 30 || b.StripeTax ||
+	if b.SSOMinSeats != 10 || b.StripeTax ||
 		b.AuditRetentionFree != 30*day || b.AuditRetentionPro != 90*day || b.AuditRetentionTeam != 365*day {
 		t.Fatalf("business defaults = %+v", b)
 	}
@@ -21,7 +21,6 @@ func TestBusinessValidationRejectsUnsafeValues(t *testing.T) {
 		"retention below the database guard": func(b *Business) { b.AuditRetentionFree = 7 * day },
 		"pro shorter than free":              func(b *Business) { b.AuditRetentionPro = b.AuditRetentionFree - time.Hour },
 		"session default above max":          func(b *Business) { b.SSOSessionDefault = b.SSOSessionMax + time.Hour },
-		"no invoice due date":                func(b *Business) { b.InvoiceDaysUntilDue = 0 },
 	} {
 		b := defaultBusiness()
 		edit(&b)
