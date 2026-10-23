@@ -5,25 +5,32 @@ import (
 	"time"
 )
 
-// InventoryRefreshEvery paces the refreshes a waiting command asks its own daemon for. The daemon no longer
-// re-lists the account on every presence change (that woke every daemon of the account at once), so a command
-// that waits for a machine to come up asks for the current inventory itself, at most this often.
-const InventoryRefreshEvery = 3 * time.Second
+// InventoryRefreshEvery and InventoryRefreshMaximum pace the refreshes a waiting command asks its own daemon
+// for: the first after InventoryRefreshEvery, then doubling to InventoryRefreshMaximum. A machine's first
+// sighting and its changes reach the daemon as inventory events, so a long wait needs no fast polling: at a
+// fixed 3 s each waiting command cost the server a full inventory (one list per workspace) every 3 s.
+const (
+	InventoryRefreshEvery   = 3 * time.Second
+	InventoryRefreshMaximum = 15 * time.Second
+)
 
-// KeepInventoryFresh calls refresh once per every (at most one call in flight) until ctx ends. Failures are
-// left to the wait itself: it reports what it last saw when its own deadline passes.
-func KeepInventoryFresh(ctx context.Context, refresh func(context.Context) error, every time.Duration) {
-	if refresh == nil || every <= 0 {
+// KeepInventoryFresh calls refresh (at most one call in flight) after every, then after doubling waits up to
+// maximum, until ctx ends. Failures are left to the wait itself: it reports what it last saw when its own
+// deadline passes.
+func KeepInventoryFresh(ctx context.Context, refresh func(context.Context) error, every, maximum time.Duration) {
+	if refresh == nil || every <= 0 || maximum < every {
 		return
 	}
-	ticker := time.NewTicker(every)
-	defer ticker.Stop()
-	for {
+	timer := time.NewTimer(every)
+	defer timer.Stop()
+	for wait := every; ; {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-timer.C:
 			_ = refresh(ctx)
+			wait = min(wait*2, maximum)
+			timer.Reset(wait)
 		}
 	}
 }

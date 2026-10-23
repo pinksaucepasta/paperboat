@@ -777,3 +777,41 @@ func TestInventoryOutageRefreshBacksOffWithJitter(t *testing.T) {
 		}
 	}
 }
+
+// pb wait asks its daemon for a refresh every few seconds; requests from local commands are spaced so
+// a loop of them cannot turn into a full account listing each time.
+func TestRequestedRefreshesFoldWithinTheSpacing(t *testing.T) {
+	source := &scriptedMachineSource{results: []machineResult{{machines: []api.UserMachine{{ID: "machine_1", Alias: "studio"}}}}}
+	store, err := localapi.NewSnapshotStore(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	var at []time.Time
+	inventory, err := NewInventory(InventoryConfig{Source: source, Store: store, RefreshInterval: time.Hour, RequestTimeout: time.Second, OnRefresh: func(error) {
+		mu.Lock()
+		at = append(at, time.Now())
+		mu.Unlock()
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- inventory.Run(ctx) }()
+	for range 14 { // 700 ms of requests, inside one spacing
+		inventory.RequestRefresh()
+		time.Sleep(50 * time.Millisecond)
+	}
+	time.Sleep(requestedRefreshSpacing)
+	cancel()
+	<-done
+	mu.Lock()
+	defer mu.Unlock()
+	if len(at) != 2 {
+		t.Fatalf("%d refreshes for the start plus 14 requests within 700 ms, want 2 (the requests folded into one)", len(at))
+	}
+	if gap := at[1].Sub(at[0]); gap < requestedRefreshSpacing-50*time.Millisecond {
+		t.Fatalf("requested refresh %v after the previous one, want at least %v", gap, requestedRefreshSpacing)
+	}
+}

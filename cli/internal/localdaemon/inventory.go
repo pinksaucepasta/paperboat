@@ -27,6 +27,10 @@ const (
 	defaultEventRefreshSpacing = 15 * time.Second
 	// While the server's change stream is healthy the periodic refresh is only a safety net.
 	defaultEventFallback = 5 * time.Minute
+	// requestedRefreshSpacing is the least time between a refresh and one asked for by a local command
+	// (pb wait, managed SSH after it starts): requests in between fold into one refresh at the spacing, so a
+	// loop of commands costs the server at most one inventory per second.
+	requestedRefreshSpacing = time.Second
 	// While it is unhealthy (usually the server itself is failing) the periodic refresh backs off from the
 	// refresh interval to outageMaximumRefresh with jitter, so a fleet does not re-list every machine in
 	// lockstep while the server recovers (22 machines made ~355 machine listings a minute in one outage).
@@ -170,6 +174,13 @@ func (i *Inventory) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-i.wake:
+			if pending != nil {
+				continue
+			}
+			if wait := requestedRefreshSpacing - time.Since(started); wait > 0 {
+				pending = time.After(wait)
+				continue
+			}
 			refresh()
 		case <-i.events.Changed():
 			if pending != nil {
