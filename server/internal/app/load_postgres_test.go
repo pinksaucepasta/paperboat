@@ -78,6 +78,12 @@ func startLoadServer(t *testing.T) *loadServer {
 	cfg := config.Default()
 	cfg.Database = config.Database{Driver: "postgres", DSN: dsn}
 	cfg.HTTP.BrowserLoginOrigin = loadOrigin
+	// Discovery like a deployed server, so GET /v1/client-configuration answers 200 (unconfigured it is a constant
+	// 503 that counted one in seven requests as failures in the first staging runs). Test domains only.
+	cfg.HTTP.PublicBaseURL, cfg.ReleaseBaseURL = "http://api.example.test", "http://api.example.test"
+	cfg.CLIAuth.VerificationURL, cfg.CLIAuth.MachinesURL = loadOrigin+"/cli", loadOrigin+"/machines"
+	cfg.LocalAccessBaseDomain, cfg.RuntimeBaseDomain = "local.example.test", "runtime.example.test"
+	cfg.Preview.BaseDomain, cfg.Tunnel.BaseDomain = "preview.example.test", "tunnel.example.test"
 	store, err := db.Open(cfg.Database)
 	if err != nil {
 		t.Fatal(err)
@@ -217,6 +223,19 @@ var refreshMix = []string{
 
 func TestLoadIdlePollMix(t *testing.T) {
 	server := startLoadServer(t)
+	// Warm-up: the first list of a freshly seeded account allocates every machine's address lease (about 0.3 s per
+	// machine under a table lock, measured on staging); measure the steady state after it.
+	warm := time.Now()
+	warmCtx, cancelWarm := context.WithTimeout(context.Background(), 5*time.Minute)
+	for attempt := 0; attempt < 30; attempt++ {
+		status, err := server.request(warmCtx, loadClient(4), http.MethodGet, refreshMix[0], "")
+		if err == nil && status == http.StatusOK {
+			break
+		}
+		time.Sleep(5 * time.Second)
+	}
+	cancelWarm()
+	t.Logf("warm-up list ready after %v", time.Since(warm).Round(time.Millisecond))
 	// 15 s is today's interval with the event stream unhealthy; 300 s is the fallback once it is healthy.
 	refreshEvery := time.Duration(loadSteps("PAPERBOAT_LOAD_REFRESH_SECONDS", []int{15})[0]) * time.Second
 	window := max(60*time.Second, refreshEvery)
@@ -225,6 +244,7 @@ func TestLoadIdlePollMix(t *testing.T) {
 		var mu sync.Mutex
 		latencies := map[string][]time.Duration{}
 		statuses := map[int]int{}
+		pathFailures := map[string]int{}
 		var transportErrors atomic.Int64
 		ctx, cancel := context.WithTimeout(context.Background(), window)
 		before := server.transactions(t)
@@ -252,9 +272,13 @@ func TestLoadIdlePollMix(t *testing.T) {
 						mu.Lock()
 						if err != nil {
 							transportErrors.Add(1)
+							pathFailures[key]++
 						} else {
 							statuses[status]++
 							latencies[key] = append(latencies[key], time.Since(started))
+							if status >= 500 || status == http.StatusTooManyRequests {
+								pathFailures[key]++
+							}
 						}
 						mu.Unlock()
 					}
@@ -282,7 +306,7 @@ func TestLoadIdlePollMix(t *testing.T) {
 			slices.Sort(values)
 			p50, p99 := values[len(values)/2], values[(len(values)*99)/100]
 			worst = max(worst, p99)
-			lines = append(lines, fmt.Sprintf("%s p50 %v p99 %v", path, p50.Round(time.Millisecond), p99.Round(time.Millisecond)))
+			lines = append(lines, fmt.Sprintf("%s p50 %v p99 %v failed %d of %d", path, p50.Round(time.Millisecond), p99.Round(time.Millisecond), pathFailures[path], len(values)))
 		}
 		slices.Sort(lines)
 		t.Logf("daemons=%d refresh=%v: %d requests (%.0f/s), %d failed, statuses %v, %.0f DB transactions/s; host busy %.2f of %d vCPU (server + PostgreSQL) = %.0f machines per busy vCPU\n  %s",

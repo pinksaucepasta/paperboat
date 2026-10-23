@@ -22,8 +22,11 @@ $DOCKER run -d --name "$NAME" -p 127.0.0.1:"$PORT":5432 -v paperboat-load-pgdata
   -c max_connections=400 -c max_locks_per_transaction=2048 -c shared_buffers=${PAPERBOAT_LOAD_PG_SHARED_BUFFERS:-256MB} \
   -c shared_preload_libraries=auto_explain -c auto_explain.log_min_duration=2s -c auto_explain.log_analyze=on \
   -c auto_explain.log_buffers=on -c auto_explain.log_nested_statements=on >/dev/null
-for _ in $(seq 1 60); do
-  $DOCKER exec "$NAME" pg_isready -U postgres -d paperboat_load_test >/dev/null 2>&1 && break
+# The image's first start runs initdb on a temporary server (pg_isready already answers) and then restarts it;
+# connect only after the init process completed and the final server accepts connections.
+for _ in $(seq 1 120); do
+  $DOCKER logs "$NAME" 2>&1 | grep -q "PostgreSQL init process complete" \
+    && $DOCKER exec "$NAME" pg_isready -U postgres -d paperboat_load_test >/dev/null 2>&1 && break
   sleep 1
 done
 export PAPERBOAT_PERF_DATABASE_DSN="postgres://postgres:$PASS@127.0.0.1:$PORT/paperboat_load_test?sslmode=disable"

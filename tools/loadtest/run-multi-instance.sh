@@ -31,7 +31,13 @@ $DOCKER rm -f "$PG" "$PROXY" >/dev/null 2>&1 || true
 $DOCKER run -d --name "$PG" -p 127.0.0.1:$PGPORT:5432 -v paperboat-load-pgdata:/var/lib/postgresql/data \
   -e POSTGRES_PASSWORD="$PASS" -e POSTGRES_DB=paperboat_load_test postgres:17 \
   -c max_connections=400 -c max_locks_per_transaction=2048 -c shared_buffers=${PAPERBOAT_LOAD_PG_SHARED_BUFFERS:-256MB} >/dev/null
-until $DOCKER exec "$PG" pg_isready -U postgres -d paperboat_load_test >/dev/null 2>&1; do sleep 1; done
+# The image's first start runs initdb on a temporary server (pg_isready already answers) and then restarts it;
+# connect only after the init process completed and the final server accepts connections.
+for _ in $(seq 1 120); do
+  $DOCKER logs "$PG" 2>&1 | grep -q "PostgreSQL init process complete" \
+    && $DOCKER exec "$PG" pg_isready -U postgres -d paperboat_load_test >/dev/null 2>&1 && break
+  sleep 1
+done
 DSN="postgres://postgres:$PASS@127.0.0.1:$PGPORT/paperboat_load_test?sslmode=disable"
 
 # Migrate and seed once through the test binary (it refuses non-*_test databases), before any instance starts.
@@ -44,6 +50,10 @@ for i in $(seq 1 "$N"); do
   PAPERBOAT_ENV=development PAPERBOAT_HTTP_ADDRESS=127.0.0.1:$port PAPERBOAT_DATABASE_DSN=$DSN \
   PAPERBOAT_PUBLIC_BASE_URL=http://api.example.test PAPERBOAT_BROWSER_LOGIN_ORIGIN=http://console.example.test \
   PAPERBOAT_WORKOS_CLIENT_ID=load-test PAPERBOAT_WORKOS_API_KEY=load-test \
+  PAPERBOAT_RELEASE_BASE_URL=http://api.example.test PAPERBOAT_CLI_VERIFICATION_URL=http://console.example.test/cli \
+  PAPERBOAT_MACHINES_URL=http://console.example.test/machines PAPERBOAT_LOCAL_ACCESS_BASE_DOMAIN=local.example.test \
+  PAPERBOAT_RUNTIME_BASE_DOMAIN=runtime.example.test PAPERBOAT_PREVIEW_BASE_DOMAIN=preview.example.test \
+  PAPERBOAT_TUNNEL_BASE_DOMAIN=tunnel.example.test \
     "$SERVER" serve >"$WORK/server-$i.log" 2>&1 &
   pids+=($!); echo "$!" >"$WORK/server-$i.pid"
   upstreams="$upstreams 127.0.0.1:$port"
