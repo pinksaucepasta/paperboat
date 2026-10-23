@@ -12,7 +12,7 @@ import (
 
 // A presence flip (online <-> offline) must not bump the inventory topic of the machine's audience; a change
 // of name, membership or lifecycle (first online, rename, seat, revoke) must. A changed set of observed
-// capabilities does too (172: one rule computes the set for both writers).
+// capabilities does too (173: one rule computes the set for both writers).
 func TestInventoryTopicIgnoresPresenceFlipsOnPostgres(t *testing.T) {
 	dsn := os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
 	if dsn == "" {

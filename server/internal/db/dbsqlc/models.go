@@ -867,6 +867,7 @@ type ControlSyncLease struct {
 	MachineID   sql.NullString
 	AddressSlot int32
 	Tags        []byte
+	ReleasedAt  sql.NullTime
 }
 
 type ControlTunnelNode struct {
@@ -1536,6 +1537,12 @@ type LazyRuntimeOwner struct {
 	BootID                 string
 	StartedAt              time.Time
 	ExpiresAt              time.Time
+}
+
+type MachineAddressPool struct {
+	Singleton  bool
+	Size       int32
+	Quarantine pgtype.Interval
 }
 
 type MachineControlRenewal struct {
