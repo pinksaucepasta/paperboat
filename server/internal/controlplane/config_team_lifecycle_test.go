@@ -349,10 +349,6 @@ func TestTeamConfigPublicationAuditUsesAuthoritativeAdoptionAndCommitsAtomically
 	if err := store.SQL().QueryRowContext(ctx, `SELECT assignment_id,sync_revision FROM paperboat.control_config_sync_statuses WHERE environment_id=$1`, environmentID).Scan(&gotAssignment, &gotRevision); err != nil || gotAssignment != replacement.ID || gotRevision != floor+1 {
 		t.Fatalf("denied status changed current binding/revision: %v", err)
 	}
-	var history int
-	if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.control_config_sync_status_history WHERE environment_id=$1`, environmentID).Scan(&history); err != nil || history != int(floor+1) {
-		t.Fatalf("replacement overwrote status history: count=%d error=%v", history, err)
-	}
 }
 
 func cleanupConfigTeamLifecycleFixture(t *testing.T, store *db.DB, users, teams, environments, machines []string) {
@@ -372,7 +368,6 @@ func cleanupConfigTeamLifecycleFixture(t *testing.T, store *db.DB, users, teams,
 		}{
 			{`ALTER TABLE paperboat.audit_events DISABLE TRIGGER audit_events_append_only`, nil},
 			{`DELETE FROM paperboat.audit_events WHERE actor_user_id=ANY($1::text[]) OR resource_id=ANY($2::text[]) OR resource_id=ANY($3::text[]) OR resource_id=ANY($4::text[])`, []any{users, teams, environments, machines}},
-			{`DELETE FROM paperboat.control_config_sync_status_history WHERE environment_id=ANY($1::text[])`, []any{environments}},
 			{`DELETE FROM paperboat.control_config_sync_statuses WHERE environment_id=ANY($1::text[])`, []any{environments}},
 			{`DELETE FROM paperboat.control_config_assignments WHERE environment_id=ANY($1::text[])`, []any{environments}},
 			{`DELETE FROM paperboat.teams WHERE team_id=ANY($1::text[])`, []any{teams}},

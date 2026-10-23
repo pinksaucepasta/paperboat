@@ -403,13 +403,6 @@ func (s *ConfigStatusService) Record(ctx context.Context, identityToken string, 
 		if err != nil {
 			return err
 		}
-		if err = tx.Queries().InsertControlConfigSyncStatusHistory(ctx, dbsqlc.InsertControlConfigSyncStatusHistoryParams{
-			EnvironmentID: report.EnvironmentID, SyncRevision: report.SyncRevision, RepositoryID: report.RepositoryID,
-			AssignmentID: report.AssignmentID, MachineID: report.MachineID, InstallationGeneration: report.InstallationGeneration,
-			State: report.State, ErrorCode: nullableString(report.ErrorCode), RemoteRevision: nullableString(report.RemoteRevision), ObservedAt: now,
-		}); err != nil {
-			return err
-		}
 		if err := s.audit.WriteTx(ctx, tx, audit.Event{ActorType: audit.ActorSystem, EventType: "config.status_recorded",
 			ResourceType: "environment", ResourceID: report.EnvironmentID,
 			IdempotencyKey: "config.status:" + report.EnvironmentID + ":" + strings.TrimSpace(report.AssignmentID) + ":" + formatInt(report.SyncRevision),

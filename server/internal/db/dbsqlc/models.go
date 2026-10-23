@@ -707,19 +707,6 @@ type ControlConfigSyncStatus struct {
 	Review                 []byte
 }
 
-type ControlConfigSyncStatusHistory struct {
-	EnvironmentID          string
-	SyncRevision           int64
-	RepositoryID           string
-	AssignmentID           string
-	MachineID              string
-	InstallationGeneration int64
-	State                  string
-	ErrorCode              sql.NullString
-	RemoteRevision         sql.NullString
-	ObservedAt             time.Time
-}
-
 type ControlConnectorGeneration struct {
 	EnvironmentID                 string
 	MachineID                     string
@@ -2113,6 +2100,15 @@ type ProviderRouteCleanupOutbox struct {
 	UpdatedAt    time.Time
 }
 
+type RelaySubjectSet struct {
+	NodeID         string
+	ProcessEpoch   string
+	NodeGeneration int64
+	Digest         string
+	Subjects       []byte
+	StoredAt       time.Time
+}
+
 type ReleaseAuthorityBundle struct {
 	ID                 string
 	ReleaseID          string
@@ -2505,6 +2501,9 @@ type TeamTerminalSessionGrant struct {
 	Role              string
 	Generation        int64
 	Active            bool
+}
+
+type TeamWriteFence struct {
 }
 
 type TerminalBrowserAccessPolicy struct {

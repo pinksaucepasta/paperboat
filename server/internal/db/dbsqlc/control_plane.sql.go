@@ -3578,48 +3578,6 @@ func (q *Queries) HeartbeatControlTunnelNode(ctx context.Context, arg HeartbeatC
 	return i, err
 }
 
-const insertControlConfigSyncStatusHistory = `-- name: InsertControlConfigSyncStatusHistory :exec
-INSERT INTO control_config_sync_status_history
-  (environment_id, sync_revision, repository_id, assignment_id, machine_id,
-   installation_generation, state, error_code, remote_revision, observed_at)
-VALUES
-  ($1, $2, $3,
-   $4, $5, $6,
-   $7, $8, $9, $10)
-ON CONFLICT (environment_id, sync_revision) DO UPDATE
-SET state = EXCLUDED.state, error_code = EXCLUDED.error_code,
-    remote_revision = EXCLUDED.remote_revision, observed_at = EXCLUDED.observed_at
-`
-
-type InsertControlConfigSyncStatusHistoryParams struct {
-	EnvironmentID          string
-	SyncRevision           int64
-	RepositoryID           string
-	AssignmentID           string
-	MachineID              string
-	InstallationGeneration int64
-	State                  string
-	ErrorCode              sql.NullString
-	RemoteRevision         sql.NullString
-	ObservedAt             time.Time
-}
-
-func (q *Queries) InsertControlConfigSyncStatusHistory(ctx context.Context, arg InsertControlConfigSyncStatusHistoryParams) error {
-	_, err := q.db.Exec(ctx, insertControlConfigSyncStatusHistory,
-		arg.EnvironmentID,
-		arg.SyncRevision,
-		arg.RepositoryID,
-		arg.AssignmentID,
-		arg.MachineID,
-		arg.InstallationGeneration,
-		arg.State,
-		arg.ErrorCode,
-		arg.RemoteRevision,
-		arg.ObservedAt,
-	)
-	return err
-}
-
 const insertControlUsageReceipt = `-- name: InsertControlUsageReceipt :one
 INSERT INTO control_usage_receipts
   (authority_id, operation_id, edge_node_id, counter_epoch, environment_id, route_id, route_revision, direction,

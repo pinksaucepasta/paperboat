@@ -531,18 +531,6 @@ WHERE control_config_sync_statuses.environment_id = sqlc.arg(environment_id)
   AND control_config_sync_statuses.machine_id = sqlc.arg(machine_id)
   AND control_config_sync_statuses.installation_generation = sqlc.arg(installation_generation);
 
--- name: InsertControlConfigSyncStatusHistory :exec
-INSERT INTO control_config_sync_status_history
-  (environment_id, sync_revision, repository_id, assignment_id, machine_id,
-   installation_generation, state, error_code, remote_revision, observed_at)
-VALUES
-  (sqlc.arg(environment_id), sqlc.arg(sync_revision), sqlc.arg(repository_id),
-   sqlc.arg(assignment_id), sqlc.arg(machine_id), sqlc.arg(installation_generation),
-   sqlc.arg(state), sqlc.narg(error_code), sqlc.narg(remote_revision), sqlc.arg(observed_at))
-ON CONFLICT (environment_id, sync_revision) DO UPDATE
-SET state = EXCLUDED.state, error_code = EXCLUDED.error_code,
-    remote_revision = EXCLUDED.remote_revision, observed_at = EXCLUDED.observed_at;
-
 -- name: ListOwnedControlConfigSyncStatus :many
 SELECT
   environment.id AS environment_id,

@@ -93,10 +93,6 @@ var policies = []policy{
 	{"support_reports_per_account", `DELETE FROM paperboat.support_reports WHERE id IN (SELECT id FROM (
  SELECT id,row_number() OVER (PARTITION BY owner_id ORDER BY created_at DESC,id DESC) n FROM paperboat.support_reports) r WHERE n > $2 LIMIT $1)`,
 		count(func(c config.Retention) int { return c.SupportReportsPerAccount })},
-	{"control_config_sync_status_history", `DELETE FROM paperboat.control_config_sync_status_history WHERE (environment_id,sync_revision) IN (
- SELECT environment_id,sync_revision FROM (SELECT environment_id,sync_revision,
-  row_number() OVER (PARTITION BY environment_id ORDER BY sync_revision DESC) n FROM paperboat.control_config_sync_status_history) h WHERE n > $2 LIMIT $1)`,
-		count(func(c config.Retention) int { return c.ConfigSyncHistoryPerEnvironment })},
 }
 
 // Result is the rows one pass deleted, per policy.
