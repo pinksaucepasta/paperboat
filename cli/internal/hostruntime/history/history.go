@@ -300,8 +300,20 @@ func (h *History) compactLocked() {
 		h.earliest = h.latest
 		h.events = h.events[:0]
 		h.head = 0
+		return
+	}
+	// Continuous output never drains the history, so the released prefix is moved out once it is
+	// most of the slice; otherwise the slice grows by one event per chunk for the session's life.
+	if h.head >= minCompactEvents && h.head > len(h.events)/2 {
+		live := copy(h.events, h.events[h.head:])
+		clear(h.events[live:])
+		h.events = h.events[:live]
+		h.head = 0
 	}
 }
+
+// minCompactEvents is the smallest released prefix worth moving.
+const minCompactEvents = 64
 
 func cloneEvent(event Event) Event {
 	event.Data = append([]byte(nil), event.Data...)

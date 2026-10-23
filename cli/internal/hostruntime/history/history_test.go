@@ -187,3 +187,26 @@ func BenchmarkPooledHistoryCompaction(b *testing.B) {
 		event.Release()
 	}
 }
+
+// Continuous output never drains a session's history; the released events must not keep growing
+// the slice (Lane X audit H1: ~56 B per chunk for the session's life).
+func TestContinuousOutputKeepsHistoryStorageBounded(t *testing.T) {
+	h, err := New(4096)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chunk := []byte("0123456789abcdef")
+	for i := 0; i < 1_000_000; i++ {
+		event, err := h.Append(1, chunk)
+		if err != nil {
+			t.Fatal(err)
+		}
+		event.Release()
+	}
+	h.mu.RLock()
+	capacity, retained := cap(h.events), len(h.events)-h.head
+	h.mu.RUnlock()
+	if retained != 4096/len(chunk) || capacity > 4*retained+2*minCompactEvents {
+		t.Fatalf("retained %d events in a slice of capacity %d", retained, capacity)
+	}
+}
