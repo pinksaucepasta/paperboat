@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 )
 
@@ -19,26 +20,26 @@ func TestManagedSSHStartsFromTheRefreshAndRetriesAFailedStart(t *testing.T) {
 	starts, reports, refreshes := 0, 0, 0
 	owner := &managedSSHOwner{
 		lifetime: t.Context(),
-		start: func(context.Context, ManagedSSHConfig) (*ManagedSSHRuntime, error) {
+		start: func(context.Context, ManagedSSHConfig, []api.UserMachine) (*ManagedSSHRuntime, error) {
 			starts++
 			if starts <= 2 {
 				return nil, failure
 			}
-			return &ManagedSSHRuntime{refresh: func(context.Context) error { refreshes++; return nil }}, nil
+			return &ManagedSSHRuntime{refresh: func(context.Context, []api.UserMachine) error { refreshes++; return nil }}, nil
 		},
 		report: func(context.Context, error) { reports++ },
 	}
 	requested := make(chan struct{}, 1)
 	owner.onStarted = func() { requested <- struct{}{} }
 	for range 2 {
-		if err := owner.refresh(t.Context()); err != nil {
+		if err := owner.refresh(t.Context(), nil); err != nil {
 			t.Fatalf("failed start must not fail the refresh: %v", err)
 		}
 	}
 	if starts != 2 || reports != 1 {
 		t.Fatalf("after two failed starts: starts=%d reports=%d, want 2 starts and the failure reported once", starts, reports)
 	}
-	if err := owner.refresh(t.Context()); err != nil || starts != 3 || reports != 2 {
+	if err := owner.refresh(t.Context(), nil); err != nil || starts != 3 || reports != 2 {
 		t.Fatalf("recovered start: err=%v starts=%d reports=%d", err, starts, reports)
 	}
 	select {
@@ -46,7 +47,7 @@ func TestManagedSSHStartsFromTheRefreshAndRetriesAFailedStart(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("a successful start did not ask for an inventory refresh")
 	}
-	if err := owner.refresh(t.Context()); err != nil || starts != 3 || refreshes != 1 {
+	if err := owner.refresh(t.Context(), nil); err != nil || starts != 3 || refreshes != 1 {
 		t.Fatalf("running managed SSH: err=%v starts=%d refreshes=%d, want a configuration refresh and no new start", err, starts, refreshes)
 	}
 }
@@ -90,18 +91,18 @@ func TestManagedSSHRunsOnTheDaemonLifetimeNotTheRefresh(t *testing.T) {
 			var agentCtx context.Context
 			owner := &managedSSHOwner{
 				lifetime: lifetime,
-				start: func(ctx context.Context, _ ManagedSSHConfig) (*ManagedSSHRuntime, error) {
+				start: func(ctx context.Context, _ ManagedSSHConfig, _ []api.UserMachine) (*ManagedSSHRuntime, error) {
 					time.Sleep(20 * time.Millisecond) // the server takes longer than the slow refresh's budget
 					if ctx.Err() != nil {
 						return nil, ctx.Err()
 					}
 					agentCtx = ctx
-					return &ManagedSSHRuntime{refresh: func(context.Context) error { return nil }}, nil
+					return &ManagedSSHRuntime{refresh: func(context.Context, []api.UserMachine) error { return nil }}, nil
 				},
 				report: func(context.Context, error) {},
 			}
 			refreshCtx, endRefresh := context.WithTimeout(t.Context(), refreshBudget)
-			_ = owner.refresh(refreshCtx)
+			_ = owner.refresh(refreshCtx, nil)
 			endRefresh()
 			if agentCtx == nil {
 				t.Fatal("managed SSH did not start")

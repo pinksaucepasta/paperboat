@@ -4,6 +4,8 @@ import (
 	"context"
 	"sync"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/api"
 )
 
 // managedSSHInstallTimeout bounds the first managed SSH configuration install, which asks the server.
@@ -20,7 +22,7 @@ const managedSSHInstallTimeout = 15 * time.Second
 type managedSSHOwner struct {
 	lifetime  context.Context
 	config    ManagedSSHConfig
-	start     func(context.Context, ManagedSSHConfig) (*ManagedSSHRuntime, error)
+	start     func(context.Context, ManagedSSHConfig, []api.UserMachine) (*ManagedSSHRuntime, error)
 	report    func(context.Context, error)
 	onStarted func()
 
@@ -30,18 +32,18 @@ type managedSSHOwner struct {
 	lastCode string
 }
 
-// refresh starts managed SSH when it is not running, else refreshes its configuration on ctx. A failed
-// start is reported through report, not returned.
-func (o *managedSSHOwner) refresh(ctx context.Context) error {
+// refresh starts managed SSH when it is not running, else rewrites its aliases for machines (the
+// inventory's latest list). A failed start is reported through report, not returned.
+func (o *managedSSHOwner) refresh(ctx context.Context, machines []api.UserMachine) error {
 	if o == nil {
 		return nil
 	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if o.runtime != nil {
-		return o.runtime.Refresh(ctx)
+		return o.runtime.Refresh(ctx, machines)
 	}
-	runtime, err := o.start(o.lifetime, o.config)
+	runtime, err := o.start(o.lifetime, o.config, machines)
 	code := ""
 	if err != nil {
 		code = ManagedSSHHealthCode(err)

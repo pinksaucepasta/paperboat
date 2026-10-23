@@ -46,10 +46,13 @@ func TestManagedSSHUsesDiscoveredDomainAndRefreshesAliases(t *testing.T) {
 		writeManagedSSHTestResponse(w, map[string]any{"version": "1", "machines_url": "http://" + r.Host + "/machines",
 			"local_access_base_domain": domain.Load().(string)})
 	})
+	// The inventory refresh already listed the machines; managed SSH must not list them again.
 	mux.HandleFunc("GET /v1/machines", func(w http.ResponseWriter, r *http.Request) {
-		writeManagedSSHTestResponse(w, api.UserMachinePage{Items: []api.UserMachine{{ID: "machine_1", Alias: "build", State: "active", InstallationGeneration: 1,
-			SSH: &api.MachineSSH{OSUser: "fixture-user", Port: 38222, TargetGeneration: 1}}}, Pagination: api.Pagination{Limit: 200, Total: 1}})
+		t.Error("managed SSH listed the machines again instead of using the inventory's list")
+		http.NotFound(w, r)
 	})
+	machines := []api.UserMachine{{ID: "machine_1", Alias: "build", State: "active", InstallationGeneration: 1,
+		SSH: &api.MachineSSH{OSUser: "fixture-user", Port: 38222, TargetGeneration: 1}}}
 	server := httptest.NewServer(mux)
 	defer server.Close()
 	executable, err := os.Executable()
@@ -62,7 +65,7 @@ func TestManagedSSHUsesDiscoveredDomainAndRefreshesAliases(t *testing.T) {
 	runtime, err := StartManagedSSH(t.Context(), ManagedSSHConfig{ServerURL: server.URL, Auth: &rotatingAuthSource{},
 		Store:              config.ProfileStore{Path: filepath.Join(root, "profiles"), Secrets: config.FileSecretStore{Dir: filepath.Join(root, "secrets")}},
 		CLIClientSessionID: "cli_domain_test", Home: root, RuntimeDirectory: filepath.Join(root, "run"),
-		Executable: executable, OwnerUID: uint32(os.Geteuid())})
+		Executable: executable, OwnerUID: uint32(os.Geteuid())}, machines)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +76,7 @@ func TestManagedSSHUsesDiscoveredDomainAndRefreshesAliases(t *testing.T) {
 	})
 	for _, current := range []string{"fleet.example.test", "machines.example.test"} {
 		domain.Store(current)
-		if err := runtime.Refresh(t.Context()); err != nil {
+		if err := runtime.Refresh(t.Context(), machines); err != nil {
 			t.Fatal(err)
 		}
 		output, err := exec.CommandContext(t.Context(), ssh, "-G", "-F", filepath.Join(root, ".ssh", "paperboat_config"), "build."+current).Output()

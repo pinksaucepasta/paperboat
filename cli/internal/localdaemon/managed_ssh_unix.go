@@ -32,10 +32,12 @@ type ManagedSSHConfig struct {
 type ManagedSSHRuntime struct {
 	agent   *managedssh.AgentService
 	mu      sync.Mutex
-	refresh func(context.Context) error
+	refresh func(context.Context, []api.UserMachine) error
 }
 
-func StartManagedSSH(ctx context.Context, cfg ManagedSSHConfig) (*ManagedSSHRuntime, error) {
+// StartManagedSSH registers the key, starts the agent and installs the OpenSSH configuration for
+// machines, the inventory's list; it never lists machines itself.
+func StartManagedSSH(ctx context.Context, cfg ManagedSSHConfig, machines []api.UserMachine) (*ManagedSSHRuntime, error) {
 	if ctx == nil || strings.TrimSpace(cfg.ServerURL) == "" || cfg.Auth == nil || cfg.Store.Path == "" || strings.TrimSpace(cfg.CLIClientSessionID) == "" || !filepath.IsAbs(cfg.Home) || !filepath.IsAbs(cfg.RuntimeDirectory) || !filepath.IsAbs(cfg.Executable) {
 		return nil, ErrInvalidInventoryConfig
 	}
@@ -67,12 +69,9 @@ func StartManagedSSH(ctx context.Context, cfg ManagedSSHConfig) (*ManagedSSHRunt
 		return nil, errors.Join(err, agent.Close())
 	}
 	command := strconv.Quote(cfg.Executable)
-	install := func(refreshCtx context.Context) error {
+	install := func(refreshCtx context.Context, machines []api.UserMachine) error {
+		// The alias domain comes from discovery and may change; it is one small request.
 		configuration, err := client.ClientConfiguration(refreshCtx)
-		if err != nil {
-			return err
-		}
-		targets, err := managedSSHAliasTargets(refreshCtx, client)
 		if err != nil {
 			return err
 		}
@@ -82,14 +81,14 @@ func StartManagedSSH(ctx context.Context, cfg ManagedSSHConfig) (*ManagedSSHRunt
 			KnownHostsCommand: command + " __ssh-known-hosts --host %h --port %p",
 			AgentSocket:       agent.Socket(),
 			IdentityFile:      managedssh.ManagedIdentityPublicKeyPath(cfg.Home),
-			Targets:           targets,
+			Targets:           managedSSHAliasTargets(machines),
 		})
 		return err
 	}
 	// ctx is the daemon's lifetime: the agent above serves on it. The first configuration install
 	// asks the server, so it gets its own bound.
 	installCtx, cancelInstall := context.WithTimeout(ctx, managedSSHInstallTimeout)
-	err = install(installCtx)
+	err = install(installCtx, machines)
 	cancelInstall()
 	if err != nil {
 		return nil, errors.Join(err, agent.Close())
@@ -97,13 +96,14 @@ func StartManagedSSH(ctx context.Context, cfg ManagedSSHConfig) (*ManagedSSHRunt
 	return &ManagedSSHRuntime{agent: agent, refresh: install}, nil
 }
 
-func (r *ManagedSSHRuntime) Refresh(ctx context.Context) error {
+// Refresh rewrites the managed aliases for machines, the inventory's latest list.
+func (r *ManagedSSHRuntime) Refresh(ctx context.Context, machines []api.UserMachine) error {
 	if r == nil || r.refresh == nil {
 		return nil
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.refresh(ctx)
+	return r.refresh(ctx, machines)
 }
 
 func (r *ManagedSSHRuntime) Close() error {

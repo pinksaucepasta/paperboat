@@ -1,21 +1,15 @@
 package localdaemon
 
 import (
-	"context"
 	"sort"
-	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 )
 
-func managedSSHAliasTargets(ctx context.Context, client *api.Client) ([]managedssh.OpenSSHAliasTarget, error) {
-	lookupCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	machines, err := client.ListUserMachines(lookupCtx)
-	if err != nil {
-		return nil, managedSSHAuthorityError(err)
-	}
+// managedSSHAliasTargets builds the OpenSSH aliases from the machines the inventory refresh just
+// listed; it lists nothing itself (a second full listing per refresh was one of the largest loads).
+func managedSSHAliasTargets(machines []api.UserMachine) []managedssh.OpenSSHAliasTarget {
 	targets := make([]managedssh.OpenSSHAliasTarget, 0, len(machines))
 	for _, machine := range machines {
 		if machine.State == "revoked" || machine.State == "disconnected" || machine.State == "deleted" {
@@ -26,5 +20,5 @@ func managedSSHAliasTargets(ctx context.Context, client *api.Client) ([]manageds
 		}
 	}
 	sort.Slice(targets, func(i, j int) bool { return targets[i].Alias < targets[j].Alias })
-	return targets, nil
+	return targets
 }

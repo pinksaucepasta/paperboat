@@ -16,7 +16,7 @@ import (
 )
 
 func TestManagedSSHRuntimeRejectsIncompleteConfiguration(t *testing.T) {
-	if _, err := StartManagedSSH(context.Background(), ManagedSSHConfig{}); !errors.Is(err, ErrInvalidInventoryConfig) {
+	if _, err := StartManagedSSH(context.Background(), ManagedSSHConfig{}, nil); !errors.Is(err, ErrInvalidInventoryConfig) {
 		t.Fatalf("err=%v", err)
 	}
 }
