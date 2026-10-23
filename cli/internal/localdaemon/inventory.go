@@ -72,6 +72,7 @@ type Inventory struct {
 	events            *machineevents.Subscription
 	eventSpacing      time.Duration
 	eventFallback     time.Duration
+	wake              chan struct{} // RequestRefresh; one pending request is enough
 	mu                sync.Mutex
 	completionMu      sync.RWMutex
 	completion        localapi.CompletionSnapshot
@@ -111,7 +112,17 @@ func NewInventory(config InventoryConfig) (*Inventory, error) {
 		events:            config.Events,
 		eventSpacing:      config.EventRefreshSpacing,
 		eventFallback:     config.EventFallback,
+		wake:              make(chan struct{}, 1),
 	}, nil
+}
+
+// RequestRefresh asks the running inventory for one more refresh soon, for a local change the server
+// does not announce (managed SSH became ready after the first refresh). It never blocks.
+func (i *Inventory) RequestRefresh() {
+	select {
+	case i.wake <- struct{}{}:
+	default:
+	}
 }
 
 func (i *Inventory) Snapshot(ctx context.Context) (localapi.Snapshot, error) {
@@ -138,6 +149,8 @@ func (i *Inventory) runTicker(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-i.wake:
+			refresh()
 		case <-i.events.Changed():
 			if wait := i.eventSpacing - time.Since(last); wait > 0 {
 				spacing := time.NewTimer(wait)

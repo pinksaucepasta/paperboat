@@ -71,20 +71,13 @@ func runWindowsDaemon(ctx context.Context, config DaemonConfig) (runErr error) {
 		}
 	}()
 
-	var managedSSHRuntime *ManagedSSHRuntime
+	// Managed SSH starts from the first inventory refresh, after the local API serves (managedSSHOwner).
+	var managedSSH *managedSSHOwner
 	if config.ManagedSSH != nil {
-		managedSSHRuntime, err = StartManagedSSH(ctx, *config.ManagedSSH)
-		reportManagedSSHStartup(ctx, config.Source, recorder, err)
-		if err != nil {
-			// Keep the daemon available when optional SSH integration is degraded;
-			// inventory health exposes the repairable condition to the client.
-			managedSSHRuntime = nil
-		}
-		defer func() {
-			if managedSSHRuntime != nil {
-				runErr = daemonCleanupFailure(runErr, managedSSHRuntime.Close())
-			}
-		}()
+		managedSSH = &managedSSHOwner{config: *config.ManagedSSH, start: StartManagedSSH, report: func(reportCtx context.Context, startErr error) {
+			reportManagedSSHStartup(reportCtx, config.Source, recorder, startErr)
+		}}
+		defer func() { runErr = daemonCleanupFailure(runErr, managedSSH.close()) }()
 	}
 
 	observeSSHRefresh := maintenanceObserver(ctx, recorder, "managed_ssh")
@@ -127,9 +120,9 @@ func runWindowsDaemon(ctx context.Context, config DaemonConfig) (runErr error) {
 				config.OnMachines(refreshCtx, machines)
 			}
 			authorityInvalidator.Observe(machines)
-			if managedSSHRuntime != nil {
+			if managedSSH != nil {
 				sshCtx, cancelSSH := context.WithTimeout(refreshCtx, 15*time.Second)
-				observeSSHRefresh(managedSSHRuntime.Refresh(sshCtx))
+				observeSSHRefresh(managedSSH.refresh(sshCtx))
 				cancelSSH()
 			}
 			if config.WarmPeerMetadata == nil {
@@ -147,6 +140,9 @@ func runWindowsDaemon(ctx context.Context, config DaemonConfig) (runErr error) {
 	})
 	if err != nil {
 		return err
+	}
+	if managedSSH != nil {
+		managedSSH.onStarted = inventory.RequestRefresh
 	}
 	observations, err := NewObservationStore(ObservationConfig{Store: store, OwnerUID: -1, OwnerSID: ownerSID, Clock: config.Clock})
 	if err != nil {
