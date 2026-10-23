@@ -130,6 +130,11 @@ function Confirm({ preview }: { preview: DeletionPreview }) {
         <WarningIcon className="size-4 text-destructive" aria-hidden />
         This can’t be undone.
       </p>
+      {preview.subscription && (
+        <p className="text-muted-foreground">
+          Your subscription ends now. No refund is given for the rest of the current period.
+        </p>
+      )}
       <label htmlFor="confirm-email" className="text-muted-foreground">
         Type <span className="font-medium text-foreground">{preview.account_email}</span> to confirm
       </label>
