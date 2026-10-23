@@ -570,3 +570,10 @@ func (s *PersistentSession) Current() (wire.Snapshot, bool, uint64) {
 	}
 	return s.session.Current()
 }
+
+func (s *PersistentSession) Candidate() (wire.Snapshot, bool) {
+	if s == nil || s.session == nil {
+		return wire.Snapshot{}, false
+	}
+	return s.session.Candidate()
+}

@@ -62,13 +62,11 @@ func connectorCarrierBootstrap(sessions activeConnectorControlSessionReader, sou
 		}
 		tunnelID, connectorID := r.PathValue("tunnel_id"), r.PathValue("connector_id")
 		active, ok := sessions.Lookup(tunnelID, connectorID, request.SessionID, request.ProcessGeneration)
-		if ok && request.ConfigGeneration == active.ServingConfigGeneration && request.ConfigContentHash == active.ServingConfigContentHash {
-			active.ConfigGeneration, active.ConfigContentHash = request.ConfigGeneration, request.ConfigContentHash
-		}
-		if !ok || active.ConfigGeneration != request.ConfigGeneration || active.ConfigContentHash != request.ConfigContentHash {
+		if !ok || !active.Serves(request.ConfigGeneration, request.ConfigContentHash) {
 			writePreviewTunnelError(w, r, http.StatusConflict, "connector_session_stale", "The connector session changed before carrier bootstrap.", "unchanged", true, "reconnect")
 			return
 		}
+		active.ConfigGeneration, active.ConfigContentHash = request.ConfigGeneration, request.ConfigContentHash
 		proofValues := r.Header.Values("X-Paperboat-Machine-Proof")
 		identityValues := r.Header.Values("X-Paperboat-Machine-Identity")
 		operationValues := r.Header.Values("Idempotency-Key")

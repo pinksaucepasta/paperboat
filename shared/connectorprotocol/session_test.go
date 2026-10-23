@@ -348,6 +348,11 @@ func TestSessionPromotesCandidateOnlyAfterReadiness(t *testing.T) {
 	if _, ready, generation := serverSession.Current(); !ready || generation != 1 {
 		t.Fatal("LKG became ineligible while candidate was merely not ready")
 	}
+	// The acknowledged candidate is visible before readiness: the connector bootstraps its
+	// carriers for it in the same session.
+	if candidate, ok := serverSession.Candidate(); !ok || candidate.Generation != 2 || candidate.ContentHash != second.ContentHash {
+		t.Fatalf("acknowledged candidate not visible: %+v %t", candidate, ok)
+	}
 	readiness, err := client.MarkReady(true, true, true)
 	if err != nil {
 		t.Fatal(err)
@@ -358,6 +363,9 @@ func TestSessionPromotesCandidateOnlyAfterReadiness(t *testing.T) {
 	current, ready, generation := serverSession.Current()
 	if !ready || generation != 2 || current.ContentHash != second.ContentHash || !applier.prepared[1].activated {
 		t.Fatalf("candidate not promoted: current=%+v ready=%t generation=%d", current, ready, generation)
+	}
+	if _, ok := serverSession.Candidate(); ok {
+		t.Fatal("promoted candidate still reported as a candidate")
 	}
 }
 

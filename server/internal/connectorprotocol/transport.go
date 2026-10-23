@@ -14,19 +14,33 @@ import (
 // authenticated connector control stream. It is used only to bind follow-up
 // carrier bootstrap reads to the exact session created by Welcome.
 type ActiveControlSession struct {
-	AccountID                string
-	TunnelID                 string
-	ConnectorID              string
-	HostID                   string
-	SessionID                string
-	IdentityKeyID            string
-	IdentityKeyThumbprint    string
-	ProcessGeneration        uint64
-	CredentialGeneration     uint64
-	ConfigGeneration         uint64
-	ConfigContentHash        string
-	ServingConfigGeneration  uint64
-	ServingConfigContentHash string
+	AccountID             string
+	TunnelID              string
+	ConnectorID           string
+	HostID                string
+	SessionID             string
+	IdentityKeyID         string
+	IdentityKeyThumbprint string
+	ProcessGeneration     uint64
+	CredentialGeneration  uint64
+	ConfigGeneration      uint64
+	ConfigContentHash     string
+	// Serving is the config the session reported ready; Candidate the config it acknowledged and
+	// is preparing carriers for. Both are filled by Lookup.
+	ServingConfigGeneration    uint64
+	ServingConfigContentHash   string
+	CandidateConfigGeneration  uint64
+	CandidateConfigContentHash string
+}
+
+// Serves reports whether a connector request for this config belongs to the session: the config
+// it was welcomed with, the one it serves, or the acknowledged candidate it is preparing. A config
+// edit therefore never needs a new control session (it used to answer connector_session_stale
+// and make the connector reconnect, re-generating the tunnel's route on every edge).
+func (s ActiveControlSession) Serves(generation uint64, contentHash string) bool {
+	return generation == s.ConfigGeneration && contentHash == s.ConfigContentHash ||
+		generation == s.ServingConfigGeneration && contentHash == s.ServingConfigContentHash ||
+		generation == s.CandidateConfigGeneration && contentHash == s.CandidateConfigContentHash
 }
 
 func (s ActiveControlSession) validate() error {
@@ -95,6 +109,9 @@ func (s *ActiveControlSessions) Lookup(tunnelID, connectorID, sessionID string, 
 	projection := current.projection
 	if snapshot, ready, _ := current.session.Current(); ready {
 		projection.ServingConfigGeneration, projection.ServingConfigContentHash = snapshot.Generation, snapshot.ContentHash
+	}
+	if candidate, ok := current.session.Candidate(); ok {
+		projection.CandidateConfigGeneration, projection.CandidateConfigContentHash = candidate.Generation, candidate.ContentHash
 	}
 	return projection, true
 }

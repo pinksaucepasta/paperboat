@@ -113,6 +113,27 @@ func TestConnectorCarrierBootstrapRequiresExactMachineAndSessionBinding(t *testi
 		t.Fatalf("stale status=%d body=%s", staleResponse.Code, staleResponse.Body.String())
 	}
 
+	// A config edit within the session: the connector acknowledged generation 5 and bootstraps its
+	// carrier for it before reporting ready. That is the same session, not a stale one (it used to
+	// answer connector_session_stale, and the connector's reconnect re-generated the tunnel's route
+	// on every edge, cutting transfers in flight).
+	editing := active
+	editing.ServingConfigGeneration, editing.ServingConfigContentHash = active.ConfigGeneration, active.ConfigContentHash
+	editing.CandidateConfigGeneration, editing.CandidateConfigContentHash = 5, "sha256:"+strings.Repeat("b", 64)
+	editedDescriptor := descriptor
+	editedDescriptor.ConfigGeneration, editedDescriptor.ConfigContentHash = editing.CandidateConfigGeneration, editing.CandidateConfigContentHash
+	editHandler := connectorCarrierBootstrap(bootstrapSessionReader{value: editing, ok: true}, bootstrapSource{value: editedDescriptor}, bootstrapVerifier{claims: controlplane.MachineRequestClaims{MachineID: active.HostID, UserID: active.AccountID, OperationID: "bootstrap_request_01", InstallationGeneration: 1}}, notGone)
+	editBody := strings.Replace(strings.Replace(string(body), `"config_generation":4`, `"config_generation":5`, 1), active.ConfigContentHash, editing.CandidateConfigContentHash, 1)
+	edit := httptest.NewRequest(http.MethodPost, request.URL.Path, strings.NewReader(editBody))
+	edit.SetPathValue("tunnel_id", active.TunnelID)
+	edit.SetPathValue("connector_id", active.ConnectorID)
+	edit.Header = request.Header.Clone()
+	editResponse := httptest.NewRecorder()
+	editHandler.ServeHTTP(editResponse, edit)
+	if editResponse.Code != http.StatusOK || !strings.Contains(editResponse.Body.String(), `"config_generation":5`) {
+		t.Fatalf("candidate config bootstrap status=%d body=%s", editResponse.Code, editResponse.Body.String())
+	}
+
 	// A connector whose tunnel expired (or was deleted, or whose machine was revoked) is told it is
 	// gone instead of retrying a 503 forever; the carrier source is never asked.
 	goneHandler := connectorCarrierBootstrap(bootstrapSessionReader{value: active, ok: true}, bootstrapSource{err: errors.New("descriptor must not be read")}, bootstrapVerifier{claims: controlplane.MachineRequestClaims{MachineID: active.HostID, UserID: active.AccountID, OperationID: "bootstrap_request_01", InstallationGeneration: 1}}, func(_ context.Context, tunnelID, connectorID string) (bool, error) {

@@ -872,6 +872,22 @@ func (s *ServerSession) Current() (Snapshot, bool, uint64) {
 	return snapshot, s.state == SessionReady && !s.needsSnapshot && s.readyGeneration == s.active.Generation, s.readyGeneration
 }
 
+// Candidate returns the snapshot the connector has acknowledged but not yet reported ready: the
+// connector prepares its carriers for it before readiness, so carrier bootstrap must accept it.
+func (s *ServerSession) Candidate() (Snapshot, bool) {
+	if s == nil {
+		return Snapshot{}, false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !s.hasCandidate {
+		return Snapshot{}, false
+	}
+	snapshot := s.candidate
+	snapshot.Payload = append([]byte(nil), snapshot.Payload...)
+	return snapshot, true
+}
+
 func (s *ServerSession) Lease() Lease {
 	if s == nil {
 		return Lease{}
