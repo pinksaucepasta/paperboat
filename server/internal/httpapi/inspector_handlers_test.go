@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat-server/internal/controlplane"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -80,12 +81,15 @@ func inspectorHTTPFixture(t *testing.T, ctx context.Context, database *db.DB, no
 	exec(`INSERT INTO paperboat.tunnels(id,account_id,name,desired_state,access_mode,generation,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id,created_at,updated_at) VALUES($1,$2,$1,'active','team',3,$3,$4,'host',$2,$5,$5)`, tunnel, owner, "endpoint_00000000-0000-4000-8000-"+suffix[len(suffix)-12:], "https://00000000-0000-8000-8000-"+suffix[len(suffix)-12:]+".tunnels.example.test", now)
 	exec(`INSERT INTO paperboat.tunnel_routes(id,tunnel_id,name,protocol,match_type,origin_scheme,origin_address,generation,desired_state,created_by_actor_id,updated_by_actor_id,created_at,updated_at) VALUES($1,$2,'web','http','catch_all','http','127.0.0.1:3000',7,'active',$3,$3,$4,$4)`, route, tunnel, owner, now)
 	exec(`INSERT INTO paperboat.teams(team_id,owner_account,generation) VALUES($1,$2,1)`, teamID, owner)
+	// Team grants authorize only on a paid team.
+	exec(`INSERT INTO paperboat.billing_workspaces(id,team_id,state,product_code,quantity,period_start,period_end) VALUES($1,$2,'active','team-pro',3,$3,$4)`, "bw_"+teamID, teamID, now.Add(-time.Hour), now.Add(time.Hour))
 	exec(`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'member',true),($1,$3,1,'member',true)`, teamID, owner, mate)
 	exec(`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account,active,generation) VALUES($1,'preview',$2,$3,true,1)`, teamID, lease, owner)
 	exec(`INSERT INTO paperboat.team_resource_grants(team_id,account_id,resource_kind,resource_id,permission,generation,active) VALUES($1,$2,'preview',$3,'inspect',1,true)`, teamID, mate, lease)
 	t.Cleanup(func() {
 		c := context.Background()
 		_, _ = database.SQL().ExecContext(c, `DELETE FROM paperboat.inspector_credentials WHERE account_id IN($1,$2)`, owner, mate)
+		_, _ = database.SQL().ExecContext(c, `DELETE FROM paperboat.billing_workspaces WHERE team_id=$1`, teamID)
 		_, _ = database.SQL().ExecContext(c, `DELETE FROM paperboat.teams WHERE team_id=$1`, teamID)
 		_, _ = database.SQL().ExecContext(c, `DELETE FROM paperboat.preview_leases WHERE id=$1`, lease)
 		_, _ = database.SQL().ExecContext(c, `DELETE FROM paperboat.operations WHERE id=$1`, operation)
@@ -195,7 +199,7 @@ func TestInspectorHandlersPostgres(t *testing.T) {
 	if decision["account_id"] != owner || decision["route_generation"] != float64(4) {
 		t.Fatalf("decision = %v", decision)
 	}
-	badProof := &InspectorHandlers{Access: inspectaccess.NewService(database), Machine: inspectorMachineStub{err: fmt.Errorf("bad proof")}}
+	badProof := &InspectorHandlers{Access: inspectaccess.NewService(database), Machine: inspectorMachineStub{err: controlplane.ErrHelperProof}}
 	recorder = inspectorHTTPRequest(t, badProof.Authorize, http.MethodPost, "/v1/inspector/authorize", authorizeBody, "")
 	if recorder.Code != http.StatusUnauthorized {
 		t.Fatalf("bad proof = %d, want 401", recorder.Code)
