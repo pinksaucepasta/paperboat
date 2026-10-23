@@ -70,7 +70,7 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 	service.ConfigureRuntimeQuota(quota, "https://console.example.test/billing")
 	// At the cap a CLI descriptor is still issued: the server cannot know whether the
 	// connection will be direct, and direct machine-to-machine traffic is always free.
-	descriptor, err := service.ExecDescriptor(ctx, userID, sourceMachineID, machineID, "cli_rq_1", "operation_rq_cap_"+suffix)
+	descriptor, err := service.ExecDescriptor(ctx, userID, sourceMachineID, machineID, "cli_rq_1", "operation_rq_cap_"+suffix, false)
 	if err != nil {
 		t.Fatalf("exec descriptor at the cap: %v", err)
 	}
@@ -79,7 +79,7 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 	if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.usage_accounting_authorities WHERE authority_id=$1`, accessSessionID).Scan(&cliAuthorities); err != nil || cliAuthorities != 0 {
 		t.Fatalf("CLI descriptor recorded an edge authority: %d err=%v", cliAuthorities, err)
 	}
-	if _, err = service.SSHDescriptor(ctx, userID, sourceMachineID, machineID, "cli_rq_1", "operation_rq_ssh_"+suffix); errors.Is(err, ErrBandwidthQuotaExhausted) {
+	if _, err = service.SSHDescriptor(ctx, userID, sourceMachineID, machineID, "cli_rq_1", "operation_rq_ssh_"+suffix, false); errors.Is(err, ErrBandwidthQuotaExhausted) {
 		t.Fatalf("ssh descriptor refused for bandwidth: %v", err)
 	}
 	if len(quota.checked) != 0 {
@@ -100,5 +100,24 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 	var refusal *BandwidthQuotaError
 	if !errors.Is(err, ErrBandwidthQuotaExhausted) || !errors.As(err, &refusal) || refusal.BillingURL != "https://console.example.test/billing" {
 		t.Fatalf("browser admission at the cap err=%v", err)
+	}
+
+	// Lane R N3: after an outage the edge carrier re-attaches up to ~30 s after presence returns, and
+	// native exec does not need it. Without a current edge route, a client that accepts native-only gets
+	// the descriptor with no edge endpoints and an access session without an edge base URL; a client that
+	// does not still gets machine_not_ready.
+	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.runtime_carrier_attachments SET ready=false,observed_at=now()-interval '5 minutes' WHERE route_id=$1`, "route_rq_"+suffix); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ExecDescriptor(ctx, userID, sourceMachineID, machineID, "cli_rq_1", "operation_rq_noroute_"+suffix, false); !errors.Is(err, ErrMachineCapabilityUnavailable) {
+		t.Fatalf("descriptor without an edge route for a client that needs it: %v", err)
+	}
+	native, err := service.ExecDescriptor(ctx, userID, sourceMachineID, machineID, "cli_rq_1", "operation_rq_native_"+suffix, true)
+	if err != nil || len(native.Endpoints) != 0 || native.Auth["token"] == "" {
+		t.Fatalf("native-only descriptor = %+v err=%v", native, err)
+	}
+	var base string
+	if err := store.SQL().QueryRowContext(ctx, `SELECT http_base_url FROM paperboat.user_machine_access_sessions WHERE id=$1`, native.Auth["access_session_id"]).Scan(&base); err != nil || base != "" {
+		t.Fatalf("native-only access session base=%q err=%v", base, err)
 	}
 }

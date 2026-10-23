@@ -3004,7 +3004,7 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 	service.ConfigureAccess(fakeCredentialIssuer{}, "https://api.paperboat.test")
 	service.ConfigureTerminalSessions(signer, nil)
 	operationID := "operation_exec_" + suffix
-	descriptor, err := service.ExecDescriptor(ctx, userID, sourceMachineID, machineID, "cli_exec_1", operationID)
+	descriptor, err := service.ExecDescriptor(ctx, userID, sourceMachineID, machineID, "cli_exec_1", operationID, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3021,7 +3021,7 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 	// A local client and machine runtime remain distinct authenticated endpoints
 	// even when their enrolled machine ID is the same.
 	selfOperationID := "operation_exec_self_" + suffix
-	selfDescriptor, err := service.ExecDescriptor(ctx, userID, machineID, machineID, "cli_exec_1", selfOperationID)
+	selfDescriptor, err := service.ExecDescriptor(ctx, userID, machineID, machineID, "cli_exec_1", selfOperationID, false)
 	if err != nil {
 		t.Fatalf("owned self exec descriptor: %v", err)
 	}
@@ -3040,7 +3040,7 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 	if selfAccessID == "" || selfAccessID != selfClaims.AssignmentID {
 		t.Fatal("self exec descriptor does not identify its exact revocable authority")
 	}
-	if _, err := service.ExecDescriptor(ctx, "usr_unrelated_"+suffix, machineID, machineID, "cli_exec_1", "operation_exec_foreign_"+suffix); !errors.Is(err, ErrNotFound) {
+	if _, err := service.ExecDescriptor(ctx, "usr_unrelated_"+suffix, machineID, machineID, "cli_exec_1", "operation_exec_foreign_"+suffix, false); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("self IDs bypassed source ownership: %v", err)
 	}
 	if err := service.RevokeUserMachineSessions(ctx, machineID, "test_revocation"); err != nil {
@@ -3055,7 +3055,7 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 	if err := service.Disconnect(ctx, userID, machineID); err != nil {
 		t.Fatal(err)
 	}
-	blocked, err := service.ExecDescriptor(ctx, userID, machineID, machineID, "cli_exec_1", "operation_exec_revoked_"+suffix)
+	blocked, err := service.ExecDescriptor(ctx, userID, machineID, machineID, "cli_exec_1", "operation_exec_revoked_"+suffix, false)
 	if !errors.Is(err, ErrMachineCapabilityUnavailable) || blocked.Auth != nil || blocked.OperationID != "" {
 		t.Fatalf("disconnected owned machine must return capability unavailable without issuing authority: err=%v credential=%t operation=%t", err, blocked.Auth != nil, blocked.OperationID != "")
 	}

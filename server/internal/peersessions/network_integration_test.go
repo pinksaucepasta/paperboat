@@ -355,7 +355,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 		return generation
 	}
 	execHostBefore := hostPeerNetwork()
-	execDescriptor, err := machineService.ExecDescriptor(sharedScope, sharedUser, "network_shared_source_"+suffix, machineID, sharedCLI, execOperationID)
+	execDescriptor, err := machineService.ExecDescriptor(sharedScope, sharedUser, "network_shared_source_"+suffix, machineID, sharedCLI, execOperationID, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -369,17 +369,17 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 		t.Fatalf("shared exec descriptor=%#v", execDescriptor)
 	}
 	refreshRuntimeCarrier()
-	ownerExecDescriptor, err := machineService.ExecDescriptor(ctx, userID, "network_owner_source_"+suffix, machineID, cliID, "operation_owner_exec_"+suffix)
+	ownerExecDescriptor, err := machineService.ExecDescriptor(ctx, userID, "network_owner_source_"+suffix, machineID, cliID, "operation_owner_exec_"+suffix, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	refreshRuntimeCarrier()
-	activeExecDescriptor, err := machineService.ExecDescriptor(sharedScope, sharedUser, "network_shared_source_"+suffix, machineID, sharedCLI, "operation_shared_active_exec_"+suffix)
+	activeExecDescriptor, err := machineService.ExecDescriptor(sharedScope, sharedUser, "network_shared_source_"+suffix, machineID, sharedCLI, "operation_shared_active_exec_"+suffix, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	refreshRuntimeCarrier()
-	afterDisableExecDescriptor, err := machineService.ExecDescriptor(sharedScope, sharedUser, "network_shared_source_"+suffix, machineID, sharedCLI, "operation_shared_after_disable_exec_"+suffix)
+	afterDisableExecDescriptor, err := machineService.ExecDescriptor(sharedScope, sharedUser, "network_shared_source_"+suffix, machineID, sharedCLI, "operation_shared_after_disable_exec_"+suffix, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -710,7 +710,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 		}
 	}
 	refreshRuntimeCarrier()
-	sshDescriptor, err := machineService.SSHDescriptor(sharedScope, sharedUser, "network_shared_source_"+suffix, machineID, sharedCLI, "operation_shared_ssh_"+suffix)
+	sshDescriptor, err := machineService.SSHDescriptor(sharedScope, sharedUser, "network_shared_source_"+suffix, machineID, sharedCLI, "operation_shared_ssh_"+suffix, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -772,7 +772,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	refreshRuntimeCarrier()
-	finalSharedExec, err := machineService.ExecDescriptor(sharedScope, sharedUser, "network_shared_source_"+suffix, machineID, sharedCLI, "operation_shared_after_owner_left_"+suffix)
+	finalSharedExec, err := machineService.ExecDescriptor(sharedScope, sharedUser, "network_shared_source_"+suffix, machineID, sharedCLI, "operation_shared_after_owner_left_"+suffix, false)
 	if err != nil {
 		t.Fatal(err)
 	}

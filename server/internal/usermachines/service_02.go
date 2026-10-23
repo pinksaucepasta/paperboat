@@ -758,15 +758,21 @@ type ExecDescriptor struct {
 
 type SSHDescriptor = ExecDescriptor
 
-func (s *Service) ExecDescriptor(ctx context.Context, userID, sourceMachineID, userMachineID, cliClientSessionID, operationID string) (ExecDescriptor, error) {
-	return s.operationDescriptor(ctx, userID, sourceMachineID, userMachineID, cliClientSessionID, operationID, "exec_operation", "exec:operate", ErrExecOperationInvalid)
+// ExecDescriptor issues an exec operation credential. nativeOnly is the client's statement that it can run
+// the operation over its native peer connection alone: when the machine has no current edge route (its edge
+// carrier is re-attaching after an outage), such a client still gets the descriptor, with no edge endpoints,
+// instead of machine_not_ready. Released clients do not send it and keep the old answer.
+// Prior art: Tailscale SSH authorizes per connection from the netmap, independent of DERP reachability
+// (ssh/tailssh/tailssh.go).
+func (s *Service) ExecDescriptor(ctx context.Context, userID, sourceMachineID, userMachineID, cliClientSessionID, operationID string, nativeOnly bool) (ExecDescriptor, error) {
+	return s.operationDescriptor(ctx, userID, sourceMachineID, userMachineID, cliClientSessionID, operationID, "exec_operation", "exec:operate", ErrExecOperationInvalid, nativeOnly)
 }
 
-func (s *Service) SSHDescriptor(ctx context.Context, userID, sourceMachineID, userMachineID, cliClientSessionID, operationID string) (SSHDescriptor, error) {
-	return s.operationDescriptor(ctx, userID, sourceMachineID, userMachineID, cliClientSessionID, operationID, "ssh_operation", "ssh:operate", ErrSSHOperationInvalid)
+func (s *Service) SSHDescriptor(ctx context.Context, userID, sourceMachineID, userMachineID, cliClientSessionID, operationID string, nativeOnly bool) (SSHDescriptor, error) {
+	return s.operationDescriptor(ctx, userID, sourceMachineID, userMachineID, cliClientSessionID, operationID, "ssh_operation", "ssh:operate", ErrSSHOperationInvalid, nativeOnly)
 }
 
-func (s *Service) operationDescriptor(ctx context.Context, userID, sourceMachineID, userMachineID, cliClientSessionID, operationID, credentialClass, scope string, invalidOperationErr error) (ExecDescriptor, error) {
+func (s *Service) operationDescriptor(ctx context.Context, userID, sourceMachineID, userMachineID, cliClientSessionID, operationID, credentialClass, scope string, invalidOperationErr error, nativeOnly bool) (ExecDescriptor, error) {
 	if !execOperationIDPattern.MatchString(operationID) {
 		return ExecDescriptor{}, invalidOperationErr
 	}
@@ -813,10 +819,11 @@ func (s *Service) operationDescriptor(ctx context.Context, userID, sourceMachine
 		}
 	}
 	route, err := s.db.Queries().GetActiveHelperRouteForEnvironment(ctx, row.EnvironmentID)
-	if errors.Is(err, sql.ErrNoRows) {
+	edge := err == nil
+	if errors.Is(err, sql.ErrNoRows) && !nativeOnly {
 		return ExecDescriptor{}, ErrMachineCapabilityUnavailable
 	}
-	if err != nil {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return ExecDescriptor{}, err
 	}
 	if s.controlSigner == nil {
@@ -834,9 +841,15 @@ func (s *Service) operationDescriptor(ctx context.Context, userID, sourceMachine
 	if err != nil {
 		return ExecDescriptor{}, err
 	}
-	httpIngressURL, ingressErr := s.runtimeIngressURL(ctx, row.EnvironmentID, route.PublicHost)
-	if ingressErr != nil {
-		return ExecDescriptor{}, ingressErr
+	// Without an edge route the session has no edge base URL: these signed credentials are fenced by the
+	// environment, never revoked through the edge, and the client runs the operation natively.
+	httpIngressURL, endpoints := "", map[string]any{}
+	if edge {
+		var ingressErr error
+		if httpIngressURL, ingressErr = s.runtimeIngressURL(ctx, row.EnvironmentID, route.PublicHost); ingressErr != nil {
+			return ExecDescriptor{}, ingressErr
+		}
+		endpoints = machineTerminalEndpoints(runtimeWebsocketBase(httpIngressURL))
 	}
 	if err := s.createAccessSession(ctx, dbsqlc.CreateUserMachineAccessSessionParams{
 		ID: accessSessionID, UserMachineID: row.ID, UserID: userID, EnvironmentID: row.EnvironmentID,
@@ -848,7 +861,7 @@ func (s *Service) operationDescriptor(ctx context.Context, userID, sourceMachine
 	return ExecDescriptor{
 		OperationID: operationID,
 		Environment: map[string]any{"id": row.EnvironmentID, "kind": accessdescriptor.EnvironmentMachine, "resource_id": row.ID, "alias": row.Alias, "state": "ready", "root": row.WorkspaceRoot},
-		Endpoints:   machineTerminalEndpoints(runtimeWebsocketBase(httpIngressURL)),
+		Endpoints:   endpoints,
 		Auth:        map[string]any{"method": "bearer", "token": token, "expires_at": expiresAt, "scopes": []string{scope}, "access_session_id": accessSessionID},
 		ExpiresAt:   expiresAt,
 	}, nil

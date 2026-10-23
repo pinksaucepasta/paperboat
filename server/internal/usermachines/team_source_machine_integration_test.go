@@ -72,10 +72,10 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 		t.Fatal(err)
 	}
 	// End to end: exec and managed SSH descriptors from the team-owned source machine.
-	if _, err := service.ExecDescriptor(ctx, userID, sourceMachineID, machineID, "cli_ts_1", "operation_ts_exec_"+suffix); err != nil {
+	if _, err := service.ExecDescriptor(ctx, userID, sourceMachineID, machineID, "cli_ts_1", "operation_ts_exec_"+suffix, false); err != nil {
 		t.Fatalf("exec descriptor from a team-owned source: %v", err)
 	}
-	if _, err := service.SSHDescriptor(ctx, userID, sourceMachineID, machineID, "cli_ts_1", "operation_ts_ssh_"+suffix); err != nil && !errors.Is(err, ErrMachineCapabilityUnavailable) {
+	if _, err := service.SSHDescriptor(ctx, userID, sourceMachineID, machineID, "cli_ts_1", "operation_ts_ssh_"+suffix, false); err != nil && !errors.Is(err, ErrMachineCapabilityUnavailable) {
 		t.Fatalf("ssh descriptor from a team-owned source: %v", err)
 	}
 	stranger := "usr_ts_other_" + suffix
@@ -102,7 +102,7 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 	if allowed(userID, sourceMachineID) {
 		t.Fatal("a suspended team's machine accepted as source")
 	}
-	if _, err := service.ExecDescriptor(ctx, userID, sourceMachineID, machineID, "cli_ts_1", "operation_ts_suspended_"+suffix); !errors.Is(err, ErrNotFound) {
+	if _, err := service.ExecDescriptor(ctx, userID, sourceMachineID, machineID, "cli_ts_1", "operation_ts_suspended_"+suffix, false); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("exec from a suspended team's machine = %v, want not found", err)
 	}
 	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET revoked_at=now(),state='revoked' WHERE id=$1`, machineID); err != nil {

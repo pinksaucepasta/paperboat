@@ -691,6 +691,9 @@ func userMachineExecDescriptor(service *usermachines.Service) http.HandlerFunc {
 		var body struct {
 			SourceMachineID string `json:"source_machine_id"`
 			OperationID     string `json:"operation_id"`
+			// NativeOnlyAccepted: the client runs the operation over its native connection when the
+			// machine has no edge route, so it accepts a descriptor with empty endpoints.
+			NativeOnlyAccepted bool `json:"native_only_accepted"`
 		}
 		decoder := json.NewDecoder(r.Body)
 		decoder.DisallowUnknownFields()
@@ -698,7 +701,7 @@ func userMachineExecDescriptor(service *usermachines.Service) http.HandlerFunc {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "Request body must contain a valid source machine and operation ID.")
 			return
 		}
-		response, err := service.ExecDescriptor(r.Context(), p.User.ID, body.SourceMachineID, r.PathValue("machine_id"), p.Client.SessionID, body.OperationID)
+		response, err := service.ExecDescriptor(r.Context(), p.User.ID, body.SourceMachineID, r.PathValue("machine_id"), p.Client.SessionID, body.OperationID, body.NativeOnlyAccepted)
 		if errors.Is(err, usermachines.ErrAmbiguousTeamAccess) {
 			writeError(w, r, http.StatusConflict, "ambiguous_team_access", "More than one team grants access to this resource. Use a resource with one team grant until team selection is available.")
 			return
@@ -733,6 +736,9 @@ func userMachineSSHDescriptor(service *usermachines.Service) http.HandlerFunc {
 		var body struct {
 			SourceMachineID string `json:"source_machine_id"`
 			OperationID     string `json:"operation_id"`
+			// NativeOnlyAccepted: the client runs the operation over its native connection when the
+			// machine has no edge route, so it accepts a descriptor with empty endpoints.
+			NativeOnlyAccepted bool `json:"native_only_accepted"`
 		}
 		decoder := json.NewDecoder(r.Body)
 		decoder.DisallowUnknownFields()
@@ -740,7 +746,7 @@ func userMachineSSHDescriptor(service *usermachines.Service) http.HandlerFunc {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "Request body must contain a valid source machine and operation ID.")
 			return
 		}
-		response, err := service.SSHDescriptor(r.Context(), p.User.ID, body.SourceMachineID, r.PathValue("machine_id"), p.Client.SessionID, body.OperationID)
+		response, err := service.SSHDescriptor(r.Context(), p.User.ID, body.SourceMachineID, r.PathValue("machine_id"), p.Client.SessionID, body.OperationID, body.NativeOnlyAccepted)
 		if errors.Is(err, usermachines.ErrAmbiguousTeamAccess) {
 			writeError(w, r, http.StatusConflict, "ambiguous_team_access", "More than one team grants access to this resource. Use a resource with one team grant until team selection is available.")
 			return

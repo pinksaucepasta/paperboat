@@ -225,7 +225,7 @@ func TestTask44ConnectedCollaboration(t *testing.T) {
 	if _, err = authority.Authorize(ctx, member.id, teamID, "tunnel", mainTunnel, "use"); err != nil {
 		t.Fatal(err)
 	}
-	if _, e := machines.ExecDescriptor(ctx, member.id, source, machine, "task44-member", "task44-denied-exec"); !errors.Is(e, usermachines.ErrNotFound) {
+	if _, e := machines.ExecDescriptor(ctx, member.id, source, machine, "task44-member", "task44-denied-exec", false); !errors.Is(e, usermachines.ErrNotFound) {
 		t.Fatalf("file grant exec denial: %v", e)
 	}
 
