@@ -248,6 +248,19 @@ func TestGateCachesAndFailsOpen(t *testing.T) {
 	if gate.Denied(ctx, "account_b", time.Now()) {
 		t.Fatal("a failing lookup withheld grants")
 	}
+	// The failed lookup starts one background refresh (9fb1e289). Wait for it, so its
+	// lookup is not counted as a hot-path retry below.
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(time.Millisecond) {
+		gate.mu.Lock()
+		busy := gate.refreshing["account_b"]
+		gate.mu.Unlock()
+		if !busy {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("background refresh of a failed lookup never finished")
+		}
+	}
 	before := calls.Load()
 	for i := 0; i < 50; i++ {
 		gate.Denied(ctx, "account_b", time.Now())
