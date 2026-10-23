@@ -54,6 +54,14 @@ type Recorder struct {
 	// successful report, sent at reported.
 	revision, delivered uint64
 	reported            time.Time
+	// ids memoizes key for the current minute: add runs on every metered read and write, and key
+	// encodes and hashes the counter's identity. Cleared when the minute changes, so it stays small.
+	ids       map[counterIdentity]string
+	idsMinute time.Time
+}
+
+type counterIdentity struct {
+	accessSessionID, streamID, consumer, mode, nodeID string
 }
 
 // Open recovers pending absolute counters. Only one recorder owns a host's
@@ -144,7 +152,15 @@ func (r *Recorder) add(binding Binding, path Path, n int64, upload bool, now tim
 	r.revision++
 	start := now.Truncate(time.Minute)
 	report := api.NativeUsageReport{AccessSessionID: binding.AccessSessionID, StreamID: binding.StreamID, Consumer: binding.Consumer, Mode: path.Mode, NodeID: path.NodeID, IntervalStart: start, IntervalEnd: now}
-	id := key(report)
+	if !r.idsMinute.Equal(start) {
+		r.ids, r.idsMinute = make(map[counterIdentity]string), start
+	}
+	identity := counterIdentity{binding.AccessSessionID, binding.StreamID, binding.Consumer, path.Mode, path.NodeID}
+	id, known := r.ids[identity]
+	if !known {
+		id = key(report)
+		r.ids[identity] = id
+	}
 	value, exists := r.state.Counters[id]
 	if !exists && len(r.state.Counters) >= maxCounters {
 		// Evict only acknowledged, completed buckets. Pending bytes must not be

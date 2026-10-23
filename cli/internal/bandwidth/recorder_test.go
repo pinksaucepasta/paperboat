@@ -34,7 +34,7 @@ func (s *testSink) ReportNativeUsage(_ context.Context, reports []api.NativeUsag
 	}
 	return nil
 }
-func newTestRecorder(t *testing.T, sink *testSink) *Recorder {
+func newTestRecorder(t testing.TB, sink *testSink) *Recorder {
 	t.Helper()
 	r, err := Open(filepath.Join(t.TempDir(), "usage.json"), sink, nil)
 	if err != nil {
