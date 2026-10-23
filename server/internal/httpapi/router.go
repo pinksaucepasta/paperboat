@@ -925,10 +925,15 @@ func registerAuthRoutes(mux *http.ServeMux, opts Options) {
 			mux.Handle("POST /v1/github/native-links", nativeGitHubAuth(githubNativeStart(opts.GitHub)))
 			mux.Handle("GET /v1/github/native-links/{link_id}", nativeGitHubAuth(githubNativeStatus(opts.GitHub, false)))
 			mux.Handle("DELETE /v1/github/native-links/{link_id}", nativeGitHubAuth(githubNativeStatus(opts.GitHub, true)))
-			mux.HandleFunc("GET /v1/github/native-links/{link_id}/launch", githubNativeLaunch(opts.GitHub))
-			mux.HandleFunc("POST /v1/github/native-links/{link_id}/launch", githubNativeLaunch(opts.GitHub))
+			decision := func(action string) http.Handler {
+				return requireAuth(opts.Auth, requireCSRF(opts.Auth, githubNativeDecision(opts.GitHub, action)))
+			}
+			mux.Handle("POST /v1/github/native-links/{link_id}/review", decision("review"))
+			mux.Handle("POST /v1/github/native-links/{link_id}/approve", decision("approve"))
+			mux.Handle("POST /v1/github/native-links/{link_id}/cancel", decision("cancel"))
 		}
 		mux.Handle("GET /v1/github/status", requireAuth(opts.Auth, githubStatus(opts.GitHub)))
+		mux.Handle("DELETE /v1/github/connection", requireAuth(opts.Auth, requireCSRF(opts.Auth, githubDisconnect(opts.GitHub))))
 		mux.Handle("GET /v1/github/repositories", userAuth("machines:read", githubRepositories(opts.GitHub)))
 		mux.Handle("POST /v1/github/oauth/start", requireAuth(opts.Auth, requireCSRF(opts.Auth, githubOAuthStart(opts.Auth, opts.GitHub))))
 		mux.Handle("GET /v1/github/oauth/callback", githubCallbackDispatch(opts.GitHub, requireAuth(opts.Auth, githubOAuthBrowserCallback(opts.Auth, opts.GitHub))))

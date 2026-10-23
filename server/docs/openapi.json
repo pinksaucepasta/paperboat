@@ -26321,24 +26321,18 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "operationId": "post_v1_github_oauth_start"
+        "operationId": "post_v1_github_oauth_start",
+        "description": "Optional return_to: a console path (starts with /, not //) added to the result page redirect."
       }
     },
     "/v1/github/oauth/callback": {
       "get": {
         "summary": "Complete GitHub OAuth from browser redirect",
         "responses": {
-          "200": {
-            "description": "GitHub connected.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SuccessResponse"
-                }
-              }
-            }
+          "303": {
+            "description": "Redirect to the console's /github/done?result=connected&login=\u2026 or ?result=error&code=github_scope_denied|github_identity_conflict|github_oauth_failed|github_link_expired, plus return_to when set."
           },
-          "400": {
+          "401": {
             "$ref": "#/components/responses/Error"
           }
         },
@@ -43554,66 +43548,6 @@
         ]
       }
     },
-    "/v1/github/native-links/{link_id}/launch": {
-      "get": {
-        "summary": "Confirm native GitHub connection in its bound browser",
-        "operationId": "get_github_native_launch",
-        "security": [],
-        "parameters": [
-          {
-            "name": "link_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Account confirmation or cancellation"
-          },
-          "303": {
-            "description": "Continue to configured GitHub authorization endpoint"
-          },
-          "400": {
-            "$ref": "#/components/responses/Error"
-          },
-          "403": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
-      "post": {
-        "summary": "Confirm native GitHub connection in its bound browser",
-        "operationId": "post_github_native_launch",
-        "security": [],
-        "parameters": [
-          {
-            "name": "link_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Account confirmation or cancellation"
-          },
-          "303": {
-            "description": "Continue to configured GitHub authorization endpoint"
-          },
-          "400": {
-            "$ref": "#/components/responses/Error"
-          },
-          "403": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/v1/config-repositories/{repository_id}/read-access": {
       "post": {
         "summary": "Read an owned repository before mapped-root consent using native user authentication",
@@ -48970,6 +48904,232 @@
           }
         },
         "description": "The bearer is an API token (pbat_…). The session ends when the token is revoked or expires; a scoped token's session is held to the scope."
+      }
+    },
+    "/v1/github/native-links/{link_id}/review": {
+      "post": {
+        "summary": "Review a CLI's GitHub connection request",
+        "description": "Read-only and repeatable. 403 github_link_other_account, 410 github_link_expired, 409 github_link_used, 404 github_link_unavailable.",
+        "operationId": "post_github_native_link_review",
+        "parameters": [
+          {
+            "name": "link_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "token"
+                ],
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "description": "The token from the console link's fragment."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "account_email, machine_name, requested_at, expires_at.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "410": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/github/native-links/{link_id}/approve": {
+      "post": {
+        "summary": "Approve a CLI's GitHub connection request",
+        "description": "One use; binds the OAuth state server-side.",
+        "operationId": "post_github_native_link_approve",
+        "parameters": [
+          {
+            "name": "link_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "token"
+                ],
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "description": "The token from the console link's fragment."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "authorization_url to open.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "410": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/github/native-links/{link_id}/cancel": {
+      "post": {
+        "summary": "Cancel a CLI's GitHub connection request",
+        "description": "Ends the request for the CLI too.",
+        "operationId": "post_github_native_link_cancel",
+        "parameters": [
+          {
+            "name": "link_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "token"
+                ],
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "description": "The token from the console link's fragment."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Cancelled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "410": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/github/connection": {
+      "delete": {
+        "summary": "Disconnect GitHub",
+        "description": "Revokes the stored authorization; the grant stays in the user's GitHub settings. 409 github_connection_in_use while config sync uses it.",
+        "operationId": "delete_v1_github_connection",
+        "responses": {
+          "200": {
+            "description": "GitHub status, connected=false.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     }
   }

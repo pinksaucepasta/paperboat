@@ -53,6 +53,7 @@ func TestGitHubNativeLinkAuthenticatedLifecycle(t *testing.T) {
 	}
 	cfg := config.Default()
 	cfg.HTTP.PublicBaseURL = "https://api.example.test"
+	cfg.HTTP.BrowserLoginOrigin = "https://login.example.test"
 	cfg.Secrets.GitHubClientID = "native-test-client"
 	cfg.Secrets.EncryptionKey = "native-test-encryption-key"
 	writer := audit.NewWriter(store)
@@ -88,26 +89,25 @@ func TestGitHubNativeLinkAuthenticatedLifecycle(t *testing.T) {
 	if _, err := store.SQL().Exec(`UPDATE paperboat.cli_client_sessions SET scopes=ARRAY['machines:read']::text[] WHERE id=$1`, read.CLIClientSessionID); err != nil {
 		t.Fatal(err)
 	}
-	request := func(method, path, token, body string, cookie *http.Cookie, want int) *httptest.ResponseRecorder {
+	request := func(method, path, token, body string, browser []*http.Cookie, want int) *httptest.ResponseRecorder {
 		t.Helper()
 		req := httptest.NewRequest(method, path, strings.NewReader(body))
 		if token != "" {
 			req.Header.Set("Authorization", "Bearer "+token)
 		}
-		if cookie != nil {
+		for _, cookie := range browser {
 			req.AddCookie(cookie)
 		}
-		if method == http.MethodPost && strings.Contains(path, "/launch") {
-			req.Header.Set("Origin", cfg.HTTP.PublicBaseURL)
-			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		if browser != nil && method != http.MethodGet {
+			req.Header.Set(auth.CSRFHeaderName, csrfCookie(t, browser))
 		}
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, req)
 		if rec.Code != want {
-			t.Fatalf("%s %s status=%d want=%d", method, strings.Split(path, "?")[0], rec.Code, want)
+			t.Fatalf("%s %s status=%d want=%d body=%s", method, strings.Split(path, "?")[0], rec.Code, want, rec.Body.String())
 		}
-		if strings.Contains(rec.Body.String(), "native-provider-secret") {
-			t.Fatal("provider secret escaped")
+		if strings.Contains(rec.Body.String(), "native-provider-secret") || strings.Contains(rec.Body.String(), "<html") {
+			t.Fatal("provider secret or HTML escaped")
 		}
 		return rec
 	}
@@ -124,31 +124,43 @@ func TestGitHubNativeLinkAuthenticatedLifecycle(t *testing.T) {
 	start := func(token string) pbgithub.NativeLink {
 		return decode(request("POST", "/v1/github/native-links", token, "{}", nil, 201))
 	}
-	launch := func(item pbgithub.NativeLink) *http.Cookie {
+	// The console reads the link id from the query and the token from the fragment.
+	capability := func(item pbgithub.NativeLink) (string, string) {
 		t.Helper()
-		rec := request("GET", item.BrowserURL, "", "", nil, 200)
-		if !strings.Contains(rec.Body.String(), ownerEmail) {
-			t.Fatal("account not shown")
+		target, e := url.Parse(item.BrowserURL)
+		if e != nil || target.Scheme+"://"+target.Host != cfg.HTTP.BrowserLoginOrigin || target.Path != "/github/connect" || target.Fragment == "" {
+			t.Fatalf("browser url is not the console connect page: %v", e)
 		}
-		if rec.Header().Get("Referrer-Policy") != "same-origin" {
-			t.Fatal("launch capabilities could leak via referrer")
-		}
-		return cookieByName(t, rec.Result().Cookies(), nativeGitHubCookie)
+		return target.Query().Get("link"), `{"token":"` + target.Fragment + `"}`
 	}
-	authorize := func(item pbgithub.NativeLink, cookie *http.Cookie) string {
+	decide := func(item pbgithub.NativeLink, action string, browser []*http.Cookie, want int) *httptest.ResponseRecorder {
 		t.Helper()
-		rec := request("POST", "/v1/github/native-links/"+item.ID+"/launch", "", url.Values{"csrf": {cookie.Value}, "action": {"continue"}}.Encode(), cookie, 303)
-		target, e := url.Parse(rec.Header().Get("Location"))
-		if e != nil {
+		id, body := capability(item)
+		return request("POST", "/v1/github/native-links/"+id+"/"+action, "", body, browser, want)
+	}
+	approve := func(item pbgithub.NativeLink) string {
+		t.Helper()
+		var out struct {
+			Data struct {
+				AuthorizationURL string `json:"authorization_url"`
+			} `json:"data"`
+		}
+		if e := json.Unmarshal(decide(item, "approve", cookies, 200).Body.Bytes(), &out); e != nil {
 			t.Fatal(e)
 		}
-		if target.Query().Get("redirect_uri") != service.DefaultCallbackURL() {
+		target, e := url.Parse(out.Data.AuthorizationURL)
+		if e != nil || target.Query().Get("redirect_uri") != service.DefaultCallbackURL() {
 			t.Fatal("callback changed")
 		}
 		return target.Query().Get("state")
 	}
-	callback := func(state string, cookie *http.Cookie, want int) {
-		request("GET", "/v1/github/oauth/callback?code=provider-code&state="+url.QueryEscape(state), "", "", cookie, want)
+	callback := func(state string, want string) {
+		t.Helper()
+		rec := request("GET", "/v1/github/oauth/callback?code=provider-code&state="+url.QueryEscape(state), "", "", nil, http.StatusSeeOther)
+		location := rec.Header().Get("Location")
+		if !strings.HasPrefix(location, cfg.HTTP.BrowserLoginOrigin+"/github/done?") || !strings.Contains(location, want) {
+			t.Fatalf("callback redirect = %q; want %q", location, want)
+		}
 	}
 	request("POST", "/v1/github/native-links", "", "{}", nil, 401)
 	request("POST", "/v1/github/native-links", read.AccessToken, "{}", nil, 403)
@@ -157,27 +169,43 @@ func TestGitHubNativeLinkAuthenticatedLifecycle(t *testing.T) {
 	request("GET", path, second.AccessToken, "", nil, 404)
 	request("GET", path, foreign.AccessToken, "", nil, 404)
 	request("DELETE", path, foreign.AccessToken, "", nil, 404)
-	browser := launch(item)
-	request("GET", item.BrowserURL, "", "", nil, 400)
-	request("POST", path+"/launch", "", "action=continue&csrf=wrong", browser, 403)
-	state := authorize(item, browser)
-	callback(state, nil, 403)
-	wrong := *browser
-	wrong.Value = strings.Repeat("x", 43)
-	callback(state, &wrong, 400)
-	callback(state+"tampered", browser, 400)
-	callback(state, browser, 200)
-	callback(state, browser, 400)
+	// Review is read-only: a prefetch or reload must not consume the request.
+	id, _ := capability(item)
+	request("POST", "/v1/github/native-links/"+id+"/review", "", `{"token":"wrong"}`, cookies, 404)
+	request("POST", "/v1/github/native-links/"+id+"/review", "", `{"token":"x"}`, nil, 401)
+	for range 2 {
+		var review struct {
+			Data pbgithub.NativeLinkReview `json:"data"`
+		}
+		if e := json.Unmarshal(decide(item, "review", cookies, 200).Body.Bytes(), &review); e != nil || review.Data.AccountEmail != ownerEmail {
+			t.Fatalf("review = %+v %v", review.Data, e)
+		}
+	}
+	otherCookies := loginCookies(t, router, "workos_native_github_other_"+suffix+":"+otherEmail+":Other")
+	decide(item, "review", otherCookies, 403)
+	decide(item, "approve", otherCookies, 403)
+	state := approve(item)
+	decide(item, "approve", cookies, 409)
+	decide(item, "review", cookies, 409)
+	callback(state+"tampered", "code=github_link_expired")
+	callback(state, "login=native-test-provider&result=connected")
+	callback(state, "code=github_link_expired")
 	if got := decode(request("GET", path, first.AccessToken, "", nil, 200)); got.State != "completed" || got.BrowserURL != "" {
 		t.Fatal("poll completion invalid")
 	}
 	request("DELETE", path, first.AccessToken, "", nil, 200)
-	// Cancellation, expiry, restart replacement and client revocation fence both browser and native operations.
+	// The console's Cancel ends the request for the CLI too.
 	item = start(first.AccessToken)
-	browser = launch(item)
-	state = authorize(item, browser)
+	decide(item, "cancel", cookies, 200)
+	decide(item, "approve", cookies, 409)
+	if got := decode(request("GET", "/v1/github/native-links/"+item.ID, first.AccessToken, "", nil, 200)); got.State == "pending" {
+		t.Fatal("console cancel left the request pending")
+	}
+	// Cancellation, expiry, restart replacement and client revocation fence approval and callback.
+	item = start(first.AccessToken)
+	state = approve(item)
 	request("DELETE", "/v1/github/native-links/"+item.ID, first.AccessToken, "", nil, 200)
-	callback(state, browser, 400)
+	callback(state, "code=github_link_expired")
 	item = start(first.AccessToken)
 	if _, err := store.SQL().Exec(`UPDATE paperboat.github_native_links SET expires_at=now()-interval '1 second' WHERE id=$1`, item.ID); err != nil {
 		t.Fatal(err)
@@ -185,21 +213,19 @@ func TestGitHubNativeLinkAuthenticatedLifecycle(t *testing.T) {
 	if got := decode(request("GET", "/v1/github/native-links/"+item.ID, first.AccessToken, "", nil, 200)); got.State != "expired" {
 		t.Fatal("expiry not reported")
 	}
-	request("GET", item.BrowserURL, "", "", nil, 400)
+	decide(item, "review", cookies, 410)
 	old := start(first.AccessToken)
 	item = start(first.AccessToken)
-	request("GET", old.BrowserURL, "", "", nil, 400)
-	browser = launch(item)
-	state = authorize(item, browser)
+	decide(old, "review", cookies, 404)
+	state = approve(item)
 	if _, err := store.SQL().Exec(`UPDATE paperboat.cli_client_sessions SET state='revoked',revoked_at=now() WHERE id=$1`, first.CLIClientSessionID); err != nil {
 		t.Fatal(err)
 	}
-	callback(state, browser, 400)
+	callback(state, "result=error")
 	request("GET", "/v1/github/native-links/"+item.ID, first.AccessToken, "", nil, 401)
 	// A revocation racing the provider exchange must prevent credential persistence.
 	item = start(second.AccessToken)
-	browser = launch(item)
-	state = authorize(item, browser)
+	state = approve(item)
 	var beforeVersion int64
 	if err := store.SQL().QueryRow(`SELECT version FROM paperboat.github_oauth_tokens WHERE user_id=$1`, owner).Scan(&beforeVersion); err != nil {
 		t.Fatal(err)
@@ -209,12 +235,28 @@ func TestGitHubNativeLinkAuthenticatedLifecycle(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	callback(state, browser, 400)
+	callback(state, "result=error")
 	var afterVersion int64
 	if err := store.SQL().QueryRow(`SELECT version FROM paperboat.github_oauth_tokens WHERE user_id=$1`, owner).Scan(&afterVersion); err != nil || afterVersion != beforeVersion {
 		t.Fatal("revoked client changed provider credential")
 	}
 	// Browser OAuth remains session-authenticated; native state cannot bypass its dispatch.
 	request("GET", "/v1/github/oauth/callback?state=ordinary-browser-state&code=provider-code", "", "", nil, 401)
-	_ = cookies
+	// Status names the connected account; disconnect clears it.
+	var status struct {
+		Data pbgithub.Status `json:"data"`
+	}
+	if e := json.Unmarshal(request("GET", "/v1/github/status", "", "", cookies, 200).Body.Bytes(), &status); e != nil || status.Data.Login != "native-test-provider" || status.Data.AvatarURL == "" {
+		t.Fatalf("status = %+v %v", status.Data, e)
+	}
+	request("DELETE", "/v1/github/connection", "", "", cookies, http.StatusConflict)
+	if _, err := store.SQL().Exec(`UPDATE paperboat.control_config_repositories SET state='disconnected' WHERE owner_user_id=$1`, owner); err != nil {
+		t.Fatal(err)
+	}
+	var disconnected struct {
+		Data pbgithub.Status `json:"data"`
+	}
+	if e := json.Unmarshal(request("DELETE", "/v1/github/connection", "", "", cookies, 200).Body.Bytes(), &disconnected); e != nil || disconnected.Data.Connected || disconnected.Data.Login != "" {
+		t.Fatalf("disconnect = %+v %v", disconnected.Data, e)
+	}
 }

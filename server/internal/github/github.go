@@ -92,7 +92,10 @@ type File struct {
 }
 
 type Status struct {
-	Connected             bool      `json:"connected"`
+	Connected bool `json:"connected"`
+	// Login and AvatarURL name the connected GitHub account (absent when not connected).
+	Login                 string    `json:"login,omitempty"`
+	AvatarURL             string    `json:"avatar_url,omitempty"`
 	Scopes                []string  `json:"scopes"`
 	MissingScopes         []string  `json:"missing_scopes"`
 	LastValidatedAt       time.Time `json:"last_validated_at,omitempty"`
@@ -280,6 +283,10 @@ func (s *Service) Status(ctx context.Context, userID string) (Status, error) {
 		return Status{}, err
 	}
 	status.Connected = true
+	if err := s.db.SQL().QueryRowContext(ctx, `SELECT provider_account_login FROM paperboat.github_oauth_tokens WHERE user_id=$1 AND revoked_at IS NULL ORDER BY updated_at DESC LIMIT 1`, userID).Scan(&status.Login); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return Status{}, err
+	}
+	status.AvatarURL = s.avatarURL(status.Login)
 	status.Scopes = connection.Scopes
 	status.LastValidatedAt = connection.LastValidatedAt.Time
 	status.MissingScopes = missingScopes(connection.Scopes, s.requiredOAuthScopes())
@@ -922,3 +929,39 @@ var (
 	ErrIdempotencyKeyRequired      = errors.New("idempotency key is required")
 	ErrRepositoryAccessUnavailable = errors.New("repository-scoped access is unavailable")
 )
+
+// ErrConnectionInUse: the GitHub connection cannot be removed while an active config
+// repository syncs through it.
+var ErrConnectionInUse = errors.New("GitHub connection is used by the config repository")
+
+// avatarURL is the account's public avatar on the configured GitHub web host.
+func (s *Service) avatarURL(login string) string {
+	if login == "" {
+		return ""
+	}
+	authorize, err := url.Parse(s.cfg.GitHub.OAuthAuthorizeURL)
+	if err != nil || authorize.Scheme == "" || authorize.Host == "" {
+		return ""
+	}
+	return authorize.Scheme + "://" + authorize.Host + "/" + url.PathEscape(login) + ".png"
+}
+
+// Disconnect revokes the stored GitHub token (Paperboat stops acting on GitHub for the user).
+// The grant itself stays listed in the user's GitHub settings until they remove it there.
+func (s *Service) Disconnect(ctx context.Context, userID string) (Status, error) {
+	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		var inUse bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.control_config_repositories WHERE owner_user_id=$1 AND provider='github' AND provisioned_at IS NOT NULL AND state='active')`, userID).Scan(&inUse); err != nil {
+			return err
+		}
+		if inUse {
+			return ErrConnectionInUse
+		}
+		_, err := tx.Exec(ctx, `UPDATE paperboat.github_oauth_tokens SET revoked_at=now(),updated_at=now(),version=version+1 WHERE user_id=$1 AND revoked_at IS NULL`, userID)
+		return err
+	})
+	if err != nil {
+		return Status{}, err
+	}
+	return s.Status(ctx, userID)
+}

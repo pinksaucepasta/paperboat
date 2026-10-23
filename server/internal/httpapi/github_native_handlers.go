@@ -1,41 +1,14 @@
 package httpapi
 
 import (
-	"crypto/hmac"
-	"crypto/rand"
-	"encoding/base64"
-	"html/template"
+	"encoding/json"
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
-	"github.com/getsentry/sentry-go"
 	pbgithub "github.com/pinksaucepasta/paperboat-server/internal/github"
 )
 
-const nativeGitHubCookie = "__Host-pb-github-native"
-
-var nativeGitHubPage = template.Must(template.New("github-connect").Funcs(template.FuncMap{
-	// Only these fixed comments are trusted HTML. Account text remains escaped.
-	// Cloudflare must not replace this security-relevant label with script output.
-	"emailOff": func() template.HTML { return "<!--email_off-->" },
-	"emailOn":  func() template.HTML { return "<!--/email_off-->" },
-}).Parse(`<!doctype html><html><head><meta charset="utf-8"><title>Connect GitHub to Paperboat</title></head><body><h1>Connect GitHub</h1><p>You are connecting GitHub to Paperboat account {{emailOff}}<strong>{{.Email}}</strong>{{emailOn}}.</p><p>Continue only if you started this request from your Paperboat CLI. GitHub will ask you to authorize repository access. After connecting, choose an accessible private repository for configuration sync. Selected configuration is ordinary plaintext in private Git, including its history.</p><form method="post" action="{{.Action}}"><input type="hidden" name="csrf" value="{{.CSRF}}"><button name="action" value="continue">Continue to GitHub</button><button name="action" value="cancel">Cancel</button></form></body></html>`))
-
-func githubNativeHeaders(w http.ResponseWriter, service *pbgithub.Service) {
-	formAction := "'self'"
-	if authorize, err := service.OAuthAuthorizeURL("browser-policy", service.DefaultCallbackURL()); err == nil {
-		if provider, err := url.Parse(authorize); err == nil && provider.Scheme == "https" {
-			formAction += " " + provider.Scheme + "://" + provider.Host
-		}
-	}
-	noStore(w)
-	// Preserve Origin on HTML form POST while withholding cross-origin referrers.
-	w.Header().Set("Referrer-Policy", "same-origin")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; form-action "+formAction+"; frame-ancestors 'none'; base-uri 'none'")
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-}
 func githubNativeStart(service *pbgithub.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		p, ok := principalFromContext(r.Context())
@@ -78,98 +51,66 @@ func githubNativeStatus(service *pbgithub.Service, cancel bool) http.HandlerFunc
 		writeJSON(w, 200, SuccessResponse{Data: item})
 	}
 }
-func githubNativeLaunch(service *pbgithub.Service) http.HandlerFunc {
+
+// githubNativeDecision serves the console's review, approve and cancel of a CLI's GitHub
+// connection request. The signed-in user must be the request's account and hold its token
+// (the console reads it from the link's fragment). Review changes nothing.
+func githubNativeDecision(service *pbgithub.Service, action string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		githubNativeHeaders(w, service)
-		if r.Method == http.MethodGet {
-			var random [32]byte
-			if _, err := rand.Read(random[:]); err != nil {
-				http.Error(w, "Unable to start GitHub connection.", 500)
-				return
-			}
-			browser := base64.RawURLEncoding.EncodeToString(random[:])
-			email, err := service.LaunchNativeLink(r.Context(), r.PathValue("link_id"), r.URL.Query().Get("token"), browser)
-			if err != nil {
-				writeGitHubNativeBrowserFailure(w, r, err, "This GitHub connection request is expired or unavailable. Start again in Paperboat.", false)
-				return
-			}
-			http.SetCookie(w, &http.Cookie{Name: nativeGitHubCookie, Value: browser, Path: "/", HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode, MaxAge: int(pbgithub.NativeLinkLifetime / time.Second)})
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			_ = nativeGitHubPage.Execute(w, struct{ Email, CSRF, Action string }{email, browser, r.URL.Path})
+		p, ok := principalFromContext(r.Context())
+		if !ok {
+			writeError(w, r, http.StatusUnauthorized, "unauthenticated", "Sign in to the account that started this request.")
 			return
 		}
-		origin := service.NativeBrowserOrigin()
-		if origin == "" || r.Header.Get("Origin") != origin {
-			http.Error(w, "GitHub connection origin was not verified.", http.StatusForbidden)
+		var body struct {
+			Token string `json:"token"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body); err != nil || body.Token == "" {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "Request body must carry the connection request's token.")
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, 4096)
-		if err := r.ParseForm(); err != nil {
-			http.Error(w, "Invalid request.", http.StatusBadRequest)
-			return
+		id := r.PathValue("link_id")
+		var data any
+		var err error
+		switch action {
+		case "review":
+			data, err = service.ReviewNativeLink(r.Context(), p.User.ID, id, body.Token)
+		case "approve":
+			var authorizationURL string
+			authorizationURL, err = service.ApproveNativeLink(r.Context(), p.User.ID, id, body.Token)
+			data = map[string]string{"authorization_url": authorizationURL}
+		default:
+			err = service.CancelNativeLink(r.Context(), p.User.ID, id, body.Token)
+			data = map[string]string{"state": "canceled"}
 		}
-		cookie, err := nativeGitHubBrowserCookie(r)
-		if err != nil || !hmac.Equal([]byte(cookie), []byte(r.PostForm.Get("csrf"))) {
-			http.Error(w, "GitHub connection browser was not verified.", http.StatusForbidden)
-			return
-		}
-		action := r.PostForm.Get("action")
-		if action != "continue" && action != "cancel" {
-			http.Error(w, "Invalid action.", http.StatusBadRequest)
-			return
-		}
-		redirect, err := service.AuthorizeNativeLink(r.Context(), r.PathValue("link_id"), cookie, action == "cancel")
 		if err != nil {
-			writeGitHubNativeBrowserFailure(w, r, err, "This GitHub connection request is expired or unavailable. Start again in Paperboat.", false)
+			writeNativeLinkFailure(w, r, err)
 			return
 		}
-		if action == "cancel" {
-			clearNativeGitHubCookie(w)
-			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-			_, _ = w.Write([]byte("GitHub connection canceled. Return to Paperboat."))
-			return
-		}
-		http.Redirect(w, r, redirect, http.StatusSeeOther)
+		noStore(w)
+		writeJSON(w, http.StatusOK, SuccessResponse{Data: data})
 	}
-}
-func writeGitHubNativeBrowserFailure(w http.ResponseWriter, r *http.Request, err error, rejectionMessage string, providerCallback bool) {
-	rejectionCode := ""
-	switch {
-	case expectedHTTPErrorOnly(err, pbgithub.ErrNativeLink):
-		rejectionCode = "github_connection_unavailable"
-	case providerCallback && expectedHTTPErrorOnly(err, pbgithub.ErrMissingScopes):
-		rejectionCode = "github_scope_denied"
-	case providerCallback && expectedHTTPErrorOnly(err, pbgithub.ErrIdentityLinkedToAnotherUser):
-		rejectionCode = "github_identity_conflict"
-	case providerCallback && githubOAuthCredentialRejected(err):
-		rejectionCode = "github_oauth_failed"
-	}
-	if rejectionCode != "" {
-		logHTTPRejection(r, http.StatusBadRequest, rejectionCode, err)
-		http.Error(w, rejectionMessage, http.StatusBadRequest)
-		return
-	}
-	captureSupportFailure(r, http.StatusServiceUnavailable, "github_connection_unavailable", sentry.NewStacktrace(), err)
-	http.Error(w, "GitHub connection is temporarily unavailable. Return to Paperboat and retry.", http.StatusServiceUnavailable)
 }
 
-func nativeGitHubBrowserCookie(r *http.Request) (string, error) {
-	var value string
-	count := 0
-	for _, c := range r.Cookies() {
-		if c.Name == nativeGitHubCookie {
-			value = c.Value
-			count++
-		}
+func writeNativeLinkFailure(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case expectedHTTPErrorOnly(err, pbgithub.ErrNativeLinkOtherAccount):
+		writeError(w, r, http.StatusForbidden, "github_link_other_account", "This GitHub connection request was started for another Paperboat account. Sign in to that account.")
+	case expectedHTTPErrorOnly(err, pbgithub.ErrNativeLinkExpired):
+		writeError(w, r, http.StatusGone, "github_link_expired", "This GitHub connection request has expired. Start it again from the Paperboat CLI.")
+	case expectedHTTPErrorOnly(err, pbgithub.ErrNativeLinkUsed):
+		writeError(w, r, http.StatusConflict, "github_link_used", "This GitHub connection request was already approved or cancelled.")
+	case expectedHTTPErrorOnly(err, pbgithub.ErrNativeLink):
+		writeError(w, r, http.StatusNotFound, "github_link_unavailable", "This GitHub connection request is not available. Start it again from the Paperboat CLI.")
+	case expectedHTTPErrorOnly(err, pbgithub.ErrClientNotConfigured):
+		writeError(w, r, http.StatusServiceUnavailable, "provider_unavailable", "GitHub OAuth is not configured.", err)
+	default:
+		writeError(w, r, http.StatusServiceUnavailable, "github_connection_unavailable", "GitHub connection is temporarily unavailable.", err)
 	}
-	if count != 1 || len(value) != 43 {
-		return "", pbgithub.ErrNativeLink
-	}
-	return value, nil
 }
-func clearNativeGitHubCookie(w http.ResponseWriter) {
-	http.SetCookie(w, &http.Cookie{Name: nativeGitHubCookie, Value: "", Path: "/", HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode, MaxAge: -1})
-}
+
+// githubCallbackDispatch completes a CLI's request (state pbnative_*) or a console-started
+// connection, and sends the browser to the console's result page; the API answers no HTML.
 func githubCallbackDispatch(service *pbgithub.Service, browser http.Handler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		state := r.URL.Query().Get("state")
@@ -177,18 +118,36 @@ func githubCallbackDispatch(service *pbgithub.Service, browser http.Handler) htt
 			browser.ServeHTTP(w, r)
 			return
 		}
-		githubNativeHeaders(w, service)
-		binding, err := nativeGitHubBrowserCookie(r)
-		if err != nil {
-			http.Error(w, "GitHub connection browser was not verified. Return to Paperboat and retry.", http.StatusForbidden)
+		noStore(w)
+		if err := service.CompleteNativeLink(r.Context(), state, r.URL.Query().Get("code")); err != nil {
+			code := githubCallbackErrorCode(err)
+			logHTTPRejection(r, http.StatusSeeOther, code, err)
+			http.Redirect(w, r, githubResultURL(service, "", url.Values{"result": {"error"}, "code": {code}}), http.StatusSeeOther)
 			return
 		}
-		if err := service.CompleteNativeLink(r.Context(), state, binding, r.URL.Query().Get("code")); err != nil {
-			writeGitHubNativeBrowserFailure(w, r, err, "GitHub connection did not complete. Return to Paperboat and retry.", true)
-			return
-		}
-		clearNativeGitHubCookie(w)
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		_, _ = w.Write([]byte("GitHub connected. Return to Paperboat to select your configuration repository."))
+		login, _ := service.NativeLinkLogin(r.Context(), state)
+		http.Redirect(w, r, githubResultURL(service, "", url.Values{"result": {"connected"}, "login": {login}}), http.StatusSeeOther)
 	}
+}
+
+func githubCallbackErrorCode(err error) string {
+	switch {
+	case expectedHTTPErrorOnly(err, pbgithub.ErrMissingScopes):
+		return "github_scope_denied"
+	case expectedHTTPErrorOnly(err, pbgithub.ErrIdentityLinkedToAnotherUser):
+		return "github_identity_conflict"
+	case expectedHTTPErrorOnly(err, pbgithub.ErrNativeLink):
+		return "github_link_expired"
+	default:
+		return "github_oauth_failed"
+	}
+}
+
+// githubResultURL is the console's GitHub result page; returnTo is a console path chosen when
+// the connection started (validated as a same-origin relative path).
+func githubResultURL(service *pbgithub.Service, returnTo string, query url.Values) string {
+	if returnTo != "" {
+		query.Set("return_to", returnTo)
+	}
+	return service.ConsoleOrigin() + "/github/done?" + query.Encode()
 }

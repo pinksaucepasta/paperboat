@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
+	"strings"
 
 	"github.com/pinksaucepasta/paperboat-server/internal/auth"
 	pbgithub "github.com/pinksaucepasta/paperboat-server/internal/github"
@@ -28,11 +30,16 @@ func githubStatus(service *pbgithub.Service) http.HandlerFunc {
 func githubOAuthStart(authService *auth.Service, service *pbgithub.Service) http.HandlerFunc {
 	type request struct {
 		RedirectURI string `json:"redirect_uri"`
+		ReturnTo    string `json:"return_to"`
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body request
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "Request body must be valid JSON.")
+			return
+		}
+		if body.ReturnTo != "" && !consolePath(body.ReturnTo) {
+			writeError(w, r, http.StatusBadRequest, "invalid_return_to", "return_to must be a console path such as /config.")
 			return
 		}
 		state, err := authService.NewOAuthState()
@@ -50,6 +57,7 @@ func githubOAuthStart(authService *auth.Service, service *pbgithub.Service) http
 			return
 		}
 		authService.SetOAuthStateCookie(w, state)
+		setGitHubReturnTo(w, body.ReturnTo)
 		writeJSON(w, http.StatusOK, SuccessResponse{Data: map[string]any{"state": state, "authorization_url": url}})
 	}
 }
@@ -85,6 +93,8 @@ func githubOAuthCallback(authService *auth.Service, service *pbgithub.Service) h
 	}
 }
 
+// githubOAuthBrowserCallback is where GitHub sends the browser after a console-started
+// connection. It answers with a redirect to the console's result page, never a body.
 func githubOAuthBrowserCallback(authService *auth.Service, service *pbgithub.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		p, ok := principalFromContext(r.Context())
@@ -92,18 +102,74 @@ func githubOAuthBrowserCallback(authService *auth.Service, service *pbgithub.Ser
 			writeError(w, r, http.StatusUnauthorized, "unauthenticated", "Authentication is required.")
 			return
 		}
-		code := r.URL.Query().Get("code")
+		noStore(w)
+		returnTo := gitHubReturnTo(r)
+		setGitHubReturnTo(w, "")
 		state := r.URL.Query().Get("state")
 		if err := authService.ValidateOAuthState(r, state); err != nil {
-			writeError(w, r, http.StatusForbidden, "oauth_state_failed", "OAuth state validation failed.")
-			return
-		}
-		status, err := service.CompleteOAuth(r.Context(), p.User.ID, code, service.DefaultCallbackURL())
-		if err != nil {
-			writeGitHubOAuthFailure(w, r, err)
+			logHTTPRejection(r, http.StatusSeeOther, "github_oauth_failed", err)
+			http.Redirect(w, r, githubResultURL(service, returnTo, url.Values{"result": {"error"}, "code": {"github_oauth_failed"}}), http.StatusSeeOther)
 			return
 		}
 		authService.ClearOAuthStateCookie(w)
+		status, err := service.CompleteOAuth(r.Context(), p.User.ID, r.URL.Query().Get("code"), service.DefaultCallbackURL())
+		if err != nil {
+			code := githubCallbackErrorCode(err)
+			logHTTPRejection(r, http.StatusSeeOther, code, err)
+			http.Redirect(w, r, githubResultURL(service, returnTo, url.Values{"result": {"error"}, "code": {code}}), http.StatusSeeOther)
+			return
+		}
+		http.Redirect(w, r, githubResultURL(service, returnTo, url.Values{"result": {"connected"}, "login": {status.Login}}), http.StatusSeeOther)
+	}
+}
+
+const githubReturnToCookie = "pb_github_return_to"
+
+// consolePath accepts only a same-origin console path: no scheme, host or backslash tricks.
+func consolePath(path string) bool {
+	return len(path) <= 256 && strings.HasPrefix(path, "/") && !strings.HasPrefix(path, "//") &&
+		!strings.ContainsAny(path, "\\\r\n\t")
+}
+
+func setGitHubReturnTo(w http.ResponseWriter, path string) {
+	cookie := &http.Cookie{Name: githubReturnToCookie, Value: url.QueryEscape(path), Path: "/v1/github/oauth",
+		MaxAge: 600, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode}
+	if path == "" {
+		cookie.MaxAge = -1
+	}
+	http.SetCookie(w, cookie)
+}
+
+func gitHubReturnTo(r *http.Request) string {
+	cookie, err := r.Cookie(githubReturnToCookie)
+	if err != nil {
+		return ""
+	}
+	path, err := url.QueryUnescape(cookie.Value)
+	if err != nil || !consolePath(path) {
+		return ""
+	}
+	return path
+}
+
+// githubDisconnect revokes the user's stored GitHub authorization. The OAuth grant itself stays
+// listed in the user's GitHub settings until they remove it there.
+func githubDisconnect(service *pbgithub.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		p, ok := principalFromContext(r.Context())
+		if !ok {
+			writeError(w, r, http.StatusUnauthorized, "unauthenticated", "Authentication is required.")
+			return
+		}
+		status, err := service.Disconnect(r.Context(), p.User.ID)
+		if expectedHTTPErrorOnly(err, pbgithub.ErrConnectionInUse) {
+			writeError(w, r, http.StatusConflict, "github_connection_in_use", "Config sync uses this GitHub connection. Turn off config sync first.")
+			return
+		}
+		if err != nil {
+			writeError(w, r, http.StatusInternalServerError, "internal_error", "Internal server error.", err)
+			return
+		}
 		writeJSON(w, http.StatusOK, SuccessResponse{Data: status})
 	}
 }

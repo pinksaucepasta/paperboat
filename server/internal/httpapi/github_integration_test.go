@@ -175,19 +175,21 @@ func TestGitHubBrowserCallbackCompletesOAuth(t *testing.T) {
 	cookies := loginCookies(t, router, "workos_github_browser:github-browser@example.com:GitHub Browser")
 	csrf := csrfCookie(t, cookies)
 	start := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/v1/github/oauth/start", strings.NewReader(`{}`))
+	req := httptest.NewRequest(http.MethodPost, "/v1/github/oauth/start", strings.NewReader(`{"return_to":"/config"}`))
 	addCookies(req, cookies)
 	req.Header.Set(auth.CSRFHeaderName, csrf)
 	router.ServeHTTP(start, req)
 	state := jsonField(t, start.Body.Bytes(), "state")
 	stateCookie := cookieByName(t, start.Result().Cookies(), auth.OAuthStateCookieName)
+	returnTo := cookieByName(t, start.Result().Cookies(), githubReturnToCookie)
 
 	callback := httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodGet, "/v1/github/oauth/callback?code=github-code&state="+state, nil)
-	addCookies(req, replaceCookie(cookies, stateCookie))
+	addCookies(req, append(replaceCookie(cookies, stateCookie), returnTo))
 	router.ServeHTTP(callback, req)
-	if callback.Code != http.StatusOK {
-		t.Fatalf("browser callback status = %d, body = %s", callback.Code, callback.Body.String())
+	location := callback.Header().Get("Location")
+	if callback.Code != http.StatusSeeOther || !strings.HasSuffix(location, "/github/done?login=paperboat-test-user&result=connected&return_to=%2Fconfig") {
+		t.Fatalf("browser callback = %d %q", callback.Code, location)
 	}
 	if strings.Contains(callback.Body.String(), "fake-gh-token") {
 		t.Fatal("browser callback leaked token")

@@ -168,66 +168,39 @@ func TestGitHubNativeStatusReportsStoreOutage(t *testing.T) {
 	}
 }
 
-func TestGitHubNativeBrowserRejectsOriginCSRFAndDuplicateCookies(t *testing.T) {
-	cfg := config.Default()
-	cfg.HTTP.PublicBaseURL = "https://api.example.test"
-	cfg.Secrets.GitHubClientID = "test-client"
-	service := pbgithub.NewService(nil, nil, nil, cfg)
-	for _, test := range []struct {
-		name, origin, csrf string
-		duplicates         bool
-	}{
-		{name: "wrong origin", origin: "https://attacker.example", csrf: strings.Repeat("b", 43)},
-		{name: "opaque origin", origin: "null", csrf: strings.Repeat("b", 43)},
-		{name: "missing origin", csrf: strings.Repeat("b", 43)},
-		{name: "wrong csrf", origin: cfg.HTTP.PublicBaseURL, csrf: "wrong"},
-		{name: "duplicate cookie", origin: cfg.HTTP.PublicBaseURL, csrf: strings.Repeat("b", 43), duplicates: true},
+func TestGitHubReturnToAcceptsOnlyConsolePaths(t *testing.T) {
+	for path, want := range map[string]bool{
+		"/config": true, "/config?tab=sync": true, "": false, "config": false, "//evil.example.test": false,
+		"/\\evil.example.test": false, "https://evil.example.test": false, "/a\r\nSet-Cookie:x": false,
+		"/" + strings.Repeat("a", 300): false,
 	} {
-		t.Run(test.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPost, cfg.HTTP.PublicBaseURL+"/v1/github/native-links/test/launch", strings.NewReader("action=continue&csrf="+test.csrf))
-			req.Header.Set("Origin", test.origin)
-			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-			cookie := &http.Cookie{Name: nativeGitHubCookie, Value: strings.Repeat("b", 43)}
-			req.AddCookie(cookie)
-			if test.duplicates {
-				req.AddCookie(cookie)
-			}
+		if consolePath(path) != want {
+			t.Errorf("consolePath(%q) = %v; want %v", path, !want, want)
+		}
+	}
+}
+
+func TestGitHubBrowserCallbackRedirectsToConsoleResult(t *testing.T) {
+	cfg := config.Default()
+	cfg.HTTP.BrowserLoginOrigin = "https://console.example.test"
+	authService := auth.NewService(nil, nil, nil, []string{"github-callback-test-key"}, false)
+	githubService := pbgithub.NewService(nil, nil, &pbgithub.FakeClient{}, cfg)
+	for name, test := range map[string]struct {
+		state, cookieState, returnTo, want string
+	}{
+		"bad state keeps return_to":   {"one", "two", "/config", "https://console.example.test/github/done?code=github_oauth_failed&result=error&return_to=%2Fconfig"},
+		"forged return_to is dropped": {"one", "two", "//evil.example.test", "https://console.example.test/github/done?code=github_oauth_failed&result=error"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/v1/github/oauth/callback?code=c&state="+test.state, nil)
+			req.AddCookie(&http.Cookie{Name: auth.DevOAuthStateCookieName, Value: test.cookieState})
+			req.AddCookie(&http.Cookie{Name: githubReturnToCookie, Value: test.returnTo})
+			req = req.WithContext(context.WithValue(req.Context(), authContextKey{}, principal{User: auth.User{ID: "usr_github_callback"}}))
 			rec := httptest.NewRecorder()
-			githubNativeLaunch(service).ServeHTTP(rec, req)
-			if !strings.Contains(rec.Header().Get("Content-Security-Policy"), "form-action 'self' https://github.com;") {
-				t.Fatal("browser policy must permit configured provider redirect")
-			}
-			if rec.Header().Get("Referrer-Policy") != "same-origin" {
-				t.Fatal("form origin must survive without cross-origin referrers")
-			}
-			if rec.Code != http.StatusForbidden {
-				t.Fatalf("status=%d", rec.Code)
+			githubOAuthBrowserCallback(authService, githubService).ServeHTTP(rec, req)
+			if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != test.want {
+				t.Fatalf("callback = %d %q; want %q", rec.Code, rec.Header().Get("Location"), test.want)
 			}
 		})
-	}
-}
-
-func TestGitHubNativeConfirmationFormHasCleanAction(t *testing.T) {
-	recorder := httptest.NewRecorder()
-	action := "/v1/github/native-links/ghlink_test/launch"
-	if err := nativeGitHubPage.Execute(recorder, struct{ Email, CSRF, Action string }{"owner@example.test", "browser-binding", action}); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(recorder.Body.String(), `<form method="post" action="`+action+`">`) {
-		t.Fatal("confirmation must submit to clean path without launch capability query")
-	}
-}
-
-func TestGitHubNativeAccountRemainsVisibleWithoutCDNJavaScript(t *testing.T) {
-	recorder := httptest.NewRecorder()
-	if err := nativeGitHubPage.Execute(recorder, struct{ Email, CSRF, Action string }{"owner@example.test<script>alert(1)</script>", "binding", "/confirm"}); err != nil {
-		t.Fatal(err)
-	}
-	body := recorder.Body.String()
-	if !strings.Contains(body, "<!--email_off--><strong>owner@example.test&lt;script&gt;alert(1)&lt;/script&gt;</strong><!--/email_off-->") {
-		t.Fatal("escaped account label must retain CDN email-obfuscation exclusion comments")
-	}
-	if strings.Contains(body, "<script>") {
-		t.Fatal("account text became trusted HTML")
 	}
 }
