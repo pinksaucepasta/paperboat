@@ -12,7 +12,9 @@ import time
 
 PB = Path.home() / '.local/bin/pb'
 SIGNED_OUT_COMMANDS = [('machine', 'list'), ('env', 'list'), ('exec', 'TARGET', '--', 'true'),
-                       ('session', 'list', 'TARGET'), ('team', 'list'), ('inbox', 'path')]
+                       ('session', 'list', 'TARGET'), ('team', 'list')]
+# Local-only commands keep working signed out (the Inbox path is this computer's setting).
+SIGNED_OUT_LOCAL = [('inbox', 'path')]
 
 
 def run(*args, timeout=60):
@@ -42,6 +44,9 @@ def main():
         code, out = run(*argv)
         if code == 0 or 'pb login' not in out or len(out) > 700:
             unclear.append(' '.join(command[:2]))
+    for command in SIGNED_OUT_LOCAL:
+        if run(*command)[0] != 0:
+            unclear.append(' '.join(command) + ' (local, must work signed out)')
     login = subprocess.Popen([str(PB), 'login', '--no-browser', '--json'], stdout=subprocess.PIPE,
                              stderr=subprocess.STDOUT, text=True, stdin=subprocess.DEVNULL)
     try:
