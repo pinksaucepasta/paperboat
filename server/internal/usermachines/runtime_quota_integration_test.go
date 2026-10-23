@@ -81,7 +81,18 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 	if len(quota.checked) != 1 || quota.checked[0] != "personal:"+userID {
 		t.Fatalf("admission checked %v", quota.checked)
 	}
+	// A console browser terminal is accounted under its attachment ID on the admitting edge.
+	attachment := "attachment_rq_" + suffix
+	if err := service.AdmitBrowserTerminalIngress(ctx, attachment, machineID, "", edgeNodeID, time.Now().Add(time.Minute)); err != nil {
+		t.Fatalf("browser admission: %v", err)
+	}
+	if err := store.SQL().QueryRowContext(ctx, `SELECT workspace_id,route_id FROM paperboat.usage_accounting_authorities WHERE authority_id=$1 AND edge_node_id=$2 AND environment_id=$3`, attachment, edgeNodeID, environmentID).Scan(&workspace, &route); err != nil || workspace != "personal:"+userID || route != "route_rq_"+suffix {
+		t.Fatalf("browser accounting workspace=%q route=%q err=%v", workspace, route, err)
+	}
 	quota.exhausted = true
+	if err := service.AdmitBrowserTerminalIngress(ctx, attachment+"_cap", machineID, "", edgeNodeID, time.Now().Add(time.Minute)); !errors.Is(err, ErrBandwidthQuotaExhausted) {
+		t.Fatalf("browser admission at the cap err=%v", err)
+	}
 	_, err = service.ExecDescriptor(ctx, userID, sourceMachineID, machineID, "cli_rq_1", "operation_rq_cap_"+suffix)
 	var refusal *BandwidthQuotaError
 	if !errors.Is(err, ErrBandwidthQuotaExhausted) || !errors.As(err, &refusal) || refusal.BillingURL != "https://console.example.test/billing" {

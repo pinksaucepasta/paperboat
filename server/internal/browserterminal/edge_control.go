@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat-server/internal/usermachines"
 	"io"
 	"log/slog"
 	"net/http"
@@ -168,7 +169,12 @@ func (g *Gateway) ServeEdgeControl(w http.ResponseWriter, r *http.Request, nodeI
 	admission, release, err := g.admitEdge(r.Context(), input, nodeID, processEpoch)
 	if err != nil {
 		reportEdgeAdmissionFailure(r.Context(), err)
-		_ = connection.Close(websocket.StatusPolicyViolation, "admission denied")
+		reason := "admission denied"
+		if errors.Is(err, usermachines.ErrBandwidthQuotaExhausted) {
+			// The edge answers the browser with its typed bandwidth refusal.
+			reason = BandwidthQuotaCloseReason
+		}
+		_ = connection.Close(websocket.StatusPolicyViolation, reason)
 		return
 	}
 	defer release()
@@ -234,6 +240,10 @@ func (g *Gateway) ServeEdgeControl(w http.ResponseWriter, r *http.Request, nodeI
 	}
 }
 
+// BandwidthQuotaCloseReason is the admission close reason when the paying workspace's relay and
+// edge allowance is used up; the edge answers the browser with bandwidth_quota_exhausted.
+const BandwidthQuotaCloseReason = "bandwidth_quota_exhausted"
+
 func reportEdgeAdmissionFailure(ctx context.Context, err error) {
 	if err == nil || pureTerminalCancellation(err) {
 		return
@@ -251,6 +261,9 @@ func edgeAdmissionReason(err error) string {
 	}
 	if errors.Is(err, ErrHostUnavailable) {
 		return "host_unavailable"
+	}
+	if errors.Is(err, usermachines.ErrBandwidthQuotaExhausted) {
+		return "bandwidth_quota_exhausted"
 	}
 	return "internal_unavailable"
 }

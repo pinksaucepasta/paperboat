@@ -780,13 +780,18 @@ func New(opts Options) (*App, error) {
 	resourceUsageService := resourceusage.New(store)
 	resourceUsageService.Debiter = workspaceBilling
 	browserTerminalGateway := &browserterminal.Gateway{
-		AdmissionLifetime:    opts.Config.CLIAuth.MintProofLifetime,
-		RecordUsageAdmission: resourceUsageService.RecordBrowserAdmission,
-		Tickets:              browserterminal.TicketStore{DB: store},
-		Authorizer:           browserterminal.MachineAuthorizer{Service: userMachineService, Inspector: inspectorHandlers.Access},
-		Signer:               mintKeys,
-		Issuer:               normalizeHelperIssuer(opts.Config.HTTP.PublicBaseURL),
-		AllowedOrigins:       append([]string(nil), opts.Config.HTTP.AllowedOrigins...),
+		AdmissionLifetime: opts.Config.CLIAuth.MintProofLifetime,
+		RecordUsageAdmission: func(ctx context.Context, attachment, machine, terminal, node, actor string, expires time.Time) error {
+			if err := userMachineService.AdmitBrowserTerminalIngress(ctx, attachment, machine, actor, node, expires); err != nil {
+				return err
+			}
+			return resourceUsageService.RecordBrowserAdmission(ctx, attachment, machine, terminal, node, actor, expires)
+		},
+		Tickets:        browserterminal.TicketStore{DB: store},
+		Authorizer:     browserterminal.MachineAuthorizer{Service: userMachineService, Inspector: inspectorHandlers.Access},
+		Signer:         mintKeys,
+		Issuer:         normalizeHelperIssuer(opts.Config.HTTP.PublicBaseURL),
+		AllowedOrigins: append([]string(nil), opts.Config.HTTP.AllowedOrigins...),
 	}
 	if edgeControlService != nil {
 		edgeControlService.SetBrowserTerminalGateway(browserTerminalGateway)

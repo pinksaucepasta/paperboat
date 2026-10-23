@@ -109,6 +109,7 @@ func expectedTerminalRejection(err error) bool {
 		ErrTicketInvalid,
 		usermachines.ErrTerminalSessionNotFound,
 		usermachines.ErrTerminalBrowserSessionClosed,
+		usermachines.ErrBandwidthQuotaExhausted,
 	)
 }
 

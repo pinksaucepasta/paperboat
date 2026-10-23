@@ -2,6 +2,7 @@ package usermachines
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"time"
 
@@ -51,4 +52,27 @@ func (s *Service) admitRuntimeIngress(ctx context.Context, route dbsqlc.ControlR
 		return ErrProvisioningUnavailable
 	}
 	return err
+}
+
+// AdmitBrowserTerminalIngress records and admission-checks one console browser terminal
+// attachment that the edge serves over the machine's runtime route: the attachment ID is the
+// usage authority the edge reports under, nodeID the admitting edge. Payer as for descriptors.
+func (s *Service) AdmitBrowserTerminalIngress(ctx context.Context, attachmentID, machineID, actor, nodeID string, expires time.Time) error {
+	if s.runtimeQuota == nil {
+		return nil
+	}
+	var machine dbsqlc.UserMachine
+	err := s.db.SQL().QueryRowContext(ctx, `SELECT id,user_id,owner_team_id,environment_id FROM paperboat.user_machines WHERE id=$1 AND deleted_at IS NULL`, machineID).Scan(&machine.ID, &machine.UserID, &machine.OwnerTeamID, &machine.EnvironmentID)
+	if err != nil {
+		return err
+	}
+	route, err := s.db.Queries().GetActiveHelperRouteForEnvironment(ctx, machine.EnvironmentID)
+	if err != nil {
+		return ErrProvisioningUnavailable
+	}
+	route.AppliedNodeID = sql.NullString{String: nodeID, Valid: nodeID != ""}
+	if actor == "" {
+		actor = machine.UserID
+	}
+	return s.admitRuntimeIngress(ctx, route, machine, actor, attachmentID, expires)
 }
