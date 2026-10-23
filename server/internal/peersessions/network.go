@@ -681,11 +681,17 @@ func (s *NetworkService) relayGrants(ctx context.Context, tx *sql.Tx, self netwo
 		if len(nodePeers) == 0 && len(peers) > 0 {
 			continue
 		}
-		controlPeers, err := relayControlPeers(self, nodePeers)
+		// Relay control rides in every chunk for its own peers. Released relays and CLIs refuse more than
+		// maximumRelayControlPeers per grant, so chunks carrying control stay within it.
+		peerRelayReady := peerRelayEnabled && self.DiscoPublicKey != "" && peersHaveDiscoKeys(nodePeers)
+		size := maximumRelayGrantPeers
+		if peerRelayReady {
+			size = maximumRelayControlPeers
+		}
+		chunks, err := relayGrantChunks(self, nodePeers, size)
 		if err != nil {
 			return nil, err
 		}
-		chunks := relayGrantChunks(nodePeers)
 		if peerRelayEnabled && (len(peerRelayWG) != 32 || len(peerRelayDisco) != 32 || !peerRelayAddress.Valid) {
 			slog.Warn("peer network authority unavailable", "site", "network.go:620")
 			return nil, ErrUnavailable
@@ -702,16 +708,15 @@ func (s *NetworkService) relayGrants(ctx context.Context, tx *sql.Tx, self netwo
 		// them. Relay control and the peer relay ride in the first chunk only.
 		for i, chunk := range chunks {
 			first := i == 0
-			claims := map[string]any{"version": 1, "iss": s.issuer, "aud": "paperboat-relay", "iat": now.Unix(), "exp": expires.Unix(), "generation": generation, "account_id": self.AccountID, "endpoint_id": self.EndpointID, "wireguard_public_key": self.WireGuardPublicKey, "quic_certificate_fingerprint": self.QUICCertificateFingerprint, "quic_public_key": self.QUICPublicKey, "node_id": nodeID, "node_generation": nodeGeneration, "process_epoch": processEpoch, "peers": chunk}
+			claims := map[string]any{"version": 1, "iss": s.issuer, "aud": "paperboat-relay", "iat": now.Unix(), "exp": expires.Unix(), "generation": generation, "account_id": self.AccountID, "endpoint_id": self.EndpointID, "wireguard_public_key": self.WireGuardPublicKey, "quic_certificate_fingerprint": self.QUICCertificateFingerprint, "quic_public_key": self.QUICPublicKey, "node_id": nodeID, "node_generation": nodeGeneration, "process_epoch": processEpoch, "peers": chunk.peers}
 			if len(self.AdmittedCertificateFingerprints) > 0 {
 				claims["admitted_certificate_fingerprints"] = self.AdmittedCertificateFingerprints
 			}
 			if self.DiscoPublicKey != "" {
 				claims["disco_public_key"] = self.DiscoPublicKey
 			}
-			peerRelayReady := peerRelayEnabled && self.DiscoPublicKey != "" && peersHaveDiscoKeys(nodePeers)
-			if first && peerRelayReady && len(controlPeers) != 0 {
-				claims["relay_control_peers"] = controlPeers
+			if peerRelayReady && len(chunk.control) != 0 {
+				claims["relay_control_peers"] = chunk.control
 			}
 			if first && peerRelayReady {
 				claims["peer_relay"] = map[string]any{
@@ -737,49 +742,46 @@ func (s *NetworkService) relayGrants(ctx context.Context, tx *sql.Tx, self netwo
 	return grants, nil
 }
 
-func relayControlPeers(self networkBinding, peers []networkPeer) ([]string, error) {
-	result := make([]string, 0, len(peers))
-	for _, peer := range peers {
-		if peer.Identity.AccountID != self.AccountID || peer.Identity.EndpointID == self.EndpointID {
-			continue
-		}
-		if peer.Identity.WireGuardPublicKey == "" {
-			slog.Warn("peer network authority unavailable", "site", "network.go:670")
-			return nil, ErrUnavailable
-		}
-		result = append(result, peer.Identity.WireGuardPublicKey)
-	}
-	sort.Strings(result)
-	if len(result) > maximumRelayControlPeers {
-		// A relay grant names a bounded set of the account's peers. Beyond it the extra peers
-		// simply have no relay fallback (they still connect directly); the refresh must not fail.
-		slog.Warn("relay grant names a bounded subset of the account's peers", "kept", maximumRelayControlPeers, "peers", len(result))
-		result = result[:maximumRelayControlPeers]
-	}
-	return result, nil
-}
-
 // maximumRelayGrantPeers is the relay's bound on one grant (relay derpquic
 // authority and mint both refuse more); more peers are carried in more grants.
 const maximumRelayGrantPeers = 64
 
-func relayGrantChunks(peers []networkPeer) [][]map[string]any {
+// relayGrantChunk is one grant's share of the peers: their entries, and the keys of those among them that
+// may use this endpoint as a peer relay (same account).
+type relayGrantChunk struct {
+	peers   []map[string]any
+	control []string
+}
+
+// relayGrantChunks splits every peer into grants of at most size peers, sorted by key. Each chunk carries the
+// control keys of its own peers, so the chunks are disjoint (the mesh refuses a duplicate control peer).
+func relayGrantChunks(self networkBinding, peers []networkPeer, size int) ([]relayGrantChunk, error) {
 	ordered := slices.Clone(peers)
 	slices.SortStableFunc(ordered, func(a, b networkPeer) int {
 		return strings.Compare(a.Identity.WireGuardPublicKey, b.Identity.WireGuardPublicKey)
 	})
-	chunks := [][]map[string]any{{}}
+	chunks := []relayGrantChunk{{peers: []map[string]any{}}}
 	for _, peer := range ordered {
-		if len(chunks[len(chunks)-1]) == maximumRelayGrantPeers {
-			chunks = append(chunks, nil)
+		last := &chunks[len(chunks)-1]
+		if len(last.peers) == size {
+			chunks = append(chunks, relayGrantChunk{})
+			last = &chunks[len(chunks)-1]
 		}
 		entry := map[string]any{"wireguard_public_key": peer.Identity.WireGuardPublicKey, "scopes": peer.Scopes}
 		if peer.Identity.DiscoPublicKey != "" {
 			entry["disco_public_key"] = peer.Identity.DiscoPublicKey
 		}
-		chunks[len(chunks)-1] = append(chunks[len(chunks)-1], entry)
+		last.peers = append(last.peers, entry)
+		if peer.Identity.AccountID != self.AccountID || peer.Identity.EndpointID == self.EndpointID {
+			continue
+		}
+		if peer.Identity.WireGuardPublicKey == "" {
+			slog.Warn("peer network authority unavailable", "site", "network.go:relayGrantChunks")
+			return nil, ErrUnavailable
+		}
+		last.control = append(last.control, peer.Identity.WireGuardPublicKey)
 	}
-	return chunks
+	return chunks, nil
 }
 
 func peersHaveDiscoKeys(peers []networkPeer) bool {
@@ -921,6 +923,9 @@ AND c.issued_at<=$3 AND (c.expires_at>$3 OR $4) WHERE n.user_id=$1 AND n.endpoin
 // oldest are dropped, not the whole configuration: clients keep naming sessions that ended
 // long ago as admitted, and one account's accumulated sessions must not stop its peers from
 // refreshing their network. Live (unexpired) sessions are ordered first by the query.
+// maximumRelayControlPeers bounds relay_control_peers per grant: released relays (derpquic authority) and CLIs
+// refuse more. Chunks are this size while peer relay is on; it rises to maximumRelayGrantPeers once no
+// released relay or CLI predates Lane R's bd757e6b.
 const maximumRelayControlPeers = 16
 
 const maximumNetworkGrants = 128
