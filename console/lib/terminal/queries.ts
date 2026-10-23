@@ -1,6 +1,6 @@
 "use client"
 
-import { queryOptions } from "@tanstack/react-query"
+import { keepPreviousData, queryOptions } from "@tanstack/react-query"
 import { api, apiAction, ApiError, idempotencyKey, send, type Data } from "@/lib/api"
 import type { TerminalSession } from "@/lib/terminal/use-terminal-connection"
 
@@ -22,18 +22,54 @@ export const terminalKeys = {
   code: (id: string) => ["terminal-sessions", id, "code-access"] as const,
 }
 
+/** A page of the terminals you own or that are shared with you, newest activity first. */
+export const terminalPageSize = 50
+
+type TerminalPage = { sessions: TerminalSession[]; pagination: { total: number } }
+
+function terminalsPath(params: Record<string, string>) {
+  return `terminal-sessions?${new URLSearchParams(params)}`
+}
+
 /**
- * Every terminal you own or that is shared with you, up to the server's one page of 200 (it has no
- * cursor yet); `complete` is false when the page is full, so the list can say it stopped there.
+ * One page from the server, which searches (`q`), splits open from closed and counts (`total`).
+ * `machine` narrows it to one machine's terminals.
  */
-export const terminalsQuery = queryOptions({
-  queryKey: terminalKeys.list,
-  queryFn: async () => {
-    const { sessions } = await api<Data<"/v1/terminal-sessions">>("terminal-sessions?limit=200")
-    return { items: sessions, complete: sessions.length < 200 }
-  },
-  refetchInterval: 15_000,
-})
+export const terminalsPageQuery = (options: { closed: boolean; q: string; page: number; machine?: string }) =>
+  queryOptions({
+    queryKey: [...terminalKeys.list, "page", options],
+    queryFn: async () => {
+      const page = await api<TerminalPage>(
+        terminalsPath({
+          limit: String(terminalPageSize),
+          offset: String((options.page - 1) * terminalPageSize),
+          closed: String(options.closed),
+          ...(options.q && { q: options.q }),
+          ...(options.machine && { machine_id: options.machine }),
+        }),
+      )
+      return { items: page.sessions, total: page.pagination.total }
+    },
+    placeholderData: keepPreviousData,
+    refetchInterval: 15_000,
+  })
+
+/** How many open and closed terminals there are, from the server's totals. */
+export const terminalCountsQuery = (machine?: string) =>
+  queryOptions({
+    queryKey: [...terminalKeys.list, "counts", machine ?? ""],
+    queryFn: async () => {
+      const total = async (closed: boolean) =>
+        (
+          await api<TerminalPage>(
+            terminalsPath({ limit: "1", closed: String(closed), live: "false", ...(machine && { machine_id: machine }) }),
+          )
+        ).pagination.total
+      const [open, closed] = await Promise.all([total(false), total(true)])
+      return { open, closed }
+    },
+    refetchInterval: 15_000,
+  })
 
 /**
  * One terminal with its live participants. Newer hosts push who is attached on the terminal's own

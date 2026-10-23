@@ -6,7 +6,8 @@ import { Fragment, useDeferredValue, useState } from "react"
 import { toast } from "sonner"
 import { useApiQuery, type Machine } from "@/lib/api"
 import { formatRelative } from "@/lib/format"
-import { closeTerminal, terminalKeys, terminalsQuery } from "@/lib/terminal/queries"
+import { closeTerminal, terminalCountsQuery, terminalKeys, terminalPageSize, terminalsPageQuery } from "@/lib/terminal/queries"
+import { usePageParam } from "@/lib/use-page-param"
 import { terminalCanAttach, type TerminalSession } from "@/lib/terminal/use-terminal-connection"
 import { useCurrentMachine } from "@/components/machine-shell"
 import { NewTerminalButton } from "@/components/terminal/new-terminal"
@@ -68,25 +69,16 @@ export function MachineTerminals() {
  */
 export function TerminalList({ machine: tabMachine }: { machine?: Machine }) {
   const { scope, machine } = useListScope(tabMachine)
-  const query = useApiQuery(terminalsQuery)
   const { now, date } = useTimeFormat(60_000)
   const [view, setView] = useState<View>("open")
   const [search, setSearch] = useState("")
-  const text = useDeferredValue(search.trim().toLowerCase())
-
-  const onMachine = (query.data?.items ?? []).filter((session) => !scope || session.target.machine_id === scope)
-  const open = onMachine.filter(terminalCanAttach)
-  const closed = onMachine.filter((session) => !terminalCanAttach(session))
-  const shown = (view === "open" ? open : closed)
-    .filter(
-      (session) =>
-        !text ||
-        [session.name, session.target.name, session.current_directory, session.started_in, session.foreground_process]
-          .filter(Boolean)
-          .some((value) => value!.toLowerCase().includes(text)),
-    )
-    .map((session) => ({ session, time: lastUsed(session, now) }))
-    .sort((a, b) => b.time - a.time)
+  const q = useDeferredValue(search.trim())
+  const pages = usePageParam(`${view}|${q}|${scope ?? ""}`)
+  const counts = useApiQuery(terminalCountsQuery(scope ?? undefined))
+  const query = useApiQuery(terminalsPageQuery({ closed: view === "closed", q, page: pages.page, machine: scope ?? undefined }))
+  const total = query.data?.total ?? 0
+  const from = (pages.page - 1) * terminalPageSize
+  const shown = (query.data?.items ?? []).map((session) => ({ session, time: lastUsed(session, now) }))
 
   // Open terminals are all current, so they're one list; closed ones group by when they were used.
   const columns = 4 + (scope ? 0 : 1) + (view === "open" ? 1 : 0)
@@ -100,7 +92,7 @@ export function TerminalList({ machine: tabMachine }: { machine?: Machine }) {
       else groups.push({ key, label, rows: [row] })
     }
 
-  if (query.isSuccess && onMachine.length === 0) {
+  if (counts.data && counts.data.open + counts.data.closed === 0) {
     return (
       <Empty className="py-16">
         <EmptyHeader>
@@ -128,8 +120,8 @@ export function TerminalList({ machine: tabMachine }: { machine?: Machine }) {
           value={view}
           onChange={setView}
           views={[
-            { value: "open", label: "Open", count: query.data && open.length },
-            { value: "closed", label: "Closed", count: query.data && closed.length },
+            { value: "open", label: "Open", count: counts.data?.open },
+            { value: "closed", label: "Closed", count: counts.data?.closed },
           ]}
         />
         <div className="ml-auto">
@@ -189,10 +181,23 @@ export function TerminalList({ machine: tabMachine }: { machine?: Machine }) {
             ))
           )}
         </table>
-        {query.data && !query.data.complete && (
-          <p className="py-3 text-center text-sm text-muted-foreground">
-            Showing the first 200 terminals. You have more; the console can’t list them yet.
-          </p>
+        {total > terminalPageSize && (
+          <nav className="flex items-center justify-end gap-3 py-3 text-sm text-muted-foreground" aria-label="Pages">
+            <span className="tabular-nums" data-terminal-range>
+              {from + 1}–{Math.min(from + terminalPageSize, total)} of {total}
+            </span>
+            <Button variant="outline" size="sm" disabled={pages.page === 1} onClick={() => pages.go(pages.page - 1)}>
+              Previous
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={from + terminalPageSize >= total}
+              onClick={() => pages.go(pages.page + 1)}
+            >
+              Next
+            </Button>
+          </nav>
         )}
         {query.isError && (
           <div className="flex items-center justify-center gap-3 py-12 text-sm text-muted-foreground">
@@ -204,8 +209,8 @@ export function TerminalList({ machine: tabMachine }: { machine?: Machine }) {
         )}
         {query.isSuccess && shown.length === 0 && (
           <p className="py-12 text-center text-sm text-muted-foreground">
-            {text
-              ? `No terminals match “${search.trim()}”`
+            {q
+              ? `No terminals match “${q}”`
               : view === "open"
                 ? "No open terminals"
                 : "No closed terminals"}
