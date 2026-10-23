@@ -20,22 +20,46 @@ var suppliedUpdateReadyTimeout = 60 * time.Second
 // must report that version (and be ready, unless it was already unhealthy before for a local reason). A
 // machine without a running user daemon has nothing to prove. Its baseline is taken now, before anything
 // changes.
-func suppliedUpdateValidator(ctx context.Context, request hostinstall.Request) func(context.Context) error {
+func suppliedUpdateValidator(ctx context.Context, request hostinstall.Request) (validate, recover func(context.Context) error) {
 	layout, err := service.UserLayout(runtime.GOOS, request.UID)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	participants, err := newUnixUpdateParticipants(layout.Binary, request.UID, request.GID)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	baseline, baselineErr := participants.Probe(ctx)
 	if baselineErr != nil || !baseline.Running {
+		return nil, nil
+	}
+	return daemonValidation(participants, request.Source.Version, baseline)
+}
+
+// daemonValidation returns the validation hook and the step that follows a failed install. Validation
+// restarts the user's daemon on the new executable; when the install then fails, the previous files are
+// restored but that daemon kept running the replaced binary against the restored runtime (lanel-b,
+// 2026-10-22: daemon on the new version, runtime on the old, "Local machine access is unavailable").
+// recover restarts it once more on the restored executable, and does nothing if validation never
+// restarted it.
+func daemonValidation(participants updated.UnixParticipants, version string, baseline updated.UnixParticipantProbe) (validate, recover func(context.Context) error) {
+	restarted := false
+	validate = func(ctx context.Context) error {
+		restarted = true
+		return restartAndAwaitDaemon(ctx, participants, version, baseline)
+	}
+	recover = func(ctx context.Context) error {
+		if !restarted {
+			return nil
+		}
+		restartCtx, cancel := context.WithTimeout(ctx, suppliedUpdateReadyTimeout)
+		defer cancel()
+		if err := participants.Restart(restartCtx); err != nil {
+			return errors.Join(errors.New("the user's Paperboat daemon could not be restarted on the restored version; run pb doctor"), err)
+		}
 		return nil
 	}
-	return func(ctx context.Context) error {
-		return restartAndAwaitDaemon(ctx, participants, request.Source.Version, baseline)
-	}
+	return validate, recover
 }
 
 func restartAndAwaitDaemon(ctx context.Context, participants updated.UnixParticipants, version string, baseline updated.UnixParticipantProbe) error {

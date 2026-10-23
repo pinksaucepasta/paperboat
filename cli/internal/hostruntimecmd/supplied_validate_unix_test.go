@@ -78,3 +78,31 @@ func TestUpdateNotReadyKeepsItsOwnExitStatusAcrossElevation(t *testing.T) {
 func hostinstallFailureForTest() error {
 	return errors.Join(errors.New("validate"), hostinstall.ErrUpdateNotReady)
 }
+
+// A supplied install whose validation restarted the user's daemon and then failed restored the previous
+// files but left that daemon on the replaced binary (lanel-b, 2026-10-22). After a failed install the
+// daemon is restarted on the restored version, and only when validation had restarted it.
+func TestFailedSuppliedInstallRestartsTheDaemonOnTheRestoredVersion(t *testing.T) {
+	previous := suppliedUpdateReadyTimeout
+	suppliedUpdateReadyTimeout = 300 * time.Millisecond
+	t.Cleanup(func() { suppliedUpdateReadyTimeout = previous })
+	baseline := updated.UnixParticipantProbe{Running: true, Version: "1", UpdaterVersion: "1", State: "ready", Machines: 1}
+	notReady := &scriptedParticipants{probes: []updated.UnixParticipantProbe{{Running: true, Version: "2", UpdaterVersion: "2", State: "degraded", ControlPlaneUnavailableOnly: true, Machines: 1}}}
+	validate, recover := daemonValidation(notReady, "2", baseline)
+	if err := recover(t.Context()); err != nil || notReady.restarts != 0 {
+		t.Fatalf("install failed before validation: recover err=%v restarts=%d, want no restart", err, notReady.restarts)
+	}
+	if err := validate(t.Context()); err == nil {
+		t.Fatal("fixture: validation passed")
+	}
+	if err := recover(t.Context()); err != nil || notReady.restarts != 2 {
+		t.Fatalf("after failed validation: recover err=%v restarts=%d, want the daemon restarted again on the restored version", err, notReady.restarts)
+	}
+	broken := &scriptedParticipants{probes: []updated.UnixParticipantProbe{{Running: true, Version: "2", UpdaterVersion: "2", State: "ready", Machines: 1}}}
+	validate, recover = daemonValidation(broken, "2", baseline)
+	_ = validate(t.Context())
+	broken.restartErr = errors.New("systemctl --user restart failed")
+	if err := recover(t.Context()); err == nil {
+		t.Fatal("a daemon that could not be restarted on the restored version was not reported")
+	}
+}
