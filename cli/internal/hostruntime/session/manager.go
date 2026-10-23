@@ -34,8 +34,6 @@ const initialReplayBytes uint64 = 64 << 10
 
 const browserScreenScrollbackLines = 200
 
-const outputPersistDebounce = 20 * time.Millisecond
-
 type PTYProcess interface {
 	io.Reader
 	InputWriter
@@ -72,6 +70,8 @@ type ManagerConfig struct {
 }
 
 type Manager struct {
+	writerOnce        sync.Once
+	output            *outputWriter
 	admission         sync.RWMutex
 	mu                sync.RWMutex
 	config            ManagerConfig
@@ -84,33 +84,33 @@ type Manager struct {
 }
 
 type managedSession struct {
-	opMu              sync.Mutex
-	inputMu           sync.Mutex
-	persistMu         sync.Mutex
-	liveProcess       atomic.Pointer[liveProcess]
-	id                string
-	name              string
-	supportReference  atomic.Pointer[string]
-	command           pty.Command
-	lifecycle         *Lifecycle
-	persistedState    State // Last successfully committed lifecycle state; guarded by opMu.
-	history           *history.History
-	fanout            *Fanout
-	inputs            *InputJournal
-	process           PTYProcess
-	exit              *pty.ExitResult
-	resizeID          string
-	resizeTime        time.Time
-	persistNotify     chan struct{}
-	persistStop       chan struct{}
-	persistStopClosed bool
-	persistDone       chan error
-	persistErr        error
-	modes             terminalModeTracker
-	identification    identificationTracker
-	screen            *xterm.Terminal
-	continuation      screenContinuation
-	participants      map[string]Participant
+	opMu             sync.Mutex
+	inputMu          sync.Mutex
+	persistMu        sync.Mutex
+	liveProcess      atomic.Pointer[liveProcess]
+	id               string
+	name             string
+	supportReference atomic.Pointer[string]
+	command          pty.Command
+	lifecycle        *Lifecycle
+	persistedState   State // Last successfully committed lifecycle state; guarded by opMu.
+	history          *history.History
+	fanout           *Fanout
+	inputs           *InputJournal
+	process          PTYProcess
+	exit             *pty.ExitResult
+	resizeID         string
+	resizeTime       time.Time
+	// persisting and persistedLatest are owned by persistMu: whether the group-commit writer
+	// still persists this session's output, and how far the store holds it.
+	persisting      bool
+	persistedLatest uint64
+	persistErr      error
+	modes           terminalModeTracker
+	identification  identificationTracker
+	screen          *xterm.Terminal
+	continuation    screenContinuation
+	participants    map[string]Participant
 }
 
 // liveProcess is immutable after publication. Terminal v1 input can therefore

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"time"
 
@@ -130,15 +131,13 @@ func (s *Store) OutputBounds(ctx context.Context, sessionID string) (earliest, l
 // bounded live history. The expected cursor prevents concurrent writers from
 // skipping an unseen committed range.
 func (s *Store) AdvanceOutput(ctx context.Context, sessionID string, expectedLatest, nextSequence uint64) (resultErr error) {
-	defer protectStoreError(&resultErr)
+	return s.AppendOutputBatch(ctx, []OutputBatch{{SessionID: sessionID, Advance: true, AdvanceFrom: expectedLatest, AdvanceTo: nextSequence}}, 1)
+}
+
+func advanceOutputTx(ctx context.Context, tx *sql.Tx, sessionID string, expectedLatest, nextSequence uint64) error {
 	if nextSequence < expectedLatest {
 		return ErrConflict
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer retainRollback(tx, &resultErr)
 	var latest uint64
 	if err := tx.QueryRowContext(ctx, `SELECT latest_sequence FROM sessions WHERE id=?`, sessionID).Scan(&latest); err != nil {
 		return err
@@ -149,10 +148,8 @@ func (s *Store) AdvanceOutput(ctx context.Context, sessionID string, expectedLat
 	if _, err := tx.ExecContext(ctx, `DELETE FROM output_events WHERE session_id=?`, sessionID); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE sessions SET earliest_sequence=?,latest_sequence=?,updated_at=? WHERE id=?`, nextSequence, nextSequence, time.Now().UTC().UnixNano(), sessionID); err != nil {
-		return err
-	}
-	return tx.Commit()
+	_, err := tx.ExecContext(ctx, `UPDATE sessions SET earliest_sequence=?,latest_sequence=?,updated_at=? WHERE id=?`, nextSequence, nextSequence, time.Now().UTC().UnixNano(), sessionID)
+	return err
 }
 
 func (s *Store) DeleteSession(ctx context.Context, id string) (resultErr error) {
@@ -168,31 +165,84 @@ func (s *Store) DeleteSession(ctx context.Context, id string) (resultErr error) 
 }
 
 func (s *Store) AppendOutput(ctx context.Context, sessionID string, channel byte, start uint64, data []byte, maxRetained uint64) (outputResult OutputEvent, earliestResult uint64, resultErr error) {
-	defer protectStoreError(&resultErr)
 	if len(data) == 0 || maxRetained == 0 {
 		return OutputEvent{}, 0, ErrConflict
 	}
-	end := start + uint64(len(data))
-	if end < start {
-		return OutputEvent{}, 0, ErrConflict
+	event := OutputEvent{Channel: channel, StartSequence: start, EndSequence: start + uint64(len(data)), Data: append([]byte(nil), data...)}
+	if err := s.AppendOutputBatch(ctx, []OutputBatch{{SessionID: sessionID, Events: []OutputEvent{event}}}, maxRetained); err != nil {
+		return OutputEvent{}, 0, err
+	}
+	earliest, _, err := s.OutputBounds(ctx, sessionID)
+	return event, earliest, err
+}
+
+// OutputBatch is one session's part of a group commit: an optional advance past output that was
+// never persisted (a replay gap), then contiguous output events.
+type OutputBatch struct {
+	SessionID              string
+	Advance                bool
+	AdvanceFrom, AdvanceTo uint64
+	Events                 []OutputEvent
+}
+
+// AppendOutputBatch persists every session's pending output in one transaction, so the host's
+// fsync rate stays bounded however many terminals print at once.
+func (s *Store) AppendOutputBatch(ctx context.Context, batches []OutputBatch, maxRetained uint64) (resultErr error) {
+	defer protectStoreError(&resultErr)
+	if maxRetained == 0 {
+		return ErrConflict
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return OutputEvent{}, 0, err
+		return err
 	}
 	defer retainRollback(tx, &resultErr)
+	for _, batch := range batches {
+		if batch.Advance {
+			if err := advanceOutputTx(ctx, tx, batch.SessionID, batch.AdvanceFrom, batch.AdvanceTo); err != nil {
+				return err
+			}
+		}
+		for _, event := range batch.Events {
+			if err := appendOutputTx(ctx, tx, batch.SessionID, event, maxRetained); err != nil {
+				return err
+			}
+		}
+	}
+	if s.hook != nil {
+		if err := s.hook("append_before_commit"); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if s.hook != nil {
+		if err := s.hook("append_after_commit"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func appendOutputTx(ctx context.Context, tx *sql.Tx, sessionID string, event OutputEvent, maxRetained uint64) error {
+	start, data := event.StartSequence, event.Data
+	end := start + uint64(len(data))
+	if len(data) == 0 || end < start || event.EndSequence != end {
+		return ErrConflict
+	}
 	var latest, earliest uint64
 	if err := tx.QueryRowContext(ctx, `SELECT latest_sequence,earliest_sequence FROM sessions WHERE id=?`, sessionID).Scan(&latest, &earliest); err != nil {
-		return OutputEvent{}, 0, err
+		return err
 	}
 	if latest != start || earliest > latest {
-		return OutputEvent{}, 0, ErrConflict
+		return ErrConflict
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO output_events(session_id,start_sequence,end_sequence,channel,data) VALUES(?,?,?,?,?)`, sessionID, start, end, channel, append([]byte(nil), data...)); err != nil {
-		return OutputEvent{}, 0, err
+	if _, err := tx.ExecContext(ctx, `INSERT INTO output_events(session_id,start_sequence,end_sequence,channel,data) VALUES(?,?,?,?,?)`, sessionID, start, end, event.Channel, append([]byte(nil), data...)); err != nil {
+		return err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE sessions SET latest_sequence=?,updated_at=? WHERE id=?`, end, time.Now().UTC().UnixNano(), sessionID); err != nil {
-		return OutputEvent{}, 0, err
+		return err
 	}
 	// Session bounds are contiguous by construction, so they are the exact
 	// retained byte count. Avoid scanning every historical BLOB on each PTY
@@ -201,10 +251,10 @@ func (s *Store) AppendOutput(ctx context.Context, sessionID string, channel byte
 	for retained > maxRetained {
 		var eventStart, eventEnd, size uint64
 		if err := tx.QueryRowContext(ctx, `SELECT start_sequence,end_sequence,length(data) FROM output_events WHERE session_id=? ORDER BY start_sequence LIMIT 1`, sessionID).Scan(&eventStart, &eventEnd, &size); err != nil {
-			return OutputEvent{}, 0, err
+			return err
 		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM output_events WHERE session_id=? AND start_sequence=?`, sessionID, eventStart); err != nil {
-			return OutputEvent{}, 0, err
+			return err
 		}
 		retained -= size
 		earliest = eventEnd
@@ -212,23 +262,8 @@ func (s *Store) AppendOutput(ctx context.Context, sessionID string, channel byte
 	if retained == 0 {
 		earliest = end
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE sessions SET earliest_sequence=? WHERE id=?`, earliest, sessionID); err != nil {
-		return OutputEvent{}, 0, err
-	}
-	if s.hook != nil {
-		if err := s.hook("append_before_commit"); err != nil {
-			return OutputEvent{}, 0, err
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return OutputEvent{}, 0, err
-	}
-	if s.hook != nil {
-		if err := s.hook("append_after_commit"); err != nil {
-			return OutputEvent{}, 0, err
-		}
-	}
-	return OutputEvent{Channel: channel, StartSequence: start, EndSequence: end, Data: append([]byte(nil), data...)}, earliest, nil
+	_, err := tx.ExecContext(ctx, `UPDATE sessions SET earliest_sequence=? WHERE id=?`, earliest, sessionID)
+	return err
 }
 
 func (s *Store) Replay(ctx context.Context, sessionID string, from, limit uint64) (outputResults []OutputEvent, earliestResult uint64, latestResult uint64, resultErr error) {

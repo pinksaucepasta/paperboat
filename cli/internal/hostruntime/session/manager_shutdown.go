@@ -129,7 +129,7 @@ func (m *Manager) Retire(ctx context.Context) error {
 			continue
 		}
 		session.persistMu.Lock()
-		retryFlush := session.persistStop == nil && session.persistErr != nil
+		retryFlush := !session.persisting && session.persistErr != nil
 		session.persistMu.Unlock()
 		if retryFlush {
 			m.startOutputPersistence(session)

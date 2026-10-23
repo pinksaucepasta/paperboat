@@ -218,3 +218,92 @@ func TestClosedSessionsDoNotConsumeTheLiveSessionLimit(t *testing.T) {
 		t.Fatalf("limit not enforced for live sessions: %v", err)
 	}
 }
+
+// floodProcess prints a chunk every millisecond until it is terminated, like `tail -f` on a
+// busy log.
+type floodProcess struct {
+	done chan struct{}
+	once sync.Once
+}
+
+func (p *floodProcess) Read(buffer []byte) (int, error) {
+	select {
+	case <-p.done:
+		return 0, io.EOF
+	case <-time.After(time.Millisecond):
+	}
+	n := min(len(buffer), 512)
+	for i := range buffer[:n] {
+		buffer[i] = 'x'
+	}
+	return n, nil
+}
+func (*floodProcess) Write(data []byte) (int, error) { return len(data), nil }
+func (*floodProcess) Resize(pty.Dimensions) error    { return nil }
+func (*floodProcess) Signal(pty.Signal) error        { return nil }
+func (p *floodProcess) Wait(ctx context.Context) (pty.ExitResult, error) {
+	select {
+	case <-p.done:
+		return pty.ExitResult{ExitedAt: time.Now().UTC()}, nil
+	case <-ctx.Done():
+		return pty.ExitResult{}, ctx.Err()
+	}
+}
+func (p *floodProcess) Terminate(ctx context.Context, _ time.Duration) (pty.ExitResult, error) {
+	p.once.Do(func() { close(p.done) })
+	return p.Wait(ctx)
+}
+func (p *floodProcess) CloseIO() error { p.once.Do(func() { close(p.done) }); return nil }
+
+// Lane W load test on ubuntu24: with 100 busy terminals every output chunk was its own fsync'd
+// transaction on the one store connection; the persister fell behind, memory grew tenfold and
+// Close waited for the backlog without a deadline. On a slow disk, output is group-committed
+// (a few transactions, not one per chunk) and Close returns within its bounded wait.
+func TestSlowStoreCannotMakeCloseHangOrCommitPerChunk(t *testing.T) {
+	var commits atomic.Int32
+	state, err := store.Open(context.Background(), store.Config{Root: filepath.Join(t.TempDir(), "state"), FailureHook: func(point string) error {
+		if point == "append_before_commit" {
+			commits.Add(1)
+			time.Sleep(20 * time.Millisecond)
+		}
+		return nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer state.Close()
+	manager, err := NewManager(ManagerConfig{
+		Store:       state,
+		Launch:      func(pty.Command) (PTYProcess, error) { return &floodProcess{done: make(chan struct{})}, nil },
+		MaxSessions: 8, MaxAttachments: 2, MaxInputDecisions: 2,
+		HistoryBytes: 64 << 10, AttachmentBytes: 64 << 10,
+		TerminationTimeout: 2 * time.Second, TerminationGrace: 100 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for i := 0; i < 3; i++ {
+		created, err := manager.Create(context.Background(), CreateRequest{Name: fmt.Sprintf("flood-%d", i), Command: pty.Command{Path: "/bin/sh", CWD: "/tmp", Dimensions: pty.Dimensions{Columns: 80, Rows: 24}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, created.ID)
+	}
+	time.Sleep(time.Second)
+	// Three sessions print ~3000 chunks a second; a commit per chunk would be thousands.
+	t.Logf("store commits in one second: %d", commits.Load())
+	if got := commits.Load(); got > 15 {
+		t.Fatalf("%d store commits in one second of output from three sessions; want group commits", got)
+	}
+	started := time.Now()
+	if _, err := manager.Close(context.Background(), ids[0]); err != nil {
+		t.Fatalf("close while the store is slow: %v", err)
+	}
+	if elapsed := time.Since(started); elapsed > outputFlushWait+3*time.Second {
+		t.Fatalf("close took %s on a slow store", elapsed)
+	}
+	if err := manager.Shutdown(context.Background()); err != nil {
+		t.Fatalf("shutdown while the store is slow: %v", err)
+	}
+}
