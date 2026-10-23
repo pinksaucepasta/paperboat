@@ -288,3 +288,49 @@ func TestFanoutRejectsNoncontiguousOutputWithoutPartialDelivery(t *testing.T) {
 		t.Fatalf("queued=%d", queued)
 	}
 }
+
+// A terminal that stops releases its output buffers, but an attached viewer still receives the output
+// it was owed (the shell's last words before exit); what no attached cursor needs is freed at once, and
+// the rest as soon as it is read (Lane G: browser broadcast publisher stopped on ErrOutputOrder).
+func TestFanoutReleaseKeepsOutputOwedToAttachedViewers(t *testing.T) {
+	f := NewFanout()
+	for _, id := range []string{"read", "owed"} {
+		if err := f.Attach(id, 16); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for sequence, value := range []byte("abc") {
+		start := uint64(sequence)
+		if _, err := f.PublishOwned(history.Event{StartSequence: start, EndSequence: start + 1, Data: []byte{value}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for range 3 {
+		event, err := f.WaitNextOwned(context.Background(), "read")
+		if err != nil {
+			t.Fatal(err)
+		}
+		event.Release()
+	}
+	event, err := f.WaitNextOwned(context.Background(), "owed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	event.Release()
+	f.Release()
+	if len(f.ring) != 2 {
+		t.Fatalf("release kept %d events, want the 2 still owed", len(f.ring))
+	}
+	var tail []byte
+	for range 2 {
+		event, err := f.WaitNextOwned(context.Background(), "owed")
+		if err != nil {
+			t.Fatalf("owed output after release: %v", err)
+		}
+		tail = append(tail, event.Data...)
+		event.Release()
+	}
+	if string(tail) != "bc" || len(f.ring) != 0 {
+		t.Fatalf("tail=%q ring=%d", tail, len(f.ring))
+	}
+}

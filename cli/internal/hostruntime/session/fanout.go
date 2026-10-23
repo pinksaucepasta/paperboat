@@ -377,15 +377,14 @@ func (f *Fanout) insertEventLocked(event history.Event) {
 	})
 }
 
-// Release drops the retained output of a stopped session. No later output can arrive, and a
-// stopped terminal offers none of its old output, so attachments keep only their cursors.
+// Release drops the retained output of a stopped session that no attached viewer still needs. No later
+// output can arrive and a stopped terminal offers none of its old output to a new attach, but a viewer
+// that is attached still receives what it was owed (the shell's last output before it exited); that
+// tail is freed as it is read or when the viewer detaches.
 func (f *Fanout) Release() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	for _, event := range f.ring {
-		event.Release()
-	}
-	f.ring, f.ringEnd = nil, 0
+	f.compactLocked()
 }
 
 // compactAfterAdvanceLocked compacts after one attachment's cursor moved on from previous, only when it
