@@ -19,6 +19,7 @@ import (
 	"github.com/pinksaucepasta/paperboat-server/internal/auth"
 	"github.com/pinksaucepasta/paperboat-server/internal/config"
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat-server/internal/testutil"
 )
 
 func TestReadExpectedErrorsRequireDirectNoRows(t *testing.T) {
@@ -151,15 +152,8 @@ func TestReadUsesCurrentDatabaseRoleAndAuditsAvailability(t *testing.T) {
 	})
 	service := NewService(store)
 	actor := auth.User{ID: actorID, Role: auth.Role("admin")}
-	uuidTail := suffix
-	if len(uuidTail) > 12 {
-		uuidTail = uuidTail[len(uuidTail)-12:]
-	}
-	for len(uuidTail) < 12 {
-		uuidTail = "0" + uuidTail
-	}
 	tunnelID, otherTunnelID, connectorID := "tun_operator_"+suffix, "tun_other_"+suffix, "con_operator_"+suffix
-	endpointID, otherEndpointID := "11111111-1111-8111-8111-"+uuidTail, "22222222-2222-8222-8222-"+uuidTail
+	endpointID, otherEndpointID := testutil.EndpointID("operator-read:"+suffix), testutil.EndpointID("operator-other:"+suffix)
 	for _, statement := range []struct {
 		q    string
 		args []any
