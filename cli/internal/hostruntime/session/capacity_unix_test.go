@@ -350,9 +350,14 @@ func TestClosedSessionsReleaseTheirOutputBuffers(t *testing.T) {
 		ids = append(ids, created.ID)
 	}
 	time.Sleep(500 * time.Millisecond)
-	for _, id := range ids {
+	for i, id := range ids {
 		if _, err := manager.Close(context.Background(), id); err != nil {
 			t.Fatalf("close: %v", err)
+		}
+		// A closed session keeps the last output an attached viewer is owed (9d291bdc); the viewer's
+		// stream ends after terminal_stream_end and detaches, and then nothing may stay behind.
+		if err := manager.Detach(id, fmt.Sprintf("att_viewer_%d", i)); err != nil {
+			t.Fatalf("detach: %v", err)
 		}
 	}
 	retained := int64(heap()) - int64(baseline)
