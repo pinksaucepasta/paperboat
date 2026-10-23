@@ -18,6 +18,7 @@ import argparse
 import csv
 import io
 import json
+import re
 import shlex
 import subprocess
 import sys
@@ -246,6 +247,45 @@ def machine_access(c, start):
         c.run(['rm', '-f', '.f19ptok', '.f19stok'])
 
 
+def identity_commands(c, team, member):
+    """C255-C260 on a team the check owns: setup commands print an Admin Portal link (never shown),
+    enforce goes through the review and its confirmation code, exempt and scim map change one
+    setting; every change is undone before the next step."""
+    redact = lambda text: re.sub(r'https://\S+', '<link>', text)
+    for args, name in ((['sso', 'setup', team, '--step', 'domain'], 'pb team sso setup --step domain prints a portal link'),
+                       (['sso', 'setup', team, '--step', 'sso'], 'pb team sso setup --step sso prints a portal link'),
+                       (['scim', 'setup', team], 'pb team scim setup prints a portal link')):
+        rc, out, err = c.pb('team', *args)
+        c.step(name, rc == 0 and 'https://' in out, redact(out + err))
+    status = lambda: c.pbj('team', 'sso', 'status', team)
+    rc, out, err = c.pb('team', 'sso', 'enforce', team, 'on')
+    code = re.search(r'--confirm (\S+)', out)
+    if rc == 0:  # nobody would lose access: it is on already
+        c.step('pb team sso enforce on (no one loses access)', status().get('sso', {}).get('required') is True, out + err)
+    else:
+        c.step('pb team sso enforce on shows the review and changes nothing', rc == 2 and code and status().get('sso', {}).get('required') is False, redact(out + err))
+        rc, out, err = c.pb('team', 'sso', 'enforce', team, 'on', '--confirm', code.group(1) if code else '')
+        c.step('pb team sso enforce on --confirm turns it on', rc == 0 and status().get('sso', {}).get('required') is True, out + err)
+    rc, out, err = c.pb('team', 'sso', 'enforce', team, 'off')
+    c.step('pb team sso enforce off turns it off', rc == 0 and status().get('sso', {}).get('required') is False, out + err)
+    rc, out, err = c.pb('team', 'sso', 'exempt', team, member)
+    c.step('pb team sso exempt marks the member', rc == 0 and member in (status().get('sso', {}).get('exempt') or []), out + err)
+    rc, out, err = c.pb('team', 'sso', 'exempt', team, member, '--remove')
+    c.step('pb team sso exempt --remove unmarks it', rc == 0 and member not in (status().get('sso', {}).get('exempt') or []), out + err)
+    groups = {g['name']: g.get('role', '') for g in (c.pbj('team', 'scim', 'status', team).get('directory', {}).get('groups') or [])}
+    if not c.step('the directory has a group to map', bool(groups), groups):
+        return
+    group = sorted(groups)[0]
+    original = groups[group] or 'none'
+    target = 'auditor' if original != 'auditor' else 'member'
+    rc, out, err = c.pb('team', 'scim', 'map', team, group, target)
+    now = {g['name']: g.get('role', '') for g in (c.pbj('team', 'scim', 'status', team).get('directory', {}).get('groups') or [])}
+    c.step('pb team scim map sets ' + group + ' to ' + target, rc == 0 and now.get(group) == target, out + err)
+    rc, out, err = c.pb('team', 'scim', 'map', team, group, original)
+    now = {g['name']: g.get('role', '') for g in (c.pbj('team', 'scim', 'status', team).get('directory', {}).get('groups') or [])}
+    c.step('pb team scim map restores ' + group, rc == 0 and (now.get(group) or 'none') == original, out + err)
+
+
 def search(c, start, owner):
     """F19-07/08: every filter narrows the log; events carry the documented shape; paging moves on."""
     items, raw = c.activity('--action', 'team.role', '--since', start)
@@ -398,6 +438,7 @@ def main():
     p.add_argument('--s3-root', default='/tmp/vgw', help='the store\'s data directory in --s3-list-cmd')
     p.add_argument('--api', default='https://api.pprbt.dev')
     p.add_argument('--member', default='', help='the member whose role changes (not directory-managed)')
+    p.add_argument('--identity-commands', action='store_true', help='also run sso setup/enforce/exempt and scim setup/map (C255-C260); only on a team the check owns')
     p.add_argument('--alias', default='', help='this machine\'s name, for the F19-07 access steps')
     p.add_argument('--peer-alias', default='', help='a second throwaway machine of the account (F19-07)')
     p.add_argument('--peer-cmd', default='', help='runs commands on the peer; its CLI session is replaced')
@@ -412,6 +453,8 @@ def main():
     start = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(time.time() - 5))
     member = roles(c, a.team)
     identity(c, a.team)
+    if a.identity_commands:
+        identity_commands(c, a.team, member or a.member)
     if a.alias and a.peer_cmd:
         machine_access(c, start)
     token = 'f19-check-%d' % time.time()
