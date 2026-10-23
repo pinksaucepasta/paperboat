@@ -133,3 +133,44 @@ func TestGlobalInstallationUsageIsHostedNotBoundToCurrentRoutes(t *testing.T) {
 		t.Fatalf("global node report on a moved route: exempt=%v err=%v (want hosted, not refused)", exempt, err)
 	}
 }
+
+// An independent operator's report for a route its node does not hold is refused (its
+// signature proves origin only), even when the node does hold another of the account's routes.
+func TestIndependentOperatorUsageIsBoundToItsAssignedRoutes(t *testing.T) {
+	store := openControlPlaneTestDB(t)
+	ctx := t.Context()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	f := newTunnelEdgeAcceptanceFixture(fmt.Sprintf("op_%d", now.UnixNano()), now)
+	t.Cleanup(func() {
+		store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.selfhost_installations WHERE node_id=$1`, f.nodeID)
+		store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.users WHERE id=$1`, f.accountID)
+		store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.control_tunnel_nodes WHERE id=$1`, f.nodeID)
+	})
+	f.insertBase(t, store)
+	f.insertConnector(t, store, f.connectorOne, f.hostOne, f.sessionOne, 11)
+	f.markConnectorPreReady(t, store, f.connectorOne, f.sessionOne)
+	service := &EdgeService{store: store, clock: func() time.Time { return now }}
+	if staged, err := service.ReconcileTunnelEdgeRouteAssignments(ctx, 10); err != nil || staged == 0 {
+		t.Fatalf("stage assignment = %d, %v", staged, err)
+	}
+	var generation int64
+	var environment string
+	if err := store.SQL().QueryRowContext(ctx, `SELECT a.route_generation,m.environment_id FROM paperboat.tunnel_edge_route_assignments a JOIN paperboat.user_machines m ON m.id=a.host_id WHERE a.route_id=$1 AND a.edge_node_id=$2 LIMIT 1`, f.routeID, f.nodeID).Scan(&generation, &environment); err != nil {
+		t.Fatal(err)
+	}
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	installation := "op_install_" + f.suffix
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete) VALUES($1,$2,$3,$3,'ciphertext','operator usage test','tunnel','account',$4,$1,true)`, installation, f.nodeID, []byte(pub), f.accountID); err != nil {
+		t.Fatal(err)
+	}
+	service.SetNodeCredentials(selfhost.New(store, "selfhost-test-encryption-key-32-bytes-long"))
+	held := edgeUsageRequest{Node: f.nodeID, Environment: environment, Route: f.routeID, Revision: generation}
+	other := held
+	other.Route = "route_not_held_" + f.suffix
+	if _, err := service.authorizeSelfhostUsage(ctx, other); !errors.Is(err, ErrUsageSignature) {
+		t.Fatalf("a route the operator's node does not hold was accepted: %v", err)
+	}
+}
