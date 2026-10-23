@@ -99,9 +99,19 @@ func TestOwnerBridgePreservesRealShellChildReplayAndInputAcrossWorkerReplacement
 	}
 	// Idle terminal polling uses short caller deadlines. Those are ordinary
 	// poll completion, not loss of the owner; subsequent input must still work.
-	pollCtx, stopPoll := context.WithTimeout(ctx, 100*time.Millisecond)
-	_, pollErr := remote.WaitNext(pollCtx, created.ID, participant.AttachmentID)
-	stopPoll()
+	// Output after "reply:before" (the rest of its line) may still arrive; drain it so the poll is idle.
+	var pollErr error
+	for drained := 0; drained < 16; drained++ {
+		pollCtx, stopPoll := context.WithTimeout(ctx, 100*time.Millisecond)
+		event, waitErr := remote.WaitNext(pollCtx, created.ID, participant.AttachmentID)
+		stopPoll()
+		if pollErr = waitErr; pollErr != nil {
+			break
+		}
+		if err = remote.Acknowledge(created.ID, participant.AttachmentID, event.EndSequence); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if pollErr != context.DeadlineExceeded {
 		t.Fatalf("idle poll became owner failure: %T %v", pollErr, pollErr)
 	}
