@@ -64,6 +64,7 @@ pb [environment] [new] [flags]
 ### SEE ALSO
 
 * [pb access](pb_access.md)	 - Open authenticated private access
+* [pb account](pb_account.md)	 - Manage your Paperboat account
 * [pb api-token](pb_api-token.md)	 - Create, list and revoke workspace API tokens
 * [pb approve](pb_approve.md)	 - Approve a peer machine over gRPC IPC
 * [pb auth](pb_auth.md)	 - Manage Paperboat sign-in

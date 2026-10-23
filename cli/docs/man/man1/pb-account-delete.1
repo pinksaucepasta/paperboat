@@ -1,0 +1,46 @@
+.nh
+.TH "PB-ACCOUNT-DELETE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-account-delete - Show where to delete your Paperboat account
+
+
+.SH SYNOPSIS
+\fBpb account delete [flags]\fP
+
+
+.SH DESCRIPTION
+Deleting your Paperboat account removes your machines, sessions and data and cannot be undone. It is done in the Paperboat console, where you confirm it with your email; pb prints the link.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for delete
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-account(1)\fP

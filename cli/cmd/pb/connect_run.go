@@ -780,8 +780,8 @@ func friendlyAPIError(err error) string {
 		return "An active team subscription is required. " + teamSubscriptionRecovery + " No resource was created."
 	case "team_suspended":
 		return apiErr.Error()
-	case "bandwidth_quota_exhausted":
-		// The authored message plus the vetted billing link from the response (apiErrorMessageFor).
+	case "bandwidth_quota_exhausted", "machine_limit_reached", "preview_limit_reached", "account_deletion_console_only":
+		// The authored message plus the vetted billing or console link from the response (apiErrorMessageFor).
 		return apiErr.Message
 	case "policy_version_conflict", "policy_changes_unconfirmed", "invalid_policy", "policy_edit_forbidden", "policy_explain_forbidden", "api_token_name_taken", "invalid_api_token_scope", "api_token_invalid", "outside_token_scope",
 		"team_sso_required", "directory_managed", "invitation_domain_not_verified":

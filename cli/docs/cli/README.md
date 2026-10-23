@@ -10,6 +10,8 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb access](pb_access.md) | Open authenticated private access |
 | [pb access machine](pb_access_machine.md) | Forward a local port to an authorized machine service |
 | [pb access tunnel](pb_access_tunnel.md) | Open private TCP access through stable hostd |
+| [pb account](pb_account.md) | Manage your Paperboat account |
+| [pb account delete](pb_account_delete.md) | Show where to delete your Paperboat account |
 | [pb api-token](pb_api-token.md) | Create, list and revoke workspace API tokens |
 | [pb api-token create](pb_api-token_create.md) | Create an API token and print its secret once |
 | [pb api-token list](pb_api-token_list.md) | List API tokens |

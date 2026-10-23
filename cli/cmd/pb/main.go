@@ -452,6 +452,7 @@ recovery instructions before retrying an operation that may have created resourc
 	root.AddCommand(workspaceSwitchCommand())
 	root.AddCommand(environmentVariablesCobraCommand())
 	root.AddCommand(teamCobraCommand())
+	root.AddCommand(accountCobraCommand())
 	root.AddCommand(desktopCommand())
 
 	root.AddCommand(doctorCommandV1())

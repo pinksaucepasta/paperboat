@@ -73,6 +73,10 @@ func apiErrorMessageFor(code string, status int, details map[string]any) string 
 		}
 	case "machine_limit_reached", "preview_limit_reached":
 		return planLimitMessage(code, details, billing)
+	case "account_deletion_console_only":
+		if console := consoleURL(details); console != "" {
+			return "Deleting an account is done in the Paperboat console: " + console
+		}
 	}
 	return apiErrorMessage(code, status)
 }
@@ -94,9 +98,18 @@ func planLimitMessage(code string, details map[string]any, billing string) strin
 	return message
 }
 
+// consoleURL is the console page a console-only refusal names, when it is an http(s) URL.
+func consoleURL(details map[string]any) string {
+	return httpURL(details["console_url"])
+}
+
 // billingURL is the console Billing link a plan-limit refusal may carry, when it is an http(s) URL.
 func billingURL(details map[string]any) string {
-	raw, _ := details["billing_url"].(string)
+	return httpURL(details["billing_url"])
+}
+
+func httpURL(value any) string {
+	raw, _ := value.(string)
 	if parsed, err := url.Parse(raw); raw != "" && err == nil && (parsed.Scheme == "https" || parsed.Scheme == "http") && parsed.Host != "" && parsed.User == nil {
 		return parsed.String()
 	}
@@ -124,6 +137,7 @@ var publicAPIMessages = map[string]string{
 	"update_required":                 "This Paperboat version is no longer supported. Run `pb update` to continue.",
 	"access_denied":                   "Access was denied. Sign in with an authorized account.",
 	"authorization_pending":           "Authorization is pending. Complete sign-in in the browser.",
+	"account_deletion_console_only":   "Deleting an account is done in the Paperboat console. Run `pb account delete` for the link.",
 	"machine_limit_reached":           "This workspace's plan machine limit is reached. Remove machines you no longer use (`pb machine revoke <machine>`) or upgrade under Billing in the Paperboat console.",
 	"preview_limit_reached":           "This workspace's plan limit for running previews and tunnels is reached. Stop one you no longer need, or upgrade under Billing in the Paperboat console.",
 	"bandwidth_quota_exhausted":       "This workspace's hosted relay and edge bandwidth is used up. Direct machine-to-machine access still works. Add bandwidth or upgrade under Billing in the Paperboat console, or wait for the next allowance period.",
