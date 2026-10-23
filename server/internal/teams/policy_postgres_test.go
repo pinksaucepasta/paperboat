@@ -145,6 +145,20 @@ func TestPolicySQLMatchesGo(t *testing.T) {
 		if len(errs) > 0 {
 			t.Fatal(errs)
 		}
+		// The audience of a machine's topic wakes (one set-based query) is exactly the members with any capability.
+		for _, machine := range machines {
+			var audience, want string
+			if err := f.store.SQL().QueryRowContext(f.ctx, `SELECT
+ coalesce((SELECT string_agg(a, ',' ORDER BY a) FROM paperboat.workspace_policy_audience($1, $2) a), ''),
+ coalesce((SELECT string_agg(m.account_id, ',' ORDER BY m.account_id) FROM paperboat.team_members m WHERE m.team_id=$1 AND m.active
+  AND EXISTS(SELECT 1 FROM unnest(ARRAY['terminal','exec','managed_ssh','files','preview_manage','tunnel_manage','private_access']) cap
+   WHERE NOT isempty(paperboat.workspace_policy_ports(m.account_id, $1, $2, cap)))), '')`, f.team, machine).Scan(&audience, &want); err != nil {
+				t.Fatal(err)
+			}
+			if audience != want {
+				t.Errorf("policy %d: %s audience %q, members with a capability %q", i, machine, audience, want)
+			}
+		}
 		for _, actor := range members {
 			for _, machine := range machines {
 				target := policy.Target{Kind: "machine", ID: machine}
