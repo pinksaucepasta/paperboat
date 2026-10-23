@@ -30,7 +30,7 @@ func TestPostgresMemberSendsBetweenTeamOwnedMachines(t *testing.T) {
 		}
 	}
 	for _, machine := range []string{source, destination} {
-		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines(id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online,configured_capabilities,observed_capabilities) VALUES($1,$2,$3,$1,'linux','amd64','/workspace','online','occupied',true,ARRAY['file_receive'],ARRAY['file_receive'])`, machine, owner, "env_"+machine); err != nil {
+		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,configured_capabilities,observed_capabilities) VALUES($1,$2,$3,'linux','amd64','/workspace','online','occupied',true,ARRAY['file_receive'],ARRAY['file_receive'])`, machine, owner, "env_"+machine); err != nil {
 			t.Fatal(err)
 		}
 	}
