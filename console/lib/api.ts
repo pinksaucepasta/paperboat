@@ -71,6 +71,8 @@ const sentences: Record<string, string> = {
     "This workspace's hosted bandwidth is used up. Direct machine-to-machine access still works. Add bandwidth or change plan under Billing, or wait for the next allowance period.",
   team_private_access_off:
     "The team has not allowed private access to its shared machines. Ask a team owner or admin to turn it on.",
+  github_connection_in_use:
+    "Config sync is using GitHub right now. Stop syncing config on your machines first, then disconnect.",
   team_sso_required: "This team requires your company's SSO. Sign out and sign in with your work email.",
   team_suspended:
     "This team is suspended, so changes are paused. Ask the team owner to restore billing or resume the team.",

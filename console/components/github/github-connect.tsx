@@ -113,7 +113,7 @@ function Review({ link, token }: { link: string; token: string }) {
 
 function Problem({ error }: { error: Error }) {
   const code = error instanceof ApiError ? error.code : ""
-  const expired = code === "github_link_expired" || code === "not_found"
+  const expired = code === "github_link_expired"
   return (
     <Outcome
       icon={<XCircleIcon className="size-8 text-white" />}

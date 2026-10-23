@@ -9,8 +9,8 @@ import { api } from "@/lib/api"
  * to /github/done. The API answers JSON only. Contract: Lane B, 2026-10-23 (PLAN Log).
  */
 
-/** Off until the server's console-based GitHub flow is deployed (an unknown /v1 path signs out). */
-export const githubLive = false
+/** The console-based GitHub flow (server 2026.10.23.37, 30a69c07). */
+export const githubLive = true
 
 export type GitHubStatus = {
   connected: boolean
@@ -75,4 +75,5 @@ export const githubErrors: Record<string, string> = {
   github_link_expired: "This connection request expired.",
   github_link_used: "This connection request was already approved or cancelled.",
   github_link_other_account: "This request is for another Paperboat account. Sign in with the account that ran pb.",
+  github_link_unavailable: "This link isn’t valid anymore; pb may have started a newer request.",
 }
