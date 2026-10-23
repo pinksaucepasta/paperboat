@@ -56,6 +56,27 @@ def run(argv, cwd, env=None):
     return result.returncode, (result.stdout + result.stderr).strip()
 
 
+def packages_with_files(module_dir, dirs, tests):
+    """The directories (relative to the module, './'-prefixed) that still hold Go files Go would compile.
+
+    A diff also names directories whose Go files were all deleted, or that only have _test.go files, or
+    only files for another OS; `go build ./dir` fails on those although the module builds. Go decides
+    what counts (`go list -e` reports no files for them), so the hook builds exactly what Go can build
+    (tests=False) or vet (tests=True) among the changed directories.
+    """
+    targets = ["./" + d if d != "." else "." for d in dirs]
+    template = "{{.Dir}}\t{{len .GoFiles}}\t{{len .CgoFiles}}\t{{len .TestGoFiles}}\t{{len .XTestGoFiles}}"
+    code, output = run(["go", "list", "-e", "-f", template, *targets], module_dir)
+    if code:
+        raise RuntimeError(f"go list {' '.join(targets)}: {output}")
+    found = []
+    for line in output.splitlines():
+        directory, *counts = line.split("\t")
+        if directory and sum(int(n) for n in (counts if tests else counts[:2])):
+            found.append("./" + os.path.relpath(directory, module_dir) if directory != str(module_dir) else ".")
+    return found
+
+
 def checkout_tree(commit):
     """One persistent detached worktree per repository: a stable path keeps Go's build cache warm."""
     common = Path(git("rev-parse", "--path-format=absolute", "--git-common-dir").strip())
@@ -99,16 +120,18 @@ def check(commit, modules, paths):
             # Only the packages the push changed: a file left out of a commit breaks its own package,
             # and building every package of a module took 15-30 min at load 50 on the shared 4-CPU box.
             # Breakage further up the import graph is CI's job (.github/workflows).
-            targets = ["./" + d if d != "." else "." for d in changed_go] if changed_go else []
-            if not targets:
+            if not changed_go:
                 continue
-            code, output = run(["go", "build", *targets], tree / module)
-            if code:
-                failures.append(f"{module}: go build failed\n{output}")
-                continue
-            if changed_go:
-                packages = ["./" + d if d != "." else "." for d in changed_go]
-                code, output = run(["go", "vet", *packages], tree / module)
+            # Without a base to diff against (paths is None) the whole module is built.
+            buildable = ["./..."] if paths is None else packages_with_files(tree / module, changed_go, tests=False)
+            if buildable:
+                code, output = run(["go", "build", *buildable], tree / module)
+                if code:
+                    failures.append(f"{module}: go build failed\n{output}")
+                    continue
+            vettable = ["./..."] if paths is None else packages_with_files(tree / module, changed_go, tests=True)
+            if vettable:
+                code, output = run(["go", "vet", *vettable], tree / module)
                 if code:
                     failures.append(f"{module}: go vet failed\n{output}")
             if module == "cli" and os.environ.get("PB_PREPUSH_CROSS") == "1":

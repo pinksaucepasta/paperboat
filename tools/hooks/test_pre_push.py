@@ -104,6 +104,41 @@ class PrePushTest(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertIn("undefined: Missing", result.stderr)
 
+    def test_a_package_whose_go_files_were_all_deleted_is_not_a_build_error(self):
+        # Deleting cli/internal/controlsync/*.go while keeping its proto/ subpackage left a changed
+        # directory with no Go files; `go build ./thatdir` failed and the hook refused a green push.
+        self.write("cli/a/gone/g.go", "package gone\n\nfunc G() int { return 1 }\n")
+        self.write("cli/a/gone/sub/s.go", "package sub\n\nfunc S() int { return 2 }\n")
+        before = self.commit("add gone and gone/sub")
+        git(self.repo, "rm", "-q", "cli/a/gone/g.go")
+        head = self.commit("delete gone, keep gone/sub")
+        result = self.push(head, before)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_a_directory_with_only_test_files_does_not_fail_the_build(self):
+        self.write("cli/a/onlytest/x_test.go", 'package onlytest\n\nimport "testing"\n\nfunc TestX(t *testing.T) {}\n')
+        head = self.commit("a package with only a test file")
+        result = self.push(head, self.base)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_a_vet_failure_in_a_test_only_directory_is_still_refused(self):
+        self.write("cli/a/onlytest/x_test.go", 'package onlytest\n\nimport (\n\t"fmt"\n\t"testing"\n)\n\nfunc TestX(t *testing.T) { fmt.Printf("%d", "x") }\n')
+        head = self.commit("bad test")
+        result = self.push(head, self.base)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("go vet failed", result.stderr)
+
+    def test_without_a_base_to_diff_against_the_whole_module_is_built(self):
+        # A new branch in a clone without origin/main: nothing to diff, so every package is built.
+        self.write("cli/a/b.go", "package a\n\nfunc B() int { return Missing() }\n")
+        head = self.commit("broken")
+        result = self.push(head)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("undefined: Missing", result.stderr)
+
+    def test_without_a_base_a_building_module_passes(self):
+        self.assertEqual(self.push(self.base).returncode, 0)
+
 
 if __name__ == "__main__":
     unittest.main()
