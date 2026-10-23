@@ -375,6 +375,19 @@ func workspaceSnapshotMachines(ctx context.Context, machines []localapi.MachineS
 	return personal, true
 }
 
+// resolveMachineWarmFirst resolves a machine from the daemon's warm snapshot and lists the
+// account's machines on the server only when the snapshot cannot answer.
+func resolveMachineWarmFirst(ctx context.Context, requested string, server func() (*api.Client, error)) (api.UserMachine, error) {
+	if machine, ok := resolveWarmUserMachine(ctx, requested); ok {
+		return machine, nil
+	}
+	client, err := server()
+	if err != nil {
+		return api.UserMachine{}, err
+	}
+	return resolveUserMachine(ctx, client, requested)
+}
+
 func resolveWarmUserMachine(ctx context.Context, requested string) (api.UserMachine, bool) {
 	if _, local := workspaceSnapshotMachines(ctx, nil); !local {
 		return api.UserMachine{}, false

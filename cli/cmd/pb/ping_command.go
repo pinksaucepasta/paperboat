@@ -81,11 +81,7 @@ func actionPing(command *cobra.Command, args []string) error {
 	if dependencies.peerLocal == nil {
 		return errors.New("pb ping requires an authenticated Paperboat server")
 	}
-	client, err := backendClient(ctx)
-	if err != nil {
-		return err
-	}
-	machine, err := resolveUserMachine(command.Context(), client, args[0])
+	machine, err := resolveMachineWarmFirst(command.Context(), args[0], func() (*api.Client, error) { return backendClient(ctx) })
 	if err != nil {
 		return err
 	}

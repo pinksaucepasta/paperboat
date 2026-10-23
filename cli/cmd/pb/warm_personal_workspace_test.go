@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 )
 
@@ -67,5 +69,30 @@ func TestStatusSelectsWorkspaceMachinesFromTheSnapshot(t *testing.T) {
 	team := context.WithValue(context.Background(), workspaceInvocationKey{}, "team-a")
 	if got, local := workspaceSnapshotMachines(team, machines); local {
 		t.Fatalf("team workspace answered from the snapshot: %v", ids(got))
+	}
+}
+
+// A warm `pb ping --count 1` took ~2 s for a 5 ms connection: it listed every machine on the
+// server (~1 s) before the daemon probe. A machine the warm snapshot sees ready needs no listing.
+func TestPingResolvesAWarmMachineWithoutListing(t *testing.T) {
+	snapshot := localapi.Snapshot{Schema: localapi.SnapshotSchemaV1, Generation: 1, ObservedAt: time.Now().UTC(), DaemonState: "ready", DaemonVersion: "dev", Machines: []localapi.MachineStatus{
+		{ID: "mch_ready", EnvironmentID: "env_ready", Alias: "build", Eligible: true, RuntimeState: "ready", Generation: 2},
+	}}
+	previous := loadWarmMachineSnapshot
+	loadWarmMachineSnapshot = func(context.Context) (localapi.Snapshot, error) { return snapshot, nil }
+	t.Cleanup(func() { loadWarmMachineSnapshot = previous })
+	listings := 0
+	errListed := errors.New("listed on the server")
+	server := func() (*api.Client, error) { listings++; return nil, errListed }
+
+	machine, err := resolveMachineWarmFirst(context.Background(), "build", server)
+	if err != nil || machine.ID != "mch_ready" || machine.EnvironmentID != "env_ready" || machine.InstallationGeneration != 2 || !machine.Online {
+		t.Fatalf("warm machine = %+v, %v", machine, err)
+	}
+	if listings != 0 {
+		t.Fatalf("a warm machine was listed on the server %d times", listings)
+	}
+	if _, err := resolveMachineWarmFirst(context.Background(), "unknown", server); !errors.Is(err, errListed) || listings != 1 {
+		t.Fatalf("a machine outside the snapshot was not resolved on the server: err=%v listings=%d", err, listings)
 	}
 }
