@@ -24,7 +24,7 @@ import { copyWithToast } from "@/lib/clipboard"
 type View = "live" | "ended"
 
 /** Stopped, expired, owner lost (`owner_disconnected` is terminal), or past its deadline. */
-const ended = (preview: Preview, now: number) =>
+export const ended = (preview: Preview, now: number) =>
   preview.state === "expired" ||
   preview.state === "stopped" ||
   preview.state === "owner_disconnected" ||

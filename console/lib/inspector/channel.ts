@@ -249,6 +249,8 @@ export function useInspectorChannel(previewId: string, machineId: string, enable
       revoke(grants.current?.inspect)
       revoke(grants.current?.replay)
       grants.current = null
+      // A paused channel is not ready; it reconnects when enabled again.
+      setPhase("connecting")
     }
   }, [enabled])
 

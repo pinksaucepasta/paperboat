@@ -22,16 +22,17 @@ import {
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
+import { ended } from "@/components/tunnels/preview-list"
+import { useNow } from "@/lib/use-now"
 
 type StatusClass = "all" | "2xx" | "3xx" | "4xx" | "5xx"
 const METHODS = ["All", "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
-
-const stopped = (preview: Preview) => ["expired", "stopped"].includes(preview.state)
 
 /** Previews → Inspect: a preview's captured requests, live (PLAN F17). */
 export function InspectorPage({ id }: { id: string }) {
   const query = useApiQuery({ ...previewQuery(id), refetchInterval: 10_000 })
   const preview = query.data
+  const now = useNow(10_000)
   return (
     <>
       <PageHeader>
@@ -44,7 +45,7 @@ export function InspectorPage({ id }: { id: string }) {
           <State title="Preview not found" detail={query.error.message} />
         ) : !preview ? (
           <Skeleton className="h-8 w-72" />
-        ) : stopped(preview) ? (
+        ) : ended(preview, now) ? (
           <State title="Preview stopped" detail="Captures end with the preview. Start a new preview to inspect it." />
         ) : (
           <Inspector preview={preview} />
@@ -73,13 +74,16 @@ const phaseText: Record<Exclude<ChannelPhase, "ready">, [string, string]> = {
   connecting: ["Connecting", "Opening an encrypted connection to the machine…"],
   reconnecting: ["Connection lost", "Reconnecting to the machine…"],
   offline: ["Machine offline", "The machine running this preview isn’t connected. Retrying…"],
-  denied: ["Not allowed", "Only the preview’s owner or the machine’s owner can inspect it."],
+  denied: ["Not allowed", "You need inspect access to this preview. Ask its owner."],
   update: ["Machine needs an update", "Update Paperboat on this machine (pb update) to inspect its previews."],
   gone: ["Preview not found", "This preview no longer exists."],
 }
 
 function Inspector({ preview }: { preview: Preview }) {
-  const channel = useInspectorChannel(preview.id, preview.owner_machine_id, true)
+  // Grants exist only while the preview routes; while it starts or its machine reconnects the
+  // channel waits, and the list collected so far stays.
+  const routing = preview.state === "ready"
+  const channel = useInspectorChannel(preview.id, preview.owner_machine_id, routing)
   const [paused, setPaused] = useState(false)
   const feed = useCaptureFeed(channel, preview.id, paused)
   const [selected, setSelected] = useState("")
@@ -90,6 +94,8 @@ function Inspector({ preview }: { preview: Preview }) {
   const [clearing, setClearing] = useState(false)
 
   // Final states replace the page; while reconnecting the last list stays visible under a notice.
+  if (!routing && feed.records.length === 0)
+    return <State title="Waiting for the preview" detail="The preview is starting or its machine is reconnecting. Inspection continues when it is back." />
   if (channel.phase !== "ready" && (feed.records.length === 0 || ["denied", "update", "gone"].includes(channel.phase))) {
     const [title, detail] = phaseText[channel.phase]
     return <State title={title} detail={channel.phase === "denied" && channel.message ? channel.message : detail} />
@@ -113,9 +119,11 @@ function Inspector({ preview }: { preview: Preview }) {
 
   return (
     <section className="flex flex-col gap-3" data-inspector-phase={channel.phase} data-capture={feed.capture}>
-      {channel.phase !== "ready" && (
+      {(channel.phase !== "ready" || !routing) && (
         <p className="text-sm text-muted-foreground" role="status">
-          {phaseText[channel.phase][1]}
+          {!routing || channel.phase === "ready"
+            ? "The preview is starting or its machine is reconnecting. Inspection continues when it is back."
+            : phaseText[channel.phase][1]}
         </p>
       )}
       <div className="flex flex-wrap items-center gap-2">
