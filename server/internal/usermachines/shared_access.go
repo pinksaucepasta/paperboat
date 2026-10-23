@@ -114,9 +114,36 @@ func (s *Service) createAccessSession(ctx context.Context, in dbsqlc.CreateUserM
 	if kind != machineCredentialSigned && kind != machineCredentialExternal {
 		return errors.New("user-machine credential kind is invalid")
 	}
-	return s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := teams.Lock(ctx, tx); err != nil {
+	// Access to the account's own personal machine involves no team state, so it does not queue on the
+	// global team write lock: SERIALIZABLE alone orders it against a concurrent revoke or ownership
+	// change (Lane A: 10 concurrent exec setups finished ~430 ms apart, one at a time). Team access
+	// keeps the lock. If the machine stops being personal between this check and the transaction, the
+	// transaction refuses and the call retries once with the lock.
+	scope, scoped := workspace.FromContext(ctx)
+	personalOnly := !scoped || scope.TeamID == ""
+	if personalOnly {
+		var personal bool
+		if err := s.db.SQL().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.user_machines WHERE id=$1 AND user_id=$2 AND owner_team_id IS NULL AND revoked_at IS NULL AND deleted_at IS NULL)`, in.UserMachineID, in.UserID).Scan(&personal); err != nil {
 			return err
+		}
+		personalOnly = personal
+	}
+	err := s.createAccessSessionTx(ctx, in, kind, !personalOnly)
+	if errors.Is(err, errAccessNeedsTeamLock) {
+		err = s.createAccessSessionTx(ctx, in, kind, true)
+	}
+	return err
+}
+
+// errAccessNeedsTeamLock: a session started without the team lock found team access was needed after all.
+var errAccessNeedsTeamLock = errors.New("access session needs the team write lock")
+
+func (s *Service) createAccessSessionTx(ctx context.Context, in dbsqlc.CreateUserMachineAccessSessionParams, kind machineCredentialKind, teamLock bool) error {
+	return s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		if teamLock {
+			if err := teams.Lock(ctx, tx); err != nil {
+				return err
+			}
 		}
 		scope, scoped := workspace.FromContext(ctx)
 		if scoped {
@@ -154,6 +181,9 @@ func (s *Service) createAccessSession(ctx context.Context, in dbsqlc.CreateUserM
 		var personal bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM user_machines WHERE id=$1 AND user_id=$2 AND owner_team_id IS NULL AND revoked_at IS NULL AND deleted_at IS NULL)`, in.UserMachineID, in.UserID).Scan(&personal); err != nil {
 			return err
+		}
+		if !teamLock && (!personal || scoped && scope.TeamID != "") {
+			return errAccessNeedsTeamLock
 		}
 		if scoped && scope.TeamID == "" {
 			if !personal {
