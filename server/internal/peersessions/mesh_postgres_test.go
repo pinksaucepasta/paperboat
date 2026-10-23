@@ -83,7 +83,9 @@ SELECT $1,$1||'_m_'||g,'machine',$1||'_m_'||g,1,1,1,sha256(convert_to('key'||$1|
  ('100.'||(64+$4::int)||'.'||(g/250)||'.'||(1+g%250))::inet,now(),now() FROM generate_series($2::int,$3::int) g`, account, from, to, int(net)%64)
 	}
 	join := func(from, to int) { t.Helper(); joinAccount(account, net[0], from, to) }
-	joinAccount(other, net[0]+1, 0, 8999)
+	for from := 0; from < 9000; from += 1000 { // statements of 1,000 rows stay far below the statement timeout
+		joinAccount(other, net[0]+1, from, from+999)
+	}
 	exec(`INSERT INTO paperboat.peer_endpoint_certificate_revocations(operation_id,user_id,certificate_fingerprint,serial,reason,created_at)
 SELECT 'mesh-revocation-'||$1||'-'||g,$1,sha256(convert_to($1||'_m_'||g,'UTF8')),1,'endpoint_removed',now() FROM generate_series(0,8999) g`, other)
 	join(0, 999)
