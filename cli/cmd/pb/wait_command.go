@@ -40,6 +40,8 @@ func waitCommand() *cobra.Command {
 			}
 			waitCtx, cancel := context.WithTimeout(command.Context(), timeout)
 			defer cancel()
+			// Presence changes no longer wake every daemon of the account; while waiting, ask our own daemon.
+			go localwait.KeepInventoryFresh(waitCtx, client.RefreshInventory, localwait.InventoryRefreshEvery)
 			var result localwait.Result
 			if condition == "runtime" {
 				result, err = localwait.WaitTargetFromSnapshot(waitCtx, client, snapshot, args[0], condition)
