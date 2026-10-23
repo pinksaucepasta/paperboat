@@ -258,9 +258,9 @@ ON CONFLICT (id) DO UPDATE SET last_used_at = NULL`, sessionID); err != nil {
 // Exercise the deployed schema's populated upgrade, including deliberate
 // capability retirement and preservation of existing Personal publications.
 func TestPopulatedSchema45To61Upgrade(t *testing.T) {
-	dsn := os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
+	dsn := os.Getenv("PAPERBOAT_MIGRATION_TEST_DATABASE_DSN")
 	if dsn == "" {
-		t.Skip("empty isolated PostgreSQL DSN required")
+		t.Skip("empty isolated migration PostgreSQL DSN required")
 	}
 	if err := db.ValidateIsolatedTestDSN(dsn, os.Getenv("PAPERBOAT_DATABASE_DSN")); err != nil {
 		t.Fatal(err)
@@ -334,7 +334,7 @@ func TestPopulatedSchema45To61Upgrade(t *testing.T) {
 	}
 	var valid bool
 	err = store.SQL().QueryRowContext(ctx, `SELECT
- (SELECT max(version_id)=64 FROM paperboat.goose_db_version WHERE is_applied)
+ (SELECT max(version_id)=$1 FROM paperboat.goose_db_version WHERE is_applied)
  AND (SELECT display_name IS NULL FROM paperboat.teams WHERE team_id='upgrade-team')
  AND to_regclass('paperboat.account_network_preferences') IS NULL
  AND to_regclass('paperboat.team_network_preferences') IS NULL
@@ -342,7 +342,7 @@ func TestPopulatedSchema45To61Upgrade(t *testing.T) {
  AND (SELECT owner_team_id IS NULL FROM paperboat.tunnels WHERE id='upgrade-tunnel')
  AND (SELECT owner_team_id IS NULL FROM paperboat.preview_leases WHERE id='upgrade-preview')
  AND paperboat.workspace_tunnel_management_allowed('upgrade-owner',NULL,'upgrade-tunnel')
- AND paperboat.workspace_preview_management_allowed('upgrade-owner',NULL,'upgrade-preview')`).Scan(&valid)
+ AND paperboat.workspace_preview_management_allowed('upgrade-owner',NULL,'upgrade-preview')`, latestMigrationVersion(t)).Scan(&valid)
 	if err != nil || !valid {
 		t.Fatalf("upgrade retirement/Personal authority invariant: valid=%v error=%v", valid, err)
 	}
