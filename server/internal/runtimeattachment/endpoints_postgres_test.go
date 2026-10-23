@@ -217,9 +217,29 @@ VALUES($1,$2,$3,$3,$4,'owner_session_endpoint','foreground','http','127.0.0.1:30
 	if got := served(); len(got) != 1 || got[0] != node+"/ready" {
 		t.Fatalf("preview_routes after origin ready = %v", got)
 	}
+	// The owner's native `pb preview inspect` gets its inspector network scope from a preview served
+	// as an endpoint route (it read only the legacy attachments, so the dial was refused).
+	cli, credential := prefix+"_cli", prefix+"_inspector"
+	exec(`INSERT INTO cli_client_sessions(id,user_id,client_id,client_label,device_type,os,scopes,state,created_at,approved_at) VALUES($1,$2,$1,'endpoint test','desktop','test',ARRAY['machines:connect'],'active',now(),now())`, cli, account)
+	exec(`INSERT INTO inspector_credentials(credential_id,token_hash,account_id,owner_account_id,resource_kind,resource_id,route_id,action,resource_generation,route_generation,target_generation,issued_at,expires_at,native_cli_session_id,native_machine_id,native_machine_generation)
+SELECT $1::text,sha256(convert_to($1::text,'UTF8')),$2,$2,'preview',$3,$3,'inspect',x.route_generation,x.route_generation,x.route_generation,now(),now()+interval '5 minutes',$4,$5,1 FROM preview_routes x WHERE x.preview_id=$3 AND x.endpoint`, credential, account, lease, cli, machine)
+	admitted := func() bool {
+		t.Helper()
+		var n int
+		if err := database.SQL().QueryRowContext(ctx, `SELECT count(*) FROM inspector_native_admissions WHERE credential_id=$1`, credential).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n == 1
+	}
+	if !admitted() {
+		t.Fatal("native inspector credential for an endpoint-route preview has no network admission")
+	}
 	exec(`UPDATE endpoint_edge_assignments SET observed_at=now()-interval '31 seconds' WHERE endpoint_id=$1`, lease)
 	if got := served(); len(got) != 0 {
 		t.Fatalf("a route the edge stopped observing is still served: %v", got)
+	}
+	if admitted() {
+		t.Fatal("inspector admission outlived the served endpoint route")
 	}
 	if err := service.Observe(ctx, edge, []runtimewire.Observation{runtimeObservation, observation}); err != nil {
 		t.Fatal(err)
