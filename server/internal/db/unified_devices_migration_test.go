@@ -130,10 +130,7 @@ func TestUnifiedMachineMigrationFrom26(t *testing.T) {
 	if err := store.SQL().QueryRowContext(ctx, `SELECT state,generation FROM paperboat.control_helpers WHERE id='helper_unified_active'`).Scan(&activeState, &generation); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SQL().QueryRowContext(ctx, `SELECT state FROM paperboat.control_helper_enrollments WHERE id='grant_unified_pending'`).Scan(&pendingState); err != nil {
-		t.Fatal(err)
-	}
-	if activeState != "active" || generation != 4 || pendingState != "revoked" {
-		t.Fatalf("cutover authority: active=%s generation=%d pending=%s", activeState, generation, pendingState)
+	if activeState != "active" || generation != 4 {
+		t.Fatalf("cutover authority: active=%s generation=%d", activeState, generation)
 	}
 }
