@@ -90,6 +90,9 @@ func (s *Service) ResetPairing(ctx context.Context, in PairingResetInput) (Pairi
 			if !bytes.Equal(oldVerifier, verifierHash[:]) || !bytes.Equal(oldRequest, requestHash[:]) {
 				return ErrPairingResetConflict
 			}
+			// A replay returns the committed receipt exactly; the database reads times in its
+			// session zone, the first answer wrote them in UTC.
+			out.CompletedAt = out.CompletedAt.UTC()
 			return json.Unmarshal(ids, &out.RetiredMachineIDs)
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
