@@ -181,18 +181,24 @@ function StreamDialog({
   }
   const [draft, setDraft] = useState(blank)
   const [secret, setSecret] = useState<string>()
+  const keepsHeader = Boolean(stream?.header_name) && draft.header_name.trim() === stream?.header_name
   const save = useMutation({
     mutationFn: () => {
       const input: AuditStreamInput =
         kind === "https"
-          ? { url: draft.url.trim(), ...(draft.header_name.trim() && { header_name: draft.header_name.trim(), header_value: draft.header_value }) }
+          ? {
+              url: draft.url.trim(),
+              // An empty name clears the header; an empty value keeps the stored one (PUT semantics).
+              header_name: draft.header_name.trim(),
+              ...(draft.header_value && { header_value: draft.header_value }),
+            }
           : {
               url: draft.url.trim(),
               region: draft.region.trim(),
               bucket: draft.bucket.trim(),
               prefix: draft.prefix.trim(),
               access_key_id: draft.access_key_id.trim(),
-              secret_access_key: draft.secret_access_key,
+              ...(draft.secret_access_key && { secret_access_key: draft.secret_access_key }),
             }
       return saveAuditStream(team, kind, input)
     },
@@ -258,9 +264,10 @@ function StreamDialog({
                 {field("url", "Endpoint", { type: "url", required: true, placeholder: "https://siem.example.com/ingest" })}
                 {field("header_name", "Header name (optional)", { placeholder: "Authorization" })}
                 {draft.header_name.trim() &&
-                  field("header_value", stream ? "Header value (enter it again to save changes)" : "Header value", {
+                  // A header that is already stored keeps its value unless a new one is entered.
+                  field("header_value", keepsHeader ? "Header value (leave empty to keep the current one)" : "Header value", {
                     type: "password",
-                    required: true,
+                    required: !keepsHeader,
                   })}
               </>
             ) : (
@@ -272,9 +279,9 @@ function StreamDialog({
                 </div>
                 {field("prefix", "Prefix (optional)")}
                 {field("access_key_id", "Access key ID", { required: true })}
-                {field("secret_access_key", stream ? "Secret access key (enter it again to save changes)" : "Secret access key", {
+                {field("secret_access_key", stream ? "Secret access key (leave empty to keep the current one)" : "Secret access key", {
                   type: "password",
-                  required: true,
+                  required: !stream,
                 })}
                 <p className="text-xs text-muted-foreground">The key only needs permission to put objects under the prefix.</p>
               </>
