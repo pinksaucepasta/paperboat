@@ -10287,9 +10287,98 @@
           "seats_used",
           "allowance_period_start",
           "allowance_period_end",
-          "topup_bytes_remaining"
+          "topup_bytes_remaining",
+          "limits"
         ],
         "properties": {
+          "limits": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Per-plan count limits with current use. machines: live machines; publications: active previews and tunnels together; browser_terminals: console terminals open through the edge.",
+            "required": [
+              "machines",
+              "publications",
+              "browser_terminals"
+            ],
+            "properties": {
+              "machines": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "used",
+                  "limit"
+                ],
+                "properties": {
+                  "used": {
+                    "type": "integer"
+                  },
+                  "limit": {
+                    "anyOf": [
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Plan limit; null for Teams (advertised unlimited)."
+                  }
+                }
+              },
+              "publications": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "used",
+                  "limit"
+                ],
+                "properties": {
+                  "used": {
+                    "type": "integer"
+                  },
+                  "limit": {
+                    "anyOf": [
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Plan limit; null for Teams (advertised unlimited)."
+                  }
+                }
+              },
+              "browser_terminals": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "used",
+                  "limit"
+                ],
+                "properties": {
+                  "used": {
+                    "type": "integer"
+                  },
+                  "limit": {
+                    "anyOf": [
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Plan limit; null for Teams (advertised unlimited)."
+                  }
+                }
+              }
+            }
+          },
+          "team_trial_days": {
+            "type": "integer",
+            "description": "Personal overview only: the Team trial a new team would get (0 once used)."
+          },
           "id": {
             "type": "string"
           },
@@ -11875,17 +11964,6 @@
               }
             ]
           },
-          "personal_machine_limit": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "format": "int64"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "revision": {
             "type": "integer",
             "format": "int64"
@@ -11894,7 +11972,6 @@
         "required": [
           "personal_allowance_bytes",
           "team_allowance_bytes",
-          "personal_machine_limit",
           "revision"
         ]
       },

@@ -8,13 +8,14 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat-server/internal/planlimits"
 	"github.com/pinksaucepasta/paperboat-server/internal/teams"
 )
 
 var ErrWorkspaceForbidden = errors.New("workspace billing permission denied")
 
-// ReserveUserMachineSeat implements the enrollment authorization boundary.
-// An unset personal machine quota permits enrollment for any active account.
+// ReserveUserMachineSeat implements the enrollment authorization boundary: an active account
+// within its plan's machine limit (planlimits) may enroll one more personal machine.
 func (s *WorkspaceService) ReserveUserMachineSeat(ctx context.Context, tx *db.Tx, userID string) error {
 	if tx == nil {
 		return ErrWorkspaceForbidden
@@ -29,20 +30,7 @@ func (s *WorkspaceService) ReserveUserMachineSeat(ctx context.Context, tx *db.Tx
 	if status != "active" {
 		return ErrWorkspaceForbidden
 	}
-	policy, err := operatorPolicyTx(ctx, tx)
-	if err != nil {
-		return err
-	}
-	if policy.PersonalMachineLimit != nil {
-		var count int32
-		if err := tx.QueryRow(ctx, `SELECT count(*) FROM user_machines WHERE user_id=$1 AND owner_team_id IS NULL AND seat_state='occupied' AND deleted_at IS NULL`, userID).Scan(&count); err != nil {
-			return err
-		}
-		if count >= *policy.PersonalMachineLimit {
-			return ErrWorkspaceQuota
-		}
-	}
-	return nil
+	return planlimits.CheckTx(ctx, tx, planlimits.Scope{Account: userID}, planlimits.Machines)
 }
 
 // Workspace is the billing owner, independent of the member initiating a request.
@@ -70,6 +58,9 @@ type Workspace struct {
 	PeriodStart          *time.Time        `json:"period_start,omitempty"`
 	PeriodEnd            *time.Time        `json:"period_end,omitempty"`
 	CancelAtPeriodEnd    bool              `json:"cancel_at_period_end"`
+	// Limits are the plan's count limits with current use (machines, publications = previews and
+	// tunnels, browser_terminals); a Teams limit is null (advertised unlimited).
+	Limits map[planlimits.Kind]planlimits.Usage `json:"limits"`
 	// TeamTrialDays, on the personal overview only, is the trial a new team would get.
 	TeamTrialDays  *int   `json:"team_trial_days,omitempty"`
 	CustomerID     string `json:"-"`

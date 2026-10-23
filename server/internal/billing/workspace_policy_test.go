@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat-server/internal/config"
+	"github.com/pinksaucepasta/paperboat-server/internal/planlimits"
 	"testing"
 	"time"
 
@@ -33,28 +35,27 @@ func TestUnsetWorkspaceAllowancesAccountUsageWithoutLimitingFree(t *testing.T) {
 		}
 	})
 	service := billing.NewWorkspaceService(store, nil, "")
-	if err := service.InitializeAllowancePolicy(ctx, nil, nil, nil); err != nil {
+	if err := service.InitializeAllowancePolicy(ctx, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	var originalPersonal, originalTeam sql.NullInt64
-	var originalMachines sql.NullInt32
 	var originalRevision int64
-	if err := store.SQL().QueryRowContext(ctx, `SELECT personal_allowance_bytes,team_allowance_bytes,personal_machine_limit,revision FROM paperboat.billing_operator_policy WHERE singleton`).Scan(&originalPersonal, &originalTeam, &originalMachines, &originalRevision); err != nil {
+	if err := store.SQL().QueryRowContext(ctx, `SELECT personal_allowance_bytes,team_allowance_bytes,revision FROM paperboat.billing_operator_policy WHERE singleton`).Scan(&originalPersonal, &originalTeam, &originalRevision); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		if _, err := store.SQL().ExecContext(context.Background(), `UPDATE paperboat.billing_operator_policy SET personal_allowance_bytes=$1,team_allowance_bytes=$2,personal_machine_limit=$3,revision=$4,updated_at=now() WHERE singleton`, originalPersonal, originalTeam, originalMachines, originalRevision); err != nil {
+		if _, err := store.SQL().ExecContext(context.Background(), `UPDATE paperboat.billing_operator_policy SET personal_allowance_bytes=$1,team_allowance_bytes=$2,revision=$3,updated_at=now() WHERE singleton`, originalPersonal, originalTeam, originalRevision); err != nil {
 			t.Error(err)
 		}
 	})
-	setPolicy := func(personal, team *int64, machines *int32) {
+	setPolicy := func(personal, team *int64) {
 		t.Helper()
-		if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.billing_operator_policy SET personal_allowance_bytes=$1,team_allowance_bytes=$2,personal_machine_limit=$3,revision=revision+1,updated_at=now() WHERE singleton`, personal, team, machines); err != nil {
+		if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.billing_operator_policy SET personal_allowance_bytes=$1,team_allowance_bytes=$2,revision=revision+1,updated_at=now() WHERE singleton`, personal, team); err != nil {
 			t.Fatal(err)
 		}
 	}
 	zeroBytes := int64(0)
-	setPolicy(&zeroBytes, nil, nil)
+	setPolicy(&zeroBytes, nil)
 	err := store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		w, err := billing.WorkspaceTx(ctx, tx, user, "", false)
 		if err != nil {
@@ -67,12 +68,12 @@ func TestUnsetWorkspaceAllowancesAccountUsageWithoutLimitingFree(t *testing.T) {
 		if !exhausted {
 			t.Error("configured zero admitted first request")
 		}
-		return billing.ErrWorkspaceQuota // admission denial rolls back period creation
+		return errRollback // admission denial rolls back period creation
 	})
-	if !errors.Is(err, billing.ErrWorkspaceQuota) {
+	if !errors.Is(err, errRollback) {
 		t.Fatal(err)
 	}
-	setPolicy(nil, nil, nil)
+	setPolicy(nil, nil)
 	if _, err := service.Overview(ctx, user, ""); err != nil {
 		t.Fatal(err)
 	}
@@ -96,19 +97,16 @@ func TestUnsetWorkspaceAllowancesAccountUsageWithoutLimitingFree(t *testing.T) {
 	if overview.AllowanceBytes != nil || overview.UsageBytes != used {
 		t.Fatalf("unset usage: allowance=%v usage=%d", overview.AllowanceBytes, overview.UsageBytes)
 	}
-	zero := int32(0)
-	setPolicy(nil, nil, &zero)
-	err = store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error { return service.ReserveUserMachineSeat(ctx, tx, user) })
-	if !errors.Is(err, billing.ErrWorkspaceQuota) {
-		t.Fatalf("configured zero machine quota: %v", err)
-	}
-	setPolicy(nil, nil, nil)
-	if err = store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error { return service.ReserveUserMachineSeat(ctx, tx, user) }); err != nil {
-		t.Fatalf("unset quota recovery: %v", err)
-	}
 	// Concurrent enrollments cannot each claim the final configured place.
-	one := int32(1)
-	setPolicy(nil, nil, &one)
+	// The user already holds one machine from the reservation above; a Free limit of 2 leaves
+	// exactly one place for the two racing enrollments.
+	limits := config.Default().Billing.Limits
+	limits.Machines.Free = 2
+	planlimits.Configure(limits, "")
+	t.Cleanup(func() { planlimits.Configure(config.Default().Billing.Limits, "") })
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state) VALUES($1,$2,$1,'quota-held','linux','amd64','/workspace','offline','occupied')`, "quota_held_"+suffix, user); err != nil {
+		t.Fatal(err)
+	}
 	results := make(chan error, 2)
 	for i := 0; i < 2; i++ {
 		go func(i int) {
@@ -127,7 +125,7 @@ func TestUnsetWorkspaceAllowancesAccountUsageWithoutLimitingFree(t *testing.T) {
 		err := <-results
 		if err == nil {
 			accepted++
-		} else if errors.Is(err, billing.ErrWorkspaceQuota) {
+		} else if errors.Is(err, planlimits.ErrLimitReached) {
 			denied++
 		} else {
 			t.Errorf("concurrent enrollment: %v", err)
@@ -137,3 +135,5 @@ func TestUnsetWorkspaceAllowancesAccountUsageWithoutLimitingFree(t *testing.T) {
 		t.Fatalf("concurrent quota accepted=%d denied=%d", accepted, denied)
 	}
 }
+
+var errRollback = errors.New("roll back the test transaction")

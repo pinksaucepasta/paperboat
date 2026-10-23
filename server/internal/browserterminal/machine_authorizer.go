@@ -24,6 +24,7 @@ func (a MachineAuthorizer) ResolveRole(ctx context.Context, userID, terminalSess
 	}
 	return machineBrowserDecision(current, err)
 }
+
 // CheckBandwidth refuses a terminal ticket while the machine's paying workspace is out of
 // hosted allowance on the edge that would carry it.
 func (a MachineAuthorizer) CheckBandwidth(ctx context.Context, decision Decision) error {
@@ -31,6 +32,13 @@ func (a MachineAuthorizer) CheckBandwidth(ctx context.Context, decision Decision
 		return ErrHostUnavailable
 	}
 	return a.Service.CheckBrowserTerminalBandwidth(ctx, decision.MachineID, decision.EdgeNodeID)
+}
+
+func (a MachineAuthorizer) CheckBrowserTerminalLimit(ctx context.Context, decision Decision) error {
+	if a.Service == nil {
+		return ErrHostUnavailable
+	}
+	return a.Service.CheckBrowserTerminalLimit(ctx, decision.MachineID, decision.TerminalSessionID)
 }
 
 func (a MachineAuthorizer) ResolveGuestRole(ctx context.Context, guestID, terminalSessionID string) (Decision, error) {

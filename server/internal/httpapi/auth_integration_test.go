@@ -232,7 +232,7 @@ func newAuthIntegrationRouter(t *testing.T) (*db.DB, http.Handler) {
 	machineService := auth.NewDeviceService(store, auditWriter, config.Default().CLIAuth, []string{"test-machine-hash-key"})
 	machineService.ConfigureAuthorizationEncryptionKey("test-enrollment-key")
 	billingService := billing.NewWorkspaceService(store, nil, "test-billing-key")
-	if err := billingService.InitializeAllowancePolicy(context.Background(), nil, nil, nil); err != nil {
+	if err := billingService.InitializeAllowancePolicy(context.Background(), nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	userMachineService := usermachines.New(store, auditWriter, usermachines.Policy{PairingLifetime: 10 * time.Minute}, billingService)

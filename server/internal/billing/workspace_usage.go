@@ -11,20 +11,6 @@ import (
 )
 
 var ErrBillingPolicyUnconfigured = errors.New("workspace accounting period is ambiguous")
-var ErrWorkspaceQuota = errors.New("workspace quota is exhausted")
-
-func (s *WorkspaceService) PersonalMachineQuota(ctx context.Context) (*int32, error) {
-	var out *int32
-	err := s.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		policy, err := operatorPolicyTx(ctx, tx)
-		if err != nil {
-			return err
-		}
-		out = policy.PersonalMachineLimit
-		return nil
-	})
-	return out, err
-}
 
 func (s *WorkspaceService) usageOverviewTx(ctx context.Context, tx *db.Tx, w *Workspace) error {
 	at := time.Now().UTC()
@@ -53,11 +39,11 @@ WHERE p.workspace_id=$1 AND p.period_start<=$2 AND p.period_end>$2`, w.ID, at).S
 
 // InitializeAllowancePolicy seeds first-boot configuration without replacing
 // later operator changes. Nil means unlimited; zero is an explicit zero limit.
-func (s *WorkspaceService) InitializeAllowancePolicy(ctx context.Context, personal, team *int64, machines *int32) error {
-	if s.store == nil || (personal != nil && *personal < 0) || (team != nil && *team < 0) || (machines != nil && *machines < 0) {
+func (s *WorkspaceService) InitializeAllowancePolicy(ctx context.Context, personal, team *int64) error {
+	if s.store == nil || (personal != nil && *personal < 0) || (team != nil && *team < 0) {
 		return ErrBillingPolicyUnconfigured
 	}
-	_, err := s.store.SQL().ExecContext(ctx, `INSERT INTO paperboat.billing_operator_policy(singleton,personal_allowance_bytes,team_allowance_bytes,personal_machine_limit) VALUES(true,$1,$2,$3) ON CONFLICT(singleton) DO NOTHING`, personal, team, machines)
+	_, err := s.store.SQL().ExecContext(ctx, `INSERT INTO paperboat.billing_operator_policy(singleton,personal_allowance_bytes,team_allowance_bytes) VALUES(true,$1,$2) ON CONFLICT(singleton) DO NOTHING`, personal, team)
 	return err
 }
 
@@ -159,7 +145,7 @@ func subscriptionUsageMonth(start, at time.Time) (time.Time, time.Time) {
 
 func operatorPolicyTx(ctx context.Context, tx *db.Tx) (OperatorPolicy, error) {
 	var out OperatorPolicy
-	err := scanPolicy(tx.QueryRow(ctx, `SELECT personal_allowance_bytes,team_allowance_bytes,personal_machine_limit,revision FROM billing_operator_policy WHERE singleton`), &out)
+	err := scanPolicy(tx.QueryRow(ctx, `SELECT personal_allowance_bytes,team_allowance_bytes,revision FROM billing_operator_policy WHERE singleton`), &out)
 	if err == pgx.ErrNoRows {
 		return out, ErrBillingPolicyUnconfigured
 	}

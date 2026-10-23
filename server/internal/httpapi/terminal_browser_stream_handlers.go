@@ -35,7 +35,7 @@ func terminalBrowserTicket(gateway *browserterminal.Gateway, signer browserMachi
 	}
 }
 func writeTerminalBrowserTicket(w http.ResponseWriter, r *http.Request, signer browserMachineSignerReader, ticket browserterminal.Ticket, streamURL string, decision browserterminal.Decision, err error) {
-	if writeBrowserTerminalQuotaExhausted(w, r, err) {
+	if writePlanLimitReached(w, r, err) || writeBrowserTerminalQuotaExhausted(w, r, err) {
 		return
 	}
 	switch {

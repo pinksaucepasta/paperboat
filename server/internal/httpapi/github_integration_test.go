@@ -276,7 +276,7 @@ func newGitHubIntegrationRouter(t *testing.T, tokenScopes []string) (*db.DB, htt
 	// The same secure browser-auth setup as the auth tests: login needs an allowed origin.
 	authService := auth.NewService(store, auditWriter, testauth.FakeWorkOSVerifier{}, []string{"test-session-key"}, true, "https://login.example.test")
 	billingService := billing.NewWorkspaceService(store, nil, "test-billing-key")
-	if err := billingService.InitializeAllowancePolicy(context.Background(), nil, nil, nil); err != nil {
+	if err := billingService.InitializeAllowancePolicy(context.Background(), nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	cfg := config.Default()

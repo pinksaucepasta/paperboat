@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"github.com/pinksaucepasta/paperboat-server/internal/planlimits"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -115,5 +116,18 @@ func (s *Service) CheckBrowserTerminalBandwidth(ctx context.Context, machineID, 
 			return &BandwidthQuotaError{BillingURL: s.runtimeBillingURL}
 		}
 		return nil
+	})
+}
+
+// CheckBrowserTerminalLimit refuses opening one more console browser terminal past the plan's
+// open browser terminals limit of the machine's workspace (planlimits).
+func (s *Service) CheckBrowserTerminalLimit(ctx context.Context, machineID, terminalSessionID string) error {
+	return s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		var scope planlimits.Scope
+		err := tx.QueryRow(ctx, `SELECT user_id,coalesce(owner_team_id,'') FROM paperboat.user_machines WHERE id=$1 AND deleted_at IS NULL`, machineID).Scan(&scope.Account, &scope.Team)
+		if err != nil {
+			return err
+		}
+		return planlimits.CheckBrowserTerminalTx(ctx, tx, scope, terminalSessionID)
 	})
 }

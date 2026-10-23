@@ -51,6 +51,7 @@ import (
 	"github.com/pinksaucepasta/paperboat-server/internal/operatorreporting"
 	"github.com/pinksaucepasta/paperboat-server/internal/peeridentity"
 	"github.com/pinksaucepasta/paperboat-server/internal/peersessions"
+	"github.com/pinksaucepasta/paperboat-server/internal/planlimits"
 	"github.com/pinksaucepasta/paperboat-server/internal/previewattachment"
 	"github.com/pinksaucepasta/paperboat-server/internal/previewdispatch"
 	"github.com/pinksaucepasta/paperboat-server/internal/previewdomain"
@@ -232,7 +233,7 @@ func New(opts Options) (*App, error) {
 		return nil, err
 	}
 	policyContext, cancelPolicy := context.WithTimeout(context.Background(), opts.Config.HTTP.RequestTimeout)
-	policyErr := workspaceBilling.InitializeAllowancePolicy(policyContext, opts.Config.Billing.PersonalAllowanceBytes, opts.Config.Billing.TeamAllowanceBytes, opts.Config.Billing.PersonalMachineLimit)
+	policyErr := workspaceBilling.InitializeAllowancePolicy(policyContext, opts.Config.Billing.PersonalAllowanceBytes, opts.Config.Billing.TeamAllowanceBytes)
 	cancelPolicy()
 	if policyErr != nil {
 		_ = store.Close()
@@ -768,6 +769,7 @@ func New(opts Options) (*App, error) {
 	teamService.ConfigurePolicy(opts.Config.WorkspacePolicy)
 	workspaceBilling.ConfigureNotificationMail(opts.Config.Mail, opts.Config.Secrets.ResendAPIKey != "")
 	workspaceBilling.ConfigureTeamTrial(opts.Config.Billing.TeamTrialDays)
+	planlimits.Configure(opts.Config.Billing.Limits, consoleBillingURL(opts.Config.Mail.ConsoleOrigin))
 	userMachineService.ConfigureRuntimeQuota(workspaceBilling, consoleBillingURL(opts.Config.Mail.ConsoleOrigin))
 	mailService := &transactionalmail.Service{DB: store, Endpoint: opts.Config.Mail.Endpoint, Key: opts.Config.Secrets.ResendAPIKey}
 

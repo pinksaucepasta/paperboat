@@ -69,7 +69,7 @@ func TestPublicPreviewIngressPostgres(t *testing.T) {
 	// F13-03: a preview withheld only for bandwidth quota is named, so the edge can refuse it with
 	// the typed reason instead of a bare 502; restoring allowance reports none.
 	quota := billing.NewWorkspaceService(f.database, nil, "")
-	if err := quota.InitializeAllowancePolicy(ctx, nil, nil, nil); err != nil {
+	if err := quota.InitializeAllowancePolicy(ctx, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	var originalPersonal, originalTeam sql.NullInt64

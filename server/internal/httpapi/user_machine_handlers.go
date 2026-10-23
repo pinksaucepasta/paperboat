@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/pinksaucepasta/paperboat-server/internal/access"
-	"github.com/pinksaucepasta/paperboat-server/internal/billing"
 	"github.com/pinksaucepasta/paperboat-server/internal/teaminbox"
 	"github.com/pinksaucepasta/paperboat-server/internal/usermachines"
 )
@@ -45,8 +44,7 @@ func userMachinePairings(service *usermachines.Service) http.HandlerFunc {
 				return
 			}
 			switch {
-			case errors.Is(err, billing.ErrWorkspaceQuota):
-				writeError(w, r, http.StatusConflict, "machine_quota_exhausted", "The configured personal machine quota is exhausted.")
+			case writePlanLimitReached(w, r, err):
 			case errors.Is(err, usermachines.ErrBandwidthDenied):
 				writeError(w, r, http.StatusForbidden, "machine_plan_inactive", "The machine plan is inactive or its billing period has ended. Update billing and create a new install command.")
 			case errors.Is(err, usermachines.ErrSeatUnavailable):
@@ -98,8 +96,7 @@ func machineSetup(service *usermachines.Service) http.HandlerFunc {
 			KeepAwake: body.KeepAwake,
 		})
 		switch {
-		case errors.Is(err, billing.ErrWorkspaceQuota):
-			writeError(w, r, http.StatusConflict, "machine_quota_exhausted", "The configured personal machine quota is exhausted. Remove a personal machine or change the configured quota before retrying.")
+		case writePlanLimitReached(w, r, err):
 		case errors.Is(err, usermachines.ErrInvalidSetup):
 			writeError(w, r, http.StatusBadRequest, "invalid_machine_setup", "Machine setup details are invalid or unsupported.")
 		case errors.Is(err, usermachines.ErrMachineIdentityConflict):
@@ -1012,4 +1009,3 @@ func userMachineDelete(service *usermachines.Service) http.HandlerFunc {
 		writeJSON(w, http.StatusOK, SuccessResponse{Data: map[string]bool{"deleted": true}})
 	}
 }
-

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/pinksaucepasta/paperboat-server/internal/endpoints"
+	"github.com/pinksaucepasta/paperboat-server/internal/planlimits"
 	"net"
 	"net/url"
 	"path"
@@ -378,6 +379,11 @@ func (s *Store) CreatePreviewLeaseV1(ctx context.Context, input CreatePreviewLea
 		}
 		if err != nil {
 			return translate(err)
+		}
+		// A new preview past the plan's active previews-and-tunnels limit is refused; a replay
+		// of an existing one (above) never is.
+		if err := planlimits.CheckTx(ctx, tx, planlimits.Scope{Account: input.AccountID, Team: ws.TeamID}, planlimits.Publications); err != nil {
+			return err
 		}
 
 		_, err = q.CreatePreviewLease(ctx, dbsqlc.CreatePreviewLeaseParams{

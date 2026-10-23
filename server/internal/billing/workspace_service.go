@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat-server/internal/planlimits"
 	"net/http"
 	"time"
 
@@ -82,6 +83,9 @@ func (s *WorkspaceService) Overview(ctx context.Context, account, team string) (
 		}
 		out.TopupBytesRemaining, err = WorkspaceTopupRemainingTx(ctx, tx, out.ID, time.Now().UTC())
 		if err != nil {
+			return err
+		}
+		if out.Limits, err = planlimits.UsageTx(ctx, tx, planlimits.Scope{Account: account, Team: team}); err != nil {
 			return err
 		}
 		if team == "" {

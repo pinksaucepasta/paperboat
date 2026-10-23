@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat-server/internal/billing"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
 )
 
 type operatorPriceReader struct{ price billing.StripePrice }
@@ -44,7 +43,7 @@ func TestOperatorBillingCatalogAndPolicyPostgres(t *testing.T) {
 	})
 	stripeCheckout := &workspaceStripeFake{}
 	workspace := billing.NewWorkspaceService(store, stripeCheckout, "operator-catalog-test-key")
-	if err := workspace.InitializeAllowancePolicy(ctx, nil, nil, nil); err != nil {
+	if err := workspace.InitializeAllowancePolicy(ctx, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	prices := operatorPriceReader{billing.StripePrice{ID: priceID, ProductID: productID, Currency: "usd", Interval: "month", UnitAmount: 2500, Active: true, Recurring: true, Licensed: true}}
@@ -54,7 +53,7 @@ func TestOperatorBillingCatalogAndPolicyPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_, _ = store.SQL().ExecContext(ctx, `UPDATE paperboat.billing_operator_policy SET personal_allowance_bytes=$1,team_allowance_bytes=$2,personal_machine_limit=$3,revision=$4,updated_at=now() WHERE singleton`, originalPolicy.PersonalAllowanceBytes, originalPolicy.TeamAllowanceBytes, originalPolicy.PersonalMachineLimit, originalPolicy.Revision)
+		_, _ = store.SQL().ExecContext(ctx, `UPDATE paperboat.billing_operator_policy SET personal_allowance_bytes=$1,team_allowance_bytes=$2,revision=$3,updated_at=now() WHERE singleton`, originalPolicy.PersonalAllowanceBytes, originalPolicy.TeamAllowanceBytes, originalPolicy.Revision)
 	})
 	allowance := int64(4096)
 	input := billing.ProductInput{DisplayName: "Operator Plan", ProviderPriceID: priceID, CatalogType: "personal_subscription", Active: true, AllowanceBytes: &allowance}
@@ -154,23 +153,14 @@ func TestOperatorBillingCatalogAndPolicyPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	machineLimit := int32(0)
 	personal := int64(0)
 	policy.PersonalAllowanceBytes = &personal
-	policy.PersonalMachineLimit = &machineLimit
 	updated, err := service.PutPolicy(ctx, admin, "policy-"+x, "set free limits", policy)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err = service.PutPolicy(ctx, admin, "policy-stale-"+x, "stale", policy); !errors.Is(err, billing.ErrOperatorBillingConflict) {
 		t.Fatalf("policy CAS=%v", err)
-	}
-	if err = store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error { return workspace.ReserveUserMachineSeat(ctx, tx, ordinary) }); !errors.Is(err, billing.ErrWorkspaceQuota) {
-		t.Fatalf("machine quota=%v", err)
-	}
-	quota, err := workspace.PersonalMachineQuota(ctx)
-	if err != nil || quota == nil || *quota != 0 {
-		t.Fatalf("quota=%v err=%v", quota, err)
 	}
 	if updated.Revision != policy.Revision+1 {
 		t.Fatalf("revision=%d", updated.Revision)

@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"github.com/jackc/pgx/v5"
+	"github.com/pinksaucepasta/paperboat-server/internal/planlimits"
 	"strings"
 	"time"
 	"unicode"
@@ -18,7 +19,6 @@ import (
 	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
 )
 
-const TerminalGuestSessionLimit = 64
 const TerminalCodeAttemptsPerMinute = 120
 const TerminalCodeMaximumLifetime = 24 * time.Hour
 
@@ -72,7 +72,7 @@ func (s *Service) TerminalCodeAccess(ctx context.Context, accountID, sessionID s
 	}
 	if out.Enabled {
 		rows, err := s.db.Pool().Query(ctx, `SELECT g.id,g.display_name,g.expires_at FROM terminal_guest_sessions g JOIN terminal_code_access c ON c.terminal_session_id=g.terminal_session_id
-    WHERE g.terminal_session_id=$1 AND g.expires_at>now() AND c.enabled AND c.expires_at>now() AND c.generation=g.code_generation ORDER BY g.created_at LIMIT $2`, sessionID, TerminalGuestSessionLimit)
+    WHERE g.terminal_session_id=$1 AND g.expires_at>now() AND c.enabled AND c.expires_at>now() AND c.generation=g.code_generation ORDER BY g.created_at LIMIT $2`, sessionID, planlimits.ViewersPerSharedTerminal())
 		if err != nil {
 			return TerminalCodeAccess{}, err
 		}
@@ -209,10 +209,11 @@ func (s *Service) JoinTerminalWithCode(ctx context.Context, sessionID, code, dis
 			return ErrTerminalCodeInvalid
 		}
 		var count int
-		if err = tx.QueryRow(ctx, `SELECT count(*) FROM terminal_guest_sessions WHERE terminal_session_id=$1`, sessionID).Scan(&count); err != nil {
+		// Only live viewers count: an expired guest frees its place.
+		if err = tx.QueryRow(ctx, `SELECT count(*) FROM terminal_guest_sessions WHERE terminal_session_id=$1 AND expires_at>now()`, sessionID).Scan(&count); err != nil {
 			return err
 		}
-		if count >= TerminalGuestSessionLimit {
+		if count >= planlimits.ViewersPerSharedTerminal() {
 			return ErrTerminalGuestCapacity
 		}
 		var secret [32]byte

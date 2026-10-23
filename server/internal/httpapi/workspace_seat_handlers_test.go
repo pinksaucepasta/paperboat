@@ -66,7 +66,7 @@ func TestPurchasedSeatHTTPContractPostgres(t *testing.T) {
 	provider := &seatHTTPProvider{}
 	service := billing.NewWorkspaceService(store, provider, "seat-http-key")
 	// Match application startup before the overview creates its allowance window.
-	if err = service.InitializeAllowancePolicy(ctx, nil, nil, nil); err != nil {
+	if err = service.InitializeAllowancePolicy(ctx, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	mux := http.NewServeMux()

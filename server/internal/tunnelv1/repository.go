@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat-server/internal/planlimits"
 	"io"
 	"net/url"
 	"strings"
@@ -337,6 +338,10 @@ func (r *SQLRepository) Create(ctx context.Context, input CreateRecord) (Mutatio
 			}
 			result = MutationRecord{Tunnel: tunnel, Operation: operation, Replayed: true}
 			return nil
+		}
+		// A new tunnel counts with previews against the plan's active publications limit.
+		if err := planlimits.CheckTx(ctx, tx, planlimits.Scope{Account: input.AccountID, Team: ws.TeamID}, planlimits.Publications); err != nil {
+			return err
 		}
 
 		now := r.now().UTC()

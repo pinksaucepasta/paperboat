@@ -446,6 +446,9 @@ func writeTunnelError(w http.ResponseWriter, r *http.Request, err error) {
 		writeWorkspaceError(w, r, err)
 		return
 	}
+	if writePreviewTunnelLimitReached(w, r, err) {
+		return
+	}
 	switch {
 	case expectedHTTPErrorOnly(err, previewtunnelstore.ErrTeamSubscriptionRequired):
 		writePreviewTunnelError(w, r, http.StatusForbidden, "team_subscription_required", "An active team subscription is required to publish in this workspace. Ask a team owner or admin to manage team billing, or select Personal and retry. No resource was created.", "unchanged", false, "manage_team_billing", err)

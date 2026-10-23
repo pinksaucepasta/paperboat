@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/pinksaucepasta/paperboat-server/internal/planlimits"
 	"slices"
 	"time"
 
@@ -214,6 +215,10 @@ func (s *Service) Machine(ctx context.Context, account, team string, r MachineRe
 			}
 			if published {
 				return ErrMachinePublication
+			}
+			// A machine moving into the team counts against the team's machine ceiling.
+			if err = planlimits.CheckTx(ctx, tx, planlimits.Scope{Team: team}, planlimits.Machines); err != nil {
+				return err
 			}
 			if err = bindMachineTx(ctx, tx, team, r.MachineID, owner); err != nil {
 				return err

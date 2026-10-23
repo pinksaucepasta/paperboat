@@ -140,9 +140,35 @@ type Billing struct {
 	TeamPortalConfigurationID     string `json:"team_portal_configuration_id,omitempty"`
 	PersonalAllowanceBytes        *int64 `json:"personal_allowance_bytes,omitempty"`
 	TeamAllowanceBytes            *int64 `json:"team_allowance_bytes,omitempty"`
-	PersonalMachineLimit          *int32 `json:"personal_machine_limit,omitempty"`
 	// TeamTrialDays is the Team plan's free trial for an account's first team; 0 disables it.
 	TeamTrialDays int `json:"team_trial_days"`
+	// Limits are the per-plan count limits (user decision 2026-10-23), the one place they live.
+	Limits PlanLimits `json:"limits"`
+}
+
+// PlanLimit is one count limit per plan. Free and Pro apply to a personal workspace. Teams are
+// advertised as unlimited; TeamCeiling is a hidden per-team safety ceiling, never shown on pricing.
+type PlanLimit struct {
+	Free        int `json:"free"`
+	Pro         int `json:"pro"`
+	TeamCeiling int `json:"team_ceiling"`
+}
+
+// PlanLimits counts only live things (revoked, deleted, closed or expired ones never count);
+// existing ones keep working when a workspace is over, only a new one is refused.
+type PlanLimits struct {
+	Machines PlanLimit `json:"machines"`
+	// Publications are previews and tunnels together, concurrently active.
+	Publications PlanLimit `json:"publications"`
+	// BrowserTerminals are console terminals open through the edge; native terminals are unlimited.
+	BrowserTerminals PlanLimit `json:"browser_terminals"`
+	// ViewersPerSharedTerminal caps one shared terminal's viewers (abuse protection; the shared
+	// terminal itself counts as one session, its viewers do not).
+	ViewersPerSharedTerminal int `json:"viewers_per_shared_terminal"`
+}
+
+func (l PlanLimit) valid() bool {
+	return l.Free > 0 && l.Pro >= l.Free && l.TeamCeiling >= l.Pro
 }
 
 // ManagedSSH bounds how long an idle CLI session keeps counting toward SSH client-key capacity
@@ -408,7 +434,7 @@ func Default() Config {
 			DSN:    "postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable",
 		},
 		APITokens:         APITokens{MaxLifetimeDays: 365, DefaultLifetimeDays: 90, MaxPerMember: 100},
-		Billing:           Billing{TopupMaxQuantity: 100, TeamTrialDays: 14, PersonalAllowanceBytes: new(int64(5_000_000_000))},
+		Billing:           Billing{TopupMaxQuantity: 100, TeamTrialDays: 14, PersonalAllowanceBytes: new(int64(5_000_000_000)), Limits: PlanLimits{Machines: PlanLimit{Free: 100, Pro: 1000, TeamCeiling: 10000}, Publications: PlanLimit{Free: 100, Pro: 1000, TeamCeiling: 10000}, BrowserTerminals: PlanLimit{Free: 10, Pro: 100, TeamCeiling: 1000}, ViewersPerSharedTerminal: 50}},
 		Business:          defaultBusiness(),
 		WorkspacePolicy:   defaultWorkspacePolicy(),
 		RuntimeBaseDomain: "localhost",
@@ -566,8 +592,11 @@ func (c Config) Validate() error {
 	if c.Billing.TopupMaxQuantity < 1 {
 		return errors.New("billing.topup_max_quantity must be positive")
 	}
-	if (c.Billing.PersonalAllowanceBytes != nil && *c.Billing.PersonalAllowanceBytes < 0) || (c.Billing.TeamAllowanceBytes != nil && *c.Billing.TeamAllowanceBytes < 0) || (c.Billing.PersonalMachineLimit != nil && *c.Billing.PersonalMachineLimit < 0) {
-		errs = append(errs, fmt.Errorf("configured billing allowances and quotas must be nonnegative"))
+	if (c.Billing.PersonalAllowanceBytes != nil && *c.Billing.PersonalAllowanceBytes < 0) || (c.Billing.TeamAllowanceBytes != nil && *c.Billing.TeamAllowanceBytes < 0) {
+		errs = append(errs, fmt.Errorf("configured billing allowances must be nonnegative"))
+	}
+	if l := c.Billing.Limits; !l.Machines.valid() || !l.Publications.valid() || !l.BrowserTerminals.valid() || l.ViewersPerSharedTerminal < 1 {
+		errs = append(errs, fmt.Errorf("billing.limits: each plan limit needs free > 0, pro >= free and team_ceiling >= pro, and viewers_per_shared_terminal > 0"))
 	}
 	if c.UserMachines.ExpiredAccessSessionRetention < time.Hour {
 		errs = append(errs, fmt.Errorf("user_machines expired access session retention must be at least one hour"))

@@ -44,7 +44,7 @@ func TestSelfhostAdmissionIgnoresHostedBandwidthExhaustion(t *testing.T) {
 	exec(`INSERT INTO selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete) VALUES($1,$2,$3,$5,'ciphertext','quota fixture','tunnel','account',$4,$1,true)`, install, node, make([]byte, 32), user, runtimeHash[:])
 	policy := billing.NewWorkspaceService(store, nil, "")
 	zero := int64(0)
-	if err := policy.InitializeAllowancePolicy(ctx, &zero, &zero, nil); err != nil {
+	if err := policy.InitializeAllowancePolicy(ctx, &zero, &zero); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC().Truncate(time.Microsecond)

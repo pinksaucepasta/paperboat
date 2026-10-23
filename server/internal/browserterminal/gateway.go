@@ -3,6 +3,7 @@ package browserterminal
 import (
 	"context"
 	"github.com/google/uuid"
+	"github.com/pinksaucepasta/paperboat-server/internal/planlimits"
 
 	"errors"
 	"github.com/pinksaucepasta/paperboat-server/internal/mint"
@@ -21,6 +22,11 @@ var ErrHostUnavailable = errors.New("browser terminal host is unavailable")
 // used up, so the browser learns the plan limit from the ticket API before it connects.
 type BandwidthChecker interface {
 	CheckBandwidth(context.Context, Decision) error
+}
+
+// LimitChecker refuses a newly opened browser terminal past the plan's open terminals limit.
+type LimitChecker interface {
+	CheckBrowserTerminalLimit(context.Context, Decision) error
 }
 
 var ErrBrowserKeyInvalid = errors.New("browser terminal key digest is invalid")
@@ -104,6 +110,14 @@ func (g *Gateway) issue(ctx context.Context, in Ticket) (Ticket, string, Decisio
 	if checker, ok := g.Authorizer.(BandwidthChecker); ok && in.Role != RoleInspector {
 		if err := checker.CheckBandwidth(ctx, decision); err != nil {
 			if errors.Is(err, usermachines.ErrBandwidthQuotaExhausted) {
+				return Ticket{}, "", Decision{}, err
+			}
+			return Ticket{}, "", Decision{}, unavailableCause(err)
+		}
+	}
+	if checker, ok := g.Authorizer.(LimitChecker); ok && in.Role != RoleInspector {
+		if err := checker.CheckBrowserTerminalLimit(ctx, decision); err != nil {
+			if errors.Is(err, planlimits.ErrLimitReached) {
 				return Ticket{}, "", Decision{}, err
 			}
 			return Ticket{}, "", Decision{}, unavailableCause(err)

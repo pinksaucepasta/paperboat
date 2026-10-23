@@ -17,6 +17,7 @@ import (
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
 	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat-server/internal/mint"
+	"github.com/pinksaucepasta/paperboat-server/internal/planlimits"
 	"github.com/pinksaucepasta/paperboat-server/internal/releases"
 	"github.com/pinksaucepasta/paperboat-server/internal/secrets"
 	"github.com/pinksaucepasta/paperboat-server/internal/teams"
@@ -462,22 +463,21 @@ type Overview struct {
 }
 
 func (s *Service) Overview(ctx context.Context, userID string) (Overview, error) {
-	var count int32
-	err := s.db.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.user_machines WHERE user_id=$1 AND owner_team_id IS NULL AND seat_state='occupied' AND deleted_at IS NULL`, userID).Scan(&count)
-	out := Overview{MachineCount: count, BootstrapCommand: s.bootstrapCommand}
-	if source, ok := s.seats.(interface {
-		PersonalMachineQuota(context.Context) (*int32, error)
-	}); ok {
-		var err error
-		out.MachineLimit, err = source.PersonalMachineQuota(ctx)
+	out := Overview{BootstrapCommand: s.bootstrapCommand}
+	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		usage, err := planlimits.UsageTx(ctx, tx, planlimits.Scope{Account: userID})
 		if err != nil {
-			return Overview{}, err
+			return err
 		}
-		if out.MachineLimit != nil {
-			available := max(int32(0), *out.MachineLimit-count)
-			out.AvailableMachines = &available
+		machines := usage[planlimits.Machines]
+		out.MachineCount = int32(machines.Used)
+		if machines.Limit != nil {
+			limit := int32(*machines.Limit)
+			available := max(int32(0), limit-out.MachineCount)
+			out.MachineLimit, out.AvailableMachines = &limit, &available
 		}
-	}
+		return nil
+	})
 	return out, err
 }
 

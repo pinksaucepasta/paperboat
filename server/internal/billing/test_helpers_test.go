@@ -27,7 +27,7 @@ func testStore(t *testing.T) *db.DB {
 	if err := db.Migrate(context.Background(), store); err != nil {
 		t.Fatal(err)
 	}
-	if err := billing.NewWorkspaceService(store, nil, "").InitializeAllowancePolicy(context.Background(), nil, nil, nil); err != nil {
+	if err := billing.NewWorkspaceService(store, nil, "").InitializeAllowancePolicy(context.Background(), nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	return store

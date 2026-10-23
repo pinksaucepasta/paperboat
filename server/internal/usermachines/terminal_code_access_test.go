@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat-server/internal/planlimits"
 	"strings"
 	"sync"
 	"testing"
@@ -210,7 +211,7 @@ func TestTerminalCodeAccessLifecycleAndBoundsPostgres(t *testing.T) {
 	}
 	insert(`INSERT INTO terminal_guest_sessions(id,token_hash,terminal_session_id,code_generation,display_name,expires_at)
  SELECT $1||'-capacity-'||i,decode(md5($1||'-capacity-'||i)||md5($1||'-hash-'||i),'hex'),$1,$2,'Bounded guest',$3
- FROM generate_series(1,$4) i`, session, state.Generation, state.ExpiresAt, TerminalGuestSessionLimit-1)
+ FROM generate_series(1,$4) i`, session, state.Generation, state.ExpiresAt, planlimits.ViewersPerSharedTerminal()-1)
 
 	var group sync.WaitGroup
 	results := make(chan error, 8)

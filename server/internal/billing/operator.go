@@ -118,7 +118,6 @@ type ProductPage struct {
 type OperatorPolicy struct {
 	PersonalAllowanceBytes *int64 `json:"personal_allowance_bytes"`
 	TeamAllowanceBytes     *int64 `json:"team_allowance_bytes"`
-	PersonalMachineLimit   *int32 `json:"personal_machine_limit"`
 	Revision               int64  `json:"revision"`
 }
 
@@ -272,7 +271,7 @@ func (s *OperatorService) Policy(ctx context.Context, actorID string) (OperatorP
 		if err := s.audit.WriteTx(ctx, tx, audit.Event{ActorUserID: actorID, ActorType: audit.ActorUser, EventType: "billing.operator.policy_read", ResourceType: "billing_configuration", ResourceID: "global", Metadata: map[string]any{}}); err != nil {
 			return err
 		}
-		return scanPolicy(tx.QueryRow(ctx, `SELECT personal_allowance_bytes,team_allowance_bytes,personal_machine_limit,revision FROM billing_operator_policy WHERE singleton`), &out)
+		return scanPolicy(tx.QueryRow(ctx, `SELECT personal_allowance_bytes,team_allowance_bytes,revision FROM billing_operator_policy WHERE singleton`), &out)
 	})
 	return out, err
 }
@@ -296,7 +295,7 @@ func (s *OperatorService) PutPolicy(ctx context.Context, actorID, key, reason st
 		if found, err := operationReplayTx(ctx, tx, key, hash, &out); found || err != nil {
 			return err
 		}
-		err := tx.QueryRow(ctx, `UPDATE billing_operator_policy SET personal_allowance_bytes=$1,team_allowance_bytes=$2,personal_machine_limit=$3,revision=revision+1,updated_at=now() WHERE singleton AND revision=$4 RETURNING personal_allowance_bytes,team_allowance_bytes,personal_machine_limit,revision`, input.PersonalAllowanceBytes, input.TeamAllowanceBytes, input.PersonalMachineLimit, input.Revision).Scan(nullableInt64(&out.PersonalAllowanceBytes), nullableInt64(&out.TeamAllowanceBytes), nullableInt32(&out.PersonalMachineLimit), &out.Revision)
+		err := tx.QueryRow(ctx, `UPDATE billing_operator_policy SET personal_allowance_bytes=$1,team_allowance_bytes=$2,revision=revision+1,updated_at=now() WHERE singleton AND revision=$3 RETURNING personal_allowance_bytes,team_allowance_bytes,revision`, input.PersonalAllowanceBytes, input.TeamAllowanceBytes, input.Revision).Scan(nullableInt64(&out.PersonalAllowanceBytes), nullableInt64(&out.TeamAllowanceBytes), &out.Revision)
 		if err == pgx.ErrNoRows {
 			return ErrOperatorBillingConflict
 		}
@@ -351,7 +350,7 @@ func validStripePriceStructure(p StripePrice) bool {
 	return false
 }
 func invalidPolicy(p OperatorPolicy) bool {
-	return (p.PersonalAllowanceBytes != nil && *p.PersonalAllowanceBytes < 0) || (p.TeamAllowanceBytes != nil && *p.TeamAllowanceBytes < 0) || (p.PersonalMachineLimit != nil && *p.PersonalMachineLimit < 0)
+	return (p.PersonalAllowanceBytes != nil && *p.PersonalAllowanceBytes < 0) || (p.TeamAllowanceBytes != nil && *p.TeamAllowanceBytes < 0)
 }
 func operatorHash(v any) (string, error) {
 	b, e := json.Marshal(v)
@@ -411,7 +410,7 @@ func parseProductMetadata(raw string, p *Product) error {
 type rowScanner interface{ Scan(...any) error }
 
 func scanPolicy(row rowScanner, p *OperatorPolicy) error {
-	return row.Scan(nullableInt64(&p.PersonalAllowanceBytes), nullableInt64(&p.TeamAllowanceBytes), nullableInt32(&p.PersonalMachineLimit), &p.Revision)
+	return row.Scan(nullableInt64(&p.PersonalAllowanceBytes), nullableInt64(&p.TeamAllowanceBytes), &p.Revision)
 }
 func nullableInt64(dst **int64) sql.Scanner { return &nullableInt64Dest{dst: dst} }
 func nullableInt32(dst **int32) sql.Scanner { return &nullableInt32Dest{dst: dst} }

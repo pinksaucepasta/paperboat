@@ -100,7 +100,7 @@ func TestTask368ServeMachineServices(t *testing.T) {
 	cliAuth := auth.NewDeviceService(database, writer, cfg.CLIAuth, []string{secret})
 	cliAuth.ConfigureAuthorizationEncryptionKey("test-device-recovery-key")
 	billingService := billing.NewWorkspaceService(database, nil, secret)
-	if err := billingService.InitializeAllowancePolicy(context.Background(), nil, nil, nil); err != nil {
+	if err := billingService.InitializeAllowancePolicy(context.Background(), nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	machines := usermachines.New(database, writer, usermachines.Policy{PairingLifetime: cfg.UserMachines.PairingLifetime, OfflineAfter: cfg.UserMachines.OfflineAfter, AllowedPlatforms: cfg.UserMachines.AllowedPlatforms}, billingService)

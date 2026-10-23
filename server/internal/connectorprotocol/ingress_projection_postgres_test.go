@@ -112,7 +112,7 @@ func testIngressProjectionPostgres(t *testing.T, onlyLKG bool) {
 	}
 	// Configured zero is enforced before the first observed usage report.
 	quota := billing.NewWorkspaceService(f.database, nil, "")
-	if err := quota.InitializeAllowancePolicy(ctx, nil, nil, nil); err != nil {
+	if err := quota.InitializeAllowancePolicy(ctx, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	var originalPersonal, originalTeam sql.NullInt64

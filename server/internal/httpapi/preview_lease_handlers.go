@@ -487,6 +487,9 @@ func writePreviewLeaseError(w http.ResponseWriter, r *http.Request, err error) {
 		writePreviewDispatchError(w, r, err, dispatchErr)
 		return
 	}
+	if writePreviewTunnelLimitReached(w, r, err) {
+		return
+	}
 	status := http.StatusServiceUnavailable
 	code := "control_unavailable"
 	message := "The preview service could not complete the request. Retry this read, or reuse the same Idempotency-Key for a mutation."
