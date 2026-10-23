@@ -169,6 +169,17 @@ func (c *nativePrivateTCPConnection) Close() error {
 	return c.closeErr
 }
 
+// serviceAnnouncementWait and serviceAnnouncementAttempts bound waiting for a just-started service:
+// the machine announces a new listener within about 2 s (one tick of its fast scan).
+var serviceAnnouncementWait = 2 * time.Second
+
+const serviceAnnouncementAttempts = 8
+
+func serviceNotAnnounced(err error) bool {
+	var refused *api.APIError
+	return errors.As(err, &refused) && refused.Code == "service_not_announced"
+}
+
 // DialMachine obtains a fresh exact-port grant before consulting network reachability.
 func (a *NativePrivateTCPAccess) DialMachine(ctx context.Context, machineID string, port int) (net.Conn, error) {
 	if a == nil || ctx == nil || machineID == "" || port < 1 || port > 65535 {
@@ -176,7 +187,21 @@ func (a *NativePrivateTCPAccess) DialMachine(ctx context.Context, machineID stri
 	}
 	operation := nativePrivateOperationID()
 	route := "tcp:" + strconv.Itoa(port)
-	grant, err := a.issue(ctx, api.NativePrivateGrantRequest{OperationID: operation, ResourceKind: "machine_service", ResourceID: machineID, RouteID: route, Protocol: "tcp"})
+	request := api.NativePrivateGrantRequest{OperationID: operation, ResourceKind: "machine_service", ResourceID: machineID, RouteID: route, Protocol: "tcp"}
+	grant, err := a.issue(ctx, request)
+	// A service that just started is allowed but not yet announced by its machine (Lane H: the first
+	// seconds after an origin starts). The server says so with 409 service_not_announced; wait for
+	// the announcement instead of failing the connection.
+	for attempt := 1; serviceNotAnnounced(err) && attempt < serviceAnnouncementAttempts; attempt++ {
+		timer := time.NewTimer(serviceAnnouncementWait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, nativePrivateTCPFailed(ctx, "grant_issue", errors.Join(err, ctx.Err()))
+		case <-timer.C:
+		}
+		grant, err = a.issue(ctx, request)
+	}
 	if err != nil {
 		return nil, nativePrivateTCPFailed(ctx, "grant_issue", err)
 	}

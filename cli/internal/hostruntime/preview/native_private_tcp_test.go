@@ -192,3 +192,37 @@ func TestNativePrivateMachineCancellationClosesPendingReadiness(t *testing.T) {
 		t.Fatal("session leaked")
 	}
 }
+
+// A just-started service is allowed but not yet announced (409 service_not_announced, Lane B's fix for
+// Lane H's 0-byte access-machine probes): the grant is asked again until it is, and a real denial after
+// it is still final. Waiting is bounded.
+func TestNativePrivateTCPAccessWaitsForAServiceAnnouncement(t *testing.T) {
+	previous := serviceAnnouncementWait
+	serviceAnnouncementWait = time.Millisecond
+	t.Cleanup(func() { serviceAnnouncementWait = previous })
+	for _, always := range []bool{false, true} {
+		calls := 0
+		access, err := NewNativePrivateTCPAccess(NativePrivateTCPAccessConfig{
+			Grants: nativePrivateGrantIssuerFunc(func(context.Context, api.NativePrivateGrantRequest) (api.NativePrivateGrant, error) {
+				calls++
+				if always || calls < 3 {
+					return api.NativePrivateGrant{}, &api.APIError{Status: 409, Code: "service_not_announced"}
+				}
+				return api.NativePrivateGrant{}, &api.APIError{Status: 403, Code: "access_forbidden"}
+			}),
+			DialSession: func(context.Context, string, uint64) (NativePrivateSession, error) {
+				return nil, errors.New("must not dial")
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = access.DialMachine(context.Background(), "machine_1", 5432)
+		if !always && (calls != 3 || !errors.Is(err, ErrPrivateTCPAccessForbidden)) {
+			t.Fatalf("calls=%d err=%v", calls, err)
+		}
+		if always && calls != serviceAnnouncementAttempts {
+			t.Fatalf("unbounded wait: calls=%d", calls)
+		}
+	}
+}
