@@ -241,6 +241,11 @@ func configAssignmentMissingOnly(err error) bool {
 }
 
 func buildConfigSyncProjection(ctx context.Context, backend configSyncSourceBackend, machine configsync.SourceConfig, requested string, current api.ConfigAssignment, names configSyncMachineNames, cacheRoot, credentialRoot, home string) (configSyncProjection, error) {
+	if current.ConsentState == "revoked" {
+		// A revoked assignment (an unassign or a team-default unadopt) names no repository this machine
+		// may read; only the file decides now. Its version still fences the next write.
+		current = api.ConfigAssignment{ID: current.ID, MachineID: current.MachineID, Version: current.Version, ConsentState: current.ConsentState}
+	}
 	repos, err := backend.ListConfigRepositories(ctx)
 	if err != nil {
 		return configSyncProjection{}, friendlyCommandError(err)

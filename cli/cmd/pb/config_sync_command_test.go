@@ -550,3 +550,37 @@ func TestConfigSyncValidateNamesARepositoryThisMachineCannotReach(t *testing.T) 
 		t.Fatalf("refusal = %q, want a message without the other machine's path", message)
 	}
 }
+
+// After a team-default unadopt the machine keeps a revoked assignment naming the team's repository;
+// apply read shared config from it and the server refused read access with 404, so every
+// `pb config sync apply` on that machine failed (Lane H, pbvm3). Only the file decides now.
+func TestConfigSyncSourceIgnoresARevokedAssignmentsRepositories(t *testing.T) {
+	t.Setenv("PATH", "")
+	backend := configSyncSourceBackendFixture(t, map[string]string{"one": ""})
+	team := "team-repository"
+	current := api.ConfigAssignment{ID: "cfgteam", Version: 4, ConsentState: "revoked", PullRepositoryID: &team, Mode: "pull_only"}
+	machine, _ := configsync.ParseSourceConfig([]byte(`["pull"]
+"repository_id" = "one"
+`), configsync.DefaultSourceConfigLimits())
+	projection, err := buildConfigSyncProjection(context.Background(), backend, machine, "", current, configSyncMachineNames{}, shorttemp.Dir(t), "", shorttemp.Dir(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if projection.PullRepositoryID != "one" || projection.PushRepositoryID == team {
+		t.Fatalf("projection uses the revoked repository: %+v", projection)
+	}
+	for _, call := range backend.calls {
+		if call == team {
+			t.Fatal("read access asked for the revoked assignment's repository")
+		}
+	}
+	_, err = buildConfigSyncProjection(context.Background(), backend, configsync.SourceConfig{}, "", current, configSyncMachineNames{}, shorttemp.Dir(t), "", shorttemp.Dir(t))
+	if err == nil || !strings.Contains(err.Error(), "No repository is selected") {
+		t.Fatal("an empty file after a revoked assignment must ask for a repository:", err)
+	}
+	for _, call := range backend.calls {
+		if call == team {
+			t.Fatal("read access asked for the revoked assignment's repository")
+		}
+	}
+}
