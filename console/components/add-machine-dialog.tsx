@@ -7,7 +7,6 @@ import { useEffect, useRef, useState } from "react"
 import { machineOverviewQuery, useApiQuery, useWorkspace, workspacesQuery, type Workspace } from "@/lib/api"
 import {
   cancelEnrollment,
-  describeMachine,
   enrollmentQuery,
   installCommand,
   installUrlFrom,
@@ -114,7 +113,6 @@ function AddMachine({
   // Launch is macOS and Linux only; Windows comes in the first update (PLAN.md 1.1).
   const shell = "posix"
   const [name, setName] = useState("")
-  const [description, setDescription] = useState("")
 
   // The command is the point of this dialog, so a pairing token is requested as soon as it opens.
   // A token that arrives after the dialog or workspace choice is gone is cancelled on arrival.
@@ -157,12 +155,9 @@ function AddMachine({
     [],
   )
 
-  const describe = useMutation({ mutationFn: () => describeMachine(machineId!, description.trim()) })
   useEffect(() => {
-    if (state !== "ready" || !machineId) return
-    void queryClient.invalidateQueries({ queryKey: ["machines"] })
-    if (description.trim() && describe.isIdle) describe.mutate()
-  }, [state, machineId, description, describe, queryClient])
+    if (state === "ready" && machineId) void queryClient.invalidateQueries({ queryKey: ["machines"] })
+  }, [state, machineId, queryClient])
 
   const finalName = name.replace(/-+$/, "")
   const problem = nameProblem(name)
@@ -175,7 +170,6 @@ function AddMachine({
       <div className="flex flex-col items-center gap-3 py-6 text-center">
         <CheckCircleIcon weight="fill" className="size-10 text-success" />
         <p className="font-medium">Machine connected</p>
-        {describe.isError && <p className="text-sm text-destructive">The description could not be saved.</p>}
         <Button size="lg" className="mt-1" render={<Link href={`/machines/${machineId}`} onClick={onDone} />}>
           Open machine
         </Button>
@@ -230,17 +224,6 @@ function AddMachine({
                 <span className="font-mono">studio</span>. Lowercase letters, numbers and dashes.
               </p>
             )}
-          </Field>
-          <Field className="gap-1.5">
-            <OptionalLabel htmlFor="machine-description">Description</OptionalLabel>
-            <Input
-              id="machine-description"
-              placeholder="What this machine is for"
-              maxLength={160}
-              value={description}
-              onChange={(event) => setDescription(event.target.value.replace(/\p{Cc}/gu, ""))}
-              autoComplete="off"
-            />
           </Field>
         </div>
       )}

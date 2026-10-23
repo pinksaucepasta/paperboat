@@ -205,7 +205,7 @@ function MachineRow({
   running: RunningCounts | null | undefined
 }) {
   const owner = machineOwner(machine, me)
-  const subtitle = machine.description || (owner === "shared" ? "Shared with you" : undefined)
+  const subtitle = owner === "shared" ? "Shared with you" : undefined
   // Right-clicking anywhere on the row opens the same menu as its "…" button.
   return (
     <MachineRowMenus

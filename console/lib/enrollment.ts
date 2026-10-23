@@ -95,13 +95,3 @@ export const enrollmentQuery = (id: string) =>
     queryFn: () => api<Enrollment>(`machine-enrollments/${encodeURIComponent(id)}`),
     refetchInterval: (query) => (query.state.data && finishedStates.has(query.state.data.state) ? false : 2000),
   })
-
-/** The installers cannot carry a description, so it is applied once the machine exists. */
-export async function describeMachine(id: string, description: string): Promise<void> {
-  const machine = await api<Machine>(`machines/${encodeURIComponent(id)}`)
-  await api(`machines/${encodeURIComponent(id)}`, {
-    method: "PATCH",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ alias: machine.alias, description }),
-  })
-}

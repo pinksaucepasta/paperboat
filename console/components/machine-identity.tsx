@@ -8,15 +8,16 @@ import { useMachineHostnames } from "@/lib/machine-domains"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useMachineEdit } from "@/components/machine-edit"
+import { TagChips } from "@/components/machine-tags"
 import { RemoveMachineDialog } from "@/components/machine-remove"
 
 /**
- * The machine's name and description. Hovering shows a pencil; editing happens in the title
+ * The machine's name and tags. Hovering shows a pencil; editing happens in the title
  * itself (same type, a faint underline), with Enter to save and Escape to cancel.
  */
 export function MachineTitle({ machine }: { machine: Machine }) {
-  const [editing, setEditing] = useState<"name" | "description" | null>(null)
-  if (editing) return <TitleEditor machine={machine} focus={editing} onDone={() => setEditing(null)} />
+  const [editing, setEditing] = useState(false)
+  if (editing) return <TitleEditor machine={machine} onDone={() => setEditing(false)} />
   return (
     <div className="group/title flex min-w-0 flex-col gap-1">
       <div className="flex min-w-0 items-center gap-1">
@@ -25,28 +26,15 @@ export function MachineTitle({ machine }: { machine: Machine }) {
           <Button
             variant="ghost"
             size="icon-sm"
-            aria-label="Edit name and description"
-            onClick={() => setEditing("name")}
+            aria-label="Edit name"
+            onClick={() => setEditing(true)}
             className="text-muted-foreground opacity-0 transition-opacity group-hover/title:opacity-100 focus-visible:opacity-100"
           >
             <PencilSimpleIcon className="size-4" />
           </Button>
         )}
       </div>
-      {/* The line is always there, so switching machines never moves the page. */}
-      {machine.description ? (
-        <p className="truncate text-sm text-muted-foreground">{machine.description}</p>
-      ) : machine.can_manage ? (
-        <button
-          type="button"
-          onClick={() => setEditing("description")}
-          className="w-fit text-left text-sm text-muted-foreground/60 italic transition-colors outline-none hover:text-muted-foreground focus-visible:text-muted-foreground"
-        >
-          Add a description
-        </button>
-      ) : (
-        <p className="text-sm text-muted-foreground/60 italic">No description</p>
-      )}
+      <TagChips tags={machine.tags} />
     </div>
   )
 }
@@ -56,11 +44,9 @@ const inPlace =
 
 function TitleEditor({
   machine,
-  focus,
   onDone,
 }: {
   machine: Machine
-  focus: "name" | "description"
   onDone: () => void
 }) {
   const edit = useMachineEdit(machine, onDone)
@@ -77,7 +63,7 @@ function TitleEditor({
     >
       <div className="flex min-w-0 items-center gap-1">
         <Input
-          autoFocus={focus === "name"}
+          autoFocus
           aria-label="Name"
           value={edit.name}
           onChange={(event) => edit.setName(event.target.value)}
@@ -107,16 +93,6 @@ function TitleEditor({
           <XIcon className="size-4" />
         </Button>
       </div>
-      <Input
-        autoFocus={focus === "description"}
-        aria-label="Description"
-        placeholder="Add a description"
-        maxLength={160}
-        value={edit.description}
-        onChange={(event) => edit.setDescription(event.target.value)}
-        className={`${inPlace} max-w-md py-0.5 text-sm text-muted-foreground md:text-sm`}
-        autoComplete="off"
-      />
       {(edit.problem || edit.save.isError || nameChanged) && (
         <p className={edit.problem || edit.save.isError ? "text-xs text-destructive" : "text-xs text-muted-foreground"}>
           {edit.save.isError

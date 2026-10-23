@@ -160,7 +160,6 @@ export type MachineState = "online" | "offline" | "disconnected" | "revoked" | "
 export type Machine = {
   id: string
   alias: string
-  description?: string
   platform: string
   architecture: string
   workspace_root: string
@@ -267,7 +266,7 @@ export const machineSummaryQuery = (workspace: string) =>
     refetchInterval: 15_000,
   })
 
-/** Server-side search by name, description or ID, for workspaces too large to list. */
+/** Server-side search by name or ID, for workspaces too large to list. */
 export const machineSearchQuery = (workspace: string, q: string) =>
   queryOptions({
     queryKey: ["machines", workspace, "search", q],
@@ -396,12 +395,11 @@ export const machineLatencyQuery = (machineId: string) =>
     refetchInterval: 120_000,
   })
 
-/** Name and description are set together; the server validates both (`Rename` in usermachines). */
-export function updateMachine(id: string, alias: string, description: string): Promise<Machine> {
+export function updateMachine(id: string, alias: string): Promise<Machine> {
   return api<Machine>(`machines/${encodeURIComponent(id)}`, {
     method: "PATCH",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ alias, description }),
+    body: JSON.stringify({ alias }),
   })
 }
 

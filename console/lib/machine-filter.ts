@@ -86,7 +86,7 @@ export function matchesQuery(machine: Machine, { filters, text }: ReturnType<typ
     if (!filterKeys[key].test(machine, value, me)) return false
   }
   if (!text) return true
-  return [machine.alias, machine.description, machine.assigned_ip, formatPlatform(machine.platform), machine.id]
+  return [machine.alias, machine.assigned_ip, formatPlatform(machine.platform), machine.id]
     .filter(Boolean)
     .some((field) => field!.toLowerCase().includes(text))
 }
