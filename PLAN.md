@@ -1512,8 +1512,17 @@ each with a PG/load test proving the bound at 10k; Lane R audits daemon/CLI/rela
    128 KiB each with `page`, `pages`, the same `generation` and the `digest` of the whole state; the daemon assembles
    them and verifies the digest. Builds are cached per (account, mesh_seq) so machines of one account share the mesh
    build, and limited per account (token bucket) so a reconnect storm queues instead of failing; clients reconnect
-   and refresh with full jitter (Lane R). Lane R raises the daemon's MaxEndpoints (2048) with the deltas.
+   and refresh with full jitter (Lane R). The daemon's MaxEndpoints (2048) becomes the visible-peer bound (point 9).
 8. **Regional candidates and relay grants** stay full in every answer (about 2 nodes).
+9. **Bounds (coordinator 2026-10-23).** An account holds up to 10,000 machines (plan limits: Pro 1,000; Teams
+   unlimited with a hidden 10,000 ceiling), so the per-account cap the mesh build uses (`peernetwork.MaxEndpoints`,
+   2,048 today) becomes 10,000. What one machine receives is bounded per machine instead: its visible peers, the
+   endpoints policy lets it reach or be reached by (personal mesh: every peer of the account; team machines: scoped
+   by the team policy), capped by one configured MaxVisiblePeers in `shared/peernetwork`; a snapshot pages through
+   them (point 7). The mesh build stays key-probed, O(account endpoints) per change (about 50 ms at 1,000 machines,
+   Lane Q 2026-10-23); no change capture in the trigger transactions. Test for the delta step (Lane Q, PG): a
+   10,000-machine account, one machine joins: one log row, the refresh under 1 s, and another machine's delta
+   carries exactly that one entry.
 *Prior art* (read 2026-10-23; headscale 494e2a6, BSD-3; NetBird 8397bed, AGPL: ideas only, no code):
 1. *Push vs poll.* Both hold one long-lived stream per node and send the full map only on connect: headscale the
    Tailscale map long-poll with keepalives every 50 s + up to 9 s jitter (`hscontrol/poll.go:26,58,334`), NetBird a
@@ -1663,7 +1672,7 @@ the peer-network delta work (contract v3) it extends.
    Per-operation scopes (machine_access, inspector, config_compare) keep their short `expires_at`.
 2. **Session rights are scopes on the peer entry (F21-11).** A peer endpoint that may start sessions on this host gets scopes
    `{resource_kind: "machine_access", capability: terminal|exec|managed_ssh|files, direction: "accept"}` with no
-   `expires_at` and `resource_generation` = the deciding policy version. No parallel list: the v3 delta, digest, paging, 2048 cap and removal-first rule apply unchanged. The
+   `expires_at` and `resource_generation` = the deciding policy version. No parallel list: the v3 delta, digest, paging, visible-peer bound and removal-first rule apply unchanged. The
    server compiles them with the same functions that issue descriptors (`machine_capability_allowed`, team policy) and
    signs them in the same document. No secrets, no ENV.
 3. **Offline admission on the host.** Online nothing changes: descriptor plus stream token, and an online refusal is final.
