@@ -52,10 +52,9 @@ func (w *ReceiptWorker) Run(ctx context.Context) error {
 
 			return nil
 		}()
+		// A failed delivery is recorded and retried on the next tick; only cancellation ends the worker,
+		// so one database error cannot stop the server (Lane X S1).
 		finishProgress(cycleErr)
-		if cycleErr != nil {
-			return cycleErr
-		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()

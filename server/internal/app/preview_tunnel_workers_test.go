@@ -103,15 +103,29 @@ func (r *recordingTunnelExpiryReconciler) ReconcileExpired(_ context.Context, re
 	return nil, r.err
 }
 
-func TestPeriodicPreviewTunnelWorkerRunsImmediatelyAndPropagatesFailure(t *testing.T) {
-	want := errors.New("database unavailable")
+// A failing iteration is retried with backoff and never ends the worker, so the supervisor and the server
+// stay up through a database blip (Lane X S1); the worker ends only on cancellation.
+func TestPeriodicPreviewTunnelWorkerKeepsRunningThroughFailures(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	failure := errors.New("database unavailable")
 	calls := 0
-	worker := periodicPreviewTunnelWorker(time.Hour, func(context.Context) error {
+	worker := periodicPreviewTunnelWorker(time.Millisecond, func(context.Context) error {
 		calls++
-		return want
+		if calls <= 3 {
+			return failure
+		}
+		cancel()
+		return nil
 	})
-	if err := worker(context.Background()); !errors.Is(err, want) || calls != 1 {
-		t.Fatalf("error = %v, calls = %d", err, calls)
+	if err := worker(ctx); !errors.Is(err, context.Canceled) || calls != 4 {
+		t.Fatalf("worker ended with %v after %d calls; want cancellation after 3 failures and a success", err, calls)
+	}
+	for failures := 1; failures <= 20; failures++ {
+		base := min(time.Second<<min(failures-1, 16), periodicFailureMaxBackoff)
+		if got := periodicFailureBackoff(time.Hour, failures); got < base/2 || got > base {
+			t.Fatalf("backoff after %d failures = %s, want within [%s, %s]", failures, got, base/2, base)
+		}
 	}
 }
 
@@ -131,15 +145,19 @@ func TestPeriodicPreviewTunnelWorkerStopsWithContext(t *testing.T) {
 func TestPreviewTunnelWorkersSupplyDurableAuditIdentity(t *testing.T) {
 	stop := errors.New("stop after first run")
 	preview := &recordingPreviewLeaseReconciler{err: stop}
-	if err := previewLeaseReconciliationWorker(preview, time.Hour)(context.Background()); !errors.Is(err, stop) {
-		t.Fatalf("preview worker error = %v", err)
+	short, cancelShort := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancelShort()
+	if err := previewLeaseReconciliationWorker(preview, time.Hour)(short); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("preview worker error = %v; a failed run must not end the worker", err)
 	}
 	if preview.actorID != "paperboat-server.preview-lease-reconciler" || !strings.HasPrefix(preview.requestID, "request_") || !strings.HasPrefix(preview.correlationID, "correlation_") {
 		t.Fatalf("preview reconciliation identity = actor %q request %q correlation %q", preview.actorID, preview.requestID, preview.correlationID)
 	}
 
 	tunnel := &recordingTunnelExpiryReconciler{err: stop}
-	if err := tunnelExpiryReconciliationWorker(tunnel, time.Hour)(context.Background()); !errors.Is(err, stop) {
+	shortTunnel, cancelTunnel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancelTunnel()
+	if err := tunnelExpiryReconciliationWorker(tunnel, time.Hour)(shortTunnel); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("tunnel worker error = %v", err)
 	}
 	if tunnel.request.ActorID != "paperboat-server.tunnel-expiry-reconciler" || tunnel.request.ActorType != "system" || !strings.HasPrefix(tunnel.request.RequestID, "request_") || !strings.HasPrefix(tunnel.request.CorrelationID, "correlation_") {

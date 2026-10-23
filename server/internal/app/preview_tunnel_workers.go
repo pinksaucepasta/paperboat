@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"github.com/google/uuid"
+	"math/rand/v2"
 
 	"fmt"
 	"strings"
@@ -149,31 +150,54 @@ func previewTunnelWorkerRequestIDs() (string, string, error) {
 	return "request_" + request.String(), "correlation_" + correlation.String(), nil
 }
 
+// periodicPreviewTunnelWorker runs one iteration every interval. A failed iteration is recorded (worker
+// progress and support signals), then retried after a jittered exponential backoff; only cancellation ends
+// the worker. Returning the error instead made the supervisor stop every worker and the server exit on one
+// database blip (Lane X S1). Prior art: Teleport runs background loops as retrying services
+// (lib/utils/retryutils Linear with jitter) and Headscale's batcher logs and continues; neither exits on a
+// loop error.
 func periodicPreviewTunnelWorker(interval time.Duration, run func(context.Context) error) workers.Worker {
 	if interval <= 0 {
 		interval = time.Second
 	}
 	return func(ctx context.Context) error {
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
+		failures := 0
 		for {
 			finishProgress := workers.BeginIteration(ctx, interval)
-			cycleErr := func() error {
-				if err := run(ctx); err != nil {
-					return err
-				}
-
-				return nil
-			}()
-			finishProgress(cycleErr)
-			if cycleErr != nil {
-				return cycleErr
+			err := run(ctx)
+			if ctx.Err() != nil {
+				finishProgress(nil)
+				return ctx.Err()
 			}
+			finishProgress(err)
+			wait := interval
+			if err != nil {
+				failures++
+				wait = periodicFailureBackoff(interval, failures)
+			} else {
+				failures = 0
+			}
+			timer := time.NewTimer(wait)
 			select {
 			case <-ctx.Done():
+				timer.Stop()
 				return ctx.Err()
-			case <-ticker.C:
+			case <-timer.C:
 			}
 		}
 	}
+}
+
+// periodicFailureMaxBackoff caps the retry delay of a failing periodic worker.
+const periodicFailureMaxBackoff = time.Minute
+
+// periodicFailureBackoff doubles from min(interval, 1 s) per consecutive failure up to a minute, with up to
+// half of it as random jitter so instances do not retry in step.
+func periodicFailureBackoff(interval time.Duration, failures int) time.Duration {
+	backoff := min(interval, time.Second) << min(failures-1, 16)
+	if backoff <= 0 || backoff > periodicFailureMaxBackoff {
+		backoff = periodicFailureMaxBackoff
+	}
+	half := backoff / 2
+	return half + time.Duration(rand.Int64N(int64(half)+1))
 }
