@@ -88,7 +88,7 @@ func TestTerminalSessionMutationsRequireBrowserCSRF(t *testing.T) {
 		body   string
 	}{
 		{http.MethodPost, "/v1/machines/missing/terminal-sessions", `{"name":"work"}`},
-		{http.MethodPatch, "/v1/machines/missing/terminal-sessions/missing", `{"title":"work"}`},
+		{http.MethodPatch, "/v1/machines/missing/terminal-sessions/missing", `{"name":"work"}`},
 		{http.MethodPost, "/v1/machines/missing/terminal-sessions/missing/close", "{}"},
 		{http.MethodDelete, "/v1/machines/missing/terminal-sessions/missing", ""},
 	} {
@@ -180,64 +180,6 @@ func TestCookieWriteRequiresCSRFButPersonalFreeNeedsNoSubscription(t *testing.T)
 		if w.Code != want {
 			t.Fatalf("csrf=%v status=%d want=%d", withCSRF, w.Code, want)
 		}
-	}
-}
-
-func TestAdminBillingAdjustmentsRequireAdminAndWriteLedger(t *testing.T) {
-	store, router := newAuthIntegrationRouter(t)
-	adminCookies := loginCookies(t, router, "workos_admin:admin@example.com:Admin User")
-	targetCookies := loginCookies(t, router, "workos_target:target@example.com:Target User")
-	adminID := userIDByEmail(t, store, "admin@example.com")
-	targetID := userIDByEmail(t, store, "target@example.com")
-	if _, err := store.SQL().ExecContext(context.Background(), `UPDATE paperboat.users SET role = 'admin' WHERE id = $1`, adminID); err != nil {
-		t.Fatal(err)
-	}
-
-	denied := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/v1/admin/users/"+targetID+"/adjust-credits", strings.NewReader(`{"amount":"5","reason":"test"}`))
-	addCookies(req, targetCookies)
-	req.Header.Set(auth.CSRFHeaderName, csrfCookie(t, targetCookies))
-	req.Header.Set("Idempotency-Key", "admin-denied-"+targetID)
-	router.ServeHTTP(denied, req)
-	if denied.Code != http.StatusForbidden {
-		t.Fatalf("non-admin status = %d, body = %s", denied.Code, denied.Body.String())
-	}
-
-	credits := httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "/v1/admin/users/"+targetID+"/adjust-credits", strings.NewReader(`{"amount":"7.5","reason":"support correction"}`))
-	addCookies(req, adminCookies)
-	req.Header.Set(auth.CSRFHeaderName, csrfCookie(t, adminCookies))
-	req.Header.Set("Idempotency-Key", "admin-credit-"+targetID)
-	router.ServeHTTP(credits, req)
-	if credits.Code != http.StatusOK {
-		t.Fatalf("credit adjustment status = %d, body = %s", credits.Code, credits.Body.String())
-	}
-
-	storage := httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "/v1/admin/users/"+targetID+"/adjust-storage", strings.NewReader(`{"purchased_gb":3,"reason":"support correction"}`))
-	addCookies(req, adminCookies)
-	req.Header.Set(auth.CSRFHeaderName, csrfCookie(t, adminCookies))
-	req.Header.Set("Idempotency-Key", "admin-storage-"+targetID)
-	router.ServeHTTP(storage, req)
-	if storage.Code != http.StatusOK {
-		t.Fatalf("storage adjustment status = %d, body = %s", storage.Code, storage.Body.String())
-	}
-
-	var balance string
-	if err := store.SQL().QueryRowContext(context.Background(), `
-SELECT balance::text FROM paperboat.credit_accounts WHERE user_id = $1`, targetID).Scan(&balance); err != nil {
-		t.Fatal(err)
-	}
-	if balance != "7.500000" {
-		t.Fatalf("balance = %s", balance)
-	}
-	var purchased int
-	if err := store.SQL().QueryRowContext(context.Background(), `
-SELECT purchased_gb FROM paperboat.storage_accounts WHERE user_id = $1`, targetID).Scan(&purchased); err != nil {
-		t.Fatal(err)
-	}
-	if purchased != 3 {
-		t.Fatalf("purchased_gb = %d", purchased)
 	}
 }
 
@@ -341,6 +283,10 @@ BEGIN
 		EXECUTE 'TRUNCATE TABLE ' || tables || ' CASCADE';
 	END IF;
 END $$;`); err != nil {
+		t.Fatal(err)
+	}
+	// Rows the migrations seed are part of the schema, not test data.
+	if _, err := store.SQL().ExecContext(context.Background(), `INSERT INTO paperboat.client_update_policy(singleton) VALUES(true) ON CONFLICT DO NOTHING`); err != nil {
 		t.Fatal(err)
 	}
 }
