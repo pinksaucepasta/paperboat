@@ -4,11 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
@@ -109,53 +109,34 @@ func listMachineSessions(ctx context.Context, client *api.Client) ([]machineSess
 	return listMachineSessionsForMachines(ctx, client, machines)
 }
 
+// listMachineSessionsForMachines lists the caller's sessions on the given terminal hosts with one
+// catalog request (stored rows, no live host probes): one request per machine took tens of seconds
+// on accounts with many machines.
 func listMachineSessionsForMachines(ctx context.Context, client *api.Client, machines []api.UserMachine) ([]machineSession, error) {
-	machines = slices.Clone(machines)
-	machines = slices.DeleteFunc(machines, func(machine api.UserMachine) bool {
-		return !machine.Capabilities.TerminalHost.Configured
-	})
-	results := make(chan []machineSession, len(machines))
-	errorsOut := make(chan error, len(machines))
-	workers := make(chan struct{}, 4)
-	var group sync.WaitGroup
+	targets := make(map[string]environmentTarget, len(machines))
 	for _, machine := range machines {
-		machine := machine
-		group.Add(1)
-		go func() {
-			defer group.Done()
-			select {
-			case workers <- struct{}{}:
-				defer func() { <-workers }()
-			case <-ctx.Done():
-				errorsOut <- ctx.Err()
-				return
-			}
-			items, loadErr := client.ListUserMachineTerminalSessions(ctx, machine.ID)
-			if loadErr != nil {
-				errorsOut <- loadErr
-				return
-			}
-			target := environmentTarget{kind: environmentUserMachine, id: machine.ID, name: machine.Alias}
-			mapped := make([]machineSession, 0, len(items))
-			for _, session := range items {
-				mapped = append(mapped, machineSession{target: target, session: session})
-			}
-			results <- mapped
-		}()
+		if machine.Capabilities.TerminalHost.Configured {
+			targets[machine.ID] = environmentTarget{kind: environmentUserMachine, id: machine.ID, name: machine.Alias}
+		}
 	}
-	group.Wait()
-	close(results)
-	close(errorsOut)
-	var loadErrors []error
-	for loadErr := range errorsOut {
-		loadErrors = append(loadErrors, loadErr)
+	if len(targets) == 0 {
+		return nil, nil
 	}
-	if loadErr := errors.Join(loadErrors...); loadErr != nil {
-		return nil, loadErr
+	catalog, err := client.SharedTerminalSessionsFiltered(ctx, url.Values{"owner": {"mine"}, "live": {"false"}})
+	if err != nil {
+		return nil, err
 	}
-	var sessions []machineSession
-	for result := range results {
-		sessions = append(sessions, result...)
+	sessions := make([]machineSession, 0, len(catalog))
+	for _, item := range catalog {
+		target, listed := targets[item.Target.MachineID]
+		if !listed {
+			continue
+		}
+		sessions = append(sessions, machineSession{target: target, session: api.TerminalSession{
+			ID: item.ID, Name: item.Name, Title: item.Title, Machine: item.Machine, StartedIn: item.StartedIn,
+			State: item.State, IsDefault: item.IsDefault, LastActiveAt: item.LastActiveAt,
+			CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
+		}})
 	}
 	slices.SortStableFunc(sessions, func(a, b machineSession) int {
 		return b.activity().Compare(a.activity())

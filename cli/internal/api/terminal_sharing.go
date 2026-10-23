@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"time"
 )
 
 func (c *Client) SharedTerminalConnectionDescriptor(ctx context.Context, sessionID string) (ConnectionDescriptor, error) {
@@ -33,14 +34,18 @@ type TerminalSharingGrant struct {
 	Generation uint64 `json:"generation"`
 }
 type SharedTerminalSession struct {
-	Title             string `json:"title"`
-	CurrentDirectory  string `json:"current_directory,omitempty"`
-	ForegroundProcess string `json:"foreground_process,omitempty"`
-	StartedIn         string `json:"started_in"`
-	Machine           string `json:"machine"`
-	ID                string `json:"id"`
-	Name              string `json:"name"`
-	State             string `json:"state"`
+	Title             string     `json:"title"`
+	CurrentDirectory  string     `json:"current_directory,omitempty"`
+	ForegroundProcess string     `json:"foreground_process,omitempty"`
+	StartedIn         string     `json:"started_in"`
+	Machine           string     `json:"machine"`
+	ID                string     `json:"id"`
+	Name              string     `json:"name"`
+	State             string     `json:"state"`
+	IsDefault         bool       `json:"is_default"`
+	LastActiveAt      *time.Time `json:"last_active_at"`
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
 	Target            struct {
 		Kind              string `json:"kind"`
 		ID                string `json:"id"`
