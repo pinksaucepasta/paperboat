@@ -1557,6 +1557,36 @@ each with a PG/load test proving the bound at 10k; Lane R audits daemon/CLI/rela
 Test (PG): one join on a 1,000-machine account writes O(1) change rows per affected scope and each machine's next
 answer carries one change; a 5k-machine team survives a server restart (snapshot storm) without 503s.
 
+#### Per-account local address namespaces (Lane Q contract, coordinator decision 2026-10-23)
+
+A machine's local address (127.100.x.y, `sync/authority.go` lease) is one slot of a single platform-wide pool
+(`control_sync_leases.address_slot`, 64,770 slots): about 64.8k machines ever, across all users, then pairing fails.
+1. **Key.** A lease is (viewer account, machine) -> slot, the slot unique within the account. An account's
+   namespace holds the machines visible to it: its own, its teams' machines, and machines shared into its teams. A
+   team machine has a slot in each member's namespace, so one machine can have different addresses for different
+   viewers; each viewer sees one stable address per machine.
+2. **Who reads which.** The inventory (`assigned_ip`) and the sync peer list answer in the caller's namespace (the
+   requesting machine's owner account for a daemon). The daemon already maps canonical addresses per viewer
+   (`cli/internal/daemoncmd/coordinator_routes.go` mapPeerSnapshot) and resolves names from its own inventory.
+3. **Allocation.** Never inside a list query (the 29 s staging stall). Missing leases of the machines a request is
+   about to show are allocated set-based in one short transaction before the read, claiming candidate slots with
+   `pg_try_advisory_xact_lock` as migration 165 does, so concurrent allocations never wait for each other.
+4. **Stability and release.** A lease never moves while its machine and the visibility exist (renames, team
+   joins, reinstalls and relists keep it; replace-retired moves the retired machine's leases to the replacement).
+   It is released when the machine is deleted or the account has not been able to see it for 30 days (retention),
+   and the lowest free slot is reused.
+5. **Tags** are per machine, not per viewer: they move from the lease row to the machine.
+6. **Exhaustion.** 64,770 visible machines per account, above the 10,000-machine account ceiling (delta contract
+   point 9); past it 54000 -> ResourceExhausted as today, for that account only.
+7. **Tests (PG).** One account's full namespace does not affect another's allocation; a team machine gets distinct
+   slots in two members' namespaces; addresses stay the same across relists, renames, team joins and a reinstall;
+   two concurrent first lists of a 1,000-machine account allocate without waiting and without duplicates.
+8. **Agreement needed.** Lane A (inventory, names, `pb access`) and Lane R (peer list, loopback mapping) confirm
+   that nothing in the daemon assumes one address per machine across accounts, before Lane Q changes the server.
+*Prior art:* headscale has one namespace per server (`hscontrol/db/ip.go` IPAllocator: sequential or random,
+`FreeIPs` on delete, `ip_random_exhaustion_test.go`); Tailscale gives addresses per tailnet and marks a shared-in
+node with `Sharer` (`tailcfg/tailcfg.go:386`). Ours is smaller (a /16 of loopback), so the namespace is the viewer.
+
 #### Scale matrix, end to end per feature (Lane W, from 2026-10-23)
 
 Targets: one machine with 100 concurrent terminals; one shared terminal with 50 viewers; an account with 1,000
