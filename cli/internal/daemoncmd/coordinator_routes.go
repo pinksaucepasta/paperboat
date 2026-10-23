@@ -89,6 +89,9 @@ func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*pbSync.
 		nameClient = connected
 	}
 	if err := c.resolveLocalDomainLocked(ctx, nameClient); err != nil {
+		// A guard that restarted (an update or self-heal replaced it) leaves this connection dead;
+		// the next reconcile connects again instead of failing on it forever.
+		c.resetNameGenerationLocked(ctx)
 		return err
 	}
 	wanted := make(map[string]*guardedRoute)

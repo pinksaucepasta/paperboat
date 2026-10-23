@@ -6,6 +6,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	pbSync "github.com/pinksaucepasta/paperboat/internal/controlsync/proto"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/internal/machineguard"
 	"github.com/pinksaucepasta/paperboat/internal/supportref"
 	"net"
 	"os"
@@ -326,5 +327,37 @@ func TestCoordinatorClosingARouteIsNotAListenerFailure(t *testing.T) {
 	}
 	if len(c.routes) != 1 {
 		t.Fatalf("route was retired as failed: %d routes", len(c.routes))
+	}
+}
+
+// deadGuardClient answers like a connection to a guard that has since restarted.
+type deadGuardClient struct{ coordinatorCleanupClient }
+
+func (*deadGuardClient) Status(context.Context) (machineguard.RuntimeStatus, error) {
+	return machineguard.RuntimeStatus{}, syscall.EPIPE
+}
+
+func TestCoordinatorReconnectsAfterTheGuardRestarts(t *testing.T) {
+	connects := 0
+	c, err := NewCoordinator(CoordinatorConfig{ConnectNameClient: func(context.Context) (guardedNameClient, error) {
+		connects++
+		if connects == 1 {
+			return &deadGuardClient{}, nil
+		}
+		return &coordinatorCleanupClient{}, nil
+	}, DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.ctx = t.Context()
+	machines := []api.UserMachine{{ID: "PRIVATE", Alias: "studio", AssignedIP: "127.100.0.22", State: "online", Online: true, NetworkApproved: true}}
+	if err := c.ApplyMachines(t.Context(), machines, nil); !errors.Is(err, syscall.EPIPE) {
+		t.Fatalf("dead guard connection was not reported: %v", err)
+	}
+	if err := c.ApplyMachines(t.Context(), machines, nil); err != nil || connects != 2 {
+		t.Fatalf("reconcile kept the dead guard connection: err=%v connects=%d", err, connects)
+	}
+	if err := c.Stop(); err != nil {
+		t.Fatal(err)
 	}
 }
