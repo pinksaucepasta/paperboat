@@ -4,7 +4,6 @@ as an SSH alias within 30 s (inventory refreshes on server changes), then the or
 import argparse
 import json
 from pathlib import Path
-import socket
 import subprocess
 import time
 import urllib.request
@@ -27,11 +26,14 @@ def completes(name):
 
 
 def resolves(host):
+    """Every name under the local access domain resolves to the local proxy, so the alias counts only
+    when plain OpenSSH reaches the machine through it."""
     try:
-        socket.getaddrinfo(host, 22)
-        return True
-    except OSError:
+        result = subprocess.run(['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', host, 'true'],
+                                capture_output=True, timeout=20, stdin=subprocess.DEVNULL)
+    except subprocess.TimeoutExpired:
         return False
+    return result.returncode == 0
 
 
 def visible_within(name, domain, budget):
