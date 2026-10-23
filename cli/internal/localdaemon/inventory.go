@@ -17,6 +17,12 @@ const (
 	defaultRefreshInterval = 15 * time.Second
 	defaultRequestTimeout  = 10 * time.Second
 	minimumRefreshInterval = time.Second
+	// One machine change bumps the inventory topic of every machine in its audience, so on a busy account
+	// every daemon was woken every ~15 s and re-listed the account's machines (the largest server load).
+	// Changes that arrive within the spacing are folded into one refresh.
+	defaultEventRefreshSpacing = 30 * time.Second
+	// While the server's change stream is healthy the periodic refresh is only a safety net.
+	defaultEventFallback = 5 * time.Minute
 )
 
 // FirstRefreshBudget bounds how long a newly started daemon with the default configuration takes to
@@ -47,6 +53,10 @@ type InventoryConfig struct {
 	// Events wakes a refresh when the server reports an inventory change; while its wait loop is
 	// healthy the periodic refresh becomes a safety net. Nil refreshes on the interval only.
 	Events *machineevents.Subscription
+	// EventRefreshSpacing is the least time between two refreshes woken by events (0: the default).
+	// EventFallback is the refresh period while events are healthy (0: the default).
+	EventRefreshSpacing time.Duration
+	EventFallback       time.Duration
 }
 
 type Inventory struct {
@@ -59,13 +69,15 @@ type Inventory struct {
 	onMachines        func(context.Context, []api.UserMachine)
 	onRefresh         func(error)
 	events            *machineevents.Subscription
+	eventSpacing      time.Duration
+	eventFallback     time.Duration
 	mu                sync.Mutex
 	completionMu      sync.RWMutex
 	completion        localapi.CompletionSnapshot
 }
 
 func NewInventory(config InventoryConfig) (*Inventory, error) {
-	if config.Source == nil || config.Store == nil || config.RefreshInterval < 0 || config.RequestTimeout < 0 {
+	if config.Source == nil || config.Store == nil || config.RefreshInterval < 0 || config.RequestTimeout < 0 || config.EventRefreshSpacing < 0 || config.EventFallback < 0 {
 		return nil, ErrInvalidInventoryConfig
 	}
 	if config.RefreshInterval == 0 {
@@ -80,6 +92,12 @@ func NewInventory(config InventoryConfig) (*Inventory, error) {
 	if config.Clock == nil {
 		config.Clock = time.Now
 	}
+	if config.EventRefreshSpacing == 0 {
+		config.EventRefreshSpacing = defaultEventRefreshSpacing
+	}
+	if config.EventFallback == 0 {
+		config.EventFallback = defaultEventFallback
+	}
 	return &Inventory{
 		source:            config.Source,
 		store:             config.Store,
@@ -90,6 +108,8 @@ func NewInventory(config InventoryConfig) (*Inventory, error) {
 		onMachines:        config.OnMachines,
 		onRefresh:         config.OnRefresh,
 		events:            config.Events,
+		eventSpacing:      config.EventRefreshSpacing,
+		eventFallback:     config.EventFallback,
 	}, nil
 }
 
@@ -102,12 +122,38 @@ func (i *Inventory) Run(ctx context.Context) error {
 	return i.runTicker(ctx)
 }
 
+// runTicker refreshes on the interval while there is no healthy change stream. With one, an inventory change
+// refreshes at most once per eventSpacing (changes in between fold into that refresh) and the interval only
+// checks whether eventFallback has passed since the last refresh.
 func (i *Inventory) runTicker(ctx context.Context) error {
-	for {
-		if !i.events.Wait(ctx, i.refreshInterval) {
-			return ctx.Err()
-		}
+	last := time.Now()
+	timer := time.NewTimer(i.refreshInterval)
+	defer timer.Stop()
+	refresh := func() {
 		_ = i.Refresh(ctx)
+		last = time.Now()
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-i.events.Changed():
+			if wait := i.eventSpacing - time.Since(last); wait > 0 {
+				spacing := time.NewTimer(wait)
+				select {
+				case <-ctx.Done():
+					spacing.Stop()
+					return ctx.Err()
+				case <-spacing.C:
+				}
+			}
+			refresh()
+		case <-timer.C:
+			if !i.events.Healthy() || time.Since(last) >= i.eventFallback {
+				refresh()
+			}
+			timer.Reset(i.refreshInterval)
+		}
 	}
 }
 

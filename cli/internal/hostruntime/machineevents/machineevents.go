@@ -383,6 +383,11 @@ func (s *Subscription) Wait(ctx context.Context, base time.Duration) bool {
 	}
 }
 
+// Healthy reports whether the hub's wait loop is currently receiving changes; a nil Subscription never is.
+func (s *Subscription) Healthy() bool {
+	return s != nil && s.hub.Healthy()
+}
+
 // Changed exposes wake-ups for consumers that already have their own loop and timer.
 func (s *Subscription) Changed() <-chan struct{} {
 	if s == nil {

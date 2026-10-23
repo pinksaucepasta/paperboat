@@ -527,7 +527,7 @@ func TestInventoryRefreshesWhenTheServerReportsAChange(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, subscriptions, plane := eventstest.Start(t, time.Hour, machineevents.TopicInventory)
-	inventory, err := NewInventory(InventoryConfig{Source: source, Store: store, RefreshInterval: time.Hour, RequestTimeout: time.Second, Events: subscriptions[0], OnRefresh: func(error) { refreshes.Add(1) }})
+	inventory, err := NewInventory(InventoryConfig{Source: source, Store: store, RefreshInterval: time.Hour, RequestTimeout: time.Second, Events: subscriptions[0], EventRefreshSpacing: time.Millisecond, OnRefresh: func(error) { refreshes.Add(1) }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -547,6 +547,50 @@ func TestInventoryRefreshesWhenTheServerReportsAChange(t *testing.T) {
 	waitFor(1)
 	plane.Publish(machineevents.TopicInventory)
 	waitFor(2)
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("run ended with %v", err)
+	}
+}
+
+// A burst of inventory changes (one machine change bumps every daemon's topic on a busy account) folds into
+// one refresh per spacing instead of one machine-list download per change.
+func TestInventoryFoldsChangesWithinTheSpacingIntoOneRefresh(t *testing.T) {
+	source := &scriptedMachineSource{results: []machineResult{{machines: []api.UserMachine{{ID: "machine_1", Alias: "studio"}}}}}
+	var refreshes atomic.Int32
+	store, err := localapi.NewSnapshotStore(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, subscriptions, plane := eventstest.Start(t, time.Hour, machineevents.TopicInventory)
+	const spacing = 300 * time.Millisecond
+	inventory, err := NewInventory(InventoryConfig{Source: source, Store: store, RefreshInterval: time.Hour, RequestTimeout: time.Second, Events: subscriptions[0], EventRefreshSpacing: spacing, OnRefresh: func(error) { refreshes.Add(1) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- inventory.Run(ctx) }()
+	deadline := time.Now().Add(2 * time.Second)
+	for refreshes.Load() < 1 {
+		if time.Now().After(deadline) {
+			t.Fatal("no first refresh")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	started := time.Now()
+	for n := 0; n < 20; n++ { // 20 changes inside one spacing
+		plane.Publish(machineevents.TopicInventory)
+		time.Sleep(spacing / 40)
+	}
+	time.Sleep(spacing + spacing/2 - time.Since(started))
+	if got := refreshes.Load(); got != 2 {
+		t.Fatalf("refreshes after 20 changes within %v = %d, want 2 (the first and one folded refresh)", spacing, got)
+	}
+	time.Sleep(spacing)
+	if got := refreshes.Load(); got > 3 {
+		t.Fatalf("refreshes kept running after the burst: %d", got)
+	}
 	cancel()
 	if err := <-done; !errors.Is(err, context.Canceled) {
 		t.Fatalf("run ended with %v", err)
