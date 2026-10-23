@@ -1347,6 +1347,44 @@ reading plus the measurements named; fixes go top-down, each with a test that pr
 | 11 | Files without bound: bug-report bundles (25 MiB each, no count cap), release targets never pruned, macOS launchd log not rotated, inbox without total cap (`cli/internal/diagnostics/bundle_unix.go`, `hostruntime/bootstrap/artifact.go:285`, `hostruntime/service/service.go:452`) | Disk grows per report/update for the life of the install | none | keep the newest few; prune old targets; rotate |
 | 12 | Relay pre-auth: unauthenticated QUIC/WSS handshakes hold the same 256 slots for 5 s; no accept-rate or source limit (`relay/derpquic/server.go:128, 179, 203`) | A few clients can keep every slot busy; reconnects refused | 5 s per slot | separate pre-auth budget, address validation |
 
+#### Reuse the Tailscale fork and headscale for deltas, reconnects and relay failover (Lane R, 2026-10-23, read-only)
+
+*Daemon: apply deltas through the fork's delta path, not a netmap rebuild (audit #8/#9).* The fork already has
+per-peer netmap mutations: `netmap.NodeMutationUpsert` / `NodeMutationRemove` (`types/netmap/nodemut.go`), and
+`ipnlocal.LocalBackend.UpdateNetmapDelta` (`ipn/ipnlocal/local.go`) applies them with `magicsock.Conn.UpsertPeer` /
+`RemovePeer` (O(1) map updates, `wgengine/magicsock/magicsock.go:3300-3370`), `UpdateNetmapDelta` for endpoint and
+DERP-home patches, and `wgengine.Engine.SyncDevicePeer(key)` for exactly the changed WireGuard peers. Our mesh does
+not run LocalBackend or controlclient (it drives the engine directly), so it cannot take a `tailcfg.MapResponse`
+as is; it calls the same three primitives: `mesh` gains `UpsertAllowedPeer` / `RemoveAllowedPeer` that update
+`allowedPeers`, the client index (94ce6a62) and the filter entry for one peer, then `UpsertPeer` / `RemovePeer` +
+`SyncDevicePeer`. `updateServerMapLocked` and `ReplaceAllowedPeers` (full rebuild + sort + `SetNetworkMap`) remain
+only for snapshots. `UpdateNetstackIPs` reads only the self node, so peer changes skip it. The signed delta
+(`paperboat-network-delta+jwt`, contract above) is verified and its digest checked first; the mesh only sees
+already-authorized changes, and the packet filter stays the authority boundary.
+
+*Server: headscale's mapper (BSD-3, ~/ref/headscale/hscontrol/mapper) maps onto Lane Q's change log.* `types/change`
+(typed changes: node added/removed/changed, policy) ≈ our change rows; `mapper.Batcher` coalesces changes for
+`tuning.batch_change_delay` (default 800 ms) and fans them out with a worker pool to per-node connections, building
+per-node `PeersChanged` / `PeersRemoved` / `PeersChangedPatch` (endpoint/DERP only) responses; a node that
+reconnects gets a full map; offline node state is dropped after 15 min. Useful for Lane Q: coalescing window,
+per-recipient diff against policy, patch type for presence/endpoint churn (keeps our deltas small), worker-bounded
+fan-out. Differences: headscale streams `MapResponse` over a held Noise connection; we answer a long-poll per
+machine and sign every answer.
+
+*Reconnect jitter (audit #5).* tailscaled uses `util/backoff` everywhere: delay = min(n² × 10 ms, max) × U(0.5, 1.5),
+max 30 s for the control map/auth/update routines (`control/controlclient/auto.go:63,317,588`) and 5 s per DERP
+region (`wgengine/magicsock/derp.go:600`). Ours: peer-network retry jitter is only +0-25 %, regional stale retry a
+fixed 1 s, the start-up refresh immediate. Fix: one shared backoff in the daemon (the same quadratic shape with
+U(0.5, 1.5) jitter, capped 30 s for control, 5 s for relay regions) for every control-plane retry, plus a random
+0-5 s start delay for the first refresh after a fleet-wide daemon restart.
+
+*Relay failover and home stability (audit #1, the 6065/9831 flapping).* netcheck keeps the current home DERP unless
+the new best is clearly better: kept if the latency gain is under an absolute threshold or the best is more than 2/3
+of the current one, and only switched when the old region is not heard from (`net/netcheck/netcheck.go:1479-1510`).
+Ours sets home to the first region of every snapshot (`mesh/regional.go setRelayRegions`) and selection can flip it
+each pass. Fix: keep the current home while it is reachable unless a candidate wins by that margin; a full node
+answers "relay full" and the client moves to the next candidate (with the registry capacities from config, Lane B).
+
 #### API/DB (Lane Q, measured 2026-10-22/23)
 
 **Scale** (`server/internal/perf/seed.sql`, isolated test PostgreSQL only): 1200 accounts, 100 paid teams (team 1:
