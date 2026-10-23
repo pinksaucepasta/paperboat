@@ -27,10 +27,11 @@ func (c *Coordinator) prepareBrowserGatewayLocked(ctx context.Context, client gu
 		if maps.Equal(old.browserRoutes, routes) {
 			return old, nil
 		}
-		if err := old.proxy.Stop(ctx); err != nil {
-			return guardedWebRoute{}, err
-		}
-		delete(c.webRoutes, base)
+		return c.updateBrowserGatewayLocked(ctx, client, old, routes, aliases)
+	}
+	byAddress, denied, err := c.browserGatewayRoutes(ctx, client, routes, aliases, nil)
+	if err != nil {
+		return guardedWebRoute{}, err
 	}
 	ip := netip.MustParseAddr(splitdns.BrowserGatewayIP)
 	httpListener, err := client.Acquire(ctx, base, ip, 80)
@@ -55,34 +56,14 @@ func (c *Coordinator) prepareBrowserGatewayLocked(ctx context.Context, client gu
 	if err := client.ReplaceAliases(ctx, aliases); err != nil {
 		return guardedWebRoute{}, coordinatorOperationFailure("browser_aliases", err)
 	}
-	byAddress := make(map[string]string, len(routes))
-	for name, route := range routes {
-		if route.MachineID == "" {
-			return guardedWebRoute{}, errors.New("browser service has no authenticated machine identity")
-		}
-		address := net.JoinHostPort(route.Address.String(), strconv.Itoa(route.Port))
-		if prior, exists := byAddress[address]; exists && prior != route.MachineID {
-			return guardedWebRoute{}, errors.New("ambiguous browser service address")
-		}
-		byAddress[address] = route.MachineID
-		if strings.HasPrefix(name, "*.") {
-			continue
-		}
-		if _, err := c.issueBrowserCertificate(ctx, client, name, route.MachineID, route.Port); err != nil {
-			return guardedWebRoute{}, err
-		}
-	}
-	deniedHosts := make(map[string]bool)
-	for name, target := range aliases {
-		if target == "" {
-			deniedHosts[name] = true
-		}
-	}
-	proxy, err := splitdns.NewProxy(splitdns.ProxyConfig{DeniedHosts: deniedHosts, Domain: c.localDomain(), Routes: routes, IssueCertificate: func(certCtx context.Context, hostname string) (tls.Certificate, error) {
-		if deniedHosts[hostname] {
+	state := &browserGatewayState{}
+	state.set(routes, byAddress, denied)
+	proxy, err := splitdns.NewProxy(splitdns.ProxyConfig{DeniedHosts: denied, Domain: c.localDomain(), Routes: routes, IssueCertificate: func(certCtx context.Context, hostname string) (tls.Certificate, error) {
+		current, _, deniedNow := state.get()
+		if deniedNow[hostname] {
 			return tls.Certificate{}, errors.New("configured browser alias destination is unavailable")
 		}
-		route, ok := browserRouteForHostDomain(routes, hostname, c.localDomain())
+		route, ok := browserRouteForHostDomain(current, hostname, c.localDomain())
 		if !ok {
 			return tls.Certificate{}, errors.New("unregistered browser certificate route")
 		}
@@ -94,8 +75,8 @@ func (c *Coordinator) prepareBrowserGatewayLocked(ctx context.Context, client gu
 		if !ok {
 			return nil, nil, errors.New("local certificate status service is unavailable")
 		}
-		// This closure contains only the proxy's current registered routes.
-		for name := range routes {
+		current, _, _ := state.get()
+		for name := range current {
 			if strings.HasPrefix(name, "*.") {
 				continue
 			}
@@ -111,7 +92,8 @@ func (c *Coordinator) prepareBrowserGatewayLocked(ctx context.Context, client gu
 		}
 		return nil, nil, errors.New("no active browser routes")
 	}, DialContext: func(ctx context.Context, _, address string) (net.Conn, error) {
-		machineID, ok := byAddress[address]
+		_, addresses, _ := state.get()
+		machineID, ok := addresses[address]
 		if !ok {
 			return nil, errors.New("unregistered browser service address")
 		}
@@ -131,10 +113,71 @@ func (c *Coordinator) prepareBrowserGatewayLocked(ctx context.Context, client gu
 	if err != nil {
 		return guardedWebRoute{}, coordinatorOperationFailure("browser_proxy", err)
 	}
-	web = guardedWebRoute{proxy: proxy, base: base, browserRoutes: routes}
+	web = guardedWebRoute{proxy: proxy, base: base, browserRoutes: routes, state: state, ports: map[int]bool{}}
+	c.addBrowserPortListeners(ctx, client, ip, routes, proxy, web.ports)
 	c.webRoutes[base] = web
-	c.addBrowserPortListeners(ctx, client, ip, routes, proxy)
 	return web, nil
+}
+
+// updateBrowserGatewayLocked applies changed routes to the running gateway: certificates for new names
+// first, then the routes, aliases and per-port listeners, without stopping the :80/:443 listeners. A
+// rebuild left a just-started service unreachable (TLS internal error, connection refused) until the
+// new gateway was up (Lane H: private-https to a fresh port).
+func (c *Coordinator) updateBrowserGatewayLocked(ctx context.Context, client guardedNameClient, old guardedWebRoute, routes map[string]splitdns.BrowserRoute, aliases map[string]string) (guardedWebRoute, error) {
+	byAddress, denied, err := c.browserGatewayRoutes(ctx, client, routes, aliases, old.browserRoutes)
+	if err != nil {
+		return guardedWebRoute{}, err
+	}
+	if err := client.ReplaceAliases(ctx, aliases); err != nil {
+		return guardedWebRoute{}, coordinatorOperationFailure("browser_aliases", err)
+	}
+	if err := old.proxy.SetRoutes(routes, denied); err != nil {
+		return guardedWebRoute{}, coordinatorOperationFailure("browser_proxy", err)
+	}
+	old.state.set(routes, byAddress, denied)
+	wanted := browserListenerPorts(routes)
+	for port := range old.ports {
+		if !wanted[port] {
+			_ = old.proxy.RemovePortListener(port)
+			delete(old.ports, port)
+		}
+	}
+	c.addBrowserPortListeners(ctx, client, netip.MustParseAddr(splitdns.BrowserGatewayIP), routes, old.proxy, old.ports)
+	old.browserRoutes = routes
+	c.webRoutes[old.base] = old
+	return old, nil
+}
+
+// browserGatewayRoutes validates routes, issues certificates for the names not in previous, and
+// returns the dial index and the denied alias hostnames.
+func (c *Coordinator) browserGatewayRoutes(ctx context.Context, client guardedNameClient, routes map[string]splitdns.BrowserRoute, aliases map[string]string, previous map[string]splitdns.BrowserRoute) (map[string]string, map[string]bool, error) {
+	byAddress := make(map[string]string, len(routes))
+	for name, route := range routes {
+		if route.MachineID == "" {
+			return nil, nil, errors.New("browser service has no authenticated machine identity")
+		}
+		address := net.JoinHostPort(route.Address.String(), strconv.Itoa(route.Port))
+		if prior, exists := byAddress[address]; exists && prior != route.MachineID {
+			return nil, nil, errors.New("ambiguous browser service address")
+		}
+		byAddress[address] = route.MachineID
+		if strings.HasPrefix(name, "*.") {
+			continue
+		}
+		if known, ok := previous[name]; ok && known == route {
+			continue
+		}
+		if _, err := c.issueBrowserCertificate(ctx, client, name, route.MachineID, route.Port); err != nil {
+			return nil, nil, err
+		}
+	}
+	denied := make(map[string]bool)
+	for name, target := range aliases {
+		if target == "" {
+			denied[name] = true
+		}
+	}
+	return byAddress, denied, nil
 }
 
 // browserCertificateFailure reports whether the browser gateway could not start only because a
@@ -159,23 +202,33 @@ func (c *Coordinator) observeBrowserTrustFailure(ctx context.Context, err error)
 // addBrowserPortListeners makes https://<machine>.<domain>:<port> work for every published port
 // of a machine by serving the gateway address on that port. A port that cannot be served (in use,
 // or an older machine guard) is reported and skipped; it never degrades the other browser URLs.
-func (c *Coordinator) addBrowserPortListeners(ctx context.Context, client guardedNameClient, ip netip.Addr, routes map[string]splitdns.BrowserRoute, proxy *splitdns.Proxy) {
+// browserListenerPorts are the machine ports that get a per-port listener: https://<machine>:<port>.
+func browserListenerPorts(routes map[string]splitdns.BrowserRoute) map[int]bool {
 	ports := make(map[int]bool)
-	privileged := 0
 	for name, route := range routes {
-		if strings.HasPrefix(name, "*.") || route.Port == 80 || route.Port == 443 {
-			continue
-		}
-		if route.Port < 1024 {
-			privileged++
+		if strings.HasPrefix(name, "*.") || route.Port == 80 || route.Port == 443 || route.Port < 1024 {
 			continue
 		}
 		ports[route.Port] = true
 	}
+	return ports
+}
+
+// addBrowserPortListeners starts a per-port listener for every routed port not in served, and records it.
+func (c *Coordinator) addBrowserPortListeners(ctx context.Context, client guardedNameClient, ip netip.Addr, routes map[string]splitdns.BrowserRoute, proxy *splitdns.Proxy, served map[int]bool) {
+	privileged := 0
+	for name, route := range routes {
+		if !strings.HasPrefix(name, "*.") && route.Port != 80 && route.Port != 443 && route.Port < 1024 {
+			privileged++
+		}
+	}
 	if privileged > 0 {
 		diagnosticlog.TryInfo("browser port URLs skip privileged machine ports; use the numeric browser URL or pb access machine", "count", privileged)
 	}
-	for _, port := range slices.Sorted(maps.Keys(ports)) {
+	for _, port := range slices.Sorted(maps.Keys(browserListenerPorts(routes))) {
+		if served[port] {
+			continue
+		}
 		listener, err := client.Acquire(ctx, splitdns.BrowserGatewayHostname, ip, port)
 		if err != nil {
 			diagnosticlog.TryInfo("browser port URL unavailable for a machine port", "port", port, "port_in_use", errors.Is(err, machineguard.ErrPortInUse))
@@ -185,7 +238,9 @@ func (c *Coordinator) addBrowserPortListeners(ctx context.Context, client guarde
 		if err := proxy.AddPortListener(port, limited); err != nil {
 			_ = limited.Close()
 			diagnosticlog.TryInfo("browser port URL could not start for a machine port", "port", port)
+			continue
 		}
+		served[port] = true
 	}
 }
 

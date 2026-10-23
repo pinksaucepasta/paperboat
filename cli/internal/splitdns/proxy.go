@@ -75,15 +75,36 @@ func NewProxy(cfg ProxyConfig) (*Proxy, error) {
 	if err != nil {
 		return nil, err
 	}
-	routes := make(map[string]BrowserRoute, len(cfg.Routes))
-	for host, route := range cfg.Routes {
+	routes, denied, machines, err := browserRouteTable(cfg.Routes, cfg.DeniedHosts, domain)
+	if err != nil {
+		return nil, err
+	}
+	p := &Proxy{
+		domain:           domain,
+		routes:           routes,
+		deniedHosts:      denied,
+		machines:         machines,
+		revocationList:   cfg.RevocationList,
+		httpAddr:         httpAddr,
+		httpsAddr:        httpsAddr,
+		transport:        &http.Transport{DialContext: cfg.DialContext, ForceAttemptHTTP2: false, MaxIdleConns: 64, MaxIdleConnsPerHost: 8, IdleConnTimeout: 30 * time.Second, ResponseHeaderTimeout: 15 * time.Second},
+		issueCertificate: cfg.IssueCertificate,
+	}
+	return p, nil
+}
+
+// browserRouteTable validates explicit routes and denied hostnames and indexes the routed names by
+// machine. NewProxy and SetRoutes share it, so a running proxy accepts exactly what a new one would.
+func browserRouteTable(explicit map[string]BrowserRoute, deniedHosts map[string]bool, domain string) (map[string]BrowserRoute, map[string]bool, map[string][]string, error) {
+	routes := make(map[string]BrowserRoute, len(explicit))
+	for host, route := range explicit {
 		_, label, parseErr := ParseBrowserHostname(strings.TrimPrefix(host, "*."), domain)
 		wildcard := strings.HasPrefix(host, "*.")
 		if wildcard {
 			_, parseErr = BrowserWildcardPattern(strings.TrimSuffix(strings.TrimPrefix(host, "*."), "."+domain), domain)
 		}
 		if parseErr != nil || (!wildcard && label == "") || !route.Address.IsValid() || route.Port < 1 || route.Port > 65535 {
-			return nil, errors.New("invalid explicit browser route")
+			return nil, nil, nil, errors.New("invalid explicit browser route")
 		}
 		routes[host] = route
 	}
@@ -94,17 +115,17 @@ func NewProxy(cfg ProxyConfig) (*Proxy, error) {
 		machine, _, _ := ParseBrowserHostname(strings.TrimPrefix(host, "*."), domain)
 		numeric, err := BrowserHostname(machine, route.Port, domain)
 		if err != nil || routes[numeric] != route {
-			return nil, errors.New("browser proxy requires the same authorized numeric route")
+			return nil, nil, nil, errors.New("browser proxy requires the same authorized numeric route")
 		}
 	}
-	denied := make(map[string]bool, len(cfg.DeniedHosts))
-	for host := range cfg.DeniedHosts {
+	denied := make(map[string]bool, len(deniedHosts))
+	for host := range deniedHosts {
 		_, label, err := ParseBrowserHostname(host, domain)
 		if err != nil || label == "" || NumericBrowserLabel(label) {
-			return nil, errors.New("invalid denied browser hostname")
+			return nil, nil, nil, errors.New("invalid denied browser hostname")
 		}
 		if _, ok := routes[host]; ok {
-			return nil, errors.New("browser hostname both denied and routed")
+			return nil, nil, nil, errors.New("browser hostname both denied and routed")
 		}
 		denied[host] = true
 	}
@@ -119,18 +140,42 @@ func NewProxy(cfg ProxyConfig) (*Proxy, error) {
 	for base := range machines {
 		sort.Strings(machines[base])
 	}
-	p := &Proxy{
-		domain:           domain,
-		routes:           routes,
-		deniedHosts:      denied,
-		machines:         machines,
-		revocationList:   cfg.RevocationList,
-		httpAddr:         httpAddr,
-		httpsAddr:        httpsAddr,
-		transport:        &http.Transport{DialContext: cfg.DialContext, ForceAttemptHTTP2: false, MaxIdleConns: 64, MaxIdleConnsPerHost: 8, IdleConnTimeout: 30 * time.Second, ResponseHeaderTimeout: 15 * time.Second},
-		issueCertificate: cfg.IssueCertificate,
+	return routes, denied, machines, nil
+}
+
+// SetRoutes replaces the routes and denied hostnames of a running proxy without stopping its listeners,
+// so a service that just started is reachable at once instead of after a gateway restart (Lane H:
+// private-https to a fresh port saw TLS internal errors and refused connections during the rebuild).
+// Cached certificates are issued per request, so names no longer routed are refused at the next hello.
+func (p *Proxy) SetRoutes(explicit map[string]BrowserRoute, deniedHosts map[string]bool) error {
+	routes, denied, machines, err := browserRouteTable(explicit, deniedHosts, p.domain)
+	if err != nil {
+		return err
 	}
-	return p, nil
+	p.certCacheMu.Lock()
+	p.routes, p.deniedHosts, p.machines = routes, denied, machines
+	p.certCacheMu.Unlock()
+	return nil
+}
+
+// RemovePortListener stops serving the per-port listener bound to port, if there is one.
+func (p *Proxy) RemovePortListener(port int) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for index, listener := range p.portListeners {
+		local, ok := listener.Addr().(*net.TCPAddr)
+		if !ok || local.Port != port {
+			continue
+		}
+		p.certCacheMu.Lock()
+		delete(p.servedPorts, port)
+		p.certCacheMu.Unlock()
+		err := p.portServers[index].Close()
+		p.portServers = append(p.portServers[:index], p.portServers[index+1:]...)
+		p.portListeners = append(p.portListeners[:index], p.portListeners[index+1:]...)
+		return err
+	}
+	return nil
 }
 
 // ServeHTTP implements http.Handler to dynamically reverse-proxy to target port.

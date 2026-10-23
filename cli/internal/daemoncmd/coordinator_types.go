@@ -140,6 +140,29 @@ type guardedWebRoute struct {
 	base          string
 	machineID     string
 	browserRoutes map[string]splitdns.BrowserRoute
+	state         *browserGatewayState
+	ports         map[int]bool // machine ports with a per-port listener
+}
+
+// browserGatewayState is the running browser gateway's current routes, read by its certificate,
+// revocation and dial callbacks; a route change swaps it without restarting the gateway.
+type browserGatewayState struct {
+	mu        sync.RWMutex
+	routes    map[string]splitdns.BrowserRoute
+	byAddress map[string]string
+	denied    map[string]bool
+}
+
+func (s *browserGatewayState) set(routes map[string]splitdns.BrowserRoute, byAddress map[string]string, denied map[string]bool) {
+	s.mu.Lock()
+	s.routes, s.byAddress, s.denied = routes, byAddress, denied
+	s.mu.Unlock()
+}
+
+func (s *browserGatewayState) get() (map[string]splitdns.BrowserRoute, map[string]string, map[string]bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.routes, s.byAddress, s.denied
 }
 
 type limitedListener struct {

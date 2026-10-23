@@ -811,3 +811,57 @@ func TestCoordinatorServiceLeaseRenewalKeepsTheForwardedPortsUp(t *testing.T) {
 		t.Fatal("a renewed lease still withdrew the forwarded port when the first one ended")
 	}
 }
+
+// A service that starts on a machine adds a route to the running browser gateway; the gateway is not
+// stopped and rebuilt, so a request right after the port appears is served instead of meeting a TLS
+// internal error or a refused connection (Lane H: private-https to a fresh port).
+func TestCoordinatorBrowserGatewayAddsARouteWithoutRestarting(t *testing.T) {
+	ca, err := testcert.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, "fresh") }))
+	defer origin.Close()
+	names := &coordinatorNameClient{domain: testBrowserDomain}
+	c, err := NewCoordinator(CoordinatorConfig{NameClient: names, DialMachine: func(ctx context.Context, _ string, _ int) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "tcp", origin.Listener.Addr().String())
+	}, IssueCertificate: func(_ context.Context, name, _ string, _ int) (tls.Certificate, error) {
+		cert, key, err := ca.IssueCertificate([]string{name})
+		if err != nil {
+			return tls.Certificate{}, err
+		}
+		return tls.X509KeyPair(cert, key)
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.ctx = t.Context()
+	defer c.Stop()
+	first := []*pbSync.PeerUpdate{{PeerId: "first", Alias: "hp", AssignedIp: "127.100.0.4", Approved: true, Online: true, ExportedPorts: []int32{6767}}}
+	if err := c.replaceGuardedRoutes(t.Context(), first); err != nil {
+		t.Fatal(err)
+	}
+	gateway := c.webRoutes[splitdns.BrowserGatewayHostname].proxy
+	second := append(first, &pbSync.PeerUpdate{PeerId: "second", Alias: "victus", AssignedIp: "127.100.0.5", Approved: true, Online: true, ExportedPorts: []int32{6767}})
+	if err := c.replaceGuardedRoutes(t.Context(), second); err != nil {
+		t.Fatal(err)
+	}
+	if c.webRoutes[splitdns.BrowserGatewayHostname].proxy != gateway {
+		t.Fatal("a new route restarted the browser gateway")
+	}
+	roots := x509.NewCertPool()
+	roots.AppendCertsFromPEM(ca.CertPEM())
+	host := "6767.victus." + testBrowserDomain
+	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, ServerName: host, MinVersion: tls.VersionTLS12}}}
+	request, _ := http.NewRequest(http.MethodGet, "https://"+names.addresses[443]+"/", nil)
+	request.Host = host
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatalf("new route on the running gateway: %v", err)
+	}
+	body, _ := io.ReadAll(response.Body)
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK || string(body) != "fresh" {
+		t.Fatalf("status=%d body=%q", response.StatusCode, body)
+	}
+}
