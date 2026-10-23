@@ -18,6 +18,7 @@ import json
 import shlex
 import subprocess
 import sys
+import time
 
 
 
@@ -70,7 +71,12 @@ def main():
         rc, out, err = owner('team', 'machine', 'grant', a.team, a.machine_id, '--all-members', '--capability', 'exec',
                              '--generation', gen(), '--json')
         step('simple view: grant exec to every member', rc == 0, out + err)
-        rc, out, err = member('exec', '--workspace', a.team, a.machine_name, '--', 'echo', marker)
+        # A grant reaches both peer networks asynchronously: retry, bounded, until it has.
+        for attempt in range(9):
+            rc, out, err = member('exec', '--workspace', a.team, a.machine_name, '--', 'echo', marker)
+            if rc == 0 and marker in out:
+                break
+            time.sleep(10)
         step('the member can exec', rc == 0 and marker in out, out + err)
         rc, out, err = owner('policy', 'get', '--workspace', a.team)
         text = out
