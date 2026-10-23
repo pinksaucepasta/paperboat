@@ -79,8 +79,11 @@ func openFDs() int {
 	return len(entries)
 }
 
+// heapMiB is live heap after two collections: pooled output buffers (sync.Pool) survive the first one in the
+// pool's victim cache and are freed by the second, so a single GC counts buffers the code already returned.
 func heapMiB() float64 {
 	var stats runtime.MemStats
+	runtime.GC()
 	runtime.GC()
 	runtime.ReadMemStats(&stats)
 	return float64(stats.HeapInuse) / (1 << 20)
