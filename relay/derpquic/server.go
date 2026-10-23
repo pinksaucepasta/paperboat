@@ -359,7 +359,9 @@ func (s *Server) admit(p *peerConn, token string) error {
 			delete(s.fences, id)
 		}
 	}
-	if previous, ok := s.fences[id]; ok && (g.Generation < previous.Generation || !merging && g.Generation == previous.Generation && g.signedHash != previous.signedHash) {
+	// An admitted grant's fence refuses older grants and another grant of its generation; a revocation's
+	// fence (no signed grant) holds min_generation and refuses only below it.
+	if previous, ok := s.fences[id]; ok && (g.Generation < previous.Generation || !merging && previous.AccountID != "" && g.Generation == previous.Generation && g.signedHash != previous.signedHash) {
 		return ErrAdmission
 	}
 	if !p.key.IsZero() && (p.key != k || p.grant.AccountID != g.AccountID || p.grant.EndpointID != g.EndpointID) {
@@ -556,9 +558,10 @@ func (s *Server) QuotaDenied() []string {
 	return accounts
 }
 
-// Revoke fences current routing immediately; signed newer grants are required to reconnect.
-func (s *Server) Revoke(account, endpoint string, generation uint64) error {
-	if account == "" || endpoint == "" || len(account) > 256 || len(endpoint) > 256 || generation == 0 {
+// Revoke fences an endpoint's grants below minGeneration, the first generation still valid: it
+// closes their connections now, and only a grant of minGeneration or later is admitted again.
+func (s *Server) Revoke(account, endpoint string, minGeneration uint64) error {
+	if account == "" || endpoint == "" || len(account) > 256 || len(endpoint) > 256 || minGeneration < 2 {
 		return ErrAdmission
 	}
 	s.mu.Lock()
@@ -569,13 +572,13 @@ func (s *Server) Revoke(account, endpoint string, generation uint64) error {
 	if previous != nil {
 		g = previous.Grant
 	}
-	if generation <= g.Generation {
+	if minGeneration <= g.Generation {
 		return nil
 	}
 	if g.Generation == 0 && len(s.fences) >= MaxConnections {
 		return ErrOverload
 	}
-	g.Generation = generation
+	g.Generation = minGeneration
 	g.ExpiresAt = time.Now().Add(time.Minute).Unix()
 	s.fences[id] = &grantFence{Grant{Generation: g.Generation, ExpiresAt: g.ExpiresAt}}
 	for k, p := range s.peers {

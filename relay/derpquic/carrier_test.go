@@ -218,7 +218,7 @@ func TestCarrierForwardRestartRevoke(t *testing.T) {
 	if g := receive(t, b, ka, data); g <= first {
 		t.Fatal("restart did not advance generation")
 	}
-	s.Revoke("account", "a", 2)
+	s.Revoke("account", "a", 3)
 	eventually(t, func() bool { a.mu.Lock(); defer a.mu.Unlock(); return a.current.conn.Context().Err() != nil })
 	if err := a.SendControl(kb, control); !errors.Is(err, ErrAdmission) {
 		t.Fatalf("revoked client: %v", err)
@@ -235,6 +235,15 @@ func TestCarrierForwardRestartRevoke(t *testing.T) {
 	connect(t, fresh)
 	if err := fresh.SendControl(kb, control); err != nil {
 		t.Fatal(err)
+	}
+	receive(t, b, ka, control)
+	// The control plane resends a min_generation every observation until the endpoint re-keys: a
+	// floor the admitted grant already meets leaves its connection alone.
+	if err := s.Revoke("account", "a", 3); err != nil {
+		t.Fatal(err)
+	}
+	if err := fresh.SendControl(kb, control); err != nil {
+		t.Fatal("a met min_generation closed the admitted grant:", err)
 	}
 	receive(t, b, ka, control)
 }

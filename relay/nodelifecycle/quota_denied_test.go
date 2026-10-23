@@ -43,7 +43,7 @@ func TestObservationAppliesQuotaDeniedListAndAnnouncesSupport(t *testing.T) {
 		}
 		mu.Lock()
 		announced = announced || in.QuotaSupport
-		out := Lease{NodeID: in.NodeID, Generation: gen, ProcessEpoch: in.Epoch, ExpiresAt: time.Now().Add(10 * time.Second).Unix(), CapacityLimit: 256, Revocations: []derpquic.AuthoritySubject{}, QuotaDenied: denied}
+		out := Lease{NodeID: in.NodeID, Generation: gen, ProcessEpoch: in.Epoch, ExpiresAt: time.Now().Add(10 * time.Second).Unix(), CapacityLimit: 256, Revocations: []Revocation{}, QuotaDenied: denied}
 		mu.Unlock()
 		json.NewEncoder(w).Encode(out)
 	}))

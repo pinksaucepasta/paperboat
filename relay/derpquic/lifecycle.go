@@ -2,11 +2,11 @@ package derpquic
 
 import "time"
 
-// AuthoritySubject contains only the metadata needed for control-plane fencing.
+// AuthoritySubject is one endpoint this relay holds authority for: membership only. Grant
+// generations change on every peer-network refresh; the control plane fences by min_generation.
 type AuthoritySubject struct {
 	AccountID  string `json:"account_id"`
 	EndpointID string `json:"endpoint_id"`
-	Generation uint64 `json:"generation"`
 }
 
 func (s *Server) AuthoritySubjects() []AuthoritySubject {
@@ -18,7 +18,7 @@ func (s *Server) AuthoritySubjects() []AuthoritySubject {
 		k, _ := ParseKey(g.WireGuardPublicKey)
 		live := s.peers[k]
 		if g.AccountID != "" && (g.ExpiresAt > time.Now().Unix() || live != nil && grantID(live.grant) == grantID(g)) {
-			out = append(out, AuthoritySubject{g.AccountID, g.EndpointID, g.Generation})
+			out = append(out, AuthoritySubject{g.AccountID, g.EndpointID})
 		}
 	}
 	return out

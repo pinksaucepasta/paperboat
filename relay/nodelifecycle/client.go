@@ -15,7 +15,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -41,7 +40,7 @@ type Lease struct {
 	ProcessEpoch  string                      `json:"process_epoch"`
 	ExpiresAt     int64                       `json:"expires_at"`
 	CapacityLimit uint64                      `json:"capacity_limit"`
-	Revocations   []derpquic.AuthoritySubject `json:"revocations"`
+	Revocations   []Revocation                `json:"revocations"`
 	PeerRelay     *derpquic.ServiceDescriptor `json:"peer_relay,omitempty"`
 	// QuotaDenied lists accounts the control plane reports out of bandwidth allowance; the relay
 	// refuses them (derpquic.ErrQuota) until a later observation no longer lists them.
@@ -49,6 +48,14 @@ type Lease struct {
 	// SubjectsRequired asks for the full subjects list on the next observation: the control plane has
 	// no stored set for this process or its digest differs. Such an answer carries no quota list.
 	SubjectsRequired bool `json:"subjects_required,omitempty"`
+}
+// Revocation fences one endpoint this relay holds: grants below MinGeneration, the first
+// generation still valid, are closed and refused. The control plane resends it every observation
+// until the endpoint re-keys; an applied one is a no-op.
+type Revocation struct {
+	AccountID     string `json:"account_id"`
+	EndpointID    string `json:"endpoint_id"`
+	MinGeneration uint64 `json:"min_generation"`
 }
 type diskState struct {
 	NodeID       string `json:"node_id"`
@@ -65,12 +72,12 @@ type Client struct {
 	sentSubjects string
 }
 
-// subjectsDigest is the hex SHA-256 of the subjects sorted by account and endpoint, one
-// "account\x00endpoint\x00generation\n" line each (the control plane computes the same).
+// subjectsDigest is the hex SHA-256 of the sorted "account\x00endpoint\n" membership lines (the
+// control plane computes the same). Membership, not grant generations, so a steady set keeps it.
 func subjectsDigest(subjects []derpquic.AuthoritySubject) string {
 	lines := make([]string, 0, len(subjects))
 	for _, subject := range subjects {
-		lines = append(lines, subject.AccountID+"\x00"+subject.EndpointID+"\x00"+strconv.FormatUint(subject.Generation, 10)+"\n")
+		lines = append(lines, subject.AccountID+"\x00"+subject.EndpointID+"\n")
 	}
 	sort.Strings(lines)
 	sum := sha256.Sum256([]byte(strings.Join(lines, "")))
@@ -295,20 +302,20 @@ func (c *Client) Observe(ctx context.Context, server *derpquic.Server, draining 
 	if out.Generation != c.lease.Generation || out.ProcessEpoch != c.lease.ProcessEpoch || out.CapacityLimit != c.lease.CapacityLimit || !server.MatchesControlService(out.PeerRelay) {
 		return ErrFenced
 	}
-	known := map[string]uint64{}
+	known := make(map[string]bool, len(subjects))
 	for _, subject := range subjects {
-		known[subject.AccountID+"\x00"+subject.EndpointID] = subject.Generation
+		known[subject.AccountID+"\x00"+subject.EndpointID] = true
 	}
 	seen := map[string]bool{}
 	for _, rev := range out.Revocations {
 		k := rev.AccountID + "\x00" + rev.EndpointID
-		if known[k] == 0 || rev.Generation <= known[k] || seen[k] {
+		if !known[k] || rev.MinGeneration < 2 || seen[k] {
 			return ErrFenced
 		}
 		seen[k] = true
 	}
 	for _, rev := range out.Revocations {
-		if server.Revoke(rev.AccountID, rev.EndpointID, rev.Generation) != nil {
+		if server.Revoke(rev.AccountID, rev.EndpointID, rev.MinGeneration) != nil {
 			return ErrControl
 		}
 	}

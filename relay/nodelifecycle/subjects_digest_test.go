@@ -42,7 +42,7 @@ func TestObservationSendsSubjectsOnlyWhenTheSetChanged(t *testing.T) {
 			return
 		}
 		gen := in.Generation
-		out := Lease{NodeID: in.NodeID, ProcessEpoch: in.Epoch, ExpiresAt: time.Now().Add(10 * time.Second).Unix(), CapacityLimit: 256, Revocations: []derpquic.AuthoritySubject{}}
+		out := Lease{NodeID: in.NodeID, ProcessEpoch: in.Epoch, ExpiresAt: time.Now().Add(10 * time.Second).Unix(), CapacityLimit: 256, Revocations: []Revocation{}}
 		mu.Lock()
 		if r.URL.Path == "/v1/relay/nodes/start" {
 			gen = in.Expected + 1
@@ -107,14 +107,15 @@ func TestObservationSendsSubjectsOnlyWhenTheSetChanged(t *testing.T) {
 	}
 }
 
-func TestSubjectsDigestSortsByAccountAndEndpoint(t *testing.T) {
-	a := []derpquic.AuthoritySubject{{AccountID: "acct_b", EndpointID: "e1", Generation: 2}, {AccountID: "acct_a", EndpointID: "e9", Generation: 7}}
-	b := []derpquic.AuthoritySubject{a[1], a[0]}
+// The digest is a wire contract: the control plane's vector (relay_subjects_test.go) for the
+// sorted membership lines printf 'acct_a\0ep_b\n' 'acct_a\0ep_z\n' 'acct_b\0ep_a\n'.
+func TestSubjectsDigestIsTheSortedMembershipLinesHash(t *testing.T) {
+	a := []derpquic.AuthoritySubject{{AccountID: "acct_b", EndpointID: "ep_a"}, {AccountID: "acct_a", EndpointID: "ep_z"}, {AccountID: "acct_a", EndpointID: "ep_b"}}
+	b := []derpquic.AuthoritySubject{a[2], a[0], a[1]}
 	if subjectsDigest(a) != subjectsDigest(b) {
 		t.Fatal("digest depends on order")
 	}
-	sum := sha256.Sum256([]byte("acct_a\x00e9\x007\nacct_b\x00e1\x002\n"))
-	if got := subjectsDigest(a); got != hex.EncodeToString(sum[:]) {
-		t.Fatalf("digest %s does not follow the agreed lines", got)
+	if got := subjectsDigest(a); got != "2c9bbe3e9c2b06d2aca7a694fa3c83370dc4dc7145c822e27c318e3e90f7607d" {
+		t.Fatalf("digest %s does not match the control plane's vector", got)
 	}
 }

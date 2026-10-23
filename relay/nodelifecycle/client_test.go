@@ -33,6 +33,9 @@ func TestNativeRelayLifecycleRevokesConnectedCarrier(t *testing.T) {
 	var revoke atomic.Bool
 	var storedMu sync.Mutex
 	var stored []derpquic.AuthoritySubject
+	// The grant's generation; a revocation's min_generation is the next one.
+	var account, endpoint string
+	subjectGeneration := uint64(1)
 	api := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer "+credential {
 			http.Error(w, "denied", 401)
@@ -53,7 +56,7 @@ func TestNativeRelayLifecycleRevokesConnectedCarrier(t *testing.T) {
 		if r.URL.Path == "/v1/relay/nodes/start" {
 			gen = in.ExpectedGeneration + 1
 		}
-		out := Lease{NodeID: in.NodeID, Generation: gen, ProcessEpoch: in.Epoch, ExpiresAt: time.Now().Add(10 * time.Second).Unix(), CapacityLimit: 256, Revocations: []derpquic.AuthoritySubject{}}
+		out := Lease{NodeID: in.NodeID, Generation: gen, ProcessEpoch: in.Epoch, ExpiresAt: time.Now().Add(10 * time.Second).Unix(), CapacityLimit: 256, Revocations: []Revocation{}}
 		// Like the control plane, keep the last full subjects list: a steady node sends only its digest.
 		storedMu.Lock()
 		if in.Subjects != nil {
@@ -63,15 +66,14 @@ func TestNativeRelayLifecycleRevokesConnectedCarrier(t *testing.T) {
 		storedMu.Unlock()
 		if revoke.Load() {
 			for _, subject := range subjects {
-				subject.Generation++
-				out.Revocations = append(out.Revocations, subject)
+				out.Revocations = append(out.Revocations, Revocation{subject.AccountID, subject.EndpointID, subjectGeneration + 1})
 			}
 		}
 		json.NewEncoder(w).Encode(out)
 	}))
 	defer api.Close()
 	cfg := Config{URL: api.URL, HTTP: api.Client(), Credential: credential, NodeID: "relay", ExpectedGeneration: 1, StatePath: filepath.Join(t.TempDir(), "state")}
-	account, endpoint, subjectGeneration := "account", "endpoint", uint64(1)
+	account, endpoint = "account", "endpoint"
 	if path := os.Getenv("PAPERBOAT_RELAY_LIFECYCLE_FIXTURE"); path != "" {
 		var fixture struct {
 			URL, Credential, NodeID, AccountID, EndpointID string
@@ -268,7 +270,7 @@ func TestNativeRelayStartupStateRetryAndExclusiveOwner(t *testing.T) {
 		if in.Epoch != epoch {
 			t.Error("startup retry changed epoch")
 		}
-		json.NewEncoder(w).Encode(Lease{NodeID: in.NodeID, Generation: in.Generation + 1, ProcessEpoch: in.Epoch, CapacityLimit: 256, ExpiresAt: time.Now().Add(10 * time.Second).Unix(), Revocations: []derpquic.AuthoritySubject{}})
+		json.NewEncoder(w).Encode(Lease{NodeID: in.NodeID, Generation: in.Generation + 1, ProcessEpoch: in.Epoch, CapacityLimit: 256, ExpiresAt: time.Now().Add(10 * time.Second).Unix(), Revocations: []Revocation{}})
 	}))
 	defer api.Close()
 	cfg := Config{URL: api.URL, HTTP: api.Client(), Credential: strings.Repeat("test", 16), NodeID: "relay", ExpectedGeneration: 1, StatePath: filepath.Join(t.TempDir(), "state")}
