@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -32,6 +33,11 @@ func (d readyLazyDispatch) Dispatch(ctx context.Context, r previewv1.DispatchReq
 	a.LeaseGeneration = uint64(r.ExpectedGeneration)
 	a.ExpiresAt = r.LeaseDeadline
 	if err := previewattachment.ApplyLazyReadyFixture(ctx, d.database, a); err != nil {
+		return previewv1.DispatchOutcome{}, err
+	}
+	// A managed-only preview is ready only once its DNS record names the serving edge
+	// (509a74ac); the remote edge observation includes that provider write.
+	if _, err := d.database.SQL().ExecContext(ctx, `INSERT INTO edge_dns_publications(hostname,owner_id,resource_generation,readiness_version,observed_at,publication_generation,desired_addresses,provider_records,state,created_at,updated_at) VALUES($1,$2,1,'fixture',now(),1,'["192.0.2.77"]','[{"Address":"192.0.2.77"}]','submitted',now(),now())`, strings.TrimPrefix(r.Endpoint, "https://"), r.PreviewID); err != nil {
 		return previewv1.DispatchOutcome{}, err
 	}
 	return previewv1.DispatchOutcome{Schema: previewv1.Schema, Kind: previewv1.PreviewDispatchKind, PreviewID: r.PreviewID, OperationID: r.OperationID, State: "accepted", Generation: r.ExpectedGeneration}, nil
@@ -66,6 +72,7 @@ func TestLazyActivationReadyPostgres(t *testing.T) {
 		cleanup, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		for _, q := range []string{
+			`DELETE FROM edge_dns_publications WHERE owner_id IN (SELECT id FROM preview_leases WHERE account_id=$1)`,
 			`DELETE FROM lazy_activations WHERE policy_id IN (SELECT id FROM lazy_access_policies WHERE account_id=$1)`,
 			`DELETE FROM lazy_access_policies WHERE account_id=$1`,
 			`DELETE FROM lazy_runtime_owners WHERE account_id=$1`,
@@ -83,6 +90,9 @@ func TestLazyActivationReadyPostgres(t *testing.T) {
 			t.Error("cleanup:", err)
 		}
 	}()
+	if _, err = database.SQL().ExecContext(ctx, `UPDATE control_tunnel_nodes SET public_ingress_ipv4='192.0.2.77' WHERE id=$1`, f.NodeID); err != nil {
+		t.Fatal(err)
+	}
 	policies, err := lazyaccess.NewService(database, "preview.example.test")
 	if err != nil {
 		t.Fatal(err)
