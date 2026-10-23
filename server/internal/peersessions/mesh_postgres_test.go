@@ -16,8 +16,10 @@ import (
 type meshTestSigner struct{}
 
 func (meshTestSigner) SignNetworkConfiguration(map[string]any) (string, error) { return "config", nil }
-func (meshTestSigner) SignRegionalCandidates(map[string]any) (string, error)   { return "candidates", nil }
-func (meshTestSigner) SignRelayGrant(map[string]any) (string, error)          { return "grant", nil }
+func (meshTestSigner) SignRegionalCandidates(map[string]any) (string, error) {
+	return "candidates", nil
+}
+func (meshTestSigner) SignRelayGrant(map[string]any) (string, error) { return "grant", nil }
 
 // Every endpoint of an account rebuilt the whole personal mesh (3 queries per peer) on every change: N x N per
 // join. The shared mesh is built once per change: on a 1,000-machine account a join writes one log row, a refresh
