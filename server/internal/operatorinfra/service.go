@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
 	"net/netip"
 	"regexp"
 	"strings"
@@ -596,7 +597,7 @@ func validNode(in NodeMutation) bool {
 	if contains(in.Roles, "edge") && (len(in.UsagePublicKey) != 32 || (!contains(in.Transports, "http3") && !contains(in.Transports, "http2"))) {
 		return false
 	}
-	if contains(in.Roles, "relay") && (in.CapacityLimit > 256 || !contains(in.Transports, "derp_quic") || !contains(in.Transports, "derp_wss")) {
+	if contains(in.Roles, "relay") && (in.CapacityLimit > relaylimits.MaxConnectionsPerNode || !contains(in.Transports, "derp_quic") || !contains(in.Transports, "derp_wss")) {
 		return false
 	}
 	if contains(in.Roles, "peer_relay") {

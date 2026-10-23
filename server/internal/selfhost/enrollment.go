@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
 
 	"github.com/pinksaucepasta/paperboat-server/internal/secrets"
 	"io"
@@ -282,7 +283,7 @@ func (s *Service) Enroll(ctx context.Context, actor string, in EnrollRequest, op
 	}
 	seen := map[string]bool{}
 	for _, c := range inspection.Components {
-		if seen[c.Capability] || c.Capability != "relay" && c.Capability != "tunnel" || c.TCPPort < 1 || c.TCPPort > 65535 || c.QUICPort < 1 || c.QUICPort > 65535 || c.Capability == "tunnel" && c.TCPPort == c.QUICPort || !validRegion(c.Region) || !validLabel(c.FailureDomain, 128) || c.CapacityLimit < 1 || c.CapacityLimit > 256 {
+		if seen[c.Capability] || !validComponent(c) {
 			return nil, ErrInvalid
 		}
 		seen[c.Capability] = true
@@ -427,3 +428,18 @@ func (s *Service) reserve(ctx context.Context, actor string, scope Scope, i Insp
 }
 
 func mustPublicKey(value string) []byte { key, _ := publicKey(value); return []byte(key) }
+
+// validComponent bounds one advertised component. A relay's capacity is bounded by the ceiling the
+// relay itself enforces; a tunnel keeps its own bound.
+func validComponent(c Component) bool {
+	ceiling := map[string]int64{"relay": relaylimits.MaxConnectionsPerNode, "tunnel": 256}[c.Capability]
+	switch {
+	case ceiling == 0 || c.CapacityLimit < 1 || c.CapacityLimit > ceiling:
+		return false
+	case c.TCPPort < 1 || c.TCPPort > 65535 || c.QUICPort < 1 || c.QUICPort > 65535:
+		return false
+	case c.Capability == "tunnel" && c.TCPPort == c.QUICPort:
+		return false
+	}
+	return validRegion(c.Region) && validLabel(c.FailureDomain, 128)
+}
