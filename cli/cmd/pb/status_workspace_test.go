@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -17,6 +19,7 @@ import (
 
 func TestStatusProjectsSelectedWorkspaceBeforeRendering(t *testing.T) {
 	_, path := localDaemonReadinessTestConfig(t, false)
+	var listed sync.Map // workspace -> listing requests
 	control := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/machines" || r.Header.Get("Authorization") != "Bearer workspace-test-token" {
 			t.Errorf("status did not request authenticated machine inventory")
@@ -24,13 +27,15 @@ func TestStatusProjectsSelectedWorkspaceBeforeRendering(t *testing.T) {
 			return
 		}
 		workspace := r.URL.Query().Get("workspace")
+		count, _ := listed.LoadOrStore(workspace, new(atomic.Int32))
+		count.(*atomic.Int32).Add(1)
 		if workspace == "denied" {
 			w.WriteHeader(http.StatusForbidden)
 			json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"code": "forbidden"}})
 			return
 		}
 		items := []map[string]any{}
-		if workspace == "personal" || workspace == "team-a" {
+		if workspace == "team-a" {
 			items = append(items, map[string]any{"id": "machine-" + workspace,
 				"alias": workspace, "installation_generation": 1})
 		} else if workspace != "empty" {
@@ -45,8 +50,12 @@ func TestStatusProjectsSelectedWorkspaceBeforeRendering(t *testing.T) {
 	t.Setenv("PAPERBOAT_WORKSPACE", "")
 	snapshot := localapi.Snapshot{Schema: localapi.SnapshotSchemaV1, Generation: 7,
 		ObservedAt: time.Now().UTC(), DaemonState: "ready", DaemonVersion: "dev"}
-	for _, id := range []string{"personal", "team-a"} {
-		snapshot.Machines = append(snapshot.Machines, localapi.MachineStatus{ID: "machine-" + id, Alias: "cached-" + id,
+	// The personal workspace is the account's own personal machines, which the snapshot carries;
+	// a team workspace's membership and names come from the server.
+	for _, machine := range []struct{ id, alias, ownership string }{{"personal", "personal", "personal"}, {"team-a", "cached-team-a", "team"}} {
+		id := machine.id
+		snapshot.Machines = append(snapshot.Machines, localapi.MachineStatus{ID: "machine-" + id, Alias: machine.alias,
+			Ownership: machine.ownership, OwnerAccount: "account-1",
 			RuntimeState: "ready", Generation: 3, SelectedPath: "direct", ActiveConsumers: 1,
 			TransferReadiness: "ready", PreviewReadiness: "ready", SSHReadiness: "ready",
 			NATMappingIPv4: "unknown", NATMappingIPv6: "unknown", CaptivePortal: "unknown",
@@ -102,6 +111,9 @@ func TestStatusProjectsSelectedWorkspaceBeforeRendering(t *testing.T) {
 			if want == 1 && (result.Machines[0].ID != "machine-"+workspace ||
 				result.Machines[0].Alias != workspace || result.Machines[0].ActiveConsumers != 1) {
 				t.Fatal("status lost workspace identity or live transport observations")
+			}
+			if count, _ := listed.Load(workspace); workspace == "personal" && count != nil {
+				t.Fatalf("personal status listed machines on the server %d times", count.(*atomic.Int32).Load())
 			}
 		})
 	}

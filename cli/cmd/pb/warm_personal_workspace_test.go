@@ -41,3 +41,31 @@ func TestPersonalWorkspaceResolvesOwnMachinesFromWarmSnapshot(t *testing.T) {
 		t.Fatal("a team workspace resolved from the snapshot instead of the server")
 	}
 }
+
+// pb status answered in ~1 s because it listed the account's machines on the server for every
+// run; the unscoped and personal workspaces are answered from the daemon snapshot.
+func TestStatusSelectsWorkspaceMachinesFromTheSnapshot(t *testing.T) {
+	machines := []localapi.MachineStatus{
+		{ID: "mch_own", Ownership: "personal", OwnerAccount: "acct_me"},
+		{ID: "mch_shared", Ownership: "personal", OwnerAccount: "acct_other"},
+		{ID: "mch_team", Ownership: "team", OwnerAccount: "acct_me"},
+	}
+	ids := func(selected []localapi.MachineStatus) []string {
+		out := make([]string, 0, len(selected))
+		for _, machine := range selected {
+			out = append(out, machine.ID)
+		}
+		return out
+	}
+	if got, local := workspaceSnapshotMachines(context.Background(), machines); !local || len(got) != 3 {
+		t.Fatalf("unscoped status = %v local=%v, want every snapshot machine", ids(got), local)
+	}
+	personal := context.WithValue(context.WithValue(context.Background(), workspaceInvocationKey{}, "personal"), personalWorkspaceAccountKey{}, "acct_me")
+	if got, local := workspaceSnapshotMachines(personal, machines); !local || len(got) != 1 || got[0].ID != "mch_own" {
+		t.Fatalf("personal status = %v local=%v, want only mch_own", ids(got), local)
+	}
+	team := context.WithValue(context.Background(), workspaceInvocationKey{}, "team-a")
+	if got, local := workspaceSnapshotMachines(team, machines); local {
+		t.Fatalf("team workspace answered from the snapshot: %v", ids(got))
+	}
+}

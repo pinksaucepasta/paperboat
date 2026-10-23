@@ -353,30 +353,37 @@ var loadWarmMachineSnapshot = func(ctx context.Context) (localapi.Snapshot, erro
 	return client.Snapshot(ctx)
 }
 
-func resolveWarmUserMachine(ctx context.Context, requested string) (api.UserMachine, bool) {
-	// Another workspace's membership is not in the snapshot: resolve it on the server. The
-	// personal workspace is the account's own personal machines, which the snapshot does carry.
-	personalAccount := ""
-	if selected, scoped := workspaceFromContext(ctx); scoped {
-		account, ok := ctx.Value(personalWorkspaceAccountKey{}).(string)
-		if selected != "personal" || !ok || account == "" {
-			return api.UserMachine{}, false
+// workspaceSnapshotMachines selects the daemon snapshot's machines that belong to the
+// invocation's workspace. It reports false when only the server can answer: another workspace's
+// membership is not in the snapshot, while the personal workspace is the account's own personal
+// machines, which the snapshot does carry.
+func workspaceSnapshotMachines(ctx context.Context, machines []localapi.MachineStatus) ([]localapi.MachineStatus, bool) {
+	selected, scoped := workspaceFromContext(ctx)
+	if !scoped {
+		return machines, true
+	}
+	account, ok := ctx.Value(personalWorkspaceAccountKey{}).(string)
+	if selected != "personal" || !ok || account == "" {
+		return nil, false
+	}
+	personal := make([]localapi.MachineStatus, 0, len(machines))
+	for _, machine := range machines {
+		if machine.Ownership == "personal" && machine.OwnerAccount == account {
+			personal = append(personal, machine)
 		}
-		personalAccount = account
+	}
+	return personal, true
+}
+
+func resolveWarmUserMachine(ctx context.Context, requested string) (api.UserMachine, bool) {
+	if _, local := workspaceSnapshotMachines(ctx, nil); !local {
+		return api.UserMachine{}, false
 	}
 	snapshot, err := loadWarmMachineSnapshot(ctx)
 	if err != nil {
 		return api.UserMachine{}, false
 	}
-	candidates := snapshot.Machines
-	if personalAccount != "" {
-		candidates = make([]localapi.MachineStatus, 0, len(snapshot.Machines))
-		for _, machine := range snapshot.Machines {
-			if machine.Ownership == "personal" && machine.OwnerAccount == personalAccount {
-				candidates = append(candidates, machine)
-			}
-		}
-	}
+	candidates, _ := workspaceSnapshotMachines(ctx, snapshot.Machines)
 	status, err := localwait.ResolveMachine(candidates, requested)
 	// Only a machine the snapshot sees ready is taken from it. Presence in the snapshot can lag (a just-paired
 	// peer stays cached offline until the daemon's next refresh), so anything else is resolved on the server:

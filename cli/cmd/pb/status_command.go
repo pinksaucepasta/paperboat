@@ -18,23 +18,10 @@ func statusCommand() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("read local Paperboat status: %w", err)
 			}
-			client, err := backendClient(actionContext(command, args))
-			if err != nil {
-				return err
-			}
-			machines, err := client.ListUserMachines(command.Context())
-			if err != nil {
-				return fmt.Errorf("read machines for the selected workspace: %w", friendlyCommandError(err))
-			}
-			aliases := make(map[string]string, len(machines))
-			for _, machine := range machines {
-				aliases[machine.ID] = machine.Alias
-			}
-			selected := make([]localapi.MachineStatus, 0, len(machines))
-			for _, machine := range snapshot.Machines {
-				if alias, allowed := aliases[machine.ID]; allowed {
-					machine.Alias = alias
-					selected = append(selected, machine)
+			selected, local := workspaceSnapshotMachines(command.Context(), snapshot.Machines)
+			if !local {
+				if selected, err = serverWorkspaceStatusMachines(command, args, snapshot.Machines); err != nil {
+					return err
 				}
 			}
 			snapshot.Machines = selected
@@ -57,4 +44,28 @@ func statusCommand() *cobra.Command {
 	}
 	command.Flags().Bool("json", false, "print JSON")
 	return command
+}
+
+// serverWorkspaceStatusMachines keeps the snapshot machines the server lists for a team workspace.
+func serverWorkspaceStatusMachines(command *cobra.Command, args []string, machines []localapi.MachineStatus) ([]localapi.MachineStatus, error) {
+	client, err := backendClient(actionContext(command, args))
+	if err != nil {
+		return nil, err
+	}
+	listed, err := client.ListUserMachines(command.Context())
+	if err != nil {
+		return nil, fmt.Errorf("read machines for the selected workspace: %w", friendlyCommandError(err))
+	}
+	aliases := make(map[string]string, len(listed))
+	for _, machine := range listed {
+		aliases[machine.ID] = machine.Alias
+	}
+	selected := make([]localapi.MachineStatus, 0, len(listed))
+	for _, machine := range machines {
+		if alias, allowed := aliases[machine.ID]; allowed {
+			machine.Alias = alias
+			selected = append(selected, machine)
+		}
+	}
+	return selected, nil
 }
