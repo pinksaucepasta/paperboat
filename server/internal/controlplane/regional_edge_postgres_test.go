@@ -70,15 +70,21 @@ func TestRegionalEdgeAssignmentsOnPostgres(t *testing.T) {
 	if n, err := svc.ReconcileTunnelEdgeRouteAssignments(ctx, 10); err != nil || n != 0 {
 		t.Fatalf("idempotent: %d %v", n, err)
 	}
-	// A stale edge loses serving authority before a replacement can be selected.
+	// A late heartbeat alone does not withdraw a serving edge (one stalled database pass would
+	// cut its transfers); an expired registry entry does, before a replacement can be selected.
 	exec(`UPDATE paperboat.control_tunnel_nodes SET last_heartbeat_at=$2 WHERE id=$1`, a.nodeID, now.Add(-16*time.Second))
+	if _, err := svc.ReconcileTunnelEdgeRouteAssignments(ctx, 10); err != nil {
+		t.Fatal(err)
+	}
+	assertState(a.generation, "active")
+	exec(`UPDATE paperboat.control_tunnel_nodes SET last_heartbeat_at=$2,registry_expires_at=$3 WHERE id=$1`, a.nodeID, now.Add(-61*time.Second), now.Add(-time.Second))
 	if _, err := svc.ReconcileTunnelEdgeRouteAssignments(ctx, 10); err != nil {
 		t.Fatal(err)
 	}
 	assertState(a.generation, "draining")
 	assertState(b.generation, "active")
 	// Excluded nodes remain unavailable even after heartbeat recovery.
-	exec(`UPDATE paperboat.control_tunnel_nodes SET last_heartbeat_at=$2,allowed_account_ids=ARRAY['another_account'] WHERE id=$1`, a.nodeID, now)
+	exec(`UPDATE paperboat.control_tunnel_nodes SET last_heartbeat_at=$2,registry_expires_at=$2::timestamptz+interval '1 minute',allowed_account_ids=ARRAY['another_account'] WHERE id=$1`, a.nodeID, now)
 	if n, err := svc.ReconcileTunnelEdgeRouteAssignments(ctx, 10); err != nil || n != 0 {
 		t.Fatalf("excluded edge selected: %d %v", n, err)
 	}

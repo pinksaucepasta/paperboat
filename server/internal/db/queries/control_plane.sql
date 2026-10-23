@@ -1203,6 +1203,10 @@ RETURNING *;
 -- name: RetireUnavailableTunnelEdgeAssignmentsV1 :execrows
 -- Retire authority before replacement selection so a recovered former edge
 -- cannot rejoin a placement without a fresh generation and readiness handshake.
+-- An active assignment is retired when its edge registry or connector lease
+-- expires, not on a late heartbeat: one stalled database pass must not withdraw
+-- a healthy route (the edge drains it, cutting transfers, and it is restaged
+-- under a new generation). A staged one also needs fresh heartbeats.
 UPDATE tunnel_edge_route_assignments a
 SET state='draining', observed_state='draining', updated_at=sqlc.arg(now)
 WHERE a.state IN ('staged','active') AND NOT EXISTS (
@@ -1215,7 +1219,7 @@ WHERE a.state IN ('staged','active') AND NOT EXISTS (
  JOIN current_tunnel_route_viewer_policy viewer_policy ON viewer_policy.route_id = r.id
  WHERE n.id=a.edge_node_id AND n.process_epoch=a.edge_process_epoch
    AND n.state='ready' AND n.ready AND n.drain_deadline IS NULL
-   AND n.last_heartbeat_at>sqlc.arg(now)::timestamptz-interval '15 seconds'
+   AND (a.state='active' OR n.last_heartbeat_at>sqlc.arg(now)::timestamptz-interval '15 seconds')
    AND n.registry_expires_at>sqlc.arg(now)
    AND n.roles @> ARRAY['edge']::text[]
    AND paperboat.node_route_eligible(n.id,a.account_id,r.id)
@@ -1224,7 +1228,7 @@ WHERE a.state IN ('staged','active') AND NOT EXISTS (
    AND ((c.last_applied_config_generation=a.config_generation AND session.applied_config_generation=a.config_generation AND config.activation_state IN ('pending','active'))
      OR (a.state='active' AND config.activation_state='active' AND c.last_applied_config_generation>=a.config_generation AND session.applied_config_generation>=a.config_generation))
    AND session.state IN ('authenticating','ready') AND session.lease_deadline>sqlc.arg(now)
-   AND session.last_heartbeat_at>sqlc.arg(now)::timestamptz-interval '15 seconds'
+   AND (a.state='active' OR session.last_heartbeat_at>sqlc.arg(now)::timestamptz-interval '15 seconds')
    AND session.process_generation=a.connector_process_generation
    AND r.desired_state='active' AND r.generation=a.route_generation AND r.deleted_at IS NULL
    AND t.desired_state='active' AND t.deleted_at IS NULL
