@@ -58,7 +58,7 @@ func TestBaselineSchema(t *testing.T) {
 	if err := db.Migrate(ctx, store); err != nil {
 		t.Fatal(err)
 	}
-	var version int
+	var version int64
 	if err := store.SQL().QueryRowContext(ctx, `SELECT max(version_id) FROM paperboat.goose_db_version WHERE is_applied`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
