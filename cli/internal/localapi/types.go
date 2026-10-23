@@ -251,10 +251,14 @@ type HealthItem struct {
 }
 
 type MachineStatus struct {
-	ID              string     `json:"id"`
-	EnvironmentID   string     `json:"environment_id,omitempty"`
-	WorkspaceRoot   string     `json:"workspace_root,omitempty"`
-	Alias           string     `json:"alias"`
+	ID            string `json:"id"`
+	EnvironmentID string `json:"environment_id,omitempty"`
+	WorkspaceRoot string `json:"workspace_root,omitempty"`
+	Alias         string `json:"alias"`
+	// Ownership and OwnerAccount let a CLI resolve a personal-workspace target from this
+	// snapshot without listing the account's machines again.
+	Ownership       string     `json:"ownership,omitempty"`
+	OwnerAccount    string     `json:"owner_account,omitempty"`
 	Platform        string     `json:"platform,omitempty"`
 	Eligible        bool       `json:"eligible"`
 	RuntimeState    string     `json:"runtime_state"`

@@ -161,9 +161,22 @@ func captureWorkspaceInvocation(command *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	command.SetContext(context.WithValue(command.Context(), workspaceInvocationKey{}, selected))
+	ctx := context.WithValue(command.Context(), workspaceInvocationKey{}, selected)
+	if selected == "personal" {
+		// The personal workspace is the signed-in account's own machines; knowing the account lets
+		// a command resolve its target from the daemon's snapshot instead of the full catalog.
+		if cfg, cfgErr := workspaceConfig(configPathFlag(command), workspaceServerOverride(command)); cfgErr == nil {
+			if account, accountErr := workspaceAccountID(cfg); accountErr == nil && account != "" {
+				ctx = context.WithValue(ctx, personalWorkspaceAccountKey{}, account)
+			}
+		}
+	}
+	command.SetContext(ctx)
 	return nil
 }
+
+// personalWorkspaceAccountKey holds the signed-in account when the personal workspace is selected.
+type personalWorkspaceAccountKey struct{}
 
 func workspaceIndependentCommand(command *cobra.Command) bool {
 	if command == nil {

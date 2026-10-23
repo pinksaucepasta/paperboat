@@ -321,6 +321,8 @@ func mapMachines(machines []api.UserMachine) []localapi.MachineStatus {
 			EnvironmentID:     machine.EnvironmentID,
 			WorkspaceRoot:     machine.WorkspaceRoot,
 			Alias:             machine.Alias,
+			Ownership:         machine.Ownership,
+			OwnerAccount:      machine.OwnerAccount,
 			Platform:          machine.Platform,
 			Eligible:          generation > 0 && machine.State != "revoked" && machine.State != "deleted",
 			RuntimeState:      runtimeState(machine, generation),

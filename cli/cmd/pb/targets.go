@@ -354,14 +354,30 @@ var loadWarmMachineSnapshot = func(ctx context.Context) (localapi.Snapshot, erro
 }
 
 func resolveWarmUserMachine(ctx context.Context, requested string) (api.UserMachine, bool) {
-	if _, scoped := workspaceFromContext(ctx); scoped {
-		return api.UserMachine{}, false
+	// Another workspace's membership is not in the snapshot: resolve it on the server. The
+	// personal workspace is the account's own personal machines, which the snapshot does carry.
+	personalAccount := ""
+	if selected, scoped := workspaceFromContext(ctx); scoped {
+		account, ok := ctx.Value(personalWorkspaceAccountKey{}).(string)
+		if selected != "personal" || !ok || account == "" {
+			return api.UserMachine{}, false
+		}
+		personalAccount = account
 	}
 	snapshot, err := loadWarmMachineSnapshot(ctx)
 	if err != nil {
 		return api.UserMachine{}, false
 	}
-	status, err := localwait.ResolveMachine(snapshot.Machines, requested)
+	candidates := snapshot.Machines
+	if personalAccount != "" {
+		candidates = make([]localapi.MachineStatus, 0, len(snapshot.Machines))
+		for _, machine := range snapshot.Machines {
+			if machine.Ownership == "personal" && machine.OwnerAccount == personalAccount {
+				candidates = append(candidates, machine)
+			}
+		}
+	}
+	status, err := localwait.ResolveMachine(candidates, requested)
 	if err != nil || !status.Eligible || status.Generation == 0 {
 		return api.UserMachine{}, false
 	}
