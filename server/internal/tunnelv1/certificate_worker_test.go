@@ -116,7 +116,14 @@ func TestCertificateWorkerRetriesPreviewPlacementWithoutExitingOnPostgres(t *tes
 		t.Fatal(err)
 	}
 	issuer := &placementPendingIssuer{}
-	coordinator, err := tunnelcert.NewCoordinator(tunnelcert.Config{Store: tunnelcert.NewMemoryStore(), Locks: tunnelcert.NewMemoryLock(), Keys: tunnelcert.ReferenceKeySource{Keys: map[string][]byte{"master/current": make([]byte, 32)}}, Issuer: issuer, CAA: tunnelcert.MemoryCAA{Result: tunnelcert.CAAResult{State: "ready"}}, Distributor: tunnelcert.NewMemoryDistributor(), MasterKeyReference: "master/current", OwnerID: "certificate-placement-worker"})
+	// The coordinator must read the preview's issuance authority from the same
+	// PostgreSQL rows the worker lists; an empty in-memory authority table would
+	// refuse the refresh before placement is checked.
+	store, err := tunnelcert.NewSQLStore(f.database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinator, err := tunnelcert.NewCoordinator(tunnelcert.Config{Store: store, Locks: tunnelcert.NewMemoryLock(), Keys: tunnelcert.ReferenceKeySource{Keys: map[string][]byte{"master/current": make([]byte, 32)}}, Issuer: issuer, CAA: tunnelcert.MemoryCAA{Result: tunnelcert.CAAResult{State: "ready"}}, Distributor: tunnelcert.NewMemoryDistributor(), MasterKeyReference: "master/current", OwnerID: "certificate-placement-worker"})
 	if err != nil {
 		t.Fatal(err)
 	}
