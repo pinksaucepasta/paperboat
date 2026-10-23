@@ -399,13 +399,15 @@ func TestStandaloneUpdateGateFenceLeaseReleasesAbandonedDrain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	retireGate(t, gate)
 	drainedGate(t, gate, "transaction_01")
 	waitFenceReleased(t, fence)
-	waitStateRecordsRollback(t, statePath)
+	waitStateRecordsRollbacks(t, statePath, 1)
 	reloaded, err := newStandaloneUpdateGate(fence.config(statePath, 50*time.Millisecond))
 	if err != nil {
 		t.Fatal(err)
 	}
+	retireGate(t, reloaded)
 	if fence.holder() != "" || !reloaded.transactions["transaction_01"].RolledBack {
 		t.Fatalf("expired lease was not recorded: holder=%q %+v", fence.holder(), reloaded.transactions["transaction_01"])
 	}
@@ -415,19 +417,37 @@ func TestStandaloneUpdateGateFenceLeaseReleasesAbandonedDrain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	retireGate(t, reloaded)
 	if fence.holder() != "transaction_02" {
 		t.Fatal("restart lost the fence of a pending update")
 	}
 	waitFenceReleased(t, fence)
 }
 
+// retireGate disarms a gate's fence lease when the test ends. Every gate this test builds from the
+// same state file keeps a timer that persists a rollback when it fires; left armed it writes into the
+// test's temporary directory while the directory is being removed ('directory not empty').
+func retireGate(t *testing.T, gate *standaloneUpdateGate) {
+	t.Helper()
+	t.Cleanup(func() {
+		gate.mu.Lock()
+		defer gate.mu.Unlock()
+		if gate.fenceTimer != nil {
+			gate.fenceTimer.Stop()
+		}
+		gate.heldTransaction = ""
+	})
+}
+
 // The gate frees the fence before it persists the rollback, so a test that reloads the state right
-// after the release can read the old record (it did on a slow macOS runner). Wait for the file.
-func waitStateRecordsRollback(t *testing.T, statePath string) {
+// after the release can read the old record, and a test that ends right after it can still have the
+// gate writing into its temporary directory (both happened on a slow macOS runner). Wait until the
+// state file records the given number of rolled-back transactions.
+func waitStateRecordsRollbacks(t *testing.T, statePath string, count int) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		if body, err := os.ReadFile(statePath); err == nil && bytes.Contains(body, []byte(`"RolledBack":true`)) {
+		if body, err := os.ReadFile(statePath); err == nil && bytes.Count(body, []byte(`"RolledBack":true`)) >= count {
 			return
 		}
 		if time.Now().After(deadline) {
