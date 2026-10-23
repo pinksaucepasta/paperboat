@@ -603,7 +603,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		return nil, err
 	}
 	gatewayHandler = installationChallenge(cfg.NodeID, deployment.ConnectorAdvertiseHost, credential, gatewayHandler)
-	assembly, err := edgeruntime.NewAssembly(edgeruntime.AssemblySpec{Reporter: reporter, Persistence: persistence, Control: controlDependency, Carrier: carrierComponent, Certificates: certificateWorker, Runtime: runtimeWorker, Preview: previewWorker, Node: nodeWorker, Routes: routeWorker, PublicTCP: publicTCP, Usage: usageWorker, GatewayAddress: deployment.PublicHTTPSListenAddress, GatewayHandler: gatewayHandler, GatewayTLS: publicTLS, GatewayWrapListener: func(listener net.Listener) (net.Listener, error) {
+	assembly, err := edgeruntime.NewAssembly(edgeruntime.AssemblySpec{Reporter: reporter, Persistence: persistence, Control: controlDependency, Carrier: carrierComponent, Certificates: certificateWorker, Runtime: runtimeWorker, Preview: previewWorker, Node: nodeWorker, Routes: componentPair{first: ingressAuthority, second: routeWorker}, PublicTCP: publicTCP, Usage: usageWorker, GatewayAddress: deployment.PublicHTTPSListenAddress, GatewayHandler: gatewayHandler, GatewayTLS: publicTLS, GatewayWrapListener: func(listener net.Listener) (net.Listener, error) {
 		return publicTCP.WrapTLSListener(listener, func(host string) bool {
 			if host == deployment.ConnectorAdvertiseHost {
 				return true
@@ -1167,4 +1167,21 @@ func serviceEvent(ctx context.Context, reporter *reporting.Reporter, code string
 		"name", "tunnel_service_lifecycle", "code", code, "outcome", "success",
 		"support_reference", reference, "correlation_id", reference)
 	reporter.Observe(ctx, "service_lifecycle", "success", code, reference, duration)
+}
+
+// componentPair starts first then second and shuts them down in reverse order.
+type componentPair struct{ first, second edgeruntime.Component }
+
+func (p componentPair) Start(ctx context.Context) error {
+	if err := p.first.Start(ctx); err != nil {
+		return err
+	}
+	if err := p.second.Start(ctx); err != nil {
+		return errors.Join(err, p.first.Shutdown(ctx))
+	}
+	return nil
+}
+
+func (p componentPair) Shutdown(ctx context.Context) error {
+	return errors.Join(p.second.Shutdown(ctx), p.first.Shutdown(ctx))
 }

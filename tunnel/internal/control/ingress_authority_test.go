@@ -60,19 +60,13 @@ func TestIngressAuthorityInvalidationRefreshesNewRouteAndFencesInFlightSnapshot(
 	snapshotDone := make(chan error, 1)
 	go func() { _, err := authority.Snapshot(context.Background()); snapshotDone <- err }()
 	<-started
-	invalidated := make(chan struct{})
-	go func() { authority.Invalidate(); close(invalidated) }()
-	// The stale fetch must finish before invalidation can complete.
-	select {
-	case <-invalidated:
-		t.Fatal("invalidation passed an in-flight snapshot")
-	default:
-	}
+	// Invalidation does not wait for the in-flight fetch, but that fetch (started before it) must
+	// not satisfy it: the next reads fetch again and see the new route.
+	authority.Invalidate()
 	close(release)
 	if err := <-snapshotDone; err != nil {
 		t.Fatal(err)
 	}
-	<-invalidated
 	rule := route.RouteRule{RouteID: decision.Binding.RouteID, TunnelID: decision.Binding.TunnelID, AccountID: decision.Binding.AccountID, ConnectorID: decision.ConnectorID, ConnectorSessionID: decision.SessionID, ConnectorProcessGeneration: decision.ProcessGeneration, ConfigGeneration: decision.ConfigGeneration, AssignmentGeneration: decision.AssignmentGeneration, RouteGeneration: decision.Binding.RouteGeneration, AccessMode: decision.Binding.Audience, ViewerPolicyGeneration: decision.PolicyGeneration, Hostname: decision.Binding.Hostname}
 	var wait sync.WaitGroup
 	for i := 0; i < 8; i++ {
@@ -189,10 +183,82 @@ func TestIngressAuthorityRefreshesDecisionBeforeCacheInterval(t *testing.T) {
 					t.Fatalf("withdrawn authority retained: %v", err)
 				}
 			case "unavailable":
-				if err == nil || len(after) != 0 {
-					t.Fatal("outage extended cached authority")
+				// F21-17: while control is unreachable a public decision is renewed locally.
+				if err != nil || len(after) != 1 || after[0].Validate(time.Now().UTC()) != nil {
+					t.Fatalf("outage dropped public authority: %d %v", len(after), err)
+				}
+				if _, out := authority.OutOfSync(); !out {
+					t.Fatal("outage not reported out of sync")
 				}
 			}
 		})
+	}
+}
+
+// F21-17: during a control-plane outage the edge keeps serving its last good public decisions and
+// stops asking on every request; restricted decisions lapse at their expiry; the first good refresh
+// after the outage replaces the set (a decision withdrawn meanwhile is gone).
+func TestIngressAuthorityKeepsPublicDecisionsThroughAControlOutage(t *testing.T) {
+	var calls atomic.Int32
+	var down atomic.Bool
+	public := ingressAuthorityTestDecision(time.Now().UTC())
+	restricted := public
+	restricted.DecisionID, restricted.Binding.Hostname, restricted.Binding.Audience = "decision_02", "team.customer.test", "team"
+	restricted.PrincipalID, restricted.GrantID, restricted.GrantGeneration, restricted.MembershipGeneration = "principal_01", "grant_01", 1, 1
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		if down.Load() {
+			w.WriteHeader(503)
+			return
+		}
+		now := time.Now().UTC()
+		p, q := public, restricted
+		p.IssuedAt, p.ExpiresAt = now, now.Add(150*time.Millisecond)
+		q.IssuedAt, q.ExpiresAt = now, now.Add(150*time.Millisecond)
+		decisions := []connectorprotocol.IngressDecision{p, q}
+		if calls.Load() > 3 { // after the outage the restricted route was withdrawn
+			decisions = decisions[:1]
+		}
+		json.NewEncoder(w).Encode(map[string]any{"complete": true, "decisions": decisions})
+	}))
+	defer server.Close()
+	client, err := NewHTTPClient(HTTPConfig{BaseURL: server.URL, Client: server.Client(), Credential: strings.Repeat("x", 32), Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority := &IngressAuthority{Client: client, NodeID: public.EdgeNodeID, ProcessEpoch: public.EdgeProcessEpoch}
+	if got, err := authority.Snapshot(t.Context()); err != nil || len(got) != 2 {
+		t.Fatalf("initial snapshot: %d %v", len(got), err)
+	}
+	down.Store(true)
+	time.Sleep(200 * time.Millisecond) // both decisions expired
+	got, err := authority.Snapshot(t.Context())
+	if err != nil || len(got) != 1 || got[0].Binding.Audience != "public" || got[0].Validate(time.Now().UTC()) != nil {
+		t.Fatalf("outage: %d decisions %v, want the public one renewed", len(got), err)
+	}
+	if _, out := authority.OutOfSync(); !out {
+		t.Fatal("outage not reported out of sync")
+	}
+	during := calls.Load()
+	for i := 0; i < 50; i++ {
+		if _, err := authority.Snapshot(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if extra := calls.Load() - during; extra > 1 {
+		t.Fatalf("%d fetches during backoff, want at most one", extra)
+	}
+	down.Store(false)
+	calls.Store(3)
+	authority.mu.Lock()
+	authority.retryAt = time.Time{}
+	authority.mu.Unlock()
+	authority.Invalidate()
+	got, err = authority.Snapshot(t.Context())
+	if err != nil || len(got) != 1 || got[0].Binding.Audience != "public" {
+		t.Fatalf("after the outage: %d %v", len(got), err)
+	}
+	if _, out := authority.OutOfSync(); out {
+		t.Fatal("still out of sync after a good refresh")
 	}
 }
