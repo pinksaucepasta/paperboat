@@ -3179,3 +3179,4 @@ Waits for Lane A/coordinator GO: device check of both (hp/victus down). Leftover
 Adopt on pprbtdev made up to 49 pending pull-only assignments; nothing approved; after unadopt: 52 revoked, 0 pending.
 2026-10-23 | Lane O F13-07 | [x]: plus-address sign-up refused with "sign in with that address" (user decision option a, no silent merge); live refusal on server .44 + Lane B's registration Action/PG tests.
 2026-10-23 | Lane X | PLAN 3b "Robustness gaps vs reference implementations": 17 ranked gaps; #1 (peer network expires 2 min → data plane dies with control): user decided "until revoked"; briefs sent to A, B, Q, R; rows CHECKLIST F21.
+2026-10-23 | Lane S F19 | F19-10, F19-14, C254, C258 L ticked (team_business.py run 14, pbvm2, dev-edcad00f, server .44). Live via Keycloak test IdP + scripted SCIM: F19-02..06 main paths seen. Fixed: stream claim 46429582, held directory invitations (mig 149), actor.token_id, CLI F19 messages; F19-07 waits that deploy.

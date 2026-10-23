@@ -34,9 +34,11 @@ def wr(n, v):
     os.write(fd, v.encode()); os.close(fd)
 cmd = sys.argv[1]
 if cmd == 'token':
-    out = subprocess.run([sys.argv[2], 'api-token', 'create', sys.argv[3], '--expires', '1d', '--workspace', sys.argv[4], '--json'], capture_output=True, text=True)
+    # token PB NAME WORKSPACE [FILE [SCOPE]]: a one-day API token, its secret only in FILE.
+    extra = ['--scope', sys.argv[6]] if len(sys.argv) > 6 else []
+    out = subprocess.run([sys.argv[2], 'api-token', 'create', sys.argv[3], '--expires', '1d', '--workspace', sys.argv[4], '--json'] + extra, capture_output=True, text=True)
     d = json.loads(out.stdout); d = d.get('data', d)
-    wr('.f19tok', d['secret']); wr('.f19hdr', os.urandom(16).hex())
+    wr(sys.argv[5] if len(sys.argv) > 5 else '.f19tok', d['secret']); wr('.f19hdr', os.urandom(16).hex())
     print(d['api_token']['id'])
 elif cmd == 'api':
     method, path = sys.argv[2], sys.argv[3]
@@ -47,7 +49,7 @@ elif cmd == 'api':
                 body[k] = rd(v[1:])
     req = urllib.request.Request(sys.argv[5] if len(sys.argv) > 5 else rd('.f19api') + path, method=method,
         data=json.dumps(body).encode() if body is not None else None,
-        headers={'Authorization': 'Bearer ' + rd('.f19tok'), 'Content-Type': 'application/json'})
+        headers={'Authorization': 'Bearer ' + rd(os.environ.get('F19TOK', '.f19tok')), 'Content-Type': 'application/json'})
     try:
         with urllib.request.urlopen(req, timeout=60) as r:
             status, raw = r.status, r.read()
@@ -118,7 +120,15 @@ class Check:
         return done.returncode, done.stdout, done.stderr
 
     def pb(self, *args, **kw):
-        return self.run([self.a.pb] + list(args), **kw)
+        """Runs pb; a response lost on the way back ("Paperboat is unreachable") is retried twice,
+        since this check is about F19 behaviour, not the machine's network."""
+        for attempt in range(3):
+            rc, out, err = self.run([self.a.pb] + list(args), **kw)
+            if rc == 0 or 'is unreachable' not in out + err:
+                break
+            print('RETRY pb ' + ' '.join(args[:3]) + ': unreachable')
+            time.sleep(3)
+        return rc, out, err
 
     def pbj(self, *args):
         rc, out, err = self.pb(*args, '--json')
@@ -158,10 +168,14 @@ def roles(c, team):
         return None
     member, original = others[0]['account_id'], others[0]['role']
     for role in ['auditor', 'billing', original]:
-        gen = str(c.pbj('team', 'get', team)['generation'])
-        rc, out, err = c.pb('team', 'role', team, member, role, '--generation', gen)
-        now = [m['role'] for m in c.pbj('team', 'get', team)['members'] if m['account_id'] == member]
-        c.step('pb team role sets ' + role, rc == 0 and now == [role], out + err)
+        now, out, err = [], '', ''
+        for attempt in range(3):  # a retried change can meet a newer generation: read it again
+            gen = str(c.pbj('team', 'get', team).get('generation'))
+            rc, out, err = c.pb('team', 'role', team, member, role, '--generation', gen)
+            now = [m['role'] for m in c.pbj('team', 'get', team).get('members', []) if m['account_id'] == member]
+            if now == [role]:
+                break
+        c.step('pb team role sets ' + role, now == [role], out + err)
     return member
 
 
@@ -172,6 +186,63 @@ def identity(c, team):
            and sso.get('seats', 0) >= sso.get('min_seats', 1) and 'required' in (sso.get('sso') or {}), sso)
     rc, out, err = c.pb('team', 'scim', 'status', team)
     c.step('pb team scim status reads the directory state', rc == 0 and 'Directory:' in out, out + err)
+
+
+def machine_access(c, start):
+    """F19-07 in the personal workspace: an exec from this machine to --peer is recorded as
+    machine.access_started; the peer, signed in with an API token that may only exec on itself,
+    is refused exec on this machine and that is recorded as machine.access_denied with reason
+    outside_token_scope and the token. Both are read back from the personal audit log. The peer's
+    CLI session is replaced by the token and ends when it is revoked."""
+    d = c.pbj('machine', 'list')
+    machines = d if isinstance(d, list) else (d.get('machines') or d.get('items') or []) if isinstance(d, dict) else []
+    ids = {m.get('alias'): m['id'] for m in machines}
+    me, peer = ids.get(c.a.alias), ids.get(c.a.peer_alias)
+    if not c.step('find this machine and the peer', me and peer, sorted(k for k in ids if k)):
+        return
+    marker = 'f19-access-%d' % time.time()
+    for attempt in range(9):  # a new machine reaches the peer network asynchronously
+        rc, out, err = c.pb('exec', peer, '--', 'echo', marker)
+        if rc == 0 and marker in out:
+            break
+        time.sleep(10)
+    c.step('exec on the peer works', rc == 0 and marker in out, out + err)
+    tag = 'f19-%d' % time.time()
+    rc, out, err = c.run(['python3', '.f19helper.py', 'token', c.a.pb, tag + '-read', 'personal', '.f19ptok'])
+    rc2, out2, err2 = c.run(['python3', '.f19helper.py', 'token', c.a.pb, tag + '-scoped', 'personal', '.f19stok',
+                             json.dumps([{'dst': ['machine:' + c.a.peer_alias], 'allow': ['exec']}])])
+    if not c.step('create a reader token and a token that may only exec on the peer', rc == 0 and rc2 == 0, err + err2):
+        return
+    try:
+        rc, secret, err = c.run(['cat', '.f19stok'])
+        done = subprocess.run(shlex.split(c.a.peer_cmd) + ['bash -lc ' + shlex.quote(c.a.pb + ' login --api-token-file -')],
+                              input=secret.strip() + '\n', capture_output=True, text=True, timeout=120)
+        secret = ''
+        c.step('the peer signs in with the scoped token', done.returncode == 0, done.stdout + done.stderr)
+        done = subprocess.run(shlex.split(c.a.peer_cmd) + ['bash -lc ' + shlex.quote(c.a.pb + ' exec ' + me + ' -- true')],
+                              capture_output=True, text=True, timeout=180)
+        c.step('the peer is refused exec here (outside the token scope)', done.returncode != 0 and 'scope' in (done.stdout + done.stderr).lower(),
+               done.stdout + done.stderr)
+
+        def events():
+            r = c.run(['env', 'F19TOK=.f19ptok', 'python3', '.f19helper.py', 'api', 'GET',
+                       '/v1/activity?workspace=personal&action=machine&since=' + start + '&limit=100'])[1]
+            try:
+                data = json.loads(r).get('data') or {}
+            except ValueError:
+                return []
+            return data.get('items') or [] if isinstance(data, dict) else []
+        found = wait(lambda: (lambda e: e if any(x['action'] == 'machine.access_denied' for x in e) else None)(events()), 60) or events()
+        started = [e for e in found if e['action'] == 'machine.access_started' and e['target'].get('id') == peer]
+        denied = [e for e in found if e['action'] == 'machine.access_denied' and e['target'].get('id') == me]
+        c.step('the access start is in the personal log (machine target, capability, actor)', started and started[0]['result'] == 'success'
+               and started[0]['target']['kind'] == 'machine' and started[0]['details'].get('capability') == 'exec' and '@' in started[0]['actor'].get('email', ''), found)
+        c.step('the refusal is in the personal log with reason and token', denied and denied[0]['result'] == 'denied'
+               and denied[0].get('reason') == 'outside_token_scope' and denied[0]['actor'].get('token_id'), found)
+    finally:
+        for name in (tag + '-scoped', tag + '-read'):
+            c.pb('api-token', 'revoke', name, '--yes', '--workspace', 'personal')
+        c.run(['rm', '-f', '.f19ptok', '.f19stok'])
 
 
 def search(c, start, owner):
@@ -240,6 +311,12 @@ def touch_role(c, member):
         c.pb('team', 'role', c.a.team, member, role, '--generation', gen)
 
 
+def streams(c, team):
+    """The team's stream destinations; [] when a poll fails (e.g. during a server rollout)."""
+    data = c.api('GET', '/v1/teams/%s/audit-streams' % team).get('data')
+    return [d for d in data if isinstance(d, dict)] if isinstance(data, list) else []
+
+
 def tunnel(c, target):
     d = c.pbj('tunnel', '--ephemeral', target, '--background')
     return d.get('endpoint', ''), d.get('id', '')
@@ -248,7 +325,8 @@ def tunnel(c, target):
 def stream_https(c, team, member):
     """F19-10 HTTPS: signed NDJSON with the custom header, test event, in order, refused batch retried."""
     c.run(['rm', '-f', 'f19recv.jsonl', 'f19recv.fail'])
-    c.run(['bash', '-c', 'nohup python3 .f19helper.py serve 8099 >/dev/null 2>&1 &'])
+    c.api('DELETE', '/v1/teams/%s/audit-streams/https' % team)  # a stream left by an interrupted run
+    c.run(['bash', '-c', 'nohup python3 .f19helper.py serve 8099 >/dev/null 2>&1 & for i in $(seq 20); do curl -s -o /dev/null http://127.0.0.1:8099/ && break; sleep 0.5; done'])
     url, tid = tunnel(c, '8099')
     if not c.step('publish the receiver with pb tunnel', url.startswith('https://'), url):
         return tid
@@ -266,13 +344,18 @@ def stream_https(c, team, member):
     c.step('events arrive in order without gaps from the stream start', ids == sorted(ids, key=ids.index) and len(ids) == len(set(ids)), ids)
     c.run(['touch', 'f19recv.fail'])
     touch_role(c, member)
-    failing = wait(lambda: [d for d in c.api('GET', '/v1/teams/%s/audit-streams' % team)['data'] or [] if d['kind'] == 'https' and d.get('last_error')], 90)
+    failing = wait(lambda: [d for d in streams(c, team) if d['kind'] == 'https' and d.get('last_error')], 90)
     c.step('a refused batch shows the error and pending events', failing and failing[0]['pending'] >= 1 and '503' in failing[0]['last_error'], failing)
     c.run(['rm', '-f', 'f19recv.fail'])
     before = len(ids)
-    ok = wait(lambda: [d for d in c.api('GET', '/v1/teams/%s/audit-streams' % team)['data'] or [] if d['kind'] == 'https' and not d.get('last_error') and d['pending'] == 0], 600)  # backoff doubles from 5 s
+    back = time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime())
+    # Recovered: the error is cleared, a delivery happened after the receiver came back and the
+    # held events arrived. (pending need not reach 0: events inside the 30 s settle window of a
+    # busy team are always pending.)
+    ok = wait(lambda: [d for d in streams(c, team) if d['kind'] == 'https' and not d.get('last_error')
+                       and (d.get('last_delivered_at') or '') >= back], 600)  # backoff doubles from 10 s
     after = [e[0] for x in received(c) for e in x['events'] if not e[0].startswith('test_')]
-    c.step('it is retried and delivered once the receiver is back', ok and len(after) >= before + 2 and ok[0].get('last_delivered_at'), [ok, after[-4:]])
+    c.step('it is retried and delivered once the receiver is back', ok and len(after) >= before + 2, [ok, after[-4:]])
     r = c.api('DELETE', '/v1/teams/%s/audit-streams/https' % team)
     c.step('stop the HTTPS stream', r['status'] in (200, 204), r)
     return tid
@@ -282,6 +365,7 @@ def stream_s3(c, team, member):
     """F19-10 S3: gzip NDJSON objects under prefix/workspace/date, signed with SigV4, checked by a real S3 server."""
     c.run(['bash', '-c', 'nohup python3 .f19helper.py forward 8097 %s >/dev/null 2>&1 &' % shlex.quote(c.a.s3_origin)])
     time.sleep(1)
+    c.api('DELETE', '/v1/teams/%s/audit-streams/s3' % team)
     url, tid = tunnel(c, '8097')
     if not c.step('publish the S3 store with pb tunnel', url.startswith('https://'), url):
         return tid
@@ -312,6 +396,9 @@ def main():
     p.add_argument('--pb', default='/home/tester/.local/bin/pb')
     p.add_argument('--s3-root', default='/tmp/vgw', help='the store\'s data directory in --s3-list-cmd')
     p.add_argument('--api', default='https://api.pprbt.dev')
+    p.add_argument('--alias', default='', help='this machine\'s name, for the F19-07 access steps')
+    p.add_argument('--peer-alias', default='', help='a second throwaway machine of the account (F19-07)')
+    p.add_argument('--peer-cmd', default='', help='runs commands on the peer; its CLI session is replaced')
     p.add_argument('--s3-origin', default='', help='host:port of the S3-compatible store, reachable from the machine')
     p.add_argument('--s3-list-cmd', default='')
     p.add_argument('--s3-region', default='eu-central-1')
@@ -323,6 +410,8 @@ def main():
     start = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(time.time() - 5))
     member = roles(c, a.team)
     identity(c, a.team)
+    if a.alias and a.peer_cmd:
+        machine_access(c, start)
     token = 'f19-check-%d' % time.time()
     rc, out, err = c.run(['python3', '.f19helper.py', 'token', a.pb, token, a.team])
     c.step('create a one-day API token for stream setup', rc == 0 and out.strip() != '', err[-300:])
@@ -335,6 +424,8 @@ def main():
             if a.s3_origin:
                 tunnels.append(stream_s3(c, a.team, member))
     finally:
+        for kind in ('https', 's3'):
+            c.api('DELETE', '/v1/teams/%s/audit-streams/%s' % (a.team, kind))
         for tid in tunnels:
             if tid:
                 c.pb('tunnel', 'stop', tid)
