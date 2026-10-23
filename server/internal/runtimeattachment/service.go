@@ -403,6 +403,23 @@ func (s *Service) Pull(ctx context.Context, edge previewattachment.PreviewEdgeId
 // again; readers treat a ready carrier as fresh for 30 seconds.
 const observationRefresh = 10 * time.Second
 
+// PullEndpoints returns only the endpoint route admissions of the edge's snapshot (the routes of
+// the agents' runtime carriers on this edge); the edge pulls it often and merges it with its last
+// full runtime snapshot.
+func (s *Service) PullEndpoints(ctx context.Context, edge previewattachment.PreviewEdgeIdentity) ([]runtimewire.Admission, error) {
+	if err := endpoints.RecordEdgeServes(ctx, s.DB.Pool(), edge.NodeID, edge.ProcessEpoch); err != nil {
+		return nil, err
+	}
+	routes, err := endpoints.EdgeAdmissions(ctx, s.DB.Pool(), edge.NodeID, edge.ProcessEpoch, admission.Deadline(time.Now(), s.AdmissionLifetime), runtimewire.MaximumAdmissions)
+	if err != nil {
+		return nil, err
+	}
+	if len(routes) > runtimewire.MaximumAdmissions {
+		return nil, ErrUnavailable
+	}
+	return routes, nil
+}
+
 func (s *Service) Observe(ctx context.Context, edge previewattachment.PreviewEdgeIdentity, observations []runtimewire.Observation) error {
 	if len(observations) > runtimewire.MaximumAdmissions {
 		return ErrInvalid

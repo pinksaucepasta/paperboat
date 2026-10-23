@@ -20,6 +20,11 @@ const HostPath = "/v1/runtime/carrier-attachment"
 const EdgePullPath = "/v1/edge/runtime/carrier-admissions"
 const EdgeObservePath = "/v1/edge/runtime/carrier-observations"
 
+// EdgeEndpointPullPath returns only the endpoint routes of an edge's runtime snapshot (PLAN 3a). It
+// is small, so an edge pulls it at its preview interval and a new preview or tunnel route is
+// admitted within a second instead of waiting for the next full runtime pull.
+const EdgeEndpointPullPath = "/v1/edge/runtime/endpoint-admissions"
+
 type EdgeCandidate struct {
 	NodeID        string `json:"node_id"`
 	ProcessEpoch  string `json:"process_epoch"`

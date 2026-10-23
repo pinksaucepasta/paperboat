@@ -72,7 +72,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": admission})
 		return
 	}
-	if r.URL.Path != runtimewire.EdgePullPath && r.URL.Path != runtimewire.EdgeObservePath {
+	if r.URL.Path != runtimewire.EdgePullPath && r.URL.Path != runtimewire.EdgeObservePath && r.URL.Path != runtimewire.EdgeEndpointPullPath {
 		writeError(w, 404, "not_found")
 		return
 	}
@@ -99,6 +99,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if edge.NodeID != request.NodeID || edge.ProcessEpoch != request.ProcessEpoch {
 		writeError(w, 401, "edge_identity_invalid")
+		return
+	}
+	if r.URL.Path == runtimewire.EdgeEndpointPullPath {
+		if len(request.Observations) != 0 || len(request.Capabilities) != 1 || request.Capabilities[0] != runtimewire.CapabilityEndpoints {
+			writeError(w, 400, "invalid_request")
+			return
+		}
+		admissions, err := h.Service.PullEndpoints(r.Context(), edge)
+		if err != nil {
+			serviceError(w, r, err)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(runtimewire.Snapshot{Schema: runtimewire.Schema, Complete: true, Admissions: &admissions})
 		return
 	}
 	if r.URL.Path == runtimewire.EdgePullPath {
@@ -147,7 +160,7 @@ func serviceError(w http.ResponseWriter, r *http.Request, err error) {
 			statusErr = supportreport.WithExpectedRetryableStatus(http.StatusServiceUnavailable, err)
 		}
 		operation := "http_other"
-		if r.URL.Path == runtimewire.EdgePullPath || r.URL.Path == runtimewire.EdgeObservePath {
+		if r.URL.Path == runtimewire.EdgePullPath || r.URL.Path == runtimewire.EdgeObservePath || r.URL.Path == runtimewire.EdgeEndpointPullPath {
 			operation = "http_edge"
 		}
 		supportreport.CaptureFromContext(r.Context(), "paperboat-server", operation, "service_error", "carrier_unavailable", statusErr)
