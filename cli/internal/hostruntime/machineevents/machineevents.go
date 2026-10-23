@@ -146,21 +146,24 @@ func NewWithWaiter(wait WaitFunc, fallback time.Duration) (*Hub, error) {
 	return &Hub{wait: wait, fallback: fallback, subs: make(map[Topic][]*Subscription), known: make(map[Topic]int64), changed: make(chan struct{})}, nil
 }
 
-// Subscribe registers interest in a topic. Subscribe before Start, or at any time; a topic that is
-// already known to have changed wakes the new subscriber once, so it refreshes right away.
-func (h *Hub) Subscribe(topic Topic) *Subscription {
+// Subscribe registers interest in one or more topics; the subscription wakes when any of them moves.
+// Subscribe before Start, or at any time; a topic that is already known to have changed wakes the new
+// subscriber once, so it refreshes right away.
+func (h *Hub) Subscribe(topics ...Topic) *Subscription {
 	if h == nil {
 		return nil
 	}
 	sub := &Subscription{hub: h, wake: make(chan struct{}, 1)}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if _, subscribed := h.known[topic]; !subscribed {
-		h.known[topic] = 0
-		close(h.changed)
-		h.changed = make(chan struct{})
+	for _, topic := range topics {
+		if _, subscribed := h.known[topic]; !subscribed {
+			h.known[topic] = 0
+			close(h.changed)
+			h.changed = make(chan struct{})
+		}
+		h.subs[topic] = append(h.subs[topic], sub)
 	}
-	h.subs[topic] = append(h.subs[topic], sub)
 	return sub
 }
 

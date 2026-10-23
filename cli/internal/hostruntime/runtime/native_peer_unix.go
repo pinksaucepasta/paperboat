@@ -51,8 +51,9 @@ type productionNativePeerConfig struct {
 	inspector                                http.Handler
 	inspectorStore                           *inspector.Store
 	usage                                    *bandwidth.Recorder
-	// networkEvents wakes the signed-network renewal when the server reports a peer or key change;
-	// nil leaves the periodic renewal alone.
+	// networkEvents wakes the signed-network renewal when the server reports a peer or key change
+	// (peer_network) or a machine joining or leaving (inventory): a newly paired machine enters the mesh
+	// when it first comes online, which moves only inventory. nil leaves the periodic renewal alone.
 	networkEvents *machineevents.Subscription
 }
 

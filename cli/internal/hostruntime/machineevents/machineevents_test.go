@@ -181,3 +181,33 @@ func TestShutdownRightAfterStartStopsTheLoopWithoutPanicking(t *testing.T) {
 		}
 	}
 }
+
+// A newly paired machine enters the peer mesh when it first comes online, which moves only inventory;
+// a host engine waiting on peer_network alone learned of it at its next periodic refresh (N2 on pbvm2:
+// the first exec from a fresh machine waited 12 s for the relay to forward to the existing one). One
+// subscription to several topics wakes on any of them.
+func TestSubscriptionToSeveralTopicsWakesOnEach(t *testing.T) {
+	hub, _, plane := eventstest.Start(t, time.Hour, machineevents.TopicPreviews)
+	sub := hub.Subscribe(machineevents.TopicPeerNetwork, machineevents.TopicInventory)
+	drain := func() {
+		select {
+		case <-sub.Changed():
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
+	drain() // a subscription to a newly known topic may wake once
+	for _, topic := range []machineevents.Topic{machineevents.TopicInventory, machineevents.TopicPeerNetwork} {
+		plane.Publish(topic)
+		select {
+		case <-sub.Changed():
+		case <-time.After(2 * time.Second):
+			t.Fatalf("a change to %s did not wake the subscription", topic)
+		}
+	}
+	plane.Publish(machineevents.TopicPreviews)
+	select {
+	case <-sub.Changed():
+		t.Fatal("a change to another topic woke the subscription")
+	case <-time.After(300 * time.Millisecond):
+	}
+}
