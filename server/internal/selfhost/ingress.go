@@ -240,6 +240,10 @@ func (s *Service) ReconcileIngress(ctx context.Context) (returnErr error) {
 		return nil
 	}
 	s.ingressCursor = ids[len(ids)-1]
+	probe := s.VerifyIngress
+	if s.ProbeIngress != nil {
+		probe = s.ProbeIngress
+	}
 	var probes sync.WaitGroup
 	var firstProbeErr error
 	var firstProbeErrMu sync.Mutex
@@ -248,7 +252,7 @@ func (s *Service) ReconcileIngress(ctx context.Context) (returnErr error) {
 			break
 		}
 		probes.Go(func() {
-			if err := s.VerifyIngress(ctx, id); err != nil {
+			if err := probe(ctx, id); err != nil {
 				fault := supportreport.ProjectFault(ctx, "paperboat-server", "worker_edge_dns", "reconciliation", "edge_dns_reconcile_failed", err)
 				if fault.Outcome == "canceled" {
 					return

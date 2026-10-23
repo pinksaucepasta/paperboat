@@ -42,6 +42,8 @@ type Service struct {
 	ControlURL              string
 	TrustDocuments          func(context.Context) ([]byte, []byte, error)
 	DialAddress             func(context.Context, string) (string, error)
+	// ProbeIngress replaces VerifyIngress inside ReconcileIngress when set (tests hold probes open).
+	ProbeIngress            func(context.Context, string) error
 }
 
 func New(database *db.DB, encryptionKey string) *Service {

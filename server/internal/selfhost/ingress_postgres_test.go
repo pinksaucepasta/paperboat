@@ -87,6 +87,12 @@ func TestIngressReconciliationFairnessAndCancellationOnPostgres(t *testing.T) {
 	}
 	// Cancellation while a bounded batch is owned must finish before another
 	// run acquires its ownership lock. Repeated runs also exercise cursor sharing.
+	// Real probes can finish before the cancel (their lookups fail fast without public DNS),
+	// leaving no batch owned. Hold each probe until its batch is cancelled.
+	service.ProbeIngress = func(ctx context.Context, _ string) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}
 	cancelledRuns := 0
 	for range 3 {
 		service.ingressCursor = ""
