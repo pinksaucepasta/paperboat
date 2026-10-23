@@ -2,9 +2,9 @@
 """Data-plane performance from this machine to a target, checked against perf_budgets.
 
 Measures `pb exec true` latency, pb send / managed scp throughput of a 50 MiB file,
-managed rsync of many small files and the selected path, then compares each number with
-the budget for that path. Prints one JSON receipt (numbers only; no file or command
-contents). Usage: perf_dataplane.py <target> [--no-budget]
+managed rsync of many small files, the selected path, and how fast `pb --version` and
+`pb status` answer locally, then compares each number with the budget for that path. Prints
+one JSON receipt (numbers only; no file or command contents). Usage: perf_dataplane.py <target> [--no-budget]
 """
 import argparse
 import hashlib
@@ -54,6 +54,11 @@ def selected_path(target):
     return samples[-1].get('path') or 'none' if samples else 'none'
 
 
+def local_command_ms(*arguments, runs=7):
+    """Median wall time of a local pb command that must not wait on the network."""
+    return round(statistics.median(pb(*arguments, timeout=60) for _ in range(runs)) * 1000)
+
+
 def exec_latency(target, runs=9):
     pb('exec', target, '--', 'true', timeout=120)  # warm the session and path
     samples = sorted(pb('exec', target, '--', 'true', timeout=120) for _ in range(runs))
@@ -76,6 +81,8 @@ def main():
     before = registration()
     run = 'perf-' + uuid.uuid4().hex[:12]
     metrics = {'path': selected_path(args.target)}
+    metrics['cli_start_ms'] = local_command_ms('--version')
+    metrics['status_ms'] = local_command_ms('status')
     metrics['exec_true_median_ms'], metrics['exec_true_max_ms'] = exec_latency(args.target)
     with tempfile.TemporaryDirectory(prefix=run) as directory:
         root = Path(directory)
@@ -112,7 +119,7 @@ def main():
                 'd.parent.name=="Paperboat" and shutil.rmtree(d,ignore_errors=True)\n'))
     budget = BUDGETS.get(metrics['path'], {})
     failures = [] if args.no_budget else [
-        name for name, (kind, bound) in budget.items()
+        name for name, (kind, bound) in (budget | BUDGETS['cli']).items()
         if name in metrics and (metrics[name] > bound if kind == 'max' else metrics[name] < bound)]
     if not budget and not args.no_budget:
         failures = [f'no budget for path {metrics["path"]}']
