@@ -2,7 +2,9 @@
 // against the live server. Paste into a signed-in tab of the console. It reads GET /v1/github/status,
 // checks Config sync shows it; starts a console connect (POST /v1/github/oauth/start) without
 // following it and checks it leads to GitHub's authorization page and that a foreign return_to is
-// refused; opens /github/connect with an incomplete and an unknown link; and renders /github/done
+// refused; returns through /github/callback with a real state and a bad code (GitHub's refusal must
+// show there, not "unauthenticated"); opens /github/connect with an incomplete and an unknown link;
+// and renders /github/done
 // for a success, an error and a return to Config sync. It never authorizes anything on GitHub or
 // disconnects an existing connection. Prints the steps (window.__checkSteps).
 ;(async () => {
@@ -52,6 +54,23 @@
   pass("Connect starts GitHub's authorization", ok.status === 200 && /^https:\/\/github\.com\/login\/oauth\/authorize\?/.test(url), `${ok.status}`)
   const foreign = await start("//example.test/x")
   pass("a return_to outside the console is refused", foreign.status === 400 && foreign.body?.error?.code === "invalid_return_to", `${foreign.status} ${foreign.body?.error?.code ?? ""}`)
+
+  // The real return of a console connect: GitHub → the server's callback → /github/callback here,
+  // which finishes it with the console session. A real state from oauth/start and a code GitHub
+  // never issued must end in GitHub's refusal shown on the page, not "unauthenticated".
+  const state = new URL(url).searchParams.get("state")
+  pass("GitHub's authorization carries a state", Boolean(state))
+  await go(`/github/callback?code=check-not-a-github-code&state=${encodeURIComponent(state)}`, () =>
+    document.querySelector("[data-github-callback=error],[data-github-callback=connected]"),
+  )
+  pass(
+    "a bad code comes back as GitHub's refusal, through the console session",
+    /GitHub couldn’t confirm the connection/.test(body()) && !/Authentication is required/.test(body()),
+    body().slice(0, 140),
+  )
+  pass("the page offers the way back to Config sync", [...document.querySelectorAll("a")].some((a) => a.getAttribute("href") === "/config"))
+  // Same route as the step before, so wait for this page's own sentence.
+  pass("declining on GitHub says so", Boolean(await go("/github/callback?error=access_denied&state=x", () => /You declined on GitHub/.test(body()))))
 
   // pb's link: incomplete, and unknown.
   await go("/github/connect?link=check", () => /incomplete/.test(body()))

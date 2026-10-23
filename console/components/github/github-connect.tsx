@@ -5,7 +5,7 @@ import { useMutation, useQuery } from "@tanstack/react-query"
 import { useSearchParams } from "next/navigation"
 import { useSyncExternalStore } from "react"
 import { ApiError } from "@/lib/api"
-import { approveLink, cancelLink, githubErrors, reviewLink } from "@/lib/github"
+import { approveLink, cancelLink, finishConnect, githubErrors, reviewLink } from "@/lib/github"
 import { useTimeFormat } from "@/lib/use-time-format"
 import { BrandScreen, Heading, Outcome, brandPrimary, brandSecondary } from "@/components/brand-screen"
 import { Button } from "@/components/ui/button"
@@ -150,6 +150,51 @@ export function GitHubDone() {
           </Outcome>
         )}
         {returnTo && (
+          <Button size="lg" className={brandPrimary} nativeButton={false} render={<a href={returnTo} />}>
+            Back to Config sync
+          </Button>
+        )}
+      </div>
+    </BrandScreen>
+  )
+}
+
+/**
+ * Where GitHub returns a connect started in the console (/github/callback?code=…&state=…, sent here
+ * by the server's registered callback). The exchange is finished through the console, with its
+ * session; the result shows here with the way back to where it started.
+ */
+export function GitHubCallback() {
+  const params = useSearchParams()
+  const code = params.get("code") ?? ""
+  const state = params.get("state") ?? ""
+  const declined = params.get("error")
+  const finish = useQuery({
+    queryKey: ["github-callback", state],
+    queryFn: () => finishConnect(code, state),
+    enabled: Boolean(code && state && !declined),
+    retry: false,
+    staleTime: Infinity,
+  })
+  const errorCode = declined ?? (finish.error instanceof ApiError ? finish.error.code : finish.error ? "provider_unavailable" : "")
+  const back = finish.data?.return_to
+  const returnTo = back && back.startsWith("/") && !back.startsWith("//") ? back : "/config"
+  return (
+    <BrandScreen>
+      <div className="flex flex-col items-center gap-6" data-github-callback={finish.data ? "connected" : errorCode ? "error" : "pending"}>
+        {finish.data ? (
+          <Outcome icon={<CheckCircleIcon className="size-8 text-white" />} title="GitHub connected">
+            Connected as <span className="font-medium text-white">{finish.data.login ?? "your GitHub account"}</span>.
+          </Outcome>
+        ) : errorCode || !code || !state ? (
+          <Outcome icon={<XCircleIcon className="size-8 text-white" />} title="GitHub not connected">
+            {githubErrors[errorCode] ?? (finish.error?.message || "GitHub didn’t send the connection back.")} Try again
+            from Config sync.
+          </Outcome>
+        ) : (
+          <CircleNotchIcon className="mx-auto size-5 animate-spin text-white/75" />
+        )}
+        {(finish.data || errorCode || !code || !state) && (
           <Button size="lg" className={brandPrimary} nativeButton={false} render={<a href={returnTo} />}>
             Back to Config sync
           </Button>

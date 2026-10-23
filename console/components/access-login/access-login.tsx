@@ -34,9 +34,9 @@ function Handoff({ transaction }: { transaction: string }) {
         body: JSON.stringify({ transaction_id: transaction }),
       }),
     retry: false,
-    // One handoff per visit: never fetched again in the background.
+    // One handoff per visit: never fetched again in the background (kept, not refetched, across the
+    // development double mount).
     staleTime: Infinity,
-    gcTime: 0,
   })
   const callback = issue.data && callbackUrl(issue.data.callback_origin)
   useEffect(() => {
