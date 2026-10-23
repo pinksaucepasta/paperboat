@@ -447,6 +447,22 @@ exit "$FAILED"
                 self.assertEqual(result.returncode, int(stop_exit != 0 or stop_id != "preview_owned" or stop_state != "stopped" or create_exit != 0), result.stdout + result.stderr)
                 self.assertIn('preview:hp', result.stdout)
 
+    def test_two_containers_on_one_docker_host_are_not_a_two_host_transfer(self):
+        # transfer-manage and transfer-resume interrupt a transfer in flight; between two containers on one
+        # Docker host it ends first, so they wait for two real hosts. Devices on different hosts still run.
+        prefix = (HERE / 'smoke.sh').read_text().split('# ---------------------------------------------------------------- run')[0]
+        with tempfile.TemporaryDirectory() as directory:
+            script = pathlib.Path(directory) / 'smoke.sh'
+            self.write_script(script, prefix + '\nsame_ct_host a b && echo same-ab\nsame_ct_host a c || echo split-ac\n'
+                              'same_ct_host a d || echo real-ad\n')
+            result = subprocess.run(['bash', str(script), '--expect-version', 'test', '--targets', 'hp'],
+                                    env=dict(os.environ, SMOKE_CT_MAP='a=h1:ct1,b=h1:ct2,c=h2:ct3'),
+                                    capture_output=True, text=True, timeout=15)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn('same-ab', result.stdout)
+            self.assertIn('split-ac', result.stdout)
+            self.assertIn('real-ad', result.stdout)
+
     def test_private_https_reads_the_domain_where_local_access_show_reports_it(self):
         # `pb config local-access show --json` carries the domain at the top level, beside local_access
         # (the machine guard owns it); the check used to read local_access.domain and died on a KeyError.

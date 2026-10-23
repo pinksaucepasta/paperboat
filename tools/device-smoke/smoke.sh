@@ -117,6 +117,10 @@ ct_of() { # ct_of DEVICE: host:container for a device that is a container, else 
   for pair in ${map//,/ }; do [ "${pair%%=*}" = "$1" ] && { echo "${pair#*=}"; return 0; }; done
   return 1
 }
+same_ct_host() { # same_ct_host A B: both devices are containers on one Docker host
+  local a b
+  a=$(ct_of "$1") && b=$(ct_of "$2") && [ "${a%%:*}" = "${b%%:*}" ]
+}
 container_on() { # container_on HOST:CONTAINER CMD... : run as the enrolled user inside the container
   local host=${1%%:*} ct=${1#*:}; shift
   local user=${SMOKE_CT_USER:-pbt} uid=${SMOKE_CT_UID:-1000} docker=${SMOKE_CT_DOCKER:-sudo docker}
@@ -483,6 +487,12 @@ test_application_pairs() {
       esac
       id="$kind:$source-$target"
       skipped "$id" && continue
+      case "$kind" in transfer-manage|transfer-resume)
+        if same_ct_host "$source" "$target"; then
+          record "$id" SKIP 0 "two containers on one Docker host: the transfer ends before the check can interrupt it; judged on two real hosts"
+          continue
+        fi ;;
+      esac
       t0=$(now)
       if ! stage_terminal_fixtures "$source"; then
         record "$id" FAIL 0 "could not stage compressed application fixture"
