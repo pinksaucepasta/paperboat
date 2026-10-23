@@ -965,6 +965,19 @@ func accessLog(logger *slog.Logger, next http.Handler) http.Handler {
 			"path", safeLogPath(r.URL.Path),
 			"status", rec.status,
 			"duration_ms", time.Since(start).Milliseconds(),
+			"client", logClient(r.UserAgent()),
 		)
 	})
+}
+
+// logClient is the caller's User-Agent for the access log ("paperboat/<version>" from pb, or a browser's), with
+// only printable ASCII and at most 80 bytes: request rates per client version are how a polling client is found.
+func logClient(userAgent string) string {
+	out := make([]byte, 0, min(len(userAgent), 80))
+	for i := 0; i < len(userAgent) && len(out) < 80; i++ {
+		if c := userAgent[i]; c >= 0x20 && c < 0x7f {
+			out = append(out, c)
+		}
+	}
+	return string(out)
 }
