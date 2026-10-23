@@ -63,6 +63,10 @@ func TestSQLCertificateDistributionCleanupFencesReplacedProcesses(t *testing.T) 
 	certificates := make([]StoredCertificate, 0, 4)
 	for generation := uint64(1); generation <= 4; generation++ {
 		certificate := fixture.certificate(generation, now)
+		// A durable certificate always names its route; the coordinator sets it
+		// (coordinator.go Ensure), and a stored row without it fails
+		// CertificateTarget.Validate when cleanup reads it back.
+		certificate.TargetKind, certificate.RouteID = TargetDurableRoute, fixture.routeID
 		if err := store.PutStaged(ctx, certificate); err != nil {
 			t.Fatalf("put staged certificate %d: %v", generation, err)
 		}
