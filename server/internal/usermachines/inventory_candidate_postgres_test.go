@@ -68,9 +68,9 @@ configured_capabilities,observed_capabilities) VALUES($1,$2,$1,$3,'linux','amd64
 	machine("team_picked", owner, team, "offline")
 	machine("team_none", member, team, "online")
 	machine("other_team", owner, other, "online")
-	machine("team_tagged", member, team, "online")   // reached by a group rule on a tag
-	machine("team_unruled", member, team, "online")  // no rule: only its team's owner and admins (management)
-	machine("lent", outsider, nil, "online")          // personal, bound, no rule of its own: the admin's every-machine rule
+	machine("team_tagged", member, team, "online")  // reached by a group rule on a tag
+	machine("team_unruled", member, team, "online") // no rule: only its team's owner and admins (management)
+	machine("lent", outsider, nil, "online")        // personal, bound, no rule of its own: the admin's every-machine rule
 	// Shortcut edges: a revoked own machine, and a machine owned by a suspended team, must get exactly what the
 	// full access functions answer.
 	exec(`UPDATE paperboat.user_machines SET revoked_at=now() WHERE id=$1`, m("own_revoked"))
