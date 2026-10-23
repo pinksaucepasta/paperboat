@@ -283,6 +283,12 @@ func auditLifecycleTx(ctx context.Context, tx *db.Tx, actor string, request Requ
 	})
 }
 
+// inboxSourceAllowed is the machine a sender may send from: their own personal machine, or a machine of a
+// team they are an active member of (the same rule as every descriptor's source check). $3 is the sender.
+const inboxSourceAllowed = `(source.owner_team_id IS NULL AND source.user_id=$3
+ OR EXISTS(SELECT 1 FROM team_members tm JOIN teams t ON t.team_id=tm.team_id
+  WHERE tm.team_id=source.owner_team_id AND tm.account_id=$3 AND tm.active AND t.deleted_at IS NULL AND NOT t.suspended))`
+
 // Create records the recipient decision before any payload stream can be opened.
 // Exact machine capability is checked under the same team lock used by Task 39.
 func (s *Service) Create(ctx context.Context, in RequestInput) (Request, error) {
@@ -304,8 +310,10 @@ func (s *Service) Create(ctx context.Context, in RequestInput) (Request, error) 
 		ownedErr := tx.QueryRow(ctx, `SELECT destination.state,destination.online,
  destination.configured_capabilities @> ARRAY['file_receive'],destination.observed_capabilities @> ARRAY['file_receive']
  FROM user_machines source JOIN user_machines destination ON destination.id=$2
- WHERE source.id=$1 AND source.user_id=$3 AND destination.user_id=$3
- AND source.owner_team_id IS NULL AND destination.owner_team_id IS NULL
+ WHERE source.id=$1 AND `+inboxSourceAllowed+`
+ AND destination.user_id=$3
+ AND (destination.owner_team_id IS NULL
+  OR team_machine_capability_allowed($3,destination.owner_team_id,destination.id,'files'))
  AND source.revoked_at IS NULL AND source.deleted_at IS NULL
  AND destination.revoked_at IS NULL AND destination.deleted_at IS NULL`, in.SourceMachineID, in.DestinationMachineID, in.SenderAccount).Scan(&destinationState, &online, &configured, &observed)
 		if ownedErr == nil {
@@ -319,7 +327,7 @@ func (s *Service) Create(ctx context.Context, in RequestInput) (Request, error) 
 			return ownedErr
 		}
 		var recipient, team string
-		err := tx.QueryRow(ctx, `SELECT destination.user_id,b.team_id,destination.state,destination.online,destination.configured_capabilities @> ARRAY['file_receive'],destination.observed_capabilities @> ARRAY['file_receive'] FROM user_machines source JOIN user_machines destination ON destination.id=$2 JOIN team_resource_bindings b ON b.resource_kind='machine' AND b.resource_id=destination.id AND b.active JOIN team_members recipient_member ON recipient_member.team_id=b.team_id AND recipient_member.account_id=destination.user_id AND recipient_member.active WHERE source.id=$1 AND source.user_id=$3 AND source.revoked_at IS NULL AND source.deleted_at IS NULL AND destination.user_id<>$3 AND destination.revoked_at IS NULL AND destination.deleted_at IS NULL AND team_machine_capability_allowed($3,b.team_id,destination.id,'files') ORDER BY b.team_id LIMIT 1`, in.SourceMachineID, in.DestinationMachineID, in.SenderAccount).Scan(&recipient, &team, &destinationState, &online, &configured, &observed)
+		err := tx.QueryRow(ctx, `SELECT destination.user_id,b.team_id,destination.state,destination.online,destination.configured_capabilities @> ARRAY['file_receive'],destination.observed_capabilities @> ARRAY['file_receive'] FROM user_machines source JOIN user_machines destination ON destination.id=$2 JOIN team_resource_bindings b ON b.resource_kind='machine' AND b.resource_id=destination.id AND b.active JOIN team_members recipient_member ON recipient_member.team_id=b.team_id AND recipient_member.account_id=destination.user_id AND recipient_member.active WHERE source.id=$1 AND `+inboxSourceAllowed+` AND source.revoked_at IS NULL AND source.deleted_at IS NULL AND destination.user_id<>$3 AND destination.revoked_at IS NULL AND destination.deleted_at IS NULL AND team_machine_capability_allowed($3,b.team_id,destination.id,'files') ORDER BY b.team_id LIMIT 1`, in.SourceMachineID, in.DestinationMachineID, in.SenderAccount).Scan(&recipient, &team, &destinationState, &online, &configured, &observed)
 		if noRows(err) {
 			return ErrForbidden
 		}
