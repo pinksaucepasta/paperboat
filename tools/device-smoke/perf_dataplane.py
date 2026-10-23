@@ -56,6 +56,7 @@ def selected_path(target):
 
 def local_command_ms(*arguments, runs=7):
     """Median wall time of a local pb command that must not wait on the network."""
+    pb(*arguments, timeout=60)  # page the binary in
     return round(statistics.median(pb(*arguments, timeout=60) for _ in range(runs)) * 1000)
 
 
@@ -80,9 +81,9 @@ def main():
     args = parser.parse_args()
     before = registration()
     run = 'perf-' + uuid.uuid4().hex[:12]
-    metrics = {'path': selected_path(args.target)}
-    metrics['cli_start_ms'] = local_command_ms('--version')
-    metrics['status_ms'] = local_command_ms('status')
+    # Local commands first: right after network work the daemon is still busy with that session.
+    metrics = {'cli_start_ms': local_command_ms('--version'), 'status_ms': local_command_ms('status')}
+    metrics['path'] = selected_path(args.target)
     metrics['exec_true_median_ms'], metrics['exec_true_max_ms'] = exec_latency(args.target)
     with tempfile.TemporaryDirectory(prefix=run) as directory:
         root = Path(directory)
