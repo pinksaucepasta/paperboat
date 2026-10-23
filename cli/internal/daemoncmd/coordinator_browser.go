@@ -29,7 +29,7 @@ func (c *Coordinator) prepareBrowserGatewayLocked(ctx context.Context, client gu
 		}
 		return c.updateBrowserGatewayLocked(ctx, client, old, routes, aliases)
 	}
-	byAddress, denied, err := c.browserGatewayRoutes(ctx, client, routes, aliases, nil)
+	byAddress, denied, err := browserGatewayRoutes(routes, aliases)
 	if err != nil {
 		return guardedWebRoute{}, err
 	}
@@ -55,6 +55,9 @@ func (c *Coordinator) prepareBrowserGatewayLocked(ctx context.Context, client gu
 	}
 	if err := client.ReplaceAliases(ctx, aliases); err != nil {
 		return guardedWebRoute{}, coordinatorOperationFailure("browser_aliases", err)
+	}
+	if err := c.issueBrowserRouteCertificates(ctx, client, routes, nil); err != nil {
+		return guardedWebRoute{}, err
 	}
 	state := &browserGatewayState{}
 	state.set(routes, byAddress, denied)
@@ -124,12 +127,15 @@ func (c *Coordinator) prepareBrowserGatewayLocked(ctx context.Context, client gu
 // rebuild left a just-started service unreachable (TLS internal error, connection refused) until the
 // new gateway was up (Lane H: private-https to a fresh port).
 func (c *Coordinator) updateBrowserGatewayLocked(ctx context.Context, client guardedNameClient, old guardedWebRoute, routes map[string]splitdns.BrowserRoute, aliases map[string]string) (guardedWebRoute, error) {
-	byAddress, denied, err := c.browserGatewayRoutes(ctx, client, routes, aliases, old.browserRoutes)
+	byAddress, denied, err := browserGatewayRoutes(routes, aliases)
 	if err != nil {
 		return guardedWebRoute{}, err
 	}
 	if err := client.ReplaceAliases(ctx, aliases); err != nil {
 		return guardedWebRoute{}, coordinatorOperationFailure("browser_aliases", err)
+	}
+	if err := c.issueBrowserRouteCertificates(ctx, client, routes, old.browserRoutes); err != nil {
+		return guardedWebRoute{}, err
 	}
 	if err := old.proxy.SetRoutes(routes, denied); err != nil {
 		return guardedWebRoute{}, coordinatorOperationFailure("browser_proxy", err)
@@ -148,11 +154,10 @@ func (c *Coordinator) updateBrowserGatewayLocked(ctx context.Context, client gua
 	return old, nil
 }
 
-// browserGatewayRoutes validates routes, issues certificates for the names not in previous, and
-// returns the dial index and the denied alias hostnames.
-func (c *Coordinator) browserGatewayRoutes(ctx context.Context, client guardedNameClient, routes map[string]splitdns.BrowserRoute, aliases map[string]string, previous map[string]splitdns.BrowserRoute) (map[string]string, map[string]bool, error) {
+// browserGatewayRoutes validates routes and returns the dial index and the denied alias hostnames.
+func browserGatewayRoutes(routes map[string]splitdns.BrowserRoute, aliases map[string]string) (map[string]string, map[string]bool, error) {
 	byAddress := make(map[string]string, len(routes))
-	for name, route := range routes {
+	for _, route := range routes {
 		if route.MachineID == "" {
 			return nil, nil, errors.New("browser service has no authenticated machine identity")
 		}
@@ -161,15 +166,6 @@ func (c *Coordinator) browserGatewayRoutes(ctx context.Context, client guardedNa
 			return nil, nil, errors.New("ambiguous browser service address")
 		}
 		byAddress[address] = route.MachineID
-		if strings.HasPrefix(name, "*.") {
-			continue
-		}
-		if known, ok := previous[name]; ok && known == route {
-			continue
-		}
-		if _, err := c.issueBrowserCertificate(ctx, client, name, route.MachineID, route.Port); err != nil {
-			return nil, nil, err
-		}
 	}
 	denied := make(map[string]bool)
 	for name, target := range aliases {
@@ -178,6 +174,24 @@ func (c *Coordinator) browserGatewayRoutes(ctx context.Context, client guardedNa
 		}
 	}
 	return byAddress, denied, nil
+}
+
+// issueBrowserRouteCertificates issues the certificate of every routed name not in previous. The
+// local certificate service knows a name only after its aliases are replaced, so this runs after
+// ReplaceAliases (issuing first left the gateway without listeners, round 22).
+func (c *Coordinator) issueBrowserRouteCertificates(ctx context.Context, client guardedNameClient, routes, previous map[string]splitdns.BrowserRoute) error {
+	for name, route := range routes {
+		if strings.HasPrefix(name, "*.") {
+			continue
+		}
+		if known, ok := previous[name]; ok && known == route {
+			continue
+		}
+		if _, err := c.issueBrowserCertificate(ctx, client, name, route.MachineID, route.Port); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // browserCertificateFailure reports whether the browser gateway could not start only because a

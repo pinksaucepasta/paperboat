@@ -23,6 +23,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -555,6 +556,8 @@ type coordinatorNameClient struct {
 	gatewayPorts  []int          // every gateway acquisition attempted, in order
 	failReplace   bool
 	closed        bool
+	// aliasesReplaced is set by ReplaceAliases: like the real guard, names are known only after it.
+	aliasesReplaced atomic.Bool
 }
 
 func (c *coordinatorNameClient) Acquire(ctx context.Context, hostname string, _ netip.Addr, requestedPort int) (net.Listener, error) {
@@ -826,6 +829,9 @@ func TestCoordinatorBrowserGatewayAddsARouteWithoutRestarting(t *testing.T) {
 	c, err := NewCoordinator(CoordinatorConfig{NameClient: names, DialMachine: func(ctx context.Context, _ string, _ int) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "tcp", origin.Listener.Addr().String())
 	}, IssueCertificate: func(_ context.Context, name, _ string, _ int) (tls.Certificate, error) {
+		if !names.aliasesReplaced.Load() {
+			return tls.Certificate{}, errors.New("certificate for a name the guard does not know yet")
+		}
 		cert, key, err := ca.IssueCertificate([]string{name})
 		if err != nil {
 			return tls.Certificate{}, err
@@ -842,6 +848,9 @@ func TestCoordinatorBrowserGatewayAddsARouteWithoutRestarting(t *testing.T) {
 		t.Fatal(err)
 	}
 	gateway := c.webRoutes[splitdns.BrowserGatewayHostname].proxy
+	if gateway == nil || names.addresses[443] == "" {
+		t.Fatal("the browser gateway did not start its :443 listener (round 22 regression)")
+	}
 	second := append(first, &pbSync.PeerUpdate{PeerId: "second", Alias: "victus", AssignedIp: "127.100.0.5", Approved: true, Online: true, ExportedPorts: []int32{6767}})
 	if err := c.replaceGuardedRoutes(t.Context(), second); err != nil {
 		t.Fatal(err)

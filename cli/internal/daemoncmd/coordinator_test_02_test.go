@@ -571,8 +571,11 @@ func TestMapPeerSnapshotProjectsCanonicalAddressWithoutMutation(t *testing.T) {
 	}
 }
 
-func (c *coordinatorNameClient) ReplaceAliases(context.Context, map[string]string) error { return nil }
-func (c *generationNameClient) ReplaceAliases(context.Context, map[string]string) error  { return nil }
+func (c *coordinatorNameClient) ReplaceAliases(context.Context, map[string]string) error {
+	c.aliasesReplaced.Store(true)
+	return nil
+}
+func (c *generationNameClient) ReplaceAliases(context.Context, map[string]string) error { return nil }
 
 // The fake guards answer Status like the real one: every owner's domain is the test domain.
 func testGuardStatus(context.Context) (machineguard.RuntimeStatus, error) {
