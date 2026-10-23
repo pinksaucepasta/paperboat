@@ -219,6 +219,24 @@ func TestRunObservesPendingFailuresOnceAndRecoversWithTheSameReference(t *testin
 	client := &pendingSequenceClient{
 		errors: []error{private, private}, called: make(chan int, 8), recovered: make(chan struct{}),
 	}
+	// Consecutive failures back off (Lane X audit P6); the waits are shortened here and recorded.
+	var waitsMu sync.Mutex
+	var waits []int
+	previousWait := pendingRetryWait
+	pendingRetryWait = func(n int) time.Duration {
+		waitsMu.Lock()
+		waits = append(waits, n)
+		waitsMu.Unlock()
+		return time.Millisecond
+	}
+	t.Cleanup(func() {
+		pendingRetryWait = previousWait
+		waitsMu.Lock()
+		defer waitsMu.Unlock()
+		if len(waits) != 2 || waits[0] != 1 || waits[1] != 2 {
+			t.Errorf("retry waits %v, want the 1st and 2nd backoff steps", waits)
+		}
+	})
 	receiver, err := New(Config{Client: client, MachineID: "machine_local", SessionID: "session_1", Path: filepath.Join(t.TempDir(), "Paperboat Inbox")})
 	if err != nil {
 		t.Fatal(err)
@@ -716,5 +734,14 @@ func TestLocalBasenamePreservesUnicodeAndAdaptsWindowsReservedNames(t *testing.T
 	}
 	if got := localBasename("CON", "darwin"); got != "CON" {
 		t.Fatalf("darwin name = %q", got)
+	}
+}
+
+func TestPendingRetryWaitBacksOffWithJitterToAMinute(t *testing.T) {
+	if first := pendingRetryWait(1); first < 500*time.Millisecond || first >= 1500*time.Millisecond {
+		t.Fatalf("first wait %v", first)
+	}
+	if late := pendingRetryWait(20); late < 30*time.Second || late >= 90*time.Second {
+		t.Fatalf("capped wait %v", late)
 	}
 }
