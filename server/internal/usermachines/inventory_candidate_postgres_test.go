@@ -68,11 +68,14 @@ configured_capabilities,observed_capabilities) VALUES($1,$2,$1,$3,'linux','amd64
 	machine("team_picked", owner, team, "offline")
 	machine("team_none", member, team, "online")
 	machine("other_team", owner, other, "online")
+	machine("team_tagged", member, team, "online")   // reached by a group rule on a tag
+	machine("team_unruled", member, team, "online")  // no rule: only its team's owner and admins (management)
+	machine("lent", outsider, nil, "online")          // personal, bound, no rule of its own: the admin's every-machine rule
 	// Shortcut edges: a revoked own machine, and a machine owned by a suspended team, must get exactly what the
 	// full access functions answer.
 	exec(`UPDATE paperboat.user_machines SET revoked_at=now() WHERE id=$1`, m("own_revoked"))
 	exec(`UPDATE paperboat.teams SET suspended=true,suspended_at=now(),suspended_by=$2 WHERE team_id=$1`, other, owner)
-	for _, id := range []string{m("team_all"), m("team_picked"), m("team_none"), m("shared")} {
+	for _, id := range []string{m("team_all"), m("team_picked"), m("team_none"), m("shared"), m("team_tagged"), m("team_unruled"), m("lent")} {
 		exec(`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account,active,generation)
 SELECT $1,'machine',id,user_id,true,1 FROM paperboat.user_machines WHERE id=$2`, team, id)
 	}
@@ -83,6 +86,13 @@ SELECT $1,'machine',id,user_id,true,1 FROM paperboat.user_machines WHERE id=$2`,
 SELECT p.id,0,false,r.kind,r.subject,'machine',r.machine,r.action,int4range(1,65536) FROM paperboat.workspace_policies p,
  (VALUES('role','member',$2::text,'terminal'),('role','member',$3::text,'exec'),('account',$4::text,$5::text,'files')) r(kind,subject,machine,action)
 WHERE p.team_id=$1`, team, m("team_all"), m("shared"), picked, m("team_picked"))
+	// The other rule shapes: a group on a tag, one account on every machine, and a deny that wins over an allow.
+	exec(`INSERT INTO paperboat.workspace_policy_tags(policy_id,tag,machine_id) SELECT id,'build',$2 FROM paperboat.workspace_policies WHERE team_id=$1`, team, m("team_tagged"))
+	exec(`INSERT INTO paperboat.workspace_policy_groups(policy_id,group_name,account_id) SELECT id,'ops',$2 FROM paperboat.workspace_policies WHERE team_id=$1`, team, picked)
+	exec(`INSERT INTO paperboat.workspace_policy_rules(policy_id,rule,deny,subject_kind,subject_id,target_kind,target_id,action,ports)
+SELECT p.id,1,r.deny,r.kind,r.subject,r.target_kind,r.target,r.action,int4range(1,65536) FROM paperboat.workspace_policies p,
+ (VALUES(false,'group','ops','tag','build','managed_ssh'),(false,'account',$4::text,'all_machines','','tunnel_manage'),(true,'account',$2::text,'machine',$3::text,'terminal')) r(deny,kind,subject,target_kind,target,action)
+WHERE p.team_id=$1`, team, member, m("team_all"), admin)
 
 	// The access rule alone, as the inventory evaluated it before the candidate clause.
 	expected := func(actor string, scoped bool, teamID any) []string {

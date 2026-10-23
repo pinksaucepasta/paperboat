@@ -34,12 +34,28 @@ func (s *Service) ListInventory(ctx context.Context, account string, opts Invent
 	if team.Valid {
 		teamID = team.String
 	}
-	// The candidate clause is a superset of every access rule below (own machines, machines owned by or bound to a
-	// team the account is an active member of) and is served by indexes. Without it the access functions ran for
-	// every machine in the database: 28 s for one list at 5k machines.
-	predicate := ` FROM user_machines m WHERE m.deleted_at IS NULL
- AND (m.user_id=$1 OR m.owner_team_id IN (SELECT tm.team_id FROM team_members tm WHERE tm.account_id=$1 AND tm.active)
-  OR m.id IN (SELECT b.resource_id FROM team_members tm JOIN team_resource_bindings b ON b.team_id=tm.team_id AND b.resource_kind='machine' WHERE tm.account_id=$1 AND tm.active))
+	// The candidates are a set-based superset of every access rule below: own personal machines, machines owned by a
+	// team the account owns or administers (management), and team machines that a policy allow rule for one of the
+	// six capabilities may give the account (any role, account or group subject; denies left to the functions).
+	// The access functions then decide each candidate. Without candidates they ran for every machine in the database
+	// (28 s at 5k machines); with all of a team's machines as candidates, the ones the account cannot use failed
+	// seven function calls each (1.5-4 s per list on production, the largest database load).
+	with := `WITH rules AS (
+ SELECT tm.team_id,r.policy_id,r.target_kind,r.target_id FROM team_members tm
+ JOIN workspace_policies p ON p.team_id=tm.team_id
+ JOIN workspace_policy_rules r ON r.policy_id=p.id AND NOT r.deny AND r.action IN ('terminal','exec','managed_ssh','files','preview_manage','tunnel_manage')
+ WHERE tm.account_id=$1 AND tm.active AND (r.subject_kind IN ('all','role') OR (r.subject_kind='account' AND r.subject_id=$1)
+  OR (r.subject_kind='group' AND EXISTS(SELECT 1 FROM workspace_policy_groups g WHERE g.policy_id=r.policy_id AND g.group_name=r.subject_id AND g.account_id=$1)))
+), candidates AS (
+ SELECT m.id FROM user_machines m WHERE m.user_id=$1 AND m.owner_team_id IS NULL
+ UNION SELECT m.id FROM teams t JOIN team_members tm ON tm.team_id=t.team_id AND tm.account_id=$1 AND tm.active AND (t.owner_account=$1 OR tm.role='admin')
+  JOIN user_machines m ON m.owner_team_id=t.team_id
+ UNION SELECT b.resource_id FROM rules r JOIN team_resource_bindings b ON b.team_id=r.team_id AND b.resource_kind='machine' AND b.active AND b.resource_id=r.target_id WHERE r.target_kind='machine'
+ UNION SELECT b.resource_id FROM rules r JOIN workspace_policy_tags tg ON tg.policy_id=r.policy_id AND tg.tag=r.target_id
+  JOIN team_resource_bindings b ON b.team_id=r.team_id AND b.resource_kind='machine' AND b.active AND b.resource_id=tg.machine_id WHERE r.target_kind='tag'
+ UNION SELECT b.resource_id FROM rules r JOIN team_resource_bindings b ON b.team_id=r.team_id AND b.resource_kind='machine' AND b.active WHERE r.target_kind='all_machines'
+) `
+	predicate := ` FROM user_machines m WHERE m.deleted_at IS NULL AND m.id IN (SELECT id FROM candidates)
  AND (
  (NOT $2::boolean AND ((m.owner_team_id IS NULL AND m.user_id=$1) OR machine_management_allowed($1,m.id) OR EXISTS(SELECT 1 FROM unnest(ARRAY['terminal','exec','managed_ssh','files','preview_manage','tunnel_manage']) cap WHERE machine_capability_allowed($1,m.id,cap))))
  OR ($2::boolean AND $3::text IS NULL AND m.user_id=$1 AND m.owner_team_id IS NULL)
@@ -53,7 +69,7 @@ func (s *Service) ListInventory(ctx context.Context, account string, opts Invent
 	// The account's own personal machines short-circuit the access functions with their first branch (own,
 	// personal, not deleted), which is what they would return: the functions cost ~1 ms per machine under load.
 	total := -1
-	rows, err := s.db.SQL().QueryContext(ctx, "SELECT m.id,count(*) OVER ()"+predicate+" ORDER BY lower(m.alias),m.id LIMIT $7 OFFSET $8", append(args, opts.Limit, opts.Offset)...)
+	rows, err := s.db.SQL().QueryContext(ctx, with+"SELECT m.id,count(*) OVER ()"+predicate+" ORDER BY lower(m.alias),m.id LIMIT $7 OFFSET $8", append(args, opts.Limit, opts.Offset)...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -72,7 +88,7 @@ func (s *Service) ListInventory(ctx context.Context, account string, opts Invent
 	if total < 0 && opts.Offset == 0 {
 		total = 0
 	} else if total < 0 {
-		if err := s.db.SQL().QueryRowContext(ctx, "SELECT count(*)"+predicate, args...).Scan(&total); err != nil {
+		if err := s.db.SQL().QueryRowContext(ctx, with+"SELECT count(*)"+predicate, args...).Scan(&total); err != nil {
 			return nil, 0, err
 		}
 	}
