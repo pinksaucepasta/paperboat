@@ -1,6 +1,7 @@
-// Browser check for the Machines table's pages, without a large real account. Paste into a
-// signed-in tab on / (Personal). It stubs this tab's fetch of GET /api/v1/machines with 130 live
-// and 12 revoked machines (cloned from one real record, honouring limit, offset and state), waits
+// Browser check for the Machines table's pages, without a large real account. Run in a signed-in
+// tab on / (Personal), e.g. a headless Chromium. It stubs this tab's fetch of GET /api/v1/machines
+// (130 machines in use by default, 12 more with ?state=revoked, cloned from one real record,
+// honouring limit and offset) and GET /api/v1/machines/summary, waits
 // for the table's next refresh, and checks: the card's online/offline; pages of 50 with the range
 // "1–50 of 130", Next to page 3 ("101–130 of 130"), Previous; the page in the URL and a ?page=3 deep
 // link; a new search starts at page 1; Status → Revoked lists the 12 revoked. Changes nothing on
@@ -32,11 +33,17 @@
   }))
   window.fetch = async (input, init) => {
     const url = new URL(typeof input === "string" ? input : input.url, location.href)
+    const live = machines.filter((m) => m.state !== "revoked")
+    if (url.pathname === "/api/v1/machines/summary") {
+      const online = live.filter((m) => m.online).length
+      const by_state = { online, offline: live.length - online, pending: 0, revoked: machines.length - live.length }
+      return Response.json({ data: { total: live.length, by_state, by_platform: { linux: live.length } } })
+    }
     if (url.pathname !== "/api/v1/machines") return realFetch(input, init)
     const state = url.searchParams.get("state")
     const offset = Number(url.searchParams.get("offset") ?? 0)
     const limit = Number(url.searchParams.get("limit") ?? 200)
-    const chosen = state ? machines.filter((m) => m.state === state) : machines
+    const chosen = state ? machines.filter((m) => m.state === state) : live
     const items = chosen.slice(offset, offset + limit)
     return Response.json({ data: { items, pagination: { total: chosen.length, offset, limit } } })
   }

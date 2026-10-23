@@ -7,7 +7,7 @@ import type { components, paths } from "@/lib/api-schema"
 import { queryKeys } from "@/lib/query-keys"
 import { usageParams, type UsagePeriod } from "@/lib/usage-period"
 import { useWorkspaceId } from "@/lib/workspace"
-import { fetchAllPages, type MachinePages } from "@/lib/machine-pages"
+import { fetchMachineList, type MachinePages } from "@/lib/machine-pages"
 
 /** Error envelope returned by the control plane: `{ error: { code, message } }`. */
 export class ApiError extends Error {
@@ -247,23 +247,23 @@ async function fetchMachines(params: Record<string, string>): Promise<MachinePag
 export const machinesQuery = (workspace: string) =>
   queryOptions({
     queryKey: queryKeys.machines(workspace),
-    queryFn: async () => (await fetchAllPages(machinePage, workspace))!,
+    queryFn: async () => (await fetchMachineList(machinePage, workspace))!,
     refetchInterval: 15_000,
   })
 
-/**
- * Workspace totals from the server, never counted from a loaded list: live machines (revoked ones
- * left out), and how many of them are online. One-row queries read `pagination.total`.
- */
-export const machineCountsQuery = (workspace: string) =>
+export type MachineSummary = {
+  /** Machines in use (revoked and disconnected ones are left out). */
+  total: number
+  by_state: { online: number; offline: number; pending: number; revoked: number } & Record<string, number>
+  /** Machines in use per platform: linux, macos, windows, and any other the server reports. */
+  by_platform: Record<string, number>
+}
+
+/** Workspace totals from the server (GET /v1/machines/summary), never counted from a loaded list. */
+export const machineSummaryQuery = (workspace: string) =>
   queryOptions({
-    queryKey: ["machines", workspace, "counts"],
-    queryFn: async () => {
-      const total = (state?: string) =>
-        machinePage({ limit: "1", workspace, ...(state && { state }) }).then((page) => page.pagination.total)
-      const [all, online, revoked] = await Promise.all([total(), total("online"), total("revoked")])
-      return { live: all - revoked, online, offline: all - revoked - online, revoked }
-    },
+    queryKey: ["machines", workspace, "summary"],
+    queryFn: () => api<MachineSummary>(`machines/summary?${new URLSearchParams({ workspace })}`),
     refetchInterval: 15_000,
   })
 

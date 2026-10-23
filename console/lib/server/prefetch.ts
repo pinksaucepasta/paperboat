@@ -6,7 +6,7 @@ import { connection } from "next/server"
 import { defaultUsagePeriod, usageParams } from "@/lib/usage-period"
 import { queryKeys } from "@/lib/query-keys"
 import { controlPlaneFetch } from "@/lib/server/control-plane"
-import { fetchAllPages } from "@/lib/machine-pages"
+import { fetchMachineList } from "@/lib/machine-pages"
 
 const workspacePattern = /^[a-z0-9-]{1,63}$/
 
@@ -41,7 +41,7 @@ export async function prefetchMachinesPage(): Promise<{ state: DehydratedState; 
   const [me, workspaces, machines, usage] = await Promise.all([
     get("me"),
     get<{ items: unknown[] }>("workspaces"),
-    fetchAllPages((params) => get<{ items: unknown[]; pagination: { total: number } }>(`machines?${new URLSearchParams(params)}`), workspace),
+    fetchMachineList((params) => get<{ items: unknown[]; pagination: { total: number } }>(`machines?${new URLSearchParams(params)}`), workspace),
     get(`usage?${usageParams(workspace, defaultUsagePeriod)}`),
   ])
 

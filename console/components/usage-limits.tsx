@@ -1,21 +1,30 @@
 "use client"
 
-import { ArrowDownIcon, ArrowUpIcon, CaretDownIcon } from "@phosphor-icons/react"
+import {
+  AppleLogoIcon,
+  ArrowDownIcon,
+  ArrowUpIcon,
+  CaretDownIcon,
+  LinuxLogoIcon,
+  WindowsLogoIcon,
+  type Icon,
+} from "@phosphor-icons/react"
 import { useId, useState } from "react"
 import {
   usageSinceQuery,
   trafficBreakdown,
   useApiQuery,
   usageQuery,
-  machineCountsQuery,
+  machineSummaryQuery,
   useWorkspace,
+  type MachineSummary,
   type PathMode,
   type TrafficSource,
   type Usage,
 } from "@/lib/api"
 import { allowanceWindow, billingQuery, usageWindowStart, type BillingWorkspace } from "@/lib/billing"
-import { formatBytes } from "@/lib/format"
-import { parseQuery, withFilter, type FilterKey } from "@/lib/machine-filter"
+import { formatBytes, formatPlatform } from "@/lib/format"
+import { filterKeys, parseQuery, withFilter, type FilterKey } from "@/lib/machine-filter"
 import { cn } from "@/lib/utils"
 import { defaultUsagePeriod, usagePeriods, type UsagePeriod } from "@/lib/usage-period"
 import {
@@ -37,7 +46,7 @@ const sources: Record<TrafficSource, string> = {
 
 export function UsageLimits() {
   const workspace = useWorkspace()
-  const counts = useApiQuery({ ...machineCountsQuery(workspace?.id ?? ""), enabled: Boolean(workspace) })
+  const summary = useApiQuery({ ...machineSummaryQuery(workspace?.id ?? ""), enabled: Boolean(workspace) })
   const billing = useApiQuery(billingQuery(workspace))
   const [chosen, setPeriod] = useState<UsagePeriod | "billing">()
   const [source, setSource] = useState<TrafficSource>("all")
@@ -61,8 +70,8 @@ export function UsageLimits() {
   return (
     // Machines and what is left of the hosted allowance first, then bandwidth across the other half.
     <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-      <Card label="Machines" loading={!workspace || counts.isPending} failed={counts.isError}>
-        {counts.data && <Machines counts={counts.data} />}
+      <Card label="Machines" loading={!workspace || summary.isPending} failed={summary.isError}>
+        {summary.data && <Machines summary={summary.data} />}
       </Card>
       <Card label="Hosted allowance" loading={!workspace || billing.isPending} failed={billing.isError}>
         {billing.data && workspace && <Allowance billing={billing.data} workspace={workspace.id} />}
@@ -89,12 +98,14 @@ export function UsageLimits() {
 const textControl =
   "rounded-sm outline-none underline-offset-4 decoration-foreground/30 hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring/30"
 
+const platformIcons: Record<string, Icon> = { macos: AppleLogoIcon, linux: LinuxLogoIcon, windows: WindowsLogoIcon }
+
 /**
  * Online and offline side by side (how many of the workspace's machines can be reached right now),
- * from the server's totals. Revoked machines are not counted. Clicking one filters the table below.
- * Counts by platform come with the server's machine summary (Lane Q), not from a loaded list.
+ * then one quiet line of what they run on, all from the server's summary. Revoked machines are not
+ * counted. Clicking one filters the table below.
  */
-function Machines({ counts }: { counts: { online: number; offline: number } }) {
+function Machines({ summary }: { summary: MachineSummary }) {
   const [query, setQuery] = useMachineQuery()
   const { filters } = parseQuery(query)
   // Clicking a label filters the table below to it; clicking it again clears that filter.
@@ -102,24 +113,59 @@ function Machines({ counts }: { counts: { online: number; offline: number } }) {
     setQuery(withFilter(query, key, filters[key] === value ? undefined : value))
     document.getElementById("machines-table")?.scrollIntoView({ behavior: "smooth", block: "nearest" })
   }
+  const online = summary.by_state.online
+  const offline = summary.total - online
+  // The three supported platforms always show, in a fixed order, even at 0; others the server
+  // reports follow.
+  const platforms = { linux: 0, macos: 0, windows: 0, ...summary.by_platform }
   return (
     <div className="flex flex-1 flex-col justify-between gap-4">
       <div className="grid grid-cols-2 gap-4">
         <Stat
-          value={counts.online}
+          value={online}
           label="Online"
           dot="bg-success"
           active={filters.status === "online"}
           onClick={() => toggle("status", "online")}
         />
         <Stat
-          value={counts.offline}
+          value={offline}
           label="Offline"
           dot="bg-muted-foreground/40"
-          muted={counts.offline === 0}
+          muted={offline === 0}
           active={filters.status === "offline"}
           onClick={() => toggle("status", "offline")}
         />
+      </div>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground" data-machine-platforms>
+        {Object.entries(platforms).map(([platform, count]) => {
+          const PlatformIcon = platformIcons[platform]
+          const name = formatPlatform(platform === "macos" ? "darwin" : platform)
+          const filterable = count > 0 && platform in filterKeys.os.options
+          return (
+            <span key={platform} className="flex items-center gap-1.5">
+              <button
+                type="button"
+                title={filterable ? `Show ${name} machines` : name}
+                aria-label={name}
+                disabled={!filterable}
+                aria-pressed={filters.os === platform}
+                onClick={() => toggle("os", platform)}
+                className={cn(
+                  "flex rounded-sm outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/30 disabled:pointer-events-none",
+                  filters.os === platform && "text-foreground",
+                )}
+              >
+                {PlatformIcon ? (
+                  <PlatformIcon weight="fill" className="size-4" />
+                ) : (
+                  <span className="trim-cap">{name}</span>
+                )}
+              </button>
+              <span className={cn("trim-cap", count ? "text-foreground" : "text-muted-foreground")}>{count}</span>
+            </span>
+          )
+        })}
       </div>
     </div>
   )
