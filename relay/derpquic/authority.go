@@ -143,7 +143,7 @@ func (v Verifier) Verify(token string, state tls.ConnectionState, now time.Time)
 	fingerprint, fingerprintErr := hex.DecodeString(g.CertificateFingerprint)
 	quicPublic, publicErr := base64.RawURLEncoding.Strict().DecodeString(g.QUICPublicKey)
 	presented, isEd25519 := leaf.PublicKey.(ed25519.PublicKey)
-	if g.Version != 1 || g.Issuer != v.Issuer || g.Audience != "paperboat-relay" || g.NodeID != v.NodeID || g.NodeGeneration != v.NodeGeneration || g.ProcessEpoch != v.ProcessEpoch || fingerprintErr != nil || len(fingerprint) != 32 || hex.EncodeToString(fingerprint) != g.CertificateFingerprint || publicErr != nil || len(quicPublic) != ed25519.PublicKeySize || base64.RawURLEncoding.EncodeToString(quicPublic) != g.QUICPublicKey || !isEd25519 || !bytes.Equal(presented, quicPublic) || now.Before(leaf.NotBefore) || !now.Before(leaf.NotAfter) || leaf.NotAfter.Sub(leaf.NotBefore) > 24*time.Hour+time.Minute || leaf.CheckSignature(leaf.SignatureAlgorithm, leaf.RawTBSCertificate, leaf.Signature) != nil || g.IssuedAt > now.Add(MaxClockSkew).Unix() || g.ExpiresAt <= g.IssuedAt || g.ExpiresAt-g.IssuedAt > 60 || g.Generation == 0 || g.AccountID == "" || g.EndpointID == "" || len(g.AccountID) > 256 || len(g.EndpointID) > 256 || len(g.Peers) > 64 || len(g.RelayControlPeers) > 16 {
+	if g.Version != 1 || g.Issuer != v.Issuer || g.Audience != "paperboat-relay" || g.NodeID != v.NodeID || g.NodeGeneration != v.NodeGeneration || g.ProcessEpoch != v.ProcessEpoch || fingerprintErr != nil || len(fingerprint) != 32 || hex.EncodeToString(fingerprint) != g.CertificateFingerprint || publicErr != nil || len(quicPublic) != ed25519.PublicKeySize || base64.RawURLEncoding.EncodeToString(quicPublic) != g.QUICPublicKey || !isEd25519 || !bytes.Equal(presented, quicPublic) || now.Before(leaf.NotBefore) || !now.Before(leaf.NotAfter) || leaf.NotAfter.Sub(leaf.NotBefore) > 24*time.Hour+time.Minute || leaf.CheckSignature(leaf.SignatureAlgorithm, leaf.RawTBSCertificate, leaf.Signature) != nil || g.IssuedAt > now.Add(MaxClockSkew).Unix() || g.ExpiresAt <= g.IssuedAt || g.ExpiresAt-g.IssuedAt > 60 || g.Generation == 0 || g.AccountID == "" || g.EndpointID == "" || len(g.AccountID) > 256 || len(g.EndpointID) > 256 || len(g.Peers) > MaxGrantPeers || len(g.RelayControlPeers) > MaxGrantPeers {
 		return Grant{}, ErrAdmission
 	}
 	if _, err := ParseKey(g.WireGuardPublicKey); err != nil {
@@ -226,6 +226,10 @@ func allowedPairExpiry(a, b Grant, now time.Time) int64 {
 // (the CLI's endpointidentity.MaxTrustedKeys).
 const MaxMergedPeers = 2048
 
+// MaxGrantPeers bounds the peers, and the peer-relay control peers, one grant part names; an endpoint
+// with more sends one part per chunk of the same generation (the server issues chunks of this size).
+const MaxGrantPeers = 64
+
 // sameGrantIdentity reports whether two grants were issued for the same endpoint, relay process and
 // authorization generation, so their peers may be combined.
 func sameGrantIdentity(a, b Grant) bool {
@@ -251,11 +255,19 @@ func mergeGrants(current, next Grant) (Grant, error) {
 	if len(merged.Peers) > MaxMergedPeers {
 		return Grant{}, ErrAdmission
 	}
-	merged.RelayControlPeers = current.RelayControlPeers
+	merged.RelayControlPeers = slices.Clone(current.RelayControlPeers)
+	control := make(map[string]bool, len(current.RelayControlPeers)+len(next.RelayControlPeers))
+	for _, peer := range current.RelayControlPeers {
+		control[peer] = true
+	}
 	for _, peer := range next.RelayControlPeers {
-		if !slices.Contains(merged.RelayControlPeers, peer) {
+		if !control[peer] {
+			control[peer] = true
 			merged.RelayControlPeers = append(merged.RelayControlPeers, peer)
 		}
+	}
+	if len(merged.RelayControlPeers) > MaxMergedPeers {
+		return Grant{}, ErrAdmission
 	}
 	if merged.PeerRelay == nil {
 		merged.PeerRelay = current.PeerRelay

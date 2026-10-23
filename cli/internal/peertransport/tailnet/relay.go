@@ -160,7 +160,7 @@ func (a *Authority) ApplyRelayGrants(ctx context.Context, tokens []string) (resu
 			grants = nil
 			return ErrAuthority
 		}
-		if len(g.RelayControlPeers) > 16 {
+		if len(g.RelayControlPeers) > derpquic.MaxGrantPeers {
 			return ErrAuthority
 		}
 		seenControl := map[string]bool{}

@@ -14,6 +14,8 @@ import (
 	"tailscale.com/types/key"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=upstream-engine-assembly
 	"tailscale.com/wgengine/filter"
+
+	"github.com/pinksaucepasta/paperboat/relay/derpquic"
 )
 
 const maxRelayRegions = 32
@@ -170,7 +172,7 @@ func (b *locoBackend) relayPeerAdmitted(peer key.NodePublic) bool {
 }
 
 func (b *locoBackend) setRelayControlPeers(peers []key.NodePublic) error {
-	if len(peers) > 16 {
+	if len(peers) > derpquic.MaxMergedPeers {
 		return errors.New("mesh: too many relay control peers")
 	}
 	next := make(map[key.NodePublic]bool, len(peers))
