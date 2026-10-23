@@ -6,7 +6,9 @@ import (
 	"errors"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/pinksaucepasta/paperboat-server/internal/accountingauthority"
+	"github.com/pinksaucepasta/paperboat-server/internal/db"
 	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
 )
 
@@ -78,4 +80,39 @@ func (s *Service) AdmitBrowserTerminalIngress(ctx context.Context, attachmentID,
 		actor = machine.UserID
 	}
 	return s.admitRuntimeIngress(ctx, route, machine, actor, attachmentID, expires)
+}
+
+// CheckBrowserTerminalBandwidth refuses a console browser terminal ticket when the machine's
+// paying workspace is out of hosted allowance, so the console can name the plan limit before
+// it opens a WebSocket (a browser cannot read the edge's handshake refusal). It records
+// nothing: the edge admission still records and checks the attachment. Customer-owned edges
+// never consume the allowance.
+func (s *Service) CheckBrowserTerminalBandwidth(ctx context.Context, machineID, nodeID string) error {
+	if s.runtimeQuota == nil {
+		return nil
+	}
+	return s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		var workspace string
+		err := tx.QueryRow(ctx, `SELECT w.id FROM paperboat.user_machines m
+			JOIN billing_workspaces w ON (m.owner_team_id IS NOT NULL AND w.team_id=m.owner_team_id AND w.user_id IS NULL)
+				OR (m.owner_team_id IS NULL AND w.user_id=m.user_id AND w.team_id IS NULL)
+			WHERE m.id=$1 AND m.deleted_at IS NULL
+				AND NOT EXISTS(SELECT 1 FROM selfhost_installations WHERE node_id=$2 AND scope_kind IN ('account','team'))`,
+			machineID, nodeID).Scan(&workspace)
+		if errors.Is(err, pgx.ErrNoRows) {
+			// No billing workspace yet (nothing used) or a customer-owned edge.
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		exhausted, err := s.runtimeQuota.CheckWorkspaceBandwidthTx(ctx, tx, workspace, s.now().UTC())
+		if err != nil {
+			return err
+		}
+		if exhausted {
+			return &BandwidthQuotaError{BillingURL: s.runtimeBillingURL}
+		}
+		return nil
+	})
 }

@@ -89,7 +89,14 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 	if err := store.SQL().QueryRowContext(ctx, `SELECT workspace_id,route_id FROM paperboat.usage_accounting_authorities WHERE authority_id=$1 AND edge_node_id=$2 AND environment_id=$3`, attachment, edgeNodeID, environmentID).Scan(&workspace, &route); err != nil || workspace != "personal:"+userID || route != "route_rq_"+suffix {
 		t.Fatalf("browser accounting workspace=%q route=%q err=%v", workspace, route, err)
 	}
+	if err := service.CheckBrowserTerminalBandwidth(ctx, machineID, edgeNodeID); err != nil {
+		t.Fatalf("browser ticket under the cap: %v", err)
+	}
 	quota.exhausted = true
+	// The ticket check refuses at the cap, so the console names the limit before connecting.
+	if err := service.CheckBrowserTerminalBandwidth(ctx, machineID, edgeNodeID); !errors.Is(err, ErrBandwidthQuotaExhausted) {
+		t.Fatalf("browser ticket at the cap err=%v", err)
+	}
 	if err := service.AdmitBrowserTerminalIngress(ctx, attachment+"_cap", machineID, "", edgeNodeID, time.Now().Add(time.Minute)); !errors.Is(err, ErrBandwidthQuotaExhausted) {
 		t.Fatalf("browser admission at the cap err=%v", err)
 	}

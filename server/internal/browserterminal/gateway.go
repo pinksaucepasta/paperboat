@@ -6,6 +6,7 @@ import (
 
 	"errors"
 	"github.com/pinksaucepasta/paperboat-server/internal/mint"
+	"github.com/pinksaucepasta/paperboat-server/internal/usermachines"
 	"net/url"
 	"slices"
 	"strings"
@@ -15,6 +16,13 @@ import (
 
 var ErrForbidden = errors.New("browser terminal access is unavailable")
 var ErrHostUnavailable = errors.New("browser terminal host is unavailable")
+
+// BandwidthChecker refuses a terminal ticket while the paying workspace's hosted allowance is
+// used up, so the browser learns the plan limit from the ticket API before it connects.
+type BandwidthChecker interface {
+	CheckBandwidth(context.Context, Decision) error
+}
+
 var ErrBrowserKeyInvalid = errors.New("browser terminal key digest is invalid")
 
 type Decision struct {
@@ -92,6 +100,14 @@ func (g *Gateway) issue(ctx context.Context, in Ticket) (Ticket, string, Decisio
 	}
 	if decision.HostWSSURL == "" {
 		return Ticket{}, "", Decision{}, ErrHostUnavailable
+	}
+	if checker, ok := g.Authorizer.(BandwidthChecker); ok && in.Role != RoleInspector {
+		if err := checker.CheckBandwidth(ctx, decision); err != nil {
+			if errors.Is(err, usermachines.ErrBandwidthQuotaExhausted) {
+				return Ticket{}, "", Decision{}, err
+			}
+			return Ticket{}, "", Decision{}, unavailableCause(err)
+		}
 	}
 	runtimeURL, err := url.Parse(decision.HostWSSURL)
 	if err != nil {

@@ -6,6 +6,8 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/pinksaucepasta/paperboat-server/internal/usermachines"
 )
 
 type issueTestTickets struct{}
@@ -51,5 +53,34 @@ func TestGatewayInvalidAuthoritativeHostPreservesPrivateParseCause(t *testing.T)
 	}
 	if strings.Contains(err.Error(), privateHost) {
 		t.Fatalf("private route detail appeared in safe error: %v", err)
+	}
+}
+
+type quotaTestAuthorizer struct {
+	testBrowserAuthorizer
+	quota error
+}
+
+func (a *quotaTestAuthorizer) CheckBandwidth(context.Context, Decision) error { return a.quota }
+
+func TestGatewayRefusesTicketAtTheBandwidthCap(t *testing.T) {
+	decision := Decision{WorkspaceID: "personal", UserID: "usr_1", OwnerAccountID: "usr_1", TerminalSessionID: "term_1", MachineID: "mch_1", EnvironmentID: "env_1", HostWSSURL: "wss://machine.runtime.example.test/v1/browser-terminal", EdgeNodeID: "edge_1", EdgeProcessEpoch: "epoch_1", EdgeEndpointHost: "edge-one.example.test", Role: "owner", PolicyGeneration: 1}
+	authorizer := &quotaTestAuthorizer{testBrowserAuthorizer: testBrowserAuthorizer{decision: decision}, quota: &usermachines.BandwidthQuotaError{}}
+	gateway := &Gateway{Tickets: issueTestTickets{}, Authorizer: authorizer, AllowedOrigins: []string{"https://dashboard.example.test"}}
+	issue := func() error {
+		_, _, _, err := gateway.Issue(context.Background(), "usr_1", "browser_1", "term_1", "https://dashboard.example.test", testBrowserKeyDigest)
+		return err
+	}
+	var refusal *usermachines.BandwidthQuotaError
+	if err := issue(); !errors.As(err, &refusal) {
+		t.Fatalf("ticket at the cap: %v", err)
+	}
+	authorizer.quota = errors.New("store down")
+	if err := issue(); !errors.Is(err, ErrHostUnavailable) {
+		t.Fatalf("quota outage: %v", err)
+	}
+	authorizer.quota = nil
+	if err := issue(); err != nil {
+		t.Fatalf("ticket under the cap: %v", err)
 	}
 }
