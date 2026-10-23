@@ -34,7 +34,7 @@ func configCobraCommand() *cobra.Command {
 		{"approve <environment>", "Approve the currently reviewed pull revision", cobra.ExactArgs(1), configApproveRevision, jsonFlag},
 		{"team-default-set <team> <repository>", "Set a team's default pull repository", cobra.ExactArgs(2), configTeamDefaultSet, jsonFlag},
 		{"team-default-adopt <team>", "Adopt a team default using your provider access", cobra.ExactArgs(1), configTeamDefaultAdopt, jsonFlag},
-		{"team-default-unadopt", "Stop inheriting a team configuration default", cobra.NoArgs, configTeamDefaultUnadopt, jsonFlag},
+		{"team-default-unadopt <team>", "Stop inheriting a team configuration default", cobra.ExactArgs(1), configTeamDefaultUnadopt, jsonFlag},
 		{"set <key> <value>", "Set a local configuration value", cobra.ExactArgs(2), configSet, jsonFlag},
 		{"unset server", "Remove a local configuration value", cobra.ExactArgs(1), configUnset, jsonFlag},
 		{"path", "Print the config file path", cobra.NoArgs, configPath, jsonFlag},

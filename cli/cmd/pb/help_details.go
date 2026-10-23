@@ -124,7 +124,7 @@ var commandHelpDetails = map[string]string{
 	"pb config status-bar show":               "Show the effective status-bar settings, including defaults and local overrides. This is read-only and does not attach to a session.",
 	"pb config team-default-adopt":            "Adopt the selected team's default pull repository for this account using its provider access. Adoption is explicit; personal machine assignments still take precedence.",
 	"pb config team-default-set":              "Set a team's default pull repository for members who explicitly adopt it. This changes the team default, not every member's current local assignment.",
-	"pb config team-default-unadopt":          "Stop this account inheriting its adopted team repository default. Personal machine assignments, the team's default, and other members' choices remain unchanged.",
+	"pb config team-default-unadopt":          "Stop this account inheriting the default it adopted from the named team. Personal machine assignments, the team's default, and other members' choices remain unchanged.",
 	"pb config unassign":                      "Remove a repository assignment from the selected environment. The repository and its content remain; the confirmation code confirms the local synchronization change.",
 	"pb config unset":                         "Remove the supported local server setting so the built-in or surrounding configuration applies. This does not revoke the current account session.",
 	"pb connect":                              "Select an environment by name, create or reattach a durable terminal session, and bridge the local terminal. Use --session for a specific session or new to start another one; connection status is reported separately from readiness.",

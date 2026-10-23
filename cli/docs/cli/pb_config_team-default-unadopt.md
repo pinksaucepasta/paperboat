@@ -6,14 +6,14 @@ Stop inheriting a team configuration default
 
 Stop inheriting a team configuration default
 
-Stop this account inheriting its adopted team repository default. Personal machine assignments, the team's default, and other members' choices remain unchanged.
+Stop this account inheriting the default it adopted from the named team. Personal machine assignments, the team's default, and other members' choices remain unchanged.
 
 Configuration commands distinguish local CLI settings from synchronized repository content. Inspect current state before changing it; synchronization reports conflicts instead of silently overwriting one side. The --json option provides structured output for scripts where supported.
 
 JSON output is supported with --json.
 
 ```
-pb config team-default-unadopt [flags]
+pb config team-default-unadopt <team> [flags]
 ```
 
 ### Options

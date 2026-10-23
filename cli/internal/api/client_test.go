@@ -996,7 +996,7 @@ func TestConfigSyncStatusRefusesAPageThatDoesNotAdvance(t *testing.T) {
 }
 
 // Team default calls go to the team they name: in the personal workspace the server refused them with
-// 409 workspace_target_conflict, so `pb config team-default-set/adopt` never worked (Lane L, pbvm3).
+// 409 workspace_target_conflict, so `pb config team-default-set/adopt/unadopt` never worked (Lane L, pbvm3).
 func TestConfigTeamDefaultCallsUseTheNamedTeamWorkspace(t *testing.T) {
 	seen := map[string]string{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1012,7 +1012,8 @@ func TestConfigTeamDefaultCallsUseTheNamedTeamWorkspace(t *testing.T) {
 	_, _ = client.ConfigTeamDefault(ctx, "team-one")
 	_, _ = client.SetConfigTeamDefault(ctx, "team-one", "repository-1", 0)
 	_, _ = client.AdoptConfigTeamDefault(ctx, "team-one", 1)
-	for _, call := range []string{"GET /v1/teams/team-one/config-default", "PUT /v1/teams/team-one/config-default", "PUT /v1/config-sync/team-default-adoption"} {
+	_ = client.UnadoptConfigTeamDefault(ctx, "team-one")
+	for _, call := range []string{"GET /v1/teams/team-one/config-default", "PUT /v1/teams/team-one/config-default", "PUT /v1/config-sync/team-default-adoption", "DELETE /v1/config-sync/team-default-adoption"} {
 		if seen[call] != "team-one" {
 			t.Fatalf("%s sent in workspace %q", call, seen[call])
 		}

@@ -201,8 +201,12 @@ func (c *Client) AdoptConfigTeamDefault(ctx context.Context, teamID string, vers
 	return out, err
 }
 
-func (c *Client) UnadoptConfigTeamDefault(ctx context.Context) error {
-	return c.do(ctx, http.MethodDelete, "/v1/config-sync/team-default-adoption", nil, nil)
+func (c *Client) UnadoptConfigTeamDefault(ctx context.Context, teamID string) error {
+	scoped, err := c.teamWorkspace(teamID)
+	if err != nil {
+		return err
+	}
+	return scoped.do(ctx, http.MethodDelete, "/v1/config-sync/team-default-adoption", nil, nil)
 }
 
 func (c *Client) UnassignConfig(ctx context.Context, machineID string, expectedVersion int64) error {

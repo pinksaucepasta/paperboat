@@ -227,7 +227,7 @@ func configTeamDefaultUnadopt(c *command.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := client.UnadoptConfigTeamDefault(c.Context); err != nil {
+	if err := client.UnadoptConfigTeamDefault(c.Context, c.Args().First()); err != nil {
 		return friendlyCommandError(err)
 	}
 	if c.Bool("json") {

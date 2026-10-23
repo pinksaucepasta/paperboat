@@ -483,7 +483,7 @@ that use them; say which in Evidence.
 | C187 | `pb config sync validate` | Review the effective file configuration on this machine | [x] | [ ] | [ ] | Waits: config-sync:hp green on current build (validate→apply covered; PASS 20261019T002705Z dev-0f56678, reruns 20261019T034703Z and 040136Z FAIL).  RE-TICKED 2026-10-19 Lane A: smoke:config-sync:hp PASS 13 s results/20261019T090731Z.json on server .19.3 (FK fix dd7f2d2 live). |
 | C188 | `pb config team-default-adopt` | Adopt a team default using your provider access | [ ] | [ ] | [ ] | — |
 | C189 | `pb config team-default-set` | Set a team's default pull repository | [ ] | [ ] | [ ] | — |
-| C190 | `pb config team-default-unadopt` | Stop inheriting a team configuration default | [ ] | [ ] | [ ] | — |
+| C190 | `pb config team-default-unadopt <team>` | Stop inheriting a team configuration default | [ ] | [ ] | [ ] | — |
 | C191 | `pb config unassign` | Remove a config repository assignment | [x] | [ ] | [ ] | smoke:config-sync:hp results/20261018T190833Z.json PASS 24 s (HP dev-0f56678, server 2026.10.18.18): retained local Git repo connect/list, machine file validate→apply with confirmation, status assignment bidirectional, force pull queued, conflict list empty, unassign→disabled  RE-TICKED 2026-10-19 Lane A: smoke:config-sync:hp PASS 13 s results/20261019T090731Z.json on server .19.3 (FK fix dd7f2d2 live). |
 
 ---
