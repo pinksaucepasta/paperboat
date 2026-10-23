@@ -168,6 +168,10 @@ func TestPersonalNetworkAdmissionOnPostgres(t *testing.T) {
 		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$3,'linux','amd64','/workspace','online','occupied',true,1)`, machine, account, environment); err != nil {
 			t.Fatal(err)
 		}
+		// The machine's control sync connection allocates its canonical address (the inventory only reads it).
+		if _, err := store.SQL().ExecContext(ctx, `SELECT paperboat.ensure_control_sync_lease($1)`, machine); err != nil {
+			t.Fatal(err)
+		}
 		_, _, quic := networkEndpointTLS(t, machine, now)
 		certificate, fingerprint := networkCertificateWithKeys(t, signer, account, wire.RoleMachine, machine, 1, 1, quic, now, now.Add(time.Hour))
 		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.peer_endpoint_certificates(fingerprint,user_id,endpoint_id,role,generation,serial,certificate,quic_public_key,issued_at,expires_at,key_id,signer_public_key) VALUES($1,$2,$3,'machine',1,1,$4,$5,$6,$7,'personal-network',$8)`, fingerprint[:], account, machine, certificate, quic[:], now, now.Add(time.Hour), signer.Public().(ed25519.PublicKey)); err != nil {

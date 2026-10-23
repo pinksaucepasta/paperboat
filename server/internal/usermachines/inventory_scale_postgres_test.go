@@ -39,7 +39,11 @@ func TestMachineInventoryListsAHundredMachinesWithoutPerRowQueriesOnPostgres(t *
 		}
 		return items, time.Since(started)
 	}
-	list() // first call allocates the machines' local address leases
+	// Each machine's control sync connection allocates its local address lease (listing only reads it).
+	if _, err := store.SQL().ExecContext(ctx, `SELECT paperboat.ensure_control_sync_lease(id) FROM paperboat.user_machines WHERE user_id=$1`, owner); err != nil {
+		t.Fatal(err)
+	}
+	list()
 	items, elapsed := list()
 	if elapsed > 300*time.Millisecond {
 		t.Fatalf("listing 100 machines took %v, want under 300ms", elapsed)
