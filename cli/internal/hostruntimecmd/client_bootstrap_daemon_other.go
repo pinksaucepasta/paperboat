@@ -68,13 +68,15 @@ func bindBootstrapDaemon(ctx context.Context, serverURL, expectedVersion string)
 	}
 }
 
-// boundDaemonServing reports that the installed daemon runs the expected version and serves this
-// enrollment. A daemon whose only problem is reaching the control plane is serving: on a slow server or
-// a large account its first inventory refresh can fail, and pairing reported failure on a machine that
-// worked (Lane A, 2026-10-22). The update baseline accepts the same state.
+// boundDaemonServing reports that the installed daemon was replaced and runs the expected version for
+// this enrollment: binding proves the cutover, not the control plane. A daemon still starting (its
+// first refresh not published yet) or degraded only because the control plane does not answer yet is
+// bound; on a slow server either can last longer than any fixed wait, and pairing reported failure on
+// machines that worked (2026-10-22). The daemon's state stays visible in pb status and pb doctor. Not
+// enrolled, degraded for another reason, the wrong version, or not running is not bound.
 func boundDaemonServing(probe localdaemon.UpdateProbe, expectedVersion string) bool {
 	if !probe.Running || probe.Version != expectedVersion {
 		return false
 	}
-	return probe.State == "ready" || probe.State == "degraded" && probe.ControlPlaneUnavailableOnly
+	return probe.State == "ready" || probe.State == "starting" || probe.State == "degraded" && probe.ControlPlaneUnavailableOnly
 }

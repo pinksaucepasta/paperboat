@@ -21,7 +21,7 @@ func TestBoundDaemonServesWhenOnlyTheControlPlaneIsUnreachable(t *testing.T) {
 		"ready":                     {localdaemon.UpdateProbe{Running: true, Version: version, State: "ready"}, true},
 		"control plane unreachable": {localdaemon.UpdateProbe{Running: true, Version: version, State: "degraded", ControlPlaneUnavailableOnly: true}, true},
 		"degraded otherwise":        {localdaemon.UpdateProbe{Running: true, Version: version, State: "degraded"}, false},
-		"still starting":            {localdaemon.UpdateProbe{Running: true, Version: version, State: "starting"}, false},
+		"still starting":            {localdaemon.UpdateProbe{Running: true, Version: version, State: "starting"}, true},
 		"not enrolled":              {localdaemon.UpdateProbe{Running: true, Version: version, State: "awaiting_enrollment"}, false},
 		"old daemon":                {localdaemon.UpdateProbe{Running: true, Version: "dev-old", State: "ready"}, false},
 		"not running":               {localdaemon.UpdateProbe{Version: version, State: "ready"}, false},
