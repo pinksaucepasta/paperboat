@@ -11,8 +11,8 @@ import (
 )
 
 // A presence flip (online <-> offline) must not bump the inventory topic of the machine's audience; a change
-// of name, membership or lifecycle (first online, rename, seat, revoke) must. A change of observed
-// capabilities does not (171): the set has two writers and flapped.
+// of name, membership or lifecycle (first online, rename, seat, revoke) must. A changed set of observed
+// capabilities does too (172: one rule computes the set for both writers).
 func TestInventoryTopicIgnoresPresenceFlipsOnPostgres(t *testing.T) {
 	dsn := os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
 	if dsn == "" {
@@ -66,7 +66,9 @@ VALUES($1,$2,$1,$3,'linux','amd64','/w','offline','occupied',false)`, id, user, 
 	step("goes offline", `UPDATE paperboat.user_machines SET state='offline',online=false WHERE id=$1`, false)
 	step("back online", `UPDATE paperboat.user_machines SET state='online',online=true,last_seen_at=now() WHERE id=$1`, false)
 	step("online flag only", `UPDATE paperboat.user_machines SET online=false WHERE id=$1`, false)
-	step("capabilities written by another reporter", `UPDATE paperboat.user_machines SET observed_capabilities=ARRAY['terminal_host','ssh_host'] WHERE id=$1`, false)
+	// One rule writes observed capabilities (172): a changed set moves the topic, the same set does not.
+	step("capabilities observed", `UPDATE paperboat.user_machines SET observed_capabilities=ARRAY['file_receive','terminal_host'] WHERE id=$1`, true)
+	step("same capabilities reordered", `UPDATE paperboat.user_machines SET observed_capabilities=ARRAY['terminal_host','file_receive'] WHERE id=$1`, false)
 	step("rename", `UPDATE paperboat.user_machines SET alias='renamed-machine' WHERE id=$1`, true)
 	step("seat released", `UPDATE paperboat.user_machines SET seat_state='released' WHERE id=$1`, true)
 	step("revoked", `UPDATE paperboat.user_machines SET state='revoked',revoked_at=now() WHERE id=$1`, true)

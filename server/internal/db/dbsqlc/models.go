@@ -722,19 +722,6 @@ type ControlConfigSyncStatus struct {
 	Review                 []byte
 }
 
-type ControlConfigSyncStatusHistory struct {
-	EnvironmentID          string
-	SyncRevision           int64
-	RepositoryID           string
-	AssignmentID           string
-	MachineID              string
-	InstallationGeneration int64
-	State                  string
-	ErrorCode              sql.NullString
-	RemoteRevision         sql.NullString
-	ObservedAt             time.Time
-}
-
 type ControlConnectorGeneration struct {
 	EnvironmentID                 string
 	MachineID                     string
@@ -3036,6 +3023,7 @@ type UserMachine struct {
 	OwnerTeamID                    sql.NullString
 	PersonalAutoEnabled            bool
 	MachineServicePolicyGeneration int64
+	CapabilitiesApplied            []string
 }
 
 type UserMachineAccessSession struct {

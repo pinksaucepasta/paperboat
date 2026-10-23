@@ -161,7 +161,7 @@ func (s *Service) RecordMachineCapabilitiesObservation(ctx context.Context, mach
 		if in.Status == "applied" && in.Applied != selectionFromNames(machine.ConfiguredCapabilities) {
 			return ErrCapabilitiesObservationStale
 		}
-		rows, err := tx.Queries().RecordUserMachineCapabilitiesObservation(ctx, dbsqlc.RecordUserMachineCapabilitiesObservationParams{ObservedCapabilities: capabilityNames(in.Applied), ObservedVersion: in.Version, Status: in.Status, ErrorCode: sql.NullString{String: in.ErrorCode, Valid: in.ErrorCode != ""}, ID: machineID, EnvironmentID: environmentID})
+		rows, err := tx.Queries().RecordUserMachineCapabilitiesObservation(ctx, dbsqlc.RecordUserMachineCapabilitiesObservationParams{AppliedCapabilities: capabilityNames(in.Applied), ObservedVersion: in.Version, Status: in.Status, ErrorCode: sql.NullString{String: in.ErrorCode, Valid: in.ErrorCode != ""}, ID: machineID, EnvironmentID: environmentID})
 		if err != nil {
 			return err
 		}
@@ -194,5 +194,5 @@ func selectionFromNames(names []string) MachineCapabilitySelection {
 }
 
 func mapMachineCapabilityPolicy(machine dbsqlc.UserMachine) MachineCapabilityPolicy {
-	return MachineCapabilityPolicy{Schema: MachineCapabilitiesSchemaV1, Desired: selectionFromNames(machine.ConfiguredCapabilities), DesiredVersion: machine.CapabilitiesDesiredVersion, Applied: selectionFromNames(machine.ObservedCapabilities), AppliedVersion: machine.CapabilitiesObservedVersion, Status: machine.CapabilitiesStatus, ErrorCode: machine.CapabilitiesErrorCode.String}
+	return MachineCapabilityPolicy{Schema: MachineCapabilitiesSchemaV1, Desired: selectionFromNames(machine.ConfiguredCapabilities), DesiredVersion: machine.CapabilitiesDesiredVersion, Applied: selectionFromNames(machine.CapabilitiesApplied), AppliedVersion: machine.CapabilitiesObservedVersion, Status: machine.CapabilitiesStatus, ErrorCode: machine.CapabilitiesErrorCode.String}
 }

@@ -612,7 +612,7 @@ WHERE id = sqlc.arg(id) AND user_id = sqlc.arg(user_id) AND deleted_at IS NULL
 
 -- name: MarkUserMachineOnlineFromHelper :execrows
 UPDATE user_machines
-SET state = 'online', online = true, observed_capabilities = COALESCE(sqlc.narg(observed_capabilities), '{}'::text[]), last_seen_at = now(), updated_at = now(), version = version + 1
+SET state = 'online', online = true, observed_capabilities = paperboat.machine_observed_capabilities(COALESCE(sqlc.narg(observed_capabilities), '{}'::text[]), capabilities_applied), last_seen_at = now(), updated_at = now(), version = version + 1
 WHERE id = sqlc.arg(id) AND environment_id = sqlc.arg(environment_id)
   AND seat_state = 'occupied' AND deleted_at IS NULL AND state IN ('pending','offline','online');
 
@@ -659,7 +659,8 @@ WHERE id = sqlc.arg(id) AND machine_management_allowed(sqlc.arg(user_id),id)
 
 -- name: RecordUserMachineCapabilitiesObservation :execrows
 UPDATE user_machines
-SET observed_capabilities = sqlc.arg(observed_capabilities),
+SET capabilities_applied = sqlc.arg(applied_capabilities)::text[],
+    observed_capabilities = paperboat.machine_observed_capabilities(observed_capabilities, sqlc.arg(applied_capabilities)::text[]),
     capabilities_observed_version = sqlc.arg(observed_version),
     capabilities_status = sqlc.arg(status),
     capabilities_error_code = sqlc.narg(error_code),
