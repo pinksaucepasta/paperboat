@@ -11,13 +11,16 @@ import (
 
 // One inventory change wakes the daemon of every machine in the account, and each lists the account's machines:
 // an account with N machines asked for the same list N times at once (19 concurrent 2-5 s lists for a 265-machine
-// account on production, where one list takes 20 ms unloaded). Identical requests share a computation, but only
-// one that starts after they arrived, so every answer reflects a snapshot taken after its request: a request
-// that finds a list already running waits for the next one, which every request arriving meanwhile shares. A
-// burst costs at most two computations per key.
+// account on production). Identical requests share a computation that started at most inventoryShareWindow before
+// them; any later request starts its own. A burst costs one computation, steady load at most one new computation
+// per key per window, and no request waits for more than one computation. (Queueing every later request behind the
+// next computation serialized an account's lists under steady load: 50 daemons of one account timed out at 15 s.)
+const inventoryShareWindow = time.Second
+
 type inventoryFlights struct {
 	mu   sync.Mutex
-	keys map[inventoryKey]*inventoryFlightPair
+	keys map[inventoryKey]*inventoryFlight // the newest computation of each key, while it runs
+	now  func() time.Time                  // nil: time.Now
 }
 
 type inventoryKey struct {
@@ -27,16 +30,12 @@ type inventoryKey struct {
 	opts    string
 }
 
-type inventoryFlightPair struct {
-	running, next *inventoryFlight
-}
-
 type inventoryFlight struct {
-	ctx   context.Context // the first waiter's values (workspace), not its cancellation
-	done  chan struct{}
-	items []UserMachine
-	total int
-	err   error
+	started time.Time
+	done    chan struct{}
+	items   []UserMachine
+	total   int
+	err     error
 }
 
 // inventoryComputeTimeout bounds a shared computation, which no single caller's cancellation stops.
@@ -51,22 +50,30 @@ func (o InventoryOptions) key() string {
 }
 
 func (f *inventoryFlights) do(ctx context.Context, key inventoryKey, compute func(context.Context) ([]UserMachine, int, error)) ([]UserMachine, int, error) {
+	now := time.Now
+	if f.now != nil {
+		now = f.now
+	}
 	f.mu.Lock()
 	if f.keys == nil {
-		f.keys = map[inventoryKey]*inventoryFlightPair{}
+		f.keys = map[inventoryKey]*inventoryFlight{}
 	}
-	pair := f.keys[key]
-	var flight *inventoryFlight
-	switch {
-	case pair == nil:
-		flight = &inventoryFlight{ctx: ctx, done: make(chan struct{})}
-		f.keys[key] = &inventoryFlightPair{running: flight}
-		go f.run(key, flight, compute)
-	case pair.next == nil:
-		flight = &inventoryFlight{ctx: ctx, done: make(chan struct{})}
-		pair.next = flight
-	default:
-		flight = pair.next
+	flight := f.keys[key]
+	if flight == nil || now().Sub(flight.started) > inventoryShareWindow {
+		flight = &inventoryFlight{started: now(), done: make(chan struct{})}
+		f.keys[key] = flight
+		// The values of this request (workspace selection) without its cancellation; bounded on its own.
+		computeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), inventoryComputeTimeout)
+		go func() {
+			defer cancel()
+			flight.items, flight.total, flight.err = compute(computeCtx)
+			close(flight.done)
+			f.mu.Lock()
+			if f.keys[key] == flight {
+				delete(f.keys, key)
+			}
+			f.mu.Unlock()
+		}()
 	}
 	f.mu.Unlock()
 	select {
@@ -77,22 +84,5 @@ func (f *inventoryFlights) do(ctx context.Context, key inventoryKey, compute fun
 		return append([]UserMachine(nil), flight.items...), flight.total, nil
 	case <-ctx.Done():
 		return nil, 0, ctx.Err()
-	}
-}
-
-// run computes flight, then starts the flight queued behind it, if any.
-func (f *inventoryFlights) run(key inventoryKey, flight *inventoryFlight, compute func(context.Context) ([]UserMachine, int, error)) {
-	for flight != nil {
-		ctx, cancel := context.WithTimeout(context.WithoutCancel(flight.ctx), inventoryComputeTimeout)
-		flight.items, flight.total, flight.err = compute(ctx)
-		cancel()
-		close(flight.done)
-		f.mu.Lock()
-		pair := f.keys[key]
-		flight, pair.running, pair.next = pair.next, pair.next, nil
-		if flight == nil {
-			delete(f.keys, key)
-		}
-		f.mu.Unlock()
 	}
 }

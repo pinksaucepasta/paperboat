@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/access"
 	"github.com/pinksaucepasta/paperboat/server/internal/teaminbox"
@@ -311,6 +312,9 @@ func userMachineInstallationConsume(service userMachineInstallationConsumer) htt
 	}
 }
 
+// machineListWait bounds one machine list request below the server's 15 s request timeout.
+const machineListWait = 10 * time.Second
+
 func machinesList(service *usermachines.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		p, ok := principalFromContext(r.Context())
@@ -322,9 +326,18 @@ func machinesList(service *usermachines.Service) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		items, total, err := service.ListInventory(personalWorkspaceContext(r.Context()), p.User.ID, usermachines.InventoryOptions{Limit: query.Limit, Offset: query.Offset, Q: query.Q, State: query.State, Owner: query.Owner})
+		// The wait stays below the server's request timeout, so a slow list answers a clear, retryable 503 instead
+		// of the generic timeout.
+		listCtx, cancel := context.WithTimeout(personalWorkspaceContext(r.Context()), machineListWait)
+		defer cancel()
+		items, total, err := service.ListInventory(listCtx, p.User.ID, usermachines.InventoryOptions{Limit: query.Limit, Offset: query.Offset, Q: query.Q, State: query.State, Owner: query.Owner})
 		if expectedHTTPErrorOnly(err, context.Canceled) {
 			return // the caller gave up (daemons wait 2 s); nobody reads a reply and it is not a server fault
+		}
+		if expectedHTTPErrorOnly(err, context.DeadlineExceeded) && r.Context().Err() == nil {
+			w.Header().Set("Retry-After", "5")
+			writeError(w, r, http.StatusServiceUnavailable, "machine_list_busy", "The machine list is busy. Retry in a few seconds.")
+			return
 		}
 		if err != nil {
 			writeError(w, r, 500, "internal_error", "Unable to list machines.", err)
