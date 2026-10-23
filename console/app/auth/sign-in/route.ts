@@ -25,6 +25,9 @@ export async function GET(request: Request): Promise<Response> {
     authorize.searchParams.set("response_type", "code")
     authorize.searchParams.set("provider", "authkit")
     authorize.searchParams.set("state", state)
+    // ?reauth=1: an irreversible action (deleting the account) needs a real sign-in now, not a
+    // reused WorkOS session; max_age=0 makes AuthKit ask again.
+    if (new URL(request.url).searchParams.get("reauth") === "1") authorize.searchParams.set("max_age", "0")
 
     const response = new Response(null, { status: 302, headers: { location: authorize.toString() } })
     relayCookies(stateResponse, response)

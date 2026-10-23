@@ -1,9 +1,12 @@
 "use client"
 
+import Link from "next/link"
 import { meQuery, useApiQuery } from "@/lib/api"
+import { accountDeletionLive } from "@/lib/account-deletion"
 import { setHideEmail, useHideEmail } from "@/lib/privacy"
 import { Email } from "@/components/email"
 import { Row, Section } from "@/components/section"
+import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 
@@ -21,6 +24,15 @@ export function Account() {
           <Switch id="hide-email" checked={hideEmail} onCheckedChange={setHideEmail} />
         </Row>
       </Section>
+      {accountDeletionLive && (
+        <Section title="Delete account">
+          <Row label="Delete your account and everything in it">
+            <Button variant="outline" nativeButton={false} render={<Link href="/account/delete" />}>
+              Delete account…
+            </Button>
+          </Row>
+        </Section>
+      )}
     </>
   )
 }
