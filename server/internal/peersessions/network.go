@@ -98,7 +98,7 @@ func (s *NetworkService) Register(ctx context.Context, in NetworkRegistration) (
 		return NetworkRegistrationResult{}, ErrInvalid
 	}
 	hash := sha256.Sum256([]byte(in.UserID + "\x00" + in.EndpointID + "\x00" + in.Role + "\x00" + fmt.Sprint(in.EndpointGeneration) + "\x00" + fmt.Sprint(in.MachineGeneration) + "\x00" + fmt.Sprint(in.ExpectedKeyGeneration) + "\x00" + base64.RawURLEncoding.EncodeToString(in.WireGuardPublicKey) + "\x00" + base64.RawURLEncoding.EncodeToString(in.DiscoPublicKey) + "\x00" + hex.EncodeToString(in.QUICCertificateFingerprint)))
-	tx, err := s.store.SQL().BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	tx, err := db.BeginSerializable(ctx, s.store.SQL())
 	if err != nil {
 		return NetworkRegistrationResult{}, err
 	}
@@ -262,7 +262,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 	}
 
 	now := s.now().UTC()
-	tx, err := s.store.SQL().BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	tx, err := db.BeginSerializable(ctx, s.store.SQL())
 	if err != nil {
 		return NetworkConfigResult{}, err
 	}

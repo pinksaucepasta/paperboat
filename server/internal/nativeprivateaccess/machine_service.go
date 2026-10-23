@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/pinksaucepasta/paperboat-server/internal/db"
 	"github.com/pinksaucepasta/paperboat-server/internal/machineservices"
 )
 
@@ -19,7 +20,7 @@ func (r *SQLResolver) resolveMachineService(ctx context.Context, in Request) (ta
 	if e != nil || in.Protocol != "tcp" {
 		return Target{}, ErrInvalid
 	}
-	tx, e := r.database.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	tx, e := db.BeginSerializable(ctx, r.database)
 	if e != nil {
 		return Target{}, e
 	}

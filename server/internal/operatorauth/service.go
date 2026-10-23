@@ -150,7 +150,7 @@ func (s *Service) Setup(ctx context.Context, email, password string) (session Se
 	}
 	now := time.Now().UTC()
 	expires := now.Add(sessionLifetime)
-	tx, err := s.Store.SQL().BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	tx, err := db.BeginSerializable(ctx, s.Store.SQL())
 	if err != nil {
 		return Session{}, err
 	}

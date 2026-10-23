@@ -163,6 +163,25 @@ func (d *DB) InTx(ctx context.Context, fn func(context.Context, *Tx) error) erro
 	}
 }
 
+// serializableSetup is run first in every serializable transaction. A sequential scan takes a predicate lock on
+// the whole table (PostgreSQL docs, Serializable Isolation), and the planner picks one for every small table, which
+// most of ours are; every concurrent write to such a table then conflicts with the transaction. Index scans lock
+// only the rows and pages they read.
+const serializableSetup = `SET LOCAL enable_seqscan TO off`
+
+// BeginSerializable starts a serializable database/sql transaction with the same setup as InTx, for code that
+// manages its own transaction. Prefer InTx, which also retries serialization failures.
+func BeginSerializable(ctx context.Context, database *sql.DB) (*sql.Tx, error) {
+	tx, err := database.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, serializableSetup); err != nil {
+		return nil, errors.Join(fmt.Errorf("set up serializable transaction: %w", err), tx.Rollback())
+	}
+	return tx, nil
+}
+
 // InReadOnlySnapshot runs reads that must agree with each other in one repeatable-read, read-only transaction.
 // It takes no row locks and no serializable predicate locks, so frequently polled reads cannot become the
 // pivot of another transaction's serialization failure. Never use it to decide a write.
@@ -267,11 +286,7 @@ func (d *DB) runInTx(ctx context.Context, isolation pgx.TxIsoLevel, fn func(cont
 	wrapped := &Tx{tx: tx, q: dbsqlc.New(tx)}
 	setup := `SET LOCAL search_path TO paperboat`
 	if isolation == pgx.Serializable {
-		// A sequential scan takes a predicate lock on the whole table (PostgreSQL docs, Serializable Isolation), and
-		// the planner picks one for every small table, which most of ours are. Every concurrent write to such a
-		// table then conflicts with the transaction: pairing failed all ten retries against the account's daemons.
-		// Index scans lock only the rows and pages they read.
-		setup += `; SET LOCAL enable_seqscan TO off`
+		setup += "; " + serializableSetup
 	}
 	if _, err := wrapped.Exec(ctx, setup); err != nil {
 		if rollbackErr := tx.Rollback(ctx); rollbackErr != nil {

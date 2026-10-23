@@ -77,7 +77,7 @@ func (s *Service) Upsert(ctx context.Context, accountID string, input UpsertRequ
 	if err := validateUpsert(accountID, input, now); err != nil {
 		return Policy{}, err
 	}
-	tx, err := s.db.SQL().BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	tx, err := db.BeginSerializable(ctx, s.db.SQL())
 	if err != nil {
 		beginErr := policyFailure("begin lazy policy transaction failed", err)
 		return Policy{}, upsertContextFailure(ctx, beginErr)

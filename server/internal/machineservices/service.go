@@ -146,7 +146,7 @@ func (s *Service) UpdatePolicy(ctx context.Context, actor, machine string, in wi
 	if in.ExpectedGeneration < 1 {
 		return wire.Policy{}, wire.ErrInvalid
 	}
-	tx, e := s.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	tx, e := db.BeginSerializable(ctx, s.DB)
 	if e != nil {
 		return wire.Policy{}, e
 	}
