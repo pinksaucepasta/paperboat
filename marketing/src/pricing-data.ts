@@ -24,7 +24,7 @@ export const featureRows: { feature: string; cells: [PlanCell, PlanCell, PlanCel
   { feature: "Roles", cells: [false, false, "Coming"] },
   { feature: "SSO and SCIM", cells: [false, false, "Coming"] },
   { feature: "Audit log export", cells: [false, false, "Coming"] },
-  { feature: "Invoices", cells: [false, false, "Coming"] },
+  { feature: "Invoices and receipts", cells: [false, true, true] },
 ]
 
 export const planNames = plans.map((plan) => plan.name)
