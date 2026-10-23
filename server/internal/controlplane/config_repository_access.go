@@ -320,17 +320,10 @@ func (s *ConfigRepositoryAccessService) RevocationWorker(interval time.Duration,
 		defer ticker.Stop()
 		for {
 			finishProgress := workers.BeginIteration(ctx, interval)
-			cycleErr := func() error {
-				if err := s.revokeProviderAccess(ctx, batchSize); err != nil {
-					return err
-				}
-
-				return nil
-			}()
-			finishProgress(cycleErr)
-			if cycleErr != nil {
-				return cycleErr
-			}
+			// Failures are recorded and retried next tick; a worker error never stops the server (S1).
+			workers.IterationFailure(ctx, "config_provider_revoke", "config_provider_revoke_failed", s.revokeProviderAccess(ctx, batchSize))
+			workers.IterationFailure(ctx, "config_secret_retention", "config_secret_retention_failed", s.pruneExpiredConfigSecrets(ctx))
+			finishProgress(nil)
 			select {
 			case <-ctx.Done():
 				return ctx.Err()

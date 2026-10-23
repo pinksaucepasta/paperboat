@@ -567,7 +567,6 @@ type ControlConfigConflictResolution struct {
 }
 
 type ControlConfigCredential struct {
-	JtiHash              []byte
 	Jti                  string
 	OperationKey         string
 	RequestHash          []byte

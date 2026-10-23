@@ -280,10 +280,10 @@ FOR UPDATE OF a, m, e, u, r;
 
 -- name: CreateControlConfigCredential :one
 INSERT INTO control_config_credentials
-  (jti_hash, jti, operation_key, request_hash, environment_id, machine_id, assignment_id,
+  (jti, operation_key, request_hash, environment_id, machine_id, assignment_id,
    warning_revision, credential_ciphertext, expires_at)
 VALUES
-  (sqlc.arg(jti_hash), sqlc.arg(jti), sqlc.arg(operation_key), sqlc.arg(request_hash), sqlc.arg(environment_id),
+  (sqlc.arg(jti), sqlc.arg(operation_key), sqlc.arg(request_hash), sqlc.arg(environment_id),
    sqlc.arg(machine_id), sqlc.arg(assignment_id), sqlc.narg(warning_revision),
    sqlc.arg(credential_ciphertext), sqlc.arg(expires_at))
 ON CONFLICT (operation_key) DO NOTHING

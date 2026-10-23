@@ -984,18 +984,17 @@ func (q *Queries) CreateControlConfigConflictResolution(ctx context.Context, arg
 
 const createControlConfigCredential = `-- name: CreateControlConfigCredential :one
 INSERT INTO control_config_credentials
-  (jti_hash, jti, operation_key, request_hash, environment_id, machine_id, assignment_id,
+  (jti, operation_key, request_hash, environment_id, machine_id, assignment_id,
    warning_revision, credential_ciphertext, expires_at)
 VALUES
-  ($1, $2, $3, $4, $5,
-   $6, $7, $8,
-   $9, $10)
+  ($1, $2, $3, $4,
+   $5, $6, $7,
+   $8, $9)
 ON CONFLICT (operation_key) DO NOTHING
-RETURNING jti_hash, jti, operation_key, request_hash, environment_id, machine_id, assignment_id, warning_revision, credential_ciphertext, expires_at, revoked_at, created_at
+RETURNING jti, operation_key, request_hash, environment_id, machine_id, assignment_id, warning_revision, credential_ciphertext, expires_at, revoked_at, created_at
 `
 
 type CreateControlConfigCredentialParams struct {
-	JtiHash              []byte
 	Jti                  string
 	OperationKey         string
 	RequestHash          []byte
@@ -1009,7 +1008,6 @@ type CreateControlConfigCredentialParams struct {
 
 func (q *Queries) CreateControlConfigCredential(ctx context.Context, arg CreateControlConfigCredentialParams) (ControlConfigCredential, error) {
 	row := q.db.QueryRow(ctx, createControlConfigCredential,
-		arg.JtiHash,
 		arg.Jti,
 		arg.OperationKey,
 		arg.RequestHash,
@@ -1022,7 +1020,6 @@ func (q *Queries) CreateControlConfigCredential(ctx context.Context, arg CreateC
 	)
 	var i ControlConfigCredential
 	err := row.Scan(
-		&i.JtiHash,
 		&i.Jti,
 		&i.OperationKey,
 		&i.RequestHash,
@@ -1912,7 +1909,7 @@ func (q *Queries) FinalizeDrainingTunnelEdgeRouteAssignmentV1(ctx context.Contex
 }
 
 const getActiveControlConfigCredentialByJTI = `-- name: GetActiveControlConfigCredentialByJTI :one
-SELECT jti_hash, jti, operation_key, request_hash, environment_id, machine_id, assignment_id, warning_revision, credential_ciphertext, expires_at, revoked_at, created_at FROM control_config_credentials
+SELECT jti, operation_key, request_hash, environment_id, machine_id, assignment_id, warning_revision, credential_ciphertext, expires_at, revoked_at, created_at FROM control_config_credentials
 WHERE jti = $1 AND environment_id = $2
   AND machine_id = $3 AND assignment_id = $4
   AND revoked_at IS NULL AND expires_at > $5
@@ -1936,7 +1933,6 @@ func (q *Queries) GetActiveControlConfigCredentialByJTI(ctx context.Context, arg
 	)
 	var i ControlConfigCredential
 	err := row.Scan(
-		&i.JtiHash,
 		&i.Jti,
 		&i.OperationKey,
 		&i.RequestHash,
@@ -2288,14 +2284,13 @@ func (q *Queries) GetControlConfigAssignment(ctx context.Context, environmentID 
 }
 
 const getControlConfigCredentialByOperation = `-- name: GetControlConfigCredentialByOperation :one
-SELECT jti_hash, jti, operation_key, request_hash, environment_id, machine_id, assignment_id, warning_revision, credential_ciphertext, expires_at, revoked_at, created_at FROM control_config_credentials WHERE operation_key = $1
+SELECT jti, operation_key, request_hash, environment_id, machine_id, assignment_id, warning_revision, credential_ciphertext, expires_at, revoked_at, created_at FROM control_config_credentials WHERE operation_key = $1
 `
 
 func (q *Queries) GetControlConfigCredentialByOperation(ctx context.Context, operationKey string) (ControlConfigCredential, error) {
 	row := q.db.QueryRow(ctx, getControlConfigCredentialByOperation, operationKey)
 	var i ControlConfigCredential
 	err := row.Scan(
-		&i.JtiHash,
 		&i.Jti,
 		&i.OperationKey,
 		&i.RequestHash,

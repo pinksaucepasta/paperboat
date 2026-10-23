@@ -123,8 +123,7 @@ func (s *ConfigCredentialService) Issue(ctx context.Context, identityToken strin
 		if err != nil {
 			return err
 		}
-		jtiHash := sha256.Sum256([]byte(jti))
-		if _, err = tx.Queries().CreateControlConfigCredential(ctx, dbsqlc.CreateControlConfigCredentialParams{JtiHash: jtiHash[:], Jti: jti, OperationKey: operationKey, RequestHash: requestHash[:], EnvironmentID: claims.EnvironmentID, MachineID: claims.MachineID, AssignmentID: assignment.ID, WarningRevision: assignment.WarningRevision, CredentialCiphertext: ciphertext, ExpiresAt: expiresAt}); err != nil {
+		if _, err = tx.Queries().CreateControlConfigCredential(ctx, dbsqlc.CreateControlConfigCredentialParams{Jti: jti, OperationKey: operationKey, RequestHash: requestHash[:], EnvironmentID: claims.EnvironmentID, MachineID: claims.MachineID, AssignmentID: assignment.ID, WarningRevision: assignment.WarningRevision, CredentialCiphertext: ciphertext, ExpiresAt: expiresAt}); err != nil {
 			return err
 		}
 		issuedNew = true
