@@ -8565,6 +8565,10 @@
               "$ref": "#/components/schemas/NativeRelaySubject"
             }
           },
+          "subjects_required": {
+            "type": "boolean",
+            "description": "Only for relays that sent subjects_digest: resend the full subjects list. No revocations are given with it."
+          },
           "peer_relay": {
             "type": "object",
             "additionalProperties": false,
@@ -8627,8 +8631,7 @@
           "process_epoch",
           "ready",
           "draining",
-          "capacity_used",
-          "subjects"
+          "capacity_used"
         ],
         "properties": {
           "node_id": {
@@ -8659,10 +8662,16 @@
           },
           "subjects": {
             "type": "array",
-            "maxItems": 256,
+            "maxItems": 16384,
+            "description": "The full admitted list. Sent when it changed or subjects_required was answered; otherwise omitted and subjects_digest names the list the server holds.",
             "items": {
               "$ref": "#/components/schemas/NativeRelaySubject"
             }
+          },
+          "subjects_digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "Lowercase hex SHA-256 of the subjects sorted by (account_id, endpoint_id), one account_id NUL endpoint_id NUL generation LF line each. Required when subjects is omitted."
           }
         }
       },

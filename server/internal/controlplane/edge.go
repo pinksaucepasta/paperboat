@@ -874,9 +874,14 @@ func (s *EdgeService) handleConnectorAdmission(w http.ResponseWriter, r *http.Re
 }
 
 func (s *EdgeService) decode(w http.ResponseWriter, r *http.Request, target any) bool {
+	return s.decodeLimit(w, r, target, maxEdgeDocument)
+}
+
+// decodeLimit decodes a JSON request body of at most limit bytes.
+func (s *EdgeService) decodeLimit(w http.ResponseWriter, r *http.Request, target any, limit int) bool {
 	defer r.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(r.Body, maxEdgeDocument+1))
-	if err != nil || len(data) > maxEdgeDocument || !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+	data, err := io.ReadAll(io.LimitReader(r.Body, int64(limit)+1))
+	if err != nil || len(data) > limit || !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
 		writeEdgeError(w, r, http.StatusBadRequest, "invalid_request", false, 0)
 		return false
 	}

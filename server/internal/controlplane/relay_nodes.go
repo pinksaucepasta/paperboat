@@ -7,6 +7,7 @@ import (
 	"errors"
 	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -24,13 +25,17 @@ type relaySubject struct {
 	Generation int64  `json:"generation"`
 }
 type relayNodeObservation struct {
-	NodeID       string         `json:"node_id"`
-	Generation   int64          `json:"node_generation"`
-	ProcessEpoch string         `json:"process_epoch"`
-	Ready        bool           `json:"ready"`
-	Draining     bool           `json:"draining"`
-	CapacityUsed int64          `json:"capacity_used"`
-	Subjects     []relaySubject `json:"subjects"`
+	NodeID       string `json:"node_id"`
+	Generation   int64  `json:"node_generation"`
+	ProcessEpoch string `json:"process_epoch"`
+	Ready        bool   `json:"ready"`
+	Draining     bool   `json:"draining"`
+	CapacityUsed int64  `json:"capacity_used"`
+	// Subjects is the full admitted list. A relay sends it only when the list changed or SubjectsRequired asked for it.
+	Subjects []relaySubject `json:"subjects"`
+	// SubjectsDigest is relaySubjectsDigest of the relay's list. A relay that sends it may omit Subjects when the
+	// server still holds that list for the node's generation and epoch.
+	SubjectsDigest string `json:"subjects_digest,omitempty"`
 	// QuotaDeniedSupported is sent by relays that understand LeaseDocument.QuotaDenied. Relays
 	// decode leases strictly, so an older relay must never be sent the field.
 	QuotaDeniedSupported bool `json:"quota_denied_supported,omitempty"`
@@ -47,6 +52,9 @@ type relayNodeLeaseDocument struct {
 	// the relay refuses their new admissions and closes their carriers (typed), until a later
 	// observation no longer lists them. It never carries authority.
 	QuotaDenied []string `json:"quota_denied,omitempty"`
+	// SubjectsRequired asks a relay that sent SubjectsDigest for its full list; no revocations are given with it.
+	// Only relays that sent a digest are ever sent the field.
+	SubjectsRequired bool `json:"subjects_required,omitempty"`
 }
 type relayServiceIdentity struct {
 	WireGuardPublicKey string `json:"wireguard_public_key"`
@@ -136,13 +144,13 @@ func (s *EdgeService) StartRelayNode(ctx context.Context, in relayNodeStart) (re
 
 func (s *EdgeService) ObserveRelayNode(ctx context.Context, in relayNodeObservation) (relayNodeLeaseDocument, error) {
 	var out relayNodeLeaseDocument
-	if !relayIdentifier(in.NodeID) || !relayIdentifier(in.ProcessEpoch) || in.Generation < 1 || in.CapacityUsed < 0 || len(in.Subjects) > 256 {
+	if !relayIdentifier(in.NodeID) || !relayIdentifier(in.ProcessEpoch) || in.Generation < 1 || in.CapacityUsed < 0 || len(in.Subjects) > relaylimits.MaxConnectionsPerNode || (in.SubjectsDigest != "" && !validRelaySubjectsDigest(in.SubjectsDigest)) {
 		return out, invalidUsage("relay_nodes.go:139")
 	}
 	seen := map[string]bool{}
 	for _, subject := range in.Subjects {
 		k := subject.AccountID + "\x00" + subject.EndpointID
-		if !relayIdentifier(subject.AccountID) || !relayIdentifier(subject.EndpointID) || subject.Generation < 1 || subject.Generation == int64(^uint64(0)>>1) || seen[k] {
+		if !relayIdentifier(subject.AccountID) || !relayIdentifier(subject.EndpointID) || strings.ContainsAny(subject.AccountID+subject.EndpointID, "\x00\n") || subject.Generation < 1 || subject.Generation == int64(^uint64(0)>>1) || seen[k] {
 			return out, invalidUsage("relay_nodes.go:145")
 		}
 		seen[k] = true
@@ -188,17 +196,14 @@ func (s *EdgeService) ObserveRelayNode(ctx context.Context, in relayNodeObservat
 		return out, err
 	}
 	out = relayNodeLeaseDocument{NodeID: in.NodeID, Generation: in.Generation, ProcessEpoch: in.ProcessEpoch, ExpiresAt: now.Add(relayNodeLease).Unix(), CapacityLimit: capacity, Revocations: []relaySubject{}}
-	for _, subject := range in.Subjects {
-		var floor int64
-		err = tx.QueryRowContext(ctx, `SELECT n.relay_revocation_generation FROM paperboat.peer_network_identities n JOIN paperboat.control_tunnel_nodes r ON r.id=$3 WHERE n.user_id=$1 AND n.endpoint_id=$2 AND paperboat.node_pool_eligible(r.id,n.user_id,'relay')`, subject.AccountID, subject.EndpointID, in.NodeID).Scan(&floor)
-		if errors.Is(err, sql.ErrNoRows) {
-			floor = subject.Generation + 1
-		} else if err != nil {
+	set, required, err := relayObservedSubjects(ctx, tx, in)
+	if err != nil {
+		return relayNodeLeaseDocument{}, err
+	}
+	out.SubjectsRequired = required
+	if !required {
+		if out.Revocations, err = relayRevocations(ctx, tx, in.NodeID, set); err != nil {
 			return relayNodeLeaseDocument{}, err
-		}
-		if floor > subject.Generation {
-			subject.Generation = floor
-			out.Revocations = append(out.Revocations, subject)
 		}
 	}
 	out.PeerRelay, err = relayServiceForNode(ctx, tx, in.NodeID)
@@ -210,9 +215,9 @@ func (s *EdgeService) ObserveRelayNode(ctx context.Context, in relayNodeObservat
 	}
 	// After the commit and outside the transaction: read-only, cached, bounded, fail-open.
 	if s.relayQuota != nil && in.QuotaDeniedSupported {
-		accounts := make([]string, 0, len(in.Subjects))
+		accounts := make([]string, 0, len(set.list))
 		listed := map[string]bool{}
-		for _, subject := range in.Subjects {
+		for _, subject := range set.list {
 			if !listed[subject.AccountID] {
 				listed[subject.AccountID] = true
 				accounts = append(accounts, subject.AccountID)
@@ -242,9 +247,14 @@ func (s *EdgeService) handleRelayStart(w http.ResponseWriter, r *http.Request) {
 	}
 	writeEdgeJSON(w, http.StatusOK, out)
 }
+
+// maxRelayObservationDocument fits a full subject list of relaylimits.MaxConnectionsPerNode subjects whose
+// identifiers are at their 256-byte limit, which the general edge document limit does not.
+const maxRelayObservationDocument = 16 << 20
+
 func (s *EdgeService) handleRelayObserve(w http.ResponseWriter, r *http.Request) {
 	var in relayNodeObservation
-	if !s.decode(w, r, &in) {
+	if !s.decodeLimit(w, r, &in, maxRelayObservationDocument) {
 		return
 	}
 	out, err := s.ObserveRelayNode(r.Context(), in)
