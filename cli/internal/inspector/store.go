@@ -32,9 +32,11 @@ type Record struct {
 	ErrorCode          string
 	State              CaptureState
 	ReplayIneligible   string
-	StartedAt          time.Time
-	FinishedAt         time.Time
-	EstimatedBytes     int64
+	// ReplayOf is the capture this record replayed; empty for live traffic.
+	ReplayOf       string
+	StartedAt      time.Time
+	FinishedAt     time.Time
+	EstimatedBytes int64
 }
 
 // Page is one bounded retrieval result.
@@ -71,6 +73,8 @@ type CompletedCapture struct {
 	// RawRetention. Nil when raw mode is off.
 	RawRequest   []byte
 	RawTruncated bool
+	// ReplayOf names the original capture when this exchange is a replay.
+	ReplayOf string
 }
 
 // Pending is one in-flight capture slot. It counts against byte/record and

@@ -21,6 +21,8 @@ export type Capture = {
   error_code: string
   state: string
   replay_ineligible?: string
+  /** The capture this record replayed; set by the machine. */
+  replay_of?: string
   started_at: string
   finished_at: string
 }
@@ -45,7 +47,6 @@ export function useCaptureFeed(channel: Channel, previewId: string, paused: bool
   const [records, setRecords] = useState<Map<string, Capture>>(() => new Map())
   const [capture, setCapture] = useState<CaptureState>("unknown")
   const [bodies, setBodies] = useState(false)
-  const [replays, setReplays] = useState<Set<string>>(() => new Set())
   const cursor = useRef("")
   const busy = useRef(false)
   const { request, phase } = channel
@@ -151,8 +152,6 @@ export function useCaptureFeed(channel: Channel, previewId: string, paused: bool
         capture_id: captureId,
         idempotency_key: idempotencyKey(),
       })) as Replay
-      const id = result.replay_record_id
-      if (id) setReplays((current) => new Set(current).add(id))
       void poll()
       return result
     },
@@ -160,5 +159,5 @@ export function useCaptureFeed(channel: Channel, previewId: string, paused: bool
   )
 
   const list = [...records.values()].reverse()
-  return { records: list, capture, bodies, replays, load, setPolicy, clear, replay }
+  return { records: list, capture, bodies, load, setPolicy, clear, replay }
 }

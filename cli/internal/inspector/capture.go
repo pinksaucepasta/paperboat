@@ -267,6 +267,7 @@ func buildRecord(pending *Pending, policy ResourcePolicy, completed CompletedCap
 		StartedAt:          started,
 		FinishedAt:         finished,
 		EstimatedBytes:     estimated,
+		ReplayOf:           completed.ReplayOf,
 	}
 	if record.ResourceGeneration == 0 {
 		record.ResourceGeneration = pending.ResourceGeneration

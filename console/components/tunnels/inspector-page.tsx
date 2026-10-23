@@ -170,7 +170,6 @@ function Inspector({ preview }: { preview: Preview }) {
       ) : (
         <Panes
           shown={shown}
-          replays={feed.replays}
           selected={current}
           onSelect={setSelected}
           load={feed.load}
@@ -212,14 +211,12 @@ function MethodFilter({ value, onChange }: { value: string; onChange: (value: st
 
 function Panes({
   shown,
-  replays,
   selected,
   onSelect,
   load,
   onReplay,
 }: {
   shown: Capture[]
-  replays: Set<string>
   selected?: Capture
   onSelect: (id: string) => void
   load: (id: string) => Promise<Capture>
@@ -250,7 +247,7 @@ function Panes({
               <CaptureRow
                 key={record.id}
                 record={record}
-                replay={replays.has(record.id)}
+                replay={Boolean(record.replay_of)}
                 selected={record.id === selected?.id}
                 onSelect={() => onSelect(record.id)}
               />

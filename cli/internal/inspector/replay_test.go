@@ -52,7 +52,7 @@ func replayTestRequest(id string, now time.Time) ReplayRequest {
 
 func TestReplayPreservesBytesAndAudits(t *testing.T) {
 	now := time.Now().UTC()
-	_, manager, id := replayTestSetup(t, ResourcePolicy{}, false)
+	store, manager, id := replayTestSetup(t, ResourcePolicy{}, false)
 	var calls int32
 	forward := func(ctx context.Context, method, requestURI string, header http.Header, body []byte) (int, http.Header, []byte, bool, error) {
 		atomic.AddInt32(&calls, 1)
@@ -80,6 +80,14 @@ func TestReplayPreservesBytesAndAudits(t *testing.T) {
 	}
 	if result.SideEffects == "" || result.ReplayRecordID == "" {
 		t.Fatalf("result must show side effects and separate response record: %+v", result)
+	}
+	// The stored replay record names the capture it replayed, so a viewer can
+	// mark it without remembering which replays it started.
+	store.mu.Lock()
+	replayed, original := store.records[result.ReplayRecordID], store.records[id]
+	store.mu.Unlock()
+	if replayed == nil || replayed.ReplayOf != id || original.ReplayOf != "" {
+		t.Fatalf("replay record = %+v, original ReplayOf = %q", replayed, original.ReplayOf)
 	}
 	if calls != 1 {
 		t.Fatalf("origin calls = %d, want 1", calls)

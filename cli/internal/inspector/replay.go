@@ -423,6 +423,7 @@ func (m *Manager) Replay(ctx context.Context, req ReplayRequest, forward ReplayF
 		ResourceGeneration: req.ResourceGeneration,
 		RouteGeneration:    req.RouteGeneration,
 		TargetGeneration:   req.TargetGeneration,
+		ReplayOf:           record.ID,
 	}
 	if forwardCtx.Err() != nil {
 		completed.ErrorCode = "forwarding_failed"

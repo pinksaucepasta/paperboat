@@ -430,6 +430,7 @@ type recordWire struct {
 	ErrorCode         string      `json:"error_code"`
 	State             string      `json:"state"`
 	ReplayIneligible  string      `json:"replay_ineligible,omitempty"`
+	ReplayOf          string      `json:"replay_of,omitempty"`
 	StartedAt         time.Time   `json:"started_at"`
 	FinishedAt        time.Time   `json:"finished_at"`
 }
@@ -445,7 +446,7 @@ func wireRecord(record inspector.Record) recordWire {
 		RequestBody:      string(record.RequestBody), RequestBodyState: string(record.RequestBodyState),
 		ResponseBody: string(record.ResponseBody), ResponseBodyState: string(record.ResponseBodyState),
 		ResponseStatus: record.ResponseStatus, ErrorCode: record.ErrorCode,
-		State: string(record.State), ReplayIneligible: record.ReplayIneligible,
+		State: string(record.State), ReplayIneligible: record.ReplayIneligible, ReplayOf: record.ReplayOf,
 		StartedAt: record.StartedAt, FinishedAt: record.FinishedAt,
 	}
 }
