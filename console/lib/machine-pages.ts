@@ -9,7 +9,7 @@ export const maxMachines = 2000
 export type MachinePages<T> = { items: T[]; total: number; complete: boolean }
 
 export async function fetchAllPages<T>(
-  fetchPage: (params: Record<string, string>) => Promise<{ items: T[]; pagination: { total: number } } | null | undefined>,
+  fetchPage: (params: Record<string, string>) => Promise<{ items: T[] | null; pagination: { total: number } } | null | undefined>,
   workspace: string,
 ): Promise<MachinePages<T> | null> {
   const items: T[] = []
@@ -17,9 +17,11 @@ export async function fetchAllPages<T>(
   for (let offset = 0; offset < maxMachines; offset += pageSize) {
     const page = await fetchPage({ limit: String(pageSize), offset: String(offset), workspace })
     if (!page) return offset === 0 ? null : { items, total, complete: false }
-    items.push(...page.items)
+    // An empty list can arrive as null (a Go nil slice); it means no items, not a broken page.
+    const got = page.items ?? []
+    items.push(...got)
     total = page.pagination.total
-    if (page.items.length < pageSize || items.length >= total) break
+    if (got.length < pageSize || items.length >= total) break
   }
   return { items, total, complete: items.length >= total }
 }
@@ -30,7 +32,7 @@ export async function fetchAllPages<T>(
  * server lists only with ?state=revoked (for the Revoked filter).
  */
 export async function fetchMachineList<T>(
-  fetchPage: (params: Record<string, string>) => Promise<{ items: T[]; pagination: { total: number } } | null | undefined>,
+  fetchPage: (params: Record<string, string>) => Promise<{ items: T[] | null; pagination: { total: number } } | null | undefined>,
   workspace: string,
 ): Promise<MachinePages<T> | null> {
   const [live, revoked] = await Promise.all([
