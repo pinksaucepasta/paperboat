@@ -374,8 +374,10 @@ func (s *Service) describeTerminalSession(ctx context.Context, account string, i
 	}
 	snap, err := s.controlRuntime.Terminal(ctx, httpIngressURL, token, "snapshot", item.ID, newID("operation"))
 	if err != nil {
-		if helperruntime.IsSessionUnknown(err) && s.markTerminalSessionAbsent(ctx, item.ID) == nil {
-			item.RuntimeState, item.State = "closed", terminalDisplayState(item.DesiredState, "closed", true, 0)
+		if helperruntime.IsSessionUnknown(err) {
+			if closed, markErr := s.markConfirmedTerminalSessionAbsent(ctx, item.ID); markErr == nil && closed {
+				item.RuntimeState, item.State = "closed", terminalDisplayState(item.DesiredState, "closed", true, 0)
+			}
 		}
 		return item, nil
 	}

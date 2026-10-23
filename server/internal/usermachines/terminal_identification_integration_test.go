@@ -24,6 +24,7 @@ type terminalIdentificationRuntime struct {
 	machine, environment, account, session, route string
 	calls                                         atomic.Int64
 	unavailable                                   bool
+	unknown                                       bool
 	slow                                          bool
 	multiple                                      bool
 }
@@ -41,12 +42,21 @@ func (r *terminalIdentificationRuntime) Terminal(ctx context.Context, route, cre
 	if r.unavailable {
 		return helperruntime.Snapshot{}, errors.New("fixture host unavailable")
 	}
+	if r.unknown {
+		return helperruntime.Snapshot{}, hostUnknownSession{}
+	}
 	return helperruntime.Snapshot{ID: session, Name: "runtime-launch-name", CWD: "/launch", State: "running", Generation: 1, Title: "  vim\x1b\u202e main.go ", CurrentDirectory: "/live\x00/\u2066api", ForegroundProcess: "vi\t\u200fm"}, nil
 }
 
 func (r *terminalIdentificationRuntime) TerminalViaEdge(ctx context.Context, _, route, credential, operation, session, operationID string) (helperruntime.Snapshot, error) {
 	return r.Terminal(ctx, "https://"+route, credential, operation, session, operationID)
 }
+
+// hostUnknownSession is the host's "no such session" answer (not_found_or_forbidden).
+type hostUnknownSession struct{}
+
+func (hostUnknownSession) Error() string                  { return "session unknown on host" }
+func (hostUnknownSession) DiagnosticProtocolCode() string { return "not_found_or_forbidden" }
 
 func TestPostgresTerminalLiveIdentificationAuthorization(t *testing.T) {
 	store := testStore(t)
@@ -110,6 +120,27 @@ func TestPostgresTerminalLiveIdentificationAuthorization(t *testing.T) {
 	if err != nil || runtime.calls.Load() != 1 || item.Name != "my-work" || item.Title != "vim main.go" || item.CurrentDirectory != "/live/api" || item.ForegroundProcess != "vim" || item.StartedIn != "/launch" || item.State != "detached" {
 		t.Fatalf("live authorized projection=%+v calls=%d error=%v", item, runtime.calls.Load(), err)
 	}
+	// Lane C, round 21: for a few seconds after create /sharing said closed while the host had not
+	// created the session yet ("unknown"). A session the host never confirmed is not closed by that.
+	fresh := "terminal_" + uuid.NewString()
+	insert(`INSERT INTO paperboat.user_machine_terminal_sessions(id,user_machine_id,owner_account,name,launch_cwd,runtime_state) VALUES($1,$2,$3,'just-created','/launch','creating')`, fresh, machine, owner)
+	runtime.unknown, runtime.multiple = true, true
+	starting, err := service.TerminalSessionSharing(ctx, owner, fresh)
+	if err != nil || starting.State == "closed" || starting.RuntimeState == "closed" {
+		t.Fatalf("a just-created session was reported closed: state=%q runtime=%q err=%v", starting.State, starting.RuntimeState, err)
+	}
+	var freshState string
+	if err = store.SQL().QueryRowContext(ctx, `SELECT runtime_state FROM paperboat.user_machine_terminal_sessions WHERE id=$1`, fresh).Scan(&freshState); err != nil || freshState != "creating" {
+		t.Fatalf("a just-created session row became %q err=%v", freshState, err)
+	}
+	// Once the host has confirmed the session, its "unknown" means the session is gone.
+	insert(`UPDATE paperboat.user_machine_terminal_sessions SET last_runtime_sync_at=now(),runtime_state='running' WHERE id=$1`, fresh)
+	gone, err := service.TerminalSessionSharing(ctx, owner, fresh)
+	if err != nil || gone.RuntimeState != "closed" {
+		t.Fatalf("a confirmed session the host no longer has: runtime=%q err=%v", gone.RuntimeState, err)
+	}
+	runtime.unknown, runtime.multiple = false, false
+	insert(`DELETE FROM paperboat.user_machine_terminal_sessions WHERE id=$1`, fresh)
 	items, err := service.ListTerminalSessions(ctx, owner, machine)
 	if err != nil || len(items) != 1 || items[0].Title != "vim main.go" || items[0].CurrentDirectory != "/live/api" || items[0].ForegroundProcess != "vim" || items[0].Name != "my-work" || items[0].StartedIn != "/launch" {
 		t.Fatalf("machine live projection=%+v error=%v", items, err)

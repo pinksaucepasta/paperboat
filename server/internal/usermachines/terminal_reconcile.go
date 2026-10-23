@@ -32,6 +32,20 @@ func (s *Service) markTerminalSessionAbsent(ctx context.Context, sessionID strin
 	return err
 }
 
+// markConfirmedTerminalSessionAbsent is markTerminalSessionAbsent for a session the host has confirmed
+// before. Right after create the host does not have the session yet and answers "unknown"; that must
+// not close it. Sessions the host never confirmed are left to reconcileOrphanTerminalSessions.
+// It reports whether it closed the row.
+func (s *Service) markConfirmedTerminalSessionAbsent(ctx context.Context, sessionID string) (bool, error) {
+	result, err := s.db.SQL().ExecContext(ctx, `UPDATE user_machine_terminal_sessions SET runtime_state='closed',closed_at=coalesce(closed_at,now()),last_runtime_sync_at=now(),updated_at=now()
+ WHERE id=$1 AND runtime_state NOT IN ('closed','exited','deleted') AND last_runtime_sync_at IS NOT NULL`, sessionID)
+	if err != nil {
+		return false, err
+	}
+	changed, err := result.RowsAffected()
+	return changed == 1, err
+}
+
 type terminalOrphan struct {
 	sessionID, userMachineID, ownerAccount string
 }
