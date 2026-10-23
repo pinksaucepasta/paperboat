@@ -5,6 +5,7 @@ import { useState } from "react"
 import { meQuery, useApiQuery, useMachines, type Workspace } from "@/lib/api"
 import {
   actionLabels,
+  envGrant,
   gridRule,
   parsePolicy,
   readOnlyNote,
@@ -37,7 +38,10 @@ export function AccessSimple({
 }) {
   const file = parsePolicy(policy.policy)
   const tags = tagsByMachine(file)
-  const rules = (file?.rules ?? []).map((rule, index) => ({ rule, index })).filter(({ rule }) => !gridRule(rule))
+  const rules = (file?.rules ?? [])
+    .map((rule, index) => ({ rule, index }))
+    .filter(({ rule }) => !gridRule(rule) && !envGrant(rule))
+  const envGrants = (file?.rules ?? []).map(envGrant).filter((grant) => grant !== undefined)
   const note = readOnlyNote(policy)
   return (
     <div className="flex flex-col gap-10">
@@ -54,6 +58,22 @@ export function AccessSimple({
               ? "Rules may give private access to the team's machines."
               : "Off: no rule gives private access. Owners and admins turn it on in the team's settings."}
           </div>
+        </Section>
+      )}
+      {workspace.kind === "team" && (
+        <Section title="Team ENV">
+          {envGrants.length === 0 ? (
+            <p className="py-3 text-sm text-muted-foreground">
+              No member has their own access. Owners always may; other rules are listed below.
+            </p>
+          ) : (
+            envGrants.map((grant) => (
+              <div key={grant.email} className="flex min-h-12 items-center justify-between border-b border-divider py-2 text-sm">
+                <span>{grant.email}</span>
+                <span className="text-muted-foreground">{grant.write ? "Read and change" : "Read"}</span>
+              </div>
+            ))
+          )}
         </Section>
       )}
       <Section title="Groups">

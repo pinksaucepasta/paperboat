@@ -50,7 +50,8 @@ export type Validation = {
   confirm: string
 }
 
-export type Decision = { allowed: boolean; reason: string; rules?: string[]; guardrail?: string }
+/** `key_delivered: false`: env_read is allowed but no key holder has delivered the team ENV key yet. */
+export type Decision = { allowed: boolean; reason: string; rules?: string[]; guardrail?: string; key_delivered?: boolean }
 export type Explanation = { decision?: Decision }
 
 export type PolicyVersion = {
@@ -354,6 +355,26 @@ export function gridRule(rule: PolicyRule): boolean {
     !rule.deny &&
     !rule.ports
   )
+}
+
+/**
+ * A member's own team ENV grant (`pb team grant … env`): one `user:` subject, `env:team`, only
+ * env_read/env_write allowed (README "Team ENV"). Returns the email and whether it can write.
+ */
+export function envGrant(rule: PolicyRule): { email: string; write: boolean } | undefined {
+  const simple =
+    Array.isArray(rule.src) &&
+    rule.src.length === 1 &&
+    rule.src[0].startsWith("user:") &&
+    Array.isArray(rule.dst) &&
+    rule.dst.length === 1 &&
+    rule.dst[0] === "env:team" &&
+    Array.isArray(rule.allow) &&
+    rule.allow.length > 0 &&
+    rule.allow.every((action) => action === "env_read" || action === "env_write") &&
+    !rule.deny
+  if (!simple) return undefined
+  return { email: rule.src[0].slice("user:".length), write: rule.allow!.includes("env_write") }
 }
 
 /** A line diff (longest common subsequence), for comparing policy versions. Sizes are bounded by the file limit. */

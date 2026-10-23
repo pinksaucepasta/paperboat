@@ -195,6 +195,12 @@ export function PolicyTest({ workspace, policy, draft }: { workspace: string; po
           >
             {decision.allowed ? "Allowed" : "Denied"}
           </span>
+          {decision.allowed && decision.key_delivered === false && (
+            <span data-key-delivered="false">
+              The team ENV key isn’t delivered to them yet: a key holder runs{" "}
+              <code className="font-mono text-code">pb env grants sync</code>.
+            </span>
+          )}
           <span>
             {decision.guardrail
               ? (guardrailLabels[decision.guardrail] ?? decision.guardrail)
