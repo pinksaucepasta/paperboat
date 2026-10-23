@@ -19,11 +19,12 @@ pb machine list [flags]
 ### Options
 
 ```
-  -h, --help           help for list
-      --json           print JSON
-      --owner string   filter owner: mine, shared, or an authorized account ID
-      --q string       filter by resource name or ID
-      --state string   filter by resource state
+  -h, --help              help for list
+      --json              print JSON
+      --owner string      filter owner: mine, shared, or an authorized account ID
+      --q string          filter by resource name or ID
+      --state string      filter by resource state
+      --tag stringArray   only machines with this tag (repeat for several)
 ```
 
 ### Options inherited from parent commands

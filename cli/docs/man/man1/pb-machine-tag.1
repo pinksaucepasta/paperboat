@@ -1,0 +1,64 @@
+.nh
+.TH "PB-MACHINE-TAG" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-machine-tag - Show or change a machine's tags
+
+
+.SH SYNOPSIS
+\fBpb machine tag <machine> [add|remove|set] [tag...] [flags]\fP
+
+
+.SH DESCRIPTION
+Show a machine's tags, or change them in the active workspace's policy: add
+or remove tags, or set the full list. Tags are tag:<name> (the tag: prefix may be
+left out). A tag that does not exist yet is created; a tag left with no machines
+is removed unless a rule uses it. A change that gives or takes anyone's access
+(rules on the tag) is printed and must be confirmed; --yes confirms it. Members
+may tag only machines they shared.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for tag
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+.PP
+\fB--yes\fP[=false]
+	confirm the printed access changes without asking
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb machine tag db
+  pb machine tag db add prod ci
+  pb machine tag db remove ci --yes
+  pb machine tag db set prod
+.EE
+
+
+.SH SEE ALSO
+\fBpb-machine(1)\fP

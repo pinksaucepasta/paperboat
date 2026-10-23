@@ -257,8 +257,10 @@ type MachineStatus struct {
 	Alias         string `json:"alias"`
 	// Ownership and OwnerAccount let a CLI resolve a personal-workspace target from this
 	// snapshot without listing the account's machines again.
-	Ownership       string     `json:"ownership,omitempty"`
-	OwnerAccount    string     `json:"owner_account,omitempty"`
+	Ownership    string `json:"ownership,omitempty"`
+	OwnerAccount string `json:"owner_account,omitempty"`
+	// Tags are the machine's tags in the account's policy (tag:<name>), for pb status.
+	Tags            []string   `json:"tags,omitempty"`
 	Platform        string     `json:"platform,omitempty"`
 	Eligible        bool       `json:"eligible"`
 	RuntimeState    string     `json:"runtime_state"`

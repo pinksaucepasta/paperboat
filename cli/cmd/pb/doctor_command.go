@@ -59,6 +59,9 @@ func writeStatus(output io.Writer, snapshot localapi.Snapshot) {
 		fmt.Fprintf(output, "\n%s (%s)\n", machine.Alias, machine.ID)
 		fmt.Fprintf(output, "  Runtime: %s  Eligible: %t  Generation: %d  Last observed: %s\n", machine.RuntimeState, machine.Eligible, machine.Generation, observed)
 		fmt.Fprintf(output, "  Path: %s  Consumers: %d  Transfer: %s  Preview: %s  SSH: %s\n", path, machine.ActiveConsumers, machine.TransferReadiness, machine.PreviewReadiness, machine.SSHReadiness)
+		if len(machine.Tags) > 0 {
+			fmt.Fprintf(output, "  Tags: %s\n", strings.Join(machine.Tags, ", "))
+		}
 		for _, health := range machine.Health {
 			fmt.Fprintf(output, "  Health: %s: %s  Recovery: %s\n", health.Severity, health.Title, health.Recovery)
 		}

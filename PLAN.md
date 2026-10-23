@@ -872,6 +872,7 @@ Simple view (user decision 2026-10-22): preview/tunnel `use`/`manage` and lazy-p
 - F18-08: Who may edit: owners/admins edit all; a member edits only rules for their own shared machines; members read and explain their own access.
 - F18-09: Console Access page (Simple grid with today's grants, private-access switch, tags, groups; Policy file editor with inline errors and Review changes; Test; History with Diff/Restore) and Settings → API tokens (scripted browser check).
 - F18-10: CLI `pb policy` and `pb api-token` commands work end to end against the live server (device check on the victus VMs).
+- F18-11: Machine tags as a first-class action (user report: no way to tag machines): `PUT /v1/workspaces/{ws}/machines/{machine}/tags` and `GET /v1/workspaces/{ws}/tags` edit and list the policy file's tags map (the only store) as reviewed, audited versions with the editor's rights; tags on machine items; `pb machine tag <machine> add|remove|set`, TAGS and `--tag` in `pb machine list`, tags in `pb status`; console Edit tags, tag filter, Access links (Lane C).
 
 ### F19. Teams for business: SSO, directory sync, roles, audit log (Lane S, user decision 2026-10-23)
 

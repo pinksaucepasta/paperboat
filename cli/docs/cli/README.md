@@ -135,6 +135,7 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb machine list](pb_machine_list.md) | List enrolled machines |
 | [pb machine rename](pb_machine_rename.md) | Rename a machine |
 | [pb machine revoke](pb_machine_revoke.md) | Disconnect and revoke a machine |
+| [pb machine tag](pb_machine_tag.md) | Show or change a machine's tags |
 | [pb new](pb_new.md) | Open a fresh terminal on this device in the current directory |
 | [pb pair](pb_pair.md) | Enroll this machine with a one-shot token |
 | [pb ping](pb_ping.md) | Measure authenticated connectivity to a machine |

@@ -22,10 +22,12 @@ type Pagination struct {
 // UserMachine describes an enrolled machine. The control plane owns its lifecycle
 // and authorization; the CLI uses this metadata to select and manage it.
 type UserMachine struct {
-	Ownership     string   `json:"ownership"`
-	OwnerAccount  string   `json:"owner_account,omitempty"`
-	OwnerTeamID   string   `json:"owner_team_id,omitempty"`
-	Permissions   []string `json:"permissions"`
+	Ownership    string   `json:"ownership"`
+	OwnerAccount string   `json:"owner_account,omitempty"`
+	OwnerTeamID  string   `json:"owner_team_id,omitempty"`
+	Permissions  []string `json:"permissions"`
+	// Tags are the machine's tags in the selected workspace's policy (tag:<name>).
+	Tags          []string `json:"tags,omitempty"`
 	CanManage     bool     `json:"can_manage"`
 	Shared        bool     `json:"shared"`
 	ID            string   `json:"id"`

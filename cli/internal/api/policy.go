@@ -232,3 +232,25 @@ func (c *Client) RevokeAPIToken(ctx context.Context, ws, id string) (APIToken, e
 	err := c.do(ctx, http.MethodDelete, workspacePath(ws, "/api-tokens/"+url.PathEscape(id)), nil, &out)
 	return out.APIToken, err
 }
+
+// MachineTagsView is the answer to a machine tag change: the machine's tags and the new
+// policy version.
+type MachineTagsView struct {
+	Tags          []string `json:"tags"`
+	PolicyVersion int64    `json:"policy_version"`
+}
+
+type MachineTagsRequest struct {
+	Tags            []string `json:"tags"`
+	ExpectedVersion int64    `json:"expected_version"`
+	Confirm         string   `json:"confirm,omitempty"`
+}
+
+// SetMachineTags makes a machine of workspace ws carry exactly in.Tags (a new policy version).
+func (c *Client) SetMachineTags(ctx context.Context, ws, machineID string, in MachineTagsRequest) (out MachineTagsView, err error) {
+	if in.Tags == nil {
+		in.Tags = []string{}
+	}
+	err = c.do(ctx, http.MethodPut, workspacePath(ws, "/machines/"+url.PathEscape(machineID)+"/tags"), in, &out)
+	return out, err
+}

@@ -25,7 +25,7 @@ func userMachineCobraCommand() *cobra.Command {
 	revoke := machineRevokeCommand()
 	availability := machineAvailabilityCommand()
 	capabilities := machineCapabilitiesCommand()
-	machine.AddCommand(add, list, rename, revoke, availability, capabilities)
+	machine.AddCommand(add, list, rename, revoke, availability, capabilities, machineTagCommand())
 	return machine
 }
 
@@ -40,12 +40,15 @@ func machineListCommand() *cobra.Command {
 		if err != nil {
 			return friendlyCommandError(err)
 		}
+		if machines, err = machineTagFilter(command, machines); err != nil {
+			return err
+		}
 		jsonOutput, _ := command.Flags().GetBool("json")
 		if jsonOutput {
 			return json.NewEncoder(command.OutOrStdout()).Encode(map[string]any{"version": "1", "machines": machines})
 		}
 		writer := tabwriter.NewWriter(command.OutOrStdout(), 0, 4, 2, ' ', 0)
-		fmt.Fprintln(writer, "NAME\tOWNERSHIP\tSTATE\tPERMISSIONS\tID")
+		fmt.Fprintln(writer, "NAME\tOWNERSHIP\tSTATE\tPERMISSIONS\tTAGS\tID")
 		for _, item := range machines {
 			state := item.State
 			if item.Online {
@@ -62,11 +65,16 @@ func machineListCommand() *cobra.Command {
 			if permissions == "" {
 				permissions = "none"
 			}
-			fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\n", item.Alias, ownership, state, permissions, item.ID)
+			tags := strings.Join(item.Tags, ",")
+			if tags == "" {
+				tags = "-"
+			}
+			fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\n", item.Alias, ownership, state, permissions, tags, item.ID)
 		}
 		return writer.Flush()
 	}}
 	list.Flags().Bool("json", false, "print JSON")
+	list.Flags().StringArray("tag", nil, "only machines with this tag (repeat for several)")
 	inventoryFilterFlags(list)
 	return list
 }

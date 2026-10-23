@@ -39,4 +39,5 @@ pb machine [flags]
 * [pb machine list](pb_machine_list.md)	 - List enrolled machines
 * [pb machine rename](pb_machine_rename.md)	 - Rename a machine
 * [pb machine revoke](pb_machine_revoke.md)	 - Disconnect and revoke a machine
+* [pb machine tag](pb_machine_tag.md)	 - Show or change a machine's tags
 
