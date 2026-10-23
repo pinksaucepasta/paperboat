@@ -636,20 +636,14 @@ func (s *ConfigAssignmentService) ownedMachineEnvironment(ctx context.Context, u
 			return "", err
 		}
 		assignment, assignmentErr := s.store.Queries().GetControlConfigAssignment(ctx, machine.EnvironmentID)
-		if scope.TeamID == "" {
-			if assignmentErr == nil && assignment.AdoptedTeamID.Valid {
-				return "", ErrAssignmentForbidden
-			}
-			if assignmentErr != nil && !errors.Is(assignmentErr, sql.ErrNoRows) {
-				return "", assignmentErr
-			}
-		} else {
-			if errors.Is(assignmentErr, sql.ErrNoRows) || assignmentErr == nil && (!assignment.AdoptedTeamID.Valid || assignment.AdoptedTeamID.String != scope.TeamID) {
-				return "", ErrAssignmentForbidden
-			}
-			if assignmentErr != nil {
-				return "", assignmentErr
-			}
+		if assignmentErr != nil && !errors.Is(assignmentErr, sql.ErrNoRows) {
+			return "", assignmentErr
+		}
+		// Only a live adoption puts the machine in the team's workspace; unadopt revokes the row but
+		// keeps adopted_team_id, and the machine is personal again.
+		adopted := assignmentErr == nil && assignment.AdoptedTeamID.Valid && !assignment.RevokedAt.Valid
+		if scope.TeamID == "" && adopted || scope.TeamID != "" && (!adopted || assignment.AdoptedTeamID.String != scope.TeamID) {
+			return "", ErrAssignmentForbidden
 		}
 	}
 	return machine.EnvironmentID, nil

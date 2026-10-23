@@ -430,3 +430,67 @@ func assertConfigAudit(t *testing.T, store interface{ SQL() *sql.DB }, teamID, e
 		}
 	}
 }
+
+// Unadopt revokes the adopted assignment but keeps adopted_team_id; the machine is personal again.
+// It stayed team-scoped, so every personal config call on it answered 404 and `pb config sync apply`
+// failed on each machine that had been through an adopt and unadopt (Lane H, pbvm3).
+func TestUnadoptedMachineIsPersonalAgain(t *testing.T) {
+	store := openControlPlaneTestDB(t)
+	ctx := context.Background()
+	suffix := strings.ReplaceAll(t.Name(), "/", "_")
+	owner, member := "cfg_unadopt_owner_"+suffix, "cfg_unadopt_member_"+suffix
+	teamID := "cfg-unadopt-" + fmt.Sprintf("%x", sha256.Sum256([]byte(t.Name())))[:10]
+	environmentID, machineID := "cfg_unadopt_env_"+suffix, "cfg_unadopt_machine_"+suffix
+	cleanupConfigTeamLifecycleFixture(t, store, []string{owner, member}, []string{teamID}, []string{environmentID}, []string{machineID})
+	for _, user := range []string{owner, member} {
+		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users (id,workos_subject,primary_email,status) VALUES ($1,$2,$3,'active')`, user, "workos_"+user, user+"@example.test"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, statement := range []struct {
+		query string
+		args  []any
+	}{
+		{`INSERT INTO paperboat.teams (team_id,owner_account,generation) VALUES ($1,$2,1)`, []any{teamID, owner}},
+		{`INSERT INTO paperboat.team_members (team_id,account_id,membership_generation,role,active) VALUES ($1,$2,1,'member',true)`, []any{teamID, member}},
+		{`INSERT INTO paperboat.control_environments (id,workspace_id,owner_user_id) VALUES ($1,$2,$3)`, []any{environmentID, "workspace_" + suffix, member}},
+		{`INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,seat_state) VALUES ($1,$2,$3,'Machine','linux','unknown','/workspace','occupied')`, []any{machineID, member, environmentID}},
+	} {
+		if _, err := store.SQL().ExecContext(ctx, statement.query, statement.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	service := NewConfigAssignmentService(store, nil, "warning")
+	service.SetRepositoryResolver(testConfigRepositoryResolver())
+	ownerRepo, err := service.ConnectRepository(ctx, owner, "github", "unadopt-repository", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ConnectRepository(ctx, member, "github", "unadopt-repository", ""); err != nil {
+		t.Fatal(err)
+	}
+	personal := workspace.WithContext(ctx, workspace.Scope{ID: "personal"})
+	team := workspace.WithContext(ctx, workspace.Scope{ID: teamID, TeamID: teamID})
+	if _, err := service.SetTeamDefault(ctx, owner, teamID, ownerRepo.ID, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.AdoptTeamDefault(ctx, member, teamID, 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Assignment(personal, member, machineID); !errors.Is(err, ErrAssignmentForbidden) {
+		t.Fatalf("adopted machine read in Personal: %v", err)
+	}
+	if _, err := service.Assignment(team, member, machineID); err != nil {
+		t.Fatalf("adopted machine read in its team: %v", err)
+	}
+	if err := service.UnadoptTeamDefault(ctx, member); err != nil {
+		t.Fatal(err)
+	}
+	assignment, err := service.Assignment(personal, member, machineID)
+	if err != nil || !assignment.RevokedAt.Valid {
+		t.Fatalf("unadopted machine read in Personal = %+v, error = %v", assignment, err)
+	}
+	if _, err := service.Assignment(team, member, machineID); !errors.Is(err, ErrAssignmentForbidden) {
+		t.Fatalf("unadopted machine still read in the team: %v", err)
+	}
+}
