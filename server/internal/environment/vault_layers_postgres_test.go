@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/config"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/teams"
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/teams"
 )
 
 // Uses the real v1 CBOR claims and signature transcript, not unsigned delivery

@@ -23,17 +23,17 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/pinksaucepasta/paperboat-server/internal/access"
-	"github.com/pinksaucepasta/paperboat-server/internal/accessdescriptor"
-	"github.com/pinksaucepasta/paperboat-server/internal/audit"
-	authservice "github.com/pinksaucepasta/paperboat-server/internal/auth"
-	"github.com/pinksaucepasta/paperboat-server/internal/config"
-	"github.com/pinksaucepasta/paperboat-server/internal/controlplane"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
-	"github.com/pinksaucepasta/paperboat-server/internal/helperruntime"
-	"github.com/pinksaucepasta/paperboat-server/internal/mint"
-	"github.com/pinksaucepasta/paperboat-server/internal/secrets"
+	"github.com/pinksaucepasta/paperboat/server/internal/access"
+	"github.com/pinksaucepasta/paperboat/server/internal/accessdescriptor"
+	"github.com/pinksaucepasta/paperboat/server/internal/audit"
+	authservice "github.com/pinksaucepasta/paperboat/server/internal/auth"
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
+	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat/server/internal/helperruntime"
+	"github.com/pinksaucepasta/paperboat/server/internal/mint"
+	"github.com/pinksaucepasta/paperboat/server/internal/secrets"
 )
 
 type testSeatAuthorizer struct{}

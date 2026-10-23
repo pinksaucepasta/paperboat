@@ -2,7 +2,7 @@ package controlplane
 
 import (
 	"context"
-	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 )
 
 // A digest explicitly provided by fixtures, never a production source fallback.

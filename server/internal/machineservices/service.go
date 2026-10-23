@@ -15,9 +15,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/machinealias"
-	"github.com/pinksaucepasta/paperboat-server/internal/naming"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/machinealias"
+	"github.com/pinksaucepasta/paperboat/server/internal/naming"
 )
 
 const MaxMachines = 128

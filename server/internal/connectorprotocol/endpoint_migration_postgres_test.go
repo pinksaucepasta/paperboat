@@ -17,9 +17,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/pinksaucepasta/paperboat-server/internal/config"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/tunnelendpoint"
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/tunnelendpoint"
 )
 
 func TestEndpointIdentityMigrationPreservesBindingsAndFencesOldSessions(t *testing.T) {

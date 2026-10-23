@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/config"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 )
 
 // A preview's URL is known to the client the moment the lease exists, seconds before the host attaches.

@@ -11,7 +11,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 

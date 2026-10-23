@@ -15,7 +15,7 @@ import (
 	"errors"
 	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/secrets"
+	"github.com/pinksaucepasta/paperboat/server/internal/secrets"
 	"io"
 	"net"
 	"net/http"

@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/admission"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/edgeerrors"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/strictjson"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/admission"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/edgeerrors"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/strictjson"
 )
 
 const maxCredentialBytes = 8192

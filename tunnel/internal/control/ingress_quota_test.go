@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/route"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/route"
 )
 
 // F13-03: a public route the server withheld only for bandwidth quota is refused with the

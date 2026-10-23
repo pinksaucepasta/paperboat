@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/config"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/machinelatency"
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/machinelatency"
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 )
 

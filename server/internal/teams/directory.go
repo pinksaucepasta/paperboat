@@ -6,8 +6,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/pinksaucepasta/paperboat-server/internal/audit"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/audit"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
 // Directory sync and SSO (PLAN F19-03..06) change membership through these functions only, inside

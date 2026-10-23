@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/controlplane"
-	"github.com/pinksaucepasta/paperboat-server/internal/environment"
+	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
+	"github.com/pinksaucepasta/paperboat/server/internal/environment"
 )
 
 type layerObservationTestService struct{ calls int }

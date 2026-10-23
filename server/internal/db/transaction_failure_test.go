@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/pinksaucepasta/paperboat-server/internal/config"
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
 )
 
 func TestIsSerializationFailureRetriesOnlyPurePostgresLeaves(t *testing.T) {

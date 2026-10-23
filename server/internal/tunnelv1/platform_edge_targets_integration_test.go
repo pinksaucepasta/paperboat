@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/config"
-	"github.com/pinksaucepasta/paperboat-server/internal/controlplane"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/tunnelv1"
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
+	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/tunnelv1"
 )
 
 func TestPlatformCertificateTargetsRequireEdgeRoleOnPostgres(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 )
 
 // Revoking a machine ends every credential it holds at once: the CLI session created when it was paired, and the

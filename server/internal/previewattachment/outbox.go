@@ -6,11 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat-server/internal/workers"
+	"github.com/pinksaucepasta/paperboat/server/internal/workers"
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 

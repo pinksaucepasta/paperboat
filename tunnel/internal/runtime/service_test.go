@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/config"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/node"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/config"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/node"
 )
 
 type recordingComponent struct {

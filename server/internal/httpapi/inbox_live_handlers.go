@@ -13,9 +13,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/pinksaucepasta/paperboat-server/internal/inboxdispatch"
-	"github.com/pinksaucepasta/paperboat-server/internal/usermachines"
-	"github.com/pinksaucepasta/paperboat-server/internal/workspace"
+	"github.com/pinksaucepasta/paperboat/server/internal/inboxdispatch"
+	"github.com/pinksaucepasta/paperboat/server/internal/usermachines"
+	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 )
 
 // InboxAPI is the live path to a machine's Inbox: the machine answers, the server stores no bytes.

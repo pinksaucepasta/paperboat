@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/config"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
-	"github.com/pinksaucepasta/paperboat-server/internal/previewtunnelstore"
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelstore"
 )
 
 func TestPreviewTunnelCommonAPIOnPostgres(t *testing.T) {

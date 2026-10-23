@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"github.com/pinksaucepasta/paperboat-relay/admission"
+	"github.com/pinksaucepasta/paperboat/relay/admission"
 	"io"
 	"os"
 	"path/filepath"

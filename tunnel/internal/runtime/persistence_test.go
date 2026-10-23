@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/store"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/store"
 )
 
 func TestPersistenceRestoresBeforeSaving(t *testing.T) {

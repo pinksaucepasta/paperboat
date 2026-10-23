@@ -5,9 +5,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
-	"github.com/pinksaucepasta/paperboat-server/internal/mint"
-	"github.com/pinksaucepasta/paperboat-server/internal/workspace"
+	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat/server/internal/mint"
+	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 )
 
 // AuthorizeCompare fences a private live read against the current reported conflict.

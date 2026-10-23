@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/audit"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
-	serverdiagnostics "github.com/pinksaucepasta/paperboat-server/internal/diagnostics"
-	"github.com/pinksaucepasta/paperboat-server/internal/workers"
+	"github.com/pinksaucepasta/paperboat/server/internal/audit"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
+	serverdiagnostics "github.com/pinksaucepasta/paperboat/server/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/server/internal/workers"
 )
 
 func ControlTunnelNodeStaleAfter() time.Duration {

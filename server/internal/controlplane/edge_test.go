@@ -15,10 +15,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
-	serverdiagnostics "github.com/pinksaucepasta/paperboat-server/internal/diagnostics"
-	"github.com/pinksaucepasta/paperboat-server/internal/nodeauth"
-	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
+	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
+	serverdiagnostics "github.com/pinksaucepasta/paperboat/server/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/server/internal/nodeauth"
+	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 )
 
 type edgeFailureReportStore struct{ saved chan supportreport.Record }

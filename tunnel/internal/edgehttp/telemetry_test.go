@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	edgetelemetry "github.com/pinksaucepasta/paperboat-tunnel/internal/telemetry"
+	edgetelemetry "github.com/pinksaucepasta/paperboat/tunnel/internal/telemetry"
 )
 
 type telemetryRoundTripFunc func(*http.Request) (*http.Response, error)

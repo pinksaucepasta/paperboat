@@ -3,9 +3,9 @@ package app
 import (
 	"context"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/previewdomain"
-	"github.com/pinksaucepasta/paperboat-server/internal/previewtunnelstore"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewdomain"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelstore"
 )
 
 type previewDomainBatchCreatorAdapter struct {

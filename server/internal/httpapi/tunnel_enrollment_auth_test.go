@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/auth"
-	"github.com/pinksaucepasta/paperboat-server/internal/controlplane"
-	"github.com/pinksaucepasta/paperboat-server/internal/previewtunnelapi"
-	"github.com/pinksaucepasta/paperboat-server/internal/tunnelv1"
+	"github.com/pinksaucepasta/paperboat/server/internal/auth"
+	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelapi"
+	"github.com/pinksaucepasta/paperboat/server/internal/tunnelv1"
 )
 
 type enrollmentHTTPAPIStub struct {

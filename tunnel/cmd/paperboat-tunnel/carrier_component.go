@@ -7,11 +7,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/config"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/datacarrier"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/edgehttp"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/reporting"
-	edgeruntime "github.com/pinksaucepasta/paperboat-tunnel/internal/runtime"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/config"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/datacarrier"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/edgehttp"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/reporting"
+	edgeruntime "github.com/pinksaucepasta/paperboat/tunnel/internal/runtime"
 )
 
 func newCarrierComponentWithTelemetry(

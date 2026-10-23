@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/config"
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
 )
 
 type peerContentionFixture struct {

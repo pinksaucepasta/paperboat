@@ -14,9 +14,9 @@ import (
 	"unicode"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/pinksaucepasta/paperboat-server/internal/audit"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/releases"
+	"github.com/pinksaucepasta/paperboat/server/internal/audit"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/releases"
 )
 
 const Schema = "paperboat.client-update-policy/v1"

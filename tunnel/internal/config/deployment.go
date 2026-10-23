@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/strictjson"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/strictjson"
 )
 
 const (

@@ -18,8 +18,8 @@ import (
 
 	"github.com/getsentry/sentry-go"
 	"github.com/getsentry/sentry-go/attribute"
-	"github.com/pinksaucepasta/paperboat-relay/derpquic"
-	"github.com/pinksaucepasta/paperboat-relay/nodelifecycle"
+	"github.com/pinksaucepasta/paperboat/relay/derpquic"
+	"github.com/pinksaucepasta/paperboat/relay/nodelifecycle"
 )
 
 // Fault is a structured, privacy-safe projection of a service failure. Err

@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/datacarrier"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/datacarrier"
 )
 
 func ExpectedRuntimeAdmission(a runtimewire.Admission, nodeID, epoch string, now time.Time) (datacarrier.ExpectedAdmission, error) {

@@ -6,7 +6,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
 // ErrRouteMoving: the host is a machine's runtime host, but no edge holds a carrier of it that can

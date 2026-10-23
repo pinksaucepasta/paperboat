@@ -7,8 +7,8 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/machinelatency"
-	"github.com/pinksaucepasta/paperboat-server/internal/usermachines"
+	"github.com/pinksaucepasta/paperboat/server/internal/machinelatency"
+	"github.com/pinksaucepasta/paperboat/server/internal/usermachines"
 )
 
 type machineLatencyService interface {

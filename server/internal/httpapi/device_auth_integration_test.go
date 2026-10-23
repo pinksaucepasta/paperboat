@@ -11,8 +11,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/auth"
-	"github.com/pinksaucepasta/paperboat-server/internal/config"
+	"github.com/pinksaucepasta/paperboat/server/internal/auth"
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
 )
 
 var cliScopes = config.Default().CLIAuth.AllowedScopes

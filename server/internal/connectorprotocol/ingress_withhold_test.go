@@ -8,7 +8,7 @@ import (
 
 	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/accountingauthority"
+	"github.com/pinksaucepasta/paperboat/server/internal/accountingauthority"
 )
 
 // One route whose decision cannot be issued must not fail an edge's whole ingress snapshot (prod

@@ -7,11 +7,11 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/audit"
-	"github.com/pinksaucepasta/paperboat-server/internal/auth"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
-	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
+	"github.com/pinksaucepasta/paperboat/server/internal/audit"
+	"github.com/pinksaucepasta/paperboat/server/internal/auth"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 )
 
 // PLAN F19-07: every machine access (terminal, exec, managed SSH, files) and every refusal is in

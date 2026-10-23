@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/config"
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
 )
 
 func TestGitHubAppAuthorizationDoesNotRequestClassicOAuthScopes(t *testing.T) {

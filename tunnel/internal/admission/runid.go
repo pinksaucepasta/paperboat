@@ -5,7 +5,7 @@ import (
 	"encoding/base64"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/edgeerrors"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/edgeerrors"
 )
 
 type RunID struct {

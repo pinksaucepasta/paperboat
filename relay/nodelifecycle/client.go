@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-relay/derpquic"
+	"github.com/pinksaucepasta/paperboat/relay/derpquic"
 )
 
 var ErrControl = errors.New("relay control authority unavailable or expired")

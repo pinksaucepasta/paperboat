@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/workspace"
+	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 )
 
 // The inventory's candidate clause (own machines, machines owned by or bound to the account's active teams) only

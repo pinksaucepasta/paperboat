@@ -9,7 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
+	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 	"strings"
 	"syscall"
 	"testing"

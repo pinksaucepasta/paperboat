@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	serverdiagnostics "github.com/pinksaucepasta/paperboat-server/internal/diagnostics"
+	serverdiagnostics "github.com/pinksaucepasta/paperboat/server/internal/diagnostics"
 )
 
 type HTTPWorkOSVerifier struct {

@@ -17,8 +17,8 @@ import (
 	"testing"
 	"time"
 
-	serverdiagnostics "github.com/pinksaucepasta/paperboat-server/internal/diagnostics"
-	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
+	serverdiagnostics "github.com/pinksaucepasta/paperboat/server/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 )
 
 type distributionFaultStore struct{ records chan supportreport.Record }

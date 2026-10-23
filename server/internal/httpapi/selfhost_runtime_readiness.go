@@ -4,8 +4,8 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/controlplane"
-	"github.com/pinksaucepasta/paperboat-server/internal/selfhost"
+	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
+	"github.com/pinksaucepasta/paperboat/server/internal/selfhost"
 )
 
 func (h *SelfhostHandlers) RuntimeReadiness(w http.ResponseWriter, r *http.Request) {

@@ -12,7 +12,7 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
+	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 )
 
 type requestNodeRoundTripper func(*http.Request) (*http.Response, error)

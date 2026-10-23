@@ -5,9 +5,9 @@ import (
 	"net"
 	"strings"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/secrets"
-	"github.com/pinksaucepasta/paperboat-server/internal/teams"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/secrets"
+	"github.com/pinksaucepasta/paperboat/server/internal/teams"
 )
 
 func authorizeSMTPAdmin(ctx context.Context, tx *db.Tx, account, team string) error {

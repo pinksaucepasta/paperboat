@@ -8,12 +8,12 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/auth"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
-	"github.com/pinksaucepasta/paperboat-server/internal/machineevents"
-	"github.com/pinksaucepasta/paperboat-server/internal/teams"
-	"github.com/pinksaucepasta/paperboat-server/internal/workspace"
+	"github.com/pinksaucepasta/paperboat/server/internal/auth"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat/server/internal/machineevents"
+	"github.com/pinksaucepasta/paperboat/server/internal/teams"
+	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 )
 
 type machineCredentialKind string

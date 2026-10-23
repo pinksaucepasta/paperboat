@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
+	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 	"math"
 	"net/url"
 	"regexp"
@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/auth"
-	"github.com/pinksaucepasta/paperboat-server/internal/telemetry"
-	"github.com/pinksaucepasta/paperboat-server/internal/workers"
+	"github.com/pinksaucepasta/paperboat/server/internal/auth"
+	"github.com/pinksaucepasta/paperboat/server/internal/telemetry"
+	"github.com/pinksaucepasta/paperboat/server/internal/workers"
 	"slices"
 )
 

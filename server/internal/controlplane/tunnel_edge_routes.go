@@ -10,7 +10,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 

@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/control"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/reporting"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/control"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/reporting"
 )
 
 type ControlDependency struct {

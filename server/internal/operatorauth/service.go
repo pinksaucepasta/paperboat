@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"golang.org/x/crypto/argon2"
 )
 

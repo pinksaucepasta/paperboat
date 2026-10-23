@@ -7,7 +7,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/releaseauthority"
+	"github.com/pinksaucepasta/paperboat/server/internal/releaseauthority"
 )
 
 func releaseAuthorityRequests(service *releaseauthority.Service) http.HandlerFunc {

@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/previewtunnelapi"
-	"github.com/pinksaucepasta/paperboat-server/internal/tunnelv1"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelapi"
+	"github.com/pinksaucepasta/paperboat/server/internal/tunnelv1"
 )
 
 // Embedding the production interface keeps this handler test focused on wire

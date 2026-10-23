@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"github.com/pinksaucepasta/paperboat-server/internal/selfhost"
+	"github.com/pinksaucepasta/paperboat/server/internal/selfhost"
 	"io"
 	"net/http"
 	"strconv"

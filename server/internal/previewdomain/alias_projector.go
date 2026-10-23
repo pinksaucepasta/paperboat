@@ -8,8 +8,8 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/previewattachment"
-	"github.com/pinksaucepasta/paperboat-server/internal/tunnelcert"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewattachment"
+	"github.com/pinksaucepasta/paperboat/server/internal/tunnelcert"
 )
 
 // PreviewCarrierAliasProjector publishes only aliases that are backed by the

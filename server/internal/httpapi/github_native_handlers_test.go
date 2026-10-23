@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/auth"
-	"github.com/pinksaucepasta/paperboat-server/internal/config"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	pbgithub "github.com/pinksaucepasta/paperboat-server/internal/github"
-	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
+	"github.com/pinksaucepasta/paperboat/server/internal/auth"
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	pbgithub "github.com/pinksaucepasta/paperboat/server/internal/github"
+	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 )
 
 func TestGitHubOAuthCallbackSeparatesRejectionAndOperationalFailure(t *testing.T) {

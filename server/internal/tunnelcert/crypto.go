@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/secrets"
+	"github.com/pinksaucepasta/paperboat/server/internal/secrets"
 )
 
 // MasterKeySource resolves a reference to the active envelope master key.  A

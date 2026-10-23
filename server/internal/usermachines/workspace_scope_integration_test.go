@@ -6,15 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
-	"github.com/pinksaucepasta/paperboat-server/internal/teams/teamstest"
+	"github.com/pinksaucepasta/paperboat/server/internal/teams/teamstest"
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/audit"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
-	"github.com/pinksaucepasta/paperboat-server/internal/mint"
-	"github.com/pinksaucepasta/paperboat-server/internal/workspace"
+	"github.com/pinksaucepasta/paperboat/server/internal/audit"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat/server/internal/mint"
+	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 )
 
 type workspaceMachineFixture struct {

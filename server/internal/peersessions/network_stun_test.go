@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/mint"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/mint"
 )
 
 func TestRegionalCandidatesSignedSTUNServers(t *testing.T) {

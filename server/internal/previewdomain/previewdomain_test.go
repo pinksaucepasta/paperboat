@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
-	"github.com/pinksaucepasta/paperboat-server/internal/previewattachment"
-	"github.com/pinksaucepasta/paperboat-server/internal/previewtunnelapi"
-	"github.com/pinksaucepasta/paperboat-server/internal/tunnelcert"
+	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewattachment"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelapi"
+	"github.com/pinksaucepasta/paperboat/server/internal/tunnelcert"
 )
 
 func TestNormalizeHostnameCanonicalizesExactAndOneLabelWildcard(t *testing.T) {

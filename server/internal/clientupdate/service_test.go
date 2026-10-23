@@ -1,7 +1,7 @@
 package clientupdate
 
 import (
-	"github.com/pinksaucepasta/paperboat-server/internal/releases"
+	"github.com/pinksaucepasta/paperboat/server/internal/releases"
 	"testing"
 	"time"
 )

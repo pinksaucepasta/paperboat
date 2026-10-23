@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/bandwidthgate"
+	"github.com/pinksaucepasta/paperboat/server/internal/bandwidthgate"
 )
 
 // F13-03 relay admission: a relay's observation names the connected accounts whose workspaces

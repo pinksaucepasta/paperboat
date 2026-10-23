@@ -13,9 +13,9 @@ import (
 
 	"github.com/getsentry/sentry-go"
 	"github.com/getsentry/sentry-go/attribute"
-	serverdiagnostics "github.com/pinksaucepasta/paperboat-server/internal/diagnostics"
-	"github.com/pinksaucepasta/paperboat-server/internal/telemetry"
-	"github.com/pinksaucepasta/paperboat-server/internal/workers"
+	serverdiagnostics "github.com/pinksaucepasta/paperboat/server/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/server/internal/telemetry"
+	"github.com/pinksaucepasta/paperboat/server/internal/workers"
 )
 
 // Only operational metadata crosses this boundary. In particular, it has no

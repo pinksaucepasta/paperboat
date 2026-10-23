@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-relay/admission"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/operation"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
+	"github.com/pinksaucepasta/paperboat/relay/admission"
 )
 
 func (s *Server) handleTerminalData(ctx context.Context, message []byte, state *terminalConnectionState) error {

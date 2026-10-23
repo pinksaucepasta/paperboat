@@ -18,11 +18,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
-	"github.com/pinksaucepasta/paperboat-server/internal/naming"
-	"github.com/pinksaucepasta/paperboat-server/internal/previewtunnelapi"
-	"github.com/pinksaucepasta/paperboat-server/internal/tunnelendpoint"
-	"github.com/pinksaucepasta/paperboat-server/internal/workspace"
+	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat/server/internal/naming"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelapi"
+	"github.com/pinksaucepasta/paperboat/server/internal/tunnelendpoint"
+	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 )
 
 var tunnelNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$`)

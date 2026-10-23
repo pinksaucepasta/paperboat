@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/connectorprotocol"
-	"github.com/pinksaucepasta/paperboat-server/internal/controlplane"
-	"github.com/pinksaucepasta/paperboat-server/internal/previewtunnelapi"
+	"github.com/pinksaucepasta/paperboat/server/internal/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelapi"
 )
 
 const connectorBootstrapBodyLimit = 8 << 10

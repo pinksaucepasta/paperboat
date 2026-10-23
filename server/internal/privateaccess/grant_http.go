@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/canonicaljson"
-	"github.com/pinksaucepasta/paperboat-server/internal/controlplane"
+	"github.com/pinksaucepasta/paperboat/server/internal/canonicaljson"
+	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
 )
 
 const GrantPath = "/v1/edge/private-access/grants"

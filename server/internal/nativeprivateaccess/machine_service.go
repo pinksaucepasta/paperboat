@@ -4,15 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"github.com/pinksaucepasta/paperboat-server/internal/admission"
+	"github.com/pinksaucepasta/paperboat/server/internal/admission"
 	wire "github.com/pinksaucepasta/paperboat/shared/machineservices"
 	"reflect"
 	"strconv"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/machineservices"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/machineservices"
 )
 
 // resolveMachineService authorizes one machine service. Its serializable read is replayed after a

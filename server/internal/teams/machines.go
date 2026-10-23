@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/pinksaucepasta/paperboat-server/internal/planlimits"
+	"github.com/pinksaucepasta/paperboat/server/internal/planlimits"
 	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
 // MachineGrant describes the team's existing resource binding.

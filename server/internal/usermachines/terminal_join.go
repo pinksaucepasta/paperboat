@@ -6,8 +6,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"regexp"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/teams"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/teams"
 )
 
 type TerminalJoinObservation struct {

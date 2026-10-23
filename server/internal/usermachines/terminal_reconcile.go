@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/helperruntime"
-	"github.com/pinksaucepasta/paperboat-server/internal/mint"
+	"github.com/pinksaucepasta/paperboat/server/internal/helperruntime"
+	"github.com/pinksaucepasta/paperboat/server/internal/mint"
 )
 
 const (

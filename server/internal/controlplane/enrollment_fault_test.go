@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
-	"github.com/pinksaucepasta/paperboat-server/internal/secrets"
+	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat/server/internal/secrets"
 )
 
 func TestPersistedEnrollmentReplayFailuresRetainCause(t *testing.T) {

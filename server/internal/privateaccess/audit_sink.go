@@ -3,7 +3,7 @@ package privateaccess
 import (
 	"context"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/audit"
+	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 )
 
 // AuditWriterSink projects authorization events into the existing append-only

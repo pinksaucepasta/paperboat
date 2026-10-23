@@ -9,8 +9,8 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/auth"
-	"github.com/pinksaucepasta/paperboat-server/internal/environment"
+	"github.com/pinksaucepasta/paperboat/server/internal/auth"
+	"github.com/pinksaucepasta/paperboat/server/internal/environment"
 )
 
 func TestEnvironmentMixedFailuresReachOneCorrelatedDiagnosticOwner(t *testing.T) {

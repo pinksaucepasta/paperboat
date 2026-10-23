@@ -16,8 +16,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/mint"
-	"github.com/pinksaucepasta/paperboat-server/internal/testutil"
+	"github.com/pinksaucepasta/paperboat/server/internal/mint"
+	"github.com/pinksaucepasta/paperboat/server/internal/testutil"
 )
 
 func TestEnrollmentExchangeRejectionClassUsesTypedCredentialCode(t *testing.T) {

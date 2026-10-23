@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/route"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/route"
 )
 
 func (r *DataCarrierRouteRegistry) ingressDecision(ctx context.Context, rule route.RouteRule, open connectorprotocol.StreamOpen) (*connectorprotocol.IngressDecision, error) {

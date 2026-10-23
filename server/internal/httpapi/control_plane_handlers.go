@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/controlplane"
+	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
 )
 
 func adminProvisionUsageKey(service *controlplane.EdgeService) http.Handler {

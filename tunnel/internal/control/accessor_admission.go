@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/datacarrier"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/datacarrier"
 )
 
 const PrivateAccessCarrierAdmissionsPath = "/v1/edge/private-access/carrier-admissions"

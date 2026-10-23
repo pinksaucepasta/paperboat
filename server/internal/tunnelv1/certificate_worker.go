@@ -10,10 +10,10 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
-	"github.com/pinksaucepasta/paperboat-server/internal/tunnelcert"
-	"github.com/pinksaucepasta/paperboat-server/internal/workers"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat/server/internal/tunnelcert"
+	"github.com/pinksaucepasta/paperboat/server/internal/workers"
 )
 
 // CertificateWorker is the durable boundary between verified tunnel_domains

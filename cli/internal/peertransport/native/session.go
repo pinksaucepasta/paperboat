@@ -11,10 +11,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-relay/admission"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
+	"github.com/pinksaucepasta/paperboat/relay/admission"
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
 )

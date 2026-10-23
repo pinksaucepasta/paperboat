@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
 var ErrDenied = errors.New("usage reporting authority unavailable")

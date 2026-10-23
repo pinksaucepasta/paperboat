@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat-server/internal/config"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/controlplane"
-	"github.com/pinksaucepasta/paperboat-server/internal/previewattachment"
-	"github.com/pinksaucepasta/paperboat-server/internal/previewtunnelstore"
+	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewattachment"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelstore"
 )
 
 type machineProofErrorVerifier struct {

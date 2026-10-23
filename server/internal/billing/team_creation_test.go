@@ -3,7 +3,7 @@ package billing_test
 import (
 	"context"
 	"errors"
-	"github.com/pinksaucepasta/paperboat-server/internal/billing"
+	"github.com/pinksaucepasta/paperboat/server/internal/billing"
 	"testing"
 )
 

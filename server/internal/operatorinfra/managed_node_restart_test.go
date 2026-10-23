@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 )
 
 func TestManagedNodeRestartAfterGracefulDrain(t *testing.T) {

@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/auth"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/strictjson"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/auth"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/strictjson"
 )
 
 const maxTrustDocument = 1 << 20

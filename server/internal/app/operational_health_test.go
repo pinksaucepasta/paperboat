@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/backupreport"
-	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
-	"github.com/pinksaucepasta/paperboat-server/internal/workers"
+	"github.com/pinksaucepasta/paperboat/server/internal/backupreport"
+	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
+	"github.com/pinksaucepasta/paperboat/server/internal/workers"
 )
 
 func TestOperationalHealthWorkerCancellation(t *testing.T) {

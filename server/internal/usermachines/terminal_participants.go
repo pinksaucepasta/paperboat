@@ -3,7 +3,7 @@ package usermachines
 import (
 	"context"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/helperruntime"
+	"github.com/pinksaucepasta/paperboat/server/internal/helperruntime"
 )
 
 // SessionParticipant is a live attachment of a terminal session with who it is. The host knows only

@@ -7,14 +7,14 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/edgeerrors"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/edgeerrors"
 	"os"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/admission"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/admission"
 )
 
 func tokenFor(t testing.TB, private ed25519.PrivateKey, keyID string, mutate func(map[string]any)) string {

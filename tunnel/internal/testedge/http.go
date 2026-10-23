@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/control"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/usage"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/control"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/usage"
 )
 
 const maxHTTPDocument = 1 << 20

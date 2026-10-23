@@ -7,14 +7,14 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"github.com/pinksaucepasta/paperboat-server/internal/planlimits"
+	"github.com/pinksaucepasta/paperboat/server/internal/planlimits"
 	"net/http"
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/pinksaucepasta/paperboat-server/internal/config"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/secrets"
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/secrets"
 )
 
 type WorkspaceService struct {

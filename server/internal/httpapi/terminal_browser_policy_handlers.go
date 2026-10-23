@@ -4,7 +4,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/usermachines"
+	"github.com/pinksaucepasta/paperboat/server/internal/usermachines"
 )
 
 func terminalBrowserAccessPolicyGet(service *usermachines.Service) http.HandlerFunc {

@@ -3,7 +3,7 @@ package teams
 import (
 	"context"
 	"errors"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
 var ErrSeatRequired = errors.New("buy a seat before inviting another member")

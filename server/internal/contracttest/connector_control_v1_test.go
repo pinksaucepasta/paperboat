@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/server/internal/connectorprotocol"
 	"github.com/xeipuuv/gojsonschema"
 )
 

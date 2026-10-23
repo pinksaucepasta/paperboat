@@ -8,11 +8,11 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/pinksaucepasta/paperboat-server/internal/helperruntime"
-	"github.com/pinksaucepasta/paperboat-server/internal/mint"
-	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
-	"github.com/pinksaucepasta/paperboat-server/internal/teams"
-	"github.com/pinksaucepasta/paperboat-server/internal/workspace"
+	"github.com/pinksaucepasta/paperboat/server/internal/helperruntime"
+	"github.com/pinksaucepasta/paperboat/server/internal/mint"
+	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
+	"github.com/pinksaucepasta/paperboat/server/internal/teams"
+	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 )
 
 const terminalRecentOutputWarning = "Attaching includes up to 64 KiB of recent output, which may contain secrets regardless of ENV permissions."

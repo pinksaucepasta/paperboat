@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/config"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
 // setENVAccess is teamstest.SetENVAccess for this package's tests (teamstest imports teams).

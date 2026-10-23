@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/auth"
-	"github.com/pinksaucepasta/paperboat-server/internal/browseraccess"
-	"github.com/pinksaucepasta/paperboat-server/internal/browseringress"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/previewattachment"
+	"github.com/pinksaucepasta/paperboat/server/internal/auth"
+	"github.com/pinksaucepasta/paperboat/server/internal/browseraccess"
+	"github.com/pinksaucepasta/paperboat/server/internal/browseringress"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewattachment"
 )
 
 func assertTeamBrowserPreviewAccounting(t *testing.T, database *db.DB, f previewattachment.LazyActivationFixture, repo *previewattachment.SQLRepository, access *browseraccess.Service, now time.Time) {

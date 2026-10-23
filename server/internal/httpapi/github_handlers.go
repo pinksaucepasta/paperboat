@@ -7,8 +7,8 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/auth"
-	pbgithub "github.com/pinksaucepasta/paperboat-server/internal/github"
+	"github.com/pinksaucepasta/paperboat/server/internal/auth"
+	pbgithub "github.com/pinksaucepasta/paperboat/server/internal/github"
 )
 
 func githubStatus(service *pbgithub.Service) http.HandlerFunc {

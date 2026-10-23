@@ -19,7 +19,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	lifetimeadmission "github.com/pinksaucepasta/paperboat-relay/admission"
+	lifetimeadmission "github.com/pinksaucepasta/paperboat/relay/admission"
 
 	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"

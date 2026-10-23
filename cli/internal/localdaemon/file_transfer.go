@@ -5,7 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
-	"github.com/pinksaucepasta/paperboat-relay/admission"
+	"github.com/pinksaucepasta/paperboat/relay/admission"
 	"io"
 	"net"
 	"sync"

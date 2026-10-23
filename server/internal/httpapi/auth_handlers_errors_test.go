@@ -12,9 +12,9 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/pinksaucepasta/paperboat-server/internal/auth"
-	"github.com/pinksaucepasta/paperboat-server/internal/emailpolicy"
-	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
+	"github.com/pinksaucepasta/paperboat/server/internal/auth"
+	"github.com/pinksaucepasta/paperboat/server/internal/emailpolicy"
+	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 )
 
 func TestWorkOSCallbackFailureSeparatesRejectionProviderAndStoreErrors(t *testing.T) {

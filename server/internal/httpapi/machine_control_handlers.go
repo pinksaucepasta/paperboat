@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/controlplane"
-	"github.com/pinksaucepasta/paperboat-server/internal/usermachines"
+	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
+	"github.com/pinksaucepasta/paperboat/server/internal/usermachines"
 )
 
 const maxMachineControlRequest = 16 << 10

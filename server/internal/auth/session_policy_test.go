@@ -1,7 +1,7 @@
 package auth
 
 import (
-	"github.com/pinksaucepasta/paperboat-server/internal/config"
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"testing"
 	"time"
 )

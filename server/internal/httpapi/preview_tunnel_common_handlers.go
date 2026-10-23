@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	serverdiagnostics "github.com/pinksaucepasta/paperboat-server/internal/diagnostics"
-	"github.com/pinksaucepasta/paperboat-server/internal/previewtunnelapi"
-	"github.com/pinksaucepasta/paperboat-server/internal/previewtunnelstore"
+	serverdiagnostics "github.com/pinksaucepasta/paperboat/server/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelapi"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelstore"
 )
 
 type PreviewTunnelAPI interface {

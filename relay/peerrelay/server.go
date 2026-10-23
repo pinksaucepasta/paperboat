@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-relay/derpquic"
+	"github.com/pinksaucepasta/paperboat/relay/derpquic"
 	"tailscale.com/disco"
 	"tailscale.com/net/udprelay"
 	"tailscale.com/types/key"

@@ -19,14 +19,14 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/pinksaucepasta/paperboat-server/internal/admission"
-	"github.com/pinksaucepasta/paperboat-server/internal/canonicaljson"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
-	"github.com/pinksaucepasta/paperboat-server/internal/mint"
-	"github.com/pinksaucepasta/paperboat-server/internal/previewtunnelstore"
-	"github.com/pinksaucepasta/paperboat-server/internal/previewv1"
-	"github.com/pinksaucepasta/paperboat-server/internal/runtimeattachment"
+	"github.com/pinksaucepasta/paperboat/server/internal/admission"
+	"github.com/pinksaucepasta/paperboat/server/internal/canonicaljson"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat/server/internal/mint"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelstore"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewv1"
+	"github.com/pinksaucepasta/paperboat/server/internal/runtimeattachment"
 )
 
 const (

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/previewtunnelapi"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelapi"
 )
 
 func TestTunnelCursorBindsFamilyAndRejectsUnknownFields(t *testing.T) {

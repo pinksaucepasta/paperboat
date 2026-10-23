@@ -5,8 +5,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/config"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
 // Since the workspace policy (PLAN F18, migrations 128/139/140) owns team machine access, the

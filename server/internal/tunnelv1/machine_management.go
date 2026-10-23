@@ -5,10 +5,10 @@ import (
 	"errors"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/previewtunnelapi"
-	"github.com/pinksaucepasta/paperboat-server/internal/teams"
-	"github.com/pinksaucepasta/paperboat-server/internal/workspace"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelapi"
+	"github.com/pinksaucepasta/paperboat/server/internal/teams"
+	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 )
 
 var ErrMachinePublicationDenied = errors.New("shared machine management does not grant public publication or connector enrollment")

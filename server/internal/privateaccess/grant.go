@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/admission"
-	"github.com/pinksaucepasta/paperboat-server/internal/mint"
+	"github.com/pinksaucepasta/paperboat/server/internal/admission"
+	"github.com/pinksaucepasta/paperboat/server/internal/mint"
 )
 
 const (

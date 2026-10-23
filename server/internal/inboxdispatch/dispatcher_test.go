@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/mint"
+	"github.com/pinksaucepasta/paperboat/server/internal/mint"
 )
 
 const testIssuer = "https://api.example.test"

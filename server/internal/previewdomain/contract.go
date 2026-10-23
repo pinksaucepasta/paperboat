@@ -16,8 +16,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
-	"github.com/pinksaucepasta/paperboat-server/internal/previewtunnelapi"
+	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelapi"
 	"golang.org/x/net/idna"
 	"golang.org/x/net/publicsuffix"
 )

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
 type SQLResolver struct {

@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/auth"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/control"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/auth"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/control"
 )
 
 // TestPrivateControlAcceptance exercises the exact bootstrap calls required by

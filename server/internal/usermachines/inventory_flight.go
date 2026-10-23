@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/workspace"
+	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 )
 
 // One inventory change wakes the daemon of every machine in the account, and each lists the account's machines:

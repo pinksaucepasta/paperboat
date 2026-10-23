@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/workspace"
+	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 )
 
 type Scope struct {

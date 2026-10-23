@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/fxamacker/cbor/v2"
-	"github.com/pinksaucepasta/paperboat-server/internal/peeridentity"
+	"github.com/pinksaucepasta/paperboat/server/internal/peeridentity"
 )
 
 func testRecipientKeyID(t *testing.T, public []byte) string {

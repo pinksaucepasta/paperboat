@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/planlimits"
-	"github.com/pinksaucepasta/paperboat-server/internal/teams"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/planlimits"
+	"github.com/pinksaucepasta/paperboat/server/internal/teams"
 )
 
 var ErrWorkspaceForbidden = errors.New("workspace billing permission denied")

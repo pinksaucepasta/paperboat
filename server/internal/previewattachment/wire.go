@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/canonicaljson"
+	"github.com/pinksaucepasta/paperboat/server/internal/canonicaljson"
 )
 
 const (

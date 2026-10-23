@@ -2,8 +2,8 @@ package controlplane
 
 import (
 	"context"
-	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
-	"github.com/pinksaucepasta/paperboat-server/internal/workspace"
+	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 )
 
 const configInventoryStatusQuery = `-- name: ListOwnedControlConfigSyncStatus :many

@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/tunnelcert"
-	"github.com/pinksaucepasta/paperboat-server/internal/workers"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/tunnelcert"
+	"github.com/pinksaucepasta/paperboat/server/internal/workers"
 )
 
 var (

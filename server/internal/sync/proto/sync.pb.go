@@ -674,7 +674,7 @@ const file_internal_sync_proto_sync_proto_rawDesc = "" +
 	"\asuccess\x18\x03 \x01(\bR\asuccess2x\n" +
 	"\vSyncService\x121\n" +
 	"\x04Sync\x12\x11.sync.SyncRequest\x1a\x12.sync.SyncResponse(\x010\x01\x126\n" +
-	"\aSetTags\x12\x14.sync.SetTagsRequest\x1a\x15.sync.SetTagsResponseBFZDgithub.com/pinksaucepasta/paperboat-server/internal/sync/proto;protob\x06proto3"
+	"\aSetTags\x12\x14.sync.SetTagsRequest\x1a\x15.sync.SetTagsResponseBFZDgithub.com/pinksaucepasta/paperboat/server/internal/sync/proto;protob\x06proto3"
 
 var (
 	file_internal_sync_proto_sync_proto_rawDescOnce sync.Once

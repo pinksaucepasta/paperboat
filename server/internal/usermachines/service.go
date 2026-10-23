@@ -9,19 +9,19 @@ import (
 	"errors"
 	"fmt"
 	"github.com/jackc/pgx/v5"
-	"github.com/pinksaucepasta/paperboat-server/internal/access"
-	"github.com/pinksaucepasta/paperboat-server/internal/accessdescriptor"
-	"github.com/pinksaucepasta/paperboat-server/internal/accountingauthority"
-	"github.com/pinksaucepasta/paperboat-server/internal/audit"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
-	"github.com/pinksaucepasta/paperboat-server/internal/helperruntime"
-	"github.com/pinksaucepasta/paperboat-server/internal/mint"
-	"github.com/pinksaucepasta/paperboat-server/internal/secrets"
-	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
-	"github.com/pinksaucepasta/paperboat-server/internal/teaminbox"
-	"github.com/pinksaucepasta/paperboat-server/internal/workers"
-	"github.com/pinksaucepasta/paperboat-server/internal/workspace"
+	"github.com/pinksaucepasta/paperboat/server/internal/access"
+	"github.com/pinksaucepasta/paperboat/server/internal/accessdescriptor"
+	"github.com/pinksaucepasta/paperboat/server/internal/accountingauthority"
+	"github.com/pinksaucepasta/paperboat/server/internal/audit"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat/server/internal/helperruntime"
+	"github.com/pinksaucepasta/paperboat/server/internal/mint"
+	"github.com/pinksaucepasta/paperboat/server/internal/secrets"
+	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
+	"github.com/pinksaucepasta/paperboat/server/internal/teaminbox"
+	"github.com/pinksaucepasta/paperboat/server/internal/workers"
+	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 	"io"
 	"net/http"
 	"regexp"
@@ -482,32 +482,32 @@ func New(store *db.DB, auditWriter *audit.Writer, policy Policy, seats SeatAutho
 
 type PairingInput struct {
 	Verifier, EnrollmentToken, Alias, Platform, Architecture, WorkspaceRoot, PublicIdentityKey string
-	SSHUser                                                                                                 string
-	SSHPort                                                                                                 uint16
-	RuntimeVersions                                                                                         json.RawMessage
-	AcceptBetaPlatform                                                                                      bool
-	CanReuseRuntimeIdentity                                                                                 bool
-	KeepAwake                                                                                               bool
+	SSHUser                                                                                    string
+	SSHPort                                                                                    uint16
+	RuntimeVersions                                                                            json.RawMessage
+	AcceptBetaPlatform                                                                         bool
+	CanReuseRuntimeIdentity                                                                    bool
+	KeepAwake                                                                                  bool
 	// ReplacesMachineID names the record of the computer this install starts over from. It is a
 	// request: approval only acts on a retired record of the same account.
 	ReplacesMachineID string
 }
 
 type Enrollment struct {
-	ID                   string     `json:"id"`
-	OperationID          string     `json:"operation_id"`
-	State                string     `json:"state"`
-	Generation           int64      `json:"generation"`
-	UserCode             string     `json:"user_code,omitempty"`
-	UserMachineID        string     `json:"machine_id,omitempty"`
-	RequestedAlias       string     `json:"requested_alias,omitempty"`
-	Platform             string     `json:"platform,omitempty"`
-	Architecture         string     `json:"architecture,omitempty"`
-	WorkspaceRoot        string     `json:"workspace_root,omitempty"`
-	ExpiresAt            time.Time  `json:"expires_at"`
-	CancelledAt          *time.Time `json:"cancelled_at,omitempty"`
-	CreatedAt            time.Time  `json:"created_at"`
-	UpdatedAt            time.Time  `json:"updated_at"`
+	ID             string     `json:"id"`
+	OperationID    string     `json:"operation_id"`
+	State          string     `json:"state"`
+	Generation     int64      `json:"generation"`
+	UserCode       string     `json:"user_code,omitempty"`
+	UserMachineID  string     `json:"machine_id,omitempty"`
+	RequestedAlias string     `json:"requested_alias,omitempty"`
+	Platform       string     `json:"platform,omitempty"`
+	Architecture   string     `json:"architecture,omitempty"`
+	WorkspaceRoot  string     `json:"workspace_root,omitempty"`
+	ExpiresAt      time.Time  `json:"expires_at"`
+	CancelledAt    *time.Time `json:"cancelled_at,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
 }
 
 type EnrollmentStart struct {

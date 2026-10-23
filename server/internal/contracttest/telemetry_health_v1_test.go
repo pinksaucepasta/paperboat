@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/telemetry"
+	"github.com/pinksaucepasta/paperboat/server/internal/telemetry"
 	"github.com/xeipuuv/gojsonschema"
 )
 

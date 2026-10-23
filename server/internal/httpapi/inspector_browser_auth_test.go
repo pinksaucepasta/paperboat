@@ -17,12 +17,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/audit"
-	"github.com/pinksaucepasta/paperboat-server/internal/auth"
-	"github.com/pinksaucepasta/paperboat-server/internal/config"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/inspectaccess"
-	"github.com/pinksaucepasta/paperboat-server/internal/testauth"
+	"github.com/pinksaucepasta/paperboat/server/internal/audit"
+	"github.com/pinksaucepasta/paperboat/server/internal/auth"
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/inspectaccess"
+	"github.com/pinksaucepasta/paperboat/server/internal/testauth"
 )
 
 func TestInspectorBrowserCredentialRouteAuthAndCSRFPostgres(t *testing.T) {

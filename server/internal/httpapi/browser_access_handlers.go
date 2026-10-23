@@ -10,17 +10,17 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/pinksaucepasta/paperboat-server/internal/canonicaljson"
-	"github.com/pinksaucepasta/paperboat-server/internal/lazyaccess"
-	"github.com/pinksaucepasta/paperboat-server/internal/previewattachment"
-	"github.com/pinksaucepasta/paperboat-server/internal/previewtunnelstore"
-	"github.com/pinksaucepasta/paperboat-server/internal/previewv1"
+	"github.com/pinksaucepasta/paperboat/server/internal/canonicaljson"
+	"github.com/pinksaucepasta/paperboat/server/internal/lazyaccess"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewattachment"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelstore"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewv1"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/accountingauthority"
-	"github.com/pinksaucepasta/paperboat-server/internal/browseraccess"
-	"github.com/pinksaucepasta/paperboat-server/internal/browseringress"
-	"github.com/pinksaucepasta/paperboat-server/internal/privateaccess"
+	"github.com/pinksaucepasta/paperboat/server/internal/accountingauthority"
+	"github.com/pinksaucepasta/paperboat/server/internal/browseraccess"
+	"github.com/pinksaucepasta/paperboat/server/internal/browseringress"
+	"github.com/pinksaucepasta/paperboat/server/internal/privateaccess"
 )
 
 type BrowserAccessHandlers struct {

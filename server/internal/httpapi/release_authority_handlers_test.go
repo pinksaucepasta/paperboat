@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/auth"
-	"github.com/pinksaucepasta/paperboat-server/internal/releaseauthority"
-	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
+	"github.com/pinksaucepasta/paperboat/server/internal/auth"
+	"github.com/pinksaucepasta/paperboat/server/internal/releaseauthority"
+	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 )
 
 func TestReleaseAuthorityBodyReadFailuresRetainCauseAtHTTPBoundary(t *testing.T) {

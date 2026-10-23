@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/helperruntime"
+	"github.com/pinksaucepasta/paperboat/server/internal/helperruntime"
 )
 
 func TestTerminalParticipantsAreNamedOnlyForTheOwnerAndThemselvesOnPostgres(t *testing.T) {

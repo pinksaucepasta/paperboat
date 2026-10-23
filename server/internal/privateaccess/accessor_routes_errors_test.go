@@ -13,10 +13,10 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/controlplane"
-	serverdiagnostics "github.com/pinksaucepasta/paperboat-server/internal/diagnostics"
-	"github.com/pinksaucepasta/paperboat-server/internal/previewattachment"
-	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
+	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
+	serverdiagnostics "github.com/pinksaucepasta/paperboat/server/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewattachment"
+	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 )
 
 type accessorHTTPRepo struct {

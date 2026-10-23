@@ -2,11 +2,11 @@ package privateaccess
 
 import (
 	"fmt"
-	"github.com/pinksaucepasta/paperboat-server/internal/accountingauthority"
-	"github.com/pinksaucepasta/paperboat-server/internal/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/server/internal/accountingauthority"
+	"github.com/pinksaucepasta/paperboat/server/internal/connectorprotocol"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/mint"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/mint"
 )
 
 // Production is the concrete private-access composition used by the server.

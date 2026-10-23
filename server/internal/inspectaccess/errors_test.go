@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/pinksaucepasta/paperboat-server/internal/teams"
+	"github.com/pinksaucepasta/paperboat/server/internal/teams"
 )
 
 func TestNoRowsClassificationDoesNotHideOperationalCause(t *testing.T) {

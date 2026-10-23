@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat-server/internal/admission"
+	"github.com/pinksaucepasta/paperboat/server/internal/admission"
 	"net"
 	"net/url"
 	"os"

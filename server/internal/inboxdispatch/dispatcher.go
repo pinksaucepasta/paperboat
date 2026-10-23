@@ -22,11 +22,11 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
-	"github.com/pinksaucepasta/paperboat-server/internal/admission"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
-	"github.com/pinksaucepasta/paperboat-server/internal/mint"
-	"github.com/pinksaucepasta/paperboat-server/internal/runtimeattachment"
+	"github.com/pinksaucepasta/paperboat/server/internal/admission"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat/server/internal/mint"
+	"github.com/pinksaucepasta/paperboat/server/internal/runtimeattachment"
 )
 
 const (

@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/control"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/route"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/tlscert"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/control"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/route"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/tlscert"
 )
 
 type workerCertificateSource struct{ certificate *tls.Certificate }

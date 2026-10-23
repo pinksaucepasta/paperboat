@@ -17,12 +17,12 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/pinksaucepasta/paperboat-server/internal/audit"
-	"github.com/pinksaucepasta/paperboat-server/internal/controlplane"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/nodeauth"
-	"github.com/pinksaucepasta/paperboat-server/internal/secrets"
-	"github.com/pinksaucepasta/paperboat-server/internal/selfhost"
+	"github.com/pinksaucepasta/paperboat/server/internal/audit"
+	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/nodeauth"
+	"github.com/pinksaucepasta/paperboat/server/internal/secrets"
+	"github.com/pinksaucepasta/paperboat/server/internal/selfhost"
 )
 
 var (

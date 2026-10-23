@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/billing"
+	"github.com/pinksaucepasta/paperboat/server/internal/billing"
 )
 
 // This exercises the real HTTP provider adapter and PostgreSQL transaction owner:

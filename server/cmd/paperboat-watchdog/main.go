@@ -14,8 +14,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/jobmonitor"
-	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
+	"github.com/pinksaucepasta/paperboat/server/internal/jobmonitor"
+	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 )
 
 type target struct {

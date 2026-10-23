@@ -149,8 +149,8 @@ The owning evidence entry is “Operator admin backend” in `plans/TRACKER.md`.
 
 Backend implementation extended 2026-09-19 to include the originally missed region/node,
 backup and Sentry browsing scope. The authoritative API reference is
-`paperboat-server/docs/openapi.json`; operational semantics and activation steps are in
-`paperboat-server/docs/runbooks/operator-admin.md`. The frontend should consume these
+`server/docs/openapi.json`; operational semantics and activation steps are in
+`server/docs/runbooks/operator-admin.md`. The frontend should consume these
 APIs rather than adding authorization or state ownership in the browser:
 
 - Full admin role; separate support, billing and operations staff capabilities.

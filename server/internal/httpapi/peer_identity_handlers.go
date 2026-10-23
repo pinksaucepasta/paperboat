@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/peeridentity"
-	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
+	"github.com/pinksaucepasta/paperboat/server/internal/peeridentity"
+	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 )
 
 type endpointCertificateRegistrar interface {

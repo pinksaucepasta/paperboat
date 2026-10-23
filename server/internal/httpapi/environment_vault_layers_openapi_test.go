@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/environment"
+	"github.com/pinksaucepasta/paperboat/server/internal/environment"
 )
 
 func TestOpenAPIEnvironmentLayerContracts(t *testing.T) {

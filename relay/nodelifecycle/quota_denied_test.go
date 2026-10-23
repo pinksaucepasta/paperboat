@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-relay/derpquic"
+	"github.com/pinksaucepasta/paperboat/relay/derpquic"
 )
 
 // F13-03 relay admission: the observation announces that this relay understands the denial

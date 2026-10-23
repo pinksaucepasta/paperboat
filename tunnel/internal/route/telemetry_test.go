@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	edgetelemetry "github.com/pinksaucepasta/paperboat-tunnel/internal/telemetry"
+	edgetelemetry "github.com/pinksaucepasta/paperboat/tunnel/internal/telemetry"
 )
 
 type recordingRouteTelemetry struct {

@@ -5,7 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/tls"
 	"errors"
-	"github.com/pinksaucepasta/paperboat-relay/admission"
+	"github.com/pinksaucepasta/paperboat/relay/admission"
 	"io"
 	"net"
 	"sort"

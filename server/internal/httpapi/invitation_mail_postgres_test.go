@@ -15,13 +15,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/audit"
-	"github.com/pinksaucepasta/paperboat-server/internal/auth"
-	"github.com/pinksaucepasta/paperboat-server/internal/config"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/teams"
-	"github.com/pinksaucepasta/paperboat-server/internal/testauth"
-	"github.com/pinksaucepasta/paperboat-server/internal/transactionalmail"
+	"github.com/pinksaucepasta/paperboat/server/internal/audit"
+	"github.com/pinksaucepasta/paperboat/server/internal/auth"
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/teams"
+	"github.com/pinksaucepasta/paperboat/server/internal/testauth"
+	"github.com/pinksaucepasta/paperboat/server/internal/transactionalmail"
 )
 
 // Authenticated HTTP + actual PG owns invitation authorization, atomic enqueue,

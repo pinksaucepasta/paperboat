@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/controlplane"
-	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
+	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 )
 
 type configRepositoryResponse struct {

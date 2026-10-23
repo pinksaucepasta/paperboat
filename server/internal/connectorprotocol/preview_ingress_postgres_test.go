@@ -4,13 +4,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
-	"github.com/pinksaucepasta/paperboat-server/internal/billing"
-	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat/server/internal/billing"
+	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/previewtunnelstore"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelstore"
 	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 

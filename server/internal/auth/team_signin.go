@@ -3,8 +3,8 @@ package auth
 import (
 	"context"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/teams"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/teams"
 )
 
 // recordTeamSignInTx applies a sign-in to teams (PLAN F19-03/05): held directory invitations for

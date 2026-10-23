@@ -2,8 +2,8 @@ package main
 
 import (
 	"errors"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/control"
-	edgeruntime "github.com/pinksaucepasta/paperboat-tunnel/internal/runtime"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/control"
+	edgeruntime "github.com/pinksaucepasta/paperboat/tunnel/internal/runtime"
 	"strings"
 	"testing"
 )

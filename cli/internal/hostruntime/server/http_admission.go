@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-relay/admission"
+	"github.com/pinksaucepasta/paperboat/relay/admission"
 )
 
 type httpAdmissionKey struct{}

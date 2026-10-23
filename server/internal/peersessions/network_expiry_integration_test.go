@@ -11,16 +11,16 @@ import (
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
-	"github.com/pinksaucepasta/paperboat-server/internal/admission"
+	"github.com/pinksaucepasta/paperboat/server/internal/admission"
 	wire "github.com/pinksaucepasta/paperboat/shared/peeridentity"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/config"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/mint"
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/mint"
 )
 
 func TestNetworkApplicationExpiryOnPostgres(t *testing.T) {

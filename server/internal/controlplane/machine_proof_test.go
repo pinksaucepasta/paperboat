@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/mint"
+	"github.com/pinksaucepasta/paperboat/server/internal/mint"
 )
 
 func TestVerifyMachineControlRequestRejectsHelperCredentialWithoutFallback(t *testing.T) {

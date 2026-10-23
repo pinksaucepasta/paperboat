@@ -9,7 +9,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
 var ErrTicketInvalid = errors.New("browser terminal ticket is invalid or expired")

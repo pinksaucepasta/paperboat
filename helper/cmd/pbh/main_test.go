@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat-helper/internal/reporting"
+	"github.com/pinksaucepasta/paperboat/helper/internal/reporting"
 )
 
 func TestPbhDisabledReporterKeepsSafeFailureAndProcessReference(t *testing.T) {

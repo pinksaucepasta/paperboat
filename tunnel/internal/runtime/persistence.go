@@ -5,7 +5,7 @@ import (
 	"errors"
 	"os"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/store"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/store"
 )
 
 type Persistence struct {

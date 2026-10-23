@@ -23,11 +23,11 @@ import (
 	"golang.org/x/net/http2"
 
 	"github.com/google/uuid"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/config"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/datacarrier"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/edgehttp"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/route"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/config"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/datacarrier"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/edgehttp"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/route"
 )
 
 // TestCarrierPromotesAnAlreadyLivePreviewSessionToDurableRouting verifies the

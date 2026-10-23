@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/config"
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
 )
 
 func TestS3ObjectStoreLifecycle(t *testing.T) {

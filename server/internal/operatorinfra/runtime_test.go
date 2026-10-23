@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/controlplane"
-	"github.com/pinksaucepasta/paperboat-server/internal/nodeauth"
-	"github.com/pinksaucepasta/paperboat-server/internal/operatoractions"
+	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
+	"github.com/pinksaucepasta/paperboat/server/internal/nodeauth"
+	"github.com/pinksaucepasta/paperboat/server/internal/operatoractions"
 )
 
 func TestManagedRelayRuntimeLifecycleAndAudit(t *testing.T) {

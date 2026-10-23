@@ -2,7 +2,7 @@ package edgehttp
 
 import (
 	"context"
-	edgetelemetry "github.com/pinksaucepasta/paperboat-tunnel/internal/telemetry"
+	edgetelemetry "github.com/pinksaucepasta/paperboat/tunnel/internal/telemetry"
 	"net/http"
 	"net/http/httptest"
 	"strings"

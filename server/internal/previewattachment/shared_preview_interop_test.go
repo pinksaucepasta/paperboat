@@ -7,10 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat-server/internal/config"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/previewtunnelapi"
-	"github.com/pinksaucepasta/paperboat-server/internal/teams/teamstest"
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelapi"
+	"github.com/pinksaucepasta/paperboat/server/internal/teams/teamstest"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -18,11 +18,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/mint"
-	"github.com/pinksaucepasta/paperboat-server/internal/previewattachment"
-	"github.com/pinksaucepasta/paperboat-server/internal/previewdispatch"
-	"github.com/pinksaucepasta/paperboat-server/internal/previewtunnelstore"
-	"github.com/pinksaucepasta/paperboat-server/internal/previewv1"
+	"github.com/pinksaucepasta/paperboat/server/internal/mint"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewattachment"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewdispatch"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelstore"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewv1"
 )
 
 type sharedPreviewRoute struct{ route previewdispatch.MachineRoute }

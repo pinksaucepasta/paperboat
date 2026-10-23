@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/accessdescriptor"
+	"github.com/pinksaucepasta/paperboat/server/internal/accessdescriptor"
 )
 
 // The CLI binds a shared-terminal join to the machine's generation and refuses a descriptor without one;

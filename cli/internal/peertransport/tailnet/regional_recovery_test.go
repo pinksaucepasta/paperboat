@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-relay/derpquic"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
+	"github.com/pinksaucepasta/paperboat/relay/derpquic"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=regional-recovery-test
 	"tailscale.com/tailcfg"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=regional-recovery-test

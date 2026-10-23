@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/auth"
-	"github.com/pinksaucepasta/paperboat-server/internal/favorites"
-	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
-	"github.com/pinksaucepasta/paperboat-server/internal/workspace"
+	"github.com/pinksaucepasta/paperboat/server/internal/auth"
+	"github.com/pinksaucepasta/paperboat/server/internal/favorites"
+	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
+	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 )
 
 func TestFavoriteSetRejectsIncompleteOrNonSchemaJSON(t *testing.T) {

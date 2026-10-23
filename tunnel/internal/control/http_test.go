@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/usage"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/usage"
 )
 
 const testControlCredential = "edge-control-test-012345678901234567890123456789"

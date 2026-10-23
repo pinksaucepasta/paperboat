@@ -8,9 +8,9 @@ import (
 	"regexp"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/secrets"
-	"github.com/pinksaucepasta/paperboat-server/internal/workspace"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/secrets"
+	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 )
 
 // PLAN F21-12 (Lane X #16): POST api-tokens with an Idempotency-Key. A client that lost the

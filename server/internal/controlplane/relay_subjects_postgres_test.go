@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
 // relaySubjectsNode is a relay node with one account whose endpoints the observation tests revoke or keep.

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-relay/nodetls"
+	"github.com/pinksaucepasta/paperboat/relay/nodetls"
 	"tailscale.com/types/key"
 )
 

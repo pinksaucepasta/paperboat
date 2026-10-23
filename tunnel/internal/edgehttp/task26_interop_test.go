@@ -19,8 +19,8 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/control"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/datacarrier"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/control"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/datacarrier"
 )
 
 type task26Descriptor struct{ Address, CACert, ClientCert, ClientKey, AuthorityURL, AuthorityCA, OriginsPath, ReadyPath, StopPath string }

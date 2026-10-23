@@ -11,16 +11,16 @@ import (
 	"errors"
 	"fmt"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/pinksaucepasta/paperboat-server/internal/accessdescriptor"
-	"github.com/pinksaucepasta/paperboat-server/internal/admission"
-	"github.com/pinksaucepasta/paperboat-server/internal/audit"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
-	"github.com/pinksaucepasta/paperboat-server/internal/mint"
-	"github.com/pinksaucepasta/paperboat-server/internal/planlimits"
-	"github.com/pinksaucepasta/paperboat-server/internal/releases"
-	"github.com/pinksaucepasta/paperboat-server/internal/secrets"
-	"github.com/pinksaucepasta/paperboat-server/internal/teams"
+	"github.com/pinksaucepasta/paperboat/server/internal/accessdescriptor"
+	"github.com/pinksaucepasta/paperboat/server/internal/admission"
+	"github.com/pinksaucepasta/paperboat/server/internal/audit"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat/server/internal/mint"
+	"github.com/pinksaucepasta/paperboat/server/internal/planlimits"
+	"github.com/pinksaucepasta/paperboat/server/internal/releases"
+	"github.com/pinksaucepasta/paperboat/server/internal/secrets"
+	"github.com/pinksaucepasta/paperboat/server/internal/teams"
 	"slices"
 	"strconv"
 	"strings"
@@ -119,9 +119,9 @@ func (s *Service) authorizeAuthenticatedMachineInstallationRetry(ctx context.Con
 
 type SetupInput struct {
 	Alias, Platform, Architecture, WorkspaceRoot, PublicIdentityKey string
-	RuntimeVersions                                                              json.RawMessage
-	AcceptBetaPlatform                                                           bool
-	KeepAwake                                                                    bool
+	RuntimeVersions                                                 json.RawMessage
+	AcceptBetaPlatform                                              bool
+	KeepAwake                                                       bool
 }
 
 func optInUserMachineKeepAwake(ctx context.Context, tx *db.Tx, userID string, row dbsqlc.UserMachine, keepAwake bool) (dbsqlc.UserMachine, error) {
@@ -339,7 +339,7 @@ func (s *Service) CreatePairing(ctx context.Context, in PairingInput) (Pairing, 
 			row, err = tx.Queries().ClaimBootstrapPairing(ctx, dbsqlc.ClaimBootstrapPairingParams{
 				ID: enrollment.ID, VerifierHash: params.VerifierHash, UserCode: params.UserCode,
 				RequestedAlias: params.RequestedAlias,
-				Platform: params.Platform, Architecture: params.Architecture, WorkspaceRoot: params.WorkspaceRoot,
+				Platform:       params.Platform, Architecture: params.Architecture, WorkspaceRoot: params.WorkspaceRoot,
 				RuntimeVersions: params.RuntimeVersions, PublicIdentityKey: params.PublicIdentityKey,
 				SshUser: params.SshUser, SshPort: params.SshPort,
 				CanReuseRuntimeIdentity: params.CanReuseRuntimeIdentity, KeepAwake: params.KeepAwake, ReplacesMachineID: params.ReplacesMachineID,

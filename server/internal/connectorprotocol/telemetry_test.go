@@ -11,7 +11,7 @@ import (
 
 	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 
-	servertelemetry "github.com/pinksaucepasta/paperboat-server/internal/telemetry"
+	servertelemetry "github.com/pinksaucepasta/paperboat/server/internal/telemetry"
 )
 
 func newConnectorTelemetryProducer(t *testing.T, now time.Time) (*servertelemetry.Producer, *servertelemetry.EventLog) {

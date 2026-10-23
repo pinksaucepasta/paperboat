@@ -17,10 +17,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/auth"
-	"github.com/pinksaucepasta/paperboat-server/internal/controlplane"
-	"github.com/pinksaucepasta/paperboat-server/internal/peeridentity"
-	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
+	"github.com/pinksaucepasta/paperboat/server/internal/auth"
+	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
+	"github.com/pinksaucepasta/paperboat/server/internal/peeridentity"
+	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 )
 
 func TestMachineEndpointRequestClassifiesUnexpectedRepositoryFailure(t *testing.T) {

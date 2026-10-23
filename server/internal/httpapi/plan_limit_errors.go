@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/planlimits"
+	"github.com/pinksaucepasta/paperboat/server/internal/planlimits"
 )
 
 // writePlanLimitReached answers a new resource refused past its plan's count limit with the

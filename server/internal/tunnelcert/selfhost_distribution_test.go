@@ -6,7 +6,7 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/nodeauth"
+	"github.com/pinksaucepasta/paperboat/server/internal/nodeauth"
 )
 
 type installationCredentials struct{ unavailable bool }

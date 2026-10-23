@@ -18,10 +18,10 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/config"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/datacarrier"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/edgehttp"
-	edgeruntime "github.com/pinksaucepasta/paperboat-tunnel/internal/runtime"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/config"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/datacarrier"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/edgehttp"
+	edgeruntime "github.com/pinksaucepasta/paperboat/tunnel/internal/runtime"
 )
 
 // PLAN 3a step 4: an agent's runtime carrier that is already live becomes the replica of the

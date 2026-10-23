@@ -5,9 +5,9 @@ import (
 	"reflect"
 	"strconv"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/backupreport"
-	"github.com/pinksaucepasta/paperboat-server/internal/nodeauth"
-	"github.com/pinksaucepasta/paperboat-server/internal/operatorreporting"
+	"github.com/pinksaucepasta/paperboat/server/internal/backupreport"
+	"github.com/pinksaucepasta/paperboat/server/internal/nodeauth"
+	"github.com/pinksaucepasta/paperboat/server/internal/operatorreporting"
 )
 
 func registerBackupReportRoute(mux *http.ServeMux, opts Options) {

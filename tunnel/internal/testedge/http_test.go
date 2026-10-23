@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/admission"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/control"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/usage"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/admission"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/control"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/usage"
 )
 
 type handlerTransport struct{ handler http.Handler }

@@ -5,7 +5,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/reporting"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/reporting"
 	"net"
 	"net/http"
 	"sync"

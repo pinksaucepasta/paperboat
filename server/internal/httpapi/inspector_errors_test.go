@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/inspectaccess"
+	"github.com/pinksaucepasta/paperboat/server/internal/inspectaccess"
 )
 
 func TestInspectorErrorKeepsPureStatusesAndReportsMixedFailures(t *testing.T) {

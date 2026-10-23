@@ -15,10 +15,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/controlplane"
-	"github.com/pinksaucepasta/paperboat-server/internal/machineservices"
-	"github.com/pinksaucepasta/paperboat-server/internal/nativeprivateaccess"
-	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
+	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
+	"github.com/pinksaucepasta/paperboat/server/internal/machineservices"
+	"github.com/pinksaucepasta/paperboat/server/internal/nativeprivateaccess"
+	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 )
 
 func TestMachineServiceRuntimeProofPrecedesAuthority(t *testing.T) {

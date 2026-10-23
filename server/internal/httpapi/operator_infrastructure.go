@@ -3,7 +3,7 @@ package httpapi
 import (
 	"net/http"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/operatorinfra"
+	"github.com/pinksaucepasta/paperboat/server/internal/operatorinfra"
 )
 
 type operatorRegionInput struct {

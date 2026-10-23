@@ -19,8 +19,8 @@ import (
 	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 
 	"github.com/coder/websocket"
-	serverdiagnostics "github.com/pinksaucepasta/paperboat-server/internal/diagnostics"
-	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
+	serverdiagnostics "github.com/pinksaucepasta/paperboat/server/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 )
 
 type websocketFailureStore struct {

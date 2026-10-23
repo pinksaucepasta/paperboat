@@ -3,8 +3,8 @@ package runtime
 import (
 	"context"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/control"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/reporting"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/control"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/reporting"
 )
 
 // HTTP attempts already publish through the control transport. This boundary

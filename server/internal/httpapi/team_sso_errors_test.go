@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/teams"
-	"github.com/pinksaucepasta/paperboat-server/internal/workspace"
+	"github.com/pinksaucepasta/paperboat/server/internal/teams"
+	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 )
 
 // PLAN F19-04: a missing SSO sign-in is refused as team_sso_required on every workspace error path

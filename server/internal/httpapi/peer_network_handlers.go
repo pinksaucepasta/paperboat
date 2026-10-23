@@ -12,7 +12,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/peersessions"
+	"github.com/pinksaucepasta/paperboat/server/internal/peersessions"
 )
 
 type peerNetworkRegisterBody struct {

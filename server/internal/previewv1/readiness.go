@@ -2,7 +2,7 @@ package previewv1
 
 import (
 	"context"
-	"github.com/pinksaucepasta/paperboat-server/internal/previewtunnelapi"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelapi"
 	"strings"
 )
 

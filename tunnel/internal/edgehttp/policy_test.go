@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/admission"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/route"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/admission"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/route"
 )
 
 type readinessFunc func(string) (string, string, bool)

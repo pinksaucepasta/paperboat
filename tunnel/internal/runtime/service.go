@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/config"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/node"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/reporting"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/config"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/node"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/reporting"
 )
 
 type Component interface {

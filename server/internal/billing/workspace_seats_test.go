@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat-server/internal/billing"
-	"github.com/pinksaucepasta/paperboat-server/internal/teams"
+	"github.com/pinksaucepasta/paperboat/server/internal/billing"
+	"github.com/pinksaucepasta/paperboat/server/internal/teams"
 	"testing"
 	"time"
 )

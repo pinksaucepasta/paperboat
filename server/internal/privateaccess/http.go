@@ -10,9 +10,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/canonicaljson"
-	"github.com/pinksaucepasta/paperboat-server/internal/previewattachment"
-	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
+	"github.com/pinksaucepasta/paperboat/server/internal/canonicaljson"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewattachment"
+	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 )
 
 const AuthorizePath = "/v1/edge/private-access/authorize"

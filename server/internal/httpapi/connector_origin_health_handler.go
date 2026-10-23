@@ -13,9 +13,9 @@ import (
 
 	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/connectorprotocol"
-	"github.com/pinksaucepasta/paperboat-server/internal/controlplane"
-	"github.com/pinksaucepasta/paperboat-server/internal/tunnelv1"
+	"github.com/pinksaucepasta/paperboat/server/internal/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
+	"github.com/pinksaucepasta/paperboat/server/internal/tunnelv1"
 )
 
 const connectorOriginHealthBodyLimit = 16 << 10

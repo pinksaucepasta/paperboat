@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/usermachines"
+	"github.com/pinksaucepasta/paperboat/server/internal/usermachines"
 )
 
 func userMachineUpdateStatus(service *usermachines.Service) http.HandlerFunc {

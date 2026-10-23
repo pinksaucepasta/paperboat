@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/config"
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
 )
 
 // Removing a machine fires the peer-network triggers (machine, CLI session, certificate, environment), which look

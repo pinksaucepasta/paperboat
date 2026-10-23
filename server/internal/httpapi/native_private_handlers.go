@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/machineservices"
-	"github.com/pinksaucepasta/paperboat-server/internal/nativeprivateaccess"
+	"github.com/pinksaucepasta/paperboat/server/internal/machineservices"
+	"github.com/pinksaucepasta/paperboat/server/internal/nativeprivateaccess"
 )
 
 func nativePrivateGrant(service *nativeprivateaccess.Service) http.HandlerFunc {

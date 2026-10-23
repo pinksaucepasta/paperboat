@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/edgeerrors"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/node"
-	edgetelemetry "github.com/pinksaucepasta/paperboat-tunnel/internal/telemetry"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/usage"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/edgeerrors"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/node"
+	edgetelemetry "github.com/pinksaucepasta/paperboat/tunnel/internal/telemetry"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/usage"
 )
 
 type Kind string

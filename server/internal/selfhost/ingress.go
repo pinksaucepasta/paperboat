@@ -19,8 +19,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/nodeauth"
-	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
+	"github.com/pinksaucepasta/paperboat/server/internal/nodeauth"
+	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 )
 
 var ErrIngress = errors.New("public ingress verification failed; check the installation hostname A/AAAA records, HTTPS port 443, certificate and running edge, then retry verify-ingress")

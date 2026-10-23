@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	edgetelemetry "github.com/pinksaucepasta/paperboat-tunnel/internal/telemetry"
+	edgetelemetry "github.com/pinksaucepasta/paperboat/tunnel/internal/telemetry"
 
 	"github.com/google/uuid"
 )

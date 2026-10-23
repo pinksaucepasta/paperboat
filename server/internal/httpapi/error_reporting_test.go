@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/auth"
-	serverdiagnostics "github.com/pinksaucepasta/paperboat-server/internal/diagnostics"
-	"github.com/pinksaucepasta/paperboat-server/internal/peeridentity"
-	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
+	"github.com/pinksaucepasta/paperboat/server/internal/auth"
+	serverdiagnostics "github.com/pinksaucepasta/paperboat/server/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/server/internal/peeridentity"
+	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 )
 
 type pendingEndpointReaderFunc func(context.Context, string, time.Time) ([]peeridentity.EndpointEnrollmentRequest, error)

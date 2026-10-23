@@ -3,8 +3,8 @@ package supportreport
 import (
 	"context"
 	"errors"
-	"github.com/pinksaucepasta/paperboat-server/internal/audit"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/audit"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
 type SQLStore struct {

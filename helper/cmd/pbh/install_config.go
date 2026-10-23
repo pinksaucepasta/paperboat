@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/pinksaucepasta/paperboat-relay/selfhost"
+	"github.com/pinksaucepasta/paperboat/relay/selfhost"
 )
 
 func installationMode(c selfhost.Config) string {

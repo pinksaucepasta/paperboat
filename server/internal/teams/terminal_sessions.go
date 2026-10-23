@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"github.com/jackc/pgx/v5"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
 func (s *Service) GrantTerminalSession(ctx context.Context, account, team string, r TerminalSessionGrantRequest) (Team, error) {

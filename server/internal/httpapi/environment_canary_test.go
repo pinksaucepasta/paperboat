@@ -7,7 +7,7 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"encoding/base64"
-	"github.com/pinksaucepasta/paperboat-server/internal/auth"
+	"github.com/pinksaucepasta/paperboat/server/internal/auth"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"

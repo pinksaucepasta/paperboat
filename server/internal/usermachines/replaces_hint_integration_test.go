@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/audit"
+	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 )
 
 // `pb reset` (start fresh) deletes the computer's own record and the new install arrives later,

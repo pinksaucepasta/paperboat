@@ -2,7 +2,7 @@ package httpapi
 
 import (
 	"errors"
-	"github.com/pinksaucepasta/paperboat-server/internal/billing"
+	"github.com/pinksaucepasta/paperboat/server/internal/billing"
 	"net/http"
 	"strings"
 )

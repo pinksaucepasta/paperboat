@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/datacarrier"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/datacarrier"
 )
 
 // These paths are the edge-node control boundary for canonical preview

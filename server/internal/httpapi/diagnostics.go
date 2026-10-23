@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	serverdiagnostics "github.com/pinksaucepasta/paperboat-server/internal/diagnostics"
-	"github.com/pinksaucepasta/paperboat-server/internal/telemetry"
+	serverdiagnostics "github.com/pinksaucepasta/paperboat/server/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/server/internal/telemetry"
 )
 
 // telemetryDiagnosticsPath is intentionally outside the public /v1 API. The

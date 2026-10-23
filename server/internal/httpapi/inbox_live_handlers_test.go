@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/auth"
-	"github.com/pinksaucepasta/paperboat-server/internal/inboxdispatch"
-	"github.com/pinksaucepasta/paperboat-server/internal/usermachines"
+	"github.com/pinksaucepasta/paperboat/server/internal/auth"
+	"github.com/pinksaucepasta/paperboat/server/internal/inboxdispatch"
+	"github.com/pinksaucepasta/paperboat/server/internal/usermachines"
 )
 
 type fakeInboxAuthority struct{ err error }

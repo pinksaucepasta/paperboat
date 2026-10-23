@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/tlscert"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/tlscert"
 )
 
 var (

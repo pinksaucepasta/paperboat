@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/machineservices"
-	"github.com/pinksaucepasta/paperboat-server/internal/nativeprivateaccess"
+	"github.com/pinksaucepasta/paperboat/server/internal/machineservices"
+	"github.com/pinksaucepasta/paperboat/server/internal/nativeprivateaccess"
 )
 
 func machineServiceError(w http.ResponseWriter, r *http.Request, e error) {

@@ -1,6 +1,6 @@
 package teaminbox
 
-import serverconfig "github.com/pinksaucepasta/paperboat-server/internal/config"
+import serverconfig "github.com/pinksaucepasta/paperboat/server/internal/config"
 
 // ManifestLimitError reports only public configured limits, never file metadata.
 type ManifestLimitError struct {

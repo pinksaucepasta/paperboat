@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/jackc/puddle/v2"
-	"github.com/pinksaucepasta/paperboat-server/internal/config"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/tunnelcert"
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/tunnelcert"
 )
 
 type unusedPlatformWorkerIssuer struct{}

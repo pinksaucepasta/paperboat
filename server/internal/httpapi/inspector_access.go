@@ -1,7 +1,7 @@
 package httpapi
 
 import (
-	"github.com/pinksaucepasta/paperboat-server/internal/inspectaccess"
+	"github.com/pinksaucepasta/paperboat/server/internal/inspectaccess"
 	"net/http"
 )
 

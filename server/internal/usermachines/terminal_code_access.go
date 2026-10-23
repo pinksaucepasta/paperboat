@@ -8,15 +8,15 @@ import (
 	"encoding/base64"
 	"errors"
 	"github.com/jackc/pgx/v5"
-	"github.com/pinksaucepasta/paperboat-server/internal/planlimits"
+	"github.com/pinksaucepasta/paperboat/server/internal/planlimits"
 	"strings"
 	"time"
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/audit"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
+	"github.com/pinksaucepasta/paperboat/server/internal/audit"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 )
 
 const TerminalCodeAttemptsPerMinute = 120

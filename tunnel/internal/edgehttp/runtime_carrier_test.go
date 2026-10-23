@@ -17,9 +17,9 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/admission"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/control"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/datacarrier"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/admission"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/control"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/datacarrier"
 )
 
 type browserTerminalAdmissionFunc func(context.Context, string, string, string) (control.BrowserTerminalAdmission, error)

@@ -11,8 +11,8 @@ import (
 
 	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/workers"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/workers"
 )
 
 const (

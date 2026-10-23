@@ -9,7 +9,7 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/workspace"
+	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 )
 
 func TestBindWorkspaceSelectorRequiresSignedBodyToMatchQuery(t *testing.T) {

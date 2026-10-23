@@ -2,7 +2,7 @@ package httpapi
 
 import (
 	"context"
-	"github.com/pinksaucepasta/paperboat-server/internal/environment"
+	"github.com/pinksaucepasta/paperboat/server/internal/environment"
 	"net/http"
 )
 

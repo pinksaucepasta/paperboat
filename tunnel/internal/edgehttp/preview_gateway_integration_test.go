@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/datacarrier"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/datacarrier"
 )
 
 // TestGatewayRoutesAttachedPreviewToCarrierTransport proves the complete live

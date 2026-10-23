@@ -8,7 +8,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/auth"
+	"github.com/pinksaucepasta/paperboat/server/internal/auth"
 )
 
 func approveRecoveryGrant(t *testing.T, router http.Handler, cookies []*http.Cookie, grant deviceGrant) {

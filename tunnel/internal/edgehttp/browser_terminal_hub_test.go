@@ -7,7 +7,7 @@ import (
 	"fmt"
 	yamux "github.com/libp2p/go-yamux/v5"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/datacarrier"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/datacarrier"
 	"io"
 	"strconv"
 	"syscall"

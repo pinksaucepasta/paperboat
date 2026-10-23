@@ -5,8 +5,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/teams"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/teams"
 )
 
 var ErrSeatQuantity = errors.New("seat quantity must cover members and pending invitations")

@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/config"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/datacarrier"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/edgehttp"
-	edgetelemetry "github.com/pinksaucepasta/paperboat-tunnel/internal/telemetry"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/config"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/datacarrier"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/edgehttp"
+	edgetelemetry "github.com/pinksaucepasta/paperboat/tunnel/internal/telemetry"
 )
 
 func TestCarrierEndpointFromDeploymentIsSeparateAndComplete(t *testing.T) {

@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/config"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
 func vaultRecordFixture(t *testing.T, c VaultLayerCoordinate, account, id string, revision, epoch uint64, deleted bool, writerGeneration ...uint64) string {

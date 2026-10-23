@@ -5,16 +5,16 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat-server/internal/teams/teamstest"
+	"github.com/pinksaucepasta/paperboat/server/internal/teams/teamstest"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/config"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/previewattachment"
-	"github.com/pinksaucepasta/paperboat-server/internal/teams"
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewattachment"
+	"github.com/pinksaucepasta/paperboat/server/internal/teams"
 )
 
 // TestInspectorAuthorizationPostgres proves end-to-end inspector authorization

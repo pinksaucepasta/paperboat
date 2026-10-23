@@ -5,14 +5,14 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"github.com/pinksaucepasta/paperboat-server/internal/audit"
+	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 	"io"
 	"net"
 	"net/http"
 	"strconv"
 	"strings"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/auth"
+	"github.com/pinksaucepasta/paperboat/server/internal/auth"
 	"github.com/realclientip/realclientip-go"
 )
 

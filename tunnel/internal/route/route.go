@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/edgeerrors"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/edgeerrors"
 )
 
 var (

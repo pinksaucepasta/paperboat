@@ -6,8 +6,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 )
 
 var ErrOperationLeaseLost = errors.New("control operation lease lost")

@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/getsentry/sentry-go"
-	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
+	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 )
 
 var ErrConfig = errors.New("invalid scheduled monitoring configuration")

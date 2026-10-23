@@ -15,11 +15,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/control"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/datacarrier"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/edgehttp"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/node"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/route"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/control"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/datacarrier"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/edgehttp"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/node"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/route"
 )
 
 type trk36SoakReport struct {

@@ -10,9 +10,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-relay/admission"
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/backoff"
+	"github.com/pinksaucepasta/paperboat/relay/admission"
 )
 
 type NetworkAPI interface {

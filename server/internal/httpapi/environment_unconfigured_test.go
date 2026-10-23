@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/environment"
+	"github.com/pinksaucepasta/paperboat/server/internal/environment"
 )
 
 func TestEnvironmentUnconfiguredErrorIncludesOnlyBootstrapCoordinates(t *testing.T) {

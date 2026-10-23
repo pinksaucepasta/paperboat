@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/tlscert"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/tlscert"
 )
 
 var (

@@ -8,11 +8,11 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/pinksaucepasta/paperboat-server/internal/accountingauthority"
-	"github.com/pinksaucepasta/paperboat-server/internal/browseraccess"
-	"github.com/pinksaucepasta/paperboat-server/internal/connectorprotocol"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/privateaccess"
+	"github.com/pinksaucepasta/paperboat/server/internal/accountingauthority"
+	"github.com/pinksaucepasta/paperboat/server/internal/browseraccess"
+	"github.com/pinksaucepasta/paperboat/server/internal/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/privateaccess"
 )
 
 type NativeIngressAuthority interface {

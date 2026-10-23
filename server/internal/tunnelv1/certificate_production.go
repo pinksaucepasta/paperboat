@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat-server/internal/nodeauth"
+	"github.com/pinksaucepasta/paperboat/server/internal/nodeauth"
 	"sync"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/tunnelcert"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/tunnelcert"
 )
 
 // ErrCertificateRuntimeUnavailable identifies a deployment that enabled the

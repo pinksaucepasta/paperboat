@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/usermachines"
+	"github.com/pinksaucepasta/paperboat/server/internal/usermachines"
 )
 
 type issueTestTickets struct{}

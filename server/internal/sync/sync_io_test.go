@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	pb "github.com/pinksaucepasta/paperboat-server/internal/sync/proto"
+	pb "github.com/pinksaucepasta/paperboat/server/internal/sync/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"

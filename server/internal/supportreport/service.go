@@ -17,7 +17,7 @@ import (
 
 	"github.com/getsentry/sentry-go"
 	"github.com/google/uuid"
-	serverdiagnostics "github.com/pinksaucepasta/paperboat-server/internal/diagnostics"
+	serverdiagnostics "github.com/pinksaucepasta/paperboat/server/internal/diagnostics"
 )
 
 const QueueCapacity = 128
@@ -843,7 +843,7 @@ func sourceLocation(stack *sentry.Stacktrace) (string, string, int) {
 	}
 	for i := len(stack.Frames) - 1; i >= 0; i-- {
 		f := stack.Frames[i]
-		if !strings.HasPrefix(f.Module, "github.com/pinksaucepasta/paperboat-server/") || strings.Contains(f.Module, "/supportreport") {
+		if !strings.HasPrefix(f.Module, "github.com/pinksaucepasta/paperboat/server/") || strings.Contains(f.Module, "/supportreport") {
 			continue
 		}
 		function := safeSourceFunction(f.Function)

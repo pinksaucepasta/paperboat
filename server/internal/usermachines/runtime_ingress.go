@@ -3,7 +3,7 @@ package usermachines
 import (
 	"context"
 	"errors"
-	"github.com/pinksaucepasta/paperboat-server/internal/runtimeattachment"
+	"github.com/pinksaucepasta/paperboat/server/internal/runtimeattachment"
 	"strings"
 )
 

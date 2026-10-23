@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
 // Since returns up to limit events of one workspace after the cursor sequence, oldest first, for

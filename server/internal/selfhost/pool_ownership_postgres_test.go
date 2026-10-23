@@ -6,9 +6,9 @@ import (
 	"os"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/config"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/nodeauth"
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/nodeauth"
 )
 
 func TestGlobalHostedPoolAndPendingEnrollmentOnPostgres(t *testing.T) {

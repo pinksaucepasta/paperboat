@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/edgeerrors"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/operation"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/strictjson"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/edgeerrors"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/operation"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/strictjson"
 	"golang.org/x/net/idna"
 )
 

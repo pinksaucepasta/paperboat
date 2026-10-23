@@ -10,7 +10,7 @@ import (
 
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
 // Querier is a pool or a transaction.

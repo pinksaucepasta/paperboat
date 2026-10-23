@@ -11,12 +11,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/accountingauthority"
+	"github.com/pinksaucepasta/paperboat/server/internal/accountingauthority"
 	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
-	"github.com/pinksaucepasta/paperboat-server/internal/tunnelendpoint"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat/server/internal/tunnelendpoint"
 )
 
 const (

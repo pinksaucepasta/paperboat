@@ -7,7 +7,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
 // DeliveryWindow permits an edge offline for a weekend to deliver its durable

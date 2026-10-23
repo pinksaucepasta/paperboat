@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/reporting"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/reporting"
 )
 
 func TestHTTPDiagnosticsPanicAbortAndRecovery(t *testing.T) {

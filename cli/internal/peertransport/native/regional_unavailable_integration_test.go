@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-relay/derpquic"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
+	"github.com/pinksaucepasta/paperboat/relay/derpquic"
 )
 
 // F9-02/F9-05 device finding: the provisional rendezvous used only the first

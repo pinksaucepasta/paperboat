@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/billing"
+	"github.com/pinksaucepasta/paperboat/server/internal/billing"
 )
 
 func TestTopupCheckoutProviderPaymentAndIdentity(t *testing.T) {

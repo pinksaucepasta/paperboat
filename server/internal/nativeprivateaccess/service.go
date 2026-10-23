@@ -3,15 +3,15 @@ package nativeprivateaccess
 import (
 	"context"
 	"errors"
-	"github.com/pinksaucepasta/paperboat-server/internal/admission"
-	"github.com/pinksaucepasta/paperboat-server/internal/machineservices"
+	"github.com/pinksaucepasta/paperboat/server/internal/admission"
+	"github.com/pinksaucepasta/paperboat/server/internal/machineservices"
 	"net"
 	"reflect"
 	"strconv"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/pinksaucepasta/paperboat-server/internal/mint"
+	"github.com/pinksaucepasta/paperboat/server/internal/mint"
 )
 
 var ErrDenied = errors.New("native private access denied")

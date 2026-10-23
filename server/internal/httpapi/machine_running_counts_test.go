@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/previewtunnelapi"
-	"github.com/pinksaucepasta/paperboat-server/internal/previewv1"
-	"github.com/pinksaucepasta/paperboat-server/internal/tunnelv1"
-	"github.com/pinksaucepasta/paperboat-server/internal/usermachines"
-	"github.com/pinksaucepasta/paperboat-server/internal/workspace"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelapi"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewv1"
+	"github.com/pinksaucepasta/paperboat/server/internal/tunnelv1"
+	"github.com/pinksaucepasta/paperboat/server/internal/usermachines"
+	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 )
 
 type fakeRunningTerminals struct {

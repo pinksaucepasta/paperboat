@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-relay/derpquic"
+	"github.com/pinksaucepasta/paperboat/relay/derpquic"
 )
 
 // An account with more peers than one relay grant may name gets grants for a subset of this

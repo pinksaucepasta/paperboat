@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/secrets"
+	"github.com/pinksaucepasta/paperboat/server/internal/secrets"
 )
 
 var ErrOAuthRefreshUnavailable = errors.New("GitHub token renewal is unavailable; retry later")

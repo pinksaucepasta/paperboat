@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/config"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/machineservices"
-	"github.com/pinksaucepasta/paperboat-server/internal/nativeprivateaccess"
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/machineservices"
+	"github.com/pinksaucepasta/paperboat/server/internal/nativeprivateaccess"
 )
 
 func TestPolicyPostgres(t *testing.T) {

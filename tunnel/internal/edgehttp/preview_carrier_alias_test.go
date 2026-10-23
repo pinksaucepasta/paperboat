@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/datacarrier"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/datacarrier"
 )
 
 func TestDataCarrierPreviewAliasesShareAuthenticatedCarrierEndToEnd(t *testing.T) {

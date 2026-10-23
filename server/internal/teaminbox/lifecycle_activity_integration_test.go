@@ -5,13 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	serverconfig "github.com/pinksaucepasta/paperboat-server/internal/config"
+	serverconfig "github.com/pinksaucepasta/paperboat/server/internal/config"
 	"strings"
 	"testing"
 	"time"
 
-	serverdiagnostics "github.com/pinksaucepasta/paperboat-server/internal/diagnostics"
-	"github.com/pinksaucepasta/paperboat-server/internal/teams"
+	serverdiagnostics "github.com/pinksaucepasta/paperboat/server/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/server/internal/teams"
 )
 
 func TestPostgresInboxLifecycleActivityAndCurrentAuthority(t *testing.T) {

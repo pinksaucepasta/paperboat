@@ -13,7 +13,7 @@ import (
 	"strings"
 	"syscall"
 
-	serverdiagnostics "github.com/pinksaucepasta/paperboat-server/internal/diagnostics"
+	serverdiagnostics "github.com/pinksaucepasta/paperboat/server/internal/diagnostics"
 )
 
 var ErrPanic = faultPanicError{}

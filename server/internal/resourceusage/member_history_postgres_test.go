@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/workspace"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 )
 
 func assertTeamMemberHistory(t *testing.T, store *db.DB, service *Service, suffix, owner, member string, now time.Time) {

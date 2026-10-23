@@ -3,7 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
-	"github.com/pinksaucepasta/paperboat-server/internal/usermachines"
+	"github.com/pinksaucepasta/paperboat/server/internal/usermachines"
 	"io"
 	"net/http"
 	"time"

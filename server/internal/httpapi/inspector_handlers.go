@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/inspectaccess"
-	"github.com/pinksaucepasta/paperboat-server/internal/previewattachment"
+	"github.com/pinksaucepasta/paperboat/server/internal/inspectaccess"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewattachment"
 )
 
 type InspectorHandlers struct {

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/edgeerrors"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/operation"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/edgeerrors"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/operation"
 )
 
 type verifierFunc func(context.Context, string) (Claims, error)

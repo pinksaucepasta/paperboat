@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/transactionalmail"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/transactionalmail"
 )
 
 // TrialWillEndEvent is Stripe's notice, three days before a trial ends.

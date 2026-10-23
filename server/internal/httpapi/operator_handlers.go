@@ -13,12 +13,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/audit"
-	"github.com/pinksaucepasta/paperboat-server/internal/auth"
-	"github.com/pinksaucepasta/paperboat-server/internal/billing"
-	"github.com/pinksaucepasta/paperboat-server/internal/operator"
-	"github.com/pinksaucepasta/paperboat-server/internal/operatoractions"
-	"github.com/pinksaucepasta/paperboat-server/internal/telemetry"
+	"github.com/pinksaucepasta/paperboat/server/internal/audit"
+	"github.com/pinksaucepasta/paperboat/server/internal/auth"
+	"github.com/pinksaucepasta/paperboat/server/internal/billing"
+	"github.com/pinksaucepasta/paperboat/server/internal/operator"
+	"github.com/pinksaucepasta/paperboat/server/internal/operatoractions"
+	"github.com/pinksaucepasta/paperboat/server/internal/telemetry"
 )
 
 // Staff authority is independent of workspace/team membership. Unknown routes deny.

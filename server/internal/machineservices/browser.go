@@ -4,8 +4,8 @@ import (
 	"context"
 	"strconv"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/teams"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/teams"
 )
 
 // ResolveBrowserTx consumes the same SQL authority as native grants and adds the

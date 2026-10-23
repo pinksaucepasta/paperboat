@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/getsentry/sentry-go"
-	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
-	"github.com/pinksaucepasta/paperboat-server/internal/workers"
+	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
+	"github.com/pinksaucepasta/paperboat/server/internal/workers"
 )
 
 // Worker lifecycle metadata never contains the returned error or worker input.

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/secrets"
+	"github.com/pinksaucepasta/paperboat/server/internal/secrets"
 )
 
 var ErrWorkOSTemporarilyUnavailable = errors.New("workos session could not be refreshed")

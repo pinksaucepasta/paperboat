@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/reporting"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/route"
-	edgetelemetry "github.com/pinksaucepasta/paperboat-tunnel/internal/telemetry"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/reporting"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/route"
+	edgetelemetry "github.com/pinksaucepasta/paperboat/tunnel/internal/telemetry"
 )
 
 func TestConfigurationFailureReportsSafeLocalFaultOffline(t *testing.T) {

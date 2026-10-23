@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 )
 
 func TestNewRequiresDatabase(t *testing.T) {

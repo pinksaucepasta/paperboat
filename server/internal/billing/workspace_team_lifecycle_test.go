@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/teams"
+	"github.com/pinksaucepasta/paperboat/server/internal/teams"
 )
 
 func TestTeamDeletionCannotOrphanRenewingSubscription(t *testing.T) {

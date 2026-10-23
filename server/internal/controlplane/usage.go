@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/accountingauthority"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
-	serverdiagnostics "github.com/pinksaucepasta/paperboat-server/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/server/internal/accountingauthority"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
+	serverdiagnostics "github.com/pinksaucepasta/paperboat/server/internal/diagnostics"
 )
 
 var (

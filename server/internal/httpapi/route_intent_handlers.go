@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/controlplane"
+	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
 )
 
 func writeRouteIntentError(w http.ResponseWriter, r *http.Request, err error) {

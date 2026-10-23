@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/auth"
-	"github.com/pinksaucepasta/paperboat-server/internal/mint"
-	"github.com/pinksaucepasta/paperboat-server/internal/nativeprivateaccess"
-	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
+	"github.com/pinksaucepasta/paperboat/server/internal/auth"
+	"github.com/pinksaucepasta/paperboat/server/internal/mint"
+	"github.com/pinksaucepasta/paperboat/server/internal/nativeprivateaccess"
+	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 )
 
 type nativePrivateResolverFunc func(context.Context, nativeprivateaccess.Request) (nativeprivateaccess.Target, error)

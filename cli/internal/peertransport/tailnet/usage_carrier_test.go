@@ -2,7 +2,7 @@ package tailnet
 
 import (
 	"errors"
-	"github.com/pinksaucepasta/paperboat-relay/derpquic"
+	"github.com/pinksaucepasta/paperboat/relay/derpquic"
 	"testing"
 	"time"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=peer-path-accounting-test

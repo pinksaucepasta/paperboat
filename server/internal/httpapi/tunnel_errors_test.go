@@ -9,11 +9,11 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/previewtunnelapi"
-	"github.com/pinksaucepasta/paperboat-server/internal/previewtunnelstore"
-	"github.com/pinksaucepasta/paperboat-server/internal/publicationdns"
-	"github.com/pinksaucepasta/paperboat-server/internal/tunnelv1"
-	"github.com/pinksaucepasta/paperboat-server/internal/workspace"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelapi"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelstore"
+	"github.com/pinksaucepasta/paperboat/server/internal/publicationdns"
+	"github.com/pinksaucepasta/paperboat/server/internal/tunnelv1"
+	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 )
 
 func TestTunnelErrorPureTypedDomainOutcomes(t *testing.T) {

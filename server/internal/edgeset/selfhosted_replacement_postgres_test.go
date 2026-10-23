@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
 // A workspace on its own servers keeps two of the servers it selected; one silent for over ten

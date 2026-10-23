@@ -10,7 +10,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 )
 

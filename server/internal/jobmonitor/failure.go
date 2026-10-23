@@ -5,7 +5,7 @@ import (
 	"log/slog"
 
 	"github.com/getsentry/sentry-go"
-	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
+	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 )
 
 const backupFaultMarker = "paperboat.backup_fault.v1"

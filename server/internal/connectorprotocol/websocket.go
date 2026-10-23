@@ -10,8 +10,8 @@ import (
 	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 
 	"github.com/coder/websocket"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 )
 
 const ControlWebSocketSubprotocol = "paperboat.connector.v1"

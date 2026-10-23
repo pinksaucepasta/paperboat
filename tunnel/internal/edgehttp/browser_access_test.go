@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/control"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/route"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/control"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/route"
 )
 
 type browserAuthorityTest struct {
@@ -205,7 +205,7 @@ func TestBrowserCookieRequestsFromSiblingHostsAreRefused(t *testing.T) {
 	m, d := browserTestMatch()
 	for _, c := range []struct {
 		name, site, mode, dest, method string
-		allowed                       bool
+		allowed                        bool
 	}{
 		{"no fetch metadata", "", "", "", "GET", true},
 		{"same origin fetch", "same-origin", "cors", "empty", "GET", true},

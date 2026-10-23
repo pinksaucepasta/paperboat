@@ -10,8 +10,8 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-helper/internal/containers"
-	"github.com/pinksaucepasta/paperboat-relay/selfhost"
+	"github.com/pinksaucepasta/paperboat/helper/internal/containers"
+	"github.com/pinksaucepasta/paperboat/relay/selfhost"
 )
 
 func uninstall(ctx context.Context, args []string, out io.Writer) error {

@@ -4,12 +4,12 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/config"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/control"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/datacarrier"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/edgehttp"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/reporting"
-	edgeruntime "github.com/pinksaucepasta/paperboat-tunnel/internal/runtime"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/config"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/control"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/datacarrier"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/edgehttp"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/reporting"
+	edgeruntime "github.com/pinksaucepasta/paperboat/tunnel/internal/runtime"
 )
 
 // previewCarrierState constructs the two node-scoped registries and the

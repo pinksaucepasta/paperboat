@@ -10,8 +10,8 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/auth"
-	"github.com/pinksaucepasta/paperboat-server/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/server/internal/auth"
+	"github.com/pinksaucepasta/paperboat/server/internal/diagnostics"
 )
 
 func TestUsageRejectsInvalidPagingBeforeQuery(t *testing.T) {

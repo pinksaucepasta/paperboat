@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/controlplane"
+	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
 )
 
 func configRepositoryAccessIssue(service *controlplane.ConfigRepositoryAccessService) http.HandlerFunc {

@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync/atomic"
 
-	edgeruntime "github.com/pinksaucepasta/paperboat-tunnel/internal/runtime"
+	edgeruntime "github.com/pinksaucepasta/paperboat/tunnel/internal/runtime"
 )
 
 type trackedCarrierComponent struct {

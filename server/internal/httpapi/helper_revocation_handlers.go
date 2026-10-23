@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/controlplane"
+	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
 )
 
 func helperRevocations(edge *controlplane.EdgeService, identities *controlplane.EnrollmentService) http.HandlerFunc {

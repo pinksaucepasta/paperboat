@@ -19,9 +19,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/auth"
-	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
-	pb "github.com/pinksaucepasta/paperboat-server/internal/sync/proto"
+	"github.com/pinksaucepasta/paperboat/server/internal/auth"
+	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
+	pb "github.com/pinksaucepasta/paperboat/server/internal/sync/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"

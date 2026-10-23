@@ -3,8 +3,8 @@ package tunnelv1
 import (
 	"context"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/workspace"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 )
 
 var ErrSelfhostHTTPDomainRequired = fmt.Errorf("%w: self-hosted-only tunnel pools cannot serve a Paperboat-managed HTTP URL; configure and verify a custom domain, or select managed edge mode", ErrInvalidInput)

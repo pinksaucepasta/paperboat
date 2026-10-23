@@ -4,9 +4,9 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/controlplane"
-	"github.com/pinksaucepasta/paperboat-server/internal/mint"
-	"github.com/pinksaucepasta/paperboat-server/internal/usermachines"
+	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
+	"github.com/pinksaucepasta/paperboat/server/internal/mint"
+	"github.com/pinksaucepasta/paperboat/server/internal/usermachines"
 )
 
 func configCompareConnection(conflicts *controlplane.ConfigConflictService, machines *usermachines.Service) http.HandlerFunc {

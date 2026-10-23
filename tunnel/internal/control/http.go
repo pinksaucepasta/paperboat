@@ -14,8 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/admission"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/strictjson"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/admission"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/strictjson"
 )
 
 const maxControlDocument = 1 << 20

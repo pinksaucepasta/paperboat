@@ -3,7 +3,7 @@ package control
 import (
 	"context"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/usage"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/usage"
 )
 
 func DeliverNext(ctx context.Context, queue *usage.Queue, sink UsageSink) (UsageResult, bool, error) {

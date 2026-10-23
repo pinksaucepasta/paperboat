@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"context"
 	"errors"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/route"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/route"
 	"io"
 	"net/http"
 	"testing"

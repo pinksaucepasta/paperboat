@@ -4,7 +4,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/emailpolicy"
+	"github.com/pinksaucepasta/paperboat/server/internal/emailpolicy"
 )
 
 func writeEmailPolicyError(w http.ResponseWriter, r *http.Request, err error) bool {

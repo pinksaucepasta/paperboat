@@ -11,9 +11,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
-	serverdiagnostics "github.com/pinksaucepasta/paperboat-server/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
+	serverdiagnostics "github.com/pinksaucepasta/paperboat/server/internal/diagnostics"
 )
 
 type ActorType string

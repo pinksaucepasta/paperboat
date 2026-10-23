@@ -1,7 +1,7 @@
 package admission
 
 import (
-	"github.com/pinksaucepasta/paperboat-server/internal/mint"
+	"github.com/pinksaucepasta/paperboat/server/internal/mint"
 	"testing"
 	"time"
 )

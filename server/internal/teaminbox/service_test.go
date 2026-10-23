@@ -2,7 +2,7 @@ package teaminbox
 
 import (
 	"errors"
-	serverconfig "github.com/pinksaucepasta/paperboat-server/internal/config"
+	serverconfig "github.com/pinksaucepasta/paperboat/server/internal/config"
 	"strings"
 	"testing"
 	"time"

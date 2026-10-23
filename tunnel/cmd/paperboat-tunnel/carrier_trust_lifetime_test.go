@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/control"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/control"
 )
 
 func TestCarrierTrustLifetimeRequestsBoundedProcessReplacement(t *testing.T) {

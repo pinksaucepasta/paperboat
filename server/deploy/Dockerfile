@@ -23,7 +23,7 @@ RUN printf '%s\n' "${PAPERBOAT_VERSION}" | grep -Eq '^[0-9]{4}\.[0-9]{2}\.[0-9]{
   && sentry_release= \
   && if test -n "${PAPERBOAT_SENTRY_DSN}"; then sentry_release="paperboat-server:${PAPERBOAT_VERSION}"; fi \
   && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath \
-    -ldflags "-s -w -X github.com/pinksaucepasta/paperboat-server/internal/buildinfo.Version=${PAPERBOAT_VERSION} -X github.com/pinksaucepasta/paperboat-server/internal/buildinfo.Commit=${PAPERBOAT_COMMIT} -X github.com/pinksaucepasta/paperboat-server/internal/config.DefaultSentryDSN=${PAPERBOAT_SENTRY_DSN} -X github.com/pinksaucepasta/paperboat-server/internal/config.DefaultSentryRelease=${sentry_release}" \
+    -ldflags "-s -w -X github.com/pinksaucepasta/paperboat/server/internal/buildinfo.Version=${PAPERBOAT_VERSION} -X github.com/pinksaucepasta/paperboat/server/internal/buildinfo.Commit=${PAPERBOAT_COMMIT} -X github.com/pinksaucepasta/paperboat/server/internal/config.DefaultSentryDSN=${PAPERBOAT_SENTRY_DSN} -X github.com/pinksaucepasta/paperboat/server/internal/config.DefaultSentryRelease=${sentry_release}" \
     -o /out/paperboat-server ./cmd/paperboat-server
 
 FROM debian:bookworm-slim@sha256:7b140f374b289a7c2befc338f42ebe6441b7ea838a042bbd5acbfca6ec875818 AS runtime

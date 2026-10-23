@@ -9,12 +9,12 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"sort"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/auth"
-	"github.com/pinksaucepasta/paperboat-server/internal/machineservices"
-	pb "github.com/pinksaucepasta/paperboat-server/internal/sync/proto"
+	"github.com/pinksaucepasta/paperboat/server/internal/auth"
+	"github.com/pinksaucepasta/paperboat/server/internal/machineservices"
+	pb "github.com/pinksaucepasta/paperboat/server/internal/sync/proto"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )

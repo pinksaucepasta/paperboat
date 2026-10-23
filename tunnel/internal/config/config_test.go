@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/edgeerrors"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/edgeerrors"
 )
 
 func TestParseRestrictiveConfiguration(t *testing.T) {

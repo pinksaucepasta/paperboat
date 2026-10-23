@@ -14,10 +14,10 @@ import (
 	"strings"
 	"time"
 
-	edgediagnostics "github.com/pinksaucepasta/paperboat-tunnel/internal/diagnostics"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/node"
-	edgetelemetry "github.com/pinksaucepasta/paperboat-tunnel/internal/telemetry"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/usage"
+	edgediagnostics "github.com/pinksaucepasta/paperboat/tunnel/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/node"
+	edgetelemetry "github.com/pinksaucepasta/paperboat/tunnel/internal/telemetry"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/usage"
 )
 
 const schemaVersion = 1

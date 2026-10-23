@@ -14,11 +14,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-relay/derpquic"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
+	"github.com/pinksaucepasta/paperboat/relay/derpquic"
 	"go.uber.org/goleak"
 )
 

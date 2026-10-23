@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/previewattachment"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewattachment"
 )
 
 // AttachmentStore is the narrow read-only view needed to bind a private

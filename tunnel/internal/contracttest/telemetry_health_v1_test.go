@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/telemetry"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/telemetry"
 )
 
 func TestTelemetryHealthV1EdgeSnapshotContract(t *testing.T) {

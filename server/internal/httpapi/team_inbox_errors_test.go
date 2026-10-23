@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/teaminbox"
+	"github.com/pinksaucepasta/paperboat/server/internal/teaminbox"
 )
 
 func TestTeamInboxLimitErrorReportsConfiguredBounds(t *testing.T) {

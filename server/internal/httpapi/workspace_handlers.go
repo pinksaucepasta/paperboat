@@ -3,7 +3,7 @@ package httpapi
 import (
 	"net/http"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/workspace"
+	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 )
 
 func workspacesList(service *workspace.Service) http.HandlerFunc {

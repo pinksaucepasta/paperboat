@@ -7,7 +7,7 @@ import (
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 	"strings"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/route"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/route"
 )
 
 // CompositeRouteMatcher combines independent authoritative route owners. A

@@ -3,7 +3,7 @@ package billing
 import (
 	"context"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
 // EnsureSeats buys seats, as owner, until the team has at least quantity (directory sync and JIT

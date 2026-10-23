@@ -6,7 +6,7 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/reporting"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/reporting"
 )
 
 var errHTTPServerDiagnostic = errors.New("HTTP server reported an internal diagnostic")

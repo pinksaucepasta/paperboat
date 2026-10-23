@@ -14,8 +14,8 @@ import (
 
 	"crypto/sha256"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/secrets"
-	"github.com/pinksaucepasta/paperboat-server/internal/selfhost"
+	"github.com/pinksaucepasta/paperboat/server/internal/secrets"
+	"github.com/pinksaucepasta/paperboat/server/internal/selfhost"
 )
 
 type task35AuthorityEdge struct {

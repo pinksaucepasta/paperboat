@@ -2,7 +2,7 @@ package inspectaccess
 
 import (
 	"context"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
 type Target struct {

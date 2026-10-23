@@ -9,7 +9,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-relay/selfhost"
+	"github.com/pinksaucepasta/paperboat/relay/selfhost"
 )
 
 // Serve locks the container lifecycle before the shared claim supervisor can

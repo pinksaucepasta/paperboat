@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	edgetelemetry "github.com/pinksaucepasta/paperboat-tunnel/internal/telemetry"
+	edgetelemetry "github.com/pinksaucepasta/paperboat/tunnel/internal/telemetry"
 )
 
 func newTestCarrierTelemetry(t *testing.T) (*CarrierTelemetry, *edgetelemetry.Metrics, *edgetelemetry.EventLog) {

@@ -9,12 +9,12 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/browseraccess"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/previewtunnelapi"
-	"github.com/pinksaucepasta/paperboat-server/internal/previewtunnelstore"
-	"github.com/pinksaucepasta/paperboat-server/internal/previewv1"
-	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
+	"github.com/pinksaucepasta/paperboat/server/internal/browseraccess"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelapi"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelstore"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewv1"
+	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 )
 
 const ActivationTimeout = 10 * time.Second

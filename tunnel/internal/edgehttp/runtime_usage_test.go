@@ -3,10 +3,10 @@ package edgehttp
 import (
 	"context"
 	"errors"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/admission"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/control"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/datacarrier"
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/admission"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/control"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/datacarrier"
 	"io"
 	"net"
 	"net/http"

@@ -3,8 +3,8 @@ package httpapi
 import (
 	"context"
 	"errors"
-	"github.com/pinksaucepasta/paperboat-server/internal/controlplane"
-	"github.com/pinksaucepasta/paperboat-server/internal/ratelimit"
+	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
+	"github.com/pinksaucepasta/paperboat/server/internal/ratelimit"
 	"log/slog"
 	"math"
 	"net/http"
@@ -16,8 +16,8 @@ import (
 
 	"github.com/getsentry/sentry-go"
 	"github.com/google/uuid"
-	serverdiagnostics "github.com/pinksaucepasta/paperboat-server/internal/diagnostics"
-	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
+	serverdiagnostics "github.com/pinksaucepasta/paperboat/server/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 )
 
 func safeLogPath(path string) string {

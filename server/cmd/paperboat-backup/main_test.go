@@ -16,7 +16,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/backupreport"
+	"github.com/pinksaucepasta/paperboat/server/internal/backupreport"
 )
 
 type backupCommandReceipts struct {

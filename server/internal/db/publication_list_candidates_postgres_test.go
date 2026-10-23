@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/pinksaucepasta/paperboat-server/internal/config"
-	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
+	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 )
 
 // The preview and tunnel lists take their candidates from the hosts an account may manage publications on (own
@@ -94,7 +94,7 @@ SELECT id,1,$2,$3,$4,$5,$6,$7,int4range(1,65536) FROM paperboat.workspace_polici
 
 	type publication struct {
 		host, account, mode string
-		team             any
+		team                any
 	}
 	var publications []publication
 	for _, host := range []struct {

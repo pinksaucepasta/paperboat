@@ -6,19 +6,19 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat-server/internal/endpoints"
+	"github.com/pinksaucepasta/paperboat/server/internal/endpoints"
 	"io"
 	"net/http"
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/auth"
-	serverdiagnostics "github.com/pinksaucepasta/paperboat-server/internal/diagnostics"
-	"github.com/pinksaucepasta/paperboat-server/internal/previewdispatch"
-	"github.com/pinksaucepasta/paperboat-server/internal/previewtunnelapi"
-	"github.com/pinksaucepasta/paperboat-server/internal/previewtunnelstore"
-	"github.com/pinksaucepasta/paperboat-server/internal/previewv1"
-	"github.com/pinksaucepasta/paperboat-server/internal/workspace"
+	"github.com/pinksaucepasta/paperboat/server/internal/auth"
+	serverdiagnostics "github.com/pinksaucepasta/paperboat/server/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewdispatch"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelapi"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelstore"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewv1"
+	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 )
 
 // PreviewLeaseAPI is kept separate from the common operation/event service so

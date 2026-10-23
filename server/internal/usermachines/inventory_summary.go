@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/workspace"
+	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 )
 
 // MachineSummary counts the machines of the selected workspace the account may see, as the machine list

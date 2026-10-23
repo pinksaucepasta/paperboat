@@ -6,7 +6,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/usermachines"
+	"github.com/pinksaucepasta/paperboat/server/internal/usermachines"
 )
 
 func userMachineCapabilities(service *usermachines.Service) http.HandlerFunc {

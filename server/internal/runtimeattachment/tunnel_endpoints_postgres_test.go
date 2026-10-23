@@ -11,11 +11,11 @@ import (
 	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/connectorprotocol"
-	"github.com/pinksaucepasta/paperboat-server/internal/controlplane"
-	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
-	"github.com/pinksaucepasta/paperboat-server/internal/endpoints"
-	"github.com/pinksaucepasta/paperboat-server/internal/tunnelv1"
+	"github.com/pinksaucepasta/paperboat/server/internal/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
+	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat/server/internal/endpoints"
+	"github.com/pinksaucepasta/paperboat/server/internal/tunnelv1"
 )
 
 // PLAN 3a step 4.1: a tunnel moves onto the endpoint engine only when its agent and every edge the

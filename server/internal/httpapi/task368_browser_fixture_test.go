@@ -9,7 +9,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
-	"github.com/pinksaucepasta/paperboat-server/internal/previewv1"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewv1"
 	"net"
 	"os"
 	"path/filepath"

@@ -8,8 +8,8 @@ import (
 
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/emailpolicy"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/emailpolicy"
 )
 
 func capacity(ctx context.Context, tx *db.Tx, account, team string) error {

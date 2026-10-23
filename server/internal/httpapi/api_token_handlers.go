@@ -4,15 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/pinksaucepasta/paperboat-server/internal/ratelimit"
+	"github.com/pinksaucepasta/paperboat/server/internal/ratelimit"
 	"net/http"
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/apitokens"
-	"github.com/pinksaucepasta/paperboat-server/internal/audit"
-	"github.com/pinksaucepasta/paperboat-server/internal/auth"
-	"github.com/pinksaucepasta/paperboat-server/internal/workspace"
+	"github.com/pinksaucepasta/paperboat/server/internal/apitokens"
+	"github.com/pinksaucepasta/paperboat/server/internal/audit"
+	"github.com/pinksaucepasta/paperboat/server/internal/auth"
+	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 	"github.com/pinksaucepasta/paperboat/shared/policy"
 )
 

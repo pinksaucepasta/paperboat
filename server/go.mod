@@ -1,4 +1,4 @@
-module github.com/pinksaucepasta/paperboat-server
+module github.com/pinksaucepasta/paperboat/server
 
 go 1.27.2
 

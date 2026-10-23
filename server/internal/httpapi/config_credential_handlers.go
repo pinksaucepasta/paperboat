@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/controlplane"
+	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
 )
 
 func configCredentialIssue(service *controlplane.ConfigCredentialService) http.HandlerFunc {

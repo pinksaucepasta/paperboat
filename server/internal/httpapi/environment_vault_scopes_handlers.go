@@ -2,10 +2,10 @@ package httpapi
 
 import (
 	"context"
-	"github.com/pinksaucepasta/paperboat-server/internal/workspace"
+	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 	"net/http"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/environment"
+	"github.com/pinksaucepasta/paperboat/server/internal/environment"
 )
 
 type environmentVaultScopesAPI interface {

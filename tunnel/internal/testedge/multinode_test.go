@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/control"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/node"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/route"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/control"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/node"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/route"
 )
 
 func TestTwoNodeReassignmentFencesStaleOwner(t *testing.T) {

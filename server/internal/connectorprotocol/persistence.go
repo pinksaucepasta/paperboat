@@ -9,7 +9,7 @@ import (
 
 	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 
-	servertelemetry "github.com/pinksaucepasta/paperboat-server/internal/telemetry"
+	servertelemetry "github.com/pinksaucepasta/paperboat/server/internal/telemetry"
 )
 
 // PersistentControlStore is the server adapter boundary for migration 122's

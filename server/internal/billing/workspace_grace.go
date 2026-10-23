@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
 // The current provider snapshot decides whether a failure is still outstanding.

@@ -4,8 +4,8 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/browseraccess"
-	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
+	"github.com/pinksaucepasta/paperboat/server/internal/browseraccess"
+	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 )
 
 func browserViewerPolicyError(w http.ResponseWriter, r *http.Request, err error) {

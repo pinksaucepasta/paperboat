@@ -11,8 +11,8 @@ import (
 
 	"github.com/felixge/httpsnoop"
 	"github.com/getsentry/sentry-go"
-	serverdiagnostics "github.com/pinksaucepasta/paperboat-server/internal/diagnostics"
-	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
+	serverdiagnostics "github.com/pinksaucepasta/paperboat/server/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 )
 
 type supportContextKey struct{}

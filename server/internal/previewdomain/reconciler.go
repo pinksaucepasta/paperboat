@@ -13,11 +13,11 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
-	"github.com/pinksaucepasta/paperboat-server/internal/publicationdns"
-	"github.com/pinksaucepasta/paperboat-server/internal/tunnelv1"
-	"github.com/pinksaucepasta/paperboat-server/internal/workers"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat/server/internal/publicationdns"
+	"github.com/pinksaucepasta/paperboat/server/internal/tunnelv1"
+	"github.com/pinksaucepasta/paperboat/server/internal/workers"
 	"golang.org/x/net/publicsuffix"
 )
 

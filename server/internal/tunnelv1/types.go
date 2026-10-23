@@ -5,7 +5,7 @@ import (
 	"crypto/sha256"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/previewtunnelapi"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelapi"
 )
 
 // Schema is the public preview/tunnel resource family identifier.

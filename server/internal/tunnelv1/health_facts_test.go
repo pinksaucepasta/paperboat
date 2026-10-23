@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 )
 
 // Each failure a tunnel can be in must say which one it is, whether it fixes itself, and what to do.

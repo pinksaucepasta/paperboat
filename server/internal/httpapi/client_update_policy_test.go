@@ -11,7 +11,7 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/clientupdate"
+	"github.com/pinksaucepasta/paperboat/server/internal/clientupdate"
 )
 
 type clientUpdatePolicyStub struct{ putErr error }

@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 )
 
 func (s *ConfigAssignmentService) Repository(ctx context.Context, account, id string) (dbsqlc.ControlConfigRepository, error) {

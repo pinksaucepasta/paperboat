@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/datacarrier"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/datacarrier"
 )
 
 func TestBrowserPreviewTransportUsesExactPrivateAdmission(t *testing.T) {

@@ -8,9 +8,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/browserterminal"
-	"github.com/pinksaucepasta/paperboat-server/internal/peeridentity"
-	"github.com/pinksaucepasta/paperboat-server/internal/usermachines"
+	"github.com/pinksaucepasta/paperboat/server/internal/browserterminal"
+	"github.com/pinksaucepasta/paperboat/server/internal/peeridentity"
+	"github.com/pinksaucepasta/paperboat/server/internal/usermachines"
 )
 
 type browserMachineSignerReader interface {

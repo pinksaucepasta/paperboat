@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
 func recordNativeReportingStatus(ctx context.Context, tx *db.Tx, machine string, generation int64, batch NativeBatch, rejected int, now time.Time) error {

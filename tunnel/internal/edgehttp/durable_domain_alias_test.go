@@ -3,7 +3,7 @@ package edgehttp
 import (
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/route"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/route"
 )
 
 func TestCarrierRouteIDUsesOpaqueTargetForDomainAlias(t *testing.T) {

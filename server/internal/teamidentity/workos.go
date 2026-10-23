@@ -11,7 +11,7 @@ import (
 	"net/url"
 	"strings"
 
-	serverdiagnostics "github.com/pinksaucepasta/paperboat-server/internal/diagnostics"
+	serverdiagnostics "github.com/pinksaucepasta/paperboat/server/internal/diagnostics"
 )
 
 // WorkOS is the part of the WorkOS API that team SSO and directory sync use (PLAN F19-02..06):

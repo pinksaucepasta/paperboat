@@ -9,8 +9,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-relay/reattach"
 	"github.com/pinksaucepasta/paperboat/internal/telemetry"
+	"github.com/pinksaucepasta/paperboat/relay/reattach"
 )
 
 type ReconnectFunc func(context.Context) (Conn, error)

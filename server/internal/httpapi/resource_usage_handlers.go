@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/resourceusage"
-	"github.com/pinksaucepasta/paperboat-server/internal/workspace"
+	"github.com/pinksaucepasta/paperboat/server/internal/resourceusage"
+	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 )
 
 func resourceUsageGet(service *resourceusage.Service) http.HandlerFunc {

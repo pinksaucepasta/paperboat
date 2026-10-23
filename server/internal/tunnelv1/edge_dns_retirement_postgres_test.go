@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 )
 
 func TestRetiredTunnelDNSLeavesQueueAfterVerifiedWithdrawalPostgres(t *testing.T) {

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/peeridentity"
+	"github.com/pinksaucepasta/paperboat/server/internal/peeridentity"
 )
 
 func TestSharedVectorInterop(t *testing.T) {

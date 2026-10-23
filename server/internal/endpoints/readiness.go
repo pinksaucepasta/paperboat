@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
 // ErrNotServing means the preview's agent serves endpoints but no edge has observed its route yet.

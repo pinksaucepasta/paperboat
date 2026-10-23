@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/teaminbox"
+	"github.com/pinksaucepasta/paperboat/server/internal/teaminbox"
 )
 
 func teamInboxError(w http.ResponseWriter, r *http.Request, err error) {

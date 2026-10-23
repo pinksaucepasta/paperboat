@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/reporting"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/reporting"
 )
 
 func serviceDiagnostic(err error) string {

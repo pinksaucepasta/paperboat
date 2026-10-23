@@ -6,8 +6,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/secrets"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/secrets"
 )
 
 type portalProviderRequest struct{ CustomerID, ReturnURL, ConfigurationID string }

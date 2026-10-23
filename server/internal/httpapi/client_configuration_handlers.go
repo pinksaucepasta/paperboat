@@ -3,7 +3,7 @@ package httpapi
 import (
 	"net/http"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/config"
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
 )
 
 type clientConfigurationResponse struct {

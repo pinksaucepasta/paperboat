@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/controlplane"
+	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
 )
 
 func configRuntimeGet(service *controlplane.ConfigRuntimeService) http.HandlerFunc {

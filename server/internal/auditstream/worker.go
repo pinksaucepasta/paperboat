@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/transactionalmail"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/transactionalmail"
 )
 
 // settle leaves the newest events for the next tick, so a late-committing event with a lower

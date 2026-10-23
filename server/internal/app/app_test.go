@@ -13,13 +13,13 @@ import (
 	"time"
 
 	"github.com/jackc/puddle/v2"
-	"github.com/pinksaucepasta/paperboat-server/internal/auth"
-	"github.com/pinksaucepasta/paperboat-server/internal/config"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	pbgithub "github.com/pinksaucepasta/paperboat-server/internal/github"
-	"github.com/pinksaucepasta/paperboat-server/internal/telemetry"
-	"github.com/pinksaucepasta/paperboat-server/internal/tunnelv1"
-	"github.com/pinksaucepasta/paperboat-server/internal/workers"
+	"github.com/pinksaucepasta/paperboat/server/internal/auth"
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	pbgithub "github.com/pinksaucepasta/paperboat/server/internal/github"
+	"github.com/pinksaucepasta/paperboat/server/internal/telemetry"
+	"github.com/pinksaucepasta/paperboat/server/internal/tunnelv1"
+	"github.com/pinksaucepasta/paperboat/server/internal/workers"
 )
 
 func TestWorkOSVerifierUsesConfiguredAPIKeyForCodeExchange(t *testing.T) {

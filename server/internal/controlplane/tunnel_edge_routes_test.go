@@ -8,7 +8,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 )
 
 func TestTunnelEdgeRouteAssignmentIDIsDeterministicAndTupleBound(t *testing.T) {

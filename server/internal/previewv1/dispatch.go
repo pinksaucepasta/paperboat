@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/previewtunnelstore"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelstore"
 )
 
 const PreviewDispatchKind = "preview_dispatch"

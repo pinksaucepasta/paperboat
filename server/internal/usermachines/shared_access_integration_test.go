@@ -5,14 +5,14 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat-server/internal/teams/teamstest"
+	"github.com/pinksaucepasta/paperboat/server/internal/teams/teamstest"
 	"slices"
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/audit"
-	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
-	"github.com/pinksaucepasta/paperboat-server/internal/teams"
+	"github.com/pinksaucepasta/paperboat/server/internal/audit"
+	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat/server/internal/teams"
 )
 
 func TestPostgresSharedMachineSessionIsolationAndRevocation(t *testing.T) {
@@ -198,7 +198,7 @@ func TestPostgresSharedMachineSessionIsolationAndRevocation(t *testing.T) {
 	if got := decide("sm_stranger_"+suffix, "terminal"); got != "team:"+team+" machine_not_in_workspace" {
 		t.Fatalf("non-member refusal: %s", got)
 	}
-	secondTeam :="sm_team_second_" + suffix
+	secondTeam := "sm_team_second_" + suffix
 	for _, statement := range []struct {
 		query string
 		args  []any

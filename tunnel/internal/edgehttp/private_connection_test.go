@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/route"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/route"
 )
 
 func TestPrivateConnectionBindsExactRouteAndFencesStaleClose(t *testing.T) {

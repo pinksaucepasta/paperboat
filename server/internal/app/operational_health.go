@@ -8,10 +8,10 @@ import (
 	"time"
 
 	"github.com/getsentry/sentry-go"
-	"github.com/pinksaucepasta/paperboat-server/internal/backupreport"
-	"github.com/pinksaucepasta/paperboat-server/internal/jobmonitor"
-	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
-	"github.com/pinksaucepasta/paperboat-server/internal/workers"
+	"github.com/pinksaucepasta/paperboat/server/internal/backupreport"
+	"github.com/pinksaucepasta/paperboat/server/internal/jobmonitor"
+	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
+	"github.com/pinksaucepasta/paperboat/server/internal/workers"
 )
 
 func operationalHealthWorker(backups *backupreport.Service, reporter *supportreport.Service, monitor *jobmonitor.Monitor, progress ...*workers.Progress) workers.Worker {

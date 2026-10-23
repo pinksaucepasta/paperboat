@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/workers"
+	"github.com/pinksaucepasta/paperboat/server/internal/workers"
 	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 

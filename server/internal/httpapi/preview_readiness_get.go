@@ -3,8 +3,8 @@ package httpapi
 import (
 	"context"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat-server/internal/previewtunnelapi"
-	"github.com/pinksaucepasta/paperboat-server/internal/previewv1"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelapi"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewv1"
 	"net/http"
 	"strings"
 )

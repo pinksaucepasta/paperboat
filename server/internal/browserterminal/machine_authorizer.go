@@ -5,8 +5,8 @@ import (
 	"math"
 	"reflect"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/inspectaccess"
-	"github.com/pinksaucepasta/paperboat-server/internal/usermachines"
+	"github.com/pinksaucepasta/paperboat/server/internal/inspectaccess"
+	"github.com/pinksaucepasta/paperboat/server/internal/usermachines"
 )
 
 type MachineAuthorizer struct {

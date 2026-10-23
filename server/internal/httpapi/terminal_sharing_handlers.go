@@ -2,8 +2,8 @@ package httpapi
 
 import (
 	"errors"
-	"github.com/pinksaucepasta/paperboat-server/internal/teams"
-	"github.com/pinksaucepasta/paperboat-server/internal/usermachines"
+	"github.com/pinksaucepasta/paperboat/server/internal/teams"
+	"github.com/pinksaucepasta/paperboat/server/internal/usermachines"
 	"net/http"
 )
 

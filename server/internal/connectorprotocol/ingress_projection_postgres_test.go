@@ -10,7 +10,7 @@ import (
 
 	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/billing"
+	"github.com/pinksaucepasta/paperboat/server/internal/billing"
 )
 
 func TestTask24IngressProjectionPostgres(t *testing.T) { testIngressProjectionPostgres(t, false) }

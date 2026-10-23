@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/usermachines"
+	"github.com/pinksaucepasta/paperboat/server/internal/usermachines"
 )
 
 func TestTerminalDeleteLiveHistoryExplainsRecovery(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
 // agentServesTunnels is the SQL predicate (parameter $1: the machine) for an agent whose tunnels

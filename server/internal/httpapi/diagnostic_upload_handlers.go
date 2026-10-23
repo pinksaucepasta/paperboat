@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/diagnosticuploads"
+	"github.com/pinksaucepasta/paperboat/server/internal/diagnosticuploads"
 )
 
 const maximumDiagnosticIntentRequestBytes = 2048

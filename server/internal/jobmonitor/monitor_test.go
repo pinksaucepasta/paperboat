@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/getsentry/sentry-go"
-	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
+	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 )
 
 func TestActualSDKCheckInLifecycle(t *testing.T) {

@@ -3,7 +3,7 @@ package previewtunnelstore
 import (
 	"context"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
 // LazyLeaseAuthority is an internal activation binding, never a general preview

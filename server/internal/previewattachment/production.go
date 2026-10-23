@@ -3,7 +3,7 @@ package previewattachment
 import (
 	"fmt"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
 // Production is the complete server-side composition for preview carrier

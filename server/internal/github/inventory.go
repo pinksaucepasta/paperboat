@@ -7,7 +7,7 @@ import (
 	"strconv"
 
 	gh "github.com/google/go-github/v88/github"
-	"github.com/pinksaucepasta/paperboat-server/internal/secrets"
+	"github.com/pinksaucepasta/paperboat/server/internal/secrets"
 )
 
 type repositoryCursor struct {

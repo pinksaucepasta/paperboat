@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
 // Aggregate before detail pagination. Grouping sets keep combined totals and

@@ -10,9 +10,9 @@ import (
 	"encoding/base64"
 	"errors"
 	"github.com/google/uuid"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/nodeauth"
-	"github.com/pinksaucepasta/paperboat-server/internal/secrets"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/nodeauth"
+	"github.com/pinksaucepasta/paperboat/server/internal/secrets"
 	"net/netip"
 	"strings"
 	"sync"
@@ -43,7 +43,7 @@ type Service struct {
 	TrustDocuments          func(context.Context) ([]byte, []byte, error)
 	DialAddress             func(context.Context, string) (string, error)
 	// ProbeIngress replaces VerifyIngress inside ReconcileIngress when set (tests hold probes open).
-	ProbeIngress            func(context.Context, string) error
+	ProbeIngress func(context.Context, string) error
 }
 
 func New(database *db.DB, encryptionKey string) *Service {

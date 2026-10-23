@@ -13,8 +13,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-helper/internal/containers"
-	"github.com/pinksaucepasta/paperboat-relay/selfhost"
+	"github.com/pinksaucepasta/paperboat/helper/internal/containers"
+	"github.com/pinksaucepasta/paperboat/relay/selfhost"
 )
 
 const serviceCommandTimeout = 30 * time.Second

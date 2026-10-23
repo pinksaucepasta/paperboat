@@ -4,7 +4,7 @@ package admission
 
 import (
 	"errors"
-	"github.com/pinksaucepasta/paperboat-server/internal/mint"
+	"github.com/pinksaucepasta/paperboat/server/internal/mint"
 	"time"
 )
 

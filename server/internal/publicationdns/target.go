@@ -9,7 +9,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
 // ResolveTargetsTx returns the complete DNS address set for at most two selected

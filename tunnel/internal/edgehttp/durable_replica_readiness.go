@@ -1,6 +1,6 @@
 package edgehttp
 
-import "github.com/pinksaucepasta/paperboat-tunnel/internal/route"
+import "github.com/pinksaucepasta/paperboat/tunnel/internal/route"
 
 func carrierForRoute(entry *dataCarrierRouteEntry, rule route.RouteRule) bool {
 	if entry == nil || entry.server == nil || entry.identity.AccountID != rule.AccountID || entry.identity.TunnelID != rule.TunnelID {

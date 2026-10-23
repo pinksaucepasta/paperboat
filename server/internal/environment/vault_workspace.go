@@ -2,7 +2,7 @@ package environment
 
 import (
 	"context"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
 // Private member scopes use the member's Personal key, but membership and Team

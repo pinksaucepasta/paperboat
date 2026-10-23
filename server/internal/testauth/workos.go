@@ -5,7 +5,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/auth"
+	"github.com/pinksaucepasta/paperboat/server/internal/auth"
 )
 
 // FakeWorkOSVerifier is a test fixture. The server never selects it at runtime.

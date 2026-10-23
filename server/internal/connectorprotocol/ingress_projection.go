@@ -12,8 +12,8 @@ import (
 	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 
 	"github.com/google/uuid"
-	"github.com/pinksaucepasta/paperboat-server/internal/accountingauthority"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/accountingauthority"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
 const maximumIngressDecisions = 4096

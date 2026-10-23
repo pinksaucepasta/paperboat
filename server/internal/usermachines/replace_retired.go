@@ -8,11 +8,11 @@ import (
 	"github.com/jackc/pgx/v5"
 	"strings"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/audit"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
-	"github.com/pinksaucepasta/paperboat-server/internal/environment"
-	"github.com/pinksaucepasta/paperboat-server/internal/machinealias"
+	"github.com/pinksaucepasta/paperboat/server/internal/audit"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat/server/internal/environment"
+	"github.com/pinksaucepasta/paperboat/server/internal/machinealias"
 )
 
 // ReplaceRetiredMachineTx removes the disconnected, revoked or offline record of a computer that was

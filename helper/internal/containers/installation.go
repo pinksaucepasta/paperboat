@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-relay/selfhost"
+	"github.com/pinksaucepasta/paperboat/relay/selfhost"
 )
 
 func InstallationEpochs(ctx context.Context, dir string) (map[string]string, error) {

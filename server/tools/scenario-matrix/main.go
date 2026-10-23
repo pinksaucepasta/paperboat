@@ -15,7 +15,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/canonicaljson"
+	"github.com/pinksaucepasta/paperboat/server/internal/canonicaljson"
 )
 
 const schemaVersion = 1

@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/machineevents"
-	"github.com/pinksaucepasta/paperboat-server/internal/usermachines"
+	"github.com/pinksaucepasta/paperboat/server/internal/machineevents"
+	"github.com/pinksaucepasta/paperboat/server/internal/usermachines"
 )
 
 const machineEventsBodyLimit = 4 << 10

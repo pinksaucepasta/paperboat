@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/getsentry/sentry-go"
-	serverdiagnostics "github.com/pinksaucepasta/paperboat-server/internal/diagnostics"
+	serverdiagnostics "github.com/pinksaucepasta/paperboat/server/internal/diagnostics"
 )
 
 type memoryStore struct {
@@ -408,7 +408,7 @@ func TestSentryWirePayloadContainsOnlyApprovedData(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref := NewReference()
-	s.Capture(ref, "user_secret", "req_1", "authorize", "internal_error", true, &sentry.Stacktrace{Frames: []sentry.Frame{{Function: "Authorize", Module: "github.com/pinksaucepasta/paperboat-server/internal/auth", Filename: "/private/SECRET/auth.go", AbsPath: "SECRET", Vars: map[string]any{"token": "SECRET"}, ContextLine: "SECRET", Lineno: 17}}})
+	s.Capture(ref, "user_secret", "req_1", "authorize", "internal_error", true, &sentry.Stacktrace{Frames: []sentry.Frame{{Function: "Authorize", Module: "github.com/pinksaucepasta/paperboat/server/internal/auth", Filename: "/private/SECRET/auth.go", AbsPath: "SECRET", Vars: map[string]any{"token": "SECRET"}, ContextLine: "SECRET", Lineno: 17}}})
 	s.process(context.Background(), <-s.queue)
 	if !s.client.Flush(time.Second) {
 		t.Fatal("SDK queue did not flush")

@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/config"
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
 )
 
 // JIT compilation made the machine inventory take seconds (the compile alone was ~1 s for an 18 ms query), so the

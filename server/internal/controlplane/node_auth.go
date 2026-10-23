@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/canonicaljson"
-	"github.com/pinksaucepasta/paperboat-server/internal/nodeauth"
+	"github.com/pinksaucepasta/paperboat/server/internal/canonicaljson"
+	"github.com/pinksaucepasta/paperboat/server/internal/nodeauth"
 )
 
 func (s *EdgeService) SetNodeCredentials(resolver nodeauth.Resolver) { s.nodeCredentials = resolver }

@@ -9,7 +9,7 @@ import (
 
 	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/accountingauthority"
+	"github.com/pinksaucepasta/paperboat/server/internal/accountingauthority"
 )
 
 func projectionFixture(now time.Time) wire.IngressDecision {

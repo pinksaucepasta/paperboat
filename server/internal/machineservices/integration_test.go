@@ -4,16 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat-server/internal/teams/teamstest"
+	"github.com/pinksaucepasta/paperboat/server/internal/teams/teamstest"
 	wire "github.com/pinksaucepasta/paperboat/shared/machineservices"
 	"os"
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/config"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/machineservices"
-	"github.com/pinksaucepasta/paperboat-server/internal/nativeprivateaccess"
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/machineservices"
+	"github.com/pinksaucepasta/paperboat/server/internal/nativeprivateaccess"
 )
 
 func TestMachineServicePostgresAuthorityLifecycle(t *testing.T) {

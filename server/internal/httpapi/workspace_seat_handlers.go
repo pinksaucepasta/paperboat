@@ -1,7 +1,7 @@
 package httpapi
 
 import (
-	"github.com/pinksaucepasta/paperboat-server/internal/billing"
+	"github.com/pinksaucepasta/paperboat/server/internal/billing"
 	"net/http"
 	"strconv"
 	"strings"

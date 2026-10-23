@@ -2,7 +2,7 @@ package runtime
 
 import (
 	"github.com/google/uuid"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/datacarrier"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/datacarrier"
 	"strings"
 	"testing"
 )

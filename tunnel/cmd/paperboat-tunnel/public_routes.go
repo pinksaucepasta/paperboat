@@ -9,8 +9,8 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/config"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/reporting"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/config"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/reporting"
 )
 
 func publicIngressHandler(routes []config.PublicRoute, infrastructureHost, healthAddress string, next http.Handler, reporter *reporting.Reporter) http.Handler {

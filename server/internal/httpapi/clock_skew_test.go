@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/controlplane"
+	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
 )
 
 // A machine whose clock is off gets a clock_skew answer with the server's time, not the 401 that makes

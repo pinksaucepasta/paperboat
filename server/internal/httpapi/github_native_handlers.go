@@ -6,7 +6,7 @@ import (
 	"net/url"
 	"strings"
 
-	pbgithub "github.com/pinksaucepasta/paperboat-server/internal/github"
+	pbgithub "github.com/pinksaucepasta/paperboat/server/internal/github"
 )
 
 func githubNativeStart(service *pbgithub.Service) http.HandlerFunc {

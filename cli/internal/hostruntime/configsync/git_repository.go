@@ -3,7 +3,7 @@ package configsync
 import (
 	"context"
 	"errors"
-	"github.com/pinksaucepasta/paperboat-relay/admission"
+	"github.com/pinksaucepasta/paperboat/relay/admission"
 	"io"
 	"net"
 	"os"

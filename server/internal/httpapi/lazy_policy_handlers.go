@@ -5,7 +5,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"net/http"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/lazyaccess"
+	"github.com/pinksaucepasta/paperboat/server/internal/lazyaccess"
 )
 
 type LazyPolicyAPI interface {

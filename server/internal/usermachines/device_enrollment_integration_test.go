@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/audit"
+	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 )
 
 // A device login approved for a team mints an enrollment that, when the device pairs, puts the

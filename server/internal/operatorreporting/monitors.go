@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/auth"
+	"github.com/pinksaucepasta/paperboat/server/internal/auth"
 )
 
 type Monitor struct {

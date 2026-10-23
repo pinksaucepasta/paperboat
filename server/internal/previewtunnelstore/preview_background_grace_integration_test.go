@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/config"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
 // A host runtime that restarts (an update) must find its background preview still active: the
@@ -45,7 +45,9 @@ func TestBackgroundPreviewKeepsItsURLThroughALongerOwnerGraceOnPostgres(t *testi
 	if _, err := database.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,online,configured_capabilities) VALUES ($1,$2,$3,'linux','amd64','/workspace','online',true,ARRAY['preview_launch']::text[])`, machine, accountID, "env_"+machine); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _, _ = database.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.user_machines WHERE id=$1`, machine) }()
+	defer func() {
+		_, _ = database.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.user_machines WHERE id=$1`, machine)
+	}()
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	create := func(name, kind string, userDeadline *time.Time) PreviewLeaseRecord {
 		hash := sha256.Sum256([]byte(name + suffix))

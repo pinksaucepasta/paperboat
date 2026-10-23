@@ -6,7 +6,7 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/auth"
+	"github.com/pinksaucepasta/paperboat/server/internal/auth"
 )
 
 const maxOutcomeGroups = 100

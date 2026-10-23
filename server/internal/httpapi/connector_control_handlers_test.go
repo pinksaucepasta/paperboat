@@ -18,8 +18,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/connectorprotocol"
-	"github.com/pinksaucepasta/paperboat-server/internal/controlplane"
+	"github.com/pinksaucepasta/paperboat/server/internal/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
 )
 
 type bootstrapSessionReader struct {

@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/tlscert"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/tlscert"
 )
 
 func TestEd25519DistributionRequestSignerBindsExactRequest(t *testing.T) {

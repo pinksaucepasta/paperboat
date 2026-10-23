@@ -4,7 +4,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/teamidentity"
+	"github.com/pinksaucepasta/paperboat/server/internal/teamidentity"
 )
 
 // Team SSO and directory sync (PLAN F19-02..06). Reads need security.manage or audit.read;

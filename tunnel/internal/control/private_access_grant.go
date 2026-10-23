@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/strictjson"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/strictjson"
 )
 
 const PrivateAccessGrantAuthorizePath = "/v1/edge/private-access/authorize"

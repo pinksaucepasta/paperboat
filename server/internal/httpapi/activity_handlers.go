@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/activity"
-	"github.com/pinksaucepasta/paperboat-server/internal/workspace"
+	"github.com/pinksaucepasta/paperboat/server/internal/activity"
+	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 )
 
 // activityRequest parses the audit log filters shared by list and export. It writes the error

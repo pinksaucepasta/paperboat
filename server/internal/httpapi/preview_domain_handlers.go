@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/previewdomain"
-	"github.com/pinksaucepasta/paperboat-server/internal/previewtunnelapi"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewdomain"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelapi"
 )
 
 // The preview-domain handlers are intentionally exported as small route

@@ -2,7 +2,7 @@ package db
 
 import (
 	"context"
-	"github.com/pinksaucepasta/paperboat-server/internal/config"
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pressly/goose/v3"
 	"os"
 	"testing"

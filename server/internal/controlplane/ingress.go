@@ -4,11 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"github.com/pinksaucepasta/paperboat-server/internal/accountingauthority"
+	"github.com/pinksaucepasta/paperboat/server/internal/accountingauthority"
 	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"net/http"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/server/internal/connectorprotocol"
 )
 
 // handleIngress is mounted only beneath the authenticated edge-control mux.

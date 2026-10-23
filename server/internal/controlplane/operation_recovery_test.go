@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
 func TestOperationRecoveryIsAuditedAndIdempotent(t *testing.T) {

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	serverdiagnostics "github.com/pinksaucepasta/paperboat-server/internal/diagnostics"
+	serverdiagnostics "github.com/pinksaucepasta/paperboat/server/internal/diagnostics"
 )
 
 type privateDiagnosticError struct {

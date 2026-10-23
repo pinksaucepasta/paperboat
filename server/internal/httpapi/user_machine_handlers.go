@@ -9,9 +9,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/access"
-	"github.com/pinksaucepasta/paperboat-server/internal/teaminbox"
-	"github.com/pinksaucepasta/paperboat-server/internal/usermachines"
+	"github.com/pinksaucepasta/paperboat/server/internal/access"
+	"github.com/pinksaucepasta/paperboat/server/internal/teaminbox"
+	"github.com/pinksaucepasta/paperboat/server/internal/usermachines"
 )
 
 func userMachinePairings(service *usermachines.Service) http.HandlerFunc {
@@ -536,7 +536,7 @@ func userMachineGet(service *usermachines.Service) http.HandlerFunc {
 
 func userMachineRename(service *usermachines.Service) http.HandlerFunc {
 	type request struct {
-		Alias       string `json:"alias"`
+		Alias string `json:"alias"`
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		p, ok := principalFromContext(r.Context())

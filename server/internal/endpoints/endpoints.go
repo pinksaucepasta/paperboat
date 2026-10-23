@@ -12,7 +12,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
 var ErrInvalid = errors.New("invalid endpoint")

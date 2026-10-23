@@ -11,7 +11,7 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/previewattachment"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewattachment"
 )
 
 type browserEdgeVerifierFunc func(context.Context, *http.Request, []byte) (previewattachment.PreviewEdgeIdentity, error)

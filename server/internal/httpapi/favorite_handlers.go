@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/favorites"
-	"github.com/pinksaucepasta/paperboat-server/internal/workspace"
+	"github.com/pinksaucepasta/paperboat/server/internal/favorites"
+	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 )
 
 func favoritesList(service *favorites.Service) http.HandlerFunc {

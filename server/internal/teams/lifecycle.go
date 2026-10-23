@@ -3,7 +3,7 @@ package teams
 import (
 	"context"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
 // revokeDepartingResourcesTx runs under the team authority lock, in the same

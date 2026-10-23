@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
 // Dormant authority deliberately does not require a live daemon or touch the

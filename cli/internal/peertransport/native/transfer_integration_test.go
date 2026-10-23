@@ -24,7 +24,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-relay/derpquic"
 	clienttransfer "github.com/pinksaucepasta/paperboat/internal/filetransfer"
 	hosttransfer "github.com/pinksaucepasta/paperboat/internal/hostruntime/filetransfer"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/nativesession"
@@ -37,6 +36,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
+	"github.com/pinksaucepasta/paperboat/relay/derpquic"
 	"go.uber.org/goleak"
 	"tailscale.com/tailcfg"
 	"tailscale.com/tstest/integration"

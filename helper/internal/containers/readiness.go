@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-relay/selfhost"
+	"github.com/pinksaucepasta/paperboat/relay/selfhost"
 )
 
 type NodeReadiness struct {

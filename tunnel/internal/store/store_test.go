@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/operation"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/usage"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/operation"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/usage"
 )
 
 func testState() State {

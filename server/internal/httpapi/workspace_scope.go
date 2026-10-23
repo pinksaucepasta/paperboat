@@ -4,8 +4,8 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/apitokens"
-	"github.com/pinksaucepasta/paperboat-server/internal/workspace"
+	"github.com/pinksaucepasta/paperboat/server/internal/apitokens"
+	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 )
 
 type workspaceQuerySelection struct {

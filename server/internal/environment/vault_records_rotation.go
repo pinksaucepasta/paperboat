@@ -6,7 +6,7 @@ import (
 	"errors"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
 // RebuildVaultRecordsTx is called inside the already-authorized scope/vault

@@ -22,8 +22,8 @@ import (
 	"github.com/getsentry/sentry-go"
 	"github.com/getsentry/sentry-go/attribute"
 	"github.com/google/uuid"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/route"
-	edgetelemetry "github.com/pinksaucepasta/paperboat-tunnel/internal/telemetry"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/route"
+	edgetelemetry "github.com/pinksaucepasta/paperboat/tunnel/internal/telemetry"
 )
 
 const (

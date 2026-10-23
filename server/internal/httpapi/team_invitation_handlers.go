@@ -3,7 +3,7 @@ package httpapi
 import (
 	"context"
 	"errors"
-	"github.com/pinksaucepasta/paperboat-server/internal/teams"
+	"github.com/pinksaucepasta/paperboat/server/internal/teams"
 	"math"
 	"net/http"
 	"strconv"

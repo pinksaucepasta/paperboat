@@ -1,4 +1,4 @@
-module github.com/pinksaucepasta/paperboat-relay
+module github.com/pinksaucepasta/paperboat/relay
 
 go 1.27.2
 

@@ -18,9 +18,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-helper/internal/containers"
-	"github.com/pinksaucepasta/paperboat-helper/internal/reporting"
-	"github.com/pinksaucepasta/paperboat-relay/selfhost"
+	"github.com/pinksaucepasta/paperboat/helper/internal/containers"
+	"github.com/pinksaucepasta/paperboat/helper/internal/reporting"
+	"github.com/pinksaucepasta/paperboat/relay/selfhost"
 )
 
 var version = "development"

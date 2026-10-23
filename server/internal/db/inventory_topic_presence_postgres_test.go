@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/config"
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
 )
 
 // A presence flip (online <-> offline) must not bump the inventory topic of the machine's audience; a change

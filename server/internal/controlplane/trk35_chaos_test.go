@@ -6,7 +6,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 )
 
 // TestTRK35EdgeProcessReplacementPublishesNewFenceWithoutErasingLKG models the

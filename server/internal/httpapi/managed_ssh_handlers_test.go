@@ -9,7 +9,7 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/managedssh"
+	"github.com/pinksaucepasta/paperboat/server/internal/managedssh"
 )
 
 func TestManagedSSHErrorPreservesPureResponsesAndReportsOperationalFailures(t *testing.T) {

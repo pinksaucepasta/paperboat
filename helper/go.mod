@@ -1,4 +1,4 @@
-module github.com/pinksaucepasta/paperboat-helper
+module github.com/pinksaucepasta/paperboat/helper
 
 go 1.27.2
 

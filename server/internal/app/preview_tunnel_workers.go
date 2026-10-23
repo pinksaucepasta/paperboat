@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/previewdomain"
-	"github.com/pinksaucepasta/paperboat-server/internal/previewv1"
-	"github.com/pinksaucepasta/paperboat-server/internal/telemetry"
-	"github.com/pinksaucepasta/paperboat-server/internal/tunnelv1"
-	"github.com/pinksaucepasta/paperboat-server/internal/workers"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewdomain"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewv1"
+	"github.com/pinksaucepasta/paperboat/server/internal/telemetry"
+	"github.com/pinksaucepasta/paperboat/server/internal/tunnelv1"
+	"github.com/pinksaucepasta/paperboat/server/internal/workers"
 )
 
 type previewLeaseReconciler interface {

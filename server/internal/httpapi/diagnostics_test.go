@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/config"
-	serverdiagnostics "github.com/pinksaucepasta/paperboat-server/internal/diagnostics"
-	"github.com/pinksaucepasta/paperboat-server/internal/telemetry"
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
+	serverdiagnostics "github.com/pinksaucepasta/paperboat/server/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/server/internal/telemetry"
 )
 
 func TestTelemetryDiagnosticsIsLoopbackBoundedAndCorrelated(t *testing.T) {

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/clientupdate"
+	"github.com/pinksaucepasta/paperboat/server/internal/clientupdate"
 )
 
 type ClientUpdatePolicyAPI interface {

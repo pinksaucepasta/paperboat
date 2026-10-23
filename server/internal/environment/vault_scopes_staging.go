@@ -7,7 +7,7 @@ import (
 	"errors"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
 func (s *Service) StagePersonalVaultScope(ctx context.Context, account, operation string, request VaultPersonalScopeStage) (VaultScopeDocument, error) {

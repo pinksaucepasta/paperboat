@@ -14,7 +14,7 @@ RUN printf '%s\n' "${PAPERBOAT_VERSION}" | grep -Eq '^[0-9]{4}\.[0-9]{2}\.[0-9]{
   && { test -z "${PAPERBOAT_SENTRY_DSN}" || printf '%s\n' "${PAPERBOAT_SENTRY_DSN}" | grep -Eq '^https://[A-Za-z0-9]+@[A-Za-z0-9.-]+(:[0-9]+)?/[A-Za-z0-9/.-]+$'; } \
   && sentry_release= \
   && if test -n "${PAPERBOAT_SENTRY_DSN}"; then sentry_release="paperboat-relay:${PAPERBOAT_VERSION}"; fi \
-  && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath -ldflags "-s -w -X main.version=${PAPERBOAT_VERSION} -X github.com/pinksaucepasta/paperboat-relay/internal/reporting.DefaultDSN=${PAPERBOAT_SENTRY_DSN} -X github.com/pinksaucepasta/paperboat-relay/internal/reporting.DefaultRelease=${sentry_release}" -o /out/paperboat-relay ./cmd/paperboat-relay \
+  && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath -ldflags "-s -w -X main.version=${PAPERBOAT_VERSION} -X github.com/pinksaucepasta/paperboat/relay/internal/reporting.DefaultDSN=${PAPERBOAT_SENTRY_DSN} -X github.com/pinksaucepasta/paperboat/relay/internal/reporting.DefaultRelease=${sentry_release}" -o /out/paperboat-relay ./cmd/paperboat-relay \
   && cp "$(go list -m -f '{{.Dir}}' tailscale.com)/LICENSE" /out/tailscale.LICENSE
 
 FROM debian:bookworm-slim@sha256:7b140f374b289a7c2befc338f42ebe6441b7ea838a042bbd5acbfca6ec875818 AS runtime

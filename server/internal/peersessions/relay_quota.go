@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/bandwidthgate"
+	"github.com/pinksaucepasta/paperboat/server/internal/bandwidthgate"
 )
 
 // RelayDeniedQuotaExhausted is the typed reason a network refresh carries when hosted relay

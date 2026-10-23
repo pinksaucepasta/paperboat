@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/controlplane"
-	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
+	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
+	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 )
 
 func TestAdminUsageMutationErrorsKeepValidationAndCaptureUnexpectedCause(t *testing.T) {

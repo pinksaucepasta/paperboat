@@ -9,8 +9,8 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-relay/admission"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/relay/admission"
 )
 
 type LocalSender struct {

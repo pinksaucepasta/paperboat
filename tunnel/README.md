@@ -17,7 +17,7 @@ Plain HTTP redirects permanently to HTTPS.
 make check
 ```
 
-The workspace module includes the shared `paperboat-relay/selfhost` runtime-file
+The workspace module includes the shared `relay/selfhost` runtime-file
 reader. Build from the Paperboat OSS workspace so both modules are available.
 
 Production configuration is illustrated by `deploy/deployment.example.json`.

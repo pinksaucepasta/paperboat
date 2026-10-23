@@ -57,7 +57,7 @@ class Tests(unittest.TestCase):
 
     def test_release_associates_exact_repository_and_commit(self):
         sha = "a" * 40
-        result = self.invoke("release", "--repository", "pinksaucepasta/paperboat-server", "--commit", sha, "--source-url", "https://github.com/pinksaucepasta/paperboat-server/releases/tag/2026.09.19.0")
+        result = self.invoke("release", "--repository", "pinksaucepasta/paperboat-server", "--commit", sha, "--source-url", "https://github.com/pinksaucepasta/paperboat/server/releases/tag/2026.09.19.0")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual([r[0] for r in Handler.requests], ["POST", "PUT"])
         self.assertEqual(Handler.requests[0][2], "Bearer " + TOKEN)

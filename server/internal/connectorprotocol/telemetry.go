@@ -5,7 +5,7 @@ import (
 
 	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 
-	servertelemetry "github.com/pinksaucepasta/paperboat-server/internal/telemetry"
+	servertelemetry "github.com/pinksaucepasta/paperboat/server/internal/telemetry"
 )
 
 // ConnectorTelemetry is the connector-v1 adapter for the server-owned

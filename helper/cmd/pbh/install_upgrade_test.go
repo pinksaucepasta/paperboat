@@ -11,8 +11,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat-helper/internal/containers"
-	"github.com/pinksaucepasta/paperboat-relay/selfhost"
+	"github.com/pinksaucepasta/paperboat/helper/internal/containers"
+	"github.com/pinksaucepasta/paperboat/relay/selfhost"
 )
 
 func TestInstallUpgradeRetainsProtectedSettingsWithoutRepeatingFlags(t *testing.T) {

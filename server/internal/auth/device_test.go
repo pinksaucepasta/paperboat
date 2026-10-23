@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/config"
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
 )
 
 func TestExactScopesRejectsMissingDuplicateAndUnknown(t *testing.T) {

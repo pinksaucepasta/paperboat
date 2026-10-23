@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/controlplane"
+	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
 )
 
 func helperIdentityRenew(service *controlplane.EnrollmentService) http.HandlerFunc {

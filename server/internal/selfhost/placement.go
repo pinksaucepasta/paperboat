@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat-server/internal/publicationdns"
+	"github.com/pinksaucepasta/paperboat/server/internal/publicationdns"
 )
 
 var ErrPlacementMode = fmt.Errorf("%w: placement must match the workspace edge mode", ErrInvalid)

@@ -1,7 +1,7 @@
 syntax = "proto3";
 
 package sync;
-option go_package = "github.com/pinksaucepasta/paperboat-server/internal/sync/proto;proto";
+option go_package = "github.com/pinksaucepasta/paperboat/server/internal/sync/proto;proto";
 
 message MachineCapabilities {
   bool can_host_terminals = 1;

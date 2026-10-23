@@ -23,7 +23,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-relay/derpquic"
+	"github.com/pinksaucepasta/paperboat/relay/derpquic"
 	"tailscale.com/derp"
 	"tailscale.com/disco"
 	"tailscale.com/net/packet"

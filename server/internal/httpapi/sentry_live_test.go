@@ -17,17 +17,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/audit"
-	"github.com/pinksaucepasta/paperboat-server/internal/auth"
-	"github.com/pinksaucepasta/paperboat-server/internal/backupreport"
-	"github.com/pinksaucepasta/paperboat-server/internal/config"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/operator"
-	"github.com/pinksaucepasta/paperboat-server/internal/operatoractions"
-	"github.com/pinksaucepasta/paperboat-server/internal/operatorauth"
-	"github.com/pinksaucepasta/paperboat-server/internal/operatorinfra"
-	"github.com/pinksaucepasta/paperboat-server/internal/operatorreporting"
-	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
+	"github.com/pinksaucepasta/paperboat/server/internal/audit"
+	"github.com/pinksaucepasta/paperboat/server/internal/auth"
+	"github.com/pinksaucepasta/paperboat/server/internal/backupreport"
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/operator"
+	"github.com/pinksaucepasta/paperboat/server/internal/operatoractions"
+	"github.com/pinksaucepasta/paperboat/server/internal/operatorauth"
+	"github.com/pinksaucepasta/paperboat/server/internal/operatorinfra"
+	"github.com/pinksaucepasta/paperboat/server/internal/operatorreporting"
+	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 )
 
 func TestLiveSentryOperationalReadback(t *testing.T) {

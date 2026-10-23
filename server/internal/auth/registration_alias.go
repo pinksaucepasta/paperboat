@@ -5,8 +5,8 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/pinksaucepasta/paperboat-server/internal/db"
-	"github.com/pinksaucepasta/paperboat-server/internal/emailpolicy"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/emailpolicy"
 )
 
 // ExistingAccountForAlias answers a sign-up before WorkOS creates the login. When the submitted address

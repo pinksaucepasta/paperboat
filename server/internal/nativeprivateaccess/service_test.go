@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/mint"
+	"github.com/pinksaucepasta/paperboat/server/internal/mint"
 )
 
 type resolverFunc func(context.Context, Request) (Target, error)

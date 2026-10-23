@@ -1,4 +1,4 @@
-module github.com/pinksaucepasta/paperboat-tunnel
+module github.com/pinksaucepasta/paperboat/tunnel
 
 go 1.27.2
 

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-server/internal/billing"
+	"github.com/pinksaucepasta/paperboat/server/internal/billing"
 )
 
 func workspaceBillingError(w http.ResponseWriter, r *http.Request, err error) {

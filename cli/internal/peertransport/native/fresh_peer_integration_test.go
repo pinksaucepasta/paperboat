@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-relay/derpquic"
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
+	"github.com/pinksaucepasta/paperboat/relay/derpquic"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=fault-injection-test
 	"tailscale.com/types/key"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=fault-injection-test
