@@ -41,8 +41,14 @@ func TestScopedTunnelDomainBootstrapOnPostgres(t *testing.T) {
 	exec(`INSERT INTO paperboat.selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete)
  VALUES($1,$2,$3,$3,'ciphertext','domain bootstrap','tunnel','account',$4,$1,true)`, installation, f.nodeID, f.configHash, f.accountID)
 	t.Cleanup(func() {
+		_, _ = database.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.selfhost_pool_policies WHERE scope_kind='account' AND scope_id=$1`, f.accountID)
 		_, _ = database.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.selfhost_installations WHERE id=$1`, installation)
 	})
+	// An account's self-hosted-only pool with a public-ingress edge (as in
+	// ingress_projection_postgres_test.go): the edge is eligible only for a
+	// route whose verified domain names this ingress address (064 publication).
+	exec(`UPDATE paperboat.control_tunnel_nodes SET public_ingress_ipv4='140.245.11.41',public_ingress_verified_at=now(),last_heartbeat_at=now() WHERE id=$1`, f.nodeID)
+	exec(`INSERT INTO paperboat.selfhost_pool_policies(scope_kind,scope_id,capability,mode,installation_ids) VALUES('account',$1,'tunnel','self-hosted-only',ARRAY[$2])`, f.accountID, installation)
 	if rows := read(); len(rows) != 0 {
 		t.Fatalf("scoped route without owned domain was admitted: %+v", rows)
 	}
@@ -53,7 +59,7 @@ func TestScopedTunnelDomainBootstrapOnPostgres(t *testing.T) {
 	if rows := read(); len(rows) != 0 {
 		t.Fatalf("unverified custom domain admitted: %+v", rows)
 	}
-	exec(`UPDATE paperboat.tunnel_domains SET ownership_state='verified' WHERE id=$1`, domain)
+	exec(`UPDATE paperboat.tunnel_domains SET ownership_state='verified',expected_records='[{"type":"A","value":"140.245.11.41"}]'::jsonb WHERE id=$1`, domain)
 	rows := read()
 	if len(rows) != 1 || rows[0].ScopedDomainHostname != hostname || rows[0].ScopedDomainMatchType != "exact" || rows[0].DomainBindings != "[]" {
 		t.Fatalf("pre-TLS bootstrap = %+v", rows)
@@ -68,10 +74,14 @@ func TestScopedTunnelDomainBootstrapOnPostgres(t *testing.T) {
 	if err := json.Unmarshal([]byte(rows[0].DomainBindings), &aliases); err != nil || len(aliases) != 1 || aliases[0]["hostname"] != hostname {
 		t.Fatalf("ready alias = %s, %v", rows[0].DomainBindings, err)
 	}
+	// A global (Paperboat-hosted) edge serves only managed-only workspaces, so the
+	// pool switches to managed-only for this check and back afterwards.
 	exec(`UPDATE paperboat.selfhost_installations SET scope_kind='global' WHERE id=$1`, installation)
+	exec(`UPDATE paperboat.selfhost_pool_policies SET mode='managed-only',installation_ids='{}' WHERE scope_kind='account' AND scope_id=$1`, f.accountID)
 	if rows := read(); len(rows) != 1 || rows[0].ScopedDomainHostname != "" {
 		t.Fatalf("global edge lost managed hostname: %+v", rows)
 	}
+	exec(`UPDATE paperboat.selfhost_pool_policies SET mode='self-hosted-only',installation_ids=ARRAY[$2] WHERE scope_kind='account' AND scope_id=$1`, f.accountID, installation)
 	exec(`UPDATE paperboat.selfhost_installations SET scope_kind='account' WHERE id=$1`, installation)
 	exec(`UPDATE paperboat.tunnel_domains SET hostname=$2,match_type='one_label_wildcard',certificate_state='pending' WHERE id=$1`, domain, "*.apps-"+f.suffix+".example.test")
 	view = tunnelEdgeRouteJSON(read()[0])

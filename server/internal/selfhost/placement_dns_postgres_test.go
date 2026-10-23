@@ -28,6 +28,9 @@ func TestPlacementDNSCreationAndResetOnPostgres(t *testing.T) {
 	}
 	t.Cleanup(func() { store.Close() })
 	ctx := t.Context()
+	if err := db.Migrate(ctx, store); err != nil {
+		t.Fatal(err)
+	}
 	suffix := randomIdentity()
 	owner := "dns_owner_" + suffix
 	exec := func(query string, args ...any) {
@@ -40,6 +43,16 @@ func TestPlacementDNSCreationAndResetOnPostgres(t *testing.T) {
 	installation := scopedInstallationFixture(t, store, "dns-placement-test-key", owner, "tunnel")
 	exec(`UPDATE paperboat.control_tunnel_nodes SET endpoint_host='140.245.11.41' WHERE id=$1`, installation.NodeID)
 	service := New(store, "dns-placement-test-key")
+	// A placement on an installation needs a self-hosted-only workspace pool; a
+	// managed placement needs a managed-only pool (placement.go SetPlacement).
+	setPool := func(policy Policy) {
+		t.Helper()
+		if _, err := service.SetPool(ctx, owner, "tunnel", policy); err != nil {
+			t.Fatal(err)
+		}
+	}
+	selfHosted := Policy{Mode: "self-hosted-only", InstallationIDs: []string{installation.InstallationID}}
+	managed := Policy{Mode: "managed-only"}
 	t.Cleanup(func() {
 
 		for _, item := range []struct{ query, id string }{
@@ -77,6 +90,7 @@ func TestPlacementDNSCreationAndResetOnPostgres(t *testing.T) {
 			exec(`INSERT INTO paperboat.tunnels(id,account_id,name,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id) VALUES($1,$2,$1,$3,$4,'host','actor')`, id, owner, endpointID, "https://"+stable)
 			exec(`INSERT INTO paperboat.tunnel_routes(id,tunnel_id,name,protocol,match_type,match_hostname,origin_scheme,origin_address,created_by_actor_id,updated_by_actor_id) VALUES($1,$2,$1,'http','managed','managed.example.test','http','127.0.0.1:3000','actor','actor')`, route, id)
 		}
+		setPool(selfHosted)
 		if _, err = service.SetPlacement(ctx, owner, kind, id, &installation.InstallationID); err != nil {
 			t.Fatal(err)
 		}
@@ -103,6 +117,7 @@ func TestPlacementDNSCreationAndResetOnPostgres(t *testing.T) {
 		}
 		check("140.245.11.41", "pending", "A", 1)
 		exec(`UPDATE `+table+` SET ownership_state='verified',conflict_state='quarantined',quarantine_until=now()+interval '1 hour' WHERE id=$1`, domainID)
+		setPool(managed)
 		if _, err = service.SetPlacement(ctx, owner, kind, id, nil); err != nil {
 			t.Fatal(err)
 		}
@@ -119,6 +134,7 @@ func TestPlacementDNSCreationAndResetOnPostgres(t *testing.T) {
 			t.Fatal("stale DNS observation crossed generation fence")
 		}
 		exec(`UPDATE `+table+` SET ownership_state='verified' WHERE id=$1`, domainID)
+		setPool(selfHosted)
 		if _, err = service.SetPlacement(ctx, owner, kind, id, &installation.InstallationID); err != nil {
 			t.Fatal(err)
 		}
