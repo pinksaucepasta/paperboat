@@ -341,38 +341,44 @@ func TestStreamRouterCloseInterruptsBlockedConsumerAccept(t *testing.T) {
 	}
 }
 
-func TestStreamRouterClassifierLimitFailsConnection(t *testing.T) {
+// More concurrent new streams than classifiers wait for a classifier instead of failing the session,
+// which tore down every live stream of the peer.
+func TestStreamRouterQueuesStreamsBeyondItsClassifiers(t *testing.T) {
 	client, server, closePair := routerSessionPair(t)
 	defer closePair()
 	config := peerquic.DevelopmentStreamRouterConfig()
 	config.MaximumClassifiers = 1
+	config.ClassificationLimit = 300 * time.Millisecond
 	router, err := peerquic.NewStreamRouter(server, config)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer router.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	first, err := client.Connection.OpenStreamSync(ctx)
+	stalled, err := client.Connection.OpenStreamSync(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer first.Close()
-	if _, err := first.Write([]byte{'a'}); err != nil {
+	defer stalled.Close()
+	if _, err := stalled.Write([]byte{'a'}); err != nil { // holds the only classifier until its limit
 		t.Fatal(err)
 	}
-	second, err := client.Connection.OpenStreamSync(ctx)
+	routed, err := client.Connection.OpenStreamSync(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer second.Close()
-	if _, err := second.Write([]byte{'b'}); err != nil {
+	defer routed.Close()
+	if _, err := routed.Write(bytes.Repeat([]byte{'r'}, 32)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := router.Accept(ctx); !errors.Is(err, peerquic.ErrStreamRouterLimit) {
-		t.Fatalf("accept error=%v", err)
+	accepted, err := router.Accept(ctx)
+	if err != nil {
+		t.Fatalf("the waiting stream was not routed: %v", err)
 	}
-	if err := router.Close(); !errors.Is(err, peerquic.ErrStreamRouterLimit) {
-		t.Fatalf("close error=%v", err)
+	_ = accepted.Close()
+	if err := client.Connection.Context().Err(); err != nil {
+		t.Fatalf("session failed: %v", err)
 	}
 }
 

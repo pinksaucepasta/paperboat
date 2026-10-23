@@ -13,7 +13,6 @@ import (
 )
 
 var ErrStreamRouterProtocol = errors.New("peer QUIC stream router protocol failure")
-var ErrStreamRouterLimit = errors.New("peer QUIC stream router limit reached")
 
 type StreamRouterConfig struct {
 	PendingConsumers    int
@@ -116,15 +115,18 @@ func (r *StreamRouter) run() {
 			}
 			return
 		}
+		// A stream waits for a free classifier rather than failing the session: the session belongs to one
+		// authenticated peer, every classification is bounded by ClassificationLimit, and QUIC's own
+		// incoming-stream limit bounds how many wait. Failing here tore down every live stream of the peer
+		// when it opened more than MaximumClassifiers streams at once.
 		select {
 		case r.classifiers <- struct{}{}:
 			r.workers.Add(1)
 			go r.classify(stream)
-		default:
+		case <-r.ctx.Done():
 			stream.CancelRead(lifetimeProbeCancel)
 			stream.CancelWrite(lifetimeProbeCancel)
 			_ = stream.Close()
-			r.fail(ErrStreamRouterLimit, true)
 			return
 		}
 	}
