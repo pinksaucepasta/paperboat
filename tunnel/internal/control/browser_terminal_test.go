@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -56,5 +57,32 @@ func TestBrowserTerminalControlChannelIsNodeBoundAndFailClosed(t *testing.T) {
 	case <-admission.Closed:
 	case <-ctx.Done():
 		t.Fatal("revoked control did not close attachment")
+	}
+}
+
+// At the cap the server refuses the admission by closing the control channel with the
+// bandwidth reason; the edge must learn that as a typed refusal, not a transport failure.
+func TestBrowserTerminalAdmissionAtTheCapIsATypedRefusal(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		connection, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer connection.CloseNow()
+		if _, _, err := connection.Read(r.Context()); err != nil {
+			return
+		}
+		_ = connection.Close(websocket.StatusPolicyViolation, "bandwidth_quota_exhausted")
+	}))
+	defer server.Close()
+	httpClient, err := NewHTTPClient(HTTPConfig{BaseURL: server.URL, Credential: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Timeout: 3 * time.Second, Client: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &BrowserTerminalClient{HTTP: httpClient, NodeID: "edge_1", ProcessEpoch: "epoch_01"}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := client.Admit(ctx, "one-use", "https://dashboard.example.test", "machine.runtime.example.test"); !errors.Is(err, ErrBrowserTerminalQuotaExhausted) {
+		t.Fatalf("admission at the cap: %v, want ErrBrowserTerminalQuotaExhausted", err)
 	}
 }

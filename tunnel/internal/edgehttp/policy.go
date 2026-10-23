@@ -526,6 +526,11 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		admission, err := p.config.BrowserTerminal.Admit(r.Context(), ticket, r.Header.Get("Origin"), host)
+		if errors.Is(err, control.ErrBrowserTerminalQuotaExhausted) {
+			w.Header().Set("X-Paperboat-Error", "bandwidth_quota_exhausted")
+			http.Error(w, "This workspace's hosted relay and edge bandwidth is used up. Add bandwidth or upgrade, or wait for the next allowance period.", http.StatusTooManyRequests)
+			return
+		}
 		if err != nil {
 			http.Error(w, "Browser terminal admission unavailable", http.StatusServiceUnavailable)
 			return

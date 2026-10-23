@@ -19,6 +19,13 @@ import (
 // BrowserTerminalAdmission is a live control-plane grant. Closing it releases
 // the control plane's attachment reservation; Closed also fires on revocation,
 // a failed policy check, or a missing heartbeat.
+// ErrBrowserTerminalQuotaExhausted: the server refused the admission because the paying
+// workspace's relay and edge allowance is used up (close reason bandwidth_quota_exhausted,
+// server browserterminal.BandwidthQuotaCloseReason).
+var ErrBrowserTerminalQuotaExhausted = errors.New("browser terminal refused: bandwidth allowance exhausted")
+
+const browserTerminalQuotaCloseReason = "bandwidth_quota_exhausted"
+
 type BrowserTerminalAdmission struct {
 	Credential        string
 	TerminalSessionID string
@@ -87,6 +94,11 @@ func (c *BrowserTerminalClient) admit(ctx context.Context, ticket, origin, host 
 		kind, raw, err = connection.Read(firstCtx)
 	}
 	stopFirst()
+	var closed websocket.CloseError
+	if errors.As(err, &closed) && closed.Code == websocket.StatusPolicyViolation && closed.Reason == browserTerminalQuotaCloseReason {
+		connection.CloseNow()
+		return BrowserTerminalAdmission{}, ErrBrowserTerminalQuotaExhausted
+	}
 	if err != nil || kind != websocket.MessageText {
 		connection.CloseNow()
 		return BrowserTerminalAdmission{}, failure("transport", 0, err)
