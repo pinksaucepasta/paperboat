@@ -9,6 +9,9 @@ import re
 import subprocess
 import time
 
+# Logs of retired server containers are kept this long under rollout-logs/.
+LOG_RETENTION_SECONDS = 7 * 24 * 3600
+
 
 class RolloutError(Exception):
     pass
@@ -83,10 +86,28 @@ class Rollout:
                     retained.append(name)
                     continue
                 self.run(['docker', 'stop', '--time', '30', name], timeout=40)
+            self.keep_logs(name)
             self.run(['docker', 'rm', name])
         state['retired'] = retained
         self.save(self.state_path, state)
         return len(retained)
+
+    def keep_logs(self, name):
+        # A request answered by a draining server must stay traceable after the
+        # container is removed. Best effort: a failed copy never blocks retirement.
+        logs = self.root / 'rollout-logs'
+        try:
+            logs.mkdir(mode=0o700, exist_ok=True)
+            cutoff = time.time() - LOG_RETENTION_SECONDS
+            for old in logs.glob('*.log'):
+                if old.stat().st_mtime < cutoff:
+                    old.unlink()
+            with open(logs / (name + '.log'), 'wb', opener=lambda p, f: os.open(p, f, 0o600)) as out:
+                subprocess.run(['docker', 'logs', name], cwd=self.root, stdout=out,
+                               stderr=subprocess.STDOUT, timeout=120)
+        except (OSError, subprocess.SubprocessError) as error:
+            self.log.write(('Could not keep logs of %s: %s\n' % (name, error)).encode())
+            self.log.flush()
 
     def recover(self):
         if not self.journal.exists():

@@ -366,6 +366,19 @@ func (r *SQLRepository) GetTarget(ctx context.Context, request GetTargetRequest)
 }
 
 func (r *SQLRepository) ObserveHost(ctx context.Context, request ObserveHostRequest, proposed HostKeySet) (HostKeySet, error) {
+	result, err := r.observeHost(ctx, request, proposed)
+	// The machine list shows the latest refusal for duplicate keys until an observation
+	// succeeds. Recording it is best effort: the observation's own answer stands.
+	var inUse *HostKeyInUseError
+	if errors.As(err, &inUse) && inUse.otherMachineID != "" {
+		_, _ = r.store.SQL().ExecContext(ctx, `INSERT INTO paperboat.machine_ssh_host_key_conflicts(user_machine_id,other_machine_id,observed_at) VALUES($1,$2,$3) ON CONFLICT (user_machine_id) DO UPDATE SET other_machine_id=EXCLUDED.other_machine_id,observed_at=EXCLUDED.observed_at`, request.UserMachineID, inUse.otherMachineID, request.Now.UTC())
+	} else if err == nil {
+		_, _ = r.store.SQL().ExecContext(ctx, `DELETE FROM paperboat.machine_ssh_host_key_conflicts WHERE user_machine_id=$1`, request.UserMachineID)
+	}
+	return result, err
+}
+
+func (r *SQLRepository) observeHost(ctx context.Context, request ObserveHostRequest, proposed HostKeySet) (HostKeySet, error) {
 	var result HostKeySet
 	requestHash := managedOperationHash(struct {
 		MachineID             string
@@ -785,5 +798,5 @@ func hostKeyInUse(ctx context.Context, tx *db.Tx, userID, otherMachineID string)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return err
 	}
-	return &HostKeyInUseError{MachineName: name.String}
+	return &HostKeyInUseError{MachineName: name.String, otherMachineID: otherMachineID}
 }

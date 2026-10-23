@@ -12,6 +12,19 @@ spec.loader.exec_module(module)
 
 
 class ServerRolloutTest(unittest.TestCase):
+    def test_retired_server_logs_are_kept_and_old_ones_pruned(self):
+        logs = self.root / 'rollout-logs'
+        logs.mkdir()
+        stale = logs / 'paperboat-server-stale.log'
+        stale.write_text('old')
+        old = module.time.time() - module.LOG_RETENTION_SECONDS - 60
+        module.os.utime(stale, (old, old))
+        with patch.object(module.subprocess, 'run') as run:
+            run.side_effect = lambda args, stdout=None, **kw: stdout.write(b'request log line\n')
+            self.rollout.keep_logs('paperboat-server-old')
+        self.assertEqual((logs / 'paperboat-server-old.log').read_bytes(), b'request log line\n')
+        self.assertFalse(stale.exists())
+
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)

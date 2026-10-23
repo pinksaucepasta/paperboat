@@ -297,7 +297,10 @@ func validOSUser(value string) bool {
 }
 
 // HostKeyInUseError is ErrHostKeyInUse naming the other machine when the caller may see it.
-type HostKeyInUseError struct{ MachineName string }
+type HostKeyInUseError struct {
+	MachineName    string
+	otherMachineID string
+}
 
 func (e *HostKeyInUseError) Error() string        { return ErrHostKeyInUse.Error() }
 func (e *HostKeyInUseError) Is(target error) bool { return target == ErrHostKeyInUse }

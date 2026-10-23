@@ -74,6 +74,16 @@ func hostKeysMoveToTheReplacement(t *testing.T, retiredState string) {
 	if err := observe("operation_reenroll_live", user, liveID, hostKey); !errors.As(err, &inUse) || inUse.MachineName == "" {
 		t.Fatalf("a live machine's host key was handed to another machine, or the owner was not named: %v", err)
 	}
+	conflictOf := func(machineID string) string {
+		var other string
+		if err := store.SQL().QueryRowContext(ctx, `SELECT coalesce((SELECT other_machine_id FROM paperboat.machine_ssh_host_key_conflicts WHERE user_machine_id=$1),'')`, machineID).Scan(&other); err != nil {
+			t.Fatal(err)
+		}
+		return other
+	}
+	if conflictOf(liveID) != oldID {
+		t.Fatal("the refused observation was not recorded for the machine list")
+	}
 	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET state=$2,online=false WHERE id=$1`, oldID, retiredState); err != nil {
 		t.Fatal(err)
 	}
@@ -82,6 +92,12 @@ func hostKeysMoveToTheReplacement(t *testing.T, retiredState string) {
 	}
 	if err := observe("operation_reenroll_new", user, newID, hostKey); err != nil {
 		t.Fatalf("the replacement machine could not record the host keys it now has: %v", err)
+	}
+	if err := observe("operation_reenroll_live_fresh", user, liveID, publicLine(t, "ed25519")); err != nil {
+		t.Fatalf("a machine with its own keys could not record them: %v", err)
+	}
+	if conflictOf(liveID) != "" {
+		t.Fatal("a successful observation left the host-key conflict in the machine list")
 	}
 	active, err := service.GetActiveHost(ctx, GetHostKeySetRequest{ActorUserID: user, UserMachineID: newID, MachineGeneration: 1})
 	if err != nil || len(active.Keys) != 1 {
