@@ -34,6 +34,7 @@ type guardUndo interface {
 	Restore(context.Context) error
 	Discard()
 }
+
 var existingMachineGuardDomain = readMachineGuardDomain
 var discoverBrowserDomain = discoverServerBrowserDomain
 
@@ -69,7 +70,11 @@ func discoverServerBrowserDomain(ctx context.Context, controlURL string) (string
 	return splitdns.NormalizeBrowserDomain(discovery.LocalAccessBaseDomain)
 }
 
-func readyMachineGuard(ctx context.Context) (resultErr error) {
+// readyMachineGuard reports nil when the installed guard is ready and runs exactly version, the build
+// being installed: the guard ships with the daemon and is replaced whenever versions differ, so the
+// two never drift apart (an older ready guard used to stay forever; older code replaced a newer one).
+// Prior art: tailscaled ships its helpers in the same package and version.
+func readyMachineGuard(ctx context.Context, version string) (resultErr error) {
 	client, err := machineguard.Connect(ctx, machineguard.DefaultSocket)
 	if err != nil {
 		return err
@@ -81,7 +86,13 @@ func readyMachineGuard(ctx context.Context) (resultErr error) {
 	if err != nil {
 		return err
 	}
-	return validateMachineGuardStatus(status)
+	if err := validateMachineGuardStatus(status); err != nil {
+		return err
+	}
+	if status.Version != version {
+		return fmt.Errorf("machine guard runs %s, this installation is %s", status.Version, version)
+	}
+	return nil
 }
 
 func validateMachineGuardStatus(status machineguard.RuntimeStatus) error {
@@ -120,7 +131,7 @@ func installMachineGuardReversible(ctx context.Context, request Request) (guardU
 		return nil, hostInstallFailure("verify Paperboat machine guard executable", err)
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	readyErr := existingMachineGuardReady(probeCtx)
+	readyErr := existingMachineGuardReady(probeCtx, request.Source.Version)
 	cancel()
 	if readyErr == nil {
 		return nil, nil

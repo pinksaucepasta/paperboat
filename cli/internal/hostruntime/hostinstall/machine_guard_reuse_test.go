@@ -53,7 +53,7 @@ func TestMachineInstallPreservesReadyMachineGuardAndValidatesSuppliedBytes(t *te
 		installMissingMachineGuard = oldInstall
 	})
 	var probed, prepared, installed int
-	existingMachineGuardReady = func(ctx context.Context) error {
+	existingMachineGuardReady = func(ctx context.Context, _ string) error {
 		probed++
 		if deadline, ok := ctx.Deadline(); !ok || time.Until(deadline) > 5*time.Second {
 			t.Fatal("guard readiness probe is not bounded")
@@ -77,7 +77,7 @@ func TestMachineInstallPreservesReadyMachineGuardAndValidatesSuppliedBytes(t *te
 		t.Fatal("invalid supplied source reached guard readiness or mutation")
 	}
 	request.Source = source
-	existingMachineGuardReady = func(context.Context) error { probed++; return errors.New("unavailable") }
+	existingMachineGuardReady = func(context.Context, string) error { probed++; return errors.New("unavailable") }
 	if err := installMachineGuard(context.Background(), request); err != nil {
 		t.Fatal(err)
 	}

@@ -29,7 +29,7 @@ func TestMachineInstallSucceedsWhenGuardTrustIsPending(t *testing.T) {
 		prepareMachineGuardForInstall = oldPrepare
 		installMissingMachineGuard = oldInstall
 	})
-	existingMachineGuardReady = func(context.Context) error { return errors.New("guard absent") }
+	existingMachineGuardReady = func(context.Context, string) error { return errors.New("guard absent") }
 	prepareMachineGuardForInstall = func() error { return nil }
 	request := Request{Executable: executable, Source: source}
 

@@ -146,12 +146,14 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 				return err
 			}
 		}
+		// Every installation and update, signed updates included, brings the guard to this build's
+		// version; the undo puts the prior guard back if the update does not commit.
+		undo, err := installMachineGuardReversible(ctx, request)
+		if err != nil {
+			return err
+		}
+		guardRestore = undo
 		if intent != unixPreparedUpdate {
-			undo, err := installMachineGuardReversible(ctx, request)
-			if err != nil {
-				return err
-			}
-			guardRestore = undo
 			if err := ensureUserLinger(ctx, request, paths); err != nil {
 				return err
 			}

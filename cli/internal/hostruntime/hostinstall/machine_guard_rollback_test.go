@@ -3,7 +3,10 @@ package hostinstall
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
+
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 )
 
 type recordingGuardUndo struct{ restored, discarded int }
@@ -27,5 +30,45 @@ func TestAFailedUpdateRestoresTheMachineGuard(t *testing.T) {
 	}
 	if err := finishMachineGuard(context.Background(), nil, errors.New("failed")); err != nil {
 		t.Fatalf("an update that kept the existing guard has nothing to restore: %v", err)
+	}
+}
+
+// A ready guard on another version than the build being installed is replaced: the guard and the
+// daemon always run the same version after an install or update (older ready guards used to stay).
+func TestAReadyGuardOnAnotherVersionIsReplaced(t *testing.T) {
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := installsource.Inspect(executable, "dev-294d86df", "custom")
+	if err != nil {
+		t.Fatal(err)
+	}
+	useGuardDomains(t, "", "local.example.test", nil)
+	oldProbe, oldPrepare, oldInstall := existingMachineGuardReady, prepareMachineGuardForInstall, installMissingMachineGuard
+	t.Cleanup(func() {
+		existingMachineGuardReady, prepareMachineGuardForInstall, installMissingMachineGuard = oldProbe, oldPrepare, oldInstall
+	})
+	running := "dev-e71c7180"
+	existingMachineGuardReady = func(_ context.Context, version string) error {
+		if running != version {
+			return errors.New("machine guard runs another version")
+		}
+		return nil
+	}
+	prepareMachineGuardForInstall = func() error { return nil }
+	installed := 0
+	installMissingMachineGuard = func(context.Context, string, string) (guardUndo, error) {
+		installed++
+		running = "dev-294d86df"
+		return &recordingGuardUndo{}, nil
+	}
+	request := Request{Executable: executable, Source: source}
+	undo, err := installMachineGuardReversible(context.Background(), request)
+	if err != nil || installed != 1 || undo == nil {
+		t.Fatalf("mismatched guard: installed=%d undo=%v err=%v", installed, undo, err)
+	}
+	if undo, err := installMachineGuardReversible(context.Background(), request); err != nil || installed != 1 || undo != nil {
+		t.Fatalf("matching guard was replaced again: installed=%d undo=%v err=%v", installed, undo, err)
 	}
 }
