@@ -3069,3 +3069,5 @@ Found: first connect to a just-paired peer waits ~5 s (5071, 6118 ms; then 3–6
 Waits for Lane A/coordinator GO: device check of both (hp/victus down). Leftover on hp to clean then: containers laner-x, laner-y; records laner-x-5, laner-y-7.
 2026-10-23 | Lane K F18 | Round 12 dev-edcad00f regression rerun on pbvm3 lanek-c/lanek-d: policy_token.py 15/15, policy_cli.sh 13/13 (09:08Z). lanek-c first pair 'host runtime command failed', retry ok (did not repeat). | policy_team.py waits for hp (member second-acct).
 2026-10-23 | Lane N F3-05 | [!] past the 2 h cap: 20th session created server+host but the client attach gets host resource_limit (3 hosts, round 12). Next: debug host logging the router/dispatcher refusal origin.
+2026-10-23 | Lane L F11-04 | Ticked L: F11-04, C188, C189, C190 (config_team_default.py PASS, pbvm3 lanel-h dev-3e4b4eab, GitHub pujan-modha/paperboat-config-test). Fixes 0f5dc6b1, d43197b0 (team-default calls send the team workspace).
+Adopt on pprbtdev made up to 49 pending pull-only assignments; nothing approved; after unadopt: 52 revoked, 0 pending.
