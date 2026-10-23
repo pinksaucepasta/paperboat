@@ -666,9 +666,11 @@ func NewRouter(opts Options) http.Handler {
 			if opts.DeviceAuth != nil {
 				mux.Handle("GET /v1/machines", requireAnyAuth(opts.Auth, opts.DeviceAuth, requireScope("machines:read", requireWorkspaceSelection(opts.Workspaces, machinesList(opts.Machines)))))
 				mux.Handle("GET /v1/machines/summary", requireAnyAuth(opts.Auth, opts.DeviceAuth, requireScope("machines:read", requireWorkspaceSelection(opts.Workspaces, machinesSummary(opts.Machines)))))
+				mux.Handle("GET /v1/machines/running-counts", requireAnyAuth(opts.Auth, opts.DeviceAuth, requireScope("machines:read", requireWorkspaceSelection(opts.Workspaces, machineRunningCounts(opts.Machines, opts.PreviewLeases, opts.Tunnels)))))
 			} else {
 				mux.Handle("GET /v1/machines", requireAuth(opts.Auth, requireWorkspaceSelection(opts.Workspaces, machinesList(opts.Machines))))
 				mux.Handle("GET /v1/machines/summary", requireAuth(opts.Auth, requireWorkspaceSelection(opts.Workspaces, machinesSummary(opts.Machines))))
+				mux.Handle("GET /v1/machines/running-counts", requireAuth(opts.Auth, requireWorkspaceSelection(opts.Workspaces, machineRunningCounts(opts.Machines, opts.PreviewLeases, opts.Tunnels))))
 			}
 		}
 		if opts.ManagedSSH != nil && opts.RuntimeIdentity != nil {

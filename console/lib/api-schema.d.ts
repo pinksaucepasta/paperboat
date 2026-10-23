@@ -3059,6 +3059,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/machines/running-counts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Count what each machine of the workspace runs
+         * @description Running terminal sessions, active tunnels and active previews per machine, counted through the three collections' own list paths (authorized exactly as GET /v1/terminal-sessions, /v1/tunnels and /v1/previews). Every page is counted up to 10,000 rows per kind; past that truncated is true. Answers may be up to 10 seconds old.
+         */
+        get: operations["get_v1_user_machines_running_counts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/machines/summary": {
         parameters: {
             query?: never;
@@ -10401,6 +10421,26 @@ export interface components {
             carrier: components["schemas"]["InspectorCarrierRoute"];
         };
         BillingWorkspace: {
+            /** @description Per-plan count limits with current use. machines: live machines; publications: active previews and tunnels together; browser_terminals: console terminals open through the edge. */
+            limits: {
+                machines: {
+                    used: number;
+                    /** @description Plan limit; null for Teams (advertised unlimited). */
+                    limit: number | null;
+                };
+                publications: {
+                    used: number;
+                    /** @description Plan limit; null for Teams (advertised unlimited). */
+                    limit: number | null;
+                };
+                browser_terminals: {
+                    used: number;
+                    /** @description Plan limit; null for Teams (advertised unlimited). */
+                    limit: number | null;
+                };
+            };
+            /** @description Personal overview only: the Team trial a new team would get (0 once used). */
+            team_trial_days?: number;
             id: string;
             user_id?: string;
             team_id?: string;
@@ -10789,7 +10829,6 @@ export interface components {
         AdminBillingOperatorPolicy: {
             personal_allowance_bytes: number | null;
             team_allowance_bytes: number | null;
-            personal_machine_limit: number | null;
             /** Format: int64 */
             revision: number;
         };
@@ -17809,6 +17848,54 @@ export interface operations {
                 content?: never;
             };
             409: components["responses"]["Error"];
+        };
+    };
+    get_v1_user_machines_running_counts: {
+        parameters: {
+            query?: {
+                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
+                workspace?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Per-machine running counts; machines running nothing are left out. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: {
+                            items: {
+                                machine_id: string;
+                                terminals: number;
+                                tunnels: number;
+                                previews: number;
+                            }[];
+                            /** @description A collection had more than 10,000 running items; its counts cover the first 10,000. */
+                            truncated: boolean;
+                        };
+                    };
+                };
+            };
+            /** @description A query parameter other than workspace. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The credential cannot read previews or tunnels. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     get_v1_user_machines_summary: {

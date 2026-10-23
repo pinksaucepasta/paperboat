@@ -27167,6 +27167,98 @@
         "operationId": "post_v1_user_machine_enrollments_enrollment_id_retry"
       }
     },
+    "/v1/machines/running-counts": {
+      "get": {
+        "summary": "Count what each machine of the workspace runs",
+        "description": "Running terminal sessions, active tunnels and active previews per machine, counted through the three collections' own list paths (authorized exactly as GET /v1/terminal-sessions, /v1/tunnels and /v1/previews). Every page is counted up to 10,000 rows per kind; past that truncated is true. Answers may be up to 10 seconds old.",
+        "security": [
+          {
+            "cookieSession": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:read"
+        ],
+        "parameters": [
+          {
+            "name": "workspace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 63
+            },
+            "description": "Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Per-machine running counts; machines running nothing are left out.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "items",
+                        "truncated"
+                      ],
+                      "properties": {
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "machine_id",
+                              "terminals",
+                              "tunnels",
+                              "previews"
+                            ],
+                            "properties": {
+                              "machine_id": {
+                                "type": "string"
+                              },
+                              "terminals": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "tunnels": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "previews": {
+                                "type": "integer",
+                                "minimum": 0
+                              }
+                            }
+                          }
+                        },
+                        "truncated": {
+                          "type": "boolean",
+                          "description": "A collection had more than 10,000 running items; its counts cover the first 10,000."
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A query parameter other than workspace."
+          },
+          "403": {
+            "description": "The credential cannot read previews or tunnels."
+          }
+        },
+        "operationId": "get_v1_user_machines_running_counts"
+      }
+    },
     "/v1/machines/summary": {
       "get": {
         "summary": "Count the selected workspace's machines (dashboard totals)",
