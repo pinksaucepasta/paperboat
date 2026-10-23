@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	cryptorand "crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -212,8 +214,26 @@ func (c *Client) PolicyVersions(ctx context.Context, ws string) ([]PolicyVersion
 	return out.Versions, err
 }
 
+// CreateAPIToken sends one Idempotency-Key with every attempt: a create whose response was lost,
+// or whose connection failed, is sent again and the server answers with the same token and
+// once-shown secret instead of a second token (F21-12).
 func (c *Client) CreateAPIToken(ctx context.Context, ws string, in APITokenCreate) (out APITokenCreated, err error) {
-	err = c.do(ctx, http.MethodPost, workspacePath(ws, "/api-tokens"), in, &out)
+	key := make([]byte, 16)
+	if _, err = cryptorand.Read(key); err != nil {
+		return out, err
+	}
+	headers := http.Header{"Idempotency-Key": []string{"pbtok_" + hex.EncodeToString(key)}}
+	for attempt := 0; attempt < readRetryAttempts; attempt++ {
+		if attempt > 0 && !sleepContext(ctx, readRetryDelay(attempt)) {
+			return out, errors.Join(err, ctx.Err())
+		}
+		err = c.doWithHeaders(ctx, http.MethodPost, workspacePath(ws, "/api-tokens"), in, &out, headers)
+		var lost *ResponseLostError
+		var transport *url.Error
+		if err == nil || !(errors.As(err, &lost) || errors.As(err, &transport)) {
+			return out, err
+		}
+	}
 	return out, err
 }
 

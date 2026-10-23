@@ -58,3 +58,32 @@ func TestAReadRetriesAfterATransportFailure(t *testing.T) {
 		t.Fatalf("bounded retry: err=%v calls=%d", err, calls.Load())
 	}
 }
+
+// A token create whose response was lost is sent again with the same Idempotency-Key, so the
+// server can answer with the same token and once-shown secret (F21-12).
+func TestCreateAPITokenRetriesALostResponseWithTheSameKey(t *testing.T) {
+	var applied atomic.Int32
+	keys := make(chan string, 4)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		keys <- r.Header.Get("Idempotency-Key")
+		if applied.Add(1) == 1 {
+			conn, _, _ := w.(http.Hijacker).Hijack()
+			_ = conn.Close()
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"data":{"api_token":{"id":"apitok_1","name":"ci"},"secret":"pbat_x"}}`))
+	}))
+	t.Cleanup(server.Close)
+	client := New(server.URL, config.Credential{AccessToken: "token"}, server.Client())
+	out, err := client.CreateAPIToken(context.Background(), "personal", APITokenCreate{Name: "ci"})
+	close(keys)
+	var sent []string
+	for k := range keys {
+		sent = append(sent, k)
+	}
+	if err != nil || out.Secret != "pbat_x" || len(sent) != 2 || sent[0] == "" || sent[0] != sent[1] {
+		t.Fatalf("out=%+v err=%v keys=%v", out, err, sent)
+	}
+}
