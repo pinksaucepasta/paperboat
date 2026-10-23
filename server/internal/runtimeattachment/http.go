@@ -41,7 +41,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	maximum := int64(1 << 20)
-	if r.URL.Path == runtimewire.HostPath {
+	if r.URL.Path == runtimewire.HostPath || r.URL.Path == runtimewire.HostTunnelsPath {
 		maximum = 4096
 	}
 	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maximum))
@@ -70,6 +70,29 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": admission})
+		return
+	}
+	if r.URL.Path == runtimewire.HostTunnelsPath {
+		var request runtimewire.TunnelsRequest
+		if decode(raw, &request) != nil {
+			writeError(w, 400, "invalid_request")
+			return
+		}
+		proof, err := h.Machine.VerifyMachineRequest(r.Context(), r, raw)
+		if err != nil {
+			if err == previewattachment.ErrUnauthorized {
+				writeError(w, 401, "device_identity_invalid")
+			} else {
+				serviceError(w, r, err)
+			}
+			return
+		}
+		tunnels, err := h.Service.Tunnels(r.Context(), proof, request)
+		if err != nil {
+			serviceError(w, r, err)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"tunnels": tunnels}})
 		return
 	}
 	if r.URL.Path != runtimewire.EdgePullPath && r.URL.Path != runtimewire.EdgeObservePath && r.URL.Path != runtimewire.EdgeEndpointPullPath {

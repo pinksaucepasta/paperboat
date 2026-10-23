@@ -1,7 +1,10 @@
 // Package runtimeattachment defines the machine, server and edge carrier wire contract.
 package runtimeattachment
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 const Schema = "paperboat.runtime-carrier/v1"
 const RouteKind = "runtime_https_wss"
@@ -29,6 +32,25 @@ const EdgeObservePath = "/v1/edge/runtime/carrier-observations"
 // is small, so an edge pulls it at its preview interval and a new preview or tunnel route is
 // admitted within a second instead of waiting for the next full runtime pull.
 const EdgeEndpointPullPath = "/v1/edge/runtime/endpoint-admissions"
+
+// HostTunnelsPath returns, to an agent that serves tunnel endpoints, its tunnels on the engine with
+// their active config snapshots (the routes and their origins), so it can forward their streams.
+const HostTunnelsPath = "/v1/runtime/endpoint-tunnels"
+
+// TunnelsRequest asks for the calling machine's engine tunnels; the machine proof binds it.
+type TunnelsRequest struct {
+	OperationID string `json:"operation_id"`
+}
+
+// EngineTunnel is one tunnel the agent serves on its runtime carriers.
+type EngineTunnel struct {
+	TunnelID          string `json:"tunnel_id"`
+	ConfigGeneration  uint64 `json:"config_generation"`
+	ConfigContentHash string `json:"config_content_hash"`
+	// Snapshot is the tunnel's active config snapshot (paperboat.preview-tunnel/v1), as a
+	// connector would receive it.
+	Snapshot json.RawMessage `json:"snapshot"`
+}
 
 type EdgeCandidate struct {
 	NodeID        string `json:"node_id"`

@@ -331,6 +331,7 @@ func NewRouter(opts Options) http.Handler {
 		}
 		if opts.RuntimeCarrierAttachment != nil {
 			mux.Handle("POST /v1/runtime/carrier-attachment", opts.RuntimeCarrierAttachment)
+			mux.Handle("POST /v1/runtime/endpoint-tunnels", opts.RuntimeCarrierAttachment)
 			mux.Handle("POST /v1/edge/runtime/carrier-admissions", opts.RuntimeCarrierAttachment)
 			mux.Handle("POST /v1/edge/runtime/carrier-observations", opts.RuntimeCarrierAttachment)
 			mux.Handle("POST /v1/edge/runtime/endpoint-admissions", opts.RuntimeCarrierAttachment)

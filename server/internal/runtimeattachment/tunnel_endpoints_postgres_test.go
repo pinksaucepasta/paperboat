@@ -3,6 +3,7 @@ package runtimeattachment
 import (
 	"database/sql"
 	"encoding/hex"
+	"strings"
 	"testing"
 	"time"
 
@@ -205,6 +206,14 @@ VALUES($1,1,sha256(convert_to($1::text,'UTF8')),convert_to(json_build_object('ro
 	var activation string
 	if err := f.database.SQL().QueryRowContext(f.ctx, `SELECT activation_state FROM tunnel_config_generations WHERE tunnel_id=$1 AND generation=1`, tunnel).Scan(&activation); err != nil || activation != "active" {
 		t.Fatalf("engine tunnel config = %q, %v; want active", activation, err)
+	}
+	// The agent learns what to serve (routes and origins) from its engine tunnels' active configs.
+	served, err := f.service.Tunnels(f.ctx, f.proof, runtimewire.TunnelsRequest{OperationID: f.proof.OperationID})
+	if err != nil || len(served) != 1 || served[0].TunnelID != tunnel || served[0].ConfigGeneration != 1 || !strings.Contains(string(served[0].Snapshot), route) {
+		t.Fatalf("agent engine tunnels = %+v, %v", served, err)
+	}
+	if _, err := f.service.Tunnels(f.ctx, f.proof, runtimewire.TunnelsRequest{OperationID: "other"}); err != ErrInvalid {
+		t.Fatalf("tunnels request not bound to its proof: %v", err)
 	}
 	// Its hostname's DNS names exactly the edges that serve the route.
 	f.exec(t, `UPDATE control_tunnel_nodes SET public_ingress_ipv4=CASE WHEN id=$1 THEN '192.0.2.21'::inet ELSE '192.0.2.22'::inet END,public_ingress_verified_at=now() WHERE id IN ($1,$2)`, f.node, f.backupNode)

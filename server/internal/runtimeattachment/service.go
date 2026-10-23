@@ -501,3 +501,32 @@ func newCarrierSessionID(random io.Reader) (string, error) {
 	}
 	return "session_" + id.String(), nil
 }
+
+// Tunnels returns the calling machine's tunnels on the endpoint engine with their active config
+// snapshots: what its agent serves on its runtime carriers.
+func (s *Service) Tunnels(ctx context.Context, proof previewattachment.MachineProof, request runtimewire.TunnelsRequest) ([]runtimewire.EngineTunnel, error) {
+	if proof.Validate() != nil || request.OperationID != proof.OperationID {
+		return nil, ErrInvalid
+	}
+	rows, err := s.DB.Pool().Query(ctx, `SELECT g.tunnel_id,g.generation,'sha256:'||encode(g.content_hash,'hex'),convert_from(g.snapshot,'UTF8')
+FROM endpoints e JOIN tunnel_config_generations g ON g.tunnel_id=e.tunnel_id AND g.activation_state='active'
+JOIN tunnels t ON t.id=e.tunnel_id AND t.account_id=$2 AND t.created_by_host_id=$1
+WHERE e.kind='tunnel' AND e.agent_machine_id=$1 AND e.desired_state='active'
+ORDER BY g.tunnel_id LIMIT $3`, proof.MachineID, proof.UserID, runtimewire.MaximumAdmissions)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []runtimewire.EngineTunnel{}
+	for rows.Next() {
+		var tunnel runtimewire.EngineTunnel
+		var generation int64
+		var snapshot string
+		if err := rows.Scan(&tunnel.TunnelID, &generation, &tunnel.ConfigContentHash, &snapshot); err != nil {
+			return nil, err
+		}
+		tunnel.ConfigGeneration, tunnel.Snapshot = uint64(generation), json.RawMessage(snapshot)
+		out = append(out, tunnel)
+	}
+	return out, rows.Err()
+}
