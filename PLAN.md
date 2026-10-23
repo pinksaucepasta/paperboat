@@ -1366,13 +1366,56 @@ lookup a trigger or access function makes has an index.
 | Machine topic fan-out (prod ~5.7 → ~107 updates/s) | presence flips and service snapshots woke every daemon's inventory | presence ignored; snapshots move `machine_services`; hosts told only topics they wait on; daemon refresh ≤1/30 s, `pb wait` asks its own daemon | 7db75a9d, e50f8372, 960aa6a9, cfab5697 |
 | Production, whole (.12/.15 → .16) | load ~21, postgres 340–356% of 4 cores, peer config 4.3 s with 245 errors / 3 min | load 0.8, postgres 63%, peer config 153 ms with 0 errors (02:53Z; part may be a quieter device wave) | — |
 
-Open, in order: the team view embeds every member, machine and grant (`/v1/teams` 6.4 MB, ~0.7 s; paginated team
-endpoints, contract with Lane A/C); keyset cursors with server-side search/filter/sort and cheap totals for every
-list, per-machine running counts, then console `allPages()` and CLI paging (coordinator 2026-10-23, server first);
-team machine list at limit=200 (~1 s; set-based access description once Lane K's compiled access table is the
-source); per-row preview/terminal enrichment (~100 queries per page, batched); retention bounds for audit events,
-sessions, access sessions and usage records; the machine presence fan-out (each online/state change writes one
-topic row per machine in its audience).
+**Scaling audit** (Lane Q 2026-10-23; one account at 1k / 10k machines and 100 members, platform 100k). Ranked by
+cost at 10k x how often it happens. W = per-machine work, N = machines in the account. Fix top-down, one commit
+each with a PG/load test proving the bound at 10k; Lane R audits daemon/CLI/relay/tunnel the same way.
+
+| # | Path | Cost at 10k per event / steady | Happens | Fix (state) |
+|---|---|---|---|---|
+| 1 | Peer network: a generation bump makes every machine refetch its whole peer list | N x N entries (10^8) per join/leave/key change, 128 KiB cap | every pairing, revoke, renewal | signed deltas per scope, below (building) |
+| 2 | Event waits never healthy (MaxWait 30 s = client timeout) → every daemon polls `/v1/machines` every 15 s x (1 + teams) | 355 lists/min from 22 machines; ~2.7k lists/s at 10k | always | MaxWait 25 s (Lane B); list cheap (#5) |
+| 3 | Revocation document unfiltered, oldest-first LIMIT 10000, no expiry filter: past 10k rows new revocations never reach edges; hosts poll 15 s, edges 5 s | security bug; 4 queries x 10k rows x ~667 req/s | always | per-account, newest/unexpired, delta by seq (next) |
+| 4 | Reconnect storm after deploy/outage: every machine fetches peer config, inventory, services at once | N snapshot builds at once → 503s | every deploy | jittered reconnect (Lane R), snapshot cache per policy scope, per-account build rate bound; load test 5k-machine team |
+| 5 | Machine list: `count(*) OVER ()` runs access functions on every candidate; N daemons per inventory event | ~7N function calls per list; N^2 per event | every inventory event | candidates by policy (3cdce5f8), rule index (2958c232), identical requests coalesced (built), set-based access description (next) |
+| 6 | Wait hub rechecks generations every 5 s per held waiter (2 per machine), ListenFor reconnect wakes all | 4k q/s at 10k, 40k q/s at 100k | always | one sweep per tick (`= ANY`), recheck 60 s jittered |
+| 7 | machine_services: refresh every 2 s past ~10 service machines, all N candidates; ErrDenied above 512 | broken at 1k | always | delta/topic-driven, candidate bound by policy |
+| 8 | Relay grants: one signature per relay node per 64-peer chunk, peers loaded N+1, silently cut to 16 | ~5k signatures per fetch | every peer config | one signature per fetch, set-based, no silent cut (Lane B/M) |
+| 9 | SQL topic triggers uncapped (Go caps 1024): a policy save bumps machine_access on every team machine → each refetches #3 | N refetches of #3 | every policy save | cap + coalesce; `team_machine_grants_publish` gets a WHEN |
+| 10 | edgeset.ReconcileAll every 1 s: one tx per workspace, GROUP BY over all user_machines per page | O(platform) per second | always | dirty-workspace queue (Lane B/M) |
+| 11 | Edge desired state / ingress: full snapshot, no LIMIT, polled; ErrIngressDenied above 4096 | O(platform) per poll | every control interval | deltas by seq (Lane B/M) |
+| 12 | previews topic wakes every carrier in the audience, each POSTs attachments.Allocate | N POSTs per preview change | every preview change | topic per carrier |
+| 13 | Team view / actions return the full team incl. inactive rows; List x 128 teams; policy save row by row | 6.4 MB per read at 1k | every team page | paginated team members/machines/grants (contract with A/C), batch insert |
+| 14 | Heartbeats: user_machines 339 updates/min from 22 machines | ~2.5k writes/s | always | Lane R interval; server writes only on change |
+| 15 | Dashboard counted from the first 200-row page | wrong totals | every console load | GET /v1/machines/summary (built) |
+| 16 | No retention: access sessions, CLI/browser sessions, usage receipts (edge every 250 ms), config sync history, operations, stripe events, device grants, tunnel logs, connector sessions, machine requests; audit prune 1,500 rows/min | unbounded tables | always | retention jobs, batched deletes |
+| 17 | tunnels / config topics: written and NOTIFYed with no subscriber | wasted writes | every change | delete the triggers |
+| 18 | Console loads every page (`allPages()` previews/tunnels) | O(N) per page view | every view | keyset cursors, server search/sort (PQ-04) |
+
+#### Peer network deltas (Lane Q server, Lane R daemon; user decision 2026-10-23)
+
+*Today* a peer-network change bumps the topic and every machine refetches its whole signed configuration
+(`POST /v1/machine-peer-network/config`, `paperboat-network-config+jwt`): N x N per change.
+*Contract* (server first; old daemons keep the full fetch until updated):
+1. **Change log.** Each change of what one machine may reach is a row `(scope_key, seq, op, endpoint_id, entry)`,
+   `op` = add | update | remove; `seq` is ordered per scope (the machine's policy scope: own account, or the team
+   policy version x member set). An update replaces the whole entry (identity plus every scope), never a field
+   patch; a remove carries only `endpoint_id`. Retention: 24 h or 10k rows per scope, whichever is less.
+2. **Request.** `POST /v1/machine-peer-network/changes {since_seq, base_digest}` (same machine proof as config).
+3. **Answer, always signed** with the config's issuer, kid and audience, `typ` `paperboat-network-delta+jwt`:
+   claims `base_seq`, `seq`, `base_digest` (sha256 of the canonical peer set the delta applies to), `digest` (after),
+   `issued_at`, `expires_at` (the state's new expiry; scope `expires_at` stays per entry), `changes[]` (at most 256;
+   `more: true` means ask again from `seq`). No change: a tiny signed delta with only a new `expires_at`.
+4. **Snapshot fallback** `{snapshot: <full signed config with seq and digest>}` when `since_seq` is unknown or older
+   than retention, the digest differs, after key rotation, or after a policy change that rewrites the scope. The
+   daemon applies a delta only if `base_seq`/`base_digest` match its signed state, else asks for a snapshot; gaps,
+   reordering and replay are therefore safe.
+5. **Only reachable peers.** Each machine's set is what its policy lets it reach, not the whole account.
+6. **Bounds.** Changes per answer 256, answer size 64 KiB; the 128 KiB snapshot cap stays for snapshots only; snapshot
+   builds are cached per (scope_key, seq) so machines in one scope share one build, and limited per account
+   (token bucket) so a reconnect storm queues instead of failing; clients reconnect with jitter (Lane R).
+7. **Regional candidates and relay grants** stay full in every answer (about 2 nodes; Lane R's call).
+Test (PG): one join on a 1,000-machine account writes O(1) change rows per affected scope and each machine's next
+answer carries one change; a 5k-machine team survives a server restart (snapshot storm) without 503s.
 
 ## 4. Handoff notes
 
