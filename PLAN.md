@@ -1576,8 +1576,9 @@ i.e. device test runs, not a daemon loop: **R → A**, re-measure after the next
 | Dimension | Target | Bound in code | Verdict | Owner |
 |---|---|---|---|---|
 | Concurrent exec per host | 32 then clear error | execprocess 32 → resource_limit | 32 × 4 MiB output in 2.2 s; 33rd refused in 27 µs (ErrCapacity); 2,000 short execs at 288/s, p99 146 ms, 0 failed; no leak (`TestLoadExecConcurrencyAndChurn`, ubuntu24) | G |
-| Concurrent transfers per host | 2 then queue | MaxConcurrentTransfers 2 | ? | Lane W |
-| Managed SSH streams per host | 32 | host.go 32, no queue → ErrSSHHostBusy at once | ? (parallel rsync/VS Code) | Lane W |
+| Concurrent exec, one client → one peer, over the network | 32 then clear error | client peer stream | 40 parallel `pb exec --json` (pbvm4 containers): 25 ok / 15 `transport_unavailable` "remote outcome may be unknown" (client daemon: peer_stream "service is unavailable"); an earlier run 35/5: fails below the host bound with a misleading message | R | Lane A |
+| Concurrent transfers per host | 2 then queue | MaxConcurrentTransfers 2 | 6 parallel 10 MiB `pb send` one client → one peer: 6/6 ok in 11 s | G | — |
+| Managed SSH streams per host | 32 | host.go 32, no queue → ErrSSHHostBusy at once | 40 parallel `pb ssh` one client → one peer (pbvm4 containers, dev-5dc70c2e): 30 ok, 10 failed after ~29 s with only OpenSSH's "Connection closed" (no Paperboat message); every success took 52.6–54.7 s for a 20 s command (~32 s setup) | R (fails below the bound, silently; setups stall) | Lane A |
 | Relay connections per account | 1,000 machines | derpquic 16 per account, 256 per relay node; peer relay 16 allocations per account | **R by design** for an account of 1,000 (machines past 16 get no relay fallback) | Lane R: caps from fd/memory, fairness from byte budgets, "relay full" → next node; tests: 1,000 registrations of one account, one account's flood doesn't slow another |
 
 **Previews, tunnels**
