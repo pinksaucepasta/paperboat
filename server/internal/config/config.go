@@ -73,6 +73,7 @@ type Config struct {
 	Access                 Access            `json:"access"`
 	Sync                   SyncConfig        `json:"sync"`
 	Diagnostics            Diagnostics       `json:"diagnostics"`
+	Retention              Retention         `json:"retention"`
 	Notifications          Notifications     `json:"notifications"`
 	Providers              Providers         `json:"providers"`
 	Secrets                Secrets           `json:"secrets"`
@@ -499,6 +500,7 @@ func Default() Config {
 			},
 		},
 		Diagnostics: Diagnostics{Retention: 7 * 24 * time.Hour},
+		Retention:   defaultRetention(),
 		Providers: Providers{
 			WorkOS: ProviderConfig{BaseURL: "https://api.workos.com"},
 			GitHub: ProviderConfig{
@@ -521,6 +523,9 @@ func Default() Config {
 }
 
 func (c Config) Validate() error {
+	if err := c.Retention.validate(c.UserMachines.ExpiredAccessSessionRetention); err != nil {
+		return err
+	}
 	if err := c.Network.Validate(); err != nil {
 		return err
 	}

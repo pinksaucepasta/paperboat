@@ -61,6 +61,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/privateaccess"
 	"github.com/pinksaucepasta/paperboat/server/internal/releaseauthority"
 	"github.com/pinksaucepasta/paperboat/server/internal/resourceusage"
+	"github.com/pinksaucepasta/paperboat/server/internal/retention"
 	"github.com/pinksaucepasta/paperboat/server/internal/runtimeattachment"
 	"github.com/pinksaucepasta/paperboat/server/internal/selfhost"
 	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
@@ -912,11 +913,21 @@ func New(opts Options) (*App, error) {
 		observedWorker(supportService, "worker_preview_outbox", previewAttachmentProduction.Repository.OutboxWorker(opts.Config.TerminalSessions.WorkerInterval), progress),
 	}
 	serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_team_retention", periodicPreviewTunnelWorker(time.Minute, func(ctx context.Context) error {
-		pruneContext, cancel := context.WithTimeout(ctx, opts.Config.HTTP.RequestTimeout)
+		pruneContext, cancel := context.WithTimeout(ctx, opts.Config.Retention.Budget+opts.Config.HTTP.RequestTimeout)
 		defer cancel()
-		_, err := activityLog.Prune(pruneContext)
+		// Audit events past their plan's window, batch after batch until caught up (one batch a minute could not
+		// keep up with the write rate); then every other table bounded by config.Retention.
+		var err error
+		for deadline := time.Now().Add(opts.Config.Retention.Budget); time.Now().Before(deadline); {
+			deleted, pruneErr := activityLog.Prune(pruneContext)
+			if pruneErr != nil || deleted < activity.PruneBatch {
+				err = pruneErr
+				break
+			}
+		}
+		_, retentionErr := retention.Run(pruneContext, store, opts.Config.Retention)
 		// Secrets held for API token create retries never outlive their window (F21-12).
-		err = errors.Join(err, apiTokens.PruneCreateRequests(pruneContext), enrollmentService.PruneProofNonces(pruneContext))
+		err = errors.Join(err, retentionErr, apiTokens.PruneCreateRequests(pruneContext), enrollmentService.PruneProofNonces(pruneContext))
 		workers.IterationFailure(ctx, "team_retention_cleanup", "team_retention_failed", err)
 		outcome := "success"
 		if err != nil {
