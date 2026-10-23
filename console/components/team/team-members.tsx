@@ -113,7 +113,7 @@ export function TeamManage({ workspace }: { workspace: Workspace }) {
   const freeSeats = billing.data ? Math.max(0, billing.data.seats_bought - billing.data.seats_used) : undefined
   const name = team.data.display_name || team.data.team_id
   // Security (SSO, directory) is for the owner and admins to change and auditors to see.
-  const securityTab = teamLive.businessRoles && ["owner", "admin", "auditor"].includes(actor)
+  const securityTab = teamLive.security && ["owner", "admin", "auditor"].includes(actor)
 
   return (
     <div className="flex flex-col gap-10">

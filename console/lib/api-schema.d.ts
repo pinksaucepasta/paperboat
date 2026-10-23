@@ -7797,6 +7797,90 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/teams/{team_id}/audit-streams": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List audit log streams
+         * @description Team plan; owners, admins and auditors (audit.read).
+         */
+        get: operations["team_audit_streams"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/teams/{team_id}/audit-streams/{kind}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Configure an audit log stream
+         * @description Owners and admins (audit.stream). Creates or replaces the stream of this kind; a new stream starts at the end of the audit log. Empty secret fields keep stored ones.
+         */
+        put: operations["team_audit_stream_configure"];
+        post?: never;
+        /**
+         * Remove an audit log stream
+         * @description Owners and admins (audit.stream).
+         */
+        delete: operations["team_audit_stream_remove"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/teams/{team_id}/audit-streams/{kind}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send a test event
+         * @description Sends one team.activity_stream_test event now; 502 audit_stream_delivery_failed says why it was refused.
+         */
+        post: operations["team_audit_stream_test"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/api-token-sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start a CLI session with an API token
+         * @description The bearer is an API token (pbat_…). The session ends when the token is revoked or expires; a scoped token's session is held to the scope.
+         */
+        post: operations["post_v1_auth_api_token_sessions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -11775,42 +11859,77 @@ export interface components {
             organization: boolean;
             can_manage: boolean;
             sso: {
-                connections?: {
-                    id?: string;
-                    type?: string;
-                    state?: string;
+                connections: {
+                    id: string;
+                    type: string;
+                    state: string;
                 }[];
-                domains?: {
-                    domain?: string;
-                    state?: string;
+                domains: {
+                    domain: string;
+                    state: string;
                 }[];
-                required?: boolean;
-                session_seconds?: number;
-                session_min_seconds?: number;
-                session_max_seconds?: number;
-                jit?: boolean;
-                exempt?: string[];
-                exempt_max?: number;
+                required: boolean;
+                session_seconds: number;
+                session_min_seconds: number;
+                session_max_seconds: number;
+                jit: boolean;
+                exempt: string[];
+                exempt_max: number;
             };
             directory: {
-                directory?: null | {
-                    id?: string;
-                    type?: string;
-                    state?: string;
+                directory: null | {
+                    id: string;
+                    type: string;
+                    state: string;
                 };
-                users?: number;
-                groups?: {
-                    id?: string;
-                    name?: string;
-                    role?: string;
+                users: number;
+                groups: {
+                    id: string;
+                    name: string;
+                    role: string;
                 }[];
-                mapped_only?: boolean;
+                mapped_only: boolean;
                 /** Format: date-time */
                 synced_at?: string;
                 error?: string;
             };
         } & {
             [key: string]: unknown;
+        };
+        /** @description A SIEM destination of the team audit log (PLAN F19-10). Credentials are never returned. */
+        AuditStreamDestination: {
+            /** @enum {string} */
+            kind: "https" | "s3";
+            /**
+             * Format: uri
+             * @description HTTPS endpoint, or the S3-compatible endpoint.
+             */
+            url: string;
+            header_name?: string;
+            region?: string;
+            bucket?: string;
+            prefix?: string;
+            access_key_id?: string;
+            /** Format: date-time */
+            last_delivered_at?: string;
+            last_error?: string;
+            /** Format: date-time */
+            failing_since?: string;
+            /** @description Events not delivered yet. */
+            pending: number;
+            /** @description HTTPS only, returned once when created. */
+            signing_secret?: string;
+        };
+        AuditStreamInput: {
+            /** Format: uri */
+            url: string;
+            header_name?: string;
+            header_value?: string;
+            region?: string;
+            bucket?: string;
+            prefix?: string;
+            access_key_id?: string;
+            secret_access_key?: string;
         };
     };
     responses: {
@@ -12042,6 +12161,8 @@ export interface operations {
                 /** @description Exact owner identifier, at most 128 UTF-8 bytes; whitespace and NUL are rejected. */
                 owner?: string;
                 closed?: boolean;
+                /** @description false returns the stored sessions without probing each host for live metadata (current directory, foreground process, participants). Authorization is unchanged. */
+                live?: boolean;
             };
             header?: never;
             path?: never;
@@ -28593,6 +28714,166 @@ export interface operations {
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    team_audit_streams: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                team_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["AuditStreamDestination"][];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    team_audit_stream_configure: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                team_id: string;
+                kind: "https" | "s3";
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AuditStreamInput"];
+            };
+        };
+        responses: {
+            /** @description Result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["AuditStreamDestination"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    team_audit_stream_remove: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                team_id: string;
+                kind: "https" | "s3";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            removed?: boolean;
+                        };
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    team_audit_stream_test: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                team_id: string;
+                kind: "https" | "s3";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            delivered?: boolean;
+                        };
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    post_v1_auth_api_token_sessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description CLI token set (access_token, refresh_token, expires_in, scope, cli_client_session_id) for a session of the token's creator that carries the token. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
             503: components["responses"]["Error"];
         };
     };

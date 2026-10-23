@@ -17,9 +17,10 @@ export type TeamRole = "owner" | "admin" | "billing" | "auditor" | "member"
 
 /**
  * Team features whose server side is not deployed yet; their controls render disabled.
- * `businessRoles`: billing and auditor roles, directory-managed members and SSO (F19).
+ * `businessRoles`: billing and auditor roles (F19, live 2026.10.23.8); `security`: the Security
+ * tab (SSO, directory sync; live 2026.10.23.10).
  */
-export const teamLive = { inviteRole: true, rename: true, mail: true, businessRoles: false } as const
+export const teamLive = { inviteRole: true, rename: true, mail: true, businessRoles: true, security: true } as const
 
 /** Role names and what each is for (server/docs/teams-business.md "Roles"). */
 export const roleLabels: Record<string, string> = {

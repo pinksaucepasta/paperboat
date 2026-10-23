@@ -20,7 +20,7 @@ export const billingLive = {
   /** `team_trial_days` on the personal overview and a trial in Team Checkout (Lane O). */
   teamTrial: false,
   /** Invoices, billing details and pay by invoice (F19, Lane S). */
-  business: false,
+  business: true,
 } as const
 export const notLiveTitle = "Not available yet"
 
