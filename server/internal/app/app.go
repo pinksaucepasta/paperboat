@@ -497,6 +497,9 @@ func New(opts Options) (*App, error) {
 		_ = store.Close()
 		return nil, fmt.Errorf("configure peer network authority: %w", err)
 	}
+	// Relay grants are withheld, with the typed reason and Billing page, for an account out of
+	// allowance in every workspace; without this the refusal only happened at the relay node.
+	peerNetworkService.ConfigureQuota(consoleBillingURL(opts.Config.Mail.ConsoleOrigin))
 	nativePrivateResolver, err := nativeprivateaccess.NewSQLResolver(store)
 	if err != nil {
 		_ = store.Close()
