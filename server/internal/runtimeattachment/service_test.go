@@ -335,6 +335,18 @@ VALUES($1,'default','1.0','epoch_backup','ready',true,now(),'second-region','sec
 	if routeAfter, attachmentAfter := versions(); routeAfter != routeBefore || attachmentAfter != attachmentBefore {
 		t.Fatalf("unchanged observation rewrote rows: route %s->%s attachment %s->%s", routeBefore, routeAfter, attachmentBefore, attachmentAfter)
 	}
+	// A route recreated by an update starts unapplied while its carrier is already ready:
+	// the next report applies it although nothing about the attachment changed.
+	if _, err := database.SQL().ExecContext(ctx, `UPDATE control_routes SET applied_node_id=NULL,applied_revision=0,applied_generation=0 WHERE id=$1`, route); err != nil {
+		t.Fatal(err)
+	}
+	if err = service.Observe(ctx, edge, []runtimewire.Observation{observation}); err != nil {
+		t.Fatal(err)
+	}
+	var reapplied string
+	if err := database.SQL().QueryRowContext(ctx, `SELECT coalesce(applied_node_id,'') FROM control_routes WHERE id=$1`, route).Scan(&reapplied); err != nil || reapplied != node {
+		t.Fatalf("an unapplied route with a ready carrier was not applied: node=%q err=%v", reapplied, err)
+	}
 	if got := dnsAddresses(); len(got) != 1 || got[node] != "192.0.2.10" {
 		t.Fatalf("DNS after the first carrier is ready = %v, want only %s", got, node)
 	}

@@ -460,28 +460,32 @@ func (s *Service) Observe(ctx context.Context, edge previewattachment.PreviewEdg
 			if err != nil {
 				return err
 			}
-			if unchanged && current {
+			if !(unchanged && current) {
+				err = tx.QueryRow(ctx, `UPDATE runtime_carrier_attachments SET ready=$6,observed_at=now() WHERE route_id=$1 AND generation=$2 AND session_id=$3 AND edge_node_id=$4 AND edge_process_epoch=$5 AND (NOT $6 OR paperboat.runtime_carrier_valid(route_id,edge_node_id,edge_process_epoch,false)) RETURNING active`, o.RouteID, o.AttachmentGeneration, o.SessionID, edge.NodeID, edge.ProcessEpoch, o.Ready).Scan(&active)
+				if errors.Is(err, pgx.ErrNoRows) {
+					stale = true
+					continue
+				}
+				if err != nil {
+					return err
+				}
+			}
+			if !active {
 				continue
 			}
-			err = tx.QueryRow(ctx, `UPDATE runtime_carrier_attachments SET ready=$6,observed_at=now() WHERE route_id=$1 AND generation=$2 AND session_id=$3 AND edge_node_id=$4 AND edge_process_epoch=$5 AND (NOT $6 OR paperboat.runtime_carrier_valid(route_id,edge_node_id,edge_process_epoch,false)) RETURNING active`, o.RouteID, o.AttachmentGeneration, o.SessionID, edge.NodeID, edge.ProcessEpoch, o.Ready).Scan(&active)
-			if errors.Is(err, pgx.ErrNoRows) {
-				stale = true
-				continue
-			}
-			if err != nil {
-				return err
-			}
-			if !active || unchanged {
-				continue
-			}
+			// The route and connector rows follow the active attachment's readiness. They are
+			// checked on every report (a route recreated by an update starts unapplied while its
+			// carrier is already ready) but written only when they differ.
 			// Existing browser consumers retain their generation checks. Their queries
 			// additionally require a current observed attachment, so legacy observation
 			// writers cannot create readiness without a real carrier.
-			_, err = tx.Exec(ctx, `UPDATE control_connector_generations c SET state=CASE WHEN $2 THEN 'admitted' ELSE 'pending' END,edge_node_id=CASE WHEN $2 THEN a.edge_node_id ELSE NULL END,version=c.version+1,updated_at=now() FROM runtime_carrier_attachments a,control_routes r WHERE a.route_id=$1 AND a.active AND r.id=a.route_id AND c.environment_id=r.environment_id AND c.connector_id='runtime' AND c.machine_id=a.machine_id`, o.RouteID, o.Ready)
+			_, err = tx.Exec(ctx, `UPDATE control_connector_generations c SET state=CASE WHEN $2 THEN 'admitted' ELSE 'pending' END,edge_node_id=CASE WHEN $2 THEN a.edge_node_id ELSE NULL END,version=c.version+1,updated_at=now() FROM runtime_carrier_attachments a,control_routes r WHERE a.route_id=$1 AND a.active AND r.id=a.route_id AND c.environment_id=r.environment_id AND c.connector_id='runtime' AND c.machine_id=a.machine_id
+ AND (c.state,c.edge_node_id) IS DISTINCT FROM (CASE WHEN $2 THEN 'admitted' ELSE 'pending' END,CASE WHEN $2 THEN a.edge_node_id ELSE NULL END)`, o.RouteID, o.Ready)
 			if err != nil {
 				return err
 			}
-			_, err = tx.Exec(ctx, `UPDATE control_routes r SET applied_node_id=CASE WHEN $2 THEN a.edge_node_id ELSE NULL END,applied_revision=CASE WHEN $2 THEN a.route_revision ELSE 0 END,applied_generation=CASE WHEN $2 THEN c.generation ELSE 0 END,version=r.version+1,updated_at=now() FROM runtime_carrier_attachments a,control_connector_generations c WHERE r.id=$1 AND a.route_id=r.id AND a.active AND c.environment_id=r.environment_id AND c.connector_id='runtime' AND c.machine_id=a.machine_id`, o.RouteID, o.Ready)
+			_, err = tx.Exec(ctx, `UPDATE control_routes r SET applied_node_id=CASE WHEN $2 THEN a.edge_node_id ELSE NULL END,applied_revision=CASE WHEN $2 THEN a.route_revision ELSE 0 END,applied_generation=CASE WHEN $2 THEN c.generation ELSE 0 END,version=r.version+1,updated_at=now() FROM runtime_carrier_attachments a,control_connector_generations c WHERE r.id=$1 AND a.route_id=r.id AND a.active AND c.environment_id=r.environment_id AND c.connector_id='runtime' AND c.machine_id=a.machine_id
+ AND (r.applied_node_id,r.applied_revision,r.applied_generation) IS DISTINCT FROM (CASE WHEN $2 THEN a.edge_node_id ELSE NULL END,CASE WHEN $2 THEN a.route_revision ELSE 0 END,CASE WHEN $2 THEN c.generation ELSE 0 END)`, o.RouteID, o.Ready)
 			if err != nil {
 				return err
 			}
