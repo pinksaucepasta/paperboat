@@ -42469,6 +42469,62 @@
         }
       }
     },
+    "/v1/runtime/endpoint-tunnels": {
+      "post": {
+        "summary": "List the machine's tunnels served on the endpoint engine",
+        "description": "Returns the active config snapshot of each of the machine's tunnels that ride its runtime carriers (capability tunnel_endpoints). Requires renewable machine proof.",
+        "operationId": "post_v1_runtime_endpoint_tunnels",
+        "security": [
+          {
+            "bearerAccess": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "operation_id"
+                ],
+                "properties": {
+                  "operation_id": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Engine tunnels with their active config snapshots."
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/MachineIdentity"
+          },
+          {
+            "$ref": "#/components/parameters/MachineProof"
+          }
+        ]
+      }
+    },
     "/v1/runtime/carrier-attachment": {
       "post": {
         "summary": "Renew the installed machine runtime carrier",
