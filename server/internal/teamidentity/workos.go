@@ -307,7 +307,35 @@ func (c HTTPWorkOS) directoryGroups(ctx context.Context, directory string, out *
 	}
 }
 
+// directoryUsers lists the directory's users, then each group's members: WorkOS no longer fills a
+// directory user's groups, so membership comes only from listing users by group.
 func (c HTTPWorkOS) directoryUsers(ctx context.Context, directory string, out *OrganizationState) error {
+	index := map[string]int{}
+	if err := c.eachDirectoryUser(ctx, url.Values{"directory": {directory}}, func(user DirectoryUser) error {
+		index[user.ID] = len(out.Users)
+		out.Users = append(out.Users, user)
+		if len(out.Users) > MaxDirectoryUsers {
+			return ErrDirectoryTooLarge
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	for _, g := range out.Groups {
+		if err := c.eachDirectoryUser(ctx, url.Values{"group": {g.ID}}, func(user DirectoryUser) error {
+			if i, ok := index[user.ID]; ok {
+				out.Users[i].Groups = append(out.Users[i].Groups, g.ID)
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// eachDirectoryUser pages through GET /directory_users with filter (directory or group).
+func (c HTTPWorkOS) eachDirectoryUser(ctx context.Context, filter url.Values, visit func(DirectoryUser) error) error {
 	after := ""
 	for {
 		var page struct {
@@ -319,15 +347,15 @@ func (c HTTPWorkOS) directoryUsers(ctx context.Context, directory string, out *O
 					Primary bool   `json:"primary"`
 					Value   string `json:"value"`
 				} `json:"emails"`
-				Groups []struct {
-					ID string `json:"id"`
-				} `json:"groups"`
 			} `json:"data"`
 			ListMetadata struct {
 				After string `json:"after"`
 			} `json:"list_metadata"`
 		}
-		q := url.Values{"directory": {directory}, "limit": {"100"}}
+		q := url.Values{"limit": {"100"}}
+		for k, v := range filter {
+			q[k] = v
+		}
 		if after != "" {
 			q.Set("after", after)
 		}
@@ -341,13 +369,9 @@ func (c HTTPWorkOS) directoryUsers(ctx context.Context, directory string, out *O
 					user.Email = strings.ToLower(strings.TrimSpace(e.Value))
 				}
 			}
-			for _, g := range u.Groups {
-				user.Groups = append(user.Groups, g.ID)
+			if err := visit(user); err != nil {
+				return err
 			}
-			out.Users = append(out.Users, user)
-		}
-		if len(out.Users) > MaxDirectoryUsers {
-			return ErrDirectoryTooLarge
 		}
 		if page.ListMetadata.After == "" {
 			return nil
