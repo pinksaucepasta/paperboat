@@ -38,15 +38,15 @@
    "actor": "user_perf_0001",
    "path": "/v1/machines?workspace=perf-team-001",
    "max_queries": 20,
-   "p50_ms": 820,
-   "reason": "1000 team machines filtered by the access functions per candidate; set-based team access (Lane Q next)"
+   "p50_ms": 1300,
+   "reason": "50 team machines with policy-backed access (the seed grants through workspace policy rules since 3581da80; before, members had no access and the budget measured nothing); per-machine access functions, set-based access next"
   },
   {
    "actor": "user_perf_0003",
    "path": "/v1/machines?workspace=perf-team-001",
    "max_queries": 20,
-   "p50_ms": 920,
-   "reason": "same as the team owner's team list"
+   "p50_ms": 1400,
+   "reason": "50 team machines with policy-backed access (the seed grants through workspace policy rules since 3581da80; before, members had no access and the budget measured nothing); per-machine access functions, set-based access next"
   },
   {
    "actor": "user_perf_0001",
@@ -306,6 +306,18 @@
    "actor": "user_perf_0002",
    "path": "/v1/config-repositories",
    "max_queries": 5
+  },
+  {
+   "actor": "user_perf_0050",
+   "path": "/v1/machines",
+   "max_queries": 12
+  },
+  {
+   "actor": "user_perf_0050",
+   "path": "/v1/machines?workspace=perf-team-001",
+   "max_queries": 20,
+   "p50_ms": 2600,
+   "reason": "ordinary member who may use half of a 1000-machine team, in the team workspace: 501 machines, per-machine access functions (10.7 s before 3cdce5f8 and 148); set-based access next"
   }
  ]
 }

@@ -64,7 +64,7 @@ func TestPerformanceBudgetsOnSeededPostgres(t *testing.T) {
 		return ctx, func(string) {}
 	})
 	tokens := map[string]string{}
-	for _, actor := range []string{perf.TeamOwner, perf.Solo, perf.TeamMember} {
+	for _, actor := range []string{perf.TeamOwner, perf.Solo, perf.TeamMember, perf.OrdinaryMember} {
 		token := "perf-session-" + actor
 		sum := sha256.Sum256([]byte(token))
 		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.sessions(id,user_id,session_hash,csrf_hash,expires_at,workos_session_id,workos_access_expires_at)

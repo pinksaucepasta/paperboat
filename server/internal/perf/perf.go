@@ -30,7 +30,9 @@ const (
 	TeamOwner  = "user_perf_0001" // owner of perf-team-001: 200 members, 1000 team machines
 	Solo       = "user_perf_0002" // 100 personal machines, many terminals, previews and tunnels
 	TeamMember = "user_perf_0003" // member of perf-team-001 with selected-member grants
-	Team       = "perf-team-001"
+	// Ordinary member of perf-team-001: may use only the half of its machines that every member may.
+	OrdinaryMember = "user_perf_0050"
+	Team           = "perf-team-001"
 )
 
 // Endpoint is one measured request. Path may contain {team_machine}, {solo_machine}, {solo_tunnel} and
