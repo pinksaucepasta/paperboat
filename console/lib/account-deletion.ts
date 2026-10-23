@@ -3,8 +3,8 @@
 import { queryOptions } from "@tanstack/react-query"
 import { api, idempotencyKey, send } from "@/lib/api"
 
-/** Off until Lane B deploys account deletion (F2-09): unknown /v1 paths answer 401 (NOTES.md). */
-export const accountDeletionLive = false
+/** Account deletion (F2-09, server 2026.10.23.71). */
+export const accountDeletionLive = true
 
 type Team = { slug: string; name: string }
 

@@ -18,7 +18,8 @@ export type ActivityEvent = {
    * company directory (SSO directory sync); `operator`: Paperboat support.
    */
   actor: {
-    kind: "user" | "api_token" | "directory" | "operator" | "machine" | "system"
+    /** `deleted_user`: someone who deleted their account; the event keeps no name or email. */
+    kind: "user" | "api_token" | "directory" | "operator" | "machine" | "system" | "deleted_user"
     id: string
     name?: string
     email?: string
@@ -262,6 +263,7 @@ export function actorName(event: ActivityEvent, meId?: string, memberNames?: Rea
   if (event.actor.kind === "system") return "Paperboat"
   if (event.actor.kind === "directory") return "Directory sync"
   if (event.actor.kind === "operator") return "Paperboat support"
+  if (event.actor.kind === "deleted_user") return "Deleted user"
   return (
     event.actor.name ??
     event.actor.email ??
