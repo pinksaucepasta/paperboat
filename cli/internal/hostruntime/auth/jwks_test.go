@@ -88,6 +88,7 @@ func TestJWKSRefreshRotationExpiryAndFailureRetention(t *testing.T) {
 		t.Fatalf("rotated key=%v ok=%v", key, ok)
 	}
 	body = `{"keys":[{"kid":"bad"}]}`
+	clock.now = clock.now.Add(jwksRefreshCooldown)
 	if err := cache.Refresh(context.Background()); !errors.Is(err, ErrJWKSInvalid) {
 		t.Fatalf("err=%v", err)
 	}
@@ -199,5 +200,40 @@ func TestJWKSPersistenceLoadsOnlyFreshValidatedMaterial(t *testing.T) {
 	}
 	if _, ok, _ := stale.Lookup(context.Background(), "persisted"); ok {
 		t.Fatal("stale persisted authorization material was accepted")
+	}
+}
+
+func TestJWKSRefreshCooldownCollapsesUnknownKeyMisses(t *testing.T) {
+	clock := &fixedClock{now: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}
+	key := ed25519.PublicKey(make([]byte, ed25519.PublicKeySize))
+	body := jwksFor("key-1", key)
+	var fetches atomic.Int32
+	cache, err := NewJWKSCache(JWKSConfig{Clock: clock, TTL: time.Minute, Fetcher: fetcherFunc(func(context.Context) (io.ReadCloser, error) {
+		fetches.Add(1)
+		return io.NopCloser(strings.NewReader(body)), nil
+	})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	for range 50 {
+		wg.Add(1)
+		go func() { defer wg.Done(); _ = cache.Refresh(context.Background()) }()
+	}
+	wg.Wait()
+	if got := fetches.Load(); got != 1 {
+		t.Fatalf("fetches=%d for 50 concurrent misses, want 1", got)
+	}
+	body = jwksFor("key-2", key)
+	_ = cache.Refresh(context.Background())
+	if _, ok, _ := cache.Lookup(context.Background(), "key-2"); ok || fetches.Load() != 1 {
+		t.Fatal("refresh inside the cooldown fetched again")
+	}
+	clock.now = clock.now.Add(jwksRefreshCooldown)
+	if err := cache.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := cache.Lookup(context.Background(), "key-2"); !ok || fetches.Load() != 2 {
+		t.Fatal("newly published key not found after the cooldown")
 	}
 }

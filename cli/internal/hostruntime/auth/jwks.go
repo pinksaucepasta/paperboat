@@ -98,7 +98,14 @@ type JWKSCache struct {
 	refreshMu sync.Mutex
 	config    JWKSConfig
 	keys      map[string]cachedKey
+	// lastFetch and lastErr are guarded by refreshMu. Callers that arrive
+	// within jwksRefreshCooldown of a fetch share its result: concurrent misses
+	// collapse into one fetch and unknown key IDs cannot drive a fetch storm.
+	lastFetch time.Time
+	lastErr   error
 }
+
+const jwksRefreshCooldown = 30 * time.Second
 
 type cachedKey struct {
 	key       ed25519.PublicKey
@@ -149,6 +156,16 @@ func (c *JWKSCache) Refresh(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	now := c.config.Clock.Now()
+	if !c.lastFetch.IsZero() && now.Sub(c.lastFetch) < jwksRefreshCooldown {
+		return c.lastErr
+	}
+	c.lastErr = c.fetch(ctx)
+	c.lastFetch = now
+	return c.lastErr
+}
+
+func (c *JWKSCache) fetch(ctx context.Context) error {
 	body, err := c.config.Fetcher.Fetch(ctx)
 	if err != nil {
 		return err
