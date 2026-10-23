@@ -89,7 +89,7 @@ func TestPostgresTeamSSOAndDirectorySync(t *testing.T) {
 	exec(`DELETE FROM paperboat.users WHERE id=$1`, bob) // bob has no account yet
 	fake := &fakeWorkOS{}
 	seats := &fakeSeats{}
-	s := New(store, fake, config.Default().Business, "https://console.example.test/team", seats)
+	s := New(store, fake, config.Default().Business, config.Default().Mail.InvitationLifetimeSeconds, "https://console.example.test/team", seats)
 	tx := func(fn func(context.Context, *db.Tx) error) error { return store.InTx(ctx, fn) }
 
 	if _, err := s.PortalLink(ctx, alice, team, "sso"); !errors.Is(err, ErrNotFound) {
@@ -128,6 +128,32 @@ func TestPostgresTeamSSOAndDirectorySync(t *testing.T) {
 	var held int
 	if err = store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.team_invitations WHERE team_id=$1 AND recipient_email=$2 AND directory_user_id='du_bob' AND accepted_at IS NULL AND cancelled_at IS NULL`, team, "bob@"+domain).Scan(&held); err != nil || held != 1 {
 		t.Fatalf("bob held invitation=%d err=%v", held, err)
+	}
+	// The held invitation has the normal lifetime (readers scan it; 'infinity' broke the team's
+	// invitation list live) and follows the group mapping on the next reconcile.
+	heldInvitation := func() (string, time.Time) {
+		t.Helper()
+		var role string
+		var expires time.Time
+		if err := store.SQL().QueryRowContext(ctx, `SELECT role,expires_at FROM paperboat.team_invitations WHERE team_id=$1 AND directory_user_id='du_bob' AND accepted_at IS NULL AND cancelled_at IS NULL`, team).Scan(&role, &expires); err != nil {
+			t.Fatal(err)
+		}
+		return role, expires
+	}
+	lifetime := time.Duration(config.Default().Mail.InvitationLifetimeSeconds) * time.Second
+	if role, expires := heldInvitation(); role != "member" || time.Until(expires) < lifetime-time.Hour || time.Until(expires) > lifetime+time.Hour {
+		t.Fatalf("bob held invitation role=%s expires=%v", role, expires)
+	}
+	fake.state.Groups = append(fake.state.Groups, DirectoryGroup{ID: "g_fin", Name: "Finance"})
+	fake.state.Users[1].Groups = []string{"g_fin"}
+	if _, err = s.UpdateDirectory(ctx, owner, team, DirectorySettings{GroupRoles: map[string]string{"g_fin": "billing"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Reconcile(ctx, team); err != nil {
+		t.Fatal(err)
+	}
+	if role, _ := heldInvitation(); role != "billing" {
+		t.Fatalf("bob held invitation role after mapping = %s", role)
 	}
 	if len(seats.calls) != 1 || seats.calls[0] != 3 {
 		t.Fatalf("seat purchases = %v", seats.calls)

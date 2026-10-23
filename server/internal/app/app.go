@@ -806,7 +806,7 @@ func New(opts Options) (*App, error) {
 	if opts.Config.Secrets.WorkOSAPIKey != "" {
 		workOSOrganizations = teamidentity.HTTPWorkOS{BaseURL: opts.Config.Providers.WorkOS.BaseURL, APIKey: opts.Config.Secrets.WorkOSAPIKey}
 	}
-	teamIdentity := teamidentity.New(store, workOSOrganizations, opts.Config.Business, strings.TrimRight(opts.Config.HTTP.BrowserLoginOrigin, "/")+"/team", workspaceBilling)
+	teamIdentity := teamidentity.New(store, workOSOrganizations, opts.Config.Business, opts.Config.Mail.InvitationLifetimeSeconds, strings.TrimRight(opts.Config.HTTP.BrowserLoginOrigin, "/")+"/team", workspaceBilling)
 	router := httpapi.NewRouter(httpapi.Options{
 		ClientUpdatePolicy:        clientupdate.New(store, auditWriter, opts.Config.ReleaseDirectory),
 		SupportReports:            supportService,

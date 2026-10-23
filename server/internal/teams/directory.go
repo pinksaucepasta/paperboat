@@ -103,13 +103,29 @@ func UnlinkDirectoryTx(ctx context.Context, tx *db.Tx, team string) error {
 	return err
 }
 
-// HoldDirectoryInvitationTx keeps a seat for a directory user without a Paperboat account; the
-// invitation never expires and turns into membership at their first sign-in with that email.
-func HoldDirectoryInvitationTx(ctx context.Context, tx *db.Tx, team, email, role, directoryUser string) (bool, error) {
+// HoldDirectoryInvitationTx keeps a seat for a directory user without a Paperboat account. The
+// invitation has the normal lifetime (lifetimeSeconds); every directory reconcile (each event and
+// daily) renews it and moves its role with the group mapping while the user stays in the
+// directory. It turns into membership at their first sign-in with that email.
+func HoldDirectoryInvitationTx(ctx context.Context, tx *db.Tx, team, email, role, directoryUser string, lifetimeSeconds int64) (bool, error) {
+	var previous string
+	err := tx.QueryRow(ctx, `WITH held AS (SELECT invitation_id,role FROM team_invitations WHERE team_id=$1 AND directory_user_id=$2
+ AND accepted_at IS NULL AND cancelled_at IS NULL ORDER BY created_at LIMIT 1 FOR UPDATE)
+ UPDATE team_invitations i SET role=$3,expires_at=now()+$4*interval '1 second' FROM held WHERE i.invitation_id=held.invitation_id RETURNING held.role`,
+		team, directoryUser, role, lifetimeSeconds).Scan(&previous)
+	if err == nil {
+		if previous == role {
+			return false, nil
+		}
+		return true, directoryAudit(ctx, tx, "", team, "directory_invitation_role", map[string]any{"role": role})
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return false, err
+	}
 	tag, err := tx.Exec(ctx, `INSERT INTO team_invitations(invitation_id,team_id,recipient_email,created_by,expires_at,role,directory_user_id)
- SELECT $1,t.team_id,$3,t.owner_account,'infinity',$4,$5 FROM teams t WHERE t.team_id=$2 AND t.deleted_at IS NULL
+ SELECT $1,t.team_id,$3,t.owner_account,now()+$6*interval '1 second',$4,$5 FROM teams t WHERE t.team_id=$2 AND t.deleted_at IS NULL
  AND NOT EXISTS(SELECT 1 FROM team_invitations i WHERE i.team_id=$2 AND i.recipient_email=$3 AND i.accepted_at IS NULL AND i.cancelled_at IS NULL)`,
-		"inv_"+uuid.NewString(), team, email, role, directoryUser)
+		"inv_"+uuid.NewString(), team, email, role, directoryUser, lifetimeSeconds)
 	if err != nil || tag.RowsAffected() == 0 {
 		return false, err
 	}

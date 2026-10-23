@@ -58,10 +58,13 @@ type Service struct {
 	cfg       config.Business
 	returnURL string
 	seats     SeatChanger
+	// invitationLifetime (seconds) is the configured invitation lifetime; held directory
+	// invitations get it and each reconcile renews it.
+	invitationLifetime int64
 }
 
-func New(store *db.DB, workos WorkOS, cfg config.Business, returnURL string, seats SeatChanger) *Service {
-	return &Service{db: store, workos: workos, cfg: cfg, returnURL: returnURL, seats: seats}
+func New(store *db.DB, workos WorkOS, cfg config.Business, invitationLifetimeSeconds int64, returnURL string, seats SeatChanger) *Service {
+	return &Service{db: store, workos: workos, cfg: cfg, invitationLifetime: invitationLifetimeSeconds, returnURL: returnURL, seats: seats}
 }
 
 type Status struct {

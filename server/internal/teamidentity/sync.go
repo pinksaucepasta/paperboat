@@ -305,7 +305,7 @@ func (s *Service) applyDirectoryTx(ctx context.Context, tx *db.Tx, team string, 
 			return err
 		}
 		if account == "" {
-			held, err := teams.HoldDirectoryInvitationTx(ctx, tx, team, u.Email, u.Groups[0], u.ID)
+			held, err := teams.HoldDirectoryInvitationTx(ctx, tx, team, u.Email, u.Groups[0], u.ID, s.invitationLifetime)
 			if err != nil {
 				return err
 			}
