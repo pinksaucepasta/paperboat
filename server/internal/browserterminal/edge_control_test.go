@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat-server/internal/usermachines"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -296,5 +297,14 @@ func TestEdgeAdmissionCapturesOperationalCauseAndCanRecover(t *testing.T) {
 	defer store.mu.Unlock()
 	if len(store.records) != 1 {
 		t.Fatalf("successful recovery added a failure record: %d", len(store.records))
+	}
+}
+
+// A bandwidth refusal at admission is an expected rejection with its own reason, not an
+// unexpected failure filed as a support report.
+func TestBandwidthRefusalIsAnExpectedAdmissionRejection(t *testing.T) {
+	err := fmt.Errorf("record usage admission: %w", &usermachines.BandwidthQuotaError{BillingURL: "https://console.example.test/billing"})
+	if !expectedTerminalRejection(err) || edgeAdmissionReason(err) != "bandwidth_quota_exhausted" {
+		t.Fatalf("expected=%v reason=%q", expectedTerminalRejection(err), edgeAdmissionReason(err))
 	}
 }

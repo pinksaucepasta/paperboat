@@ -22,6 +22,9 @@ type BandwidthQuotaError struct{ BillingURL string }
 func (e *BandwidthQuotaError) Error() string        { return ErrBandwidthQuotaExhausted.Error() }
 func (e *BandwidthQuotaError) Is(target error) bool { return target == ErrBandwidthQuotaExhausted }
 
+// Unwrap exposes the sentinel, so callers that match error leaves by identity see the refusal.
+func (e *BandwidthQuotaError) Unwrap() error { return ErrBandwidthQuotaExhausted }
+
 // ConfigureRuntimeQuota makes edge runtime sessions (exec, ssh, terminal, file transfer)
 // admission-checked and accounted against the paying workspace. Nil leaves them unmetered.
 // billingURL is the console's Billing page, returned with a refusal; it may be empty.
