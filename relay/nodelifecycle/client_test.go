@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -30,6 +31,8 @@ import (
 func TestNativeRelayLifecycleRevokesConnectedCarrier(t *testing.T) {
 	credential := strings.Repeat("test", 16)
 	var revoke atomic.Bool
+	var storedMu sync.Mutex
+	var stored []derpquic.AuthoritySubject
 	api := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer "+credential {
 			http.Error(w, "denied", 401)
@@ -51,8 +54,15 @@ func TestNativeRelayLifecycleRevokesConnectedCarrier(t *testing.T) {
 			gen = in.ExpectedGeneration + 1
 		}
 		out := Lease{NodeID: in.NodeID, Generation: gen, ProcessEpoch: in.Epoch, ExpiresAt: time.Now().Add(10 * time.Second).Unix(), CapacityLimit: 256, Revocations: []derpquic.AuthoritySubject{}}
+		// Like the control plane, keep the last full subjects list: a steady node sends only its digest.
+		storedMu.Lock()
+		if in.Subjects != nil {
+			stored = in.Subjects
+		}
+		subjects := stored
+		storedMu.Unlock()
 		if revoke.Load() {
-			for _, subject := range in.Subjects {
+			for _, subject := range subjects {
 				subject.Generation++
 				out.Revocations = append(out.Revocations, subject)
 			}

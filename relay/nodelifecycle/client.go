@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,8 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -43,6 +46,9 @@ type Lease struct {
 	// QuotaDenied lists accounts the control plane reports out of bandwidth allowance; the relay
 	// refuses them (derpquic.ErrQuota) until a later observation no longer lists them.
 	QuotaDenied []string `json:"quota_denied,omitempty"`
+	// SubjectsRequired asks for the full subjects list on the next observation: the control plane has
+	// no stored set for this process or its digest differs. Such an answer carries no quota list.
+	SubjectsRequired bool `json:"subjects_required,omitempty"`
 }
 type diskState struct {
 	NodeID       string `json:"node_id"`
@@ -53,6 +59,22 @@ type Client struct {
 	cfg   Config
 	lease Lease
 	lock  *os.File
+	// sentSubjects is the digest of the subjects list the control plane last accepted in full; an
+	// observation sends only the digest while the set is unchanged (~400 KB every 3 s at 4,096
+	// connections otherwise).
+	sentSubjects string
+}
+
+// subjectsDigest is the hex SHA-256 of the subjects sorted by account and endpoint, one
+// "account\x00endpoint\x00generation\n" line each (the control plane computes the same).
+func subjectsDigest(subjects []derpquic.AuthoritySubject) string {
+	lines := make([]string, 0, len(subjects))
+	for _, subject := range subjects {
+		lines = append(lines, subject.AccountID+"\x00"+subject.EndpointID+"\x00"+strconv.FormatUint(subject.Generation, 10)+"\n")
+	}
+	sort.Strings(lines)
+	sum := sha256.Sum256([]byte(strings.Join(lines, "")))
+	return hex.EncodeToString(sum[:])
 }
 
 func New(cfg Config) (*Client, error) {
@@ -260,7 +282,13 @@ func (c *Client) Observe(ctx context.Context, server *derpquic.Server, draining 
 		return ErrControl
 	}
 	subjects := server.AuthoritySubjects()
-	out, err := c.post(ctx, "/v1/relay/nodes/observe", map[string]any{"node_id": c.lease.NodeID, "node_generation": c.lease.Generation, "process_epoch": c.lease.ProcessEpoch, "ready": server.Ready() && !draining, "draining": draining, "capacity_used": stats.Connections, "subjects": subjects, "quota_denied_supported": true})
+	digest := subjectsDigest(subjects)
+	body := map[string]any{"node_id": c.lease.NodeID, "node_generation": c.lease.Generation, "process_epoch": c.lease.ProcessEpoch, "ready": server.Ready() && !draining, "draining": draining, "capacity_used": stats.Connections, "subjects_digest": digest, "quota_denied_supported": true}
+	full := digest != c.sentSubjects
+	if full {
+		body["subjects"] = append([]derpquic.AuthoritySubject{}, subjects...)
+	}
+	out, err := c.post(ctx, "/v1/relay/nodes/observe", body)
 	if err != nil {
 		return err
 	}
@@ -284,8 +312,18 @@ func (c *Client) Observe(ctx context.Context, server *derpquic.Server, draining 
 			return ErrControl
 		}
 	}
-	if server.SetQuotaDenied(out.QuotaDenied) != nil {
-		return ErrControl
+	if out.SubjectsRequired {
+		// The control plane lost or never had this set: send it in full next time, and keep the
+		// quota list, which such an answer does not carry.
+		c.sentSubjects = ""
+		out.QuotaDenied, out.SubjectsRequired = c.lease.QuotaDenied, false
+	} else {
+		if full {
+			c.sentSubjects = digest
+		}
+		if server.SetQuotaDenied(out.QuotaDenied) != nil {
+			return ErrControl
+		}
 	}
 	c.lease = out
 	return nil
