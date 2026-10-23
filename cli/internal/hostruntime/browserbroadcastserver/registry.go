@@ -42,7 +42,10 @@ type publication struct {
 	cancel        context.CancelFunc
 	diagnosticCtx context.Context
 	mu            sync.Mutex
-	stopOnce      sync.Once
+	// writeMu orders records on the stream. Writes happen outside mu, so a stalled stream never blocks
+	// Join or Leave (Leave's stop closes the stream, which ends the stalled write).
+	writeMu  sync.Mutex
+	stopOnce sync.Once
 }
 
 func NewRegistry(manager session.Service, signingKey func(context.Context) (ed25519.PrivateKey, error)) (*Registry, error) {
@@ -220,19 +223,22 @@ func (r *Registry) publish(ctx context.Context, p *publication, key ed25519.Priv
 			reportPublisherFailure(p.diagnosticCtx, deliveryStage, err)
 			return
 		}
+		p.writeMu.Lock()
 		p.mu.Lock()
 		if p.index == ^uint64(0) {
 			p.mu.Unlock()
+			p.writeMu.Unlock()
 			event.Release()
 			reportPublisherFailure(p.diagnosticCtx, deliveryStage, errOutputIndexExhausted)
 			return
 		}
 		p.index++
 		frame, encodeErr := browserbroadcast.Seal(browserbroadcast.Record{SessionID: p.sessionID, Generation: p.generation, EpochID: p.epoch.ID, Index: p.index, Channel: byte(event.Channel), StartSequence: event.StartSequence, Data: event.Data}, p.epoch, key)
+		p.mu.Unlock()
 		if encodeErr == nil {
 			encodeErr = writeRecord(p.stream, frame)
 		}
-		p.mu.Unlock()
+		p.writeMu.Unlock()
 		event.Release()
 		if encodeErr != nil {
 			reportPublisherFailure(p.diagnosticCtx, deliveryStage, encodeErr)
