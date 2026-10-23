@@ -234,10 +234,10 @@ func (s *Server) serveContext(ctx context.Context, connection net.Conn) error {
 	s.mu.Lock()
 	current := s.state
 	s.mu.Unlock()
-	if request.Version < current.DesiredVersion || request.Version == current.DesiredVersion && request.Mode != current.DesiredMode {
+	if stalePolicy(request.Mode, request.Version, current) {
 		return s.respond(connection, s.errorResponse("stale_policy"))
 	}
-	if request.Version == current.DesiredVersion && current.Status == "applied" {
+	if request.Version == current.DesiredVersion && request.Mode == current.DesiredMode && current.Status == "applied" {
 		return s.respond(connection, s.response(current))
 	}
 	if err := s.apply(requestCtx, request.Mode, request.Version); err != nil {

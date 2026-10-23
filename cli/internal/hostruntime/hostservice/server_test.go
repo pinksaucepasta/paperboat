@@ -414,3 +414,25 @@ func unixPair(t *testing.T) (*net.UnixConn, *net.UnixConn) {
 	}
 	return server, client
 }
+
+// A host that booted at its keep_awake default (version 0) accepts the server's default policy
+// (allow_sleep, version 0) and reports it applied. It used to answer stale_policy forever, so every
+// machine whose owner never changed the setting stayed "Waiting" in the console (F2-06).
+func TestHostDefaultAcceptsTheServerDefaultPolicy(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("peer test requires a non-root enrolled user")
+	}
+	applier := &fakeApplier{}
+	server := testServer(t, os.Getuid(), applier)
+	if server.state.DesiredMode != KeepAwake || server.state.DesiredVersion != 0 {
+		t.Fatalf("initial state=%+v", server.state)
+	}
+	response := requestServer(t, server, Request{Schema: ProtocolV1, Operation: "apply_availability", Mode: AllowSleep, Version: 0})
+	if response.Status != "applied" || response.ObservedMode != AllowSleep || response.ObservedVersion != 0 {
+		t.Fatalf("response=%+v", response)
+	}
+	again := requestServer(t, server, Request{Schema: ProtocolV1, Operation: "apply_availability", Mode: AllowSleep, Version: 0})
+	if again.Status != "applied" || len(applier.modes) != 1 {
+		t.Fatalf("idempotent response=%+v modes=%v", again, applier.modes)
+	}
+}
