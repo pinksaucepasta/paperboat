@@ -3,6 +3,7 @@ package edgehttp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -110,5 +111,39 @@ func TestBrowserTerminalExpectedRequiresEveryLeaf(t *testing.T) {
 		if browserTerminalExpected(err) {
 			t.Fatal("operational cause hidden")
 		}
+	}
+}
+
+func TestBrowserTerminalQuotaCutNamesThePlanLimit(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	for name, cause := range map[string]error{
+		"quota":   fmt.Errorf("failed to read frame header: %w", ErrIngressQuotaExhausted),
+		"failure": syscall.EIO,
+	} {
+		t.Run(name, func(t *testing.T) {
+			edge := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				browser, err := websocket.Accept(w, r, nil)
+				if err != nil {
+					return
+				}
+				closeBrowserTerminal(browser, cause)
+			}))
+			defer edge.Close()
+			conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(edge.URL, "http"), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer conn.CloseNow()
+			_, _, err = conn.Read(ctx)
+			var closed websocket.CloseError
+			named := errors.As(err, &closed) && closed.Code == websocket.StatusPolicyViolation && closed.Reason == "bandwidth_quota_exhausted"
+			if named != (name == "quota") {
+				t.Fatalf("browser saw %v", err)
+			}
+		})
+	}
+	if !browserTerminalExpected(fmt.Errorf("read: %w", ErrIngressQuotaExhausted)) {
+		t.Fatal("allowance cut filed as an edge failure")
 	}
 }

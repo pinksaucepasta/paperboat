@@ -133,7 +133,7 @@ func bridgeBrowserTerminal(ctx context.Context, browser, upstream *websocket.Con
 	failures := make(chan error, 3)
 	defer func() {
 		cancel()
-		_ = browser.CloseNow()
+		closeBrowserTerminal(browser, result)
 		_ = upstream.CloseNow()
 		workers.Wait()
 		close(failures)
@@ -253,11 +253,26 @@ func bridgeBrowserTerminal(ctx context.Context, browser, upstream *websocket.Con
 	}
 }
 
+// browserTerminalQuotaCloseReason is the close reason the console's terminal worker matches
+// to show the plan limit instead of reconnecting.
+const browserTerminalQuotaCloseReason = "bandwidth_quota_exhausted"
+
+// closeBrowserTerminal tells the browser why its terminal ended when the workspace's
+// allowance cut it; any other end drops the connection as before.
+func closeBrowserTerminal(browser *websocket.Conn, cause error) {
+	if errors.Is(cause, ErrIngressQuotaExhausted) {
+		_ = browser.Close(websocket.StatusPolicyViolation, browserTerminalQuotaCloseReason)
+		return
+	}
+	_ = browser.CloseNow()
+}
+
 // Expected shutdown must account for every leaf so a simultaneous operational
 // failure is never hidden by a normal participant departure.
 func browserTerminalExpected(err error) bool {
 	return requestErrorLeaves(err, func(leaf error) bool {
-		if leaf == context.Canceled || leaf == ErrBrowserTerminalHubEnded {
+		// The allowance cut is a plan limit the server already reported, not an edge failure.
+		if leaf == context.Canceled || leaf == ErrBrowserTerminalHubEnded || leaf == ErrIngressQuotaExhausted {
 			return true
 		}
 		switch closed := leaf.(type) {
