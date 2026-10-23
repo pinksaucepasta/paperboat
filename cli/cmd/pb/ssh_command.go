@@ -38,6 +38,9 @@ func actionSSH(command *cobra.Command, args []string) error {
 	if err != nil {
 		return friendlyCommandError(err)
 	}
+	if err := sshTargetHealth(command.Context(), machine.ID, machine.Alias); err != nil {
+		return err
+	}
 	domain, err := managedSSHDomain(command.Context(), client)
 	if err != nil {
 		return err
@@ -148,6 +151,9 @@ func actionSSHProxy(command *cobra.Command, _ []string) error {
 	descriptor := pendingSSHDescriptor(machine, operationID)
 	connection, err := d.peerApplications.DialSSH(command.Context(), sshConnectInfo(machine, descriptor, client.Workspace()), operationID)
 	if err != nil {
+		if notReady := sshTargetHealth(command.Context(), machine.ID, machine.Alias); notReady != nil {
+			return notReady
+		}
 		return err
 	}
 	halfCloser, ok := connection.(interface{ CloseWrite() error })

@@ -51,7 +51,7 @@ func connectionFailureKind(kind commandFailureKind) bool {
 // relayDenialLookupTimeout bounds the extra daemon read on an already failed command.
 const relayDenialLookupTimeout = 2 * time.Second
 
-var daemonSnapshotForPlanLimit = func(ctx context.Context) (localapi.Snapshot, error) {
+var readDaemonSnapshot = func(ctx context.Context) (localapi.Snapshot, error) {
 	paths, err := currentLocalDaemonPaths()
 	if err != nil {
 		return localapi.Snapshot{}, err
@@ -66,7 +66,7 @@ var daemonSnapshotForPlanLimit = func(ctx context.Context) (localapi.Snapshot, e
 func daemonRelayDenial(ctx context.Context) string {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), relayDenialLookupTimeout)
 	defer cancel()
-	snapshot, err := daemonSnapshotForPlanLimit(ctx)
+	snapshot, err := readDaemonSnapshot(ctx)
 	if err != nil {
 		return ""
 	}

@@ -35,10 +35,10 @@ func TestARenewalRefusedAtThePlanLimitNamesIt(t *testing.T) {
 // says relays are withheld at the limit, the command names it (Lane O, pbvm3 relay-only send).
 func TestAStreamCutByTheRelayAtThePlanLimitNamesIt(t *testing.T) {
 	const limit = "This workspace's hosted relay and edge bandwidth is used up. Add bandwidth: https://console.example.test/billing"
-	previous := daemonSnapshotForPlanLimit
-	t.Cleanup(func() { daemonSnapshotForPlanLimit = previous })
+	previous := readDaemonSnapshot
+	t.Cleanup(func() { readDaemonSnapshot = previous })
 	health := []localapi.HealthItem{{Code: localapi.RelayQuotaCode, Severity: "warning", Title: limit}}
-	daemonSnapshotForPlanLimit = func(context.Context) (localapi.Snapshot, error) { return localapi.Snapshot{Health: health}, nil }
+	readDaemonSnapshot = func(context.Context) (localapi.Snapshot, error) { return localapi.Snapshot{Health: health}, nil }
 	var lost error = fmt.Errorf("send: %w", &net.OpError{Op: "read", Net: "unix", Err: syscall.ECONNRESET})
 	if failure := classifyCommandFailure(lost); failure.kind != commandOperational {
 		t.Fatalf("fixture is not a connectivity failure: %+v", failure)

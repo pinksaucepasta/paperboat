@@ -61,6 +61,10 @@ func commandFailureMessage(err error, failure commandFailure) string {
 	if failure.kind == commandOperational && errors.As(err, &lost) {
 		return "The change was sent, but its answer was lost on the way back, so it may have been applied. " + responseLostRecovery
 	}
+	var sshNotReady *sshTargetNotReadyError
+	if failure.kind == commandRejected && errors.As(err, &sshNotReady) {
+		return sshNotReady.Error()
+	}
 	var inWorkspaces *machineInWorkspacesError
 	if failure.kind == commandRejected && errors.As(err, &inWorkspaces) {
 		return inWorkspaces.Error()
