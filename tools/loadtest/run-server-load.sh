@@ -1,0 +1,26 @@
+#!/bin/bash
+# Server load run for the PLAN 3b scale matrix, on a dedicated staging VM (never the production host or database).
+# Starts a throwaway PostgreSQL 17 on tmpfs, runs the server load test binary against it (it migrates and seeds the
+# perf data set on first use), then removes the database container.
+#
+#   tools/loadtest/run-server-load.sh <app.load.test> [test regex] [extra test flags]
+#
+# Build the binary from a clean tree: (cd server && CGO_ENABLED=0 go test -c -tags load -o app.load.test ./internal/app/)
+# Step sizes: PAPERBOAT_LOAD_WAITERS=100,500,1000 PAPERBOAT_LOAD_DAEMONS=50,100,250 (defaults in load_postgres_test.go).
+set -euo pipefail
+BIN=${1:?path to app.load.test}; RUN=${2:-TestLoad}; shift $(( $# > 2 ? 2 : $# ))
+NAME=paperboat-load-pg
+PORT=${PAPERBOAT_LOAD_PG_PORT:-55432}
+PASS=$(head -c 18 /dev/urandom | base64 | tr -dc A-Za-z0-9)
+cleanup() { docker rm -f "$NAME" >/dev/null 2>&1 || true; }
+trap cleanup EXIT
+cleanup
+docker run -d --name "$NAME" -p 127.0.0.1:"$PORT":5432 --tmpfs /var/lib/postgresql/data:rw,size=6g \
+  -e POSTGRES_PASSWORD="$PASS" -e POSTGRES_DB=paperboat_load_test postgres:17 \
+  -c max_connections=400 -c max_locks_per_transaction=2048 -c shared_buffers=512MB >/dev/null
+for _ in $(seq 1 60); do
+  docker exec "$NAME" pg_isready -U postgres -d paperboat_load_test >/dev/null 2>&1 && break
+  sleep 1
+done
+export PAPERBOAT_PERF_DATABASE_DSN="postgres://postgres:$PASS@127.0.0.1:$PORT/paperboat_load_test?sslmode=disable"
+"$BIN" -test.run "$RUN" -test.v -test.timeout 90m "$@"

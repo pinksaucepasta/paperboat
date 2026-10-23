@@ -1,0 +1,291 @@
+//go:build load
+
+package app
+
+// Server load checks for the scale matrix (PLAN 3b, Lane W). They boot the real router on a real listener over the
+// seeded perf database and measure where the control plane first degrades:
+//
+//   - TestLoadHeldEventWaiters: N daemons holding the event long-poll with no changes. Reports database queries per
+//     second (the cost of holding waiters) and checks every wait answers 204 inside the client's 30 s header timeout.
+//   - TestLoadIdlePollMix: N simulated daemons each running the inventory-refresh request mix every 15 s, ramped
+//     until p99 exceeds 5 s or 1% of requests fail. Reports the first N that degrades and whether it fails with
+//     clear errors or 5xx.
+//
+// Never against production: PAPERBOAT_PERF_DATABASE_DSN must name an isolated *_test database (staging VM).
+//
+//	PAPERBOAT_PERF_DATABASE_DSN=... go test -tags load -run TestLoad -v -timeout 60m ./internal/app/
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"runtime"
+	"slices"
+	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/pinksaucepasta/paperboat-server/internal/auth"
+	"github.com/pinksaucepasta/paperboat-server/internal/config"
+	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat-server/internal/perf"
+)
+
+const loadOrigin = "http://console.example.test"
+
+type loadServer struct {
+	url, session, csrf string
+	machines           []string
+	queries            atomic.Int64
+}
+
+func startLoadServer(t *testing.T) *loadServer {
+	t.Helper()
+	dsn := os.Getenv("PAPERBOAT_PERF_DATABASE_DSN")
+	if dsn == "" {
+		t.Skip("set PAPERBOAT_PERF_DATABASE_DSN to an isolated *_test database")
+	}
+	if err := db.ValidateIsolatedTestDSN(dsn, os.Getenv("PAPERBOAT_DATABASE_DSN")); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	cfg := config.Default()
+	cfg.Database = config.Database{Driver: "postgres", DSN: dsn}
+	cfg.HTTP.BrowserLoginOrigin = loadOrigin
+	seedStore, err := db.Open(cfg.Database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = perf.Prepare(ctx, seedStore)
+	seedStore.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	application, err := New(Options{Config: cfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = application.db.Close() })
+	server := &loadServer{session: "load-session-solo", csrf: "load-csrf-solo"}
+	application.db.SetQueryObserver(func(ctx context.Context) (context.Context, func(string)) {
+		server.queries.Add(1)
+		return ctx, func(string) {}
+	})
+	hash := func(value string) string { sum := sha256.Sum256([]byte(value)); return hex.EncodeToString(sum[:]) }
+	if _, err := application.db.SQL().ExecContext(ctx, `INSERT INTO paperboat.sessions(id,user_id,session_hash,csrf_hash,expires_at,workos_session_id,workos_access_expires_at)
+VALUES('session_load_solo',$1,$2,$3,now()+interval '29 days','session_load',now()+interval '1 day')
+ON CONFLICT (id) DO UPDATE SET session_hash=excluded.session_hash,csrf_hash=excluded.csrf_hash,expires_at=excluded.expires_at,revoked_at=NULL,workos_access_expires_at=excluded.workos_access_expires_at`,
+		perf.Solo, hash(server.session), hash(server.csrf)); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := application.db.SQL().QueryContext(ctx, `SELECT id FROM paperboat.user_machines WHERE user_id=$1 AND owner_team_id IS NULL AND state='online' ORDER BY id`, perf.Solo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		server.machines = append(server.machines, id)
+	}
+	rows.Close()
+	if len(server.machines) == 0 {
+		t.Fatal("perf seed has no online solo machines")
+	}
+	listener := httptest.NewServer(application.server.Handler)
+	t.Cleanup(listener.Close)
+	server.url = listener.URL
+	return server
+}
+
+func (s *loadServer) request(ctx context.Context, client *http.Client, method, path, body string) (int, error) {
+	request, err := http.NewRequestWithContext(ctx, method, s.url+path, strings.NewReader(body))
+	if err != nil {
+		return 0, err
+	}
+	request.AddCookie(&http.Cookie{Name: auth.DevSessionCookieName, Value: s.session})
+	if method != http.MethodGet {
+		request.AddCookie(&http.Cookie{Name: auth.DevCSRFCookieName, Value: s.csrf})
+		request.Header.Set(auth.CSRFHeaderName, s.csrf)
+		request.Header.Set("Origin", loadOrigin)
+		request.Header.Set("Content-Type", "application/json")
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return 0, err
+	}
+	_, _ = io.Copy(io.Discard, response.Body)
+	response.Body.Close()
+	return response.StatusCode, nil
+}
+
+// The client side of a released daemon: 30 s response header timeout (cli/internal/httptransport DefaultConfig).
+func loadClient(conns int) *http.Client {
+	return &http.Client{Transport: &http.Transport{ResponseHeaderTimeout: 30 * time.Second, MaxIdleConns: conns, MaxIdleConnsPerHost: conns, MaxConnsPerHost: conns}}
+}
+
+func TestLoadHeldEventWaiters(t *testing.T) {
+	server := startLoadServer(t)
+	for _, waiters := range loadSteps("PAPERBOAT_LOAD_WAITERS", []int{100, 500, 1000, 2000}) {
+		client := loadClient(waiters)
+		body := `{"topics":{"inventory":0,"machine_services":0,"peer_network":0}}`
+		// Learn the current generations so the held waits see no change.
+		ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+		if status, err := server.request(ctx, client, http.MethodPost, "/v1/machines/"+server.machines[0]+"/events/wait", body); err != nil || status >= 500 {
+			cancel()
+			t.Fatalf("first wait: status %d err %v", status, err)
+		}
+		cancel()
+		var ok, noChange, failed, clientTimeout atomic.Int64
+		goroutines := runtime.NumGoroutine()
+		before := server.queries.Load()
+		started := time.Now()
+		var wg sync.WaitGroup
+		for index := 0; index < waiters; index++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+				defer cancel()
+				status, err := server.request(ctx, client, http.MethodPost, "/v1/machines/"+server.machines[index%len(server.machines)]+"/events/wait", body)
+				switch {
+				case err != nil && strings.Contains(err.Error(), "timeout awaiting response headers"):
+					clientTimeout.Add(1)
+				case err != nil || status >= 500:
+					failed.Add(1)
+				case status == http.StatusNoContent:
+					noChange.Add(1)
+				default:
+					ok.Add(1)
+				}
+			}()
+		}
+		time.Sleep(10 * time.Second)
+		peak := runtime.NumGoroutine() - goroutines
+		wg.Wait()
+		elapsed := time.Since(started)
+		queries := server.queries.Load() - before
+		t.Logf("waiters=%d: 204=%d 200=%d client-timeout=%d failed=%d in %v; %.0f queries/s (%.2f per waiter per s); +%d goroutines held",
+			waiters, noChange.Load(), ok.Load(), clientTimeout.Load(), failed.Load(), elapsed.Round(time.Millisecond),
+			float64(queries)/elapsed.Seconds(), float64(queries)/elapsed.Seconds()/float64(waiters), peak)
+		if clientTimeout.Load() > 0 {
+			t.Errorf("waiters=%d: %d waits outlived the client's 30 s header timeout (the hold must end before it)", waiters, clientTimeout.Load())
+		}
+		if failed.Load() > 0 {
+			t.Errorf("waiters=%d: %d waits failed", waiters, failed.Load())
+		}
+		client.CloseIdleConnections()
+	}
+}
+
+// The requests one daemon's inventory refresh makes today (prod mix 2026-10-23), with the solo actor's data.
+var refreshMix = []string{
+	"/v1/machines?limit=200&offset=0&sort=alias",
+	"/v1/machines?limit=200&offset=0&sort=alias",
+	"/v1/workspaces",
+	"/v1/machine-services",
+	"/v1/previews?limit=200",
+	"/v1/terminal-sessions?owner=mine&live=false&limit=200&offset=0",
+	"/v1/client-configuration",
+}
+
+func TestLoadIdlePollMix(t *testing.T) {
+	server := startLoadServer(t)
+	const refreshEvery = 15 * time.Second
+	const window = 60 * time.Second
+	for _, daemons := range loadSteps("PAPERBOAT_LOAD_DAEMONS", []int{50, 100, 250, 500, 1000}) {
+		client := loadClient(256)
+		var mu sync.Mutex
+		latencies := map[string][]time.Duration{}
+		statuses := map[int]int{}
+		var transportErrors atomic.Int64
+		ctx, cancel := context.WithTimeout(context.Background(), window)
+		before := server.queries.Load()
+		var wg sync.WaitGroup
+		for daemon := 0; daemon < daemons; daemon++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				// Spread the daemons' refreshes over the interval like a steady fleet.
+				offset := time.Duration(daemon) * refreshEvery / time.Duration(daemons)
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(offset):
+				}
+				for ctx.Err() == nil {
+					next := time.Now().Add(refreshEvery)
+					for _, path := range refreshMix {
+						requestCtx, cancelRequest := context.WithTimeout(context.Background(), 30*time.Second)
+						started := time.Now()
+						status, err := server.request(requestCtx, client, http.MethodGet, path, "")
+						cancelRequest()
+						key := strings.SplitN(path, "?", 2)[0]
+						mu.Lock()
+						if err != nil {
+							transportErrors.Add(1)
+						} else {
+							statuses[status]++
+							latencies[key] = append(latencies[key], time.Since(started))
+						}
+						mu.Unlock()
+					}
+					select {
+					case <-ctx.Done():
+					case <-time.After(time.Until(next)):
+					}
+				}
+			}()
+		}
+		wg.Wait()
+		cancel()
+		total, failed := 0, int(transportErrors.Load())
+		for status, count := range statuses {
+			total += count
+			if status >= 500 || status == http.StatusTooManyRequests {
+				failed += count
+			}
+		}
+		var worst time.Duration
+		var lines []string
+		for path, values := range latencies {
+			slices.Sort(values)
+			p50, p99 := values[len(values)/2], values[(len(values)*99)/100]
+			worst = max(worst, p99)
+			lines = append(lines, fmt.Sprintf("%s p50 %v p99 %v", path, p50.Round(time.Millisecond), p99.Round(time.Millisecond)))
+		}
+		slices.Sort(lines)
+		t.Logf("daemons=%d: %d requests (%.0f/s), %d failed, statuses %v, %.0f queries/s\n  %s", daemons, total+int(transportErrors.Load()),
+			float64(total)/window.Seconds(), failed, statuses, float64(server.queries.Load()-before)/window.Seconds(), strings.Join(lines, "\n  "))
+		client.CloseIdleConnections()
+		if worst > 5*time.Second || failed*100 > total {
+			t.Logf("first degradation at daemons=%d (p99 %v, %d failed)", daemons, worst.Round(time.Millisecond), failed)
+			break
+		}
+	}
+}
+
+func loadSteps(name string, fallback []int) []int {
+	value := os.Getenv(name)
+	if value == "" {
+		return fallback
+	}
+	var steps []int
+	for _, field := range strings.Split(value, ",") {
+		step, err := strconv.Atoi(strings.TrimSpace(field))
+		if err == nil && step > 0 {
+			steps = append(steps, step)
+		}
+	}
+	return steps
+}

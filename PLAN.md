@@ -1417,6 +1417,61 @@ each with a PG/load test proving the bound at 10k; Lane R audits daemon/CLI/rela
 Test (PG): one join on a 1,000-machine account writes O(1) change rows per affected scope and each machine's next
 answer carries one change; a 5k-machine team survives a server restart (snapshot storm) without 503s.
 
+#### Scale matrix, end to end per feature (Lane W, from 2026-10-23)
+
+Targets: one machine with 100 concurrent terminals; one shared terminal with 50 viewers; an account with 1,000
+concurrent previews/tunnels and 100 browser terminals; the platform at 100k machines. Verdict per cell: **G**
+degrades gracefully up to the target (a clear limit error, backpressure or a queue), **A** degrades before the
+target, **R** crashes, leaks, storms or lets one user hurt others, **?** not measured yet. A cell is G/A/R only from
+a load test or prod measurement (named in Proof). Load runs never touch production; data-plane runs go on victus
+VMs (ubuntu24 host for in-process binaries), server runs on the staging VM (pbvm4) or lane-b-test-pg.
+
+**Platform, idle machine cost** (prod 10:10Z, 19 online machines, 10 min): 28,210 requests = 2.5 req/s per idle
+machine, so 100k machines ≈ 250k req/s: **R**. Target ≤ 0.05 req/s per idle machine, event-driven.
+
+| Finding | Measured | Verdict | Owner, status |
+|---|---|---|---|
+| Event long-poll never healthy: client header timeout 30 s = server hold 30 s; the client gives up first, so every daemon polls inventory every 15 s | user-daemon waits end at 29,995–29,999 ms; inventory topic moved 0 times in 3 min while 139 refreshes ran | R | Lane B: MaxWait 25 s; Lane R: long-poll deadline |
+| One inventory refresh = own list + managed-SSH re-list + 1 list per team + workspaces + client-configuration + machine-services + preview pages + terminal catalog | ~6.7 GET /v1/machines per refresh, 355/min from 22 machines; avg 791 ms | R | Lane R |
+| Private-access dial lists every machine of the account | code: tunnel/native_private.go:27 | R (O(dials × machines)) | Lane R |
+| Server re-reads topic generations every 5 s per held waiter | ≈ 2 waiters × 100k / 5 s = 40k qps | R at 100k | Lane Q |
+| Other per-machine polls: ssh-target 8.9/min, machine-services 8.4, JWKS 11.7 (3 fetchers), certificates 6.9, runtime-observations 6.0, peer config 10.2 | prod mix | A | Lane R (peer config: delta rewrite) |
+| Edge pulls endpoint/carrier admissions every ~300 ms per edge node, full snapshot | 3.4 + 2.8 req/s; size grows with previews | ? at 1,000 previews | Lane M |
+| Server has no request admission cap, no WriteTimeout/IdleTimeout; pgxpool 20 conns (1 pinned by LISTEN), no acquire timeout | code | ? (storm test on staging) | Lane Q |
+
+**Terminals (native, replay/reconnect, shared, browser)**
+
+| Dimension | Target | Bound in code | Measured | Verdict | Owner, status |
+|---|---|---|---|---|---|
+| Sessions per machine | 100 | host 20 (config.go DefaultResources) and server 20 (usermachines maxActive); the 20th attach refused with resource_limit, server row orphaned | F3-05 session_limit.py round 12, 3 hosts | R | Lane N: one host ceiling 256, attach-at-cap + orphan fixes; Lane B: drop the server count |
+| 100 PTY sessions + output, echo latency | 100 | — | created in 1.3–1.6 s, echo p50 3 ms p95 10–14 ms max 64 ms, heap 50 MiB (`TestLoadHundredSessionsFiftyViewers`, ubuntu24) | G | — |
+| Close after an output burst | every close works | host SQLite store: deferred read-then-write transactions (`store_sessions.go` AppendOutput, lifecycle persist) | after one 32 MiB burst, **every** close and shutdown fails `SQLITE_BUSY` — with 2, 5, 20 and 100 sessions (same test, `PAPERBOAT_LOAD_SESSIONS`) | R | Lane N |
+| Viewers on one shared session | 50 | host 128 attachments/session; edge 100 participants, 512 KiB/viewer queue; guests 64 | host: 32 MiB to 50 viewers in 1.6 s (19.8 MiB/s each); edge hub at 20 MiB/s: p99 0.7 ms, 0 of 50 readers cut off (`TestLoadBrowserTerminalHub`, pbvm3) | G | — |
+| Slow viewer | evicted, others unaffected | host: evict at 1 MiB pending; edge: subscriber dropped | stalled viewer evicted on host and edge, other viewers' rate unchanged | G | — |
+| Replay ack map per attachment ID never pruned | bounded | history/history.go acks | code | A (grows with reconnects for the session's life) | Lane R |
+| Browser terminals per account | 100 | edge 4,096 hub sessions per node, 128 E2EE connections per host | edge hub, 100 terminals at 2 MiB/s + 50 viewers on one: p99 2 ms, no reader cut off (in-process; network path still ?) | G (hub) | Lane W: network path |
+| Reconnect storm after server deploy | all sessions back < 30 s, no 5xx | — | ? | ? | Lane W (staging) |
+
+**Exec, transfers, SSH**
+
+| Dimension | Target | Bound in code | Verdict | Owner |
+|---|---|---|---|---|
+| Concurrent exec per host | 32 then clear error | execprocess 32 → resource_limit | ? | Lane W |
+| Concurrent transfers per host | 2 then queue | MaxConcurrentTransfers 2 | ? | Lane W |
+| Managed SSH streams per host | 32 | host.go 32, no queue → ErrSSHHostBusy at once | ? (parallel rsync/VS Code) | Lane W |
+| Relay connections per account | 1,000 machines | derpquic 16 per account, 256 per relay node; peer relay 16 allocations per account | **R by design** for an account of 1,000 (machines past 16 get no relay fallback) | Lane R |
+
+**Previews, tunnels**
+
+| Dimension | Target | Bound in code | Verdict | Owner |
+|---|---|---|---|---|
+| Previews per machine | — | 20 active targets per host; registry records never deleted (registry.go) | A (leak per created/removed preview) | Lane R |
+| Previews/tunnels per account | 1,000 | server lists paged (200); completion lists page through all previews on every refresh | R (with the refresh storm) | Lane R |
+| Streams per tunnel carrier | — | datacarrier 64 streams default, 1,024 max | ? | Lane M |
+
+**ENV, config sync, console, teams/audit/usage**: bounds listed (ENV 128 records/batch, 256 KiB live; config sync
+5 MiB/file, 1 min remote poll; team members 128; audit export 1M rows); load tests after staging is up: **?**.
+
 ## 4. Handoff notes
 
 All open items from the Phase B handoff (2026-10-14) are filed in S0 (smoke suite), F4
