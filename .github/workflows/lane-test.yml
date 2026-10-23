@@ -102,9 +102,24 @@ jobs:
       - run: go vet ./...
       - name: go test -race
         run: |
-          # Packages share one database, so PostgreSQL modules run one package at a time.
-          p=(); [ -z "$PAPERBOAT_TEST_DATABASE_DSN" ] || p=(-p 1)
-          go test -race -count=1 -timeout 30m "${p[@]}" ${RUN:+-run "$RUN"} ./...
+          run=(); [ -z "$RUN" ] || run=(-run "$RUN")
+          # Without a PostgreSQL DSN no package needs a database: one run covers them all.
+          if [ -z "$PAPERBOAT_TEST_DATABASE_DSN" ]; then
+            go test -race -count=1 -timeout 30m "${run[@]}" ./...
+            exit
+          fi
+          # Every package gets its own empty database, created here, so no package sees rows another
+          # package left behind. Packages run one after another; every failing package is reported.
+          mod=$(go list -f '{{.Module.Path}}' ./... | head -n1)
+          export PGPASSWORD=postgres
+          failed=0
+          for pkg in $(go list ./...); do
+            db="lane_$(sed -e "s|^$mod/||" -e 's|[^A-Za-z0-9]|_|g' <<<"$pkg")_test"
+            psql -h localhost -U postgres -qc "create database \"$db\"" || { failed=1; continue; }
+            PAPERBOAT_TEST_DATABASE_DSN="${PAPERBOAT_TEST_DATABASE_DSN/lane_test\?/$db?}" \
+              go test -race -count=1 -timeout 30m "${run[@]}" "$pkg" || failed=1
+          done
+          exit $failed
       - name: migration tests (each on its own empty database)
         if: matrix.module == 'server' && !cancelled()
         run: |
