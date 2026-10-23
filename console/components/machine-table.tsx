@@ -21,7 +21,7 @@ import { tagsLive } from "@/lib/policy"
 import { TagChips } from "@/components/machine-tags"
 import { AddMachineDialog } from "@/components/add-machine-dialog"
 import { MachineRowMenus } from "@/components/machine-actions"
-import { useMachineQuery, useUrlPage } from "@/components/machine-query"
+import { useMachineQuery, useMachineUrl } from "@/components/machine-query"
 import { MachineAddressStack } from "@/components/machine-address"
 import { FilterButton, FilterChip } from "@/components/machine-filters"
 import { MachineUpdate } from "@/components/machine-update"
@@ -330,17 +330,19 @@ const perPage = 50
  * search or filter starts again at page 1; a page past the end shows the last one.
  */
 function usePages(query: string, count: number) {
-  const fromUrl = useUrlPage()
-  // A new search or filter starts at page 1; the URL's page belongs to the search it was chosen in.
-  const [pagedFor, setPagedFor] = useState(query)
+  const url = useMachineUrl()
+  // The page shown is chosen here and written to the URL; the URL's page applies when the page is
+  // opened (a new `url`) and the search is still the URL's. A new search starts at page 1.
+  const [chosen, setChosen] = useState<{ query: string; page: number; url: typeof url } | null>(null)
+  const wanted = chosen?.url === url ? (chosen.query === query ? chosen.page : 1) : query === url.q ? url.page : 1
   const last = Math.max(1, Math.ceil(count / perPage))
-  const page = Math.min(Math.max(1, pagedFor === query ? fromUrl : 1), last)
+  const page = Math.min(Math.max(1, wanted), last)
   const go = (next: number) => {
-    const url = new URL(window.location.href)
-    if (next > 1) url.searchParams.set("page", String(next))
-    else url.searchParams.delete("page")
-    window.history.replaceState(null, "", url)
-    setPagedFor(query)
+    setChosen({ query, page: next, url })
+    const address = new URL(window.location.href)
+    if (next > 1) address.searchParams.set("page", String(next))
+    else address.searchParams.delete("page")
+    window.history.replaceState(null, "", address)
     document.getElementById("machines-table")?.scrollIntoView({ block: "start" })
   }
   return { page, from: (page - 1) * perPage, to: page * perPage, go }
