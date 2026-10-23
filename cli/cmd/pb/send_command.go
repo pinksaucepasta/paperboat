@@ -78,16 +78,12 @@ func sendCommand() *cobra.Command {
 					eligible = slices.DeleteFunc(eligible, func(machine api.UserMachine) bool { return machine.ID == sourceMachineID })
 					switch len(eligible) {
 					case 0:
-						return errors.New("no eligible transfer destination is attached to the session")
+						return localArgumentError("No transfer destination is attached to this terminal session. Name the receiving machine with --to <machine>.")
 					case 1:
 						destination = eligible[0]
 					default:
 						if jsonOutput || !term.IsTerminal(int(os.Stdin.Fd())) {
-							summaries := make([]string, len(eligible))
-							for i, machine := range eligible {
-								summaries[i] = machine.Alias + " (" + machine.ID + ")"
-							}
-							return fmt.Errorf("transfer destination is ambiguous; use --to or set a default; eligible machines: %s", strings.Join(summaries, ", "))
+							return localArgumentError("More than one machine can receive this transfer; name one with --to <machine> (`pb machine list` shows them).")
 						}
 						index, promptErr := chooseIndex(cobraCommand.Context(), "Choose a transfer destination", "Eligible machines for this session", len(eligible), func(index int) selector.Item {
 							machine := eligible[index]
@@ -99,7 +95,7 @@ func sendCommand() *cobra.Command {
 						destination = eligible[index]
 					}
 				} else {
-					return errors.New("no default transfer destination is configured; use --to or `pb send destination set <machine>`")
+					return localArgumentError("Name the receiving machine with --to <machine> (or set a default with `pb send destination set <machine>`).")
 				}
 			}
 			if destination.State == "revoked" || destination.State == "disconnected" || destination.State == "deleted" {

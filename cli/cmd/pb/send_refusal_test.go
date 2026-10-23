@@ -111,3 +111,18 @@ func TestServerTransferLimitNamesTheExceededLimit(t *testing.T) {
 		t.Fatal("converted something that is not an exceeded limit")
 	}
 }
+
+// A send without a destination is a usage error naming --to, not "could not finish the command"; and a
+// send at the plan limit keeps the billing link like exec/ssh/ping (Lane O).
+func TestSendDestinationAndPlanLimitMessages(t *testing.T) {
+	missing := localArgumentError("Name the receiving machine with --to <machine> (or set a default with `pb send destination set <machine>`).")
+	failure := classifyCommandFailure(missing)
+	if failure.kind != commandUsage || !strings.Contains(commandFailureMessage(missing, failure), "--to <machine>") {
+		t.Fatalf("kind=%v message=%q", failure.kind, commandFailureMessage(missing, failure))
+	}
+	quota := &api.APIError{Status: http.StatusConflict, Code: "bandwidth_quota_exhausted", Message: "This workspace's hosted relay and edge bandwidth is used up. Add bandwidth: https://console.example.test/billing"}
+	failure = classifyCommandFailure(quota)
+	if message := commandFailureMessage(quota, failure); !strings.Contains(message, "Add bandwidth: https://console.example.test/billing") {
+		t.Fatalf("billing link lost: %q", message)
+	}
+}

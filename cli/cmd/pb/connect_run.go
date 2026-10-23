@@ -776,6 +776,9 @@ func friendlyAPIError(err error) string {
 		return "An active team subscription is required. " + teamSubscriptionRecovery + " No resource was created."
 	case "team_suspended":
 		return apiErr.Error()
+	case "bandwidth_quota_exhausted":
+		// The authored message plus the vetted billing link from the response (apiErrorMessageFor).
+		return apiErr.Message
 	case "policy_version_conflict", "policy_changes_unconfirmed", "invalid_policy", "policy_edit_forbidden", "policy_explain_forbidden", "api_token_name_taken", "invalid_api_token_scope", "api_token_invalid":
 		return api.PublicMessage(apiErr.Code)
 	case "credits_exhausted":

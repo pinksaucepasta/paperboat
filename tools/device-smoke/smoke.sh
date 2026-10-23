@@ -475,7 +475,7 @@ test_application_pairs() {
   for source in "${TLIST[@]}"; do
     for target in "${TLIST[@]}"; do
       case "$kind" in
-        transfer-multi|exec-repeat|ssh-tools|transfer-manage|exec-cancel|ssh-doctor|inbox-manage|transfer-resume|transfer-errors)
+        transfer-multi|exec-repeat|ssh-tools|transfer-manage|exec-cancel|ssh-doctor|inbox-manage|transfer-resume|transfer-errors|inventory-freshness)
           [ "$source" != "$target" ] || continue ;;
         preview-manage|preview-inspect|send-self|preview-access) [ "$source" = "$target" ] || continue ;;
       esac
@@ -955,6 +955,7 @@ test_application_pairs readiness-main exec_lifecycle.py readiness
 test_application_pairs exec-cancel exec_cancel.py
 test_application_pairs ssh-doctor ssh_doctor_lifecycle.py
 test_application_pairs ssh-alias ssh_alias_lifecycle.py
+test_application_pairs inventory-freshness inventory_freshness.py
 test_application_pairs inbox-manage inbox_manage.py
 test_inbox_approval
 test_private_access
