@@ -7,7 +7,6 @@ import (
 	"github.com/pinksaucepasta/paperboat-server/internal/config"
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
 	"os"
-	"strings"
 	"testing"
 	"time"
 )
@@ -44,7 +43,7 @@ func TestConfiguredResourceSessionPostgres(t *testing.T) {
 	defer store.SQL().ExecContext(ctx, `DELETE FROM paperboat.users WHERE id=$1`, owner)
 	exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,description,platform,architecture,workspace_root,state,seat_state) VALUES($1,$2,$3,'session-host','Session host','linux','amd64','/workspace','offline','released')`, machine, owner, "env_"+suffix)
 	exec(`INSERT INTO paperboat.sessions(id,user_id,session_hash,csrf_hash,expires_at) VALUES($1,$2,$3,$4,$5)`, session, owner, "hash_"+suffix, "csrf_"+suffix, start.Add(time.Hour))
-	exec(`INSERT INTO paperboat.tunnels(id,account_id,name,desired_state,access_mode,generation,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id,created_at,updated_at) VALUES($1,$2,$1,'active','private',3,$3,$4,$5,$2,$6,$6)`, tunnel, owner, strings.TrimSuffix(host, ".tunnels.example.test"), "https://"+host, machine, start)
+	exec(`INSERT INTO paperboat.tunnels(id,account_id,name,desired_state,access_mode,generation,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id,created_at,updated_at) VALUES($1,$2,$1,'active','private',3,$3,$4,$5,$2,$6,$6)`, tunnel, owner, "endpoint_00000000-0000-4000-8000-"+suffix[len(suffix)-12:], "https://"+host, machine, start)
 	exec(`INSERT INTO paperboat.tunnel_routes(id,tunnel_id,name,protocol,match_type,origin_scheme,origin_address,generation,desired_state,created_by_actor_id,updated_by_actor_id,created_at,updated_at) VALUES($1,$2,'web','http','catch_all','http','127.0.0.1:3000',7,'active',$3,$3,$4,$4)`, route, tunnel, owner, start)
 	s, err := NewService(store, "https://login.example.test")
 	if err != nil {

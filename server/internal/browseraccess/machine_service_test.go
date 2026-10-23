@@ -28,6 +28,9 @@ func TestAutomaticBrowserDormantAuthorityPostgres(t *testing.T) {
 	}
 	defer store.Close()
 	ctx := context.Background()
+	if e := db.Migrate(ctx, store); e != nil {
+		t.Fatal(e)
+	}
 	suffix := fmt.Sprint(time.Now().UnixNano())
 	owner, other, machine, environment := "ab-owner-"+suffix, "ab-other-"+suffix, "ab-machine-"+suffix, "ab-env-"+suffix
 	exec := func(q string, args ...any) {
