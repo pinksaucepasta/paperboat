@@ -19,6 +19,7 @@ pids=()
 cleanup() {
   for pid in "${pids[@]}"; do kill "$pid" 2>/dev/null || true; done
   [ -n "${stats:-}" ] && kill "$stats" 2>/dev/null || true
+  [ -n "${watcher:-}" ] && kill "$watcher" 2>/dev/null || true
   docker rm -f "$PG" "$PROXY" >/dev/null 2>&1 || true
   rm -rf "$WORK"
 }
@@ -71,11 +72,34 @@ echo "instances=$N up behind :$PROXYPORT"
 stats=$!
 
 export PAPERBOAT_PERF_DATABASE_DSN=$DSN PAPERBOAT_LOAD_TARGET_URL=http://127.0.0.1:$PROXYPORT
-# The failover test kills the first instance; its process id is in a file so nothing matches by name.
-export PAPERBOAT_LOAD_KILL_COMMAND="kill -9 \$(cat $WORK/server-1.pid)"
+# Worker leader (F21-04): the lease row names the holding instance; /healthz on each instance names itself.
+leader_row() { docker exec "$PG" psql -U postgres -d paperboat_load_test -Atc \
+  "SELECT holder_instance||' '||generation FROM paperboat.worker_leader WHERE name='server_workers'" 2>/dev/null; }
+instance_of() { curl -fsS "http://127.0.0.1:$((18080 + $1))/healthz" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("instance",""))'; }
+for _ in $(seq 1 30); do [ -n "$(leader_row)" ] && break; sleep 1; done
+read -r leader_id leader_generation <<<"$(leader_row)"
+victim=1
+for i in $(seq 1 "$N"); do [ "$(instance_of "$i")" = "$leader_id" ] && victim=$i; done
+echo "leader before: instance=$leader_id generation=$leader_generation (server-$victim); killing it mid-test"
+# The failover test kills the leader (worst case); its process id is in a file so nothing matches by name.
+export PAPERBOAT_LOAD_KILL_COMMAND="kill -9 \$(cat $WORK/server-$victim.pid)"
+# Lease row every second: the takeover time is the gap between the kill and the first new holder.
+( last=""; while sleep 1; do now=$(leader_row); [ "$now" != "$last" ] && echo "leader $(date +%T) ${now:-none}"; last=$now; done ) &
+watcher=$!
 "$TESTS" -test.run "$RUN" -test.v -test.timeout 90m 2>&1 | grep -vE '^\s*$'
-kill "$stats" 2>/dev/null || true
-# Background workers must run in one instance only (F21-04): show which instances logged worker activity.
+kill "$stats" "$watcher" 2>/dev/null || true
+# Exactly once: leader-mode workers may iterate only on the instance that held the lease at the time. Show every
+# survivor's worker counters (leader="false" on a leader-mode worker must stay 0).
 for i in $(seq 1 "$N"); do
-  echo "server-$i worker log lines: $(grep -ciE 'worker|leader|reconcil' "$WORK/server-$i.log" || true)"
+  [ "$i" = "$victim" ] && continue
+  echo "server-$i ($(instance_of "$i")) worker metrics:"
+  curl -fsS "http://127.0.0.1:$((18080 + i))/metrics" | python3 -c '
+import json, sys
+data = json.load(sys.stdin)
+def walk(prefix, value):
+    if isinstance(value, dict):
+        for k, v in value.items(): walk(prefix + "." + k if prefix else k, v)
+    elif "worker_iterations" in prefix or "worker_mode" in prefix:
+        print("  ", prefix, value)
+walk("", data)'
 done
