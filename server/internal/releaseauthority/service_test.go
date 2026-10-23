@@ -49,7 +49,7 @@ func TestRequestUsesCurrentAdminRoleAndConcreteAuditWriter(t *testing.T) {
 	ctx := context.Background()
 	suffix := fmt.Sprint(time.Now().UnixNano())
 	actor := "release_admin_" + suffix
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users(id,workos_subject,primary_email,status,role) VALUES($1,$2,$3,'active','admin')`, actor, "workos_"+suffix, suffix+"@release.test"); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.operator_accounts(id,email,password_hash,status,role) VALUES($1,$2,'unused test login','active','admin')`, actor, suffix+"@release.test"); err != nil {
 		t.Fatal(err)
 	}
 	keys := make([]Key, 2)
@@ -78,7 +78,7 @@ func TestRequestUsesCurrentAdminRoleAndConcreteAuditWriter(t *testing.T) {
 	if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.audit_events WHERE event_type='release_authority.requested' AND resource_id=$1 AND idempotency_key=$2`, created.ID, operationKey).Scan(&audits); err != nil || audits != 1 {
 		t.Fatalf("audit count=%d err=%v", audits, err)
 	}
-	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.users SET role='support' WHERE id=$1`, actor); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.operator_accounts SET role='support' WHERE id=$1`, actor); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := service.Request(ctx, actor, operationKey, request); !errors.Is(err, ErrForbidden) {

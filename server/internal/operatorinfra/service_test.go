@@ -32,7 +32,7 @@ func TestOperatorInfrastructureEnrollmentReplayAndRegionFence(t *testing.T) {
 	ctx := context.Background()
 	x := fmt.Sprint(time.Now().UnixNano())
 	admin := "infra_admin_" + x
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users(id,workos_subject,primary_email,status,role) VALUES($1,$1,$1||'@test.invalid','active','admin')`, admin); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.operator_accounts(id,email,password_hash,status,role) VALUES($1,$1||'@test.invalid','unused test login','active','admin')`, admin); err != nil {
 		t.Fatal(err)
 	}
 	s := NewService(store, "operator-infrastructure-test-key-32-bytes")
@@ -130,7 +130,7 @@ func TestOperatorInfrastructureEnrollmentReplayAndRegionFence(t *testing.T) {
 	if _, err = s.MutateNode(ctx, admin, "node-resume-"+x, NodeMutation{Action: "resume", NodeID: nodeInput.NodeID, Reason: "case:test", Revision: rotated.Node.Revision}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("disabled resume=%v", err)
 	}
-	if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.users SET role='support' WHERE id=$1`, admin); err != nil {
+	if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.operator_accounts SET role='support' WHERE id=$1`, admin); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = s.MutateRegion(ctx, admin, "region-disable-"+x, RegionMutation{Action: "disable", ID: region.ID, Reason: "case:test", Revision: region.Revision}); !errors.Is(err, ErrForbidden) {

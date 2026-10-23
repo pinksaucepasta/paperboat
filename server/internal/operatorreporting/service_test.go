@@ -358,7 +358,11 @@ func TestOperatorReportingDatabaseAndSentryReads(t *testing.T) {
 	ref, eventID, issueID := "support_01234567-89ab-4def-8123-456789abcdef", "0123456789abcdef0123456789abcdef", "42"
 	traceID := "abcdefabcdefabcdefabcdefabcdefab"
 	spanID := "abcdefabcdefabcd"
-	_, err = store.Pool().Exec(t.Context(), `INSERT INTO users(id,workos_subject,primary_email,status,role) VALUES($1,$1,$1||'@test','active','support'),($2,$2,$2||'@test','active','user'),($3,$3,$3||'@test','active','user')`, actorID, ownerID, ownerID2)
+	_, err = store.Pool().Exec(t.Context(), `INSERT INTO operator_accounts(id,email,password_hash,status,role) VALUES($1,$1||'@test','unused test login','active','support')`, actorID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.Pool().Exec(t.Context(), `INSERT INTO users(id,workos_subject,primary_email,status,role) VALUES($1,$1,$1||'@test','active','user'),($2,$2,$2||'@test','active','user')`, ownerID, ownerID2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -438,7 +442,7 @@ func TestOperatorReportingDatabaseAndSentryReads(t *testing.T) {
 				return
 			}
 			if revokeOnIssue {
-				_, _ = store.Pool().Exec(r.Context(), `UPDATE users SET role='user' WHERE id=$1`, actorID)
+				_, _ = store.Pool().Exec(r.Context(), `UPDATE operator_accounts SET status='disabled' WHERE id=$1`, actorID)
 			}
 			if got := r.URL.Query()["project"]; len(got) != 2 || got[0] != "99" || got[1] != "100" {
 				w.WriteHeader(http.StatusBadRequest)

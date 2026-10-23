@@ -138,12 +138,16 @@ func TestReadUsesCurrentDatabaseRoleAndAuditsAvailability(t *testing.T) {
 	}
 	suffix := strings.ReplaceAll(time.Now().UTC().Format("150405.000000000"), ".", "")
 	actorID, accountID := "usr_operator_"+suffix, "usr_account_"+suffix
-	if _, err := store.Pool().Exec(ctx, `INSERT INTO users(id,workos_subject,primary_email,display_name,status,role) VALUES($1,$1,$2,'Operator','active','admin'),($3,$3,$4,'Customer','active','user')`, actorID, actorID+"@example.test", accountID, accountID+"@example.test"); err != nil {
+	if _, err := store.Pool().Exec(ctx, `INSERT INTO operator_accounts(id,email,password_hash,status,role) VALUES($1,$2,'unused test login','active','admin')`, actorID, actorID+"@example.test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Pool().Exec(ctx, `INSERT INTO users(id,workos_subject,primary_email,display_name,status,role) VALUES($1,$1,$2,'Customer','active','user')`, accountID, accountID+"@example.test"); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
 		store.Pool().Exec(context.Background(), `DELETE FROM audit_events WHERE actor_user_id=$1 OR resource_id=$2`, actorID, accountID)
-		store.Pool().Exec(context.Background(), `DELETE FROM users WHERE id IN($1,$2)`, actorID, accountID)
+		store.Pool().Exec(context.Background(), `DELETE FROM operator_accounts WHERE id=$1`, actorID)
+		store.Pool().Exec(context.Background(), `DELETE FROM users WHERE id=$1`, accountID)
 	})
 	service := NewService(store)
 	actor := auth.User{ID: actorID, Role: auth.Role("admin")}
