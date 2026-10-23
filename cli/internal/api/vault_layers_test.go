@@ -95,3 +95,31 @@ func TestVaultTeamCapsuleManagementUsesAccountAndExactTeamWorkspace(t *testing.T
 		t.Fatal("management changed active workspace")
 	}
 }
+
+// Team ENV mutations go to the team they name, whatever workspace the command selected: the server
+// refuses them elsewhere with 409 workspace_target_conflict, which left a pending publication that
+// `pb env vault resume` replayed into the same refusal (Lane K).
+func TestVaultTeamMutationsUseTheNamedTeamWorkspace(t *testing.T) {
+	seen := map[string]string{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen[r.URL.Path] = r.URL.Query().Get("workspace")
+		writeData(w, 200, VaultTeamState{TeamID: "team-one"})
+	}))
+	defer server.Close()
+	client := New(server.URL, config.Credential{}, server.Client())
+	if err := client.SetWorkspace("personal"); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	_, _ = client.CreateVaultTeam(ctx, VaultTeamCreate{TeamID: "team-one"})
+	_, _ = client.GrantVaultTeamMember(ctx, "team-one", VaultMemberGrant{})
+	_, _ = client.RotateVaultTeam(ctx, "team-one", VaultTeamRotate{})
+	for _, path := range []string{"/v1/environment/teams", "/v1/environment/teams/team-one/members", "/v1/environment/teams/team-one/rotate"} {
+		if seen[path] != "team-one" {
+			t.Fatalf("%s sent in workspace %q", path, seen[path])
+		}
+	}
+	if client.Workspace() != "personal" {
+		t.Fatal("a team mutation changed the command's workspace")
+	}
+}

@@ -153,27 +153,51 @@ func (c *Client) GetVaultSharing(ctx context.Context, account string) (VaultShar
 	return out, err
 }
 func (c *Client) GetVaultTeam(ctx context.Context, team string) (VaultTeamState, error) {
-	scoped := *c
-	if err := scoped.SetWorkspace(team); err != nil {
+	scoped, err := c.teamWorkspace(team)
+	if err != nil {
 		return VaultTeamState{}, err
 	}
 	var out VaultTeamState
-	err := scoped.vaultDataRequest(ctx, http.MethodGet, "/v1/environment/teams/"+url.PathEscape(team), nil, &out)
+	err = scoped.vaultDataRequest(ctx, http.MethodGet, "/v1/environment/teams/"+url.PathEscape(team), nil, &out)
 	return out, err
 }
+
+// teamWorkspace binds a copy of the client to the team a team-ENV operation names: the server refuses
+// a team operation sent in another workspace (409 workspace_target_conflict), whatever --workspace the
+// command was given, and `pb env vault resume` replays a pending team operation the same way.
+func (c *Client) teamWorkspace(team string) (*Client, error) {
+	scoped := *c
+	if err := scoped.SetWorkspace(team); err != nil {
+		return nil, err
+	}
+	return &scoped, nil
+}
+
 func (c *Client) CreateVaultTeam(ctx context.Context, in VaultTeamCreate) (VaultTeamState, error) {
+	scoped, err := c.teamWorkspace(in.TeamID)
+	if err != nil {
+		return VaultTeamState{}, err
+	}
 	var out VaultTeamState
-	err := c.vaultDataRequest(ctx, http.MethodPost, "/v1/environment/teams", in, &out)
+	err = scoped.vaultDataRequest(ctx, http.MethodPost, "/v1/environment/teams", in, &out)
 	return out, err
 }
 func (c *Client) GrantVaultTeamMember(ctx context.Context, team string, in VaultMemberGrant) (VaultTeamState, error) {
+	scoped, err := c.teamWorkspace(team)
+	if err != nil {
+		return VaultTeamState{}, err
+	}
 	var out VaultTeamState
-	err := c.vaultDataRequest(ctx, http.MethodPost, "/v1/environment/teams/"+url.PathEscape(team)+"/members", in, &out)
+	err = scoped.vaultDataRequest(ctx, http.MethodPost, "/v1/environment/teams/"+url.PathEscape(team)+"/members", in, &out)
 	return out, err
 }
 func (c *Client) RotateVaultTeam(ctx context.Context, team string, in VaultTeamRotate) (VaultTeamState, error) {
+	scoped, err := c.teamWorkspace(team)
+	if err != nil {
+		return VaultTeamState{}, err
+	}
 	var out VaultTeamState
-	err := c.vaultDataRequest(ctx, http.MethodPost, "/v1/environment/teams/"+url.PathEscape(team)+"/rotate", in, &out)
+	err = scoped.vaultDataRequest(ctx, http.MethodPost, "/v1/environment/teams/"+url.PathEscape(team)+"/rotate", in, &out)
 	return out, err
 }
 func (c *Client) GetVaultGrants(ctx context.Context) ([]VaultGrantState, error) {
