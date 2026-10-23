@@ -40,7 +40,7 @@ func TestHostIsToldAboutAChangeWithoutPollingOnPostgres(t *testing.T) {
 	}
 	exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$2,'active')`, account, account+"@example.test")
 	for index, id := range []string{machine, other} {
-		exec(`INSERT INTO paperboat.user_machines (id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state) VALUES ($1,$2,$3,$4,'linux','amd64','/workspace','online','occupied')`, id, account, "env_"+id, fmt.Sprintf("box-%d", index))
+		exec(`INSERT INTO paperboat.user_machines (id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,last_seen_at) VALUES ($1,$2,$3,$4,'linux','amd64','/workspace','online','occupied',now())`, id, account, "env_"+id, fmt.Sprintf("box-%d", index))
 	}
 	t.Cleanup(func() {
 		_, _ = database.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.users WHERE id=$1`, account)
@@ -239,7 +239,7 @@ func TestWritesThatChangeWhatAHostCachesPublishTheirTopicsOnPostgres(t *testing.
 		}
 	})
 	addMachine := func(id, owner, alias string) {
-		exec(`INSERT INTO paperboat.user_machines (id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state) VALUES ($1,$2,$3,$4,'linux','amd64','/workspace','online','occupied')`, id, owner, "env_"+id, alias)
+		exec(`INSERT INTO paperboat.user_machines (id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,last_seen_at) VALUES ($1,$2,$3,$4,'linux','amd64','/workspace','online','occupied',now())`, id, owner, "env_"+id, alias)
 	}
 	addMachine(laptop, account, "laptop")
 	addMachine(outsider, stranger, "outsider")

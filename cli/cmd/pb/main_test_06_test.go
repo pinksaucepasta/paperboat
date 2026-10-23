@@ -386,3 +386,37 @@ func TestCommandFailureBorrowsTerminalReferenceWithoutHidingIndependentFault(t *
 		t.Fatal("invalid remote reference became trusted ownership")
 	}
 }
+
+// Round 10 (hp, lanep-r10a/b): a just-paired peer stayed cached offline in the daemon's snapshot until its next
+// refresh, and pb exec refused it ("the machine is offline") for ~2 min while ping worked. A cached presence must
+// never refuse: a machine the snapshot does not see ready is resolved on the server.
+func TestCachedOfflinePeerIsResolvedOnTheServer(t *testing.T) {
+	var catalogCalls int32
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/v1/machines" {
+			atomic.AddInt32(&catalogCalls, 1)
+			writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "mch_new", "alias": "just-paired", "state": "online", "online": true, "installation_generation": 1, "environment_id": "env_new", "workspace_root": "/root"}}, "pagination": map[string]any{"limit": 200, "offset": 0, "total": 1, "next_offset": nil}})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer backend.Close()
+	snapshot := localapi.Snapshot{
+		Schema: localapi.SnapshotSchemaV1, Generation: 3, ObservedAt: time.Now().UTC(), DaemonState: "ready", DaemonVersion: "dev",
+		Machines: []localapi.MachineStatus{{ID: "mch_new", EnvironmentID: "env_new", WorkspaceRoot: "/root", Alias: "just-paired", Eligible: true, RuntimeState: "offline", Generation: 1, SelectedPath: "none", TransferReadiness: "unavailable", PreviewReadiness: "unavailable", SSHReadiness: "unavailable", NATMappingIPv4: "unknown", NATMappingIPv6: "unknown", CaptivePortal: "unknown", PMTU: "unknown", RouterProtocol: "unknown", RouterMapping: "unknown", MappingLifetime: "unknown", UpdateHealth: "unknown"}},
+	}
+	previous := loadWarmMachineSnapshot
+	loadWarmMachineSnapshot = func(context.Context) (localapi.Snapshot, error) { return snapshot, nil }
+	t.Cleanup(func() { loadWarmMachineSnapshot = previous })
+
+	if got, ok := resolveWarmUserMachine(context.Background(), "just-paired"); ok {
+		t.Fatalf("a peer cached offline was taken from the snapshot: %+v", got)
+	}
+	_, machine, err := resolveEnvironmentTargetWithMachine(context.Background(), api.New(backend.URL, config.Credential{AccessToken: "token"}, backend.Client()), "just-paired")
+	if err != nil || machine.ID != "mch_new" || !machine.Online {
+		t.Fatalf("resolved %+v, %v; want the server's online machine", machine, err)
+	}
+	if got := atomic.LoadInt32(&catalogCalls); got != 1 {
+		t.Fatalf("catalog calls = %d, want 1", got)
+	}
+}

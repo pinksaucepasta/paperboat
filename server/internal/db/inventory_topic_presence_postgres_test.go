@@ -41,7 +41,7 @@ func TestInventoryTopicIgnoresPresenceFlipsOnPostgres(t *testing.T) {
 	exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@example.test','active')`, user)
 	for _, id := range []string{flipping, peer} {
 		exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,online)
-VALUES($1,$2,$1,$3,'linux','amd64','/w','pending','occupied',false)`, id, user, "it-"+id[3:7]+fmt.Sprint(len(id)))
+VALUES($1,$2,$1,$3,'linux','amd64','/w','offline','occupied',false)`, id, user, "it-"+id[3:7]+fmt.Sprint(len(id)))
 	}
 	generation := func() int64 {
 		t.Helper()
@@ -60,9 +60,10 @@ VALUES($1,$2,$1,$3,'linux','amd64','/w','pending','occupied',false)`, id, user, 
 			t.Fatalf("%s: peer's inventory topic bumped=%v, want %v", name, bumped, wantBump)
 		}
 	}
-	step("first online", `UPDATE paperboat.user_machines SET state='online',online=true WHERE id=$1`, true)
+	// A paired machine starts offline and never seen (CreateEnrolledMachine); heartbeats set last_seen_at.
+	step("first online after pairing", `UPDATE paperboat.user_machines SET state='online',online=true,last_seen_at=now() WHERE id=$1`, true)
 	step("goes offline", `UPDATE paperboat.user_machines SET state='offline',online=false WHERE id=$1`, false)
-	step("back online", `UPDATE paperboat.user_machines SET state='online',online=true WHERE id=$1`, false)
+	step("back online", `UPDATE paperboat.user_machines SET state='online',online=true,last_seen_at=now() WHERE id=$1`, false)
 	step("online flag only", `UPDATE paperboat.user_machines SET online=false WHERE id=$1`, false)
 	step("rename", `UPDATE paperboat.user_machines SET alias='renamed-machine' WHERE id=$1`, true)
 	step("seat released", `UPDATE paperboat.user_machines SET seat_state='released' WHERE id=$1`, true)

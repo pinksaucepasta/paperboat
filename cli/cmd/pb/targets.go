@@ -378,10 +378,13 @@ func resolveWarmUserMachine(ctx context.Context, requested string) (api.UserMach
 		}
 	}
 	status, err := localwait.ResolveMachine(candidates, requested)
-	if err != nil || !status.Eligible || status.Generation == 0 {
+	// Only a machine the snapshot sees ready is taken from it. Presence in the snapshot can lag (a just-paired
+	// peer stays cached offline until the daemon's next refresh), so anything else is resolved on the server:
+	// a cached "offline" never refuses a command.
+	if err != nil || !status.Eligible || status.Generation == 0 || status.RuntimeState != "ready" {
 		return api.UserMachine{}, false
 	}
-	return api.UserMachine{ID: status.ID, EnvironmentID: status.EnvironmentID, WorkspaceRoot: status.WorkspaceRoot, Alias: status.Alias, Platform: status.Platform, State: "ready", Online: status.RuntimeState == "ready", InstallationGeneration: int64(status.Generation)}, true
+	return api.UserMachine{ID: status.ID, EnvironmentID: status.EnvironmentID, WorkspaceRoot: status.WorkspaceRoot, Alias: status.Alias, Platform: status.Platform, State: "ready", Online: true, InstallationGeneration: int64(status.Generation)}, true
 }
 
 func resolveTerminalSession(ctx context.Context, client *api.Client, target environmentTarget, ref string) (api.TerminalSession, error) {
