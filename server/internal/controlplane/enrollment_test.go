@@ -114,7 +114,7 @@ func TestHelperEnrollmentExchangeIsSingleUseAndKeyBound(t *testing.T) {
 		t.Fatalf("renewal replay = %#v, %v", renewedReplay, err)
 	}
 	var renewalCiphertext []byte
-	if err := store.SQL().QueryRowContext(ctx, `SELECT identity_ciphertext FROM paperboat.hosted_helper_identity_renewals WHERE helper_id=$1`, identity.HelperID).Scan(&renewalCiphertext); err != nil {
+	if err := store.SQL().QueryRowContext(ctx, `SELECT identity_ciphertext FROM paperboat.helper_identity_renewals WHERE helper_id=$1`, identity.HelperID).Scan(&renewalCiphertext); err != nil {
 		t.Fatal(err)
 	}
 	if bytes.Contains(renewalCiphertext, []byte(renewed.Credential)) {
