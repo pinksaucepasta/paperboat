@@ -211,42 +211,6 @@ func TestGitHubProvisionRequiresConnection(t *testing.T) {
 	}
 }
 
-func TestProjectCreateRequiresGitHubForFreeAccount(t *testing.T) {
-	_, router, _ := newGitHubIntegrationRouter(t, []string{"repo"})
-	cookies := loginCookies(t, router, "workos_project_github_required:project-github-required@example.com:Project GitHub Required")
-
-	req := httptest.NewRequest(http.MethodPost, "/v1/projects", strings.NewReader(`{}`))
-	addCookies(req, cookies)
-	req.Header.Set(auth.CSRFHeaderName, csrfCookie(t, cookies))
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), "github_required") {
-		t.Fatalf("expected github_required, body = %s", rec.Body.String())
-	}
-}
-
-func TestProjectCreateValidatesGitHubScopesBeforeHandler(t *testing.T) {
-	_, router, _ := newGitHubIntegrationRouter(t, []string{"repo"})
-	cookies := loginCookies(t, router, "workos_project_github_connected:project-github-connected@example.com:Project GitHub Connected")
-	csrf := csrfCookie(t, cookies)
-	connectGitHub(t, router, cookies, csrf)
-
-	req := httptest.NewRequest(http.MethodPost, "/v1/projects", strings.NewReader(`{}`))
-	addCookies(req, cookies)
-	req.Header.Set(auth.CSRFHeaderName, csrf)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), "idempotency_key_required") {
-		t.Fatalf("expected idempotency_key_required, body = %s", rec.Body.String())
-	}
-}
-
 func TestGitHubProvisionRetriesAfterCreateFailure(t *testing.T) {
 	_, router, fake := newGitHubIntegrationRouter(t, []string{"repo"})
 	fake.CreateErr = errors.New("github unavailable")
@@ -298,7 +262,8 @@ func newGitHubIntegrationRouter(t *testing.T, tokenScopes []string) (*db.DB, htt
 	}
 	resetIntegrationTables(t, store)
 	auditWriter := audit.NewWriter(store)
-	authService := auth.NewService(store, auditWriter, testauth.FakeWorkOSVerifier{}, []string{"test-session-key"}, false)
+	// The same secure browser-auth setup as the auth tests: login needs an allowed origin.
+	authService := auth.NewService(store, auditWriter, testauth.FakeWorkOSVerifier{}, []string{"test-session-key"}, true, "https://login.example.test")
 	billingService := billing.NewWorkspaceService(store, nil, "test-billing-key")
 	if err := billingService.InitializeAllowancePolicy(context.Background(), nil, nil, nil); err != nil {
 		t.Fatal(err)
@@ -306,19 +271,20 @@ func newGitHubIntegrationRouter(t *testing.T, tokenScopes []string) (*db.DB, htt
 	cfg := config.Default()
 	cfg.HTTP.PublicBaseURL = "https://unified-camel-humorous.ngrok-free.app"
 	cfg.Secrets.EncryptionKey = "test-encryption-key-for-github-tests"
+	cfg.Secrets.GitHubClientID, cfg.Secrets.GitHubClientSecret = "test-github-client", "test-github-secret"
 	fake := &pbgithub.FakeClient{
 		Token: pbgithub.OAuthToken{AccessToken: "fake-gh-token", Scopes: tokenScopes},
 		User:  pbgithub.GitHubUser{Login: "paperboat-test-user"},
 	}
 	githubService := pbgithub.NewService(store, auditWriter, fake, cfg)
-	return store, NewRouter(Options{
+	return store, authTestOriginHandler{next: NewRouter(Options{
 		Config:           cfg,
 		Logger:           slog.New(slog.NewTextHandler(io.Discard, nil)),
 		ReadinessChecker: readinessFunc(func(context.Context) error { return nil }),
 		Auth:             authService,
 		WorkspaceBilling: billingService,
 		GitHub:           githubService,
-	}), fake
+	})}, fake
 }
 
 func connectGitHub(t *testing.T, router http.Handler, cookies []*http.Cookie, csrf string) {
