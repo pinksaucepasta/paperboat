@@ -252,7 +252,7 @@ func (v Verifier) Verify(token string, state tls.ConnectionState, now time.Time)
 }
 
 func controlAllowed(a, b Grant, now time.Time) bool {
-	return a.AccountID == b.AccountID && a.ExpiresAt > now.Unix() && b.ExpiresAt > now.Unix() && slices.Contains(a.RelayControlPeers, b.WireGuardPublicKey) && slices.Contains(b.RelayControlPeers, a.WireGuardPublicKey)
+	return a.AccountID == b.AccountID && a.ExpiresAt > now.Unix() && b.ExpiresAt > now.Unix() && a.controls(b.WireGuardPublicKey) && b.controls(a.WireGuardPublicKey)
 }
 func allowed(a, b Grant, now time.Time) bool { return allowedPairExpiry(a, b, now) > now.Unix() }
 
@@ -288,41 +288,52 @@ func sameGrantIdentity(a, b Grant) bool {
 }
 
 // mergeGrants adds the peers of a further grant of the same identity. A peer named again takes the
-// newer grant's scopes (a refreshed chunk); the result stays within MaxMergedPeers.
+// newer grant's scopes (a refreshed chunk); the result stays within MaxMergedPeers. It costs the size of
+// next, not of current: current's lists and index are extended in place, so current is consumed and
+// must be replaced by the result (the caller holds the server lock, which every reader of a grant holds).
+// On an error nothing is changed.
 func mergeGrants(current, next Grant) (Grant, error) {
+	if current.index == nil {
+		current = current.withIndex()
+	}
+	index := current.index
+	addedPeers := make(map[string]bool, len(next.Peers))
+	for _, peer := range next.Peers {
+		if _, ok := index.peers[peer.WireGuardPublicKey]; !ok {
+			addedPeers[peer.WireGuardPublicKey] = true
+		}
+	}
+	addedControl := make(map[string]bool, len(next.RelayControlPeers))
+	for _, peer := range next.RelayControlPeers {
+		if !index.control[peer] {
+			addedControl[peer] = true
+		}
+	}
+	if len(current.Peers)+len(addedPeers) > MaxMergedPeers || len(current.RelayControlPeers)+len(addedControl) > MaxMergedPeers {
+		return Grant{}, ErrAdmission
+	}
 	merged := next
-	index := make(map[string]int, len(current.Peers)+len(next.Peers))
-	merged.Peers = make([]Peer, 0, len(current.Peers)+len(next.Peers))
-	for _, peer := range append(append([]Peer(nil), current.Peers...), next.Peers...) {
-		if i, ok := index[peer.WireGuardPublicKey]; ok {
+	merged.Peers, merged.RelayControlPeers = current.Peers, current.RelayControlPeers
+	for _, peer := range next.Peers {
+		if i, ok := index.peers[peer.WireGuardPublicKey]; ok {
 			merged.Peers[i] = peer
 			continue
 		}
-		index[peer.WireGuardPublicKey] = len(merged.Peers)
+		index.peers[peer.WireGuardPublicKey] = len(merged.Peers)
 		merged.Peers = append(merged.Peers, peer)
 	}
-	if len(merged.Peers) > MaxMergedPeers {
-		return Grant{}, ErrAdmission
-	}
-	merged.RelayControlPeers = slices.Clone(current.RelayControlPeers)
-	control := make(map[string]bool, len(current.RelayControlPeers)+len(next.RelayControlPeers))
-	for _, peer := range current.RelayControlPeers {
-		control[peer] = true
-	}
 	for _, peer := range next.RelayControlPeers {
-		if !control[peer] {
-			control[peer] = true
+		if !index.control[peer] {
+			index.control[peer] = true
 			merged.RelayControlPeers = append(merged.RelayControlPeers, peer)
 		}
-	}
-	if len(merged.RelayControlPeers) > MaxMergedPeers {
-		return Grant{}, ErrAdmission
 	}
 	if merged.PeerRelay == nil {
 		merged.PeerRelay = current.PeerRelay
 	}
 	merged.ExpiresAt = max(current.ExpiresAt, next.ExpiresAt)
-	return merged.withIndex(), nil
+	merged.index = index
+	return merged, nil
 }
 
 func allowedAdmitted(a, b Grant) bool {

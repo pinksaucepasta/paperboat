@@ -121,12 +121,8 @@ func (l *PairLease) capabilityValidLocked() (time.Time, bool) {
 		return time.Time{}, false
 	}
 	match := func(g, other Grant) bool {
-		for _, p := range g.Peers {
-			if p.WireGuardPublicKey == other.WireGuardPublicKey {
-				return p.DiscoPublicKey == other.DiscoPublicKey
-			}
-		}
-		return false
+		p, ok := g.peerEntry(other.WireGuardPublicKey)
+		return ok && p.DiscoPublicKey == other.DiscoPublicKey
 	}
 	if !match(a, b) || !match(b, a) {
 		return time.Time{}, false

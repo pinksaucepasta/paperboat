@@ -339,12 +339,8 @@ func (s *Server) admit(p *peerConn, token string) error {
 	defer s.mu.Unlock()
 	// An endpoint with more peers than one grant names sends one grant per chunk of peers, all of the
 	// same generation; on its admitted connection they add up.
+	// The part is merged at the commit below, after every refusal, because the merge extends p.grant in place.
 	merging := !p.key.IsZero() && p.grant.Generation == g.Generation && p.grant.signedHash != g.signedHash && sameGrantIdentity(p.grant, g)
-	if merging {
-		if g, err = mergeGrants(p.grant, g); err != nil {
-			return err
-		}
-	}
 	if s.draining && (p.key.IsZero() || !now.Before(s.deadline)) {
 		return ErrOverload
 	}
@@ -390,13 +386,20 @@ func (s *Server) admit(p *peerConn, token string) error {
 		}
 		old.close(code, "relay registration superseded")
 	}
+	if merging {
+		if g, err = mergeGrants(p.grant, g); err != nil {
+			return err
+		}
+	}
 	if p.key.IsZero() {
 		s.accepted.Add(1)
 	}
 	p.key = k
 	p.grant = g
 	s.peers[k] = p
-	if previous := s.fences[id]; previous != nil && sameGrantAuthority(previous.Grant, g) {
+	// A merged part only adds peers to the admitted grant: its fence (and the peer-relay leases that hold
+	// it) stays. Comparing the whole authority costs every peer the endpoint names, on every part.
+	if previous := s.fences[id]; previous != nil && (merging || sameGrantAuthority(previous.Grant, g)) {
 		previous.Grant = g
 	} else {
 		s.fences[id] = &grantFence{g}
