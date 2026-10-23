@@ -17,6 +17,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat/server/internal/helperruntime"
 	"github.com/pinksaucepasta/paperboat/server/internal/mint"
+	"github.com/pinksaucepasta/paperboat/server/internal/planlimits"
 	"github.com/pinksaucepasta/paperboat/server/internal/secrets"
 	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 	"github.com/pinksaucepasta/paperboat/server/internal/teaminbox"
@@ -545,6 +546,13 @@ func (s *Service) StartEnrollmentWithOptions(ctx context.Context, userID, idempo
 	}
 	if strings.TrimSpace(s.encryptionKey) == "" {
 		return EnrollmentStart{}, errors.New("user-machine enrollment encryption is not configured")
+	}
+	// Refuse up front at the plan's machine limit, before an install command is handed out;
+	// pairing checks again for a token issued earlier.
+	if err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		return planlimits.CheckTx(ctx, tx, planlimits.Scope{Account: userID, Team: options.WorkspaceTeamID}, planlimits.Machines)
+	}); err != nil {
+		return EnrollmentStart{}, err
 	}
 	token, err := randomEnrollmentTokenFor(options.Shell)
 	if err != nil {

@@ -183,6 +183,9 @@ func userMachineEnrollmentStart(service *usermachines.Service) http.HandlerFunc 
 		}
 		result, err := service.StartEnrollmentWithOptions(r.Context(), p.User.ID, r.Header.Get("Idempotency-Key"), usermachines.EnrollmentOptions{Shell: body.Shell, WorkspaceTeamID: team})
 		if err != nil {
+			if writePlanLimitReached(w, r, err) {
+				return
+			}
 			if errors.Is(err, usermachines.ErrWorkspaceForbidden) {
 				writeError(w, r, http.StatusForbidden, "workspace_forbidden", "You cannot add machines to that workspace.")
 				return

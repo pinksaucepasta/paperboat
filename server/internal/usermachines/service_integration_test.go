@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/server/internal/planlimits"
 	"io"
 	"os"
 	"reflect"
@@ -3668,5 +3669,35 @@ func TestMachineControlRenewalReplayAfterLostResponse(t *testing.T) {
 	}
 	if _, err := renew(initial.Credential, machineID, operation); !errors.Is(err, ErrMachineControlInvalid) {
 		t.Fatalf("replay after a newer renewal err=%v, want ErrMachineControlInvalid", err)
+	}
+}
+
+// At the plan's machine limit Add machine is refused before any install command is issued, with
+// the typed limit error the console and CLI name (machines: Free 100, here configured to 1).
+func TestEnrollmentStartIsRefusedAtThePlanMachineLimitPostgres(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	userID := "usr_enroll_limit_" + suffix
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users (id, workos_subject, primary_email, status) VALUES ($1,$2,$3,'active')`, userID, "workos_"+suffix, "enroll-limit-"+suffix+"@example.test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state) VALUES ($1,$2,$1,'held','linux','amd64','/w','online','occupied')`, "mch_enroll_limit_"+suffix, userID); err != nil {
+		t.Fatal(err)
+	}
+	limits := config.Default().Billing.Limits
+	limits.Machines.Free = 1
+	planlimits.Configure(limits, "https://console.example.test/billing")
+	t.Cleanup(func() { planlimits.Configure(config.Default().Billing.Limits, "") })
+	service := New(store, audit.NewWriter(store), Policy{PairingLifetime: 10 * time.Minute, AllowedPlatforms: []string{"linux"}}, testSeatAuthorizer{})
+	service.ConfigureInstallationEncryption("test-enrollment-key")
+	_, err := service.StartEnrollment(ctx, userID, "idem-limit-"+suffix)
+	var limit *planlimits.LimitError
+	if !errors.As(err, &limit) || limit.Code() != "machine_limit_reached" || limit.Limit != 1 || limit.BillingURL == "" {
+		t.Fatalf("enrollment at the machine limit: %v", err)
+	}
+	var pairings int
+	if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.user_machine_pairings WHERE idempotency_key=$1`, "idem-limit-"+suffix).Scan(&pairings); err != nil || pairings != 0 {
+		t.Fatalf("a refused enrollment created %d pairings (err=%v)", pairings, err)
 	}
 }
