@@ -54,6 +54,7 @@ func mainExit() (exitCode int) {
 		defer close(signalDone)
 		select {
 		case <-interrupts:
+			userInterrupted.Store(true)
 			cancel()
 		case <-ctx.Done():
 		}

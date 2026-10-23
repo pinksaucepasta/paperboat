@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
@@ -21,7 +22,7 @@ func planLimitRefusal(ctx context.Context, err error) error {
 	if errors.As(err, &refused) && refused.Code == localapi.RelayQuotaCode {
 		return refused
 	}
-	if !connectionFailureKind(ctx, classifyCommandFailure(err).kind) {
+	if !connectionFailureKind(classifyCommandFailure(err).kind) {
 		return err
 	}
 	if message := daemonRelayDenial(ctx); message != "" {
@@ -30,15 +31,19 @@ func planLimitRefusal(ctx context.Context, err error) error {
 	return err
 }
 
+// userInterrupted records that this process received Ctrl-C or SIGTERM. A cancellation without it came
+// from inside the command (a relay cut ends a send as canceled), so it may be the plan limit.
+var userInterrupted atomic.Bool
+
 // connectionFailureKind reports whether a failure may be a peer connection that needed the withheld
 // relay: exec, ssh, send and terminal end as a lost connection, a deadline, an unexpected local service
-// failure, or a cancellation that did not come from the user (the command's own context is still live).
-func connectionFailureKind(ctx context.Context, kind commandFailureKind) bool {
+// failure, or a cancellation the user did not ask for.
+func connectionFailureKind(kind commandFailureKind) bool {
 	switch kind {
 	case commandOperational, commandDeadline, commandUnexpected:
 		return true
 	case commandCanceled:
-		return ctx.Err() == nil
+		return !userInterrupted.Load()
 	}
 	return false
 }

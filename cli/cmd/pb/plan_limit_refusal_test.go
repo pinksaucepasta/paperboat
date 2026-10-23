@@ -55,9 +55,16 @@ func TestAStreamCutByTheRelayAtThePlanLimitNamesIt(t *testing.T) {
 			t.Fatalf("%v: message=%q", other, message)
 		}
 	}
-	interrupted, cancel := context.WithCancel(context.Background())
+	// A send cut by the relay ends canceled with its context canceled too (Lane O, F13-03S): only a
+	// real interrupt keeps "Operation canceled".
+	canceledCtx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if planLimitRefusal(interrupted, context.Canceled) != context.Canceled {
+	if err := planLimitRefusal(canceledCtx, context.Canceled); err == context.Canceled {
+		t.Fatal("a relay cut that canceled the command was reported as a user cancel")
+	}
+	userInterrupted.Store(true)
+	t.Cleanup(func() { userInterrupted.Store(false) })
+	if planLimitRefusal(canceledCtx, context.Canceled) != context.Canceled {
 		t.Fatal("a cancellation by the user named the plan limit")
 	}
 	health = nil
