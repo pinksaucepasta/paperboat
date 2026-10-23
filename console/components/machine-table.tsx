@@ -151,7 +151,7 @@ export function MachineTable() {
                 key={machine.id}
                 machine={machine}
                 me={me}
-                running={runningFailed ? null : running && (running.get(machine.id) ?? idle)}
+                running={runningFailed ? null : running && (running.counts.get(machine.id) ?? (running.truncated ? null : idle))}
               />
             ))}
           </tbody>

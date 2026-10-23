@@ -471,34 +471,22 @@ export async function allPages<T>(path: string, params: Record<string, string> =
 }
 
 /**
- * What each machine is running: open terminal sessions, active tunnels and active previews.
- * There is no per-machine count API, so this groups the three inventories by machine. Terminal
- * sessions are listed per account (`/v1/terminal-sessions`), tunnels and previews per workspace.
+ * What each machine is running: open terminal sessions, active tunnels and active previews, from
+ * the server's per-machine counts (one computation serves every tab, at most 10 s old). Machines
+ * running nothing are left out; when the server stopped short (`truncated`), a machine it left out
+ * is unknown rather than idle.
  */
 export const runningQuery = (workspace: string) =>
   queryOptions({
     queryKey: ["running", workspace],
     queryFn: async () => {
-      const [sessions, tunnels, previews] = await Promise.all([
-        api<Data<"/v1/terminal-sessions">>("terminal-sessions?state=running&limit=200"),
-        allPages<Data<"/v1/tunnels">["items"][number]>("tunnels", { workspace, state: "active" }),
-        allPages<Data<"/v1/previews">["items"][number]>("previews", { workspace, state: "active" }),
-      ])
-      const counts = new Map<string, RunningCounts>()
-      const add = (id: string | undefined, kind: keyof RunningCounts) => {
-        if (!id) return
-        const entry = counts.get(id) ?? { terminals: 0, tunnels: 0, previews: 0 }
-        entry[kind]++
-        counts.set(id, entry)
-      }
-      // Counted from a list that stopped short would be wrong: show no counts instead ("—").
-      if (!tunnels.complete || !previews.complete || sessions.sessions.length >= 200) {
-        throw new Error("Too many terminals, tunnels or previews to count per machine.")
-      }
-      sessions.sessions.forEach((session) => add(session.target?.machine_id, "terminals"))
-      tunnels.items.forEach((tunnel) => add(tunnel.created_by_host_id, "tunnels"))
-      previews.items.forEach((preview) => add(preview.owner_machine_id, "previews"))
-      return counts
+      const data = await api<{ items: ({ machine_id: string } & RunningCounts)[]; truncated: boolean }>(
+        `machines/running-counts?${new URLSearchParams({ workspace })}`,
+      )
+      const counts = new Map(
+        data.items.map(({ machine_id, terminals, tunnels, previews }) => [machine_id, { terminals, tunnels, previews }]),
+      )
+      return { counts, truncated: data.truncated }
     },
     refetchInterval: 30_000,
   })
