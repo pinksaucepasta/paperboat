@@ -24,7 +24,7 @@ type Connections struct {
 	router      *Router
 }
 
-func NewConnections(ctx context.Context, catalog Catalog, active Descriptor, start func(context.Context, string) error, maxSessions, maxAttachments int) (*Connections, error) {
+func NewConnections(ctx context.Context, catalog Catalog, active Descriptor, start func(context.Context, string) error, maxSessions int) (*Connections, error) {
 	if start == nil || active.Validate() != nil {
 		return nil, ErrInvalid
 	}
@@ -40,7 +40,7 @@ func NewConnections(ctx context.Context, catalog Catalog, active Descriptor, sta
 		owners[d.Generation] = Owner{Descriptor: d}
 	}
 	connections := &Connections{catalog: catalog, active: active, start: start, clients: make(map[string]*workloadbridge.Client), descriptors: make(map[string]Descriptor)}
-	router, err := NewRouter(active.Generation, owners, maxSessions, maxAttachments, connections.ensure)
+	router, err := NewRouter(active.Generation, owners, maxSessions, connections.ensure)
 	if err != nil {
 		return nil, err
 	}

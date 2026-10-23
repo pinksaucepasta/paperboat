@@ -32,7 +32,7 @@ func TestRouterKeepsOldSessionsWithTheirOwnerAndAdmitsNewSessionsGlobally(t *tes
 	metadata := map[string]Owner{
 		oldGeneration: {Descriptor: oldOwner.Descriptor},
 	}
-	router, err := NewRouter(oldGeneration, metadata, 2, 1, ensureRouterOwner(available))
+	router, err := NewRouter(oldGeneration, metadata, 2, ensureRouterOwner(available))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,8 +86,10 @@ func TestRouterKeepsOldSessionsWithTheirOwnerAndAdmitsNewSessionsGlobally(t *tes
 	if newManager.List()[0].ID != newSession.ID || oldManager.List()[0].ID != oldSession.ID {
 		t.Fatal("create or route changed the generation that owns a session")
 	}
-	if _, err := remote.AttachLive(newSession.ID, "att_overflow"); !errors.Is(err, session.ErrResourceLimit) {
-		t.Fatalf("global attachment limit across owners: got %v", err)
+	// Attachments are bounded per session by the session manager, not across the machine, so a
+	// second session takes its own attachment while another session already has one.
+	if _, err := remote.AttachLive(newSession.ID, "att_second_session"); err != nil {
+		t.Fatalf("attachment to a second session: %v", err)
 	}
 
 	listed := remote.List()
@@ -102,7 +104,7 @@ func TestRouterKeepsOldSessionsWithTheirOwnerAndAdmitsNewSessionsGlobally(t *tes
 		t.Fatalf("aggregate list lost generation ownership: %#v", listedIDs)
 	}
 	counts := remote.ResourceCounts()
-	if err := remote.LastError(); err != nil || counts["sessions"] != 2 || counts["processes"] != 2 || counts["attachments"] != 1 {
+	if err := remote.LastError(); err != nil || counts["sessions"] != 2 || counts["processes"] != 2 || counts["attachments"] != 2 {
 		t.Fatalf("aggregate resources: counts=%v err=%v", counts, err)
 	}
 
@@ -171,7 +173,7 @@ func TestRouterReopensArchivedSessionOnCurrentOwnerCodeWithoutCatalogMutation(t 
 		activeGeneration: {Descriptor: activeDescriptor},
 	}
 	available := map[string]Owner{oldGeneration: reopenedOwner, activeGeneration: activeOwner}
-	router, err := NewRouter(activeGeneration, metadata, 4, 2, ensureRouterOwner(available))
+	router, err := NewRouter(activeGeneration, metadata, 4, ensureRouterOwner(available))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,7 +253,7 @@ func TestRouterRejectsArchivedCodeTransitionOutsideCurrentActiveSource(t *testin
 			owner.Descriptor = descriptor
 			owner.Identity.ExecutableSHA256 = descriptor.Source.SHA256
 			available := map[string]Owner{oldGeneration: owner, activeGeneration: activeOwner}
-			router, err := NewRouter(activeGeneration, metadata, 4, 2, ensureRouterOwner(available))
+			router, err := NewRouter(activeGeneration, metadata, 4, ensureRouterOwner(available))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -273,7 +275,7 @@ func TestRouterBoundsCatalogAndFailsClosedOnOverLimitOwnerList(t *testing.T) {
 		firstGeneration:  {Descriptor: firstOwner.Descriptor},
 		secondGeneration: {Descriptor: secondOwner.Descriptor},
 	}
-	router, err := NewRouter(firstGeneration, metadata, 1, 2, ensureRouterOwner(available))
+	router, err := NewRouter(firstGeneration, metadata, 1, ensureRouterOwner(available))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -290,8 +292,13 @@ func TestRouterBoundsCatalogAndFailsClosedOnOverLimitOwnerList(t *testing.T) {
 			t.Fatalf("seed owner session %d: %v", index, err)
 		}
 	}
-	if _, err := router.Call(context.Background(), "List", []byte(`{}`)); !errors.Is(err, session.ErrResourceLimit) {
-		t.Fatalf("over-limit catalog list must fail closed: got %v", err)
+	// Sessions an owner already holds past the ceiling stay listed and reachable; the ceiling only
+	// refuses new sessions.
+	if _, err := router.Call(context.Background(), "List", []byte(`{}`)); err != nil {
+		t.Fatalf("list with sessions past the ceiling: %v", err)
+	}
+	if _, err := router.Call(context.Background(), "Create", []byte(`{"Request":{"Name":"past-ceiling"}}`)); !errors.Is(err, session.ErrResourceLimit) {
+		t.Fatalf("create past the ceiling must be refused: got %v", err)
 	}
 
 	thirdOwner := Owner{Descriptor: testOwnerDescriptor(t, thirdGeneration, t.TempDir(), shell)}
@@ -333,7 +340,7 @@ func TestRouterRejectsDuplicateSessionIDsAndMismatchedOwnerIdentity(t *testing.T
 		secondGeneration: {Descriptor: secondOwner.Descriptor},
 	}
 	available := map[string]Owner{firstGeneration: firstOwner, secondGeneration: secondOwner}
-	router, err := NewRouter(firstGeneration, metadata, 2, 2, ensureRouterOwner(available))
+	router, err := NewRouter(firstGeneration, metadata, 2, ensureRouterOwner(available))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -344,7 +351,7 @@ func TestRouterRejectsDuplicateSessionIDsAndMismatchedOwnerIdentity(t *testing.T
 	mismatchedIdentity := secondOwner
 	mismatchedIdentity.Identity.Generation = firstGeneration
 	available[secondGeneration] = mismatchedIdentity
-	identityRouter, err := NewRouter(firstGeneration, metadata, 2, 2, ensureRouterOwner(available))
+	identityRouter, err := NewRouter(firstGeneration, metadata, 2, ensureRouterOwner(available))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -355,7 +362,7 @@ func TestRouterRejectsDuplicateSessionIDsAndMismatchedOwnerIdentity(t *testing.T
 	retiredOwner := secondOwner
 	retiredOwner.Identity.Retired = true
 	available[secondGeneration] = retiredOwner
-	retiredRouter, err := NewRouter(firstGeneration, metadata, 2, 2, ensureRouterOwner(available))
+	retiredRouter, err := NewRouter(firstGeneration, metadata, 2, ensureRouterOwner(available))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -372,7 +379,7 @@ func TestRouterRejectsDuplicateSessionIDsAndMismatchedOwnerIdentity(t *testing.T
 		firstGeneration:  {Descriptor: firstOwner.Descriptor},
 		secondGeneration: {Descriptor: otherAccount},
 	}
-	if _, err := NewRouter(firstGeneration, crossAccount, 2, 2, ensureRouterOwner(available)); !errors.Is(err, session.ErrInvalidSession) {
+	if _, err := NewRouter(firstGeneration, crossAccount, 2, ensureRouterOwner(available)); !errors.Is(err, session.ErrInvalidSession) {
 		t.Fatalf("cross-account owner catalog must be rejected: %v", err)
 	}
 }
@@ -382,7 +389,7 @@ func TestRouterSerializesConcurrentCreateAtGlobalLimit(t *testing.T) {
 	gen := generation(31)
 	owner := authenticatedRouterOwner(t, gen, manager, workspace, shell)
 	metadata := map[string]Owner{gen: {Descriptor: owner.Descriptor}}
-	router, err := NewRouter(gen, metadata, 1, 2, ensureRouterOwner(map[string]Owner{gen: owner}))
+	router, err := NewRouter(gen, metadata, 1, ensureRouterOwner(map[string]Owner{gen: owner}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -524,7 +531,7 @@ func TestRouterAdmitsNewSessionsWhileClosedRecordsExceedTheLimit(t *testing.T) {
 	manager, workspace, shell := newRouterTestManager(t)
 	gen := generation(41)
 	owner := authenticatedRouterOwner(t, gen, manager, workspace, shell)
-	router, err := NewRouter(gen, map[string]Owner{gen: {Descriptor: owner.Descriptor}}, 1, 2, ensureRouterOwner(map[string]Owner{gen: owner}))
+	router, err := NewRouter(gen, map[string]Owner{gen: {Descriptor: owner.Descriptor}}, 1, ensureRouterOwner(map[string]Owner{gen: owner}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -546,5 +553,41 @@ func TestRouterAdmitsNewSessionsWhileClosedRecordsExceedTheLimit(t *testing.T) {
 	}
 	if _, err := remote.Create(context.Background(), session.CreateRequest{Name: "over-limit", Command: routerShellCommand(shell, workspace, "exec sleep 60")}); !errors.Is(err, session.ErrResourceLimit) {
 		t.Fatalf("a second live session must still be refused: %v", err)
+	}
+}
+
+// F3-05 on three hosts: the 20th terminal was created but attaching to it was refused with
+// resource_limit. A machine at its terminal ceiling attaches to every one of its sessions.
+func TestRouterAttachesToEverySessionAtTheCeiling(t *testing.T) {
+	const ceiling = 3
+	manager, workspace, shell := newRouterTestManager(t)
+	gen := generation(51)
+	owner := authenticatedRouterOwner(t, gen, manager, workspace, shell)
+	router, err := NewRouter(gen, map[string]Owner{gen: {Descriptor: owner.Descriptor}}, ceiling, ensureRouterOwner(map[string]Owner{gen: owner}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	remote, err := router.Service()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for i := 0; i < ceiling; i++ {
+		created, err := remote.Create(context.Background(), session.CreateRequest{Name: fmt.Sprintf("ceiling-%d", i), Command: routerShellCommand(shell, workspace, "exec sleep 60")})
+		if err != nil {
+			t.Fatalf("create %d of %d: %v", i+1, ceiling, err)
+		}
+		ids = append(ids, created.ID)
+	}
+	for i, id := range ids {
+		if _, err := remote.AttachLive(id, fmt.Sprintf("att_ceiling_%d", i)); err != nil {
+			t.Fatalf("attach to session %d of %d at the ceiling: %v", i+1, ceiling, err)
+		}
+	}
+	if _, err := remote.Create(context.Background(), session.CreateRequest{Name: "over-ceiling", Command: routerShellCommand(shell, workspace, "exec sleep 60")}); !errors.Is(err, session.ErrResourceLimit) {
+		t.Fatalf("create past the ceiling: %v", err)
+	}
+	if got := len(manager.List()); got != ceiling {
+		t.Fatalf("a refused create left %d sessions, want %d", got, ceiling)
 	}
 }

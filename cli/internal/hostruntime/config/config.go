@@ -38,7 +38,7 @@ type ResourceLimits struct {
 	MaxConcurrentOps       int
 }
 
-var DefaultResources = ResourceLimits{MaxSessions: 20, MaxAttachments: 128, MaxInputDecisions: 10_000, HistoryBytes: 64 << 10, MaxConcurrentTransfers: 2, MaxPreviewTargets: 20, MaxConcurrentProbes: 8, MaxConcurrentOps: 32}
+var DefaultResources = ResourceLimits{MaxSessions: 256, MaxAttachments: 128, MaxInputDecisions: 10_000, HistoryBytes: 64 << 10, MaxConcurrentTransfers: 2, MaxPreviewTargets: 20, MaxConcurrentProbes: 8, MaxConcurrentOps: 32}
 
 func (c Config) Validate() error {
 	if c.StateRoot == "" || !filepath.IsAbs(c.StateRoot) {

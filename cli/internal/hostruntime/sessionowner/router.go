@@ -60,21 +60,19 @@ type Router struct {
 	revision  uint64
 	maxIDs    int
 	maxOwners int
-	maxAttach int
 	ensure    Ensure
 	archive   func(context.Context, string) (workloadbridge.ArchiveMetadata, error)
 }
 
 // NewRouter creates a router over a complete, bounded owner catalog. Owners
 // may be metadata-only entries; Ensure supplies authenticated calls lazily.
-func NewRouter(active string, owners map[string]Owner, maxSessions, maxAttachments int, ensure Ensure) (*Router, error) {
-	if maxSessions < 1 || maxAttachments < 1 || ensure == nil {
+func NewRouter(active string, owners map[string]Owner, maxSessions int, ensure Ensure) (*Router, error) {
+	if maxSessions < 1 || ensure == nil {
 		return nil, session.ErrInvalidSession
 	}
 	r := &Router{
 		maxIDs:    maxSessions,
 		maxOwners: maxSessions + 1,
-		maxAttach: maxAttachments,
 		ensure:    ensure,
 		sessions:  make(map[string]routedSession),
 	}
@@ -252,7 +250,7 @@ func (r *Router) inspect(ctx context.Context, includeCounts bool) (routerImage, 
 		}
 		// One owner holds at most the session limit of live sessions; closed records are retained
 		// for display and do not count. A list beyond the retained bound is malformed.
-		if len(out.V0) > maxRetainedRecordsPerOwner || liveSnapshots(out.V0) > r.maxIDs {
+		if len(out.V0) > maxRetainedRecordsPerOwner {
 			return routerImage{}, session.ErrResourceLimit
 		}
 		for _, snapshot := range out.V0 {
@@ -335,7 +333,7 @@ func (r *Router) create(ctx context.Context, body json.RawMessage) (json.RawMess
 	if err := decodeRemote(body, &args); err != nil {
 		return nil, session.ErrInvalidSession
 	}
-	image, err := r.inspect(ctx, true)
+	image, err := r.inspect(ctx, false)
 	if err != nil {
 		return nil, err
 	}
@@ -344,7 +342,7 @@ func (r *Router) create(ctx context.Context, body json.RawMessage) (json.RawMess
 			return nil, session.ErrSessionExists
 		}
 	}
-	if liveSessions(image.byID) >= r.maxIDs || image.counts["processes"] >= uint64(r.maxIDs) {
+	if r.atCeiling(image) {
 		return nil, session.ErrResourceLimit
 	}
 	active, _, _ := r.catalogSnapshot()
@@ -366,7 +364,7 @@ func (r *Router) create(ctx context.Context, body json.RawMessage) (json.RawMess
 		cleanupErr := deleteCreated(ctx, owner.Call, out.V0.ID)
 		return nil, errors.Join(session.ErrSessionExists, cleanupErr)
 	}
-	if liveSessions(image.byID) >= r.maxIDs {
+	if r.atCeiling(image) {
 		cleanupErr := deleteCreated(ctx, owner.Call, out.V0.ID)
 		return nil, errors.Join(session.ErrResourceLimit, cleanupErr)
 	}
@@ -389,7 +387,7 @@ func (r *Router) mutateExisting(ctx context.Context, op string, body json.RawMes
 	if err != nil {
 		return nil, err
 	}
-	image, err := r.inspect(ctx, true)
+	image, err := r.inspect(ctx, false)
 	if err != nil {
 		return nil, err
 	}
@@ -403,9 +401,6 @@ func (r *Router) mutateExisting(ctx context.Context, op string, body json.RawMes
 		if err != nil {
 			return nil, err
 		}
-	}
-	if isRestart(op) && image.counts["processes"] >= uint64(r.maxIDs) && routed.state != session.Running && routed.state != session.Closing {
-		return nil, session.ErrResourceLimit
 	}
 	response, err := owner.Call(ctx, op, body)
 	if err != nil {
@@ -441,12 +436,9 @@ func (r *Router) mutateExisting(ctx context.Context, op string, body json.RawMes
 }
 
 func (r *Router) attach(ctx context.Context, op string, body json.RawMessage) (json.RawMessage, error) {
-	image, err := r.inspect(ctx, true)
+	image, err := r.inspect(ctx, false)
 	if err != nil {
 		return nil, err
-	}
-	if image.counts["attachments"] >= uint64(r.maxAttach) {
-		return nil, session.ErrResourceLimit
 	}
 	return r.forwardFromImage(ctx, op, body, image)
 }
@@ -700,27 +692,13 @@ func nameExists(snapshots []session.Snapshot, name string) bool {
 	return false
 }
 
-func isRestart(op string) bool {
-	switch op {
-	case "Restart", "RestartAtGeneration", "RestartContext", "RestartAtGenerationContext":
-		return true
-	default:
-		return false
-	}
-}
-
 func isDelete(op string) bool { return op == "Delete" || op == "DeleteAtGeneration" }
+
+// atCeiling is the one check of the machine's terminal ceiling: live sessions across every owner
+// generation. It protects the machine from runaway creation; it is not a plan limit. Attachments are
+// bounded per session by the session manager.
+func (r *Router) atCeiling(image routerImage) bool { return liveSessions(image.byID) >= r.maxIDs }
 
 // maxRetainedRecordsPerOwner bounds one owner's list, live and closed records together, so a
 // malformed or runaway owner cannot grow the catalog without limit.
 const maxRetainedRecordsPerOwner = 1024
-
-func liveSnapshots(snapshots []session.Snapshot) int {
-	live := 0
-	for _, snapshot := range snapshots {
-		if snapshot.State != session.Closed && snapshot.State != session.Deleted {
-			live++
-		}
-	}
-	return live
-}

@@ -110,7 +110,7 @@ func NewProductionOwner(ctx context.Context, version string, environ func(string
 		return nil, errors.Join(err, durable.Close())
 	}
 	catalog := sessionowner.Catalog{Root: catalogRoot, ConfigRoot: filepath.Dir(catalogRoot), User: "enrolled", Group: "enrolled", OwnerSID: active.OwnerSID, Maximum: resources.MaxSessions + 1}
-	connections, err := sessionowner.NewConnections(ctx, catalog, active, updater.StartSessionOwner, resources.MaxSessions, resources.MaxAttachments)
+	connections, err := sessionowner.NewConnections(ctx, catalog, active, updater.StartSessionOwner, resources.MaxSessions)
 	if err != nil {
 		return nil, errors.Join(err, durable.Close())
 	}

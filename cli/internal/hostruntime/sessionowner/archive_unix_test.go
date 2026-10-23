@@ -253,7 +253,7 @@ func TestArchivedHistoryAdmitsNewTerminalWithoutNativeStartup(t *testing.T) {
 	if _, err := os.Stat(declaration); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("leftover native declaration remains")
 	}
-	connections, e := NewConnections(ctx, catalog, active, func(context.Context, string) error { return errors.New("unexpected archived native startup") }, 4, 4)
+	connections, e := NewConnections(ctx, catalog, active, func(context.Context, string) error { return errors.New("unexpected archived native startup") }, 4)
 	if e != nil {
 		t.Fatal(e)
 	}

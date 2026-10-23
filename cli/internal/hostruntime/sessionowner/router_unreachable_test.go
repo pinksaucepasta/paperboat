@@ -29,7 +29,7 @@ func TestRouterServesActiveGenerationWhenPreviousOwnerCannotStart(t *testing.T) 
 		}
 		return ensureRouterOwner(map[string]Owner{activeGeneration: activeOwner})(ctx, gen)
 	}
-	router, err := NewRouter(activeGeneration, metadata, 4, 2, ensure)
+	router, err := NewRouter(activeGeneration, metadata, 4, ensure)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func TestRouterAdmitsNewSessionsWhenRetiredGenerationsRetainClosedRecords(t *tes
 		oldGeneration:    {Descriptor: testOwnerDescriptor(t, oldGeneration, oldWorkspace, shell)},
 		activeGeneration: {Descriptor: activeOwner.Descriptor},
 	}
-	router, err := NewRouter(activeGeneration, metadata, 2, 2, ensureRouterOwner(map[string]Owner{activeGeneration: activeOwner}))
+	router, err := NewRouter(activeGeneration, metadata, 2, ensureRouterOwner(map[string]Owner{activeGeneration: activeOwner}))
 	if err != nil {
 		t.Fatal(err)
 	}

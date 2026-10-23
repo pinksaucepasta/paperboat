@@ -201,7 +201,7 @@ func TestPackagedSessionOwnerSurvivesClientAndReopensHistory(t *testing.T) {
 	}
 	defer emptyClient.Close()
 	catalog := sessionowner.Catalog{Root: filepath.Join(root, "catalog"), ConfigRoot: "/", User: "root", Group: "root", Maximum: 21}
-	connections, err := sessionowner.NewConnections(ctx, catalog, d, func(context.Context, string) error { return session.ErrOwnerUnavailable }, 20, 128)
+	connections, err := sessionowner.NewConnections(ctx, catalog, d, func(context.Context, string) error { return session.ErrOwnerUnavailable }, 20)
 	if err != nil {
 		t.Fatal(err)
 	}
