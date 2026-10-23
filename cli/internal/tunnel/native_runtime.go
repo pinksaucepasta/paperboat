@@ -516,67 +516,40 @@ func (r *cliNativeRuntime) alive() bool {
 	}
 }
 
+// RegisterNetwork registers this daemon's peer identity with the server ahead of its first native
+// operation, without starting the engine. Registering on first use made every existing machine learn a
+// new peer at the moment of the user's first command, so that command waited for them (N2: the first
+// ping from a just-paired machine lost its whole 10 s sample). Registration is idempotent: the engine's
+// own registration later reuses the same key and publishes nothing new.
+func (t *PeerTerminalTunnel) RegisterNetwork(ctx context.Context) error {
+	if t == nil || ctx == nil {
+		return ErrPeerTerminalInvalid
+	}
+	credential, err := t.config.Auth.Credential()
+	if err != nil {
+		return err
+	}
+	profile, err := t.config.Store.Load(t.config.Issuer)
+	if err != nil {
+		return err
+	}
+	client := api.New(t.config.Issuer, credential, t.config.HTTPClient)
+	identity, err := t.authorities.ResolveLocal(ctx, clientauthority.Request{Store: t.config.Store, Client: client, Issuer: t.config.Issuer, AccountID: profile.Account.ID, CLIClientSessionID: profile.CLIClientSessionID, Now: t.config.Now().UTC()})
+	if err != nil {
+		return err
+	}
+	defer identity.Clear()
+	networkAPI := cliNativeNetworkAPI{issuer: t.config.Issuer, auth: t.config.Auth, http: t.config.HTTPClient}
+	authority, _, _, err := newCLINativeAuthority(ctx, t.config.Issuer, t.config.Store, networkAPI, t.config.HTTPClient, t.config.TLS, profile.Account.ID, profile.CLIClientSessionID, identity)
+	if err != nil {
+		return err
+	}
+	return authority.Close()
+}
+
 func newCLINativeRuntime(ctx context.Context, issuer string, store config.ProfileStore, networkAPI tailnet.NetworkAPI, httpClient *http.Client, relayTrust *tls.Config, accountID, endpointID string, identity clientauthority.Authority) (*cliNativeRuntime, error) {
-	if ctx == nil || issuer == "" || store.Path == "" || store.Secrets == nil || networkAPI == nil || httpClient == nil || relayTrust == nil || accountID == "" || endpointID == "" {
-		return nil, ErrPeerTerminalInvalid
-	}
-	parsed, err := url.Parse(issuer)
-	if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" {
-		return nil, ErrPeerTerminalInvalid
-	}
-	fetcher, err := hostauth.NewHTTPJWKSFetcher(parsed.ResolveReference(&url.URL{Path: "/.well-known/jwks.json"}).String(), []string{parsed.Hostname()}, httpClient.Transport)
+	authority, peerTLS, relayTLS, err := newCLINativeAuthority(ctx, issuer, store, networkAPI, httpClient, relayTrust, accountID, endpointID, identity)
 	if err != nil {
-		return nil, err
-	}
-	keys, err := hostauth.NewJWKSCache(hostauth.JWKSConfig{Fetcher: fetcher, Clock: nativeRuntimeClock{}, TTL: 5 * time.Minute, RetainMissing: hostauth.DefaultRetainMissing})
-	if err != nil {
-		return nil, err
-	}
-	refresh, cancelRefresh := context.WithTimeout(ctx, 10*time.Second)
-	err = keys.Refresh(refresh)
-	cancelRefresh()
-	if err != nil {
-		return nil, err
-	}
-	now := time.Now().UTC()
-	lifetime := identity.LocalCertificate.Claims.ExpiresAt.Sub(now)
-	if lifetime > 24*time.Hour {
-		lifetime = 24 * time.Hour
-	}
-	issueLeaf := func() (tls.Certificate, error) {
-		remaining := identity.LocalCertificate.Claims.ExpiresAt.Sub(time.Now().UTC())
-		if remaining > 24*time.Hour {
-			remaining = 24 * time.Hour
-		}
-		return endpointidentity.NewTLSCertificate(identity.LocalCertificate, identity.RootPublic, identity.LocalKeys.QUICPrivate, time.Now().UTC(), remaining)
-	}
-	leaf, err := endpointidentity.NewTLSCertificate(identity.LocalCertificate, identity.RootPublic, identity.LocalKeys.QUICPrivate, now, lifetime)
-	if err != nil {
-		return nil, err
-	}
-	getCertificate := func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
-		value, issueErr := issueLeaf()
-		return &value, issueErr
-	}
-	getClientCertificate := func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
-		value, issueErr := issueLeaf()
-		return &value, issueErr
-	}
-	peerTLS := &tls.Config{MinVersion: tls.VersionTLS13, MaxVersion: tls.VersionTLS13, InsecureSkipVerify: true, NextProtos: []string{peerquic.ALPN}, Certificates: []tls.Certificate{leaf}, GetCertificate: getCertificate, GetClientCertificate: getClientCertificate} //nolint:gosec
-	relayTLS := relayTrust.Clone()
-	relayTLS.MinVersion = tls.VersionTLS13
-	relayTLS.Certificates = []tls.Certificate{leaf}
-	relayTLS.GetClientCertificate = getClientCertificate
-	self := tailnet.NetworkBinding{AccountID: accountID, EndpointID: endpointID, Role: "cli", EndpointGeneration: identity.LocalCertificate.Claims.Generation, QUICCertificateFingerprint: identity.LocalCertificate.Fingerprint(), QUICPublicKey: base64.RawURLEncoding.EncodeToString(identity.LocalCertificate.Claims.QUICPublicKey)}
-	authority, err := tailnet.NewAuthority(tailnet.AuthorityOptions{Store: store, Issuer: issuer, Self: self, Keys: keys})
-	if err != nil {
-		return nil, err
-	}
-	register, cancelRegister := context.WithTimeout(ctx, 15*time.Second)
-	err = authority.Register(register, networkAPI, false)
-	cancelRegister()
-	if err != nil {
-		_ = authority.Close()
 		return nil, err
 	}
 	if _, err = authority.ConfigureRegionalRelays(relayTLS); err != nil {
@@ -596,6 +569,75 @@ func newCLINativeRuntime(ctx context.Context, issuer string, store config.Profil
 	}()
 	return runtime, nil
 }
+
+// newCLINativeAuthority builds the daemon's signed-network authority and registers its identity; it
+// returns the peer and relay TLS configurations the engine needs.
+func newCLINativeAuthority(ctx context.Context, issuer string, store config.ProfileStore, networkAPI tailnet.NetworkAPI, httpClient *http.Client, relayTrust *tls.Config, accountID, endpointID string, identity clientauthority.Authority) (*tailnet.Authority, *tls.Config, *tls.Config, error) {
+	if ctx == nil || issuer == "" || store.Path == "" || store.Secrets == nil || networkAPI == nil || httpClient == nil || relayTrust == nil || accountID == "" || endpointID == "" {
+		return nil, nil, nil, ErrPeerTerminalInvalid
+	}
+	parsed, err := url.Parse(issuer)
+	if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" {
+		return nil, nil, nil, ErrPeerTerminalInvalid
+	}
+	fetcher, err := hostauth.NewHTTPJWKSFetcher(parsed.ResolveReference(&url.URL{Path: "/.well-known/jwks.json"}).String(), []string{parsed.Hostname()}, httpClient.Transport)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	keys, err := hostauth.NewJWKSCache(hostauth.JWKSConfig{Fetcher: fetcher, Clock: nativeRuntimeClock{}, TTL: 5 * time.Minute, RetainMissing: hostauth.DefaultRetainMissing})
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	refresh, cancelRefresh := context.WithTimeout(ctx, 10*time.Second)
+	err = keys.Refresh(refresh)
+	cancelRefresh()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	now := time.Now().UTC()
+	lifetime := identity.LocalCertificate.Claims.ExpiresAt.Sub(now)
+	if lifetime > 24*time.Hour {
+		lifetime = 24 * time.Hour
+	}
+	issueLeaf := func() (tls.Certificate, error) {
+		remaining := identity.LocalCertificate.Claims.ExpiresAt.Sub(time.Now().UTC())
+		if remaining > 24*time.Hour {
+			remaining = 24 * time.Hour
+		}
+		return endpointidentity.NewTLSCertificate(identity.LocalCertificate, identity.RootPublic, identity.LocalKeys.QUICPrivate, time.Now().UTC(), remaining)
+	}
+	leaf, err := endpointidentity.NewTLSCertificate(identity.LocalCertificate, identity.RootPublic, identity.LocalKeys.QUICPrivate, now, lifetime)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	getCertificate := func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+		value, issueErr := issueLeaf()
+		return &value, issueErr
+	}
+	getClientCertificate := func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
+		value, issueErr := issueLeaf()
+		return &value, issueErr
+	}
+	peerTLS := &tls.Config{MinVersion: tls.VersionTLS13, MaxVersion: tls.VersionTLS13, InsecureSkipVerify: true, NextProtos: []string{peerquic.ALPN}, Certificates: []tls.Certificate{leaf}, GetCertificate: getCertificate, GetClientCertificate: getClientCertificate} //nolint:gosec
+	relayTLS := relayTrust.Clone()
+	relayTLS.MinVersion = tls.VersionTLS13
+	relayTLS.Certificates = []tls.Certificate{leaf}
+	relayTLS.GetClientCertificate = getClientCertificate
+	self := tailnet.NetworkBinding{AccountID: accountID, EndpointID: endpointID, Role: "cli", EndpointGeneration: identity.LocalCertificate.Claims.Generation, QUICCertificateFingerprint: identity.LocalCertificate.Fingerprint(), QUICPublicKey: base64.RawURLEncoding.EncodeToString(identity.LocalCertificate.Claims.QUICPublicKey)}
+	authority, err := tailnet.NewAuthority(tailnet.AuthorityOptions{Store: store, Issuer: issuer, Self: self, Keys: keys})
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	register, cancelRegister := context.WithTimeout(ctx, 15*time.Second)
+	err = authority.Register(register, networkAPI, false)
+	cancelRegister()
+	if err != nil {
+		_ = authority.Close()
+		return nil, nil, nil, err
+	}
+	return authority, peerTLS, relayTLS, nil
+}
+
 
 func observeCLINativePeerEvent(event native.Event) {
 	if event.Kind == "connected" {

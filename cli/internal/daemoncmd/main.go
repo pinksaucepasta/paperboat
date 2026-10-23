@@ -289,6 +289,15 @@ func localDaemonCommand() *cobra.Command {
 					resultErr = coordinatorFailure("Paperboat daemon cleanup failed", resultErr, cleanupErr)
 				}
 			}()
+			if profileErr == nil {
+				// Peers learn this daemon's identity before its first command; on failure the first native
+				// operation registers as before.
+				go func() {
+					registerCtx, cancelRegister := context.WithTimeout(command.Context(), 30*time.Second)
+					defer cancelRegister()
+					_ = peerTunnel.RegisterNetwork(registerCtx)
+				}()
+			}
 			coordinatorConfig := CoordinatorConfig{LocalAccess: cfg.LocalAccess}
 			if profileErr == nil {
 				coordinatorConfig.AccountID = profile.Account.ID
@@ -357,7 +366,8 @@ func localDaemonCommand() *cobra.Command {
 					}
 					inventoryEvents = events.Subscribe(machineevents.TopicInventory)
 					servicesEvents = events.Subscribe(machineevents.TopicMachineServices)
-					networkEvents := events.Subscribe(machineevents.TopicPeerNetwork)
+					// A newly paired machine enters the mesh when it first comes online, which moves only inventory.
+					networkEvents := events.Subscribe(machineevents.TopicPeerNetwork, machineevents.TopicInventory)
 					go func() {
 						for {
 							select {
