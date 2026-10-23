@@ -41,6 +41,9 @@ const (
 	TopicTunnels       Topic = "tunnels"
 	TopicConfig        Topic = "config"
 	TopicInventory     Topic = "inventory"
+	// TopicMachineServices moves when a machine in this machine's audience publishes a changed
+	// service snapshot (ports).
+	TopicMachineServices Topic = "machine_services"
 )
 
 const (
@@ -49,10 +52,10 @@ const (
 	// requestTimeout exceeds the 30 s the server holds a request, with room for the round trip.
 	requestTimeout = 40 * time.Second
 	// WaitTimeout bounds one wait made by a caller's own client; see requestTimeout.
-	WaitTimeout = requestTimeout
-	minBackoff     = time.Second
-	maxBackoff     = 30 * time.Second
-	responseLimit  = 4 << 10
+	WaitTimeout   = requestTimeout
+	minBackoff    = time.Second
+	maxBackoff    = 30 * time.Second
+	responseLimit = 4 << 10
 )
 
 // ErrInvalid reports a Hub configured without what it needs.

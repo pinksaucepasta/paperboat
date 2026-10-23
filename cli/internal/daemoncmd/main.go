@@ -341,15 +341,12 @@ func localDaemonCommand() *cobra.Command {
 				return err
 			}
 			return runWithSyncFailure(command.Context(), coordinator.Errors(), func(ctx context.Context) error {
-				if cfg.ControlSyncAddress == "" {
-					go refreshMachineServices(ctx, coordinator, cfg.ServerURL, authSource, controlTransport)
-				}
 				go newRelayLatencyReporter(cfg.ServerURL, source.SourceMachineID, controlTransport, func(ctx context.Context) (config.Credential, error) {
 					return authSource.WithContext(ctx).Credential()
 				}, peerTunnel.NativeRelayCandidates).Run(ctx)
 				// The server tells the daemon when the machine list changed, so inventory refreshes at
 				// once; without a machine id (never enrolled) or while the wait fails it polls as before.
-				var inventoryEvents *machineevents.Subscription
+				var inventoryEvents, servicesEvents *machineevents.Subscription
 				if source.SourceMachineID != "" {
 					events, eventsErr := machineevents.NewWithWaiter(machineevents.UserWaiter(func(waitCtx context.Context, known map[string]int64) (map[string]int64, error) {
 						credential, credentialErr := authSource.WithContext(waitCtx).Credential()
@@ -362,6 +359,7 @@ func localDaemonCommand() *cobra.Command {
 						return eventsErr
 					}
 					inventoryEvents = events.Subscribe(machineevents.TopicInventory)
+					servicesEvents = events.Subscribe(machineevents.TopicMachineServices)
 					networkEvents := events.Subscribe(machineevents.TopicPeerNetwork)
 					go func() {
 						for {
@@ -377,6 +375,9 @@ func localDaemonCommand() *cobra.Command {
 						return eventsErr
 					}
 					defer func() { _ = events.Shutdown(context.WithoutCancel(ctx)) }()
+				}
+				if cfg.ControlSyncAddress == "" {
+					go refreshMachineServices(ctx, coordinator, cfg.ServerURL, authSource, controlTransport, servicesEvents.Changed())
 				}
 				teamShared := &teamSharedMachines{}
 				return localdaemon.Run(ctx, localdaemon.DaemonConfig{
