@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/causetext"
 	"io"
 	"os"
@@ -183,6 +184,10 @@ func runtimeFailureMessage(err error) string {
 		return "An unfinished earlier enrollment on this machine used a different enrollment. Run `pb reset` with this enrollment token file to discard it, then pair again."
 	case errors.Is(err, bootstrap.ErrPairingDenied):
 		return "The machine pairing was denied. Create a new enrollment with Add machine if this machine should be added."
+	}
+	var refused *api.APIError
+	if errors.As(err, &refused) && api.PlanLimitRefusal(refused.Status, refused.Code, nil) != nil {
+		return refused.Message // the plan's limit, the way out and the Billing link
 	}
 	var request bootstrap.RequestError
 	if errors.As(err, &request) {

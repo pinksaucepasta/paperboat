@@ -23,6 +23,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/httptransport"
 )
@@ -418,11 +419,16 @@ func request(ctx context.Context, client *http.Client, method, target string, bo
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		var envelope struct {
 			Error struct {
-				Code    string `json:"code"`
-				Message string `json:"message"`
+				Code    string         `json:"code"`
+				Message string         `json:"message"`
+				Details map[string]any `json:"details"`
 			} `json:"error"`
 		}
 		_ = json.Unmarshal(encoded, &envelope)
+		// A plan limit refuses pairing and enrollment with its own message (limit, way out, Billing).
+		if refused := api.PlanLimitRefusal(response.StatusCode, envelope.Error.Code, envelope.Error.Details); refused != nil {
+			return joinBootstrapErrors(refused, closeBootstrapResponse(response))
+		}
 		outcome := ErrInvalid
 		switch envelope.Error.Code {
 		case "enrollment_token_expired":

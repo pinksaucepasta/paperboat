@@ -21,9 +21,19 @@ func TestPlanLimitRefusalsNameTheLimitAndTheWayOut(t *testing.T) {
 	if bare := apiErrorMessageFor("machine_limit_reached", http.StatusConflict, nil); bare != publicAPIMessages["machine_limit_reached"] {
 		t.Fatalf("without details: %q", bare)
 	}
-	for _, code := range []string{"machine_limit_reached", "preview_limit_reached"} {
+	terminals := apiErrorMessageFor("browser_terminal_limit_reached", http.StatusForbidden, details)
+	if !strings.Contains(terminals, "allows 100 open browser terminals") || !strings.HasSuffix(terminals, "https://console.example.test/billing") {
+		t.Fatalf("browser terminals: %q", terminals)
+	}
+	for _, code := range []string{"machine_limit_reached", "preview_limit_reached", "browser_terminal_limit_reached"} {
 		if (&APIError{Code: code}).PublicCode() != code {
 			t.Fatalf("%s is not a public code", code)
 		}
+		if refused := PlanLimitRefusal(http.StatusForbidden, code, details); refused == nil || refused.Code != code || !strings.Contains(refused.Message, "allows 100") {
+			t.Fatalf("%s refusal = %+v", code, refused)
+		}
+	}
+	if PlanLimitRefusal(http.StatusForbidden, "forbidden", details) != nil {
+		t.Fatal("an unrelated code became a plan-limit refusal")
 	}
 }

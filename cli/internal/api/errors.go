@@ -71,7 +71,7 @@ func apiErrorMessageFor(code string, status int, details map[string]any) string 
 		if billing != "" {
 			return apiErrorMessage(code, status) + " Add bandwidth: " + billing
 		}
-	case "machine_limit_reached", "preview_limit_reached":
+	case "machine_limit_reached", "preview_limit_reached", "browser_terminal_limit_reached":
 		return planLimitMessage(code, details, billing)
 	case "account_deletion_console_only":
 		if console := consoleURL(details); console != "" {
@@ -81,15 +81,29 @@ func apiErrorMessageFor(code string, status int, details map[string]any) string 
 	return apiErrorMessage(code, status)
 }
 
+// PlanLimitRefusal is the plan-limit refusal (machine_limit_reached, preview_limit_reached,
+// browser_terminal_limit_reached) as an APIError with its authored message, for clients outside this
+// package that decode the server's error envelope themselves (machine bootstrap). Other codes: nil.
+func PlanLimitRefusal(status int, code string, details map[string]any) *APIError {
+	switch code {
+	case "machine_limit_reached", "preview_limit_reached", "browser_terminal_limit_reached":
+		return &APIError{Status: status, Code: code, Message: apiErrorMessageFor(code, status, details), Details: details}
+	}
+	return nil
+}
+
 // planLimitMessage names the plan's limit and the two ways out: free one up, or upgrade.
 func planLimitMessage(code string, details map[string]any, billing string) string {
 	limit, _ := details["limit"].(float64)
 	message := apiErrorMessage(code, http.StatusConflict)
 	if limit >= 1 && limit == float64(int64(limit)) {
-		if code == "machine_limit_reached" {
+		switch code {
+		case "machine_limit_reached":
 			message = fmt.Sprintf("This workspace's plan allows %d machines. Remove machines you no longer use (`pb machine revoke <machine>`) or upgrade.", int64(limit))
-		} else {
+		case "preview_limit_reached":
 			message = fmt.Sprintf("This workspace's plan allows %d running previews and tunnels. Stop one you no longer need, or upgrade.", int64(limit))
+		default:
+			message = fmt.Sprintf("This workspace's plan allows %d open browser terminals. Close one you no longer need, or upgrade.", int64(limit))
 		}
 	}
 	if billing != "" {
@@ -139,6 +153,7 @@ var publicAPIMessages = map[string]string{
 	"authorization_pending":           "Authorization is pending. Complete sign-in in the browser.",
 	"account_deletion_console_only":   "Deleting an account is done in the Paperboat console. Run `pb account delete` for the link.",
 	"machine_limit_reached":           "This workspace's plan machine limit is reached. Remove machines you no longer use (`pb machine revoke <machine>`) or upgrade under Billing in the Paperboat console.",
+	"browser_terminal_limit_reached":  "This workspace's plan limit for open browser terminals is reached. Close one you no longer need, or upgrade under Billing in the Paperboat console.",
 	"preview_limit_reached":           "This workspace's plan limit for running previews and tunnels is reached. Stop one you no longer need, or upgrade under Billing in the Paperboat console.",
 	"bandwidth_quota_exhausted":       "This workspace's hosted relay and edge bandwidth is used up. Direct machine-to-machine access still works. Add bandwidth or upgrade under Billing in the Paperboat console, or wait for the next allowance period.",
 	"conflict":                        "The resource state changed. Refresh it and try again.",

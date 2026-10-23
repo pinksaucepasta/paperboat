@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 )
 
@@ -506,5 +507,27 @@ func TestValidateMaterialAcceptsClientCLISetup(t *testing.T) {
 	}
 	if err := validateMaterial(material, false); err != nil {
 		t.Fatalf("client material rejected: %v", err)
+	}
+}
+
+// Pairing refused at the plan's machine limit (Lane O, e5b0de26: 403 machine_limit_reached) names the
+// limit and the way out with an authored message, not "invalid machine bootstrap"; the server's own
+// text still never escapes.
+func TestCreatePairingAtTheMachineLimitNamesIt(t *testing.T) {
+	workspace, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		writer.WriteHeader(http.StatusForbidden)
+		_, _ = writer.Write([]byte(`{"error":{"code":"machine_limit_reached","message":"SERVER_TEXT","details":{"kind":"machines","plan":"free","limit":100,"used":100,"billing_url":"https://console.example.test/billing"}}}`))
+	}))
+	defer server.Close()
+	config := Config{ServerURL: server.URL, EnrollmentToken: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", Alias: "Studio", WorkspaceRoot: workspace, Verifier: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", PublicIdentityKey: testPublicIdentityKey, HTTP: server.Client()}
+	_, err = CreatePairing(context.Background(), config)
+	var refused *api.APIError
+	if !errors.As(err, &refused) || refused.Code != "machine_limit_reached" || !strings.Contains(refused.Message, "allows 100 machines") || strings.Contains(err.Error(), "SERVER_TEXT") || errors.Is(err, ErrInvalid) {
+		t.Fatalf("error = %v", err)
 	}
 }
