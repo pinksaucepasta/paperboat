@@ -15,6 +15,7 @@ import { useNow } from "@/lib/use-now"
 import { CopyRow } from "@/components/copy-button"
 import { HostnameInput } from "@/components/domains/hostname-input"
 import { canPreview, MachineChoice, usePort } from "@/components/tunnels/machine-choice"
+import { isLimitReached, LimitReached } from "@/components/limit-reached"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Field, FieldError, FieldLabel } from "@/components/ui/field"
@@ -172,7 +173,9 @@ function NewPreviewDialog({ machine, onClose }: { machine?: Machine; onClose: ()
               </ToggleGroup>
               <p className="text-xs text-muted-foreground">You can stop it any time before.</p>
             </Field>
-            {create.isError && <p className="text-sm text-destructive">{create.error.message}</p>}
+            {isLimitReached(create.error) ? (
+              <LimitReached error={create.error} />
+            ) : create.isError && <p className="text-sm text-destructive">{create.error.message}</p>}
             <DialogFooter>
               <Button type="button" variant="secondary" size="lg" onClick={onClose} disabled={create.isPending}>
                 Cancel

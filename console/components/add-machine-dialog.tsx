@@ -18,6 +18,7 @@ import { CopyIcons, useCopy } from "@/components/copy-button"
 import { ShareMachine } from "@/components/share-machine-dialog"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { isLimitReached, LimitReached } from "@/components/limit-reached"
 import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { NewMachineAccess } from "@/components/team/new-machine-access"
@@ -188,6 +189,8 @@ function AddMachine({
         <div className="flex min-h-5 items-center justify-between gap-3 text-xs text-muted-foreground">
           {plain ? (
             <span>Installs, then opens your browser to sign in, choose the workspace and approve.</span>
+          ) : isLimitReached(start.error) ? (
+            <LimitReached error={start.error} removeMachines />
           ) : start.isError ? (
             <span className="text-destructive">{start.error.message}</span>
           ) : (

@@ -4,15 +4,23 @@
  */
 import { plans, teamTrial } from "./site"
 
+const limitCells = (key: "machines" | "publications" | "browserTerminals"): [PlanCell, PlanCell, PlanCell] => [
+  plans[0][key],
+  plans[1][key],
+  plans[2][key],
+]
+
 /** One row per feature: true is included, false is not, a string is shown as it is. */
 export type PlanCell = boolean | string
 export const featureRows: { feature: string; cells: [PlanCell, PlanCell, PlanCell] }[] = [
-  { feature: "Machines", cells: ["Unlimited", "Unlimited", "Unlimited"] },
+  { feature: "Machines", cells: limitCells("machines") },
   { feature: "Terminals that survive a dropped connection, with replay", cells: [true, true, true] },
   { feature: "Remote commands", cells: [true, true, true] },
   { feature: "SSH, SCP, SFTP and rsync, with managed keys", cells: [true, true, true] },
   { feature: "Send and receive files", cells: [true, true, true] },
-  { feature: "Previews and tunnels", cells: ["Unlimited", "Unlimited", "Unlimited"] },
+  { feature: "Previews and tunnels (active, combined)", cells: limitCells("publications") },
+  { feature: "Browser terminals (open in the console)", cells: limitCells("browserTerminals") },
+  { feature: "Terminals from the pb command", cells: ["Unlimited", "Unlimited", "Unlimited"] },
   { feature: "Your own domains", cells: [true, true, true] },
   { feature: "Environment variables, end-to-end encrypted", cells: [true, true, true] },
   { feature: "Config sync from a Git repository", cells: [true, true, true] },
@@ -53,12 +61,16 @@ export const bandwidthNotes = [
 export const faq = [
   {
     question: "Is there a limit on machines?",
-    answer: "No. Every plan has unlimited machines.",
+    answer: "Free allows 100 machines and Pro 1,000. Team has no limit.",
   },
   {
     question: "Are features locked behind a plan?",
     answer:
-      "Free and Pro have everything one person needs, with no limits on previews or tunnels; they differ only in bandwidth. Team adds people: members and lasting access to each other’s machines.",
+      "Free and Pro have everything one person needs, with generous limits on machines, previews and tunnels; they differ in those limits and in bandwidth. Team adds people: members and lasting access to each other’s machines.",
+  },
+  {
+    question: "What counts as a browser terminal?",
+    answer: "A terminal open in the console. Terminals from the pb command are unlimited on every plan. A shared terminal counts once, with up to 50 viewers.",
   },
   {
     question: "Do I need Team to share with someone?",

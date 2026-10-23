@@ -7,6 +7,7 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { useEffect, useRef, useState } from "react"
 import { api, idempotencyKey, useApiQuery, machineQuery } from "@/lib/api"
 import { Frame, TopBar } from "@/components/terminal/terminal-page"
+import { isLimitReached, LimitReached } from "@/components/limit-reached"
 import { Button } from "@/components/ui/button"
 
 /**
@@ -49,6 +50,11 @@ export function StartTerminal() {
       <main className="flex flex-1 items-center justify-center p-8 text-center">
         {!machineId ? (
           <Problem title="No machine chosen" detail="Start a terminal from the Terminals page." />
+        ) : isLimitReached(start.error) ? (
+          <div className="flex max-w-sm flex-col items-center gap-3">
+            <p className="font-medium">Couldn’t start a shell on {name}</p>
+            <LimitReached error={start.error} />
+          </div>
         ) : start.isError ? (
           <Problem
             title={`Couldn’t start a shell on ${name}`}

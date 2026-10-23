@@ -33,6 +33,9 @@ export const plans = [
     price: "$0",
     period: "",
     bandwidth: "5 GB",
+    machines: "100",
+    publications: "100",
+    browserTerminals: "10",
     detail: "Everything for one person, on your own machines.",
   },
   {
@@ -40,6 +43,9 @@ export const plans = [
     price: "$8",
     period: "/month, or $80/year",
     bandwidth: "100 GB",
+    machines: "1,000",
+    publications: "1,000",
+    browserTerminals: "100",
     detail: "Everything in Free, with more bandwidth. Add 100 GB any time.",
   },
   {
@@ -47,6 +53,9 @@ export const plans = [
     price: "$15",
     period: "/seat/month, or $150/seat/year",
     bandwidth: "100 GB per seat",
+    machines: "Unlimited",
+    publications: "Unlimited",
+    browserTerminals: "Unlimited",
     detail: "Members, and lasting access to each other's machines. Try it free for 14 days.",
   },
 ] as const

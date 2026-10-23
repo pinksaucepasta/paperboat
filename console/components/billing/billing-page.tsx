@@ -14,6 +14,7 @@ import {
   type BillingInterval,
   type BillingProduct,
   type BillingWorkspace,
+  formatLimit,
 } from "@/lib/billing"
 import { formatBytes } from "@/lib/format"
 import { PlanActions, Seats, TopUps } from "@/components/billing/billing-sections"
@@ -161,6 +162,13 @@ function Plan({
           ? `${formatBytes(billing.usage_bytes)} used`
           : `${formatBytes(billing.usage_bytes)} of ${formatBytes(billing.allowance_bytes)} used`}
       </Row>
+      {billing.limits && (
+        <>
+          <Row label="Machines">{formatLimit(billing.limits.machines)}</Row>
+          <Row label="Previews & tunnels">{formatLimit(billing.limits.publications)}</Row>
+          <Row label="Browser terminals">{formatLimit(billing.limits.browser_terminals)}</Row>
+        </>
+      )}
       <PlanActions workspace={workspace} billing={billing} />
       {portal.isError && <p className="py-2 text-sm text-destructive">{portal.error.message}</p>}
     </Section>

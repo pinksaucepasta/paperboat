@@ -4,7 +4,15 @@ import { queryOptions } from "@tanstack/react-query"
 import { api, idempotencyKey, type Workspace } from "@/lib/api"
 import type { components } from "@/lib/api-schema"
 
-export type BillingWorkspace = components["schemas"]["BillingWorkspace"]
+type Limit = { used: number; limit: number | null }
+/** `limits` is newer than the generated schema; `limit` is null where the plan is unlimited. */
+export type BillingWorkspace = components["schemas"]["BillingWorkspace"] & {
+  limits?: { machines: Limit; publications: Limit; browser_terminals: Limit }
+}
+
+/** "6 of 1,000", or "6 · Unlimited" when the plan has no limit. */
+export const formatLimit = ({ used, limit }: Limit) =>
+  limit === null ? `${used.toLocaleString("en-US")} · Unlimited` : `${used.toLocaleString("en-US")} of ${limit.toLocaleString("en-US")}`
 export type BillingProduct = components["schemas"]["WorkspaceBillingProduct"]
 export type BillingInterval = "month" | "year"
 
