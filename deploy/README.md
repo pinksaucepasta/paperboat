@@ -181,7 +181,7 @@ natively (arm64); anvit takes the image by `docker save | ssh anvit docker load`
 oracle first, and wait for its node row to heartbeat before the next:
 
 ```sh
-sudo docker build --build-arg PAPERBOAT_VERSION=$V -t paperboat-tunnel:$V -f tunnel/deploy/Dockerfile $D
+sudo docker build --build-arg PAPERBOAT_VERSION=$V --build-arg PAPERBOAT_COMMIT=$C -t paperboat-tunnel:$V -f tunnel/deploy/Dockerfile $D
 sudo /usr/local/lib/paperboat-selfhost/pbh install --relay-image paperboat-relay:<current> --tunnel-image paperboat-tunnel:$V
 # check: select node_id,last_heartbeat_at from control_tunnel_nodes; edge logs show no route_invalid
 ```

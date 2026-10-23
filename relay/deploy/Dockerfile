@@ -1,4 +1,5 @@
 ARG PAPERBOAT_VERSION
+ARG PAPERBOAT_COMMIT
 ARG PAPERBOAT_SENTRY_DSN
 
 FROM --platform=$BUILDPLATFORM golang:1.27.2-bookworm@sha256:5cf287a799e6b94384bad13d16b14904c531f51ba65792237e122ce42b392f61 AS build
@@ -19,7 +20,12 @@ RUN printf '%s\n' "${PAPERBOAT_VERSION}" | grep -Eq '^[0-9]{4}\.[0-9]{2}\.[0-9]{
 
 FROM debian:bookworm-slim@sha256:7b140f374b289a7c2befc338f42ebe6441b7ea838a042bbd5acbfca6ec875818 AS runtime
 ARG PAPERBOAT_VERSION
-LABEL org.opencontainers.image.version="${PAPERBOAT_VERSION}"
+ARG PAPERBOAT_COMMIT
+# The deployed commit is checkable on the image itself (OCI image-spec annotation, as cloudflared and
+# Teleport images carry it); a build without the full commit is refused.
+RUN printf '%s\n' "${PAPERBOAT_COMMIT}" | grep -Eq '^[0-9a-f]{40}$'
+LABEL org.opencontainers.image.version="${PAPERBOAT_VERSION}" \
+      org.opencontainers.image.revision="${PAPERBOAT_COMMIT}"
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates tini \
   && rm -rf /var/lib/apt/lists/* \

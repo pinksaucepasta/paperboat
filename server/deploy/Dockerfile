@@ -29,7 +29,12 @@ RUN printf '%s\n' "${PAPERBOAT_VERSION}" | grep -Eq '^[0-9]{4}\.[0-9]{2}\.[0-9]{
 FROM debian:bookworm-slim@sha256:7b140f374b289a7c2befc338f42ebe6441b7ea838a042bbd5acbfca6ec875818 AS runtime
 
 ARG PAPERBOAT_VERSION
-LABEL org.opencontainers.image.version="${PAPERBOAT_VERSION}"
+ARG PAPERBOAT_COMMIT
+# The deployed commit is checkable on the image itself (OCI image-spec annotation, as cloudflared and
+# Teleport images carry it); a build without the full commit is refused.
+RUN printf '%s\n' "${PAPERBOAT_COMMIT}" | grep -Eq '^[0-9a-f]{40}$'
+LABEL org.opencontainers.image.version="${PAPERBOAT_VERSION}" \
+      org.opencontainers.image.revision="${PAPERBOAT_COMMIT}"
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates curl tini \
