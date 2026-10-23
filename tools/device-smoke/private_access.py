@@ -161,6 +161,12 @@ def forward(binary, phase):
             child.stdout.close()
 
 
+def local_access_domain(binary):
+    # The browser domain belongs to the machine guard, so `show --json` reports it beside the
+    # `local_access` settings, not inside them (b1d1d1c6).
+    return invoke(binary, 'config', 'local-access', 'show', '--json')['domain']
+
+
 def probe(args):
     phase = json.loads(args.phase)
     assert phase['state'] == 'private_access_required' and phase['check'] == args.check
@@ -173,7 +179,7 @@ def probe(args):
         matches = [m for m in machines if m['id'] == phase['machine_id']]
         assert len(matches) == 1 and matches[0]['network_approved']
         alias = matches[0]['alias']
-        domain = invoke(binary, 'config', 'local-access', 'show', '--json')['local_access']['domain']
+        domain = local_access_domain(binary)
         assert alias and domain and not any(c in alias + domain for c in '/: \r\n')
         expected = phase['marker'].encode() + hashlib.sha256(PAYLOAD).digest()
         hosts = [str(phase['port']) + '.' + alias + '.' + domain,

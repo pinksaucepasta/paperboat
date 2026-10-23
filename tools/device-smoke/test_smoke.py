@@ -447,6 +447,17 @@ exit "$FAILED"
                 self.assertEqual(result.returncode, int(stop_exit != 0 or stop_id != "preview_owned" or stop_state != "stopped" or create_exit != 0), result.stdout + result.stderr)
                 self.assertIn('preview:hp', result.stdout)
 
+    def test_private_https_reads_the_domain_where_local_access_show_reports_it(self):
+        # `pb config local-access show --json` carries the domain at the top level, beside local_access
+        # (the machine guard owns it); the check used to read local_access.domain and died on a KeyError.
+        import private_access
+        with tempfile.TemporaryDirectory() as directory:
+            fake = pathlib.Path(directory) / 'pb'
+            fake.write_text('#!/bin/sh\necho \'{"ok":true,"data":{"path":"/c.json","domain":"example.test",'
+                            '"local_access":{"service_aliases":[]}}}\'\n')
+            fake.chmod(0o700)
+            self.assertEqual(private_access.local_access_domain(fake), 'example.test')
+
     def test_a_container_stands_in_for_a_device_name(self):
         # SMOKE_CT_MAP sends a device's commands through ssh to `docker exec` in its container; devices
         # that are not mapped keep their own transport.
