@@ -7,7 +7,10 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
@@ -42,15 +45,15 @@ type signedUsageDocument struct {
 
 func (s *EdgeService) verifyUsage(ctx context.Context, request edgeUsageRequest) error {
 	if len(request.Payload) == 0 || len(request.Payload) > maxEdgeDocument {
-		return ErrUsageSignature
+		return usageSignatureError("payload missing or too large")
 	}
 	var envelope signedUsageEnvelope
 	if strictUsageJSON(request.Payload, &envelope) != nil || envelope.Algorithm != "EdDSA" || envelope.KeyID == "" {
-		return ErrUsageSignature
+		return usageSignatureError("envelope invalid")
 	}
 	publicKey, err := s.store.Queries().GetActiveControlUsageVerificationKey(ctx, dbsqlc.GetActiveControlUsageVerificationKeyParams{KeyID: envelope.KeyID, EdgeNodeID: request.Node, Now: s.clock()})
 	if err != nil || len(publicKey) != ed25519.PublicKeySize {
-		return ErrUsageSignature
+		return usageSignatureError("no active verification key for this key id and edge node")
 	}
 	return verifySignedUsageEnvelope(ed25519.PublicKey(publicKey), envelope, request)
 }
@@ -58,25 +61,43 @@ func (s *EdgeService) verifyUsage(ctx context.Context, request edgeUsageRequest)
 func verifySignedUsageEnvelope(publicKey ed25519.PublicKey, envelope signedUsageEnvelope, request edgeUsageRequest) error {
 	payload, err := base64.RawURLEncoding.DecodeString(envelope.Payload)
 	if err != nil || len(payload) > maxEdgeDocument {
-		return ErrUsageSignature
+		return usageSignatureError("payload encoding invalid")
 	}
 	signature, err := base64.RawURLEncoding.DecodeString(envelope.Signature)
 	if err != nil || !ed25519.Verify(publicKey, payload, signature) {
-		return ErrUsageSignature
+		return usageSignatureError("signature does not verify")
 	}
 	var document signedUsageDocument
-	if strictUsageJSON(payload, &document) != nil || !sameSignedUsage(document, request) {
-		return ErrUsageSignature
+	if err := strictUsageJSON(payload, &document); err != nil {
+		return usageSignatureError("signed document invalid: " + err.Error())
+	}
+	if differing := signedUsageDifferences(document, request); len(differing) > 0 {
+		return usageSignatureError("signed fields differ from the report: " + strings.Join(differing, ","))
 	}
 	return nil
 }
 
-func sameSignedUsage(document signedUsageDocument, request edgeUsageRequest) bool {
-	return document.Key.AuthorityID == request.AuthorityID && document.OperationID == request.OperationID && document.Key.Node == request.Node &&
-		document.Key.Epoch == request.Epoch && document.Key.Environment == request.Environment &&
-		document.Key.Route == request.Route && document.Key.Revision == request.Revision &&
-		document.Key.Direction == request.Direction && document.Bytes == request.Bytes &&
-		document.Start.Equal(request.Start) && document.End.Equal(request.End)
+// usageSignatureError is ErrUsageSignature naming the step that refused the report; the
+// reasons carry field names only, never values.
+func usageSignatureError(reason string) error {
+	return fmt.Errorf("%w: %s", ErrUsageSignature, reason)
+}
+
+func signedUsageDifferences(document signedUsageDocument, request edgeUsageRequest) []string {
+	var differing []string
+	for name, same := range map[string]bool{
+		"authority_id": document.Key.AuthorityID == request.AuthorityID, "operation_id": document.OperationID == request.OperationID,
+		"edge_node_id": document.Key.Node == request.Node, "counter_epoch": document.Key.Epoch == request.Epoch,
+		"environment_id": document.Key.Environment == request.Environment, "route_id": document.Key.Route == request.Route,
+		"route_revision": document.Key.Revision == request.Revision, "direction": document.Key.Direction == request.Direction,
+		"bytes": document.Bytes == request.Bytes, "interval_start": document.Start.Equal(request.Start), "interval_end": document.End.Equal(request.End),
+	} {
+		if !same {
+			differing = append(differing, name)
+		}
+	}
+	sort.Strings(differing)
+	return differing
 }
 
 func strictUsageJSON(data []byte, target any) error {
