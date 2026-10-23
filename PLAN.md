@@ -1258,6 +1258,61 @@ budgets (exec latency, send/scp/rsync throughput, small files/s per path type) i
 it after that. Open: daemon's 1 s carrier-attachment poll (Lane P), 8 s machine-services poll (needs a
 push topic, server first), live upgrade of an h2 carrier back to QUIC (Lane M's agent carriers).
 
+#### Design (awaiting user decision): long-lived network scopes, per-operation authority in the stream token
+
+Not built. Coordinator takes it to the user; Lane A (host/CLI) and Lane B (server) review here first.
+
+*Problem (measured 2026-10-23, laner-a → laner-b-2, same docker bridge, server .12):* after the client
+fixes 9e74c29d/b9943159, `pb exec true` takes 8.7–10.6 s; plain `ssh true` on the same link takes 0.32 s.
+Every operation descriptor creates a NEW access session (`server/internal/usermachines/service_02.go`
+`operationDescriptor`: `accessSessionID := newID("session")` → `admitRuntimeIngress` in `runtime_quota.go`),
+and the signed peer-network configuration turns each live row of `user_machine_access_sessions` into a
+`machine_access` scope keyed by that id (`server/internal/peersessions/network.go`, the access-session query
+and `g.kind = "machine_access"`). So for each operation both ends must fetch a new configuration before a
+stream can open: the CLI forces `POST /v1/peer-network/config` before every dial
+(`cli/internal/tunnel/native_runtime.go` `acquireNativeRuntime`: "the operation descriptor may have just
+created its peer grant"; 3–5 calls per exec in the trace), and the host refreshes on the first stream whose
+scope it lacks (`cli/internal/peertransport/native/session.go` `authorizeIncoming`). At 0.5–6 s per call that
+is most of the exec time, and the direct handshake looks dead until the host has refreshed.
+
+*Design (the industry split; Tailscale: network reachability from ACLs, application auth per request):*
+1. **Network scope = a grant, not an operation.** One grant per (CLI session, machine, capability), with an
+   id that stays stable while the grant is live, a generation, and an expiry renewed while it is used (e.g.
+   1 h, renewed when a descriptor is issued with under half left). `peersessions/network.go` emits one scope
+   per live grant (`resource_id` = grant id), so a configuration changes only when a grant starts, ends or
+   changes generation, not per command.
+2. **Per-operation authority stays in the stream token.** The descriptor still mints a short-lived,
+   operation-scoped token (`exec:operate`/`ssh:operate`, operation id, about 2 min) whose resource is the
+   grant id. The host verifies it on every stream before any scope check (`authorizeIncoming` → `authorize`
+   → `streamauth` header; signature via JWKS), as today.
+3. **The CLI dials without a refresh when the scope is already live.** `acquireNativeRuntime` refreshes only
+   if `Authority.Allows(machine, grant, capability, "dial")` is false; the host's check-then-refresh in
+   `authorizeIncoming` needs no change.
+
+*Revocation stays immediate:* (a) every new stream needs a fresh descriptor, and the server issues one only
+for a live grant (membership, capability policy, machine and session state checked at issuance as today), so
+a revoked user, member or machine cannot open new streams; (b) revoking (member removed, team or machine
+revoked, capability turned off, CLI session ended) ends the grant or bumps its generation, publishes the
+peer topic to both endpoints, and the next configuration generation drops the scope; open streams end at
+their admitted-lifetime check when the scope disappears, the mechanism that ends them today; (c) a token
+minted just before revocation is bounded by its own expiry and by (b), the same window as today, where an
+open stream also lives until the next refresh.
+
+*Migration (server first, no dual path):*
+1. Server (Lane B): give access sessions a grant key (user, CLI session, machine, capability); reuse a live
+   grant in `operationDescriptor` instead of `newID("session")` and renew its expiry; emit scopes per grant in
+   `peersessions/network.go`; publish the peer topic on grant end or generation change. Old CLIs and hosts
+   keep working unchanged: they still refresh before or at the first stream and then find the scope. Usage
+   accounting (`resourceusage`, keyed by access session) becomes per grant + stream id; check bandwidth
+   reports keep their per-operation split through the stream id.
+2. CLI (Lane A): skip the forced refresh in `acquireNativeRuntime` when the scope is live; a test counts
+   `POST /v1/peer-network/config` per dial (0 on a warm grant, 1 on a new one).
+3. Device checks: perf_dataplane.py exec median budget (target < 1 s warm on L/M) and the revoke smoke checks
+   (machine revoke, member removal, capability off): a revoked grant cannot open a new stream, and open
+   streams end within one refresh.
+
+*Review:* Lane A (host admission, CLI dial): pending · Lane B (server grants, revocation topics): pending
+
 #### API/DB (Lane Q, measured 2026-10-22/23)
 
 **Scale** (`server/internal/perf/seed.sql`, isolated test PostgreSQL only): 1200 accounts, 100 paid teams (team 1:
