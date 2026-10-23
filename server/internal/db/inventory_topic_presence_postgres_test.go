@@ -68,3 +68,56 @@ VALUES($1,$2,$1,$3,'linux','amd64','/w','pending','occupied',false)`, id, user, 
 	step("seat released", `UPDATE paperboat.user_machines SET seat_state='released' WHERE id=$1`, true)
 	step("revoked", `UPDATE paperboat.user_machines SET state='revoked',revoked_at=now() WHERE id=$1`, true)
 }
+
+// A machine's changed service snapshot moves the machine_services topic of its audience, not their inventory:
+// the machine list carries no services.
+func TestServiceSnapshotChangesMoveTheirOwnTopicOnPostgres(t *testing.T) {
+	dsn := os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
+	if dsn == "" {
+		t.Skip("requires isolated PostgreSQL")
+	}
+	if err := ValidateIsolatedTestDSN(dsn, os.Getenv("PAPERBOAT_DATABASE_DSN")); err != nil {
+		t.Fatal(err)
+	}
+	store, err := Open(config.Database{Driver: "postgres", DSN: dsn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	if err := Migrate(ctx, store); err != nil {
+		t.Fatal(err)
+	}
+	s := fmt.Sprint(time.Now().UnixNano())
+	user, host, peer := "st_user_"+s, "st_host_"+s, "st_peer_"+s
+	exec := func(query string, args ...any) {
+		t.Helper()
+		if _, err := store.SQL().ExecContext(ctx, query, args...); err != nil {
+			t.Fatalf("%v\n%s", err, query)
+		}
+	}
+	exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@example.test','active')`, user)
+	for i, id := range []string{host, peer} {
+		exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,online)
+VALUES($1,$2,$1,$3,'linux','amd64','/w','online','occupied',true)`, id, user, fmt.Sprintf("st-%d", i))
+	}
+	generation := func(topic string) int64 {
+		t.Helper()
+		var g int64
+		if err := store.SQL().QueryRowContext(ctx, `SELECT coalesce(max(generation),0) FROM paperboat.machine_topic_generations WHERE machine_id=$1 AND topic=$2`, peer, topic).Scan(&g); err != nil {
+			t.Fatal(err)
+		}
+		return g
+	}
+	inventory, services := generation("inventory"), generation("machine_services")
+	exec(`INSERT INTO paperboat.machine_service_snapshots(machine_id,installation_generation,boot_id,started_at,generation,services,expires_at,updated_at)
+VALUES($1,1,'boot-012345678901',now(),1,'[{"port":3000,"address_family":"ipv4"}]',now()+interval '30 seconds',now())`, host)
+	exec(`UPDATE paperboat.machine_service_snapshots SET services='[{"port":3000,"address_family":"ipv4"},{"port":8080,"address_family":"ipv4"}]',generation=2 WHERE machine_id=$1`, host)
+	if got := generation("inventory"); got != inventory {
+		t.Fatalf("service snapshot changes moved the peer's inventory topic %d -> %d", inventory, got)
+	}
+	if got := generation("machine_services"); got < services+2 {
+		t.Fatalf("machine_services topic %d -> %d, want two moves (insert and change)", services, got)
+	}
+}

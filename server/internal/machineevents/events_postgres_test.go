@@ -75,10 +75,13 @@ func TestHostIsToldAboutAChangeWithoutPollingOnPostgres(t *testing.T) {
 		out := make(chan result, 1)
 		// Creating the machines published their inventory; the host in this test has seen that already.
 		seen := map[string]int64{}
+		for _, topic := range topics { // a host waits on the topics it lists; this one lists them all
+			seen[topic] = 0
+		}
 		for topic, generation := range known {
 			seen[topic] = generation
 		}
-		if _, ok := seen[TopicInventory]; !ok {
+		if _, ok := known[TopicInventory]; !ok {
 			var inventory int64
 			if err := database.SQL().QueryRowContext(ctx, `SELECT coalesce((SELECT generation FROM paperboat.machine_topic_generations WHERE machine_id=$1 AND topic='inventory'),0)`, machineID).Scan(&inventory); err != nil {
 				t.Error(err)
@@ -108,6 +111,21 @@ func TestHostIsToldAboutAChangeWithoutPollingOnPostgres(t *testing.T) {
 	}
 	if b := <-bystander; b.err != nil || len(b.changed) != 0 {
 		t.Fatalf("another machine was told: %+v", b)
+	}
+	// A topic the host does not wait on never wakes it.
+	var inventoryNow int64
+	if err := database.SQL().QueryRowContext(ctx, `SELECT coalesce((SELECT generation FROM paperboat.machine_topic_generations WHERE machine_id=$1 AND topic='inventory'),0)`, other).Scan(&inventoryNow); err != nil {
+		t.Fatal(err)
+	}
+	only := make(chan result, 1)
+	go func() {
+		changed, err := hub.Wait(ctx, other, map[string]int64{TopicInventory: inventoryNow}, 800*time.Millisecond)
+		only <- result{changed: changed, err: err}
+	}()
+	time.Sleep(100 * time.Millisecond)
+	publish([]string{other}, TopicMachineServices)
+	if r := <-only; r.err != nil || len(r.changed) != 0 {
+		t.Fatalf("a topic the host does not wait on woke it: %+v", r)
 	}
 	// A host that was away compares what it knew: an older generation is answered at once, a current one waits.
 	publish([]string{machine}, TopicPreviews)
@@ -230,15 +248,21 @@ func TestWritesThatChangeWhatAHostCachesPublishTheirTopicsOnPostgres(t *testing.
 	// inventory: a new machine tells the account's other machines, and nobody else.
 	expect("new machine", moved(TopicInventory, []string{laptop, outsider}, func() { addMachine(server, account, "server") }), map[string]bool{laptop: true, outsider: false})
 	expect("rename", moved(TopicInventory, all, func() { exec(`UPDATE paperboat.user_machines SET alias='renamed' WHERE id=$1`, server) }), map[string]bool{laptop: true, server: true, outsider: false})
-	expect("presence", moved(TopicInventory, all, func() { exec(`UPDATE paperboat.user_machines SET online=NOT online WHERE id=$1`, server) }), map[string]bool{laptop: true, outsider: false})
+	// Presence is not inventory: a flip used to wake every daemon of the account to re-list its machines.
+	expect("presence", moved(TopicInventory, all, func() { exec(`UPDATE paperboat.user_machines SET online=NOT online WHERE id=$1`, server) }), map[string]bool{laptop: false, server: false, outsider: false})
+	expect("offline", moved(TopicInventory, all, func() { exec(`UPDATE paperboat.user_machines SET state='offline' WHERE id=$1`, server) }), map[string]bool{laptop: false, server: false, outsider: false})
+	exec(`UPDATE paperboat.user_machines SET state='online' WHERE id=$1`, server)
 	expect("heartbeat only", moved(TopicInventory, all, func() { exec(`UPDATE paperboat.user_machines SET last_seen_at=now() WHERE id=$1`, server) }), map[string]bool{laptop: false, server: false})
 	services := func(list string) {
 		exec(`INSERT INTO paperboat.machine_service_snapshots(machine_id,installation_generation,boot_id,started_at,generation,services,expires_at,updated_at) VALUES($1,1,'boot-012345678901',now(),1,$2::jsonb,now()+interval '1 hour',now())
  ON CONFLICT(machine_id) DO UPDATE SET services=EXCLUDED.services,expires_at=EXCLUDED.expires_at,updated_at=now()`, server, list)
 	}
-	expect("services appear", moved(TopicInventory, all, func() { services(`[{"port":3000,"address_family":"ipv4"}]`) }), map[string]bool{laptop: true, outsider: false})
-	expect("services unchanged", moved(TopicInventory, all, func() { services(`[{"port":3000,"address_family":"ipv4"}]`) }), map[string]bool{laptop: false, server: false})
-	expect("services change", moved(TopicInventory, all, func() { services(`[]`) }), map[string]bool{laptop: true, outsider: false})
+	// machine_services: a machine's published ports tell the machines that can see it; the machine list
+	// carries no services, so inventory does not move.
+	expect("services appear", moved(TopicMachineServices, all, func() { services(`[{"port":3000,"address_family":"ipv4"}]`) }), map[string]bool{laptop: true, outsider: false})
+	expect("services unchanged", moved(TopicMachineServices, all, func() { services(`[{"port":3000,"address_family":"ipv4"}]`) }), map[string]bool{laptop: false, server: false})
+	expect("services change", moved(TopicMachineServices, all, func() { services(`[]`) }), map[string]bool{laptop: true, outsider: false})
+	expect("services leave inventory", moved(TopicInventory, all, func() { services(`[{"port":8080,"address_family":"ipv4"}]`) }), map[string]bool{laptop: false, server: false, outsider: false})
 
 	// previews: every machine that can see the owner machine learns of a preview, not only the owner.
 	expect("preview", moved(TopicPreviews, all, func() {

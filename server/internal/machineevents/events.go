@@ -23,9 +23,12 @@ const (
 	TopicTunnels       = "tunnels"
 	TopicConfig        = "config"
 	TopicInventory     = "inventory"
+	// TopicMachineServices moves when a machine's published service snapshot (ports) changes. It used to
+	// move the inventory topic, which made every daemon of the account re-list its machines.
+	TopicMachineServices = "machine_services"
 )
 
-var topics = []string{TopicMachineAccess, TopicPeerNetwork, TopicPreviews, TopicTunnels, TopicConfig, TopicInventory}
+var topics = []string{TopicMachineAccess, TopicPeerNetwork, TopicPreviews, TopicTunnels, TopicConfig, TopicInventory, TopicMachineServices}
 
 // ValidTopic reports whether name is a topic a host may wait on.
 func ValidTopic(name string) bool { return slices.Contains(topics, name) }
@@ -154,8 +157,9 @@ func (h *Hub) listen(ctx context.Context) error {
 	}
 }
 
-// Wait returns the topics whose generation is higher than the one the host knows (a topic missing
-// from known counts as 0), as soon as there is one. It returns an empty map when maxWait passes with
+// Wait returns the topics the host waits on (the keys of known) whose generation is higher than the one it
+// knows, as soon as there is one. Topics the host did not list are not reported: they would wake it for
+// changes it does not consume. It returns an empty map when maxWait passes with
 // no change, and ctx's error if the request is abandoned.
 func (h *Hub) Wait(ctx context.Context, machineID string, known map[string]int64, maxWait time.Duration) (map[string]int64, error) {
 	if machineID == "" || maxWait <= 0 || maxWait > MaxWait {
@@ -201,7 +205,7 @@ func (h *Hub) changed(ctx context.Context, machineID string, known map[string]in
 		if err := rows.Scan(&topic, &generation); err != nil {
 			return nil, err
 		}
-		if generation > known[topic] {
+		if knownGeneration, waited := known[topic]; waited && generation > knownGeneration {
 			changed[topic] = generation
 		}
 	}
