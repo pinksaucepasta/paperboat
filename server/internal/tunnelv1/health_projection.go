@@ -32,9 +32,9 @@ func RefreshHealth(ctx context.Context, executor healthExecutor, accountID strin
  WHEN bool_or(coalesce(probe.failed,false)) THEN 'route_unavailable'
  ELSE 'pending' END AS code
  FROM tunnels t LEFT JOIN tunnel_routes r ON r.tunnel_id=t.id AND r.desired_state='active' AND r.deleted_at IS NULL
- LEFT JOIN LATERAL (
- SELECT bool_and(a.observed_state='ready' AND a.observed_at>$3::timestamptz-interval '15 seconds') AS ready,
- bool_or(a.observed_state IN ('failed','degraded') AND a.observed_at>$3::timestamptz-interval '15 seconds') AS failed
+ LEFT JOIN LATERAL (SELECT bool_and(ok) AS ready, bool_or(bad) AS failed FROM (
+ SELECT a.observed_state='ready' AND a.observed_at>$3::timestamptz-interval '15 seconds' AS ok,
+ a.observed_state IN ('failed','degraded') AND a.observed_at>$3::timestamptz-interval '15 seconds' AS bad
  FROM tunnel_edge_route_assignments a
  JOIN tunnel_connectors c ON c.id=a.connector_id AND c.tunnel_id=t.id AND c.host_id=a.host_id
  JOIN tunnel_connector_sessions s ON s.id=a.connector_session_id AND s.connector_id=c.id
@@ -63,7 +63,21 @@ func RefreshHealth(ctx context.Context, executor healthExecutor, accountID strin
  AND n.state='ready' AND n.ready AND n.roles @> ARRAY['edge']::text[]
  AND n.registry_expires_at>$3 AND n.last_heartbeat_at>$3::timestamptz-interval '15 seconds'
  AND n.drain_deadline IS NULL AND paperboat.node_route_eligible(n.id,t.account_id,r.id)
- ) probe ON true
+ UNION ALL
+ -- A tunnel on the endpoint engine (PLAN 3a step 4): its route on each edge where the agent's
+ -- runtime carrier holds it, observed ready by that edge.
+ SELECT x.observed_ready AND x.observed_at>$3::timestamptz-interval '15 seconds', false
+ FROM endpoint_edge_assignments x
+ JOIN endpoints e ON e.id=x.endpoint_id AND e.kind='tunnel' AND e.tunnel_id=t.id AND e.desired_state='active'
+ JOIN endpoint_routes er ON er.id=x.route_id AND er.tunnel_route_id=r.id
+ JOIN runtime_carrier_attachments ra ON ra.machine_id=e.agent_machine_id AND ra.edge_node_id=x.edge_node_id
+ AND ra.edge_process_epoch=x.edge_process_epoch AND ra.session_id=x.carrier_session_id
+ JOIN control_tunnel_nodes n ON n.id=x.edge_node_id AND n.process_epoch=x.edge_process_epoch
+ WHERE x.desired='active' AND ra.expires_at>$3
+ AND n.state='ready' AND n.ready AND n.roles @> ARRAY['edge']::text[]
+ AND n.registry_expires_at>$3 AND n.last_heartbeat_at>$3::timestamptz-interval '15 seconds'
+ AND n.drain_deadline IS NULL AND paperboat.node_route_eligible(n.id,t.account_id,r.id)
+ ) probes) probe ON true
  WHERE t.account_id=$1 AND t.id=ANY($2::text[]) GROUP BY t.id
  ), updated AS (
  UPDATE tunnels t SET summary_code=CASE WHEN h.code='expired' THEN t.summary_code ELSE h.code END,

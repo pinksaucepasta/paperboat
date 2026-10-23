@@ -3,6 +3,7 @@ package runtimeattachment
 import (
 	"encoding/hex"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
@@ -12,6 +13,7 @@ import (
 	"github.com/pinksaucepasta/paperboat-server/internal/controlplane"
 	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat-server/internal/endpoints"
+	"github.com/pinksaucepasta/paperboat-server/internal/tunnelv1"
 )
 
 // PLAN 3a step 4.1: a tunnel moves onto the endpoint engine only when its agent and every edge the
@@ -160,10 +162,42 @@ func TestTunnelsMoveOntoTheEngineOnlyWhenAgentAndEdgesServeThemOnPostgres(t *tes
 	if rows := snapshot(); rows[0].ObservedState != "ready" {
 		t.Fatalf("engine route after the edge observed it ready = %s", rows[0].ObservedState)
 	}
+	// The tunnel is ready only once every edge holding its route has observed it (F8-06).
+	health := func() string {
+		t.Helper()
+		var code string
+		if err := f.database.SQL().QueryRowContext(f.ctx, `SELECT summary_code FROM tunnels WHERE id=$1`, tunnel).Scan(&code); err != nil {
+			t.Fatal(err)
+		}
+		return code
+	}
+	if code := health(); code != "pending" {
+		t.Fatalf("tunnel health with one of two edges ready = %s, want pending", code)
+	}
+	backupRows, err := control.ListTunnelEdgeRouteAssignmentsForNodeV1(f.ctx, f.backupNode, f.backupEdge.ProcessEpoch)
+	if err != nil || len(backupRows) != 1 {
+		t.Fatalf("backup edge snapshot = %d rows, %v", len(backupRows), err)
+	}
+	backup := backupRows[0]
+	if err := control.ObserveRoutes(f.ctx, f.backupNode, []controlplane.RouteObservation{{
+		RouteID: route, AssignmentID: backup.AssignmentID, AssignmentGeneration: backup.AssignmentGeneration, RouteRevision: backup.RouteRevision,
+		EdgeNodeID: f.backupNode, EdgeProcessEpoch: f.backupEdge.ProcessEpoch, ConnectorID: backup.ConnectorID, HostID: backup.HostID,
+		ConnectorGeneration: 1, ConnectorSessionID: backup.ConnectorSessionID, ConnectorProcessGeneration: backup.ConnectorProcessGeneration,
+		ConfigGeneration: backup.ConfigGeneration, ConfigContentHash: "sha256:" + hex.EncodeToString(backup.ConfigContentHash),
+		AccessMode: backup.AccessMode, ViewerPolicyGeneration: backup.ViewerPolicyGeneration, ObservedState: "ready",
+	}}); err != nil {
+		t.Fatal(err)
+	}
 	// A live machine has a current control session, and its environment is its own workspace.
 	f.exec(t, `UPDATE control_environments SET workspace_id=$2 WHERE id=$1`, f.env, f.machine)
 	f.exec(t, `INSERT INTO machine_control_renewals(operation_id,machine_id,installation_generation,credential_jti,issued_at,expires_at,session_generation) VALUES($1,$2,1,$1,now()-interval '1 minute',now()+interval '1 hour',1)`, "renew_"+f.prefix, f.machine)
 	f.exec(t, `INSERT INTO machine_control_sessions(machine_id,installation_generation,session_generation,operation_id,credential_jti,issued_at,expires_at) SELECT machine_id,installation_generation,session_generation,operation_id,credential_jti,issued_at,expires_at FROM machine_control_renewals WHERE operation_id=$1`, "renew_"+f.prefix)
+	if err := tunnelv1.RefreshHealth(f.ctx, f.database.Pool(), f.account, []string{tunnel}, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if code := health(); code != "ready" {
+		t.Fatalf("tunnel health with both edges ready = %s, want ready", code)
+	}
 	// The edge's public ingress authority for the route is bound to the same carrier identity its
 	// stream preface carries, and names the tunnel route and its origin.
 	decisions, err := connectorprotocol.SQLIngressSource{DB: f.database}.Edge(f.ctx, f.node, f.edge.ProcessEpoch)
