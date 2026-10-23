@@ -18,10 +18,13 @@ AND NOT EXISTS(SELECT 1 FROM runtime_carrier_attachments a LEFT JOIN control_tun
  OR n.tunnel_endpoints_epoch IS DISTINCT FROM a.edge_process_epoch))`
 
 // engineTunnel is the SQL predicate (over tunnels t) for a live tunnel the engine can serve now.
-// Its routes are all HTTP until TCP, TLS and private TCP ride on agent carriers (3a step 4.4): a
-// tunnel moves as a whole, so a tunnel with another route kind keeps its connector.
-const engineTunnel = liveTunnel + ` AND t.stable_endpoint LIKE 'https://_%' AND NOT EXISTS(SELECT 1 FROM tunnel_routes o WHERE o.tunnel_id=t.id
-AND o.desired_state='active' AND o.deleted_at IS NULL AND o.protocol<>'http')`
+// Its routes are all public HTTP: TCP, TLS and private TCP ride on agent carriers in 3a step 4.4,
+// and a private or team route needs the agent's own ingress authority for engine routes first. A
+// tunnel moves as a whole, so a tunnel with any other route keeps its connector.
+const engineTunnel = liveTunnel + ` AND t.stable_endpoint LIKE 'https://_%' AND NOT EXISTS(SELECT 1 FROM tunnel_routes o
+LEFT JOIN current_tunnel_route_viewer_policy v ON v.route_id=o.id
+WHERE o.tunnel_id=t.id AND o.desired_state='active' AND o.deleted_at IS NULL
+AND (o.protocol<>'http' OR coalesce(v.effective_access_mode,t.access_mode)<>'public'))`
 
 // SyncAgentTunnelsTx makes the machine's tunnel endpoints match its tunnels: while its agent serves
 // tunnels, every live tunnel it created is an endpoint with one endpoint route per active route;

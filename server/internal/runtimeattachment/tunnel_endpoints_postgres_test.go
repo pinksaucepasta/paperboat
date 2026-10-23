@@ -110,6 +110,18 @@ VALUES($1,1,sha256(convert_to($1::text,'UTF8')),convert_to(json_build_object('ro
 	if endpoint, routes, assignments := state(); !endpoint || len(routes) != 1 || routes[0] != route+"@3" || assignments != 2 {
 		t.Fatalf("engine tunnel = %v %v %d, want endpoint with %s@3 on both edges", endpoint, routes, assignments, route)
 	}
+	// A private tunnel keeps its connector until the agent has its own ingress authority for engine
+	// routes; back to public, it moves again.
+	f.exec(t, `UPDATE tunnels SET access_mode='private' WHERE id=$1`, tunnel)
+	sync()
+	if endpoint, _, _ := state(); endpoint {
+		t.Fatal("a private tunnel moved onto the engine")
+	}
+	f.exec(t, `UPDATE tunnels SET access_mode='public' WHERE id=$1`, tunnel)
+	sync()
+	if endpoint, routes, assignments := state(); !endpoint || len(routes) != 1 || assignments != 2 {
+		t.Fatalf("public again: engine tunnel = %v %v %d", endpoint, routes, assignments)
+	}
 	// Each edge gets the route in its tunnel route snapshot, bound to the agent's runtime carrier on
 	// that edge (its identity exactly as the edge admitted the carrier), not to a tunnel connector.
 	control := controlplane.NewEdgeService(f.database, "")
