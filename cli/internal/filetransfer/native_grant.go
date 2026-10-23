@@ -10,6 +10,7 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/serverclock"
 )
 
@@ -209,10 +210,16 @@ func (e *localDaemonUnavailable) Error() string {
 }
 func (e *localDaemonUnavailable) Unwrap() error { return e.cause }
 
-// localDaemonRestarting reports whether a renewal failed only because the local daemon's socket is
-// missing or not accepting yet, as while it restarts.
+// localDaemonRestarting reports whether a renewal or stream failed only because the local daemon is
+// restarting: its socket is missing or not accepting yet, or the old daemon, shutting down for an
+// update, answered the transfer with 503 before it exited (F14-02).
 func localDaemonRestarting(err error) bool {
 	var dial *net.OpError
-	return errors.As(err, &dial) && dial.Op == "dial" && dial.Net == "unix" &&
-		(errors.Is(err, syscall.ENOENT) || errors.Is(err, syscall.ECONNREFUSED))
+	if errors.As(err, &dial) && dial.Op == "dial" && dial.Net == "unix" &&
+		(errors.Is(err, syscall.ENOENT) || errors.Is(err, syscall.ECONNREFUSED)) {
+		return true
+	}
+	var local *localapi.RemoteError
+	return errors.As(err, &local) && local.StatusCode == http.StatusServiceUnavailable &&
+		(local.Code == "file_transfer_unavailable" || local.Code == "file_transfer_stream_unavailable")
 }
