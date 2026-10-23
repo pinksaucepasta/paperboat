@@ -555,7 +555,7 @@ func TestRuntimeAttachmentAdvertisesEndpointsAndReadsWhetherEdgesServeThem(t *te
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(sent.Capabilities) != 1 || sent.Capabilities[0] != "endpoints" {
+		if len(sent.Capabilities) != 2 || sent.Capabilities[0] != "endpoints" || sent.Capabilities[1] != "tunnel_endpoints" {
 			t.Fatalf("attachment request capabilities = %v", sent.Capabilities)
 		}
 		if out.EndpointsServed != want {
