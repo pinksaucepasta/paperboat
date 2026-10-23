@@ -1,7 +1,7 @@
 "use client"
 
 import { queryOptions } from "@tanstack/react-query"
-import { api, idempotencyKey, type Machine } from "@/lib/api"
+import { api, idempotencyKey } from "@/lib/api"
 
 export type Shell = "posix" | "powershell"
 
@@ -22,7 +22,14 @@ export type EnrollmentState =
   | "deleted"
   | "auth_consumed"
 
-export type Enrollment = { id: string; state: EnrollmentState; machine_id?: string; expires_at: string }
+export type Enrollment = {
+  id: string
+  state: EnrollmentState
+  machine_id?: string
+  expires_at: string
+  /** Why pairing was refused, for failed_retryable (e.g. machine_limit_reached). */
+  failure_code?: string
+}
 
 type EnrollmentStart = Enrollment & { bootstrap_token: string }
 

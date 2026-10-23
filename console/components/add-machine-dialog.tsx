@@ -4,7 +4,7 @@ import { CheckCircleIcon, CircleNotchIcon, PlusIcon } from "@phosphor-icons/reac
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import Link from "next/link"
 import { useEffect, useRef, useState } from "react"
-import { machineOverviewQuery, useApiQuery, useWorkspace, workspacesQuery, type Workspace } from "@/lib/api"
+import { ApiError, machineOverviewQuery, useApiQuery, useWorkspace, workspacesQuery, type Workspace } from "@/lib/api"
 import {
   cancelEnrollment,
   enrollmentQuery,
@@ -194,7 +194,7 @@ function AddMachine({
           ) : start.isError ? (
             <span className="text-destructive">{start.error.message}</span>
           ) : (
-            <EnrollmentStatus state={state} onRetry={() => start.mutate({ shell, workspace })} />
+            <EnrollmentStatus state={state} failure={live.data?.failure_code} onRetry={() => start.mutate({ shell, workspace })} />
           )}
           <button
             type="button"
@@ -243,7 +243,23 @@ function OptionalLabel({ htmlFor, children }: { htmlFor: string; children: React
   )
 }
 
-function EnrollmentStatus({ state, onRetry }: { state: string | undefined; onRetry: () => void }) {
+/** Pairing refused because the workspace reached its plan's machine limit (no billing_url here). */
+const machineLimit = new ApiError(
+  409,
+  "machine_limit_reached",
+  "This workspace has reached its plan's machine limit. Remove machines you no longer use, or upgrade your plan.",
+)
+
+function EnrollmentStatus({
+  state,
+  failure,
+  onRetry,
+}: {
+  state: string | undefined
+  failure?: string
+  onRetry: () => void
+}) {
+  if (state === "failed_retryable" && failure === "machine_limit_reached") return <LimitReached error={machineLimit} removeMachines />
   if (state === "expired" || state === "cancelled" || state === "denied" || state === "failed_retryable") {
     return (
       <span className="flex items-center gap-2">
