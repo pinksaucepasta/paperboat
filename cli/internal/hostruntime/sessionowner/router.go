@@ -250,9 +250,9 @@ func (r *Router) inspect(ctx context.Context, includeCounts bool) (routerImage, 
 		if out.V0 == nil {
 			return routerImage{}, session.ErrOwnerUnavailable
 		}
-		// One owner's store is bounded by the session limit; a larger list is
-		// malformed. Retained closed records may accumulate across owners.
-		if len(out.V0) > r.maxIDs {
+		// One owner holds at most the session limit of live sessions; closed records are retained
+		// for display and do not count. A list beyond the retained bound is malformed.
+		if len(out.V0) > maxRetainedRecordsPerOwner || liveSnapshots(out.V0) > r.maxIDs {
 			return routerImage{}, session.ErrResourceLimit
 		}
 		for _, snapshot := range out.V0 {
@@ -267,7 +267,7 @@ func (r *Router) inspect(ctx context.Context, includeCounts bool) (routerImage, 
 					return routerImage{}, session.ErrSessionExists
 				}
 			}
-			if len(image.byID) >= r.maxIDs*r.maxOwners {
+			if len(image.byID) >= maxRetainedRecordsPerOwner*r.maxOwners {
 				return routerImage{}, session.ErrResourceLimit
 			}
 			image.byID[snapshot.ID] = routedSession{generation: generation, name: snapshot.Name, state: snapshot.State}
@@ -710,3 +710,17 @@ func isRestart(op string) bool {
 }
 
 func isDelete(op string) bool { return op == "Delete" || op == "DeleteAtGeneration" }
+
+// maxRetainedRecordsPerOwner bounds one owner's list, live and closed records together, so a
+// malformed or runaway owner cannot grow the catalog without limit.
+const maxRetainedRecordsPerOwner = 1024
+
+func liveSnapshots(snapshots []session.Snapshot) int {
+	live := 0
+	for _, snapshot := range snapshots {
+		if snapshot.State != session.Closed && snapshot.State != session.Deleted {
+			live++
+		}
+	}
+	return live
+}

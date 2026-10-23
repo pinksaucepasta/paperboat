@@ -517,3 +517,34 @@ func routerShellCommand(shell, workspace, script string) pty.Command {
 		Dimensions: pty.Dimensions{Columns: 80, Rows: 24},
 	}
 }
+
+// F3-05 on hp: a host whose owner kept more closed records than the session limit refused every new
+// terminal with resource_limit while no session was live. Closed records must not consume the limit.
+func TestRouterAdmitsNewSessionsWhileClosedRecordsExceedTheLimit(t *testing.T) {
+	manager, workspace, shell := newRouterTestManager(t)
+	gen := generation(41)
+	owner := authenticatedRouterOwner(t, gen, manager, workspace, shell)
+	router, err := NewRouter(gen, map[string]Owner{gen: {Descriptor: owner.Descriptor}}, 1, 2, ensureRouterOwner(map[string]Owner{gen: owner}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	remote, err := router.Service()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"closed-one", "closed-two", "live-three"} {
+		created, err := remote.Create(context.Background(), session.CreateRequest{Name: name, Command: routerShellCommand(shell, workspace, "exec sleep 60")})
+		if err != nil {
+			t.Fatalf("create %s after closing the earlier ones: %v", name, err)
+		}
+		if name == "live-three" {
+			break
+		}
+		if _, err := manager.Close(context.Background(), created.ID); err != nil {
+			t.Fatalf("close %s: %v", name, err)
+		}
+	}
+	if _, err := remote.Create(context.Background(), session.CreateRequest{Name: "over-limit", Command: routerShellCommand(shell, workspace, "exec sleep 60")}); !errors.Is(err, session.ErrResourceLimit) {
+		t.Fatalf("a second live session must still be refused: %v", err)
+	}
+}
