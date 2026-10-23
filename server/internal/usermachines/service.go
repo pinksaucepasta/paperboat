@@ -243,6 +243,7 @@ type Policy struct {
 	ExpiredAccessSessionRetention time.Duration
 }
 type Service struct {
+	inventoryFlights            inventoryFlights
 	runtimeQuota                accountingauthority.QuotaChecker
 	runtimeBillingURL           string
 	nameRandom                  io.Reader

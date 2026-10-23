@@ -24,11 +24,19 @@ func (s *Service) ListInventory(ctx context.Context, account string, opts Invent
 	if opts.Limit < 1 || opts.Limit > 200 || opts.Offset < 0 {
 		return nil, 0, ErrInvalidMachineName
 	}
-	if scope, ok := workspace.FromContext(ctx); ok {
+	scope, scoped := workspace.FromContext(ctx)
+	if scoped {
 		if err := workspace.Validate(ctx, s.db, account, scope); err != nil {
 			return nil, 0, err
 		}
 	}
+	return s.inventoryFlights.do(ctx, inventoryKey{account: account, scoped: scoped, scope: scope, opts: opts.key()}, func(ctx context.Context) ([]UserMachine, int, error) {
+		return s.listInventory(ctx, account, opts)
+	})
+}
+
+// listInventory computes one inventory page; ListInventory shares it between identical requests.
+func (s *Service) listInventory(ctx context.Context, account string, opts InventoryOptions) ([]UserMachine, int, error) {
 	scoped, team := workspaceTeamArgument(ctx)
 	var teamID any
 	if team.Valid {
