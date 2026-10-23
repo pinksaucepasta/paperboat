@@ -146,7 +146,19 @@ func (s *Service) GetPolicy(ctx context.Context, actor, machine string) (wire.Po
 	}
 	return p, e
 }
-func (s *Service) UpdatePolicy(ctx context.Context, actor, machine string, in wire.PolicyUpdate) (policy wire.Policy, resultErr error) {
+
+// UpdatePolicy changes a machine's service policy; its serializable transaction is replayed after a
+// serialization failure.
+func (s *Service) UpdatePolicy(ctx context.Context, actor, machine string, in wire.PolicyUpdate) (wire.Policy, error) {
+	var out wire.Policy
+	err := db.RetrySerializable(ctx, func() (e error) {
+		out, e = s.updatePolicyAttempt(ctx, actor, machine, in)
+		return e
+	})
+	return out, err
+}
+
+func (s *Service) updatePolicyAttempt(ctx context.Context, actor, machine string, in wire.PolicyUpdate) (policy wire.Policy, resultErr error) {
 	if in.ExpectedGeneration < 1 {
 		return wire.Policy{}, wire.ErrInvalid
 	}

@@ -69,7 +69,17 @@ func NewService(database *db.DB, endpointDomain string) (*Service, error) {
 	return &Service{db: database, endpointDomain: domain, now: time.Now}, nil
 }
 
-func (s *Service) Upsert(ctx context.Context, accountID string, input UpsertRequest) (policy Policy, resultErr error) {
+// Upsert stores a lazy access policy; its serializable transaction is replayed after a serialization failure.
+func (s *Service) Upsert(ctx context.Context, accountID string, input UpsertRequest) (Policy, error) {
+	var out Policy
+	err := db.RetrySerializable(ctx, func() (e error) {
+		out, e = s.upsertAttempt(ctx, accountID, input)
+		return e
+	})
+	return out, err
+}
+
+func (s *Service) upsertAttempt(ctx context.Context, accountID string, input UpsertRequest) (policy Policy, resultErr error) {
 	now := s.now().UTC()
 	if input.OwnershipMode == "" {
 		input.OwnershipMode = "persistent_port"

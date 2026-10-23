@@ -15,7 +15,19 @@ import (
 	"github.com/pinksaucepasta/paperboat-server/internal/machineservices"
 )
 
-func (r *SQLResolver) resolveMachineService(ctx context.Context, in Request) (target Target, returnErr error) {
+// resolveMachineService authorizes one machine service. Its serializable read is replayed after a
+// serialization failure: one conflict at a rollout used to fail the grant and leave a daemon's local
+// machine access down for minutes (2026-10-23 13:41Z).
+func (r *SQLResolver) resolveMachineService(ctx context.Context, in Request) (Target, error) {
+	var out Target
+	err := db.RetrySerializable(ctx, func() (e error) {
+		out, e = r.resolveMachineServiceAttempt(ctx, in)
+		return e
+	})
+	return out, err
+}
+
+func (r *SQLResolver) resolveMachineServiceAttempt(ctx context.Context, in Request) (target Target, returnErr error) {
 	port, e := wire.ParseRoute(in.RouteID)
 	if e != nil || in.Protocol != "tcp" {
 		return Target{}, ErrInvalid

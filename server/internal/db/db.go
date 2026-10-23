@@ -131,20 +131,43 @@ func (d *DB) TransactionStats() TransactionSnapshot {
 // InTx callers are idempotent (idempotency keys / ON CONFLICT), so replaying an
 // aborted attempt is safe.
 func (d *DB) InTx(ctx context.Context, fn func(context.Context, *Tx) error) error {
-	const maxAttempts = 10
 	d.serializable.calls.Add(1)
-	for attempt := 1; ; attempt++ {
+	attempts := 0
+	err := retrySerializable(ctx, func() error {
+		attempts++
 		d.serializable.attempts.Add(1)
-		err := d.runInTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable}, fn)
-		if err == nil || attempt >= maxAttempts || !isSerializationFailure(err) {
-			if attempt >= maxAttempts && isSerializationFailure(err) {
-				d.serializable.exhausted.Add(1)
-			}
+		if attempts > 1 {
+			d.serializable.retries.Add(1)
+		}
+		return d.runInTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable}, fn)
+	})
+	if attempts >= serializableAttempts && isSerializationFailure(err) {
+		d.serializable.exhausted.Add(1)
+	}
+	return err
+}
+
+// serializableAttempts bounds how often a serializable transaction is replayed after a
+// serialization failure (40001) or deadlock (40P01).
+const serializableAttempts = 10
+
+// RetrySerializable runs attempt, which must open, use and finish its own serializable transaction (for code
+// that uses BeginSerializable), and replays it from scratch after a serialization failure or deadlock, with
+// bounded jittered backoff. Without it, one transient conflict (two servers overlapping during a rollout, a
+// concurrent write) becomes a 503 and the client backs off for minutes. attempt must be safe to replay.
+func RetrySerializable(ctx context.Context, attempt func() error) error {
+	return retrySerializable(ctx, attempt)
+}
+
+func retrySerializable(ctx context.Context, attempt func() error) error {
+	for n := 1; ; n++ {
+		err := attempt()
+		if err == nil || n >= serializableAttempts || !isSerializationFailure(err) {
 			return err
 		}
 		// Exponential jitter prevents synchronized workers from repeatedly
 		// colliding on the same serializable rows. The delay remains bounded.
-		backoff := 5 * time.Millisecond << min(attempt-1, 5)
+		backoff := 5 * time.Millisecond << min(n-1, 5)
 		if backoff > 200*time.Millisecond {
 			backoff = 200 * time.Millisecond
 		}
@@ -158,7 +181,6 @@ func (d *DB) InTx(ctx context.Context, fn func(context.Context, *Tx) error) erro
 			}
 			return ctx.Err()
 		case <-timer.C:
-			d.serializable.retries.Add(1)
 		}
 	}
 }
@@ -170,7 +192,7 @@ func (d *DB) InTx(ctx context.Context, fn func(context.Context, *Tx) error) erro
 const serializableSetup = `SET LOCAL enable_seqscan TO off`
 
 // BeginSerializable starts a serializable database/sql transaction with the same setup as InTx, for code that
-// manages its own transaction. Prefer InTx, which also retries serialization failures.
+// manages its own transaction. Prefer InTx; otherwise wrap the whole transaction in RetrySerializable.
 func BeginSerializable(ctx context.Context, database *sql.DB) (*sql.Tx, error) {
 	tx, err := database.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {

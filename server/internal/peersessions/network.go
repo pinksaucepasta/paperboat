@@ -93,7 +93,18 @@ func NewNetworkService(store *db.DB, signer interface {
 	return &NetworkService{store: store, signer: signer, issuer: issuer, now: time.Now, stunServers: stunServers}, nil
 }
 
+// Register records a peer endpoint registration. Its serializable transaction is replayed after a
+// serialization failure, so a concurrent write (or two servers during a rollout) is not a 503.
 func (s *NetworkService) Register(ctx context.Context, in NetworkRegistration) (NetworkRegistrationResult, error) {
+	var out NetworkRegistrationResult
+	err := db.RetrySerializable(ctx, func() (e error) {
+		out, e = s.registerAttempt(ctx, in)
+		return e
+	})
+	return out, err
+}
+
+func (s *NetworkService) registerAttempt(ctx context.Context, in NetworkRegistration) (NetworkRegistrationResult, error) {
 	if ctx == nil || !bounded(in.OperationID, 8, 128) || !bounded(in.UserID, 1, 256) || !bounded(in.EndpointID, 1, 128) || !validWireGuardPublicKey(in.WireGuardPublicKey) || !validWireGuardPublicKey(in.DiscoPublicKey) || len(in.QUICCertificateFingerprint) != 32 || in.ExpectedKeyGeneration < 0 || (in.Role != "cli" && in.Role != "machine") {
 		return NetworkRegistrationResult{}, ErrInvalid
 	}
