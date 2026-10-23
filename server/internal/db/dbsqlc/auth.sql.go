@@ -12,7 +12,7 @@ import (
 )
 
 const authenticateBrowserSession = `-- name: AuthenticateBrowserSession :one
-SELECT s.id AS session_id, s.user_id, s.expires_at, s.csrf_hash, s.operator_authenticated_at, s.workos_session_id, s.workos_access_expires_at,
+SELECT s.id AS session_id, s.user_id, s.expires_at, s.created_at AS signed_in_at, s.csrf_hash, s.operator_authenticated_at, s.workos_session_id, s.workos_access_expires_at,
        u.id, coalesce(s.workos_subject,u.workos_subject)::text AS workos_subject, u.primary_email, u.email_verified, u.display_name, u.status, u.role, u.created_at
 FROM sessions s JOIN users u ON u.id = s.user_id
 WHERE s.session_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > now() AND u.status = 'active'
@@ -22,6 +22,7 @@ type AuthenticateBrowserSessionRow struct {
 	SessionID               string
 	UserID                  string
 	ExpiresAt               time.Time
+	SignedInAt              time.Time
 	CsrfHash                string
 	OperatorAuthenticatedAt sql.NullTime
 	WorkosSessionID         sql.NullString
@@ -43,6 +44,7 @@ func (q *Queries) AuthenticateBrowserSession(ctx context.Context, sessionHash st
 		&i.SessionID,
 		&i.UserID,
 		&i.ExpiresAt,
+		&i.SignedInAt,
 		&i.CsrfHash,
 		&i.OperatorAuthenticatedAt,
 		&i.WorkosSessionID,

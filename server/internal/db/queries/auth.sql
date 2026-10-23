@@ -16,7 +16,7 @@ INSERT INTO sessions (id, user_id, session_hash, csrf_hash, expires_at, workos_s
 VALUES (sqlc.arg(id), sqlc.arg(user_id), sqlc.arg(session_hash), sqlc.arg(csrf_hash), sqlc.arg(expires_at), sqlc.narg(workos_session_id), sqlc.narg(workos_subject), sqlc.narg(workos_refresh_token_ciphertext), sqlc.narg(workos_access_expires_at), now(), now());
 
 -- name: AuthenticateBrowserSession :one
-SELECT s.id AS session_id, s.user_id, s.expires_at, s.csrf_hash, s.operator_authenticated_at, s.workos_session_id, s.workos_access_expires_at,
+SELECT s.id AS session_id, s.user_id, s.expires_at, s.created_at AS signed_in_at, s.csrf_hash, s.operator_authenticated_at, s.workos_session_id, s.workos_access_expires_at,
        u.id, coalesce(s.workos_subject,u.workos_subject)::text AS workos_subject, u.primary_email, u.email_verified, u.display_name, u.status, u.role, u.created_at
 FROM sessions s JOIN users u ON u.id = s.user_id
 WHERE s.session_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > now() AND u.status = 'active';

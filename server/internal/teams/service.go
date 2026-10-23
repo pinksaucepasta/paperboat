@@ -277,26 +277,34 @@ func (s *Service) Mutate(ctx context.Context, account, team string, r MutationRe
 			if billingActive {
 				return ErrBillingActive
 			}
-			if err := FenceENVTx(ctx, tx, team); err != nil {
-				return err
-			}
-			if err := removeTeamMachinesTx(ctx, tx, team); err != nil {
-				return err
-			}
-			if err := revokeDepartingResourcesTx(ctx, tx, team, ""); err != nil {
-				return err
-			}
-			for _, q := range []string{`UPDATE team_terminal_session_grants SET active=false,generation=generation+1 WHERE team_id=$1 AND active`, `UPDATE teams SET deleted_at=now() WHERE team_id=$1`, `UPDATE team_members SET active=false,membership_generation=membership_generation+1 WHERE team_id=$1 AND active`, `UPDATE team_resource_grants SET active=false,generation=generation+1 WHERE team_id=$1 AND active`, `UPDATE team_resource_bindings SET active=false,generation=generation+1 WHERE team_id=$1 AND active`, `UPDATE team_invitations SET cancelled_at=now() WHERE team_id=$1 AND accepted_at IS NULL AND cancelled_at IS NULL`, `DELETE FROM environment_vault_team_grants WHERE team_id=$1`, `DELETE FROM environment_vault_team_members WHERE team_id=$1`, `DELETE FROM environment_vault_scopes WHERE owner_kind='team' AND owner_id=$1`, `DELETE FROM environment_vault_teams WHERE team_id=$1`} {
-				if _, err := tx.Exec(ctx, q, team); err != nil {
-					return err
-				}
-			}
-			return nil
+			return DeleteTeamTx(ctx, tx, team)
 		default:
 			return ErrInvalid
 		}
 	})
 }
+
+// DeleteTeamTx soft-deletes a team and revokes everything it grants, inside the caller's transaction
+// with the team lock held (Lock). The caller checks the owner and billing: the team delete action does, and
+// account deletion does for a team whose only member is the account.
+func DeleteTeamTx(ctx context.Context, tx *db.Tx, team string) error {
+	if err := FenceENVTx(ctx, tx, team); err != nil {
+		return err
+	}
+	if err := removeTeamMachinesTx(ctx, tx, team); err != nil {
+		return err
+	}
+	if err := revokeDepartingResourcesTx(ctx, tx, team, ""); err != nil {
+		return err
+	}
+	for _, q := range []string{`UPDATE team_terminal_session_grants SET active=false,generation=generation+1 WHERE team_id=$1 AND active`, `UPDATE teams SET deleted_at=now() WHERE team_id=$1`, `UPDATE team_members SET active=false,membership_generation=membership_generation+1 WHERE team_id=$1 AND active`, `UPDATE team_resource_grants SET active=false,generation=generation+1 WHERE team_id=$1 AND active`, `UPDATE team_resource_bindings SET active=false,generation=generation+1 WHERE team_id=$1 AND active`, `UPDATE team_invitations SET cancelled_at=now() WHERE team_id=$1 AND accepted_at IS NULL AND cancelled_at IS NULL`, `DELETE FROM environment_vault_team_grants WHERE team_id=$1`, `DELETE FROM environment_vault_team_members WHERE team_id=$1`, `DELETE FROM environment_vault_scopes WHERE owner_kind='team' AND owner_id=$1`, `DELETE FROM environment_vault_teams WHERE team_id=$1`} {
+		if _, err := tx.Exec(ctx, q, team); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *Service) Invite(ctx context.Context, account, team string, r InviteRequest) (Invitation, error) {
 	var out Invitation
 	if r.Role == "" {

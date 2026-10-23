@@ -12,6 +12,21 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type AccountDeletionJob struct {
+	ID            string
+	UserID        string
+	Kind          string
+	Target        string
+	Recipient     string
+	State         string
+	Attempts      int32
+	LastError     string
+	NextAttemptAt time.Time
+	LeaseUntil    sql.NullTime
+	CreatedAt     time.Time
+	CompletedAt   sql.NullTime
+}
+
 type AccountE2eeKey struct {
 	KeyID              string
 	UserID             string

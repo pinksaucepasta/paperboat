@@ -55,11 +55,14 @@ type User struct {
 }
 
 type Session struct {
-	ID                      string
-	UserID                  string
-	Token                   string
-	CSRFToken               string
-	ExpiresAt               time.Time
+	ID        string
+	UserID    string
+	Token     string
+	CSRFToken string
+	ExpiresAt time.Time
+	// SignedInAt is when the user signed in to create this browser session. Rotation keeps it:
+	// token refreshes do not sign anyone in again.
+	SignedInAt              time.Time
 	OperatorAuthenticatedAt time.Time
 	WorkOSSessionID         string
 }
@@ -189,7 +192,7 @@ func (s *Service) VerifyCallback(ctx context.Context, input CallbackInput) (User
 	if err != nil {
 		return User{}, Session{}, fmt.Errorf("upsert workos user and session: %w", err)
 	}
-	return user, Session{ID: sessionID, UserID: user.ID, Token: sessionToken, CSRFToken: csrfToken, ExpiresAt: expiresAt, WorkOSSessionID: profile.SessionID}, nil
+	return user, Session{ID: sessionID, UserID: user.ID, Token: sessionToken, CSRFToken: csrfToken, ExpiresAt: expiresAt, SignedInAt: s.now(), WorkOSSessionID: profile.SessionID}, nil
 }
 
 func (s *Service) NewOAuthState() (string, error) {
@@ -255,7 +258,7 @@ func (s *Service) AuthenticateRequest(ctx context.Context, r *http.Request) (Use
 		}
 	}
 	user := User{ID: row.ID, WorkOSSubject: row.WorkosSubject, PrimaryEmail: row.PrimaryEmail, EmailVerified: row.EmailVerified, DisplayName: row.DisplayName, Status: row.Status, Role: Role(row.Role), CreatedAt: row.CreatedAt}
-	session := Session{ID: row.SessionID, UserID: row.UserID, ExpiresAt: row.ExpiresAt}
+	session := Session{ID: row.SessionID, UserID: row.UserID, ExpiresAt: row.ExpiresAt, SignedInAt: row.SignedInAt}
 	if row.WorkosSessionID.Valid {
 		session.WorkOSSessionID = row.WorkosSessionID.String
 	}
@@ -276,6 +279,7 @@ func (s *Service) RotateSession(ctx context.Context, session Session) (Session, 
 		Token:           newToken(),
 		CSRFToken:       newToken(),
 		ExpiresAt:       s.now().Add(s.sessionPolicy.LoginLifetime),
+		SignedInAt:      session.SignedInAt,
 		WorkOSSessionID: session.WorkOSSessionID,
 	}
 	operatorAuthenticatedAt, err := s.db.Queries().RotateBrowserSession(ctx, dbsqlc.RotateBrowserSessionParams{SessionHash: tokenHash(next.Token), CsrfHash: tokenHash(next.CSRFToken), ExpiresAt: next.ExpiresAt, ID: session.ID})

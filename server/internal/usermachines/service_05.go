@@ -792,6 +792,14 @@ func (s *Service) Delete(ctx context.Context, userID, userMachineID string) erro
 	return errors.Join(auditErr, s.RevokeUserMachineSessions(ctx, userMachineID, "user_machine_deleted"))
 }
 
+// DeleteMachineTx deletes a machine inside the caller's transaction with the same fences, credential
+// cleanup and access-session records as Delete. Host notification stays with RetryPendingRevocations,
+// which picks up the sessions this records as revoked. The caller holds the vault mutation lock
+// (environment.LockVaultMutationsTx) and has read the machine with GetUserMachineForUpdate.
+func (s *Service) DeleteMachineTx(ctx context.Context, tx *db.Tx, userID string, machine dbsqlc.UserMachine) error {
+	return s.revokeUserMachineControlTx(ctx, tx, userID, machine, true)
+}
+
 func (s *Service) revokeUserMachineControl(ctx context.Context, userID, userMachineID string, deleted bool) error {
 	return s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		if err := environment.LockVaultMutationsTx(ctx, tx); err != nil {
