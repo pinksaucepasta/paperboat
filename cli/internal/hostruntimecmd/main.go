@@ -4,10 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/causetext"
 	"io"
 	"os"
-	"slices"
-	"strings"
 
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
@@ -224,7 +223,7 @@ func finishRuntimeCommand(ctx context.Context, operation string, output io.Write
 		// These run under the service manager with nobody to ask. The journal is
 		// the only place their real cause can be found, and support references
 		// alone do not carry it.
-		message += "\npb: cause: " + FailureCauseText(err)
+		message += "\npb: cause: " + causetext.Text(err)
 	}
 	if _, writeErr := fmt.Fprintln(output, message); writeErr != nil {
 		outputFailed = true
@@ -274,36 +273,4 @@ func longRunningRuntimeService(operation string) bool {
 		return true
 	}
 	return false
-}
-
-// FailureCauseText lists the distinct leaf errors under err, bounded in depth
-// and length. A CommandFailure's own message is public prose; the leaves are
-// the diagnostic causes it retains.
-func FailureCauseText(err error) string {
-	var leaves []string
-	var walk func(error, int)
-	walk = func(current error, depth int) {
-		if current == nil || len(leaves) >= 8 {
-			return
-		}
-		var children []error
-		if joined, ok := current.(interface{ Unwrap() []error }); ok {
-			children = joined.Unwrap()
-		}
-		if len(children) == 0 || depth >= 6 {
-			text := current.Error()
-			if len(text) > 300 {
-				text = text[:300] + "..."
-			}
-			if !slices.Contains(leaves, text) {
-				leaves = append(leaves, text)
-			}
-			return
-		}
-		for _, child := range children {
-			walk(child, depth+1)
-		}
-	}
-	walk(err, 0)
-	return strings.Join(leaves, "; ")
 }

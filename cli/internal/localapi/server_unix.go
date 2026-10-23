@@ -97,6 +97,9 @@ type ServerConfig struct {
 	Timeout              time.Duration
 	WatchDuration        time.Duration
 	MaxWatchEvents       int
+	// RecordCause keeps the cause text of a failed peer request locally (owner-only, never uploaded): the
+	// diagnostic event carries only the error's type chain. Optional.
+	RecordCause func(operation, supportReference string, err error)
 }
 
 type Server struct {
@@ -348,6 +351,7 @@ func (s *Server) fileTransfer(writer http.ResponseWriter, request *http.Request,
 			_ = s.config.FileTransfers.ReleaseFileTransfer(peer, result.Handle)
 		}
 		errorreport.Current().CaptureFailure(request.Context(), "paperboatd", "transfer", "stream_open", "file_transfer_failed", err)
+		s.recordCause(request.Context(), "transfer", err)
 		if writeRelayQuotaRefusal(writer, requestID, err) {
 			return
 		}
@@ -412,6 +416,7 @@ func (s *Server) fileTransferStream(writer http.ResponseWriter, request *http.Re
 			_ = stream.Close()
 		}
 		errorreport.Current().CaptureFailure(request.Context(), "paperboatd", "transfer", "stream_open", "file_transfer_failed", err)
+		s.recordCause(request.Context(), "transfer", err)
 		if writeRelayQuotaRefusal(writer, requestID, err) {
 			return
 		}
@@ -479,6 +484,7 @@ func (s *Server) peerProbe(writer http.ResponseWriter, request *http.Request, re
 			return
 		}
 		errorreport.Current().CaptureFailure(request.Context(), "paperboatd", "peer_probe", "peer_connect", "native_private_failed", err)
+		s.recordCause(request.Context(), "peer_probe", err)
 		writeError(writer, http.StatusServiceUnavailable, requestID, "peer_probe_unavailable", "peer probe failed; check target connectivity with pb doctor")
 		return
 	}
@@ -525,6 +531,7 @@ func (s *Server) inspectorRequest(writer http.ResponseWriter, request *http.Requ
 			return
 		}
 		errorreport.Current().CaptureFailure(request.Context(), "paperboatd", "inspector", "peer_connect", "native_private_failed", err)
+		s.recordCause(request.Context(), "inspector", err)
 		writeError(writer, http.StatusServiceUnavailable, requestID, "inspector_unavailable", "inspector request failed; check target connectivity with pb doctor")
 		return
 	}
@@ -577,6 +584,7 @@ func (s *Server) peerStream(writer http.ResponseWriter, request *http.Request, r
 			_ = stream.Close()
 		}
 		errorreport.Current().CaptureFailure(request.Context(), "paperboatd", "peer_stream", "stream_open", "native_private_failed", err)
+		s.recordCause(request.Context(), "peer_stream", err)
 		if writeRelayQuotaRefusal(writer, requestID, err) {
 			return
 		}
@@ -939,4 +947,10 @@ func onlyServiceCancellation(err error) bool {
 		}
 	}
 	return err != nil
+}
+
+func (s *Server) recordCause(ctx context.Context, operation string, err error) {
+	if s.config.RecordCause != nil && err != nil {
+		s.config.RecordCause(operation, supportref.FromContext(ctx), err)
+	}
 }

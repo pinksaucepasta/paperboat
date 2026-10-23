@@ -5,6 +5,7 @@ package localdaemon
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/causetext"
 	"net"
 	"os"
 	"path/filepath"
@@ -142,6 +143,9 @@ func Run(ctx context.Context, config DaemonConfig) (runErr error) {
 	vaultCustody := localapi.NewVaultCustodyStore()
 	defer func() { runErr = daemonCleanupFailure(runErr, vaultCustody.Close()) }()
 	server, err := localapi.NewServer(localapi.ServerConfig{
+		RecordCause: func(operation, supportReference string, causeErr error) {
+			_ = causetext.Record(filepath.Join(config.Paths.StateRoot, "diagnostics"), "last-daemon-failure.txt", operation, supportReference, causeErr)
+		},
 		SocketPath:           config.Paths.SocketPath,
 		OwnerUID:             config.OwnerUID,
 		OwnerGID:             config.OwnerGID,

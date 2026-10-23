@@ -130,3 +130,26 @@ func TestProbeMixedPermissionFailureIsOperational(t *testing.T) {
 		}
 	}
 }
+
+// A failed peer request hands its cause to the daemon's local cause record (the event has no text).
+func TestPeerProbeFailureCauseIsRecordedLocally(t *testing.T) {
+	request, err := NewPeerStreamRequest("machine_test", "environment_test", 1, "health_probe", "operation_test", "credential_test", time.Now().Add(time.Minute), 1024, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := json.Marshal(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := httptest.NewRequest(http.MethodPost, "/v1/peer-probes", bytes.NewReader(body))
+	input.Header.Set("Content-Type", "application/json")
+	var recorded []string
+	cause := errors.New("native dial failed at open")
+	server := &Server{config: ServerConfig{PeerProbes: failingProbe{cause}, RecordCause: func(operation, _ string, err error) {
+		recorded = append(recorded, operation+": "+err.Error())
+	}}}
+	server.peerProbe(httptest.NewRecorder(), input, localRequestID(), Peer{})
+	if len(recorded) != 1 || recorded[0] != "peer_probe: native dial failed at open" {
+		t.Fatalf("recorded %q", recorded)
+	}
+}
