@@ -189,6 +189,20 @@ func (c HTTPStripeClient) CreatePortal(ctx context.Context, in StripePortalInput
 	return CustomerPortalSession{URL: out.URL}, nil
 }
 
+// CancelSubscription ends a subscription now. Invoices and payment records already issued are kept.
+// A subscription Stripe no longer has is already cancelled.
+func (c HTTPStripeClient) CancelSubscription(ctx context.Context, id string) error {
+	var out struct {
+		ID string `json:"id"`
+	}
+	err := c.do(ctx, http.MethodDelete, "/v1/subscriptions/"+url.PathEscape(id), "", nil, &out)
+	var apiErr StripeAPIError
+	if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound {
+		return nil
+	}
+	return err
+}
+
 func (c HTTPStripeClient) GetSubscription(ctx context.Context, id string) (StripeSubscription, error) {
 	var out stripeSubscriptionResponse
 	if err := c.do(ctx, http.MethodGet, "/v1/subscriptions/"+url.PathEscape(id)+"?expand%5B%5D=latest_invoice", "", nil, &out); err != nil {

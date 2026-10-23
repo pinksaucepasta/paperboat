@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/jackc/puddle/v2"
-	"github.com/pinksaucepasta/paperboat/server/internal/auth"
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	pbgithub "github.com/pinksaucepasta/paperboat/server/internal/github"
@@ -27,10 +26,7 @@ func TestWorkOSVerifierUsesConfiguredAPIKeyForCodeExchange(t *testing.T) {
 	cfg.Secrets.WorkOSClientID = "client_test"
 	cfg.Secrets.WorkOSAPIKey = "sk_test_configured"
 
-	verifier, ok := workOSVerifier(cfg).(auth.HTTPWorkOSVerifier)
-	if !ok {
-		t.Fatal("real WorkOS verifier was not configured")
-	}
+	verifier := workOSVerifier(cfg)
 	if verifier.ClientID != cfg.Secrets.WorkOSClientID || verifier.APIKey != cfg.Secrets.WorkOSAPIKey {
 		t.Fatal("WorkOS code exchange is not configured with the client ID and API key")
 	}

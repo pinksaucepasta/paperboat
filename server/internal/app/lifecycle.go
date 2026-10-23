@@ -60,7 +60,7 @@ func githubClient(cfg config.Config) pbgithub.Client {
 	}
 }
 
-func workOSVerifier(cfg config.Config) auth.WorkOSVerifier {
+func workOSVerifier(cfg config.Config) auth.HTTPWorkOSVerifier {
 	return auth.HTTPWorkOSVerifier{
 		BaseURL:    cfg.Providers.WorkOS.BaseURL,
 		ClientID:   cfg.Secrets.WorkOSClientID,

@@ -16,6 +16,7 @@ CREATE TABLE paperboat.account_deletion_jobs (
     completed_at timestamp with time zone,
     UNIQUE (user_id, kind, target)
 );
+-- small-table: one row per deleted account and provider step.
 CREATE INDEX account_deletion_jobs_due ON paperboat.account_deletion_jobs (next_attempt_at, id) WHERE state = 'queued';
 
 -- Audit events stay append-only, except that the account deletion transaction (which sets

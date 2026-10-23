@@ -824,6 +824,9 @@ func New(opts Options) (*App, error) {
 	teamIdentity := teamidentity.New(store, workOSOrganizations, opts.Config.Business, opts.Config.Mail.InvitationLifetimeSeconds, strings.TrimRight(opts.Config.HTTP.BrowserLoginOrigin, "/")+"/team", workspaceBilling)
 	apiTokens := apitokens.New(store, auditWriter, opts.Config.APITokens, opts.Config.Secrets.EncryptionKey)
 	accountDeletion := accountdeletion.New(store, userMachineService, opts.Config.Mail)
+	// A nil Stripe client leaves subscription jobs failing until Stripe is configured.
+	subscriptionCanceller, _ := stripeClient.(accountdeletion.Subscriptions)
+	accountDeletionOutbox := accountDeletion.Worker(workOSVerifier(opts.Config), subscriptionCanceller)
 	router := httpapi.NewRouter(httpapi.Options{
 		ClientUpdatePolicy:        clientupdate.New(store, auditWriter, opts.Config.ReleaseDirectory),
 		SupportReports:            supportService,
@@ -915,6 +918,7 @@ func New(opts Options) (*App, error) {
 	progress := workers.NewProgress(opts.Config.Reporting.WorkerStallTimeout)
 	serverWorkers := []workers.Worker{
 		observedWorker(supportService, "worker_transactional_mail", mailService.Run, progress),
+		observedWorker(supportService, "worker_account_deletion", accountDeletionOutbox.Run, progress),
 		operationalHealthWorker(backupService, supportService, healthMonitor, progress),
 		observedWorker(supportService, "worker_machines", userMachineService.Worker(opts.Config.TerminalSessions.WorkerInterval), progress),
 		observedWorker(supportService, "worker_config_warnings", configAssignmentService.WarningReconciliationWorker(opts.Config.TerminalSessions.WorkerInterval), progress),

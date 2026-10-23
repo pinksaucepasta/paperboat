@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -194,4 +195,34 @@ func (v HTTPWorkOSVerifier) authenticate(ctx context.Context, payload map[string
 		name = strings.TrimSpace(response.User.FirstName + " " + response.User.LastName)
 	}
 	return WorkOSProfile{Subject: subject, Email: response.User.Email, EmailVerified: response.User.EmailVerified, DisplayName: name, AuthenticationMethod: response.AuthenticationMethod, OrganizationID: response.OrganizationID, Impersonator: response.Impersonator != nil, SessionID: sessionID, RefreshToken: response.RefreshToken, AccessExpiresAt: tokenExpiry}, nil
+}
+
+// DeleteWorkOSUser removes the WorkOS user of a deleted account. A subject WorkOS no longer knows is
+// already deleted. Errors carry the HTTP status only, never the provider's response.
+func (v HTTPWorkOSVerifier) DeleteWorkOSUser(ctx context.Context, subject string) error {
+	if strings.TrimSpace(v.BaseURL) == "" || strings.TrimSpace(v.APIKey) == "" {
+		return errors.New("WorkOS is not configured")
+	}
+	client := v.HTTPClient
+	if client == nil {
+		client = serverdiagnostics.DefaultProviderClient("workos")
+	}
+	// The API key must not follow a redirect to another host.
+	boundedClient := *client
+	boundedClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, strings.TrimRight(v.BaseURL, "/")+"/user_management/users/"+url.PathEscape(subject), nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+v.APIKey)
+	res, err := boundedClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("WorkOS user delete failed: %w", err)
+	}
+	defer res.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(res.Body, 4096))
+	if res.StatusCode == http.StatusNotFound || (res.StatusCode >= 200 && res.StatusCode < 300) {
+		return nil
+	}
+	return fmt.Errorf("WorkOS user delete returned HTTP %d", res.StatusCode)
 }
