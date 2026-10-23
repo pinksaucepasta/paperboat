@@ -35,8 +35,12 @@ type Claims struct {
 	EdgePool               string
 	EdgeNodeID             string
 	RouteBinding           string
-	ExpiresAt              time.Time
-	Revoked                bool
+	// AssignmentID is a runtime credential's access session: the server's usage
+	// accounting authority for the session's bytes through the edge.
+	AssignmentID string
+	IssuedAt     time.Time
+	ExpiresAt    time.Time
+	Revoked      bool
 }
 
 type Route struct {

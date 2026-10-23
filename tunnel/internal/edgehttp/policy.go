@@ -19,11 +19,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/pinksaucepasta/paperboat/shared/reattach"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/admission"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/control"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/route"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/shared/reattach"
 	"github.com/realclientip/realclientip-go"
 )
 
@@ -548,6 +548,10 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		ctx, cancel := context.WithCancel(r.Context())
 		defer cancel()
+		if claims.AssignmentID != "" {
+			// The session's bytes are accounted to the authority the server recorded for it.
+			ctx = withRuntimeUsage(ctx, runtimeUsageBinding{Authority: claims.AssignmentID, Environment: claims.EnvironmentID, IssuedAt: claims.IssuedAt})
+		}
 		r = r.WithContext(ctx)
 		go p.cancelWhenAccessRevoked(ctx, cancel, claims)
 	}

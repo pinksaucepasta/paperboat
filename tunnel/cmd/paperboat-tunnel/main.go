@@ -351,10 +351,6 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		reporter.ObserveFailure(ctx, "browser_terminal_stream", cause)
 	}
 	runtimeWorker := &edgeruntime.RuntimeCarrierWorker{Reporter: reporter, Source: client, Expected: runtimeExpected, Routes: runtimeRoutes, Endpoints: previewRoutes, BrowserTerminalHub: browserTerminalHub, Interval: deployment.ControlInterval, EndpointInterval: deployment.PreviewCarrierPollInterval(), Timeout: deployment.ControlTimeout}
-	runtimeTransport, err := edgehttp.NewDataCarrierPreviewTransport(edgehttp.DataCarrierPreviewTransportConfig{Registry: runtimeRoutes, StreamOpenTimeout: deployment.ControlTimeout})
-	if err != nil {
-		return nil, err
-	}
 	accessorAdmissions, err := datacarrier.NewDurableAdmissionRegistry(datacarrier.DurableAdmissionRegistryConfig{NodeID: cfg.NodeID, ProcessEpoch: processEpoch, MaximumAdmissions: 4096})
 	if err != nil {
 		return nil, err
@@ -364,6 +360,10 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 	}}
 	if err := meter.RestoreBaseline(); err != nil {
 		return nil, fmt.Errorf("restore usage baseline: %w", err)
+	}
+	runtimeTransport, err := edgehttp.NewDataCarrierPreviewTransport(edgehttp.DataCarrierPreviewTransportConfig{Registry: runtimeRoutes, StreamOpenTimeout: deployment.ControlTimeout, RuntimeUsage: meter})
+	if err != nil {
+		return nil, err
 	}
 	ingressAuthority := &control.IngressAuthority{Client: client, NodeID: cfg.NodeID, ProcessEpoch: processEpoch}
 	durableRoutes, err := edgehttp.NewDataCarrierRouteRegistry(edgehttp.DataCarrierRouteRegistryConfig{MaximumRoutes: 4096, Usage: meter, IngressAuthority: ingressAuthority.Resolve})

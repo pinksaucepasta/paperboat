@@ -537,6 +537,7 @@ type DataCarrierPreviewTransport struct {
 	registry         *DataCarrierPreviewRegistry
 	openWait         time.Duration
 	ingressRegistry  *DataCarrierRouteRegistry
+	runtimeUsage     IngressUsage
 	publicAuthority  func(context.Context, DataCarrierPreviewRoute) (connectorprotocol.IngressDecision, error)
 	privateAuthority func(context.Context, connectorprotocol.IngressDecision) (connectorprotocol.IngressDecision, error)
 }
@@ -547,6 +548,9 @@ type DataCarrierPreviewTransportConfig struct {
 	IngressRegistry   *DataCarrierRouteRegistry
 	PublicAuthority   func(context.Context, DataCarrierPreviewRoute) (connectorprotocol.IngressDecision, error)
 	PrivateAuthority  func(context.Context, connectorprotocol.IngressDecision) (connectorprotocol.IngressDecision, error)
+	// RuntimeUsage meters edge runtime sessions (runtime_https_wss) under the authority of
+	// their verified credential and ends them when that authority's allowance is exhausted.
+	RuntimeUsage IngressUsage
 }
 
 func NewDataCarrierPreviewTransport(config DataCarrierPreviewTransportConfig) (*DataCarrierPreviewTransport, error) {
@@ -559,7 +563,7 @@ func NewDataCarrierPreviewTransport(config DataCarrierPreviewTransportConfig) (*
 	if config.StreamOpenTimeout <= 0 || config.StreamOpenTimeout > time.Minute {
 		return nil, ErrDataCarrierPreviewRegistryInvalid
 	}
-	return &DataCarrierPreviewTransport{registry: config.Registry, openWait: config.StreamOpenTimeout, ingressRegistry: config.IngressRegistry, publicAuthority: config.PublicAuthority, privateAuthority: config.PrivateAuthority}, nil
+	return &DataCarrierPreviewTransport{registry: config.Registry, openWait: config.StreamOpenTimeout, ingressRegistry: config.IngressRegistry, publicAuthority: config.PublicAuthority, privateAuthority: config.PrivateAuthority, runtimeUsage: config.RuntimeUsage}, nil
 }
 
 func (t *DataCarrierPreviewTransport) RoundTrip(request *http.Request) (*http.Response, error) {
@@ -698,6 +702,9 @@ func (t *DataCarrierPreviewTransport) RoundTrip(request *http.Request) (*http.Re
 	if ingressLease != nil {
 		application = ingressLease.Wrap(lifetimeContext, stream)
 		ingressLease = nil
+	} else if binding, ok := runtimeUsageFrom(request.Context()); ok && t.runtimeUsage != nil && route.Kind == runtimewire.RouteKind {
+		binding.Route, binding.Revision = route.RouteID, route.Revision
+		application = meterRuntimeStream(t.runtimeUsage, binding, stream)
 	}
 	out := request.Clone(request.Context())
 	originalBody := out.Body
