@@ -105,3 +105,31 @@ func TestSelfhostUsageCannotChargeOrNameOtherResources(t *testing.T) {
 		t.Fatalf("removed scoped installation usage: %v", err)
 	}
 }
+
+// Paperboat's own pbh-installed (global) nodes are hosted edges: a report for a route that
+// has moved to another edge is billed through the hosted path, not refused as an independent
+// operator's (oracle retried one refused preview report ~240 times a minute).
+func TestGlobalInstallationUsageIsHostedNotBoundToCurrentRoutes(t *testing.T) {
+	store := openControlPlaneTestDB(t)
+	ctx := t.Context()
+	suffix := fmt.Sprint(time.Now().UnixNano())
+	seedUsageScope(t, store, suffix)
+	node, installation := "node_"+suffix, "global_install_"+suffix
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete) VALUES($1,$2,$3,$3,'ciphertext','global usage test','tunnel','global','global',$1,true)`, installation, node, []byte(pub)); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.selfhost_installations WHERE id=$1`, installation)
+	})
+	service := NewEdgeService(store, "managed")
+	service.SetNodeCredentials(selfhost.New(store, "selfhost-test-encryption-key-32-bytes-long"))
+	request := edgeUsageRequest{Node: node, Environment: "env_" + suffix, Route: "preview_moved_" + suffix, Revision: 1}
+	exempt, err := service.authorizeSelfhostUsage(ctx, request)
+	if err != nil || exempt {
+		t.Fatalf("global node report on a moved route: exempt=%v err=%v (want hosted, not refused)", exempt, err)
+	}
+}

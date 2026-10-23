@@ -13,6 +13,14 @@ func (s *EdgeService) authorizeSelfhostUsage(ctx context.Context, r edgeUsageReq
 	if err != nil || !private {
 		return private, err
 	}
+	// Installation credentials also cover Paperboat's own (global) nodes. Their reports are
+	// hosted traffic, billed through the scoped authority path like any managed edge; binding
+	// them to the node's current assignment refused every report for a route that had since
+	// moved to another edge, and the edge retried it forever.
+	var customerOwned bool
+	if err := s.store.SQL().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.selfhost_installations WHERE node_id=$1 AND scope_kind IN ('account','team'))`, r.Node).Scan(&customerOwned); err != nil || !customerOwned {
+		return false, err
+	}
 	var authorized bool
 	err = s.store.SQL().QueryRowContext(ctx, `SELECT EXISTS (
  SELECT 1 FROM paperboat.tunnel_edge_route_assignments a
@@ -35,11 +43,7 @@ func (s *EdgeService) authorizeSelfhostUsage(ctx context.Context, r edgeUsageReq
 		return true, err
 	}
 	if !authorized {
-		return true, ErrUsageSignature
+		return true, usageSignatureError("an independent operator's report names a route this node does not hold")
 	}
-	// Installation credentials also cover globally operated nodes. Only
-	// account/team ownership exempts accepted telemetry from hosted billing.
-	var customerOwned bool
-	err = s.store.SQL().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.selfhost_installations WHERE node_id=$1 AND scope_kind IN ('account','team'))`, r.Node).Scan(&customerOwned)
-	return customerOwned, err
+	return true, nil
 }
