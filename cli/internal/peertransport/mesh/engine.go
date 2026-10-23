@@ -39,6 +39,8 @@ import (
 // Set configuration before Start. Live policy changes use the replacement methods.
 // An empty peer map denies all peers; a zero identity or missing allocation is invalid.
 type Server struct {
+	// usagePaths caches each peer's accounting path for usagePathTTL.
+	usagePaths             usagePathCache
 	STUNServers            []string
 	TestOnlyPacketListener nettype.PacketListener
 	PeerRelayNodes         []*tailcfg.Node

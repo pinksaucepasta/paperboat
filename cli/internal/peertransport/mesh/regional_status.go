@@ -4,12 +4,17 @@
 package mesh
 
 import (
+	"sync"
+	"time"
+
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=peer-path-diagnostics
 	"tailscale.com/ipn/ipnstate"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=upstream-engine-assembly
 	"tailscale.com/tailcfg"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=peer-path-diagnostics
 	"tailscale.com/types/key"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=engine-assembly
+	"tailscale.com/util/mak"
 )
 
 // UsagePath describes a selected path without exposing peer addresses. NodeID
@@ -37,9 +42,50 @@ func (s *Server) PeerUsagePath(peer key.NodePublic) UsagePath {
 	if !admitted {
 		return UsagePath{Mode: "unknown"}
 	}
-	status := &ipnstate.StatusBuilder{WantPeers: true}
-	s.lb.sys.MagicSock.Get().UpdateStatus(status)
-	return usagePathFromStatus(status.Status().Peer[peer])
+	return s.usagePaths.get(peer, time.Now(), func() UsagePath {
+		status := &ipnstate.StatusBuilder{WantPeers: true}
+		s.lb.sys.MagicSock.Get().UpdateStatus(status)
+		return usagePathFromStatus(status.Status().Peer[peer])
+	})
+}
+
+// usagePathTTL bounds how stale an accounting path may be. Metered connections ask for the path before
+// and after every read and write, and a fresh answer builds magicsock's status of every peer to read
+// one; a path switch is attributed at most this late.
+const usagePathTTL = time.Second
+
+// maxUsagePaths bounds the cache; stale entries are dropped once it holds more peers than this.
+const maxUsagePaths = 1024
+
+type usagePathCache struct {
+	mu    sync.Mutex
+	paths map[key.NodePublic]cachedUsagePath
+}
+
+type cachedUsagePath struct {
+	path UsagePath
+	at   time.Time
+}
+
+func (c *usagePathCache) get(peer key.NodePublic, now time.Time, compute func() UsagePath) UsagePath {
+	c.mu.Lock()
+	if cached, ok := c.paths[peer]; ok && now.Sub(cached.at) < usagePathTTL {
+		c.mu.Unlock()
+		return cached.path
+	}
+	c.mu.Unlock()
+	path := compute()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.paths) >= maxUsagePaths {
+		for k, cached := range c.paths {
+			if now.Sub(cached.at) >= usagePathTTL {
+				delete(c.paths, k)
+			}
+		}
+	}
+	mak.Set(&c.paths, peer, cachedUsagePath{path: path, at: now})
+	return path
 }
 
 func usagePathFromStatus(p *ipnstate.PeerStatus) UsagePath {
