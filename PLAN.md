@@ -3145,3 +3145,4 @@ Waits for Lane A/coordinator GO: device check of both (hp/victus down). Leftover
 2026-10-23 | Lane N F3-05 | [!] past the 2 h cap: 20th session created server+host but the client attach gets host resource_limit (3 hosts, round 12). Next: debug host logging the router/dispatcher refusal origin.
 2026-10-23 | Lane L F11-04 | Ticked L: F11-04, C188, C189, C190 (config_team_default.py PASS, pbvm3 lanel-h dev-3e4b4eab, GitHub pujan-modha/paperboat-config-test). Fixes 0f5dc6b1, d43197b0 (team-default calls send the team workspace).
 Adopt on pprbtdev made up to 49 pending pull-only assignments; nothing approved; after unadopt: 52 revoked, 0 pending.
+2026-10-23 | Lane O F13-07 | [x]: plus-address sign-up refused with "sign in with that address" (user decision option a, no silent merge); live refusal on server .44 + Lane B's registration Action/PG tests.
