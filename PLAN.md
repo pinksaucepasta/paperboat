@@ -1327,6 +1327,26 @@ and a bandwidth refusal at issuance still stops new streams; (5) migration: gran
 user_machine_access_sessions rows (no second table), old rows expire on their own. It also cuts peer-config
 churn, which helps the serialization load measured tonight.
 
+#### Data plane at 1k/10k peers per account (Lane R audit, 2026-10-23)
+
+Ranked by cost at 10k peers × how often it runs. "Break" = a fixed cap refuses work above it. Code
+reading plus the measurements named; fixes go top-down, each with a test that proves the bound.
+
+| # | What (file) | At 10k × frequency | Bound today | Fix |
+|---|---|---|---|---|
+| 1 | Relay admits 16 connections per account, 256 per process (`relay/derpquic/server.go:20-21`) | Break: 16 of 10k admitted; the rest retry every 4–12 s (~1.2k handshakes/s per relay). Hit live: first contact on pbvm2 failed "relay capacity exhausted" (10:02Z, ~40-machine test account) | hard cap | caps from config sized to the fleet; per-account fairness instead of a 16 ceiling |
+| 2 | Signed peer network carries every peer, cap 2048 (`shared/peernetwork/bounds.go:9`) | Break above 2048; below it every machine downloads all N peers per refresh (9–36 s), O(N²) bytes server-wide | 2048 | deltas (user decision; Lane Q server, Lane R daemon) and a cap sized to the target |
+| 3 | Edge carrier registry cap 4096, per-request scan + sort of all carriers (`tunnel/internal/edgehttp/durable_carrier_transport.go:26, 366-399`) | Break above 4096 machines per edge; O(carriers) per public request | 4096 | index carriers by route; cap from config |
+| 4 | Outage polling without backoff: inventory 15 s (`cli/internal/localdaemon/inventory.go`), revocations 15 s, heartbeat 10 s | During a server outage ~4–5k req/s from 10k machines, unjittered, exactly when the server recovers. Live: 22 machines → ~355 `/v1/machines`/min since the 09:31Z restart | none | back off 15 s → 5 min with jitter while the change stream is unhealthy |
+| 5 | Reconnect herd: peer-network retry jitter only +0–25 %, regional stale retry fixed 1 s, startup refresh immediate (`tailnet/refresh.go`, `regional_recovery.go`) | After a deploy all machines retry within ~250 ms of each other | backoff, little jitter | full jitter on every control-plane retry |
+| 6 | Per-packet peer lookup scans all clients under one lock (`mesh/engine_backend.go peerByIP`) | 3.86 ms per outbound packet at 10k admitted clients (benchmark) | none | address index: 45.6 ns, 0 allocs (this batch) |
+| 7 | Relay per-datagram scope scan (`relay/derpquic/authority.go:267-293`) and one global mutex taken 2–3× per datagram (`server.go:417-489`) | Relay-wide throughput ceiling, grows with grant size (≤2048 merged peers) | none | precomputed reciprocal pair set; sharded locks |
+| 8 | Netmap rebuilt, sorted and re-published per new peer and per regional pass even when unchanged; endpoint advertise O(N²) (`mesh/engine_backend.go updateServerMapLocked, advertiseEndpoints`; `mesh/regional.go setRelayRegions`) | O(N² log N) to bring up N peers; full rebuild every ~3 s while recovering | none | incremental netmap updates; skip unchanged regions (goes with deltas) |
+| 9 | Each config apply re-marshals every peer, rebuilds the packet filter, re-checks scopes (`tailnet/authorized_udp.go replaceLocked`, `mesh/engine_authority.go`) | O(N) CPU per refresh on every machine | ≤2048 | deltas apply only what changed |
+| 10 | Edge: stream authorization scans all admissions; up to 64 streams × 4 MiB window per carrier (`tunnel/internal/datacarrier/admission.go:604`, `carrier.go:959`) | O(admissions) per stream; memory bound per carrier only | per stream | index admissions; aggregate per-carrier memory cap |
+| 11 | Files without bound: bug-report bundles (25 MiB each, no count cap), release targets never pruned, macOS launchd log not rotated, inbox without total cap (`cli/internal/diagnostics/bundle_unix.go`, `hostruntime/bootstrap/artifact.go:285`, `hostruntime/service/service.go:452`) | Disk grows per report/update for the life of the install | none | keep the newest few; prune old targets; rotate |
+| 12 | Relay pre-auth: unauthenticated QUIC/WSS handshakes hold the same 256 slots for 5 s; no accept-rate or source limit (`relay/derpquic/server.go:128, 179, 203`) | A few clients can keep every slot busy; reconnects refused | 5 s per slot | separate pre-auth budget, address validation |
+
 #### API/DB (Lane Q, measured 2026-10-22/23)
 
 **Scale** (`server/internal/perf/seed.sql`, isolated test PostgreSQL only): 1200 accounts, 100 paid teams (team 1:
