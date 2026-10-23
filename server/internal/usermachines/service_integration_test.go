@@ -3701,3 +3701,45 @@ func TestEnrollmentStartIsRefusedAtThePlanMachineLimitPostgres(t *testing.T) {
 		t.Fatalf("a refused enrollment created %d pairings (err=%v)", pairings, err)
 	}
 }
+
+// limitSeatAuthorizer refuses every machine seat as the plan's machine limit would.
+type limitSeatAuthorizer struct{ testSeatAuthorizer }
+
+func (limitSeatAuthorizer) ReserveUserMachineSeat(context.Context, *db.Tx, string) error {
+	return &planlimits.LimitError{Kind: planlimits.Machines, Plan: planlimits.Free, Limit: 1, Used: 1}
+}
+
+func TestPairingRefusedAtThePlanMachineLimitNamesItInTheEnrollmentPostgres(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	userID := "usr_pair_limit_" + suffix
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users (id, workos_subject, primary_email, status) VALUES ($1,$2,$3,'active')`, userID, "workos_"+suffix, "pair-limit-"+suffix+"@example.test"); err != nil {
+		t.Fatal(err)
+	}
+	service := New(store, audit.NewWriter(store), Policy{PairingLifetime: 10 * time.Minute, AllowedPlatforms: []string{"linux"}}, limitSeatAuthorizer{})
+	service.ConfigureInstallationEncryption("test-enrollment-key")
+	start, err := service.StartEnrollment(ctx, userID, "idem-pair-limit-"+suffix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = service.CreatePairing(ctx, PairingInput{EnrollmentToken: start.BootstrapToken, Verifier: "verifier-pair-limit-" + suffix, Alias: "limit-host", Platform: "linux", Architecture: "amd64", WorkspaceRoot: "/workspace", PublicIdentityKey: newIntegrationPublicIdentityKey(t)})
+	var limit *planlimits.LimitError
+	if !errors.As(err, &limit) {
+		t.Fatalf("pairing past the machine limit: %v", err)
+	}
+	enrollment, err := service.Enrollment(ctx, userID, start.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if enrollment.State != "failed_retryable" || enrollment.FailureCode != "machine_limit_reached" {
+		t.Fatalf("enrollment after the refusal: state=%q failure_code=%q", enrollment.State, enrollment.FailureCode)
+	}
+	retried, err := service.RetryEnrollment(ctx, userID, start.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retried.FailureCode != "" {
+		t.Fatalf("a retry kept failure_code %q", retried.FailureCode)
+	}
+}

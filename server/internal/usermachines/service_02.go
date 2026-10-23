@@ -374,6 +374,8 @@ func (s *Service) CreatePairing(ctx context.Context, in PairingInput) (Pairing, 
 				PairingID: enrollmentID,
 				UserID:    sql.NullString{String: enrollmentUserID, Valid: true},
 				FailedAt:  failedAt,
+				// The console names a refusal it can act on (remove machines or upgrade).
+				FailureCode: enrollmentFailureCode(err),
 			}); cleanupErr != nil || n != 1 {
 				if cleanupErr == nil {
 					cleanupErr = fmt.Errorf("updated %d rows, want 1", n)
@@ -384,6 +386,14 @@ func (s *Service) CreatePairing(ctx context.Context, in PairingInput) (Pairing, 
 		}
 	}
 	return Pairing{ID: row.ID, UserCode: row.UserCode.String, ExpiresAt: row.ExpiresAt}, nil
+}
+
+func enrollmentFailureCode(err error) sql.NullString {
+	var limit *planlimits.LimitError
+	if errors.As(err, &limit) {
+		return sql.NullString{String: limit.Code(), Valid: true}
+	}
+	return sql.NullString{}
 }
 
 type UserMachine struct {

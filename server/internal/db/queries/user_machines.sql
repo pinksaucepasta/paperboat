@@ -78,6 +78,7 @@ RETURNING *;
 -- name: FailBootstrapPairingApproval :execrows
 UPDATE user_machine_pairings
 SET state='expired',installation_state='failed_retryable',expires_at=least(expires_at,sqlc.arg(failed_at)),
+    failure_code=sqlc.narg(failure_code),
     installation_config_ciphertext=NULL,installation_config_nonce=NULL,installation_config_consumed_at=NULL,
     installation_recovery_operation_key=NULL,updated_at=sqlc.arg(failed_at)
 WHERE id=sqlc.arg(pairing_id) AND bootstrap_owner_account=sqlc.arg(user_id)
@@ -96,7 +97,7 @@ WHERE id=sqlc.arg(id) AND bootstrap_owner_account=sqlc.arg(user_id)
 
 -- name: RetryBootstrapPairing :one
 UPDATE user_machine_pairings
-SET state='awaiting_bootstrap',installation_state='awaiting_bootstrap',generation=generation+1,
+SET state='awaiting_bootstrap',installation_state='awaiting_bootstrap',generation=generation+1,failure_code=NULL,
     bootstrap_token_hash=sqlc.arg(bootstrap_token_hash),bootstrap_token_ciphertext=sqlc.arg(bootstrap_token_ciphertext),
     verifier_hash=NULL,user_code=NULL,requested_alias=NULL,platform=NULL,architecture=NULL,
     workspace_root=NULL,public_identity_key=NULL,runtime_versions='{}'::jsonb,ssh_user=NULL,ssh_port=NULL,

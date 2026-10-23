@@ -507,8 +507,10 @@ type Enrollment struct {
 	WorkspaceRoot  string     `json:"workspace_root,omitempty"`
 	ExpiresAt      time.Time  `json:"expires_at"`
 	CancelledAt    *time.Time `json:"cancelled_at,omitempty"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
+	// FailureCode names why a failed_retryable enrollment was refused (machine_limit_reached).
+	FailureCode string    `json:"failure_code,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 type EnrollmentStart struct {
@@ -658,7 +660,7 @@ func (s *Service) enrollmentStart(row dbsqlc.UserMachinePairing, token string) E
 }
 
 func mapEnrollment(row dbsqlc.UserMachinePairing) Enrollment {
-	result := Enrollment{ID: row.ID, OperationID: row.OperationID.String, State: row.InstallationState, Generation: row.Generation, UserMachineID: row.UserMachineID.String, RequestedAlias: row.RequestedAlias.String, Platform: row.Platform.String, Architecture: row.Architecture.String, WorkspaceRoot: row.WorkspaceRoot.String, ExpiresAt: row.ExpiresAt, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt}
+	result := Enrollment{ID: row.ID, OperationID: row.OperationID.String, State: row.InstallationState, Generation: row.Generation, UserMachineID: row.UserMachineID.String, RequestedAlias: row.RequestedAlias.String, Platform: row.Platform.String, Architecture: row.Architecture.String, WorkspaceRoot: row.WorkspaceRoot.String, ExpiresAt: row.ExpiresAt, FailureCode: row.FailureCode.String, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt}
 	if row.CancelledAt.Valid {
 		value := row.CancelledAt.Time
 		result.CancelledAt = &value

@@ -3177,6 +3177,7 @@ type UserMachinePairing struct {
 	CancelledAt                          sql.NullTime
 	WorkspaceTeamID                      sql.NullString
 	ReplacesMachineID                    sql.NullString
+	FailureCode                          sql.NullString
 }
 
 type UserMachinePairingReset struct {
@@ -3252,6 +3253,14 @@ type UserTransferDestinationDefault struct {
 	Version   int64
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+
+type WorkerLeader struct {
+	ID          bool
+	Instance    string
+	Version     string
+	Since       time.Time
+	HeartbeatAt time.Time
 }
 
 type WorkosEventCursor struct {
