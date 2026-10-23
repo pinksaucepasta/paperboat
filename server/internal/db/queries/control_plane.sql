@@ -1206,7 +1206,9 @@ RETURNING *;
 -- An active assignment is retired when its edge registry or connector lease
 -- expires, not on a late heartbeat: one stalled database pass must not withdraw
 -- a healthy route (the edge drains it, cutting transfers, and it is restaged
--- under a new generation). A staged one also needs fresh heartbeats.
+-- under a new generation). A staged one also needs fresh heartbeats. An active
+-- assignment whose connector session was replaced keeps serving (last known
+-- good) until its replacement is promoted, which drains it (ready-new-before-drain).
 UPDATE tunnel_edge_route_assignments a
 SET state='draining', observed_state='draining', updated_at=sqlc.arg(now)
 WHERE a.state IN ('staged','active') AND NOT EXISTS (
@@ -1224,7 +1226,7 @@ WHERE a.state IN ('staged','active') AND NOT EXISTS (
    AND n.roles @> ARRAY['edge']::text[]
    AND paperboat.node_route_eligible(n.id,a.account_id,r.id)
    AND c.desired_state='active' AND c.drain_state='accepting' AND c.revoked_at IS NULL
-   AND c.last_session_id=session.id AND c.generation=a.connector_generation
+   AND (a.state='active' OR c.last_session_id=session.id) AND c.generation=a.connector_generation
    AND ((c.last_applied_config_generation=a.config_generation AND session.applied_config_generation=a.config_generation AND config.activation_state IN ('pending','active'))
      OR (a.state='active' AND config.activation_state='active' AND c.last_applied_config_generation>=a.config_generation AND session.applied_config_generation>=a.config_generation))
    AND session.state IN ('authenticating','ready') AND session.lease_deadline>sqlc.arg(now)
