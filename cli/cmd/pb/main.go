@@ -202,6 +202,9 @@ func runWithReporter(ctx context.Context, args []string, stdout, stderr io.Write
 		}
 		if failure.kind == commandUnexpected {
 			diagnosticReference = reporter.CaptureFailure(faultCtx, processComponent(args), operation, "command", "unexpected_cli_failure", err).SupportReference
+			if directory, dirErr := processDiagnosticsDirectory(executed); dirErr == nil {
+				_ = recordUnexpectedFailureCause(directory, operation, diagnosticReference, err)
+			}
 		} else if failure.kind == commandOperational || failure.kind == commandDeadline || failure.kind == commandRejected {
 			diagnosticReference = reporter.ObserveFailure(faultCtx, processComponent(args), operation, "command", "command_failed", err).SupportReference
 		}
