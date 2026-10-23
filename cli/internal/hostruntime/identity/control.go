@@ -2,6 +2,7 @@ package identity
 
 import (
 	"bytes"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -135,7 +136,8 @@ func (s *Store) MachineProof(operationID, method, path string, body []byte, now 
 		BodySHA256             string    `json:"body_sha256"`
 		IssuedAt               time.Time `json:"issued_at"`
 		ExpiresAt              time.Time `json:"expires_at"`
-	}{registration.MachineID, registration.EnvironmentID, registration.InstallationGeneration, operationID, method, path, base64.RawURLEncoding.EncodeToString(bodyHash[:]), now, now.Add(time.Minute)})
+		Nonce                  string    `json:"nonce"`
+	}{registration.MachineID, registration.EnvironmentID, registration.InstallationGeneration, operationID, method, path, base64.RawURLEncoding.EncodeToString(bodyHash[:]), now, now.Add(time.Minute), ProofNonce()})
 	if err != nil {
 		return nil, err
 	}
@@ -156,4 +158,12 @@ func (s *Store) writePrivateDocument(name, _ string, encoded []byte) error {
 		return err
 	}
 	return atomicfile.Write(path, encoded, atomicfile.CurrentOwnerOptions(0o600))
+}
+
+// ProofNonce is the one-use value every signed request proof carries: the server reserves it until
+// the proof expires, so a captured proof cannot be replayed (F21-13).
+func ProofNonce() string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b) // never fails since Go 1.24
+	return base64.RawURLEncoding.EncodeToString(b)
 }

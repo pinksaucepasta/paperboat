@@ -110,7 +110,8 @@ func (s ProofSource) proof(operationID, method, path string, body []byte, allowE
 		BodySHA256    string    `json:"body_sha256"`
 		IssuedAt      time.Time `json:"issued_at"`
 		ExpiresAt     time.Time `json:"expires_at"`
-	}{value.HelperID, value.EnvironmentID, operationID, method, path, base64.RawURLEncoding.EncodeToString(bodyHash[:]), now, now.Add(time.Minute)}
+		Nonce         string    `json:"nonce"`
+	}{value.HelperID, value.EnvironmentID, operationID, method, path, base64.RawURLEncoding.EncodeToString(bodyHash[:]), now, now.Add(time.Minute), identity.ProofNonce()}
 	payload, err := json.Marshal(claims)
 	if err != nil {
 		return nil, err
