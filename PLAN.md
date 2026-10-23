@@ -1758,6 +1758,481 @@ Hetzner DB read-only for rollback for 7 days. Deploy changes (Lane B): compose d
 `backup-database.sh`/`verify-backup.sh` move to PlanetScale backups/PITR (or run pg_dump over the direct port);
 the migrate service uses the direct DSN.
 
+#### Full codebase audit (Lane X, from 2026-10-23; replaces the narrow DB review, which is folded in as D1–D10)
+
+Every product package checked against one fixed list and against the matching subsystem of Tailscale, Headscale, NetBird or
+Teleport (references shallow-cloned in ~/ref). **Checklist:** (a) growth and retention, (b) fan-out and N², (c) polling,
+timers, retries, (d) queries per request, indexes, transaction scope, (e) memory/goroutine/fd bounds, (f) timeouts and
+cancellation, (g) failure, idempotency, restart, (h) locks and races, (i) wire size, full vs delta, (j) input limits, rate
+limits, fairness, (k) duplicate paths and dead code, (l) data model. A finding is listed only after Lane X has re-read it
+in our code; "verify" marks the rest. Ranked by impact at 100k users × frequency; each goes to its owner lane; fixes worth
+doing before launch become F21 rows after the coordinator agrees. **Coverage: 0 / 433 packages done** (inventory
+2026-10-23 at 6a290a9d: 311 Go packages, 490k non-test lines; 122 console areas, 59k lines; 6 test-only packages).
+
+**Findings so far** (DB review, measured on prod catalog statistics since 2026-10-14 plus counts by expiry; plans on the
+seeded lane-b-test-pg database). Proposed policies are deletes in bounded batches (`LIMIT 500`, `FOR UPDATE SKIP LOCKED`) by
+an existing worker.
+
+| # | Finding | Evidence | Fix (owner) |
+|---|---|---|---|
+| D1 | Per-operation tables nothing prunes: `control_config_credentials` (TTL 2 min; 0 live, 10,678 expired, ~2.6k/day), `control_config_repository_access_operations` (0 live, 8,346 expired), `managed_ssh_operations` (94k idempotency rows, ~10k/day), `user_machine_access_sessions` (16 live, 3,624 expired), `operations`, `control_usage_receipts`, `control_config_sync_status_history`, `helper_identity_renewals`, `cli_access_tokens`/`cli_refresh_tokens` | no `DELETE FROM` for any of them outside migrations (grep of server/internal) | credentials and repo access: delete 1 h after expiry once provider revocation is done; idempotency rows (managed SSH, operations): 24 h after a terminal state; access sessions and tokens: 1 day after expiry or revocation has propagated; usage receipts: after acknowledgement + 2 days; status history: newest 100 per environment. Extends Lane Q #16 (Q) |
+| D2 | Encrypted credentials kept long after use: 1.24 KB GitHub credential ciphertext per row (most of the ~2.7 KB/row, plus a dead copy from the revoke update), 533 B repo-access ciphertext; `jti` and `jti_hash` both unique-indexed, the `jti_hash` primary key never scanned | pg_stats avg_width; `pg_stat_user_indexes` | null the ciphertext at expiry, then D1's delete; keep one key column (B) |
+| D3 | The revocation document full-scans `control_config_credentials` (543k scans, avg 3,225 rows each) and `user_machine_access_sessions` (427k scans) on every host/edge poll: its predicate `revoked_at IS NOT NULL AND expires_at > now` has no credential index | `queries/control_plane.sql` ListRevokedControlCredentialJTIs; prod stats | D1 removes the rows; partial index `(expires_at) WHERE revoked_at IS NOT NULL`; goes with Lane Q #3 (Q) |
+| D4 | Unconditional upserts rewrite unchanged rows: `runtime_carrier_attachments` 7.3M updates on 615 rows (~9/s), each rewriting the `admission` JSON with the edge certificate chain PEM (6 MB TOAST); `tunnel_platform_certificate_targets` 3.2M on 2 rows (~4/s); `machine_edge_placements` 2.9M on 313; `control_tunnel_nodes` 790k on 4 rows with 0 % HOT (12.8k autovacuums) | `runtimeattachment/service.go:258`, `edgeplacement/placement.go:87`, `queries/tunnel_certificates_v1.sql:720`, `queries/control_plane.sql:1039` | `DO UPDATE … WHERE (…) IS DISTINCT FROM (EXCLUDED…)`; liveness timestamps in a narrow row or memory; build admission at read instead of copying the edge certificate per row (B). Every write is WAL to two replicas on PlanetScale |
+| D5 | Access functions run per candidate row: `teams` seq-scanned 564M times, `billing_workspaces` 349M, `team_members` 212M, `team_resource_bindings` 203M since 2026-10-14, for 36 teams | `pg_stat_user_tables` | set-based access description (Lane Q #5, "next"): one join per request, not one function call per row (Q) |
+| D6 | One `support_reports` row per error occurrence: ~6.4k/day (45k inside the 7-day TTL) from ~25 machines, ~2.6M/day at 10k machines | 7,312 deletes by the TTL job; avg 146 B error chain | aggregate by fingerprint (component, code, cause, source line) per hour with count and first/last seen, as Sentry does (B) |
+| D7 | Indexes: 169 of 604 never scanned (46 non-unique, 7.9 MB); 4 exact duplicates (`account_e2ee_keys`, `github_oauth_tokens`, `release_authority_bundles`, `tunnel_connector_activations`); `audit_events` has 10 indexes, 37 MB of index over 35 MB of heap, 2 never scanned (`account_cursor` 4 MB, `correlation`) | `pg_stat_user_indexes`, `pg_index` | drop duplicates and unused non-unique indexes on write-hot tables after one more week of stats (Q) |
+| D8 | `pending_provider_revocations` in GetConfigSyncMetrics and the revoke-by-environment/repository updates can't use the repo-access partial indexes: 762k full scans | index predicates vs queries in `queries/control_plane.sql` | match the partial index predicate, or index `(revoked_at) WHERE provider_revoked_at IS NULL` (Q) |
+| D9 | 125 of 423 `*_id` columns have no foreign key (e.g. credentials' environment/assignment, usage receipts, bandwidth events) | catalog | decide per column: per-operation rows get `ON DELETE CASCADE` so a removed machine takes them along; history rows stay keyless on purpose, written in a comment (B) |
+| D10 | Text ids with prefixes are 42–48 B in every key and foreign key (uuid: 16 B); indexes are 133 MB vs 207 MB heap | pg_stats avg_width | not worth changing before launch; note for post-launch (—) |
+
+Hot read plans on the seeded database (5k machines, 200k audit events, 50k access sessions): warm planning 0.3–1 ms,
+execution ≤ 0.2 ms for the revocation document, the workspace activity page and the bandwidth month sum; the right indexes are used.
+
+**Coverage**
+
+| Package | Lines | Owner | Reference subsystem | Status | Findings |
+|---|---|---|---|---|---|
+| `cli/cmd/browserterminal-wasm` | 2379 | A | Teleport lib/srv/sess, lib/events (session recording); TS ssh/tailssh | todo | |
+| `cli/cmd/environmentvault-wasm` | 1257 | A | TS taildrop (feature/taildrop); — | todo | |
+| `cli/cmd/pb` | 37014 | A | TS cmd/tailscale/cli, client/local (LocalAPI) | todo | |
+| `cli/docs` | 126 | A | — | todo | |
+| `cli/internal/api` | 9399 | A | TS cmd/tailscale/cli, client/local (LocalAPI) | todo | |
+| `cli/internal/atomicfile` | 484 | A | TS ipn/store, atomicfile; NB profilemanager | todo | |
+| `cli/internal/atomicfile/atomicfiletest` | 63 | A | TS ipn/store, atomicfile; NB profilemanager | todo | |
+| `cli/internal/auth` | 271 | A | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | todo | |
+| `cli/internal/backoff` | 30 | A | TS util/backoff | todo | |
+| `cli/internal/bandwidth` | 387 | A | Teleport lib/usagereporter; — | todo | |
+| `cli/internal/bugreport` | 629 | A | TS logtail, logpolicy, health, cmd/tailscale bugreport; Teleport lib/events (debug) | todo | |
+| `cli/internal/buildinfo` | 51 | A | HS hscontrol/app.go; Teleport lib/web, lib/limiter | todo | |
+| `cli/internal/causetext` | 59 | A | TS logtail, logpolicy, health, cmd/tailscale bugreport; Teleport lib/events (debug) | todo | |
+| `cli/internal/command` | 65 | A | TS cmd/tailscale/cli, client/local (LocalAPI) | todo | |
+| `cli/internal/config` | 7065 | A | TS ipn/store, atomicfile; NB profilemanager | todo | |
+| `cli/internal/connectorprotocol` | 4206 | A | Teleport lib/srv (exec, reexec); TS ssh/tailssh incubator | todo | |
+| `cli/internal/controlsync/proto` | 897 | A | TS control/controlclient (auto, direct, map); HS poll; NB client/internal/engine | todo | |
+| `cli/internal/daemoncmd` | 3229 | A | TS control/controlclient (auto, direct, map); HS poll; NB client/internal/engine | todo | |
+| `cli/internal/daemonrpc` | 1073 | A | TS control/controlclient (auto, direct, map); HS poll; NB client/internal/engine | todo | |
+| `cli/internal/daemonrpc/proto` | 907 | A | TS control/controlclient (auto, direct, map); HS poll; NB client/internal/engine | todo | |
+| `cli/internal/diagnosticlog` | 130 | A | TS logtail, logpolicy, health, cmd/tailscale bugreport; Teleport lib/events (debug) | todo | |
+| `cli/internal/diagnostics` | 1597 | A | TS logtail, logpolicy, health, cmd/tailscale bugreport; Teleport lib/events (debug) | todo | |
+| `cli/internal/diskspace` | 55 | A | TS ipn/store, atomicfile; NB profilemanager | todo | |
+| `cli/internal/doctor` | 203 | A | TS logtail, logpolicy, health, cmd/tailscale bugreport; Teleport lib/events (debug) | todo | |
+| `cli/internal/endpointbinary` | 110 | A | TS clientupdate, cmd/tailscaled install; Teleport lib/automaticupgrades | todo | |
+| `cli/internal/environmente2ee` | 3849 | A | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | todo | |
+| `cli/internal/environmentmanager` | 2445 | A | TS taildrop (feature/taildrop); — | todo | |
+| `cli/internal/errorreport` | 1871 | A | TS logtail, logpolicy, health, cmd/tailscale bugreport; Teleport lib/events (debug) | todo | |
+| `cli/internal/fileindex` | 231 | A | TS taildrop (feature/taildrop); — | todo | |
+| `cli/internal/filetransfer` | 1935 | A | TS taildrop (feature/taildrop); — | todo | |
+| `cli/internal/hostruntime/auth` | 924 | A | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | todo | |
+| `cli/internal/hostruntime/autoupdate` | 808 | A | TS clientupdate; Teleport lib/automaticupgrades | todo | |
+| `cli/internal/hostruntime/availability` | 544 | A | TS health (Tracker/Warnable) | todo | |
+| `cli/internal/hostruntime/binarytarget` | 96 | A | TS clientupdate; Teleport lib/automaticupgrades | todo | |
+| `cli/internal/hostruntime/bootstrap` | 2819 | A | TS clientupdate, cmd/tailscaled install; Teleport lib/automaticupgrades | todo | |
+| `cli/internal/hostruntime/browserbroadcast` | 216 | A | Teleport lib/web/terminal | todo | |
+| `cli/internal/hostruntime/browserbroadcastserver` | 428 | A | Teleport lib/web/terminal | todo | |
+| `cli/internal/hostruntime/carriercontrol` | 391 | R | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | todo | |
+| `cli/internal/hostruntime/config` | 101 | A | TS ipn/store, atomicfile; NB profilemanager | todo | |
+| `cli/internal/hostruntime/configapply` | 76 | A | — | todo | |
+| `cli/internal/hostruntime/configsync` | 9069 | A | — (Git-based; compare: Teleport lib/services watcher) | todo | |
+| `cli/internal/hostruntime/connector` | 4186 | A | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | todo | |
+| `cli/internal/hostruntime/connectorrotation` | 2943 | A | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | todo | |
+| `cli/internal/hostruntime/controlbackoff` | 147 | A | TS util/backoff | todo | |
+| `cli/internal/hostruntime/edgeplacement` | 178 | A | TS tailcfg DERPMap / derp mesh; Teleport lib/reversetunnel (agentpool) | todo | |
+| `cli/internal/hostruntime/enrollment` | 1375 | A | TS control/controlclient (register), types/key | todo | |
+| `cli/internal/hostruntime/envinject` | 1005 | A | — | todo | |
+| `cli/internal/hostruntime/environmentkey` | 1538 | A | TS taildrop (feature/taildrop); — | todo | |
+| `cli/internal/hostruntime/errors` | 25 | A | Teleport lib/srv (exec, reexec); TS ssh/tailssh incubator | todo | |
+| `cli/internal/hostruntime/execprocess` | 2279 | A | Teleport lib/srv (exec, reexec); TS ssh/tailssh incubator | todo | |
+| `cli/internal/hostruntime/filetransfer` | 1477 | A | TS taildrop (feature/taildrop); — | todo | |
+| `cli/internal/hostruntime/health` | 673 | A | TS health (Tracker/Warnable) | todo | |
+| `cli/internal/hostruntime/history` | 310 | A | Teleport lib/srv/sess, lib/events (session recording); TS ssh/tailssh | todo | |
+| `cli/internal/hostruntime/hostd` | 459 | A | Teleport lib/srv (exec, reexec); TS ssh/tailssh incubator | todo | |
+| `cli/internal/hostruntime/hostdproto` | 2898 | A | Teleport lib/srv (exec, reexec); TS ssh/tailssh incubator | todo | |
+| `cli/internal/hostruntime/hostinstall` | 13011 | A | TS clientupdate, cmd/tailscaled install; Teleport lib/automaticupgrades | todo | |
+| `cli/internal/hostruntime/hostservice` | 1876 | A | Teleport lib/srv (exec, reexec); TS ssh/tailssh incubator | todo | |
+| `cli/internal/hostruntime/hoststate` | 1944 | A | TS ipn/store, atomicfile; NB profilemanager | todo | |
+| `cli/internal/hostruntime/identity` | 1118 | A | TS control/controlclient (register), types/key | todo | |
+| `cli/internal/hostruntime/inspectorapi` | 999 | A | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | todo | |
+| `cli/internal/hostruntime/inspectorauth` | 234 | A | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | todo | |
+| `cli/internal/hostruntime/installsource` | 823 | A | TS clientupdate; Teleport lib/automaticupgrades | todo | |
+| `cli/internal/hostruntime/machinecontrol` | 432 | A | TS tailcfg DERPMap / derp mesh; Teleport lib/reversetunnel (agentpool) | todo | |
+| `cli/internal/hostruntime/machineevents` | 401 | A | TS control/controlclient (auto, direct, map); HS poll; NB client/internal/engine | todo | |
+| `cli/internal/hostruntime/machineevents/eventstest` | 153 | A | TS control/controlclient (auto, direct, map); HS poll; NB client/internal/engine | todo | |
+| `cli/internal/hostruntime/nativeproto` | 147 | A | Teleport lib/srv (exec, reexec); TS ssh/tailssh incubator | todo | |
+| `cli/internal/hostruntime/nativesession` | 188 | A | Teleport lib/srv/sess, lib/events (session recording); TS ssh/tailssh | todo | |
+| `cli/internal/hostruntime/nativesignature` | 76 | A | TS control/controlclient (register), types/key | todo | |
+| `cli/internal/hostruntime/networkrecovery` | 1092 | A | TS net/netmon | todo | |
+| `cli/internal/hostruntime/operation` | 272 | A | Teleport lib/srv (exec, reexec); TS ssh/tailssh incubator | todo | |
+| `cli/internal/hostruntime/originhealth` | 200 | A | TS health (Tracker/Warnable) | todo | |
+| `cli/internal/hostruntime/peeridentity` | 255 | A | TS control/controlclient (register), types/key | todo | |
+| `cli/internal/hostruntime/preview` | 10984 | R | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | todo | |
+| `cli/internal/hostruntime/privateproxyconfig` | 1271 | A | — | todo | |
+| `cli/internal/hostruntime/process` | 289 | A | Teleport lib/srv (exec, reexec); TS ssh/tailssh incubator | todo | |
+| `cli/internal/hostruntime/protocol` | 902 | A | Teleport lib/srv (exec, reexec); TS ssh/tailssh incubator | todo | |
+| `cli/internal/hostruntime/pty` | 1196 | A | Teleport lib/srv (exec, reexec); TS ssh/tailssh incubator | todo | |
+| `cli/internal/hostruntime/releaseeligibility` | 792 | A | TS clientupdate; Teleport lib/automaticupgrades | todo | |
+| `cli/internal/hostruntime/releaseindex` | 295 | A | TS clientupdate, cmd/tailscaled install; Teleport lib/automaticupgrades | todo | |
+| `cli/internal/hostruntime/releasepolicy` | 414 | A | HS hscontrol/policy; Teleport lib/services (RBAC, roles) | todo | |
+| `cli/internal/hostruntime/runtime` | 9870 | A | TS control/controlclient (auto, direct, map); HS poll; NB client/internal/engine | todo | |
+| `cli/internal/hostruntime/runtimeattachment` | 823 | A | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | todo | |
+| `cli/internal/hostruntime/runtimeport` | 8 | A | Teleport lib/srv (exec, reexec); TS ssh/tailssh incubator | todo | |
+| `cli/internal/hostruntime/server` | 7883 | A | TS control/controlclient (auto, direct, map); HS poll; NB client/internal/engine | todo | |
+| `cli/internal/hostruntime/service` | 6758 | A | TS clientupdate, cmd/tailscaled install; Teleport lib/automaticupgrades | todo | |
+| `cli/internal/hostruntime/session` | 4464 | A | Teleport lib/srv/sess, lib/events (session recording); TS ssh/tailssh | todo | |
+| `cli/internal/hostruntime/sessionowner` | 2542 | A | Teleport lib/srv/sess, lib/events (session recording); TS ssh/tailssh | todo | |
+| `cli/internal/hostruntime/store` | 1706 | A | TS ipn/store, atomicfile; NB profilemanager | todo | |
+| `cli/internal/hostruntime/store/storesqlc` | 620 | A | TS ipn/store, atomicfile; NB profilemanager | todo | |
+| `cli/internal/hostruntime/supervisorupdate` | 952 | A | TS clientupdate; Teleport lib/automaticupgrades | todo | |
+| `cli/internal/hostruntime/supportbundle` | 1309 | A | — | todo | |
+| `cli/internal/hostruntime/telemetry` | 1442 | A | TS logtail, logpolicy, health, cmd/tailscale bugreport; Teleport lib/events (debug) | todo | |
+| `cli/internal/hostruntime/testleak` | 49 | A | Teleport lib/srv (exec, reexec); TS ssh/tailssh incubator | todo | |
+| `cli/internal/hostruntime/tunnelcreatejournal` | 823 | R | — | todo | |
+| `cli/internal/hostruntime/tunnelenrollment` | 4285 | R | TS control/controlclient (register), types/key | todo | |
+| `cli/internal/hostruntime/tunnelmanager` | 6227 | R | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | todo | |
+| `cli/internal/hostruntime/updated` | 7189 | A | TS clientupdate, cmd/tailscaled install; Teleport lib/automaticupgrades | todo | |
+| `cli/internal/hostruntime/updateflow` | 351 | A | TS clientupdate; Teleport lib/automaticupgrades | todo | |
+| `cli/internal/hostruntime/workerupdate` | 2241 | A | TS clientupdate; Teleport lib/automaticupgrades | todo | |
+| `cli/internal/hostruntime/workloadbridge` | 763 | R | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | todo | |
+| `cli/internal/hostruntimecmd` | 9695 | A | — | todo | |
+| `cli/internal/hostruntimeentry` | 49 | A | — | todo | |
+| `cli/internal/httptransport` | 592 | A | TS cmd/tailscale/cli, client/local (LocalAPI) | todo | |
+| `cli/internal/inbox` | 1199 | A | TS taildrop (feature/taildrop); — | todo | |
+| `cli/internal/inspector` | 2164 | A | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | todo | |
+| `cli/internal/liveconnections` | 37 | A | TS wgengine/magicsock, net/netcheck; NB client/internal/peer | todo | |
+| `cli/internal/localapi` | 4110 | A | TS cmd/tailscale/cli, client/local (LocalAPI) | todo | |
+| `cli/internal/localdaemon` | 5362 | A | TS control/controlclient (auto, direct, map); HS poll; NB client/internal/engine | todo | |
+| `cli/internal/localwait` | 303 | A | TS control/controlclient (auto, direct, map); HS poll; NB client/internal/engine | todo | |
+| `cli/internal/machineguard` | 9397 | A | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | todo | |
+| `cli/internal/machineguard/wfp` | 1428 | A | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | todo | |
+| `cli/internal/machineloopback` | 65 | A | TS ipn/ipnlocal (serve, dns), net/dns; NB client/internal/dns | todo | |
+| `cli/internal/machinename` | 25 | A | TS cmd/tailscale/cli, client/local (LocalAPI) | todo | |
+| `cli/internal/machineservices` | 565 | A | HS hscontrol/state, mapper; NB management/server (network map, peers) | todo | |
+| `cli/internal/managedssh` | 6294 | A | TS ssh/tailssh; Teleport lib/srv (node, regular) | todo | |
+| `cli/internal/nativeprivate` | 115 | A | TS ipn/ipnlocal (serve, dns), net/dns; NB client/internal/dns | todo | |
+| `cli/internal/neterr` | 46 | A | TS logtail, logpolicy, health, cmd/tailscale bugreport; Teleport lib/events (debug) | todo | |
+| `cli/internal/netlatency` | 184 | A | TS wgengine/magicsock, net/netcheck; NB client/internal/peer | todo | |
+| `cli/internal/ospeer` | 49 | A | TS wgengine/magicsock, net/netcheck; NB client/internal/peer | todo | |
+| `cli/internal/paste` | 1122 | A | Teleport lib/srv/sess, lib/events (session recording); TS ssh/tailssh | todo | |
+| `cli/internal/peertransport/clientauthority` | 407 | R | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | todo | |
+| `cli/internal/peertransport/endpointidentity` | 494 | R | TS control/controlclient (register), types/key | todo | |
+| `cli/internal/peertransport/fixedpacket` | 49 | R | TS control/controlclient (register), types/key | todo | |
+| `cli/internal/peertransport/identitybootstrap` | 692 | R | TS control/controlclient (register), types/key | todo | |
+| `cli/internal/peertransport/mesh` | 2091 | R | TS wgengine/magicsock, net/netcheck; NB client/internal/peer | todo | |
+| `cli/internal/peertransport/native` | 1142 | R | TS ipn/ipnlocal (serve, dns), net/dns; NB client/internal/dns | todo | |
+| `cli/internal/peertransport/networkadaptation` | 2269 | R | TS wgengine/magicsock, net/netcheck; NB client/internal/peer | todo | |
+| `cli/internal/peertransport/networkmonitor` | 1164 | R | TS net/netmon | todo | |
+| `cli/internal/peertransport/peerquic` | 1148 | R | TS ipn/ipnlocal (serve, dns), net/dns; NB client/internal/dns | todo | |
+| `cli/internal/peertransport/portmapping` | 591 | R | — | todo | |
+| `cli/internal/peertransport/privatepreview` | 162 | R | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | todo | |
+| `cli/internal/peertransport/recoverykey` | 73 | R | — | todo | |
+| `cli/internal/peertransport/streamauth` | 102 | R | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | todo | |
+| `cli/internal/peertransport/tailnet` | 3890 | R | TS wgengine/magicsock, net/netcheck; NB client/internal/peer | todo | |
+| `cli/internal/peertransport/trustedkeys` | 109 | R | — | todo | |
+| `cli/internal/peertransport/udpsocket` | 442 | R | — | todo | |
+| `cli/internal/preferences` | 534 | A | TS ipn/store, atomicfile; NB profilemanager | todo | |
+| `cli/internal/privatepreviewproxy` | 1127 | A | TS ipn/ipnlocal (serve, dns), net/dns; NB client/internal/dns | todo | |
+| `cli/internal/processlaunch` | 37 | A | TS clientupdate, cmd/tailscaled install; Teleport lib/automaticupgrades | todo | |
+| `cli/internal/processlifetime` | 138 | A | TS clientupdate, cmd/tailscaled install; Teleport lib/automaticupgrades | todo | |
+| `cli/internal/prompt` | 513 | A | TS cmd/tailscale/cli, client/local (LocalAPI) | todo | |
+| `cli/internal/remotepath` | 58 | A | TS taildrop (feature/taildrop); — | todo | |
+| `cli/internal/resolver` | 854 | A | TS ipn/ipnlocal (serve, dns), net/dns; NB client/internal/dns | todo | |
+| `cli/internal/selector` | 1216 | A | TS cmd/tailscale/cli, client/local (LocalAPI) | todo | |
+| `cli/internal/selfupdate` | 42 | A | TS clientupdate, cmd/tailscaled install; Teleport lib/automaticupgrades | todo | |
+| `cli/internal/serve` | 1351 | A | Teleport lib/srv/sess, lib/events (session recording); TS ssh/tailssh | todo | |
+| `cli/internal/serverclock` | 49 | A | — | todo | |
+| `cli/internal/session` | 388 | A | Teleport lib/srv/sess, lib/events (session recording); TS ssh/tailssh | todo | |
+| `cli/internal/shorttemp` | 30 | A | TS ipn/store, atomicfile; NB profilemanager | todo | |
+| `cli/internal/splitdns` | 1158 | A | TS ipn/ipnlocal (serve, dns), net/dns; NB client/internal/dns | todo | |
+| `cli/internal/statusbar` | 1291 | A | Teleport lib/srv/sess, lib/events (session recording); TS ssh/tailssh | todo | |
+| `cli/internal/supportref` | 45 | A | TS logtail, logpolicy, health, cmd/tailscale bugreport; Teleport lib/events (debug) | todo | |
+| `cli/internal/telemetry` | 1367 | A | TS logtail, logpolicy, health, cmd/tailscale bugreport; Teleport lib/events (debug) | todo | |
+| `cli/internal/testcert` | 72 | A | — | todo | |
+| `cli/internal/tunnel` | 4999 | R | — | todo | |
+| `cli/internal/userpaths` | 41 | A | TS ipn/store, atomicfile; NB profilemanager | todo | |
+| `cli/internal/windows/elevation` | 1828 | A | — | todo | |
+| `cli/internal/windows/pipeauth` | 99 | A | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | todo | |
+| `cli/internal/windowsenvironment` | 192 | A | TS taildrop (feature/taildrop); — | todo | |
+| `cli/internal/windowsopenssh` | 5332 | A | TS ssh/tailssh; Teleport lib/srv (node, regular) | todo | |
+| `cli/internal/windowssecurity` | 370 | A | — | todo | |
+| `cli/internal/wirejson` | 34 | A | TS cmd/tailscale/cli, client/local (LocalAPI) | todo | |
+| `cli/tools/http3-probe` | 138 | A | — | todo | |
+| `cli/tools/metric-schema` | 182 | A | — | todo | |
+| `cli/tools/preview-e2e-client` | 74 | A | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | todo | |
+| `cli/tools/preview-e2e-target` | 40 | A | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | todo | |
+| `cli/tools/release-plan` | 375 | A | — | todo | |
+| `cli/tools/releaseplan` | 1066 | A | — | todo | |
+| `cli/tools/terminal-benchmark` | 701 | A | Teleport lib/srv/sess, lib/events (session recording); TS ssh/tailssh | todo | |
+| `cli/tools/terminal-experience-benchmark` | 543 | A | Teleport lib/srv/sess, lib/events (session recording); TS ssh/tailssh | todo | |
+| `cli/tools/terminal-input-benchmark` | 613 | A | Teleport lib/srv/sess, lib/events (session recording); TS ssh/tailssh | todo | |
+| `cli/tools/tuf-repository` | 1270 | A | — | todo | |
+| `server/cmd/paperboat-backup` | 203 | B/Q | — | todo | |
+| `server/cmd/paperboat-server` | 223 | B/Q | — | todo | |
+| `server/cmd/paperboat-watchdog` | 143 | B/Q | TS logtail, logpolicy, health, cmd/tailscale bugreport; Teleport lib/events (debug) | todo | |
+| `server/internal/access` | 48 | B/Q | HS hscontrol/policy; Teleport lib/services (RBAC, roles) | todo | |
+| `server/internal/accessdescriptor` | 97 | B/Q | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | todo | |
+| `server/internal/accountingauthority` | 121 | B/Q | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | todo | |
+| `server/internal/activity` | 511 | B/Q | Teleport lib/events (audit log, retention, pgevents) | todo | |
+| `server/internal/admission` | 92 | B/Q | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | todo | Robustness #1 (F21-01) |
+| `server/internal/apitokens` | 684 | B/Q | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | todo | |
+| `server/internal/app` | 2389 | B/Q | HS hscontrol/app.go; Teleport lib/web, lib/limiter | todo | Robustness #4, #9 |
+| `server/internal/audit` | 175 | B/Q | Teleport lib/events (audit log, retention, pgevents) | todo | |
+| `server/internal/auditstream` | 770 | B/Q | Teleport lib/events (audit log, retention, pgevents) | todo | |
+| `server/internal/auth` | 2137 | B/Q | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | todo | |
+| `server/internal/backupreport` | 1203 | B/Q | TS logtail, logpolicy, health, cmd/tailscale bugreport; Teleport lib/events (debug) | todo | |
+| `server/internal/bandwidthgate` | 224 | B/Q | Teleport lib/usagereporter; — | todo | |
+| `server/internal/billing` | 3885 | B/Q | Teleport lib/usagereporter; — | todo | |
+| `server/internal/browseraccess` | 1743 | B/Q | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | todo | |
+| `server/internal/browseringress` | 180 | B/Q | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | todo | |
+| `server/internal/browserterminal` | 1028 | B/Q | Teleport lib/srv/sess, lib/events (session recording); TS ssh/tailssh | todo | |
+| `server/internal/buildinfo` | 9 | B/Q | HS hscontrol/app.go; Teleport lib/web, lib/limiter | todo | |
+| `server/internal/canonicaljson` | 77 | B/Q | — | todo | |
+| `server/internal/clientupdate` | 251 | B/Q | — | todo | |
+| `server/internal/config` | 1818 | B/Q | TS ipn/store, atomicfile; NB profilemanager | todo | |
+| `server/internal/connectorprotocol` | 6446 | B/Q | Teleport lib/srv (exec, reexec); TS ssh/tailssh incubator | todo | |
+| `server/internal/controlplane` | 7440 | B/Q | HS hscontrol/app.go; Teleport lib/web, lib/limiter | todo | Robustness #2 (fixed aa987d5d) |
+| `server/internal/db` | 743 | B/Q | HS hscontrol/db; Teleport lib/backend (pgbk), lib/cache | todo | DB review D1–D10 below |
+| `server/internal/db/dbsqlc` | 34306 | B/Q | HS hscontrol/db; Teleport lib/backend (pgbk), lib/cache | todo | |
+| `server/internal/diagnostics` | 284 | B/Q | TS logtail, logpolicy, health, cmd/tailscale bugreport; Teleport lib/events (debug) | todo | |
+| `server/internal/diagnosticuploads` | 645 | B/Q | TS logtail, logpolicy, health, cmd/tailscale bugreport; Teleport lib/events (debug) | todo | |
+| `server/internal/edgeplacement` | 91 | B/Q | TS tailcfg DERPMap / derp mesh; Teleport lib/reversetunnel (agentpool) | todo | D4 |
+| `server/internal/edgeset` | 275 | B/Q | TS tailcfg DERPMap / derp mesh; Teleport lib/reversetunnel (agentpool) | todo | |
+| `server/internal/emailpolicy` | 35 | B/Q | HS hscontrol/policy; Teleport lib/services (RBAC, roles) | todo | |
+| `server/internal/endpoints` | 365 | B/Q | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | todo | |
+| `server/internal/environment` | 5705 | B/Q | TS taildrop (feature/taildrop); — | todo | |
+| `server/internal/favorites` | 193 | B/Q | HS hscontrol/policy; Teleport lib/services (RBAC, roles) | todo | |
+| `server/internal/github` | 1557 | B/Q | — (Git-based; compare: Teleport lib/services watcher) | todo | |
+| `server/internal/helperruntime` | 428 | B/Q | — | todo | |
+| `server/internal/httpapi` | 17884 | B/Q | HS hscontrol/app.go; Teleport lib/web, lib/limiter | todo | Robustness #5 (timeout bypass), #17 |
+| `server/internal/inboxdispatch` | 413 | B/Q | TS taildrop (feature/taildrop); — | todo | |
+| `server/internal/inspectaccess` | 721 | B/Q | HS hscontrol/policy; Teleport lib/services (RBAC, roles) | todo | |
+| `server/internal/jobmonitor` | 426 | B/Q | TS logtail, logpolicy, health, cmd/tailscale bugreport; Teleport lib/events (debug) | todo | |
+| `server/internal/lazyaccess` | 1010 | B/Q | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | todo | |
+| `server/internal/machinealias` | 74 | B/Q | HS hscontrol/state, mapper; NB management/server (network map, peers) | todo | |
+| `server/internal/machineevents` | 232 | B/Q | TS control/controlclient (auto, direct, map); HS poll; NB client/internal/engine | todo | Robustness #9; recheck 5 s per waiter (Lane Q #6) |
+| `server/internal/machinelatency` | 144 | B/Q | HS hscontrol/state, mapper; NB management/server (network map, peers) | todo | |
+| `server/internal/machineservices` | 551 | B/Q | HS hscontrol/state, mapper; NB management/server (network map, peers) | todo | |
+| `server/internal/managedssh` | 1110 | B/Q | TS ssh/tailssh; Teleport lib/srv (node, regular) | todo | |
+| `server/internal/metering` | 73 | B/Q | Teleport lib/usagereporter; — | todo | |
+| `server/internal/mint` | 1459 | B/Q | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | todo | Robustness #8 |
+| `server/internal/naming` | 77 | B/Q | HS hscontrol/state, mapper; NB management/server (network map, peers) | todo | |
+| `server/internal/nativeprivateaccess` | 373 | B/Q | TS ipn/ipnlocal (serve, dns), net/dns; NB client/internal/dns | todo | |
+| `server/internal/nodeauth` | 168 | B/Q | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | todo | |
+| `server/internal/operator` | 770 | B/Q | HS hscontrol/policy; Teleport lib/services (RBAC, roles) | todo | |
+| `server/internal/operatoractions` | 340 | B/Q | HS hscontrol/policy; Teleport lib/services (RBAC, roles) | todo | |
+| `server/internal/operatorauth` | 316 | B/Q | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | todo | |
+| `server/internal/operatorinfra` | 660 | B/Q | HS hscontrol/policy; Teleport lib/services (RBAC, roles) | todo | |
+| `server/internal/operatorreporting` | 1930 | B/Q | HS hscontrol/policy; Teleport lib/services (RBAC, roles) | todo | |
+| `server/internal/peeridentity` | 1090 | B/Q | TS control/controlclient (register), types/key | todo | |
+| `server/internal/peersessions` | 1433 | B/Q | Teleport lib/srv/sess, lib/events (session recording); TS ssh/tailssh | todo | |
+| `server/internal/perf` | 112 | B/Q | HS hscontrol/db; Teleport lib/backend (pgbk), lib/cache | todo | |
+| `server/internal/planlimits` | 221 | B/Q | — | todo | |
+| `server/internal/previewattachment` | 5230 | B/Q | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | todo | |
+| `server/internal/previewdispatch` | 461 | B/Q | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | todo | |
+| `server/internal/previewdomain` | 2431 | B/Q | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | todo | |
+| `server/internal/previewtunnelapi` | 636 | B/Q | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | todo | |
+| `server/internal/previewtunnelstore` | 2073 | B/Q | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | todo | |
+| `server/internal/previewv1` | 1845 | B/Q | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | todo | |
+| `server/internal/privateaccess` | 2633 | B/Q | HS hscontrol/policy; Teleport lib/services (RBAC, roles) | todo | |
+| `server/internal/publicationdns` | 142 | B/Q | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | todo | |
+| `server/internal/releaseauthority` | 390 | B/Q | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | todo | |
+| `server/internal/releases` | 502 | B/Q | — | todo | |
+| `server/internal/resourceusage` | 580 | B/Q | Teleport lib/usagereporter; — | todo | |
+| `server/internal/runtimeattachment` | 865 | B/Q | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | todo | D4 (unconditional upsert, 9 writes/s) |
+| `server/internal/secrets` | 85 | B/Q | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | todo | |
+| `server/internal/selfhost` | 1617 | B/Q | — | todo | |
+| `server/internal/supportreport` | 2340 | B/Q | TS logtail, logpolicy, health, cmd/tailscale bugreport; Teleport lib/events (debug) | todo | D6 (one row per error) |
+| `server/internal/sync` | 671 | B/Q | — (Git-based; compare: Teleport lib/services watcher) | todo | Robustness #7 (unused gRPC channel) |
+| `server/internal/sync/proto` | 896 | B/Q | — | todo | |
+| `server/internal/teamidentity` | 1240 | B/Q | TS control/controlclient (register), types/key | todo | |
+| `server/internal/teaminbox` | 1107 | B/Q | HS hscontrol/policy; Teleport lib/services (RBAC, roles) | todo | |
+| `server/internal/teams` | 4303 | B/Q | HS hscontrol/policy; Teleport lib/services (RBAC, roles) | todo | |
+| `server/internal/teams/teamstest` | 64 | B/Q | HS hscontrol/policy; Teleport lib/services (RBAC, roles) | todo | |
+| `server/internal/telemetry` | 4999 | B/Q | TS logtail, logpolicy, health, cmd/tailscale bugreport; Teleport lib/events (debug) | todo | |
+| `server/internal/testauth` | 31 | B/Q | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | todo | |
+| `server/internal/testtopology` | 913 | B/Q | HS hscontrol/app.go; Teleport lib/web, lib/limiter | todo | |
+| `server/internal/testutil` | 23 | B/Q | HS hscontrol/app.go; Teleport lib/web, lib/limiter | todo | |
+| `server/internal/transactionalmail` | 184 | B/Q | — | todo | |
+| `server/internal/tunnelcert` | 8495 | B/Q | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | todo | D4 (platform targets 4 writes/s on 2 rows) |
+| `server/internal/tunnelendpoint` | 18 | B/Q | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | todo | |
+| `server/internal/tunnelv1` | 8478 | B/Q | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | todo | |
+| `server/internal/usermachines` | 9348 | B/Q | HS hscontrol/state, mapper; NB management/server (network map, peers) | todo | |
+| `server/internal/workers` | 410 | B/Q | HS hscontrol/app.go; Teleport lib/web, lib/limiter | todo | |
+| `server/internal/workspace` | 234 | B/Q | HS hscontrol/policy; Teleport lib/services (RBAC, roles) | todo | |
+| `server/tools/metric-schema` | 110 | B/Q | — | todo | |
+| `server/tools/scenario-matrix` | 177 | B/Q | — | todo | |
+| `relay/admission` | 291 | R | TS derp/derpserver, net/udprelay; NB relay/server | todo | |
+| `relay/cmd/paperboat-relay` | 467 | R | TS derp/derpserver, net/udprelay; NB relay/server | todo | |
+| `relay/derpquic` | 2724 | R | TS derp/derpserver, net/udprelay; NB relay/server | todo | |
+| `relay/internal/reporting` | 1604 | R | TS derp/derpserver, net/udprelay; NB relay/server | todo | |
+| `relay/nodelifecycle` | 386 | R | TS cmd/derper (cert, mesh); NB relay | todo | |
+| `relay/nodetls` | 72 | R | TS cmd/derper (cert, mesh); NB relay | todo | |
+| `relay/peerrelay` | 302 | R | TS derp/derpserver, net/udprelay; NB relay/server | todo | |
+| `relay/reattach` | 117 | R | TS derp/derpserver, net/udprelay; NB relay/server | todo | |
+| `relay/selfhost` | 1429 | R | TS cmd/derper (cert, mesh); NB relay | todo | |
+| `tunnel/cmd/paperboat-tunnel` | 1890 | M | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | todo | |
+| `tunnel/internal/admission` | 271 | M | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | todo | |
+| `tunnel/internal/auth` | 570 | M | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | todo | |
+| `tunnel/internal/config` | 400 | M | TS ipn/store, atomicfile; NB profilemanager | todo | |
+| `tunnel/internal/control` | 3021 | M | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | todo | |
+| `tunnel/internal/datacarrier` | 4575 | M | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | todo | |
+| `tunnel/internal/diagnostics` | 336 | M | TS logtail, logpolicy, health, cmd/tailscale bugreport; Teleport lib/events (debug) | todo | |
+| `tunnel/internal/edgeerrors` | 104 | M | Teleport lib/srv (exec, reexec); TS ssh/tailssh incubator | todo | |
+| `tunnel/internal/edgehttp` | 7794 | M | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | todo | |
+| `tunnel/internal/node` | 348 | M | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | todo | |
+| `tunnel/internal/operation` | 149 | M | Teleport lib/srv (exec, reexec); TS ssh/tailssh incubator | todo | |
+| `tunnel/internal/reporting` | 1722 | M | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | todo | |
+| `tunnel/internal/route` | 1897 | M | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | todo | |
+| `tunnel/internal/runtime` | 4767 | M | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | todo | |
+| `tunnel/internal/store` | 151 | M | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | todo | |
+| `tunnel/internal/strictjson` | 102 | M | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | todo | |
+| `tunnel/internal/telemetry` | 2096 | M | TS logtail, logpolicy, health, cmd/tailscale bugreport; Teleport lib/events (debug) | todo | |
+| `tunnel/internal/testedge` | 329 | M | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | todo | |
+| `tunnel/internal/tlscert` | 1092 | M | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | todo | |
+| `tunnel/internal/usage` | 684 | M | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | todo | |
+| `tunnel/tools/control-conformance` | 221 | M | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | todo | |
+| `tunnel/tools/metric-schema` | 290 | M | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | todo | |
+| `shared/admission` | 291 | B/Q | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | todo | |
+| `shared/connectorprotocol` | 6080 | B/Q | Teleport lib/srv (exec, reexec); TS ssh/tailssh incubator | todo | |
+| `shared/machineservices` | 105 | B/Q | HS hscontrol/state, mapper; NB management/server (network map, peers) | todo | |
+| `shared/managedssh` | 132 | B/Q | TS ssh/tailssh; Teleport lib/srv (node, regular) | todo | |
+| `shared/peeridentity` | 265 | B/Q | TS control/controlclient (register), types/key | todo | |
+| `shared/peernetwork` | 18 | B/Q | HS hscontrol/state, mapper; NB management/server (network map, peers) | todo | |
+| `shared/policy` | 2181 | B/Q | HS hscontrol/policy; Teleport lib/services (RBAC, roles) | todo | |
+| `shared/reattach` | 117 | B/Q | — | todo | |
+| `shared/relaylimits` | 10 | B/Q | — | todo | |
+| `shared/runtimeattachment` | 183 | B/Q | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | todo | |
+| `helper/cmd/pbh` | 693 | B/Q | TS cmd/derper deploy; NB infrastructure_files | todo | |
+| `helper/internal/containers` | 945 | B/Q | TS cmd/derper deploy; NB infrastructure_files | todo | |
+| `helper/internal/reporting` | 1604 | B/Q | TS cmd/derper deploy; NB infrastructure_files | todo | |
+| `console/lib/upload.ts` | 45 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/lib/teams.ts` | 252 | C | HS hscontrol/policy; Teleport lib/services (RBAC, roles) | todo | |
+| `console/lib/api-schema.d.ts` | 28869 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/lib/clipboard.ts` | 37 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/lib/use-now.ts` | 55 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/lib/account-deletion.ts` | 74 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/lib/activity.ts` | 283 | C | Teleport lib/events (audit log, retention, pgevents) | todo | |
+| `console/lib/workspace.ts` | 36 | C | HS hscontrol/policy; Teleport lib/services (RBAC, roles) | todo | |
+| `console/lib/machine-filter.ts` | 92 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/lib/enrollment.ts` | 97 | C | TS control/controlclient (register), types/key | todo | |
+| `console/lib/tunnels.ts` | 268 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/lib/network.ts` | 120 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/lib/sections.ts` | 70 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/lib/use-time-format.ts` | 30 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/lib/api.ts` | 509 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/lib/machine-pages.ts` | 41 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/lib/inspector` | 498 | C | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | todo | |
+| `console/lib/domains.ts` | 18 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/lib/usage-period.ts` | 18 | C | Teleport lib/usagereporter; — | todo | |
+| `console/lib/identity.ts` | 106 | C | TS control/controlclient (register), types/key | todo | |
+| `console/lib/billing.ts` | 181 | C | Teleport lib/usagereporter; — | todo | |
+| `console/lib/policy.ts` | 441 | C | HS hscontrol/policy; Teleport lib/services (RBAC, roles) | todo | |
+| `console/lib/recent-machines.ts` | 23 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/lib/format.ts` | 135 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/lib/machine-domains.ts` | 156 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/lib/audit-streams.ts` | 33 | C | Teleport lib/events (audit log, retention, pgevents) | todo | |
+| `console/lib/config-sync.ts` | 105 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/lib/envvault` | 407 | C | TS taildrop (feature/taildrop); — | todo | |
+| `console/lib/query-keys.ts` | 10 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/lib/utils.ts` | 1 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/lib/github.ts` | 101 | C | — (Git-based; compare: Teleport lib/services watcher) | todo | |
+| `console/lib/privacy.ts` | 42 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/lib/server` | 162 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/lib/files.ts` | 111 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/lib/terminal` | 2626 | C | Teleport lib/srv/sess, lib/events (session recording); TS ssh/tailssh | todo | |
+| `console/components/machine-picker.tsx` | 153 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/components/machine-remove.tsx` | 93 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/components/page-header.tsx` | 48 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/components/section.tsx` | 60 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/components/section-page.tsx` | 35 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/components/machine-actions.tsx` | 115 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/components/cli` | 238 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/components/github` | 205 | C | — (Git-based; compare: Teleport lib/services watcher) | todo | |
+| `console/components/machine-status.tsx` | 68 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/components/workspace-switcher.tsx` | 91 | C | HS hscontrol/policy; Teleport lib/services (RBAC, roles) | todo | |
+| `console/components/machine-table.tsx` | 357 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/components/usage-limits.tsx` | 502 | C | Teleport lib/usagereporter; — | todo | |
+| `console/components/providers.tsx` | 34 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/components/account.tsx` | 38 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/components/machine-address.tsx` | 66 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/components/file-drop.tsx` | 66 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/components/machine-tags.tsx` | 156 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/components/config` | 348 | C | TS ipn/store, atomicfile; NB profilemanager | todo | |
+| `console/components/brand-screen.tsx` | 50 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/components/logo.tsx` | 10 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/components/machine-overview.tsx` | 316 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/components/share-machine-dialog.tsx` | 118 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/components/usage` | 328 | C | Teleport lib/usagereporter; — | todo | |
+| `console/components/crumb-picker.tsx` | 20 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/components/machine-identity.tsx` | 145 | C | TS control/controlclient (register), types/key | todo | |
+| `console/components/app-sidebar.tsx` | 67 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/components/workspace-picker.tsx` | 61 | C | HS hscontrol/policy; Teleport lib/services (RBAC, roles) | todo | |
+| `console/components/billing` | 510 | C | Teleport lib/usagereporter; — | todo | |
+| `console/components/server-data.tsx` | 36 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/components/files` | 782 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/components/environment` | 299 | C | TS taildrop (feature/taildrop); — | todo | |
+| `console/components/delete-account.tsx` | 150 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/components/email.tsx` | 54 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/components/team` | 2035 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/components/not-found-game.tsx` | 413 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/components/domains` | 583 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/components/quick-terminal.tsx` | 254 | C | Teleport lib/srv/sess, lib/events (session recording); TS ssh/tailssh | todo | |
+| `console/components/user-menu.tsx` | 102 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/components/access` | 1330 | C | HS hscontrol/policy; Teleport lib/services (RBAC, roles) | todo | |
+| `console/components/tunnels` | 2725 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/components/access-login` | 90 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/components/command-palette.tsx` | 123 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/components/ui` | 3513 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/components/machine-shell.tsx` | 240 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/components/brand-bar.tsx` | 247 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/components/copy-button.tsx` | 112 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/components/machine-update.tsx` | 107 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/components/machine-filters.tsx` | 126 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/components/quota-banner.tsx` | 82 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/components/machine-query.tsx` | 48 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/components/machine-edit.tsx` | 95 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/components/limit-reached.tsx` | 33 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/components/activity` | 556 | C | Teleport lib/events (audit log, retention, pgevents) | todo | |
+| `console/components/list-toolbar.tsx` | 195 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/components/row-menus.tsx` | 126 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/components/network` | 494 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/components/add-machine-dialog.tsx` | 284 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/components/terminal` | 2412 | C | Teleport lib/srv/sess, lib/events (session recording); TS ssh/tailssh | todo | |
+| `console/components/time.tsx` | 23 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/hooks/use-mobile.ts` | 17 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/hooks/use-debounced.ts` | 11 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/app/(console)/settings` | 16 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/app/(console)/config` | 18 | C | TS ipn/store, atomicfile; NB profilemanager | todo | |
+| `console/app/(console)/terminals` | 18 | C | Teleport lib/srv/sess, lib/events (session recording); TS ssh/tailssh | todo | |
+| `console/app/(console)/usage` | 18 | C | Teleport lib/usagereporter; — | todo | |
+| `console/app/(console)/previews` | 36 | C | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | todo | |
+| `console/app/(console)/billing` | 16 | C | Teleport lib/usagereporter; — | todo | |
+| `console/app/(console)/files` | 18 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/app/(console)/environment` | 18 | C | TS taildrop (feature/taildrop); — | todo | |
+| `console/app/(console)/page.tsx` | 44 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/app/(console)/team` | 21 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/app/(console)/domains` | 14 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/app/(console)/layout.tsx` | 23 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/app/(console)/access` | 16 | C | HS hscontrol/policy; Teleport lib/services (RBAC, roles) | todo | |
+| `console/app/(console)/tunnels` | 36 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/app/(console)/machines` | 77 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/app/(console)/activity` | 18 | C | Teleport lib/events (audit log, retention, pgevents) | todo | |
+| `console/app/(console)/network` | 14 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/app/(console)/account` | 37 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/app/(terminal)` | 60 | C | Teleport lib/srv/sess, lib/events (session recording); TS ssh/tailssh | todo | |
+| `console/app/auth` | 190 | C | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | todo | |
+| `console/app/cli` | 14 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/app/github` | 42 | C | — (Git-based; compare: Teleport lib/services watcher) | todo | |
+| `console/app/access-login` | 14 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/app/api` | 172 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/app/not-found.tsx` | 9 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `console/app/layout.tsx` | 27 | C | Teleport web/packages (teleport UI); Headscale-UI n/a | todo | |
+| `cli/internal/contracttest` | test only | A | — | done | test-only package, not product code |
+| `cli/internal/hostruntime/contracttest` | test only | A | — | done | test-only package, not product code |
+| `cli/tools` | test only | A | — | done | test-only package, not product code |
+| `server/internal/contractchaos` | test only | B/Q | — | done | test-only package, not product code |
+| `server/internal/contracttest` | test only | B/Q | — | done | test-only package, not product code |
+| `tunnel/internal/contracttest` | test only | M | — | done | test-only package, not product code |
+
 ## 4. Handoff notes
 
 All open items from the Phase B handoff (2026-10-14) are filed in S0 (smoke suite), F4
