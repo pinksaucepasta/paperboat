@@ -192,10 +192,14 @@ func (a *Authority) Run(ctx context.Context, client NetworkAPI, report func(erro
 			a.relay.mu.Lock()
 			recovering := a.relay.recovery != nil
 			a.relay.mu.Unlock()
-			// Signed health observations expire after 15 seconds. Active regional
-			// recovery refreshes before that boundary, including bounded jitter.
+			// Signed health observations expire regionalObservationMaxAge after they were
+			// made, not after they were issued. Active regional recovery renews before the
+			// earliest one ends, so its relays are not withdrawn between renewals.
 			if recovering {
 				delay = 8*time.Second + regionalProbeDelay()/2
+				if due, ok := a.regionalRenewalDelay(time.Now()); ok {
+					delay = due
+				}
 			}
 			// A signed configuration may be much shorter than the regional cadence.
 			// Reserve half its remaining lifetime (at most the request bound) for
@@ -208,6 +212,36 @@ func (a *Authority) Run(ctx context.Context, client NetworkAPI, report func(erro
 			timer.Reset(a.refreshDelay(delay))
 		}
 	}
+}
+
+// regionalRenewBefore is how long before the earliest signed observation ends a renewal starts;
+// regionalMinimumRenewal bounds renewals when the server's observations arrive already old.
+const (
+	regionalRenewBefore    = 3 * time.Second
+	regionalMinimumRenewal = 4 * time.Second
+)
+
+// regionalRenewalDelay is when to renew so the eligible relays' observations stay fresh. It
+// reports false when no relay is eligible.
+func (a *Authority) regionalRenewalDelay(now time.Time) (time.Duration, bool) {
+	a.mu.Lock()
+	candidates := a.regional
+	a.mu.Unlock()
+	nodes, _, err := candidates.Eligible("relay", "derp_quic", nil, now)
+	if err != nil || len(nodes) == 0 {
+		return 0, false
+	}
+	return regionalRenewalAfter(nodes, now), true
+}
+
+func regionalRenewalAfter(nodes []RegionalNode, now time.Time) time.Duration {
+	earliest := time.Unix(min(nodes[0].ObservedAt, nodes[0].CapacityObservedAt), 0)
+	for _, n := range nodes[1:] {
+		if observed := time.Unix(min(n.ObservedAt, n.CapacityObservedAt), 0); observed.Before(earliest) {
+			earliest = observed
+		}
+	}
+	return max(earliest.Add(regionalObservationMaxAge-regionalRenewBefore).Sub(now), regionalMinimumRenewal)
 }
 
 // refreshRetryDelay is the wait after the failures-th consecutive failed refresh: one second,

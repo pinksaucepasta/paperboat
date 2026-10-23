@@ -170,6 +170,10 @@ func (a *Authority) RegionalNodes(now time.Time) ([]RegionalNode, error) {
 	return nodes, nil
 }
 
+// regionalObservationMaxAge is how old a signed health or capacity observation may be for its
+// node to be selected; an older one withdraws the node until the configuration is renewed.
+const regionalObservationMaxAge = 15 * time.Second
+
 func (c *RegionalCandidates) Eligible(role, transport string, regions map[string]bool, now time.Time) ([]RegionalNode, Redundancy, error) {
 	if c == nil || c.ExpiresAt <= now.Unix() {
 		return nil, RedundancyNone, ErrRegionalAuthority
@@ -177,7 +181,7 @@ func (c *RegionalCandidates) Eligible(role, transport string, regions map[string
 	out := make([]RegionalNode, 0, len(c.Nodes))
 	seen := map[string]bool{}
 	for _, n := range c.Nodes {
-		if !validID(n.NodeID) || !validID(n.ProcessEpoch) || !validID(n.Region) || !validID(n.FailureDomain) || seen[n.NodeID] || n.NodeGeneration == 0 || n.State != "ready" || n.ObservedAt > now.Unix() || now.Unix()-n.ObservedAt > 15 || n.ExpiresAt <= now.Unix() || n.CapacityObservedAt > now.Unix() || now.Unix()-n.CapacityObservedAt > 15 || n.CapacityLimit == 0 || n.CapacityUsed >= n.CapacityLimit-n.CapacityLimit/10 || n.DrainDeadline != nil {
+		if !validID(n.NodeID) || !validID(n.ProcessEpoch) || !validID(n.Region) || !validID(n.FailureDomain) || seen[n.NodeID] || n.NodeGeneration == 0 || n.State != "ready" || n.ObservedAt > now.Unix() || now.Unix()-n.ObservedAt > int64(regionalObservationMaxAge/time.Second) || n.ExpiresAt <= now.Unix() || n.CapacityObservedAt > now.Unix() || now.Unix()-n.CapacityObservedAt > int64(regionalObservationMaxAge/time.Second) || n.CapacityLimit == 0 || n.CapacityUsed >= n.CapacityLimit-n.CapacityLimit/10 || n.DrainDeadline != nil {
 			continue
 		}
 		if len(regions) > 0 && !regions[n.Region] || !contains(n.Roles, role) || !contains(n.Transports, transport) || !validEndpointHost(n.EndpointHost) || (n.EndpointTCPPort == 0 && n.EndpointQUICPort == 0) {
