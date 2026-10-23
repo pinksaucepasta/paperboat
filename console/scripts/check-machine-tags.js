@@ -55,9 +55,10 @@
   pass("the machine page shows the tag as a chip", Boolean(chip))
 
   chip?.click()
-  const filtered = await until(() => location.pathname === "/" && document.querySelectorAll("#machines-table tbody tr").length > 0)
-  const rows = document.querySelectorAll("#machines-table tbody tr").length
-  pass("the chip opens the list filtered by the tag", Boolean(filtered) && rows === 1, `${location.search} ${rows} rows`)
+  // The list applies ?q= once the page is shown; wait for the filtered rows.
+  const rows = () => document.querySelectorAll("#machines-table tbody tr").length
+  const filtered = await until(() => location.pathname === "/" && rows() === 1, 10000)
+  pass("the chip opens the list filtered by the tag", Boolean(filtered), `${location.search} ${rows()} rows`)
 
   const removed = await edit(async () => {
     const label = [...dialog().querySelectorAll("label")].find((l) => l.textContent.trim() === "console-check")
