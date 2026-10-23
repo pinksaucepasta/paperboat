@@ -21,6 +21,10 @@ const (
 	// carrier. A tunnel moves onto the engine only when its agent and every edge it holds carriers
 	// to advertise it; until then it keeps its own connector.
 	CapabilityTunnelEndpoints = "tunnel_endpoints"
+	// CapabilityEndpointDeltas (edges only, with CapabilityEndpoints): the edge takes its endpoint
+	// routes only from the endpoint pull, as a full snapshot or as the changes since a cursor, and
+	// the full runtime pull leaves them out (Lane W scale matrix: no full re-send per poll).
+	CapabilityEndpointDeltas = "endpoint_deltas"
 )
 const MaximumAdmissions = 4096
 const MaximumEdgeCandidates = 32
@@ -147,6 +151,9 @@ type EdgeRequest struct {
 	ProcessEpoch string        `json:"process_epoch"`
 	Observations []Observation `json:"observations,omitempty"`
 	Capabilities []string      `json:"capabilities,omitempty"`
+	// Since, on an endpoint pull with CapabilityEndpointDeltas, is the cursor of the edge's last
+	// endpoint answer: the server answers only what changed since it. Empty asks for a full set.
+	Since string `json:"since,omitempty"`
 }
 
 // Snapshot requires an explicit admissions array, including when empty.
@@ -155,10 +162,33 @@ type Snapshot struct {
 	Schema     string       `json:"schema"`
 	Complete   bool         `json:"complete"`
 	Admissions *[]Admission `json:"admissions"`
+	// Only for an edge with CapabilityEndpointDeltas (edges decode strictly): Cursor is sent back as
+	// Since next time. An
+	// answer with Complete false is a delta: Admissions are added or replaced, RemovedRouteIDs
+	// dropped, and every kept endpoint admission now expires at ExpiresAt.
+	Cursor          string    `json:"cursor,omitempty"`
+	RemovedRouteIDs []string  `json:"removed_route_ids,omitempty"`
+	ExpiresAt       *time.Time `json:"expires_at,omitempty"`
 }
 
-// ValidCapabilities accepts no capabilities, CapabilityEndpoints, or CapabilityEndpoints with
-// CapabilityTunnelEndpoints, each at most once.
+// ValidEdgeCapabilities accepts what an edge may advertise: nothing, or CapabilityEndpoints with
+// any of CapabilityTunnelEndpoints and CapabilityEndpointDeltas, each at most once.
+func ValidEdgeCapabilities(values []string) bool {
+	if len(values) == 0 {
+		return true
+	}
+	seen := map[string]bool{}
+	for _, value := range values {
+		if seen[value] || value != CapabilityEndpoints && value != CapabilityTunnelEndpoints && value != CapabilityEndpointDeltas {
+			return false
+		}
+		seen[value] = true
+	}
+	return seen[CapabilityEndpoints]
+}
+
+// ValidCapabilities accepts what an agent may advertise: no capabilities, CapabilityEndpoints, or
+// CapabilityEndpoints with CapabilityTunnelEndpoints, each at most once.
 func ValidCapabilities(values []string) bool {
 	switch len(values) {
 	case 0:

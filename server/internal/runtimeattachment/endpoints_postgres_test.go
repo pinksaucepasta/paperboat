@@ -221,7 +221,7 @@ VALUES($1,$2,$3,$3,$4,'owner_session_endpoint','foreground','http','127.0.0.1:30
 		t.Fatalf("endpoint route does not ride on the runtime carrier: %+v vs %+v", endpointRoute.Binding, a.Binding)
 	}
 	// The fast endpoint-only pull carries exactly the endpoint routes of the snapshot.
-	if fast, err := service.PullEndpoints(ctx, edge, []string{runtimewire.CapabilityEndpoints}); err != nil || len(fast) != 1 || fast[0].EndpointID != lease || fast[0].Binding.RouteID != endpointRoute.Binding.RouteID {
+	if fast, err := service.PullEndpoints(ctx, edge, []string{runtimewire.CapabilityEndpoints}, ""); err != nil || !fast.Complete || fast.Admissions == nil || len(*fast.Admissions) != 1 || (*fast.Admissions)[0].EndpointID != lease || (*fast.Admissions)[0].Binding.RouteID != endpointRoute.Binding.RouteID {
 		t.Fatalf("endpoint-only pull = %+v, %v", fast, err)
 	}
 	if _, err := service.Pull(ctx, edge, []string{"something_else"}); err != ErrInvalid {

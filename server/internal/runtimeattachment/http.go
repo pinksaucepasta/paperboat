@@ -125,16 +125,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Path == runtimewire.EdgeEndpointPullPath {
-		if len(request.Observations) != 0 || !runtimewire.HasCapability(request.Capabilities, runtimewire.CapabilityEndpoints) || !runtimewire.ValidCapabilities(request.Capabilities) {
+		if len(request.Observations) != 0 || !runtimewire.HasCapability(request.Capabilities, runtimewire.CapabilityEndpoints) || !runtimewire.ValidEdgeCapabilities(request.Capabilities) {
 			writeError(w, 400, "invalid_request")
 			return
 		}
-		admissions, err := h.Service.PullEndpoints(r.Context(), edge, request.Capabilities)
+		snapshot, err := h.Service.PullEndpoints(r.Context(), edge, request.Capabilities, request.Since)
 		if err != nil {
 			serviceError(w, r, err)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(runtimewire.Snapshot{Schema: runtimewire.Schema, Complete: true, Admissions: &admissions})
+		_ = json.NewEncoder(w).Encode(snapshot)
 		return
 	}
 	if r.URL.Path == runtimewire.EdgePullPath {

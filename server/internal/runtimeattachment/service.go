@@ -345,7 +345,7 @@ ON CONFLICT(route_id,edge_node_id) DO UPDATE SET machine_id=EXCLUDED.machine_id,
 // Pull returns the edge's complete runtime snapshot: the runtime route admissions and, for an edge
 // that advertised runtimewire.CapabilityEndpoints, the endpoint routes riding on those carriers.
 func (s *Service) Pull(ctx context.Context, edge previewattachment.PreviewEdgeIdentity, capabilities []string) ([]runtimewire.Admission, error) {
-	if !runtimewire.ValidCapabilities(capabilities) {
+	if !runtimewire.ValidEdgeCapabilities(capabilities) {
 		return nil, ErrInvalid
 	}
 	if len(capabilities) != 0 {
@@ -379,7 +379,8 @@ func (s *Service) Pull(ctx context.Context, edge previewattachment.PreviewEdgeId
 			return nil, ErrUnavailable
 		}
 	}
-	if err := rows.Err(); err != nil || len(capabilities) == 0 {
+	// An edge taking endpoint deltas gets its endpoint routes only from the endpoint pull.
+	if err := rows.Err(); err != nil || len(capabilities) == 0 || runtimewire.HasCapability(capabilities, runtimewire.CapabilityEndpointDeltas) {
 		return out, err
 	}
 	routes, err := endpoints.EdgeAdmissions(ctx, s.DB.Pool(), edge.NodeID, edge.ProcessEpoch, admission.Deadline(time.Now(), s.AdmissionLifetime), runtimewire.MaximumAdmissions-len(out))
@@ -396,25 +397,57 @@ func (s *Service) Pull(ctx context.Context, edge previewattachment.PreviewEdgeId
 // again; readers treat a ready carrier as fresh for 30 seconds.
 const observationRefresh = 10 * time.Second
 
-// PullEndpoints returns only the endpoint route admissions of the edge's snapshot (the routes of
-// the agents' runtime carriers on this edge); the edge pulls it often and merges it with its last
-// full runtime snapshot.
-func (s *Service) PullEndpoints(ctx context.Context, edge previewattachment.PreviewEdgeIdentity, capabilities []string) ([]runtimewire.Admission, error) {
-	if !runtimewire.HasCapability(capabilities, runtimewire.CapabilityEndpoints) || !runtimewire.ValidCapabilities(capabilities) {
-		return nil, ErrInvalid
+// PullEndpoints returns the endpoint route admissions of the edge's snapshot (the routes of the
+// agents' runtime carriers on this edge). With CapabilityEndpointDeltas and a cursor it returns only
+// what changed since the cursor; otherwise the full set. Every answer carries the next cursor.
+func (s *Service) PullEndpoints(ctx context.Context, edge previewattachment.PreviewEdgeIdentity, capabilities []string, since string) (runtimewire.Snapshot, error) {
+	if !runtimewire.HasCapability(capabilities, runtimewire.CapabilityEndpoints) || !runtimewire.ValidEdgeCapabilities(capabilities) {
+		return runtimewire.Snapshot{}, ErrInvalid
 	}
-	if err := endpoints.RecordEdgeServes(ctx, s.DB.Pool(), edge.NodeID, edge.ProcessEpoch, runtimewire.HasCapability(capabilities, runtimewire.CapabilityTunnelEndpoints)); err != nil {
-		return nil, err
+	var now time.Time
+	if err := s.DB.Pool().QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
+		return runtimewire.Snapshot{}, err
 	}
-	routes, err := endpoints.EdgeAdmissions(ctx, s.DB.Pool(), edge.NodeID, edge.ProcessEpoch, admission.Deadline(time.Now(), s.AdmissionLifetime), runtimewire.MaximumAdmissions)
+	expires := admission.Deadline(time.Now(), s.AdmissionLifetime)
+	out := runtimewire.Snapshot{Schema: runtimewire.Schema}
+	deltas := runtimewire.HasCapability(capabilities, runtimewire.CapabilityEndpointDeltas)
+	if deltas {
+		out.Cursor = now.UTC().Format(time.RFC3339Nano)
+	}
+	cursor, err := time.Parse(time.RFC3339Nano, since)
+	delta := deltas && err == nil && now.Sub(cursor) < endpointDeltaWindow
+	if !delta {
+		if err := endpoints.RecordEdgeServes(ctx, s.DB.Pool(), edge.NodeID, edge.ProcessEpoch, runtimewire.HasCapability(capabilities, runtimewire.CapabilityTunnelEndpoints)); err != nil {
+			return runtimewire.Snapshot{}, err
+		}
+		routes, err := endpoints.EdgeAdmissions(ctx, s.DB.Pool(), edge.NodeID, edge.ProcessEpoch, expires, runtimewire.MaximumAdmissions)
+		if err != nil {
+			return runtimewire.Snapshot{}, err
+		}
+		if len(routes) > runtimewire.MaximumAdmissions {
+			return runtimewire.Snapshot{}, ErrUnavailable
+		}
+		out.Complete, out.Admissions = true, &routes
+		return out, nil
+	}
+	routes, removed, err := endpoints.EdgeAdmissionsChanged(ctx, s.DB.Pool(), edge.NodeID, edge.ProcessEpoch, cursor.Add(-endpointDeltaOverlap), expires, runtimewire.MaximumAdmissions)
 	if err != nil {
-		return nil, err
+		return runtimewire.Snapshot{}, err
 	}
-	if len(routes) > runtimewire.MaximumAdmissions {
-		return nil, ErrUnavailable
+	if len(routes)+len(removed) > runtimewire.MaximumAdmissions {
+		return runtimewire.Snapshot{}, ErrUnavailable
 	}
-	return routes, nil
+	out.Admissions, out.RemovedRouteIDs, out.ExpiresAt = &routes, removed, &expires
+	return out, nil
 }
+
+const (
+	// endpointDeltaOverlap re-reads changes committed by transactions still open at the previous
+	// answer: a row's changed_at is taken when it is written, not when it commits.
+	endpointDeltaOverlap = 10 * time.Second
+	// endpointDeltaWindow: an older cursor gets a full answer.
+	endpointDeltaWindow = 10 * time.Minute
+)
 
 func (s *Service) Observe(ctx context.Context, edge previewattachment.PreviewEdgeIdentity, observations []runtimewire.Observation) error {
 	if len(observations) > runtimewire.MaximumAdmissions {

@@ -24,3 +24,24 @@ func TestValidCapabilitiesAcceptsEndpointsOptionallyWithTunnels(t *testing.T) {
 		t.Fatal("HasCapability")
 	}
 }
+
+func TestValidEdgeCapabilitiesAddEndpointDeltas(t *testing.T) {
+	for _, tc := range []struct {
+		values []string
+		valid  bool
+	}{
+		{nil, true},
+		{[]string{CapabilityEndpoints, CapabilityTunnelEndpoints, CapabilityEndpointDeltas}, true},
+		{[]string{CapabilityEndpointDeltas, CapabilityEndpoints}, true},
+		{[]string{CapabilityEndpointDeltas}, false},
+		{[]string{CapabilityEndpoints, CapabilityEndpointDeltas, CapabilityEndpointDeltas}, false},
+		{[]string{CapabilityEndpoints, "other"}, false},
+	} {
+		if got := ValidEdgeCapabilities(tc.values); got != tc.valid {
+			t.Fatalf("ValidEdgeCapabilities(%v) = %v, want %v", tc.values, got, tc.valid)
+		}
+	}
+	if ValidCapabilities([]string{CapabilityEndpoints, CapabilityEndpointDeltas}) {
+		t.Fatal("an agent may not advertise endpoint deltas")
+	}
+}

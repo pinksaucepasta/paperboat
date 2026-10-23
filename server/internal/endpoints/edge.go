@@ -49,7 +49,7 @@ AND n.endpoints_epoch=e.epoch AND (NOT $3 OR n.tunnel_endpoints_epoch=e.epoch)`,
 // carrier's identity, with the route's own id, hostname and kind. Callers send these only to an
 // edge that advertised runtimewire.CapabilityEndpoints.
 func EdgeAdmissions(ctx context.Context, q Querier, nodeID, epoch string, expiresAt time.Time, limit int) ([]runtimewire.Admission, error) {
-	rows, err := q.Query(ctx, `SELECT a.admission,x.route_id,x.generation,r.hostname,r.revision,e.id,e.access_mode
+	rows, err := q.Query(ctx, `SELECT x.route_id,a.admission,x.generation,r.hostname,r.revision,e.id,e.access_mode,true
 FROM endpoint_edge_assignments x JOIN endpoint_routes r ON r.id=x.route_id JOIN endpoints e ON e.id=x.endpoint_id
 JOIN runtime_carrier_attachments a ON a.machine_id=e.agent_machine_id AND a.edge_node_id=x.edge_node_id
  AND a.edge_process_epoch=x.edge_process_epoch AND a.session_id=x.carrier_session_id
@@ -60,18 +60,50 @@ ORDER BY x.route_id LIMIT $3`, nodeID, epoch, limit+1)
 	if err != nil {
 		return nil, err
 	}
+	admissions, _, err := scanEdgeAdmissions(rows, expiresAt)
+	return admissions, err
+}
+
+// EdgeAdmissionsChanged returns the endpoint assignments of one edge process whose admission may
+// have changed after since: each is an admission (as EdgeAdmissions would answer it) or a removed
+// route id. Callers ask from a little before their last answer, so a change committed late is not
+// missed; answering a row twice is harmless.
+func EdgeAdmissionsChanged(ctx context.Context, q Querier, nodeID, epoch string, since, expiresAt time.Time, limit int) ([]runtimewire.Admission, []string, error) {
+	rows, err := q.Query(ctx, `SELECT x.route_id,a.admission,x.generation,r.hostname,r.revision,e.id,e.access_mode,
+ coalesce(x.desired='active' AND a.route_id IS NOT NULL AND `+liveEndpoint+`
+ AND paperboat.runtime_carrier_valid(a.route_id,a.edge_node_id,a.edge_process_epoch,false),false)
+FROM endpoint_edge_assignments x JOIN endpoint_routes r ON r.id=x.route_id JOIN endpoints e ON e.id=x.endpoint_id
+LEFT JOIN runtime_carrier_attachments a ON a.machine_id=e.agent_machine_id AND a.edge_node_id=x.edge_node_id
+ AND a.edge_process_epoch=x.edge_process_epoch AND a.session_id=x.carrier_session_id
+ AND a.agent_capabilities @> ARRAY['endpoints']::text[]
+WHERE x.edge_node_id=$1 AND x.edge_process_epoch=$2 AND x.changed_at>$3 AND e.kind='preview'
+ORDER BY x.route_id LIMIT $4`, nodeID, epoch, since, limit+1)
+	if err != nil {
+		return nil, nil, err
+	}
+	return scanEdgeAdmissions(rows, expiresAt)
+}
+
+// scanEdgeAdmissions builds each live row into its endpoint admission and returns the other rows'
+// route ids as removed.
+func scanEdgeAdmissions(rows pgx.Rows, expiresAt time.Time) ([]runtimewire.Admission, []string, error) {
 	defer rows.Close()
-	out := []runtimewire.Admission{}
+	out, removed := []runtimewire.Admission{}, []string{}
 	for rows.Next() {
 		var raw []byte
 		var route, hostname, endpoint, access string
 		var generation, revision int64
-		if err := rows.Scan(&raw, &route, &generation, &hostname, &revision, &endpoint, &access); err != nil {
-			return nil, err
+		var live bool
+		if err := rows.Scan(&route, &raw, &generation, &hostname, &revision, &endpoint, &access, &live); err != nil {
+			return nil, nil, err
+		}
+		if !live {
+			removed = append(removed, route)
+			continue
 		}
 		var a runtimewire.Admission
 		if err := json.Unmarshal(raw, &a); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		a.Binding.RouteID, a.Binding.RouteGeneration = route, uint64(revision)
 		a.RouteRevision, a.AttachmentGeneration = uint64(revision), uint64(generation)
@@ -83,7 +115,7 @@ ORDER BY x.route_id LIMIT $3`, nodeID, epoch, limit+1)
 		a.ExpiresAt = expiresAt
 		out = append(out, a)
 	}
-	return out, rows.Err()
+	return out, removed, rows.Err()
 }
 
 // ObserveTx records an edge's observation of one endpoint route. It reports false when the
