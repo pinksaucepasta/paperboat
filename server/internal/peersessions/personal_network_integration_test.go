@@ -107,6 +107,19 @@ func TestPersonalNetworkCarriesEveryComputerOfALargeAccountOnPostgres(t *testing
 			t.Fatalf("concurrent configuration failed: %v", err)
 		}
 	}
+	// Every endpoint of the account refreshing at once (a wake of the whole account) all succeed.
+	many := make(chan error, 20)
+	for i := range 20 {
+		go func() {
+			_, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: fmt.Sprintf("account_wake_%d_%s", i, suffix), UserID: account, EndpointID: machines[2+i]})
+			many <- err
+		}()
+	}
+	for range 20 {
+		if err := <-many; err != nil {
+			t.Fatalf("configuration during an account-wide refresh failed: %v", err)
+		}
+	}
 }
 
 func TestPersonalNetworkAdmissionOnPostgres(t *testing.T) {

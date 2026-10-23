@@ -265,7 +265,22 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 	}
 
 	now := s.now().UTC()
-	tx, err := db.BeginSerializable(ctx, s.store.SQL())
+	// The configuration is built from one read-only snapshot. Serializable builds of every
+	// endpoint of an account read each other's identity rows while each bumped its own, which
+	// formed dependency cycles and aborted ~30% of builds past the retry budget on a 109-endpoint
+	// account. The generation is allocated by its own statement below; the per-endpoint lock in
+	// Configuration keeps one endpoint's generations in build order.
+	// The generation is allocated first, on its own connection, so a build never holds a
+	// snapshot while waiting for a second pool connection (a burst would exhaust the pool).
+	var generation int64
+	err = s.store.SQL().QueryRowContext(ctx, `UPDATE paperboat.peer_network_identities SET config_generation=config_generation+1,updated_at=$1 WHERE user_id=$2 AND endpoint_id=$3 RETURNING config_generation`, now, in.UserID, in.EndpointID).Scan(&generation)
+	if err == sql.ErrNoRows {
+		return NetworkConfigResult{}, ErrDenied
+	}
+	if err != nil {
+		return NetworkConfigResult{}, err
+	}
+	tx, err := s.store.SQL().BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 	if err != nil {
 		return NetworkConfigResult{}, err
 	}
@@ -274,11 +289,6 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 	if err == sql.ErrNoRows || err == ErrUnavailable {
 		return NetworkConfigResult{}, ErrDenied
 	}
-	if err != nil {
-		return NetworkConfigResult{}, err
-	}
-	var generation int64
-	err = tx.QueryRowContext(ctx, `UPDATE paperboat.peer_network_identities SET config_generation=config_generation+1,updated_at=$1 WHERE user_id=$2 AND endpoint_id=$3 RETURNING config_generation`, now, in.UserID, in.EndpointID).Scan(&generation)
 	if err != nil {
 		return NetworkConfigResult{}, err
 	}
