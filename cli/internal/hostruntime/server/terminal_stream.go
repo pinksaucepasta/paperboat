@@ -3,6 +3,8 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/browserbroadcastserver"
@@ -23,6 +25,54 @@ type terminalOutputStream struct {
 	checkpointSent     bool
 	broadcast          *browserbroadcastserver.Registry
 	keyUpdates         <-chan browserbroadcastserver.Epoch
+	// participants is the last participant list this stream reported; participantsCheckedAt
+	// bounds how often a busy stream looks again.
+	participants          string
+	participantsCheckedAt time.Time
+}
+
+// participantsInterval bounds how soon a viewer learns that someone joined, left or changed role.
+const participantsInterval = 500 * time.Millisecond
+
+// participantsEvent reports the session's participants when they changed since this stream last
+// reported them, so viewers update their people list without polling the control plane. The first
+// call reports the current list.
+func (s *terminalOutputStream) participantsEvent() error {
+	if time.Since(s.participantsCheckedAt) < participantsInterval {
+		return nil
+	}
+	s.participantsCheckedAt = time.Now()
+	snapshot, err := s.snapshot()
+	if err != nil {
+		return nil
+	}
+	signature := participantSignature(snapshot.Participants)
+	if signature == s.participants {
+		return nil
+	}
+	s.participants = signature
+	participants := snapshot.Participants
+	if participants == nil {
+		participants = []session.Participant{}
+	}
+	payload, err := json.Marshal(struct {
+		Event        string                `json:"event"`
+		SessionID    string                `json:"session_id"`
+		Participants []session.Participant `json:"participants"`
+	}{"participants", snapshot.ID, participants})
+	if err != nil {
+		return err
+	}
+	return &StreamEvent{Payload: payload}
+}
+
+func participantSignature(participants []session.Participant) string {
+	entries := make([]string, 0, len(participants))
+	for _, participant := range participants {
+		entries = append(entries, participant.AttachmentID+"\x00"+participant.AccountID+"\x00"+participant.Role)
+	}
+	sort.Strings(entries)
+	return "[" + strings.Join(entries, "\x01") + "]"
 }
 
 const terminalExitObservationInterval = 100 * time.Millisecond

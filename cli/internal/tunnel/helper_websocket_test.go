@@ -817,3 +817,13 @@ func helperTestInputBody(t *testing.T, data []byte) []byte {
 	}
 	return append([]byte(nil), data[13:]...)
 }
+
+// A newer host may add events a terminal client does not use (participants for browser viewers);
+// the client ignores them instead of ending the terminal with an invalid-event error.
+func TestHelperTerminalIgnoresEventsItDoesNotUse(t *testing.T) {
+	conn := &helperTerminalConn{streamID: 7}
+	finished := conn.handleEvent(helperFrame{Type: "event", Payload: json.RawMessage(`{"event":"participants","session_id":"ses_1","participants":[]}`)})
+	if finished {
+		t.Fatal("an unknown event ended the terminal")
+	}
+}

@@ -410,6 +410,11 @@ func (s *terminalOutputStream) Next(ctx context.Context) (protocol.BinaryFrame, 
 	}
 	if s.keyUpdates != nil {
 		for {
+			// Only browser terminals (this key-update stream) get participant events: released CLI
+			// terminals end the connection on an event they do not know.
+			if err := s.participantsEvent(); err != nil {
+				return protocol.BinaryFrame{}, err
+			}
 			select {
 			case <-ctx.Done():
 				return protocol.BinaryFrame{}, ctx.Err()

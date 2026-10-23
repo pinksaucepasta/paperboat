@@ -635,7 +635,12 @@ func (c *helperTerminalConn) handleEvent(frame helperFrame) bool {
 		c.publishInputResult(TerminalInputResult{StreamID: event.StreamID, Sequence: event.Sequence, Status: event.Status, BytesWritten: event.BytesWritten, ErrorCode: event.ErrorCode})
 		return false
 	}
-	if event.Event != "terminal_stream_end" || c.target == nil || event.SessionID != c.target.SessionID {
+	if event.Event != "terminal_stream_end" {
+		// Newer hosts add events (for example participants for browser viewers); ignore what this
+		// client does not use instead of ending the terminal.
+		return false
+	}
+	if c.target == nil || event.SessionID != c.target.SessionID {
 		c.finish(1, errors.Join(ErrTransportLost, errors.New("invalid helper terminal event")))
 		return true
 	}

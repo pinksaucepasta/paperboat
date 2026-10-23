@@ -134,6 +134,13 @@ type StreamEnd struct {
 
 func (e *StreamEnd) Error() string { return "output stream ended" }
 
+// StreamEvent is a structured event in the middle of an output stream; the stream goes on.
+type StreamEvent struct {
+	Payload json.RawMessage
+}
+
+func (e *StreamEvent) Error() string { return "output stream event" }
+
 type StreamHandler interface {
 	OpenStream(context.Context, Authorization, string, json.RawMessage, operation.Outcome, bool) (OutputStream, bool, error)
 }

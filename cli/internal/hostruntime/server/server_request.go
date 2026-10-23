@@ -171,6 +171,14 @@ func (s *Server) stream(ctx context.Context, writer *lockedWriter, conn Connecti
 	for {
 		frame, err := stream.Next(ctx)
 		if err != nil {
+			var streamEvent *StreamEvent
+			if errors.As(err, &streamEvent) {
+				if writeErr := writer.write(protocol.Frame{Type: "event", RequestID: "stream", Version: protocol.ProtocolVersion, Capability: capability, Payload: streamEvent.Payload}); writeErr != nil {
+					streamFailure = writeErr
+					return
+				}
+				continue
+			}
 			var streamEnd *StreamEnd
 			if errors.As(err, &streamEnd) {
 				if capability == "config.compare.v1" {
