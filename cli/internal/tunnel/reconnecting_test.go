@@ -277,3 +277,39 @@ func TestTerminalRecoveryBudgetDoesNotRestartAfterSuccessfulReattach(t *testing.
 		t.Fatalf("recovery budget restarted: calls=%d err=%v", calls, err)
 	}
 }
+
+type blockingReconnectConn struct {
+	*reconnectTestConn
+	stop chan struct{}
+	once atomic.Bool
+}
+
+func (c *blockingReconnectConn) Read(p []byte) (int, error) { <-c.stop; return 0, io.EOF }
+func (c *blockingReconnectConn) Wait() (int, error)         { <-c.stop; return 0, nil }
+func (c *blockingReconnectConn) Close() error {
+	if c.once.CompareAndSwap(false, true) {
+		close(c.stop)
+	}
+	return nil
+}
+
+// A shared terminal whose role changed redials for fresh authorization; a plain close of the old
+// connection reports a clean end, so without Redial the joined terminal would just exit.
+func TestReconnectingConnRedialReplacesTheConnection(t *testing.T) {
+	first := &blockingReconnectConn{reconnectTestConn: &reconnectTestConn{}, stop: make(chan struct{})}
+	second := &reconnectTestConn{Reader: bytes.NewReader([]byte("fresh")), code: 3}
+	var reconnects atomic.Int32
+	c := NewReconnectingConn(context.Background(), first, 2, 0, func(context.Context) (Conn, error) {
+		reconnects.Add(1)
+		return second, nil
+	})
+	c.Redial()
+	got, err := io.ReadAll(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, err := c.Wait()
+	if err != nil || code != 3 || string(got) != "fresh" || reconnects.Load() != 1 {
+		t.Fatalf("code=%d err=%v output=%q reconnects=%d", code, err, got, reconnects.Load())
+	}
+}

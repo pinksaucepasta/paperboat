@@ -29,13 +29,34 @@ type runOptions struct {
 	outputBufferBytes int
 	output            io.Writer
 	remoteSize        func() (uint16, uint16)
-	readOnly          bool
+	readOnly          func() bool
 	bracketedPaste    bool
 }
 
 // WithReadOnly keeps input and resize local. Ctrl-C detaches without signaling the shell.
 func WithReadOnly() RunOption {
-	return func(options *runOptions) { options.readOnly = true }
+	return WithReadOnlyWhile(func() bool { return true })
+}
+
+// WithReadOnlyWhile is WithReadOnly for as long as readOnly reports true, so a shared terminal
+// whose role changes while it is joined starts or stops sending input without a rejoin.
+func WithReadOnlyWhile(readOnly func() bool) RunOption {
+	return func(options *runOptions) { options.readOnly = readOnly }
+}
+
+func (o runOptions) isReadOnly() bool { return o.readOnly != nil && o.readOnly() }
+
+// readOnlyResize drops local resizes while the session is read-only.
+type readOnlyResize struct {
+	tunnel.Conn
+	readOnly func() bool
+}
+
+func (c readOnlyResize) Resize(rows, cols uint16) error {
+	if c.readOnly() {
+		return nil
+	}
+	return c.Conn.Resize(rows, cols)
 }
 
 var errViewerDetached = errors.New("viewer detached")
@@ -103,10 +124,7 @@ func Run(ctx context.Context, conn tunnel.Conn, stdinSink io.WriteCloser, opts .
 	}
 
 	// Propagate the initial size and subsequent resizes.
-	stopResize := func() {}
-	if !options.readOnly {
-		stopResize = watchResize(conn, options.remoteSize)
-	}
+	stopResize := watchResize(readOnlyResize{Conn: conn, readOnly: options.isReadOnly}, options.remoteSize)
 	defer stopResize()
 
 	// Remote -> local. Ends when the remote PTY closes; that is normal EOF, not
@@ -141,7 +159,7 @@ func Run(ctx context.Context, conn tunnel.Conn, stdinSink io.WriteCloser, opts .
 		buf := make([]byte, 32*1024)
 		for {
 			n, readErr := readLocalInput(inputCtx, os.Stdin, buf)
-			if options.readOnly {
+			if options.isReadOnly() {
 				if bytes.IndexByte(buf[:n], 3) >= 0 {
 					streamErr <- errViewerDetached
 					return

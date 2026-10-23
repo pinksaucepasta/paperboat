@@ -5,7 +5,9 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/resolver"
 	"github.com/pinksaucepasta/paperboat/internal/tunnel"
@@ -34,5 +36,36 @@ func TestSharedJoinAnnouncesTheTerminalOnlyAfterItConnects(t *testing.T) {
 	}, info, "terminal_1")
 	if err != nil || conn == nil || !strings.Contains(out.String(), "Shared terminal terminal_1 · view only") {
 		t.Fatalf("connected join conn=%v err=%v output=%q", conn, err, out.String())
+	}
+}
+
+// F3-06 (user decision 2026-10-23): an owner's upgrade to interactive reaches a joined teammate
+// within seconds, without a rejoin. The watcher redials only when the role differs.
+func TestWatchSharedRoleRedialsWhenTheRoleChanges(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var serverViewer, joinedViewer atomic.Bool
+	serverViewer.Store(true)
+	joinedViewer.Store(true)
+	redials := make(chan struct{}, 4)
+	go watchSharedRole(ctx, 10*time.Millisecond, func(context.Context) (bool, error) { return serverViewer.Load(), nil }, joinedViewer.Load, func() {
+		joinedViewer.Store(serverViewer.Load())
+		redials <- struct{}{}
+	})
+	select {
+	case <-redials:
+		t.Fatal("redialed while the role was unchanged")
+	case <-time.After(100 * time.Millisecond):
+	}
+	serverViewer.Store(false)
+	select {
+	case <-redials:
+	case <-time.After(2 * time.Second):
+		t.Fatal("an upgrade to interactive did not redial")
+	}
+	select {
+	case <-redials:
+		t.Fatal("redialed again after the role matched")
+	case <-time.After(100 * time.Millisecond):
 	}
 }

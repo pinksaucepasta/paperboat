@@ -234,6 +234,8 @@ func joinSharedTerminal(c *cobra.Command, args []string) (result error) {
 	if err != nil {
 		return err
 	}
+	var viewOnly atomic.Bool
+	viewOnly.Store(info.Terminal.ViewOnly())
 	conn := tunnel.NewReconnectingConn(c.Context(), initial, d.cfg.Connect.DialRetries, time.Duration(d.cfg.Connect.DialRetrySeconds)*time.Second, func(ctx context.Context) (tunnel.Conn, error) {
 		fresh, err := resolve(ctx)
 		if err != nil {
@@ -243,16 +245,21 @@ func joinSharedTerminal(c *cobra.Command, args []string) (result error) {
 			}
 			return nil, err
 		}
-		if fresh.Terminal.ViewOnly() != info.Terminal.ViewOnly() {
-			return nil, tunnel.StopReconnect(errors.New("your terminal role changed; run `pb session join " + id + "` again to use the current role"))
+		next, err := d.tunnel.Dial(ctx, fresh)
+		if err == nil && viewOnly.Swap(fresh.Terminal.ViewOnly()) != fresh.Terminal.ViewOnly() {
+			fmt.Fprintln(c.ErrOrStderr(), sharedRoleNotice(fresh.Terminal.ViewOnly()))
 		}
-		return d.tunnel.Dial(ctx, fresh)
+		return next, err
 	})
+	if client, err := newWorkspaceAPIClient(actionContext(c, nil), d.cfg.ServerURL, d.auth); err == nil {
+		go watchSharedRole(c.Context(), sharedRoleInterval, func(ctx context.Context) (bool, error) {
+			state, err := client.TerminalSharing(ctx, id)
+			return state.Role == "viewer", err
+		}, viewOnly.Load, conn.Redial)
+	}
 	defer func() { result = terminalSharingWithCleanup(result, conn.Close()) }()
 	opts := []session.RunOption{session.WithOutput(c.OutOrStdout()), session.WithOutputBufferBytes(d.cfg.Connect.TerminalOutputBufferBytes)}
-	if info.Terminal.ViewOnly() {
-		opts = append(opts, session.WithReadOnly())
-	}
+	opts = append(opts, session.WithReadOnlyWhile(viewOnly.Load))
 	code, err := session.Run(c.Context(), conn, sharedInputSink{conn}, opts...)
 	if err != nil {
 		return err
@@ -282,4 +289,32 @@ func dialSharedTerminal(ctx context.Context, w io.Writer, dial func(context.Cont
 		return nil, terminalSharingOutputFailure(err)
 	}
 	return conn, nil
+}
+
+// sharedRoleInterval bounds how long a joined teammate waits for a role the owner changed.
+const sharedRoleInterval = 5 * time.Second
+
+// watchSharedRole redials the joined terminal when the member's role on it changes, so an owner's
+// upgrade to interactive (or downgrade to viewer) takes effect without a rejoin.
+func watchSharedRole(ctx context.Context, interval time.Duration, currentlyViewer func(context.Context) (bool, error), joinedAsViewer func() bool, redial func()) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		viewer, err := currentlyViewer(ctx)
+		if err == nil && viewer != joinedAsViewer() {
+			redial()
+		}
+	}
+}
+
+func sharedRoleNotice(viewOnly bool) string {
+	if viewOnly {
+		return "Your role on this shared terminal is now view only; typing stays local and Ctrl-C detaches."
+	}
+	return "Your role on this shared terminal is now interactive; typing reaches the shared shell."
 }

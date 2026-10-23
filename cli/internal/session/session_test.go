@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -166,5 +167,57 @@ func TestRunViewerKeepsInputLocalAndDetachesWithoutSignal(t *testing.T) {
 	code, err := Run(context.Background(), c, s, WithReadOnly(), WithOutput(&out))
 	if err != nil || code != 0 || s.Len() != 0 || c.halfClosed.Load() || !c.closed.Load() {
 		t.Fatalf("viewer code=%d err=%v input bytes=%d halfclose=%v", code, err, s.Len(), c.halfClosed.Load())
+	}
+}
+
+type lockedSink struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (s *lockedSink) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.Write(p)
+}
+func (s *lockedSink) Close() error   { return nil }
+func (s *lockedSink) String() string { s.mu.Lock(); defer s.mu.Unlock(); return s.buf.String() }
+
+// F3-06: a viewer upgraded to interactive while joined starts sending input without a rejoin;
+// what it typed while still a viewer stays local.
+func TestRunStartsSendingInputWhenReadOnlyEnds(t *testing.T) {
+	inR, inW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := os.Stdin
+	os.Stdin = inR
+	defer func() { os.Stdin = old; _ = inR.Close(); _ = inW.Close() }()
+	var viewer atomic.Bool
+	viewer.Store(true)
+	c := &testConn{Reader: bytes.NewBufferString(""), wait: make(chan struct{})}
+	s := &lockedSink{}
+	done := make(chan error, 1)
+	go func() {
+		_, err := Run(context.Background(), c, s, WithReadOnlyWhile(viewer.Load), WithOutput(io.Discard))
+		done <- err
+	}()
+	_, _ = inW.Write([]byte("while-viewer"))
+	time.Sleep(200 * time.Millisecond)
+	viewer.Store(false)
+	_, _ = inW.Write([]byte("typed"))
+	deadline := time.Now().Add(5 * time.Second)
+	for !strings.Contains(s.String(), "typed") {
+		if time.Now().After(deadline) {
+			t.Fatalf("input after the upgrade never reached the shell: %q", s.String())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if strings.Contains(s.String(), "while-viewer") {
+		t.Fatalf("input typed as a viewer was forwarded: %q", s.String())
+	}
+	close(c.wait)
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }

@@ -83,6 +83,7 @@ type ReconnectingConn struct {
 	mu                sync.RWMutex
 	current           Conn
 	available         chan struct{}
+	redial            atomic.Bool
 	reconnect         ReconnectFunc
 	maxRetries        int
 	delay             time.Duration
@@ -187,6 +188,9 @@ func (c *ReconnectingConn) supervise(conn Conn) {
 		_ = conn.Close()
 		<-readDone
 		c.recordCompression(conn)
+		if c.redial.Swap(false) && c.reconnect != nil && c.maxRetries > 0 {
+			err = ErrTransportLost
+		}
 		if err == nil || !errors.Is(err, ErrTransportLost) || c.reconnect == nil || c.maxRetries <= 0 {
 			if err == nil {
 				lifetimeOutcome = "success"
@@ -428,6 +432,20 @@ func (c *ReconnectingConn) CloseWrite() error {
 	return nil
 }
 func (c *ReconnectingConn) Wait() (int, error) { r := <-c.done; return r.code, r.err }
+
+// Redial replaces the current connection with a fresh one from the reconnect function, as after a
+// lost transport, for example when the terminal's authorization changed. Output resumes at the cursor.
+func (c *ReconnectingConn) Redial() {
+	c.mu.RLock()
+	conn := c.current
+	c.mu.RUnlock()
+	if conn == nil {
+		return
+	}
+	c.redial.Store(true)
+	_ = conn.Close()
+}
+
 func (c *ReconnectingConn) Close() error {
 	var err error
 	c.closeOnce.Do(func() {
