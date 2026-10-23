@@ -46,6 +46,7 @@ func (s *Service) describeMachineAccess(ctx context.Context, account string, mac
 	if scoped && scope.TeamID != "" {
 		teamID = scope.TeamID
 	}
+	// The local address lease is read, never allocated here: a machine gets one when it connects to control sync.
 	rows, err := s.db.SQL().QueryContext(ctx, `SELECT m.id,
  CASE WHEN NOT $3::boolean THEN (m.owner_team_id IS NULL AND m.user_id=$1 AND m.deleted_at IS NULL) OR machine_management_allowed($1,m.id)
       WHEN $4::text IS NULL THEN m.user_id=$1 AND m.owner_team_id IS NULL
@@ -56,7 +57,7 @@ func (s *Service) describeMachineAccess(ctx context.Context, account string, mac
         WHEN $4::text IS NULL THEN m.user_id=$1 AND m.owner_team_id IS NULL AND m.revoked_at IS NULL AND m.deleted_at IS NULL
         ELSE team_machine_capability_allowed($1,$4,m.id,capability) END),'[]'::json),
  coalesce(l.address_slot, 0), EXISTS(SELECT 1 FROM paperboat.peer_network_identities n JOIN paperboat.peer_endpoint_certificates c ON c.fingerprint=n.quic_certificate_fingerprint AND c.revoked_at IS NULL AND c.expires_at>now() WHERE n.machine_id=m.id AND n.machine_generation=m.installation_generation AND n.revoked_at IS NULL)
- FROM user_machines m LEFT JOIN LATERAL paperboat.ensure_control_sync_lease(m.id) l ON true WHERE m.id=ANY($2::text[])`, account, ids, scoped, teamID)
+ FROM user_machines m LEFT JOIN paperboat.control_sync_leases l ON l.machine_id=m.id WHERE m.id=ANY($2::text[])`, account, ids, scoped, teamID)
 	if err != nil {
 		return err
 	}
