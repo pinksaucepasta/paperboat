@@ -12,6 +12,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/internal/serverclock"
 	"github.com/pinksaucepasta/paperboat/internal/telemetry"
 )
 
@@ -372,7 +373,7 @@ func (r *APIResolver) validateDescriptor(resp api.ConnectionDescriptor, target t
 	if resp.UserMachineID != target.id {
 		return api.ConnectionDescriptor{}, errors.New("server returned a descriptor for the wrong machine")
 	}
-	if resp.ExpiresAt.IsZero() || !time.Now().Before(resp.ExpiresAt) {
+	if resp.ExpiresAt.IsZero() || !serverclock.Now().Before(resp.ExpiresAt) {
 		return api.ConnectionDescriptor{}, errors.New("server returned an expired connection descriptor")
 	}
 	if !completeTerminalDescriptor(resp.Terminal) {
@@ -401,7 +402,7 @@ func (r *APIResolver) validateDescriptor(resp api.ConnectionDescriptor, target t
 	if !validTerminalAuth || !(exactScopes(resp.Terminal.Auth.Scopes, "terminal:operate") || exactScopes(resp.Terminal.Auth.Scopes, "terminal:view") || exactScopes(resp.Terminal.Auth.Scopes, "terminal:control")) {
 		return api.ConnectionDescriptor{}, errors.New("terminal descriptor has invalid scope or auth")
 	}
-	if resp.Terminal.Auth.ExpiresAt.IsZero() || !time.Now().Before(resp.Terminal.Auth.ExpiresAt) || resp.Terminal.Auth.ExpiresAt.After(resp.ExpiresAt) {
+	if resp.Terminal.Auth.ExpiresAt.IsZero() || !serverclock.Now().Before(resp.Terminal.Auth.ExpiresAt) || resp.Terminal.Auth.ExpiresAt.After(resp.ExpiresAt) {
 		return api.ConnectionDescriptor{}, errors.New("terminal credential is expired")
 	}
 	sharedTerminal := exactScopes(resp.Terminal.Auth.Scopes, "terminal:view") || exactScopes(resp.Terminal.Auth.Scopes, "terminal:control")
@@ -431,7 +432,7 @@ func (r *APIResolver) validateFileTransfer(transfer *api.FileTransfer, terminalU
 	if transfer.Auth.Method != "bearer" || strings.TrimSpace(transfer.Auth.Token) == "" || !exactScopes(transfer.Auth.Scopes, "file:transfer") {
 		return errors.New("file transfer descriptor has invalid scope or auth")
 	}
-	if transfer.Auth.ExpiresAt.IsZero() || !time.Now().Before(transfer.Auth.ExpiresAt) || transfer.Auth.ExpiresAt.After(descriptorExpiry) {
+	if transfer.Auth.ExpiresAt.IsZero() || !serverclock.Now().Before(transfer.Auth.ExpiresAt) || transfer.Auth.ExpiresAt.After(descriptorExpiry) {
 		return errors.New("file transfer credential is expired")
 	}
 	p := transfer.Policy

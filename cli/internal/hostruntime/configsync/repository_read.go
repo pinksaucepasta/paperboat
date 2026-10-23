@@ -20,6 +20,8 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/go-git/go-git/v5/storage"
 	"github.com/go-git/go-git/v5/storage/filesystem"
+
+	"github.com/pinksaucepasta/paperboat/internal/serverclock"
 )
 
 // RepositoryReadAccess authorizes only an account's registered repository read.
@@ -72,7 +74,7 @@ func readSharedRepositoryConfig(ctx context.Context, root, credentialRoot string
 	if err != nil || normalized != access.CloneURL || kind != access.Transport || access.RepositoryID == "" || access.Branch == "" || plumbing.NewBranchReferenceName(access.Branch).Validate() != nil || (access.Capability != "repository_contents_read" && (!machineGrant || access.Capability != "repository_contents_write")) {
 		return fail(ErrAuthorization)
 	}
-	if !access.ExpiresAt.After(time.Now()) {
+	if !access.ExpiresAt.After(serverclock.Now()) {
 		return fail(ErrAuthorization)
 	}
 	defaults := DefaultSourceConfigLimits()

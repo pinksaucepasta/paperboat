@@ -17,6 +17,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/selector"
+	"github.com/pinksaucepasta/paperboat/internal/serverclock"
 )
 
 var authCredentialStoreAvailable = config.CredentialStoreAvailable
@@ -178,7 +179,7 @@ func browserLogin(c *command.Context) error {
 				if err := c.Context.Err(); err != nil {
 					return abortBrowserLogin(c.Context, issuer, state, save, err)
 				}
-				if !time.Now().Before(state.ExpiresAt) {
+				if !serverclock.Now().Before(state.ExpiresAt) {
 					return abortBrowserLogin(c.Context, issuer, state, save, errors.New("login link expired; run `pb login` again"))
 				}
 				t, err := api.PollDeviceLogin(c.Context, issuer, state.DeviceCode, loginHTTPClient())
@@ -231,7 +232,7 @@ func browserLogin(c *command.Context) error {
 					return browserLoginFailure{message: "login connection interrupted; run `pb login` to resume the same approval", cause: err}
 				}
 				delay := time.Duration(state.Interval) * time.Second
-				if remaining := time.Until(state.ExpiresAt); remaining < delay {
+				if remaining := serverclock.Until(state.ExpiresAt); remaining < delay {
 					delay = remaining
 				}
 				if err = loginWait(c.Context, delay); err != nil {
@@ -248,7 +249,7 @@ func browserLogin(c *command.Context) error {
 				return fmt.Errorf("sign-in saved; unlock the credential store and retry `pb login`: %w", err)
 			}
 		} else {
-			if !time.Now().Before(state.Credential.ExpiresAt) {
+			if !serverclock.Now().Before(state.Credential.ExpiresAt) {
 				return abortBrowserLogin(c.Context, issuer, state, save, errors.New("approved login session expired; run `pb login` again"))
 			}
 			if _, err = auth.CompleteLogin(c.Context, auth.LoginCompletion{Store: store, Client: api.New(issuer, *state.Credential, loginHTTPClient()), Issuer: issuer, Credential: *state.Credential, SessionID: state.Profile.CLIClientSessionID, ExpectedAccountID: state.Profile.Account.ID, PreviousSessionID: &state.PreviousSessionID, AllowAccountChange: true}); err != nil {

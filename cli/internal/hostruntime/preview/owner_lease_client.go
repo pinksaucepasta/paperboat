@@ -11,6 +11,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/serverclock"
 )
 
 const ownerSessionLeaseResponseLimit = 16 << 10
@@ -229,7 +231,7 @@ func (c *LocalOwnerSessionClient) KeepAlive(ctx context.Context, lease OwnerSess
 	}
 	current := lease
 	for {
-		interval := time.Until(current.ExpiresAt.UTC()) / 3
+		interval := serverclock.Until(current.ExpiresAt.UTC()) / 3
 		if interval < time.Second {
 			interval = time.Second
 		}

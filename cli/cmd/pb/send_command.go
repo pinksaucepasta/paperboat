@@ -18,6 +18,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/resolver"
 	"github.com/pinksaucepasta/paperboat/internal/selector"
+	"github.com/pinksaucepasta/paperboat/internal/serverclock"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -210,7 +211,7 @@ func sendCommand() *cobra.Command {
 						return errors.New("local daemon transport is unavailable for native file transfer")
 					}
 					grantForDescriptor := func(grantCtx context.Context, current api.FileTransfer) (filetransfer.NativeGrant, error) {
-						if current.Endpoint != descriptor.Endpoint || current.SourceMachineID != descriptor.SourceMachineID || current.DestinationMachineID != descriptor.DestinationMachineID || current.InitiatingUserID != descriptor.InitiatingUserID || current.Policy != descriptor.Policy || current.Auth.Method != "bearer" || current.Auth.Token == "" || !current.Auth.ExpiresAt.After(time.Now()) {
+						if current.Endpoint != descriptor.Endpoint || current.SourceMachineID != descriptor.SourceMachineID || current.DestinationMachineID != descriptor.DestinationMachineID || current.InitiatingUserID != descriptor.InitiatingUserID || current.Policy != descriptor.Policy || current.Auth.Method != "bearer" || current.Auth.Token == "" || !current.Auth.ExpiresAt.After(serverclock.Now()) {
 							return filetransfer.NativeGrant{}, errors.New("renewed transfer authorization changed the approved resource or policy")
 						}
 						lease, leaseErr := dependencies.peerLocal.PrepareFileTransfer(grantCtx, localapi.FileTransferRequest{Schema: localapi.FileTransferSchemaV1, MachineID: destination.ID, EnvironmentID: destination.EnvironmentID, MachineGeneration: uint64(destination.InstallationGeneration), OperationID: batchID, Credential: current.Auth.Token, AccessSessionID: current.Auth.AccessSessionID, Deadline: current.Auth.ExpiresAt, MaximumBytes: uint64(current.Policy.MaxFileBytes)})

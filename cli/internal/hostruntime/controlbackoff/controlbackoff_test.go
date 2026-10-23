@@ -149,3 +149,31 @@ func TestARejectedCredentialDoesNotHoldBackANewOne(t *testing.T) {
 		t.Fatalf("the rejected credential is no longer held back: %v", err)
 	}
 }
+
+// A 401 whose Date is a minute or more from the local clock is a skewed clock, not a bad identity:
+// the next request goes out at once with a corrected proof (Lane X #2).
+func TestARefusalFromAClockSkewDoesNotHoldTheIdentityBack(t *testing.T) {
+	clock := time.Unix(1_000_000, 0)
+	server := &skewedServer{date: clock.Add(10 * time.Minute)}
+	transport := newTransport(&identityServer{}, &clock)
+	transport.Base = server
+	for range 3 {
+		if response, err := transport.RoundTrip(identified()); err != nil || response.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("a skew refusal held the identity back: %v", err)
+		}
+	}
+	if server.calls != 3 {
+		t.Fatalf("network requests = %d, want 3", server.calls)
+	}
+}
+
+type skewedServer struct {
+	date  time.Time
+	calls int
+}
+
+func (s *skewedServer) RoundTrip(*http.Request) (*http.Response, error) {
+	s.calls++
+	header := http.Header{"Date": []string{s.date.UTC().Format(http.TimeFormat)}}
+	return &http.Response{StatusCode: http.StatusUnauthorized, Header: header, Body: http.NoBody}, nil
+}

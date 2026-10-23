@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/serverclock"
 	"github.com/pinksaucepasta/paperboat/internal/wirejson"
 	"io"
 	"net/http"
@@ -175,7 +176,7 @@ func NewSource(config Config) (*Source, error) {
 		config.RenewBefore = 10 * time.Minute
 	}
 	if config.Clock == nil {
-		config.Clock = func() time.Time { return time.Now().UTC() }
+		config.Clock = func() time.Time { return serverclock.Now().UTC() }
 	}
 	if config.OperationID == nil {
 		config.OperationID = randomOperationID

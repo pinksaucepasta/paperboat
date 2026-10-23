@@ -26,6 +26,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntimecmd"
 	"github.com/pinksaucepasta/paperboat/internal/inbox"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/recoverykey"
+	"github.com/pinksaucepasta/paperboat/internal/serverclock"
 	"github.com/spf13/cobra"
 )
 
@@ -386,7 +387,7 @@ func saveSetupMachineControl(ctx context.Context, client *api.Client, identitySt
 		return err
 	}
 	controlPath := "/v1/machines/" + machine.ID + "/control-credentials"
-	proof, err := identityStore.MachineProof(operationID, http.MethodPost, controlPath, controlBody, time.Now().UTC())
+	proof, err := identityStore.MachineProof(operationID, http.MethodPost, controlPath, controlBody, serverclock.Now().UTC())
 	if err != nil {
 		return fmt.Errorf("prove machine identity: %w", err)
 	}

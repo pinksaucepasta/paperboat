@@ -12,6 +12,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/internal/serverclock"
 )
 
 const refreshBefore = 60 * time.Second
@@ -124,13 +125,13 @@ func (s *Source) credential(refreshWindow time.Duration) (result config.Credenti
 			expires := time.Now().UTC().Add(time.Duration(tokens.ExpiresIn) * time.Second)
 			return config.Credential{AccessToken: tokens.AccessToken, RefreshToken: tokens.RefreshToken, TokenType: tokens.TokenType, ExpiresAt: expires}, tokens.CLIClientSessionID, nil
 		})
-		if err != nil || time.Now().Before(credential.ExpiresAt) {
+		if err != nil || serverclock.Now().Before(credential.ExpiresAt) {
 			break
 		}
 		// An offline interrupted rotation can recover an expired access token with
 		// its still-valid successor refresh. Commit it first, then rotate normally.
 	}
-	if err == nil && !time.Now().Before(credential.ExpiresAt) {
+	if err == nil && !serverclock.Now().Before(credential.ExpiresAt) {
 		err = config.ErrNoCredentials
 		return config.Credential{}, accountCredentialFailure(err)
 	}

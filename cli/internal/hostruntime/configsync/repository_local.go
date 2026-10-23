@@ -6,12 +6,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"time"
 
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/filemode"
 	"github.com/go-git/go-git/v5/plumbing/object"
+
+	"github.com/pinksaucepasta/paperboat/internal/serverclock"
 )
 
 // Config repositories contain small files; bound transport work independently
@@ -228,7 +229,7 @@ func publishLocal(ctx context.Context, source *git.Repository, a RepositoryAcces
 	if err := ctx.Err(); err != nil {
 		return PublishResult{}, err
 	}
-	if !a.ExpiresAt.After(time.Now()) {
+	if !a.ExpiresAt.After(serverclock.Now()) {
 		return PublishResult{}, ErrAuthorization
 	}
 	if _, err := io.WriteString(lock, commit.String()+"\n"); err != nil {

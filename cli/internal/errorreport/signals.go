@@ -12,6 +12,7 @@ import (
 
 	"github.com/getsentry/sentry-go"
 	"github.com/getsentry/sentry-go/attribute"
+	"github.com/pinksaucepasta/paperboat/internal/serverclock"
 	"github.com/pinksaucepasta/paperboat/internal/supportref"
 )
 
@@ -289,6 +290,8 @@ func (t ownedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		copy := *response
 		copy.Request = clone
 		response = &copy
+		// Every Paperboat server answer, a refusal included, tells this process the server's clock.
+		serverclock.Observe(response.Header.Get("Date"), started, time.Now())
 	}
 	observed.duration.Store(int64(time.Since(started)))
 	outcome := "success"

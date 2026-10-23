@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/command"
@@ -17,6 +16,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntimecmd"
 	"github.com/pinksaucepasta/paperboat/internal/machinename"
 	"github.com/pinksaucepasta/paperboat/internal/selector"
+	"github.com/pinksaucepasta/paperboat/internal/serverclock"
 	"github.com/spf13/cobra"
 )
 
@@ -76,7 +76,7 @@ func workspaceLabel(id string) string {
 // pairLoginEnrollment adds this device to the account with the enrollment its approved login
 // carried: the same pairing `pb pair` runs with a dashboard token.
 func pairLoginEnrollment(c *command.Context, server string, enrollment *config.LoginEnrollment, name string) error {
-	if !time.Now().Before(enrollment.ExpiresAt) {
+	if !serverclock.Now().Before(enrollment.ExpiresAt) {
 		return errors.New("the approval to add this computer expired; run `pb login` again")
 	}
 	dir, err := os.MkdirTemp("", "pb-login-")

@@ -18,6 +18,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
 	"github.com/pinksaucepasta/paperboat/internal/httptransport"
+	"github.com/pinksaucepasta/paperboat/internal/serverclock"
 )
 
 const contentType = "application/offset+octet-stream"
@@ -847,13 +848,13 @@ func (c *Client) refreshRequestAdmission(ctx context.Context) error {
 		return nil
 	}
 	current := c.currentAuth()
-	if current.ExpiresAt.IsZero() || time.Until(current.ExpiresAt) > 30*time.Second {
+	if current.ExpiresAt.IsZero() || serverclock.Until(current.ExpiresAt) > 30*time.Second {
 		return nil
 	}
 	c.refreshMu.Lock()
 	defer c.refreshMu.Unlock()
 	current = c.currentAuth()
-	if current.ExpiresAt.IsZero() || time.Until(current.ExpiresAt) > 30*time.Second {
+	if current.ExpiresAt.IsZero() || serverclock.Until(current.ExpiresAt) > 30*time.Second {
 		return nil
 	}
 	fresh, err := c.RefreshAuth(ctx)

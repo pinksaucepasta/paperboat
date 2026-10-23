@@ -15,6 +15,8 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/serverclock"
 )
 
 var ErrGitRepositoryInvalid = errors.New("invalid config Git repository")
@@ -283,7 +285,7 @@ func (r *GitRepository) open(ctx context.Context) (accessResult RepositoryAccess
 	if err != nil {
 		return RepositoryAccess{}, nil, err
 	}
-	if !access.ExpiresAt.After(time.Now()) {
+	if !access.ExpiresAt.After(serverclock.Now()) {
 		return RepositoryAccess{}, nil, ErrAuthorization
 	}
 	if access.Branch == "" || plumbing.NewBranchReferenceName(access.Branch).Validate() != nil ||

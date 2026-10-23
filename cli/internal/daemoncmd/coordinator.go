@@ -20,6 +20,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/daemonrpc"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/machineloopback"
+	"github.com/pinksaucepasta/paperboat/internal/serverclock"
 	"github.com/pinksaucepasta/paperboat/internal/supportref"
 )
 
@@ -220,7 +221,7 @@ func (c *Coordinator) ApplyMachines(ctx context.Context, machines []api.UserMach
 	byID := make(map[string]api.MachineServicesMachine, len(services))
 	var expiry time.Time
 	for _, service := range services {
-		if service.ExpiresAt.After(time.Now()) {
+		if service.ExpiresAt.After(serverclock.Now()) {
 			byID[service.MachineID] = service
 			if expiry.IsZero() || service.ExpiresAt.Before(expiry) {
 				expiry = service.ExpiresAt

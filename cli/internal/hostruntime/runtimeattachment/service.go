@@ -30,6 +30,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machinecontrol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelmanager"
+	"github.com/pinksaucepasta/paperboat/internal/serverclock"
 	"github.com/pinksaucepasta/paperboat/internal/supportref"
 )
 
@@ -579,10 +580,10 @@ func (s *Service) fetch(ctx context.Context, activeNode, activeEpoch string) (ou
 		return out, controlFailure(errors.Join(preview.ErrMachineAttachmentSessionInvalid, err))
 	}
 	out = envelope.Data
-	if out.Schema != "paperboat.runtime-carrier/v1" || out.Binding.HostID != s.config.MachineID || out.Binding.InstallationGeneration != s.config.InstallationGeneration || out.Binding.ProcessGeneration != s.config.WorkerGeneration || out.Binding.RouteID == "" || out.Binding.SessionID == "" || out.RouteKind != "runtime_https_wss" || !out.ExpiresAt.After(time.Now()) {
+	if out.Schema != "paperboat.runtime-carrier/v1" || out.Binding.HostID != s.config.MachineID || out.Binding.InstallationGeneration != s.config.InstallationGeneration || out.Binding.ProcessGeneration != s.config.WorkerGeneration || out.Binding.RouteID == "" || out.Binding.SessionID == "" || out.RouteKind != "runtime_https_wss" || !out.ExpiresAt.After(serverclock.Now()) {
 		return admission{}, controlFailure(preview.ErrMachineAttachmentSessionInvalid)
 	}
-	if out.Backup != nil && (out.Backup.Schema != out.Schema || out.Backup.Binding.HostID != out.Binding.HostID || out.Backup.Binding.AccountID != out.Binding.AccountID || out.Backup.Binding.RouteID != out.Binding.RouteID || out.Backup.Binding.EdgeNodeID == out.Binding.EdgeNodeID || out.Backup.Binding.EdgeProcessEpoch == "" || out.Backup.Binding.InstallationGeneration != out.Binding.InstallationGeneration || out.Backup.Binding.ProcessGeneration != out.Binding.ProcessGeneration || out.Backup.RouteKind != out.RouteKind || !out.Backup.ExpiresAt.After(time.Now())) {
+	if out.Backup != nil && (out.Backup.Schema != out.Schema || out.Backup.Binding.HostID != out.Binding.HostID || out.Backup.Binding.AccountID != out.Binding.AccountID || out.Backup.Binding.RouteID != out.Binding.RouteID || out.Backup.Binding.EdgeNodeID == out.Binding.EdgeNodeID || out.Backup.Binding.EdgeProcessEpoch == "" || out.Backup.Binding.InstallationGeneration != out.Binding.InstallationGeneration || out.Backup.Binding.ProcessGeneration != out.Binding.ProcessGeneration || out.Backup.RouteKind != out.RouteKind || !out.Backup.ExpiresAt.After(serverclock.Now())) {
 		return admission{}, controlFailure(preview.ErrMachineAttachmentSessionInvalid)
 	}
 	return out, nil

@@ -5,9 +5,9 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
-	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/configsync"
+	"github.com/pinksaucepasta/paperboat/internal/serverclock"
 )
 
 type ConfigComparisonDescriptor struct {
@@ -24,7 +24,7 @@ func (c *Client) ConfigConflictConnection(ctx context.Context, environmentID, co
 	if err != nil {
 		return result, err
 	}
-	if len(result.OperationID) < 8 || len(result.OperationID) > 128 || !result.ExpiresAt.After(time.Now()) {
+	if len(result.OperationID) < 8 || len(result.OperationID) > 128 || !result.ExpiresAt.After(serverclock.Now()) {
 		return ConfigComparisonDescriptor{}, errors.New("invalid conflict comparison lifetime")
 	}
 	if result.Environment == nil {

@@ -5,12 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/identitybootstrap"
+	"github.com/pinksaucepasta/paperboat/internal/serverclock"
 )
 
 type LoginClient interface {
@@ -35,7 +35,7 @@ type LoginCompletion struct {
 // profile. Approval/token recovery remains with the acquiring caller; endpoint
 // enrollment and profile transactions can both be retried for the same session.
 func CompleteLogin(ctx context.Context, r LoginCompletion) (config.Profile, error) {
-	if ctx == nil || r.Client == nil || r.SessionID == "" || r.Credential.TokenType != "Bearer" || r.Credential.AccessToken == "" || r.Credential.RefreshToken == "" || !time.Now().Before(r.Credential.ExpiresAt) {
+	if ctx == nil || r.Client == nil || r.SessionID == "" || r.Credential.TokenType != "Bearer" || r.Credential.AccessToken == "" || r.Credential.RefreshToken == "" || !serverclock.Now().Before(r.Credential.ExpiresAt) {
 		return config.Profile{}, errors.New("approved login session is invalid")
 	}
 	issuer, err := config.NormalizeIssuer(r.Issuer)

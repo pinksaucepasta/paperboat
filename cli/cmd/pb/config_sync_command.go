@@ -10,10 +10,10 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/configsync"
+	"github.com/pinksaucepasta/paperboat/internal/serverclock"
 	"github.com/spf13/cobra"
 )
 
@@ -286,7 +286,7 @@ func buildConfigSyncProjection(ctx context.Context, backend configSyncSourceBack
 			return api.ConfigRepository{}, configsync.RepositoryReadAccess{}, configSyncRefusal("The repository grant does not match the configured target or branch. Check the repository, URL and branch in the machine configuration (`pb config sync path`).")
 		}
 		normalized, transport, err := configsync.NormalizeRepositoryEndpoint(access.CloneURL)
-		if err != nil || normalized != access.CloneURL || transport != access.Transport || access.Capability != "repository_contents_read" || !access.ExpiresAt.After(time.Now()) {
+		if err != nil || normalized != access.CloneURL || transport != access.Transport || access.Capability != "repository_contents_read" || !access.ExpiresAt.After(serverclock.Now()) {
 			return api.ConfigRepository{}, configsync.RepositoryReadAccess{}, configsync.ErrAuthorization
 		}
 		return repository, access, nil

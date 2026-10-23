@@ -8,7 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"sync"
-	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/serverclock"
 )
 
 // NativeGrant couples one freshly authorized resource credential to its
@@ -44,7 +45,7 @@ type nativeGrantOwner struct {
 // NewRenewableNativeClient owns the initial lease on success and all replacement
 // leases. Close reports any deferred transport or lease cleanup failures.
 func NewRenewableNativeClient(initial NativeGrant, renew func(context.Context) (NativeGrant, error)) (*NativeClient, error) {
-	if initial.Lease == nil || renew == nil || initial.Auth.ExpiresAt.IsZero() || !initial.Auth.ExpiresAt.After(time.Now()) {
+	if initial.Lease == nil || renew == nil || initial.Auth.ExpiresAt.IsZero() || !initial.Auth.ExpiresAt.After(serverclock.Now()) {
 		return nil, errors.New("invalid native transfer grant")
 	}
 	client, err := NewNativeClient(initial.Endpoint, initial.Auth, initial.Binding, initial.Lease.OpenTransferStream)
@@ -63,7 +64,7 @@ func NewRenewableNativeClient(initial NativeGrant, renew func(context.Context) (
 		if fresh.Lease == nil {
 			return Auth{}, &nativeAuthorizationFailure{errors.New("native transfer renewal lacks a lease")}
 		}
-		if fresh.Endpoint != initial.Endpoint || fresh.Binding != initial.Binding || fresh.Policy != initial.Policy || fresh.Auth.Token == "" || fresh.Auth.ExpiresAt.IsZero() || !fresh.Auth.ExpiresAt.After(time.Now()) {
+		if fresh.Endpoint != initial.Endpoint || fresh.Binding != initial.Binding || fresh.Policy != initial.Policy || fresh.Auth.Token == "" || fresh.Auth.ExpiresAt.IsZero() || !fresh.Auth.ExpiresAt.After(serverclock.Now()) {
 			return Auth{}, &nativeAuthorizationFailure{errors.Join(errors.New("renewed native transfer grant changed resource or policy"), fresh.Lease.Close())}
 		}
 		replacement, err := NewNativeRoundTripper(fresh.Lease.OpenTransferStream)

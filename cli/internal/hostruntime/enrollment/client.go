@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/serverclock"
 	"github.com/pinksaucepasta/paperboat/internal/wirejson"
 	"io"
 	"net/http"
@@ -74,7 +75,8 @@ func (s ProofSource) renewalProof(operationID, method, path string, body []byte)
 }
 
 func (s ProofSource) proof(operationID, method, path string, body []byte, allowExpiredIdentity bool) ([]byte, error) {
-	now := time.Now().UTC()
+	// Proofs carry the time; the server accepts them within a minute of its own clock.
+	now := serverclock.Now().UTC()
 	if s.Clock != nil {
 		now = s.Clock().UTC()
 	}
@@ -122,7 +124,7 @@ func (s ProofSource) proof(operationID, method, path string, body []byte, allowE
 }
 
 func (s TokenSource) Token(context.Context) (string, error) {
-	now := time.Now().UTC()
+	now := serverclock.Now().UTC()
 	if s.Clock != nil {
 		now = s.Clock().UTC()
 	}
