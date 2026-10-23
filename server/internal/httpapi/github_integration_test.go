@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -183,13 +184,21 @@ func TestGitHubBrowserCallbackCompletesOAuth(t *testing.T) {
 	stateCookie := cookieByName(t, start.Result().Cookies(), auth.OAuthStateCookieName)
 	returnTo := cookieByName(t, start.Result().Cookies(), githubReturnToCookie)
 
-	callback := httptest.NewRecorder()
+	// GitHub returns the browser to the API origin, which has no console session.
+	bounce := httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodGet, "/v1/github/oauth/callback?code=github-code&state="+state, nil)
+	router.ServeHTTP(bounce, req)
+	if bounce.Code != http.StatusSeeOther || !strings.HasSuffix(bounce.Header().Get("Location"), "/github/callback?code=github-code&state="+url.QueryEscape(state)) {
+		t.Fatalf("bare callback = %d %q", bounce.Code, bounce.Header().Get("Location"))
+	}
+	// The console page completes it through its proxy with the session and the start cookies.
+	callback := httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/v1/github/oauth/callback", strings.NewReader(`{"code":"github-code","state":"`+state+`"}`))
 	addCookies(req, append(replaceCookie(cookies, stateCookie), returnTo))
+	req.Header.Set(auth.CSRFHeaderName, csrf)
 	router.ServeHTTP(callback, req)
-	location := callback.Header().Get("Location")
-	if callback.Code != http.StatusSeeOther || !strings.HasSuffix(location, "/github/done?login=paperboat-test-user&result=connected&return_to=%2Fconfig") {
-		t.Fatalf("browser callback = %d %q", callback.Code, location)
+	if callback.Code != http.StatusOK || jsonField(t, callback.Body.Bytes(), "login") != "paperboat-test-user" || jsonField(t, callback.Body.Bytes(), "return_to") != "/config" {
+		t.Fatalf("console callback = %d %s", callback.Code, callback.Body.String())
 	}
 	if strings.Contains(callback.Body.String(), "fake-gh-token") {
 		t.Fatal("browser callback leaked token")

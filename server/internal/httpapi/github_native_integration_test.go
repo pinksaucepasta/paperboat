@@ -240,8 +240,8 @@ func TestGitHubNativeLinkAuthenticatedLifecycle(t *testing.T) {
 	if err := store.SQL().QueryRow(`SELECT version FROM paperboat.github_oauth_tokens WHERE user_id=$1`, owner).Scan(&afterVersion); err != nil || afterVersion != beforeVersion {
 		t.Fatal("revoked client changed provider credential")
 	}
-	// Browser OAuth remains session-authenticated; native state cannot bypass its dispatch.
-	request("GET", "/v1/github/oauth/callback?state=ordinary-browser-state&code=provider-code", "", "", nil, 401)
+	// A console-started state is sent to the console, which completes it with the session.
+	request("GET", "/v1/github/oauth/callback?state=ordinary-browser-state&code=provider-code", "", "", nil, http.StatusSeeOther)
 	// Status names the connected account; disconnect clears it.
 	var status struct {
 		Data pbgithub.Status `json:"data"`

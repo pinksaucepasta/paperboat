@@ -180,27 +180,16 @@ func TestGitHubReturnToAcceptsOnlyConsolePaths(t *testing.T) {
 	}
 }
 
-func TestGitHubBrowserCallbackRedirectsToConsoleResult(t *testing.T) {
+func TestGitHubBrowserCallbackSendsTheBrowserToTheConsole(t *testing.T) {
 	cfg := config.Default()
 	cfg.HTTP.BrowserLoginOrigin = "https://console.example.test"
-	authService := auth.NewService(nil, nil, nil, []string{"github-callback-test-key"}, false)
 	githubService := pbgithub.NewService(nil, nil, &pbgithub.FakeClient{}, cfg)
-	for name, test := range map[string]struct {
-		state, cookieState, returnTo, want string
-	}{
-		"bad state keeps return_to":   {"one", "two", "/config", "https://console.example.test/github/done?code=github_oauth_failed&result=error&return_to=%2Fconfig"},
-		"forged return_to is dropped": {"one", "two", "//evil.example.test", "https://console.example.test/github/done?code=github_oauth_failed&result=error"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, "/v1/github/oauth/callback?code=c&state="+test.state, nil)
-			req.AddCookie(&http.Cookie{Name: auth.DevOAuthStateCookieName, Value: test.cookieState})
-			req.AddCookie(&http.Cookie{Name: githubReturnToCookie, Value: test.returnTo})
-			req = req.WithContext(context.WithValue(req.Context(), authContextKey{}, principal{User: auth.User{ID: "usr_github_callback"}}))
-			rec := httptest.NewRecorder()
-			githubOAuthBrowserCallback(authService, githubService).ServeHTTP(rec, req)
-			if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != test.want {
-				t.Fatalf("callback = %d %q; want %q", rec.Code, rec.Header().Get("Location"), test.want)
-			}
-		})
+	// No session on the API origin: the browser must still never see an API body.
+	req := httptest.NewRequest(http.MethodGet, "/v1/github/oauth/callback?code=c&state=s&error=access_denied&extra=x", nil)
+	rec := httptest.NewRecorder()
+	githubCallbackDispatch(githubService, githubOAuthBrowserCallback(githubService)).ServeHTTP(rec, req)
+	want := "https://console.example.test/github/callback?code=c&error=access_denied&state=s"
+	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != want {
+		t.Fatalf("callback = %d %q; want %q", rec.Code, rec.Header().Get("Location"), want)
 	}
 }

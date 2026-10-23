@@ -83,43 +83,38 @@ func githubOAuthCallback(authService *auth.Service, service *pbgithub.Service) h
 			writeError(w, r, http.StatusForbidden, "oauth_state_failed", "OAuth state validation failed.")
 			return
 		}
+		if body.RedirectURI == "" {
+			body.RedirectURI = service.DefaultCallbackURL()
+		}
+		returnTo := gitHubReturnTo(r)
 		status, err := service.CompleteOAuth(r.Context(), p.User.ID, body.Code, body.RedirectURI)
 		if err != nil {
 			writeGitHubOAuthFailure(w, r, err)
 			return
 		}
 		authService.ClearOAuthStateCookie(w)
-		writeJSON(w, http.StatusOK, SuccessResponse{Data: status})
+		setGitHubReturnTo(w, "")
+		writeJSON(w, http.StatusOK, SuccessResponse{Data: struct {
+			pbgithub.Status
+			ReturnTo string `json:"return_to,omitempty"`
+		}{status, returnTo}})
 	}
 }
 
 // githubOAuthBrowserCallback is where GitHub sends the browser after a console-started
-// connection. It answers with a redirect to the console's result page, never a body.
-func githubOAuthBrowserCallback(authService *auth.Service, service *pbgithub.Service) http.HandlerFunc {
+// connection. The browser carries no console session on the API origin, so it is sent on to the
+// console's callback page, which completes the exchange through POST /v1/github/oauth/callback
+// with the user's session and the state cookie set at start. No body is ever shown here.
+func githubOAuthBrowserCallback(service *pbgithub.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		p, ok := principalFromContext(r.Context())
-		if !ok {
-			writeError(w, r, http.StatusUnauthorized, "unauthenticated", "Authentication is required.")
-			return
-		}
 		noStore(w)
-		returnTo := gitHubReturnTo(r)
-		setGitHubReturnTo(w, "")
-		state := r.URL.Query().Get("state")
-		if err := authService.ValidateOAuthState(r, state); err != nil {
-			logHTTPRejection(r, http.StatusSeeOther, "github_oauth_failed", err)
-			http.Redirect(w, r, githubResultURL(service, returnTo, url.Values{"result": {"error"}, "code": {"github_oauth_failed"}}), http.StatusSeeOther)
-			return
+		query := url.Values{}
+		for _, key := range []string{"code", "state", "error"} {
+			if value := r.URL.Query().Get(key); value != "" && len(value) <= 512 {
+				query.Set(key, value)
+			}
 		}
-		authService.ClearOAuthStateCookie(w)
-		status, err := service.CompleteOAuth(r.Context(), p.User.ID, r.URL.Query().Get("code"), service.DefaultCallbackURL())
-		if err != nil {
-			code := githubCallbackErrorCode(err)
-			logHTTPRejection(r, http.StatusSeeOther, code, err)
-			http.Redirect(w, r, githubResultURL(service, returnTo, url.Values{"result": {"error"}, "code": {code}}), http.StatusSeeOther)
-			return
-		}
-		http.Redirect(w, r, githubResultURL(service, returnTo, url.Values{"result": {"connected"}, "login": {status.Login}}), http.StatusSeeOther)
+		http.Redirect(w, r, service.ConsoleOrigin()+"/github/callback?"+query.Encode(), http.StatusSeeOther)
 	}
 }
 
@@ -132,7 +127,7 @@ func consolePath(path string) bool {
 }
 
 func setGitHubReturnTo(w http.ResponseWriter, path string) {
-	cookie := &http.Cookie{Name: githubReturnToCookie, Value: url.QueryEscape(path), Path: "/v1/github/oauth",
+	cookie := &http.Cookie{Name: githubReturnToCookie, Value: url.QueryEscape(path), Path: "/",
 		MaxAge: 600, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode}
 	if path == "" {
 		cookie.MaxAge = -1

@@ -936,7 +936,7 @@ func registerAuthRoutes(mux *http.ServeMux, opts Options) {
 		mux.Handle("DELETE /v1/github/connection", requireAuth(opts.Auth, requireCSRF(opts.Auth, githubDisconnect(opts.GitHub))))
 		mux.Handle("GET /v1/github/repositories", userAuth("machines:read", githubRepositories(opts.GitHub)))
 		mux.Handle("POST /v1/github/oauth/start", requireAuth(opts.Auth, requireCSRF(opts.Auth, githubOAuthStart(opts.Auth, opts.GitHub))))
-		mux.Handle("GET /v1/github/oauth/callback", githubCallbackDispatch(opts.GitHub, requireAuth(opts.Auth, githubOAuthBrowserCallback(opts.Auth, opts.GitHub))))
+		mux.Handle("GET /v1/github/oauth/callback", githubCallbackDispatch(opts.GitHub, githubOAuthBrowserCallback(opts.GitHub)))
 		mux.Handle("POST /v1/github/oauth/callback", requireAuth(opts.Auth, requireCSRF(opts.Auth, githubOAuthCallback(opts.Auth, opts.GitHub))))
 		mux.Handle("POST /v1/github/config-repositories/provision", requireAuth(opts.Auth, requireCSRF(opts.Auth, githubProvisionConfigRepo(opts.GitHub))))
 	}
