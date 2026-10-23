@@ -1,0 +1,145 @@
+name: Lane test
+
+# Heavy suites for lanes, so the shared build host only builds and runs single packages.
+# Run it with tools/ci-test.sh, or push any commit to a ci/** branch (every module, the console).
+# workflow_dispatch narrows it: `modules` (space separated; default all) and `run` (go test -run).
+# The nightly run on main keeps the Go build caches warm for the ci/** branches (caches are only
+# written from main; other refs read them).
+
+on:
+  push:
+    branches: ['ci/**']
+  workflow_dispatch:
+    inputs:
+      modules:
+        description: 'Modules to test: shared cli relay tunnel helper server console (empty = all)'
+        default: ''
+      run:
+        description: 'go test -run pattern (empty = all tests)'
+        default: ''
+  schedule:
+    - cron: '17 3 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lane-test-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      go: ${{ steps.plan.outputs.go }}
+      console: ${{ steps.plan.outputs.console }}
+    steps:
+      - id: plan
+        env:
+          MODULES: ${{ inputs.modules }}
+        run: |
+          all="shared cli relay tunnel helper server console"
+          want="${MODULES:-$all}"
+          for m in $want; do
+            case " $all " in *" $m "*) ;; *) echo "unknown module '$m' (modules: $all)" >&2; exit 1 ;; esac
+          done
+          # server and tunnel also run their PostgreSQL suites (a service container below).
+          go=$(for m in $want; do [ "$m" = console ] || echo "$m"; done |
+            jq -R '{module: ., pg: (. == "server" or . == "tunnel")}' | jq -sc .)
+          echo "go=$go" >> "$GITHUB_OUTPUT"
+          case " $want " in *" console "*) echo "console=true" ;; *) echo "console=false" ;; esac >> "$GITHUB_OUTPUT"
+
+  go:
+    name: go ${{ matrix.module }}
+    needs: plan
+    if: needs.plan.outputs.go != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.go) }}
+    services:
+      # An isolated, empty database that exists only for this job; the *_test names are what the
+      # tests' ValidateIsolatedTestDSN requires. PostgreSQL suites run only for modules with pg=true.
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: lane_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
+    defaults:
+      run:
+        working-directory: ${{ matrix.module }}
+    env:
+      RUN: ${{ inputs.run }}
+      PAPERBOAT_TEST_DATABASE_DSN: ${{ matrix.pg && 'postgres://postgres:postgres@localhost:5432/lane_test?sslmode=disable&statement_timeout=600000' || '' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: ${{ matrix.module }}/go.mod
+          cache: false
+      - id: paths
+        run: |
+          echo "build=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+          echo "mod=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+      - id: cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ${{ steps.paths.outputs.build }}
+            ${{ steps.paths.outputs.mod }}
+          key: lane-test-go-${{ matrix.module }}-${{ hashFiles('go.work.sum', '*/go.sum') }}-${{ github.run_id }}
+          restore-keys: |
+            lane-test-go-${{ matrix.module }}-${{ hashFiles('go.work.sum', '*/go.sum') }}-
+            lane-test-go-${{ matrix.module }}-
+      - run: go vet ./...
+      - name: go test -race
+        run: |
+          # Packages share one database, so PostgreSQL modules run one package at a time.
+          p=(); [ -z "$PAPERBOAT_TEST_DATABASE_DSN" ] || p=(-p 1)
+          go test -race -count=1 -timeout 30m "${p[@]}" ${RUN:+-run "$RUN"} ./...
+      - name: migration tests (each on its own empty database)
+        if: matrix.module == 'server' && !cancelled()
+        run: |
+          # These tests start from an empty database and leave it migrated, so each gets a fresh one.
+          export PGPASSWORD=postgres
+          tests=$(grep -l PAPERBOAT_MIGRATION_TEST_DATABASE_DSN internal/db/*_test.go | xargs grep -ho '^func Test[A-Za-z0-9_]*' | sed 's/^func //')
+          [ -z "$RUN" ] || tests=$(grep -E -- "$RUN" <<<"$tests" || true)
+          n=0 failed=0
+          for t in $tests; do
+            n=$((n + 1))
+            psql -h localhost -U postgres -qc "create database lane_migration_${n}_test"
+            PAPERBOAT_MIGRATION_TEST_DATABASE_DSN="postgres://postgres:postgres@localhost:5432/lane_migration_${n}_test?sslmode=disable&statement_timeout=600000" \
+              go test -race -count=1 -run "^${t}\$" ./internal/db || failed=1
+          done
+          exit $failed
+      - if: github.ref == 'refs/heads/main' && !cancelled()
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ${{ steps.paths.outputs.build }}
+            ${{ steps.paths.outputs.mod }}
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+
+  console:
+    name: console check
+    needs: plan
+    if: needs.plan.outputs.console == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: console
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: oven-sh/setup-bun@3d267786b128fe76c2f16a390aa2448b815359f3 # v2.1.2
+        with:
+          bun-version-file: console/package.json
+      - run: bun install --frozen-lockfile
+      - run: bun run check
