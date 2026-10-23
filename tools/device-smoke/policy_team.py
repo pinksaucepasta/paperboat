@@ -196,6 +196,7 @@ def env_checks(a, owner, step, gen):
         ruled = {'src': [who], 'dst': ['env:team'], 'allow': ['env_read']} in rules
         dec = explain(owner, a.team, '--src', who, '--dst', 'env:team', '--action', 'env_read').get('decision') or {}
         step('F18-07 the grant is the member\'s rule and explain allows env_read', ruled and dec.get('allowed') is True, str(dec))
+        step('F18-07 explain says the member has no team key yet', dec.get('key_delivered') is False, str(dec))
     finally:
         rc, out, err = owner('team', 'grant', a.team, account, 'env', a.team, 'read', '--active=false', '--generation', gen(), '--json')
         step('F18-07 revoking the grant removes the rule', rc == 0, out[-300:] + err)
