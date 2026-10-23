@@ -131,7 +131,7 @@ func RevokeMachineEnvironmentTx(ctx context.Context, tx *Tx, environmentID strin
 // from them, or it is the source), so removing a device that never received ENV leaves every
 // other machine's delivery untouched. An empty machine (a revoked CLI session) fences the whole account.
 func FenceRemovedMachineVaultTx(ctx context.Context, tx *Tx, account, machine string) error {
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(160235)`); err != nil {
+	if err := LockTeamWrites(ctx, tx); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `UPDATE environment_vault_layer_fences f SET generation=generation+1 WHERE f.owner_kind='personal' AND f.owner_id=$1 AND ($2='' OR f.source_machine_id=$2 OR EXISTS(SELECT 1 FROM environment_vault_layers l WHERE l.workspace_id=f.workspace_id AND l.owner_kind=f.owner_kind AND l.owner_id=f.owner_id AND l.source_machine_id=f.source_machine_id AND l.machine_id=$2))`, account, machine); err != nil {

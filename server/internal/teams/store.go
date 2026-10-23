@@ -32,9 +32,10 @@ func (s *Service) ConfigureMail(policy config.TransactionalMail, enabled bool) {
 	s.mail = policy
 	s.mailEnabled = enabled
 }
+
+// Lock serializes team-touching writes; call it first in the transaction (see db.LockTeamWrites).
 func Lock(ctx context.Context, tx *db.Tx) error {
-	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(160235)`)
-	return err
+	return db.LockTeamWrites(ctx, tx)
 }
 func AuditTx(ctx context.Context, tx *db.Tx, account, team, action, operation string, metadata map[string]any) error {
 	metadata, err := activityMetadata(metadata, true)

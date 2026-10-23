@@ -15,12 +15,10 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/teams"
 )
 
-// All vault scope writes take the same transaction advisory lock before row
-// locks. This small bounded subsystem avoids cross-account grant/reset deadlocks;
-// password-only writes take an account lock and never wait for this lock.
+// All vault scope writes take the team write lock before row locks. This small bounded subsystem avoids
+// cross-account grant/reset deadlocks; password-only writes take an account lock and never wait for it.
 func lockVaultScopes(ctx context.Context, tx *db.Tx) error {
-	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(160235)`)
-	return err
+	return db.LockTeamWrites(ctx, tx)
 }
 func (s *Service) vaultMetadataTx(ctx context.Context, tx *db.Tx, account string) (PasswordVaultMetadata, error) {
 	// Match password publication lock order before reading custody or inserting user FKs.
