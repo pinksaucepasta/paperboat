@@ -26,8 +26,13 @@ func TestSharedTunnelManagementOnPostgres(t *testing.T) {
 	}
 	f.createTunnel(t, owner, host, tunnel, "shared-tunnel")
 	exec(`INSERT INTO paperboat.teams(team_id,owner_account,generation) VALUES($1,$2,1)`, team, owner)
+	// Team machine access is a paid-team capability (team_machine_bound_for requires
+	// team_paid_entitled), so the team needs an active paid workspace, as in
+	// workspace_integration_test.go.
+	exec(`INSERT INTO paperboat.billing_workspaces(id,team_id,state,product_code,quantity,period_start,period_end) VALUES($1,$2,'active','team-pro',2,now()-interval '1 hour',now()+interval '1 hour')`, "team:"+team, team)
 	t.Cleanup(func() {
 		exec(`UPDATE paperboat.user_machines SET owner_team_id=NULL WHERE id=$1`, host)
+		exec(`DELETE FROM paperboat.billing_workspaces WHERE team_id=$1`, team)
 		exec(`DELETE FROM paperboat.teams WHERE team_id=$1`, team)
 	})
 	exec(`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'member',true)`, team, member)
