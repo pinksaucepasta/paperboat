@@ -149,3 +149,31 @@ func TestInventoryCallerCancellationDoesNotStopTheSharedComputation(t *testing.T
 		return len(flights.keys) == 0
 	})
 }
+
+// Staging (50 daemons of one account): with no bound, one account's lists held all 20 pool connections and every
+// other request waited at authentication. At most inventoryMaxRunning computations of a key run at once; a later
+// request joins the newest running one instead of starting another.
+func TestOneKeyRunsAtMostABoundedNumberOfComputations(t *testing.T) {
+	clock := &fakeClock{now: time.Unix(1_700_000_000, 0)}
+	flights := inventoryFlights{now: clock.get}
+	g := newGatedInventory()
+	results := make(chan int, 6)
+	for i := 0; i < 6; i++ {
+		go func() { _, n, _ := flights.do(context.Background(), flightKey, g.compute); results <- n }()
+		time.Sleep(20 * time.Millisecond)
+		clock.add(inventoryShareWindow + inventoryShareWindow/2) // every request arrives past the share window
+	}
+	if n := g.calls.Load(); n != inventoryMaxRunning {
+		t.Fatalf("6 requests of one key started %d computations while all ran, want %d", n, inventoryMaxRunning)
+	}
+	for i := range g.gates {
+		close(g.gates[i])
+	}
+	got := map[int]int{}
+	for i := 0; i < 6; i++ {
+		got[<-results]++
+	}
+	if got[1] != 1 || got[2] != 5 {
+		t.Fatalf("answers by computation %v, want the first alone on 1 and the rest joined to the newest (2)", got)
+	}
+}
