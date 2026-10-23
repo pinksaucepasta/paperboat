@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"net/http"
-	"sort"
 	"sync"
 	"time"
 )
@@ -714,19 +713,17 @@ func (s *Store) List(ctx context.Context, credential Credential, cursor string, 
 	if _, err := s.authorizeRetrieval(credential, ActionInspect); err != nil {
 		return Page{}, err
 	}
+	// Pages follow the order records were stored (when each exchange
+	// finished), so a cursor never skips a record that started earlier but
+	// finished later than the last one a reader saw.
 	ordered := make([]*Record, 0, len(s.records))
-	for _, record := range s.records {
-		if record.ResourceID != credential.ResourceID || staleRecord(record, credential) {
+	for _, id := range s.order {
+		record := s.records[id]
+		if record == nil || record.ResourceID != credential.ResourceID || staleRecord(record, credential) {
 			continue
 		}
 		ordered = append(ordered, record)
 	}
-	sort.Slice(ordered, func(i, j int) bool {
-		if ordered[i].StartedAt.Equal(ordered[j].StartedAt) {
-			return ordered[i].ID < ordered[j].ID
-		}
-		return ordered[i].StartedAt.Before(ordered[j].StartedAt)
-	})
 	start := 0
 	if cursor != "" {
 		found := false

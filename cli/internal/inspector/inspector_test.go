@@ -539,3 +539,37 @@ func TestRetrievalWithoutAPolicyReportsCaptureNotEnabled(t *testing.T) {
 		t.Fatalf("after purge: %v", err)
 	}
 }
+
+// A request that started first but finished after a later one is still listed after the cursor
+// a reader holds: pages follow the order records were stored, not their start time.
+func TestListCursorKeepsARecordThatFinishedLate(t *testing.T) {
+	now := time.Now().UTC()
+	store := NewStore()
+	store.now = func() time.Time { return now }
+	if err := store.SetPolicy("tunnel_01", testPolicy()); err != nil {
+		t.Fatal(err)
+	}
+	slow, err := store.TryBegin("tunnel_01")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fast, err := store.TryBegin("tunnel_01")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Finish(fast, completeJSON("GET", "https://app.example.test/fast", nil, nil, nil, now.Add(time.Second))); err != nil {
+		t.Fatal(err)
+	}
+	credential := testCredential("tunnel_01", "user_01", ActionInspect, now)
+	first, err := store.List(context.Background(), credential, "", 10)
+	if err != nil || len(first.Records) != 1 {
+		t.Fatalf("first page = %+v err=%v", first.Records, err)
+	}
+	if _, err := store.Finish(slow, completeJSON("GET", "https://app.example.test/slow", nil, nil, nil, now)); err != nil {
+		t.Fatal(err)
+	}
+	next, err := store.List(context.Background(), credential, first.Records[0].ID, 10)
+	if err != nil || len(next.Records) != 1 || next.Records[0].URL != "https://app.example.test/slow" {
+		t.Fatalf("page after cursor = %+v err=%v, want the late /slow record", next.Records, err)
+	}
+}
