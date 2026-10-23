@@ -263,10 +263,26 @@ func ssoSummary(w io.Writer, s api.TeamIdentity) error {
 	}
 	required := "off"
 	if s.SSO.Required {
-		required = fmt.Sprintf("on, SSO session %s", time.Duration(s.SSO.SessionSeconds)*time.Second)
+		required = "on, SSO session " + ssoSession(s.SSO.SessionSeconds)
 	}
-	fmt.Fprintf(w, "Require SSO: %s\nJIT provisioning: %t\nSSO exempt: %s\n", required, s.SSO.JIT, strings.Join(s.SSO.Exempt, ", "))
+	jit, exempt := "off", "none"
+	if s.SSO.JIT {
+		jit = "on"
+	}
+	if len(s.SSO.Exempt) > 0 {
+		exempt = strings.Join(s.SSO.Exempt, ", ")
+	}
+	fmt.Fprintf(w, "Require SSO: %s\nJIT provisioning: %s\nSSO exempt: %s\n", required, jit, exempt)
 	return nil
+}
+
+// ssoSession prints a session length the way it is configured: whole days, else hours.
+func ssoSession(seconds int) string {
+	d := time.Duration(seconds) * time.Second
+	if d >= 24*time.Hour && d%(24*time.Hour) == 0 {
+		return fmt.Sprintf("%d days", int(d/(24*time.Hour)))
+	}
+	return fmt.Sprintf("%d hours", int(d.Round(time.Hour)/time.Hour))
 }
 
 func teamSCIMCommand() *cobra.Command {
