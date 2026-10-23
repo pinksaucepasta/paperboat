@@ -1436,7 +1436,7 @@ machine, so 100k machines ≈ 250k req/s: **R**. Target ≤ 0.05 req/s per idle 
 | Private-access dial lists every machine of the account | code: tunnel/native_private.go:27 | R (O(dials × machines)) | Lane R |
 | Server re-reads topic generations every 5 s per held waiter | ≈ 2 waiters × 100k / 5 s = 40k qps | R at 100k | Lane Q |
 | Other per-machine polls: ssh-target 8.9/min, machine-services 8.4, JWKS 11.7 (3 fetchers), certificates 6.9, runtime-observations 6.0, peer config 10.2 | prod mix | A | Lane R (peer config: delta rewrite) |
-| Edge pulls endpoint/carrier admissions every ~300 ms per edge node, full snapshot | 3.4 + 2.8 req/s; size grows with previews | ? at 1,000 previews | Lane M |
+| Edge pulls endpoint/carrier admissions every ~300 ms per edge node, full snapshot | 3.4 + 2.8 req/s; size grows with previews | A | Lane M: "unchanged since G" + ≥30 s full snapshot, after slice 4.2 |
 | Server has no request admission cap, no WriteTimeout/IdleTimeout; pgxpool 20 conns (1 pinned by LISTEN), no acquire timeout | code | ? (storm test on staging) | Lane Q |
 | Machines per vCPU of one server box (server + PostgreSQL), today's 15 s refresh mix and the fixed 300 s mix | `TestLoadIdlePollMix` on pbvm4 reports daemons per busy vCPU at the last step with p99 < 5 s | ? (pbvm4 after Lane H's S3-04 run) | Lane W |
 
@@ -1457,7 +1457,7 @@ machine, so 100k machines ≈ 250k req/s: **R**. Target ≤ 0.05 req/s per idle 
 
 | Dimension | Target | Bound in code | Verdict | Owner |
 |---|---|---|---|---|
-| Concurrent exec per host | 32 then clear error | execprocess 32 → resource_limit | ? | Lane W |
+| Concurrent exec per host | 32 then clear error | execprocess 32 → resource_limit | 32 × 4 MiB output in 2.2 s; 33rd refused in 27 µs (ErrCapacity); 2,000 short execs at 288/s, p99 146 ms, 0 failed; no leak (`TestLoadExecConcurrencyAndChurn`, ubuntu24) | G |
 | Concurrent transfers per host | 2 then queue | MaxConcurrentTransfers 2 | ? | Lane W |
 | Managed SSH streams per host | 32 | host.go 32, no queue → ErrSSHHostBusy at once | ? (parallel rsync/VS Code) | Lane W |
 | Relay connections per account | 1,000 machines | derpquic 16 per account, 256 per relay node; peer relay 16 allocations per account | **R by design** for an account of 1,000 (machines past 16 get no relay fallback) | Lane R |
@@ -1466,7 +1466,7 @@ machine, so 100k machines ≈ 250k req/s: **R**. Target ≤ 0.05 req/s per idle 
 
 | Dimension | Target | Bound in code | Verdict | Owner |
 |---|---|---|---|---|
-| Previews per machine | — | 20 active targets per host; registry records never deleted (registry.go) | A (leak per created/removed preview) | Lane R |
+| Previews per machine | — | PLAN 3a endpoint engine (old preview.Registry has no production constructor: dead code, not a leak) | ? | Lane M / Lane W |
 | Previews/tunnels per account | 1,000 | server lists paged (200); completion lists page through all previews on every refresh | R (with the refresh storm) | Lane R |
 | Streams per tunnel carrier | — | datacarrier 64 streams default, 1,024 max | ? | Lane M |
 
