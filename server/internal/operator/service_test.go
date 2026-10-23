@@ -259,7 +259,7 @@ func TestReadUsesCurrentDatabaseRoleAndAuditsAvailability(t *testing.T) {
 	if _, err := store.Pool().Exec(ctx, fmt.Sprintf(`DROP TRIGGER %s ON paperboat.audit_events; DROP FUNCTION paperboat.%s()`, triggerName, functionName)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.Pool().Exec(ctx, `UPDATE users SET role='user' WHERE id=$1`, actorID); err != nil {
+	if _, err := store.Pool().Exec(ctx, `UPDATE operator_accounts SET status='disabled' WHERE id=$1`, actorID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := service.Read(ctx, actor, "account", accountID, "", 1); !errors.Is(err, ErrForbidden) {
