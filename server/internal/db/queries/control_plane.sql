@@ -1235,6 +1235,8 @@ WHERE a.state IN ('staged','active') AND NOT EXISTS (
    AND viewer_policy.effective_access_mode=a.access_mode
    AND viewer_policy.viewer_policy_generation=a.viewer_policy_generation
    AND (t.expires_at IS NULL OR t.expires_at>sqlc.arg(now))
+   -- A tunnel moved onto the endpoint engine (PLAN 3a step 4) retires its connector assignments.
+   AND NOT EXISTS (SELECT 1 FROM endpoints engine WHERE engine.tunnel_id=a.tunnel_id)
 );
 
 -- name: ListReadyTunnelEdgeRouteCandidatesV1 :many
@@ -1261,6 +1263,8 @@ SELECT t.account_id,
        node.failure_domain::text AS edge_failure_domain
 FROM tunnels AS t
 JOIN tunnel_routes AS r ON r.tunnel_id = t.id
+ -- A tunnel served on the endpoint engine (PLAN 3a step 4) rides on its agent's carriers instead.
+ AND NOT EXISTS (SELECT 1 FROM endpoints engine WHERE engine.tunnel_id = t.id)
 JOIN current_tunnel_route_viewer_policy AS viewer_policy ON viewer_policy.route_id = r.id
 JOIN tunnel_connectors AS c ON c.tunnel_id = t.id
 JOIN tunnel_connector_sessions AS session

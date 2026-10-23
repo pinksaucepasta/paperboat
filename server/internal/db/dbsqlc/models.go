@@ -892,6 +892,7 @@ type ControlTunnelNode struct {
 	PublicIngressVerifiedAt          sql.NullTime
 	TlsSpkiSha256                    []byte
 	EndpointsEpoch                   sql.NullString
+	TunnelEndpointsEpoch             sql.NullString
 }
 
 type ControlUsageCounter struct {
@@ -1042,6 +1043,7 @@ type Endpoint struct {
 	Generation     int64
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+	TunnelID       sql.NullString
 }
 
 type EndpointEdgeAssignment struct {
@@ -1057,11 +1059,12 @@ type EndpointEdgeAssignment struct {
 }
 
 type EndpointRoute struct {
-	ID         string
-	EndpointID string
-	Hostname   string
-	Protocol   string
-	Revision   int64
+	ID            string
+	EndpointID    string
+	Hostname      string
+	Protocol      string
+	Revision      int64
+	TunnelRouteID sql.NullString
 }
 
 type EnvironmentAuthority struct {

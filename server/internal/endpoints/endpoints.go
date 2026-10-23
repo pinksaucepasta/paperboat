@@ -60,7 +60,11 @@ VALUES($1,'preview',$2,$3,$4,$5,'lease',$1)`, p.LeaseID, p.AccountID, team, p.Ag
 const liveEndpoint = `e.desired_state='active' AND (e.kind<>'preview' OR (EXISTS(SELECT 1 FROM preview_leases p
 WHERE p.id=e.preview_lease_id AND p.terminal_state='active' AND p.lease_deadline>now())
 AND NOT EXISTS(SELECT 1 FROM preview_lease_carrier_attachments la WHERE la.preview_id=e.preview_lease_id
-AND la.account_id=e.account_id AND la.state NOT IN ('failed','released'))))`
+AND la.account_id=e.account_id AND la.state NOT IN ('failed','released'))))
+AND (e.kind<>'tunnel' OR EXISTS(SELECT 1 FROM tunnels t WHERE t.id=e.tunnel_id AND `+liveTunnel+`))`
+
+// liveTunnel is the SQL predicate (over tunnels t) for a tunnel that should be served now.
+const liveTunnel = `t.desired_state='active' AND t.deleted_at IS NULL AND (t.expires_at IS NULL OR t.expires_at>now())`
 
 // ReconcileAgentTx makes the agent's assignments match its live endpoints times the runtime
 // carriers it holds that can serve endpoints. A changed carrier session or edge epoch fences the
@@ -69,7 +73,8 @@ func ReconcileAgentTx(ctx context.Context, tx *db.Tx, machineID string) error {
 	_, err := tx.Exec(ctx, `WITH desired AS (
 SELECT DISTINCT ON (r.id,a.edge_node_id) r.id route_id,e.id endpoint_id,a.edge_node_id,a.edge_process_epoch,a.session_id
 FROM endpoints e JOIN endpoint_routes r ON r.endpoint_id=e.id
-JOIN runtime_carrier_attachments a ON a.machine_id=e.agent_machine_id AND a.agent_capabilities @> ARRAY['endpoints']::text[]
+JOIN runtime_carrier_attachments a ON a.machine_id=e.agent_machine_id AND a.agent_capabilities @> CASE WHEN e.kind='tunnel'
+ THEN ARRAY['endpoints','tunnel_endpoints'] ELSE ARRAY['endpoints'] END::text[]
 WHERE e.agent_machine_id=$1 AND `+liveEndpoint+`
 ORDER BY r.id,a.edge_node_id,a.active DESC
 ), upserted AS (

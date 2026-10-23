@@ -1,0 +1,143 @@
+package runtimeattachment
+
+import (
+	"testing"
+
+	"github.com/google/uuid"
+	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
+
+	"github.com/pinksaucepasta/paperboat-server/internal/endpoints"
+)
+
+// PLAN 3a step 4.1: a tunnel moves onto the endpoint engine only when its agent and every edge the
+// agent holds carriers to serve tunnel endpoints, and only while all its routes are HTTP; its route
+// is then assigned to each edge over the agent's runtime carrier, never as a preview admission.
+func TestTunnelsMoveOntoTheEngineOnlyWhenAgentAndEdgesServeThemOnPostgres(t *testing.T) {
+	f := newAgentFixture(t, "tunnelep")
+	tunnel, route, tcpRoute := "tunnel_"+f.prefix, "route_"+f.prefix, "route_tcp_"+f.prefix
+	endpointID := uuid.NewString()
+	f.exec(t, `INSERT INTO tunnels(id,account_id,name,desired_state,access_mode,generation,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id) VALUES($1,$2,$1,'active','public',1,$3,$4,$5,$2)`,
+		tunnel, f.account, "endpoint_"+endpointID, "https://"+endpointID+".tunnels.example.test", f.machine)
+	f.exec(t, `INSERT INTO tunnel_routes(id,tunnel_id,name,priority,protocol,match_type,origin_scheme,origin_address,tls_verification,generation,desired_state,created_by_actor_id,updated_by_actor_id,created_at,updated_at) VALUES($1,$2,'web',1,'http','catch_all','http','127.0.0.1:3000','not_applicable',3,'active',$3,$3,now(),now())`, route, tunnel, f.account)
+	sync := func() {
+		t.Helper()
+		if err := endpoints.SyncTunnelAgents(f.ctx, f.database, 100); err != nil {
+			t.Fatal(err)
+		}
+	}
+	state := func() (endpoint bool, routes []string, assignments int) {
+		t.Helper()
+		if err := f.database.SQL().QueryRowContext(f.ctx, `SELECT EXISTS(SELECT 1 FROM endpoints WHERE tunnel_id=$1 AND kind='tunnel' AND agent_machine_id=$2)`, tunnel, f.machine).Scan(&endpoint); err != nil {
+			t.Fatal(err)
+		}
+		rows, err := f.database.SQL().QueryContext(f.ctx, `SELECT id||'@'||revision FROM endpoint_routes WHERE endpoint_id=$1 ORDER BY id`, tunnel)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for rows.Next() {
+			var r string
+			if err := rows.Scan(&r); err != nil {
+				t.Fatal(err)
+			}
+			routes = append(routes, r)
+		}
+		rows.Close()
+		if err := f.database.SQL().QueryRowContext(f.ctx, `SELECT count(*) FROM endpoint_edge_assignments WHERE endpoint_id=$1 AND desired='active'`, tunnel).Scan(&assignments); err != nil {
+			t.Fatal(err)
+		}
+		return endpoint, routes, assignments
+	}
+	both := []string{runtimewire.CapabilityEndpoints, runtimewire.CapabilityTunnelEndpoints}
+	attach := func(capabilities []string) runtimewire.HostAdmission {
+		t.Helper()
+		request := f.request
+		request.Capabilities = capabilities
+		a, err := f.service.Attach(f.ctx, f.proof, request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return a
+	}
+
+	// An agent that serves previews only keeps its tunnel on the connector.
+	attach([]string{runtimewire.CapabilityEndpoints})
+	sync()
+	if endpoint, _, _ := state(); endpoint {
+		t.Fatal("tunnel moved for an agent without tunnel endpoints")
+	}
+	// The agent serves tunnels, but its edges only serve previews: still the connector.
+	if _, err := f.service.Pull(f.ctx, f.edge, []string{runtimewire.CapabilityEndpoints}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.service.Pull(f.ctx, f.backupEdge, []string{runtimewire.CapabilityEndpoints}); err != nil {
+		t.Fatal(err)
+	}
+	if a := attach(both); a.TunnelEndpointsServed || !a.EndpointsServed {
+		t.Fatalf("served before the edges serve tunnels: endpoints=%v tunnels=%v", a.EndpointsServed, a.TunnelEndpointsServed)
+	}
+	if endpoint, _, _ := state(); endpoint {
+		t.Fatal("tunnel moved before the edges serve tunnel endpoints")
+	}
+	// One edge serves tunnels, the other not yet: still the connector.
+	if _, err := f.service.Pull(f.ctx, f.edge, both); err != nil {
+		t.Fatal(err)
+	}
+	if a := attach(both); a.TunnelEndpointsServed {
+		t.Fatal("served while one edge does not serve tunnel endpoints")
+	}
+	if endpoint, _, _ := state(); endpoint {
+		t.Fatal("tunnel moved while one edge does not serve tunnel endpoints")
+	}
+	// Both edges serve tunnels: the tunnel is an endpoint with its route on both edges.
+	if _, err := f.service.Pull(f.ctx, f.backupEdge, both); err != nil {
+		t.Fatal(err)
+	}
+	if a := attach(both); !a.TunnelEndpointsServed {
+		t.Fatal("tunnel endpoints not served with agent and both edges serving them")
+	}
+	if endpoint, routes, assignments := state(); !endpoint || len(routes) != 1 || routes[0] != route+"@3" || assignments != 2 {
+		t.Fatalf("engine tunnel = %v %v %d, want endpoint with %s@3 on both edges", endpoint, routes, assignments, route)
+	}
+	// Tunnel routes reach the edge with its route snapshot, never as preview admissions.
+	values, err := f.service.Pull(f.ctx, f.edge, both)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range values {
+		if v.EndpointID == tunnel || v.Binding.RouteID == route {
+			t.Fatalf("tunnel route sent as a runtime admission: %+v", v)
+		}
+	}
+	// A route edit follows its generation.
+	f.exec(t, `UPDATE tunnel_routes SET generation=4 WHERE id=$1`, route)
+	sync()
+	if _, routes, _ := state(); len(routes) != 1 || routes[0] != route+"@4" {
+		t.Fatalf("route revision after an edit = %v", routes)
+	}
+	// A private TCP route keeps the whole tunnel on its connector until TCP rides on agent carriers.
+	f.exec(t, `INSERT INTO tunnel_routes(id,tunnel_id,name,priority,protocol,match_type,origin_scheme,origin_address,tls_verification,generation,desired_state,created_by_actor_id,updated_by_actor_id,created_at,updated_at) VALUES($1,$2,'db',2,'private_tcp','catch_all','tcp','127.0.0.1:5432','not_applicable',1,'active',$3,$3,now(),now())`, tcpRoute, tunnel, f.account)
+	sync()
+	if endpoint, _, assignments := state(); endpoint || assignments != 0 {
+		t.Fatal("a tunnel with a private TCP route moved onto the engine")
+	}
+	f.exec(t, `UPDATE tunnel_routes SET desired_state='deleted',deleted_at=now() WHERE id=$1`, tcpRoute)
+	sync()
+	if endpoint, routes, _ := state(); !endpoint || len(routes) != 1 {
+		t.Fatal("tunnel did not return to the engine once its TCP route was removed")
+	}
+	// A deleted tunnel leaves the engine, and so do the tunnels of an agent that stops serving them.
+	f.exec(t, `UPDATE tunnels SET desired_state='deleted',deleted_at=now() WHERE id=$1`, tunnel)
+	sync()
+	if endpoint, _, _ := state(); endpoint {
+		t.Fatal("deleted tunnel still on the engine")
+	}
+	f.exec(t, `UPDATE tunnels SET desired_state='active',deleted_at=NULL WHERE id=$1`, tunnel)
+	sync()
+	if endpoint, _, _ := state(); !endpoint {
+		t.Fatal("restored tunnel not back on the engine")
+	}
+	attach([]string{runtimewire.CapabilityEndpoints})
+	if endpoint, _, _ := state(); endpoint {
+		t.Fatal("tunnel stayed on the engine after its agent stopped serving tunnels")
+	}
+}

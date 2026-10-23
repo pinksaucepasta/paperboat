@@ -13,6 +13,7 @@ import (
 	"github.com/pinksaucepasta/paperboat-server/internal/audit"
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
 	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat-server/internal/endpoints"
 	"github.com/pinksaucepasta/paperboat-server/internal/tunnelv1"
 	"github.com/pinksaucepasta/paperboat-server/internal/workers"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
@@ -171,6 +172,11 @@ func (s *EdgeService) TunnelEdgeAssignmentWorker(interval time.Duration, batchSi
 		for {
 			finishProgress := workers.BeginIteration(ctx, interval)
 			cycleErr := func() error {
+				// Tunnels whose agents serve them on the endpoint engine leave the connector path
+				// first (PLAN 3a step 4), so the reconcile below neither stages nor keeps them.
+				if err := endpoints.SyncTunnelAgents(ctx, s.store, 500); err != nil && ctx.Err() == nil {
+					workers.IterationFailure(ctx, "edge_route_assignment", "edge_route_reconcile_failed", err)
+				}
 				if _, err := s.ReconcileTunnelEdgeRouteAssignments(ctx, batchSize); err != nil && ctx.Err() == nil {
 					workers.IterationFailure(ctx, "edge_route_assignment", "edge_route_reconcile_failed", err)
 				}

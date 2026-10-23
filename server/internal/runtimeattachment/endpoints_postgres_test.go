@@ -23,7 +23,28 @@ import (
 // PLAN 3a step 1: a preview endpoint is served over the agent's runtime carriers. Its route is
 // assigned to every edge where the agent holds a carrier that can serve endpoints, and is sent
 // only to an edge that can admit it; the edge's observation marks the assignment ready.
-func TestEndpointRoutesRideOnAgentRuntimeCarriersOnPostgres(t *testing.T) {
+// agentFixture is an account with one enrolled machine, its runtime route and two edges: the
+// agent side of the endpoint engine.
+type agentFixture struct {
+	database                                  *db.DB
+	ctx                                       context.Context
+	prefix, account, machine, env, route, key string
+	node, backupNode                          string
+	service                                   *Service
+	proof                                     previewattachment.MachineProof
+	request                                   runtimewire.Request
+	edge, backupEdge                          previewattachment.PreviewEdgeIdentity
+}
+
+func (f *agentFixture) exec(t *testing.T, query string, args ...any) {
+	t.Helper()
+	if _, err := f.database.SQL().ExecContext(f.ctx, query, args...); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func newAgentFixture(t *testing.T, name string) *agentFixture {
+	t.Helper()
 	dsn := os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
 	if dsn == "" {
 		t.Skip("requires isolated PostgreSQL")
@@ -35,48 +56,58 @@ func TestEndpointRoutesRideOnAgentRuntimeCarriersOnPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
 	ctx := context.Background()
 	if err = db.Migrate(ctx, database); err != nil {
 		t.Fatal(err)
 	}
-	prefix := "endpoint_" + strings.ReplaceAll(time.Now().UTC().Format("150405.000000000"), ".", "")
-	account, machine, env, route, node, backupNode := prefix+"_account", prefix+"_machine", prefix+"_env", prefix+"_route", prefix+"_edge", prefix+"_zbackup"
-	lease := prefix + "_preview"
-	host := strings.ReplaceAll(prefix, "_", "-") + ".preview.example.test"
-	exec := func(query string, args ...any) {
-		t.Helper()
-		if _, err := database.SQL().ExecContext(ctx, query, args...); err != nil {
-			t.Fatal(err)
+	prefix := name + "_" + strings.ReplaceAll(time.Now().UTC().Format("150405.000000000"), ".", "")
+	f := &agentFixture{database: database, ctx: ctx, prefix: prefix, account: prefix + "_account", machine: prefix + "_machine", env: prefix + "_env", route: prefix + "_route", node: prefix + "_edge", backupNode: prefix + "_zbackup"}
+	t.Cleanup(func() {
+		for _, query := range []string{`DELETE FROM endpoints WHERE agent_machine_id=$1`, `DELETE FROM tunnels WHERE created_by_host_id=$1`, `DELETE FROM preview_leases WHERE owner_machine_id=$1`, `DELETE FROM runtime_carrier_attachments WHERE machine_id=$1`} {
+			_, _ = database.SQL().ExecContext(ctx, query, f.machine)
 		}
-	}
-	defer func() {
-		for _, query := range []string{`DELETE FROM endpoints WHERE agent_machine_id=$1`, `DELETE FROM preview_leases WHERE owner_machine_id=$1`, `DELETE FROM runtime_carrier_attachments WHERE machine_id=$1`} {
-			_, _ = database.SQL().ExecContext(ctx, query, machine)
-		}
-		_, _ = database.SQL().ExecContext(ctx, `DELETE FROM control_routes WHERE id=$1`, route)
-		_, _ = database.SQL().ExecContext(ctx, `DELETE FROM control_connector_generations WHERE environment_id=$1`, env)
-		_, _ = database.SQL().ExecContext(ctx, `DELETE FROM user_machines WHERE id=$1`, machine)
-		_, _ = database.SQL().ExecContext(ctx, `DELETE FROM control_environments WHERE id=$1`, env)
-		_, _ = database.SQL().ExecContext(ctx, `DELETE FROM control_tunnel_nodes WHERE id IN ($1,$2)`, node, backupNode)
-		_, _ = database.SQL().ExecContext(ctx, `DELETE FROM users WHERE id=$1`, account)
-	}()
+		_, _ = database.SQL().ExecContext(ctx, `DELETE FROM control_routes WHERE id=$1`, f.route)
+		_, _ = database.SQL().ExecContext(ctx, `DELETE FROM control_connector_generations WHERE environment_id=$1`, f.env)
+		_, _ = database.SQL().ExecContext(ctx, `DELETE FROM user_machines WHERE id=$1`, f.machine)
+		_, _ = database.SQL().ExecContext(ctx, `DELETE FROM control_environments WHERE id=$1`, f.env)
+		_, _ = database.SQL().ExecContext(ctx, `DELETE FROM control_tunnel_nodes WHERE id IN ($1,$2)`, f.node, f.backupNode)
+		_, _ = database.SQL().ExecContext(ctx, `DELETE FROM users WHERE id=$1`, f.account)
+		database.Close()
+	})
 	public, _, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	key := base64.RawURLEncoding.EncodeToString(public)
-	exec(`INSERT INTO users(id,workos_subject,primary_email,status) VALUES($1,$1,$2,'active')`, account, account+"@example.test")
-	exec(`INSERT INTO control_environments(id,workspace_id,owner_user_id,desired_state) VALUES($1,$1,$2,'active')`, env, account)
-	exec(`INSERT INTO user_machines (id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,public_identity_key,installation_generation,worker_generation,configured_capabilities) VALUES ($1,$2,$3,'endpoint-test','linux','amd64','/workspace','online','occupied',$4,1,1,ARRAY['terminal_host']::text[])`, machine, account, env, key)
-	exec(`INSERT INTO control_routes(id,environment_id,kind,public_host,target_host,target_port) VALUES($1,$2,'runtime_https_wss',$3,'127.0.0.1',38080)`, route, env, machine+".runtime.example.test")
-	exec(`INSERT INTO control_connector_generations(environment_id,machine_id,connector_id,generation,edge_pool,state) VALUES($1,$2,'runtime',1,'default','pending')`, env, machine)
+	f.key = base64.RawURLEncoding.EncodeToString(public)
+	f.exec(t, `INSERT INTO users(id,workos_subject,primary_email,status) VALUES($1,$1,$2,'active')`, f.account, f.account+"@example.test")
+	f.exec(t, `INSERT INTO control_environments(id,workspace_id,owner_user_id,desired_state) VALUES($1,$1,$2,'active')`, f.env, f.account)
+	f.exec(t, `INSERT INTO user_machines (id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,public_identity_key,installation_generation,worker_generation,configured_capabilities) VALUES ($1,$2,$3,'endpoint-test','linux','amd64','/workspace','online','occupied',$4,1,1,ARRAY['terminal_host']::text[])`, f.machine, f.account, f.env, f.key)
+	f.exec(t, `INSERT INTO control_routes(id,environment_id,kind,public_host,target_host,target_port) VALUES($1,$2,'runtime_https_wss',$3,'127.0.0.1',38080)`, f.route, f.env, f.machine+".runtime.example.test")
+	f.exec(t, `INSERT INTO control_connector_generations(environment_id,machine_id,connector_id,generation,edge_pool,state) VALUES($1,$2,'runtime',1,'default','pending')`, f.env, f.machine)
 	for _, n := range []struct{ id, epoch, region, domain, host, pin string }{
-		{node, "epoch_endpoint", "first-region", "first-domain", "edge.example.test", "1"},
-		{backupNode, "epoch_backup", "second-region", "second-domain", "backup.example.test", "2"},
+		{f.node, "epoch_endpoint", "first-region", "first-domain", "edge.example.test", "1"},
+		{f.backupNode, "epoch_backup", "second-region", "second-domain", "backup.example.test", "2"},
 	} {
-		exec(`INSERT INTO control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,carrier_server_spki_sha256,carrier_server_certificate_chain_pem)
+		f.exec(t, `INSERT INTO control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,carrier_server_spki_sha256,carrier_server_certificate_chain_pem)
 VALUES($1,'default','1.0',$2,'ready',true,now(),$3,$4,ARRAY['edge']::text[],ARRAY['http3','http2']::text[],128,0,now(),now()+interval '1 hour',$5,27443,27444,$6,'fixture certificate')`, n.id, n.epoch, n.region, n.domain, n.host, "sha256:"+strings.Repeat(n.pin, 64))
+	}
+	f.service = &Service{DB: database}
+	f.proof = previewattachment.MachineProof{UserID: f.account, MachineID: f.machine, OperationID: "operation_endpoint", InstallationGeneration: 1}
+	f.request = runtimewire.Request{OperationID: f.proof.OperationID, ProcessID: "process_endpoint", WorkerGeneration: 1, InstallationGeneration: 1, RuntimeListenPort: 48080}
+	f.edge = previewattachment.PreviewEdgeIdentity{NodeID: f.node, ProcessEpoch: "epoch_endpoint"}
+	f.backupEdge = previewattachment.PreviewEdgeIdentity{NodeID: f.backupNode, ProcessEpoch: "epoch_backup"}
+	return f
+}
+
+func TestEndpointRoutesRideOnAgentRuntimeCarriersOnPostgres(t *testing.T) {
+	f := newAgentFixture(t, "endpoint")
+	database, ctx, prefix := f.database, f.ctx, f.prefix
+	account, machine, node, backupNode, key := f.account, f.machine, f.node, f.backupNode, f.key
+	lease := prefix + "_preview"
+	host := strings.ReplaceAll(prefix, "_", "-") + ".preview.example.test"
+	exec := func(query string, args ...any) {
+		t.Helper()
+		f.exec(t, query, args...)
 	}
 	exec(`INSERT INTO preview_leases(id,endpoint,account_id,actor_id,owner_machine_id,owner_session_id,owner_session_kind,target_scheme,target_address,access_mode,lease_deadline)
 VALUES($1,$2,$3,$3,$4,'owner_session_endpoint','foreground','http','127.0.0.1:3000','team',now()+interval '10 minutes')`, lease, "https://"+host, account, machine)
@@ -85,10 +116,7 @@ VALUES($1,$2,$3,$3,$4,'owner_session_endpoint','foreground','http','127.0.0.1:30
 	}); err != nil {
 		t.Fatal(err)
 	}
-	service := &Service{DB: database}
-	proof := previewattachment.MachineProof{UserID: account, MachineID: machine, OperationID: "operation_endpoint", InstallationGeneration: 1}
-	request := runtimewire.Request{OperationID: proof.OperationID, ProcessID: "process_endpoint", WorkerGeneration: 1, InstallationGeneration: 1, RuntimeListenPort: 48080}
-	edge := previewattachment.PreviewEdgeIdentity{NodeID: node, ProcessEpoch: "epoch_endpoint"}
+	service, proof, request, edge := f.service, f.proof, f.request, f.edge
 	capable := []string{runtimewire.CapabilityEndpoints}
 	assignments := func() map[string]string {
 		t.Helper()
@@ -156,7 +184,7 @@ VALUES($1,$2,$3,$3,$4,'owner_session_endpoint','foreground','http','127.0.0.1:30
 	if err := gate(); !errors.Is(err, oldPath) {
 		t.Fatalf("readiness before the edges admit endpoints = %v, want the old attachment gate", err)
 	}
-	backupEdge := previewattachment.PreviewEdgeIdentity{NodeID: backupNode, ProcessEpoch: "epoch_backup"}
+	backupEdge := f.backupEdge
 	for _, e := range []previewattachment.PreviewEdgeIdentity{edge, backupEdge} {
 		if _, err := service.Pull(ctx, e, capable); err != nil {
 			t.Fatal(err)
@@ -193,14 +221,14 @@ VALUES($1,$2,$3,$3,$4,'owner_session_endpoint','foreground','http','127.0.0.1:30
 		t.Fatalf("endpoint route does not ride on the runtime carrier: %+v vs %+v", endpointRoute.Binding, a.Binding)
 	}
 	// The fast endpoint-only pull carries exactly the endpoint routes of the snapshot.
-	if fast, err := service.PullEndpoints(ctx, edge); err != nil || len(fast) != 1 || fast[0].EndpointID != lease || fast[0].Binding.RouteID != endpointRoute.Binding.RouteID {
+	if fast, err := service.PullEndpoints(ctx, edge, []string{runtimewire.CapabilityEndpoints}); err != nil || len(fast) != 1 || fast[0].EndpointID != lease || fast[0].Binding.RouteID != endpointRoute.Binding.RouteID {
 		t.Fatalf("endpoint-only pull = %+v, %v", fast, err)
 	}
 	if _, err := service.Pull(ctx, edge, []string{"something_else"}); err != ErrInvalid {
 		t.Fatalf("unknown edge capability accepted: %v", err)
 	}
 	observation := runtimewire.Observation{RouteID: endpointRoute.Binding.RouteID, SessionID: endpointRoute.Binding.SessionID, AttachmentGeneration: endpointRoute.AttachmentGeneration, Ready: true}
-	runtimeObservation := runtimewire.Observation{RouteID: route, SessionID: a.Binding.SessionID, AttachmentGeneration: a.AttachmentGeneration, Ready: true}
+	runtimeObservation := runtimewire.Observation{RouteID: f.route, SessionID: a.Binding.SessionID, AttachmentGeneration: a.AttachmentGeneration, Ready: true}
 	if err := service.Observe(ctx, edge, []runtimewire.Observation{runtimeObservation, observation}); err != nil {
 		t.Fatal(err)
 	}
@@ -277,7 +305,7 @@ SELECT $1::text,sha256(convert_to($1::text,'UTF8')),$2,$2,'preview',$3,$3,'inspe
 		_, _ = database.SQL().ExecContext(context.Background(), `DELETE FROM control_usage_receipts WHERE operation_id=$1`, usage)
 	})
 	exec(`INSERT INTO control_usage_receipts(operation_id,edge_node_id,counter_epoch,environment_id,route_id,route_revision,direction,observed_bytes,delta_bytes,interval_start,interval_end,workspace_id)
-SELECT $1,$2,'epoch_usage',$3,$4,x.route_generation,'egress',4096,4096,now(),now()+interval '1 second','personal:'||$5 FROM preview_routes x WHERE x.preview_id=$4 AND x.endpoint`, usage, node, env, lease, account)
+SELECT $1,$2,'epoch_usage',$3,$4,x.route_generation,'egress',4096,4096,now(),now()+interval '1 second','personal:'||$5 FROM preview_routes x WHERE x.preview_id=$4 AND x.endpoint`, usage, node, f.env, lease, account)
 	exec(`SELECT paperboat.project_edge_bandwidth($1)`, usage)
 	var attributed string
 	if err := database.SQL().QueryRowContext(ctx, `SELECT resource_kind||'/'||resource_id||'/'||machine_id FROM resource_bandwidth_events WHERE operation_id='edge:'||$1`, usage).Scan(&attributed); err != nil || attributed != "preview/"+lease+"/"+machine {

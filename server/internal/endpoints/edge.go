@@ -24,19 +24,23 @@ type Execer interface {
 }
 
 // RecordEdgeServes notes that this edge process admits endpoint routes (it pulled its runtime
-// snapshot advertising the capability).
-func RecordEdgeServes(ctx context.Context, db Execer, nodeID, epoch string) error {
-	_, err := db.Exec(ctx, `UPDATE control_tunnel_nodes SET endpoints_epoch=$2 WHERE id=$1 AND process_epoch=$2 AND endpoints_epoch IS DISTINCT FROM $2`, nodeID, epoch)
+// snapshot advertising the capability) and, with tunnels, tunnel routes on agent carriers.
+func RecordEdgeServes(ctx context.Context, db Execer, nodeID, epoch string, tunnels bool) error {
+	_, err := db.Exec(ctx, `UPDATE control_tunnel_nodes SET endpoints_epoch=$2,
+tunnel_endpoints_epoch=CASE WHEN $3 THEN $2 ELSE tunnel_endpoints_epoch END
+WHERE id=$1 AND process_epoch=$2 AND (endpoints_epoch IS DISTINCT FROM $2 OR $3 AND tunnel_endpoints_epoch IS DISTINCT FROM $2)`, nodeID, epoch, tunnels)
 	return err
 }
 
-// EdgesServeTx reports whether every given edge process admits endpoint routes.
-func EdgesServeTx(ctx context.Context, tx *db.Tx, nodes, epochs []string) (bool, error) {
+// EdgesServeTx reports whether every given edge process admits endpoint routes, and with tunnels,
+// tunnel routes on agent carriers.
+func EdgesServeTx(ctx context.Context, tx *db.Tx, nodes, epochs []string, tunnels bool) (bool, error) {
 	if len(nodes) == 0 || len(nodes) != len(epochs) {
 		return false, nil
 	}
 	var served int
-	err := tx.QueryRow(ctx, `SELECT count(*) FROM control_tunnel_nodes n JOIN unnest($1::text[],$2::text[]) AS e(node,epoch) ON n.id=e.node AND n.endpoints_epoch=e.epoch`, nodes, epochs).Scan(&served)
+	err := tx.QueryRow(ctx, `SELECT count(*) FROM control_tunnel_nodes n JOIN unnest($1::text[],$2::text[]) AS e(node,epoch) ON n.id=e.node
+AND n.endpoints_epoch=e.epoch AND (NOT $3 OR n.tunnel_endpoints_epoch=e.epoch)`, nodes, epochs, tunnels).Scan(&served)
 	return served == len(nodes), err
 }
 
@@ -50,7 +54,7 @@ FROM endpoint_edge_assignments x JOIN endpoint_routes r ON r.id=x.route_id JOIN 
 JOIN runtime_carrier_attachments a ON a.machine_id=e.agent_machine_id AND a.edge_node_id=x.edge_node_id
  AND a.edge_process_epoch=x.edge_process_epoch AND a.session_id=x.carrier_session_id
  AND a.agent_capabilities @> ARRAY['endpoints']::text[]
-WHERE x.edge_node_id=$1 AND x.edge_process_epoch=$2 AND x.desired='active' AND `+liveEndpoint+`
+WHERE x.edge_node_id=$1 AND x.edge_process_epoch=$2 AND x.desired='active' AND e.kind='preview' AND `+liveEndpoint+`
 AND paperboat.runtime_carrier_valid(a.route_id,a.edge_node_id,a.edge_process_epoch,false)
 ORDER BY x.route_id LIMIT $3`, nodeID, epoch, limit+1)
 	if err != nil {

@@ -49,20 +49,8 @@ type Service struct {
 	AdmissionLifetime time.Duration
 }
 
-func validCapabilities(values []string) bool {
-	if len(values) > 1 {
-		return false
-	}
-	for _, value := range values {
-		if value != runtimewire.CapabilityEndpoints {
-			return false
-		}
-	}
-	return true
-}
-
 func validRequest(p previewattachment.MachineProof, r runtimewire.Request) bool {
-	return p.Validate() == nil && validCapabilities(r.Capabilities) && r.OperationID == p.OperationID && connectorprotocol.ValidateOpaqueEpoch(r.ProcessID) == nil && r.WorkerGeneration > 0 && r.WorkerGeneration <= 1<<62 && r.InstallationGeneration == p.InstallationGeneration && r.RuntimeListenPort >= 1024 && r.RuntimeListenPort <= 65535 && ((r.ActiveEdgeNodeID == "" && r.ActiveEdgeProcessEpoch == "") || (connectorprotocol.ValidateIdentifier(r.ActiveEdgeNodeID) == nil && connectorprotocol.ValidateOpaqueEpoch(r.ActiveEdgeProcessEpoch) == nil))
+	return p.Validate() == nil && runtimewire.ValidCapabilities(r.Capabilities) && r.OperationID == p.OperationID && connectorprotocol.ValidateOpaqueEpoch(r.ProcessID) == nil && r.WorkerGeneration > 0 && r.WorkerGeneration <= 1<<62 && r.InstallationGeneration == p.InstallationGeneration && r.RuntimeListenPort >= 1024 && r.RuntimeListenPort <= 65535 && ((r.ActiveEdgeNodeID == "" && r.ActiveEdgeProcessEpoch == "") || (connectorprotocol.ValidateIdentifier(r.ActiveEdgeNodeID) == nil && connectorprotocol.ValidateOpaqueEpoch(r.ActiveEdgeProcessEpoch) == nil))
 }
 
 func (s *Service) Attach(ctx context.Context, proof previewattachment.MachineProof, request runtimewire.Request) (runtimewire.HostAdmission, error) {
@@ -340,11 +328,16 @@ ON CONFLICT(route_id,edge_node_id) DO UPDATE SET machine_id=EXCLUDED.machine_id,
 			nodes, epochs = append(nodes, edge.node), append(epochs, edge.epoch)
 		}
 		if len(capabilities) != 0 {
-			if out.EndpointsServed, err = endpoints.EdgesServeTx(ctx, tx, nodes, epochs); err != nil {
+			if out.EndpointsServed, err = endpoints.EdgesServeTx(ctx, tx, nodes, epochs, false); err != nil {
 				return err
 			}
 		}
-		return endpoints.ReconcileAgentTx(ctx, tx, proof.MachineID)
+		if runtimewire.HasCapability(capabilities, runtimewire.CapabilityTunnelEndpoints) {
+			if out.TunnelEndpointsServed, err = endpoints.EdgesServeTx(ctx, tx, nodes, epochs, true); err != nil {
+				return err
+			}
+		}
+		return endpoints.SyncAgentTunnelsTx(ctx, tx, proof.MachineID)
 	})
 	return out, err
 }
@@ -352,11 +345,11 @@ ON CONFLICT(route_id,edge_node_id) DO UPDATE SET machine_id=EXCLUDED.machine_id,
 // Pull returns the edge's complete runtime snapshot: the runtime route admissions and, for an edge
 // that advertised runtimewire.CapabilityEndpoints, the endpoint routes riding on those carriers.
 func (s *Service) Pull(ctx context.Context, edge previewattachment.PreviewEdgeIdentity, capabilities []string) ([]runtimewire.Admission, error) {
-	if !validCapabilities(capabilities) {
+	if !runtimewire.ValidCapabilities(capabilities) {
 		return nil, ErrInvalid
 	}
 	if len(capabilities) != 0 {
-		if err := endpoints.RecordEdgeServes(ctx, s.DB.Pool(), edge.NodeID, edge.ProcessEpoch); err != nil {
+		if err := endpoints.RecordEdgeServes(ctx, s.DB.Pool(), edge.NodeID, edge.ProcessEpoch, runtimewire.HasCapability(capabilities, runtimewire.CapabilityTunnelEndpoints)); err != nil {
 			return nil, err
 		}
 	}
@@ -406,8 +399,11 @@ const observationRefresh = 10 * time.Second
 // PullEndpoints returns only the endpoint route admissions of the edge's snapshot (the routes of
 // the agents' runtime carriers on this edge); the edge pulls it often and merges it with its last
 // full runtime snapshot.
-func (s *Service) PullEndpoints(ctx context.Context, edge previewattachment.PreviewEdgeIdentity) ([]runtimewire.Admission, error) {
-	if err := endpoints.RecordEdgeServes(ctx, s.DB.Pool(), edge.NodeID, edge.ProcessEpoch); err != nil {
+func (s *Service) PullEndpoints(ctx context.Context, edge previewattachment.PreviewEdgeIdentity, capabilities []string) ([]runtimewire.Admission, error) {
+	if !runtimewire.HasCapability(capabilities, runtimewire.CapabilityEndpoints) || !runtimewire.ValidCapabilities(capabilities) {
+		return nil, ErrInvalid
+	}
+	if err := endpoints.RecordEdgeServes(ctx, s.DB.Pool(), edge.NodeID, edge.ProcessEpoch, runtimewire.HasCapability(capabilities, runtimewire.CapabilityTunnelEndpoints)); err != nil {
 		return nil, err
 	}
 	routes, err := endpoints.EdgeAdmissions(ctx, s.DB.Pool(), edge.NodeID, edge.ProcessEpoch, admission.Deadline(time.Now(), s.AdmissionLifetime), runtimewire.MaximumAdmissions)

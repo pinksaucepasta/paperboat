@@ -13,6 +13,11 @@ const (
 	EndpointPublicRouteKind     = "preview_public_https_wss"
 	EndpointRestrictedRouteKind = "preview_private_https_wss"
 	CapabilityEndpoints         = "endpoints"
+	// CapabilityTunnelEndpoints (with CapabilityEndpoints): an agent serves its tunnels' routes on
+	// its runtime carriers, and an edge serves tunnel routes whose replica is an agent's runtime
+	// carrier. A tunnel moves onto the engine only when its agent and every edge it holds carriers
+	// to advertise it; until then it keeps its own connector.
+	CapabilityTunnelEndpoints = "tunnel_endpoints"
 )
 const MaximumAdmissions = 4096
 const MaximumEdgeCandidates = 32
@@ -105,6 +110,9 @@ type HostAdmission struct {
 	// EndpointsServed: every edge of this attachment admits endpoint routes, so the agent serves
 	// its previews as endpoint routes on these carriers (PLAN 3a).
 	EndpointsServed bool `json:"endpoints_served,omitempty"`
+	// TunnelEndpointsServed: every edge of this attachment also serves tunnel routes on these
+	// carriers, so the agent serves its tunnels here instead of running their connectors.
+	TunnelEndpointsServed bool `json:"tunnel_endpoints_served,omitempty"`
 }
 type Observation struct {
 	RouteID              string `json:"route_id"`
@@ -125,4 +133,29 @@ type Snapshot struct {
 	Schema     string       `json:"schema"`
 	Complete   bool         `json:"complete"`
 	Admissions *[]Admission `json:"admissions"`
+}
+
+// ValidCapabilities accepts no capabilities, CapabilityEndpoints, or CapabilityEndpoints with
+// CapabilityTunnelEndpoints, each at most once.
+func ValidCapabilities(values []string) bool {
+	switch len(values) {
+	case 0:
+		return true
+	case 1:
+		return values[0] == CapabilityEndpoints
+	case 2:
+		return values[0] == CapabilityEndpoints && values[1] == CapabilityTunnelEndpoints ||
+			values[1] == CapabilityEndpoints && values[0] == CapabilityTunnelEndpoints
+	}
+	return false
+}
+
+// HasCapability reports whether values contains capability.
+func HasCapability(values []string, capability string) bool {
+	for _, value := range values {
+		if value == capability {
+			return true
+		}
+	}
+	return false
 }
