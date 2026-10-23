@@ -68,7 +68,9 @@ func TestTunnelHealthFollowsObservedRoutesOnPostgres(t *testing.T) {
 	// to it, so the tunnel is not ready until it has (F8-06 first-request EOF).
 	secondNode := f.nodeID + "_second"
 	exec(`INSERT INTO paperboat.control_tunnel_nodes SELECT (jsonb_populate_record(NULL::paperboat.control_tunnel_nodes, to_jsonb(n) || jsonb_build_object('id',$2::text,'process_epoch','epoch_second_'||$3::text))).* FROM paperboat.control_tunnel_nodes n WHERE n.id=$1`, f.nodeID, secondNode, f.suffix)
-	t.Cleanup(func() { database.SQL().ExecContext(ctx, `DELETE FROM paperboat.control_tunnel_nodes WHERE id=$1`, secondNode) })
+	t.Cleanup(func() {
+		database.SQL().ExecContext(ctx, `DELETE FROM paperboat.control_tunnel_nodes WHERE id=$1`, secondNode)
+	})
 	exec(`INSERT INTO paperboat.tunnel_edge_route_assignments SELECT (jsonb_populate_record(NULL::paperboat.tunnel_edge_route_assignments, to_jsonb(a) || jsonb_build_object('assignment_generation',a.assignment_generation+100,'assignment_id','assignment_second_'||$3::text,'edge_node_id',$2::text,'edge_process_epoch','epoch_second_'||$3::text,'state','active','observed_state','pending'))).* FROM paperboat.tunnel_edge_route_assignments a WHERE a.assignment_id=$1`, assignment.assignmentID, secondNode, f.suffix)
 	if err := service.ObserveRoutes(ctx, f.nodeID, []RouteObservation{f.observation(assignment, "ready")}); err != nil {
 		t.Fatal(err)

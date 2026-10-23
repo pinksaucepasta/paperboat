@@ -191,7 +191,7 @@ func (o RouteObservation) canonicalObservedState() (string, error) {
 	state := strings.TrimSpace(o.State)
 	observed := strings.TrimSpace(o.ObservedState)
 	if state != "" && observed != "" && state != observed {
-		return "", ErrInvalidUsageReport
+		return "", invalidUsage("edge.go:194")
 	}
 	if state == "" {
 		state = observed
@@ -200,7 +200,7 @@ func (o RouteObservation) canonicalObservedState() (string, error) {
 	case "prepared", "ready", "degraded", "draining", "failed", "detached":
 		return state, nil
 	default:
-		return "", ErrInvalidUsageReport
+		return "", invalidUsage("edge.go:203")
 	}
 }
 
@@ -215,7 +215,7 @@ func validEdgeAccessMode(mode string) bool {
 
 func (s *EdgeService) ObserveRoutes(ctx context.Context, nodeID string, observations []RouteObservation) error {
 	if nodeID == "" || len(observations) > 1000 {
-		return ErrInvalidUsageReport
+		return invalidUsage("edge.go:218")
 	}
 	now := s.clock().UTC()
 	detachedCount := int64(0)
@@ -228,18 +228,18 @@ func (s *EdgeService) ObserveRoutes(ctx context.Context, nodeID string, observat
 		observedCanonical := make(map[string]struct{}, len(observations))
 		for _, observation := range observations {
 			if observation.RouteID == "" || observation.RouteRevision < 1 || observation.EdgeNodeID != nodeID || observation.ConnectorGeneration < 1 {
-				return ErrInvalidUsageReport
+				return invalidUsage("edge.go:231")
 			}
 			if observation.ConfigGeneration > 0 {
 				if observation.AssignmentID == "" || observation.AssignmentGeneration < 1 || observation.EdgeProcessEpoch == "" || observation.ConnectorID == "" || observation.HostID == "" || observation.ConnectorSessionID == "" || observation.ConnectorProcessGeneration < 1 || !validEdgeAccessMode(observation.AccessMode) || observation.ViewerPolicyGeneration < 1 {
-					return ErrInvalidUsageReport
+					return invalidUsage("edge.go:235")
 				}
 				configHash, err := parseTunnelEdgeConfigHash(observation.ConfigContentHash)
 				if err != nil {
-					return ErrInvalidUsageReport
+					return invalidUsage("edge.go:239")
 				}
 				if _, duplicate := observedCanonical[observation.AssignmentID]; duplicate {
-					return ErrInvalidUsageReport
+					return invalidUsage("edge.go:242")
 				}
 				observedCanonical[observation.AssignmentID] = struct{}{}
 				state, err := observation.canonicalObservedState()
@@ -312,7 +312,7 @@ func (s *EdgeService) ObserveRoutes(ctx context.Context, nodeID string, observat
 				continue
 			}
 			if _, duplicate := observedLegacy[observation.RouteID]; duplicate {
-				return ErrInvalidUsageReport
+				return invalidUsage("edge.go:315")
 			}
 			observedLegacy[observation.RouteID] = struct{}{}
 			if _, err := tx.Queries().ApplyControlRouteObservation(ctx, dbsqlc.ApplyControlRouteObservationParams{ID: observation.RouteID, RouteRevision: observation.RouteRevision, EdgeNodeID: sql.NullString{String: observation.EdgeNodeID, Valid: true}, ConnectorGeneration: sql.NullInt64{Int64: observation.ConnectorGeneration, Valid: true}, Now: now}); err != nil {
@@ -383,7 +383,7 @@ func (s *EdgeService) Revocations(ctx context.Context) (RevocationDocument, erro
 func (s *EdgeService) RevokeSigningKey(ctx context.Context, actorID, idempotencyKey, keyID, reason string, revokedAt time.Time) error {
 	actorID, idempotencyKey, keyID, reason = strings.TrimSpace(actorID), strings.TrimSpace(idempotencyKey), strings.TrimSpace(keyID), strings.TrimSpace(reason)
 	if actorID == "" || idempotencyKey == "" || keyID == "" || reason == "" || revokedAt.IsZero() {
-		return ErrInvalidUsageReport
+		return invalidUsage("edge.go:386")
 	}
 	return s.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		if err := requireActiveGlobalRole(ctx, tx, actorID, "admin"); err != nil {
@@ -512,7 +512,7 @@ func validConnectorID(value string) bool {
 
 func (s *EdgeService) ProvisionUsageKey(ctx context.Context, actorID, idempotencyKey, keyID, nodeID string, publicKey []byte, notBefore, expiresAt time.Time) error {
 	if strings.TrimSpace(actorID) == "" || strings.TrimSpace(idempotencyKey) == "" || keyID == "" || nodeID == "" || len(publicKey) != ed25519.PublicKeySize || !expiresAt.After(notBefore) {
-		return ErrInvalidUsageReport
+		return invalidUsage("edge.go:515")
 	}
 	return s.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		if err := requireActiveGlobalRole(ctx, tx, actorID, "admin"); err != nil {
@@ -537,7 +537,7 @@ func (s *EdgeService) ProvisionUsageKey(ctx context.Context, actorID, idempotenc
 
 func (s *EdgeService) RevokeUsageKey(ctx context.Context, actorID, idempotencyKey, keyID, reason string, revokedAt time.Time) error {
 	if strings.TrimSpace(actorID) == "" || strings.TrimSpace(idempotencyKey) == "" || keyID == "" || strings.TrimSpace(reason) == "" {
-		return ErrInvalidUsageReport
+		return invalidUsage("edge.go:540")
 	}
 	return s.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		if err := requireActiveGlobalRole(ctx, tx, actorID, "admin"); err != nil {
@@ -633,7 +633,7 @@ const controlTunnelNodeStaleAfter = 2 * time.Minute
 
 func (s *EdgeService) RegisterNode(ctx context.Context, r edgeNodeRegistration) error {
 	if r.NodeID == "" || r.EdgePool == "" || r.Protocol == "" || r.ProcessEpoch == "" || r.Capacity == 0 || r.Endpoint.Host == "" || r.Endpoint.TCPPort == 0 || r.Endpoint.QUICPort == 0 || validateCarrierServerCertificateChain(r.CarrierServerCertificateChainPEM, r.CarrierServerSPKISHA256, r.CarrierEndpoint.Host, s.clock().UTC()) != nil {
-		return ErrInvalidUsageReport
+		return invalidUsage("edge.go:636")
 	}
 	if err := validateCarrierEndpoint(r.CarrierEndpoint); err != nil {
 		return err
@@ -662,7 +662,7 @@ func validCarrierServerSPKISHA256(value string) bool {
 
 func validateCarrierServerCertificateChain(chainPEM, pin, hostname string, now time.Time) error {
 	if len(chainPEM) == 0 || len(chainPEM) > 64<<10 || !validCarrierServerSPKISHA256(pin) {
-		return ErrInvalidUsageReport
+		return invalidUsage("edge.go:665")
 	}
 	rest := []byte(chainPEM)
 	count := 0
@@ -670,30 +670,30 @@ func validateCarrierServerCertificateChain(chainPEM, pin, hostname string, now t
 	for len(rest) > 0 {
 		block, next := pem.Decode(rest)
 		if block == nil || block.Type != "CERTIFICATE" || len(block.Headers) != 0 {
-			return ErrInvalidUsageReport
+			return invalidUsage("edge.go:673")
 		}
 		certificate, err := x509.ParseCertificate(block.Bytes)
 		if err != nil {
-			return ErrInvalidUsageReport
+			return invalidUsage("edge.go:677")
 		}
 		if count == 0 {
 			leaf = certificate
 		}
 		count++
 		if count > 8 {
-			return ErrInvalidUsageReport
+			return invalidUsage("edge.go:684")
 		}
 		rest = next
 	}
 	if leaf == nil {
-		return ErrInvalidUsageReport
+		return invalidUsage("edge.go:689")
 	}
 	if now.Before(leaf.NotBefore) || !now.Before(leaf.NotAfter) || leaf.VerifyHostname(hostname) != nil {
-		return ErrInvalidUsageReport
+		return invalidUsage("edge.go:692")
 	}
 	digest := sha256.Sum256(leaf.RawSubjectPublicKeyInfo)
 	if pin != "sha256:"+hex.EncodeToString(digest[:]) {
-		return ErrInvalidUsageReport
+		return invalidUsage("edge.go:696")
 	}
 	return nil
 }
@@ -705,14 +705,14 @@ func validateCarrierEndpoint(endpoint struct {
 }) error {
 	host := strings.TrimSpace(endpoint.Host)
 	if host != endpoint.Host || len(host) > 253 || strings.ContainsAny(host, "/ 	\r\n\x00") || endpoint.TCPPort == 0 || endpoint.QUICPort == 0 || endpoint.TCPPort == endpoint.QUICPort {
-		return ErrInvalidUsageReport
+		return invalidUsage("edge.go:708")
 	}
 	return nil
 }
 
 func (s *EdgeService) Heartbeat(ctx context.Context, r edgeNodeObservation) error {
 	if r.NodeID == "" || r.ProcessEpoch == "" || r.At.IsZero() {
-		return ErrInvalidUsageReport
+		return invalidUsage("edge.go:715")
 	}
 	observation, _ := json.Marshal(map[string]any{"active_streams": r.ActiveStreams})
 	_, err := s.store.Queries().HeartbeatControlTunnelNode(ctx, dbsqlc.HeartbeatControlTunnelNodeParams{ID: r.NodeID, ProcessEpoch: r.ProcessEpoch, Ready: r.Ready, Draining: r.Draining, Observation: observation, Now: sql.NullTime{Time: s.clock().UTC(), Valid: true}})
@@ -743,7 +743,7 @@ func (s *EdgeService) Usage(ctx context.Context, r edgeUsageRequest) (UsageRecei
 	}
 	// Scoped reports can never fall through to historical machine-owner billing.
 	if !private && r.AuthorityID != "" {
-		return UsageReceipt{}, ErrInvalidUsageReport
+		return UsageReceipt{}, invalidUsage("edge.go:746")
 	}
 	debiter := s.bandwidth
 	// Independent operators can account for their own transport, but pairing
@@ -1012,6 +1012,9 @@ func (s *EdgeService) handleUsage(w http.ResponseWriter, r *http.Request) {
 	result, err := s.Usage(r.Context(), input)
 	if err != nil {
 		status, code, retryable, retryAfterMS := usageErrorResponse(err)
+		if status == http.StatusBadRequest {
+			slog.WarnContext(r.Context(), "edge usage report refused", "error", err.Error(), "edge_node_id", input.Node, "route_id", input.Route)
+		}
 		writeEdgeError(w, r, status, code, retryable, retryAfterMS, err)
 		return
 	}
@@ -1039,11 +1042,11 @@ func writeEdgeJSON(w http.ResponseWriter, status int, value any) {
 
 func parseTunnelEdgeConfigHash(value string) ([]byte, error) {
 	if len(value) != len("sha256:")+sha256.Size*2 || !strings.HasPrefix(value, "sha256:") {
-		return nil, ErrInvalidUsageReport
+		return nil, invalidUsage("edge.go:1042")
 	}
 	decoded, err := hex.DecodeString(strings.TrimPrefix(value, "sha256:"))
 	if err != nil || len(decoded) != sha256.Size {
-		return nil, ErrInvalidUsageReport
+		return nil, invalidUsage("edge.go:1046")
 	}
 	return decoded, nil
 }

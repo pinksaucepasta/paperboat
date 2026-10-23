@@ -119,6 +119,7 @@ func validSelector(s string) bool {
 	}
 	return true
 }
+
 // validConfigRuleSource lists where an effective rule came from, lowest priority
 // first: the shared file, its [os.<os>] section, its [machine.<name>] section and
 // the machine's own file.

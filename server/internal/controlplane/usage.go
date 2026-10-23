@@ -113,10 +113,10 @@ func reconcileUsage(ctx context.Context, store *db.DB, report UsageReport, now t
 			var workspace string
 			var actor sql.NullString
 			if report.AuthorityID == "" || len(report.AuthorityID) > 512 || report.IntervalEnd.After(now) {
-				return ErrInvalidUsageReport
+				return invalidUsage("usage.go:116")
 			}
 			if err := tx.QueryRow(ctx, `SELECT workspace_id,actor_account_id FROM usage_accounting_authorities WHERE authority_id=$1 AND edge_node_id=$2 AND environment_id=$3 AND route_id=$4 AND route_revision=$5 AND admitted_at<=$6 AND retain_until>$7`, report.AuthorityID, report.EdgeNodeID, report.EnvironmentID, report.RouteID, report.RouteRevision, report.IntervalEnd, now).Scan(&workspace, &actor); err != nil {
-				return ErrInvalidUsageReport
+				return invalidUsage("usage.go:119")
 			}
 			if _, err := tx.Exec(ctx, `UPDATE control_usage_receipts SET workspace_id=$2,actor_account_id=$3 WHERE operation_id=$1`, report.OperationID, workspace, actor); err != nil {
 				return err
@@ -160,14 +160,14 @@ func reconcileUsage(ctx context.Context, store *db.DB, report UsageReport, now t
 func validateUsageReport(r UsageReport) error {
 	for name, value := range map[string]string{"operation_id": r.OperationID, "edge_node_id": r.EdgeNodeID, "counter_epoch": r.CounterEpoch, "environment_id": r.EnvironmentID, "route_id": r.RouteID, "direction": r.Direction} {
 		if strings.TrimSpace(value) == "" {
-			return fmt.Errorf("%w: %s is required", ErrInvalidUsageReport, name)
+			return fmt.Errorf("%w: %s is required", invalidUsage("usage.go:163"), name)
 		}
 	}
 	if r.RouteRevision < 1 || r.Bytes < 0 || (r.Direction != "ingress" && r.Direction != "egress") {
-		return fmt.Errorf("%w: invalid counter or direction", ErrInvalidUsageReport)
+		return fmt.Errorf("%w: invalid counter or direction", invalidUsage("usage.go:167"))
 	}
 	if r.IntervalStart.IsZero() || r.IntervalEnd.IsZero() || r.IntervalEnd.Before(r.IntervalStart) {
-		return fmt.Errorf("%w: invalid interval", ErrInvalidUsageReport)
+		return fmt.Errorf("%w: invalid interval", invalidUsage("usage.go:170"))
 	}
 	return nil
 }
@@ -181,7 +181,13 @@ func sameUsageReport(existing dbsqlc.ControlUsageReceipt, r UsageReport) bool {
 
 func ReconcileScopedUsage(ctx context.Context, store *db.DB, report UsageReport, now time.Time, debiter ScopedBandwidthDebiter) (UsageReceipt, error) {
 	if debiter == nil {
-		return UsageReceipt{}, ErrInvalidUsageReport
+		return UsageReceipt{}, invalidUsage("usage.go:184")
 	}
 	return reconcileUsage(ctx, store, report, now, nil, debiter)
+}
+
+// invalidUsage is ErrInvalidUsageReport naming the check that refused the report, so a
+// refusal is traceable from the log (every report from an edge was refused unseen).
+func invalidUsage(site string) error {
+	return fmt.Errorf("%w (%s)", ErrInvalidUsageReport, site)
 }
