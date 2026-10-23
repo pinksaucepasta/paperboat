@@ -61,9 +61,12 @@ type DataCarrierPoolConfig struct {
 	Fallback        Transport
 	SingleTransport bool
 	EdgeID          string
-	FailureDomains  []string
-	Session         DataCarrierIdentity
-	Carrier         DataCarrierConfig
+	// EdgeProcessEpoch is the edge process this pool's carriers are admitted to. Accepted streams
+	// carry it in their EdgeTarget, which ingress authority must match before an origin is reached.
+	EdgeProcessEpoch string
+	FailureDomains   []string
+	Session          DataCarrierIdentity
+	Carrier          DataCarrierConfig
 }
 
 func DefaultDataCarrierPoolConfig() DataCarrierPoolConfig {

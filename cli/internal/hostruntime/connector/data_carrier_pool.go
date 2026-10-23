@@ -262,7 +262,7 @@ func (p *DataCarrierPool) target(slot int) DataCarrierTarget {
 	if len(p.targets) > 0 {
 		return p.targets[slot]
 	}
-	return DataCarrierTarget{EdgeID: p.config.EdgeID, FailureDomain: p.config.FailureDomains[slot]}
+	return DataCarrierTarget{EdgeID: p.config.EdgeID, ProcessEpoch: p.config.EdgeProcessEpoch, FailureDomain: p.config.FailureDomains[slot]}
 }
 
 func (p *DataCarrierPool) dialSlot(ctx context.Context, slot int) (DataCarrierDialResult, Transport, int, error) {

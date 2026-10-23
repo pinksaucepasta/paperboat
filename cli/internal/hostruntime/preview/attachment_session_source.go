@@ -512,7 +512,7 @@ func (s *MachineAttachmentSessionSource) prepareCarrier(accountID, hostID, machi
 	}
 	poolConfig := s.carrier
 	poolConfig.MaximumCarriers = 1
-	poolConfig.EdgeID = edgeNodeID
+	poolConfig.EdgeID, poolConfig.EdgeProcessEpoch = edgeNodeID, edgeProcessEpoch
 	poolConfig.FailureDomains = []string{edgeNodeID}
 	poolConfig.Session = liveIdentity
 	switch {

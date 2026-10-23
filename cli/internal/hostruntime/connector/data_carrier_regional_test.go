@@ -244,3 +244,53 @@ func TestRegionalCarrierSilentPeerMissesResetAndExposeSurvivor(t *testing.T) {
 		t.Fatal("healthy survivor lost readiness")
 	}
 }
+
+// A single-edge pool (a preview or agent runtime carrier) stamps its edge process epoch on every
+// accepted stream: ingress authority requires the stream's edge target to equal the decision's edge
+// node and epoch, so a missing epoch refused every restricted browser stream (F7-03).
+func TestSingleEdgePoolStreamsCarryTheEdgeProcessEpoch(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	config := DefaultDataCarrierPoolConfig()
+	config.MaximumCarriers, config.EdgeID, config.EdgeProcessEpoch, config.FailureDomains = 1, "edge-a", "epoch-a", []string{"edge-a"}
+	config.Carrier = testDataCarrierConfig()
+	var server *DataCarrier
+	var mu sync.Mutex
+	dialer := func(_ context.Context, r DataCarrierDialRequest) (DataCarrierDialResult, error) {
+		local, remote := net.Pipe()
+		s, err := NewDataCarrierServer(ctx, remote, config.Carrier, DataCarrierAdmission{Identity: config.Session, Authorize: func(context.Context, StreamOpen) error { return nil }})
+		if err != nil {
+			local.Close()
+			remote.Close()
+			return DataCarrierDialResult{}, err
+		}
+		mu.Lock()
+		server = s
+		mu.Unlock()
+		return DataCarrierDialResult{Link: local, PeerIdentity: config.Session, Transport: r.Transport, EdgeID: r.EdgeID, FailureDomain: r.FailureDomain}, nil
+	}
+	pool, err := NewDataCarrierPool(ctx, config, dialer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	if err := pool.Connect(ctx); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	opened, err := server.OpenStream(ctx)
+	mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer opened.Close()
+	defer server.Close()
+	stream, _, err := pool.AcceptStream(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+	if target := stream.EdgeTarget(); target.EdgeID != "edge-a" || target.ProcessEpoch != "epoch-a" {
+		t.Fatalf("accepted stream edge target = %+v, want edge-a/epoch-a", target)
+	}
+}
