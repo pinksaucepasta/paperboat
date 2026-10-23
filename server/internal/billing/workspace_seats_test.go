@@ -229,3 +229,35 @@ func TestPurchasedSeatChangesReserveInvitesAndDeferRemoval(t *testing.T) {
 	}
 
 }
+
+// A team in its free trial can buy seats (Stripe prorates the trial to $0); only a team with
+// no live subscription, or one set to cancel, cannot change them.
+func TestTrialingTeamCanChangeSeats(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	x := fmt.Sprint(time.Now().UnixNano())
+	owner, team := "usr_tso_"+x, "seat-trial-"+x
+	insertUser(t, store, owner, owner+"@example.test")
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := store.SQL().ExecContext(ctx, q, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exec(`INSERT INTO paperboat.teams(team_id,owner_account,generation) VALUES($1,$2,1)`, team, owner)
+	exec(`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'member',true)`, team, owner)
+	code, price := "seat-trial-plan-"+x, "price_seat_trial_"+x
+	exec(`INSERT INTO paperboat.billing_products(id,code,provider,provider_product_id,provider_price_id,catalog_type,catalog_ref,active) VALUES($1,$1,'stripe',$1,$2,'team_subscription','{}',true)`, code, price)
+	start, end := time.Now().Add(-time.Hour).UTC().Truncate(time.Second), time.Now().Add(14*24*time.Hour).UTC().Truncate(time.Second)
+	exec(`INSERT INTO paperboat.billing_workspaces(id,team_id,state,quantity,provider_subscription_id,provider_item_id,provider_customer_id,product_code,period_start,period_end) VALUES('trial:'||$1,$1,'trialing',1,'sub_'||$1,'si_'||$1,'cus_'||$1,$2,$3,$4)`, team, code, start, end)
+	sub := billing.StripeSubscription{ID: "sub_" + team, CustomerID: "cus_" + team, ItemID: "si_" + team, PriceID: price, Status: "trialing", Quantity: 1, PeriodStart: start, PeriodEnd: end}
+	fake := &membershipStripeFake{subs: map[string]billing.StripeSubscription{sub.ID: sub}, fail: map[string]bool{}, updates: map[string]int{}}
+	service := billing.NewWorkspaceService(store, fake, "trial-seat-test-key")
+	if _, err := service.PreviewSeats(ctx, owner, team, 2); err != nil {
+		t.Fatalf("trialing team seat preview: %v", err)
+	}
+	exec(`UPDATE paperboat.billing_workspaces SET cancel_at_period_end=true WHERE team_id=$1`, team)
+	if _, err := service.PreviewSeats(ctx, owner, team, 2); !errors.Is(err, billing.ErrSeatSubscription) {
+		t.Fatalf("a trial set to cancel changed seats: %v", err)
+	}
+}

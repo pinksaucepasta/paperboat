@@ -39,7 +39,7 @@ func seatChangeTx(ctx context.Context, tx *db.Tx, account, team string, quantity
 	if err != nil {
 		return w, SeatChange{}, err
 	}
-	if team == "" || w.SubscriptionID == "" || w.ItemID == "" || w.State != "active" || w.CancelAtPeriodEnd || w.PeriodStart == nil || w.PeriodEnd == nil || !w.PeriodEnd.After(time.Now()) {
+	if team == "" || w.SubscriptionID == "" || w.ItemID == "" || (w.State != "active" && w.State != "trialing") || w.CancelAtPeriodEnd || w.PeriodStart == nil || w.PeriodEnd == nil || !w.PeriodEnd.After(time.Now()) {
 		return w, SeatChange{}, ErrSeatSubscription
 	}
 	if quantity < 1 || quantity > teams.MaximumMembers || quantity < w.SeatsUsed {
