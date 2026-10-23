@@ -88,7 +88,7 @@ func Run(ctx context.Context, config DaemonConfig) (runErr error) {
 	// Managed SSH starts from the first inventory refresh, after the local API serves (managedSSHOwner).
 	var managedSSH *managedSSHOwner
 	if config.ManagedSSH != nil {
-		managedSSH = &managedSSHOwner{config: *config.ManagedSSH, start: StartManagedSSH, report: func(reportCtx context.Context, startErr error) {
+		managedSSH = &managedSSHOwner{lifetime: ctx, config: *config.ManagedSSH, start: StartManagedSSH, report: func(reportCtx context.Context, startErr error) {
 			reportManagedSSHStartup(reportCtx, config.Source, recorder, startErr)
 		}}
 		defer func() { runErr = daemonCleanupFailure(runErr, managedSSH.close()) }()

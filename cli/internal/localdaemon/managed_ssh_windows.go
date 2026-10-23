@@ -77,7 +77,12 @@ func StartManagedSSH(ctx context.Context, cfg ManagedSSHConfig) (*ManagedSSHRunt
 		}
 		return installWindowsOpenSSHConfig(cfg, agentRuntime.socket, identity.PublicKey, configuration.LocalAccessBaseDomain, targets)
 	}
-	if err := install(ctx); err != nil {
+	// ctx is the daemon's lifetime: the agent above serves on it. The first configuration install
+	// asks the server, so it gets its own bound.
+	installCtx, cancelInstall := context.WithTimeout(ctx, managedSSHInstallTimeout)
+	err = install(installCtx)
+	cancelInstall()
+	if err != nil {
 		return nil, errors.Join(err, agentRuntime.Close())
 	}
 	return &ManagedSSHRuntime{closeFn: agentRuntime.Close, refresh: install}, nil

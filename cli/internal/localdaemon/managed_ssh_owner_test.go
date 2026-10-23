@@ -18,6 +18,7 @@ func TestManagedSSHStartsFromTheRefreshAndRetriesAFailedStart(t *testing.T) {
 	failure := errors.New("register managed SSH client key: server did not answer")
 	starts, reports, refreshes := 0, 0, 0
 	owner := &managedSSHOwner{
+		lifetime: t.Context(),
 		start: func(context.Context, ManagedSSHConfig) (*ManagedSSHRuntime, error) {
 			starts++
 			if starts <= 2 {
@@ -69,5 +70,44 @@ func TestInventoryRefreshesWhenAsked(t *testing.T) {
 	case <-refreshed:
 	case <-time.After(2 * time.Second):
 		t.Fatal("RequestRefresh did not refresh the inventory")
+	}
+}
+
+// Round 7 regression (dadape, 2026-10-23): the owner started managed SSH on the refresh's 15 s context,
+// and the agent serves on the context it is started with, so it stopped as soon as that refresh ended:
+// no agent socket, `pb ssh` denied. Managed SSH starts on the daemon's lifetime, whether the server
+// answers quickly or the refresh's own context ends first (slow server), and stays up afterwards.
+func TestManagedSSHRunsOnTheDaemonLifetimeNotTheRefresh(t *testing.T) {
+	for name, refreshBudget := range map[string]time.Duration{"healthy server": time.Minute, "slow server": time.Millisecond} {
+		t.Run(name, func(t *testing.T) {
+			lifetime, stopDaemon := context.WithCancel(t.Context())
+			defer stopDaemon()
+			var agentCtx context.Context
+			owner := &managedSSHOwner{
+				lifetime: lifetime,
+				start: func(ctx context.Context, _ ManagedSSHConfig) (*ManagedSSHRuntime, error) {
+					time.Sleep(20 * time.Millisecond) // the server takes longer than the slow refresh's budget
+					if ctx.Err() != nil {
+						return nil, ctx.Err()
+					}
+					agentCtx = ctx
+					return &ManagedSSHRuntime{refresh: func(context.Context) error { return nil }}, nil
+				},
+				report: func(context.Context, error) {},
+			}
+			refreshCtx, endRefresh := context.WithTimeout(t.Context(), refreshBudget)
+			_ = owner.refresh(refreshCtx)
+			endRefresh()
+			if agentCtx == nil {
+				t.Fatal("managed SSH did not start")
+			}
+			if agentCtx.Err() != nil {
+				t.Fatal("the agent's context ended with the refresh; managed SSH must run on the daemon lifetime")
+			}
+			stopDaemon()
+			if agentCtx.Err() == nil {
+				t.Fatal("the agent's context must end with the daemon")
+			}
+		})
 	}
 }

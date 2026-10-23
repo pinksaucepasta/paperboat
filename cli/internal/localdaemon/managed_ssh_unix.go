@@ -86,7 +86,11 @@ func StartManagedSSH(ctx context.Context, cfg ManagedSSHConfig) (*ManagedSSHRunt
 		})
 		return err
 	}
-	err = install(ctx)
+	// ctx is the daemon's lifetime: the agent above serves on it. The first configuration install
+	// asks the server, so it gets its own bound.
+	installCtx, cancelInstall := context.WithTimeout(ctx, managedSSHInstallTimeout)
+	err = install(installCtx)
+	cancelInstall()
 	if err != nil {
 		return nil, errors.Join(err, agent.Close())
 	}
