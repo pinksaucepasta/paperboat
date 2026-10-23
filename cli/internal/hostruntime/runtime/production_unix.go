@@ -509,20 +509,12 @@ func initializeProductionManagedSSHUnix(ctx context.Context, host *managedssh.Ho
 	if err != nil {
 		return nil, errors.Join(ErrManagedSSHUnavailable, err)
 	}
-	paths := existingSSHHostPublicKeyPathsUnix()
-	if len(paths) == 0 {
-		return nil, errors.Join(ErrManagedSSHUnavailable, errors.New("no SSH host public key is published"))
-	}
-	inventory, err := managedssh.ReadHostPublicKeys(paths, 0)
+	publicKeys, err := readSSHHostPublicKeysUnix()
 	if err != nil {
 		return nil, errors.Join(ErrManagedSSHUnavailable, err)
 	}
 	if observationGeneration == 0 {
 		return nil, errors.New("managed SSH observation generation is unavailable")
-	}
-	publicKeys := make([]string, len(inventory.Keys))
-	for index := range inventory.Keys {
-		publicKeys[index] = inventory.Keys[index].PublicKey
 	}
 	client := clientapi.New(controlURL, clientconfig.Credential{}, &http.Client{Transport: transport, Timeout: 15 * time.Second})
 	account, err := user.Lookup(registration.SSHUser)
@@ -535,7 +527,7 @@ func initializeProductionManagedSSHUnix(ctx context.Context, host *managedssh.Ho
 	}
 	reconciler := &managedSSHKeyReconciler{
 		client: client, identity: identitySource, registration: registration,
-		workerGeneration: observationGeneration, publicKeys: publicKeys,
+		workerGeneration: observationGeneration, publicKeys: publicKeys, readPublicKeys: readSSHHostPublicKeysUnix,
 		home: account.HomeDir, ownerUID: uint32(uid), interval: 30 * time.Second, timeout: 10 * time.Second,
 	}
 	return reconciler, nil
@@ -596,6 +588,22 @@ func reconcileManagedSSHAuthorityWithOperations(ctx context.Context, client mana
 		return clientapi.ManagedSSHAuthorizedKeys{}, false, err
 	}
 	return keySet, true, nil
+}
+
+func readSSHHostPublicKeysUnix() ([]string, error) {
+	paths := existingSSHHostPublicKeyPathsUnix()
+	if len(paths) == 0 {
+		return nil, errors.New("no SSH host public key is published")
+	}
+	inventory, err := managedssh.ReadHostPublicKeys(paths, 0)
+	if err != nil {
+		return nil, err
+	}
+	publicKeys := make([]string, len(inventory.Keys))
+	for index := range inventory.Keys {
+		publicKeys[index] = inventory.Keys[index].PublicKey
+	}
+	return publicKeys, nil
 }
 
 func existingSSHHostPublicKeyPathsUnix() []string {

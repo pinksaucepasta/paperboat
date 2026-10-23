@@ -401,8 +401,9 @@ func mapMachines(machines []api.UserMachine) []localapi.MachineStatus {
 		} else if generation > 0 && machine.SSHAuthority.TargetGeneration != generation {
 			status.Health = []localapi.HealthItem{{Code: "ssh_target_not_ready", Severity: "warning", Title: "SSH target is not ready", Recovery: "Ensure the machine's existing SSH service is listening on loopback", ETag: "ssh_target_not_ready"}}
 		} else if generation > 0 && machine.SSHAuthority.HostKeyGeneration == 0 {
-			// The machine never published SSH host keys: no SSH server runs there, so there is nothing to trust.
-			status.Health = []localapi.HealthItem{{Code: "ssh_server_missing", Severity: "warning", Title: "No SSH server is running on the machine", Recovery: "Install and start an SSH server (sshd) on the machine; Paperboat publishes its host keys within a minute", ETag: "ssh_server_missing"}}
+			// The machine never published SSH host keys. sshd may be missing, or running with host keys the
+			// server refused as another machine's (a cloned image), so name both and the fix for each.
+			status.Health = []localapi.HealthItem{{Code: "ssh_host_keys_unpublished", Severity: "warning", Title: "The machine's SSH host keys are not published", Recovery: sshHostKeysUnpublishedRecovery, ETag: "ssh_host_keys_unpublished"}}
 		} else if generation > 0 && machine.SSHAuthority.HostKeyGeneration != generation {
 			status.Health = []localapi.HealthItem{{Code: "ssh_host_key_changed", Severity: "warning", Title: "SSH host identity is not ready", Recovery: "Review and approve the machine's current SSH host keys", ETag: "ssh_host_key_changed"}}
 		}
@@ -416,6 +417,10 @@ func mapMachines(machines []api.UserMachine) []localapi.MachineStatus {
 	})
 	return result
 }
+
+const sshHostKeysUnpublishedRecovery = "On the machine, start an SSH server (sshd) if none runs. If sshd runs, its host keys are " +
+	"identical to another machine's (cloned image): remove /etc/ssh/ssh_host_*, run ssh-keygen -A and restart sshd. " +
+	"Paperboat publishes the keys within a minute"
 
 func updateHealth(machine api.UserMachine) string {
 	if machine.Availability.Schema != "paperboat.availability-policy/v1" || machine.Availability.ObservedAt == nil {

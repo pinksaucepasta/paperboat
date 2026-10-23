@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"slices"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -24,13 +25,17 @@ type managedSSHKeyReconciler struct {
 	registration     runtimeidentity.Registration
 	workerGeneration uint64
 	publicKeys       []string
-	home             string
-	ownerUID         uint32
-	interval         time.Duration
-	timeout          time.Duration
-	sequence         atomic.Uint64
-	ready            atomic.Bool
-	hostKeyInUse     atomic.Bool
+	// readPublicKeys re-reads the host's SSH public keys. While the server refuses them as another
+	// machine's, a changed set (the owner regenerated them) is published at the next tick.
+	readPublicKeys func() ([]string, error)
+	refusedAt      time.Time
+	home           string
+	ownerUID       uint32
+	interval       time.Duration
+	timeout        time.Duration
+	sequence       atomic.Uint64
+	ready          atomic.Bool
+	hostKeyInUse   atomic.Bool
 
 	mu     sync.Mutex
 	cancel context.CancelFunc
@@ -81,6 +86,10 @@ func (s *managedSSHKeyReconciler) run(ctx context.Context, done chan<- struct{})
 		case <-ctx.Done():
 			return
 		case <-timer.C:
+			if !s.hostKeysChangedOrRetryDue(time.Now()) {
+				timer.Reset(s.nextReconcile())
+				continue
+			}
 			reconcileCtx, cancel := context.WithTimeout(ctx, s.timeout)
 			if err := s.reconcile(reconcileCtx); err != nil {
 				// A managed key is only authoritative while the host can obtain a
@@ -101,6 +110,9 @@ func (s *managedSSHKeyReconciler) reconcile(ctx context.Context) error {
 	suffix := s.registration.MachineID + "-" + strconv.FormatUint(uint64(s.registration.InstallationGeneration), 10) + "-" + strconv.FormatUint(s.workerGeneration, 10) + "-refresh-" + strconv.FormatUint(sequence, 10)
 	keys, active, err := reconcileManagedSSHAuthorityWithOperations(ctx, s.client, s.identity, s.registration, s.workerGeneration, s.publicKeys, "managed-ssh-observe-"+suffix, "managed-ssh-keys-"+suffix)
 	s.hostKeyInUse.Store(hostKeysInUseElsewhere(err))
+	if s.hostKeyInUse.Load() {
+		s.refusedAt = time.Now()
+	}
 	if err != nil {
 		_, cleanupErr := reconcilePlatformAuthorizedKeys(s.home, s.ownerUID, nil)
 		if cleanupErr == nil && s.hostKeyInUse.Load() {
@@ -191,8 +203,21 @@ func hostKeysInUseElsewhere(err error) bool {
 }
 
 func (s *managedSSHKeyReconciler) nextReconcile() time.Duration {
-	if s.hostKeyInUse.Load() {
-		return max(s.interval, managedSSHHostKeyInUseRetry)
-	}
 	return s.interval
+}
+
+// hostKeysChangedOrRetryDue reports whether a tick should reconcile. Refused host keys do not change
+// by asking again, so the server is asked again only when the keys on disk differ from the refused
+// ones (adopting them) or managedSSHHostKeyInUseRetry has passed.
+func (s *managedSSHKeyReconciler) hostKeysChangedOrRetryDue(now time.Time) bool {
+	if !s.hostKeyInUse.Load() {
+		return true
+	}
+	if s.readPublicKeys != nil {
+		if keys, err := s.readPublicKeys(); err == nil && len(keys) > 0 && !slices.Equal(keys, s.publicKeys) {
+			s.publicKeys = keys
+			return true
+		}
+	}
+	return now.Sub(s.refusedAt) >= managedSSHHostKeyInUseRetry
 }

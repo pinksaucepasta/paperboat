@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -354,7 +355,7 @@ func TestInventoryClassifiesSSHAuthorityTransitions(t *testing.T) {
 		health    string
 	}{
 		{name: "missing target", machine: base, readiness: "unavailable", health: "ssh_target_not_ready"},
-		{name: "no ssh server (no host keys ever)", machine: func() api.UserMachine { value := base; value.SSHAuthority.TargetGeneration = 4; return value }(), readiness: "degraded", health: "ssh_server_missing"},
+		{name: "no ssh server (no host keys ever)", machine: func() api.UserMachine { value := base; value.SSHAuthority.TargetGeneration = 4; return value }(), readiness: "degraded", health: "ssh_host_keys_unpublished"},
 		{name: "changed host keys", machine: func() api.UserMachine {
 			value := base
 			value.SSHAuthority = api.SSHAuthority{TargetGeneration: 4, HostKeyGeneration: 3}
@@ -713,5 +714,17 @@ func TestInventoryReconcileFailureCausedByTheServerReportsTheControlPlane(t *tes
 				t.Fatalf("snapshot=%#v err=%v, want degraded with %s and the machine kept", snapshot, err, test.want)
 			}
 		})
+	}
+}
+
+// Cloned host keys refused by the server leave the machine without published keys while sshd runs
+// (Lane H): the health item names both causes and never claims no SSH server is running.
+func TestUnpublishedHostKeysDoNotClaimSSHDIsMissing(t *testing.T) {
+	machine := api.UserMachine{ID: "machine_1", Alias: "studio", Online: true, InstallationGeneration: 4, SSHLocalReady: true}
+	machine.SSHAuthority.TargetGeneration = 4
+	item := mapMachines([]api.UserMachine{machine})[0].Health[0]
+	text := item.Title + " " + item.Recovery
+	if strings.Contains(strings.ToLower(text), "no ssh server") || !strings.Contains(text, "identical to another machine's") || !strings.Contains(text, "ssh-keygen -A") {
+		t.Fatalf("health = %+v", item)
 	}
 }
