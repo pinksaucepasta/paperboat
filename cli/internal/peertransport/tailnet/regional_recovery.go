@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat-relay/derpquic"
+	"github.com/pinksaucepasta/paperboat/internal/backoff"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=regional-recovery
 	"tailscale.com/tailcfg"
@@ -486,7 +487,7 @@ func (r *regionalRecovery) run(ctx context.Context) {
 			r.mu.Unlock()
 			// Stale health observations are the usual cause: renew and look again soon.
 			r.authority.RequestRefresh()
-			timer.Reset(regionalStaleRetry)
+			timer.Reset(backoff.Jitter(regionalStaleRetry))
 			continue
 		}
 		// A fresh signed grant may recover relay admission even when its pair
@@ -522,11 +523,7 @@ func (r *regionalRecovery) run(ctx context.Context) {
 				}
 			}
 		}
-		regions := make([]*tailcfg.DERPRegion, 0, len(nodes))
-		for _, n := range nodes {
-			regions = append(regions, regionForNode(n))
-		}
-		if err = r.engine.SetRelayRegions(regions); err != nil {
+		if err = r.engine.SetRelayRegions(relayRegionsSelectedFirst(nodes, selection.current())); err != nil {
 			timer.Reset(regionalProbeDelay())
 			continue
 		}
@@ -788,4 +785,22 @@ func (r *regionalRecovery) authorityGeneration(self NetworkBinding, peers map[ke
 		r.semanticPeers = projection
 	}
 	return r.semanticGeneration
+}
+
+// relayRegionsSelectedFirst lists the relay regions with the selected node's first: the engine
+// advertises its first region as home, and the nodes come sorted by region name, so the advertised
+// home was not the selected relay (peers then meowed to a relay this machine had not chosen).
+func relayRegionsSelectedFirst(nodes []RegionalNode, selected string) []*tailcfg.DERPRegion {
+	regions := make([]*tailcfg.DERPRegion, 0, len(nodes))
+	for _, n := range nodes {
+		if n.NodeID == selected {
+			regions = append(regions, regionForNode(n))
+		}
+	}
+	for _, n := range nodes {
+		if n.NodeID != selected {
+			regions = append(regions, regionForNode(n))
+		}
+	}
+	return regions
 }
