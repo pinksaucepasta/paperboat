@@ -768,21 +768,35 @@ type unixParticipantReadiness struct {
 	handoff      *unixActivationHandoff
 }
 
-func (g *unixParticipantReadiness) waitReady(ctx context.Context, version string) error {
+// waitReady polls the restarted daemon until it is ready for version. For a candidate, a daemon
+// degraded for a local reason fails at once; one only waiting for the control plane is waited for, and
+// at the deadline the error is ErrParticipantControlPlaneTimeout. Recovery to the previous version
+// keeps polling on any failure.
+func (g *unixParticipantReadiness) waitReady(ctx context.Context, version string, candidate bool) error {
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 	var last error
+	wait := ParticipantNotReady
 	for {
-		if last = g.probe(ctx, version); last == nil {
+		probe, err := g.participants.Probe(ctx)
+		if err != nil {
+			wait, last = ParticipantNotReady, participantFailure("probe", errors.Join(ErrParticipantReadiness, err))
+		} else if wait, last = ClassifyParticipant(probe, version, g.handoff.Baseline, g.handoff.RequireInventory); wait == ParticipantReadyNow {
 			return nil
+		} else if candidate && wait == ParticipantDegradedLocally {
+			return errors.Join(ErrParticipantReadiness, last)
 		}
 		select {
 		case <-ctx.Done():
+			if wait == ParticipantWaitingForControlPlane {
+				return errors.Join(ErrParticipantReadiness, ErrParticipantControlPlaneTimeout, last, ctx.Err())
+			}
 			return errors.Join(ErrParticipantReadiness, last, ctx.Err())
 		case <-ticker.C:
 		}
 	}
 }
+
 func (g *unixParticipantReadiness) probe(ctx context.Context, version string) error {
 	probe, err := g.participants.Probe(ctx)
 	if err != nil {
@@ -904,7 +918,7 @@ func (s *Service) applyPrepared(ctx context.Context, candidate workerupdate.Prep
 			}
 		}
 		readyCtx, cancel := context.WithTimeout(validateCtx, timeout)
-		readyErr := readiness.waitReady(readyCtx, candidate.Source.Version)
+		readyErr := readiness.waitReady(readyCtx, candidate.Source.Version, true)
 		cancel()
 		if readyErr != nil {
 			return readyErr
@@ -943,7 +957,7 @@ func (s *Service) applyPrepared(ctx context.Context, candidate workerupdate.Prep
 	if restartErr != nil {
 		return installsource.Source{}, errors.Join(err, participantFailure("restart_daemon", errors.Join(ErrParticipantReadiness, restartErr)))
 	}
-	if readinessErr := readiness.waitReady(recoveryCtx, source.Version); readinessErr != nil {
+	if readinessErr := readiness.waitReady(recoveryCtx, source.Version, false); readinessErr != nil {
 		return installsource.Source{}, errors.Join(err, readinessErr)
 	}
 	return source, err
@@ -1019,4 +1033,39 @@ func resolveUnixActivationRelease(ctx context.Context, handoff *unixActivationHa
 // only has to run the right version; see unixParticipantReady.
 func ParticipantReady(probe UnixParticipantProbe, version string, baseline UnixParticipantProbe, requireInventory bool) error {
 	return unixParticipantReady(probe, version, baseline, requireInventory)
+}
+
+// ParticipantWait is what one probe of a restarted daemon means for an update that waits for it.
+type ParticipantWait int
+
+const (
+	// ParticipantNotReady: not running the version yet, still starting, or not probed; keep waiting.
+	ParticipantNotReady ParticipantWait = iota
+	// ParticipantReadyNow: ready by the readiness rule (unixParticipantReady).
+	ParticipantReadyNow
+	// ParticipantWaitingForControlPlane: the new version runs but its only problem is that the
+	// control plane has not answered yet; keep waiting, never commit on it.
+	ParticipantWaitingForControlPlane
+	// ParticipantDegradedLocally: the new version runs and is degraded for another reason.
+	ParticipantDegradedLocally
+)
+
+// ErrParticipantControlPlaneTimeout reports an update whose new daemon was still waiting for the
+// Paperboat server at the deadline: the previous version is restored and the update can be retried.
+var ErrParticipantControlPlaneTimeout = errors.New("the Paperboat server did not answer the new version's daemon before the update's deadline, so the previous version was restored; retry the update when the server is reachable")
+
+// ClassifyParticipant applies the readiness rule to one probe; supplied and signed updates share it.
+// The error is the readiness failure for any result but ParticipantReadyNow.
+func ClassifyParticipant(probe UnixParticipantProbe, version string, baseline UnixParticipantProbe, requireInventory bool) (ParticipantWait, error) {
+	err := unixParticipantReady(probe, version, baseline, requireInventory)
+	switch {
+	case err == nil:
+		return ParticipantReadyNow, nil
+	case probe.Running && probe.Version == version && probe.State == "degraded" && probe.ControlPlaneUnavailableOnly:
+		return ParticipantWaitingForControlPlane, err
+	case probe.Running && probe.Version == version && probe.State == "degraded":
+		return ParticipantDegradedLocally, err
+	default:
+		return ParticipantNotReady, err
+	}
 }

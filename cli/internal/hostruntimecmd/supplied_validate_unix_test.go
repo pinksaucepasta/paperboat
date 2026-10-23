@@ -125,14 +125,14 @@ func TestSuppliedUpdateWaitsOnlyForTheControlPlane(t *testing.T) {
 	}
 
 	neverAnswers := &scriptedParticipants{probes: []updated.UnixParticipantProbe{waiting}}
-	if err := restartAndAwaitDaemon(t.Context(), neverAnswers, "2", baseline); !errors.Is(err, errDaemonControlPlaneTimeout) {
+	if err := restartAndAwaitDaemon(t.Context(), neverAnswers, "2", baseline); !errors.Is(err, updated.ErrParticipantControlPlaneTimeout) {
 		t.Fatalf("daemon still waiting for the server at the deadline: %v, want the control-plane error", err)
 	}
 
 	locallyBroken := &scriptedParticipants{probes: []updated.UnixParticipantProbe{{Running: true, Version: "2", UpdaterVersion: "2", State: "degraded", Machines: 1}}}
 	started := time.Now()
 	err := restartAndAwaitDaemon(t.Context(), locallyBroken, "2", baseline)
-	if err == nil || errors.Is(err, errDaemonControlPlaneTimeout) || time.Since(started) > time.Second {
+	if err == nil || errors.Is(err, updated.ErrParticipantControlPlaneTimeout) || time.Since(started) > time.Second {
 		t.Fatalf("locally degraded daemon: err=%v after %v, want an immediate non-control-plane failure", err, time.Since(started))
 	}
 }
