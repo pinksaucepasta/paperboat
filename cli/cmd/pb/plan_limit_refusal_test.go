@@ -47,6 +47,19 @@ func TestAStreamCutByTheRelayAtThePlanLimitNamesIt(t *testing.T) {
 	if message := commandFailureMessage(err, classifyCommandFailure(err)); !strings.Contains(message, "Add bandwidth: https://console.example.test/billing") {
 		t.Fatalf("message=%q", message)
 	}
+	// exec ("could not complete the request") and send ("canceled") at the cap on a relay-only path
+	// (Lane O, server .46): an unexpected failure and a cancellation the user did not ask for.
+	for _, other := range []error{errors.New("local service failed"), context.Canceled} {
+		err := planLimitRefusal(context.Background(), other)
+		if message := commandFailureMessage(err, classifyCommandFailure(err)); !strings.Contains(message, "Add bandwidth") {
+			t.Fatalf("%v: message=%q", other, message)
+		}
+	}
+	interrupted, cancel := context.WithCancel(context.Background())
+	cancel()
+	if planLimitRefusal(interrupted, context.Canceled) != context.Canceled {
+		t.Fatal("a cancellation by the user named the plan limit")
+	}
 	health = nil
 	if planLimitRefusal(context.Background(), lost) != lost {
 		t.Fatal("a lost connection without a relay refusal changed")
