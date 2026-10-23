@@ -1539,6 +1539,12 @@ VMs (ubuntu24 host for in-process binaries), server runs on the staging VM (pbvm
 
 **Platform, idle machine cost** (prod 10:10Z, 19 online machines, 10 min): 28,210 requests = 2.5 req/s per idle
 machine, so 100k machines ≈ 250k req/s: **R**. Target ≤ 0.05 req/s per idle machine, event-driven.
+Re-measured 12:07–12:17Z after Lane B's MaxWait 25 s (waits now 204 at 25.0 s, client-gone logged 499), 17 online
+machines, mostly pre-fix builds: 22,281 requests = 37 req/s ≈ 2.2 req/s per machine including the edge's own pulls.
+GET /v1/machines 2.3/min per machine (was 15.7), GET /v1/previews 2.0 (was 9.9). Still per machine per minute:
+ssh-target 8.9, JWKS 10.7, machine-services 6.8, runtime-observations 6.1, peer config 8.8, certificates 5.2
+(Lane R's list, items 5–7). /v1/machines/{id}/terminal-sessions 5.8 comes from `pb` commands (cmd/pb/targets.go),
+i.e. device test runs, not a daemon loop: **R → A**, re-measure after the next shared build.
 
 | Finding | Measured | Verdict | Owner, status |
 |---|---|---|---|
