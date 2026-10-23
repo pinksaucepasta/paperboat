@@ -12,6 +12,8 @@
 #   (cd server && CGO_ENABLED=0 go build -o paperboat-server ./cmd/paperboat-server \
 #      && CGO_ENABLED=0 go test -c -tags load -o app.load.test ./internal/app/)
 set -euo pipefail
+# DOCKER="sudo docker" where the user is not in the docker group.
+DOCKER=${DOCKER:-docker}
 SERVER=${1:?paperboat-server binary}; TESTS=${2:?app.load.test}; N=${3:?instances}; RUN=${4:-TestLoad}
 WORK=$(mktemp -d); PG=paperboat-load-pg; PROXY=paperboat-load-proxy; PGPORT=55432; PROXYPORT=58080
 PASS=$(head -c 18 /dev/urandom | base64 | tr -dc A-Za-z0-9)
@@ -20,15 +22,16 @@ cleanup() {
   for pid in "${pids[@]}"; do kill "$pid" 2>/dev/null || true; done
   [ -n "${stats:-}" ] && kill "$stats" 2>/dev/null || true
   [ -n "${watcher:-}" ] && kill "$watcher" 2>/dev/null || true
-  docker rm -f "$PG" "$PROXY" >/dev/null 2>&1 || true
+  $DOCKER rm -f "$PG" "$PROXY" >/dev/null 2>&1 || true
+  $DOCKER volume rm paperboat-load-pgdata >/dev/null 2>&1 || true
   rm -rf "$WORK"
 }
 trap cleanup EXIT
-docker rm -f "$PG" "$PROXY" >/dev/null 2>&1 || true
-docker run -d --name "$PG" -p 127.0.0.1:$PGPORT:5432 --tmpfs /var/lib/postgresql/data:rw,size=6g \
+$DOCKER rm -f "$PG" "$PROXY" >/dev/null 2>&1 || true
+$DOCKER run -d --name "$PG" -p 127.0.0.1:$PGPORT:5432 -v paperboat-load-pgdata:/var/lib/postgresql/data \
   -e POSTGRES_PASSWORD="$PASS" -e POSTGRES_DB=paperboat_load_test postgres:17 \
-  -c max_connections=400 -c max_locks_per_transaction=2048 -c shared_buffers=512MB >/dev/null
-until docker exec "$PG" pg_isready -U postgres -d paperboat_load_test >/dev/null 2>&1; do sleep 1; done
+  -c max_connections=400 -c max_locks_per_transaction=2048 -c shared_buffers=${PAPERBOAT_LOAD_PG_SHARED_BUFFERS:-256MB} >/dev/null
+until $DOCKER exec "$PG" pg_isready -U postgres -d paperboat_load_test >/dev/null 2>&1; do sleep 1; done
 DSN="postgres://postgres:$PASS@127.0.0.1:$PGPORT/paperboat_load_test?sslmode=disable"
 
 # Migrate and seed once through the test binary (it refuses non-*_test databases), before any instance starts.
@@ -60,7 +63,7 @@ cat >"$WORK/Caddyfile" <<EOF
 	}
 }
 EOF
-docker run -d --name "$PROXY" --network host -v "$WORK/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2 >/dev/null
+$DOCKER run -d --name "$PROXY" --network host -v "$WORK/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2 >/dev/null
 for i in $(seq 1 "$N"); do
   until curl -fsS "http://127.0.0.1:$((18080 + i))/healthz" >/dev/null 2>&1; do sleep 1; done
 done
@@ -68,12 +71,12 @@ until curl -fsS "http://127.0.0.1:$PROXYPORT/healthz" >/dev/null 2>&1; do sleep 
 echo "instances=$N up behind :$PROXYPORT"
 
 # Postgres CPU every 5 s for the whole run.
-( while sleep 5; do docker stats --no-stream --format "{{.CPUPerc}}" "$PG" | sed "s/^/pg_cpu $(date +%T) /"; done ) &
+( while sleep 5; do $DOCKER stats --no-stream --format "{{.CPUPerc}}" "$PG" | sed "s/^/pg_cpu $(date +%T) /"; done ) &
 stats=$!
 
 export PAPERBOAT_PERF_DATABASE_DSN=$DSN PAPERBOAT_LOAD_TARGET_URL=http://127.0.0.1:$PROXYPORT
 # Worker leader (F21-04): the lease row names the holding instance; /healthz on each instance names itself.
-leader_row() { docker exec "$PG" psql -U postgres -d paperboat_load_test -Atc \
+leader_row() { $DOCKER exec "$PG" psql -U postgres -d paperboat_load_test -Atc \
   "SELECT holder_instance||' '||generation FROM paperboat.worker_leader WHERE name='server_workers'" 2>/dev/null; }
 instance_of() { curl -fsS "http://127.0.0.1:$((18080 + $1))/healthz" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("instance",""))'; }
 for _ in $(seq 1 30); do [ -n "$(leader_row)" ] && break; sleep 1; done
