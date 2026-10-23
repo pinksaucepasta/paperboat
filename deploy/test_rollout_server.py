@@ -46,7 +46,7 @@ class ServerRolloutTest(unittest.TestCase):
         removed = [args[2] for args in calls if args[:2] == ['docker', 'rmi']]
         # 5 deployed, 4 still in use (draining), 3 and 2 the two previous rollback targets.
         self.assertEqual(removed, ['paperboat-server:1'])
-        self.assertIn(['docker', 'builder', 'prune', '-f', '--filter', 'until=24h'], calls)
+        self.assertIn(['docker', 'builder', 'prune', '-af'], calls)
 
     def test_prune_failure_never_fails_the_rollout(self):
         with patch.object(self.rollout, 'run', side_effect=module.RolloutError('docker down')):

@@ -11,11 +11,12 @@ import time
 
 # Logs of retired server containers are kept this long under rollout-logs/.
 LOG_RETENTION_SECONDS = 7 * 24 * 3600
-# Server images kept besides the deployed one (rollback targets); older ones and build cache older
-# than BUILD_CACHE_RETENTION are removed after each rollout. Unbounded, they filled the disk once
-# (96 images and 50 GB of build cache, 99% full, 2026-10-23).
+# Server images kept besides the deployed one (rollback targets); older ones and all build cache are
+# removed after each rollout. Unbounded, they filled the disk once (96 images and 50 GB of build
+# cache, 99% full, 2026-10-23). An age filter (24 h) still let one evening's builds grow 22 GB, and
+# on the containerd image store (Docker 29) size bounds (--keep-storage, --max-used-space) free
+# nothing, so the whole cache goes: the next build re-downloads Go modules (about a minute).
 PREVIOUS_IMAGES_KEPT = 2
-BUILD_CACHE_RETENTION = '24h'
 
 
 class RolloutError(Exception):
@@ -132,8 +133,7 @@ class Rollout:
                     continue
                 self.run(['docker', 'rmi', name])
             self.run(['docker', 'image', 'prune', '-f'])
-            self.run(['docker', 'builder', 'prune', '-f', '--filter', 'until=' + BUILD_CACHE_RETENTION],
-                     timeout=600)
+            self.run(['docker', 'builder', 'prune', '-af'], timeout=600)
         except (RolloutError, subprocess.SubprocessError) as error:
             self.log.write(('Could not prune images: %s\n' % error).encode())
             self.log.flush()
