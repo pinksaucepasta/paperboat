@@ -210,3 +210,29 @@ func TestExplicitMachineServiceProbePolicyAndWithdrawal(t *testing.T) {
 		t.Fatal("closed explicit service announced", got)
 	}
 }
+
+// A port reused right after its previous listener stopped is still listed at the server while this host
+// has withdrawn it. A flow granted for it is accepted once a fresh scan sees it listening, and refused
+// when it is still not there (Lane H: access-machine read 0 bytes from a just-started origin).
+func TestAJustStartedServiceIsAdmittedAfterAFreshScan(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"expires_at": time.Now().Add(time.Minute)}})
+	}))
+	defer server.Close()
+	listening := false
+	s := &runtimeObservationSender{endpoint: server.URL + "/v1/runtime-observations", machineID: "machine_a", environmentID: "env_a", installationGeneration: 7, lazyBootID: "boot_a", lazyStartedAt: time.Now(), machineServicesGeneration: 3, machineServicesPolicy: api.MachineServicesPolicy{AutomaticDiscoveryEnabled: true}, tokens: livenessObservationTokenSource{}, proofs: livenessObservationProofSource{}, operationID: func() (string, error) { return "operation_a", nil }, client: server.Client(),
+		machineServicesDiscover: func(context.Context) ([]machineservices.Service, error) {
+			if !listening {
+				return nil, nil
+			}
+			return []machineservices.Service{{Port: 3000, Loopback: "127.0.0.1"}}, nil
+		}}
+	b := nativeprivate.Binding{Schema: nativeprivate.SchemaV1, ResourceKind: "machine_service", ResourceID: "machine_a", OwnerEndpointID: "machine_a", RouteID: "tcp:3000", ResourceGeneration: 1, RouteGeneration: 1, TargetGeneration: 1, Protocol: "tcp", TargetScheme: "tcp", TargetAddress: "127.0.0.1:3000", ExpiresAt: time.Now().Add(time.Minute), InstallationGeneration: 7, BootID: "boot_a", PolicyGeneration: 2, AnnouncementGeneration: 2, UserID: "user_a", CLIClientSessionID: "cli_a", AccessSessionID: "access_a"}
+	if err := s.validateMachineService(context.Background(), b); !errors.Is(err, admission.ErrRevoked) {
+		t.Fatal("a service that is not listening was admitted", err)
+	}
+	listening = true
+	if err := s.validateMachineService(context.Background(), b); err != nil {
+		t.Fatal("a just-started service was refused", err)
+	}
+}

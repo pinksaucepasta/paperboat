@@ -30,9 +30,14 @@ func (s *runtimeObservationSender) validateMachineService(ctx context.Context, b
 	// An unrelated service starting or stopping advances the announcement generation (for access to
 	// this very machine, `pb access`'s own listener does), so the binding's generation only has to be
 	// no newer than the current one; what must hold is that its exact target is still announced.
-	s.machineServicesMu.Lock()
-	announced := binding.AnnouncementGeneration <= int64(s.machineServicesGeneration) && machineServiceAnnounced(s.machineServicesPorts, binding.TargetAddress)
-	s.machineServicesMu.Unlock()
+	announced := s.machineServiceAnnounced(binding)
+	if !announced {
+		// The service may have started after the last scan: a port reused right after its previous
+		// listener stopped is still listed at the server while this host has withdrawn it. Look once
+		// more before refusing (Lane H: access-machine read 0 bytes from a just-started origin).
+		s.machineServicesObservation(ctx)
+		announced = s.machineServiceAnnounced(binding)
+	}
 	if !announced {
 		return admission.ErrRevoked
 	}
@@ -106,6 +111,12 @@ func (s *runtimeObservationSender) validateMachineService(ctx context.Context, b
 
 // machineServiceAnnounced reports whether the announced set holds the loopback target address
 // ("127.0.0.1:5432" or "[::1]:5432") of a binding.
+func (s *runtimeObservationSender) machineServiceAnnounced(binding nativeprivate.Binding) bool {
+	s.machineServicesMu.Lock()
+	defer s.machineServicesMu.Unlock()
+	return binding.AnnouncementGeneration <= int64(s.machineServicesGeneration) && machineServiceAnnounced(s.machineServicesPorts, binding.TargetAddress)
+}
+
 func machineServiceAnnounced(ports []api.MachineServicePort, address string) bool {
 	host, portText, err := net.SplitHostPort(address)
 	port, portErr := strconv.Atoi(portText)
