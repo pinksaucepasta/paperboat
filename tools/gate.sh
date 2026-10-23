@@ -32,6 +32,9 @@ python3 tools/check_domains.py && (cd tools && python3 -m unittest test_check_do
 step "documentation links"
 python3 tools/check_doc_links.py && python3 tools/check_doc_envvars.py && (cd tools && python3 -m unittest test_check_doc_links test_check_doc_envvars) || { echo "FAIL: documentation links or environment variables"; fail=1; }
 
+step "migrations: expand/contract and index locks (F21-04)"
+python3 tools/check_migrations.py && (cd tools && python3 -m unittest test_check_migrations) || { echo "FAIL: migration lint"; fail=1; }
+
 step "server-first check tests"
 (cd tools && python3 -m unittest test_check_server_deployed) || { echo "FAIL: server-first check"; fail=1; }
 
