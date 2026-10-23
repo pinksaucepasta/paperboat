@@ -160,16 +160,19 @@ func TestPublicPreviewIngressPostgres(t *testing.T) {
 		_, _ = f.database.SQL().ExecContext(ctx, `DELETE FROM edge_dns_publications WHERE owner_id=$1`, preview)
 	})
 	publicationReady(false)
-	// Written to the provider (submitted with records) is enough: no resolver verification wait.
-	exec(`UPDATE edge_dns_publications SET provider_records='[{"fixture":true}]' WHERE owner_id=$1`, preview)
+	// A record written to the provider for the serving edge is enough: no resolver verification wait.
+	exec(`UPDATE edge_dns_publications SET provider_records='[{"Address":"8.8.8.8"}]' WHERE owner_id=$1`, preview)
 	publicationReady(true)
 	exec(`UPDATE edge_dns_publications SET state='verified',verified_at=$2 WHERE owner_id=$1`, preview, now)
 	publicationReady(true)
-	exec(`UPDATE edge_dns_publications SET desired_addresses='["8.8.4.4"]' WHERE owner_id=$1`, preview)
+	// A republication in flight (new desired set, state desired) keeps the published record, which
+	// still names the serving edge: the preview stays ready (f0e37145).
+	exec(`UPDATE edge_dns_publications SET desired_addresses='["8.8.4.4","8.8.8.8"]',state='desired' WHERE owner_id=$1`, preview)
+	publicationReady(true)
+	// A published record that names no serving edge is pending.
+	exec(`UPDATE edge_dns_publications SET provider_records='[{"Address":"8.8.4.4"}]' WHERE owner_id=$1`, preview)
 	publicationReady(false)
-	exec(`UPDATE edge_dns_publications SET desired_addresses='["8.8.8.8"]',valid_until=now()-interval '1 second' WHERE owner_id=$1`, preview)
-	publicationReady(false)
-	exec(`UPDATE edge_dns_publications SET valid_until=$2 WHERE owner_id=$1`, preview, now.Add(time.Hour))
+	exec(`UPDATE edge_dns_publications SET provider_records='[{"Address":"8.8.8.8"}]',state='verified' WHERE owner_id=$1`, preview)
 	publicationReady(true)
 	exec(`DELETE FROM edge_dns_publications WHERE owner_id=$1`, preview)
 	beforeRenewal, err := f.database.Queries().ListReadyEdgeDNSAddressesV1(ctx, dbsqlc.ListReadyEdgeDNSAddressesV1Params{TunnelID: preview, Hostname: hostname, Now: sql.NullTime{Time: now, Valid: true}})
