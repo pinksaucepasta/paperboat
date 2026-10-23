@@ -22465,7 +22465,7 @@
     "/v1/machine-events/wait": {
       "post": {
         "summary": "Wait for a change to something the host caches",
-        "description": "Host-only, authenticated like carrier bootstrap by the renewable machine identity and a detached proof over the exact method, path and body; Idempotency-Key binds the proof operation. The host sends the generation of each topic it last saw. The server answers 200 as soon as any topic of that machine has a higher generation, naming only those topics, or 204 after up to 30 seconds without a change. A response carries generations, never data: the host refreshes the named topic itself. Generations are persisted per machine and topic, so a reconnecting host loses nothing. Topics: machine_access, peer_network, previews, tunnels, config, inventory.",
+        "description": "Host-only, authenticated like carrier bootstrap by the renewable machine identity and a detached proof over the exact method, path and body; Idempotency-Key binds the proof operation. The host sends the generation of each topic it last saw. The server answers 200 as soon as any topic of that machine has a higher generation, naming only those topics, or 204 after up to 30 seconds without a change. Every answer carries X-Paperboat-Events-Answer, a signed statement of the answer (the unchanged one too) bound to the request body. A response carries generations, never data: the host refreshes the named topic itself. Generations are persisted per machine and topic, so a reconnecting host loses nothing. Topics: machine_access, peer_network, previews, tunnels, config, inventory.",
         "security": [],
         "parameters": [
           {
@@ -22498,6 +22498,12 @@
                   "type": "string",
                   "const": "no-store"
                 }
+              },
+              "X-Paperboat-Events-Answer": {
+                "description": "Signed answer (typ paperboat-machine-events+jwt, verified against /.well-known/jwks.json): kind changed or unchanged, the moved topics, and request_sha256 of the request body. Present on 200 and 204.",
+                "schema": {
+                  "type": "string"
+                }
               }
             },
             "content": {
@@ -22509,7 +22515,15 @@
             }
           },
           "204": {
-            "description": "No topic changed within the wait."
+            "description": "No topic changed within the wait.",
+            "headers": {
+              "X-Paperboat-Events-Answer": {
+                "description": "Signed answer (typ paperboat-machine-events+jwt, verified against /.well-known/jwks.json): kind changed or unchanged, the moved topics, and request_sha256 of the request body. Present on 200 and 204.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "$ref": "#/components/responses/Error"
@@ -22575,6 +22589,12 @@
                   "type": "string",
                   "const": "no-store"
                 }
+              },
+              "X-Paperboat-Events-Answer": {
+                "description": "Signed answer (typ paperboat-machine-events+jwt, verified against /.well-known/jwks.json): kind changed or unchanged, the moved topics, and request_sha256 of the request body. Present on 200 and 204.",
+                "schema": {
+                  "type": "string"
+                }
               }
             },
             "content": {
@@ -22586,7 +22606,15 @@
             }
           },
           "204": {
-            "description": "No topic changed within the wait."
+            "description": "No topic changed within the wait.",
+            "headers": {
+              "X-Paperboat-Events-Answer": {
+                "description": "Signed answer (typ paperboat-machine-events+jwt, verified against /.well-known/jwks.json): kind changed or unchanged, the moved topics, and request_sha256 of the request body. Present on 200 and 204.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "$ref": "#/components/responses/Error"

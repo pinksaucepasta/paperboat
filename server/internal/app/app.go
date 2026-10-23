@@ -384,7 +384,12 @@ func New(opts Options) (*App, error) {
 		return nil, fmt.Errorf("configure connector origin health: %w", err)
 	}
 	machineEventHub := machineevents.NewHub(store.Pool())
-	machineEventsHandler, err := httpapi.NewMachineEventsHandler(machineEventHub, enrollmentService)
+	machineEventSigning, err := httpapi.NewMachineEventSigning(mintKeys, publicBaseURL)
+	if err != nil {
+		_ = store.Close()
+		return nil, fmt.Errorf("configure machine event signing: %w", err)
+	}
+	machineEventsHandler, err := httpapi.NewMachineEventsHandler(machineEventHub, enrollmentService, machineEventSigning)
 	if err != nil {
 		_ = store.Close()
 		return nil, fmt.Errorf("configure machine events: %w", err)
@@ -892,6 +897,7 @@ func New(opts Options) (*App, error) {
 		ConnectorOriginHealth:     connectorOriginHealthHandler,
 		MachineEvents:             machineEventsHandler,
 		MachineEventWaiter:        machineEventHub,
+		MachineEventSigning:       machineEventSigning,
 		TelemetryHTTP:             telemetryHTTP,
 		TelemetryMetrics:          telemetryMetrics,
 		TelemetryDiagnostics:      telemetryDiagnostics,

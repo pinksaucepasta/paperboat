@@ -25,16 +25,20 @@ import (
 )
 
 const (
-	ProofType                = "t3-cloud-mint+jwt"
-	ProofScope               = "environment:connect"
-	RevokeType               = "t3-cloud-revoke+jwt"
-	RevokeScope              = "environment:revoke"
-	HealthType               = "t3-cloud-health+jwt"
-	HealthScope              = "environment:health"
-	MaxProofTTL              = 5 * time.Minute
-	NetworkConfigurationType = "paperboat-network-config+jwt"
-	RegionalCandidatesType   = "paperboat-regional-candidates+jwt"
-	RelayGrantType           = "paperboat-relay-grant+jwt"
+	ProofType   = "t3-cloud-mint+jwt"
+	ProofScope  = "environment:connect"
+	RevokeType  = "t3-cloud-revoke+jwt"
+	RevokeScope = "environment:revoke"
+	HealthType  = "t3-cloud-health+jwt"
+	HealthScope = "environment:health"
+	MaxProofTTL = 5 * time.Minute
+	// MachineEventsType is the typ of a signed machine-event answer (see SignMachineEvents).
+	MachineEventsType = "paperboat-machine-events+jwt"
+	// MachineEventsAnswerLifetime bounds one answer; a client checks it on the answer it just received.
+	MachineEventsAnswerLifetime = time.Minute
+	NetworkConfigurationType    = "paperboat-network-config+jwt"
+	RegionalCandidatesType      = "paperboat-regional-candidates+jwt"
+	RelayGrantType              = "paperboat-relay-grant+jwt"
 )
 
 // SignNetworkConfiguration signs the already validated network-authority
@@ -679,6 +683,39 @@ func (p *Provider) SignHealth(input ProofInput) (string, error) {
 		"jti": input.JTI, "iat": issuedAt.Unix(), "exp": expiresAt.Unix(),
 		"environmentId": input.EnvironmentID, "clientSessionId": input.CLIClientSessionID,
 		"nonce": input.Nonce, "scope": []string{HealthScope},
+	})
+}
+
+// MachineEventsAnswer is one answer to a held machine-event wait: the topics that moved, or none.
+type MachineEventsAnswer struct {
+	Issuer    string
+	MachineID string
+	// RequestSHA256 is the lowercase hex SHA-256 of the request body the answer belongs to.
+	RequestSHA256 string
+	// Topics maps each moved topic to its new generation; nil or empty means "unchanged".
+	Topics   map[string]int64
+	IssuedAt time.Time
+}
+
+// SignMachineEvents signs an answer to a machine-event wait. Every answer is signed, the unchanged one
+// included, so a client can tell an authentic "nothing changed" from a dropped or forged one. The
+// request hash binds the answer to the request that asked for it.
+func (p *Provider) SignMachineEvents(input MachineEventsAnswer) (string, error) {
+	if strings.TrimSpace(input.Issuer) == "" || strings.TrimSpace(input.MachineID) == "" || !validPreviewLaunchHash(input.RequestSHA256) || input.IssuedAt.IsZero() {
+		return "", errors.New("machine event answer claims are incomplete")
+	}
+	kind := "unchanged"
+	topics := input.Topics
+	if len(topics) > 0 {
+		kind = "changed"
+	} else {
+		topics = map[string]int64{}
+	}
+	issuedAt := input.IssuedAt.UTC()
+	return p.signClaims(MachineEventsType, map[string]any{
+		"iss": input.Issuer, "aud": "machine:" + input.MachineID, "sub": input.MachineID,
+		"iat": issuedAt.Unix(), "exp": issuedAt.Add(MachineEventsAnswerLifetime).Unix(),
+		"request_sha256": input.RequestSHA256, "kind": kind, "topics": topics,
 	})
 }
 

@@ -2,7 +2,11 @@ package httpapi
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,8 +16,69 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/auth"
 	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
 	"github.com/pinksaucepasta/paperboat/server/internal/machineevents"
+	"github.com/pinksaucepasta/paperboat/server/internal/mint"
 	"github.com/pinksaucepasta/paperboat/server/internal/usermachines"
 )
+
+const machineEventsIssuer = "https://api.example.test"
+
+// verifyMachineEventsAnswer checks the answer header against the provider's published key and returns its claims.
+func verifyMachineEventsAnswer(t *testing.T, provider *mint.Provider, header, body string) map[string]any {
+	t.Helper()
+	parts := strings.Split(header, ".")
+	if len(parts) != 3 {
+		t.Fatalf("answer header = %q", header)
+	}
+	var head struct {
+		Type string `json:"typ"`
+		KID  string `json:"kid"`
+	}
+	raw, _ := base64.RawURLEncoding.DecodeString(parts[0])
+	if err := json.Unmarshal(raw, &head); err != nil || head.Type != mint.MachineEventsType {
+		t.Fatalf("answer header = %s", raw)
+	}
+	jwks, _ := provider.JWKSJSON()
+	var trust struct {
+		Keys []struct {
+			KID string `json:"kid"`
+			X   string `json:"x"`
+		} `json:"keys"`
+	}
+	if err := json.Unmarshal(jwks, &trust); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range trust.Keys {
+		public, _ := base64.RawURLEncoding.DecodeString(key.X)
+		signature, _ := base64.RawURLEncoding.DecodeString(parts[2])
+		if key.KID == head.KID && ed25519.Verify(public, []byte(parts[0]+"."+parts[1]), signature) {
+			payload, _ := base64.RawURLEncoding.DecodeString(parts[1])
+			var claims map[string]any
+			if err := json.Unmarshal(payload, &claims); err != nil {
+				t.Fatal(err)
+			}
+			sum := sha256.Sum256([]byte(body))
+			if claims["request_sha256"] != hex.EncodeToString(sum[:]) {
+				t.Fatalf("answer is bound to another request: %v", claims["request_sha256"])
+			}
+			return claims
+		}
+	}
+	t.Fatal("answer signature does not verify against the published trust document")
+	return nil
+}
+
+func testMachineEventSigning(t *testing.T) (MachineEventSigning, *mint.Provider) {
+	t.Helper()
+	provider, err := mint.NewEphemeral(time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signing, err := NewMachineEventSigning(provider, machineEventsIssuer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return signing, provider
+}
 
 type machineEventWaiterFake struct {
 	machine string
@@ -36,8 +101,9 @@ func (f *machineEventWaiterFake) Wait(ctx context.Context, machineID string, kno
 
 func TestMachineEventsWaitAuthenticatesAndAnswersChangesOrNothing(t *testing.T) {
 	claims := controlplane.MachineRequestClaims{MachineID: "machine_01", UserID: "account_01", OperationID: "events_01", InstallationGeneration: 1}
+	signing, provider := testMachineEventSigning(t)
 	send := func(waiter *machineEventWaiterFake, verifier bootstrapVerifier, body string, mutate func(*http.Request)) *httptest.ResponseRecorder {
-		handler := machineEventsWait(waiter, verifier)
+		handler := machineEventsWait(waiter, verifier, signing)
 		request := httptest.NewRequest(http.MethodPost, MachineEventsPath, strings.NewReader(body))
 		request.Header.Set("Content-Type", "application/json")
 		request.Header.Set("X-Paperboat-Machine-Identity", strings.Repeat("m", 48))
@@ -56,10 +122,14 @@ func TestMachineEventsWaitAuthenticatesAndAnswersChangesOrNothing(t *testing.T) 
 	if r := send(changed, bootstrapVerifier{claims: claims}, body, nil); r.Code != http.StatusOK || strings.TrimSpace(r.Body.String()) != `{"topics":{"previews":5}}` ||
 		changed.machine != "machine_01" || changed.known["previews"] != 4 || changed.maxWait != machineevents.MaxWait {
 		t.Fatalf("changed: status=%d body=%s waiter=%+v", r.Code, r.Body.String(), changed)
+	} else if got := verifyMachineEventsAnswer(t, provider, r.Header().Get(MachineEventsAnswerHeader), body); got["kind"] != "changed" || got["sub"] != "machine_01" {
+		t.Fatalf("changed answer claims = %v", got)
 	}
 	idle := &machineEventWaiterFake{changed: map[string]int64{}}
 	if r := send(idle, bootstrapVerifier{claims: claims}, body, nil); r.Code != http.StatusNoContent || r.Body.Len() != 0 {
 		t.Fatalf("no change: status=%d body=%q", r.Code, r.Body.String())
+	} else if got := verifyMachineEventsAnswer(t, provider, r.Header().Get(MachineEventsAnswerHeader), body); got["kind"] != "unchanged" {
+		t.Fatalf("unchanged answer must be signed too: %v", got)
 	}
 	// A host that hangs up before the answer is logged as 499, not as a silent 200.
 	gone := &machineEventWaiterFake{gone: true}
@@ -101,10 +171,11 @@ func (f machineLookupFake) Get(_ context.Context, userID, machineID string) (use
 }
 
 func TestMachineEventsWaitForUserIsLimitedToTheUsersOwnMachine(t *testing.T) {
+	signing, _ := testMachineEventSigning(t)
 	send := func(user, machine string) (*httptest.ResponseRecorder, *machineEventWaiterFake) {
 		waiter := &machineEventWaiterFake{changed: map[string]int64{"inventory": 3}}
 		mux := http.NewServeMux()
-		mux.Handle("POST /v1/machines/{machine_id}/events/wait", machineEventsWaitForUser(machineLookupFake{owner: "account_01", machine: "machine_01"}, waiter))
+		mux.Handle("POST /v1/machines/{machine_id}/events/wait", machineEventsWaitForUser(machineLookupFake{owner: "account_01", machine: "machine_01"}, waiter, signing))
 		request := httptest.NewRequest(http.MethodPost, "/v1/machines/"+machine+"/events/wait", strings.NewReader(`{"topics":{"inventory":1}}`))
 		request.Header.Set("Content-Type", "application/json")
 		request = request.WithContext(context.WithValue(request.Context(), authContextKey{}, principal{User: auth.User{ID: user}}))

@@ -958,3 +958,56 @@ func TestMaxAgeIsRequired(t *testing.T) {
 		t.Fatal("trust document without a max age accepted")
 	}
 }
+
+// Prior art: tailscale control/controlclient/map.go (a held long-poll answers with the changes since the
+// node's last map); here every answer, including "unchanged", is signed and bound to its request.
+func TestSignMachineEventsCarriesKindTopicsAndRequestBinding(t *testing.T) {
+	provider, err := New([]Key{{ID: "events-key", PrivateKey: testKey(14)}}, "events-key", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)
+	hash := strings.Repeat("ab", 32)
+	decode := func(token string) map[string]any {
+		t.Helper()
+		parts := strings.Split(token, ".")
+		payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+		if err != nil {
+			t.Fatal(err)
+		}
+		var claims map[string]any
+		if err := json.Unmarshal(payload, &claims); err != nil {
+			t.Fatal(err)
+		}
+		return claims
+	}
+	unchanged, err := provider.SignMachineEvents(MachineEventsAnswer{Issuer: "https://api.example.test", MachineID: "machine_01", RequestSHA256: hash, IssuedAt: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims := decode(unchanged)
+	if claims["kind"] != "unchanged" || claims["topics"] == nil || len(claims["topics"].(map[string]any)) != 0 || claims["request_sha256"] != hash || claims["aud"] != "machine:machine_01" {
+		t.Fatalf("unchanged claims = %v", claims)
+	}
+	if got := claims["exp"].(float64) - claims["iat"].(float64); got != float64(MachineEventsAnswerLifetime/time.Second) {
+		t.Fatalf("answer lifetime = %v seconds", got)
+	}
+	changed, err := provider.SignMachineEvents(MachineEventsAnswer{Issuer: "https://api.example.test", MachineID: "machine_01", RequestSHA256: hash, Topics: map[string]int64{"peer_network": 7}, IssuedAt: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claims := decode(changed); claims["kind"] != "changed" || claims["topics"].(map[string]any)["peer_network"] != float64(7) {
+		t.Fatalf("changed claims = %v", claims)
+	}
+	for name, input := range map[string]MachineEventsAnswer{
+		"no issuer":     {MachineID: "machine_01", RequestSHA256: hash, IssuedAt: now},
+		"no machine":    {Issuer: "https://api.example.test", RequestSHA256: hash, IssuedAt: now},
+		"short hash":    {Issuer: "https://api.example.test", MachineID: "machine_01", RequestSHA256: "ab", IssuedAt: now},
+		"upper hash":    {Issuer: "https://api.example.test", MachineID: "machine_01", RequestSHA256: strings.Repeat("AB", 32), IssuedAt: now},
+		"no issue time": {Issuer: "https://api.example.test", MachineID: "machine_01", RequestSHA256: hash},
+	} {
+		if _, err := provider.SignMachineEvents(input); err == nil {
+			t.Errorf("%s: answer signed", name)
+		}
+	}
+}
