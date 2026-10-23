@@ -148,11 +148,12 @@ func relayRevocationsByGeneration(ctx context.Context, q relayQueryer, node stri
 // relayMinGenerations serves a digest relay whose members carry no generation: one query over the whole membership
 // gives each member the first grant generation still valid for it (min_generation). An eligible identity's relay
 // revocation generation is that floor. An identity no longer eligible for this node's pool is cut at its
-// configuration generation+1, above every grant minted for it. A member with no identity is cut at the largest
+// configuration or relay revocation generation +1, whichever is higher: above every grant minted for it (a
+// grant may carry the revocation generation, which can exceed the configuration generation). A member with no identity is cut at the largest
 // generation. Only members above relayFirstGeneration are listed; the rest have nothing to revoke.
 func relayMinGenerations(ctx context.Context, q relayQueryer, node string, set relaySubjectSet) ([]relayRevocation, error) {
 	revoked := []relayRevocation{}
-	rows, err := q.QueryContext(ctx, `SELECT q.account_id,q.endpoint_id,q.min_generation FROM (SELECT s.account_id,s.endpoint_id,CASE WHEN n.user_id IS NULL THEN $3::bigint WHEN paperboat.node_pool_eligible($1,s.account_id,'relay') THEN n.relay_revocation_generation ELSE n.config_generation+1 END AS min_generation FROM jsonb_to_recordset($2::jsonb) AS s(account_id text,endpoint_id text) LEFT JOIN paperboat.peer_network_identities n ON n.user_id=s.account_id AND n.endpoint_id=s.endpoint_id) q WHERE q.min_generation>$4 ORDER BY q.account_id,q.endpoint_id`, node, set.json, int64(math.MaxInt64), int64(relayFirstGeneration))
+	rows, err := q.QueryContext(ctx, `SELECT q.account_id,q.endpoint_id,q.min_generation FROM (SELECT s.account_id,s.endpoint_id,CASE WHEN n.user_id IS NULL THEN $3::bigint WHEN paperboat.node_pool_eligible($1,s.account_id,'relay') THEN n.relay_revocation_generation ELSE greatest(n.config_generation,n.relay_revocation_generation)+1 END AS min_generation FROM jsonb_to_recordset($2::jsonb) AS s(account_id text,endpoint_id text) LEFT JOIN paperboat.peer_network_identities n ON n.user_id=s.account_id AND n.endpoint_id=s.endpoint_id) q WHERE q.min_generation>$4 ORDER BY q.account_id,q.endpoint_id`, node, set.json, int64(math.MaxInt64), int64(relayFirstGeneration))
 	if err != nil {
 		return nil, err
 	}

@@ -97,7 +97,7 @@ func TestSelfhostRegisteredRelayProcessOnPostgres(t *testing.T) {
 		{`INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$2,'active')`, []any{account, account + "@example.test"}},
 		{`INSERT INTO paperboat.account_e2ee_roots(user_id,public_key,fingerprint) VALUES($1,$2,$3)`, []any{account, []byte(public), fingerprint[:]}},
 		{`INSERT INTO paperboat.account_e2ee_keys(key_id,user_id,public_key,fingerprint) VALUES($1,$2,$3,$4)`, []any{keyID, account, []byte(public), fingerprint[:]}},
-		{`INSERT INTO paperboat.peer_endpoint_certificates(fingerprint,user_id,endpoint_id,role,generation,serial,certificate,quic_public_key,issued_at,expires_at,key_id) VALUES($1,$2,$3,'cli',1,1,$4,$5,now(),now()+interval '1 hour',$6)`, []any{certificateFingerprint[:], account, endpoint, make([]byte, 172), wireguard, keyID}},
+		{`INSERT INTO paperboat.peer_endpoint_certificates(fingerprint,user_id,endpoint_id,role,generation,serial,certificate,quic_public_key,issued_at,expires_at,key_id,signer_public_key) VALUES($1,$2,$3,'cli',1,1,$4,$5,now(),now()+interval '1 hour',$6,$7)`, []any{certificateFingerprint[:], account, endpoint, make([]byte, 172), wireguard, keyID, []byte(public)}},
 		{`INSERT INTO paperboat.peer_network_identities(user_id,endpoint_id,role,endpoint_generation,machine_generation,key_generation,wireguard_public_key,quic_certificate_fingerprint,virtual_address,config_generation,relay_revocation_generation,created_at,updated_at) VALUES($1,$2,'cli',1,0,1,$3,$4,('fd7a:115c:a1e0::'::inet+nextval('paperboat.peer_network_virtual_address_seq')),1,1,now(),now())`, []any{account, endpoint, wireguard, certificateFingerprint[:]}},
 	} {
 		if _, e = database.SQL().ExecContext(ctx, statement.q, statement.args...); e != nil {

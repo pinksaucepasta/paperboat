@@ -287,10 +287,13 @@ func TestRelaySubjectsStoredListFollowsNodeGenerationPostgres(t *testing.T) {
 func TestRelaySubjectsIneligibleAccountIsCutAboveItsGrantsPostgres(t *testing.T) {
 	n := newRelaySubjectsNode(t, "relay_pool")
 	n.identity("ep_a", 0, 4)
+	// A grant can carry the relay revocation generation, which may exceed the configuration generation
+	// (the relay lifecycle test's grant was at 3 with configuration generation 1): the cut is above both.
+	n.identity("ep_b", 7, 4)
 	n.exec(t.Context(), `UPDATE control_tunnel_nodes SET allowed_account_ids=ARRAY['someone_else'] WHERE id=$1`, n.id)
-	got := floors(n.mustObserve(n.members("ep_a"), relaySubjectsDigestOf(t, n.members("ep_a"))).Revocations)
-	if got["ep_a"] != 5 {
-		t.Fatalf("ineligible endpoint cut at %d, want its configuration generation + 1 (5)", got["ep_a"])
+	got := floors(n.mustObserve(n.members("ep_a", "ep_b"), relaySubjectsDigestOf(t, n.members("ep_a", "ep_b"))).Revocations)
+	if got["ep_a"] != 5 || got["ep_b"] != 8 {
+		t.Fatalf("ineligible endpoints cut at %d and %d, want 5 and 8 (the higher of configuration and revocation generation, + 1)", got["ep_a"], got["ep_b"])
 	}
 }
 
