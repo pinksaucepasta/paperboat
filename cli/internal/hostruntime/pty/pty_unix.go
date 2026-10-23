@@ -209,7 +209,7 @@ func (p *Process) Terminate(ctx context.Context, grace time.Duration) (ExitResul
 		return result, err
 	default:
 	}
-	if err := p.Signal(Terminate); err != nil && !errors.Is(err, os.ErrProcessDone) {
+	if err := p.Signal(Terminate); err != nil && !processGone(err) {
 		return ExitResult{}, err
 	}
 	graceCtx, cancel := context.WithTimeout(ctx, grace)
@@ -221,7 +221,7 @@ func (p *Process) Terminate(ctx context.Context, grace time.Duration) (ExitResul
 	if ctx.Err() != nil {
 		return ExitResult{}, ctx.Err()
 	}
-	if err := p.Signal(Kill); err != nil && !errors.Is(err, os.ErrProcessDone) {
+	if err := p.Signal(Kill); err != nil && !processGone(err) {
 		return ExitResult{}, err
 	}
 	result, err = p.Wait(ctx)
@@ -230,6 +230,12 @@ func (p *Process) Terminate(ctx context.Context, grace time.Duration) (ExitResul
 	}
 	return result, err
 }
+// processGone reports a signal that found no process: it has exited (its group may already be gone
+// before Wait observes the exit), so terminating it only has to wait for the result.
+func processGone(err error) bool {
+	return errors.Is(err, os.ErrProcessDone) || errors.Is(err, syscall.ESRCH)
+}
+
 func (p *Process) wait() {
 	err := p.cmd.Wait()
 	result := ExitResult{ExitedAt: time.Now().UTC()}
