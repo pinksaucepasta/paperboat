@@ -162,6 +162,7 @@ func (j *FileJournal) Save(ctx context.Context, record Record) error {
 		next[id] = value
 	}
 	next[record.OperationID] = record.clone()
+	pruneFinishedRecords(next, record.OperationID)
 	if len(next) > maxJournalRecords {
 		return ErrJournalUncertain
 	}
@@ -344,4 +345,31 @@ func walkJSONValue(decoder *json.Decoder) error {
 		return ErrJournalCorrupt
 	}
 	return nil
+}
+
+// pruneFinishedRecords drops the oldest finished rotations (old credential revoked) until the journal is
+// within maxJournalRecords; keep is the record being saved. Without it every connector stopped rotating
+// after 64 rotations (Lane X audit H3). Only a journal full of unfinished rotations stays over the cap.
+func pruneFinishedRecords(records map[string]Record, keep string) {
+	if len(records) <= maxJournalRecords {
+		return
+	}
+	finished := make([]Record, 0, len(records))
+	for id, record := range records {
+		if id != keep && record.Phase == PhaseRevoked {
+			finished = append(finished, record)
+		}
+	}
+	sort.Slice(finished, func(i, j int) bool {
+		if !finished[i].UpdatedAt.Equal(finished[j].UpdatedAt) {
+			return finished[i].UpdatedAt.Before(finished[j].UpdatedAt)
+		}
+		return finished[i].OperationID < finished[j].OperationID
+	})
+	for _, record := range finished {
+		if len(records) <= maxJournalRecords {
+			return
+		}
+		delete(records, record.OperationID)
+	}
 }
