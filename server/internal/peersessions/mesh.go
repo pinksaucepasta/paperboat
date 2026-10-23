@@ -84,11 +84,15 @@ func buildMesh(ctx context.Context, tx *sql.Tx, account string, now time.Time) (
 	return out, earliest, rows.Err()
 }
 
-// meshSignal is the account's change signal: its peer_network and inventory topic generations (migration 149).
+// meshSignal is the account's change signal: its peer_network and inventory topic generations (migration 150) plus
+// the relay revocation generations of its identities, which only the peer-network triggers advance (a reinstall,
+// certificate issuance, a CLI session or environment ending publish no topic). Read-only: no hot row is written
+// in the triggers' transactions, and the identities' part is an index-only scan (migration 152).
 func meshSignal(ctx context.Context, tx *sql.Tx, account string) (int64, error) {
 	var signal int64
-	err := tx.QueryRowContext(ctx, `SELECT coalesce(sum(generation),0)::bigint FROM paperboat.account_topic_generations
- WHERE account_id=$1 AND topic IN ('peer_network','inventory')`, account).Scan(&signal)
+	err := tx.QueryRowContext(ctx, `SELECT
+ coalesce((SELECT sum(generation) FROM paperboat.account_topic_generations WHERE account_id=$1 AND topic IN ('peer_network','inventory')),0)::bigint
+ + coalesce((SELECT sum(relay_revocation_generation) FROM paperboat.peer_network_identities WHERE user_id=$1),0)::bigint`, account).Scan(&signal)
 	return signal, err
 }
 

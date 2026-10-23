@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -13,9 +14,15 @@ import (
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
 )
 
-type meshTestSigner struct{}
+// meshTestSigner signs nothing; it keeps the last configuration's claims.
+type meshTestSigner struct{ claims *map[string]any }
 
-func (meshTestSigner) SignNetworkConfiguration(map[string]any) (string, error) { return "config", nil }
+func (m meshTestSigner) SignNetworkConfiguration(claims map[string]any) (string, error) {
+	if m.claims != nil {
+		*m.claims = claims
+	}
+	return "config", nil
+}
 func (meshTestSigner) SignRegionalCandidates(map[string]any) (string, error) {
 	return "candidates", nil
 }
@@ -72,7 +79,8 @@ SELECT $1,$1||'_m_'||g,'machine',$1||'_m_'||g,1,1,1,sha256(convert_to('key'||$1|
 	}
 	join(0, 999)
 
-	service, err := NewNetworkService(store, meshTestSigner{}, "https://issuer.example.test", NetworkOptions{})
+	var signed map[string]any
+	service, err := NewNetworkService(store, meshTestSigner{claims: &signed}, "https://issuer.example.test", NetworkOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,6 +125,23 @@ SELECT $1,$1||'_m_'||g,'machine',$1||'_m_'||g,1,1,1,sha256(convert_to('key'||$1|
 	}
 	if n, _ := logRows(); n != 1000 {
 		t.Fatalf("a refresh without a change wrote %d rows", n-1000)
+	}
+
+	// A configuration build reads the mesh, not every peer: before, ~3 queries per peer (3,000 here).
+	var queries atomic.Int64
+	store.SetQueryObserver(func(ctx context.Context) (context.Context, func(string)) {
+		queries.Add(1)
+		return ctx, func(string) {}
+	})
+	if _, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "mesh_config_" + s, UserID: account, EndpointID: account + "_m_1"}); err != nil {
+		t.Fatal(err)
+	}
+	store.SetQueryObserver(nil)
+	if peers, _ := signed["peers"].([]networkPeer); len(peers) != 999 {
+		t.Fatalf("configuration carries %d peers, want the other 999", len(peers))
+	}
+	if n := queries.Load(); n > 40 {
+		t.Fatalf("one configuration build on a 1,000-machine account ran %d queries, want a bounded few (it loaded every peer)", n)
 	}
 
 	join(1000, 1000)

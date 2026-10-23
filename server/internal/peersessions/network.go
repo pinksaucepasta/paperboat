@@ -280,6 +280,12 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 	if err != nil {
 		return NetworkConfigResult{}, err
 	}
+	// The shared mesh is brought up to date (once per change for the whole account) before the snapshot opens, so
+	// the snapshot sees it; this writes, like the generation above.
+	meshSeq, err := s.refreshMesh(ctx, in.UserID)
+	if err != nil {
+		return NetworkConfigResult{}, err
+	}
 	tx, err := s.store.SQL().BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 	if err != nil {
 		return NetworkConfigResult{}, err
@@ -467,7 +473,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 	}
 	// Durable personal-machine connectivity is distinct from application access.
 	// Exact access-session scopes above still authorize every application stream.
-	mesh, err := personalNetworkPeers(ctx, tx, self, now, &expiry, admittedPeers, live["machine_network"])
+	mesh, err := personalNetworkPeers(ctx, tx, self, now, &expiry, admittedPeers, live["machine_network"], meshSeq)
 	if err != nil {
 		return NetworkConfigResult{}, err
 	}
@@ -557,7 +563,7 @@ func personalNetworkScope(self, peer networkBinding, expiry time.Time) networkSc
 	return networkScope{"machine_network", personalNetworkScopeID(self, peer), 1, "connect", direction, 443, expiry.Unix()}
 }
 
-func personalNetworkPeers(ctx context.Context, tx *sql.Tx, self networkBinding, now time.Time, expiry *time.Time, admittedPeers map[string]bool, admittedNetworks []string) ([]networkBinding, error) {
+func personalNetworkPeers(ctx context.Context, tx *sql.Tx, self networkBinding, now time.Time, expiry *time.Time, admittedPeers map[string]bool, admittedNetworks []string, meshSeq int64) ([]networkBinding, error) {
 	if self.Role == "machine" {
 		var personal bool
 		if err := tx.QueryRowContext(ctx, `SELECT owner_team_id IS NULL FROM paperboat.user_machines WHERE id=$1 AND user_id=$2`, self.EndpointID, self.AccountID).Scan(&personal); err != nil {
@@ -594,19 +600,39 @@ func personalNetworkPeers(ctx context.Context, tx *sql.Tx, self networkBinding, 
 	if len(ids) > maximumAccountEndpoints {
 		return nil, ErrResourceLimit
 	}
+	// The shared mesh (mesh.go) holds every peer with a current certificate, built once per change: a peer is read
+	// from it, not loaded again per endpoint (3 queries per peer). A peer this endpoint reports as admitted may keep
+	// a superseded or expired certificate, so it alone is loaded as before.
+	mesh, err := latestMeshEntries(ctx, tx, self.AccountID, meshSeq, nil)
+	if err != nil {
+		return nil, err
+	}
+	var validUntil sql.NullTime
+	if err = tx.QueryRowContext(ctx, `SELECT valid_until FROM paperboat.peer_mesh_accounts WHERE account_id=$1`, self.AccountID).Scan(&validUntil); err != nil && err != sql.ErrNoRows {
+		return nil, err
+	}
+	if validUntil.Valid && validUntil.Time.After(now) && validUntil.Time.Before(*expiry) {
+		*expiry = validUntil.Time // the earliest certificate of the mesh: never later than this endpoint's peers' own
+	}
 	peers := make([]networkBinding, 0, len(ids))
 	for _, id := range ids {
-		binding, certExpiry, err := loadNetworkBinding(ctx, tx, self.AccountID, id, now, admittedPeers[id] || slices.Contains(admittedNetworks, personalNetworkScopeID(self, networkBinding{EndpointID: id})))
-		if err == sql.ErrNoRows || err == ErrUnavailable {
+		if admittedPeers[id] || slices.Contains(admittedNetworks, personalNetworkScopeID(self, networkBinding{EndpointID: id})) {
+			binding, certExpiry, err := loadNetworkBinding(ctx, tx, self.AccountID, id, now, true)
+			if err == sql.ErrNoRows || err == ErrUnavailable {
+				continue
+			}
+			if err != nil {
+				return nil, err
+			}
+			if certExpiry.After(now) && certExpiry.Before(*expiry) {
+				*expiry = certExpiry
+			}
+			peers = append(peers, binding)
 			continue
 		}
-		if err != nil {
-			return nil, err
+		if binding, ok := mesh[id]; ok {
+			peers = append(peers, binding)
 		}
-		if certExpiry.After(now) && certExpiry.Before(*expiry) {
-			*expiry = certExpiry
-		}
-		peers = append(peers, binding)
 	}
 	return peers, nil
 }
