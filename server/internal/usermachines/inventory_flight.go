@@ -51,7 +51,7 @@ func (o InventoryOptions) key() string {
 	if o.Closed != nil {
 		closed = fmt.Sprint(*o.Closed)
 	}
-	return fmt.Sprintf("%d|%d|%q|%q|%q|%s|%t", o.Limit, o.Offset, o.Q, o.State, o.Owner, closed, o.WithoutLiveMetadata)
+	return fmt.Sprintf("%d|%d|%q|%q|%q|%s|%t|%q", o.Limit, o.Offset, o.Q, o.State, o.Owner, closed, o.WithoutLiveMetadata, o.MachineID)
 }
 
 func (f *inventoryFlights) do(ctx context.Context, key inventoryKey, compute func(context.Context) ([]UserMachine, int, error)) ([]UserMachine, int, error) {

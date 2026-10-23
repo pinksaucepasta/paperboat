@@ -5,6 +5,8 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/teams"
 	"github.com/pinksaucepasta/paperboat/server/internal/usermachines"
 	"net/http"
+	"strings"
+	"unicode/utf8"
 )
 
 func terminalSessionCatalog(service *usermachines.Service) http.HandlerFunc {
@@ -13,7 +15,7 @@ func terminalSessionCatalog(service *usermachines.Service) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		query, valid := readInventoryQuery(w, r, []string{"running", "closed", "unavailable"}, true, "live")
+		query, valid := readInventoryQuery(w, r, []string{"running", "closed", "unavailable"}, true, "live", "machine_id")
 		if !valid {
 			return
 		}
@@ -24,7 +26,13 @@ func terminalSessionCatalog(service *usermachines.Service) http.HandlerFunc {
 			writeError(w, r, 400, "invalid_inventory_query", "Use one valid limit (1–200), nonnegative offset, and supported inventory filters.")
 			return
 		}
-		items, total, err := service.TerminalSessionInventory(personalWorkspaceContext(r.Context()), account, usermachines.InventoryOptions{Limit: query.Limit, Offset: query.Offset, Q: query.Q, State: query.State, Owner: query.Owner, Closed: query.Closed, WithoutLiveMetadata: live == "false"})
+		// machine_id: one machine's sessions (the console's machine page), counted and paged on their own.
+		machineID := r.URL.Query().Get("machine_id")
+		if !utf8.ValidString(machineID) || len(machineID) > 128 || strings.ContainsAny(machineID, " \t\r\n\x00") {
+			writeError(w, r, 400, "invalid_inventory_query", "Use one valid limit (1–200), nonnegative offset, and supported inventory filters.")
+			return
+		}
+		items, total, err := service.TerminalSessionInventory(personalWorkspaceContext(r.Context()), account, usermachines.InventoryOptions{Limit: query.Limit, Offset: query.Offset, Q: query.Q, State: query.State, Owner: query.Owner, Closed: query.Closed, MachineID: machineID, WithoutLiveMetadata: live == "false"})
 		if err != nil {
 			writeError(w, r, 500, "internal_error", "Terminal sessions could not be loaded.", err)
 			return

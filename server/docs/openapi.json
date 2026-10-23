@@ -17193,6 +17193,16 @@
               "type": "boolean",
               "default": true
             }
+          },
+          {
+            "name": "machine_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Only the sessions on this machine (exact machine id), at most 128 UTF-8 bytes; whitespace and NUL are rejected. Pagination totals count the filtered set."
           }
         ]
       }

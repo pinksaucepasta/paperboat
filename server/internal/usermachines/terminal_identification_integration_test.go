@@ -260,6 +260,15 @@ func TestPostgresTerminalLiveIdentificationAuthorization(t *testing.T) {
 	if err != nil || total != 0 || len(page) != 0 {
 		t.Fatalf("close request listed as running %+v total%d err%v", page, total, err)
 	}
+	// The machine filter (the console's machine page) pages and counts only that machine's sessions.
+	page, total, err = service.TerminalSessionInventory(ctx, owner, InventoryOptions{Limit: 20, Closed: &closed, MachineID: machine})
+	if err != nil || total != 1 || len(page) != 1 || page[0].ID != session {
+		t.Fatalf("sessions of machine %s: %+v total%d err%v", machine, page, total, err)
+	}
+	page, total, err = service.TerminalSessionInventory(ctx, owner, InventoryOptions{Limit: 20, Closed: &closed, MachineID: machine + "_other"})
+	if err != nil || total != 0 || len(page) != 0 {
+		t.Fatalf("another machine's filter listed %+v total%d err%v", page, total, err)
+	}
 	beforeCalls := runtime.calls.Load()
 	if _, err = service.TerminalBrowserSession(ctx, owner, "", session); !errors.Is(err, ErrTerminalBrowserSessionClosed) {
 		t.Fatalf("owner close error %v", err)

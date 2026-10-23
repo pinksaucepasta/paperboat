@@ -127,12 +127,13 @@ func (s *Service) terminalSessionInventory(ctx context.Context, account, exactSe
  AND ($5='' OR position(lower($5) in lower(x.name||' '||x.target_name||' '||x.id))>0)
  AND ($6='' OR CASE WHEN x.desired_state<>'open' OR x.runtime_state IN ('closed','exited','deleted') THEN 'closed' WHEN x.runtime_state='running' THEN 'running' ELSE 'unavailable' END=$6)
  AND ($7='' OR ($7='mine' AND x.owner_account=$1) OR ($7='shared' AND x.owner_account<>$1) OR x.owner_account=$7)
- AND ($8::boolean IS NULL OR (x.desired_state<>'open' OR x.runtime_state IN ('closed','exited','deleted'))=$8)`
+ AND ($8::boolean IS NULL OR (x.desired_state<>'open' OR x.runtime_state IN ('closed','exited','deleted'))=$8)
+ AND ($9='' OR x.machine_id=$9)`
 	var closed any
 	if opts.Closed != nil {
 		closed = *opts.Closed
 	}
-	args := []any{account, exactSession, workspaceSet, teamID, opts.Q, opts.State, opts.Owner, closed}
+	args := []any{account, exactSession, workspaceSet, teamID, opts.Q, opts.State, opts.Owner, closed, opts.MachineID}
 	// Runtime probes below must not hold a database snapshot open.
 	tx, err := s.db.Pool().BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
@@ -143,7 +144,7 @@ func (s *Service) terminalSessionInventory(ctx context.Context, account, exactSe
 	if err := tx.QueryRow(ctx, "SELECT count(*) FROM ("+query+") inventory", args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
-	rows, err := tx.Query(ctx, query+" ORDER BY lower(x.name),x.id LIMIT $9 OFFSET $10", append(args, opts.Limit, opts.Offset)...)
+	rows, err := tx.Query(ctx, query+" ORDER BY lower(x.name),x.id LIMIT $10 OFFSET $11", append(args, opts.Limit, opts.Offset)...)
 	if err != nil {
 		return nil, 0, err
 	}
