@@ -78,14 +78,20 @@ func TestRelayGrantsNameEveryPeerOfAHundredPeerAccountOnPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(grants) != 7 {
-		t.Fatalf("grants = %d, want 7 chunks of at most %d", len(grants), maximumRelayControlPeers)
+	// Other tests' relay nodes in a shared database may admit every account: count this node's grants.
+	var mine []map[string]any
+	for _, grant := range grants {
+		if claims := networkClaims(t, grant); claims["node_id"] == node {
+			mine = append(mine, claims)
+		}
+	}
+	if len(mine) != 7 {
+		t.Fatalf("grants for the node = %d, want 7 chunks of at most %d", len(mine), maximumRelayControlPeers)
 	}
 	named, control := map[string]bool{}, map[string]bool{}
-	for _, grant := range grants {
-		claims := networkClaims(t, grant)
-		if claims["generation"].(float64) != 7 || claims["node_id"] != node {
-			t.Fatalf("grant generation/node = %v/%v", claims["generation"], claims["node_id"])
+	for _, claims := range mine {
+		if claims["generation"].(float64) != 7 {
+			t.Fatalf("grant generation = %v", claims["generation"])
 		}
 		inGrant := map[string]bool{}
 		for _, entry := range claims["peers"].([]any) {
