@@ -337,7 +337,9 @@ function StatusLine({
           ? "No access"
           : phase === "transport-error"
             ? "Disconnected"
-            : null
+            : phase === "limit"
+              ? "Limit reached"
+              : null
   // The shell's window title usually names the directory too (anvit@hp: ~/go), and it arrives at
   // once; the directory the server reports lags by a poll, so it's only the fallback.
   const place =

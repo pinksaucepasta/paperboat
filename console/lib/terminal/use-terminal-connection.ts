@@ -51,6 +51,8 @@ export type TerminalPhase =
   | "transport-error"
   /** The workspace's hosted bandwidth is used up: retrying can't help until it renews or is added to. */
   | "quota"
+  /** The plan's browser-terminal limit is reached: `limit` holds the server's refusal. */
+  | "limit"
 
 type Ticket = {
   stream_url: string
@@ -165,6 +167,7 @@ export function useTerminalConnection({
   const [connectedEdge, setConnectedEdge] = useState("")
   // The window title the shell sets (OSC 0/2), seen as it happens; the server's copy lags.
   const [title, setTitle] = useState("")
+  const [limit, setLimit] = useState<ApiError | null>(null)
   // Who is attached, pushed by the host (newer hosts only); null until the first such event.
   const [participants, setParticipants] = useState<HostParticipant[] | null>(null)
   const [filePasteProgress, setFilePasteProgress] = useState<FilePasteProgress | null>(null)
@@ -996,6 +999,10 @@ export function useTerminalConnection({
         setError(apiErrorMessage(reason))
         if (reason instanceof ApiError && reason.code === "bandwidth_quota_exhausted") {
           setPhaseValue("quota")
+        } else if (reason instanceof ApiError && reason.code === "browser_terminal_limit_reached") {
+          // Retrying can't help until a browser terminal is closed or the plan changes.
+          setLimit(reason)
+          setPhaseValue("limit")
         } else if (reason instanceof ApiError && [401, 403, 404].includes(reason.status)) {
           if (accessMethod === "code")
             setError("Your code has stopped working. It may have expired or been replaced; ask for a new one.")
@@ -1088,6 +1095,7 @@ export function useTerminalConnection({
     notice,
     connectedEdge,
     title,
+    limit,
     participants,
     reconnect,
     fitToWindow,
