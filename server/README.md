@@ -172,7 +172,10 @@ times and does not roll back or duplicate the completed file transfer.
 - `PAPERBOAT_MINT_ACTIVE_KEY_ID`
 - `PAPERBOAT_MINT_SIGNING_KEYS` or `PAPERBOAT_MINT_SIGNING_KEYS_FILE` as comma-separated
   `kid:base64url` Ed25519 seeds/private keys. Publish the previous key alongside the active
-  key for the configured `PAPERBOAT_MINT_JWKS_MAX_AGE` rotation overlap.
+  key for the configured `PAPERBOAT_MINT_JWKS_MAX_AGE` rotation overlap (default 1 h; the trust document's
+  Cache-Control max-age uses this one value).
+- `PAPERBOAT_MINT_WITHDRAWN_KEY_IDS` (comma-separated kids): keys that stop verifying at once and are listed in the
+  trust document's `withdrawn_key_ids`. Edges drop them when they next fetch the trust document (up to one max-age).
 
 
 Postgres tables live in the dedicated `paperboat` schema. The migration policy is

@@ -294,7 +294,10 @@ type CLIAuth struct {
 	AccountActionsPerMinute  int           `json:"account_actions_per_minute"`
 	MintActiveKeyID          string        `json:"mint_active_key_id"`
 	MintJWKSMaxAge           time.Duration `json:"mint_jwks_max_age"`
-	MintProofLifetime        time.Duration `json:"mint_proof_lifetime"`
+	// MintWithdrawnKeyIDs are signing keys no longer trusted: verification refuses them and the trust document
+	// lists them in withdrawn_key_ids. The active key cannot be withdrawn.
+	MintWithdrawnKeyIDs []string      `json:"mint_withdrawn_key_ids"`
+	MintProofLifetime   time.Duration `json:"mint_proof_lifetime"`
 	// ClientSessionTouchInterval throttles last_used_at writes for CLI client
 	// sessions. Authenticated requests only rewrite the touch timestamp when
 	// it is older than this interval, so hot request bursts do not pay a
@@ -485,7 +488,7 @@ func Default() Config {
 			NetworkRequestsPerMinute:   30,
 			GrantPollsPerMinute:        30,
 			AccountActionsPerMinute:    30,
-			MintJWKSMaxAge:             5 * time.Minute,
+			MintJWKSMaxAge:             time.Hour,
 			MintProofLifetime:          admission.DefaultLifetime,
 			ClientSessionTouchInterval: time.Minute,
 		},

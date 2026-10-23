@@ -489,6 +489,9 @@ func overlayEnv(c *Config, lookup func(string) (string, bool), readFile func(str
 	if v, ok := lookup("PAPERBOAT_MINT_SIGNING_KEYS"); ok {
 		c.Secrets.MintSigningKeys = splitCSV(v)
 	}
+	if v, ok := lookup("PAPERBOAT_MINT_WITHDRAWN_KEY_IDS"); ok {
+		c.CLIAuth.MintWithdrawnKeyIDs = splitCSV(v)
+	}
 	if path, ok := lookup("PAPERBOAT_MINT_SIGNING_KEYS_FILE"); ok {
 		b, err := readFile(path)
 		if err != nil {

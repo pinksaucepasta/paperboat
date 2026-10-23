@@ -35,7 +35,6 @@ const (
 	NetworkConfigurationType = "paperboat-network-config+jwt"
 	RegionalCandidatesType   = "paperboat-regional-candidates+jwt"
 	RelayGrantType           = "paperboat-relay-grant+jwt"
-	defaultMaxAge            = 5 * time.Minute
 )
 
 // SignNetworkConfiguration signs the already validated network-authority
@@ -226,11 +225,16 @@ type Key struct {
 	PrivateKey ed25519.PrivateKey
 }
 
+// Provider signs and verifies infrastructure proofs with Ed25519 keys selected by kid.
+// Prior art: teleport lib/auth/rotate.go (a signing key leaves service through a phased
+// state change, never an in-place edit of the set verifiers read); this type keeps one
+// set of keys plus a withdrawn set that is published in the same trust document.
 type Provider struct {
 	admissionLifetime time.Duration
 	mu                sync.RWMutex
 	activeID          string
 	keys              map[string]ed25519.PrivateKey
+	withdrawn         map[string]struct{}
 	maxAge            time.Duration
 }
 
@@ -570,11 +574,13 @@ func credentialScopesAllowed(class string, scopes, fixed []string) bool {
 	return slices.Equal(scopes, fixed)
 }
 
+// New builds a provider. maxAge is the Cache-Control max-age of the published trust document
+// (cli_auth.mint_jwks_max_age); the caller always supplies it, so the value lives in one place.
 func New(keys []Key, activeID string, maxAge time.Duration) (*Provider, error) {
 	if maxAge <= 0 {
-		maxAge = defaultMaxAge
+		return nil, errors.New("mint trust document max age must be positive")
 	}
-	provider := &Provider{activeID: strings.TrimSpace(activeID), keys: make(map[string]ed25519.PrivateKey), maxAge: maxAge}
+	provider := &Provider{activeID: strings.TrimSpace(activeID), keys: make(map[string]ed25519.PrivateKey), withdrawn: map[string]struct{}{}, maxAge: maxAge}
 	for _, key := range keys {
 		id := strings.TrimSpace(key.ID)
 		if id == "" || len(key.PrivateKey) != ed25519.PrivateKeySize {
@@ -600,6 +606,26 @@ func NewEphemeral(maxAge time.Duration) (*Provider, error) {
 		return nil, fmt.Errorf("generate mint key: %w", err)
 	}
 	return New([]Key{{ID: "development-ephemeral", PrivateKey: privateKey}}, "development-ephemeral", maxAge)
+}
+
+// Withdraw removes signing keys from service: they stop verifying credentials at once and are
+// published in withdrawn_key_ids so edges drop them. The active key cannot be withdrawn; rotate
+// to another key first.
+func (p *Provider) Withdraw(ids []string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, raw := range ids {
+		id := strings.TrimSpace(raw)
+		if id == "" {
+			return errors.New("withdrawn mint key id must not be empty")
+		}
+		if id == p.activeID {
+			return fmt.Errorf("active mint key %q cannot be withdrawn", id)
+		}
+		delete(p.keys, id)
+		p.withdrawn[id] = struct{}{}
+	}
+	return nil
 }
 
 // ParseKeys accepts entries in the form kid:base64url(ed25519-seed-or-private-key).
@@ -1338,7 +1364,8 @@ func (p *Provider) signClaims(proofType string, claims map[string]any) (string, 
 	return unsigned + "." + base64.RawURLEncoding.EncodeToString(ed25519.Sign(privateKey, []byte(unsigned))), nil
 }
 
-// JWKSJSON exposes the same public trust document to enrolled infrastructure.
+// JWKSJSON exposes the same public trust document to enrolled infrastructure. withdrawn_key_ids
+// lists every key that must no longer be trusted, including ones no longer present in keys.
 func (p *Provider) JWKSJSON() ([]byte, error) {
 	p.mu.RLock()
 	keys := make([]map[string]string, 0, len(p.keys))
@@ -1355,8 +1382,13 @@ func (p *Provider) JWKSJSON() ([]byte, error) {
 			"x": base64.RawURLEncoding.EncodeToString(publicKey),
 		})
 	}
+	withdrawn := make([]string, 0, len(p.withdrawn))
+	for id := range p.withdrawn {
+		withdrawn = append(withdrawn, id)
+	}
 	p.mu.RUnlock()
-	return json.Marshal(map[string]any{"keys": keys})
+	sort.Strings(withdrawn)
+	return json.Marshal(map[string]any{"keys": keys, "withdrawn_key_ids": withdrawn})
 }
 func (p *Provider) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	b, err := p.JWKSJSON()

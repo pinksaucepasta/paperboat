@@ -38,6 +38,9 @@ func mintKeyProvider(cfg config.Config) (*mint.Provider, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err = provider.Withdraw(cfg.CLIAuth.MintWithdrawnKeyIDs); err != nil {
+		return nil, err
+	}
 	if err = provider.ConfigureAdmissionLifetime(cfg.CLIAuth.MintProofLifetime); err != nil {
 		return nil, err
 	}

@@ -59,7 +59,7 @@
       "operations:write"
     ],
     "mint_active_key_id": "",
-    "mint_jwks_max_age": 300000000000,
+    "mint_jwks_max_age": 3600000000000,
     "mint_proof_lifetime": 120000000000,
     "device_grant_lifetime": 600000000000,
     "access_token_lifetime": 900000000000,

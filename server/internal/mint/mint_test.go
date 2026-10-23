@@ -887,3 +887,74 @@ func TestInboxCredentialsBindOneFileOneOperationAndAreNotInterchangeable(t *test
 		t.Error("inbox_delete without an idempotency key accepted")
 	}
 }
+
+// Prior art: teleport lib/auth/rotate.go (signing keys leave service through a phased change).
+func TestWithdrawnKeyIsRefusedAtOnceAndPublished(t *testing.T) {
+	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
+	const issuer = "https://api.example.test"
+	input := CredentialInput{Issuer: issuer, Audience: "paperboat-enrollment", Subject: "env_1", JTI: "jti_enroll_w", IssuedAt: now, ExpiresAt: now.Add(5 * time.Minute), CredentialClass: "helper_enrollment", Scopes: []string{"helper:enroll"}, EnvironmentID: "env_1", EnrollmentID: "enr_1"}
+	previous, err := New([]Key{{ID: "previous", PrivateKey: testKey(4)}}, "previous", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := previous.SignCredential(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider, err := New([]Key{{ID: "current", PrivateKey: testKey(3)}, {ID: "previous", PrivateKey: testKey(4)}}, "current", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := provider.VerifyCredential(token, issuer, "helper_enrollment", now); err != nil {
+		t.Fatalf("previous key before withdrawal = %v", err)
+	}
+	if err := provider.Withdraw([]string{"previous"}); err != nil {
+		t.Fatal(err)
+	}
+	var verr CredentialVerificationError
+	if _, err := provider.VerifyCredential(token, issuer, "helper_enrollment", now); !errors.As(err, &verr) || verr.Code != CredentialKeyUnknown {
+		t.Fatalf("withdrawn key verification = %v, want %s", err, CredentialKeyUnknown)
+	}
+	recorder := httptest.NewRecorder()
+	provider.ServeHTTP(recorder, httptest.NewRequest("GET", "/.well-known/jwks.json", nil))
+	if got := recorder.Header().Get("Cache-Control"); got != "public, max-age=3600" {
+		t.Fatalf("cache-control = %q", got)
+	}
+	var body struct {
+		Keys      []map[string]string `json:"keys"`
+		Withdrawn []string            `json:"withdrawn_key_ids"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Keys) != 1 || body.Keys[0]["kid"] != "current" || len(body.Withdrawn) != 1 || body.Withdrawn[0] != "previous" {
+		t.Fatalf("trust document keys=%#v withdrawn=%#v", body.Keys, body.Withdrawn)
+	}
+}
+
+func TestWithdrawRefusesActiveAndEmptyKeys(t *testing.T) {
+	provider, err := New([]Key{{ID: "current", PrivateKey: testKey(3)}, {ID: "previous", PrivateKey: testKey(4)}}, "current", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := provider.Withdraw([]string{"current"}); err == nil {
+		t.Fatal("active key withdrawn")
+	}
+	if err := provider.Withdraw([]string{" "}); err == nil {
+		t.Fatal("empty key id withdrawn")
+	}
+	if err := provider.Withdraw(nil); err != nil {
+		t.Fatalf("no withdrawals = %v", err)
+	}
+	recorder := httptest.NewRecorder()
+	provider.ServeHTTP(recorder, httptest.NewRequest("GET", "/.well-known/jwks.json", nil))
+	if !strings.Contains(recorder.Body.String(), `"withdrawn_key_ids":[]`) {
+		t.Fatalf("empty withdrawal list must be [] not null: %s", recorder.Body.String())
+	}
+}
+
+func TestMaxAgeIsRequired(t *testing.T) {
+	if _, err := New([]Key{{ID: "key", PrivateKey: testKey(5)}}, "key", 0); err == nil {
+		t.Fatal("trust document without a max age accepted")
+	}
+}
