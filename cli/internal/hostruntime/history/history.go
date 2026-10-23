@@ -266,6 +266,14 @@ func (h *History) Acknowledge(attachmentID string, nextSequence uint64) error {
 	return nil
 }
 
+// Forget drops a detached attachment's acknowledgement, so the map holds only live attachments (a
+// long-lived shared terminal otherwise kept one entry for every viewer that ever attached).
+func (h *History) Forget(attachmentID string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	delete(h.acks, attachmentID)
+}
+
 func (h *History) Acknowledged(attachmentID string) (uint64, bool) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()

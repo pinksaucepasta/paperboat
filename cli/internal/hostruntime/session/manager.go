@@ -349,3 +349,12 @@ func (m *Manager) Create(ctx context.Context, request CreateRequest) (Snapshot, 
 	go m.capture(session, process)
 	return snapshot, nil
 }
+
+// removeParticipantLocked forgets a detached attachment: its participant entry and its history
+// acknowledgement. session.opMu must be held.
+func (s *managedSession) removeParticipantLocked(attachmentID string) {
+	delete(s.participants, attachmentID)
+	if s.history != nil {
+		s.history.Forget(attachmentID)
+	}
+}

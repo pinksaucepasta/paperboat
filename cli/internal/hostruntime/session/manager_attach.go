@@ -61,7 +61,7 @@ func (m *Manager) pruneParticipantsLocked(session *managedSession) {
 			if err == nil {
 				_ = session.fanout.Detach(attachmentID)
 			}
-			delete(session.participants, attachmentID)
+			session.removeParticipantLocked(attachmentID)
 		}
 	}
 }
@@ -247,7 +247,7 @@ func (m *Manager) Detach(sessionID, attachmentID string) error {
 	defer session.opMu.Unlock()
 	err = session.fanout.Detach(attachmentID)
 	if err == nil {
-		delete(session.participants, attachmentID)
+		session.removeParticipantLocked(attachmentID)
 	}
 	return err
 }
@@ -265,7 +265,7 @@ func (m *Manager) DetachParticipantAtGeneration(sessionID, attachmentID, account
 		return ErrStaleGeneration
 	}
 	if err = session.fanout.Detach(attachmentID); err == nil {
-		delete(session.participants, attachmentID)
+		session.removeParticipantLocked(attachmentID)
 	}
 	return err
 }

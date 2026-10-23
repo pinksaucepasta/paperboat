@@ -191,7 +191,7 @@ func (m *Manager) restartAtGeneration(ctx context.Context, sessionID string, exp
 	for attachmentID, participant := range session.participants {
 		if participant.Role != "owner" {
 			_ = session.fanout.Detach(attachmentID)
-			delete(session.participants, attachmentID)
+			session.removeParticipantLocked(attachmentID)
 		}
 	}
 	if err := session.lifecycle.Transition(Restarting); err != nil {
