@@ -13,7 +13,10 @@ type healthExecutor interface {
 
 // RefreshHealth projects current, exact edge-probed route readiness. A connected
 // connector alone is insufficient, and a completed operation stays historical
-// when a later outage makes the current health pending again. The expiry
+// when a later outage makes the current health pending again. A route is ready
+// only when every live edge holding its active assignment has observed it ready:
+// a tunnel hostname can resolve to any of those edges (the managed wildcard), so
+// "ready on one edge" sent first requests to an edge without the route (F8-06). The expiry
 // reconciler retains ownership of persisting expired summary/audit state.
 func RefreshHealth(ctx context.Context, executor healthExecutor, accountID string, tunnelIDs []string, now time.Time) error {
 	_, err := executor.Exec(ctx, `WITH health AS (
@@ -30,8 +33,8 @@ func RefreshHealth(ctx context.Context, executor healthExecutor, accountID strin
  ELSE 'pending' END AS code
  FROM tunnels t LEFT JOIN tunnel_routes r ON r.tunnel_id=t.id AND r.desired_state='active' AND r.deleted_at IS NULL
  LEFT JOIN LATERAL (
- SELECT bool_or(a.observed_state='ready') AS ready,
- bool_or(a.observed_state IN ('failed','degraded')) AS failed
+ SELECT bool_and(a.observed_state='ready' AND a.observed_at>$3::timestamptz-interval '15 seconds') AS ready,
+ bool_or(a.observed_state IN ('failed','degraded') AND a.observed_at>$3::timestamptz-interval '15 seconds') AS failed
  FROM tunnel_edge_route_assignments a
  JOIN tunnel_connectors c ON c.id=a.connector_id AND c.tunnel_id=t.id AND c.host_id=a.host_id
  JOIN tunnel_connector_sessions s ON s.id=a.connector_session_id AND s.connector_id=c.id
@@ -45,7 +48,6 @@ func RefreshHealth(ctx context.Context, executor healthExecutor, accountID strin
  WHERE a.route_id=r.id AND a.account_id=t.account_id AND a.state='active'
  AND a.route_generation=r.generation AND a.route_revision=r.generation
  AND a.access_mode=v.effective_access_mode AND a.viewer_policy_generation=v.viewer_policy_generation
- AND a.observed_at>$3::timestamptz-interval '15 seconds'
  AND c.desired_state='active' AND c.revoked_at IS NULL AND c.drain_state='accepting'
  AND c.generation=a.connector_generation AND c.last_session_id=s.id
  AND c.last_applied_config_generation=a.config_generation
