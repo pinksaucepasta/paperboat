@@ -20,8 +20,10 @@ const (
 	minimumRefreshInterval = time.Second
 	// One machine change bumps the inventory topic of every machine in its audience, so on a busy account
 	// every daemon was woken every ~15 s and re-listed the account's machines (the largest server load).
-	// Changes that arrive within the spacing are folded into one refresh.
-	defaultEventRefreshSpacing = 30 * time.Second
+	// Changes that arrive within the spacing are folded into one refresh. The spacing counts from the start of
+	// the previous refresh, so a change shows locally within the spacing plus one refresh (the 30 s bound of
+	// smoke check inventory-freshness; a refresh takes up to ~10 s on a slow control plane).
+	defaultEventRefreshSpacing = 15 * time.Second
 	// While the server's change stream is healthy the periodic refresh is only a safety net.
 	defaultEventFallback = 5 * time.Minute
 )
@@ -129,22 +131,20 @@ func (i *Inventory) Snapshot(ctx context.Context) (localapi.Snapshot, error) {
 	return i.store.Snapshot(ctx)
 }
 
+// Run refreshes once, then on the interval while there is no healthy change stream. With one, an inventory change
+// refreshes at most once per eventSpacing, counted from the start of the previous refresh (changes in between fold
+// into that refresh), and the interval only checks whether eventFallback has passed since the last refresh.
 func (i *Inventory) Run(ctx context.Context) error {
-	_ = i.Refresh(ctx)
-	return i.runTicker(ctx)
-}
-
-// runTicker refreshes on the interval while there is no healthy change stream. With one, an inventory change
-// refreshes at most once per eventSpacing (changes in between fold into that refresh) and the interval only
-// checks whether eventFallback has passed since the last refresh.
-func (i *Inventory) runTicker(ctx context.Context) error {
-	last := time.Now()
+	var started time.Time        // of the latest refresh
+	var pending <-chan time.Time // a change waiting for the spacing
+	refresh := func() {
+		pending = nil // this refresh shows every change so far
+		started = time.Now()
+		_ = i.Refresh(ctx)
+	}
+	refresh()
 	timer := time.NewTimer(i.refreshInterval)
 	defer timer.Stop()
-	refresh := func() {
-		_ = i.Refresh(ctx)
-		last = time.Now()
-	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -152,18 +152,18 @@ func (i *Inventory) runTicker(ctx context.Context) error {
 		case <-i.wake:
 			refresh()
 		case <-i.events.Changed():
-			if wait := i.eventSpacing - time.Since(last); wait > 0 {
-				spacing := time.NewTimer(wait)
-				select {
-				case <-ctx.Done():
-					spacing.Stop()
-					return ctx.Err()
-				case <-spacing.C:
-				}
+			if pending != nil {
+				continue
+			}
+			if wait := i.eventSpacing - time.Since(started); wait > 0 {
+				pending = time.After(wait)
+				continue
 			}
 			refresh()
+		case <-pending:
+			refresh()
 		case <-timer.C:
-			if !i.events.Healthy() || time.Since(last) >= i.eventFallback {
+			if !i.events.Healthy() || time.Since(started) >= i.eventFallback {
 				refresh()
 			}
 			timer.Reset(i.refreshInterval)

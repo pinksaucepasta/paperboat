@@ -176,14 +176,7 @@ func runWindowsDaemon(ctx context.Context, config DaemonConfig) (runErr error) {
 	defer cancel()
 	results := make(chan error, 3)
 	go func() { results <- server.Run(runCtx) }()
-	go func() {
-		_ = inventory.Refresh(runCtx)
-		if runCtx.Err() != nil {
-			results <- runCtx.Err()
-			return
-		}
-		results <- inventory.runTicker(runCtx)
-	}()
+	go func() { results <- inventory.Run(runCtx) }()
 	go func() { results <- observations.Run(runCtx) }()
 	first := <-results
 	cancel()

@@ -64,7 +64,12 @@ func TestInventoryRefreshesWhenAsked(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	go func() { _ = inventory.runTicker(ctx) }()
+	go func() { _ = inventory.Run(ctx) }()
+	select {
+	case <-refreshed: // the first refresh
+	case <-time.After(2 * time.Second):
+		t.Fatal("no first refresh")
+	}
 	inventory.RequestRefresh()
 	select {
 	case <-refreshed:

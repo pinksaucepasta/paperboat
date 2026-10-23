@@ -599,6 +599,46 @@ func TestInventoryFoldsChangesWithinTheSpacingIntoOneRefresh(t *testing.T) {
 	}
 }
 
+// A change shows locally within the spacing plus one refresh (smoke check inventory-freshness, 30 s): the spacing
+// counts from the start of the previous refresh. Counted from its end, a change that arrived just after a slow
+// refresh waited the whole spacing and then a whole refresh (40 s on device with a 30 s spacing).
+func TestInventoryChangeIsShownWithinTheSpacingOfThePreviousRefreshStart(t *testing.T) {
+	const spacing, duration = time.Second, 500 * time.Millisecond
+	store, err := localapi.NewSnapshotStore(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, subscriptions, plane := eventstest.Start(t, time.Hour, machineevents.TopicInventory)
+	refreshed := make(chan time.Time, 8)
+	inventory, err := NewInventory(InventoryConfig{Source: slowMachineSource{delay: duration}, Store: store, RefreshInterval: time.Hour,
+		RequestTimeout: 5 * time.Second, Events: subscriptions[0], EventRefreshSpacing: spacing, OnRefresh: func(error) { refreshed <- time.Now() }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- inventory.Run(ctx) }()
+	select {
+	case <-refreshed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no first refresh")
+	}
+	changed := time.Now() // just after a refresh finished
+	plane.Publish(machineevents.TopicInventory)
+	select {
+	case shown := <-refreshed:
+		if took := shown.Sub(changed); took > spacing+duration/2 {
+			t.Fatalf("a change after a refresh was shown after %v, want within the spacing (%v) of the previous refresh's start plus that refresh", took.Round(10*time.Millisecond), spacing)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the change was never refreshed")
+	}
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("run ended with %v", err)
+	}
+}
+
 type slowMachineSource struct{ delay time.Duration }
 
 func (s slowMachineSource) ListUserMachines(ctx context.Context) ([]api.UserMachine, error) {
