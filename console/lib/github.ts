@@ -9,8 +9,8 @@ import { api } from "@/lib/api"
  * to /github/done. The API answers JSON only. Contract: Lane B, 2026-10-23 (PLAN Log).
  */
 
-/** The console-based GitHub flow (server 2026.10.23.37, 30a69c07). */
-export const githubLive = true
+/** Off: GitHub returned to the API origin, which has no console session (support_f2b6764c); on again when the return goes through the console. */
+export const githubLive = false
 
 export type GitHubStatus = {
   connected: boolean
