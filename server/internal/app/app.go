@@ -1069,7 +1069,7 @@ func New(opts Options) (*App, error) {
 			Handler:           router,
 			ReadHeaderTimeout: opts.Config.HTTP.ReadHeaderTimeout,
 		},
-		worker:               workers.NewSupervisor(serverWorkers...),
+		worker:               workers.NewLeaderSupervisor(workerLeader(store, telemetryMetrics, opts.Logger), serverWorkers...),
 		certificateRuntime:   certificateRuntime,
 		telemetryMetrics:     telemetryMetrics,
 		telemetryHealth:      telemetryHealth,

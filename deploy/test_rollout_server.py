@@ -106,6 +106,24 @@ class ServerRolloutTest(unittest.TestCase):
         self.assertEqual(state['retired'], [])
         self.assertIn(['docker', 'stop', '--time', '30', 'paperboat-server-1'], self.operations)
 
+    def test_retired_server_drains_workers_after_the_switch(self):
+        with patch.object(self.rollout, 'run', side_effect=self.docker):
+            self.rollout.deploy('new-image')
+        reload = next(i for i, a in enumerate(self.operations) if 'reload' in a)
+        drain = self.operations.index(['docker', 'kill', '--signal=SIGUSR1', 'paperboat-server-1'])
+        self.assertLess(reload, drain)
+
+    def test_failed_drain_signal_keeps_the_new_server(self):
+        def docker(args, image=None, timeout=120):
+            if args[:2] == ['docker', 'kill']:
+                self.operations.append(args)
+                raise module.RolloutError('no such container')
+            return self.docker(args, image, timeout)
+        with patch.object(self.rollout, 'run', side_effect=docker):
+            self.rollout.deploy('new-image')
+        self.assertFalse(any(a[:3] == ['docker', 'rm', '-f'] for a in self.operations))
+        self.assertEqual(json.loads(self.rollout.state_path.read_text())['active'], self.candidate)
+
     def test_failed_readiness_does_not_switch_or_stop_previous_server(self):
         with patch.object(self.rollout, 'run', side_effect=self.docker), patch.object(self.rollout, 'ready', return_value=False), patch.object(module.time, 'sleep'):
             with self.assertRaisesRegex(module.RolloutError, 'did not become ready'):

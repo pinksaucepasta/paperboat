@@ -37,6 +37,7 @@ const (
 	MetricPreviewLeaseCleanup       = "paperboat_server_preview_lease_cleanup_total"
 	MetricOperationIdempotency      = "paperboat_server_operation_idempotency_total"
 	MetricServiceUptime             = "paperboat_server_service_uptime_seconds"
+	MetricWorkerMode                = "paperboat_server_worker_mode"
 	MetricServiceRestarts           = "paperboat_server_service_restarts_total"
 	MetricServiceWatchdog           = "paperboat_server_service_watchdog_total"
 	MetricServiceCrashLoop          = "paperboat_server_service_crash_loop"
@@ -113,6 +114,7 @@ var fixedMetricDescriptors = []MetricDescriptor{
 	{Name: MetricPreviewAllocation, Kind: MetricCounter, Labels: []LabelDescriptor{{Name: "outcome", AllowedValues: []string{"success", "failed", "rejected", "canceled"}}}},
 	{Name: MetricPreviewLeaseCleanup, Kind: MetricCounter, Labels: []LabelDescriptor{{Name: "outcome", AllowedValues: []string{"success", "failed", "already_clean"}}}},
 	{Name: MetricOperationIdempotency, Kind: MetricCounter, Labels: []LabelDescriptor{{Name: "outcome", AllowedValues: []string{"new", "reused", "conflict"}}}},
+	{Name: MetricWorkerMode, Kind: MetricGauge, Labels: []LabelDescriptor{{Name: "mode", AllowedValues: []string{"leader", "standby", "drained"}}}},
 	{Name: MetricServiceUptime, Kind: MetricGauge, Labels: []LabelDescriptor{{Name: "state", AllowedValues: []string{"running", "degraded", "stopped"}}}},
 	{Name: MetricServiceRestarts, Kind: MetricCounter, Labels: []LabelDescriptor{{Name: "outcome", AllowedValues: []string{"success", "failed"}}}},
 	{Name: MetricServiceWatchdog, Kind: MetricCounter, Labels: []LabelDescriptor{{Name: "outcome", AllowedValues: []string{"healthy", "failed", "restarted"}}}},

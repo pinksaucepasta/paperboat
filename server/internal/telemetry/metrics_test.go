@@ -116,6 +116,7 @@ func TestServerMetricsCoverRequiredFailureDomainsWithFiniteLabels(t *testing.T) 
 		MetricPreviewLeaseCleanup:      false,
 		MetricOperationIdempotency:     false,
 		MetricServiceUptime:            false,
+		MetricWorkerMode:               false,
 		MetricServiceWatchdog:          false,
 		MetricServiceCrashLoop:         false,
 	}

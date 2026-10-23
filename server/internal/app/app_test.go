@@ -340,3 +340,51 @@ func configureAppTestDatabase(t *testing.T, cfg *config.Config) {
 		t.Fatal(err)
 	}
 }
+
+// A rollout sends SIGUSR1 to the retired server: its workers stop (worker leadership passes to the new
+// version) while the server keeps running for its held connections, and a later stop is clean (F21-04).
+func TestDrainSignalStopsWorkersButKeepsServing(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	address := listener.Addr().String()
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	configureAppTestDatabase(t, &cfg)
+	cfg.HTTP.Address = address
+	application, err := New(Options{Config: cfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, stopped := make(chan struct{}), make(chan struct{})
+	application.worker = workers.NewSupervisor(func(ctx context.Context) error {
+		close(started)
+		<-ctx.Done()
+		close(stopped)
+		return ctx.Err()
+	})
+	runCtx, cancelRun := context.WithCancel(context.Background())
+	runDone := make(chan error, 1)
+	go func() { runDone <- application.Run(runCtx) }()
+	<-started
+	if err := syscall.Kill(os.Getpid(), syscall.SIGUSR1); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("drain signal did not stop the workers")
+	}
+	select {
+	case err := <-runDone:
+		t.Fatalf("server stopped on drain: %v", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+	cancelRun()
+	if err := <-runDone; err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("run after drain = %v", err)
+	}
+}

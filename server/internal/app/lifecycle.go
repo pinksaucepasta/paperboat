@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/getsentry/sentry-go"
 	"github.com/pinksaucepasta/paperboat/server/internal/auth"
+	"github.com/pinksaucepasta/paperboat/server/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	serverdiagnostics "github.com/pinksaucepasta/paperboat/server/internal/diagnostics"
@@ -14,10 +15,14 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/runtimeattachment"
 	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 	"github.com/pinksaucepasta/paperboat/server/internal/telemetry"
+	"github.com/pinksaucepasta/paperboat/server/internal/workers"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 )
 
@@ -137,8 +142,31 @@ func (a *App) Run(ctx context.Context) error {
 		}
 		serverErrors <- nil
 	}()
+	// A rollout signals the retired server with SIGUSR1 once traffic moved: it stops its workers and
+	// releases worker leadership to the new version, while it keeps serving its held connections.
+	workerContext, drainWorkers := context.WithCancel(runContext)
+	defer drainWorkers()
+	drainSignal := make(chan os.Signal, 1)
+	signal.Notify(drainSignal, syscall.SIGUSR1)
+	defer signal.Stop(drainSignal)
+	workersDrained := make(chan struct{})
 	go func() {
-		workerErrors <- a.worker.Run(runContext)
+		select {
+		case <-drainSignal:
+			a.logger.Info("server draining: stopping background workers")
+			drainWorkers()
+		case <-workerContext.Done():
+		}
+	}()
+	go func() {
+		err := a.worker.Run(workerContext)
+		if runContext.Err() == nil && workerContext.Err() != nil {
+			setWorkerMode(a.telemetryMetrics, "drained")
+			a.logger.Info("server drained: background workers stopped")
+			close(workersDrained)
+			return
+		}
+		workerErrors <- err
 	}()
 
 	var syncErrors <-chan error
@@ -191,6 +219,8 @@ func (a *App) Run(ctx context.Context) error {
 	if !workerDone {
 		select {
 		case workerErr = <-workerErrors:
+			workerDone = true
+		case <-workersDrained:
 			workerDone = true
 		case <-workerShutdownCtx.Done():
 			runErr = errors.Join(runErr, fmt.Errorf("stop workers: %w", workerShutdownCtx.Err()))
@@ -318,4 +348,27 @@ func (r readinessChecker) Ready(ctx context.Context) error {
 		return errors.New("WorkOS is not configured")
 	}
 	return nil
+}
+
+// workerLeader elects the one instance that runs background workers (F21-04).
+func workerLeader(store *db.DB, metrics *telemetry.Metrics, logger *slog.Logger) *workers.PostgresLeader {
+	host, _ := os.Hostname()
+	return &workers.PostgresLeader{
+		DB: store.SQL(), Instance: fmt.Sprintf("%s/%d", host, os.Getpid()), Version: buildinfo.Version,
+		Retry: workers.LeaderRetry, Check: workers.LeaderCheck, Logger: logger,
+		Mode: func(mode string) { setWorkerMode(metrics, mode) },
+	}
+}
+
+func setWorkerMode(metrics *telemetry.Metrics, mode string) {
+	if metrics == nil {
+		return
+	}
+	for _, m := range []string{"leader", "standby", "drained"} {
+		value := uint64(0)
+		if m == mode {
+			value = 1
+		}
+		_ = metrics.SetGauge(telemetry.MetricWorkerMode, telemetry.MetricLabels{"mode": m}, value)
+	}
 }

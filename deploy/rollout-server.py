@@ -213,6 +213,13 @@ class Rollout:
                 # A pre-routing candidate cannot hold admitted user traffic.
                 self.run(['docker', 'rm', '-f', candidate])
             raise
+        # Traffic has moved: the retired server stops its background workers and hands worker
+        # leadership to the replacement; it keeps serving the connections it holds (F21-04).
+        # Outside the rollback path on purpose: a failed signal must never remove the new server.
+        try:
+            self.run(['docker', 'kill', '--signal=SIGUSR1', before['active']])
+        except RolloutError as error:
+            print('Warning: retired server was not told to drain its workers:', error)
         retained = self.reap(state)
         self.prune_images(image)
         return 'Ready replacement is serving; retained draining servers: ' + str(retained)
