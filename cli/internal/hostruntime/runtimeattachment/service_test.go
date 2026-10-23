@@ -550,3 +550,31 @@ func TestRuntimeAttachmentAdvertisesEndpointsAndReadsWhetherEdgesServeThem(t *te
 		}
 	}
 }
+
+// F7-04: a background preview resumed right after a host restart must not choose its carrier
+// before the agent's first attachment answer says whether the edges serve endpoint routes.
+func TestEndpointsServedWaitsForTheFirstAttachmentAnswer(t *testing.T) {
+	service := newRuntimeAttachmentTestService(t, roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("unused")
+	}))
+	short, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	if service.EndpointsServed(short) {
+		t.Fatal("served reported before any attachment answer")
+	}
+	result := make(chan bool, 1)
+	go func() { result <- service.EndpointsServed(t.Context()) }()
+	time.Sleep(50 * time.Millisecond)
+	service.hubsMu.Lock()
+	service.served = true
+	service.hubsMu.Unlock()
+	service.answeredOnce.Do(func() { close(service.answered) })
+	select {
+	case served := <-result:
+		if !served {
+			t.Fatal("waiting caller got false after the answer said served")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("waiting caller not released by the first answer")
+	}
+}

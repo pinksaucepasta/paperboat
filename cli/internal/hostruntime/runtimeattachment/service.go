@@ -67,11 +67,20 @@ type Service struct {
 	hubs        map[string]*preview.DataCarrierPreviewHub
 	hubsChanged chan struct{}
 	served      bool
+	// answered is closed by the first successful attachment answer.
+	answered     chan struct{}
+	answeredOnce sync.Once
 }
 
 // EndpointsServed implements preview.AgentCarriers: every edge of the latest attachment admits
-// endpoint routes.
-func (s *Service) EndpointsServed() bool {
+// endpoint routes. Until the first attachment answer after a start it waits (bounded by ctx), so
+// a preview resumed right after a host restart does not fall back to its own carrier.
+func (s *Service) EndpointsServed(ctx context.Context) bool {
+	select {
+	case <-s.answered:
+	case <-ctx.Done():
+		return false
+	}
 	s.hubsMu.Lock()
 	defer s.hubsMu.Unlock()
 	return s.served
@@ -199,7 +208,7 @@ func New(config Config) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Service{hubs: map[string]*preview.DataCarrierPreviewHub{}, hubsChanged: make(chan struct{}), config: config, auth: auth, client: &http.Client{Transport: config.Transport, Timeout: 12 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("runtime attachment redirect refused") }}, sessions: sessions, processID: processID}, nil
+	return &Service{hubs: map[string]*preview.DataCarrierPreviewHub{}, hubsChanged: make(chan struct{}), answered: make(chan struct{}), config: config, auth: auth, client: &http.Client{Transport: config.Transport, Timeout: 12 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("runtime attachment redirect refused") }}, sessions: sessions, processID: processID}, nil
 }
 
 func (s *Service) Start(ctx context.Context) error {
@@ -325,6 +334,7 @@ func (s *Service) run(ctx context.Context) {
 			s.hubsMu.Lock()
 			s.served = response.EndpointsServed
 			s.hubsMu.Unlock()
+			s.answeredOnce.Do(func() { close(s.answered) })
 			ordered := []admissionBinding{response.primary()}
 			if response.Backup != nil {
 				ordered = append(ordered, *response.Backup)

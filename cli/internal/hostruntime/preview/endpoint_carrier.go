@@ -13,8 +13,9 @@ import (
 type AgentCarriers interface {
 	Hubs() ([]*DataCarrierPreviewHub, <-chan struct{})
 	// EndpointsServed reports whether every edge of the agent's attachment admits endpoint
-	// routes; until then previews keep their own carriers.
-	EndpointsServed() bool
+	// routes; until then previews keep their own carriers. It waits, bounded by ctx, for the
+	// agent's first attachment answer after a start.
+	EndpointsServed(ctx context.Context) bool
 }
 
 // endpointReadyTimeout bounds how long a preview waits for the first edge to serve its route.

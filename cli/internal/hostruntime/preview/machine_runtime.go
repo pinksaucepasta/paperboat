@@ -170,6 +170,10 @@ func (r *MachinePreviewRuntime) attachPrivate(hub *DataCarrierPreviewHub, lease 
 	return r.private.registerEndpoint(lease, hub)
 }
 
+// agentAnswerWait bounds how long a new preview waits for the agent's first attachment answer
+// after a host start before it chooses its carrier.
+const agentAnswerWait = 15 * time.Second
+
 // endpointRouteRevision is the revision of a preview's one endpoint route; the server never
 // changes a preview's route.
 const endpointRouteRevision = 1
@@ -211,7 +215,13 @@ func (r *MachinePreviewRuntime) NewCarrier(ctx context.Context, target LeaseTarg
 	r.refs++
 	agent := r.agent
 	r.mu.Unlock()
-	if agent != nil && agent.EndpointsServed() {
+	served := false
+	if agent != nil {
+		waitCtx, cancelWait := context.WithTimeout(ctx, agentAnswerWait)
+		served = agent.EndpointsServed(waitCtx)
+		cancelWait()
+	}
+	if served {
 		carrier, err := NewEndpointCarrier(agent, func(hub *DataCarrierPreviewHub) (*DataCarrierPreviewCarrier, error) {
 			config := r.route
 			config.Hub = hub

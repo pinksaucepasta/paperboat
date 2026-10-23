@@ -28,7 +28,7 @@ func (a *agentCarriersFake) Hubs() ([]*DataCarrierPreviewHub, <-chan struct{}) {
 	return append([]*DataCarrierPreviewHub(nil), a.hubs...), a.changed
 }
 
-func (a *agentCarriersFake) EndpointsServed() bool { return true }
+func (a *agentCarriersFake) EndpointsServed(context.Context) bool { return true }
 
 func (a *agentCarriersFake) set(hubs ...*DataCarrierPreviewHub) {
 	a.mu.Lock()
