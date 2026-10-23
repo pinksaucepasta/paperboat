@@ -31,6 +31,11 @@ func TestEstablishedConnectorRoutesSurviveAdmissionExpiry(t *testing.T) {
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_connector_generations (environment_id,machine_id,generation,edge_pool,edge_node_id,state,expires_at) VALUES ($1,$2,1,'default',$3,'admitted',$4)`, environmentID, machineID, nodeID, now.Add(-time.Second)); err != nil {
 		t.Fatal(err)
 	}
+	// Runtime routes ride on runtime carriers and are excluded from this projection (see
+	// the runtimeattachment legacy-projection assertion), so the established route is a preview route.
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_routes (id,environment_id,kind,public_host,target_host,target_port) VALUES ($1,$2,'preview_public_https_wss',$3,'127.0.0.1',3000)`, "route_established_"+suffix, environmentID, "established-"+suffix+".example.test"); err != nil {
+		t.Fatal(err)
+	}
 	service := NewEdgeService(store, "test")
 	service.SetClock(func() time.Time { return now })
 	if routes, err := service.Routes(ctx, nodeID); err != nil {
