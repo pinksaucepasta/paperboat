@@ -326,11 +326,15 @@ func TestPopulatedSchema45To61Upgrade(t *testing.T) {
 	exec(`INSERT INTO paperboat.cli_client_sessions(id,user_id,client_id,client_label,device_type,os,scopes,state,created_at,approved_at) VALUES('upgrade-cli-session','upgrade-owner','upgrade-cli','Migration','desktop','linux',ARRAY['machines:connect'],'active',now(),now())`)
 	exec(`INSERT INTO paperboat.config_compare_admissions(id,operation_id,account_id,environment_id,machine_id,installation_generation,assignment_id,assignment_version,config_path,conflict_revision,expected_remote_revision,native_cli_session_id,source_machine_id,workspace_id,expires_at) VALUES('upgrade-native-admission','upgrade-native-operation','upgrade-owner','upgrade-machine','upgrade-machine',1,'upgrade-assignment',1,'settings/editor',repeat('a',64),'remote','upgrade-cli-session','upgrade-machine','personal',now()+interval '1 minute')`)
 	exec(`INSERT INTO paperboat.config_compare_admissions(id,operation_id,account_id,environment_id,machine_id,installation_generation,assignment_id,assignment_version,config_path,conflict_revision,expected_remote_revision,browser_session_id,browser_key_sha256,ticket_hash,workspace_id,expires_at,origin,runtime_host,edge_node_id,edge_process_epoch) VALUES('upgrade-browser-admission','upgrade-browser-operation','upgrade-owner','upgrade-machine','upgrade-machine',1,'upgrade-assignment',1,'settings/editor',repeat('a',64),'remote','upgrade-browser-session',repeat('A',43),decode(repeat('01',32),'hex'),'personal',now()+interval '1 minute','https://dashboard.example.test','machine.runtime.example.test','edge_1','epoch_1')`)
-	if err := db.Migrate(ctx, store); err != nil {
+	// Compare at version 61: columns that later migrations add or backfill are not part of this upgrade.
+	if err := goose.UpToContext(ctx, store.SQL(), "migrations", 61); err != nil {
 		t.Fatal(err)
 	}
 	if after := snapshot(true); after != before {
 		t.Fatalf("upgrade changed durable identity, ownership, publication or generations: before=%s after=%s", before, after)
+	}
+	if err := db.Migrate(ctx, store); err != nil {
+		t.Fatal(err)
 	}
 	var valid bool
 	err = store.SQL().QueryRowContext(ctx, `SELECT
