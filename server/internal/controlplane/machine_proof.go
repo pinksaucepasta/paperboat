@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"time"
@@ -46,7 +47,8 @@ func (s *EnrollmentService) VerifyMachineRequest(ctx context.Context, identityTo
 	// A helper proof is a supported credential fallback only when the machine
 	// credential itself was rejected. Database and other operational failures
 	// from machine-control verification must remain visible to the API owner.
-	if !errors.Is(err, ErrHelperProof) {
+	// A clock outside the window fails a helper proof the same way; keep the reason.
+	if !errors.Is(err, ErrHelperProof) || errors.Is(err, ErrClockSkew) {
 		return MachineRequestClaims{}, err
 	}
 	helper, err := s.VerifyHelperRequest(ctx, identityToken, proof, method, path, body)
@@ -132,8 +134,11 @@ func verifyCanonicalMachineProof(machine dbsqlc.UserMachine, encoded []byte, met
 		return canonicalMachineProofClaims{}, ErrHelperProof
 	}
 	digest := sha256.Sum256(body)
-	if claims.MachineID != machine.ID || claims.EnvironmentID != machine.EnvironmentID || claims.InstallationGeneration != machine.InstallationGeneration || len(claims.OperationID) < 8 || len(claims.OperationID) > 128 || claims.Method != strings.ToUpper(method) || claims.Path != path || claims.BodySHA256 != base64.RawURLEncoding.EncodeToString(digest[:]) || claims.IssuedAt.IsZero() || claims.ExpiresAt.IsZero() || !claims.ExpiresAt.After(claims.IssuedAt) || claims.ExpiresAt.Sub(claims.IssuedAt) > time.Minute || claims.IssuedAt.After(now.Add(time.Minute)) || !claims.ExpiresAt.After(now) {
+	if claims.MachineID != machine.ID || claims.EnvironmentID != machine.EnvironmentID || claims.InstallationGeneration != machine.InstallationGeneration || len(claims.OperationID) < 8 || len(claims.OperationID) > 128 || claims.Method != strings.ToUpper(method) || claims.Path != path || claims.BodySHA256 != base64.RawURLEncoding.EncodeToString(digest[:]) {
 		return canonicalMachineProofClaims{}, ErrHelperProof
+	}
+	if err := proofWindow(claims.IssuedAt, claims.ExpiresAt, now); err != nil {
+		return canonicalMachineProofClaims{}, err
 	}
 	return claims, nil
 }
@@ -155,6 +160,27 @@ func strictCanonicalMachineJSON(data []byte, target any) error {
 	}
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return ErrHelperProof
+	}
+	return nil
+}
+
+// ProofClockWindow is how far a signed proof's issued_at may be ahead of the server clock.
+const ProofClockWindow = time.Minute
+
+// ErrClockSkew rejects a correctly signed proof whose time window does not contain the server's
+// clock: the machine's clock is off (or the proof is stale). It is still a proof denial (it wraps
+// ErrHelperProof), but answered with its own code, not 401, so a client corrects its clock instead of
+// treating the machine as signed out.
+var ErrClockSkew = fmt.Errorf("signed proof time is outside the server's clock window: %w", ErrHelperProof)
+
+// proofWindow checks a proof's validity window: a malformed window is a plain proof denial; a
+// well-formed one that does not contain now is clock skew.
+func proofWindow(issued, expires, now time.Time) error {
+	if issued.IsZero() || expires.IsZero() || !expires.After(issued) || expires.Sub(issued) > ProofClockWindow {
+		return ErrHelperProof
+	}
+	if issued.After(now.Add(ProofClockWindow)) || !expires.After(now) {
+		return ErrClockSkew
 	}
 	return nil
 }

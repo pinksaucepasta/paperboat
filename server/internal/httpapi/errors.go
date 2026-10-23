@@ -54,6 +54,9 @@ func writeError(w http.ResponseWriter, r *http.Request, status int, code, messag
 // ErrUnauthorized) only for invalid credentials; database and operational
 // failures retain their original cause and produce an actionable 503.
 func writeMachineProofFailure(w http.ResponseWriter, r *http.Request, err error, rejectedCode, rejectedMessage string) {
+	if writeClockSkew(w, r, err) {
+		return
+	}
 	if machineProofRejected(err) {
 		logHTTPRejection(r, http.StatusUnauthorized, rejectedCode, err)
 		writeError(w, r, http.StatusUnauthorized, rejectedCode, rejectedMessage)
@@ -125,6 +128,9 @@ func pureMachineProofDenials(err error) (rejected bool) {
 }
 
 func writePreviewMachineProofFailure(w http.ResponseWriter, r *http.Request, err error) {
+	if writeClockSkew(w, r, err) {
+		return
+	}
 	if machineProofRejected(err) {
 		logHTTPRejection(r, http.StatusUnauthorized, "machine_identity_invalid", err)
 		writePreviewTunnelError(w, r, http.StatusUnauthorized, "machine_identity_invalid", "The signed host identity could not be verified.", "unchanged", false, "run_on_authorized_host")
@@ -156,4 +162,16 @@ func writeErrorDetails(w http.ResponseWriter, r *http.Request, status int, code,
 		CorrelationID:    serverdiagnostics.CorrelationID(r.Context()),
 		Details:          details,
 	}})
+}
+
+// writeClockSkew answers a correctly signed proof made with a clock outside the window. It is not a
+// 401: the machine is still signed in; it must correct its clock (Date and details.server_time).
+func writeClockSkew(w http.ResponseWriter, r *http.Request, err error) bool {
+	if !machineProofRejected(err) || !errors.Is(err, controlplane.ErrClockSkew) {
+		return false
+	}
+	logHTTPRejection(r, http.StatusBadRequest, "clock_skew", err)
+	writeErrorDetails(w, r, http.StatusBadRequest, "clock_skew", "This machine's clock is off by more than a minute. Correct the system time; Paperboat retries with the server's time.",
+		map[string]any{"server_time": time.Now().UTC().Format(time.RFC3339), "allowed_skew_seconds": int(controlplane.ProofClockWindow / time.Second)})
+	return true
 }

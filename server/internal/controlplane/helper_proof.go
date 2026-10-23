@@ -123,8 +123,11 @@ func verifyHelperProof(publicKey ed25519.PublicKey, encoded []byte, helperID, en
 		return HelperProofClaims{}, ErrHelperProof
 	}
 	bodyHash := sha256.Sum256(body)
-	if claims.HelperID != helperID || claims.EnvironmentID != environmentID || len(claims.OperationID) < 8 || len(claims.OperationID) > 128 || claims.Method != strings.ToUpper(method) || claims.Path != path || claims.BodySHA256 != base64.RawURLEncoding.EncodeToString(bodyHash[:]) || claims.IssuedAt.IsZero() || claims.ExpiresAt.IsZero() || !claims.ExpiresAt.After(claims.IssuedAt) || claims.ExpiresAt.Sub(claims.IssuedAt) > time.Minute || claims.IssuedAt.After(now.Add(time.Minute)) || !claims.ExpiresAt.After(now) {
+	if claims.HelperID != helperID || claims.EnvironmentID != environmentID || len(claims.OperationID) < 8 || len(claims.OperationID) > 128 || claims.Method != strings.ToUpper(method) || claims.Path != path || claims.BodySHA256 != base64.RawURLEncoding.EncodeToString(bodyHash[:]) {
 		return HelperProofClaims{}, ErrHelperProof
+	}
+	if err := proofWindow(claims.IssuedAt, claims.ExpiresAt, now); err != nil {
+		return HelperProofClaims{}, err
 	}
 	return claims, nil
 }

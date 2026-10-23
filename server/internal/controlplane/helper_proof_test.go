@@ -44,3 +44,32 @@ func TestStrictHelperProofJSONRejectsDuplicateKeys(t *testing.T) {
 		t.Fatalf("duplicate proof error = %v", err)
 	}
 }
+
+// A correctly signed proof from a machine whose clock is off is clock skew, not a plain denial, so the
+// client is told to correct its clock instead of being treated as signed out. A malformed window stays
+// a plain denial.
+func TestProofWindowSeparatesClockSkewFromMalformedProofs(t *testing.T) {
+	now := time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)
+	for name, test := range map[string]struct {
+		issued, expires time.Time
+		want            error
+	}{
+		"current":                {now, now.Add(time.Minute), nil},
+		"clock 90 s ahead":       {now.Add(90 * time.Second), now.Add(150 * time.Second), ErrClockSkew},
+		"clock 2 min behind":     {now.Add(-2 * time.Minute), now.Add(-time.Minute), ErrClockSkew},
+		"lifetime over a minute": {now, now.Add(2 * time.Minute), ErrHelperProof},
+		"expires before issue":   {now, now.Add(-time.Second), ErrHelperProof},
+		"no issue time":          {time.Time{}, now.Add(time.Minute), ErrHelperProof},
+	} {
+		err := proofWindow(test.issued, test.expires, now)
+		if test.want == nil && err != nil || test.want != nil && !errors.Is(err, test.want) {
+			t.Errorf("%s: %v, want %v", name, err, test.want)
+		}
+		if errors.Is(test.want, ErrHelperProof) && test.want != ErrClockSkew && errors.Is(err, ErrClockSkew) {
+			t.Errorf("%s: malformed window reported as clock skew", name)
+		}
+		if err != nil && !errors.Is(err, ErrHelperProof) {
+			t.Errorf("%s: %v is not a proof denial", name, err)
+		}
+	}
+}
