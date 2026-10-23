@@ -84,13 +84,15 @@ func TestPlacementDNSCreationAndResetOnPostgres(t *testing.T) {
 		route := "dns_route_" + suffix
 		endpointID := testutil.EndpointID(id)
 		stable := testutil.EndpointLabel(endpointID) + ".example.test"
+		// A mode change is refused while the owner has live publications, so the pool moves before the
+		// resource exists and the resource is retired before the pool moves back (ErrLiveEdgeModeChange).
+		setPool(selfHosted)
 		if kind == "preview" {
 			exec(`INSERT INTO paperboat.preview_leases(owner_session_kind,id,endpoint,account_id,actor_id,owner_machine_id,owner_session_id,target_scheme,target_address,lease_deadline) VALUES('foreground',$1,$2,$3,$3,'machine','session','http','127.0.0.1:3000',now()+interval '10 minutes')`, id, "https://"+stable, owner)
 		} else {
 			exec(`INSERT INTO paperboat.tunnels(id,account_id,name,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id) VALUES($1,$2,$1,$3,$4,'host','actor')`, id, owner, endpointID, "https://"+stable)
 			exec(`INSERT INTO paperboat.tunnel_routes(id,tunnel_id,name,protocol,match_type,match_hostname,origin_scheme,origin_address,created_by_actor_id,updated_by_actor_id) VALUES($1,$2,$1,'http','managed','managed.example.test','http','127.0.0.1:3000','actor','actor')`, route, id)
 		}
-		setPool(selfHosted)
 		if _, err = service.SetPlacement(ctx, owner, kind, id, &installation.InstallationID); err != nil {
 			t.Fatal(err)
 		}
@@ -117,6 +119,11 @@ func TestPlacementDNSCreationAndResetOnPostgres(t *testing.T) {
 		}
 		check("140.245.11.41", "pending", "A", 1)
 		exec(`UPDATE `+table+` SET ownership_state='verified',conflict_state='quarantined',quarantine_until=now()+interval '1 hour' WHERE id=$1`, domainID)
+		if kind == "preview" {
+			exec(`UPDATE paperboat.preview_leases SET terminal_state='stopped',stopped_at=now() WHERE id=$1`, id)
+		} else {
+			exec(`UPDATE paperboat.tunnels SET desired_state='closed' WHERE id=$1`, id)
+		}
 		setPool(managed)
 		if _, err = service.SetPlacement(ctx, owner, kind, id, nil); err != nil {
 			t.Fatal(err)
