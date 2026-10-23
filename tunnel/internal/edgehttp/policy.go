@@ -553,6 +553,7 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		ctx, cancel := context.WithCancel(r.Context())
 		defer cancel()
+		slog.InfoContext(ctx, "runtime_helper_access", "path", r.URL.Path, "credential_class", claims.CredentialClass, "assignment_present", claims.AssignmentID != "")
 		if claims.AssignmentID != "" {
 			// The session's bytes are accounted to the authority the server recorded for it.
 			ctx = withRuntimeUsage(ctx, runtimeUsageBinding{Authority: claims.AssignmentID, Environment: claims.EnvironmentID, IssuedAt: claims.IssuedAt})

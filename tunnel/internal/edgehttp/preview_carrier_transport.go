@@ -9,6 +9,7 @@ import (
 	runtimeadmission "github.com/pinksaucepasta/paperboat/shared/admission"
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"sort"
@@ -702,9 +703,15 @@ func (t *DataCarrierPreviewTransport) RoundTrip(request *http.Request) (*http.Re
 	if ingressLease != nil {
 		application = ingressLease.Wrap(lifetimeContext, stream)
 		ingressLease = nil
-	} else if binding, ok := runtimeUsageFrom(request.Context()); ok && t.runtimeUsage != nil && route.Kind == runtimewire.RouteKind {
-		binding.Route, binding.Revision = route.RouteID, route.Revision
-		application = meterRuntimeStream(t.runtimeUsage, binding, stream)
+	} else if route.Kind == runtimewire.RouteKind {
+		binding, ok := runtimeUsageFrom(request.Context())
+		if ok && t.runtimeUsage != nil {
+			binding.Route, binding.Revision = route.RouteID, route.Revision
+			application = meterRuntimeStream(t.runtimeUsage, binding, stream)
+		}
+		// One line per runtime stream: whether its bytes are accounted, and if not why
+		// (no credential authority on the request, or no meter configured).
+		slog.InfoContext(request.Context(), "runtime_stream_usage", "route_id", route.RouteID, "path", request.URL.Path, "metered", ok && t.runtimeUsage != nil, "authority_present", ok, "meter_configured", t.runtimeUsage != nil)
 	}
 	out := request.Clone(request.Context())
 	originalBody := out.Body

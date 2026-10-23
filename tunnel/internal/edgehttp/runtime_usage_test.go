@@ -3,9 +3,16 @@ package edgehttp
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat-tunnel/internal/admission"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/control"
+	"github.com/pinksaucepasta/paperboat-tunnel/internal/datacarrier"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/route"
+	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
+	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -102,5 +109,59 @@ func TestBrowserTerminalUpstreamIsAccountedToItsAttachment(t *testing.T) {
 	}
 	if _, ok := runtimeUsageFrom(browserTerminalUsage(context.Background(), match, control.BrowserTerminalAdmission{}, time.Now())); ok {
 		t.Fatal("an admission without an attachment id produced a usage binding")
+	}
+}
+
+// Through the whole gateway: a runtime-route request authorized by a credential that carries
+// assignment_id is metered under that authority (the path pb send/exec content takes).
+func TestRuntimeRouteRequestThroughTheGatewayIsMetered(t *testing.T) {
+	identity := testEdgePreviewIdentity(1, 1)
+	server, client := testEdgePreviewCarrierPair(t, identity)
+	registry, err := NewDataCarrierPreviewRegistry(DataCarrierPreviewRegistryConfig{BaseDomain: "runtime.example.test", ProcessEpoch: "edge_epoch_1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer registry.Close()
+	value := DataCarrierPreviewRoute{RouteID: "runtime_route", Hostname: "machine.runtime.example.test", Kind: runtimewire.RouteKind, EdgeProcessEpoch: "edge_epoch_1", Revision: 3, AttachmentGeneration: 1, Server: server, ExpiresAt: time.Now().Add(time.Minute)}
+	if err = registry.Attach(value); err != nil {
+		t.Fatal(err)
+	}
+	usage := &recordingUsage{}
+	transport, err := NewDataCarrierPreviewTransport(DataCarrierPreviewTransportConfig{Registry: registry, StreamOpenTimeout: time.Second, RuntimeUsage: usage})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gateway, err := NewGatewayWithTransports(Config{PreviewBaseDomain: "preview.example.test", TunnelBaseDomain: "tunnels.example.test", RuntimeBaseDomain: "runtime.example.test", MaxHeaderBytes: 4096, MaxBodyBytes: 1 << 20, Routes: NewPreviewCarrierRouteMatcher(registry), RuntimeCarrierTransport: transport, HelperAccess: helperAccessFunc(func(_ context.Context, token string) (admission.Claims, error) {
+		return admission.Claims{JTI: "test", EnvironmentID: "env_machine", MachineID: identity.HostID, CredentialClass: "file_transfer", AssignmentID: "session_a", IssuedAt: time.Now(), ExpiresAt: time.Now().Add(time.Minute)}, nil
+	}), Revocations: revocationFunc(func(context.Context, admission.Claims) (bool, error) { return false, nil }), RevocationCheckInterval: time.Second}, "", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		stream, _, err := client.AcceptStream(context.Background())
+		if err != nil {
+			done <- err
+			return
+		}
+		done <- datacarrier.ServeHTTPStream(context.Background(), stream, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			body, _ := io.ReadAll(r.Body)
+			_, _ = w.Write(body)
+		}), 1<<20, time.Second)
+	}()
+	payload := strings.Repeat("x", 4096)
+	req := httptest.NewRequest("PATCH", "https://machine.runtime.example.test/v1/file-transfers/transfer_1/content", strings.NewReader(payload))
+	req.Header.Set("Authorization", "Bearer token")
+	rec := httptest.NewRecorder()
+	gateway.ServeHTTP(rec, req)
+	if rec.Code != 200 || rec.Body.Len() != len(payload) {
+		t.Fatalf("runtime request %d (%d bytes)", rec.Code, rec.Body.Len())
+	}
+	<-done
+	usage.mu.Lock()
+	got := usage.recorded["session_a|env_machine|runtime_route"]
+	usage.mu.Unlock()
+	if got[0] < uint64(len(payload)) || got[1] < uint64(len(payload)) {
+		t.Fatalf("runtime route bytes recorded under the session = %v, want >= %d each way", got, len(payload))
 	}
 }
