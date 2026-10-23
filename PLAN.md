@@ -2232,6 +2232,34 @@ execution ≤ 0.2 ms for the revocation document, the workspace activity page an
 | `server/internal/contractchaos` | test only | B/Q | — | done | test-only package, not product code |
 | `server/internal/contracttest` | test only | B/Q | — | done | test-only package, not product code |
 | `tunnel/internal/contracttest` | test only | M | — | done | test-only package, not product code |
+#### Horizontal scaling: per-instance server state (Lane B, audit 2026-10-23; Lane W proves it with 3 instances, one killed mid-test)
+
+Goal: N identical server instances behind the proxy. F21-04 (one worker leader through a Postgres advisory lock with lease
+and handover) comes first, right after the red server tests. Per-instance state, fix per item:
+- **Breaks with N>1 (fix before scaling out):**
+  - tunnelcert DistributionHub keeps pending certificate actions and results in memory
+    (distribution_http.go:137-151, 613-648): edge pulls/acks on another instance see nothing. Move pending and results
+    to Postgres (SQLDistributor already holds the DB).
+  - The distribution-identity replay nonce cache is in memory (distribution_identity.go:59-70, 125-142): a replay
+    passes on another instance. Reserve nonces with a unique insert, as connector proofs do.
+  - The private-access idempotency cache is per instance (privateaccess/service.go:63-70, 382-400): same key with a
+    different body slips through on another instance. Move idempotency to Postgres; the decision cache may stay at a short TTL.
+  - The backup report producer uses a local directory plus flock (backupreport/producer.go): run as a single leader
+    job.
+  - mint ephemeral keys outside production are per process (mint.go:597-602): every environment with >1 instance
+    must configure shared signing keys (startup refuses ephemeral keys when an instance count >1 is configured).
+- **Wasteful, put behind the F21-04 leader lock:** team billing reconcile (N Stripe reads/min), edge DNS
+  mutations, edge-set ReconcileAll, operational health probes, support snapshot loop, self-host ingress probe,
+  diagnostic upload cleanup, tunnelcert coordinator alert dedupe (N duplicate alerts).
+- **Fine as is (documented):** row-claiming workers (SKIP LOCKED / leases / advisory locks: mail, DNS, outboxes,
+  audit streams, team identity, edge assignments, stale nodes, certificates); Postgres-backed rate limits and lockouts
+  (device auth, operator login); the machine-events hub (LISTEN/NOTIFY on every instance); browser-terminal and
+  connector-control WebSockets pinned to one instance for their lifetime (state in Postgres; the proxy must allow
+  upgrades and long holds); bounded per-instance caches (bandwidth gate 10 s, inventory single-flight); per-instance
+  support sampling quotas and stream caps (they scale with N; documented).
+- **To verify:** worker_tunnel_expiry, terminal-code and operator-reporting rate limits, inspector hubs,
+  diagnostic upload storage location, any server path that must push to a connector stream synchronously (it must
+  reach the holding instance); release artifacts served from each instance's local directory (deploys must be identical).
 
 ## 4. Handoff notes
 
