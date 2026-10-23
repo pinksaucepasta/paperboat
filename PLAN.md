@@ -1432,14 +1432,19 @@ each with a PG/load test proving the bound at 10k; Lane R audits daemon/CLI/rela
    `exp` (the state's new expiry), `changes[]` = `{op: add|update|remove, endpoint_id, identity?, scopes?}` (an
    update replaces identity and every scope; remove carries endpoint_id only), at most 256 per answer, `more: true`
    = ask again with the new generation. No change: only a new `generation`/`exp`.
-5. **Digest** = lowercase hex sha256 of the RFC 8785 (JCS) JSON of `peers`, sorted by `identity.endpoint_id`, each
-   entry's `scopes` sorted by (resource_kind, resource_id, capability, direction, port); `self` excluded. Vectors:
-   `[]` -> `4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945`; one peer
+5. **Digest** (v3: updatable in O(changes); a hash of the whole list costs O(N) per request, N^2 per event) =
+   lowercase hex of the 32-byte big-endian sum mod 2^256 of sha256(JCS(entry)) over every `peers` entry, where an
+   entry is `{identity, scopes}` with `scopes` sorted by (resource_kind, resource_id, capability, direction, port)
+   and JCS is RFC 8785; `self` excluded; order of entries does not matter. Changing an entry subtracts its old hash
+   and adds the new one. It proves both sides hold the same state; authenticity is the signature. Vectors: no peers
+   `0000000000000000000000000000000000000000000000000000000000000000`; peer a =
    `{"identity":{"account_id":"user_1","disco_public_key":"","endpoint_generation":1,"endpoint_id":"machine_b",`
    `"key_generation":1,"machine_generation":1,"machine_id":"machine_b","quic_certificate_fingerprint":"ab",`
    `"quic_public_key":"BBBB","role":"machine","virtual_address":"100.64.0.2","wireguard_public_key":"AAAA"},`
    `"scopes":[{"capability":"connect","direction":"dial","port":443,"resource_generation":1,"resource_id":`
-   `"network_x","resource_kind":"machine_network"}]}` -> `40caa1b159b30322cc65ce12c2a39a21adaaca453fcc8a8342a45289dd5f0b46`.
+   `"network_x","resource_kind":"machine_network"}]}` -> `74f978ea9e3cfdd4f6380e7cc4cd2fd01f4a51b2d0e6c1edab66b0d8749399ec`;
+   a + b (b = a with endpoint_id and machine_id `machine_c`, virtual_address `100.64.0.3`) ->
+   `7ade17e24a93a6c29cfded5053bb68f76eea349eea510158271d759f7672ac0e`.
    The daemon applies a delta only if `base_generation` and `base_digest` match its state, recomputes `digest`
    after applying and asks for a snapshot on any mismatch, so gaps, reordering and replay are safe.
 6. **Expiry.** Mesh scopes carry no `expires_at` (they last until the state `exp`); only per-operation scopes carry
