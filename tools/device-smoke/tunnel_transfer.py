@@ -2,6 +2,7 @@
 """F8-06: 16 MiB upload and download through a durable tunnel arrive byte-exact."""
 import hashlib
 import http.server
+import sys
 import json
 import os
 from pathlib import Path
@@ -14,6 +15,14 @@ from tunnel_lifecycle import confirmed, run, wait
 
 SIZE = 16 << 20
 DOWNLOAD = os.urandom(SIZE)
+
+
+class QuietServer(http.server.ThreadingHTTPServer):
+    """A client that hangs up mid-response is not a failure of the check; only its own receipt is."""
+
+    def handle_error(self, request, client_address):
+        if not isinstance(sys.exc_info()[1], (ConnectionResetError, BrokenPipeError)):
+            super().handle_error(request, client_address)
 
 
 class Origin(http.server.BaseHTTPRequestHandler):
@@ -45,7 +54,7 @@ def main():
     before = registration()
     name = 'smoke-tunnel-xfer-' + uuid.uuid4().hex[:10]
     identifier = None
-    server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Origin)
+    server = QuietServer(('127.0.0.1', 0), Origin)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
         created = run('tunnel', 'create', name, '--port', str(server.server_port), '--duration', '30m',

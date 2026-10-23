@@ -475,7 +475,7 @@ test_application_pairs() {
   for source in "${TLIST[@]}"; do
     for target in "${TLIST[@]}"; do
       case "$kind" in
-        transfer-multi|exec-repeat|ssh-tools|transfer-manage|exec-cancel|ssh-doctor|inbox-manage|transfer-resume|transfer-errors|inventory-freshness)
+        transfer-multi|exec-repeat|ssh-tools|transfer-manage|exec-cancel|ssh-doctor|inbox-manage|transfer-resume|transfer-errors)
           [ "$source" != "$target" ] || continue ;;
         preview-manage|preview-inspect|send-self|preview-access) [ "$source" = "$target" ] || continue ;;
       esac
