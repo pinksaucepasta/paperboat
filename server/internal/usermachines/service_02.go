@@ -386,10 +386,12 @@ func (s *Service) CreatePairing(ctx context.Context, in PairingInput) (Pairing, 
 }
 
 type UserMachine struct {
-	Ownership              string                  `json:"ownership"`
-	OwnerAccount           string                  `json:"owner_account,omitempty"`
-	OwnerTeamID            string                  `json:"owner_team_id,omitempty"`
-	Permissions            []string                `json:"permissions"`
+	Ownership    string   `json:"ownership"`
+	OwnerAccount string   `json:"owner_account,omitempty"`
+	OwnerTeamID  string   `json:"owner_team_id,omitempty"`
+	Permissions  []string `json:"permissions"`
+	// Tags are the machine's tags in the selected workspace's policy file (tag:<name>).
+	Tags                   []string                `json:"tags"`
 	CanManage              bool                    `json:"can_manage"`
 	Shared                 bool                    `json:"shared"`
 	ID                     string                  `json:"id"`

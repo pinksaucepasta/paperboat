@@ -170,6 +170,15 @@ Version     {version, digest, created_at, author, api_token?, message, gained, l
   `private_access_off`, `outside_token_scope`; `guardrail` names a failed guardrail
   (`team_suspended`, `membership_inactive`, `machine_not_in_workspace`, `team_not_entitled`,
   `machine_service_off`). A member asking about someone else is 403 `policy_explain_forbidden`.
+- **Machine tags** (`pb machine tag`, the console's "Edit tags"): the file's `tags` map stays the
+  only store. `GET /v1/workspaces/{ws}/tags` → `{tags: [{name, machines: [machine_id]}], can_edit,
+  policy_version}`. `PUT /v1/workspaces/{ws}/machines/{machine}/tags` `{tags: ["tag:<name>"],
+  expected_version, confirm?}` makes that machine carry exactly those tags (unknown tags are
+  created) as a new version → `{tags, policy_version}`; same 409/412/422/403 as PUT policy, 404
+  `not_found` for a machine outside the workspace, request errors at `/tags/<i>`. A tag left with
+  no machines is removed unless a rule or test names it. A member may tag only machines they
+  shared. `GET /v1/machines` items (and one machine) carry `tags` from the selected workspace's
+  policy (`[]` when none).
 - **Preview/tunnel inspect and replay** (F17): decided by the policy on `preview:<id>` /
   `tunnel:<name>` and on the team machine the resource runs on (machine, `machine:*`, tag); the
   resource's owner and the owner of the personal machine it runs on always may; `inspect` does

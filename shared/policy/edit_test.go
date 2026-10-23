@@ -91,3 +91,39 @@ func TestSetSimpleRuleOnAPreview(t *testing.T) {
 		t.Fatal("a machine action on a tunnel is not a simple rule")
 	}
 }
+
+func TestSetMachineTagsEditsOnlyThatMachine(t *testing.T) {
+	src := []byte(`{
+	// tags
+	"tags": {"tag:prod": ["machine:db1", "machine:web1"], "tag:old": ["machine:db1"], "tag:ci": ["machine:db1"]},
+	"rules": [{"src": ["*"], "dst": ["tag:ci"], "allow": ["exec"]}],
+}`)
+	out, err := SetMachineTags(src, "machine:db1", []string{"tag:prod", "tag:new"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, errs := Parse(out)
+	if len(errs) > 0 {
+		t.Fatal(errs, string(out))
+	}
+	want := map[string][]string{"tag:prod": {"machine:db1", "machine:web1"}, "tag:new": {"machine:db1"}, "tag:ci": {}}
+	for name, machines := range want {
+		got, ok := d.Tags[name]
+		if !ok || len(got) != len(machines) {
+			t.Fatalf("%s = %v (present %v), want %v\n%s", name, got, ok, machines, out)
+		}
+	}
+	if _, ok := d.Tags["tag:old"]; ok {
+		t.Fatalf("an emptied tag no rule uses is removed:\n%s", out)
+	}
+	if !strings.Contains(string(out), "// tags") {
+		t.Fatalf("comments are kept:\n%s", out)
+	}
+	if got := MachineTags(d, "machine:db1"); !reflect.DeepEqual(got, []string{"tag:new", "tag:prod"}) {
+		t.Fatalf("MachineTags = %v", got)
+	}
+	empty, _ := SetMachineTags([]byte(`{}`), "machine:runner", []string{"tag:ci"})
+	if d, _ = Parse(empty); len(d.Tags["tag:ci"]) != 1 {
+		t.Fatalf("%s", empty)
+	}
+}

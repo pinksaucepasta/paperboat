@@ -327,15 +327,19 @@ func ownMachineNames(sc policyScope, inv policy.Inventory) map[string]bool {
 }
 
 // onlyOwnMachines reports whether next differs from cur only in rules whose every dst is one
-// of own: the right a member keeps over access to the machines they shared.
+// of own, and in tag entries for own machines: the right a member keeps over access to the
+// machines they shared.
 func onlyOwnMachines(cur, next string, own map[string]bool) bool {
 	a, errsA := policy.Parse([]byte(cur))
 	b, errsB := policy.Parse([]byte(next))
 	if len(errsA) > 0 || len(errsB) > 0 {
 		return false
 	}
+	if !onlyOwnTagEntries(a.Tags, b.Tags, own) {
+		return false
+	}
 	ra, rb := a.Rules, b.Rules
-	a.Rules, b.Rules = nil, nil
+	a.Rules, b.Rules, a.Tags, b.Tags = nil, nil, nil, nil
 	ja, _ := json.Marshal(a)
 	jb, _ := json.Marshal(b)
 	if string(ja) != string(jb) {
@@ -361,6 +365,28 @@ func onlyOwnMachines(cur, next string, own map[string]bool) bool {
 			if !own[d] {
 				return false
 			}
+		}
+	}
+	return true
+}
+
+// onlyOwnTagEntries reports whether every tag entry added or removed between a and b names one
+// of own (a tag defined or dropped with no entries changes nobody's machine).
+func onlyOwnTagEntries(a, b map[string][]string, own map[string]bool) bool {
+	diff := map[string]int{}
+	for tag, entries := range a {
+		for _, e := range entries {
+			diff[tag+"\x00"+e]++
+		}
+	}
+	for tag, entries := range b {
+		for _, e := range entries {
+			diff[tag+"\x00"+e]--
+		}
+	}
+	for k, n := range diff {
+		if _, entry, _ := strings.Cut(k, "\x00"); n != 0 && !own[entry] {
+			return false
 		}
 	}
 	return true

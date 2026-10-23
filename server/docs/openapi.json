@@ -47925,6 +47925,134 @@
         "description": "Saves an earlier version as a new one, with the same validation and confirmation as PUT."
       }
     },
+    "/v1/workspaces/{ws}/tags": {
+      "get": {
+        "operationId": "get_v1_workspace_tags",
+        "summary": "List the workspace tags",
+        "security": [
+          {
+            "bearerAccess": []
+          },
+          {
+            "cookieSession": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:read"
+        ],
+        "parameters": [
+          {
+            "name": "ws",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON body as documented in shared/policy/README.md."
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "The tags of the workspace policy file with their machines (IDs), and who may edit them: {tags: [{name, machines}], can_edit, policy_version}."
+      }
+    },
+    "/v1/workspaces/{ws}/machines/{machine}/tags": {
+      "put": {
+        "operationId": "put_v1_workspace_machine_tags",
+        "summary": "Set a machine's tags",
+        "security": [
+          {
+            "bearerAccess": []
+          },
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:connect"
+        ],
+        "parameters": [
+          {
+            "name": "ws",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "machine",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "{tags: [\"tag:<name>\"], expected_version, confirm?}"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "JSON body as documented in shared/policy/README.md."
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "412": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "Sets one machine's tags in the workspace policy file as a new version, with the same rights, review (412) and conflict (409) rules as PUT policy."
+      }
+    },
     "/v1/workspaces/{ws}/api-tokens": {
       "get": {
         "operationId": "get_v1_workspace_api_tokens",

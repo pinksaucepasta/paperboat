@@ -18,6 +18,8 @@ type policyAPI interface {
 	RestorePolicy(context.Context, string, string, teams.PolicyRestoreRequest) (teams.PolicyView, error)
 	ExplainPolicy(context.Context, string, string, teams.PolicyExplainRequest) (teams.PolicyExplanation, error)
 	PolicyVersions(context.Context, string, string) ([]teams.PolicyVersion, error)
+	SetMachineTags(context.Context, string, string, string, teams.MachineTagsRequest) (teams.MachineTagsView, error)
+	WorkspaceTagList(context.Context, string, string) (teams.WorkspaceTags, error)
 }
 
 func registerPolicyRoutes(mux *http.ServeMux, service policyAPI, read, write func(http.Handler) http.Handler) {
@@ -31,6 +33,8 @@ func registerPolicyRoutes(mux *http.ServeMux, service policyAPI, read, write fun
 	mux.Handle("POST /v1/workspaces/{ws}/policy/explain", read(policyHandler(service, "explain")))
 	mux.Handle("PUT /v1/workspaces/{ws}/policy", write(policyHandler(service, "save")))
 	mux.Handle("POST /v1/workspaces/{ws}/policy/restore", write(policyHandler(service, "restore")))
+	mux.Handle("GET /v1/workspaces/{ws}/tags", read(policyHandler(service, "tags")))
+	mux.Handle("PUT /v1/workspaces/{ws}/machines/{machine}/tags", write(policyHandler(service, "machine_tags")))
 }
 
 func policyHandler(service policyAPI, kind string) http.HandlerFunc {
@@ -88,6 +92,14 @@ func policyHandler(service policyAPI, kind string) http.HandlerFunc {
 				return
 			}
 			out, err = service.RestorePolicy(r.Context(), account, ws, in)
+		case "tags":
+			out, err = service.WorkspaceTagList(r.Context(), account, ws)
+		case "machine_tags":
+			var in teams.MachineTagsRequest
+			if !decodeStrictJSON(w, r, &in) {
+				return
+			}
+			out, err = service.SetMachineTags(r.Context(), account, ws, r.PathValue("machine"), in)
 		}
 		if err != nil {
 			writePolicyError(w, r, err)
@@ -112,6 +124,8 @@ func writePolicyError(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, r, http.StatusForbidden, "policy_edit_forbidden", "Only owners and admins can change this; members can change access only to the machines they shared.")
 	case expectedHTTPErrorOnly(err, teams.ErrPolicyExplainForbidden):
 		writeError(w, r, http.StatusForbidden, "policy_explain_forbidden", "Members can explain only their own access; ask an owner or admin.")
+	case expectedHTTPErrorOnly(err, teams.ErrPolicyMachineNotFound):
+		writeError(w, r, http.StatusNotFound, "not_found", "That machine is not in this workspace. Run `pb machine list` to see its machines.")
 	case expectedHTTPErrorOnly(err, teams.ErrPolicyUnavailable):
 		writeError(w, r, http.StatusNotFound, "not_found", "That policy version does not exist (only recent versions are kept).")
 	case expectedHTTPErrorOnly(err, teams.ErrForbidden), expectedHTTPErrorOnly(err, teams.ErrNotFound):

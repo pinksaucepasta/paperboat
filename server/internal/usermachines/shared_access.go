@@ -79,6 +79,32 @@ func (s *Service) describeMachineAccess(ctx context.Context, account string, mac
 			return errors.Join(err, rows.Close())
 		}
 	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return err
+	}
+	return s.describeTags(ctx, account, teamID, ids, byID)
+}
+
+// describeTags sets each machine's tags from the selected workspace's policy file (the team's,
+// or the account's personal one): the stored tags rows, one query for the page.
+func (s *Service) describeTags(ctx context.Context, account string, teamID any, ids []string, byID map[string]*UserMachine) error {
+	for _, m := range byID {
+		m.Tags = []string{}
+	}
+	rows, err := s.db.SQL().QueryContext(ctx, `SELECT t.machine_id,t.tag FROM workspace_policy_tags t JOIN workspace_policies p ON p.id=t.policy_id
+	 WHERE CASE WHEN $2::text IS NULL THEN p.owner_account=$1 ELSE p.team_id=$2 END AND t.machine_id=ANY($3::text[]) ORDER BY t.machine_id,t.tag`, account, teamID, ids)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var id, tag string
+		if err := rows.Scan(&id, &tag); err != nil {
+			return errors.Join(err, rows.Close())
+		}
+		if m := byID[id]; m != nil {
+			m.Tags = append(m.Tags, tag)
+		}
+	}
 	return errors.Join(rows.Err(), rows.Close())
 }
 

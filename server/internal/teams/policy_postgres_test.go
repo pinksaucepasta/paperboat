@@ -485,3 +485,60 @@ func TestPolicyInspectReplaySQLMatchesGo(t *testing.T) {
 		}
 	}
 }
+
+// Machine tags as their own action: each change is a policy version with the editor's review
+// (412 when it changes access), rights (a member tags only machines they shared), name checks,
+// and the workspace's tag list.
+func TestPolicyMachineTags(t *testing.T) {
+	f := newPolicyFixture(t)
+	f.save(`{"rules": [{"src": ["role:admin"], "dst": ["env:team"], "allow": ["env_read", "env_write"]}, {"src": ["role:member"], "dst": ["tag:prod"], "allow": ["exec"]}], "tags": {"tag:prod": []}}`)
+	cur, err := f.service.Policy(f.ctx, f.owner, f.team, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := MachineTagsRequest{Tags: []string{"tag:prod", "tag:new"}, ExpectedVersion: cur.Version}
+	_, err = f.service.SetMachineTags(f.ctx, f.owner, f.team, f.db1, req)
+	var unconfirmed *PolicyUnconfirmedError
+	if !errors.As(err, &unconfirmed) || len(unconfirmed.Changes) == 0 {
+		t.Fatalf("tagging db1 tag:prod gives members exec there and must be confirmed: %v", err)
+	}
+	req.Confirm = unconfirmed.Confirm
+	out, err := f.service.SetMachineTags(f.ctx, f.owner, f.team, f.db1, req)
+	if err != nil || out.PolicyVersion != cur.Version+1 || strings.Join(out.Tags, ",") != "tag:new,tag:prod" || !f.sqlAllowed(f.other, f.db1, "exec", 0) {
+		t.Fatalf("%+v %v", out, err)
+	}
+	list, err := f.service.WorkspaceTagList(f.ctx, f.member, f.team)
+	if err != nil || list.CanEdit != "own_machines" || len(list.Tags) != 2 || list.Tags[1].Name != "tag:prod" || strings.Join(list.Tags[1].Machines, ",") != f.db1 {
+		t.Fatalf("tag list: %+v %v", list, err)
+	}
+	if _, err = f.service.SetMachineTags(f.ctx, f.owner, f.team, f.db1, MachineTagsRequest{Tags: []string{"tag:new"}, ExpectedVersion: cur.Version}); !errors.Is(err, ErrPolicyConflict) {
+		t.Fatalf("stale tag change: %v", err)
+	}
+	// member shared web1: may tag it, not db1.
+	v := out.PolicyVersion
+	if _, err = f.service.SetMachineTags(f.ctx, f.member, f.team, f.db1, MachineTagsRequest{Tags: nil, ExpectedVersion: v}); !errors.Is(err, ErrPolicyForbidden) {
+		t.Fatalf("a member untagged someone else's machine: %v", err)
+	}
+	if out, err = f.service.SetMachineTags(f.ctx, f.member, f.team, f.web1, MachineTagsRequest{Tags: []string{"tag:mine"}, ExpectedVersion: v}); err != nil || strings.Join(out.Tags, ",") != "tag:mine" {
+		t.Fatalf("a member tags their own shared machine: %+v %v", out, err)
+	}
+	var invalid *PolicyInvalidError
+	if _, err = f.service.SetMachineTags(f.ctx, f.owner, f.team, f.db1, MachineTagsRequest{Tags: []string{"Prod"}, ExpectedVersion: out.PolicyVersion}); !errors.As(err, &invalid) || invalid.Errors[0].Path != "/tags/0" || invalid.Errors[0].Code != "invalid_name" {
+		t.Fatalf("invalid tag name: %v", err)
+	}
+	if _, err = f.service.SetMachineTags(f.ctx, f.owner, f.team, "machine_not_here", MachineTagsRequest{ExpectedVersion: out.PolicyVersion}); !errors.Is(err, ErrPolicyMachineNotFound) {
+		t.Fatalf("unknown machine: %v", err)
+	}
+	// Untagging db1 from everything keeps tag:prod (a rule names it) and drops tag:new.
+	if out, err = f.service.SetMachineTags(f.ctx, f.owner, f.team, f.db1, MachineTagsRequest{ExpectedVersion: out.PolicyVersion, Confirm: ""}); err != nil {
+		if errors.As(err, &unconfirmed) {
+			out, err = f.service.SetMachineTags(f.ctx, f.owner, f.team, f.db1, MachineTagsRequest{ExpectedVersion: v + 1, Confirm: unconfirmed.Confirm})
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if list, _ = f.service.WorkspaceTagList(f.ctx, f.owner, f.team); len(list.Tags) != 2 || list.Tags[0].Name != "tag:mine" || list.Tags[1].Name != "tag:prod" || len(list.Tags[1].Machines) != 0 {
+		t.Fatalf("after untagging db1: %+v", list.Tags)
+	}
+}
