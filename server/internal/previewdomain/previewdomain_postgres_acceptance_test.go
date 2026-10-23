@@ -57,7 +57,14 @@ VALUES ($1, $2, $3, 'active')`, account, "workos_"+account, account+"@example.te
 			t.Fatal(err)
 		}
 	}
+	machineIDs := []string{"machine_preview_domain_" + suffix, "machine_reuse_" + suffix, "machine_other_" + suffix}
+	for i, owner := range []string{accountID, accountID, otherAccountID} {
+		if err := insertPreviewOwnerMachine(ctx, database, owner, machineIDs[i]); err != nil {
+			t.Fatal(err)
+		}
+	}
 	t.Cleanup(func() {
+		_, _ = database.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.user_machines WHERE id = ANY($1::text[])`, machineIDs)
 		_, _ = database.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.users WHERE id IN ($1, $2)`, accountID, otherAccountID)
 	})
 
@@ -88,7 +95,7 @@ VALUES ($1, $2, $3, 'active')`, account, "workos_"+account, account+"@example.te
 		AuditEventID: "aud_preview_domain_create_" + suffix, AccountID: accountID,
 		ActorID: accountID, ActorType: "user", OwnerMachineID: "machine_preview_domain_" + suffix,
 		OwnerSessionID: "session_preview_domain_" + suffix, OwnerSessionKind: "foreground", TargetScheme: "http", TargetAddress: "127.0.0.1:3000",
-		AccessMode: "public", Endpoint: "https://preview-domain-" + suffix + ".preview.example.test", LeaseDeadline: now.Add(time.Hour),
+		AccessMode: "public", Endpoint: "https://domain-" + suffix + ".preview.example.test", LeaseDeadline: now.Add(time.Hour),
 		RequestHash: sha256Bytes("preview-domain-create:" + suffix), IdempotencyKey: "preview-domain-create:" + suffix,
 		CorrelationID: "cor_preview_domain_create_" + suffix, RequestID: "req_preview_domain_create_" + suffix,
 		SourceMachineID: "machine_preview_domain_" + suffix, Now: now,
@@ -146,7 +153,7 @@ VALUES ($1, $2, $3, 'active')`, account, "workos_"+account, account+"@example.te
 		AuditEventID: "aud_preview_domain_other_" + suffix, AccountID: otherAccountID,
 		ActorID: otherAccountID, ActorType: "user", OwnerMachineID: "machine_other_" + suffix,
 		OwnerSessionID: "session_other_" + suffix, OwnerSessionKind: "foreground", TargetScheme: "http", TargetAddress: "127.0.0.1:3001",
-		AccessMode: "public", Endpoint: "https://preview-other-" + suffix + ".preview.example.test", LeaseDeadline: now.Add(time.Hour),
+		AccessMode: "public", Endpoint: "https://domain-other-" + suffix + ".preview.example.test", LeaseDeadline: now.Add(time.Hour),
 		RequestHash: sha256Bytes("preview-domain-other:" + suffix), IdempotencyKey: "preview-domain-other:" + suffix,
 		CorrelationID: "cor_preview_domain_other_" + suffix, RequestID: "req_preview_domain_other_" + suffix,
 		SourceMachineID: "machine_other_" + suffix, Now: now.Add(3 * time.Minute),
@@ -163,7 +170,7 @@ VALUES ($1, $2, $3, 'active')`, account, "workos_"+account, account+"@example.te
 		AuditEventID: "aud_preview_domain_reuse_" + suffix, AccountID: accountID,
 		ActorID: accountID, ActorType: "user", OwnerMachineID: "machine_reuse_" + suffix,
 		OwnerSessionID: "session_reuse_" + suffix, OwnerSessionKind: "foreground", TargetScheme: "http", TargetAddress: "127.0.0.1:3002",
-		AccessMode: "public", Endpoint: "https://preview-reuse-" + suffix + ".preview.example.test", LeaseDeadline: now.Add(time.Hour),
+		AccessMode: "public", Endpoint: "https://domain-reuse-" + suffix + ".preview.example.test", LeaseDeadline: now.Add(time.Hour),
 		RequestHash: sha256Bytes("preview-domain-reuse:" + suffix), IdempotencyKey: "preview-domain-reuse:" + suffix,
 		CorrelationID: "cor_preview_domain_reuse_" + suffix, RequestID: "req_preview_domain_reuse_" + suffix,
 		SourceMachineID: "machine_reuse_" + suffix, Now: now.Add(4 * time.Minute),
@@ -176,6 +183,16 @@ VALUES ($1, $2, $3, 'active')`, account, "workos_"+account, account+"@example.te
 		t.Fatalf("reused lease generation = %d, want 1", reused.Lease.Generation)
 	}
 	assertPreviewDomainRows(t, database, ctx, reused.Lease.ID, accountID, 1, 1, 1)
+}
+
+// insertPreviewOwnerMachine registers the machine that owns a fixture lease.
+// Lease creation refuses an owner that is not an online, preview-capable
+// machine of the lease's account.
+func insertPreviewOwnerMachine(ctx context.Context, database *db.DB, accountID, machineID string) error {
+	_, err := database.SQL().ExecContext(ctx, `
+INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,online,configured_capabilities)
+VALUES($1,$2,$1,'linux','amd64','/workspace','online',true,ARRAY['preview_launch']::text[])`, machineID, accountID)
+	return err
 }
 
 type previewDomainBatchAdapter struct {

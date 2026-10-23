@@ -54,12 +54,17 @@ INSERT INTO paperboat.users (id, workos_subject, primary_email, status)
 VALUES ($1, $2, $3, 'active')`, accountID, "workos_"+accountID, accountID+"@example.test"); err != nil {
 		t.Fatal(err)
 	}
+	if err := insertPreviewOwnerMachine(ctx, database, accountID, "machine_preview_dns_"+suffix); err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() {
+		_, _ = database.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.user_machines WHERE id = $1`, "machine_preview_dns_"+suffix)
 		_, _ = database.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.users WHERE id = $1`, accountID)
 	})
 
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	leaseID := "prv_preview_dns_reconciler_" + suffix
+	endpointHost := "domain-dns-" + suffix + ".preview.example.test"
 	store, err := previewtunnelstore.New(database)
 	if err != nil {
 		t.Fatal(err)
@@ -69,7 +74,7 @@ VALUES ($1, $2, $3, 'active')`, accountID, "workos_"+accountID, accountID+"@exam
 		AuditEventID: "aud_preview_dns_lease_" + suffix, AccountID: accountID,
 		ActorID: accountID, ActorType: "user", OwnerMachineID: "machine_preview_dns_" + suffix,
 		OwnerSessionID: "session_preview_dns_" + suffix, OwnerSessionKind: "foreground", TargetScheme: "http", TargetAddress: "127.0.0.1:4100",
-		AccessMode: "public", Endpoint: "https://preview-dns-" + suffix + ".preview.example.test", LeaseDeadline: now.Add(time.Hour),
+		AccessMode: "public", Endpoint: "https://" + endpointHost, LeaseDeadline: now.Add(time.Hour),
 		RequestHash: hashBytes("lease:" + suffix), IdempotencyKey: "preview-dns-lease:" + suffix,
 		CorrelationID: "cor_preview_dns_lease_" + suffix, RequestID: "req_preview_dns_lease_" + suffix,
 		SourceMachineID: "machine_preview_dns_" + suffix, Now: now,
@@ -82,7 +87,7 @@ VALUES ($1, $2, $3, 'active')`, accountID, "workos_"+accountID, accountID+"@exam
 		t.Fatal(err)
 	}
 	hostname := "alias-" + suffix + ".example.test"
-	target := "preview-dns-" + suffix + ".preview.example.test"
+	target := endpointHost
 	expected := []byte(`[{"name":"` + hostname + `","type":"CNAME","value":"` + target + `","ttl":300}]`)
 	created, err := repository.Create(ctx, previewdomain.CreateRecord{
 		OperationID: "op_preview_dns_create_" + suffix, AuditEventID: "aud_preview_dns_create_" + suffix,
