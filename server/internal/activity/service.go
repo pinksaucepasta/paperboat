@@ -245,6 +245,9 @@ func actorKind(actorType, tokenID string) string {
 		return actorType
 	case actorType == "admin":
 		return "operator"
+	case actorType == "deleted_user":
+		// Account deletion anonymizes the actor of the account's events (F2-09).
+		return "deleted_user"
 	}
 	return "system"
 }

@@ -15459,7 +15459,8 @@
                   "api_token",
                   "directory",
                   "operator",
-                  "system"
+                  "system",
+                  "deleted_user"
                 ]
               },
               "id": {
