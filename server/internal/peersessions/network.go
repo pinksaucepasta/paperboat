@@ -521,8 +521,12 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 		slog.Warn("peer network authority unavailable", "site", "network.go:500")
 		return NetworkConfigResult{}, ErrUnavailable
 	}
-	quotaDenied := s.relayQuotaWithheld(ctx, self.AccountID, now)
-	relayGrants, withheld, err := s.relayGrants(ctx, tx, self, peers, generation, now, expiry, quotaDenied)
+	billable, err := s.billableRelayPeers(ctx, tx, self, peers, now)
+	if err != nil {
+		return NetworkConfigResult{}, err
+	}
+	withheld := len(billable) < len(peers)
+	relayGrants, err := s.relayGrants(ctx, tx, self, peers, billable, generation, now, expiry)
 	if err != nil {
 		return NetworkConfigResult{}, err
 	}
@@ -607,26 +611,20 @@ func personalNetworkPeers(ctx context.Context, tx *sql.Tx, self networkBinding, 
 	return peers, nil
 }
 
-// relayGrants signs one grant per eligible relay node. With quotaDenied only customer-run
-// relays (never metered against Paperboat's allowance) are granted; withheld reports that a
-// hosted grant was refused for that reason.
-func (s *NetworkService) relayGrants(ctx context.Context, tx *sql.Tx, self networkBinding, peers []networkPeer, generation int64, now, authorityExpiry time.Time, quotaDenied bool) ([]string, bool, error) {
-	controlPeers, err := relayControlPeers(self, peers)
-	if err != nil {
-		return nil, false, err
-	}
+// relayGrants signs one grant per eligible relay node. A Paperboat-hosted node relays only the
+// billable peers (their workspace has allowance left); a customer-run node (never metered
+// against Paperboat's allowance) relays every peer.
+func (s *NetworkService) relayGrants(ctx context.Context, tx *sql.Tx, self networkBinding, peers, billable []networkPeer, generation int64, now, authorityExpiry time.Time) ([]string, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT id,node_generation,process_epoch,registry_expires_at,roles @> ARRAY['peer_relay']::text[],peer_relay_wireguard_public_key,peer_relay_disco_public_key,host(peer_relay_virtual_address),EXISTS(SELECT 1 FROM paperboat.selfhost_installations i WHERE i.node_id=control_tunnel_nodes.id AND i.scope_kind IN ('account','team')) FROM paperboat.control_tunnel_nodes WHERE region IS NOT NULL AND paperboat.node_pool_eligible(id,$1,'relay') AND state='ready' AND ready AND last_heartbeat_at>$2::timestamptz-interval '15 seconds' AND registry_expires_at>$2::timestamptz AND capacity_observed_at>$2::timestamptz-interval '15 seconds' AND capacity_used<capacity_limit-capacity_limit/10 AND drain_deadline IS NULL AND roles @> ARRAY['relay']::text[] AND transports @> ARRAY['derp_quic']::text[] ORDER BY region,id LIMIT 33`, self.AccountID, now)
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 	defer rows.Close()
-	chunks := relayGrantChunks(peers)
-	grants := make([]string, 0, len(chunks))
-	withheld := false
+	grants := make([]string, 0, 4)
 	nodes := 0
 	for rows.Next() {
 		if nodes == 32 {
-			return nil, false, ErrResourceLimit
+			return nil, ErrResourceLimit
 		}
 		nodes++
 		var nodeID, processEpoch string
@@ -637,15 +635,23 @@ func (s *NetworkService) relayGrants(ctx context.Context, tx *sql.Tx, self netwo
 		var peerRelayAddress sql.NullString
 		var customerOwned bool
 		if err := rows.Scan(&nodeID, &nodeGeneration, &processEpoch, &nodeExpiry, &peerRelayEnabled, &peerRelayWG, &peerRelayDisco, &peerRelayAddress, &customerOwned); err != nil {
-			return nil, false, err
+			return nil, err
 		}
-		if quotaDenied && !customerOwned {
-			withheld = true
+		nodePeers := billable
+		if customerOwned {
+			nodePeers = peers
+		}
+		if len(nodePeers) == 0 && len(peers) > 0 {
 			continue
 		}
+		controlPeers, err := relayControlPeers(self, nodePeers)
+		if err != nil {
+			return nil, err
+		}
+		chunks := relayGrantChunks(nodePeers)
 		if peerRelayEnabled && (len(peerRelayWG) != 32 || len(peerRelayDisco) != 32 || !peerRelayAddress.Valid) {
 			slog.Warn("peer network authority unavailable", "site", "network.go:620")
-			return nil, false, ErrUnavailable
+			return nil, ErrUnavailable
 		}
 		expires := now.Add(time.Minute)
 		if authorityExpiry.Before(expires) {
@@ -666,7 +672,7 @@ func (s *NetworkService) relayGrants(ctx context.Context, tx *sql.Tx, self netwo
 			if self.DiscoPublicKey != "" {
 				claims["disco_public_key"] = self.DiscoPublicKey
 			}
-			peerRelayReady := peerRelayEnabled && self.DiscoPublicKey != "" && peersHaveDiscoKeys(peers)
+			peerRelayReady := peerRelayEnabled && self.DiscoPublicKey != "" && peersHaveDiscoKeys(nodePeers)
 			if first && peerRelayReady && len(controlPeers) != 0 {
 				claims["relay_control_peers"] = controlPeers
 			}
@@ -679,19 +685,19 @@ func (s *NetworkService) relayGrants(ctx context.Context, tx *sql.Tx, self netwo
 			}
 			grant, err := s.signer.SignRelayGrant(claims)
 			if err != nil {
-				return nil, false, err
+				return nil, err
 			}
 			if len(grant) > networkConfigLimit {
 				slog.Warn("peer network authority unavailable", "site", "network.go:653")
-				return nil, false, ErrUnavailable
+				return nil, ErrUnavailable
 			}
 			grants = append(grants, grant)
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return nil, false, err
+		return nil, err
 	}
-	return grants, withheld, nil
+	return grants, nil
 }
 
 func relayControlPeers(self networkBinding, peers []networkPeer) ([]string, error) {

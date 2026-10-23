@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -196,14 +197,21 @@ func (g *Gate) Cached(account string) (denied, known bool) {
 // consumption (summed over its budget segments) reached the included bytes and, for a paid
 // period, no top-up credit remains; a workspace with no period yet is not exhausted. The
 // account is denied only when its personal workspace and every active team are exhausted.
-func (g *Gate) Lookup(ctx context.Context, account string, at time.Time) (bool, error) {
-	var denied bool
-	err := g.store.SQL().QueryRowContext(ctx, `WITH ws AS (
+// Lookup answers for a key: a workspace ID ("personal:<account>" or "team:<team>") is denied when
+// that workspace is out of allowance; an account ID is denied when every workspace the account
+// can use is.
+func (g *Gate) Lookup(ctx context.Context, key string, at time.Time) (bool, error) {
+	workspaces := `WITH ws AS (
  SELECT 'personal:'||$1::text AS id
  UNION
  SELECT 'team:'||m.team_id FROM team_members m JOIN teams t ON t.team_id=m.team_id
  WHERE m.account_id=$1 AND m.active AND t.deleted_at IS NULL
-)
+)`
+	if strings.HasPrefix(key, "personal:") || strings.HasPrefix(key, "team:") {
+		workspaces = `WITH ws AS (SELECT $1::text AS id)`
+	}
+	var denied bool
+	err := g.store.SQL().QueryRowContext(ctx, workspaces+`
 SELECT coalesce(bool_and(coalesce((
  SELECT true FROM billing_workspace_usage_periods p
  WHERE p.workspace_id=ws.id AND p.period_start<=$2 AND p.period_end>$2 AND p.included_bytes IS NOT NULL
@@ -211,6 +219,6 @@ SELECT coalesce(bool_and(coalesce((
        WHERE q.workspace_id=ws.id AND q.paid=p.paid AND coalesce(q.budget_start,q.period_start)=coalesce(p.budget_start,p.period_start)) >= p.included_bytes
   AND (NOT p.paid OR coalesce((SELECT sum(t.remaining_bytes) FROM billing_workspace_topups t WHERE t.workspace_id=ws.id AND t.purchased_at<=$2),0)=0)
  LIMIT 1),false)),false)
-FROM ws`, account, at).Scan(&denied)
+FROM ws`, key, at).Scan(&denied)
 	return denied, err
 }
