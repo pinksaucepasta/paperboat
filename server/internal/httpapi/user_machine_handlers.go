@@ -884,6 +884,11 @@ func userMachineTerminalSessionsCreate(service *usermachines.Service) http.Handl
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "Request body must be valid JSON.")
 			return
 		}
+		// The console opens every terminal it creates in the browser, so a create past the
+		// open browser terminals limit is refused before a shell starts on the machine.
+		if p.Client == nil && p.APIToken == nil && writePlanLimitReached(w, r, service.CheckBrowserTerminalLimit(r.Context(), r.PathValue("machine_id"), "")) {
+			return
+		}
 		item, err := service.CreateConfiguredTerminalSession(r.Context(), p.User.ID, r.PathValue("machine_id"), body.Name, r.Header.Get("Idempotency-Key"))
 		if userMachineTerminalSessionError(w, r, err) {
 			return

@@ -381,3 +381,36 @@ func userIDByEmail(t *testing.T, store *db.DB, email string) string {
 	}
 	return id
 }
+
+func TestConsoleTerminalCreateIsRefusedAtTheBrowserTerminalLimitPostgres(t *testing.T) {
+	store, router := newAuthIntegrationRouter(t)
+	cookies := loginCookies(t, router, "terminal_limit:terminal-limit@example.com:Terminal Limit")
+	csrfToken := csrfCookie(t, cookies)
+	userID := userIDByEmail(t, store, "terminal-limit@example.com")
+	ctx := context.Background()
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,online,installation_generation)
+ VALUES('machine_limit',$1,'machine_limit','limit-machine','linux','amd64','/workspace','online','occupied',true,1)`, userID); err != nil {
+		t.Fatal(err)
+	}
+	// Free plan: 10 open browser terminals, all taken.
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.native_usage_authorities(access_session_id,machine_id,installation_generation,workspace_id,resource_kind,resource_id,resource_name,machine_name,capabilities,admitted_at,expires_at,retain_until,edge_node_id)
+ SELECT 'open_'||i,'machine_limit',1,'personal:'||$1,'terminal','terminal_'||i,'open','limit-machine',ARRAY['terminal'],now(),now()+interval '10 minutes',now()+interval '11 minutes','node_test' FROM generate_series(1,10) i`, userID); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/machines/machine_limit/terminal-sessions", strings.NewReader(`{"name":"work"}`))
+	addCookies(req, cookies)
+	req.Header.Set(auth.CSRFHeaderName, csrfToken)
+	req.Header.Set("Idempotency-Key", "terminal-limit-test-operation")
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), `"browser_terminal_limit_reached"`) {
+		t.Fatalf("create at the limit: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var sessions int
+	if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.user_machine_terminal_sessions WHERE user_machine_id='machine_limit'`).Scan(&sessions); err != nil {
+		t.Fatal(err)
+	}
+	if sessions != 0 {
+		t.Fatalf("a refused create left %d terminal sessions; no shell may start", sessions)
+	}
+}

@@ -125,6 +125,9 @@ func (s *Service) CheckBrowserTerminalLimit(ctx context.Context, machineID, term
 	return s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		var scope planlimits.Scope
 		err := tx.QueryRow(ctx, `SELECT user_id,coalesce(owner_team_id,'') FROM paperboat.user_machines WHERE id=$1 AND deleted_at IS NULL`, machineID).Scan(&scope.Account, &scope.Team)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil // the caller's own lookup answers the missing machine
+		}
 		if err != nil {
 			return err
 		}
