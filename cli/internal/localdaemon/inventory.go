@@ -284,7 +284,9 @@ func healthSince(current *localapi.Snapshot, now time.Time, item localapi.Health
 // controlPlaneUnreachable reports a failure of a request to the Paperboat server itself: the HTTP
 // client could not complete it (*url.Error: connection, TLS or timeout), or the server answered
 // 408/429/5xx. A local failure (the machine guard socket, or the reconcile's own deadline with no
-// request in the chain) is not the control plane.
+// request in the chain) is not the control plane. The reconcile's only net/http requests go to the
+// server; the machine guard speaks its own protocol over a unix socket (*net.OpError). If a local
+// dependency ever moves to HTTP, this must look at the request's host instead of the error type.
 func controlPlaneUnreachable(err error) bool {
 	var request *url.Error
 	if errors.As(err, &request) {
