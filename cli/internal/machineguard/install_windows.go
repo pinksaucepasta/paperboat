@@ -22,7 +22,7 @@ import (
 
 const windowsGuardTask = `\Paperboat\MachineGuard`
 
-func Install(ctx context.Context, executable, browserDomain string) (resultErr error) {
+func installGuard(ctx context.Context, executable, browserDomain string, undo **Undo) (resultErr error) {
 	if !elevation.IsCurrentProcessElevated() {
 		return errors.New("installing the machine guard requires an elevated administrator")
 	}
@@ -112,7 +112,7 @@ func Install(ctx context.Context, executable, browserDomain string) (resultErr e
 	}
 	candidateStarted := false
 	candidateTaskCreated := false
-	defer finishGuardInstall(ctx, rollback, &resultErr, func(c context.Context) error {
+	defer finishGuardInstall(ctx, rollback, &resultErr, undo, func(c context.Context) error {
 		if !candidateStarted {
 			return nil
 		}

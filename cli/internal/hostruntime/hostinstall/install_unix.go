@@ -122,6 +122,9 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 		}
 	}
 
+	// The guard is a separate system component: the update keeps the replaced one restorable and puts
+	// it back if any later step fails, so a failed update leaves no component on the new version.
+	var guardRestore guardUndo
 	resultErr = lifecycle.Replace(ctx, func(ctx context.Context) error {
 		if err := publishUnixControlLifetime(ctx, paths, hostd, coldCarrier); err != nil {
 			return err
@@ -144,9 +147,11 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 			}
 		}
 		if intent != unixPreparedUpdate {
-			if err := installMachineGuard(ctx, request); err != nil {
+			undo, err := installMachineGuardReversible(ctx, request)
+			if err != nil {
 				return err
 			}
+			guardRestore = undo
 			if err := ensureUserLinger(ctx, request, paths); err != nil {
 				return err
 			}
@@ -253,8 +258,12 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 		}
 		return commitPreparedInstallationLocked(ctx, request, paths, true)
 	})
-	if resultErr == nil && intent == unixSuppliedInstall {
+	if resultErr != nil {
+		return errors.Join(resultErr, finishMachineGuard(ctx, guardRestore, resultErr))
+	}
+	_ = finishMachineGuard(ctx, guardRestore, nil)
+	if intent == unixSuppliedInstall {
 		return finalizePreparedUpdateLocked(ctx, request.UID)
 	}
-	return resultErr
+	return nil
 }

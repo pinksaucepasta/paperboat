@@ -141,3 +141,58 @@ func finishGuardInstallation(ctx context.Context, r *guardFileRollback, result *
 		*result = errors.Join(*result, restore(cleanup))
 	}
 }
+
+// Undo restores the guard installation that an Install replaced: its executable and service files, then
+// its state and service. An update keeps it until the whole update commits, so a failed update puts back
+// every component, the guard included (a failed update used to leave the new guard behind).
+type Undo struct {
+	rollback      *guardFileRollback
+	stop, restore func(context.Context) error
+}
+
+// Restore stops the installed guard and restores the prior one. A nil Undo restores nothing.
+func (u *Undo) Restore(ctx context.Context) error {
+	if u == nil {
+		return nil
+	}
+	err := errRestoreRequested
+	finishGuardInstallation(ctx, u.rollback, &err, u.stop, u.restore)
+	if errors.Is(err, errRestoreRequested) && len(unwrapJoined(err)) == 1 {
+		return nil
+	}
+	return errors.Join(unwrapJoinedExcept(err, errRestoreRequested)...)
+}
+
+// Discard keeps the installed guard and drops the copies of the prior one.
+func (u *Undo) Discard() {
+	if u != nil {
+		u.rollback.cleanup()
+	}
+}
+
+var errRestoreRequested = errors.New("guard restore requested")
+
+func unwrapJoined(err error) []error {
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		return joined.Unwrap()
+	}
+	return []error{err}
+}
+
+func unwrapJoinedExcept(err, skip error) []error {
+	var kept []error
+	for _, item := range unwrapJoined(err) {
+		if item != skip {
+			kept = append(kept, item)
+		}
+	}
+	return kept
+}
+
+// Install installs and starts the guard from executable. On success (trust may still be pending) it
+// returns the Undo that restores the prior installation; the caller restores or discards it.
+func Install(ctx context.Context, executable, browserDomain string) (*Undo, error) {
+	var undo *Undo
+	err := installGuard(ctx, executable, browserDomain, &undo)
+	return undo, err
+}

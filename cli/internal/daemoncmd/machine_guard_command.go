@@ -21,9 +21,11 @@ func AddMachineGuardCommand(root *cobra.Command) {
 			return err
 		}
 		domain, _ := cmd.Flags().GetString("browser-domain")
-		if err := machineguard.Install(cmd.Context(), executable, domain); err != nil {
+		undo, err := machineguard.Install(cmd.Context(), executable, domain)
+		if err != nil {
 			return err
 		}
+		undo.Discard()
 		return writeDaemonCommandResult(cmd, map[string]any{"installed": true}, "Machine guard installed.")
 	}}
 	install.Flags().Bool("json", false, "print JSON")

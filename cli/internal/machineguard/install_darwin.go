@@ -23,7 +23,7 @@ const darwinHelperPath = "/Library/PrivilegedHelperTools/io.paperboat.machinegua
 const darwinLaunchPath = "/Library/LaunchDaemons/io.paperboat.machineguard.plist"
 const darwinLaunchMarker = "<!-- Managed by Paperboat machine guard -->"
 
-func Install(ctx context.Context, executable, browserDomain string) (resultErr error) {
+func installGuard(ctx context.Context, executable, browserDomain string, undo **Undo) (resultErr error) {
 	if err := requirePrivilege(); err != nil {
 		return err
 	}
@@ -73,7 +73,7 @@ func Install(ctx context.Context, executable, browserDomain string) (resultErr e
 	return installDarwin(ctx, executable, darwinInstallConfig{
 		HelperPath: darwinHelperPath, LaunchPath: darwinLaunchPath,
 		Label: "io.paperboat.machineguard", Socket: DefaultSocket, Account: darwinBrokerAccount, StateDir: DefaultStateDir,
-		LaunchArguments: []string{"daemon", "machine-guard", "run"}, InstallAccount: true, RollbackState: &oldState,
+		LaunchArguments: []string{"daemon", "machine-guard", "run"}, InstallAccount: true, RollbackState: &oldState, Undo: undo,
 	})
 }
 
@@ -82,8 +82,10 @@ type darwinInstallConfig struct {
 	StateDir                                       string
 	LaunchMarker                                   string
 	RollbackState                                  *loopbackState
-	LaunchArguments                                []string
-	InstallAccount                                 bool
+	// Undo receives the restore for the prior installation on success; nil discards it.
+	Undo            **Undo
+	LaunchArguments []string
+	InstallAccount  bool
 }
 
 func installDarwin(ctx context.Context, executable string, cfg darwinInstallConfig) (resultErr error) {
@@ -138,7 +140,7 @@ func installDarwin(ctx context.Context, executable string, cfg darwinInstallConf
 	}
 	controller := service.LaunchdController{Runner: service.ExecRunner{}, UID: 0, Label: cfg.Label}
 	wasRunning := exec.CommandContext(ctx, "/bin/launchctl", "print", "system/"+cfg.Label).Run() == nil
-	defer finishGuardInstall(ctx, rollback, &resultErr, func(c context.Context) error { return controller.Stop(c, cfg.LaunchPath) }, func(c context.Context) error {
+	defer finishGuardInstall(ctx, rollback, &resultErr, cfg.Undo, func(c context.Context) error { return controller.Stop(c, cfg.LaunchPath) }, func(c context.Context) error {
 		if cfg.RollbackState != nil {
 			if err := writeLoopbackState(cfg.StateDir, *cfg.RollbackState); err != nil {
 				return err

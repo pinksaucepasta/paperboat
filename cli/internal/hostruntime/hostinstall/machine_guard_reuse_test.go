@@ -61,7 +61,7 @@ func TestMachineInstallPreservesReadyMachineGuardAndValidatesSuppliedBytes(t *te
 		return nil
 	}
 	prepareMachineGuardForInstall = func() error { prepared++; return nil }
-	installMissingMachineGuard = func(context.Context, string, string) error { installed++; return nil }
+	installMissingMachineGuard = func(context.Context, string, string) (guardUndo, error) { installed++; return nil, nil }
 	request := Request{Executable: executable, Source: source}
 	if err := installMachineGuard(context.Background(), request); err != nil {
 		t.Fatal(err)

@@ -17,7 +17,7 @@ import (
 // Install copies the invoked executable into root-only installation storage and
 // restores only address isolation before user sessions. DNS startup does not gate
 // normal logins. No user-writable binary runs as root.
-func Install(ctx context.Context, executable, browserDomain string) (resultErr error) {
+func installGuard(ctx context.Context, executable, browserDomain string, undo **Undo) (resultErr error) {
 	if err := requirePrivilege(); err != nil {
 		return err
 	}
@@ -69,7 +69,7 @@ func Install(ctx context.Context, executable, browserDomain string) (resultErr e
 	}
 	wasRunning := false
 	candidateStarted := false
-	defer finishGuardInstall(ctx, rollback, &resultErr, func(c context.Context) error {
+	defer finishGuardInstall(ctx, rollback, &resultErr, undo, func(c context.Context) error {
 		if !candidateStarted {
 			return nil
 		}

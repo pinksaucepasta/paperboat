@@ -39,7 +39,7 @@ func TestPendingTrustKeepsInstalledGuardWithoutRollback(t *testing.T) {
 	helper, rollback := installedGuardFixture(t)
 	result := trustPending(t.Context(), errors.New("The authorization was denied since no user interaction was possible."))
 	stops, restores := 0, 0
-	finishGuardInstall(t.Context(), rollback, &result, func(context.Context) error { stops++; return nil }, func(context.Context) error { restores++; return nil })
+	finishGuardInstall(t.Context(), rollback, &result, nil, func(context.Context) error { stops++; return nil }, func(context.Context) error { restores++; return nil })
 	if !errors.Is(result, ErrTrustPending) {
 		t.Fatalf("pending trust result lost its type: %v", result)
 	}
@@ -58,7 +58,7 @@ func TestRealInstallFailureStillRollsBack(t *testing.T) {
 	helper, rollback := installedGuardFixture(t)
 	result := errors.New("candidate not ready")
 	stops, restores := 0, 0
-	finishGuardInstall(t.Context(), rollback, &result, func(context.Context) error { stops++; return nil }, func(context.Context) error { restores++; return nil })
+	finishGuardInstall(t.Context(), rollback, &result, nil, func(context.Context) error { stops++; return nil }, func(context.Context) error { restores++; return nil })
 	if errors.Is(result, ErrTrustPending) {
 		t.Fatal("real failure reported as pending trust")
 	}

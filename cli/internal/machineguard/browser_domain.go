@@ -180,9 +180,11 @@ func InstallBrowserDomain(ctx context.Context, executable, owner, domain string)
 	}
 	// The normal installer repairs and restarts the owned helper before changing
 	// its selection, and preserves its existing rollback guarantees.
-	if err := Install(ctx, executable, ""); err != nil {
+	undo, err := Install(ctx, executable, "")
+	if err != nil {
 		return nil, err
 	}
+	undo.Discard()
 	lifecycle, err := lockGuardLifecycle(DefaultStateDir)
 	if err != nil {
 		return nil, err

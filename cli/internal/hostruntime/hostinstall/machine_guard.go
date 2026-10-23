@@ -21,7 +21,19 @@ import (
 // Explicit guard installation remains responsible for upgrading its executable.
 var existingMachineGuardReady = readyMachineGuard
 var prepareMachineGuardForInstall = prepareMachineGuardFoundation
-var installMissingMachineGuard = machineguard.Install
+var installMissingMachineGuard = func(ctx context.Context, executable, domain string) (guardUndo, error) {
+	undo, err := machineguard.Install(ctx, executable, domain)
+	if undo == nil {
+		return nil, err
+	}
+	return undo, err
+}
+
+// guardUndo restores (or keeps) the guard an installation replaced; machineguard.Undo implements it.
+type guardUndo interface {
+	Restore(context.Context) error
+	Discard()
+}
 var existingMachineGuardDomain = readMachineGuardDomain
 var discoverBrowserDomain = discoverServerBrowserDomain
 
@@ -89,26 +101,35 @@ func validateMachineGuardStatus(status machineguard.RuntimeStatus) error {
 	return nil
 }
 func installMachineGuard(ctx context.Context, request Request) error {
+	undo, err := installMachineGuardReversible(ctx, request)
+	finishMachineGuard(ctx, undo, nil)
+	return err
+}
+
+// installMachineGuardReversible installs the guard when the existing one is not ready and returns the
+// Undo that restores the replaced guard (nil when the existing guard was kept). An update restores it
+// if the update fails after this step, so no component is left on the new version.
+func installMachineGuardReversible(ctx context.Context, request Request) (guardUndo, error) {
 	if ctx == nil {
-		return ErrInvalidRequest
+		return nil, ErrInvalidRequest
 	}
 	if err := ctx.Err(); err != nil {
-		return err
+		return nil, err
 	}
 	if err := request.Source.Verify(request.Executable); err != nil {
-		return hostInstallFailure("verify Paperboat machine guard executable", err)
+		return nil, hostInstallFailure("verify Paperboat machine guard executable", err)
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	readyErr := existingMachineGuardReady(probeCtx)
 	cancel()
 	if readyErr == nil {
-		return nil
+		return nil, nil
 	}
 	if err := ctx.Err(); err != nil {
-		return hostInstallFailure("machine guard installation canceled", readyErr, err, context.Cause(ctx))
+		return nil, hostInstallFailure("machine guard installation canceled", readyErr, err, context.Cause(ctx))
 	}
 	if err := prepareMachineGuardForInstall(); err != nil {
-		return hostInstallFailure("prepare Paperboat machine guard directory", readyErr, err)
+		return nil, hostInstallFailure("prepare Paperboat machine guard directory", readyErr, err)
 	}
 	// A guard that already records its local access domain keeps it; otherwise
 	// this installation learns the deployment's domain from the server.
@@ -120,13 +141,33 @@ func installMachineGuard(ctx context.Context, request Request) error {
 		found, err := discoverBrowserDomain(discoverCtx, request.ControlURL)
 		cancelDiscover()
 		if err != nil {
-			return hostInstallFailure("read the local access domain from the Paperboat server; check the network and retry", readyErr, err)
+			return nil, hostInstallFailure("read the local access domain from the Paperboat server; check the network and retry", readyErr, err)
 		}
 		domain = found
 	}
 	// A ready guard whose browser trust awaits approval is installed successfully.
-	if err := installMissingMachineGuard(ctx, request.Executable, domain); err != nil && !errors.Is(err, machineguard.ErrTrustPending) {
-		return hostInstallFailure("install Paperboat machine guard", readyErr, err)
+	undo, err := installMissingMachineGuard(ctx, request.Executable, domain)
+	if err != nil && !errors.Is(err, machineguard.ErrTrustPending) {
+		return nil, hostInstallFailure("install Paperboat machine guard", readyErr, err)
+	}
+	return undo, nil
+}
+
+// finishMachineGuard completes the guard part of an installation: when the installation failed it puts
+// back the guard it replaced (with its own bounded context, so the caller's cancellation cannot leave
+// the new guard behind) and returns the restore error; otherwise it keeps the new guard.
+func finishMachineGuard(ctx context.Context, undo guardUndo, installErr error) error {
+	if undo == nil {
+		return nil
+	}
+	if installErr == nil {
+		undo.Discard()
+		return nil
+	}
+	restoreCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 60*time.Second)
+	defer cancel()
+	if err := undo.Restore(restoreCtx); err != nil {
+		return hostInstallFailure("restore the previous Paperboat machine guard", err)
 	}
 	return nil
 }

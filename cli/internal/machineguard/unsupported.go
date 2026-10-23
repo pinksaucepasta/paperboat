@@ -19,7 +19,7 @@ func (*Client) Status(context.Context) (RuntimeStatus, error)             { retu
 func (*Client) PrepareRangeChange(context.Context, string) error          { return ErrUnsupported }
 func (*Client) Close() error                                              { return nil }
 func Serve(context.Context, Config) error                                 { return ErrUnsupported }
-func Install(context.Context, string, string) error                       { return ErrUnsupported }
+func Install(context.Context, string, string) (*Undo, error)              { return nil, ErrUnsupported }
 
 const DefaultSocket = ""
 const DefaultStateDir = ""

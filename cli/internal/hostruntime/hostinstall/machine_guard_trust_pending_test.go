@@ -33,15 +33,15 @@ func TestMachineInstallSucceedsWhenGuardTrustIsPending(t *testing.T) {
 	prepareMachineGuardForInstall = func() error { return nil }
 	request := Request{Executable: executable, Source: source}
 
-	installMissingMachineGuard = func(context.Context, string, string) error {
-		return fmt.Errorf("%w: approval denied", machineguard.ErrTrustPending)
+	installMissingMachineGuard = func(context.Context, string, string) (guardUndo, error) {
+		return nil, fmt.Errorf("%w: approval denied", machineguard.ErrTrustPending)
 	}
 	if err := installMachineGuard(context.Background(), request); err != nil {
 		t.Fatalf("pending browser trust failed the machine guard installation: %v", err)
 	}
 
 	cause := errors.New("guard copy failed")
-	installMissingMachineGuard = func(context.Context, string, string) error { return cause }
+	installMissingMachineGuard = func(context.Context, string, string) (guardUndo, error) { return nil, cause }
 	if err := installMachineGuard(context.Background(), request); !errors.Is(err, cause) {
 		t.Fatalf("real guard installation failure was not preserved: %v", err)
 	}

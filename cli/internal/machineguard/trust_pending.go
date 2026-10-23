@@ -30,9 +30,14 @@ func isTrustPending(err error) bool { return errors.Is(err, ErrTrustPending) }
 
 // finishGuardInstall rolls back a failed guard installation. A pending trust result
 // means the new guard is installed and ready, so its files and running state stay.
-func finishGuardInstall(ctx context.Context, rollback *guardFileRollback, result *error, stop, restore func(context.Context) error) {
-	if isTrustPending(*result) {
-		rollback.cleanup()
+func finishGuardInstall(ctx context.Context, rollback *guardFileRollback, result *error, undo **Undo, stop, restore func(context.Context) error) {
+	if *result == nil || isTrustPending(*result) {
+		if undo == nil {
+			rollback.cleanup()
+			return
+		}
+		// Installed: the prior installation stays restorable until the whole update commits.
+		*undo = &Undo{rollback: rollback, stop: stop, restore: restore}
 		return
 	}
 	finishGuardInstallation(ctx, rollback, result, stop, restore)
