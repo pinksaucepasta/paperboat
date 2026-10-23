@@ -105,5 +105,6 @@ pb [environment] [new] [flags]
 * [pb tunnel](pb_tunnel.md)	 - Manage durable tunnels or start an ephemeral tunnel
 * [pb uninstall](pb_uninstall.md)	 - Completely remove Paperboat from this machine
 * [pb update](pb_update.md)	 - Update pb from the signed Paperboat release
+* [pb version](pb_version.md)	 - Print the pb version
 * [pb wait](pb_wait.md)	 - Wait for a machine readiness condition
 

@@ -1,0 +1,46 @@
+.nh
+.TH "PB-VERSION" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-version - Print the pb version
+
+
+.SH SYNOPSIS
+\fBpb version [flags]\fP
+
+
+.SH DESCRIPTION
+Print this pb's version, the same as \fBpb --version\fR\&. With --json it prints the version and the source commit it was built from, which is what support and bug reports ask for.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for version
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb(1)\fP

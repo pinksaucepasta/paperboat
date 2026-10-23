@@ -208,7 +208,7 @@ func workspaceIndependentCommand(command *cobra.Command) bool {
 		return false
 	}
 	switch parts[1] {
-	case "login", "auth", "daemon", "doctor", "fresh", "install", "manual-install", "pair", "relay", "service", "setup", "uninstall", "update":
+	case "login", "auth", "daemon", "doctor", "fresh", "install", "manual-install", "pair", "relay", "service", "setup", "uninstall", "update", "version":
 		return true
 	case "machine":
 		return len(parts) > 2 && parts[2] == "add"

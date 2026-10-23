@@ -276,4 +276,5 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb update download](pb_update_download.md) | Download and verify an update without installing it |
 | [pb update settings](pb_update_settings.md) | View or change automatic update settings |
 | [pb update status](pb_update_status.md) | Show installed Paperboat update state |
+| [pb version](pb_version.md) | Print the pb version |
 | [pb wait](pb_wait.md) | Wait for a machine readiness condition |

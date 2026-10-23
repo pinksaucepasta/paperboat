@@ -43,3 +43,14 @@ func TestAccountDeleteOnlyPrintsTheConsoleLink(t *testing.T) {
 		t.Fatalf("refusal message %q", out.String())
 	}
 }
+
+// `pb version` prints the version instead of looking for a machine named "version" (Lane O).
+func TestVersionIsACommand(t *testing.T) {
+	c := versionCommand()
+	var out bytes.Buffer
+	c.SetOut(&out)
+	c.SetArgs([]string{"--json"})
+	if err := c.Execute(); err != nil || !strings.Contains(out.String(), `"version"`) {
+		t.Fatalf("out=%q err=%v", out.String(), err)
+	}
+}
