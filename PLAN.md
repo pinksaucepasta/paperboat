@@ -1678,6 +1678,27 @@ the peer-network delta work (contract v3) it extends.
    is full; unreachable only on connect failure, timeout or origin 503. Device (F21-11, staging only, never prod): stop
    the server, then a new exec, ssh and terminal between two paired machines work and a revoked user is refused.
 
+#### Account deletion (GDPR erasure; Lane B server, Lane C console, Lane A CLI link; user request 2026-10-23)
+
+Console only. `DELETE /v1/account` accepts only a browser session that signed in again within the last 5 minutes,
+with body `{"confirm_email": "<the account email>"}`. CLI sessions and API tokens get 403 `account_deletion_console_only`
+with the console URL; a stale sign-in gets 401 `reauthentication_required`; a wrong email 400 `confirmation_mismatch`.
+`GET /v1/account/deletion-preview` lists what will go: machines (count), personal ENV vaults, previews, tunnels,
+config sync, inbox items, API tokens, an active subscription, and teams: the ones deleted with the account (it is
+the only member) and the ones that block it (it owns the team and others are members).
+Refusal: 409 `account_owns_team` with `{teams: [{slug, members}]}` while the account owns a team with other members
+(transfer ownership or delete the team first). Otherwise, in one transaction and irreversibly: every machine is
+revoked (hosts get the revocation, generations bump for every peer, F21 rules); all browser and CLI sessions, refresh
+tokens and API tokens end; ENV values and personal vaults are deleted; personal workspace, previews, tunnels, config
+sync, inbox, lazy access and peer identities are removed; single-member teams the account owns are deleted. After
+commit, best effort with retries (an outbox, not the request): delete the WorkOS user, cancel the Stripe subscription
+(invoices and payment records stay, legally required), send a confirmation email (Resend). Team audit entries keep the
+event with actor "deleted user" (no name, email or id); billing and usage rows keep only what tax law needs (amounts,
+dates, workspace id), with the account's email and name removed. The email may sign up again later as a new account.
+`pb account delete` prints the console link only; there is no CLI deletion path and no --yes.
+Tests (PG): each removal; the owner refusal; console-only refusals (CLI session, API token, stale sign-in, wrong email);
+audit anonymization; the outbox jobs (WorkOS, Stripe, mail) retry and never block the deletion.
+
 ## 4. Handoff notes
 
 All open items from the Phase B handoff (2026-10-14) are filed in S0 (smoke suite), F4
