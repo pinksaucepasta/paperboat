@@ -172,6 +172,9 @@ func (connection *browserTerminal) connectAndServe() error {
 		connection.mu.Lock()
 		connection.attached = true
 		connection.mu.Unlock()
+		// inspectorRequest enqueues its frames on connection.writes; without
+		// the write loop they would never leave the browser.
+		go connection.writeLoop(clientTLS, ws)
 		connection.emit("state", map[string]any{"state": "connected"})
 		return connection.readTerminalStream(clientTLS)
 	}

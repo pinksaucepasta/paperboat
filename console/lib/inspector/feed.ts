@@ -123,7 +123,8 @@ export function useCaptureFeed(channel: Channel, previewId: string, paused: bool
         enabled,
         capture_request_body: withBodies,
         capture_response_body: withBodies,
-        capture_raw: false,
+        // Replay needs the raw request kept on the machine, so it rides with bodies.
+        capture_raw: withBodies,
         sensitive_names: [],
       })
       setCapture(enabled ? "on" : "off")

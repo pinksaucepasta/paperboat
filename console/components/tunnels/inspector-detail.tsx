@@ -169,7 +169,7 @@ export function CaptureDetail({
             size="sm"
             variant="outline"
             disabled={replaying || Boolean(record.replay_ineligible)}
-            title={record.replay_ineligible ? `Can’t replay: ${record.replay_ineligible.replaceAll("_", " ")}` : undefined}
+            title={replayBlocked(record.replay_ineligible)}
             onClick={() => void replay()}
           >
             <ArrowClockwiseIcon />
@@ -201,4 +201,11 @@ export function CaptureDetail({
       </Section>
     </div>
   )
+}
+
+/** Why a capture cannot be replayed, in words. */
+function replayBlocked(reason?: string) {
+  if (!reason) return undefined
+  if (reason === "raw_disabled") return "Turn on Bodies before the request to replay it"
+  return `Can’t replay: ${reason.replaceAll("_", " ")}`
 }

@@ -139,7 +139,7 @@ function Inspector({ preview }: { preview: Preview }) {
               <Switch checked={feed.capture === "on"} onCheckedChange={(on) => void policy(on, feed.bodies)} />
               Capture
             </label>
-            <label className="flex items-center gap-2">
+            <label className="flex items-center gap-2" title="Keep request and response bodies on the machine; needed to replay">
               <Switch
                 checked={feed.bodies}
                 disabled={feed.capture !== "on"}

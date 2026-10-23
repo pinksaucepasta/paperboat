@@ -42,6 +42,13 @@
     capture.click()
     pass("capture turns on", Boolean(await until(() => section()?.dataset.capture === "on")))
   }
+  // Replay needs bodies (raw capture) on before the traffic.
+  const bodies = switchFor("Bodies")
+  const bodiesWereOn = bodies?.getAttribute("aria-checked") === "true"
+  if (bodies && !bodiesWereOn) {
+    bodies.click()
+    pass("bodies turn on", Boolean(await until(() => switchFor("Bodies")?.getAttribute("aria-checked") === "true")))
+  }
   if (!host) {
     pass("window.__previewHost set (needed to send traffic)", false)
     return console.table(steps), steps
@@ -92,6 +99,7 @@
   const confirm = await until(() => document.querySelector("[role=alertdialog]"))
   if (confirm) button("Clear", confirm)?.click()
   pass("clear empties the list", Boolean(await until(() => state() === "No requests yet", 15000)))
+  if (bodies && !bodiesWereOn) switchFor("Bodies")?.click()
   if (capture && !wasOn) switchFor("Capture")?.click()
   console.table(steps)
   return steps
