@@ -90,9 +90,22 @@ func TestPostgresAuditStreamDelivery(t *testing.T) {
 	if _, err := s.Configure(ctx, member, team, "https", Input{URL: "https://siem.example.test/hook"}); err != ErrForbidden {
 		t.Fatalf("member configured a stream: %v", err)
 	}
-	d, err := s.Configure(ctx, owner, team, "https", Input{URL: "https://siem.example.test/hook", HeaderName: "Authorization", HeaderValue: "Splunk token"})
+	d, err := s.Configure(ctx, owner, team, "https", Input{URL: "https://siem.example.test/hook"})
 	if err != nil || !strings.HasPrefix(d.SigningSecret, "pbsig_") {
 		t.Fatalf("configure = %+v err=%v", d, err)
+	}
+	// Editing: a newly added header needs its value; omitted secrets keep the stored ones.
+	hook := Input{URL: "https://siem.example.test/hook", HeaderName: "Authorization"}
+	if _, err = s.Configure(ctx, owner, team, "https", hook); err != ErrInvalid {
+		t.Fatalf("header without a value: %v", err)
+	}
+	hook.HeaderValue = "Splunk token"
+	if _, err = s.Configure(ctx, owner, team, "https", hook); err != nil {
+		t.Fatal(err)
+	}
+	hook.HeaderValue = ""
+	if edited, err := s.Configure(ctx, owner, team, "https", hook); err != nil || edited.SigningSecret != "" {
+		t.Fatalf("edit without secrets = %+v err=%v", edited, err)
 	}
 	exec(`UPDATE paperboat.audit_stream_destinations SET url=$2 WHERE team_id=$1`, team, srv.URL)
 	w := audit.NewWriter(store)
@@ -119,7 +132,7 @@ func TestPostgresAuditStreamDelivery(t *testing.T) {
 	if len(parts) != 2 || parts[1] != hex.EncodeToString(m.Sum(nil)) {
 		t.Fatal("signature does not verify")
 	}
-	if !strings.Contains(string(bodies[0]), `"action":"team.event_0"`) || strings.Index(string(bodies[0]), "event_0") > strings.Index(string(bodies[0]), "event_2") {
+	if !strings.Contains(string(bodies[0]), `"action":"team.event_0"`) || strings.Index(string(bodies[0]), `"team.event_0"`) > strings.Index(string(bodies[0]), `"team.event_2"`) {
 		t.Fatal("events missing or out of order")
 	}
 	fail = true

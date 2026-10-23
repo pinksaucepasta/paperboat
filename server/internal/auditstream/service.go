@@ -228,6 +228,9 @@ func (s *Service) Configure(ctx context.Context, account, team, kind string, in 
 		if in.SecretAccessKey != "" {
 			sec.SecretAccessKey = in.SecretAccessKey
 		}
+		if in.HeaderName != "" && sec.HeaderValue == "" {
+			return ErrInvalid // a header added on edit needs its value
+		}
 		plain, _ := json.Marshal(sec)
 		sealed, err := secrets.Encrypt(s.key, string(plain))
 		if err != nil {
