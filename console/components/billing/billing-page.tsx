@@ -102,6 +102,7 @@ function Plan({
   const time = useTimeFormat()
   // Stripe keeps retrying a failed renewal; paid features last until `paid_benefits_until`.
   const failed = ["past_due", "unpaid", "suspended"].includes(billing.state)
+  const trialing = billing.state === "trialing"
   const benefits = billing.paid_benefits_until
   // Yearly plans renew once a year but their bandwidth resets monthly.
   const resets = allowanceWindow(billing).end
@@ -139,10 +140,24 @@ function Plan({
             </Button>
           )}
         </div>
+      ) : trialing ? (
+        // A Team trial (14 days, card at start): billing starts at period_end unless it is cancelled.
+        <div className="flex items-center justify-between gap-6 border-b border-divider py-3 text-sm">
+          <span>
+            {billing.cancel_at_period_end
+              ? `Free trial until ${end}. It is cancelled, so nothing will be charged.`
+              : `Free trial until ${end}. Billing starts then; cancel before and you won’t be charged.`}
+          </span>
+          {billing.can_manage && !billing.cancel_at_period_end && (
+            <Button variant="outline" disabled={portal.isPending} onClick={() => portal.mutate()}>
+              Cancel trial
+            </Button>
+          )}
+        </div>
       ) : (
         billing.state !== "free" && billing.state !== "active" && <Row label="Status">{stateLabel(billing.state)}</Row>
       )}
-      {end && (
+      {end && !trialing && (
         <Row label={billing.cancel_at_period_end ? "Ends" : billing.product_code ? "Renews" : "Bandwidth resets"}>
           {end}
         </Row>

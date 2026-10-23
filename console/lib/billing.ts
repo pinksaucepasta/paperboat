@@ -17,8 +17,8 @@ export const billingLive = {
   seats: true,
   topups: true,
   paidTeamCreate: true,
-  /** `team_trial_days` on the personal overview and a trial in Team Checkout (Lane O). */
-  teamTrial: false,
+  /** `team_trial_days` on the personal overview and a trial in Team Checkout (live 2026.10.23.8). */
+  teamTrial: true,
   /** Invoices, billing details and pay by invoice (F19, Lane S). */
   business: true,
 } as const
