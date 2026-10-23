@@ -68,7 +68,7 @@ VALUES ($1, $2, $3, 'active')`, accountID, "workos_"+accountID, accountID+"@exam
 		OperationID: "op_preview_dns_lease_" + suffix, LeaseID: leaseID,
 		AuditEventID: "aud_preview_dns_lease_" + suffix, AccountID: accountID,
 		ActorID: accountID, ActorType: "user", OwnerMachineID: "machine_preview_dns_" + suffix,
-		OwnerSessionID: "session_preview_dns_" + suffix, TargetScheme: "http", TargetAddress: "127.0.0.1:4100",
+		OwnerSessionID: "session_preview_dns_" + suffix, OwnerSessionKind: "foreground", TargetScheme: "http", TargetAddress: "127.0.0.1:4100",
 		AccessMode: "public", Endpoint: "https://preview-dns-" + suffix + ".preview.example.test", LeaseDeadline: now.Add(time.Hour),
 		RequestHash: hashBytes("lease:" + suffix), IdempotencyKey: "preview-dns-lease:" + suffix,
 		CorrelationID: "cor_preview_dns_lease_" + suffix, RequestID: "req_preview_dns_lease_" + suffix,
