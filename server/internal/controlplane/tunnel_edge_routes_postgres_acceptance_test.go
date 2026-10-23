@@ -264,8 +264,14 @@ func TestTunnelViewerPolicyPublicToRestrictedPostgres(t *testing.T) {
 	fixture.insertConnector(t, database, fixture.connectorOne, fixture.hostOne, fixture.sessionOne, 11)
 	fixture.insertConnector(t, database, fixture.connectorTwo, fixture.hostTwo, fixture.sessionTwo, 22)
 	service := &EdgeService{store: database, clock: func() time.Time { return now }}
-	if staged, err := service.ReconcileTunnelEdgeRouteAssignments(ctx, 10); err != nil || staged != 2 {
-		t.Fatalf("initial public reconcile = %d, %v; want two staged assignments", staged, err)
+	// The batch covers every ready route in the database, and earlier tests in this package can leave
+	// ready routes behind, so the count is not this test's. Assert this route's staged assignments.
+	if _, err := service.ReconcileTunnelEdgeRouteAssignments(ctx, 10); err != nil {
+		t.Fatalf("initial public reconcile: %v", err)
+	}
+	var staged int
+	if err := database.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.tunnel_edge_route_assignments WHERE route_id=$1`, fixture.routeID).Scan(&staged); err != nil || staged != 2 {
+		t.Fatalf("initial public reconcile staged %d assignments for the route, %v; want two", staged, err)
 	}
 	first, second := fixture.loadAssignment(t, database, 1), fixture.loadAssignment(t, database, 2)
 	if first.accessMode != "public" || second.accessMode != "public" || first.viewerPolicyGeneration != 1 || second.viewerPolicyGeneration != 1 {
