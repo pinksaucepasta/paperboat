@@ -1494,6 +1494,37 @@ each with a PG/load test proving the bound at 10k; Lane R audits daemon/CLI/rela
    build, and limited per account (token bucket) so a reconnect storm queues instead of failing; clients reconnect
    and refresh with full jitter (Lane R). Lane R raises the daemon's MaxEndpoints (2048) with the deltas.
 8. **Regional candidates and relay grants** stay full in every answer (about 2 nodes).
+*Prior art* (read 2026-10-23; headscale 494e2a6, BSD-3; NetBird 8397bed, AGPL: ideas only, no code):
+1. *Push vs poll.* Both hold one long-lived stream per node and send the full map only on connect: headscale the
+   Tailscale map long-poll with keepalives every 50 s + up to 9 s jitter (`hscontrol/poll.go:26,58,334`), NetBird a
+   gRPC stream fed by a bounded per-peer channel whose send never blocks (full channel: dropped, the peer resyncs;
+   `management/internals/controllers/network_map/update_channel/updatechannel.go` SendUpdate). Ours: keep the HTTP
+   long-poll, but the wait answers with the signed delta itself (no wake-then-fetch round trip), held below the
+   client timeout (the MaxWait = client timeout bug made every stream unhealthy) with jittered keepalives.
+2. *Log vs batcher.* Neither stores a per-node change log. headscale keeps all nodes in a copy-on-write in-memory
+   snapshot (`hscontrol/state/node_store.go` NodeStore) and a per-node "last sent peers" to diff against
+   (`mapper/batcher.go` computePeerDiff); NetBird a per-account network serial the client compares and drops stale
+   maps by (`client/internal/engine.go:1614`). We run rolling deploys and several request paths, so we keep the
+   state in PostgreSQL: one shared per-account mesh log (not per node) plus each endpoint's last delivered state,
+   written by that endpoint's own request (O(1) per machine, no fan-out).
+3. *No per-row fan-out writes.* headscale writes only the changed node; fan-out is in memory (`addToBatch` appends
+   to each connected node's pending list, `processBatchedChanges` sends one bundle per node per 800 ms tick, at
+   most one in flight, policy repeats de-duplicated). NetBird debounces account-wide changes on a per-account timer
+   (`controller/controller.go` BufferUpdateAccountPeers, BufferUpdateAffectedPeers). Ours: a topic generation per
+   account, not per machine (one row per change, not N; the 4,097-row insert writes one), statement-level triggers,
+   and a per-account debounce of mesh rebuilds.
+4. *Reconnect storms.* headscale #3346 (`mapper/initialmap_storm_test.go:108-132`): after a restart every node
+   redialed; per-node filtering serialized on one exclusive policy lock, time-to-initial-map went from 4 s to 76 s,
+   clients aborted and redialed and the storm never converged; fixed with shared read locks, NodeStore write
+   batching and jittered keepalives. NetBird coalesces concurrent account loads into one per 100 ms window
+   (`management/server/account_request_buffer.go` GetAccountWithBackpressure). Ours: one snapshot build per
+   (account, mesh_seq) shared by every waiter, no exclusive lock across builds, a per-account build token bucket,
+   client full jitter, and a server answer always faster than the client timeout.
+5. *Per-node policy cost.* headscale computes the peer map O(n^2) once per write batch, not per request
+   (`policy/v2/policy.go:698` BuildPeerMap), caches each node's matchers until the policy changes
+   (`policy.go:79,947` matchersForNodeMap) and has a global-filter fast path. Ours: per-row SQL access functions
+   (~2 ms each) are the cost; compile "who may reach whom" once per (account, policy version), set-based, and make
+   each node's view a lookup; the personal mesh (everyone) needs no filter at all.
 Test (PG): one join on a 1,000-machine account writes O(1) change rows per affected scope and each machine's next
 answer carries one change; a 5k-machine team survives a server restart (snapshot storm) without 503s.
 
