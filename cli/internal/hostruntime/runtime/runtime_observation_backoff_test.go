@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"path/filepath"
@@ -12,10 +13,12 @@ import (
 )
 
 // failingObservationTransport accepts the first observation (the start) and fails every later one, as a
-// server that goes down after the machine started.
+// server that goes down after the machine started. unreachable fails without an answer instead, as the
+// machine's own network being down.
 type failingObservationTransport struct {
-	calls atomic.Int64
-	start livenessObservationTransport
+	calls       atomic.Int64
+	start       livenessObservationTransport
+	unreachable bool
 }
 
 func (t *failingObservationTransport) RoundTrip(request *http.Request) (*http.Response, error) {
@@ -24,6 +27,9 @@ func (t *failingObservationTransport) RoundTrip(request *http.Request) (*http.Re
 	}
 	if request.Body != nil {
 		_ = request.Body.Close()
+	}
+	if t.unreachable {
+		return nil, errors.New("network is unreachable")
 	}
 	return &http.Response{StatusCode: http.StatusServiceUnavailable, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"error":{"code":"unavailable","message":"unavailable"}}`)), Request: request}, nil
 }
@@ -52,6 +58,14 @@ func TestRuntimeObservationBacksOffWhileTheServerFails(t *testing.T) {
 	run(failing)
 	healthy := &livenessObservationTransport{notify: make(chan struct{}, 1024)}
 	run(healthy)
+	// A machine whose network is down keeps the interval: its retries cost the server nothing, and a
+	// backoff kept it offline at the server for up to 90 s after the network came back (N3 on pbvm2).
+	unreachable := &failingObservationTransport{start: livenessObservationTransport{notify: make(chan struct{}, 4)}, unreachable: true}
+	run(unreachable)
+	t.Logf("unreachable server %d", unreachable.calls.Load())
+	if unreachable.calls.Load() < 2*failing.calls.Load() {
+		t.Fatalf("an unreachable server got %d observations against %d for a failing one; want the interval, not the backoff", unreachable.calls.Load(), failing.calls.Load())
+	}
 	// Failing: about 50, 50, 100, 200, 400, 800 ms waits (~8 sends in 2.5 s); healthy: one per ~50 ms.
 	t.Logf("observations in 2.5 s at a 50 ms interval: failing server %d, healthy server %d", failing.calls.Load(), healthy.calls.Load())
 	if failing.calls.Load() > 12 || failing.calls.Load()*2 > healthy.calls.Load() {

@@ -96,11 +96,21 @@ func (s *runtimeObservationService) Start(ctx context.Context) error {
 // runtimeObservationMaxRetry caps the wait between observations while the server keeps failing them.
 const runtimeObservationMaxRetry = time.Minute
 
+// serverAnswered reports whether a failed observation reached the server and got a failing answer.
+// Only those back off: a machine whose network is down costs the server nothing by retrying, and the
+// server marks it offline after OfflineAfter, so a long backoff would keep it offline for up to a
+// minute and a half after its network came back.
+func serverAnswered(err error) bool {
+	var failure runtimeObservationFailure
+	return errors.As(err, &failure) && failure.answered
+}
+
 func (s *runtimeObservationService) loop(ctx context.Context, done chan<- struct{}) {
 	defer close(done)
 	// The next observation follows the interval with jitter, so a fleet that reconnected together (a
 	// server deploy) does not report in lockstep; consecutive failures back off to runtimeObservationMaxRetry
-	// instead of every machine asking a failing server every interval.
+	// instead of every machine asking a failing server every interval. Failures that never reached the
+	// server keep the interval (serverAnswered).
 	next := time.NewTimer(backoff.Jitter(s.interval))
 	defer next.Stop()
 	failures := 0
@@ -113,8 +123,11 @@ func (s *runtimeObservationService) loop(ctx context.Context, done chan<- struct
 	send := func() {
 		sendCtx, cancel := context.WithTimeout(ctx, s.timeout)
 		defer cancel()
-		if err := s.sender.Send(sendCtx); err != nil {
+		err := s.sender.Send(sendCtx)
+		if err != nil {
 			reportRuntimeObservationAttempt(sendCtx, err)
+		}
+		if serverAnswered(err) {
 			failures++
 		} else {
 			failures = 0
@@ -286,7 +299,7 @@ func (s *runtimeObservationSender) send(ctx context.Context, mayConfirm bool) er
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		s.applyMachineServicesPolicy(nil)
-		return runtimeObservationFailure{stage: "control_request", cause: errorreport.HTTPStatusFailure(response)}
+		return runtimeObservationFailure{stage: "control_request", cause: errorreport.HTTPStatusFailure(response), answered: true}
 	}
 	s.applyMachineServicesPolicy(responseBody)
 	if s.transferPolicy != nil {
@@ -321,6 +334,8 @@ func (s *runtimeObservationSender) send(ctx context.Context, mayConfirm bool) er
 type runtimeObservationFailure struct {
 	stage string
 	cause error
+	// answered is set when the server returned a failing status.
+	answered bool
 }
 
 func (runtimeObservationFailure) Error() string                   { return "runtime observation failed" }
