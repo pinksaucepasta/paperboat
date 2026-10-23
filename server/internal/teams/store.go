@@ -153,15 +153,18 @@ func AuthorizeTx(ctx context.Context, tx *db.Tx, account, team, kind, id, permis
 	if !paid {
 		return d, ErrForbidden
 	}
-	t, err := ReadTx(ctx, tx, team)
+	// Only the caller's membership and this resource's rows decide; the team row is locked as ReadTx locks it.
+	d = Decision{TeamID: team, AccountID: account, ResourceKind: kind, ResourceID: id, Permission: permission}
+	var member bool
+	err := tx.QueryRow(ctx, `SELECT t.generation,coalesce(m.membership_generation,0),coalesce(CASE WHEN t.owner_account=$2 THEN 'owner' ELSE m.role END,''),
+ t.deleted_at IS NULL AND NOT t.suspended AND coalesce(m.active,false)
+ FROM teams t LEFT JOIN team_members m ON m.team_id=t.team_id AND m.account_id=$2 WHERE t.team_id=$1 FOR UPDATE OF t`, team, account).Scan(&d.TeamGeneration, &d.MembershipGeneration, &d.Role, &member)
 	if err != nil {
-		return d, err
+		return Decision{}, mapTeamReadNotFound(err)
 	}
-	m, ok := member(t, account)
-	if t.Deleted || !ok {
-		return d, ErrForbidden
+	if !member {
+		return Decision{}, ErrForbidden
 	}
-	d = Decision{TeamID: team, AccountID: account, Role: m.Role, TeamGeneration: t.Generation, MembershipGeneration: m.MembershipGeneration, ResourceKind: kind, ResourceID: id, Permission: permission}
 	var active bool
 	err = tx.QueryRow(ctx, `SELECT active,generation FROM team_resource_bindings WHERE team_id=$1 AND resource_kind=$2 AND resource_id=$3`, team, kind, id).Scan(&active, &d.BindingGeneration)
 	if err == pgx.ErrNoRows || err == nil && !active {
@@ -208,11 +211,27 @@ func AuthorizeTx(ctx context.Context, tx *db.Tx, account, team, kind, id, permis
 		d.GrantGeneration = version
 		return d, nil
 	}
-	for _, g := range t.Grants {
-		if g.AccountID == account && g.ResourceKind == kind && g.ResourceID == id && g.Active && permits(kind, g.Permission, permission) {
-			d.GrantGeneration = g.Generation
+	// The member's own grants on this resource (policy grants are only the env and inspect/replay, decided above).
+	rows, err := tx.Query(ctx, `SELECT permission,generation FROM team_resource_grants
+ WHERE team_id=$1 AND account_id=$2 AND resource_kind=$3 AND resource_id=$4 AND active AND permission NOT IN ('inspect','replay')
+ ORDER BY permission`, team, account, kind, id)
+	if err != nil {
+		return d, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var granted string
+		var generation uint64
+		if err = rows.Scan(&granted, &generation); err != nil {
+			return d, err
+		}
+		if permits(kind, granted, permission) {
+			d.GrantGeneration = generation
 			return d, nil
 		}
+	}
+	if err = rows.Err(); err != nil {
+		return d, err
 	}
 	return d, ErrForbidden
 }
