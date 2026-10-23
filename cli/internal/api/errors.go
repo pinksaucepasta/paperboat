@@ -1,10 +1,12 @@
 package api
 
 import (
+	"fmt"
 	hostconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 )
 
 // ResponseDecodeError preserves the protocol cause without displaying response
@@ -61,18 +63,44 @@ func apiErrorMessage(code string, status int) string {
 }
 
 // apiErrorMessageFor is apiErrorMessage plus the one server-provided detail a recovery message
-// may carry: the console Billing page for bandwidth_quota_exhausted, when it is an http(s) URL.
+// may carry: the plan limit and the console Billing page for the plan-limit refusals.
 func apiErrorMessageFor(code string, status int, details map[string]any) string {
-	message := apiErrorMessage(code, status)
-	if code != "bandwidth_quota_exhausted" {
-		return message
+	billing := billingURL(details)
+	switch code {
+	case "bandwidth_quota_exhausted":
+		if billing != "" {
+			return apiErrorMessage(code, status) + " Add bandwidth: " + billing
+		}
+	case "machine_limit_reached", "preview_limit_reached":
+		return planLimitMessage(code, details, billing)
 	}
-	if raw, _ := details["billing_url"].(string); raw != "" {
-		if parsed, err := url.Parse(raw); err == nil && (parsed.Scheme == "https" || parsed.Scheme == "http") && parsed.Host != "" && parsed.User == nil {
-			return message + " Add bandwidth: " + parsed.String()
+	return apiErrorMessage(code, status)
+}
+
+// planLimitMessage names the plan's limit and the two ways out: free one up, or upgrade.
+func planLimitMessage(code string, details map[string]any, billing string) string {
+	limit, _ := details["limit"].(float64)
+	message := apiErrorMessage(code, http.StatusConflict)
+	if limit >= 1 && limit == float64(int64(limit)) {
+		if code == "machine_limit_reached" {
+			message = fmt.Sprintf("This workspace's plan allows %d machines. Remove machines you no longer use (`pb machine revoke <machine>`) or upgrade.", int64(limit))
+		} else {
+			message = fmt.Sprintf("This workspace's plan allows %d running previews and tunnels. Stop one you no longer need, or upgrade.", int64(limit))
 		}
 	}
+	if billing != "" {
+		message = strings.TrimSuffix(message, ".") + ": " + billing
+	}
 	return message
+}
+
+// billingURL is the console Billing link a plan-limit refusal may carry, when it is an http(s) URL.
+func billingURL(details map[string]any) string {
+	raw, _ := details["billing_url"].(string)
+	if parsed, err := url.Parse(raw); raw != "" && err == nil && (parsed.Scheme == "https" || parsed.Scheme == "http") && parsed.Host != "" && parsed.User == nil {
+		return parsed.String()
+	}
+	return ""
 }
 
 // PublicMessage is the authored recovery advice for an audited protocol code, or "".
@@ -96,6 +124,8 @@ var publicAPIMessages = map[string]string{
 	"update_required":                 "This Paperboat version is no longer supported. Run `pb update` to continue.",
 	"access_denied":                   "Access was denied. Sign in with an authorized account.",
 	"authorization_pending":           "Authorization is pending. Complete sign-in in the browser.",
+	"machine_limit_reached":           "This workspace's plan machine limit is reached. Remove machines you no longer use (`pb machine revoke <machine>`) or upgrade under Billing in the Paperboat console.",
+	"preview_limit_reached":           "This workspace's plan limit for running previews and tunnels is reached. Stop one you no longer need, or upgrade under Billing in the Paperboat console.",
 	"bandwidth_quota_exhausted":       "This workspace's hosted relay and edge bandwidth is used up. Direct machine-to-machine access still works. Add bandwidth or upgrade under Billing in the Paperboat console, or wait for the next allowance period.",
 	"conflict":                        "The resource state changed. Refresh it and try again.",
 	"config_compare_stale":            "The conflict changed before it could be compared. Run `pb config conflict list` and compare the current conflict.",
