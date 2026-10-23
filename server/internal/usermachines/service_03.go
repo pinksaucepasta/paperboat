@@ -40,7 +40,7 @@ func (s *Service) fileTransferDescriptor(ctx context.Context, userID, sourceMach
 			return FileTransferDescriptor{}, ErrTerminalSessionNotFound
 		}
 	}
-	destination, err := getMachineForCapability(ctx, s.db.Queries(), dbsqlc.GetUserMachineForCapabilityParams{ID: destinationMachineID, UserID: userID, Capability: "files"})
+	destination, err := s.machineForCapability(ctx, s.db.Queries(), dbsqlc.GetUserMachineForCapabilityParams{ID: destinationMachineID, UserID: userID, Capability: "files"})
 	if errors.Is(err, sql.ErrNoRows) {
 		return FileTransferDescriptor{}, ErrNotFound
 	}
@@ -382,7 +382,7 @@ func (s *Service) ConnectTerminalSession(ctx context.Context, userID, sourceMach
 	} else if err != nil {
 		return ConnectionDescriptor{}, err
 	}
-	row, err := getMachineForCapability(ctx, s.db.Queries(), dbsqlc.GetUserMachineForCapabilityParams{ID: userMachineID, UserID: userID, Capability: "terminal"})
+	row, err := s.machineForCapability(ctx, s.db.Queries(), dbsqlc.GetUserMachineForCapabilityParams{ID: userMachineID, UserID: userID, Capability: "terminal"})
 	if errors.Is(err, sql.ErrNoRows) {
 		return ConnectionDescriptor{}, ErrNotFound
 	}
@@ -550,7 +550,7 @@ func (s *Service) ConnectionReadiness(ctx context.Context, userID, userMachineID
 }
 
 func (s *Service) ConnectionReadinessForTerminalSession(ctx context.Context, userID, userMachineID, terminalSessionID string) (ConnectionDescriptor, error) {
-	row, err := getMachineForCapability(ctx, s.db.Queries(), dbsqlc.GetUserMachineForCapabilityParams{ID: userMachineID, UserID: userID, Capability: "terminal"})
+	row, err := s.machineForCapability(ctx, s.db.Queries(), dbsqlc.GetUserMachineForCapabilityParams{ID: userMachineID, UserID: userID, Capability: "terminal"})
 	if errors.Is(err, sql.ErrNoRows) {
 		return ConnectionDescriptor{}, ErrNotFound
 	}

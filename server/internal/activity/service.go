@@ -219,7 +219,7 @@ func decode(rows interface{ Scan(...any) error }, ws string) (Event, error) {
 		event.Actor = Actor{Kind: "system"}
 	}
 	switch event.Target.Kind {
-	case "user_machine":
+	case "user_machine", "machine_access":
 		event.Target.Kind = "machine"
 	case "preview_lease":
 		event.Target.Kind = "preview"

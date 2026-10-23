@@ -346,11 +346,12 @@ func (s *Service) createTerminalSession(ctx context.Context, userID, sourceMachi
 		_, err := lockTerminalSessions(ctx, tx.Queries(), dbsqlc.LockUserMachineTerminalSessionsParams{UserMachineID: userMachineID, UserID: userID})
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
+				s.recordAccessDenied(ctx, tx.Queries(), dbsqlc.GetUserMachineForCapabilityParams{ID: userMachineID, UserID: userID, Capability: "terminal"}, false)
 				return ErrNotFound
 			}
 			return err
 		}
-		lockedMachine, err := getMachineForCapability(ctx, tx.Queries(), dbsqlc.GetUserMachineForCapabilityParams{ID: userMachineID, UserID: userID, Capability: "terminal"})
+		lockedMachine, err := s.machineForCapability(ctx, tx.Queries(), dbsqlc.GetUserMachineForCapabilityParams{ID: userMachineID, UserID: userID, Capability: "terminal"})
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return ErrNotFound

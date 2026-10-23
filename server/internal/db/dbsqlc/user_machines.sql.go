@@ -4512,6 +4512,40 @@ func (q *Queries) LockUserMachineTerminalSessionsInWorkspace(ctx context.Context
 	return id, err
 }
 
+const machineAccessDecision = `-- name: MachineAccessDecision :one
+SELECT d.workspace::text AS workspace, coalesce(d.reason, '')::text AS reason, coalesce(d.policy_version, 0)::bigint AS policy_version
+FROM machine_access_decision($1::text, $2::text, $3::text,
+ $4::boolean, $5::text) d
+`
+
+type MachineAccessDecisionParams struct {
+	Actor      string
+	Machine    string
+	Capability string
+	ScopeSet   bool
+	ScopeTeam  sql.NullString
+}
+
+type MachineAccessDecisionRow struct {
+	Workspace     string
+	Reason        string
+	PolicyVersion int64
+}
+
+// PLAN F19-07: the workspace and refusal reason of one machine access (machine_access_decision).
+func (q *Queries) MachineAccessDecision(ctx context.Context, arg MachineAccessDecisionParams) (MachineAccessDecisionRow, error) {
+	row := q.db.QueryRow(ctx, machineAccessDecision,
+		arg.Actor,
+		arg.Machine,
+		arg.Capability,
+		arg.ScopeSet,
+		arg.ScopeTeam,
+	)
+	var i MachineAccessDecisionRow
+	err := row.Scan(&i.Workspace, &i.Reason, &i.PolicyVersion)
+	return i, err
+}
+
 const markMachineControlRenewalSuperseded = `-- name: MarkMachineControlRenewalSuperseded :execrows
 UPDATE machine_control_renewals
 SET superseded_at = $1

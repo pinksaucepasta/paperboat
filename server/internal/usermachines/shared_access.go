@@ -101,7 +101,7 @@ func (s *Service) createAccessSession(ctx context.Context, in dbsqlc.CreateUserM
 		if len(in.Capabilities) == 0 {
 			return ErrMachineCapabilityUnavailable
 		}
-		machine, err := getMachineForCapability(ctx, tx.Queries(), dbsqlc.GetUserMachineForCapabilityParams{ID: in.UserMachineID, UserID: in.UserID, Capability: in.Capabilities[0]})
+		machine, err := s.machineForCapability(ctx, tx.Queries(), dbsqlc.GetUserMachineForCapabilityParams{ID: in.UserMachineID, UserID: in.UserID, Capability: in.Capabilities[0]})
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
@@ -175,6 +175,9 @@ func (s *Service) createAccessSession(ctx context.Context, in dbsqlc.CreateUserM
 		if err := tx.Queries().CreateUserMachineAccessSession(ctx, in); err != nil {
 			return err
 		}
+		if err := s.recordAccessStartedTx(ctx, tx, in); err != nil {
+			return err
+		}
 		if !in.TeamID.Valid {
 			return nil // the account's own machines are always in each other's peer network
 		}
@@ -236,7 +239,7 @@ func (s *Service) transferSessionHost(ctx context.Context, userID, sessionID str
 			boundContext = ctx
 		}
 		var err error
-		host, err = getMachineForCapability(boundContext, tx.Queries(), dbsqlc.GetUserMachineForCapabilityParams{ID: machineID, UserID: userID, Capability: "terminal"})
+		host, err = s.machineForCapability(boundContext, tx.Queries(), dbsqlc.GetUserMachineForCapabilityParams{ID: machineID, UserID: userID, Capability: "terminal"})
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrTerminalSessionNotFound
 		}
@@ -249,7 +252,7 @@ func (s *Service) transferSessionHost(ctx context.Context, userID, sessionID str
 }
 
 func (s *Service) transferDestinationMachine(ctx context.Context, userID, machineID string) (UserMachine, bool, error) {
-	row, err := getMachineForCapability(ctx, s.db.Queries(), dbsqlc.GetUserMachineForCapabilityParams{ID: machineID, UserID: userID, Capability: "files"})
+	row, err := s.machineForCapability(ctx, s.db.Queries(), dbsqlc.GetUserMachineForCapabilityParams{ID: machineID, UserID: userID, Capability: "files"})
 	if errors.Is(err, sql.ErrNoRows) {
 		return UserMachine{}, false, nil
 	}

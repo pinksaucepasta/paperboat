@@ -62,7 +62,7 @@ func activityMetadata(input map[string]any, strict bool) (map[string]any, error)
 	out := make(map[string]any)
 	for key, value := range input {
 		switch key {
-		case "generation", "epoch", "revision", "target_account", "recipient_account", "sender_account", "role", "resource_kind", "resource_id", "permission", "active", "machine_id", "audience", "capabilities", "terminal_session_id", "action", "access_session_id", "attachment_id", "request_id", "source_machine_id", "destination_machine_id", "status", "decision", "repository_id", "version", "published_revision", "assignment_id", "default_version", "previous_owner", "new_owner", "adopted_version", "format", "rows", "since", "until", "tax_id", "intent", "required", "session_seconds", "jit", "exempt", "group_id", "mapped_only", "reason", "gained", "lost", "api_token", "kind":
+		case "generation", "epoch", "revision", "target_account", "recipient_account", "sender_account", "role", "resource_kind", "resource_id", "permission", "active", "machine_id", "audience", "capabilities", "terminal_session_id", "action", "access_session_id", "attachment_id", "request_id", "source_machine_id", "destination_machine_id", "status", "decision", "repository_id", "version", "published_revision", "assignment_id", "default_version", "previous_owner", "new_owner", "adopted_version", "format", "rows", "since", "until", "tax_id", "intent", "required", "session_seconds", "jit", "exempt", "group_id", "mapped_only", "reason", "gained", "lost", "api_token", "kind", "capability", "policy_version":
 		default:
 			if strict {
 				return nil, ErrInvalid

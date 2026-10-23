@@ -145,7 +145,60 @@ func TestPostgresSharedMachineSessionIsolationAndRevocation(t *testing.T) {
 	if err = persist(member, sharedAccess, "terminal"); err != nil {
 		t.Fatal(err)
 	}
-	secondTeam := "sm_team_second_" + suffix
+	// PLAN F19-07: access starts are recorded in the workspace that authorized them (the member's
+	// access to the owner's shared machine in the team, not in the owner's personal log); refusals
+	// with their reason, once per minute.
+	if err = persist(member, "denied_again_"+suffix, "exec"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("repeated ungranted exec issuance: %v", err)
+	}
+	type accessEvent struct{ event, workspace, result, reason string }
+	var events []accessEvent
+	rows, err := store.SQL().QueryContext(ctx, `SELECT event_type,coalesce(activity_workspace_id,''),result,coalesce(reason,'') FROM paperboat.audit_events
+ WHERE resource_type='machine_access' AND resource_id=$1 ORDER BY cursor_sequence`, machine)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var e accessEvent
+		if err = rows.Scan(&e.event, &e.workspace, &e.result, &e.reason); err != nil {
+			t.Fatal(err)
+		}
+		events = append(events, e)
+	}
+	rows.Close()
+	want := []accessEvent{
+		{"machine.access_denied", "personal:" + member, "denied", "machine_not_in_workspace"},
+		{"machine.access_denied", "team:" + team, "denied", "policy"},
+		{"machine.access_started", "personal:" + owner, "success", ""},
+		{"machine.access_started", "team:" + team, "success", ""},
+	}
+	if !slices.Equal(events, want) {
+		t.Fatalf("machine access audit:\n got %v\nwant %v", events, want)
+	}
+	decide := func(actor, capability string) string {
+		t.Helper()
+		d, err := store.Queries().MachineAccessDecision(ctx, dbsqlc.MachineAccessDecisionParams{Actor: actor, Machine: machine, Capability: capability})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return d.Workspace + " " + d.Reason
+	}
+	if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.teams SET sso_required=true,sso_session_seconds=86400 WHERE team_id=$1`, team); err != nil {
+		t.Fatal(err)
+	}
+	if got := decide(member, "terminal"); got != "team:"+team+" team_sso_required" {
+		t.Fatalf("SSO-required refusal: %s", got)
+	}
+	if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.teams SET sso_required=false WHERE team_id=$1`, team); err != nil {
+		t.Fatal(err)
+	}
+	if got := decide(member, "terminal"); got != "team:"+team+" " {
+		t.Fatalf("allowed member decision: %s", got)
+	}
+	if got := decide("sm_stranger_"+suffix, "terminal"); got != "team:"+team+" machine_not_in_workspace" {
+		t.Fatalf("non-member refusal: %s", got)
+	}
+	secondTeam :="sm_team_second_" + suffix
 	for _, statement := range []struct {
 		query string
 		args  []any

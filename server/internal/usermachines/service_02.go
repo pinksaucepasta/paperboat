@@ -570,7 +570,7 @@ func (s *Service) TerminalSessionTransferDestination(ctx context.Context, userID
 		} else if err != nil {
 			return err
 		}
-		row, err := getMachineForCapability(ctx, tx.Queries(), dbsqlc.GetUserMachineForCapabilityParams{
+		row, err := s.machineForCapability(ctx, tx.Queries(), dbsqlc.GetUserMachineForCapabilityParams{
 			ID: destinationID.String, UserID: userID, Capability: "files",
 		})
 		if errors.Is(err, sql.ErrNoRows) {
@@ -602,7 +602,7 @@ func (s *Service) SetTerminalSessionTransferDestination(ctx context.Context, use
 		if err != nil {
 			return ErrTransferDestinationInvalid
 		}
-		row, err := getMachineForCapability(ctx, tx.Queries(), dbsqlc.GetUserMachineForCapabilityParams{
+		row, err := s.machineForCapability(ctx, tx.Queries(), dbsqlc.GetUserMachineForCapabilityParams{
 			ID: machineID, UserID: userID, Capability: "files",
 		})
 		if errors.Is(err, sql.ErrNoRows) || row.State == "revoked" || row.State == "disconnected" || row.State == "deleted" || row.SeatState != "occupied" {
@@ -769,7 +769,7 @@ func (s *Service) operationDescriptor(ctx context.Context, userID, sourceMachine
 	if credentialClass == "ssh_operation" {
 		capability = "managed_ssh"
 	}
-	row, err := getMachineForCapability(ctx, s.db.Queries(), dbsqlc.GetUserMachineForCapabilityParams{ID: userMachineID, UserID: userID, Capability: capability})
+	row, err := s.machineForCapability(ctx, s.db.Queries(), dbsqlc.GetUserMachineForCapabilityParams{ID: userMachineID, UserID: userID, Capability: capability})
 	if errors.Is(err, sql.ErrNoRows) {
 		return ExecDescriptor{}, ErrNotFound
 	}

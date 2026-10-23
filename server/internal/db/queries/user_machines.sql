@@ -1263,3 +1263,9 @@ WHERE m.id=sqlc.arg(id) AND m.deleted_at IS NULL AND (
     AND machine_capability_allowed(sqlc.arg(user_id),m.id,sqlc.arg(capability)))
   OR (sqlc.arg(workspace_set)::boolean AND sqlc.narg(workspace_team_id)::text IS NOT NULL
     AND team_machine_capability_allowed(sqlc.arg(user_id),sqlc.narg(workspace_team_id)::text,m.id,sqlc.arg(capability))));
+
+-- name: MachineAccessDecision :one
+-- PLAN F19-07: the workspace and refusal reason of one machine access (machine_access_decision).
+SELECT d.workspace::text AS workspace, coalesce(d.reason, '')::text AS reason, coalesce(d.policy_version, 0)::bigint AS policy_version
+FROM machine_access_decision(sqlc.arg(actor)::text, sqlc.arg(machine)::text, sqlc.arg(capability)::text,
+ sqlc.arg(scope_set)::boolean, sqlc.narg(scope_team)::text) d;
