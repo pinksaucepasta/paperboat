@@ -250,10 +250,17 @@ VALUES($1,1,sha256(convert_to($1::text,'UTF8')),convert_to(json_build_object('ro
 	// Its hostname's DNS names exactly the edges that serve the route.
 	f.exec(t, `UPDATE control_tunnel_nodes SET public_ingress_ipv4=CASE WHEN id=$1 THEN '192.0.2.21'::inet ELSE '192.0.2.22'::inet END,public_ingress_verified_at=now() WHERE id IN ($1,$2)`, f.node, f.backupNode)
 	certificate := "cert_" + f.prefix
-	f.exec(t, `INSERT INTO tunnel_platform_certificate_targets(id,kind,hostname,account_id,challenge_reference) VALUES('platform_cert_public_v1','public_wildcard','*.tunnels.example.test','platform_system_v1','dns:fixture')`)
-	t.Cleanup(func() {
-		_, _ = f.database.SQL().ExecContext(f.ctx, `DELETE FROM tunnel_platform_certificate_targets WHERE id='platform_cert_public_v1'`)
-	})
+	// The platform target is a singleton other suites may hold in a shared database: create it only
+	// if absent, and remove it only if this test created it.
+	var created int64
+	if err := f.database.SQL().QueryRowContext(f.ctx, `WITH inserted AS (INSERT INTO tunnel_platform_certificate_targets(id,kind,hostname,account_id,challenge_reference) VALUES('platform_cert_public_v1','public_wildcard','*.tunnels.example.test','platform_system_v1','dns:fixture') ON CONFLICT (id) DO NOTHING RETURNING 1) SELECT count(*) FROM inserted`).Scan(&created); err != nil {
+		t.Fatal(err)
+	}
+	if created == 1 {
+		t.Cleanup(func() {
+			_, _ = f.database.SQL().ExecContext(f.ctx, `DELETE FROM tunnel_platform_certificate_targets WHERE id='platform_cert_public_v1'`)
+		})
+	}
 	f.exec(t, `INSERT INTO tunnel_certificate_records(id,domain_id,account_id,hostname,domain_generation,certificate_generation,strategy,state,certificate_reference,master_key_reference,certificate_ciphertext,private_key_ciphertext,fingerprint,issuer,not_before,expires_at,renewal_at,target_kind) VALUES($1,'platform_cert_public_v1','platform_system_v1','*.tunnels.example.test',1,1,'platform_dns01','active','fixture','fixture',decode(repeat('ab',29),'hex'),decode(repeat('ab',29),'hex'),decode(repeat('ab',32),'hex'),'fixture',now()-interval '1 hour',now()+interval '1 hour',now(),'platform_wildcard')`, certificate)
 	t.Cleanup(func() {
 		_, _ = f.database.SQL().ExecContext(f.ctx, `DELETE FROM tunnel_certificate_records WHERE id=$1`, certificate)
