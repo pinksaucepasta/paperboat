@@ -17,12 +17,18 @@ import (
 // sequence is never passed by the cursor.
 const settle = 30 * time.Second
 
+// claimLease holds a due destination for one worker: longer than a tick's 2-minute bound, so
+// another server process never sends the same batch at the same time.
+const claimLease = 3 * time.Minute
+
 // Deliver is one worker tick: every destination that is due gets the events after its cursor, in
 // order, in batches of at most business.audit_stream_batch_bytes. Success moves the cursor;
 // failure retries with exponential backoff up to business.audit_stream_max_backoff and, after
 // business.audit_stream_alert_after of failures, emails the team's owners and admins once.
 func (s *Service) Deliver(ctx context.Context) error {
-	rows, err := s.db.SQL().QueryContext(ctx, `SELECT team_id,kind FROM paperboat.audit_stream_destinations WHERE next_attempt_at<=now() ORDER BY next_attempt_at LIMIT 20`)
+	rows, err := s.db.SQL().QueryContext(ctx, `UPDATE paperboat.audit_stream_destinations d SET next_attempt_at=now()+make_interval(secs=>$1)
+ FROM (SELECT team_id,kind FROM paperboat.audit_stream_destinations WHERE next_attempt_at<=now() ORDER BY next_attempt_at LIMIT 20 FOR UPDATE SKIP LOCKED) due
+ WHERE d.team_id=due.team_id AND d.kind=due.kind RETURNING d.team_id,d.kind`, claimLease.Seconds())
 	if err != nil {
 		return err
 	}
@@ -56,7 +62,9 @@ func (s *Service) deliverOne(ctx context.Context, team, kind string) error {
 	}
 	events, err := s.log.Since(ctx, "team:"+team, d.cursor, 1000, settle)
 	if err != nil || len(events) == 0 {
-		return err
+		// Nothing to send: release the claim so new events go out on the next tick.
+		_, release := s.db.SQL().ExecContext(ctx, `UPDATE paperboat.audit_stream_destinations SET next_attempt_at=now() WHERE team_id=$1 AND kind=$2 AND attempts=0`, team, kind)
+		return errors.Join(err, release)
 	}
 	var body []byte
 	var first, last int64

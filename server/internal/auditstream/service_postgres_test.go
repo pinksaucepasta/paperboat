@@ -6,6 +6,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -118,7 +119,15 @@ func TestPostgresAuditStreamDelivery(t *testing.T) {
 	exec(`ALTER TABLE paperboat.audit_events DISABLE TRIGGER audit_events_append_only`)
 	exec(`UPDATE paperboat.audit_events SET created_at=created_at-interval '1 minute' WHERE activity_workspace_id='team:'||$1`, team)
 	exec(`ALTER TABLE paperboat.audit_events ENABLE TRIGGER audit_events_append_only`)
-	if err = s.Deliver(ctx); err != nil {
+	// Two server processes tick at once: the claim gives the batch to one of them.
+	var wg sync.WaitGroup
+	errs := make([]error, 2)
+	for i := range errs {
+		wg.Add(1)
+		go func() { defer wg.Done(); errs[i] = s.Deliver(ctx) }()
+	}
+	wg.Wait()
+	if err = errors.Join(errs...); err != nil {
 		t.Fatal(err)
 	}
 	mu.Lock()
