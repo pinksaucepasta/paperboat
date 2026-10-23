@@ -1416,25 +1416,41 @@ each with a PG/load test proving the bound at 10k; Lane R audits daemon/CLI/rela
 
 *Today* a peer-network change bumps the topic and every machine refetches its whole signed configuration
 (`POST /v1/machine-peer-network/config`, `paperboat-network-config+jwt`): N x N per change.
-*Contract* (server first; old daemons keep the full fetch until updated):
-1. **Change log.** Each change of what one machine may reach is a row `(scope_key, seq, op, endpoint_id, entry)`,
-   `op` = add | update | remove; `seq` is ordered per scope (the machine's policy scope: own account, or the team
-   policy version x member set). An update replaces the whole entry (identity plus every scope), never a field
-   patch; a remove carries only `endpoint_id`. Retention: 24 h or 10k rows per scope, whichever is less.
-2. **Request.** `POST /v1/machine-peer-network/changes {since_seq, base_digest}` (same machine proof as config).
-3. **Answer, always signed** with the config's issuer, kid and audience, `typ` `paperboat-network-delta+jwt`:
-   claims `base_seq`, `seq`, `base_digest` (sha256 of the canonical peer set the delta applies to), `digest` (after),
-   `issued_at`, `expires_at` (the state's new expiry; scope `expires_at` stays per entry), `changes[]` (at most 256;
-   `more: true` means ask again from `seq`). No change: a tiny signed delta with only a new `expires_at`.
-4. **Snapshot fallback** `{snapshot: <full signed config with seq and digest>}` when `since_seq` is unknown or older
-   than retention, the digest differs, after key rotation, or after a policy change that rewrites the scope. The
-   daemon applies a delta only if `base_seq`/`base_digest` match its signed state, else asks for a snapshot; gaps,
-   reordering and replay are therefore safe.
-5. **Only reachable peers.** Each machine's set is what its policy lets it reach, not the whole account.
-6. **Bounds.** Changes per answer 256, answer size 64 KiB; the 128 KiB snapshot cap stays for snapshots only; snapshot
-   builds are cached per (scope_key, seq) so machines in one scope share one build, and limited per account
-   (token bucket) so a reconnect storm queues instead of failing; clients reconnect with jitter (Lane R).
-7. **Regional candidates and relay grants** stay full in every answer (about 2 nodes; Lane R's call).
+*Contract* (server first; old daemons keep the full fetch until updated; v2 after Lane R's review):
+1. **State.** A machine's signed state is `self` + `peers` (as today). `generation` stays the endpoint's monotonic
+   config generation: every answer (snapshot page or delta) allocates the next one, and the relay grants and
+   regional candidates in that answer are issued against it, as today. `self` (keys, key/endpoint generation)
+   changes only through a snapshot; every delta carries `self_key_generation` and the daemon refuses another one.
+2. **Where changes come from.** The N x N part is the personal mesh (every endpoint of the account): it is rebuilt
+   once per change, set-based, into a shared per-account log `(account_id, mesh_seq, endpoint_id, op, entry)`; a
+   join or leave writes O(1) rows however large the account. The per-endpoint part (machine_access, inspector,
+   config_compare scopes, at most 128 grants; admitted certificates) is computed per request and diffed against
+   what that endpoint was last sent (stored per endpoint with its generation and `mesh_seq`).
+3. **Request.** `POST /v1/machine-peer-network/changes {base_generation, base_digest}` (machine proof as config).
+4. **Delta**, signed with the config's issuer, kid and audience, `typ` `paperboat-network-delta+jwt`: claims
+   `generation`, `base_generation`, `base_digest`, `digest` (after applying), `self_key_generation`, `iat`,
+   `exp` (the state's new expiry), `changes[]` = `{op: add|update|remove, endpoint_id, identity?, scopes?}` (an
+   update replaces identity and every scope; remove carries endpoint_id only), at most 256 per answer, `more: true`
+   = ask again with the new generation. No change: only a new `generation`/`exp`.
+5. **Digest** = lowercase hex sha256 of the RFC 8785 (JCS) JSON of `peers`, sorted by `identity.endpoint_id`, each
+   entry's `scopes` sorted by (resource_kind, resource_id, capability, direction, port); `self` excluded. Vectors:
+   `[]` -> `4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945`; one peer
+   `{"identity":{"account_id":"user_1","disco_public_key":"","endpoint_generation":1,"endpoint_id":"machine_b",`
+   `"key_generation":1,"machine_generation":1,"machine_id":"machine_b","quic_certificate_fingerprint":"ab",`
+   `"quic_public_key":"BBBB","role":"machine","virtual_address":"100.64.0.2","wireguard_public_key":"AAAA"},`
+   `"scopes":[{"capability":"connect","direction":"dial","port":443,"resource_generation":1,"resource_id":`
+   `"network_x","resource_kind":"machine_network"}]}` -> `40caa1b159b30322cc65ce12c2a39a21adaaca453fcc8a8342a45289dd5f0b46`.
+   The daemon applies a delta only if `base_generation` and `base_digest` match its state, recomputes `digest`
+   after applying and asks for a snapshot on any mismatch, so gaps, reordering and replay are safe.
+6. **Expiry.** Mesh scopes carry no `expires_at` (they last until the state `exp`); only per-operation scopes carry
+   their own and come and go as add/remove. Keeping 1k peers alive is one tiny delta, not 1k updates.
+7. **Snapshot** `{snapshot: [pages]}` when the base is unknown or older than the stored state, the digest differs,
+   after key rotation, or after a policy change that rewrites the set. Pages are signed configs of at most
+   128 KiB each with `page`, `pages`, the same `generation` and the `digest` of the whole state; the daemon assembles
+   them and verifies the digest. Builds are cached per (account, mesh_seq) so machines of one account share the mesh
+   build, and limited per account (token bucket) so a reconnect storm queues instead of failing; clients reconnect
+   and refresh with full jitter (Lane R). Lane R raises the daemon's MaxEndpoints (2048) with the deltas.
+8. **Regional candidates and relay grants** stay full in every answer (about 2 nodes).
 Test (PG): one join on a 1,000-machine account writes O(1) change rows per affected scope and each machine's next
 answer carries one change; a 5k-machine team survives a server restart (snapshot storm) without 503s.
 
