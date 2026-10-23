@@ -352,7 +352,7 @@ func (s *Server) fileTransfer(writer http.ResponseWriter, request *http.Request,
 		}
 		errorreport.Current().CaptureFailure(request.Context(), "paperboatd", "transfer", "stream_open", "file_transfer_failed", err)
 		s.recordCause(request.Context(), "transfer", err)
-		if writeRelayQuotaRefusal(writer, requestID, err) {
+		if writeServerRefusal(writer, requestID, err) {
 			return
 		}
 		writeError(writer, http.StatusServiceUnavailable, requestID, "file_transfer_unavailable", "file transfer setup failed; retry the transfer")
@@ -417,7 +417,7 @@ func (s *Server) fileTransferStream(writer http.ResponseWriter, request *http.Re
 		}
 		errorreport.Current().CaptureFailure(request.Context(), "paperboatd", "transfer", "stream_open", "file_transfer_failed", err)
 		s.recordCause(request.Context(), "transfer", err)
-		if writeRelayQuotaRefusal(writer, requestID, err) {
+		if writeServerRefusal(writer, requestID, err) {
 			return
 		}
 		writeError(writer, http.StatusServiceUnavailable, requestID, "file_transfer_stream_unavailable", "file transfer stream could not open; refresh the target and retry the transfer")
@@ -476,7 +476,7 @@ func (s *Server) peerProbe(writer http.ResponseWriter, request *http.Request, re
 			return
 		}
 		// The plan limit explains a timed-out probe too: without a relay the peer cannot be reached.
-		if writeRelayQuotaRefusal(writer, requestID, err) {
+		if writeServerRefusal(writer, requestID, err) {
 			return
 		}
 		if errors.Is(err, context.DeadlineExceeded) {
@@ -523,7 +523,7 @@ func (s *Server) inspectorRequest(writer http.ResponseWriter, request *http.Requ
 			writeError(writer, http.StatusForbidden, requestID, "permission_denied", "inspector authority was denied; refresh the target and its authorization")
 			return
 		}
-		if writeRelayQuotaRefusal(writer, requestID, err) {
+		if writeServerRefusal(writer, requestID, err) {
 			return
 		}
 		if errors.Is(err, context.DeadlineExceeded) {
@@ -585,7 +585,7 @@ func (s *Server) peerStream(writer http.ResponseWriter, request *http.Request, r
 		}
 		errorreport.Current().CaptureFailure(request.Context(), "paperboatd", "peer_stream", "stream_open", "native_private_failed", err)
 		s.recordCause(request.Context(), "peer_stream", err)
-		if writeRelayQuotaRefusal(writer, requestID, err) {
+		if writeServerRefusal(writer, requestID, err) {
 			return
 		}
 		message := "peer stream could not open; refresh the target and check connectivity with pb doctor"

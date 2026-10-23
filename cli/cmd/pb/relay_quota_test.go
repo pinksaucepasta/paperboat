@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 )
 
@@ -38,5 +39,28 @@ func TestRelayQuotaRefusalNamesThePlanLimitAndTheAction(t *testing.T) {
 	other := &localapi.RemoteError{StatusCode: http.StatusServiceUnavailable, Code: "peer_stream_unavailable", Message: "peer stream could not open"}
 	if strings.Contains(commandFailureMessage(other, classifyCommandFailure(other)), "bandwidth") || errors.Is(other, refusal) {
 		t.Fatal("other peer failures must keep the generic guidance")
+	}
+}
+
+// F18-06: a machine outside the API token's scope is a refusal with its own message and code.
+func TestAPITokenScopeRefusalSaysTheTokenDoesNotCoverIt(t *testing.T) {
+	message := api.PublicMessage(localapi.TokenScopeCode)
+	refusal := &localapi.RemoteError{StatusCode: http.StatusForbidden, Code: localapi.TokenScopeCode, Message: message}
+	err := fmt.Errorf("open exec stream: %w", refusal)
+	if got := commandFailureMessage(err, classifyCommandFailure(err)); got != message || !strings.Contains(got, "scope") {
+		t.Fatalf("message = %q", got)
+	}
+	if retryableInitialConnectFailure(err) {
+		t.Fatal("a scope refusal must not be retried")
+	}
+	if encoded := classifyCLIJSONError(err); encoded.Code != localapi.TokenScopeCode || encoded.Retryable || encoded.StateChanged != false {
+		t.Fatalf("json = %#v", encoded)
+	}
+	if safeExecError(refusal) != message {
+		t.Fatalf("exec message = %q", safeExecError(refusal))
+	}
+	direct := &api.APIError{Status: http.StatusForbidden, Code: localapi.TokenScopeCode}
+	if encoded := classifyCLIJSONError(direct); encoded.Code != localapi.TokenScopeCode {
+		t.Fatalf("a direct API refusal keeps its code: %#v", encoded)
 	}
 }

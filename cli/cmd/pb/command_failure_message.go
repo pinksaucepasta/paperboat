@@ -219,7 +219,7 @@ func typedCommandOwnerMessage(owner error, failure commandFailure) string {
 		if owner.Code == "environment_unavailable" {
 			return "Managed environment variables could not be delivered on the target. Check ENV delivery and retry."
 		}
-		if owner.Code == "terminal_session_limit_reached" || owner.Code == localapi.RelayQuotaCode {
+		if owner.Code == "terminal_session_limit_reached" || localapi.Refusal(owner.Code) {
 			return owner.Message
 		}
 		return "The local Paperboat service could not complete the request. Check its status with `pb status`, then retry; run `pb doctor` if this continues."

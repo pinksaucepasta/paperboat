@@ -230,6 +230,10 @@ func classifyCLIJSONFailure(err error, failure commandFailure) cliJSONError {
 		result.Code, result.Category, result.StateChanged = "file_transfer_limit_exceeded", "conflict", false
 		result.Recovery = "Send fewer or smaller files."
 	case *localapi.RemoteError:
+		if typed.Code == localapi.TokenScopeCode {
+			result.Code, result.Category, result.StateChanged, result.Retryable = localapi.TokenScopeCode, "authorization_or_entitlement", false, false
+			result.Recovery = "Use an API token whose scope includes this machine and action, or sign in with `pb login`."
+		}
 		if typed.Code == localapi.RelayQuotaCode {
 			// The connection was refused before anything was sent or started.
 			result.Code, result.Category, result.StateChanged = localapi.RelayQuotaCode, "authorization_or_entitlement", false

@@ -147,8 +147,8 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 		if remote, ok := err.(*localapi.RemoteError); ok && remote.Code == "environment_unavailable" {
 			return fail(125, "environment_unavailable", false, false, err)
 		}
-		if remote, ok := err.(*localapi.RemoteError); ok && remote.Code == localapi.RelayQuotaCode {
-			return fail(255, localapi.RelayQuotaCode, false, false, err)
+		if remote, ok := err.(*localapi.RemoteError); ok && localapi.Refusal(remote.Code) {
+			return fail(255, remote.Code, false, false, err)
 		}
 		return fail(255, "transport_unavailable", false, false, err)
 	}
@@ -427,7 +427,7 @@ func safeExecError(err error) string {
 	if remote, ok := err.(*localapi.RemoteError); ok && remote.Code == "environment_unavailable" {
 		return "Managed environment variables could not be delivered on the target. Check ENV delivery and retry."
 	}
-	if remote, ok := err.(*localapi.RemoteError); ok && remote.Code == localapi.RelayQuotaCode {
+	if remote, ok := err.(*localapi.RemoteError); ok && localapi.Refusal(remote.Code) {
 		return remote.Message
 	}
 	if remote, ok := soleExecRemoteError(err); ok {

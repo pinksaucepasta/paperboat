@@ -132,6 +132,7 @@ var publicAPIMessages = map[string]string{
 	"api_token_name_taken":            "You already have an API token with this name in this workspace. Choose another name or revoke the old token.",
 	"invalid_api_token_scope":         "The API token scope is not valid. Fix the listed errors and try again.",
 	"api_token_invalid":               "The API token expired or was revoked. Create a new one with `pb api-token create`.",
+	"outside_token_scope":             "This API token's scope does not cover this. Use a token whose scope includes it, or sign in with `pb login`.",
 }
 
 // Operation errors are read projections, not HTTP errors. Keep typed machine
