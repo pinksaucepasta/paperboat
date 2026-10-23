@@ -125,7 +125,7 @@ func TestPostgresAuditStreamDelivery(t *testing.T) {
 	if len(bodies) != 1 || strings.Count(string(bodies[0]), "\n") < 3 || headers[0].Get("Authorization") != "Splunk token" {
 		t.Fatalf("delivered %d batches: %q", len(bodies), bodies)
 	}
-	parts := strings.SplitN(strings.TrimPrefix(headers[0].Get("Paperboat-Signature"), "t="), ",v1=", 2)
+	parts := strings.SplitN(strings.TrimPrefix(headers[0].Get(SignatureHeader), "t="), ",v1=", 2)
 	m := hmac.New(sha256.New, []byte(d.SigningSecret))
 	m.Write([]byte(parts[0] + "."))
 	m.Write(bodies[0])

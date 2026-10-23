@@ -1011,7 +1011,7 @@ activity endpoint is folded into it (one way to read). Personal workspaces have 
 - **Streaming to a SIEM** (Team plan; owners/admins; at most one destination of each kind):
   - *HTTPS:* POST of NDJSON batches (≤1 MiB or 5 s), `Content-Type: application/x-ndjson`, an
     optional custom header (e.g. `Authorization: Splunk <token>` or a Datadog key) stored
-    encrypted, and `Paperboat-Signature: t=<unix>,v1=<HMAC-SHA256>` with a per-destination
+    encrypted, and `Pb-Signature: t=<unix>,v1=<HMAC-SHA256>` with a per-destination
     signing secret shown once. Works with Splunk HEC (raw), Datadog, Elastic, Axiom, Cribl, Panther
     and plain webhooks.
   - *S3-compatible:* endpoint, region, bucket, prefix, access key and secret (encrypted); objects

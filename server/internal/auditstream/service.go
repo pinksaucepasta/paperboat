@@ -175,7 +175,7 @@ func (in Input) validate(kind string, creating bool) bool {
 		if in.HeaderName == "" {
 			return in.HeaderValue == ""
 		}
-		reserved := map[string]bool{"host": true, "content-type": true, "content-length": true, "paperboat-signature": true, "user-agent": true}
+		reserved := map[string]bool{"host": true, "content-type": true, "content-length": true, "pb-signature": true, "user-agent": true}
 		return headerName.MatchString(in.HeaderName) && !reserved[strings.ToLower(in.HeaderName)] && (in.HeaderValue != "" || !creating)
 	case "s3":
 		return region.MatchString(in.Region) && bucket.MatchString(in.Bucket) && prefix.MatchString(in.Prefix) &&

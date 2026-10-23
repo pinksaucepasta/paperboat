@@ -18,6 +18,11 @@ func TestSignatureIsHMACOfTimestampAndBody(t *testing.T) {
 	if want := "t=1761200000,v1=" + hex.EncodeToString(m.Sum(nil)); got != want {
 		t.Fatalf("signature = %s, want %s", got, want)
 	}
+	// The Paperboat tunnel edge strips Paperboat-* request headers as credentials; a receiver
+	// behind it lost the signature (live F19-10 check, 2026-10-23).
+	if strings.HasPrefix(strings.ToLower(SignatureHeader), "paperboat-") || strings.HasPrefix(strings.ToLower(SignatureHeader), "x-paperboat-") {
+		t.Fatalf("%s is in the namespace proxies strip", SignatureHeader)
+	}
 }
 
 func TestDestinationsOnlyOnThePublicInternet(t *testing.T) {
@@ -44,7 +49,7 @@ func TestInputValidation(t *testing.T) {
 		t.Fatal("valid https refused")
 	}
 	for name, in := range map[string]Input{
-		"reserved header": {URL: "https://siem.example.test", HeaderName: "Paperboat-Signature", HeaderValue: "x"},
+		"reserved header": {URL: "https://siem.example.test", HeaderName: "Pb-Signature", HeaderValue: "x"},
 		"header no value": {URL: "https://siem.example.test", HeaderName: "Authorization"},
 		"bad bucket":      {URL: good.URL, Region: good.Region, Bucket: "Bad_Bucket", AccessKeyID: "AKIA", SecretAccessKey: "s"},
 		"no secret":       {URL: good.URL, Region: good.Region, Bucket: good.Bucket, AccessKeyID: "AKIA"},

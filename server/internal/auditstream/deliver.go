@@ -80,8 +80,12 @@ func deliveryFailure(err error) error {
 	return &DeliveryError{Reason: "could not connect to the destination"}
 }
 
-// signature is the Paperboat-Signature header: t=<unix seconds>,v1=<hex HMAC-SHA256 of "t.body">.
-// Receivers recompute it with their signing secret and reject old timestamps (as Stripe does).
+// SignatureHeader carries t=<unix seconds>,v1=<hex HMAC-SHA256 of "t.body">. Receivers recompute
+// it with their signing secret and reject old timestamps (as Stripe does). It stays outside the
+// Paperboat-* namespace, which proxies such as the Paperboat tunnel edge strip as credentials.
+const SignatureHeader = "Pb-Signature"
+
+// signature is the SignatureHeader value.
 func signature(secret string, at time.Time, body []byte) string {
 	t := strconv.FormatInt(at.Unix(), 10)
 	m := hmac.New(sha256.New, []byte(secret))
@@ -98,7 +102,7 @@ func sendHTTPS(ctx context.Context, client httpDoer, d Destination, secrets Secr
 	}
 	req.Header.Set("Content-Type", "application/x-ndjson")
 	req.Header.Set("User-Agent", "Paperboat-Audit-Stream/1")
-	req.Header.Set("Paperboat-Signature", signature(secrets.SigningSecret, now, body))
+	req.Header.Set(SignatureHeader, signature(secrets.SigningSecret, now, body))
 	if d.HeaderName != "" {
 		req.Header.Set(d.HeaderName, secrets.HeaderValue)
 	}

@@ -174,7 +174,7 @@ example `Authorization: Splunk <HEC token>` (Splunk HEC raw endpoint), `DD-API-K
 (Datadog logs), `Authorization: Bearer <token>` (Axiom, Cribl, Panther, Elastic). Any 2xx answer
 counts as delivered.
 
-Every request carries `Paperboat-Signature: t=<unix seconds>,v1=<hex>` where `v1` is
+Every request carries `Pb-Signature: t=<unix seconds>,v1=<hex>` where `v1` is
 HMAC-SHA256 with your signing secret (shown once when you create the stream) over
 `<t>.<request body>`. To verify: recompute it, compare in constant time, and reject a `t` older
 than 5 minutes.
