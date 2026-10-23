@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/pinksaucepasta/paperboat/server/internal/accessdescriptor"
+	"github.com/pinksaucepasta/paperboat/server/internal/accountdeletion"
 	"github.com/pinksaucepasta/paperboat/server/internal/activity"
 	"github.com/pinksaucepasta/paperboat/server/internal/apitokens"
 	"github.com/pinksaucepasta/paperboat/server/internal/audit"
@@ -822,6 +823,7 @@ func New(opts Options) (*App, error) {
 	}
 	teamIdentity := teamidentity.New(store, workOSOrganizations, opts.Config.Business, opts.Config.Mail.InvitationLifetimeSeconds, strings.TrimRight(opts.Config.HTTP.BrowserLoginOrigin, "/")+"/team", workspaceBilling)
 	apiTokens := apitokens.New(store, auditWriter, opts.Config.APITokens, opts.Config.Secrets.EncryptionKey)
+	accountDeletion := accountdeletion.New(store, userMachineService, opts.Config.Mail)
 	router := httpapi.NewRouter(httpapi.Options{
 		ClientUpdatePolicy:        clientupdate.New(store, auditWriter, opts.Config.ReleaseDirectory),
 		SupportReports:            supportService,
@@ -868,6 +870,7 @@ func New(opts Options) (*App, error) {
 		Routes:                    routeService,
 		Favorites:                 favorites.NewService(store),
 		APITokens:                 apiTokens,
+		AccountDeletion:           accountDeletion,
 		ControlDiagnostics:        controlDiagnostics,
 		OperationRecovery:         operationRecovery,
 		PeerIdentity:              peerIdentityService,

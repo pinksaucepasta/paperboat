@@ -16280,6 +16280,150 @@
             "type": "string"
           }
         }
+      },
+      "AccountDeletionRequest": {
+        "type": "object",
+        "required": [
+          "confirm_email"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "confirm_email": {
+            "type": "string",
+            "description": "The account email, typed to confirm."
+          }
+        }
+      },
+      "AccountDeletionPreview": {
+        "type": "object",
+        "required": [
+          "account_email",
+          "machines",
+          "env_vaults",
+          "previews",
+          "tunnels",
+          "config_sync",
+          "inbox_items",
+          "api_tokens",
+          "subscription",
+          "teams_deleted",
+          "teams_blocking",
+          "reauthenticated_at",
+          "reauthentication_required"
+        ],
+        "properties": {
+          "account_email": {
+            "type": "string"
+          },
+          "machines": {
+            "type": "integer"
+          },
+          "env_vaults": {
+            "type": "integer"
+          },
+          "previews": {
+            "type": "integer"
+          },
+          "tunnels": {
+            "type": "integer"
+          },
+          "config_sync": {
+            "type": "boolean"
+          },
+          "inbox_items": {
+            "type": "integer"
+          },
+          "api_tokens": {
+            "type": "integer"
+          },
+          "subscription": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "plan",
+                  "period_end"
+                ],
+                "properties": {
+                  "plan": {
+                    "type": "string"
+                  },
+                  "period_end": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "date-time"
+                  }
+                }
+              }
+            ]
+          },
+          "teams_deleted": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "slug",
+                "name"
+              ],
+              "properties": {
+                "slug": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "teams_blocking": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "slug",
+                "name",
+                "members"
+              ],
+              "properties": {
+                "slug": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "members": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "reauthenticated_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "reauthentication_required": {
+            "type": "boolean"
+          }
+        }
+      },
+      "AccountDeletionPreviewResponse": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AccountDeletionPreview"
+          }
+        }
       }
     },
     "responses": {
@@ -49649,6 +49793,111 @@
             "$ref": "#/components/responses/Error"
           }
         }
+      }
+    },
+    "/v1/account/deletion-preview": {
+      "get": {
+        "summary": "Preview account deletion",
+        "description": "Browser session only. Lists what deleting the account removes (machines, personal ENV vaults, previews, tunnels, config sync, inbox items, API tokens, the active subscription) and the teams that are deleted with it or block it. reauthentication_required is true when the session signed in more than five minutes ago; deletion then needs a fresh sign-in.",
+        "security": [
+          {
+            "cookieSession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deletion preview.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountDeletionPreviewResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "description": "A CLI session or API token was used; account deletion is only available in the console. details.console_url names the console page.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "operationId": "get_v1_account_deletion_preview"
+      }
+    },
+    "/v1/account": {
+      "delete": {
+        "summary": "Delete the account",
+        "description": "Browser session only, with CSRF. Irreversible. Revokes every machine the account owns, ends its sessions and tokens, removes its personal data, deletes single-member teams it owns and leaves other teams, and anonymizes its audit events. The user row stays as a tombstone. Provider cleanup (WorkOS user, Stripe subscription, confirmation email) runs afterwards from a retried queue and never blocks the deletion. Returns 204 and clears the session cookies.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountDeletionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Account deleted; session cookies cleared."
+          },
+          "400": {
+            "description": "confirm_email does not match the account email (confirmation_mismatch), or the body is malformed (validation_failed).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in (unauthenticated), or the last sign-in is more than five minutes old (reauthentication_required).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A CLI session or API token was used (account_deletion_console_only, details.console_url), or the CSRF check failed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The account owns a team with other members (account_owns_team). details.teams lists {slug, name, members}; transfer or delete those teams first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "operationId": "delete_v1_account"
       }
     }
   }

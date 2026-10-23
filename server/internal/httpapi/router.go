@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/server/internal/accountdeletion"
 	"github.com/pinksaucepasta/paperboat/server/internal/activity"
 	"github.com/pinksaucepasta/paperboat/server/internal/apitokens"
 	"github.com/pinksaucepasta/paperboat/server/internal/auditstream"
@@ -105,6 +106,7 @@ type Options struct {
 	Routes                   *controlplane.RouteService
 	Favorites                *favorites.Service
 	APITokens                *apitokens.Service
+	AccountDeletion          *accountdeletion.Service
 	ControlDiagnostics       *controlplane.DiagnosticsService
 	OperationRecovery        *controlplane.OperationRecoveryService
 	PeerIdentity             *peeridentity.Service
@@ -879,6 +881,10 @@ func registerAuthRoutes(mux *http.ServeMux, opts Options) {
 		meHandler = requireAnyAuth(opts.Auth, opts.DeviceAuth, me(opts.Auth))
 	}
 	mux.Handle("GET /v1/me", meHandler)
+	if opts.AccountDeletion != nil && opts.Auth != nil {
+		mux.Handle("GET /v1/account/deletion-preview", accountDeletionBrowserOnly(opts.AccountDeletion, requireAuth(opts.Auth, accountDeletionPreview(opts.AccountDeletion))))
+		mux.Handle("DELETE /v1/account", accountDeletionBrowserOnly(opts.AccountDeletion, requireAuth(opts.Auth, requireCSRF(opts.Auth, accountDelete(opts.Auth, opts.AccountDeletion)))))
+	}
 	if opts.APITokens != nil {
 		mux.Handle("POST /v1/workspaces/{ws}/api-tokens", accountRead(requireCSRF(opts.Auth, apiTokenCreate(opts.APITokens))))
 		mux.Handle("GET /v1/workspaces/{ws}/api-tokens", accountRead(apiTokenList(opts.APITokens)))
