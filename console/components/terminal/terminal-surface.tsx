@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils"
 import type { TerminalConnection } from "@/lib/terminal/use-terminal-connection"
 import type { MobileKey } from "@/lib/terminal/mobile-keys"
 import { terminalThemeStyle, type TerminalTheme } from "@/lib/terminal/themes"
+import { QuotaMessage } from "@/components/quota-banner"
 import { Button } from "@/components/ui/button"
 
 const mobileKeys: { label: string; key: MobileKey | "CTRL" | "ALT"; description: string }[] = [
@@ -47,7 +48,7 @@ export function TerminalSurface({
 }) {
   const { phase, catchingUp, error, upload, role, mobile } = connection
   const busy = phase === "connecting" || phase === "reconnecting" || (phase === "attached" && catchingUp)
-  const stopped = phase === "denied" || phase === "closed" || phase === "transport-error"
+  const stopped = phase === "denied" || phase === "closed" || phase === "transport-error" || phase === "quota"
   // Overlays take the theme's colours, so they belong to the terminal rather than the page.
   const overlay = {
     background: `color-mix(in oklab, ${theme.background} 92%, transparent)`,
@@ -89,9 +90,19 @@ export function TerminalSurface({
           >
             <div className="w-full max-w-sm rounded-lg border p-5 text-sm" style={overlay}>
               <p className="font-medium">
-                {phase === "closed" ? "Terminal closed" : phase === "denied" ? "No access" : "Connection lost"}
+                {phase === "closed"
+                  ? "Terminal closed"
+                  : phase === "denied"
+                    ? "No access"
+                    : phase === "quota"
+                      ? "Bandwidth used up"
+                      : "Connection lost"}
               </p>
-              {error && (
+              {phase === "quota" ? (
+                <div className="mt-1.5" style={muted}>
+                  <QuotaMessage />
+                </div>
+              ) : error && (
                 <p className="mt-1.5" style={muted}>
                   {error}
                 </p>

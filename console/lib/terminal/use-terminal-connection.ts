@@ -42,7 +42,15 @@ import { paletteSequence, type TerminalTheme } from "@/lib/terminal/themes"
 export type TerminalSession = Data<"/v1/terminal-sessions/{session_id}/sharing">
 export type TerminalRole = "owner" | "viewer" | "interactive"
 export type TerminalPhase =
-  "loading" | "connecting" | "attached" | "reconnecting" | "denied" | "closed" | "transport-error"
+  | "loading"
+  | "connecting"
+  | "attached"
+  | "reconnecting"
+  | "denied"
+  | "closed"
+  | "transport-error"
+  /** The workspace's hosted bandwidth is used up: retrying can't help until it renews or is added to. */
+  | "quota"
 
 type Ticket = {
   stream_url: string
@@ -733,6 +741,13 @@ export function useTerminalConnection({
           catchupRequestRef.current = ""
           catchupBoundaryRef.current = null
         }
+        // The edge refuses a terminal at the bandwidth cap (and ends an open one) with this code.
+        if (event.code === "bandwidth_quota_exhausted") {
+          resetSync()
+          window.clearTimeout(reconnectTimerRef.current)
+          setPhaseValue("quota")
+          return
+        }
         if (event.state === "reconnecting") {
           resetSync()
           setError("")
@@ -971,7 +986,9 @@ export function useTerminalConnection({
         if (identityID) apiRef.current?.discardIdentity(identityID)
         if (disposedRef.current) return
         setError(apiErrorMessage(reason))
-        if (reason instanceof ApiError && [401, 403, 404].includes(reason.status)) {
+        if (reason instanceof ApiError && reason.code === "bandwidth_quota_exhausted") {
+          setPhaseValue("quota")
+        } else if (reason instanceof ApiError && [401, 403, 404].includes(reason.status)) {
           if (accessMethod === "code")
             setError("Your code has stopped working. It may have expired or been replaced; ask for a new one.")
           setPhaseValue("denied")
