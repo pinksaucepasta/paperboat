@@ -178,19 +178,16 @@ func buildRecord(pending *Pending, policy ResourcePolicy, completed CompletedCap
 		method = method[:16]
 	}
 	sanitizedURL, urlTruncated := SanitizeURL(strings.TrimSpace(completed.RawURL))
-	if strings.TrimSpace(completed.RawURL) == "" {
-		sanitizedURL, urlTruncated = redactedValue, true
-	}
 	requestHeaders, requestHeaderTruncated := SanitizeHeaders(completed.RequestHeaders)
 	responseHeaders, responseHeaderTruncated := SanitizeHeaders(completed.ResponseHeaders)
 	headersTruncated := requestHeaderTruncated || responseHeaderTruncated
 
 	requestBody, requestState := sanitizeBody(
 		completed.RequestBody, completed.RequestTruncated, completed.RequestUnsupported,
-		policy.CaptureRequestBody, requestHeaders.Get("Content-Type"), policy.SensitiveNames)
+		policy.CaptureRequestBody)
 	responseBody, responseState := sanitizeBody(
 		completed.ResponseBody, completed.ResponseTruncated, completed.ResponseUnsupported,
-		policy.CaptureResponseBody, responseHeaders.Get("Content-Type"), policy.SensitiveNames)
+		policy.CaptureResponseBody)
 
 	// Enforce the 16 KiB metadata cap by dropping response headers first,
 	// then request headers, keeping method/URL/status always.
@@ -289,11 +286,10 @@ func dropOneHeader(header http.Header) {
 }
 
 // sanitizeBody applies the opt-in policy: disabled modes report dropped
-// without storing bytes; unsupported streams and non-JSON bodies report
-// unsupported; truncated captures keep their state; otherwise bodies are
-// redacted as bounded UTF-8 JSON or marked unsupported when redaction fails
-// closed.
-func sanitizeBody(body []byte, truncated, unsupported, enabled bool, contentType string, sensitive []string) ([]byte, CaptureState) {
+// without storing bytes; unsupported streams and binary bodies report
+// unsupported; text bodies are stored as sent, truncated ones as their
+// retained prefix.
+func sanitizeBody(body []byte, truncated, unsupported, enabled bool) ([]byte, CaptureState) {
 	if unsupported {
 		return nil, StateUnsupported
 	}
@@ -301,26 +297,17 @@ func sanitizeBody(body []byte, truncated, unsupported, enabled bool, contentType
 		return nil, StateDropped
 	}
 	if truncated && int64(len(body)) >= BodyMaxBytes {
-		// Attempt to redact the retained prefix; a cut mid-value fails
-		// closed to unsupported rather than leaking a partial secret.
-		if !jsonBodySupported(contentType, body) {
+		prefix := textPrefix(body, int(BodyMaxBytes))
+		if !textBody(prefix) {
 			return nil, StateTruncated
 		}
-		sanitized, err := SanitizeJSONBody(body, sensitive)
-		if err != nil {
-			return nil, StateTruncated
-		}
-		return sanitized, StateTruncated
+		return append([]byte(nil), prefix...), StateTruncated
 	}
 	if len(body) == 0 {
 		return nil, StateComplete
 	}
-	if !jsonBodySupported(contentType, body) {
+	if !textBody(body) {
 		return nil, StateUnsupported
 	}
-	sanitized, err := SanitizeJSONBody(body, sensitive)
-	if err != nil {
-		return nil, StateUnsupported
-	}
-	return sanitized, StateComplete
+	return append([]byte(nil), body...), StateComplete
 }

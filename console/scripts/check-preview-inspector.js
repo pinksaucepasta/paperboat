@@ -33,8 +33,13 @@
     [...document.querySelectorAll("label")].find((l) => l.textContent.trim() === label)?.querySelector("[role=switch]")
   // Accept-Language is one of the few headers a no-cors fetch may set; it carries the tag so the
   // check can see a header value shown in full.
+  // A no-cors fetch only rejects on a network error (DNS, TLS, edge); those are counted so a
+  // request that never reached the preview is not mistaken for one the inspector missed.
+  const unsent = []
   const hit = (path, headers = {}) =>
-    fetch(`https://${host}${path}`, { mode: "no-cors", cache: "no-store", headers }).catch(() => null)
+    fetch(`https://${host}${path}`, { mode: "no-cors", cache: "no-store", headers }).catch((error) => {
+      unsent.push(`${path}: ${error.message}`)
+    })
 
   const ready = await until(() => section() || ["Not allowed", "Machine offline", "Machine needs an update", "Preview stopped"].includes(state()), 30000)
   pass("page connects or shows a clear state", Boolean(ready), state() ?? section()?.dataset.inspectorPhase ?? "")
@@ -60,6 +65,7 @@
   await hit(`/${tag}/a`, { "Accept-Language": `${tag}-lang` })
   await hit(`/${tag}/b?x=1`)
   const live = await until(() => rows().filter((row) => row.innerText.includes(tag)).length >= 2, 20000)
+  pass("requests reach the preview", unsent.length === 0, unsent.join("; "))
   pass("requests arrive live", Boolean(live))
   await sleep(3000)
   pass("no duplicate rows after several polls", new Set(ids()).size === ids().length, `${ids().length} rows`)

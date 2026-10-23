@@ -106,9 +106,6 @@ func TestInspectorPublicCaptureAndReplay(t *testing.T) {
 	defer hub.Close()
 
 	lease := Lease{ID: "preview-public", AccountID: identity.AccountID, Generation: 2, AccessMode: "public", Endpoint: "https://public.example.test", Target: LeaseTarget{Scheme: "http", Address: origin.Listener.Addr().String()}, LeaseDeadline: time.Now().UTC().Add(time.Hour)}
-	if status, payload := call(http.MethodPut, "/v1/inspector/policy", map[string]any{"resource_kind": "preview", "resource_id": lease.ID, "route_id": lease.ID, "enabled": true, "capture_request_body": true, "capture_response_body": true, "capture_raw": true}, "grant_owner_replay"); status != http.StatusOK {
-		t.Fatalf("enable = %d: %s", status, payload)
-	}
 
 	carrier, err := NewDataCarrierPreviewCarrier(DataCarrierPreviewCarrierConfig{Hub: hub, Identity: identity, RouteID: "pvc_rte_pub", Inspector: store, Registry: registry, DialOrigin: func(ctx context.Context, target LeaseTarget) (io.ReadWriteCloser, error) {
 		return (&net.Dialer{}).DialContext(ctx, "tcp", target.Address)
@@ -123,6 +120,29 @@ func TestInspectorPublicCaptureAndReplay(t *testing.T) {
 	case <-ready:
 	case <-ctx.Done():
 		t.Fatal("carrier not ready")
+	}
+
+	// Traffic flows before capture is on; the first request after the
+	// policy PUT is answered must be captured (the console sends traffic
+	// as soon as its toggle shows on).
+	warm, err := pair.edge.OpenStream(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := connectorprotocol.WriteStreamOpen(warm, testPreviewStreamOpen(identity, "pvc_rte_pub", "request-before-capture")); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = fmt.Fprintf(warm, "GET /before HTTP/1.1\r\nHost: public.example.test\r\nConnection: close\r\n\r\n")
+	if response, err := http.ReadResponse(bufio.NewReader(warm), nil); err != nil {
+		t.Fatal(err)
+	} else {
+		_, _ = io.Copy(io.Discard, response.Body)
+		_ = response.Body.Close()
+	}
+	_ = warm.Close()
+	hits.Store(0)
+	if status, payload := call(http.MethodPut, "/v1/inspector/policy", map[string]any{"resource_kind": "preview", "resource_id": lease.ID, "route_id": lease.ID, "enabled": true, "capture_request_body": true, "capture_response_body": true, "capture_raw": true}, "grant_owner_replay"); status != http.StatusOK {
+		t.Fatalf("enable = %d: %s", status, payload)
 	}
 
 	stream, err := pair.edge.OpenStream(ctx)
@@ -164,8 +184,8 @@ func TestInspectorPublicCaptureAndReplay(t *testing.T) {
 		t.Fatalf("page = %s err=%v", payload, err)
 	}
 	record := page.Records[0]
-	if strings.Contains(record.URL, "secret") || strings.Contains(record.ResponseBody, "zzz") || strings.Contains(record.ResponseBody, "hunter2") {
-		t.Fatalf("sanitized record leaked: %+v", record)
+	if !strings.Contains(record.URL, "session=secret") || !strings.Contains(record.ResponseBody, "zzz") {
+		t.Fatalf("record not kept as sent: %+v", record)
 	}
 	if record.ReplayIneligible != "" {
 		t.Fatalf("complete public capture must be replayable: %+v", record)

@@ -75,7 +75,7 @@ export function CaptureRow({
 
 const bodyStates: Record<string, string> = {
   "": "Not captured. Turn on “Capture bodies” to record bodies.",
-  unsupported: "Not captured: this content type isn’t recorded.",
+  unsupported: "Not shown: binary or streamed body.",
   dropped: "Dropped: the machine was over its capture budget.",
   expired: "Expired.",
 }

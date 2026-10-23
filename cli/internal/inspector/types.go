@@ -28,9 +28,7 @@ const (
 	MetadataMaxBytes       = 16 << 10
 	URLMaxBytes            = 2048
 	URLInputMaxBytes       = 64 << 10
-	JSONMaxDepth           = 64
 	MaxHeadersPerDirection = 64
-	MaxSensitiveNames      = 64
 	BodyMaxBytes           = 64 << 10
 	RawMaxBytes            = 256 << 10
 	RawRetention           = 2 * time.Minute
@@ -92,9 +90,6 @@ type ResourcePolicy struct {
 	RouteGeneration    uint64
 	TargetGeneration   uint64
 	Revoked            bool
-	// SensitiveNames adds case-insensitive body field names to the built-in
-	// password/secret/token/key matcher.
-	SensitiveNames []string
 }
 
 func validResourceID(value string) bool {

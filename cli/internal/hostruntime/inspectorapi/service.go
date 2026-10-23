@@ -27,10 +27,8 @@ import (
 )
 
 const (
-	SchemaV1            = "paperboat.inspector/v1"
-	maxRequestBytes     = 64 << 10
-	maxPolicyNames      = 32
-	maxSensitiveNameLen = 128
+	SchemaV1        = "paperboat.inspector/v1"
+	maxRequestBytes = 64 << 10
 	// grantHeader carries the server-minted inspector grant token. It is
 	// write-only: accepted on input, never logged, never returned.
 	grantHeader = "X-Paperboat-Inspector-Grant"
@@ -390,14 +388,13 @@ func decodeStrict(body io.Reader, out any) error {
 }
 
 type policyRequest struct {
-	ResourceKind        string   `json:"resource_kind"`
-	ResourceID          string   `json:"resource_id"`
-	RouteID             string   `json:"route_id"`
-	Enabled             bool     `json:"enabled"`
-	CaptureRequestBody  bool     `json:"capture_request_body"`
-	CaptureResponseBody bool     `json:"capture_response_body"`
-	CaptureRaw          bool     `json:"capture_raw"`
-	SensitiveNames      []string `json:"sensitive_names"`
+	ResourceKind        string `json:"resource_kind"`
+	ResourceID          string `json:"resource_id"`
+	RouteID             string `json:"route_id"`
+	Enabled             bool   `json:"enabled"`
+	CaptureRequestBody  bool   `json:"capture_request_body"`
+	CaptureResponseBody bool   `json:"capture_response_body"`
+	CaptureRaw          bool   `json:"capture_raw"`
 }
 
 type replayHTTPRequest struct {
@@ -549,15 +546,9 @@ func (s *Service) handlePolicy(writer http.ResponseWriter, request *http.Request
 		writeError(requestContext(request), writer, http.StatusBadRequest, "invalid_inspector_request", nil)
 		return
 	}
-	if !validQueryResource(body.ResourceID) || len(body.SensitiveNames) > maxPolicyNames {
+	if !validQueryResource(body.ResourceID) {
 		writeError(requestContext(request), writer, http.StatusBadRequest, "invalid_inspector_request", nil)
 		return
-	}
-	for _, name := range body.SensitiveNames {
-		if len(name) > maxSensitiveNameLen {
-			writeError(requestContext(request), writer, http.StatusBadRequest, "invalid_inspector_request", nil)
-			return
-		}
 	}
 	// Capture-policy changes require the replay action: they control future
 	// replayability and destroy nothing by themselves, but only replay
@@ -570,7 +561,6 @@ func (s *Service) handlePolicy(writer http.ResponseWriter, request *http.Request
 	policy := inspector.ResourcePolicy{
 		Enabled: body.Enabled, CaptureRequestBody: body.CaptureRequestBody,
 		CaptureResponseBody: body.CaptureResponseBody, CaptureRaw: body.CaptureRaw,
-		SensitiveNames:     body.SensitiveNames,
 		ResourceGeneration: credential.ResourceGeneration,
 		RouteGeneration:    credential.RouteGeneration,
 		TargetGeneration:   credential.TargetGeneration,

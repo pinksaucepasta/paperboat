@@ -2,12 +2,12 @@ package inspector
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func testCredential(resourceID, principal string, action Action, now time.Time) Credential {
@@ -62,7 +62,8 @@ func TestDisabledByDefault(t *testing.T) {
 	}
 }
 
-func TestCaptureKeepsHeadersAndRedactsBodyAndQuery(t *testing.T) {
+// Captures keep requests as sent, like ngrok: headers, query and body in full.
+func TestCaptureKeepsHeadersQueryAndBodyAsSent(t *testing.T) {
 	now := time.Now().UTC()
 	store := NewStore()
 	store.now = func() time.Time { return now }
@@ -92,20 +93,14 @@ func TestCaptureKeepsHeadersAndRedactsBodyAndQuery(t *testing.T) {
 	if got := record.RequestHeaders.Get("Content-Type"); got != "application/json" {
 		t.Fatalf("content-type lost: %q", got)
 	}
-	if strings.Contains(record.URL, "session=secret") {
-		t.Fatalf("query value leaked: %q", record.URL)
+	if want := "https://app.example.test/api/items?session=secret&next=/x"; record.URL != want {
+		t.Fatalf("url = %q, want %q", record.URL, want)
 	}
-	if !strings.Contains(record.URL, "/api/items") {
-		t.Fatalf("path lost: %q", record.URL)
+	if string(record.RequestBody) != string(requestBody) {
+		t.Fatalf("request body = %s, want it as sent", record.RequestBody)
 	}
-	if strings.Contains(string(record.RequestBody), "hunter2") || strings.Contains(string(record.RequestBody), "abc") {
-		t.Fatalf("body secret leaked: %s", record.RequestBody)
-	}
-	if !strings.Contains(string(record.RequestBody), "hello") {
-		t.Fatalf("non-sensitive body lost: %s", record.RequestBody)
-	}
-	if strings.Contains(string(record.ResponseBody), "zzz") {
-		t.Fatalf("response secret leaked: %s", record.ResponseBody)
+	if string(record.ResponseBody) != string(responseBody) {
+		t.Fatalf("response body = %s, want it as sent", record.ResponseBody)
 	}
 	if record.RequestBodyState != StateComplete || record.ResponseBodyState != StateComplete {
 		t.Fatalf("body states = %q/%q", record.RequestBodyState, record.ResponseBodyState)
@@ -349,17 +344,29 @@ func TestPerResourceBudgetIsolation(t *testing.T) {
 	}
 }
 
-func TestLongURLIsRedactedBeforeTruncation(t *testing.T) {
-	secret := strings.Repeat("s", URLMaxBytes+100)
-	got, truncated := SanitizeURL("https://example.test/path?token=" + secret)
-	if !truncated {
-		t.Fatal("long sanitized URL was not marked truncated")
+func TestLongURLIsTruncatedOnARuneBoundary(t *testing.T) {
+	long := "https://example.test/path?q=" + strings.Repeat("é", URLMaxBytes)
+	got, truncated := SanitizeURL(long)
+	if !truncated || len(got) > URLMaxBytes || !utf8.ValidString(got) || !strings.HasPrefix(long, got) {
+		t.Fatalf("url = %d bytes, truncated=%v, valid=%v", len(got), truncated, utf8.ValidString(got))
 	}
-	if strings.Contains(got, secret[:128]) || strings.Contains(got, "token="+secret[:32]) {
-		t.Fatalf("long URL leaked query value: %q", got)
+	if got, truncated := SanitizeURL("https://example.test/" + strings.Repeat("path/", URLInputMaxBytes)); got != truncatedURL || !truncated {
+		t.Fatalf("oversized URL = %q, %v", got, truncated)
 	}
-	if len(got) > URLMaxBytes {
-		t.Fatalf("URL length = %d", len(got))
+}
+
+// Text bodies of any content type are stored as sent; binary ones are marked unsupported.
+func TestBodiesAreStoredAsTextOrMarkedUnsupported(t *testing.T) {
+	if body, state := sanitizeBody([]byte("a=1&password=x"), false, false, true); string(body) != "a=1&password=x" || state != StateComplete {
+		t.Fatalf("form body = %q %q", body, state)
+	}
+	if body, state := sanitizeBody([]byte{0x89, 'P', 'N', 'G', 0}, false, false, true); body != nil || state != StateUnsupported {
+		t.Fatalf("binary body = %q %q", body, state)
+	}
+	long := []byte(strings.Repeat("é", BodyMaxBytes))
+	body, state := sanitizeBody(long[:BodyMaxBytes], true, false, true)
+	if state != StateTruncated || !utf8.Valid(body) || len(body) == 0 || len(body) > BodyMaxBytes {
+		t.Fatalf("truncated body = %d bytes %q", len(body), state)
 	}
 }
 
@@ -497,10 +504,6 @@ func TestRunExpiresIdlePendingAtDeadlineAndPurgesOnCancel(t *testing.T) {
 func TestPolicyAndUsageChurnRemainBounded(t *testing.T) {
 	store := NewStore()
 	policy := testPolicy()
-	policy.SensitiveNames = make([]string, MaxSensitiveNames+10)
-	for i := range policy.SensitiveNames {
-		policy.SensitiveNames[i] = "safe-name"
-	}
 	for i := 0; i < DaemonMaxRecords; i++ {
 		id := fmt.Sprintf("tunnel_%04d", i)
 		if err := store.SetPolicy(id, policy); err != nil {
@@ -516,39 +519,6 @@ func TestPolicyAndUsageChurnRemainBounded(t *testing.T) {
 	}
 	if len(store.policies) != DaemonMaxRecords {
 		t.Fatalf("policy entries = %d", len(store.policies))
-	}
-	if len(store.policies["tunnel_replacement"].SensitiveNames) != MaxSensitiveNames {
-		t.Fatal("sensitive-name policy was not bounded")
-	}
-}
-
-func TestSanitizerBoundsAdversarialJSONAndURLInput(t *testing.T) {
-	var document strings.Builder
-	document.WriteByte('{')
-	for i := 0; i < 2500; i++ {
-		if i > 0 {
-			document.WriteByte(',')
-		}
-		fmt.Fprintf(&document, `%q:%q`, fmt.Sprintf("field_%04d", i), "value")
-	}
-	document.WriteString(`,"password":"must-not-survive"}`)
-	if document.Len() > BodyMaxBytes {
-		t.Fatalf("fixture exceeded input cap: %d", document.Len())
-	}
-	sanitized, err := SanitizeJSONBody([]byte(document.String()), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cap(sanitized) > BodyMaxBytes || strings.Contains(string(sanitized), "must-not-survive") || !json.Valid(sanitized) {
-		t.Fatalf("adversarial JSON was not safely bounded/redacted: len=%d cap=%d", len(sanitized), cap(sanitized))
-	}
-	nested := strings.Repeat("[", JSONMaxDepth+2) + "0" + strings.Repeat("]", JSONMaxDepth+2)
-	if _, err := SanitizeJSONBody([]byte(nested), nil); err != ErrInvalid {
-		t.Fatalf("deep JSON = %v", err)
-	}
-	longURL := "https://example.test/" + strings.Repeat("path/", URLInputMaxBytes)
-	if got, truncated := SanitizeURL(longURL); got != redactedValue || !truncated {
-		t.Fatalf("oversized URL = %q, %v", got, truncated)
 	}
 }
 

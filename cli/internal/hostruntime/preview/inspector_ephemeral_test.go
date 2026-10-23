@@ -180,13 +180,13 @@ func TestInspectorEphemeralCaptureAndReplay(t *testing.T) {
 		t.Fatalf("page = %s err=%v", payload, err)
 	}
 	record := page.Records[0]
-	if !strings.Contains(record.URL, "/items") || strings.Contains(record.URL, "secret") {
-		t.Fatalf("sanitized URL wrong: %q", record.URL)
+	if !strings.Contains(record.URL, "/items?session=secret") {
+		t.Fatalf("url = %q, want it as sent", record.URL)
 	}
 	if got := record.RequestHeaders["Authorization"]; len(got) != 1 || got[0] != "Bearer client-secret" {
 		t.Fatalf("authorization not stored in full: %v", record.RequestHeaders)
 	}
-	if strings.Contains(record.ResponseBody, "zzz") || !strings.Contains(record.ResponseBody, "ok") {
+	if !strings.Contains(record.ResponseBody, "zzz") {
 		t.Fatalf("response body wrong: %q", record.ResponseBody)
 	}
 	if record.ReplayIneligible != "" {

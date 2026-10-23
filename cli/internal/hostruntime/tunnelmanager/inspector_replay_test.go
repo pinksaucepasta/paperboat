@@ -102,8 +102,8 @@ func TestInspectorDurableRegistersReplayBinding(t *testing.T) {
 	if _, ok := registry.Current("route_durable", time.Now().UTC()); ok {
 		t.Fatal("closed local target remained replayable")
 	}
-	if result.Method != "POST" || !strings.Contains(result.URL, "/submit") || strings.Contains(result.URL, "secret") {
-		t.Fatalf("replay result not sanitized: %+v", result)
+	if result.Method != "POST" || !strings.Contains(result.URL, "/submit?session=secret") {
+		t.Fatalf("replay result URL not as sent: %+v", result)
 	}
 }
 

@@ -560,11 +560,7 @@ func responseCaptureState(header http.Header, body []byte, truncated bool) Captu
 	if len(body) == 0 {
 		return StateComplete
 	}
-	contentType := ""
-	if header != nil {
-		contentType = header.Get("Content-Type")
-	}
-	if !jsonBodySupported(contentType, body) {
+	if !textBody(body) {
 		return StateUnsupported
 	}
 	return StateComplete

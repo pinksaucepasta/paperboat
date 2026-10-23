@@ -220,17 +220,6 @@ func (s *Store) SetPolicy(resourceID string, policy ResourcePolicy) error {
 	if !validResourceID(resourceID) {
 		return ErrInvalid
 	}
-	names := make([]string, 0, len(policy.SensitiveNames))
-	for _, name := range policy.SensitiveNames {
-		if len(names) >= MaxSensitiveNames {
-			break
-		}
-		name = trimName(name)
-		if name != "" && len(name) <= 128 {
-			names = append(names, name)
-		}
-	}
-	policy.SensitiveNames = names
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, exists := s.policies[resourceID]; !exists && len(s.policies) >= DaemonMaxRecords {
@@ -432,13 +421,6 @@ func (s *Store) cleanupUsageLocked(resourceID string, usage *resourceUsage) {
 	if usage != nil && usage.count == 0 && usage.inflight == 0 {
 		delete(s.usage, resourceID)
 	}
-}
-
-func trimName(value string) string {
-	if len(value) > 128 {
-		value = value[:128]
-	}
-	return value
 }
 
 // Finish sanitizes a completed exchange and stores it subject to budgets. It

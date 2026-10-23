@@ -130,14 +130,12 @@ func TestInspectorCapturePreservesStreaming(t *testing.T) {
 	if got := record.ResponseHeaders.Get("Set-Cookie"); got != "session=origin-secret" {
 		t.Fatalf("response cookie = %q, want it in full", got)
 	}
-	if strings.Contains(record.URL, "session=secret") {
-		t.Fatalf("query secret leaked: %q", record.URL)
+	// Query and bodies are kept as sent, like ngrok.
+	if !strings.Contains(record.URL, "session=secret") {
+		t.Fatalf("url = %q, want the query as sent", record.URL)
 	}
-	if strings.Contains(string(record.RequestBody), "hunter2") || strings.Contains(string(record.ResponseBody), "hunter2") {
-		t.Fatalf("body secret leaked: req=%s resp=%s", record.RequestBody, record.ResponseBody)
-	}
-	if !strings.Contains(string(record.ResponseBody), "hello") {
-		t.Fatalf("non-sensitive body lost: %s", record.ResponseBody)
+	if string(record.ResponseBody) != want {
+		t.Fatalf("response body = %s, want it as sent", record.ResponseBody)
 	}
 	// Viewers must not open the inspection API even though forwarding worked.
 	viewer := inspectorTestCredential("route_01")
