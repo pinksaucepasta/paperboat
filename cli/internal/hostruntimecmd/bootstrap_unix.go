@@ -34,6 +34,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
 	"github.com/pinksaucepasta/paperboat/internal/httptransport"
+	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
 	"github.com/pinksaucepasta/paperboat/internal/machinename"
 )
 
@@ -314,11 +315,12 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 			if err != nil {
 				return &installationStageError{Stage: "daemon_readiness", Cause: err}
 			}
+			paired := pairedMessage(ctx, localdaemon.ProbeCurrentUserForUpdate)
 			environmentErr := hostruntime.PreparePairEnvironment(ctx, *stateRoot, material.ControlURL, httptransport.Default())
 			if err := bootstrap.ClearResume(*stateRoot); err != nil {
 				return fmt.Errorf("clear completed machine enrollment resume state: %w", err)
 			}
-			return reportPairEnvironment(stdout, environmentErr, "Paperboat machine runtime is ready.")
+			return reportPairEnvironment(stdout, environmentErr, paired)
 		}
 		select {
 		case <-readyCtx.Done():

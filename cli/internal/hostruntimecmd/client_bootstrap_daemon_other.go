@@ -80,3 +80,38 @@ func boundDaemonServing(probe localdaemon.UpdateProbe, expectedVersion string) b
 	}
 	return probe.State == "ready" || probe.State == "starting" || probe.State == "degraded" && probe.ControlPlaneUnavailableOnly
 }
+
+// daemonSettleWindow bounds how long pairing waits, after binding, for a daemon that is still starting
+// to publish its first state. Binding does not wait for that (a slow control plane would fail a working
+// pair), but without this wait the first command after `pb setup` or `pb pair` met a daemon that was
+// still starting (C020, round 9: `pb doctor` right after setup said degraded, healthy seconds later).
+const daemonSettleWindow = 60 * time.Second
+
+// pairedMessage is what pairing prints once the daemon is bound: ready when it settled within
+// daemonSettleWindow, otherwise that it is still starting and where to watch it.
+func pairedMessage(ctx context.Context, probe func(context.Context) (localdaemon.UpdateProbe, error)) string {
+	settleCtx, cancel := context.WithTimeout(ctx, daemonSettleWindow)
+	defer cancel()
+	if awaitBoundDaemonSettled(settleCtx, probe) {
+		return "Paperboat machine runtime is ready."
+	}
+	return "Paperboat is paired; its local service is still starting. Run `pb status` to see when it is ready."
+}
+
+// awaitBoundDaemonSettled reports whether the bound daemon left "starting" (ready, or degraded with its
+// own reason, which pb status and pb doctor show) before ctx ends.
+func awaitBoundDaemonSettled(ctx context.Context, probe func(context.Context) (localdaemon.UpdateProbe, error)) bool {
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		state, err := probe(ctx)
+		if err == nil && state.Running && state.State != "" && state.State != "starting" {
+			return true
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-ticker.C:
+		}
+	}
+}
