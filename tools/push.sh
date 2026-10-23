@@ -13,4 +13,11 @@ flock 9
 echo "push: rebasing onto origin/main" >&2
 git fetch -q origin main
 git rebase -q origin/main
+# Two lanes adding the same migration number both rebase cleanly, and goose then refuses the duplicate
+# version on every server start. Checked here, under the lock, after the rebase that could bring it in.
+dups=$(git ls-tree --name-only HEAD server/internal/db/migrations/ | sed -n 's#.*/\([0-9][0-9]*\)_.*#\1#p' | sort | uniq -d)
+if [ -n "$dups" ]; then
+  echo "push: migration number $dups is used twice after rebasing onto origin/main; renumber yours to the next free number" >&2
+  exit 1
+fi
 git push origin HEAD:main
