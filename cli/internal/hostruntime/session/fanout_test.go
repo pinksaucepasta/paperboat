@@ -123,7 +123,7 @@ func TestFanoutCompactsBehindSlowestAttachedCursor(t *testing.T) {
 }
 
 func BenchmarkPublishOwnedAttachments(b *testing.B) {
-	for _, attachments := range []int{1, 4, 16} {
+	for _, attachments := range []int{1, 4, 16, 256, 1024} { // a shared terminal with many viewers
 		b.Run(fmt.Sprintf("%d", attachments), func(b *testing.B) {
 			f := NewFanout()
 			ids := make([]string, attachments)

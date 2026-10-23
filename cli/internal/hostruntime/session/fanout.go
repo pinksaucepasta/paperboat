@@ -42,6 +42,13 @@ type attachmentCursor struct {
 type Fanout struct {
 	mu          sync.Mutex
 	attachments map[string]*attachmentCursor
+	// ringEnd is the largest EndSequence of the retained ring (0 when empty).
+	ringEnd uint64
+	// minimum, haveMinimum and atMinimum are the attached cursors' minimum at the last compaction and how
+	// many attached cursors were on it.
+	minimum     uint64
+	haveMinimum bool
+	atMinimum   int
 	active      sync.Map
 	ring        []history.Event
 }
@@ -121,13 +128,18 @@ func (f *Fanout) SkipTo(attachmentID string, nextSequence uint64) error {
 	if cursor.hasCursor && (nextSequence < cursor.cursor || nextSequence > cursor.enqueuedEnd) {
 		return ErrOutputOrder
 	}
+	previous, moved := cursor.cursor, cursor.hasCursor
 	if !cursor.hasCursor {
 		cursor.enqueuedEnd = nextSequence
 		cursor.hasCursor = true
 	}
 	cursor.cursor = nextSequence
 	cursor.queuedBytes = cursor.enqueuedEnd - nextSequence
-	f.compactLocked()
+	if moved {
+		f.compactAfterAdvanceLocked(previous)
+	} else {
+		f.compactLocked()
+	}
 	return nil
 }
 
@@ -261,7 +273,7 @@ func (f *Fanout) WaitNextOwned(ctx context.Context, attachmentID string) (histor
 			consumed := retained.EndSequence - retained.StartSequence
 			cursor.cursor = retained.EndSequence
 			cursor.queuedBytes -= consumed
-			f.compactLocked()
+			f.compactAfterAdvanceLocked(start)
 			f.mu.Unlock()
 			return retained, nil
 		}
@@ -304,7 +316,7 @@ func (f *Fanout) Next(attachmentID string) (history.Event, bool, error) {
 	end := event.EndSequence
 	cursor.cursor = end
 	cursor.queuedBytes -= end - start
-	f.compactLocked()
+	f.compactAfterAdvanceLocked(start)
 	f.mu.Unlock()
 	return history.Event{Channel: event.Channel, StartSequence: start, EndSequence: end, Data: data}, true, nil
 }
@@ -336,6 +348,14 @@ func (f *Fanout) eventAtLocked(sequence uint64) (history.Event, bool) {
 }
 
 func (f *Fanout) insertEventLocked(event history.Event) {
+	// Output arrives in order: an event that starts at or after every retained event's end is neither
+	// a duplicate nor overlapping and keeps the ring sorted, so it is appended without a scan or a
+	// re-sort (each chunk used to cost a full sort of the ring).
+	if event.StartSequence >= f.ringEnd {
+		f.ring = append(f.ring, event.Retain())
+		f.ringEnd = event.EndSequence
+		return
+	}
 	for index, existing := range f.ring {
 		if existing.StartSequence <= event.StartSequence && existing.EndSequence >= event.EndSequence && existing.Channel == event.Channel && bytes.Equal(existing.Data[event.StartSequence-existing.StartSequence:event.EndSequence-existing.StartSequence], event.Data) {
 			return
@@ -348,6 +368,7 @@ func (f *Fanout) insertEventLocked(event history.Event) {
 		}
 	}
 	f.ring = append(f.ring, event.Retain())
+	f.ringEnd = max(f.ringEnd, event.EndSequence)
 	sort.Slice(f.ring, func(i, j int) bool {
 		if f.ring[i].StartSequence == f.ring[j].StartSequence {
 			return f.ring[i].EndSequence > f.ring[j].EndSequence
@@ -364,26 +385,43 @@ func (f *Fanout) Release() {
 	for _, event := range f.ring {
 		event.Release()
 	}
-	f.ring = nil
+	f.ring, f.ringEnd = nil, 0
+}
+
+// compactAfterAdvanceLocked compacts after one attachment's cursor moved on from previous, only when it
+// was the last cursor on the attached minimum: a compaction scans every attachment, and doing it on every
+// read made a shared terminal cost O(viewers²) per output chunk. Viewers reading in step trigger one scan
+// per round; a single slow viewer frees output with each of its reads.
+func (f *Fanout) compactAfterAdvanceLocked(previous uint64) {
+	if !f.haveMinimum || previous != f.minimum {
+		return
+	}
+	if f.atMinimum--; f.atMinimum > 0 {
+		return
+	}
+	f.compactLocked()
 }
 
 func (f *Fanout) compactLocked() {
 	var minimum uint64
-	haveMinimum := false
+	haveMinimum, atMinimum := false, 0
 	for _, cursor := range f.attachments {
 		if cursor.state != Attached || !cursor.hasCursor {
 			continue
 		}
-		if !haveMinimum || cursor.cursor < minimum {
-			minimum = cursor.cursor
-			haveMinimum = true
+		switch {
+		case !haveMinimum || cursor.cursor < minimum:
+			minimum, haveMinimum, atMinimum = cursor.cursor, true, 1
+		case cursor.cursor == minimum:
+			atMinimum++
 		}
 	}
+	f.minimum, f.haveMinimum, f.atMinimum = minimum, haveMinimum, atMinimum
 	if !haveMinimum {
 		for _, event := range f.ring {
 			event.Release()
 		}
-		f.ring = nil
+		f.ring, f.ringEnd = nil, 0
 		return
 	}
 	index := 0
@@ -395,6 +433,9 @@ func (f *Fanout) compactLocked() {
 		copy(f.ring, f.ring[index:])
 		clear(f.ring[len(f.ring)-index:])
 		f.ring = f.ring[:len(f.ring)-index]
+		if len(f.ring) == 0 {
+			f.ringEnd = 0
+		}
 	}
 }
 
