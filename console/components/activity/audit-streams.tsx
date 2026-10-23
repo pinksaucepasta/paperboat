@@ -238,7 +238,7 @@ function StreamDialog({
           <DialogTitle>{secret ? "Signing secret" : `${stream ? "Edit" : "Set up"} ${kinds[kind].title} streaming`}</DialogTitle>
           <DialogDescription>
             {secret
-              ? "Every request carries Paperboat-Signature: t=<time>,v1=<HMAC-SHA256 of “t.body” with this secret>. Copy it now; it is not shown again."
+              ? "Every request carries Pb-Signature: t=<time>,v1=<HMAC-SHA256 of “t.body” with this secret>. Copy it now; it is not shown again."
               : kinds[kind].about}
           </DialogDescription>
         </DialogHeader>
