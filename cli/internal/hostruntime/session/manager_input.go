@@ -64,9 +64,20 @@ func (m *Manager) WriteContext(ctx context.Context, sessionID string, key InputK
 			decision.WriteError = "decision_persist_failed"
 			return decision, persistErr
 		}
+		// The journal keeps only the last InputDecisionWindow sequenced decisions of a client; the
+		// durable rows follow it in batches so a long session stays bounded (Lane X audit H2).
+		if key.InputSequence > InputDecisionWindow && key.InputSequence%inputPruneBatch == 0 {
+			if pruneErr := m.config.Store.PruneInputDecisions(context.Background(), sessionID, key.ClientID, key.AttachmentID, key.Generation, key.InputSequence-InputDecisionWindow); pruneErr != nil {
+				observeSessionFailure(session, "lifecycle", classifySessionFailure("lifecycle", pruneErr))
+			}
+		}
 	}
 	return decision, nil
 }
+
+// inputPruneBatch is how many sequenced writes pass between deletions of durable decisions that left
+// the window.
+const inputPruneBatch = 64
 
 // InputSequence returns the highest sequence recorded for an attachment. The
 // stream server uses it when rebinding a persistent attachment after a

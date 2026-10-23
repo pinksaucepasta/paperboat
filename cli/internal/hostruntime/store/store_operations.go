@@ -240,3 +240,19 @@ func (s *Store) operation(ctx context.Context, operationID string) (operationRes
 	}
 	return operationFromSQLC(row.OperationID, row.RequestHash, row.State, row.Result, row.ErrorCode, row.CompletedAt, row.ExpiresAt), nil
 }
+
+// PruneInputDecisions deletes one client's sequenced input decisions of a generation up to and including
+// sequence upTo. Unsequenced (named) decisions are kept.
+func (s *Store) PruneInputDecisions(ctx context.Context, sessionID, clientID, attachmentID string, generation, upTo uint64) (resultErr error) {
+	defer protectStoreError(&resultErr)
+	_, err := s.db.ExecContext(ctx, `DELETE FROM input_decisions WHERE session_id=? AND client_id=? AND attachment_id=? AND generation=? AND input_id NOT GLOB '*[^0-9]*' AND input_id<>'' AND CAST(input_id AS INTEGER)<=?`, sessionID, clientID, attachmentID, generation, upTo)
+	return err
+}
+
+// DeleteInputDecisionsOutsideGeneration deletes a session's input decisions of every other generation:
+// input of an older process generation is refused as stale.
+func (s *Store) DeleteInputDecisionsOutsideGeneration(ctx context.Context, sessionID string, generation uint64) (resultErr error) {
+	defer protectStoreError(&resultErr)
+	_, err := s.db.ExecContext(ctx, `DELETE FROM input_decisions WHERE session_id=? AND generation<>?`, sessionID, generation)
+	return err
+}

@@ -80,10 +80,37 @@ func NewBoundedInputJournal(generation uint64, max int) *InputJournal {
 	return &InputJournal{current: generation, max: max, decisions: make(map[InputKey]InputDecision), last: make(map[inputCursor]uint64)}
 }
 
+// SetGeneration moves the journal to a new process generation. Input of an older generation is refused
+// as stale, so its decisions are dropped.
 func (j *InputJournal) SetGeneration(generation uint64) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	j.current = generation
+	for key := range j.decisions {
+		if key.Generation != generation {
+			delete(j.decisions, key)
+		}
+	}
+	for cursor := range j.last {
+		if cursor.generation != generation {
+			delete(j.last, cursor)
+		}
+	}
+}
+
+// InputDecisionWindow is how many recent sequenced decisions are kept per client, attachment and
+// generation. A sequenced client resends only input it has not seen decided, which is never more than
+// its outstanding window; an older sequence is refused as out of order, never written twice. Without the
+// window a session refused all input after MaxInputDecisions writes (Lane X audit H2).
+const InputDecisionWindow = 256
+
+// forgetBeforeWindowLocked drops the sequenced decision that just left the window; j.mu is held.
+func (j *InputJournal) forgetBeforeWindowLocked(key InputKey) {
+	if key.InputSequence > InputDecisionWindow {
+		old := key
+		old.InputSequence -= InputDecisionWindow
+		delete(j.decisions, old)
+	}
 }
 
 func (j *InputJournal) Write(key InputKey, data []byte, writer InputWriter) (InputDecision, error) {
@@ -134,6 +161,7 @@ func (j *InputJournal) Write(key InputKey, data []byte, writer InputWriter) (Inp
 	if key.InputSequence != 0 {
 		cursor := inputCursor{clientID: key.ClientID, attachmentID: key.AttachmentID, generation: key.Generation}
 		j.last[cursor] = key.InputSequence
+		j.forgetBeforeWindowLocked(key)
 	}
 	j.mu.Unlock()
 	n, err := writer.Write(data)

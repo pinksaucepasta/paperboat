@@ -147,3 +147,31 @@ func TestInputSequenceDuplicateReturnsOriginalDecision(t *testing.T) {
 		t.Fatalf("duplicate=%#v calls=%d err=%v", second, writer.calls, err)
 	}
 }
+
+// A terminal session takes input for its whole life: sequenced decisions are kept only for the recent
+// window, so input is never refused for having taken many writes (Lane X audit H2: refused after
+// MaxInputDecisions), a resend inside the window is still answered from the journal, and a sequence that
+// left the window is refused, never written twice. A new process generation drops the old decisions.
+func TestInputJournalKeepsARecentWindowForLongSessions(t *testing.T) {
+	j := NewBoundedInputJournal(1, 2*InputDecisionWindow)
+	w := &countingWriter{n: -1}
+	key := InputKey{ClientID: "cli", AttachmentID: "att", Generation: 1}
+	for sequence := uint64(1); sequence <= 10_000; sequence++ {
+		key.InputSequence = sequence
+		if decision, err := j.Write(key, []byte("k"), w); err != nil || decision.Status != InputAccepted {
+			t.Fatalf("write %d: decision=%+v err=%v", sequence, decision, err)
+		}
+	}
+	key.InputSequence = 10_000
+	if decision, err := j.Write(key, []byte("k"), w); err != nil || decision.Status != InputAccepted || w.calls != 10_000 {
+		t.Fatalf("resend inside the window: decision=%+v calls=%d err=%v", decision, w.calls, err)
+	}
+	key.InputSequence = 10_000 - InputDecisionWindow
+	if _, err := j.Write(key, []byte("k"), w); !errors.Is(err, ErrInputSequence) || w.calls != 10_000 {
+		t.Fatalf("a sequence outside the window was not refused: err=%v calls=%d", err, w.calls)
+	}
+	j.SetGeneration(2)
+	if len(j.decisions) != 0 || len(j.last) != 0 {
+		t.Fatalf("old generation kept: decisions=%d cursors=%d", len(j.decisions), len(j.last))
+	}
+}

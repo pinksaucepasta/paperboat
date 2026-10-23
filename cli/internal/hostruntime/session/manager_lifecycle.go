@@ -216,6 +216,11 @@ func (m *Manager) restartAtGeneration(ctx context.Context, sessionID string, exp
 	}
 	_, generation = session.lifecycle.Snapshot()
 	session.inputs.SetGeneration(generation)
+	if m.config.Store != nil {
+		if pruneErr := m.config.Store.DeleteInputDecisionsOutsideGeneration(context.Background(), session.id, generation); pruneErr != nil {
+			observeSessionFailure(session, "lifecycle", classifySessionFailure("lifecycle", pruneErr))
+		}
+	}
 	session.screen = xterm.New(xterm.WithCols(int(session.command.Dimensions.Columns)), xterm.WithRows(int(session.command.Dimensions.Rows)), xterm.WithScrollback(browserScreenScrollbackLines))
 	session.continuation.reset()
 	session.process, session.exit = process, nil

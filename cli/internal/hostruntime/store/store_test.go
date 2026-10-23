@@ -770,3 +770,46 @@ func TestSessionUpdateSucceedsWhileAnotherSessionFloodsOutput(t *testing.T) {
 		t.Fatalf("flooding session: %v", err)
 	}
 }
+
+// Sequenced input decisions that left the session's window are deleted in batches, named ones are kept,
+// and a new process generation drops the old generation's rows (Lane X audit H2).
+func TestInputDecisionsArePrunedToTheWindow(t *testing.T) {
+	store, _ := openStore(t, nil)
+	defer store.Close()
+	if err := store.CreateSession(context.Background(), testSession()); err != nil {
+		t.Fatal(err)
+	}
+	put := func(generation uint64, inputID string) {
+		decision := InputDecision{SessionID: "ses_1", ClientID: "cli", AttachmentID: "att", Generation: generation, InputID: inputID, Hash: []byte(inputID), Status: "accepted", BytesWritten: 1, CreatedAt: time.Now()}
+		if inserted, err := store.PutInputDecision(context.Background(), decision); err != nil || !inserted {
+			t.Fatalf("put %s: inserted=%v err=%v", inputID, inserted, err)
+		}
+	}
+	for _, id := range []string{"1", "2", "9", "10", "11", "named"} {
+		put(1, id)
+	}
+	put(2, "1")
+	if err := store.PruneInputDecisions(context.Background(), "ses_1", "cli", "att", 1, 10); err != nil {
+		t.Fatal(err)
+	}
+	ids := func() map[string]bool {
+		decisions, err := store.InputDecisions(context.Background(), "ses_1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		seen := map[string]bool{}
+		for _, decision := range decisions {
+			seen[fmt.Sprint(decision.Generation)+":"+decision.InputID] = true
+		}
+		return seen
+	}
+	if got := ids(); len(got) != 3 || !got["1:11"] || !got["1:named"] || !got["2:1"] {
+		t.Fatalf("after prune: %v", got)
+	}
+	if err := store.DeleteInputDecisionsOutsideGeneration(context.Background(), "ses_1", 2); err != nil {
+		t.Fatal(err)
+	}
+	if got := ids(); len(got) != 1 || !got["2:1"] {
+		t.Fatalf("after generation change: %v", got)
+	}
+}
