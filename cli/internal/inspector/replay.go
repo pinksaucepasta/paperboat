@@ -5,7 +5,7 @@ import (
 	"context"
 	"errors"
 	"github.com/google/uuid"
-	"github.com/pinksaucepasta/paperboat/relay/admission"
+	"github.com/pinksaucepasta/paperboat/shared/admission"
 	"net/http"
 	"strings"
 	"sync"

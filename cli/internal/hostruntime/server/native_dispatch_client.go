@@ -6,7 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/relay/admission"
+	"github.com/pinksaucepasta/paperboat/shared/admission"
 	"io"
 	"net"
 	"net/http"

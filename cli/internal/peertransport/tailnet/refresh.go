@@ -12,7 +12,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/backoff"
-	"github.com/pinksaucepasta/paperboat/relay/admission"
+	"github.com/pinksaucepasta/paperboat/shared/admission"
 )
 
 type NetworkAPI interface {

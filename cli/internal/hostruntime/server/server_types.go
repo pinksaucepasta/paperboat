@@ -12,7 +12,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/operation"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
-	"github.com/pinksaucepasta/paperboat/relay/admission"
+	"github.com/pinksaucepasta/paperboat/shared/admission"
 )
 
 var (

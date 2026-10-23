@@ -11,7 +11,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/resolver"
 	"github.com/pinksaucepasta/paperboat/internal/tunnel"
-	"github.com/pinksaucepasta/paperboat/relay/reattach"
+	"github.com/pinksaucepasta/paperboat/shared/reattach"
 	"golang.org/x/term"
 	"os"
 	"os/signal"
@@ -453,5 +453,7 @@ func safeExecError(err error) string {
 // execNotStartedError is an exec whose connection to the machine never opened: the command did not run.
 type execNotStartedError struct{ cause error }
 
-func (e *execNotStartedError) Error() string { return "exec connection did not open: " + e.cause.Error() }
+func (e *execNotStartedError) Error() string {
+	return "exec connection did not open: " + e.cause.Error()
+}
 func (e *execNotStartedError) Unwrap() error { return e.cause }

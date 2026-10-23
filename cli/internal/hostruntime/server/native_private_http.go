@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/relay/admission"
+	"github.com/pinksaucepasta/paperboat/shared/admission"
 	"io"
 	"net"
 	"net/http"

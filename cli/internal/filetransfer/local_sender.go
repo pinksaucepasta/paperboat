@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
-	"github.com/pinksaucepasta/paperboat/relay/admission"
+	"github.com/pinksaucepasta/paperboat/shared/admission"
 )
 
 type LocalSender struct {

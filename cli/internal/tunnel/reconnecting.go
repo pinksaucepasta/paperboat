@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/telemetry"
-	"github.com/pinksaucepasta/paperboat/relay/reattach"
+	"github.com/pinksaucepasta/paperboat/shared/reattach"
 )
 
 type ReconnectFunc func(context.Context) (Conn, error)

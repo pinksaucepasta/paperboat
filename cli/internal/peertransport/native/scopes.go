@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
-	"github.com/pinksaucepasta/paperboat/relay/admission"
+	"github.com/pinksaucepasta/paperboat/shared/admission"
 )
 
 type scopeKey struct{ resource, capability, direction string }

@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
-	"github.com/pinksaucepasta/paperboat/relay/reattach"
+	"github.com/pinksaucepasta/paperboat/shared/reattach"
 	"io"
 	"net"
 	"net/url"

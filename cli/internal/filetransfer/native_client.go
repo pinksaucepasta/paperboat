@@ -17,7 +17,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
-	"github.com/pinksaucepasta/paperboat/relay/reattach"
+	"github.com/pinksaucepasta/paperboat/shared/reattach"
 )
 
 // NativeClient sends application records exclusively through an authenticated

@@ -7,7 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	lifetime "github.com/pinksaucepasta/paperboat/relay/admission"
+	lifetime "github.com/pinksaucepasta/paperboat/shared/admission"
 	"io"
 	"net"
 	"net/http"

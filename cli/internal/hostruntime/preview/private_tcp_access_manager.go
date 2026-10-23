@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/privatepreviewproxy"
-	"github.com/pinksaucepasta/paperboat/relay/admission"
+	"github.com/pinksaucepasta/paperboat/shared/admission"
 )
 
 const (
