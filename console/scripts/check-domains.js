@@ -1,138 +1,39 @@
-// Browser check for F8-02 (custom domain: add -> DNS instructions -> verify -> TLS -> remove). Paste
-// into the console of a signed-in tab on a tunnel page (/tunnels/<id>, Personal workspace) whose
-// service is up, with `window.__domain` set to a hostname in a zone you control. Needs a caller that
-// creates the two DNS records the page shows: the script publishes them in `window.__dnsRecords`
-// ([{type, name, value}]) and waits for `window.__dnsReady = true`. It adds the hostname from the
-// "Your domain" tab, reads the instructions, checks DNS until verified, waits for the certificate on
-// the server, then removes the hostname and checks the binding is gone. Removed domains are held for
-// a week, so use a new hostname each run. Prints the steps (also in window.__checkSteps).
+// Browser check for the Domains page: one row per domain name, and no React key warnings. Paste
+// into a signed-in tab of the console. Seeds this browser's stored machine domains with a
+// duplicate of Paperboat's own domain (the cause of "two children with the same key"), opens
+// /domains, and checks each name is listed once and React logged no key warning; then restores
+// the stored list. Prints the steps (window.__checkSteps).
 ;(async () => {
-  const domain = window.__domain
-  delete window.__domain
   const steps = []
   const pass = (step, ok, detail = "") => steps.push({ step, ok, detail })
-  // Steps so far, readable while a long check runs or if it throws: window.__checkSteps.
   window.__checkSteps = steps
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
-  const until = async (test, ms = 20000) => {
-    for (let waited = 0; waited < ms; waited += 500) {
-      const found = await test()
-      if (found) return found
-      await sleep(500)
-    }
-    return null
+  const key = "pb-machine-domains"
+  const saved = localStorage.getItem(key)
+  const warnings = []
+  const original = console.error
+  console.error = (...args) => {
+    const text = args.map(String).join(" ")
+    if (/same key|unique "key"/.test(text)) warnings.push(text.slice(0, 160))
+    original(...args)
   }
-  const type = (input, text) => {
-    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(input, text)
-    input.dispatchEvent(new Event("input", { bubbles: true }))
+  try {
+    const config = (await (await fetch("/api/v1/client-configuration")).json()).data
+    const managed = config?.local_access_base_domain
+    pass("the managed machine domain is known", Boolean(managed), managed ?? "")
+    // The stored list holds the managed name twice, as a browser could after adding it early.
+    localStorage.setItem(key, JSON.stringify({ added: [managed, managed, "check.example.test"], primary: "" }))
+    window.next.router.push("/domains")
+    await sleep(6000)
+    const names = [...document.querySelectorAll("main tbody tr td:first-child")].map((cell) => cell.innerText.trim().split("\n")[0])
+    const duplicates = names.filter((name, index) => names.indexOf(name) !== index)
+    pass("every domain is listed once", names.length > 0 && duplicates.length === 0, duplicates.join(", ") || `${names.length} rows`)
+    pass("Paperboat's domain is listed", names.includes(managed))
+    pass("React logged no duplicate-key warning", warnings.length === 0, warnings[0] ?? "")
+  } finally {
+    console.error = original
+    if (saved === null) localStorage.removeItem(key)
+    else localStorage.setItem(key, saved)
   }
-  const main = () => document.querySelector("main main") ?? document.querySelector("main")
-  const dialog = () => document.querySelector("[role=dialog], [role=alertdialog]")
-  const button = (label, root = main()) =>
-    [...root.querySelectorAll("button")].find((b) => b.textContent.trim() === label)
-  const section = () => {
-    const text = main().innerText
-    return text.slice(text.indexOf("Public hostnames"), text.indexOf("Danger zone")).replace(/\s+/g, " ")
-  }
-  const tunnelId = location.pathname.split("/").at(-1)
-  // The console is reached over a tunnel that drops a request now and then; retry reads.
-  const domains = async () => {
-    for (let attempt = 0; ; attempt++) {
-      try {
-        return (await (await fetch(`/api/v1/tunnels/${tunnelId}/domains`)).json()).data.items
-      } catch (error) {
-        if (attempt >= 4) throw error
-        await new Promise((resolve) => setTimeout(resolve, 600))
-      }
-    }
-  }
-  const mine = async () => (await domains()).find((d) => d.hostname === domain)
-
-  pass("a test hostname was given", Boolean(domain), domain ?? "")
-  if (!domain) return steps
-  pass("hostname is not bound yet", !(await mine()))
-
-  button("Add")?.click()
-  const yours = await until(() => button("Your domain", dialog() ?? main()))
-  yours?.click()
-  await sleep(500)
-  const hostInput = await until(() =>
-    [...(dialog()?.querySelectorAll("input") ?? [])].find((i) => /example/.test(i.placeholder)),
-  )
-  pass("Add a public hostname offers Your domain", Boolean(hostInput))
-  if (!hostInput) return steps
-  type(hostInput, domain)
-  type(document.getElementById("hostname-service"), window.__port ?? "18088")
-  await sleep(300)
-  button("Add hostname", dialog())?.click()
-  pass("domain bound on the server", Boolean(await until(mine, 30000)))
-  const records = await until(() => {
-    const found = [...section().matchAll(/Add record (\S+) (\S+) → (\S+)/g)].map((m) => ({
-      type: m[1],
-      name: m[2],
-      value: m[3],
-    }))
-    return found.length >= 2 ? found : null
-  })
-  pass(
-    "page shows the DNS records to add",
-    Boolean(records),
-    records ? records.map((r) => `${r.type} ${r.name}`).join(" | ") : section(),
-  )
-  if (!records) return steps
-  pass(
-    "one record points the name at the tunnel and one answers the certificate challenge",
-    records.some((r) => r.name === domain) && records.some((r) => r.name === `_acme-challenge.${domain}`),
-  )
-  window.__dnsRecords = records
-  await until(() => window.__dnsReady, 180000)
-  const verified = await until(async () => {
-    button("Check again")?.click()
-    await sleep(2000)
-    const d = await mine()
-    return d && d.dns?.observed_records?.length && !/Waiting for DNS/.test(section()) ? d : null
-  }, 120000)
-  pass("DNS verified from the console", Boolean(verified))
-  const ready = await until(async () => (await mine())?.certificate?.state === "ready", 240000)
-  pass("certificate issued", Boolean(ready))
-  const final = await mine()
-  pass(
-    "domain reports ready with a certificate expiry",
-    final?.state === "ready" && Boolean(final?.certificate?.expires_at),
-    `${final?.state} until ${final?.certificate?.expires_at ?? "?"}`,
-  )
-  // The page refreshes domain states every 15 seconds.
-  pass(
-    "page shows the hostname as ready",
-    Boolean(
-      await until(
-        () =>
-          !/Certificate failed|Waiting for DNS|Getting a certificate/.test(
-            section().split(domain)[1]?.slice(0, 60) ?? "",
-          ),
-        45000,
-      ),
-    ),
-    section().split(domain)[1]?.slice(0, 40) ?? "",
-  )
-  window.__domainReady = true
-  await until(() => window.__removeNow, 120000)
-
-  const actions = [...main().querySelectorAll("button")].find(
-    (b) => b.getAttribute("aria-label") === `Actions for ${domain}`,
-  )
-  actions?.click()
-  const remove = await until(() =>
-    [...document.querySelectorAll("[role=menuitem]")].find((i) => /Remove hostname/.test(i.textContent)),
-  )
-  remove?.click()
-  const confirm = await until(() => dialog())
-  pass(
-    "remove asks to confirm and says the DNS record stays",
-    Boolean(confirm) && /DNS record stays/.test(confirm.innerText),
-  )
-  ;[...(confirm?.querySelectorAll("button") ?? [])].find((b) => /^Remove/.test(b.textContent.trim()))?.click()
-  pass("binding removed on the server", Boolean(await until(async () => !(await mine()), 30000)))
-  pass("hostname gone from the page", Boolean(await until(() => !section().includes(domain))))
   return steps
 })()
