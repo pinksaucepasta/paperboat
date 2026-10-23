@@ -3,6 +3,7 @@ module github.com/pinksaucepasta/paperboat-relay
 go 1.27.2
 
 require (
+	github.com/pinksaucepasta/paperboat/shared v0.0.0
 	github.com/coder/websocket v1.8.15
 	github.com/getsentry/sentry-go v0.49.0
 	github.com/quic-go/quic-go v0.61.0
@@ -30,3 +31,5 @@ require (
 )
 
 replace tailscale.com => github.com/pinksaucepasta/tailscale v1.103.0-pre.0.20261019044951-ac1095ce5264
+
+replace github.com/pinksaucepasta/paperboat/shared => ../shared

@@ -13,12 +13,19 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
 	"github.com/quic-go/quic-go"
 	"tailscale.com/types/key"
 )
 
-const MaxConnections = 256
-const MaxAccountConnections = 16
+// MaxConnections bounds the capacity a node's registry lease may grant (one ceiling for the server's
+// registry, self-host enrollment and this relay); the lease's CapacityLimit is the node's real size.
+const MaxConnections = relaylimits.MaxConnectionsPerNode
+
+// accountShareLocked is how many connections one account may hold on this node: every slot but a
+// tenth, so other accounts always find room. Byte budgets per account keep forwarding fair; a fixed
+// small count refused the 17th machine of an account (relay capacity exhausted on first contact).
+func (s *Server) accountShareLocked() int { return max(1, s.connectionLimit-s.connectionLimit/10) }
 
 type Stats struct {
 	Accepted, Denied, Forwarded, Dropped uint64
@@ -371,7 +378,7 @@ func (s *Server) admit(p *peerConn, token string) error {
 		}
 		count--
 	}
-	if p.key.IsZero() && (count >= MaxAccountConnections || len(s.fences) >= MaxConnections && s.fences[id] == nil) {
+	if p.key.IsZero() && (count >= s.accountShareLocked() || len(s.fences) >= MaxConnections && s.fences[id] == nil) {
 		return ErrOverload
 	}
 	if old != nil && old != p {
