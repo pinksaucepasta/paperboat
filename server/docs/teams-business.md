@@ -85,7 +85,9 @@ Connect your directory from the same Security page (`pb team scim setup`). Paper
 it within seconds:
 
 - Active directory users become members. Someone without a Paperboat account gets a seat held
-  for them and becomes a member at their first sign-in with that email.
+  for them as a directory invitation (role from their groups) and becomes a member at their
+  first sign-in with that email. The invitation has the normal invitation lifetime; every sync
+  renews it while they stay in the directory and updates its role when their groups change.
 - **Group → role:** map directory groups to `admin`, `billing`, `auditor` or `member`
   (`pb team scim map <group> <role>`). Someone in several mapped groups gets the highest role
   (admin > billing > auditor > member); everyone else is a member, or is left out when
