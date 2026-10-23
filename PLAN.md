@@ -1163,6 +1163,20 @@ restored production backup.
 4. Tunnels onto endpoints (routes, domains, rotation, private_tcp, catch-all); CLI tunnel manager; smoke tunnel*, tcp_private.
 5. Deletion commits for everything in "Removed"; DNS/health/failover runbook rewritten; chaos test: kill one edge mid-traffic.
 
+**Step 4 slices (Lane M, 2026-10-23).** Today a tunnel's carrier identity, stream preface, ingress decision and control
+session (Hello/Welcome/snapshot/ack/rotation) are all bound to one tunnel's connector; an agent carrier serves many tunnels, so
+route authority moves from the carrier identity to the route (as preview endpoint routes already do: RouteID-authorized
+admissions on the runtime carrier). Each slice is gated on an agent capability `tunnel_endpoints` plus every edge serving
+endpoints, so non-capable machines keep the connector path until the slice that deletes it.
+4.1 Server: a capable tunnel becomes `endpoints(kind=tunnel, id=tunnel id)` + `endpoint_routes(id=tunnel route id,
+revision=route generation)`; runtime admissions carry the route's match (host, match type, path prefix, priority, protocol,
+domain bindings); tunnel ingress, health/readiness and DNS read endpoint assignments the way preview_routes does.
+4.2 Edge: tunnel endpoint admissions become matcher rules whose replica is the agent's runtime carrier (HTTP/WS first).
+4.3 CLI: the agent serves tunnel routes on its hubs (OriginStreamForwarder per route) from a machine-authenticated route
+list; the tunnel manager stops dialing its own carrier when served.
+4.4 TCP, TLS passthrough, private_tcp and custom domains on the same path. 5: deletions (connector stack, attachments).
+Gate per slice: smoke tunnel-manage, tunnel-protocols, tunnel-transfer, tunnel-survival, tunnel-lifecycle, tcp-private green.
+
 **Decided.** No headless connectors (tunnels run on enrolled machines only); 2 carriers per edge; the URL is returned when one
 edge is ready; no custom domains for previews. Timing: engine work starts after Linux is done, before macOS.
 
