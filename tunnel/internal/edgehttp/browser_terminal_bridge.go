@@ -57,7 +57,15 @@ func (p *Policy) serveBrowserTerminal(w http.ResponseWriter, request *http.Reque
 
 	// The browser's upstream stream is accounted to its attachment, which the server records
 	// as the session's usage authority when it admits the ticket, and is closed at the cap.
-	dialCtx := browserTerminalUsage(ctx, match, admission, time.Now().UTC())
+	environment := match.Rule.Environment
+	if environment == "" && p.config.HelperAccess != nil {
+		// A runtime route's rule carries no environment; the server-signed host credential
+		// of this admission names the machine's environment.
+		if claims, err := p.config.HelperAccess.VerifyHelperAccess(ctx, admission.Credential); err == nil {
+			environment = claims.EnvironmentID
+		}
+	}
+	dialCtx := browserTerminalUsage(ctx, environment, admission, time.Now().UTC())
 	upstreamURL := (&url.URL{Scheme: "wss", Host: host, Path: "/v1/browser-terminal"}).String()
 	upstreamHeader := make(http.Header)
 	upstreamHeader.Set("Authorization", "Bearer "+admission.Credential)
@@ -268,9 +276,9 @@ func (p *Policy) observeBrowserTerminal(ctx context.Context, err error) {
 	}
 }
 
-func browserTerminalUsage(ctx context.Context, match route.RouteMatch, admission control.BrowserTerminalAdmission, now time.Time) context.Context {
-	if admission.AttachmentID == "" || match.Rule.Environment == "" {
+func browserTerminalUsage(ctx context.Context, environment string, admission control.BrowserTerminalAdmission, now time.Time) context.Context {
+	if admission.AttachmentID == "" || environment == "" {
 		return ctx
 	}
-	return withRuntimeUsage(ctx, runtimeUsageBinding{Authority: admission.AttachmentID, Environment: match.Rule.Environment, IssuedAt: now})
+	return withRuntimeUsage(ctx, runtimeUsageBinding{Authority: admission.AttachmentID, Environment: environment, IssuedAt: now})
 }
