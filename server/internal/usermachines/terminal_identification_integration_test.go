@@ -81,7 +81,7 @@ func TestPostgresTerminalLiveIdentificationAuthorization(t *testing.T) {
 	}
 	service := New(store, audit.NewWriter(store), Policy{}, nil)
 	service.issuer = "https://api.paperboat.test"
-	service.ConfigureTerminalSessions(4, signer, nil)
+	service.ConfigureTerminalSessions(signer, nil)
 	runtime := &terminalIdentificationRuntime{signer: signer, machine: machine, environment: environment, account: owner, session: session, route: "https://" + host}
 	service.controlRuntime = runtime
 	// A ready carrier without verified public ingress is temporarily unavailable,

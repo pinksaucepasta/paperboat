@@ -928,13 +928,6 @@ func userMachineTerminalSessionError(w http.ResponseWriter, r *http.Request, err
 		writeError(w, r, http.StatusConflict, "terminal_session_reserved", "The default terminal session cannot be changed this way.")
 	case errors.Is(err, usermachines.ErrTerminalSessionNotClosed):
 		writeError(w, r, http.StatusConflict, "terminal_session_not_closed", "Close the terminal and wait for the host to confirm it is closed before deleting its history.")
-	case errors.Is(err, usermachines.ErrTerminalSessionLimit):
-		var capacity *usermachines.TerminalSessionCapacityError
-		if errors.As(err, &capacity) {
-			writeError(w, r, http.StatusConflict, "terminal_session_limit_reached", capacity.Error())
-		} else {
-			writeError(w, r, http.StatusConflict, "terminal_session_limit_reached", "This machine has reached its terminal session limit.")
-		}
 	case errors.Is(err, usermachines.ErrTerminalSessionConflict):
 		writeError(w, r, http.StatusConflict, "terminal_session_name_conflict", "A terminal session already uses that name.")
 	case errors.Is(err, usermachines.ErrTerminalSessionInvalidCWD):

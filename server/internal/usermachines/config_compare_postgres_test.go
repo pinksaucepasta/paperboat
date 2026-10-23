@@ -102,7 +102,7 @@ func TestNativeConfigCompareDescriptorAndMeterPostgres(t *testing.T) {
 	}
 	machines := usermachines.New(store, nil, usermachines.Policy{}, nil)
 	machines.ConfigureAccess(nil, "https://api.compare.test")
-	machines.ConfigureTerminalSessions(8, signer, nil)
+	machines.ConfigureTerminalSessions(signer, nil)
 	native, err := machines.ConfigCompareDescriptor(scoped, account, environment, machine, client, binding)
 	if err != nil {
 		t.Fatal(err)

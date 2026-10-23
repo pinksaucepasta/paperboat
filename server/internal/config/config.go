@@ -162,7 +162,6 @@ type UserMachines struct {
 }
 
 type TerminalSessions struct {
-	MaxActivePerProject    int           `json:"max_active_per_project"`
 	OperationTimeout       time.Duration `json:"operation_timeout"`
 	RetryBackoff           time.Duration `json:"retry_backoff"`
 	WorkerInterval         time.Duration `json:"worker_interval"`
@@ -415,7 +414,7 @@ func Default() Config {
 		RuntimeBaseDomain: "localhost",
 		ManagedSSH:        ManagedSSH{ClientKeyActiveWindow: 30 * 24 * time.Hour},
 		UserMachines:      UserMachines{PairingLifetime: 10 * time.Minute, OfflineAfter: 2 * time.Minute, ExpiredAccessSessionRetention: 7 * 24 * time.Hour, AllowedPlatforms: []string{"darwin", "linux", "windows"}, RuntimeListenPort: 38080},
-		TerminalSessions:  TerminalSessions{MaxActivePerProject: 20, OperationTimeout: 15 * time.Second, RetryBackoff: time.Second, WorkerInterval: time.Second, MaxAttemptsBeforeAlert: 10},
+		TerminalSessions:  TerminalSessions{OperationTimeout: 15 * time.Second, RetryBackoff: time.Second, WorkerInterval: time.Second, MaxAttemptsBeforeAlert: 10},
 		Preview:           Preview{BaseDomain: "preview.localhost"},
 		Tunnel:            Tunnel{BaseDomain: "tunnels.localhost", PublicTCPPortMin: 20000, PublicTCPPortMax: 29999},
 		ConfigSync: ConfigSync{
@@ -613,7 +612,7 @@ func (c Config) Validate() error {
 	} else if c.ReleaseAuthority.Threshold < 2 || c.ReleaseAuthority.Threshold > len(c.ReleaseAuthority.PublicKeys) || len(c.ReleaseAuthority.PublicKeys) > 16 {
 		errs = append(errs, fmt.Errorf("release_authority.threshold must be between 2 and the number of public keys"))
 	}
-	if c.TerminalSessions.MaxActivePerProject <= 0 || c.TerminalSessions.MaxActivePerProject > 20 || c.TerminalSessions.OperationTimeout <= 0 || c.TerminalSessions.RetryBackoff <= 0 || c.TerminalSessions.WorkerInterval <= 0 || c.TerminalSessions.MaxAttemptsBeforeAlert <= 0 {
+	if c.TerminalSessions.OperationTimeout <= 0 || c.TerminalSessions.RetryBackoff <= 0 || c.TerminalSessions.WorkerInterval <= 0 || c.TerminalSessions.MaxAttemptsBeforeAlert <= 0 {
 		errs = append(errs, fmt.Errorf("terminal_sessions limits and timings must be positive"))
 	}
 	if c.Sync.Address != "" && (c.Sync.TLSCertFile == "" || c.Sync.TLSKeyFile == "") {

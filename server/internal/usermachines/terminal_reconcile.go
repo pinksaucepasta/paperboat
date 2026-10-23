@@ -2,6 +2,7 @@ package usermachines
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -12,10 +13,15 @@ import (
 const (
 	terminalReconcileBudget      = 8 * time.Second
 	terminalReconcileConcurrency = 4
+	// terminalOrphanBound is how long a live session may go without the host confirming it before the sweep asks.
+	// A create the host refused or lost never gets a snapshot, so this is what closes it.
+	terminalOrphanBound = 2 * time.Minute
+	terminalOrphanBatch = 32
 )
 
-// terminalLiveRowsPredicate is the one definition of "counts toward the machine's terminal session limit".
-const terminalLiveRowsPredicate = `user_machine_id=$1 AND deleted_at IS NULL AND (
+// terminalLiveStatePredicate is the one definition of "a live terminal session" (it counts toward nothing but
+// the sweep and the detail views). Columns are unqualified: it runs against user_machine_terminal_sessions.
+const terminalLiveStatePredicate = `deleted_at IS NULL AND (
     (desired_state='open' AND runtime_state NOT IN ('closed','exited','deleted'))
     OR runtime_state IN ('creating','running','restarting','closing'))`
 
@@ -26,78 +32,122 @@ func (s *Service) markTerminalSessionAbsent(ctx context.Context, sessionID strin
 	return err
 }
 
-// reconcileLiveTerminalSessions asks the host about every session the server counts as live and closes the ones
-// the host does not have (a host reinstall, a crashed daemon, an aborted run). A host that cannot be reached
-// changes nothing: only the host's own "no such session" answer closes a row. It returns how many it closed.
-func (s *Service) reconcileLiveTerminalSessions(ctx context.Context, userID, userMachineID string) (int, error) {
+type terminalOrphan struct {
+	sessionID, userMachineID, ownerAccount string
+}
+
+type terminalHost struct {
+	environmentID, ingress string
+}
+
+// reconcileOrphanTerminalSessions asks the host about live sessions it has never confirmed (a create the host
+// refused or lost). Only the host's own "session unknown" answer closes a row. A host that cannot be reached
+// changes nothing, and a host that answers a snapshot confirms the row so it is not asked again.
+func (s *Service) reconcileOrphanTerminalSessions(ctx context.Context) error {
 	if s.controlSigner == nil || s.controlRuntime == nil {
-		return 0, nil
+		return nil
 	}
-	machine, err := s.Get(ctx, userID, userMachineID)
+	rows, err := s.db.SQL().QueryContext(ctx, `SELECT id,user_machine_id,owner_account FROM user_machine_terminal_sessions
+ WHERE `+terminalLiveStatePredicate+` AND last_runtime_sync_at IS NULL AND created_at < $1
+   AND EXISTS(SELECT 1 FROM user_machines m WHERE m.id=user_machine_id AND m.online AND m.deleted_at IS NULL)
+ ORDER BY updated_at,id LIMIT $2`,
+		s.now().UTC().Add(-terminalOrphanBound), terminalOrphanBatch)
 	if err != nil {
-		return 0, err
+		return err
 	}
-	route, err := s.db.Queries().GetActiveHelperRouteForEnvironment(ctx, machine.EnvironmentID)
-	if err != nil {
-		return 0, nil
-	}
-	ingress, err := s.runtimeIngressURL(ctx, machine.EnvironmentID, route.PublicHost)
-	if err != nil {
-		return 0, nil
-	}
-	rows, err := s.db.SQL().QueryContext(ctx, `SELECT id FROM user_machine_terminal_sessions WHERE `+terminalLiveRowsPredicate+` ORDER BY created_at LIMIT 64`, userMachineID)
-	if err != nil {
-		return 0, err
-	}
-	var ids []string
+	var orphans []terminalOrphan
 	for rows.Next() {
-		var id string
-		if err = rows.Scan(&id); err != nil {
+		var o terminalOrphan
+		if err = rows.Scan(&o.sessionID, &o.userMachineID, &o.ownerAccount); err != nil {
 			_ = rows.Close()
-			return 0, err
+			return err
 		}
-		ids = append(ids, id)
+		orphans = append(orphans, o)
 	}
 	if err = rows.Close(); err != nil {
-		return 0, err
+		return err
+	}
+	if len(orphans) == 0 {
+		return nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, terminalReconcileBudget)
 	defer cancel()
+	hosts := map[string]terminalHost{}
+	for _, o := range orphans {
+		if _, seen := hosts[o.userMachineID]; !seen {
+			hosts[o.userMachineID] = s.terminalHostRoute(ctx, o.userMachineID)
+		}
+	}
 	var (
-		mu     sync.Mutex
-		closed int
-		wg     sync.WaitGroup
-		jobs   = make(chan string)
+		mu   sync.Mutex
+		errs []error
+		wg   sync.WaitGroup
+		jobs = make(chan terminalOrphan)
 	)
-	for worker := 0; worker < terminalReconcileConcurrency && worker < len(ids); worker++ {
+	for worker := 0; worker < terminalReconcileConcurrency; worker++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for id := range jobs {
-				now := s.now().UTC()
-				token, signErr := s.signProcessCredential(ctx, mint.CredentialInput{Issuer: s.issuer, Audience: "paperboat-machine", Subject: userID, JTI: newID("token"), IssuedAt: now, ExpiresAt: now.Add(time.Minute), CredentialClass: "terminal_operation", Scopes: []string{"terminal:operate"}, EnvironmentID: machine.EnvironmentID, MachineID: userMachineID, UserID: userID, CLIClientSessionID: newID("operation"), SessionID: id})
-				if signErr != nil {
-					continue
-				}
-				_, observeErr := s.controlRuntime.Terminal(ctx, ingress, token, "snapshot", id, newID("operation"))
-				if observeErr == nil || !helperruntime.IsSessionUnknown(observeErr) {
-					continue
-				}
-				if s.markTerminalSessionAbsent(ctx, id) == nil {
+			for o := range jobs {
+				if err := s.checkTerminalSession(ctx, o, hosts[o.userMachineID]); err != nil {
 					mu.Lock()
-					closed++
+					errs = append(errs, err)
 					mu.Unlock()
 				}
 			}
 		}()
 	}
-	for _, id := range ids {
+	for _, o := range orphans {
+		if hosts[o.userMachineID].ingress == "" {
+			continue
+		}
 		select {
-		case jobs <- id:
+		case jobs <- o:
 		case <-ctx.Done():
 		}
 	}
 	close(jobs)
 	wg.Wait()
-	return closed, nil
+	return errors.Join(errs...)
+}
+
+// checkTerminalSession asks the host for one session. The host's "unknown" answer closes the row and its snapshot
+// confirms it. Any other host outcome changes nothing; only signing and database errors are returned.
+func (s *Service) checkTerminalSession(ctx context.Context, o terminalOrphan, host terminalHost) error {
+	now := s.now().UTC()
+	token, err := s.signProcessCredential(ctx, mint.CredentialInput{Issuer: s.issuer, Audience: "paperboat-machine", Subject: o.ownerAccount, JTI: newID("token"), IssuedAt: now, ExpiresAt: now.Add(time.Minute), CredentialClass: "terminal_operation", Scopes: []string{"terminal:operate"}, EnvironmentID: host.environmentID, MachineID: o.userMachineID, UserID: o.ownerAccount, CLIClientSessionID: "control-plane", SessionID: o.sessionID})
+	if err != nil {
+		return err
+	}
+	_, observeErr := s.controlRuntime.Terminal(ctx, host.ingress, token, "snapshot", o.sessionID, newID("operation"))
+	switch {
+	case observeErr == nil:
+		_, err = s.db.SQL().ExecContext(ctx, `UPDATE user_machine_terminal_sessions SET last_runtime_sync_at=now() WHERE id=$1`, o.sessionID)
+		return err
+	case helperruntime.IsSessionUnknown(observeErr):
+		return s.markTerminalSessionAbsent(ctx, o.sessionID)
+	default:
+		// Move the row to the back of the queue: a host that does not answer must not hold the batch
+		// for the orphans behind it.
+		_, err = s.db.SQL().ExecContext(ctx, `UPDATE user_machine_terminal_sessions SET updated_at=now() WHERE id=$1 AND last_runtime_sync_at IS NULL`, o.sessionID)
+		return err
+	}
+}
+
+// terminalHostRoute finds where the server reaches a machine's terminal host. A machine without an active route
+// has an empty ingress and its sessions are left alone.
+func (s *Service) terminalHostRoute(ctx context.Context, userMachineID string) terminalHost {
+	var host terminalHost
+	if err := s.db.SQL().QueryRowContext(ctx, `SELECT environment_id FROM user_machines WHERE id=$1`, userMachineID).Scan(&host.environmentID); err != nil {
+		return terminalHost{}
+	}
+	route, err := s.db.Queries().GetActiveHelperRouteForEnvironment(ctx, host.environmentID)
+	if err != nil {
+		return terminalHost{}
+	}
+	host.ingress, err = s.runtimeIngressURL(ctx, host.environmentID, route.PublicHost)
+	if err != nil {
+		return terminalHost{}
+	}
+	return host
 }

@@ -36,7 +36,6 @@
     "runtime_listen_port": 38080
   },
   "terminal_sessions": {
-    "max_active_per_project": 32,
     "operation_timeout": 15000000000,
     "retry_backoff": 1000000000,
     "worker_interval": 1000000000,

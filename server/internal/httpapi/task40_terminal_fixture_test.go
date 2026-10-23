@@ -188,7 +188,7 @@ func TestTask40ServeTerminalSharing(t *testing.T) {
 	}
 	transport := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}}
 	defer transport.CloseIdleConnections()
-	machines.ConfigureTerminalSessions(20, signer, &http.Client{Transport: transport, Timeout: 10 * time.Second})
+	machines.ConfigureTerminalSessions(signer, &http.Client{Transport: transport, Timeout: 10 * time.Second})
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_routes(id,environment_id,kind,public_host,target_host,target_port,desired_revision,applied_revision,applied_node_id,applied_generation) VALUES($1,$2,'runtime_https_wss',$3,'127.0.0.1',15442,1,1,$4,1)`, "route40_"+suffix, environment, runtime.PublicHost, edge); err != nil {
 		t.Fatal(err)
 	}

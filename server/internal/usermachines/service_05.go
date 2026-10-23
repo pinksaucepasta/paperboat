@@ -282,11 +282,11 @@ func (s *Service) ListTerminalSessions(ctx context.Context, userID, userMachineI
 	return out, nil
 }
 
-func (s *Service) CreateTerminalSession(ctx context.Context, userID, userMachineID, name, idempotencyKey string, maxActive int) (TerminalSession, error) {
-	return s.createTerminalSession(ctx, userID, "", userMachineID, name, idempotencyKey, "", maxActive)
+func (s *Service) CreateTerminalSession(ctx context.Context, userID, userMachineID, name, idempotencyKey string) (TerminalSession, error) {
+	return s.createTerminalSession(ctx, userID, "", userMachineID, name, idempotencyKey, "")
 }
 
-func (s *Service) createTerminalSession(ctx context.Context, userID, sourceMachineID, userMachineID, name, idempotencyKey, cwd string, maxActive int) (TerminalSession, error) {
+func (s *Service) createTerminalSession(ctx context.Context, userID, sourceMachineID, userMachineID, name, idempotencyKey, cwd string) (TerminalSession, error) {
 	if sourceMachineID != "" || cwd != "" {
 		// An explicit local launch directory belongs to the authenticated owner
 		// machine. A caller-supplied source ID never grants access to a target.
@@ -318,19 +318,10 @@ func (s *Service) createTerminalSession(ctx context.Context, userID, sourceMachi
 	if strings.TrimSpace(idempotencyKey) == "" {
 		return TerminalSession{}, ErrTerminalSessionIdempotency
 	}
-	if maxActive <= 0 {
-		return TerminalSession{}, ErrTerminalSessionLimit
-	}
 	if existing, err := getTerminalSessionByIdempotencyKey(ctx, s.db.Queries(), dbsqlc.GetUserMachineTerminalSessionByIdempotencyKeyParams{UserMachineID: userMachineID, UserID: userID, IdempotencyKey: sql.NullString{String: idempotencyKey, Valid: true}}); err == nil {
 		return mapTerminalSession(existing), nil
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return TerminalSession{}, err
-	}
-	// Sessions the host no longer has must not hold the limit: ask the host before refusing.
-	if live, countErr := s.db.Queries().CountLiveUserMachineTerminalSessions(ctx, userMachineID); countErr == nil && int(live) >= maxActive {
-		if _, reconcileErr := s.reconcileLiveTerminalSessions(ctx, userID, userMachineID); reconcileErr != nil {
-			supportreport.CaptureFromContext(ctx, "paperboat-server", "http_terminal", "service_error", "terminal_host_unavailable", reconcileErr)
-		}
 	}
 	id := newID("terminal")
 	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
@@ -369,13 +360,6 @@ func (s *Service) createTerminalSession(ctx context.Context, userID, sourceMachi
 			return nil
 		} else if !errors.Is(err, sql.ErrNoRows) {
 			return err
-		}
-		count, err := tx.Queries().CountLiveUserMachineTerminalSessions(ctx, userMachineID)
-		if err != nil {
-			return err
-		}
-		if int(count) >= maxActive {
-			return &TerminalSessionCapacityError{LiveSessions: int(count), Limit: maxActive}
 		}
 		sessionName := requestedName
 		for attempts := 0; attempts < 32; attempts++ {
@@ -454,7 +438,7 @@ func userMachineTerminalSessionUniqueViolation(err error) bool {
 }
 
 func (s *Service) CreateConfiguredTerminalSession(ctx context.Context, userID, userMachineID, name, idempotencyKey string) (TerminalSession, error) {
-	return s.CreateTerminalSession(ctx, userID, userMachineID, name, idempotencyKey, s.maxSessions)
+	return s.CreateTerminalSession(ctx, userID, userMachineID, name, idempotencyKey)
 }
 
 // CreateConfiguredTerminalSessionInDirectory creates an owner-machine session at
@@ -463,7 +447,7 @@ func (s *Service) CreateConfiguredTerminalSessionInDirectory(ctx context.Context
 	if sourceMachineID == "" {
 		return TerminalSession{}, ErrNotFound
 	}
-	return s.createTerminalSession(ctx, userID, sourceMachineID, userMachineID, name, idempotencyKey, cwd, s.maxSessions)
+	return s.createTerminalSession(ctx, userID, sourceMachineID, userMachineID, name, idempotencyKey, cwd)
 }
 
 func canonicalTerminalLaunchCWD(platform, cwd string) (string, bool) {

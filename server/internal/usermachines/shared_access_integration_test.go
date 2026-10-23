@@ -49,7 +49,7 @@ func TestPostgresSharedMachineSessionIsolationAndRevocation(t *testing.T) {
 		t.Fatal(err)
 	}
 	service := New(store, audit.NewWriter(store), Policy{}, nil)
-	if _, err = service.CreateTerminalSession(ctx, member, machine, "same-name", "before-share", 4); !errors.Is(err, ErrNotFound) {
+	if _, err = service.CreateTerminalSession(ctx, member, machine, "same-name", "before-share"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("unshared session creation: %v", err)
 	}
 	current, err = authority.Machine(ctx, owner, team, teams.MachineRequest{OperationID: "share", ExpectedGeneration: current.Generation, MachineID: machine, Action: "share"})
@@ -73,11 +73,11 @@ func TestPostgresSharedMachineSessionIsolationAndRevocation(t *testing.T) {
 	if err != nil || !renamed.CanManage || !slices.Equal(renamed.Permissions, ownerPermissions) {
 		t.Fatalf("rename management presentation: can_manage=%t permissions=%v error=%v", renamed.CanManage, renamed.Permissions, err)
 	}
-	first, err := service.CreateTerminalSession(ctx, owner, machine, "same-name", "owner-session", 4)
+	first, err := service.CreateTerminalSession(ctx, owner, machine, "same-name", "owner-session")
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := service.CreateTerminalSession(ctx, member, machine, "same-name", "member-session", 4)
+	second, err := service.CreateTerminalSession(ctx, member, machine, "same-name", "member-session")
 	if err != nil {
 		t.Fatal(err)
 	}

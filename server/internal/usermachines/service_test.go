@@ -260,20 +260,6 @@ func TestMachineJSONUsesDashboardFieldNames(t *testing.T) {
 	}
 }
 
-func TestTerminalSessionCapacityErrorIsActionableAndTyped(t *testing.T) {
-	err := &TerminalSessionCapacityError{LiveSessions: 20, Limit: 20}
-	if !errors.Is(err, ErrTerminalSessionLimit) {
-		t.Fatalf("capacity error does not preserve ErrTerminalSessionLimit: %v", err)
-	}
-	var typed *TerminalSessionCapacityError
-	if !errors.As(err, &typed) || typed.LiveSessions != 20 || typed.Limit != 20 {
-		t.Fatalf("capacity error details = %#v, want 20 of 20 live sessions", typed)
-	}
-	if got, want := err.Error(), "This machine has 20 running terminals (limit 20). Close one to start another."; got != want {
-		t.Fatalf("capacity error text = %q, want %q", got, want)
-	}
-}
-
 func TestTerminalSessionExpiryUsesConfirmedCloseTime(t *testing.T) {
 	if got := terminalSessionExpiresAt("running", sql.NullTime{}); got != nil {
 		t.Fatalf("open session expiry = %v, want nil", got)

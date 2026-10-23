@@ -27,7 +27,6 @@ func TestLoadOverlaysEnvAndSecretFiles(t *testing.T) {
 		"PAPERBOAT_PREVIEW_SUBDOMAIN_PREFIX":                    "pc",
 		"PAPERBOAT_ACCESS_CONNECT_READY_TIMEOUT":                "7s",
 		"PAPERBOAT_ACCESS_CONNECT_POLL_INTERVAL":                "250ms",
-		"PAPERBOAT_TERMINAL_SESSIONS_MAX_ACTIVE_PER_PROJECT":    "16",
 		"PAPERBOAT_TERMINAL_SESSIONS_OPERATION_TIMEOUT":         "20s",
 		"PAPERBOAT_TERMINAL_SESSIONS_RETRY_BACKOFF":             "3s",
 		"PAPERBOAT_TERMINAL_SESSIONS_WORKER_INTERVAL":           "2s",
@@ -84,7 +83,7 @@ func TestLoadOverlaysEnvAndSecretFiles(t *testing.T) {
 	if got := strings.Join(cfg.Secrets.SessionKeys, ","); got != "one,two" {
 		t.Fatalf("session keys = %q", got)
 	}
-	if cfg.TerminalSessions.MaxActivePerProject != 16 || cfg.TerminalSessions.OperationTimeout.String() != "20s" || cfg.TerminalSessions.RetryBackoff.String() != "3s" || cfg.TerminalSessions.WorkerInterval.String() != "2s" || cfg.TerminalSessions.MaxAttemptsBeforeAlert != 7 {
+	if cfg.TerminalSessions.OperationTimeout.String() != "20s" || cfg.TerminalSessions.RetryBackoff.String() != "3s" || cfg.TerminalSessions.WorkerInterval.String() != "2s" || cfg.TerminalSessions.MaxAttemptsBeforeAlert != 7 {
 		t.Fatalf("terminal session config was not loaded from env: %#v", cfg.TerminalSessions)
 	}
 	if cfg.ConfigSync.Mode != "read_only" {

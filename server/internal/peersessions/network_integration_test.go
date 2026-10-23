@@ -343,7 +343,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	}
 	machineService := usermachines.New(store, audit.NewWriter(store), usermachines.Policy{}, nil)
 	machineService.ConfigureAccess(nil, "https://api.example.test")
-	machineService.ConfigureTerminalSessions(4, provider, nil)
+	machineService.ConfigureTerminalSessions(provider, nil)
 	machineService.ConfigureFileTransfer(accessdescriptor.FileTransferPolicy{Revision: "shared-native-v1", MaxFileBytes: 1 << 20, MaxBatchFiles: 2, MaxBatchBytes: 2 << 20, MaxConcurrentTransfers: 2, RetentionSeconds: 60, DeliveryTimeoutSeconds: 60, MaxPendingSpoolBytes: 2 << 20})
 	execOperationID := "operation_shared_exec_" + suffix
 	refreshRuntimeCarrier()
@@ -449,7 +449,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 		}
 		heldRuntime = helperruntime.Client{HTTPClient: &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS13, RootCAs: roots}}, Timeout: 10 * time.Second}}
 		heldRoute, heldOwnerToken = "https://"+ready.PublicHost, ownerAuth["token"].(string)
-		machineService.ConfigureTerminalSessions(4, provider, heldRuntime.HTTPClient)
+		machineService.ConfigureTerminalSessions(provider, heldRuntime.HTTPClient)
 	}
 	terminalOwnerConfig, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "operation_terminal_owner_config_" + suffix, UserID: userID, EndpointID: cliID})
 	if err != nil {
@@ -465,7 +465,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 		if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.control_routes SET public_host=$2,managed_public_host=$2 WHERE id=$1`, "network_route_"+suffix, stubHost); err != nil {
 			t.Fatal(err)
 		}
-		machineService.ConfigureTerminalSessions(4, provider, stubClient)
+		machineService.ConfigureTerminalSessions(provider, stubClient)
 	}
 	sharingTeam, err := teams.NewService(store).Get(ctx, userID, teamID)
 	if err != nil {

@@ -1142,114 +1142,61 @@ func TestCreateTerminalSessionMapsDuplicateNameToConflict(t *testing.T) {
 		t.Fatal(err)
 	}
 	service := New(store, audit.NewWriter(store), Policy{}, nil)
-	if _, err := service.CreateTerminalSession(ctx, userID, machineID, "benchmark", "create-one", 4); err != nil {
+	if _, err := service.CreateTerminalSession(ctx, userID, machineID, "benchmark", "create-one"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.CreateTerminalSession(ctx, userID, machineID, "benchmark", "create-two", 4); !errors.Is(err, ErrTerminalSessionConflict) {
+	if _, err := service.CreateTerminalSession(ctx, userID, machineID, "benchmark", "create-two"); !errors.Is(err, ErrTerminalSessionConflict) {
 		t.Fatalf("duplicate name error = %v, want %v", err, ErrTerminalSessionConflict)
 	}
 }
 
-func TestCreateTerminalSessionEnforcesLiveCapacityWithoutEviction(t *testing.T) {
+func TestCreateTerminalSessionIsUnlimitedPerMachine(t *testing.T) {
 	store := testStore(t)
 	ctx := context.Background()
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
-	userID, machineID := "usr_um_limit_"+suffix, "um_limit_"+suffix
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users (id,workos_subject,primary_email,status) VALUES ($1,$2,$3,'active')`, userID, "workos_"+suffix, "limit-"+suffix+"@example.test"); err != nil {
+	userID, machineID := "usr_um_unlimited_"+suffix, "um_unlimited_"+suffix
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users (id,workos_subject,primary_email,status) VALUES ($1,$2,$3,'active')`, userID, "workos_"+suffix, "unlimited-"+suffix+"@example.test"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online,configured_capabilities,observed_capabilities) VALUES ($1,$2,$3,'Limit','linux','amd64','/home/test','online','occupied',true,ARRAY['terminal_host'],ARRAY['terminal_host'])`, machineID, userID, "env_limit_"+suffix); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online,configured_capabilities,observed_capabilities) VALUES ($1,$2,$3,'Unlimited','linux','amd64','/home/test','online','occupied',true,ARRAY['terminal_host'],ARRAY['terminal_host'])`, machineID, userID, "env_unlimited_"+suffix); err != nil {
 		t.Fatal(err)
 	}
 	service := New(store, audit.NewWriter(store), Policy{}, nil)
-	first, err := service.CreateTerminalSession(ctx, userID, machineID, "first", "limit-first", 3)
-	if err != nil {
-		t.Fatal(err)
+	// Native terminals have no server-side count: 25 is above the old per-machine limit of 20.
+	var first TerminalSession
+	for i := range 25 {
+		created, err := service.CreateTerminalSession(ctx, userID, machineID, "", fmt.Sprintf("unlimited-%d", i))
+		if err != nil {
+			t.Fatalf("session %d of 25: %v", i+1, err)
+		}
+		if i == 0 {
+			first = created
+		}
 	}
-	second, err := service.CreateTerminalSession(ctx, userID, machineID, "second", "limit-second", 3)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defaultID := newID("terminal")
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machine_terminal_sessions
-(id,user_machine_id,name,is_default,owner_account,launch_cwd,desired_state,runtime_state)
-VALUES ($1,$2,'default',true,$3,'/home/test','open','running')`, defaultID, machineID, userID); err != nil {
-		t.Fatal(err)
-	}
-	exitedID := newID("terminal")
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machine_terminal_sessions
-(id,user_machine_id,name,owner_account,launch_cwd,desired_state,runtime_state)
-VALUES ($1,$2,'exited',$3,'/home/test','open','exited')`, exitedID, machineID, userID); err != nil {
-		t.Fatal(err)
-	}
-	_, err = service.CreateTerminalSession(ctx, userID, machineID, "third", "limit-third", 3)
-	var capacityErr *TerminalSessionCapacityError
-	if !errors.Is(err, ErrTerminalSessionLimit) || !errors.As(err, &capacityErr) {
-		t.Fatalf("capacity error = %v, want typed terminal capacity error", err)
-	}
-	if capacityErr.LiveSessions != 3 || capacityErr.Limit != 3 {
-		t.Fatalf("capacity details = %+v, want 3 of 3 live terminals", capacityErr)
-	}
-	if !strings.Contains(err.Error(), "Close one to start another") {
-		t.Fatalf("capacity error is not actionable: %q", err)
-	}
-
-	// Retries still resolve the original durable session even while full.
-	replay, err := service.CreateTerminalSession(ctx, userID, machineID, "first", "limit-first", 3)
+	// Retries still resolve the original durable session.
+	replay, err := service.CreateTerminalSession(ctx, userID, machineID, "", "unlimited-0")
 	if err != nil || replay.ID != first.ID {
-		t.Fatalf("idempotent replay at capacity = %+v, %v; want %s", replay, err, first.ID)
+		t.Fatalf("idempotent replay = %+v, %v; want %s", replay, err, first.ID)
 	}
-	var queuedOperations, visibleRecords int
-	if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.user_machine_terminal_sessions WHERE user_machine_id=$1 AND deleted_at IS NULL`, machineID).Scan(&visibleRecords); err != nil {
-		t.Fatal(err)
+	if rows := countTerminalSessionRows(t, store, machineID); rows != 25 {
+		t.Fatalf("session records = %d, want 25", rows)
 	}
-	if visibleRecords != 4 {
-		t.Fatalf("session records at capacity = %d, want both open sessions, default, and exited history preserved", visibleRecords)
-	}
+	var queuedOperations int
 	if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.user_machine_terminal_session_operations WHERE user_machine_id=$1`, machineID).Scan(&queuedOperations); err != nil {
 		t.Fatal(err)
 	}
-	if queuedOperations != 2 {
-		t.Fatalf("host creation operations = %d, want one per accepted session and none for capacity rejection", queuedOperations)
+	if queuedOperations != 25 {
+		t.Fatalf("host creation operations = %d, want one per accepted session", queuedOperations)
 	}
-	count, err := store.Queries().CountLiveUserMachineTerminalSessions(ctx, machineID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if int(count) != 3 {
-		t.Fatalf("live session count = %d, want default plus both created sessions; exited history must not count", count)
-	}
+}
 
-	// A close request does not release a real running process slot until the
-	// host confirms it is closed. Once closed, its process slot is free.
-	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machine_terminal_sessions SET desired_state='closed',runtime_state='running' WHERE id=$1`, first.ID); err != nil {
+func countTerminalSessionRows(t *testing.T, store *db.DB, machineID string) int {
+	t.Helper()
+	var rows int
+	if err := store.SQL().QueryRowContext(context.Background(), `SELECT count(*) FROM paperboat.user_machine_terminal_sessions WHERE user_machine_id=$1`, machineID).Scan(&rows); err != nil {
 		t.Fatal(err)
 	}
-	_, err = service.CreateTerminalSession(ctx, userID, machineID, "third-pending-close", "limit-third-pending-close", 3)
-	if !errors.Is(err, ErrTerminalSessionLimit) {
-		t.Fatalf("capacity with close pending = %v, want ErrTerminalSessionLimit", err)
-	}
-	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machine_terminal_sessions SET runtime_state='closed',updated_at=now()-interval '1 day' WHERE id=$1`, first.ID); err != nil {
-		t.Fatal(err)
-	}
-	created, err := service.CreateTerminalSession(ctx, userID, machineID, "third", "limit-third", 3)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if created.ID == first.ID || created.ID == second.ID {
-		t.Fatalf("new session reused an existing identity: %+v", created)
-	}
-	items, err := service.ListTerminalSessions(ctx, userID, machineID)
-	if err != nil || len(items) != 5 {
-		t.Fatalf("retained session records = %d, %v; want two closed histories plus 3 live records", len(items), err)
-	}
-	var firstDeletedAt sql.NullTime
-	if err := store.SQL().QueryRowContext(ctx, `SELECT deleted_at FROM paperboat.user_machine_terminal_sessions WHERE id=$1`, first.ID).Scan(&firstDeletedAt); err != nil {
-		t.Fatal(err)
-	}
-	if firstDeletedAt.Valid {
-		t.Fatalf("closed history %s was deleted during capacity admission", first.ID)
-	}
+	return rows
 }
 
 func TestTerminalSessionRetentionExpiresOnlyConfirmedClosedRows(t *testing.T) {
@@ -1385,37 +1332,33 @@ func TestCreateTerminalSessionAllocatesNameWhenOmitted(t *testing.T) {
 	service := New(store, audit.NewWriter(store), Policy{}, nil)
 	// Deliberately repeat the first candidate on another machine, then redraw.
 	service.nameRandom = bytes.NewReader([]byte{0, 0, 0, 0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3})
-	first, err := service.CreateTerminalSession(ctx, userID, machineID, "", "create-auto-one", 4)
+	first, err := service.CreateTerminalSession(ctx, userID, machineID, "", "create-auto-one")
 	if err != nil || first.Name != "agile-alpine-anchor" {
 		t.Fatalf("first name %q %v", first.Name, err)
 	}
-	replay, err := service.CreateTerminalSession(ctx, userID, machineID, "", "create-auto-one", 4)
+	replay, err := service.CreateTerminalSession(ctx, userID, machineID, "", "create-auto-one")
 	if err != nil || replay.ID != first.ID || replay.Name != first.Name {
 		t.Fatalf("idempotent replay %+v %v", replay, err)
 	}
-	second, err := service.CreateTerminalSession(ctx, userID, machineID+"_other", "", "create-auto-two", 4)
+	second, err := service.CreateTerminalSession(ctx, userID, machineID+"_other", "", "create-auto-two")
 	if err != nil || second.Name != "alert-amber-arch" {
 		t.Fatalf("cross-machine collision retry %+v %v", second, err)
 	}
-	claimed, err := service.CreateTerminalSession(ctx, userID, machineID, "bold-arctic-barn", "create-custom", 4)
+	claimed, err := service.CreateTerminalSession(ctx, userID, machineID, "bold-arctic-barn", "create-custom")
 	if err != nil || claimed.Name != "bold-arctic-barn" {
 		t.Fatalf("explicit name %+v %v", claimed, err)
 	}
-	automatic, err := service.CreateTerminalSession(ctx, userID, machineID, "", "create-auto-three", 4)
+	automatic, err := service.CreateTerminalSession(ctx, userID, machineID, "", "create-auto-three")
 	if err != nil || automatic.Name != "brave-autumn-bay" {
 		t.Fatalf("explicit name collision retry %+v %v", automatic, err)
 	}
 	// Entropy exhaustion fails without creating a row or queuing an operation.
-	before, err := store.Queries().CountLiveUserMachineTerminalSessions(ctx, machineID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = service.CreateTerminalSession(ctx, userID, machineID, "", "create-no-entropy", 16); !errors.Is(err, io.EOF) {
+	before := countTerminalSessionRows(t, store, machineID)
+	if _, err = service.CreateTerminalSession(ctx, userID, machineID, "", "create-no-entropy"); !errors.Is(err, io.EOF) {
 		t.Fatalf("entropy failure = %v", err)
 	}
-	after, err := store.Queries().CountLiveUserMachineTerminalSessions(ctx, machineID)
-	if err != nil || before != after {
-		t.Fatalf("entropy failure changed admission %d %d %v", before, after, err)
+	if after := countTerminalSessionRows(t, store, machineID); before != after {
+		t.Fatalf("entropy failure created rows: %d -> %d", before, after)
 	}
 }
 
@@ -2882,7 +2825,7 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 	if err != nil {
 		t.Fatal(err)
 	}
-	service.ConfigureTerminalSessions(4, signer, nil)
+	service.ConfigureTerminalSessions(signer, nil)
 	response, err := service.ConnectTerminalSession(ctx, userID, sourceMachineID, userMachineID, "cls_1", terminalSessionID)
 	if err != nil {
 		t.Fatal(err)
@@ -2969,7 +2912,7 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 	if err != nil {
 		t.Fatal(err)
 	}
-	service.ConfigureTerminalSessions(4, signer, nil)
+	service.ConfigureTerminalSessions(signer, nil)
 
 	created, err := service.CreateConfiguredTerminalSessionInDirectory(ctx, userID, userMachineID, userMachineID, "bench-run", "pb-mc-key", "/tmp/local project")
 	if err != nil {
@@ -3058,7 +3001,7 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 	}
 	service := New(store, audit.NewWriter(store), Policy{}, nil)
 	service.ConfigureAccess(fakeCredentialIssuer{}, "https://api.paperboat.test")
-	service.ConfigureTerminalSessions(4, signer, nil)
+	service.ConfigureTerminalSessions(signer, nil)
 	operationID := "operation_exec_" + suffix
 	descriptor, err := service.ExecDescriptor(ctx, userID, sourceMachineID, machineID, "cli_exec_1", operationID)
 	if err != nil {
@@ -3183,7 +3126,7 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 	policy := accessdescriptor.FileTransferPolicy{Revision: "file-transfer-v1", MaxFileBytes: 50 << 20, MaxBatchFiles: 10, MaxBatchBytes: 500 << 20, MaxConcurrentTransfers: 2, RetentionSeconds: 604800, DeliveryTimeoutSeconds: 600, MaxPendingSpoolBytes: 1 << 30}
 	service := New(store, audit.NewWriter(store), Policy{}, nil)
 	service.ConfigureAccess(nil, "https://api.paperboat.test")
-	service.ConfigureTerminalSessions(4, signer, nil)
+	service.ConfigureTerminalSessions(signer, nil)
 	service.ConfigureFileTransfer(policy)
 
 	if _, err := service.SetTransferDestinationDefault(ctx, userID, foreign.id); !errors.Is(err, ErrTransferDestinationInvalid) {

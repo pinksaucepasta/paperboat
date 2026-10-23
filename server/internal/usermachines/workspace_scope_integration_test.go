@@ -38,7 +38,7 @@ func TestWorkspaceTerminalDescriptorDoesNotBorrowPersonalCapabilities(t *testing
 		name      string
 		wantFiles bool
 	}{{team, "team-only", false}, {personal, "personal-full", true}} {
-		session, err := f.service.CreateTerminalSession(test.ctx, f.account, f.machine, test.name, "descriptor_"+test.name+f.suffix, 8)
+		session, err := f.service.CreateTerminalSession(test.ctx, f.account, f.machine, test.name, "descriptor_"+test.name+f.suffix)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -113,7 +113,7 @@ func newWorkspaceDescriptorFixture(t *testing.T) (workspaceMachineFixture, strin
 		t.Fatal(err)
 	}
 	f.service.ConfigureAccess(fakeCredentialIssuer{}, "https://api.paperboat.test")
-	f.service.ConfigureTerminalSessions(8, signer, nil)
+	f.service.ConfigureTerminalSessions(signer, nil)
 	return f, source, signer
 }
 
@@ -284,7 +284,7 @@ func TestWorkspaceScopedTerminalOwnership(t *testing.T) {
 	teamTwo := workspace.WithContext(f.ctx, workspace.Scope{ID: f.teamTwo, TeamID: f.teamTwo})
 	personal := workspace.WithContext(f.ctx, workspace.Scope{ID: "personal"})
 
-	created, err := f.service.CreateTerminalSession(teamOne, f.account, f.machine, "team-debug", "ws_terminal_"+f.suffix, 8)
+	created, err := f.service.CreateTerminalSession(teamOne, f.account, f.machine, "team-debug", "ws_terminal_"+f.suffix)
 	if err != nil {
 		t.Fatalf("create team terminal session: %v", err)
 	}

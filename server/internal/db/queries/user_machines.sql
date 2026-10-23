@@ -1086,14 +1086,6 @@ WHERE m.id=sqlc.arg(user_machine_id) AND m.deleted_at IS NULL
         AND team_machine_capability_allowed(sqlc.arg(user_id),sqlc.narg(workspace_team_id)::text,m.id,'terminal')))
 FOR UPDATE;
 
--- name: CountLiveUserMachineTerminalSessions :one
-SELECT count(*)::integer FROM user_machine_terminal_sessions
-WHERE user_machine_id=sqlc.arg(user_machine_id) AND deleted_at IS NULL
-  AND (
-    (desired_state='open' AND runtime_state NOT IN ('closed','exited','deleted'))
-    OR runtime_state IN ('creating','running','restarting','closing')
-  );
-
 -- name: CreateUserMachineTerminalSession :execrows
 INSERT INTO user_machine_terminal_sessions (id,user_machine_id,owner_account,owner_team_id,name,idempotency_key,launch_cwd)
 VALUES (sqlc.arg(id),sqlc.arg(user_machine_id),sqlc.arg(owner_account),sqlc.narg(owner_team_id),sqlc.arg(name),sqlc.arg(idempotency_key),sqlc.arg(launch_cwd))

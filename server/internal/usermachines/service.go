@@ -61,7 +61,6 @@ var (
 	ErrTerminalSessionEnded                 = errors.New("user-machine terminal session has closed")
 	ErrTerminalSharingNotApplied            = errors.New("terminal sharing was not applied")
 	ErrTerminalSessionReserved              = errors.New("user-machine default terminal session is reserved")
-	ErrTerminalSessionLimit                 = errors.New("user-machine terminal session limit reached")
 	ErrTerminalSessionConflict              = errors.New("user-machine terminal session name conflict")
 	ErrTerminalSessionNotClosed             = errors.New("user-machine terminal session is not closed")
 	ErrTerminalSessionInvalidName           = errors.New("invalid user-machine terminal session name")
@@ -77,19 +76,6 @@ var (
 func exactNoRows(err error) bool {
 	return err == sql.ErrNoRows || err == pgx.ErrNoRows
 }
-
-// TerminalSessionCapacityError reports why a new terminal cannot be reserved
-// on a machine while preserving ErrTerminalSessionLimit for existing callers.
-type TerminalSessionCapacityError struct {
-	LiveSessions int
-	Limit        int
-}
-
-func (e *TerminalSessionCapacityError) Error() string {
-	return fmt.Sprintf("This machine has %d running terminals (limit %d). Close one to start another.", e.LiveSessions, e.Limit)
-}
-
-func (e *TerminalSessionCapacityError) Unwrap() error { return ErrTerminalSessionLimit }
 
 var terminalSessionNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
 var execOperationIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{8,128}$`)
@@ -270,7 +256,6 @@ type Service struct {
 	issuer                      string
 	fileTransferPolicy          accessdescriptor.FileTransferPolicy
 	teamInbox                   *teaminbox.Service
-	maxSessions                 int
 	controlSigner               *mint.Provider
 	controlRuntime              userMachineHelperRuntime
 	bootstrapCommand            string
@@ -393,6 +378,7 @@ func (s *Service) Worker(interval time.Duration) func(context.Context) error {
 				workers.IterationFailure(ctx, "pending_revocation", "machine_revocation_failed", s.RetryPendingRevocations(ctx))
 				workers.IterationFailure(ctx, "terminal_session_operation", "terminal_operation_failed", s.processDueTerminalSessionOperations(ctx))
 				workers.IterationFailure(ctx, "terminal_session_cleanup", "terminal_cleanup_failed", s.expireClosedTerminalSessions(ctx))
+				workers.IterationFailure(ctx, "terminal_session_orphans", "terminal_orphan_reconcile_failed", s.reconcileOrphanTerminalSessions(ctx))
 				_, progressErr := s.db.Queries().MarkStaleUserMachinesOffline(ctx, sql.NullTime{Time: s.now().UTC().Add(-s.policy.OfflineAfter), Valid: true})
 				workers.IterationFailure(ctx, "stale_machine_offline", "machine_offline_reconcile_failed", progressErr)
 				workers.IterationFailure(ctx, "access_session_retention", "access_session_retention_failed", s.retireExpiredAccessSessions(ctx))
@@ -450,10 +436,7 @@ func (s *Service) RuntimeFileTransferPolicy() accessdescriptor.FileTransferPolic
 	return s.fileTransferPolicy
 }
 
-func (s *Service) ConfigureTerminalSessions(maxActive int, signer *mint.Provider, client *http.Client) {
-	if maxActive > 0 {
-		s.maxSessions = min(maxActive, 20)
-	}
+func (s *Service) ConfigureTerminalSessions(signer *mint.Provider, client *http.Client) {
 	s.controlSigner = signer
 	if client == nil {
 		client = &http.Client{Timeout: 15 * time.Second}
@@ -493,7 +476,7 @@ func New(store *db.DB, auditWriter *audit.Writer, policy Policy, seats SeatAutho
 	if policy.OfflineAfter <= 0 {
 		policy.OfflineAfter = 2 * time.Minute
 	}
-	return &Service{db: store, audit: auditWriter, policy: policy, seats: seats, now: time.Now, maxSessions: 20}
+	return &Service{db: store, audit: auditWriter, policy: policy, seats: seats, now: time.Now}
 }
 
 type PairingInput struct {

@@ -65,7 +65,7 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 	}
 	service := New(store, audit.NewWriter(store), Policy{}, nil)
 	service.ConfigureAccess(fakeCredentialIssuer{}, "https://api.paperboat.test")
-	service.ConfigureTerminalSessions(4, signer, nil)
+	service.ConfigureTerminalSessions(signer, nil)
 	quota := &runtimeQuotaFixture{exhausted: true}
 	service.ConfigureRuntimeQuota(quota, "https://console.example.test/billing")
 	// At the cap a CLI descriptor is still issued: the server cannot know whether the

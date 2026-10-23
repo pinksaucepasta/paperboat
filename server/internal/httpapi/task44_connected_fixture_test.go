@@ -121,7 +121,7 @@ func TestTask44ConnectedCollaboration(t *testing.T) {
 	authority := teams.NewService(store)
 	machines := usermachines.New(store, writer, usermachines.Policy{}, nil)
 	machines.ConfigureAccess(nil, "https://task44.invalid")
-	machines.ConfigureTerminalSessions(4, signer, nil)
+	machines.ConfigureTerminalSessions(signer, nil)
 	machines.ConfigureFileTransfer(accessdescriptor.FileTransferPolicy{Revision: "task44", MaxFileBytes: 1 << 20, MaxBatchFiles: 2, MaxBatchBytes: 2 << 20, MaxConcurrentTransfers: 2, RetentionSeconds: 60, DeliveryTimeoutSeconds: 60, MaxPendingSpoolBytes: 2 << 20})
 	inbox, err := teaminbox.New(store, config.Default().Access.FileTransfer)
 	if err != nil {
@@ -275,7 +275,7 @@ func TestTask44ConnectedCollaboration(t *testing.T) {
 	}
 	transport := &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS13, RootCAs: roots}}
 	defer transport.CloseIdleConnections()
-	machines.ConfigureTerminalSessions(4, signer, &http.Client{Transport: transport, Timeout: 5 * time.Second})
+	machines.ConfigureTerminalSessions(signer, &http.Client{Transport: transport, Timeout: 5 * time.Second})
 	sql(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at) VALUES($1,'task44','1.0',$1,'ready',true,now())`, edge)
 	sql(`UPDATE paperboat.control_connector_generations SET machine_id=$2,edge_pool='task44',edge_node_id=$3,state='admitted' WHERE environment_id=$1 AND generation=1`, environment, machine, edge)
 	sql(`INSERT INTO paperboat.control_routes(id,environment_id,kind,public_host,target_host,target_port,desired_revision,applied_revision,applied_node_id,applied_generation) VALUES($1,$2,'runtime_https_wss',$3,'127.0.0.1',8080,1,1,$4,1)`, "route_"+suffix, environment, ready.PublicHost, edge)

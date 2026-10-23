@@ -596,22 +596,6 @@ func (q *Queries) ConsumeUserMachineTopup(ctx context.Context, arg ConsumeUserMa
 	return result.RowsAffected(), nil
 }
 
-const countLiveUserMachineTerminalSessions = `-- name: CountLiveUserMachineTerminalSessions :one
-SELECT count(*)::integer FROM user_machine_terminal_sessions
-WHERE user_machine_id=$1 AND deleted_at IS NULL
-  AND (
-    (desired_state='open' AND runtime_state NOT IN ('closed','exited','deleted'))
-    OR runtime_state IN ('creating','running','restarting','closing')
-  )
-`
-
-func (q *Queries) CountLiveUserMachineTerminalSessions(ctx context.Context, userMachineID string) (int32, error) {
-	row := q.db.QueryRow(ctx, countLiveUserMachineTerminalSessions, userMachineID)
-	var column_1 int32
-	err := row.Scan(&column_1)
-	return column_1, err
-}
-
 const countOccupiedUserMachineSeats = `-- name: CountOccupiedUserMachineSeats :one
 SELECT count(*)::integer FROM user_machines
 WHERE user_id = $1 AND seat_state = 'occupied' AND deleted_at IS NULL

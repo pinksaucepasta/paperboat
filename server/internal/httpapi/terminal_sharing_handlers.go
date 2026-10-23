@@ -114,7 +114,7 @@ func writeTerminalSharingMutation(w http.ResponseWriter, r *http.Request, item u
 		writeError(w, r, 409, "team_changed", "Team changed. Refresh before retrying.")
 	case errors.Is(err, teams.ErrInvalid):
 		writeError(w, r, 400, "invalid_request", "Check the sharing audience, member, role and operation.")
-	case errors.Is(err, teams.ErrLimit), errors.Is(err, usermachines.ErrTerminalSessionLimit):
+	case errors.Is(err, teams.ErrLimit):
 		writeError(w, r, 409, "terminal_session_limit", "Terminal session sharing limit reached. End unused sharing before retrying.")
 	case errors.Is(err, usermachines.ErrTerminalSessionEnded):
 		writeError(w, r, 409, "terminal_session_closed", "This terminal session has closed, so it cannot be shared. Start or choose a running session.")

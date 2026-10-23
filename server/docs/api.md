@@ -244,7 +244,6 @@ Documented public codes currently emitted by the handlers include:
 - `machine_not_ready`
 - `terminal_session_not_found`
 - `terminal_session_name_conflict`
-- `terminal_session_limit_reached`
 - `terminal_session_reserved`
 - `terminal_session_not_closed`
 - `terminal_session_operation_pending`

@@ -11,7 +11,7 @@ import (
 // client deletes/restores a terminal. Runtime enrichment may be unavailable.
 func TestTerminalInventoryConcurrentLifecyclePostgres(t *testing.T) {
 	f := newWorkspaceMachineFixture(t)
-	session, err := f.service.CreateTerminalSession(f.ctx, f.account, f.machine, "snapshot", "snapshot-"+f.suffix, 20)
+	session, err := f.service.CreateTerminalSession(f.ctx, f.account, f.machine, "snapshot", "snapshot-"+f.suffix)
 	if err != nil {
 		t.Fatal(err)
 	}

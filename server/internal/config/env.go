@@ -303,13 +303,6 @@ func overlayEnv(c *Config, lookup func(string) (string, bool), readFile func(str
 		}
 		c.TerminalSessions.MaxAttemptsBeforeAlert = parsed
 	}
-	if v, ok := lookup("PAPERBOAT_TERMINAL_SESSIONS_MAX_ACTIVE_PER_PROJECT"); ok {
-		parsed, err := strconv.Atoi(v)
-		if err != nil {
-			return fmt.Errorf("parse PAPERBOAT_TERMINAL_SESSIONS_MAX_ACTIVE_PER_PROJECT: %w", err)
-		}
-		c.TerminalSessions.MaxActivePerProject = parsed
-	}
 	if v, ok := lookup("PAPERBOAT_TERMINAL_SESSIONS_OPERATION_TIMEOUT"); ok {
 		parsed, err := time.ParseDuration(v)
 		if err != nil {
