@@ -969,14 +969,10 @@ func (s *EdgeService) handleRoutes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if input.ProcessEpoch != "" {
-		rows, err := s.ListTunnelEdgeRouteAssignmentsForNodeV1(r.Context(), input.NodeID, input.ProcessEpoch)
+		items, err := s.CanonicalRouteSnapshot(r.Context(), input.NodeID, input.ProcessEpoch)
 		if err != nil {
 			writeEdgeError(w, r, http.StatusServiceUnavailable, "control_unavailable", true, 1000, err)
 			return
-		}
-		items := make([]map[string]any, 0, len(rows))
-		for _, row := range rows {
-			items = append(items, tunnelEdgeRouteJSON(row))
 		}
 		legacyRows, err := s.Routes(r.Context(), input.NodeID)
 		if err != nil {

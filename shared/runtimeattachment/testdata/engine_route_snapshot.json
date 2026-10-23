@@ -1,0 +1,50 @@
+{
+  "complete": true,
+  "routes": [
+    {
+      "access_mode": "public",
+      "account_id": "tunnelep_193850011087413_account",
+      "assignment_generation": 1,
+      "assignment_id": "epa_route_tunnelep_193850011087413",
+      "config_content_hash": "sha256:62f3869cdbba3f051d30525a0d793de13016518d822902d66d272e572ba433b3",
+      "config_generation": 1,
+      "connector_generation": 1,
+      "connector_id": "tunnelep_193850011087413_machine",
+      "connector_process_generation": 1,
+      "connector_session_id": "session_08576199-43aa-45a6-9920-d375e52fb574",
+      "desired_state": "active",
+      "domain_bindings": [],
+      "edge_failure_domain": "first-domain",
+      "edge_node_id": "tunnelep_193850011087413_edge",
+      "edge_process_epoch": "epoch_endpoint",
+      "host_id": "tunnelep_193850011087413_machine",
+      "host_override": null,
+      "kind": "tunnel_http_wss",
+      "machine_identity_public_key": "JhWYYZ_o917giBRPBnYrqi7vRIRmzPIDcQwpVWwYzLE",
+      "machine_identity_thumbprint": "vF1JB5UOo5Coz1qPj_S_QzWyvFch0hv9awgqO1xPGp4",
+      "match_hostname": "7f3cc669-3d56-4ddc-8c35-f61836992a7a.tunnels.example.test",
+      "match_type": "managed",
+      "observed_state": "pending",
+      "origin_scheme": "http",
+      "path_prefix": null,
+      "preserve_host": true,
+      "priority": 1,
+      "protocol": "http",
+      "public_host": "7f3cc669-3d56-4ddc-8c35-f61836992a7a.tunnels.example.test",
+      "public_tcp_listener_id": null,
+      "public_tcp_port": null,
+      "route_id": "route_tunnelep_193850011087413",
+      "route_revision": 3,
+      "state": "active",
+      "target": {
+        "config_generation": 1,
+        "connector_process_generation": 1,
+        "connector_session_id": "session_08576199-43aa-45a6-9920-d375e52fb574",
+        "route_id": "route_tunnelep_193850011087413"
+      },
+      "tunnel_id": "tunnelep_193850011087413_route",
+      "viewer_policy_generation": 3,
+      "wildcard_suffix": null
+    }
+  ]
+}

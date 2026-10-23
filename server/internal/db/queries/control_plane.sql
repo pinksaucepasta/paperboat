@@ -1572,7 +1572,9 @@ SELECT ('epa_' || x.route_id)::text,
        (ra.admission->'binding'->>'connector_id')::text,
        ra.machine_id,
        ra.public_identity_key,
-       (ra.admission->'binding'->>'machine_identity_thumbprint')::text,
+       -- Filled by the route snapshot with the shared connector thumbprint of the key (the
+       -- carrier's own sha256 thumbprint is another format the edge's registry refuses).
+       ''::text,
        1::bigint,
        ra.session_id,
        ra.worker_generation,

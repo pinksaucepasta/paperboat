@@ -1,8 +1,12 @@
 package runtimeattachment
 
 import (
+	"crypto/ed25519"
 	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -153,6 +157,22 @@ VALUES($1,1,sha256(convert_to($1::text,'UTF8')),convert_to(json_build_object('ro
 		row.PublicHost != endpointID+".tunnels.example.test" || row.State != "active" || row.ObservedState != "pending" {
 		t.Fatalf("engine snapshot row = %+v, carrier %+v", row, edgeCarrier)
 	}
+	// The edge's durable admission registry admits a replica only when the row's thumbprint is the
+	// connector (JWK) thumbprint of its machine key; the runtime carrier's own sha256 thumbprint is
+	// another format (round 21: every engine route stayed unobserved). Check the snapshot the edge
+	// receives, and keep it as the golden contract the edge's own test consumes.
+	items, err := control.CanonicalRouteSnapshot(f.ctx, f.node, f.edge.ProcessEpoch)
+	if err != nil || len(items) != 1 {
+		t.Fatalf("canonical snapshot: %d %v", len(items), err)
+	}
+	key, err := base64.RawURLEncoding.DecodeString(f.key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want, err := wire.IdentityThumbprint(ed25519.PublicKey(key)); err != nil || items[0]["machine_identity_thumbprint"] != want {
+		t.Fatalf("engine route thumbprint = %v, want the connector thumbprint %q (%v)", items[0]["machine_identity_thumbprint"], want, err)
+	}
+	checkEngineRouteGolden(t, items[0])
 	if other, err := control.ListTunnelEdgeRouteAssignmentsForNodeV1(f.ctx, f.node, "epoch_other"); err != nil || len(other) != 0 {
 		t.Fatalf("another process epoch of the edge got the route: %d %v", len(other), err)
 	}
@@ -301,5 +321,47 @@ VALUES($1,1,sha256(convert_to($1::text,'UTF8')),convert_to(json_build_object('ro
 	attach([]string{runtimewire.CapabilityEndpoints})
 	if endpoint, _, _ := state(); endpoint {
 		t.Fatal("tunnel stayed on the engine after its agent stopped serving tunnels")
+	}
+}
+
+// engineRouteGolden is the engine route row the server sends an edge, kept where the edge's test
+// reads it (tunnel/internal/runtime: TestEdgeAdmitsTheServersEngineRouteGolden), so both sides run
+// their real code against one contract. PAPERBOAT_UPDATE_GOLDEN=<path of that file> rewrites it.
+const engineRouteGolden = "../../../shared/runtimeattachment/testdata/engine_route_snapshot.json"
+
+func checkEngineRouteGolden(t *testing.T, item map[string]any) {
+	t.Helper()
+	encoded, err := json.MarshalIndent(map[string]any{"complete": true, "routes": []any{item}}, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path := os.Getenv("PAPERBOAT_UPDATE_GOLDEN"); path != "" {
+		if err := os.WriteFile(path, append(encoded, '\n'), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	raw, err := os.ReadFile(engineRouteGolden)
+	if err != nil {
+		t.Fatalf("read the engine route golden (PAPERBOAT_UPDATE_GOLDEN=<path> writes it): %v", err)
+	}
+	var golden struct {
+		Routes []map[string]any `json:"routes"`
+	}
+	var current struct {
+		Routes []map[string]any `json:"routes"`
+	}
+	if json.Unmarshal(raw, &golden) != nil || json.Unmarshal(encoded, &current) != nil || len(golden.Routes) != 1 {
+		t.Fatal("engine route golden unreadable")
+	}
+	for field := range current.Routes[0] {
+		if _, ok := golden.Routes[0][field]; !ok {
+			t.Fatalf("server sends field %q the golden lacks: rewrite it with PAPERBOAT_UPDATE_GOLDEN and run the edge test", field)
+		}
+	}
+	for field := range golden.Routes[0] {
+		if _, ok := current.Routes[0][field]; !ok {
+			t.Fatalf("golden field %q is no longer sent: rewrite it with PAPERBOAT_UPDATE_GOLDEN and run the edge test", field)
+		}
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
@@ -121,6 +122,31 @@ func validTunnelEdgeProcessEpoch(value string) bool {
 		return false
 	}
 	return true
+}
+
+// CanonicalRouteSnapshot is the process-fenced tunnel route snapshot an edge process pulls. An
+// engine route (PLAN 3a step 4) rides on the agent's runtime carrier: its machine thumbprint is the
+// shared connector thumbprint of the agent's key, the one the edge's durable admission registry
+// checks, computed here by the same shared function (connectorprotocol.IdentityThumbprint).
+func (s *EdgeService) CanonicalRouteSnapshot(ctx context.Context, nodeID, processEpoch string) ([]map[string]any, error) {
+	rows, err := s.ListTunnelEdgeRouteAssignmentsForNodeV1(ctx, nodeID, processEpoch)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		if row.MachineIdentityThumbprint == "" {
+			key, err := base64.RawURLEncoding.Strict().DecodeString(row.MachineIdentityPublicKey)
+			if err != nil {
+				return nil, fmt.Errorf("engine route %s machine key: %w", row.RouteID, err)
+			}
+			if row.MachineIdentityThumbprint, err = connectorprotocol.IdentityThumbprint(ed25519.PublicKey(key)); err != nil {
+				return nil, fmt.Errorf("engine route %s machine thumbprint: %w", row.RouteID, err)
+			}
+		}
+		items = append(items, tunnelEdgeRouteJSON(row))
+	}
+	return items, nil
 }
 
 func tunnelEdgeRouteJSON(row dbsqlc.ListTunnelEdgeRouteAssignmentsForNodeV1Row) map[string]any {
