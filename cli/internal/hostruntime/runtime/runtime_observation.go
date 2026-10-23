@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -96,21 +97,45 @@ func (s *runtimeObservationService) Start(ctx context.Context) error {
 // runtimeObservationMaxRetry caps the wait between observations while the server keeps failing them.
 const runtimeObservationMaxRetry = time.Minute
 
+// runtimeObservationReconnectRetry is the wait after an observation whose connection could not even
+// be opened (DNS, route or connect failed): the server marks a silent machine offline after
+// OfflineAfter and refuses descriptors for it, so presence is the first thing a machine whose network
+// came back must report. Such a retry never reaches the server.
+const runtimeObservationReconnectRetry = 2 * time.Second
+
 // serverAnswered reports whether a failed observation reached the server and got a failing answer.
-// Only those back off: a machine whose network is down costs the server nothing by retrying, and the
-// server marks it offline after OfflineAfter, so a long backoff would keep it offline for up to a
-// minute and a half after its network came back.
+// Only those back off: failures that never reached the server cost it nothing.
 func serverAnswered(err error) bool {
 	var failure runtimeObservationFailure
 	return errors.As(err, &failure) && failure.answered
 }
 
+// connectionNotOpened reports whether an observation failed before any connection to the server
+// existed. A timeout on an open connection is not one: that server may be hung, and stays at the
+// interval.
+func connectionNotOpened(err error) bool {
+	var dns *net.DNSError
+	var network *net.OpError
+	return errors.As(err, &dns) || errors.As(err, &network) && network.Op == "dial"
+}
+
+// runtimeObservationWait is the wait before the next observation after err (nil on success) and
+// failures consecutive answered failures.
+func (s *runtimeObservationService) runtimeObservationWait(err error, failures int) time.Duration {
+	switch {
+	case failures > 1:
+		return backoff.Retry(failures-1, s.interval, runtimeObservationMaxRetry)
+	case err != nil && !serverAnswered(err) && connectionNotOpened(err):
+		return backoff.Jitter(runtimeObservationReconnectRetry)
+	}
+	return backoff.Jitter(s.interval)
+}
+
 func (s *runtimeObservationService) loop(ctx context.Context, done chan<- struct{}) {
 	defer close(done)
 	// The next observation follows the interval with jitter, so a fleet that reconnected together (a
-	// server deploy) does not report in lockstep; consecutive failures back off to runtimeObservationMaxRetry
-	// instead of every machine asking a failing server every interval. Failures that never reached the
-	// server keep the interval (serverAnswered).
+	// server deploy) does not report in lockstep; consecutive failures the server answered back off to
+	// runtimeObservationMaxRetry instead of every machine asking a failing server every interval.
 	next := time.NewTimer(backoff.Jitter(s.interval))
 	defer next.Stop()
 	failures := 0
@@ -120,7 +145,7 @@ func (s *runtimeObservationService) loop(ctx context.Context, done chan<- struct
 	}
 	watch := time.NewTicker(watchEvery)
 	defer watch.Stop()
-	send := func() {
+	send := func() error {
 		sendCtx, cancel := context.WithTimeout(ctx, s.timeout)
 		defer cancel()
 		err := s.sender.Send(sendCtx)
@@ -132,18 +157,15 @@ func (s *runtimeObservationService) loop(ctx context.Context, done chan<- struct
 		} else {
 			failures = 0
 		}
+		return err
 	}
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-next.C:
-			send()
-			wait := backoff.Jitter(s.interval)
-			if failures > 1 {
-				wait = backoff.Retry(failures-1, s.interval, runtimeObservationMaxRetry)
-			}
-			next.Reset(wait)
+			err := send()
+			next.Reset(s.runtimeObservationWait(err, failures))
 		case <-watch.C:
 			if s.sender.machineServicesChanged(ctx) {
 				send()

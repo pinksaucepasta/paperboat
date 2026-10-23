@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -70,5 +72,33 @@ func TestRuntimeObservationBacksOffWhileTheServerFails(t *testing.T) {
 	t.Logf("observations in 2.5 s at a 50 ms interval: failing server %d, healthy server %d", failing.calls.Load(), healthy.calls.Load())
 	if failing.calls.Load() > 12 || failing.calls.Load()*2 > healthy.calls.Load() {
 		t.Fatalf("a failing server got %d observations against %d for a healthy one; want a backoff", failing.calls.Load(), healthy.calls.Load())
+	}
+}
+
+// After a network outage the server has marked the machine offline and refuses descriptors for it
+// (machine_not_ready), so presence is retried within seconds while no connection can be opened. A
+// timeout on an open connection may be a hung server and keeps the interval; a server that answered
+// with failures backs off.
+func TestRuntimeObservationRetriesSoonWhileNoConnectionOpens(t *testing.T) {
+	service := &runtimeObservationService{interval: 10 * time.Second}
+	dial := runtimeObservationFailure{stage: "control_request", cause: &url.Error{Op: "Post", URL: "https://observations.invalid", Err: &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("i/o timeout")}}}
+	dns := runtimeObservationFailure{stage: "control_request", cause: &url.Error{Op: "Post", URL: "https://observations.invalid", Err: &net.OpError{Op: "dial", Net: "tcp", Err: &net.DNSError{Err: "no such host", Name: "observations.invalid"}}}}
+	hung := runtimeObservationFailure{stage: "control_request", cause: &url.Error{Op: "Post", URL: "https://observations.invalid", Err: context.DeadlineExceeded}}
+	answered := runtimeObservationFailure{stage: "control_request", cause: errors.New("503"), answered: true}
+	for range 100 {
+		for name, err := range map[string]error{"dial": dial, "dns": dns} {
+			if got := service.runtimeObservationWait(err, 0); got >= 3*time.Second {
+				t.Fatalf("%s failure waits %v; want under 3 s", name, got)
+			}
+		}
+		if got := service.runtimeObservationWait(hung, 0); got < 5*time.Second {
+			t.Fatalf("a timeout on an open connection waits %v; want the interval", got)
+		}
+		if got := service.runtimeObservationWait(nil, 0); got < 5*time.Second || got >= 15*time.Second {
+			t.Fatalf("success waits %v; want the jittered interval", got)
+		}
+		if got := service.runtimeObservationWait(answered, 4); got < 20*time.Second {
+			t.Fatalf("answered failures wait %v; want the backoff", got)
+		}
 	}
 }
