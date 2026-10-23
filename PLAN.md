@@ -1790,6 +1790,15 @@ an existing worker.
 Hot read plans on the seeded database (5k machines, 200k audit events, 50k access sessions): warm planning 0.3–1 ms,
 execution ≤ 0.2 ms for the revocation document, the workspace activity page and the bandwidth month sum; the right indexes are used.
 
+**Ranked (impact at 100k users × frequency), top 15:** 1 P1 config + JWKS refetch every 1 s per active client ·
+2 S1 one worker's DB error stops the server · 3 T1 edge fails closed on a control outage · 4 S5 presence: 4–6 write tx per
+10 s per machine · 5 P4 machine-services poll pinned at 2 s · 6 P3 private TCP routes POST every 1 s per session · 7 C1/C2
+console full machine list every 15 s per tab, per-row inbox/domain polls · 8 S2/S7 one global lock, Stripe call inside it ·
+9 E2 4 MiB config re-read per connector heartbeat · 10 D1/E4 tables nothing prunes · 11 E1 ACME re-order every second ·
+12 P2 full peer status built twice per metered read/write · 13 A1 local snapshot 1 MiB cap vs 10k machines · 14 H2 input
+journal lifetime cap · 15 S3/E3 N+1 terminal and preview lists. The cloudflared/zrok/ngrok-go comparison of the tunnel stack
+(HA connections, reconnect, drain, limits) is still running; its findings are added as T5+ when verified.
+
 **Findings by package group** (verified in our code by Lane X; ranked list follows when coverage is complete)
 
 | # | Finding | Ours | Reference does | Owner |
@@ -1829,6 +1838,13 @@ execution ≤ 0.2 ms for the revocation document, the workspace activity page an
 | E2 | Every connector heartbeat (5 s) re-reads the full tunnel config snapshot (≤4 MiB) from the DB and re-parses it; the server never offers deltas (OfferDelta has no caller); ~2 row writes per heartbeat | `server/internal/connectorprotocol/transport.go:438-446, sql_store.go:423-460,809-870, persistence.go:424-432` | cloudflared: remote config pushed on version change only; TS: delta map after the first | B (M for the connector side) |
 | E3 | Preview list is N+1: previewView runs CurrentPreviewRoute + ListProjection per row (~401 round trips per 200-row page); the edge carrier pull does 2 statements per admission (≤8192/pull) and the ack 1 tx per admission with FOR UPDATE on the edge node row | `server/internal/previewv1/service.go:660-668,990,1002; previewattachment/outbox.go:163-185,273-290; edge_http.go:317-322` | zrok: share list is one query; batch by ids | Q |
 | E4 | Tables nothing prunes (beyond D1): preview_carrier_attachment_outbox, tunnel_log_entries (has a retention index but no delete), tunnel_connector_enrollments, peer_endpoint_certificates/enrollment requests, managed_ssh_client_keys, transactional_mail_outbox (payload blanked only) | `grep: no DELETE outside migrations` | Teleport: TTL on every backend item | Q |
+| P1 | While any native stream is open, every client re-fetches its signed peer-network config and the JWKS every 1 s (the revocation lease poll runs a full Refresh), ~2 requests/s per active client | `cli/internal/peertransport/tailnet/refresh.go:119-132, 60-82; shared/admission/lifetime.go:136` | TS: map updates arrive on the open long poll (controlclient direct.go); revocation pushed | R + B (push revocation) |
+| P2 | Every metered Read/Write builds a full magicsock status of all peers twice (path observer before and after each op), plus json+sha256 per add() under the recorder lock, which also fsyncs state up to 128× per flush | `cli/internal/bandwidth/meter.go:40-66, recorder.go:136-160,248-258; peertransport/mesh/regional_status.go:30-43` | TS wgengine/netlog: typed counters under lock, serialize at a 5 s flush; per-peer lookup O(1) (peermap) | R |
+| P3 | Each active private TCP session POSTs /v1/private-access/routes every 1 s (lease poll → validate → uncached discovery snapshot); the server returns up to 4,096 rows per call | `cli/internal/hostruntime/preview/private_tcp_access_manager.go:345-350, accessor_discovery.go:150-172; server privateaccess/accessor_routes.go:162-170` | Teleport lib/srv/monitor: subscribes to a lock watcher (push), no per-session poll | R + B |
+| P4 | Machine-services refresh waits min(lease expiry) − 10 s over every listed machine's 30 s lease, floored at 2 s: with many announcing machines the floor is hit constantly, so each daemon GETs /v1/machine-services every ~2 s (server does per-port ResolveTx per candidate) | `cli/internal/daemoncmd/machine_services_refresh.go:18-37; server machineservices/service.go:29` | TS: services/peers arrive in the netmap stream; Teleport heartbeat scaled to fleet size (lib/inventory/controller.go:298-302) | R + Q |
+| P5 | CallMeMaybe is sent to every peer on every status change and meow ping, each send scanning all peers (O(N²) per event); admit rebuilds and sorts the whole netmap under the backend lock | `cli/internal/peertransport/mesh/engine_backend.go:262-274,98-109,362-393` | TS magicsock sends CallMeMaybe only to the peer starting discovery (endpoint.go:1428-1450); updateNodes diffs | R (extends Lane R #8) |
+| P6 | Inbox pending poll retries a failed request after a fixed 1 s, no backoff or jitter, for the life of each `pb connect` session: 10k sessions = 10k req/s exactly when the server recovers | `cli/internal/inbox/inbox.go:270-284` | TS controlclient: exponential backoff with jitter, honors Retry-After (auto.go, direct.go) | A |
+| P7 | Client metrics sampler sends up to ~68 metric items to Sentry every 30 s per daemon, bypassing the 32/min detail budget it documents (~1.4M items/min at 10k daemons; verify series count) | `cli/internal/errorreport/metrics.go:95-137` | TS logtail: buffered, rate-limited uploads | A (B owns Sentry quota) |
 
 **Coverage**
 
@@ -1839,42 +1855,42 @@ execution ≤ 0.2 ms for the revocation document, the workspace activity page an
 | `cli/cmd/pb` | 37014 | A | TS cmd/tailscale/cli, client/local (LocalAPI) | done | A2 |
 | `cli/docs` | 126 | A | — | done | checked, nothing |
 | `cli/internal/api` | 9399 | A | TS cmd/tailscale/cli, client/local (LocalAPI) | done | A3 |
-| `cli/internal/atomicfile` | 484 | A | TS ipn/store, atomicfile; NB profilemanager | todo |  |
-| `cli/internal/atomicfile/atomicfiletest` | 63 | A | TS ipn/store, atomicfile; NB profilemanager | todo |  |
-| `cli/internal/auth` | 271 | A | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | todo |  |
-| `cli/internal/backoff` | 30 | A | TS util/backoff | todo |  |
-| `cli/internal/bandwidth` | 387 | A | Teleport lib/usagereporter; — | todo |  |
-| `cli/internal/bugreport` | 629 | A | TS logtail, logpolicy, health, cmd/tailscale bugreport; Teleport lib/events (debug) | todo |  |
-| `cli/internal/buildinfo` | 51 | A | HS hscontrol/app.go; Teleport lib/web, lib/limiter | todo |  |
+| `cli/internal/atomicfile` | 484 | A | TS ipn/store, atomicfile; NB profilemanager | done | checked, nothing |
+| `cli/internal/atomicfile/atomicfiletest` | 63 | A | TS ipn/store, atomicfile; NB profilemanager | done | checked, nothing |
+| `cli/internal/auth` | 271 | A | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | done | checked, nothing |
+| `cli/internal/backoff` | 30 | A | TS util/backoff | done | checked, nothing |
+| `cli/internal/bandwidth` | 387 | A | Teleport lib/usagereporter; — | done | P2 |
+| `cli/internal/bugreport` | 629 | A | TS logtail, logpolicy, health, cmd/tailscale bugreport; Teleport lib/events (debug) | done | checked, nothing |
+| `cli/internal/buildinfo` | 51 | A | HS hscontrol/app.go; Teleport lib/web, lib/limiter | done | checked, nothing |
 | `cli/internal/causetext` | 59 | A | TS logtail, logpolicy, health, cmd/tailscale bugreport; Teleport lib/events (debug) | done | checked, nothing |
 | `cli/internal/command` | 65 | A | TS cmd/tailscale/cli, client/local (LocalAPI) | done | checked, nothing |
-| `cli/internal/config` | 7065 | A | TS ipn/store, atomicfile; NB profilemanager | todo |  |
-| `cli/internal/connectorprotocol` | 4206 | A | Teleport lib/srv (exec, reexec); TS ssh/tailssh incubator | todo |  |
-| `cli/internal/controlsync/proto` | 897 | A | TS control/controlclient (auto, direct, map); HS poll; NB client/internal/engine | todo |  |
-| `cli/internal/daemoncmd` | 3229 | A | TS control/controlclient (auto, direct, map); HS poll; NB client/internal/engine | todo |  |
-| `cli/internal/daemonrpc` | 1073 | A | TS control/controlclient (auto, direct, map); HS poll; NB client/internal/engine | todo |  |
-| `cli/internal/daemonrpc/proto` | 907 | A | TS control/controlclient (auto, direct, map); HS poll; NB client/internal/engine | todo |  |
-| `cli/internal/diagnosticlog` | 130 | A | TS logtail, logpolicy, health, cmd/tailscale bugreport; Teleport lib/events (debug) | todo |  |
-| `cli/internal/diagnostics` | 1597 | A | TS logtail, logpolicy, health, cmd/tailscale bugreport; Teleport lib/events (debug) | todo |  |
-| `cli/internal/diskspace` | 55 | A | TS ipn/store, atomicfile; NB profilemanager | todo |  |
-| `cli/internal/doctor` | 203 | A | TS logtail, logpolicy, health, cmd/tailscale bugreport; Teleport lib/events (debug) | todo |  |
-| `cli/internal/endpointbinary` | 110 | A | TS clientupdate, cmd/tailscaled install; Teleport lib/automaticupgrades | todo |  |
-| `cli/internal/environmente2ee` | 3849 | A | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | todo |  |
-| `cli/internal/environmentmanager` | 2445 | A | TS taildrop (feature/taildrop); — | todo |  |
-| `cli/internal/errorreport` | 1871 | A | TS logtail, logpolicy, health, cmd/tailscale bugreport; Teleport lib/events (debug) | todo |  |
-| `cli/internal/fileindex` | 231 | A | TS taildrop (feature/taildrop); — | todo |  |
-| `cli/internal/filetransfer` | 1935 | A | TS taildrop (feature/taildrop); — | todo |  |
+| `cli/internal/config` | 7065 | A | TS ipn/store, atomicfile; NB profilemanager | done | checked, nothing |
+| `cli/internal/connectorprotocol` | 4206 | A | Teleport lib/srv (exec, reexec); TS ssh/tailssh incubator | done | checked, nothing |
+| `cli/internal/controlsync/proto` | 897 | A | TS control/controlclient (auto, direct, map); HS poll; NB client/internal/engine | done | checked, nothing |
+| `cli/internal/daemoncmd` | 3229 | A | TS control/controlclient (auto, direct, map); HS poll; NB client/internal/engine | done | P4 |
+| `cli/internal/daemonrpc` | 1073 | A | TS control/controlclient (auto, direct, map); HS poll; NB client/internal/engine | done | checked, nothing |
+| `cli/internal/daemonrpc/proto` | 907 | A | TS control/controlclient (auto, direct, map); HS poll; NB client/internal/engine | done | checked, nothing |
+| `cli/internal/diagnosticlog` | 130 | A | TS logtail, logpolicy, health, cmd/tailscale bugreport; Teleport lib/events (debug) | done | checked, nothing |
+| `cli/internal/diagnostics` | 1597 | A | TS logtail, logpolicy, health, cmd/tailscale bugreport; Teleport lib/events (debug) | done | checked, nothing |
+| `cli/internal/diskspace` | 55 | A | TS ipn/store, atomicfile; NB profilemanager | done | checked, nothing |
+| `cli/internal/doctor` | 203 | A | TS logtail, logpolicy, health, cmd/tailscale bugreport; Teleport lib/events (debug) | done | checked, nothing |
+| `cli/internal/endpointbinary` | 110 | A | TS clientupdate, cmd/tailscaled install; Teleport lib/automaticupgrades | done | checked, nothing |
+| `cli/internal/environmente2ee` | 3849 | A | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | done | checked, nothing |
+| `cli/internal/environmentmanager` | 2445 | A | TS taildrop (feature/taildrop); — | done | checked, nothing |
+| `cli/internal/errorreport` | 1871 | A | TS logtail, logpolicy, health, cmd/tailscale bugreport; Teleport lib/events (debug) | done | P7 |
+| `cli/internal/fileindex` | 231 | A | TS taildrop (feature/taildrop); — | done | checked, nothing |
+| `cli/internal/filetransfer` | 1935 | A | TS taildrop (feature/taildrop); — | done | checked, nothing |
 | `cli/internal/hostruntime/auth` | 924 | A | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | done | H4 |
 | `cli/internal/hostruntime/autoupdate` | 808 | A | TS clientupdate; Teleport lib/automaticupgrades | done | checked, nothing |
 | `cli/internal/hostruntime/availability` | 544 | A | TS health (Tracker/Warnable) | done | checked, nothing |
 | `cli/internal/hostruntime/binarytarget` | 96 | A | TS clientupdate; Teleport lib/automaticupgrades | done | checked, nothing |
-| `cli/internal/hostruntime/bootstrap` | 2819 | A | TS clientupdate, cmd/tailscaled install; Teleport lib/automaticupgrades | todo |  |
+| `cli/internal/hostruntime/bootstrap` | 2819 | A | TS clientupdate, cmd/tailscaled install; Teleport lib/automaticupgrades | done | checked, nothing |
 | `cli/internal/hostruntime/browserbroadcast` | 216 | A | Teleport lib/web/terminal | done | checked, nothing |
 | `cli/internal/hostruntime/browserbroadcastserver` | 428 | A | Teleport lib/web/terminal | done | checked, nothing |
-| `cli/internal/hostruntime/carriercontrol` | 391 | R | cloudflared supervisor, connection (QUIC→HTTP/2, HA connections, reconnect), ingress rules; ngrok-go session (reconnect, heartbeat); zrok shares (public/private/reserved) | todo |  |
+| `cli/internal/hostruntime/carriercontrol` | 391 | R | cloudflared supervisor, connection (QUIC→HTTP/2, HA connections, reconnect), ingress rules; ngrok-go session (reconnect, heartbeat); zrok shares (public/private/reserved) | done | checked, nothing |
 | `cli/internal/hostruntime/config` | 101 | A | TS ipn/store, atomicfile; NB profilemanager | done | checked, nothing |
 | `cli/internal/hostruntime/configapply` | 76 | A | — | done | checked, nothing |
-| `cli/internal/hostruntime/configsync` | 9069 | A | — (Git-based; compare: Teleport lib/services watcher) | todo |  |
+| `cli/internal/hostruntime/configsync` | 9069 | A | — (Git-based; compare: Teleport lib/services watcher) | done | checked, nothing |
 | `cli/internal/hostruntime/connector` | 4186 | A | cloudflared supervisor, connection (QUIC→HTTP/2, HA connections, reconnect), ingress rules; ngrok-go session (reconnect, heartbeat); zrok shares (public/private/reserved) | done | checked, nothing |
 | `cli/internal/hostruntime/connectorrotation` | 2943 | A | cloudflared supervisor, connection (QUIC→HTTP/2, HA connections, reconnect), ingress rules; ngrok-go session (reconnect, heartbeat); zrok shares (public/private/reserved) | done | H3 |
 | `cli/internal/hostruntime/controlbackoff` | 147 | A | TS util/backoff | done | checked, nothing |
@@ -1889,12 +1905,12 @@ execution ≤ 0.2 ms for the revocation document, the workspace activity page an
 | `cli/internal/hostruntime/history` | 310 | A | Teleport lib/srv/sess, lib/events (session recording); TS ssh/tailssh | done | H1 |
 | `cli/internal/hostruntime/hostd` | 459 | A | Teleport lib/srv (exec, reexec); TS ssh/tailssh incubator | done | checked, nothing |
 | `cli/internal/hostruntime/hostdproto` | 2898 | A | Teleport lib/srv (exec, reexec); TS ssh/tailssh incubator | done | checked, nothing |
-| `cli/internal/hostruntime/hostinstall` | 13011 | A | TS clientupdate, cmd/tailscaled install; Teleport lib/automaticupgrades | todo |  |
-| `cli/internal/hostruntime/hostservice` | 1876 | A | Teleport lib/srv (exec, reexec); TS ssh/tailssh incubator | todo |  |
-| `cli/internal/hostruntime/hoststate` | 1944 | A | TS ipn/store, atomicfile; NB profilemanager | todo |  |
+| `cli/internal/hostruntime/hostinstall` | 13011 | A | TS clientupdate, cmd/tailscaled install; Teleport lib/automaticupgrades | done | checked, nothing |
+| `cli/internal/hostruntime/hostservice` | 1876 | A | Teleport lib/srv (exec, reexec); TS ssh/tailssh incubator | done | checked, nothing |
+| `cli/internal/hostruntime/hoststate` | 1944 | A | TS ipn/store, atomicfile; NB profilemanager | done | checked, nothing |
 | `cli/internal/hostruntime/identity` | 1118 | A | TS control/controlclient (register), types/key | done | checked, nothing |
-| `cli/internal/hostruntime/inspectorapi` | 999 | A | cloudflared supervisor, connection (QUIC→HTTP/2, HA connections, reconnect), ingress rules; ngrok-go session (reconnect, heartbeat); zrok shares (public/private/reserved) | todo |  |
-| `cli/internal/hostruntime/inspectorauth` | 234 | A | cloudflared supervisor, connection (QUIC→HTTP/2, HA connections, reconnect), ingress rules; ngrok-go session (reconnect, heartbeat); zrok shares (public/private/reserved) | todo |  |
+| `cli/internal/hostruntime/inspectorapi` | 999 | A | cloudflared supervisor, connection (QUIC→HTTP/2, HA connections, reconnect), ingress rules; ngrok-go session (reconnect, heartbeat); zrok shares (public/private/reserved) | done | checked, nothing |
+| `cli/internal/hostruntime/inspectorauth` | 234 | A | cloudflared supervisor, connection (QUIC→HTTP/2, HA connections, reconnect), ingress rules; ngrok-go session (reconnect, heartbeat); zrok shares (public/private/reserved) | done | checked, nothing |
 | `cli/internal/hostruntime/installsource` | 823 | A | TS clientupdate; Teleport lib/automaticupgrades | done | checked, nothing |
 | `cli/internal/hostruntime/machinecontrol` | 432 | A | TS tailcfg DERPMap / derp mesh; Teleport lib/reversetunnel (agentpool) | done | checked, nothing |
 | `cli/internal/hostruntime/machineevents` | 401 | A | TS control/controlclient (auto, direct, map); HS poll; NB client/internal/engine | done | checked, nothing |
@@ -1906,7 +1922,7 @@ execution ≤ 0.2 ms for the revocation document, the workspace activity page an
 | `cli/internal/hostruntime/operation` | 272 | A | Teleport lib/srv (exec, reexec); TS ssh/tailssh incubator | done | checked, nothing |
 | `cli/internal/hostruntime/originhealth` | 200 | A | cloudflared supervisor, connection (QUIC→HTTP/2, HA connections, reconnect), ingress rules; ngrok-go session (reconnect, heartbeat); zrok shares (public/private/reserved) | done | checked, nothing |
 | `cli/internal/hostruntime/peeridentity` | 255 | A | TS control/controlclient (register), types/key | done | checked, nothing |
-| `cli/internal/hostruntime/preview` | 10984 | R | cloudflared supervisor, connection (QUIC→HTTP/2, HA connections, reconnect), ingress rules; ngrok-go session (reconnect, heartbeat); zrok shares (public/private/reserved) | todo |  |
+| `cli/internal/hostruntime/preview` | 10984 | R | cloudflared supervisor, connection (QUIC→HTTP/2, HA connections, reconnect), ingress rules; ngrok-go session (reconnect, heartbeat); zrok shares (public/private/reserved) | done | P3 |
 | `cli/internal/hostruntime/privateproxyconfig` | 1271 | A | — | done | checked, nothing |
 | `cli/internal/hostruntime/process` | 289 | A | Teleport lib/srv (exec, reexec); TS ssh/tailssh incubator | done | checked, nothing |
 | `cli/internal/hostruntime/protocol` | 902 | A | Teleport lib/srv (exec, reexec); TS ssh/tailssh incubator | done | checked, nothing |
@@ -1914,15 +1930,15 @@ execution ≤ 0.2 ms for the revocation document, the workspace activity page an
 | `cli/internal/hostruntime/releaseeligibility` | 792 | A | TS clientupdate; Teleport lib/automaticupgrades | done | checked, nothing |
 | `cli/internal/hostruntime/releaseindex` | 295 | A | TS clientupdate, cmd/tailscaled install; Teleport lib/automaticupgrades | done | checked, nothing |
 | `cli/internal/hostruntime/releasepolicy` | 414 | A | HS hscontrol/policy; Teleport lib/services (RBAC, roles) | done | checked, nothing |
-| `cli/internal/hostruntime/runtime` | 9870 | A | TS control/controlclient (auto, direct, map); HS poll; NB client/internal/engine | todo |  |
+| `cli/internal/hostruntime/runtime` | 9870 | A | TS control/controlclient (auto, direct, map); HS poll; NB client/internal/engine | done | checked, nothing |
 | `cli/internal/hostruntime/runtimeattachment` | 823 | A | cloudflared supervisor, connection (QUIC→HTTP/2, HA connections, reconnect), ingress rules; ngrok-go session (reconnect, heartbeat); zrok shares (public/private/reserved) | done | checked, nothing |
 | `cli/internal/hostruntime/runtimeport` | 8 | A | Teleport lib/srv (exec, reexec); TS ssh/tailssh incubator | done | checked, nothing |
-| `cli/internal/hostruntime/server` | 7883 | A | TS control/controlclient (auto, direct, map); HS poll; NB client/internal/engine | todo |  |
-| `cli/internal/hostruntime/service` | 6758 | A | TS clientupdate, cmd/tailscaled install; Teleport lib/automaticupgrades | todo |  |
+| `cli/internal/hostruntime/server` | 7883 | A | TS control/controlclient (auto, direct, map); HS poll; NB client/internal/engine | done | checked, nothing |
+| `cli/internal/hostruntime/service` | 6758 | A | TS clientupdate, cmd/tailscaled install; Teleport lib/automaticupgrades | done | checked, nothing |
 | `cli/internal/hostruntime/session` | 4464 | A | Teleport lib/srv/sess, lib/events (session recording); TS ssh/tailssh | done | H2 |
 | `cli/internal/hostruntime/sessionowner` | 2542 | A | Teleport lib/srv/sess, lib/events (session recording); TS ssh/tailssh | done | checked, nothing |
-| `cli/internal/hostruntime/store` | 1706 | A | TS ipn/store, atomicfile; NB profilemanager | todo |  |
-| `cli/internal/hostruntime/store/storesqlc` | 620 | A | TS ipn/store, atomicfile; NB profilemanager | todo |  |
+| `cli/internal/hostruntime/store` | 1706 | A | TS ipn/store, atomicfile; NB profilemanager | done | checked, nothing |
+| `cli/internal/hostruntime/store/storesqlc` | 620 | A | TS ipn/store, atomicfile; NB profilemanager | done | checked, nothing |
 | `cli/internal/hostruntime/supervisorupdate` | 952 | A | TS clientupdate; Teleport lib/automaticupgrades | done | checked, nothing |
 | `cli/internal/hostruntime/supportbundle` | 1309 | A | — | done | checked, nothing |
 | `cli/internal/hostruntime/telemetry` | 1442 | A | TS logtail, logpolicy, health, cmd/tailscale bugreport; Teleport lib/events (debug) | done | checked, nothing |
@@ -1933,68 +1949,68 @@ execution ≤ 0.2 ms for the revocation document, the workspace activity page an
 | `cli/internal/hostruntime/updated` | 7189 | A | TS clientupdate, cmd/tailscaled install; Teleport lib/automaticupgrades | done | checked, nothing |
 | `cli/internal/hostruntime/updateflow` | 351 | A | TS clientupdate; Teleport lib/automaticupgrades | done | checked, nothing |
 | `cli/internal/hostruntime/workerupdate` | 2241 | A | TS clientupdate; Teleport lib/automaticupgrades | done | checked, nothing |
-| `cli/internal/hostruntime/workloadbridge` | 763 | R | cloudflared supervisor, connection (QUIC→HTTP/2, HA connections, reconnect), ingress rules; ngrok-go session (reconnect, heartbeat); zrok shares (public/private/reserved) | todo |  |
+| `cli/internal/hostruntime/workloadbridge` | 763 | R | cloudflared supervisor, connection (QUIC→HTTP/2, HA connections, reconnect), ingress rules; ngrok-go session (reconnect, heartbeat); zrok shares (public/private/reserved) | done | checked, nothing |
 | `cli/internal/hostruntimecmd` | 9695 | A | — | done | checked, nothing |
 | `cli/internal/hostruntimeentry` | 49 | A | — | done | checked, nothing |
 | `cli/internal/httptransport` | 592 | A | TS cmd/tailscale/cli, client/local (LocalAPI) | done | checked, nothing |
-| `cli/internal/inbox` | 1199 | A | TS taildrop (feature/taildrop); — | todo |  |
-| `cli/internal/inspector` | 2164 | A | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | todo |  |
-| `cli/internal/liveconnections` | 37 | A | TS wgengine/magicsock, net/netcheck; NB client/internal/peer | todo |  |
+| `cli/internal/inbox` | 1199 | A | TS taildrop (feature/taildrop); — | done | P6 |
+| `cli/internal/inspector` | 2164 | A | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | done | checked, nothing |
+| `cli/internal/liveconnections` | 37 | A | TS wgengine/magicsock, net/netcheck; NB client/internal/peer | done | checked, nothing |
 | `cli/internal/localapi` | 4110 | A | TS cmd/tailscale/cli, client/local (LocalAPI) | done | A1 |
-| `cli/internal/localdaemon` | 5362 | A | TS control/controlclient (auto, direct, map); HS poll; NB client/internal/engine | todo |  |
-| `cli/internal/localwait` | 303 | A | TS control/controlclient (auto, direct, map); HS poll; NB client/internal/engine | todo |  |
-| `cli/internal/machineguard` | 9397 | A | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | todo |  |
-| `cli/internal/machineguard/wfp` | 1428 | A | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | todo |  |
-| `cli/internal/machineloopback` | 65 | A | TS ipn/ipnlocal (serve, dns), net/dns; NB client/internal/dns | todo |  |
+| `cli/internal/localdaemon` | 5362 | A | TS control/controlclient (auto, direct, map); HS poll; NB client/internal/engine | done | checked, nothing |
+| `cli/internal/localwait` | 303 | A | TS control/controlclient (auto, direct, map); HS poll; NB client/internal/engine | done | checked, nothing |
+| `cli/internal/machineguard` | 9397 | A | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | done | checked, nothing |
+| `cli/internal/machineguard/wfp` | 1428 | A | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | done | checked, nothing |
+| `cli/internal/machineloopback` | 65 | A | TS ipn/ipnlocal (serve, dns), net/dns; NB client/internal/dns | done | checked, nothing |
 | `cli/internal/machinename` | 25 | A | TS cmd/tailscale/cli, client/local (LocalAPI) | done | checked, nothing |
-| `cli/internal/machineservices` | 565 | A | HS hscontrol/state, mapper; NB management/server (network map, peers) | todo |  |
-| `cli/internal/managedssh` | 6294 | A | TS ssh/tailssh; Teleport lib/srv (node, regular) | todo |  |
-| `cli/internal/nativeprivate` | 115 | A | TS ipn/ipnlocal (serve, dns), net/dns; NB client/internal/dns | todo |  |
+| `cli/internal/machineservices` | 565 | A | HS hscontrol/state, mapper; NB management/server (network map, peers) | done | checked, nothing |
+| `cli/internal/managedssh` | 6294 | A | TS ssh/tailssh; Teleport lib/srv (node, regular) | done | checked, nothing |
+| `cli/internal/nativeprivate` | 115 | A | TS ipn/ipnlocal (serve, dns), net/dns; NB client/internal/dns | done | checked, nothing |
 | `cli/internal/neterr` | 46 | A | TS logtail, logpolicy, health, cmd/tailscale bugreport; Teleport lib/events (debug) | done | checked, nothing |
-| `cli/internal/netlatency` | 184 | A | TS wgengine/magicsock, net/netcheck; NB client/internal/peer | todo |  |
-| `cli/internal/ospeer` | 49 | A | TS wgengine/magicsock, net/netcheck; NB client/internal/peer | todo |  |
-| `cli/internal/paste` | 1122 | A | Teleport lib/srv/sess, lib/events (session recording); TS ssh/tailssh | todo |  |
-| `cli/internal/peertransport/clientauthority` | 407 | R | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | todo |  |
-| `cli/internal/peertransport/endpointidentity` | 494 | R | TS control/controlclient (register), types/key | todo |  |
-| `cli/internal/peertransport/fixedpacket` | 49 | R | TS control/controlclient (register), types/key | todo |  |
-| `cli/internal/peertransport/identitybootstrap` | 692 | R | TS control/controlclient (register), types/key | todo |  |
-| `cli/internal/peertransport/mesh` | 2091 | R | TS wgengine/magicsock, net/netcheck; NB client/internal/peer | todo |  |
-| `cli/internal/peertransport/native` | 1142 | R | TS ipn/ipnlocal (serve, dns), net/dns; NB client/internal/dns | todo |  |
-| `cli/internal/peertransport/networkadaptation` | 2269 | R | TS wgengine/magicsock, net/netcheck; NB client/internal/peer | todo |  |
-| `cli/internal/peertransport/networkmonitor` | 1164 | R | TS net/netmon | todo |  |
-| `cli/internal/peertransport/peerquic` | 1148 | R | TS ipn/ipnlocal (serve, dns), net/dns; NB client/internal/dns | todo |  |
-| `cli/internal/peertransport/portmapping` | 591 | R | — | todo |  |
-| `cli/internal/peertransport/privatepreview` | 162 | R | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | todo |  |
-| `cli/internal/peertransport/recoverykey` | 73 | R | — | todo |  |
-| `cli/internal/peertransport/streamauth` | 102 | R | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | todo |  |
-| `cli/internal/peertransport/tailnet` | 3890 | R | TS wgengine/magicsock, net/netcheck; NB client/internal/peer | todo |  |
-| `cli/internal/peertransport/trustedkeys` | 109 | R | — | todo |  |
-| `cli/internal/peertransport/udpsocket` | 442 | R | — | todo |  |
-| `cli/internal/preferences` | 534 | A | TS ipn/store, atomicfile; NB profilemanager | todo |  |
-| `cli/internal/privatepreviewproxy` | 1127 | A | TS ipn/ipnlocal (serve, dns), net/dns; NB client/internal/dns | todo |  |
-| `cli/internal/processlaunch` | 37 | A | TS clientupdate, cmd/tailscaled install; Teleport lib/automaticupgrades | todo |  |
-| `cli/internal/processlifetime` | 138 | A | TS clientupdate, cmd/tailscaled install; Teleport lib/automaticupgrades | todo |  |
+| `cli/internal/netlatency` | 184 | A | TS wgengine/magicsock, net/netcheck; NB client/internal/peer | done | checked, nothing |
+| `cli/internal/ospeer` | 49 | A | TS wgengine/magicsock, net/netcheck; NB client/internal/peer | done | checked, nothing |
+| `cli/internal/paste` | 1122 | A | Teleport lib/srv/sess, lib/events (session recording); TS ssh/tailssh | done | checked, nothing |
+| `cli/internal/peertransport/clientauthority` | 407 | R | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | done | checked, nothing |
+| `cli/internal/peertransport/endpointidentity` | 494 | R | TS control/controlclient (register), types/key | done | checked, nothing |
+| `cli/internal/peertransport/fixedpacket` | 49 | R | TS control/controlclient (register), types/key | done | checked, nothing |
+| `cli/internal/peertransport/identitybootstrap` | 692 | R | TS control/controlclient (register), types/key | done | checked, nothing |
+| `cli/internal/peertransport/mesh` | 2091 | R | TS wgengine/magicsock, net/netcheck; NB client/internal/peer | done | P5 |
+| `cli/internal/peertransport/native` | 1142 | R | TS ipn/ipnlocal (serve, dns), net/dns; NB client/internal/dns | done | checked, nothing |
+| `cli/internal/peertransport/networkadaptation` | 2269 | R | TS wgengine/magicsock, net/netcheck; NB client/internal/peer | done | checked, nothing |
+| `cli/internal/peertransport/networkmonitor` | 1164 | R | TS net/netmon | done | checked, nothing |
+| `cli/internal/peertransport/peerquic` | 1148 | R | TS ipn/ipnlocal (serve, dns), net/dns; NB client/internal/dns | done | checked, nothing |
+| `cli/internal/peertransport/portmapping` | 591 | R | — | done | checked, nothing |
+| `cli/internal/peertransport/privatepreview` | 162 | R | Teleport lib/reversetunnel, lib/proxy, lib/srv/app; TS ipn/ipnlocal serve (funnel) | done | checked, nothing |
+| `cli/internal/peertransport/recoverykey` | 73 | R | — | done | checked, nothing |
+| `cli/internal/peertransport/streamauth` | 102 | R | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | done | checked, nothing |
+| `cli/internal/peertransport/tailnet` | 3890 | R | TS wgengine/magicsock, net/netcheck; NB client/internal/peer | done | P1 |
+| `cli/internal/peertransport/trustedkeys` | 109 | R | — | done | checked, nothing |
+| `cli/internal/peertransport/udpsocket` | 442 | R | — | done | checked, nothing |
+| `cli/internal/preferences` | 534 | A | TS ipn/store, atomicfile; NB profilemanager | done | checked, nothing |
+| `cli/internal/privatepreviewproxy` | 1127 | A | TS ipn/ipnlocal (serve, dns), net/dns; NB client/internal/dns | done | checked, nothing |
+| `cli/internal/processlaunch` | 37 | A | TS clientupdate, cmd/tailscaled install; Teleport lib/automaticupgrades | done | checked, nothing |
+| `cli/internal/processlifetime` | 138 | A | TS clientupdate, cmd/tailscaled install; Teleport lib/automaticupgrades | done | checked, nothing |
 | `cli/internal/prompt` | 513 | A | TS cmd/tailscale/cli, client/local (LocalAPI) | done | checked, nothing |
-| `cli/internal/remotepath` | 58 | A | TS taildrop (feature/taildrop); — | todo |  |
-| `cli/internal/resolver` | 854 | A | TS ipn/ipnlocal (serve, dns), net/dns; NB client/internal/dns | todo |  |
+| `cli/internal/remotepath` | 58 | A | TS taildrop (feature/taildrop); — | done | checked, nothing |
+| `cli/internal/resolver` | 854 | A | TS ipn/ipnlocal (serve, dns), net/dns; NB client/internal/dns | done | checked, nothing |
 | `cli/internal/selector` | 1216 | A | TS cmd/tailscale/cli, client/local (LocalAPI) | done | checked, nothing |
-| `cli/internal/selfupdate` | 42 | A | TS clientupdate, cmd/tailscaled install; Teleport lib/automaticupgrades | todo |  |
-| `cli/internal/serve` | 1351 | A | Teleport lib/srv/sess, lib/events (session recording); TS ssh/tailssh | todo |  |
-| `cli/internal/serverclock` | 49 | A | — | todo |  |
-| `cli/internal/session` | 388 | A | Teleport lib/srv/sess, lib/events (session recording); TS ssh/tailssh | todo |  |
-| `cli/internal/shorttemp` | 30 | A | TS ipn/store, atomicfile; NB profilemanager | todo |  |
-| `cli/internal/splitdns` | 1158 | A | TS ipn/ipnlocal (serve, dns), net/dns; NB client/internal/dns | todo |  |
+| `cli/internal/selfupdate` | 42 | A | TS clientupdate, cmd/tailscaled install; Teleport lib/automaticupgrades | done | checked, nothing |
+| `cli/internal/serve` | 1351 | A | Teleport lib/srv/sess, lib/events (session recording); TS ssh/tailssh | done | checked, nothing |
+| `cli/internal/serverclock` | 49 | A | — | done | checked, nothing |
+| `cli/internal/session` | 388 | A | Teleport lib/srv/sess, lib/events (session recording); TS ssh/tailssh | done | checked, nothing |
+| `cli/internal/shorttemp` | 30 | A | TS ipn/store, atomicfile; NB profilemanager | done | checked, nothing |
+| `cli/internal/splitdns` | 1158 | A | TS ipn/ipnlocal (serve, dns), net/dns; NB client/internal/dns | done | checked, nothing |
 | `cli/internal/statusbar` | 1291 | A | Teleport lib/srv/sess, lib/events (session recording); TS ssh/tailssh | done | checked, nothing |
-| `cli/internal/supportref` | 45 | A | TS logtail, logpolicy, health, cmd/tailscale bugreport; Teleport lib/events (debug) | todo |  |
-| `cli/internal/telemetry` | 1367 | A | TS logtail, logpolicy, health, cmd/tailscale bugreport; Teleport lib/events (debug) | todo |  |
-| `cli/internal/testcert` | 72 | A | — | todo |  |
-| `cli/internal/tunnel` | 4999 | R | — | todo |  |
-| `cli/internal/userpaths` | 41 | A | TS ipn/store, atomicfile; NB profilemanager | todo |  |
-| `cli/internal/windows/elevation` | 1828 | A | — | todo |  |
-| `cli/internal/windows/pipeauth` | 99 | A | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | todo |  |
-| `cli/internal/windowsenvironment` | 192 | A | TS taildrop (feature/taildrop); — | todo |  |
-| `cli/internal/windowsopenssh` | 5332 | A | TS ssh/tailssh; Teleport lib/srv (node, regular) | todo |  |
-| `cli/internal/windowssecurity` | 370 | A | — | todo |  |
+| `cli/internal/supportref` | 45 | A | TS logtail, logpolicy, health, cmd/tailscale bugreport; Teleport lib/events (debug) | done | checked, nothing |
+| `cli/internal/telemetry` | 1367 | A | TS logtail, logpolicy, health, cmd/tailscale bugreport; Teleport lib/events (debug) | done | checked, nothing |
+| `cli/internal/testcert` | 72 | A | — | done | checked, nothing |
+| `cli/internal/tunnel` | 4999 | R | — | done | checked, nothing |
+| `cli/internal/userpaths` | 41 | A | TS ipn/store, atomicfile; NB profilemanager | done | checked, nothing |
+| `cli/internal/windows/elevation` | 1828 | A | — | done | checked, nothing |
+| `cli/internal/windows/pipeauth` | 99 | A | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | done | checked, nothing |
+| `cli/internal/windowsenvironment` | 192 | A | TS taildrop (feature/taildrop); — | done | checked, nothing |
+| `cli/internal/windowsopenssh` | 5332 | A | TS ssh/tailssh; Teleport lib/srv (node, regular) | done | checked, nothing |
+| `cli/internal/windowssecurity` | 370 | A | — | done | checked, nothing |
 | `cli/internal/wirejson` | 34 | A | TS cmd/tailscale/cli, client/local (LocalAPI) | done | checked, nothing |
 | `cli/tools/http3-probe` | 138 | A | — | done | checked, nothing |
 | `cli/tools/metric-schema` | 182 | A | — | done | checked, nothing |
@@ -2046,7 +2062,7 @@ execution ≤ 0.2 ms for the revocation document, the workspace activity page an
 | `server/internal/httpapi` | 17884 | B/Q | HS hscontrol/app.go; Teleport lib/web, lib/limiter | done | Robustness #5 (timeout bypass), #17; S5 |
 | `server/internal/inboxdispatch` | 413 | B/Q | TS taildrop (feature/taildrop); — | done | checked, nothing |
 | `server/internal/inspectaccess` | 721 | B/Q | zrok controller (shares, frontends, reserved names, limits, metrics); cloudflared ingress rules; Teleport lib/proxy, lib/reversetunnel | done | checked, nothing |
-| `server/internal/jobmonitor` | 426 | B/Q | TS logtail, logpolicy, health, cmd/tailscale bugreport; Teleport lib/events (debug) | todo |  |
+| `server/internal/jobmonitor` | 426 | B/Q | TS logtail, logpolicy, health, cmd/tailscale bugreport; Teleport lib/events (debug) | done | checked, nothing |
 | `server/internal/lazyaccess` | 1010 | B/Q | zrok controller (shares, frontends, reserved names, limits, metrics); cloudflared ingress rules; Teleport lib/proxy, lib/reversetunnel | done | hot paths read, rest grep-screened |
 | `server/internal/machinealias` | 74 | B/Q | HS hscontrol/state, mapper; NB management/server (network map, peers) | done | checked, nothing |
 | `server/internal/machineevents` | 232 | B/Q | TS control/controlclient (auto, direct, map); HS poll; NB client/internal/engine | done | Robustness #9; recheck 5 s per waiter (Lane Q #6) |
@@ -2062,7 +2078,7 @@ execution ≤ 0.2 ms for the revocation document, the workspace activity page an
 | `server/internal/operatoractions` | 340 | B/Q | HS hscontrol/policy; Teleport lib/services (RBAC, roles) | done | checked, nothing |
 | `server/internal/operatorauth` | 316 | B/Q | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | done | checked, nothing |
 | `server/internal/operatorinfra` | 660 | B/Q | HS hscontrol/policy; Teleport lib/services (RBAC, roles) | done | checked, nothing |
-| `server/internal/operatorreporting` | 1930 | B/Q | HS hscontrol/policy; Teleport lib/services (RBAC, roles) | todo |  |
+| `server/internal/operatorreporting` | 1930 | B/Q | HS hscontrol/policy; Teleport lib/services (RBAC, roles) | done | checked, nothing |
 | `server/internal/peeridentity` | 1090 | B/Q | TS control/controlclient (register), types/key | done | hot paths read, rest grep-screened |
 | `server/internal/peersessions` | 1433 | B/Q | Teleport lib/srv/sess, lib/events (session recording); TS ssh/tailssh | done | hot paths read, rest grep-screened |
 | `server/internal/perf` | 112 | B/Q | HS hscontrol/db; Teleport lib/backend (pgbk), lib/cache | done | checked, nothing |
@@ -2079,16 +2095,16 @@ execution ≤ 0.2 ms for the revocation document, the workspace activity page an
 | `server/internal/releases` | 502 | B/Q | — | done | checked, nothing |
 | `server/internal/resourceusage` | 580 | B/Q | Teleport lib/usagereporter; — | done | checked, nothing |
 | `server/internal/runtimeattachment` | 865 | B/Q | zrok controller (shares, frontends, reserved names, limits, metrics); cloudflared ingress rules; Teleport lib/proxy, lib/reversetunnel | done | D4 (unconditional upsert, 9 writes/s) |
-| `server/internal/secrets` | 85 | B/Q | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | todo |  |
+| `server/internal/secrets` | 85 | B/Q | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | done | checked, nothing |
 | `server/internal/selfhost` | 1617 | B/Q | — | done | checked, nothing |
-| `server/internal/supportreport` | 2340 | B/Q | TS logtail, logpolicy, health, cmd/tailscale bugreport; Teleport lib/events (debug) | todo | D6 (one row per error) |
+| `server/internal/supportreport` | 2340 | B/Q | TS logtail, logpolicy, health, cmd/tailscale bugreport; Teleport lib/events (debug) | done | D6 (one row per error) |
 | `server/internal/sync` | 671 | B/Q | — (Git-based; compare: Teleport lib/services watcher) | done | Robustness #7 (unused gRPC channel) |
 | `server/internal/sync/proto` | 896 | B/Q | — | done | checked, nothing |
 | `server/internal/teamidentity` | 1240 | B/Q | TS control/controlclient (register), types/key | done | S10 |
 | `server/internal/teaminbox` | 1107 | B/Q | HS hscontrol/policy; Teleport lib/services (RBAC, roles) | done | checked, nothing |
 | `server/internal/teams` | 4303 | B/Q | HS hscontrol/policy; Teleport lib/services (RBAC, roles) | done | S2, S8 |
 | `server/internal/teams/teamstest` | 64 | B/Q | HS hscontrol/policy; Teleport lib/services (RBAC, roles) | done | checked, nothing |
-| `server/internal/telemetry` | 4999 | B/Q | TS logtail, logpolicy, health, cmd/tailscale bugreport; Teleport lib/events (debug) | todo |  |
+| `server/internal/telemetry` | 4999 | B/Q | TS logtail, logpolicy, health, cmd/tailscale bugreport; Teleport lib/events (debug) | done | checked, nothing |
 | `server/internal/testauth` | 31 | B/Q | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | done | checked, nothing |
 | `server/internal/testtopology` | 913 | B/Q | HS hscontrol/app.go; Teleport lib/web, lib/limiter | done | checked, nothing |
 | `server/internal/testutil` | 23 | B/Q | HS hscontrol/app.go; Teleport lib/web, lib/limiter | done | checked, nothing |
@@ -2132,7 +2148,7 @@ execution ≤ 0.2 ms for the revocation document, the workspace activity page an
 | `tunnel/internal/usage` | 684 | M | cloudflared connection, supervisor, ingress, metrics (edge side); zrok controller (shares, limits, metrics); Teleport lib/reversetunnel, lib/proxy | done | checked, nothing |
 | `tunnel/tools/control-conformance` | 221 | M | cloudflared connection, supervisor, ingress, metrics (edge side); zrok controller (shares, limits, metrics); Teleport lib/reversetunnel, lib/proxy | done | checked, nothing |
 | `tunnel/tools/metric-schema` | 290 | M | cloudflared connection, supervisor, ingress, metrics (edge side); zrok controller (shares, limits, metrics); Teleport lib/reversetunnel, lib/proxy | done | checked, nothing |
-| `shared/admission` | 291 | B/Q | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | done | checked, nothing |
+| `shared/admission` | 291 | B/Q | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | done | checked, nothing; P1 |
 | `shared/connectorprotocol` | 6080 | B/Q | Teleport lib/srv (exec, reexec); TS ssh/tailssh incubator | done | R4, T4 |
 | `shared/machineservices` | 105 | B/Q | HS hscontrol/state, mapper; NB management/server (network map, peers) | done | checked, nothing |
 | `shared/managedssh` | 132 | B/Q | TS ssh/tailssh; Teleport lib/srv (node, regular) | done | checked, nothing |
