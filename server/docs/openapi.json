@@ -462,6 +462,17 @@
             ],
             "format": "date-time"
           },
+          "is_default": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
           "expires_at": {
             "type": "string",
             "format": "date-time",

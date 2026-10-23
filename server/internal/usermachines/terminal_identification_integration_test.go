@@ -296,8 +296,8 @@ func TestPostgresTerminalLiveIdentificationAuthorization(t *testing.T) {
 		t.Fatalf("a page without live metadata probed the runtime %d times", probes)
 	}
 	for _, item := range stored {
-		if item.Target.MachineID != machine || item.ID == "" {
-			t.Fatalf("stored page lost the session identity: %+v", item)
+		if item.Target.MachineID != machine || item.ID == "" || item.CreatedAt.IsZero() || item.UpdatedAt.Before(item.CreatedAt) || item.IsDefault {
+			t.Fatalf("stored page lost the session identity or its menu fields: %+v", item)
 		}
 	}
 }
