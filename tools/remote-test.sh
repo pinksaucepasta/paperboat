@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 # Run one module's Go tests for the committed HEAD on a spare VM instead of the shared build host.
 #   tools/remote-test.sh <host> <module> [go test args...]
-#   tools/remote-test.sh pbvm2 cli -race ./internal/tunnel/...
+#   tools/remote-test.sh pbvm2 cli -run TestExec ./cmd/pb
 #   tools/remote-test.sh pbvm3 shared            # go test -p 2 ./...
 # <host> is an ssh alias of a VM with Go 1.27.2 in ~/.local/go1.27.2 (pbvm2, pbvm3). The VMs have 3-4 GB
 # of RAM, so the host runs one test job at a time (a host-wide lock; later jobs wait) with `nice go test -p 2`.
 # Only git-tracked, committed files are tested: that is what `git archive HEAD` ships. No PostgreSQL is
-# available there, so PostgreSQL suites skip; use tools/ci-test.sh for those.
+# available there, so PostgreSQL suites skip, and there is no C compiler, so no -race; use tools/ci-test.sh
+# for those.
 set -euo pipefail
 
-usage() { sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() { sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 [ $# -ge 2 ] || usage
 host=$1 module=$2
 shift 2
