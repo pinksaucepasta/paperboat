@@ -162,6 +162,9 @@ func captureWorkspaceInvocation(command *cobra.Command, args []string) error {
 		return err
 	}
 	ctx := context.WithValue(command.Context(), workspaceInvocationKey{}, selected)
+	if explicitWorkspaceSelection(command) {
+		ctx = context.WithValue(ctx, workspaceExplicitKey{}, true)
+	}
 	if selected == "personal" {
 		// The personal workspace is the signed-in account's own machines; knowing the account lets
 		// a command resolve its target from the daemon's snapshot instead of the full catalog.
@@ -173,6 +176,24 @@ func captureWorkspaceInvocation(command *cobra.Command, args []string) error {
 	}
 	command.SetContext(ctx)
 	return nil
+}
+
+// workspaceExplicitKey marks a workspace the user chose for this command (--workspace or
+// PAPERBOAT_WORKSPACE); machine names then resolve only there.
+type workspaceExplicitKey struct{}
+
+func explicitWorkspaceSelection(command *cobra.Command) bool {
+	if root := command.Root(); root != nil {
+		if flag := root.PersistentFlags().Lookup("workspace"); flag != nil && flag.Changed {
+			return true
+		}
+	}
+	return strings.TrimSpace(os.Getenv("PAPERBOAT_WORKSPACE")) != ""
+}
+
+func workspaceExplicit(ctx context.Context) bool {
+	explicit, _ := ctx.Value(workspaceExplicitKey{}).(bool)
+	return explicit
 }
 
 // personalWorkspaceAccountKey holds the signed-in account when the personal workspace is selected.

@@ -3,6 +3,9 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -10,55 +13,84 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/resolver"
 )
 
-// machineTeamHintBudget bounds the extra lookup on an already failed name resolution.
-const machineTeamHintBudget = 5 * time.Second
+// machineOtherWorkspacesBudget bounds the lookup in the account's other workspaces.
+const machineOtherWorkspacesBudget = 5 * time.Second
 
-// machineInTeamWorkspaceError is a machine name not found in the selected workspace that names a
-// machine of one of the account's teams: it says which workspace to use instead of "no machine".
-type machineInTeamWorkspaceError struct {
-	machine, team string
+// machineResolutionNotice receives the one line naming the workspace a name resolved in.
+var machineResolutionNotice io.Writer = os.Stderr
+
+// machineInWorkspaces is a machine name not found in the selected workspace that matches machines in
+// several other workspaces: the user picks one with --workspace.
+type machineInWorkspacesError struct {
+	machine    string
+	candidates []string // "<machine-id> (workspace <id>)"
+	workspaces []string
 }
 
-func (e *machineInTeamWorkspaceError) Error() string {
-	return e.machine + " is in team " + e.team + "; use --workspace " + e.team + "."
+func (e *machineInWorkspacesError) Error() string {
+	return fmt.Sprintf("%s matches machines in several workspaces: %s. Choose one with --workspace (%s).", e.machine, strings.Join(e.candidates, ", "), strings.Join(e.workspaces, ", "))
 }
-func (e *machineInTeamWorkspaceError) Unwrap() error { return resolver.ErrMachineNotFound }
+func (e *machineInWorkspacesError) Unwrap() error { return resolver.ErrMachineAmbiguous }
 
-// explainMachineInTeamWorkspace turns a machine-not-found from the selected workspace into
-// machineInTeamWorkspaceError when exactly one other team workspace of the account has a machine with
-// that name or ID (a team-owned machine lives in its team's workspace, not the personal one).
-func explainMachineInTeamWorkspace(ctx context.Context, current *api.Client, scoped func(workspace string) (*api.Client, error), requested string, err error) error {
-	if !errors.Is(err, resolver.ErrMachineNotFound) || current == nil || scoped == nil {
-		return err
+// resolveInOtherWorkspaces is the decision of 2026-10-23 (coordinator, for the user): a name not found
+// in the selected workspace, when the user did not choose a workspace explicitly, is looked up in every
+// other workspace the account can use. One match is used: client is rebound to its workspace and one
+// line names it. Several matches are refused with the candidates. An explicit --workspace always wins.
+// Prior art: Tailscale resolves names only in the current tailnet; kubectl and gh need an explicit
+// context. This is friendlier, but never guesses between several.
+func resolveInOtherWorkspaces(ctx context.Context, client *api.Client, requested string, notFound error) (api.UserMachine, error) {
+	if !errors.Is(notFound, resolver.ErrMachineNotFound) || workspaceExplicit(ctx) {
+		return api.UserMachine{}, notFound
 	}
-	ctx, cancel := context.WithTimeout(ctx, machineTeamHintBudget)
+	lookup, cancel := context.WithTimeout(ctx, machineOtherWorkspacesBudget)
 	defer cancel()
-	page, listErr := current.ListWorkspaces(ctx)
-	if listErr != nil {
-		return err
+	page, err := client.ListWorkspaces(lookup)
+	if err != nil {
+		return api.UserMachine{}, notFound
 	}
-	var holders []string
+	type match struct {
+		machine   api.UserMachine
+		workspace api.Workspace
+	}
+	var matches []match
 	for _, workspace := range page.Items {
-		if workspace.Kind != "team" || workspace.ID == current.Workspace() {
+		if workspace.ID == client.Workspace() {
 			continue
 		}
-		client, scopeErr := scoped(workspace.ID)
-		if scopeErr != nil {
+		scoped, err := client.ForWorkspace(workspace.ID)
+		if err != nil {
 			continue
 		}
-		machines, listErr := client.ListUserMachines(ctx)
-		if listErr != nil {
+		machines, err := scoped.ListUserMachines(lookup)
+		if err != nil {
 			continue
 		}
-		for _, machine := range machines {
-			if machine.ID == requested || strings.EqualFold(machine.Alias, requested) {
-				holders = append(holders, workspace.ID)
-				break
-			}
+		if machine, err := resolveUserMachineIn(machines, requested); err == nil {
+			matches = append(matches, match{machine, workspace})
 		}
 	}
-	if len(holders) != 1 {
-		return err
+	switch len(matches) {
+	case 0:
+		return api.UserMachine{}, notFound
+	case 1:
+		found := matches[0]
+		if err := client.SetWorkspace(found.workspace.ID); err != nil {
+			return api.UserMachine{}, err
+		}
+		_, _ = fmt.Fprintf(machineResolutionNotice, "%s (%s)\n", found.machine.Alias, describeWorkspace(found.workspace))
+		return found.machine, nil
 	}
-	return &machineInTeamWorkspaceError{machine: requested, team: holders[0]}
+	ambiguous := &machineInWorkspacesError{machine: requested}
+	for _, found := range matches {
+		ambiguous.candidates = append(ambiguous.candidates, found.machine.ID+" ("+describeWorkspace(found.workspace)+")")
+		ambiguous.workspaces = append(ambiguous.workspaces, "--workspace "+found.workspace.ID)
+	}
+	return api.UserMachine{}, ambiguous
+}
+
+func describeWorkspace(workspace api.Workspace) string {
+	if workspace.Kind == "team" {
+		return "team " + workspace.ID
+	}
+	return workspace.ID + " workspace"
 }

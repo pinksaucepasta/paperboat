@@ -61,9 +61,9 @@ func commandFailureMessage(err error, failure commandFailure) string {
 	if failure.kind == commandOperational && errors.As(err, &lost) {
 		return "The change was sent, but its answer was lost on the way back, so it may have been applied. " + responseLostRecovery
 	}
-	var inTeam *machineInTeamWorkspaceError
-	if failure.kind == commandRejected && errors.As(err, &inTeam) {
-		return inTeam.Error()
+	var inWorkspaces *machineInWorkspacesError
+	if failure.kind == commandRejected && errors.As(err, &inWorkspaces) {
+		return inWorkspaces.Error()
 	}
 	if remote, ok := soleCommandOwner(err).(interface{ SupportReference() string }); ok && failure.kind == commandOperational && supportref.Valid(remote.SupportReference()) {
 		return "The remote machine could not confirm terminal creation. Check `pb session list` before retrying; run `pb doctor` if this continues. Support reference: " + remote.SupportReference() + "."
