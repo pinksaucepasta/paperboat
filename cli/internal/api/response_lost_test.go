@@ -87,3 +87,21 @@ func TestCreateAPITokenRetriesALostResponseWithTheSameKey(t *testing.T) {
 		t.Fatalf("out=%+v err=%v keys=%v", out, err, sent)
 	}
 }
+
+type unwrittenFailure struct{ calls atomic.Int32 }
+
+func (f *unwrittenFailure) RoundTrip(*http.Request) (*http.Response, error) {
+	f.calls.Add(1)
+	return nil, errors.New("dial tcp: connection refused")
+}
+
+// A read that fails before it is written (an unreachable server) is not repeated by this layer: the
+// transport already retries those, and stacking both turned one read into ~9 attempts (Lane X A3).
+func TestAReadThatWasNeverSentIsNotRetriedHere(t *testing.T) {
+	failing := &unwrittenFailure{}
+	client := New("https://api.example.test", config.Credential{AccessToken: "token"}, &http.Client{Transport: failing})
+	var out map[string]any
+	if err := client.do(context.Background(), http.MethodGet, "/v1/machines", nil, &out); err == nil || failing.calls.Load() != 1 {
+		t.Fatalf("err=%v calls=%d", err, failing.calls.Load())
+	}
+}
