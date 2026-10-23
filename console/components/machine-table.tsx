@@ -339,7 +339,7 @@ function usePages(query: string, count: number) {
     const url = new URL(window.location.href)
     if (next > 1) url.searchParams.set("page", String(next))
     else url.searchParams.delete("page")
-    window.history.replaceState(window.history.state, "", url)
+    window.history.replaceState(null, "", url)
     setPagedFor(query)
     document.getElementById("machines-table")?.scrollIntoView({ block: "start" })
   }
