@@ -120,7 +120,7 @@ func (c *Client) Watch(ctx context.Context, after uint64) (<-chan Snapshot, <-ch
 			return
 		}
 		scanner := bufio.NewScanner(response.Body)
-		scanner.Buffer(make([]byte, 64<<10), maxJSONBytes+1)
+		scanner.Buffer(make([]byte, 64<<10), maxSnapshotBytes+1)
 		cursor := after
 		for scanner.Scan() {
 			var event StatusEvent
@@ -368,7 +368,7 @@ func (c *Client) Snapshot(ctx context.Context) (Snapshot, error) {
 	if response.Header.Get("X-Paperboat-Protocol") != ProtocolV1 {
 		return Snapshot{}, ErrVersionMismatch
 	}
-	limited := io.LimitReader(response.Body, maxJSONBytes+1)
+	limited := io.LimitReader(response.Body, maxSnapshotBytes+1)
 	if response.StatusCode != http.StatusOK {
 		return Snapshot{}, decodeRemoteErrorReader(response.StatusCode, limited)
 	}

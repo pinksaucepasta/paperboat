@@ -17,7 +17,12 @@ const (
 	PeerStreamSchemaV1   = "paperboat.peer-stream-request/v1"
 	FileTransferSchemaV1 = "paperboat.file-transfer-request/v1"
 	maxMachines          = 10_000
-	maxUnixSocketPath    = 100
+	// maxMachineStatusBytes bounds one machine's entry in a snapshot (about 500-700 B measured, Lane X
+	// audit A1); maxSnapshotBytes is sized from it so a snapshot of maxMachines machines fits. The
+	// general 1 MiB request bound broke pb status, watch and warm resolution near 1,500 machines.
+	maxMachineStatusBytes = 1 << 10
+	maxSnapshotBytes      = maxMachines*maxMachineStatusBytes + 64<<10
+	maxUnixSocketPath     = 100
 )
 
 type FileTransferRequest struct {

@@ -319,7 +319,7 @@ func (s *Server) handler() http.Handler {
 			return
 		}
 		encoded, err := json.Marshal(snapshot)
-		if err != nil || len(encoded) > maxJSONBytes {
+		if err != nil || len(encoded) > maxSnapshotBytes {
 			if err == nil {
 				err = ErrInvalidResponse
 			}
@@ -877,7 +877,7 @@ func (s *Server) watch(writer http.ResponseWriter, request *http.Request, reques
 		}
 		event := StatusEvent{Schema: StatusEventSchemaV1, Snapshot: snapshot}
 		encoded, err := json.Marshal(event)
-		if err != nil || len(encoded) > maxJSONBytes {
+		if err != nil || len(encoded) > maxSnapshotBytes {
 			if err == nil {
 				err = ErrInvalidResponse
 			}

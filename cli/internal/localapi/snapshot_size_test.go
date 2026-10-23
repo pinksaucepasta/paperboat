@@ -1,0 +1,29 @@
+package localapi
+
+import (
+	"encoding/json"
+	"fmt"
+	"testing"
+)
+
+// A snapshot of the most machines the daemon accepts, each with a health item, fits the snapshot bound
+// (Lane X audit A1: the 1 MiB request bound broke pb status near 1,500 machines).
+func TestASnapshotOfTheMostMachinesFits(t *testing.T) {
+	snapshot := validSnapshot()
+	template := snapshot.Machines[0]
+	template.Health = []HealthItem{{Code: "ssh_host_keys_unpublished", Severity: "warning", Title: "The machine's SSH host keys are not published", Recovery: "On the machine, start an SSH server (sshd) if none runs. If sshd runs, its host keys are identical to another machine's (cloned image): remove /etc/ssh/ssh_host_*, run ssh-keygen -A and restart sshd. Paperboat publishes the keys within a minute", ETag: "ssh_host_keys_unpublished"}}
+	snapshot.Machines = make([]MachineStatus, maxMachines)
+	for i := range snapshot.Machines {
+		machine := template
+		machine.ID = fmt.Sprintf("machine_%08d-0000-0000-0000-000000000000", i)
+		machine.Alias = fmt.Sprintf("build-host-%05d", i)
+		snapshot.Machines[i] = machine
+	}
+	if err := snapshot.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(snapshot)
+	if err != nil || len(encoded) > maxSnapshotBytes {
+		t.Fatalf("snapshot of %d machines is %d bytes, bound %d (err %v)", maxMachines, len(encoded), maxSnapshotBytes, err)
+	}
+}
