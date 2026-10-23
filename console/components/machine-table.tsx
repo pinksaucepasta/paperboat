@@ -4,6 +4,7 @@ import { InfoIcon, LaptopIcon, MagnifyingGlassIcon, XIcon } from "@phosphor-icon
 import Link from "next/link"
 import { useDeferredValue, useState } from "react"
 import {
+  ApiError,
   useApiQuery,
   machineOwner,
   meQuery,
@@ -33,7 +34,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 
 export function MachineTable() {
-  const { data: page, isPending, isError, refetch } = useMachinePage()
+  const { data: page, isPending, isError, error, refetch } = useMachinePage()
   const { data: me } = useApiQuery(meQuery)
   const { data: running, isError: runningFailed } = useRunning()
   const workspace = useWorkspace()
@@ -157,10 +158,17 @@ export function MachineTable() {
         </table>
         {isError && (
           <div className="flex items-center justify-center gap-3 py-12 text-sm text-muted-foreground">
-            Couldn’t load machines.
-            <Button variant="outline" size="sm" onClick={() => refetch()}>
-              Retry
-            </Button>
+            {/* A refusal (such as a team that requires SSO) says what to do; retrying won't help. */}
+            {error instanceof ApiError && error.status === 403 ? (
+              error.message
+            ) : (
+              <>
+                Couldn’t load machines.
+                <Button variant="outline" size="sm" onClick={() => refetch()}>
+                  Retry
+                </Button>
+              </>
+            )}
           </div>
         )}
         {visible && visible.length > perPage && (
