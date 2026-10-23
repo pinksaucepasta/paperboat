@@ -35,4 +35,20 @@ func TestScopedTokenRoute(t *testing.T) {
 			t.Errorf("%s %s: %v, want %v", c.method, c.path, got, c.want)
 		}
 	}
+	// pb login registers the session's own E2EE certificate under the account's root; a fresh
+	// enrollment can replace that root, which a scoped token never may.
+	r := httptest.NewRequest("POST", "/v1/e2ee/bootstrap", nil)
+	if !scopedTokenRoute(r) {
+		t.Error("a scoped session cannot register its own E2EE certificate")
+	}
+	r.Header.Set("X-Paperboat-Fresh-Enrollment", "1")
+	if scopedTokenRoute(r) {
+		t.Error("a scoped session may replace the account's E2EE root")
+	}
+	if scopedTokenRoute(httptest.NewRequest("POST", "/v1/workspaces/acme/api-tokens", nil)) {
+		t.Error("a scoped token may create API tokens")
+	}
+	if !scopedTokenRoute(httptest.NewRequest("DELETE", "/v1/workspaces/acme/api-tokens/apitok_1", nil)) {
+		t.Error("a scoped token cannot revoke API tokens")
+	}
 }

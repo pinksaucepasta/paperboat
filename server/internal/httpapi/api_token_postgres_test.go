@@ -140,8 +140,16 @@ func TestAPITokenBearerRequests(t *testing.T) {
 	if status, out = do(http.MethodPost, "/v1/auth/api-token-sessions", ownerSession, `{"client_label":"x","device_type":"server","os":"linux"}`); status != http.StatusUnauthorized || code(out) != "api_token_required" {
 		t.Fatalf("a session cannot start another session = %d %v", status, out)
 	}
-	if status, out = do(http.MethodPost, "/v1/workspaces/"+team+"/api-tokens", secret, `{"name":"more"}`); status != http.StatusForbidden || code(out) != "forbidden" {
-		t.Fatalf("token creates token = %d %v", status, out)
+	// No token, nor a session made from one, can mint a token: it could be wider or outlive it.
+	for _, c := range []struct{ name, bearer, code string }{
+		{"scoped token", secret, "outside_token_scope"},
+		{"scoped token's session", scopedSession, "outside_token_scope"},
+		{"unscoped token", ownerSecret, "forbidden"},
+		{"unscoped token's session", ownerSession, "forbidden"},
+	} {
+		if status, out = do(http.MethodPost, "/v1/workspaces/"+team+"/api-tokens", c.bearer, `{"name":"more"}`); status != http.StatusForbidden || code(out) != c.code {
+			t.Fatalf("%s creates a token = %d %v", c.name, status, out)
+		}
 	}
 	if status, out = do(http.MethodDelete, "/v1/workspaces/"+team+"/api-tokens/"+ownerToken.ID, secret, ""); status != http.StatusNotFound {
 		t.Fatalf("member revokes owner's token = %d %v", status, out)

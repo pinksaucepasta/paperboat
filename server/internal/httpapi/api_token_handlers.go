@@ -88,7 +88,8 @@ func apiTokenView(t apitokens.Token) apiTokenJSON {
 }
 
 // apiTokenRequest resolves {ws} and the acting account. A token may only act in its own
-// workspace, and may not create tokens: a new token could be wider than its scope.
+// workspace, and neither a token nor a session made from one may create tokens: a new token
+// could be wider than the scope or outlive the token.
 func apiTokenRequest(w http.ResponseWriter, r *http.Request, create bool) (string, workspace.Scope, bool) {
 	noStore(w)
 	p, ok := principalFromContext(r.Context())
@@ -105,7 +106,7 @@ func apiTokenRequest(w http.ResponseWriter, r *http.Request, create bool) (strin
 		writeWorkspaceError(w, r, workspace.ErrForbidden)
 		return "", workspace.Scope{}, false
 	}
-	if p.APIToken != nil && create {
+	if _, viaToken := auth.APITokenFromContext(r.Context()); (p.APIToken != nil || viaToken) && create {
 		writeError(w, r, http.StatusForbidden, "forbidden", "API tokens cannot create API tokens. Sign in to create one.")
 		return "", workspace.Scope{}, false
 	}
@@ -211,10 +212,12 @@ func scopedTokenRoute(r *http.Request) bool {
 	switch {
 	case strings.HasPrefix(p, "/v1/workspaces/") && (strings.HasSuffix(p, "/policy/explain") || strings.HasSuffix(p, "/policy/validate")):
 		return true
-	case strings.HasPrefix(p, "/v1/workspaces/") && (strings.HasSuffix(p, "/api-tokens") || strings.Contains(p, "/api-tokens/")):
-		return true
+	case r.Method == http.MethodDelete && strings.HasPrefix(p, "/v1/workspaces/") && strings.Contains(p, "/api-tokens/"):
+		return true // revoking only narrows; creating is refused for every token request
 	case p == "/v1/auth/api-token-sessions", p == "/v1/peer-network/config", p == "/v1/peer-network/register":
 		return true
+	case p == "/v1/e2ee/bootstrap" && r.Header.Get("X-Paperboat-Fresh-Enrollment") == "":
+		return true // pb login registers the session's own certificate; a fresh enrollment could replace the root
 	case r.Method == http.MethodPut && strings.HasPrefix(p, "/v1/ssh/client-keys/"):
 		return true
 	}
