@@ -37,7 +37,7 @@ func (d readyLazyDispatch) Dispatch(ctx context.Context, r previewv1.DispatchReq
 	}
 	// A managed-only preview is ready only once its DNS record names the serving edge
 	// (509a74ac); the remote edge observation includes that provider write.
-	if _, err := d.database.SQL().ExecContext(ctx, `INSERT INTO edge_dns_publications(hostname,owner_id,resource_generation,readiness_version,observed_at,publication_generation,desired_addresses,provider_records,state,created_at,updated_at) VALUES($1,$2,1,'fixture',now(),1,'["192.0.2.77"]','[{"Address":"192.0.2.77"}]','submitted',now(),now())`, strings.TrimPrefix(r.Endpoint, "https://"), r.PreviewID); err != nil {
+	if _, err := d.database.SQL().ExecContext(ctx, `INSERT INTO edge_dns_publications(hostname,owner_id,resource_generation,readiness_version,observed_at,publication_generation,desired_addresses,provider_records,state,created_at,updated_at) VALUES($1,$2,1,'fixture',now(),1,'["192.0.2.77"]','[{"Address":"192.0.2.77"}]','submitted',now(),now()) ON CONFLICT (hostname) DO UPDATE SET owner_id=EXCLUDED.owner_id,provider_records=EXCLUDED.provider_records,desired_addresses=EXCLUDED.desired_addresses,updated_at=now()`, strings.TrimPrefix(r.Endpoint, "https://"), r.PreviewID); err != nil {
 		return previewv1.DispatchOutcome{}, err
 	}
 	return previewv1.DispatchOutcome{Schema: previewv1.Schema, Kind: previewv1.PreviewDispatchKind, PreviewID: r.PreviewID, OperationID: r.OperationID, State: "accepted", Generation: r.ExpectedGeneration}, nil
