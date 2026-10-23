@@ -37,6 +37,7 @@ type canonicalMachineProofClaims struct {
 	BodySHA256             string    `json:"body_sha256"`
 	IssuedAt               time.Time `json:"issued_at"`
 	ExpiresAt              time.Time `json:"expires_at"`
+	Nonce                  string    `json:"nonce,omitempty"`
 }
 
 func (s *EnrollmentService) VerifyMachineRequest(ctx context.Context, identityToken string, proof []byte, method, path string, body []byte) (MachineRequestClaims, error) {
@@ -93,6 +94,9 @@ func (s *EnrollmentService) VerifyMachineControlRequest(ctx context.Context, ide
 	}
 	claims, err := verifyCanonicalMachineProof(machine, proof, method, path, body, now)
 	if err != nil {
+		return MachineRequestClaims{}, err
+	}
+	if err := s.reserveProofNonce(ctx, "machine:"+machine.ID, claims.Nonce, method, claims.ExpiresAt); err != nil {
 		return MachineRequestClaims{}, err
 	}
 	return MachineRequestClaims{

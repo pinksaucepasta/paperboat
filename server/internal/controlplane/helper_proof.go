@@ -36,6 +36,7 @@ type HelperProofClaims struct {
 	BodySHA256    string    `json:"body_sha256"`
 	IssuedAt      time.Time `json:"issued_at"`
 	ExpiresAt     time.Time `json:"expires_at"`
+	Nonce         string    `json:"nonce,omitempty"`
 }
 
 func (s *EnrollmentService) VerifyHelperRequest(ctx context.Context, identityToken string, proof []byte, method, path string, body []byte) (HelperProofClaims, error) {
@@ -58,7 +59,11 @@ func (s *EnrollmentService) verifyHelperRenewalRequest(ctx context.Context, proo
 	if helper.KeyThumbprint.String != "sha256:"+base64.RawURLEncoding.EncodeToString(thumbprint[:]) {
 		return HelperProofClaims{}, ErrHelperProof
 	}
-	return verifyHelperProof(ed25519.PublicKey(helper.PublicKey), proof, claims.HelperID, claims.EnvironmentID, http.MethodPost, "/v1/helper-identity-renewals", body, s.clock().UTC())
+	verified, err := verifyHelperProof(ed25519.PublicKey(helper.PublicKey), proof, claims.HelperID, claims.EnvironmentID, http.MethodPost, "/v1/helper-identity-renewals", body, s.clock().UTC())
+	if err != nil {
+		return HelperProofClaims{}, err
+	}
+	return verified, s.reserveProofNonce(ctx, "helper:"+helper.ID, verified.Nonce, http.MethodPost, verified.ExpiresAt)
 }
 
 func (s *EnrollmentService) verifyHelperRequest(ctx context.Context, identityToken string, proof []byte, method, path string, body []byte, expiryGrace time.Duration) (HelperProofClaims, error) {
@@ -92,6 +97,9 @@ func (s *EnrollmentService) verifyHelperRequest(ctx context.Context, identityTok
 	}
 	verified, err := verifyHelperProof(ed25519.PublicKey(helper.PublicKey), proof, identity.HelperID, identity.EnvironmentID, method, path, body, now)
 	if err != nil {
+		return HelperProofClaims{}, err
+	}
+	if err := s.reserveProofNonce(ctx, "helper:"+helper.ID, verified.Nonce, method, verified.ExpiresAt); err != nil {
 		return HelperProofClaims{}, err
 	}
 	verified.MachineID = identity.MachineID

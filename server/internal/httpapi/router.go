@@ -720,6 +720,7 @@ func NewRouter(opts Options) http.Handler {
 	handler = secureHeaders(handler)
 	handler = cors(opts.Config.HTTP.AllowedOrigins, handler)
 	handler = bodyLimit(opts.Config.HTTP.MaxBodyBytes, handler)
+	handler = markResendable(handler)
 	handler = timeout(opts.Config.HTTP.RequestTimeout, opts.Logger, handler)
 	handler = recoverer(opts.Logger, handler)
 	if opts.TelemetryHTTP != nil {

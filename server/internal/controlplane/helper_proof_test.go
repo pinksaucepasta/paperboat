@@ -73,3 +73,20 @@ func TestProofWindowSeparatesClockSkewFromMalformedProofs(t *testing.T) {
 		}
 	}
 }
+
+// A proof may carry a nonce (F21-13); strict claim decoding accepts it and returns it.
+func TestVerifyHelperProofAcceptsANonce(t *testing.T) {
+	privateKey := ed25519.NewKeyFromSeed([]byte(strings.Repeat("n", ed25519.SeedSize)))
+	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
+	bodyHash := sha256.Sum256(nil)
+	payload, err := json.Marshal(HelperProofClaims{HelperID: "hlp_1", EnvironmentID: "env_1", OperationID: "operation_1", Method: "POST", Path: "/v1/x",
+		BodySHA256: base64.RawURLEncoding.EncodeToString(bodyHash[:]), IssuedAt: now, ExpiresAt: now.Add(time.Minute), Nonce: "abcdefghijklmnop0123"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	envelope, _ := json.Marshal(helperProofEnvelope{Algorithm: "EdDSA", Payload: base64.RawURLEncoding.EncodeToString(payload), Signature: base64.RawURLEncoding.EncodeToString(ed25519.Sign(privateKey, payload))})
+	verified, err := verifyHelperProof(privateKey.Public().(ed25519.PublicKey), envelope, "hlp_1", "env_1", "POST", "/v1/x", nil, now)
+	if err != nil || verified.Nonce != "abcdefghijklmnop0123" {
+		t.Fatalf("verified = %#v, %v", verified, err)
+	}
+}

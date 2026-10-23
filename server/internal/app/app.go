@@ -916,7 +916,7 @@ func New(opts Options) (*App, error) {
 		defer cancel()
 		_, err := activityLog.Prune(pruneContext)
 		// Secrets held for API token create retries never outlive their window (F21-12).
-		err = errors.Join(err, apiTokens.PruneCreateRequests(pruneContext))
+		err = errors.Join(err, apiTokens.PruneCreateRequests(pruneContext), enrollmentService.PruneProofNonces(pruneContext))
 		workers.IterationFailure(ctx, "team_retention_cleanup", "team_retention_failed", err)
 		outcome := "success"
 		if err != nil {

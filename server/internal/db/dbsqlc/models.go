@@ -2087,6 +2087,12 @@ type PreviewRoute struct {
 	Endpoint                             bool
 }
 
+type ProofNonce struct {
+	Signer    string
+	Nonce     string
+	ExpiresAt time.Time
+}
+
 type ProviderEvent struct {
 	ID              string
 	Provider        string

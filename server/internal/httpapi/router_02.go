@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat-server/internal/controlplane"
 	"log/slog"
 	"net/http"
 	"slices"
@@ -303,3 +304,14 @@ func requestIDFromContext(ctx context.Context) string {
 }
 
 func newRequestID() string { return "request_" + uuid.NewString() }
+
+// markResendable tells proof verification that HTTP may send this request again (it carries an
+// Idempotency-Key), so a repeated proof nonce is not a replay (F21-13).
+func markResendable(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Idempotency-Key") != "" {
+			r = r.WithContext(controlplane.WithResendableRequest(r.Context()))
+		}
+		next.ServeHTTP(w, r)
+	})
+}
