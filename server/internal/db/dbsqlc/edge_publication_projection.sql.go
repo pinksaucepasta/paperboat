@@ -101,6 +101,11 @@ SELECT DISTINCT node.id,t.generation AS resource_generation,statement_timestamp(
    FROM tunnel_edge_route_assignments a WHERE a.tunnel_id=t.id AND a.edge_node_id=node.id
     AND a.edge_process_epoch=node.process_epoch AND a.state='active' AND a.observed_state='ready'
  ),'') || '/' || COALESCE((
+   -- Tunnel routes on the endpoint engine (PLAN 3a step 4), ready on this edge.
+   SELECT string_agg(x.route_id || ':' || x.generation,',' ORDER BY x.route_id)
+   FROM endpoint_edge_assignments x JOIN endpoints e ON e.id=x.endpoint_id AND e.kind='tunnel' AND e.tunnel_id=t.id
+   WHERE x.edge_node_id=node.id AND x.edge_process_epoch=node.process_epoch AND x.desired='active' AND x.observed_ready
+ ),'') || '/' || COALESCE((
    SELECT string_agg(cert.id,',' ORDER BY cert.id)
    FROM tunnel_certificate_records cert JOIN tunnel_certificate_edge_distributions d ON d.certificate_id=cert.id
    WHERE cert.state='active' AND d.edge_node_id=node.id AND d.edge_process_epoch=node.process_epoch
@@ -110,7 +115,12 @@ SELECT DISTINCT node.id,t.generation AS resource_generation,statement_timestamp(
    (SELECT min(LEAST(s.lease_deadline,s.last_heartbeat_at+interval '15 seconds'))
     FROM tunnel_edge_route_assignments a JOIN tunnel_connector_sessions s ON s.id=a.connector_session_id
     WHERE a.tunnel_id=t.id AND a.edge_node_id=node.id AND a.edge_process_epoch=node.process_epoch
-     AND a.state='active' AND a.observed_state='ready'))::timestamptz AS valid_until
+     AND a.state='active' AND a.observed_state='ready'),
+   (SELECT min(ra.expires_at) FROM endpoint_edge_assignments x
+    JOIN endpoints e ON e.id=x.endpoint_id AND e.kind='tunnel' AND e.tunnel_id=t.id
+    JOIN runtime_carrier_attachments ra ON ra.machine_id=e.agent_machine_id AND ra.edge_node_id=x.edge_node_id
+     AND ra.edge_process_epoch=x.edge_process_epoch AND ra.session_id=x.carrier_session_id
+    WHERE x.edge_node_id=node.id AND x.edge_process_epoch=node.process_epoch AND x.desired='active' AND x.observed_ready))::timestamptz AS valid_until
 FROM tunnels t
 JOIN control_tunnel_nodes node ON true
 WHERE t.id=$1 AND t.desired_state='active' AND t.deleted_at IS NULL
@@ -159,6 +169,15 @@ WHERE t.id=$1 AND t.desired_state='active' AND t.deleted_at IS NULL
      AND s.applied_config_generation>=a.config_generation AND s.lease_deadline>$2
      AND s.last_heartbeat_at>$2::timestamptz-interval '15 seconds'
      AND config.activation_state='active' AND config.content_hash=a.config_content_hash
+   )
+   AND NOT EXISTS (
+    SELECT 1 FROM endpoint_edge_assignments x
+    JOIN endpoints e ON e.id=x.endpoint_id AND e.kind='tunnel' AND e.tunnel_id=t.id AND e.desired_state='active'
+    JOIN endpoint_routes er ON er.id=x.route_id AND er.tunnel_route_id=r.id
+    JOIN runtime_carrier_attachments ra ON ra.machine_id=e.agent_machine_id AND ra.edge_node_id=x.edge_node_id
+     AND ra.edge_process_epoch=x.edge_process_epoch AND ra.session_id=x.carrier_session_id
+    WHERE x.edge_node_id=node.id AND x.edge_process_epoch=node.process_epoch AND x.desired='active' AND x.observed_ready
+     AND ra.expires_at>$2 AND paperboat.node_route_eligible(node.id,t.account_id,r.id)
    )
  )
  AND (

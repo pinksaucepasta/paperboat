@@ -53,6 +53,20 @@ WHERE endpoints.access_mode IS DISTINCT FROM EXCLUDED.access_mode OR endpoints.o
 AND NOT EXISTS(SELECT 1 FROM tunnel_routes tr WHERE tr.id=r.tunnel_route_id AND tr.tunnel_id=e.tunnel_id AND tr.desired_state='active' AND tr.deleted_at IS NULL)`, machineID); err != nil {
 		return err
 	}
+	// An engine tunnel has no connector to acknowledge its config: the agent serves the routes in
+	// tunnel_routes, so the newest config generation is the active one (the DNS and status
+	// projections read the active config).
+	const newest = `SELECT max(h.generation) FROM tunnel_config_generations h WHERE h.tunnel_id=g.tunnel_id AND h.activation_state IN ('pending','active')`
+	if _, err := tx.Exec(ctx, `UPDATE tunnel_config_generations g SET activation_state='superseded',activated_at=NULL
+FROM endpoints e WHERE e.tunnel_id=g.tunnel_id AND e.kind='tunnel' AND e.agent_machine_id=$1
+AND g.activation_state='active' AND g.generation<>(`+newest+`)`, machineID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE tunnel_config_generations g SET activation_state='active',activated_at=now()
+FROM endpoints e WHERE e.tunnel_id=g.tunnel_id AND e.kind='tunnel' AND e.agent_machine_id=$1
+AND g.activation_state='pending' AND g.generation=(`+newest+`)`, machineID); err != nil {
+		return err
+	}
 	// The route's id is the tunnel route's id, so the edge, the agent and accounting name it the same
 	// way on both paths; its revision follows the route generation.
 	if _, err := tx.Exec(ctx, `INSERT INTO endpoint_routes(id,endpoint_id,hostname,protocol,revision,tunnel_route_id)

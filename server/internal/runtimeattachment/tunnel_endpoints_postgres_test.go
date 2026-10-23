@@ -1,6 +1,7 @@
 package runtimeattachment
 
 import (
+	"database/sql"
 	"encoding/hex"
 	"testing"
 	"time"
@@ -26,6 +27,8 @@ func TestTunnelsMoveOntoTheEngineOnlyWhenAgentAndEdgesServeThemOnPostgres(t *tes
 	f.exec(t, `INSERT INTO tunnels(id,account_id,name,desired_state,access_mode,generation,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id) VALUES($1,$2,$1,'active','public',1,$3,$4,$5,$2)`,
 		tunnel, f.account, "endpoint_"+endpointID, "https://"+endpointID+".tunnels.example.test", f.machine)
 	f.exec(t, `INSERT INTO tunnel_routes(id,tunnel_id,name,priority,protocol,match_type,match_hostname,origin_scheme,origin_address,tls_verification,generation,desired_state,created_by_actor_id,updated_by_actor_id,created_at,updated_at) VALUES($1,$2,'web',1,'http','managed',$4,'http','127.0.0.1:3000','not_applicable',3,'active',$3,$3,now(),now())`, route, tunnel, f.account, endpointID+".tunnels.example.test")
+	f.exec(t, `INSERT INTO tunnel_config_generations(tunnel_id,generation,content_hash,snapshot,activation_state,created_by_actor_id,retained_until)
+VALUES($1,1,sha256(convert_to($1::text,'UTF8')),convert_to(json_build_object('routes',json_build_array(json_build_object('id',$2::text)))::text,'UTF8'),'pending',$3,now()+interval '1 day')`, tunnel, route, f.account)
 	sync := func() {
 		t.Helper()
 		if err := endpoints.SyncTunnelAgents(f.ctx, f.database, 100); err != nil {
@@ -197,6 +200,27 @@ func TestTunnelsMoveOntoTheEngineOnlyWhenAgentAndEdgesServeThemOnPostgres(t *tes
 	}
 	if code := health(); code != "ready" {
 		t.Fatalf("tunnel health with both edges ready = %s, want ready", code)
+	}
+	// No connector applies an engine tunnel's config: its newest generation is active.
+	var activation string
+	if err := f.database.SQL().QueryRowContext(f.ctx, `SELECT activation_state FROM tunnel_config_generations WHERE tunnel_id=$1 AND generation=1`, tunnel).Scan(&activation); err != nil || activation != "active" {
+		t.Fatalf("engine tunnel config = %q, %v; want active", activation, err)
+	}
+	// Its hostname's DNS names exactly the edges that serve the route.
+	f.exec(t, `UPDATE control_tunnel_nodes SET public_ingress_ipv4=CASE WHEN id=$1 THEN '192.0.2.21'::inet ELSE '192.0.2.22'::inet END,public_ingress_verified_at=now() WHERE id IN ($1,$2)`, f.node, f.backupNode)
+	certificate := "cert_" + f.prefix
+	f.exec(t, `INSERT INTO tunnel_platform_certificate_targets(id,kind,hostname,account_id,challenge_reference) VALUES('platform_cert_public_v1','public_wildcard','*.tunnels.example.test','platform_system_v1','dns:fixture')`)
+	t.Cleanup(func() {
+		_, _ = f.database.SQL().ExecContext(f.ctx, `DELETE FROM tunnel_platform_certificate_targets WHERE id='platform_cert_public_v1'`)
+	})
+	f.exec(t, `INSERT INTO tunnel_certificate_records(id,domain_id,account_id,hostname,domain_generation,certificate_generation,strategy,state,certificate_reference,master_key_reference,certificate_ciphertext,private_key_ciphertext,fingerprint,issuer,not_before,expires_at,renewal_at,target_kind) VALUES($1,'platform_cert_public_v1','platform_system_v1','*.tunnels.example.test',1,1,'platform_dns01','active','fixture','fixture',decode(repeat('ab',29),'hex'),decode(repeat('ab',29),'hex'),decode(repeat('ab',32),'hex'),'fixture',now()-interval '1 hour',now()+interval '1 hour',now(),'platform_wildcard')`, certificate)
+	t.Cleanup(func() {
+		_, _ = f.database.SQL().ExecContext(f.ctx, `DELETE FROM tunnel_certificate_records WHERE id=$1`, certificate)
+	})
+	f.exec(t, `INSERT INTO tunnel_certificate_edge_distributions(certificate_id,edge_node_id,edge_process_epoch,edge_assignment_generation,state,observed_certificate_generation) VALUES($1,$2,$3,1,'active',1),($1,$4,$5,1,'active',1)`, certificate, f.node, f.edge.ProcessEpoch, f.backupNode, f.backupEdge.ProcessEpoch)
+	addresses, err := f.database.Queries().ListReadyEdgeDNSAddressesV1(f.ctx, dbsqlc.ListReadyEdgeDNSAddressesV1Params{TunnelID: tunnel, Hostname: endpointID + ".tunnels.example.test", Now: sql.NullTime{Time: time.Now().UTC(), Valid: true}})
+	if err != nil || len(addresses) != 2 {
+		t.Fatalf("engine tunnel DNS addresses = %+v, %v; want both edges", addresses, err)
 	}
 	// The edge's public ingress authority for the route is bound to the same carrier identity its
 	// stream preface carries, and names the tunnel route and its origin.
