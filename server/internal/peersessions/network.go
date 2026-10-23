@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"github.com/pinksaucepasta/paperboat-server/internal/admission"
 	"github.com/pinksaucepasta/paperboat-server/internal/bandwidthgate"
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"log/slog"
 	"net/netip"
 	"slices"
@@ -25,12 +26,14 @@ import (
 	"golang.org/x/crypto/curve25519"
 )
 
-const networkConfigLimit = 128 << 10
+// networkConfigLimit bounds one signed configuration, relay grant or regional candidate token;
+// it is the client's bound (shared/peernetwork), so a configuration the server signs is one the
+// CLI accepts.
+const networkConfigLimit = peernetwork.MaxConfigurationBytes
 
-// maximumAccountEndpoints is the stated product maximum of computers (machines
-// and CLI endpoints) in one account, equal to the CLI's trusted-key bound
-// (endpointidentity.MaxTrustedKeys, 2048 keys for 1024 computers).
-const maximumAccountEndpoints = 2048
+// maximumAccountEndpoints is the stated product maximum of endpoints in one account, shared
+// with the CLI's trusted-key and configuration bounds.
+const maximumAccountEndpoints = peernetwork.MaxEndpoints
 
 type NetworkRegistration struct {
 	OperationID                                                    string
@@ -467,7 +470,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 			p = &networkPeer{Identity: binding}
 			byPeer[binding.EndpointID] = p
 		}
-		if scopes >= 2*maximumAccountEndpoints {
+		if scopes >= peernetwork.MaxScopes {
 			return NetworkConfigResult{}, ErrResourceLimit
 		}
 		p.Scopes = append(p.Scopes, personalNetworkScope(self, binding, expiry))

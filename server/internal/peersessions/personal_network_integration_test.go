@@ -57,7 +57,7 @@ func TestPersonalNetworkCarriesEveryComputerOfALargeAccountOnPostgres(t *testing
 	// Controlled enrollment records contain real signed endpoint certificates.
 	// All network registration/configuration below uses the production service.
 	var machines []string
-	for i := range 70 {
+	for i := range 140 {
 		machines = append(machines, fmt.Sprintf("personal_%02d_%s", i, suffix))
 	}
 	for _, machine := range machines {
@@ -86,7 +86,11 @@ func TestPersonalNetworkCarriesEveryComputerOfALargeAccountOnPostgres(t *testing
 		}
 		return result
 	}
-	claims := networkClaims(t, configuration(machines[0]).Configuration)
+	first := configuration(machines[0]).Configuration
+	if len(first) <= 128<<10 {
+		t.Fatalf("140-computer configuration is %d bytes; the test must exceed the old 128 KiB bound", len(first))
+	}
+	claims := networkClaims(t, first)
 	if peers := claims["peers"].([]any); len(peers) != len(machines)-1 {
 		t.Fatalf("configuration names %d peers, want %d", len(peers), len(machines)-1)
 	}
