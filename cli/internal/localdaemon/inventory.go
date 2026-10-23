@@ -157,14 +157,17 @@ func (i *Inventory) Snapshot(ctx context.Context) (localapi.Snapshot, error) {
 // Run refreshes once, then on the interval while there is no healthy change stream. With one, an inventory change
 // refreshes at most once per eventSpacing, counted from the start of the previous refresh (changes in between fold
 // into that refresh), and the interval only checks whether eventFallback has passed since the last refresh.
+// A refresh that failed is retried on the outage backoff whatever the stream's health, so a local reconcile
+// that failed while pb update restarted the services does not wait the event fallback.
 func (i *Inventory) Run(ctx context.Context) error {
 	var started time.Time        // of the latest refresh
 	var pending <-chan time.Time // a change waiting for the spacing
-	outages := 0                 // consecutive periodic checks that found the change stream unhealthy
+	outages := 0                 // consecutive periodic checks that found the stream unhealthy or the refresh failed
+	failed := false              // the latest refresh failed; retry it on the outage backoff, not the event fallback
 	refresh := func() {
 		pending = nil // this refresh shows every change so far
 		started = time.Now()
-		_ = i.Refresh(ctx)
+		failed = i.Refresh(ctx) != nil
 	}
 	refresh()
 	timer := time.NewTimer(i.refreshInterval)
@@ -195,10 +198,10 @@ func (i *Inventory) Run(ctx context.Context) error {
 			refresh()
 		case <-timer.C:
 			healthy := i.events.Healthy()
-			if !healthy || time.Since(started) >= i.eventFallback {
+			if !healthy || failed || time.Since(started) >= i.eventFallback {
 				refresh()
 			}
-			if healthy {
+			if healthy && !failed {
 				outages = 0
 			} else {
 				outages = min(outages+1, 32)

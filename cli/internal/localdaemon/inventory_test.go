@@ -815,3 +815,44 @@ func TestRequestedRefreshesFoldWithinTheSpacing(t *testing.T) {
 		t.Fatalf("requested refresh %v after the previous one, want at least %v", gap, requestedRefreshSpacing)
 	}
 }
+
+// A refresh that fails (here the local reconcile, as during the service restarts of pb update) is
+// retried on the outage backoff, not left until the event fallback because the change stream is healthy:
+// otherwise a daemon stays "Local machine access is unavailable" for minutes after an update.
+func TestInventoryRetriesAFailedRefreshWhileTheChangeStreamIsHealthy(t *testing.T) {
+	source := &scriptedMachineSource{results: []machineResult{{machines: []api.UserMachine{{ID: "machine_1", Alias: "studio"}}}}}
+	store, err := localapi.NewSnapshotStore(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, subscriptions, _ := eventstest.Start(t, time.Hour, machineevents.TopicInventory)
+	var reconciles atomic.Int32
+	inventory, err := NewInventory(InventoryConfig{Source: source, Store: store, RefreshInterval: time.Second, RequestTimeout: time.Second, Events: subscriptions[0], EventFallback: time.Hour,
+		ReconcileMachines: func(context.Context, []api.UserMachine) error {
+			if reconciles.Add(1) == 1 {
+				return errors.New("machine guard is restarting")
+			}
+			return nil
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- inventory.Run(ctx) }()
+	defer func() {
+		cancel()
+		<-done
+	}()
+	deadline := time.Now().Add(4 * time.Second)
+	for {
+		snapshot, err := store.Snapshot(t.Context())
+		if err == nil && snapshot.DaemonState == "ready" {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("daemon state %q after %d reconciles, 4 s after a failed first refresh with a 1 s interval; want ready on the outage retry", snapshot.DaemonState, reconciles.Load())
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
