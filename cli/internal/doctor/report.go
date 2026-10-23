@@ -15,6 +15,9 @@ const (
 	StatusWarning     = "warning"
 	StatusFail        = "fail"
 	StatusUnavailable = "unavailable"
+	// StatusPending is a check whose subject is still starting (the local daemon before its first
+	// state); it is not a fault, and the report's overall is "starting" when nothing else is wrong.
+	StatusPending = "pending"
 )
 
 var safeIdentifier = regexp.MustCompile(`^[a-z0-9][a-z0-9_.:-]{0,127}$`)
@@ -43,7 +46,7 @@ type Report struct {
 }
 
 func (r Report) Validate() error {
-	if r.Schema != SchemaV1 || !safeIdentifier.MatchString(r.CorrelationID) || r.CheckedAt.IsZero() || !oneOf(r.Overall, "healthy", "degraded", "unhealthy") || len(r.Checks) == 0 || len(r.Checks) > 64 {
+	if r.Schema != SchemaV1 || !safeIdentifier.MatchString(r.CorrelationID) || r.CheckedAt.IsZero() || !oneOf(r.Overall, "healthy", "starting", "degraded", "unhealthy") || len(r.Checks) == 0 || len(r.Checks) > 64 {
 		return errors.New("invalid doctor report")
 	}
 	if r.Machine != nil && (!safeIdentifier.MatchString(r.Machine.ID) || !safeText(r.Machine.Alias, 256)) {
@@ -65,7 +68,7 @@ func (r Report) Validate() error {
 }
 
 func (c Check) Validate() error {
-	if !safeIdentifier.MatchString(c.Category) || !safeIdentifier.MatchString(c.Code) || !oneOf(c.Status, StatusPass, StatusWarning, StatusFail, StatusUnavailable) || !safeText(c.Summary, 512) || c.Recovery != "" && !safeText(c.Recovery, 512) {
+	if !safeIdentifier.MatchString(c.Category) || !safeIdentifier.MatchString(c.Code) || !oneOf(c.Status, StatusPass, StatusPending, StatusWarning, StatusFail, StatusUnavailable) || !safeText(c.Summary, 512) || c.Recovery != "" && !safeText(c.Recovery, 512) {
 		return errors.New("invalid doctor check")
 	}
 	if (c.Status == StatusFail || c.Status == StatusWarning) && c.Recovery == "" {
@@ -94,11 +97,15 @@ func normalize(checks []Check) ([]Check, error) {
 func overall(checks []Check) string {
 	state := "healthy"
 	for _, check := range checks {
-		if check.Status == StatusFail {
+		switch check.Status {
+		case StatusFail:
 			return "unhealthy"
-		}
-		if check.Status == StatusWarning || check.Status == StatusUnavailable {
+		case StatusWarning, StatusUnavailable:
 			state = "degraded"
+		case StatusPending:
+			if state == "healthy" {
+				state = "starting"
+			}
 		}
 	}
 	return state

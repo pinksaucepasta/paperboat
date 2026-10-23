@@ -162,6 +162,12 @@ func doctorProbes(command *cobra.Command, snapshot localapi.Snapshot, machine *l
 			if snapshot.DaemonState != "ready" {
 				status = doctorpkg.StatusWarning
 				recovery = "Restart the Paperboat local service and run pb doctor again."
+				if snapshot.DaemonState == "starting" {
+					// Starting is not a fault (right after pb setup, pb pair or a restart): restarting
+					// would only start it again.
+					status = doctorpkg.StatusPending
+					recovery = "Paperboat is still starting; run `pb doctor` again in a moment."
+				}
 				if snapshot.DaemonState == "awaiting_enrollment" {
 					// Waiting to be added again is not a service fault: restarting cannot help.
 					recovery = dashboardEnrollmentGuidance + " Then run `pb doctor` again."

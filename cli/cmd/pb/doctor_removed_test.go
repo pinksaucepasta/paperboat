@@ -51,6 +51,23 @@ func TestDoctorSendsAComputerAwaitingEnrollmentToPbLogin(t *testing.T) {
 	t.Fatal("no daemon probe")
 }
 
+// C020: right after `pb setup` the daemon is still starting; doctor says so (pending, overall
+// "starting") and does not send the user to restart a service that is only starting.
+func TestDoctorReportsAStartingDaemonAsPendingNotAFault(t *testing.T) {
+	snapshot := localapi.Snapshot{DaemonState: "starting"}
+	for _, probe := range doctorProbes(&cobra.Command{}, snapshot, nil) {
+		if probe.Code != "daemon" {
+			continue
+		}
+		check := probe.Run(context.Background())
+		if check.Status != doctorpkg.StatusPending || strings.Contains(check.Recovery, "Restart") || !strings.Contains(check.Recovery, "pb doctor") {
+			t.Fatalf("a starting daemon was reported as a fault: %+v", check)
+		}
+		return
+	}
+	t.Fatal("no daemon probe")
+}
+
 // F14-07: a server that refuses an out-of-date client is answered with `pb update`, not with advice
 // to sign in again.
 func TestDoctorNamesAnUnsupportedVersionInsteadOfAFailedLogin(t *testing.T) {

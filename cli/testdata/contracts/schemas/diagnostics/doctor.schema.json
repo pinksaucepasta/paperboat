@@ -9,7 +9,7 @@
     "schema": { "const": "paperboat.doctor/v1" },
     "correlation_id": { "type": "string", "pattern": "^pb-doctor-[a-f0-9]{16}$" },
     "checked_at": { "type": "string", "format": "date-time" },
-    "overall": { "enum": ["healthy", "degraded", "unhealthy"] },
+    "overall": { "enum": ["healthy", "starting", "degraded", "unhealthy"] },
     "machine": {
       "type": "object",
       "additionalProperties": false,
@@ -30,7 +30,7 @@
         "properties": {
           "category": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_.:-]{0,127}$" },
           "code": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_.:-]{0,127}$" },
-          "status": { "enum": ["pass", "warning", "fail", "unavailable"] },
+          "status": { "enum": ["pass", "pending", "warning", "fail", "unavailable"] },
           "summary": { "type": "string", "minLength": 1, "maxLength": 512 },
           "recovery": { "type": "string", "minLength": 1, "maxLength": 512 },
           "selected_path": { "enum": ["direct", "peer_relay", "regional_relay", "unknown"] }
