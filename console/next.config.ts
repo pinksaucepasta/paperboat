@@ -19,6 +19,8 @@ const nextConfig: NextConfig = {
     ]
   },
   experimental: {
+    // Set by `next upgrade --agent=security` (16.4.0 → 16.4.2, security advisory).
+    agentUpgrade: "security",
     // The persisted dev cache served stale CSS and kept re-emitting the client entry,
     // which made every open tab reload in a loop. Dev starts are fast enough without it.
     turbopackFileSystemCacheForDev: false,
