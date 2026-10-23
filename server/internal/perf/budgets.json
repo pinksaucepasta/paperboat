@@ -59,8 +59,8 @@
    "actor": "user_perf_0003",
    "path": "/v1/machines?workspace=perf-team-001&limit=200",
    "max_queries": 20,
-   "p50_ms": 2710,
-   "reason": "same as the team owner's 200-row team list"
+   "p50_ms": 3660,
+   "reason": "same as the team owner's 200-row team list (the seed's grants are policy rules since migration 128, so the member's access is evaluated per machine)"
   },
   {
    "actor": "user_perf_0001",

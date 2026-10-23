@@ -34,7 +34,7 @@ func TestMachineInventoryCandidatesMatchTheAccessRulesOnPostgres(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		for _, q := range []string{
-			`DELETE FROM paperboat.team_machine_grants WHERE team_id=ANY($1)`,
+			`DELETE FROM paperboat.workspace_policies WHERE team_id=ANY($1)`,
 			`DELETE FROM paperboat.team_resource_bindings WHERE team_id=ANY($1)`,
 			`DELETE FROM paperboat.billing_workspaces WHERE team_id=ANY($1)`,
 			`DELETE FROM paperboat.user_machines WHERE owner_team_id=ANY($1)`,
@@ -77,8 +77,12 @@ configured_capabilities,observed_capabilities) VALUES($1,$2,$1,$3,'linux','amd64
 SELECT $1,'machine',id,user_id,true,1 FROM paperboat.user_machines WHERE id=$2`, team, id)
 	}
 	exec(`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account,active,generation) VALUES($1,'machine',$2,$3,true,1)`, other, m("other_team"), owner)
-	exec(`INSERT INTO paperboat.team_machine_grants(team_id,machine_id,audience,capabilities) VALUES($1,$2,'all_members',ARRAY['terminal']),($1,$3,'all_members',ARRAY['exec'])`, team, m("team_all"), m("shared"))
-	exec(`INSERT INTO paperboat.team_machine_grants(team_id,machine_id,audience,account_id,capabilities) VALUES($1,$2,'selected_member',$3,ARRAY['files'])`, team, m("team_picked"), picked)
+	// Machine access is the team's workspace policy (migration 128).
+	exec(`INSERT INTO paperboat.workspace_policies(team_id,version,source,digest) VALUES($1,1,'{}','sha256:test')`, team)
+	exec(`INSERT INTO paperboat.workspace_policy_rules(policy_id,rule,deny,subject_kind,subject_id,target_kind,target_id,action,ports)
+SELECT p.id,0,false,r.kind,r.subject,'machine',r.machine,r.action,int4range(1,65536) FROM paperboat.workspace_policies p,
+ (VALUES('role','member',$2::text,'terminal'),('role','member',$3::text,'exec'),('account',$4::text,$5::text,'files')) r(kind,subject,machine,action)
+WHERE p.team_id=$1`, team, m("team_all"), m("shared"), picked, m("team_picked"))
 
 	// The access rule alone, as the inventory evaluated it before the candidate clause.
 	expected := func(actor string, scoped bool, teamID any) []string {

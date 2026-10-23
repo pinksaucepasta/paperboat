@@ -16,7 +16,7 @@ import (
 )
 
 // The preview and tunnel lists take their candidates from the hosts an account may manage publications on (own
-// personal machines, machines with a preview_manage/tunnel_manage grant in an active team) before the exact access
+// personal machines, team machines whose workspace policy gives it preview_manage/tunnel_manage) before the exact access
 // functions run. For every actor and workspace the lists must equal what the access functions alone allow.
 func TestPublicationListCandidatesMatchTheAccessRulesOnPostgres(t *testing.T) {
 	dsn := os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
@@ -62,12 +62,16 @@ configured_capabilities,observed_capabilities) VALUES($1,$2,$1,$3,'linux','amd64
 		}
 		return id
 	}
+	// Machine access is the team's workspace policy (migration 128): a rule per machine for every member or one.
+	exec(`INSERT INTO paperboat.workspace_policies(team_id,version,source,digest) VALUES($1,1,'{}','sha256:test')`, team)
 	grant := func(machine string, account any, capabilities ...string) {
-		audience := "all_members"
+		kind, subject := "role", any("member")
 		if account != nil {
-			audience = "selected_member"
+			kind, subject = "account", account
 		}
-		exec(`INSERT INTO paperboat.team_machine_grants(team_id,machine_id,audience,account_id,capabilities) VALUES($1,$2,$3,$4,$5)`, team, machine, audience, account, capabilities)
+		exec(`INSERT INTO paperboat.workspace_policy_rules(policy_id,rule,deny,subject_kind,subject_id,target_kind,target_id,action,ports)
+SELECT p.id,0,false,$2,$3,'machine',$4,c,int4range(1,65536) FROM paperboat.workspace_policies p,unnest($5::text[]) c WHERE p.team_id=$1`,
+			team, kind, subject, machine, capabilities)
 	}
 	teamAll, teamPicked, teamNone := machine("team_all", admin, team), machine("team_picked", owner, team), machine("team_none", member, team)
 	memberOwn, outsiderOwn := machine("member_own", member, nil), machine("outsider_own", outsider, nil)
@@ -77,6 +81,16 @@ configured_capabilities,observed_capabilities) VALUES($1,$2,$1,$3,'linux','amd64
 	grant(teamPicked, picked, "preview_manage")
 	grant(teamNone, nil, "terminal")
 	grant(shared, nil, "tunnel_manage", "preview_manage")
+	// The other rule shapes: a group on a tag, a role on every machine, and a deny that wins over an allow.
+	rule := func(deny bool, subjectKind, subject, targetKind, target, action string) {
+		exec(`INSERT INTO paperboat.workspace_policy_rules(policy_id,rule,deny,subject_kind,subject_id,target_kind,target_id,action,ports)
+SELECT id,1,$2,$3,$4,$5,$6,$7,int4range(1,65536) FROM paperboat.workspace_policies WHERE team_id=$1`, team, deny, subjectKind, subject, targetKind, target, action)
+	}
+	exec(`INSERT INTO paperboat.workspace_policy_tags(policy_id,tag,machine_id) SELECT id,'build',$2 FROM paperboat.workspace_policies WHERE team_id=$1`, team, teamNone)
+	exec(`INSERT INTO paperboat.workspace_policy_groups(policy_id,group_name,account_id) SELECT id,'ops',$2 FROM paperboat.workspace_policies WHERE team_id=$1`, team, picked)
+	rule(false, "group", "ops", "tag", "build", "preview_manage")
+	rule(false, "role", "admin", "all_machines", "", "tunnel_manage")
+	rule(true, "account", member, "machine", teamAll, "preview_manage")
 
 	type publication struct {
 		host, account, mode string

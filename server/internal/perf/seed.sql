@@ -70,18 +70,24 @@ UPDATE user_machines SET revoked_at = now() - interval '1 day' WHERE state = 're
 
 INSERT INTO team_resource_bindings(team_id, resource_kind, resource_id, owner_account, active, generation)
 SELECT team, 'machine', pg_temp.pid('machine', mi), owner, true, 1 FROM perf_machine_plan WHERE team IS NOT NULL;
-INSERT INTO team_machine_grants(team_id, machine_id, audience, capabilities)
-SELECT team, pg_temp.pid('machine', mi), 'all_members', ARRAY['terminal','exec','files']
-FROM perf_machine_plan WHERE team IS NOT NULL AND mi % 2 = 0;
-INSERT INTO team_machine_grants(team_id, machine_id, audience, account_id, capabilities)
-SELECT team, pg_temp.pid('machine', mi), 'selected_member', 'user_perf_' || lpad((1 + (mi * 7 + k) % 200)::text, 4, '0'),
-       ARRAY['terminal','exec','managed_ssh','files','private_access']
-FROM perf_machine_plan, generate_series(1, 3) k WHERE team IS NOT NULL AND mi % 2 = 1
-ON CONFLICT DO NOTHING;
-INSERT INTO team_machine_grants(team_id, machine_id, audience, account_id, capabilities)
-SELECT 'perf-team-001', pg_temp.pid('machine', i), 'selected_member', 'user_perf_0003', ARRAY['terminal','exec']
-FROM generate_series(1, 1000, 2) i
-ON CONFLICT DO NOTHING;
+-- Machine access is each team's workspace policy (migration 128): half the machines for every member, the other half
+-- for three picked members each, and the team member actor manages previews and tunnels on the odd machines.
+INSERT INTO workspace_policies(team_id, version, source, digest)
+SELECT DISTINCT team, 1, '{}', 'sha256:perf' FROM perf_machine_plan WHERE team IS NOT NULL;
+INSERT INTO workspace_policy_rules(policy_id, rule, deny, subject_kind, subject_id, target_kind, target_id, action, ports)
+SELECT w.id, 0, false, 'role', 'member', 'machine', pg_temp.pid('machine', p.mi), c, int4range(1, 65536)
+FROM perf_machine_plan p JOIN workspace_policies w ON w.team_id = p.team, unnest(ARRAY['terminal','exec','files']) c
+WHERE p.mi % 2 = 0;
+INSERT INTO workspace_policy_rules(policy_id, rule, deny, subject_kind, subject_id, target_kind, target_id, action, ports)
+SELECT w.id, 1, false, 'account', 'user_perf_' || lpad((1 + (p.mi * 7 + k) % 200)::text, 4, '0'), 'machine',
+       pg_temp.pid('machine', p.mi), c, CASE WHEN c = 'private_access' THEN int4range(1024, 65536) ELSE int4range(1, 65536) END
+FROM perf_machine_plan p JOIN workspace_policies w ON w.team_id = p.team, generate_series(1, 3) k,
+     unnest(ARRAY['terminal','exec','managed_ssh','files','private_access']) c
+WHERE p.mi % 2 = 1;
+INSERT INTO workspace_policy_rules(policy_id, rule, deny, subject_kind, subject_id, target_kind, target_id, action, ports)
+SELECT w.id, 2, false, 'account', 'user_perf_0003', 'machine', pg_temp.pid('machine', i), c, int4range(1, 65536)
+FROM workspace_policies w, generate_series(1, 1000, 2) i, unnest(ARRAY['terminal','exec','preview_manage','tunnel_manage']) c
+WHERE w.team_id = 'perf-team-001';
 
 -- Browser sessions: 50k, mostly expired or revoked; one live session per perf actor is minted by the check.
 INSERT INTO sessions(id, user_id, session_hash, csrf_hash, expires_at, revoked_at, created_at, updated_at)

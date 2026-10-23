@@ -371,15 +371,33 @@ func (q *Queries) GetPreviewLeaseV1(ctx context.Context, arg GetPreviewLeaseV1Pa
 }
 
 const listPreviewLeasesV1 = `-- name: ListPreviewLeasesV1 :many
-WITH hosts AS (
+WITH rules AS (
+  -- The allow rules for preview_manage in the account's teams whose subject may be the account (any role: a superset).
+  SELECT tm.team_id, r.policy_id, r.target_kind, r.target_id FROM team_members AS tm
+  JOIN workspace_policies AS p ON p.team_id = tm.team_id
+  JOIN workspace_policy_rules AS r ON r.policy_id = p.id AND r.action = 'preview_manage' AND NOT r.deny
+  WHERE tm.account_id = $1 AND tm.active
+    AND (r.subject_kind IN ('all', 'role') OR (r.subject_kind = 'account' AND r.subject_id = $1)
+      OR (r.subject_kind = 'group' AND EXISTS(SELECT 1 FROM workspace_policy_groups AS g
+        WHERE g.policy_id = r.policy_id AND g.group_name = r.subject_id AND g.account_id = $1)))
+), targets AS (
+  SELECT r.team_id, r.target_id AS machine_id FROM rules AS r WHERE r.target_kind = 'machine'
+  UNION
+  SELECT r.team_id, tg.machine_id FROM rules AS r
+  JOIN workspace_policy_tags AS tg ON tg.policy_id = r.policy_id AND tg.tag = r.target_id WHERE r.target_kind = 'tag'
+), hosts AS (
   SELECT m.id FROM user_machines AS m WHERE m.user_id = $1 AND m.owner_team_id IS NULL
   UNION
-  SELECT g.machine_id FROM team_machine_grants AS g
-  JOIN team_members AS tm ON tm.team_id = g.team_id AND tm.account_id = $1 AND tm.active
-  WHERE g.active AND 'preview_manage' = ANY(g.capabilities) AND (g.audience = 'all_members' OR g.account_id = $1)
+  SELECT b.resource_id FROM team_resource_bindings AS b JOIN targets AS t ON t.team_id = b.team_id AND t.machine_id = b.resource_id
+  WHERE b.resource_kind = 'machine' AND b.active
+  UNION
+  SELECT b.resource_id FROM team_resource_bindings AS b JOIN rules AS r ON r.team_id = b.team_id AND r.target_kind = 'all_machines'
+  WHERE b.resource_kind = 'machine' AND b.active
 ), candidates AS MATERIALIZED (
   SELECT p.id, p.endpoint, p.account_id, p.actor_id, p.owner_machine_id, p.owner_session_id, p.target_scheme, p.target_address, p.access_mode, p.lease_deadline, p.user_deadline, p.allocation_state, p.edge_state, p.origin_state, p.terminal_state, p.created_at, p.ready_at, p.last_renewed_at, p.stopped_at, p.generation, p.owner_last_seen_at, p.owner_session_kind, p.owner_team_id FROM preview_leases AS p
   WHERE p.owner_machine_id IN (SELECT hosts.id FROM hosts)
+    -- Every management rule needs the account's own preview or a private or team one.
+    AND (p.account_id = $1 OR p.access_mode IN ('private', 'team'))
     AND (
       $5::timestamptz IS NULL
       OR (p.created_at, p.id) < ($5::timestamptz, $6::text)
@@ -437,8 +455,8 @@ type ListPreviewLeasesV1Row struct {
 	OwnerTeamID      sql.NullString
 }
 
-// Every way to manage a preview needs its host machine to be the account's own personal machine or one with a
-// preview_manage grant for the account in one of its active teams. Ordering those candidates first and running the
+// Every way to manage a preview needs its host machine to be the account's own personal machine or a machine shared
+// into one of its active teams whose workspace policy gives the account preview_manage there. Ordering those candidates first and running the
 // exact access functions only until the page is full keeps the list independent of how many previews exist: it
 // scanned every lease with ~2.5 ms of function calls per row (33 s at 20k leases).
 func (q *Queries) ListPreviewLeasesV1(ctx context.Context, arg ListPreviewLeasesV1Params) ([]ListPreviewLeasesV1Row, error) {

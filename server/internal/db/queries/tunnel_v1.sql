@@ -2,18 +2,36 @@
 -- can evolve independently from preview leases and route/connector APIs.
 
 -- name: ListPreviewTunnelsV1 :many
--- Every way to manage a tunnel needs its creating host to be the account's own personal machine or one with a
--- tunnel_manage grant for the account in one of its active teams (see ListPreviewLeasesV1): candidates come from
+-- Every way to manage a tunnel needs its creating host to be the account's own personal machine or a team machine
+-- whose workspace policy gives the account tunnel_manage (see ListPreviewLeasesV1): candidates come from
 -- that host set by index, and the exact access functions run only until the page is full.
-WITH hosts AS (
+WITH rules AS (
+  -- The allow rules for tunnel_manage in the account's teams whose subject may be the account (any role: a superset).
+  SELECT tm.team_id, r.policy_id, r.target_kind, r.target_id FROM team_members AS tm
+  JOIN workspace_policies AS p ON p.team_id = tm.team_id
+  JOIN workspace_policy_rules AS r ON r.policy_id = p.id AND r.action = 'tunnel_manage' AND NOT r.deny
+  WHERE tm.account_id = sqlc.arg(account_id) AND tm.active
+    AND (r.subject_kind IN ('all', 'role') OR (r.subject_kind = 'account' AND r.subject_id = sqlc.arg(account_id))
+      OR (r.subject_kind = 'group' AND EXISTS(SELECT 1 FROM workspace_policy_groups AS g
+        WHERE g.policy_id = r.policy_id AND g.group_name = r.subject_id AND g.account_id = sqlc.arg(account_id))))
+), targets AS (
+  SELECT r.team_id, r.target_id AS machine_id FROM rules AS r WHERE r.target_kind = 'machine'
+  UNION
+  SELECT r.team_id, tg.machine_id FROM rules AS r
+  JOIN workspace_policy_tags AS tg ON tg.policy_id = r.policy_id AND tg.tag = r.target_id WHERE r.target_kind = 'tag'
+), hosts AS (
   SELECT m.id FROM user_machines AS m WHERE m.user_id = sqlc.arg(account_id) AND m.owner_team_id IS NULL
   UNION
-  SELECT g.machine_id FROM team_machine_grants AS g
-  JOIN team_members AS tm ON tm.team_id = g.team_id AND tm.account_id = sqlc.arg(account_id) AND tm.active
-  WHERE g.active AND 'tunnel_manage' = ANY(g.capabilities) AND (g.audience = 'all_members' OR g.account_id = sqlc.arg(account_id))
+  SELECT b.resource_id FROM team_resource_bindings AS b JOIN targets AS t ON t.team_id = b.team_id AND t.machine_id = b.resource_id
+  WHERE b.resource_kind = 'machine' AND b.active
+  UNION
+  SELECT b.resource_id FROM team_resource_bindings AS b JOIN rules AS r ON r.team_id = b.team_id AND r.target_kind = 'all_machines'
+  WHERE b.resource_kind = 'machine' AND b.active
 ), candidates AS MATERIALIZED (
   SELECT t.* FROM tunnels AS t
   WHERE t.created_by_host_id IN (SELECT hosts.id FROM hosts)
+    -- Every management rule needs the account's own tunnel or a private or team one.
+    AND (t.account_id = sqlc.arg(account_id) OR t.access_mode IN ('private', 'team'))
     AND (
       sqlc.narg(after_created_at)::timestamptz IS NULL
       OR (t.created_at, t.id) < (sqlc.narg(after_created_at)::timestamptz, sqlc.narg(after_id)::text)

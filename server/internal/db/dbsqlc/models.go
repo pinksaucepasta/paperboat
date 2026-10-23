@@ -1585,6 +1585,12 @@ type MachineSshHostKey struct {
 	Ordinal       int16
 }
 
+type MachineSshHostKeyConflict struct {
+	UserMachineID  string
+	OtherMachineID string
+	ObservedAt     time.Time
+}
+
 type MachineSshHostKeyOwner struct {
 	Fingerprint     []byte
 	UserMachineID   string
@@ -1858,6 +1864,20 @@ type PeerNetworkRegistrationOperation struct {
 	RequestHash   []byte
 	KeyGeneration int64
 	CreatedAt     time.Time
+}
+
+type PolicyEnvMigration struct {
+	TeamID    string
+	AccountID string
+	Write     bool
+}
+
+type PolicyInspectMigration struct {
+	TeamID       string
+	AccountID    string
+	ResourceKind string
+	ResourceID   string
+	Actions      interface{}
 }
 
 type PolicyMigration struct {
