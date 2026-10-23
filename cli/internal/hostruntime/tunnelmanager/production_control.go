@@ -5,6 +5,7 @@ import (
 	"errors"
 	"hash/fnv"
 	"io"
+	"net"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
@@ -204,12 +205,22 @@ func (a *ProductionAssembly) runControlLoop(ctx context.Context, done chan struc
 	if err := a.runControlAttempt(ctx, runner, stream, helloRequestID); err == nil && ctx.Err() == nil {
 		return a.reconnectControl(ctx, done, ErrProductionControlDisconnected)
 	} else if ctx.Err() != nil {
-		resultErr := controlTerminationFailure{cause: errors.Join(err, ctx.Err(), context.Cause(ctx))}
+		resultErr := controlTerminationFailure{cause: errors.Join(unexpectedControlFailure(err), ctx.Err(), context.Cause(ctx))}
 		a.finishControl(done, resultErr)
 		return resultErr
 	} else {
 		return a.reconnectControl(ctx, done, err)
 	}
+}
+
+// unexpectedControlFailure drops the error a control attempt ends with when the control plane simply
+// hung up (EOF, closed pipe): during shutdown that is the expected end of the stream, not a cleanup
+// failure, and which of the cancellation and the hang-up is seen first is a matter of timing.
+func unexpectedControlFailure(err error) error {
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrClosedPipe) || errors.Is(err, net.ErrClosed) {
+		return nil
+	}
+	return err
 }
 
 type controlTerminationFailure struct{ cause error }
