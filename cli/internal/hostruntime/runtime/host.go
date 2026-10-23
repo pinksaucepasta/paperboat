@@ -75,7 +75,6 @@ type HostDependencies struct {
 	AuthorizationService      Service
 	Listener                  ListenerFactory
 	Connector                 Service
-	Previews                  *preview.Registry
 	PreviewRoutesChanged      func()
 	PreviewDispatcher         server.PreviewDispatcher
 	PreviewRecovery           Service
@@ -594,7 +593,7 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 		stableComponents = append(stableComponents, stablehostd.Component{Name: "runtime_attachment", Required: false, Service: dependencies.RuntimeAttachmentService})
 	}
 	daemon, err := stablehostd.New(stablehostd.Config{
-		Workloads:  stablehostd.Workloads{Sessions: sessions, Executions: executions, Transfers: transferService, Previews: dependencies.Previews, ManagedSSH: dependencies.ManagedSSH, Tunnels: dependencies.TunnelManager},
+		Workloads:  stablehostd.Workloads{Sessions: sessions, Executions: executions, Transfers: transferService, ManagedSSH: dependencies.ManagedSSH, Tunnels: dependencies.TunnelManager},
 		Components: stableComponents, ShutdownTimeout: config.ShutdownTimeout,
 	})
 	if err != nil {
@@ -711,16 +710,6 @@ func (h *Host) WorkloadStatus() hostdproto.WorkloadStatus {
 	}
 	if h.hostd != nil {
 		workloads := h.hostd.Workloads()
-		if workloads.Previews != nil {
-			for key, value := range workloads.Previews.ResourceCounts() {
-				counts[key] += value
-			}
-			for _, value := range workloads.Previews.List() {
-				if value.State != preview.Removed {
-					identities = append(identities, fmt.Sprintf("preview\x00%s\x00%d\x00%s", value.Identity, value.Revision, value.State))
-				}
-			}
-		}
 		if workloads.Tunnels != nil {
 			for key, value := range workloads.Tunnels.ResourceCounts() {
 				counts[key] += value

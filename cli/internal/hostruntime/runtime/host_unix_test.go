@@ -19,7 +19,6 @@ import (
 	"github.com/coder/websocket"
 	runtimeconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/configapply"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/process"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
@@ -50,10 +49,6 @@ func TestCommandManagedEnvironmentDoesNotMutatePersistedCommand(t *testing.T) {
 func (hostAuthorizer) Authorize(context.Context, protocol.Frame) (server.Authorization, error) {
 	return server.Authorization{JournalBinding: "test:user:client", EnvironmentID: "env_test", UserID: "user_test", ClientID: "client_test"}, nil
 }
-
-type hostProber struct{}
-
-func (hostProber) Probe(context.Context, preview.Target) error { return nil }
 
 type testSessionLauncher struct {
 	sessions session.Service
@@ -116,10 +111,6 @@ func TestHostCompositionNegotiatesAuthenticatedHealthAndClosesDurableState(t *te
 	serverSide, clientSide := net.Pipe()
 	listener := &hostListener{conn: serverSide, closed: make(chan struct{})}
 	config := runtimeconfig.Config{StateRoot: root, Version: "test", Limits: runtimeconfig.DefaultLimits, Resources: runtimeconfig.DefaultResources}
-	previews, err := preview.New(preview.Config{Prober: hostProber{}, MaxTargets: 4, MaxConcurrentProbes: 1})
-	if err != nil {
-		t.Fatal(err)
-	}
 	host, err := NewHost(context.Background(), HostConfig{
 		Runtime: config, ListenAddress: "127.0.0.1:0", WorkspaceRoot: root,
 		EnvironmentID: "env_test", MachineID: "machine_test",
@@ -131,7 +122,6 @@ func TestHostCompositionNegotiatesAuthenticatedHealthAndClosesDurableState(t *te
 			return hostAuthorizer{}, nil
 		},
 		Listener:    func() (net.Listener, error) { return listener, nil },
-		Previews:    previews,
 		ConfigApply: configapply.ConformanceHandler{}, ConfigApplyProof: true,
 		SessionLauncherFactory: testSessionLauncherFactory("/bin/sh", []string{"-l"}, []string{"PATH=/usr/bin:/bin"}),
 	})
