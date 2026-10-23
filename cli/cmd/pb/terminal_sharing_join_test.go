@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/resolver"
 	"github.com/pinksaucepasta/paperboat/internal/tunnel"
 )
@@ -67,5 +68,28 @@ func TestWatchSharedRoleRedialsWhenTheRoleChanges(t *testing.T) {
 	case <-redials:
 		t.Fatal("redialed again after the role matched")
 	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+type recordingSessionCloser struct {
+	machineID, sessionID string
+	err                  error
+}
+
+func (r *recordingSessionCloser) CloseUserMachineTerminalSession(_ context.Context, machineID, sessionID string) (api.TerminalSessionCloseResult, error) {
+	r.machineID, r.sessionID = machineID, sessionID
+	return api.TerminalSessionCloseResult{}, r.err
+}
+
+// F3-05: a terminal the machine refused (for example at its ceiling) after the server created
+// its row must not stay live on the server; connect closes the session it created.
+func TestCloseAbandonedSessionClosesTheCreatedSession(t *testing.T) {
+	closer := &recordingSessionCloser{}
+	if err := closeAbandonedSession(closer, "machine_1", "terminal_1"); err != nil || closer.machineID != "machine_1" || closer.sessionID != "terminal_1" {
+		t.Fatalf("close machine=%q session=%q err=%v", closer.machineID, closer.sessionID, err)
+	}
+	closer.err = errors.New("server unreachable")
+	if err := closeAbandonedSession(closer, "machine_1", "terminal_1"); err == nil || !strings.Contains(err.Error(), "did not attach") {
+		t.Fatalf("a failed cleanup must name the step: %v", err)
 	}
 }

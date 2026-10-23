@@ -307,6 +307,7 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 	}
 	var transferClient *filetransfer.NativeClient
 	var transferLease *localapi.FileTransferLease
+	createdSessionID, createdMachineID := "", ""
 	for attempt := 0; attempt <= d.cfg.Connect.DialRetries; attempt++ {
 		resolveRequest := resolver.ConnectRequest{Machine: machineRef, Credential: cred, TerminalSessionID: terminalSessionID, CreateTerminalSession: createSession}
 		if target.kind == environmentUserMachine && resolvedMachine.ID != "" && resolvedMachine.InstallationGeneration > 0 {
@@ -318,6 +319,7 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 				created := info.TerminalSession
 				if terminalSessionID == "" {
 					terminalSessionID = created.ID
+					createdSessionID, createdMachineID = created.ID, info.MachineID
 				}
 				if created.Name != "" && created.Name != terminalSessionName {
 					terminalSessionName = created.Name
@@ -403,7 +405,9 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 			bar.SetConnection("failed")
 			bar.FailureFor("connection", "Connection failed")
 		}
-
+		if createdSessionID != "" {
+			reportTerminalAuxFailure(ctx, "cleanup", "terminal_session_failed", closeAbandonedSession(backend, createdMachineID, createdSessionID))
+		}
 		return fmt.Errorf("connect to %q: %w", machineRef, err)
 	}
 	if c.Bool("debug") {
@@ -854,4 +858,20 @@ func expandDirs(dirs []string) []string {
 		out = append(out, d)
 	}
 	return out
+}
+
+type terminalSessionCloser interface {
+	CloseUserMachineTerminalSession(ctx context.Context, machineID, sessionID string) (api.TerminalSessionCloseResult, error)
+}
+
+// closeAbandonedSession closes the session this connect created when it never attached (for
+// example the machine refused it at its terminal ceiling), so the server does not keep a live row
+// the user never got. The server also reconciles such rows with the host; this is the prompt path.
+func closeAbandonedSession(closer terminalSessionCloser, machineID, sessionID string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, err := closer.CloseUserMachineTerminalSession(ctx, machineID, sessionID); err != nil {
+		return fmt.Errorf("close the terminal session that did not attach: %w", err)
+	}
+	return nil
 }
