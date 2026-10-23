@@ -51,8 +51,18 @@ func NewHTTPService(ctx context.Context, config ServiceConfig) (*HTTPService, er
 	if err := carrier.validateListener(); err != nil {
 		return nil, err
 	}
+	maximum := config.MaximumCarriers
+	if maximum == 0 {
+		maximum = DefaultMaximumCarriers
+	}
+	if maximum < 0 || maximum > 1<<16 {
+		return nil, ErrInvalidEndpoint
+	}
 	serviceCtx, cancel := context.WithCancel(ctx)
-	s := &HTTPService{ctx: serviceCtx, cancel: cancel, config: carrier, onFailure: config.OnFailure, accepted: make(chan *Server, carrier.QueueDepth), admissions: make(chan struct{}, carrier.QueueDepth), done: make(chan struct{}), servers: make(map[*Server]struct{})}
+	// admissions is held for each carrier's whole life: it bounds concurrent carriers, so it is
+	// sized by MaximumCarriers. (It was the accept queue depth, 16, so an edge refused every
+	// carrier past the 16th with 503 "carrier capacity reached".)
+	s := &HTTPService{ctx: serviceCtx, cancel: cancel, config: carrier, onFailure: config.OnFailure, accepted: make(chan *Server, carrier.QueueDepth), admissions: make(chan struct{}, maximum), done: make(chan struct{}), servers: make(map[*Server]struct{})}
 	if config.TCP != nil {
 		if err := config.TCP.validateServer(); err != nil {
 			cancel()

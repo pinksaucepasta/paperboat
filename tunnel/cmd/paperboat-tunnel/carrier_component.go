@@ -90,8 +90,16 @@ func newCarrierComponentWithTelemetry(
 		authorizers = append(authorizers, accessorExpected)
 	}
 	carrierConfig.Authorize = datacarrier.AnyAuthorizer(authorizers...)
+	maximumHandlers := 1024
+	if deployment.NodeCapacity < uint32(maximumHandlers) {
+		maximumHandlers = int(deployment.NodeCapacity)
+	}
+	if maximumHandlers == 0 {
+		maximumHandlers = 64
+	}
 	service, err := datacarrier.NewHTTPService(context.Background(), datacarrier.ServiceConfig{
-		Carrier: carrierConfig,
+		Carrier:         carrierConfig,
+		MaximumCarriers: maximumHandlers,
 		OnFailure: func(ctx context.Context, err error) {
 			if errors.Is(err, datacarrier.ErrCarrierHTTPPanic) {
 				reporter.CaptureFailure(ctx, "process_panic", reporting.PanicFailure{})
@@ -104,13 +112,6 @@ func newCarrierComponentWithTelemetry(
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("create carrier service: %w", err)
-	}
-	maximumHandlers := 1024
-	if deployment.NodeCapacity < uint32(maximumHandlers) {
-		maximumHandlers = int(deployment.NodeCapacity)
-	}
-	if maximumHandlers == 0 {
-		maximumHandlers = 64
 	}
 	handle := func(ctx context.Context, server *datacarrier.Server) error {
 		identity := server.Identity()

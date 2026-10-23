@@ -18,7 +18,14 @@ type ServiceConfig struct {
 	// OnFailure receives content-free HTTP diagnostics and a typed panic marker.
 	// Fatal listener errors are returned to Accept for its final lifecycle owner.
 	OnFailure func(context.Context, error)
+	// MaximumCarriers bounds the authenticated carriers held at once (every machine's runtime,
+	// preview and tunnel carriers); a carrier past it is refused with 503. Zero means
+	// DefaultMaximumCarriers. It is not the accept queue depth.
+	MaximumCarriers int
 }
+
+// DefaultMaximumCarriers is the carrier bound of a service that does not name one.
+const DefaultMaximumCarriers = 1024
 
 // Service owns the real edge carrier listeners. It only publishes a Server
 // after the listener has completed mutual TLS/QUIC authentication, canonical

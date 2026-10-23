@@ -237,3 +237,54 @@ func TestHTTPServicePanicAbortPrivacyAndRecovery(t *testing.T) {
 		}
 	}
 }
+
+// An edge holds every machine's carriers at once. The carrier bound must not be the accept queue
+// depth (prod 2026-10-23: queue depth 16, so the 17th carrier on an edge got 503 "carrier capacity
+// reached" and new machines could not connect or serve previews).
+func TestHTTPServiceHoldsMoreCarriersThanItsQueueDepthUpToItsMaximum(t *testing.T) {
+	clientTLS, serverTLS, _ := testEndpointCertificates(t)
+	identity := testCarrierIdentity()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	config := ServiceConfig{Carrier: testCarrierConfig(2), MaximumCarriers: 6,
+		TCP: &EndpointConfig{Address: "127.0.0.1:0", TLS: serverTLS, PeerBinding: func(tls.ConnectionState) (Identity, error) { return identity, nil }}}
+	service, err := NewHTTPService(ctx, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+	go func() {
+		for {
+			if _, err := service.Accept(ctx); err != nil {
+				return
+			}
+		}
+	}()
+	connect := func() int {
+		t.Helper()
+		tlsConfig := clientTLS.Clone()
+		tlsConfig.NextProtos = []string{"h2"}
+		transport := &http2.Transport{TLSClientConfig: tlsConfig}
+		t.Cleanup(transport.CloseIdleConnections)
+		body, writer := io.Pipe()
+		t.Cleanup(func() { _ = writer.Close() })
+		request, err := http.NewRequestWithContext(ctx, http.MethodConnect, "https://"+service.TCPAddr().String()+httpCarrierPath, body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response, err := transport.RoundTrip(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = response.Body.Close() })
+		return response.StatusCode
+	}
+	for i := 0; i < 6; i++ {
+		if status := connect(); status != http.StatusOK {
+			t.Fatalf("carrier %d of 6 (queue depth %d) = %d", i+1, config.Carrier.QueueDepth, status)
+		}
+	}
+	if status := connect(); status != http.StatusServiceUnavailable {
+		t.Fatalf("carrier past the maximum = %d, want 503", status)
+	}
+}
