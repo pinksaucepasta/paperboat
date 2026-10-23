@@ -22,15 +22,29 @@ type cacheEntry struct {
 
 const trustRefreshInterval = 15 * time.Second
 
+// localServeStaleFor is how long ResolveLocal answers from an older cached local identity while
+// one background refresh replaces it, so a command after a short idle gap does not wait for two
+// control-plane round trips before it can dial. Past it, or once the local certificate is about
+// to expire, resolution waits for the server as before.
+const localServeStaleFor = 2 * time.Minute
+
+// localRefreshTimeout bounds one background local refresh.
+const localRefreshTimeout = 30 * time.Second
+
 // Cache retains endpoint authority metadata for the daemon lifetime. It never
 // owns a carrier; machine-specific transport state is created only by an
 // active consumer.
 type Cache struct {
-	mu      sync.Mutex
-	entries map[cacheKey]cacheEntry
+	mu         sync.Mutex
+	entries    map[cacheKey]cacheEntry
+	refreshing map[cacheKey]bool
+	// resolveLocal is ResolveLocal; tests replace it to count and pace control-plane work.
+	resolveLocal func(context.Context, Request) (Authority, error)
 }
 
-func NewCache() *Cache { return &Cache{entries: make(map[cacheKey]cacheEntry)} }
+func NewCache() *Cache {
+	return &Cache{entries: make(map[cacheKey]cacheEntry), refreshing: make(map[cacheKey]bool), resolveLocal: ResolveLocal}
+}
 
 func (c *Cache) Resolve(ctx context.Context, request Request) (Authority, error) {
 	if c == nil {
@@ -72,24 +86,56 @@ func (c *Cache) ResolveLocal(ctx context.Context, request Request) (Authority, e
 	now := request.Now.UTC()
 	c.mu.Lock()
 	if cached, ok := c.entries[key]; ok && !now.Before(cached.refreshedAt) &&
-		now.Sub(cached.refreshedAt) < trustRefreshInterval &&
 		cached.authority.LocalCertificate.Claims.ExpiresAt.After(now.Add(time.Second)) {
-		clone := cloneAuthority(cached.authority)
-		c.mu.Unlock()
-		return clone, nil
+		age := now.Sub(cached.refreshedAt)
+		if age < trustRefreshInterval || age < localServeStaleFor && cached.authority.LocalCertificate.Claims.ExpiresAt.After(now.Add(localServeStaleFor)) {
+			if age >= trustRefreshInterval && !c.refreshing[key] {
+				c.refreshing[key] = true
+				go c.refreshLocal(key, request)
+			}
+			clone := cloneAuthority(cached.authority)
+			c.mu.Unlock()
+			return clone, nil
+		}
 	}
 	c.mu.Unlock()
-	resolved, err := ResolveLocal(ctx, request)
+	resolved, err := c.resolveLocal(ctx, request)
 	if err != nil {
 		return Authority{}, err
 	}
+	c.storeLocal(key, resolved, now)
+	return resolved, nil
+}
+
+// refreshLocal replaces a stale local identity in the background. A failure leaves the stale
+// entry to age out; the next resolution after localServeStaleFor then waits for the server.
+func (c *Cache) refreshLocal(key cacheKey, request Request) {
+	defer func() {
+		c.mu.Lock()
+		delete(c.refreshing, key)
+		c.mu.Unlock()
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), localRefreshTimeout)
+	defer cancel()
+	request.Now = time.Now().UTC()
+	resolved, err := c.resolveLocal(ctx, request)
+	if err != nil {
+		return
+	}
+	c.storeLocal(key, resolved, request.Now)
+	resolved.Clear()
+}
+
+func (c *Cache) storeLocal(key cacheKey, resolved Authority, at time.Time) {
 	c.mu.Lock()
+	defer c.mu.Unlock()
 	if previous, ok := c.entries[key]; ok {
+		if at.Before(previous.refreshedAt) {
+			return
+		}
 		previous.authority.Clear()
 	}
-	c.entries[key] = cacheEntry{authority: cloneAuthority(resolved), refreshedAt: now}
-	c.mu.Unlock()
-	return resolved, nil
+	c.entries[key] = cacheEntry{authority: cloneAuthority(resolved), refreshedAt: at}
 }
 
 func (c *Cache) InvalidateMachine(machineID string) {
