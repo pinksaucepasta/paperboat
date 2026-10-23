@@ -77,10 +77,16 @@ type Config struct {
 	MaxConnsPerHost        int
 	MaxIdleConnsPerHost    int
 	MaxResponseHeaderBytes int64
+	// HealthCheckInterval is how long an HTTP/2 connection may stay silent before it is pinged, and
+	// HealthCheckTimeout how long the ping may go unanswered before the connection is closed. A
+	// connection that stalled during an outage is then replaced instead of carrying every request
+	// until its TCP retransmission timer gives up minutes later.
+	HealthCheckInterval time.Duration
+	HealthCheckTimeout  time.Duration
 }
 
 func DevelopmentConfig() Config {
-	return Config{ProxySource: DefaultProxySource(), ForceAttemptHTTP2: true, DialTimeout: 5 * time.Second, KeepAlive: 30 * time.Second, TLSHandshakeTimeout: 5 * time.Second, ResponseHeaderTimeout: 30 * time.Second, ExpectContinueTimeout: time.Second, IdleConnTimeout: 90 * time.Second, MaxIdleConns: 32, MaxConnsPerHost: 16, MaxIdleConnsPerHost: 8, MaxResponseHeaderBytes: 32 << 10}
+	return Config{ProxySource: DefaultProxySource(), ForceAttemptHTTP2: true, DialTimeout: 5 * time.Second, KeepAlive: 30 * time.Second, TLSHandshakeTimeout: 5 * time.Second, ResponseHeaderTimeout: 30 * time.Second, ExpectContinueTimeout: time.Second, IdleConnTimeout: 90 * time.Second, MaxIdleConns: 32, MaxConnsPerHost: 16, MaxIdleConnsPerHost: 8, MaxResponseHeaderBytes: 32 << 10, HealthCheckInterval: 15 * time.Second, HealthCheckTimeout: 5 * time.Second}
 }
 
 // Default returns an independently owned transport with development policy.
@@ -113,7 +119,7 @@ func New(config Config) (*Transport, error) {
 	if config.ProxySource == nil {
 		config.ProxySource = EnvironmentProxySource{}
 	}
-	if config.DialTimeout <= 0 || config.KeepAlive <= 0 || config.TLSHandshakeTimeout <= 0 || config.ResponseHeaderTimeout <= 0 || config.ExpectContinueTimeout <= 0 || config.IdleConnTimeout <= 0 || config.MaxIdleConns < 1 || config.MaxConnsPerHost < 1 || config.MaxIdleConnsPerHost < 1 || config.MaxIdleConnsPerHost > config.MaxConnsPerHost || config.MaxIdleConnsPerHost > config.MaxIdleConns || config.MaxResponseHeaderBytes < 1024 || config.MaxResponseHeaderBytes > 1<<20 {
+	if config.DialTimeout <= 0 || config.KeepAlive <= 0 || config.TLSHandshakeTimeout <= 0 || config.ResponseHeaderTimeout <= 0 || config.ExpectContinueTimeout <= 0 || config.IdleConnTimeout <= 0 || config.MaxIdleConns < 1 || config.MaxConnsPerHost < 1 || config.MaxIdleConnsPerHost < 1 || config.MaxIdleConnsPerHost > config.MaxConnsPerHost || config.MaxIdleConnsPerHost > config.MaxIdleConns || config.MaxResponseHeaderBytes < 1024 || config.MaxResponseHeaderBytes > 1<<20 || config.HealthCheckInterval <= 0 || config.HealthCheckTimeout <= 0 {
 		return nil, errors.New("invalid HTTP transport configuration")
 	}
 	return &Transport{config: config}, nil
@@ -165,6 +171,7 @@ func (t *Transport) transport(snapshot ProxySnapshot) (*http.Transport, *http.Tr
 		dialContext = (&net.Dialer{Timeout: t.config.DialTimeout, KeepAlive: t.config.KeepAlive}).DialContext
 	}
 	base := &http.Transport{Proxy: proxy, DialContext: dialContext, DialTLSContext: t.config.DialTLSContext, ForceAttemptHTTP2: t.config.ForceAttemptHTTP2, TLSClientConfig: t.config.TLSConfig.Clone(), TLSHandshakeTimeout: t.config.TLSHandshakeTimeout, ResponseHeaderTimeout: t.config.ResponseHeaderTimeout, ExpectContinueTimeout: t.config.ExpectContinueTimeout, IdleConnTimeout: t.config.IdleConnTimeout, MaxIdleConns: t.config.MaxIdleConns, MaxConnsPerHost: t.config.MaxConnsPerHost, MaxIdleConnsPerHost: t.config.MaxIdleConnsPerHost, MaxResponseHeaderBytes: t.config.MaxResponseHeaderBytes,
+		HTTP2: &http.HTTP2Config{SendPingTimeout: t.config.HealthCheckInterval, PingTimeout: t.config.HealthCheckTimeout},
 		OnProxyConnectResponse: func(_ context.Context, _ *url.URL, _ *http.Request, response *http.Response) error {
 			if response.StatusCode == http.StatusProxyAuthRequired {
 				return &ProxyError{Failure: ProxyAuthenticationRequired}
