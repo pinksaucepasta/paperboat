@@ -27,30 +27,28 @@ type meshChange struct {
 }
 
 // meshEntriesQuery is loadNetworkBinding (admitted = false) and personalNetworkPeers' membership for every endpoint
-// of one account at once: personal machines and active CLI sessions with a current certificate. Every join is on a
-// primary or unique key, so the plan is linear in the account's endpoints whatever the statistics say: written as an
-// OR of two EXISTS, it became a subplan scanning all of the owner's environments per machine, and the revocation
-// probe (without user_id, the leading column of its index) scanned the whole index per certificate; together a
-// 1,000-machine build passed the 30 s statement timeout on CI.
-const meshEntriesQuery = `WITH members AS (
- SELECT n.* FROM paperboat.peer_network_identities n
- JOIN paperboat.user_machines m ON m.id=n.endpoint_id AND m.id=n.machine_id AND m.user_id=n.user_id AND m.owner_team_id IS NULL
-  AND m.state IN ('online','offline') AND m.seat_state='occupied' AND m.revoked_at IS NULL AND m.deleted_at IS NULL
-  AND m.installation_generation=n.machine_generation
- JOIN paperboat.control_environments e ON e.id=m.environment_id AND e.owner_user_id=m.user_id AND e.desired_state='active'
-  AND e.revoked_at IS NULL
- WHERE n.user_id=$1 AND n.revoked_at IS NULL AND n.role='machine'
- UNION ALL
- SELECT n.* FROM paperboat.peer_network_identities n
- JOIN paperboat.cli_client_sessions s ON s.id=n.endpoint_id AND s.user_id=n.user_id AND s.state='active' AND s.revoked_at IS NULL
- WHERE n.user_id=$1 AND n.revoked_at IS NULL AND n.role='cli')
-SELECT n.endpoint_id,n.role,coalesce(n.machine_id,''),n.endpoint_generation,n.machine_generation,n.key_generation,
+// of one account at once: personal machines and active CLI sessions with a current certificate. It reads the
+// account's identities and, for each, its certificate, machine, environment or CLI session by primary key: each
+// lookup is a LATERAL subquery with LIMIT 1, which PostgreSQL neither flattens nor pushes the outer conditions into,
+// so the plan is one key probe per lookup whatever the statistics say. Written as joins, the plan depended on them:
+// right after a bulk change (stale statistics) it scanned all of the owner's environments per machine, or every
+// certificate on the server, and a 1,000-machine build passed the 30 s statement timeout on CI.
+const meshEntriesQuery = `SELECT n.endpoint_id,n.role,coalesce(n.machine_id,''),n.endpoint_generation,n.machine_generation,n.key_generation,
  n.wireguard_public_key,n.disco_public_key,n.quic_certificate_fingerprint,c.quic_public_key,host(n.virtual_address),c.expires_at
-FROM members n
-JOIN paperboat.users u ON u.id=n.user_id AND u.status='active'
-JOIN paperboat.peer_endpoint_certificates c ON c.fingerprint=n.quic_certificate_fingerprint AND c.user_id=n.user_id AND c.endpoint_id=n.endpoint_id
- AND c.generation=n.endpoint_generation AND c.role=n.role AND c.revoked_at IS NULL AND c.issued_at<=$2 AND c.expires_at>$2
- AND NOT EXISTS(SELECT 1 FROM paperboat.peer_endpoint_certificate_revocations r WHERE r.user_id=c.user_id AND r.certificate_fingerprint=c.fingerprint)
+FROM paperboat.peer_network_identities n
+JOIN LATERAL (SELECT * FROM paperboat.peer_endpoint_certificates c WHERE c.fingerprint=n.quic_certificate_fingerprint LIMIT 1) c ON true
+LEFT JOIN LATERAL (SELECT * FROM paperboat.user_machines m WHERE m.id=n.endpoint_id LIMIT 1) m ON n.role='machine'
+LEFT JOIN LATERAL (SELECT * FROM paperboat.control_environments e WHERE e.id=m.environment_id LIMIT 1) e ON true
+LEFT JOIN LATERAL (SELECT * FROM paperboat.cli_client_sessions s WHERE s.id=n.endpoint_id LIMIT 1) s ON n.role='cli'
+WHERE n.user_id=$1 AND n.revoked_at IS NULL
+ AND EXISTS(SELECT 1 FROM paperboat.users u WHERE u.id=$1 AND u.status='active')
+ AND c.user_id=n.user_id AND c.endpoint_id=n.endpoint_id AND c.generation=n.endpoint_generation AND c.role=n.role
+ AND c.revoked_at IS NULL AND c.issued_at<=$2 AND c.expires_at>$2
+ AND NOT EXISTS(SELECT 1 FROM paperboat.peer_endpoint_certificate_revocations r WHERE r.user_id=$1 AND r.certificate_fingerprint=c.fingerprint)
+ AND ((n.role='machine' AND m.id=n.machine_id AND m.user_id=n.user_id AND m.owner_team_id IS NULL AND m.state IN ('online','offline')
+   AND m.seat_state='occupied' AND m.revoked_at IS NULL AND m.deleted_at IS NULL AND m.installation_generation=n.machine_generation
+   AND e.owner_user_id=m.user_id AND e.desired_state='active' AND e.revoked_at IS NULL)
+  OR (n.role='cli' AND s.user_id=n.user_id AND s.state='active' AND s.revoked_at IS NULL))
 ORDER BY n.endpoint_id LIMIT $3`
 
 // buildMesh reads the account's mesh entries and the earliest certificate expiry among them.
