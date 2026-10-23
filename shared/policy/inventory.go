@@ -224,3 +224,15 @@ func (inv Inventory) MachineName(id string) string {
 	x := newIndex(inv)
 	return x.machineName(x.byMachineID[id])
 }
+
+// MachineNames is MachineName for every machine of the inventory, by ID. It builds the index once:
+// MachineName in a loop rebuilt it per machine, quadratic in the workspace (17 s per team read at
+// 1000 machines).
+func (inv Inventory) MachineNames() map[string]string {
+	x := newIndex(inv)
+	out := make(map[string]string, len(inv.Machines))
+	for _, m := range inv.Machines {
+		out[m.ID] = x.machineName(m)
+	}
+	return out
+}

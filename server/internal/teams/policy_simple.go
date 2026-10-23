@@ -91,37 +91,23 @@ func ApplyENVAccessTx(ctx context.Context, tx *db.Tx, cfg config.WorkspacePolicy
 }
 
 // machineGrantsTx is the simple view of a team policy: its per-machine rules as grants.
-func machineGrantsTx(ctx context.Context, tx *db.Tx, team string) ([]MachineGrant, error) {
+func machineGrants(p teamPolicy) []MachineGrant {
 	out := []MachineGrant{}
-	var source string
-	var version uint64
-	err := tx.QueryRow(ctx, `SELECT source,version FROM workspace_policies WHERE team_id=$1`, team).Scan(&source, &version)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return out, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	inv, err := policyInventoryTx(ctx, tx, Workspace{TeamID: team})
-	if err != nil {
-		return nil, err
-	}
-	d, errs := policy.Parse(external(source, inv))
-	if len(errs) > 0 {
-		return out, nil
+	if !p.parsed {
+		return out
 	}
 	machines, accounts := map[string]string{}, map[string]string{}
-	for _, m := range inv.Machines {
-		machines["machine:"+inv.MachineName(m.ID)] = m.ID
+	for id, name := range p.inv.MachineNames() {
+		machines["machine:"+name] = id
 	}
-	for _, m := range inv.Members {
+	for _, m := range p.inv.Members {
 		accounts["user:"+strings.ToLower(m.Email)] = m.AccountID
 	}
-	for _, r := range policy.SimpleRules(d) {
+	for _, r := range policy.SimpleRules(p.document) {
 		if r.Target == "env:team" {
 			continue
 		}
-		g := MachineGrant{MachineID: machines[r.Target], Audience: "all_members", Capabilities: r.Allow, Generation: version, Active: true}
+		g := MachineGrant{MachineID: machines[r.Target], Audience: "all_members", Capabilities: r.Allow, Generation: p.version, Active: true}
 		if r.Subject != "role:member" {
 			g.Audience, g.AccountID = "selected_member", accounts[strings.ToLower(r.Subject)]
 		}
@@ -129,7 +115,7 @@ func machineGrantsTx(ctx context.Context, tx *db.Tx, team string) ([]MachineGran
 			out = append(out, g)
 		}
 	}
-	return out, nil
+	return out
 }
 
 // SetAllowPrivateAccessTx sets the team's "Allow private access" switch in its policy file.
@@ -140,27 +126,41 @@ func SetAllowPrivateAccessTx(ctx context.Context, tx *db.Tx, cfg config.Workspac
 	})
 }
 
-// policyGrantsTx is the simple view of the team ENV and of preview/tunnel inspect/replay: each
-// member's own rule as a grant (generation: the policy version).
-func policyGrantsTx(ctx context.Context, tx *db.Tx, team string) ([]Grant, error) {
-	out := []Grant{}
+// teamPolicy is a team's stored policy, parsed once against its inventory for the team view.
+type teamPolicy struct {
+	version  uint64
+	inv      policy.Inventory
+	document policy.Document
+	parsed   bool // false: no policy, or a stored file that no longer parses
+}
+
+func teamPolicyTx(ctx context.Context, tx *db.Tx, team string) (teamPolicy, error) {
+	var p teamPolicy
 	var source string
-	var version uint64
-	err := tx.QueryRow(ctx, `SELECT source,version FROM workspace_policies WHERE team_id=$1`, team).Scan(&source, &version)
+	err := tx.QueryRow(ctx, `SELECT source,version FROM workspace_policies WHERE team_id=$1`, team).Scan(&source, &p.version)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return out, nil
+		return p, nil
 	}
 	if err != nil {
-		return nil, err
+		return p, err
 	}
-	inv, err := policyInventoryTx(ctx, tx, Workspace{TeamID: team})
-	if err != nil {
-		return nil, err
+	if p.inv, err = policyInventoryTx(ctx, tx, Workspace{TeamID: team}); err != nil {
+		return p, err
 	}
-	d, errs := policy.Parse(external(source, inv))
-	if len(errs) > 0 {
-		return out, nil
+	var errs policy.Errors
+	p.document, errs = policy.Parse(external(source, p.inv))
+	p.parsed = len(errs) == 0
+	return p, nil
+}
+
+// policyGrants is the simple view of the team ENV and of preview/tunnel inspect/replay: each
+// member's own rule as a grant (generation: the policy version).
+func policyGrants(p teamPolicy, team string) []Grant {
+	out := []Grant{}
+	if !p.parsed {
+		return out
 	}
+	inv, d, version := p.inv, p.document, p.version
 	accounts := map[string]string{}
 	for _, m := range inv.Members {
 		accounts["user:"+strings.ToLower(m.Email)] = m.AccountID
@@ -186,7 +186,7 @@ func policyGrantsTx(ctx context.Context, tx *db.Tx, team string) ([]Grant, error
 			}
 		}
 	}
-	return out, nil
+	return out
 }
 
 // resourceLabel is a preview's or tunnel's name in a policy file (a preview has none: its ID).

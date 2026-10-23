@@ -96,11 +96,11 @@ func readTx(ctx context.Context, tx *db.Tx, id, lock string) (Team, error) {
 	if err != nil {
 		return out, err
 	}
-	env, err := policyGrantsTx(ctx, tx, id)
+	teamPolicy, err := teamPolicyTx(ctx, tx, id)
 	if err != nil {
 		return out, err
 	}
-	out.Grants = append(out.Grants, env...)
+	out.Grants = append(out.Grants, policyGrants(teamPolicy, id)...)
 	rows, err = tx.Query(ctx, `SELECT terminal_session_id,audience,coalesce(account_id,''),role,generation,active FROM team_terminal_session_grants WHERE team_id=$1 ORDER BY terminal_session_id,audience,account_id`, id)
 	if err != nil {
 		return out, err
@@ -121,6 +121,7 @@ func readTx(ctx context.Context, tx *db.Tx, id, lock string) (Team, error) {
 	if err = readMachinesTx(ctx, tx, id, &out); err != nil {
 		return out, err
 	}
+	out.MachineGrants = machineGrants(teamPolicy)
 	err = readMachineRequestsTx(ctx, tx, id, &out)
 	return out, err
 }

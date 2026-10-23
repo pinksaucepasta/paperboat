@@ -264,7 +264,8 @@ func TestPolicySimpleViewAndDepartures(t *testing.T) {
 	}
 	var grants []MachineGrant
 	f.store.InTx(f.ctx, func(ctx context.Context, tx *db.Tx) (err error) {
-		grants, err = machineGrantsTx(ctx, tx, f.team)
+		p, err := teamPolicyTx(ctx, tx, f.team)
+		grants = machineGrants(p)
 		return err
 	})
 	if len(grants) != 1 || grants[0].AccountID != f.member || strings.Join(grants[0].Capabilities, ",") != "exec,terminal" {

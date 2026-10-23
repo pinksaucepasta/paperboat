@@ -375,6 +375,15 @@ func TestSameAliasNeedsTheOwnerQualifiedName(t *testing.T) {
 	if inv.MachineName("m-db1") != "db1" || inv.MachineName("m-db1b") != "bo@example.test/db1" {
 		t.Fatal(inv.MachineName("m-db1"), inv.MachineName("m-db1b"))
 	}
+	names := inv.MachineNames()
+	if len(names) != len(inv.Machines) {
+		t.Fatalf("MachineNames has %d machines, the inventory %d", len(names), len(inv.Machines))
+	}
+	for _, m := range inv.Machines {
+		if names[m.ID] != inv.MachineName(m.ID) {
+			t.Fatalf("MachineNames[%s] = %q, MachineName %q", m.ID, names[m.ID], inv.MachineName(m.ID))
+		}
+	}
 }
 
 func TestPortRangeJSONRoundTrip(t *testing.T) {

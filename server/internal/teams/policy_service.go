@@ -179,8 +179,9 @@ func viewOf(sc policyScope, p storedPolicy, inv policy.Inventory) PolicyView {
 	for _, m := range inv.Members {
 		names.Users = append(names.Users, strings.ToLower(m.Email))
 	}
+	machineNames := inv.MachineNames()
 	for _, m := range inv.Machines {
-		names.Machines = append(names.Machines, inv.MachineName(m.ID))
+		names.Machines = append(names.Machines, machineNames[m.ID])
 	}
 	if d, errs := policy.Parse(external(p.source, inv)); len(errs) == 0 {
 		for t := range d.Tags {
@@ -316,9 +317,10 @@ func (s *Service) writePolicy(ctx context.Context, account, ws string, build fun
 
 func ownMachineNames(sc policyScope, inv policy.Inventory) map[string]bool {
 	own := map[string]bool{}
+	names := inv.MachineNames()
 	for _, m := range inv.Machines {
 		if m.PersonalOwner == sc.actor.AccountID {
-			own["machine:"+inv.MachineName(m.ID)] = true
+			own["machine:"+names[m.ID]] = true
 		}
 	}
 	return own
