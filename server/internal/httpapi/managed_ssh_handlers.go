@@ -343,6 +343,15 @@ func managedSSHError(w http.ResponseWriter, r *http.Request, err error) bool {
 	if err == nil {
 		return false
 	}
+	var inUse *managedssh.HostKeyInUseError
+	if errors.As(err, &inUse) {
+		details := map[string]any{"state_changed": false}
+		if inUse.MachineName != "" {
+			details["machine_name"] = inUse.MachineName
+		}
+		writeErrorDetails(w, r, http.StatusConflict, "ssh_host_key_in_use", "This machine's SSH host keys are identical to another machine's.", details)
+		return true
+	}
 	status, code := http.StatusBadRequest, "invalid_request"
 	switch {
 	case expectedHTTPErrorOnly(err, wire.ErrInvalid):

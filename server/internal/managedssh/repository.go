@@ -472,7 +472,10 @@ func (r *SQLRepository) ObserveHost(ctx context.Context, request ObserveHostRequ
 				}
 			}
 			if ownerErr == nil {
-				if owner.UserMachineID != request.UserMachineID || owner.Algorithm != key.Algorithm || owner.PublicKey != key.PublicKey {
+				if owner.UserMachineID != request.UserMachineID {
+					return hostKeyInUse(ctx, tx, request.UserID, owner.UserMachineID)
+				}
+				if owner.Algorithm != key.Algorithm || owner.PublicKey != key.PublicKey {
 					return ErrConflict
 				}
 				continue
@@ -771,4 +774,16 @@ func releaseRetiredHostKeyOwner(ctx context.Context, q *dbsqlc.Queries, userID s
 	}
 	released, err := q.DeleteRetiredMachineSSHHostKeyOwner(ctx, dbsqlc.DeleteRetiredMachineSSHHostKeyOwnerParams{Fingerprint: fingerprint, UserID: userID})
 	return released > 0, err
+}
+
+// hostKeyInUse refuses host keys another live machine already owns (a VM or container
+// image cloned with its /etc/ssh keys). The other machine is named only when the
+// observing account may see it, so other accounts' machines are never revealed.
+func hostKeyInUse(ctx context.Context, tx *db.Tx, userID, otherMachineID string) error {
+	var name sql.NullString
+	err := tx.QueryRow(ctx, `SELECT CASE WHEN m.user_id=$1 OR paperboat.machine_management_allowed($1,m.id) THEN coalesce(nullif(m.alias,''),m.id) END FROM paperboat.user_machines m WHERE m.id=$2`, userID, otherMachineID).Scan(&name)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	return &HostKeyInUseError{MachineName: name.String}
 }

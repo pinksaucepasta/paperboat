@@ -68,14 +68,17 @@ func hostKeysMoveToTheReplacement(t *testing.T, retiredState string) {
 	if err := observe("operation_reenroll_old", user, oldID, hostKey); err != nil {
 		t.Fatal(err)
 	}
-	if err := observe("operation_reenroll_live", user, liveID, hostKey); !errors.Is(err, ErrConflict) {
-		t.Fatalf("a live machine's host key was handed to another machine: %v", err)
+	// A live machine's host keys are refused to another machine with a typed error naming the
+	// owner the account can see (an image cloned with its /etc/ssh keys).
+	var inUse *HostKeyInUseError
+	if err := observe("operation_reenroll_live", user, liveID, hostKey); !errors.As(err, &inUse) || inUse.MachineName == "" {
+		t.Fatalf("a live machine's host key was handed to another machine, or the owner was not named: %v", err)
 	}
 	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET state=$2,online=false WHERE id=$1`, oldID, retiredState); err != nil {
 		t.Fatal(err)
 	}
-	if err := observe("operation_reenroll_foreign", other, otherID, hostKey); !errors.Is(err, ErrConflict) {
-		t.Fatalf("another account took a retired record's host key: %v", err)
+	if err := observe("operation_reenroll_foreign", other, otherID, hostKey); !errors.As(err, &inUse) || inUse.MachineName != "" {
+		t.Fatalf("another account took a retired record's host key, or its owner was named to it: %v", err)
 	}
 	if err := observe("operation_reenroll_new", user, newID, hostKey); err != nil {
 		t.Fatalf("the replacement machine could not record the host keys it now has: %v", err)

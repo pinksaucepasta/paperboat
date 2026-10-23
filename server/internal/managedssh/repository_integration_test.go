@@ -145,8 +145,9 @@ func TestSQLRepositoryManagedSSHAuthorityLifecycle(t *testing.T) {
 		t.Fatalf("pending replacement error=%v", err)
 	}
 	crossOwner := ObserveHostRequest{OperationID: "operation_host_cross_owner" + suffix, UserID: userB, UserMachineID: machineB, MachineGeneration: 1, ObservationGeneration: 1, PublicKeys: []string{hostOne}, Now: now}
-	if _, err := service.ObserveHost(ctx, crossOwner); !errors.Is(err, ErrConflict) {
-		t.Fatalf("cross-machine host key error=%v", err)
+	var inUse *HostKeyInUseError
+	if _, err := service.ObserveHost(ctx, crossOwner); !errors.As(err, &inUse) || inUse.MachineName != "" {
+		t.Fatalf("cross-account host key error=%v (another account's machine must not be named)", err)
 	}
 	if _, err := service.PromoteHost(ctx, PromoteHostRequest{OperationID: "operation_host_promote" + suffix, ActorUserID: userA, UserMachineID: machineA, MachineGeneration: 2, SetID: pending.ID, ExpectedFingerprint: pending.Fingerprint, Now: now.Add(2 * time.Second)}); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("stale generation promotion error=%v", err)

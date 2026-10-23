@@ -16,7 +16,9 @@ import (
 )
 
 var (
-	ErrConflict           = errors.New("managed SSH key conflicts with current authority")
+	ErrConflict = errors.New("managed SSH key conflicts with current authority")
+	// ErrHostKeyInUse: the observed host keys already belong to another machine.
+	ErrHostKeyInUse       = errors.New("managed SSH host keys belong to another machine")
 	ErrUnavailable        = errors.New("managed SSH authority is unavailable")
 	ErrMachineKeyCapacity = errors.New("machine exceeds the managed SSH client-key limit")
 )
@@ -293,3 +295,9 @@ func validOSUser(value string) bool {
 	}
 	return true
 }
+
+// HostKeyInUseError is ErrHostKeyInUse naming the other machine when the caller may see it.
+type HostKeyInUseError struct{ MachineName string }
+
+func (e *HostKeyInUseError) Error() string        { return ErrHostKeyInUse.Error() }
+func (e *HostKeyInUseError) Is(target error) bool { return target == ErrHostKeyInUse }
