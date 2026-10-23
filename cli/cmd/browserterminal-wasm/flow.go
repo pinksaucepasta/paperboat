@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"sync"
+	"time"
 )
 
 const terminalWriteQueueBytes = (1 << 20) + 4096
@@ -159,4 +160,24 @@ func (q *terminalReceiveQueue) close() {
 			return
 		}
 	}
+}
+
+// attachSetupTimeout bounds everything between the machine's TLS handshake and an attached
+// terminal (hello, welcome, attach response, screen checkpoint). Without it a stream the edge or
+// the machine stalls after the handshake leaves the browser on "Connecting" with no error.
+const attachSetupTimeout = 15 * time.Second
+
+type deadlineConn interface{ SetDeadline(time.Time) error }
+
+// withAttachDeadline runs the attach setup under one deadline on the transport and clears it
+// afterwards, so the live terminal stream has none.
+func withAttachDeadline(conn deadlineConn, timeout time.Duration, setup func() error) error {
+	if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
+		return err
+	}
+	err := setup()
+	if clearErr := conn.SetDeadline(time.Time{}); err == nil {
+		err = clearErr
+	}
+	return err
 }

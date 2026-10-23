@@ -148,28 +148,110 @@ func (connection *browserTerminal) connectAndServe() error {
 		"machine_id":       connection.config.MachineID,
 		"root_key_id":      connection.config.RootKeyID,
 	})
-	if err := connection.sendHello(clientTLS); err != nil {
-		return &terminalConnectError{state: "transport-error", code: "protocol_error", message: "The machine rejected the encrypted terminal handshake.", cause: err}
-	}
-	welcome, err := readStructuredFrame(clientTLS)
-	if err != nil || welcome.Type != "welcome" || welcome.Version != protocol.ProtocolVersion {
-		return &terminalConnectError{state: "transport-error", code: "protocol_error", message: "The machine rejected the encrypted terminal handshake.", cause: err}
-	}
-	var negotiation struct {
-		Capabilities []string `json:"capabilities"`
-	}
-	if json.Unmarshal(welcome.Payload, &negotiation) != nil {
-		return errors.New("invalid capabilities")
-	}
-	for _, capability := range negotiation.Capabilities {
-		if capability == "file-transfer.v1" {
-			connection.filesAvailable = true
+	var (
+		inspector          bool
+		attachState        terminalAttachState
+		checkpoint         []byte
+		checkpointSequence uint64
+	)
+	setupErr := withAttachDeadline(ws, attachSetupTimeout, func() error {
+		if err := connection.sendHello(clientTLS); err != nil {
+			return &terminalConnectError{state: "transport-error", code: "protocol_error", message: "The machine rejected the encrypted terminal handshake.", cause: err}
 		}
-		if capability == inspectorCapability {
-			connection.inspectorReady = true
+		welcome, err := readStructuredFrame(clientTLS)
+		if err != nil || welcome.Type != "welcome" || welcome.Version != protocol.ProtocolVersion {
+			return &terminalConnectError{state: "transport-error", code: "protocol_error", message: "The machine rejected the encrypted terminal handshake.", cause: err}
 		}
+		var negotiation struct {
+			Capabilities []string `json:"capabilities"`
+		}
+		if json.Unmarshal(welcome.Payload, &negotiation) != nil {
+			return errors.New("invalid capabilities")
+		}
+		for _, capability := range negotiation.Capabilities {
+			if capability == "file-transfer.v1" {
+				connection.filesAvailable = true
+			}
+			if capability == inspectorCapability {
+				connection.inspectorReady = true
+			}
+		}
+		if connection.config.Mode == connectionModeInspector {
+			inspector = true
+			return nil
+		}
+		requestID, err := randomID("request")
+		if err != nil {
+			return err
+		}
+		operationID, err := randomID("operation")
+		if err != nil {
+			return err
+		}
+		attachPayload, err := json.Marshal(map[string]any{"action": "attach", "session_id": connection.config.TerminalSessionID, "from_sequence": connection.config.FromSequence, "at_live_boundary": connection.config.AtLiveBoundary})
+		if err != nil {
+			return err
+		}
+		attach := protocol.Frame{Type: "request", RequestID: requestID, Version: protocol.ProtocolVersion, OperationID: operationID, Capability: "terminal.v1", DeadlineMS: 10000, Payload: attachPayload}
+		if err := writeStructuredFrame(clientTLS, attach); err != nil {
+			return &terminalConnectError{state: "transport-error", code: "connection_failed", message: "The terminal attachment could not be requested.", cause: err}
+		}
+		response, err := readStructuredFrame(clientTLS)
+		if err != nil {
+			return &terminalConnectError{state: "transport-error", code: "connection_failed", message: "The terminal attachment response could not be read.", cause: err}
+		}
+		if response.Type == "error" {
+			var serverError struct {
+				Code    string `json:"code"`
+				Details struct {
+					EarliestSequence uint64 `json:"earliest_sequence"`
+					LatestSequence   uint64 `json:"latest_sequence"`
+				} `json:"details"`
+			}
+			_ = json.Unmarshal(response.Payload, &serverError)
+			if serverError.Code == "credential_expired" {
+				return &terminalConnectError{state: "reconnecting", code: serverError.Code, message: "The short-lived terminal ticket expired. Requesting a fresh ticket."}
+			}
+			if serverError.Code == "replay_gap" && serverError.Details.EarliestSequence > connection.config.FromSequence {
+				return &terminalConnectError{state: "reconnecting", code: serverError.Code, message: "Some earlier terminal output is no longer available.", details: map[string]any{
+					"earliest_sequence": strconv.FormatUint(serverError.Details.EarliestSequence, 10),
+					"latest_sequence":   strconv.FormatUint(serverError.Details.LatestSequence, 10),
+				}}
+			}
+			if serverError.Code == "not_found_or_forbidden" || serverError.Code == "stale_generation" {
+				return &terminalConnectError{state: "denied", code: serverError.Code, message: "You do not have access to this terminal. Ask its owner to restore access."}
+			}
+			if serverError.Code == "terminal_closed" || serverError.Code == "closed" {
+				return &terminalConnectError{state: "closed", code: serverError.Code, message: "This terminal has closed."}
+			}
+			return &terminalConnectError{state: "transport-error", code: "protocol_error", message: "The machine could not attach this terminal."}
+		}
+		if response.Type != "response" || response.RequestID != requestID {
+			return &terminalConnectError{state: "transport-error", code: "invalid_attach_response", message: "The machine returned an invalid terminal attachment."}
+		}
+		attachState, err = parseAttachResponse(response.Payload)
+		if err != nil {
+			return &terminalConnectError{state: "transport-error", code: "invalid_attach_response", message: "The machine returned an invalid terminal attachment.", cause: err}
+		}
+		connection.mu.Lock()
+		connection.streamID = attachState.StreamID
+		connection.attachmentID = attachState.AttachmentID
+		connection.inputSequence = attachState.InputSequence
+		connection.resizeSequence = 0
+		connection.attached = true
+		connection.mu.Unlock()
+		checkpoint, checkpointSequence, err = readScreenCheckpoint(clientTLS, attachState.StreamID)
+		if err != nil {
+			return &terminalConnectError{state: "transport-error", code: "invalid_checkpoint", message: "The machine could not restore the terminal screen.", cause: err}
+		}
+		return nil
+	})
+	if setupErr != nil {
+		// A stall past the deadline fails the read inside setup, which reports a transport error the
+		// page shows with Reconnect.
+		return setupErr
 	}
-	if connection.config.Mode == connectionModeInspector {
+	if inspector {
 		connection.mu.Lock()
 		connection.attached = true
 		connection.mu.Unlock()
@@ -178,70 +260,6 @@ func (connection *browserTerminal) connectAndServe() error {
 		go connection.writeLoop(clientTLS, ws)
 		connection.emit("state", map[string]any{"state": "connected"})
 		return connection.readTerminalStream(clientTLS)
-	}
-	requestID, err := randomID("request")
-	if err != nil {
-		return err
-	}
-	operationID, err := randomID("operation")
-	if err != nil {
-		return err
-	}
-	attachPayload, err := json.Marshal(map[string]any{"action": "attach", "session_id": connection.config.TerminalSessionID, "from_sequence": connection.config.FromSequence, "at_live_boundary": connection.config.AtLiveBoundary})
-	if err != nil {
-		return err
-	}
-	attach := protocol.Frame{Type: "request", RequestID: requestID, Version: protocol.ProtocolVersion, OperationID: operationID, Capability: "terminal.v1", DeadlineMS: 10000, Payload: attachPayload}
-	if err := writeStructuredFrame(clientTLS, attach); err != nil {
-		return &terminalConnectError{state: "transport-error", code: "connection_failed", message: "The terminal attachment could not be requested.", cause: err}
-	}
-	response, err := readStructuredFrame(clientTLS)
-	if err != nil {
-		return &terminalConnectError{state: "transport-error", code: "connection_failed", message: "The terminal attachment response could not be read.", cause: err}
-	}
-	if response.Type == "error" {
-		var serverError struct {
-			Code    string `json:"code"`
-			Details struct {
-				EarliestSequence uint64 `json:"earliest_sequence"`
-				LatestSequence   uint64 `json:"latest_sequence"`
-			} `json:"details"`
-		}
-		_ = json.Unmarshal(response.Payload, &serverError)
-		if serverError.Code == "credential_expired" {
-			return &terminalConnectError{state: "reconnecting", code: serverError.Code, message: "The short-lived terminal ticket expired. Requesting a fresh ticket."}
-		}
-		if serverError.Code == "replay_gap" && serverError.Details.EarliestSequence > connection.config.FromSequence {
-			return &terminalConnectError{state: "reconnecting", code: serverError.Code, message: "Some earlier terminal output is no longer available.", details: map[string]any{
-				"earliest_sequence": strconv.FormatUint(serverError.Details.EarliestSequence, 10),
-				"latest_sequence":   strconv.FormatUint(serverError.Details.LatestSequence, 10),
-			}}
-		}
-		if serverError.Code == "not_found_or_forbidden" || serverError.Code == "stale_generation" {
-			return &terminalConnectError{state: "denied", code: serverError.Code, message: "You do not have access to this terminal. Ask its owner to restore access."}
-		}
-		if serverError.Code == "terminal_closed" || serverError.Code == "closed" {
-			return &terminalConnectError{state: "closed", code: serverError.Code, message: "This terminal has closed."}
-		}
-		return &terminalConnectError{state: "transport-error", code: "protocol_error", message: "The machine could not attach this terminal."}
-	}
-	if response.Type != "response" || response.RequestID != requestID {
-		return &terminalConnectError{state: "transport-error", code: "invalid_attach_response", message: "The machine returned an invalid terminal attachment."}
-	}
-	attachState, err := parseAttachResponse(response.Payload)
-	if err != nil {
-		return &terminalConnectError{state: "transport-error", code: "invalid_attach_response", message: "The machine returned an invalid terminal attachment.", cause: err}
-	}
-	connection.mu.Lock()
-	connection.streamID = attachState.StreamID
-	connection.attachmentID = attachState.AttachmentID
-	connection.inputSequence = attachState.InputSequence
-	connection.resizeSequence = 0
-	connection.attached = true
-	connection.mu.Unlock()
-	checkpoint, checkpointSequence, err := readScreenCheckpoint(clientTLS, attachState.StreamID)
-	if err != nil {
-		return &terminalConnectError{state: "transport-error", code: "invalid_checkpoint", message: "The machine could not restore the terminal screen.", cause: err}
 	}
 	connection.keyEvents = make(chan browserbroadcast.Epoch, 4)
 	go connection.writeLoop(clientTLS, ws)

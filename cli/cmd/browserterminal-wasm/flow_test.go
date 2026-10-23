@@ -3,9 +3,11 @@ package main
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"errors"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/browserbroadcast"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
 	"testing"
+	"time"
 )
 
 func TestTerminalWriterAdmissionIsBoundedAndOrdered(t *testing.T) {
@@ -182,5 +184,30 @@ func TestTerminalReceiveAcceptsMoreThan256ValidTinyRecords(t *testing.T) {
 	}
 	if q.bytes != 0 {
 		t.Fatal("tiny-record reservations leaked")
+	}
+}
+
+type recordingDeadlineConn struct{ deadlines []time.Time }
+
+func (c *recordingDeadlineConn) SetDeadline(deadline time.Time) error {
+	c.deadlines = append(c.deadlines, deadline)
+	return nil
+}
+
+// F3-07: one fresh browser terminal stayed on "Connecting" for over a minute: after the TLS
+// handshake nothing bounded hello, welcome, attach and checkpoint. The setup runs under one
+// deadline that is cleared afterwards, also when setup fails.
+func TestAttachSetupRunsUnderOneDeadlineThenClearsIt(t *testing.T) {
+	conn := &recordingDeadlineConn{}
+	started := time.Now()
+	failure := errors.New("attach stalled")
+	if err := withAttachDeadline(conn, attachSetupTimeout, func() error { return failure }); !errors.Is(err, failure) {
+		t.Fatalf("setup error = %v", err)
+	}
+	if len(conn.deadlines) != 2 || conn.deadlines[0].Before(started.Add(attachSetupTimeout)) || !conn.deadlines[1].IsZero() {
+		t.Fatalf("deadlines = %v; want setup deadline then cleared", conn.deadlines)
+	}
+	if attachSetupTimeout <= 0 || attachSetupTimeout > 30*time.Second {
+		t.Fatalf("attach setup timeout %v must be bounded", attachSetupTimeout)
 	}
 }
