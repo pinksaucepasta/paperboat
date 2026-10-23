@@ -633,7 +633,7 @@ can cover them later).
 
 - F17-01: The daemon serves capture list, detail, live follow, enable/disable, purge and replay to an authorized console browser over the E2E browser channel; the server relays only ciphertext and never stores or sees captures.
 - F17-02: Only people allowed to manage the preview (its owner, or the machine owner) get an inspector credential; a team member without that right and a stranger are refused by the server and by the daemon.
-- F17-03: Console: open a preview's inspector, see requests arrive live (method, path, status, duration, time), open one to read request/response headers and body as captured (redacted values stay redacted), and filter by method, status class and path text.
+- F17-03: Console: open a preview's inspector, see requests arrive live (method, path, status, duration, time), open one to read request/response headers in full and body as captured (body redaction and size limit unchanged), and filter by method, status class and path text.
 - F17-04: Console: replay a captured request and see the replay's result appear in the list, marked as a replay.
 - F17-05: Console: turn capture on/off (with or without bodies) and clear captures; clear states for capture off, no requests yet, preview stopped and machine offline.
 - F17-06: Losing the connection or the machine restarting reconnects and resumes the live list without duplicates; losing access mid-view ends it with a clear message.

@@ -129,7 +129,7 @@ function Section({ title, children }: { title: React.ReactNode; children: React.
   )
 }
 
-/** Request and response of one capture, exactly as captured (redacted values stay redacted). */
+/** Request and response of one capture, exactly as captured, headers in full. */
 export function CaptureDetail({
   record,
   load,

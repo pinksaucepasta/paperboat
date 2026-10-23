@@ -124,11 +124,11 @@ func TestInspectorCapturePreservesStreaming(t *testing.T) {
 	if record.Method != "POST" || record.ResponseStatus != 200 || record.State != inspector.StateComplete {
 		t.Fatalf("record = %+v", record)
 	}
-	if got := record.RequestHeaders.Get("Authorization"); got != "[redacted]" {
-		t.Fatalf("request authorization leaked: %q", got)
+	if got := record.RequestHeaders.Get("Authorization"); got != "Bearer client-secret" {
+		t.Fatalf("request authorization = %q, want it in full", got)
 	}
-	if got := record.ResponseHeaders.Get("Set-Cookie"); got != "[redacted]" {
-		t.Fatalf("response cookie leaked: %q", got)
+	if got := record.ResponseHeaders.Get("Set-Cookie"); got != "session=origin-secret" {
+		t.Fatalf("response cookie = %q, want it in full", got)
 	}
 	if strings.Contains(record.URL, "session=secret") {
 		t.Fatalf("query secret leaked: %q", record.URL)

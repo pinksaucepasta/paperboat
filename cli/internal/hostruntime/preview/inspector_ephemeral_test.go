@@ -183,8 +183,8 @@ func TestInspectorEphemeralCaptureAndReplay(t *testing.T) {
 	if !strings.Contains(record.URL, "/items") || strings.Contains(record.URL, "secret") {
 		t.Fatalf("sanitized URL wrong: %q", record.URL)
 	}
-	if got := record.RequestHeaders["Authorization"]; len(got) != 1 || got[0] != "[redacted]" {
-		t.Fatalf("authorization leaked: %v", record.RequestHeaders)
+	if got := record.RequestHeaders["Authorization"]; len(got) != 1 || got[0] != "Bearer client-secret" {
+		t.Fatalf("authorization not stored in full: %v", record.RequestHeaders)
 	}
 	if strings.Contains(record.ResponseBody, "zzz") || !strings.Contains(record.ResponseBody, "ok") {
 		t.Fatalf("response body wrong: %q", record.ResponseBody)

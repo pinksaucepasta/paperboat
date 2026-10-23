@@ -62,7 +62,7 @@ func TestDisabledByDefault(t *testing.T) {
 	}
 }
 
-func TestRedactionPreservesDebuggability(t *testing.T) {
+func TestCaptureKeepsHeadersAndRedactsBodyAndQuery(t *testing.T) {
 	now := time.Now().UTC()
 	store := NewStore()
 	store.now = func() time.Time { return now }
@@ -79,14 +79,18 @@ func TestRedactionPreservesDebuggability(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := record.RequestHeaders.Get("Authorization"); got != "[redacted]" {
-		t.Fatalf("authorization not redacted: %q", got)
+	// Headers are stored in full for people allowed to inspect.
+	if got := record.RequestHeaders.Get("Authorization"); got != "Bearer secret" {
+		t.Fatalf("authorization = %q, want it in full", got)
 	}
-	if got := record.ResponseHeaders.Get("Set-Cookie"); got != "[redacted]" {
-		t.Fatalf("set-cookie not redacted: %q", got)
+	if got := record.RequestHeaders.Get("X-Paperboat-Internal"); got != "internal" {
+		t.Fatalf("x-paperboat-internal = %q, want it in full", got)
+	}
+	if got := record.ResponseHeaders.Get("Set-Cookie"); got != "session=secret" {
+		t.Fatalf("set-cookie = %q, want it in full", got)
 	}
 	if got := record.RequestHeaders.Get("Content-Type"); got != "application/json" {
-		t.Fatalf("allowlisted content-type lost: %q", got)
+		t.Fatalf("content-type lost: %q", got)
 	}
 	if strings.Contains(record.URL, "session=secret") {
 		t.Fatalf("query value leaked: %q", record.URL)

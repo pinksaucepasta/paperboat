@@ -11,22 +11,11 @@ import (
 
 const redactedValue = "[redacted]"
 
-// visibleHeaders is the small explicit non-sensitive allowlist whose values
-// may be shown. Every other header value is redacted, including
-// Authorization, Cookie, Set-Cookie, API keys, signed tokens and all
-// Paperboat headers.
-func visibleHeader(name string) bool {
-	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "content-type", "content-length":
-		return true
-	default:
-		return false
-	}
-}
-
-// SanitizeHeaders returns a redacted copy of header with at most
-// MaxHeadersPerDirection entries. Excess entries are dropped and reported via
-// truncated. The input is never mutated.
+// SanitizeHeaders returns a copy of header with at most
+// MaxHeadersPerDirection entries. Values are kept in full: people allowed to
+// inspect a preview see every header, as in ngrok's inspector (user decision
+// 2026-10-23). Excess entries are dropped and reported via truncated. The
+// input is never mutated.
 func SanitizeHeaders(header http.Header) (http.Header, bool) {
 	if len(header) == 0 {
 		return http.Header{}, false
@@ -48,20 +37,9 @@ func SanitizeHeaders(header http.Header) (http.Header, bool) {
 			break
 		}
 		values := header.Values(name)
-		if visibleHeader(name) {
-			copied := make([]string, len(values))
-			copy(copied, values)
-			out[canonicalHeaderKey(name)] = copied
-		} else {
-			masked := make([]string, len(values))
-			for i := range values {
-				masked[i] = redactedValue
-			}
-			if len(masked) == 0 {
-				masked = []string{redactedValue}
-			}
-			out[canonicalHeaderKey(name)] = masked
-		}
+		copied := make([]string, len(values))
+		copy(copied, values)
+		out[canonicalHeaderKey(name)] = copied
 		kept++
 	}
 	return out, truncated

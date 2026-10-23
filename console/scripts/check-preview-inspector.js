@@ -2,7 +2,7 @@
 // /previews/<id>/inspect for a live preview you own (machine with the inspector capability).
 // Set window.__previewHost to the preview's host to let the check send traffic to it.
 // Checks: the page connects, capture can be turned on, requests arrive live without
-// duplicates, filters narrow the list, the detail pane shows headers and bodies, replay
+// duplicates, filters narrow the list, the detail pane shows headers in full and bodies, replay
 // appears marked "Replay", pause stops updates, and Clear empties the list. Leaves capture
 // as it found it. Prints the steps; they stay readable in window.__checkSteps.
 ;(async () => {
@@ -31,7 +31,10 @@
   const ids = () => rows().map((row) => row.getAttribute("data-capture-id"))
   const switchFor = (label) =>
     [...document.querySelectorAll("label")].find((l) => l.textContent.trim() === label)?.querySelector("[role=switch]")
-  const hit = (path) => fetch(`https://${host}${path}`, { mode: "no-cors", cache: "no-store" }).catch(() => null)
+  // Accept-Language is one of the few headers a no-cors fetch may set; it carries the tag so the
+  // check can see a header value shown in full.
+  const hit = (path, headers = {}) =>
+    fetch(`https://${host}${path}`, { mode: "no-cors", cache: "no-store", headers }).catch(() => null)
 
   const ready = await until(() => section() || ["Not allowed", "Machine offline", "Machine needs an update", "Preview stopped"].includes(state()), 30000)
   pass("page connects or shows a clear state", Boolean(ready), state() ?? section()?.dataset.inspectorPhase ?? "")
@@ -54,7 +57,7 @@
     return console.table(steps), steps
   }
   const tag = `pbcheck-${Date.now()}`
-  await hit(`/${tag}/a`)
+  await hit(`/${tag}/a`, { "Accept-Language": `${tag}-lang` })
   await hit(`/${tag}/b?x=1`)
   const live = await until(() => rows().filter((row) => row.innerText.includes(tag)).length >= 2, 20000)
   pass("requests arrive live", Boolean(live))
@@ -78,6 +81,10 @@
   pass(
     "detail shows request and response headers",
     Boolean(detail) && /Request headers/.test(detail.innerText) && /Response/.test(detail.innerText),
+  )
+  pass(
+    "header values are shown in full",
+    Boolean(detail) && detail.innerText.includes(`${tag}-lang`) && !detail.innerText.includes("[redacted]"),
   )
   const replay = detail && button("Replay", detail)
   if (replay) {

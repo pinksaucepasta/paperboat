@@ -30,7 +30,7 @@ func daemonListHandler(t *testing.T, hits *atomic.Int32, grant *string, status i
 	}
 }
 
-const inspectorTestPage = `{"schema":"paperboat.inspector/v1","kind":"capture_page","resource_id":"tun_01","records":[{"id":"cap_01","resource_id":"rte_01","method":"POST","url":"https://app.example.test/api/items","request_headers":{"Authorization":["[redacted]"]},"response_headers":{},"request_body_state":"complete","response_body_state":"complete","response_status":200,"error_code":"none","state":"complete","started_at":"2026-09-08T00:00:00Z","finished_at":"2026-09-08T00:00:01Z"}],"next_cursor":""}`
+const inspectorTestPage = `{"schema":"paperboat.inspector/v1","kind":"capture_page","resource_id":"tun_01","records":[{"id":"cap_01","resource_id":"rte_01","method":"POST","url":"https://app.example.test/api/items","request_headers":{"Authorization":["Bearer secret"]},"response_headers":{},"request_body_state":"complete","response_body_state":"complete","response_status":200,"error_code":"none","state":"complete","started_at":"2026-09-08T00:00:00Z","finished_at":"2026-09-08T00:00:01Z"}],"next_cursor":""}`
 
 func TestTunnelInspectIssuesAsUserAndLists(t *testing.T) {
 	client, fixture := newInspectorTestServer(t, http.StatusOK, inspectorTestRouteJSON)
