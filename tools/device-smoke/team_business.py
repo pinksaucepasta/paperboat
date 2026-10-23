@@ -163,7 +163,8 @@ def roles(c, team):
     """F19-01: the owner changes another member's role to auditor, billing and back."""
     t = c.pbj('team', 'get', team)
     owner = t.get('owner_account')
-    others = [m for m in t.get('members', []) if m['active'] and m['account_id'] != owner]
+    others = [m for m in t.get('members', []) if m['active'] and m['account_id'] != owner
+              and (not c.a.member or m['account_id'] == c.a.member)]
     if not c.step('the team has another active member', bool(others), t):
         return None
     member, original = others[0]['account_id'], others[0]['role']
@@ -396,6 +397,7 @@ def main():
     p.add_argument('--pb', default='/home/tester/.local/bin/pb')
     p.add_argument('--s3-root', default='/tmp/vgw', help='the store\'s data directory in --s3-list-cmd')
     p.add_argument('--api', default='https://api.pprbt.dev')
+    p.add_argument('--member', default='', help='the member whose role changes (not directory-managed)')
     p.add_argument('--alias', default='', help='this machine\'s name, for the F19-07 access steps')
     p.add_argument('--peer-alias', default='', help='a second throwaway machine of the account (F19-07)')
     p.add_argument('--peer-cmd', default='', help='runs commands on the peer; its CLI session is replaced')
