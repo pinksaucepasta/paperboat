@@ -85,16 +85,13 @@ func TestPlacementDNSCreationAndResetOnPostgres(t *testing.T) {
 		endpointID := testutil.EndpointID(id)
 		stable := testutil.EndpointLabel(endpointID) + ".example.test"
 		// A mode change is refused while the owner has live publications, so the pool moves before the
-		// resource exists and the resource is retired before the pool moves back (ErrLiveEdgeModeChange).
+		// resource exists and the resource is stopped before the pool moves back (ErrLiveEdgeModeChange).
 		setPool(selfHosted)
 		if kind == "preview" {
 			exec(`INSERT INTO paperboat.preview_leases(owner_session_kind,id,endpoint,account_id,actor_id,owner_machine_id,owner_session_id,target_scheme,target_address,lease_deadline) VALUES('foreground',$1,$2,$3,$3,'machine','session','http','127.0.0.1:3000',now()+interval '10 minutes')`, id, "https://"+stable, owner)
 		} else {
 			exec(`INSERT INTO paperboat.tunnels(id,account_id,name,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id) VALUES($1,$2,$1,$3,$4,'host','actor')`, id, owner, endpointID, "https://"+stable)
 			exec(`INSERT INTO paperboat.tunnel_routes(id,tunnel_id,name,protocol,match_type,match_hostname,origin_scheme,origin_address,created_by_actor_id,updated_by_actor_id) VALUES($1,$2,$1,'http','managed','managed.example.test','http','127.0.0.1:3000','actor','actor')`, route, id)
-		}
-		if _, err = service.SetPlacement(ctx, owner, kind, id, &installation.InstallationID); err != nil {
-			t.Fatal(err)
 		}
 		domainID := "dns_domain_" + kind + "_" + suffix
 		hostname := kind + "-" + testutil.EndpointLabel(endpointID) + ".example.test"
@@ -117,7 +114,13 @@ func TestPlacementDNSCreationAndResetOnPostgres(t *testing.T) {
 				t.Fatalf("%s target=%q state=%q type=%q generation=%d: %v", kind, actualTarget, actualState, actualType, actualGeneration, err)
 			}
 		}
-		check("140.245.11.41", "pending", "A", 1)
+		check(stable, "pending", "CNAME", 1)
+		// A self-hosted placement needs a verified custom domain; each placement change resets the domain to pending.
+		exec(`UPDATE `+table+` SET ownership_state='verified' WHERE id=$1`, domainID)
+		if _, err = service.SetPlacement(ctx, owner, kind, id, &installation.InstallationID); err != nil {
+			t.Fatal(err)
+		}
+		check("140.245.11.41", "pending", "A", 2)
 		exec(`UPDATE `+table+` SET ownership_state='verified',conflict_state='quarantined',quarantine_until=now()+interval '1 hour' WHERE id=$1`, domainID)
 		if kind == "preview" {
 			exec(`UPDATE paperboat.preview_leases SET terminal_state='stopped',stopped_at=now() WHERE id=$1`, id)
@@ -128,12 +131,12 @@ func TestPlacementDNSCreationAndResetOnPostgres(t *testing.T) {
 		if _, err = service.SetPlacement(ctx, owner, kind, id, nil); err != nil {
 			t.Fatal(err)
 		}
-		check(stable, "pending", "CNAME", 2)
+		check(stable, "pending", "CNAME", 3)
 		var quarantineCleared bool
 		if err := store.SQL().QueryRowContext(ctx, `SELECT quarantine_until IS NULL FROM `+table+` WHERE id=$1`, domainID).Scan(&quarantineCleared); err != nil || !quarantineCleared {
 			t.Fatal("placement retained quarantine")
 		}
-		result, err := store.SQL().ExecContext(ctx, `UPDATE `+table+` SET ownership_state='verified' WHERE id=$1 AND generation=1`, domainID)
+		result, err := store.SQL().ExecContext(ctx, `UPDATE `+table+` SET ownership_state='verified' WHERE id=$1 AND generation=2`, domainID)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -145,10 +148,10 @@ func TestPlacementDNSCreationAndResetOnPostgres(t *testing.T) {
 		if _, err = service.SetPlacement(ctx, owner, kind, id, &installation.InstallationID); err != nil {
 			t.Fatal(err)
 		}
-		check("140.245.11.41", "pending", "A", 3)
+		check("140.245.11.41", "pending", "A", 4)
 		if _, err = service.SetPlacement(ctx, owner, kind, id, &installation.InstallationID); err != nil {
 			t.Fatal(err)
 		}
-		check("140.245.11.41", "pending", "A", 3)
+		check("140.245.11.41", "pending", "A", 4)
 	}
 }
