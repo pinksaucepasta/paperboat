@@ -948,8 +948,8 @@ func TestWithdrawRefusesActiveAndEmptyKeys(t *testing.T) {
 	}
 	recorder := httptest.NewRecorder()
 	provider.ServeHTTP(recorder, httptest.NewRequest("GET", "/.well-known/jwks.json", nil))
-	if !strings.Contains(recorder.Body.String(), `"withdrawn_key_ids":[]`) {
-		t.Fatalf("empty withdrawal list must be [] not null: %s", recorder.Body.String())
+	if strings.Contains(recorder.Body.String(), "withdrawn_key_ids") {
+		t.Fatalf("trust document without withdrawals must not change shape: %s", recorder.Body.String())
 	}
 }
 

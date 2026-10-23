@@ -1401,6 +1401,13 @@ func (p *Provider) signClaims(proofType string, claims map[string]any) (string, 
 	return unsigned + "." + base64.RawURLEncoding.EncodeToString(ed25519.Sign(privateKey, []byte(unsigned))), nil
 }
 
+// trustDocument is the published JWKS. withdrawn_key_ids is omitted while nothing is withdrawn, so the
+// document stays byte-identical to the one strict consumers already parse until a key is withdrawn.
+type trustDocument struct {
+	Keys            []map[string]string `json:"keys"`
+	WithdrawnKeyIDs []string            `json:"withdrawn_key_ids,omitempty"`
+}
+
 // JWKSJSON exposes the same public trust document to enrolled infrastructure. withdrawn_key_ids
 // lists every key that must no longer be trusted, including ones no longer present in keys.
 func (p *Provider) JWKSJSON() ([]byte, error) {
@@ -1425,7 +1432,7 @@ func (p *Provider) JWKSJSON() ([]byte, error) {
 	}
 	p.mu.RUnlock()
 	sort.Strings(withdrawn)
-	return json.Marshal(map[string]any{"keys": keys, "withdrawn_key_ids": withdrawn})
+	return json.Marshal(trustDocument{Keys: keys, WithdrawnKeyIDs: withdrawn})
 }
 func (p *Provider) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	b, err := p.JWKSJSON()
