@@ -155,7 +155,7 @@ func runWindowsDaemon(ctx context.Context, config DaemonConfig) (runErr error) {
 		OwnerUID:             -1,
 		OwnerGID:             -1,
 		OwnerSID:             ownerSID,
-		Source:               inventory,
+		Source:               relayDenialSource{Inventory: inventory, denial: config.RelayDenial},
 		Completions:          inventory,
 		Diagnostics:          diagnosticAPI,
 		AuthorizeDiagnostics: func(peer localapi.Peer) bool { return peer.SID == ownerSID },

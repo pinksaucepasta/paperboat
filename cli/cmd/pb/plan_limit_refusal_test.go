@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/localapi"
+	"net"
 	"net/http"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
@@ -15,14 +19,36 @@ import (
 func TestARenewalRefusedAtThePlanLimitNamesIt(t *testing.T) {
 	refused := &api.APIError{Status: http.StatusConflict, Code: "bandwidth_quota_exhausted", Message: "This workspace's hosted relay and edge bandwidth is used up. Add bandwidth: https://console.example.test/billing"}
 	renewal := fmt.Errorf("file transfer authorization renewal failed: %w", refused)
-	err := planLimitRefusal(errors.Join(errors.New("write unix local-api.sock: broken pipe"), renewal))
+	err := planLimitRefusal(context.Background(), errors.Join(errors.New("write unix local-api.sock: broken pipe"), renewal))
 	failure := classifyCommandFailure(err)
 	message := commandFailureMessage(err, failure)
 	result := classifyCLIJSONError(err)
 	if !strings.Contains(message, "Add bandwidth: https://console.example.test/billing") || result.Code != "bandwidth_quota_exhausted" {
 		t.Fatalf("message=%q code=%q", message, result.Code)
 	}
-	if other := errors.New("dial"); planLimitRefusal(other) != other {
+	if other := errors.New("dial"); planLimitRefusal(context.Background(), other) != other {
 		t.Fatal("an unrelated failure changed")
+	}
+}
+
+// A send the relay cut at the limit fails like a lost connection; while the daemon's latest refresh
+// says relays are withheld at the limit, the command names it (Lane O, pbvm3 relay-only send).
+func TestAStreamCutByTheRelayAtThePlanLimitNamesIt(t *testing.T) {
+	const limit = "This workspace's hosted relay and edge bandwidth is used up. Add bandwidth: https://console.example.test/billing"
+	previous := daemonSnapshotForPlanLimit
+	t.Cleanup(func() { daemonSnapshotForPlanLimit = previous })
+	health := []localapi.HealthItem{{Code: localapi.RelayQuotaCode, Severity: "warning", Title: limit}}
+	daemonSnapshotForPlanLimit = func(context.Context) (localapi.Snapshot, error) { return localapi.Snapshot{Health: health}, nil }
+	var lost error = fmt.Errorf("send: %w", &net.OpError{Op: "read", Net: "unix", Err: syscall.ECONNRESET})
+	if failure := classifyCommandFailure(lost); failure.kind != commandOperational {
+		t.Fatalf("fixture is not a connectivity failure: %+v", failure)
+	}
+	err := planLimitRefusal(context.Background(), lost)
+	if message := commandFailureMessage(err, classifyCommandFailure(err)); !strings.Contains(message, "Add bandwidth: https://console.example.test/billing") {
+		t.Fatalf("message=%q", message)
+	}
+	health = nil
+	if planLimitRefusal(context.Background(), lost) != lost {
+		t.Fatal("a lost connection without a relay refusal changed")
 	}
 }

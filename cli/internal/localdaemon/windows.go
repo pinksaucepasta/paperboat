@@ -39,6 +39,7 @@ type DaemonConfig struct {
 	ProbePeer               func(context.Context, localapi.Peer, localapi.PeerStreamRequest) (localapi.PeerProbeResult, error)
 	InspectorRequest        func(context.Context, localapi.Peer, localapi.InspectorRequest) (localapi.InspectorResult, error)
 	RelayInventory          func(context.Context) (localapi.RelayInventory, error)
+	RelayDenial             func() *api.APIError
 	InvalidatePeerAuthority func(string)
 	WarmPeerMetadata        func(context.Context, []api.UserMachine) error
 	IssuePeerStream         func(context.Context, localapi.PeerStreamRequest) (localapi.PeerStreamRequest, error)

@@ -32,6 +32,7 @@ type DaemonConfig struct {
 	ProbePeer               func(context.Context, localapi.Peer, localapi.PeerStreamRequest) (localapi.PeerProbeResult, error)
 	InspectorRequest        func(context.Context, localapi.Peer, localapi.InspectorRequest) (localapi.InspectorResult, error)
 	RelayInventory          func(context.Context) (localapi.RelayInventory, error)
+	RelayDenial             func() *api.APIError
 	InvalidatePeerAuthority func(string)
 	WarmPeerMetadata        func(context.Context, []api.UserMachine) error
 	IssuePeerStream         func(context.Context, localapi.PeerStreamRequest) (localapi.PeerStreamRequest, error)
@@ -149,7 +150,7 @@ func Run(ctx context.Context, config DaemonConfig) (runErr error) {
 		SocketPath:           config.Paths.SocketPath,
 		OwnerUID:             config.OwnerUID,
 		OwnerGID:             config.OwnerGID,
-		Source:               inventory,
+		Source:               relayDenialSource{Inventory: inventory, denial: config.RelayDenial},
 		Completions:          inventory,
 		Diagnostics:          diagnosticAPI,
 		AuthorizeDiagnostics: func(peer localapi.Peer) bool { return peer.UID == config.OwnerUID },

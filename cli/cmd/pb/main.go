@@ -187,7 +187,7 @@ func runWithReporter(ctx context.Context, args []string, stdout, stderr io.Write
 		outcome = "success"
 		return 0
 	}
-	err = planLimitRefusal(err)
+	err = planLimitRefusal(preferenceContext, err)
 	failure := classifyCommandFailure(err)
 	switch failure.kind {
 	case commandCanceled, commandInteractiveCanceled:

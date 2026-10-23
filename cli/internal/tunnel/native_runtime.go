@@ -654,3 +654,17 @@ func (r *cliNativeRuntime) Close() error {
 	})
 	return errors.Join(result)
 }
+
+// RelayDenial is the plan-limit refusal of the latest network refresh, or nil.
+func (t *PeerTerminalTunnel) RelayDenial() *api.APIError {
+	if t == nil {
+		return nil
+	}
+	t.nativeMu.Lock()
+	runtime := t.nativeRuntime
+	t.nativeMu.Unlock()
+	if runtime == nil || runtime.authority == nil {
+		return nil
+	}
+	return runtime.authority.RelayDenial()
+}
