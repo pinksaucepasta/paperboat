@@ -122,13 +122,20 @@ func (p *Plane) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // Start runs a Hub against a new Plane, with a subscription per topic. The hub stops with the test.
 func Start(t *testing.T, fallback time.Duration, topics ...machineevents.Topic) (*machineevents.Hub, []*machineevents.Subscription, *Plane) {
 	t.Helper()
+	return StartWith(t, fallback, func(server *httptest.Server) http.RoundTripper { return server.Client().Transport }, topics...)
+}
+
+// StartWith is Start with the hub's transport built for the stand-in server, for tests of the
+// production transport against a held wait.
+func StartWith(t *testing.T, fallback time.Duration, transport func(*httptest.Server) http.RoundTripper, topics ...machineevents.Topic) (*machineevents.Hub, []*machineevents.Subscription, *Plane) {
+	t.Helper()
 	plane := &Plane{generations: map[string]int64{}, wake: make(chan struct{}, 64), proofs: make(chan Proof, 64)}
 	server := httptest.NewTLSServer(plane)
 	t.Cleanup(server.Close)
 	signer := auth{proofs: plane.proofs}
 	var operations atomic.Int64
 	hub, err := machineevents.New(machineevents.Config{
-		ControlURL: server.URL, Tokens: signer, Proofs: signer, Transport: server.Client().Transport, FallbackInterval: fallback,
+		ControlURL: server.URL, Tokens: signer, Proofs: signer, Transport: transport(server), FallbackInterval: fallback,
 		OperationID: func() (string, error) { return fmt.Sprintf("operation_%08d", operations.Add(1)), nil },
 	})
 	if err != nil {

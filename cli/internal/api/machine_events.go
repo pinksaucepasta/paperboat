@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/httptransport"
 	"io"
 	"net/http"
 	"net/url"
@@ -21,7 +22,7 @@ func (c *Client) WaitMachineEvents(ctx context.Context, machineID string, known 
 	if known == nil {
 		known = map[string]int64{}
 	}
-	request, _, supportReference, path, err := c.newRequest(ctx, http.MethodPost, "/v1/machines/"+url.PathEscape(machineID)+"/events/wait", struct {
+	request, _, supportReference, path, err := c.newRequest(httptransport.LongPoll(ctx), http.MethodPost, "/v1/machines/"+url.PathEscape(machineID)+"/events/wait", struct {
 		Topics map[string]int64 `json:"topics"`
 	}{known}, nil)
 	if err != nil {

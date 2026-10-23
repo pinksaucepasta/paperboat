@@ -93,6 +93,17 @@ type Transport struct {
 	mu     sync.Mutex
 	key    string
 	base   *http.Transport
+	// longPoll is base without the response-header timeout, for requests marked with LongPoll.
+	longPoll *http.Transport
+}
+
+type longPollKey struct{}
+
+// LongPoll marks a request the server deliberately holds open (the machine-events wait holds up
+// to 30 s). It skips the response-header timeout, which is no longer than that hold and would end
+// every wait just before its answer; the request's own deadline bounds it instead.
+func LongPoll(ctx context.Context) context.Context {
+	return context.WithValue(ctx, longPollKey{}, true)
 }
 
 func New(config Config) (*Transport, error) {
@@ -116,9 +127,15 @@ func (t *Transport) RoundTrip(request *http.Request) (*http.Response, error) {
 	if err != nil {
 		return nil, err
 	}
-	base, err := t.transport(snapshot)
+	base, longPoll, err := t.transport(snapshot)
 	if err != nil {
 		return nil, err
+	}
+	if marked, _ := request.Context().Value(longPollKey{}).(bool); marked {
+		if _, bounded := request.Context().Deadline(); !bounded {
+			return nil, errors.New("a long-poll request needs a deadline")
+		}
+		base = longPoll
 	}
 	response, err := base.RoundTrip(request)
 	if err != nil {
@@ -132,16 +149,16 @@ func (t *Transport) RoundTrip(request *http.Request) (*http.Response, error) {
 	return response, nil
 }
 
-func (t *Transport) transport(snapshot ProxySnapshot) (*http.Transport, error) {
+func (t *Transport) transport(snapshot ProxySnapshot) (*http.Transport, *http.Transport, error) {
 	proxy, key, err := proxyFunction(snapshot)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	t.mu.Lock()
 	if t.base != nil && t.key == key {
-		base := t.base
+		base, longPoll := t.base, t.longPoll
 		t.mu.Unlock()
-		return base, nil
+		return base, longPoll, nil
 	}
 	dialContext := t.config.DialContext
 	if dialContext == nil {
@@ -155,13 +172,16 @@ func (t *Transport) transport(snapshot ProxySnapshot) (*http.Transport, error) {
 			return nil
 		},
 	}
-	previous := t.base
-	t.base, t.key = base, key
+	longPoll := base.Clone()
+	longPoll.ResponseHeaderTimeout = 0
+	previous, previousLongPoll := t.base, t.longPoll
+	t.base, t.longPoll, t.key = base, longPoll, key
 	t.mu.Unlock()
 	if previous != nil {
 		previous.CloseIdleConnections()
+		previousLongPoll.CloseIdleConnections()
 	}
-	return base, nil
+	return base, longPoll, nil
 }
 
 func (t *Transport) CloseIdleConnections() {
@@ -169,10 +189,11 @@ func (t *Transport) CloseIdleConnections() {
 		return
 	}
 	t.mu.Lock()
-	base := t.base
+	base, longPoll := t.base, t.longPoll
 	t.mu.Unlock()
 	if base != nil {
 		base.CloseIdleConnections()
+		longPoll.CloseIdleConnections()
 	}
 }
 

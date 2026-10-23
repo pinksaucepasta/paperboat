@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/httptransport"
 	"io"
 	"net/http"
 	"net/url"
@@ -309,7 +310,7 @@ func (w *signedWaiter) wait(ctx context.Context, topics map[Topic]int64) (map[To
 	if err != nil {
 		return nil, fmt.Errorf("machine events proof: %w", err)
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, w.endpoint, bytes.NewReader(body))
+	request, err := http.NewRequestWithContext(httptransport.LongPoll(ctx), http.MethodPost, w.endpoint, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
