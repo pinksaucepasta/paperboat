@@ -225,8 +225,12 @@ func (c *Client) doRequestMeta(ctx context.Context, method, path string, body, o
 		req.Header.Set("X-Paperboat-Machine-Proof", base64.RawURLEncoding.EncodeToString(proof))
 	}
 
-	resp, err := c.http.Do(req)
+	resp, err := c.send(req)
 	if err != nil {
+		var lost *ResponseLostError
+		if errors.As(err, &lost) {
+			return err
+		}
 		return fmt.Errorf("call %s %s: %w", method, path, err)
 	}
 	defer resp.Body.Close()

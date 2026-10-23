@@ -344,6 +344,13 @@ func classifyCLIJSONFailure(err error, failure commandFailure) cliJSONError {
 			}
 		}
 	}
+	var lost *api.ResponseLostError
+	if failure.kind == commandOperational && errors.As(err, &lost) {
+		// The change was sent; only its answer is missing, so it may have been applied.
+		result.Code, result.Category, result.StateChanged = "response_lost", "unavailable_retryable", "unknown"
+		result.Retryable, result.OutcomeUncertain = false, true
+		result.Recovery = responseLostRecovery
+	}
 	return result
 }
 

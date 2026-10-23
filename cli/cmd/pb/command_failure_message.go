@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -55,6 +56,10 @@ func commandFailureMessage(err error, failure commandFailure) string {
 	// underneath must not replace it with a generic service message.
 	if login, ok := boundedBrowserLoginFailure(err); ok && login.message != "" && failure.kind != commandCanceled && failure.kind != commandInteractiveCanceled {
 		return login.message
+	}
+	var lost *api.ResponseLostError
+	if failure.kind == commandOperational && errors.As(err, &lost) {
+		return "The change was sent, but its answer was lost on the way back, so it may have been applied. " + responseLostRecovery
 	}
 	if remote, ok := soleCommandOwner(err).(interface{ SupportReference() string }); ok && failure.kind == commandOperational && supportref.Valid(remote.SupportReference()) {
 		return "The remote machine could not confirm terminal creation. Check `pb session list` before retrying; run `pb doctor` if this continues. Support reference: " + remote.SupportReference() + "."
@@ -268,3 +273,6 @@ func transferSize(bytes int64) string {
 	}
 	return fmt.Sprintf("%d bytes", bytes)
 }
+
+// responseLostRecovery is the next step after a change whose answer was lost.
+const responseLostRecovery = "Check the current state with the matching list or status command (for example `pb team list` or `pb machine list`) before retrying."
