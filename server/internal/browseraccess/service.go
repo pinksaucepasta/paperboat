@@ -27,9 +27,13 @@ const (
 )
 
 var (
-	ErrInvalid              = errors.New("invalid browser access request")
-	ErrExpired              = errors.New("browser access expired")
-	ErrNotAuthorized        = errors.New("browser access not authorized")
+	ErrInvalid       = errors.New("invalid browser access request")
+	ErrExpired       = errors.New("browser access expired")
+	ErrNotAuthorized = errors.New("browser access not authorized")
+	// ErrAccessDenied: the login transaction and the signed-in session are valid, but this account may
+	// not open the resource. It is distinct from an expired or unknown transaction so the console can
+	// say "no access" instead of "link expired"; it does not reveal whether the resource exists.
+	ErrAccessDenied         = errors.New("browser access denied for this account")
 	ErrAlreadyRedeemed      = errors.New("browser access handoff already redeemed")
 	ErrCapacity             = errors.New("browser access capacity reached")
 	ErrAmbiguousTeamAccess  = errors.New("multiple teams authorize browser access; select a team")
@@ -241,6 +245,9 @@ func (s *Service) Issue(ctx context.Context, in IssueRequest) (IssueResult, erro
 			a, err = resolveAuthority(ctx, tx, host, in.Principal.UserID, now, s.MachineServiceDomain)
 		} else {
 			a, err = resolveBrowserBound(ctx, tx, in.Principal.UserID, host, kind, resourceID, routeID, now)
+		}
+		if err == ErrNotAuthorized { // a joined storage error stays a storage error
+			return ErrAccessDenied
 		}
 		if err != nil {
 			return err

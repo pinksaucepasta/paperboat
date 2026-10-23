@@ -55,6 +55,7 @@ func TestBrowserAccessQuotaClassificationPreservesMixedOperationalFailure(t *tes
 		{"redeemed", browseraccess.ErrAlreadyRedeemed, 401, "authentication_required"},
 		{"ambiguous", browseraccess.ErrAmbiguousTeamAccess, 409, "ambiguous_team_access"},
 		{"unauthorized", browseraccess.ErrNotAuthorized, 404, "not_found"},
+		{"access denied", browseraccess.ErrAccessDenied, 403, "forbidden"},
 		{"capacity", lazyaccess.ErrCapacity, 429, "activation_limit"},
 		{"activation timeout", &lazyaccess.ActivationError{Code: "activation_timeout"}, 504, "activation_timeout"},
 	} {

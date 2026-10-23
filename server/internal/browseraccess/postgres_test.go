@@ -78,6 +78,12 @@ func TestBrowserAccessPostgres(t *testing.T) {
 	if issue, err = svc.Issue(ctx, IssueRequest{TransactionID: begin.TransactionID, Principal: auth.Session{ID: session, UserID: owner}}); err == nil || issue.Handoff != "" {
 		t.Fatal("duplicate issue succeeded")
 	}
+	// A signed-in account without access is refused as such, not as an unknown or expired link.
+	exec(`INSERT INTO paperboat.sessions(id,user_id,session_hash,csrf_hash,expires_at) VALUES($1,$2,$3,$4,$5)`, session+"_viewer", viewer, "hash_viewer_"+suffix, "csrf_viewer_"+suffix, now.Add(2*time.Hour))
+	refused, _ := svc.Begin(ctx, BeginRequest{Host: host, ReturnPath: "/ok"})
+	if _, err = svc.Issue(ctx, IssueRequest{TransactionID: refused.TransactionID, Principal: auth.Session{ID: session + "_viewer", UserID: viewer}}); !errors.Is(err, ErrAccessDenied) {
+		t.Fatalf("viewer without access: %v, want ErrAccessDenied", err)
+	}
 	// Obtain a fresh issued handoff for the redemption race.
 	begin, _ = svc.Begin(ctx, BeginRequest{Host: host, ReturnPath: "/ok"})
 	issued, err := svc.Issue(ctx, IssueRequest{TransactionID: begin.TransactionID, Principal: auth.Session{ID: session, UserID: owner}})

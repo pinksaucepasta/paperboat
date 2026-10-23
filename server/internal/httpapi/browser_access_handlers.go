@@ -50,6 +50,8 @@ func browserAccessError(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, r, 409, "ambiguous_team_access", "More than one team grants access to this resource. Use a resource with one team grant until team selection is available.")
 	case expectedHTTPErrorOnly(err, accountingauthority.ErrQuotaExhausted):
 		writeError(w, r, 409, "bandwidth_quota_exhausted", "This workspace's bandwidth allowance is exhausted. Access can resume when its next allowance period begins.")
+	case expectedHTTPErrorOnly(err, browseraccess.ErrAccessDenied):
+		writeError(w, r, 403, "forbidden", "This account cannot open this address.")
 	case expectedHTTPErrorOnly(err, browseraccess.ErrNotAuthorized, connectorprotocol.ErrIngressDenied):
 		writeError(w, r, 404, "not_found", "Resource not found.")
 	default:

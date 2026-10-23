@@ -230,7 +230,7 @@ func TestBrowserViewerPolicyPostgres(t *testing.T) {
 	if _, err = svc.Authorize(ctx, AuthorizeRequest{Token: emailToken, Host: host, ResourceKind: "tunnel", ResourceID: tunnel, RouteID: routeA}); err != nil {
 		t.Fatalf("verified exact email denied: %v", err)
 	}
-	if _, err = issueBrowserTokenResult(svc, ctx, teamViewer, sessionIDs[teamViewer], host, "/a/page", now); !errors.Is(err, ErrNotAuthorized) {
+	if _, err = issueBrowserTokenResult(svc, ctx, teamViewer, sessionIDs[teamViewer], host, "/a/page", now); !errors.Is(err, ErrAccessDenied) {
 		t.Fatalf("team member retained access after audience change: %v", err)
 	}
 	if _, err = svc.IssueMachineCredential(ctx, MachineCredentialRequest{AccountID: emailViewer, Host: host, ResourceKind: "tunnel", ResourceID: tunnel, RouteID: routeA, Action: "use", TTL: time.Minute}); !errors.Is(err, ErrNotAuthorized) {
@@ -253,7 +253,7 @@ func TestBrowserViewerPolicyPostgres(t *testing.T) {
 		t.Fatalf("verified exact-domain email denied: %v", err)
 	}
 	for _, user := range []string{subdomainViewer, suffixViewer, unverifiedViewer} {
-		if _, err = issueBrowserTokenResult(svc, ctx, user, sessionIDs[user], host, "/a/page", now); !errors.Is(err, ErrNotAuthorized) {
+		if _, err = issueBrowserTokenResult(svc, ctx, user, sessionIDs[user], host, "/a/page", now); !errors.Is(err, ErrAccessDenied) {
 			t.Errorf("domain audience incorrectly authorized %s: %v", user, err)
 		}
 	}
