@@ -178,8 +178,20 @@ func TestPreviewLeaseWorkerEmitsCorrelatedCleanupTelemetry(t *testing.T) {
 	producer := &telemetry.Producer{Metrics: telemetry.NewMetrics(), Events: events, Health: health, Now: time.Now}
 	stop := errors.New("database unavailable")
 	reconciler := &recordingPreviewLeaseReconciler{err: stop}
-	if err := previewLeaseReconciliationWorker(reconciler, time.Second, producer)(context.Background()); !errors.Is(err, stop) {
-		t.Fatalf("worker error=%v", err)
+	// A failed pass is recorded and retried, never returned: the worker ends only on cancellation (S1).
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- previewLeaseReconciliationWorker(reconciler, time.Second, producer)(ctx) }()
+	deadline := time.Now().Add(10 * time.Second)
+	for len(events.Snapshot()) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("no cleanup event after a failed pass")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	cancel()
+	if err := <-done; errors.Is(err, stop) || !errors.Is(err, context.Canceled) {
+		t.Fatalf("worker error=%v, want cancellation only", err)
 	}
 	recorded := events.Snapshot()
 	if len(recorded) != 1 || recorded[0].Name != "preview_cleanup" || recorded[0].Outcome != telemetry.OutcomeFailed || recorded[0].RequestID != reconciler.requestID || recorded[0].CorrelationID != reconciler.correlationID {
