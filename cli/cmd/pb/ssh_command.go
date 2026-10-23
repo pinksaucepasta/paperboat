@@ -50,7 +50,25 @@ func actionSSH(command *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	return executeManagedSSH(command, ctx, machine, destination, args[1:], dash == 1, environment)
+	err = executeManagedSSH(command, ctx, machine, destination, args[1:], dash == 1, environment)
+	explainChangedSSHHostIdentity(command, client, machine, err)
+	return err
+}
+
+// explainChangedSSHHostIdentity follows an OpenSSH connection failure (exit 255) with what to do when the
+// machine has published new host keys that are not trusted yet: OpenSSH itself only says the key changed
+// and suggests editing known_hosts, which managed SSH does not use.
+func explainChangedSSHHostIdentity(command *cobra.Command, client *api.Client, machine api.UserMachine, err error) {
+	var exit managedssh.NativeExitError
+	if !errors.As(err, &exit) || exit.Code != 255 || client == nil {
+		return
+	}
+	generation := uint64(machine.InstallationGeneration)
+	pending, pendingErr := client.ManagedSSHPendingHostKeys(command.Context(), machine.ID, generation)
+	if pendingErr != nil || pending.Fingerprint == "" {
+		return
+	}
+	fmt.Fprintf(command.ErrOrStderr(), "pb: %s published a new SSH host identity that is not trusted yet (pending %s). If you expected the change, trust it with `pb ssh trust-host %s --fingerprint %s`.\n", machine.Alias, pending.Fingerprint, machine.Alias, pending.Fingerprint)
 }
 
 func resolveSSHRequestedUser(targetUser, flagUser string) (string, error) {
@@ -235,7 +253,7 @@ func actionSSHTrustHost(command *cobra.Command, args []string) error {
 	fingerprint = strings.TrimSpace(fingerprint)
 	jsonOutput, _ := command.Flags().GetBool("json")
 	if fingerprint != "" && fingerprint != pending.Fingerprint {
-		return errors.New("pending SSH host fingerprint does not match --fingerprint")
+		return localArgumentError("--fingerprint does not match the pending SSH host identity of " + machine.Alias + " (" + pending.Fingerprint + "); nothing was trusted.")
 	}
 	if fingerprint == "" {
 		if jsonOutput {
