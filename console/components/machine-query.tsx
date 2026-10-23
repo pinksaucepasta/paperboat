@@ -12,7 +12,8 @@ const noSubscription = () => () => {}
 
 /**
  * Starts from `?q=` (a tag link such as /?q=tag:prod), so pages can link to a filtered list. The
- * URL is read after hydration (the server renders an empty search), then typing takes over.
+ * URL is read after hydration (the server renders an empty search), then typing takes over until
+ * a link brings another `?q=` (Next keeps this state across navigations).
  */
 export function MachineQueryProvider({ children }: { children: React.ReactNode }) {
   const fromUrl = useSyncExternalStore(
@@ -20,8 +21,9 @@ export function MachineQueryProvider({ children }: { children: React.ReactNode }
     () => new URLSearchParams(window.location.search).get("q") ?? "",
     () => "",
   )
-  const [typed, setTyped] = useState<string | null>(null)
-  const state: [string, (query: string) => void] = [typed ?? fromUrl, setTyped]
+  const [typed, setTyped] = useState<{ text: string; under: string } | null>(null)
+  const query = typed && typed.under === fromUrl ? typed.text : fromUrl
+  const state: [string, (query: string) => void] = [query, (text) => setTyped({ text, under: fromUrl })]
   return <MachineQuery value={state}>{children}</MachineQuery>
 }
 

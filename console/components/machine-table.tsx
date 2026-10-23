@@ -331,22 +331,24 @@ const noSubscription = () => () => {}
  * search or filter starts again at page 1; a page past the end shows the last one.
  */
 function usePages(query: string, count: number) {
+  // The URL owns the page; it is read on every render because Next keeps this component's state
+  // across navigations, so a link to /?page=3 must win over a page chosen earlier.
   const fromUrl = useSyncExternalStore(
     noSubscription,
     () => Number(new URLSearchParams(window.location.search).get("page")) || 1,
     () => 1,
   )
-  const [chosen, setChosen] = useState<{ query: string; page: number } | null>(null)
-  const [opened] = useState(query)
+  const [pagedFor, setPagedFor] = useState(query)
+  const [, rerender] = useState(0)
   const last = Math.max(1, Math.ceil(count / perPage))
-  const wanted = chosen ? (chosen.query === query ? chosen.page : 1) : query === opened ? fromUrl : 1
-  const page = Math.min(Math.max(1, wanted), last)
+  const page = Math.min(Math.max(1, pagedFor === query ? fromUrl : 1), last)
   const go = (next: number) => {
-    setChosen({ query, page: next })
     const url = new URL(window.location.href)
     if (next > 1) url.searchParams.set("page", String(next))
     else url.searchParams.delete("page")
     window.history.replaceState(window.history.state, "", url)
+    setPagedFor(query)
+    rerender((n) => n + 1)
     document.getElementById("machines-table")?.scrollIntoView({ block: "start" })
   }
   return { page, from: (page - 1) * perPage, to: page * perPage, go }
