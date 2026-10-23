@@ -49,6 +49,12 @@ export function useCaptureFeed(channel: Channel, previewId: string, paused: bool
   const [bodies, setBodies] = useState(false)
   const cursor = useRef("")
   const busy = useRef(false)
+  // Read after each await: a page that lands after Pause is dropped without moving the cursor,
+  // so the list holds still and Resume fetches it again.
+  const held = useRef(paused)
+  useEffect(() => {
+    held.current = paused
+  }, [paused])
   const { request, phase } = channel
 
   const merge = useCallback((page: Capture[], reset: boolean) => {
@@ -64,7 +70,7 @@ export function useCaptureFeed(channel: Channel, previewId: string, paused: bool
   }, [])
 
   const poll = useCallback(async () => {
-    if (busy.current) return
+    if (busy.current || held.current) return
     busy.current = true
     try {
       for (let pages = 0; pages < 10; pages++) {
@@ -75,6 +81,7 @@ export function useCaptureFeed(channel: Channel, previewId: string, paused: bool
           limit: "100",
         })) as Page
         setCapture("on")
+        if (held.current) break
         if (page.records.length) cursor.current = page.records[page.records.length - 1].id
         if (reset || page.records.length) merge(page.records, reset)
         if (!page.next_cursor) break

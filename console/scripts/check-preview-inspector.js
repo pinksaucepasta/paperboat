@@ -29,6 +29,7 @@
     [...root.querySelectorAll("button")].find((b) => b.textContent.trim() === label)
   const rows = () => [...document.querySelectorAll("[data-capture-id]")]
   const ids = () => rows().map((row) => row.getAttribute("data-capture-id"))
+  const listed = () => rows().map((row) => row.innerText.replace(/\s+/g, " ").slice(0, 60)).join(" | ")
   const switchFor = (label) =>
     [...document.querySelectorAll("label")].find((l) => l.textContent.trim() === label)?.querySelector("[role=switch]")
   // Accept-Language is one of the few headers a no-cors fetch may set; it carries the tag so the
@@ -43,7 +44,11 @@
 
   const ready = await until(() => section() || ["Not allowed", "Machine offline", "Machine needs an update", "Preview stopped"].includes(state()), 30000)
   pass("page connects or shows a clear state", Boolean(ready), state() ?? section()?.dataset.inspectorPhase ?? "")
-  if (!section()) return console.table(steps), steps
+  if (!section()) {
+    // The check is run on a live preview the account owns: a state instead of the list is a failure.
+    pass("inspector reaches the live list", false, state() ?? "no state")
+    return console.table(steps), steps
+  }
   const capture = switchFor("Capture")
   const wasOn = capture?.getAttribute("aria-checked") === "true"
   if (capture && !wasOn) {
@@ -71,22 +76,24 @@
   pass("no duplicate rows after several polls", new Set(ids()).size === ids().length, `${ids().length} rows`)
 
   const search = document.querySelector('input[placeholder="Filter by path"]')
+  // The filter is a deferred value: it applies when React gets to it.
   type(search, `${tag}/b`)
-  await sleep(500)
-  pass("path filter narrows the list", rows().length === 1 && rows()[0].innerText.includes(`${tag}/b`))
+  const narrowed = await until(() => rows().length === 1 && rows()[0].innerText.includes(`${tag}/b`), 5000)
+  pass("path filter narrows the list", Boolean(narrowed), listed())
   type(search, "")
+  await until(() => rows().length >= 2, 5000)
   button("5xx")?.click()
   await sleep(300)
   pass("status filter hides 2xx rows", rows().every((row) => /\b5\d\d\b/.test(row.innerText)))
   button("All")?.click()
-  await sleep(300)
 
-  const target = rows().find((row) => row.innerText.includes(`${tag}/a`))
+  const target = await until(() => rows().find((row) => row.innerText.includes(`${tag}/a`)), 5000)
   target?.click()
   const detail = await until(() => document.querySelector("[data-capture-detail]"))
   pass(
     "detail shows request and response headers",
     Boolean(detail) && /Request headers/.test(detail.innerText) && /Response/.test(detail.innerText),
+    `row ${target ? "found" : "missing"}: ${listed()}`,
   )
   pass(
     "header values are shown in full",
@@ -104,7 +111,7 @@
   const paused = ids().length
   await hit(`/${tag}/paused`)
   await sleep(2500)
-  pass("pause stops updates", ids().length === paused)
+  pass("pause stops updates", ids().length === paused, `${paused} -> ${ids().length}: ${listed()}`)
   button("Resume")?.click()
   pass("resume brings in the paused request", Boolean(await until(() => ids().length > paused)))
 
