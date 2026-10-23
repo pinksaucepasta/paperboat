@@ -96,6 +96,18 @@ func (c *Client) SetWorkspace(selector string) error {
 	return nil
 }
 
+// ForWorkspace is this client, with the same credentials and transport, bound to another workspace.
+func (c *Client) ForWorkspace(selector string) (*Client, error) {
+	if c == nil {
+		return nil, errors.New("paperboat API client is nil")
+	}
+	next := *c
+	if err := next.SetWorkspace(selector); err != nil {
+		return nil, err
+	}
+	return &next, nil
+}
+
 // Workspace returns the workspace bound to this client, or the empty string
 // for intentionally unscoped clients.
 func (c *Client) Workspace() string {

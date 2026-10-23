@@ -309,7 +309,8 @@ func resolveUserMachine(ctx context.Context, client *api.Client, requested strin
 	if err != nil {
 		return api.UserMachine{}, err
 	}
-	return resolveUserMachineIn(machines, requested)
+	machine, err := resolveUserMachineIn(machines, requested)
+	return machine, explainMachineInTeamWorkspace(ctx, client, client.ForWorkspace, requested, err)
 }
 
 // resolveUserMachineIn finds the one machine a user named, by ID or by name, among machines already fetched.

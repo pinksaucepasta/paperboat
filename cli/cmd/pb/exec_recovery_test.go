@@ -214,6 +214,8 @@ func execRecoveryBackend(t *testing.T, machine api.UserMachine, descriptors *ato
 		switch r.URL.Path {
 		case "/v1/machines":
 			writeAPIData(t, w, api.UserMachinePage{Items: []api.UserMachine{machine}, Pagination: api.Pagination{Limit: 200, Total: 1}})
+		case "/v1/workspaces": // an unknown name is also looked up in the account's team workspaces
+			writeAPIData(t, w, map[string]any{"items": []map[string]string{{"id": "personal", "name": "Personal", "kind": "personal", "role": "owner"}}})
 		case "/v1/machines/machine_target/exec-descriptor":
 			var body struct {
 				OperationID string `json:"operation_id"`
