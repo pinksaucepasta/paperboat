@@ -3247,3 +3247,4 @@ Adopt on pprbtdev made up to 49 pending pull-only assignments; nothing approved;
 2026-10-23 | Lane L F11 regression | Apply 404 after a team-default unadopt fixed: 0f9fe843 (client ignores a revoked assignment's repositories), a4fc94e7 (server: only a live adoption scopes a machine; live in 2026.10.23.53).
 Lane H config-sync PASS on laneh-s313-a/b (revoked team row kept), dev-0f9fe843, results/20261023T132621Z.json. Not on an official release yet.
 2026-10-23 | Lane O F13-03 | [x] L: cap enforced on relay/edge only (direct P2P free), plan-limit messages on ping/exec/ssh/terminal/browser terminal, owner email via Resend. New row F13-03S (send says "Operation canceled") → Lane A.
+2026-10-23 | Lane O F12-02-mail-live | [x]: invitation + resend sent via Resend (mail_3a03b50d…, mail_c2ddadfe…), link → console Team page → joined. Found/fixed on the way: trialing teams could not change seats (11419b73).
