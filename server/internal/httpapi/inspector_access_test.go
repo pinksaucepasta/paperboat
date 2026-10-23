@@ -50,6 +50,10 @@ func TestInspectorRemoteAccessPostgres(t *testing.T) {
 		_, _ = database.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.cli_client_sessions WHERE id=$1`, cli)
 	})
 	service := inspectaccess.NewService(database)
+	// mate may also inspect the tunnel (checked below). A policy save fences inspector
+	// credentials issued before it, so the access is set before mate's preview credential.
+	exec(`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account,active,generation) VALUES($1,'tunnel',$2,$3,true,1)`, "team_ih_"+suffix, tunnel, owner)
+	teamstest.SetResourceAccess(t, database, "team_ih_"+suffix, mate, "tunnel", tunnel, "inspect", true)
 	grant, err := service.Issue(ctx, inspectaccess.IssueRequest{AccountID: mate, ResourceKind: "preview", ResourceID: lease, RouteID: lease, Action: "inspect", TTL: time.Minute})
 	if err != nil {
 		t.Fatal(err)
@@ -105,8 +109,6 @@ func TestInspectorRemoteAccessPostgres(t *testing.T) {
 	if e != nil || edgeDurable.Carrier.AssignmentID != assignment || edgeDurable.Carrier.ConfigContentHash != fmt.Sprintf("sha256:%x", hash) {
 		t.Fatalf("durable edge routing: %v", e)
 	}
-	exec(`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account,active,generation) VALUES($1,'tunnel',$2,$3,true,1)`, "team_ih_"+suffix, tunnel, owner)
-	teamstest.SetResourceAccess(t, database, "team_ih_"+suffix, mate, "tunnel", tunnel, "inspect", true)
 	targets, e := service.Targets(ctx, mate, tunnel, "inspect")
 	if e != nil || len(targets) != 1 || targets[0].ResourceID != tunnel || targets[0].RouteID != route {
 		t.Fatalf("inspect-only target discovery: %v", e)
