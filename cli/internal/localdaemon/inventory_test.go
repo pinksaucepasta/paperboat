@@ -728,3 +728,52 @@ func TestUnpublishedHostKeysDoNotClaimSSHDIsMissing(t *testing.T) {
 		t.Fatalf("health = %+v", item)
 	}
 }
+
+// Daemons re-listed the account's machines (once per workspace) every 15 s while the server's change
+// stream was idle. A healthy, idle stream must mean no machine listing between events.
+func TestInventoryMakesNoListingWhileTheChangeStreamIsHealthyAndIdle(t *testing.T) {
+	source := &scriptedMachineSource{results: []machineResult{{machines: []api.UserMachine{{ID: "machine_1", Alias: "studio"}}}}}
+	var refreshes atomic.Int32
+	store, err := localapi.NewSnapshotStore(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, subscriptions, _ := eventstest.Start(t, time.Hour, machineevents.TopicInventory)
+	inventory, err := NewInventory(InventoryConfig{Source: source, Store: store, RefreshInterval: time.Second, RequestTimeout: time.Second, Events: subscriptions[0], EventFallback: time.Hour, OnRefresh: func(error) { refreshes.Add(1) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- inventory.Run(ctx) }()
+	time.Sleep(3500 * time.Millisecond)
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("run ended with %v", err)
+	}
+	if got := refreshes.Load(); got != 1 {
+		t.Fatalf("%d refreshes in 3.5 s with a healthy idle stream and a 1 s periodic check, want only the first", got)
+	}
+}
+
+// While the change stream is unhealthy the periodic refresh backs off with jitter instead of re-listing
+// every interval in lockstep across the fleet.
+func TestInventoryOutageRefreshBacksOffWithJitter(t *testing.T) {
+	interval := 15 * time.Second
+	if got := outageRefreshDelay(interval, 0); got != interval {
+		t.Fatalf("healthy delay %v, want %v", got, interval)
+	}
+	for outages, want := range map[int]time.Duration{1: 15 * time.Second, 2: 30 * time.Second, 3: time.Minute, 5: 4 * time.Minute, 6: outageMaximumRefresh, 32: outageMaximumRefresh} {
+		seen := map[time.Duration]bool{}
+		for range 50 {
+			got := outageRefreshDelay(interval, outages)
+			if got < want-want/5 || got > want+want/5 {
+				t.Fatalf("outage %d: delay %v outside %v ± 20%%", outages, got, want)
+			}
+			seen[got] = true
+		}
+		if len(seen) < 2 {
+			t.Fatalf("outage %d: no jitter", outages)
+		}
+	}
+}

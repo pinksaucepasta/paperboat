@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
+	"math/rand/v2"
 	"net/url"
 	"sort"
 	"sync"
@@ -26,7 +27,25 @@ const (
 	defaultEventRefreshSpacing = 15 * time.Second
 	// While the server's change stream is healthy the periodic refresh is only a safety net.
 	defaultEventFallback = 5 * time.Minute
+	// While it is unhealthy (usually the server itself is failing) the periodic refresh backs off from the
+	// refresh interval to outageMaximumRefresh with jitter, so a fleet does not re-list every machine in
+	// lockstep while the server recovers (22 machines made ~355 machine listings a minute in one outage).
+	outageMaximumRefresh = 5 * time.Minute
 )
+
+// outageRefreshDelay is the wait before the next periodic check after outages consecutive checks found
+// the change stream unhealthy: the interval itself while healthy, then doubling to outageMaximumRefresh,
+// each with ±20% jitter.
+func outageRefreshDelay(interval time.Duration, outages int) time.Duration {
+	if outages == 0 {
+		return interval
+	}
+	delay := outageMaximumRefresh
+	if outages < 32 && interval<<(outages-1) < outageMaximumRefresh {
+		delay = interval << (outages - 1)
+	}
+	return delay - delay/5 + time.Duration(rand.Int64N(int64(delay/5)*2+1))
+}
 
 // FirstRefreshBudget bounds how long a newly started daemon with the default configuration takes to
 // publish its first state: a refresh runs up to three stages (machine list, local reconcile, completion),
@@ -137,6 +156,7 @@ func (i *Inventory) Snapshot(ctx context.Context) (localapi.Snapshot, error) {
 func (i *Inventory) Run(ctx context.Context) error {
 	var started time.Time        // of the latest refresh
 	var pending <-chan time.Time // a change waiting for the spacing
+	outages := 0                 // consecutive periodic checks that found the change stream unhealthy
 	refresh := func() {
 		pending = nil // this refresh shows every change so far
 		started = time.Now()
@@ -163,10 +183,16 @@ func (i *Inventory) Run(ctx context.Context) error {
 		case <-pending:
 			refresh()
 		case <-timer.C:
-			if !i.events.Healthy() || time.Since(started) >= i.eventFallback {
+			healthy := i.events.Healthy()
+			if !healthy || time.Since(started) >= i.eventFallback {
 				refresh()
 			}
-			timer.Reset(i.refreshInterval)
+			if healthy {
+				outages = 0
+			} else {
+				outages = min(outages+1, 32)
+			}
+			timer.Reset(outageRefreshDelay(i.refreshInterval, outages))
 		}
 	}
 }
