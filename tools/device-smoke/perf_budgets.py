@@ -7,6 +7,14 @@ two containers on one Docker bridge, dev-f9e28273, 2026-10-23: exec median 4.8 /
 headroom for noise; they catch regressions. Exec latency is dominated by per-operation access sessions (PLAN 3b design note).
 """
 BUDGETS = {
+    # perf_idle.py: one machine, 10 min idle, all pb processes (PR-03). Round 16 dev-3f068585 on a
+    # pbvm2 container measured 3.4% CPU, 417 wakeups/s and 6.6 MB/h on TCP 443 (control plane and
+    # edge); before the idle fixes 17-20%, ~1,680/s and 147-172 MB/h.
+    'idle': {
+        'cpu_percent': ('max', 5),
+        'wakeups_per_s': ('max', 600),
+        'tls_mb_per_hour': ('max', 15),
+    },
     # Checked on every path: local commands answer from the binary and the daemon snapshot
     # (PR-07; hp: --version 32 ms, status 960 ms before it stopped listing machines on the server).
     'cli': {
