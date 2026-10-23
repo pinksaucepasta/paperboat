@@ -19,6 +19,7 @@ import (
 
 	clientapi "github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
+	"github.com/pinksaucepasta/paperboat/internal/backoff"
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
@@ -92,10 +93,17 @@ func (s *runtimeObservationService) Start(ctx context.Context) error {
 	return nil
 }
 
+// runtimeObservationMaxRetry caps the wait between observations while the server keeps failing them.
+const runtimeObservationMaxRetry = time.Minute
+
 func (s *runtimeObservationService) loop(ctx context.Context, done chan<- struct{}) {
 	defer close(done)
-	ticker := time.NewTicker(s.interval)
-	defer ticker.Stop()
+	// The next observation follows the interval with jitter, so a fleet that reconnected together (a
+	// server deploy) does not report in lockstep; consecutive failures back off to runtimeObservationMaxRetry
+	// instead of every machine asking a failing server every interval.
+	next := time.NewTimer(backoff.Jitter(s.interval))
+	defer next.Stop()
+	failures := 0
 	watchEvery := s.servicesWatch
 	if watchEvery <= 0 {
 		watchEvery = machineServicesWatchInterval
@@ -107,14 +115,22 @@ func (s *runtimeObservationService) loop(ctx context.Context, done chan<- struct
 		defer cancel()
 		if err := s.sender.Send(sendCtx); err != nil {
 			reportRuntimeObservationAttempt(sendCtx, err)
+			failures++
+		} else {
+			failures = 0
 		}
 	}
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-next.C:
 			send()
+			wait := backoff.Jitter(s.interval)
+			if failures > 1 {
+				wait = backoff.Retry(failures-1, s.interval, runtimeObservationMaxRetry)
+			}
+			next.Reset(wait)
 		case <-watch.C:
 			if s.sender.machineServicesChanged(ctx) {
 				send()
