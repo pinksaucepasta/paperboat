@@ -172,7 +172,11 @@ func (a *Authority) Run(ctx context.Context, client NetworkAPI, report func(erro
 				default:
 				}
 			}
-			timer.Reset(a.refreshDelay(regionalRefreshDelay()))
+			// Every applied configuration lands here, including the one the refresh below just applied, so
+			// this must schedule exactly what that refresh would: the regional cadence alone overwrote the
+			// recovery renewal, the relays' observations expired, and every region was withdrawn and
+			// reconnected about every 17 s.
+			timer.Reset(a.nextRefresh(nil, 0))
 		case <-timer.C:
 			request, cancel := context.WithTimeout(ctx, 10*time.Second)
 			err := a.Refresh(request, client)
@@ -189,30 +193,36 @@ func (a *Authority) Run(ctx context.Context, client NetworkAPI, report func(erro
 			if denial := a.RelayDenial(); err == nil && denial != nil && report != nil {
 				report(denial)
 			}
-			delay := regionalRefreshDelay()
-			a.relay.mu.Lock()
-			recovering := a.relay.recovery != nil
-			a.relay.mu.Unlock()
-			// Signed health observations expire regionalObservationMaxAge after they were
-			// made, not after they were issued. Active regional recovery renews before the
-			// earliest one ends, so its relays are not withdrawn between renewals.
-			if recovering {
-				delay = 8*time.Second + regionalProbeDelay()/2
-				if due, ok := a.regionalRenewalDelay(time.Now()); ok {
-					delay = due
-				}
-			}
-			// A signed configuration may be much shorter than the regional cadence.
-			// Reserve half its remaining lifetime (at most the request bound) for
-			// renewal. A failed refresh retries after a short, growing, jittered
-			// delay; cached authority still expires independently, including while a
-			// request is pending.
-			if err != nil {
-				delay = min(delay, refreshRetryDelay(failures))
-			}
-			timer.Reset(a.refreshDelay(delay))
+			timer.Reset(a.nextRefresh(err, failures))
 		}
 	}
+}
+
+// nextRefresh is the wait before the next refresh after one that ended with err (nil on success)
+// and failures consecutive failures.
+func (a *Authority) nextRefresh(err error, failures int) time.Duration {
+	delay := regionalRefreshDelay()
+	a.relay.mu.Lock()
+	recovering := a.relay.recovery != nil
+	a.relay.mu.Unlock()
+	// Signed health observations expire regionalObservationMaxAge after they were
+	// made, not after they were issued. Active regional recovery renews before the
+	// earliest one ends, so its relays are not withdrawn between renewals.
+	if recovering {
+		delay = 8*time.Second + regionalProbeDelay()/2
+		if due, ok := a.regionalRenewalDelay(time.Now()); ok {
+			delay = due
+		}
+	}
+	// A signed configuration may be much shorter than the regional cadence.
+	// Reserve half its remaining lifetime (at most the request bound) for
+	// renewal. A failed refresh retries after a short, growing, jittered
+	// delay; cached authority still expires independently, including while a
+	// request is pending.
+	if err != nil {
+		delay = min(delay, refreshRetryDelay(failures))
+	}
+	return a.refreshDelay(delay)
 }
 
 // regionalRenewBefore is how long before the earliest signed observation ends a renewal starts;
