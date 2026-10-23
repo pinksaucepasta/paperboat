@@ -19,6 +19,11 @@ import (
 	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
 )
 
+// authorityOutageGrace bounds how long an admitted browser attachment survives
+// while its live authority check cannot get an answer. Revocations answered by
+// the authority still end the attachment on the next 2-second check.
+var authorityOutageGrace = 6 * time.Second
+
 // EdgeControlRequest travels on a node-authenticated control socket. Terminal
 // content never uses this connection.
 type EdgeControlRequest struct {
@@ -183,6 +188,7 @@ func (g *Gateway) ServeEdgeControl(w http.ResponseWriter, r *http.Request, nodeI
 	}()
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
+	var outageSince time.Time
 	for {
 		select {
 		case <-r.Context().Done():
@@ -198,12 +204,25 @@ func (g *Gateway) ServeEdgeControl(w http.ResponseWriter, r *http.Request, nodeI
 				active = checkErr == nil && sameDecision(admission.Decision, current)
 			}
 			cancel()
-			if !active || checkErr != nil {
-				if checkErr != nil {
-					reportEdgeAdmissionFailure(r.Context(), checkErr)
+			if checkErr != nil {
+				reportEdgeAdmissionFailure(r.Context(), checkErr)
+			}
+			if checkErr != nil && !expectedTerminalRejection(checkErr) {
+				// The authority could not answer (database or host overload). Keep
+				// the attachment for a short bounded grace; any answered refusal
+				// still ends it at once.
+				if outageSince.IsZero() {
+					outageSince = time.Now()
 				}
+				if time.Since(outageSince) > authorityOutageGrace {
+					_ = connection.Close(websocket.StatusPolicyViolation, "authority unavailable")
+					return
+				}
+			} else if !active || checkErr != nil {
 				_ = connection.Close(websocket.StatusPolicyViolation, "access revoked")
 				return
+			} else {
+				outageSince = time.Time{}
 			}
 			heartbeatCtx, stop := context.WithTimeout(r.Context(), 2*time.Second)
 			err = connection.Write(heartbeatCtx, websocket.MessageText, []byte("ok"))
