@@ -39,7 +39,7 @@ func TestRuntimeCarrierControlRequiresCompleteBoundSnapshot(t *testing.T) {
 					t.Fatal("missing authenticated runtime control binding")
 				}
 				request, _ := io.ReadAll(r.Body)
-				if string(request) != `{"edge_node_id":"edge_1","process_epoch":"edge_epoch_1","capabilities":["endpoints"]}` {
+				if string(request) != `{"edge_node_id":"edge_1","process_epoch":"edge_epoch_1","capabilities":["endpoints","tunnel_endpoints"]}` {
 					t.Fatalf("request %s", request)
 				}
 				return response(http.StatusOK, string(encoded)), nil

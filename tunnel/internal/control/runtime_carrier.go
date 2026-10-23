@@ -64,7 +64,7 @@ func (c *HTTPClient) RuntimeCarrierAdmissions(ctx context.Context, nodeID, epoch
 		return nil, ErrControlInvalid
 	}
 	var result runtimewire.Snapshot
-	if err := c.postNodeWithMaximumAndIdentity(ctx, runtimewire.EdgePullPath, nodeID, epoch, runtimewire.EdgeRequest{NodeID: nodeID, ProcessEpoch: epoch, Capabilities: []string{runtimewire.CapabilityEndpoints}}, &result, maxPreviewCarrierSnapshotBytes); err != nil {
+	if err := c.postNodeWithMaximumAndIdentity(ctx, runtimewire.EdgePullPath, nodeID, epoch, runtimewire.EdgeRequest{NodeID: nodeID, ProcessEpoch: epoch, Capabilities: []string{runtimewire.CapabilityEndpoints, runtimewire.CapabilityTunnelEndpoints}}, &result, maxPreviewCarrierSnapshotBytes); err != nil {
 		return nil, err
 	}
 	if result.Schema != runtimewire.Schema || !result.Complete || result.Admissions == nil || len(*result.Admissions) > runtimewire.MaximumAdmissions {
@@ -85,7 +85,7 @@ func (c *HTTPClient) EndpointAdmissions(ctx context.Context, nodeID, epoch strin
 		return nil, ErrControlInvalid
 	}
 	var result runtimewire.Snapshot
-	if err := c.postNodeWithMaximumAndIdentity(ctx, runtimewire.EdgeEndpointPullPath, nodeID, epoch, runtimewire.EdgeRequest{NodeID: nodeID, ProcessEpoch: epoch, Capabilities: []string{runtimewire.CapabilityEndpoints}}, &result, maxPreviewCarrierSnapshotBytes); err != nil {
+	if err := c.postNodeWithMaximumAndIdentity(ctx, runtimewire.EdgeEndpointPullPath, nodeID, epoch, runtimewire.EdgeRequest{NodeID: nodeID, ProcessEpoch: epoch, Capabilities: []string{runtimewire.CapabilityEndpoints, runtimewire.CapabilityTunnelEndpoints}}, &result, maxPreviewCarrierSnapshotBytes); err != nil {
 		return nil, err
 	}
 	if result.Schema != runtimewire.Schema || !result.Complete || result.Admissions == nil || len(*result.Admissions) > runtimewire.MaximumAdmissions {

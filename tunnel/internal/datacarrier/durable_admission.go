@@ -114,6 +114,19 @@ type DurableAdmissionRegistry struct {
 	mu     sync.RWMutex
 	closed bool
 	byID   map[string]durableAdmissionEntry
+	// changed is closed (and replaced) by every Replace, so a carrier waiting to learn whether it
+	// serves routes (an agent's runtime carrier, PLAN 3a) hears of new admissions at once.
+	changed chan struct{}
+}
+
+// Changed returns a channel closed at the next Replace.
+func (r *DurableAdmissionRegistry) Changed() <-chan struct{} {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.changed == nil {
+		r.changed = make(chan struct{})
+	}
+	return r.changed
 }
 
 type DurableAdmissionRegistryConfig struct {
@@ -201,6 +214,10 @@ func (r *DurableAdmissionRegistry) Replace(admissions []DurableAdmission, now ti
 		return ErrCarrierClosed
 	}
 	r.byID = next
+	if r.changed != nil {
+		close(r.changed)
+		r.changed = nil
+	}
 	return nil
 }
 

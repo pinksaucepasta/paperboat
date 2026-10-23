@@ -167,6 +167,12 @@ func newCarrierComponentWithTelemetry(
 				return err
 			}
 		}
+		// An agent's runtime carrier also carries the agent's tunnel routes once its tunnels are on
+		// the endpoint engine (PLAN 3a step 4): it becomes their replica whenever the durable
+		// admissions name its identity, which can happen any time after it connected. A failure to
+		// attach it is reported and retried; it must not close a carrier that serves the agent's
+		// runtime route and previews.
+		engineReplica := runtimeAttached && !durableLifecycle && durableExpected != nil && durableRoutes != nil
 		if !runtimeAttached && !previewAttached && !durableAuthorized && !accessorAttached {
 			return datacarrier.ErrDurableAdmissionMissing
 		}
@@ -196,6 +202,36 @@ func newCarrierComponentWithTelemetry(
 							results <- err
 							return
 						}
+					}
+				}
+			}()
+		}
+		if engineReplica {
+			// The deferred Detach runs only after this loop stopped, so it cannot re-attach a gone carrier.
+			engineDone := make(chan struct{})
+			defer func() { cancel(); <-engineDone }()
+			go func() {
+				defer close(engineDone)
+				ticker := time.NewTicker(deployment.ControlInterval)
+				defer ticker.Stop()
+				for {
+					// Taken before the sync so a Replace during it is not missed.
+					changed := durableExpected.Changed()
+					err := syncDurable(time.Now().UTC())
+					if errors.Is(err, datacarrier.ErrDurableAdmissionMissing) {
+						// No active or staged route names this carrier (yet, or any more).
+						if durableRegistered {
+							_ = durableRoutes.Detach(server)
+							durableRegistered = false
+						}
+					} else if err != nil {
+						reporter.ObserveFailure(handlerCtx, "carrier_handler", err)
+					}
+					select {
+					case <-handlerCtx.Done():
+						return
+					case <-changed:
+					case <-ticker.C:
 					}
 				}
 			}()

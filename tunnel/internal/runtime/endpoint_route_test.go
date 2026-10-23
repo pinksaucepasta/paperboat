@@ -98,6 +98,18 @@ func TestEndpointRouteRidesOnTheAgentRuntimeCarrier(t *testing.T) {
 	if routes.Len() != 1 {
 		t.Fatalf("runtime registry holds %d routes, want only the runtime route", routes.Len())
 	}
+	// A restricted (team) endpoint route's browser stream is authorized by the runtime admission with
+	// the private-access decision the preview transport builds from the registry route (F7-03).
+	open := datacarrier.StreamOpen{AccountID: route.Identity.AccountID, TunnelID: route.Identity.TunnelID, ConnectorID: route.Identity.ConnectorID,
+		SessionID: route.Identity.SessionID, ProcessGeneration: route.Identity.ProcessGeneration, Generation: route.Identity.Generation, RouteID: route.RouteID}
+	decisionCtx := datacarrier.WithPrivateAccessDecision(ctx, datacarrier.PrivateAccessDecision{
+		Allowed: true, ExpiresAt: time.Now().Add(time.Minute), ResourceID: route.PreviewID, RouteID: route.RouteID, OperationID: route.OperationID,
+		CarrierSessionID: route.Identity.SessionID, RouteGeneration: route.Revision, ProcessGeneration: route.Identity.ProcessGeneration,
+		ConfigGeneration: route.Identity.Generation, Protocol: "http",
+	})
+	if err := expected.AuthorizeStream(decisionCtx, route.Identity, open); err != nil {
+		t.Fatalf("restricted endpoint browser stream refused by the runtime admission: %v (route %+v)", err, route)
+	}
 
 	// The preview carrier worker's complete snapshot does not list endpoint routes; it must keep them.
 	previews := &previewCarrierSourceFake{}
