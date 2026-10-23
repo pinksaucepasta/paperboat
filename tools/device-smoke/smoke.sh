@@ -854,7 +854,7 @@ if sys.argv[2] in ("team-lifecycle", "team-roles"):
 elif sys.argv[2]=="doctor-lifecycle":
  assert all(r[k] for k in ("healthy_requires_terminal_and_exec", "failure_explained", "repair_recovers"))
 elif sys.argv[2]=="session-limit":
- assert r["limit"]==20 and r["clear_message"] and r["closed_not_counted"]
+ assert r["opened"]==25 and r["closed_not_counted"] and r["reopened_after_close"]==5
 elif sys.argv[2]=="tunnel-transfer":
  assert r["upload_16mib"] and r["download_16mib"]
 elif sys.argv[2]=="tunnel-survival":

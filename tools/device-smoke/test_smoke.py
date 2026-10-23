@@ -463,6 +463,23 @@ exit "$FAILED"
             self.assertIn('split-ac', result.stdout)
             self.assertIn('real-ad', result.stdout)
 
+    def test_session_limit_is_judged_by_the_receipt_session_limit_py_prints(self):
+        # session_limit.py (0e712b6b) prints opened/closed_not_counted/reopened_after_close; the suite still
+        # asserted the old limit/clear_message keys and recorded a passing run as FAIL.
+        prefix = (HERE / 'smoke.sh').read_text().split('# ---------------------------------------------------------------- run')[0]
+        receipt = ('{"check": "session-limit", "target": "hp", "status": "PASS", "opened": %d, '
+                   '"closed_not_counted": true, "reopened_after_close": 5, "max_open_seconds": 3.5}')
+        with tempfile.TemporaryDirectory() as directory:
+            script = pathlib.Path(directory) / 'smoke.sh'
+            self.write_script(script, prefix + '\nTLIST=(hp)\nstage_terminal_fixtures() { return 0; }\n'
+                              'on() { printf %s "$FAKE_RECEIPT"; }\ntest_device_application session-limit session_limit.py\n')
+            for opened, expected in ((25, 'session-limit:hp PASS'), (7, 'session-limit:hp FAIL')):
+                result = subprocess.run(['bash', str(script), '--expect-version', 'test', '--targets', 'hp'],
+                                        env=dict(os.environ, FAKE_RECEIPT=receipt % opened),
+                                        capture_output=True, text=True, timeout=30)
+                self.assertIn(expected.split()[0], result.stdout, result.stdout + result.stderr)
+                self.assertRegex(result.stdout, r'session-limit:hp\s+' + expected.split()[1], result.stdout)
+
     def test_private_https_reads_the_domain_where_local_access_show_reports_it(self):
         # `pb config local-access show --json` carries the domain at the top level, beside local_access
         # (the machine guard owns it); the check used to read local_access.domain and died on a KeyError.
