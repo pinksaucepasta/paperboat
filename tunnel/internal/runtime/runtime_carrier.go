@@ -26,12 +26,21 @@ type RuntimeCarrierWorker struct {
 	Endpoints          *edgehttp.DataCarrierPreviewRegistry
 	BrowserTerminalHub *edgehttp.BrowserTerminalHub
 	Interval           time.Duration
-	Timeout            time.Duration
-	mu                 sync.Mutex
-	cancel             context.CancelFunc
-	done               chan struct{}
-	wake               chan struct{}
-	closed             bool
+	// EndpointInterval paces the small endpoint-only pull (PLAN 3a) that admits a new preview or
+	// tunnel route within a second; zero disables it (endpoint routes then follow full pulls).
+	EndpointInterval time.Duration
+	Timeout          time.Duration
+	// runtimeSet and endpointSet are the latest runtime and endpoint admissions; only the worker
+	// goroutine touches them. endpointPause stops fast pulls until the next full pull after one
+	// fails (for example on a server that does not serve them yet).
+	runtimeSet    []runtimewire.Admission
+	endpointSet   []runtimewire.Admission
+	endpointPause bool
+	mu            sync.Mutex
+	cancel        context.CancelFunc
+	done          chan struct{}
+	wake          chan struct{}
+	closed        bool
 }
 
 func (w *RuntimeCarrierWorker) Start(ctx context.Context) error {
@@ -55,12 +64,20 @@ func (w *RuntimeCarrierWorker) Start(ctx context.Context) error {
 		w.reconcile(run)
 		ticker := time.NewTicker(w.Interval)
 		defer ticker.Stop()
+		var fast <-chan time.Time
+		if w.EndpointInterval > 0 {
+			fastTicker := time.NewTicker(w.EndpointInterval)
+			defer fastTicker.Stop()
+			fast = fastTicker.C
+		}
 		for {
 			select {
 			case <-run.Done():
 				return
 			case <-ticker.C:
 				w.reconcile(run)
+			case <-fast:
+				w.reconcileEndpoints(run)
 			case <-w.wake:
 				w.observe(run)
 			}
@@ -123,20 +140,81 @@ func (w *RuntimeCarrierWorker) reconcile(parent context.Context) (failure error)
 	defer cancel()
 	values, err := w.Source.RuntimeCarrierAdmissions(ctx, w.Expected.NodeID(), w.Expected.ProcessEpoch())
 	if err == nil {
-		expected := make([]datacarrier.ExpectedAdmission, 0, len(values))
+		w.runtimeSet, w.endpointSet = w.runtimeSet[:0], w.endpointSet[:0]
 		for _, value := range values {
-			a, e := control.ExpectedRuntimeAdmission(value, w.Expected.NodeID(), w.Expected.ProcessEpoch(), time.Now().UTC())
-			if e != nil {
-				return e
+			if value.EndpointID != "" {
+				w.endpointSet = append(w.endpointSet, value)
+			} else {
+				w.runtimeSet = append(w.runtimeSet, value)
 			}
-			expected = append(expected, a)
 		}
-		if err = w.Expected.Replace(expected, time.Now().UTC()); err != nil {
+		w.endpointPause = false
+		if err = w.install(); err != nil {
 			return err
 		}
 	}
-	// A successful complete pull withdraws revoked routes. Credential expiry
-	// during an outage never revokes an admitted carrier.
+	w.withdraw()
+	w.observe(parent)
+	return err
+}
+
+// reconcileEndpoints replaces only the endpoint routes, from the small endpoint-only pull. A
+// failed pull keeps the last good set and pauses fast pulls until the next full pull.
+func (w *RuntimeCarrierWorker) reconcileEndpoints(parent context.Context) (failure error) {
+	if w.endpointPause {
+		return nil
+	}
+	defer func() { observeWorkerFailure(parent, w.Reporter, "endpoint_admission", failure) }()
+	ctx, cancel := context.WithTimeout(parent, w.Timeout)
+	defer cancel()
+	values, err := w.Source.EndpointAdmissions(ctx, w.Expected.NodeID(), w.Expected.ProcessEpoch())
+	if err != nil {
+		w.endpointPause = true
+		return err
+	}
+	if endpointSetEqual(w.endpointSet, values) {
+		return nil
+	}
+	w.endpointSet = append(w.endpointSet[:0], values...)
+	if err := w.install(); err != nil {
+		return err
+	}
+	w.withdraw()
+	w.observe(parent)
+	return nil
+}
+
+func endpointSetEqual(a, b []runtimewire.Admission) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].Binding != b[i].Binding || a[i].AttachmentGeneration != b[i].AttachmentGeneration || a[i].Hostname != b[i].Hostname || a[i].RouteKind != b[i].RouteKind || a[i].RouteRevision != b[i].RouteRevision || a[i].EndpointID != b[i].EndpointID || a[i].AccessMode != b[i].AccessMode {
+			return false
+		}
+	}
+	return true
+}
+
+// install makes the expected admissions the latest runtime and endpoint sets.
+func (w *RuntimeCarrierWorker) install() error {
+	now := time.Now().UTC()
+	expected := make([]datacarrier.ExpectedAdmission, 0, len(w.runtimeSet)+len(w.endpointSet))
+	for _, set := range [][]runtimewire.Admission{w.runtimeSet, w.endpointSet} {
+		for _, value := range set {
+			a, err := control.ExpectedRuntimeAdmission(value, w.Expected.NodeID(), w.Expected.ProcessEpoch(), now)
+			if err != nil {
+				return err
+			}
+			expected = append(expected, a)
+		}
+	}
+	return w.Expected.Replace(expected, now)
+}
+
+// withdraw detaches routes the expected admissions no longer allow. Credential expiry during an
+// outage never revokes an admitted carrier: only a successful pull changes the set.
+func (w *RuntimeCarrierWorker) withdraw() {
 	allowed := map[string]datacarrier.ExpectedAdmission{}
 	for _, a := range w.Expected.Snapshot() {
 		if a.Admitted {
@@ -149,8 +227,6 @@ func (w *RuntimeCarrierWorker) reconcile(parent context.Context) (failure error)
 			w.detachRoute(r)
 		}
 	}
-	w.observe(parent)
-	return err
 }
 
 func (w *RuntimeCarrierWorker) observe(parent context.Context) (failure error) {

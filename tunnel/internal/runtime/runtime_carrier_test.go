@@ -17,6 +17,7 @@ type runtimeSourceFake struct {
 	mu           sync.Mutex
 	admissions   []runtimewire.Admission
 	err          error
+	endpointErr  error
 	observations []runtimewire.Observation
 }
 
@@ -24,6 +25,17 @@ func (s *runtimeSourceFake) RuntimeCarrierAdmissions(context.Context, string, st
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]runtimewire.Admission(nil), s.admissions...), s.err
+}
+func (s *runtimeSourceFake) EndpointAdmissions(context.Context, string, string) ([]runtimewire.Admission, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := []runtimewire.Admission{}
+	for _, a := range s.admissions {
+		if a.EndpointID != "" {
+			out = append(out, a)
+		}
+	}
+	return out, s.endpointErr
 }
 func (s *runtimeSourceFake) ObserveRuntimeCarriers(_ context.Context, _, _ string, o []runtimewire.Observation) error {
 	s.mu.Lock()

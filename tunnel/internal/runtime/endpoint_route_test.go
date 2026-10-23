@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -123,5 +124,52 @@ func TestEndpointRouteRidesOnTheAgentRuntimeCarrier(t *testing.T) {
 	waitRuntime(t, func() bool { _, ok := endpoints.Lookup("bright-otter.preview.example.test"); return !ok })
 	if routes.Len() != 1 {
 		t.Fatal("withdrawing the endpoint route detached the runtime route")
+	}
+}
+
+// A new preview's route is admitted by the small endpoint-only pull within a second, without
+// waiting for the next full runtime pull; a failed fast pull keeps the routes already admitted.
+func TestEndpointRouteIsAdmittedByTheFastPullBetweenFullPulls(t *testing.T) {
+	runtimeRoute := runtimeAdmission(t)
+	endpoint := endpointAdmission(runtimeRoute, "public")
+	epoch := runtimeRoute.Binding.EdgeProcessEpoch
+	source := &runtimeSourceFake{admissions: []runtimewire.Admission{runtimeRoute}}
+	expected, err := datacarrier.NewExpectedAdmissionRegistry(datacarrier.ExpectedAdmissionRegistryConfig{NodeID: runtimeRoute.Binding.EdgeNodeID, ProcessEpoch: epoch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	routes, err := edgehttp.NewDataCarrierPreviewRegistry(edgehttp.DataCarrierPreviewRegistryConfig{BaseDomain: "runtime.example.test", ProcessEpoch: epoch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoints := endpointRegistry(t, epoch)
+	w := &RuntimeCarrierWorker{Source: source, Expected: expected, Routes: routes, Endpoints: endpoints, Interval: 4 * time.Minute, EndpointInterval: 20 * time.Millisecond, Timeout: time.Second}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := w.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = w.Shutdown(context.Background()) }()
+	ea, err := control.ExpectedRuntimeAdmission(runtimeRoute, runtimeRoute.Binding.EdgeNodeID, epoch, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := newPreviewCarrierTestServer(t, ea.Identity)
+	go func() { _ = w.Handle(ctx, server) }()
+	waitRuntime(t, func() bool { return routes.Len() == 1 })
+	started := time.Now()
+	source.mu.Lock()
+	source.admissions = []runtimewire.Admission{runtimeRoute, endpoint}
+	source.mu.Unlock()
+	waitRuntime(t, func() bool { _, ok := endpoints.Lookup("bright-otter.preview.example.test"); return ok })
+	if waited := time.Since(started); waited > time.Second {
+		t.Fatalf("endpoint route admitted after %v, want the fast pull (< 1 s)", waited)
+	}
+	source.mu.Lock()
+	source.endpointErr = errors.New("control unavailable")
+	source.mu.Unlock()
+	time.Sleep(100 * time.Millisecond)
+	if _, ok := endpoints.Lookup("bright-otter.preview.example.test"); !ok {
+		t.Fatal("a failed fast pull withdrew an admitted endpoint route")
 	}
 }

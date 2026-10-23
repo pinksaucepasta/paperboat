@@ -55,6 +55,7 @@ func ExpectedRuntimeAdmission(a runtimewire.Admission, nodeID, epoch string, now
 
 type RuntimeCarrierSource interface {
 	RuntimeCarrierAdmissions(context.Context, string, string) ([]runtimewire.Admission, error)
+	EndpointAdmissions(context.Context, string, string) ([]runtimewire.Admission, error)
 	ObserveRuntimeCarriers(context.Context, string, string, []runtimewire.Observation) error
 }
 
@@ -71,6 +72,30 @@ func (c *HTTPClient) RuntimeCarrierAdmissions(ctx context.Context, nodeID, epoch
 	}
 	now := time.Now().UTC()
 	for _, a := range *result.Admissions {
+		if _, err := ExpectedRuntimeAdmission(a, nodeID, epoch, now); err != nil {
+			return nil, documentFailure{sentinel: ErrControlUnavailable, cause: err}
+		}
+	}
+	return *result.Admissions, nil
+}
+
+// EndpointAdmissions pulls only the endpoint routes of the edge's runtime snapshot (PLAN 3a).
+func (c *HTTPClient) EndpointAdmissions(ctx context.Context, nodeID, epoch string) ([]runtimewire.Admission, error) {
+	if connectorprotocol.ValidateIdentifier(nodeID) != nil || connectorprotocol.ValidateOpaqueEpoch(epoch) != nil {
+		return nil, ErrControlInvalid
+	}
+	var result runtimewire.Snapshot
+	if err := c.postNodeWithMaximumAndIdentity(ctx, runtimewire.EdgeEndpointPullPath, nodeID, epoch, runtimewire.EdgeRequest{NodeID: nodeID, ProcessEpoch: epoch, Capabilities: []string{runtimewire.CapabilityEndpoints}}, &result, maxPreviewCarrierSnapshotBytes); err != nil {
+		return nil, err
+	}
+	if result.Schema != runtimewire.Schema || !result.Complete || result.Admissions == nil || len(*result.Admissions) > runtimewire.MaximumAdmissions {
+		return nil, ErrControlUnavailable
+	}
+	now := time.Now().UTC()
+	for _, a := range *result.Admissions {
+		if a.EndpointID == "" {
+			return nil, documentFailure{sentinel: ErrControlUnavailable, cause: ErrControlInvalid}
+		}
 		if _, err := ExpectedRuntimeAdmission(a, nodeID, epoch, now); err != nil {
 			return nil, documentFailure{sentinel: ErrControlUnavailable, cause: err}
 		}
