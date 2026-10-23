@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"syscall"
 
 	"github.com/pinksaucepasta/paperboat/internal/serverclock"
 )
@@ -58,6 +59,11 @@ func NewRenewableNativeClient(initial NativeGrant, renew func(context.Context) (
 	client.HTTPClient.Transport = owner
 	client.RefreshAuth = func(ctx context.Context) (Auth, error) {
 		fresh, err := renew(ctx)
+		if err != nil && localDaemonRestarting(err) {
+			// The local daemon is restarting (an update): the transfer waits for it and renews then,
+			// inside the native recovery window, instead of failing as refused.
+			return Auth{}, &localDaemonUnavailable{err}
+		}
 		if err != nil {
 			return Auth{}, &nativeAuthorizationFailure{err}
 		}
@@ -123,6 +129,10 @@ func (o *nativeGrantOwner) RoundTrip(request *http.Request) (*http.Response, err
 	response, err := grant.transport.RoundTrip(request)
 	if err != nil {
 		o.release(grant)
+		if localDaemonRestarting(err) {
+			// The lease's stream goes through the local daemon, which is restarting.
+			err = &localDaemonUnavailable{err}
+		}
 		return response, err
 	}
 	if response.Body == nil {
@@ -189,4 +199,20 @@ func (b *nativeGrantBody) Close() error {
 	err := b.ReadCloser.Close()
 	b.once.Do(b.release)
 	return err
+}
+
+// localDaemonUnavailable is a renewal that could not reach the restarting local daemon; it is retried.
+type localDaemonUnavailable struct{ cause error }
+
+func (e *localDaemonUnavailable) Error() string {
+	return "the local Paperboat daemon is restarting: " + e.cause.Error()
+}
+func (e *localDaemonUnavailable) Unwrap() error { return e.cause }
+
+// localDaemonRestarting reports whether a renewal failed only because the local daemon's socket is
+// missing or not accepting yet, as while it restarts.
+func localDaemonRestarting(err error) bool {
+	var dial *net.OpError
+	return errors.As(err, &dial) && dial.Op == "dial" && dial.Net == "unix" &&
+		(errors.Is(err, syscall.ENOENT) || errors.Is(err, syscall.ECONNREFUSED))
 }

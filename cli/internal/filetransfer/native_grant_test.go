@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -25,13 +26,17 @@ import (
 )
 
 type nativeTestLease struct {
-	address  string
-	expires  time.Time
-	closed   atomic.Bool
-	closeErr error
+	address    string
+	expires    time.Time
+	closed     atomic.Bool
+	closeErr   error
+	daemonDown *atomic.Bool // the lease's streams go through a local daemon that is restarting
 }
 
 func (l *nativeTestLease) OpenTransferStream(ctx context.Context) (net.Conn, error) {
+	if l.daemonDown != nil && l.daemonDown.Load() {
+		return nil, &net.OpError{Op: "dial", Net: "unix", Err: os.NewSyscallError("connect", syscall.ENOENT)}
+	}
 	if l.closed.Load() || !l.expires.After(time.Now()) {
 		return nil, net.ErrClosed
 	}
@@ -40,8 +45,13 @@ func (l *nativeTestLease) OpenTransferStream(ctx context.Context) (net.Conn, err
 func (l *nativeTestLease) Close() error { l.closed.Store(true); return l.closeErr }
 
 func TestNativeTransferReauthorizesLostConnectionWithoutNewBatch(t *testing.T) {
-	for _, denied := range []bool{false, true} {
-		t.Run(strconv.FormatBool(denied), func(t *testing.T) {
+	// restarting: the renewal first finds the local daemon's socket gone, as while an update restarts
+	// it (F14-02: two 50 MiB sends in flight across pb update failed instead of resuming).
+	for _, mode := range []string{"allowed", "denied", "restarting"} {
+		t.Run(mode, func(t *testing.T) {
+			denied := mode == "denied"
+			daemonDown := 0
+			var restarting atomic.Bool
 			data := bytes.Repeat([]byte("bounded"), protocol.FileTransferChunkBytes/7+17)
 			item := source(data)
 			manifest := Manifest{TransferID: "ft_renew", BatchID: "batch_renew", SourceMachineID: "machine_source", DestinationMachineID: "machine_destination", InitiatingUserID: "user_1", Basename: item.Basename, Size: item.Size, SHA256: hex.EncodeToString(item.SHA256[:])}
@@ -104,6 +114,7 @@ func TestNativeTransferReauthorizesLostConnectionWithoutNewBatch(t *testing.T) {
 						oldExpired = true
 						// Commit the chunk, then lose the response and original carrier.
 						first.closed.Store(true)
+						restarting.Store(mode == "restarting")
 						connection, _, hijackErr := w.(http.Hijacker).Hijack()
 						if hijackErr != nil {
 							t.Error(hijackErr)
@@ -126,11 +137,16 @@ func TestNativeTransferReauthorizesLostConnectionWithoutNewBatch(t *testing.T) {
 				}
 			}))
 			defer server.Close()
-			first = &nativeTestLease{address: server.Listener.Addr().String(), expires: time.Now().Add(5 * time.Minute)}
+			first = &nativeTestLease{address: server.Listener.Addr().String(), expires: time.Now().Add(5 * time.Minute), daemonDown: &restarting}
 			var replacement *nativeTestLease
 			initial := NativeGrant{Endpoint: server.URL + "/v1/file-transfers", Auth: Auth{Token: "original", ExpiresAt: first.expires}, Binding: testBinding(), Policy: policy, Lease: first}
 			var err error
 			client, err = NewRenewableNativeClient(initial, func(ctx context.Context) (NativeGrant, error) {
+				if mode == "restarting" && daemonDown < 3 {
+					daemonDown++
+					restarting.Store(daemonDown < 3)
+					return NativeGrant{}, fmt.Errorf("renew file transfer grant: %w", &net.OpError{Op: "dial", Net: "unix", Err: os.NewSyscallError("connect", syscall.ENOENT)})
+				}
 				body, _ := json.Marshal(testBinding())
 				request, _ := http.NewRequestWithContext(ctx, http.MethodPost, server.URL+"/authorize", bytes.NewReader(body))
 				request.Header.Set("Authorization", "Bearer account")
@@ -171,6 +187,9 @@ func TestNativeTransferReauthorizesLostConnectionWithoutNewBatch(t *testing.T) {
 			}
 			if creates != 1 || renewals != 1 {
 				t.Fatal("recovery created a new batch or repeatedly probed authorization")
+			}
+			if mode == "restarting" && daemonDown != 3 {
+				t.Fatal("renewal did not wait for the restarting daemon", daemonDown)
 			}
 			if !denied && maintenanceResponses != 6 {
 				t.Fatal("transfer did not recover beyond the former four-failure limit")
