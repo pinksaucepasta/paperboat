@@ -80,7 +80,7 @@ func startLoadServer(t *testing.T) *loadServer {
 	cfg.HTTP.BrowserLoginOrigin = loadOrigin
 	// Discovery like a deployed server, so GET /v1/client-configuration answers 200 (unconfigured it is a constant
 	// 503 that counted one in seven requests as failures in the first staging runs). Test domains only.
-	cfg.HTTP.PublicBaseURL, cfg.ReleaseBaseURL = "http://api.example.test", "http://api.example.test"
+	cfg.HTTP.PublicBaseURL, cfg.ReleaseBaseURL = "http://api.example.test", "https://api.example.test"
 	cfg.CLIAuth.VerificationURL, cfg.CLIAuth.MachinesURL = loadOrigin+"/cli", loadOrigin+"/machines"
 	cfg.LocalAccessBaseDomain, cfg.RuntimeBaseDomain = "local.example.test", "runtime.example.test"
 	cfg.Preview.BaseDomain, cfg.Tunnel.BaseDomain = "preview.example.test", "tunnel.example.test"
