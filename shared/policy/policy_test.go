@@ -409,3 +409,32 @@ func TestExactRolesMatchOnlyThatRole(t *testing.T) {
 		}
 	}
 }
+
+func TestTeamOwnerKeepsTeamENVAgainstAnyDeny(t *testing.T) {
+	c := mustCompile(t, `{"rules": [
+		{"src": ["*"], "dst": ["env:team"], "deny": ["env_read", "env_write"]},
+		{"src": ["role:admin"], "dst": ["env:team"], "allow": ["env_read", "env_write"]},
+	]}`, team())
+	env := Target{Kind: "env", ID: "acme"}
+	for _, action := range []string{ActionENVRead, ActionENVWrite} {
+		if d := c.Decide("ana", env, action, 0); !d.Allowed || d.Reason != "owner" {
+			t.Fatalf("the team owner keeps the team ENV (%s): %+v", action, d)
+		}
+		if d := c.Decide("bo", env, action, 0); d.Allowed || d.Reason != "denied_by_rule" {
+			t.Fatalf("an admin follows the rules (%s): %+v", action, d)
+		}
+	}
+}
+
+func TestChangesNeverListTheOwnerGuardrail(t *testing.T) {
+	before := mustCompile(t, `{"rules": [{"src": ["role:admin"], "dst": ["env:team"], "allow": ["env_read", "env_write"]}]}`, team())
+	after := mustCompile(t, `{"rules": []}`, team())
+	var got []string
+	for _, c := range Changes(before, after) {
+		got = append(got, c.Change+" "+c.Subject+" "+c.Action)
+	}
+	want := []string{"lost user:bo@example.test env_read", "lost user:bo@example.test env_write"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("the owner keeps the team ENV, so only the admin loses it: %q", got)
+	}
+}

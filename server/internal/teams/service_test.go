@@ -715,7 +715,6 @@ func TestPostgresENVGrantRevocationRequiresRotation(t *testing.T) {
 		`INSERT INTO team_resource_bindings(team_id,resource_kind,resource_id,owner_account) VALUES($1,'env',$1,$2)`,
 		`INSERT INTO environment_vault_teams(team_id,key_epoch) SELECT $1,1 WHERE $2<>''`,
 		`INSERT INTO environment_vault_team_members(team_id,account_id,grant_epoch) VALUES($1,$2,1)`,
-		`INSERT INTO team_resource_grants(team_id,account_id,resource_kind,resource_id,permission,generation,active) VALUES($1,$2,'env',$1,'read',1,true)`,
 		`INSERT INTO environment_vault_scopes(workspace_id,owner_kind,owner_id,machine_id,key_epoch,revision,document_id,envelope,writer_public) SELECT $1,'team',$1,'',1,1,'sha256:'||repeat('a',64),decode('01','hex'),decode(repeat('13',32),'hex') WHERE $2<>''`,
 		`INSERT INTO environment_vault_layer_fences(workspace_id,owner_kind,owner_id,source_machine_id,generation) SELECT $1,'team',$1,'',1 WHERE $2<>''`,
 	} {
@@ -723,11 +722,16 @@ func TestPostgresENVGrantRevocationRequiresRotation(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	setENVAccess(t, store, grantTeam, ordinary, "read")
 	if grantState, err = s.Get(ctx, owner, grantTeam); err != nil || grantState.ENVStatus != "ready" {
 		t.Fatalf("grant fixture ENV state=%s err=%v", grantState.ENVStatus, err)
 	}
 	if _, err = s.Authorize(ctx, ordinary, grantTeam, "env", grantTeam, "read"); err != nil {
 		t.Fatal("grant baseline", err)
+	}
+	var fenceBefore uint64
+	if err := store.SQL().QueryRowContext(ctx, `SELECT generation FROM environment_vault_layer_fences WHERE owner_kind='team' AND owner_id=$1`, grantTeam).Scan(&fenceBefore); err != nil {
+		t.Fatal(err)
 	}
 	grantState, err = s.Grant(ctx, owner, grantTeam, GrantRequest{OperationID: "revoke_initialized_env_grant", ExpectedGeneration: grantState.Generation, AccountID: ordinary, ResourceKind: "env", ResourceID: grantTeam, Permission: "read", Active: false})
 	if err != nil || grantState.ENVStatus != "rotation_pending" {
@@ -735,7 +739,7 @@ func TestPostgresENVGrantRevocationRequiresRotation(t *testing.T) {
 	}
 	var grantPending bool
 	var grantEpoch, grantFence uint64
-	if err := store.SQL().QueryRowContext(ctx, `SELECT t.rotation_required,m.grant_epoch,f.generation FROM environment_vault_teams t JOIN environment_vault_team_members m USING(team_id) JOIN environment_vault_layer_fences f ON f.owner_kind='team' AND f.owner_id=t.team_id WHERE t.team_id=$1 AND m.account_id=$2`, grantTeam, ordinary).Scan(&grantPending, &grantEpoch, &grantFence); err != nil || !grantPending || grantEpoch != 0 || grantFence != 2 {
+	if err := store.SQL().QueryRowContext(ctx, `SELECT t.rotation_required,m.grant_epoch,f.generation FROM environment_vault_teams t JOIN environment_vault_team_members m USING(team_id) JOIN environment_vault_layer_fences f ON f.owner_kind='team' AND f.owner_id=t.team_id WHERE t.team_id=$1 AND m.account_id=$2`, grantTeam, ordinary).Scan(&grantPending, &grantEpoch, &grantFence); err != nil || !grantPending || grantEpoch != 0 || grantFence != fenceBefore+1 {
 		t.Fatalf("grant revocation custody/fence: pending=%t epoch=%d fence=%d err=%v", grantPending, grantEpoch, grantFence, err)
 	}
 	if _, err = s.Authorize(ctx, ordinary, grantTeam, "env", grantTeam, "read"); !errors.Is(err, ErrForbidden) {

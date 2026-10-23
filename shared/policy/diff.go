@@ -43,7 +43,7 @@ func portsLabel(ps []PortRange) string {
 // with the policy and is not listed.
 func Changes(before, after Compiled) []Change {
 	var out []Change
-	b, a := before.Enforced(), after.Enforced()
+	b, a := before.unowned(before.Enforced()), after.unowned(after.Enforced())
 	i, j := 0, 0
 	for i < len(b) || j < len(a) {
 		switch {
@@ -58,6 +58,17 @@ func Changes(before, after Compiled) []Change {
 				out = append(out, Change{Change: "lost", Access: before.access(b[i])}, Change{Change: "gained", Access: after.access(a[j])})
 			}
 			i, j = i+1, j+1
+		}
+	}
+	return out
+}
+
+// unowned drops the grants the owner guardrail gives anyway: they never change with the policy.
+func (c Compiled) unowned(gs []Grant) []Grant {
+	out := make([]Grant, 0, len(gs))
+	for _, g := range gs {
+		if !c.owns(g.Account, g.Target, g.Action) {
+			out = append(out, g)
 		}
 	}
 	return out

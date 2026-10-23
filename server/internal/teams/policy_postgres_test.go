@@ -171,7 +171,8 @@ func TestPolicySaveReviewAndRights(t *testing.T) {
 	if err != nil || cur.CanEdit != "all" || cur.Version != 1 {
 		t.Fatalf("%+v %v", cur, err)
 	}
-	gain := `{"rules": [{"src": ["role:member"], "dst": ["machine:db1"], "allow": ["exec"]}]}`
+	// A team's version 1 lets owners and admins use the team ENV; this save keeps that rule.
+	gain := `{"rules": [{"src": ["role:admin"], "dst": ["env:team"], "allow": ["env_read", "env_write"]}, {"src": ["role:member"], "dst": ["machine:db1"], "allow": ["exec"]}]}`
 	_, err = f.service.SavePolicy(f.ctx, f.owner, f.team, PolicySaveRequest{Policy: `{"rules": [{"src": ["*"], "dst": ["machine:nope"], "allow": ["exec"]}]}`, ExpectedVersion: 1})
 	var invalid *PolicyInvalidError
 	if !errors.As(err, &invalid) || invalid.Errors[0].Code != "unknown_machine" {
@@ -197,7 +198,7 @@ func TestPolicySaveReviewAndRights(t *testing.T) {
 	if view.CanEdit != "own_machines" {
 		t.Fatalf("%+v", view)
 	}
-	own := fmt.Sprintf(`{"rules": [{"src": ["role:member"], "dst": ["machine:db1"], "allow": ["exec"]}, {"src": ["role:member"], "dst": ["machine:%s/web1"], "allow": ["files"]}]}`, f.email(f.member))
+	own := fmt.Sprintf(`{"rules": [{"src": ["role:admin"], "dst": ["env:team"], "allow": ["env_read", "env_write"]}, {"src": ["role:member"], "dst": ["machine:db1"], "allow": ["exec"]}, {"src": ["role:member"], "dst": ["machine:%s/web1"], "allow": ["files"]}]}`, f.email(f.member))
 	if _, err = f.service.SavePolicy(f.ctx, f.member, f.team, PolicySaveRequest{Policy: own, ExpectedVersion: 2}); err != nil && !errors.As(err, &unconfirmed) {
 		t.Fatalf("own machine edit refused: %v", err)
 	}
@@ -209,7 +210,7 @@ func TestPolicySaveReviewAndRights(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 	ex, err := f.service.ExplainPolicy(f.ctx, f.member, f.team, PolicyExplainRequest{Src: "user:" + f.email(f.member), Dst: "machine:db1", Action: "exec"})
-	if err != nil || ex.Decision == nil || !ex.Decision.Allowed || ex.Decision.Rules[0] != "/rules/0" {
+	if err != nil || ex.Decision == nil || !ex.Decision.Allowed || ex.Decision.Rules[0] != "/rules/1" {
 		t.Fatalf("%+v %v", ex.Decision, err)
 	}
 	// A scoped API token is narrowed by its scope even where its creator is allowed.
@@ -310,5 +311,89 @@ func TestPolicySimpleViewAndDepartures(t *testing.T) {
 	view, _ = f.service.Policy(f.ctx, f.owner, f.team, 0)
 	if !on || !strings.Contains(view.Policy, `"allow_private_access": true`) {
 		t.Fatalf("%v\n%s", on, view.Policy)
+	}
+}
+
+// F18-07: the team ENV follows the policy. A team starts with owners and admins on it; an ENV
+// grant is a member's rule; explain says when a key has not been delivered yet; a save that
+// removes a key holder's read takes their key and requires a rotation, as pb env team revoke.
+func TestPolicyDecidesTeamENV(t *testing.T) {
+	f := newPolicyFixture(t)
+	f.exec(`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account) VALUES($1,'env',$1,$2)`, f.team, f.owner)
+	f.exec(`INSERT INTO paperboat.environment_vault_teams(team_id,key_epoch) VALUES($1,1)`, f.team)
+	f.exec(`INSERT INTO paperboat.environment_vault_team_members(team_id,account_id,grant_epoch) VALUES($1,$2,1)`, f.team, f.owner)
+	if _, err := f.service.Policy(f.ctx, f.owner, f.team, 0); err != nil {
+		t.Fatal(err)
+	}
+	permission := func(account string) (p string) {
+		t.Helper()
+		if err := f.store.SQL().QueryRowContext(f.ctx, `SELECT paperboat.team_env_permission($1,$2)`, account, f.team).Scan(&p); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	for account, want := range map[string]string{f.owner: "write", f.admin: "write", f.member: "", f.other: ""} {
+		if got := permission(account); got != want {
+			t.Fatalf("new team: %s ENV %q, want %q", account, got, want)
+		}
+	}
+	grant := func(account, perm string, active bool) Team {
+		t.Helper()
+		var generation uint64
+		if err := f.store.SQL().QueryRowContext(f.ctx, `SELECT generation FROM paperboat.teams WHERE team_id=$1`, f.team).Scan(&generation); err != nil {
+			t.Fatal(err)
+		}
+		out, err := f.service.Grant(f.ctx, f.owner, f.team, GrantRequest{OperationID: fmt.Sprintf("op_env_%s_%s_%v_%d", account, perm, active, generation), ExpectedGeneration: generation, AccountID: account, ResourceKind: "env", ResourceID: f.team, Permission: perm, Active: active})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	team := grant(f.member, "read", true)
+	grant(f.other, "write", true)
+	if permission(f.member) != "read" || permission(f.other) != "write" {
+		t.Fatalf("grants: member %q other %q", permission(f.member), permission(f.other))
+	}
+	shown := false
+	for _, g := range team.Grants {
+		shown = shown || (g.ResourceKind == "env" && g.AccountID == f.member && g.Permission == "read" && g.Active)
+	}
+	if !shown {
+		t.Fatalf("the team view does not show the member's ENV grant: %+v", team.Grants)
+	}
+	f.exec(`INSERT INTO paperboat.environment_vault_team_members(team_id,account_id,grant_epoch) VALUES($1,$2,1)`, f.team, f.member)
+	explain := func(account string) *PolicyDecision {
+		t.Helper()
+		ex, err := f.service.ExplainPolicy(f.ctx, f.owner, f.team, PolicyExplainRequest{Src: "user:" + f.email(account), Dst: "env:team", Action: "env_read"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ex.Decision
+	}
+	if d := explain(f.member); !d.Allowed || d.KeyDelivered != nil {
+		t.Fatalf("member holds the key: %+v", d)
+	}
+	if d := explain(f.other); !d.Allowed || d.KeyDelivered == nil || *d.KeyDelivered {
+		t.Fatalf("other is allowed but has no key yet: %+v", d)
+	}
+	cur, err := f.service.Policy(f.ctx, f.owner, f.team, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, err := policy.SetSimpleRule([]byte(cur.Policy), "user:"+f.email(f.member), "env:team", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.save(string(next))
+	var epoch uint64
+	var rotation bool
+	if err := f.store.SQL().QueryRowContext(f.ctx, `SELECT e.grant_epoch,t.rotation_required FROM paperboat.environment_vault_team_members e JOIN paperboat.environment_vault_teams t USING(team_id) WHERE e.team_id=$1 AND e.account_id=$2`, f.team, f.member).Scan(&epoch, &rotation); err != nil {
+		t.Fatal(err)
+	}
+	if permission(f.member) != "" || epoch != 0 || !rotation {
+		t.Fatalf("removing the member's ENV rule: permission %q, key epoch %d, rotation required %v; want none, 0, true", permission(f.member), epoch, rotation)
+	}
+	if grant(f.other, "write", false); permission(f.other) != "" || permission(f.admin) != "write" {
+		t.Fatalf("revoking other's grant: other %q admin %q", permission(f.other), permission(f.admin))
 	}
 }

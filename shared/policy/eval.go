@@ -37,13 +37,18 @@ func (c Compiled) Enforced() []Grant {
 
 // owns is the owner guardrail, which no rule can take away: a personal machine's owner may
 // do everything on it in the personal workspace, and the owner of a preview or tunnel, or of
-// the personal machine it runs on, may always inspect and replay it.
+// the personal machine it runs on, may always inspect and replay it, and the team owner keeps
+// the team ENV.
 func (c Compiled) owns(account string, t Target, action string) bool {
 	inspector := action == ActionInspect || action == ActionReplay
 	switch t.Kind {
 	case "machine":
 		m, ok := c.x.byMachineID[t.ID]
 		return ok && m.PersonalOwner == account && (!c.x.inv.Team || inspector)
+	case "env":
+		// The team owner always keeps the team ENV, as today (a vault needs a key holder).
+		m, ok := c.x.byAccount[account]
+		return ok && m.Role == "owner" && (action == ActionENVRead || action == ActionENVWrite)
 	case "preview", "tunnel":
 		r, ok := c.x.resourceIDs[t.Kind+":"+t.ID]
 		if !ok || !inspector {

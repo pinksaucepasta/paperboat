@@ -75,8 +75,12 @@ func digest(source []byte) string {
 // emptyPolicy is version 1 of a workspace that has none yet.
 const emptyPolicy = "{\n  \"rules\": []\n}\n"
 
+// teamDefaultPolicy is a new team's version 1: owners and admins use the team ENV, as before
+// the policy owned it (the owner keeps it regardless, by the owner guardrail).
+const teamDefaultPolicy = "{\n  \"rules\": [\n    {\"src\": [\"role:admin\"], \"dst\": [\"env:team\"], \"allow\": [\"env_read\", \"env_write\"]}\n  ]\n}\n"
+
 // policyTx returns the workspace's current policy, creating version 1 when it has none (a
-// personal workspace, or a team created after the migration). Lock must be held.
+// personal workspace; teams get theirs when created). Lock must be held.
 func policyTx(ctx context.Context, tx *db.Tx, w Workspace) (storedPolicy, error) {
 	col, key := w.column()
 	var p storedPolicy
@@ -85,13 +89,29 @@ func policyTx(ctx context.Context, tx *db.Tx, w Workspace) (storedPolicy, error)
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return p, err
 	}
-	p = storedPolicy{version: 1, source: emptyPolicy, digest: digest([]byte(emptyPolicy))}
+	source := emptyPolicy
+	if w.TeamID != "" {
+		source = teamDefaultPolicy
+	}
+	p = storedPolicy{version: 1, source: source, digest: digest([]byte(source))}
 	err = tx.QueryRow(ctx, `INSERT INTO workspace_policies(`+col+`,version,source,digest) VALUES($1,1,$2,$3) RETURNING id,updated_at`, key, p.source, p.digest).Scan(&p.id, &p.updatedAt)
 	if err != nil {
 		return p, err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO workspace_policy_versions(policy_id,version,kind,source,digest) VALUES($1,1,'saved',$2,$3)`, p.id, p.source, p.digest)
-	return p, err
+	if _, err = tx.Exec(ctx, `INSERT INTO workspace_policy_versions(policy_id,version,kind,source,digest) VALUES($1,1,'saved',$2,$3)`, p.id, p.source, p.digest); err != nil {
+		return p, err
+	}
+	inv, err := policyInventoryTx(ctx, tx, w)
+	if err != nil {
+		return p, err
+	}
+	return p, storeRowsTx(ctx, tx, p.id, compileStored(p.source, inv).Store())
+}
+
+// InitTeamPolicyTx gives a team just created (owner already a member) its version 1.
+func InitTeamPolicyTx(ctx context.Context, tx *db.Tx, team string) error {
+	_, err := policyTx(ctx, tx, Workspace{TeamID: team})
+	return err
 }
 
 // policyInventoryTx is what a policy of w is compiled against.
@@ -317,6 +337,36 @@ func savePolicyTx(ctx context.Context, tx *db.Tx, w Workspace, cfg config.Worksp
 	if err = advance(ctx, tx, w.TeamID); err != nil {
 		return cur, nil, err
 	}
+	if err = envAccessChangedTx(ctx, tx, w.TeamID, changes); err != nil {
+		return cur, nil, err
+	}
 	err = AuditTx(ctx, tx, in.actor, w.TeamID, event, "policy:"+w.TeamID+":"+fmt.Sprint(next0.version), metadata)
 	return next0, changes, err
+}
+
+// envAccessChangedTx applies a policy change to the team ENV: a member the policy no longer
+// lets read it loses their key exactly as `pb env team revoke` takes it (rotation required when
+// they held one); any ENV change invalidates the team's ENV layers.
+func envAccessChangedTx(ctx context.Context, tx *db.Tx, team string, changes []policy.Change) error {
+	changed := false
+	for _, c := range changes {
+		changed = changed || c.Target == "env:team"
+	}
+	if !changed {
+		return nil
+	}
+	var held bool
+	err := tx.QueryRow(ctx, `WITH lost AS (
+	  UPDATE environment_vault_team_members e SET grant_epoch=0
+	  WHERE e.team_id=$1 AND e.grant_epoch>0 AND team_env_permission(e.account_id,e.team_id)=''
+	  RETURNING e.account_id
+	), dropped AS (DELETE FROM environment_vault_team_grants g USING lost WHERE g.team_id=$1 AND g.account_id=lost.account_id)
+	SELECT EXISTS(SELECT 1 FROM lost)`, team).Scan(&held)
+	if err != nil {
+		return err
+	}
+	if held {
+		return FenceENVTx(ctx, tx, team)
+	}
+	return InvalidateENVTx(ctx, tx, team)
 }

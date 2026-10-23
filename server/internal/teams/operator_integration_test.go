@@ -47,7 +47,6 @@ func TestOperatorTeamSuspensionFencesAuthorityAndResumesAtNewGeneration(t *testi
 		{`INSERT INTO teams(team_id,owner_account,generation) VALUES($1,$2,1)`, []any{team, owner}},
 		{`INSERT INTO team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'admin',true),($1,$3,1,'member',true)`, []any{team, owner, memberID}},
 		{`INSERT INTO team_resource_bindings(team_id,resource_kind,resource_id,owner_account,generation,active) VALUES($1,'env',$1,$2,1,true)`, []any{team, owner}},
-		{`INSERT INTO team_resource_grants(team_id,account_id,resource_kind,resource_id,permission,generation,active) VALUES($1,$2,'env',$1,'read',1,true)`, []any{team, memberID}},
 		{`INSERT INTO billing_workspaces(id,team_id,state,quantity,period_start,period_end) VALUES('team:'||$1,$1,'active',2,now()-interval '1 day',now()+interval '1 day')`, []any{team}},
 	} {
 		if _, err = store.Pool().Exec(ctx, statement.q, statement.args...); err != nil {
@@ -55,12 +54,13 @@ func TestOperatorTeamSuspensionFencesAuthorityAndResumesAtNewGeneration(t *testi
 		}
 	}
 	t.Cleanup(func() {
-		for _, q := range []string{`DELETE FROM billing_workspaces WHERE team_id=$1`, `DELETE FROM team_resource_grants WHERE team_id=$1`, `DELETE FROM team_resource_bindings WHERE team_id=$1`, `DELETE FROM team_members WHERE team_id=$1`, `DELETE FROM teams WHERE team_id=$1`} {
+		for _, q := range []string{`DELETE FROM billing_workspaces WHERE team_id=$1`, `DELETE FROM team_resource_grants WHERE team_id=$1`, `DELETE FROM workspace_policies WHERE team_id=$1`, `DELETE FROM team_resource_bindings WHERE team_id=$1`, `DELETE FROM team_members WHERE team_id=$1`, `DELETE FROM teams WHERE team_id=$1`} {
 			store.Pool().Exec(context.Background(), q, team)
 		}
 		store.Pool().Exec(context.Background(), `DELETE FROM users WHERE id=ANY($1)`, []string{owner, memberID})
 		store.Pool().Exec(context.Background(), `DELETE FROM operator_accounts WHERE id=$1`, admin)
 	})
+	setENVAccess(t, store, team, memberID, "read")
 	service := NewService(store)
 	before, err := service.Authorize(ctx, memberID, team, "env", team, "read")
 	if err != nil {

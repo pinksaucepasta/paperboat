@@ -87,6 +87,15 @@ func (s *Service) ExplainPolicy(ctx context.Context, account, ws string, r Polic
 					d.Allowed, d.Guardrail = false, "team_sso_required"
 				}
 			}
+			if d.Allowed && target.Kind == "env" {
+				var delivered bool
+				if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM environment_vault_teams t JOIN environment_vault_team_members e USING(team_id) WHERE t.team_id=$1 AND e.account_id=$2 AND e.grant_epoch=t.key_epoch)`, sc.w.TeamID, src).Scan(&delivered); err != nil {
+					return err
+				}
+				if !delivered {
+					d.KeyDelivered = &delivered
+				}
+			}
 			out.Decision = &d
 		case r.Dst != "" && r.Action != "":
 			out.WhoCan = limitRows(c.WhoCan(target, r.Action), s.policy.ExplainMaxRows)

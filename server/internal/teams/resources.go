@@ -26,32 +26,20 @@ func (s *Service) Grant(ctx context.Context, account, team string, r GrantReques
 		if err != nil {
 			return err
 		}
-		if r.ResourceKind == "env" && r.ResourceID != team {
-			return ErrInvalid
+		if r.ResourceKind == "env" {
+			// The team ENV's grants are rules of the team policy; revoking one (Active false)
+			// takes the member's ENV access and key, whichever permission it names.
+			if r.ResourceID != team {
+				return ErrInvalid
+			}
+			permission := r.Permission
+			if !r.Active {
+				permission = ""
+			}
+			return ApplyENVAccessTx(ctx, tx, s.policy, team, account, r.AccountID, permission)
 		}
 		_, err = tx.Exec(ctx, `INSERT INTO team_resource_grants(team_id,account_id,resource_kind,resource_id,permission,generation,active) VALUES($1,$2,$3,$4,$5,1,$6) ON CONFLICT(team_id,account_id,resource_kind,resource_id,permission) DO UPDATE SET generation=team_resource_grants.generation+1,active=EXCLUDED.active`, team, r.AccountID, r.ResourceKind, r.ResourceID, r.Permission, r.Active)
-		if err != nil {
-			return err
-		}
-		if r.ResourceKind == "env" && !r.Active {
-			var held bool
-			if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM environment_vault_team_members WHERE team_id=$1 AND account_id=$2 AND grant_epoch>0)`, team, r.AccountID).Scan(&held); err != nil {
-				return err
-			}
-			if _, err = tx.Exec(ctx, `UPDATE environment_vault_team_members SET grant_epoch=0 WHERE team_id=$1 AND account_id=$2`, team, r.AccountID); err != nil {
-				return err
-			}
-			if _, err = tx.Exec(ctx, `DELETE FROM environment_vault_team_grants WHERE team_id=$1 AND account_id=$2`, team, r.AccountID); err != nil {
-				return err
-			}
-			if held {
-				return FenceENVTx(ctx, tx, team)
-			}
-		}
-		if r.ResourceKind == "env" {
-			return InvalidateENVTx(ctx, tx, team)
-		}
-		return nil
+		return err
 	})
 }
 

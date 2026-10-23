@@ -3,6 +3,7 @@ package teams
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -65,6 +66,30 @@ func ApplyMachineAccessTx(ctx context.Context, tx *db.Tx, cfg config.WorkspacePo
 	})
 }
 
+// envActions is the simple view of a team ENV permission ("" removes the member's rule).
+var envActions = map[string][]string{"read": {policy.ActionENVRead}, "write": {policy.ActionENVRead, policy.ActionENVWrite}, "": nil}
+
+// ApplyENVAccessTx sets one member's team ENV permission (read, write, or "" for none) in the
+// team policy. The caller has checked rights and that the team ENV exists; losing read takes
+// the member's key (envAccessChangedTx).
+func ApplyENVAccessTx(ctx context.Context, tx *db.Tx, cfg config.WorkspacePolicy, team, actor, account, permission string) error {
+	actions, ok := envActions[permission]
+	if !ok {
+		return ErrInvalid
+	}
+	return setPolicyTx(ctx, tx, Workspace{TeamID: team}, cfg, actor, "Team ENV access changed", func(ext []byte, inv policy.Inventory) ([]byte, error) {
+		for _, m := range inv.Members {
+			if m.AccountID == account {
+				return policy.SetSimpleRule(ext, "user:"+strings.ToLower(m.Email), "env:team", actions)
+			}
+		}
+		if permission == "" {
+			return ext, nil // a member who left has no rules left (refreshPolicyTx)
+		}
+		return nil, ErrForbidden
+	})
+}
+
 // machineGrantsTx is the simple view of a team policy: its per-machine rules as grants.
 func machineGrantsTx(ctx context.Context, tx *db.Tx, team string) ([]MachineGrant, error) {
 	out := []MachineGrant{}
@@ -93,7 +118,10 @@ func machineGrantsTx(ctx context.Context, tx *db.Tx, team string) ([]MachineGran
 		accounts["user:"+strings.ToLower(m.Email)] = m.AccountID
 	}
 	for _, r := range policy.SimpleRules(d) {
-		g := MachineGrant{MachineID: machines[r.Machine], Audience: "all_members", Capabilities: r.Allow, Generation: version, Active: true}
+		if r.Target == "env:team" {
+			continue
+		}
+		g := MachineGrant{MachineID: machines[r.Target], Audience: "all_members", Capabilities: r.Allow, Generation: version, Active: true}
 		if r.Subject != "role:member" {
 			g.Audience, g.AccountID = "selected_member", accounts[strings.ToLower(r.Subject)]
 		}
@@ -110,4 +138,40 @@ func SetAllowPrivateAccessTx(ctx context.Context, tx *db.Tx, cfg config.Workspac
 	return setPolicyTx(ctx, tx, Workspace{TeamID: team}, cfg, actor, message, func(ext []byte, _ policy.Inventory) ([]byte, error) {
 		return policy.SetAllowPrivateAccess(ext, on)
 	})
+}
+
+// envGrantsTx is the simple view of the team ENV: each member's own rule as a grant.
+func envGrantsTx(ctx context.Context, tx *db.Tx, team string) ([]Grant, error) {
+	out := []Grant{}
+	var source string
+	var version uint64
+	err := tx.QueryRow(ctx, `SELECT source,version FROM workspace_policies WHERE team_id=$1`, team).Scan(&source, &version)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return out, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	inv, err := policyInventoryTx(ctx, tx, Workspace{TeamID: team})
+	if err != nil {
+		return nil, err
+	}
+	d, errs := policy.Parse(external(source, inv))
+	if len(errs) > 0 {
+		return out, nil
+	}
+	accounts := map[string]string{}
+	for _, m := range inv.Members {
+		accounts["user:"+strings.ToLower(m.Email)] = m.AccountID
+	}
+	for _, r := range policy.SimpleRules(d) {
+		if id := accounts[strings.ToLower(r.Subject)]; r.Target == "env:team" && id != "" {
+			permission := "read"
+			if slices.Contains(r.Allow, policy.ActionENVWrite) {
+				permission = "write"
+			}
+			out = append(out, Grant{AccountID: id, ResourceKind: "env", ResourceID: team, Permission: permission, Generation: version, Active: true})
+		}
+	}
+	return out, nil
 }

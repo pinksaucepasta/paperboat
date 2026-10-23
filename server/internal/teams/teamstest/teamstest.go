@@ -1,4 +1,4 @@
-// Package teamstest sets team machine access in tests through the same policy path as the
+// Package teamstest sets team machine and ENV access in tests through the same policy path as the
 // console's "Manage access" and `pb team machine-grant` (PLAN F18), instead of writing rows.
 package teamstest
 
@@ -29,6 +29,15 @@ func SetPrivateAccess(t testing.TB, store *db.DB, team string, on bool) {
 	t.Helper()
 	run(t, store, func(ctx context.Context, tx *db.Tx) error {
 		return teams.SetAllowPrivateAccessTx(ctx, tx, config.Default().WorkspacePolicy, team, "", on)
+	})
+}
+
+// SetENVAccess sets a member's team ENV permission (read, write, or "" for none), as
+// `pb team grant <team> <account> env <team> <permission>` does.
+func SetENVAccess(t testing.TB, store *db.DB, team, account, permission string) {
+	t.Helper()
+	run(t, store, func(ctx context.Context, tx *db.Tx) error {
+		return teams.ApplyENVAccessTx(ctx, tx, config.Default().WorkspacePolicy, team, "", account, permission)
 	})
 }
 

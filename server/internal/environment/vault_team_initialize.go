@@ -132,10 +132,7 @@ func initializeVaultTeamAuthorityTx(ctx context.Context, tx *db.Tx, account, tea
 	if _, err := tx.Exec(ctx, `INSERT INTO environment_vault_team_members(team_id,account_id,grant_epoch) VALUES($1,$2,1)`, team, account); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO team_resource_grants(team_id,account_id,resource_kind,resource_id,permission,generation,active) VALUES($1,$2,'env',$1,'write',1,true)`, team, account); err != nil {
-		return err
-	}
-	return nil
+	return nil // the owner's ENV access is the team policy's owner guardrail
 }
 
 func commitVaultKeyMutationTx(ctx context.Context, tx *db.Tx, incoming parsedPasswordVault) error {

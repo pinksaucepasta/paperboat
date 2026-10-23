@@ -26,7 +26,7 @@ func TestSetSimpleRuleEditsOnlyItsOwnRules(t *testing.T) {
 	if !strings.Contains(string(out), "// team policy") || len(d.Rules) != 3 {
 		t.Fatalf("%s", out)
 	}
-	if got := SimpleRules(d); !reflect.DeepEqual(got, []SimpleRule{{Subject: "role:member", Machine: "machine:db1", Allow: []string{"exec", "terminal"}}}) {
+	if got := SimpleRules(d); !reflect.DeepEqual(got, []SimpleRule{{Subject: "role:member", Target: "machine:db1", Allow: []string{"exec", "terminal"}}}) {
 		t.Fatalf("%+v", got)
 	}
 	out, _ = SetSimpleRule(out, "role:member", "machine:db1", nil)
@@ -51,5 +51,28 @@ func TestSetAllowPrivateAccess(t *testing.T) {
 	d, _ = Parse(out)
 	if *d.AllowPrivateAccess {
 		t.Fatalf("%s", out)
+	}
+}
+
+func TestSetSimpleRuleOnTheTeamENV(t *testing.T) {
+	src := []byte(`{"rules": [{"src": ["role:admin"], "dst": ["env:team"], "allow": ["env_read", "env_write"]}]}`)
+	out, err := SetSimpleRule(src, "user:cy@example.test", "env:team", []string{ActionENVRead})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, errs := Parse(out)
+	if len(errs) > 0 {
+		t.Fatal(errs)
+	}
+	want := []SimpleRule{{Subject: "user:cy@example.test", Target: "env:team", Allow: []string{ActionENVRead}}}
+	if got := SimpleRules(d); !reflect.DeepEqual(got, want) || len(d.Rules) != 2 {
+		t.Fatalf("role:admin is not the simple view's; got %+v in %s", got, out)
+	}
+	out, _ = SetSimpleRule(out, "user:cy@example.test", "env:team", nil)
+	if d, _ = Parse(out); len(d.Rules) != 1 || len(SimpleRules(d)) != 0 {
+		t.Fatalf("%s", out)
+	}
+	if _, ok := simple(Rule{Src: []string{"role:member"}, Dst: []string{"env:team"}, Allow: []string{ActionExec}}); ok {
+		t.Fatal("a machine action on env:team is not a simple rule")
 	}
 }

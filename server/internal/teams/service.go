@@ -72,6 +72,9 @@ func (s *Service) Create(ctx context.Context, account string, r CreateRequest) (
 		if _, err = tx.Exec(ctx, `INSERT INTO team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'member',true)`, r.TeamID, account); err != nil {
 			return err
 		}
+		if err = InitTeamPolicyTx(ctx, tx, r.TeamID); err != nil {
+			return err
+		}
 		out, err = ReadTx(ctx, tx, r.TeamID)
 		if err != nil {
 			return err

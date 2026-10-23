@@ -147,7 +147,8 @@ Policy      {workspace, version, policy (file text, comments kept), digest ("sha
                     tags: [tag], groups: [group]}}
 Validation  {valid, errors: [Error], tests: {passed, failed},
              access_changes: [Change] (against the saved version), confirm ("sha256:<hex>")}
-Explanation {decision?: {allowed, reason, rules: ["/rules/N"], guardrail?},   // src+dst+action
+Explanation {decision?: {allowed, reason, rules: ["/rules/N"], guardrail?,    // src+dst+action
+                         key_delivered?},  // false: env:team allowed, team key not delivered yet
              who_can?: [Access],                                              // dst+action
              what_can?: [Access]}                                             // src only
 Access      {subject, target, action, ports?, reason ("owner" | "rule"), rules?}
@@ -169,6 +170,14 @@ Version     {version, digest, created_at, author, api_token?, message, gained, l
   `private_access_off`, `outside_token_scope`; `guardrail` names a failed guardrail
   (`team_suspended`, `membership_inactive`, `machine_not_in_workspace`, `team_not_entitled`,
   `machine_service_off`). A member asking about someone else is 403 `policy_explain_forbidden`.
+- **Team ENV**: `env_read`/`env_write` on `env:team` decide who may use the team ENV (write
+  covers reading); the team owner always may (owner guardrail). A team starts with
+  `{"src": ["role:admin"], "dst": ["env:team"], "allow": ["env_read", "env_write"]}`.
+  `pb team grant <team> <account> env <team> read|write` sets that member's own rule (one src,
+  `dst` `env:team`; `--active=false` removes it), and the team view lists those rules as `env`
+  grants. A save after which a member who holds the team key may no longer read the ENV takes
+  the key, as `pb env team revoke` does (rotation required). A member allowed without a key yet
+  is `allowed` with `key_delivered: false`: a key holder delivers it with `pb env grants sync`.
 
 ## API tokens
 

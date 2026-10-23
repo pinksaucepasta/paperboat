@@ -66,7 +66,8 @@ func ReadTx(ctx context.Context, tx *db.Tx, id string) (Team, error) {
 	if err != nil {
 		return out, err
 	}
-	rows, err = tx.Query(ctx, `SELECT account_id,resource_kind,resource_id,permission,generation,active FROM team_resource_grants WHERE team_id=$1 ORDER BY resource_kind,resource_id,account_id`, id)
+	// The team ENV's grants are the policy's (envGrantsTx, below); old env rows stay unread.
+	rows, err = tx.Query(ctx, `SELECT account_id,resource_kind,resource_id,permission,generation,active FROM team_resource_grants WHERE team_id=$1 AND resource_kind<>'env' ORDER BY resource_kind,resource_id,account_id`, id)
 	if err != nil {
 		return out, err
 	}
@@ -83,6 +84,11 @@ func ReadTx(ctx context.Context, tx *db.Tx, id string) (Team, error) {
 	if err != nil {
 		return out, err
 	}
+	env, err := envGrantsTx(ctx, tx, id)
+	if err != nil {
+		return out, err
+	}
+	out.Grants = append(out.Grants, env...)
 	rows, err = tx.Query(ctx, `SELECT terminal_session_id,audience,coalesce(account_id,''),role,generation,active FROM team_terminal_session_grants WHERE team_id=$1 ORDER BY terminal_session_id,audience,account_id`, id)
 	if err != nil {
 		return out, err
@@ -167,6 +173,19 @@ func AuthorizeTx(ctx context.Context, tx *db.Tx, account, team, kind, id, permis
 		if !current {
 			return d, ErrForbidden
 		}
+	}
+	if kind == "env" {
+		// The team ENV follows the team policy (owner, role and member rules alike).
+		var granted string
+		var version uint64
+		if err = tx.QueryRow(ctx, `SELECT team_env_permission($1,$2),coalesce((SELECT version FROM workspace_policies WHERE team_id=$2),0)`, account, team).Scan(&granted, &version); err != nil {
+			return d, err
+		}
+		if id != team || !permits(kind, granted, permission) {
+			return d, ErrForbidden
+		}
+		d.GrantGeneration = version
+		return d, nil
 	}
 	for _, g := range t.Grants {
 		if g.AccountID == account && g.ResourceKind == kind && g.ResourceID == id && g.Active && permits(kind, g.Permission, permission) {

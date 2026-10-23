@@ -146,6 +146,9 @@ func (s *WorkspaceService) materializePaidTeam(ctx context.Context, event Stripe
 		if _, err := tx.Exec(ctx, `INSERT INTO team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'member',true)`, req.Input.TeamID, actor); err != nil {
 			return err
 		}
+		if err := teams.InitTeamPolicyTx(ctx, tx, req.Input.TeamID); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `INSERT INTO billing_workspaces(id,team_id,provider_customer_id,provider_subscription_id,provider_item_id,product_code,state,quantity,period_start,period_end,bandwidth_anchor,cancel_at_period_end) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$9,$11)`, "team:"+req.Input.TeamID, req.Input.TeamID, sub.CustomerID, sub.ID, sub.ItemID, req.ProductCode, sub.Status, sub.Quantity, sub.PeriodStart, sub.PeriodEnd, sub.CancelAtPeriodEnd); err != nil {
 			return err
 		}

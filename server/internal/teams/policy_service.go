@@ -79,6 +79,9 @@ type PolicyExplainRequest struct {
 type PolicyDecision struct {
 	policy.Decision
 	Guardrail string `json:"guardrail,omitempty"`
+	// KeyDelivered is false when the policy lets a member use the team ENV but no key holder
+	// has delivered them the team key yet (pb env grants sync); absent otherwise.
+	KeyDelivered *bool `json:"key_delivered,omitempty"`
 }
 
 type PolicyExplanation struct {

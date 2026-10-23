@@ -10,6 +10,7 @@ import (
 	"sort"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/pinksaucepasta/paperboat-server/internal/config"
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
 	"github.com/pinksaucepasta/paperboat-server/internal/teams"
 )
@@ -115,7 +116,7 @@ func readVaultTeamTx(ctx context.Context, tx *db.Tx, team string) (VaultTeamStat
 	if err != nil {
 		return out, err
 	}
-	rows, err := tx.Query(ctx, `SELECT m.account_id,m.membership_generation,CASE WHEN t.owner_account=m.account_id THEN 'owner' ELSE m.role END,m.active,COALESCE(e.grant_epoch,0),CASE WHEN t.owner_account=m.account_id OR m.role='admin' THEN 'write' ELSE COALESCE(g.permission,'read') END FROM team_members m JOIN teams t USING(team_id) LEFT JOIN environment_vault_team_members e USING(team_id,account_id) LEFT JOIN LATERAL (SELECT CASE WHEN bool_or(permission='write') THEN 'write' WHEN bool_or(permission='read') THEN 'read' ELSE '' END AS permission FROM team_resource_grants WHERE team_id=m.team_id AND account_id=m.account_id AND resource_kind='env' AND resource_id=m.team_id AND active) g ON true WHERE m.team_id=$1 ORDER BY m.account_id`, team)
+	rows, err := tx.Query(ctx, `SELECT m.account_id,m.membership_generation,CASE WHEN t.owner_account=m.account_id THEN 'owner' ELSE m.role END,m.active,COALESCE(e.grant_epoch,0),team_env_permission(m.account_id,m.team_id) FROM team_members m JOIN teams t USING(team_id) LEFT JOIN environment_vault_team_members e USING(team_id,account_id) WHERE m.team_id=$1 ORDER BY m.account_id`, team)
 	if err != nil {
 		return out, err
 	}
@@ -608,7 +609,11 @@ func (s *Service) RotateVaultTeam(ctx context.Context, account, teamID string, r
 			}
 		}
 		for id := range removed {
-			if _, err := tx.Exec(ctx, `UPDATE team_resource_grants SET active=false,generation=generation+1 WHERE team_id=$1 AND account_id=$2 AND active`, teamID, id); err != nil {
+			if _, err := tx.Exec(ctx, `UPDATE team_resource_grants SET active=false,generation=generation+1 WHERE team_id=$1 AND account_id=$2 AND resource_kind<>'env' AND active`, teamID, id); err != nil {
+				return err
+			}
+			// The team ENV grant is the member's rule in the team policy (the vault lock is the teams lock).
+			if err := teams.ApplyENVAccessTx(ctx, tx, config.WorkspacePolicy{}, teamID, account, id, ""); err != nil {
 				return err
 			}
 		}
