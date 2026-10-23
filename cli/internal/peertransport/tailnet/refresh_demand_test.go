@@ -8,12 +8,14 @@ import (
 	"time"
 )
 
+// The retry doubles to about a minute and is spread over half to one and a half times its base, so a
+// fleet that lost the server together (a deploy) does not come back within the same ~250 ms.
 func TestRefreshRetryDelayGrowsToAboutAMinute(t *testing.T) {
 	want := []time.Duration{time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 16 * time.Second, 32 * time.Second, time.Minute, time.Minute}
 	for i, base := range want {
 		got := refreshRetryDelay(i + 1)
-		if got < base || got > base+base/4 {
-			t.Fatalf("failure %d: delay %v outside [%v, %v]", i+1, got, base, base+base/4)
+		if got < base/2 || got >= base/2*3 {
+			t.Fatalf("failure %d: delay %v outside [%v, %v)", i+1, got, base/2, base/2*3)
 		}
 	}
 }

@@ -7,6 +7,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	sessionauth "github.com/pinksaucepasta/paperboat/internal/auth"
+	"github.com/pinksaucepasta/paperboat/internal/backoff"
 	"github.com/pinksaucepasta/paperboat/internal/diagnosticlog"
 )
 
@@ -67,7 +68,7 @@ func refreshMachineServices(ctx context.Context, coordinator serviceApplier, ser
 			retry = machineServicesMinimumRefresh
 		} else {
 			// A failing server is retried with doubling waits, not at the renewal cadence.
-			wait, retry = retry, min(retry*2, machineServicesMaximumRetry)
+			wait, retry = backoff.Jitter(retry), min(retry*2, machineServicesMaximumRetry)
 			if ctx.Err() == nil {
 				diagnosticlog.TryWarn("could not renew the announced-service leases; the next attempt follows", "error", err)
 			}

@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/backoff"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
 )
@@ -91,6 +92,9 @@ func (s *revocationRefreshService) refresh(ctx context.Context) error {
 	return s.cache.Replace(document.JTIs)
 }
 
+// revocationMaximumRetry caps the wait between failed revocation refreshes.
+const revocationMaximumRetry = 5 * time.Minute
+
 func (s *revocationRefreshService) Start(context.Context) error {
 	if s.cancel != nil {
 		return ErrProductionInvalid
@@ -99,11 +103,20 @@ func (s *revocationRefreshService) Start(context.Context) error {
 	s.cancel, s.done = cancel, make(chan struct{})
 	go func() {
 		defer close(s.done)
+		failures := 0
 		for {
 			attemptCtx, attemptCancel := context.WithTimeout(ctx, 10*time.Second)
-			_ = s.refresh(attemptCtx)
+			err := s.refresh(attemptCtx)
 			attemptCancel()
-			if !s.events.Wait(ctx, s.interval) {
+			wait := s.interval
+			if err != nil {
+				// A failing server is not asked again at the steady interval by every host at once.
+				failures++
+				wait = backoff.Retry(failures, s.interval, revocationMaximumRetry)
+			} else {
+				failures = 0
+			}
+			if !s.events.Wait(ctx, wait) {
 				return
 			}
 		}

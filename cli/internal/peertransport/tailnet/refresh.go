@@ -12,6 +12,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat-relay/admission"
 	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/internal/backoff"
 )
 
 type NetworkAPI interface {
@@ -245,19 +246,10 @@ func regionalRenewalAfter(nodes []RegionalNode, now time.Time) time.Duration {
 }
 
 // refreshRetryDelay is the wait after the failures-th consecutive failed refresh: one second,
-// then doubling to a one-minute ceiling, with up to 25% added jitter so clients that failed
-// together do not retry together.
+// doubling to a one-minute ceiling, each spread over half to one and a half times (backoff.Retry)
+// so clients that failed together do not retry together.
 func refreshRetryDelay(failures int) time.Duration {
-	delay := time.Minute
-	if failures >= 1 && failures <= 6 {
-		delay = time.Second << (failures - 1)
-	}
-	delay = min(delay, time.Minute)
-	var random [1]byte
-	if _, err := rand.Read(random[:]); err == nil {
-		delay += delay / 4 * time.Duration(random[0]) / 255
-	}
-	return delay
+	return backoff.Retry(failures, time.Second, time.Minute)
 }
 
 // onDemandRefreshSpacing bounds how often RequestRefresh can make Run call the server.
