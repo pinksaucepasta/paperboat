@@ -63,11 +63,14 @@ type locoBackend struct {
 	// peer map lookup. Set before createEngine.
 	onDERPRecv func(regionID tailcfg.DERPRegionID, src key.NodePublic, pkt []byte) bool
 
-	mu        sync.Mutex
-	clients   map[key.NodePublic]*tailcfg.Node // for the server
-	nm        *netmap.NetworkMap
-	eps       []netip.AddrPort // our current local UDP endpoints, sorted
-	closeOnce sync.Once
+	mu      sync.Mutex
+	clients map[key.NodePublic]*tailcfg.Node // for the server
+	// clientByAddr indexes clients by address for the per-packet peer lookup; it changes only
+	// through setClientLocked and deleteClientLocked.
+	clientByAddr map[netip.Addr]key.NodePublic
+	nm           *netmap.NetworkMap
+	eps          []netip.AddrPort // our current local UDP endpoints, sorted
+	closeOnce    sync.Once
 }
 
 func (b *locoBackend) derpRegionID() tailcfg.DERPRegionID {
@@ -150,15 +153,33 @@ func (b *locoBackend) peerConfig(k key.NodePublic) (_ wgcfg.PeerConfig, ok bool)
 // peerByIP returns the public key of the peer that outbound packets
 // addressed to dst should be sent to (see
 // [wgengine.Engine.SetPeerByIPPacketFunc]).
+// It runs for every outbound packet, so it is one map lookup, not a scan of the clients.
 func (b *locoBackend) peerByIP(dst netip.Addr) (_ key.NodePublic, ok bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	for k, n := range b.clients {
-		if slices.Contains(n.Addresses, pfxOf(dst)) {
-			return k, true
+	k, ok := b.clientByAddr[dst]
+	return k, ok
+}
+
+// setClientLocked records an admitted client and indexes its addresses; b.mu must be held.
+func (b *locoBackend) setClientLocked(k key.NodePublic, n *tailcfg.Node) {
+	b.deleteClientLocked(k)
+	mak.Set(&b.clients, k, n)
+	for _, p := range n.Addresses {
+		mak.Set(&b.clientByAddr, p.Addr(), k)
+	}
+}
+
+// deleteClientLocked removes a client and its address index entries; b.mu must be held.
+func (b *locoBackend) deleteClientLocked(k key.NodePublic) {
+	if n := b.clients[k]; n != nil {
+		for _, p := range n.Addresses {
+			if b.clientByAddr[p.Addr()] == k {
+				delete(b.clientByAddr, p.Addr())
+			}
 		}
 	}
-	return key.NodePublic{}, false
+	delete(b.clients, k)
 }
 
 // peerForIP is the [wgengine.Engine.SetPeerForIPFunc] callback,
@@ -356,7 +377,7 @@ func (b *locoBackend) onMeow(src key.NodePublic, discoPub key.DiscoPublic) bool 
 	b.nextClientID++
 	addr := b.allowedPeers[src]
 	derpRegion := b.derpRegionIDLocked()
-	mak.Set(&b.clients, src, &tailcfg.Node{
+	b.setClientLocked(src, &tailcfg.Node{
 		ID:         tailcfg.NodeID(id),
 		StableID:   tailcfg.StableNodeID(fmt.Sprint(id)),
 		Name:       fmt.Sprintf("peer%d.paperboat.", id),

@@ -150,7 +150,7 @@ func (b *locoBackend) setPeerRelayRegion(peer key.NodePublic, id tailcfg.DERPReg
 	}
 	n = n.Clone()
 	n.HomeDERP = id
-	b.clients[peer] = n
+	b.setClientLocked(peer, n)
 	b.updateServerMapLocked()
 	return nil
 }

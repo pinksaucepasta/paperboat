@@ -81,7 +81,7 @@ func (s *Server) ReplaceAllowedPeers(peers map[key.NodePublic]netip.Addr) error 
 	var removed []key.NodePublic
 	for k, n := range b.clients {
 		if addr, ok := peers[k]; !ok || !slices.Contains(n.Addresses, pfxOf(addr)) {
-			delete(b.clients, k)
+			b.deleteClientLocked(k)
 			removed = append(removed, k)
 		}
 	}

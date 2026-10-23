@@ -340,7 +340,7 @@ func (s *Server) InvalidateAuthorizedPeer(peer key.NodePublic) {
 	_, admitted := b.allowedPeers[peer]
 	_, present := b.clients[peer]
 	if admitted && present {
-		delete(b.clients, peer)
+		b.deleteClientLocked(peer)
 		b.updateServerMapLocked()
 	}
 	b.mu.Unlock()
