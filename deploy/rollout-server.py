@@ -11,6 +11,11 @@ import time
 
 # Logs of retired server containers are kept this long under rollout-logs/.
 LOG_RETENTION_SECONDS = 7 * 24 * 3600
+# Server images kept besides the deployed one (rollback targets); older ones and build cache older
+# than BUILD_CACHE_RETENTION are removed after each rollout. Unbounded, they filled the disk once
+# (96 images and 50 GB of build cache, 99% full, 2026-10-23).
+PREVIOUS_IMAGES_KEPT = 2
+BUILD_CACHE_RETENTION = '24h'
 
 
 class RolloutError(Exception):
@@ -109,6 +114,30 @@ class Rollout:
             self.log.write(('Could not keep logs of %s: %s\n' % (name, error)).encode())
             self.log.flush()
 
+    def prune_images(self, deployed):
+        # Best effort: a failed prune never fails a rollout that is already serving.
+        try:
+            used = set(self.run(['docker', 'ps', '-a', '--format', '{{.Image}}']).decode().split())
+            rows = self.run(['docker', 'image', 'ls', 'paperboat-server', '--format',
+                             '{{.Repository}}:{{.Tag}} {{.CreatedAt}}']).decode().splitlines()
+            images = [row.split(' ', 1) for row in rows if ' ' in row]
+            images = [row for row in images if not row[0].endswith(':<none>')]
+            images.sort(key=lambda row: row[1], reverse=True)
+            kept = 0
+            for name, _ in images:
+                if name == deployed or name in used:
+                    continue
+                if kept < PREVIOUS_IMAGES_KEPT:
+                    kept += 1
+                    continue
+                self.run(['docker', 'rmi', name])
+            self.run(['docker', 'image', 'prune', '-f'])
+            self.run(['docker', 'builder', 'prune', '-f', '--filter', 'until=' + BUILD_CACHE_RETENTION],
+                     timeout=600)
+        except (RolloutError, subprocess.SubprocessError) as error:
+            self.log.write(('Could not prune images: %s\n' % error).encode())
+            self.log.flush()
+
     def recover(self):
         if not self.journal.exists():
             return
@@ -185,6 +214,7 @@ class Rollout:
                 self.run(['docker', 'rm', '-f', candidate])
             raise
         retained = self.reap(state)
+        self.prune_images(image)
         return 'Ready replacement is serving; retained draining servers: ' + str(retained)
 
 

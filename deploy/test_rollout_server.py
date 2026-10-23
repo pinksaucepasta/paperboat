@@ -25,6 +25,33 @@ class ServerRolloutTest(unittest.TestCase):
         self.assertEqual((logs / 'paperboat-server-old.log').read_bytes(), b'request log line\n')
         self.assertFalse(stale.exists())
 
+    def test_prune_keeps_deployed_running_and_two_previous_images(self):
+        listing = ('paperboat-server:5 2026-10-23 10:00:00 +0000 UTC\n'
+                   'paperboat-server:4 2026-10-23 09:00:00 +0000 UTC\n'
+                   'paperboat-server:3 2026-10-23 08:00:00 +0000 UTC\n'
+                   'paperboat-server:2 2026-10-23 07:00:00 +0000 UTC\n'
+                   'paperboat-server:1 2026-10-23 06:00:00 +0000 UTC\n'
+                   'paperboat-server:<none> 2026-10-22 06:00:00 +0000 UTC\n')
+        calls = []
+
+        def docker(args, image=None, timeout=120):
+            calls.append(args)
+            if args[:2] == ['docker', 'ps']:
+                return b'paperboat-server:4\npostgres:17\n'
+            if args[:3] == ['docker', 'image', 'ls']:
+                return listing.encode()
+            return b''
+        with patch.object(self.rollout, 'run', side_effect=docker):
+            self.rollout.prune_images('paperboat-server:5')
+        removed = [args[2] for args in calls if args[:2] == ['docker', 'rmi']]
+        # 5 deployed, 4 still in use (draining), 3 and 2 the two previous rollback targets.
+        self.assertEqual(removed, ['paperboat-server:1'])
+        self.assertIn(['docker', 'builder', 'prune', '-f', '--filter', 'until=24h'], calls)
+
+    def test_prune_failure_never_fails_the_rollout(self):
+        with patch.object(self.rollout, 'run', side_effect=module.RolloutError('docker down')):
+            self.rollout.prune_images('paperboat-server:5')
+
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)

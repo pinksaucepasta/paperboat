@@ -1,6 +1,7 @@
 name: paperboat
 services:
   postgres:
+    logging: {driver: json-file, options: {max-size: "50m", max-file: "4"}}
     image: ${PAPERBOAT_POSTGRES_IMAGE:?set PAPERBOAT_POSTGRES_IMAGE}
     restart: unless-stopped
     environment:
@@ -26,6 +27,7 @@ services:
       postgres: {condition: service_healthy}
     restart: "no"
   server:
+    logging: {driver: json-file, options: {max-size: "50m", max-file: "4"}}
     image: ${PAPERBOAT_SERVER_IMAGE:?set PAPERBOAT_SERVER_IMAGE}
     restart: unless-stopped
     env_file: [server.env]
@@ -41,6 +43,7 @@ services:
       timeout: 5s
       retries: 6
   diagnostics:
+    logging: {driver: json-file, options: {max-size: "50m", max-file: "4"}}
     image: ${PAPERBOAT_DIAGNOSTICS_IMAGE:?set PAPERBOAT_DIAGNOSTICS_IMAGE}
     restart: unless-stopped
     environment:
@@ -50,6 +53,7 @@ services:
     command: [server, /data, --console-address, ":9001"]
     volumes: [diagnostics_data:/data]
   proxy:
+    logging: {driver: json-file, options: {max-size: "50m", max-file: "4"}}
     image: ${PAPERBOAT_PROXY_IMAGE:?set PAPERBOAT_PROXY_IMAGE}
     restart: unless-stopped
     environment:
