@@ -205,3 +205,19 @@ func TestMachineEventsAnswerBeforeReleasedClientsGiveUp(t *testing.T) {
 		t.Fatalf("MaxWait %s leaves under 5 s before the clients' %s header timeout", machineevents.MaxWait, machineevents.ClientHeaderTimeout)
 	}
 }
+
+// An answer that cannot be signed is not sent unsigned: the wait fails closed with a retryable error.
+func TestMachineEventsFailClosedWithoutSigning(t *testing.T) {
+	claims := controlplane.MachineRequestClaims{MachineID: "machine_01", UserID: "account_01", OperationID: "events_01", InstallationGeneration: 1}
+	handler := machineEventsWait(&machineEventWaiterFake{changed: map[string]int64{"previews": 5}}, bootstrapVerifier{claims: claims}, MachineEventSigning{})
+	request := httptest.NewRequest(http.MethodPost, MachineEventsPath, strings.NewReader(`{"topics":{"previews":4}}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-Paperboat-Machine-Identity", strings.Repeat("m", 48))
+	request.Header.Set("X-Paperboat-Machine-Proof", base64.RawURLEncoding.EncodeToString([]byte("proof")))
+	request.Header.Set("Idempotency-Key", "events_01")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusServiceUnavailable || response.Header().Get(MachineEventsAnswerHeader) != "" || strings.Contains(response.Body.String(), `"topics"`) {
+		t.Fatalf("unsigned answer: status=%d header=%q body=%s", response.Code, response.Header().Get(MachineEventsAnswerHeader), response.Body.String())
+	}
+}

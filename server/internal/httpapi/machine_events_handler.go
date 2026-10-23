@@ -50,6 +50,9 @@ func NewMachineEventSigning(signer machineEventSigner, issuer string) (MachineEv
 
 // sign returns the signed answer for one wait, bound to the exact request body it answers.
 func (s MachineEventSigning) sign(machineID string, body []byte, changed map[string]int64) (string, error) {
+	if s.signer == nil {
+		return "", errors.New("machine event signing is not configured")
+	}
 	sum := sha256.Sum256(body)
 	return s.signer.SignMachineEvents(mint.MachineEventsAnswer{Issuer: s.issuer, MachineID: machineID, RequestSHA256: hex.EncodeToString(sum[:]), Topics: changed, IssuedAt: time.Now().UTC()})
 }
