@@ -1,11 +1,13 @@
 package db
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"errors"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -23,6 +25,8 @@ type DB struct {
 	pool     *pgxpool.Pool
 	sql      *sql.DB
 	q        *dbsqlc.Queries
+	// migrationConfig opens the migrations' own pool (no statement or lock timeouts).
+	migrationConfig *pgxpool.Config
 
 	serializable  transactionCounters
 	readCommitted transactionCounters
@@ -67,15 +71,25 @@ func Open(cfg config.Database) (*DB, error) {
 	// JIT compilation costs ~1 s on a query like the machine inventory's (plpgsql lateral calls inflate its estimated
 	// cost past jit_above_cost) and never pays off for this OLTP workload: the same statement runs in ~18 ms without it.
 	poolConfig.ConnConfig.RuntimeParams["jit"] = "off"
-	poolConfig.MaxConns = 20
 	poolConfig.MaxConnLifetime = 30 * time.Minute
+	// Migrations (index builds, table rewrites) run longer than any request; their pool has no time bounds.
+	migrationConfig := poolConfig.Copy()
+	migrationConfig.MaxConns = 2
+	poolConfig.MaxConns = cmp.Or(cfg.MaxConns, 20)
+	for name, value := range map[string]time.Duration{
+		"statement_timeout":                   cmp.Or(cfg.StatementTimeout, 30*time.Second),
+		"lock_timeout":                        cmp.Or(cfg.LockTimeout, 10*time.Second),
+		"idle_in_transaction_session_timeout": cmp.Or(cfg.IdleInTransactionTimeout, 60*time.Second),
+	} {
+		poolConfig.ConnConfig.RuntimeParams[name] = strconv.FormatInt(value.Milliseconds(), 10)
+	}
 	observer := &queryObserver{}
 	poolConfig.ConnConfig.Tracer = observer
 	pool, err := pgxpool.NewWithConfig(context.Background(), poolConfig)
 	if err != nil {
 		return nil, fmt.Errorf("open postgres: %w", err)
 	}
-	return &DB{observer: observer, pool: pool, sql: stdlib.OpenDBFromPool(pool), q: dbsqlc.New(pool)}, nil
+	return &DB{observer: observer, pool: pool, sql: stdlib.OpenDBFromPool(pool), q: dbsqlc.New(pool), migrationConfig: migrationConfig}, nil
 }
 
 func (d *DB) Close() error {

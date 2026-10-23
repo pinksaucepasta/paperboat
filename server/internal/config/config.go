@@ -131,6 +131,13 @@ func NormalizeIssuer(raw string) string {
 type Database struct {
 	Driver string `json:"driver"`
 	DSN    string `json:"dsn"`
+	// MaxConns bounds the request pool (0: 20). Statement, lock and idle-in-transaction timeouts bound every
+	// connection of it (0: 30 s, 10 s, 60 s), so a stuck query or a lock queue cannot hold a connection forever;
+	// migrations run on their own pool without them.
+	MaxConns                 int32         `json:"max_conns"`
+	StatementTimeout         time.Duration `json:"statement_timeout"`
+	LockTimeout              time.Duration `json:"lock_timeout"`
+	IdleInTransactionTimeout time.Duration `json:"idle_in_transaction_timeout"`
 }
 
 // APITokens bounds workspace API tokens (F18).

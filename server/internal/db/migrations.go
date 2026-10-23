@@ -2,8 +2,11 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"embed"
 	"fmt"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/stdlib"
 	"hash/fnv"
 
 	"github.com/pressly/goose/v3"
@@ -18,7 +21,15 @@ func Migrate(ctx context.Context, d *DB) error {
 	if err := d.Ping(ctx); err != nil {
 		return err
 	}
-	conn, err := d.sql.Conn(ctx)
+	// Migrations run on their own pool: the request pool's statement and lock timeouts would cut index builds.
+	migrationPool, err := pgxpool.NewWithConfig(ctx, d.migrationConfig)
+	if err != nil {
+		return fmt.Errorf("open migration pool: %w", err)
+	}
+	defer migrationPool.Close()
+	migrations := stdlib.OpenDBFromPool(migrationPool)
+	defer migrations.Close()
+	conn, err := migrations.Conn(ctx)
 	if err != nil {
 		return fmt.Errorf("open migration connection: %w", err)
 	}
@@ -36,10 +47,10 @@ func Migrate(ctx context.Context, d *DB) error {
 	if err := goose.SetDialect("postgres"); err != nil {
 		return fmt.Errorf("set migration dialect: %w", err)
 	}
-	if err := checkBaselineHistory(ctx, d); err != nil {
+	if err := checkBaselineHistory(ctx, migrations); err != nil {
 		return err
 	}
-	if err := goose.UpContext(ctx, d.sql, migrationsDir); err != nil {
+	if err := goose.UpContext(ctx, migrations, migrationsDir); err != nil {
 		return fmt.Errorf("run migrations: %w", err)
 	}
 	return nil
@@ -47,9 +58,9 @@ func Migrate(ctx context.Context, d *DB) error {
 
 // This pre-release baseline is only for an empty database. Old migration
 // histories must not be mistaken for the new version 1.
-func checkBaselineHistory(ctx context.Context, d *DB) error {
+func checkBaselineHistory(ctx context.Context, database *sql.DB) error {
 	var baselineApplied, existingObjects, historyApplied, baselineObjects bool
-	err := d.sql.QueryRowContext(ctx, `
+	err := database.QueryRowContext(ctx, `
 SELECT EXISTS (
   SELECT 1 FROM paperboat.goose_db_version
   WHERE version_id = 1 AND is_applied
@@ -72,13 +83,13 @@ SELECT EXISTS (
 	if err != nil {
 		// Goose has not initialized the version table on a fresh database.
 		var historyExists bool
-		if checkErr := d.sql.QueryRowContext(ctx, `SELECT to_regclass('paperboat.goose_db_version') IS NOT NULL`).Scan(&historyExists); checkErr != nil {
+		if checkErr := database.QueryRowContext(ctx, `SELECT to_regclass('paperboat.goose_db_version') IS NOT NULL`).Scan(&historyExists); checkErr != nil {
 			return fmt.Errorf("check migration history: %w", checkErr)
 		}
 		if historyExists {
 			return fmt.Errorf("read migration history: %w", err)
 		}
-		if err := d.sql.QueryRowContext(ctx, `SELECT EXISTS (
+		if err := database.QueryRowContext(ctx, `SELECT EXISTS (
   SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
   WHERE n.nspname='paperboat' AND c.relkind IN ('r','p','v','m','S')
 )`).Scan(&existingObjects); err != nil {

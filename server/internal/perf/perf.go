@@ -94,6 +94,10 @@ CREATE TABLE IF NOT EXISTS perf.seed(version text NOT NULL, seeded_at timestampt
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
 	defer cancel()
 	return store.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		// Seeding takes minutes; the request pool's statement timeout does not apply to it.
+		if _, err := tx.Exec(ctx, `SET LOCAL statement_timeout = 0`); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `DO $$ DECLARE tables text; BEGIN
 SELECT string_agg(format('%I.%I', schemaname, tablename), ', ') INTO tables FROM pg_tables
 WHERE schemaname = 'paperboat' AND tablename <> 'goose_db_version';
