@@ -87,3 +87,28 @@ func TestCompletionInventoryListsSessionsInOneCatalogRequest(t *testing.T) {
 		t.Fatalf("catalog requests=%d sessions=%v, want 1 and %v", catalogRequests, sessions, want)
 	}
 }
+
+// Machine names still complete when the preview or session lists cannot be read (the server answered
+// /v1/previews 503 under load and every new daemon completed nothing); the failure is still reported.
+func TestCompletionKeepsMachineNamesWhenPreviewsAndSessionsFail(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":{"code":"control_unavailable","message":"unavailable"}}`))
+	}))
+	defer server.Close()
+	source := AuthenticatedMachineSource{ServerURL: server.URL, Auth: &rotatingAuthSource{}, HTTPClient: server.Client()}
+	items, err := source.ListCompletionItems(context.Background(), []api.UserMachine{{ID: "machine_owner", Alias: "studio", EnvironmentID: "environment_owner", State: "online"}})
+	if err == nil {
+		t.Fatal("the preview and session failures were not reported")
+	}
+	names := map[string]bool{}
+	for _, item := range items {
+		if item.Kind == "machine" {
+			names[item.Value] = true
+		}
+	}
+	if !names["studio"] || !names["machine_owner"] {
+		t.Fatalf("machine names lost: %v", items)
+	}
+}

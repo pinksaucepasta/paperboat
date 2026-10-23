@@ -107,3 +107,34 @@ func TestInventoryCallbackIncludesCompletionValidationFailure(t *testing.T) {
 		t.Fatal("completion validation failure missed final callback")
 	}
 }
+
+// A daemon with no completion projection yet publishes the machine names even while the session list
+// is unavailable.
+func TestFreshInventoryCompletesMachineNamesDuringASessionListOutage(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/machines":
+			_, _ = w.Write([]byte(`{"data":{"items":[{"id":"machine_1","alias":"studio","environment_id":"environment_1"}],"pagination":{"limit":200,"offset":0,"total":1,"next_offset":null}}}`))
+		default:
+			w.WriteHeader(503)
+			_, _ = w.Write([]byte(`{"error":{"code":"control_unavailable","message":"unavailable"}}`))
+		}
+	}))
+	defer server.Close()
+	store, err := localapi.NewSnapshotStore(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inventory, err := NewInventory(InventoryConfig{Source: AuthenticatedMachineSource{ServerURL: server.URL, Auth: &rotatingAuthSource{}, HTTPClient: server.Client()}, Store: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := inventory.Refresh(t.Context()); err == nil {
+		t.Fatal("the outage was not reported")
+	}
+	projection, err := inventory.Completions(t.Context())
+	if err != nil || len(projection.Items) == 0 || projection.Items[0].Kind != "machine" {
+		t.Fatalf("fresh daemon completes nothing: %v %v", projection.Items, err)
+	}
+}

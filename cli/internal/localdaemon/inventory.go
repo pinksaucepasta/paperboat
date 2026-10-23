@@ -245,7 +245,13 @@ func (i *Inventory) Refresh(ctx context.Context) (refreshErr error) {
 		i.completion = localapi.CompletionSnapshot{}
 		i.completionMu.Unlock()
 	}
-	if sourceErr == nil && completionErr == nil {
+	// A partial list (machine names, without previews or sessions the server could not list) is
+	// published only while there is no good projection yet, so a fresh daemon still completes machine
+	// names; an existing projection is kept through the outage.
+	i.completionMu.RLock()
+	haveProjection := i.completion.Validate() == nil
+	i.completionMu.RUnlock()
+	if sourceErr == nil && (completionErr == nil || len(completionItems) > 0 && !haveProjection) {
 		snapshot := localapi.CompletionSnapshot{Schema: localapi.CompletionSchemaV1, ObservedAt: now, Items: append([]localapi.CompletionItem(nil), completionItems...)}
 		if validationErr := snapshot.Validate(); validationErr == nil {
 			i.completionMu.Lock()

@@ -129,16 +129,19 @@ func (s AuthenticatedMachineSource) ListCompletionItems(ctx context.Context, mac
 			items = append(items, localapi.CompletionItem{Kind: "transfer_target", Value: machine.ID, Description: description, EnvironmentID: machine.EnvironmentID})
 		}
 	}
+	// Machine names complete even when the preview or session lists cannot be read: those lists are
+	// only added to them. The failure is still returned for the refresh to report.
+	var partial error
 	previews, err := previewCompletionItems(ctx, client, machines, maximumCompletionItems-len(items))
 	if err != nil {
-		return nil, err
+		partial = err
 	}
 	items = append(items, previews...)
 	// One catalog page for the caller's own sessions on every machine, stored rows only: listing
 	// each machine separately cost N requests per daemon per refresh (O(N²) across an account).
 	sessions, err := client.SharedTerminalSessionsFiltered(ctx, url.Values{"owner": {"mine"}, "live": {"false"}})
 	if err != nil {
-		return nil, inventorySourceFailure("completion_list", err)
+		partial = errors.Join(partial, inventorySourceFailure("completion_list", err))
 	}
 	environments := make(map[string]string, len(machines))
 	for _, machine := range machines {
@@ -167,7 +170,7 @@ func (s AuthenticatedMachineSource) ListCompletionItems(ctx context.Context, mac
 	if len(items) > maximumCompletionItems {
 		items = items[:maximumCompletionItems]
 	}
-	return items, nil
+	return items, partial
 }
 
 func completionDescription(values ...string) string {
