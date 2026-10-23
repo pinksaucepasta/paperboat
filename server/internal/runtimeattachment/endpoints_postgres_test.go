@@ -213,10 +213,17 @@ VALUES($1,$2,$3,$3,$4,'owner_session_endpoint','foreground','http','127.0.0.1:30
 	if err := gate(); err != nil {
 		t.Fatalf("readiness with one serving edge = %v", err)
 	}
-	exec(`UPDATE preview_leases SET origin_state='ready' WHERE id=$1`, lease)
+	exec(`UPDATE preview_leases SET origin_state='ready',ready_at=now() WHERE id=$1`, lease)
 	if got := served(); len(got) != 1 || got[0] != node+"/ready" {
 		t.Fatalf("preview_routes after origin ready = %v", got)
 	}
+	// The app stopping does not withdraw the route: the preview shows origin_unavailable, not a
+	// pending route ("connecting"), and the app's health stays in origin_state.
+	exec(`UPDATE preview_leases SET origin_state='down' WHERE id=$1`, lease)
+	if got := served(); len(got) != 1 || got[0] != node+"/ready" {
+		t.Fatalf("preview_routes while the app is down = %v, want %s/ready", got, node)
+	}
+	exec(`UPDATE preview_leases SET origin_state='ready' WHERE id=$1`, lease)
 	// The owner's native `pb preview inspect` gets its inspector network scope from a preview served
 	// as an endpoint route (it read only the legacy attachments, so the dial was refused).
 	cli, credential := prefix+"_cli", prefix+"_inspector"
