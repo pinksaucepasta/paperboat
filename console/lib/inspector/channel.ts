@@ -116,7 +116,7 @@ function finalPhase(error: unknown): ChannelPhase | undefined {
   return undefined
 }
 
-export function useInspectorChannel(previewId: string, machineId: string, enabled: boolean) {
+export function useInspectorChannel(previewId: string, machineId: string, enabled: boolean, routing: boolean) {
   const [phase, setPhase] = useState<ChannelPhase>("connecting")
   const [message, setMessage] = useState("")
   const [canReplay, setCanReplay] = useState(false)
@@ -127,6 +127,10 @@ export function useInspectorChannel(previewId: string, machineId: string, enable
   const timer = useRef<number | undefined>(undefined)
   const disposed = useRef(false)
   const startRef = useRef<() => void>(() => undefined)
+  const routingRef = useRef(routing)
+  useEffect(() => {
+    routingRef.current = routing
+  }, [routing])
 
   const retry = useCallback((reason: string, next: ChannelPhase = "reconnecting") => {
     if (disposed.current) return
@@ -219,7 +223,10 @@ export function useInspectorChannel(previewId: string, machineId: string, enable
       if (disposed.current) return
       const final = finalPhase(error)
       const text = error instanceof Error ? error.message : "The inspector could not connect."
-      if (final === "denied" && !fresh && grants.current) {
+      if (final === "denied" && !routingRef.current) {
+        // The server grants inspection only while the preview routes; wait for it.
+        retry("Waiting for the preview to route…")
+      } else if (final === "denied" && !fresh && grants.current) {
         revoke(grants.current.inspect)
         revoke(grants.current.replay)
         grants.current = null
@@ -249,8 +256,6 @@ export function useInspectorChannel(previewId: string, machineId: string, enable
       revoke(grants.current?.inspect)
       revoke(grants.current?.replay)
       grants.current = null
-      // A paused channel is not ready; it reconnects when enabled again.
-      setPhase("connecting")
     }
   }, [enabled])
 
@@ -269,7 +274,8 @@ export function useInspectorChannel(previewId: string, machineId: string, enable
         revoke(current.replay)
       } catch (error) {
         const final = finalPhase(error)
-        if (final && final !== "offline") {
+        // A preview that is not routing refuses grants for now; the next start retries.
+        if (final && final !== "offline" && !(final === "denied" && !routingRef.current)) {
           setPhase(final)
           setMessage(error instanceof Error ? error.message : "")
         }

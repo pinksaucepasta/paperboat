@@ -80,10 +80,10 @@ const phaseText: Record<Exclude<ChannelPhase, "ready">, [string, string]> = {
 }
 
 function Inspector({ preview }: { preview: Preview }) {
-  // Grants exist only while the preview routes; while it starts or its machine reconnects the
-  // channel waits, and the list collected so far stays.
+  // The server grants inspection only while the preview routes. While it starts or its machine
+  // reconnects, a refusal means 'wait', not 'not allowed'; the list collected so far stays.
   const routing = preview.state === "ready"
-  const channel = useInspectorChannel(preview.id, preview.owner_machine_id, routing)
+  const channel = useInspectorChannel(preview.id, preview.owner_machine_id, true, routing)
   const [paused, setPaused] = useState(false)
   const feed = useCaptureFeed(channel, preview.id, paused)
   const [selected, setSelected] = useState("")
@@ -94,7 +94,7 @@ function Inspector({ preview }: { preview: Preview }) {
   const [clearing, setClearing] = useState(false)
 
   // Final states replace the page; while reconnecting the last list stays visible under a notice.
-  if (!routing && feed.records.length === 0)
+  if (!routing && channel.phase !== "ready" && feed.records.length === 0)
     return <State title="Waiting for the preview" detail="The preview is starting or its machine is reconnecting. Inspection continues when it is back." />
   if (channel.phase !== "ready" && (feed.records.length === 0 || ["denied", "update", "gone"].includes(channel.phase))) {
     const [title, detail] = phaseText[channel.phase]
@@ -119,11 +119,11 @@ function Inspector({ preview }: { preview: Preview }) {
 
   return (
     <section className="flex flex-col gap-3" data-inspector-phase={channel.phase} data-capture={feed.capture}>
-      {(channel.phase !== "ready" || !routing) && (
+      {channel.phase !== "ready" && (
         <p className="text-sm text-muted-foreground" role="status">
-          {!routing || channel.phase === "ready"
-            ? "The preview is starting or its machine is reconnecting. Inspection continues when it is back."
-            : phaseText[channel.phase][1]}
+          {routing
+            ? phaseText[channel.phase][1]
+            : "The preview is starting or its machine is reconnecting. Inspection continues when it is back."}
         </p>
       )}
       <div className="flex flex-wrap items-center gap-2">
