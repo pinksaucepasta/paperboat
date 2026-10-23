@@ -141,8 +141,9 @@ func TestAddingTheSameComputerAgainRemovesItsRetiredRecordAndKeepsTheName(t *tes
 		t.Fatal(err)
 	}
 	addMachine(foreignNew, userA, "desk", "online")
-	if err := observe(userA, foreignNew, foreignKey); !errors.Is(err, managedssh.ErrConflict) {
-		t.Fatalf("another account's host key was taken: %v", err)
+	var inUse *managedssh.HostKeyInUseError
+	if err := observe(userA, foreignNew, foreignKey); !errors.As(err, &inUse) || inUse.MachineName != "" {
+		t.Fatalf("another account's host key was taken, or its machine was named: %v", err)
 	}
 	if _, status, deleted := state(foreignOld); status != "disconnected" || deleted {
 		t.Fatalf("another account's record was touched: %q %v", status, deleted)
@@ -156,8 +157,8 @@ func TestAddingTheSameComputerAgainRemovesItsRetiredRecordAndKeepsTheName(t *tes
 		t.Fatal(err)
 	}
 	addMachine(liveNew, userA, "rack-2", "online")
-	if err := observe(userA, liveNew, liveKey); !errors.Is(err, managedssh.ErrConflict) {
-		t.Fatalf("a live machine's host key was handed over: %v", err)
+	if err := observe(userA, liveNew, liveKey); !errors.As(err, &inUse) || inUse.MachineName != "rack" {
+		t.Fatalf("a live machine's host key was handed over, or the machine was not named: %v", err)
 	}
 	if _, status, deleted := state(liveOld); status != "online" || deleted {
 		t.Fatalf("a live machine was removed: %q %v", status, deleted)
