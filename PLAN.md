@@ -1452,12 +1452,12 @@ machine, so 100k machines ≈ 250k req/s: **R**. Target ≤ 0.05 req/s per idle 
 
 | Finding | Measured | Verdict | Owner, status |
 |---|---|---|---|
-| Event long-poll never healthy: client header timeout 30 s = server hold 30 s; the client gives up first, so every daemon polls inventory every 15 s | user-daemon waits end at 29,995–29,999 ms; inventory topic moved 0 times in 3 min while 139 refreshes ran | R | Lane B: MaxWait 25 s; Lane R: long-poll deadline |
-| One inventory refresh = own list + managed-SSH re-list + 1 list per team + workspaces + client-configuration + machine-services + preview pages + terminal catalog | ~6.7 GET /v1/machines per refresh, 355/min from 22 machines; avg 791 ms | R | Lane R |
+| Event long-poll never healthy: client header timeout 30 s = server hold 30 s; the client gives up first, so every daemon polls inventory every 15 s | user-daemon waits end at 29,995–29,999 ms; inventory topic moved 0 times in 3 min while 139 refreshes ran | R | Lane R: fixed in e9b79df2 (held waits skip the header timeout, `TestHubStaysHealthyAcrossEmptyWaitsLongerThanTheHeaderTimeout`) + 9e83beed (outage backoff 15 s → 5 min); Lane B: MaxWait 25 s for released clients; Lane W: re-measure prod mix after the next shared build |
+| One inventory refresh = own list + managed-SSH re-list + 1 list per team + workspaces + client-configuration + machine-services + preview pages + terminal catalog | ~6.7 GET /v1/machines per refresh, 355/min from 22 machines; avg 791 ms | R | Lane R, in order with counting tests: managed-SSH reuse, team lists on event, completions off the refresh |
 | Private-access dial lists every machine of the account | code: tunnel/native_private.go:27 | R (O(dials × machines)) | Lane R |
 | Server re-reads topic generations every 5 s per held waiter | ≈ 2 waiters × 100k / 5 s = 40k qps | R at 100k | Lane Q |
 | Other per-machine polls: ssh-target 8.9/min, machine-services 8.4, JWKS 11.7 (3 fetchers), certificates 6.9, runtime-observations 6.0, peer config 10.2 | prod mix | A | Lane R (peer config: delta rewrite) |
-| Edge pulls endpoint/carrier admissions every ~300 ms per edge node, full snapshot | 3.4 + 2.8 req/s; size grows with previews | A | Lane M: "unchanged since G" + ≥30 s full snapshot, after slice 4.2 |
+| Edge pulls endpoint/carrier admissions every ~300 ms per edge node, full snapshot | 3.4 + 2.8 req/s; size grows with previews | A | Lane M: true delta (changed_at cursor, 10 s overlap, removals), full snapshot every 2 min; reports snapshot bytes at 1k/10k |
 | Server has no request admission cap, no WriteTimeout/IdleTimeout; pgxpool 20 conns (1 pinned by LISTEN), no acquire timeout | code | ? (storm test on staging) | Lane Q |
 | Machines per vCPU of one server box (server + PostgreSQL), today's 15 s refresh mix and the fixed 300 s mix | `TestLoadIdlePollMix` on pbvm4 reports daemons per busy vCPU at the last step with p99 < 5 s | ? (pbvm4 after Lane H's S3-04 run) | Lane W |
 
@@ -1481,7 +1481,7 @@ machine, so 100k machines ≈ 250k req/s: **R**. Target ≤ 0.05 req/s per idle 
 | Concurrent exec per host | 32 then clear error | execprocess 32 → resource_limit | 32 × 4 MiB output in 2.2 s; 33rd refused in 27 µs (ErrCapacity); 2,000 short execs at 288/s, p99 146 ms, 0 failed; no leak (`TestLoadExecConcurrencyAndChurn`, ubuntu24) | G |
 | Concurrent transfers per host | 2 then queue | MaxConcurrentTransfers 2 | ? | Lane W |
 | Managed SSH streams per host | 32 | host.go 32, no queue → ErrSSHHostBusy at once | ? (parallel rsync/VS Code) | Lane W |
-| Relay connections per account | 1,000 machines | derpquic 16 per account, 256 per relay node; peer relay 16 allocations per account | **R by design** for an account of 1,000 (machines past 16 get no relay fallback) | Lane R |
+| Relay connections per account | 1,000 machines | derpquic 16 per account, 256 per relay node; peer relay 16 allocations per account | **R by design** for an account of 1,000 (machines past 16 get no relay fallback) | Lane R: caps from fd/memory, fairness from byte budgets, "relay full" → next node; tests: 1,000 registrations of one account, one account's flood doesn't slow another |
 
 **Previews, tunnels**
 
