@@ -37,7 +37,15 @@ func TestWorkersRunInOneInstanceAndFailOverOnPostgres(t *testing.T) {
 	var active, overlap atomic.Int32
 	runs := map[string]*atomic.Int32{"a": {}, "b": {}}
 	instance := func(name string) (*workers.Supervisor, context.CancelFunc, chan error) {
-		leader := &workers.PostgresLeader{DB: store.SQL(), Instance: "test-" + name, Version: "test",
+		// Each instance has its own pool, as separate server processes do: a shared pool could hand the
+		// standby the leader's own session, where the advisory lock is reentrant and a lock left behind
+		// on a pooled connection goes unnoticed (it did, until prod handed over to nobody).
+		pool, err := db.Open(config.Database{Driver: "postgres", DSN: dsn})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { pool.Close() })
+		leader := &workers.PostgresLeader{DB: pool.SQL(), Instance: "test-" + name, Version: "test",
 			Retry: 100 * time.Millisecond, Check: 100 * time.Millisecond, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
 		s := workers.NewLeaderSupervisor(leader, func(ctx context.Context) error {
 			if active.Add(1) > 1 {

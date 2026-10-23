@@ -119,10 +119,21 @@ func (l *PostgresLeader) hold(conn *sql.Conn) (<-chan struct{}, func(), error) {
 	return lost, release, nil
 }
 
-// discard closes the physical connection instead of returning it to the pool, so a session advisory
-// lock can never stay behind on a pooled connection.
+// discard releases the lock and closes the physical connection instead of returning it to the pool, so a
+// session advisory lock can never stay behind on a pooled connection. (Returning driver.ErrBadConn from
+// Conn.Raw does not discard a sql.Conn: on 2026-10-23 the released lock stayed held by the draining server's
+// pool and no instance ran workers until the backend was terminated.) Unlocking is best effort: if the
+// connection is already dead, PostgreSQL dropped the lock with the backend.
 func discard(conn *sql.Conn) {
-	_ = conn.Raw(func(any) error { return driver.ErrBadConn })
+	ctx, cancel := context.WithTimeout(context.Background(), leaderStatementTimeout)
+	defer cancel()
+	_, _ = conn.ExecContext(ctx, `SELECT pg_advisory_unlock($1)`, workerLeaderLockKey)
+	_ = conn.Raw(func(driverConn any) error {
+		if closer, ok := driverConn.(driver.Conn); ok {
+			_ = closer.Close()
+		}
+		return nil
+	})
 	_ = conn.Close()
 }
 
