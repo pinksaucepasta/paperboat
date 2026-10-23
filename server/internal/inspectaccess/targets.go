@@ -19,7 +19,7 @@ func (s *Service) Targets(ctx context.Context, account, selector, action string)
 	}
 	result := []Target{}
 	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		rows, err := tx.Query(ctx, `SELECT t.id,r.id,r.name FROM tunnels t JOIN tunnel_routes r ON r.tunnel_id=t.id WHERE (t.id=$1 OR t.name=$1) AND t.desired_state='active' AND t.deleted_at IS NULL AND (t.expires_at IS NULL OR t.expires_at>$3) AND r.desired_state='active' AND r.deleted_at IS NULL AND (t.account_id=$2 OR EXISTS(SELECT 1 FROM team_resource_grants g JOIN team_resource_bindings b ON b.team_id=g.team_id AND b.resource_kind=g.resource_kind AND b.resource_id=g.resource_id WHERE g.account_id=$2 AND g.resource_kind='tunnel' AND g.resource_id=t.id AND g.permission=$4 AND g.active AND b.active)) ORDER BY t.id,r.id LIMIT 129`, selector, account, s.now(), action)
+		rows, err := tx.Query(ctx, `SELECT t.id,r.id,r.name FROM tunnels t JOIN tunnel_routes r ON r.tunnel_id=t.id WHERE (t.id=$1 OR t.name=$1) AND t.desired_state='active' AND t.deleted_at IS NULL AND (t.expires_at IS NULL OR t.expires_at>$3) AND r.desired_state='active' AND r.deleted_at IS NULL AND (t.account_id=$2 OR EXISTS(SELECT 1 FROM team_resource_bindings b WHERE b.resource_kind='tunnel' AND b.resource_id=t.id AND b.active AND workspace_policy_resource_allowed($2,b.team_id,'tunnel',t.id,$4))) ORDER BY t.id,r.id LIMIT 129`, selector, account, s.now(), action)
 		if err != nil {
 			return err
 		}

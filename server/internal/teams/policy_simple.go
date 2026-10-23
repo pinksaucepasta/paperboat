@@ -140,8 +140,9 @@ func SetAllowPrivateAccessTx(ctx context.Context, tx *db.Tx, cfg config.Workspac
 	})
 }
 
-// envGrantsTx is the simple view of the team ENV: each member's own rule as a grant.
-func envGrantsTx(ctx context.Context, tx *db.Tx, team string) ([]Grant, error) {
+// policyGrantsTx is the simple view of the team ENV and of preview/tunnel inspect/replay: each
+// member's own rule as a grant (generation: the policy version).
+func policyGrantsTx(ctx context.Context, tx *db.Tx, team string) ([]Grant, error) {
 	out := []Grant{}
 	var source string
 	var version uint64
@@ -164,14 +165,70 @@ func envGrantsTx(ctx context.Context, tx *db.Tx, team string) ([]Grant, error) {
 	for _, m := range inv.Members {
 		accounts["user:"+strings.ToLower(m.Email)] = m.AccountID
 	}
+	resources := map[string]policy.Resource{}
+	for _, r := range inv.Resources {
+		resources[resourceLabel(r)] = r
+	}
 	for _, r := range policy.SimpleRules(d) {
-		if id := accounts[strings.ToLower(r.Subject)]; r.Target == "env:team" && id != "" {
+		id := accounts[strings.ToLower(r.Subject)]
+		if id == "" {
+			continue
+		}
+		if r.Target == "env:team" {
 			permission := "read"
 			if slices.Contains(r.Allow, policy.ActionENVWrite) {
 				permission = "write"
 			}
 			out = append(out, Grant{AccountID: id, ResourceKind: "env", ResourceID: team, Permission: permission, Generation: version, Active: true})
+		} else if res, ok := resources[r.Target]; ok {
+			for _, a := range r.Allow {
+				out = append(out, Grant{AccountID: id, ResourceKind: res.Kind, ResourceID: res.ID, Permission: a, Generation: version, Active: true})
+			}
 		}
 	}
 	return out, nil
+}
+
+// resourceLabel is a preview's or tunnel's name in a policy file (a preview has none: its ID).
+func resourceLabel(r policy.Resource) string {
+	if r.Name != "" {
+		return r.Kind + ":" + r.Name
+	}
+	return r.Kind + ":" + r.ID
+}
+
+// ApplyResourceAccessTx adds (r.Active) or removes r.Permission (inspect or replay) for one member
+// on one preview or tunnel bound to the team, in the member's rule for it. The caller has checked
+// rights and the binding.
+func ApplyResourceAccessTx(ctx context.Context, tx *db.Tx, cfg config.WorkspacePolicy, team, actor string, r GrantRequest) error {
+	return setPolicyTx(ctx, tx, Workspace{TeamID: team}, cfg, actor, "Inspector access changed", func(ext []byte, inv policy.Inventory) ([]byte, error) {
+		subject, target := "", ""
+		for _, m := range inv.Members {
+			if m.AccountID == r.AccountID {
+				subject = "user:" + strings.ToLower(m.Email)
+			}
+		}
+		for _, res := range inv.Resources {
+			if res.Kind == r.ResourceKind && res.ID == r.ResourceID {
+				target = resourceLabel(res)
+			}
+		}
+		if subject == "" || target == "" {
+			return nil, ErrForbidden
+		}
+		d, errs := policy.Parse(ext)
+		if len(errs) > 0 {
+			return nil, &PolicyInvalidError{Errors: errs}
+		}
+		var actions []string
+		for _, s := range policy.SimpleRules(d) {
+			if s.Subject == subject && s.Target == target {
+				actions = slices.DeleteFunc(slices.Clone(s.Allow), func(a string) bool { return a == r.Permission })
+			}
+		}
+		if r.Active {
+			actions = append(actions, r.Permission)
+		}
+		return policy.SetSimpleRule(ext, subject, target, actions)
+	})
 }

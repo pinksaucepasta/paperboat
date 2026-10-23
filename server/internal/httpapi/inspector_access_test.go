@@ -8,6 +8,7 @@ import (
 	"github.com/pinksaucepasta/paperboat-server/internal/config"
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
 	"github.com/pinksaucepasta/paperboat-server/internal/inspectaccess"
+	"github.com/pinksaucepasta/paperboat-server/internal/teams/teamstest"
 	"net/http"
 	"os"
 	"testing"
@@ -105,7 +106,7 @@ func TestInspectorRemoteAccessPostgres(t *testing.T) {
 		t.Fatalf("durable edge routing: %v", e)
 	}
 	exec(`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account,active,generation) VALUES($1,'tunnel',$2,$3,true,1)`, "team_ih_"+suffix, tunnel, owner)
-	exec(`INSERT INTO paperboat.team_resource_grants(team_id,account_id,resource_kind,resource_id,permission,generation,active) VALUES($1,$2,'tunnel',$3,'inspect',1,true)`, "team_ih_"+suffix, mate, tunnel)
+	teamstest.SetResourceAccess(t, database, "team_ih_"+suffix, mate, "tunnel", tunnel, "inspect", true)
 	targets, e := service.Targets(ctx, mate, tunnel, "inspect")
 	if e != nil || len(targets) != 1 || targets[0].ResourceID != tunnel || targets[0].RouteID != route {
 		t.Fatalf("inspect-only target discovery: %v", e)
@@ -139,7 +140,7 @@ func TestInspectorRemoteAccessPostgres(t *testing.T) {
 	if _, e = service.Targets(ctx, mate, tunnel, "inspect"); e == nil {
 		t.Fatal("deleted route remained discoverable")
 	}
-	exec(`UPDATE paperboat.team_resource_grants SET active=false,generation=generation+1 WHERE resource_id=$1 AND account_id=$2 AND permission='inspect'`, lease, mate)
+	teamstest.SetResourceAccess(t, database, "team_ih_"+suffix, mate, "preview", lease, "inspect", false)
 	if _, err = service.ResolveAccess(ctx, input); err == nil {
 		t.Fatal("revoked inspect grant admitted")
 	}

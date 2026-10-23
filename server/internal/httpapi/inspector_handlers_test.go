@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/pinksaucepasta/paperboat-server/internal/controlplane"
+	"github.com/pinksaucepasta/paperboat-server/internal/teams/teamstest"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -85,7 +86,7 @@ func inspectorHTTPFixture(t *testing.T, ctx context.Context, database *db.DB, no
 	exec(`INSERT INTO paperboat.billing_workspaces(id,team_id,state,product_code,quantity,period_start,period_end) VALUES($1,$2,'active','team-pro',3,$3,$4)`, "bw_"+teamID, teamID, now.Add(-time.Hour), now.Add(time.Hour))
 	exec(`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'member',true),($1,$3,1,'member',true)`, teamID, owner, mate)
 	exec(`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account,active,generation) VALUES($1,'preview',$2,$3,true,1)`, teamID, lease, owner)
-	exec(`INSERT INTO paperboat.team_resource_grants(team_id,account_id,resource_kind,resource_id,permission,generation,active) VALUES($1,$2,'preview',$3,'inspect',1,true)`, teamID, mate, lease)
+	teamstest.SetResourceAccess(t, database, teamID, mate, "preview", lease, "inspect", true)
 	t.Cleanup(func() {
 		c := context.Background()
 		_, _ = database.SQL().ExecContext(c, `DELETE FROM paperboat.inspector_credentials WHERE account_id IN($1,$2)`, owner, mate)

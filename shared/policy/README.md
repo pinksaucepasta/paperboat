@@ -170,6 +170,14 @@ Version     {version, digest, created_at, author, api_token?, message, gained, l
   `private_access_off`, `outside_token_scope`; `guardrail` names a failed guardrail
   (`team_suspended`, `membership_inactive`, `machine_not_in_workspace`, `team_not_entitled`,
   `machine_service_off`). A member asking about someone else is 403 `policy_explain_forbidden`.
+- **Preview/tunnel inspect and replay** (F17): decided by the policy on `preview:<id>` /
+  `tunnel:<name>` and on the team machine the resource runs on (machine, `machine:*`, tag); the
+  resource's owner and the owner of the personal machine it runs on always may; `inspect` does
+  not imply `replay`. `pb team grant <team> <account> preview|tunnel <id> inspect|replay` adds or
+  removes that action in the member's own rule; the team view lists those rules as grants. Stored
+  files name previews and tunnels by ID (`preview:#<id>`, `tunnel:#<id>`), so a rename never
+  changes a rule. A policy save advances the grant generation of inspector credentials, which
+  fences them (the console channel ends on its next check). `use`/`manage` stay grants.
 - **Team ENV**: `env_read`/`env_write` on `env:team` decide who may use the team ENV (write
   covers reading); the team owner always may (owner guardrail). A team starts with
   `{"src": ["role:admin"], "dst": ["env:team"], "allow": ["env_read", "env_write"]}`.

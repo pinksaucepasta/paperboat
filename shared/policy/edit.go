@@ -2,6 +2,7 @@ package policy
 
 import (
 	"slices"
+	"strings"
 
 	"github.com/tailscale/hujson"
 )
@@ -9,13 +10,14 @@ import (
 // The console's per-machine "Manage access" dialog, `pb team machine-grant` and the team ENV
 // grant (`pb team grant ... env`) edit the policy through these functions. A "simple rule" is
 // one they own: exactly one src (role:member or a user), exactly one dst (a machine with machine
-// capabilities, or env:team with ENV actions), an allow list, no ports, no note. Every other
+// capabilities, env:team with ENV actions, or a preview or tunnel with inspect/replay), an allow
+// list, no ports, no note. Every other
 // rule stays as the file has it.
 
 // SimpleRule is one per-machine or team ENV grant as the simple view shows it.
 type SimpleRule struct {
 	Subject string   // "role:member" or "user:<email>"
-	Target  string   // "machine:<name>" or "env:team"
+	Target  string   // "machine:<name>", "env:team", "preview:<name>" or "tunnel:<name>"
 	Allow   []string // sorted actions
 }
 
@@ -38,10 +40,12 @@ func simple(r Rule) (SimpleRule, bool) {
 		return SimpleRule{}, false
 	}
 	actions := MachineCapabilities
-	switch {
+	switch kind, _, _ := strings.Cut(r.Dst[0], ":"); {
 	case r.Dst[0] == "env:team":
-		actions = []string{ActionENVRead, ActionENVWrite}
-	case len(r.Dst[0]) < 9 || r.Dst[0][:8] != "machine:" || r.Dst[0] == "machine:*":
+		actions = ENVActions
+	case kind == "preview" || kind == "tunnel":
+		actions = ResourceActions
+	case kind != "machine" || r.Dst[0] == "machine:*" || r.Dst[0] == "machine:":
 		return SimpleRule{}, false
 	}
 	for _, a := range r.Allow {

@@ -147,13 +147,33 @@ func policyInventoryTx(ctx context.Context, tx *db.Tx, w Workspace) (policy.Inve
 	if err != nil {
 		return inv, err
 	}
-	defer rows.Close()
 	for rows.Next() {
 		var m policy.Machine
 		if err = rows.Scan(&m.ID, &m.Alias, &m.PersonalOwner); err != nil {
+			rows.Close()
 			return inv, err
 		}
 		inv.Machines = append(inv.Machines, m)
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil || w.TeamID == "" {
+		return inv, err
+	}
+	// Previews and tunnels bound to the team, for inspect/replay rules (a preview is named by its ID).
+	rows, err = tx.Query(ctx, `SELECT 'preview',p.id,'',coalesce(p.owner_machine_id,''),p.account_id FROM team_resource_bindings b JOIN preview_leases p ON p.id=b.resource_id
+	   WHERE b.team_id=$1 AND b.resource_kind='preview' AND b.active AND p.terminal_state='active'
+	 UNION ALL SELECT 'tunnel',t.id,t.name,coalesce(t.created_by_host_id,''),t.account_id FROM team_resource_bindings b JOIN tunnels t ON t.id=b.resource_id
+	   WHERE b.team_id=$1 AND b.resource_kind='tunnel' AND b.active AND t.deleted_at IS NULL ORDER BY 1,2`, w.TeamID)
+	if err != nil {
+		return inv, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var r policy.Resource
+		if err = rows.Scan(&r.Kind, &r.ID, &r.Name, &r.MachineID, &r.Owner); err != nil {
+			return inv, err
+		}
+		inv.Resources = append(inv.Resources, r)
 	}
 	return inv, rows.Err()
 }

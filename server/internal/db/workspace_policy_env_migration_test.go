@@ -40,7 +40,9 @@ func TestWorkspacePolicyENVMigrationKeepsAccess(t *testing.T) {
 	// The migration database is shared with the other migration tests: start and leave it empty.
 	exec(`DROP SCHEMA IF EXISTS paperboat CASCADE`)
 	exec(`CREATE SCHEMA paperboat`)
-	defer func() { _, _ = store.SQL().ExecContext(context.Background(), `DROP SCHEMA IF EXISTS paperboat CASCADE`) }() // runs before store.Close
+	defer func() {
+		_, _ = store.SQL().ExecContext(context.Background(), `DROP SCHEMA IF EXISTS paperboat CASCADE`)
+	}() // runs before store.Close
 	goose.SetBaseFS(migrationsFS)
 	goose.SetTableName("paperboat.goose_db_version")
 	if err = goose.SetDialect("postgres"); err != nil {

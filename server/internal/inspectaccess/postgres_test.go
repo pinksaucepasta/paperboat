@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat-server/internal/teams/teamstest"
 	"os"
 	"strings"
 	"testing"
@@ -133,7 +134,10 @@ func TestInspectorAuthorizationPostgres(t *testing.T) {
 	if _, err = teamSvc.Grant(ctx, owner, team, teams.GrantRequest{OperationID: "op_grant_ia_" + suffix, ExpectedGeneration: teamGen, AccountID: mate, ResourceKind: "preview", ResourceID: lease, Permission: "inspect", Active: true}); err != nil {
 		t.Fatalf("teams grant inspect via API: %v", err)
 	}
-	exec(`INSERT INTO paperboat.team_resource_grants(team_id,account_id,resource_kind,resource_id,permission,generation,active) VALUES($1,$2,'preview',$3,'replay',1,true),($1,$2,'tunnel',$4,'inspect',1,true),($1,$2,'tunnel',$4,'replay',1,true),($1,$5,'preview',$3,'inspect',1,true)`, team, mate, lease, tunnel, exm)
+	teamstest.SetResourceAccess(t, store, team, mate, "preview", lease, "replay", true)
+	teamstest.SetResourceAccess(t, store, team, mate, "tunnel", tunnel, "inspect", true)
+	teamstest.SetResourceAccess(t, store, team, mate, "tunnel", tunnel, "replay", true)
+	teamstest.SetResourceAccess(t, store, team, exm, "preview", lease, "inspect", true)
 
 	svc := NewService(store)
 	svc.now = func() time.Time { return now }
@@ -225,7 +229,7 @@ func TestInspectorAuthorizationPostgres(t *testing.T) {
 	// Removing one grant preserves the other action: revoke mate's preview
 	// replay grant only. Outstanding replay credentials die immediately while
 	// inspect (and the tunnel replay grant) keep working.
-	exec(`UPDATE paperboat.team_resource_grants SET active=false,generation=generation+1 WHERE team_id=$1 AND account_id=$2 AND resource_kind='preview' AND resource_id=$3 AND permission='replay'`, team, mate, lease)
+	teamstest.SetResourceAccess(t, store, team, mate, "preview", lease, "replay", false)
 	if _, err = authorize(owner, matePreviewReplay.Token, "preview", lease, lease, "replay"); err == nil {
 		t.Fatal("revoked replay credential still authorized")
 	}

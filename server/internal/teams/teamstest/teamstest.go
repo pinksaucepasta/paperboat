@@ -1,4 +1,4 @@
-// Package teamstest sets team machine and ENV access in tests through the same policy path as the
+// Package teamstest sets team machine, ENV and inspector access in tests through the same policy path as the
 // console's "Manage access" and `pb team machine-grant` (PLAN F18), instead of writing rows.
 package teamstest
 
@@ -38,6 +38,15 @@ func SetENVAccess(t testing.TB, store *db.DB, team, account, permission string) 
 	t.Helper()
 	run(t, store, func(ctx context.Context, tx *db.Tx) error {
 		return teams.ApplyENVAccessTx(ctx, tx, config.Default().WorkspacePolicy, team, "", account, permission)
+	})
+}
+
+// SetResourceAccess gives (active) or takes a member's inspect or replay on a preview or tunnel
+// bound to team, as `pb team grant <team> <account> preview|tunnel <id> inspect|replay` does.
+func SetResourceAccess(t testing.TB, store *db.DB, team, account, kind, id, permission string, active bool) {
+	t.Helper()
+	run(t, store, func(ctx context.Context, tx *db.Tx) error {
+		return teams.ApplyResourceAccessTx(ctx, tx, config.Default().WorkspacePolicy, team, "", teams.GrantRequest{AccountID: account, ResourceKind: kind, ResourceID: id, Permission: permission, Active: active})
 	})
 }
 

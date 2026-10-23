@@ -153,8 +153,8 @@ func (r *rewriter) incomplete(e hujson.Value) bool {
 	return false
 }
 
-// Internalize turns names into stable IDs for storage: machine:<name> → machine:#<id> and
-// user:<email> → user:#<account>. Names that do not resolve are left as they are (Validate
+// Internalize turns names into stable IDs for storage: machine:<name> → machine:#<id>,
+// user:<email> → user:#<account> and preview:/tunnel:<name> → preview:/tunnel:#<id>. Names that do not resolve are left as they are (Validate
 // reports them). Stored files survive renames and alias collisions unchanged.
 func Internalize(src []byte, inv Inventory) ([]byte, error) {
 	x := newIndex(inv)
@@ -169,13 +169,16 @@ func Internalize(src []byte, inv Inventory) ([]byte, error) {
 				return "user:#" + a, true
 			}
 		}
+		if r, ok := x.resources[s]; ok {
+			return r.Kind + ":#" + r.ID, true
+		}
 		return s, true
 	})
 	return out, err
 }
 
-// Externalize renders a stored file with current names, dropping references to machines and
-// members no longer in the workspace.
+// Externalize renders a stored file with current names, dropping references to machines,
+// members, previews and tunnels no longer in the workspace.
 func Externalize(src []byte, inv Inventory) ([]byte, error) {
 	x := newIndex(inv)
 	out, _, err := RewriteFunc(src, func(s string) (string, bool) {
@@ -186,6 +189,10 @@ func Externalize(src []byte, inv Inventory) ([]byte, error) {
 		if id, ok := strings.CutPrefix(s, "user:#"); ok {
 			m, ok := x.byAccount[id]
 			return "user:" + strings.ToLower(m.Email), ok
+		}
+		if kind, id, ok := strings.Cut(s, ":#"); ok && (kind == "preview" || kind == "tunnel") {
+			_, ok := x.resourceIDs[kind+":"+id]
+			return x.targetLabel(Target{Kind: kind, ID: id}), ok
 		}
 		return s, true
 	})

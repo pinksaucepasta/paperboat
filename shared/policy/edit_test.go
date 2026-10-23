@@ -76,3 +76,18 @@ func TestSetSimpleRuleOnTheTeamENV(t *testing.T) {
 		t.Fatal("a machine action on env:team is not a simple rule")
 	}
 }
+
+func TestSetSimpleRuleOnAPreview(t *testing.T) {
+	out, err := SetSimpleRule([]byte(`{}`), "user:cy@example.test", "preview:p1", []string{ActionReplay, ActionInspect})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, _ := Parse(out)
+	want := []SimpleRule{{Subject: "user:cy@example.test", Target: "preview:p1", Allow: []string{ActionInspect, ActionReplay}}}
+	if got := SimpleRules(d); !reflect.DeepEqual(got, want) {
+		t.Fatalf("%+v", got)
+	}
+	if _, ok := simple(Rule{Src: []string{"role:member"}, Dst: []string{"tunnel:api"}, Allow: []string{ActionExec}}); ok {
+		t.Fatal("a machine action on a tunnel is not a simple rule")
+	}
+}

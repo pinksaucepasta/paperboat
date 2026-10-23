@@ -203,6 +203,12 @@ func currentMember(t Team, account string) (Member, bool) {
 	return Member{}, false
 }
 
+// policyResourceAction reports whether the team policy, not a grant row, decides permission on
+// a resource of kind: inspect and replay on previews and tunnels.
+func policyResourceAction(kind, permission string) bool {
+	return (kind == "preview" || kind == "tunnel") && (permission == "inspect" || permission == "replay")
+}
+
 // permits reports whether a stored grant permission satisfies a wanted action.
 // Inspector actions are exact-match only: login, membership, viewing (use),
 // management (manage) and machine connectivity imply neither inspect nor

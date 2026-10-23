@@ -397,3 +397,90 @@ func TestPolicyDecidesTeamENV(t *testing.T) {
 		t.Fatalf("revoking other's grant: other %q admin %q", permission(f.other), permission(f.admin))
 	}
 }
+
+// Preview/tunnel inspect and replay: the SQL check behind inspector credentials and shared/policy
+// Decide agree for every member, resource and action, across resource rules, machine rules,
+// tags, deny and the owner guardrail; pb team grant ... inspect edits one member's rule.
+func TestPolicyInspectReplaySQLMatchesGo(t *testing.T) {
+	f := newPolicyFixture(t)
+	// api runs on the team machine db1 (owner's); web runs on member's shared web1.
+	api, web := "api-"+f.team, "web-"+f.team
+	for i, tn := range [][3]string{{api, f.owner, f.db1}, {web, f.member, f.web1}} {
+		hex := fmt.Sprintf("%011d%d", time.Now().UnixNano()%1e11, i)
+		f.exec(`INSERT INTO paperboat.tunnels(id,account_id,name,desired_state,access_mode,generation,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id,created_at,updated_at) VALUES($1,$2,$1,'active','team',1,$4,$5,$3,$2,now(),now())`,
+			tn[0], tn[1], tn[2], "endpoint_00000000-0000-4000-8000-"+hex, "https://00000000-0000-8000-8000-"+hex+".tunnels.example.test")
+		f.exec(`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account) VALUES($1,'tunnel',$2,$3)`, f.team, tn[0], tn[1])
+	}
+	t.Cleanup(func() {
+		_, _ = f.store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.tunnels WHERE id=ANY($1)`, []string{api, web})
+	})
+	o := "user:" + f.email(f.other)
+	policies := []string{
+		`{"rules": []}`,
+		fmt.Sprintf(`{"rules": [{"src": ["%s"], "dst": ["tunnel:%s"], "allow": ["inspect"]}, {"src": ["role:member"], "dst": ["machine:db1"], "allow": ["replay"]}]}`, o, api),
+		fmt.Sprintf(`{"tags": {"tag:prod": ["machine:db1"]}, "rules": [
+		  {"src": ["*"], "dst": ["tag:prod"], "allow": ["inspect", "replay"]},
+		  {"src": ["%s"], "dst": ["tunnel:%s"], "deny": ["replay"]},
+		  {"src": ["*"], "dst": ["machine:*"], "deny": ["inspect"]}]}`, o, api),
+	}
+	members := []string{f.owner, f.admin, f.member, f.other}
+	for i, source := range policies {
+		f.save(source)
+		var inv policy.Inventory
+		if err := f.store.InTx(f.ctx, func(ctx context.Context, tx *db.Tx) (err error) {
+			inv, err = policyInventoryTx(ctx, tx, Workspace{TeamID: f.team})
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		_, c, errs := policy.Validate([]byte(source), inv, policy.Limits{})
+		if len(errs) > 0 {
+			t.Fatal(errs)
+		}
+		for _, actor := range members {
+			for _, tn := range []string{api, web} {
+				for _, action := range policy.ResourceActions {
+					want := c.Decide(actor, policy.Target{Kind: "tunnel", ID: tn}, action, 0).Allowed
+					var got bool
+					if err := f.store.SQL().QueryRowContext(f.ctx, `SELECT paperboat.workspace_policy_resource_allowed($1,$2,'tunnel',$3,$4)`, actor, f.team, tn, action).Scan(&got); err != nil {
+						t.Fatal(err)
+					}
+					if got != want {
+						t.Errorf("policy %d: %s %s %s: SQL %v, Go %v", i, actor, tn, action, got, want)
+					}
+				}
+			}
+		}
+	}
+	// The simple view: pb team grant adds and removes one action of one member's rule.
+	f.save(`{"rules": []}`)
+	grant := func(permission string, active bool) Team {
+		t.Helper()
+		var generation uint64
+		if err := f.store.SQL().QueryRowContext(f.ctx, `SELECT generation FROM paperboat.teams WHERE team_id=$1`, f.team).Scan(&generation); err != nil {
+			t.Fatal(err)
+		}
+		out, err := f.service.Grant(f.ctx, f.owner, f.team, GrantRequest{OperationID: fmt.Sprintf("op_ins_%s_%v_%d", permission, active, generation), ExpectedGeneration: generation, AccountID: f.other, ResourceKind: "tunnel", ResourceID: api, Permission: permission, Active: active})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	grant("inspect", true)
+	team := grant("replay", true)
+	shown := map[string]bool{}
+	for _, g := range team.Grants {
+		if g.AccountID == f.other && g.ResourceID == api {
+			shown[g.Permission] = g.Active
+		}
+	}
+	if !shown["inspect"] || !shown["replay"] {
+		t.Fatalf("team view grants for other on api: %v", shown)
+	}
+	grant("replay", false)
+	for action, want := range map[string]bool{"inspect": true, "replay": false} {
+		if d, err := f.service.Authorize(f.ctx, f.other, f.team, "tunnel", api, action); (err == nil) != want {
+			t.Fatalf("after revoking replay, %s: %+v %v", action, d, err)
+		}
+	}
+}

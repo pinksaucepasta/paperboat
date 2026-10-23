@@ -66,8 +66,9 @@ func ReadTx(ctx context.Context, tx *db.Tx, id string) (Team, error) {
 	if err != nil {
 		return out, err
 	}
-	// The team ENV's grants are the policy's (envGrantsTx, below); old env rows stay unread.
-	rows, err = tx.Query(ctx, `SELECT account_id,resource_kind,resource_id,permission,generation,active FROM team_resource_grants WHERE team_id=$1 AND resource_kind<>'env' ORDER BY resource_kind,resource_id,account_id`, id)
+	// The team ENV's and inspect/replay grants are the policy's (policyGrantsTx, below); their
+	// old rows stay unread.
+	rows, err = tx.Query(ctx, `SELECT account_id,resource_kind,resource_id,permission,generation,active FROM team_resource_grants WHERE team_id=$1 AND resource_kind<>'env' AND permission NOT IN ('inspect','replay') ORDER BY resource_kind,resource_id,account_id`, id)
 	if err != nil {
 		return out, err
 	}
@@ -84,7 +85,7 @@ func ReadTx(ctx context.Context, tx *db.Tx, id string) (Team, error) {
 	if err != nil {
 		return out, err
 	}
-	env, err := envGrantsTx(ctx, tx, id)
+	env, err := policyGrantsTx(ctx, tx, id)
 	if err != nil {
 		return out, err
 	}
@@ -174,14 +175,23 @@ func AuthorizeTx(ctx context.Context, tx *db.Tx, account, team, kind, id, permis
 			return d, ErrForbidden
 		}
 	}
-	if kind == "env" {
-		// The team ENV follows the team policy (owner, role and member rules alike).
-		var granted string
+	if kind == "env" || policyResourceAction(kind, permission) {
+		// The team ENV and preview/tunnel inspect/replay follow the team policy; a policy save
+		// advances GrantGeneration, which fences what was authorized under the old version.
+		var allowed bool
 		var version uint64
-		if err = tx.QueryRow(ctx, `SELECT team_env_permission($1,$2),coalesce((SELECT version FROM workspace_policies WHERE team_id=$2),0)`, account, team).Scan(&granted, &version); err != nil {
+		allowed = kind == "env" && id == team
+		q, args := `SELECT team_env_permission($1,$2)='write' OR (team_env_permission($1,$2)='read' AND $3::text='read')`, []any{account, team, permission}
+		if kind != "env" {
+			allowed = true
+			q, args = `SELECT workspace_policy_resource_allowed($1,$2,$4,$5,$3)`, []any{account, team, permission, kind, id}
+		}
+		var decided bool
+		if err = tx.QueryRow(ctx, q+`,coalesce((SELECT version FROM workspace_policies WHERE team_id=$2),0)`, args...).Scan(&decided, &version); err != nil {
 			return d, err
 		}
-		if id != team || !permits(kind, granted, permission) {
+		allowed = allowed && decided
+		if !allowed {
 			return d, ErrForbidden
 		}
 		d.GrantGeneration = version
