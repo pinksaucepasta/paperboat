@@ -764,7 +764,9 @@ func (s *Service) operationDescriptor(ctx context.Context, userID, sourceMachine
 	if sourceMachineID == "" || cliClientSessionID == "" {
 		return ExecDescriptor{}, ErrNotFound
 	}
-	if _, err := s.db.Queries().GetUserMachineForUser(ctx, dbsqlc.GetUserMachineForUserParams{ID: sourceMachineID, UserID: userID}); err != nil {
+	if allowed, err := s.sourceMachineAllowed(ctx, userID, sourceMachineID); err != nil {
+		return ExecDescriptor{}, err
+	} else if !allowed {
 		return ExecDescriptor{}, ErrNotFound
 	}
 	capability := "exec"

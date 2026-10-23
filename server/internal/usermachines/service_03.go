@@ -25,11 +25,10 @@ func (s *Service) fileTransferDescriptor(ctx context.Context, userID, sourceMach
 	if sourceMachineID == "" || destinationMachineID == "" || cliClientSessionID == "" || s.controlSigner == nil {
 		return FileTransferDescriptor{}, ErrNotFound
 	}
-	if _, err := s.db.Queries().GetUserMachineForUser(ctx, dbsqlc.GetUserMachineForUserParams{ID: sourceMachineID, UserID: userID}); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return FileTransferDescriptor{}, ErrNotFound
-		}
+	if allowed, err := s.sourceMachineAllowed(ctx, userID, sourceMachineID); err != nil {
 		return FileTransferDescriptor{}, err
+	} else if !allowed {
+		return FileTransferDescriptor{}, ErrNotFound
 	}
 	if sessionID != "" {
 		owned, err := s.db.Queries().UserOwnsTerminalSession(ctx, dbsqlc.UserOwnsTerminalSessionParams{SessionID: sessionID, UserID: userID})
@@ -209,10 +208,10 @@ func (s *Service) ConnectSharedTerminalSession(ctx context.Context, userID, sour
 	if sourceMachineID == "" || cliClientSessionID == "" || sessionID == "" {
 		return ConnectionDescriptor{}, ErrNotFound
 	}
-	if _, err := s.db.Queries().GetUserMachineForUser(ctx, dbsqlc.GetUserMachineForUserParams{ID: sourceMachineID, UserID: userID}); exactNoRows(err) {
-		return ConnectionDescriptor{}, ErrNotFound
-	} else if err != nil {
+	if allowed, err := s.sourceMachineAllowed(ctx, userID, sourceMachineID); err != nil {
 		return ConnectionDescriptor{}, err
+	} else if !allowed {
+		return ConnectionDescriptor{}, ErrNotFound
 	}
 	teamFilter := ""
 	if scope, selected := workspace.FromContext(ctx); selected {
@@ -371,10 +370,10 @@ func (s *Service) ConnectTerminalSession(ctx context.Context, userID, sourceMach
 	if sourceMachineID == "" {
 		return ConnectionDescriptor{}, ErrNotFound
 	}
-	if _, err := s.db.Queries().GetUserMachineForUser(ctx, dbsqlc.GetUserMachineForUserParams{ID: sourceMachineID, UserID: userID}); exactNoRows(err) {
-		return ConnectionDescriptor{}, ErrNotFound
-	} else if err != nil {
+	if allowed, err := s.sourceMachineAllowed(ctx, userID, sourceMachineID); err != nil {
 		return ConnectionDescriptor{}, err
+	} else if !allowed {
+		return ConnectionDescriptor{}, ErrNotFound
 	}
 	row, err := s.machineForCapability(ctx, s.db.Queries(), dbsqlc.GetUserMachineForCapabilityParams{ID: userMachineID, UserID: userID, Capability: "terminal"})
 	if errors.Is(err, sql.ErrNoRows) {

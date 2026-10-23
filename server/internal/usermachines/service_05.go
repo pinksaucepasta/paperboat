@@ -293,17 +293,20 @@ func (s *Service) createTerminalSession(ctx context.Context, userID, sourceMachi
 		if sourceMachineID == "" || cwd != "" && sourceMachineID != userMachineID {
 			return TerminalSession{}, ErrNotFound
 		}
-		machine, err := s.db.Queries().GetUserMachineForUser(ctx, dbsqlc.GetUserMachineForUserParams{ID: sourceMachineID, UserID: userID})
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return TerminalSession{}, ErrNotFound
-			}
+		if allowed, err := s.sourceMachineAllowed(ctx, userID, sourceMachineID); err != nil {
 			return TerminalSession{}, err
-		}
-		if machine.RevokedAt.Valid || machine.State == "revoked" || machine.State == "deleted" {
+		} else if !allowed {
 			return TerminalSession{}, ErrNotFound
 		}
 		if cwd != "" {
+			// A launch directory is only for the user's own personal machine (checked again under lock).
+			machine, err := s.db.Queries().GetUserMachineForUser(ctx, dbsqlc.GetUserMachineForUserParams{ID: sourceMachineID, UserID: userID})
+			if err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					return TerminalSession{}, ErrNotFound
+				}
+				return TerminalSession{}, err
+			}
 			var valid bool
 			cwd, valid = canonicalTerminalLaunchCWD(machine.Platform, cwd)
 			if !valid {
