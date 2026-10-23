@@ -1557,35 +1557,36 @@ each with a PG/load test proving the bound at 10k; Lane R audits daemon/CLI/rela
 Test (PG): one join on a 1,000-machine account writes O(1) change rows per affected scope and each machine's next
 answer carries one change; a 5k-machine team survives a server restart (snapshot storm) without 503s.
 
-#### Per-account local address namespaces (Lane Q contract, coordinator decision 2026-10-23)
+#### Machine local addresses: one global 127.64.0.0/10 pool (Lane Q contract, coordinator decision 2026-10-23)
 
-A machine's local address (127.100.x.y, `sync/authority.go` lease) is one slot of a single platform-wide pool
-(`control_sync_leases.address_slot`, 64,770 slots): about 64.8k machines ever, across all users, then pairing fails.
-1. **Key.** A lease is (viewer account, machine) -> slot, the slot unique within the account. An account's
-   namespace holds the machines visible to it: its own, its teams' machines, and machines shared into its teams. A
-   team machine has a slot in each member's namespace, so one machine can have different addresses for different
-   viewers; each viewer sees one stable address per machine.
-2. **Who reads which.** The inventory (`assigned_ip`) and the sync peer list answer in the caller's namespace (the
-   requesting machine's owner account for a daemon). The daemon already maps canonical addresses per viewer
-   (`cli/internal/daemoncmd/coordinator_routes.go` mapPeerSnapshot) and resolves names from its own inventory.
-3. **Allocation.** Never inside a list query (the 29 s staging stall). Missing leases of the machines a request is
-   about to show are allocated set-based in one short transaction before the read, claiming candidate slots with
-   `pg_try_advisory_xact_lock` as migration 165 does, so concurrent allocations never wait for each other.
-4. **Stability and release.** A lease never moves while its machine and the visibility exist (renames, team
-   joins, reinstalls and relists keep it; replace-retired moves the retired machine's leases to the replacement).
-   It is released when the machine is deleted or the account has not been able to see it for 30 days (retention),
-   and the lowest free slot is reused.
-5. **Tags** are per machine, not per viewer: they move from the lease row to the machine.
-6. **Exhaustion.** 64,770 visible machines per account, above the 10,000-machine account ceiling (delta contract
-   point 9); past it 54000 -> ResourceExhausted as today, for that account only.
-7. **Tests (PG).** One account's full namespace does not affect another's allocation; a team machine gets distinct
-   slots in two members' namespaces; addresses stay the same across relists, renames, team joins and a reinstall;
-   two concurrent first lists of a 1,000-machine account allocate without waiting and without duplicates.
-8. **Agreement needed.** Lane A (inventory, names, `pb access`) and Lane R (peer list, loopback mapping) confirm
-   that nothing in the daemon assumes one address per machine across accounts, before Lane Q changes the server.
-*Prior art:* headscale has one namespace per server (`hscontrol/db/ip.go` IPAllocator: sequential or random,
-`FreeIPs` on delete, `ip_random_exhaustion_test.go`); Tailscale gives addresses per tailnet and marks a shared-in
-node with `Sharer` (`tailcfg/tailcfg.go:386`). Ours is smaller (a /16 of loopback), so the namespace is the viewer.
+A machine's local address (127.100.x.y, `sync/authority.go` lease) is one slot of a platform-wide pool of 64,770
+(`control_sync_leases.address_slot` 2..65534): about 64.8k machines ever, then pairing fails. Per-account namespaces
+were dropped: the machine guard reserves each address host-wide for one OS user
+(`cli/internal/machineguard/server.go:620-640`), so two accounts on one host must never share an address (Lane A).
+1. **Pool.** One global pool, 127.64.0.0/10 (4,194,304 addresses). Slot s is the address
+   127.64.0.0 + ((s + 36*65536) mod 2^22): slots below 65,536 are exactly today's 127.100.x.y, so every existing
+   lease keeps its address and a server still running the old formula reads them right; higher slots continue with
+   127.101.0.0 .. 127.127.255.255, then 127.64.0.0 .. 127.99.255.255.
+2. **Excluded addresses, one place** (`paperboat.machine_address_slot_allowed`, used by the CHECK and the
+   allocator): last octet 0 or 255, 127.100.0.0/24 (the browser gateway 127.100.0.1 and reserved), and nothing
+   outside the /10, so never 127.0.0.0/16 (127.0.0.1, systemd-resolved 127.0.0.53, Debian 127.0.1.1).
+3. **Order.** Lowest free slot first, so 127.100/16 fills before any other address is handed out: released daemons
+   accept only 127.100/16 until Lane A's MapCanonical and guard accept the /10, and the pool leaves it only after
+   64,770 live leases. Allocation stays lock-free (advisory claim of candidate slots, migration 165).
+4. **Recycling.** A deleted machine's lease is released (machine_id NULL, released_at set) and its address is not
+   handed out again for 7 days (the quarantine, in the pool's configuration row), so no host that still maps the old
+   name can reach a different machine at it.
+5. **Pool configuration** is one row (`paperboat.machine_address_pool`: size, quarantine); the CHECK bounds slots
+   to the /10.
+6. **Tests (PG).** Existing 127.100.x.y leases keep their addresses; excluded addresses are never allocated; the
+   pool crosses from 127.100.255.254 to 127.101.0.1; a released address is not reused inside the quarantine and is
+   after it; exhaustion (pool size lowered in the test database) answers 54000 -> ResourceExhausted; concurrent
+   first allocations of 1,000 machines neither wait nor collide.
+7. **Clients (Lane A).** MapCanonical and the guard accept 127.64.0.0/10; on macOS one lo0 alias per used address as
+   today. Lane R: no change (the daemon reads assigned_ip from its own inventory).
+*Prior art:* Tailscale gives each node one address from 100.64.0.0/10 and keeps it when the node is shared into
+another tailnet (`tailcfg/tailcfg.go:386` Sharer); headscale allocates sequentially or randomly in one prefix and
+frees on delete (`hscontrol/db/ip.go` IPAllocator, `ip_random_exhaustion_test.go`).
 
 #### Scale matrix, end to end per feature (Lane W, from 2026-10-23)
 
