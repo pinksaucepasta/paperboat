@@ -80,18 +80,17 @@ func task44QualifyConfigWorker(t *testing.T, ctx context.Context, store *db.DB, 
 	policy.Mode = "leased_writes"
 	policy.WarningRevision = "task44"
 	credentials := controlplane.NewConfigCredentialService(store, signer, issuer, encryptionKey)
-	credentials.SetAuditWriter(writer)
 	credentials.SetWarningRevision(policy.WarningRevision)
 	credentials.SetMode(policy.Mode)
 	leases := controlplane.NewConfigLeaseService(store, writer)
 	leases.ConfigureAuthentication(enrollment, signer, issuer, policy.WarningRevision)
 	leases.ConfigureMode(policy.Mode)
-	statuses := controlplane.NewConfigStatusService(store, enrollment, writer, policy.SummaryLimit)
+	statuses := controlplane.NewConfigStatusService(store, enrollment, policy.SummaryLimit)
 	statuses.SetAccountPolicy(policy)
 	access := controlplane.NewConfigRepositoryAccessService(store, leases, controlplane.ConfigRepositoryAccessIssuerFuncs{Issue: func(ctx context.Context, actor, id, permission string) (controlplane.ScopedRepositoryCredential, error) {
 		issued, err := provider.IssueUserRepositoryAccess(ctx, actor, id, permission)
 		return controlplane.ScopedRepositoryCredential{Token: issued.Token, ExpiresAt: issued.ExpiresAt}, err
-	}}, encryptionKey, writer)
+	}}, encryptionKey)
 	conflicts := controlplane.NewConfigConflictService(store, leases, writer)
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/config/credentials", configCredentialIssue(credentials))

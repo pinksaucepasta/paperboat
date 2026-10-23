@@ -548,16 +548,17 @@ func (s *Store) RenewPreviewLeaseV1(ctx context.Context, input RenewPreviewLease
 		if err != nil {
 			return translate(err)
 		}
-		if err := insertPreviewLeaseAudit(ctx, q, previewLeaseAuditInput{
+		result = RenewPreviewLeaseV1Result{Lease: previewLeaseRecordFromRow(lease), Operation: operation}
+		// Only a person's renewal is an audit event; the host's automatic renewals are operational.
+		if input.ActorType != "user" {
+			return nil
+		}
+		return insertPreviewLeaseAudit(ctx, q, previewLeaseAuditInput{
 			ID: input.AuditEventID, AccountID: input.AccountID, ActorID: input.ActorID, ActorType: input.ActorType,
 			EventType: "preview.lease_renewed", ChangeType: "renew", Outcome: "changed", ResourceID: input.PreviewID,
 			IdempotencyKey: input.IdempotencyKey, RequestID: input.RequestID, CorrelationID: input.CorrelationID,
 			SourceMachineID: input.SourceMachineID, Metadata: map[string]any{"lease_deadline": input.LeaseDeadline.UTC()}, CreatedAt: now,
-		}); err != nil {
-			return err
-		}
-		result = RenewPreviewLeaseV1Result{Lease: previewLeaseRecordFromRow(lease), Operation: operation}
-		return nil
+		})
 	})
 	if err == nil {
 		records := []PreviewLeaseRecord{result.Lease}

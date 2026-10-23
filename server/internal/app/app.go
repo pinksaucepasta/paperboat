@@ -467,13 +467,12 @@ func New(opts Options) (*App, error) {
 		return items, next, nil
 	}})
 	configCredentialService := controlplane.NewConfigCredentialService(store, mintKeys, config.NormalizeIssuer(opts.Config.HTTP.PublicBaseURL), opts.Config.Secrets.EncryptionKey)
-	configCredentialService.SetAuditWriter(auditWriter)
 	configCredentialService.SetWarningRevision(opts.Config.ConfigSync.WarningRevision)
 	configCredentialService.SetMode(opts.Config.ConfigSync.Mode)
 	configLeaseService := controlplane.NewConfigLeaseService(store, auditWriter)
 	configLeaseService.ConfigureAuthentication(enrollmentService, mintKeys, config.NormalizeIssuer(opts.Config.HTTP.PublicBaseURL), opts.Config.ConfigSync.WarningRevision)
 	configLeaseService.ConfigureMode(opts.Config.ConfigSync.Mode)
-	configStatusService := controlplane.NewConfigStatusService(store, enrollmentService, auditWriter, opts.Config.ConfigSync.SummaryLimit)
+	configStatusService := controlplane.NewConfigStatusService(store, enrollmentService, opts.Config.ConfigSync.SummaryLimit)
 	configStatusService.SetAccountPolicy(opts.Config.ConfigSync)
 	configRepositoryAccessService := controlplane.NewConfigRepositoryAccessService(store, configLeaseService,
 		controlplane.ConfigRepositoryAccessIssuerFuncs{
@@ -481,7 +480,7 @@ func New(opts Options) (*App, error) {
 				issued, issueErr := githubService.IssueUserRepositoryAccess(ctx, userID, repositoryID, contentsPermission)
 				return controlplane.ScopedRepositoryCredential{Token: issued.Token, ExpiresAt: issued.ExpiresAt}, issueErr
 			},
-		}, opts.Config.Secrets.EncryptionKey, auditWriter)
+		}, opts.Config.Secrets.EncryptionKey)
 	configRuntimeService := controlplane.NewConfigRuntimeService(store, configLeaseService, opts.Config.ConfigSync)
 	configConflictService := controlplane.NewConfigConflictService(store, configLeaseService, auditWriter)
 	routeService := controlplane.NewRouteService(store, auditWriter)

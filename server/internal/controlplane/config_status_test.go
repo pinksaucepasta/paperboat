@@ -157,7 +157,7 @@ func TestConfigAccountStatusUsesCanonicalAssignmentsConsentAndStatus(t *testing.
 	t.Cleanup(func() {
 		_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.users WHERE id=$1`, user)
 	})
-	service := NewConfigStatusService(store, nil, nil, 10)
+	service := NewConfigStatusService(store, nil, 10)
 	service.clock = func() time.Time { return now }
 	service.SetAccountPolicy(config.ConfigSync{
 		Mode:           "leased_writes",

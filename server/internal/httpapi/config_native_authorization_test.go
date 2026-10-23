@@ -49,7 +49,7 @@ func TestConfigNativeRepositoryAndConsentAuthorization(t *testing.T) {
 	assignments := controlplane.NewConfigAssignmentService(store, writer, "native-warning")
 	router := authTestOriginHandler{next: NewRouter(Options{Config: cfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Auth: accounts, DeviceAuth: cliAuth, ConfigAssignments: assignments, ConfigRepositoryAccess: controlplane.NewConfigRepositoryAccessService(store, nil, controlplane.ConfigRepositoryAccessIssuerFuncs{Issue: func(context.Context, string, string, string) (controlplane.ScopedRepositoryCredential, error) {
 		return controlplane.ScopedRepositoryCredential{Token: "private-provider-fixture", ExpiresAt: time.Now().Add(time.Hour)}, nil
-	}}, "", writer)})}
+	}}, "")})}
 	suffix := fmt.Sprint(time.Now().UnixNano())
 	ownerEmail, otherEmail := "config-owner-"+suffix+"@example.test", "config-other-"+suffix+"@example.test"
 	ownerCookies := loginCookies(t, router, "workos_config_owner_"+suffix+":"+ownerEmail+":Owner")

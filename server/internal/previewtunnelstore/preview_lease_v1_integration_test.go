@@ -120,16 +120,31 @@ VALUES ($1, $2, $3, 'active')`, accountID, "workos_preview_"+suffix, "preview-"+
 	if renewed.Lease.Generation != 3 || !renewed.Lease.LastRenewedAt.After(ready.LastRenewedAt) {
 		t.Fatalf("renewed lease = %#v", renewed.Lease)
 	}
+	// The host's automatic renewal is not an audit event; a person's is (preview.lease_renewed was the fourth most
+	// frequent audit row on production, every one automatic).
+	if _, err := store.RenewPreviewLeaseV1(ctx, RenewPreviewLeaseV1Input{
+		OperationID: "op_host_renew_" + suffix, AuditEventID: "aud_host_renew_" + suffix, AccountID: accountID, ActorID: "machine_" + suffix, ActorType: "host",
+		PreviewID: created.Lease.ID, OwnerMachineID: "machine_" + suffix, OwnerSessionID: "session_" + suffix, ExpectedGeneration: 3, LeaseDeadline: now.Add(4 * time.Minute), RequestHash: sha256Bytes("preview-host-renew:" + suffix),
+		IdempotencyKey: "preview-host-renew:" + suffix, CorrelationID: "cor_host_renew_" + suffix, RequestID: "req_host_renew_" + suffix,
+		SourceMachineID: "machine_" + suffix, Now: now.Add(2500 * time.Millisecond),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var personAudits, hostAudits int
+	if err := database.SQL().QueryRowContext(ctx, `SELECT count(*) FILTER (WHERE id=$1),count(*) FILTER (WHERE id=$2) FROM paperboat.audit_events WHERE id IN ($1,$2)`,
+		"aud_renew_"+suffix, "aud_host_renew_"+suffix).Scan(&personAudits, &hostAudits); err != nil || personAudits != 1 || hostAudits != 0 {
+		t.Fatalf("renewal audit events: person %d, host %d, %v; want 1 and 0", personAudits, hostAudits, err)
+	}
 
 	stopped, err := store.StopPreviewLeaseV1(ctx, StopPreviewLeaseV1Input{
 		OperationID: "op_stop_" + suffix, AuditEventID: "aud_stop_" + suffix, AccountID: accountID, ActorID: accountID, ActorType: "user",
-		PreviewID: created.Lease.ID, OwnerMachineID: "machine_" + suffix, OwnerSessionID: "session_" + suffix, ExpectedGeneration: 3, RequestHash: sha256Bytes("preview-stop:" + suffix), IdempotencyKey: "preview-stop:" + suffix,
+		PreviewID: created.Lease.ID, OwnerMachineID: "machine_" + suffix, OwnerSessionID: "session_" + suffix, ExpectedGeneration: 4, RequestHash: sha256Bytes("preview-stop:" + suffix), IdempotencyKey: "preview-stop:" + suffix,
 		CorrelationID: "cor_stop_" + suffix, RequestID: "req_stop_" + suffix, SourceMachineID: "machine_" + suffix, Now: now.Add(3 * time.Second),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stopped.Lease.Generation != 4 || stopped.Lease.TerminalState != "stopped" || !stopped.Lease.StoppedAt.Valid {
+	if stopped.Lease.Generation != 5 || stopped.Lease.TerminalState != "stopped" || !stopped.Lease.StoppedAt.Valid {
 		t.Fatalf("stopped lease = %#v", stopped.Lease)
 	}
 	keyReplay, err := store.StopPreviewLeaseV1(ctx, StopPreviewLeaseV1Input{

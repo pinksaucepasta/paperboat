@@ -233,7 +233,7 @@ func TestTeamConfigPublicationAuditUsesAuthoritativeAdoptionAndCommitsAtomically
 		assignment.RevokedAt.Valid || machine.InstallationGeneration < 1 {
 		t.Fatalf("adopted assignment does not match authoritative fixture: assignment=%+v identity_machine=%q machine=%q adoption_repo=%q", assignment, identity.MachineID, machine.ID, adoption.RepositoryID)
 	}
-	statuses := NewConfigStatusService(store, enrollment, audit.NewWriter(store), 10)
+	statuses := NewConfigStatusService(store, enrollment, 10)
 	statuses.clock = func() time.Time { return now }
 	report := ConfigStatusReport{State: "healthy", Mode: assignment.Mode, RepositoryID: assignment.RepositoryID.String, AssignmentID: assignment.ID,
 		EnvironmentID: assignment.EnvironmentID, MachineID: assignment.MachineID, InstallationGeneration: machine.InstallationGeneration, WarningRevision: assignment.WarningRevision.String,

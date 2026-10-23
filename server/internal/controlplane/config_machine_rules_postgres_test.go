@@ -94,7 +94,7 @@ func TestConfigCustomRepositoryRulesAccessAndRevocation(t *testing.T) {
 	leases.ConfigureAuthentication(enrollment, signer, "https://api.example.test", "warning-7")
 	leases.ConfigureMode("leased_writes")
 	leases.clock = func() time.Time { return now }
-	access := NewConfigRepositoryAccessService(store, leases, nil, "config-credential-encryption-key", nil)
+	access := NewConfigRepositoryAccessService(store, leases, nil, "config-credential-encryption-key")
 	access.clock = func() time.Time { return now }
 	issue := func(operation, direction string) (ConfigRepositoryAccess, error) {
 		return access.Issue(ctx, identity.Credential, credential.Credential, proofFor(operation, "/v1/config/repository-access"), body, "POST", "/v1/config/repository-access", operation, direction)
@@ -184,7 +184,7 @@ func TestConfigCustomRepositoryRulesAccessAndRevocation(t *testing.T) {
 			t.Fatal("provider request did not preserve the authorized owner, repository, and permission")
 		}
 		return ScopedRepositoryCredential{Token: secretProviderToken, ExpiresAt: now.Add(30 * time.Second)}, nil
-	}}, "config-credential-encryption-key", nil)
+	}}, "config-credential-encryption-key")
 	malformedProvider.clock = func() time.Time { return now }
 	malformedOperation := "provider-malformed-" + suffix
 	_, err = malformedProvider.Issue(ctx, identity.Credential, providerCredential.Credential, proofFor(malformedOperation, "/v1/config/repository-access"), body, "POST", "/v1/config/repository-access", malformedOperation, "push")
@@ -208,7 +208,7 @@ func TestConfigCustomRepositoryRulesAccessAndRevocation(t *testing.T) {
 	failingProvider := NewConfigRepositoryAccessService(store, leases, ConfigRepositoryAccessIssuerFuncs{Issue: func(context.Context, string, string, string) (ScopedRepositoryCredential, error) {
 		cancelIssue()
 		return ScopedRepositoryCredential{}, providerFailure
-	}}, "config-credential-encryption-key", nil)
+	}}, "config-credential-encryption-key")
 	failingProvider.clock = func() time.Time { return now }
 	failureOperation := "provider-marker-failure-" + suffix
 	_, err = failingProvider.Issue(issueCtx, identity.Credential, providerCredential.Credential, proofFor(failureOperation, "/v1/config/repository-access"), body, "POST", "/v1/config/repository-access", failureOperation, "push")
@@ -224,7 +224,7 @@ func TestConfigCustomRepositoryRulesAccessAndRevocation(t *testing.T) {
 	}
 	// Unassigning forgets what the machine reported for the assignment it no longer has: the frozen conflict
 	// stays out of the account status instead of showing a conflict on a machine that is Off.
-	statusService := NewConfigStatusService(store, nil, nil, 10)
+	statusService := NewConfigStatusService(store, nil, 10)
 	conflictsOf := func() int {
 		t.Helper()
 		account, statusErr := statusService.Account(ctx, user)

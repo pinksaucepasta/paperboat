@@ -54,7 +54,7 @@ func TestConfigRepositoryReadAccessOwnerIsolationRevocationAndReadOnly(t *testin
 		}
 		return ScopedRepositoryCredential{Token: "private-fixture-token", ExpiresAt: now.Add(time.Hour)}, nil
 	}}
-	service := NewConfigRepositoryAccessService(store, nil, issuer, "", nil)
+	service := NewConfigRepositoryAccessService(store, nil, issuer, "")
 	service.clock = func() time.Time { return now }
 	for _, id := range []string{custom.ID, github.ID} {
 		if _, err := service.IssueReadAccess(ctx, other, id, ""); !errors.Is(err, ErrConfigRepositoryAccessInvalid) {
@@ -84,7 +84,7 @@ func TestConfigRepositoryReadAccessOwnerIsolationRevocationAndReadOnly(t *testin
 	providerFailure := errors.New("provider access request failed")
 	failingProvider := NewConfigRepositoryAccessService(store, nil, ConfigRepositoryAccessIssuerFuncs{Issue: func(context.Context, string, string, string) (ScopedRepositoryCredential, error) {
 		return ScopedRepositoryCredential{}, providerFailure
-	}}, "", nil)
+	}}, "")
 	if _, err := failingProvider.IssueReadAccess(ctx, owner, github.ID, ""); !errors.Is(err, ErrConfigRepositoryAccessUncertain) || !errors.Is(err, providerFailure) {
 		t.Fatalf("provider issuance cause = %v", err)
 	}
@@ -107,7 +107,7 @@ func TestConfigRepositoryReadAccessOwnerIsolationRevocationAndReadOnly(t *testin
 			return ScopedRepositoryCredential{}, err
 		}
 		return ScopedRepositoryCredential{Token: "private-fixture-token", ExpiresAt: now.Add(time.Hour)}, nil
-	}}, "", nil)
+	}}, "")
 	if _, err := closingProvider.IssueReadAccess(ctx, owner, github.ID, ""); err == nil || errors.Is(err, ErrConfigRepositoryAccessInvalid) {
 		t.Fatalf("post-provider database failure was collapsed into invalid authorization: %v", err)
 	}

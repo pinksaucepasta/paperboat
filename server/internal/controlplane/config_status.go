@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
@@ -77,7 +76,6 @@ type ConfigStatusReport struct {
 type ConfigStatusService struct {
 	store      *db.DB
 	identities *EnrollmentService
-	audit      *audit.Writer
 	clock      func() time.Time
 	limit      int
 	policy     config.ConfigSync
@@ -301,8 +299,8 @@ func nullTimePointer(value sql.NullTime) *time.Time {
 	return &result
 }
 
-func NewConfigStatusService(store *db.DB, identities *EnrollmentService, writer *audit.Writer, summaryLimit int) *ConfigStatusService {
-	return &ConfigStatusService{store: store, identities: identities, audit: writer, clock: func() time.Time { return time.Now().UTC() }, limit: summaryLimit}
+func NewConfigStatusService(store *db.DB, identities *EnrollmentService, summaryLimit int) *ConfigStatusService {
+	return &ConfigStatusService{store: store, identities: identities, clock: func() time.Time { return time.Now().UTC() }, limit: summaryLimit}
 }
 
 func (s *ConfigStatusService) Record(ctx context.Context, identityToken string, proof, body []byte, method, path string, report ConfigStatusReport) error {

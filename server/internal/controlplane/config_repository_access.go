@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat/server/internal/secrets"
@@ -63,14 +62,13 @@ type ConfigRepositoryAccessService struct {
 	leases        *ConfigLeaseService
 	issuer        ConfigRepositoryAccessIssuer
 	encryptionKey string
-	audit         *audit.Writer
 	clock         func() time.Time
 }
 
-func NewConfigRepositoryAccessService(store *db.DB, leases *ConfigLeaseService, issuer ConfigRepositoryAccessIssuer, encryptionKey string, writer *audit.Writer) *ConfigRepositoryAccessService {
+func NewConfigRepositoryAccessService(store *db.DB, leases *ConfigLeaseService, issuer ConfigRepositoryAccessIssuer, encryptionKey string) *ConfigRepositoryAccessService {
 	return &ConfigRepositoryAccessService{
 		store: store, leases: leases, issuer: issuer, encryptionKey: encryptionKey,
-		audit: writer, clock: func() time.Time { return time.Now().UTC() },
+		clock: func() time.Time { return time.Now().UTC() },
 	}
 }
 
@@ -243,10 +241,8 @@ func (s *ConfigRepositoryAccessService) Issue(ctx context.Context, identityToken
 		}); err != nil {
 			return err
 		}
-		return s.audit.WriteTx(ctx, tx, audit.Event{ActorType: audit.ActorSystem, EventType: "config.repository_access_issued",
-			ResourceType: "config_repository", ResourceID: holder.RepositoryID,
-			IdempotencyKey: "config.repository_access:" + operationID,
-			Metadata:       map[string]any{"assignment_id": holder.AssignmentID, "environment_id": holder.EnvironmentID, "machine_id": holder.MachineID, "expires_at": issued.ExpiresAt.UTC()}})
+		// Issued automatically for every sync: operational, not an audit event.
+		return nil
 	})
 	if errors.Is(err, sql.ErrNoRows) {
 		return ConfigRepositoryAccess{}, ErrConfigRepositoryAccessInvalid

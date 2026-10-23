@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 	serverdiagnostics "github.com/pinksaucepasta/paperboat/server/internal/diagnostics"
@@ -30,7 +29,6 @@ type ConfigCredentialService struct {
 	issuer          string
 	encryptionKey   string
 	clock           func() time.Time
-	audit           *audit.Writer
 	warningRevision string
 	mode            string
 }
@@ -39,7 +37,6 @@ func NewConfigCredentialService(store *db.DB, signer *mint.Provider, issuer, enc
 	return &ConfigCredentialService{store: store, signer: signer, issuer: strings.TrimRight(issuer, "/"), encryptionKey: encryptionKey, clock: func() time.Time { return time.Now().UTC() }}
 }
 
-func (s *ConfigCredentialService) SetAuditWriter(writer *audit.Writer) { s.audit = writer }
 func (s *ConfigCredentialService) SetWarningRevision(revision string) {
 	s.warningRevision = strings.TrimSpace(revision)
 }
@@ -127,7 +124,9 @@ func (s *ConfigCredentialService) Issue(ctx context.Context, identityToken strin
 			return err
 		}
 		issuedNew = true
-		return s.audit.WriteTx(ctx, tx, audit.Event{ActorType: audit.ActorSystem, EventType: "config.credential_issued", ResourceType: "config_assignment", ResourceID: assignment.ID, IdempotencyKey: operationKey, Metadata: map[string]any{"environment_id": claims.EnvironmentID, "machine_id": claims.MachineID, "warning_revision": assignment.WarningRevision.String, "expires_at": expiresAt}})
+		// Issued automatically on every sync (a 2-minute credential): operational, not an audit event (it was the most
+		// frequent row of audit_events). serverdiagnostics counts issuances.
+		return nil
 	})
 	if err == nil && issuedNew {
 		serverdiagnostics.ControlCredentialIssued()
