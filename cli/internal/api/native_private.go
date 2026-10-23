@@ -47,7 +47,7 @@ type NativePrivateGrant struct {
 
 func (c *Client) IssueNativePrivateGrant(ctx context.Context, request NativePrivateGrantRequest) (NativePrivateGrant, error) {
 	var grant NativePrivateGrant
-	if err := c.doChecked(ctx, http.MethodPost, "/v1/native-private-access/grants", request, &grant); err != nil {
+	if err := c.doIssuance(ctx, http.MethodPost, "/v1/native-private-access/grants", request, &grant, true); err != nil {
 		return NativePrivateGrant{}, err
 	}
 	t := grant.Target

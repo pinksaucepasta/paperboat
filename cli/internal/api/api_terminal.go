@@ -270,7 +270,7 @@ func (c *Client) MachineExecDescriptor(ctx context.Context, machineID, operation
 		return ExecDescriptor{}, errors.New("machine, source machine, and operation IDs are required")
 	}
 	var out ExecDescriptor
-	err := c.do(ctx, http.MethodPost, "/v1/machines/"+url.PathEscape(machineID)+"/exec-descriptor", map[string]string{"source_machine_id": c.sourceMachineID, "operation_id": operationID}, &out)
+	err := c.doIssuance(ctx, http.MethodPost, "/v1/machines/"+url.PathEscape(machineID)+"/exec-descriptor", map[string]string{"source_machine_id": c.sourceMachineID, "operation_id": operationID}, &out, false)
 	if err == nil {
 		err = validateOperationDescriptor(out, machineID, operationID, "exec:operate", "exec")
 	}
@@ -282,7 +282,7 @@ func (c *Client) MachineSSHDescriptor(ctx context.Context, machineID, operationI
 		return SSHDescriptor{}, errors.New("machine, source machine, and operation IDs are required")
 	}
 	var out SSHDescriptor
-	err := c.do(ctx, http.MethodPost, "/v1/machines/"+url.PathEscape(machineID)+"/ssh-descriptor", map[string]string{"source_machine_id": c.sourceMachineID, "operation_id": operationID}, &out)
+	err := c.doIssuance(ctx, http.MethodPost, "/v1/machines/"+url.PathEscape(machineID)+"/ssh-descriptor", map[string]string{"source_machine_id": c.sourceMachineID, "operation_id": operationID}, &out, false)
 	if err == nil {
 		err = validateOperationDescriptor(out, machineID, operationID, "ssh:operate", "ssh")
 	}
