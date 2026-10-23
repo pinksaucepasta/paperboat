@@ -182,8 +182,10 @@ func (h *Hub) Start(ctx context.Context) error {
 		return errors.New("machine events already started")
 	}
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	h.cancel, h.done = cancel, make(chan struct{})
-	go func() { defer close(h.done); h.run(runCtx) }()
+	done := make(chan struct{})
+	h.cancel, h.done = cancel, done
+	// The loop closes its own channel: Shutdown clears h.done, possibly before this goroutine runs.
+	go func() { defer close(done); h.run(runCtx) }()
 	return nil
 }
 

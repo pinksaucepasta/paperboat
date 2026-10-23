@@ -156,3 +156,28 @@ func TestNewRejectsAnInsecureOrIncompleteConfiguration(t *testing.T) {
 		}
 	}
 }
+
+// A daemon stopped right after it started (pb update restarts it twice within seconds) shuts its hub down
+// before the loop goroutine has run. The loop must still close the channel Shutdown waits on, not panic
+// on a field Shutdown has already cleared.
+func TestShutdownRightAfterStartStopsTheLoopWithoutPanicking(t *testing.T) {
+	wait := func(ctx context.Context, _ map[machineevents.Topic]int64) (map[machineevents.Topic]int64, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	for range 1000 {
+		hub, err := machineevents.NewWithWaiter(wait, time.Hour)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := hub.Start(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		err = hub.Shutdown(ctx)
+		cancel()
+		if err != nil {
+			t.Fatalf("shutdown right after start: %v", err)
+		}
+	}
+}
