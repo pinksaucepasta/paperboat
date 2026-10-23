@@ -170,6 +170,9 @@ export function useInspectorChannel(previewId: string, machineId: string, enable
   const start = useCallback(async () => {
     if (disposed.current) return
     let identityID = ""
+    // Grants issued before a policy save are fenced by it; only a refusal of
+    // freshly issued grants means access really ended.
+    const fresh = grants.current === null
     try {
       const runtime = (browser.current ??= await loadBrowserTerminal())
       grants.current ??= await issueGrants(previewId)
@@ -216,7 +219,12 @@ export function useInspectorChannel(previewId: string, machineId: string, enable
       if (disposed.current) return
       const final = finalPhase(error)
       const text = error instanceof Error ? error.message : "The inspector could not connect."
-      if (final === "offline") retry(text, "offline")
+      if (final === "denied" && !fresh && grants.current) {
+        revoke(grants.current.inspect)
+        revoke(grants.current.replay)
+        grants.current = null
+        retry("Access changed. Reconnecting with fresh permissions…")
+      } else if (final === "offline") retry(text, "offline")
       else if (final) {
         setPhase(final)
         setMessage(text)
@@ -269,6 +277,20 @@ export function useInspectorChannel(previewId: string, machineId: string, enable
   }, [enabled, previewId])
 
   /** One daemon inspector API call over the E2E channel, with the grant for `action`. */
+  /**
+   * The machine refused a grant: revoked, or fenced by a policy save.
+   * Reconnect with fresh grants; if access really ended, the server refuses
+   * them and the page says so.
+   */
+  const refreshAccess = useCallback(() => {
+    if (connection.current) browser.current?.leave(connection.current)
+    connection.current = ""
+    revoke(grants.current?.inspect)
+    revoke(grants.current?.replay)
+    grants.current = null
+    retry("Access changed. Reconnecting with fresh permissions…")
+  }, [retry])
+
   const request = useCallback(
     async (action: InspectorAction, method: string, path: string, query?: Record<string, string>, body?: unknown) => {
       const grant = grants.current?.[action]
@@ -280,25 +302,19 @@ export function useInspectorChannel(previewId: string, machineId: string, enable
       const reply = await browser.current.inspectorRequest(id, payload)
       if (reply.error) {
         // The machine re-checks every grant live; a refusal means access ended.
-        if (reply.error === "not_found_or_forbidden") {
-          setPhase("denied")
-          setMessage("Your access to this preview's inspector ended.")
-        }
+        if (reply.error === "not_found_or_forbidden") refreshAccess()
         throw new InspectorError(0, reply.error, reply.message ?? "The machine did not answer.")
       }
       const result = reply.result as DaemonReply
       if (result.status >= 400) {
         const code = (result.body as { code?: string } | null)?.code ?? "inspector_unavailable"
         // The daemon re-checks the grant live: losing the right ends the view.
-        if (code === "inspector_forbidden" || code === "inspector_unauthorized") {
-          setPhase("denied")
-          setMessage("Your access to this preview's inspector ended.")
-        }
+        if (code === "inspector_forbidden" || code === "inspector_unauthorized") refreshAccess()
         throw new InspectorError(result.status, code, code.replaceAll("_", " "))
       }
       return result.body
     },
-    [],
+    [refreshAccess],
   )
 
   return { phase, message, canReplay, request }
