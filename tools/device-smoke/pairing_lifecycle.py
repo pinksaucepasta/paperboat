@@ -114,9 +114,9 @@ def check_machine_revoked(binary, identifier, *, perform):
         if result['outcome'] != 'confirmed' or result['machine']['id'] != identifier:
             raise RuntimeError('revoke receipt did not identify the exact machine')
     machines = invoke(binary, '--workspace', 'personal', 'machine', 'list', '--json')['machines']
-    current = next(item for item in machines if item['id'] == identifier)
-    if current['state'] != 'disconnected' or current['online'] is not False:
-        raise RuntimeError('revoked machine remains online in the server catalog')
+    # Since server 2026.10.23.48 the default machine list omits revoked and disconnected machines.
+    if any(item['id'] == identifier for item in machines):
+        raise RuntimeError('revoked machine remains in the server catalog')
     event = denied_exec(binary, identifier, {'machine_resolution_failed', 'runtime_unavailable',
                         'source_identity_unavailable', 'local_transport_unavailable',
                         'transport_unavailable', 'environment_unavailable'})
