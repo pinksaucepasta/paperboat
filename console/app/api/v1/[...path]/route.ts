@@ -89,6 +89,8 @@ async function relay(request: Request, { params }: Context): Promise<Response> {
     const value = upstream.headers.get(name)
     if (value) responseHeaders.set(name, value)
   }
+  // fetch() hands over the decoded body; a compressed upstream's length would cut it short.
+  if (upstream.headers.get("content-encoding")) responseHeaders.delete("content-length")
   const response = new Response(upstream.body, { status: upstream.status, headers: responseHeaders })
   if (issued) relayCookies(issued, response)
   relayCookies(upstream, response)
