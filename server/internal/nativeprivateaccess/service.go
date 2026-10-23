@@ -18,6 +18,10 @@ var ErrDenied = errors.New("native private access denied")
 var ErrInvalid = errors.New("native private access request invalid")
 var ErrAuthorityUnavailable = errors.New("machine service current announcement is unavailable")
 
+// ErrServiceNotAnnounced: policy allows the port, but the machine's current service announcement does not
+// list it yet (a service started moments ago). Retryable: the host announces new listeners within seconds.
+var ErrServiceNotAnnounced = errors.New("the machine has not announced this port yet")
+
 type Target struct {
 	CLIClientSessionID string `json:"cli_client_session_id,omitempty"`
 

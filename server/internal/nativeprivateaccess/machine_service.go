@@ -68,7 +68,7 @@ func (r *SQLResolver) resolveMachineServiceAttempt(ctx context.Context, in Reque
 		}
 	}
 	if out.TargetAddress == "" {
-		return Target{}, ErrDenied
+		return Target{}, ErrServiceNotAnnounced
 	}
 	out.ResourceGeneration = out.InstallationGeneration
 	out.RouteGeneration = out.PolicyGeneration

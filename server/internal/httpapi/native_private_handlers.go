@@ -41,6 +41,9 @@ func nativePrivateGrant(service *nativeprivateaccess.Service) http.HandlerFunc {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "Native private access request is invalid.")
 		case err == machineservices.ErrTeamPrivateAccessOff:
 			writeError(w, r, http.StatusForbidden, "team_private_access_off", "The team has not allowed private access to its shared machines. Ask a team owner or admin to turn it on.")
+		case err == nativeprivateaccess.ErrServiceNotAnnounced:
+			w.Header().Set("Retry-After", "2")
+			writeError(w, r, http.StatusConflict, "service_not_announced", "The machine has not announced this port yet. It is retried automatically; check that the service is listening.")
 		case err == nativeprivateaccess.ErrDenied:
 			writeError(w, r, http.StatusForbidden, "forbidden", "Native private access is not allowed.")
 		case err != nil:

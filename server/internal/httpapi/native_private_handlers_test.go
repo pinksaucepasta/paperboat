@@ -129,3 +129,35 @@ func TestNativePrivateGrantRequiresMachinePrincipalAndStrictBody(t *testing.T) {
 		})
 	}
 }
+
+// A port the policy allows but the machine has not announced yet (a service started moments ago) is a
+// retryable 409, not the final 403 of a policy denial (Lane A, access-machine 0-byte failures).
+func TestNativePrivateGrantNotYetAnnouncedPortIsRetryable(t *testing.T) {
+	requestBody := `{"operation_id":"operation_10000000-0000-4000-8000-000000000031","resource_kind":"machine_service","resource_id":"machine_10000000-0000-4000-8000-000000000032","route_id":"tcp:3000","protocol":"tcp"}`
+	signer, err := mint.NewEphemeral(time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, test := range map[string]struct {
+		resolverErr error
+		status      int
+		code        string
+		retryAfter  string
+	}{
+		"not announced yet": {nativeprivateaccess.ErrServiceNotAnnounced, http.StatusConflict, "service_not_announced", "2"},
+		"policy denial":     {nativeprivateaccess.ErrDenied, http.StatusForbidden, "forbidden", ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			service := &nativeprivateaccess.Service{Signer: signer, Issuer: "https://api.example.test", Resolver: nativePrivateResolverFunc(func(context.Context, nativeprivateaccess.Request) (nativeprivateaccess.Target, error) {
+				return nativeprivateaccess.Target{}, test.resolverErr
+			})}
+			req := httptest.NewRequest(http.MethodPost, "/v1/native-private-access/grants", strings.NewReader(requestBody))
+			req = req.WithContext(context.WithValue(req.Context(), authContextKey{}, principal{User: auth.User{ID: "user_10000000-0000-4000-8000-000000000033"}, Client: &auth.ClientPrincipal{SessionID: "session_10000000-0000-4000-8000-000000000034"}}))
+			response := httptest.NewRecorder()
+			nativePrivateGrant(service).ServeHTTP(response, req)
+			if response.Code != test.status || !strings.Contains(response.Body.String(), `"code":"`+test.code+`"`) || response.Header().Get("Retry-After") != test.retryAfter {
+				t.Fatalf("%s = %d %q Retry-After=%q", name, response.Code, response.Body.String(), response.Header().Get("Retry-After"))
+			}
+		})
+	}
+}

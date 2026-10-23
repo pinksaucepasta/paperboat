@@ -17441,7 +17441,7 @@
     "/v1/native-private-access/grants": {
       "post": {
         "summary": "Issue an exact native machine-service credential",
-        "description": "CLI-only. Authorizes an exact machine_service machine ID plus tcp:<port> independently of terminal sessions. Machine services use a capability-only access session and bind installation, boot, authorization-source and announcement generations. The five-minute credential expiry limits admission; admitted streams require renewable runtime authority at most 30 seconds long. Native traffic remains end-to-end encrypted.",
+        "description": "CLI-only. Authorizes an exact machine_service machine ID plus tcp:<port> independently of terminal sessions. Machine services use a capability-only access session and bind installation, boot, authorization-source and announcement generations. The five-minute credential expiry limits admission; admitted streams require renewable runtime authority at most 30 seconds long. Native traffic remains end-to-end encrypted. A 409 service_not_announced means the machine has not announced the port yet; retry after the Retry-After seconds.",
         "security": [
           {
             "bearerAccess": []
@@ -17499,6 +17499,9 @@
             "$ref": "#/components/responses/Error"
           },
           "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
             "$ref": "#/components/responses/Error"
           },
           "503": {
@@ -26393,7 +26396,7 @@
         "summary": "Complete GitHub OAuth from browser redirect",
         "responses": {
           "303": {
-            "description": "Redirect to the console's /github/done?result=connected&login=\u2026 or ?result=error&code=github_scope_denied|github_identity_conflict|github_oauth_failed|github_link_expired, plus return_to when set."
+            "description": "Redirect to the console's /github/done?result=connected&login=… or ?result=error&code=github_scope_denied|github_identity_conflict|github_oauth_failed|github_link_expired, plus return_to when set."
           },
           "401": {
             "$ref": "#/components/responses/Error"
