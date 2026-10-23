@@ -1825,6 +1825,10 @@ execution ≤ 0.2 ms for the revocation document, the workspace activity page an
 | S8 | Teams are hard-capped at 128 members against the 1k-member target; team list reads ≥6 statements per team with unpaged member/grant/machine arrays | `server/internal/teams/types.go:25, store.go:379-420` | NB: paginated peers/users | B (product limit: coordinator) |
 | S9 | Bandwidth gate cache is wiped whole at 4,096 accounts: beyond that each hot-path request does a DB lookup and a denied account fails open while billing is slow | `server/internal/bandwidthgate/gate.go:92-99` | Teleport ratelimit: per-entry TTL sweep | B |
 | S10 | SSO identity sync re-marks every stale team dirty on every 5 s tick (no `AND NOT dirty`) and does one OR-joined UPDATE per WorkOS event | `server/internal/teamidentity/sync.go:36-40, 89-99` | HS: per-node timers, no rescans | B |
+| E1 | Tunnel-domain certificates have no retry backoff: failed/rate-limited domains are picked every 1 s tick (CAA + lock + ACME order each time) and the ACME RetryAt is discarded; the preview variant has a 1-minute backoff | `server/internal/db/queries/tunnel_certificate_domains_v1.sql:8-40 vs :93; tunnelv1/certificate_worker.go:79-119` | TS ipn/ipnlocal/cert.go: renew near expiry, honor Retry-After; cloudflared: no per-tick reissue | B |
+| E2 | Every connector heartbeat (5 s) re-reads the full tunnel config snapshot (≤4 MiB) from the DB and re-parses it; the server never offers deltas (OfferDelta has no caller); ~2 row writes per heartbeat | `server/internal/connectorprotocol/transport.go:438-446, sql_store.go:423-460,809-870, persistence.go:424-432` | cloudflared: remote config pushed on version change only; TS: delta map after the first | B (M for the connector side) |
+| E3 | Preview list is N+1: previewView runs CurrentPreviewRoute + ListProjection per row (~401 round trips per 200-row page); the edge carrier pull does 2 statements per admission (≤8192/pull) and the ack 1 tx per admission with FOR UPDATE on the edge node row | `server/internal/previewv1/service.go:660-668,990,1002; previewattachment/outbox.go:163-185,273-290; edge_http.go:317-322` | zrok: share list is one query; batch by ids | Q |
+| E4 | Tables nothing prunes (beyond D1): preview_carrier_attachment_outbox, tunnel_log_entries (has a retention index but no delete), tunnel_connector_enrollments, peer_endpoint_certificates/enrollment requests, managed_ssh_client_keys, transactional_mail_outbox (payload blanked only) | `grep: no DELETE outside migrations` | Teleport: TTL on every backend item | Q |
 
 **Coverage**
 
@@ -2005,40 +2009,40 @@ execution ≤ 0.2 ms for the revocation document, the workspace activity page an
 | `server/cmd/paperboat-backup` | 203 | B/Q | — | done | checked, nothing |
 | `server/cmd/paperboat-server` | 223 | B/Q | — | done | checked, nothing |
 | `server/cmd/paperboat-watchdog` | 143 | B/Q | TS logtail, logpolicy, health, cmd/tailscale bugreport; Teleport lib/events (debug) | done | checked, nothing |
-| `server/internal/access` | 48 | B/Q | HS hscontrol/policy; Teleport lib/services (RBAC, roles) | todo |  |
+| `server/internal/access` | 48 | B/Q | HS hscontrol/policy; Teleport lib/services (RBAC, roles) | done | checked, nothing |
 | `server/internal/accessdescriptor` | 97 | B/Q | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | done | checked, nothing |
 | `server/internal/accountingauthority` | 121 | B/Q | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | done | checked, nothing |
 | `server/internal/activity` | 511 | B/Q | Teleport lib/events (audit log, retention, pgevents) | done | S6 |
 | `server/internal/admission` | 92 | B/Q | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | done | Robustness #1 (F21-01) |
 | `server/internal/apitokens` | 684 | B/Q | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | done | checked, nothing |
 | `server/internal/app` | 2389 | B/Q | HS hscontrol/app.go; Teleport lib/web, lib/limiter | done | Robustness #4, #9; S1 |
-| `server/internal/audit` | 175 | B/Q | Teleport lib/events (audit log, retention, pgevents) | todo |  |
+| `server/internal/audit` | 175 | B/Q | Teleport lib/events (audit log, retention, pgevents) | done | checked, nothing |
 | `server/internal/auditstream` | 770 | B/Q | Teleport lib/events (audit log, retention, pgevents) | done | checked, nothing |
 | `server/internal/auth` | 2137 | B/Q | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | done | checked, nothing |
 | `server/internal/backupreport` | 1203 | B/Q | TS logtail, logpolicy, health, cmd/tailscale bugreport; Teleport lib/events (debug) | done | checked, nothing |
 | `server/internal/bandwidthgate` | 224 | B/Q | Teleport lib/usagereporter; — | done | S9 |
 | `server/internal/billing` | 3885 | B/Q | Teleport lib/usagereporter; — | done | S7 |
-| `server/internal/browseraccess` | 1743 | B/Q | zrok controller (shares, frontends, reserved names, limits, metrics); cloudflared ingress rules; Teleport lib/proxy, lib/reversetunnel | todo |  |
-| `server/internal/browseringress` | 180 | B/Q | zrok controller (shares, frontends, reserved names, limits, metrics); cloudflared ingress rules; Teleport lib/proxy, lib/reversetunnel | todo |  |
-| `server/internal/browserterminal` | 1028 | B/Q | Teleport lib/srv/sess, lib/events (session recording); TS ssh/tailssh | todo |  |
+| `server/internal/browseraccess` | 1743 | B/Q | zrok controller (shares, frontends, reserved names, limits, metrics); cloudflared ingress rules; Teleport lib/proxy, lib/reversetunnel | done | checked, nothing |
+| `server/internal/browseringress` | 180 | B/Q | zrok controller (shares, frontends, reserved names, limits, metrics); cloudflared ingress rules; Teleport lib/proxy, lib/reversetunnel | done | checked, nothing |
+| `server/internal/browserterminal` | 1028 | B/Q | Teleport lib/srv/sess, lib/events (session recording); TS ssh/tailssh | done | checked, nothing |
 | `server/internal/buildinfo` | 9 | B/Q | HS hscontrol/app.go; Teleport lib/web, lib/limiter | done | checked, nothing |
-| `server/internal/canonicaljson` | 77 | B/Q | — | todo |  |
-| `server/internal/clientupdate` | 251 | B/Q | — | todo |  |
-| `server/internal/config` | 1818 | B/Q | TS ipn/store, atomicfile; NB profilemanager | todo |  |
-| `server/internal/connectorprotocol` | 6446 | B/Q | zrok controller (shares, frontends, reserved names, limits, metrics); cloudflared ingress rules; Teleport lib/proxy, lib/reversetunnel | todo |  |
+| `server/internal/canonicaljson` | 77 | B/Q | — | done | checked, nothing |
+| `server/internal/clientupdate` | 251 | B/Q | — | done | checked, nothing |
+| `server/internal/config` | 1818 | B/Q | TS ipn/store, atomicfile; NB profilemanager | done | checked, nothing |
+| `server/internal/connectorprotocol` | 6446 | B/Q | zrok controller (shares, frontends, reserved names, limits, metrics); cloudflared ingress rules; Teleport lib/proxy, lib/reversetunnel | done | E2 |
 | `server/internal/controlplane` | 7440 | B/Q | HS hscontrol/app.go; Teleport lib/web, lib/limiter | done | Robustness #2 (fixed aa987d5d); hot paths read, rest grep-screened |
 | `server/internal/db` | 743 | B/Q | HS hscontrol/db; Teleport lib/backend (pgbk), lib/cache | done | DB review D1–D10 below |
 | `server/internal/db/dbsqlc` | 34306 | B/Q | HS hscontrol/db; Teleport lib/backend (pgbk), lib/cache | done | checked, nothing |
 | `server/internal/diagnostics` | 284 | B/Q | TS logtail, logpolicy, health, cmd/tailscale bugreport; Teleport lib/events (debug) | done | checked, nothing |
 | `server/internal/diagnosticuploads` | 645 | B/Q | TS logtail, logpolicy, health, cmd/tailscale bugreport; Teleport lib/events (debug) | done | checked, nothing |
-| `server/internal/edgeplacement` | 91 | B/Q | zrok controller (shares, frontends, reserved names, limits, metrics); cloudflared ingress rules; Teleport lib/proxy, lib/reversetunnel | todo | D4 |
-| `server/internal/edgeset` | 275 | B/Q | zrok controller (shares, frontends, reserved names, limits, metrics); cloudflared ingress rules; Teleport lib/proxy, lib/reversetunnel | todo |  |
-| `server/internal/emailpolicy` | 35 | B/Q | HS hscontrol/policy; Teleport lib/services (RBAC, roles) | todo |  |
+| `server/internal/edgeplacement` | 91 | B/Q | zrok controller (shares, frontends, reserved names, limits, metrics); cloudflared ingress rules; Teleport lib/proxy, lib/reversetunnel | done | D4 |
+| `server/internal/edgeset` | 275 | B/Q | zrok controller (shares, frontends, reserved names, limits, metrics); cloudflared ingress rules; Teleport lib/proxy, lib/reversetunnel | done | checked, nothing |
+| `server/internal/emailpolicy` | 35 | B/Q | HS hscontrol/policy; Teleport lib/services (RBAC, roles) | done | checked, nothing |
 | `server/internal/endpoints` | 365 | B/Q | zrok controller (shares, frontends, reserved names, limits, metrics); cloudflared ingress rules; Teleport lib/proxy, lib/reversetunnel | done | checked, nothing |
 | `server/internal/environment` | 5705 | B/Q | TS taildrop (feature/taildrop); — | done | checked, nothing |
 | `server/internal/favorites` | 193 | B/Q | HS hscontrol/policy; Teleport lib/services (RBAC, roles) | done | checked, nothing |
 | `server/internal/github` | 1557 | B/Q | — (Git-based; compare: Teleport lib/services watcher) | done | checked, nothing |
-| `server/internal/helperruntime` | 428 | B/Q | — | todo |  |
+| `server/internal/helperruntime` | 428 | B/Q | — | done | checked, nothing |
 | `server/internal/httpapi` | 17884 | B/Q | HS hscontrol/app.go; Teleport lib/web, lib/limiter | done | Robustness #5 (timeout bypass), #17; S5 |
 | `server/internal/inboxdispatch` | 413 | B/Q | TS taildrop (feature/taildrop); — | done | checked, nothing |
 | `server/internal/inspectaccess` | 721 | B/Q | zrok controller (shares, frontends, reserved names, limits, metrics); cloudflared ingress rules; Teleport lib/proxy, lib/reversetunnel | done | checked, nothing |
@@ -2054,32 +2058,32 @@ execution ≤ 0.2 ms for the revocation document, the workspace activity page an
 | `server/internal/naming` | 77 | B/Q | HS hscontrol/state, mapper; NB management/server (network map, peers) | done | checked, nothing |
 | `server/internal/nativeprivateaccess` | 373 | B/Q | TS ipn/ipnlocal (serve, dns), net/dns; NB client/internal/dns | done | checked, nothing |
 | `server/internal/nodeauth` | 168 | B/Q | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | done | checked, nothing |
-| `server/internal/operator` | 770 | B/Q | HS hscontrol/policy; Teleport lib/services (RBAC, roles) | todo |  |
-| `server/internal/operatoractions` | 340 | B/Q | HS hscontrol/policy; Teleport lib/services (RBAC, roles) | todo |  |
+| `server/internal/operator` | 770 | B/Q | HS hscontrol/policy; Teleport lib/services (RBAC, roles) | done | checked, nothing |
+| `server/internal/operatoractions` | 340 | B/Q | HS hscontrol/policy; Teleport lib/services (RBAC, roles) | done | checked, nothing |
 | `server/internal/operatorauth` | 316 | B/Q | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | done | checked, nothing |
-| `server/internal/operatorinfra` | 660 | B/Q | HS hscontrol/policy; Teleport lib/services (RBAC, roles) | todo |  |
+| `server/internal/operatorinfra` | 660 | B/Q | HS hscontrol/policy; Teleport lib/services (RBAC, roles) | done | checked, nothing |
 | `server/internal/operatorreporting` | 1930 | B/Q | HS hscontrol/policy; Teleport lib/services (RBAC, roles) | todo |  |
 | `server/internal/peeridentity` | 1090 | B/Q | TS control/controlclient (register), types/key | done | hot paths read, rest grep-screened |
 | `server/internal/peersessions` | 1433 | B/Q | Teleport lib/srv/sess, lib/events (session recording); TS ssh/tailssh | done | hot paths read, rest grep-screened |
 | `server/internal/perf` | 112 | B/Q | HS hscontrol/db; Teleport lib/backend (pgbk), lib/cache | done | checked, nothing |
 | `server/internal/planlimits` | 221 | B/Q | — | done | checked, nothing |
-| `server/internal/previewattachment` | 5230 | B/Q | zrok controller (shares, frontends, reserved names, limits, metrics); cloudflared ingress rules; Teleport lib/proxy, lib/reversetunnel | todo |  |
-| `server/internal/previewdispatch` | 461 | B/Q | zrok controller (shares, frontends, reserved names, limits, metrics); cloudflared ingress rules; Teleport lib/proxy, lib/reversetunnel | todo |  |
-| `server/internal/previewdomain` | 2431 | B/Q | zrok controller (shares, frontends, reserved names, limits, metrics); cloudflared ingress rules; Teleport lib/proxy, lib/reversetunnel | todo |  |
-| `server/internal/previewtunnelapi` | 636 | B/Q | zrok controller (shares, frontends, reserved names, limits, metrics); cloudflared ingress rules; Teleport lib/proxy, lib/reversetunnel | todo |  |
-| `server/internal/previewtunnelstore` | 2073 | B/Q | zrok controller (shares, frontends, reserved names, limits, metrics); cloudflared ingress rules; Teleport lib/proxy, lib/reversetunnel | todo |  |
-| `server/internal/previewv1` | 1845 | B/Q | zrok controller (shares, frontends, reserved names, limits, metrics); cloudflared ingress rules; Teleport lib/proxy, lib/reversetunnel | todo |  |
+| `server/internal/previewattachment` | 5230 | B/Q | zrok controller (shares, frontends, reserved names, limits, metrics); cloudflared ingress rules; Teleport lib/proxy, lib/reversetunnel | done | checked, nothing |
+| `server/internal/previewdispatch` | 461 | B/Q | zrok controller (shares, frontends, reserved names, limits, metrics); cloudflared ingress rules; Teleport lib/proxy, lib/reversetunnel | done | checked, nothing |
+| `server/internal/previewdomain` | 2431 | B/Q | zrok controller (shares, frontends, reserved names, limits, metrics); cloudflared ingress rules; Teleport lib/proxy, lib/reversetunnel | done | checked, nothing |
+| `server/internal/previewtunnelapi` | 636 | B/Q | zrok controller (shares, frontends, reserved names, limits, metrics); cloudflared ingress rules; Teleport lib/proxy, lib/reversetunnel | done | checked, nothing |
+| `server/internal/previewtunnelstore` | 2073 | B/Q | zrok controller (shares, frontends, reserved names, limits, metrics); cloudflared ingress rules; Teleport lib/proxy, lib/reversetunnel | done | checked, nothing |
+| `server/internal/previewv1` | 1845 | B/Q | zrok controller (shares, frontends, reserved names, limits, metrics); cloudflared ingress rules; Teleport lib/proxy, lib/reversetunnel | done | E3 |
 | `server/internal/privateaccess` | 2633 | B/Q | HS hscontrol/policy; Teleport lib/services (RBAC, roles) | done | hot paths read, rest grep-screened |
-| `server/internal/publicationdns` | 142 | B/Q | zrok controller (shares, frontends, reserved names, limits, metrics); cloudflared ingress rules; Teleport lib/proxy, lib/reversetunnel | todo |  |
-| `server/internal/releaseauthority` | 390 | B/Q | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | todo |  |
-| `server/internal/releases` | 502 | B/Q | — | todo |  |
+| `server/internal/publicationdns` | 142 | B/Q | zrok controller (shares, frontends, reserved names, limits, metrics); cloudflared ingress rules; Teleport lib/proxy, lib/reversetunnel | done | checked, nothing |
+| `server/internal/releaseauthority` | 390 | B/Q | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | done | checked, nothing |
+| `server/internal/releases` | 502 | B/Q | — | done | checked, nothing |
 | `server/internal/resourceusage` | 580 | B/Q | Teleport lib/usagereporter; — | done | checked, nothing |
 | `server/internal/runtimeattachment` | 865 | B/Q | zrok controller (shares, frontends, reserved names, limits, metrics); cloudflared ingress rules; Teleport lib/proxy, lib/reversetunnel | done | D4 (unconditional upsert, 9 writes/s) |
 | `server/internal/secrets` | 85 | B/Q | Teleport lib/auth (CA rotation, tokens); TS controlbase (Noise), tka | todo |  |
-| `server/internal/selfhost` | 1617 | B/Q | — | todo |  |
+| `server/internal/selfhost` | 1617 | B/Q | — | done | checked, nothing |
 | `server/internal/supportreport` | 2340 | B/Q | TS logtail, logpolicy, health, cmd/tailscale bugreport; Teleport lib/events (debug) | todo | D6 (one row per error) |
 | `server/internal/sync` | 671 | B/Q | — (Git-based; compare: Teleport lib/services watcher) | done | Robustness #7 (unused gRPC channel) |
-| `server/internal/sync/proto` | 896 | B/Q | — | todo |  |
+| `server/internal/sync/proto` | 896 | B/Q | — | done | checked, nothing |
 | `server/internal/teamidentity` | 1240 | B/Q | TS control/controlclient (register), types/key | done | S10 |
 | `server/internal/teaminbox` | 1107 | B/Q | HS hscontrol/policy; Teleport lib/services (RBAC, roles) | done | checked, nothing |
 | `server/internal/teams` | 4303 | B/Q | HS hscontrol/policy; Teleport lib/services (RBAC, roles) | done | S2, S8 |
@@ -2089,9 +2093,9 @@ execution ≤ 0.2 ms for the revocation document, the workspace activity page an
 | `server/internal/testtopology` | 913 | B/Q | HS hscontrol/app.go; Teleport lib/web, lib/limiter | done | checked, nothing |
 | `server/internal/testutil` | 23 | B/Q | HS hscontrol/app.go; Teleport lib/web, lib/limiter | done | checked, nothing |
 | `server/internal/transactionalmail` | 184 | B/Q | — | done | checked, nothing |
-| `server/internal/tunnelcert` | 8495 | B/Q | zrok controller (shares, frontends, reserved names, limits, metrics); cloudflared ingress rules; Teleport lib/proxy, lib/reversetunnel | todo | D4 (platform targets 4 writes/s on 2 rows) |
-| `server/internal/tunnelendpoint` | 18 | B/Q | zrok controller (shares, frontends, reserved names, limits, metrics); cloudflared ingress rules; Teleport lib/proxy, lib/reversetunnel | todo |  |
-| `server/internal/tunnelv1` | 8478 | B/Q | zrok controller (shares, frontends, reserved names, limits, metrics); cloudflared ingress rules; Teleport lib/proxy, lib/reversetunnel | todo |  |
+| `server/internal/tunnelcert` | 8495 | B/Q | zrok controller (shares, frontends, reserved names, limits, metrics); cloudflared ingress rules; Teleport lib/proxy, lib/reversetunnel | done | D4 (platform targets 4 writes/s on 2 rows) |
+| `server/internal/tunnelendpoint` | 18 | B/Q | zrok controller (shares, frontends, reserved names, limits, metrics); cloudflared ingress rules; Teleport lib/proxy, lib/reversetunnel | done | checked, nothing |
+| `server/internal/tunnelv1` | 8478 | B/Q | zrok controller (shares, frontends, reserved names, limits, metrics); cloudflared ingress rules; Teleport lib/proxy, lib/reversetunnel | done | checked, nothing |
 | `server/internal/usermachines` | 9348 | B/Q | HS hscontrol/state, mapper; NB management/server (network map, peers) | done | S3; hot paths read, rest grep-screened |
 | `server/internal/workers` | 410 | B/Q | HS hscontrol/app.go; Teleport lib/web, lib/limiter | done | checked, nothing |
 | `server/internal/workspace` | 234 | B/Q | HS hscontrol/policy; Teleport lib/services (RBAC, roles) | done | checked, nothing |
