@@ -872,7 +872,7 @@ AND (c.revoked_at IS NULL OR ($4 AND c.revocation_reason='certificate_superseded
  AND replacement.role=c.role AND replacement.generation=c.generation
  AND replacement.quic_public_key=c.quic_public_key AND replacement.signer_public_key=c.signer_public_key
  AND replacement.revoked_at IS NULL AND replacement.issued_at<=$3 AND replacement.serial>c.serial)))
-AND NOT EXISTS(SELECT 1 FROM paperboat.peer_endpoint_certificate_revocations r WHERE r.certificate_fingerprint=c.fingerprint)
+AND NOT EXISTS(SELECT 1 FROM paperboat.peer_endpoint_certificate_revocations r WHERE r.user_id=c.user_id AND r.certificate_fingerprint=c.fingerprint)
 AND c.issued_at<=$3 AND (c.expires_at>$3 OR $4) WHERE n.user_id=$1 AND n.endpoint_id=$2 AND n.revoked_at IS NULL`, userID, endpointID, now, admitted).Scan(&b.AccountID, &b.EndpointID, &b.Role, &b.MachineID, &b.EndpointGeneration, &b.MachineGeneration, &b.KeyGeneration, &key, &disco, &fingerprint, &quicPublic, &b.VirtualAddress, &expiry)
 	if err != nil {
 		return b, time.Time{}, err

@@ -30,7 +30,9 @@ func (meshTestSigner) SignRelayGrant(map[string]any) (string, error) { return "g
 
 // Every endpoint of an account rebuilt the whole personal mesh (3 queries per peer) on every change: N x N per
 // join. The shared mesh is built once per change: on a 1,000-machine account a join writes one log row, a refresh
-// with no change writes none, and every entry is exactly what loadNetworkBinding gives for that endpoint.
+// with no change writes none, and every entry is exactly what loadNetworkBinding gives for that endpoint. The build
+// is linear: with 9,000 more endpoints and their revoked certificates in another account on the server, the first
+// build and a join each take well under a second (the build passed the 30 s statement timeout on CI before).
 func TestMeshJoinOnAThousandMachineAccountWritesOneLogRowOnPostgres(t *testing.T) {
 	dsn := os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
 	if dsn == "" {
@@ -57,13 +59,16 @@ func TestMeshJoinOnAThousandMachineAccountWritesOneLogRowOnPostgres(t *testing.T
 			t.Fatalf("%v\n%s", err, query)
 		}
 	}
-	exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@example.test','active')`, account)
+	other := "mesh_other_" + s
+	for _, user := range []string{account, other} {
+		exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@example.test','active')`, user)
+	}
 	t.Cleanup(func() {
-		_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.users WHERE id=$1`, account)
+		_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.users WHERE id IN ($1,$2)`, account, other)
 	})
 	// One /16 of the CGNAT range per fixture for unique virtual addresses.
 	net := sha256.Sum256([]byte(s))
-	join := func(from, to int) {
+	joinAccount := func(account string, net byte, from, to int) {
 		t.Helper()
 		exec(`INSERT INTO paperboat.control_environments(id,workspace_id,owner_user_id,desired_state,desired_version,applied_state,applied_version,created_at,updated_at)
 SELECT $1||'_env_'||g,$1||'_env_'||g,$1,'active',1,'ready',1,now(),now() FROM generate_series($2::int,$3::int) g`, account, from, to)
@@ -75,8 +80,12 @@ SELECT sha256(convert_to($1||'_m_'||g,'UTF8')),$1,$1||'_m_'||g,'machine',1,1,dec
 		exec(`INSERT INTO paperboat.peer_network_identities(user_id,endpoint_id,role,machine_id,endpoint_generation,machine_generation,key_generation,
 wireguard_public_key,quic_certificate_fingerprint,virtual_address,created_at,updated_at)
 SELECT $1,$1||'_m_'||g,'machine',$1||'_m_'||g,1,1,1,sha256(convert_to('key'||$1||'_m_'||g,'UTF8')),sha256(convert_to($1||'_m_'||g,'UTF8')),
- ('100.'||(64+$4::int)||'.'||(g/250)||'.'||(1+g%250))::inet,now(),now() FROM generate_series($2::int,$3::int) g`, account, from, to, int(net[0])%64)
+ ('100.'||(64+$4::int)||'.'||(g/250)||'.'||(1+g%250))::inet,now(),now() FROM generate_series($2::int,$3::int) g`, account, from, to, int(net)%64)
 	}
+	join := func(from, to int) { t.Helper(); joinAccount(account, net[0], from, to) }
+	joinAccount(other, net[0]+1, 0, 8999)
+	exec(`INSERT INTO paperboat.peer_endpoint_certificate_revocations(operation_id,user_id,certificate_fingerprint,serial,reason,created_at)
+SELECT 'mesh-revocation-'||$1||'-'||g,$1,sha256(convert_to($1||'_m_'||g,'UTF8')),1,'endpoint_removed',now() FROM generate_series(0,8999) g`, other)
 	join(0, 999)
 
 	var signed map[string]any
@@ -92,9 +101,13 @@ SELECT $1,$1||'_m_'||g,'machine',$1||'_m_'||g,1,1,1,sha256(convert_to('key'||$1|
 		}
 		return rows, last
 	}
+	started := time.Now()
 	seq, err := service.refreshMesh(ctx, account)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if took := time.Since(started); took > 2*time.Second {
+		t.Fatalf("the first build of a 1,000-machine account took %v", took)
 	}
 	if n, _ := logRows(); n != 1000 || seq != 1000 {
 		t.Fatalf("first build: %d log rows, seq %d; want 1000 adds", n, seq)
@@ -145,8 +158,12 @@ SELECT $1,$1||'_m_'||g,'machine',$1||'_m_'||g,1,1,1,sha256(convert_to('key'||$1|
 	}
 
 	join(1000, 1000)
+	started = time.Now()
 	if seq, err = service.refreshMesh(ctx, account); err != nil || seq != 1001 {
 		t.Fatalf("after a join: seq %d, %v; want one more entry", seq, err)
+	}
+	if took := time.Since(started); took > time.Second {
+		t.Fatalf("a join on a 1,000-machine account took %v", took)
 	}
 	if n, last := logRows(); n != 1001 || last != "add "+account+"_m_1000" {
 		t.Fatalf("a join on a 1,000-machine account wrote %d rows (last %q), want exactly one add", n-1000, last)

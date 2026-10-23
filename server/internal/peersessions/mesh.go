@@ -27,20 +27,30 @@ type meshChange struct {
 }
 
 // meshEntriesQuery is loadNetworkBinding (admitted = false) and personalNetworkPeers' membership for every endpoint
-// of one account at once: personal machines and active CLI sessions with a current certificate.
-const meshEntriesQuery = `SELECT n.endpoint_id,n.role,coalesce(n.machine_id,''),n.endpoint_generation,n.machine_generation,n.key_generation,
+// of one account at once: personal machines and active CLI sessions with a current certificate. Every join is on a
+// primary or unique key, so the plan is linear in the account's endpoints whatever the statistics say: written as an
+// OR of two EXISTS, it became a subplan scanning all of the owner's environments per machine, and the revocation
+// probe (without user_id, the leading column of its index) scanned the whole index per certificate; together a
+// 1,000-machine build passed the 30 s statement timeout on CI.
+const meshEntriesQuery = `WITH members AS (
+ SELECT n.* FROM paperboat.peer_network_identities n
+ JOIN paperboat.user_machines m ON m.id=n.endpoint_id AND m.id=n.machine_id AND m.user_id=n.user_id AND m.owner_team_id IS NULL
+  AND m.state IN ('online','offline') AND m.seat_state='occupied' AND m.revoked_at IS NULL AND m.deleted_at IS NULL
+  AND m.installation_generation=n.machine_generation
+ JOIN paperboat.control_environments e ON e.id=m.environment_id AND e.owner_user_id=m.user_id AND e.desired_state='active'
+  AND e.revoked_at IS NULL
+ WHERE n.user_id=$1 AND n.revoked_at IS NULL AND n.role='machine'
+ UNION ALL
+ SELECT n.* FROM paperboat.peer_network_identities n
+ JOIN paperboat.cli_client_sessions s ON s.id=n.endpoint_id AND s.user_id=n.user_id AND s.state='active' AND s.revoked_at IS NULL
+ WHERE n.user_id=$1 AND n.revoked_at IS NULL AND n.role='cli')
+SELECT n.endpoint_id,n.role,coalesce(n.machine_id,''),n.endpoint_generation,n.machine_generation,n.key_generation,
  n.wireguard_public_key,n.disco_public_key,n.quic_certificate_fingerprint,c.quic_public_key,host(n.virtual_address),c.expires_at
-FROM paperboat.peer_network_identities n
+FROM members n
 JOIN paperboat.users u ON u.id=n.user_id AND u.status='active'
 JOIN paperboat.peer_endpoint_certificates c ON c.fingerprint=n.quic_certificate_fingerprint AND c.user_id=n.user_id AND c.endpoint_id=n.endpoint_id
  AND c.generation=n.endpoint_generation AND c.role=n.role AND c.revoked_at IS NULL AND c.issued_at<=$2 AND c.expires_at>$2
- AND NOT EXISTS(SELECT 1 FROM paperboat.peer_endpoint_certificate_revocations r WHERE r.certificate_fingerprint=c.fingerprint)
-WHERE n.user_id=$1 AND n.revoked_at IS NULL AND (
- (n.role='machine' AND EXISTS(SELECT 1 FROM paperboat.user_machines m
-  JOIN paperboat.control_environments e ON e.id=m.environment_id AND e.owner_user_id=m.user_id AND e.desired_state='active' AND e.revoked_at IS NULL
-  WHERE m.id=n.endpoint_id AND m.id=n.machine_id AND m.user_id=n.user_id AND m.owner_team_id IS NULL AND m.state IN ('online','offline')
-   AND m.seat_state='occupied' AND m.revoked_at IS NULL AND m.deleted_at IS NULL AND m.installation_generation=n.machine_generation))
- OR (n.role='cli' AND EXISTS(SELECT 1 FROM paperboat.cli_client_sessions s WHERE s.id=n.endpoint_id AND s.user_id=n.user_id AND s.state='active' AND s.revoked_at IS NULL)))
+ AND NOT EXISTS(SELECT 1 FROM paperboat.peer_endpoint_certificate_revocations r WHERE r.user_id=c.user_id AND r.certificate_fingerprint=c.fingerprint)
 ORDER BY n.endpoint_id LIMIT $3`
 
 // buildMesh reads the account's mesh entries and the earliest certificate expiry among them.
@@ -165,20 +175,26 @@ func (s *NetworkService) refreshMesh(ctx context.Context, account string) (int64
 	if err != nil {
 		return 0, err
 	}
-	for _, change := range diffMesh(previous, current) {
-		seq++
-		var entry any
+	// One statement for every change (a first build of a 1,000-machine account is 1,000 adds).
+	changes := diffMesh(previous, current)
+	ids, ops, entries := make([]string, len(changes)), make([]string, len(changes)), make([]string, len(changes))
+	for i, change := range changes {
+		ids[i], ops[i] = change.EndpointID, change.Op
 		if change.Entry != nil {
 			raw, err := json.Marshal(change.Entry)
 			if err != nil {
 				return 0, err
 			}
-			entry = raw
+			entries[i] = string(raw)
 		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO paperboat.peer_mesh_log(account_id,mesh_seq,endpoint_id,op,entry) VALUES($1,$2,$3,$4,$5)`,
-			account, seq, change.EndpointID, change.Op, entry); err != nil {
+	}
+	if len(changes) > 0 {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO paperboat.peer_mesh_log(account_id,mesh_seq,endpoint_id,op,entry)
+SELECT $1,$2+c.n,c.endpoint_id,c.op,nullif(c.entry,'')::jsonb FROM unnest($3::text[],$4::text[],$5::text[]) WITH ORDINALITY AS c(endpoint_id,op,entry,n)`,
+			account, seq, ids, ops, entries); err != nil {
 			return 0, err
 		}
+		seq += int64(len(changes))
 	}
 	var until any
 	if !earliest.IsZero() {

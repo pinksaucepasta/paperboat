@@ -53,7 +53,7 @@ WHERE old.fingerprint=$1 AND old.user_id=$2 AND old.endpoint_id=$3
 AND old.role=$4 AND old.generation=$5 AND old.quic_public_key=$6
 AND old.signer_public_key=current.signer_public_key AND old.issued_at<=$8
 AND (old.revoked_at IS NULL OR old.revocation_reason='certificate_superseded')
-AND NOT EXISTS(SELECT 1 FROM paperboat.peer_endpoint_certificate_revocations r WHERE r.certificate_fingerprint=old.fingerprint))`, fingerprint, binding.AccountID, binding.EndpointID, binding.Role, binding.EndpointGeneration, key, binding.QUICCertificateFingerprint, now).Scan(&allowed)
+AND NOT EXISTS(SELECT 1 FROM paperboat.peer_endpoint_certificate_revocations r WHERE r.user_id=old.user_id AND r.certificate_fingerprint=old.fingerprint))`, fingerprint, binding.AccountID, binding.EndpointID, binding.Role, binding.EndpointGeneration, key, binding.QUICCertificateFingerprint, now).Scan(&allowed)
 		if err != nil {
 			return err
 		}
