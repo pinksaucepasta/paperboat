@@ -70,4 +70,18 @@ func TestTimedOutDialWithRelaysWithheldIsThePlanLimit(t *testing.T) {
 	if !got.Equal(want) {
 		t.Fatal("the dial deadline changed although relays are available")
 	}
+	// A dial without a caller deadline (pb send) is bounded while relays are withheld, so it ends with
+	// the plan limit instead of waiting for a relay that never comes (Lane O, F13-03S).
+	bounded, stop := relayWithheldDeadline(context.Background(), fixedDenier{denial})
+	got, ok := bounded.Deadline()
+	stop()
+	if !ok || time.Until(got) > relayWithheldDialTimeout {
+		t.Fatalf("an unbounded dial stayed unbounded with relays withheld: %v %v", got, ok)
+	}
+	open, stop := relayWithheldDeadline(context.Background(), fixedDenier{})
+	_, ok = open.Deadline()
+	stop()
+	if ok {
+		t.Fatal("an unbounded dial got a deadline although relays are available")
+	}
 }

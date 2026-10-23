@@ -43,9 +43,20 @@ func relayQuotaFailure(denier relayDenier, err error) error {
 // failure is reported (as the plan limit) before the caller times out.
 const relayAnswerMargin = 2 * time.Second
 
+// relayWithheldDialTimeout bounds a dial without a caller deadline (a file transfer) while relays are
+// withheld at the plan limit: a peer that needs a relay is never reached, and waiting for it made pb send
+// hang for minutes and end "canceled" instead of naming the limit (Lane O, F13-03S).
+const relayWithheldDialTimeout = 15 * time.Second
+
 func relayWithheldDeadline(ctx context.Context, denier relayDenier) (context.Context, context.CancelFunc) {
+	if denier == nil || denier.RelayDenial() == nil {
+		return context.WithCancel(ctx)
+	}
 	deadline, ok := ctx.Deadline()
-	if !ok || denier == nil || denier.RelayDenial() == nil || time.Until(deadline) <= 2*relayAnswerMargin {
+	if !ok {
+		return context.WithTimeout(ctx, relayWithheldDialTimeout)
+	}
+	if time.Until(deadline) <= 2*relayAnswerMargin {
 		return context.WithCancel(ctx)
 	}
 	return context.WithDeadline(ctx, deadline.Add(-relayAnswerMargin))
