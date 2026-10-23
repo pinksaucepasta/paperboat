@@ -1796,8 +1796,9 @@ execution ≤ 0.2 ms for the revocation document, the workspace activity page an
 console full machine list every 15 s per tab, per-row inbox/domain polls · 8 S2/S7 one global lock, Stripe call inside it ·
 9 E2 4 MiB config re-read per connector heartbeat · 10 D1/E4 tables nothing prunes · 11 E1 ACME re-order every second ·
 12 P2 full peer status built twice per metered read/write · 13 A1 local snapshot 1 MiB cap vs 10k machines · 14 H2 input
-journal lifetime cap · 15 S3/E3 N+1 terminal and preview lists. The cloudflared/zrok/ngrok-go comparison of the tunnel stack
-(HA connections, reconnect, drain, limits) is still running; its findings are added as T5+ when verified.
+journal lifetime cap · 15 S3/E3 N+1 terminal and preview lists. Tunnel stack vs cloudflared/zrok/ngrok-go (done): T5 descriptor refetch every
+4 s per healthy connector ranks with #5; T6 QUIC carriers unmonitored (2 min dead-link detection) with #11; T7–T9 below.
+Ours is equal or better on reconnect backoff (full jitter; ngrok-go has none), protocol fallback and origin timeouts.
 
 **Findings by package group** (verified in our code by Lane X; ranked list follows when coverage is complete)
 
@@ -1845,6 +1846,11 @@ journal lifetime cap · 15 S3/E3 N+1 terminal and preview lists. The cloudflared
 | P5 | CallMeMaybe is sent to every peer on every status change and meow ping, each send scanning all peers (O(N²) per event); admit rebuilds and sorts the whole netmap under the backend lock | `cli/internal/peertransport/mesh/engine_backend.go:262-274,98-109,362-393` | TS magicsock sends CallMeMaybe only to the peer starting discovery (endpoint.go:1428-1450); updateNodes diffs | R (extends Lane R #8) |
 | P6 | Inbox pending poll retries a failed request after a fixed 1 s, no backoff or jitter, for the life of each `pb connect` session: 10k sessions = 10k req/s exactly when the server recovers | `cli/internal/inbox/inbox.go:270-284` | TS controlclient: exponential backoff with jitter, honors Retry-After (auto.go, direct.go) | A |
 | P7 | Client metrics sampler sends up to ~68 metric items to Sentry every 30 s per daemon, bypassing the 32/min detail budget it documents (~1.4M items/min at 10k daemons; verify series count) | `cli/internal/errorreport/metrics.go:95-137` | TS logtail: buffered, rate-limited uploads | A (B owns Sentry quota) |
+| T5 | Every tunnel connector pool re-fetches its carrier descriptor from the server every 4 s, even when healthy: the repair loop calls Connect every 1 s with no "pool full" early return, and Connect refreshes targets after 4 s (~0.25 req/s per connector, ~2.5k req/s at 10k machines) | `cli/internal/hostruntime/connector/data_carrier_pool.go:88-112,342-358; tunnelenrollment/bootstrap_descriptor.go:131-134` | cloudflared: edge discovery once, re-resolved only on connection failure (supervisor) | M (A for cli paths) |
+| T6 | QUIC carriers (the default preferred transport) get no liveness monitor; only HTTP3/HTTP2 carriers are pinged every 5 s. A blackholed QUIC carrier is detected only by the 2 min idle timeout (keepalive 30 s), and its streams hang meanwhile | `cli/internal/hostruntime/connector/data_carrier_pool.go:236-238, data_carrier_pool_types.go:76, data_carrier_endpoint.go:293` | cloudflared QUIC: idle 5 s, keepalive 1 s (quic/constants.go) | M |
+| T7 | Every edge stream open takes the route registry's exclusive lock and scans every active rule (≤4,096) with no early exit | `tunnel/internal/route/matcher.go:630-652, matching_rules.go:76-103` | cloudflared ingress: first-match over an immutable slice, no lock (ingress/ingress.go:42-68); copy-on-write snapshot | M |
+| T8 | A pending preview attachment POSTs Allocate every 250 ms until ready, each a server write transaction (placement, latency, attachment upsert): 1k pending = 4k write tx/s | `cli/internal/hostruntime/preview/attachment_types.go:26, attachment_client.go:176-202; server runtimeattachment/service.go` | cloudflared: versioned config pushed on the open stream (orchestration/orchestrator.go) | M + B |
+| T9 | Each machine keeps at most 2 carriers on 2 edges (failure domains), so one dead edge leaves a single path; unused single-connection connector.Manager/Supervisor remain | `cli/internal/hostruntime/connector/data_carrier_types.go:28; server edgeset/select.go:16; connector/manager.go, supervisor.go:87` | cloudflared: 4 HA connections by default (cmd/cloudflared/tunnel/cmd.go:792) | M (product choice: edge pair, see memory edge-model-account-pair) |
 
 **Coverage**
 
@@ -1891,7 +1897,7 @@ journal lifetime cap · 15 S3/E3 N+1 terminal and preview lists. The cloudflared
 | `cli/internal/hostruntime/config` | 101 | A | TS ipn/store, atomicfile; NB profilemanager | done | checked, nothing |
 | `cli/internal/hostruntime/configapply` | 76 | A | — | done | checked, nothing |
 | `cli/internal/hostruntime/configsync` | 9069 | A | — (Git-based; compare: Teleport lib/services watcher) | done | checked, nothing |
-| `cli/internal/hostruntime/connector` | 4186 | A | cloudflared supervisor, connection (QUIC→HTTP/2, HA connections, reconnect), ingress rules; ngrok-go session (reconnect, heartbeat); zrok shares (public/private/reserved) | done | checked, nothing |
+| `cli/internal/hostruntime/connector` | 4186 | A | cloudflared supervisor, connection (QUIC→HTTP/2, HA connections, reconnect), ingress rules; ngrok-go session (reconnect, heartbeat); zrok shares (public/private/reserved) | done | checked, nothing; T5, T6, T9 |
 | `cli/internal/hostruntime/connectorrotation` | 2943 | A | cloudflared supervisor, connection (QUIC→HTTP/2, HA connections, reconnect), ingress rules; ngrok-go session (reconnect, heartbeat); zrok shares (public/private/reserved) | done | H3 |
 | `cli/internal/hostruntime/controlbackoff` | 147 | A | TS util/backoff | done | checked, nothing |
 | `cli/internal/hostruntime/edgeplacement` | 178 | A | TS tailcfg DERPMap / derp mesh; Teleport lib/reversetunnel (agentpool) | done | checked, nothing |
@@ -1922,7 +1928,7 @@ journal lifetime cap · 15 S3/E3 N+1 terminal and preview lists. The cloudflared
 | `cli/internal/hostruntime/operation` | 272 | A | Teleport lib/srv (exec, reexec); TS ssh/tailssh incubator | done | checked, nothing |
 | `cli/internal/hostruntime/originhealth` | 200 | A | cloudflared supervisor, connection (QUIC→HTTP/2, HA connections, reconnect), ingress rules; ngrok-go session (reconnect, heartbeat); zrok shares (public/private/reserved) | done | checked, nothing |
 | `cli/internal/hostruntime/peeridentity` | 255 | A | TS control/controlclient (register), types/key | done | checked, nothing |
-| `cli/internal/hostruntime/preview` | 10984 | R | cloudflared supervisor, connection (QUIC→HTTP/2, HA connections, reconnect), ingress rules; ngrok-go session (reconnect, heartbeat); zrok shares (public/private/reserved) | done | P3 |
+| `cli/internal/hostruntime/preview` | 10984 | R | cloudflared supervisor, connection (QUIC→HTTP/2, HA connections, reconnect), ingress rules; ngrok-go session (reconnect, heartbeat); zrok shares (public/private/reserved) | done | P3; P3, T8 |
 | `cli/internal/hostruntime/privateproxyconfig` | 1271 | A | — | done | checked, nothing |
 | `cli/internal/hostruntime/process` | 289 | A | Teleport lib/srv (exec, reexec); TS ssh/tailssh incubator | done | checked, nothing |
 | `cli/internal/hostruntime/protocol` | 902 | A | Teleport lib/srv (exec, reexec); TS ssh/tailssh incubator | done | checked, nothing |
@@ -2138,7 +2144,7 @@ journal lifetime cap · 15 S3/E3 N+1 terminal and preview lists. The cloudflared
 | `tunnel/internal/node` | 348 | M | cloudflared connection, supervisor, ingress, metrics (edge side); zrok controller (shares, limits, metrics); Teleport lib/reversetunnel, lib/proxy | done | checked, nothing |
 | `tunnel/internal/operation` | 149 | M | cloudflared connection, supervisor, ingress, metrics (edge side); zrok controller (shares, limits, metrics); Teleport lib/reversetunnel, lib/proxy | done | checked, nothing |
 | `tunnel/internal/reporting` | 1722 | M | cloudflared connection, supervisor, ingress, metrics (edge side); zrok controller (shares, limits, metrics); Teleport lib/reversetunnel, lib/proxy | done | checked, nothing |
-| `tunnel/internal/route` | 1897 | M | cloudflared connection, supervisor, ingress, metrics (edge side); zrok controller (shares, limits, metrics); Teleport lib/reversetunnel, lib/proxy | done | checked, nothing |
+| `tunnel/internal/route` | 1897 | M | cloudflared connection, supervisor, ingress, metrics (edge side); zrok controller (shares, limits, metrics); Teleport lib/reversetunnel, lib/proxy | done | checked, nothing; T7 |
 | `tunnel/internal/runtime` | 4767 | M | cloudflared connection, supervisor, ingress, metrics (edge side); zrok controller (shares, limits, metrics); Teleport lib/reversetunnel, lib/proxy | done | T2, T4 |
 | `tunnel/internal/store` | 151 | M | cloudflared connection, supervisor, ingress, metrics (edge side); zrok controller (shares, limits, metrics); Teleport lib/reversetunnel, lib/proxy | done | checked, nothing |
 | `tunnel/internal/strictjson` | 102 | M | cloudflared connection, supervisor, ingress, metrics (edge side); zrok controller (shares, limits, metrics); Teleport lib/reversetunnel, lib/proxy | done | checked, nothing |
