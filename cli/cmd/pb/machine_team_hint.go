@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -61,7 +62,7 @@ func resolveInOtherWorkspaces(ctx context.Context, client *api.Client, requested
 		if err != nil {
 			continue
 		}
-		machines, err := scoped.ListUserMachines(lookup)
+		machines, err := scoped.ListUserMachinesFiltered(lookup, url.Values{"q": {requested}})
 		if err != nil {
 			continue
 		}

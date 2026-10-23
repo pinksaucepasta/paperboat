@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -305,7 +306,10 @@ func resolveEnvironmentTargetWithMachine(ctx context.Context, client *api.Client
 }
 
 func resolveUserMachine(ctx context.Context, client *api.Client, requested string) (api.UserMachine, error) {
-	machines, err := client.ListUserMachines(ctx)
+	// The server filters by a case-insensitive substring of name and ID, so a machine named or
+	// identified exactly by requested is always in this page; the account is not listed in full
+	// (Lane X audit A2: ~50 serial pages at 10,000 machines).
+	machines, err := client.ListUserMachinesFiltered(ctx, url.Values{"q": {requested}})
 	if err != nil {
 		return api.UserMachine{}, err
 	}

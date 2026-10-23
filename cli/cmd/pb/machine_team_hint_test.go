@@ -77,3 +77,23 @@ func TestAMachineNameResolvesAcrossWorkspacesOnlyWhenUnique(t *testing.T) {
 		t.Fatalf("unknown: %v", err)
 	}
 }
+
+// Resolving one machine asks the server for that name only (q), not for the whole account
+// (Lane X audit A2, F21-24).
+func TestResolvingAMachineAsksOnlyForItsName(t *testing.T) {
+	var queries []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		queries = append(queries, r.URL.Query().Get("q"))
+		items := []map[string]any{}
+		if r.URL.Query().Get("q") == "build-host" {
+			items = append(items, map[string]any{"id": "machine_1", "alias": "build-host"}, map[string]any{"id": "machine_2", "alias": "build-host-2"})
+		}
+		writeAPIData(t, w, map[string]any{"items": items, "pagination": map[string]any{"limit": 200, "offset": 0, "total": len(items), "next_offset": nil}})
+	}))
+	defer server.Close()
+	client := api.New(server.URL, config.Credential{AccessToken: "token"}, server.Client())
+	machine, err := resolveUserMachine(context.Background(), client, "build-host")
+	if err != nil || machine.ID != "machine_1" || len(queries) != 1 || queries[0] != "build-host" {
+		t.Fatalf("machine=%+v err=%v queries=%v", machine, err, queries)
+	}
+}
