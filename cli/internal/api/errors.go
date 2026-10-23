@@ -1,6 +1,7 @@
 package api
 
 import (
+	hostconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -99,7 +100,7 @@ var publicAPIMessages = map[string]string{
 	"conflict":                        "The resource state changed. Refresh it and try again.",
 	"config_compare_stale":            "The conflict changed before it could be compared. Run `pb config conflict list` and compare the current conflict.",
 	"config_compare_host_unavailable": "The machine with the conflict is offline or not connected. Start Paperboat on it, then compare again.",
-	"terminal_session_limit_reached":  "This machine has reached its terminal session limit. Close a terminal with `pb session close`, then retry.",
+	"terminal_session_limit_reached":  hostconfig.TerminalCeilingMessage(),
 	"credits_exhausted":               "Credits are exhausted. Top up credits before trying again.",
 	"entitlement_lost":                "Your Paperboat plan is inactive. Restore billing access before trying again.",
 	"expired_token":                   "The authorization token expired. Start sign-in again.",

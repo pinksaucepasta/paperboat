@@ -38,6 +38,12 @@ type ResourceLimits struct {
 	MaxConcurrentOps       int
 }
 
+// TerminalCeilingMessage is what a user sees when a machine already runs its ceiling of open
+// terminals. The ceiling protects the machine from runaway creation; it is not a plan limit.
+func TerminalCeilingMessage() string {
+	return fmt.Sprintf("This machine has reached its ceiling of %d open terminals. Close some with `pb session close`, then retry.", DefaultResources.MaxSessions)
+}
+
 var DefaultResources = ResourceLimits{MaxSessions: 256, MaxAttachments: 128, MaxInputDecisions: 10_000, HistoryBytes: 64 << 10, MaxConcurrentTransfers: 2, MaxPreviewTargets: 20, MaxConcurrentProbes: 8, MaxConcurrentOps: 32}
 
 func (c Config) Validate() error {

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	hostconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
 	"github.com/pinksaucepasta/paperboat/internal/supportref"
 )
 
@@ -608,7 +609,7 @@ func (s *Server) peerStream(writer http.ResponseWriter, request *http.Request, r
 				message = "Managed environment variables could not be delivered on the target. Check ENV delivery and retry."
 			case "resource_limit":
 				code = "terminal_session_limit_reached"
-				message = "This machine has reached its terminal session limit. Close a terminal with `pb session close`, then retry."
+				message = hostconfig.TerminalCeilingMessage()
 			}
 		}
 		writeError(writer, http.StatusServiceUnavailable, requestID, code, message)

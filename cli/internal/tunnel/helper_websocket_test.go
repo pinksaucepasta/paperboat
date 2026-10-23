@@ -677,7 +677,7 @@ func TestCanonicalHelperTerminalErrorCarriesValidatedReferenceWithoutRemoteText(
 		{"unknown remote code", "PRIVATE_REMOTE_CODE", reference, "", "", "remote terminal operation failed"},
 		{"invalid reference", "terminal_create_failed", "support_private-value", "", "", "remote terminal operation failed"},
 		{"environment denial", "environment_unavailable", reference, "", "environment_unavailable", "Managed environment variables could not be delivered on the target. Check ENV delivery and retry."},
-		{"session limit", "resource_limit", reference, "", "resource_limit", "This machine has reached its terminal session limit. Close a terminal with `pb session close`, then retry."},
+		{"session limit", "resource_limit", reference, "", "resource_limit", "This machine has reached its ceiling of 256 open terminals. Close some with `pb session close`, then retry."},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

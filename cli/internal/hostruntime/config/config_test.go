@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestFromEnvDefaults(t *testing.T) {
 	c, err := FromEnv("1.0.0", func(string) string { return "" })
@@ -41,5 +44,16 @@ func TestValidateRejectsUnsafeLimits(t *testing.T) {
 	c.Limits.MutationDeadline = DefaultLimits.MutationDeadline + 1
 	if err := c.Validate(); err == nil {
 		t.Fatal("expected invalid limits")
+	}
+}
+
+// Lane W 2026-10-23: native terminals have no plan limit; the machine's protection ceiling is 256
+// and the message at the ceiling names it and the way out.
+func TestTerminalCeilingMessageNamesTheCeiling(t *testing.T) {
+	if DefaultResources.MaxSessions != 256 {
+		t.Fatalf("terminal ceiling = %d, want 256", DefaultResources.MaxSessions)
+	}
+	if got := TerminalCeilingMessage(); !strings.Contains(got, "256 open terminals") || !strings.Contains(got, "pb session close") {
+		t.Fatalf("ceiling message = %q", got)
 	}
 }

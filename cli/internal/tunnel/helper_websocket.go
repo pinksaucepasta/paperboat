@@ -16,6 +16,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat/internal/diagnosticlog"
+	hostconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
 	"github.com/pinksaucepasta/paperboat/internal/resolver"
 	"github.com/pinksaucepasta/paperboat/internal/supportref"
@@ -41,10 +42,6 @@ type helperFrame struct {
 	DeadlineMS  uint32          `json:"deadline_ms,omitempty"`
 	Payload     json.RawMessage `json:"payload,omitempty"`
 }
-
-// terminalSessionLimitMessage is what the user sees when the machine already runs the maximum
-// number of live terminal sessions.
-const terminalSessionLimitMessage = "This machine has reached its terminal session limit. Close a terminal with `pb session close`, then retry."
 
 type helperRemoteError struct {
 	Code      string                  `json:"code"`
@@ -85,7 +82,7 @@ func (e *helperRemoteError) Error() string {
 	case "environment_unavailable":
 		return "Managed environment variables could not be delivered on the target. Check ENV delivery and retry."
 	case "resource_limit":
-		return terminalSessionLimitMessage
+		return hostconfig.TerminalCeilingMessage()
 	case "not_found_or_forbidden":
 		return "terminal resource was not found or is not permitted"
 	case "replay_gap":
