@@ -1165,6 +1165,26 @@ domain bindings); tunnel ingress, health/readiness and DNS read endpoint assignm
 list; the tunnel manager stops dialing its own carrier when served.
 4.4 TCP, TLS passthrough, private_tcp and custom domains on the same path. 5: deletions (connector stack, attachments), the unused single-connection connector.Manager/Supervisor: audit T9).
 Gate per slice: smoke tunnel-manage, tunnel-protocols, tunnel-transfer, tunnel-survival, tunnel-lifecycle, tcp-private green.
+4.3 as built (branch lane-m-43): only public HTTP tunnels move (a private/team route needs an agent-side ingress authority for
+engine routes first, which 4.4 adds); the agent refetches its engine tunnels on the `tunnels` machine event with a 1-min safety
+poll, verifies each snapshot's content hash, and serves every active route on every carrier hub; the tunnel manager keeps no
+connector for a moved tunnel (reconcile within 5 s) and brings it back if the tunnel leaves the engine.
+*Prior art (4.3, failover, drain; ~/ref, read 2026-10-23).* One process holding all routes over a few long-lived edge connections:
+cloudflared keeps `HAConnections` (default 4) spread over two edge regions (`supervisor/supervisor.go:105-186`,
+`edgediscovery/allregions/regions.go`), and serves every ingress rule over each of them, first match on an immutable rule list
+(`ingress/ingress.go:42-68`): our 2-edge pair with every route on both carriers is the same shape. Config by version push, not
+polling: cloudflared applies remote config only on a version change (orchestration), Tailscale sends one full map then deltas
+(tailcfg PeersChanged/Removed): our machine-event topic + content-hash check follows that. Server-initiated moves: DERP sends
+`ServerRestartingMessage{ReconnectIn, TryFor}` before a restart (`tailscale/derp/derp_client.go:500-517`); Teleport's proxy
+`DrainConnections` closes its listener and advises every agent to reconnect elsewhere while open connections finish
+(`teleport/lib/reversetunnel/srv.go:673-689`, agent side `agent.go:552`); cloudflared's connector sends `UnregisterConnection`
+and keeps a grace period on its own shutdown (`connection/control.go:120-140`). Ours (agreed with Lane B): the edge marks itself
+draining and sends GOAWAY {reason, drain_deadline} as an edge-opened stream, admits no new streams on that node's carriers and
+lets in-flight ones finish (<=20 s); the server's own requests already dial an edge with a valid carrier on a non-draining
+node (d7b68a39), and the agent's backup carrier on the other edge serves at once. Host-initiated drain (audit T10, cloudflared
+UnregisterConnection) is the mirror: the agent tells the edge before closing a carrier. Private shares: zrok keeps private
+shares reachable only through an authenticated `access` frontend (`zrok/controller/access.go`, share.go private token); our
+restricted routes keep the edge's signed browser decision plus the agent's own authority check, so they move only in 4.4.
 
 **Decided.** No headless connectors (tunnels run on enrolled machines only); 2 carriers per edge; the URL is returned when one
 edge is ready; no custom domains for previews. Timing: engine work starts after Linux is done, before macOS.
