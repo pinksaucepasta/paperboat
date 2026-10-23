@@ -34,7 +34,7 @@ fi
 
 lane=$(printf %s "${root##*/}" | tr -c 'A-Za-z0-9._-' _)
 sha=$(git rev-parse --short HEAD)
-branch="ci/$lane-$sha-$(date +%H%M%S)"
+branch="ci/$lane-$sha-$(date +%H%M%S)-$$"
 trap 'git push -q --no-verify origin --delete "$branch" >/dev/null 2>&1 || true' EXIT
 
 # Same tree as HEAD in a child commit whose message skips the push-triggered run: the dispatch below
