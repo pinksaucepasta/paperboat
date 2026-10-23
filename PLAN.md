@@ -1311,7 +1311,18 @@ open stream also lives until the next refresh.
    (machine revoke, member removal, capability off): a revoked grant cannot open a new stream, and open
    streams end within one refresh.
 
-*Review:* Lane A (host admission, CLI dial): pending · Lane B (server grants, revocation topics): pending
+*Review:* Lane A (host admission, CLI dial): pending · Lane B (server grants, revocation topics): **approve, with
+conditions** (2026-10-23): (1) the grant key includes the acting team (user, CLI session, machine, capability,
+team), and a unique partial index on live grants with an upsert, so concurrent descriptors cannot create two;
+(2) every path that ends authority ends or re-generations the grant in one place (a trigger or one service
+function), each with a PG test: member removal, team suspension, machine revoke/disconnect, capability or
+policy turned off, CLI session ended, plan/bandwidth refusal. A grant now lives up to 1 h instead of ~2 min, so
+a missed path is a real hole; (3) renewal happens only through descriptor issuance, which re-checks authority;
+nothing else extends expiry; (4) usage: the runtime accounting authority (Lane O's 88e486d7, authority_id =
+access session id) moves to the grant id, edge usage reports keep a per-stream id for the per-operation split,
+and a bandwidth refusal at issuance still stops new streams; (5) migration: grants reuse
+user_machine_access_sessions rows (no second table), old rows expire on their own. It also cuts peer-config
+churn, which helps the serialization load measured tonight.
 
 #### API/DB (Lane Q, measured 2026-10-22/23)
 
