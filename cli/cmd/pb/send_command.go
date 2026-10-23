@@ -235,7 +235,7 @@ func sendCommand() *cobra.Command {
 						return errors.Join(nativeErr, initialGrant.Lease.Close())
 					}
 					batch, err = nativeClient.SendBatch(ctx.Context, batchID, sessionID, prepared.Sources)
-					err = destinationStorageFull(destination.Alias, err)
+					err = destinationBusy(destination.Alias, destinationStorageFull(destination.Alias, err))
 					if closeErr := nativeClient.Close(); closeErr != nil {
 						err = errors.Join(err, closeErr)
 					}

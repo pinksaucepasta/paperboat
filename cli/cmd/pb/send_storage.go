@@ -36,6 +36,29 @@ func destinationStorageFull(machine string, err error) error {
 	return destinationStorageFullError{machine: machine, needed: remote.NeededBytes, free: remote.FreeBytes, cause: err}
 }
 
+// destinationBusyError is a send the receiving computer refused because it already holds as many
+// unfinished transfers as it accepts (its resource_limit, HTTP 429). Nothing new was delivered.
+type destinationBusyError struct {
+	machine string
+	cause   error
+}
+
+func (e destinationBusyError) Error() string {
+	return fmt.Sprintf("%s is already receiving as many transfers as it accepts at once. Let them finish, or cancel unfinished ones (`pb send list --on %s`, then `pb send cancel <transfer-id> --on %s`), then send again.", e.machine, e.machine, e.machine)
+}
+
+func (e destinationBusyError) Unwrap() error { return e.cause }
+
+// destinationBusy turns the receiver's resource_limit refusal into destinationBusyError; any other
+// error is returned unchanged.
+func destinationBusy(machine string, err error) error {
+	var remote *filetransfer.Error
+	if err == nil || !errors.As(err, &remote) || remote.Code != "resource_limit" {
+		return err
+	}
+	return destinationBusyError{machine: machine, cause: err}
+}
+
 // serverTransferLimit turns the server's 413 file_transfer_limit_exceeded (a team policy can be
 // stricter than the CLI's defaults) into the same typed refusal a local check produces, naming the
 // limit that was actually exceeded. It returns nil for any other error or when no limit is hit.

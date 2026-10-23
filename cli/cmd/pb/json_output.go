@@ -221,6 +221,9 @@ func classifyCLIJSONFailure(err error, failure commandFailure) cliJSONError {
 		// The updater refused before changing anything.
 		result.Code, result.Category, result.StateChanged, result.Retryable = "update_busy", "conflict", false, true
 		result.Recovery = "Close the SSH connections and port forwards or wait for them to finish, then retry; `pb update --force` ends them."
+	case destinationBusyError:
+		result.Code, result.Category, result.StateChanged, result.Retryable = "destination_busy", "conflict", false, true
+		result.Recovery = "Let the destination's unfinished transfers finish or cancel them (`pb send list --on <machine>`, `pb send cancel <transfer-id> --on <machine>`), then send again."
 	case destinationStorageFullError:
 		// Nothing was delivered; the partial upload is discarded by the receiver.
 		result.Code, result.Category, result.StateChanged, result.Retryable = "destination_storage_full", "conflict", false, false

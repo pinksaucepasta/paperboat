@@ -236,7 +236,7 @@ func typedCommandOwnerMessage(owner error, failure commandFailure) string {
 		return transferLimitMessage(owner)
 	case updateOpenConnectionsRefusal:
 		return owner.message
-	case destinationStorageFullError:
+	case destinationStorageFullError, destinationBusyError:
 		return owner.Error()
 	case *TunnelCreateExistingError:
 		return "A tunnel with this name already exists; nothing was changed. Inspect it with `pb tunnel status <tunnel>`."
