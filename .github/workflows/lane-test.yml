@@ -94,9 +94,10 @@ jobs:
           path: |
             ${{ steps.paths.outputs.build }}
             ${{ steps.paths.outputs.mod }}
-          key: lane-test-go-${{ matrix.module }}-${{ hashFiles('go.work.sum', '*/go.sum') }}-${{ github.run_id }}
+          # One entry per module and dependency set: the Go build cache is content addressed, so an
+          # entry from an older commit still serves everything that did not change.
+          key: lane-test-go-${{ matrix.module }}-${{ hashFiles('go.work.sum', '*/go.sum') }}
           restore-keys: |
-            lane-test-go-${{ matrix.module }}-${{ hashFiles('go.work.sum', '*/go.sum') }}-
             lane-test-go-${{ matrix.module }}-
       - run: go vet ./...
       - name: go test -race

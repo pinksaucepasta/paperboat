@@ -40,7 +40,8 @@ trap 'git push -q --no-verify origin --delete "$branch" >/dev/null 2>&1 || true'
 # Same tree as HEAD in a child commit whose message skips the push-triggered run: the dispatch below
 # is the only run, and it carries the module/-run inputs.
 commit=$(git commit-tree "HEAD^{tree}" -p HEAD -m "ci-test $lane $sha [skip ci]")
-git push -q --no-verify origin "$commit:refs/heads/$branch"
+git push -q --no-verify origin "$commit:refs/heads/$branch" 2>/dev/null ||
+  { echo "ci-test: could not push the ci branch (is origin reachable and writable?)" >&2; exit 1; }
 
 args=(--ref "$branch" -f "modules=${modules[*]:-}" -f "run=$run")
 gh workflow run lane-test.yml "${args[@]}"
@@ -71,7 +72,7 @@ done
 
 final=$(gh run view "$id" --json conclusion,jobs)
 echo
-jq -r '.jobs[] | select(.name != "Plan") | [.name, (.conclusion // .status),
+jq -r '.jobs[] | select(.name != "Plan" and .conclusion != "skipped") | [.name, (.conclusion // .status),
   (if .completedAt and .startedAt then ((.completedAt | fromdate) - (.startedAt | fromdate)) else 0 end | "\(. / 60 | floor)m\(. % 60)s")] | @tsv' <<<"$final" |
   column -t -s "$(printf '\t')"
 conclusion=$(jq -r .conclusion <<<"$final")
