@@ -249,7 +249,7 @@ func New(opts Options) (*App, error) {
 		Resolver: previewdispatch.DBMachineRouteResolver{DB: store},
 		Signer:   mintKeys,
 		Issuer:   normalizeHelperIssuer(opts.Config.HTTP.PublicBaseURL),
-		Client:   providerHTTPClient("helper", opts.Config.HTTP.RequestTimeout),
+		Client:   helperHTTPClient(store, opts.Config.HTTP.RequestTimeout),
 		Timeout:  opts.Config.HTTP.RequestTimeout,
 	})
 	if err != nil {
@@ -261,7 +261,7 @@ func New(opts Options) (*App, error) {
 		DB:     store,
 		Signer: mintKeys,
 		Issuer: normalizeHelperIssuer(opts.Config.HTTP.PublicBaseURL),
-		Client: providerHTTPClient("helper", opts.Config.HTTP.RequestTimeout),
+		Client: helperHTTPClient(store, opts.Config.HTTP.RequestTimeout),
 	})
 	if err != nil {
 		_ = store.Close()

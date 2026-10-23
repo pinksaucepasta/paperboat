@@ -296,6 +296,10 @@ var errLeaseExpired = errors.New("preview lease deadline has passed")
 var errRemoteResponseInvalid = errors.New("preview dispatch response is invalid")
 
 func classifyTransportError(ctx context.Context, err error) error {
+	if errors.Is(err, runtimeattachment.ErrRouteMoving) {
+		// No edge could take the request, so nothing reached the machine.
+		return &DispatchError{Code: "machine_route_moving", Retryable: true, Cause: err}
+	}
 	if errors.Is(err, context.DeadlineExceeded) || ctx != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return uncertainDispatchError("timeout", err)
 	}

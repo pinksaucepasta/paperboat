@@ -11,9 +11,11 @@ import (
 	serverdiagnostics "github.com/pinksaucepasta/paperboat-server/internal/diagnostics"
 	pbgithub "github.com/pinksaucepasta/paperboat-server/internal/github"
 	"github.com/pinksaucepasta/paperboat-server/internal/mint"
+	"github.com/pinksaucepasta/paperboat-server/internal/runtimeattachment"
 	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
 	"github.com/pinksaucepasta/paperboat-server/internal/telemetry"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"time"
@@ -62,6 +64,15 @@ func workOSVerifier(cfg config.Config) auth.WorkOSVerifier {
 func providerHTTPClient(provider string, timeout time.Duration) *http.Client {
 	//paperboat:allow-source-policy default-http owner=server-runtime reason=instrument-standard-transport-behind-configured-timeout
 	return &http.Client{Timeout: timeout, Transport: serverdiagnostics.InstrumentProviderTransport(provider, http.DefaultTransport)}
+}
+
+// helperHTTPClient carries the server's own requests to machines: runtime hosts are dialed at an edge
+// that can serve them now (runtimeattachment.EdgeDialer), so an edge restart does not fail them.
+func helperHTTPClient(store *db.DB, timeout time.Duration) *http.Client {
+	//paperboat:allow-source-policy default-http owner=server-runtime reason=instrument-standard-transport-behind-configured-timeout
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.DialContext = runtimeattachment.EdgeDialer{DB: store, Dial: (&net.Dialer{Timeout: 10 * time.Second}).DialContext, Wait: 5 * time.Second}.DialContext
+	return &http.Client{Timeout: timeout, Transport: serverdiagnostics.InstrumentProviderTransport("helper", transport)}
 }
 
 func publicURLSecure(raw string) bool {
