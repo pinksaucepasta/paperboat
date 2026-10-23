@@ -53,7 +53,7 @@ export function CommandPalette() {
 
   const needle = search.trim().toLowerCase()
   const matchingPages = pages.filter((section) => !needle || section.title.toLowerCase().includes(needle))
-  const machines: Machine[] = query ? (results.data?.items ?? []) : (page.data?.items.slice(0, 5) ?? [])
+  const machines: Machine[] = query ? (results.data?.items ?? []) : (page.data?.items.filter((machine) => machine.state !== "revoked").slice(0, 5) ?? [])
 
   return (
     <>

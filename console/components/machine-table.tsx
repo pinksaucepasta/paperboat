@@ -2,7 +2,7 @@
 
 import { InfoIcon, LaptopIcon, MagnifyingGlassIcon, XIcon } from "@phosphor-icons/react"
 import Link from "next/link"
-import { useDeferredValue } from "react"
+import { useDeferredValue, useState, useSyncExternalStore } from "react"
 import {
   useApiQuery,
   machineOwner,
@@ -16,7 +16,9 @@ import {
   type RunningCounts,
 } from "@/lib/api"
 import { formatPlatform } from "@/lib/format"
-import { parseQuery, matchesQuery, type FilterKey } from "@/lib/machine-filter"
+import { parseQuery, matchesQuery, tagOptions, type FilterKey } from "@/lib/machine-filter"
+import { tagsLive } from "@/lib/policy"
+import { TagChips } from "@/components/machine-tags"
 import { AddMachineDialog } from "@/components/add-machine-dialog"
 import { MachineRowMenus } from "@/components/machine-actions"
 import { useMachineQuery } from "@/components/machine-query"
@@ -37,19 +39,27 @@ export function MachineTable() {
   const workspace = useWorkspace()
   const [query, setQuery] = useMachineQuery()
   const parsed = parseQuery(useDeferredValue(query))
-  // The first page holds up to 200 machines; past that, typing searches the whole workspace.
-  const partial = Boolean(page && page.total > page.items.length)
+  // Every machine is loaded (up to a bound); past it, typing searches the whole workspace.
+  const partial = Boolean(page && !page.complete)
   const search = useApiQuery({
     ...machineSearchQuery(workspace?.id ?? "", parsed.text),
     enabled: partial && Boolean(workspace && parsed.text),
   })
   const machines = partial && parsed.text ? search.data?.items : page?.items
-  const keys: FilterKey[] = workspace?.kind === "personal" ? ["status", "os", "owner"] : ["status", "os"]
+  const keys: FilterKey[] = [
+    "status",
+    "os",
+    ...(tagsLive ? (["tag"] as const) : []),
+    ...(workspace?.kind === "personal" ? (["owner"] as const) : []),
+  ]
+  const tags = tagOptions(page?.items)
   const applied = (Object.entries(parsed.filters) as [FilterKey, string][]).filter(([key]) => keys.includes(key))
   const visible = machines?.filter((machine) =>
     matchesQuery(machine, { text: parsed.text, filters: Object.fromEntries(applied) }, me),
   )
   const filtered = Boolean(parsed.text) || applied.length > 0
+  const pages = usePages(query, visible?.length ?? 0)
+  const shown = visible?.slice(pages.from, pages.to)
 
   return (
     <section id="machines-table" className="flex scroll-mt-16 flex-col gap-3">
@@ -79,7 +89,7 @@ export function MachineTable() {
             </InputGroupAddon>
           )}
         </InputGroup>
-        <FilterButton query={query} keys={keys} filters={parsed.filters} onQuery={setQuery} />
+        <FilterButton query={query} keys={keys} filters={parsed.filters} onQuery={setQuery} tags={tags} />
         <div className="ml-auto">
           <AddMachineDialog />
         </div>
@@ -87,7 +97,7 @@ export function MachineTable() {
       {filtered && machines && (
         <div className="flex flex-wrap items-center gap-2">
           {applied.map(([key, value]) => (
-            <FilterChip key={key} name={key} value={value} query={query} onQuery={setQuery} />
+            <FilterChip key={key} name={key} value={value} query={query} onQuery={setQuery} tags={tags} />
           ))}
           <span className="px-1 text-xs text-muted-foreground">
             {visible?.length} of {machines.length} {machines.length === 1 ? "machine" : "machines"}
@@ -135,7 +145,7 @@ export function MachineTable() {
           </thead>
           <tbody className="divide-y divide-divider">
             {(isPending || (partial && Boolean(parsed.text) && search.isPending)) && <LoadingRows />}
-            {visible?.map((machine) => (
+            {shown?.map((machine) => (
               <MachineRow
                 key={machine.id}
                 machine={machine}
@@ -153,9 +163,22 @@ export function MachineTable() {
             </Button>
           </div>
         )}
+        {visible && visible.length > perPage && (
+          <nav className="flex items-center justify-end gap-3 py-3 text-sm text-muted-foreground" aria-label="Pages">
+            <span className="tabular-nums" data-machine-range>
+              {pages.from + 1}–{Math.min(pages.to, visible.length)} of {visible.length}
+            </span>
+            <Button variant="outline" size="sm" disabled={pages.page === 1} onClick={() => pages.go(pages.page - 1)}>
+              Previous
+            </Button>
+            <Button variant="outline" size="sm" disabled={pages.to >= visible.length} onClick={() => pages.go(pages.page + 1)}>
+              Next
+            </Button>
+          </nav>
+        )}
         {partial && !parsed.text && page && (
           <p className="py-4 text-center text-xs text-muted-foreground">
-            Showing {page.items.length} of {page.total} machines. Search to find the others.
+            Showing the first {page.items.length} of {page.total} machines. Search to find the others.
           </p>
         )}
         {machines?.length === 0 && !filtered && <NoMachines />}
@@ -198,6 +221,8 @@ function MachineRow({
                 {machine.alias}
               </Link>
               <MachineDot machine={machine} />
+              {/* Above the row's link overlay, so a tag filters instead of opening the machine. */}
+              <TagChips tags={machine.tags} className="relative z-10 hidden min-w-0 sm:inline-flex" />
             </div>
             {subtitle && <div className="truncate text-xs text-muted-foreground">{subtitle}</div>}
           </td>
@@ -296,4 +321,33 @@ function NoMachines() {
       </EmptyContent>
     </Empty>
   )
+}
+
+const perPage = 50
+const noSubscription = () => () => {}
+
+/**
+ * The table's page, in the URL (?page=) so a page can be shared and survives a reload. A new
+ * search or filter starts again at page 1; a page past the end shows the last one.
+ */
+function usePages(query: string, count: number) {
+  const fromUrl = useSyncExternalStore(
+    noSubscription,
+    () => Number(new URLSearchParams(window.location.search).get("page")) || 1,
+    () => 1,
+  )
+  const [chosen, setChosen] = useState<{ query: string; page: number } | null>(null)
+  const [opened] = useState(query)
+  const last = Math.max(1, Math.ceil(count / perPage))
+  const wanted = chosen ? (chosen.query === query ? chosen.page : 1) : query === opened ? fromUrl : 1
+  const page = Math.min(Math.max(1, wanted), last)
+  const go = (next: number) => {
+    setChosen({ query, page: next })
+    const url = new URL(window.location.href)
+    if (next > 1) url.searchParams.set("page", String(next))
+    else url.searchParams.delete("page")
+    window.history.replaceState(window.history.state, "", url)
+    document.getElementById("machines-table")?.scrollIntoView({ block: "start" })
+  }
+  return { page, from: (page - 1) * perPage, to: page * perPage, go }
 }

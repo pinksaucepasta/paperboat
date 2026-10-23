@@ -16,10 +16,21 @@ import {
 const control =
   "flex h-8 items-center gap-1.5 rounded-md bg-surface px-2.5 text-sm text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/30"
 
-function Options({ name, value, onChange }: { name: FilterKey; value?: string; onChange: (value: string) => void }) {
+function Options({
+  name,
+  value,
+  onChange,
+  options,
+}: {
+  name: FilterKey
+  value?: string
+  onChange: (value: string) => void
+  /** For keys whose values come from the data (tags). */
+  options?: Record<string, string>
+}) {
   return (
     <DropdownMenuRadioGroup value={value ?? ""} onValueChange={(next) => onChange(String(next))}>
-      {Object.entries(filterKeys[name].options).map(([option, label]) => (
+      {Object.entries(options ?? filterKeys[name].options).map(([option, label]) => (
         <DropdownMenuRadioItem key={option} value={option}>
           {label}
         </DropdownMenuRadioItem>
@@ -34,11 +45,14 @@ export function FilterButton({
   keys,
   filters,
   onQuery,
+  tags,
 }: {
   query: string
   keys: FilterKey[]
   filters: Filters
   onQuery: (query: string) => void
+  /** The Tag filter's values (from the machines). */
+  tags?: Record<string, string>
 }) {
   return (
     <DropdownMenu>
@@ -54,6 +68,7 @@ export function FilterButton({
               <Options
                 name={name}
                 value={filters[name]}
+                options={name === "tag" ? tags : undefined}
                 onChange={(value) => onQuery(withFilter(query, name, value))}
               />
             </DropdownMenuSubContent>
@@ -70,14 +85,17 @@ export function FilterChip({
   value,
   query,
   onQuery,
+  tags,
 }: {
   name: FilterKey
   value: string
   query: string
   onQuery: (query: string) => void
+  tags?: Record<string, string>
 }) {
   const spec = filterKeys[name]
-  const label = spec.options[value as keyof typeof spec.options]
+  // A tag filter names its tag even when no machine on this page carries it.
+  const label = name === "tag" ? value : spec.options[value as keyof typeof spec.options]
   return (
     <span className="flex h-8 items-center rounded-md bg-surface text-sm">
       <DropdownMenu>
@@ -87,7 +105,12 @@ export function FilterChip({
           <CaretDownIcon className="size-3.5 text-muted-foreground" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="min-w-40">
-          <Options name={name} value={value} onChange={(next) => onQuery(withFilter(query, name, next))} />
+          <Options
+            name={name}
+            value={value}
+            options={name === "tag" ? tags : undefined}
+            onChange={(next) => onQuery(withFilter(query, name, next))}
+          />
         </DropdownMenuContent>
       </DropdownMenu>
       <button

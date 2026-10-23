@@ -1,0 +1,25 @@
+/**
+ * The workspace's machines, page by page (the server caps a page at 200), so lists and pickers
+ * never silently miss machines past the first page. Bounded: at most `maxMachines` are loaded, and
+ * `complete` says whether that was all of them. Shared by the browser query and the server prefetch.
+ */
+export const pageSize = 200
+export const maxMachines = 2000
+
+export type MachinePages<T> = { items: T[]; total: number; complete: boolean }
+
+export async function fetchAllPages<T>(
+  fetchPage: (params: Record<string, string>) => Promise<{ items: T[]; pagination: { total: number } } | null | undefined>,
+  workspace: string,
+): Promise<MachinePages<T> | null> {
+  const items: T[] = []
+  let total = 0
+  for (let offset = 0; offset < maxMachines; offset += pageSize) {
+    const page = await fetchPage({ limit: String(pageSize), offset: String(offset), workspace })
+    if (!page) return offset === 0 ? null : { items, total, complete: false }
+    items.push(...page.items)
+    total = page.pagination.total
+    if (page.items.length < pageSize || items.length >= total) break
+  }
+  return { items, total, complete: items.length >= total }
+}

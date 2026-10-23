@@ -7,6 +7,7 @@ import type { components, paths } from "@/lib/api-schema"
 import { queryKeys } from "@/lib/query-keys"
 import { usageParams, type UsagePeriod } from "@/lib/usage-period"
 import { useWorkspaceId } from "@/lib/workspace"
+import { fetchAllPages, type MachinePages } from "@/lib/machine-pages"
 
 /** Error envelope returned by the control plane: `{ error: { code, message } }`. */
 export class ApiError extends Error {
@@ -190,6 +191,8 @@ export type Machine = {
     update_rollbacks: number
   }
   runtime_diagnostics?: { connector_state: string; observed_at?: string }
+  /** `tag:<name>` from the selected workspace's policy (absent on servers before machine tags). */
+  tags?: string[]
 }
 
 export type MachineOverview = Data<"/v1/machines/overview">
@@ -230,18 +233,37 @@ export const workspacesQuery = queryOptions({
   staleTime: 5 * minute,
 })
 
-type MachinePage = { items: Machine[]; total: number }
+type MachinePage = MachinePages<Machine>
+
+const machinePage = (params: Record<string, string>) =>
+  api<{ items: Machine[]; pagination: { total: number } }>(`machines?${new URLSearchParams(params)}`)
 
 async function fetchMachines(params: Record<string, string>): Promise<MachinePage> {
-  const page = await api<{ items: Machine[]; pagination: { total: number } }>(`machines?${new URLSearchParams(params)}`)
-  return { items: page.items, total: page.pagination.total }
+  const page = await machinePage(params)
+  return { items: page.items, total: page.pagination.total, complete: page.items.length >= page.pagination.total }
 }
 
-/** The first page of the workspace's machines (the server caps a page at 200). */
+/** Every machine of the workspace, revoked ones included (bounded, see lib/machine-pages.ts). */
 export const machinesQuery = (workspace: string) =>
   queryOptions({
     queryKey: queryKeys.machines(workspace),
-    queryFn: () => fetchMachines({ limit: "200", workspace }),
+    queryFn: async () => (await fetchAllPages(machinePage, workspace))!,
+    refetchInterval: 15_000,
+  })
+
+/**
+ * Workspace totals from the server, never counted from a loaded list: live machines (revoked ones
+ * left out), and how many of them are online. One-row queries read `pagination.total`.
+ */
+export const machineCountsQuery = (workspace: string) =>
+  queryOptions({
+    queryKey: ["machines", workspace, "counts"],
+    queryFn: async () => {
+      const total = (state?: string) =>
+        machinePage({ limit: "1", workspace, ...(state && { state }) }).then((page) => page.pagination.total)
+      const [all, online, revoked] = await Promise.all([total(), total("online"), total("revoked")])
+      return { live: all - revoked, online, offline: all - revoked - online, revoked }
+    },
     refetchInterval: 15_000,
   })
 
@@ -408,12 +430,13 @@ export function useMachinePage() {
   return useApiQuery({ ...machinesQuery(workspace?.id ?? ""), enabled: Boolean(workspace) })
 }
 
+/** The workspace's machines you can use: every page, revoked ones left out. */
 export function useMachines() {
   const workspace = useWorkspace()
   return useApiQuery({
     ...machinesQuery(workspace?.id ?? ""),
     enabled: Boolean(workspace),
-    select: (page: MachinePage) => page.items,
+    select: (page: MachinePage) => page.items.filter((machine) => machine.state !== "revoked"),
   })
 }
 

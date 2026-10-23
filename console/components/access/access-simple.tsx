@@ -1,5 +1,6 @@
 "use client"
 
+import Link from "next/link"
 import { useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { meQuery, useApiQuery, useMachines, type Workspace } from "@/lib/api"
@@ -140,9 +141,15 @@ function RuleRow({ rule, index }: { rule: PolicyRule; index: number }) {
   )
 }
 
+/** A machine's tags; each opens the machines list filtered by it. */
 function TagChips({ tags }: { tags: string[] | undefined }) {
   return (tags ?? []).map((tag) => (
-    <Badge key={tag} variant="outline" className="font-normal text-muted-foreground">
+    <Badge
+      key={tag}
+      variant="outline"
+      className="font-normal text-muted-foreground hover:text-foreground"
+      render={<Link href={`/?q=${encodeURIComponent(`tag:${tag.replace(/^tag:/, "")}`)}`} />}
+    >
       {tag.replace(/^tag:/, "")}
     </Badge>
   ))

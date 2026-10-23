@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils"
 import { MachineAddress } from "@/components/machine-address"
 import { MachinePicker } from "@/components/machine-picker"
 import { MachineTitle } from "@/components/machine-identity"
+import { MachineTags } from "@/components/machine-tags"
 import { MachineStatus } from "@/components/machine-status"
 import { CrumbLink, PageHeader } from "@/components/page-header"
 import { TeamsUpgradeDialog } from "@/components/team/teams-upgrade"
@@ -107,6 +108,7 @@ export function MachineShell({ machineId, children }: { machineId: string; child
                 {formatPlatform(machine.platform)} · {machine.architecture}
               </span>
               <MachineAddress machine={machine} />
+              <MachineTags machine={machine} />
             </div>
           </div>
           {personalOwner && (

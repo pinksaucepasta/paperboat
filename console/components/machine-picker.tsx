@@ -44,7 +44,14 @@ export function MachinePicker({ value, onChange, allowAll = false }: Props) {
   })
 
   const suggestions = useMemo(
-    () => (page.data ? suggest(page.data.items, value, workspace ? recentMachines(workspace.id) : []) : []),
+    () =>
+      page.data
+        ? suggest(
+            page.data.items.filter((machine) => machine.state !== "revoked"),
+            value,
+            workspace ? recentMachines(workspace.id) : [],
+          )
+        : [],
     // Recents are read when the list opens; they only change by choosing here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [page.data, value, workspace, open],

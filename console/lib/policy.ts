@@ -151,6 +151,38 @@ export const policyQuery = (workspace: string) =>
     retry: (count, error) => !(error instanceof ApiError && error.status >= 400 && error.status < 500) && count < 2,
   })
 
+/** Machine tags in the console (Lane K's tag API); off until it is deployed. */
+export const tagsLive = false
+
+export type WorkspaceTags = {
+  tags: { name: string; machines: string[] }[]
+  can_edit: "all" | "own_machines" | "none"
+  policy_version: number
+}
+
+/** The workspace's tags (`tag:<name>`) and the machines carrying each; the policy file is their store. */
+export const tagsQuery = (workspace: string) =>
+  queryOptions({
+    queryKey: ["policy", workspace, "tags"],
+    queryFn: () => call<WorkspaceTags>("Loading tags", `${ws(workspace)}/tags`),
+    enabled: tagsLive && Boolean(workspace),
+  })
+
+/**
+ * Sets one machine's tags (new tags are created; a tag left without machines is dropped unless a
+ * rule uses it). Like a policy save: 412 lists the access it changes, to confirm; 409 means reload.
+ */
+export function setMachineTags(workspace: string, machineId: string, tags: string[], expected: number, confirm?: string) {
+  return call<{ tags: string[]; policy_version: number }>(
+    "Saving tags",
+    `${ws(workspace)}/machines/${encodeURIComponent(machineId)}/tags`,
+    { method: "PUT", json: { tags, expected_version: expected, ...(confirm && { confirm }) } },
+  )
+}
+
+/** `tag:<name>` names: lowercase letters, digits, . _ -; 1–63 characters, starting with a letter or digit. */
+export const tagNamePattern = /^tag:[a-z0-9][a-z0-9._-]{0,62}$/
+
 export const policyVersionQuery = (workspace: string, version: number) =>
   queryOptions({
     queryKey: ["policy", workspace, "version", version],
