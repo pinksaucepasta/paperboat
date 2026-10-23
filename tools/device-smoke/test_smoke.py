@@ -480,6 +480,41 @@ exit "$FAILED"
                 self.assertIn(expected.split()[0], result.stdout, result.stdout + result.stderr)
                 self.assertRegex(result.stdout, r'session-limit:hp\s+' + expected.split()[1], result.stdout)
 
+    def test_update_crossbuild_needs_both_directions_ready_with_a_matched_guard(self):
+        # update_crossbuild.py switches N-1 -> N -> N-1 with `pb update --from FILE --force`; each end must
+        # report the target version, a healthy doctor and a passing machine_guard_version check.
+        with tempfile.TemporaryDirectory() as directory:
+            home = pathlib.Path(directory)
+            pb = home / '.local/bin/pb'
+            pb.parent.mkdir(parents=True)
+            pb.write_text(r"""#!/bin/sh
+state="$HOME/installed"
+case "$1" in
+  --version) printf '{"ok":true,"data":{"version":"%s"}}' "$(cat "$state")" ;;
+  update) shift; file=$2; cat "$file" > "$state"; printf '{"ok":true,"data":{"version":"%s"}}' "$(cat "$state")" ;;
+  doctor) guard=pass; [ -f "$HOME/bad-guard" ] && [ "$(cat "$state")" = v2 ] && guard=fail
+          checks="{\"code\":\"machine_guard_version\",\"status\":\"$guard\"}"
+          [ "$(cat "$state")" = v1 ] && checks=""   # v1 predates the guard check
+          printf '{"ok":true,"data":{"overall":"healthy","checks":[%s]}}' "$checks" ;;
+esac
+""")
+            pb.chmod(0o755)
+            (home / 'installed').write_text('v1')
+            for name, version in (('prev', 'v1'), ('cur', 'v2')):
+                (home / name).write_text(version)
+            command = [sys.executable, str(HERE / 'update_crossbuild.py'), '--previous', str(home / 'prev'), '--previous-version', 'v1',
+                       '--current', str(home / 'cur'), '--current-version', 'v2']
+            env = dict(os.environ, HOME=str(home), PAPERBOAT_SMOKE_READY_SECONDS='6')
+            good = subprocess.run(command, env=env, capture_output=True, text=True, timeout=60, cwd=str(HERE))
+            self.assertEqual(good.returncode, 0, good.stdout + good.stderr)
+            receipt = json.loads(good.stdout.strip().splitlines()[-1])
+            self.assertTrue(receipt['status'] == 'PASS' and receipt['guard_version_matched'], good.stdout)
+            self.assertEqual((home / 'installed').read_text(), 'v1')  # ends on the previous build
+            (home / 'bad-guard').write_text('1')
+            bad = subprocess.run(command, env=env, capture_output=True, text=True, timeout=60, cwd=str(HERE))
+            self.assertNotEqual(bad.returncode, 0, bad.stdout)
+            self.assertIn('guard fail', bad.stdout + bad.stderr)
+
     def test_private_https_reads_the_domain_where_local_access_show_reports_it(self):
         # `pb config local-access show --json` carries the domain at the top level, beside local_access
         # (the machine guard owns it); the check used to read local_access.domain and died on a KeyError.

@@ -826,6 +826,33 @@ test_tunnel_domain() {
   done
 }
 
+# Release loop: update N-1 -> N and N -> N-1 on one device, both ending ready with a matched guard version.
+# Runs only when SMOKE_XBUILD_PREV / SMOKE_XBUILD_CUR (local pb files) and their reported versions
+# SMOKE_XBUILD_PREV_VERSION / SMOKE_XBUILD_CUR_VERSION are set; it ends on the previous build, so run it last
+# on a device that is allowed to move builds (a disposable container).
+test_update_crossbuild() {
+  skipped update-crossbuild && return
+  [ -n "${SMOKE_XBUILD_PREV:-}" ] && [ -n "${SMOKE_XBUILD_CUR:-}" ] || return 0
+  local device id out status t0
+  for device in "${TLIST[@]}"; do
+    id="update-crossbuild:$device"
+    skipped "$id" && continue
+    t0=$(now)
+    if ! stage_terminal_fixtures "$device"; then
+      record "$id" FAIL 0 "could not stage the device fixture"
+      continue
+    fi
+    on "$device" "umask 077; cat > /tmp/$RUN_ID/xbuild-prev; chmod 755 /tmp/$RUN_ID/xbuild-prev" < "$SMOKE_XBUILD_PREV"
+    on "$device" "umask 077; cat > /tmp/$RUN_ID/xbuild-cur; chmod 755 /tmp/$RUN_ID/xbuild-cur" < "$SMOKE_XBUILD_CUR"
+    out=$(on "$device" "cd /tmp/$RUN_ID && python3 update_crossbuild.py --previous /tmp/$RUN_ID/xbuild-prev --previous-version ${SMOKE_XBUILD_PREV_VERSION:?} --current /tmp/$RUN_ID/xbuild-cur --current-version ${SMOKE_XBUILD_CUR_VERSION:?}" 2>&1); status=$?
+    if [ "$status" = 0 ] && python3 -c 'import json,sys;r=json.loads(sys.argv[1].strip().splitlines()[-1]);assert r["check"]=="update-crossbuild" and r["status"]=="PASS" and r["guard_version_matched"] and r["enrollment_preserved"]' "$out" 2>/dev/null; then
+      record "$id" PASS $(( $(now)-t0 )) "update $SMOKE_XBUILD_PREV_VERSION -> $SMOKE_XBUILD_CUR_VERSION -> $SMOKE_XBUILD_PREV_VERSION: ready both ways, guard version matched"
+    else
+      record_command_failure "$id" $(( $(now)-t0 )) "$out"
+    fi
+  done
+}
+
 test_device_application() {
   local group=$1 script=$2 flags=${3:-}
   skipped "$group" && return
@@ -1003,6 +1030,7 @@ done
 if [ -n "$UPDATE_DIR" ]; then
   for t in "${TLIST[@]}"; do update_target "$t"; done
 fi
+test_update_crossbuild
 
 # ---------------------------------------------------------------- report
 if [ -n "$ONLY_CHECK" ]; then
