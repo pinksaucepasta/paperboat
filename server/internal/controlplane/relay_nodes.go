@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
 	"net/http"
 	"time"
 )
@@ -92,7 +93,7 @@ func (s *EdgeService) StartRelayNode(ctx context.Context, in relayNodeStart) (re
 	if err != nil {
 		return out, err
 	}
-	if state == "retired" || state == "draining" || capacity <= 0 || capacity > 256 {
+	if !relayNodeMayStart(state, capacity) {
 		return out, invalidUsage("relay_nodes.go:96")
 	}
 	if epoch == in.ProcessEpoch && gen == in.ExpectedGeneration+1 {
@@ -256,4 +257,10 @@ func (s *EdgeService) handleRelayObserve(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeEdgeJSON(w, http.StatusOK, out)
+}
+
+// relayNodeMayStart admits a relay process start for a node that is not retired or draining and whose
+// registered capacity is within the ceiling the relay itself enforces (shared/relaylimits).
+func relayNodeMayStart(state string, capacity int64) bool {
+	return state != "retired" && state != "draining" && capacity > 0 && capacity <= relaylimits.MaxConnectionsPerNode
 }
