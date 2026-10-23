@@ -38,7 +38,7 @@ func (t *PeerTerminalTunnel) InspectorRequest(ctx context.Context, access api.In
 	if err != nil {
 		return nil, 0, err
 	}
-	runtime, consumed, err := t.acquireNativeRuntime(ctx, profile.Account.ID, profile.CLIClientSessionID, identity)
+	runtime, consumed, err := t.acquireNativeRuntime(ctx, profile.Account.ID, profile.CLIClientSessionID, identity, nil)
 	if !consumed {
 		identity.Clear()
 	}

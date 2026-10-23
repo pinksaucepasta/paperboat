@@ -41,7 +41,7 @@ func TestCachedNativeRuntimeRefreshesOperationAuthority(t *testing.T) {
 				}
 				return &http.Response{StatusCode: http.StatusServiceUnavailable, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"error":{"code":"peer_network_unavailable","message":"unavailable"}}`))}, nil
 			})}}}
-			got, consumed, err := peer.acquireNativeRuntime(ctx, accountID, endpointID, identity)
+			got, consumed, err := peer.acquireNativeRuntime(ctx, accountID, endpointID, identity, nil)
 			if err == nil || got != nil || consumed || calls.Load() == 0 {
 				t.Fatalf("cached authority admitted without successful refresh: runtime=%t consumed=%t calls=%d error=%v", got != nil, consumed, calls.Load(), err)
 			}
@@ -52,5 +52,31 @@ func TestCachedNativeRuntimeRefreshesOperationAuthority(t *testing.T) {
 				t.Fatalf("refresh did not preserve cancellation: %v", err)
 			}
 		})
+	}
+}
+
+// A warm `pb ping` refreshed the signed peer network on the server before every probe although a
+// probe creates no grant; a runtime that already admits the target is reused without it.
+func TestCachedNativeRuntimeSkipsRefreshWhenItAlreadyAdmitsTheTarget(t *testing.T) {
+	issuer, accountID, endpointID := "https://api.example.test", "account_connected", "cli_connected"
+	identity, _, _ := connectedEndpointAuthority(t, connectedStore(t), issuer, accountID, endpointID, "machine_connected")
+	defer identity.Clear()
+	networkAuthority, err := tailnet.NewAuthority(tailnet.AuthorityOptions{Store: connectedStore(t), Issuer: issuer, Self: tailnet.NetworkBinding{AccountID: accountID, EndpointID: endpointID, Role: "cli", EndpointGeneration: identity.LocalCertificate.Claims.Generation, QUICCertificateFingerprint: identity.LocalCertificate.Fingerprint(), QUICPublicKey: base64.RawURLEncoding.EncodeToString(identity.LocalCertificate.Claims.QUICPublicKey)}, Keys: connectedNetworkKeys{public: identity.RootPublic}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer networkAuthority.Close()
+	var refreshes atomic.Int32
+	current := &cliNativeRuntime{accountID: accountID, endpointID: endpointID, identityFingerprint: identity.LocalCertificate.Fingerprint(), authority: networkAuthority, done: make(chan struct{})}
+	peer := &PeerTerminalTunnel{nativeRuntime: current, config: PeerTerminalConfig{Issuer: issuer, Auth: &rotatingNativeAuth{token: "fixture-token"}, HTTPClient: &http.Client{Transport: substrateTransport(func(*http.Request) (*http.Response, error) {
+		refreshes.Add(1)
+		return &http.Response{StatusCode: http.StatusServiceUnavailable, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"error":{"code":"peer_network_unavailable","message":"unavailable"}}`))}, nil
+	})}}}
+	got, consumed, err := peer.acquireNativeRuntime(t.Context(), accountID, endpointID, identity, func(network *tailnet.Authority) bool { return network == networkAuthority })
+	if err != nil || got != current || consumed || refreshes.Load() != 0 {
+		t.Fatalf("admitting runtime: same=%t consumed=%t refreshes=%d err=%v", got == current, consumed, refreshes.Load(), err)
+	}
+	if _, _, err := peer.acquireNativeRuntime(t.Context(), accountID, endpointID, identity, func(*tailnet.Authority) bool { return false }); err == nil || refreshes.Load() == 0 {
+		t.Fatalf("a runtime that does not admit the target was reused without refresh: refreshes=%d err=%v", refreshes.Load(), err)
 	}
 }

@@ -98,7 +98,10 @@ func (t *PeerTerminalTunnel) ProbeNative(ctx context.Context, machineID string, 
 	if err != nil {
 		return NativeProbe{}, err
 	}
-	runtime, consumed, err := t.acquireNativeRuntime(ctx, profile.Account.ID, profile.CLIClientSessionID, authority)
+	// A health probe opens no operation and so creates no grant: an engine that already admits
+	// the machine needs no refresh first.
+	admits := func(network *tailnet.Authority) bool { _, err := network.Descriptor(machineID); return err == nil }
+	runtime, consumed, err := t.acquireNativeRuntime(ctx, profile.Account.ID, profile.CLIClientSessionID, authority, admits)
 	if !consumed {
 		authority.Clear()
 	}
@@ -406,7 +409,7 @@ func (t *PeerTerminalTunnel) PrepareNativeFileTransfer(ctx context.Context, info
 	if err != nil {
 		return nil, err
 	}
-	runtime, consumed, err := t.acquireNativeRuntime(ctx, profile.Account.ID, profile.CLIClientSessionID, authority)
+	runtime, consumed, err := t.acquireNativeRuntime(ctx, profile.Account.ID, profile.CLIClientSessionID, authority, nil)
 	if !consumed {
 		authority.Clear()
 	}
@@ -416,7 +419,10 @@ func (t *PeerTerminalTunnel) PrepareNativeFileTransfer(ctx context.Context, info
 	return &cliNativeTransferLease{runtime: runtime, machineID: info.MachineID, target: info.Terminal, application: peerApplication{operationID: operationID}, now: t.config.Now}, nil
 }
 
-func (t *PeerTerminalTunnel) acquireNativeRuntime(ctx context.Context, accountID, endpointID string, identity clientauthority.Authority) (*cliNativeRuntime, bool, error) {
+// acquireNativeRuntime returns the live runtime, refreshing its signed admission first, or starts
+// one. A caller that creates no new peer grant passes admitted: a runtime that already admits its
+// target is reused without that refresh round trip.
+func (t *PeerTerminalTunnel) acquireNativeRuntime(ctx context.Context, accountID, endpointID string, identity clientauthority.Authority, admitted func(*tailnet.Authority) bool) (*cliNativeRuntime, bool, error) {
 	if t == nil {
 		return nil, false, ErrPeerTerminalInvalid
 	}
@@ -428,6 +434,9 @@ func (t *PeerTerminalTunnel) acquireNativeRuntime(ctx context.Context, accountID
 	fingerprint := identity.LocalCertificate.Fingerprint()
 	networkAPI := cliNativeNetworkAPI{issuer: t.config.Issuer, auth: t.config.Auth, http: t.config.HTTPClient}
 	if current := t.nativeRuntime; current != nil && current.alive() && current.accountID == accountID && current.endpointID == endpointID && current.identityFingerprint == fingerprint && identity.LocalCertificate.Claims.ExpiresAt.After(time.Now().UTC()) {
+		if admitted != nil && admitted(current.authority) {
+			return current, false, nil
+		}
 		// The operation descriptor may have just created its peer grant. Refresh
 		// signed admission before reusing the engine; the periodic refresh alone
 		// cannot establish that this new operation is ready to open a stream.
@@ -485,7 +494,7 @@ func (t *PeerTerminalTunnel) NativeRelayCandidates(ctx context.Context) ([]tailn
 	if err != nil {
 		return nil, err
 	}
-	runtime, consumed, err := t.acquireNativeRuntime(ctx, profile.Account.ID, profile.CLIClientSessionID, identity)
+	runtime, consumed, err := t.acquireNativeRuntime(ctx, profile.Account.ID, profile.CLIClientSessionID, identity, nil)
 	if !consumed {
 		identity.Clear()
 	}

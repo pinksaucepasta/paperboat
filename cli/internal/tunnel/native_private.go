@@ -59,7 +59,7 @@ func (t *PeerTerminalTunnel) DialPrivateSession(ctx context.Context, machineID s
 	if err != nil {
 		return nil, err
 	}
-	runtime, consumed, err := t.acquireNativeRuntime(ctx, profile.Account.ID, profile.CLIClientSessionID, identity)
+	runtime, consumed, err := t.acquireNativeRuntime(ctx, profile.Account.ID, profile.CLIClientSessionID, identity, nil)
 	if !consumed {
 		identity.Clear()
 	}
