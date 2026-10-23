@@ -24,6 +24,12 @@ import (
 // Regional recovery is metadata coordination around magicsock, not a packet
 // scheduler. Existing magicsock preference and discovery own all data paths.
 const regionalProbeTimeout = 5 * time.Second
+
+// regionalAcknowledgedRouteWait bounds how long a client waits for the peer to acknowledge a
+// common relay before it prepares one provisionally. An answering peer acknowledges within a
+// relay round trip; a just-paired peer does not answer until its configuration lists this
+// endpoint, and waiting the whole probe timeout for it delayed first connections by 5 s.
+const regionalAcknowledgedRouteWait = 250 * time.Millisecond
 const regionalProbeInterval = 3 * time.Second
 
 // regionalStaleRetry is how soon recovery looks again after finding no usable relay.
@@ -108,7 +114,7 @@ func (a *Authority) relayControl(id tailcfg.DERPRegionID, peer key.NodePublic, p
 }
 
 // PrepareRegional starts a single authority-owned recovery worker. A client
-// waits for an acknowledged common route before its bootstrap handshake. A host
+// briefly waits for an acknowledged common route before its bootstrap handshake. A host
 // prepares independently so initial discovery does not depend on a working pair.
 func (a *Authority) PrepareRegional(ctx context.Context, peerID string) error {
 	a.mu.Lock()
@@ -184,7 +190,7 @@ func (a *Authority) PrepareRegional(ctx context.Context, peerID string) error {
 		return ErrRegionalAuthority
 	case <-ready:
 		return nil
-	case <-time.After(regionalProbeTimeout):
+	case <-time.After(regionalAcknowledgedRouteWait):
 		return r.prepareProvisional(ctx)
 	}
 }
