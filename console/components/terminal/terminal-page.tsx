@@ -10,6 +10,7 @@ import { ApiError, meQuery, useApiQuery } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { closeTerminal, terminalKeys, terminalQuery } from "@/lib/terminal/queries"
 import {
+  terminalCanAttach,
   useTerminalConnection,
   type HostParticipant,
   type TerminalConnection,
@@ -84,7 +85,9 @@ export function TerminalPage({ id }: { id: string }) {
     )
   }
   // Mounted once: later polls update the panel and title without restarting the terminal.
-  return <TerminalRoom session={query.data} onPushed={setPushed} />
+  // Keyed by whether it can attach: a session first read as closed or not yet running (just
+  // created) gets a fresh connection when a later poll shows it running, instead of staying closed.
+  return <TerminalRoom key={String(terminalCanAttach(query.data))} session={query.data} onPushed={setPushed} />
 }
 
 export function Frame({ children }: { children: React.ReactNode }) {
