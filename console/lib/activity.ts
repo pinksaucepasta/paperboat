@@ -59,7 +59,7 @@ const areaActions: Record<Exclude<ActivityArea, "all">, string> = {
 }
 
 /** The audit log's filters and export (F19); off until that server is deployed. */
-export const activityLive = { filters: true, export: true } as const
+export const activityLive = { filters: true, export: true, streaming: false } as const
 
 export const activityPeriods = { all: "Any time", day: "Last 24 hours", week: "Last 7 days", month: "Last 30 days" } as const
 export type ActivityPeriod = keyof typeof activityPeriods

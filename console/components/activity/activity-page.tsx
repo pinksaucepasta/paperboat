@@ -21,7 +21,8 @@ import {
   type ActivityFilter,
   type ActivityPeriod,
 } from "@/lib/activity"
-import { SearchField, useListScope } from "@/components/list-toolbar"
+import { AuditStreams } from "@/components/activity/audit-streams"
+import { SearchField, useListScope, ViewToggle } from "@/components/list-toolbar"
 import { useCurrentMachine } from "@/components/machine-shell"
 import { Choice } from "@/components/tunnels/share-file"
 import { Badge } from "@/components/ui/badge"
@@ -70,6 +71,17 @@ export function ActivityPage({ machine: tabMachine }: { machine?: Machine }) {
   const canExport =
     activityLive.export && workspace?.kind === "team" && ["owner", "admin", "auditor"].includes(workspace.role ?? "")
   const filtered = q || area !== "all" || denied || period.name !== "all"
+  // Streaming: owners and admins configure it, auditors see it (teams-business.md).
+  const role = workspace?.kind === "team" ? (workspace.role ?? "") : ""
+  const streaming = activityLive.streaming && !tabMachine && ["owner", "admin", "auditor"].includes(role)
+  const [view, setView] = useState<"events" | "streaming">("events")
+  if (streaming && view === "streaming")
+    return (
+      <section className="flex flex-col gap-6">
+        <ViewToggle value={view} onChange={setView} views={[{ value: "events", label: "Events" }, { value: "streaming", label: "Streaming" }]} />
+        <AuditStreams team={workspace!.id} canConfigure={role !== "auditor"} />
+      </section>
+    )
   const events = activity.data?.pages.flatMap((page) => page.items) ?? []
 
   const groups: { label: string; events: typeof events }[] = []
@@ -83,6 +95,9 @@ export function ActivityPage({ machine: tabMachine }: { machine?: Machine }) {
   return (
     <section className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        {streaming && (
+          <ViewToggle value={view} onChange={setView} views={[{ value: "events", label: "Events" }, { value: "streaming", label: "Streaming" }]} />
+        )}
         <SearchField value={search} onChange={setSearch} placeholder="Search activity" />
         <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
           Show

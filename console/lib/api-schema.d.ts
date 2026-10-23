@@ -11606,6 +11606,10 @@ export interface components {
                 port: number;
                 target_generation: number;
                 host_key_generation: number;
+                /** @description Present while this machine's latest host-key report was refused because another machine has the same SSH host keys (a cloned image). machine_name is given only when the caller may see that machine. */
+                host_key_conflict?: {
+                    machine_name?: string;
+                };
             };
         };
         MeResponse: {
