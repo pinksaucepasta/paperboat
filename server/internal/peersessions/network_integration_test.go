@@ -347,9 +347,22 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	machineService.ConfigureFileTransfer(accessdescriptor.FileTransferPolicy{Revision: "shared-native-v1", MaxFileBytes: 1 << 20, MaxBatchFiles: 2, MaxBatchBytes: 2 << 20, MaxConcurrentTransfers: 2, RetentionSeconds: 60, DeliveryTimeoutSeconds: 60, MaxPendingSpoolBytes: 2 << 20})
 	execOperationID := "operation_shared_exec_" + suffix
 	refreshRuntimeCarrier()
+	hostPeerNetwork := func() (generation int64) {
+		t.Helper()
+		if err := store.SQL().QueryRowContext(ctx, `SELECT coalesce((SELECT generation FROM paperboat.machine_topic_generations WHERE machine_id=$1 AND topic='peer_network'),0)`, machineID).Scan(&generation); err != nil {
+			t.Fatal(err)
+		}
+		return generation
+	}
+	execHostBefore := hostPeerNetwork()
 	execDescriptor, err := machineService.ExecDescriptor(sharedScope, sharedUser, "network_shared_source_"+suffix, machineID, sharedCLI, execOperationID)
 	if err != nil {
 		t.Fatal(err)
+	}
+	// Team access from another account is new to the host's peer network: it must refresh now,
+	// not on its timer, or it drops the member's handshake (F18-02 on device).
+	if execHostAfter := hostPeerNetwork(); execHostAfter <= execHostBefore {
+		t.Fatalf("team exec access session left the host's peer_network generation at %d->%d; the host must be woken", execHostBefore, execHostAfter)
 	}
 	sharedAccess, _ := execDescriptor.Auth["access_session_id"].(string)
 	if sharedAccess == "" || execDescriptor.Auth["token"] == "" {

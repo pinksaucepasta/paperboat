@@ -6,11 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat-server/internal/auth"
 	"slices"
 
+	"github.com/pinksaucepasta/paperboat-server/internal/auth"
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
 	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat-server/internal/machineevents"
 	"github.com/pinksaucepasta/paperboat-server/internal/teams"
 	"github.com/pinksaucepasta/paperboat-server/internal/workspace"
 )
@@ -174,7 +175,12 @@ func (s *Service) createAccessSession(ctx context.Context, in dbsqlc.CreateUserM
 		if err := tx.Queries().CreateUserMachineAccessSession(ctx, in); err != nil {
 			return err
 		}
-		return nil
+		if !in.TeamID.Valid {
+			return nil // the account's own machines are always in each other's peer network
+		}
+		// Team access can come from another account, new to the host's signed peer network: wake
+		// its refresh now instead of leaving the connection to wait for the periodic one.
+		return machineevents.Publish(ctx, tx, []string{in.UserMachineID}, machineevents.TopicPeerNetwork)
 	})
 }
 
