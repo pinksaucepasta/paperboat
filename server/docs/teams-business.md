@@ -136,6 +136,70 @@ The same shape in the API, the export and the stream:
 | `request_id` | Matches the `Request-Id` response header and support references. |
 | `details` | Documented keys only (role, permission, capabilities, format, …). Never contents, ENV values or secrets. |
 
+### Machine access
+
+Every start of terminal, exec, managed SSH and file access is `machine.access_started` (details:
+`capability`, `capabilities`, `access_session_id`), and every refusal is `machine.access_denied`
+with `result: denied` and a `reason`, at most once a minute per account, machine, capability and
+reason. Both go to the log of the workspace that decided the access: a member's access to a
+machine shared into a team is in the team's log, not in the machine owner's personal log. Reasons
+use the names of `pb policy explain`, checked in this order:
+
+| Reason | Why |
+|---|---|
+| `outside_token_scope` | The API token used is limited to other machines or capabilities. |
+| `team_sso_required` | The team requires SSO and the member has no recent SSO sign-in. |
+| `machine_not_in_workspace` | Not a member, the team is suspended or unpaid, or the machine is not in the workspace. |
+| `policy` | The workspace policy does not allow this capability; `details.policy_version` is the version that decided (`pb policy explain --version`). |
+| `not_found` | No such machine. |
+
+Private access (ports) is `private_access.allowed` / `private_access.denied`.
+
+### Event catalog
+
+Every action is `<namespace>.<verb>`. The namespaces, which a test keeps equal to the server:
+
+<!-- event-catalog:start -->
+| Namespace | Events about |
+|---|---|
+| `api_token` | API tokens created and revoked. |
+| `auth` | Sign-in, sign-out, CLI device approval and revocation. |
+| `billing` | Plan, seats, top-ups, Customer Portal sessions, bandwidth exhaustion. |
+| `client_update_policy` | Paperboat operations: the CLI update policy. |
+| `config` | Config sync: assignments, consents, conflicts, credentials. |
+| `connector` | Tunnel connectors: enrollment, credentials, draining. |
+| `control` | Paperboat operations: recovered control operations. |
+| `backup` | Paperboat operations: database backup reports. |
+| `diagnostic_upload` | Support diagnostics uploaded by a user. |
+| `domain` | Custom domains: created, verification, deleted. |
+| `edge` | Paperboat operations: edge nodes and usage keys. |
+| `environment_manifest` | ENV manifests (never values). |
+| `github` | GitHub connection and config repository. |
+| `helper` | Self-hosted helper enrollment and replacement. |
+| `machine` | Machine setup and access: `machine.access_started`, `machine.access_denied`. |
+| `managed_ssh` | Managed SSH targets and host keys. |
+| `mint` | Paperboat operations: credential signing keys. |
+| `operation` | Preview and tunnel operations completed or cancelled. |
+| `operator` | Paperboat operations: staff actions on an account. |
+| `operator_reporting` | Paperboat operations: staff reports read. |
+| `peer_endpoint` | Peer certificates and enrollments of machines and the CLI. |
+| `peer_network` | Peer network keys and certificates. |
+| `personal` | The personal workspace policy (`personal.policy.updated`, …). |
+| `preview` | Previews created, ready, renewed, stopped. |
+| `private_access` | Private access to machine ports: grants, allowed, denied. |
+| `release_authority` | Paperboat operations: release signing authority. |
+| `route` | Tunnel routes and their intents. |
+| `support` | Support references looked up. |
+| `team` | Team membership, invitations, roles, sharing, grants, policy, SSO, directory sync, audit export and streaming. |
+| `terminal` | Terminal browser access and access codes. |
+| `transfer_destination` | Default and per-session file transfer destinations. |
+| `tunnel` | Tunnels: created, updated, paused, domains, connectors. |
+| `user_machine` | Machines: enrollment, approval, renames, availability, removal. |
+<!-- event-catalog:end -->
+
+Namespaces marked "Paperboat operations" are about running the service and are never in a
+workspace log.
+
 ### Retention
 
 Events are kept by the workspace's plan: Free 30 days, Pro 90 days, Team 365 days (server config
