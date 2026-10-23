@@ -22,11 +22,14 @@ import (
 	"strings"
 	"time"
 
+	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
+
 	"github.com/pinksaucepasta/paperboat-server/internal/audit"
 	"github.com/pinksaucepasta/paperboat-server/internal/bandwidthgate"
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
 	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
 	serverdiagnostics "github.com/pinksaucepasta/paperboat-server/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat-server/internal/endpoints"
 	"github.com/pinksaucepasta/paperboat-server/internal/mint"
 	"github.com/pinksaucepasta/paperboat-server/internal/nodeauth"
 	"github.com/pinksaucepasta/paperboat-server/internal/secrets"
@@ -245,6 +248,12 @@ func (s *EdgeService) ObserveRoutes(ctx context.Context, nodeID string, observat
 				state, err := observation.canonicalObservedState()
 				if err != nil {
 					return err
+				}
+				if endpoints.IsTunnelAssignmentID(observation.AssignmentID) {
+					if err := observeEngineTunnelRoute(ctx, tx, nodeID, observation, state == "ready", now); err != nil {
+						return err
+					}
+					continue
 				}
 				if state == "detached" {
 					if _, err := tx.Queries().FinalizeDrainingTunnelEdgeRouteAssignmentV1(ctx, dbsqlc.FinalizeDrainingTunnelEdgeRouteAssignmentV1Params{
@@ -1098,4 +1107,22 @@ func warnEdgeRejection(r *http.Request, code string, status int, cause error) {
 	fault := supportreport.ProjectFault(r.Context(), "paperboat-server", "http_edge", "http_handler", code, supportreport.WithDiagnosticStatus(status, cause))
 	fault.Outcome, fault.Severity = "rejected", "warning"
 	slog.WarnContext(r.Context(), "edge request rejected", fault.LogAttrs()...)
+}
+
+// observeEngineTunnelRoute applies an edge's observation of a tunnel route served on the endpoint
+// engine (PLAN 3a step 4) and refreshes the tunnel's health. An observation of an assignment
+// replaced since the edge's last pull is dropped, never a conflict for the rest of the report.
+func observeEngineTunnelRoute(ctx context.Context, tx *db.Tx, nodeID string, observation RouteObservation, ready bool, now time.Time) error {
+	accepted, err := endpoints.ObserveTx(ctx, tx, nodeID, observation.EdgeProcessEpoch, runtimewire.Observation{
+		RouteID: observation.RouteID, SessionID: observation.ConnectorSessionID,
+		AttachmentGeneration: uint64(observation.AssignmentGeneration), Ready: ready,
+	})
+	if err != nil || !accepted {
+		return err
+	}
+	var accountID, tunnelID string
+	if err := tx.QueryRow(ctx, `SELECT e.account_id,e.tunnel_id FROM endpoint_routes r JOIN endpoints e ON e.id=r.endpoint_id WHERE r.id=$1 AND e.kind='tunnel'`, observation.RouteID).Scan(&accountID, &tunnelID); err != nil {
+		return err
+	}
+	return tunnelv1.RefreshHealth(ctx, tx, accountID, []string{tunnelID}, now)
 }

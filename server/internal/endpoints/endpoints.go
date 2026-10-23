@@ -61,7 +61,7 @@ const liveEndpoint = `e.desired_state='active' AND (e.kind<>'preview' OR (EXISTS
 WHERE p.id=e.preview_lease_id AND p.terminal_state='active' AND p.lease_deadline>now())
 AND NOT EXISTS(SELECT 1 FROM preview_lease_carrier_attachments la WHERE la.preview_id=e.preview_lease_id
 AND la.account_id=e.account_id AND la.state NOT IN ('failed','released'))))
-AND (e.kind<>'tunnel' OR EXISTS(SELECT 1 FROM tunnels t WHERE t.id=e.tunnel_id AND `+liveTunnel+`))`
+AND (e.kind<>'tunnel' OR EXISTS(SELECT 1 FROM tunnels t WHERE t.id=e.tunnel_id AND ` + liveTunnel + `))`
 
 // liveTunnel is the SQL predicate (over tunnels t) for a tunnel that should be served now.
 const liveTunnel = `t.desired_state='active' AND t.deleted_at IS NULL AND (t.expires_at IS NULL OR t.expires_at>now())`

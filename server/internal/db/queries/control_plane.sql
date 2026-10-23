@@ -1568,7 +1568,94 @@ WHERE a.edge_node_id = sqlc.arg(edge_node_id)
   AND paperboat.node_route_eligible(node.id,t.account_id,r.id)
     )
   )
-ORDER BY a.route_id, a.assignment_generation, a.assignment_id;
+UNION ALL
+-- A tunnel on the endpoint engine (PLAN 3a step 4): its route rides on the agent's runtime carrier
+-- to this edge. The carrier identity (tunnel, connector, session, generations, config hash) is the
+-- runtime carrier's, exactly as the edge admitted it; the route id names the tunnel route. Only an
+-- edge process that serves tunnel endpoints is told.
+SELECT ('epa_' || x.route_id)::text,
+       x.route_id,
+       x.generation,
+       tr.generation,
+       t.account_id,
+       (ra.admission->'binding'->>'tunnel_id')::text,
+       (ra.admission->'binding'->>'connector_id')::text,
+       ra.machine_id,
+       ra.public_identity_key,
+       (ra.admission->'binding'->>'machine_identity_thumbprint')::text,
+       1::bigint,
+       ra.session_id,
+       ra.worker_generation,
+       (ra.admission->'binding'->>'config_generation')::bigint,
+       decode(substring(ra.admission->>'config_content_hash' from 8), 'hex'),
+       viewer_policy.effective_access_mode,
+       viewer_policy.viewer_policy_generation,
+       tr.generation,
+       x.edge_node_id,
+       x.edge_process_epoch,
+       node.failure_domain::text,
+       'tunnel_http_wss',
+       (CASE WHEN tr.match_type = 'one_label_wildcard' THEN '*.' || tr.wildcard_suffix
+             WHEN tr.match_type = 'catch_all' THEN substring(t.stable_endpoint from 9)
+             ELSE COALESCE(tr.match_hostname, '') END)::text,
+       tr.match_type,
+       tr.match_hostname,
+       tr.wildcard_suffix,
+       tr.path_prefix,
+       tr.priority,
+       tr.protocol,
+       tr.public_tcp_listener_id,
+       tr.public_tcp_port,
+       tr.origin_scheme,
+       tr.preserve_host,
+       tr.host_override,
+       COALESCE(engine_scoped_domain.hostname, '')::text,
+       COALESCE(engine_scoped_domain.match_type, '')::text,
+       COALESCE((
+         SELECT jsonb_agg(jsonb_build_object('id', d.id, 'hostname', d.hostname, 'match_type', d.match_type, 'generation', d.generation) ORDER BY d.hostname, d.id)
+         FROM tunnel_domains AS d
+         WHERE d.route_id = tr.id AND d.tunnel_id = tr.tunnel_id AND d.deleted_at IS NULL AND d.ownership_state = 'verified'
+           AND d.certificate_state = 'ready' AND d.conflict_state = 'clear'
+       ), '[]'::jsonb)::text,
+       'active',
+       CASE WHEN x.observed_ready THEN 'ready' ELSE 'pending' END,
+       tr.desired_state
+FROM endpoint_edge_assignments AS x
+JOIN endpoints AS e ON e.id = x.endpoint_id AND e.kind = 'tunnel' AND e.desired_state = 'active'
+JOIN tunnels AS t ON t.id = e.tunnel_id
+JOIN endpoint_routes AS er ON er.id = x.route_id
+JOIN tunnel_routes AS tr ON tr.id = er.tunnel_route_id AND tr.tunnel_id = t.id
+JOIN current_tunnel_route_viewer_policy AS viewer_policy ON viewer_policy.route_id = tr.id
+JOIN runtime_carrier_attachments AS ra
+  ON ra.machine_id = e.agent_machine_id AND ra.edge_node_id = x.edge_node_id
+ AND ra.edge_process_epoch = x.edge_process_epoch AND ra.session_id = x.carrier_session_id
+ AND ra.agent_capabilities @> ARRAY['endpoints','tunnel_endpoints']::text[]
+JOIN control_tunnel_nodes AS node ON node.id = x.edge_node_id
+LEFT JOIN LATERAL (
+  SELECT d.hostname, d.match_type
+  FROM tunnel_domains d
+  WHERE tr.match_type = 'managed'
+    AND EXISTS (SELECT 1 FROM selfhost_installations i WHERE i.node_id = node.id AND i.scope_kind <> 'global')
+    AND d.route_id = tr.id AND d.tunnel_id = tr.tunnel_id AND d.account_id = t.account_id
+    AND d.deleted_at IS NULL AND d.ownership_state = 'verified' AND d.conflict_state = 'clear'
+  ORDER BY d.hostname, d.id
+  LIMIT 1
+) engine_scoped_domain ON true
+WHERE x.edge_node_id = sqlc.arg(edge_node_id)
+  AND x.edge_process_epoch = sqlc.arg(edge_process_epoch)
+  AND x.desired = 'active'
+  AND node.tunnel_endpoints_epoch = x.edge_process_epoch
+  AND t.desired_state = 'active' AND t.deleted_at IS NULL
+  AND (t.expires_at IS NULL OR t.expires_at > sqlc.arg(now))
+  AND tr.desired_state = 'active' AND tr.deleted_at IS NULL AND tr.protocol = 'http'
+  AND paperboat.runtime_carrier_valid(ra.route_id, ra.edge_node_id, ra.edge_process_epoch, false)
+  AND node.process_epoch = x.edge_process_epoch
+  AND node.state = 'ready' AND node.ready = true
+  AND node.registry_expires_at > sqlc.arg(now)
+  AND node.roles @> ARRAY['edge']::text[]
+  AND node.drain_deadline IS NULL
+  AND paperboat.node_route_eligible(node.id, t.account_id, tr.id)
+ORDER BY route_id, assignment_generation, assignment_id;
 
 -- name: ApplyTunnelEdgeRouteObservationV1 :one
 -- Observation is accepted only for the exact assignment/session/process/config

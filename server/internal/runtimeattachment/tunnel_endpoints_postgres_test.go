@@ -1,11 +1,14 @@
 package runtimeattachment
 
 import (
+	"encoding/hex"
 	"testing"
 
 	"github.com/google/uuid"
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 
+	"github.com/pinksaucepasta/paperboat-server/internal/controlplane"
+	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat-server/internal/endpoints"
 )
 
@@ -92,11 +95,68 @@ func TestTunnelsMoveOntoTheEngineOnlyWhenAgentAndEdgesServeThemOnPostgres(t *tes
 	if _, err := f.service.Pull(f.ctx, f.backupEdge, both); err != nil {
 		t.Fatal(err)
 	}
-	if a := attach(both); !a.TunnelEndpointsServed {
+	carrier := attach(both)
+	if !carrier.TunnelEndpointsServed {
 		t.Fatal("tunnel endpoints not served with agent and both edges serving them")
 	}
 	if endpoint, routes, assignments := state(); !endpoint || len(routes) != 1 || routes[0] != route+"@3" || assignments != 2 {
 		t.Fatalf("engine tunnel = %v %v %d, want endpoint with %s@3 on both edges", endpoint, routes, assignments, route)
+	}
+	// Each edge gets the route in its tunnel route snapshot, bound to the agent's runtime carrier on
+	// that edge (its identity exactly as the edge admitted the carrier), not to a tunnel connector.
+	control := controlplane.NewEdgeService(f.database, "")
+	snapshot := func() []dbsqlc.ListTunnelEdgeRouteAssignmentsForNodeV1Row {
+		t.Helper()
+		rows, err := control.ListTunnelEdgeRouteAssignmentsForNodeV1(f.ctx, f.node, f.edge.ProcessEpoch)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return rows
+	}
+	edgeCarrier := carrier.Admission
+	if carrier.Backup != nil && carrier.Backup.Binding.EdgeNodeID == f.node {
+		edgeCarrier = *carrier.Backup
+	}
+	if edgeCarrier.Binding.EdgeNodeID != f.node {
+		t.Fatalf("no carrier to %s in %+v", f.node, carrier)
+	}
+	rows := snapshot()
+	if len(rows) != 1 {
+		t.Fatalf("edge snapshot has %d rows, want the engine tunnel route", len(rows))
+	}
+	row := rows[0]
+	b := edgeCarrier.Binding
+	if row.AssignmentID != "epa_"+route || row.RouteID != route || row.RouteGeneration != 3 || row.Kind != "tunnel_http_wss" || row.Protocol != "http" ||
+		row.TunnelID != b.TunnelID || row.ConnectorID != b.ConnectorID || row.HostID != f.machine || row.ConnectorSessionID != b.SessionID ||
+		row.ConnectorProcessGeneration != int64(b.ProcessGeneration) || row.ConfigGeneration != int64(b.ConfigGeneration) ||
+		"sha256:"+hex.EncodeToString(row.ConfigContentHash) != edgeCarrier.ConfigContentHash || row.MachineIdentityPublicKey != f.key ||
+		row.PublicHost != endpointID+".tunnels.example.test" || row.State != "active" || row.ObservedState != "pending" {
+		t.Fatalf("engine snapshot row = %+v, carrier %+v", row, edgeCarrier)
+	}
+	if other, err := control.ListTunnelEdgeRouteAssignmentsForNodeV1(f.ctx, f.node, "epoch_other"); err != nil || len(other) != 0 {
+		t.Fatalf("another process epoch of the edge got the route: %d %v", len(other), err)
+	}
+	// The edge's ready observation marks the assignment ready; a stale one is dropped.
+	observe := func(generation int64, session string) error {
+		return control.ObserveRoutes(f.ctx, f.node, []controlplane.RouteObservation{{
+			RouteID: route, AssignmentID: row.AssignmentID, AssignmentGeneration: generation, RouteRevision: row.RouteRevision,
+			EdgeNodeID: f.node, EdgeProcessEpoch: f.edge.ProcessEpoch, ConnectorID: row.ConnectorID, HostID: row.HostID,
+			ConnectorGeneration: 1, ConnectorSessionID: session, ConnectorProcessGeneration: row.ConnectorProcessGeneration,
+			ConfigGeneration: row.ConfigGeneration, ConfigContentHash: "sha256:" + hex.EncodeToString(row.ConfigContentHash),
+			AccessMode: row.AccessMode, ViewerPolicyGeneration: row.ViewerPolicyGeneration, ObservedState: "ready",
+		}})
+	}
+	if err := observe(row.AssignmentGeneration+1, row.ConnectorSessionID); err != nil {
+		t.Fatalf("stale engine observation failed the report: %v", err)
+	}
+	if rows := snapshot(); rows[0].ObservedState != "pending" {
+		t.Fatal("stale engine observation was applied")
+	}
+	if err := observe(row.AssignmentGeneration, row.ConnectorSessionID); err != nil {
+		t.Fatal(err)
+	}
+	if rows := snapshot(); rows[0].ObservedState != "ready" {
+		t.Fatalf("engine route after the edge observed it ready = %s", rows[0].ObservedState)
 	}
 	// Tunnel routes reach the edge with its route snapshot, never as preview admissions.
 	values, err := f.service.Pull(f.ctx, f.edge, both)

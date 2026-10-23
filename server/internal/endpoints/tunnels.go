@@ -3,6 +3,7 @@ package endpoints
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
 )
@@ -95,3 +96,10 @@ UNION SELECT e.agent_machine_id FROM endpoints e WHERE e.kind='tunnel') m ORDER 
 	}
 	return failures
 }
+
+// tunnelAssignmentPrefix marks the edge assignment id of a tunnel route on the engine; the rest is
+// the route id. It is what an edge reports back in its route observations.
+const tunnelAssignmentPrefix = "epa_"
+
+// IsTunnelAssignmentID reports whether an edge route assignment id names an engine tunnel route.
+func IsTunnelAssignmentID(id string) bool { return strings.HasPrefix(id, tunnelAssignmentPrefix) }
