@@ -315,3 +315,12 @@ func TestPolicySchemaIsOffline(t *testing.T) {
 		t.Fatalf("code=%d err=%s", code, stderr.String())
 	}
 }
+
+func TestPolicyExplainSaysWhenTheTeamENVKeyIsNotDelivered(t *testing.T) {
+	fake, url := newPolicyFake(t)
+	fake.on("POST "+policyBase+"/explain", 200, data(`{"decision":{"allowed":true,"reason":"rule","rules":["/rules/2"],"key_delivered":false}}`))
+	code, out, errOut := runPolicyCLI(t, url, "policy", "explain", "--src", "user:ana@example.test", "--dst", "env:team", "--action", "env_read")
+	if code != 0 || !strings.Contains(out, "ALLOWED: rule") || !strings.Contains(out, "Key not delivered yet: a key holder runs `pb env grants sync`") {
+		t.Fatalf("code=%d out=%s err=%s", code, out, errOut)
+	}
+}

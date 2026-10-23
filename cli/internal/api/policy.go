@@ -68,6 +68,8 @@ type PolicyDecision struct {
 	Reason    string   `json:"reason"`
 	Rules     []string `json:"rules"`
 	Guardrail string   `json:"guardrail,omitempty"`
+	// KeyDelivered is false when the team ENV is allowed but the member has no key yet.
+	KeyDelivered *bool `json:"key_delivered,omitempty"`
 }
 
 type PolicyAccess struct {

@@ -73,6 +73,9 @@ func printExplanation(w io.Writer, explanation api.PolicyExplanation) error {
 		if decision.Guardrail != "" {
 			fmt.Fprintf(w, "Guardrail: %s\n", decision.Guardrail)
 		}
+		if decision.KeyDelivered != nil && !*decision.KeyDelivered {
+			fmt.Fprintln(w, "Key not delivered yet: a key holder runs `pb env grants sync` to give it")
+		}
 	}
 	for _, table := range []struct {
 		title string
