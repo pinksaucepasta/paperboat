@@ -230,17 +230,7 @@ func joinSharedTerminal(c *cobra.Command, args []string) (result error) {
 	if err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintln(c.ErrOrStderr(), terminalSharingNotice); err != nil {
-		return terminalSharingOutputFailure(err)
-	}
-	role := "interactive"
-	if info.Terminal.ViewOnly() {
-		role = "view only; Ctrl-C detaches"
-	}
-	if _, err := fmt.Fprintf(c.ErrOrStderr(), "Shared terminal %s · %s. Use `pb session participants %s` to see participants.\n", id, role, id); err != nil {
-		return terminalSharingOutputFailure(err)
-	}
-	initial, err := d.tunnel.Dial(c.Context(), info)
+	initial, err := dialSharedTerminal(c.Context(), c.ErrOrStderr(), d.tunnel.Dial, info, id)
 	if err != nil {
 		return err
 	}
@@ -271,4 +261,25 @@ func joinSharedTerminal(c *cobra.Command, args []string) (result error) {
 		return exitCodeError{code: code}
 	}
 	return nil
+}
+
+// dialSharedTerminal connects first and only then says the terminal is joined: a join that is still
+// connecting, or fails, must not print a banner that looks like an attached terminal.
+func dialSharedTerminal(ctx context.Context, w io.Writer, dial func(context.Context, resolver.ConnectInfo) (tunnel.Conn, error), info resolver.ConnectInfo, id string) (tunnel.Conn, error) {
+	if _, err := fmt.Fprintf(w, "Connecting to shared terminal %s...\n", id); err != nil {
+		return nil, terminalSharingOutputFailure(err)
+	}
+	conn, err := dial(ctx, info)
+	if err != nil {
+		return nil, err
+	}
+	role := "interactive"
+	if info.Terminal.ViewOnly() {
+		role = "view only; Ctrl-C detaches"
+	}
+	if _, err := fmt.Fprintf(w, "%s\nShared terminal %s · %s. Use `pb session participants %s` to see participants.\n", terminalSharingNotice, id, role, id); err != nil {
+		_ = conn.Close()
+		return nil, terminalSharingOutputFailure(err)
+	}
+	return conn, nil
 }
