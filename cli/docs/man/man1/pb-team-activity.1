@@ -13,7 +13,7 @@ pb-team-activity - Search the team audit log (owners, admins, auditors)
 Search the team audit log, newest first. Owners, admins and auditors can read it. Filter by actor (account ID, email or API token), action or action prefix, target, result (success or denied) and time range, or search text. Each event shows when, who, what, the result and the target. Use --json for the documented event shape and the next page cursor.
 
 .PP
-Read recent owner/admin activity for one team, with cursor and limit for pagination. Entries support review of membership and grant changes within the retention window.
+Events are kept for the plan's retention period (Team 365 days); export them with pb team activity export.
 
 .PP
 Teams use explicit membership and resource grants. Membership alone does not grant machine use, ENV values, previews, or tunnels. Mutations use the current team generation to reject stale edits; read pb team get before retrying a conflicting change.
