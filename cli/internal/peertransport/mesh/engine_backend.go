@@ -237,7 +237,12 @@ func (b *locoBackend) onEngineStatus(st *wgengine.Status, err error) {
 // direct path to us and teaches us its address from the pings we
 // receive back. It's called whenever our endpoints change and when a
 // peer first completes the meow handshake, and is idempotent.
-func (b *locoBackend) advertiseEndpoints() {
+func (b *locoBackend) advertiseEndpoints() { b.advertiseEndpointsTo(key.NodePublic{}) }
+
+// advertiseEndpointsTo sends our endpoints to one peer, or to every peer when only is zero. A peer
+// starting discovery (its meow and our acknowledgment) needs them alone: advertising to every peer on
+// each meow made bringing up N peers cost O(N²) sealed messages.
+func (b *locoBackend) advertiseEndpointsTo(only key.NodePublic) {
 	if runtime.GOOS == "js" {
 		// In browsers this does nothing: js/wasm has no UDP, so
 		// peers disco-pinging whatever endpoints magicsock reports
@@ -252,14 +257,15 @@ func (b *locoBackend) advertiseEndpoints() {
 	if b.nm != nil {
 		peers = b.nm.Peers
 	}
+	targets := endpointTargets(peers, only, b.derpRegionIDLocked())
 	b.mu.Unlock()
-	if len(eps) == 0 || len(peers) == 0 {
+	if len(eps) == 0 || len(targets) == 0 {
 		return
 	}
 	payload := (&disco.CallMeMaybe{MyNumber: eps}).AppendMarshal(nil)
 	discoPriv := discoPrivateForNode(b.priv)
 	mc := b.sys.MagicSock.Get()
-	for _, p := range peers {
+	for _, p := range targets {
 		// Frame and seal the message the same way magicsock's
 		// sendDiscoMessage does, so the peer's stock magicsock
 		// processes it natively. Use that peer's current rendezvous after
@@ -267,11 +273,34 @@ func (b *locoBackend) advertiseEndpoints() {
 		pkt := make([]byte, 0, 512)
 		pkt = append(pkt, disco.Magic...)
 		pkt = b.discoPublic().AppendTo(pkt)
-		pkt = append(pkt, discoPriv.Shared(p.DiscoKey()).Seal(payload)...)
-		if _, err := mc.SendDERPPacketTo(p.Key(), b.peerDERPRegion(p.Key()), pkt); err != nil {
-			b.logf("advertiseEndpoints to %v: %v", p.Key().ShortString(), err)
+		pkt = append(pkt, discoPriv.Shared(p.disco).Seal(payload)...)
+		if _, err := mc.SendDERPPacketTo(p.key, p.region, pkt); err != nil {
+			b.logf("advertiseEndpoints to %v: %v", p.key.ShortString(), err)
 		}
 	}
+}
+
+type endpointTarget struct {
+	key    key.NodePublic
+	disco  key.DiscoPublic
+	region tailcfg.DERPRegionID
+}
+
+// endpointTargets lists the peers to advertise endpoints to (only that peer when only is set) with each
+// peer's rendezvous: its home relay, or ours when it has none. One pass over the peers.
+func endpointTargets(peers []tailcfg.NodeView, only key.NodePublic, fallback tailcfg.DERPRegionID) []endpointTarget {
+	var targets []endpointTarget
+	for _, p := range peers {
+		if !only.IsZero() && p.Key() != only {
+			continue
+		}
+		region := p.HomeDERP()
+		if region == 0 {
+			region = fallback
+		}
+		targets = append(targets, endpointTarget{key: p.Key(), disco: p.DiscoKey(), region: region})
+	}
+	return targets
 }
 
 // nodeHasAddr reports whether ip is one of n's tailcat addresses.

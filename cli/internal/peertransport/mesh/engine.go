@@ -167,7 +167,7 @@ func (s *Server) Start() error {
 						// The client's peer map is installed before it sends the meow.
 						// Advertise after the acknowledgment on the same DERP route so
 						// it can process our endpoints before probing directly.
-						lb.advertiseEndpoints()
+						lb.advertiseEndpointsTo(src)
 					}
 				}
 			}()
@@ -312,7 +312,7 @@ func (s *Server) prepareAuthorizedPeer(ctx context.Context, peer key.NodePublic,
 			// The first advertisement in onMeow can arrive before the remote
 			// has admitted us. Its acknowledgment proves that admission is now
 			// installed, so send our candidates again for direct discovery.
-			s.lb.advertiseEndpoints()
+			s.lb.advertiseEndpointsTo(peer)
 			return nil
 		case <-ctx.Done():
 			s.peerReadyMu.Lock()
