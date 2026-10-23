@@ -97,11 +97,16 @@ func readMachineEventsRequest(w http.ResponseWriter, r *http.Request) (machineEv
 	return request, body, true
 }
 
+// statusClientClosedRequest is logged when the client hung up before the server answered.
+const statusClientClosedRequest = 499
+
 func answerMachineEvents(w http.ResponseWriter, r *http.Request, waiter machineEventWaiter, machineID string, request machineEventsRequest) {
 	changed, err := waiter.Wait(r.Context(), machineID, request.Topics, machineevents.MaxWait)
 	if err != nil {
 		if errors.Is(err, r.Context().Err()) {
-			return // the host went away
+			// The host went away before the answer: record it as such, not as a silent 200.
+			w.WriteHeader(statusClientClosedRequest)
+			return
 		}
 		writePreviewTunnelError(w, r, http.StatusServiceUnavailable, "events_unavailable", "Machine events are temporarily unavailable.", "unchanged", true, "retry", err)
 		return

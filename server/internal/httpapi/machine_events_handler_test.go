@@ -11,6 +11,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat-server/internal/auth"
 	"github.com/pinksaucepasta/paperboat-server/internal/controlplane"
+	"github.com/pinksaucepasta/paperboat-server/internal/machineevents"
 	"github.com/pinksaucepasta/paperboat-server/internal/usermachines"
 )
 
@@ -20,11 +21,16 @@ type machineEventWaiterFake struct {
 	maxWait time.Duration
 	changed map[string]int64
 	calls   int
+	gone    bool
 }
 
-func (f *machineEventWaiterFake) Wait(_ context.Context, machineID string, known map[string]int64, maxWait time.Duration) (map[string]int64, error) {
+func (f *machineEventWaiterFake) Wait(ctx context.Context, machineID string, known map[string]int64, maxWait time.Duration) (map[string]int64, error) {
 	f.calls++
 	f.machine, f.known, f.maxWait = machineID, known, maxWait
+	if f.gone {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	return f.changed, nil
 }
 
@@ -48,12 +54,21 @@ func TestMachineEventsWaitAuthenticatesAndAnswersChangesOrNothing(t *testing.T) 
 
 	changed := &machineEventWaiterFake{changed: map[string]int64{"previews": 5}}
 	if r := send(changed, bootstrapVerifier{claims: claims}, body, nil); r.Code != http.StatusOK || strings.TrimSpace(r.Body.String()) != `{"topics":{"previews":5}}` ||
-		changed.machine != "machine_01" || changed.known["previews"] != 4 || changed.maxWait != 30*time.Second {
+		changed.machine != "machine_01" || changed.known["previews"] != 4 || changed.maxWait != machineevents.MaxWait {
 		t.Fatalf("changed: status=%d body=%s waiter=%+v", r.Code, r.Body.String(), changed)
 	}
 	idle := &machineEventWaiterFake{changed: map[string]int64{}}
 	if r := send(idle, bootstrapVerifier{claims: claims}, body, nil); r.Code != http.StatusNoContent || r.Body.Len() != 0 {
 		t.Fatalf("no change: status=%d body=%q", r.Code, r.Body.String())
+	}
+	// A host that hangs up before the answer is logged as 499, not as a silent 200.
+	gone := &machineEventWaiterFake{gone: true}
+	if r := send(gone, bootstrapVerifier{claims: claims}, body, func(r *http.Request) {
+		ctx, cancel := context.WithCancel(r.Context())
+		cancel()
+		*r = *r.WithContext(ctx)
+	}); r.Code != statusClientClosedRequest {
+		t.Fatalf("client gone: status=%d", r.Code)
 	}
 	reject := func(name string, want int, verifier bootstrapVerifier, body string, mutate func(*http.Request)) {
 		t.Helper()
@@ -109,5 +124,13 @@ func TestMachineEventsWaitForUserIsLimitedToTheUsersOwnMachine(t *testing.T) {
 		if isMachineEventsWait(path) != want {
 			t.Errorf("isMachineEventsWait(%q) = %v, want %v", path, !want, want)
 		}
+	}
+}
+
+// Released clients give up on a response after 30 s of waiting for headers. The server must answer a
+// held wait before that, with room for the round trip, or no client ever sees its 204.
+func TestMachineEventsAnswerBeforeReleasedClientsGiveUp(t *testing.T) {
+	if machineevents.MaxWait+5*time.Second > machineevents.ClientHeaderTimeout {
+		t.Fatalf("MaxWait %s leaves under 5 s before the clients' %s header timeout", machineevents.MaxWait, machineevents.ClientHeaderTimeout)
 	}
 }

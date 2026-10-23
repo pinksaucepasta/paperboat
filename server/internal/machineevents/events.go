@@ -34,8 +34,13 @@ var topics = []string{TopicMachineAccess, TopicPeerNetwork, TopicPreviews, Topic
 func ValidTopic(name string) bool { return slices.Contains(topics, name) }
 
 const (
-	// MaxWait is the longest a request is held before answering "no change".
-	MaxWait = 30 * time.Second
+	// MaxWait is the longest a request is held before answering "no change". It stays well under the
+	// 30 s response-header timeout of every released client (cli httptransport): held for the full 30 s,
+	// clients hung up just before the 204, their change streams never became healthy and every daemon
+	// fell back to re-listing machines every 15 s (~330 lists/min on production, 2026-10-23).
+	MaxWait = 25 * time.Second
+	// ClientHeaderTimeout is the response-header timeout released clients use; MaxWait must stay under it.
+	ClientHeaderTimeout = 30 * time.Second
 	// recheckInterval re-reads the generations while waiting, so a missed notification (a listener
 	// reconnecting) delays a change by seconds instead of losing it.
 	recheckInterval = 5 * time.Second
