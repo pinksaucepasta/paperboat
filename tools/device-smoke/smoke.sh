@@ -47,7 +47,8 @@ RUN_ID="smoke$(date -u +%H%M%S)$RANDOM"
 EXPECT_VERSION=""
 TARGETS="hp,apple"
 # CLIENT is the Linux device that drives every pair; PEER is the second Linux device. SMOKE_CT_MAP
-# (name=host:container,...) stands a disposable systemd container on a Docker host in for a device name.
+# (name=host:container,...) stands a disposable systemd container on a Docker host in for a device name;
+# SMOKE_CT_USER / SMOKE_CT_UID / SMOKE_CT_DOCKER set the container user (pbt/1000) and docker command ("sudo docker").
 CLIENT=${SMOKE_CLIENT:-hp}
 PEER=${SMOKE_PEER:-dadape}
 LONG_EXEC=420
@@ -118,7 +119,8 @@ ct_of() { # ct_of DEVICE: host:container for a device that is a container, else 
 }
 container_on() { # container_on HOST:CONTAINER CMD... : run as the enrolled user inside the container
   local host=${1%%:*} ct=${1#*:}; shift
-  ssh "${SSH_OPTS[@]}" -o BatchMode=yes "$host" "sudo docker exec -i -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 $ct bash -lc $(printf '%q' "$*")"
+  local user=${SMOKE_CT_USER:-pbt} uid=${SMOKE_CT_UID:-1000} docker=${SMOKE_CT_DOCKER:-sudo docker}
+  ssh "${SSH_OPTS[@]}" -o BatchMode=yes "$host" "$docker exec -i -u $user -e HOME=/home/$user -e XDG_RUNTIME_DIR=/run/user/$uid $ct bash -lc $(printf '%q' "$*")"
 }
 
 # on DEVICE CMD... : run a POSIX shell command (hp, apple) or a PowerShell

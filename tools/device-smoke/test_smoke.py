@@ -469,6 +469,16 @@ exit "$FAILED"
             self.assertIn(' ct-a bash -lc ', command)
             self.assertIn('hi\\ there', command)
             self.assertIn('unmapped', result.stdout)
+            # The container host's docker command and the container's user are configurable (hp: plain docker, user tester).
+            result = subprocess.run(['bash', str(script), '--expect-version', 'test', '--targets', 'hp'],
+                                    env=dict(os.environ, PATH=str(root) + os.pathsep + os.environ['PATH'], SSH_LAST=str(last),
+                                             SMOKE_CT_MAP='box-a=dockerhost:ct-a', SMOKE_CT_USER='tester', SMOKE_CT_UID='1001',
+                                             SMOKE_CT_DOCKER='docker'),
+                                    capture_output=True, text=True, timeout=15)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            command = last.read_text()
+            self.assertIn('docker exec -i -u tester -e HOME=/home/tester -e XDG_RUNTIME_DIR=/run/user/1001 ct-a', command)
+            self.assertNotIn('sudo', command)
 
     def run_exec(self, exit_code, forged_receipt=False, transport_failure=False):
         # Exercise the smoke owner through a local shell transport; the command
