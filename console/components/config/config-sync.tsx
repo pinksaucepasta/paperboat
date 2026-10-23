@@ -12,6 +12,7 @@ import {
   type ConfigPath,
 } from "@/lib/config-sync"
 import { formatBytes } from "@/lib/format"
+import { GitHubConnection } from "@/components/config/github-connection"
 import { useListScope } from "@/components/list-toolbar"
 import { Detail } from "@/components/machine-overview"
 import { useCurrentMachine } from "@/components/machine-shell"
@@ -63,8 +64,12 @@ export function ConfigSync({ machine: tabMachine }: { machine?: Machine }) {
       <NotSetUp name={machine?.alias ?? "This machine"} />
     )
   }
-  if (!environments.length) return <NotSetUp />
-  return <AllMachines environments={environments} />
+  return (
+    <div className="flex flex-col gap-10">
+      <GitHubConnection />
+      {environments.length ? <AllMachines environments={environments} /> : <NotSetUp />}
+    </div>
+  )
 }
 
 function NotSetUp({ name }: { name?: string }) {

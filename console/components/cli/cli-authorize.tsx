@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useState } from "react"
 import { api, ApiError, useApiQuery, workspacesQuery, type Data, type Workspace } from "@/lib/api"
-import { BrandScreen, brandPrimary, brandSecondary } from "@/components/brand-screen"
+import { BrandScreen, Heading, Outcome, brandPrimary, brandSecondary } from "@/components/brand-screen"
 import { Button } from "@/components/ui/button"
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
@@ -234,26 +234,5 @@ function Expired() {
     <Outcome icon={<XCircleIcon className="size-8 text-white/75" />} title="This code expired">
       Run pb login again for a new code.
     </Outcome>
-  )
-}
-
-function Heading({ title, text }: { title: string; text: React.ReactNode }) {
-  return (
-    <div className="flex flex-col gap-1.5">
-      <h1 className="font-heading text-[clamp(1.75rem,4vw,2.5rem)] leading-[1.1] font-semibold tracking-[-0.03em] text-balance">
-        {title}
-      </h1>
-      <p className="text-base text-white/75">{text}</p>
-    </div>
-  )
-}
-
-function Outcome({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) {
-  return (
-    <div className="flex flex-col items-center gap-3 text-center">
-      {icon}
-      <h1 className="font-heading text-2xl font-semibold tracking-[-0.02em]">{title}</h1>
-      <p className="text-base text-white/75">{children}</p>
-    </div>
   )
 }
