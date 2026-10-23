@@ -165,6 +165,8 @@ export function useTerminalConnection({
   const [connectedEdge, setConnectedEdge] = useState("")
   // The window title the shell sets (OSC 0/2), seen as it happens; the server's copy lags.
   const [title, setTitle] = useState("")
+  // Who is attached, pushed by the host (newer hosts only); null until the first such event.
+  const [participants, setParticipants] = useState<HostParticipant[] | null>(null)
   const [filePasteProgress, setFilePasteProgress] = useState<FilePasteProgress | null>(null)
   const [filePasteNotice, setFilePasteNotice] = useState("")
   const [fileDragOver, setFileDragOver] = useState(false)
@@ -701,6 +703,12 @@ export function useTerminalConnection({
     (connectionID: string, pin: RootPin, event: BrowserTerminalEvent) => {
       if (disposedRef.current || connectionIDRef.current !== connectionID) return
       const terminal = terminalRef.current
+      if (event.type === "event" && event.capability === "terminal.v1") {
+        const payload = event.payload as { event?: string; session_id?: string; participants?: HostParticipant[] }
+        if (payload?.event === "participants" && payload.session_id === sessionRef.current.id && Array.isArray(payload.participants))
+          setParticipants(payload.participants)
+        return
+      }
       if (event.type === "identity-verified") {
         const current = sessionRef.current
         if (
@@ -1080,6 +1088,7 @@ export function useTerminalConnection({
     notice,
     connectedEdge,
     title,
+    participants,
     reconnect,
     fitToWindow,
     focus,
@@ -1097,3 +1106,12 @@ export function useTerminalConnection({
 }
 
 export type TerminalConnection = ReturnType<typeof useTerminalConnection>
+
+/** One attachment as the host reports it: identities only; names come from /sharing. */
+export type HostParticipant = {
+  attachment_id: string
+  account_id: string
+  client_id: string
+  role: "owner" | "viewer" | "interactive"
+  connected_at: string
+}

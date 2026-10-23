@@ -110,17 +110,17 @@ export function DomainList() {
   const ws = workspace?.id ?? ""
   const machineDomains = useMachineDomains()
   const tunnels = useApiQuery({ ...tunnelsQuery(ws), enabled: Boolean(workspace) })
-  const bindings = useQueries({ queries: (tunnels.data ?? []).map((tunnel) => domainsQuery(tunnel.id)) })
+  const bindings = useQueries({ queries: (tunnels.data?.items ?? []).map((tunnel) => domainsQuery(tunnel.id)) })
   const previews = useApiQuery({ ...previewsQuery(ws), enabled: Boolean(workspace) })
   const [search, setSearch] = useState("")
   const text = useDeferredValue(search.trim().toLowerCase())
   const [adding, setAdding] = useState(false)
   const [open, setOpen] = useState<string>()
 
-  const hostnames = (tunnels.data ?? []).flatMap((tunnel, index) =>
+  const hostnames = (tunnels.data?.items ?? []).flatMap((tunnel, index) =>
     (bindings[index]?.data ?? []).map((domain) => ({ domain, tunnel })),
   )
-  const previewNames = (previews.data ?? [])
+  const previewNames = (previews.data?.items ?? [])
     .filter((preview) => preview.state !== "expired" && preview.state !== "stopped")
     .flatMap((preview) => preview.domains.map((domain) => ({ hostname: domain.hostname, preview })))
 

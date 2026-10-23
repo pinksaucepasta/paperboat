@@ -74,7 +74,7 @@ export function TerminalList({ machine: tabMachine }: { machine?: Machine }) {
   const [search, setSearch] = useState("")
   const text = useDeferredValue(search.trim().toLowerCase())
 
-  const onMachine = (query.data ?? []).filter((session) => !scope || session.target.machine_id === scope)
+  const onMachine = (query.data?.items ?? []).filter((session) => !scope || session.target.machine_id === scope)
   const open = onMachine.filter(terminalCanAttach)
   const closed = onMachine.filter((session) => !terminalCanAttach(session))
   const shown = (view === "open" ? open : closed)
@@ -189,6 +189,11 @@ export function TerminalList({ machine: tabMachine }: { machine?: Machine }) {
             ))
           )}
         </table>
+        {query.data && !query.data.complete && (
+          <p className="py-3 text-center text-sm text-muted-foreground">
+            Showing the first 200 terminals. You have more; the console can’t list them yet.
+          </p>
+        )}
         {query.isError && (
           <div className="flex items-center justify-center gap-3 py-12 text-sm text-muted-foreground">
             Couldn’t load terminals.

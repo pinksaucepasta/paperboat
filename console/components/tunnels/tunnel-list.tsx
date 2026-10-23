@@ -33,7 +33,7 @@ export function TunnelList({ machine: tabMachine }: { machine?: Machine }) {
   const [search, setSearch] = useState("")
   const text = useDeferredValue(search.trim().toLowerCase())
 
-  const onMachine = (query.data ?? []).filter((tunnel) => !scope || tunnel.created_by_host_id === scope)
+  const onMachine = (query.data?.items ?? []).filter((tunnel) => !scope || tunnel.created_by_host_id === scope)
   const shown = onMachine
     .filter(
       (tunnel) =>
@@ -110,6 +110,11 @@ export function TunnelList({ machine: tabMachine }: { machine?: Machine }) {
                 ))}
           </tbody>
         </table>
+        {query.data && !query.data.complete && (
+          <p className="py-3 text-center text-sm text-muted-foreground">
+            Showing the first 2,000 tunnels. This workspace has more; the console can’t list them yet.
+          </p>
+        )}
         {query.isError && (
           <div className="flex items-center justify-center gap-3 py-12 text-sm text-muted-foreground">
             Couldn’t load tunnels.

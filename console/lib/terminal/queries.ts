@@ -22,22 +22,28 @@ export const terminalKeys = {
   code: (id: string) => ["terminal-sessions", id, "code-access"] as const,
 }
 
-/** Every terminal you own or that is shared with you. */
+/**
+ * Every terminal you own or that is shared with you, up to the server's one page of 200 (it has no
+ * cursor yet); `complete` is false when the page is full, so the list can say it stopped there.
+ */
 export const terminalsQuery = queryOptions({
   queryKey: terminalKeys.list,
-  queryFn: async () => (await api<Data<"/v1/terminal-sessions">>("terminal-sessions?limit=200")).sessions,
+  queryFn: async () => {
+    const { sessions } = await api<Data<"/v1/terminal-sessions">>("terminal-sessions?limit=200")
+    return { items: sessions, complete: sessions.length < 200 }
+  },
   refetchInterval: 15_000,
 })
 
 /**
- * One terminal with its live participants. There is no participant event stream, so the page
- * polls; the terminal itself never restarts for it (see useTerminalConnection).
+ * One terminal with its live participants. Newer hosts push who is attached on the terminal's own
+ * stream, and then this is only a safety net (`pushed`); older hosts don't, so the page polls.
  */
-export const terminalQuery = (id: string) =>
+export const terminalQuery = (id: string, pushed = false) =>
   queryOptions({
     queryKey: terminalKeys.session(id),
     queryFn: () => api<TerminalSession>(`${sessionPath(id)}/sharing`),
-    refetchInterval: 4_000,
+    refetchInterval: pushed ? 60_000 : 4_000,
   })
 
 /** Owner only: who may open this terminal in a browser. */

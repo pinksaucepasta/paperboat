@@ -21,6 +21,7 @@ export type BrowserTerminalEvent = {
   channel?: number
   screen?: Uint8Array
   screen_sequence?: string
+  capability?: string
   payload?: unknown
 }
 

@@ -453,17 +453,21 @@ export type Team = Data<"/v1/teams/{team_id}">
 export type RunningCounts = { terminals: number; tunnels: number; previews: number }
 
 /** Every page of a cursor collection, bounded so one huge account cannot stall the table. */
-async function allPages<T>(path: string, params: Record<string, string>): Promise<T[]> {
+/** A cursor-paged list: `complete` is false when the bound below stopped it short. */
+export type Paged<T> = { items: T[]; complete: boolean }
+
+/** Pages of 200 by cursor, at most 10 (2,000 items), so a large workspace can't stall a tab. */
+export async function allPages<T>(path: string, params: Record<string, string> = {}): Promise<Paged<T>> {
   const items: T[] = []
   let cursor = ""
   for (let page = 0; page < 10; page++) {
     const query = new URLSearchParams({ ...params, limit: "200", ...(cursor && { cursor }) })
     const result = await api<{ items: T[]; next_cursor?: string }>(`${path}?${query}`)
     items.push(...result.items)
-    if (!result.next_cursor) break
+    if (!result.next_cursor) return { items, complete: true }
     cursor = result.next_cursor
   }
-  return items
+  return { items, complete: false }
 }
 
 /**
@@ -487,9 +491,13 @@ export const runningQuery = (workspace: string) =>
         entry[kind]++
         counts.set(id, entry)
       }
+      // Counted from a list that stopped short would be wrong: show no counts instead ("—").
+      if (!tunnels.complete || !previews.complete || sessions.sessions.length >= 200) {
+        throw new Error("Too many terminals, tunnels or previews to count per machine.")
+      }
       sessions.sessions.forEach((session) => add(session.target?.machine_id, "terminals"))
-      tunnels.forEach((tunnel) => add(tunnel.created_by_host_id, "tunnels"))
-      previews.forEach((preview) => add(preview.owner_machine_id, "previews"))
+      tunnels.items.forEach((tunnel) => add(tunnel.created_by_host_id, "tunnels"))
+      previews.items.forEach((preview) => add(preview.owner_machine_id, "previews"))
       return counts
     },
     refetchInterval: 30_000,

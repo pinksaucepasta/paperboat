@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils"
 import { closeTerminal, terminalKeys, terminalQuery } from "@/lib/terminal/queries"
 import {
   useTerminalConnection,
+  type HostParticipant,
   type TerminalConnection,
   type TerminalSession,
 } from "@/lib/terminal/use-terminal-connection"
@@ -49,7 +50,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
  * People panel. It is what every "open" leads to, and the page you share.
  */
 export function TerminalPage({ id }: { id: string }) {
-  const query = useApiQuery(terminalQuery(id))
+  const [pushed, setPushed] = useState(false)
+  const query = useApiQuery(terminalQuery(id, pushed))
   if (query.isPending) {
     return (
       <Frame>
@@ -82,7 +84,7 @@ export function TerminalPage({ id }: { id: string }) {
     )
   }
   // Mounted once: later polls update the panel and title without restarting the terminal.
-  return <TerminalRoom session={query.data} />
+  return <TerminalRoom session={query.data} onPushed={setPushed} />
 }
 
 export function Frame({ children }: { children: React.ReactNode }) {
@@ -157,11 +159,21 @@ function Action({
  * The terminal with its bar and People panel. `guest` is someone who joined with a code: no
  * account, so nothing here may call account APIs (they would send a guest to sign-in).
  */
-export function TerminalRoom({ session, guest = false }: { session: TerminalSession; guest?: boolean }) {
+export function TerminalRoom({
+  session: polled,
+  guest = false,
+  onPushed,
+}: {
+  session: TerminalSession
+  guest?: boolean
+  /** Told whether the host pushes participants, so /sharing can poll less. */
+  onPushed?: (pushed: boolean) => void
+}) {
   const router = useRouter()
   const { theme } = useTerminalTheme()
   const hostRef = useRef<HTMLDivElement>(null)
-  const connection = useTerminalConnection({ session, theme, hostRef, accessMethod: guest ? "code" : "account" })
+  const connection = useTerminalConnection({ session: polled, theme, hostRef, accessMethod: guest ? "code" : "account" })
+  const session = useLiveParticipants(polled, connection.participants, onPushed)
   const { data: me } = useApiQuery({ ...meQuery, enabled: !guest })
   const isOwner = session.role === "owner"
   const people = peopleIn(session)
@@ -394,4 +406,32 @@ function CloseTerminal({ session, onClose }: { session: TerminalSession; onClose
       </AlertDialogContent>
     </AlertDialog>
   )
+}
+
+/**
+ * The session with the host's pushed participants when there are any: the push says who is
+ * attached, /sharing says what to call them. Someone the polled data doesn't know yet triggers one
+ * refresh of /sharing.
+ */
+function useLiveParticipants(
+  session: TerminalSession,
+  pushed: HostParticipant[] | null,
+  onPushed?: (pushed: boolean) => void,
+): TerminalSession {
+  const queryClient = useQueryClient()
+  const asked = useRef(new Set<string>())
+  useEffect(() => onPushed?.(pushed !== null), [pushed, onPushed])
+  useEffect(() => {
+    const unknown = pushed?.filter((p) => !session.participants.some((s) => s.account_id === p.account_id))
+    const fresh = unknown?.filter((p) => !asked.current.has(p.account_id)) ?? []
+    if (!fresh.length) return
+    fresh.forEach((p) => asked.current.add(p.account_id))
+    void queryClient.invalidateQueries({ queryKey: terminalKeys.session(session.id) })
+  }, [pushed, session, queryClient])
+  if (!pushed) return session
+  const participants = pushed.map((p) => {
+    const known = session.participants.find((s) => s.account_id === p.account_id)
+    return { kind: "member" as const, ...known, ...p }
+  })
+  return { ...session, participants }
 }

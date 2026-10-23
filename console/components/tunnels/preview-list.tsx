@@ -95,7 +95,7 @@ export function PreviewList({ machine: tabMachine }: { machine?: Machine }) {
     </>
   )
 
-  const onMachine = (query.data ?? []).filter((preview) => !scope || preview.owner_machine_id === scope)
+  const onMachine = (query.data?.items ?? []).filter((preview) => !scope || preview.owner_machine_id === scope)
   const live = onMachine.filter((preview) => !ended(preview, now))
   const done = onMachine.filter((preview) => ended(preview, now))
   const shown = (view === "live" ? live : done)
@@ -193,6 +193,11 @@ export function PreviewList({ machine: tabMachine }: { machine?: Machine }) {
                 ))}
           </tbody>
         </table>
+        {query.data && !query.data.complete && (
+          <p className="py-3 text-center text-sm text-muted-foreground">
+            Showing the first 2,000 previews. This workspace has more; the console can’t list them yet.
+          </p>
+        )}
         {query.isError && (
           <div className="flex items-center justify-center gap-3 py-12 text-sm text-muted-foreground">
             Couldn’t load previews.

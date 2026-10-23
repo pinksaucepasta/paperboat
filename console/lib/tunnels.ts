@@ -1,7 +1,7 @@
 "use client"
 
 import { queryOptions } from "@tanstack/react-query"
-import { api, ApiError, idempotencyKey, send, type Data } from "@/lib/api"
+import { allPages, api, ApiError, idempotencyKey, send, type Data } from "@/lib/api"
 import { uploadFile } from "@/lib/upload"
 
 /*
@@ -33,19 +33,6 @@ export const tunnelKeys = {
 }
 
 /** Every page of a cursor collection, bounded so one huge account cannot stall the page. */
-async function allPages<T>(path: string, params: Record<string, string> = {}): Promise<T[]> {
-  const items: T[] = []
-  let cursor = ""
-  for (let page = 0; page < 10; page++) {
-    const query = new URLSearchParams({ ...params, limit: "200", ...(cursor && { cursor }) })
-    const result = await api<{ items: T[]; next_cursor?: string }>(`${path}?${query}`)
-    items.push(...result.items)
-    if (!result.next_cursor) break
-    cursor = result.next_cursor
-  }
-  return items
-}
-
 /** The workspace's previews, live and ended. Leases count down, so the list stays fresh. */
 export const previewsQuery = (workspace: string) =>
   queryOptions({
@@ -58,8 +45,10 @@ export const previewsQuery = (workspace: string) =>
 export const tunnelsQuery = (workspace: string) =>
   queryOptions({
     queryKey: tunnelKeys.tunnels(workspace),
-    queryFn: async () =>
-      (await allPages<Tunnel>("tunnels", { workspace })).filter((tunnel) => tunnel.desired_state !== "deleted"),
+    queryFn: async () => {
+      const page = await allPages<Tunnel>("tunnels", { workspace })
+      return { ...page, items: page.items.filter((tunnel) => tunnel.desired_state !== "deleted") }
+    },
     refetchInterval: 15_000,
   })
 
@@ -81,13 +70,13 @@ export const routesQuery = (id: string) =>
   queryOptions({
     queryKey: tunnelKeys.routes(id),
     queryFn: async () =>
-      (await allPages<TunnelRoute>(`${tunnelPath(id)}/routes`)).filter((route) => route.desired_state !== "deleted"),
+      (await allPages<TunnelRoute>(`${tunnelPath(id)}/routes`)).items.filter((route) => route.desired_state !== "deleted"),
   })
 
 export const domainsQuery = (id: string) =>
   queryOptions({
     queryKey: tunnelKeys.domains(id),
-    queryFn: () => allPages<TunnelDomain>(`${tunnelPath(id)}/domains`),
+    queryFn: async () => (await allPages<TunnelDomain>(`${tunnelPath(id)}/domains`)).items,
     // Domains move through DNS and certificate states on their own.
     refetchInterval: 15_000,
   })
