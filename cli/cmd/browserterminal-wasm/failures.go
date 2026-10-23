@@ -1,5 +1,10 @@
 package main
 
+import (
+	"errors"
+	"io"
+)
+
 type terminalConnectError struct {
 	state   string
 	code    string
@@ -27,4 +32,30 @@ func browserFileFailure(remoteCode string) (string, string) {
 		code = "file_failed"
 	}
 	return code, "The file upload could not finish. Reconnect and retry; no path was pasted."
+}
+
+// bandwidthQuotaExhausted is the edge's WebSocket close reason when the workspace's hosted bandwidth is
+// used up; the console stops reconnecting on this code and shows the plan limit.
+const bandwidthQuotaExhausted = "bandwidth_quota_exhausted"
+
+// closeFailure turns the WebSocket close reason into the terminal's outcome: the plan-limit close is a
+// denial (no reconnect loop); any other close is a plain end of stream.
+func closeFailure(reason string) error {
+	if reason == bandwidthQuotaExhausted {
+		return &terminalConnectError{state: "denied", code: bandwidthQuotaExhausted, message: "This workspace's hosted relay and edge bandwidth is used up. Add bandwidth or upgrade under Billing in the Paperboat console, or wait for the next allowance period."}
+	}
+	return io.EOF
+}
+
+// innermostConnectError prefers the most specific outcome: a transport failure wrapping the socket's
+// plan-limit denial is reported as the denial.
+func innermostConnectError(err *terminalConnectError) *terminalConnectError {
+	for err.cause != nil {
+		var inner *terminalConnectError
+		if !errors.As(err.cause, &inner) {
+			break
+		}
+		err = inner
+	}
+	return err
 }

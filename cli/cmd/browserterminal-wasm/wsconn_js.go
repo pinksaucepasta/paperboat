@@ -88,7 +88,14 @@ func newBrowserWSConn(url string, protocols []string) (*browserWSConn, error) {
 			connection.fail(errors.New("WebSocket transport failed"))
 			return nil
 		}),
-		js.FuncOf(func(_ js.Value, _ []js.Value) any { connection.finish(io.EOF); return nil }),
+		js.FuncOf(func(_ js.Value, args []js.Value) any {
+			reason := ""
+			if len(args) > 0 && args[0].Type() == js.TypeObject {
+				reason = args[0].Get("reason").String()
+			}
+			connection.finish(closeFailure(reason))
+			return nil
+		}),
 	)
 	socket.Set("onopen", connection.handlers[0])
 	socket.Set("onmessage", connection.handlers[1])

@@ -99,6 +99,7 @@ func (connection *browserTerminal) run() {
 		}
 		var connectErr *terminalConnectError
 		if errors.As(err, &connectErr) {
+			connectErr = innermostConnectError(connectErr)
 			values := map[string]any{"state": connectErr.state, "code": connectErr.code, "message": connectErr.message}
 			for name, value := range connectErr.details {
 				values[name] = value
