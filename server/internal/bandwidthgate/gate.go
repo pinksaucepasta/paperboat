@@ -2,8 +2,9 @@
 // is every workspace an account can use out of bandwidth allowance? It is one read-only
 // statement (MVCC: no write, no row lock, so it cannot queue behind usage debits) with a
 // short timeout and a per-account cache. A failure answers "not denied" (fail open) unless the
-// account was answered "denied" within knownDeniedHold: connectivity never depends on billing,
-// but a slow lookup cannot reopen an account known to be over its allowance.
+// account was answered "denied" within knownDeniedHold, and starts one longer background lookup
+// that caches the real answer: connectivity never waits on billing, a slow lookup cannot reopen
+// an account known to be over its allowance, and a slow database only delays enforcement.
 package bandwidthgate
 
 import (
@@ -26,6 +27,9 @@ const (
 	// is slow (fail closed), but only for a bounded time without a fresh answer.
 	knownDeniedHold = 2 * time.Minute
 	cacheMax        = 4096
+	// backgroundTimeout bounds the lookup a failed hot-path answer starts, so a database too
+	// slow for the hot path still settles the account's answer within seconds.
+	backgroundTimeout = 5 * time.Second
 )
 
 type entry struct {
@@ -42,6 +46,8 @@ type Gate struct {
 	lookup  func(context.Context, string, time.Time) (bool, error)
 	mu      sync.Mutex
 	cache   map[string]entry
+	// refreshing holds accounts with a background lookup in flight (at most one each).
+	refreshing map[string]bool
 }
 
 func New(store *db.DB) *Gate {
@@ -82,6 +88,9 @@ func (g *Gate) Denied(ctx context.Context, account string, at time.Time) bool {
 		slog.WarnContext(ctx, "bandwidth gate unavailable; treating the account as within allowance", "error_type", fmt.Sprintf("%T", err))
 		denied, ttl = false, failureTTL
 	}
+	if err != nil {
+		g.refreshInBackground(account, at)
+	}
 	g.mu.Lock()
 	if g.cache == nil || len(g.cache) >= cacheMax {
 		g.cache = make(map[string]entry)
@@ -89,6 +98,41 @@ func (g *Gate) Denied(ctx context.Context, account string, at time.Time) bool {
 	g.cache[account] = entry{denied: denied, until: now.Add(ttl), deniedAt: deniedAt}
 	g.mu.Unlock()
 	return denied
+}
+
+// refreshInBackground repeats a failed lookup without the hot path's deadline and caches its
+// answer, so repeated hot-path timeouts cannot keep an over-allowance account open for good.
+func (g *Gate) refreshInBackground(account string, at time.Time) {
+	g.mu.Lock()
+	if g.refreshing == nil {
+		g.refreshing = make(map[string]bool)
+	}
+	if g.refreshing[account] {
+		g.mu.Unlock()
+		return
+	}
+	g.refreshing[account] = true
+	g.mu.Unlock()
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), backgroundTimeout)
+		defer cancel()
+		denied, err := g.lookup(ctx, account, at)
+		now := time.Now()
+		g.mu.Lock()
+		defer g.mu.Unlock()
+		delete(g.refreshing, account)
+		if err != nil {
+			return
+		}
+		next := entry{denied: denied, until: now.Add(answerTTL), deniedAt: g.cache[account].deniedAt}
+		if denied {
+			next.deniedAt = now
+		}
+		if g.cache == nil || len(g.cache) >= cacheMax {
+			g.cache = make(map[string]entry)
+		}
+		g.cache[account] = next
+	}()
 }
 
 // DeniedAmong answers for many accounts at once (a relay's connected accounts). Cached answers
