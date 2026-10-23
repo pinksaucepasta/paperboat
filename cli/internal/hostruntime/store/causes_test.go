@@ -2,9 +2,11 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
@@ -70,14 +72,21 @@ func TestStoreCausePrivacyRollbackAndFreshRecovery(t *testing.T) {
 }
 
 func TestStoreSQLiteBusyCancellationRetainsCauseAndRecovers(t *testing.T) {
-	state, _ := openStore(t, nil)
+	state, root := openStore(t, nil)
 	defer state.Close()
 	now := time.Now().UTC()
 	operation := OperationResult{OperationID: "op_busy_0001", RequestHash: []byte("hash"), Result: []byte(`{"ok":true}`), CompletedAt: now, ExpiresAt: now.Add(time.Hour)}
 	if _, _, err := state.ReserveOperation(t.Context(), operation.OperationID, operation.RequestHash, operation.ExpiresAt); err != nil {
 		t.Fatal(err)
 	}
-	tx, err := state.db.BeginTx(t.Context(), nil)
+	// The store writes through one connection, so the lock holder is another handle on the same
+	// file, as another process would be.
+	holder, err := sql.Open("sqlite", "file:"+filepath.Join(root, "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Close()
+	tx, err := holder.BeginTx(t.Context(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,6 +138,9 @@ func TestStoreSQLiteBusyCancellationRetainsCauseAndRecovers(t *testing.T) {
 func TestStoreSchemaOperationalFailureIsNotCorruption(t *testing.T) {
 	state, _ := openStore(t, nil)
 	defer state.Close()
+	// Schema validation runs during Open, while the pool still has its two migration connections
+	// for the nested reads; Open then narrows the pool to one writer.
+	state.db.SetMaxOpenConns(2)
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	err := validateDatabaseSchema(ctx, state.db)

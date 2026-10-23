@@ -114,6 +114,10 @@ func Open(ctx context.Context, config Config) (openedStore *Store, resultErr err
 	query.Add("_pragma", "busy_timeout(5000)")
 	query.Add("_pragma", "foreign_keys(ON)")
 	query.Add("_pragma", "synchronous(FULL)")
+	// Every transaction takes the write lock at BEGIN, so busy_timeout applies. A deferred
+	// transaction that reads first fails at once with SQLITE_BUSY when it upgrades to a write while
+	// the other connection commits, as during a terminal's output burst.
+	query.Set("_txlock", "immediate")
 	dsnURL.RawQuery = query.Encode()
 	dsn := dsnURL.String()
 	db, err := sql.Open("sqlite", dsn)
@@ -145,6 +149,11 @@ func Open(ctx context.Context, config Config) (openedStore *Store, resultErr err
 	if err := store.check(ctx); err != nil {
 		return nil, err
 	}
+	// After migration one connection carries every statement, so writers queue in Go instead of
+	// racing for SQLite's unfair write lock: a session's close waits its turn behind another
+	// session's output burst instead of failing with SQLITE_BUSY after busy_timeout.
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 	return store, nil
 }
 

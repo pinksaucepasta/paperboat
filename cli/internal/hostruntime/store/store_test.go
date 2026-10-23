@@ -721,3 +721,52 @@ func TestFileTransferHistoryPagesPreserveAuthorizationAndFilters(t *testing.T) {
 		}
 	}
 }
+
+// Lane W load test on ubuntu24: after one terminal printed a burst, every close on the machine
+// failed with SQLITE_BUSY, because a deferred write transaction cannot upgrade to the write lock
+// while another connection keeps committing output, and busy_timeout does not cover that upgrade.
+// A session's state change succeeds while another session floods output.
+func TestSessionUpdateSucceedsWhileAnotherSessionFloodsOutput(t *testing.T) {
+	state, _ := openStore(t, nil)
+	defer state.Close()
+	ctx := context.Background()
+	flooder := testSession()
+	closing := testSession()
+	closing.ID, closing.Name = "ses_2", "closing"
+	for _, session := range []Session{flooder, closing} {
+		if err := state.CreateSession(ctx, session); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stop := make(chan struct{})
+	flooded := make(chan error, 1)
+	go func() {
+		payload := make([]byte, 32<<10)
+		var sequence uint64
+		for {
+			select {
+			case <-stop:
+				flooded <- nil
+				return
+			default:
+			}
+			if _, _, err := state.AppendOutput(ctx, flooder.ID, 1, sequence, payload, 1<<20); err != nil {
+				flooded <- err
+				return
+			}
+			sequence += uint64(len(payload))
+		}
+	}()
+	for i := 0; i < 40; i++ {
+		next := closing
+		next.UpdatedAt = closing.UpdatedAt.Add(time.Duration(i+1) * time.Second)
+		if err := state.UpdateSession(ctx, closing.ID, "running", next); err != nil {
+			close(stop)
+			t.Fatalf("state update %d while another session floods output: %v (flooding: %v)", i, err, <-flooded)
+		}
+	}
+	close(stop)
+	if err := <-flooded; err != nil {
+		t.Fatalf("flooding session: %v", err)
+	}
+}
