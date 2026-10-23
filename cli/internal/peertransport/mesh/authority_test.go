@@ -153,11 +153,15 @@ func TestAuthorityRoutesAndAdmission(t *testing.T) {
 	if b.onMeow(k, key.DiscoPublic{}) {
 		t.Fatal("empty authority policy admitted peer")
 	}
-	b.clients = map[key.NodePublic]*tailcfg.Node{k: {Key: k, Addresses: []netip.Prefix{pfxOf(peer)}, AllowedIPs: []netip.Prefix{pfxOf(peer)}}}
+	b.mu.Lock()
+	b.setClientLocked(k, &tailcfg.Node{Key: k, Addresses: []netip.Prefix{pfxOf(peer)}, AllowedIPs: []netip.Prefix{pfxOf(peer)}})
+	b.mu.Unlock()
 	if got, ok := b.peerByIP(peer); !ok || got != k {
 		t.Fatal("server ignored allocated peer address")
 	}
-	delete(b.clients, k)
+	b.mu.Lock()
+	b.deleteClientLocked(k)
+	b.mu.Unlock()
 	if _, ok := b.peerConfig(k); ok {
 		t.Fatal("removed peer retained WireGuard configuration")
 	}
