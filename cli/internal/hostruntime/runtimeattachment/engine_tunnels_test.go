@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -89,6 +90,33 @@ func TestEngineTunnelRouteRidesOnTheAgentRuntimeCarrier(t *testing.T) {
 	if body, err := request(); err != nil || body != "engine-ok" {
 		t.Fatalf("engine route through the runtime carrier: %q %v", body, err)
 	}
+	// The edge marks the route ready only after its readiness probe is acknowledged with one byte.
+	// The probe's kind is the one the real edge sends (recorded by the tunnel module's
+	// TestEngineRouteGoesReadyThroughTheRealEdgeCarrier). Round 23: unanswered, so no engine route
+	// was ever observed ready.
+	recorded, err := os.ReadFile("../../../../shared/runtimeattachment/testdata/engine_probe_open.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var edgeProbe struct {
+		Kind string `json:"kind"`
+	}
+	if err := json.Unmarshal(recorded, &edgeProbe); err != nil || edgeProbe.Kind == "" {
+		t.Fatalf("recorded edge probe: %v", err)
+	}
+	probe, err := edge.OpenStream(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	open := connector.StreamOpen{Protocol: connectorprotocol.ProtocolName, Version: connectorprotocol.ProtocolVersion, AccountID: identity.AccountID, TunnelID: identity.TunnelID, ConnectorID: identity.ConnectorID, SessionID: identity.SessionID, ProcessGeneration: identity.ProcessGeneration, Generation: identity.Generation, RouteID: routeID, RequestID: "request_" + uuid.NewString(), Kind: edgeProbe.Kind}
+	if err := connectorprotocol.WriteStreamOpen(probe, open); err != nil {
+		t.Fatal(err)
+	}
+	ack := make([]byte, 1)
+	if _, err := io.ReadFull(probe, ack); err != nil || ack[0] != 1 {
+		t.Fatalf("readiness probe not acknowledged: %v %v", ack, err)
+	}
+	_ = probe.Close()
 	// The server takes the tunnel off the engine (served flag unchanged, list empty): after the next
 	// fetch the route is not served and Served reports false.
 	listed.Store(false)

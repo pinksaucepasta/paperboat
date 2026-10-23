@@ -56,6 +56,10 @@ type OriginStreamForwarder struct {
 	InspectorHTTP    AuthenticatedInspectorHTTP
 	Registry         *inspector.Registry
 	CaptureIdentity  *CaptureIdentity
+	// ReadinessProbes: the edge confirms this carrier's routes with connector_ready streams. Routes
+	// with an ingress authority always are; engine tunnel routes (PLAN 3a step 4) have none but are
+	// confirmed the same way.
+	ReadinessProbes bool
 }
 
 // CaptureIdentity is the product resource identity for inspector capture and
@@ -167,7 +171,7 @@ func (f OriginStreamForwarder) serve(ctx context.Context, active StreamSource, i
 			continue
 		}
 		route, ok := routes[open.RouteID]
-		if ok && open.Kind == "connector_ready" && f.IngressAuthority != nil {
+		if ok && open.Kind == "connector_ready" && (f.IngressAuthority != nil || f.ReadinessProbes) {
 			// Local origin probing has already passed before this generation
 			// starts accepting streams. This confirms that exact ready carrier;
 			// it cannot forward payloads or initiate an origin probe.

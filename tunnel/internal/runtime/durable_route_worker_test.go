@@ -489,7 +489,7 @@ func TestCanonicalRouteRulesPublishReadyExactAndWildcardDomainAliases(t *testing
 		{ID: "domain_exact", Hostname: "app.customer.example", MatchType: route.MatchExact, Generation: 4},
 		{ID: "domain_wild", Hostname: "*.apps.customer.example", MatchType: route.MatchOneLabelWildcard, Generation: 5},
 	}
-	rules := canonicalRouteRules([]control.RouteAssignment{assignment})
+	rules := CanonicalRouteRules([]control.RouteAssignment{assignment})
 	if len(rules) != 3 {
 		t.Fatalf("rules = %+v", rules)
 	}
@@ -670,9 +670,9 @@ func TestCanonicalPrimaryDomainAndReadyAliasPublishOnce(t *testing.T) {
 				a.MatchHostname = "11111111-1111-4111-8111-111111111111.tunnels.example.test"
 				host = a.MatchHostname
 			}
-			before := canonicalRouteRules([]control.RouteAssignment{a})
+			before := CanonicalRouteRules([]control.RouteAssignment{a})
 			a.DomainBindings = []control.DomainBinding{{ID: "domain_primary", Hostname: host, MatchType: aliasType, Generation: 4}}
-			after := canonicalRouteRules([]control.RouteAssignment{a})
+			after := CanonicalRouteRules([]control.RouteAssignment{a})
 			if len(before) != 1 || len(after) != 1 || after[0].ID != a.RouteID || after[0].Target != a.RouteID || after[0].MatchType != before[0].MatchType || after[0].Hostname != before[0].Hostname || after[0].WildcardSuffix != before[0].WildcardSuffix {
 				t.Fatalf("TLS activation changed primary matcher: before=%+v after=%+v", before, after)
 			}

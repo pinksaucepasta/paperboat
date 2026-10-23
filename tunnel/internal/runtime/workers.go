@@ -610,7 +610,7 @@ func (w *RouteWorker) reconcileRoutes(ctx context.Context) (result error) {
 		// during the first reconcile after a control update.
 		if probeCandidate && len(selectedAssignments) != 0 && (!w.canonicalPendingAdmissions || w.canonicalPendingAdmissionsHash != candidateHash) {
 			admissionAssignments := canonicalPendingAdmissionAssignments(selectedAssignments, w.canonicalAssignments, desired)
-			admissions, admissionErr := canonicalDurableAdmissions(admissionAssignments)
+			admissions, admissionErr := CanonicalDurableAdmissions(admissionAssignments)
 			if admissionErr != nil {
 				return admissionErr
 			}
@@ -641,7 +641,7 @@ func (w *RouteWorker) reconcileRoutes(ctx context.Context) (result error) {
 			return err
 		}
 		httpAssignments, _, _ := splitCanonicalAssignments(activeAssignments)
-		rules := canonicalRouteRules(httpAssignments)
+		rules := CanonicalRouteRules(httpAssignments)
 		sortRouteRules(rules)
 		contentHash := canonicalRouteHash(activeAssignments)
 		localGeneration := w.canonicalGeneration
@@ -679,7 +679,7 @@ func (w *RouteWorker) reconcileRoutes(ctx context.Context) (result error) {
 			// not yet crossed that fence.
 			if len(selectedAssignments) != 0 && !w.canonicalPendingAdmissions {
 				admissionAssignments := canonicalPendingAdmissionAssignments(selectedAssignments, w.canonicalAssignments, desired)
-				admissions, admissionErr := canonicalDurableAdmissions(admissionAssignments)
+				admissions, admissionErr := CanonicalDurableAdmissions(admissionAssignments)
 				if admissionErr != nil {
 					return admissionErr
 				}
@@ -717,7 +717,7 @@ func (w *RouteWorker) reconcileRoutes(ctx context.Context) (result error) {
 			if len(probeFailures) != 0 {
 				admissionAssignments = canonicalPendingAdmissionAssignments(selectedAssignments, activeAssignments, desired)
 			}
-			activeAdmissions, activeAdmissionErr := canonicalDurableAdmissions(admissionAssignments)
+			activeAdmissions, activeAdmissionErr := CanonicalDurableAdmissions(admissionAssignments)
 			if activeAdmissionErr != nil {
 				return activeAdmissionErr
 			}
@@ -752,7 +752,7 @@ func (w *RouteWorker) reconcileRoutes(ctx context.Context) (result error) {
 				// context and can make an LKG replacement fail closed.
 				admissionAssignments = canonicalPendingAdmissionAssignments(selectedAssignments, w.canonicalAssignments, desired)
 				if !w.canonicalPendingAdmissions {
-					admissions, admissionErr := canonicalDurableAdmissions(admissionAssignments)
+					admissions, admissionErr := CanonicalDurableAdmissions(admissionAssignments)
 					if admissionErr != nil {
 						return admissionErr
 					}
@@ -764,7 +764,7 @@ func (w *RouteWorker) reconcileRoutes(ctx context.Context) (result error) {
 				}
 			}
 			if len(probeFailures) == 0 {
-				admissions, admissionErr := canonicalDurableAdmissions(admissionAssignments)
+				admissions, admissionErr := CanonicalDurableAdmissions(admissionAssignments)
 				if admissionErr != nil {
 					return admissionErr
 				}
@@ -902,7 +902,8 @@ func selectCanonicalAssignments(desired []control.RouteAssignment, nodeID, proce
 	return result, invalid, nil
 }
 
-func canonicalRouteRules(assignments []control.RouteAssignment) []route.RouteRule {
+// CanonicalRouteRules builds the matcher rules of the canonical (process-fenced) route assignments.
+func CanonicalRouteRules(assignments []control.RouteAssignment) []route.RouteRule {
 	// One matcher rule owns public route precedence. Replica assignments for
 	// that route remain in DurableAdmissions and are selected by the carrier
 	// registry after the matcher has admitted exactly one request.
@@ -1062,7 +1063,7 @@ func canonicalAssignmentGroups(assignments []control.RouteAssignment) []canonica
 
 func (w *RouteWorker) probeCanonicalGroup(ctx context.Context, assignments []control.RouteAssignment) error {
 	httpAssignments, tcpAssignments, privateAssignments := splitCanonicalAssignments(assignments)
-	httpRules := canonicalRouteRules(httpAssignments)
+	httpRules := CanonicalRouteRules(httpAssignments)
 	tcpRules := canonicalTCPRouteRules(tcpAssignments)
 	privateRules := canonicalPrivateRouteRules(privateAssignments)
 	sortRouteRules(httpRules)
@@ -1212,7 +1213,8 @@ func canonicalPendingAdmissionAssignments(candidate, previous, desired []control
 	return result
 }
 
-func canonicalDurableAdmissions(assignments []control.RouteAssignment) ([]datacarrier.DurableAdmission, error) {
+// CanonicalDurableAdmissions builds the carrier admissions of the canonical route assignments.
+func CanonicalDurableAdmissions(assignments []control.RouteAssignment) ([]datacarrier.DurableAdmission, error) {
 	result := make([]datacarrier.DurableAdmission, 0, len(assignments))
 	for _, assignment := range assignments {
 		if err := validateCanonicalAssignment(assignment, assignment.NodeID, assignment.EdgeProcessEpoch); err != nil {
@@ -1619,7 +1621,7 @@ func (w *RouteWorker) fenceChangedViewerPolicy(ctx context.Context, desired, sel
 	if generation == 0 {
 		return route.ErrInvalid
 	}
-	rules := canonicalRouteRules(remaining)
+	rules := CanonicalRouteRules(remaining)
 	sortRouteRules(rules)
 	for index := range rules {
 		rules[index].Generation = generation
@@ -1631,7 +1633,7 @@ func (w *RouteWorker) fenceChangedViewerPolicy(ctx context.Context, desired, sel
 		return err
 	}
 	admissionAssignments := canonicalPendingAdmissionAssignments(selected, remaining, desired)
-	admissions, err := canonicalDurableAdmissions(admissionAssignments)
+	admissions, err := CanonicalDurableAdmissions(admissionAssignments)
 	if err != nil {
 		return err
 	}

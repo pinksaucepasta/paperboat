@@ -266,7 +266,10 @@ func (e *EngineTunnels) serve(ctx context.Context, hub *preview.DataCarrierPrevi
 	if err != nil {
 		return nil, err
 	}
-	streams, err := e.Forwarder.StartFrom(ctx, registration, hub.Identity(), []hoststate.TunnelConfigRoute{route})
+	// The edge confirms an engine route with a connector_ready stream before it serves it.
+	forwarder := e.Forwarder
+	forwarder.ReadinessProbes = true
+	streams, err := forwarder.StartFrom(ctx, registration, hub.Identity(), []hoststate.TunnelConfigRoute{route})
 	if err != nil {
 		_ = registration.Close()
 		return nil, err

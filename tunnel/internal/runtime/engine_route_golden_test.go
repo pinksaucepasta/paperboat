@@ -53,7 +53,7 @@ func TestEdgeAdmitsTheServersEngineRouteGolden(t *testing.T) {
 	if err != nil || !snapshot.Canonical || len(snapshot.Routes) != 1 {
 		t.Fatalf("edge decoder refused the server's engine route: %+v %v", snapshot, err)
 	}
-	admissions, err := canonicalDurableAdmissions(snapshot.Routes)
+	admissions, err := CanonicalDurableAdmissions(snapshot.Routes)
 	if err != nil || len(admissions) != 1 {
 		t.Fatalf("engine route did not convert to a durable admission: %v", err)
 	}

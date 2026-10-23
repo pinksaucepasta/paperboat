@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -74,6 +75,18 @@ VALUES($1,1,sha256(convert_to($1::text,'UTF8')),convert_to(json_build_object('ro
 		return a
 	}
 
+	// The machine key comes from the shared test seed, so the edge's contract test can present a
+	// carrier certificate for the golden row this test writes.
+	seed, err := os.ReadFile("../../../shared/runtimeattachment/testdata/engine_machine_seed.hex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedBytes, err := hex.DecodeString(strings.TrimSpace(string(seed)))
+	if err != nil || len(seedBytes) != ed25519.SeedSize {
+		t.Fatalf("engine machine seed: %v", err)
+	}
+	f.key = base64.RawURLEncoding.EncodeToString(ed25519.NewKeyFromSeed(seedBytes).Public().(ed25519.PublicKey))
+	f.exec(t, `UPDATE user_machines SET public_identity_key=$2 WHERE id=$1`, f.machine, f.key)
 	// An agent that serves previews only keeps its tunnel on the connector.
 	attach([]string{runtimewire.CapabilityEndpoints})
 	sync()
@@ -333,7 +346,7 @@ VALUES($1,1,sha256(convert_to($1::text,'UTF8')),convert_to(json_build_object('ro
 
 // engineRouteGolden is the engine route row the server sends an edge, kept where the edge's test
 // reads it (tunnel/internal/runtime: TestEdgeAdmitsTheServersEngineRouteGolden), so both sides run
-// their real code against one contract. PAPERBOAT_UPDATE_GOLDEN=<path of that file> rewrites it.
+// their real code against one contract. PAPERBOAT_UPDATE_GOLDEN=<that testdata directory> rewrites it.
 const engineRouteGolden = "../../../shared/runtimeattachment/testdata/engine_route_snapshot.json"
 
 func checkEngineRouteGolden(t *testing.T, item map[string]any) {
@@ -342,15 +355,15 @@ func checkEngineRouteGolden(t *testing.T, item map[string]any) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if path := os.Getenv("PAPERBOAT_UPDATE_GOLDEN"); path != "" {
-		if err := os.WriteFile(path, append(encoded, '\n'), 0o644); err != nil {
+	if dir := os.Getenv("PAPERBOAT_UPDATE_GOLDEN"); dir != "" {
+		if err := os.WriteFile(filepath.Join(dir, filepath.Base(engineRouteGolden)), append(encoded, '\n'), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		return
 	}
 	raw, err := os.ReadFile(engineRouteGolden)
 	if err != nil {
-		t.Fatalf("read the engine route golden (PAPERBOAT_UPDATE_GOLDEN=<path> writes it): %v", err)
+		t.Fatalf("read the engine route golden (PAPERBOAT_UPDATE_GOLDEN=<testdata dir> writes it): %v", err)
 	}
 	var golden struct {
 		Routes []map[string]any `json:"routes"`

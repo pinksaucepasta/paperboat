@@ -29,12 +29,12 @@ func TestCanonicalManagedAssignmentStagesFromControlProjection(t *testing.T) {
 	if err := validateCanonicalAssignment(assignment, assignment.NodeID, assignment.EdgeProcessEpoch); err != nil {
 		t.Fatalf("validate: %v", err)
 	}
-	rules := canonicalRouteRules([]control.RouteAssignment{assignment})
+	rules := CanonicalRouteRules([]control.RouteAssignment{assignment})
 	registry := route.NewGenerationRegistry(4)
 	if err := registry.StageGeneration(1, rules); err != nil {
 		t.Fatalf("stage: %v; rules=%+v", err, rules)
 	}
-	admissions, err := canonicalDurableAdmissions([]control.RouteAssignment{assignment})
+	admissions, err := CanonicalDurableAdmissions([]control.RouteAssignment{assignment})
 	if err != nil {
 		t.Fatalf("admissions: %v", err)
 	}
