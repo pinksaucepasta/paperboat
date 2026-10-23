@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
+	"github.com/pinksaucepasta/paperboat/server/internal/machineaddress"
 	"reflect"
 
 	"github.com/jackc/pgx/v5"
@@ -133,7 +133,7 @@ func (a *SQLAuthority) lease(ctx context.Context, machine string) (string, []str
 	if err = json.Unmarshal(encoded, &tags); err != nil {
 		return "", nil, err
 	}
-	return fmt.Sprintf("127.100.%d.%d", slot/256, slot%256), tags, nil
+	return machineaddress.FromSlot(slot).String(), tags, nil
 }
 func (a *SQLAuthority) SetTags(ctx context.Context, p auth.ClientPrincipal, machine string, tags []string) (resultErr error) {
 	tx, err := a.DB.Pool().Begin(ctx)

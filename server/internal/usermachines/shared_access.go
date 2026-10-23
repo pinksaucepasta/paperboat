@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
+	"github.com/pinksaucepasta/paperboat/server/internal/machineaddress"
 	"slices"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/auth"
@@ -74,7 +74,7 @@ func (s *Service) describeMachineAccess(ctx context.Context, account string, mac
 		machine.CanManage, machine.Shared = manage, shared
 		machine.NetworkApproved = machineApproved
 		if slot > 0 {
-			machine.AssignedIP = fmt.Sprintf("127.100.%d.%d", slot/256, slot%256)
+			machine.AssignedIP = machineaddress.FromSlot(slot).String()
 		}
 		if err := json.Unmarshal(permissions, &machine.Permissions); err != nil {
 			return errors.Join(err, rows.Close())
