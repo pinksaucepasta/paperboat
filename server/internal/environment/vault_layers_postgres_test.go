@@ -117,7 +117,7 @@ func TestPostgresVaultLayersFanoutSignedPublicationAndWorkspaceIsolation(t *test
 	}
 	hosts := map[string]string{ownerA: owner, ownerB: owner, memberHost: member, noVaultHost: noVault, outsideHost: outsider}
 	for machine, account := range hosts {
-		exec(`INSERT INTO user_machines(id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,configured_capabilities) VALUES($1,$2,$3,'signed layer fixture','linux','amd64','/vault-layer-test','online','released',ARRAY['environment_injection'])`, machine, account, "env_"+machine)
+		exec(`INSERT INTO user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,configured_capabilities) VALUES($1,$2,$3,'linux','amd64','/vault-layer-test','online','released',ARRAY['environment_injection'])`, machine, account, "env_"+machine)
 	}
 	service := NewService(store, nil, nil, "https://control.example")
 	vaults := map[string]PasswordVaultMetadata{}

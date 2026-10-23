@@ -133,7 +133,7 @@ func TestTask40ServeTerminalSharing(t *testing.T) {
 		Args []any
 	}{
 		{`INSERT INTO paperboat.control_environments(id,workspace_id,owner_user_id) VALUES($1,$1,$2)`, []any{environment, owner.AccountID}},
-		{`INSERT INTO paperboat.user_machines(id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online,configured_capabilities,observed_capabilities,installation_generation) VALUES($1,$2,$3,'Task 40 terminal','linux','amd64','/workspace','online','occupied',true,ARRAY['terminal_host'],ARRAY['terminal_host'],1)`, []any{machine, owner.AccountID, environment}},
+		{`INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,configured_capabilities,observed_capabilities,installation_generation) VALUES($1,$2,$3,'linux','amd64','/workspace','online','occupied',true,ARRAY['terminal_host'],ARRAY['terminal_host'],1)`, []any{machine, owner.AccountID, environment}},
 		{`INSERT INTO paperboat.user_machine_terminal_sessions(id,user_machine_id,name,launch_cwd,owner_account,runtime_state) VALUES($1,$2,'task40-shared','/workspace',$3,'running')`, []any{session, machine, owner.AccountID}},
 		{`INSERT INTO paperboat.teams(team_id,owner_account,generation) VALUES($1,$2,1)`, []any{team, owner.AccountID}},
 		{`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'admin',true),($1,$3,1,'member',true)`, []any{team, owner.AccountID, member.AccountID}},

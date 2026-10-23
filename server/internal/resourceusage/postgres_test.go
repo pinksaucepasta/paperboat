@@ -45,7 +45,7 @@ func TestPostgresBandwidthHistory(t *testing.T) {
 	for _, user := range []string{a, b} {
 		exec(`INSERT INTO users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@usage.invalid','active')`, user)
 	}
-	exec(`INSERT INTO user_machines(id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$3,'Usage test','linux','amd64','/workspace','online','occupied',true,1)`, machine, a, "env_"+suffix)
+	exec(`INSERT INTO user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$3,'linux','amd64','/workspace','online','occupied',true,1)`, machine, a, "env_"+suffix)
 	exec(`INSERT INTO cli_client_sessions(id,user_id,client_id,client_label,device_type,os,scopes,state,created_at,approved_at) VALUES($1,$2,$1,'Usage','desktop','linux',ARRAY['account:read'],'active',$3,$3)`, client, a, now)
 	exec(`INSERT INTO user_machine_access_sessions(credential_kind,id,user_machine_id,user_id,environment_id,cli_client_session_id,http_base_url,helper_terminal_session_id,expires_at,created_at,capabilities) VALUES('control_plane_signed',$1,$2,$3,$4,$5,'','token_usage',$6,$7,ARRAY['terminal','files'])`, session, machine, a, "env_"+suffix, client, now.Add(time.Hour), now.Add(-time.Minute))
 	exec(`INSERT INTO control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready) VALUES($1,'test','1.0','usage-epoch','ready',true)`, node)

@@ -171,7 +171,7 @@ func seedConnectorTestMachine(t *testing.T, store interface{ SQL() *sql.DB }, en
 	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.control_environments SET owner_user_id=$2 WHERE id=$1`, environmentID, userID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root) VALUES ($1,$2,$3,$1,'linux','unknown','/workspace')`, machineID, userID, environmentID); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root) VALUES ($1,$2,$3,'linux','unknown','/workspace')`, machineID, userID, environmentID); err != nil {
 		t.Fatal(err)
 	}
 	return machineID

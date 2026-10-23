@@ -146,7 +146,7 @@ func TestMachineControlRequestRejectsSupersededAndRevokedSessions(t *testing.T) 
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users (id,workos_subject,primary_email,status) VALUES ($1,$2,$3,'active')`, userID, "workos_"+suffix, suffix+"@example.test"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online,public_identity_key,installation_generation) VALUES ($1,$2,$3,$1,'linux','amd64','/workspace','online','occupied',true,$4,3)`, machineID, userID, environmentID, base64.RawURLEncoding.EncodeToString(publicKey)); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,public_identity_key,installation_generation) VALUES ($1,$2,$3,'linux','amd64','/workspace','online','occupied',true,$4,3)`, machineID, userID, environmentID, base64.RawURLEncoding.EncodeToString(publicKey)); err != nil {
 		t.Fatal(err)
 	}
 	for generation, values := range []struct{ operation, jti string }{{"machine-control-old-" + suffix, "mcc_old_" + suffix}, {"machine-control-current-" + suffix, "mcc_current_" + suffix}} {
@@ -535,10 +535,10 @@ func seedEnrollmentMachine(t *testing.T, store interface{ SQL() *sql.DB }, userI
 	t.Helper()
 	if _, err := store.SQL().ExecContext(context.Background(), `
 		INSERT INTO paperboat.user_machines
-		  (id,user_id,environment_id,description,platform,architecture,workspace_root)
-		VALUES ($1,$2,$3,$4,'linux','unknown','/workspace')
+		  (id,user_id,environment_id,platform,architecture,workspace_root)
+		VALUES ($1,$2,$3,'linux','unknown','/workspace')
 		ON CONFLICT (environment_id) DO NOTHING`,
-		"machine_"+environmentID, userID, environmentID, "Machine "+environmentID); err != nil {
+		"machine_"+environmentID, userID, environmentID); err != nil {
 		t.Fatal(err)
 	}
 }

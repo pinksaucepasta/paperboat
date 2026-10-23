@@ -60,7 +60,7 @@ func TestTeamMachineAuthenticatedHTTPLifecycle(t *testing.T) {
 	}
 	ownerToken, memberToken := authorizeCLI(t, router, ownerCookies).AccessToken, authorizeCLI(t, router, memberCookies).AccessToken
 	machine, teamID := "http_machine_"+suffix, "http-team-"+suffix
-	if _, err := store.SQL().ExecContext(context.Background(), `INSERT INTO paperboat.user_machines(id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online,configured_capabilities,observed_capabilities) VALUES($1,$2,$3,'HTTP host','linux','amd64','/workspace','online','occupied',true,ARRAY['terminal_host'],ARRAY['terminal_host'])`, machine, owner, "env_"+suffix); err != nil {
+	if _, err := store.SQL().ExecContext(context.Background(), `INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,configured_capabilities,observed_capabilities) VALUES($1,$2,$3,'linux','amd64','/workspace','online','occupied',true,ARRAY['terminal_host'],ARRAY['terminal_host'])`, machine, owner, "env_"+suffix); err != nil {
 		t.Fatal(err)
 	}
 	call := func(token, method, path string, body any, status int, out any) {

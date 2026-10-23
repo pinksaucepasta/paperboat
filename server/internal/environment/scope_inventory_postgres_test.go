@@ -39,7 +39,7 @@ func TestPostgresScopeInventoryIncludesRetiredScopesInCanonicalOrder(t *testing.
 		t.Fatal(err)
 	}
 	for _, machineID := range []string{"machine_a_" + suffix, "machine_z_" + suffix} {
-		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state) VALUES ($1,$2,$3,$4,'linux','amd64','/inventory','offline','released')`, machineID, accountID, "environment_"+machineID, "ENV inventory "+machineID); err != nil {
+		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state) VALUES ($1,$2,$3,'linux','amd64','/inventory','offline','released')`, machineID, accountID, "environment_"+machineID); err != nil {
 			t.Fatal(err)
 		}
 	}

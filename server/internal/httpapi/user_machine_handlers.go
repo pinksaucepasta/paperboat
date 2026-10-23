@@ -19,7 +19,6 @@ func userMachinePairings(service *usermachines.Service) http.HandlerFunc {
 		Verifier                string          `json:"verifier"`
 		EnrollmentToken         string          `json:"enrollment_token"`
 		Alias                   string          `json:"alias"`
-		Description             string          `json:"description"`
 		Platform                string          `json:"platform"`
 		Architecture            string          `json:"architecture"`
 		WorkspaceRoot           string          `json:"workspace_root"`
@@ -38,7 +37,7 @@ func userMachinePairings(service *usermachines.Service) http.HandlerFunc {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "Request body must be valid JSON.")
 			return
 		}
-		pairing, err := service.CreatePairing(r.Context(), usermachines.PairingInput{Verifier: body.Verifier, EnrollmentToken: body.EnrollmentToken, Alias: body.Alias, Description: body.Description, Platform: body.Platform, Architecture: body.Architecture, WorkspaceRoot: body.WorkspaceRoot, RuntimeVersions: body.RuntimeVersions, PublicIdentityKey: body.PublicIdentityKey, AcceptBetaPlatform: body.AcceptBetaPlatform, SSHUser: body.SSHUser, SSHPort: body.SSHPort, CanReuseRuntimeIdentity: body.CanReuseRuntimeIdentity, KeepAwake: body.KeepAwake, ReplacesMachineID: body.ReplacesMachineID})
+		pairing, err := service.CreatePairing(r.Context(), usermachines.PairingInput{Verifier: body.Verifier, EnrollmentToken: body.EnrollmentToken, Alias: body.Alias, Platform: body.Platform, Architecture: body.Architecture, WorkspaceRoot: body.WorkspaceRoot, RuntimeVersions: body.RuntimeVersions, PublicIdentityKey: body.PublicIdentityKey, AcceptBetaPlatform: body.AcceptBetaPlatform, SSHUser: body.SSHUser, SSHPort: body.SSHPort, CanReuseRuntimeIdentity: body.CanReuseRuntimeIdentity, KeepAwake: body.KeepAwake, ReplacesMachineID: body.ReplacesMachineID})
 		if err != nil {
 			if writePairingRejection(w, r, err) {
 				return
@@ -67,7 +66,6 @@ func userMachinePairings(service *usermachines.Service) http.HandlerFunc {
 func machineSetup(service *usermachines.Service) http.HandlerFunc {
 	type request struct {
 		Alias              string          `json:"alias"`
-		Description        string          `json:"description"`
 		Platform           string          `json:"platform"`
 		Architecture       string          `json:"architecture"`
 		WorkspaceRoot      string          `json:"workspace_root"`
@@ -90,7 +88,7 @@ func machineSetup(service *usermachines.Service) http.HandlerFunc {
 			return
 		}
 		machine, err := service.Setup(r.Context(), principal.User.ID, usermachines.SetupInput{
-			Alias: body.Alias, Description: body.Description, Platform: body.Platform, Architecture: body.Architecture,
+			Alias: body.Alias, Platform: body.Platform, Architecture: body.Architecture,
 			WorkspaceRoot: body.WorkspaceRoot, PublicIdentityKey: body.PublicIdentityKey,
 			RuntimeVersions: body.RuntimeVersions, AcceptBetaPlatform: body.AcceptBetaPlatform,
 			KeepAwake: body.KeepAwake,
@@ -539,7 +537,6 @@ func userMachineGet(service *usermachines.Service) http.HandlerFunc {
 func userMachineRename(service *usermachines.Service) http.HandlerFunc {
 	type request struct {
 		Alias       string `json:"alias"`
-		Description string `json:"description"`
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		p, ok := principalFromContext(r.Context())
@@ -554,10 +551,10 @@ func userMachineRename(service *usermachines.Service) http.HandlerFunc {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "Request body must be valid JSON.")
 			return
 		}
-		machine, err := service.Rename(r.Context(), p.User.ID, r.PathValue("machine_id"), body.Alias, body.Description)
+		machine, err := service.Rename(r.Context(), p.User.ID, r.PathValue("machine_id"), body.Alias)
 		switch {
 		case errors.Is(err, usermachines.ErrInvalidMachineName):
-			writeError(w, r, http.StatusBadRequest, "invalid_machine_name", "Use a valid lowercase machine alias of 1–63 characters and a description of at most 160 characters without control characters.")
+			writeError(w, r, http.StatusBadRequest, "invalid_machine_name", "Use a valid lowercase machine alias of 1–63 characters.")
 		case errors.Is(err, usermachines.ErrMachineNameConflict):
 			writeError(w, r, http.StatusConflict, "machine_name_conflict", "A machine with this alias already exists in this ownership scope. Choose another alias.")
 		case errors.Is(err, usermachines.ErrNotFound):

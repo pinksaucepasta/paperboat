@@ -26,7 +26,7 @@ func TestExplicitMachineRevocationFencesVaultAndTeams(t *testing.T) {
 			if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@invalid.test','active')`, account); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state) VALUES ($1,$2,$3,'revoke vault','linux','amd64','/revoke-test','online','released')`, machine, account, "env_"+suffix); err != nil {
+			if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state) VALUES ($1,$2,$3,'linux','amd64','/revoke-test','online','released')`, machine, account, "env_"+suffix); err != nil {
 				t.Fatal(err)
 			}
 			// The revocation hook only observes custody existence; no cryptographic claim

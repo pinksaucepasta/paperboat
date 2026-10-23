@@ -40,9 +40,9 @@ func TestCanManageInboxIsOwnerOrTeamAdminOnlyOnPostgres(t *testing.T) {
 	exec(`INSERT INTO paperboat.teams(team_id,owner_account,generation) VALUES($1,$2,1)`, team, owner)
 	exec(`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'admin',true),($1,$3,1,'admin',true),($1,$4,1,'member',true)`, team, owner, admin, member)
 	personal, shared := prefix+"personal", prefix+"shared"
-	exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,description,platform,architecture,workspace_root,state,seat_state,owner_team_id) VALUES
- ($1,$3,$1||'_env','inbox-personal','','linux','amd64','/workspace','online','occupied',NULL),
- ($2,$3,$2||'_env','inbox-shared','','linux','amd64','/workspace','online','occupied',$4)`, personal, shared, owner, team)
+	exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,owner_team_id) VALUES
+ ($1,$3,$1||'_env','inbox-personal','linux','amd64','/workspace','online','occupied',NULL),
+ ($2,$3,$2||'_env','inbox-shared','linux','amd64','/workspace','online','occupied',$4)`, personal, shared, owner, team)
 
 	service := New(store, nil, Policy{}, nil)
 	for _, allowed := range []struct{ actor, machine string }{{owner, personal}, {owner, shared}, {admin, shared}} {

@@ -49,7 +49,7 @@ func TestRemovingANeverDeliveredMachineLeavesOtherDeliveriesFencedOnlyWhereItRea
 	})
 	exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$2,$3,'active')`, account, "workos_"+account, account+"@example.test")
 	for _, id := range []string{source, recipient, junk} {
-		exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$3,$1,'linux','amd64','/w','online','occupied',true,1)`, id, account, "env_"+id)
+		exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$3,'linux','amd64','/w','online','occupied',true,1)`, id, account, "env_"+id)
 		exec(`INSERT INTO paperboat.environment_vault_hosts(machine_id,account_id,installation_generation,host_key_generation,host_public) VALUES($1,$2,1,1,$3)`, id, account, make([]byte, 32))
 	}
 	document := "sha256:" + strings.Repeat("a", 64)

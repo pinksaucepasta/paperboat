@@ -58,7 +58,7 @@ func TestBrowserAccessPostgres(t *testing.T) {
 		_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.users WHERE id IN($1,$2)`, owner, viewer)
 	})
 	exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@test.invalid','active'),($2,$2,$2||'@test.invalid','active')`, owner, viewer)
-	exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,description,platform,architecture,workspace_root,state,seat_state) VALUES($1,$2,$3,'browser-host','Browser host','linux','amd64','/workspace','offline','released')`, hostMachine, owner, "env_"+suffix)
+	exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state) VALUES($1,$2,$3,'browser-host','linux','amd64','/workspace','offline','released')`, hostMachine, owner, "env_"+suffix)
 	exec(`INSERT INTO paperboat.sessions(id,user_id,session_hash,csrf_hash,expires_at) VALUES($1,$2,$3,$4,$5)`, session, owner, "hash_"+suffix, "csrf_"+suffix, now.Add(2*time.Hour))
 	exec(`INSERT INTO paperboat.tunnels(id,account_id,name,desired_state,access_mode,generation,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id,created_at,updated_at) VALUES($1,$2,$1,'active','private',3,$3,$4,$5,$2,$6,$6)`, tunnel, owner, "endpoint_"+strings.TrimSuffix(host, ".tunnels.example.test"), "https://"+host, hostMachine, now)
 	exec(`INSERT INTO paperboat.tunnel_routes(id,tunnel_id,name,protocol,match_type,origin_scheme,origin_address,generation,desired_state,created_by_actor_id,updated_by_actor_id,created_at,updated_at) VALUES($1,$2,'web','http','catch_all','http','127.0.0.1:3000',7,'active',$3,$3,$4,$4)`, route, tunnel, owner, now)

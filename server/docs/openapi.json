@@ -6340,11 +6340,6 @@
           },
           "observation": {
             "$ref": "#/components/schemas/UpdateObservation"
-          },
-          "description": {
-            "type": "string",
-            "maxLength": 160,
-            "description": "Optional descriptive text; trimmed and contains no control characters. Not a selector."
           }
         }
       },
@@ -10685,9 +10680,6 @@
             "type": "string"
           },
           "alias": {
-            "type": "string"
-          },
-          "description": {
             "type": "string"
           },
           "installation_generation": {
@@ -15093,9 +15085,6 @@
           "environment_id": {
             "type": "string"
           },
-          "description": {
-            "type": "string"
-          },
           "alias": {
             "type": "string"
           },
@@ -15811,9 +15800,6 @@
             "type": "string"
           },
           "owner_team_id": {
-            "type": "string"
-          },
-          "description": {
             "type": "string"
           },
           "alias": {
@@ -26671,11 +26657,6 @@
                   "keep_awake": {
                     "type": "boolean",
                     "description": "Opt this machine into sleep prevention. Omitted or false allows sleep for a new machine and preserves an existing machine policy."
-                  },
-                  "description": {
-                    "type": "string",
-                    "maxLength": 160,
-                    "description": "Optional descriptive text; trimmed and contains no control characters. Not a selector."
                   }
                 },
                 "allOf": [
@@ -27740,11 +27721,6 @@
                     "minLength": 1,
                     "maxLength": 63,
                     "pattern": "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"
-                  },
-                  "description": {
-                    "type": "string",
-                    "maxLength": 160,
-                    "description": "Optional descriptive text; trimmed and contains no control characters. Not a selector."
                   }
                 }
               }

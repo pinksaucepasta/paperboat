@@ -139,7 +139,7 @@ func TestPostgresTeamMachineAuthority(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, id := range machineIDs {
-		if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines(id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state) VALUES($1,$2,$3,$1,'linux','amd64','/workspace','offline','released')`, id, enroller, "env_"+id); err != nil {
+		if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state) VALUES($1,$2,$3,'linux','amd64','/workspace','offline','released')`, id, enroller, "env_"+id); err != nil {
 			t.Fatal(err)
 		}
 	}

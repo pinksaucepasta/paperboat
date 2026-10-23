@@ -328,8 +328,8 @@ func TestUserMachineMutationsAcceptScopedBearerAndRequireCookieCSRF(t *testing.T
 	for _, machineID := range []string{"um_disconnect", "um_delete", "um_cookie"} {
 		if _, err := store.SQL().Exec(`
 INSERT INTO paperboat.user_machines
-  (id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online)
-VALUES ($1,$2,$3,$4,'linux','amd64','/home/paperboat','online','occupied',true)`, machineID, userID, "env_"+machineID, machineID); err != nil {
+  (id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online)
+VALUES ($1,$2,$3,'linux','amd64','/home/paperboat','online','occupied',true)`, machineID, userID, "env_"+machineID); err != nil {
 			t.Fatal(err)
 		}
 	}

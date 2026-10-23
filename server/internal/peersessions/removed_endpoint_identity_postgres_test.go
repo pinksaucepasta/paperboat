@@ -62,7 +62,7 @@ func TestRemovedEndpointsLoseTheirPeerIdentityPostgres(t *testing.T) {
 	}
 	machineRemoved, machineKept, cliEnded, cliKept := "peer_revoke_mr_"+x, "peer_revoke_mk_"+x, "peer_revoke_ce_"+x, "peer_revoke_ck_"+x
 	for _, id := range []string{machineRemoved, machineKept} {
-		exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$3,$1,'linux','amd64','/w','online','occupied',true,1)`, id, user, "env_"+id)
+		exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$3,'linux','amd64','/w','online','occupied',true,1)`, id, user, "env_"+id)
 		endpoint(id, "machine")
 	}
 	for _, id := range []string{cliEnded, cliKept} {

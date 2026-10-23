@@ -63,14 +63,14 @@ VALUES ($1, $2, $3, 'active')`, environmentID, "workspace_"+suffix, userID); err
 		t.Fatal(err)
 	}
 	if _, err := store.SQL().ExecContext(ctx, `
-INSERT INTO paperboat.user_machines (id, user_id, environment_id, description, platform, architecture, workspace_root,
-   state, seat_state, public_identity_key, configured_capabilities) VALUES ($1, $2, $3, 'Cleanup test', 'linux', 'amd64', '/workspace', 'offline', 'released',
+INSERT INTO paperboat.user_machines (id, user_id, environment_id, platform, architecture, workspace_root,
+   state, seat_state, public_identity_key, configured_capabilities) VALUES ($1, $2, $3, 'linux', 'amd64', '/workspace', 'offline', 'released',
         $4, ARRAY['file_receive','preview_launch']::text[])`, machineID, userID, environmentID, publicIdentityKey); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.SQL().ExecContext(ctx, `
-INSERT INTO paperboat.user_machines (id, user_id, environment_id, description, platform, architecture, workspace_root,
-   state, seat_state, public_identity_key, configured_capabilities) VALUES ($1, $2, $3, 'Sibling cleanup test', 'linux', 'amd64', '/sibling', 'offline', 'released',
+INSERT INTO paperboat.user_machines (id, user_id, environment_id, platform, architecture, workspace_root,
+   state, seat_state, public_identity_key, configured_capabilities) VALUES ($1, $2, $3, 'linux', 'amd64', '/sibling', 'offline', 'released',
 		$4, ARRAY['file_receive']::text[])`, siblingMachineID, userID, siblingEnvironmentID, siblingPublicIdentityKey); err != nil {
 		t.Fatal(err)
 	}

@@ -33,7 +33,7 @@ func (s *Service) validateAuthenticatedMachineInstallationMachine(machine UserMa
 		return UserMachine{}, ErrInvalidMachineInstallation
 	}
 	pairingInput := PairingInput{
-		Verifier: in.Verifier, Alias: machine.Alias, Description: machine.Description, Platform: machine.Platform,
+		Verifier: in.Verifier, Alias: machine.Alias, Platform: machine.Platform,
 		Architecture: machine.Architecture, WorkspaceRoot: machine.WorkspaceRoot,
 		PublicIdentityKey: machine.PublicIdentityKey, RuntimeVersions: machine.RuntimeVersions,
 		SSHUser: in.SSHUser, SSHPort: in.SSHPort, CanReuseRuntimeIdentity: in.CanReuseRuntimeIdentity,
@@ -57,7 +57,7 @@ func authenticatedMachineInstallationPairingFieldsMatch(pairing dbsqlc.UserMachi
 
 		pairing.ApprovedByUserID.Valid && pairing.ApprovedByUserID.String == userID && pairing.UserMachineID.Valid && pairing.UserMachineID.String == machine.ID &&
 		pairing.PublicIdentityKey.String == machine.PublicIdentityKey && bytes.Equal(pairing.VerifierHash, verifierHash) &&
-		pairing.RequestedAlias.String == machine.Alias && pairing.RequestedDescription == machine.Description && pairing.Platform.String == machine.Platform && pairing.Architecture.String == machine.Architecture &&
+		pairing.RequestedAlias.String == machine.Alias && pairing.Platform.String == machine.Platform && pairing.Architecture.String == machine.Architecture &&
 		pairing.WorkspaceRoot.String == machine.WorkspaceRoot && bytes.Equal(pairing.RuntimeVersions, machine.RuntimeVersions) && pairing.CanReuseRuntimeIdentity == in.CanReuseRuntimeIdentity && pairing.KeepAwake == in.KeepAwake &&
 		pairing.SshUser == (sql.NullString{String: in.SSHUser, Valid: in.SSHUser != ""}) && pairing.SshPort == (sql.NullInt32{Int32: int32(in.SSHPort), Valid: in.SSHPort != 0}) &&
 		pairing.PublicIdentityKey.String == machine.PublicIdentityKey && bytes.Equal(pairing.VerifierHash, verifierHash)
@@ -118,7 +118,7 @@ func (s *Service) authorizeAuthenticatedMachineInstallationRetry(ctx context.Con
 }
 
 type SetupInput struct {
-	Alias, Description, Platform, Architecture, WorkspaceRoot, PublicIdentityKey string
+	Alias, Platform, Architecture, WorkspaceRoot, PublicIdentityKey string
 	RuntimeVersions                                                              json.RawMessage
 	AcceptBetaPlatform                                                           bool
 	KeepAwake                                                                    bool
@@ -135,7 +135,7 @@ func (s *Service) Setup(ctx context.Context, userID string, in SetupInput) (User
 	userID = strings.TrimSpace(userID)
 	workspaceRoot, validWorkspace := canonicalWorkspaceRoot(in.Platform, in.WorkspaceRoot)
 	publicKey, keyErr := base64.RawURLEncoding.DecodeString(strings.TrimSpace(in.PublicIdentityKey))
-	if userID == "" || invalidMachineAlias(in.Alias) || invalidMachineDescription(in.Description) || !validMachineArchitecture(in.Architecture) ||
+	if userID == "" || invalidMachineAlias(in.Alias) || !validMachineArchitecture(in.Architecture) ||
 		!releases.SupportedPlatformArchitecture(strings.ToLower(strings.TrimSpace(in.Platform)), strings.ToLower(strings.TrimSpace(in.Architecture))) ||
 		!validWorkspace ||
 		!slices.Contains(s.policy.AllowedPlatforms, strings.ToLower(strings.TrimSpace(in.Platform))) ||
@@ -172,7 +172,7 @@ func (s *Service) Setup(ctx context.Context, userID string, in SetupInput) (User
 			if row.Platform != strings.ToLower(strings.TrimSpace(in.Platform)) || row.Architecture != strings.ToLower(strings.TrimSpace(in.Architecture)) || row.WorkspaceRoot != in.WorkspaceRoot {
 				return ErrInvalidSetup
 			}
-			row, err = tx.Queries().UpdateUserMachineMetadata(ctx, dbsqlc.UpdateUserMachineMetadataParams{ID: row.ID, UserID: userID, Alias: strings.TrimSpace(in.Alias), Description: strings.TrimSpace(in.Description), RuntimeVersions: in.RuntimeVersions})
+			row, err = tx.Queries().UpdateUserMachineMetadata(ctx, dbsqlc.UpdateUserMachineMetadataParams{ID: row.ID, UserID: userID, Alias: strings.TrimSpace(in.Alias), RuntimeVersions: in.RuntimeVersions})
 			if err != nil {
 				return err
 			}
@@ -203,7 +203,7 @@ func (s *Service) Setup(ctx context.Context, userID string, in SetupInput) (User
 			return err
 		}
 		row, err = tx.Queries().CreateEnrolledMachine(ctx, dbsqlc.CreateEnrolledMachineParams{
-			ID: machineID, UserID: userID, EnvironmentID: machineID, Description: strings.TrimSpace(in.Description), Alias: alias,
+			ID: machineID, UserID: userID, EnvironmentID: machineID, Alias: alias,
 			Platform: strings.ToLower(strings.TrimSpace(in.Platform)), Architecture: strings.ToLower(strings.TrimSpace(in.Architecture)),
 			WorkspaceRoot: in.WorkspaceRoot, RuntimeVersions: in.RuntimeVersions, ConfiguredCapabilities: defaultConfiguredCapabilities(), PublicIdentityKey: key,
 		})
@@ -247,7 +247,7 @@ func (s *Service) Setup(ctx context.Context, userID string, in SetupInput) (User
 func (s *Service) completeAuthenticatedMachineInstallationTx(ctx context.Context, tx *db.Tx, userID string, row dbsqlc.UserMachine, in SetupInput) (dbsqlc.UserMachine, error) {
 	var err error
 	row, err = tx.Queries().UpdateUserMachineInstallation(ctx, dbsqlc.UpdateUserMachineInstallationParams{
-		ID: row.ID, UserID: userID, Alias: strings.TrimSpace(in.Alias), Description: strings.TrimSpace(in.Description),
+		ID: row.ID, UserID: userID, Alias: strings.TrimSpace(in.Alias),
 		WorkspaceRoot: in.WorkspaceRoot, RuntimeVersions: in.RuntimeVersions,
 	})
 	if err != nil {
@@ -290,7 +290,7 @@ func (s *Service) CreatePairing(ctx context.Context, in PairingInput) (Pairing, 
 		in.RuntimeVersions = json.RawMessage(`{}`)
 	}
 	expires := s.now().UTC().Add(s.policy.PairingLifetime)
-	params := dbsqlc.CreateUserMachinePairingParams{VerifierHash: verifierHash[:], UserCode: sql.NullString{String: code, Valid: true}, RequestedAlias: sql.NullString{String: strings.TrimSpace(in.Alias), Valid: true}, RequestedDescription: strings.TrimSpace(in.Description), Platform: sql.NullString{String: strings.ToLower(strings.TrimSpace(in.Platform)), Valid: true}, Architecture: sql.NullString{String: strings.ToLower(strings.TrimSpace(in.Architecture)), Valid: true}, WorkspaceRoot: sql.NullString{String: in.WorkspaceRoot, Valid: true}, RuntimeVersions: in.RuntimeVersions, PublicIdentityKey: sql.NullString{String: strings.TrimSpace(in.PublicIdentityKey), Valid: true}, CanReuseRuntimeIdentity: in.CanReuseRuntimeIdentity, KeepAwake: in.KeepAwake, ExpiresAt: expires, ReplacesMachineID: sql.NullString{String: strings.TrimSpace(in.ReplacesMachineID), Valid: strings.TrimSpace(in.ReplacesMachineID) != ""}}
+	params := dbsqlc.CreateUserMachinePairingParams{VerifierHash: verifierHash[:], UserCode: sql.NullString{String: code, Valid: true}, RequestedAlias: sql.NullString{String: strings.TrimSpace(in.Alias), Valid: true}, Platform: sql.NullString{String: strings.ToLower(strings.TrimSpace(in.Platform)), Valid: true}, Architecture: sql.NullString{String: strings.ToLower(strings.TrimSpace(in.Architecture)), Valid: true}, WorkspaceRoot: sql.NullString{String: in.WorkspaceRoot, Valid: true}, RuntimeVersions: in.RuntimeVersions, PublicIdentityKey: sql.NullString{String: strings.TrimSpace(in.PublicIdentityKey), Valid: true}, CanReuseRuntimeIdentity: in.CanReuseRuntimeIdentity, KeepAwake: in.KeepAwake, ExpiresAt: expires, ReplacesMachineID: sql.NullString{String: strings.TrimSpace(in.ReplacesMachineID), Valid: strings.TrimSpace(in.ReplacesMachineID) != ""}}
 	if in.SSHUser != "" || in.SSHPort != 0 {
 		params.SshUser = sql.NullString{String: strings.TrimSpace(in.SSHUser), Valid: true}
 		params.SshPort = sql.NullInt32{Int32: int32(in.SSHPort), Valid: true}
@@ -338,7 +338,7 @@ func (s *Service) CreatePairing(ctx context.Context, in PairingInput) (Pairing, 
 			}
 			row, err = tx.Queries().ClaimBootstrapPairing(ctx, dbsqlc.ClaimBootstrapPairingParams{
 				ID: enrollment.ID, VerifierHash: params.VerifierHash, UserCode: params.UserCode,
-				RequestedAlias: params.RequestedAlias, RequestedDescription: params.RequestedDescription,
+				RequestedAlias: params.RequestedAlias,
 				Platform: params.Platform, Architecture: params.Architecture, WorkspaceRoot: params.WorkspaceRoot,
 				RuntimeVersions: params.RuntimeVersions, PublicIdentityKey: params.PublicIdentityKey,
 				SshUser: params.SshUser, SshPort: params.SshPort,
@@ -397,7 +397,6 @@ type UserMachine struct {
 	Shared                 bool                    `json:"shared"`
 	ID                     string                  `json:"id"`
 	EnvironmentID          string                  `json:"environment_id"`
-	Description            string                  `json:"description,omitempty"`
 	Alias                  string                  `json:"alias"`
 	Platform               string                  `json:"platform"`
 	Architecture           string                  `json:"architecture"`

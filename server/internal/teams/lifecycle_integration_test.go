@@ -126,7 +126,7 @@ func TestPostgresUnifiedLifecycleNoRevivedAuthority(t *testing.T) {
 	source, destination := "lc_source_"+suffix, "lc_destination_"+suffix
 	for _, pair := range [][2]string{{source, departing}, {destination, remaining}} {
 		exec(`INSERT INTO paperboat.control_environments(id,workspace_id,owner_user_id) VALUES($1,$1,$2)`, "env_"+pair[0], pair[1])
-		exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state) VALUES($1,$2,$3,'fixture','linux','amd64','/workspace','offline','released')`, pair[0], pair[1], "env_"+pair[0])
+		exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state) VALUES($1,$2,$3,'linux','amd64','/workspace','offline','released')`, pair[0], pair[1], "env_"+pair[0])
 	}
 	exec(`INSERT INTO paperboat.control_config_assignments(id,machine_id,environment_id,repository_id,adopted_team_id,adopted_default_version) VALUES($1,$1,$2,$3,$4,1)`, source, "env_"+source, repo, team)
 	exec(`INSERT INTO paperboat.control_config_assignments(id,machine_id,environment_id,repository_id) VALUES($1,$1,$2,$3)`, destination, "env_"+destination, repo)

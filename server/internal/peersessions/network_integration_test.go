@@ -77,7 +77,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_environments(id,workspace_id,owner_user_id) VALUES($1,$2,$3)`, envID, "workspace_"+suffix, userID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines(id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$3,'Network machine','linux','amd64','/workspace','online','occupied',true,1)`, machineID, userID, envID); err != nil {
+	if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$3,'linux','amd64','/workspace','online','occupied',true,1)`, machineID, userID, envID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -313,8 +313,8 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 		{`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'admin',true)`, []any{teamID, userID}},
 		{`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'member',true)`, []any{teamID, sharedUser}},
 		{`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account) VALUES($1,'machine',$2,$3)`, []any{teamID, machineID, userID}},
-		{`INSERT INTO paperboat.user_machines(id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$3,'Shared source','linux','amd64','/source','online','occupied',true,1)`, []any{"network_shared_source_" + suffix, sharedUser, "network_shared_source_env_" + suffix}},
-		{`INSERT INTO paperboat.user_machines(id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$3,'Owner source','linux','amd64','/owner-source','online','occupied',true,1)`, []any{"network_owner_source_" + suffix, userID, "network_owner_source_env_" + suffix}},
+		{`INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$3,'linux','amd64','/source','online','occupied',true,1)`, []any{"network_shared_source_" + suffix, sharedUser, "network_shared_source_env_" + suffix}},
+		{`INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$3,'linux','amd64','/owner-source','online','occupied',true,1)`, []any{"network_owner_source_" + suffix, userID, "network_owner_source_env_" + suffix}},
 		{`UPDATE paperboat.user_machines SET observed_capabilities=configured_capabilities,worker_generation=1,public_identity_key=$2 WHERE id=$1`, []any{machineID, runtimeIdentity}},
 		{`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,state,ready,last_heartbeat_at,node_generation,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,allowed_account_ids) VALUES($1,'task8','v1',$2,'edge.example.test',443,444,'ready',true,now(),1,'hel','hel-edge',ARRAY['edge'],ARRAY['http2','http3'],100,0,now(),now()+interval '1 hour',ARRAY[$3])`, []any{runtimeEdgeID, runtimeEdgeEpoch, userID}},
 		{`INSERT INTO paperboat.control_helpers(id,environment_id,state) VALUES($1,$2,'active')`, []any{"network_helper_" + suffix, envID}},

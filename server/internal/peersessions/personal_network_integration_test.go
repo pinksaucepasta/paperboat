@@ -65,7 +65,7 @@ func TestPersonalNetworkCarriesEveryComputerOfALargeAccountOnPostgres(t *testing
 		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_environments(id,workspace_id,owner_user_id) VALUES($1,$1,$2)`, environment, account); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines(id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$3,$1,'linux','amd64','/workspace','online','occupied',true,1)`, machine, account, environment); err != nil {
+		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$3,'linux','amd64','/workspace','online','occupied',true,1)`, machine, account, environment); err != nil {
 			t.Fatal(err)
 		}
 		_, _, quic := networkEndpointTLS(t, machine, now)
@@ -165,7 +165,7 @@ func TestPersonalNetworkAdmissionOnPostgres(t *testing.T) {
 		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_environments(id,workspace_id,owner_user_id) VALUES($1,$1,$2)`, environment, account); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines(id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$3,$1,'linux','amd64','/workspace','online','occupied',true,1)`, machine, account, environment); err != nil {
+		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$3,'linux','amd64','/workspace','online','occupied',true,1)`, machine, account, environment); err != nil {
 			t.Fatal(err)
 		}
 		_, _, quic := networkEndpointTLS(t, machine, now)

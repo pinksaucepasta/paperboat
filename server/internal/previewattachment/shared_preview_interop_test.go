@@ -197,7 +197,7 @@ func (f *sharedPreviewFixture) addAccount(t *testing.T, label string) (string, s
 	}
 	hash := sha256.Sum256([]byte(machine))
 	key := base64.RawURLEncoding.EncodeToString(hash[:])
-	if _, err := f.database.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,public_identity_key,configured_capabilities) VALUES ($1,$2,$1,$1,'linux','amd64','/workspace','online','occupied',$3,ARRAY['preview_launch'])`, machine, account, key); err != nil {
+	if _, err := f.database.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,public_identity_key,configured_capabilities) VALUES ($1,$2,$1,'linux','amd64','/workspace','online','occupied',$3,ARRAY['preview_launch'])`, machine, account, key); err != nil {
 		t.Fatal(err)
 	}
 	// The isolated database owner removes immutable audit fixtures at teardown.

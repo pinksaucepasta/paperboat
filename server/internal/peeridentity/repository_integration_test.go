@@ -118,7 +118,7 @@ func TestSQLRepositoryAuthenticatedMachineEnrollmentBindsSignerWithoutChangingAc
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.account_e2ee_keys (key_id,user_id,public_key,fingerprint,generation) VALUES ($1,$2,$3,$4,1)`, keyIDForFingerprint(firstFingerprint), userID, firstPublic, firstFingerprint[:]); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state,online,public_identity_key) VALUES ($1,$2,$3,'fresh-machine','windows','amd64','C:\\Users\\Test','offline',false,$4)`, machineID, userID, "env_"+suffix, "identity_"+suffix); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root,state,online,public_identity_key) VALUES ($1,$2,$3,'windows','amd64','C:\\Users\\Test','offline',false,$4)`, machineID, userID, "env_"+suffix, "identity_"+suffix); err != nil {
 		t.Fatal(err)
 	}
 	for _, clientID := range []string{firstClientID, freshClientID} {

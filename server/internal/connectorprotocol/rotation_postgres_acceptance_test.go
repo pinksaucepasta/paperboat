@@ -138,8 +138,8 @@ VALUES ($1, $2, $3, 'active')`, f.accountID, "workos_"+f.accountID, f.accountID+
 	hostID := "mch_trk08_" + f.suffix + "_a"
 	_, hostPublic, _, _ := trk08Key("host:" + hostID)
 	if _, err := database.ExecContext(ctx, `
-INSERT INTO paperboat.user_machines (id, user_id, environment_id, description, platform, architecture, workspace_root,
-   state, seat_state, public_identity_key) VALUES ($1, $2, $3, $4, 'linux', 'amd64', '/workspace', 'online', 'occupied', $5)`, hostID, f.accountID, "env_"+hostID, "TRK08 host a", base64.RawURLEncoding.EncodeToString(hostPublic)); err != nil {
+INSERT INTO paperboat.user_machines (id, user_id, environment_id, platform, architecture, workspace_root,
+   state, seat_state, public_identity_key) VALUES ($1, $2, $3, 'linux', 'amd64', '/workspace', 'online', 'occupied', $4)`, hostID, f.accountID, "env_"+hostID, base64.RawURLEncoding.EncodeToString(hostPublic)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -205,8 +205,8 @@ func (f *trk08PostgresFixture) insertConnector(t *testing.T, label string, withS
 	if label != "a" {
 		_, hostPublic, _, _ = trk08Key("host:" + hostID)
 		if _, err := f.database.SQL().ExecContext(ctx, `
-INSERT INTO paperboat.user_machines (id, user_id, environment_id, description, platform, architecture, workspace_root,
-   state, seat_state, public_identity_key) VALUES ($1, $2, $3, $4, 'linux', 'amd64', '/workspace', 'online', 'occupied', $5)`, hostID, f.accountID, "env_"+hostID, "TRK08 host "+label, base64.RawURLEncoding.EncodeToString(hostPublic)); err != nil {
+INSERT INTO paperboat.user_machines (id, user_id, environment_id, platform, architecture, workspace_root,
+   state, seat_state, public_identity_key) VALUES ($1, $2, $3, 'linux', 'amd64', '/workspace', 'online', 'occupied', $4)`, hostID, f.accountID, "env_"+hostID, base64.RawURLEncoding.EncodeToString(hostPublic)); err != nil {
 			t.Fatal(err)
 		}
 	}

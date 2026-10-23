@@ -137,7 +137,7 @@ func (s *Service) approve(ctx context.Context, userID, userCode string) (UserMac
 				} else if existing.SeatState != "occupied" {
 					return ErrEnrollmentState
 				}
-				row, err := tx.Queries().UpdateUserMachineInstallation(ctx, dbsqlc.UpdateUserMachineInstallationParams{ID: existing.ID, UserID: userID, Alias: existing.Alias, Description: pairing.RequestedDescription, WorkspaceRoot: pairing.WorkspaceRoot.String, RuntimeVersions: pairing.RuntimeVersions})
+				row, err := tx.Queries().UpdateUserMachineInstallation(ctx, dbsqlc.UpdateUserMachineInstallationParams{ID: existing.ID, UserID: userID, Alias: existing.Alias, WorkspaceRoot: pairing.WorkspaceRoot.String, RuntimeVersions: pairing.RuntimeVersions})
 				if err != nil {
 					return err
 				}
@@ -183,7 +183,7 @@ func (s *Service) approve(ctx context.Context, userID, userCode string) (UserMac
 				return err
 			}
 			row, err := tx.Queries().CreateEnrolledMachine(ctx, dbsqlc.CreateEnrolledMachineParams{
-				ID: machineID, UserID: userID, EnvironmentID: machineID, Description: pairing.RequestedDescription, Alias: alias,
+				ID: machineID, UserID: userID, EnvironmentID: machineID, Alias: alias,
 				Platform: pairing.Platform.String, Architecture: pairing.Architecture.String, WorkspaceRoot: pairing.WorkspaceRoot.String,
 				RuntimeVersions: pairing.RuntimeVersions, ConfiguredCapabilities: defaultConfiguredCapabilities(),
 				PublicIdentityKey: sql.NullString{String: pairing.PublicIdentityKey.String, Valid: true},
@@ -203,7 +203,7 @@ func (s *Service) approve(ctx context.Context, userID, userCode string) (UserMac
 				}
 				return ErrEnrollmentState
 			}
-			row, err = tx.Queries().UpdateUserMachineInstallation(ctx, dbsqlc.UpdateUserMachineInstallationParams{ID: row.ID, UserID: userID, Alias: alias, Description: pairing.RequestedDescription, WorkspaceRoot: pairing.WorkspaceRoot.String, RuntimeVersions: pairing.RuntimeVersions})
+			row, err = tx.Queries().UpdateUserMachineInstallation(ctx, dbsqlc.UpdateUserMachineInstallationParams{ID: row.ID, UserID: userID, Alias: alias, WorkspaceRoot: pairing.WorkspaceRoot.String, RuntimeVersions: pairing.RuntimeVersions})
 			if err != nil {
 				return err
 			}
@@ -260,7 +260,7 @@ func (s *Service) approve(ctx context.Context, userID, userCode string) (UserMac
 				return ErrEnrollmentState
 			}
 			row, err := tx.Queries().UpdateUserMachineInstallation(ctx, dbsqlc.UpdateUserMachineInstallationParams{
-				ID: existing.ID, UserID: userID, Alias: pairing.RequestedAlias.String, Description: pairing.RequestedDescription,
+				ID: existing.ID, UserID: userID, Alias: pairing.RequestedAlias.String,
 				WorkspaceRoot: pairing.WorkspaceRoot.String, RuntimeVersions: pairing.RuntimeVersions,
 			})
 			if err != nil {
@@ -844,7 +844,7 @@ func authenticatedMachineInstallationRecoveryPairingMatches(current, expected db
 		current.AuthenticatedSetupCLISessionID == expected.AuthenticatedSetupCLISessionID && current.AuthenticatedSetupOperationID == expected.AuthenticatedSetupOperationID &&
 		current.AuthenticatedSetupGeneration.Valid && current.AuthenticatedSetupGeneration == expected.AuthenticatedSetupGeneration && current.AuthenticatedSetupGeneration.Int64 == binding.Generation &&
 
-		current.RequestedAlias.String == machine.Alias && current.RequestedDescription == machine.Description && current.Platform.String == machine.Platform && current.Architecture.String == machine.Architecture &&
+		current.RequestedAlias.String == machine.Alias && current.Platform.String == machine.Platform && current.Architecture.String == machine.Architecture &&
 		current.WorkspaceRoot.String == machine.WorkspaceRoot && bytes.Equal(current.RuntimeVersions, machine.RuntimeVersions) &&
 		current.SshUser == expected.SshUser && current.SshPort == expected.SshPort && current.CanReuseRuntimeIdentity == expected.CanReuseRuntimeIdentity &&
 		current.State == "consumed" && current.InstallationConfigConsumedAt.Valid && current.InstallationConfigConsumedAt == expected.InstallationConfigConsumedAt &&

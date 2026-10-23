@@ -1,10 +1,10 @@
 -- name: CreateUserMachinePairing :one
 INSERT INTO user_machine_pairings (
-  id, verifier_hash, user_code, requested_alias, requested_description, platform, architecture,
+  id, verifier_hash, user_code, requested_alias, platform, architecture,
   workspace_root, runtime_versions, public_identity_key, ssh_user, ssh_port,
   can_reuse_runtime_identity, keep_awake, installation_state, generation, expires_at, replaces_machine_id
 ) VALUES (
-  sqlc.arg(id), sqlc.arg(verifier_hash), sqlc.arg(user_code), sqlc.arg(requested_alias), sqlc.arg(requested_description),
+  sqlc.arg(id), sqlc.arg(verifier_hash), sqlc.arg(user_code), sqlc.arg(requested_alias),
   sqlc.arg(platform), sqlc.arg(architecture), sqlc.arg(workspace_root), sqlc.arg(runtime_versions), sqlc.arg(public_identity_key),
   sqlc.narg(ssh_user), sqlc.narg(ssh_port), sqlc.arg(can_reuse_runtime_identity), sqlc.arg(keep_awake),
   'awaiting_approval', 1, sqlc.arg(expires_at), sqlc.narg(replaces_machine_id)
@@ -12,14 +12,14 @@ INSERT INTO user_machine_pairings (
 
 -- name: CreateAuthenticatedMachineInstallationPairing :one
 INSERT INTO user_machine_pairings (
-  id, verifier_hash, user_code, requested_alias, requested_description, platform, architecture,
+  id, verifier_hash, user_code, requested_alias, platform, architecture,
   workspace_root, runtime_versions, public_identity_key, ssh_user, ssh_port,
   can_reuse_runtime_identity, keep_awake, state, installation_state, generation, approved_by_user_id, user_machine_id,
   authenticated_setup_cli_session_id, authenticated_setup_operation_id,
   authenticated_setup_generation,
   approved_at, expires_at
 ) VALUES (
-  sqlc.arg(id), sqlc.arg(verifier_hash), sqlc.arg(user_code), sqlc.arg(requested_alias), sqlc.arg(requested_description),
+  sqlc.arg(id), sqlc.arg(verifier_hash), sqlc.arg(user_code), sqlc.arg(requested_alias),
   sqlc.arg(platform), sqlc.arg(architecture), sqlc.arg(workspace_root), sqlc.arg(runtime_versions),
   sqlc.arg(public_identity_key), sqlc.narg(ssh_user), sqlc.narg(ssh_port),
   sqlc.arg(can_reuse_runtime_identity), sqlc.arg(keep_awake), 'approved', 'approved', 1, sqlc.arg(user_id), sqlc.arg(user_machine_id),
@@ -67,7 +67,7 @@ SELECT * FROM user_machine_pairings WHERE bootstrap_token_hash=sqlc.arg(bootstra
 UPDATE user_machine_pairings
 SET state='pending',installation_state='awaiting_approval',
     verifier_hash=sqlc.arg(verifier_hash),user_code=sqlc.arg(user_code),
-    requested_alias=sqlc.arg(requested_alias),requested_description=sqlc.arg(requested_description),
+    requested_alias=sqlc.arg(requested_alias),
     platform=sqlc.arg(platform),architecture=sqlc.arg(architecture),workspace_root=sqlc.arg(workspace_root),
     runtime_versions=sqlc.arg(runtime_versions),public_identity_key=sqlc.arg(public_identity_key),
     ssh_user=sqlc.arg(ssh_user),ssh_port=sqlc.arg(ssh_port),
@@ -98,7 +98,7 @@ WHERE id=sqlc.arg(id) AND bootstrap_owner_account=sqlc.arg(user_id)
 UPDATE user_machine_pairings
 SET state='awaiting_bootstrap',installation_state='awaiting_bootstrap',generation=generation+1,
     bootstrap_token_hash=sqlc.arg(bootstrap_token_hash),bootstrap_token_ciphertext=sqlc.arg(bootstrap_token_ciphertext),
-    verifier_hash=NULL,user_code=NULL,requested_alias=NULL,requested_description='',platform=NULL,architecture=NULL,
+    verifier_hash=NULL,user_code=NULL,requested_alias=NULL,platform=NULL,architecture=NULL,
     workspace_root=NULL,public_identity_key=NULL,runtime_versions='{}'::jsonb,ssh_user=NULL,ssh_port=NULL,
     approved_by_user_id=NULL,approved_at=NULL,denied_at=NULL,
     installation_config_ciphertext=NULL,installation_config_nonce=NULL,installation_config_consumed_at=NULL,
@@ -291,10 +291,10 @@ SELECT count(*)::bigint FROM expired;
 
 -- name: CreateEnrolledMachine :one
 INSERT INTO user_machines (
-  id, user_id, environment_id, description, alias, platform, architecture, workspace_root,
+  id, user_id, environment_id, alias, platform, architecture, workspace_root,
   state, seat_state, runtime_versions, configured_capabilities, public_identity_key, enrolled_at
 ) VALUES (
-  sqlc.arg(id), sqlc.arg(user_id), sqlc.arg(environment_id), sqlc.arg(description), sqlc.arg(alias),
+  sqlc.arg(id), sqlc.arg(user_id), sqlc.arg(environment_id), sqlc.arg(alias),
   sqlc.arg(platform), sqlc.arg(architecture), sqlc.arg(workspace_root),
   'offline', 'released', sqlc.arg(runtime_versions), sqlc.arg(configured_capabilities), sqlc.arg(public_identity_key), now()
 ) RETURNING *;
@@ -453,18 +453,18 @@ RETURNING *;
 
 -- name: UpdateUserMachineInstallation :one
 UPDATE user_machines
-SET alias = sqlc.arg(alias), description = sqlc.arg(description), workspace_root = sqlc.arg(workspace_root),
+SET alias = sqlc.arg(alias), workspace_root = sqlc.arg(workspace_root),
  runtime_versions = sqlc.arg(runtime_versions),
- updated_at = CASE WHEN alias IS DISTINCT FROM sqlc.arg(alias) OR description IS DISTINCT FROM sqlc.arg(description) OR workspace_root IS DISTINCT FROM sqlc.arg(workspace_root) OR runtime_versions IS DISTINCT FROM sqlc.arg(runtime_versions) THEN now() ELSE updated_at END,
- version = version + CASE WHEN alias IS DISTINCT FROM sqlc.arg(alias) OR description IS DISTINCT FROM sqlc.arg(description) OR workspace_root IS DISTINCT FROM sqlc.arg(workspace_root) OR runtime_versions IS DISTINCT FROM sqlc.arg(runtime_versions) THEN 1 ELSE 0 END
+ updated_at = CASE WHEN alias IS DISTINCT FROM sqlc.arg(alias) OR workspace_root IS DISTINCT FROM sqlc.arg(workspace_root) OR runtime_versions IS DISTINCT FROM sqlc.arg(runtime_versions) THEN now() ELSE updated_at END,
+ version = version + CASE WHEN alias IS DISTINCT FROM sqlc.arg(alias) OR workspace_root IS DISTINCT FROM sqlc.arg(workspace_root) OR runtime_versions IS DISTINCT FROM sqlc.arg(runtime_versions) THEN 1 ELSE 0 END
 WHERE id = sqlc.arg(id) AND user_id = sqlc.arg(user_id) AND machine_management_allowed(sqlc.arg(user_id),id) AND deleted_at IS NULL
 RETURNING *;
 
 -- name: UpdateUserMachineMetadata :one
 UPDATE user_machines
-SET alias = sqlc.arg(alias), description = sqlc.arg(description), runtime_versions = sqlc.arg(runtime_versions),
- updated_at = CASE WHEN alias IS DISTINCT FROM sqlc.arg(alias) OR description IS DISTINCT FROM sqlc.arg(description) OR runtime_versions IS DISTINCT FROM sqlc.arg(runtime_versions) THEN now() ELSE updated_at END,
- version = version + CASE WHEN alias IS DISTINCT FROM sqlc.arg(alias) OR description IS DISTINCT FROM sqlc.arg(description) OR runtime_versions IS DISTINCT FROM sqlc.arg(runtime_versions) THEN 1 ELSE 0 END
+SET alias = sqlc.arg(alias), runtime_versions = sqlc.arg(runtime_versions),
+ updated_at = CASE WHEN alias IS DISTINCT FROM sqlc.arg(alias) OR runtime_versions IS DISTINCT FROM sqlc.arg(runtime_versions) THEN now() ELSE updated_at END,
+ version = version + CASE WHEN alias IS DISTINCT FROM sqlc.arg(alias) OR runtime_versions IS DISTINCT FROM sqlc.arg(runtime_versions) THEN 1 ELSE 0 END
 WHERE id = sqlc.arg(id) AND user_id = sqlc.arg(user_id) AND machine_management_allowed(sqlc.arg(user_id),id) AND deleted_at IS NULL
 RETURNING *;
 
@@ -540,7 +540,7 @@ WHERE id = sqlc.arg(id) AND machine_management_allowed(sqlc.arg(user_id),id) AND
 
 -- name: RenameUserMachine :one
 UPDATE user_machines
-SET alias = sqlc.arg(alias), description = sqlc.arg(description), updated_at = now(), version = version + 1
+SET alias = sqlc.arg(alias), updated_at = now(), version = version + 1
 WHERE id = sqlc.arg(id) AND machine_management_allowed(sqlc.arg(user_id),id) AND deleted_at IS NULL
 RETURNING *;
 

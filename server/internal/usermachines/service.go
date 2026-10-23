@@ -481,7 +481,7 @@ func New(store *db.DB, auditWriter *audit.Writer, policy Policy, seats SeatAutho
 }
 
 type PairingInput struct {
-	Verifier, EnrollmentToken, Alias, Description, Platform, Architecture, WorkspaceRoot, PublicIdentityKey string
+	Verifier, EnrollmentToken, Alias, Platform, Architecture, WorkspaceRoot, PublicIdentityKey string
 	SSHUser                                                                                                 string
 	SSHPort                                                                                                 uint16
 	RuntimeVersions                                                                                         json.RawMessage
@@ -501,7 +501,6 @@ type Enrollment struct {
 	UserCode             string     `json:"user_code,omitempty"`
 	UserMachineID        string     `json:"machine_id,omitempty"`
 	RequestedAlias       string     `json:"requested_alias,omitempty"`
-	RequestedDescription string     `json:"requested_description,omitempty"`
 	Platform             string     `json:"platform,omitempty"`
 	Architecture         string     `json:"architecture,omitempty"`
 	WorkspaceRoot        string     `json:"workspace_root,omitempty"`
@@ -651,7 +650,7 @@ func (s *Service) enrollmentStart(row dbsqlc.UserMachinePairing, token string) E
 }
 
 func mapEnrollment(row dbsqlc.UserMachinePairing) Enrollment {
-	result := Enrollment{ID: row.ID, OperationID: row.OperationID.String, State: row.InstallationState, Generation: row.Generation, UserMachineID: row.UserMachineID.String, RequestedAlias: row.RequestedAlias.String, RequestedDescription: row.RequestedDescription, Platform: row.Platform.String, Architecture: row.Architecture.String, WorkspaceRoot: row.WorkspaceRoot.String, ExpiresAt: row.ExpiresAt, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt}
+	result := Enrollment{ID: row.ID, OperationID: row.OperationID.String, State: row.InstallationState, Generation: row.Generation, UserMachineID: row.UserMachineID.String, RequestedAlias: row.RequestedAlias.String, Platform: row.Platform.String, Architecture: row.Architecture.String, WorkspaceRoot: row.WorkspaceRoot.String, ExpiresAt: row.ExpiresAt, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt}
 	if row.CancelledAt.Valid {
 		value := row.CancelledAt.Time
 		result.CancelledAt = &value
@@ -772,7 +771,7 @@ func (s *Service) PrepareAuthenticatedMachineInstallation(ctx context.Context, u
 		pairing, loadErr = tx.Queries().CreateAuthenticatedMachineInstallationPairing(ctx, dbsqlc.CreateAuthenticatedMachineInstallationPairingParams{
 			ID:           newID("pairing"),
 			VerifierHash: verifierHash[:], UserCode: sql.NullString{String: userCode, Valid: true},
-			RequestedAlias: sql.NullString{String: machine.Alias, Valid: true}, RequestedDescription: machine.Description, Platform: sql.NullString{String: machine.Platform, Valid: true}, Architecture: sql.NullString{String: machine.Architecture, Valid: true},
+			RequestedAlias: sql.NullString{String: machine.Alias, Valid: true}, Platform: sql.NullString{String: machine.Platform, Valid: true}, Architecture: sql.NullString{String: machine.Architecture, Valid: true},
 			WorkspaceRoot: sql.NullString{String: machine.WorkspaceRoot, Valid: true}, RuntimeVersions: machine.RuntimeVersions,
 			PublicIdentityKey:       sql.NullString{String: machine.PublicIdentityKey, Valid: true},
 			SshUser:                 sql.NullString{String: in.SSHUser, Valid: in.SSHUser != ""},

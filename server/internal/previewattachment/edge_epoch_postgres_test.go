@@ -364,11 +364,11 @@ VALUES ($1, $2, $3, 'active')`, f.accountID, "workos_"+f.suffix, "carrier-epoch-
 	}
 	if _, err := database.SQL().ExecContext(ctx, `
 INSERT INTO paperboat.user_machines
-  (id, user_id, environment_id, description, platform, architecture, workspace_root,
+  (id, user_id, environment_id, platform, architecture, workspace_root,
    state, seat_state, online, public_identity_key, installation_generation,
    worker_generation, worker_service_scope, connector_state)
-VALUES ($1, $2, $3, $4, 'linux', 'amd64', '/workspace', 'online', 'occupied', true,
-        $5, 1, 1, 'system', 'ready')`, f.machineID, f.accountID, f.envID, "Carrier epoch "+f.suffix, f.publicKey); err != nil {
+VALUES ($1, $2, $3, 'linux', 'amd64', '/workspace', 'online', 'occupied', true,
+        $4, 1, 1, 'system', 'ready')`, f.machineID, f.accountID, f.envID, f.publicKey); err != nil {
 		return err
 	}
 	if _, err := database.SQL().ExecContext(ctx, `

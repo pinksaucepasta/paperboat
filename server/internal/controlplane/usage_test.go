@@ -183,7 +183,7 @@ func TestReconcileUsageDebitsMachineBandwidthAndKeepsTheEnvironmentAtExhaustion(
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machine_entitlements (id,user_id,provider_subscription_id,product_code,state,seat_quantity,allowance_bytes,current_period_start,current_period_end) VALUES ($1,$2,$3,'machine-test','active',1,100,$4,$5)`, "ent_"+suffix, userID, "sub_"+suffix, now.Add(-time.Hour), now.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online) VALUES ($1,$2,$3,$4,'linux','amd64','/home/test','online','occupied',true)`, machineID, userID, "env_"+suffix, "Usage "+suffix); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online) VALUES ($1,$2,$3,'linux','amd64','/home/test','online','occupied',true)`, machineID, userID, "env_"+suffix); err != nil {
 		t.Fatal(err)
 	}
 	debit := usermachines.New(store, audit.NewWriter(store), usermachines.Policy{}, nil)
@@ -230,7 +230,7 @@ func TestReconcileDelayedUsageAfterMachineDisconnect(t *testing.T) {
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machine_entitlements (id,user_id,provider_subscription_id,product_code,state,seat_quantity,allowance_bytes,current_period_start,current_period_end) VALUES ($1,$2,$3,'machine-test','active',1,1000,$4,$5)`, "ent_"+suffix, userID, "sub_"+suffix, intervalEnd.Add(-time.Hour), intervalEnd.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online) VALUES ($1,$2,$3,$4,'linux','amd64','/home/test','offline','released',false)`, machineID, userID, "env_"+suffix, "Usage "+suffix); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online) VALUES ($1,$2,$3,'linux','amd64','/home/test','offline','released',false)`, machineID, userID, "env_"+suffix); err != nil {
 		t.Fatal(err)
 	}
 	debit := usermachines.New(store, audit.NewWriter(store), usermachines.Policy{}, nil)

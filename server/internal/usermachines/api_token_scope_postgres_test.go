@@ -28,7 +28,7 @@ func TestMachineAuthorizationHoldsAPITokensToTheirScope(t *testing.T) {
 	}
 	exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@example.test','active')`, user)
 	for _, m := range []string{ci, laptop} {
-		exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online) VALUES($1,$2,$1,$1,'linux','amd64','/w','online','occupied',true)`, m, user)
+		exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online) VALUES($1,$2,$1,'linux','amd64','/w','online','occupied',true)`, m, user)
 	}
 	exec(`INSERT INTO paperboat.workspace_policies(owner_account,version,source,digest) VALUES($1,1,'{}','test')`, user)
 	exec(`INSERT INTO paperboat.workspace_policy_tags(policy_id,tag,machine_id) SELECT id,'tag:ci',$2 FROM paperboat.workspace_policies WHERE owner_account=$1`, user, ci)

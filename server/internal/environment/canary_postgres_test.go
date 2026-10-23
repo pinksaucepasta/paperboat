@@ -75,7 +75,7 @@ func TestPostgresOpaqueCanaryNeverAppearsInServerSurfaces(t *testing.T) {
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$2,$3,'active')`, accountID, "workos_"+suffix, suffix+"@canary.invalid"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state) VALUES ($1,$2,$3,'ENV canary','linux','amd64','/canary','online','released')`, machineID, accountID, "env_"+suffix); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state) VALUES ($1,$2,$3,'linux','amd64','/canary','online','released')`, machineID, accountID, "env_"+suffix); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.environment_scopes(id,account_id,scope,scope_state,version,key_epoch,authority_generation,authority_id,manifest_id) VALUES($1,$2,'global','active',$3,$4,$5,$6,$7)`, scopeID, accountID, int64(manifest.Version), int64(manifest.KeyEpoch), int64(authorityDocument.Generation), authorityDocument.ID, manifest.ID); err != nil {

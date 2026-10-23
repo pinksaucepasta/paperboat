@@ -80,7 +80,7 @@ func TestConfigNativeConflictResolutionAuthorization(t *testing.T) {
 		args  []any
 	}{
 		{`INSERT INTO paperboat.control_environments(id,workspace_id,owner_user_id) VALUES($1,$1,$2)`, []any{environment, owner}},
-		{`INSERT INTO paperboat.user_machines(id,user_id,environment_id,description,platform,architecture,workspace_root) VALUES($1,$2,$3,'Machine','linux','amd64','/workspace')`, []any{machine, owner, environment}},
+		{`INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root) VALUES($1,$2,$3,'linux','amd64','/workspace')`, []any{machine, owner, environment}},
 		{`INSERT INTO paperboat.control_config_repositories(id,owner_user_id,provider,external_ref,display_name) VALUES($1,$2,'git',$1,'Config')`, []any{repository, owner}},
 		{`INSERT INTO paperboat.control_config_assignments(id,machine_id,environment_id,repository_id,mode,consent_state,warning_revision,accepted_at,configuration_revision,version) VALUES($1,$2,$3,$4,'bidirectional','accepted','warning-1',now(),repeat('a',64),3)`, []any{assignment, machine, environment, repository}},
 		{`INSERT INTO paperboat.control_config_sync_statuses(environment_id,repository_id,assignment_id,machine_id,installation_generation,warning_revision,policy_revision,sync_revision,state,conflicts,remote_revision,machine_updated_at,observed_at) VALUES($1,$2,$3,$4,1,'warning-1','policy-1',2,'conflict',$5::jsonb,'head-2',now(),now())`, []any{environment, repository, assignment, machine, `[{"path":"myapp/settings.json","revision":"` + revision + `"}]`}},

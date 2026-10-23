@@ -484,9 +484,8 @@ func seedStormAssignments(t *testing.T, ctx context.Context, database stormSQL, 
 		`INSERT INTO paperboat.control_environments (id,workspace_id,owner_user_id)
 		 SELECT $1 || 'env_' || value, $1 || 'workspace_' || value, $1 || 'user_' || value
 		 FROM generate_series(0,$2::integer-1) value`,
-		`INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state,online)
-		 SELECT $1 || 'machine_' || value, $1 || 'user_' || value, $1 || 'env_' || value,
-		        'storm-' || value, 'linux', 'amd64', '/workspace', 'online', true
+		`INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root,state,online)
+		 SELECT $1 || 'machine_' || value, $1 || 'user_' || value, $1 || 'env_' || value, 'linux', 'amd64', '/workspace', 'online', true
 		 FROM generate_series(0,$2::integer-1) value`,
 		`INSERT INTO paperboat.control_connector_generations
 		 (environment_id,connector_id,machine_id,generation,edge_pool,edge_node_id,state,expires_at)

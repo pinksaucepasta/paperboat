@@ -49,7 +49,7 @@ func TestPolicyPostgres(t *testing.T) {
 	if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@test.invalid','active')`, owner); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines(id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,installation_generation) VALUES($1,$2,$3,$1,'linux','amd64','/workspace','online','occupied',4)`, machine, owner, environment); err != nil {
+	if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,installation_generation) VALUES($1,$2,$3,'linux','amd64','/workspace','online','occupied',4)`, machine, owner, environment); err != nil {
 		t.Fatal(err)
 	}
 	svc, err := NewService(store, "preview.example.test")

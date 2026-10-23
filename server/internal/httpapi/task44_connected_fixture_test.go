@@ -158,8 +158,8 @@ func TestTask44ConnectedCollaboration(t *testing.T) {
 	// sharing, approval, adoption and departure below use their owning services.
 	sql(`INSERT INTO paperboat.control_environments(id,workspace_id,owner_user_id) VALUES($1,$1,$2)`, environment, owner.id)
 	sql(`INSERT INTO paperboat.control_environments(id,workspace_id,owner_user_id) VALUES($1,$1,$2)`, "env_"+source, member.id)
-	sql(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online,installation_generation,configured_capabilities,observed_capabilities) VALUES($1,$2,$3,'Task44 host','linux','amd64','/workspace','online','occupied',true,1,ARRAY['terminal_host','file_receive'],ARRAY['terminal_host','file_receive'])`, machine, owner.id, environment)
-	sql(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$3,'Task44 member','linux','amd64','/workspace','online','occupied',true,1)`, source, member.id, "env_"+source)
+	sql(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,installation_generation,configured_capabilities,observed_capabilities) VALUES($1,$2,$3,'linux','amd64','/workspace','online','occupied',true,1,ARRAY['terminal_host','file_receive'],ARRAY['terminal_host','file_receive'])`, machine, owner.id, environment)
+	sql(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$3,'linux','amd64','/workspace','online','occupied',true,1)`, source, member.id, "env_"+source)
 	sql(`INSERT INTO paperboat.user_machine_terminal_sessions(id,user_machine_id,name,owner_account,launch_cwd,runtime_state) VALUES($1,$2,'task44-shared',$3,'/workspace','running')`, terminal, machine, owner.id)
 	call := func(who actor, method, path string, body, out any, want int) {
 		t.Helper()
@@ -402,7 +402,7 @@ func TestTask44ConnectedCollaboration(t *testing.T) {
 		t.Fatal("automatic transfer completion missing")
 	}
 	ownSource := "t44_own_source_" + suffix
-	sql(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$3,'Own source','linux','amd64','/workspace','online','occupied',true,1)`, ownSource, owner.id, "env_"+ownSource)
+	sql(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$3,'linux','amd64','/workspace','online','occupied',true,1)`, ownSource, owner.id, "env_"+ownSource)
 	own, err := inbox.Create(ctx, teaminbox.RequestInput{RequestID: "t44_own_" + suffix, OperationID: "own", SenderAccount: owner.id, SourceMachineID: ownSource, DestinationMachineID: machine, BatchID: "t44_own_batch_" + suffix, Files: files, ExpiresAt: time.Now().Add(time.Minute)})
 	if err != nil || own.Status != "not_required" {
 		t.Fatalf("own-machine acceptance bypass: %v", err)

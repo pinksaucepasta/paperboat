@@ -85,7 +85,6 @@ type MaintenanceApproval struct {
 type FleetUpdateMachine struct {
 	MachineID   string             `json:"machine_id"`
 	Alias       string             `json:"alias"`
-	Description string             `json:"description,omitempty"`
 	Online      bool               `json:"online"`
 	State       string             `json:"state"`
 	Observation *UpdateObservation `json:"observation,omitempty"`
@@ -243,7 +242,7 @@ func (s *Service) FleetUpdateSummary(ctx context.Context, userID string, options
   AND ((m.owner_team_id=$4 AND machine_management_allowed($1,m.id))
    OR EXISTS(SELECT 1 FROM unnest(ARRAY['terminal','exec','managed_ssh','files','preview_manage','tunnel_manage']) capability
     WHERE team_machine_capability_allowed($1,$4,m.id,capability)))))
- AND ($2='' OR position(lower($2) in lower(m.id||' '||m.alias||' '||m.description))>0)
+ AND ($2='' OR position(lower($2) in lower(m.id||' '||m.alias))>0)
  AND ($3='' OR coalesce(o.state,'not_reporting')=$3)`
 	_, teamID := workspaceTeamArgument(ctx)
 	args := []any{userID, options.Q, options.State, teamID}
@@ -265,7 +264,7 @@ func (s *Service) FleetUpdateSummary(ctx context.Context, userID string, options
 	if err != nil {
 		return result, err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT m.id,m.alias,m.description,m.online,coalesce(o.state,'not_reporting'),CASE WHEN o.user_machine_id IS NULL THEN NULL ELSE jsonb_build_object(
+	rows, err := tx.QueryContext(ctx, `SELECT m.id,m.alias,m.online,coalesce(o.state,'not_reporting'),CASE WHEN o.user_machine_id IS NULL THEN NULL ELSE jsonb_build_object(
  'schema',o.schema,'state',o.state,'current_version',o.current_version,'target_version',coalesce(o.target_version,''),'channel',o.channel,'operation_id',o.operation_id,'installation_generation',o.installation_generation,'worker_generation',o.worker_generation,'os_boot_id',o.os_boot_id,'rollback_count',o.rollback_count,'error_code',coalesce(o.error_code,''),'observed_at',o.observed_at) END`+predicate+` ORDER BY lower(m.alias),m.id LIMIT $5 OFFSET $6`, append(args, options.Limit, options.Offset)...)
 	if err != nil {
 		return result, err
@@ -273,7 +272,7 @@ func (s *Service) FleetUpdateSummary(ctx context.Context, userID string, options
 	for rows.Next() {
 		var item FleetUpdateMachine
 		var observation []byte
-		if err = rows.Scan(&item.MachineID, &item.Alias, &item.Description, &item.Online, &item.State, &observation); err != nil {
+		if err = rows.Scan(&item.MachineID, &item.Alias, &item.Online, &item.State, &observation); err != nil {
 			rows.Close()
 			return result, err
 		}

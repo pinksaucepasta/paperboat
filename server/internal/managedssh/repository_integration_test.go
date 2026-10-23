@@ -51,7 +51,7 @@ func TestSQLRepositoryManagedSSHAuthorityLifecycle(t *testing.T) {
 		}
 	}
 	for _, value := range []struct{ id, userID string }{{machineA, userA}, {machineB, userB}} {
-		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES ($1,$2,$3,$4,'linux','amd64','/workspace','online','occupied',true,1)`, value.id, value.userID, "env_"+value.id, value.id); err != nil {
+		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES ($1,$2,$3,'linux','amd64','/workspace','online','occupied',true,1)`, value.id, value.userID, "env_"+value.id); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -341,7 +341,7 @@ func TestSQLRepositoryManagedSSHClientKeySetIsBounded(t *testing.T) {
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users (id,workos_subject,primary_email,status) VALUES ($1,$2,$3,'active')`, userID, "workos_"+userID, userID+"@example.test"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES ($1,$2,$3,$4,'windows','amd64','C:\\workspace','online','occupied',true,1)`, machineID, userID, "env_"+machineID, machineID); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES ($1,$2,$3,'windows','amd64','C:\\workspace','online','occupied',true,1)`, machineID, userID, "env_"+machineID); err != nil {
 		t.Fatal(err)
 	}
 	publicKeys := make([]string, 65)
@@ -423,7 +423,7 @@ func TestSQLRepositoryManagedSSHKeyRevokesWithClientSessionAndAccount(t *testing
 		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.cli_client_sessions (id,user_id,client_id,client_label,device_type,os,scopes,state,created_at,approved_at) VALUES ($1,$2,$3,'SSH revocation test','desktop','test',ARRAY['machines:connect'],'active',$4,$4)`, value.clientID, value.userID, "client_"+value.clientID, now); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES ($1,$2,$3,$4,'linux','amd64','/workspace','online','occupied',true,1)`, value.machineID, value.userID, "env_"+value.machineID, value.machineID); err != nil {
+		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES ($1,$2,$3,'linux','amd64','/workspace','online','occupied',true,1)`, value.machineID, value.userID, "env_"+value.machineID); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -504,7 +504,7 @@ func TestSQLRepositoryManagedSSHIdleClientSessionsDoNotCount(t *testing.T) {
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users (id,workos_subject,primary_email,status) VALUES ($1,$2,$3,'active')`, userID, "workos_"+userID, userID+"@example.test"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES ($1,$2,$3,$1,'linux','amd64','/w','online','occupied',true,1)`, machineID, userID, "env_"+machineID); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES ($1,$2,$3,'linux','amd64','/w','online','occupied',true,1)`, machineID, userID, "env_"+machineID); err != nil {
 		t.Fatal(err)
 	}
 	for index := 0; index < 70; index++ {

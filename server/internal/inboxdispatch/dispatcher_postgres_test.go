@@ -60,8 +60,8 @@ func TestEligibleMachineHonoursAuthorityAvailabilityAndCapabilityOnPostgres(t *t
 	exec(`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'admin',true),($1,$3,1,'admin',true),($1,$4,1,'member',true)`, team, owner, admin, member)
 	personal, shared, nocap, offline := prefix+"personal", prefix+"shared", prefix+"nocap", prefix+"offline"
 	insert := func(id, state string, online bool, owner_team any, capabilities string) {
-		exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,description,platform,architecture,workspace_root,state,seat_state,online,owner_team_id,configured_capabilities,observed_capabilities)
- VALUES($1,$2,$1||'_env','inbox-'||substr(md5($1),1,10),'','linux','amd64','/workspace',$3,'occupied',$4,$5,$6::text[],$6::text[])`, id, owner, state, online, owner_team, capabilities)
+		exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,online,owner_team_id,configured_capabilities,observed_capabilities)
+ VALUES($1,$2,$1||'_env','inbox-'||substr(md5($1),1,10),'linux','amd64','/workspace',$3,'occupied',$4,$5,$6::text[],$6::text[])`, id, owner, state, online, owner_team, capabilities)
 	}
 	insert(personal, "online", true, nil, "{file_receive,preview_launch}")
 	insert(shared, "online", true, team, "{file_receive}")

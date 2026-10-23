@@ -45,7 +45,7 @@ func TestPreviewLeaseScopedPoolAdmissionOnPostgres(t *testing.T) {
 	for _, user := range []string{account, other} {
 		exec(t, `INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$2,'active')`, user, user+"@example.test")
 	}
-	exec(t, `INSERT INTO paperboat.user_machines(id,user_id,environment_id,description,platform,architecture,workspace_root,state,online,configured_capabilities) VALUES($1,$2,$1,$1,'linux','amd64','/workspace','online',true,ARRAY['preview_launch']::text[])`, machine, account)
+	exec(t, `INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,online,configured_capabilities) VALUES($1,$2,$1,'linux','amd64','/workspace','online',true,ARRAY['preview_launch']::text[])`, machine, account)
 	// Another account's tunnel policy and this account's relay policy must
 	// not restrict its managed preview URLs.
 	exec(t, `INSERT INTO paperboat.selfhost_pool_policies(scope_kind,scope_id,capability,mode) VALUES('account',$1,'tunnel','self-hosted-only'),('account',$2,'relay','self-hosted-only')`, other, account)

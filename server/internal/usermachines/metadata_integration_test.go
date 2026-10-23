@@ -42,15 +42,15 @@ func TestMachineMetadataOwnershipAndNamespace(t *testing.T) {
 	insert(a, owner, "office")
 	insert(b, other, "office")
 	service := New(store, audit.NewWriter(store), Policy{}, nil)
-	if _, err := service.Rename(ctx, other, a, "stolen", "bad"); !errors.Is(err, ErrNotFound) {
+	if _, err := service.Rename(ctx, other, a, "stolen"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("outsider metadata update: %v", err)
 	}
-	got, err := service.Rename(ctx, owner, a, "office", "  Macbook Pro 2013  ")
-	if err != nil || got.ID != a || got.Alias != "office" || got.Description != "Macbook Pro 2013" {
+	got, err := service.Rename(ctx, owner, a, "office")
+	if err != nil || got.ID != a || got.Alias != "office" {
 		t.Fatalf("metadata update: %+v %v", got, err)
 	}
-	if _, err := service.Rename(ctx, owner, a, "office", strings.Repeat("界", 161)); !errors.Is(err, ErrInvalidMachineName) {
-		t.Fatalf("description overflow: %v", err)
+	if _, err := service.Rename(ctx, owner, a, strings.Repeat("a", 64)); !errors.Is(err, ErrInvalidMachineName) {
+		t.Fatalf("alias overflow: %v", err)
 	}
 	current, err = authority.Machine(ctx, owner, team, teams.MachineRequest{OperationID: "transfer-a", ExpectedGeneration: current.Generation, Action: "transfer_to_team", MachineID: a, Confirmation: a})
 	if err != nil {
@@ -70,7 +70,7 @@ func TestMachineMetadataOwnershipAndNamespace(t *testing.T) {
 	if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET alias='lab',owner_team_id=$2 WHERE id=$1`, b, team); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = service.Rename(ctx, owner, b, "office", "collision"); !errors.Is(err, ErrMachineNameConflict) {
+	if _, err = service.Rename(ctx, owner, b, "office"); !errors.Is(err, ErrMachineNameConflict) {
 		t.Fatalf("team manager alias collision: %v", err)
 	}
 }

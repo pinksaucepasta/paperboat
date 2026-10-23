@@ -345,7 +345,7 @@ candidates AS (SELECT m.id FROM paperboat.user_machines m WHERE m.user_id=$1
  UNION SELECT resource_id FROM bound WHERE resource_kind='machine'
  UNION SELECT p.machine_id FROM paperboat.lazy_access_policies p JOIN bound ON bound.resource_kind='lazy_policy' AND bound.resource_id=p.id
  UNION SELECT t.created_by_host_id FROM paperboat.tunnels t JOIN bound ON bound.resource_kind='tunnel' AND bound.resource_id=t.id)
-SELECT m.id,m.alias,m.description,s.installation_generation,s.boot_id,m.machine_service_policy_generation,s.generation,s.expires_at,s.services,
+SELECT m.id,m.alias,s.installation_generation,s.boot_id,m.machine_service_policy_generation,s.generation,s.expires_at,s.services,
  (m.user_id=$1 AND m.owner_team_id IS NULL AND m.personal_auto_enabled AND m.seat_state='occupied' AND m.state NOT IN ('pending','revoked','deleted')
   AND EXISTS(SELECT 1 FROM paperboat.users u WHERE u.id=$1 AND u.status='active')) FROM paperboat.user_machines m JOIN paperboat.machine_service_snapshots s ON s.machine_id=m.id AND s.installation_generation=m.installation_generation WHERE m.id IN (SELECT id FROM candidates) AND s.expires_at>now() AND m.online AND m.state='online' AND m.deleted_at IS NULL AND m.revoked_at IS NULL ORDER BY m.id LIMIT $2`, actor, MaxCandidateMachines+1)
 	if e != nil {
@@ -365,7 +365,7 @@ SELECT m.id,m.alias,m.description,s.installation_generation,s.boot_id,m.machine_
 		var i wire.Item
 		var data []byte
 		var automatic bool
-		if e = rows.Scan(&i.MachineID, &i.Alias, &i.Description, &i.InstallationGeneration, &i.BootID, &i.PolicyGeneration, &i.AnnouncementGeneration, &i.ExpiresAt, &data, &automatic); e != nil {
+		if e = rows.Scan(&i.MachineID, &i.Alias, &i.InstallationGeneration, &i.BootID, &i.PolicyGeneration, &i.AnnouncementGeneration, &i.ExpiresAt, &data, &automatic); e != nil {
 			return nil, e
 		}
 		automaticPersonal = append(automaticPersonal, automatic)

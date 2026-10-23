@@ -83,7 +83,7 @@ func TestPostgresRuntimeSuspendsReinstalledHostAndOnlyRoutesRevocationToRetiredK
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$2,$3,'active')`, accountID, "workos_env_runtime_generation", "env-runtime-generation@canary.invalid"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,installation_generation,configured_capabilities) VALUES ($1,$2,$3,'Reinstalled ENV host','linux','amd64','/host','online','released',$4,ARRAY['environment_injection'])`, host.SubjectID, accountID, environmentID, int64(host.SubjectGeneration+1)); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,installation_generation,configured_capabilities) VALUES ($1,$2,$3,'linux','amd64','/host','online','released',$4,ARRAY['environment_injection'])`, host.SubjectID, accountID, environmentID, int64(host.SubjectGeneration+1)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.environment_authority_roots(account_id,key_id,public_key) VALUES($1,$2,$3)`, accountID, roots.Keys[0].KeyID, []byte(roots.Keys[0].PublicKey)); err != nil {

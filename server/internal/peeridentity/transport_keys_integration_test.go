@@ -47,7 +47,7 @@ func TestTransportKeysCountOnlySessionsThatCanStillRefresh(t *testing.T) {
 		}
 	}
 	exec(`INSERT INTO paperboat.users (id,workos_subject,primary_email,status) VALUES ($1,$2,$3,'active')`, userID, "workos_"+userID, userID+"@example.test")
-	exec(`INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state,online,public_identity_key) VALUES ($1,$2,$3,'removed','linux','amd64','/home/test','disconnected',false,$4)`, removedMachineID, userID, "env_"+suffix, "identity_"+suffix)
+	exec(`INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root,state,online,public_identity_key) VALUES ($1,$2,$3,'linux','amd64','/home/test','disconnected',false,$4)`, removedMachineID, userID, "env_"+suffix, "identity_"+suffix)
 	repository, err := NewSQLRepository(store, audit.NewWriter(store))
 	if err != nil {
 		t.Fatal(err)

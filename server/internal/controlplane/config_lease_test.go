@@ -36,7 +36,7 @@ func TestConfigRepositoryLeaseSerializesFencesAndRevokes(t *testing.T) {
 			t.Fatal(err)
 		}
 		machineID := "machine_" + fixture.environment
-		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root) VALUES ($1,$2,$3,$3,'linux','unknown','/workspace')`, machineID, user, fixture.environment); err != nil {
+		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root) VALUES ($1,$2,$3,'linux','unknown','/workspace')`, machineID, user, fixture.environment); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_helpers (id,environment_id,state,generation) VALUES ($1,$2,'active',1)`, fixture.helper, fixture.environment); err != nil {
@@ -140,7 +140,7 @@ func TestConfigSyncAccountSuspensionRevokesAndPreventsAuthority(t *testing.T) {
 		{`INSERT INTO paperboat.users (id,workos_subject,primary_email,status) VALUES ($1,$2,$3,'active')`, []any{user, "workos_" + user, user + "@example.test"}},
 		{`INSERT INTO paperboat.control_config_repositories (id,owner_user_id,provider,external_ref,display_name) VALUES ($1,$2,'github',$1,'Config')`, []any{repositoryID, user}},
 		{`INSERT INTO paperboat.control_environments (id,workspace_id,owner_user_id) VALUES ($1,$2,$3)`, []any{environmentID, "workspace_" + suffix, user}},
-		{`INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root) VALUES ($1,$2,$3,'Machine','linux','unknown','/workspace')`, []any{"machine_" + suffix, user, environmentID}},
+		{`INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root) VALUES ($1,$2,$3,'linux','unknown','/workspace')`, []any{"machine_" + suffix, user, environmentID}},
 		{`INSERT INTO paperboat.control_helpers (id,environment_id,state,generation) VALUES ($1,$2,'active',1)`, []any{helperID, environmentID}},
 		{`INSERT INTO paperboat.control_config_assignments (id,machine_id,environment_id,repository_id,mode,consent_state,warning_revision,accepted_at,configuration_revision) VALUES ($1,$2,$3,$4,'bidirectional','accepted','warning-1',now(),repeat('a',64))`, []any{assignmentID, "machine_" + suffix, environmentID, repositoryID}},
 		{`INSERT INTO paperboat.control_config_credentials (jti_hash,jti,operation_key,request_hash,environment_id,machine_id,assignment_id,warning_revision,credential_ciphertext,expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, []any{[]byte("account-jti-hash-" + suffix), "account-jti-" + suffix, "account-credential-" + suffix, []byte("request"), environmentID, "machine_" + suffix, assignmentID, "warning-1", []byte("ciphertext"), now.Add(time.Hour)}},
@@ -228,7 +228,7 @@ func TestConfigLeaseUsesDistinctPushRepository(t *testing.T) {
 		{`INSERT INTO paperboat.users (id,workos_subject,primary_email,status) VALUES ($1,$1,$2,'active')`, []any{user, user + "@example.test"}},
 		{`INSERT INTO paperboat.control_config_repositories (id,owner_user_id,provider,external_ref,display_name) VALUES ($1,$3,'git',$1,'Pull'),($2,$3,'git',$2,'Push')`, []any{pull, push, user}},
 		{`INSERT INTO paperboat.control_environments (id,workspace_id,owner_user_id) VALUES ($1,$1,$2)`, []any{environment, user}},
-		{`INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root) VALUES ($1,$2,$3,'Machine','linux','unknown','/workspace')`, []any{machine, user, environment}},
+		{`INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root) VALUES ($1,$2,$3,'linux','unknown','/workspace')`, []any{machine, user, environment}},
 		{`INSERT INTO paperboat.control_config_assignments (id,machine_id,environment_id,repository_id,push_repository_id,mode,consent_state,warning_revision,accepted_at,configuration_revision) VALUES ($1,$2,$3,$4,$5,'bidirectional','accepted','warning',now(),repeat('a',64))`, []any{assignment, machine, environment, pull, push}},
 	}
 	for _, statement := range statements {

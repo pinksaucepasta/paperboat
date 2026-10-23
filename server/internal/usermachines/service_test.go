@@ -281,23 +281,13 @@ func TestTerminalSessionExpiryUsesConfirmedCloseTime(t *testing.T) {
 }
 
 func TestMachineMetadataValidation(t *testing.T) {
-	for _, value := range []string{"", "office", "Macbook Pro 2013", strings.Repeat("界", 160)} {
-		if invalidMachineDescription(value) {
-			t.Fatalf("description rejected: %q", value)
-		}
-	}
-	for _, value := range []string{"line\nbreak", "tab\tinside", "nul\x00inside", "control\u0085inside", strings.Repeat("界", 161), string([]byte{0xff})} {
-		if !invalidMachineDescription(value) {
-			t.Fatal("invalid description accepted")
-		}
-	}
 	for _, value := range []string{"", "Office", "office room", "api", "-office", strings.Repeat("a", 64)} {
 		if !invalidMachineAlias(value) {
 			t.Fatalf("invalid alias accepted: %q", value)
 		}
 	}
-	b, err := json.Marshal(UserMachine{Alias: "office", Description: "Macbook Pro 2013"})
-	if err != nil || strings.Contains(string(b), "display_name") || !strings.Contains(string(b), `"description":"Macbook Pro 2013"`) {
+	b, err := json.Marshal(UserMachine{Alias: "office"})
+	if err != nil || strings.Contains(string(b), "display_name") || strings.Contains(string(b), "description") {
 		t.Fatalf("machine metadata JSON: %s %v", b, err)
 	}
 }

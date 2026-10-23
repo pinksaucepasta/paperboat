@@ -83,7 +83,6 @@ func ValidateSnapshot(in Snapshot, now time.Time) error {
 type Item struct {
 	MachineID              string          `json:"machine_id"`
 	Alias                  string          `json:"alias"`
-	Description            string          `json:"description,omitempty"`
 	InstallationGeneration int64           `json:"installation_generation"`
 	BootID                 string          `json:"boot_id"`
 	PolicyGeneration       int64           `json:"policy_generation"`

@@ -19,8 +19,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"unicode"
-	"unicode/utf8"
 )
 
 // ReconcileUserMachineEntitlement is safe to call after every billing
@@ -171,7 +169,6 @@ func (s *Service) validatePairing(in PairingInput) error {
 		{s.policy.PairingLifetime <= 0, "pairing lifetime"},
 		{strings.TrimSpace(in.Verifier) == "", "verifier"},
 		{invalidMachineAlias(in.Alias), "alias"},
-		{invalidMachineDescription(in.Description), "description"},
 		{!validWorkspace, "workspace root"},
 		{keyErr != nil || len(publicKey) != ed25519.PublicKeySize, "public identity key"},
 		{(in.SSHUser == "") != (in.SSHPort == 0), "SSH target completeness"},
@@ -199,18 +196,6 @@ func (s *Service) validatePairingPlatform(token, platform, architecture string) 
 }
 
 func invalidMachineAlias(value string) bool { return !machinealias.Valid(strings.TrimSpace(value)) }
-func invalidMachineDescription(value string) bool {
-	value = strings.TrimSpace(value)
-	if !utf8.ValidString(value) || utf8.RuneCountInString(value) > 160 {
-		return true
-	}
-	for _, r := range value {
-		if unicode.IsControl(r) {
-			return true
-		}
-	}
-	return false
-}
 
 func validPairingSSHUser(value string) bool {
 	if value == "" || len(value) > 128 || strings.TrimSpace(value) != value || strings.ContainsAny(value, "\x00\r\n@") {
@@ -279,7 +264,7 @@ func mapMachine(row dbsqlc.UserMachine) UserMachine {
 		observed := row.RuntimeDiagnosticsObservedAt.Time
 		diagnostics.ObservedAt = &observed
 	}
-	m := UserMachine{Ownership: "personal", OwnerAccount: row.UserID, Permissions: []string{}, ID: row.ID, EnvironmentID: row.EnvironmentID, Description: row.Description, Alias: row.Alias, Platform: row.Platform, Architecture: row.Architecture, WorkspaceRoot: row.WorkspaceRoot, State: row.State, SeatState: row.SeatState, Online: row.Online, RuntimeVersions: row.RuntimeVersions, Capabilities: mapCapabilities(row.ConfiguredCapabilities, row.ObservedCapabilities), MachineCapabilities: mapMachineCapabilityPolicy(row), PublicIdentityKey: row.PublicIdentityKey.String, InstallationGeneration: row.InstallationGeneration, Availability: mapAvailability(row), RuntimeDiagnostics: diagnostics}
+	m := UserMachine{Ownership: "personal", OwnerAccount: row.UserID, Permissions: []string{}, ID: row.ID, EnvironmentID: row.EnvironmentID, Alias: row.Alias, Platform: row.Platform, Architecture: row.Architecture, WorkspaceRoot: row.WorkspaceRoot, State: row.State, SeatState: row.SeatState, Online: row.Online, RuntimeVersions: row.RuntimeVersions, Capabilities: mapCapabilities(row.ConfiguredCapabilities, row.ObservedCapabilities), MachineCapabilities: mapMachineCapabilityPolicy(row), PublicIdentityKey: row.PublicIdentityKey.String, InstallationGeneration: row.InstallationGeneration, Availability: mapAvailability(row), RuntimeDiagnostics: diagnostics}
 	if row.OwnerTeamID.Valid {
 		m.Ownership = "team"
 		m.OwnerTeamID = row.OwnerTeamID.String

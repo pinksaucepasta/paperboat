@@ -86,7 +86,7 @@ func TestActivationPostgres(t *testing.T) {
 		}
 	}()
 	exec(`INSERT INTO users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@example.test','active')`, owner)
-	exec(`INSERT INTO user_machines(id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$3,$1,'linux','amd64','/workspace','online','occupied',true,1)`, machine, owner, environment)
+	exec(`INSERT INTO user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$3,'linux','amd64','/workspace','online','occupied',true,1)`, machine, owner, environment)
 	policies, err := NewService(database, "preview.example.test")
 	if err != nil {
 		t.Fatal(err)

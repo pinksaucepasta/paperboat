@@ -3007,7 +3007,6 @@ type UserMachine struct {
 	CapabilitiesStatus             string
 	CapabilitiesErrorCode          sql.NullString
 	OwnerTeamID                    sql.NullString
-	Description                    string
 	PersonalAutoEnabled            bool
 	MachineServicePolicyGeneration int64
 }
@@ -3156,7 +3155,6 @@ type UserMachinePairing struct {
 	AuthenticatedSetupGeneration         sql.NullInt64
 	AuthenticatedSetupHelperEnrollmentID sql.NullString
 	KeepAwake                            bool
-	RequestedDescription                 string
 	BootstrapOwnerAccount                sql.NullString
 	OperationID                          sql.NullString
 	IdempotencyKey                       sql.NullString

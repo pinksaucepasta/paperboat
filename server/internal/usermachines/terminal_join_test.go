@@ -79,7 +79,7 @@ func TestPostgresTerminalJoinExactAuthorityAndIdempotency(t *testing.T) {
 		args []any
 	}{
 		{`INSERT INTO paperboat.users(id,workos_subject,primary_email,status) SELECT x,x,x||'@invalid.test','active' FROM unnest($1::text[]) x`, []any{[]string{owner, member}}},
-		{`INSERT INTO paperboat.user_machines(id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online,configured_capabilities,observed_capabilities) VALUES($1,$2,$3,'join','linux','amd64','/workspace','online','occupied',true,ARRAY['terminal_host'],ARRAY['terminal_host'])`, []any{machine, owner, project}},
+		{`INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,configured_capabilities,observed_capabilities) VALUES($1,$2,$3,'linux','amd64','/workspace','online','occupied',true,ARRAY['terminal_host'],ARRAY['terminal_host'])`, []any{machine, owner, project}},
 		{`INSERT INTO paperboat.user_machine_terminal_sessions(id,user_machine_id,name,owner_account,launch_cwd) VALUES($1,$2,'join',$3,'/workspace')`, []any{session, machine, owner}},
 	} {
 		if _, err = database.SQL().ExecContext(ctx, item.q, item.args...); err != nil {

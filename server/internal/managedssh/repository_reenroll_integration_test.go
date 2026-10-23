@@ -51,7 +51,7 @@ func hostKeysMoveToTheReplacement(t *testing.T, retiredState string) {
 		}
 	}
 	for _, value := range []struct{ id, userID string }{{oldID, user}, {newID, user}, {liveID, user}, {otherID, other}} {
-		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES ($1,$2,$3,$4,'linux','amd64','/workspace','online','occupied',true,1)`, value.id, value.userID, "env_"+value.id, value.id); err != nil {
+		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES ($1,$2,$3,'linux','amd64','/workspace','online','occupied',true,1)`, value.id, value.userID, "env_"+value.id); err != nil {
 			t.Fatal(err)
 		}
 	}

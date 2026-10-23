@@ -41,7 +41,7 @@ func TestAdmittedMachineIdentitySurvivesCredentialExpiryAndObservationLossUntilR
 	execute(`INSERT INTO users(id,workos_subject,primary_email,status) VALUES($1,$1,$2,'active')`, account, account+"@example.test")
 	defer database.SQL().ExecContext(context.Background(), `DELETE FROM users WHERE id=$1`, account)
 	execute(`INSERT INTO control_environments(id,workspace_id,owner_user_id) VALUES($1,$1,$2)`, environment, account)
-	execute(`INSERT INTO user_machines(id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$3,'actor','linux','amd64','/workspace','online','occupied',true,1)`, machine, account, environment)
+	execute(`INSERT INTO user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$3,'linux','amd64','/workspace','online','occupied',true,1)`, machine, account, environment)
 	execute(`INSERT INTO machine_control_renewals(operation_id,machine_id,installation_generation,credential_jti,issued_at,expires_at,session_generation) VALUES($1,$2,1,$1,$3,$4,1)`, jti, machine, now, now.Add(time.Second))
 	execute(`INSERT INTO machine_control_sessions(machine_id,installation_generation,session_generation,operation_id,credential_jti,issued_at,expires_at) VALUES($1,1,1,$2,$2,$3,$4)`, machine, jti, now, now.Add(time.Second))
 	verifier, err := NewSQLMachineStateVerifier(database)

@@ -47,7 +47,7 @@ VALUES ($1, $2, $3, 'active')`, accountID, "workos_preview_"+suffix, "preview-"+
 	}
 	machineIDs := []string{"machine_" + suffix, "machine_expire_" + suffix, "machine_owner_" + suffix}
 	for _, id := range machineIDs {
-		if _, err := database.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines(id,user_id,environment_id,description,platform,architecture,workspace_root,state,online,configured_capabilities) VALUES($1,$2,$1,$1,'linux','amd64','/workspace','online',true,ARRAY['preview_launch']::text[])`, id, accountID); err != nil {
+		if _, err := database.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,online,configured_capabilities) VALUES($1,$2,$1,'linux','amd64','/workspace','online',true,ARRAY['preview_launch']::text[])`, id, accountID); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -332,7 +332,7 @@ func TestSharedPreviewMachineAuthorityOnPostgres(t *testing.T) {
 	if _, err = tx.Exec(ctx, `INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'member',true),($1,$3,1,'member',true)`, team, owner, member); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO paperboat.user_machines(id,user_id,environment_id,description,platform,architecture,workspace_root,state,online,configured_capabilities) VALUES($1,$2,$1,$1,'linux','amd64','/workspace','online',true,ARRAY['preview_launch']::text[])`, machine, owner); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,online,configured_capabilities) VALUES($1,$2,$1,'linux','amd64','/workspace','online',true,ARRAY['preview_launch']::text[])`, machine, owner); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account) VALUES($1,'machine',$2,$3)`, team, machine, owner); err != nil {

@@ -24,7 +24,7 @@ func TestPostgresSharedMachineSessionIsolationAndRevocation(t *testing.T) {
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users(id,workos_subject,primary_email,status) SELECT x,x,x||'@invalid.test','active' FROM unnest($1::text[]) x`, []string{owner, member}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines(id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online,configured_capabilities,observed_capabilities) VALUES($1,$2,$3,'Shared host','linux','amd64','/workspace','online','occupied',true,ARRAY['terminal_host','file_receive'],ARRAY['terminal_host','file_receive'])`, machine, owner, "env_"+suffix); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,configured_capabilities,observed_capabilities) VALUES($1,$2,$3,'linux','amd64','/workspace','online','occupied',true,ARRAY['terminal_host','file_receive'],ARRAY['terminal_host','file_receive'])`, machine, owner, "env_"+suffix); err != nil {
 		t.Fatal(err)
 	}
 	authority := teams.NewService(store)
@@ -68,7 +68,7 @@ func TestPostgresSharedMachineSessionIsolationAndRevocation(t *testing.T) {
 	if err != nil || total != 1 || len(visible) != 1 || visible[0].CanManage || len(visible[0].Permissions) != 1 || visible[0].Permissions[0] != "terminal" {
 		t.Fatalf("shared machine visibility/permissions: total=%d count=%d err=%v", total, len(visible), err)
 	}
-	renamed, err := service.Rename(ctx, owner, machine, "shared-host", "Shared host")
+	renamed, err := service.Rename(ctx, owner, machine, "shared-host")
 	ownerPermissions := []string{"terminal", "exec", "managed_ssh", "files", "preview_manage", "tunnel_manage", "private_access"}
 	if err != nil || !renamed.CanManage || !slices.Equal(renamed.Permissions, ownerPermissions) {
 		t.Fatalf("rename management presentation: can_manage=%t permissions=%v error=%v", renamed.CanManage, renamed.Permissions, err)

@@ -61,8 +61,8 @@ VALUES ($1, $2, $3, 'active')`, accountID, "workos_"+suffix, "trk06-"+suffix+"@e
 	}
 	hostID := "mch_trk06_" + suffix
 	if _, err := database.SQL().ExecContext(ctx, `
-INSERT INTO paperboat.user_machines (id, user_id, environment_id, description, platform, architecture, workspace_root,
-   state, seat_state, public_identity_key, configured_capabilities) VALUES ($1, $2, $3, $4, 'linux', 'amd64', '/workspace', 'online', 'occupied', $5, ARRAY['preview_launch']::text[])`, hostID, accountID, "env_"+suffix, "Host "+suffix, strings.Repeat("A", 43)); err != nil {
+INSERT INTO paperboat.user_machines (id, user_id, environment_id, platform, architecture, workspace_root,
+   state, seat_state, public_identity_key, configured_capabilities) VALUES ($1, $2, $3, 'linux', 'amd64', '/workspace', 'online', 'occupied', $4, ARRAY['preview_launch']::text[])`, hostID, accountID, "env_"+suffix, strings.Repeat("A", 43)); err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _, _ = database.SQL().ExecContext(ctx, `DELETE FROM paperboat.users WHERE id=$1`, accountID) }()
@@ -475,8 +475,8 @@ VALUES ($1, $2, $3, 'active')`, accountID, "workos_"+accountID, accountID+"@exam
 	identityDigest := sha256.Sum256([]byte(hostID))
 	publicIdentityKey := base64.RawURLEncoding.EncodeToString(identityDigest[:])
 	if _, err := f.database.SQL().ExecContext(ctx, `
-INSERT INTO paperboat.user_machines (id, user_id, environment_id, description, platform, architecture, workspace_root,
-   state, seat_state, public_identity_key, configured_capabilities) VALUES ($1, $2, $3, $4, 'linux', 'amd64', '/workspace', 'online', 'occupied', $5, ARRAY['preview_launch']::text[])`, hostID, accountID, "env_"+hostID, label+" host", publicIdentityKey); err != nil {
+INSERT INTO paperboat.user_machines (id, user_id, environment_id, platform, architecture, workspace_root,
+   state, seat_state, public_identity_key, configured_capabilities) VALUES ($1, $2, $3, 'linux', 'amd64', '/workspace', 'online', 'occupied', $4, ARRAY['preview_launch']::text[])`, hostID, accountID, "env_"+hostID, publicIdentityKey); err != nil {
 		t.Fatal(err)
 	}
 	f.accounts = append(f.accounts, accountID)

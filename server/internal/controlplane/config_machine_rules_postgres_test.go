@@ -27,7 +27,7 @@ func TestConfigCustomRepositoryRulesAccessAndRevocation(t *testing.T) {
 		t.Fatal(err)
 	}
 	helperPrivate := enrollmentTestPrivateKey(environmentID)
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,alias,description,platform,architecture,workspace_root,public_identity_key,seat_state) VALUES ($1,$2,$3,'machine','Machine','linux','arm64','/workspace',$4,'occupied')`, "cfg_credential_machine_"+suffix, user, environmentID, base64.RawURLEncoding.EncodeToString(helperPrivate.Public().(ed25519.PublicKey))); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,alias,platform,architecture,workspace_root,public_identity_key,seat_state) VALUES ($1,$2,$3,'machine','linux','arm64','/workspace',$4,'occupied')`, "cfg_credential_machine_"+suffix, user, environmentID, base64.RawURLEncoding.EncodeToString(helperPrivate.Public().(ed25519.PublicKey))); err != nil {
 		t.Fatal(err)
 	}
 	privateKey := ed25519.NewKeyFromSeed([]byte(strings.Repeat("c", ed25519.SeedSize)))

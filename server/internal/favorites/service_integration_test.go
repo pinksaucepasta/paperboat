@@ -58,8 +58,8 @@ VALUES($1,$2,'active','team-pro',2,$3,$4)`, "bw_"+team, team, time.Now().Add(-ti
 	}
 	for _, fixture := range []struct{ id, owner string }{{sharedMachine, hostOwner}, {personalMachine, actor}} {
 		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines
-(id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online,configured_capabilities,observed_capabilities)
-VALUES($1,$2,$3,'Favorite host','linux','amd64','/workspace','online','occupied',true,ARRAY['terminal_host'],ARRAY['terminal_host'])`,
+(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,configured_capabilities,observed_capabilities)
+VALUES($1,$2,$3,'linux','amd64','/workspace','online','occupied',true,ARRAY['terminal_host'],ARRAY['terminal_host'])`,
 			fixture.id, fixture.owner, "env_"+fixture.id); err != nil {
 			t.Fatal(err)
 		}

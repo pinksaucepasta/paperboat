@@ -80,7 +80,7 @@ func newWorkspaceDescriptorFixture(t *testing.T) (workspaceMachineFixture, strin
 		args  []any
 	}{
 		{`UPDATE paperboat.user_machines SET configured_capabilities=ARRAY['terminal_host','file_receive','preview_launch'], observed_capabilities=ARRAY['terminal_host','file_receive','preview_launch'],public_identity_key=$2,worker_generation=1 WHERE id=$1`, []any{f.machine, publicKey}},
-		{`INSERT INTO paperboat.user_machines(id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online) VALUES($1,$2,$3,'Source','linux','amd64','/workspace','online','occupied',true)`, []any{source, f.account, "env_source_" + f.suffix}},
+		{`INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online) VALUES($1,$2,$3,'linux','amd64','/workspace','online','occupied',true)`, []any{source, f.account, "env_source_" + f.suffix}},
 		{`INSERT INTO paperboat.control_environments(id,workspace_id,owner_user_id,desired_state) VALUES($1,$2,$3,'active')`, []any{env, f.machine, f.account}},
 		{`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,roles,transports,registry_expires_at,region,failure_domain,capacity_limit,capacity_observed_at) VALUES($1,'development','1.0',$2,'ready',true,now(),ARRAY['edge'],ARRAY['http2','http3'],now()+interval '1 hour','test-region','test-domain',100,now())`, []any{edge, "epoch_" + f.suffix}},
 		{`INSERT INTO paperboat.control_connector_generations(environment_id,machine_id,generation,edge_pool,edge_node_id,state) VALUES($1,$2,1,'development',$3,'admitted')`, []any{env, f.machine, edge}},
@@ -130,8 +130,8 @@ SELECT x,x,x||'@invalid.test','active' FROM unnest($1::text[]) x`, []string{acco
 		t.Fatal(err)
 	}
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines
-(id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online,configured_capabilities,observed_capabilities)
-VALUES($1,$2,$3,'Workspace host','linux','amd64','/workspace','online','occupied',true,ARRAY['terminal_host','file_receive'],ARRAY['terminal_host','file_receive'])`, machine, account, "env_"+suffix); err != nil {
+(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,configured_capabilities,observed_capabilities)
+VALUES($1,$2,$3,'linux','amd64','/workspace','online','occupied',true,ARRAY['terminal_host','file_receive'],ARRAY['terminal_host','file_receive'])`, machine, account, "env_"+suffix); err != nil {
 		t.Fatal(err)
 	}
 	for _, team := range []string{teamOne, teamTwo} {

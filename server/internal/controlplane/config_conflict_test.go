@@ -26,7 +26,7 @@ func TestConfigConflictResolutionRequiresCurrentAssignmentHeadAndConflictRevisio
 		{`INSERT INTO paperboat.users (id,workos_subject,primary_email,status) VALUES ($1,$2,$3,'active')`, []any{user, "workos_" + user, user + "@example.test"}},
 		{`INSERT INTO paperboat.control_config_repositories (id,owner_user_id,provider,external_ref,display_name,state) VALUES ($1,$2,'github',$1,'owner/config','active')`, []any{repository, user}},
 		{`INSERT INTO paperboat.control_environments (id,workspace_id,owner_user_id) VALUES ($1,$1,$2)`, []any{environment, user}},
-		{`INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root) VALUES ($1,$2,$3,'Conflict host','linux','unknown','/workspace')`, []any{"machine_" + suffix, user, environment}},
+		{`INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root) VALUES ($1,$2,$3,'linux','unknown','/workspace')`, []any{"machine_" + suffix, user, environment}},
 		{`INSERT INTO paperboat.control_helpers (id,environment_id,state,generation) VALUES ($1,$2,'active',1)`, []any{helper, environment}},
 		{`INSERT INTO paperboat.control_config_assignments (id,machine_id,environment_id,repository_id,mode,consent_state,warning_revision,version,accepted_at,configuration_revision) VALUES ($1,$2,$3,$4,'bidirectional','accepted','warning-1',3,now(),repeat('a',64))`, []any{assignment, "machine_" + suffix, environment, repository}},
 		{`INSERT INTO paperboat.control_config_sync_statuses

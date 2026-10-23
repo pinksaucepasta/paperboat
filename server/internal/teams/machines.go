@@ -26,7 +26,6 @@ type MachineBinding struct {
 	MachineID              string   `json:"machine_id"`
 	OwnerAccount           string   `json:"owner_account"`
 	OwnerTeamID            string   `json:"owner_team_id,omitempty"`
-	Description            string   `json:"description,omitempty"`
 	Alias                  string   `json:"alias"`
 	State                  string   `json:"state"`
 	Online                 bool     `json:"online"`
@@ -325,13 +324,13 @@ func unbindMachineTx(ctx context.Context, tx *db.Tx, team, machine string) error
 
 func readMachinesTx(ctx context.Context, tx *db.Tx, team string, out *Team) error {
 	out.Machines = []MachineBinding{}
-	rows, err := tx.Query(ctx, `SELECT m.id,CASE WHEN m.owner_team_id IS NULL THEN m.user_id ELSE '' END,coalesce(m.owner_team_id,''),m.alias,m.description,m.state,m.online,m.configured_capabilities,b.generation,b.active FROM team_resource_bindings b JOIN user_machines m ON m.id=b.resource_id WHERE b.team_id=$1 AND b.resource_kind='machine' ORDER BY m.id`, team)
+	rows, err := tx.Query(ctx, `SELECT m.id,CASE WHEN m.owner_team_id IS NULL THEN m.user_id ELSE '' END,coalesce(m.owner_team_id,''),m.alias,m.state,m.online,m.configured_capabilities,b.generation,b.active FROM team_resource_bindings b JOIN user_machines m ON m.id=b.resource_id WHERE b.team_id=$1 AND b.resource_kind='machine' ORDER BY m.id`, team)
 	if err != nil {
 		return err
 	}
 	for rows.Next() {
 		var b MachineBinding
-		if err = rows.Scan(&b.MachineID, &b.OwnerAccount, &b.OwnerTeamID, &b.Alias, &b.Description, &b.State, &b.Online, &b.ConfiguredCapabilities, &b.Generation, &b.Active); err != nil {
+		if err = rows.Scan(&b.MachineID, &b.OwnerAccount, &b.OwnerTeamID, &b.Alias, &b.State, &b.Online, &b.ConfiguredCapabilities, &b.Generation, &b.Active); err != nil {
 			rows.Close()
 			return err
 		}

@@ -222,10 +222,9 @@ func (s *Service) Get(ctx context.Context, userID, userMachineID string) (UserMa
 	return item, nil
 }
 
-func (s *Service) Rename(ctx context.Context, userID, userMachineID, alias, description string) (UserMachine, error) {
+func (s *Service) Rename(ctx context.Context, userID, userMachineID, alias string) (UserMachine, error) {
 	userID, userMachineID, alias = strings.TrimSpace(userID), strings.TrimSpace(userMachineID), strings.TrimSpace(alias)
-	description = strings.TrimSpace(description)
-	if userID == "" || userMachineID == "" || invalidMachineAlias(alias) || invalidMachineDescription(description) {
+	if userID == "" || userMachineID == "" || invalidMachineAlias(alias) {
 		return UserMachine{}, ErrInvalidMachineName
 	}
 	var result UserMachine
@@ -233,7 +232,7 @@ func (s *Service) Rename(ctx context.Context, userID, userMachineID, alias, desc
 		if err := teams.Lock(ctx, tx); err != nil {
 			return err
 		}
-		row, err := tx.Queries().RenameUserMachine(ctx, dbsqlc.RenameUserMachineParams{Alias: alias, Description: description, ID: userMachineID, UserID: userID})
+		row, err := tx.Queries().RenameUserMachine(ctx, dbsqlc.RenameUserMachineParams{Alias: alias, ID: userMachineID, UserID: userID})
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}

@@ -72,7 +72,7 @@ func TestPostgresMachineAdmission(t *testing.T) {
 		t.Helper()
 		id += "_" + suffix
 		exec(`INSERT INTO paperboat.control_environments(id,workspace_id,owner_user_id) VALUES($1,$1,$2)`, "env_"+id, user)
-		exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state) VALUES($1,$2,$3,'fixture','linux','amd64','/workspace','offline','released')`, id, user, "env_"+id)
+		exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state) VALUES($1,$2,$3,'linux','amd64','/workspace','offline','released')`, id, user, "env_"+id)
 		return id
 	}
 	op := 0

@@ -76,7 +76,7 @@ func TestBrowserViewerPolicyPostgres(t *testing.T) {
 ($5,$5,'person@sub.company.test',true,'active'),
 ($6,$6,'person@notcompany.test',true,'active'),
 ($7,$7,'person@company.test',false,'active')`, owner, teamViewer, emailViewer, domainViewer, subdomainViewer, suffixViewer, unverifiedViewer)
-	exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,description,platform,architecture,workspace_root,state,seat_state) VALUES($1,$2,$3,'browser-host','Viewer policy test host','linux','amd64','/workspace','offline','released')`, machine, owner, "env_vp_"+suffix)
+	exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state) VALUES($1,$2,$3,'browser-host','linux','amd64','/workspace','offline','released')`, machine, owner, "env_vp_"+suffix)
 	exec(`INSERT INTO paperboat.tunnels(id,account_id,name,desired_state,access_mode,generation,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id,created_at,updated_at) VALUES($1,$2,'viewer-policy','active','public',1,$3,$4,$5,$2,$6,$6)`, tunnel, owner, "endpoint_"+endpointID, "https://"+host, machine, now)
 	exec(`INSERT INTO paperboat.tunnel_routes(id,tunnel_id,name,protocol,match_type,match_hostname,path_prefix,priority,origin_scheme,origin_address,desired_state,generation,created_by_actor_id,updated_by_actor_id,created_at,updated_at) VALUES
 ($1,$2,'a','http','managed',$3,'/a',100,'http','127.0.0.1:3100','active',1,$4,$4,$5,$5),

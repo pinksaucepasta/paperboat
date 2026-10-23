@@ -53,7 +53,7 @@ func TestPostgresLayerObservationsReceiptFencesAndRevocation(t *testing.T) {
 		}
 	}
 	exec(`INSERT INTO users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@invalid.test','active'),($2,$2,$2||'@invalid.test','active')`, owner, foreign)
-	exec(`INSERT INTO user_machines(id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,configured_capabilities) VALUES($1,$2,$3,'layer observation fixture','linux','amd64','/layer-test','online','released',ARRAY['environment_injection'])`, machine, owner, "lo_env_"+suffix)
+	exec(`INSERT INTO user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,configured_capabilities) VALUES($1,$2,$3,'linux','amd64','/layer-test','online','released',ARRAY['environment_injection'])`, machine, owner, "lo_env_"+suffix)
 	public := bytes.Repeat([]byte{19}, 32)
 	document := "sha256:" + strings.Repeat("a", 64)
 	exec(`INSERT INTO environment_vault_hosts(machine_id,account_id,installation_generation,host_key_generation,host_public) VALUES($1,$2,1,1,$3)`, machine, owner, public)

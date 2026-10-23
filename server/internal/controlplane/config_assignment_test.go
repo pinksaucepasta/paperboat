@@ -33,7 +33,7 @@ func TestConfigAssignmentOwnershipConcurrencyAndMachineConsent(t *testing.T) {
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_environments (id,workspace_id,owner_user_id) VALUES ($1,$2,$3) ON CONFLICT (id) DO UPDATE SET owner_user_id=EXCLUDED.owner_user_id, desired_state='active'`, env, "workspace_"+suffix, userA); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,alias,description,platform,architecture,workspace_root) VALUES ($1,$2,$3,'machine','Machine','linux','arm64','/workspace')`, machineID, userA, env); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,alias,platform,architecture,workspace_root) VALUES ($1,$2,$3,'machine','linux','arm64','/workspace')`, machineID, userA, env); err != nil {
 		t.Fatal(err)
 	}
 	service := NewConfigAssignmentService(store, nil, "warning-1")
@@ -159,7 +159,7 @@ func TestConfigCredentialIsBoundReplaySafeAndRevokedWithAssignment(t *testing.T)
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_environments (id,workspace_id,owner_user_id) VALUES ($1,$2,$3)`, environmentID, "workspace_"+suffix, user); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,alias,description,platform,architecture,workspace_root,seat_state) VALUES ($1,$2,$3,'machine','Machine','linux','arm64','/workspace','occupied')`, "cfg_credential_machine_"+suffix, user, environmentID); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,alias,platform,architecture,workspace_root,seat_state) VALUES ($1,$2,$3,'machine','linux','arm64','/workspace','occupied')`, "cfg_credential_machine_"+suffix, user, environmentID); err != nil {
 		t.Fatal(err)
 	}
 	privateKey := ed25519.NewKeyFromSeed([]byte(strings.Repeat("c", ed25519.SeedSize)))
@@ -290,7 +290,7 @@ func TestConfigAssignmentEveryMachineRequiresConsent(t *testing.T) {
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_environments (id,workspace_id,owner_user_id) VALUES ($1,$2,$3) ON CONFLICT (id) DO UPDATE SET owner_user_id=EXCLUDED.owner_user_id, desired_state='active'`, env, "workspace_"+suffix, user); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root) VALUES ($1,$2,$3,'Machine','linux','unknown','/workspace')`, machineID, user, env); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root) VALUES ($1,$2,$3,'linux','unknown','/workspace')`, machineID, user, env); err != nil {
 		t.Fatal(err)
 	}
 	cleanupConfigTeamLifecycleFixture(t, store, []string{user}, nil, []string{env}, []string{machineID})
@@ -348,7 +348,7 @@ func TestTeamConfigDefaultUsesMemberProviderConnectionAndExplicitReplacement(t *
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_environments (id,workspace_id,owner_user_id) VALUES ($1,$2,$3)`, environmentID, "workspace_"+suffix, member); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,alias,description,platform,architecture,workspace_root) VALUES ($1,$2,$3,'machine','Machine','linux','arm64','/workspace')`, machineID, member, environmentID); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,alias,platform,architecture,workspace_root) VALUES ($1,$2,$3,'machine','linux','arm64','/workspace')`, machineID, member, environmentID); err != nil {
 		t.Fatal(err)
 	}
 	service := NewConfigAssignmentService(store, nil, "warning")
@@ -482,7 +482,7 @@ func TestConfigUpdatePolicyPreservesBaselineIdentity(t *testing.T) {
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_environments (id,workspace_id,owner_user_id) VALUES ($1,$2,$3)`, environmentID, "workspace_"+suffix, user); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,alias,description,platform,architecture,workspace_root,seat_state) VALUES ($1,$2,$3,'machine','Machine','linux','arm64','/workspace','occupied')`, "cfg_credential_machine_"+suffix, user, environmentID); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,alias,platform,architecture,workspace_root,seat_state) VALUES ($1,$2,$3,'machine','linux','arm64','/workspace','occupied')`, "cfg_credential_machine_"+suffix, user, environmentID); err != nil {
 		t.Fatal(err)
 	}
 	privateKey := ed25519.NewKeyFromSeed([]byte(strings.Repeat("c", ed25519.SeedSize)))
@@ -588,7 +588,7 @@ func TestConfigPendingBootstrapCannotConsentAndProjectionDigestFencesIdentity(t 
 	}{
 		{`INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$2,'active')`, []any{user, user + "@example.test"}},
 		{`INSERT INTO paperboat.control_environments(id,workspace_id,owner_user_id) VALUES($1,$1,$2)`, []any{env, user}},
-		{`INSERT INTO paperboat.user_machines(id,user_id,environment_id,description,platform,architecture,workspace_root) VALUES($1,$2,$3,'Machine','linux','arm64','/workspace')`, []any{machine, user, env}},
+		{`INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root) VALUES($1,$2,$3,'linux','arm64','/workspace')`, []any{machine, user, env}},
 	} {
 		if _, err := store.SQL().ExecContext(ctx, fixture.sql, fixture.args...); err != nil {
 			t.Fatal(err)

@@ -73,17 +73,17 @@ func TestRenameMachineUsesOnlyActiveNames(t *testing.T) {
 	}
 
 	service := New(store, audit.NewWriter(store), Policy{}, testSeatAuthorizer{})
-	renamed, err := service.Rename(ctx, userID, "mch_rename_other_"+suffix, "  reusable  ", "")
+	renamed, err := service.Rename(ctx, userID, "mch_rename_other_"+suffix, "  reusable  ")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if renamed.Alias != "reusable" {
 		t.Fatalf("display name = %q, want Reusable", renamed.Alias)
 	}
-	if _, err := service.Rename(ctx, userID, renamed.ID, "active", ""); !errors.Is(err, ErrMachineNameConflict) {
+	if _, err := service.Rename(ctx, userID, renamed.ID, "active"); !errors.Is(err, ErrMachineNameConflict) {
 		t.Fatalf("active-name rename error = %v, want ErrMachineNameConflict", err)
 	}
-	if _, err := service.Rename(ctx, userID, renamed.ID, " ", ""); !errors.Is(err, ErrInvalidMachineName) {
+	if _, err := service.Rename(ctx, userID, renamed.ID, " "); !errors.Is(err, ErrInvalidMachineName) {
 		t.Fatalf("blank-name rename error = %v, want ErrInvalidMachineName", err)
 	}
 }
@@ -769,7 +769,7 @@ func TestPersistAuthenticatedHelperEnrollmentCompensatesBindFailure(t *testing.T
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.cli_client_sessions (id,user_id,client_id,client_label,device_type,os,scopes,state,created_at,approved_at) VALUES ($1,$2,$3,'Host compensation','desktop','linux',ARRAY['machines:connect'],'active',now(),now())`, sessionID, userID, "client_authenticated_compensation_"+suffix); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,public_identity_key,installation_generation) VALUES ($1,$2,$3,'Host compensation','linux','amd64','/workspace','offline','occupied',$4,2)`, machineID, userID, environmentID, publicKey); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,public_identity_key,installation_generation) VALUES ($1,$2,$3,'linux','amd64','/workspace','offline','occupied',$4,2)`, machineID, userID, environmentID, publicKey); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_environments (id,workspace_id,owner_user_id,desired_state) VALUES ($1,$2,$3,'active')`, environmentID, machineID, userID); err != nil {
@@ -961,7 +961,7 @@ func TestEntitlementRevocationExpiresAuthenticatedHostGrant(t *testing.T) {
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.cli_client_sessions (id,user_id,client_id,client_label,device_type,os,scopes,state,created_at,approved_at) VALUES ($1,$2,$3,'Entitlement Host','desktop','linux',ARRAY['machines:connect'],'active',now(),now())`, sessionID, userID, "client_entitlement_host_"+suffix); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,public_identity_key,installation_generation) VALUES ($1,$2,$3,'Entitlement Host','linux','amd64','/workspace','offline','occupied',$4,2)`, machineID, userID, environmentID, publicKey); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,public_identity_key,installation_generation) VALUES ($1,$2,$3,'linux','amd64','/workspace','offline','occupied',$4,2)`, machineID, userID, environmentID, publicKey); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_environments (id,workspace_id,owner_user_id,desired_state) VALUES ($1,$2,$3,'active')`, environmentID, machineID, userID); err != nil {
@@ -1032,7 +1032,7 @@ func TestRepeatedPairingPreservesExplicitCapabilitiesAndInstallationAuthority(t 
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machine_entitlements (id,user_id,provider_subscription_id,product_code,state,seat_quantity,allowance_bytes,current_period_start,current_period_end) VALUES ($1,$2,$3,'connected-test','active',1,1048576,now()-interval '1 hour',now()+interval '1 hour')`, "ume_client_pairing_host_"+suffix, userID, "sub_client_pairing_host_"+suffix); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,runtime_versions,configured_capabilities,public_identity_key,installation_generation) VALUES ($1,$2,$3,'client-pairing-host','linux','amd64','/workspace','offline','occupied','{}',ARRAY['file_receive','preview_launch','terminal_host','session_host','keep_awake'],$4,2)`, machineID, userID, environmentID, publicKey); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,runtime_versions,configured_capabilities,public_identity_key,installation_generation) VALUES ($1,$2,$3,'linux','amd64','/workspace','offline','occupied','{}',ARRAY['file_receive','preview_launch','terminal_host','session_host','keep_awake'],$4,2)`, machineID, userID, environmentID, publicKey); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_environments (id,workspace_id,owner_user_id,desired_state) VALUES ($1,$2,$3,'active')`, environmentID, machineID, userID); err != nil {
@@ -1090,7 +1090,7 @@ func TestWorkerMarksStaleMachineOfflineAndHeartbeatRestoresIt(t *testing.T) {
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users (id,workos_subject,primary_email,status) VALUES ($1,$2,$3,'active')`, userID, "workos_"+suffix, "cm-liveness-"+suffix+"@example.test"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online,last_seen_at) VALUES ($1,$2,$3,'Liveness','linux','amd64','/home/test','online','occupied',true,now()-interval '1 minute')`, userMachineID, userID, environmentID); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,last_seen_at) VALUES ($1,$2,$3,'linux','amd64','/home/test','online','occupied',true,now()-interval '1 minute')`, userMachineID, userID, environmentID); err != nil {
 		t.Fatal(err)
 	}
 	service := New(store, audit.NewWriter(store), Policy{OfflineAfter: 10 * time.Second}, nil)
@@ -1138,7 +1138,7 @@ func TestCreateTerminalSessionMapsDuplicateNameToConflict(t *testing.T) {
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users (id,workos_subject,primary_email,status) VALUES ($1,$2,$3,'active')`, userID, "workos_"+suffix, "session-"+suffix+"@example.test"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online,configured_capabilities,observed_capabilities) VALUES ($1,$2,$3,'Sessions','linux','amd64','/home/test','online','occupied',true,ARRAY['terminal_host'],ARRAY['terminal_host'])`, machineID, userID, "env_session_"+suffix); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,configured_capabilities,observed_capabilities) VALUES ($1,$2,$3,'linux','amd64','/home/test','online','occupied',true,ARRAY['terminal_host'],ARRAY['terminal_host'])`, machineID, userID, "env_session_"+suffix); err != nil {
 		t.Fatal(err)
 	}
 	service := New(store, audit.NewWriter(store), Policy{}, nil)
@@ -1158,7 +1158,7 @@ func TestCreateTerminalSessionIsUnlimitedPerMachine(t *testing.T) {
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users (id,workos_subject,primary_email,status) VALUES ($1,$2,$3,'active')`, userID, "workos_"+suffix, "unlimited-"+suffix+"@example.test"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online,configured_capabilities,observed_capabilities) VALUES ($1,$2,$3,'Unlimited','linux','amd64','/home/test','online','occupied',true,ARRAY['terminal_host'],ARRAY['terminal_host'])`, machineID, userID, "env_unlimited_"+suffix); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,configured_capabilities,observed_capabilities) VALUES ($1,$2,$3,'linux','amd64','/home/test','online','occupied',true,ARRAY['terminal_host'],ARRAY['terminal_host'])`, machineID, userID, "env_unlimited_"+suffix); err != nil {
 		t.Fatal(err)
 	}
 	service := New(store, audit.NewWriter(store), Policy{}, nil)
@@ -1207,7 +1207,7 @@ func TestTerminalSessionRetentionExpiresOnlyConfirmedClosedRows(t *testing.T) {
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users (id,workos_subject,primary_email,status) VALUES ($1,$2,$3,'active')`, userID, "workos_retention_"+suffix, "retention-"+suffix+"@example.test"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online,configured_capabilities,observed_capabilities) VALUES ($1,$2,$3,'Retention','linux','amd64','/home/test','online','occupied',true,ARRAY['terminal_host'],ARRAY['terminal_host'])`, machineID, userID, "env_retention_"+suffix); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,configured_capabilities,observed_capabilities) VALUES ($1,$2,$3,'linux','amd64','/home/test','online','occupied',true,ARRAY['terminal_host'],ARRAY['terminal_host'])`, machineID, userID, "env_retention_"+suffix); err != nil {
 		t.Fatal(err)
 	}
 	oldClose := time.Now().UTC().Add(-31 * 24 * time.Hour)
@@ -1325,7 +1325,7 @@ func TestCreateTerminalSessionAllocatesNameWhenOmitted(t *testing.T) {
 	}
 	defer store.SQL().ExecContext(ctx, `DELETE FROM paperboat.users WHERE id=$1`, userID)
 	for i, machine := range []string{machineID, machineID + "_other"} {
-		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,description,platform,architecture,workspace_root,state,seat_state,online,configured_capabilities,observed_capabilities) VALUES($1,$2,$1,$3,'Auto Sessions','linux','amd64','/home/test','online','occupied',true,ARRAY['terminal_host'],ARRAY['terminal_host'])`, machine, userID, fmt.Sprintf("names-%s-%d", suffix, i)); err != nil {
+		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,online,configured_capabilities,observed_capabilities) VALUES($1,$2,$1,$3,'linux','amd64','/home/test','online','occupied',true,ARRAY['terminal_host'],ARRAY['terminal_host'])`, machine, userID, fmt.Sprintf("names-%s-%d", suffix, i)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1373,7 +1373,7 @@ func TestAvailabilityPolicyLifecycle(t *testing.T) {
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users (id,workos_subject,primary_email,status) VALUES ($1,$2,$3,'active')`, userID, "workos_"+suffix, "availability-"+suffix+"@example.test"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online) VALUES ($1,$2,$3,'Availability','linux','amd64','/home/test','online','occupied',true)`, machineID, userID, environmentID); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online) VALUES ($1,$2,$3,'linux','amd64','/home/test','online','occupied',true)`, machineID, userID, environmentID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_environments (id,workspace_id,owner_user_id,desired_state) VALUES ($1,$2,$3,'active')`, environmentID, machineID, userID); err != nil {
@@ -1543,8 +1543,8 @@ VALUES ($1, $2, $3, 'connected-test', 'active', 1, 100, $4, $5)`, "ume_"+suffix,
 	}
 	if _, err := store.SQL().ExecContext(ctx, `
 INSERT INTO paperboat.user_machines
-  (id, user_id, environment_id, description, platform, architecture, workspace_root, state, seat_state, online)
-VALUES ($1, $2, $3, $4, 'linux', 'amd64', '/home/example', 'online', 'occupied', true)`, userMachineID, userID, "env_"+suffix, "UserMachine "+suffix); err != nil {
+  (id, user_id, environment_id, platform, architecture, workspace_root, state, seat_state, online)
+VALUES ($1, $2, $3, 'linux', 'amd64', '/home/example', 'online', 'occupied', true)`, userMachineID, userID, "env_"+suffix); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET observed_capabilities=ARRAY['file_receive'] WHERE id=$1`, userMachineID); err != nil {
@@ -2465,7 +2465,7 @@ func TestInstallationFailureRevokesIdentityReleasesSeatAndRetryIssuesNewIdentity
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users (id,workos_subject,primary_email,status) VALUES ($1,$2,$3,'active')`, userID, "workos_install_failure_"+suffix, "install-failure-"+suffix+"@example.test"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,alias,description,platform,architecture,workspace_root,state,seat_state,public_identity_key) VALUES ($1,$2,$3,'recovery-host','Recovery host','linux','amd64','/workspace','offline','occupied',$4)`, userMachineID, userID, environmentID, integrationPublicIdentityKey); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,public_identity_key) VALUES ($1,$2,$3,'recovery-host','linux','amd64','/workspace','offline','occupied',$4)`, userMachineID, userID, environmentID, integrationPublicIdentityKey); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machine_pairings (id,verifier_hash,user_code,requested_alias,platform,architecture,workspace_root,public_identity_key,state,user_machine_id,expires_at,installation_state,generation) VALUES ($1,$2,$3,'recovery-host','linux','amd64','/workspace',$4,'consumed',$5,now()+interval '10 minutes','installing',1)`, pairingID, []byte("verifier_"+suffix), "CODE"+suffix, integrationPublicIdentityKey, userMachineID); err != nil {
@@ -2593,7 +2593,7 @@ func TestMachineControlInitialReplayRotatesAfterExpiryWithoutCrossMachineCollisi
 	}
 	insertMachine := func(id, env string, key ed25519.PublicKey) {
 		t.Helper()
-		_, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,configured_capabilities,observed_capabilities,public_identity_key,installation_generation) VALUES ($1,$2,$3,$4,'windows','amd64','C:\workspace','offline','occupied',ARRAY['file_receive','preview_launch']::text[],ARRAY[]::text[],$5,3)`, id, userID, env, id, base64.RawURLEncoding.EncodeToString(key))
+		_, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,configured_capabilities,observed_capabilities,public_identity_key,installation_generation) VALUES ($1,$2,$3,'windows','amd64','C:\workspace','offline','occupied',ARRAY['file_receive','preview_launch']::text[],ARRAY[]::text[],$4,3)`, id, userID, env, base64.RawURLEncoding.EncodeToString(key))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2768,14 +2768,14 @@ func TestConnectIssuesEnvironmentBoundDescriptor(t *testing.T) {
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users (id,workos_subject,primary_email,status) VALUES ($1,$2,$3,'active')`, userID, "workos_"+suffix, "cm-connect-"+suffix+"@example.test"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online) VALUES ($1,$2,$3,'Studio Mac','darwin','arm64','/Users/paperboat','online','occupied',true)`, userMachineID, userID, environmentID); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online) VALUES ($1,$2,$3,'darwin','arm64','/Users/paperboat','online','occupied',true)`, userMachineID, userID, environmentID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET observed_capabilities=configured_capabilities WHERE id=$1`, userMachineID); err != nil {
 		t.Fatal(err)
 	}
 	sourceMachineID := "um_source_" + suffix
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online) VALUES ($1,$2,$3,'Source Mac','darwin','arm64','/Users/source','online','occupied',true)`, sourceMachineID, userID, "env_source_"+suffix); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online) VALUES ($1,$2,$3,'darwin','arm64','/Users/source','online','occupied',true)`, sourceMachineID, userID, "env_source_"+suffix); err != nil {
 		t.Fatal(err)
 	}
 	publicIdentityKey := newIntegrationPublicIdentityKey(t)
@@ -2866,14 +2866,14 @@ func TestCreateAndConnectTerminalSessionCompositionIsIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	publicIdentityKey := newIntegrationPublicIdentityKey(t)
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online,public_identity_key,worker_generation) VALUES ($1,$2,$3,'Studio Mac','darwin','arm64','/Users/paperboat','online','occupied',true,$4,1)`, userMachineID, userID, environmentID, publicIdentityKey); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,public_identity_key,worker_generation) VALUES ($1,$2,$3,'darwin','arm64','/Users/paperboat','online','occupied',true,$4,1)`, userMachineID, userID, environmentID, publicIdentityKey); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET observed_capabilities=configured_capabilities WHERE id=$1`, userMachineID); err != nil {
 		t.Fatal(err)
 	}
 	sourceMachineID := "um_mc_source_" + suffix
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online) VALUES ($1,$2,$3,'Source Mac','darwin','arm64','/Users/source','online','occupied',true)`, sourceMachineID, userID, "env_mc_source_"+suffix); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online) VALUES ($1,$2,$3,'darwin','arm64','/Users/source','online','occupied',true)`, sourceMachineID, userID, "env_mc_source_"+suffix); err != nil {
 		t.Fatal(err)
 	}
 	helperID := "helper_mc_" + suffix
@@ -2974,9 +2974,9 @@ func TestExecDescriptorPersistsExactRevocableCredential(t *testing.T) {
 		args  []any
 	}{
 		{`INSERT INTO paperboat.users (id,workos_subject,primary_email,status) VALUES ($1,$2,$3,'active')`, []any{userID, "workos_exec_" + suffix, "exec-" + suffix + "@example.test"}},
-		{`INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online,public_identity_key,worker_generation) VALUES ($1,$2,$3,'Exec Host','linux','amd64','/workspace','online','occupied',true,$4,1)`, []any{machineID, userID, environmentID, publicIdentityKey}},
+		{`INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,public_identity_key,worker_generation) VALUES ($1,$2,$3,'linux','amd64','/workspace','online','occupied',true,$4,1)`, []any{machineID, userID, environmentID, publicIdentityKey}},
 		{`UPDATE paperboat.user_machines SET observed_capabilities=configured_capabilities WHERE id=$1`, []any{machineID}},
-		{`INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online) VALUES ($1,$2,$3,'Exec Source','linux','amd64','/source','online','occupied',true)`, []any{sourceMachineID, userID, "env_exec_source_" + suffix}},
+		{`INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online) VALUES ($1,$2,$3,'linux','amd64','/source','online','occupied',true)`, []any{sourceMachineID, userID, "env_exec_source_" + suffix}},
 		{`INSERT INTO paperboat.control_environments (id,workspace_id,owner_user_id,desired_state) VALUES ($1,$2,$3,'active')`, []any{environmentID, machineID, userID}},
 		{`INSERT INTO paperboat.control_helpers (id,environment_id,state) VALUES ($1,$2,'active')`, []any{helperID, environmentID}},
 		{`INSERT INTO paperboat.control_tunnel_nodes (id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,roles,transports,registry_expires_at,region,failure_domain,capacity_limit,capacity_observed_at) VALUES ($1,'development','1.0',$2,'ready',true,now(),ARRAY['edge'],ARRAY['http2','http3'],now()+interval '1 hour','test-region','test-domain',100,now())`, []any{edgeNodeID, "epoch_exec_" + suffix}},
@@ -3077,7 +3077,7 @@ func TestTransferDefaultsAndBrokerPreserveMachineOwnershipAndRouteHost(t *testin
 	host := machineFixture{"um_transfer_host_" + suffix, "env_transfer_host_" + suffix, userID, "Host"}
 	foreign := machineFixture{"um_transfer_foreign_" + suffix, "env_transfer_foreign_" + suffix, foreignUserID, "Foreign"}
 	for _, machine := range []machineFixture{source, destination, host, foreign} {
-		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online) VALUES ($1,$2,$3,$4,'linux','amd64','/home/test','online','occupied',true)`, machine.id, machine.ownerID, machine.environmentID, machine.name); err != nil {
+		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online) VALUES ($1,$2,$3,'linux','amd64','/home/test','online','occupied',true)`, machine.id, machine.ownerID, machine.environmentID); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET observed_capabilities=configured_capabilities WHERE id=$1`, machine.id); err != nil {
@@ -3194,14 +3194,14 @@ func TestDisconnectRevokesMintedHelperSessionsAndRetriesOfflineConnector(t *test
 		t.Fatal(err)
 	}
 	publicIdentityKey := newIntegrationPublicIdentityKey(t)
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online,provider_route_route_id,provider_route_client_id,provider_route_http_base_url,provider_route_websocket_base_url,public_identity_key,worker_generation) VALUES ($1,$2,$3,'Studio Mac','darwin','arm64','/Users/paperboat','online','occupied',true,'tun_1','cli_1','https://machine.example','wss://machine.example',$4,1)`, userMachineID, userID, environmentID, publicIdentityKey); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,provider_route_route_id,provider_route_client_id,provider_route_http_base_url,provider_route_websocket_base_url,public_identity_key,worker_generation) VALUES ($1,$2,$3,'darwin','arm64','/Users/paperboat','online','occupied',true,'tun_1','cli_1','https://machine.example','wss://machine.example',$4,1)`, userMachineID, userID, environmentID, publicIdentityKey); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET observed_capabilities=configured_capabilities WHERE id=$1`, userMachineID); err != nil {
 		t.Fatal(err)
 	}
 	sourceMachineID := "um_source_revoke_" + suffix
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online) VALUES ($1,$2,$3,'Source Mac','darwin','arm64','/Users/source','online','occupied',true)`, sourceMachineID, userID, "env_source_revoke_"+suffix); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online) VALUES ($1,$2,$3,'darwin','arm64','/Users/source','online','occupied',true)`, sourceMachineID, userID, "env_source_revoke_"+suffix); err != nil {
 		t.Fatal(err)
 	}
 	helperID := "helper_revoke_" + suffix
@@ -3299,7 +3299,7 @@ func TestEntitlementLossRevokesMachineControlPlaneWithoutActiveSessions(t *testi
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users (id,workos_subject,primary_email,status) VALUES ($1,$2,$3,'active')`, userID, "workos_"+suffix, "cm-seat-"+suffix+"@example.test"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online,revoked_at) VALUES ($1,$2,$3,'Seat Loss','linux','amd64','/srv/workspace','revoked','released',false,now())`, userMachineID, userID, environmentID); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,revoked_at) VALUES ($1,$2,$3,'linux','amd64','/srv/workspace','revoked','released',false,now())`, userMachineID, userID, environmentID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_environments (id,workspace_id,owner_user_id,desired_state) VALUES ($1,$2,$3,'active')`, environmentID, userMachineID, userID); err != nil {
@@ -3360,8 +3360,8 @@ VALUES ($1,$2,$3,'user-machine-seat','active',1,1048576,now()-interval '1 day',n
 	}
 	for _, machine := range machines {
 		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines
-  (id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online,enrolled_at,created_at)
-VALUES ($1,$2,$3,$4,'linux','amd64','/srv/workspace','online','occupied',true,now()-$5::interval,now()-$5::interval)`, machine.id, userID, machine.environmentID, machine.label, machine.enrolledOffset); err != nil {
+  (id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,enrolled_at,created_at)
+VALUES ($1,$2,$3,'linux','amd64','/srv/workspace','online','occupied',true,now()-$4::interval,now()-$4::interval)`, machine.id, userID, machine.environmentID, machine.enrolledOffset); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_environments (id,workspace_id,owner_user_id,desired_state) VALUES ($1,$2,$3,'active')`, machine.environmentID, machine.id, userID); err != nil {
@@ -3610,7 +3610,7 @@ func TestMachineControlRenewalReplayAfterLostResponse(t *testing.T) {
 			t.Fatal(err)
 		}
 		keys[id] = private
-		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,configured_capabilities,observed_capabilities,public_identity_key,installation_generation) VALUES ($1,$2,$3,$1,'linux','amd64','/work','offline','occupied',ARRAY['file_receive']::text[],ARRAY[]::text[],$4,3)`, id, userID, "env_"+id, base64.RawURLEncoding.EncodeToString(public)); err != nil {
+		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,configured_capabilities,observed_capabilities,public_identity_key,installation_generation) VALUES ($1,$2,$3,'linux','amd64','/work','offline','occupied',ARRAY['file_receive']::text[],ARRAY[]::text[],$4,3)`, id, userID, "env_"+id, base64.RawURLEncoding.EncodeToString(public)); err != nil {
 			t.Fatal(err)
 		}
 	}

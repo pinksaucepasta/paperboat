@@ -62,7 +62,7 @@ func (s *Service) ReplaceRetiredMachineTx(ctx context.Context, tx *db.Tx, userID
 		return err
 	}
 	if replacement.Alias != retired.Alias && isNumberedVariant(replacement.Alias, retired.Alias) {
-		if _, err := tx.Queries().RenameUserMachine(ctx, dbsqlc.RenameUserMachineParams{Alias: retired.Alias, Description: replacement.Description, ID: replacement.ID, UserID: userID}); err != nil {
+		if _, err := tx.Queries().RenameUserMachine(ctx, dbsqlc.RenameUserMachineParams{Alias: retired.Alias, ID: replacement.ID, UserID: userID}); err != nil {
 			return err
 		}
 	}

@@ -74,7 +74,7 @@ func TestPostgresTransitionInventoryRejectsMachineWithEnvironmentDisabled(t *tes
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$2,$3,'active')`, authority.AccountID, "workos_env_client_only", "env-client-only@canary.invalid"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,configured_capabilities) VALUES ($1,$2,'env_client_only','Client only','linux','amd64','/client','online','occupied','{}')`, hostID, authority.AccountID); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,configured_capabilities) VALUES ($1,$2,'env_client_only','linux','amd64','/client','online','occupied','{}')`, hostID, authority.AccountID); err != nil {
 		t.Fatal(err)
 	}
 	err = store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {

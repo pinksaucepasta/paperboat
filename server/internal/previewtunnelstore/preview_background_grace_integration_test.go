@@ -42,7 +42,7 @@ func TestBackgroundPreviewKeepsItsURLThroughALongerOwnerGraceOnPostgres(t *testi
 		t.Fatal(err)
 	}
 	machine := "machine_bg_" + suffix
-	if _, err := database.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines(id,user_id,environment_id,description,platform,architecture,workspace_root,state,online,configured_capabilities) VALUES ($1,$2,$3,'bg host','linux','amd64','/workspace','online',true,ARRAY['preview_launch']::text[])`, machine, accountID, "env_"+machine); err != nil {
+	if _, err := database.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,online,configured_capabilities) VALUES ($1,$2,$3,'linux','amd64','/workspace','online',true,ARRAY['preview_launch']::text[])`, machine, accountID, "env_"+machine); err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _, _ = database.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.user_machines WHERE id=$1`, machine) }()
