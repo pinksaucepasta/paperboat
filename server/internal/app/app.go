@@ -673,6 +673,9 @@ func New(opts Options) (*App, error) {
 		privateAccessRoutesHandler = privateAccessProduction.AccessorRoutes
 	}
 	telemetryMetrics := telemetry.NewMetrics()
+	if edgeControlService != nil {
+		edgeControlService.SetRelayMetrics(telemetryMetrics)
+	}
 	telemetryHealth, telemetryErr := telemetry.NewHealthTracker(time.Now)
 	if telemetryErr != nil {
 		_ = store.Close()

@@ -60,6 +60,7 @@ const (
 	MetricHealthProbes              = "paperboat_server_health_probes_total"
 	MetricHTTPRequests              = "paperboat_server_http_requests_total"
 	MetricHTTPDuration              = "paperboat_server_http_request_duration_seconds"
+	MetricRelaySubjectObservations  = "paperboat_server_relay_subject_observations_total"
 )
 
 // Singular/plural aliases keep producer code readable without introducing a
@@ -111,6 +112,7 @@ var fixedMetricDescriptors = []MetricDescriptor{
 	{Name: MetricDNSVerificationDuration, Kind: MetricHistogram, Labels: []LabelDescriptor{{Name: "outcome", AllowedValues: []string{"success", "failed", "waiting"}}}, Histogram: &HistogramDescriptor{Buckets: []float64{1, 5, 10, 30, 60, 120, 300, 600}}},
 	{Name: MetricDNSVerificationFailures, Kind: MetricCounter, Labels: []LabelDescriptor{{Name: "failure_class", AllowedValues: []string{"nxdomain", "timeout", "conflict", "provider", "unauthorized", "invalid", "unknown"}}}},
 	{Name: MetricCertificateExpiryHorizon, Kind: MetricGauge, Labels: []LabelDescriptor{{Name: "horizon", AllowedValues: []string{"expired", "under_1h", "under_24h", "under_7d", "under_14d", "over_14d"}}}},
+	{Name: MetricRelaySubjectObservations, Kind: MetricCounter, Labels: []LabelDescriptor{{Name: "shape", AllowedValues: []string{"full", "digest_only", "required"}}}},
 	{Name: MetricPreviewAllocation, Kind: MetricCounter, Labels: []LabelDescriptor{{Name: "outcome", AllowedValues: []string{"success", "failed", "rejected", "canceled"}}}},
 	{Name: MetricPreviewLeaseCleanup, Kind: MetricCounter, Labels: []LabelDescriptor{{Name: "outcome", AllowedValues: []string{"success", "failed", "already_clean"}}}},
 	{Name: MetricOperationIdempotency, Kind: MetricCounter, Labels: []LabelDescriptor{{Name: "outcome", AllowedValues: []string{"new", "reused", "conflict"}}}},

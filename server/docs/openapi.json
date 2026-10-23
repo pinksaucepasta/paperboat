@@ -8502,8 +8502,7 @@
         "additionalProperties": false,
         "required": [
           "account_id",
-          "endpoint_id",
-          "generation"
+          "endpoint_id"
         ],
         "properties": {
           "account_id": {
@@ -8519,7 +8518,40 @@
           "generation": {
             "type": "integer",
             "minimum": 1,
-            "maximum": 9223372036854775806
+            "maximum": 9223372036854775806,
+            "description": "Only from relays that did not send subjects_digest: the grant generation of the subject."
+          }
+        }
+      },
+      "NativeRelayRevocation": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "account_id",
+          "endpoint_id"
+        ],
+        "properties": {
+          "account_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "endpoint_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "generation": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807,
+            "description": "Relays without subjects_digest only: revoke grants below this generation."
+          },
+          "min_generation": {
+            "type": "integer",
+            "minimum": 2,
+            "maximum": 9223372036854775807,
+            "description": "Digest relays only: the first grant generation still valid for this endpoint; grants below it are revoked. Listed only above 1."
           }
         }
       },
@@ -8560,9 +8592,9 @@
           },
           "revocations": {
             "type": "array",
-            "maxItems": 256,
+            "maxItems": 16384,
             "items": {
-              "$ref": "#/components/schemas/NativeRelaySubject"
+              "$ref": "#/components/schemas/NativeRelayRevocation"
             }
           },
           "subjects_required": {
@@ -8671,7 +8703,7 @@
           "subjects_digest": {
             "type": "string",
             "pattern": "^[0-9a-f]{64}$",
-            "description": "Lowercase hex SHA-256 of the subjects sorted by (account_id, endpoint_id), one account_id NUL endpoint_id NUL generation LF line each. Required when subjects is omitted."
+            "description": "Lowercase hex SHA-256 of the membership: one account_id NUL endpoint_id LF line per subject, sorted as strings. Grant generations are not part of it. Required when subjects is omitted."
           }
         }
       },

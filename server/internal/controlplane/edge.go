@@ -34,6 +34,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/nodeauth"
 	"github.com/pinksaucepasta/paperboat/server/internal/secrets"
 	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
+	"github.com/pinksaucepasta/paperboat/server/internal/telemetry"
 	"github.com/pinksaucepasta/paperboat/server/internal/tunnelv1"
 )
 
@@ -53,6 +54,7 @@ type EdgeService struct {
 	bandwidth               BandwidthDebiter
 	scopedBandwidth         ScopedBandwidthDebiter
 	relayQuota              *bandwidthgate.Gate
+	relayMetrics            *telemetry.Metrics
 	audit                   *audit.Writer
 	signer                  *mint.Provider
 	issuer                  string
@@ -67,6 +69,9 @@ type EdgeService struct {
 // SetRelayQuotaGate makes relay observations report which connected accounts are out of
 // bandwidth allowance (see relayNodeLeaseDocument.QuotaDenied). Nil leaves the list empty.
 func (s *EdgeService) SetRelayQuotaGate(gate *bandwidthgate.Gate) { s.relayQuota = gate }
+
+// SetRelayMetrics counts how relay observations carried their subjects (MetricRelaySubjectObservations).
+func (s *EdgeService) SetRelayMetrics(metrics *telemetry.Metrics) { s.relayMetrics = metrics }
 
 func (s *EdgeService) SetScopedBandwidthDebiter(debiter ScopedBandwidthDebiter) {
 	s.scopedBandwidth = debiter

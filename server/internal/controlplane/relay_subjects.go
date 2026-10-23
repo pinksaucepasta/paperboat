@@ -1,54 +1,58 @@
 package controlplane
 
 import (
-	"cmp"
 	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
+	"math"
 	"slices"
-	"strconv"
-	"strings"
 )
 
-// relaySubjectSet is a relay's full subject list in the form the revocation query reads it.
-type relaySubjectSet struct {
-	digest string
-	list   []relaySubject // sorted by (account_id, endpoint_id)
-	json   string         // list as a JSON array, the revocation query's input
+// relayFirstGeneration is the lowest grant generation: grants are minted at a configuration generation of at least 1,
+// so a revocation floor of 1 or less cuts nothing and is never sent.
+const relayFirstGeneration = 1
+
+// relayQueryer is the query surface of the revocation passes; a test counts their statements through it.
+type relayQueryer interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }
 
-// newRelaySubjectSet canonicalizes a full list: sorted by (account_id, endpoint_id), digested as
-// relaySubjectsDigest defines it.
+// relaySubjectSet is a relay's full subject list in the form the revocation queries read it.
+type relaySubjectSet struct {
+	digest string
+	list   []relaySubject
+	json   string // the list as a JSON array, the revocation queries' input
+}
+
+// newRelaySubjectSet canonicalizes a full list and digests it as relaySubjectsDigest defines.
 func newRelaySubjectSet(subjects []relaySubject) (relaySubjectSet, error) {
-	sorted := make([]relaySubject, len(subjects))
-	copy(sorted, subjects)
-	slices.SortFunc(sorted, func(a, b relaySubject) int {
-		return cmp.Or(strings.Compare(a.AccountID, b.AccountID), strings.Compare(a.EndpointID, b.EndpointID))
-	})
-	data, err := json.Marshal(sorted)
+	if subjects == nil {
+		subjects = []relaySubject{}
+	}
+	data, err := json.Marshal(subjects)
 	if err != nil {
 		return relaySubjectSet{}, err
 	}
-	return relaySubjectSet{digest: relaySubjectsDigest(sorted), list: sorted, json: string(data)}, nil
+	return relaySubjectSet{digest: relaySubjectsDigest(subjects), list: subjects, json: string(data)}, nil
 }
 
-// relaySubjectsDigest is the digest a relay sends as subjects_digest: lowercase hex SHA-256 over the
-// subjects sorted by (account_id, endpoint_id), each as one "account_id\x00endpoint_id\x00generation\n" line.
-// Identifiers never contain NUL or newline (checked on observation), so the lines are unambiguous.
-func relaySubjectsDigest(sorted []relaySubject) string {
+// relaySubjectsDigest is the digest a relay sends as subjects_digest: lowercase hex SHA-256 of the lines
+// "account_id\x00endpoint_id\n" for the subjects, sorted as strings. Membership only: grant generations change on
+// every peer-network refresh, so they are not part of the digest. Identifiers never contain NUL or newline
+// (checked on observation), so the lines are unambiguous.
+func relaySubjectsDigest(subjects []relaySubject) string {
+	lines := make([]string, len(subjects))
+	for i, subject := range subjects {
+		lines[i] = subject.AccountID + "\x00" + subject.EndpointID + "\n"
+	}
+	slices.Sort(lines)
 	h := sha256.New()
-	var line []byte
-	for _, subject := range sorted {
-		line = append(line[:0], subject.AccountID...)
-		line = append(line, 0)
-		line = append(line, subject.EndpointID...)
-		line = append(line, 0)
-		line = strconv.AppendInt(line, subject.Generation, 10)
-		line = append(line, '\n')
-		h.Write(line)
+	for _, line := range lines {
+		_, _ = io.WriteString(h, line)
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }
@@ -68,7 +72,7 @@ func validRelaySubjectsDigest(digest string) bool {
 // relayObservedSubjects is the subject list an observation is judged against. A digest-only observation uses
 // the list stored for the node's current generation and epoch when its digest matches; otherwise it asks for the
 // full list (required) and changes nothing. A full list is checked against the digest when one is sent, and
-// stored under it. A full list without a digest (an older relay) is only used.
+// stored under it when it differs from the stored one. A full list without a digest (an older relay) is only used.
 func relayObservedSubjects(ctx context.Context, tx *sql.Tx, in relayNodeObservation) (set relaySubjectSet, required bool, err error) {
 	if in.Subjects == nil && in.SubjectsDigest != "" {
 		stored, found, err := storedRelaySubjects(ctx, tx, in.NodeID, in.ProcessEpoch, in.Generation)
@@ -121,22 +125,44 @@ func storeRelaySubjects(ctx context.Context, tx *sql.Tx, node, epoch string, gen
 	return err
 }
 
-// relayRevocations answers the whole set in one query: a subject is revoked at its identity's relay revocation
-// generation when that is above the subject's generation, or at its generation+1 when no identity is eligible
-// for this node's pool.
-func relayRevocations(ctx context.Context, tx *sql.Tx, node string, set relaySubjectSet) ([]relaySubject, error) {
-	revoked := []relaySubject{}
-	rows, err := tx.QueryContext(ctx, `SELECT s.account_id,s.endpoint_id,coalesce(n.relay_revocation_generation,s.generation+1) FROM jsonb_to_recordset($2::jsonb) AS s(account_id text,endpoint_id text,generation bigint) LEFT JOIN paperboat.peer_network_identities n ON n.user_id=s.account_id AND n.endpoint_id=s.endpoint_id AND paperboat.node_pool_eligible($1,s.account_id,'relay') WHERE coalesce(n.relay_revocation_generation,s.generation+1)>s.generation ORDER BY s.account_id,s.endpoint_id`, node, set.json)
+// relayRevocationsByGeneration serves a relay that sent generations with its list (no subjects_digest): one query
+// for the whole list, revoking a subject at its identity's relay revocation generation when that is above the
+// subject's generation, or at generation+1 when no identity is eligible for this node's pool.
+func relayRevocationsByGeneration(ctx context.Context, q relayQueryer, node string, set relaySubjectSet) ([]relayRevocation, error) {
+	revoked := []relayRevocation{}
+	rows, err := q.QueryContext(ctx, `SELECT s.account_id,s.endpoint_id,coalesce(n.relay_revocation_generation,s.generation+1) FROM jsonb_to_recordset($2::jsonb) AS s(account_id text,endpoint_id text,generation bigint) LEFT JOIN paperboat.peer_network_identities n ON n.user_id=s.account_id AND n.endpoint_id=s.endpoint_id AND paperboat.node_pool_eligible($1,s.account_id,'relay') WHERE coalesce(n.relay_revocation_generation,s.generation+1)>s.generation ORDER BY s.account_id,s.endpoint_id`, node, set.json)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var subject relaySubject
-		if err := rows.Scan(&subject.AccountID, &subject.EndpointID, &subject.Generation); err != nil {
+		var revocation relayRevocation
+		if err := rows.Scan(&revocation.AccountID, &revocation.EndpointID, &revocation.Generation); err != nil {
 			return nil, err
 		}
-		revoked = append(revoked, subject)
+		revoked = append(revoked, revocation)
+	}
+	return revoked, rows.Err()
+}
+
+// relayMinGenerations serves a digest relay whose members carry no generation: one query over the whole membership
+// gives each member the first grant generation still valid for it (min_generation). An eligible identity's relay
+// revocation generation is that floor. An identity no longer eligible for this node's pool is cut at its
+// configuration generation+1, above every grant minted for it. A member with no identity is cut at the largest
+// generation. Only members above relayFirstGeneration are listed; the rest have nothing to revoke.
+func relayMinGenerations(ctx context.Context, q relayQueryer, node string, set relaySubjectSet) ([]relayRevocation, error) {
+	revoked := []relayRevocation{}
+	rows, err := q.QueryContext(ctx, `SELECT q.account_id,q.endpoint_id,q.min_generation FROM (SELECT s.account_id,s.endpoint_id,CASE WHEN n.user_id IS NULL THEN $3::bigint WHEN paperboat.node_pool_eligible($1,s.account_id,'relay') THEN n.relay_revocation_generation ELSE n.config_generation+1 END AS min_generation FROM jsonb_to_recordset($2::jsonb) AS s(account_id text,endpoint_id text) LEFT JOIN paperboat.peer_network_identities n ON n.user_id=s.account_id AND n.endpoint_id=s.endpoint_id) q WHERE q.min_generation>$4 ORDER BY q.account_id,q.endpoint_id`, node, set.json, int64(math.MaxInt64), int64(relayFirstGeneration))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var revocation relayRevocation
+		if err := rows.Scan(&revocation.AccountID, &revocation.EndpointID, &revocation.MinGeneration); err != nil {
+			return nil, err
+		}
+		revoked = append(revoked, revocation)
 	}
 	return revoked, rows.Err()
 }

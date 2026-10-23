@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/server/internal/telemetry"
 )
 
 const relayNodeLease = 15 * time.Second
@@ -22,7 +24,18 @@ type relayNodeStart struct {
 type relaySubject struct {
 	AccountID  string `json:"account_id"`
 	EndpointID string `json:"endpoint_id"`
-	Generation int64  `json:"generation"`
+	// Generation is the grant generation a relay without subjects_digest sends with each subject. Relays that
+	// send subjects_digest send membership only.
+	Generation int64 `json:"generation,omitempty"`
+}
+
+// relayRevocation is one lease entry. A relay without subjects_digest gets generation (the floor it must reach);
+// a digest relay gets min_generation, the first grant generation still valid for that endpoint, and no generation.
+type relayRevocation struct {
+	AccountID     string `json:"account_id"`
+	EndpointID    string `json:"endpoint_id"`
+	Generation    int64  `json:"generation,omitempty"`
+	MinGeneration int64  `json:"min_generation,omitempty"`
 }
 type relayNodeObservation struct {
 	NodeID       string `json:"node_id"`
@@ -46,7 +59,7 @@ type relayNodeLeaseDocument struct {
 	ProcessEpoch  string                `json:"process_epoch"`
 	ExpiresAt     int64                 `json:"expires_at"`
 	CapacityLimit int64                 `json:"capacity_limit"`
-	Revocations   []relaySubject        `json:"revocations"`
+	Revocations   []relayRevocation     `json:"revocations"`
 	PeerRelay     *relayServiceIdentity `json:"peer_relay,omitempty"`
 	// QuotaDenied lists connected accounts whose workspaces are all out of bandwidth allowance:
 	// the relay refuses their new admissions and closes their carriers (typed), until a later
@@ -122,7 +135,7 @@ func (s *EdgeService) StartRelayNode(ctx context.Context, in relayNodeStart) (re
 				return out, err
 			}
 		}
-		out = relayNodeLeaseDocument{NodeID: in.NodeID, Generation: gen, ProcessEpoch: epoch, ExpiresAt: min(expires.Unix(), s.clock().Add(relayNodeLease).Unix()), CapacityLimit: capacity, Revocations: []relaySubject{}}
+		out = relayNodeLeaseDocument{NodeID: in.NodeID, Generation: gen, ProcessEpoch: epoch, ExpiresAt: min(expires.Unix(), s.clock().Add(relayNodeLease).Unix()), CapacityLimit: capacity, Revocations: []relayRevocation{}}
 	} else {
 		if gen != in.ExpectedGeneration || epoch == in.ProcessEpoch {
 			return out, invalidUsage("relay_nodes.go:119")
@@ -133,7 +146,7 @@ func (s *EdgeService) StartRelayNode(ctx context.Context, in relayNodeStart) (re
 		if err != nil {
 			return out, err
 		}
-		out = relayNodeLeaseDocument{NodeID: in.NodeID, Generation: gen + 1, ProcessEpoch: in.ProcessEpoch, ExpiresAt: now.Add(relayNodeLease).Unix(), CapacityLimit: capacity, Revocations: []relaySubject{}}
+		out = relayNodeLeaseDocument{NodeID: in.NodeID, Generation: gen + 1, ProcessEpoch: in.ProcessEpoch, ExpiresAt: now.Add(relayNodeLease).Unix(), CapacityLimit: capacity, Revocations: []relayRevocation{}}
 	}
 	out.PeerRelay, err = relayServiceForNode(ctx, tx, in.NodeID)
 	if err != nil {
@@ -150,7 +163,12 @@ func (s *EdgeService) ObserveRelayNode(ctx context.Context, in relayNodeObservat
 	seen := map[string]bool{}
 	for _, subject := range in.Subjects {
 		k := subject.AccountID + "\x00" + subject.EndpointID
-		if !relayIdentifier(subject.AccountID) || !relayIdentifier(subject.EndpointID) || strings.ContainsAny(subject.AccountID+subject.EndpointID, "\x00\n") || subject.Generation < 1 || subject.Generation == int64(^uint64(0)>>1) || seen[k] {
+		// A digest relay sends membership only; a relay without a digest sends each grant generation.
+		generation := subject.Generation >= 1 && subject.Generation != int64(^uint64(0)>>1)
+		if in.SubjectsDigest != "" {
+			generation = subject.Generation == 0
+		}
+		if !relayIdentifier(subject.AccountID) || !relayIdentifier(subject.EndpointID) || strings.ContainsAny(subject.AccountID+subject.EndpointID, "\x00\n") || !generation || seen[k] {
 			return out, invalidUsage("relay_nodes.go:145")
 		}
 		seen[k] = true
@@ -195,14 +213,19 @@ func (s *EdgeService) ObserveRelayNode(ctx context.Context, in relayNodeObservat
 	if err != nil {
 		return out, err
 	}
-	out = relayNodeLeaseDocument{NodeID: in.NodeID, Generation: in.Generation, ProcessEpoch: in.ProcessEpoch, ExpiresAt: now.Add(relayNodeLease).Unix(), CapacityLimit: capacity, Revocations: []relaySubject{}}
+	out = relayNodeLeaseDocument{NodeID: in.NodeID, Generation: in.Generation, ProcessEpoch: in.ProcessEpoch, ExpiresAt: now.Add(relayNodeLease).Unix(), CapacityLimit: capacity, Revocations: []relayRevocation{}}
 	set, required, err := relayObservedSubjects(ctx, tx, in)
 	if err != nil {
 		return relayNodeLeaseDocument{}, err
 	}
 	out.SubjectsRequired = required
 	if !required {
-		if out.Revocations, err = relayRevocations(ctx, tx, in.NodeID, set); err != nil {
+		if in.SubjectsDigest != "" {
+			out.Revocations, err = relayMinGenerations(ctx, tx, in.NodeID, set)
+		} else {
+			out.Revocations, err = relayRevocationsByGeneration(ctx, tx, in.NodeID, set)
+		}
+		if err != nil {
 			return relayNodeLeaseDocument{}, err
 		}
 	}
@@ -213,6 +236,7 @@ func (s *EdgeService) ObserveRelayNode(ctx context.Context, in relayNodeObservat
 	if err := tx.Commit(); err != nil {
 		return relayNodeLeaseDocument{}, err
 	}
+	s.countRelayObservation(in, required)
 	// After the commit and outside the transaction: read-only, cached, bounded, fail-open.
 	if s.relayQuota != nil && in.QuotaDeniedSupported {
 		accounts := make([]string, 0, len(set.list))
@@ -226,6 +250,22 @@ func (s *EdgeService) ObserveRelayNode(ctx context.Context, in relayNodeObservat
 		out.QuotaDenied = s.relayQuota.DeniedAmong(ctx, accounts, now, relayQuotaFreshLookups)
 	}
 	return out, nil
+}
+
+// countRelayObservation records how an observation carried its subjects. Metrics are best-effort: an observation
+// never fails on them.
+func (s *EdgeService) countRelayObservation(in relayNodeObservation, required bool) {
+	if s.relayMetrics == nil {
+		return
+	}
+	shape := "full"
+	if in.SubjectsDigest != "" && in.Subjects == nil {
+		shape = "digest_only"
+		if required {
+			shape = "required"
+		}
+	}
+	_ = s.relayMetrics.IncCounter(telemetry.MetricRelaySubjectObservations, telemetry.MetricLabels{"shape": shape})
 }
 
 // relayQuotaFreshLookups bounds the uncached allowance reads one relay observation may cost.
