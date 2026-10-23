@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -243,10 +244,42 @@ type ConfigSyncPathSummary struct {
 }
 
 // ConfigSyncStatus gets the authenticated account's configuration sync state.
+// ErrConfigStatusInvalid means the server's config status pages did not end or did not advance.
+var ErrConfigStatusInvalid = errors.New("paperboat-server returned an invalid config status page")
+
+// configStatusPageSize is the largest page the server serves; configStatusMaxPages bounds the walk.
+const configStatusPageSize, configStatusMaxPages = 200, 50
+
+// ConfigSyncStatus reads every machine's status. The server pages it (50 by default); reading only
+// the first page hid machines past the 50th from status, conflict, force and approve (pbvm3
+// lanel-e, 2026-10-23, on an account with 178 machines).
 func (c *Client) ConfigSyncStatus(ctx context.Context) (ConfigSyncStatus, error) {
 	var out ConfigSyncStatus
-	err := c.do(ctx, http.MethodGet, "/v1/config-sync/status", nil, &out)
-	return out, err
+	offset := 0
+	for page := 0; page < configStatusMaxPages; page++ {
+		var current struct {
+			ConfigSyncStatus
+			Pagination *struct {
+				NextOffset *int `json:"next_offset"`
+			} `json:"pagination"`
+		}
+		path := fmt.Sprintf("/v1/config-sync/status?limit=%d&offset=%d", configStatusPageSize, offset)
+		if err := c.do(ctx, http.MethodGet, path, nil, &current); err != nil {
+			return ConfigSyncStatus{}, err
+		}
+		if page == 0 {
+			out.State = current.State
+		}
+		out.Environments = append(out.Environments, current.Environments...)
+		if current.Pagination == nil || current.Pagination.NextOffset == nil {
+			return out, nil
+		}
+		if *current.Pagination.NextOffset <= offset {
+			return ConfigSyncStatus{}, fmt.Errorf("config status page did not advance: %w", ErrConfigStatusInvalid)
+		}
+		offset = *current.Pagination.NextOffset
+	}
+	return ConfigSyncStatus{}, fmt.Errorf("config status has more than %d pages: %w", configStatusMaxPages, ErrConfigStatusInvalid)
 }
 
 type ConfigConflictRequest struct {

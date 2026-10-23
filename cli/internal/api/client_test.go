@@ -963,3 +963,34 @@ func TestPublicCallBoundsResponseAndKeepsOversizeCausePrivate(t *testing.T) {
 		t.Fatalf("response content escaped in error: %v", err)
 	}
 }
+
+// The server pages config status; every page is read so machines past the first 50 are not lost.
+func TestConfigSyncStatusReadsEveryPage(t *testing.T) {
+	var offsets []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		offsets = append(offsets, r.URL.Query().Get("offset"))
+		if r.URL.Query().Get("limit") != "200" {
+			t.Errorf("limit = %q", r.URL.Query().Get("limit"))
+		}
+		if r.URL.Query().Get("offset") == "0" {
+			writeData(w, http.StatusOK, map[string]any{"state": "conflict", "environments": []map[string]any{{"machine_id": "first", "alias": "a"}}, "pagination": map[string]any{"next_offset": 1}})
+			return
+		}
+		writeData(w, http.StatusOK, map[string]any{"state": "healthy", "environments": []map[string]any{{"machine_id": "second", "alias": "z"}}, "pagination": map[string]any{"next_offset": nil}})
+	}))
+	defer server.Close()
+	status, err := New(server.URL, config.Credential{AccessToken: "native"}, nil).ConfigSyncStatus(context.Background())
+	if err != nil || len(status.Environments) != 2 || status.Environments[1].MachineID != "second" || status.State != "conflict" || len(offsets) != 2 || offsets[1] != "1" {
+		t.Fatalf("status = %+v, offsets = %v, err = %v", status, offsets, err)
+	}
+}
+
+func TestConfigSyncStatusRefusesAPageThatDoesNotAdvance(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeData(w, http.StatusOK, map[string]any{"state": "healthy", "environments": []map[string]any{}, "pagination": map[string]any{"next_offset": 0}})
+	}))
+	defer server.Close()
+	if _, err := New(server.URL, config.Credential{}, nil).ConfigSyncStatus(context.Background()); !errors.Is(err, ErrConfigStatusInvalid) {
+		t.Fatalf("err = %v", err)
+	}
+}

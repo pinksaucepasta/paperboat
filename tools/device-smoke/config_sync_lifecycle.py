@@ -26,6 +26,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import traceback
 import urllib.request
 import glob
 from pathlib import Path
@@ -88,7 +89,10 @@ def check(name, action):
         print('PASS %s %.0fs %s' % (name, time.time() - started, detail or ''), flush=True)
     except Exception as error:  # noqa: BLE001 one failing check must not hide the others
         results[name] = 'FAIL'
-        print('FAIL %s %.0fs %s' % (name, time.time() - started, str(error)[:300]), flush=True)
+        # The type and the failing line: an assert or KeyError alone prints nothing useful.
+        frame = traceback.extract_tb(error.__traceback__)[-1]
+        print('FAIL %s %.0fs %s: %s (line %d: %s)' % (name, time.time() - started, type(error).__name__,
+                                                   str(error)[:300], frame.lineno, frame.line), flush=True)
 
 
 def git(*args, cwd=None):
