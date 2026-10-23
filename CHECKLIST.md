@@ -749,6 +749,17 @@ Behaviour that only matters when platforms mix. The three cells are platform **p
 
 ---
 
+## F20. Shared edge engine (PLAN 3a)
+
+Previews, tunnels and browser traffic reach a machine through one engine. Every step keeps the ticked F3-07, F7, F8 and F17 device checks green.
+
+| ID | Scenario | L | M | W | Evidence |
+|---|---|---|---|---|---|
+| F20-01 | Edge: tunnel routes are served through the machine's shared connection (HTTP/WebSocket), with no per-tunnel carrier (PLAN 3a step 4.2). | [ ] | [ ] | [ ] | Waits for Lane M: step 4.2 gate run, then smoke tunnel-manage, tunnel-protocols, tunnel-transfer, tunnel-survival, tunnel-lifecycle. |
+| F20-02 | Daemon: tunnel routes are served from the shared connection; the tunnel manager no longer dials its own carrier; a second route on a tunnel works (step 4.3, unblocks C126). | [ ] | [ ] | [ ] | Waits for Lane M: step 4.3. |
+| F20-03 | TCP, TLS passthrough, private TCP and custom domains run on the same path (step 4.4). | [ ] | [ ] | [ ] | Waits for Lane M: step 4.4, smoke tcp-private. |
+| F20-04 | Old paths deleted: per-tunnel connector stack and preview attachment carriers removed; preview, tunnel, browser terminal and inspector device checks still green (step 5). | [ ] | [ ] | [ ] | Waits for Lane M: step 5 after F20-03. |
+
 ## P. Performance (PLAN 3b)
 
 | ID | Scenario | L | M | W | Evidence |

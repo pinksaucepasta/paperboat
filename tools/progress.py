@@ -34,11 +34,11 @@ def refresh_forever():
 def parse(text):
     sections, current = [], None
     for line in text.splitlines():
-        if m := re.match(r"^## ((?:F|S)\d+|X)\. (.+)", line):
+        if m := re.match(r"^## ((?:F|S)\d+|X|P)\. (.+)", line):
             current = {"id": m[1], "name": m[2], "feature": [], "command": []}
             sections.append(current)
             continue
-        m = re.match(r"^\|\s*((F|S|X)\d*-\d+|C\d+)\s*\|", line)
+        m = re.match(r"^\|\s*((F|S|X)\d*-\d+|P[RQ]-\d+|C\d+)\s*\|", line)
         if not (m and current):
             continue
         cells = [c.strip() for c in line.strip().strip("|").split("|")]
@@ -46,7 +46,7 @@ def parse(text):
         marks = cells[start:start + 3]
         if len(marks) != 3 or any(mark not in MARKS for mark in marks):
             continue
-        row = {"id": cells[0], "text": cells[1] if cells[0].startswith(("F", "S", "X")) else f"{cells[1]} — {cells[2]}",
+        row = {"id": cells[0], "text": cells[1] if cells[0].startswith(("F", "S", "X", "P")) else f"{cells[1]} — {cells[2]}",
                "platforms": marks[:3], "evidence": cells[-1]}
         current["command" if cells[0].startswith("C") else "feature"].append(row)
     return sections
@@ -66,7 +66,7 @@ def count(rows, platform):
 
 
 def render(sections):
-    feats = [r for s in sections if s["id"].startswith("F") for r in s["feature"]]
+    feats = [r for s in sections if s["id"].startswith(("F", "P")) for r in s["feature"]]
     cmds = [r for s in sections for r in s["command"]]
     cards = []
     for index, name in ((0, "Linux"), (1, "macOS"), (2, "Windows")):
