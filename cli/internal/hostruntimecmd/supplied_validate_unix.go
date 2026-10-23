@@ -70,19 +70,37 @@ func restartAndAwaitDaemon(ctx context.Context, participants updated.UnixPartici
 	defer cancel()
 	requireInventory := baseline.Machines > 0 || baseline.State == "ready"
 	var last error
+	waitingForControlPlane := false
+	delay := 250 * time.Millisecond
 	for {
 		probe, err := participants.Probe(readyCtx)
 		if err == nil {
 			if last = updated.ParticipantReady(probe, version, baseline, requireInventory); last == nil {
 				return nil
 			}
+			// The new daemon runs but is degraded. Only the control plane not answering yet is worth
+			// waiting for (a slow server makes the first refresh fail); an update is never committed on
+			// that state, because a version that cannot talk to the server looks the same. Any other
+			// degradation fails the validation now.
+			waitingForControlPlane = probe.Running && probe.Version == version && probe.State == "degraded" && probe.ControlPlaneUnavailableOnly
+			if probe.Running && probe.Version == version && probe.State == "degraded" && !probe.ControlPlaneUnavailableOnly {
+				return errors.Join(errors.New("the user's Paperboat daemon came up degraded on the new version"), last)
+			}
 		} else {
 			last = err
 		}
 		select {
 		case <-readyCtx.Done():
+			if waitingForControlPlane {
+				return errors.Join(errDaemonControlPlaneTimeout, last, readyCtx.Err())
+			}
 			return errors.Join(errors.New("the user's Paperboat daemon did not become ready on the new version"), last, readyCtx.Err())
-		case <-time.After(250 * time.Millisecond):
+		case <-time.After(delay):
 		}
+		delay = min(2*delay, 2*time.Second)
 	}
 }
+
+// errDaemonControlPlaneTimeout reports a validation that ended while the new daemon was still waiting
+// for the Paperboat server: the previous version is restored and the update can simply be retried.
+var errDaemonControlPlaneTimeout = errors.New("the Paperboat server did not answer the new version's daemon before the update's deadline, so the previous version was restored; retry the update when the server is reachable")

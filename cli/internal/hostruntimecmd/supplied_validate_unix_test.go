@@ -106,3 +106,33 @@ func TestFailedSuppliedInstallRestartsTheDaemonOnTheRestoredVersion(t *testing.T
 		t.Fatal("a daemon that could not be restarted on the restored version was not reported")
 	}
 }
+
+// Lane F's rule: a daemon that was ready must be ready again before an update commits. When it only
+// waits for the control plane (a slow server), validation keeps polling until the deadline instead of
+// failing; when the deadline passes in that state the error names the control plane; any other
+// degradation fails at once.
+func TestSuppliedUpdateWaitsOnlyForTheControlPlane(t *testing.T) {
+	previous := suppliedUpdateReadyTimeout
+	suppliedUpdateReadyTimeout = 2 * time.Second
+	t.Cleanup(func() { suppliedUpdateReadyTimeout = previous })
+	baseline := updated.UnixParticipantProbe{Running: true, Version: "1", UpdaterVersion: "1", State: "ready", Machines: 1}
+	waiting := updated.UnixParticipantProbe{Running: true, Version: "2", UpdaterVersion: "2", State: "degraded", ControlPlaneUnavailableOnly: true, Machines: 1}
+	ready := updated.UnixParticipantProbe{Running: true, Version: "2", UpdaterVersion: "2", State: "ready", Machines: 1}
+
+	recovers := &scriptedParticipants{probes: []updated.UnixParticipantProbe{waiting, waiting, ready}}
+	if err := restartAndAwaitDaemon(t.Context(), recovers, "2", baseline); err != nil {
+		t.Fatalf("daemon that reached the server after two degraded answers: %v", err)
+	}
+
+	neverAnswers := &scriptedParticipants{probes: []updated.UnixParticipantProbe{waiting}}
+	if err := restartAndAwaitDaemon(t.Context(), neverAnswers, "2", baseline); !errors.Is(err, errDaemonControlPlaneTimeout) {
+		t.Fatalf("daemon still waiting for the server at the deadline: %v, want the control-plane error", err)
+	}
+
+	locallyBroken := &scriptedParticipants{probes: []updated.UnixParticipantProbe{{Running: true, Version: "2", UpdaterVersion: "2", State: "degraded", Machines: 1}}}
+	started := time.Now()
+	err := restartAndAwaitDaemon(t.Context(), locallyBroken, "2", baseline)
+	if err == nil || errors.Is(err, errDaemonControlPlaneTimeout) || time.Since(started) > time.Second {
+		t.Fatalf("locally degraded daemon: err=%v after %v, want an immediate non-control-plane failure", err, time.Since(started))
+	}
+}
