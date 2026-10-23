@@ -4,7 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"io/fs"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -14,6 +17,29 @@ import (
 	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
 	"github.com/pressly/goose/v3"
 )
+
+// latestMigrationVersion is the highest migration number on disk. Version pins
+// derive from it so that adding a migration does not require editing the tests.
+func latestMigrationVersion(t *testing.T) int64 {
+	t.Helper()
+	names, err := fs.Glob(os.DirFS("migrations"), "*.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var latest int64
+	for _, name := range names {
+		prefix, _, _ := strings.Cut(name, "_")
+		version, err := strconv.ParseInt(prefix, 10, 64)
+		if err != nil {
+			t.Fatalf("migration %s has no numeric version: %v", name, err)
+		}
+		latest = max(latest, version)
+	}
+	if latest == 0 {
+		t.Fatal("no migrations found")
+	}
+	return latest
+}
 
 func TestBaselineSchema(t *testing.T) {
 	dsn := os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
@@ -36,8 +62,8 @@ func TestBaselineSchema(t *testing.T) {
 	if err := store.SQL().QueryRowContext(ctx, `SELECT max(version_id) FROM paperboat.goose_db_version WHERE is_applied`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 64 {
-		t.Fatalf("schema version = %d, want current schema version 64", version)
+	if latest := latestMigrationVersion(t); version != latest {
+		t.Fatalf("schema version = %d, want latest migration %d", version, latest)
 	}
 	for _, object := range []string{"users", "teams", "user_machines", "peer_endpoint_certificates", "tunnels", "tunnel_config_generations", "environment_password_vaults", "selfhost_installations", "selfhost_pool_policies", "selfhost_placements"} {
 		var exists bool
