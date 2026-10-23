@@ -214,8 +214,8 @@ APIToken {id, name, workspace, created_by ("user:<email>"), created_at, expires_
 - Scoped tokens: a request made with a scoped token (directly, or through a pb session made from
   it) reads as the creator; machine actions (terminal, exec, managed SSH, files) are checked
   against the scope (`outside_token_scope`); other changes are refused, except the policy's
-  explain/validate, revoking API tokens and the connection plumbing pb needs (including its own
-  E2EE certificate, never a fresh enrollment that replaces the account's root). No request made
+  explain/validate, revoking API tokens and the connection plumbing pb needs (including the
+  session's own E2EE endpoint certificate). No request made
   with an API token, directly or through its session, can create an API token (403 `forbidden`).
 - `POST /v1/auth/api-token-sessions` (bearer: the API token) `{"client_label", "device_type":
   "desktop|server|container", "os"}` returns a CLI token set for a session of the creator that

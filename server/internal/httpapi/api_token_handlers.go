@@ -216,8 +216,8 @@ func scopedTokenRoute(r *http.Request) bool {
 		return true // revoking only narrows; creating is refused for every token request
 	case p == "/v1/auth/api-token-sessions", p == "/v1/peer-network/config", p == "/v1/peer-network/register":
 		return true
-	case p == "/v1/e2ee/bootstrap" && r.Header.Get("X-Paperboat-Fresh-Enrollment") == "":
-		return true // pb login registers the session's own certificate; a fresh enrollment could replace the root
+	case p == "/v1/e2ee/bootstrap":
+		return true // pb login registers the session's own endpoint certificate (EndpointID = this session)
 	case r.Method == http.MethodPut && strings.HasPrefix(p, "/v1/ssh/client-keys/"):
 		return true
 	}
