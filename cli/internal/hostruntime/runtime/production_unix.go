@@ -668,8 +668,16 @@ func (s *peerEnrollmentRuntimeService) Shutdown(ctx context.Context) error {
 	}
 }
 
+// allowPendingPeerEnrollment runs the first peer identity registration. A pending approval or a
+// transient control-plane failure (a DNS or network timeout, 408/429/5xx) does not stop the start:
+// the enrollment runtime service retries it every few seconds. Exiting on one failed request failed
+// the whole pair at "installing system services".
 func allowPendingPeerEnrollment(ctx context.Context, enrollment peerEnrollmentEnsurer) error {
 	err := enrollment.Ensure(ctx)
+	if err != nil && ctx.Err() == nil && !errors.Is(err, peeridentityenrollment.ErrPending) && transientNativePeerStart(err) {
+		slog.Warn("machine endpoint registration failed; retrying in the background", "error", err)
+		return nil
+	}
 	if !errors.Is(err, peeridentityenrollment.ErrPending) {
 		return err
 	}
@@ -736,22 +744,27 @@ func waitForPeerEnrollment(ctx context.Context, enrollment peerEnrollmentEnsurer
 		interval = 2 * time.Second
 	}
 	reported := false
+	failures := 0 // consecutive transient failures; they back off, a pending approval keeps the interval
 	for {
 		err := enrollment.Ensure(ctx)
 		if err == nil {
 			return nil
 		}
+		wait := interval
 		if !errors.Is(err, peeridentityenrollment.ErrPending) {
-			return err
-		}
-		if !reported {
+			if ctx.Err() != nil || !transientNativePeerStart(err) {
+				return err
+			}
+			failures = min(failures+1, 6)
+			wait = min(interval<<failures, time.Minute)
+		} else if !reported {
 			var pending *peeridentityenrollment.PendingError
 			if errors.As(err, &pending) {
 				slog.Warn("machine endpoint approval pending", "request_id", pending.RequestID, "safety_code", pending.SafetyCode, "expires_at", pending.ExpiresAt)
 			}
 			reported = true
 		}
-		timer := time.NewTimer(interval)
+		timer := time.NewTimer(wait)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
