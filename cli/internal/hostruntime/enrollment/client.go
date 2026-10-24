@@ -49,6 +49,10 @@ type RuntimeIdentity struct {
 	Credential    string    `json:"credential"`
 	ExpiresAt     time.Time `json:"expires_at"`
 	KeyID         string    `json:"key_id"`
+	// InstallationGeneration is the machine registration's generation when this credential was
+	// stored. An install over a running machine moves the generation and the server fences
+	// credentials from the old one; a source that sees the two differ renews at once.
+	InstallationGeneration int64 `json:"installation_generation,omitempty"`
 }
 
 type Client struct {
@@ -326,6 +330,7 @@ func controlTransport(caPath string) (http.RoundTripper, error) {
 }
 
 func writeIdentity(root string, value RuntimeIdentity) error {
+	value.InstallationGeneration = registeredGeneration(root)
 	encoded, err := json.Marshal(value)
 	if err != nil {
 		return err
@@ -450,4 +455,17 @@ func rejectDuplicateJSON(data []byte) error {
 		return ErrInvalid
 	}
 	return nil
+}
+
+// registeredGeneration is the machine registration's installation generation, or 0 when there is none yet.
+func registeredGeneration(root string) int64 {
+	store, err := identity.Open(identity.Config{StateRoot: root})
+	if err != nil {
+		return 0
+	}
+	registration, err := store.Registration()
+	if err != nil {
+		return 0
+	}
+	return registration.InstallationGeneration
 }

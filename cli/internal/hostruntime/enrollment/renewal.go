@@ -75,7 +75,7 @@ func (s *RenewingTokenSource) Token(ctx context.Context) (token string, resultEr
 	if err != nil {
 		return "", unavailableEnrollment(err)
 	}
-	if current.ExpiresAt.After(now.Add(s.config.RenewBefore)) {
+	if s.fresh(current, now) {
 		if err := attemptCtx.Err(); err != nil {
 			return "", unavailableEnrollment(err)
 		}
@@ -101,7 +101,7 @@ func (s *RenewingTokenSource) Token(ctx context.Context) (token string, resultEr
 	if err != nil {
 		return "", unavailableEnrollment(err)
 	}
-	if current.ExpiresAt.After(now.Add(s.config.RenewBefore)) {
+	if s.fresh(current, now) {
 		if err := attemptCtx.Err(); err != nil {
 			return "", unavailableEnrollment(err)
 		}
@@ -161,6 +161,13 @@ func (s *RenewingTokenSource) Token(ctx context.Context) (token string, resultEr
 		return "", unavailableEnrollment(err)
 	}
 	return renewed.Credential, nil
+}
+
+// fresh reports whether the stored credential can be used without renewal: it is not near expiry and
+// was stored for the current installation generation (stg-m1: an install moved the generation and the
+// carrier was refused with 401 for 35 min, until the scheduled renewal).
+func (s *RenewingTokenSource) fresh(current RuntimeIdentity, now time.Time) bool {
+	return current.ExpiresAt.After(now.Add(s.config.RenewBefore)) && current.InstallationGeneration == registeredGeneration(s.config.StateRoot)
 }
 
 var _ interface {
