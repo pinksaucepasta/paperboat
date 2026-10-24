@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"fmt"
 	"os"
 	"sync"
@@ -113,19 +114,28 @@ func TestPairingSurvivesConcurrentPeerConfigRefreshesOnPostgres(t *testing.T) {
 					return
 				default:
 				}
-				err := f.store.InTx(f.ctx, func(ctx context.Context, tx *Tx) error {
-					// The daemons' peer-config read (production statement): the account's identities and their machines.
-					rows, err := tx.tx.Query(ctx, `SELECT n.endpoint_id FROM paperboat.peer_network_identities n
+				// The daemons' peer-config refresh as peersessions.Configuration runs it: the endpoint's generation
+				// is bumped by its own statement, then the account's identities and machines are read in a
+				// read-only repeatable-read snapshot (a serializable read of the whole account plus the bump in one
+				// transaction formed dependency cycles with every other endpoint and with pairing).
+				_, err := f.store.SQL().ExecContext(f.ctx, `UPDATE paperboat.peer_network_identities SET config_generation=config_generation+1,updated_at=now() WHERE user_id=$1 AND endpoint_id=$2`, f.user, peer)
+				if err == nil {
+					err = func() error {
+						tx, err := f.store.SQL().BeginTx(f.ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+						if err != nil {
+							return err
+						}
+						defer tx.Rollback()
+						rows, err := tx.QueryContext(f.ctx, `SELECT n.endpoint_id FROM paperboat.peer_network_identities n
  WHERE n.user_id=$1 AND n.endpoint_id<>$2 AND n.revoked_at IS NULL AND
  ((n.role='machine' AND EXISTS(SELECT 1 FROM paperboat.user_machines m WHERE m.id=n.machine_id AND m.user_id=n.user_id AND m.owner_team_id IS NULL AND m.revoked_at IS NULL AND m.deleted_at IS NULL))
  OR ($3='machine' AND n.role='cli' AND EXISTS(SELECT 1 FROM paperboat.cli_client_sessions c WHERE c.id=n.endpoint_id AND c.user_id=n.user_id AND c.state='active' AND c.revoked_at IS NULL)))`, f.user, peer, "machine")
-					if err != nil {
-						return err
-					}
-					rows.Close()
-					_, err = tx.Exec(ctx, `UPDATE paperboat.peer_network_identities SET config_generation=config_generation+1,updated_at=now() WHERE user_id=$1 AND endpoint_id=$2`, f.user, peer)
-					return err
-				})
+						if err != nil {
+							return err
+						}
+						return rows.Close()
+					}()
+				}
 				if err == nil {
 					refreshes.Add(1)
 				}
