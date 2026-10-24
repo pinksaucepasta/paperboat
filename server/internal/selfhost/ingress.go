@@ -66,7 +66,7 @@ func (s *Service) VerifyIngress(ctx context.Context, id string) error {
 	ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
 	var node, host, epoch string
-	if err := s.database.SQL().QueryRowContext(ctx, `SELECT n.id,n.endpoint_host,n.process_epoch FROM paperboat.selfhost_installations i JOIN paperboat.control_tunnel_nodes n ON n.id=i.node_id WHERE i.id=$1 AND i.state='active' AND i.capability='tunnel' AND (i.expires_at IS NULL OR i.expires_at>now()) AND n.state='ready' AND n.ready AND n.last_heartbeat_at>now()-interval '15 seconds'`, id).Scan(&node, &host, &epoch); err != nil {
+	if err := s.database.SQL().QueryRowContext(ctx, `SELECT n.id,n.endpoint_host,n.process_epoch FROM paperboat.selfhost_installations i JOIN paperboat.control_tunnel_nodes n ON n.id=i.node_id WHERE i.id=$1 AND i.state='active' AND i.capability='tunnel' AND (i.expires_at IS NULL OR i.expires_at>now()) AND `+nodeLiveSQL, id).Scan(&node, &host, &epoch); err != nil {
 		if err == sql.ErrNoRows {
 			return ErrIngress
 		}

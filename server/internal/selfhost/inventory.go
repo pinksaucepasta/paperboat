@@ -42,7 +42,7 @@ func (o InventoryOptions) normalized() (InventoryOptions, error) {
 
 const installationInventorySQL = `WITH visible AS (
  SELECT i.id,i.node_id,coalesce(n.endpoint_host,'') AS endpoint_host,i.name,i.capability,i.scope_kind,i.scope_id,i.claim_complete,
- coalesce(i.claim_complete AND n.ready AND n.state='ready' AND n.last_heartbeat_at>now()-interval '15 seconds' AND(i.capability='relay' OR n.public_ingress_verified_at IS NOT NULL),false) AS ready
+ ` + installationReadySQL + ` AS ready
  FROM paperboat.selfhost_installations i JOIN paperboat.control_tunnel_nodes n ON n.id=i.node_id
  WHERE i.state='active' AND ($1 OR paperboat.selfhost_scope_visible(i.scope_kind,i.scope_id,$2))
  AND (NOT $3 OR(i.scope_kind=$4 AND i.scope_id=$5))
@@ -125,7 +125,7 @@ func (s *Service) GetInstallation(ctx context.Context, actor, id string, operato
 	}
 	var complete bool
 	err := s.database.SQL().QueryRowContext(ctx, `SELECT i.id,i.node_id,coalesce(n.endpoint_host,''),i.name,i.capability,i.scope_kind,i.scope_id,i.claim_complete,
- coalesce(i.claim_complete AND n.ready AND n.state='ready' AND n.last_heartbeat_at>now()-interval '15 seconds' AND(i.capability='relay' OR n.public_ingress_verified_at IS NOT NULL),false)
+ `+installationReadySQL+`
  FROM paperboat.selfhost_installations i JOIN paperboat.control_tunnel_nodes n ON n.id=i.node_id WHERE i.id=$1 AND i.state='active' AND (($2 AND i.scope_kind='global') OR (NOT $2 AND paperboat.selfhost_scope_visible(i.scope_kind,i.scope_id,$3)))`, id, operator, actor).Scan(&i.InstallationID, &i.NodeID, &i.EndpointHost, &i.Name, &i.Capability, &i.ScopeKind, &i.ScopeID, &complete, &i.Ready)
 	if err == sql.ErrNoRows {
 		return i, ErrInstallationNotFound
