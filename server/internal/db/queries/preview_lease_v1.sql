@@ -131,6 +131,7 @@ WITH rules AS (
     AND (sqlc.arg(q)::text='' OR position(lower(sqlc.arg(q)) in lower(p.id||' '||p.endpoint||' '||p.owner_machine_id))>0)
     AND (sqlc.arg(state)::text='' OR CASE WHEN p.terminal_state='owner_lost' THEN 'owner_disconnected' WHEN p.terminal_state='expired' THEN 'expired' WHEN p.terminal_state IN ('stopped','failed') THEN 'stopped' WHEN p.allocation_state<>'ready' THEN 'allocating' WHEN p.edge_state<>'ready' OR p.origin_state<>'ready' THEN 'connecting' ELSE 'ready' END=sqlc.arg(state) OR (sqlc.arg(state)='active' AND p.terminal_state='active'))
     AND (sqlc.arg(owner)::text='' OR (sqlc.arg(owner)='mine' AND p.account_id=sqlc.arg(account_id)) OR (sqlc.arg(owner)='shared' AND p.account_id<>sqlc.arg(account_id)) OR p.account_id=sqlc.arg(owner))
+    AND (sqlc.arg(machine_id)::text='' OR p.owner_machine_id=sqlc.arg(machine_id))
   ORDER BY p.created_at DESC, p.id DESC
 )
 SELECT c.id, c.endpoint, c.account_id, c.actor_id, c.owner_machine_id, c.owner_session_id,

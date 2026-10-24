@@ -284,7 +284,7 @@ func (s *Store) ListPreviewLeasesV1(ctx context.Context, input ListPreviewLeases
 	ws, selected := workspace.FromContext(ctx)
 	filters := workspace.InventoryFiltersFromContext(ctx)
 	rows, err := s.db.Queries().ListPreviewLeasesV1(ctx, dbsqlc.ListPreviewLeasesV1Params{
-		AccountID: input.AccountID, AfterCreatedAt: input.AfterCreatedAt, AfterID: input.AfterID, RowLimit: input.Limit, WorkspaceSet: selected, WorkspaceTeamID: nullableText(ws.TeamID), Q: filters.Q, State: filters.State, Owner: filters.Owner,
+		AccountID: input.AccountID, AfterCreatedAt: input.AfterCreatedAt, AfterID: input.AfterID, RowLimit: input.Limit, WorkspaceSet: selected, WorkspaceTeamID: nullableText(ws.TeamID), Q: filters.Q, State: filters.State, Owner: filters.Owner, MachineID: filters.MachineID,
 	})
 	if err != nil {
 		return nil, translate(err)

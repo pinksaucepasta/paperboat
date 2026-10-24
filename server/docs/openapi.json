@@ -19664,6 +19664,16 @@
               "maxLength": 128
             },
             "description": "Exact owner identifier, at most 128 UTF-8 bytes; whitespace and NUL are rejected."
+          },
+          {
+            "name": "machine_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Only the previews served from this machine (exact machine id), at most 128 UTF-8 bytes; whitespace and NUL are rejected. Part of the cursor's filters."
           }
         ],
         "responses": {
@@ -20715,6 +20725,16 @@
               "maxLength": 128
             },
             "description": "Exact owner identifier, at most 128 UTF-8 bytes; whitespace and NUL are rejected."
+          },
+          {
+            "name": "machine_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Only the tunnels this machine created or hosts an active connector of (exact machine id), at most 128 UTF-8 bytes; whitespace and NUL are rejected. Part of the cursor's filters."
           }
         ],
         "responses": {

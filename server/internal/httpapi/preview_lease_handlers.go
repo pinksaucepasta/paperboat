@@ -205,7 +205,11 @@ func previewLeaseList(service PreviewLeaseAPI) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		filters, valid := readCursorInventoryQuery(w, r, []string{"allocating", "connecting", "ready", "owner_disconnected", "expired", "stopped", "active"})
+		filters, valid := readCursorInventoryQuery(w, r, []string{"allocating", "connecting", "ready", "owner_disconnected", "expired", "stopped", "active"}, "machine_id")
+		if !valid {
+			return
+		}
+		machineID, valid := readMachineIDFilter(w, r)
 		if !valid {
 			return
 		}
@@ -213,7 +217,7 @@ func previewLeaseList(service PreviewLeaseAPI) http.HandlerFunc {
 			writeError(w, r, 400, "invalid_inventory_query", "Use cursor for this collection.")
 			return
 		}
-		r = r.WithContext(workspace.WithInventoryFilters(r.Context(), workspace.InventoryFilters{Q: filters.Q, State: filters.State, Owner: filters.Owner}))
+		r = r.WithContext(workspace.WithInventoryFilters(r.Context(), workspace.InventoryFilters{Q: filters.Q, State: filters.State, Owner: filters.Owner, MachineID: machineID}))
 		limit, err := previewtunnelapi.PageLimit(r.URL.Query().Get("limit"))
 		if err != nil {
 			writePreviewLeaseError(w, r, err)

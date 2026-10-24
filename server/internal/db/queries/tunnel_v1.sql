@@ -39,6 +39,9 @@ WITH rules AS (
     AND (sqlc.arg(q)::text='' OR position(lower(sqlc.arg(q)) in lower(t.id||' '||t.name||' '||t.stable_endpoint||' '||t.created_by_host_id))>0)
     AND (sqlc.arg(state)::text='' OR t.desired_state=sqlc.arg(state))
     AND (sqlc.arg(owner)::text='' OR (sqlc.arg(owner)='mine' AND t.account_id=sqlc.arg(account_id)) OR (sqlc.arg(owner)='shared' AND t.account_id<>sqlc.arg(account_id)) OR t.account_id=sqlc.arg(owner))
+    -- A machine's tunnels: those it created or hosts an active connector of.
+    AND (sqlc.arg(machine_id)::text='' OR t.created_by_host_id=sqlc.arg(machine_id) OR EXISTS(SELECT 1 FROM tunnel_connectors AS c
+      WHERE c.tunnel_id=t.id AND c.host_id=sqlc.arg(machine_id) AND c.revoked_at IS NULL))
   ORDER BY t.created_at DESC, t.id DESC
 )
 SELECT c.id, c.account_id, c.name, c.desired_state, c.access_mode, c.generation, c.stable_endpoint_id, c.stable_endpoint,

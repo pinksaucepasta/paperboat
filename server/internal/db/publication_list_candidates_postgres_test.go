@@ -117,14 +117,15 @@ VALUES($1,$2,$3,$4,$5,$6,$7,$2,$8)`, fmt.Sprintf("pc_tunnel_%d_%s", i, s), p.acc
 	exec(`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account,active,generation) VALUES
 ($1,'preview',$2,$3,true,1),($1,'tunnel',$4,$3,true,1)`, team, fmt.Sprintf("pc_preview_%d_%s", 17, s), outsider, fmt.Sprintf("pc_tunnel_%d_%s", 17, s))
 
-	reference := func(kind, actor string, set bool, teamID sql.NullString) []string {
+	reference := func(kind, actor string, set bool, teamID sql.NullString, machine string) []string {
 		query := `SELECT id FROM paperboat.preview_leases WHERE id LIKE 'pc_preview_%_'||$4 AND paperboat.preview_management_allowed($1,id)
- AND (NOT $2 OR paperboat.workspace_preview_management_allowed($1,$3,id)) ORDER BY id`
+ AND (NOT $2 OR paperboat.workspace_preview_management_allowed($1,$3,id)) AND ($5='' OR owner_machine_id=$5) ORDER BY id`
 		if kind == "tunnel" {
-			query = `SELECT id FROM paperboat.tunnels WHERE id LIKE 'pc_tunnel_%_'||$4 AND paperboat.tunnel_management_allowed($1,id)
- AND (NOT $2 OR paperboat.workspace_tunnel_management_allowed($1,$3,id)) ORDER BY id`
+			query = `SELECT id FROM paperboat.tunnels t WHERE id LIKE 'pc_tunnel_%_'||$4 AND paperboat.tunnel_management_allowed($1,id)
+ AND (NOT $2 OR paperboat.workspace_tunnel_management_allowed($1,$3,id))
+ AND ($5='' OR created_by_host_id=$5 OR EXISTS(SELECT 1 FROM paperboat.tunnel_connectors c WHERE c.tunnel_id=t.id AND c.host_id=$5 AND c.revoked_at IS NULL)) ORDER BY id`
 		}
-		rows, err := store.SQL().QueryContext(ctx, query, actor, set, teamID, s)
+		rows, err := store.SQL().QueryContext(ctx, query, actor, set, teamID, s, machine)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -140,7 +141,20 @@ VALUES($1,$2,$3,$4,$5,$6,$7,$2,$8)`, fmt.Sprintf("pc_tunnel_%d_%s", i, s), p.acc
 		slices.Sort(ids)
 		return ids
 	}
-	seen := 0
+	var machines []string
+	if rows, err := store.SQL().QueryContext(ctx, `SELECT id FROM paperboat.user_machines WHERE id LIKE 'pc_machine_%_'||$1 ORDER BY id`, s); err != nil {
+		t.Fatal(err)
+	} else {
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				t.Fatal(err)
+			}
+			machines = append(machines, id)
+		}
+		rows.Close()
+	}
+	seen, seenOnMachine := 0, 0
 	for _, actor := range users {
 		for _, scope := range []struct {
 			set  bool
@@ -164,16 +178,43 @@ VALUES($1,$2,$3,$4,$5,$6,$7,$2,$8)`, fmt.Sprintf("pc_tunnel_%d_%s", i, s), p.acc
 			}
 			slices.Sort(gotPreviews)
 			slices.Sort(gotTunnels)
-			if want := reference("preview", actor, scope.set, scope.team); !slices.Equal(gotPreviews, want) {
+			if want := reference("preview", actor, scope.set, scope.team, ""); !slices.Equal(gotPreviews, want) {
 				t.Fatalf("previews for %s set=%v team=%v: listed %v, access rules allow %v", actor, scope.set, scope.team.String, gotPreviews, want)
 			}
-			if want := reference("tunnel", actor, scope.set, scope.team); !slices.Equal(gotTunnels, want) {
+			if want := reference("tunnel", actor, scope.set, scope.team, ""); !slices.Equal(gotTunnels, want) {
 				t.Fatalf("tunnels for %s set=%v team=%v: listed %v, access rules allow %v", actor, scope.set, scope.team.String, gotTunnels, want)
+			}
+			// One machine's publications (machine_id): the same rules narrowed to that machine.
+			for _, machine := range machines {
+				previews, err := store.Queries().ListPreviewLeasesV1(ctx, dbsqlc.ListPreviewLeasesV1Params{AccountID: actor, RowLimit: 200, WorkspaceSet: scope.set, WorkspaceTeamID: scope.team, Q: s, MachineID: machine})
+				if err != nil {
+					t.Fatal(err)
+				}
+				tunnels, err := store.Queries().ListPreviewTunnelsV1(ctx, dbsqlc.ListPreviewTunnelsV1Params{AccountID: actor, RowLimit: 200, WorkspaceSet: scope.set, WorkspaceTeamID: scope.team, Q: s, MachineID: machine})
+				if err != nil {
+					t.Fatal(err)
+				}
+				var onPreviews, onTunnels []string
+				for _, row := range previews {
+					onPreviews = append(onPreviews, row.ID)
+				}
+				for _, row := range tunnels {
+					onTunnels = append(onTunnels, row.ID)
+				}
+				slices.Sort(onPreviews)
+				slices.Sort(onTunnels)
+				if want := reference("preview", actor, scope.set, scope.team, machine); !slices.Equal(onPreviews, want) {
+					t.Fatalf("previews of %s for %s: listed %v, want %v", machine, actor, onPreviews, want)
+				}
+				if want := reference("tunnel", actor, scope.set, scope.team, machine); !slices.Equal(onTunnels, want) {
+					t.Fatalf("tunnels of %s for %s: listed %v, want %v", machine, actor, onTunnels, want)
+				}
+				seenOnMachine += min(len(onPreviews)+len(onTunnels), 1)
 			}
 			seen += min(len(gotPreviews), 1) + min(len(gotTunnels), 1)
 		}
 	}
-	if seen < 12 {
-		t.Fatalf("fixture too weak: only %d non-empty lists", seen)
+	if seen < 12 || seenOnMachine < 8 {
+		t.Fatalf("fixture too weak: only %d non-empty lists, %d non-empty machine lists", seen, seenOnMachine)
 	}
 }

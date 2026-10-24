@@ -97,7 +97,7 @@ func inventoryPagination(limit, offset, total, count int) map[string]any {
 }
 
 // Cursor collections use the same filter validation but reject offset semantics.
-func readCursorInventoryQuery(w http.ResponseWriter, r *http.Request, states []string) (inventoryQuery, bool) {
+func readCursorInventoryQuery(w http.ResponseWriter, r *http.Request, states []string, extraKeys ...string) (inventoryQuery, bool) {
 	values := r.URL.Query()
 	if len(values["cursor"]) > 1 || values.Has("offset") {
 		writeError(w, r, 400, "invalid_inventory_query", "Use one cursor and no offset.")
@@ -108,5 +108,16 @@ func readCursorInventoryQuery(w http.ResponseWriter, r *http.Request, states []s
 	cloned.URL = &urlCopy
 	values.Del("cursor")
 	cloned.URL.RawQuery = values.Encode()
-	return readInventoryQuery(w, cloned, states, false)
+	return readInventoryQuery(w, cloned, states, false, extraKeys...)
+}
+
+// readMachineIDFilter reads the optional machine_id filter of a list (one machine's terminals, previews or
+// tunnels): an exact machine id, at most 128 bytes, no whitespace or NUL.
+func readMachineIDFilter(w http.ResponseWriter, r *http.Request) (string, bool) {
+	machineID := r.URL.Query().Get("machine_id")
+	if !utf8.ValidString(machineID) || len(machineID) > 128 || strings.ContainsAny(machineID, " \t\r\n\x00") {
+		writeError(w, r, 400, "invalid_inventory_query", "Use one valid limit (1–200), nonnegative offset, and supported inventory filters.")
+		return "", false
+	}
+	return machineID, true
 }

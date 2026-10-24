@@ -7,7 +7,7 @@ import (
 )
 
 // InventoryFilters selects authorized resources before the cursor page is read.
-type InventoryFilters struct{ Q, State, Owner string }
+type InventoryFilters struct{ Q, State, Owner, MachineID string }
 type inventoryFiltersKey struct{}
 
 func WithInventoryFilters(ctx context.Context, filters InventoryFilters) context.Context {
@@ -22,6 +22,6 @@ func InventoryCursorPrincipal(ctx context.Context, principal string) string {
 	if filters == (InventoryFilters{}) {
 		return principal
 	}
-	sum := sha256.Sum256([]byte(filters.Q + "\x00" + filters.State + "\x00" + filters.Owner))
+	sum := sha256.Sum256([]byte(filters.Q + "\x00" + filters.State + "\x00" + filters.Owner + "\x00" + filters.MachineID))
 	return principal + "\x1e" + hex.EncodeToString(sum[:])
 }

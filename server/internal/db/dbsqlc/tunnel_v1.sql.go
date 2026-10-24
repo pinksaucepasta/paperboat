@@ -145,6 +145,9 @@ WITH rules AS (
     AND ($7::text='' OR position(lower($7) in lower(t.id||' '||t.name||' '||t.stable_endpoint||' '||t.created_by_host_id))>0)
     AND ($8::text='' OR t.desired_state=$8)
     AND ($9::text='' OR ($9='mine' AND t.account_id=$1) OR ($9='shared' AND t.account_id<>$1) OR t.account_id=$9)
+    -- A machine's tunnels: those it created or hosts an active connector of.
+    AND ($10::text='' OR t.created_by_host_id=$10 OR EXISTS(SELECT 1 FROM tunnel_connectors AS c
+      WHERE c.tunnel_id=t.id AND c.host_id=$10 AND c.revoked_at IS NULL))
   ORDER BY t.created_at DESC, t.id DESC
 )
 SELECT c.id, c.account_id, c.name, c.desired_state, c.access_mode, c.generation, c.stable_endpoint_id, c.stable_endpoint,
@@ -166,6 +169,7 @@ type ListPreviewTunnelsV1Params struct {
 	Q               string
 	State           string
 	Owner           string
+	MachineID       string
 }
 
 type ListPreviewTunnelsV1Row struct {
@@ -205,6 +209,7 @@ func (q *Queries) ListPreviewTunnelsV1(ctx context.Context, arg ListPreviewTunne
 		arg.Q,
 		arg.State,
 		arg.Owner,
+		arg.MachineID,
 	)
 	if err != nil {
 		return nil, err

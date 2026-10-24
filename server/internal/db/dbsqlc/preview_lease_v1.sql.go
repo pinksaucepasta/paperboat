@@ -405,6 +405,7 @@ WITH rules AS (
     AND ($7::text='' OR position(lower($7) in lower(p.id||' '||p.endpoint||' '||p.owner_machine_id))>0)
     AND ($8::text='' OR CASE WHEN p.terminal_state='owner_lost' THEN 'owner_disconnected' WHEN p.terminal_state='expired' THEN 'expired' WHEN p.terminal_state IN ('stopped','failed') THEN 'stopped' WHEN p.allocation_state<>'ready' THEN 'allocating' WHEN p.edge_state<>'ready' OR p.origin_state<>'ready' THEN 'connecting' ELSE 'ready' END=$8 OR ($8='active' AND p.terminal_state='active'))
     AND ($9::text='' OR ($9='mine' AND p.account_id=$1) OR ($9='shared' AND p.account_id<>$1) OR p.account_id=$9)
+    AND ($10::text='' OR p.owner_machine_id=$10)
   ORDER BY p.created_at DESC, p.id DESC
 )
 SELECT c.id, c.endpoint, c.account_id, c.actor_id, c.owner_machine_id, c.owner_session_id,
@@ -427,6 +428,7 @@ type ListPreviewLeasesV1Params struct {
 	Q               string
 	State           string
 	Owner           string
+	MachineID       string
 }
 
 type ListPreviewLeasesV1Row struct {
@@ -470,6 +472,7 @@ func (q *Queries) ListPreviewLeasesV1(ctx context.Context, arg ListPreviewLeases
 		arg.Q,
 		arg.State,
 		arg.Owner,
+		arg.MachineID,
 	)
 	if err != nil {
 		return nil, err

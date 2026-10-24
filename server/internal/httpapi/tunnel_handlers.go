@@ -144,7 +144,11 @@ func tunnelList(service tunnelv1.API) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		filters, valid := readCursorInventoryQuery(w, r, []string{tunnelv1.DesiredActive, tunnelv1.DesiredPaused, tunnelv1.DesiredDeleted})
+		filters, valid := readCursorInventoryQuery(w, r, []string{tunnelv1.DesiredActive, tunnelv1.DesiredPaused, tunnelv1.DesiredDeleted}, "machine_id")
+		if !valid {
+			return
+		}
+		machineID, valid := readMachineIDFilter(w, r)
 		if !valid {
 			return
 		}
@@ -152,7 +156,7 @@ func tunnelList(service tunnelv1.API) http.HandlerFunc {
 			writeError(w, r, 400, "invalid_inventory_query", "Use cursor for this collection.")
 			return
 		}
-		r = r.WithContext(workspace.WithInventoryFilters(r.Context(), workspace.InventoryFilters{Q: filters.Q, State: filters.State, Owner: filters.Owner}))
+		r = r.WithContext(workspace.WithInventoryFilters(r.Context(), workspace.InventoryFilters{Q: filters.Q, State: filters.State, Owner: filters.Owner, MachineID: machineID}))
 		limit, err := previewtunnelapi.PageLimit(r.URL.Query().Get("limit"))
 		if err != nil {
 			writeTunnelError(w, r, fmt.Errorf("%w: %v", tunnelv1.ErrInvalidInput, err))

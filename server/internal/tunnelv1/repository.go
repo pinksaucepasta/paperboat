@@ -233,7 +233,7 @@ func (r *SQLRepository) List(ctx context.Context, accountID string, after *ListP
 	ws, selected := workspace.FromContext(ctx)
 	filters := workspace.InventoryFiltersFromContext(ctx)
 	params := dbsqlc.ListPreviewTunnelsV1Params{
-		AccountID: accountID, AfterCreatedAt: afterCreatedAt, AfterID: afterID, RowLimit: int32(limit), WorkspaceSet: selected, WorkspaceTeamID: nullableString(ws.TeamID), Q: filters.Q, State: filters.State, Owner: filters.Owner,
+		AccountID: accountID, AfterCreatedAt: afterCreatedAt, AfterID: afterID, RowLimit: int32(limit), WorkspaceSet: selected, WorkspaceTeamID: nullableString(ws.TeamID), Q: filters.Q, State: filters.State, Owner: filters.Owner, MachineID: filters.MachineID,
 	}
 	items, err := r.listTunnelPage(ctx, params)
 	if err != nil {
