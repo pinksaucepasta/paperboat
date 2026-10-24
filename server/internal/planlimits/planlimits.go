@@ -138,17 +138,26 @@ func CheckBrowserTerminalTx(ctx context.Context, tx *db.Tx, scope Scope, termina
 // UsageTx reports every kind for the scope, for the billing overview.
 func UsageTx(ctx context.Context, tx *db.Tx, scope Scope) (map[Kind]Usage, error) {
 	set := current.Load()
-	plan, err := planTx(ctx, tx, scope)
-	if err != nil {
-		return nil, err
-	}
-	out := make(map[Kind]Usage, 3)
-	for _, kind := range []Kind{Machines, Publications, BrowserTerminals} {
-		used, err := countTx(ctx, tx, scope, kind)
+	kinds := []Kind{Machines, Publications, BrowserTerminals}
+	// One statement for the billing overview: the plan and every count.
+	query := `SELECT CASE WHEN $2::text<>'' THEN '' ELSE coalesce((SELECT w.product_code FROM billing_workspaces w
+ WHERE w.user_id=$1 AND w.team_id IS NULL AND billing_workspace_paid_until(w)>now()),'') END`
+	for _, kind := range kinds {
+		sub, err := countSQL(kind)
 		if err != nil {
 			return nil, err
 		}
-		u := Usage{Used: used}
+		query += ",\n" + sub
+	}
+	var product string
+	used := make([]int, len(kinds))
+	if err := tx.QueryRow(ctx, query, scope.Account, scope.Team, scope.workspaceID()).Scan(&product, &used[0], &used[1], &used[2]); err != nil {
+		return nil, err
+	}
+	plan := planOf(scope, product)
+	out := make(map[Kind]Usage, len(kinds))
+	for i, kind := range kinds {
+		u := Usage{Used: used[i]}
 		if plan != Team {
 			limit := limitFor(set.limits, kind, plan)
 			u.Limit = &limit
@@ -187,35 +196,47 @@ func planTx(ctx context.Context, tx *db.Tx, scope Scope) (Plan, error) {
 	if err != nil {
 		return "", err
 	}
-	if strings.HasPrefix(product, "pro-") {
-		return Pro, nil
-	}
-	return Free, nil
+	return planOf(scope, product), nil
 }
 
-func countTx(ctx context.Context, tx *db.Tx, scope Scope, kind Kind) (int, error) {
-	var query string
-	args := []any{scope.Account, scope.Team}
+func planOf(scope Scope, product string) Plan {
+	switch {
+	case scope.Team != "":
+		return Team
+	case strings.HasPrefix(product, "pro-"):
+		return Pro
+	default:
+		return Free
+	}
+}
+
+// countSQL is one kind's live count as a scalar subquery over $1 account, $2 team, $3 workspace id.
+func countSQL(kind Kind) (string, error) {
 	switch kind {
 	case Machines:
-		query = `SELECT count(*) FROM user_machines WHERE deleted_at IS NULL AND revoked_at IS NULL AND
- CASE WHEN $2<>'' THEN owner_team_id=$2 ELSE user_id=$1 AND owner_team_id IS NULL AND seat_state='occupied' END`
+		return `(SELECT count(*) FROM user_machines WHERE deleted_at IS NULL AND revoked_at IS NULL AND
+ CASE WHEN $2<>'' THEN owner_team_id=$2 ELSE user_id=$1 AND owner_team_id IS NULL AND seat_state='occupied' END)`, nil
 	case Publications:
-		query = `SELECT
- (SELECT count(*) FROM preview_leases WHERE terminal_state='active' AND stopped_at IS NULL AND lease_deadline>now() AND
+		return `((SELECT count(*) FROM preview_leases WHERE terminal_state='active' AND stopped_at IS NULL AND lease_deadline>now() AND
   CASE WHEN $2<>'' THEN owner_team_id=$2 ELSE account_id=$1 AND owner_team_id IS NULL END) +
  (SELECT count(*) FROM tunnels WHERE desired_state='active' AND deleted_at IS NULL AND (expires_at IS NULL OR expires_at>now()) AND
-  CASE WHEN $2<>'' THEN owner_team_id=$2 ELSE account_id=$1 AND owner_team_id IS NULL END)`
+  CASE WHEN $2<>'' THEN owner_team_id=$2 ELSE account_id=$1 AND owner_team_id IS NULL END))`, nil
 	case BrowserTerminals:
 		// Open console terminals: distinct terminal sessions with a live edge admission, so a
 		// reconnect or a shared terminal's viewers never count twice.
-		query = `SELECT count(DISTINCT resource_id) FROM native_usage_authorities WHERE workspace_id=$1
- AND resource_kind='terminal' AND edge_node_id IS NOT NULL AND expires_at>now()`
-		args = []any{scope.workspaceID()}
+		return `(SELECT count(DISTINCT resource_id) FROM native_usage_authorities WHERE workspace_id=$3
+ AND resource_kind='terminal' AND edge_node_id IS NOT NULL AND expires_at>now())`, nil
 	default:
-		return 0, fmt.Errorf("unknown plan limit kind %q", kind)
+		return "", fmt.Errorf("unknown plan limit kind %q", kind)
+	}
+}
+
+func countTx(ctx context.Context, tx *db.Tx, scope Scope, kind Kind) (int, error) {
+	query, err := countSQL(kind)
+	if err != nil {
+		return 0, err
 	}
 	var n int
-	err := tx.QueryRow(ctx, query, args...).Scan(&n)
+	err = tx.QueryRow(ctx, `SELECT `+query+` FROM (SELECT $1::text,$2::text,$3::text) AS params`, scope.Account, scope.Team, scope.workspaceID()).Scan(&n)
 	return n, err
 }
