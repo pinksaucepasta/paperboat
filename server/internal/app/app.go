@@ -572,7 +572,11 @@ func New(opts Options) (*App, error) {
 	if opts.Config.Secrets.EdgeControlCredential != "" {
 		edgeControlService = controlplane.NewEdgeService(store, opts.Config.Secrets.EdgeControlCredential)
 		edgeControlService.SetNodeCredentials(nodeCredentials)
-		edgeControlService.SetCertificateDistribution(opts.CertificateDistribution)
+		distribution := opts.CertificateDistribution
+		if distribution == nil {
+			distribution = tunnelcert.DisabledDistributionHandler()
+		}
+		edgeControlService.SetCertificateDistribution(distribution)
 		edgeControlService.SetScopedBandwidthDebiter(workspaceBilling)
 		edgeControlService.SetRelayQuotaGate(bandwidthgate.New(store))
 		edgeControlService.SetAuditWriter(auditWriter)

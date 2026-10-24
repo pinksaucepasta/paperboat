@@ -115,6 +115,15 @@ type distributionPull struct {
 	Cursor           string `json:"cursor,omitempty"`
 }
 
+// distributionPage is the pull response. The edge treats a complete page with
+// no messages as nothing to install.
+type distributionPage struct {
+	Version    int                   `json:"version"`
+	Complete   bool                  `json:"complete"`
+	NextCursor string                `json:"next_cursor,omitempty"`
+	Messages   []DistributionMessage `json:"messages"`
+}
+
 type distributionRequest struct {
 	Hostname string `json:"hostname"`
 }
@@ -555,12 +564,22 @@ func (h *DistributionHub) handlePull(w http.ResponseWriter, r *http.Request) {
 		nextCursor = encodeDistributionCursor(selectedKeys[len(selectedKeys)-1])
 	}
 	h.mu.Unlock()
-	writeDistributionJSON(w, http.StatusOK, struct {
-		Version    int                   `json:"version"`
-		Complete   bool                  `json:"complete"`
-		NextCursor string                `json:"next_cursor,omitempty"`
-		Messages   []DistributionMessage `json:"messages"`
-	}{Version: 1, Complete: complete, NextCursor: nextCursor, Messages: messages})
+	writeDistributionJSON(w, http.StatusOK, distributionPage{Version: 1, Complete: complete, NextCursor: nextCursor, Messages: messages})
+}
+
+// DisabledDistributionHandler serves the distribution routes while managed
+// certificates are disabled, so the edge's pull is a known route. Nothing can
+// be pending, so pull answers the empty complete page; ack and request have no
+// certificate to act on and answer unavailable.
+func DisabledDistributionHandler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST "+CertificateDistributionPullPath, func(w http.ResponseWriter, _ *http.Request) {
+		writeDistributionJSON(w, http.StatusOK, distributionPage{Version: 1, Complete: true, Messages: []DistributionMessage{}})
+	})
+	unavailable := func(w http.ResponseWriter, _ *http.Request) { writeDistributionError(w, http.StatusServiceUnavailable) }
+	mux.HandleFunc("POST "+CertificateDistributionAckPath, unavailable)
+	mux.HandleFunc("POST "+CertificateDistributionRequestPath, unavailable)
+	return mux
 }
 
 func (h *DistributionHub) handleRequest(w http.ResponseWriter, r *http.Request) {
