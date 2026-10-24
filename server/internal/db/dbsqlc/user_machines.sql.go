@@ -4116,6 +4116,127 @@ func (q *Queries) ListUserMachineTerminalSessions(ctx context.Context, arg ListU
 	return items, nil
 }
 
+const listUserMachineTerminalSessionsByIDs = `-- name: ListUserMachineTerminalSessionsByIDs :many
+SELECT s.id, s.user_machine_id, s.name, s.idempotency_key, s.is_default, s.launch_cwd, s.desired_state, s.runtime_state, s.last_activity_at, s.last_runtime_sync_at, s.last_runtime_sequence, s.deleted_at, s.version, s.created_at, s.updated_at, s.transfer_destination_machine_id, s.owner_account, s.title, s.closed_at, s.owner_team_id FROM user_machine_terminal_sessions s
+JOIN user_machines m ON m.id=s.user_machine_id
+WHERE s.id=ANY($1::text[]) AND s.user_machine_id=$2
+  AND s.owner_account=$3 AND machine_capability_allowed($3,m.id,'terminal') AND m.deleted_at IS NULL AND s.deleted_at IS NULL
+`
+
+type ListUserMachineTerminalSessionsByIDsParams struct {
+	Ids           []string
+	UserMachineID string
+	UserID        string
+}
+
+// GetUserMachineTerminalSession for a page of sessions of one machine.
+func (q *Queries) ListUserMachineTerminalSessionsByIDs(ctx context.Context, arg ListUserMachineTerminalSessionsByIDsParams) ([]UserMachineTerminalSession, error) {
+	rows, err := q.db.Query(ctx, listUserMachineTerminalSessionsByIDs, arg.Ids, arg.UserMachineID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []UserMachineTerminalSession
+	for rows.Next() {
+		var i UserMachineTerminalSession
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserMachineID,
+			&i.Name,
+			&i.IdempotencyKey,
+			&i.IsDefault,
+			&i.LaunchCwd,
+			&i.DesiredState,
+			&i.RuntimeState,
+			&i.LastActivityAt,
+			&i.LastRuntimeSyncAt,
+			&i.LastRuntimeSequence,
+			&i.DeletedAt,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TransferDestinationMachineID,
+			&i.OwnerAccount,
+			&i.Title,
+			&i.ClosedAt,
+			&i.OwnerTeamID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUserMachineTerminalSessionsByIDsInWorkspace = `-- name: ListUserMachineTerminalSessionsByIDsInWorkspace :many
+SELECT s.id, s.user_machine_id, s.name, s.idempotency_key, s.is_default, s.launch_cwd, s.desired_state, s.runtime_state, s.last_activity_at, s.last_runtime_sync_at, s.last_runtime_sequence, s.deleted_at, s.version, s.created_at, s.updated_at, s.transfer_destination_machine_id, s.owner_account, s.title, s.closed_at, s.owner_team_id FROM user_machine_terminal_sessions s
+JOIN user_machines m ON m.id=s.user_machine_id
+WHERE s.id=ANY($1::text[]) AND s.user_machine_id=$2
+  AND s.owner_account=$3 AND s.owner_team_id IS NOT DISTINCT FROM $4::text
+  AND m.deleted_at IS NULL AND s.deleted_at IS NULL
+  AND (($4::text IS NULL AND m.user_id=$3 AND m.owner_team_id IS NULL
+        AND machine_capability_allowed($3,m.id,'terminal'))
+    OR ($4::text IS NOT NULL
+        AND team_machine_capability_allowed($3,$4::text,m.id,'terminal')))
+`
+
+type ListUserMachineTerminalSessionsByIDsInWorkspaceParams struct {
+	Ids             []string
+	UserMachineID   string
+	UserID          string
+	WorkspaceTeamID sql.NullString
+}
+
+// GetUserMachineTerminalSessionInWorkspace for a page of sessions of one machine.
+func (q *Queries) ListUserMachineTerminalSessionsByIDsInWorkspace(ctx context.Context, arg ListUserMachineTerminalSessionsByIDsInWorkspaceParams) ([]UserMachineTerminalSession, error) {
+	rows, err := q.db.Query(ctx, listUserMachineTerminalSessionsByIDsInWorkspace,
+		arg.Ids,
+		arg.UserMachineID,
+		arg.UserID,
+		arg.WorkspaceTeamID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []UserMachineTerminalSession
+	for rows.Next() {
+		var i UserMachineTerminalSession
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserMachineID,
+			&i.Name,
+			&i.IdempotencyKey,
+			&i.IsDefault,
+			&i.LaunchCwd,
+			&i.DesiredState,
+			&i.RuntimeState,
+			&i.LastActivityAt,
+			&i.LastRuntimeSyncAt,
+			&i.LastRuntimeSequence,
+			&i.DeletedAt,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TransferDestinationMachineID,
+			&i.OwnerAccount,
+			&i.Title,
+			&i.ClosedAt,
+			&i.OwnerTeamID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUserMachineTerminalSessionsInWorkspace = `-- name: ListUserMachineTerminalSessionsInWorkspace :many
 SELECT s.id, s.user_machine_id, s.name, s.idempotency_key, s.is_default, s.launch_cwd, s.desired_state, s.runtime_state, s.last_activity_at, s.last_runtime_sync_at, s.last_runtime_sequence, s.deleted_at, s.version, s.created_at, s.updated_at, s.transfer_destination_machine_id, s.owner_account, s.title, s.closed_at, s.owner_team_id FROM user_machine_terminal_sessions s
 JOIN user_machines m ON m.id=s.user_machine_id

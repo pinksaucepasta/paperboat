@@ -92,9 +92,9 @@
   {
    "actor": "user_perf_0002",
    "path": "/v1/machines/{solo_machine}/terminal-sessions",
-   "max_queries": 90,
+   "max_queries": 26,
    "p50_ms": 280,
-   "reason": "per-session live description (grants, helper route) for each row"
+   "reason": "one query for the page's records and one page context for its live detail, not per row: measured 21"
   },
   {
    "actor": "user_perf_0001",
@@ -113,30 +113,30 @@
   {
    "actor": "user_perf_0002",
    "path": "/v1/terminal-sessions",
-   "max_queries": 115,
+   "max_queries": 16,
    "p50_ms": 280,
-   "reason": "per-row grants and helper route lookups (batched next)"
+   "reason": "one page context (grants, routes, ingress, launch workspaces) per request, not per row: measured 12"
   },
   {
    "actor": "user_perf_0003",
    "path": "/v1/terminal-sessions",
-   "max_queries": 65,
+   "max_queries": 16,
    "p50_ms": 150,
-   "reason": "measured 58 ms p50 on the loaded gate host"
+   "reason": "one page context (grants, routes, ingress, launch workspaces) per request, not per row: measured 12"
   },
   {
    "actor": "user_perf_0001",
    "path": "/v1/terminal-sessions?workspace=perf-team-001",
-   "max_queries": 55,
+   "max_queries": 20,
    "p50_ms": 250,
-   "reason": "per-row grants and helper route lookups (batched next)"
+   "reason": "one page context (grants, routes, ingress, launch workspaces) per request, not per row: measured 16"
   },
   {
    "actor": "user_perf_0003",
    "path": "/v1/terminal-sessions?workspace=perf-team-001",
-   "max_queries": 85,
+   "max_queries": 22,
    "p50_ms": 280,
-   "reason": "per-row grants and helper route lookups (batched next)"
+   "reason": "one page context (grants, routes, ingress, launch workspaces) per request, not per row: measured 18"
   },
   {
    "actor": "user_perf_0001",

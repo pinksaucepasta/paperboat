@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/server/internal/runtimeattachment"
 	"sync"
 	"time"
 
@@ -70,16 +71,20 @@ type SharedTerminalSession struct {
 }
 
 func (s *Service) TerminalSessionCatalog(ctx context.Context, account string) ([]SharedTerminalSession, error) {
-	return s.terminalSessionCatalog(ctx, account, "")
+	return s.terminalSessionCatalog(ctx, account, nil)
 }
-func (s *Service) terminalSessionCatalog(ctx context.Context, account, exactSession string) ([]SharedTerminalSession, error) {
-	items, _, err := s.terminalSessionInventory(ctx, account, exactSession, InventoryOptions{Limit: maximumTerminalCatalog})
+
+// terminalSessionCatalog is the account's catalog without live detail: every session, or only those in sessions.
+func (s *Service) terminalSessionCatalog(ctx context.Context, account string, sessions []string) ([]SharedTerminalSession, error) {
+	items, _, err := s.terminalSessionInventory(ctx, account, sessions, InventoryOptions{Limit: maximumTerminalCatalog})
 	return items, err
 }
 func (s *Service) TerminalSessionInventory(ctx context.Context, account string, opts InventoryOptions) ([]SharedTerminalSession, int, error) {
-	return s.terminalSessionInventory(ctx, account, "", opts)
+	return s.terminalSessionInventory(ctx, account, nil, opts)
 }
-func (s *Service) terminalSessionInventory(ctx context.Context, account, exactSession string, opts InventoryOptions) ([]SharedTerminalSession, int, error) {
+
+// terminalSessionInventory lists the catalog, with live detail unless sessions narrows it (their callers describe).
+func (s *Service) terminalSessionInventory(ctx context.Context, account string, sessions []string, opts InventoryOptions) ([]SharedTerminalSession, int, error) {
 	if opts.Limit < 1 || opts.Limit > maximumTerminalCatalog || opts.Offset < 0 {
 		return nil, 0, ErrTerminalSessionInvalidName
 	}
@@ -116,7 +121,7 @@ func (s *Service) terminalSessionInventory(ctx context.Context, account, exactSe
 	 SELECT x.id,x.name,x.launch_cwd,x.desired_state,x.runtime_state,x.last_activity_at,x.closed_at,x.is_default,x.owner_account,x.kind,x.target_id,x.target_name,x.machine_id,x.environment_id,x.installation_generation,x.state,x.online,x.terminal_ready,coalesce(b.team_id,''),coalesce(t.generation,0),coalesce(terminal_session_role($1,x.id),''),x.owner_account=$1,EXISTS(SELECT 1 FROM team_terminal_session_grants ag WHERE ag.team_id=b.team_id AND ag.terminal_session_id=x.id AND ag.audience='all_members' AND ag.active),bc.id IS NOT NULL,x.created_at,x.updated_at
 	 FROM sessions x LEFT JOIN team_resource_bindings b ON b.resource_kind='terminal_session' AND b.resource_id=x.id AND b.active LEFT JOIN teams t ON t.team_id=b.team_id AND t.deleted_at IS NULL
 	 LEFT JOIN browser_candidates bc ON bc.id=x.id
-	WHERE ($2='' OR x.id=$2)
+	WHERE ($2::text[] IS NULL OR x.id=ANY($2))
 	  AND (NOT $3::boolean
 	    OR ($4::text IS NULL AND x.owner_account=$1 AND x.owner_team_id IS NULL)
 	    OR ($4::text IS NOT NULL AND (
@@ -133,7 +138,7 @@ func (s *Service) terminalSessionInventory(ctx context.Context, account, exactSe
 	if opts.Closed != nil {
 		closed = *opts.Closed
 	}
-	args := []any{account, exactSession, workspaceSet, teamID, opts.Q, opts.State, opts.Owner, closed, opts.MachineID}
+	args := []any{account, sessions, workspaceSet, teamID, opts.Q, opts.State, opts.Owner, closed, opts.MachineID}
 	// Runtime probes below must not hold a database snapshot open.
 	tx, err := s.db.Pool().BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
@@ -223,7 +228,7 @@ func (s *Service) terminalSessionInventory(ctx context.Context, account, exactSe
 		authorized = append(authorized, item)
 	}
 	out = authorized
-	if exactSession == "" && !opts.WithoutLiveMetadata {
+	if sessions == nil && !opts.WithoutLiveMetadata {
 		for index, observed := range s.describeTerminalPage(ctx, account, out) {
 			if observed != nil {
 				out[index] = *observed
@@ -249,15 +254,138 @@ func (s *Service) describeTerminalPage(ctx context.Context, account string, item
 		ids[index] = item.ID
 		byID[item.ID] = item
 	}
+	page, err := s.loadTerminalPage(ctx, items)
+	if err != nil {
+		return make([]*SharedTerminalSession, len(items)) // the listed rows, without live detail
+	}
 	return boundedTerminalInventoryObservations(ctx, ids, func(ctx context.Context, id string) (SharedTerminalSession, error) {
-		return s.describeTerminalSession(ctx, account, byID[id])
+		return s.describeTerminalSession(ctx, account, byID[id], page)
 	})
 }
 
+// terminalPage is what describing a page of terminals reads from the database, once for the page: the sharing
+// grants of every session and the runtime ingress of every machine environment. Read per row it was the
+// catalog's N+1 (about 9 queries a session, 104 for the perf solo account's page; Lane X S3).
+type terminalPage struct {
+	grants  map[string][]SharedTerminalGrant // session -> grants of its sharing team, by audience and account
+	ingress map[string]string                // environment -> runtime ingress URL; absent: unavailable
+	launch  map[string]string                // session -> launch workspace (personal or team)
+	// validated memoizes the team membership checks of the page's credentials (owner|team -> result).
+	validated *sync.Map
+}
+
+func (s *Service) loadTerminalPage(ctx context.Context, items []SharedTerminalSession) (terminalPage, error) {
+	page := terminalPage{grants: map[string][]SharedTerminalGrant{}, ingress: map[string]string{}, launch: map[string]string{}, validated: &sync.Map{}}
+	team := map[string]string{}
+	var shared []string
+	for _, item := range items {
+		if !item.BrowserOnly && item.Sharing.TeamID != "" {
+			team[item.ID] = item.Sharing.TeamID
+			shared = append(shared, item.ID)
+		}
+	}
+	if len(shared) > 0 {
+		rows, err := s.db.SQL().QueryContext(ctx, `SELECT terminal_session_id,team_id,audience,coalesce(account_id,''),role,active,generation
+ FROM team_terminal_session_grants WHERE terminal_session_id=ANY($1) ORDER BY terminal_session_id,audience,account_id`, shared)
+		if err != nil {
+			return page, err
+		}
+		for rows.Next() {
+			var session, teamID string
+			var g SharedTerminalGrant
+			if err := rows.Scan(&session, &teamID, &g.Audience, &g.AccountID, &g.Role, &g.Active, &g.Generation); err != nil {
+				return page, errors.Join(err, rows.Close())
+			}
+			if team[session] == teamID {
+				page.grants[session] = append(page.grants[session], g)
+			}
+		}
+		if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+			return page, err
+		}
+	}
+	if s.controlSigner == nil {
+		return page, nil
+	}
+	seen := map[string]bool{}
+	var sessions, machines, environments []string
+	for _, item := range items {
+		environment := item.Target.EnvironmentID
+		if item.BrowserOnly || item.Target.Status != "ready" {
+			continue
+		}
+		sessions, machines = append(sessions, item.ID), append(machines, item.Target.MachineID)
+		if !seen[environment] {
+			seen[environment] = true
+			environments = append(environments, environment)
+		}
+	}
+	if len(environments) > 0 {
+		routes, err := s.db.Queries().ListActiveHelperRouteHostsForEnvironments(ctx, environments)
+		if err != nil {
+			return page, err
+		}
+		hosts := make(map[string]string, len(routes))
+		for _, route := range routes {
+			hosts[route.EnvironmentID] = route.PublicHost
+		}
+		ingress, err := runtimeattachment.IngressURLs(ctx, s.db, hosts)
+		if err != nil {
+			return page, err
+		}
+		for environment, found := range ingress {
+			if found.Err == nil {
+				page.ingress[environment] = found.URL
+			}
+		}
+	}
+	if len(sessions) > 0 {
+		launch, err := s.terminalLaunchWorkspaces(ctx, sessions, machines)
+		if err != nil {
+			return page, err
+		}
+		page.launch = launch
+	}
+	return page, nil
+}
+
+// validate is workspace.Validate, once per owner and team for the page.
+func (p terminalPage) validate(ctx context.Context, s *Service) func(user, team string) error {
+	check := s.validateWorkspace(ctx)
+	return func(user, team string) error {
+		key := user + "\x00" + team
+		if result, ok := p.validated.Load(key); ok {
+			err, _ := result.(error)
+			return err
+		}
+		err := check(user, team)
+		p.validated.Store(key, err)
+		return err
+	}
+}
+
+// terminalInventoryObservations is the catalog's live detail for ids (one query for the rows, one page context),
+// in the order of ids; nil where a session is not in the account's catalog or could not be described.
 func (s *Service) terminalInventoryObservations(ctx context.Context, account string, ids []string) []*SharedTerminalSession {
-	return boundedTerminalInventoryObservations(ctx, ids, func(ctx context.Context, id string) (SharedTerminalSession, error) {
-		return s.TerminalSessionSharing(ctx, account, id)
-	})
+	out := make([]*SharedTerminalSession, len(ids))
+	if len(ids) == 0 {
+		return out
+	}
+	items, err := s.terminalSessionCatalog(ctx, account, ids)
+	if err != nil {
+		return out
+	}
+	described := s.describeTerminalPage(ctx, account, items)
+	byID := make(map[string]*SharedTerminalSession, len(items))
+	for index, item := range items {
+		if described[index] != nil {
+			byID[item.ID] = described[index]
+		}
+	}
+	for index, id := range ids {
+		out[index] = byID[id]
+	}
+	return out
 }
 func boundedTerminalInventoryObservations(ctx context.Context, ids []string, observe func(context.Context, string) (SharedTerminalSession, error)) []*SharedTerminalSession {
 	out := make([]*SharedTerminalSession, len(ids))
@@ -296,7 +424,7 @@ dispatch:
 }
 
 func (s *Service) TerminalSessionSharing(ctx context.Context, account, sessionID string) (SharedTerminalSession, error) {
-	items, err := s.terminalSessionCatalog(ctx, account, sessionID)
+	items, err := s.terminalSessionCatalog(ctx, account, []string{sessionID})
 	if err != nil {
 		return SharedTerminalSession{}, err
 	}
@@ -312,11 +440,15 @@ func (s *Service) TerminalSessionSharing(ctx context.Context, account, sessionID
 	if !found {
 		return item, ErrTerminalSessionNotFound
 	}
-	return s.describeTerminalSession(ctx, account, item)
+	page, err := s.loadTerminalPage(ctx, []SharedTerminalSession{item})
+	if err != nil {
+		return item, err
+	}
+	return s.describeTerminalSession(ctx, account, item, page)
 }
 
 // describeTerminalSession adds grants and live host metadata to an authorized catalog row.
-func (s *Service) describeTerminalSession(ctx context.Context, account string, item SharedTerminalSession) (SharedTerminalSession, error) {
+func (s *Service) describeTerminalSession(ctx context.Context, account string, item SharedTerminalSession, page terminalPage) (SharedTerminalSession, error) {
 	sessionID := item.ID
 	if item.BrowserOnly {
 		decision, decisionErr := s.ResolveTerminalBrowserRole(ctx, account, sessionID)
@@ -330,17 +462,8 @@ func (s *Service) describeTerminalSession(ctx context.Context, account string, i
 		}
 		return item, nil
 	}
-	rows, err := s.db.SQL().QueryContext(ctx, `SELECT audience,coalesce(account_id,''),role,active,generation FROM team_terminal_session_grants WHERE team_id=$1 AND terminal_session_id=$2 ORDER BY audience,account_id`, item.Sharing.TeamID, sessionID)
-	if err != nil {
-		return item, err
-	}
-	defer rows.Close()
 	all := false
-	for rows.Next() {
-		var g SharedTerminalGrant
-		if err = rows.Scan(&g.Audience, &g.AccountID, &g.Role, &g.Active, &g.Generation); err != nil {
-			return item, errors.Join(err, rows.Close())
-		}
+	for _, g := range page.grants[sessionID] {
 		if item.CanManage || g.Audience == "all_members" || g.AccountID == account {
 			item.Sharing.Grants = append(item.Sharing.Grants, g)
 		}
@@ -348,28 +471,22 @@ func (s *Service) describeTerminalSession(ctx context.Context, account string, i
 			all = true
 		}
 	}
-	if err = rows.Err(); err != nil {
-		return item, errors.Join(err, rows.Close())
-	}
-	if err = rows.Close(); err != nil {
-		return item, err
-	}
 	if all {
 		item.Sharing.Audience = "all_members"
 	}
 	if item.Target.Status != "ready" || s.controlSigner == nil {
 		return item, nil
 	}
-	route, err := s.db.Queries().GetActiveHelperRouteForEnvironment(ctx, item.Target.EnvironmentID)
-	if err != nil {
+	httpIngressURL, found := page.ingress[item.Target.EnvironmentID]
+	if !found {
 		return item, nil
 	}
 	now := s.now().UTC()
-	token, err := s.signProcessCredential(ctx, mint.CredentialInput{Issuer: s.issuer, Audience: "paperboat-machine", Subject: item.OwnerAccount, JTI: newID("token"), IssuedAt: now, ExpiresAt: now.Add(time.Minute), CredentialClass: "terminal_operation", Scopes: []string{"terminal:operate"}, EnvironmentID: item.Target.EnvironmentID, MachineID: item.Target.MachineID, UserID: item.OwnerAccount, CLIClientSessionID: "control-plane", SessionID: item.ID})
-	if err != nil {
+	selected, found := page.launch[item.ID]
+	if !found {
 		return item, nil
 	}
-	httpIngressURL, err := s.runtimeIngressURL(ctx, item.Target.EnvironmentID, route.PublicHost)
+	token, err := s.signTerminalCredential(ctx, mint.CredentialInput{Issuer: s.issuer, Audience: "paperboat-machine", Subject: item.OwnerAccount, JTI: newID("token"), IssuedAt: now, ExpiresAt: now.Add(time.Minute), CredentialClass: "terminal_operation", Scopes: []string{"terminal:operate"}, EnvironmentID: item.Target.EnvironmentID, MachineID: item.Target.MachineID, UserID: item.OwnerAccount, CLIClientSessionID: "control-plane", SessionID: item.ID}, selected, page.validate(ctx, s))
 	if err != nil {
 		return item, nil
 	}

@@ -159,15 +159,14 @@ func (s *Service) ListTerminalSessionInventory(ctx context.Context, account, mac
 	if err != nil {
 		return nil, 0, err
 	}
-	out := make([]TerminalSession, 0, len(ids))
-	for _, id := range ids {
-		row, e := getTerminalSession(ctx, dbsqlc.New(tx), dbsqlc.GetUserMachineTerminalSessionParams{ID: id, UserMachineID: machineID, UserID: account})
-		if e != nil {
-			return nil, 0, e
-		}
+	records, err := listTerminalSessions(ctx, dbsqlc.New(tx), ids, machineID, account)
+	if err != nil {
+		return nil, 0, err
+	}
+	out := make([]TerminalSession, 0, len(records))
+	for _, row := range records {
 		item := mapTerminalSession(row)
 		item.Machine = machine.Alias
-
 		out = append(out, item)
 	}
 	if err := tx.Commit(ctx); err != nil {

@@ -392,6 +392,36 @@ func getTerminalSession(ctx context.Context, q *dbsqlc.Queries, in dbsqlc.GetUse
 	})
 }
 
+// listTerminalSessions is getTerminalSession for a page of one machine's sessions, in the order of ids; a session
+// it does not authorize is an error, as it is for getTerminalSession.
+func listTerminalSessions(ctx context.Context, q *dbsqlc.Queries, ids []string, machineID, account string) ([]dbsqlc.UserMachineTerminalSession, error) {
+	var rows []dbsqlc.UserMachineTerminalSession
+	var err error
+	if workspaceSet, teamID := workspaceTeamArgument(ctx); workspaceSet {
+		rows, err = q.ListUserMachineTerminalSessionsByIDsInWorkspace(ctx, dbsqlc.ListUserMachineTerminalSessionsByIDsInWorkspaceParams{
+			Ids: ids, UserMachineID: machineID, UserID: account, WorkspaceTeamID: teamID,
+		})
+	} else {
+		rows, err = q.ListUserMachineTerminalSessionsByIDs(ctx, dbsqlc.ListUserMachineTerminalSessionsByIDsParams{Ids: ids, UserMachineID: machineID, UserID: account})
+	}
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[string]dbsqlc.UserMachineTerminalSession, len(rows))
+	for _, row := range rows {
+		byID[row.ID] = row
+	}
+	out := make([]dbsqlc.UserMachineTerminalSession, 0, len(ids))
+	for _, id := range ids {
+		row, found := byID[id]
+		if !found {
+			return nil, sql.ErrNoRows
+		}
+		out = append(out, row)
+	}
+	return out, nil
+}
+
 func getTerminalSessionByIdempotencyKey(ctx context.Context, q *dbsqlc.Queries, in dbsqlc.GetUserMachineTerminalSessionByIdempotencyKeyParams) (dbsqlc.UserMachineTerminalSession, error) {
 	workspaceSet, teamID := workspaceTeamArgument(ctx)
 	if !workspaceSet {

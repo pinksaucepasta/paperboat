@@ -1029,6 +1029,25 @@ WHERE s.id=sqlc.arg(id) AND s.user_machine_id=sqlc.arg(user_machine_id)
     OR (sqlc.narg(workspace_team_id)::text IS NOT NULL
         AND team_machine_capability_allowed(sqlc.arg(user_id),sqlc.narg(workspace_team_id)::text,m.id,'terminal')));
 
+-- name: ListUserMachineTerminalSessionsByIDs :many
+-- GetUserMachineTerminalSession for a page of sessions of one machine.
+SELECT s.* FROM user_machine_terminal_sessions s
+JOIN user_machines m ON m.id=s.user_machine_id
+WHERE s.id=ANY(sqlc.arg(ids)::text[]) AND s.user_machine_id=sqlc.arg(user_machine_id)
+  AND s.owner_account=sqlc.arg(user_id) AND machine_capability_allowed(sqlc.arg(user_id),m.id,'terminal') AND m.deleted_at IS NULL AND s.deleted_at IS NULL;
+
+-- name: ListUserMachineTerminalSessionsByIDsInWorkspace :many
+-- GetUserMachineTerminalSessionInWorkspace for a page of sessions of one machine.
+SELECT s.* FROM user_machine_terminal_sessions s
+JOIN user_machines m ON m.id=s.user_machine_id
+WHERE s.id=ANY(sqlc.arg(ids)::text[]) AND s.user_machine_id=sqlc.arg(user_machine_id)
+  AND s.owner_account=sqlc.arg(user_id) AND s.owner_team_id IS NOT DISTINCT FROM sqlc.narg(workspace_team_id)::text
+  AND m.deleted_at IS NULL AND s.deleted_at IS NULL
+  AND ((sqlc.narg(workspace_team_id)::text IS NULL AND m.user_id=sqlc.arg(user_id) AND m.owner_team_id IS NULL
+        AND machine_capability_allowed(sqlc.arg(user_id),m.id,'terminal'))
+    OR (sqlc.narg(workspace_team_id)::text IS NOT NULL
+        AND team_machine_capability_allowed(sqlc.arg(user_id),sqlc.narg(workspace_team_id)::text,m.id,'terminal')));
+
 -- name: GetUserMachineForSharedTerminalSession :one
 WITH target AS (
  SELECT s.user_machine_id machine_id FROM user_machine_terminal_sessions s WHERE s.id=sqlc.arg(session_id) AND s.deleted_at IS NULL
