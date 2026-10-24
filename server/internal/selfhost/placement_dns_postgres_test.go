@@ -41,8 +41,9 @@ func TestPlacementDNSCreationAndResetOnPostgres(t *testing.T) {
 	}
 	exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$2,'active')`, owner, owner+"@example.test")
 	installation := scopedInstallationFixture(t, store, "dns-placement-test-key", owner, "tunnel")
-	// The node's verified public ingress is the self-hosted DNS target the pool publishes (publicationdns.Target).
-	exec(`UPDATE paperboat.control_tunnel_nodes SET endpoint_host='140.245.11.41',public_ingress_ipv4='140.245.11.41',public_ingress_verified_at=now() WHERE id=$1`, installation.NodeID)
+	// A serving edge node: its verified public ingress is the self-hosted DNS target the pool publishes
+	// (publicationdns.Target), and publication_edge_nodes needs it ready with a fresh heartbeat.
+	exec(`UPDATE paperboat.control_tunnel_nodes SET endpoint_host='140.245.11.41',state='ready',ready=true,last_heartbeat_at=now(),registry_expires_at=now()+interval '1 hour',public_ingress_verified_at=now(),public_ingress_ipv4='140.245.11.41' WHERE id=$1`, installation.NodeID)
 	service := New(store, "dns-placement-test-key")
 	// A placement on an installation needs a self-hosted-only workspace pool; a
 	// managed placement needs a managed-only pool (placement.go SetPlacement).
