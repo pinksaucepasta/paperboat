@@ -152,9 +152,11 @@ func TestPlacementDNSCreationAndResetOnPostgres(t *testing.T) {
 			t.Fatal(err)
 		}
 		check("140.245.11.41", "pending", "A", 3)
+		// Repeating the same placement on the verified domain changes nothing: the target is unchanged.
+		exec(`UPDATE `+table+` SET ownership_state='verified' WHERE id=$1`, domainID)
 		if _, err = service.SetPlacement(ctx, owner, kind, id, &installation.InstallationID); err != nil {
 			t.Fatal(err)
 		}
-		check("140.245.11.41", "pending", "A", 3)
+		check("140.245.11.41", "verified", "A", 3)
 	}
 }
