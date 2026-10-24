@@ -139,7 +139,7 @@ func runObserved(ctx context.Context, args []string, out io.Writer, observe func
 		if fs.NArg() != 0 {
 			return commandError("unexpected arguments")
 		}
-		return containers.Serve(ctx, *dir, out, observe)
+		return serve(ctx, *dir, out, observe)
 	case "status":
 		cmd := exec.CommandContext(ctx, "systemctl", "status", "--no-pager", "paperboat-selfhost.service")
 		cmd.Stdout = out
@@ -232,6 +232,9 @@ func install(ctx context.Context, args []string, out io.Writer) error {
 		if err != nil {
 			return err
 		}
+		if err := checkClaimListen(c.Listen); err != nil {
+			return err
+		}
 		if c, err = stageInstallFiles(*dir, fs, c); err != nil {
 			return err
 		}
@@ -256,6 +259,19 @@ func install(ctx context.Context, args []string, out io.Writer) error {
 	}
 	return run(ctx, []string{"selfhost", "code", "--state-dir", *dir}, out)
 }
+
+// serve runs the installation. A claim address already in use is reported by
+// name, because the service journal is the only place the operator will look.
+func serve(ctx context.Context, dir string, out io.Writer, observe func(context.Context, string, error)) error {
+	err := containers.Serve(ctx, dir, out, observe)
+	if errors.Is(err, syscall.EADDRINUSE) {
+		if c, readErr := selfhost.ReadConfig(dir); readErr == nil {
+			return claimListenError(c.Listen, err)
+		}
+	}
+	return err
+}
+
 func publicAddress(ctx context.Context) (string, error) {
 	addressURL := os.Getenv("PAPERBOAT_SELFHOST_ADDRESS_URL")
 	if addressURL == "" {
