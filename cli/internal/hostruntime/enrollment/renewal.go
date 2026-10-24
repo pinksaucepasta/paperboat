@@ -167,7 +167,13 @@ func (s *RenewingTokenSource) Token(ctx context.Context) (token string, resultEr
 // was stored for the current installation generation (stg-m1: an install moved the generation and the
 // carrier was refused with 401 for 35 min, until the scheduled renewal).
 func (s *RenewingTokenSource) fresh(current RuntimeIdentity, now time.Time) bool {
-	return current.ExpiresAt.After(now.Add(s.config.RenewBefore)) && current.InstallationGeneration == registeredGeneration(s.config.StateRoot)
+	if !current.ExpiresAt.After(now.Add(s.config.RenewBefore)) {
+		return false
+	}
+	// 0 is a credential stored before the machine had a registration (its first enrollment) or by an
+	// older build: its generation is unknown, so only expiry renews it. Renewing it at once added a
+	// renewal to every fresh pair.
+	return current.InstallationGeneration == 0 || current.InstallationGeneration == registeredGeneration(s.config.StateRoot)
 }
 
 var _ interface {
