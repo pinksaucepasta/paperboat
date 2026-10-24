@@ -101,7 +101,10 @@ func TestNetworkRegistrationLostResponseAndRefreshRecovery(t *testing.T) {
 	}
 }
 
-func TestLiveNativeScopeObservesWithdrawalBeforeCredentialRefresh(t *testing.T) {
+// A live operation's scope ends as soon as the server announces the change: revoking a machine or an
+// access grant moves peer_network or inventory, and those topics wake RequestRefresh (F21-18). The engine
+// no longer fetches its whole configuration every second while a scope is admitted.
+func TestLiveNativeScopeObservesAnnouncedWithdrawalWithinASecond(t *testing.T) {
 	a, c, signer, _ := networkTestAuthority(t)
 	if err := a.Apply(t.Context(), networkToken(t, signer, c)); err != nil {
 		t.Fatal(err)
@@ -134,10 +137,11 @@ func TestLiveNativeScopeObservesWithdrawalBeforeCredentialRefresh(t *testing.T) 
 		t.Fatal("initial network refresh unavailable")
 	}
 	withdrawn.Store(true)
+	a.RequestRefresh() // what the peer_network or inventory event does
 	deadline := time.Now().Add(2500 * time.Millisecond)
 	for a.AllowsAdmitted("machine_test", "grant_test", "terminal", "dial") {
 		if time.Now().After(deadline) {
-			t.Fatal("live operation waited for credential refresh to observe withdrawal")
+			t.Fatal("live operation waited for the regular renewal to observe an announced withdrawal")
 		}
 		time.Sleep(time.Millisecond)
 	}
@@ -1142,5 +1146,64 @@ func TestNetworkAuthorityAcceptsAConfigurationForALargeAccount(t *testing.T) {
 	}
 	if !a.Allows("machine_149", "grant_test", "exec", "dial") {
 		t.Fatal("the last peer of a large configuration is not admitted")
+	}
+}
+
+// P1 (F21-18): while any scope was admitted, every engine fetched its signed configuration every second,
+// about 10,000 requests a second for 10,000 machines in sessions. Renewal now follows the schedule and
+// the server's announcements only.
+func TestAdmittedScopeDoesNotPollTheConfigurationEverySecond(t *testing.T) {
+	a, c, signer, _ := networkTestAuthority(t)
+	if err := a.Apply(t.Context(), networkToken(t, signer, c)); err != nil {
+		t.Fatal(err)
+	}
+	release, err := a.TrackAdmittedScope("machine_test", "grant_test", "terminal", "dial")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	var fetches atomic.Int32
+	client := networkAPIFunc{configuration: func(context.Context, string) (string, error) {
+		fetches.Add(1)
+		c.Generation++
+		return networkToken(t, signer, c), nil
+	}}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- a.Run(ctx, client, nil) }()
+	time.Sleep(3500 * time.Millisecond)
+	cancel()
+	<-done
+	if got := fetches.Load(); got > 1 {
+		t.Fatalf("%d configuration fetches in 3.5 s with an admitted scope; want the initial one only", got)
+	}
+}
+
+// A refresh requested while another refresh is applying its configuration must still run: the applied
+// configuration's wake re-armed the regular cadence over it, so an announced withdrawal waited for the
+// next renewal (seen as a flaky TestLiveNativeScopeObservesAnnouncedWithdrawalWithinASecond).
+func TestRequestDuringARefreshIsNotLostToTheAppliedConfigurationWake(t *testing.T) {
+	for round := range 10 {
+		a, c, signer, _ := networkTestAuthority(t)
+		fetched := make(chan struct{}, 4)
+		client := networkAPIFunc{configuration: func(context.Context, string) (string, error) {
+			c.Generation++
+			if len(fetched) == 0 {
+				a.RequestRefresh() // pending before this refresh applies its configuration
+			}
+			fetched <- struct{}{}
+			return networkToken(t, signer, c), nil
+		}}
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+		go func() { done <- a.Run(ctx, client, nil) }()
+		<-fetched
+		select {
+		case <-fetched:
+		case <-time.After(2500 * time.Millisecond):
+			t.Fatalf("round %d: the requested refresh never ran", round)
+		}
+		cancel()
+		<-done
 	}
 }

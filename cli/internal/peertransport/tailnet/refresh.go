@@ -12,7 +12,6 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/backoff"
-	"github.com/pinksaucepasta/paperboat/shared/admission"
 )
 
 type NetworkAPI interface {
@@ -113,27 +112,6 @@ func (a *Authority) Run(ctx context.Context, client NetworkAPI, report func(erro
 	defer a.Close()
 	ctx, cancelRun := context.WithCancel(ctx)
 	defer cancelRun()
-	// Live carrier and operation refs need current policy independently of the
-	// credential renewal schedule. The shared owner bounds every lookup and
-	// keeps accepted work through transient control-plane failures.
-	revocations, err := admission.Admit(ctx, time.Time{}, nil)
-	if err != nil {
-		return err
-	}
-	defer revocations.Close()
-	revocations.Poll(func(check context.Context) error {
-		if len(a.AdmittedScopes()) == 0 {
-			return nil
-		}
-		err := a.Refresh(check, client)
-		if err != nil && report != nil {
-			report(err)
-		}
-		if denial := a.RelayDenial(); err == nil && denial != nil && report != nil {
-			report(denial)
-		}
-		return err
-	})
 	watchDone := make(chan struct{})
 	defer close(watchDone)
 	go func() {
@@ -145,6 +123,26 @@ func (a *Authority) Run(ctx context.Context, client NetworkAPI, report func(erro
 	}()
 	timer := time.NewTimer(0)
 	defer timer.Stop()
+	due := time.Now() // when timer fires
+	reset := func(wait time.Duration) {
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+		timer.Reset(wait)
+		due = time.Now().Add(wait)
+	}
+	// An on-demand request or an applied configuration may bring the next refresh forward, never push it
+	// back: the wake from the configuration a refresh had just applied re-armed the regular cadence over a
+	// pending on-demand refresh (an announced withdrawal then waited for the next renewal), and earlier
+	// over the regional recovery renewal (every relay withdrawn about every 17 s).
+	earlier := func(wait time.Duration) {
+		if time.Now().Add(wait).Before(due) {
+			reset(wait)
+		}
+	}
 	var lastRefresh time.Time
 	failures := 0
 	for {
@@ -158,25 +156,10 @@ func (a *Authority) Run(ctx context.Context, client NetworkAPI, report func(erro
 				// The server is failing: the backoff schedule already decides when to retry.
 				continue
 			}
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
-				}
-			}
-			timer.Reset(max(0, onDemandRefreshSpacing-time.Since(lastRefresh)))
+			earlier(max(0, onDemandRefreshSpacing-time.Since(lastRefresh)))
 		case <-a.refreshWake:
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
-				}
-			}
-			// Every applied configuration lands here, including the one the refresh below just applied, so
-			// this must schedule exactly what that refresh would: the regional cadence alone overwrote the
-			// recovery renewal, the relays' observations expired, and every region was withdrawn and
-			// reconnected about every 17 s.
-			timer.Reset(a.nextRefresh(nil, 0))
+			// A configuration applied elsewhere may expire sooner than the current schedule.
+			earlier(a.nextRefresh(nil, 0))
 		case <-timer.C:
 			request, cancel := context.WithTimeout(ctx, 10*time.Second)
 			err := a.Refresh(request, client)
@@ -193,7 +176,7 @@ func (a *Authority) Run(ctx context.Context, client NetworkAPI, report func(erro
 			if denial := a.RelayDenial(); err == nil && denial != nil && report != nil {
 				report(denial)
 			}
-			timer.Reset(a.nextRefresh(err, failures))
+			reset(a.nextRefresh(err, failures))
 		}
 	}
 }
