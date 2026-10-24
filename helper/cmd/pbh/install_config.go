@@ -31,7 +31,7 @@ func existingInstallConfig(dir string, fs *flag.FlagSet) (selfhost.Config, bool,
 	staged := map[string]struct {
 		file   trustFile
 		stored string
-	}{"https-cert": {publicCertFile, c.PublicHTTPSCertFile}, "https-key": {publicKeyFile, c.PublicHTTPSKeyFile}}
+	}{"https-cert": {publicCertFile, c.PublicHTTPSCertFile}, "https-key": {publicKeyFile, c.PublicHTTPSKeyFile}, "control-ca": {controlCAFile, c.ControlCA}}
 	fs.Visit(func(f *flag.Flag) {
 		if err != nil {
 			return

@@ -28,6 +28,7 @@ type trustFile struct {
 var (
 	publicCertFile = trustFile{kind: "public-https-cert", label: "browser HTTPS certificate", certificate: true}
 	publicKeyFile  = trustFile{kind: "public-https-key", label: "browser HTTPS private key", private: true}
+	controlCAFile  = trustFile{kind: "control-ca", label: "control-plane CA certificate", certificate: true}
 )
 
 const maxTrustFileBytes = 1 << 20
@@ -130,6 +131,11 @@ func stageInstallFiles(dir string, fs *flag.FlagSet, c selfhost.Config) (selfhos
 	}
 	if src := fs.Lookup("https-key").Value.String(); src != "" {
 		if c.PublicHTTPSKeyFile, err = stageTrustFile(dir, publicKeyFile, src); err != nil {
+			return c, err
+		}
+	}
+	if src := fs.Lookup("control-ca").Value.String(); src != "" {
+		if c.ControlCA, err = stageTrustFile(dir, controlCAFile, src); err != nil {
 			return c, err
 		}
 	}

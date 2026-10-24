@@ -112,7 +112,8 @@ func TestStageInstallFilesPointsConfigurationAtCopies(t *testing.T) {
 	fs := flag.NewFlagSet("install", flag.ContinueOnError)
 	fs.String("https-cert", "", "")
 	fs.String("https-key", "", "")
-	if err := fs.Parse([]string{"--https-cert", cert, "--https-key", key}); err != nil {
+	fs.String("control-ca", "", "")
+	if err := fs.Parse([]string{"--https-cert", cert, "--https-key", key, "--control-ca", cert}); err != nil {
 		t.Fatal(err)
 	}
 	state := filepath.Join(t.TempDir(), "state")
@@ -122,6 +123,41 @@ func TestStageInstallFilesPointsConfigurationAtCopies(t *testing.T) {
 	}
 	if filepath.Dir(c.PublicHTTPSCertFile) != state || filepath.Dir(c.PublicHTTPSKeyFile) != state {
 		t.Fatalf("configuration still points outside the state directory: %s %s", c.PublicHTTPSCertFile, c.PublicHTTPSKeyFile)
+	}
+	if filepath.Dir(c.ControlCA) != state {
+		t.Fatalf("control CA not staged into the state directory: %q", c.ControlCA)
+	}
+}
+
+func TestStageInstallFilesDefaultsToPublicRoots(t *testing.T) {
+	fs := flag.NewFlagSet("install", flag.ContinueOnError)
+	fs.String("https-cert", "", "")
+	fs.String("https-key", "", "")
+	fs.String("control-ca", "", "")
+	if err := fs.Parse(nil); err != nil {
+		t.Fatal(err)
+	}
+	c, err := stageInstallFiles(filepath.Join(t.TempDir(), "state"), fs, selfhost.Config{})
+	if err != nil || c.ControlCA != "" {
+		t.Fatalf("without --control-ca the control plane must use public roots: %q %v", c.ControlCA, err)
+	}
+}
+
+func TestStageInstallFilesRefusesControlCAThatIsNotACertificate(t *testing.T) {
+	bad := filepath.Join(t.TempDir(), "control-ca.pem")
+	if err := os.WriteFile(bad, []byte("not a certificate"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	fs := flag.NewFlagSet("install", flag.ContinueOnError)
+	fs.String("https-cert", "", "")
+	fs.String("https-key", "", "")
+	fs.String("control-ca", "", "")
+	if err := fs.Parse([]string{"--control-ca", bad}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := stageInstallFiles(filepath.Join(t.TempDir(), "state"), fs, selfhost.Config{})
+	if err == nil || !strings.Contains(err.Error(), bad) || !strings.Contains(err.Error(), "PEM certificate") {
+		t.Fatalf("invalid control CA error does not name the file: %v", err)
 	}
 }
 
