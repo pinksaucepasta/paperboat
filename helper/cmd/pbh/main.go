@@ -231,6 +231,9 @@ func install(ctx context.Context, args []string, out io.Writer) error {
 		if err != nil {
 			return err
 		}
+		if c, err = stageInstallFiles(*dir, fs, c); err != nil {
+			return err
+		}
 	}
 	if err := selfhost.Initialize(*dir, c); err != nil {
 		return err
@@ -358,7 +361,15 @@ func configureTLS(ctx context.Context, args []string, out io.Writer) error {
 	if !*noService && os.Geteuid() != 0 {
 		return elevated(ctx, append([]string{"configure-tls"}, args...), out)
 	}
-	rollback, err := selfhost.ConfigurePublicHTTPS(*dir, *cert, *key)
+	certFile, err := stageTrustFile(*dir, publicCertFile, *cert)
+	if err != nil {
+		return err
+	}
+	keyFile, err := stageTrustFile(*dir, publicKeyFile, *key)
+	if err != nil {
+		return err
+	}
+	rollback, err := selfhost.ConfigurePublicHTTPS(*dir, certFile, keyFile)
 	if err != nil {
 		return fmt.Errorf("%w: %w", commandError("browser HTTPS configuration was not changed; check certificate hostname, validity, key pairing, and owner-only key permissions"), err)
 	}

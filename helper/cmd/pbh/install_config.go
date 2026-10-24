@@ -27,9 +27,17 @@ func existingInstallConfig(dir string, fs *flag.FlagSet) (selfhost.Config, bool,
 	if err != nil {
 		return c, false, err
 	}
-	expected := map[string]string{"enable": installationMode(c), "endpoint-host": c.EndpointHost, "name": c.Name, "claim-listen": c.Listen, "preview-domain": c.PreviewDomain, "tunnel-domain": c.TunnelDomain, "runtime-domain": c.RuntimeDomain, "browser-login-origin": c.BrowserLoginOrigin, "https-cert": c.PublicHTTPSCertFile, "https-key": c.PublicHTTPSKeyFile}
+	expected := map[string]string{"enable": installationMode(c), "endpoint-host": c.EndpointHost, "name": c.Name, "claim-listen": c.Listen, "preview-domain": c.PreviewDomain, "tunnel-domain": c.TunnelDomain, "runtime-domain": c.RuntimeDomain, "browser-login-origin": c.BrowserLoginOrigin}
+	staged := map[string]struct {
+		file   trustFile
+		stored string
+	}{"https-cert": {publicCertFile, c.PublicHTTPSCertFile}, "https-key": {publicKeyFile, c.PublicHTTPSKeyFile}}
 	fs.Visit(func(f *flag.Flag) {
 		if err != nil {
+			return
+		}
+		if s, ok := staged[f.Name]; ok {
+			err = matchStoredTrustFile(dir, s.file, f.Name, f.Value.String(), s.stored)
 			return
 		}
 		if value, ok := expected[f.Name]; ok && value != f.Value.String() {
@@ -68,7 +76,7 @@ func freshInstallConfig(ctx context.Context, fs *flag.FlagSet) (selfhost.Config,
 	if failure == "" {
 		failure = host
 	}
-	c := selfhost.Config{Name: name, EndpointHost: host, Listen: value("claim-listen"), PreviewDomain: value("preview-domain"), TunnelDomain: value("tunnel-domain"), RuntimeDomain: value("runtime-domain"), BrowserLoginOrigin: value("browser-login-origin"), PublicHTTPSCertFile: value("https-cert"), PublicHTTPSKeyFile: value("https-key")}
+	c := selfhost.Config{Name: name, EndpointHost: host, Listen: value("claim-listen"), PreviewDomain: value("preview-domain"), TunnelDomain: value("tunnel-domain"), RuntimeDomain: value("runtime-domain"), BrowserLoginOrigin: value("browser-login-origin")}
 	mode := value("enable")
 	if mode == "relay" || mode == "both" {
 		tcp := 443
