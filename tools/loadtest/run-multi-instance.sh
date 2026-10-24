@@ -95,15 +95,13 @@ export PAPERBOAT_PERF_DATABASE_DSN=$DSN PAPERBOAT_LOAD_TARGET_URL=http://127.0.0
 # paperboat_server_worker_mode (leader|standby|drained) on its loopback /metrics.
 leader_row() { $DOCKER exec "$PG" psql -U postgres -d paperboat_load_test -Atc \
   "SELECT instance||' '||to_char(heartbeat_at,'HH24:MI:SS') FROM paperboat.worker_leader" 2>/dev/null; }
+# /metrics answers {"data":{"typed":[{"name":..,"labels":[{"name":"mode","value":..}],"value":1},..]}}; the mode whose
+# worker_mode gauge is 1 is the instance's current mode.
 mode_of() { curl -fsS --max-time 2 "http://127.0.0.1:$((18080 + $1))/metrics" 2>/dev/null | python3 -c '
 import json, sys
-def walk(value, path=""):
-    if isinstance(value, dict):
-        for k, v in value.items(): yield from walk(v, path + "/" + k)
-    elif "worker_mode" in path and value in (1, 1.0, True): yield path
-for path in walk(json.load(sys.stdin)):
-    for mode in ("leader", "standby", "drained"):
-        if mode in path: print(mode)' 2>/dev/null | head -1; }
+for sample in json.load(sys.stdin)["data"].get("typed", []):
+    if sample["name"] == "paperboat_server_worker_mode" and sample.get("value") == 1:
+        print(next(l["value"] for l in sample["labels"] if l["name"] == "mode")); break' 2>/dev/null; }
 for _ in $(seq 1 60); do [ -n "$(leader_row)" ] && break; sleep 1; done
 read -r leader_instance _ <<<"$(leader_row)"
 leader_pid=${leader_instance##*/}
