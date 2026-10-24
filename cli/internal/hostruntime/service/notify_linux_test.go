@@ -4,6 +4,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -18,6 +19,7 @@ func TestProcessNotifierLifecycleAndWatchdog(t *testing.T) {
 	t.Setenv("NOTIFY_SOCKET", path)
 	t.Setenv("WATCHDOG_USEC", "2000000")
 	t.Setenv("WATCHDOG_PID", "")
+	resetServiceManager(t)
 
 	notifier, err := NewProcessNotifier()
 	if err != nil {
@@ -55,12 +57,26 @@ func TestProcessNotifierLifecycleAndWatchdog(t *testing.T) {
 	if err := notifier.Degraded("bad\nstatus"); err == nil {
 		t.Fatal("accepted unsafe status")
 	}
+	if os.Getenv("NOTIFY_SOCKET") != "" || os.Getenv("WATCHDOG_USEC") != "" {
+		t.Fatal("child processes would inherit the service manager's notification socket")
+	}
+	again, err := NewProcessNotifier()
+	if err != nil || again.Starting() != nil {
+		t.Fatalf("a second notifier in the process lost the socket: %v", err)
+	}
+}
+
+func resetServiceManager(t *testing.T) {
+	t.Helper()
+	serviceManager = sync.OnceValues(captureServiceManager)
+	t.Cleanup(func() { serviceManager = sync.OnceValues(captureServiceManager) })
 }
 
 func TestProcessNotifierRejectsInvalidWatchdogConfiguration(t *testing.T) {
 	t.Setenv("NOTIFY_SOCKET", "")
 	t.Setenv("WATCHDOG_USEC", "invalid")
 	t.Setenv("WATCHDOG_PID", os.Getenv("WATCHDOG_PID"))
+	resetServiceManager(t)
 	if _, err := NewProcessNotifier(); err == nil {
 		t.Fatal("accepted invalid watchdog configuration")
 	}
