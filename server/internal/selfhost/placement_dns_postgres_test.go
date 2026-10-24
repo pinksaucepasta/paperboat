@@ -41,7 +41,8 @@ func TestPlacementDNSCreationAndResetOnPostgres(t *testing.T) {
 	}
 	exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$2,'active')`, owner, owner+"@example.test")
 	installation := scopedInstallationFixture(t, store, "dns-placement-test-key", owner, "tunnel")
-	exec(`UPDATE paperboat.control_tunnel_nodes SET endpoint_host='140.245.11.41' WHERE id=$1`, installation.NodeID)
+	// The node's verified public ingress is the self-hosted DNS target the pool publishes (publicationdns.Target).
+	exec(`UPDATE paperboat.control_tunnel_nodes SET endpoint_host='140.245.11.41',public_ingress_ipv4='140.245.11.41',public_ingress_verified_at=now() WHERE id=$1`, installation.NodeID)
 	service := New(store, "dns-placement-test-key")
 	// A placement on an installation needs a self-hosted-only workspace pool; a
 	// managed placement needs a managed-only pool (placement.go SetPlacement).
@@ -114,7 +115,7 @@ func TestPlacementDNSCreationAndResetOnPostgres(t *testing.T) {
 				t.Fatalf("%s target=%q state=%q type=%q generation=%d: %v", kind, actualTarget, actualState, actualType, actualGeneration, err)
 			}
 		}
-		check(stable, "pending", "CNAME", 1)
+		check("140.245.11.41", "pending", "A", 1)
 		// A self-hosted placement needs a verified custom domain; each placement change resets the domain to pending.
 		exec(`UPDATE `+table+` SET ownership_state='verified' WHERE id=$1`, domainID)
 		if _, err = service.SetPlacement(ctx, owner, kind, id, &installation.InstallationID); err != nil {
