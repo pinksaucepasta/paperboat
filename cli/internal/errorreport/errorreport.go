@@ -32,6 +32,8 @@ type Reporter struct {
 	ambientReference         atomic.Pointer[string]
 	snapshotDropped          atomic.Uint64
 	snapshotCursor           int
+	metricsSent              map[string]float64
+	metricsRefreshedAt       time.Time
 	component                atomic.Pointer[string]
 	sources                  []func() []MetricSample
 	metricSchema             map[string]map[string]map[string]bool

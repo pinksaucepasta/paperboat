@@ -230,7 +230,8 @@ func TestSnapshotHealthPriorityAndWeightedDetails(t *testing.T) {
 			}
 		}
 	}
-	if len(seen) != 84 || r.SnapshotDropped() != 32 {
+	// Window 1 sends 64 of 80 runtime series and drops 16; window 2 sends only the 16 not yet sent.
+	if len(seen) != 84 || r.SnapshotDropped() != 16 {
 		t.Fatalf("rotation=%d dropped=%d", len(seen), r.SnapshotDropped())
 	}
 	for i := 0; i < 16; i++ {
@@ -318,5 +319,38 @@ func TestOwnedReferenceIndependentOfReportingAndHeaderWins(t *testing.T) {
 			}
 			resp.Body.Close()
 		})
+	}
+}
+
+// Lane X P7: every 30 s tick sent every gauge again, unchanged or not. Only changed values are sent
+// between refreshes.
+func TestSnapshotSendsOnlyChangedValuesBetweenRefreshes(t *testing.T) {
+	transport := &sentry.MockTransport{}
+	r := newSignalReporter("https://public@example.invalid/1", "test", transport, false, true, 0)
+	defer r.Flush(context.Background())
+	samples := []MetricSample{{Name: "paperboat_runtime_a_snapshot", Value: 1}, {Name: "paperboat_runtime_b_snapshot", Value: 1}}
+	r.RegisterMetrics(func() []MetricSample { return samples }, []MetricDescriptor{{Name: "paperboat_runtime_a_snapshot"}, {Name: "paperboat_runtime_b_snapshot"}})
+	sent := func() map[string]int {
+		r.client.Flush(time.Second)
+		counts := map[string]int{}
+		for _, event := range transport.Events() {
+			for _, metric := range event.Metrics {
+				counts[metric.Name]++
+			}
+		}
+		return counts
+	}
+	r.sampleMetrics()
+	samples[1].Value = 2
+	r.sampleMetrics()
+	if counts := sent(); counts["paperboat_runtime_a_snapshot"] != 1 || counts["paperboat_runtime_b_snapshot"] != 2 {
+		t.Fatalf("sent=%v, want the unchanged series once and the changed one twice", counts)
+	}
+	r.mu.Lock()
+	r.metricsRefreshedAt = r.metricsRefreshedAt.Add(-metricRefreshInterval)
+	r.mu.Unlock()
+	r.sampleMetrics()
+	if counts := sent(); counts["paperboat_runtime_a_snapshot"] != 2 {
+		t.Fatalf("sent=%v, want every series again at the refresh", counts)
 	}
 }

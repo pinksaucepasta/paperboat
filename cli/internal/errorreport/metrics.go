@@ -58,6 +58,7 @@ func (r *Reporter) sampleMetrics() {
 		}
 		all = append(all, samples...)
 	}
+	all = r.changedMetricSamples(all, time.Now())
 	sort.Slice(all, func(i, j int) bool { return metricSampleKey(all[i]) < metricSampleKey(all[j]) })
 	health := make([]MetricSample, 0, 4)
 	runtime := make([]MetricSample, 0, len(all))
@@ -112,9 +113,37 @@ func (r *Reporter) sampleMetrics() {
 		meter.SetAttributes(attrs...)
 		meter.Gauge(sample.Name, sample.Value)
 		r.submitMu.RUnlock()
+		r.mu.Lock()
+		r.metricsSent[metricSampleKey(sample)] = sample.Value
+		r.mu.Unlock()
 	}
 
 }
+
+// metricRefreshInterval is how often every series is sent again even when unchanged, so a gauge
+// does not disappear from dashboards; between refreshes only changed values are sent (Lane X P7:
+// every 30 s tick sent up to 68 unchanged gauges per process).
+const metricRefreshInterval = 15 * time.Minute
+
+// changedMetricSamples keeps the four diagnostic health gauges and the samples whose value differs from
+// the last one sent, or all of them when a refresh is due.
+func (r *Reporter) changedMetricSamples(all []MetricSample, now time.Time) []MetricSample {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.metricsSent == nil || len(r.metricsSent) > 16384 || now.Sub(r.metricsRefreshedAt) >= metricRefreshInterval {
+		r.metricsSent = map[string]float64{}
+		r.metricsRefreshedAt = now
+		return all
+	}
+	changed := all[:0]
+	for _, sample := range all {
+		if previous, sent := r.metricsSent[metricSampleKey(sample)]; diagnosticHealthMetric(sample.Name) || !sent || previous != sample.Value {
+			changed = append(changed, sample)
+		}
+	}
+	return changed
+}
+
 func (r *Reporter) runMetrics() {
 	defer close(r.samplerDone)
 	ticker := time.NewTicker(30 * time.Second)
