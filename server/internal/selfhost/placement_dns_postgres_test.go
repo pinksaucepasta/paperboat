@@ -122,7 +122,8 @@ func TestPlacementDNSCreationAndResetOnPostgres(t *testing.T) {
 		if _, err = service.SetPlacement(ctx, owner, kind, id, &installation.InstallationID); err != nil {
 			t.Fatal(err)
 		}
-		check("140.245.11.41", "pending", "A", 2)
+		// The domain already targets the installation, so the placement does not reset it.
+		check("140.245.11.41", "verified", "A", 1)
 		exec(`UPDATE `+table+` SET ownership_state='verified',conflict_state='quarantined',quarantine_until=now()+interval '1 hour' WHERE id=$1`, domainID)
 		if kind == "preview" {
 			exec(`UPDATE paperboat.preview_leases SET terminal_state='stopped',stopped_at=now() WHERE id=$1`, id)
@@ -133,12 +134,12 @@ func TestPlacementDNSCreationAndResetOnPostgres(t *testing.T) {
 		if _, err = service.SetPlacement(ctx, owner, kind, id, nil); err != nil {
 			t.Fatal(err)
 		}
-		check(stable, "pending", "CNAME", 3)
+		check(stable, "pending", "CNAME", 2)
 		var quarantineCleared bool
 		if err := store.SQL().QueryRowContext(ctx, `SELECT quarantine_until IS NULL FROM `+table+` WHERE id=$1`, domainID).Scan(&quarantineCleared); err != nil || !quarantineCleared {
 			t.Fatal("placement retained quarantine")
 		}
-		result, err := store.SQL().ExecContext(ctx, `UPDATE `+table+` SET ownership_state='verified' WHERE id=$1 AND generation=2`, domainID)
+		result, err := store.SQL().ExecContext(ctx, `UPDATE `+table+` SET ownership_state='verified' WHERE id=$1 AND generation=1`, domainID)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -150,10 +151,10 @@ func TestPlacementDNSCreationAndResetOnPostgres(t *testing.T) {
 		if _, err = service.SetPlacement(ctx, owner, kind, id, &installation.InstallationID); err != nil {
 			t.Fatal(err)
 		}
-		check("140.245.11.41", "pending", "A", 4)
+		check("140.245.11.41", "pending", "A", 3)
 		if _, err = service.SetPlacement(ctx, owner, kind, id, &installation.InstallationID); err != nil {
 			t.Fatal(err)
 		}
-		check("140.245.11.41", "pending", "A", 4)
+		check("140.245.11.41", "pending", "A", 3)
 	}
 }
