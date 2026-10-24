@@ -75,6 +75,7 @@ type Repository interface {
 	GetPreviewLeaseV1(context.Context, string, string) (previewtunnelstore.PreviewLeaseRecord, error)
 	GetPreviewLeaseCreateOperationV1(context.Context, string, string) (dbsqlc.Operation, error)
 	ListPreviewLeasesV1(context.Context, previewtunnelstore.ListPreviewLeasesV1Input) ([]previewtunnelstore.PreviewLeaseRecord, error)
+	CountPreviewLeasesV1(context.Context, string) (int, error)
 	CreatePreviewLeaseV1(context.Context, previewtunnelstore.CreatePreviewLeaseV1Input) (previewtunnelstore.CreatePreviewLeaseV1Result, error)
 	RenewPreviewLeaseV1(context.Context, previewtunnelstore.RenewPreviewLeaseV1Input) (previewtunnelstore.RenewPreviewLeaseV1Result, error)
 	StopPreviewLeaseV1(context.Context, previewtunnelstore.StopPreviewLeaseV1Input) (previewtunnelstore.StopPreviewLeaseV1Result, error)
@@ -232,6 +233,7 @@ type StopResult struct {
 type PreviewPage struct {
 	Items      []Preview `json:"items"`
 	NextCursor string    `json:"next_cursor,omitempty"`
+	Total      int       `json:"total"` // every preview the cursor pages through with these filters
 }
 
 type ReconcileResult struct {
@@ -660,7 +662,11 @@ func (s *Service) List(ctx context.Context, request previewtunnelapi.RequestCont
 	if hasMore {
 		rows = rows[:limit]
 	}
-	page := PreviewPage{Items: make([]Preview, 0, len(rows))}
+	total, err := s.repository.CountPreviewLeasesV1(ctx, request.Actor.AccountID)
+	if err != nil {
+		return PreviewPage{}, err
+	}
+	page := PreviewPage{Items: make([]Preview, 0, len(rows)), Total: total}
 	for _, row := range rows {
 		view, viewErr := s.previewView(ctx, row)
 		if viewErr != nil {

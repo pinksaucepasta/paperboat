@@ -479,6 +479,11 @@ func (f *previewCustomDomainsRepository) GetPreviewLeaseCreateOperationV1(_ cont
 	return dbsqlc.Operation{}, previewtunnelstore.ErrNotFound
 }
 
+func (f *previewCustomDomainsRepository) CountPreviewLeasesV1(ctx context.Context, account string) (int, error) {
+	items, err := f.ListPreviewLeasesV1(ctx, previewtunnelstore.ListPreviewLeasesV1Input{AccountID: account})
+	return len(items), err
+}
+
 func (f *previewCustomDomainsRepository) ListPreviewLeasesV1(_ context.Context, input previewtunnelstore.ListPreviewLeasesV1Input) ([]previewtunnelstore.PreviewLeaseRecord, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

@@ -87,6 +87,11 @@ func (f *previewLeaseFake) ListPreviewLeasesV1(_ context.Context, input previewt
 	return items, nil
 }
 
+func (f *previewLeaseFake) CountPreviewLeasesV1(ctx context.Context, account string) (int, error) {
+	items, err := f.ListPreviewLeasesV1(ctx, previewtunnelstore.ListPreviewLeasesV1Input{AccountID: account})
+	return len(items), err
+}
+
 func (f *previewLeaseFake) CreatePreviewLeaseV1(_ context.Context, input previewtunnelstore.CreatePreviewLeaseV1Input) (previewtunnelstore.CreatePreviewLeaseV1Result, error) {
 	f.createInput = append(f.createInput, input)
 	if len(f.createErrors) > 0 {

@@ -65,6 +65,7 @@ type TunnelRepository interface {
 	Create(context.Context, CreateRecord) (MutationRecord, error)
 	Get(context.Context, string, string) (dbsqlc.Tunnel, error)
 	List(context.Context, string, *ListPosition, int) ([]dbsqlc.Tunnel, error)
+	Count(context.Context, string) (int, error)
 	Patch(context.Context, PatchRecord) (MutationRecord, error)
 	Transition(context.Context, StateRecord) (MutationRecord, error)
 	ReconcileExpired(context.Context, ExpiryRecord) ([]MutationRecord, error)
@@ -259,6 +260,19 @@ func (r *SQLRepository) List(ctx context.Context, accountID string, after *ListP
 		err = r.decoratePublicEndpoints(ctx, items)
 	}
 	return items, translate(err)
+}
+
+// Count is how many tunnels List pages through for the account with the request's workspace and filters.
+func (r *SQLRepository) Count(ctx context.Context, accountID string) (int, error) {
+	if strings.TrimSpace(accountID) == "" {
+		return 0, ErrInvalidInput
+	}
+	ws, selected := workspace.FromContext(ctx)
+	filters := workspace.InventoryFiltersFromContext(ctx)
+	total, err := r.db.Queries().CountPreviewTunnelsV1(ctx, dbsqlc.CountPreviewTunnelsV1Params{
+		AccountID: accountID, WorkspaceSet: selected, WorkspaceTeamID: nullableString(ws.TeamID), Q: filters.Q, State: filters.State, Owner: filters.Owner, MachineID: filters.MachineID,
+	})
+	return int(total), translate(err)
 }
 
 func (r *SQLRepository) listTunnelPage(ctx context.Context, params dbsqlc.ListPreviewTunnelsV1Params) ([]dbsqlc.Tunnel, error) {

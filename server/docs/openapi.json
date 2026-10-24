@@ -3660,7 +3660,8 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "items"
+          "items",
+          "total"
         ],
         "properties": {
           "items": {
@@ -3672,6 +3673,11 @@
           "next_cursor": {
             "type": "string",
             "minLength": 1
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Every preview the cursor pages through with these filters (workspace, q, state, owner, machine_id), counted by the same access rules as the items."
           }
         }
       },
@@ -4001,7 +4007,8 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "items"
+          "items",
+          "total"
         ],
         "properties": {
           "items": {
@@ -4013,6 +4020,11 @@
           "next_cursor": {
             "type": "string",
             "minLength": 1
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Every tunnel the cursor pages through with these filters (workspace, q, state, owner, machine_id), counted by the same access rules as the items."
           }
         }
       },

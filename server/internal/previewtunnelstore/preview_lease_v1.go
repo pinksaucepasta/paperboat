@@ -299,6 +299,20 @@ func (s *Store) ListPreviewLeasesV1(ctx context.Context, input ListPreviewLeases
 	return items, nil
 }
 
+// CountPreviewLeasesV1 is how many previews ListPreviewLeasesV1 pages through for the account with the request's
+// workspace and filters.
+func (s *Store) CountPreviewLeasesV1(ctx context.Context, accountID string) (int, error) {
+	if strings.TrimSpace(accountID) == "" {
+		return 0, ErrInvalidInput
+	}
+	ws, selected := workspace.FromContext(ctx)
+	filters := workspace.InventoryFiltersFromContext(ctx)
+	total, err := s.db.Queries().CountPreviewLeasesV1(ctx, dbsqlc.CountPreviewLeasesV1Params{
+		AccountID: accountID, WorkspaceSet: selected, WorkspaceTeamID: nullableText(ws.TeamID), Q: filters.Q, State: filters.State, Owner: filters.Owner, MachineID: filters.MachineID,
+	})
+	return int(total), translate(err)
+}
+
 func (s *Store) CreatePreviewLeaseV1(ctx context.Context, input CreatePreviewLeaseV1Input) (CreatePreviewLeaseV1Result, error) {
 	if err := validateCreatePreviewLeaseV1(input); err != nil {
 		return CreatePreviewLeaseV1Result{}, err

@@ -229,7 +229,11 @@ func (s *Service) ListTunnels(ctx context.Context, request previewtunnelapi.Requ
 	if hasMore {
 		rows = rows[:limit]
 	}
-	page := TunnelPage{Items: make([]TunnelView, 0, len(rows))}
+	total, err := s.repository.Count(ctx, request.Actor.AccountID)
+	if err != nil {
+		return TunnelPage{}, err
+	}
+	page := TunnelPage{Items: make([]TunnelView, 0, len(rows)), Total: total}
 	for _, row := range rows {
 		page.Items = append(page.Items, tunnelView(row))
 	}

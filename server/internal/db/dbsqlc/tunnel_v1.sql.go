@@ -11,6 +11,37 @@ import (
 	"time"
 )
 
+const countPreviewTunnelsV1 = `-- name: CountPreviewTunnelsV1 :one
+SELECT count(*) FROM tunnels AS c WHERE c.id IN (SELECT paperboat.manageable_tunnel_ids($1::text, $2::boolean,
+  $3::text, $4::text, $5::text, $6::text, $7::text))
+`
+
+type CountPreviewTunnelsV1Params struct {
+	AccountID       string
+	WorkspaceSet    bool
+	WorkspaceTeamID sql.NullString
+	Q               string
+	State           string
+	Owner           string
+	MachineID       string
+}
+
+// Every tunnel ListPreviewTunnelsV1 can page through with the same filters.
+func (q *Queries) CountPreviewTunnelsV1(ctx context.Context, arg CountPreviewTunnelsV1Params) (int64, error) {
+	row := q.db.QueryRow(ctx, countPreviewTunnelsV1,
+		arg.AccountID,
+		arg.WorkspaceSet,
+		arg.WorkspaceTeamID,
+		arg.Q,
+		arg.State,
+		arg.Owner,
+		arg.MachineID,
+	)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const getOwnedActivePreviewTunnelHostV1 = `-- name: GetOwnedActivePreviewTunnelHostV1 :one
 SELECT id
 FROM user_machines
@@ -111,113 +142,54 @@ func (q *Queries) ListExpiredPreviewTunnelsV1(ctx context.Context, arg ListExpir
 
 const listPreviewTunnelsV1 = `-- name: ListPreviewTunnelsV1 :many
 
-WITH rules AS (
-  -- The allow rules for tunnel_manage in the account's teams whose subject may be the account (any role: a superset).
-  SELECT tm.team_id, r.policy_id, r.target_kind, r.target_id FROM team_members AS tm
-  JOIN workspace_policies AS p ON p.team_id = tm.team_id
-  JOIN workspace_policy_rules AS r ON r.policy_id = p.id AND r.action = 'tunnel_manage' AND NOT r.deny
-  WHERE tm.account_id = $1 AND tm.active
-    AND (r.subject_kind IN ('all', 'role') OR (r.subject_kind = 'account' AND r.subject_id = $1)
-      OR (r.subject_kind = 'group' AND EXISTS(SELECT 1 FROM workspace_policy_groups AS g
-        WHERE g.policy_id = r.policy_id AND g.group_name = r.subject_id AND g.account_id = $1)))
-), targets AS (
-  SELECT r.team_id, r.target_id AS machine_id FROM rules AS r WHERE r.target_kind = 'machine'
-  UNION
-  SELECT r.team_id, tg.machine_id FROM rules AS r
-  JOIN workspace_policy_tags AS tg ON tg.policy_id = r.policy_id AND tg.tag = r.target_id WHERE r.target_kind = 'tag'
-), hosts AS (
-  SELECT m.id FROM user_machines AS m WHERE m.user_id = $1 AND m.owner_team_id IS NULL
-  UNION
-  SELECT b.resource_id FROM team_resource_bindings AS b JOIN targets AS t ON t.team_id = b.team_id AND t.machine_id = b.resource_id
-  WHERE b.resource_kind = 'machine' AND b.active
-  UNION
-  SELECT b.resource_id FROM team_resource_bindings AS b JOIN rules AS r ON r.team_id = b.team_id AND r.target_kind = 'all_machines'
-  WHERE b.resource_kind = 'machine' AND b.active
-), candidates AS MATERIALIZED (
-  SELECT t.id, t.account_id, t.name, t.desired_state, t.access_mode, t.generation, t.stable_endpoint_id, t.stable_endpoint, t.created_by_host_id, t.created_by_actor_id, t.expires_at, t.summary_code, t.summary_transitioned_at, t.created_at, t.updated_at, t.deleted_at, t.access_generation, t.owner_team_id FROM tunnels AS t
-  WHERE t.created_by_host_id IN (SELECT hosts.id FROM hosts)
-    -- Every management rule needs the account's own tunnel or a private or team one.
-    AND (t.account_id = $1 OR t.access_mode IN ('private', 'team'))
-    AND (
-      $5::timestamptz IS NULL
-      OR (t.created_at, t.id) < ($5::timestamptz, $6::text)
-    )
-    AND ($7::text='' OR position(lower($7) in lower(t.id||' '||t.name||' '||t.stable_endpoint||' '||t.created_by_host_id))>0)
-    AND ($8::text='' OR t.desired_state=$8)
-    AND ($9::text='' OR ($9='mine' AND t.account_id=$1) OR ($9='shared' AND t.account_id<>$1) OR t.account_id=$9)
-    -- A machine's tunnels: those it created or hosts an active connector of.
-    AND ($10::text='' OR t.created_by_host_id=$10 OR EXISTS(SELECT 1 FROM tunnel_connectors AS c
-      WHERE c.tunnel_id=t.id AND c.host_id=$10 AND c.revoked_at IS NULL))
-  ORDER BY t.created_at DESC, t.id DESC
-)
 SELECT c.id, c.account_id, c.name, c.desired_state, c.access_mode, c.generation, c.stable_endpoint_id, c.stable_endpoint,
        c.created_by_host_id, c.created_by_actor_id, c.expires_at, c.summary_code, c.summary_transitioned_at, c.created_at,
        c.updated_at, c.deleted_at, c.access_generation, c.owner_team_id
-FROM candidates AS c
-WHERE tunnel_management_allowed($1::text, c.id)
- AND (NOT $2::boolean OR workspace_tunnel_management_allowed($1::text, $3::text, c.id))
-LIMIT $4
+FROM tunnels AS c
+WHERE c.id IN (SELECT paperboat.manageable_tunnel_ids($1::text, $2::boolean, $3::text,
+  $4::text, $5::text, $6::text, $7::text))
+  AND ($8::timestamptz IS NULL
+   OR (c.created_at, c.id) < ($8::timestamptz, $9::text))
+ORDER BY c.created_at DESC, c.id DESC
+LIMIT $10
 `
 
 type ListPreviewTunnelsV1Params struct {
 	AccountID       string
 	WorkspaceSet    bool
 	WorkspaceTeamID sql.NullString
-	RowLimit        int32
-	AfterCreatedAt  sql.NullTime
-	AfterID         sql.NullString
 	Q               string
 	State           string
 	Owner           string
 	MachineID       string
-}
-
-type ListPreviewTunnelsV1Row struct {
-	ID                    string
-	AccountID             string
-	Name                  string
-	DesiredState          string
-	AccessMode            string
-	Generation            int64
-	StableEndpointID      string
-	StableEndpoint        string
-	CreatedByHostID       string
-	CreatedByActorID      string
-	ExpiresAt             sql.NullTime
-	SummaryCode           string
-	SummaryTransitionedAt time.Time
-	CreatedAt             time.Time
-	UpdatedAt             time.Time
-	DeletedAt             sql.NullTime
-	AccessGeneration      int64
-	OwnerTeamID           sql.NullString
+	AfterCreatedAt  sql.NullTime
+	AfterID         sql.NullString
+	RowLimit        int32
 }
 
 // Tunnel lifecycle queries are kept in their own sqlc input so tunnel API work
 // can evolve independently from preview leases and route/connector APIs.
-// Every way to manage a tunnel needs its creating host to be the account's own personal machine or a team machine
-// whose workspace policy gives the account tunnel_manage (see ListPreviewLeasesV1): candidates come from
-// that host set by index, and the exact access functions run only until the page is full.
-func (q *Queries) ListPreviewTunnelsV1(ctx context.Context, arg ListPreviewTunnelsV1Params) ([]ListPreviewTunnelsV1Row, error) {
+// One page of the tunnels the account may manage (manageable_tunnel_ids, migration 174).
+func (q *Queries) ListPreviewTunnelsV1(ctx context.Context, arg ListPreviewTunnelsV1Params) ([]Tunnel, error) {
 	rows, err := q.db.Query(ctx, listPreviewTunnelsV1,
 		arg.AccountID,
 		arg.WorkspaceSet,
 		arg.WorkspaceTeamID,
-		arg.RowLimit,
-		arg.AfterCreatedAt,
-		arg.AfterID,
 		arg.Q,
 		arg.State,
 		arg.Owner,
 		arg.MachineID,
+		arg.AfterCreatedAt,
+		arg.AfterID,
+		arg.RowLimit,
 	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListPreviewTunnelsV1Row
+	var items []Tunnel
 	for rows.Next() {
-		var i ListPreviewTunnelsV1Row
+		var i Tunnel
 		if err := rows.Scan(
 			&i.ID,
 			&i.AccountID,

@@ -93,6 +93,10 @@ func (f *fakeTunnelRepository) List(_ context.Context, _ string, _ *ListPosition
 	return f.list, nil
 }
 
+func (f *fakeTunnelRepository) Count(_ context.Context, _ string) (int, error) {
+	return len(f.list), f.listErr
+}
+
 func (f *fakeTunnelRepository) Patch(_ context.Context, input PatchRecord) (MutationRecord, error) {
 	f.patch = input
 	if f.patchErr != nil {

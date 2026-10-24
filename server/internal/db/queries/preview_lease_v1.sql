@@ -93,55 +93,24 @@ RETURNING id, account_id, idempotency_key, request_hash, operation_type, resourc
           correlation_id, created_at, updated_at, completed_at;
 
 -- name: ListPreviewLeasesV1 :many
--- Every way to manage a preview needs its host machine to be the account's own personal machine or a machine shared
--- into one of its active teams whose workspace policy gives the account preview_manage there. Ordering those candidates first and running the
--- exact access functions only until the page is full keeps the list independent of how many previews exist: it
--- scanned every lease with ~2.5 ms of function calls per row (33 s at 20k leases).
-WITH rules AS (
-  -- The allow rules for preview_manage in the account's teams whose subject may be the account (any role: a superset).
-  SELECT tm.team_id, r.policy_id, r.target_kind, r.target_id FROM team_members AS tm
-  JOIN workspace_policies AS p ON p.team_id = tm.team_id
-  JOIN workspace_policy_rules AS r ON r.policy_id = p.id AND r.action = 'preview_manage' AND NOT r.deny
-  WHERE tm.account_id = sqlc.arg(account_id) AND tm.active
-    AND (r.subject_kind IN ('all', 'role') OR (r.subject_kind = 'account' AND r.subject_id = sqlc.arg(account_id))
-      OR (r.subject_kind = 'group' AND EXISTS(SELECT 1 FROM workspace_policy_groups AS g
-        WHERE g.policy_id = r.policy_id AND g.group_name = r.subject_id AND g.account_id = sqlc.arg(account_id))))
-), targets AS (
-  SELECT r.team_id, r.target_id AS machine_id FROM rules AS r WHERE r.target_kind = 'machine'
-  UNION
-  SELECT r.team_id, tg.machine_id FROM rules AS r
-  JOIN workspace_policy_tags AS tg ON tg.policy_id = r.policy_id AND tg.tag = r.target_id WHERE r.target_kind = 'tag'
-), hosts AS (
-  SELECT m.id FROM user_machines AS m WHERE m.user_id = sqlc.arg(account_id) AND m.owner_team_id IS NULL
-  UNION
-  SELECT b.resource_id FROM team_resource_bindings AS b JOIN targets AS t ON t.team_id = b.team_id AND t.machine_id = b.resource_id
-  WHERE b.resource_kind = 'machine' AND b.active
-  UNION
-  SELECT b.resource_id FROM team_resource_bindings AS b JOIN rules AS r ON r.team_id = b.team_id AND r.target_kind = 'all_machines'
-  WHERE b.resource_kind = 'machine' AND b.active
-), candidates AS MATERIALIZED (
-  SELECT p.* FROM preview_leases AS p
-  WHERE p.owner_machine_id IN (SELECT hosts.id FROM hosts)
-    -- Every management rule needs the account's own preview or a private or team one.
-    AND (p.account_id = sqlc.arg(account_id) OR p.access_mode IN ('private', 'team'))
-    AND (
-      sqlc.narg(after_created_at)::timestamptz IS NULL
-      OR (p.created_at, p.id) < (sqlc.narg(after_created_at)::timestamptz, sqlc.narg(after_id)::text)
-    )
-    AND (sqlc.arg(q)::text='' OR position(lower(sqlc.arg(q)) in lower(p.id||' '||p.endpoint||' '||p.owner_machine_id))>0)
-    AND (sqlc.arg(state)::text='' OR CASE WHEN p.terminal_state='owner_lost' THEN 'owner_disconnected' WHEN p.terminal_state='expired' THEN 'expired' WHEN p.terminal_state IN ('stopped','failed') THEN 'stopped' WHEN p.allocation_state<>'ready' THEN 'allocating' WHEN p.edge_state<>'ready' OR p.origin_state<>'ready' THEN 'connecting' ELSE 'ready' END=sqlc.arg(state) OR (sqlc.arg(state)='active' AND p.terminal_state='active'))
-    AND (sqlc.arg(owner)::text='' OR (sqlc.arg(owner)='mine' AND p.account_id=sqlc.arg(account_id)) OR (sqlc.arg(owner)='shared' AND p.account_id<>sqlc.arg(account_id)) OR p.account_id=sqlc.arg(owner))
-    AND (sqlc.arg(machine_id)::text='' OR p.owner_machine_id=sqlc.arg(machine_id))
-  ORDER BY p.created_at DESC, p.id DESC
-)
+-- One page of the previews the account may manage (manageable_preview_ids, migration 174: each host check once per
+-- host, so the list and its count cost the same whatever the page).
 SELECT c.id, c.endpoint, c.account_id, c.actor_id, c.owner_machine_id, c.owner_session_id,
        c.target_scheme, c.target_address, c.access_mode, c.lease_deadline, c.user_deadline,
        c.allocation_state, c.edge_state, c.origin_state, c.terminal_state, c.created_at, c.ready_at,
        c.last_renewed_at, c.stopped_at, c.generation, c.owner_last_seen_at,c.owner_session_kind,c.owner_team_id
-FROM candidates AS c
-WHERE preview_management_allowed(sqlc.arg(account_id), c.id)
- AND (NOT sqlc.arg(workspace_set)::boolean OR workspace_preview_management_allowed(sqlc.arg(account_id)::text, sqlc.narg(workspace_team_id)::text, c.id))
+FROM preview_leases AS c
+WHERE c.id IN (SELECT paperboat.manageable_preview_ids(sqlc.arg(account_id)::text, sqlc.arg(workspace_set)::boolean, sqlc.narg(workspace_team_id)::text,
+  sqlc.arg(q)::text, sqlc.arg(state)::text, sqlc.arg(owner)::text, sqlc.arg(machine_id)::text))
+  AND (sqlc.narg(after_created_at)::timestamptz IS NULL
+   OR (c.created_at, c.id) < (sqlc.narg(after_created_at)::timestamptz, sqlc.narg(after_id)::text))
+ORDER BY c.created_at DESC, c.id DESC
 LIMIT sqlc.arg(row_limit);
+
+-- name: CountPreviewLeasesV1 :one
+-- Every preview ListPreviewLeasesV1 can page through with the same filters.
+SELECT count(*) FROM preview_leases AS c WHERE c.id IN (SELECT paperboat.manageable_preview_ids(sqlc.arg(account_id)::text, sqlc.arg(workspace_set)::boolean,
+  sqlc.narg(workspace_team_id)::text, sqlc.arg(q)::text, sqlc.arg(state)::text, sqlc.arg(owner)::text, sqlc.arg(machine_id)::text));
 
 -- name: AdvancePreviewLeaseLifecycleV1 :one
 UPDATE preview_leases

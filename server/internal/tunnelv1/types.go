@@ -87,6 +87,7 @@ type MutationResult struct {
 type TunnelPage struct {
 	Items      []TunnelView `json:"items"`
 	NextCursor string       `json:"next_cursor,omitempty"`
+	Total      int          `json:"total"` // every tunnel the cursor pages through with these filters
 }
 
 type HealthDimension struct {
