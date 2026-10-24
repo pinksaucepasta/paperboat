@@ -270,7 +270,7 @@ func (c *Client) MachineExecDescriptor(ctx context.Context, machineID, operation
 		return ExecDescriptor{}, errors.New("machine, source machine, and operation IDs are required")
 	}
 	var out ExecDescriptor
-	err := c.doIssuance(ctx, http.MethodPost, "/v1/machines/"+url.PathEscape(machineID)+"/exec-descriptor", map[string]string{"source_machine_id": c.sourceMachineID, "operation_id": operationID}, &out, false)
+	err := c.doIssuance(ctx, http.MethodPost, "/v1/machines/"+url.PathEscape(machineID)+"/exec-descriptor", operationDescriptorRequest{SourceMachineID: c.sourceMachineID, OperationID: operationID, NativeOnlyAccepted: true}, &out, false)
 	if err == nil {
 		err = validateOperationDescriptor(out, machineID, operationID, "exec:operate", "exec")
 	}
@@ -282,19 +282,37 @@ func (c *Client) MachineSSHDescriptor(ctx context.Context, machineID, operationI
 		return SSHDescriptor{}, errors.New("machine, source machine, and operation IDs are required")
 	}
 	var out SSHDescriptor
-	err := c.doIssuance(ctx, http.MethodPost, "/v1/machines/"+url.PathEscape(machineID)+"/ssh-descriptor", map[string]string{"source_machine_id": c.sourceMachineID, "operation_id": operationID}, &out, false)
+	err := c.doIssuance(ctx, http.MethodPost, "/v1/machines/"+url.PathEscape(machineID)+"/ssh-descriptor", operationDescriptorRequest{SourceMachineID: c.sourceMachineID, OperationID: operationID, NativeOnlyAccepted: true}, &out, false)
 	if err == nil {
 		err = validateOperationDescriptor(out, machineID, operationID, "ssh:operate", "ssh")
 	}
 	return out, err
 }
 
+// operationDescriptorRequest asks for an exec or SSH descriptor. NativeOnlyAccepted lets the server
+// answer while the machine's edge runtime carrier is not current (after a restart, an outage or an edge
+// incident): the operation runs over the native peer connection, so the descriptor then has no edge
+// endpoints instead of the server refusing it with machine_not_ready.
+type operationDescriptorRequest struct {
+	SourceMachineID    string `json:"source_machine_id"`
+	OperationID        string `json:"operation_id"`
+	NativeOnlyAccepted bool   `json:"native_only_accepted"`
+}
+
+// validEdgeEndpoints reports whether e is either empty (a native-only descriptor) or both edge endpoints.
+func validEdgeEndpoints(e TerminalEndpoints) bool {
+	if e.QUIC == "" && e.WSS == "" {
+		return true
+	}
+	quic, quicErr := url.Parse(e.QUIC)
+	wss, wssErr := url.Parse(e.WSS)
+	return quicErr == nil && quic.Scheme == "quic" && quic.Hostname() != "" && quic.User == nil && quic.Path == "" && quic.RawQuery == "" && quic.Fragment == "" &&
+		wssErr == nil && wss.Scheme == "wss" && wss.Hostname() != "" && wss.User == nil && wss.Path == "/v1/runtime" && wss.RawQuery == "" && wss.Fragment == ""
+}
+
 func validateOperationDescriptor(out ExecDescriptor, machineID, operationID, expectedScope, operationKind string) error {
-	quic, quicErr := url.Parse(out.Endpoints.QUIC)
-	wss, wssErr := url.Parse(out.Endpoints.WSS)
 	if out.OperationID != operationID || out.Environment == nil || out.Environment.ID == "" || out.Environment.Kind != "machine" || out.Environment.ResourceID != machineID || out.Environment.State != "ready" || !remotepath.Absolute(out.Environment.Root) ||
-		quicErr != nil || quic.Scheme != "quic" || quic.Hostname() == "" || quic.User != nil || quic.Path != "" || quic.RawQuery != "" || quic.Fragment != "" ||
-		wssErr != nil || wss.Scheme != "wss" || wss.Hostname() == "" || wss.User != nil || wss.Path != "/v1/runtime" || wss.RawQuery != "" || wss.Fragment != "" ||
+		!validEdgeEndpoints(out.Endpoints) ||
 		out.Auth.Method != "bearer" || out.Auth.Token == "" || len(out.Auth.Scopes) != 1 || out.Auth.Scopes[0] != expectedScope || out.ExpiresAt.IsZero() || out.Auth.ExpiresAt.IsZero() || !out.ExpiresAt.Equal(out.Auth.ExpiresAt) {
 		return fmt.Errorf("invalid %s descriptor", operationKind)
 	}

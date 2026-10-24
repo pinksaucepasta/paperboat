@@ -75,8 +75,8 @@ func TestMachineExecDescriptorBindsSourceAndOperation(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
-		var body map[string]string
-		if json.NewDecoder(r.Body).Decode(&body) != nil || body["source_machine_id"] != "um_source" || body["operation_id"] != "operation_exec_1" {
+		var body operationDescriptorRequest
+		if json.NewDecoder(r.Body).Decode(&body) != nil || body.SourceMachineID != "um_source" || body.OperationID != "operation_exec_1" || !body.NativeOnlyAccepted {
 			t.Fatalf("body=%#v", body)
 		}
 		expiresAt := time.Now().Add(time.Minute)
@@ -88,6 +88,21 @@ func TestMachineExecDescriptorBindsSourceAndOperation(t *testing.T) {
 	descriptor, err := client.MachineExecDescriptor(context.Background(), "um_1", "operation_exec_1")
 	if err != nil || descriptor.Auth.Token != "exec-token" || descriptor.Environment.Root != "/workspace" {
 		t.Fatalf("descriptor=%#v err=%v", descriptor, err)
+	}
+}
+
+// N3: after a restart or an outage the machine's edge runtime carrier is not current, and the server
+// refused exec with machine_not_ready for 30 s to 8 min although exec runs over the native peer
+// connection. The client asks for a native-only descriptor and accepts one without edge endpoints;
+// half an edge endpoint pair is still refused.
+func TestOperationDescriptorAcceptsNativeOnlyAnswers(t *testing.T) {
+	for name, endpoints := range map[string]TerminalEndpoints{"native only": {}, "edge": {QUIC: "quic://machine.test:443", WSS: "wss://machine.test/v1/runtime"}, "half an edge pair": {WSS: "wss://machine.test/v1/runtime"}} {
+		expiresAt := time.Now().Add(time.Minute)
+		descriptor := ExecDescriptor{OperationID: "operation_exec_1", Environment: &Environment{ID: "env_1", Kind: "machine", ResourceID: "um_1", State: "ready", Root: "/workspace"}, Endpoints: endpoints, Auth: AuthMaterial{Method: "bearer", Token: "exec-token", ExpiresAt: expiresAt, Scopes: []string{"exec:operate"}}, ExpiresAt: expiresAt}
+		err := validateOperationDescriptor(descriptor, "um_1", "operation_exec_1", "exec:operate", "exec")
+		if (err == nil) != (name != "half an edge pair") {
+			t.Errorf("%s: %v", name, err)
+		}
 	}
 }
 
@@ -129,8 +144,8 @@ func TestMachineSSHDescriptorRequiresExactScope(t *testing.T) {
 					http.NotFound(w, r)
 					return
 				}
-				var body map[string]string
-				if json.NewDecoder(r.Body).Decode(&body) != nil || body["source_machine_id"] != "um_source" || body["operation_id"] != "operation_ssh_1" {
+				var body operationDescriptorRequest
+				if json.NewDecoder(r.Body).Decode(&body) != nil || body.SourceMachineID != "um_source" || body.OperationID != "operation_ssh_1" || !body.NativeOnlyAccepted {
 					t.Fatalf("body=%#v", body)
 				}
 				expiresAt := time.Now().Add(time.Minute)
