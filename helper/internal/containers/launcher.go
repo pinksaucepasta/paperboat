@@ -142,7 +142,7 @@ func (l *Launcher) Run(ctx context.Context, capability, componentDir string, out
 	err = waitReady(ready, name, owner, client, previousEpoch)
 	cancel()
 	if err != nil {
-		return err
+		return exitError(name, err)
 	}
 	fmt.Fprintf(output, "Paperboat %s container ready.\n", capability)
 	ticker := time.NewTicker(time.Second)
@@ -157,7 +157,7 @@ func (l *Launcher) Run(ctx context.Context, capability, componentDir string, out
 				return err
 			}
 			if !running {
-				return errors.New("runtime container exited; supervisor will retry")
+				return &ChildExit{Err: fmt.Errorf("%w; supervisor will retry", errContainerExited), LastLine: lastOutputLine(name)}
 			}
 		}
 	}
@@ -172,7 +172,7 @@ func waitReady(ctx context.Context, name, owner string, client *nodeClient, prev
 			return errors.Join(ctx.Err(), err)
 		}
 		if !running {
-			return errors.New("runtime container exited before readiness")
+			return fmt.Errorf("%w before readiness", errContainerExited)
 		}
 		state, err := client.readiness(ctx)
 		if err == nil && state.Ready && state.ProcessEpoch != previousEpoch {

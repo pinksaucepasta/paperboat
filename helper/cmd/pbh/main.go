@@ -54,7 +54,10 @@ func execute(ctx context.Context, reporter *reporting.Reporter, args []string, o
 			code = 2
 		}
 	}()
-	observe := func(ctx context.Context, definition string, err error) { reporter.ObserveFailure(ctx, definition, err) }
+	observe := func(ctx context.Context, definition string, err error) {
+		reporter.ObserveFailure(ctx, definition, err)
+		reportChildExit(diagnostic, ctx, definition, err)
+	}
 	if err := runObserved(ctx, args, out, observe); err != nil {
 		fault := reporter.CaptureFailure(ctx, "selfhost_command", err)
 		message := "operation failed; state retained for retry"
@@ -66,6 +69,20 @@ func execute(ctx context.Context, reporter *reporting.Reporter, args []string, o
 		return 1
 	}
 	return 0
+}
+
+// reportChildExit writes the stopped runtime container's last output line next
+// to its selfhost_child_failed record, which carries only the cause code.
+func reportChildExit(w io.Writer, ctx context.Context, definition string, err error) {
+	var exit *containers.ChildExit
+	if definition != "selfhost_child" || !errors.As(err, &exit) {
+		return
+	}
+	reference := reporting.SupportReference(ctx)
+	if reference == "" {
+		reference = reporting.Reference()
+	}
+	fmt.Fprintf(w, "pbh: selfhost_child_failed support reference %s; last output %q\n", reference, exit.LastLine)
 }
 
 type pbhPanic struct{}
