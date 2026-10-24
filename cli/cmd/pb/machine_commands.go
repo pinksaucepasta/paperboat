@@ -1,9 +1,15 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"net/url"
+
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/machinename"
+	"github.com/pinksaucepasta/paperboat/internal/resolver"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 	"os"
@@ -119,22 +125,26 @@ func machineRevokeCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		userMachineID, alias, err := resolveUserMachineTarget(ctx.Context, client, args[0])
-		if err != nil {
-			return err
+		jsonOutput, _ := cobraCommand.Flags().GetBool("json")
+		target, err := resolveUserMachine(ctx.Context, client, args[0])
+		if errors.Is(err, resolver.ErrMachineNotFound) {
+			// A disconnected machine is no longer listed by default, yet revoking it again is done, not a
+			// failure (laneo-ha/hb, round 26 reported operation_failed/local_io).
+			if machine, found := findDisconnectedMachine(ctx.Context, client, args[0]); found {
+				return reportMachineRevoked(cobraCommand, jsonOutput, machine.ID, machine.Alias, "already_disconnected")
+			}
 		}
+		if err != nil {
+			return friendlyCommandError(err)
+		}
+		userMachineID, alias := target.ID, target.Alias
 		if err := confirmMutation(cobraCommand, "machine-revoke:"+userMachineID, fmt.Sprintf("Revoke machine %s (%s)? Its enrollment and credentials will lose authority.", alias, userMachineID)); err != nil {
 			return err
 		}
 		if err := client.DisconnectUserMachine(ctx.Context, userMachineID); err != nil {
 			return friendlyCommandError(err)
 		}
-		jsonOutput, _ := cobraCommand.Flags().GetBool("json")
-		if jsonOutput {
-			return json.NewEncoder(cobraCommand.OutOrStdout()).Encode(map[string]any{"version": "1", "machine": map[string]string{"id": userMachineID, "alias": alias, "state": "disconnected"}, "outcome": "confirmed", "retry": "not_required"})
-		}
-		fmt.Fprintf(cobraCommand.OutOrStdout(), "Disconnected machine %s (%s).\nIf this device was lost or compromised, rotate ENV keys.\n", alias, userMachineID)
-		return nil
+		return reportMachineRevoked(cobraCommand, jsonOutput, userMachineID, alias, "confirmed")
 	}}
 	revoke.Flags().String("confirm", "", "six-character confirmation code from the preview")
 	revoke.Flags().Bool("json", false, "print JSON")
@@ -238,4 +248,26 @@ func machineCapabilitiesCommand() *cobra.Command {
 	capabilities.Flags().Bool("preview-tunnel", false, "serve preview and tunnel routes")
 	capabilities.Flags().Bool("json", false, "print JSON")
 	return capabilities
+}
+
+// findDisconnectedMachine looks requested up, by exact ID or name, among the machines already disconnected.
+func findDisconnectedMachine(ctx context.Context, client *api.Client, requested string) (api.UserMachine, bool) {
+	machines, err := client.ListUserMachinesFiltered(ctx, url.Values{"q": {requested}, "state": {"disconnected"}})
+	if err != nil {
+		return api.UserMachine{}, false
+	}
+	machine, err := resolveUserMachineIn(machines, requested)
+	return machine, err == nil
+}
+
+func reportMachineRevoked(command *cobra.Command, jsonOutput bool, id, alias, outcome string) error {
+	if jsonOutput {
+		return json.NewEncoder(command.OutOrStdout()).Encode(map[string]any{"version": "1", "machine": map[string]string{"id": id, "alias": alias, "state": "disconnected"}, "outcome": outcome, "retry": "not_required"})
+	}
+	if outcome == "already_disconnected" {
+		fmt.Fprintf(command.OutOrStdout(), "Machine %s (%s) is already disconnected.\n", alias, id)
+		return nil
+	}
+	fmt.Fprintf(command.OutOrStdout(), "Disconnected machine %s (%s).\nIf this device was lost or compromised, rotate ENV keys.\n", alias, id)
+	return nil
 }

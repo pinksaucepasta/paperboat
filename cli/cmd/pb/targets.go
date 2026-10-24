@@ -20,31 +20,6 @@ import (
 	"golang.org/x/term"
 )
 
-func resolveUserMachineTarget(ctx context.Context, client *api.Client, requested string) (string, string, error) {
-	machines, err := client.ListUserMachines(ctx)
-	if err != nil {
-		return "", "", friendlyCommandError(err)
-	}
-	for _, machine := range machines {
-		if machine.ID == requested {
-			return machine.ID, machine.Alias, nil
-		}
-	}
-	matches := make([]api.UserMachine, 0, 1)
-	for _, machine := range machines {
-		if strings.EqualFold(machine.Alias, requested) {
-			matches = append(matches, machine)
-		}
-	}
-	if len(matches) == 1 {
-		return matches[0].ID, matches[0].Alias, nil
-	}
-	if len(matches) > 1 {
-		return "", "", fmt.Errorf("machine name %q is ambiguous; use a stable machine ID", requested)
-	}
-	return "", "", fmt.Errorf("machine %q was not found", requested)
-}
-
 type environmentTarget struct {
 	kind string
 	id   string

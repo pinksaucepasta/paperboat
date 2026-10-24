@@ -27,19 +27,6 @@ import (
 	"time"
 )
 
-func TestResolveMachineTargetRejectsAmbiguousNames(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		writeAPIData(t, w, map[string]any{"items": []map[string]any{
-			{"id": "um_1", "alias": "studio"}, {"id": "um_2", "alias": "studio"},
-		}, "pagination": map[string]any{"limit": 200, "offset": 0, "total": 2, "next_offset": nil}})
-	}))
-	defer srv.Close()
-	_, _, err := resolveUserMachineTarget(context.Background(), api.New(srv.URL, config.Credential{AccessToken: "token"}, srv.Client()), "studio")
-	if err == nil || !strings.Contains(err.Error(), "ambiguous") {
-		t.Fatalf("err=%v, want ambiguity", err)
-	}
-}
-
 func TestMachineHomeActionsFollowConfiguredCapabilities(t *testing.T) {
 	machine := api.UserMachine{ID: "machine_actions", Capabilities: api.MachineCapabilities{
 		FileReceive: api.MachineCapability{Configured: true}, PreviewLaunch: api.MachineCapability{Configured: true},
@@ -768,5 +755,37 @@ func writeTestProfile(t *testing.T, dir, configPath, serverURL string) {
 	err := store.Save(config.Profile{Issuer: serverURL, CLIClientSessionID: "cls_test", AccessExpiresAt: expires}, config.Credential{AccessToken: "token", RefreshToken: "refresh", ExpiresAt: expires})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Round 26: revoking a machine that was already disconnected failed with operation_failed/local_io,
+// because the default machine list hides disconnected machines. It is reported as already done.
+func TestMachineRevokeOfADisconnectedMachineIsAlreadyDone(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /v1/machines":
+			items := []map[string]any{}
+			if r.URL.Query().Get("state") == "disconnected" {
+				items = []map[string]any{{"id": "um_gone", "alias": "studio", "state": "disconnected"}}
+			}
+			writeAPIData(t, w, map[string]any{"items": items, "pagination": map[string]any{"limit": 200, "offset": 0, "total": len(items), "next_offset": nil}})
+		case "GET /v1/workspaces":
+			writeAPIData(t, w, map[string]any{"items": []map[string]any{}, "pagination": map[string]any{"limit": 200, "offset": 0, "total": 0, "next_offset": nil}})
+		case "POST /v1/machines/um_gone/disconnect":
+			t.Fatal("an already disconnected machine was disconnected again")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	writeTestProfile(t, dir, configPath, srv.URL)
+	var output bytes.Buffer
+	if code := run(t.Context(), []string{"--config", configPath, "machine", "revoke", "um_gone", "--json"}, &output, &output); code != 0 {
+		t.Fatalf("exit code=%d output=%q", code, output.String())
+	}
+	if !strings.Contains(output.String(), `"outcome":"already_disconnected"`) || !strings.Contains(output.String(), `"id":"um_gone"`) {
+		t.Fatalf("output=%s", output.String())
 	}
 }
