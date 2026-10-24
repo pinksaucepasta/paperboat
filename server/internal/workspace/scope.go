@@ -82,15 +82,14 @@ func Validate(ctx context.Context, database *db.DB, account string, scope Scope)
 	})
 }
 
-// ValidateTx serializes the selection check with team membership, suspension,
-// and deletion changes, for callers that act on it in the same transaction. Callers may already hold this
-// advisory transaction lock; PostgreSQL advisory transaction locks are reentrant within a session.
+// ValidateTx checks the selection inside the caller's transaction, for callers that act on it there. It
+// takes no lock: it only reads membership, suspension and deletion, and the SERIALIZABLE transaction orders it
+// against a concurrent change of those (one of the two retries). Taking the global team write lock here put
+// every scoped read-then-act on the platform in one queue, and mid-transaction, after the snapshot (Lane X S2).
+// Callers that write team state take teams.Lock themselves.
 func ValidateTx(ctx context.Context, tx *db.Tx, account string, scope Scope) error {
 	if tx == nil {
 		return ErrInvalid
-	}
-	if err := teams.Lock(ctx, tx); err != nil {
-		return err
 	}
 	ssoRequired, err := checkTx(ctx, tx, account, scope)
 	if err != nil || !ssoRequired {

@@ -115,37 +115,13 @@ func (s *Service) createAccessSession(ctx context.Context, in dbsqlc.CreateUserM
 	if kind != machineCredentialSigned && kind != machineCredentialExternal {
 		return errors.New("user-machine credential kind is invalid")
 	}
-	// Access to the account's own personal machine involves no team state, so it does not queue on the
-	// global team write lock: SERIALIZABLE alone orders it against a concurrent revoke or ownership
-	// change (Lane A: 10 concurrent exec setups finished ~430 ms apart, one at a time). Team access
-	// keeps the lock. If the machine stops being personal between this check and the transaction, the
-	// transaction refuses and the call retries once with the lock.
-	scope, scoped := workspace.FromContext(ctx)
-	personalOnly := !scoped || scope.TeamID == ""
-	if personalOnly {
-		var personal bool
-		if err := s.db.SQL().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.user_machines WHERE id=$1 AND user_id=$2 AND owner_team_id IS NULL AND revoked_at IS NULL AND deleted_at IS NULL)`, in.UserMachineID, in.UserID).Scan(&personal); err != nil {
-			return err
-		}
-		personalOnly = personal
-	}
-	err := s.createAccessSessionTx(ctx, in, kind, !personalOnly)
-	if errors.Is(err, errAccessNeedsTeamLock) {
-		err = s.createAccessSessionTx(ctx, in, kind, true)
-	}
-	return err
-}
-
-// errAccessNeedsTeamLock: a session started without the team lock found team access was needed after all.
-var errAccessNeedsTeamLock = errors.New("access session needs the team write lock")
-
-func (s *Service) createAccessSessionTx(ctx context.Context, in dbsqlc.CreateUserMachineAccessSessionParams, kind machineCredentialKind, teamLock bool) error {
+	// No team write lock: an access session only reads team state and inserts its own row, so sessions do
+	// not conflict with each other, and SERIALIZABLE orders one against a concurrent membership, grant or
+	// machine revoke (one of the two retries). Under the global lock every exec/ssh/terminal setup on the
+	// platform ran one at a time (Lane A: 10 concurrent setups ~430 ms apart). Lane X S2.
+	// Prior art: NetBird management locks per account (GetAccountWithLock), Tailscale control per node;
+	// neither serializes unrelated nodes' session setup.
 	return s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if teamLock {
-			if err := teams.Lock(ctx, tx); err != nil {
-				return err
-			}
-		}
 		scope, scoped := workspace.FromContext(ctx)
 		if scoped {
 			if err := workspace.ValidateTx(ctx, tx, in.UserID, scope); err != nil {
@@ -182,9 +158,6 @@ func (s *Service) createAccessSessionTx(ctx context.Context, in dbsqlc.CreateUse
 		var personal bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM user_machines WHERE id=$1 AND user_id=$2 AND owner_team_id IS NULL AND revoked_at IS NULL AND deleted_at IS NULL)`, in.UserMachineID, in.UserID).Scan(&personal); err != nil {
 			return err
-		}
-		if !teamLock && (!personal || scoped && scope.TeamID != "") {
-			return errAccessNeedsTeamLock
 		}
 		if scoped && scope.TeamID == "" {
 			if !personal {
