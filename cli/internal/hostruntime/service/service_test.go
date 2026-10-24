@@ -593,14 +593,3 @@ func TestRemoveRejectsSymlinkDefinitionWithMissingExecutable(t *testing.T) {
 		t.Fatalf("changed unrelated declaration: %v", err)
 	}
 }
-
-// A carrier whose enrollment the server refused restarted every 5 s, 398 times (staging stg-m1).
-func TestSystemdDoesNotRestartARejectedEnrollment(t *testing.T) {
-	body, err := renderSystemd(Config{Kind: CarrierKind, User: "paperboat", Group: "paperboat", Executable: "/usr/local/libexec/paperboat/pb"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(body), "RestartPreventExitStatus=80\n") {
-		t.Fatalf("carrier unit restarts on a rejected enrollment:\n%s", body)
-	}
-}

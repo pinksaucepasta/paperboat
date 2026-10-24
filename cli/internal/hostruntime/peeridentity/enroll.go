@@ -24,8 +24,8 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/trustedkeys"
 )
 
-// StatusError is a refused peer identity request. It is ErrInvalid; Transient and Rejected let the
-// runtime retry a server hiccup with backoff and stop for good when the enrollment itself is refused.
+// StatusError is a refused peer identity request. It is ErrInvalid; Transient lets the runtime retry
+// a server hiccup instead of failing the start.
 type StatusError struct{ Status int }
 
 func (e *StatusError) Error() string { return fmt.Sprintf("HTTP %d: %v", e.Status, ErrInvalid) }
@@ -33,10 +33,6 @@ func (e *StatusError) Unwrap() error { return ErrInvalid }
 
 // Transient reports a status that a later attempt can succeed past (408, 429, 5xx).
 func (e *StatusError) Transient() bool { return e.Status == 408 || e.Status == 429 || e.Status >= 500 }
-
-// Rejected reports that the server no longer accepts this machine's enrollment (401, 403): retrying
-// cannot help until the machine is paired again.
-func (e *StatusError) Rejected() bool { return e.Status == 401 || e.Status == 403 }
 
 var (
 	ErrInvalid = errors.New("machine endpoint enrollment is invalid")

@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/coreos/go-systemd/v22/unit"
@@ -45,10 +44,6 @@ var (
 )
 
 // prepareServiceLogs is a variable so definition tests need not own the machine's log directory.
-// EnrollmentRejectedExitCode is the exit status of a host service whose enrollment the server refuses;
-// systemd does not restart on it (RestartPreventExitStatus).
-const EnrollmentRejectedExitCode = 80
-
 var prepareServiceLogs = prepareNativeServiceLogs
 
 type Controller interface {
@@ -524,7 +519,6 @@ func renderSystemd(config Config) ([]byte, error) {
 	options = append(options,
 		unit.NewUnitOption("Service", "Restart", "always"),
 		unit.NewUnitOption("Service", "RestartSec", "5s"),
-		unit.NewUnitOption("Service", "RestartPreventExitStatus", strconv.Itoa(EnrollmentRejectedExitCode)),
 		unit.NewUnitOption("Service", "TimeoutStopSec", "60s"),
 		unit.NewUnitOption("Service", "KillMode", "mixed"),
 		unit.NewUnitOption("Service", "UMask", "0077"),
