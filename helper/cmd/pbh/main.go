@@ -179,7 +179,7 @@ func elevated(ctx context.Context, args []string, out io.Writer) error {
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }
-func install(ctx context.Context, args []string, out io.Writer) error {
+func install(ctx context.Context, args []string, out io.Writer) (err error) {
 	fs := flag.NewFlagSet("install", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	enable := fs.String("enable", "relay", "relay, tunnel, or both")
@@ -222,6 +222,11 @@ func install(ctx context.Context, args []string, out io.Writer) error {
 	if !*noService && *dir != defaultState {
 		return commandError("system service requires default state directory")
 	}
+	if !*noService {
+		if err := servicePackageReady(filepath.Join(defaultBinaries, "pbh")); err != nil {
+			return err
+		}
+	}
 	c, existing, err := existingInstallConfig(*dir, fs)
 	if err != nil {
 		return err
@@ -229,6 +234,14 @@ func install(ctx context.Context, args []string, out io.Writer) error {
 	if existing {
 		*enable = installationMode(c)
 	}
+	// A first install that fails before its runtime starts leaves no state
+	// behind; once the runtime is installed, failures keep the installation.
+	fresh := !existing
+	defer func() {
+		if fresh && err != nil {
+			err = errors.Join(err, discardFreshInstall(*dir))
+		}
+	}()
 	images := containers.Images{Relay: *relayImage, Tunnel: *tunnelImage}
 	selected := strings.Split(strings.ReplaceAll(*enable, "both", "relay,tunnel"), ",")
 	for _, capability := range selected {
@@ -262,6 +275,7 @@ func install(ctx context.Context, args []string, out io.Writer) error {
 	if err := installRuntimeImages(ctx, *dir, c, images, *noService); err != nil {
 		return err
 	}
+	fresh = false
 	ready, err := selfhost.RuntimeReady(*dir)
 	if err != nil {
 		return err
@@ -315,20 +329,28 @@ func publicAddress(ctx context.Context) (string, error) {
 	}
 	return v.Address, nil
 }
-func installService(ctx context.Context) error {
+
+// servicePackageReady proves the release installer placed the runtime binary
+// that the systemd unit executes. Install checks it before writing any state.
+func servicePackageReady(binary string) error {
 	if _, err := exec.LookPath("systemctl"); err != nil {
 		return fmt.Errorf("%w: %w", commandError("systemd is required for automatic service startup"), err)
 	}
-	for _, name := range []string{"pbh"} {
-		path := filepath.Join(defaultBinaries, name)
-		info, err := os.Stat(path)
-		if err != nil {
-			return fmt.Errorf("%w: %w", commandError("installed package is missing a runtime binary"), err)
-		}
-		if !info.Mode().IsRegular() {
-			return fmt.Errorf("installed package is missing %s", name)
-		}
+	return servicePackageBinary(binary)
+}
+
+func servicePackageBinary(binary string) error {
+	info, err := os.Stat(binary)
+	if err != nil {
+		return fmt.Errorf("%w: %w", commandError(fmt.Sprintf("the self-host package is missing %s; install with the release installer, which places pbh there, then rerun", binary)), err)
 	}
+	if !info.Mode().IsRegular() {
+		return commandError(fmt.Sprintf("%s is not a regular file; reinstall with the release installer", binary))
+	}
+	return nil
+}
+
+func installService(ctx context.Context) error {
 	service := `[Unit]
 Description=Paperboat self-hosted node
 After=network-online.target

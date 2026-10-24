@@ -53,32 +53,34 @@ func installRuntimeImages(ctx context.Context, dir string, c selfhost.Config, im
 	if err := containers.SaveImages(dir, images); err != nil {
 		return err
 	}
-	if err := restartInstallation(ctx, dir, c, claimed, before); err == nil {
+	err = restartInstallation(ctx, dir, c, claimed, before)
+	if err == nil {
 		return nil
-	} else {
-		primary := fmt.Errorf("%w: %w", commandError("runtime upgrade failed; restoring previous images"), err)
-		recovery, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-		defer cancel()
-		if oldErr != nil {
-			stopErr := stopInstallation(recovery)
-			return errors.Join(primary, stopErr)
-		}
-		if claimed {
-			if _, err := containers.PrepareHandoff(recovery, dir, old); err != nil {
-				return errors.Join(primary, err)
-			}
-		}
-		if stopErr := stopInstallation(recovery); stopErr != nil {
-			return errors.Join(primary, stopErr)
-		}
-		if saveErr := containers.SaveImages(dir, old); saveErr != nil {
-			return errors.Join(primary, saveErr)
-		}
-		if recoveryErr := restartInstallation(recovery, dir, c, claimed, before); recoveryErr != nil {
-			return errors.Join(primary, fmt.Errorf("%w: %w", commandError("previous images restored but service recovery failed; restart the service"), recoveryErr))
-		}
-		return primary
 	}
+	recovery, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	if oldErr != nil {
+		// A fresh install has no previous images to restore. Install discards the
+		// partial installation once this error is returned.
+		primary := fmt.Errorf("%w: %w", commandError("runtime install failed; nothing was kept; check pbh status, fix the cause and rerun pbh install"), err)
+		return errors.Join(primary, stopInstallation(recovery))
+	}
+	primary := fmt.Errorf("%w: %w", commandError("runtime upgrade failed; restoring previous images"), err)
+	if claimed {
+		if _, err := containers.PrepareHandoff(recovery, dir, old); err != nil {
+			return errors.Join(primary, err)
+		}
+	}
+	if stopErr := stopInstallation(recovery); stopErr != nil {
+		return errors.Join(primary, stopErr)
+	}
+	if saveErr := containers.SaveImages(dir, old); saveErr != nil {
+		return errors.Join(primary, saveErr)
+	}
+	if recoveryErr := restartInstallation(recovery, dir, c, claimed, before); recoveryErr != nil {
+		return errors.Join(primary, fmt.Errorf("%w: %w", commandError("previous images restored but service recovery failed; restart the service"), recoveryErr))
+	}
+	return primary
 }
 
 func restartInstallation(ctx context.Context, dir string, c selfhost.Config, claimed bool, previous map[string]string) error {

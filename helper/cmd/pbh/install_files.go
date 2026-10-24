@@ -4,11 +4,15 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"crypto/x509"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
+	"syscall"
 
 	"github.com/pinksaucepasta/paperboat/relay/selfhost"
 )
@@ -140,4 +144,36 @@ func stageInstallFiles(dir string, fs *flag.FlagSet, c selfhost.Config) (selfhos
 		}
 	}
 	return c, nil
+}
+
+// discardFreshInstall removes what a first install wrote before its runtime
+// started: identity and configuration, the image selection and the staged trust
+// copies. Nothing can have been claimed yet, because claim codes are only issued
+// after a successful install. Unrelated files are kept, and the directory is
+// removed only when it is left empty.
+func discardFreshInstall(dir string) error {
+	var errs []error
+	remove := func(path string) {
+		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			errs = append(errs, err)
+		}
+	}
+	for _, name := range []string{"selfhost.json", "images.json", "tls.crt", "tls.key", ".selfhost.lock"} {
+		remove(filepath.Join(dir, name))
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		errs = append(errs, err)
+	}
+	for _, entry := range entries {
+		for _, file := range []trustFile{publicCertFile, publicKeyFile, controlCAFile} {
+			if name := entry.Name(); strings.HasPrefix(name, file.kind+"-") && strings.HasSuffix(name, ".pem") {
+				remove(filepath.Join(dir, name))
+			}
+		}
+	}
+	if err := os.Remove(dir); err != nil && !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, syscall.ENOTEMPTY) {
+		errs = append(errs, err)
+	}
+	return errors.Join(errs...)
 }
