@@ -128,7 +128,7 @@ func TestPlacementDNSCreationAndResetOnPostgres(t *testing.T) {
 		if kind == "preview" {
 			exec(`UPDATE paperboat.preview_leases SET terminal_state='stopped',stopped_at=now() WHERE id=$1`, id)
 		} else {
-			exec(`UPDATE paperboat.tunnels SET desired_state='closed' WHERE id=$1`, id)
+			exec(`UPDATE paperboat.tunnels SET desired_state='paused' WHERE id=$1`, id)
 		}
 		setPool(managed)
 		if _, err = service.SetPlacement(ctx, owner, kind, id, nil); err != nil {
