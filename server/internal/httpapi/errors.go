@@ -121,6 +121,10 @@ func writeMachineProofFailure(w http.ResponseWriter, r *http.Request, err error,
 		return
 	}
 	if machineProofRejected(err) {
+		if reason := controlplane.ProofRejectionReason(err); reason != "" {
+			// A fixed reason code (no credential or request content) names the check that refused it.
+			serverdiagnostics.LoggerWithRequest(r.Context(), slog.Default()).WarnContext(r.Context(), "machine proof rejected", "reason", reason, "path", r.URL.Path)
+		}
 		logHTTPRejection(r, http.StatusUnauthorized, rejectedCode, err)
 		writeError(w, r, http.StatusUnauthorized, rejectedCode, rejectedMessage)
 		return
@@ -176,6 +180,10 @@ func pureMachineProofDenials(err error) (rejected bool) {
 		if wrapped, ok := current.(interface{ Unwrap() error }); ok {
 			child := wrapped.Unwrap()
 			return child != nil && visit(child, depth+1)
+		}
+		if _, ok := current.(controlplane.ProofRejection); ok {
+			matched = true
+			return true
 		}
 		if !typ.Comparable() {
 			return false

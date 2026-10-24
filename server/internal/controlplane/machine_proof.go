@@ -52,8 +52,13 @@ func (s *EnrollmentService) VerifyMachineRequest(ctx context.Context, identityTo
 	if !errors.Is(err, ErrHelperProof) || errors.Is(err, ErrClockSkew) {
 		return MachineRequestClaims{}, err
 	}
+	controlReason := ProofRejectionReason(err)
 	helper, err := s.VerifyHelperRequest(ctx, identityToken, proof, method, path, body)
 	if err != nil {
+		if errors.Is(err, ErrHelperProof) && !errors.Is(err, ErrClockSkew) {
+			// Both credential paths refused it: keep the machine-control reason, the likely one.
+			return MachineRequestClaims{}, proofRejected(controlReason + "; helper " + ProofRejectionReason(err))
+		}
 		return MachineRequestClaims{}, err
 	}
 	machine, err := s.store.Queries().GetActiveUserMachineForControl(ctx, helper.MachineID)
@@ -73,14 +78,17 @@ func (s *EnrollmentService) VerifyMachineControlRequest(ctx context.Context, ide
 	now := s.clock().UTC()
 	identity, err := s.signer.VerifyCredential(identityToken, s.issuer, "machine_control", now)
 	if err != nil {
-		return MachineRequestClaims{}, ErrHelperProof
+		return MachineRequestClaims{}, proofRejected("control_credential_invalid")
 	}
 	machine, err := s.store.Queries().GetActiveUserMachineForControl(ctx, identity.MachineID)
 	if err != nil {
 		return MachineRequestClaims{}, machineProofLookupError(err)
 	}
-	if machine.UserID != identity.UserID || machine.EnvironmentID != identity.EnvironmentID || machine.InstallationGeneration != identity.InstallationGeneration || machineControlThumbprint(machine) != identity.KeyThumbprint {
-		return MachineRequestClaims{}, ErrHelperProof
+	if machine.InstallationGeneration != identity.InstallationGeneration {
+		return MachineRequestClaims{}, proofRejected("installation_generation_moved")
+	}
+	if machine.UserID != identity.UserID || machine.EnvironmentID != identity.EnvironmentID || machineControlThumbprint(machine) != identity.KeyThumbprint {
+		return MachineRequestClaims{}, proofRejected("control_credential_mismatch")
 	}
 	current, err := s.store.Queries().GetCurrentMachineControlSession(ctx, dbsqlc.GetCurrentMachineControlSessionParams{
 		MachineID: machine.ID, InstallationGeneration: machine.InstallationGeneration,
@@ -90,7 +98,7 @@ func (s *EnrollmentService) VerifyMachineControlRequest(ctx context.Context, ide
 		return MachineRequestClaims{}, machineProofLookupError(err)
 	}
 	if current.SessionGeneration != identity.SessionGeneration || current.OperationID == "" {
-		return MachineRequestClaims{}, ErrHelperProof
+		return MachineRequestClaims{}, proofRejected("control_session_superseded")
 	}
 	claims, err := verifyCanonicalMachineProof(machine, proof, method, path, body, now)
 	if err != nil {
@@ -108,38 +116,62 @@ func (s *EnrollmentService) VerifyMachineControlRequest(ctx context.Context, ide
 
 func machineProofLookupError(err error) error {
 	if errors.Is(err, sql.ErrNoRows) {
-		return ErrHelperProof
+		return proofRejected("machine_not_active")
 	}
 	return err
 }
 
+// ProofRejection is an invalid machine credential or proof, with a fixed reason code (no request or credential
+// content) so a rejection log says which check refused it. It is ErrHelperProof for every caller that branches.
+type ProofRejection struct{ Reason string }
+
+func (e ProofRejection) Error() string        { return "machine proof rejected: " + e.Reason }
+func (e ProofRejection) Is(target error) bool { return target == ErrHelperProof }
+
+func proofRejected(reason string) error { return ProofRejection{Reason: reason} }
+
+// ProofRejectionReason is the reason code of a rejected machine proof, or "" when err is not one.
+func ProofRejectionReason(err error) string {
+	var rejection ProofRejection
+	if errors.As(err, &rejection) {
+		return rejection.Reason
+	}
+	if errors.Is(err, ErrHelperProof) {
+		return "proof_rejected"
+	}
+	return ""
+}
+
 func verifyCanonicalMachineProof(machine dbsqlc.UserMachine, encoded []byte, method, path string, body []byte, now time.Time) (canonicalMachineProofClaims, error) {
 	if len(encoded) == 0 || len(encoded) > 16<<10 || !machine.PublicIdentityKey.Valid {
-		return canonicalMachineProofClaims{}, ErrHelperProof
+		return canonicalMachineProofClaims{}, proofRejected("proof_malformed")
 	}
 	publicKey, err := base64.RawURLEncoding.DecodeString(machine.PublicIdentityKey.String)
 	if err != nil || len(publicKey) != ed25519.PublicKeySize {
-		return canonicalMachineProofClaims{}, ErrHelperProof
+		return canonicalMachineProofClaims{}, proofRejected("machine_key_invalid")
 	}
 	var envelope helperProofEnvelope
 	if strictProofJSON(encoded, &envelope) != nil || envelope.Algorithm != "EdDSA" {
-		return canonicalMachineProofClaims{}, ErrHelperProof
+		return canonicalMachineProofClaims{}, proofRejected("proof_malformed")
 	}
 	payload, err := base64.RawURLEncoding.DecodeString(envelope.Payload)
 	if err != nil || len(payload) > 16<<10 {
-		return canonicalMachineProofClaims{}, ErrHelperProof
+		return canonicalMachineProofClaims{}, proofRejected("proof_malformed")
 	}
 	signature, err := base64.RawURLEncoding.DecodeString(envelope.Signature)
 	if err != nil || !ed25519.Verify(ed25519.PublicKey(publicKey), payload, signature) {
-		return canonicalMachineProofClaims{}, ErrHelperProof
+		return canonicalMachineProofClaims{}, proofRejected("proof_signature_invalid")
 	}
 	var claims canonicalMachineProofClaims
 	if strictCanonicalMachineJSON(payload, &claims) != nil {
-		return canonicalMachineProofClaims{}, ErrHelperProof
+		return canonicalMachineProofClaims{}, proofRejected("proof_malformed")
 	}
 	digest := sha256.Sum256(body)
-	if claims.MachineID != machine.ID || claims.EnvironmentID != machine.EnvironmentID || claims.InstallationGeneration != machine.InstallationGeneration || len(claims.OperationID) < 8 || len(claims.OperationID) > 128 || claims.Method != strings.ToUpper(method) || claims.Path != path || claims.BodySHA256 != base64.RawURLEncoding.EncodeToString(digest[:]) {
-		return canonicalMachineProofClaims{}, ErrHelperProof
+	if claims.InstallationGeneration != machine.InstallationGeneration {
+		return canonicalMachineProofClaims{}, proofRejected("installation_generation_moved")
+	}
+	if claims.MachineID != machine.ID || claims.EnvironmentID != machine.EnvironmentID || len(claims.OperationID) < 8 || len(claims.OperationID) > 128 || claims.Method != strings.ToUpper(method) || claims.Path != path || claims.BodySHA256 != base64.RawURLEncoding.EncodeToString(digest[:]) {
+		return canonicalMachineProofClaims{}, proofRejected("proof_request_mismatch")
 	}
 	if err := proofWindow(claims.IssuedAt, claims.ExpiresAt, now); err != nil {
 		return canonicalMachineProofClaims{}, err
