@@ -18,7 +18,10 @@ import (
 
 type fetcherFunc func(context.Context) (io.ReadCloser, error)
 
-func (f fetcherFunc) Fetch(ctx context.Context) (io.ReadCloser, error) { return f(ctx) }
+func (f fetcherFunc) Fetch(ctx context.Context) (io.ReadCloser, time.Duration, error) {
+	body, err := f(ctx)
+	return body, 0, err
+}
 
 func jwksFor(keyID string, key ed25519.PublicKey) string {
 	return `{"keys":[{"kty":"OKP","crv":"Ed25519","use":"sig","alg":"EdDSA","kid":"` + keyID + `","x":"` + base64.RawURLEncoding.EncodeToString(key) + `"}]}`
@@ -42,7 +45,7 @@ func TestHTTPJWKSFetcherRequiresAllowedHTTPSAndSuccessfulResponse(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, err := fetcher.Fetch(context.Background())
+	body, _, err := fetcher.Fetch(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +57,7 @@ func TestHTTPJWKSFetcherRequiresAllowedHTTPSAndSuccessfulResponse(t *testing.T) 
 	fetcher.client.Transport = roundTripperFunc(func(request *http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusServiceUnavailable, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("unavailable")), Request: request}, nil
 	})
-	if body, err := fetcher.Fetch(context.Background()); !errors.Is(err, ErrJWKSInvalid) || body != nil {
+	if body, _, err := fetcher.Fetch(context.Background()); !errors.Is(err, ErrJWKSInvalid) || body != nil {
 		t.Fatalf("body=%v err=%v", body, err)
 	}
 }

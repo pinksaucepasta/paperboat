@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
@@ -34,8 +35,33 @@ const (
 	DefaultRetainMissing = 61 * time.Minute
 )
 
+// JWKSFetcher fetches the key set. maxAge is how long the server says the document stays current
+// (Cache-Control max-age), zero when it does not say.
 type JWKSFetcher interface {
-	Fetch(context.Context) (io.ReadCloser, error)
+	Fetch(context.Context) (body io.ReadCloser, maxAge time.Duration, err error)
+}
+
+// The server's max-age is honoured within these bounds: keys are re-read at least hourly (a withdrawn
+// key otherwise stays usable longer) and never more than once a minute.
+const (
+	minimumJWKSMaxAge = time.Minute
+	maximumJWKSMaxAge = time.Hour
+)
+
+// cacheMaxAge reads max-age from a Cache-Control header; zero when absent or invalid.
+func cacheMaxAge(header string) time.Duration {
+	for _, directive := range strings.Split(header, ",") {
+		name, value, ok := strings.Cut(strings.TrimSpace(directive), "=")
+		if !ok || !strings.EqualFold(name, "max-age") {
+			continue
+		}
+		seconds, err := strconv.ParseInt(value, 10, 64)
+		if err != nil || seconds <= 0 {
+			return 0
+		}
+		return min(max(time.Duration(seconds)*time.Second, minimumJWKSMaxAge), maximumJWKSMaxAge)
+	}
+	return 0
 }
 
 type HTTPJWKSFetcher struct {
@@ -65,21 +91,21 @@ func NewHTTPJWKSFetcher(endpoint string, allowedHosts []string, transport http.R
 	return &HTTPJWKSFetcher{endpoint: parsed, client: client}, nil
 }
 
-func (f *HTTPJWKSFetcher) Fetch(ctx context.Context) (io.ReadCloser, error) {
+func (f *HTTPJWKSFetcher) Fetch(ctx context.Context) (io.ReadCloser, time.Duration, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, f.endpoint.String(), nil)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	request.Header.Set("Accept", "application/json")
 	response, err := f.client.Do(request)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if response.StatusCode != http.StatusOK {
 		response.Body.Close()
-		return nil, ErrJWKSInvalid
+		return nil, 0, ErrJWKSInvalid
 	}
-	return response.Body, nil
+	return response.Body, cacheMaxAge(response.Header.Get("Cache-Control")), nil
 }
 
 type JWKSConfig struct {
@@ -103,6 +129,8 @@ type JWKSCache struct {
 	// collapse into one fetch and unknown key IDs cannot drive a fetch storm.
 	lastFetch time.Time
 	lastErr   error
+	// ttl is how long the last fetched document stays current: the server's max-age, else config.TTL.
+	ttl time.Duration
 }
 
 const jwksRefreshCooldown = 30 * time.Second
@@ -165,10 +193,25 @@ func (c *JWKSCache) Refresh(ctx context.Context) error {
 	return c.lastErr
 }
 
+// RefreshInterval is when a periodic refresh should run again: half the current document's lifetime,
+// so a key rotation is seen before the previous document ends.
+func (c *JWKSCache) RefreshInterval() time.Duration {
+	c.refreshMu.Lock()
+	defer c.refreshMu.Unlock()
+	if c.ttl == 0 {
+		return c.config.TTL / 2
+	}
+	return c.ttl / 2
+}
+
 func (c *JWKSCache) fetch(ctx context.Context) error {
-	body, err := c.config.Fetcher.Fetch(ctx)
+	body, maxAge, err := c.config.Fetcher.Fetch(ctx)
 	if err != nil {
 		return err
+	}
+	ttl := c.config.TTL
+	if maxAge > 0 {
+		ttl = maxAge
 	}
 	if body == nil {
 		return ErrJWKSInvalid
@@ -182,10 +225,11 @@ func (c *JWKSCache) fetch(ctx context.Context) error {
 	if int64(len(encoded)) > c.config.MaxBytes {
 		return ErrJWKSOverLimit
 	}
-	refreshed, err := decodeJWKS(encoded, c.config.MaxKeys)
+	refreshed, withdrawn, err := decodeJWKS(encoded, c.config.MaxKeys)
 	if err != nil {
 		return err
 	}
+	c.ttl = ttl
 	c.mu.Lock()
 	now := c.config.Clock.Now()
 	if err := c.persist(encoded, now); err != nil {
@@ -194,10 +238,11 @@ func (c *JWKSCache) fetch(ctx context.Context) error {
 	}
 	keys := make(map[string]cachedKey, len(refreshed)+len(c.keys))
 	for keyID, key := range refreshed {
-		keys[keyID] = cachedKey{key: key, expiresAt: now.Add(c.config.TTL)}
+		keys[keyID] = cachedKey{key: key, expiresAt: now.Add(ttl)}
 	}
 	for keyID, previous := range c.keys {
-		if _, current := refreshed[keyID]; current {
+		// A withdrawn key ends now; a key that only left the set is retained for the credentials it signed.
+		if _, current := refreshed[keyID]; current || withdrawn[keyID] {
 			continue
 		}
 		if previous.retired {
@@ -247,7 +292,7 @@ func (c *JWKSCache) loadPersisted() {
 	if persisted.ValidatedAt.After(now.Add(time.Minute)) || !now.Before(persisted.ValidatedAt.Add(c.config.TTL)) {
 		return
 	}
-	keys, err := decodeJWKS(persisted.Document, c.config.MaxKeys)
+	keys, _, err := decodeJWKS(persisted.Document, c.config.MaxKeys)
 	if err != nil {
 		return
 	}
@@ -285,6 +330,8 @@ func (c *JWKSCache) persist(document []byte, validatedAt time.Time) error {
 
 type jwksDocument struct {
 	Keys []jwk `json:"keys"`
+	// WithdrawnKeyIDs names keys that must stop verifying immediately (omitted while empty).
+	WithdrawnKeyIDs []string `json:"withdrawn_key_ids"`
 }
 type jwk struct {
 	KeyType   string `json:"kty"`
@@ -295,35 +342,45 @@ type jwk struct {
 	X         string `json:"x"`
 }
 
-func decodeJWKS(encoded []byte, maxKeys int) (map[string]ed25519.PublicKey, error) {
+func decodeJWKS(encoded []byte, maxKeys int) (map[string]ed25519.PublicKey, map[string]bool, error) {
 	if err := rejectDuplicateKeys(encoded); err != nil {
-		return nil, ErrJWKSInvalid
+		return nil, nil, ErrJWKSInvalid
 	}
 	decoder := json.NewDecoder(bytes.NewReader(encoded))
 	var document jwksDocument
 	if err := decoder.Decode(&document); err != nil {
-		return nil, ErrJWKSInvalid
+		return nil, nil, ErrJWKSInvalid
 	}
 	var extra any
 	if err := decoder.Decode(&extra); err != io.EOF {
-		return nil, ErrJWKSInvalid
+		return nil, nil, ErrJWKSInvalid
 	}
 	if len(document.Keys) == 0 || len(document.Keys) > maxKeys {
-		return nil, ErrJWKSOverLimit
+		return nil, nil, ErrJWKSOverLimit
 	}
 	keys := make(map[string]ed25519.PublicKey, len(document.Keys))
 	for _, item := range document.Keys {
 		if item.KeyType != "OKP" || item.Curve != "Ed25519" || item.Use != "sig" || item.Algorithm != "EdDSA" || len(item.KeyID) < 1 || len(item.KeyID) > 128 {
-			return nil, ErrJWKSInvalid
+			return nil, nil, ErrJWKSInvalid
 		}
 		if _, duplicate := keys[item.KeyID]; duplicate {
-			return nil, ErrJWKSInvalid
+			return nil, nil, ErrJWKSInvalid
 		}
 		x, err := base64.RawURLEncoding.DecodeString(item.X)
 		if err != nil || len(x) != ed25519.PublicKeySize {
-			return nil, ErrJWKSInvalid
+			return nil, nil, ErrJWKSInvalid
 		}
 		keys[item.KeyID] = append(ed25519.PublicKey(nil), x...)
 	}
-	return keys, nil
+	if len(document.WithdrawnKeyIDs) > maxKeys {
+		return nil, nil, ErrJWKSOverLimit
+	}
+	withdrawn := make(map[string]bool, len(document.WithdrawnKeyIDs))
+	for _, keyID := range document.WithdrawnKeyIDs {
+		if len(keyID) < 1 || len(keyID) > 128 || keys[keyID] != nil {
+			return nil, nil, ErrJWKSInvalid
+		}
+		withdrawn[keyID] = true
+	}
+	return keys, withdrawn, nil
 }

@@ -2,6 +2,7 @@ package tailnet
 
 import (
 	"context"
+	"crypto/ed25519"
 	"testing"
 	"time"
 )
@@ -70,5 +71,52 @@ func TestRegionalRecoveryRenewalSurvivesTheAppliedConfigurationWake(t *testing.T
 	case <-refreshed:
 	case <-time.After(7 * time.Second):
 		t.Fatal("no renewal before the relays' observations ended; the applied configuration's wake re-armed the regular cadence")
+	}
+}
+
+type countingRefreshKeys struct {
+	known     map[string]ed25519.PublicKey
+	pending   map[string]ed25519.PublicKey // published by the next refresh
+	refreshes int
+}
+
+func (k *countingRefreshKeys) Lookup(_ context.Context, id string) (ed25519.PublicKey, bool, error) {
+	key, ok := k.known[id]
+	return key, ok, nil
+}
+
+func (k *countingRefreshKeys) Refresh(context.Context) error {
+	k.refreshes++
+	for id, key := range k.pending {
+		k.known[id] = key
+	}
+	return nil
+}
+
+// F21-18: every configuration refresh fetched the key set (about twice a minute per engine). It is fetched
+// only when a token names a key the cache does not hold: a rotation, or the cached set's lifetime ending.
+func TestConfigurationRefreshFetchesKeysOnlyForAnUnknownKey(t *testing.T) {
+	a, c, signer, _ := networkTestAuthority(t)
+	current := a.options.Keys.(networkTestKeys)
+	keys := &countingRefreshKeys{known: map[string]ed25519.PublicKey{}, pending: map[string]ed25519.PublicKey{}}
+	for id, key := range current {
+		keys.known[id] = key
+	}
+	a.options.Keys = keys
+	token := networkToken(t, signer, c)
+	for range 3 {
+		if err := a.knowSigningKeys(t.Context(), []string{token, ""}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if keys.refreshes != 0 {
+		t.Fatalf("%d key-set fetches for a known key, want none", keys.refreshes)
+	}
+	for id, key := range keys.known { // the key rotates: the cache no longer holds it
+		keys.pending[id] = key
+		delete(keys.known, id)
+	}
+	if err := a.knowSigningKeys(t.Context(), []string{token}); err != nil || keys.refreshes != 1 {
+		t.Fatalf("an unknown key: %d fetches, err %v; want one", keys.refreshes, err)
 	}
 }

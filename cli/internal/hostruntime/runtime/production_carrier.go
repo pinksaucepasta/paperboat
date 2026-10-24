@@ -117,7 +117,7 @@ func NewProductionCarrier(ctx context.Context, version string, environ func(stri
 	if err != nil {
 		return nil, err
 	}
-	return &ProductionCarrier{peer: peer, authorization: serviceGroup{&jwksRefreshService{cache: keys, interval: time.Minute}, newPeerEnrollmentRuntimeService(peerEnrollment, 2*time.Second)}, usage: usageService, ssh: ssh}, nil
+	return &ProductionCarrier{peer: peer, authorization: serviceGroup{&jwksRefreshService{cache: keys}, newPeerEnrollmentRuntimeService(peerEnrollment, 2*time.Second)}, usage: usageService, ssh: ssh}, nil
 }
 
 func (c *ProductionCarrier) Start(ctx context.Context) error {

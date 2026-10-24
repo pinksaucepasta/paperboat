@@ -4,10 +4,13 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"github.com/google/uuid"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
@@ -73,10 +76,8 @@ func (a *Authority) Refresh(ctx context.Context, client NetworkAPI) error {
 		}
 		return err
 	}
-	if refresher, ok := a.options.Keys.(interface{ Refresh(context.Context) error }); ok {
-		if err := refresher.Refresh(ctx); err != nil {
-			return err
-		}
+	if err := a.knowSigningKeys(ctx, append([]string{result.Configuration, result.CandidateSet}, result.RelayGrants...)); err != nil {
+		return err
 	}
 	if err := a.Apply(ctx, result.Configuration); err != nil {
 		if errors.Is(err, ErrStaleAuthority) {
@@ -179,6 +180,34 @@ func (a *Authority) Run(ctx context.Context, client NetworkAPI, report func(erro
 			reset(a.nextRefresh(err, failures))
 		}
 	}
+}
+
+// knowSigningKeys fetches the key set only when a token names a key the cache does not hold (a rotation, or
+// the cache's own lifetime ending). Every refresh fetched it before, about twice a minute per engine; the
+// set now changes on rotation only, and the server says how long a fetched one stays current (F21-18).
+func (a *Authority) knowSigningKeys(ctx context.Context, tokens []string) error {
+	refresher, ok := a.options.Keys.(interface{ Refresh(context.Context) error })
+	if !ok {
+		return nil
+	}
+	for _, token := range tokens {
+		encoded, _, found := strings.Cut(token, ".")
+		if !found {
+			continue
+		}
+		header, err := base64.RawURLEncoding.DecodeString(encoded)
+		var h struct {
+			KeyID string `json:"kid"`
+		}
+		if err != nil || json.Unmarshal(header, &h) != nil || h.KeyID == "" {
+			continue // the token's own verification refuses it
+		}
+		if _, known, err := a.options.Keys.Lookup(ctx, h.KeyID); err == nil && known {
+			continue
+		}
+		return refresher.Refresh(ctx)
+	}
+	return nil
 }
 
 // nextRefresh is the wait before the next refresh after one that ended with err (nil on success)

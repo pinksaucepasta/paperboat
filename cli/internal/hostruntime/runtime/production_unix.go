@@ -236,7 +236,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 		return nil, err
 	}
 	revocationRefresh.events = machineEvents.Subscribe(machineevents.TopicMachineAccess)
-	authorizationRefresh := serviceGroup{machineEvents, &jwksRefreshService{cache: cache, interval: time.Minute}, revocationRefresh}
+	authorizationRefresh := serviceGroup{machineEvents, &jwksRefreshService{cache: cache}, revocationRefresh}
 	if nativeDispatch == nil {
 		authorizationRefresh = append(authorizationRefresh, newPeerEnrollmentRuntimeService(peerEnrollment, 2*time.Second))
 	}
@@ -874,15 +874,18 @@ func validateMachineWorkspaceUnix(root string) error {
 	return nil
 }
 
+// jwksRefreshService re-reads the key set at half its lifetime (the server's max-age, one hour), so a
+// rotation is known before the previous set ends; a failed read is retried after jwksRefreshRetry.
 type jwksRefreshService struct {
-	cache    *auth.JWKSCache
-	interval time.Duration
-	cancel   context.CancelFunc
-	done     chan struct{}
+	cache  *auth.JWKSCache
+	cancel context.CancelFunc
+	done   chan struct{}
 }
 
+const jwksRefreshRetry = time.Minute
+
 func (s *jwksRefreshService) Start(context.Context) error {
-	if s.cache == nil || s.interval <= 0 || s.cancel != nil {
+	if s.cache == nil || s.cancel != nil {
 		return ErrProductionInvalid
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -897,9 +900,13 @@ func (s *jwksRefreshService) Start(context.Context) error {
 				return
 			case <-timer.C:
 				attemptCtx, attemptCancel := context.WithTimeout(ctx, 10*time.Second)
-				_ = s.cache.Refresh(attemptCtx)
+				err := s.cache.Refresh(attemptCtx)
 				attemptCancel()
-				timer.Reset(s.interval)
+				wait := s.cache.RefreshInterval()
+				if err != nil {
+					wait = min(wait, jwksRefreshRetry)
+				}
+				timer.Reset(wait)
 			}
 		}
 	}()
