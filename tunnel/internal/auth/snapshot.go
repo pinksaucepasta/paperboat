@@ -64,6 +64,9 @@ func (s *Snapshot) ConfigureRevocationFreshness(maxAge time.Duration, now func()
 
 type jwksDocument struct {
 	Keys []jwk `json:"keys"`
+	// WithdrawnKeyIDs names keys the server withdrew (F21-08): tokens signed with them are refused at once,
+	// even while a key is still listed. The server omits the field while nothing is withdrawn.
+	WithdrawnKeyIDs []string `json:"withdrawn_key_ids,omitempty"`
 }
 type jwk struct {
 	KeyType   string `json:"kty"`
@@ -92,6 +95,20 @@ func (s *Snapshot) ReplaceJWKS(data []byte) error {
 			return ErrSnapshotInvalid
 		}
 		next[item.KeyID] = append(ed25519.PublicKey(nil), raw...)
+	}
+	if len(document.WithdrawnKeyIDs) > 128 {
+		return ErrSnapshotInvalid
+	}
+	for _, id := range document.WithdrawnKeyIDs {
+		if id == "" || len(id) > 128 {
+			return ErrSnapshotInvalid
+		}
+		delete(next, id)
+	}
+	if len(next) == 0 {
+		// Every listed key withdrawn: keep the last good set rather than trust nothing (the server
+		// refuses to withdraw its active key, so this is a malformed document).
+		return ErrSnapshotInvalid
 	}
 	s.mu.Lock()
 	s.keys = next
