@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"errors"
+	peeridentityenrollment "github.com/pinksaucepasta/paperboat/internal/hostruntime/peeridentity"
 	"github.com/pinksaucepasta/paperboat/shared/admission"
 	"net"
 	"net/http"
@@ -230,6 +231,10 @@ func transientNativePeerStart(err error) bool {
 	if errors.As(err, &response) {
 		return response.Status == 408 || response.Status == 429 || response.Status >= 500 ||
 			response.Status == 409 && (response.Code == "peer_network_too_large" || response.Code == "peer_network_conflict")
+	}
+	var refused *peeridentityenrollment.StatusError
+	if errors.As(err, &refused) {
+		return refused.Transient()
 	}
 	var network net.Error
 	return errors.As(err, &network) && (network.Timeout() || network.Temporary())

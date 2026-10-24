@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/causetext"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/peeridentity"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"io"
 	"os"
 
@@ -29,6 +31,11 @@ const InsufficientSpaceExitCode = 78
 // UpdateNotReadyExitCode preserves "the new version did not start, the previous one was restored"
 // across Unix elevation.
 const UpdateNotReadyExitCode = 79
+
+// EnrollmentRejectedExitCode ends a host service whose machine enrollment the server refuses (401/403).
+// Its service definition does not restart on it: every restart asked the server again and could never
+// succeed (398 restarts on staging). Pairing the machine again installs the services afresh.
+const EnrollmentRejectedExitCode = service.EnrollmentRejectedExitCode
 
 const usage = `pb daemon internal host runtime.
 
@@ -118,7 +125,7 @@ func execute(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 	}
 	if args[0] == "carrier" {
 		if err := runCarrier(ctx, args[1:], stdout, stderr); err != nil {
-			return finishRuntimeCommand(ctx, args[0], stderr, err, 1)
+			return finishRuntimeCommand(ctx, args[0], stderr, err, carrierExitCode(err))
 		}
 		return 0
 	}
@@ -278,4 +285,12 @@ func longRunningRuntimeService(operation string) bool {
 		return true
 	}
 	return false
+}
+
+func carrierExitCode(err error) int {
+	var refused *peeridentity.StatusError
+	if errors.As(err, &refused) && refused.Rejected() {
+		return EnrollmentRejectedExitCode
+	}
+	return 1
 }

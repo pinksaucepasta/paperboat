@@ -12,6 +12,7 @@ import (
 	"time"
 
 	clientapi "github.com/pinksaucepasta/paperboat/internal/api"
+	peeridentityenrollment "github.com/pinksaucepasta/paperboat/internal/hostruntime/peeridentity"
 )
 
 // Every fresh pair on the shared account failed at "installing system services" once the server
@@ -57,7 +58,9 @@ func TestTransientPeerEnrollmentFailureKeepsTheCarrierStarting(t *testing.T) {
 		{fmt.Errorf("register peer identity: %w", dnsTimeout), true},
 		{&clientapi.APIError{Status: 503, Code: "service_unavailable"}, true},
 		{context.DeadlineExceeded, true},
+		{fmt.Errorf("check machine endpoint approval: %w", &peeridentityenrollment.StatusError{Status: 503}), true},
 		{&clientapi.APIError{Status: 403, Code: "machine_revoked"}, false},
+		{fmt.Errorf("check machine endpoint approval: %w", &peeridentityenrollment.StatusError{Status: 401}), false},
 		{errors.Join(ErrProductionInvalid, errors.New("invalid certificate")), false},
 	} {
 		err := allowPendingPeerEnrollment(t.Context(), scriptedPeerEnrollment{err: test.err})
