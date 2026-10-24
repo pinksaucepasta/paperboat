@@ -1,6 +1,7 @@
 "use client"
 
-import { queryOptions } from "@tanstack/react-query"
+import { keepPreviousData, queryOptions } from "@tanstack/react-query"
+import { cursorPage } from "@/lib/cursor-pages"
 import { allPages, api, ApiError, idempotencyKey, send, type Data } from "@/lib/api"
 import { uploadFile } from "@/lib/upload"
 
@@ -33,6 +34,69 @@ export const tunnelKeys = {
 }
 
 /** Every page of a cursor collection, bounded so one huge account cannot stall the page. */
+/**
+ * One page of the workspace's live or ended previews, searched, filtered and counted by the server;
+ * `machine` narrows it to the previews one machine serves.
+ */
+export const previewsPageQuery = (options: {
+  workspace: string
+  ended: boolean
+  q: string
+  page: number
+  machine?: string
+}) =>
+  queryOptions({
+    queryKey: [...tunnelKeys.previews(options.workspace), "page", options],
+    queryFn: () =>
+      cursorPage<Preview>(
+        "previews",
+        {
+          workspace: options.workspace,
+          state: options.ended ? "ended" : "active",
+          ...(options.q && { q: options.q }),
+          ...(options.machine && { machine_id: options.machine }),
+        },
+        options.page,
+      ),
+    placeholderData: keepPreviousData,
+    refetchInterval: 10_000,
+  })
+
+/** How many live and ended previews there are, from the server's totals. */
+export const previewCountsQuery = (workspace: string, machine?: string) =>
+  queryOptions({
+    queryKey: [...tunnelKeys.previews(workspace), "counts", machine ?? ""],
+    queryFn: async () => {
+      const total = async (state: string) =>
+        (
+          await api<{ total: number }>(
+            `previews?${new URLSearchParams({ workspace, state, limit: "1", ...(machine && { machine_id: machine }) })}`,
+          )
+        ).total
+      const [live, ended] = await Promise.all([total("active"), total("ended")])
+      return { live, ended }
+    },
+    refetchInterval: 10_000,
+  })
+
+/** One page of the workspace's tunnels (deleted ones are left out by the server). */
+export const tunnelsPageQuery = (options: { workspace: string; q: string; page: number; machine?: string }) =>
+  queryOptions({
+    queryKey: [...tunnelKeys.tunnels(options.workspace), "page", options],
+    queryFn: () =>
+      cursorPage<Tunnel>(
+        "tunnels",
+        {
+          workspace: options.workspace,
+          ...(options.q && { q: options.q }),
+          ...(options.machine && { machine_id: options.machine }),
+        },
+        options.page,
+      ),
+    placeholderData: keepPreviousData,
+    refetchInterval: 15_000,
+  })
+
 /** The workspace's previews, live and ended. Leases count down, so the list stays fresh. */
 export const previewsQuery = (workspace: string) =>
   queryOptions({

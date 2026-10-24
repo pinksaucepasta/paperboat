@@ -4,7 +4,10 @@ import { PlugsIcon } from "@phosphor-icons/react"
 import Link from "next/link"
 import { useDeferredValue, useState } from "react"
 import { useApiQuery, useWorkspace, type Machine } from "@/lib/api"
-import { hostOf, tunnelsQuery, type Tunnel } from "@/lib/tunnels"
+import { cursorPageSize } from "@/lib/cursor-pages"
+import { hostOf, tunnelsPageQuery, type Tunnel } from "@/lib/tunnels"
+import { usePageParam } from "@/lib/use-page-param"
+import { ListPager } from "@/components/list-pager"
 import { NewTunnelButton } from "@/components/tunnels/new-tunnel"
 import { useTunnelActions } from "@/components/tunnels/tunnel-actions"
 import { TunnelStatus } from "@/components/tunnels/tunnel-status"
@@ -29,23 +32,17 @@ export function MachineTunnels() {
 export function TunnelList({ machine: tabMachine }: { machine?: Machine }) {
   const workspace = useWorkspace()
   const { scope, machine, aliasOf } = useListScope(tabMachine)
-  const query = useApiQuery({ ...tunnelsQuery(workspace?.id ?? ""), enabled: Boolean(workspace) })
   const [search, setSearch] = useState("")
-  const text = useDeferredValue(search.trim().toLowerCase())
-
-  const onMachine = (query.data?.items ?? []).filter((tunnel) => !scope || tunnel.created_by_host_id === scope)
-  const shown = onMachine
-    .filter(
-      (tunnel) =>
-        !text ||
-        [tunnel.name, tunnel.stable_endpoint, aliasOf(tunnel.created_by_host_id)]
-          .filter(Boolean)
-          .some((value) => value!.toLowerCase().includes(text)),
-    )
-    .sort((a, b) => a.name.localeCompare(b.name))
+  const q = useDeferredValue(search.trim())
+  const pages = usePageParam(`${q}|${scope ?? ""}`)
+  const query = useApiQuery({
+    ...tunnelsPageQuery({ workspace: workspace?.id ?? "", q, page: pages.page, machine: scope ?? undefined }),
+    enabled: Boolean(workspace),
+  })
+  const shown = query.data?.items ?? []
   const columns = 4 + (scope ? 0 : 1)
 
-  if (query.isSuccess && onMachine.length === 0) {
+  if (query.isSuccess && query.data.total === 0 && !q) {
     return (
       <Empty className="py-16">
         <EmptyHeader>
@@ -110,11 +107,7 @@ export function TunnelList({ machine: tabMachine }: { machine?: Machine }) {
                 ))}
           </tbody>
         </table>
-        {query.data && !query.data.complete && (
-          <p className="py-3 text-center text-sm text-muted-foreground">
-            Showing the first 2,000 tunnels. This workspace has more; the console can’t list them yet.
-          </p>
-        )}
+        {query.data && <ListPager page={query.data.page} size={cursorPageSize} total={query.data.total} go={pages.go} />}
         {query.isError && (
           <div className="flex items-center justify-center gap-3 py-12 text-sm text-muted-foreground">
             Couldn’t load tunnels.

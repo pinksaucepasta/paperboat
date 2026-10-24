@@ -5,7 +5,10 @@ import { useQueryClient } from "@tanstack/react-query"
 import { useDeferredValue, useState } from "react"
 import { toast } from "sonner"
 import { useApiQuery, useWorkspace, type Machine } from "@/lib/api"
-import { tunnelKeys, hostOf, originLabel, previewsQuery, stopPreview, type Preview } from "@/lib/tunnels"
+import { cursorPageSize } from "@/lib/cursor-pages"
+import { tunnelKeys, hostOf, originLabel, previewCountsQuery, previewsPageQuery, stopPreview, type Preview } from "@/lib/tunnels"
+import { usePageParam } from "@/lib/use-page-param"
+import { ListPager } from "@/components/list-pager"
 import { formatRelative } from "@/lib/format"
 import { useNow } from "@/lib/use-now"
 import { NewPreviewButton } from "@/components/tunnels/new-preview"
@@ -81,11 +84,17 @@ export function MachinePreviews() {
 export function PreviewList({ machine: tabMachine }: { machine?: Machine }) {
   const workspace = useWorkspace()
   const { scope, machine, aliasOf } = useListScope(tabMachine)
-  const query = useApiQuery({ ...previewsQuery(workspace?.id ?? ""), enabled: Boolean(workspace) })
   const now = useNow(30_000)
   const [view, setView] = useState<View>("live")
   const [search, setSearch] = useState("")
-  const text = useDeferredValue(search.trim().toLowerCase())
+  const q = useDeferredValue(search.trim())
+  const ws = workspace?.id ?? ""
+  const pages = usePageParam(`${view}|${q}|${scope ?? ""}`)
+  const counts = useApiQuery({ ...previewCountsQuery(ws, scope ?? undefined), enabled: Boolean(workspace) })
+  const query = useApiQuery({
+    ...previewsPageQuery({ workspace: ws, ended: view === "ended", q, page: pages.page, machine: scope ?? undefined }),
+    enabled: Boolean(workspace),
+  })
   // Dropping a file anywhere on the page shares it (like drop.new).
   const drop = usePageFileDrop()
   const dropped = (
@@ -95,25 +104,10 @@ export function PreviewList({ machine: tabMachine }: { machine?: Machine }) {
     </>
   )
 
-  const onMachine = (query.data?.items ?? []).filter((preview) => !scope || preview.owner_machine_id === scope)
-  const live = onMachine.filter((preview) => !ended(preview, now))
-  const done = onMachine.filter((preview) => ended(preview, now))
-  const shown = (view === "live" ? live : done)
-    .filter(
-      (preview) =>
-        !text ||
-        [preview.endpoint, preview.target.address, aliasOf(preview.owner_machine_id)]
-          .filter(Boolean)
-          .some((value) => value!.toLowerCase().includes(text)),
-    )
-    .sort((a, b) =>
-      view === "live"
-        ? Date.parse(b.created_at ?? "") - Date.parse(a.created_at ?? "")
-        : Date.parse(endedAt(b)) - Date.parse(endedAt(a)),
-    )
+  const shown = query.data?.items ?? []
   const columns = (view === "live" ? 5 : 4) + (scope ? 0 : 1)
 
-  if (query.isSuccess && onMachine.length === 0) {
+  if (counts.data && counts.data.live + counts.data.ended === 0 && !q) {
     return (
       <Empty className="py-16">
         <EmptyHeader>
@@ -144,8 +138,8 @@ export function PreviewList({ machine: tabMachine }: { machine?: Machine }) {
           value={view}
           onChange={setView}
           views={[
-            { value: "live", label: "Live", count: query.data && live.length },
-            { value: "ended", label: "Ended", count: query.data && done.length },
+            { value: "live", label: "Live", count: counts.data?.live },
+            { value: "ended", label: "Ended", count: counts.data?.ended },
           ]}
         />
         <div className="ml-auto flex gap-2">
@@ -193,11 +187,7 @@ export function PreviewList({ machine: tabMachine }: { machine?: Machine }) {
                 ))}
           </tbody>
         </table>
-        {query.data && !query.data.complete && (
-          <p className="py-3 text-center text-sm text-muted-foreground">
-            Showing the first 2,000 previews. This workspace has more; the console can’t list them yet.
-          </p>
-        )}
+        {query.data && <ListPager page={query.data.page} size={cursorPageSize} total={query.data.total} go={pages.go} />}
         {query.isError && (
           <div className="flex items-center justify-center gap-3 py-12 text-sm text-muted-foreground">
             Couldn’t load previews.
@@ -208,7 +198,7 @@ export function PreviewList({ machine: tabMachine }: { machine?: Machine }) {
         )}
         {query.isSuccess && shown.length === 0 && (
           <p className="py-12 text-center text-sm text-muted-foreground">
-            {text ? `No previews match “${search.trim()}”` : view === "live" ? "No live previews" : "No ended previews"}
+            {q ? `No previews match “${q}”` : view === "live" ? "No live previews" : "No ended previews"}
           </p>
         )}
       </div>

@@ -8,6 +8,7 @@ import { useApiQuery, type Machine } from "@/lib/api"
 import { formatRelative } from "@/lib/format"
 import { closeTerminal, terminalCountsQuery, terminalKeys, terminalPageSize, terminalsPageQuery } from "@/lib/terminal/queries"
 import { usePageParam } from "@/lib/use-page-param"
+import { ListPager } from "@/components/list-pager"
 import { terminalCanAttach, type TerminalSession } from "@/lib/terminal/use-terminal-connection"
 import { useCurrentMachine } from "@/components/machine-shell"
 import { NewTerminalButton } from "@/components/terminal/new-terminal"
@@ -77,7 +78,6 @@ export function TerminalList({ machine: tabMachine }: { machine?: Machine }) {
   const counts = useApiQuery(terminalCountsQuery(scope ?? undefined))
   const query = useApiQuery(terminalsPageQuery({ closed: view === "closed", q, page: pages.page, machine: scope ?? undefined }))
   const total = query.data?.total ?? 0
-  const from = (pages.page - 1) * terminalPageSize
   const shown = (query.data?.items ?? []).map((session) => ({ session, time: lastUsed(session, now) }))
 
   // Open terminals are all current, so they're one list; closed ones group by when they were used.
@@ -181,24 +181,7 @@ export function TerminalList({ machine: tabMachine }: { machine?: Machine }) {
             ))
           )}
         </table>
-        {total > terminalPageSize && (
-          <nav className="flex items-center justify-end gap-3 py-3 text-sm text-muted-foreground" aria-label="Pages">
-            <span className="tabular-nums" data-terminal-range>
-              {from + 1}–{Math.min(from + terminalPageSize, total)} of {total}
-            </span>
-            <Button variant="outline" size="sm" disabled={pages.page === 1} onClick={() => pages.go(pages.page - 1)}>
-              Previous
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={from + terminalPageSize >= total}
-              onClick={() => pages.go(pages.page + 1)}
-            >
-              Next
-            </Button>
-          </nav>
-        )}
+        <ListPager page={pages.page} size={terminalPageSize} total={total} go={pages.go} />
         {query.isError && (
           <div className="flex items-center justify-center gap-3 py-12 text-sm text-muted-foreground">
             Couldn’t load terminals.
