@@ -95,4 +95,8 @@ func TestInstallShowsWhyTheSuppliedExecutableWasRefused(t *testing.T) {
 	if err == nil || !strings.Contains(commandFailureMessage(err, failure), "chmod go-w /tmp/pb") {
 		t.Fatalf("message=%q err=%v", commandFailureMessage(err, failure), err)
 	}
+	// The refusal is about the file, not the arguments: no usage text after it (Lane W, stg-m1).
+	if failure.kind == commandUsage {
+		t.Fatal("a refused executable is reported as a usage error and prints the usage text")
+	}
 }

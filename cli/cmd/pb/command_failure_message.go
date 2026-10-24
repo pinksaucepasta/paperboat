@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"net/http"
 	"os"
 	"syscall"
@@ -64,6 +65,10 @@ func commandFailureMessage(err error, failure commandFailure) string {
 	var sshNotReady *sshTargetNotReadyError
 	if failure.kind == commandRejected && errors.As(err, &sshNotReady) {
 		return sshNotReady.Error()
+	}
+	var refusedExecutable *hostinstall.SuppliedExecutableError
+	if failure.kind == commandRejected && errors.As(err, &refusedExecutable) {
+		return refusedExecutable.Error()
 	}
 	var inWorkspaces *machineInWorkspacesError
 	if failure.kind == commandRejected && errors.As(err, &inWorkspaces) {
