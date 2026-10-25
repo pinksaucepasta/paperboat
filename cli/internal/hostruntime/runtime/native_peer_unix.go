@@ -584,6 +584,26 @@ func (s *productionNativePeerService) LastError() error {
 	return s.lastErr
 }
 
+// PathEligibility reports which kind of path carries the peer endpointID's traffic to this host and a
+// channel closed once it changes or ctx ends (tailnet.Authority.PathEligibility). A receiver refuses an
+// Unlimited file transfer while it is a hosted relay (PLAN 3b "File transfer modes").
+func (s *productionNativePeerService) PathEligibility(ctx context.Context, endpointID string) (tailnet.PathKind, <-chan struct{}) {
+	s.mu.Lock()
+	generation := s.current
+	s.mu.Unlock()
+	if generation == nil || generation.authority == nil {
+		return tailnet.PathNone, closedWhenDone(ctx)
+	}
+	return generation.authority.PathEligibility(ctx, endpointID)
+}
+
+// closedWhenDone is a change channel for a peer engine that is not running: it closes with ctx.
+func closedWhenDone(ctx context.Context) <-chan struct{} {
+	changed := make(chan struct{})
+	go func() { <-ctx.Done(); close(changed) }()
+	return changed
+}
+
 func (s *productionNativePeerService) currentIdentityFingerprint() (string, error) {
 	endpoint, err := runtimeEnvironmentEndpoint(s.config.stateRoot)
 	if err != nil || endpoint.Generation != s.config.generation {

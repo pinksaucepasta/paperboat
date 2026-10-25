@@ -461,6 +461,24 @@ func (t *PeerTerminalTunnel) acquireNativeRuntime(ctx context.Context, accountID
 	return runtime, true, nil
 }
 
+// PathEligibility reports which kind of path carries traffic to machineID and a channel closed once it
+// changes or ctx ends (tailnet.Authority.PathEligibility). An Unlimited file transfer sends only while it
+// is direct or a self-hosted relay (PLAN 3b "File transfer modes"). Without a native runtime there is no
+// path yet.
+func (t *PeerTerminalTunnel) PathEligibility(ctx context.Context, machineID string) (tailnet.PathKind, <-chan struct{}) {
+	if t != nil {
+		t.nativeMu.Lock()
+		runtime := t.nativeRuntime
+		t.nativeMu.Unlock()
+		if runtime != nil && runtime.authority != nil {
+			return runtime.authority.PathEligibility(ctx, machineID)
+		}
+	}
+	changed := make(chan struct{})
+	go func() { <-ctx.Done(); close(changed) }()
+	return tailnet.PathNone, changed
+}
+
 // RefreshNetwork renews the daemon's signed peer network now, for example when the server reports
 // that a peer joined, left or changed its keys. Without a native runtime there is nothing to renew.
 func (t *PeerTerminalTunnel) RefreshNetwork() {
