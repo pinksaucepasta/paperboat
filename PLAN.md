@@ -2490,6 +2490,29 @@ and handover) comes first, right after the red server tests. Per-instance state,
   diagnostic upload storage location, any server path that must push to a connector stream synchronously (it must
   reach the holding instance); release artifacts served from each instance's local directory (deploys must be identical).
 
+#### Regional control plane: clients pick a nearby region, no global load balancer (Lane B; user decision 2026-10-26; record now, build later)
+
+Decided:
+- No global load balancer and no anycast front for the API. The server's discovery response carries a **control-plane
+  region map**, built the same way as the relay and tunnel discovery: per region an id, an API origin and a health
+  state, signed with the rest of discovery.
+- Clients (CLI, daemon, console) measure latency to each region's API origin, pick the healthiest nearby one, and keep
+  it while it stays healthy. They fail over to the next region by measured order. The choice is cached with the
+  discovery generation and is never a hardcoded host (AGENTS.md: domains come from discovery).
+- A region may run its own load balancer in front of its instances (F21-04's single worker leader still holds per
+  database). Regions are added or drained by changing the map, not DNS.
+Prior art: Tailscale's DERP map (tailcfg/derpmap.go:19,117), where control sends regions and the client ranks them
+by measured latency (net/netcheck/netcheck.go:115 PreferredDERP), while the control URL itself is one origin
+(ipn/prefs.go:42 DefaultControlURL); NetBird management hands clients their signal and relay endpoints
+(management/internals/shared/grpc/conversion.go:85-100), and clients connect to those, not through one front.
+OPEN, not final: one central writable database with regional read replicas. To design before building:
+- freshness bounds per read: which reads may be served from a replica;
+- authorization and revocation consistency: a revoke must never be readable as granted from a lagging replica, so
+  authz reads either go to the primary or carry a generation floor;
+- write routing and latency from far regions;
+- primary failover, and what clients see during it.
+Rows: none yet; becomes an F21 row when the build is scheduled.
+
 #### Inspector: a fresh machine's first preview can miss its first requests (Lane I, open, 2026-10-24)
 
 Seen 2 times in about 40 runs of check-preview-inspector.js (aaf3f121 on 2026-10-23, round 21 dev-97238006): on the
