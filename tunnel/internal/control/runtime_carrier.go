@@ -55,7 +55,9 @@ func ExpectedRuntimeAdmission(a runtimewire.Admission, nodeID, epoch string, now
 
 type RuntimeCarrierSource interface {
 	RuntimeCarrierAdmissions(context.Context, string, string) ([]runtimewire.Admission, error)
-	EndpointAdmissions(context.Context, string, string) ([]runtimewire.Admission, error)
+	// EndpointAdmissions returns the full endpoint set when since is empty, otherwise what changed
+	// since that cursor.
+	EndpointAdmissions(ctx context.Context, nodeID, epoch, since string) (EndpointUpdate, error)
 	ObserveRuntimeCarriers(context.Context, string, string, []runtimewire.Observation) error
 }
 
@@ -64,7 +66,7 @@ func (c *HTTPClient) RuntimeCarrierAdmissions(ctx context.Context, nodeID, epoch
 		return nil, ErrControlInvalid
 	}
 	var result runtimewire.Snapshot
-	if err := c.postNodeWithMaximumAndIdentity(ctx, runtimewire.EdgePullPath, nodeID, epoch, runtimewire.EdgeRequest{NodeID: nodeID, ProcessEpoch: epoch, Capabilities: []string{runtimewire.CapabilityEndpoints, runtimewire.CapabilityTunnelEndpoints}}, &result, maxPreviewCarrierSnapshotBytes); err != nil {
+	if err := c.postNodeWithMaximumAndIdentity(ctx, runtimewire.EdgePullPath, nodeID, epoch, runtimewire.EdgeRequest{NodeID: nodeID, ProcessEpoch: epoch, Capabilities: edgeRuntimeCapabilities}, &result, maxPreviewCarrierSnapshotBytes); err != nil {
 		return nil, err
 	}
 	if result.Schema != runtimewire.Schema || !result.Complete || result.Admissions == nil || len(*result.Admissions) > runtimewire.MaximumAdmissions {
@@ -79,29 +81,82 @@ func (c *HTTPClient) RuntimeCarrierAdmissions(ctx context.Context, nodeID, epoch
 	return *result.Admissions, nil
 }
 
-// EndpointAdmissions pulls only the endpoint routes of the edge's runtime snapshot (PLAN 3a).
-func (c *HTTPClient) EndpointAdmissions(ctx context.Context, nodeID, epoch string) ([]runtimewire.Admission, error) {
-	if connectorprotocol.ValidateIdentifier(nodeID) != nil || connectorprotocol.ValidateOpaqueEpoch(epoch) != nil {
-		return nil, ErrControlInvalid
-	}
-	var result runtimewire.Snapshot
-	if err := c.postNodeWithMaximumAndIdentity(ctx, runtimewire.EdgeEndpointPullPath, nodeID, epoch, runtimewire.EdgeRequest{NodeID: nodeID, ProcessEpoch: epoch, Capabilities: []string{runtimewire.CapabilityEndpoints, runtimewire.CapabilityTunnelEndpoints}}, &result, maxPreviewCarrierSnapshotBytes); err != nil {
-		return nil, err
-	}
-	if result.Schema != runtimewire.Schema || !result.Complete || result.Admissions == nil || len(*result.Admissions) > runtimewire.MaximumAdmissions {
-		return nil, ErrControlUnavailable
-	}
-	now := time.Now().UTC()
-	for _, a := range *result.Admissions {
-		if a.EndpointID == "" {
-			return nil, documentFailure{sentinel: ErrControlUnavailable, cause: ErrControlInvalid}
-		}
-		if _, err := ExpectedRuntimeAdmission(a, nodeID, epoch, now); err != nil {
-			return nil, documentFailure{sentinel: ErrControlUnavailable, cause: err}
-		}
-	}
-	return *result.Admissions, nil
+// EndpointUpdate is one endpoint pull: the full set (Complete) or the changes since the cursor sent.
+// Every endpoint admission kept after it expires at ExpiresAt; Cursor is sent as since next time.
+type EndpointUpdate struct {
+	Complete   bool
+	Admissions []runtimewire.Admission
+	Removed    []string
+	Cursor     string
+	ExpiresAt  time.Time
 }
+
+// EndpointAdmissions pulls the endpoint routes of the edge's runtime snapshot (PLAN 3a), as deltas
+// after the first full set (Lane W scale matrix). The server sends them grouped by carrier in pages;
+// all pages of one answer are read here, and the first page's cursor is the answer's cursor.
+func (c *HTTPClient) EndpointAdmissions(ctx context.Context, nodeID, epoch, since string) (EndpointUpdate, error) {
+	if connectorprotocol.ValidateIdentifier(nodeID) != nil || connectorprotocol.ValidateOpaqueEpoch(epoch) != nil || len(since) > 64 {
+		return EndpointUpdate{}, ErrControlInvalid
+	}
+	var update EndpointUpdate
+	now := time.Now().UTC()
+	page := ""
+	for pages := 0; ; pages++ {
+		if pages == maximumEndpointPages {
+			return EndpointUpdate{}, ErrControlUnavailable
+		}
+		var result runtimewire.Snapshot
+		request := runtimewire.EdgeRequest{NodeID: nodeID, ProcessEpoch: epoch, Capabilities: edgeRuntimeCapabilities, Since: since, Page: page}
+		if err := c.postNodeWithMaximumAndIdentity(ctx, runtimewire.EdgeEndpointPullPath, nodeID, epoch, request, &result, maxPreviewCarrierSnapshotBytes); err != nil {
+			return EndpointUpdate{}, err
+		}
+		if result.Schema != runtimewire.Schema || result.Carriers == nil || result.Cursor == "" || len(result.Cursor) > 64 || len(result.Next) > 1024 {
+			return EndpointUpdate{}, ErrControlUnavailable
+		}
+		if pages == 0 {
+			update.Complete, update.Cursor = result.Complete, result.Cursor
+		} else if result.Complete != update.Complete {
+			return EndpointUpdate{}, ErrControlUnavailable
+		}
+		if !result.Complete {
+			if result.ExpiresAt == nil || !result.ExpiresAt.After(now) {
+				return EndpointUpdate{}, ErrControlUnavailable
+			}
+			update.ExpiresAt = result.ExpiresAt.UTC()
+		} else if len(result.RemovedRouteIDs) != 0 {
+			return EndpointUpdate{}, ErrControlUnavailable
+		}
+		for _, id := range result.RemovedRouteIDs {
+			if connectorprotocol.ValidateIdentifier(id) != nil {
+				return EndpointUpdate{}, documentFailure{sentinel: ErrControlUnavailable, cause: ErrControlInvalid}
+			}
+		}
+		update.Removed = append(update.Removed, result.RemovedRouteIDs...)
+		for _, carrier := range *result.Carriers {
+			for _, a := range carrier.Admissions() {
+				if a.EndpointID == "" {
+					return EndpointUpdate{}, documentFailure{sentinel: ErrControlUnavailable, cause: ErrControlInvalid}
+				}
+				if _, err := ExpectedRuntimeAdmission(a, nodeID, epoch, now); err != nil {
+					return EndpointUpdate{}, documentFailure{sentinel: ErrControlUnavailable, cause: err}
+				}
+				update.Admissions = append(update.Admissions, a)
+			}
+		}
+		if len(update.Admissions)+len(update.Removed) > runtimewire.MaximumAdmissions {
+			return EndpointUpdate{}, ErrControlUnavailable
+		}
+		if page = result.Next; page == "" {
+			return update, nil
+		}
+	}
+}
+
+// maximumEndpointPages bounds one paged endpoint answer (MaximumAdmissions over the server's pages).
+const maximumEndpointPages = 64
+
+// edgeRuntimeCapabilities is what this edge advertises on its runtime and endpoint pulls.
+var edgeRuntimeCapabilities = []string{runtimewire.CapabilityEndpoints, runtimewire.CapabilityTunnelEndpoints, runtimewire.CapabilityEndpointDeltas}
 
 func (c *HTTPClient) ObserveRuntimeCarriers(ctx context.Context, nodeID, epoch string, observations []runtimewire.Observation) error {
 	if connectorprotocol.ValidateIdentifier(nodeID) != nil || connectorprotocol.ValidateOpaqueEpoch(epoch) != nil || len(observations) > runtimewire.MaximumAdmissions {

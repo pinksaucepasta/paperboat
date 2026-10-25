@@ -129,7 +129,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 400, "invalid_request")
 			return
 		}
-		snapshot, err := h.Service.PullEndpoints(r.Context(), edge, request.Capabilities, request.Since)
+		snapshot, err := h.Service.PullEndpoints(r.Context(), edge, request.Capabilities, request.Since, request.Page)
 		if err != nil {
 			serviceError(w, r, err)
 			return

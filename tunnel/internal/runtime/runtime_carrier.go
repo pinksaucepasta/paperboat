@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
+	"sort"
 	"sync"
 	"time"
 
@@ -29,18 +30,26 @@ type RuntimeCarrierWorker struct {
 	// EndpointInterval paces the small endpoint-only pull (PLAN 3a) that admits a new preview or
 	// tunnel route within a second; zero disables it (endpoint routes then follow full pulls).
 	EndpointInterval time.Duration
-	Timeout          time.Duration
+	// EndpointFullInterval: how often the endpoint pull takes the full set instead of deltas (zero:
+	// endpointFullInterval, the server's admission lifetime).
+	EndpointFullInterval time.Duration
+	Timeout              time.Duration
 	// runtimeSet and endpointSet are the latest runtime and endpoint admissions; only the worker
 	// goroutine touches them. endpointPause stops fast pulls until the next full pull after one
 	// fails (for example on a server that does not serve them yet).
 	runtimeSet    []runtimewire.Admission
 	endpointSet   []runtimewire.Admission
 	endpointPause bool
-	mu            sync.Mutex
-	cancel        context.CancelFunc
-	done          chan struct{}
-	wake          chan struct{}
-	closed        bool
+	// endpointCursor is the server's cursor of the last endpoint answer; endpointFullAt when the last
+	// full endpoint set arrived; endpointExpiry the expiry the installed endpoint admissions carry.
+	endpointCursor string
+	endpointFullAt time.Time
+	endpointExpiry time.Time
+	mu             sync.Mutex
+	cancel         context.CancelFunc
+	done           chan struct{}
+	wake           chan struct{}
+	closed         bool
 }
 
 func (w *RuntimeCarrierWorker) Start(ctx context.Context) error {
@@ -140,11 +149,10 @@ func (w *RuntimeCarrierWorker) reconcile(parent context.Context) (failure error)
 	defer cancel()
 	values, err := w.Source.RuntimeCarrierAdmissions(ctx, w.Expected.NodeID(), w.Expected.ProcessEpoch())
 	if err == nil {
-		w.runtimeSet, w.endpointSet = w.runtimeSet[:0], w.endpointSet[:0]
+		// Endpoint routes come only from the endpoint pull (endpoint deltas); this one is runtime.
+		w.runtimeSet = w.runtimeSet[:0]
 		for _, value := range values {
-			if value.EndpointID != "" {
-				w.endpointSet = append(w.endpointSet, value)
-			} else {
+			if value.EndpointID == "" {
 				w.runtimeSet = append(w.runtimeSet, value)
 			}
 		}
@@ -158,8 +166,17 @@ func (w *RuntimeCarrierWorker) reconcile(parent context.Context) (failure error)
 	return err
 }
 
-// reconcileEndpoints replaces only the endpoint routes, from the small endpoint-only pull. A
-// failed pull keeps the last good set and pauses fast pulls until the next full pull.
+// endpointFullInterval is how often the endpoint pull asks for the full set instead of deltas: the
+// safety net for changes no delta reports (a lease lapsing, a carrier going stale). It equals the
+// server's admission lifetime, which every delta renews.
+const endpointFullInterval = 2 * time.Minute
+
+// endpointRenewStep: a delta's later expiry is installed once it moved this far, not on every poll.
+const endpointRenewStep = 30 * time.Second
+
+// reconcileEndpoints updates only the endpoint routes from the endpoint pull: the full set when due,
+// otherwise the changes since the last cursor. A failed pull keeps the last good set and pauses
+// fast pulls until the next full runtime pull.
 func (w *RuntimeCarrierWorker) reconcileEndpoints(parent context.Context) (failure error) {
 	if w.endpointPause {
 		return nil
@@ -167,21 +184,66 @@ func (w *RuntimeCarrierWorker) reconcileEndpoints(parent context.Context) (failu
 	defer func() { observeWorkerFailure(parent, w.Reporter, "endpoint_admission", failure) }()
 	ctx, cancel := context.WithTimeout(parent, w.Timeout)
 	defer cancel()
-	values, err := w.Source.EndpointAdmissions(ctx, w.Expected.NodeID(), w.Expected.ProcessEpoch())
+	since, full := w.endpointCursor, w.EndpointFullInterval
+	if full <= 0 {
+		full = endpointFullInterval
+	}
+	if time.Since(w.endpointFullAt) >= full {
+		since = ""
+	}
+	update, err := w.Source.EndpointAdmissions(ctx, w.Expected.NodeID(), w.Expected.ProcessEpoch(), since)
 	if err != nil {
 		w.endpointPause = true
 		return err
 	}
-	if endpointSetEqual(w.endpointSet, values) {
+	next, expiry := mergeEndpointUpdate(w.endpointSet, update)
+	if update.Complete {
+		w.endpointFullAt = time.Now()
+	}
+	w.endpointCursor = update.Cursor
+	changed := !endpointSetEqual(w.endpointSet, next)
+	if !changed && expiry.Sub(w.endpointExpiry) < endpointRenewStep {
 		return nil
 	}
-	w.endpointSet = append(w.endpointSet[:0], values...)
+	w.endpointSet, w.endpointExpiry = next, expiry
 	if err := w.install(); err != nil {
 		return err
 	}
-	w.withdraw()
-	w.observe(parent)
+	if changed {
+		w.withdraw()
+		w.observe(parent)
+	}
 	return nil
+}
+
+// mergeEndpointUpdate applies a full set or a delta to the current endpoint admissions (sorted by
+// route id) and returns the result with the expiry its admissions carry.
+func mergeEndpointUpdate(current []runtimewire.Admission, update control.EndpointUpdate) ([]runtimewire.Admission, time.Time) {
+	byRoute := map[string]runtimewire.Admission{}
+	if !update.Complete {
+		for _, a := range current {
+			byRoute[a.Binding.RouteID] = a
+		}
+	}
+	for _, id := range update.Removed {
+		delete(byRoute, id)
+	}
+	for _, a := range update.Admissions {
+		byRoute[a.Binding.RouteID] = a
+	}
+	next := make([]runtimewire.Admission, 0, len(byRoute))
+	var expiry time.Time
+	for _, a := range byRoute {
+		if !update.Complete {
+			a.ExpiresAt = update.ExpiresAt
+		}
+		if expiry.IsZero() || a.ExpiresAt.Before(expiry) {
+			expiry = a.ExpiresAt
+		}
+		next = append(next, a)
+	}
+	sort.Slice(next, func(i, j int) bool { return next[i].Binding.RouteID < next[j].Binding.RouteID })
+	return next, expiry
 }
 
 func endpointSetEqual(a, b []runtimewire.Admission) bool {

@@ -19,6 +19,9 @@ type runtimeSourceFake struct {
 	err          error
 	endpointErr  error
 	observations []runtimewire.Observation
+	// endpointUpdate, when set, answers endpoint pulls; endpointPulls records each since sent.
+	endpointUpdate func(since string) control.EndpointUpdate
+	endpointPulls  []string
 }
 
 func (s *runtimeSourceFake) RuntimeCarrierAdmissions(context.Context, string, string) ([]runtimewire.Admission, error) {
@@ -26,16 +29,20 @@ func (s *runtimeSourceFake) RuntimeCarrierAdmissions(context.Context, string, st
 	defer s.mu.Unlock()
 	return append([]runtimewire.Admission(nil), s.admissions...), s.err
 }
-func (s *runtimeSourceFake) EndpointAdmissions(context.Context, string, string) ([]runtimewire.Admission, error) {
+func (s *runtimeSourceFake) EndpointAdmissions(_ context.Context, _, _, since string) (control.EndpointUpdate, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.endpointPulls = append(s.endpointPulls, since)
+	if s.endpointUpdate != nil {
+		return s.endpointUpdate(since), s.endpointErr
+	}
 	out := []runtimewire.Admission{}
 	for _, a := range s.admissions {
 		if a.EndpointID != "" {
 			out = append(out, a)
 		}
 	}
-	return out, s.endpointErr
+	return control.EndpointUpdate{Complete: true, Admissions: out, Cursor: "cursor"}, s.endpointErr
 }
 func (s *runtimeSourceFake) ObserveRuntimeCarriers(_ context.Context, _, _ string, o []runtimewire.Observation) error {
 	s.mu.Lock()

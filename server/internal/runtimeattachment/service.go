@@ -18,6 +18,7 @@ import (
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 	"io"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -398,25 +399,19 @@ func (s *Service) Pull(ctx context.Context, edge previewattachment.PreviewEdgeId
 const observationRefresh = 10 * time.Second
 
 // PullEndpoints returns the endpoint route admissions of the edge's snapshot (the routes of the
-// agents' runtime carriers on this edge). With CapabilityEndpointDeltas and a cursor it returns only
-// what changed since the cursor; otherwise the full set. Every answer carries the next cursor.
-func (s *Service) PullEndpoints(ctx context.Context, edge previewattachment.PreviewEdgeIdentity, capabilities []string, since string) (runtimewire.Snapshot, error) {
+// agents' runtime carriers on this edge). An edge with CapabilityEndpointDeltas gets them grouped by
+// carrier in pages of endpointPageRows (page continues one answer), and given a cursor only what
+// changed since it; every answer carries the next cursor. Other edges get the full set as before.
+func (s *Service) PullEndpoints(ctx context.Context, edge previewattachment.PreviewEdgeIdentity, capabilities []string, since, page string) (runtimewire.Snapshot, error) {
 	if !runtimewire.HasCapability(capabilities, runtimewire.CapabilityEndpoints) || !runtimewire.ValidEdgeCapabilities(capabilities) {
 		return runtimewire.Snapshot{}, ErrInvalid
 	}
-	var now time.Time
-	if err := s.DB.Pool().QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
-		return runtimewire.Snapshot{}, err
-	}
 	expires := admission.Deadline(time.Now(), s.AdmissionLifetime)
 	out := runtimewire.Snapshot{Schema: runtimewire.Schema}
-	deltas := runtimewire.HasCapability(capabilities, runtimewire.CapabilityEndpointDeltas)
-	if deltas {
-		out.Cursor = now.UTC().Format(time.RFC3339Nano)
-	}
-	cursor, err := time.Parse(time.RFC3339Nano, since)
-	delta := deltas && err == nil && now.Sub(cursor) < endpointDeltaWindow
-	if !delta {
+	if !runtimewire.HasCapability(capabilities, runtimewire.CapabilityEndpointDeltas) {
+		if page != "" {
+			return runtimewire.Snapshot{}, ErrInvalid
+		}
 		if err := endpoints.RecordEdgeServes(ctx, s.DB.Pool(), edge.NodeID, edge.ProcessEpoch, runtimewire.HasCapability(capabilities, runtimewire.CapabilityTunnelEndpoints)); err != nil {
 			return runtimewire.Snapshot{}, err
 		}
@@ -430,15 +425,67 @@ func (s *Service) PullEndpoints(ctx context.Context, edge previewattachment.Prev
 		out.Complete, out.Admissions = true, &routes
 		return out, nil
 	}
-	routes, removed, err := endpoints.EdgeAdmissionsChanged(ctx, s.DB.Pool(), edge.NodeID, edge.ProcessEpoch, cursor.Add(-endpointDeltaOverlap), expires, runtimewire.MaximumAdmissions)
+	after, err := decodeEndpointPage(page)
+	if err != nil {
+		return runtimewire.Snapshot{}, ErrInvalid
+	}
+	var now time.Time
+	if err := s.DB.Pool().QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
+		return runtimewire.Snapshot{}, err
+	}
+	out.Cursor = now.UTC().Format(time.RFC3339Nano)
+	cursor, parseErr := time.Parse(time.RFC3339Nano, since)
+	var routes []runtimewire.Admission
+	var removed []string
+	var last endpoints.Position
+	if parseErr != nil || now.Sub(cursor) >= endpointDeltaWindow {
+		if page == "" {
+			if err := endpoints.RecordEdgeServes(ctx, s.DB.Pool(), edge.NodeID, edge.ProcessEpoch, runtimewire.HasCapability(capabilities, runtimewire.CapabilityTunnelEndpoints)); err != nil {
+				return runtimewire.Snapshot{}, err
+			}
+		}
+		out.Complete = true
+		routes, last, err = endpoints.EdgeAdmissionsPage(ctx, s.DB.Pool(), edge.NodeID, edge.ProcessEpoch, after, expires, endpointPageRows-1)
+	} else {
+		routes, removed, last, err = endpoints.EdgeAdmissionsChanged(ctx, s.DB.Pool(), edge.NodeID, edge.ProcessEpoch, cursor.Add(-endpointDeltaOverlap), after, expires, endpointPageRows-1)
+		out.RemovedRouteIDs, out.ExpiresAt = removed, &expires
+	}
 	if err != nil {
 		return runtimewire.Snapshot{}, err
 	}
-	if len(routes)+len(removed) > runtimewire.MaximumAdmissions {
-		return runtimewire.Snapshot{}, ErrUnavailable
+	// The queries return at most endpointPageRows rows: a full page may continue.
+	if len(routes)+len(removed) >= endpointPageRows {
+		out.Next = encodeEndpointPage(last)
 	}
-	out.Admissions, out.RemovedRouteIDs, out.ExpiresAt = &routes, removed, &expires
+	carriers := runtimewire.GroupEndpointAdmissions(routes)
+	if carriers == nil {
+		carriers = []runtimewire.EndpointCarrier{}
+	}
+	out.Carriers = &carriers
 	return out, nil
+}
+
+// endpointPageRows bounds one endpoint answer page: even with every row on its own carrier (~2 KB
+// each) a page stays near 1 MB. A variable only so a test can page small sets.
+var endpointPageRows = 500
+
+func encodeEndpointPage(p endpoints.Position) string {
+	return base64.RawURLEncoding.EncodeToString([]byte(p.Session + "\x00" + p.Route))
+}
+
+func decodeEndpointPage(page string) (endpoints.Position, error) {
+	if page == "" {
+		return endpoints.Position{}, nil
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(page)
+	if err != nil || len(raw) > 512 {
+		return endpoints.Position{}, ErrInvalid
+	}
+	session, route, ok := strings.Cut(string(raw), "\x00")
+	if !ok || session == "" || route == "" {
+		return endpoints.Position{}, ErrInvalid
+	}
+	return endpoints.Position{Session: session, Route: route}, nil
 }
 
 const (

@@ -1165,6 +1165,14 @@ domain bindings); tunnel ingress, health/readiness and DNS read endpoint assignm
 list; the tunnel manager stops dialing its own carrier when served.
 4.4 TCP, TLS passthrough, private_tcp and custom domains on the same path. 5: deletions (connector stack, attachments), the unused single-connection connector.Manager/Supervisor: audit T9).
 Gate per slice: smoke tunnel-manage, tunnel-protocols, tunnel-transfer, tunnel-survival, tunnel-lifecycle, tcp-private green.
+4.3 on prod, 2026-10-23/26: two rollouts failed on prod edges and were rolled back to tunnel .9. (1) Engine route rows carried the
+runtime carrier's thumbprint format; the edge's durable registry wants the connector JWK thumbprint (fixed c6b4b834, golden contract
+test across server and edge). (2) Prod edges check readiness with a connector_ready probe (their route registry has an ingress
+authority); the agent's engine forwarder did not answer it (fixed b12530ed; end-to-end contract: server golden row -> real edge
+carrier and route registry -> recorded probe -> real agent hub). Staging (pbvm4, self-hosted edge): the engine route goes ready
+(22:13:45Z 2026-10-25). Staging cannot serve HTTPS for a tunnel (self-hosted edges need a verified customer domain and staging cannot
+issue a certificate: Cloudflare DNS-01 only), so tunnel-manage cannot run there; F20-02 [!] waits for a coordinator decision
+(single-edge prod canary with rollback ready, or a staging certificate path).
 4.3 as built (branch lane-m-43): only public HTTP tunnels move (a private/team route needs an agent-side ingress authority for
 engine routes first, which 4.4 adds); the agent refetches its engine tunnels on the `tunnels` machine event with a 1-min safety
 poll, verifies each snapshot's content hash, and serves every active route on every carrier hub; the tunnel manager keeps no

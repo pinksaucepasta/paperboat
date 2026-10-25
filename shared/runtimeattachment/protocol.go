@@ -154,6 +154,8 @@ type EdgeRequest struct {
 	// Since, on an endpoint pull with CapabilityEndpointDeltas, is the cursor of the edge's last
 	// endpoint answer: the server answers only what changed since it. Empty asks for a full set.
 	Since string `json:"since,omitempty"`
+	// Page continues a paged endpoint answer (the Next of its previous page).
+	Page string `json:"page,omitempty"`
 }
 
 // Snapshot requires an explicit admissions array, including when empty.
@@ -162,13 +164,17 @@ type Snapshot struct {
 	Schema     string       `json:"schema"`
 	Complete   bool         `json:"complete"`
 	Admissions *[]Admission `json:"admissions"`
-	// Only for an edge with CapabilityEndpointDeltas (edges decode strictly): Cursor is sent back as
-	// Since next time. An
-	// answer with Complete false is a delta: Admissions are added or replaced, RemovedRouteIDs
-	// dropped, and every kept endpoint admission now expires at ExpiresAt.
-	Cursor          string    `json:"cursor,omitempty"`
-	RemovedRouteIDs []string  `json:"removed_route_ids,omitempty"`
-	ExpiresAt       *time.Time `json:"expires_at,omitempty"`
+	// Only for an edge with CapabilityEndpointDeltas (edges decode strictly): endpoint routes come
+	// as Carriers (each carrier's admission once, its routes compact) instead of Admissions, in pages
+	// of bounded size: Next, when set, is sent back as Page for the rest of this answer. Cursor is
+	// sent back as Since next time. An answer with Complete false is a delta: carriers' routes are
+	// added or replaced, RemovedRouteIDs dropped, and every kept endpoint admission now expires at
+	// ExpiresAt.
+	Carriers        *[]EndpointCarrier `json:"carriers,omitempty"`
+	Next            string             `json:"next,omitempty"`
+	Cursor          string             `json:"cursor,omitempty"`
+	RemovedRouteIDs []string           `json:"removed_route_ids,omitempty"`
+	ExpiresAt       *time.Time         `json:"expires_at,omitempty"`
 }
 
 // ValidEdgeCapabilities accepts what an edge may advertise: nothing, or CapabilityEndpoints with
@@ -210,4 +216,60 @@ func HasCapability(values []string, capability string) bool {
 		}
 	}
 	return false
+}
+
+// EndpointCarrier is one agent runtime carrier's endpoint routes in a grouped endpoint answer: the
+// carrier's admission once (its route fields empty) and each route's own fields.
+type EndpointCarrier struct {
+	Carrier Admission       `json:"carrier"`
+	Routes  []EndpointRoute `json:"routes"`
+}
+
+// EndpointRoute is what differs between the endpoint routes of one carrier.
+type EndpointRoute struct {
+	RouteID              string `json:"route_id"`
+	Revision             uint64 `json:"revision"`
+	AttachmentGeneration uint64 `json:"attachment_generation"`
+	Hostname             string `json:"hostname"`
+	EndpointID           string `json:"endpoint_id"`
+	AccessMode           string `json:"access_mode"`
+}
+
+// Admissions expands the carrier's routes into full endpoint admissions.
+func (c EndpointCarrier) Admissions() []Admission {
+	out := make([]Admission, 0, len(c.Routes))
+	for _, r := range c.Routes {
+		a := c.Carrier
+		a.EdgeEndpoints = append([]string(nil), c.Carrier.EdgeEndpoints...)
+		a.Binding.RouteID, a.Binding.RouteGeneration = r.RouteID, r.Revision
+		a.RouteRevision, a.AttachmentGeneration = r.Revision, r.AttachmentGeneration
+		a.Hostname, a.EndpointID, a.AccessMode = r.Hostname, r.EndpointID, r.AccessMode
+		a.RouteKind = EndpointPublicRouteKind
+		if r.AccessMode != "public" {
+			a.RouteKind = EndpointRestrictedRouteKind
+		}
+		out = append(out, a)
+	}
+	return out
+}
+
+// GroupEndpointAdmissions groups endpoint admissions by carrier session, keeping their order.
+func GroupEndpointAdmissions(admissions []Admission) []EndpointCarrier {
+	var out []EndpointCarrier
+	index := map[string]int{}
+	for _, a := range admissions {
+		key := a.Binding.SessionID + "\x00" + a.Binding.EdgeProcessEpoch
+		i, ok := index[key]
+		if !ok {
+			carrier := a
+			carrier.Binding.RouteID, carrier.Binding.RouteGeneration = "", 0
+			carrier.RouteRevision, carrier.AttachmentGeneration = 0, 0
+			carrier.Hostname, carrier.EndpointID, carrier.AccessMode, carrier.RouteKind = "", "", "", ""
+			out = append(out, EndpointCarrier{Carrier: carrier})
+			i = len(out) - 1
+			index[key] = i
+		}
+		out[i].Routes = append(out[i].Routes, EndpointRoute{RouteID: a.Binding.RouteID, Revision: a.RouteRevision, AttachmentGeneration: a.AttachmentGeneration, Hostname: a.Hostname, EndpointID: a.EndpointID, AccessMode: a.AccessMode})
+	}
+	return out
 }

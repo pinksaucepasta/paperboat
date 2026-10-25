@@ -71,7 +71,7 @@ func TestEndpointRouteRidesOnTheAgentRuntimeCarrier(t *testing.T) {
 		t.Fatal(err)
 	}
 	endpoints := endpointRegistry(t, epoch)
-	w := &RuntimeCarrierWorker{Source: source, Expected: expected, Routes: routes, Endpoints: endpoints, Interval: 20 * time.Millisecond, Timeout: time.Second}
+	w := &RuntimeCarrierWorker{Source: source, Expected: expected, Routes: routes, Endpoints: endpoints, Interval: 20 * time.Millisecond, EndpointInterval: 20 * time.Millisecond, Timeout: time.Second}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	if err := w.Start(ctx); err != nil {
