@@ -853,6 +853,22 @@ test_update_crossbuild() {
   done
 }
 
+# Runs only when SMOKE_FRESH_HOST (a Linux VM with Docker, image laneh-ubuntu24-systemd, and a signed-in `pb` user)
+# and SMOKE_FRESH_BINARY (the linux-amd64 build under test) are set: a FRESH pair, then `pb access machine` to it
+# with no daemon restart (the private-access P0 of 2026-10-26 showed only on freshly paired machines).
+test_fresh_pair_access() {
+  skipped fresh-pair-access && return
+  [ -n "${SMOKE_FRESH_HOST:-}" ] && [ -n "${SMOKE_FRESH_BINARY:-}" ] || return 0
+  local out status t0
+  t0=$(now)
+  out=$("$HERE/fresh_pair_access.sh" "$SMOKE_FRESH_HOST" "$SMOKE_FRESH_BINARY" 2>&1); status=$?
+  if [ "$status" = 0 ] && python3 -c 'import json,sys;r=json.loads(sys.argv[1].strip().splitlines()[-1]);assert r["check"]=="fresh-pair-access" and r["status"]=="PASS"' "$out" 2>/dev/null; then
+    record fresh-pair-access PASS $(( $(now)-t0 )) "fresh pair on $SMOKE_FRESH_HOST, then pb access machine reached the origin"
+  else
+    record_command_failure fresh-pair-access $(( $(now)-t0 )) "$out"
+  fi
+}
+
 test_device_application() {
   local group=$1 script=$2 flags=${3:-}
   skipped "$group" && return
@@ -998,6 +1014,7 @@ test_application_pairs inventory-freshness inventory_freshness.py
 test_application_pairs inbox-manage inbox_manage.py
 test_inbox_approval
 test_private_access
+test_fresh_pair_access
 test_application_pairs transfer-manage transfer_manage.py
 test_application_pairs preview-manage preview_manage.py
 test_application_pairs preview-inspect preview_inspect.py
