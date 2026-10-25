@@ -120,7 +120,12 @@ func (l *PairLease) capabilityValidLocked() (time.Time, bool) {
 	if !allowed(a, b, now) || a.DiscoPublicKey != DiscoKeyString(l.disco[0]) || b.DiscoPublicKey != DiscoKeyString(l.disco[1]) {
 		return time.Time{}, false
 	}
+	// A per-peer grant binds the other's disco key; a membership grant names no peers, and each disco key
+	// is the one its own signed grant carries (checked against the lease above).
 	match := func(g, other Grant) bool {
+		if len(g.Memberships) > 0 {
+			return true
+		}
 		p, ok := g.peerEntry(other.WireGuardPublicKey)
 		return ok && p.DiscoPublicKey == other.DiscoPublicKey
 	}

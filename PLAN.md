@@ -1741,14 +1741,18 @@ peer entry (derpquic reciprocalScopes). Those resource ids are already pair- or 
 network for the mesh, one access grant for a shared machine. So the per-peer nesting adds size but no
 authority. A grant instead carries `memberships`: the same scope tuples, attached to the endpoint itself
 (bounded, e.g. 256 per grant: one for the account mesh, plus one per access grant, share, private route or
-team network the endpoint takes part in). The relay forwards a pair when the two admitted grants hold a
-reciprocal membership, which is one index lookup per pair. Relay-control peers become "same account and
+team network the endpoint takes part in). The relay forwards a pair only when one grant holds (R, dial) and
+the other holds (R, accept) for the same resource kind, id, generation, capability and port, both unexpired
+(Lane B review: shares and private routes are one id held by their host and every viewer, so holding the
+same membership is not enough; two viewers of one share stay unpaired). Mesh and team networks hold both
+directions, so they keep a full mesh. One index lookup per pair. Relay-control peers become "same account and
 both hold the account's network membership". Disco keys come from each grant's own signed field. Memory per
 grant becomes O(memberships) (a mesh endpoint: one entry), independent of the account's size.
 Contract order: relay accepts `memberships` (the relay ignores per-peer lists when present) → CLI accepts and
 forwards it → server signs it (Lane B) → per-peer lists and MaxMergedPeers removed. Test: 10,000 endpoints of
-one account registered on one relay, heap per grant and pair-check time per datagram (budget: < 1 KiB per
-mesh grant, < 200 ns per check), plus the existing revocation, quota and cross-account refusal tests.
+one account registered on one relay, heap per grant and pair-check time (budget: < 1 KiB per mesh grant,
+< 1 µs for a pair's first check with grants spread over memory, < 100 ns per datagram after it, as the
+connection remembers its pair until a grant changes), plus the existing revocation, quota and cross-account refusal tests.
 
 **Design 2: relay health that does not expire every 15 s.** The signed candidate set keeps a node's identity,
 endpoints and hosting for its own lifetime (the node's `expires_at`, e.g. 5 min). The engine's own relay
