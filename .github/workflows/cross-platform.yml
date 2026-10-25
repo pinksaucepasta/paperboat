@@ -15,6 +15,9 @@ on:
       run:
         description: Only tests matching this regular expression
         default: ''
+      count:
+        description: Repeat each test this many times (go test -count)
+        default: '1'
 
 permissions:
   contents: read
@@ -69,4 +72,5 @@ jobs:
           # A package list given by hand names cli packages.
           PACKAGES: ${{ (matrix.module == 'cli' && inputs.packages) || './...' }}
           RUN: ${{ inputs.run }}
-        run: go test -race -timeout 15m ${RUN:+-run "$RUN"} $PACKAGES
+          COUNT: ${{ inputs.count || '1' }}
+        run: go test -race -timeout 15m -count "$COUNT" ${RUN:+-run "$RUN"} $PACKAGES
