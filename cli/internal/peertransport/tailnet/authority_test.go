@@ -1224,6 +1224,8 @@ func TestPeerEntriesMayCarryCandidateEndpoints(t *testing.T) {
 		"not canonical":  {[]string{"010.0.0.1:41641"}, false},
 		"zone":           {[]string{"[fe80::1%eth0]:41641"}, false},
 		"hostname":       {[]string{"relay.example.test:41641"}, false},
+		"unspecified":    {[]string{"0.0.0.0:41641"}, false},
+		"multicast":      {[]string{"224.0.0.251:5353"}, false},
 	} {
 		a, cfg, signer, _ := networkTestAuthority(t)
 		cfg.Peers[0].Endpoints = c.endpoints

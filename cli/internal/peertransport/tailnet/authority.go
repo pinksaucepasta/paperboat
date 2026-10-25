@@ -80,8 +80,8 @@ type NetworkPeer struct {
 // MaxPeerEndpoints bounds the candidate addresses one peer entry may carry.
 const MaxPeerEndpoints = 8
 
-// validPeerEndpoints reports whether endpoints are at most MaxPeerEndpoints distinct, canonical ip:port
-// addresses with a nonzero port.
+// validPeerEndpoints reports whether endpoints are at most MaxPeerEndpoints distinct, canonical unicast
+// ip:port addresses with a nonzero port (the server stores them normalized the same way).
 func validPeerEndpoints(endpoints []string) bool {
 	if len(endpoints) > MaxPeerEndpoints {
 		return false
@@ -89,7 +89,8 @@ func validPeerEndpoints(endpoints []string) bool {
 	seen := make(map[netip.AddrPort]bool, len(endpoints))
 	for _, raw := range endpoints {
 		addr, err := netip.ParseAddrPort(raw)
-		if err != nil || addr.Port() == 0 || !addr.Addr().IsValid() || addr.Addr().Zone() != "" || addr.String() != raw || seen[addr] {
+		ip := addr.Addr()
+		if err != nil || addr.Port() == 0 || !ip.IsValid() || ip.Zone() != "" || ip.IsUnspecified() || ip.IsMulticast() || addr.String() != raw || seen[addr] {
 			return false
 		}
 		seen[addr] = true
