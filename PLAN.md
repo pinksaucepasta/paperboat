@@ -1565,52 +1565,80 @@ each with a PG/load test proving the bound at 10k; Lane R audits daemon/CLI/rela
 Test (PG): one join on a 1,000-machine account writes O(1) change rows per affected scope and each machine's next
 answer carries one change; a 5k-machine team survives a server restart (snapshot storm) without 503s.
 
-#### Multi-account hosts: per-account addresses, per-user gateways, collision-only name suffixes (Lane A design, Lane Q server, Lane X review; user direction 2026-10-26; replaces the dropped global 127.64.0.0/10 pool)
+#### Multi-account hosts: per-account addresses, one host gateway routed by the caller's uid (Lane A design, Lane Q server, Lane X + GPT review; user direction 2026-10-26; replaces the dropped global 127.64.0.0/10 pool) — rev 2
 
-**Goal.** Any number of OS users on one host, each with any account, with no platform-wide bottleneck. One user's
-conflict degrades only that item (done: 5080a29b, `listener_refused`).
-**1. Addresses (server: Lane Q expand/contract of 172).** `control_sync_leases` gains account_id and unique
-(account_id, slot); lowest free slot per account in 127.100/16 (slots 2..65534; 0 and the gateway 1 excluded); existing
-slots unchanged; then the global PK, pool and quarantine are dropped. A slot is unique only inside its account.
-*Team machines:* one slot per VIEWER account (each account numbers the machines it can see). Pro: a viewer's addresses
-are stable and never depend on another account; no cross-account coordination. Con: the same team machine has a
-different address for each viewer, so a raw IP is not shareable between teammates (names are). Chosen: per viewer.
-**2. Host guard: the local address is the guard's, keyed by (uid, account, machine).** The daemon asks
-`Acquire(account, machine, preferred=server address, name, port)`; the guard answers with the local address. The first
-(uid, account) to hold an address keeps it; another (uid, account) whose preferred address is taken gets the lowest free
-127.100.x.y, persisted, so it is stable for that user on that host. State: `leases[(uid, account, machine)] = {ip, name}`
-plus the reverse indexes; per-uid caps stay (512). Migration: today's `reserved.IPs/Names[...] = uid` entries load as
-(uid, account "", machine "") and the first Acquire by that uid adopts them for its account: no address moves on a
-single-user host. Security boundary stays the uid (nft/pf/WFP rules allow only the owning uid); account is a namespace
-inside it, passed by the uid's daemon.
-**3. Ports and browser gateway.** Native ports are per address, so Bob's 127.100.0.3:3000 and Alice's 127.100.0.9:3000
-coexist. The gateway becomes per uid: the first uid keeps 127.100.0.1; each further uid gets its own gateway address
-from the same allocator (persisted), and its :80/:443 bind there. A port taken by another program stays
-`port_in_use` for that item only.
-**4. Names (recommendation: collision-only suffix in the host-wide hosts file).** `<machine>.<domain>` stays the name
-while it is unique on the host. A second (uid, account) whose name is taken gets `<machine>.<account-handle>.<domain>`,
-persisted in the guard; `pb status`, `pb machine list` and browser URLs show the name actually assigned.
-Options weighed:
-- (a) per-uid answers. Linux: a glibc NSS module asking the guard over its unix socket (SO_PEERCRED) answers per uid
-  for getaddrinfo users, but misses static Go binaries and browsers using DoH; resolved's stub (127.0.0.53, UDP) has
-  no reliable peer uid (sock_diag lookups race and cost a netlink call per query); resolved links are per interface,
-  not per user. macOS: /etc/resolver and mDNSResponder resolve as root, so the asking uid is lost; not possible.
-  Windows: the DNS client service is shared; per-user answers would need an LSP/WFP redirect. Rejected: Linux-only,
-  partial even there.
-- (b) collision-only suffix: works the same on Linux, macOS and Windows (hosts file, which every resolver honours),
-  no new privileged component, names change only for the second claimant of one name, never for existing hosts.
-  Cost: the second user's colliding names are longer; names are visible host-wide (as today; addresses stay
-  uid-filtered, so seeing a name grants nothing). Chosen.
-- (c) always per-account names (`<machine>.<account>.<domain>`): unambiguous but changes every existing URL. Rejected.
-**5. Tests.** Workspace tests with two uids on one fake guard: distinct addresses for the same slot; stable re-acquire
-after restart; the gateway per uid; name suffix only for the second claimant; one refused item leaves the other user's
-routes and names intact; migration of a legacy state file keeps every address. Device: two OS users on pbvm2 containers.
-*Prior art:* Tailscale is one tailnet per host on Linux and serves one user at a time on Windows/macOS
-(`~/ref/tailscale/ipn/ipnserver/server.go:255` checkConnIdentityLocked, "Tailscale already in use by <user>";
-profiles switch the whole node, `ipn/ipnlocal/profiles.go:126`); NetBird keeps per-user profiles but one active
-connection per host (`~/ref/netbird/client/internal/profilemanager/service.go`); Teleport tsh keeps per-OS-user
-profiles in ~/.tsh with no host-wide network state. None gives two users on one host simultaneous private names;
-ours does by keeping network state per uid in the guard.
+**Fact that shapes it.** Local names are not in a hosts file or local DNS: the local access domain is a public wildcard,
+so every `<machine>.<domain>` and `<port>.<machine>.<domain>` resolves to 127.100.0.1, the browser gateway, which routes
+by Host/SNI (checked with dig; hosts/resolver files are only cleaned up, `machineguard/hosts.go`, `server_darwin.go:166`).
+So names never collide in DNS; the one host-wide bottleneck is the gateway's 127.100.0.1:80/443 (+ its 1024-65535 ports).
+**Goal.** Any number of OS users, each with any account, simultaneously, with no platform-wide cap; one user's
+conflict degrades only that item (done: 5080a29b, `listener_refused`). Per-host ceiling: 127.100/16 = 65,533 machine
+addresses shared by all users of one host (stated, not a platform cap).
+**1. Addresses (server, Lane Q, agreed).** Lease per (viewer account, machine): unique (account_id, machine_id) and
+(account_id, slot), lowest free slot in 127.100/16; existing rows keep their slot under the owner account; other viewers
+of a team machine get their own slot on first sight; no quarantine (the guard keys by machine, see 2); 54000 per account
+past 64,770. Team machines: one slot per viewer (stable for the viewer; a raw IP is not shareable between teammates).
+**2. Guard state per (uid, account, machine), with lifetimes.** The guard derives the uid from the kernel (SO_PEERCRED on
+its unix socket; never from the request) and reserves atomically under its registry lock. `claims[(uid, account_id,
+machine_id)] = {ip, port set}`; account_id is the immutable server id, never a handle. The first claimant of an address keeps
+it; another (uid, account) whose preferred address is taken gets the lowest free 127.100.x.y, persisted (stable for it on
+this host). Claims persist independently of live listeners.
+- *Release (Lane X 1):* each reconcile sends the daemon's complete (account, machine) set; claims absent from it are
+  released; a released address stays held for its previous (uid, account) for 7 days, then is free. Logout and account
+  switch release that account's claims (into the 7-day hold); `pb uninstall` releases the uid's claims immediately; a
+  deleted OS user (uid without a passwd entry) is released at guard start. UID reuse: a new user with an old uid inherits
+  nothing older than the 7-day hold, since uninstall/logout released it; account rename changes nothing (ids are immutable).
+- *Legacy adoption (Lane X 2):* today's `reserved.IPs/Names[...] = uid` load as (uid, "", "") entries; one is adopted only
+  by an Acquire of the same uid whose preferred address equals it; entries not adopted within 7 days are released.
+  Single-user hosts keep every address.
+- *Bounds (Lane X 5):* per uid 512 claims and 4 gateway-routed accounts; host-wide 65,533 addresses and 8,192 live
+  listeners. The refused item gets `listener_refused` with the reason; `pb status`/`pb doctor` show
+  "local access limit reached on this computer (<which>)" for the refused user only. Others are unaffected.
+**3. Isolation (GPT 1-2, Lane X 3b).** Linux (today, kept): nft output allows a lease ip:port only for `meta skuid <owner>`;
+input accepts a SYN to the range only for the guard's marked sockets (`socket mark`), so B binding A's absent address
+receives nothing; everything else in the range is rejected. On release the guard closes the lease's listener and every
+connection it accepted (conntrack entries die with them), so a reassigned address carries no old connection.
+macOS: pf `pass in ... user <guard>` (receiving socket owned by the guard) and `pass out ... user <owner>` per lease,
+block the range otherwise (`server_darwin.go` darwinRules), same release rule. Tests on Linux and macOS: B cannot connect
+to A's address, B cannot receive on A's address while A's listener is absent, both across a guard restart and a guard crash
+(rules are installed before any listener and persist across restart; on crash the default-deny table stays).
+**4. Gateway: one host gateway, routed by the caller's uid (recommendation).** The guard (root) owns 127.100.0.1 on
+80/443/1024-65535 once per host. For each accepted connection it finds the connecting socket's owner uid from the kernel
+(Linux: sock_diag INET_DIAG lookup by the 4-tuple, `idiag_uid`; macOS: the `net.inet.tcp.pcblist_n` entry for the
+4-tuple, `xso_uid`), and hands the connection to that uid's daemon gateway (the daemon's existing proxy, over the guard
+socket, as listeners are handed today). The daemon routes by Host/SNI among only its own routes; the guard authorizes
+nothing by hostname (GPT 2). Result: Bob's and Alice's `hp.<domain>` and `3000.hp.<domain>` both work, short, at the same
+URL, each reaching their own machine; a uid without a daemon gets a refusal page.
+- Two accounts under ONE uid with the same machine name: the daemon routes both; the second account's machine gets
+  `<machine>.<workspace-slug>` as its name label (the slug the user picked, never an email; visible only to that uid,
+  Lane X 4). Persisted per (uid, account, machine); never changes for the first.
+- *Certificates (Lane X 3a/3c):* the guard issues a certificate only for a name in the requesting uid's own route set,
+  under that uid's own local CA (browser trust is per user already); `certificate.go:142` stops matching
+  `lease.ip == BrowserGatewayIP` and checks the uid's gateway registration instead. Test: B gets no certificate for A's
+  name and B's connection to the gateway with A's name reaches B's routes only (refused if B has none).
+- *TLS/cookies (GPT 5):* names are exact per route; the CA issues `*.<machine>.<domain>` per machine for port and alias
+  names, so deeper names are covered. Cookies are scoped by browser profile, and each OS user has their own profile and
+  own CA, so users never share cookies; within one user, cookies cross ports and sibling subdomains as on any site (stated,
+  not isolated).
+**5. Options weighed for names.**
+(a) per-uid DNS answers (NSS module, resolved stub peer uid, macOS resolver): rejected, the asking uid is lost on macOS
+(mDNSResponder resolves as root) and Linux coverage is partial; public wildcard DNS makes it unnecessary anyway.
+(b) collision-only suffix (rev 1): rejected, first-claim order becomes identity on a shared host.
+(GPT 6) always account-qualified canonical names plus short aliases bound to their first owner: unambiguous, but makes
+every URL longer or order-dependent again for the short form. With uid-routed gateway, short names are unambiguous per
+user without qualification, so neither is needed; the slug label is used only within one uid (section 4).
+**6. Windows (after launch).** Kernel uid of a loopback TCP peer: `GetExtendedTcpTable` (owning PID -> user SID); filtering
+per user with WFP (already used for the guard range). Same design.
+**7. Tests.** Two uids on one fake guard: same slot, different addresses; stable re-acquire after restart; release and 7-day
+hold (600 machines come and go, a new acquire still succeeds; a held address is not given to another uid); per-entry legacy
+adoption; gateway routing by uid (Bob and Alice `hp.<domain>` reach their own routes); certificate refusal for another uid's
+name; one refused item leaves the other user intact. Device: two OS users on one pbvm2 container, Linux; macOS VM.
+*Prior art:* Tailscale serves one user at a time per host (`~/ref/tailscale/ipn/ipnserver/server.go:255`
+checkConnIdentityLocked, "already in use by"; profiles switch the node, `ipn/ipnlocal/profiles.go:126`); NetBird one
+active profile per host (`~/ref/netbird/client/internal/profilemanager/service.go`); Headscale bumps colliding names to
+base-1, base-2 with the holder keeping its label (`hscontrol/state/node_store.go:669`). Routing loopback connections by the
+peer's kernel uid is what Tailscale's LocalAPI does for its unix socket (peercred) and safesocket on macOS
+(`~/ref/tailscale/safesocket/safesocket.go`); we apply it to the TCP gateway.
 
 #### File transfer modes: Automatic and Unlimited (Lane A design; Lane B/O server, Lane R paths, Lane C console; user decision 2026-10-26)
 
