@@ -246,7 +246,12 @@ func TestHTTPServiceHoldsMoreCarriersThanItsQueueDepthUpToItsMaximum(t *testing.
 	identity := testCarrierIdentity()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	config := ServiceConfig{Carrier: testCarrierConfig(2), MaximumCarriers: 6,
+	// The test's clients never read their carriers, so a frequent keepalive would fill each HTTP/2
+	// window, hit the write limit and close the carrier, freeing its slot before the extra dial
+	// (flaky under load). The carriers must stay held: keepalives here are rare.
+	carrier := testCarrierConfig(2)
+	carrier.KeepAliveInterval = time.Hour
+	config := ServiceConfig{Carrier: carrier, MaximumCarriers: 6,
 		TCP: &EndpointConfig{Address: "127.0.0.1:0", TLS: serverTLS, PeerBinding: func(tls.ConnectionState) (Identity, error) { return identity, nil }}}
 	service, err := NewHTTPService(ctx, config)
 	if err != nil {
