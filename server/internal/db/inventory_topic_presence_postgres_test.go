@@ -69,6 +69,8 @@ VALUES($1,$2,$1,$3,'linux','amd64','/w','offline','occupied',false)`, id, user, 
 	// One rule writes observed capabilities (172): a changed set moves the topic, the same set does not.
 	step("capabilities observed", `UPDATE paperboat.user_machines SET observed_capabilities=ARRAY['file_receive','terminal_host'] WHERE id=$1`, true)
 	step("same capabilities reordered", `UPDATE paperboat.user_machines SET observed_capabilities=ARRAY['terminal_host','file_receive'] WHERE id=$1`, false)
+	// A lease the server adds after pairing (backfill) reaches the running daemon through its inventory topic.
+	step("local-address lease added", `SELECT paperboat.ensure_control_sync_lease($1)`, true)
 	step("rename", `UPDATE paperboat.user_machines SET alias='renamed-machine' WHERE id=$1`, true)
 	step("seat released", `UPDATE paperboat.user_machines SET seat_state='released' WHERE id=$1`, true)
 	step("revoked", `UPDATE paperboat.user_machines SET state='revoked',revoked_at=now() WHERE id=$1`, true)
