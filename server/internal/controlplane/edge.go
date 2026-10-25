@@ -490,9 +490,6 @@ func (s *EdgeService) IssueConnectorAdmission(ctx context.Context, identityToken
 		}
 		expiresAt := admission.Expiry(s.signer, now)
 		policy := s.fileTransferPolicy
-		if policy.Revision == "" {
-			policy = mint.DefaultFileTransferPolicy
-		}
 		handoffs := make([]ConnectorRouteHandoff, 0, len(routes))
 		for _, route := range routes {
 			handoff := ConnectorRouteHandoff{RouteID: route.RouteID, RouteRevision: route.RouteRevision, Kind: route.Kind, PublicHost: route.PublicHost, ProxyName: route.RouteID}

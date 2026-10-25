@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/pinksaucepasta/paperboat/server/internal/admission"
+	"github.com/pinksaucepasta/paperboat/server/internal/mint"
 	"net"
 	"net/url"
 	"os"
@@ -364,13 +365,14 @@ type Access struct {
 
 type FileTransferPolicy struct {
 	Revision               string        `json:"revision"`
-	MaxFileBytes           int64         `json:"max_file_bytes"`
 	MaxBatchFiles          int           `json:"max_batch_files"`
-	MaxBatchBytes          int64         `json:"max_batch_bytes"`
 	MaxConcurrentTransfers int           `json:"max_concurrent_transfers"`
 	Retention              time.Duration `json:"retention"`
 	DeliveryTimeout        time.Duration `json:"delivery_timeout"`
 	MaxPendingSpoolBytes   int64         `json:"max_pending_spool_bytes"`
+	// AutomaticMaxBatchBytes bounds one Automatic `pb send` (every file summed, so also any one
+	// file); Unlimited has no bound but never uses a Paperboat-hosted relay. Published to clients.
+	AutomaticMaxBatchBytes int64 `json:"automatic_max_batch_bytes"`
 }
 
 type Diagnostics struct {
@@ -523,9 +525,9 @@ func Default() Config {
 			ConnectReadyTimeout:  2 * time.Second,
 			ConnectPollInterval:  100 * time.Millisecond,
 			FileTransfer: FileTransferPolicy{
-				Revision: "file-transfer-v1", MaxFileBytes: 50 << 20, MaxBatchFiles: 10,
-				MaxBatchBytes: 500 << 20, MaxConcurrentTransfers: 2, Retention: 7 * 24 * time.Hour,
-				DeliveryTimeout: 10 * time.Minute, MaxPendingSpoolBytes: 1 << 30,
+				Revision: "file-transfer-v1", MaxBatchFiles: 10, AutomaticMaxBatchBytes: 2_000_000_000,
+				MaxConcurrentTransfers: 2, Retention: 7 * 24 * time.Hour,
+				DeliveryTimeout: 10 * time.Minute, MaxPendingSpoolBytes: 2_000_000_000,
 			},
 		},
 		Diagnostics: Diagnostics{Retention: 7 * 24 * time.Hour},
@@ -774,7 +776,7 @@ func (c Config) Validate() error {
 		errs = append(errs, fmt.Errorf("access.connect_poll_interval must be positive and no greater than connect_ready_timeout"))
 	}
 	transfer := c.Access.FileTransfer
-	if strings.TrimSpace(transfer.Revision) == "" || transfer.MaxFileBytes < 1 || transfer.MaxFileBytes > 50<<20 || transfer.MaxBatchFiles < 1 || transfer.MaxBatchFiles > 10 || transfer.MaxBatchBytes < transfer.MaxFileBytes || transfer.MaxBatchBytes > 500<<20 || transfer.MaxConcurrentTransfers < 1 || transfer.MaxConcurrentTransfers > 2 || transfer.Retention <= 0 || transfer.DeliveryTimeout <= 0 || transfer.MaxPendingSpoolBytes < transfer.MaxBatchBytes {
+	if strings.TrimSpace(transfer.Revision) == "" || transfer.AutomaticMaxBatchBytes < 1 || transfer.AutomaticMaxBatchBytes > 1<<40 || transfer.MaxBatchFiles < 1 || transfer.MaxBatchFiles > 10 || transfer.MaxConcurrentTransfers < 1 || transfer.MaxConcurrentTransfers > 2 || transfer.Retention <= 0 || transfer.DeliveryTimeout <= 0 || transfer.MaxPendingSpoolBytes < transfer.AutomaticMaxBatchBytes {
 		errs = append(errs, fmt.Errorf("access.file_transfer policy is invalid"))
 	}
 	diagnosticsConfigured := strings.TrimSpace(c.Diagnostics.ObjectEndpoint) != "" || strings.TrimSpace(c.Diagnostics.ObjectRegion) != "" || strings.TrimSpace(c.Diagnostics.ObjectBucket) != "" || strings.TrimSpace(c.Secrets.DiagnosticsAccessKey) != "" || strings.TrimSpace(c.Secrets.DiagnosticsSecretKey) != ""
@@ -1013,4 +1015,13 @@ func validEndpointBaseDomain(raw string) bool {
 		}
 	}
 	return true
+}
+
+// Published is the file transfer policy as clients receive it (descriptor and connector admission).
+func (p FileTransferPolicy) Published() mint.FileTransferPolicy {
+	return mint.FileTransferPolicy{
+		Revision: p.Revision, MaxBatchFiles: p.MaxBatchFiles, AutomaticMaxBatchBytes: p.AutomaticMaxBatchBytes,
+		MaxConcurrentTransfers: p.MaxConcurrentTransfers, RetentionSeconds: int64(p.Retention / time.Second),
+		DeliveryTimeoutSeconds: int64(p.DeliveryTimeout / time.Second), MaxPendingSpoolBytes: p.MaxPendingSpoolBytes,
+	}
 }

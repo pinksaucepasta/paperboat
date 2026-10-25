@@ -46,30 +46,26 @@ func TestPostgresSameMachineInboxDeliveryRequiresCurrentOwnerAndFileCapability(t
 		t.Fatalf("authorized self delivery rejected or binding changed: %v", err)
 	}
 	limits := serverconfig.Default().Access.FileTransfer
-	limits.MaxFileBytes, limits.MaxBatchBytes, limits.MaxBatchFiles = 10, 12, 2
+	limits.MaxBatchFiles = 2
 	limited, err := New(store, limits)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Sizes are bounded at the descriptor by transfer mode, so the Inbox admits any size and
+	// bounds only the file count.
 	limitInput := input
-	limitInput.Files = []File{{Basename: "boundary", Size: limits.MaxFileBytes, SHA256: strings.Repeat("a", 64)}}
+	limitInput.Files = []File{{Basename: "first", Size: 1 << 40, SHA256: strings.Repeat("a", 64)}, {Basename: "second", Size: 5_000_000_000, SHA256: strings.Repeat("b", 64)}}
 	if _, err := limited.Create(ctx, limitInput); err != nil {
-		t.Fatalf("exact configured file boundary denied: %v", err)
+		t.Fatalf("large files within the file count denied: %v", err)
 	}
-	limitInput.Files = []File{{Basename: "first", Size: 6, SHA256: strings.Repeat("a", 64)}, {Basename: "second", Size: 6, SHA256: strings.Repeat("b", 64)}}
-	if _, err := limited.Create(ctx, limitInput); err != nil {
-		t.Fatalf("exact configured batch boundary denied: %v", err)
+	limitInput.Files = nil
+	for i := 0; i < 3; i++ {
+		limitInput.Files = append(limitInput.Files, File{Basename: fmt.Sprintf("bounded-%d", i), Size: 1, SHA256: strings.Repeat("a", 64)})
 	}
-	for _, sizes := range [][]int64{{11}, {7, 7}, {1, 1, 1}, {1<<63 - 1}} {
-		limitInput.Files = nil
-		for i, size := range sizes {
-			limitInput.Files = append(limitInput.Files, File{Basename: fmt.Sprintf("bounded-%d", i), Size: size, SHA256: strings.Repeat("a", 64)})
-		}
-		_, err := limited.Create(ctx, limitInput)
-		var bound *ManifestLimitError
-		if !errors.As(err, &bound) || bound.MaxFileBytes != limits.MaxFileBytes || bound.MaxBatchFiles != limits.MaxBatchFiles || bound.MaxBatchBytes != limits.MaxBatchBytes {
-			t.Fatal("Inbox admission ignored configured transfer bounds or lost typed limits")
-		}
+	_, err = limited.Create(ctx, limitInput)
+	var bound *ManifestLimitError
+	if !errors.As(err, &bound) || bound.MaxBatchFiles != limits.MaxBatchFiles {
+		t.Fatal("Inbox admission ignored the configured file count or lost the typed limit")
 	}
 	foreign := input
 	foreign.SenderAccount = other

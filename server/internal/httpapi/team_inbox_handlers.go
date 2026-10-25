@@ -12,7 +12,7 @@ func teamInboxError(w http.ResponseWriter, r *http.Request, err error) {
 	var limit *teaminbox.ManifestLimitError
 	switch {
 	case errors.As(err, &limit):
-		writeErrorDetails(w, r, http.StatusRequestEntityTooLarge, "file_transfer_limit_exceeded", limit.Error(), map[string]any{"max_file_bytes": limit.MaxFileBytes, "max_batch_files": limit.MaxBatchFiles, "max_batch_bytes": limit.MaxBatchBytes})
+		writeErrorDetails(w, r, http.StatusRequestEntityTooLarge, "file_transfer_limit_exceeded", limit.Error(), map[string]any{"max_batch_files": limit.MaxBatchFiles})
 	case errors.Is(err, teaminbox.ErrInvalid):
 		writeError(w, r, http.StatusBadRequest, "invalid_team_inbox_request", "The Team Inbox request is invalid.")
 	case errors.Is(err, teaminbox.ErrForbidden):
