@@ -2721,6 +2721,23 @@ func TestMachineControlInitialReplayRotatesAfterExpiryWithoutCrossMachineCollisi
 	if _, err := service.RenewMachineControl(ctx, renewed.Credential, proof, body, "POST", claims.Path); err != nil {
 		t.Fatal("current machine-control credential/proof baseline", err)
 	}
+	// Clients since b684f426 (F21-13) put a one-use nonce in every proof. Renewal decoded proofs strictly
+	// and refused the unknown field, so every renewal on prod answered 401 (1,248 of 1,261 in 6 h) and
+	// machines went offline until they re-issued. A nonce-bearing proof renews (replay refusal: TestMachineProofNonceIsUsedOnceOnPostgres).
+	nonceClaims := claims
+	nonceClaims.OperationID, nonceClaims.Nonce = "renew-nonce-"+suffix, "n0nce-"+strings.Repeat("a", 20)
+	noncePayload, err := json.Marshal(nonceClaims)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nonceProof, err := json.Marshal(machineProofEnvelope{Algorithm: "EdDSA", Payload: base64.RawURLEncoding.EncodeToString(noncePayload), Signature: base64.RawURLEncoding.EncodeToString(ed25519.Sign(privateKey, noncePayload))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	renewed, err = service.RenewMachineControl(ctx, renewed.Credential, nonceProof, body, "POST", claims.Path)
+	if err != nil {
+		t.Fatal("renewal with a nonce-bearing proof rejected", err)
+	}
 	if err := service.Delete(ctx, userID, machineID); err != nil {
 		t.Fatal(err)
 	}

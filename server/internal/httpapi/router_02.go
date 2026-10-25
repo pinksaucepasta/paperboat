@@ -3,7 +3,7 @@ package httpapi
 import (
 	"context"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/ratelimit"
 	"log/slog"
 	"math"
@@ -313,7 +313,7 @@ func newRequestID() string { return "request_" + uuid.NewString() }
 func markResendable(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Idempotency-Key") != "" {
-			r = r.WithContext(controlplane.WithResendableRequest(r.Context()))
+			r = r.WithContext(db.WithResendableRequest(r.Context()))
 		}
 		next.ServeHTTP(w, r)
 	})

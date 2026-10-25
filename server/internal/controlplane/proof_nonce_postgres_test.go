@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"net/http"
 	"testing"
 	"time"
@@ -28,9 +29,11 @@ func TestProofNonceIsUsedOnce(t *testing.T) {
 		t.Fatalf("same nonce, other signer: %v", err)
 	}
 	for name, try := range map[string]func() error{
-		"GET":             func() error { return s.reserveProofNonce(ctx, signer, nonce, http.MethodGet, expires) },
-		"Idempotency-Key": func() error { return s.reserveProofNonce(WithResendableRequest(ctx), signer, nonce, http.MethodPost, expires) },
-		"no nonce":        func() error { return s.reserveProofNonce(ctx, signer, "", http.MethodPost, expires) },
+		"GET": func() error { return s.reserveProofNonce(ctx, signer, nonce, http.MethodGet, expires) },
+		"Idempotency-Key": func() error {
+			return s.reserveProofNonce(db.WithResendableRequest(ctx), signer, nonce, http.MethodPost, expires)
+		},
+		"no nonce": func() error { return s.reserveProofNonce(ctx, signer, "", http.MethodPost, expires) },
 	} {
 		if err := try(); err != nil {
 			t.Fatalf("%s re-send refused: %v", name, err)

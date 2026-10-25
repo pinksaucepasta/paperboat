@@ -44,6 +44,9 @@ type MachineProofClaims struct {
 	BodySHA256             string    `json:"body_sha256"`
 	IssuedAt               time.Time `json:"issued_at"`
 	ExpiresAt              time.Time `json:"expires_at"`
+	// Nonce makes the proof one-use (F21-13). Clients since b684f426 send it on every proof; this strict
+	// decoder refused the unknown field, so every machine-control renewal answered 401.
+	Nonce string `json:"nonce,omitempty"`
 }
 
 func (s *Service) ConfigureMachineControl(signer *mint.Provider, issuer string) {
@@ -61,6 +64,9 @@ func (s *Service) IssueMachineControl(ctx context.Context, userID, machineID str
 	}
 	claims, err := verifyMachineProof(machine, proof, method, path, body, s.now().UTC())
 	if err != nil {
+		return MachineControlCredential{}, err
+	}
+	if err := s.reserveMachineProofNonce(ctx, machine.ID, claims, method); err != nil {
 		return MachineControlCredential{}, err
 	}
 	connector, err := s.db.Queries().EnsureControlConnectorMachine(ctx, dbsqlc.EnsureControlConnectorMachineParams{EnvironmentID: machine.EnvironmentID, ConnectorID: "runtime", MachineID: machine.ID, EdgePool: "default"})
@@ -143,8 +149,25 @@ func (s *Service) RenewMachineControl(ctx context.Context, credential string, pr
 	if err != nil {
 		return MachineControlCredential{}, controlReason("proof", err)
 	}
+	if err := s.reserveMachineProofNonce(ctx, machine.ID, claims, method); err != nil {
+		return MachineControlCredential{}, err
+	}
 	out, err := s.mintMachineControl(ctx, machine, claims.OperationID)
 	return out, controlReason("mint", err)
+}
+
+// reserveMachineProofNonce uses a proof's nonce once (db.ReserveProofNonce, the signer namespace every
+// machine-proof verifier shares). The replay path does not reserve: a retry of a committed renewal carries
+// the same proof by design and is bound to its operation instead.
+func (s *Service) reserveMachineProofNonce(ctx context.Context, machineID string, claims MachineProofClaims, method string) error {
+	ok, err := s.db.ReserveProofNonce(ctx, "machine:"+machineID, claims.Nonce, method, claims.ExpiresAt)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return controlRejected("proof_nonce_replayed")
+	}
+	return nil
 }
 
 // ControlRejection is a refused machine-control request with a fixed reason code (no credential or request
