@@ -13,6 +13,7 @@ import (
 	"math/big"
 	"net"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -506,4 +507,106 @@ func testDataCarrierCertificates(t *testing.T) (clientTLS, serverTLS *tls.Config
 	serverTLS = &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{serverCertificate}, ClientAuth: tls.RequireAndVerifyClientCert, ClientCAs: pool, NextProtos: []string{DataCarrierALPN}}
 	clientTLS = &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{clientCertificate}, RootCAs: pool, ServerName: "localhost", NextProtos: []string{DataCarrierALPN}}
 	return clientTLS, serverTLS, pool
+}
+
+// udpBlackhole relays UDP between one client and target until blackhole is called, after which
+// it drops every packet both ways, like a network path that silently died.
+type udpBlackhole struct {
+	conn    *net.UDPConn
+	dropped atomic.Bool
+}
+
+func newUDPBlackhole(t *testing.T, target *net.UDPAddr) *udpBlackhole {
+	t.Helper()
+	front, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	back, err := net.DialUDP("udp", nil, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = front.Close(); _ = back.Close() })
+	b := &udpBlackhole{conn: front}
+	var client atomic.Pointer[net.UDPAddr]
+	go func() {
+		buffer := make([]byte, 64<<10)
+		for {
+			n, from, err := front.ReadFromUDP(buffer)
+			if err != nil {
+				return
+			}
+			client.Store(from)
+			if !b.dropped.Load() {
+				_, _ = back.Write(buffer[:n])
+			}
+		}
+	}()
+	go func() {
+		buffer := make([]byte, 64<<10)
+		for {
+			n, err := back.Read(buffer)
+			if err != nil {
+				return
+			}
+			if to := client.Load(); to != nil && !b.dropped.Load() {
+				_, _ = front.WriteToUDP(buffer[:n], to)
+			}
+		}
+	}()
+	return b
+}
+
+// Audit T6: a QUIC carrier whose path goes silent closes after the QUIC idle timeout, kept short
+// by keepalives, instead of hanging its streams for minutes.
+func TestBlackholedQUICCarrierClosesAfterTheIdleTimeout(t *testing.T) {
+	if quicMaxIdleTimeout > 15*time.Second || quicKeepAlivePeriod*3 > quicMaxIdleTimeout {
+		t.Fatalf("QUIC liveness keepalive %s idle %s: a dead carrier must be found in 15 s with 3 keepalives", quicKeepAlivePeriod, quicMaxIdleTimeout)
+	}
+	defer func(keepAlive, idle time.Duration) { quicKeepAlivePeriod, quicMaxIdleTimeout = keepAlive, idle }(quicKeepAlivePeriod, quicMaxIdleTimeout)
+	quicKeepAlivePeriod, quicMaxIdleTimeout = 100*time.Millisecond, 600*time.Millisecond
+
+	clientTLS, serverTLS, _ := testDataCarrierCertificates(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	packetConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer packetConn.Close()
+	listener, err := quic.Listen(packetConn, serverTLS.Clone(), &quic.Config{MaxIdleTimeout: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	go func() {
+		if connection, err := listener.Accept(ctx); err == nil {
+			<-ctx.Done()
+			_ = connection.CloseWithError(0, "")
+		}
+	}()
+	relay := newUDPBlackhole(t, packetConn.LocalAddr().(*net.UDPAddr))
+	identity := testDataCarrierIdentity()
+	session, err := DialQUIC(ctx, DataCarrierEndpointConfig{Address: relay.conn.LocalAddr().String(), TLS: clientTLS, PeerBinding: func(tls.ConnectionState) (DataCarrierIdentity, error) { return identity, nil }, ExpectedIdentity: identity})
+	if err != nil {
+		t.Fatal(err)
+	}
+	carrier, err := NewDataCarrierServerWithSession(ctx, session, testDataCarrierConfig(), DataCarrierAdmission{Identity: identity, Authorize: func(context.Context, StreamOpen) error { return nil }})
+	if err != nil {
+		_ = session.Close()
+		t.Fatal(err)
+	}
+	defer carrier.Close()
+	// Keepalives hold an idle but live carrier open well past the idle timeout.
+	select {
+	case <-carrier.Done():
+		t.Fatal("idle live QUIC carrier closed")
+	case <-time.After(1500 * time.Millisecond):
+	}
+	relay.dropped.Store(true)
+	select {
+	case <-carrier.Done():
+	case <-time.After(3 * time.Second):
+		t.Fatal("blackholed QUIC carrier still open")
+	}
 }

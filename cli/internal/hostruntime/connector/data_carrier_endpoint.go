@@ -289,8 +289,18 @@ func dataCarrierDialFallbackEligible(err error) bool {
 	return errors.As(err, &networkErr) && (networkErr.Timeout() || networkErr.Temporary())
 }
 
+// QUIC carriers get no application ping (HTTP/2 and HTTP/3 carriers are pinged every 5 s, 3
+// misses close them); their liveness is QUIC's own: a keepalive every quicKeepAlivePeriod and
+// close after quicMaxIdleTimeout without a packet from the edge, so a blackholed carrier is
+// replaced in seconds, not minutes (audit T6). The idle timeout in effect is the lower of the two
+// peers'. Prior art: cloudflared QUIC idle 5 s, keepalive 1 s (quic/constants.go).
+var (
+	quicKeepAlivePeriod = 5 * time.Second
+	quicMaxIdleTimeout  = 15 * time.Second
+)
+
 func defaultQUICConfig() *quic.Config {
-	return &quic.Config{MaxIdleTimeout: 2 * time.Minute, KeepAlivePeriod: 30 * time.Second, MaxIncomingStreams: 16, MaxIncomingUniStreams: 0}
+	return &quic.Config{MaxIdleTimeout: quicMaxIdleTimeout, KeepAlivePeriod: quicKeepAlivePeriod, MaxIncomingStreams: 16, MaxIncomingUniStreams: 0}
 }
 
 type quicDataCarrierSession struct {
