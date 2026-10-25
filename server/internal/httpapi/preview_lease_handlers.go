@@ -205,7 +205,7 @@ func previewLeaseList(service PreviewLeaseAPI) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		filters, valid := readCursorInventoryQuery(w, r, []string{"allocating", "connecting", "ready", "owner_disconnected", "expired", "stopped", "active"}, "machine_id")
+		filters, valid := readCursorInventoryQuery(w, r, []string{"allocating", "connecting", "ready", "owner_disconnected", "expired", "stopped", "active", "ended"}, "machine_id")
 		if !valid {
 			return
 		}

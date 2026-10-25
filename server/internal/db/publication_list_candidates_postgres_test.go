@@ -43,7 +43,7 @@ func TestPublicationListCandidatesMatchTheAccessRulesOnPostgres(t *testing.T) {
 		query := `SELECT id FROM paperboat.preview_leases WHERE id LIKE 'pc_preview_%_'||$4 AND paperboat.preview_management_allowed($1,id)
  AND (NOT $2 OR paperboat.workspace_preview_management_allowed($1,$3,id)) AND ($5='' OR owner_machine_id=$5) ORDER BY id`
 		if kind == "tunnel" {
-			query = `SELECT id FROM paperboat.tunnels t WHERE id LIKE 'pc_tunnel_%_'||$4 AND paperboat.tunnel_management_allowed($1,id)
+			query = `SELECT id FROM paperboat.tunnels t WHERE id LIKE 'pc_tunnel_%_'||$4 AND desired_state<>'deleted' AND paperboat.tunnel_management_allowed($1,id)
  AND (NOT $2 OR paperboat.workspace_tunnel_management_allowed($1,$3,id))
  AND ($5='' OR created_by_host_id=$5 OR EXISTS(SELECT 1 FROM paperboat.tunnel_connectors c WHERE c.tunnel_id=t.id AND c.host_id=$5 AND c.revoked_at IS NULL)) ORDER BY id`
 		}
@@ -64,6 +64,7 @@ func TestPublicationListCandidatesMatchTheAccessRulesOnPostgres(t *testing.T) {
 		return ids
 	}
 	seen, seenOnMachine := 0, 0
+	var deletedSeen int64
 	for _, actor := range users {
 		for _, scope := range []struct {
 			set  bool
@@ -105,6 +106,34 @@ func TestPublicationListCandidatesMatchTheAccessRulesOnPostgres(t *testing.T) {
 				}
 				return previews, tunnels
 			}
+			// Live and Ended split the previews exactly; deleted tunnels are listed only when asked for.
+			stateCount := func(kind, state string) int64 {
+				t.Helper()
+				var n int64
+				var err error
+				if kind == "preview" {
+					n, err = store.Queries().CountPreviewLeasesV1(ctx, dbsqlc.CountPreviewLeasesV1Params{AccountID: actor, WorkspaceSet: scope.set, WorkspaceTeamID: scope.team, Q: s, State: state})
+				} else {
+					n, err = store.Queries().CountPreviewTunnelsV1(ctx, dbsqlc.CountPreviewTunnelsV1Params{AccountID: actor, WorkspaceSet: scope.set, WorkspaceTeamID: scope.team, Q: s, State: state})
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				return n
+			}
+			if active, ended, all := stateCount("preview", "active"), stateCount("preview", "ended"), stateCount("preview", ""); active+ended != all {
+				t.Fatalf("previews for %s: %d active + %d ended != %d", actor, active, ended, all)
+			}
+			deleted := 0
+			for _, id := range gotTunnels {
+				if id == fmt.Sprintf("pc_tunnel_8_%s", s) {
+					deleted++
+				}
+			}
+			if deleted != 0 {
+				t.Fatalf("the default tunnel list of %s holds the deleted tunnel", actor)
+			}
+			deletedSeen += stateCount("tunnel", "deleted")
 			// The totals count exactly what the lists page through.
 			if previews, tunnels := counted(""); previews != int64(len(gotPreviews)) || tunnels != int64(len(gotTunnels)) {
 				t.Fatalf("counts for %s set=%v team=%v: %d previews, %d tunnels; listed %d and %d", actor, scope.set, scope.team.String, previews, tunnels, len(gotPreviews), len(gotTunnels))
@@ -141,6 +170,9 @@ func TestPublicationListCandidatesMatchTheAccessRulesOnPostgres(t *testing.T) {
 			}
 			seen += min(len(gotPreviews), 1) + min(len(gotTunnels), 1)
 		}
+	}
+	if deletedSeen == 0 {
+		t.Fatal("no actor lists the deleted tunnel with state=deleted")
 	}
 	if seen < 12 || seenOnMachine < 8 {
 		t.Fatalf("fixture too weak: only %d non-empty lists, %d non-empty machine lists", seen, seenOnMachine)

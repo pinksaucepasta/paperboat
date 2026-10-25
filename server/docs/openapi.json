@@ -19663,9 +19663,11 @@
                 "owner_disconnected",
                 "expired",
                 "stopped",
-                "active"
+                "active",
+                "ended"
               ]
-            }
+            },
+            "description": "active: every live preview; ended: every preview whose lease ended (the exact complement of active)."
           },
           {
             "name": "owner",
@@ -20726,7 +20728,8 @@
                 "paused",
                 "deleted"
               ]
-            }
+            },
+            "description": "Without state the list leaves out deleted tunnels; state=deleted lists them."
           },
           {
             "name": "owner",
