@@ -438,3 +438,7 @@ WHERE d.id = sqlc.arg(domain_id)
   AND p.terminal_state = 'active'
   AND p.generation = d.preview_generation
 FOR UPDATE OF d;
+
+-- name: ListPreviewDomainsByIDsV1 :many
+-- The rows of a page of the workspace domain list (domaininventory), whose query authorized them.
+SELECT * FROM preview_domains WHERE id = ANY(sqlc.arg(ids)::text[]) AND deleted_at IS NULL;

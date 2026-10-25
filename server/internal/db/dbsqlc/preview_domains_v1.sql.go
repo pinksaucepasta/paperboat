@@ -1081,6 +1081,62 @@ func (q *Queries) ListPreviewDomainProjectionsV1(ctx context.Context, previewIds
 	return items, nil
 }
 
+const listPreviewDomainsByIDsV1 = `-- name: ListPreviewDomainsByIDsV1 :many
+SELECT id, account_id, preview_id, preview_generation, hostname, match_type, ownership_challenge_reference, ownership_state, dns_target, observed_records, dns_provider, expected_records, dns_last_checked_at, dns_next_check_at, dns_ttl_seconds, verification_attempts, certificate_strategy, certificate_reference, certificate_state, certificate_expires_at, certificate_renewal_attempted_at, certificate_failure_code, caa_state, conflict_state, last_verified_at, generation, created_at, updated_at, deleted_at, quarantine_until FROM preview_domains WHERE id = ANY($1::text[]) AND deleted_at IS NULL
+`
+
+// The rows of a page of the workspace domain list (domaininventory), whose query authorized them.
+func (q *Queries) ListPreviewDomainsByIDsV1(ctx context.Context, ids []string) ([]PreviewDomain, error) {
+	rows, err := q.db.Query(ctx, listPreviewDomainsByIDsV1, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []PreviewDomain
+	for rows.Next() {
+		var i PreviewDomain
+		if err := rows.Scan(
+			&i.ID,
+			&i.AccountID,
+			&i.PreviewID,
+			&i.PreviewGeneration,
+			&i.Hostname,
+			&i.MatchType,
+			&i.OwnershipChallengeReference,
+			&i.OwnershipState,
+			&i.DnsTarget,
+			&i.ObservedRecords,
+			&i.DnsProvider,
+			&i.ExpectedRecords,
+			&i.DnsLastCheckedAt,
+			&i.DnsNextCheckAt,
+			&i.DnsTtlSeconds,
+			&i.VerificationAttempts,
+			&i.CertificateStrategy,
+			&i.CertificateReference,
+			&i.CertificateState,
+			&i.CertificateExpiresAt,
+			&i.CertificateRenewalAttemptedAt,
+			&i.CertificateFailureCode,
+			&i.CaaState,
+			&i.ConflictState,
+			&i.LastVerifiedAt,
+			&i.Generation,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+			&i.QuarantineUntil,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPreviewDomainsV1 = `-- name: ListPreviewDomainsV1 :many
 SELECT id, account_id, preview_id, preview_generation, hostname, match_type, ownership_challenge_reference, ownership_state, dns_target, observed_records, dns_provider, expected_records, dns_last_checked_at, dns_next_check_at, dns_ttl_seconds, verification_attempts, certificate_strategy, certificate_reference, certificate_state, certificate_expires_at, certificate_renewal_attempted_at, certificate_failure_code, caa_state, conflict_state, last_verified_at, generation, created_at, updated_at, deleted_at, quarantine_until
 FROM preview_domains

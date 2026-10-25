@@ -515,3 +515,7 @@ WHERE account_id = sqlc.arg(account_id)
   AND cursor_sequence > sqlc.arg(after_sequence)
 ORDER BY cursor_sequence ASC
 LIMIT sqlc.arg(row_limit);
+
+-- name: ListTunnelDomainsByIDsV1 :many
+-- The rows of a page of the workspace domain list (domaininventory), whose query authorized them.
+SELECT * FROM tunnel_domains WHERE id = ANY(sqlc.arg(ids)::text[]) AND deleted_at IS NULL;

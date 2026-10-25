@@ -28,6 +28,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	serverdiagnostics "github.com/pinksaucepasta/paperboat/server/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/server/internal/diagnosticuploads"
+	"github.com/pinksaucepasta/paperboat/server/internal/domaininventory"
 	"github.com/pinksaucepasta/paperboat/server/internal/edgeset"
 	"github.com/pinksaucepasta/paperboat/server/internal/endpoints"
 	"github.com/pinksaucepasta/paperboat/server/internal/environment"
@@ -903,6 +904,7 @@ func New(opts Options) (*App, error) {
 		PreviewDomains:            previewDomainService,
 		Tunnels:                   tunnelService,
 		TunnelResources:           tunnelResourceService,
+		Domains:                   domaininventory.New(store),
 		PreviewLogs:               tunnelResourceService,
 		PreviewCarrierAttachment:  previewAttachmentHandler,
 		RuntimeCarrierAttachment:  runtimeAttachmentHandler,

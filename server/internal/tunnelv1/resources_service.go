@@ -353,7 +353,7 @@ func (s *ResourceService) ListDomains(ctx context.Context, request previewtunnel
 	}
 	page := DomainPage{Items: make([]DomainView, 0, len(rows))}
 	for _, row := range rows {
-		page.Items = append(page.Items, domainView(row))
+		page.Items = append(page.Items, DomainViewFromRow(row))
 	}
 	if hasMore && len(rows) > 0 {
 		last := rows[len(rows)-1]
@@ -377,7 +377,7 @@ func (s *ResourceService) GetDomain(ctx context.Context, request previewtunnelap
 	if err != nil {
 		return DomainView{}, err
 	}
-	return domainView(row), nil
+	return DomainViewFromRow(row), nil
 }
 
 func (s *ResourceService) CreateDomain(ctx context.Context, request previewtunnelapi.RequestContext, tunnelID string, input DomainCreateRequest) (DomainMutationResult, error) {
@@ -440,7 +440,7 @@ func (s *ResourceService) CreateDomain(ctx context.Context, request previewtunne
 	if err != nil {
 		return DomainMutationResult{}, err
 	}
-	return DomainMutationResult{Domain: domainView(result.Domain), Operation: previewtunnelapi.OperationView(result.Operation, request.RequestID), Replayed: result.Replayed, Changed: result.Changed}, nil
+	return DomainMutationResult{Domain: DomainViewFromRow(result.Domain), Operation: previewtunnelapi.OperationView(result.Operation, request.RequestID), Replayed: result.Replayed, Changed: result.Changed}, nil
 }
 
 func (s *ResourceService) DeleteDomain(ctx context.Context, request previewtunnelapi.RequestContext, tunnelID, domainID string, input ResourceMutationInput) (DomainMutationResult, error) {
@@ -482,7 +482,7 @@ func (s *ResourceService) mutateDomain(ctx context.Context, request previewtunne
 	if err != nil {
 		return DomainMutationResult{}, err
 	}
-	return DomainMutationResult{Domain: domainView(result.Domain), Operation: previewtunnelapi.OperationView(result.Operation, request.RequestID), Replayed: result.Replayed, Changed: result.Changed}, nil
+	return DomainMutationResult{Domain: DomainViewFromRow(result.Domain), Operation: previewtunnelapi.OperationView(result.Operation, request.RequestID), Replayed: result.Replayed, Changed: result.Changed}, nil
 }
 
 func (s *ResourceService) DomainInstructions(ctx context.Context, request previewtunnelapi.RequestContext, tunnelID, domainID string) (DNSInstructions, error) {
@@ -981,7 +981,8 @@ func routeView(row dbsqlc.TunnelRoute) RouteView {
 		ETag: previewtunnelapi.ETag("route", row.ID, row.Generation), PublicTCPListenerID: nullStringValue(row.PublicTcpListenerID), PublicTCPPort: row.PublicTcpPort.Int32}
 }
 
-func domainView(row dbsqlc.TunnelDomain) DomainView {
+// DomainViewFromRow is the wire view of a tunnel domain binding.
+func DomainViewFromRow(row dbsqlc.TunnelDomain) DomainView {
 	observed := make([]string, 0)
 	var raw []any
 	if json.Unmarshal(row.ObservedRecords, &raw) == nil {

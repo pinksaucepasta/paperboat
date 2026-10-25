@@ -2949,17 +2949,18 @@ type UsageAccountingAuthority struct {
 }
 
 type User struct {
-	ID             string
-	WorkosSubject  string
-	PrimaryEmail   string
-	DisplayName    string
-	Status         string
-	Version        int64
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	Role           string
-	EmailVerified  bool
-	CanonicalEmail sql.NullString
+	ID               string
+	WorkosSubject    string
+	PrimaryEmail     string
+	DisplayName      string
+	Status           string
+	Version          int64
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+	Role             string
+	EmailVerified    bool
+	CanonicalEmail   sql.NullString
+	FileTransferMode string
 }
 
 type UserFavorite struct {

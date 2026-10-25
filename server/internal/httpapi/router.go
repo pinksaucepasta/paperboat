@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"github.com/pinksaucepasta/paperboat/server/internal/domaininventory"
 	"github.com/pinksaucepasta/paperboat/server/internal/ratelimit"
 	"log/slog"
 	"net"
@@ -129,6 +130,7 @@ type Options struct {
 	PreviewDomains           previewdomain.API
 	Tunnels                  tunnelv1.API
 	TunnelResources          tunnelv1.ResourceAPI
+	Domains                  *domaininventory.Service
 	PreviewLogs              tunnelv1.PreviewLogAPI
 	// PreviewCarrierAttachment is the machine-proof host attachment surface;
 	// PreviewCarrierEdge is the edge-control pull/ACK/observation surface.
@@ -280,6 +282,10 @@ func NewRouter(opts Options) http.Handler {
 			// before constructing the host actor.
 			mux.Handle("POST /v1/tunnels", tunnelCreateAuth(opts.Auth, opts.DeviceAuth, tunnelCreate(opts.Tunnels, opts.Enrollment)))
 			mux.Handle("GET /v1/tunnels", tunnelRead(requireWorkspaceSelection(opts.Workspaces, tunnelList(opts.Tunnels))))
+			if opts.Domains != nil {
+				// The workspace's tunnel and live preview domains in one list: both read scopes.
+				mux.Handle("GET /v1/domains", tunnelRead(requireScope("previews:read", requireWorkspaceSelection(opts.Workspaces, domainInventoryList(opts.Domains)))))
+			}
 			mux.Handle("GET /v1/tunnels/{tunnel_id}", tunnelRead(tunnelGet(opts.Tunnels)))
 			mux.Handle("PATCH /v1/tunnels/{tunnel_id}", tunnelWrite(tunnelPatch(opts.Tunnels)))
 			mux.Handle("DELETE /v1/tunnels/{tunnel_id}", tunnelWrite(tunnelDelete(opts.Tunnels)))

@@ -172,7 +172,7 @@ func TestDomainClaimQuarantineIsBoundedAndLiveClaimsStayExclusive(t *testing.T) 
 }
 
 func TestDomainViewIncludesEmptyObservedRecordsArray(t *testing.T) {
-	view := domainView(resourceDomain("dom_empty", "app.example.test", "pending", "clear"))
+	view := DomainViewFromRow(resourceDomain("dom_empty", "app.example.test", "pending", "clear"))
 	encoded, err := json.Marshal(view)
 	if err != nil {
 		t.Fatal(err)

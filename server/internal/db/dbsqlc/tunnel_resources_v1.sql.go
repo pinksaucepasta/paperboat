@@ -1518,6 +1518,62 @@ func (q *Queries) ListTunnelConnectorsV1(ctx context.Context, arg ListTunnelConn
 	return items, nil
 }
 
+const listTunnelDomainsByIDsV1 = `-- name: ListTunnelDomainsByIDsV1 :many
+SELECT id, account_id, tunnel_id, route_id, hostname, match_type, ownership_challenge_reference, ownership_state, dns_target, observed_records, certificate_strategy, certificate_reference, certificate_state, certificate_expires_at, certificate_renewal_attempted_at, certificate_failure_code, caa_state, conflict_state, last_verified_at, generation, created_at, updated_at, deleted_at, dns_provider, expected_records, dns_last_checked_at, dns_next_check_at, dns_ttl_seconds, verification_attempts, quarantine_until FROM tunnel_domains WHERE id = ANY($1::text[]) AND deleted_at IS NULL
+`
+
+// The rows of a page of the workspace domain list (domaininventory), whose query authorized them.
+func (q *Queries) ListTunnelDomainsByIDsV1(ctx context.Context, ids []string) ([]TunnelDomain, error) {
+	rows, err := q.db.Query(ctx, listTunnelDomainsByIDsV1, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []TunnelDomain
+	for rows.Next() {
+		var i TunnelDomain
+		if err := rows.Scan(
+			&i.ID,
+			&i.AccountID,
+			&i.TunnelID,
+			&i.RouteID,
+			&i.Hostname,
+			&i.MatchType,
+			&i.OwnershipChallengeReference,
+			&i.OwnershipState,
+			&i.DnsTarget,
+			&i.ObservedRecords,
+			&i.CertificateStrategy,
+			&i.CertificateReference,
+			&i.CertificateState,
+			&i.CertificateExpiresAt,
+			&i.CertificateRenewalAttemptedAt,
+			&i.CertificateFailureCode,
+			&i.CaaState,
+			&i.ConflictState,
+			&i.LastVerifiedAt,
+			&i.Generation,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+			&i.DnsProvider,
+			&i.ExpectedRecords,
+			&i.DnsLastCheckedAt,
+			&i.DnsNextCheckAt,
+			&i.DnsTtlSeconds,
+			&i.VerificationAttempts,
+			&i.QuarantineUntil,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTunnelDomainsV1 = `-- name: ListTunnelDomainsV1 :many
 SELECT tunnel_domains.id, tunnel_domains.account_id, tunnel_domains.tunnel_id, tunnel_domains.route_id, tunnel_domains.hostname, tunnel_domains.match_type, tunnel_domains.ownership_challenge_reference, tunnel_domains.ownership_state, tunnel_domains.dns_target, tunnel_domains.observed_records, tunnel_domains.certificate_strategy, tunnel_domains.certificate_reference, tunnel_domains.certificate_state, tunnel_domains.certificate_expires_at, tunnel_domains.certificate_renewal_attempted_at, tunnel_domains.certificate_failure_code, tunnel_domains.caa_state, tunnel_domains.conflict_state, tunnel_domains.last_verified_at, tunnel_domains.generation, tunnel_domains.created_at, tunnel_domains.updated_at, tunnel_domains.deleted_at, tunnel_domains.dns_provider, tunnel_domains.expected_records, tunnel_domains.dns_last_checked_at, tunnel_domains.dns_next_check_at, tunnel_domains.dns_ttl_seconds, tunnel_domains.verification_attempts, tunnel_domains.quarantine_until
 FROM tunnel_domains

@@ -427,8 +427,8 @@ type ListPreviewLeasesV1Params struct {
 	RowLimit        int32
 }
 
-// One page of the previews the account may manage (manageable_preview_ids, migration 174: each host check once per
-// host, so the list and its count cost the same whatever the page).
+// One page of the previews the account may manage (manageable_preview_ids: each host check once per host, each
+// row decided only until the page is full, migration 176).
 func (q *Queries) ListPreviewLeasesV1(ctx context.Context, arg ListPreviewLeasesV1Params) ([]PreviewLease, error) {
 	rows, err := q.db.Query(ctx, listPreviewLeasesV1,
 		arg.AccountID,

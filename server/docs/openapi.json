@@ -16488,6 +16488,70 @@
             ]
           }
         }
+      },
+      "WorkspaceDomain": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "domain"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "tunnel",
+              "preview"
+            ]
+          },
+          "domain": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TunnelDomain"
+              },
+              {
+                "$ref": "#/components/schemas/PreviewDomain"
+              }
+            ],
+            "description": "The same view as GET /v1/tunnels/{tunnel_id}/domains (kind tunnel) or GET /v1/previews/{preview_id}/domains (kind preview)."
+          }
+        }
+      },
+      "WorkspaceDomainPageResponse": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "items",
+              "total"
+            ],
+            "properties": {
+              "items": {
+                "type": "array",
+                "maxItems": 200,
+                "items": {
+                  "$ref": "#/components/schemas/WorkspaceDomain"
+                }
+              },
+              "total": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Every domain the filters select (the same on every page)."
+              },
+              "next_cursor": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024,
+                "description": "Present when domains follow this page."
+              }
+            }
+          }
+        }
       }
     },
     "responses": {
@@ -50190,6 +50254,83 @@
             }
           }
         ]
+      }
+    },
+    "/v1/domains": {
+      "get": {
+        "operationId": "get_v1_domains",
+        "summary": "List the selected workspace's tunnel domains and live previews' custom domains",
+        "description": "Hostname order (then id), keyset paged, with the total. Tunnels and previews are the ones GET /v1/tunnels and GET /v1/previews?state=active list; deleted domains are not listed.",
+        "parameters": [
+          {
+            "name": "workspace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 63
+            },
+            "description": "Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 253
+            },
+            "description": "Hostname substring."
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "tunnel",
+                "preview"
+              ]
+            },
+            "description": "Without kind both are listed."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Workspace domain page.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceDomainPageResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query."
+          }
+        }
       }
     }
   }
