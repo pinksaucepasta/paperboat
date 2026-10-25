@@ -73,14 +73,11 @@ func (s *Service) approve(ctx context.Context, userID, userCode string) (UserMac
 				if err := s.seats.ReserveUserMachineSeat(ctx, tx, userID); err != nil {
 					return err
 				}
-				if n, err := tx.Queries().OccupyUserMachineSeat(ctx, dbsqlc.OccupyUserMachineSeatParams{ID: row.ID, UserID: userID}); err != nil || n != 1 {
+				if n, err := occupySeat(ctx, tx, row.ID, userID); err != nil || n != 1 {
 					if err != nil {
 						return err
 					}
 					return ErrEnrollmentState
-				}
-				if err := ensureMachineAddressLease(ctx, tx, row.ID); err != nil {
-					return err
 				}
 				row.SeatState = "occupied"
 			}
@@ -131,7 +128,7 @@ func (s *Service) approve(ctx context.Context, userID, userCode string) (UserMac
 					if err := s.seats.ReserveUserMachineSeat(ctx, tx, userID); err != nil {
 						return err
 					}
-					if n, err := tx.Queries().OccupyUserMachineSeat(ctx, dbsqlc.OccupyUserMachineSeatParams{ID: existing.ID, UserID: userID}); err != nil || n != 1 {
+					if n, err := occupySeat(ctx, tx, existing.ID, userID); err != nil || n != 1 {
 						if err != nil {
 							return err
 						}
@@ -200,7 +197,7 @@ func (s *Service) approve(ctx context.Context, userID, userCode string) (UserMac
 			if _, err := tx.Queries().CreateControlEnvironment(ctx, dbsqlc.CreateControlEnvironmentParams{ID: row.ID, WorkspaceID: row.ID, OwnerUserID: sql.NullString{String: userID, Valid: true}, DesiredState: "active"}); err != nil {
 				return err
 			}
-			if n, err := tx.Queries().OccupyUserMachineSeat(ctx, dbsqlc.OccupyUserMachineSeatParams{ID: row.ID, UserID: userID}); err != nil || n != 1 {
+			if n, err := occupySeat(ctx, tx, row.ID, userID); err != nil || n != 1 {
 				if err != nil {
 					return err
 				}
@@ -253,7 +250,7 @@ func (s *Service) approve(ctx context.Context, userID, userCode string) (UserMac
 				if err := s.seats.ReserveUserMachineSeat(ctx, tx, userID); err != nil {
 					return err
 				}
-				if n, err := tx.Queries().OccupyUserMachineSeat(ctx, dbsqlc.OccupyUserMachineSeatParams{ID: existing.ID, UserID: userID}); err != nil || n != 1 {
+				if n, err := occupySeat(ctx, tx, existing.ID, userID); err != nil || n != 1 {
 					if err != nil {
 						return err
 					}
@@ -872,4 +869,14 @@ func replaceInstallationClientSession(material []byte, session installationClien
 func ensureMachineAddressLease(ctx context.Context, tx *db.Tx, machineID string) error {
 	_, err := tx.Exec(ctx, `SELECT paperboat.ensure_control_sync_lease($1)`, machineID)
 	return err
+}
+
+// occupySeat takes the machine's seat at pairing together with its local-address lease: every approve path
+// occupies the seat here, so none can leave a paired machine without an address.
+func occupySeat(ctx context.Context, tx *db.Tx, machineID, userID string) (int64, error) {
+	n, err := tx.Queries().OccupyUserMachineSeat(ctx, dbsqlc.OccupyUserMachineSeatParams{ID: machineID, UserID: userID})
+	if err != nil || n != 1 {
+		return n, err
+	}
+	return n, ensureMachineAddressLease(ctx, tx, machineID)
 }
