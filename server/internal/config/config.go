@@ -886,10 +886,10 @@ func (c Certificates) Validate(environment Environment) error {
 			errs = append(errs, fmt.Errorf("certificates.%s is required and must be a safe reference", name))
 		}
 	}
-	if c.Challenge == CertificateChallengeDNS01 && !validCertificateReference(c.DNSTokenReference) {
+	if c.ChallengeType() == CertificateChallengeDNS01 && !validCertificateReference(c.DNSTokenReference) {
 		errs = append(errs, fmt.Errorf("certificates.dns_token_reference is required and must be a safe reference"))
 	}
-	switch c.Challenge {
+	switch c.ChallengeType() {
 	case CertificateChallengeDNS01:
 		errs = append(errs, c.validateDNS01()...)
 	case CertificateChallengeHTTP01:
@@ -923,6 +923,15 @@ const (
 
 // validateDNS01 checks the Cloudflare zones and challenge delegation that only
 // the DNS-01 challenge needs.
+// ChallengeType is the ACME challenge in use: the configured one, or dns-01 when none is set, so a configuration
+// written before the switch (or a test fixture) keeps its meaning.
+func (c Certificates) ChallengeType() string {
+	if strings.TrimSpace(c.Challenge) == "" {
+		return CertificateChallengeDNS01
+	}
+	return c.Challenge
+}
+
 func (c Certificates) validateDNS01() []error {
 	var errs []error
 	if strings.TrimSpace(c.DNSProvider) != "cloudflare" {

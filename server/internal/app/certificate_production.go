@@ -64,7 +64,7 @@ func newCertificateRuntime(ctx context.Context, database *db.DB, cfg config.Conf
 	if err != nil {
 		return nil, fmt.Errorf("%w: platform edge targets: %w", tunnelv1.ErrCertificateRuntimeUnavailable, err)
 	}
-	platformBases, platformTargets := platformWildcardInputs(certificateConfig.Challenge, tunnelcert.PlatformCertificateBases{
+	platformBases, platformTargets := platformWildcardInputs(certificateConfig.ChallengeType(), tunnelcert.PlatformCertificateBases{
 		PreviewBaseDomain: cfg.Preview.BaseDomain,
 		TunnelBaseDomain:  cfg.Tunnel.BaseDomain,
 		RuntimeBaseDomain: cfg.RuntimeBaseDomain,
@@ -129,7 +129,7 @@ func newPublicCertificateIssuer(cfg config.Config) (*tunnelcert.ACMEIssuer, tunn
 		ChallengeZone:       certificateConfig.ChallengeZone,
 	}
 	var http01 *tunnelcert.HTTP01Responses
-	if certificateConfig.Challenge == config.CertificateChallengeHTTP01 {
+	if certificateConfig.ChallengeType() == config.CertificateChallengeHTTP01 {
 		http01 = tunnelcert.NewHTTP01Responses(func() time.Time { return time.Now().UTC() })
 		issuerConfig.HTTP01 = http01
 	} else {
