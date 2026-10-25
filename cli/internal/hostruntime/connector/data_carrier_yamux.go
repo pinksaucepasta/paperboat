@@ -44,7 +44,12 @@ func (s *yamuxDataCarrierSession) OpenStream(ctx context.Context) (DataCarrierSt
 	if s == nil || s.session == nil || ctx == nil {
 		return nil, ErrInvalidDataCarrierConfig
 	}
-	return s.session.OpenStream(ctx)
+	// A failed open returns a nil *yamux.Stream; never hand that on as a non-nil link.
+	stream, err := s.session.OpenStream(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return stream, nil
 }
 
 type dataCarrierNetConn struct{ io.ReadWriteCloser }
@@ -104,7 +109,10 @@ func (s *yamuxDataCarrierSession) AcceptStream(ctx context.Context) (DataCarrier
 	}()
 	select {
 	case opened := <-result:
-		return opened.stream, opened.err
+		if opened.err != nil {
+			return nil, opened.err
+		}
+		return opened.stream, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case <-s.session.CloseChan():

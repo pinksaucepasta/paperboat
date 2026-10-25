@@ -362,7 +362,7 @@ type dataCarrierOpenResult struct {
 func (c *DataCarrier) finishCanceledOpen(result <-chan dataCarrierOpenResult) {
 	opened := <-result
 	<-c.openings
-	if opened.stream != nil {
+	if opened.err == nil && opened.stream != nil {
 		_ = opened.stream.Close()
 	}
 	c.releasePermit()
