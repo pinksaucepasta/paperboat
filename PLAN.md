@@ -1722,6 +1722,47 @@ with 64 KiB block checksums, sent over whatever path the tailnet has, DERP inclu
 and accept a self-hosted relay flag; neither bounds size. Our split (bounded on hosted relays, unbounded only on
 direct/own relays) bounds hosted relay cost without a bandwidth bill surprise.
 
+#### Relay pair authorization by membership, and relay health without 15 s renewals (Lane R design; Lane B server signing; coordinator decision 2026-10-26)
+
+**Why.** (1) A relay grant lists every peer the endpoint may reach, each with its scopes. One grant naming
+16,384 peers is ~4.3 MiB, so a 10k-machine Teams account on one relay needs tens of GB, and the relay caps a
+grant at MaxMergedPeers = 2,048. That contradicts unlimited Teams (10k ceiling). (2) Signed relay health
+observations last 15 s (regionalObservationMaxAge), so every engine renews its whole signed configuration about
+every 9 s just to keep its relays usable: ~13 config POSTs a minute per machine, measured on pbvm2.
+
+**Prior art.** Tailscale's derpserver authorizes a client once at connect by node key and keeps no per-peer
+lists (derp/derpserver/derpserver.go:1732 verifyClient); end-to-end authorization stays with the peers'
+WireGuard keys and netmaps. Tailscale nodes do not re-fetch the netmap for DERP health: health is their own
+netcheck and home-DERP connection (net/netcheck, wgengine/magicsock/derp.go).
+
+**Design 1: memberships instead of per-peer scopes.** Today the relay forwards a pair when both grants name
+the same scope (resource kind, id, generation, capability, port) in opposite directions, under each other's
+peer entry (derpquic reciprocalScopes). Those resource ids are already pair- or group-specific: the account's
+network for the mesh, one access grant for a shared machine. So the per-peer nesting adds size but no
+authority. A grant instead carries `memberships`: the same scope tuples, attached to the endpoint itself
+(bounded, e.g. 256 per grant: one for the account mesh, plus one per access grant, share, private route or
+team network the endpoint takes part in). The relay forwards a pair when the two admitted grants hold a
+reciprocal membership, which is one index lookup per pair. Relay-control peers become "same account and
+both hold the account's network membership". Disco keys come from each grant's own signed field. Memory per
+grant becomes O(memberships) (a mesh endpoint: one entry), independent of the account's size.
+Contract order: relay accepts `memberships` (the relay ignores per-peer lists when present) → CLI accepts and
+forwards it → server signs it (Lane B) → per-peer lists and MaxMergedPeers removed. Test: 10,000 endpoints of
+one account registered on one relay, heap per grant and pair-check time per datagram (budget: < 1 KiB per
+mesh grant, < 200 ns per check), plus the existing revocation, quota and cross-account refusal tests.
+
+**Design 2: relay health that does not expire every 15 s.** The signed candidate set keeps a node's identity,
+endpoints and hosting for its own lifetime (the node's `expires_at`, e.g. 5 min). The engine's own relay
+connection is the health signal (a failed connection or a refused admission fails over at once, as today).
+The control plane announces a node's state change (drain, stop, capacity crossing, revocation) on the
+`peer_network` topic, so engines renew on the event instead of every 9 s. The 15 s `observed_at` freshness
+check goes; the authority boundary moves to the node's signed `expires_at`, the relay's own fencing (node
+generation, process epoch, revocations) and the pushed state change.
+Expected: config POSTs per machine fall from ~13/min to the topic events, plus one renewal per signed
+lifetime.
+
+Owners: Lane R (relay derpquic, CLI tailnet), Lane B (server signing, topic publish). Keep MaxMergedPeers
+2,048 until design 1 lands.
+
 #### Scale matrix, end to end per feature (Lane W, from 2026-10-23)
 
 Targets: one machine with 100 concurrent terminals; one shared terminal with 50 viewers; an account with 1,000
