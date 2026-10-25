@@ -13,14 +13,14 @@ export function Transfers({ scope }: { scope?: string | null }) {
   const workspace = useWorkspace()
   const { data: me } = useApiQuery(meQuery)
   const machines = useMachines()
-  const requests = useApiQuery({ ...requestsQuery(workspace?.id ?? ""), enabled: Boolean(workspace) && transferModesLive })
+  const requests = useApiQuery({ ...requestsQuery(workspace?.id ?? ""), enabled: Boolean(workspace) && transferModesLive.progress })
   const running = (requests.data ?? []).filter(
     (request) =>
       ["sending", "paused", "failed"].includes(request.state ?? "") &&
       (request.sender_account === me?.id || request.recipient_account === me?.id) &&
       (!scope || request.destination_machine_id === scope || request.source_machine_id === scope),
   )
-  if (!transferModesLive || !running.length) return null
+  if (!transferModesLive.progress || !running.length) return null
   const aliasOf = (id: string) => machines.data?.find((entry) => entry.id === id)?.alias ?? "a machine"
   return (
     <div className="flex flex-col gap-2">

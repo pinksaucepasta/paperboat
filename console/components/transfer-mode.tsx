@@ -14,7 +14,7 @@ export function TransferModeSection() {
     mutationFn: setTransferMode,
     onSuccess: (next) => queryClient.setQueryData(preferencesQuery.queryKey, next),
   })
-  if (!transferModesLive) return null
+  if (!transferModesLive.preference) return null
   const current = change.variables ?? preferences.data?.file_transfer_mode
   return (
     <Section title="File transfers">

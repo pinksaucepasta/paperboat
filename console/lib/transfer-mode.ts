@@ -3,8 +3,11 @@
 import { queryOptions } from "@tanstack/react-query"
 import { api } from "@/lib/api"
 
-/** Off until Lane O ships File transfer modes (PLAN 3b): unknown /v1 paths answer 401 (NOTES.md). */
-export const transferModesLive = false
+/**
+ * File transfer modes (PLAN 3b), turned on as Lane O's parts deploy: the account preference
+ * (GET/PATCH /v1/me/preferences), then transfer progress on Team Inbox requests.
+ */
+export const transferModesLive = { preference: false, progress: false } as const
 
 export type TransferMode = "automatic" | "unlimited"
 
@@ -33,7 +36,7 @@ type Preferences = { file_transfer_mode: TransferMode }
 export const preferencesQuery = queryOptions({
   queryKey: ["me", "preferences"],
   queryFn: () => api<Preferences>("me/preferences"),
-  enabled: transferModesLive,
+  enabled: transferModesLive.preference,
 })
 
 export const setTransferMode = (mode: TransferMode) =>
