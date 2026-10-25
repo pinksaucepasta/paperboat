@@ -8,6 +8,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/operatorinfra"
 	"github.com/pinksaucepasta/paperboat/server/internal/selfhost"
 	"os"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
@@ -55,7 +56,7 @@ func newCertificateRuntime(ctx context.Context, database *db.DB, cfg config.Conf
 		return nil, fmt.Errorf("%w: distribution credential must equal edge control credential", tunnelv1.ErrCertificateRuntimeUnavailable)
 	}
 	clear(edgeCredential)
-	issuer, caaInspector, err := newPublicCertificateIssuer(cfg)
+	issuer, caaInspector, http01, err := newPublicCertificateIssuer(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -88,49 +89,23 @@ func newCertificateRuntime(ctx context.Context, database *db.DB, cfg config.Conf
 	if err != nil {
 		return nil, err
 	}
+	runtime.HTTP01 = http01
 	return runtime, nil
 }
 
-// newPublicCertificateIssuer configures the DNS-01 issuer used by managed tunnel certificates.
-func newPublicCertificateIssuer(cfg config.Config) (*tunnelcert.ACMEIssuer, tunnelcert.CAAInspector, error) {
+// newPublicCertificateIssuer configures the ACME issuer for managed tunnel
+// certificates. dns-01 (the default) needs the Cloudflare zones; http-01 (staging
+// only) answers through the edges and returns the responses the edge snapshot serves.
+func newPublicCertificateIssuer(cfg config.Config) (*tunnelcert.ACMEIssuer, tunnelcert.CAAInspector, *tunnelcert.HTTP01Responses, error) {
 	certificateConfig := cfg.Certificates
 	secrets := tunnelcert.EnvironmentReferenceSource{Prefix: "PAPERBOAT_CERT_SECRET_", LookupEnv: os.LookupEnv}
 	signerSource := tunnelcert.EnvironmentSignerSource{EnvironmentReferenceSource: secrets}
-	dnsProvider, err := tunnelcert.NewCloudflareDNSProvider(tunnelcert.CloudflareDNSConfig{
-		ZoneID:         certificateConfig.DNSZoneID,
-		TokenReference: certificateConfig.DNSTokenReference,
-		TokenSource:    secrets,
-		HTTPClient:     providerHTTPClient("cloudflare-dns", cfg.HTTP.RequestTimeout),
-	})
-	if err != nil {
-		return nil, nil, fmt.Errorf("%w: DNS provider configuration: %w", tunnelv1.ErrCertificateRuntimeUnavailable, err)
-	}
-	publicDNS, err := tunnelcert.NewCloudflareDNSProvider(tunnelcert.CloudflareDNSConfig{
-		ZoneID: certificateConfig.PublicDNSZoneID, TokenReference: certificateConfig.DNSTokenReference,
-		TokenSource: secrets, HTTPClient: providerHTTPClient("cloudflare-public-dns", cfg.HTTP.RequestTimeout),
-	})
-	if err != nil {
-		return nil, nil, fmt.Errorf("%w: public DNS provider configuration: %w", tunnelv1.ErrCertificateRuntimeUnavailable, err)
-	}
-	dnsZones, err := tunnelcert.NewDNS01Zones(map[string]tunnelcert.DNS01Provider{
-		cfg.Preview.BaseDomain:          publicDNS,
-		cfg.RuntimeBaseDomain:           dnsProvider,
-		certificateConfig.ChallengeZone: dnsProvider,
-	})
-	if err != nil {
-		return nil, nil, fmt.Errorf("%w: configured DNS zones: %w", tunnelv1.ErrCertificateRuntimeUnavailable, err)
-	}
-	caaInspector, err := tunnelcert.NewDNSCAAInspector(tunnelcert.DNSCAAInspectorConfig{Server: certificateConfig.CAAResolver, Timeout: cfg.HTTP.RequestTimeout})
-	if err != nil {
-		return nil, nil, fmt.Errorf("%w: CAA resolver configuration: %w", tunnelv1.ErrCertificateRuntimeUnavailable, err)
-	}
-	issuer, err := tunnelcert.NewACMEIssuer(tunnelcert.ACMEIssuerConfig{
+	issuerConfig := tunnelcert.ACMEIssuerConfig{
 		DirectoryURL:        certificateConfig.DirectoryURL,
 		AccountKID:          certificateConfig.AccountKID,
 		AccountEmail:        certificateConfig.AccountEmail,
 		AccountKeys:         signerSource,
 		AccountKeyReference: certificateConfig.AccountKeyReference,
-		DNS:                 dnsZones,
 		HTTPClient:          providerHTTPClient("acme", cfg.HTTP.RequestTimeout),
 		Timeout:             certificateConfig.ACMETimeout,
 		PropagationTimeout:  certificateConfig.PropagationTimeout,
@@ -141,9 +116,55 @@ func newPublicCertificateIssuer(cfg config.Config) (*tunnelcert.ACMEIssuer, tunn
 		RetryMax:            certificateConfig.RetryMax,
 		Issuer:              certificateConfig.Issuer,
 		ChallengeZone:       certificateConfig.ChallengeZone,
+	}
+	var http01 *tunnelcert.HTTP01Responses
+	if certificateConfig.Challenge == config.CertificateChallengeHTTP01 {
+		http01 = tunnelcert.NewHTTP01Responses(func() time.Time { return time.Now().UTC() })
+		issuerConfig.HTTP01 = http01
+	} else {
+		dnsZones, err := newCloudflareDNSZones(cfg, secrets)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		issuerConfig.DNS = dnsZones
+	}
+	caaInspector, err := tunnelcert.NewDNSCAAInspector(tunnelcert.DNSCAAInspectorConfig{Server: certificateConfig.CAAResolver, Timeout: cfg.HTTP.RequestTimeout})
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("%w: CAA resolver configuration: %w", tunnelv1.ErrCertificateRuntimeUnavailable, err)
+	}
+	issuer, err := tunnelcert.NewACMEIssuer(issuerConfig)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("%w: ACME issuer configuration: %w", tunnelv1.ErrCertificateRuntimeUnavailable, err)
+	}
+	return issuer, caaInspector, http01, nil
+}
+
+// newCloudflareDNSZones routes DNS-01 records to the Cloudflare zones named in configuration.
+func newCloudflareDNSZones(cfg config.Config, secrets tunnelcert.EnvironmentReferenceSource) (*tunnelcert.DNS01Zones, error) {
+	certificateConfig := cfg.Certificates
+	dnsProvider, err := tunnelcert.NewCloudflareDNSProvider(tunnelcert.CloudflareDNSConfig{
+		ZoneID:         certificateConfig.DNSZoneID,
+		TokenReference: certificateConfig.DNSTokenReference,
+		TokenSource:    secrets,
+		HTTPClient:     providerHTTPClient("cloudflare-dns", cfg.HTTP.RequestTimeout),
 	})
 	if err != nil {
-		return nil, nil, fmt.Errorf("%w: ACME issuer configuration: %w", tunnelv1.ErrCertificateRuntimeUnavailable, err)
+		return nil, fmt.Errorf("%w: DNS provider configuration: %w", tunnelv1.ErrCertificateRuntimeUnavailable, err)
 	}
-	return issuer, caaInspector, nil
+	publicDNS, err := tunnelcert.NewCloudflareDNSProvider(tunnelcert.CloudflareDNSConfig{
+		ZoneID: certificateConfig.PublicDNSZoneID, TokenReference: certificateConfig.DNSTokenReference,
+		TokenSource: secrets, HTTPClient: providerHTTPClient("cloudflare-public-dns", cfg.HTTP.RequestTimeout),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%w: public DNS provider configuration: %w", tunnelv1.ErrCertificateRuntimeUnavailable, err)
+	}
+	dnsZones, err := tunnelcert.NewDNS01Zones(map[string]tunnelcert.DNS01Provider{
+		cfg.Preview.BaseDomain:          publicDNS,
+		cfg.RuntimeBaseDomain:           dnsProvider,
+		certificateConfig.ChallengeZone: dnsProvider,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%w: configured DNS zones: %w", tunnelv1.ErrCertificateRuntimeUnavailable, err)
+	}
+	return dnsZones, nil
 }

@@ -577,6 +577,9 @@ func New(opts Options) (*App, error) {
 			distribution = tunnelcert.DisabledDistributionHandler()
 		}
 		edgeControlService.SetCertificateDistribution(distribution)
+		if opts.CertificateRuntime != nil && opts.CertificateRuntime.HTTP01 != nil {
+			edgeControlService.SetHTTP01Responses(opts.CertificateRuntime.HTTP01)
+		}
 		edgeControlService.SetScopedBandwidthDebiter(workspaceBilling)
 		edgeControlService.SetRelayQuotaGate(bandwidthgate.New(store))
 		edgeControlService.SetAuditWriter(auditWriter)

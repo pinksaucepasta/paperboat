@@ -11,17 +11,15 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"strings"
 	"sync"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 const (
-	http01MaximumResponses    = 256
-	http01ResponseLifetime    = 10 * time.Minute
-	http01PollInterval        = 100 * time.Millisecond
-	maxHTTP01TokenLength      = 256
-	maxHTTP01KeyAuthorization = 512
+	http01ResponseLifetime = 10 * time.Minute
+	http01PollInterval     = 100 * time.Millisecond
 )
 
 // HTTP01Record is one http-01 response: the key authorization for Token, to be
@@ -41,13 +39,6 @@ type HTTP01Publisher interface {
 	Withdraw(context.Context, HTTP01Record) error
 }
 
-// HTTP01Response is the wire form an edge receives in its ingress snapshot.
-type HTTP01Response struct {
-	Hostname         string `json:"hostname"`
-	Token            string `json:"token"`
-	KeyAuthorization string `json:"key_authorization"`
-}
-
 // HTTP01Responses is the in-memory registry behind HTTP01Publisher. It is
 // bounded and expires entries, so a stalled order cannot grow it.
 type HTTP01Responses struct {
@@ -57,7 +48,7 @@ type HTTP01Responses struct {
 }
 
 type http01Entry struct {
-	response HTTP01Response
+	response connectorprotocol.HTTP01Response
 	expires  time.Time
 	fetched  map[string]bool
 }
@@ -68,12 +59,9 @@ func NewHTTP01Responses(now func() time.Time) *HTTP01Responses {
 }
 
 func (r *HTTP01Responses) Publish(_ context.Context, record HTTP01Record) error {
-	hostname, wildcard, err := normalizeHostname(record.Hostname)
-	if err != nil || wildcard || hostname != record.Hostname {
-		return fmt.Errorf("%w: HTTP-01 hostname must be an exact name", ErrDNSChallengeUnavailable)
-	}
-	if !validHTTP01Token(record.Token) || len(record.KeyAuthorization) > maxHTTP01KeyAuthorization || !strings.HasPrefix(record.KeyAuthorization, record.Token+".") {
-		return fmt.Errorf("%w: HTTP-01 key authorization is invalid", ErrDNSChallengeUnavailable)
+	response := connectorprotocol.HTTP01Response{Hostname: record.Hostname, Token: record.Token, KeyAuthorization: record.KeyAuthorization}
+	if err := response.Validate(); err != nil {
+		return fmt.Errorf("%w: %w", ErrDNSChallengeUnavailable, err)
 	}
 	if len(record.EdgeNodeIDs) == 0 {
 		return fmt.Errorf("%w: HTTP-01 has no edge to answer", ErrDNSChallengeUnavailable)
@@ -82,7 +70,7 @@ func (r *HTTP01Responses) Publish(_ context.Context, record HTTP01Record) error 
 	defer r.mu.Unlock()
 	now := r.now()
 	r.purgeLocked(now)
-	if _, exists := r.entries[record.Token]; !exists && len(r.entries) >= http01MaximumResponses {
+	if _, exists := r.entries[record.Token]; !exists && len(r.entries) >= connectorprotocol.MaxHTTP01Responses {
 		return fmt.Errorf("%w: too many pending HTTP-01 challenges", ErrDNSChallengeUnavailable)
 	}
 	fetched := make(map[string]bool, len(record.EdgeNodeIDs))
@@ -93,7 +81,7 @@ func (r *HTTP01Responses) Publish(_ context.Context, record HTTP01Record) error 
 		fetched[id] = false
 	}
 	r.entries[record.Token] = &http01Entry{
-		response: HTTP01Response{Hostname: hostname, Token: record.Token, KeyAuthorization: record.KeyAuthorization},
+		response: response,
 		expires:  now.Add(http01ResponseLifetime),
 		fetched:  fetched,
 	}
@@ -142,11 +130,11 @@ func (r *HTTP01Responses) Withdraw(_ context.Context, record HTTP01Record) error
 
 // ForEdge returns the unexpired responses that edge must serve and marks them
 // fetched. It is called from the authenticated ingress snapshot.
-func (r *HTTP01Responses) ForEdge(nodeID string) []HTTP01Response {
+func (r *HTTP01Responses) ForEdge(nodeID string) []connectorprotocol.HTTP01Response {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.purgeLocked(r.now())
-	var out []HTTP01Response
+	var out []connectorprotocol.HTTP01Response
 	for _, entry := range r.entries {
 		if _, targeted := entry.fetched[nodeID]; !targeted {
 			continue
@@ -164,15 +152,6 @@ func (r *HTTP01Responses) purgeLocked(now time.Time) {
 			delete(r.entries, token)
 		}
 	}
-}
-
-func validHTTP01Token(token string) bool {
-	if token == "" || len(token) > maxHTTP01TokenLength {
-		return false
-	}
-	return !strings.ContainsFunc(token, func(c rune) bool {
-		return !(c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-' || c == '_')
-	})
 }
 
 var _ HTTP01Publisher = (*HTTP01Responses)(nil)

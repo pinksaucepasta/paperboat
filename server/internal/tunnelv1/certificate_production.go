@@ -57,6 +57,9 @@ type CertificateRuntime struct {
 	Worker         *CertificateWorker
 	PlatformWorker *PlatformCertificateWorker
 	Distribution   *tunnelcert.DistributionHub
+	// HTTP01 is non-nil only for the staging http-01 challenge; the edge
+	// control service serves its responses in each ingress snapshot.
+	HTTP01 *tunnelcert.HTTP01Responses
 
 	closeOnce sync.Once
 	closeErr  error

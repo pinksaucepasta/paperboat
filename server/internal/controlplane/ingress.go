@@ -11,6 +11,12 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/connectorprotocol"
 )
 
+// HTTP01Source supplies the http-01 responses an edge must serve. ForEdge also
+// records that the edge has fetched them, which the issuer waits for.
+type HTTP01Source interface {
+	ForEdge(nodeID string) []wire.HTTP01Response
+}
+
 // handleIngress is mounted only beneath the authenticated edge-control mux.
 // A complete empty snapshot revokes authority; failed reads never renew it.
 func (s *EdgeService) handleIngress(w http.ResponseWriter, r *http.Request) {
@@ -45,7 +51,12 @@ func (s *EdgeService) handleIngress(w http.ResponseWriter, r *http.Request) {
 	if len(denied) > 4096 {
 		denied = denied[:4096]
 	}
-	writeEdgeJSON(w, http.StatusOK, map[string]any{"complete": true, "decisions": decisions, "quota_denied": denied})
+	snapshotBody := map[string]any{"complete": true, "decisions": decisions, "quota_denied": denied}
+	// Released edges decode this snapshot strictly, so the field exists only where http-01 is configured (staging).
+	if s.http01 != nil {
+		snapshotBody["http01_responses"] = s.http01.ForEdge(input.NodeID)
+	}
+	writeEdgeJSON(w, http.StatusOK, snapshotBody)
 }
 
 const (

@@ -61,6 +61,7 @@ type EdgeService struct {
 	encryptionKey           string
 	fileTransferPolicy      mint.FileTransferPolicy
 	certificateDistribution http.Handler
+	http01                  HTTP01Source
 	browserTerminal         interface {
 		ServeEdgeControl(http.ResponseWriter, *http.Request, string, string)
 	}
@@ -93,6 +94,10 @@ func (s *EdgeService) SetFileTransferPolicy(policy mint.FileTransferPolicy) {
 func (s *EdgeService) SetCertificateDistribution(handler http.Handler) {
 	s.certificateDistribution = handler
 }
+
+// SetHTTP01Responses puts the staging http-01 responses into each edge's ingress snapshot.
+// Nil leaves the snapshot without responses.
+func (s *EdgeService) SetHTTP01Responses(source HTTP01Source) { s.http01 = source }
 
 func (s *EdgeService) SetBrowserTerminalGateway(gateway interface {
 	ServeEdgeControl(http.ResponseWriter, *http.Request, string, string)
