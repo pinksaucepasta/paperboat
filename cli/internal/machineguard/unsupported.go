@@ -14,6 +14,10 @@ func Connect(context.Context, string) (*Client, error) { return nil, ErrUnsuppor
 func (*Client) Acquire(context.Context, string, netip.Addr, int) (net.Listener, error) {
 	return nil, ErrUnsupported
 }
+func (*Client) AcquireMachine(context.Context, string, string, string, netip.Addr, int) (net.Listener, netip.Addr, error) {
+	return nil, netip.Addr{}, ErrUnsupported
+}
+func (*Client) ReplaceClaims(context.Context, string, []string) error     { return ErrUnsupported }
 func (*Client) ReplaceNames(context.Context, map[string]netip.Addr) error { return ErrUnsupported }
 func (*Client) Status(context.Context) (RuntimeStatus, error)             { return RuntimeStatus{}, ErrUnsupported }
 func (*Client) PrepareRangeChange(context.Context, string) error          { return ErrUnsupported }

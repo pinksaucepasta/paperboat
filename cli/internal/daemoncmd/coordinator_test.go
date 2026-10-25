@@ -559,6 +559,7 @@ type coordinatorNameClient struct {
 	closed        bool
 	// aliasesReplaced is set by ReplaceAliases: like the real guard, names are known only after it.
 	aliasesReplaced atomic.Bool
+	claims          []string
 }
 
 func (c *coordinatorNameClient) Acquire(ctx context.Context, hostname string, _ netip.Addr, requestedPort int) (net.Listener, error) {
@@ -598,6 +599,16 @@ func (c *coordinatorNameClient) Acquire(ctx context.Context, hostname string, _ 
 		c.mu.Unlock()
 	}
 	return listener, err
+}
+func (c *coordinatorNameClient) AcquireMachine(ctx context.Context, _, _, hostname string, ip netip.Addr, port int) (net.Listener, netip.Addr, error) {
+	listener, err := c.Acquire(ctx, hostname, ip, port)
+	return listener, ip, err
+}
+func (c *coordinatorNameClient) ReplaceClaims(_ context.Context, account string, machines []string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.claims = append(c.claims, account+":"+strings.Join(machines, ","))
+	return nil
 }
 func (c *coordinatorNameClient) ReplaceNames(_ context.Context, names map[string]netip.Addr) error {
 	c.mu.Lock()
@@ -664,6 +675,11 @@ type generationNameClient struct {
 	activeListeners []net.Listener
 }
 
+func (c *generationNameClient) AcquireMachine(ctx context.Context, _, _, hostname string, ip netip.Addr, port int) (net.Listener, netip.Addr, error) {
+	listener, err := c.Acquire(ctx, hostname, ip, port)
+	return listener, ip, err
+}
+func (c *generationNameClient) ReplaceClaims(context.Context, string, []string) error { return nil }
 func (c *generationNameClient) Acquire(_ context.Context, hostname string, _ netip.Addr, port int) (net.Listener, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -937,11 +953,11 @@ type refusingNameClient struct {
 	refused int
 }
 
-func (c refusingNameClient) Acquire(ctx context.Context, hostname string, ip netip.Addr, port int) (net.Listener, error) {
+func (c refusingNameClient) AcquireMachine(ctx context.Context, account, machine, hostname string, ip netip.Addr, port int) (net.Listener, netip.Addr, error) {
 	if port == c.refused {
-		return nil, fmt.Errorf("acquire: %w", machineguard.ErrListenerRefused)
+		return nil, netip.Addr{}, fmt.Errorf("acquire: %w", machineguard.ErrListenerRefused)
 	}
-	return c.coordinatorNameClient.Acquire(ctx, hostname, ip, port)
+	return c.coordinatorNameClient.AcquireMachine(ctx, account, machine, hostname, ip, port)
 }
 
 // A second OS user on a host failed its whole reconcile when the guard refused one listener as the first
@@ -963,5 +979,38 @@ func TestCoordinatorRefusedListenerSkipsOnlyThatItem(t *testing.T) {
 	}
 	if len(c.routes) != 1 || len(names.names) != 1 {
 		t.Fatalf("routes=%d names=%d, want only hp:6767", len(c.routes), len(names.names))
+	}
+}
+
+// relocatingNameClient assigns another address, as the guard does when another OS user holds the preferred one.
+type relocatingNameClient struct{ *coordinatorNameClient }
+
+func (c relocatingNameClient) AcquireMachine(ctx context.Context, account, machine, hostname string, _ netip.Addr, port int) (net.Listener, netip.Addr, error) {
+	return c.coordinatorNameClient.AcquireMachine(ctx, account, machine, hostname, netip.MustParseAddr("127.100.0.77"), port)
+}
+
+// PLAN 3b multi-account hosts: the daemon publishes the address the guard assigned, not the server's
+// preferred one, and sends the account's complete machine set (offline machines included) so the guard
+// releases only machines that left it.
+func TestCoordinatorUsesTheGuardAssignedAddressAndSendsTheCompleteSet(t *testing.T) {
+	names := relocatingNameClient{&coordinatorNameClient{}}
+	c, err := NewCoordinator(CoordinatorConfig{AccountID: "acct_alice", NameClient: names, DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("unused") }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.ctx = t.Context()
+	defer c.Stop()
+	peers := []*pbSync.PeerUpdate{
+		{PeerId: "m_hp", Alias: "hp", AssignedIp: "127.100.0.3", Approved: true, Online: true, ExportedPorts: []int32{22}},
+		{PeerId: "m_off", Alias: "nas", AssignedIp: "127.100.0.4", Approved: true, Online: false},
+	}
+	if err := c.replaceGuardedRoutes(t.Context(), peers); err != nil {
+		t.Fatal(err)
+	}
+	if got := names.names["hp."+c.localDomain()]; got.String() != "127.100.0.77" {
+		t.Fatalf("published %v, want the guard-assigned 127.100.0.77 (names=%v)", got, names.names)
+	}
+	if len(names.claims) != 1 || names.claims[0] != "acct_alice:m_hp,m_off" {
+		t.Fatalf("claims=%v, want the complete set including the offline machine", names.claims)
 	}
 }

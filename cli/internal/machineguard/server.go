@@ -33,8 +33,10 @@ type controlListener interface {
 	Close() error
 }
 type reservations struct {
-	IPs   map[string]string `json:"ips"`
-	Names map[string]string `json:"names"`
+	// IPs is the host-wide address reservation of earlier guards; it is read once and adopted into Claims.
+	IPs    map[string]string `json:"ips,omitempty"`
+	Names  map[string]string `json:"names"`
+	Claims map[string]claim  `json:"claims"`
 }
 type guardedLease struct {
 	hostname, ip string
@@ -47,6 +49,7 @@ type guardServer struct {
 	mu               sync.Mutex
 	cfg              Config
 	reserved         reservations
+	claims           *claimBook
 	leases           map[string]*guardedLease
 	names            map[controlConn]map[string]string
 	aliases          map[controlConn]map[string]string
@@ -101,12 +104,18 @@ func Serve(ctx context.Context, cfg Config) (resultErr error) {
 	defer func() { resultErr = errors.Join(resultErr, lock.Close()) }()
 	g := &guardServer{cfg: cfg, reserved: reservations{IPs: map[string]string{}, Names: map[string]string{}}, leases: map[string]*guardedLease{}, names: map[controlConn]map[string]string{}, connections: map[controlConn]string{}, failures: make(chan error, 1)}
 	if data, err := os.ReadFile(filepath.Join(cfg.StateDir, "reservations.json")); err == nil {
-		if len(data) > 8<<20 || json.Unmarshal(data, &g.reserved) != nil || g.reserved.IPs == nil || g.reserved.Names == nil {
+		if len(data) > 8<<20 || json.Unmarshal(data, &g.reserved) != nil || g.reserved.Names == nil {
 			return errors.New("invalid machine guard reservation journal")
 		}
 	} else if !os.IsNotExist(err) {
 		return err
 	}
+	if g.reserved.Claims == nil {
+		g.reserved.Claims = map[string]claim{}
+	}
+	g.claims = &claimBook{Claims: g.reserved.Claims}
+	g.claims.adoptLegacy(g.reserved.IPs, time.Now())
+	g.reserved.IPs = nil
 	defer retirePlatform(cfg)
 	if err = g.applyRules(ctx); err != nil {
 		return err
@@ -428,12 +437,18 @@ func (g *guardServer) serveConnection(ctx context.Context, conn controlConn) {
 			certificate, err = g.certificate(opCtx, conn, uid, in.Hostname)
 		} else {
 			g.mu.Lock()
-			file, err = g.handle(opCtx, conn, uid, in)
+			in, err = g.assignClaim(uid, in)
+			if err == nil {
+				file, err = g.handle(opCtx, conn, uid, in)
+			}
 			g.pruneCertificates(conn, uid)
 			g.mu.Unlock()
 		}
 		cancel()
 		out := response{Status: status, Certificate: certificate}
+		if in.Operation == "acquire" && err == nil {
+			out.IP = in.IP
+		}
 		if err != nil {
 			out.Error = err.Error()
 			if errors.Is(err, ErrPortInUse) {
@@ -613,25 +628,20 @@ func (g *guardServer) handle(ctx context.Context, conn controlConn, uid string, 
 				return nil, errors.New("machine name conflicts with an active browser alias")
 			}
 		}
-		ownedIPs, ownedNames := 0, 0
-		for _, owner := range g.reserved.IPs {
-			if owner == uid {
-				ownedIPs++
-			}
-		}
+		ownedNames := 0
 		for _, owner := range g.reserved.Names {
 			if owner == uid {
 				ownedNames++
 			}
 		}
-		if len(g.leases) >= 8192 || !has(g.reserved.IPs, in.IP) && (len(g.reserved.IPs) >= 65533 || ownedIPs >= 512) || !has(g.reserved.Names, in.Hostname) && (len(g.reserved.Names) >= 4096 || ownedNames >= 512) {
+		if len(g.leases) >= 8192 || !has(g.reserved.Names, in.Hostname) && (len(g.reserved.Names) >= 4096 || ownedNames >= 512) {
 			return nil, listenerRefusal{reason: "machine guard reservation limit reached for this OS user"}
 		}
 
 		for _, owner := range []struct {
 			value  string
 			exists bool
-		}{{g.reserved.IPs[in.IP], has(g.reserved.IPs, in.IP)}, {g.reserved.Names[in.Hostname], has(g.reserved.Names, in.Hostname)}} {
+		}{{g.reserved.Names[in.Hostname], has(g.reserved.Names, in.Hostname)}} {
 			if owner.exists && owner.value != uid {
 				return nil, listenerRefusal{reason: "machine name or address belongs to another OS user; choose a nonconflicting installation"}
 			}
@@ -639,7 +649,6 @@ func (g *guardServer) handle(ctx context.Context, conn controlConn, uid string, 
 		if _, exists := g.leases[key]; exists {
 			return nil, listenerRefusal{reason: "protected listener is already owned by another connection"}
 		}
-		g.reserved.IPs[in.IP] = uid
 		g.reserved.Names[in.Hostname] = uid
 		if err := g.persist(); err != nil {
 			return nil, err
@@ -674,6 +683,15 @@ func (g *guardServer) handle(ctx context.Context, conn controlConn, uid string, 
 			return nil, err
 		}
 		return nil, nil
+	case "claims":
+		present := make(map[string]bool, len(in.Machines))
+		for _, machine := range in.Machines {
+			present[machine] = true
+		}
+		if err := g.claims.releaseAbsent(uid, in.Account, present, time.Now()); err != nil {
+			return nil, err
+		}
+		return nil, g.persist()
 	case "aliases":
 		return nil, g.replaceAliases(ctx, conn, uid, in.Names)
 	case "names":
@@ -804,4 +822,25 @@ func (g *guardServer) applyRules(ctx context.Context) error {
 		return leases[i].port < leases[j].port
 	})
 	return applyProtection(ctx, g.cfg, leases)
+}
+
+// assignClaim gives a machine listener request its address from the uid's claim for (account, machine): the
+// preferred (server) address when it is free on this host, else another stable one. Registry lock held.
+func (g *guardServer) assignClaim(uid string, in request) (request, error) {
+	if in.Operation != "acquire" || in.Hostname == splitdns.BrowserGatewayHostname {
+		return in, nil
+	}
+	if in.Account == "" || in.Machine == "" {
+		return in, errors.New("machine listener request names no account and machine")
+	}
+	preferred, err := netip.ParseAddr(in.IP)
+	if err != nil {
+		return in, errors.New("invalid preferred machine address")
+	}
+	ip, err := g.claims.assign(claimKey{UID: uid, Account: in.Account, Machine: in.Machine}, preferred, time.Now())
+	if err != nil {
+		return in, err
+	}
+	in.IP = ip
+	return in, g.persist()
 }

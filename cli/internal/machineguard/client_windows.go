@@ -92,15 +92,39 @@ func (c *Client) exchange(ctx context.Context, in request) (response, error) {
 	return out, nil
 }
 func (c *Client) Acquire(ctx context.Context, hostname string, ip netip.Addr, port int) (net.Listener, error) {
-	out, err := c.exchange(ctx, request{Operation: "acquire", Hostname: hostname, IP: ip.String(), Port: port})
+	listener, _, err := c.acquire(ctx, request{Operation: "acquire", Hostname: hostname, IP: ip.String(), Port: port})
+	return listener, err
+}
+
+// AcquireMachine opens a listener for one machine of one account at the address the guard assigns.
+func (c *Client) AcquireMachine(ctx context.Context, account, machine, hostname string, preferred netip.Addr, port int) (net.Listener, netip.Addr, error) {
+	return c.acquire(ctx, request{Operation: "acquire", Account: account, Machine: machine, Hostname: hostname, IP: preferred.String(), Port: port})
+}
+
+// ReplaceClaims sends the complete machine set of account from a verified configuration.
+func (c *Client) ReplaceClaims(ctx context.Context, account string, machines []string) error {
+	_, err := c.exchange(ctx, request{Operation: "claims", Account: account, Machines: machines})
+	return err
+}
+
+func (c *Client) acquire(ctx context.Context, in request) (net.Listener, netip.Addr, error) {
+	out, err := c.exchange(ctx, in)
 	if err != nil {
-		return nil, err
+		return nil, netip.Addr{}, err
 	}
 	if len(out.Socket) == 0 {
-		return nil, errors.New("machine guard returned no listener")
+		return nil, netip.Addr{}, errors.New("machine guard returned no listener")
+	}
+	ip := netip.MustParseAddr(in.IP)
+	if out.IP != "" {
+		assigned, parseErr := netip.ParseAddr(out.IP)
+		if parseErr != nil {
+			return nil, netip.Addr{}, errors.New("machine guard returned an invalid address")
+		}
+		ip = assigned
 	}
 	proxy := &windowsProxyListener{path: string(out.Socket), done: make(chan struct{})}
-	return &windowsOwnedListener{windowsProxyListener: proxy, client: c, ip: ip.String(), port: port}, nil
+	return &windowsOwnedListener{windowsProxyListener: proxy, client: c, ip: ip.String(), port: in.Port}, ip, nil
 }
 func (c *Client) ReplaceAliases(ctx context.Context, aliases map[string]string) error {
 	_, err := c.exchange(ctx, request{Operation: "aliases", Names: aliases})

@@ -53,11 +53,17 @@ type request struct {
 	Port         int               `json:"port,omitempty"`
 	Names        map[string]string `json:"names,omitempty"`
 	LoopbackCIDR string            `json:"loopback_cidr,omitempty"`
+	// Account and Machine name the claim a machine listener belongs to (PLAN 3b multi-account hosts); the guard
+	// answers with the address it assigned. Machines is the complete set of an account for the "claims" operation.
+	Account  string   `json:"account,omitempty"`
+	Machine  string   `json:"machine,omitempty"`
+	Machines []string `json:"machines,omitempty"`
 }
 type response struct {
 	Certificate *CertificateBundle `json:"certificate,omitempty"`
 	Status      *RuntimeStatus     `json:"status,omitempty"`
 	Socket      []byte             `json:"socket,omitempty"`
+	IP          string             `json:"ip,omitempty"`
 	ErrorCode   string             `json:"error_code,omitempty"`
 	Error       string             `json:"error,omitempty"`
 }

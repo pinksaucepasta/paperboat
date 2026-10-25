@@ -74,6 +74,8 @@ func coordinatorOperationFailure(operation string, cause error) error {
 
 type guardedNameClient interface {
 	Acquire(context.Context, string, netip.Addr, int) (net.Listener, error)
+	AcquireMachine(ctx context.Context, account, machine, hostname string, preferred netip.Addr, port int) (net.Listener, netip.Addr, error)
+	ReplaceClaims(ctx context.Context, account string, machines []string) error
 	ReplaceNames(context.Context, map[string]netip.Addr) error
 	ReplaceAliases(context.Context, map[string]string) error
 	Status(context.Context) (machineguard.RuntimeStatus, error)
@@ -96,6 +98,7 @@ type CoordinatorConfig struct {
 
 type guardedRoute struct {
 	listener  net.Listener
+	address   netip.Addr // the local address the guard assigned to this machine for this user
 	machineID string
 	port      int
 	ctx       context.Context

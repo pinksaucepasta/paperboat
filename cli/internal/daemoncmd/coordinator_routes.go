@@ -207,10 +207,10 @@ func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*pbSync.
 			}
 			key := peer.GetPeerId() + "\x00" + hostname + "\x00" + ip.String() + "\x00" + strconv.Itoa(port)
 			if route, ok := c.routes[key]; ok {
-				wanted[key], names[hostname] = route, ip
+				wanted[key], names[hostname] = route, route.address
 				continue
 			}
-			listener, err := nameClient.Acquire(ctx, hostname, ip, port)
+			listener, assigned, err := nameClient.AcquireMachine(ctx, c.cfg.AccountID, peer.GetPeerId(), hostname, ip, port)
 			if err != nil {
 				if errors.Is(err, machineguard.ErrPortInUse) || errors.Is(err, machineguard.ErrListenerRefused) {
 					// The guard's default deny remains in force without a lease. Another program's port or
@@ -226,8 +226,8 @@ func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*pbSync.
 				return coordinatorOperationFailure("native_listener", err)
 			}
 			routeCtx, routeCancel := context.WithCancel(c.ctx)
-			route := &guardedRoute{listener: listener, machineID: peer.GetPeerId(), port: port, ctx: routeCtx, cancel: routeCancel}
-			wanted[key], names[hostname] = route, ip
+			route := &guardedRoute{listener: listener, address: assigned, machineID: peer.GetPeerId(), port: port, ctx: routeCtx, cancel: routeCancel}
+			wanted[key], names[hostname] = route, assigned
 			c.routes[key] = route
 			c.wg.Add(1)
 			go c.serveRoute(route)
@@ -264,6 +264,19 @@ func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*pbSync.
 	if err := nameClient.ReplaceNames(ctx, names); err != nil {
 		c.resetNameGenerationLocked(ctx)
 		return coordinatorOperationFailure("machine_names", err)
+	}
+	// The snapshot is the complete, verified machine set of this account: the guard releases the claims of
+	// machines that left it (held 7 days). An empty set is refused by the guard while claims exist.
+	if c.cfg.AccountID != "" && len(peers) > 0 {
+		machines := make([]string, 0, len(peers))
+		for _, peer := range peers {
+			if peer != nil && peer.GetPeerId() != "" {
+				machines = append(machines, peer.GetPeerId())
+			}
+		}
+		if err := nameClient.ReplaceClaims(ctx, c.cfg.AccountID, machines); err != nil {
+			diagnosticlog.TryWarn("local machine address claims were not updated; the guard keeps them", "error", err)
+		}
 	}
 	var removedRoutes []*guardedRoute
 	for key, route := range c.routes {

@@ -150,20 +150,49 @@ func (c *Client) exchange(ctx context.Context, in request) (response, *os.File, 
 	return out, file, nil
 }
 func (c *Client) Acquire(ctx context.Context, hostname string, ip netip.Addr, port int) (net.Listener, error) {
-	_, file, err := c.exchange(ctx, request{Operation: "acquire", Hostname: hostname, IP: ip.String(), Port: port})
+	listener, _, err := c.acquire(ctx, request{Operation: "acquire", Hostname: hostname, IP: ip.String(), Port: port})
+	return listener, err
+}
+
+// AcquireMachine opens a listener for one machine of one account; the guard assigns the address (the preferred
+// server address when free on this host) and returns it.
+func (c *Client) AcquireMachine(ctx context.Context, account, machine, hostname string, preferred netip.Addr, port int) (net.Listener, netip.Addr, error) {
+	return c.acquire(ctx, request{Operation: "acquire", Account: account, Machine: machine, Hostname: hostname, IP: preferred.String(), Port: port})
+}
+
+// ReplaceClaims sends the complete machine set of account from a verified configuration; the guard releases the
+// rest into its hold.
+func (c *Client) ReplaceClaims(ctx context.Context, account string, machines []string) error {
+	_, _, err := c.exchange(ctx, request{Operation: "claims", Account: account, Machines: machines})
+	return err
+}
+
+func (c *Client) acquire(ctx context.Context, in request) (net.Listener, netip.Addr, error) {
+	out, file, err := c.exchange(ctx, in)
 	if err != nil {
-		return nil, err
+		return nil, netip.Addr{}, err
+	}
+	ip, port := netip.MustParseAddr(in.IP), in.Port
+	if out.IP != "" {
+		assigned, parseErr := netip.ParseAddr(out.IP)
+		if parseErr != nil {
+			if file != nil {
+				file.Close()
+			}
+			return nil, netip.Addr{}, errors.New("machine guard returned an invalid address")
+		}
+		ip = assigned
 	}
 	if file == nil {
-		return nil, errors.New("machine guard returned no listener")
+		return nil, netip.Addr{}, errors.New("machine guard returned no listener")
 	}
 	defer file.Close()
 	listener, err := net.FileListener(file)
 	if err != nil {
 		_, _, _ = c.exchange(context.Background(), request{Operation: "release", IP: ip.String(), Port: port})
-		return nil, err
+		return nil, netip.Addr{}, err
 	}
-	return &ownedListener{Listener: listener, client: c, ip: ip.String(), port: port}, nil
+	return &ownedListener{Listener: listener, client: c, ip: ip.String(), port: port}, ip, nil
 }
 func (c *Client) ReplaceAliases(ctx context.Context, aliases map[string]string) error {
 	_, file, err := c.exchange(ctx, request{Operation: "aliases", Names: aliases})
