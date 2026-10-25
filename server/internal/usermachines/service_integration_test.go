@@ -114,6 +114,13 @@ func TestSetupIsIdempotentAndPreservesCapabilities(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A newly installed machine has its local-address lease at once: machine lists only read leases, and
+	// without one its daemon cannot bind the machine's local address (prod 2026-10-25: private access failed
+	// with EINVAL on 14 new machines).
+	var leaseSlot int
+	if err := store.SQL().QueryRowContext(ctx, `SELECT address_slot FROM paperboat.control_sync_leases WHERE machine_id=$1`, first.ID).Scan(&leaseSlot); err != nil {
+		t.Fatalf("new machine has no local-address lease: %v", err)
+	}
 	var canonicalScope bool
 	if err := store.SQL().QueryRowContext(ctx, `SELECT m.environment_id=m.id AND e.id=m.id AND e.workspace_id=m.id AND e.owner_user_id=m.user_id FROM paperboat.user_machines m JOIN paperboat.control_environments e ON e.id=m.environment_id WHERE m.id=$1`, first.ID).Scan(&canonicalScope); err != nil || !canonicalScope || first.EnvironmentID != first.ID {
 		t.Fatalf("canonical machine control scope = %v, %v", canonicalScope, err)

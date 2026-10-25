@@ -79,6 +79,9 @@ func (s *Service) approve(ctx context.Context, userID, userCode string) (UserMac
 					}
 					return ErrEnrollmentState
 				}
+				if err := ensureMachineAddressLease(ctx, tx, row.ID); err != nil {
+					return err
+				}
 				row.SeatState = "occupied"
 			}
 
@@ -860,4 +863,13 @@ func replaceInstallationClientSession(material []byte, session installationClien
 	}
 	fields["client_session"] = session
 	return json.Marshal(fields)
+}
+
+// ensureMachineAddressLease gives a machine its local-address lease when its seat is occupied, in the same
+// transaction. Since 05862b9b machine lists only read leases (allocating there took a table lock per list), so
+// pairing is where a new machine gets one; without it the daemon cannot bind the machine's local address and
+// private access fails (prod 2026-10-25: 14 machines had none).
+func ensureMachineAddressLease(ctx context.Context, tx *db.Tx, machineID string) error {
+	_, err := tx.Exec(ctx, `SELECT paperboat.ensure_control_sync_lease($1)`, machineID)
+	return err
 }

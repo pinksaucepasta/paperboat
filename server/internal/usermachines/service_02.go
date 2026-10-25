@@ -266,6 +266,9 @@ func (s *Service) completeAuthenticatedMachineInstallationTx(ctx context.Context
 			}
 			return dbsqlc.UserMachine{}, ErrEnrollmentState
 		}
+		if err := ensureMachineAddressLease(ctx, tx, row.ID); err != nil {
+			return dbsqlc.UserMachine{}, err
+		}
 		row.SeatState = "occupied"
 	} else if row.SeatState != "occupied" {
 		return dbsqlc.UserMachine{}, ErrEnrollmentState
