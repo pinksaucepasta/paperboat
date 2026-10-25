@@ -22,6 +22,8 @@ import (
 	"testing"
 	"time"
 
+	sharedprotocol "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
+
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/edgeplacement"
@@ -589,5 +591,37 @@ func TestEndpointsServedWaitsForTheFirstAttachmentAnswer(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("waiting caller not released by the first answer")
+	}
+}
+
+// Audit T10: a daemon closing its runtime carrier first tells the edge it is going away, so the
+// edge routes nothing new to a carrier that is closing.
+func TestClosingRuntimeCarrierSendsHostGoaway(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	service, edge := startConnectedRuntimeCarrier(t, ctx, time.Now().Add(time.Hour), func() int { return http.StatusOK })
+	deadline := time.Now().Add(5 * time.Second)
+	for hubs, _ := service.Hubs(); len(hubs) == 0; hubs, _ = service.Hubs() {
+		if time.Now().After(deadline) {
+			t.Fatal("runtime carrier never came into service")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	go func() { _ = service.Shutdown(context.Background()) }()
+	for {
+		stream, open, err := edge.AcceptStream(ctx)
+		if err != nil {
+			t.Fatalf("no goaway before the carrier closed: %v", err)
+		}
+		if open.Kind != sharedprotocol.Goaway {
+			_ = stream.Close()
+			continue
+		}
+		notice, err := sharedprotocol.ReadGoawayNotice(stream)
+		_ = stream.Close()
+		if err != nil || notice.Reason != sharedprotocol.GoawayHostDraining || notice.DrainDeadline < time.Now().Unix() || open.RouteID != "route-test" {
+			t.Fatalf("goaway = %+v %+v, %v", open, notice, err)
+		}
+		return
 	}
 }

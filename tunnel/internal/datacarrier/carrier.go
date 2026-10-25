@@ -36,8 +36,10 @@ const (
 )
 
 var (
-	ErrInvalidConfig     = errors.New("invalid data carrier configuration")
-	ErrCarrierClosed     = errors.New("data carrier closed")
+	ErrInvalidConfig = errors.New("invalid data carrier configuration")
+	ErrCarrierClosed = errors.New("data carrier closed")
+	// ErrCarrierDraining refuses a new stream on a carrier whose host sent a goaway.
+	ErrCarrierDraining   = errors.New("data carrier draining")
 	ErrStreamLimit       = errors.New("data carrier stream limit reached")
 	ErrCarrierOverloaded = errors.New("data carrier overloaded")
 	ErrIdentityMismatch  = errors.New("data carrier stream identity mismatch")
@@ -231,6 +233,8 @@ type Server struct {
 	closeErr       error
 	active         atomic.Int64
 	dataAcceptOnce sync.Once
+	draining       chan struct{}
+	drainOnce      sync.Once
 	dataAccess     chan acceptResult
 	dataTerminal   chan acceptResult
 	controlMu      sync.Mutex
@@ -252,7 +256,7 @@ func NewServer(ctx context.Context, link io.ReadWriteCloser, config Config) (*Se
 		return nil, err
 	}
 	serverContext, cancel := context.WithCancel(ctx)
-	server := &Server{ctx: serverContext, cancel: cancel, session: session, config: config, permits: make(chan struct{}, config.MaximumStreams), openings: make(chan struct{}, config.QueueDepth), done: make(chan struct{}), dataAccess: make(chan acceptResult, config.QueueDepth), dataTerminal: make(chan acceptResult, config.QueueDepth)}
+	server := &Server{ctx: serverContext, cancel: cancel, session: session, config: config, permits: make(chan struct{}, config.MaximumStreams), openings: make(chan struct{}, config.QueueDepth), done: make(chan struct{}), dataAccess: make(chan acceptResult, config.QueueDepth), dataTerminal: make(chan acceptResult, config.QueueDepth), draining: make(chan struct{})}
 	go server.watch()
 	return server, nil
 }
@@ -268,7 +272,7 @@ func NewServerWithSession(ctx context.Context, session Session, config Config) (
 		return nil, err
 	}
 	serverContext, cancel := context.WithCancel(ctx)
-	server := &Server{ctx: serverContext, cancel: cancel, session: session, config: config, permits: make(chan struct{}, config.MaximumStreams), openings: make(chan struct{}, config.QueueDepth), done: make(chan struct{}), dataAccess: make(chan acceptResult, config.QueueDepth), dataTerminal: make(chan acceptResult, config.QueueDepth)}
+	server := &Server{ctx: serverContext, cancel: cancel, session: session, config: config, permits: make(chan struct{}, config.MaximumStreams), openings: make(chan struct{}, config.QueueDepth), done: make(chan struct{}), dataAccess: make(chan acceptResult, config.QueueDepth), dataTerminal: make(chan acceptResult, config.QueueDepth), draining: make(chan struct{})}
 	go server.watch()
 	return server, nil
 }
@@ -298,6 +302,11 @@ func (s *Server) OpenStreamWithLifetime(openCtx, lifetimeCtx context.Context, op
 	}
 	if !s.config.Identity.matches(open) {
 		return nil, ErrIdentityMismatch
+	}
+	select {
+	case <-s.draining:
+		return nil, ErrCarrierDraining
+	default:
 	}
 	if err := s.config.Authorize.AuthorizeStream(openCtx, s.config.Identity, open); err != nil {
 		return nil, carrierFailure{sentinel: ErrRouteDenied, cause: err}
@@ -559,6 +568,14 @@ func (s *Server) ActiveStreams() int {
 		return 0
 	}
 	return int(active)
+}
+
+// Draining is closed when the host sends a goaway: it opens no new streams on this carrier, and
+// the open ones finish until the carrier closes. Calling it starts the carrier's inbound stream
+// loop, which is where the goaway arrives.
+func (s *Server) Draining() <-chan struct{} {
+	s.dataAcceptOnce.Do(func() { go s.acceptDataStreams() })
+	return s.draining
 }
 
 func (s *Server) Done() <-chan struct{} {

@@ -53,7 +53,7 @@ func (s StreamOpen) Validate() error {
 
 func validStreamKind(kind string) bool {
 	switch kind {
-	case "connector_ready", "tcp_public", "http_browser", "http", "https", "h2c", "websocket", "sse", "grpc", "tcp_private", PrivateAccessHTTP, PrivateAccessTCP, InspectorHTTP, BrowserTerminalOutput:
+	case "connector_ready", "tcp_public", "http_browser", "http", "https", "h2c", "websocket", "sse", "grpc", "tcp_private", PrivateAccessHTTP, PrivateAccessTCP, InspectorHTTP, BrowserTerminalOutput, Goaway:
 		return true
 	default:
 		return false

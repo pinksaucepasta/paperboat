@@ -4,6 +4,8 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"io"
+
+	sharedprotocol "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 const (
@@ -52,7 +54,7 @@ func (s StreamOpen) Validate() error {
 
 func validStreamKind(kind string) bool {
 	switch kind {
-	case "http_browser", "connector_ready", "tcp_public", "http", "https", "h2c", "websocket", "sse", "grpc", "tcp_private", PrivateAccessHTTP, PrivateAccessTCP, InspectorHTTP, "browser_terminal_output":
+	case "http_browser", "connector_ready", "tcp_public", "http", "https", "h2c", "websocket", "sse", "grpc", "tcp_private", PrivateAccessHTTP, PrivateAccessTCP, InspectorHTTP, "browser_terminal_output", sharedprotocol.Goaway:
 		return true
 	default:
 		return false

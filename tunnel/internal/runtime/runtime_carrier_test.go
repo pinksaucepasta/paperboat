@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
+	"net"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/control"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/datacarrier"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/edgehttp"
@@ -164,5 +166,73 @@ func TestRuntimeCarrierReadinessRevocationExpiryAndRecovery(t *testing.T) {
 				t.Fatal("handler leaked")
 			}
 		})
+	}
+}
+
+// Audit T10: when the host sends a goaway on its runtime carrier, the edge takes that carrier's
+// routes out at once (new requests get the route-unavailable answer instead of a closing carrier)
+// and keeps the carrier until the host closes it.
+func TestRuntimeCarrierRoutesLeaveOnHostGoaway(t *testing.T) {
+	a := runtimeAdmission(t)
+	source := &runtimeSourceFake{admissions: []runtimewire.Admission{a}}
+	expected, err := datacarrier.NewExpectedAdmissionRegistry(datacarrier.ExpectedAdmissionRegistryConfig{NodeID: a.Binding.EdgeNodeID, ProcessEpoch: a.Binding.EdgeProcessEpoch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	routes, err := edgehttp.NewDataCarrierPreviewRegistry(edgehttp.DataCarrierPreviewRegistryConfig{BaseDomain: "runtime.example.test", ProcessEpoch: a.Binding.EdgeProcessEpoch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := &RuntimeCarrierWorker{Source: source, Expected: expected, Routes: routes, Endpoints: endpointRegistry(t, a.Binding.EdgeProcessEpoch), Interval: 20 * time.Millisecond, Timeout: time.Second}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := w.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = w.Shutdown(context.Background()) }()
+	waitRuntime(t, func() bool { return len(expected.Snapshot()) == 1 })
+	ea, err := control.ExpectedRuntimeAdmission(a, a.Binding.EdgeNodeID, a.Binding.EdgeProcessEpoch, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := newTestCarrierSession()
+	session.inbound = make(chan datacarrier.StreamLink, 1)
+	config := datacarrier.DefaultConfig()
+	config.Identity = ea.Identity
+	config.Authorize = datacarrier.AuthorizerFunc(func(context.Context, datacarrier.Identity, datacarrier.StreamOpen) error { return nil })
+	server, err := datacarrier.NewServerWithSession(context.Background(), session, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+	done := make(chan error, 1)
+	go func() { done <- w.Handle(ctx, server) }()
+	waitRuntime(t, func() bool { return routes.Len() == 1 })
+
+	edgeEnd, hostEnd := net.Pipe()
+	session.inbound <- edgeEnd
+	id := ea.Identity
+	open := connectorprotocol.StreamOpen{Protocol: connectorprotocol.ProtocolName, Version: connectorprotocol.ProtocolVersion, AccountID: id.AccountID, TunnelID: id.TunnelID, ConnectorID: id.ConnectorID, SessionID: id.SessionID, ProcessGeneration: id.ProcessGeneration, Generation: id.Generation, RouteID: a.Binding.RouteID, RequestID: "request_goaway", Kind: connectorprotocol.Goaway}
+	if err := connectorprotocol.WriteStreamOpen(hostEnd, open); err != nil {
+		t.Fatal(err)
+	}
+	if err := connectorprotocol.WriteGoawayNotice(hostEnd, connectorprotocol.GoawayHostDraining, time.Now().Add(5*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	_ = hostEnd.Close()
+	waitRuntime(t, func() bool { return routes.Len() == 0 })
+	select {
+	case err := <-done:
+		t.Fatalf("handler left before the host closed its carrier: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	_ = server.Close()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("handler after the carrier closed: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler kept a closed carrier")
 	}
 }

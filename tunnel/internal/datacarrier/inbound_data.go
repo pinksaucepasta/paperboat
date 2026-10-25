@@ -86,6 +86,10 @@ func (s *Server) readInboundDataStream(raw StreamLink) acceptResult {
 	if err == nil && !s.config.Identity.matches(open) {
 		err = ErrAccessStreamIdentity
 	}
+	if err == nil && open.Kind == connectorprotocol.Goaway {
+		s.readGoaway(raw, deadline)
+		return acceptResult{}
+	}
 	if err == nil {
 		admissionContext, cancel := context.WithTimeout(s.ctx, s.config.StreamOpenLimit)
 		err = s.config.Authorize.AuthorizeStream(admissionContext, s.config.Identity, open)
@@ -100,4 +104,18 @@ func (s *Server) readInboundDataStream(raw StreamLink) acceptResult {
 		return acceptResult{open: open, err: err}
 	}
 	return acceptResult{stream: wrapStream(raw, context.Background(), s.releasePermit, open), open: open}
+}
+
+// readGoaway takes the host's drain notice: the carrier opens no new streams from now on. The
+// identity was checked by the caller; a malformed notice changes nothing.
+func (s *Server) readGoaway(raw StreamLink, deadline time.Time) {
+	defer s.releasePermit()
+	defer raw.Close()
+	if raw.SetReadDeadline(deadline) != nil {
+		return
+	}
+	if notice, err := connectorprotocol.ReadGoawayNotice(raw); err != nil || notice.Reason != connectorprotocol.GoawayHostDraining {
+		return
+	}
+	s.drainOnce.Do(func() { close(s.draining) })
 }

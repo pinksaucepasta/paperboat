@@ -21,6 +21,7 @@ import (
 
 	"github.com/google/uuid"
 	lifetimeadmission "github.com/pinksaucepasta/paperboat/shared/admission"
+	sharedprotocol "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 
 	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
@@ -65,8 +66,10 @@ type Service struct {
 
 	// hubs are the live carriers' stream hubs, by carrier key, for endpoint routes (PLAN 3a);
 	// hubsChanged is closed and replaced whenever the set changes.
-	hubsMu      sync.Mutex
-	hubs        map[string]*preview.DataCarrierPreviewHub
+	hubsMu sync.Mutex
+	hubs   map[string]*preview.DataCarrierPreviewHub
+	// goaways tells each edge of a live carrier that it is going away (T10), keyed like hubs.
+	goaways     map[string]func()
 	hubsChanged chan struct{}
 	served      bool
 	// tunnelsServed: every edge of the attachment serves this agent's tunnels as endpoint routes
@@ -104,13 +107,15 @@ func (s *Service) Hubs() ([]*preview.DataCarrierPreviewHub, <-chan struct{}) {
 	return out, s.hubsChanged
 }
 
-func (s *Service) setHub(key string, hub *preview.DataCarrierPreviewHub) {
+func (s *Service) setHub(key string, hub *preview.DataCarrierPreviewHub, goaway func()) {
 	s.hubsMu.Lock()
 	defer s.hubsMu.Unlock()
 	if hub == nil {
 		delete(s.hubs, key)
+		delete(s.goaways, key)
 	} else {
 		s.hubs[key] = hub
+		s.goaways[key] = goaway
 	}
 	close(s.hubsChanged)
 	s.hubsChanged = make(chan struct{})
@@ -175,6 +180,8 @@ type live struct {
 	streams *tunnelmanager.RunningOriginStreams
 	release func(context.Context) error
 	open    browserbroadcastserver.OpenPublisher
+	// goaway tells the edge this carrier is going away, so it routes nothing new to it (T10).
+	goaway func()
 }
 
 // attachmentCheckTimeout bounds one attachment reconciliation: the control
@@ -215,7 +222,7 @@ func New(config Config) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Service{hubs: map[string]*preview.DataCarrierPreviewHub{}, hubsChanged: make(chan struct{}), tunnelsChanged: make(chan struct{}), answered: make(chan struct{}), config: config, auth: auth, client: &http.Client{Transport: config.Transport, Timeout: 12 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("runtime attachment redirect refused") }}, sessions: sessions, processID: processID}, nil
+	return &Service{hubs: map[string]*preview.DataCarrierPreviewHub{}, goaways: map[string]func(){}, hubsChanged: make(chan struct{}), tunnelsChanged: make(chan struct{}), answered: make(chan struct{}), config: config, auth: auth, client: &http.Client{Transport: config.Transport, Timeout: 12 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("runtime attachment redirect refused") }}, sessions: sessions, processID: processID}, nil
 }
 
 func (s *Service) Start(ctx context.Context) error {
@@ -241,6 +248,9 @@ func (s *Service) Start(ctx context.Context) error {
 }
 
 func (s *Service) Shutdown(ctx context.Context) error {
+	// Each edge hears that its carrier is going away while the carriers still run; canceling
+	// below closes them.
+	s.sendGoaways()
 	s.mu.Lock()
 	if s.cancel != nil {
 		s.cancel()
@@ -659,8 +669,37 @@ func (s *Service) connect(ctx context.Context, a admissionBinding, key string) (
 			RouteID: b.RouteID, RequestID: terminalSessionID, Kind: "browser_terminal_output",
 		})
 	})
-	s.setHub(key, hub)
-	return &live{key: key, active: carrier.Active, hub: hub, streams: streams, release: carrier.Release, open: opener}, nil
+	goaway := func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		requestID, err := randomID("request")
+		if err != nil {
+			return
+		}
+		stream, err := carrier.Active.OpenStream(ctx, connector.StreamOpen{
+			Protocol: connectorprotocol.ProtocolName, Version: connectorprotocol.ProtocolVersion, AccountID: b.AccountID,
+			TunnelID: b.TunnelID, ConnectorID: b.ConnectorID, SessionID: b.SessionID,
+			ProcessGeneration: b.ProcessGeneration, Generation: b.ConfigGeneration,
+			RouteID: b.RouteID, RequestID: requestID, Kind: sharedprotocol.Goaway,
+		})
+		if err != nil {
+			return
+		}
+		defer stream.Close()
+		if sharedprotocol.WriteGoawayNotice(stream, sharedprotocol.GoawayHostDraining, time.Now().Add(carrierDrainGrace)) != nil {
+			return
+		}
+		// The edge closes the stream once it has the notice; wait for that (bounded by ctx) so the
+		// carrier is not torn down first.
+		received := make(chan struct{})
+		go func() { _, _ = io.Copy(io.Discard, io.LimitReader(stream, 1)); close(received) }()
+		select {
+		case <-received:
+		case <-ctx.Done():
+		}
+	}
+	s.setHub(key, hub, goaway)
+	return &live{key: key, active: carrier.Active, hub: hub, streams: streams, release: carrier.Release, open: opener, goaway: goaway}, nil
 }
 
 // runtimeOriginForwarder serves the machine's own runtime listener over the carrier. The control
@@ -670,15 +709,36 @@ func runtimeOriginForwarder() tunnelmanager.OriginStreamForwarder {
 	return tunnelmanager.OriginStreamForwarder{Transport: &tunnelmanager.OriginHTTPTransport{KeepControlPlaneHeaders: true}}
 }
 
+// sendGoaways tells every edge of a live carrier, in parallel, that it is going away.
+func (s *Service) sendGoaways() {
+	s.hubsMu.Lock()
+	goaways := make([]func(), 0, len(s.goaways))
+	for _, goaway := range s.goaways {
+		goaways = append(goaways, goaway)
+	}
+	s.hubsMu.Unlock()
+	var sent sync.WaitGroup
+	for _, goaway := range goaways {
+		sent.Go(goaway)
+	}
+	sent.Wait()
+}
+
+// carrierDrainGrace is how long a closing carrier's open streams may finish.
+const carrierDrainGrace = 5 * time.Second
+
 func (s *Service) closeLive(l *live) error {
 	if l == nil {
 		return nil
 	}
-	s.setHub(l.key, nil)
+	s.setHub(l.key, nil, nil)
+	if l.goaway != nil {
+		l.goaway()
+	}
 	if l.hub != nil {
 		_ = l.hub.Close()
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), carrierDrainGrace)
 	defer cancel()
 	var err error
 	if l.streams != nil {

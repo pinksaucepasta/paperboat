@@ -201,6 +201,8 @@ func TestCarrierAssemblyTelemetryWrapsAuthenticatedPeerLifetime(t *testing.T) {
 type testCarrierSession struct {
 	closed chan struct{}
 	once   sync.Once
+	// inbound, when set, delivers host-opened streams to AcceptStream.
+	inbound chan datacarrier.StreamLink
 }
 
 func newTestCarrierSession() *testCarrierSession {
@@ -217,7 +219,14 @@ func (s *testCarrierSession) OpenStream(ctx context.Context) (datacarrier.Stream
 }
 
 func (s *testCarrierSession) AcceptStream(ctx context.Context) (datacarrier.StreamLink, error) {
-	return s.OpenStream(ctx)
+	select {
+	case <-s.closed:
+		return nil, datacarrier.ErrCarrierClosed
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case link := <-s.inbound:
+		return link, nil
+	}
 }
 
 func (s *testCarrierSession) Ping(ctx context.Context) error {

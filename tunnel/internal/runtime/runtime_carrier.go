@@ -389,6 +389,22 @@ func (w *RuntimeCarrierWorker) Handle(ctx context.Context, server *datacarrier.S
 			return nil
 		case <-changes:
 		case <-timer.C:
+		case <-server.Draining():
+			// The host is going away (T10): its routes leave this edge now, so new requests get
+			// the route-unavailable answer instead of a carrier that is closing; open streams
+			// finish until the host closes the carrier.
+			timer.Stop()
+			for key, a := range attached {
+				w.detachAdmission(a)
+				delete(attached, key)
+			}
+			w.changed()
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-server.Done():
+				return nil
+			}
 		case err := <-outputErrors:
 			timer.Stop()
 			if ctx.Err() != nil {
