@@ -64,6 +64,11 @@ func newCertificateRuntime(ctx context.Context, database *db.DB, cfg config.Conf
 	if err != nil {
 		return nil, fmt.Errorf("%w: platform edge targets: %w", tunnelv1.ErrCertificateRuntimeUnavailable, err)
 	}
+	platformBases, platformTargets := platformWildcardInputs(certificateConfig.Challenge, tunnelcert.PlatformCertificateBases{
+		PreviewBaseDomain: cfg.Preview.BaseDomain,
+		TunnelBaseDomain:  cfg.Tunnel.BaseDomain,
+		RuntimeBaseDomain: cfg.RuntimeBaseDomain,
+	}, platformEdges.Resolve)
 	runtime, err := tunnelv1.NewCertificateRuntime(tunnelv1.CertificateRuntimeConfig{
 		NodeCredentials:        nodeauth.Composite{operatorinfra.NewService(database, cfg.Secrets.EncryptionKey), selfhost.New(database, cfg.Secrets.EncryptionKey)},
 		Database:               database,
@@ -79,18 +84,24 @@ func newCertificateRuntime(ctx context.Context, database *db.DB, cfg config.Conf
 		DistributionTimeout:    certificateConfig.DistributionTimeout,
 		ExpiryAlertWindow:      certificateConfig.ExpiryAlertWindow,
 		MaxCertificateLifetime: certificateConfig.MaxCertificateLifetime,
-		PlatformBases: tunnelcert.PlatformCertificateBases{
-			PreviewBaseDomain: cfg.Preview.BaseDomain,
-			TunnelBaseDomain:  cfg.Tunnel.BaseDomain,
-			RuntimeBaseDomain: cfg.RuntimeBaseDomain,
-		},
-		PlatformEdgeTargets: platformEdges.Resolve,
+		PlatformBases:          platformBases,
+		PlatformEdgeTargets:    platformTargets,
 	})
 	if err != nil {
 		return nil, err
 	}
 	runtime.HTTP01 = http01
 	return runtime, nil
+}
+
+// platformWildcardInputs returns the server-owned wildcard inputs. Wildcard
+// certificates need DNS-01, so under http-01 the platform worker is not started
+// (the runtime starts it only when bases or an edge resolver are given).
+func platformWildcardInputs(challenge string, bases tunnelcert.PlatformCertificateBases, resolve tunnelv1.PlatformEdgeTargetResolver) (tunnelcert.PlatformCertificateBases, tunnelv1.PlatformEdgeTargetResolver) {
+	if challenge == config.CertificateChallengeHTTP01 {
+		return tunnelcert.PlatformCertificateBases{}, nil
+	}
+	return bases, resolve
 }
 
 // newPublicCertificateIssuer configures the ACME issuer for managed tunnel

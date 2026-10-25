@@ -1,11 +1,13 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
+	"github.com/pinksaucepasta/paperboat/server/internal/tunnelcert"
 	"github.com/pinksaucepasta/paperboat/server/internal/tunnelv1"
 )
 
@@ -35,5 +37,20 @@ func TestCertificateChallengeComposition(t *testing.T) {
 	cfg.Certificates.Challenge = config.CertificateChallengeDNS01
 	if _, _, _, err := newPublicCertificateIssuer(cfg); !errors.Is(err, tunnelv1.ErrCertificateRuntimeUnavailable) || !strings.Contains(err.Error(), "DNS") {
 		t.Fatalf("dns-01 without Cloudflare zones accepted: %v", err)
+	}
+}
+
+// Under http-01 the platform wildcard worker has no inputs, so the runtime does
+// not start it; dns-01 keeps the server-owned wildcard bases.
+func TestPlatformWildcardsNeedDNS01(t *testing.T) {
+	bases := tunnelcert.PlatformCertificateBases{PreviewBaseDomain: "preview.example.test", TunnelBaseDomain: "preview.example.test", RuntimeBaseDomain: "runtime.example.test"}
+	var resolver tunnelv1.PlatformEdgeTargetResolver = func(context.Context) ([]tunnelcert.EdgeTarget, error) { return nil, nil }
+	gotBases, gotResolver := platformWildcardInputs(config.CertificateChallengeHTTP01, bases, resolver)
+	if gotBases != (tunnelcert.PlatformCertificateBases{}) || gotResolver != nil {
+		t.Fatalf("http-01 kept platform wildcard inputs: %+v", gotBases)
+	}
+	gotBases, gotResolver = platformWildcardInputs(config.CertificateChallengeDNS01, bases, resolver)
+	if gotBases != bases || gotResolver == nil {
+		t.Fatalf("dns-01 dropped platform wildcard inputs: %+v", gotBases)
 	}
 }
