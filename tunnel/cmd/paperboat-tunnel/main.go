@@ -619,7 +619,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 				previewHTTPSMatcher.HasAdmittedHTTPSHostname(host) ||
 				(!deployment.SelfHosted && edgehttp.NewPreviewCarrierRouteMatcher(runtimeRoutes).HasAdmittedHTTPSHostname(host))
 		})
-	}, GatewayMaxHeaderBytes: int(deployment.MaxHeaderBytes), PrivateAddress: deployment.PrivateHTTPSListenAddress, PrivateHandler: gatewayHandler, PrivateTLS: certificateSelector.TLSConfig(), RedirectAddress: deployment.PublicHTTPListenAddress, RedirectHandler: redirectHandler})
+	}, GatewayMaxHeaderBytes: int(deployment.MaxHeaderBytes), PrivateAddress: deployment.PrivateHTTPSListenAddress, PrivateHandler: gatewayHandler, PrivateTLS: certificateSelector.TLSConfig(), RedirectAddress: deployment.PublicHTTPListenAddress, RedirectHandler: ingressAuthority.HTTP01Handler(redirectHandler)})
 	if err != nil {
 		if carrierCleanup != nil {
 			_ = carrierCleanup()

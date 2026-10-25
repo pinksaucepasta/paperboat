@@ -23,7 +23,8 @@ type IngressAuthority struct {
 	ProcessEpoch  string
 	mu            sync.Mutex
 	decisions     []connectorprotocol.IngressDecision
-	quotaDenied   map[string]bool // hostnames withheld only for bandwidth quota, from the same fetch
+	quotaDenied   map[string]bool                             // hostnames withheld only for bandwidth quota, from the same fetch
+	http01        map[string]connectorprotocol.HTTP01Response // by token, from the same fetch
 	fetched       time.Time
 	invalidated   bool
 	invalidations uint64 // a fetch started before the latest Invalidate does not clear it
@@ -177,10 +178,10 @@ func (a *IngressAuthority) snapshot(ctx context.Context, force bool) ([]connecto
 		generation := a.invalidations
 		a.mu.Unlock()
 		fetch, cancel := context.WithTimeout(ctx, 2*time.Second)
-		decisions, denied, err := a.Client.IngressDecisions(fetch, a.NodeID, a.ProcessEpoch)
+		snapshot, err := a.Client.IngressDecisions(fetch, a.NodeID, a.ProcessEpoch)
 		cancel()
 		a.mu.Lock()
-		a.recordLocked(time.Now().UTC(), decisions, denied, err, generation == a.invalidations)
+		a.recordLocked(time.Now().UTC(), snapshot, err, generation == a.invalidations)
 		a.inflight = nil
 		close(done)
 		if a.fetched.IsZero() {
@@ -193,7 +194,7 @@ func (a *IngressAuthority) snapshot(ctx context.Context, force bool) ([]connecto
 	}
 }
 
-func (a *IngressAuthority) recordLocked(now time.Time, decisions []connectorprotocol.IngressDecision, denied []connectorprotocol.IngressQuotaDenial, err error, fenced bool) {
+func (a *IngressAuthority) recordLocked(now time.Time, snapshot IngressSnapshot, err error, fenced bool) {
 	if err != nil {
 		a.failures++
 		a.lastErr = err
@@ -203,15 +204,35 @@ func (a *IngressAuthority) recordLocked(now time.Time, decisions []connectorprot
 		}
 		return
 	}
-	a.decisions, a.fetched = decisions, now
+	a.decisions, a.fetched = snapshot.Decisions, now
 	if fenced {
 		a.invalidated = false
 	}
 	a.failures, a.retryAt, a.lastErr, a.outOfSync = 0, time.Time{}, nil, time.Time{}
-	a.quotaDenied = make(map[string]bool, len(denied))
-	for _, d := range denied {
+	a.quotaDenied = make(map[string]bool, len(snapshot.QuotaDenied))
+	for _, d := range snapshot.QuotaDenied {
 		a.quotaDenied[d.Hostname] = true
 	}
+	a.http01 = make(map[string]connectorprotocol.HTTP01Response, len(snapshot.HTTP01))
+	for _, r := range snapshot.HTTP01 {
+		a.http01[r.Token] = r
+	}
+}
+
+// HTTP01KeyAuthorization returns the key authorization the last good snapshot
+// holds for an http-01 challenge at host. Responses are never served for a
+// different hostname than the one the server issued them for.
+func (a *IngressAuthority) HTTP01KeyAuthorization(host, token string) (string, bool) {
+	if a == nil {
+		return "", false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	response, ok := a.http01[token]
+	if !ok || response.Hostname != host {
+		return "", false
+	}
+	return response.KeyAuthorization, true
 }
 
 // servedLocked copies the decisions. Out of sync, a public decision near its expiry is renewed
