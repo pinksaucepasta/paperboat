@@ -7,7 +7,7 @@ import { api } from "@/lib/api"
  * File transfer modes (PLAN 3b), turned on as Lane O's parts deploy: the account preference
  * (GET/PATCH /v1/me/preferences), then transfer progress on Team Inbox requests.
  */
-export const transferModesLive = { preference: true, progress: false } as const
+export const transferModesLive = { preference: true, progress: true } as const
 
 export type TransferMode = "automatic" | "unlimited"
 
