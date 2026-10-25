@@ -21,14 +21,33 @@ func (s *Service) Sync(ctx context.Context) error {
 	if s.workos == nil {
 		return nil
 	}
-	// One server process at a time; the lock is released at the end of the tick.
-	acquired, release, err := s.lockTick(ctx)
+	// One server process at a time; the lock is released at the end of the tick. When its connection fails
+	// PostgreSQL drops the lock, so the tick stops rather than run beside another process's tick.
+	acquired, lost, release, err := s.lockTick(ctx)
 	if err != nil || !acquired {
 		return err
 	}
 	defer release()
+	ctx, stop := context.WithCancelCause(ctx)
+	defer stop(nil)
+	go func() {
+		select {
+		case <-lost:
+			stop(errSyncLockLost)
+		case <-ctx.Done():
+		}
+	}()
+	err = s.syncTick(ctx)
+	if cause := context.Cause(ctx); errors.Is(cause, errSyncLockLost) {
+		return errors.Join(err, cause)
+	}
+	return err
+}
+
+// syncTick is the work of one tick, run under the session lock.
+func (s *Service) syncTick(ctx context.Context) error {
 	errs := []error{s.readEvents(ctx)}
-	if _, err = s.db.SQL().ExecContext(ctx, `UPDATE paperboat.team_identity_state s SET dirty=true FROM paperboat.teams t WHERE t.team_id=s.team_id AND t.workos_organization_id IS NOT NULL AND (s.synced_at IS NULL OR s.synced_at < now()-interval '1 day')`); err != nil {
+	if _, err := s.db.SQL().ExecContext(ctx, `UPDATE paperboat.team_identity_state s SET dirty=true FROM paperboat.teams t WHERE t.team_id=s.team_id AND t.workos_organization_id IS NOT NULL AND (s.synced_at IS NULL OR s.synced_at < now()-interval '1 day')`); err != nil {
 		errs = append(errs, err)
 	}
 	rows, err := s.db.SQL().QueryContext(ctx, `SELECT s.team_id FROM paperboat.team_identity_state s JOIN paperboat.teams t USING(team_id) WHERE s.dirty AND t.workos_organization_id IS NOT NULL AND t.deleted_at IS NULL ORDER BY s.synced_at NULLS FIRST LIMIT 5`)
@@ -52,19 +71,46 @@ func (s *Service) Sync(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
+// syncLockCheck is how often the sync pings the connection that holds its session lock.
+const syncLockCheck = 5 * time.Second
+
+var errSyncLockLost = errors.New("team identity sync lost its database connection and stopped; the next tick retries")
+
 // lockTick takes the session lock that makes one server process run the sync at a time. The lock lives on one
-// direct connection until release.
-func (s *Service) lockTick(ctx context.Context) (bool, func(), error) {
+// direct connection, which a heartbeat pings every syncLockCheck: a failed ping means PostgreSQL has dropped the
+// lock, so lost closes. release ends the heartbeat and unlocks, and a connection that cannot unlock is closed.
+func (s *Service) lockTick(ctx context.Context) (acquired bool, lost <-chan struct{}, release func(), err error) {
 	conn, err := s.db.Direct().Acquire(ctx)
 	if err != nil {
-		return false, nil, err
+		return false, nil, nil, err
 	}
-	var acquired bool
 	if err := conn.QueryRow(ctx, `SELECT pg_try_advisory_lock(160236)`).Scan(&acquired); err != nil || !acquired {
 		conn.Release()
-		return false, nil, err
+		return false, nil, nil, err
 	}
-	return true, func() {
+	lostCh, stop, stopped := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(stopped)
+		ticker := time.NewTicker(syncLockCheck)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+			}
+			pingCtx, cancel := context.WithTimeout(context.Background(), syncLockCheck)
+			pingErr := conn.Ping(pingCtx)
+			cancel()
+			if pingErr != nil {
+				close(lostCh)
+				return
+			}
+		}
+	}()
+	release = func() {
+		close(stop)
+		<-stopped
 		unlockCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		if _, err := conn.Exec(unlockCtx, `SELECT pg_advisory_unlock(160236)`); err != nil {
@@ -72,7 +118,8 @@ func (s *Service) lockTick(ctx context.Context) (bool, func(), error) {
 			_ = conn.Conn().Close(unlockCtx)
 		}
 		conn.Release()
-	}, nil
+	}
+	return true, lostCh, release, nil
 }
 
 // deleteOrganizations removes the WorkOS organization of deleted teams, so their SSO connection
