@@ -66,6 +66,10 @@ type Deployment struct {
 	// preview waits for the next pull, so it is much shorter than ControlInterval; zero means
 	// DefaultPreviewCarrierInterval.
 	PreviewCarrierInterval time.Duration `json:"preview_carrier_interval,omitempty"`
+
+	// PublicTCPIdleTimeout closes a public TCP or TLS tunnel stream after this long without
+	// traffic in either direction; zero means DefaultPublicTCPIdleTimeout.
+	PublicTCPIdleTimeout time.Duration `json:"public_tcp_idle_timeout,omitempty"`
 }
 
 type PublicRoute struct {
@@ -206,6 +210,9 @@ func (d Deployment) validate() error {
 	if d.PreviewCarrierInterval < 0 || d.PreviewCarrierInterval > d.ControlInterval && d.PreviewCarrierInterval != 0 || d.PreviewCarrierInterval != 0 && d.PreviewCarrierInterval < 50*time.Millisecond {
 		return errors.New("preview carrier interval is invalid")
 	}
+	if d.PublicTCPIdleTimeout != 0 && (d.PublicTCPIdleTimeout < time.Minute || d.PublicTCPIdleTimeout > 24*time.Hour) {
+		return errors.New("public_tcp_idle_timeout must be between 1m and 24h")
+	}
 	if d.NodeCapacity == 0 || d.NodeCapacity > 10000 || d.ControlInterval <= 0 || d.ControlInterval > time.Minute || d.ControlTimeout <= 0 || d.ControlTimeout > 30*time.Second || d.MaxBodyBytes < 1 || d.MaxHeaderBytes < 1024 || d.MaxHeaderBytes > maximumGatewayHeaderBytes {
 		return errors.New("deployment bounds are invalid")
 	}
@@ -277,6 +284,18 @@ func privateRouteEndpoint(address string) error {
 
 // DefaultPreviewCarrierInterval keeps a new preview's wait for edge admission well under a second.
 const DefaultPreviewCarrierInterval = 500 * time.Millisecond
+
+// DefaultPublicTCPIdleTimeout keeps long quiet sessions (SSH, databases) open and still reclaims
+// streams whose peers vanished (coordinator decision 2026-10-26; no lifetime cap).
+const DefaultPublicTCPIdleTimeout = time.Hour
+
+// PublicTCPIdle is the effective idle timeout of public TCP and TLS streams.
+func (d Deployment) PublicTCPIdle() time.Duration {
+	if d.PublicTCPIdleTimeout == 0 {
+		return DefaultPublicTCPIdleTimeout
+	}
+	return d.PublicTCPIdleTimeout
+}
 
 // PreviewCarrierPollInterval is the effective preview admission pull interval.
 func (d Deployment) PreviewCarrierPollInterval() time.Duration {

@@ -47,6 +47,7 @@ type DataCarrierRouteRegistry struct {
 	ingressLimits    *IngressLimits
 	usage            IngressUsage
 	maximum          int
+	publicTCPIdle    time.Duration
 	done             chan struct{}
 	once             sync.Once
 	mu               sync.RWMutex
@@ -94,20 +95,23 @@ type DataCarrierRouteRegistryConfig struct {
 	IngressLimits    *IngressLimits
 	Usage            IngressUsage
 	MaximumRoutes    int
+	// PublicTCPIdleTimeout closes a public TCP or TLS stream after this long without traffic in
+	// either direction; zero keeps idle streams open.
+	PublicTCPIdleTimeout time.Duration
 }
 
 func NewDataCarrierRouteRegistry(config DataCarrierRouteRegistryConfig) (*DataCarrierRouteRegistry, error) {
 	if config.MaximumRoutes == 0 {
 		config.MaximumRoutes = maximumDataCarrierRoutes
 	}
-	if config.MaximumRoutes < 1 || config.MaximumRoutes > maximumDataCarrierRoutes {
+	if config.MaximumRoutes < 1 || config.MaximumRoutes > maximumDataCarrierRoutes || config.PublicTCPIdleTimeout < 0 {
 		return nil, ErrDataCarrierRouteInvalid
 	}
 	limits, err := newIngressLimits(config.IngressLimits)
 	if err != nil {
 		return nil, ErrDataCarrierRouteInvalid
 	}
-	return &DataCarrierRouteRegistry{ingressAuthority: config.IngressAuthority, ingressLimits: limits, usage: config.Usage, maximum: config.MaximumRoutes, done: make(chan struct{}), byKey: make(map[string]*dataCarrierRouteEntry)}, nil
+	return &DataCarrierRouteRegistry{ingressAuthority: config.IngressAuthority, ingressLimits: limits, usage: config.Usage, maximum: config.MaximumRoutes, publicTCPIdle: config.PublicTCPIdleTimeout, done: make(chan struct{}), byKey: make(map[string]*dataCarrierRouteEntry)}, nil
 }
 
 // Attach registers one already-authenticated server. The Server identity is

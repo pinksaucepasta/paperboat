@@ -6,6 +6,7 @@ import (
 	runtimeadmission "github.com/pinksaucepasta/paperboat/shared/admission"
 	"io"
 	"net"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -68,7 +69,21 @@ func (r *DataCarrierRouteRegistry) ForwardPublicTCP(ctx context.Context, connect
 	}
 	applicationStream := lease.Wrap(ctx, stream)
 	defer applicationStream.Close()
-	return bridgePublicTCP(ctx, connection, applicationStream, authority, open, currentAuthority)
+	keepPublicTCPAlive(connection)
+	return bridgePublicTCP(ctx, connection, applicationStream, authority, open, currentAuthority, r.publicTCPIdle)
+}
+
+// publicTCPKeepAlive finds a vanished public client in about a minute instead of leaving its
+// stream to the idle timeout. Prior art: cloudflared's tcpKeepAlive default of 30 s.
+var publicTCPKeepAlive = net.KeepAliveConfig{Enable: true, Idle: 30 * time.Second, Interval: 10 * time.Second, Count: 3}
+
+func keepPublicTCPAlive(connection net.Conn) {
+	if replay, ok := connection.(*replayTLSConn); ok {
+		connection = replay.Conn
+	}
+	if tcp, ok := connection.(*net.TCPConn); ok {
+		_ = tcp.SetKeepAliveConfig(publicTCPKeepAlive)
+	}
 }
 
 func resolvePublicTCPAuthority(ctx context.Context, current func(context.Context, connectorprotocol.IngressDecision) (connectorprotocol.IngressDecision, error), decision connectorprotocol.IngressDecision, open connectorprotocol.StreamOpen) (connectorprotocol.IngressDecision, error) {
@@ -85,7 +100,7 @@ func resolvePublicTCPAuthority(ctx context.Context, current func(context.Context
 	return authority, nil
 }
 
-func bridgePublicTCP(ctx context.Context, connection net.Conn, stream io.ReadWriteCloser, authority connectorprotocol.IngressDecision, open connectorprotocol.StreamOpen, current func(context.Context, connectorprotocol.IngressDecision) (connectorprotocol.IngressDecision, error)) error {
+func bridgePublicTCP(ctx context.Context, connection net.Conn, stream io.ReadWriteCloser, authority connectorprotocol.IngressDecision, open connectorprotocol.StreamOpen, current func(context.Context, connectorprotocol.IngressDecision) (connectorprotocol.IngressDecision, error), idle time.Duration) error {
 	lease, err := runtimeadmission.Admit(ctx, time.Time{}, nil)
 	if err != nil {
 		return err
@@ -112,8 +127,10 @@ func bridgePublicTCP(ctx context.Context, connection net.Conn, stream io.ReadWri
 	})
 	defer stopWatch()
 	results := make(chan error, 2)
+	var last atomic.Int64
+	last.Store(time.Now().UnixNano())
 	copyDirection := func(destination io.Writer, source io.Reader, closeWrite func() error) {
-		_, copyErr := io.Copy(destination, source)
+		_, copyErr := io.Copy(destination, activityReader{source, &last})
 		copyErr = errors.Join(copyErr, closeWrite())
 		results <- copyErr
 	}
@@ -127,6 +144,17 @@ func bridgePublicTCP(ctx context.Context, connection net.Conn, stream io.ReadWri
 	}
 	go copyDirection(stream, connection, streamCloseWrite)
 	go copyDirection(connection, stream, connectionCloseWrite)
+	idled := make(chan struct{})
+	if idle > 0 {
+		stopIdle := closeWhenIdle(idle, &last, idled, func() {
+			// Both sides are silent: a FIN each way first, so neither peer sees a reset.
+			_ = connectionCloseWrite()
+			_ = streamCloseWrite()
+			_ = connection.Close()
+			_ = stream.Close()
+		})
+		defer stopIdle()
+	}
 	first := <-results
 	if first != nil {
 		_ = connection.Close()
@@ -138,5 +166,51 @@ func bridgePublicTCP(ctx context.Context, connection net.Conn, stream io.ReadWri
 	if errors.Is(context.Cause(lease.Context()), runtimeadmission.ErrRevoked) {
 		return errors.Join(connectorprotocol.ErrIngressDenied, first, second)
 	}
+	select {
+	case <-idled:
+		return nil
+	default:
+	}
 	return errors.Join(ctx.Err(), first, second)
+}
+
+// activityReader records the time of every read that carried data.
+type activityReader struct {
+	io.Reader
+	last *atomic.Int64
+}
+
+func (r activityReader) Read(p []byte) (int, error) {
+	n, err := r.Reader.Read(p)
+	if n > 0 {
+		r.last.Store(time.Now().UnixNano())
+	}
+	return n, err
+}
+
+// closeWhenIdle runs shut once no data has moved for idle, then closes idled. The returned
+// function stops the watch.
+func closeWhenIdle(idle time.Duration, last *atomic.Int64, idled chan struct{}, shut func()) func() {
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		timer := time.NewTimer(idle)
+		defer timer.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-timer.C:
+			}
+			if quiet := time.Since(time.Unix(0, last.Load())); quiet < idle {
+				timer.Reset(idle - quiet)
+				continue
+			}
+			close(idled)
+			shut()
+			return
+		}
+	}()
+	return func() { close(stop); <-done }
 }

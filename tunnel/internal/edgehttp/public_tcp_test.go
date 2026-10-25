@@ -170,7 +170,7 @@ func TestPublicTCPAdmittedStreamOutlivesTTLAndIsCutByRevocation(t *testing.T) {
 		return fresh, nil
 	}
 	done := make(chan error, 1)
-	go func() { done <- bridgePublicTCP(t.Context(), accepted, stream, decision, open, current) }()
+	go func() { done <- bridgePublicTCP(t.Context(), accepted, stream, decision, open, current, 0) }()
 	select {
 	case <-done:
 		t.Fatal("admitted TCP expired")
@@ -190,5 +190,82 @@ func TestPublicTCPAdmittedStreamOutlivesTTLAndIsCutByRevocation(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("revocation retained admitted TCP")
+	}
+}
+
+// tcpPair is a connected loopback TCP pair, so half-close and reset are the kernel's.
+func tcpPair(t *testing.T) (*net.TCPConn, *net.TCPConn) {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	dialed, err := net.Dial("tcp", listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted, err := listener.Accept()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = dialed.Close(); _ = accepted.Close() })
+	return dialed.(*net.TCPConn), accepted.(*net.TCPConn)
+}
+
+// Audit T3: a public TCP stream stays open while data moves either way and is closed cleanly
+// (EOF on both peers, never a reset) once both sides are silent for the idle timeout.
+func TestPublicTCPIdleTimeoutClosesQuietStreamsCleanly(t *testing.T) {
+	client, accepted := tcpPair(t)
+	stream, origin := tcpPair(t)
+	now := time.Now().UTC()
+	decision := publicTCPDecision(now, 4002)
+	open := connectorprotocol.StreamOpen{Protocol: connectorprotocol.ProtocolName, Version: connectorprotocol.ProtocolVersion, AccountID: decision.Binding.AccountID, TunnelID: decision.Binding.TunnelID, ConnectorID: decision.ConnectorID, SessionID: decision.SessionID, ProcessGeneration: decision.ProcessGeneration, Generation: decision.ConfigGeneration, RouteID: decision.Binding.RouteID, RequestID: "request_idle", Kind: "tcp_public"}
+	current := func(context.Context, connectorprotocol.IngressDecision) (connectorprotocol.IngressDecision, error) {
+		fresh := decision
+		fresh.IssuedAt = time.Now().UTC().Add(-time.Second)
+		fresh.ExpiresAt = fresh.IssuedAt.Add(10 * time.Second)
+		return fresh, nil
+	}
+	const idle = 300 * time.Millisecond
+	done := make(chan error, 1)
+	go func() { done <- bridgePublicTCP(t.Context(), accepted, stream, decision, open, current, idle) }()
+
+	// Traffic alternating direction every 150 ms keeps it open well past the idle timeout.
+	var b [1]byte
+	for i := range 6 {
+		writer, reader := net.Conn(client), net.Conn(origin)
+		if i%2 == 1 {
+			writer, reader = origin, client
+		}
+		if _, err := writer.Write([]byte{byte(i)}); err != nil {
+			t.Fatal(err)
+		}
+		_ = reader.SetReadDeadline(time.Now().Add(time.Second))
+		if _, err := io.ReadFull(reader, b[:]); err != nil || b[0] != byte(i) {
+			t.Fatalf("byte %d lost: %v", i, err)
+		}
+		time.Sleep(idle / 2)
+	}
+	select {
+	case err := <-done:
+		t.Fatalf("active stream closed: %v", err)
+	default:
+	}
+
+	// Silence: both peers see a clean EOF and the bridge reports no failure.
+	for name, peer := range map[string]net.Conn{"client": client, "origin": origin} {
+		_ = peer.SetReadDeadline(time.Now().Add(3 * idle))
+		if _, err := peer.Read(b[:]); err != io.EOF {
+			t.Fatalf("%s after idle timeout: %v, want a clean EOF", name, err)
+		}
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("idle close reported %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("bridge kept an idle stream")
 	}
 }

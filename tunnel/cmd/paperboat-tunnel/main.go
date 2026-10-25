@@ -366,7 +366,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		return nil, err
 	}
 	ingressAuthority := &control.IngressAuthority{Client: client, NodeID: cfg.NodeID, ProcessEpoch: processEpoch}
-	durableRoutes, err := edgehttp.NewDataCarrierRouteRegistry(edgehttp.DataCarrierRouteRegistryConfig{MaximumRoutes: 4096, Usage: meter, IngressAuthority: ingressAuthority.Resolve})
+	durableRoutes, err := edgehttp.NewDataCarrierRouteRegistry(edgehttp.DataCarrierRouteRegistryConfig{MaximumRoutes: 4096, Usage: meter, IngressAuthority: ingressAuthority.Resolve, PublicTCPIdleTimeout: deployment.PublicTCPIdle()})
 	if err != nil {
 		return nil, fmt.Errorf("create durable carrier route registry: %w", err)
 	}

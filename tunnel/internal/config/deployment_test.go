@@ -194,3 +194,19 @@ func TestPreviewCarrierIntervalDefaultsBelowControlInterval(t *testing.T) {
 		}
 	}
 }
+
+func TestPublicTCPIdleTimeoutDefaultsToOneHour(t *testing.T) {
+	deployment, err := LoadDeployment(writeDeployment(t, validDeploymentJSON()))
+	if err != nil || deployment.PublicTCPIdle() != time.Hour {
+		t.Fatalf("default public TCP idle timeout = %s, %v", deployment.PublicTCPIdle(), err)
+	}
+	explicit := strings.TrimSuffix(validDeploymentJSON(), "}") + `,"public_tcp_idle_timeout":600000000000}`
+	if deployment, err = LoadDeployment(writeDeployment(t, explicit)); err != nil || deployment.PublicTCPIdle() != 10*time.Minute {
+		t.Fatalf("explicit public TCP idle timeout = %s, %v", deployment.PublicTCPIdle(), err)
+	}
+	for _, bad := range []string{`,"public_tcp_idle_timeout":-1}`, `,"public_tcp_idle_timeout":1000000000}`, `,"public_tcp_idle_timeout":90000000000000}`} {
+		if _, err := LoadDeployment(writeDeployment(t, strings.TrimSuffix(validDeploymentJSON(), "}")+bad)); err == nil {
+			t.Fatalf("accepted public TCP idle timeout %s", bad)
+		}
+	}
+}
