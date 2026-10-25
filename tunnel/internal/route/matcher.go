@@ -148,6 +148,7 @@ func (l *StreamLease) Close() error {
 type generationState struct {
 	generation uint64
 	rules      []RouteRule
+	index      *ruleIndex
 	ctx        context.Context
 	cancel     context.CancelFunc
 	ready      bool
@@ -160,7 +161,7 @@ type generationState struct {
 
 func newGenerationState(generation uint64, rules []RouteRule) *generationState {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &generationState{generation: generation, rules: rules, ctx: ctx, cancel: cancel, drained: make(chan struct{}), leases: make(map[*StreamLease]struct{})}
+	return &generationState{generation: generation, rules: rules, index: newRuleIndex(rules), ctx: ctx, cancel: cancel, drained: make(chan struct{}), leases: make(map[*StreamLease]struct{})}
 }
 
 func (s *generationState) markDrained() {
@@ -617,10 +618,10 @@ func (g *GenerationRegistry) Match(host, requestPath string) (RouteMatch, error)
 		g.mu.RUnlock()
 		return RouteMatch{}, ErrNoMatch
 	}
-	rules := active.rules
+	rules, index := active.rules, active.index
 	generation := active.generation
 	g.mu.RUnlock()
-	rule, err := chooseRule(rules, host, requestPath)
+	rule, err := chooseRuleFrom(rules, index, host, requestPath)
 	if err != nil {
 		return RouteMatch{}, err
 	}
@@ -642,16 +643,25 @@ func (g *GenerationRegistry) Acquire(ctx context.Context, host, requestPath stri
 	if err != nil {
 		return nil, RouteMatch{}, ErrNoMatch
 	}
-	g.mu.Lock()
-	active := g.active
-	if active == nil || !active.accepting {
-		g.mu.Unlock()
+	// Choose the rule from the active generation's immutable rules and index under the read lock;
+	// the exclusive lock below only counts the stream (audit T7: no rule scan under it).
+	g.mu.RLock()
+	chosen := g.active
+	if chosen == nil || !chosen.accepting {
+		g.mu.RUnlock()
 		return nil, RouteMatch{}, ErrNoMatch
 	}
-	rule, err := chooseRule(active.rules, host, requestPath)
+	g.mu.RUnlock()
+	rule, err := chooseRuleFrom(chosen.rules, chosen.index, host, requestPath)
 	if err != nil {
-		g.mu.Unlock()
 		return nil, RouteMatch{}, err
+	}
+	g.mu.Lock()
+	active := g.active
+	if active != chosen || !active.accepting {
+		// The generation changed meanwhile: its rules decide, so choose again from them.
+		g.mu.Unlock()
+		return g.Acquire(ctx, host, requestPath)
 	}
 	if active.streams >= g.maximumStreams {
 		activeStreams := active.streams

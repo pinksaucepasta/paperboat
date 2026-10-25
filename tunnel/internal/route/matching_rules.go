@@ -2,6 +2,7 @@ package route
 
 import (
 	"net"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -74,9 +75,58 @@ func routeAccepting(rule RouteRule) bool {
 }
 
 func chooseRule(rules []RouteRule, host, requestPath string) (RouteRule, error) {
+	return chooseRuleFrom(rules, nil, host, requestPath)
+}
+
+// ruleIndex lists, for a host, the positions of the rules that can match it: exact and named
+// catch-all rules by hostname, one-label wildcards by suffix, unnamed catch-alls always. Matching
+// a request then looks at a handful of rules instead of every rule (audit T7).
+type ruleIndex struct {
+	byHost   map[string][]int
+	bySuffix map[string][]int
+	always   []int
+}
+
+func newRuleIndex(rules []RouteRule) *ruleIndex {
+	index := &ruleIndex{byHost: map[string][]int{}, bySuffix: map[string][]int{}}
+	for i, rule := range rules {
+		switch {
+		case rule.MatchType == MatchExact || rule.MatchType == MatchManagedExact || rule.MatchType == MatchCatchAll && rule.Hostname != "":
+			index.byHost[rule.Hostname] = append(index.byHost[rule.Hostname], i)
+		case rule.MatchType == MatchOneLabelWildcard:
+			index.bySuffix[rule.WildcardSuffix] = append(index.bySuffix[rule.WildcardSuffix], i)
+		case rule.MatchType == MatchCatchAll:
+			index.always = append(index.always, i)
+		}
+	}
+	return index
+}
+
+// candidates returns the positions of the rules that can match host, in rule order.
+func (x *ruleIndex) candidates(host string) []int {
+	out := append([]int(nil), x.byHost[host]...)
+	if _, suffix, ok := strings.Cut(host, "."); ok {
+		out = append(out, x.bySuffix[suffix]...)
+	}
+	out = append(out, x.always...)
+	sort.Ints(out)
+	return out
+}
+
+// chooseRuleFrom chooses among rules, or only among the rules index lists for host when index is
+// set; either way in rule order, so the choice and its conflicts are the same.
+func chooseRuleFrom(rules []RouteRule, index *ruleIndex, host, requestPath string) (RouteRule, error) {
+	order := rules
+	if index != nil {
+		positions := index.candidates(host)
+		order = make([]RouteRule, len(positions))
+		for i, position := range positions {
+			order[i] = rules[position]
+		}
+	}
 	var best routeCandidate
 	found := false
-	for _, rule := range rules {
+	for _, rule := range order {
 		if !routeAccepting(rule) {
 			continue
 		}
