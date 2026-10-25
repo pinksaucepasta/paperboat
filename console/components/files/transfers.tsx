@@ -16,7 +16,7 @@ export function Transfers({ scope }: { scope?: string | null }) {
   const requests = useApiQuery({ ...requestsQuery(workspace?.id ?? ""), enabled: Boolean(workspace) && transferModesLive.progress })
   const running = (requests.data ?? []).filter(
     (request) =>
-      ["sending", "paused", "failed"].includes(request.state ?? "") &&
+      ["sending", "paused", "failed"].includes(request.transfer_state ?? "") &&
       (request.sender_account === me?.id || request.recipient_account === me?.id) &&
       (!scope || request.destination_machine_id === scope || request.source_machine_id === scope),
   )
@@ -48,10 +48,10 @@ function TransferRow({ request, to }: { request: InboxRequest; to: string }) {
       <span className="text-xs text-muted-foreground">
         {formatBytes(done)} of {formatBytes(total)}
         {mode && ` · ${mode}`}
-        {request.state === "sending" && " · Sending"}
-        {request.state === "failed" && " · Failed"}
+        {request.transfer_state === "sending" && " · Sending"}
+        {request.transfer_state === "failed" && " · Failed"}
       </span>
-      {request.state === "paused" && (
+      {request.transfer_state === "paused" && (
         <span className="text-xs">
           Waiting for a direct connection or your relay.{" "}
           <span className="text-muted-foreground">{pauseReasons[request.pause_reason ?? ""] ?? ""}</span>
