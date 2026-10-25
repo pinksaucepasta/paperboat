@@ -139,7 +139,7 @@ func (s AuthenticatedMachineSource) ListCompletionItems(ctx context.Context, mac
 	items = append(items, previews...)
 	// One catalog page for the caller's own sessions on every machine, stored rows only: listing
 	// each machine separately cost N requests per daemon per refresh (O(N²) across an account).
-	sessions, err := client.SharedTerminalSessionsFiltered(ctx, url.Values{"owner": {"mine"}, "live": {"false"}})
+	sessions, err := client.SharedTerminalSessionsFiltered(ctx, url.Values{"owner": {"mine"}, "live": {"false"}, "closed": {"false"}})
 	if err != nil {
 		partial = errors.Join(partial, inventorySourceFailure("completion_list", err))
 	}

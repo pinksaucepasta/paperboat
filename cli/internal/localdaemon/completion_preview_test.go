@@ -16,6 +16,9 @@ func TestCompletionInventoryReadsCanonicalPreviewPages(t *testing.T) {
 	calls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/terminal-sessions" {
+			if r.URL.Query().Get("closed") != "false" {
+				t.Errorf("completion listed closed terminal sessions: %s", r.URL.RawQuery)
+			}
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"sessions": []any{}, "pagination": map[string]any{"limit": 200, "offset": 0, "total": 0, "next_offset": nil}}})
 			return
@@ -26,6 +29,9 @@ func TestCompletionInventoryReadsCanonicalPreviewPages(t *testing.T) {
 			return
 		}
 		calls++
+		if r.URL.Query().Get("state") != "active" {
+			t.Errorf("completion walked previews without state=active: %s", r.URL.RawQuery)
+		}
 		id, next := "preview_first", "page-two"
 		if r.URL.Query().Get("cursor") == "page-two" {
 			id, next = "preview_second", ""
