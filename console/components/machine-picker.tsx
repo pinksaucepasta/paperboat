@@ -3,7 +3,8 @@
 import { CheckIcon, StackIcon } from "@phosphor-icons/react"
 import { useMemo, useState } from "react"
 import { useDebounced } from "@/hooks/use-debounced"
-import { machineSearchQuery, useApiQuery, useMachine, useMachinePage, useWorkspace, type Machine } from "@/lib/api"
+import { machineListQuery } from "@/lib/machine-list"
+import { machineSearchQuery, useApiQuery, useMachine, useWorkspace, type Machine } from "@/lib/api"
 import { recentMachines, rememberMachine } from "@/lib/recent-machines"
 import { cn } from "@/lib/utils"
 import { CrumbPickerTrigger, pickerOption } from "@/components/crumb-picker"
@@ -35,7 +36,8 @@ export function MachinePicker({ value, onChange, allowAll = false }: Props) {
   const [search, setSearch] = useState("")
   const query = useDebounced(search.trim(), 200)
   const workspace = useWorkspace()
-  const page = useMachinePage()
+  // Without a search: the first page in name order (revoked left out by the server), not every machine.
+  const page = useApiQuery({ ...machineListQuery(workspace?.id ?? "", "", {}, 1), enabled: open && Boolean(workspace) })
   const { data: selected, isPending } = useMachine(value)
   const results = useApiQuery({
     ...machineSearchQuery(workspace?.id ?? "", query),
@@ -47,7 +49,7 @@ export function MachinePicker({ value, onChange, allowAll = false }: Props) {
     () =>
       page.data
         ? suggest(
-            page.data.items.filter((machine) => machine.state !== "revoked"),
+            page.data.items,
             value,
             workspace ? recentMachines(workspace.id) : [],
           )

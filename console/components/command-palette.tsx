@@ -4,7 +4,8 @@ import { MagnifyingGlassIcon, UserCircleIcon } from "@phosphor-icons/react"
 import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
 import { useDebounced } from "@/hooks/use-debounced"
-import { machineSearchQuery, useApiQuery, useMachinePage, useWorkspace, type Machine } from "@/lib/api"
+import { machineListQuery } from "@/lib/machine-list"
+import { machineSearchQuery, useApiQuery, useWorkspace, type Machine } from "@/lib/api"
 import { navigationGroups } from "@/lib/sections"
 import { StatusDot } from "@/components/machine-status"
 import {
@@ -27,7 +28,8 @@ export function CommandPalette() {
   const query = useDebounced(search.trim(), 200)
   const router = useRouter()
   const workspace = useWorkspace()
-  const page = useMachinePage()
+  // Without a search: the first page in name order (revoked left out by the server), not every machine.
+  const page = useApiQuery({ ...machineListQuery(workspace?.id ?? "", "", {}, 1), enabled: open && Boolean(workspace) })
   const results = useApiQuery({
     ...machineSearchQuery(workspace?.id ?? "", query),
     enabled: open && Boolean(workspace) && query.length > 0,
@@ -53,7 +55,7 @@ export function CommandPalette() {
 
   const needle = search.trim().toLowerCase()
   const matchingPages = pages.filter((section) => !needle || section.title.toLowerCase().includes(needle))
-  const machines: Machine[] = query ? (results.data?.items ?? []) : (page.data?.items.filter((machine) => machine.state !== "revoked").slice(0, 5) ?? [])
+  const machines: Machine[] = query ? (results.data?.items ?? []) : (page.data?.items.slice(0, 5) ?? [])
 
   return (
     <>

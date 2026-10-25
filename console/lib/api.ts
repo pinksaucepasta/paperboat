@@ -435,11 +435,6 @@ export function useWorkspace(): Workspace | undefined {
   return data?.find((workspace) => workspace.id === id) ?? data?.find((workspace) => workspace.kind === "personal")
 }
 
-export function useMachinePage() {
-  const workspace = useWorkspace()
-  return useApiQuery({ ...machinesQuery(workspace?.id ?? ""), enabled: Boolean(workspace) })
-}
-
 /** The workspace's machines you can use: every page, revoked ones left out. */
 export function useMachines() {
   const workspace = useWorkspace()
