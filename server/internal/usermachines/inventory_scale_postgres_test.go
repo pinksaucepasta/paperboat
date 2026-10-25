@@ -33,7 +33,7 @@ func TestMachineInventoryListsAHundredMachinesWithoutPerRowQueriesOnPostgres(t *
 	service := New(store, nil, Policy{}, nil)
 	list := func() ([]UserMachine, time.Duration) {
 		started := time.Now()
-		items, total, err := service.ListInventory(ctx, owner, InventoryOptions{Limit: 100})
+		items, total, _, err := service.ListInventory(ctx, owner, InventoryOptions{Limit: 100})
 		if err != nil || total != 100 || len(items) != 100 {
 			t.Fatalf("inventory: %d of %d err=%v", len(items), total, err)
 		}

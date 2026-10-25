@@ -207,12 +207,12 @@ func TestWorkspaceScopedMachineListGetAndAccess(t *testing.T) {
 		owner string
 		total int
 	}{{personal, "mine", 1}, {teamOne, "mine", 1}, {teamOne, "shared", 0}, {teamTwo, "", 0}} {
-		items, total, err := f.service.ListInventory(entry.ctx, f.account, InventoryOptions{Limit: 1, Owner: entry.owner})
+		items, total, _, err := f.service.ListInventory(entry.ctx, f.account, InventoryOptions{Limit: 1, Owner: entry.owner})
 		if err != nil || total != entry.total || len(items) != entry.total {
 			t.Fatalf("filtered machine page owner=%s: %d %d %v", entry.owner, len(items), total, err)
 		}
 	}
-	if items, total, err := f.service.ListInventory(personal, f.account, InventoryOptions{Limit: 1, Offset: 1}); err != nil || total != 1 || len(items) != 0 {
+	if items, total, _, err := f.service.ListInventory(personal, f.account, InventoryOptions{Limit: 1, Offset: 1}); err != nil || total != 1 || len(items) != 0 {
 		t.Fatalf("machine offset page: %d %d %v", len(items), total, err)
 	}
 
@@ -265,7 +265,7 @@ func TestWorkspaceScopedMachineListGetAndAccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	for offset, id := range []string{f.machine, second} {
-		items, total, err := f.service.ListInventory(personal, f.account, InventoryOptions{Limit: 1, Offset: offset})
+		items, total, _, err := f.service.ListInventory(personal, f.account, InventoryOptions{Limit: 1, Offset: offset})
 		if err != nil || total != 2 || len(items) != 1 || items[0].ID != id {
 			t.Fatalf("personal page %d: incorrect authorized inventory", offset)
 		}
@@ -273,7 +273,7 @@ func TestWorkspaceScopedMachineListGetAndAccess(t *testing.T) {
 			t.Fatalf("personal page %d: incorrect owner/management authority", offset)
 		}
 	}
-	if items, total, err := f.service.ListInventory(personal, f.account, InventoryOptions{Limit: 1, Offset: 2}); err != nil || total != 2 || len(items) != 0 {
+	if items, total, _, err := f.service.ListInventory(personal, f.account, InventoryOptions{Limit: 1, Offset: 2}); err != nil || total != 2 || len(items) != 0 {
 		t.Fatal("exhausted personal page lost total or repeated an item")
 	}
 }
@@ -368,7 +368,7 @@ func TestFilesOnlyTeamInventoryRequiresPaidEntitlement(t *testing.T) {
 	team := workspace.WithContext(f.ctx, workspace.Scope{ID: f.teamOne, TeamID: f.teamOne})
 	check := func(want int) {
 		t.Helper()
-		items, total, err := f.service.ListInventory(team, member, InventoryOptions{Limit: 50})
+		items, total, _, err := f.service.ListInventory(team, member, InventoryOptions{Limit: 50})
 		if err != nil || total != want || len(items) != want {
 			t.Fatalf("files-only inventory count=%d total=%d want=%d: %v", len(items), total, want, err)
 		}
@@ -385,7 +385,7 @@ func TestFilesOnlyTeamInventoryRequiresPaidEntitlement(t *testing.T) {
 	if _, err := getMachineForCapability(team, f.store.Queries(), dbsqlc.GetUserMachineForCapabilityParams{ID: f.machine, UserID: member, Capability: "terminal"}); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("files-only grant authorized terminal: %v", err)
 	}
-	if _, total, err := f.service.ListInventory(workspace.WithContext(f.ctx, workspace.Scope{ID: "personal"}), member, InventoryOptions{Limit: 50}); err != nil || total != 0 {
+	if _, total, _, err := f.service.ListInventory(workspace.WithContext(f.ctx, workspace.Scope{ID: "personal"}), member, InventoryOptions{Limit: 50}); err != nil || total != 0 {
 		t.Fatal("team grant leaked into personal inventory")
 	}
 	if _, err := f.store.SQL().ExecContext(f.ctx, `UPDATE paperboat.billing_workspaces SET period_end=now()-interval '1 second' WHERE team_id=$1`, f.teamOne); err != nil {

@@ -167,7 +167,7 @@ WHERE p.team_id=$1`, team, member, m("team_all"), admin)
 					want = append(want, id)
 				}
 			}
-			items, total, err := service.ListInventory(listCtx, actor, InventoryOptions{Limit: 200})
+			items, total, _, err := service.ListInventory(listCtx, actor, InventoryOptions{Limit: 200})
 			if err != nil {
 				if scope != nil && scope.TeamID != "" && len(allowed) == 0 {
 					continue // not a member: the workspace itself is refused

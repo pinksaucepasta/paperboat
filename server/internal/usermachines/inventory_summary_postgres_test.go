@@ -59,7 +59,7 @@ FROM generate_series(0,249) g`, user); err != nil {
 	if fmt.Sprint(summary) != fmt.Sprint(want) {
 		t.Fatalf("summary %+v, want %+v", summary, want)
 	}
-	items, total, err := service.ListInventory(personal, user, InventoryOptions{Limit: 200})
+	items, total, _, err := service.ListInventory(personal, user, InventoryOptions{Limit: 200})
 	if err != nil || len(items) != 200 || total != 230 {
 		t.Fatalf("default list: %d items, total %d, %v; want a 200-row page of 230 machines in use", len(items), total, err)
 	}
@@ -68,7 +68,8 @@ FROM generate_series(0,249) g`, user); err != nil {
 			t.Fatalf("the default list shows %s machine %s", item.State, item.ID)
 		}
 	}
-	if _, total, err := service.ListInventory(personal, user, InventoryOptions{Limit: 50, State: "revoked"}); err != nil || total != 12 {
-		t.Fatalf("revoked machines on request: total %d, %v; want 12", total, err)
+	// state=revoked lists what the summary counts as revoked: revoked and disconnected machines.
+	if _, total, _, err := service.ListInventory(personal, user, InventoryOptions{Limit: 50, State: "revoked"}); err != nil || total != summary.ByState["revoked"] {
+		t.Fatalf("revoked machines on request: total %d, %v; want the summary's %d", total, err, summary.ByState["revoked"])
 	}
 }

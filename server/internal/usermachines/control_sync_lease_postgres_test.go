@@ -57,7 +57,7 @@ SELECT $1||'_m'||g,$1,$1||'_e'||g,'m-'||g,'linux','amd64','/w','online','occupie
 	}
 
 	started := time.Now()
-	items, total, err := New(store, nil, Policy{}, nil).ListInventory(workspace.WithContext(ctx, workspace.Scope{ID: "personal"}), user, InventoryOptions{Limit: 200})
+	items, total, _, err := New(store, nil, Policy{}, nil).ListInventory(workspace.WithContext(ctx, workspace.Scope{ID: "personal"}), user, InventoryOptions{Limit: 200})
 	if err != nil || len(items) != 200 || total != 1000 {
 		t.Fatalf("first list: %d items, total %d, %v", len(items), total, err)
 	}

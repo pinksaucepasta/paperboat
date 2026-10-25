@@ -32,7 +32,7 @@ func TestMachineItemsCarryTheirPolicyTagsOnPostgres(t *testing.T) {
 	exec(`INSERT INTO paperboat.workspace_policies(owner_account,version,source,digest) VALUES($1,2,'{}','sha256:x')`, owner)
 	exec(`INSERT INTO paperboat.workspace_policy_tags(policy_id,tag,machine_id) SELECT id,tag,'inv_tag_1_'||$2 FROM paperboat.workspace_policies, unnest(ARRAY['tag:ci','tag:a']) tag WHERE owner_account=$1`, owner, suffix)
 	service := New(store, nil, Policy{}, nil)
-	items, _, err := service.ListInventory(ctx, owner, InventoryOptions{Limit: 10})
+	items, _, _, err := service.ListInventory(ctx, owner, InventoryOptions{Limit: 10})
 	if err != nil || len(items) != 2 {
 		t.Fatalf("inventory: %d items err=%v", len(items), err)
 	}

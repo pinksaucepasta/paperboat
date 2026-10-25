@@ -15,25 +15,41 @@ type InventoryOptions struct {
 	Q, State, Owner string
 	Closed          *bool
 	MachineID       string // the terminal catalog's machine filter
+	// After is the machine list's keyset cursor: the page starts after this (lowercased alias, id).
+	After *InventoryPosition
+	// Platform (linux, darwin, windows) and Tag (a workspace policy tag, without "tag:") narrow the machine list.
+	Platform, Tag string
 	// WithoutLiveMetadata skips the terminal catalog's live host enrichment (current directory,
 	// foreground process, participants) for callers that need only the stored rows.
 	WithoutLiveMetadata bool
 }
 
-// ListInventory selects the authorized filtered page before describing runtime access.
-func (s *Service) ListInventory(ctx context.Context, account string, opts InventoryOptions) ([]UserMachine, int, error) {
-	if opts.Limit < 1 || opts.Limit > 200 || opts.Offset < 0 {
-		return nil, 0, ErrInvalidMachineName
+// InventoryPosition is a machine list keyset position: the sort key (lowercased alias) and the id.
+type InventoryPosition struct{ Key, ID string }
+
+// ListInventory selects the authorized filtered page before describing runtime access; more reports whether
+// machines follow the page (by offset or after a cursor).
+func (s *Service) ListInventory(ctx context.Context, account string, opts InventoryOptions) (items []UserMachine, total int, more bool, err error) {
+	if opts.Limit < 1 || opts.Limit > 200 || opts.Offset < 0 || (opts.After != nil && opts.Offset != 0) {
+		return nil, 0, false, ErrInvalidMachineName
 	}
 	scope, scoped := workspace.FromContext(ctx)
 	if scoped {
 		if err := workspace.Validate(ctx, s.db, account, scope); err != nil {
-			return nil, 0, err
+			return nil, 0, false, err
 		}
 	}
-	return s.inventoryFlights.do(ctx, inventoryKey{account: account, scoped: scoped, scope: scope, opts: opts.key()}, func(ctx context.Context) ([]UserMachine, int, error) {
+	items, total, err = s.inventoryFlights.do(ctx, inventoryKey{account: account, scoped: scoped, scope: scope, opts: opts.key()}, func(ctx context.Context) ([]UserMachine, int, error) {
 		return s.listInventory(ctx, account, opts)
 	})
+	if err != nil {
+		return nil, 0, false, err
+	}
+	// listInventory reads one machine past the page to tell whether more follow.
+	if len(items) > opts.Limit {
+		return items[:opts.Limit], total, true, nil
+	}
+	return items, total, false, nil
 }
 
 // listInventory computes one inventory page; ListInventory shares it between identical requests.
@@ -43,7 +59,15 @@ func (s *Service) listInventory(ctx context.Context, account string, opts Invent
 	// The account's own personal machines short-circuit the access functions with their first branch (own,
 	// personal, not deleted), which is what they would return: the functions cost ~1 ms per machine under load.
 	total := -1
-	rows, err := s.db.SQL().QueryContext(ctx, with+"SELECT m.id,count(*) OVER ()"+predicate+" ORDER BY lower(m.alias),m.id LIMIT $7 OFFSET $8", append(args, opts.Limit, opts.Offset)...)
+	// The window counts the whole filtered set before the cursor narrows it, so the total is the same on every page.
+	var afterKey, afterID any
+	if opts.After != nil {
+		afterKey, afterID = opts.After.Key, opts.After.ID
+	}
+	n := len(args)
+	page := fmt.Sprintf(`) AS x WHERE $%d::text IS NULL OR (x.k,x.id) > ($%d::text,$%d::text) ORDER BY x.k,x.id LIMIT $%d OFFSET $%d`, n+1, n+1, n+2, n+3, n+4)
+	rows, err := s.db.SQL().QueryContext(ctx, with+`SELECT x.id,x.total FROM (SELECT m.id,lower(m.alias) AS k,count(*) OVER () AS total`+predicate+page,
+		append(args, afterKey, afterID, opts.Limit+1, opts.Offset)...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -59,7 +83,7 @@ func (s *Service) listInventory(ctx context.Context, account string, opts Invent
 	if err != nil {
 		return nil, 0, err
 	}
-	if total < 0 && opts.Offset == 0 {
+	if total < 0 && opts.Offset == 0 && opts.After == nil {
 		total = 0
 	} else if total < 0 {
 		if err := s.db.SQL().QueryRowContext(ctx, with+"SELECT count(*)"+predicate, args...).Scan(&total); err != nil {
@@ -222,14 +246,20 @@ func inventoryFilter(ctx context.Context, account string, opts InventoryOptions,
  OR ($2::boolean AND $3::text IS NULL AND m.user_id=$1 AND m.owner_team_id IS NULL)
  OR ($2::boolean AND $3::text IS NOT NULL AND EXISTS(SELECT 1 FROM teams t JOIN team_members member USING(team_id) WHERE t.team_id=$3 AND t.deleted_at IS NULL AND NOT t.suspended AND member.account_id=$1 AND member.active)
  AND ((m.owner_team_id=$3 AND machine_management_allowed($1,m.id)) OR EXISTS(SELECT 1 FROM unnest(ARRAY['terminal','exec','managed_ssh','files','preview_manage','tunnel_manage']) cap WHERE team_machine_capability_allowed($1,$3,m.id,cap)))))
- AND ($4='' OR position(lower($4) in lower(m.alias||' '||m.id))>0)
- AND ($5='' OR m.state=$5)`
+ AND ($4='' OR position(lower($4) in lower(m.alias||' '||m.id||' '||coalesce((SELECT '127.100.'||(l.address_slot/256)||'.'||(l.address_slot%256)
+  FROM control_sync_leases l WHERE l.machine_id=m.id),'')))>0 OR lower(m.alias)=split_part(lower($4),'.',1))
+ AND ($5='' OR ($5='revoked' AND (m.revoked_at IS NOT NULL OR m.state IN ('revoked','disconnected'))) OR ($5<>'revoked' AND m.state=$5))`
 	if !withRevoked {
 		// Without a state filter the list is the machines in use: revoked and disconnected ones (revoked_at set)
 		// are listed only when asked for by state.
 		predicate += ` AND ($5<>'' OR (m.revoked_at IS NULL AND m.state NOT IN ('revoked','disconnected')))`
 	}
 	predicate += `
- AND ($6='' OR ($6='mine' AND m.user_id=$1 AND m.owner_team_id IS NULL) OR ($6='shared' AND (m.user_id<>$1 OR m.owner_team_id IS NOT NULL)) OR m.user_id=$6)`
-	return with, predicate, []any{account, scoped, teamID, opts.Q, opts.State, opts.Owner}
+ AND ($6='' OR ($6='mine' AND m.user_id=$1 AND m.owner_team_id IS NULL) OR ($6='shared' AND (m.user_id<>$1 OR m.owner_team_id IS NOT NULL)) OR m.user_id=$6)
+ AND ($7='' OR m.platform=$7)
+ AND ($8='' OR EXISTS(SELECT 1 FROM workspace_policy_tags tg JOIN workspace_policies p ON p.id=tg.policy_id
+  WHERE tg.machine_id=m.id AND tg.tag=$8 AND (($3::text IS NOT NULL AND p.team_id=$3)
+   OR ($3::text IS NULL AND p.team_id IS NULL AND p.owner_account=$1)
+   OR (NOT $2::boolean AND p.team_id IN (SELECT team_id FROM team_members WHERE account_id=$1 AND active)))))`
+	return with, predicate, []any{account, scoped, teamID, opts.Q, opts.State, opts.Owner, opts.Platform, opts.Tag}
 }

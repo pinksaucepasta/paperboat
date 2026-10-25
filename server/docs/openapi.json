@@ -15383,6 +15383,16 @@
               },
               "pagination": {
                 "$ref": "#/components/schemas/InventoryOffsetPagination"
+              },
+              "total": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Every machine the filters select (the same on every page)."
+              },
+              "next_cursor": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Present when machines follow this page; pass it as cursor."
               }
             }
           }
@@ -27261,7 +27271,8 @@
               "minimum": 0,
               "maximum": 2147483647,
               "default": 0
-            }
+            },
+            "description": "Not with cursor."
           },
           {
             "name": "q",
@@ -27271,7 +27282,7 @@
               "type": "string",
               "maxLength": 160
             },
-            "description": "Search text, at most 160 UTF-8 bytes; NUL is rejected."
+            "description": "Search text, at most 160 UTF-8 bytes; NUL is rejected. Matches alias, machine id and local address; a hostname matches by its first label (the alias)."
           },
           {
             "name": "state",
@@ -27286,7 +27297,8 @@
                 "revoked",
                 "pending"
               ]
-            }
+            },
+            "description": "revoked lists revoked and disconnected machines (what the summary counts as revoked); without state the list is the machines in use."
           },
           {
             "name": "owner",
@@ -27297,6 +27309,39 @@
               "maxLength": 128
             },
             "description": "Exact owner identifier, at most 128 UTF-8 bytes; whitespace and NUL are rejected."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 512
+            },
+            "description": "Keyset position from next_cursor: the page after it in alias order. Not with offset."
+          },
+          {
+            "name": "platform",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "linux",
+                "macos",
+                "windows"
+              ]
+            }
+          },
+          {
+            "name": "tag",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "description": "A workspace policy tag (tag:prod or prod): machines the selected workspace's policy tags with it."
           }
         ]
       }

@@ -36,12 +36,12 @@ func TestMachineInventoryCarriesManagedSSHTargetsOnPostgres(t *testing.T) {
 	exec(`INSERT INTO paperboat.machine_ssh_host_key_sets(id,user_machine_id,machine_generation,observation_generation,set_fingerprint,state,reconciliation_version,observed_at,promoted_at)
  VALUES('keyset_'||gen_random_uuid()::text,'inv_ssh_1_'||$1,1,1,decode(repeat('ab',32),'hex'),'active',1,now(),now())`, suffix)
 	service := New(store, nil, Policy{}, nil)
-	items, _, err := service.ListInventory(ctx, owner, InventoryOptions{Limit: 10})
+	items, _, _, err := service.ListInventory(ctx, owner, InventoryOptions{Limit: 10})
 	if err != nil || len(items) != 3 {
 		t.Fatalf("inventory: %d items err=%v; want the 3 machines in use", len(items), err)
 	}
 	// The default list leaves revoked machines out; asked for by state, one still carries no target.
-	revoked, _, err := service.ListInventory(ctx, owner, InventoryOptions{Limit: 10, State: "revoked"})
+	revoked, _, _, err := service.ListInventory(ctx, owner, InventoryOptions{Limit: 10, State: "revoked"})
 	if err != nil || len(revoked) != 1 {
 		t.Fatalf("revoked inventory: %d items err=%v", len(revoked), err)
 	}
