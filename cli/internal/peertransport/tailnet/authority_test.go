@@ -1207,3 +1207,29 @@ func TestRequestDuringARefreshIsNotLostToTheAppliedConfigurationWake(t *testing.
 		<-done
 	}
 }
+
+// N5: a peer entry may carry the peer's own candidate addresses so the engine can reach it with no relay. The
+// client accepts the field before the server sends it; anything but a few canonical ip:port addresses refuses
+// the configuration, as any other malformed signed field does.
+func TestPeerEntriesMayCarryCandidateEndpoints(t *testing.T) {
+	for name, c := range map[string]struct {
+		endpoints []string
+		ok        bool
+	}{
+		"absent":         {nil, true},
+		"lan and public": {[]string{"192.168.1.20:41641", "203.0.113.7:41641", "[2001:db8::7]:41641"}, true},
+		"too many":       {[]string{"10.0.0.1:1", "10.0.0.1:2", "10.0.0.1:3", "10.0.0.1:4", "10.0.0.1:5", "10.0.0.1:6", "10.0.0.1:7", "10.0.0.1:8", "10.0.0.1:9"}, false},
+		"duplicate":      {[]string{"10.0.0.1:41641", "10.0.0.1:41641"}, false},
+		"no port":        {[]string{"10.0.0.1:0"}, false},
+		"not canonical":  {[]string{"010.0.0.1:41641"}, false},
+		"zone":           {[]string{"[fe80::1%eth0]:41641"}, false},
+		"hostname":       {[]string{"relay.example.test:41641"}, false},
+	} {
+		a, cfg, signer, _ := networkTestAuthority(t)
+		cfg.Peers[0].Endpoints = c.endpoints
+		err := a.Apply(t.Context(), networkToken(t, signer, cfg))
+		if (err == nil) != c.ok {
+			t.Errorf("%s: apply error %v, want accepted=%v", name, err, c.ok)
+		}
+	}
+}

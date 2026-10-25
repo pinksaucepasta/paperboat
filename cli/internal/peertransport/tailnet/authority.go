@@ -71,7 +71,32 @@ type NetworkScope struct {
 type NetworkPeer struct {
 	Identity NetworkBinding `json:"identity"`
 	Scopes   []NetworkScope `json:"scopes"`
+	// Endpoints are the peer's own candidate UDP addresses ("ip:port": its LAN interfaces, STUN-mapped and
+	// port-mapped addresses), so the engine can reach it directly with no relay (PLAN 3b "Direct paths
+	// without a relay"). Absent while the server does not send them.
+	Endpoints []string `json:"endpoints,omitempty"`
 }
+
+// MaxPeerEndpoints bounds the candidate addresses one peer entry may carry.
+const MaxPeerEndpoints = 8
+
+// validPeerEndpoints reports whether endpoints are at most MaxPeerEndpoints distinct, canonical ip:port
+// addresses with a nonzero port.
+func validPeerEndpoints(endpoints []string) bool {
+	if len(endpoints) > MaxPeerEndpoints {
+		return false
+	}
+	seen := make(map[netip.AddrPort]bool, len(endpoints))
+	for _, raw := range endpoints {
+		addr, err := netip.ParseAddrPort(raw)
+		if err != nil || addr.Port() == 0 || !addr.Addr().IsValid() || addr.Addr().Zone() != "" || addr.String() != raw || seen[addr] {
+			return false
+		}
+		seen[addr] = true
+	}
+	return true
+}
+
 type NetworkConfiguration struct {
 	Version    int            `json:"version"`
 	Issuer     string         `json:"iss"`
@@ -272,7 +297,7 @@ func (a *Authority) verify(ctx context.Context, token string, now time.Time) (Ne
 	scopes := 0
 	for _, p := range cfg.Peers {
 		b := p.Identity
-		if !validBinding(b) || (s.Role == "cli" && b.Role == "cli") || ids[b.EndpointID] || addresses[b.VirtualAddress] || keys[b.WireGuardPublicKey] || len(p.Scopes) == 0 {
+		if !validBinding(b) || (s.Role == "cli" && b.Role == "cli") || ids[b.EndpointID] || addresses[b.VirtualAddress] || keys[b.WireGuardPublicKey] || len(p.Scopes) == 0 || !validPeerEndpoints(p.Endpoints) {
 			return cfg, "", ErrAuthority
 		}
 		ids[b.EndpointID] = true
