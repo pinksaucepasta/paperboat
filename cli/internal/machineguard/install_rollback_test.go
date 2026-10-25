@@ -79,8 +79,13 @@ func TestGuardInstallationRollbackPreservesExternalReplacement(t *testing.T) {
 	if err := replaceStateFile(foreign, path); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.restore(); err == nil {
-		t.Fatal("external replacement accepted")
+	// ubuntu24: the failed update's undo stopped the guard, refused the externally replaced file and left
+	// the guard stopped. The installed guard is started again.
+	stopped, started := false, false
+	result := errors.New("update failed")
+	finishGuardInstallation(t.Context(), r, &result, func(context.Context) error { stopped = true; return nil }, func(context.Context) error { started = true; return nil })
+	if result == nil || !stopped || !started {
+		t.Fatalf("result=%v stopped=%v started=%v, want the installed guard started again", result, stopped, started)
 	}
 	data, err := os.ReadFile(path)
 	if err != nil || string(data) != "foreign" {

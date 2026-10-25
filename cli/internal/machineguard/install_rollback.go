@@ -133,7 +133,13 @@ func finishGuardInstallation(ctx context.Context, r *guardFileRollback, result *
 		}
 	}
 	if err := r.restore(); err != nil {
+		// The files changed under us (another installer put a guard in place); keep the copy, but never
+		// leave the guard stopped: start whatever is installed (ubuntu24, 2026-10-26: a failed update's
+		// undo stopped the guard the updater had just healed and left the host without one).
 		*result = errors.Join(*result, err)
+		if restore != nil {
+			*result = errors.Join(*result, restore(cleanup))
+		}
 		return
 	}
 	r.cleanup()
