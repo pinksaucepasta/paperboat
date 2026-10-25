@@ -6,7 +6,7 @@ containers that are never removed grow its peer-network configuration until it h
 bound and native access stops for the whole account. Run after each device run.
 
 A lane passes its own throwaway prefix (--prefix laner-) and only machines whose alias starts
-with it are considered; --all (every throwaway pattern of every lane) is for Lane B only. Only
+with it are considered; --id <machine_id> (repeatable) narrows to exact records; --all (every throwaway pattern of every lane) is for Lane B only. Only
 machines matching AND not seen for --stale (default 2 h) are revoked, together with the CLI sessions `pb pair` created for them. Protected
 devices (ubuntu24, pbvm*, dadape, hp, apple, victus) are never touched. Dry-run by default: it
 prints the ids it would revoke; --apply revokes them in one transaction and prints them again.
@@ -26,7 +26,8 @@ CREATE TEMP TABLE doomed ON COMMIT DROP AS
 SELECT m.id FROM paperboat.user_machines m
 WHERE m.user_id = ANY(%(accounts)s) AND m.revoked_at IS NULL AND m.deleted_at IS NULL
   AND (m.last_seen_at IS NULL OR m.last_seen_at < now() - %(stale)s::interval)
-  AND m.alias ~ %(throwaway)s AND m.alias !~* %(protected)s;
+  AND m.alias ~ %(throwaway)s AND m.alias !~* %(protected)s
+  AND (cardinality(%(ids)s) = 0 OR m.id = ANY(%(ids)s));
 """
 
 # The same fence as migration 118: end the machines' pair-time CLI sessions with their tokens.
@@ -58,16 +59,21 @@ def main():
     scope = parser.add_mutually_exclusive_group(required=True)
     scope.add_argument("--prefix", help="this lane's throwaway alias prefix, e.g. laner- (required for lanes)")
     scope.add_argument("--all", action="store_true", help="every lane's throwaway machines (Lane B only)")
+    scope.add_argument("--id", action="append", help="exact machine id to revoke (repeatable); still only a throwaway, unprotected machine")
     args = parser.parse_args()
     throwaway = THROWAWAY
     if args.prefix:
         if not re.fullmatch(r"[a-z][a-z0-9]*-", args.prefix) or re.search(PROTECTED, args.prefix):
             parser.error("--prefix must be a lane prefix like laner- (lowercase, ending in -)")
         throwaway = "^" + re.escape(args.prefix)
+    for machine_id in args.id or []:
+        if not re.fullmatch(r"machine_[0-9a-f-]{36}", machine_id):
+            parser.error("--id must be a full machine id (machine_<uuid>)")
     accounts = args.account or DEFAULT_ACCOUNTS
     params = {
         "accounts": "ARRAY[" + ",".join(quote(a) for a in accounts) + "]::text[]",
         "stale": quote(args.stale), "throwaway": quote(throwaway), "protected": quote(PROTECTED),
+        "ids": "ARRAY[" + ",".join(quote(i) for i in args.id or []) + "]::text[]",
     }
     sql = "\\set ON_ERROR_STOP 1\nBEGIN;\nSET LOCAL search_path TO paperboat, public;\n" + SELECT % params
     if args.apply:
