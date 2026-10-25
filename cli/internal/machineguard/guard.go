@@ -13,9 +13,22 @@ var ErrUnsupported = errors.New("protected machine-name access requires the Linu
 
 var ErrPortInUse = errors.New("protected port is already in use")
 
+// ErrListenerRefused is a refusal of one listener (its name or address belongs to another OS user, the
+// user's reservation limit, a listener another connection holds). The caller skips that item; the rest of
+// its machines keep working.
+var ErrListenerRefused = errors.New("protected listener refused")
+
+type listenerRefusal struct{ reason string }
+
+func (e listenerRefusal) Error() string      { return e.reason }
+func (listenerRefusal) Is(target error) bool { return target == ErrListenerRefused }
+
 func responseError(out response) error {
 	if out.ErrorCode == "port_in_use" {
 		return ErrPortInUse
+	}
+	if out.ErrorCode == "listener_refused" {
+		return listenerRefusal{reason: out.Error}
 	}
 	if out.Error != "" {
 		return errors.New(out.Error)

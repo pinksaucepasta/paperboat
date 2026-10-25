@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
+	"fmt"
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	pbSync "github.com/pinksaucepasta/paperboat/internal/controlsync/proto"
@@ -927,5 +928,40 @@ func TestCoordinatorBrowserGatewayWaitsForAJustStartedServiceRoute(t *testing.T)
 	response.Body.Close()
 	if response.StatusCode != http.StatusOK || string(body) != "fresh" {
 		t.Fatalf("status=%d body=%q", response.StatusCode, body)
+	}
+}
+
+// refusingNameClient refuses one port as another OS user's, as the guard does on a shared host.
+type refusingNameClient struct {
+	*coordinatorNameClient
+	refused int
+}
+
+func (c refusingNameClient) Acquire(ctx context.Context, hostname string, ip netip.Addr, port int) (net.Listener, error) {
+	if port == c.refused {
+		return nil, fmt.Errorf("acquire: %w", machineguard.ErrListenerRefused)
+	}
+	return c.coordinatorNameClient.Acquire(ctx, hostname, ip, port)
+}
+
+// A second OS user on a host failed its whole reconcile when the guard refused one listener as the first
+// user's (multi-account hosts, 2026-10-26): only that listener is skipped.
+func TestCoordinatorRefusedListenerSkipsOnlyThatItem(t *testing.T) {
+	names := refusingNameClient{coordinatorNameClient: &coordinatorNameClient{}, refused: 3000}
+	c, err := NewCoordinator(CoordinatorConfig{NameClient: names, DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("unused") }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.ctx = t.Context()
+	defer c.Stop()
+	peers := []*pbSync.PeerUpdate{
+		{PeerId: "first", Alias: "hp", AssignedIp: "127.100.0.4", Approved: true, Online: true, ExportedPorts: []int32{3000, 6767}},
+		{PeerId: "second", Alias: "nas", AssignedIp: "127.100.0.5", Approved: true, Online: true, ExportedPorts: []int32{3000}},
+	}
+	if err := c.replaceGuardedRoutes(t.Context(), peers); err != nil {
+		t.Fatalf("one refused listener failed the reconcile: %v", err)
+	}
+	if len(c.routes) != 1 || len(names.names) != 1 {
+		t.Fatalf("routes=%d names=%d, want only hp:6767", len(c.routes), len(names.names))
 	}
 }

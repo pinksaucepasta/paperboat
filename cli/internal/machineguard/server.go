@@ -438,6 +438,8 @@ func (g *guardServer) serveConnection(ctx context.Context, conn controlConn) {
 			out.Error = err.Error()
 			if errors.Is(err, ErrPortInUse) {
 				out.ErrorCode = "port_in_use"
+			} else if errors.Is(err, ErrListenerRefused) {
+				out.ErrorCode = "listener_refused"
 			}
 		}
 		if err := conn.Send(out, file); err != nil {
@@ -623,7 +625,7 @@ func (g *guardServer) handle(ctx context.Context, conn controlConn, uid string, 
 			}
 		}
 		if len(g.leases) >= 8192 || !has(g.reserved.IPs, in.IP) && (len(g.reserved.IPs) >= 65533 || ownedIPs >= 512) || !has(g.reserved.Names, in.Hostname) && (len(g.reserved.Names) >= 4096 || ownedNames >= 512) {
-			return nil, errors.New("machine guard reservation limit reached for this OS user")
+			return nil, listenerRefusal{reason: "machine guard reservation limit reached for this OS user"}
 		}
 
 		for _, owner := range []struct {
@@ -631,11 +633,11 @@ func (g *guardServer) handle(ctx context.Context, conn controlConn, uid string, 
 			exists bool
 		}{{g.reserved.IPs[in.IP], has(g.reserved.IPs, in.IP)}, {g.reserved.Names[in.Hostname], has(g.reserved.Names, in.Hostname)}} {
 			if owner.exists && owner.value != uid {
-				return nil, errors.New("machine name or address belongs to another OS user; choose a nonconflicting installation")
+				return nil, listenerRefusal{reason: "machine name or address belongs to another OS user; choose a nonconflicting installation"}
 			}
 		}
 		if _, exists := g.leases[key]; exists {
-			return nil, errors.New("protected listener is already owned by another connection")
+			return nil, listenerRefusal{reason: "protected listener is already owned by another connection"}
 		}
 		g.reserved.IPs[in.IP] = uid
 		g.reserved.Names[in.Hostname] = uid

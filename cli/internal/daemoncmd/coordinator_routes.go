@@ -212,9 +212,10 @@ func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*pbSync.
 			}
 			listener, err := nameClient.Acquire(ctx, hostname, ip, port)
 			if err != nil {
-				if errors.Is(err, machineguard.ErrPortInUse) {
-					// The guard's default deny remains in force without a lease.
-					// Keep independent routes and retry this port on reconciliation.
+				if errors.Is(err, machineguard.ErrPortInUse) || errors.Is(err, machineguard.ErrListenerRefused) {
+					// The guard's default deny remains in force without a lease. Another program's port or
+					// another OS user's name or address refuses this one listener only: keep independent
+					// routes and retry this port on reconciliation.
 					conflictedPorts++
 					if firstConflictedPort == 0 {
 						firstConflictedPort = port
@@ -238,7 +239,7 @@ func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*pbSync.
 	if len(browserRoutes) > 0 {
 		web, err := c.prepareBrowserGatewayLocked(ctx, nameClient, browserRoutes, aliases)
 		switch {
-		case errors.Is(err, machineguard.ErrPortInUse):
+		case errors.Is(err, machineguard.ErrPortInUse), errors.Is(err, machineguard.ErrListenerRefused):
 			// Another program (a web server on :80/:443) owns a gateway port.
 			// Machine names and native ports keep working; only browser URLs
 			// are withdrawn, so a busy port must not degrade the whole daemon.
