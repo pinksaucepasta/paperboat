@@ -323,12 +323,17 @@ func (w *RuntimeCarrierWorker) Handle(ctx context.Context, server *datacarrier.S
 		}
 		w.changed()
 	}()
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
 	for {
+		// Woken by a change of the expected admissions or the next expiry, not polled (audit T2).
+		changes := w.Expected.Changed()
 		desired := map[string]datacarrier.ExpectedAdmission{}
+		var nextExpiry time.Time
 		for _, a := range w.Expected.ForIdentity(server.Identity(), time.Now().UTC()) {
 			desired[a.RouteID] = a
+			// Only a future expiry is a reason to wake; a past one stays until the next change.
+			if a.ExpiresAt.After(time.Now()) && (nextExpiry.IsZero() || a.ExpiresAt.Before(nextExpiry)) {
+				nextExpiry = a.ExpiresAt
+			}
 		}
 		changed := false
 		for key, a := range attached {
@@ -370,13 +375,22 @@ func (w *RuntimeCarrierWorker) Handle(ctx context.Context, server *datacarrier.S
 		if changed {
 			w.changed()
 		}
+		wait := handlerRecheck
+		if !nextExpiry.IsZero() {
+			wait = min(max(time.Until(nextExpiry), handlerMinimumWait), handlerRecheck)
+		}
+		timer := time.NewTimer(wait)
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return ctx.Err()
 		case <-server.Done():
+			timer.Stop()
 			return nil
-		case <-ticker.C:
+		case <-changes:
+		case <-timer.C:
 		case err := <-outputErrors:
+			timer.Stop()
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
@@ -384,6 +398,13 @@ func (w *RuntimeCarrierWorker) Handle(ctx context.Context, server *datacarrier.S
 		}
 	}
 }
+
+// A carrier handler rechecks its admissions on a change, at the next expiry (not sooner than
+// handlerMinimumWait), and at least every handlerRecheck.
+const (
+	handlerMinimumWait = 100 * time.Millisecond
+	handlerRecheck     = 30 * time.Second
+)
 
 func (w *RuntimeCarrierWorker) Shutdown(ctx context.Context) error {
 	w.mu.Lock()

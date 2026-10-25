@@ -216,7 +216,10 @@ type ExpectedAdmissionRegistry struct {
 	closed  bool
 	byKey   map[string]ExpectedAdmission
 	pending map[string]ExpectedAdmission
-	changed chan struct{}
+	// byIdentity indexes the admitted admissions by carrier identity (sorted by key); rebuilt with
+	// every change, so a carrier's lookup does not scan every admission (audit T2).
+	byIdentity map[Identity][]ExpectedAdmission
+	changed    chan struct{}
 }
 
 type ExpectedAdmissionRegistryConfig struct {
@@ -288,9 +291,7 @@ func (r *ExpectedAdmissionRegistry) Replace(admissions []ExpectedAdmission, now 
 	}
 	r.byKey = next
 	r.pending = make(map[string]ExpectedAdmission)
-	previousChanged := r.changed
-	r.changed = make(chan struct{})
-	close(previousChanged)
+	r.publishLocked()
 	r.mu.Unlock()
 	return nil
 }
@@ -332,9 +333,7 @@ func (r *ExpectedAdmissionRegistry) InstallPending(admissions []ExpectedAdmissio
 			r.byKey[key] = admission
 		}
 	}
-	previous := r.changed
-	r.changed = make(chan struct{})
-	close(previous)
+	r.publishLocked()
 	return nil
 }
 
@@ -363,9 +362,7 @@ func (r *ExpectedAdmissionRegistry) MarkAdmitted(admissions []ExpectedAdmission)
 		r.byKey[key] = value
 		delete(r.pending, key)
 	}
-	previous := r.changed
-	r.changed = make(chan struct{})
-	close(previous)
+	r.publishLocked()
 	return nil
 }
 
@@ -396,9 +393,7 @@ func (r *ExpectedAdmissionRegistry) Commit(admissions []ExpectedAdmission) error
 	}
 	r.byKey = next
 	r.pending = make(map[string]ExpectedAdmission)
-	previous := r.changed
-	r.changed = make(chan struct{})
-	close(previous)
+	r.publishLocked()
 	return nil
 }
 
@@ -433,9 +428,7 @@ func (r *ExpectedAdmissionRegistry) Upsert(admission ExpectedAdmission, now time
 		return fmt.Errorf("%w: admission capacity reached", ErrAdmissionConflict)
 	}
 	r.byKey[key] = admission
-	previous := r.changed
-	r.changed = make(chan struct{})
-	close(previous)
+	r.publishLocked()
 	return nil
 }
 
@@ -459,9 +452,7 @@ func (r *ExpectedAdmissionRegistry) Remove(admission ExpectedAdmission) error {
 		return ErrAdmissionConflict
 	}
 	delete(r.byKey, admission.key())
-	previous := r.changed
-	r.changed = make(chan struct{})
-	close(previous)
+	r.publishLocked()
 	return nil
 }
 
@@ -489,17 +480,32 @@ func (r *ExpectedAdmissionRegistry) ForIdentity(identity Identity, now time.Time
 		return nil
 	}
 	r.mu.RLock()
-	result := make([]ExpectedAdmission, 0)
+	defer r.mu.RUnlock()
+	return append([]ExpectedAdmission{}, r.byIdentity[identity]...)
+}
+
+// Changed returns a channel closed at the registry's next change.
+func (r *ExpectedAdmissionRegistry) Changed() <-chan struct{} {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.changed
+}
+
+// publishLocked rebuilds the identity index and wakes everything waiting on Changed.
+func (r *ExpectedAdmissionRegistry) publishLocked() {
+	byIdentity := make(map[Identity][]ExpectedAdmission)
 	for _, admission := range r.byKey {
-		if admission.Admitted && admission.Identity == identity {
-			result = append(result, admission)
+		if admission.Admitted {
+			byIdentity[admission.Identity] = append(byIdentity[admission.Identity], admission)
 		}
 	}
-	r.mu.RUnlock()
-	sort.Slice(result, func(i, j int) bool {
-		return result[i].key() < result[j].key()
-	})
-	return result
+	for _, admissions := range byIdentity {
+		sort.Slice(admissions, func(i, j int) bool { return admissions[i].key() < admissions[j].key() })
+	}
+	r.byIdentity = byIdentity
+	previous := r.changed
+	r.changed = make(chan struct{})
+	close(previous)
 }
 
 // WaitForIdentity waits for a successful control pull to publish at least one
@@ -656,9 +662,7 @@ func (r *ExpectedAdmissionRegistry) Close() error {
 	r.mu.Lock()
 	if !r.closed {
 		r.closed = true
-		previous := r.changed
-		r.changed = make(chan struct{})
-		close(previous)
+		r.publishLocked()
 	}
 	r.mu.Unlock()
 	return nil

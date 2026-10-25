@@ -24,7 +24,6 @@ const (
 	defaultPreviewCarrierPollInterval = 15 * time.Second
 	defaultPreviewCarrierWaitTimeout  = 30 * time.Second
 	maxPreviewCarrierPollInterval     = 5 * time.Minute
-	previewCarrierReconcileInterval   = 100 * time.Millisecond
 	previewCarrierReadyRetryInterval  = time.Second
 )
 
@@ -432,23 +431,40 @@ func (h *PreviewCarrierHandler) Handle(ctx context.Context, server *datacarrier.
 	}
 	attached := make(map[string]datacarrier.ExpectedAdmission)
 	pendingReady := make(map[string]previewCarrierPendingReady)
+	// Taken before each reconcile reads the admissions, so a change during it is never missed.
+	changes := h.expected.Changed()
 	if err := h.reconcile(ctx, server, identity, attached, pendingReady); err != nil {
 		_ = h.closeAttached(ctx, attached, "handler_error")
 		return err
 	}
-	ticker := time.NewTicker(previewCarrierReconcileInterval)
-	defer ticker.Stop()
 	for {
+		// Woken by a change of the expected admissions, or every second while a ready report waits
+		// for a retry; a slow recheck covers the rest (audit T2: no 100 ms poll per carrier).
+		wait := handlerRecheck
+		if len(pendingReady) != 0 {
+			wait = previewCarrierReadyRetryInterval
+		}
+		for _, admission := range h.expected.ForIdentity(identity, h.now().UTC()) {
+			if until := admission.ExpiresAt.Sub(h.now()); until > 0 {
+				wait = min(wait, max(until, handlerMinimumWait))
+			}
+		}
+		timer := time.NewTimer(wait)
 		select {
 		case <-server.Done():
+			timer.Stop()
 			return h.closeAttached(ctx, attached, "carrier_closed")
 		case <-ctx.Done():
+			timer.Stop()
 			return h.closeAttached(ctx, attached, "carrier_closed")
-		case <-ticker.C:
-			if err := h.reconcile(ctx, server, identity, attached, pendingReady); err != nil {
-				_ = h.closeAttached(ctx, attached, "handler_error")
-				return err
-			}
+		case <-changes:
+			timer.Stop()
+		case <-timer.C:
+		}
+		changes = h.expected.Changed()
+		if err := h.reconcile(ctx, server, identity, attached, pendingReady); err != nil {
+			_ = h.closeAttached(ctx, attached, "handler_error")
+			return err
 		}
 	}
 }
