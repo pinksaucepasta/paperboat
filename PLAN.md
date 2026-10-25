@@ -1565,41 +1565,52 @@ each with a PG/load test proving the bound at 10k; Lane R audits daemon/CLI/rela
 Test (PG): one join on a 1,000-machine account writes O(1) change rows per affected scope and each machine's next
 answer carries one change; a 5k-machine team survives a server restart (snapshot storm) without 503s.
 
-#### Machine local addresses: one global 127.64.0.0/10 pool (Lane Q contract, coordinator decision 2026-10-23)
+#### Multi-account hosts: per-account addresses, per-user gateways, collision-only name suffixes (Lane A design, Lane Q server, Lane X review; user direction 2026-10-26; replaces the dropped global 127.64.0.0/10 pool)
 
-A machine's local address (127.100.x.y, `sync/authority.go` lease) is one slot of a platform-wide pool of 64,770
-(`control_sync_leases.address_slot` 2..65534): about 64.8k machines ever, then pairing fails. Per-account namespaces
-were dropped: the machine guard reserves each address host-wide for one OS user
-(`cli/internal/machineguard/server.go:620-640`), so two accounts on one host must never share an address (Lane A).
-1. **Pool.** One global pool, 127.64.0.0/10 (4,194,304 addresses). Slot s is the address
-   127.64.0.0 + ((s + 36*65536) mod 2^22): slots below 65,536 are exactly today's 127.100.x.y, so every existing
-   lease keeps its address and a server still running the old formula reads them right; higher slots continue with
-   127.101.0.0 .. 127.127.255.255, then 127.64.0.0 .. 127.99.255.255.
-2. **Excluded addresses, one place** (`paperboat.machine_address_slot_allowed`, used by the CHECK and the
-   allocator): last octet 0 or 255, 127.100.0.0 and the browser gateway 127.100.0.1 (slots 0 and 1, as before),
-   and nothing outside the /10, so never 127.0.0.0/16 (127.0.0.1, systemd-resolved 127.0.0.53, Debian 127.0.1.1).
-3. **Order.** Lowest free slot first, so 127.100/16 fills before any other address is handed out: released daemons
-   accept only 127.100/16 until Lane A's MapCanonical and guard accept the /10, and the pool leaves it only after
-   64,770 live leases. Allocation stays lock-free (advisory claim of candidate slots, migration 165).
-4. **Recycling.** A deleted machine's lease is released (machine_id NULL, released_at set) and its address is not
-   handed out again for 7 days (the quarantine, in the pool's configuration row), so no host that still maps the old
-   name can reach a different machine at it.
-5. **Pool configuration** is one row (`paperboat.machine_address_pool`: size, quarantine); the CHECK bounds slots
-   to the /10.
-6. **Tests (PG).** Existing 127.100.x.y leases keep their addresses; excluded addresses are never allocated; the
-   pool crosses from 127.100.255.254 to 127.101.0.1; a released address is not reused inside the quarantine and is
-   after it; exhaustion (pool size lowered in the test database) answers 54000 -> ResourceExhausted; concurrent
-   first allocations of 1,000 machines neither wait nor collide.
-7. **Clients (Lane A).** The machine guard enforces a fixed 127.100.0.0/16 (persisted active range,
-   validAddressInCIDR, default-deny rules) and MapCanonical refuses anything else ("machine address is outside the
-   canonical 127.100.0.0/16 range"). A guard migration moves the fixed range to 127.64.0.0/10 (the persisted
-   127.100.0.0/16 is a subset, so no address moves), widens the Linux deny/forward rules and keeps one lo0 alias per
-   used address on macOS; MapCanonical's check widens with it. It must ship before the server's live leases pass
-   64,770. Lane R: no change (the daemon reads assigned_ip from its own inventory).
-   Server: shipped in a651265c (migration 172, TestMachineAddressPoolOnPostgres).
-*Prior art:* Tailscale gives each node one address from 100.64.0.0/10 and keeps it when the node is shared into
-another tailnet (`tailcfg/tailcfg.go:386` Sharer); headscale allocates sequentially or randomly in one prefix and
-frees on delete (`hscontrol/db/ip.go` IPAllocator, `ip_random_exhaustion_test.go`).
+**Goal.** Any number of OS users on one host, each with any account, with no platform-wide bottleneck. One user's
+conflict degrades only that item (done: 5080a29b, `listener_refused`).
+**1. Addresses (server: Lane Q expand/contract of 172).** `control_sync_leases` gains account_id and unique
+(account_id, slot); lowest free slot per account in 127.100/16 (slots 2..65534; 0 and the gateway 1 excluded); existing
+slots unchanged; then the global PK, pool and quarantine are dropped. A slot is unique only inside its account.
+*Team machines:* one slot per VIEWER account (each account numbers the machines it can see). Pro: a viewer's addresses
+are stable and never depend on another account; no cross-account coordination. Con: the same team machine has a
+different address for each viewer, so a raw IP is not shareable between teammates (names are). Chosen: per viewer.
+**2. Host guard: the local address is the guard's, keyed by (uid, account, machine).** The daemon asks
+`Acquire(account, machine, preferred=server address, name, port)`; the guard answers with the local address. The first
+(uid, account) to hold an address keeps it; another (uid, account) whose preferred address is taken gets the lowest free
+127.100.x.y, persisted, so it is stable for that user on that host. State: `leases[(uid, account, machine)] = {ip, name}`
+plus the reverse indexes; per-uid caps stay (512). Migration: today's `reserved.IPs/Names[...] = uid` entries load as
+(uid, account "", machine "") and the first Acquire by that uid adopts them for its account: no address moves on a
+single-user host. Security boundary stays the uid (nft/pf/WFP rules allow only the owning uid); account is a namespace
+inside it, passed by the uid's daemon.
+**3. Ports and browser gateway.** Native ports are per address, so Bob's 127.100.0.3:3000 and Alice's 127.100.0.9:3000
+coexist. The gateway becomes per uid: the first uid keeps 127.100.0.1; each further uid gets its own gateway address
+from the same allocator (persisted), and its :80/:443 bind there. A port taken by another program stays
+`port_in_use` for that item only.
+**4. Names (recommendation: collision-only suffix in the host-wide hosts file).** `<machine>.<domain>` stays the name
+while it is unique on the host. A second (uid, account) whose name is taken gets `<machine>.<account-handle>.<domain>`,
+persisted in the guard; `pb status`, `pb machine list` and browser URLs show the name actually assigned.
+Options weighed:
+- (a) per-uid answers. Linux: a glibc NSS module asking the guard over its unix socket (SO_PEERCRED) answers per uid
+  for getaddrinfo users, but misses static Go binaries and browsers using DoH; resolved's stub (127.0.0.53, UDP) has
+  no reliable peer uid (sock_diag lookups race and cost a netlink call per query); resolved links are per interface,
+  not per user. macOS: /etc/resolver and mDNSResponder resolve as root, so the asking uid is lost; not possible.
+  Windows: the DNS client service is shared; per-user answers would need an LSP/WFP redirect. Rejected: Linux-only,
+  partial even there.
+- (b) collision-only suffix: works the same on Linux, macOS and Windows (hosts file, which every resolver honours),
+  no new privileged component, names change only for the second claimant of one name, never for existing hosts.
+  Cost: the second user's colliding names are longer; names are visible host-wide (as today; addresses stay
+  uid-filtered, so seeing a name grants nothing). Chosen.
+- (c) always per-account names (`<machine>.<account>.<domain>`): unambiguous but changes every existing URL. Rejected.
+**5. Tests.** Workspace tests with two uids on one fake guard: distinct addresses for the same slot; stable re-acquire
+after restart; the gateway per uid; name suffix only for the second claimant; one refused item leaves the other user's
+routes and names intact; migration of a legacy state file keeps every address. Device: two OS users on pbvm2 containers.
+*Prior art:* Tailscale is one tailnet per host on Linux and serves one user at a time on Windows/macOS
+(`~/ref/tailscale/ipn/ipnserver/server.go:255` checkConnIdentityLocked, "Tailscale already in use by <user>";
+profiles switch the whole node, `ipn/ipnlocal/profiles.go:126`); NetBird keeps per-user profiles but one active
+connection per host (`~/ref/netbird/client/internal/profilemanager/service.go`); Teleport tsh keeps per-OS-user
+profiles in ~/.tsh with no host-wide network state. None gives two users on one host simultaneous private names;
+ours does by keeping network state per uid in the guard.
 
 #### File transfer modes: Automatic and Unlimited (Lane A design; Lane B/O server, Lane R paths, Lane C console; user decision 2026-10-26)
 
