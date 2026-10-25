@@ -146,6 +146,7 @@ func (a *Authority) Run(ctx context.Context, client NetworkAPI, report func(erro
 	}
 	var lastRefresh time.Time
 	failures := 0
+	unusable := 0 // consecutive successful renewals that brought no usable relay
 	for {
 		select {
 		case <-a.done:
@@ -160,7 +161,7 @@ func (a *Authority) Run(ctx context.Context, client NetworkAPI, report func(erro
 			earlier(max(0, onDemandRefreshSpacing-time.Since(lastRefresh)))
 		case <-a.refreshWake:
 			// A configuration applied elsewhere may expire sooner than the current schedule.
-			earlier(a.nextRefresh(nil, 0))
+			earlier(a.nextRefresh(nil, 0, unusable))
 		case <-timer.C:
 			request, cancel := context.WithTimeout(ctx, 10*time.Second)
 			err := a.Refresh(request, client)
@@ -177,7 +178,14 @@ func (a *Authority) Run(ctx context.Context, client NetworkAPI, report func(erro
 			if denial := a.RelayDenial(); err == nil && denial != nil && report != nil {
 				report(denial)
 			}
-			reset(a.nextRefresh(err, failures))
+			if err == nil {
+				if _, usable := a.regionalRenewalDelay(time.Now()); usable {
+					unusable = 0
+				} else {
+					unusable++
+				}
+			}
+			reset(a.nextRefresh(err, failures, unusable))
 		}
 	}
 }
@@ -210,9 +218,18 @@ func (a *Authority) knowSigningKeys(ctx context.Context, tokens []string) error 
 	return nil
 }
 
-// nextRefresh is the wait before the next refresh after one that ended with err (nil on success)
-// and failures consecutive failures.
-func (a *Authority) nextRefresh(err error, failures int) time.Duration {
+// regionalUnusableRetry and regionalUnusableRetryMaximum space renewals while the signed configuration
+// names no usable relay (a relay outage, or relays withheld): every engine renewing every ~9 s, or every
+// second before, for as long as that lasted is the whole fleet polling. No topic announces a relay coming
+// back, so the cap bounds how long a recovered relay waits to be used.
+const (
+	regionalUnusableRetry        = 8 * time.Second
+	regionalUnusableRetryMaximum = time.Minute
+)
+
+// nextRefresh is the wait before the next refresh after one that ended with err (nil on success),
+// failures consecutive failures and unusable consecutive renewals that brought no usable relay.
+func (a *Authority) nextRefresh(err error, failures, unusable int) time.Duration {
 	delay := regionalRefreshDelay()
 	a.relay.mu.Lock()
 	recovering := a.relay.recovery != nil
@@ -221,7 +238,7 @@ func (a *Authority) nextRefresh(err error, failures int) time.Duration {
 	// made, not after they were issued. Active regional recovery renews before the
 	// earliest one ends, so its relays are not withdrawn between renewals.
 	if recovering {
-		delay = 8*time.Second + regionalProbeDelay()/2
+		delay = backoff.Retry(unusable, regionalUnusableRetry, regionalUnusableRetryMaximum)
 		if due, ok := a.regionalRenewalDelay(time.Now()); ok {
 			delay = due
 		}

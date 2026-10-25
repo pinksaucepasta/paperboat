@@ -468,6 +468,7 @@ func (r *regionalRecovery) run(ctx context.Context) {
 	cursor := 0
 	backupID := ""
 	retries := make(map[string]regionalRetry)
+	stale := false // the last look found no usable relay
 	timer := time.NewTimer(0)
 	defer timer.Stop()
 	for {
@@ -485,11 +486,18 @@ func (r *regionalRecovery) run(ctx context.Context) {
 			r.mu.Lock()
 			r.status = RegionalStatus{Redundancy: RedundancyNone, Reason: "no_authorized_common_node"}
 			r.mu.Unlock()
-			// Stale health observations are the usual cause: renew and look again soon.
-			r.authority.RequestRefresh()
+			// Stale health observations are the usual cause: renew once, then keep looking at the local
+			// state, which costs no request; the authority's own renewal schedule brings later
+			// configurations. Asking on every look made every engine fetch its configuration every second
+			// for as long as no relay was usable (a relay outage, or relays withheld).
+			if !stale {
+				stale = true
+				r.authority.RequestRefresh()
+			}
 			timer.Reset(backoff.Jitter(regionalStaleRetry))
 			continue
 		}
+		stale = false
 		// A fresh signed grant may recover relay admission even when its pair
 		// permissions are unchanged. Keep this fence on issuance generation.
 		r.authority.mu.Lock()
