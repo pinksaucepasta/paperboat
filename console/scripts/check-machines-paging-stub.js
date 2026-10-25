@@ -1,7 +1,7 @@
 // Browser check for the Machines table's pages, without a large real account. Run in a signed-in
 // tab on / (Personal), e.g. a headless Chromium. It stubs this tab's fetch of GET /api/v1/machines
 // (130 machines in use by default, 12 more with ?state=revoked, cloned from one real record,
-// honouring limit and offset) and GET /api/v1/machines/summary, waits
+// honouring limit, cursor, state and q) and GET /api/v1/machines/summary, waits
 // for the table's next refresh, and checks: the card's online/offline; pages of 50 with the range
 // "1–50 of 130", Next to page 3 ("101–130 of 130"), Previous; the page in the URL and a ?page=3 deep
 // link; a new search starts at page 1; Status → Revoked lists the 12 revoked. Changes nothing on
@@ -40,16 +40,19 @@
       return Response.json({ data: { total: live.length, by_state, by_platform: { linux: live.length } } })
     }
     if (url.pathname !== "/api/v1/machines") return realFetch(input, init)
+    // The cursor contract (Lane Q, PQ-04 C1): state and q filter on the server, total counts them.
     const state = url.searchParams.get("state")
-    const offset = Number(url.searchParams.get("offset") ?? 0)
-    const limit = Number(url.searchParams.get("limit") ?? 200)
-    const chosen = state ? machines.filter((m) => m.state === state) : live
+    const q = (url.searchParams.get("q") ?? "").toLowerCase()
+    const offset = Number(url.searchParams.get("cursor") ?? 0)
+    const limit = Number(url.searchParams.get("limit") ?? 50)
+    const chosen = (state ? machines.filter((m) => m.state === state) : live).filter((m) => !q || m.alias.includes(q))
     const items = chosen.slice(offset, offset + limit)
-    return Response.json({ data: { items, pagination: { total: chosen.length, offset, limit } } })
+    const next = offset + limit < chosen.length ? String(offset + limit) : undefined
+    return Response.json({ data: { items, total: chosen.length, ...(next && { next_cursor: next }) } })
   }
 
   const rows = () => document.querySelectorAll("#machines-table tbody tr").length
-  const range = () => document.querySelector("[data-machine-range]")?.textContent.trim()
+  const range = () => document.querySelector("[data-list-range]")?.textContent.trim()
   const button = (label) => [...document.querySelectorAll("#machines-table button")].find((b) => b.textContent.trim() === label)
   const page = () => new URL(location.href).searchParams.get("page")
   try {

@@ -47,7 +47,7 @@
   )
 
   const rows = () => document.querySelectorAll("#machines-table tbody tr").length
-  const range = () => document.querySelector("[data-machine-range]")?.textContent.trim()
+  const range = () => document.querySelector("[data-list-range]")?.textContent.trim()
   await until(() => rows() > 0 || total === 0)
   pass("the table lists every machine in use", total > 50 ? range()?.endsWith(`of ${total}`) : rows() === total, range() ?? `${rows()} rows`)
   const input = document.querySelector('#machines-table input[placeholder="Search machines"]')

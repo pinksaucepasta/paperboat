@@ -8,8 +8,6 @@ import {
   useApiQuery,
   machineOwner,
   meQuery,
-  machineSearchQuery,
-  useMachinePage,
   useRunning,
   useWorkspace,
   type Machine,
@@ -17,8 +15,11 @@ import {
   type RunningCounts,
 } from "@/lib/api"
 import { formatPlatform } from "@/lib/format"
-import { parseQuery, matchesQuery, tagOptions, type FilterKey } from "@/lib/machine-filter"
-import { tagsLive } from "@/lib/policy"
+import { cursorPageSize } from "@/lib/cursor-pages"
+import { parseQuery, type FilterKey } from "@/lib/machine-filter"
+import { machineListQuery } from "@/lib/machine-list"
+import { tagsLive, tagsQuery } from "@/lib/policy"
+import { ListPager } from "@/components/list-pager"
 import { TagChips } from "@/components/machine-tags"
 import { AddMachineDialog } from "@/components/add-machine-dialog"
 import { MachineRowMenus } from "@/components/machine-actions"
@@ -34,33 +35,31 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 
 export function MachineTable() {
-  const { data: page, isPending, isError, error, refetch } = useMachinePage()
   const { data: me } = useApiQuery(meQuery)
   const { data: running, isError: runningFailed } = useRunning()
   const workspace = useWorkspace()
   const [query, setQuery] = useMachineQuery()
   const parsed = parseQuery(useDeferredValue(query))
-  // Every machine is loaded (up to a bound); past it, typing searches the whole workspace.
-  const partial = Boolean(page && !page.complete)
-  const search = useApiQuery({
-    ...machineSearchQuery(workspace?.id ?? "", parsed.text),
-    enabled: partial && Boolean(workspace && parsed.text),
-  })
-  const machines = partial && parsed.text ? search.data?.items : page?.items
   const keys: FilterKey[] = [
     "status",
     "os",
     ...(tagsLive ? (["tag"] as const) : []),
     ...(workspace?.kind === "personal" ? (["owner"] as const) : []),
   ]
-  const tags = tagOptions(page?.items)
-  const applied = (Object.entries(parsed.filters) as [FilterKey, string][]).filter(([key]) => keys.includes(key))
-  const visible = machines?.filter((machine) =>
-    matchesQuery(machine, { text: parsed.text, filters: Object.fromEntries(applied) }, me),
+  const workspaceTags = useApiQuery(tagsQuery(workspace?.id ?? ""))
+  const tags = Object.fromEntries(
+    (workspaceTags.data?.tags ?? []).map((tag) => tag.name.replace(/^tag:/, "")).map((name) => [name, name]),
   )
+  const applied = (Object.entries(parsed.filters) as [FilterKey, string][]).filter(([key]) => keys.includes(key))
   const filtered = Boolean(parsed.text) || applied.length > 0
-  const pages = usePages(query, visible?.length ?? 0)
-  const shown = visible?.slice(pages.from, pages.to)
+  const pages = usePages(query)
+  const list = useApiQuery({
+    ...machineListQuery(workspace?.id ?? "", parsed.text, Object.fromEntries(applied), pages.page),
+    enabled: Boolean(workspace),
+  })
+  const { isPending, isError, error, refetch } = list
+  const shown = list.data?.items
+  const total = list.data?.total ?? 0
 
   return (
     <section id="machines-table" className="flex scroll-mt-16 flex-col gap-3">
@@ -95,13 +94,13 @@ export function MachineTable() {
           <AddMachineDialog />
         </div>
       </div>
-      {filtered && machines && (
+      {filtered && list.data && (
         <div className="flex flex-wrap items-center gap-2">
           {applied.map(([key, value]) => (
             <FilterChip key={key} name={key} value={value} query={query} onQuery={setQuery} tags={tags} />
           ))}
           <span className="px-1 text-xs text-muted-foreground">
-            {visible?.length} of {machines.length} {machines.length === 1 ? "machine" : "machines"}
+            {total} {total === 1 ? "machine" : "machines"}
           </span>
         </div>
       )}
@@ -145,7 +144,7 @@ export function MachineTable() {
             </tr>
           </thead>
           <tbody className="divide-y divide-divider">
-            {(isPending || (partial && Boolean(parsed.text) && search.isPending)) && <LoadingRows />}
+            {isPending && <LoadingRows />}
             {shown?.map((machine) => (
               <MachineRow
                 key={machine.id}
@@ -171,28 +170,11 @@ export function MachineTable() {
             )}
           </div>
         )}
-        {visible && visible.length > perPage && (
-          <nav className="flex items-center justify-end gap-3 py-3 text-sm text-muted-foreground" aria-label="Pages">
-            <span className="tabular-nums" data-machine-range>
-              {pages.from + 1}–{Math.min(pages.to, visible.length)} of {visible.length}
-            </span>
-            <Button variant="outline" size="sm" disabled={pages.page === 1} onClick={() => pages.go(pages.page - 1)}>
-              Previous
-            </Button>
-            <Button variant="outline" size="sm" disabled={pages.to >= visible.length} onClick={() => pages.go(pages.page + 1)}>
-              Next
-            </Button>
-          </nav>
-        )}
-        {partial && !parsed.text && page && (
-          <p className="py-4 text-center text-xs text-muted-foreground">
-            Showing the first {page.items.length} of {page.total} machines. Search to find the others.
-          </p>
-        )}
-        {machines?.length === 0 && !filtered && <NoMachines />}
-        {machines && visible?.length === 0 && (machines.length > 0 || filtered) && (
+        {list.data && <ListPager page={list.data.page} size={cursorPageSize} total={total} go={pages.go} />}
+        {list.data && total === 0 && !filtered && <NoMachines />}
+        {list.data && total === 0 && filtered && (
           <p className="py-12 text-center text-sm text-muted-foreground">
-            {filtered ? "No machines match these filters" : "No machines"}
+            No machines match these filters
           </p>
         )}
       </div>
@@ -331,20 +313,18 @@ function NoMachines() {
   )
 }
 
-const perPage = 50
-
 /**
  * The table's page, in the URL (?page=) so a page can be shared and survives a reload. A new
- * search or filter starts again at page 1; a page past the end shows the last one.
+ * search or filter starts again at page 1; a page past the end shows the last one (the server's
+ * cursor stops there).
  */
-function usePages(query: string, count: number) {
+function usePages(query: string) {
   const url = useMachineUrl()
   // The page shown is chosen here and written to the URL; the URL's page applies when the page is
   // opened (a new `url`) and the search is still the URL's. A new search starts at page 1.
   const [chosen, setChosen] = useState<{ query: string; page: number; url: typeof url } | null>(null)
   const wanted = chosen?.url === url ? (chosen.query === query ? chosen.page : 1) : query === url.q ? url.page : 1
-  const last = Math.max(1, Math.ceil(count / perPage))
-  const page = Math.min(Math.max(1, wanted), last)
+  const page = Math.max(1, wanted)
   const go = (next: number) => {
     setChosen({ query, page: next, url })
     const address = new URL(window.location.href)
@@ -353,5 +333,5 @@ function usePages(query: string, count: number) {
     window.history.replaceState(null, "", address)
     document.getElementById("machines-table")?.scrollIntoView({ block: "start" })
   }
-  return { page, from: (page - 1) * perPage, to: page * perPage, go }
+  return { page, go }
 }
