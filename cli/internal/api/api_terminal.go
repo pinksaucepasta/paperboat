@@ -132,6 +132,24 @@ type FileTransferPolicy struct {
 	RetentionSeconds       int64  `json:"retention_seconds"`
 	DeliveryTimeoutSeconds int64  `json:"delivery_timeout_seconds"`
 	MaxPendingSpoolBytes   int64  `json:"max_pending_spool_bytes"`
+	AutomaticMaxBatchBytes int64  `json:"automatic_max_batch_bytes,omitempty"`
+}
+
+// AutomaticTransferLimit is the largest Automatic transfer: 2,000,000,000 bytes (PLAN 3b, File transfer modes).
+const AutomaticTransferLimit = int64(2_000_000_000)
+
+// Bounds is the per-file and per-batch byte bound: the Automatic batch bound for both when the server sends it,
+// otherwise the earlier separate fields (accepted until the server stops sending them).
+func (p FileTransferPolicy) Bounds() (file, batch int64) {
+	if p.AutomaticMaxBatchBytes > 0 {
+		return p.AutomaticMaxBatchBytes, p.AutomaticMaxBatchBytes
+	}
+	return p.MaxFileBytes, p.MaxBatchBytes
+}
+
+func (p FileTransferPolicy) ValidBounds() bool {
+	file, batch := p.Bounds()
+	return file > 0 && file <= batch && batch <= AutomaticTransferLimit && p.MaxPendingSpoolBytes >= batch
 }
 
 type FileTransfer struct {

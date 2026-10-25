@@ -195,7 +195,7 @@ func validRelayHTTPEndpoint(value string) bool {
 }
 
 func validFileTransferPolicy(policy auth.FileTransferPolicy) bool {
-	return policy.Revision != "" && policy.MaxFileBytes > 0 && policy.MaxFileBytes <= 50<<20 && policy.MaxBatchFiles > 0 && policy.MaxBatchFiles <= 10 && policy.MaxBatchBytes >= policy.MaxFileBytes && policy.MaxBatchBytes <= 500<<20 && policy.MaxConcurrentTransfers > 0 && policy.MaxConcurrentTransfers <= 2 && policy.RetentionSeconds > 0 && policy.DeliveryTimeoutSeconds > 0 && policy.MaxPendingSpoolBytes >= policy.MaxBatchBytes
+	return policy.Revision != "" && policy.ValidBounds() && policy.MaxBatchFiles > 0 && policy.MaxBatchFiles <= 10 && policy.MaxConcurrentTransfers > 0 && policy.MaxConcurrentTransfers <= 2 && policy.RetentionSeconds > 0 && policy.DeliveryTimeoutSeconds > 0
 }
 
 func strictJSON(data []byte, target any) error {

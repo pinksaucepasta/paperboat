@@ -161,18 +161,19 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) ([]store.Fi
 	now := s.config.Now()
 	transfers := make([]store.FileTransfer, len(request.Files))
 	var total int64
+	maxFile, maxBatch := policy.Bounds()
 	for i, file := range request.Files {
 		if !validBasename(file.Basename) {
 			return nil, &Error{Code: InvalidPath}
 		}
-		if file.Size < 0 || file.Size > policy.MaxFileBytes {
+		if file.Size < 0 || file.Size > maxFile {
 			return nil, &Error{Code: InvalidSize}
 		}
 		if !validDigest(file.SHA256) {
 			return nil, &Error{Code: DigestMismatch}
 		}
 		total += file.Size
-		if total > policy.MaxBatchBytes {
+		if total > maxBatch {
 			return nil, &Error{Code: BatchLimit}
 		}
 		id, err := s.newID()

@@ -436,7 +436,7 @@ func (r *APIResolver) validateFileTransfer(transfer *api.FileTransfer, terminalU
 		return errors.New("file transfer credential is expired")
 	}
 	p := transfer.Policy
-	if p.Revision == "" || p.MaxFileBytes <= 0 || p.MaxFileBytes > 50<<20 || p.MaxBatchFiles < 1 || p.MaxBatchFiles > 10 || p.MaxBatchBytes < p.MaxFileBytes || p.MaxBatchBytes > 500<<20 || p.MaxConcurrentTransfers < 1 || p.MaxConcurrentTransfers > 2 || p.RetentionSeconds != 7*24*60*60 || p.DeliveryTimeoutSeconds != 600 || p.MaxPendingSpoolBytes != 1<<30 {
+	if p.Revision == "" || !p.ValidBounds() || p.MaxBatchFiles < 1 || p.MaxBatchFiles > 10 || p.MaxConcurrentTransfers < 1 || p.MaxConcurrentTransfers > 2 || p.RetentionSeconds != 7*24*60*60 || p.DeliveryTimeoutSeconds != 600 {
 		return errors.New("file transfer descriptor has invalid policy")
 	}
 	return nil

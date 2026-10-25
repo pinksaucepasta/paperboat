@@ -169,6 +169,16 @@ func TestValidateFileTransferRequiresExactRouteScopeAndPolicy(t *testing.T) {
 	if err := r.validateFileTransfer(&bad, terminalURL, expires); err == nil {
 		t.Fatal("accepted policy outside bounds")
 	}
+	// The server's Automatic policy: one batch bound of 2,000,000,000 bytes and a spool that holds it.
+	automatic := *transfer
+	automatic.Policy = api.FileTransferPolicy{Revision: "file-transfer-v2", AutomaticMaxBatchBytes: api.AutomaticTransferLimit, MaxBatchFiles: 10, MaxConcurrentTransfers: 2, RetentionSeconds: 604800, DeliveryTimeoutSeconds: 600, MaxPendingSpoolBytes: api.AutomaticTransferLimit}
+	if err := r.validateFileTransfer(&automatic, terminalURL, expires); err != nil {
+		t.Fatalf("automatic policy refused: %v", err)
+	}
+	automatic.Policy.AutomaticMaxBatchBytes = api.AutomaticTransferLimit + 1
+	if err := r.validateFileTransfer(&automatic, terminalURL, expires); err == nil {
+		t.Fatal("accepted an automatic bound over 2,000,000,000")
+	}
 }
 
 func routeOnlyTerminal() *api.Terminal {
