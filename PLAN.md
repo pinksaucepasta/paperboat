@@ -1601,6 +1601,50 @@ were dropped: the machine guard reserves each address host-wide for one OS user
 another tailnet (`tailcfg/tailcfg.go:386` Sharer); headscale allocates sequentially or randomly in one prefix and
 frees on delete (`hscontrol/db/ip.go` IPAllocator, `ip_random_exhaustion_test.go`).
 
+#### File transfer modes: Automatic and Unlimited (Lane A design; Lane B/O server, Lane R paths, Lane C console; user decision 2026-10-26)
+
+**Modes.** Exactly two; self-hosted relays add no third mode and do not lift Automatic's bound.
+- **Automatic** (default): total of one `pb send` (every file, directories expanded) <= 2,000,000,000 bytes. Path:
+  P2P, else any relay including Paperboat-hosted. Hosted-relay bytes count toward plan bandwidth (relay quota, as today).
+- **Unlimited**: no Paperboat size bound. Path: P2P, else only the account's/team's self-hosted relays. File bytes never
+  cross a Paperboat-hosted relay. With no eligible path the transfer pauses and resumes by itself when one returns.
+**Byte definition.** total_bytes = sum of file sizes in the prepared batch (`filetransfer.Prepare`), known before any
+server call. The bound is one config value (server `FileTransfer.AutomaticMaxBatchBytes`, mirrored in the descriptor),
+not copied in the client. Today's 50 MB/file and 500 MB/batch client limits are replaced by it (Automatic) or removed (Unlimited).
+**Authority (Lane B/O).** The inbox request carries files[{basename,size,sha256}]; POST
+`/v1/machines/{id}/file-transfer-descriptor` adds `transfer_mode` and `declared_bytes` (= the manifest total). The signed
+file_transfer claims gain `transfer_mode` ("automatic"|"unlimited") and, for automatic only, `max_bytes` = declared total.
+Automatic over the bound: 409 `transfer_too_large` details {total_bytes, max_bytes}. Destination verifiers accept the two
+claims before the server emits them (claims are exact). The destination cuts a stream at max_bytes (forged-size test).
+**Enforcement, at the endpoints (relays stay content-blind; coordinator option a).** A hosted relay forwards encrypted
+peer packets and cannot see streams. (1) Sender: for unlimited, a file_transfer stream is opened only when the peer path is
+direct or a self-hosted relay (`peertransport` path kind; Lane R exposes PathKind = direct|self_hosted_relay|hosted_relay);
+if the path moves to a hosted relay mid-stream, the sender stops at the next chunk and pauses. (2) Destination: refuses an
+unlimited stream whose peer path is hosted_relay (`file_transfer_path_not_allowed`). Both are tested with a fake path that
+switches to hosted_relay: no file byte is written to that path (test fails if one is).
+**Pause and resume.** Uploads already commit offsets (tus-style `committed_offset`). New: the batch state (batch_id,
+descriptor request id, per-file sha256/size/committed offset, mode) is persisted under the user state dir and owned by
+the local daemon's transfer queue, so `pb send` can exit and a daemon restart resumes. Paused reasons (one enum):
+`no_eligible_path` (unlimited: only a hosted relay is available), `destination_offline`, `relay_quota_exhausted`
+(automatic). Resume triggers: path change event, destination online, backoff 5 s -> 5 min.
+**UX.** `pb send` = Automatic unless `--unlimited` or the preference. Over the bound it refuses before any network call:
+"This transfer is 3.4 GB. Automatic sends up to 2 GB. Use --unlimited to send directly or through your own relay."
+Paused: "Waiting for a direct connection or your relay (<reason>)" in `pb send`, `pb transfers`, inbox.
+Preference: `pb config set transfers.mode automatic|unlimited` writes the account preference on the server (one owner;
+console Settings edits the same field): GET/PATCH `/v1/me/preferences` field `file_transfer_mode`. Per account, not per
+workspace (the mode is the sender's choice of path, not a team policy).
+**Console/inbox fields (Lane C).** Transfer and inbox items: `transfer_mode`, `state` (adds `paused`), `pause_reason`
+(enum above), `total_bytes`, `committed_bytes`. Errors: `transfer_too_large` {total_bytes,max_bytes},
+`file_transfer_path_not_allowed`.
+**Tests/rows.** CHECKLIST feature row F22-01 (two modes) and command rows for `pb send --unlimited`, `pb config set
+transfers.mode`: size boundary (2,000,000,000 ok, +1 refused, before any call), batch accounting (directory + files summed),
+unlimited never on hosted relay (failing-if-touched fake path), pause/resume on path loss, resume after daemon restart.
+*Prior art:* Taildrop (`~/ref/tailscale/feature/taildrop/resume.go`, `send.go`): no size cap, resumable `.partial` files
+with 64 KiB block checksums, sent over whatever path the tailnet has, DERP included; Tailscale peer relays
+(`feature/relayserver`) are user-run and chosen like any path. croc and magic-wormhole use a public relay by default
+and accept a self-hosted relay flag; neither bounds size. Our split (bounded on hosted relays, unbounded only on
+direct/own relays) bounds hosted relay cost without a bandwidth bill surprise.
+
 #### Scale matrix, end to end per feature (Lane W, from 2026-10-23)
 
 Targets: one machine with 100 concurrent terminals; one shared terminal with 50 viewers; an account with 1,000
