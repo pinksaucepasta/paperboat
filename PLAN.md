@@ -1780,8 +1780,12 @@ control/controlclient/direct.go). Control hands every peer's endpoints to the ot
 (`tailcfg.Node.Endpoints`, changes as `PeersChangedPatch`). magicsock disco-pings them directly
 (wgengine/magicsock/endpoint.go updateFromNode), and DERP is only one of the paths.
 
-**Contract (server first; the client accepts the field before the server sends it, as signed documents decode
-strictly).**
+**Contract.** Order (Lane B review): the server accepts `endpoints` in the request bodies and deploys (they
+decode strictly, so an early client would get 400); then a CLI round sends it and accepts the delivered field
+(the client accepts it since 3e401cc3/06f77b82); then the server delivers it. Lane B owns the two config paths,
+Lane Q the `/changes` request. The server stores the set normalized (sorted, deduplicated, valid unicast
+ip:port) and publishes only when the normalized set differs from the stored one, coalesced per identity to one
+per 60 s with the latest set winning.
 1. *Report.* The peer-network configuration request (`POST /v1/machine-peer-network/config` and
    `/v1/peer-network/config`, and the delta `/changes` request) carries `endpoints`: the engine's own candidate
    addresses as `ip:port` strings. These are local interface addresses, the STUN-mapped public address and a
