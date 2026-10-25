@@ -118,7 +118,7 @@ func sendCommand() *cobra.Command {
 					return err
 				}
 			}
-			prepared, err := filetransfer.Prepare(preparedPaths, filetransfer.Limits{})
+			prepared, err := filetransfer.Prepare(preparedPaths, automaticTransferLimits)
 			if err != nil {
 				return err
 			}

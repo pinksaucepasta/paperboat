@@ -267,6 +267,9 @@ func typedCommandOwnerMessage(owner error, failure commandFailure) string {
 
 // transferLimitMessage says which transfer limit a send exceeded and by how much. Nothing was sent.
 func transferLimitMessage(limit *filetransfer.LimitError) string {
+	if limit.Scope != filetransfer.LimitBatchFiles && limit.Limit == api.AutomaticTransferLimit {
+		return fmt.Sprintf("This transfer is %s. Automatic sends up to 2 GB. Nothing was sent.", transferGigabytes(limit.Value))
+	}
 	switch limit.Scope {
 	case filetransfer.LimitBatchFiles:
 		return fmt.Sprintf("That is %d files and one send takes at most %d. Send them in smaller groups; nothing was sent.", limit.Value, limit.Limit)
@@ -274,6 +277,11 @@ func transferLimitMessage(limit *filetransfer.LimitError) string {
 		return fmt.Sprintf("Those files total %s and one send takes at most %s. Send them in smaller groups; nothing was sent.", transferSize(limit.Value), transferSize(limit.Limit))
 	}
 	return fmt.Sprintf("%s is %s and a single file can be at most %s. Nothing was sent.", limit.Name, transferSize(limit.Value), transferSize(limit.Limit))
+}
+
+// transferGigabytes is a size in decimal gigabytes, as the Automatic bound (2 GB = 2,000,000,000 bytes) is stated.
+func transferGigabytes(bytes int64) string {
+	return fmt.Sprintf("%.1f GB", float64(bytes)/1e9)
 }
 
 func transferSize(bytes int64) string {

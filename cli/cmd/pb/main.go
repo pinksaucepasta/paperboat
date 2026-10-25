@@ -831,11 +831,16 @@ func nativeFileTransferClient(ctx context.Context, local *localapi.Client, targe
 	return client, lease, nil
 }
 
+// automaticTransferLimits bounds an Automatic send before any network call (PLAN 3b, File transfer modes): one
+// send totals at most 2,000,000,000 bytes, every file of it included.
+var automaticTransferLimits = filetransfer.Limits{MaxFileBytes: api.AutomaticTransferLimit, MaxBatchFiles: 10, MaxBatchBytes: api.AutomaticTransferLimit}
+
 func fileTransferLimits(target *resolver.FileTransferTarget) filetransfer.Limits {
 	if target == nil {
-		return filetransfer.Limits{MaxFileBytes: 50 << 20, MaxBatchFiles: 10, MaxBatchBytes: 500 << 20}
+		return automaticTransferLimits
 	}
-	return filetransfer.Limits{MaxFileBytes: target.Policy.MaxFileBytes, MaxBatchFiles: target.Policy.MaxBatchFiles, MaxBatchBytes: target.Policy.MaxBatchBytes}
+	maxFile, maxBatch := target.Policy.Bounds()
+	return filetransfer.Limits{MaxFileBytes: maxFile, MaxBatchFiles: target.Policy.MaxBatchFiles, MaxBatchBytes: maxBatch}
 }
 
 func descriptorFileTransferPolicy(target *resolver.FileTransferTarget) filetransfer.Policy {
