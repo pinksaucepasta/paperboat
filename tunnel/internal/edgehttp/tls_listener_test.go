@@ -339,3 +339,97 @@ func TestTLSListenerAdmissionAndInterruptedCleanup(t *testing.T) {
 		t.Fatal("inspection admission leaked after cancellation")
 	}
 }
+
+// gatedListener holds Accept until open is closed, so a test can finish configuring the shared
+// listener before its accept loop sees a connection.
+type gatedListener struct {
+	net.Listener
+	open chan struct{}
+}
+
+func (g gatedListener) Accept() (net.Conn, error) {
+	<-g.open
+	return g.Listener.Accept()
+}
+
+// Audit T3: a long-lived TLS passthrough stream runs in its own bounded pool and gives its accept
+// slot back, so it cannot starve new HTTPS connections; a full passthrough pool refuses only the
+// excess passthrough connection.
+func TestTLSPassthroughStreamReleasesItsAcceptSlot(t *testing.T) {
+	probe, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	address := probe.Addr().String()
+	registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
+	defer registry.Close()
+	authority := &tlsAuthorityFixture{}
+	d := publicTCPDecision(time.Now().UTC(), 443)
+	d.Binding.Protocol = "tls"
+	d.Binding.ListenerID = "listener_tls_443"
+	authority.set(d)
+
+	gate := gatedListener{Listener: probe, open: make(chan struct{})}
+	manager := newSharedTLSListener(gate, authority, registry, func(string) bool { return false }, make(chan struct{}, 1), "", nil, nil, nil)
+	defer manager.Close()
+	forwarded := make(chan struct{}, 4)
+	manager.forward = func(ctx context.Context, conn net.Conn, _ connectorprotocol.IngressDecision, _ func(context.Context, connectorprotocol.IngressDecision) (connectorprotocol.IngressDecision, error)) error {
+		forwarded <- struct{}{}
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	close(gate.open)
+
+	hello := func() net.Conn {
+		t.Helper()
+		conn, err := net.Dial("tcp", address)
+		if err != nil {
+			t.Fatal(err)
+		}
+		go func() { _ = tls.Client(conn, &tls.Config{ServerName: d.Binding.Hostname}).Handshake() }()
+		return conn
+	}
+	held := hello()
+	defer held.Close()
+	select {
+	case <-forwarded:
+	case <-time.After(2 * time.Second):
+		t.Fatal("passthrough stream not forwarded")
+	}
+	until := time.Now().Add(time.Second)
+	for len(manager.slots) != 0 {
+		if time.Now().After(until) {
+			t.Fatal("held passthrough stream keeps its accept slot")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if len(manager.passthrough) != 1 {
+		t.Fatalf("passthrough pool holds %d streams", len(manager.passthrough))
+	}
+
+	excess := hello()
+	defer excess.Close()
+	_ = excess.SetReadDeadline(time.Now().Add(2 * time.Second))
+	var b [1]byte
+	if _, err = excess.Read(b[:]); err == nil {
+		t.Fatal("excess passthrough connection served")
+	} else if timeout, ok := err.(net.Error); ok && timeout.Timeout() {
+		t.Fatal("excess passthrough connection not refused promptly")
+	}
+	select {
+	case <-forwarded:
+		t.Fatal("excess passthrough connection forwarded beyond the pool")
+	default:
+	}
+
+	closed := make(chan struct{})
+	go func() { manager.Close(); close(closed) }()
+	select {
+	case <-closed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("shared listener cleanup timed out")
+	}
+	if len(manager.passthrough) != 0 || len(manager.slots) != 0 {
+		t.Fatal("passthrough admission leaked after close")
+	}
+}

@@ -25,13 +25,18 @@ type SharedTLSListener struct {
 	cancel                 context.CancelFunc
 	ready                  chan net.Conn
 	slots                  chan struct{}
-	done                   chan struct{}
-	workers                sync.WaitGroup
-	closeOnce              sync.Once
-	mu                     sync.Mutex
-	acceptErr              error
-	onFailure              func(context.Context, string, error)
-	closeErr               error
+	// passthrough bounds the TLS-passthrough streams handed off from dispatch; they are long-lived,
+	// so they must not hold the dispatch slots new HTTPS connections need (audit T3).
+	passthrough chan struct{}
+	// forward carries one passthrough stream (the route registry's ForwardPublicTCP).
+	forward   func(context.Context, net.Conn, connectorprotocol.IngressDecision, func(context.Context, connectorprotocol.IngressDecision) (connectorprotocol.IngressDecision, error)) error
+	done      chan struct{}
+	workers   sync.WaitGroup
+	closeOnce sync.Once
+	mu        sync.Mutex
+	acceptErr error
+	onFailure func(context.Context, string, error)
+	closeErr  error
 }
 
 func NewSharedTLSListener(listener net.Listener, authority PublicTCPAuthority, routes *DataCarrierRouteRegistry, httpsHostname func(string) bool, maximumConnections int, infrastructureHostname string) (*SharedTLSListener, error) {
@@ -43,7 +48,7 @@ func NewSharedTLSListener(listener net.Listener, authority PublicTCPAuthority, r
 
 func newSharedTLSListener(listener net.Listener, authority PublicTCPAuthority, routes *DataCarrierRouteRegistry, httpsHostname func(string) bool, slots chan struct{}, infrastructureHostname string, admittedHTTPSHostname func(string) bool, previewHTTPSAuthority func(context.Context, string) error, observe func(context.Context, string, error)) *SharedTLSListener {
 	ctx, cancel := context.WithCancel(context.Background())
-	l := &SharedTLSListener{Listener: listener, authority: authority, routes: routes, httpsHostname: httpsHostname, admittedHTTPSHostname: admittedHTTPSHostname, previewHTTPSAuthority: previewHTTPSAuthority, infrastructureHostname: infrastructureHostname, ctx: ctx, cancel: cancel, ready: make(chan net.Conn), slots: slots, done: make(chan struct{}), onFailure: observe}
+	l := &SharedTLSListener{Listener: listener, authority: authority, routes: routes, httpsHostname: httpsHostname, admittedHTTPSHostname: admittedHTTPSHostname, previewHTTPSAuthority: previewHTTPSAuthority, infrastructureHostname: infrastructureHostname, ctx: ctx, cancel: cancel, ready: make(chan net.Conn), slots: slots, passthrough: make(chan struct{}, cap(slots)), forward: routes.ForwardPublicTCP, done: make(chan struct{}), onFailure: observe}
 	go l.run()
 	return l
 }
@@ -155,8 +160,23 @@ func (l *SharedTLSListener) dispatch(conn net.Conn) {
 		selected = &current
 	}
 	if selected != nil {
+		// Hand the long-lived passthrough stream to its own bounded pool and free this dispatch
+		// slot; a full passthrough pool refuses only this connection.
+		select {
+		case l.passthrough <- struct{}{}:
+		default:
+			return
+		}
+		owned = false
+		decision := *selected
 		replay.(*replayTLSConn).sharedListener = true
-		l.observe("public_tcp_stream", l.routes.ForwardPublicTCP(l.ctx, replay, *selected, l.authority.ResolveDecision))
+		l.workers.Add(1)
+		go func() {
+			defer l.workers.Done()
+			defer func() { <-l.passthrough }()
+			defer conn.Close()
+			l.observe("public_tcp_stream", l.forward(l.ctx, replay, decision, l.authority.ResolveDecision))
+		}()
 		return
 	}
 	if !authorizedHTTPS && !infrastructureHTTPS {
