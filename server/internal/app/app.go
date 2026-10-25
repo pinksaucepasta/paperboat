@@ -384,7 +384,7 @@ func New(opts Options) (*App, error) {
 		_ = store.Close()
 		return nil, fmt.Errorf("configure connector origin health: %w", err)
 	}
-	machineEventHub := machineevents.NewHub(store.Pool())
+	machineEventHub := machineevents.NewHub(store.Pool(), store.Direct())
 	machineEventSigning, err := httpapi.NewMachineEventSigning(mintKeys, publicBaseURL)
 	if err != nil {
 		_ = store.Close()

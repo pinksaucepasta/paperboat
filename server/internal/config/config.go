@@ -131,6 +131,10 @@ func NormalizeIssuer(raw string) string {
 type Database struct {
 	Driver string `json:"driver"`
 	DSN    string `json:"dsn"`
+	// DirectDSN reaches PostgreSQL without a connection pooler (empty: DSN). Session state (advisory locks held
+	// across statements, LISTEN) and migrations use that direct pool, because a transaction-pooled connection can
+	// hand the next statement of a session to another backend.
+	DirectDSN string `json:"direct_dsn"`
 	// MaxConns bounds the request pool (0: 20). Statement, lock and idle-in-transaction timeouts bound every
 	// connection of it (0: 30 s, 10 s, 60 s), so a stuck query or a lock queue cannot hold a connection forever;
 	// migrations run on their own pool without them.

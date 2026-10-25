@@ -81,7 +81,7 @@ type databaseCloudflareAddressAdmission struct {
 // NewDatabaseCloudflareAddressAdmission creates the shared per-zone provider
 // budget used by every server replica configured with the same database.
 func NewDatabaseCloudflareAddressAdmission(database *db.DB, zoneID string) (CloudflareAddressAdmission, error) {
-	if database == nil || database.Pool() == nil || !validMetadata(zoneID, 128) {
+	if database == nil || database.Direct() == nil || !validMetadata(zoneID, 128) {
 		return nil, fmt.Errorf("%w: Cloudflare address admission database and zone are required", ErrInvalid)
 	}
 	return &databaseCloudflareAddressAdmission{database: database, zoneID: zoneID}, nil
@@ -92,7 +92,7 @@ func (a *databaseCloudflareAddressAdmission) Acquire(ctx context.Context) (func(
 		return reservation.acquire(ctx)
 	}
 	for {
-		conn, err := a.database.Pool().Acquire(ctx)
+		conn, err := a.database.Direct().Acquire(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -125,13 +125,9 @@ func (a *databaseCloudflareAddressAdmission) Acquire(ctx context.Context) (func(
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return nil, err
 		}
-		var waitSeconds float64
-		if err := a.database.Pool().QueryRow(ctx, budgetWaitSQL, a.zoneID).Scan(&waitSeconds); err != nil {
+		wait, err := a.budgetWait(ctx)
+		if err != nil {
 			return nil, err
-		}
-		wait := time.Duration(waitSeconds * float64(time.Second))
-		if wait < 25*time.Millisecond {
-			wait = 25 * time.Millisecond
 		}
 		if err := waitContext(ctx, wait); err != nil {
 			return nil, err
@@ -139,11 +135,21 @@ func (a *databaseCloudflareAddressAdmission) Acquire(ctx context.Context) (func(
 	}
 }
 
+// budgetWait is how long to wait before the zone's provider budget can admit a call (at least 25 ms). It holds no
+// session state, so it runs on the pooled handle.
+func (a *databaseCloudflareAddressAdmission) budgetWait(ctx context.Context) (time.Duration, error) {
+	var waitSeconds float64
+	if err := a.database.Pool().QueryRow(ctx, budgetWaitSQL, a.zoneID).Scan(&waitSeconds); err != nil {
+		return 0, err
+	}
+	return max(time.Duration(waitSeconds*float64(time.Second)), 25*time.Millisecond), nil
+}
+
 func (a *databaseCloudflareAddressAdmission) Reserve(ctx context.Context, count int) (context.Context, func(), error) {
 	if count < 1 || count > cloudflareAddressBurst {
 		return nil, nil, ErrInvalid
 	}
-	conn, err := a.database.Pool().Acquire(ctx)
+	conn, err := a.database.Direct().Acquire(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -224,7 +230,7 @@ VALUES($1,5,statement_timestamp(),statement_timestamp()+$2::interval) ON CONFLIC
 }
 
 func NewAddressReconciler(database *db.DB, provider AddressRecordProvider, resolver AddressResolver) (*AddressReconciler, error) {
-	if database == nil || database.Pool() == nil || provider == nil || resolver == nil {
+	if database == nil || database.Direct() == nil || provider == nil || resolver == nil {
 		return nil, fmt.Errorf("%w: address reconciler dependencies are required", ErrInvalid)
 	}
 	return &AddressReconciler{database: database, provider: provider, resolver: resolver, now: time.Now}, nil
@@ -300,7 +306,7 @@ func (r *AddressReconciler) reconcile(ctx context.Context, desired DesiredAddres
 	}
 	desired.Hostname, desired.Addresses = host, addresses
 
-	conn, err := r.database.Pool().Acquire(ctx)
+	conn, err := r.database.Direct().Acquire(ctx)
 	if err != nil {
 		return err
 	}

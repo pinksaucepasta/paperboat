@@ -59,7 +59,7 @@ SELECT $1||'_m'||g,$1,$1||'_e'||g,'m-'||g,'linux','amd64','/w','online','occupie
 		return machineRows, accountGeneration
 	}
 
-	hub := NewHub(database.Pool())
+	hub := NewHub(database.Pool(), database.Direct())
 	go func() {
 		for ctx.Err() == nil {
 			_ = hub.ListenFor(ctx, 10*time.Second)

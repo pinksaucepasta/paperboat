@@ -120,6 +120,7 @@ Common environment overrides:
 - `PAPERBOAT_ALLOWED_ORIGINS`
 - `PAPERBOAT_DATABASE_DRIVER`
 - `PAPERBOAT_DATABASE_DSN`
+- `PAPERBOAT_DATABASE_DIRECT_DSN` (optional: a connection that bypasses any connection pooler, for advisory locks, LISTEN and migrations; empty uses `PAPERBOAT_DATABASE_DSN`)
 - `PAPERBOAT_GITHUB_OAUTH_AUTHORIZE_URL`
 - `PAPERBOAT_GITHUB_OAUTH_TOKEN_URL`
 - `PAPERBOAT_GITHUB_OAUTH_SCOPES`

@@ -141,6 +141,7 @@ func overlayEnv(c *Config, lookup func(string) (string, bool), readFile func(str
 	setString("PAPERBOAT_BROWSER_LOGIN_ORIGIN", &c.HTTP.BrowserLoginOrigin)
 	setString("PAPERBOAT_DATABASE_DRIVER", &c.Database.Driver)
 	setString("PAPERBOAT_DATABASE_DSN", &c.Database.DSN)
+	setString("PAPERBOAT_DATABASE_DIRECT_DSN", &c.Database.DirectDSN)
 	setString("PAPERBOAT_CONFIG_SYNC_HOME", &c.ConfigSync.HomeOverride)
 	setString("PAPERBOAT_CONFIG_SYNC_MODE", &c.ConfigSync.Mode)
 	setString("PAPERBOAT_CONFIG_SYNC_POLICY_REVISION", &c.ConfigSync.PolicyRevision)

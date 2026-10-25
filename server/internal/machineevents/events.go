@@ -74,13 +74,15 @@ func Publish(ctx context.Context, tx Execer, machineIDs []string, topic string) 
 
 // Hub holds waiting requests and wakes them on notifications from PostgreSQL.
 type Hub struct {
-	pool *pgxpool.Pool
-	mu   sync.Mutex
-	subs map[string]map[chan struct{}]struct{}
+	// pool serves the queries; direct holds the LISTEN session (db.DB.Direct).
+	pool   *pgxpool.Pool
+	direct *pgxpool.Pool
+	mu     sync.Mutex
+	subs   map[string]map[chan struct{}]struct{}
 }
 
-func NewHub(pool *pgxpool.Pool) *Hub {
-	return &Hub{pool: pool, subs: map[string]map[chan struct{}]struct{}{}}
+func NewHub(pool, direct *pgxpool.Pool) *Hub {
+	return &Hub{pool: pool, direct: direct, subs: map[string]map[chan struct{}]struct{}{}}
 }
 
 func (h *Hub) subscribe(machineID string) (chan struct{}, func()) {
@@ -142,7 +144,7 @@ func (h *Hub) ListenFor(ctx context.Context, d time.Duration) error {
 }
 
 func (h *Hub) listen(ctx context.Context) error {
-	conn, err := h.pool.Acquire(ctx)
+	conn, err := h.direct.Acquire(ctx)
 	if err != nil {
 		return err
 	}

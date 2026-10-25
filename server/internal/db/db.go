@@ -23,9 +23,11 @@ import (
 type DB struct {
 	observer *queryObserver
 	pool     *pgxpool.Pool
-	sql      *sql.DB
-	q        *dbsqlc.Queries
-	// migrationConfig opens the migrations' own pool (no statement or lock timeouts).
+	// direct carries session state (see Direct); it is never used for ordinary queries.
+	direct *pgxpool.Pool
+	sql    *sql.DB
+	q      *dbsqlc.Queries
+	// migrationConfig opens the migrations' own pool on the direct DSN (no statement or lock timeouts).
 	migrationConfig *pgxpool.Config
 
 	serializable  transactionCounters
@@ -56,6 +58,10 @@ type Tx struct {
 	q  *dbsqlc.Queries
 }
 
+// directMaxConns bounds the direct pool: session state holds one connection each (the machine-events LISTEN, the
+// worker leader, a team identity sync, each address reconcile), so it stays small.
+const directMaxConns = 4
+
 func Open(cfg config.Database) (*DB, error) {
 	if cfg.Driver != "postgres" && cfg.Driver != "pgx" {
 		return nil, fmt.Errorf("unsupported database driver %q: postgres is required for first release", cfg.Driver)
@@ -63,33 +69,67 @@ func Open(cfg config.Database) (*DB, error) {
 	if strings.TrimSpace(cfg.DSN) == "" {
 		return nil, errors.New("database dsn is required")
 	}
-	poolConfig, err := pgxpool.ParseConfig(cfg.DSN)
+	observer := &queryObserver{}
+	poolConfig, err := newPoolConfig(cfg, cfg.DSN, cmp.Or(cfg.MaxConns, 20), observer)
 	if err != nil {
 		return nil, fmt.Errorf("parse postgres dsn: %w", err)
 	}
-	poolConfig.ConnConfig.RuntimeParams["search_path"] = "paperboat"
-	// JIT compilation costs ~1 s on a query like the machine inventory's (plpgsql lateral calls inflate its estimated
-	// cost past jit_above_cost) and never pays off for this OLTP workload: the same statement runs in ~18 ms without it.
-	poolConfig.ConnConfig.RuntimeParams["jit"] = "off"
-	poolConfig.MaxConnLifetime = 30 * time.Minute
-	// Migrations (index builds, table rewrites) run longer than any request; their pool has no time bounds.
-	migrationConfig := poolConfig.Copy()
+	directConfig, err := newPoolConfig(cfg, cmp.Or(strings.TrimSpace(cfg.DirectDSN), cfg.DSN), directMaxConns, observer)
+	if err != nil {
+		return nil, fmt.Errorf("parse postgres direct dsn: %w", err)
+	}
+	// Migrations (index builds, table rewrites) run longer than any request; their pool has no time bounds, so the
+	// timeouts that the role defaults or startup parameters set are cleared on every migration connection.
+	migrationConfig := directConfig.Copy()
 	migrationConfig.MaxConns = 2
-	poolConfig.MaxConns = cmp.Or(cfg.MaxConns, 20)
+	migrationConfig.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+		_, err := conn.Exec(ctx, `SET statement_timeout = 0; SET lock_timeout = 0; SET idle_in_transaction_session_timeout = 0`)
+		return err
+	}
+	pool, err := pgxpool.NewWithConfig(context.Background(), poolConfig)
+	if err != nil {
+		return nil, fmt.Errorf("open postgres: %w", err)
+	}
+	direct, err := pgxpool.NewWithConfig(context.Background(), directConfig)
+	if err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("open direct postgres: %w", err)
+	}
+	return &DB{observer: observer, pool: pool, direct: direct, sql: stdlib.OpenDBFromPool(pool), q: dbsqlc.New(pool), migrationConfig: migrationConfig}, nil
+}
+
+// newPoolConfig parses dsn for a pool whose connections start with the session settings.
+func newPoolConfig(cfg config.Database, dsn string, maxConns int32, observer *queryObserver) (*pgxpool.Config, error) {
+	poolConfig, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		return nil, err
+	}
+	for name, value := range sessionSettings(cfg) {
+		poolConfig.ConnConfig.RuntimeParams[name] = value
+	}
+	poolConfig.MaxConnLifetime = 30 * time.Minute
+	poolConfig.MaxConns = maxConns
+	poolConfig.ConnConfig.Tracer = observer
+	return poolConfig, nil
+}
+
+// sessionSettings is the one list of settings every connection runs with. Open sends them as startup parameters
+// and db-role-defaults stores them as role defaults, so the two cannot drift apart.
+func sessionSettings(cfg config.Database) map[string]string {
+	settings := map[string]string{
+		"search_path": "paperboat",
+		// JIT compilation costs ~1 s on a query like the machine inventory's (plpgsql lateral calls inflate its estimated
+		// cost past jit_above_cost) and never pays off for this OLTP workload: the same statement runs in ~18 ms without it.
+		"jit": "off",
+	}
 	for name, value := range map[string]time.Duration{
 		"statement_timeout":                   cmp.Or(cfg.StatementTimeout, 30*time.Second),
 		"lock_timeout":                        cmp.Or(cfg.LockTimeout, 10*time.Second),
 		"idle_in_transaction_session_timeout": cmp.Or(cfg.IdleInTransactionTimeout, 60*time.Second),
 	} {
-		poolConfig.ConnConfig.RuntimeParams[name] = strconv.FormatInt(value.Milliseconds(), 10)
+		settings[name] = strconv.FormatInt(value.Milliseconds(), 10)
 	}
-	observer := &queryObserver{}
-	poolConfig.ConnConfig.Tracer = observer
-	pool, err := pgxpool.NewWithConfig(context.Background(), poolConfig)
-	if err != nil {
-		return nil, fmt.Errorf("open postgres: %w", err)
-	}
-	return &DB{observer: observer, pool: pool, sql: stdlib.OpenDBFromPool(pool), q: dbsqlc.New(pool), migrationConfig: migrationConfig}, nil
+	return settings
 }
 
 func (d *DB) Close() error {
@@ -98,6 +138,7 @@ func (d *DB) Close() error {
 	}
 	sqlErr := d.sql.Close()
 	d.pool.Close()
+	d.direct.Close()
 	return sqlErr
 }
 
@@ -127,6 +168,17 @@ func (d *DB) Pool() *pgxpool.Pool {
 		return nil
 	}
 	return d.pool
+}
+
+// Direct is the pool for session state: a session advisory lock (pg_try_advisory_lock, pg_advisory_lock and their
+// unlocks) and LISTEN must stay on one connection from acquire to release, and migrations need it too. Behind a
+// transaction-pooling PgBouncer the unlock or the LISTEN would run on another backend, so the lock leaks and no
+// notification arrives. Transaction-scoped locks (pg_advisory_xact_lock) and everything else use Pool or SQL.
+func (d *DB) Direct() *pgxpool.Pool {
+	if d == nil {
+		return nil
+	}
+	return d.direct
 }
 
 func (d *DB) TransactionStats() TransactionSnapshot {

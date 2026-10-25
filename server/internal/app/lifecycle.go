@@ -354,7 +354,7 @@ func (r readinessChecker) Ready(ctx context.Context) error {
 func workerLeader(store *db.DB, metrics *telemetry.Metrics, logger *slog.Logger) *workers.PostgresLeader {
 	host, _ := os.Hostname()
 	return &workers.PostgresLeader{
-		DB: store.SQL(), Instance: fmt.Sprintf("%s/%d", host, os.Getpid()), Version: buildinfo.Version,
+		DB: store.Direct(), Instance: fmt.Sprintf("%s/%d", host, os.Getpid()), Version: buildinfo.Version,
 		Retry: workers.LeaderRetry, Check: workers.LeaderCheck, Logger: logger,
 		Mode: func(mode string) { setWorkerMode(metrics, mode) },
 	}

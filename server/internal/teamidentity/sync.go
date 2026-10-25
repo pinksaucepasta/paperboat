@@ -21,17 +21,12 @@ func (s *Service) Sync(ctx context.Context) error {
 	if s.workos == nil {
 		return nil
 	}
-	var acquired bool
 	// One server process at a time; the lock is released at the end of the tick.
-	conn, err := s.db.SQL().Conn(ctx)
-	if err != nil {
+	acquired, release, err := s.lockTick(ctx)
+	if err != nil || !acquired {
 		return err
 	}
-	defer conn.Close()
-	if err = conn.QueryRowContext(ctx, `SELECT pg_try_advisory_lock(160236)`).Scan(&acquired); err != nil || !acquired {
-		return err
-	}
-	defer conn.ExecContext(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock(160236)`)
+	defer release()
 	errs := []error{s.readEvents(ctx)}
 	if _, err = s.db.SQL().ExecContext(ctx, `UPDATE paperboat.team_identity_state s SET dirty=true FROM paperboat.teams t WHERE t.team_id=s.team_id AND t.workos_organization_id IS NOT NULL AND (s.synced_at IS NULL OR s.synced_at < now()-interval '1 day')`); err != nil {
 		errs = append(errs, err)
@@ -55,6 +50,29 @@ func (s *Service) Sync(ctx context.Context) error {
 	}
 	errs = append(errs, s.processJIT(ctx), s.deleteOrganizations(ctx))
 	return errors.Join(errs...)
+}
+
+// lockTick takes the session lock that makes one server process run the sync at a time. The lock lives on one
+// direct connection until release.
+func (s *Service) lockTick(ctx context.Context) (bool, func(), error) {
+	conn, err := s.db.Direct().Acquire(ctx)
+	if err != nil {
+		return false, nil, err
+	}
+	var acquired bool
+	if err := conn.QueryRow(ctx, `SELECT pg_try_advisory_lock(160236)`).Scan(&acquired); err != nil || !acquired {
+		conn.Release()
+		return false, nil, err
+	}
+	return true, func() {
+		unlockCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if _, err := conn.Exec(unlockCtx, `SELECT pg_advisory_unlock(160236)`); err != nil {
+			// A connection that failed to unlock must not go back to the pool with the lock.
+			_ = conn.Conn().Close(unlockCtx)
+		}
+		conn.Release()
+	}, nil
 }
 
 // deleteOrganizations removes the WorkOS organization of deleted teams, so their SSO connection

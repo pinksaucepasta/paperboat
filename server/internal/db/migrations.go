@@ -18,10 +18,11 @@ var migrationsFS embed.FS
 const migrationsDir = "migrations"
 
 func Migrate(ctx context.Context, d *DB) error {
-	if err := d.Ping(ctx); err != nil {
-		return err
+	if err := d.Direct().Ping(ctx); err != nil {
+		return fmt.Errorf("ping direct database: %w", err)
 	}
-	// Migrations run on their own pool: the request pool's statement and lock timeouts would cut index builds.
+	// Migrations run on their own pool, on the direct DSN: the migration lock below is a session lock, and the
+	// request pool's statement and lock timeouts would cut index builds.
 	migrationPool, err := pgxpool.NewWithConfig(ctx, d.migrationConfig)
 	if err != nil {
 		return fmt.Errorf("open migration pool: %w", err)

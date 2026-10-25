@@ -45,7 +45,7 @@ func TestWorkersRunInOneInstanceAndFailOverOnPostgres(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { pool.Close() })
-		leader := &workers.PostgresLeader{DB: pool.SQL(), Instance: "test-" + name, Version: "test",
+		leader := &workers.PostgresLeader{DB: pool.Direct(), Instance: "test-" + name, Version: "test",
 			Retry: 100 * time.Millisecond, Check: 100 * time.Millisecond, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
 		s := workers.NewLeaderSupervisor(leader, func(ctx context.Context) error {
 			if active.Add(1) > 1 {

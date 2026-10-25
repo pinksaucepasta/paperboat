@@ -2,11 +2,11 @@ package workers
 
 import (
 	"context"
-	"database/sql"
-	"database/sql/driver"
 	"log/slog"
 	"math/rand/v2"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Leadership gates a Supervisor: Acquire blocks until this instance may run the workers (or ctx ends),
@@ -28,7 +28,8 @@ const workerLeaderLockKey int64 = 0x7062776c // "pbwl"
 // interval, context cancelled on loss), used by lib/auth/connector_monitor.go:141. Headscale runs one
 // instance only.
 type PostgresLeader struct {
-	DB                *sql.DB
+	// DB is the direct pool (db.DB.Direct): the lock lives on one pinned connection.
+	DB                *pgxpool.Pool
 	Instance, Version string
 	Retry, Check      time.Duration
 	Logger            *slog.Logger
@@ -66,19 +67,19 @@ func (l *PostgresLeader) Acquire(ctx context.Context) (<-chan struct{}, func(), 
 }
 
 // tryLock returns a pinned connection holding the lock, or nil when another instance leads.
-func (l *PostgresLeader) tryLock(ctx context.Context) (*sql.Conn, error) {
-	conn, err := l.DB.Conn(ctx)
+func (l *PostgresLeader) tryLock(ctx context.Context) (*pgxpool.Conn, error) {
+	conn, err := l.DB.Acquire(ctx)
 	if err != nil {
 		return nil, err
 	}
 	qctx, cancel := context.WithTimeout(ctx, leaderStatementTimeout)
 	defer cancel()
 	var ok bool
-	if err = conn.QueryRowContext(qctx, `SELECT pg_try_advisory_lock($1)`, workerLeaderLockKey).Scan(&ok); err != nil || !ok {
+	if err = conn.QueryRow(qctx, `SELECT pg_try_advisory_lock($1)`, workerLeaderLockKey).Scan(&ok); err != nil || !ok {
 		discard(conn)
 		return nil, err
 	}
-	if _, err = conn.ExecContext(qctx, `INSERT INTO paperboat.worker_leader(id,instance,version,since,heartbeat_at)
+	if _, err = conn.Exec(qctx, `INSERT INTO paperboat.worker_leader(id,instance,version,since,heartbeat_at)
  VALUES(true,$1,$2,now(),now()) ON CONFLICT(id) DO UPDATE SET instance=excluded.instance,version=excluded.version,
  since=excluded.since,heartbeat_at=excluded.heartbeat_at`, l.Instance, l.Version); err != nil {
 		discard(conn)
@@ -87,7 +88,7 @@ func (l *PostgresLeader) tryLock(ctx context.Context) (*sql.Conn, error) {
 	return conn, nil
 }
 
-func (l *PostgresLeader) hold(conn *sql.Conn) (<-chan struct{}, func(), error) {
+func (l *PostgresLeader) hold(conn *pgxpool.Conn) (<-chan struct{}, func(), error) {
 	lost, stop, stopped := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	go func() {
 		defer close(stopped)
@@ -100,7 +101,7 @@ func (l *PostgresLeader) hold(conn *sql.Conn) (<-chan struct{}, func(), error) {
 			case <-ticker.C:
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), leaderStatementTimeout)
-			_, err := conn.ExecContext(ctx, `UPDATE paperboat.worker_leader SET heartbeat_at=now() WHERE id AND instance=$1`, l.Instance)
+			_, err := conn.Exec(ctx, `UPDATE paperboat.worker_leader SET heartbeat_at=now() WHERE id AND instance=$1`, l.Instance)
 			cancel()
 			if err != nil {
 				l.Logger.Warn("worker leader connection lost; stopping workers", "instance", l.Instance, "error", err)
@@ -120,21 +121,16 @@ func (l *PostgresLeader) hold(conn *sql.Conn) (<-chan struct{}, func(), error) {
 }
 
 // discard releases the lock and closes the physical connection instead of returning it to the pool, so a
-// session advisory lock can never stay behind on a pooled connection. (Returning driver.ErrBadConn from
-// Conn.Raw does not discard a sql.Conn: on 2026-10-23 the released lock stayed held by the draining server's
-// pool and no instance ran workers until the backend was terminated.) Unlocking is best effort: if the
+// session advisory lock can never stay behind on a pooled connection. (Returning the connection to the pool, or
+// driver.ErrBadConn from Conn.Raw, does not discard it: on 2026-10-23 the released lock stayed held by the draining
+// server's pool and no instance ran workers until the backend was terminated.) Unlocking is best effort: if the
 // connection is already dead, PostgreSQL dropped the lock with the backend.
-func discard(conn *sql.Conn) {
+func discard(conn *pgxpool.Conn) {
 	ctx, cancel := context.WithTimeout(context.Background(), leaderStatementTimeout)
 	defer cancel()
-	_, _ = conn.ExecContext(ctx, `SELECT pg_advisory_unlock($1)`, workerLeaderLockKey)
-	_ = conn.Raw(func(driverConn any) error {
-		if closer, ok := driverConn.(driver.Conn); ok {
-			_ = closer.Close()
-		}
-		return nil
-	})
-	_ = conn.Close()
+	_, _ = conn.Exec(ctx, `SELECT pg_advisory_unlock($1)`, workerLeaderLockKey)
+	_ = conn.Conn().Close(ctx)
+	conn.Release()
 }
 
 func (l *PostgresLeader) mode(m string) {

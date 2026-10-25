@@ -45,7 +45,7 @@ func TestHostIsToldAboutAChangeWithoutPollingOnPostgres(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = database.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.users WHERE id=$1`, account)
 	})
-	hub := NewHub(database.Pool())
+	hub := NewHub(database.Pool(), database.Direct())
 	go func() {
 		for ctx.Err() == nil {
 			_ = hub.ListenFor(ctx, 10*time.Second)
