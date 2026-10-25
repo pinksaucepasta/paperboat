@@ -13,7 +13,7 @@ import (
 
 const countPreviewTunnelsV1 = `-- name: CountPreviewTunnelsV1 :one
 SELECT count(*) FROM tunnels AS c WHERE c.id IN (SELECT paperboat.manageable_tunnel_ids($1::text, $2::boolean,
-  $3::text, $4::text, $5::text, $6::text, $7::text))
+  $3::text, $4::text, $5::text, $6::text, $7::text, NULL, NULL, NULL))
 `
 
 type CountPreviewTunnelsV1Params struct {
@@ -147,9 +147,8 @@ SELECT c.id, c.account_id, c.name, c.desired_state, c.access_mode, c.generation,
        c.updated_at, c.deleted_at, c.access_generation, c.owner_team_id
 FROM tunnels AS c
 WHERE c.id IN (SELECT paperboat.manageable_tunnel_ids($1::text, $2::boolean, $3::text,
-  $4::text, $5::text, $6::text, $7::text))
-  AND ($8::timestamptz IS NULL
-   OR (c.created_at, c.id) < ($8::timestamptz, $9::text))
+  $4::text, $5::text, $6::text, $7::text,
+  $8::timestamptz, $9::text, $10::integer))
 ORDER BY c.created_at DESC, c.id DESC
 LIMIT $10
 `

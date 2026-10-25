@@ -142,7 +142,7 @@ func (q *Queries) CompletePreviewLeaseCreateOperationV1(ctx context.Context, arg
 
 const countPreviewLeasesV1 = `-- name: CountPreviewLeasesV1 :one
 SELECT count(*) FROM preview_leases AS c WHERE c.id IN (SELECT paperboat.manageable_preview_ids($1::text, $2::boolean,
-  $3::text, $4::text, $5::text, $6::text, $7::text))
+  $3::text, $4::text, $5::text, $6::text, $7::text, NULL, NULL, NULL))
 `
 
 type CountPreviewLeasesV1Params struct {
@@ -408,9 +408,8 @@ SELECT c.id, c.endpoint, c.account_id, c.actor_id, c.owner_machine_id, c.owner_s
        c.last_renewed_at, c.stopped_at, c.generation, c.owner_last_seen_at,c.owner_session_kind,c.owner_team_id
 FROM preview_leases AS c
 WHERE c.id IN (SELECT paperboat.manageable_preview_ids($1::text, $2::boolean, $3::text,
-  $4::text, $5::text, $6::text, $7::text))
-  AND ($8::timestamptz IS NULL
-   OR (c.created_at, c.id) < ($8::timestamptz, $9::text))
+  $4::text, $5::text, $6::text, $7::text,
+  $8::timestamptz, $9::text, $10::integer))
 ORDER BY c.created_at DESC, c.id DESC
 LIMIT $10
 `

@@ -106,6 +106,47 @@ func TestPublicationListCandidatesMatchTheAccessRulesOnPostgres(t *testing.T) {
 				}
 				return previews, tunnels
 			}
+			// Walking the cursor in pages of 3 lists exactly the full list (the lists stop deciding at the page).
+			var walkedPreviews, walkedTunnels []string
+			for after := (struct {
+				at sql.NullTime
+				id sql.NullString
+			}{}); ; {
+				page, err := store.Queries().ListPreviewLeasesV1(ctx, dbsqlc.ListPreviewLeasesV1Params{AccountID: actor, RowLimit: 3, WorkspaceSet: scope.set, WorkspaceTeamID: scope.team, Q: s, AfterCreatedAt: after.at, AfterID: after.id})
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, row := range page {
+					walkedPreviews = append(walkedPreviews, row.ID)
+				}
+				if len(page) < 3 {
+					break
+				}
+				last := page[len(page)-1]
+				after.at, after.id = sql.NullTime{Time: last.CreatedAt, Valid: true}, sql.NullString{String: last.ID, Valid: true}
+			}
+			for after := (struct {
+				at sql.NullTime
+				id sql.NullString
+			}{}); ; {
+				page, err := store.Queries().ListPreviewTunnelsV1(ctx, dbsqlc.ListPreviewTunnelsV1Params{AccountID: actor, RowLimit: 3, WorkspaceSet: scope.set, WorkspaceTeamID: scope.team, Q: s, AfterCreatedAt: after.at, AfterID: after.id})
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, row := range page {
+					walkedTunnels = append(walkedTunnels, row.ID)
+				}
+				if len(page) < 3 {
+					break
+				}
+				last := page[len(page)-1]
+				after.at, after.id = sql.NullTime{Time: last.CreatedAt, Valid: true}, sql.NullString{String: last.ID, Valid: true}
+			}
+			slices.Sort(walkedPreviews)
+			slices.Sort(walkedTunnels)
+			if !slices.Equal(walkedPreviews, gotPreviews) || !slices.Equal(walkedTunnels, gotTunnels) {
+				t.Fatalf("paging for %s set=%v team=%v: walked %v and %v, full lists %v and %v", actor, scope.set, scope.team.String, walkedPreviews, walkedTunnels, gotPreviews, gotTunnels)
+			}
 			// Live and Ended split the previews exactly; deleted tunnels are listed only when asked for.
 			stateCount := func(kind, state string) int64 {
 				t.Helper()

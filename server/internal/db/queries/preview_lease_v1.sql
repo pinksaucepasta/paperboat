@@ -93,24 +93,23 @@ RETURNING id, account_id, idempotency_key, request_hash, operation_type, resourc
           correlation_id, created_at, updated_at, completed_at;
 
 -- name: ListPreviewLeasesV1 :many
--- One page of the previews the account may manage (manageable_preview_ids, migration 174: each host check once per
--- host, so the list and its count cost the same whatever the page).
+-- One page of the previews the account may manage (manageable_preview_ids: each host check once per host, each
+-- row decided only until the page is full, migration 176).
 SELECT c.id, c.endpoint, c.account_id, c.actor_id, c.owner_machine_id, c.owner_session_id,
        c.target_scheme, c.target_address, c.access_mode, c.lease_deadline, c.user_deadline,
        c.allocation_state, c.edge_state, c.origin_state, c.terminal_state, c.created_at, c.ready_at,
        c.last_renewed_at, c.stopped_at, c.generation, c.owner_last_seen_at,c.owner_session_kind,c.owner_team_id
 FROM preview_leases AS c
 WHERE c.id IN (SELECT paperboat.manageable_preview_ids(sqlc.arg(account_id)::text, sqlc.arg(workspace_set)::boolean, sqlc.narg(workspace_team_id)::text,
-  sqlc.arg(q)::text, sqlc.arg(state)::text, sqlc.arg(owner)::text, sqlc.arg(machine_id)::text))
-  AND (sqlc.narg(after_created_at)::timestamptz IS NULL
-   OR (c.created_at, c.id) < (sqlc.narg(after_created_at)::timestamptz, sqlc.narg(after_id)::text))
+  sqlc.arg(q)::text, sqlc.arg(state)::text, sqlc.arg(owner)::text, sqlc.arg(machine_id)::text,
+  sqlc.narg(after_created_at)::timestamptz, sqlc.narg(after_id)::text, sqlc.arg(row_limit)::integer))
 ORDER BY c.created_at DESC, c.id DESC
 LIMIT sqlc.arg(row_limit);
 
 -- name: CountPreviewLeasesV1 :one
 -- Every preview ListPreviewLeasesV1 can page through with the same filters.
 SELECT count(*) FROM preview_leases AS c WHERE c.id IN (SELECT paperboat.manageable_preview_ids(sqlc.arg(account_id)::text, sqlc.arg(workspace_set)::boolean,
-  sqlc.narg(workspace_team_id)::text, sqlc.arg(q)::text, sqlc.arg(state)::text, sqlc.arg(owner)::text, sqlc.arg(machine_id)::text));
+  sqlc.narg(workspace_team_id)::text, sqlc.arg(q)::text, sqlc.arg(state)::text, sqlc.arg(owner)::text, sqlc.arg(machine_id)::text, NULL, NULL, NULL));
 
 -- name: AdvancePreviewLeaseLifecycleV1 :one
 UPDATE preview_leases

@@ -44,18 +44,21 @@ func TestPreviewTotalOverTwentyThousandPreviewsOnPostgres(t *testing.T) {
 	// Later tests on the same database (preview reconciliation scans every active lease) must not see these.
 	t.Cleanup(func() {
 		cleanup := context.Background()
-		for _, query := range []string{
-			`DELETE FROM paperboat.preview_leases WHERE owner_machine_id=$1`,
-			`DELETE FROM paperboat.team_resource_bindings WHERE resource_id=$1`,
-			`DELETE FROM paperboat.workspace_policies WHERE team_id=$2`,
-			`DELETE FROM paperboat.team_members WHERE team_id=$2`,
-			`DELETE FROM paperboat.billing_workspaces WHERE team_id=$2`,
-			`DELETE FROM paperboat.user_machines WHERE id=$1`,
-			`DELETE FROM paperboat.teams WHERE team_id=$2`,
-			`DELETE FROM paperboat.users WHERE id IN ($3,$4)`,
+		for _, step := range []struct {
+			query string
+			args  []any
+		}{
+			{`DELETE FROM paperboat.preview_leases WHERE owner_machine_id=$1`, []any{host}},
+			{`DELETE FROM paperboat.team_resource_bindings WHERE resource_id=$1`, []any{host}},
+			{`DELETE FROM paperboat.workspace_policies WHERE team_id=$1`, []any{team}},
+			{`DELETE FROM paperboat.team_members WHERE team_id=$1`, []any{team}},
+			{`DELETE FROM paperboat.billing_workspaces WHERE team_id=$1`, []any{team}},
+			{`DELETE FROM paperboat.user_machines WHERE id=$1`, []any{host}},
+			{`DELETE FROM paperboat.teams WHERE team_id=$1`, []any{team}},
+			{`DELETE FROM paperboat.users WHERE id IN ($1,$2)`, []any{owner, member}},
 		} {
-			if _, err := store.SQL().ExecContext(cleanup, query, host, team, owner, member); err != nil {
-				t.Errorf("cleanup: %v\n%s", err, query)
+			if _, err := store.SQL().ExecContext(cleanup, step.query, step.args...); err != nil {
+				t.Errorf("cleanup: %v\n%s", err, step.query)
 			}
 		}
 	})

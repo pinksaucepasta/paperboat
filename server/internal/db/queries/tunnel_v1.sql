@@ -8,16 +8,15 @@ SELECT c.id, c.account_id, c.name, c.desired_state, c.access_mode, c.generation,
        c.updated_at, c.deleted_at, c.access_generation, c.owner_team_id
 FROM tunnels AS c
 WHERE c.id IN (SELECT paperboat.manageable_tunnel_ids(sqlc.arg(account_id)::text, sqlc.arg(workspace_set)::boolean, sqlc.narg(workspace_team_id)::text,
-  sqlc.arg(q)::text, sqlc.arg(state)::text, sqlc.arg(owner)::text, sqlc.arg(machine_id)::text))
-  AND (sqlc.narg(after_created_at)::timestamptz IS NULL
-   OR (c.created_at, c.id) < (sqlc.narg(after_created_at)::timestamptz, sqlc.narg(after_id)::text))
+  sqlc.arg(q)::text, sqlc.arg(state)::text, sqlc.arg(owner)::text, sqlc.arg(machine_id)::text,
+  sqlc.narg(after_created_at)::timestamptz, sqlc.narg(after_id)::text, sqlc.arg(row_limit)::integer))
 ORDER BY c.created_at DESC, c.id DESC
 LIMIT sqlc.arg(row_limit);
 
 -- name: CountPreviewTunnelsV1 :one
 -- Every tunnel ListPreviewTunnelsV1 can page through with the same filters.
 SELECT count(*) FROM tunnels AS c WHERE c.id IN (SELECT paperboat.manageable_tunnel_ids(sqlc.arg(account_id)::text, sqlc.arg(workspace_set)::boolean,
-  sqlc.narg(workspace_team_id)::text, sqlc.arg(q)::text, sqlc.arg(state)::text, sqlc.arg(owner)::text, sqlc.arg(machine_id)::text));
+  sqlc.narg(workspace_team_id)::text, sqlc.arg(q)::text, sqlc.arg(state)::text, sqlc.arg(owner)::text, sqlc.arg(machine_id)::text, NULL, NULL, NULL));
 
 -- name: UpdatePreviewTunnelFieldsV1 :one
 UPDATE tunnels
