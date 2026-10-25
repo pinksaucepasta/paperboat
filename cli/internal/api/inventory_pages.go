@@ -62,7 +62,7 @@ func collectOffsetInventoryPage[T any](ctx context.Context, c *Client, path, fie
 		}
 		p := page.Pagination
 		var next *int
-		if json.Unmarshal(p.NextOffset, &next) != nil || *p.Limit < 1 || *p.Limit > 200 || len(*batch) > *p.Limit || *p.Offset != offset || *p.Total < 0 || int64(*p.Total) > 2147483647 || len(*batch) > limit {
+		if json.Unmarshal(p.NextOffset, &next) != nil || *p.Limit != limit || *p.Offset != offset || *p.Total < 0 || int64(*p.Total) > 2147483647 || len(*batch) > limit {
 			return nil, 0, invalid()
 		}
 		end := int64(offset) + int64(len(*batch))

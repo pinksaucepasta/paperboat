@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -28,7 +29,8 @@ func (s *tagServer) handler(t *testing.T) http.HandlerFunc {
 		defer s.mu.Unlock()
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/machines":
-			writeAPIData(t, w, api.UserMachinePage{Items: s.machines, Pagination: api.Pagination{Limit: 200, Total: len(s.machines)}})
+			limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+			writeAPIData(t, w, api.UserMachinePage{Items: s.machines, Pagination: api.Pagination{Limit: limit, Total: len(s.machines)}})
 		case r.Method == http.MethodGet && r.URL.Path == policyBase:
 			_, _ = io.WriteString(w, data(testPolicyJSON))
 		case r.Method == http.MethodPut && r.URL.Path == "/v1/workspaces/acme/machines/m1/tags":
