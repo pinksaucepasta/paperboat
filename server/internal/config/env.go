@@ -243,6 +243,7 @@ func overlayEnv(c *Config, lookup func(string) (string, bool), readFile func(str
 	setString("PAPERBOAT_CERTIFICATES_ACCOUNT_KID", &c.Certificates.AccountKID)
 	setString("PAPERBOAT_CERTIFICATES_ACCOUNT_EMAIL", &c.Certificates.AccountEmail)
 	setString("PAPERBOAT_CERTIFICATES_ISSUER", &c.Certificates.Issuer)
+	setString("PAPERBOAT_CERTIFICATES_CHALLENGE", &c.Certificates.Challenge)
 	setString("PAPERBOAT_CERTIFICATES_ACCOUNT_KEY_REFERENCE", &c.Certificates.AccountKeyReference)
 	setString("PAPERBOAT_CERTIFICATES_MASTER_KEY_REFERENCE", &c.Certificates.MasterKeyReference)
 	setString("PAPERBOAT_CERTIFICATES_DNS_PROVIDER", &c.Certificates.DNSProvider)

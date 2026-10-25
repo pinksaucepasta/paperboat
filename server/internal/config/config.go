@@ -238,11 +238,14 @@ type Tunnel struct {
 // Values are resolved by the server process from its configured secret
 // provider when the managed lifecycle is enabled.
 type Certificates struct {
-	Enabled                         bool          `json:"enabled"`
-	DirectoryURL                    string        `json:"directory_url"`
-	AccountKID                      string        `json:"account_kid"`
-	AccountEmail                    string        `json:"account_email"`
-	Issuer                          string        `json:"issuer"`
+	Enabled      bool   `json:"enabled"`
+	DirectoryURL string `json:"directory_url"`
+	AccountKID   string `json:"account_kid"`
+	AccountEmail string `json:"account_email"`
+	Issuer       string `json:"issuer"`
+	// Challenge selects the ACME challenge type: dns-01 (default, Cloudflare)
+	// or http-01 (staging only; the edge answers /.well-known/acme-challenge).
+	Challenge                       string        `json:"challenge"`
 	AccountKeyReference             string        `json:"account_key_reference"`
 	MasterKeyReference              string        `json:"master_key_reference"`
 	DNSProvider                     string        `json:"dns_provider"`
@@ -445,7 +448,8 @@ func Load(ctx context.Context, opts LoadOptions) (Config, error) {
 func Default() Config {
 	reportingEnabled := DefaultSentryDSN != "" && DefaultSentryRelease != ""
 	return Config{
-		Mail: TransactionalMail{InvitationLifetimeSeconds: 2592000},
+		Certificates: Certificates{Challenge: CertificateChallengeDNS01},
+		Mail:         TransactionalMail{InvitationLifetimeSeconds: 2592000},
 		Reporting: Reporting{
 			Enabled: reportingEnabled,
 			Release: DefaultSentryRelease,
@@ -864,7 +868,6 @@ func (c Certificates) Validate(environment Environment) error {
 	for name, value := range map[string]string{
 		"account_key_reference":             c.AccountKeyReference,
 		"master_key_reference":              c.MasterKeyReference,
-		"dns_token_reference":               c.DNSTokenReference,
 		"distribution_credential_reference": c.DistributionCredentialReference,
 		"owner_id":                          c.OwnerID,
 	} {
@@ -872,17 +875,18 @@ func (c Certificates) Validate(environment Environment) error {
 			errs = append(errs, fmt.Errorf("certificates.%s is required and must be a safe reference", name))
 		}
 	}
-	if strings.TrimSpace(c.DNSProvider) != "cloudflare" {
-		errs = append(errs, fmt.Errorf("certificates.dns_provider must be cloudflare"))
+	if c.Challenge == CertificateChallengeDNS01 && !validCertificateReference(c.DNSTokenReference) {
+		errs = append(errs, fmt.Errorf("certificates.dns_token_reference is required and must be a safe reference"))
 	}
-	if !validConfigMetadata(c.DNSZoneID, 128) {
-		errs = append(errs, fmt.Errorf("certificates.dns_zone_id is required"))
-	}
-	if !validConfigMetadata(c.PublicDNSZoneID, 128) {
-		errs = append(errs, fmt.Errorf("certificates.public_dns_zone_id is required"))
-	}
-	if !validEndpointBaseDomain(c.ChallengeZone) {
-		errs = append(errs, fmt.Errorf("certificates.challenge_zone must be a DNS hostname"))
+	switch c.Challenge {
+	case CertificateChallengeDNS01:
+		errs = append(errs, c.validateDNS01()...)
+	case CertificateChallengeHTTP01:
+		if environment == EnvironmentProduction {
+			errs = append(errs, fmt.Errorf("certificates.challenge %s (PAPERBOAT_CERTIFICATES_CHALLENGE) is for staging only and is refused in production", CertificateChallengeHTTP01))
+		}
+	default:
+		errs = append(errs, fmt.Errorf("certificates.challenge must be %s or %s", CertificateChallengeDNS01, CertificateChallengeHTTP01))
 	}
 	if host, port, err := net.SplitHostPort(strings.TrimSpace(c.CAAResolver)); err != nil || host == "" || port == "" {
 		errs = append(errs, fmt.Errorf("certificates.caa_resolver must be host:port"))
@@ -897,6 +901,32 @@ func (c Certificates) Validate(environment Environment) error {
 		errs = append(errs, fmt.Errorf("certificates timing and retry bounds are invalid"))
 	}
 	return errors.Join(errs...)
+}
+
+// CertificateChallengeDNS01 and CertificateChallengeHTTP01 are the only ACME
+// challenge types. http-01 is a staging path: it is refused in production.
+const (
+	CertificateChallengeDNS01  = "dns-01"
+	CertificateChallengeHTTP01 = "http-01"
+)
+
+// validateDNS01 checks the Cloudflare zones and challenge delegation that only
+// the DNS-01 challenge needs.
+func (c Certificates) validateDNS01() []error {
+	var errs []error
+	if strings.TrimSpace(c.DNSProvider) != "cloudflare" {
+		errs = append(errs, fmt.Errorf("certificates.dns_provider must be cloudflare"))
+	}
+	if !validConfigMetadata(c.DNSZoneID, 128) {
+		errs = append(errs, fmt.Errorf("certificates.dns_zone_id is required"))
+	}
+	if !validConfigMetadata(c.PublicDNSZoneID, 128) {
+		errs = append(errs, fmt.Errorf("certificates.public_dns_zone_id is required"))
+	}
+	if !validEndpointBaseDomain(c.ChallengeZone) {
+		errs = append(errs, fmt.Errorf("certificates.challenge_zone must be a DNS hostname"))
+	}
+	return errs
 }
 
 func validCertificateReference(value string) bool {
