@@ -368,16 +368,13 @@ type CredentialInput struct {
 
 type FileTransferPolicy struct {
 	Revision               string `json:"revision"`
-	MaxFileBytes           int64  `json:"max_file_bytes"`
 	MaxBatchFiles          int    `json:"max_batch_files"`
-	MaxBatchBytes          int64  `json:"max_batch_bytes"`
+	AutomaticMaxBatchBytes int64  `json:"automatic_max_batch_bytes"`
 	MaxConcurrentTransfers int    `json:"max_concurrent_transfers"`
 	RetentionSeconds       int64  `json:"retention_seconds"`
 	DeliveryTimeoutSeconds int64  `json:"delivery_timeout_seconds"`
 	MaxPendingSpoolBytes   int64  `json:"max_pending_spool_bytes"`
 }
-
-var DefaultFileTransferPolicy = FileTransferPolicy{Revision: "file-transfer-v1", MaxFileBytes: 50 << 20, MaxBatchFiles: 10, MaxBatchBytes: 500 << 20, MaxConcurrentTransfers: 2, RetentionSeconds: 604800, DeliveryTimeoutSeconds: 600, MaxPendingSpoolBytes: 1 << 30}
 
 type CredentialClaims struct {
 	Issuer                 string              `json:"iss"`
@@ -774,8 +771,8 @@ func (p *Provider) SignCredential(input CredentialInput) (string, error) {
 		}
 		claims["user_id"], claims["machine_id"], claims["key_thumbprint"], claims["installation_generation"], claims["session_generation"] = input.UserID, input.MachineID, input.KeyThumbprint, input.InstallationGeneration, input.SessionGeneration
 	case "connector_admission":
-		if input.FileTransferPolicy == nil {
-			input.FileTransferPolicy = &DefaultFileTransferPolicy
+		if input.FileTransferPolicy == nil || input.FileTransferPolicy.Revision == "" {
+			return "", errors.New("connector admission file transfer policy is required")
 		}
 		binding, bindingErr := base64.RawURLEncoding.Strict().DecodeString(input.RouteBinding)
 		if input.MachineID == "" || input.InstallationGeneration < 1 || input.ConnectorID == "" || input.ConnectorGeneration < 1 || input.EdgePool == "" || input.EdgeNodeID == "" || bindingErr != nil || len(binding) != 32 || base64.RawURLEncoding.EncodeToString(binding) != input.RouteBinding {

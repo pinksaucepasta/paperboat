@@ -344,8 +344,8 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	machineService := usermachines.New(store, audit.NewWriter(store), usermachines.Policy{}, nil)
 	machineService.ConfigureAccess(nil, "https://api.example.test")
 	machineService.ConfigureTerminalSessions(provider, nil)
-	machineService.ConfigureFileTransfer(accessdescriptor.FileTransferPolicy{Revision: "shared-native-v1", MaxFileBytes: 1 << 20, MaxBatchFiles: 2, MaxBatchBytes: 2 << 20, MaxConcurrentTransfers: 2, RetentionSeconds: 60, DeliveryTimeoutSeconds: 60, MaxPendingSpoolBytes: 2 << 20})
-	machineService.ConfigureTransferModes(2_000_000_000, "2026.10.27.0")
+	machineService.ConfigureFileTransfer(accessdescriptor.FileTransferPolicy{Revision: "shared-native-v1", MaxBatchFiles: 2, AutomaticMaxBatchBytes: 2 << 20, MaxConcurrentTransfers: 2, RetentionSeconds: 60, DeliveryTimeoutSeconds: 60, MaxPendingSpoolBytes: 2 << 20})
+	machineService.ConfigureTransferModes("2026.10.27.0")
 	execOperationID := "operation_shared_exec_" + suffix
 	refreshRuntimeCarrier()
 	hostPeerNetwork := func() (generation int64) {
@@ -635,7 +635,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	}
 	machineService.ConfigureTeamInbox(inbox)
 	refreshRuntimeCarrier()
-	if _, err = machineService.FileTransferDescriptor(sharedScope, sharedUser, "network_shared_source_"+suffix, machineID, sharedCLI, "", usermachines.TransferIntent{}); !errors.Is(err, teaminbox.ErrPending) {
+	if _, err = machineService.FileTransferDescriptor(sharedScope, sharedUser, "network_shared_source_"+suffix, machineID, sharedCLI, "", usermachines.TransferIntent{Mode: "automatic", DeclaredBytes: 1}); !errors.Is(err, teaminbox.ErrPending) {
 		t.Fatalf("cross-account descriptor without acceptance error=%v", err)
 	}
 	filePayload := []byte("server-issued-native-file")
@@ -668,7 +668,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 		t.Fatalf("own-machine Inbox status=%q error=%v", ownRequest.Status, err)
 	}
 	refreshRuntimeCarrier()
-	if _, err = machineService.FileTransferDescriptor(ctx, userID, "network_owner_source_"+suffix, machineID, cliID, "", usermachines.TransferIntent{}); err != nil {
+	if _, err = machineService.FileTransferDescriptor(ctx, userID, "network_owner_source_"+suffix, machineID, cliID, "", usermachines.TransferIntent{Mode: "automatic", DeclaredBytes: 1}); err != nil {
 		t.Fatalf("own-machine descriptor without acceptance: %v", err)
 	}
 	refreshRuntimeCarrier()
@@ -754,7 +754,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	}
 	assertNoNetworkCapability(t, sharedMachineDisabled.Configuration, "file_transfer")
 	refreshRuntimeCarrier()
-	if _, err = machineService.FileTransferDescriptor(sharedScope, sharedUser, "network_shared_source_"+suffix, machineID, sharedCLI, "", usermachines.TransferIntent{}); !errors.Is(err, usermachines.ErrMachineCapabilityUnavailable) {
+	if _, err = machineService.FileTransferDescriptor(sharedScope, sharedUser, "network_shared_source_"+suffix, machineID, sharedCLI, "", usermachines.TransferIntent{Mode: "automatic", DeclaredBytes: 1}); !errors.Is(err, usermachines.ErrMachineCapabilityUnavailable) {
 		t.Fatalf("disabled file receive descriptor error=%v", err)
 	}
 	teamstest.SetMachineAccess(t, store, teamID, machineID, sharedUser)

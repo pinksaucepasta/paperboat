@@ -15,7 +15,7 @@ import (
 
 func TestRuntimeObservationReturnsConfiguredTransferPolicyAfterAuthentication(t *testing.T) {
 	machines := &usermachines.Service{}
-	policy := accessdescriptor.FileTransferPolicy{Revision: "task24", MaxFileBytes: 1024, MaxBatchFiles: 2, MaxBatchBytes: 2048, MaxConcurrentTransfers: 1, RetentionSeconds: 60, DeliveryTimeoutSeconds: 30, MaxPendingSpoolBytes: 4096}
+	policy := accessdescriptor.FileTransferPolicy{Revision: "task24", MaxBatchFiles: 2, AutomaticMaxBatchBytes: 2048, MaxConcurrentTransfers: 1, RetentionSeconds: 60, DeliveryTimeoutSeconds: 30, MaxPendingSpoolBytes: 4096}
 	machines.ConfigureFileTransfer(policy)
 	for _, denied := range []bool{false, true} {
 		identity := &fakeRuntimeIdentity{}

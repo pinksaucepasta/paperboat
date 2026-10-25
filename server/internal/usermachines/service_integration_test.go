@@ -2867,7 +2867,7 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 		t.Fatal(err)
 	}
 	service.ConfigureTerminalSessions(signer, nil)
-	service.ConfigureTransferModes(2_000_000_000, "2026.10.27.0")
+	service.ConfigureTransferModes("2026.10.27.0")
 	response, err := service.ConnectTerminalSession(ctx, userID, sourceMachineID, userMachineID, "cls_1", terminalSessionID)
 	if err != nil {
 		t.Fatal(err)
@@ -2955,7 +2955,7 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 		t.Fatal(err)
 	}
 	service.ConfigureTerminalSessions(signer, nil)
-	service.ConfigureTransferModes(2_000_000_000, "2026.10.27.0")
+	service.ConfigureTransferModes("2026.10.27.0")
 
 	created, err := service.CreateConfiguredTerminalSessionInDirectory(ctx, userID, userMachineID, userMachineID, "bench-run", "pb-mc-key", "/tmp/local project")
 	if err != nil {
@@ -3166,7 +3166,7 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 	if err != nil {
 		t.Fatal(err)
 	}
-	policy := accessdescriptor.FileTransferPolicy{Revision: "file-transfer-v1", MaxFileBytes: 50 << 20, MaxBatchFiles: 10, MaxBatchBytes: 500 << 20, MaxConcurrentTransfers: 2, RetentionSeconds: 604800, DeliveryTimeoutSeconds: 600, MaxPendingSpoolBytes: 1 << 30}
+	policy := accessdescriptor.FileTransferPolicy{Revision: "file-transfer-v1", MaxBatchFiles: 10, AutomaticMaxBatchBytes: 500 << 20, MaxConcurrentTransfers: 2, RetentionSeconds: 604800, DeliveryTimeoutSeconds: 600, MaxPendingSpoolBytes: 1 << 30}
 	service := New(store, audit.NewWriter(store), Policy{}, nil)
 	service.ConfigureAccess(nil, "https://api.paperboat.test")
 	service.ConfigureTerminalSessions(signer, nil)
@@ -3188,14 +3188,14 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 		t.Fatalf("get session default = %+v, %v", selected, err)
 	}
 
-	direct, err := service.FileTransferDescriptor(ctx, userID, source.id, destination.id, "cli_1", "", TransferIntent{})
+	direct, err := service.FileTransferDescriptor(ctx, userID, source.id, destination.id, "cli_1", "", TransferIntent{Mode: "automatic", DeclaredBytes: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if direct.Endpoint != "https://destination-"+suffix+".example.test/v1/file-transfers" || direct.DestinationMachineID != destination.id || direct.Policy != policy {
 		t.Fatalf("direct descriptor = %+v", direct)
 	}
-	session, err := service.FileTransferDescriptor(ctx, userID, source.id, destination.id, "cli_1", sessionID, TransferIntent{})
+	session, err := service.FileTransferDescriptor(ctx, userID, source.id, destination.id, "cli_1", sessionID, TransferIntent{Mode: "automatic", DeclaredBytes: 1})
 	if err != nil {
 		t.Fatal(err)
 	}

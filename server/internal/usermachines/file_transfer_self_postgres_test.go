@@ -30,7 +30,7 @@ WHERE id IN(SELECT edge_node_id FROM paperboat.control_connector_generations WHE
 	}
 	for _, selectedSession := range []string{"", session} {
 		refresh()
-		descriptor, err := f.service.FileTransferDescriptorForRequest(ctx, f.account, f.machine, f.machine, "self-cli", selectedSession, "", "", TransferIntent{})
+		descriptor, err := f.service.FileTransferDescriptorForRequest(ctx, f.account, f.machine, f.machine, "self-cli", selectedSession, "", "", TransferIntent{Mode: "automatic", DeclaredBytes: 1})
 		if err != nil {
 			t.Fatalf("authorized self descriptor rejected: %v", err)
 		}
@@ -55,7 +55,7 @@ WHERE id IN(SELECT edge_node_id FROM paperboat.control_connector_generations WHE
 			defer exec(test.restore)
 			for _, selectedSession := range []string{"", session} {
 				refresh()
-				descriptor, err := f.service.FileTransferDescriptorForRequest(ctx, f.account, f.machine, f.machine, "self-cli", selectedSession, "", "", TransferIntent{})
+				descriptor, err := f.service.FileTransferDescriptorForRequest(ctx, f.account, f.machine, f.machine, "self-cli", selectedSession, "", "", TransferIntent{Mode: "automatic", DeclaredBytes: 1})
 				if !errors.Is(err, test.want) || descriptor.Auth != nil {
 					t.Fatal("self descriptor bypassed current machine authority/readiness")
 				}
@@ -63,7 +63,7 @@ WHERE id IN(SELECT edge_node_id FROM paperboat.control_connector_generations WHE
 		})
 	}
 	for _, actor := range []string{"foreign-account", ""} {
-		if descriptor, err := f.service.FileTransferDescriptor(ctx, actor, f.machine, f.machine, "self-cli", "", TransferIntent{}); !errors.Is(err, ErrNotFound) || descriptor.Auth != nil {
+		if descriptor, err := f.service.FileTransferDescriptor(ctx, actor, f.machine, f.machine, "self-cli", "", TransferIntent{Mode: "automatic", DeclaredBytes: 1}); !errors.Is(err, ErrNotFound) || descriptor.Auth != nil {
 			t.Fatal("foreign actor received self descriptor")
 		}
 	}
@@ -71,7 +71,7 @@ WHERE id IN(SELECT edge_node_id FROM paperboat.control_connector_generations WHE
 		t.Fatal("transfer fixture ownership failed")
 	}
 	defer exec(`UPDATE paperboat.user_machines SET owner_team_id=NULL WHERE id=$1`)
-	if descriptor, err := f.service.FileTransferDescriptor(ctx, f.account, f.machine, f.machine, "self-cli", "", TransferIntent{}); !errors.Is(err, ErrNotFound) || descriptor.Auth != nil {
+	if descriptor, err := f.service.FileTransferDescriptor(ctx, f.account, f.machine, f.machine, "self-cli", "", TransferIntent{Mode: "automatic", DeclaredBytes: 1}); !errors.Is(err, ErrNotFound) || descriptor.Auth != nil {
 		t.Fatal("original issuer bypassed transferred team ownership")
 	}
 }
@@ -115,13 +115,9 @@ func TestFileTransferModesBoundAutomaticAndSignTheModePostgres(t *testing.T) {
 		}
 	}
 
-	// An undeclared send (released pb) gets exactly today's credential: no mode, no bound.
-	undeclared, err := descriptor(TransferIntent{})
-	if err != nil {
+	// Every supported pb declares (PLAN 3b step 3): an undeclared send is refused, naming the update.
+	if _, err := descriptor(TransferIntent{}); !errors.Is(err, ErrTransferIntentRequired) {
 		t.Fatalf("undeclared send: %v", err)
-	}
-	if mode, max := signed(undeclared); mode != "" || max != 0 {
-		t.Fatalf("undeclared claims changed: mode=%q max_bytes=%d", mode, max)
 	}
 
 	// A destination that predates modes: a declared send within today's caps keeps today's

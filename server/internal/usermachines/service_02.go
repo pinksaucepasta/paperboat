@@ -914,6 +914,10 @@ func (e *DestinationUpdateRequiredError) Error() string {
 	return fmt.Sprintf("The receiving machine %s needs pb %s or later to accept files over %d bytes or unlimited transfers. Update pb on it, or send less than that.", e.Machine, e.MinimumVersion, e.MaxBytes)
 }
 
+// legacyDestinationMaxBatchBytes is what a destination without file_transfer_modes stores (50 MiB
+// per file, 500 MiB per batch in its local store): pb before Lane A's release N+1.
+const legacyDestinationMaxBatchBytes int64 = 500 << 20
+
 // CapabilityFileTransferModes is observed by destinations whose pb verifies transfer_mode and
 // max_bytes and takes max_bytes as the receive bound.
 const CapabilityFileTransferModes = "file_transfer_modes"
@@ -937,8 +941,8 @@ func (s *Service) signedIntent(intent TransferIntent, destinationAlias string, o
 	if slices.Contains(observed, CapabilityFileTransferModes) {
 		return intent, nil
 	}
-	if intent.Mode == mint.TransferModeUnlimited || intent.DeclaredBytes > s.fileTransferPolicy.MaxBatchBytes {
-		return TransferIntent{}, &DestinationUpdateRequiredError{Machine: destinationAlias, MaxBytes: s.fileTransferPolicy.MaxBatchBytes, MinimumVersion: s.transferModesMinimumVersion}
+	if intent.Mode == mint.TransferModeUnlimited || intent.DeclaredBytes > legacyDestinationMaxBatchBytes {
+		return TransferIntent{}, &DestinationUpdateRequiredError{Machine: destinationAlias, MaxBytes: legacyDestinationMaxBatchBytes, MinimumVersion: s.transferModesMinimumVersion}
 	}
 	return TransferIntent{}, nil
 }
@@ -955,7 +959,7 @@ func (s *Service) checkTransferIntent(intent TransferIntent) error {
 		if intent.DeclaredBytes < 1 {
 			return ErrInvalidTransferIntent
 		}
-		if bound := s.automaticMaxBatchBytes; intent.DeclaredBytes > bound {
+		if bound := s.fileTransferPolicy.AutomaticMaxBatchBytes; intent.DeclaredBytes > bound {
 			return &TransferTooLargeError{TotalBytes: intent.DeclaredBytes, MaxBytes: bound}
 		}
 		return nil

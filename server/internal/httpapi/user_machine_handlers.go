@@ -846,6 +846,10 @@ func userMachineFileTransferDescriptor(service *usermachines.Service) http.Handl
 			writeErrorDetails(w, r, http.StatusConflict, "destination_update_required", destinationOld.Error(), map[string]any{"machine": destinationOld.Machine, "max_bytes": destinationOld.MaxBytes, "minimum_version": destinationOld.MinimumVersion})
 			return
 		}
+		if errors.Is(err, usermachines.ErrTransferIntentRequired) {
+			writeError(w, r, http.StatusBadRequest, "pb_update_required", "This pb is too old to send files. Update pb (pb update) and send again.")
+			return
+		}
 		if errors.Is(err, usermachines.ErrInvalidTransferIntent) {
 			writeError(w, r, http.StatusBadRequest, "invalid_transfer_intent", "transfer_mode must be automatic or unlimited, and declared_bytes must be the prepared batch's total (the accepted inbox request's total for team sends).")
 			return

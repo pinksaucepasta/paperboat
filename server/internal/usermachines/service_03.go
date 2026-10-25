@@ -25,11 +25,13 @@ func (s *Service) fileTransferDescriptor(ctx context.Context, userID, sourceMach
 	if sourceMachineID == "" || destinationMachineID == "" || cliClientSessionID == "" || s.controlSigner == nil {
 		return FileTransferDescriptor{}, ErrNotFound
 	}
-	declared := intent.declared()
-	if declared {
-		if err := s.checkTransferIntent(intent); err != nil {
-			return FileTransferDescriptor{}, err
-		}
+	// Every supported pb declares its mode and batch total (PLAN 3b step 3); an undeclared send is
+	// a pb older than the oldest supported release.
+	if !intent.declared() {
+		return FileTransferDescriptor{}, ErrTransferIntentRequired
+	}
+	if err := s.checkTransferIntent(intent); err != nil {
+		return FileTransferDescriptor{}, err
 	}
 	if allowed, err := s.sourceMachineAllowed(ctx, userID, sourceMachineID); err != nil {
 		return FileTransferDescriptor{}, err
@@ -78,7 +80,7 @@ func (s *Service) fileTransferDescriptor(ctx context.Context, userID, sourceMach
 			return FileTransferDescriptor{}, teaminbox.ErrConflict
 		}
 		// The signed bound is the accepted manifest's total, not a number the sender picks later.
-		if declared && teaminbox.ManifestTotal(accepted.Files) != intent.DeclaredBytes {
+		if teaminbox.ManifestTotal(accepted.Files) != intent.DeclaredBytes {
 			return FileTransferDescriptor{}, ErrInvalidTransferIntent
 		}
 		acceptedRequest = &accepted
@@ -115,13 +117,11 @@ func (s *Service) fileTransferDescriptor(ctx context.Context, userID, sourceMach
 		EnvironmentID: routeMachine.EnvironmentID, MachineID: routeMachine.ID, SourceMachineID: sourceMachineID,
 		UserID: userID, CLIClientSessionID: cliClientSessionID, SessionID: sessionID, OperationID: operationID, AssignmentID: accessSessionID,
 	}
-	if declared {
-		signed, err := s.signedIntent(intent, destination.Alias, destination.ObservedCapabilities)
-		if err != nil {
-			return FileTransferDescriptor{}, err
-		}
-		credentialInput.TransferMode, credentialInput.MaxBytes = signed.Mode, signedMaxBytes(signed)
+	signed, err := s.signedIntent(intent, destination.Alias, destination.ObservedCapabilities)
+	if err != nil {
+		return FileTransferDescriptor{}, err
 	}
+	credentialInput.TransferMode, credentialInput.MaxBytes = signed.Mode, signedMaxBytes(signed)
 	if acceptedRequest != nil {
 		credentialInput.RequestID, credentialInput.IdempotencyKey, credentialInput.RequestHash = acceptedRequest.RequestID, acceptedRequest.BatchID, acceptedRequest.ManifestDigest
 	}
