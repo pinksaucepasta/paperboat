@@ -338,6 +338,21 @@ VALUES($1,1,sha256(convert_to($1::text,'UTF8')),convert_to(json_build_object('ro
 	if endpoint, _, _ := state(); !endpoint {
 		t.Fatal("restored tunnel not back on the engine")
 	}
+	// A custom domain on an engine tunnel gets certificate targets from the engine's ready edge assignments:
+	// the certificate worker read only connector-path route assignments, so such a domain never got an
+	// edge to place its certificate on (Lane M, staging 4.3).
+	domain := "domain_" + f.prefix
+	f.exec(t, `INSERT INTO tunnel_domains(id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state) VALUES($1,$2,$3,$4,$5,'exact',$1,'verified',$5,'managed','issuing','ready','clear')`, domain, f.account, tunnel, route, "custom-"+f.prefix+".example.test")
+	f.exec(t, `UPDATE endpoint_edge_assignments SET observed_ready=true,observed_at=now() WHERE endpoint_id=$1 AND desired='active'`, tunnel)
+	targets, err := f.database.Queries().ListReadyTunnelCertificateEdgesV1(f.ctx, domain)
+	if err != nil || len(targets) == 0 {
+		t.Fatalf("engine tunnel domain certificate targets = %+v, %v; want its ready engine edges", targets, err)
+	}
+	for _, target := range targets {
+		if target.EdgeNodeID != f.edge.NodeID && target.EdgeNodeID != f.backupEdge.NodeID {
+			t.Fatalf("certificate target %q is not one of the agent's edges", target.EdgeNodeID)
+		}
+	}
 	attach([]string{runtimewire.CapabilityEndpoints})
 	if endpoint, _, _ := state(); endpoint {
 		t.Fatal("tunnel stayed on the engine after its agent stopped serving tunnels")

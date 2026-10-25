@@ -498,13 +498,25 @@ func (q *Queries) ListReadyPreviewCertificateEdgesV1(ctx context.Context, arg Li
 }
 
 const listReadyTunnelCertificateEdgesV1 = `-- name: ListReadyTunnelCertificateEdgesV1 :many
-SELECT a.edge_node_id, a.edge_process_epoch, a.assignment_generation
-FROM tunnel_edge_route_assignments AS a
-JOIN tunnel_domains AS d ON d.route_id = a.route_id AND d.tunnel_id = a.tunnel_id AND d.account_id = a.account_id
-WHERE d.id = $1
-  AND a.state = 'active'
-  AND a.observed_state = 'ready'
-ORDER BY a.edge_node_id, a.edge_process_epoch, a.assignment_generation
+SELECT edge_node_id, edge_process_epoch, assignment_generation FROM (
+  SELECT a.edge_node_id, a.edge_process_epoch, a.assignment_generation
+  FROM tunnel_edge_route_assignments AS a
+  JOIN tunnel_domains AS d ON d.route_id = a.route_id AND d.tunnel_id = a.tunnel_id AND d.account_id = a.account_id
+  WHERE d.id = $1
+    AND a.state = 'active'
+    AND a.observed_state = 'ready'
+  UNION
+  SELECT ea.edge_node_id, ea.edge_process_epoch, ea.generation AS assignment_generation
+  FROM endpoint_edge_assignments AS ea
+  JOIN endpoint_routes AS er ON er.id = ea.route_id
+  JOIN endpoints AS e ON e.id = er.endpoint_id
+  JOIN tunnel_domains AS d ON d.route_id = er.tunnel_route_id AND d.tunnel_id = e.tunnel_id AND d.account_id = e.account_id
+  WHERE d.id = $1
+    AND e.desired_state = 'active'
+    AND ea.desired = 'active'
+    AND ea.observed_ready
+) AS edges
+ORDER BY edge_node_id, edge_process_epoch, assignment_generation
 `
 
 type ListReadyTunnelCertificateEdgesV1Row struct {
@@ -513,6 +525,8 @@ type ListReadyTunnelCertificateEdgesV1Row struct {
 	AssignmentGeneration int64
 }
 
+// The edges serving a domain's route: connector-path assignments, and the engine's endpoint assignments
+// for a tunnel moved onto the engine (3a step 4.3), which has no connector session and no row above.
 func (q *Queries) ListReadyTunnelCertificateEdgesV1(ctx context.Context, domainID string) ([]ListReadyTunnelCertificateEdgesV1Row, error) {
 	rows, err := q.db.Query(ctx, listReadyTunnelCertificateEdgesV1, domainID)
 	if err != nil {
