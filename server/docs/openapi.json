@@ -16437,6 +16437,47 @@
             "$ref": "#/components/schemas/AccountDeletionPreview"
           }
         }
+      },
+      "AccountPreferences": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "file_transfer_mode"
+        ],
+        "properties": {
+          "file_transfer_mode": {
+            "type": "string",
+            "enum": [
+              "automatic",
+              "unlimited"
+            ],
+            "description": "Default mode of `pb send` and console sends. automatic: up to the published automatic_max_batch_bytes, any path including Paperboat-hosted relays. unlimited: no size bound, direct paths and self-hosted relays only."
+          }
+        }
+      },
+      "AccountPreferencesResponse": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AccountPreferences"
+          }
+        }
+      },
+      "AccountPreferencesUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "file_transfer_mode": {
+            "type": "string",
+            "enum": [
+              "automatic",
+              "unlimited"
+            ]
+          }
+        }
       }
     },
     "responses": {
@@ -49944,6 +49985,77 @@
           }
         },
         "operationId": "delete_v1_account"
+      }
+    },
+    "/v1/me/preferences": {
+      "get": {
+        "summary": "Account preferences",
+        "security": [
+          {
+            "cookieSession": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The account's preferences.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountPreferencesResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "operationId": "get_v1_me_preferences"
+      },
+      "patch": {
+        "summary": "Change account preferences",
+        "description": "Partial update; omitted fields keep their value. Unknown fields are refused.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountPreferencesUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The account's preferences.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountPreferencesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "operationId": "patch_v1_me_preferences"
       }
     }
   }

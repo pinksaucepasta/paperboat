@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/pinksaucepasta/paperboat/server/internal/accountprefs"
 	"io"
 	"log/slog"
 	"net/http"
@@ -247,6 +248,7 @@ func newAuthIntegrationRouter(t *testing.T) (*db.DB, http.Handler) {
 		}),
 		Auth:                 service,
 		DeviceAuth:           machineService,
+		AccountPreferences:   accountprefs.New(store),
 		WorkspaceBilling:     billingService,
 		Machines:             userMachineService,
 		EnvironmentVariables: environment.NewService(store, nil, nil, "http://127.0.0.1:8080"),
@@ -412,5 +414,46 @@ func TestConsoleTerminalCreateIsRefusedAtTheBrowserTerminalLimitPostgres(t *test
 	}
 	if sessions != 0 {
 		t.Fatalf("a refused create left %d terminal sessions; no shell may start", sessions)
+	}
+}
+
+func TestAccountPreferencesFileTransferModePostgres(t *testing.T) {
+	_, router := newAuthIntegrationRouter(t)
+	cookies := loginCookies(t, router, "prefs:prefs@example.com:Prefs")
+	csrfToken := csrfCookie(t, cookies)
+	call := func(method, body string) (int, string) {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(method, "/v1/me/preferences", strings.NewReader(body))
+		addCookies(req, cookies)
+		if method == http.MethodPatch {
+			req.Header.Set(auth.CSRFHeaderName, csrfToken)
+		}
+		router.ServeHTTP(rec, req)
+		return rec.Code, rec.Body.String()
+	}
+	if code, body := call(http.MethodGet, ""); code != http.StatusOK || !strings.Contains(body, `"file_transfer_mode":"automatic"`) {
+		t.Fatalf("default preference: %d %s", code, body)
+	}
+	if code, body := call(http.MethodPatch, `{"file_transfer_mode":"unlimited"}`); code != http.StatusOK || !strings.Contains(body, `"file_transfer_mode":"unlimited"`) {
+		t.Fatalf("set unlimited: %d %s", code, body)
+	}
+	if code, body := call(http.MethodGet, ""); code != http.StatusOK || !strings.Contains(body, `"file_transfer_mode":"unlimited"`) {
+		t.Fatalf("read back: %d %s", code, body)
+	}
+	for _, bad := range []string{`{"file_transfer_mode":"fast"}`, `{"theme":"dark"}`, `not json`} {
+		if code, body := call(http.MethodPatch, bad); code != http.StatusBadRequest {
+			t.Fatalf("patch %s: %d %s", bad, code, body)
+		}
+	}
+	if code, body := call(http.MethodPatch, `{}`); code != http.StatusOK || !strings.Contains(body, `"file_transfer_mode":"unlimited"`) {
+		t.Fatalf("empty patch must keep the value: %d %s", code, body)
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPatch, "/v1/me/preferences", strings.NewReader(`{"file_transfer_mode":"automatic"}`))
+	addCookies(req, cookies)
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("cookie patch without CSRF: %d", rec.Code)
 	}
 }

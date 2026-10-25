@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"github.com/pinksaucepasta/paperboat/server/internal/accessdescriptor"
 	"github.com/pinksaucepasta/paperboat/server/internal/accountdeletion"
+	"github.com/pinksaucepasta/paperboat/server/internal/accountprefs"
 	"github.com/pinksaucepasta/paperboat/server/internal/activity"
 	"github.com/pinksaucepasta/paperboat/server/internal/apitokens"
 	"github.com/pinksaucepasta/paperboat/server/internal/audit"
@@ -880,6 +881,7 @@ func New(opts Options) (*App, error) {
 		Favorites:                 favorites.NewService(store),
 		APITokens:                 apiTokens,
 		AccountDeletion:           accountDeletion,
+		AccountPreferences:        accountprefs.New(store),
 		ControlDiagnostics:        controlDiagnostics,
 		OperationRecovery:         operationRecovery,
 		PeerIdentity:              peerIdentityService,

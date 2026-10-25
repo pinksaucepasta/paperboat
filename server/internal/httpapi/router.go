@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/accountdeletion"
+	"github.com/pinksaucepasta/paperboat/server/internal/accountprefs"
 	"github.com/pinksaucepasta/paperboat/server/internal/activity"
 	"github.com/pinksaucepasta/paperboat/server/internal/apitokens"
 	"github.com/pinksaucepasta/paperboat/server/internal/auditstream"
@@ -107,6 +108,7 @@ type Options struct {
 	Favorites                *favorites.Service
 	APITokens                *apitokens.Service
 	AccountDeletion          *accountdeletion.Service
+	AccountPreferences       *accountprefs.Service
 	ControlDiagnostics       *controlplane.DiagnosticsService
 	OperationRecovery        *controlplane.OperationRecoveryService
 	PeerIdentity             *peeridentity.Service
@@ -881,6 +883,14 @@ func registerAuthRoutes(mux *http.ServeMux, opts Options) {
 		meHandler = requireAnyAuth(opts.Auth, opts.DeviceAuth, me(opts.Auth))
 	}
 	mux.Handle("GET /v1/me", meHandler)
+	if opts.AccountPreferences != nil && opts.Auth != nil {
+		withAuth := func(next http.Handler) http.Handler { return requireAuth(opts.Auth, next) }
+		if opts.DeviceAuth != nil {
+			withAuth = func(next http.Handler) http.Handler { return requireAnyAuth(opts.Auth, opts.DeviceAuth, next) }
+		}
+		mux.Handle("GET /v1/me/preferences", withAuth(accountPreferencesGet(opts.AccountPreferences)))
+		mux.Handle("PATCH /v1/me/preferences", withAuth(requireCSRF(opts.Auth, accountPreferencesPatch(opts.AccountPreferences))))
+	}
 	if opts.AccountDeletion != nil && opts.Auth != nil {
 		mux.Handle("GET /v1/account/deletion-preview", accountDeletionBrowserOnly(opts.AccountDeletion, requireAuth(opts.Auth, accountDeletionPreview(opts.AccountDeletion))))
 		mux.Handle("DELETE /v1/account", accountDeletionBrowserOnly(opts.AccountDeletion, requireAuth(opts.Auth, requireCSRF(opts.Auth, accountDelete(opts.Auth, opts.AccountDeletion)))))
