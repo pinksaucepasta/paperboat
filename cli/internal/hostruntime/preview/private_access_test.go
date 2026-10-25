@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -575,5 +576,44 @@ func TestPrivateAccessorRevocationReleasesCarrierOnce(t *testing.T) {
 	stream.Close()
 	if releases.Load() != 1 {
 		t.Fatal("carrier released more than once")
+	}
+}
+
+// P3: every active private TCP session checks its route every second, and each check fetched the whole
+// routes snapshot, so N sessions on one machine asked the server N times a second. One snapshot answers
+// every caller for a second, which is the sessions' own revocation cadence.
+func TestRoutesSnapshotIsSharedByEverySessionForASecond(t *testing.T) {
+	now := time.Now().UTC()
+	admission := validAccessorAdmission(t, now, "private_tcp")
+	admission.Hostname = ""
+	var requests atomic.Int32
+	transport := privateAccessRoundTripper(func(request *http.Request) (*http.Response, error) {
+		requests.Add(1)
+		body, _ := json.Marshal(accessorSnapshot{Schema: connectorprotocol.PrivateAccessSchema, Kind: "private_access_carrier_snapshot", Complete: true, Admissions: []accessorAdmission{admission}})
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(body)), Header: http.Header{"Content-Type": []string{"application/json"}}, Request: request}, nil
+	})
+	client, err := newAccessorDiscoveryClient("https://api.example.test", privateAccessTestAuth{}, transport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock := now
+	client.now = func() time.Time { return clock }
+	var sessions sync.WaitGroup
+	for range 16 {
+		sessions.Add(1)
+		go func() {
+			defer sessions.Done()
+			if admissions, err := client.snapshot(t.Context()); err != nil || len(admissions) != 1 {
+				t.Errorf("admissions %d err %v", len(admissions), err)
+			}
+		}()
+	}
+	sessions.Wait()
+	if got := requests.Load(); got != 1 {
+		t.Fatalf("16 sessions checking within a second made %d requests, want 1", got)
+	}
+	clock = clock.Add(accessorSnapshotReuse)
+	if _, err := client.snapshot(t.Context()); err != nil || requests.Load() != 2 {
+		t.Fatalf("a check a second later made %d requests in total (err %v), want a fresh snapshot", requests.Load(), err)
 	}
 }

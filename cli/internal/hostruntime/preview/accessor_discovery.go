@@ -11,8 +11,10 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
@@ -138,7 +140,18 @@ type accessorDiscoveryClient struct {
 	endpoint *url.URL
 	auth     privateAccessMachineAuth
 	client   *http.Client
+	// One snapshot serves every caller for accessorSnapshotReuse: each active private TCP session checks
+	// its route every second, so N sessions on a machine asked the server N times a second (P3).
+	mu      sync.Mutex
+	fetched time.Time
+	last    []accessorAdmission
+	lastErr error
+	now     func() time.Time
 }
+
+// accessorSnapshotReuse is how long one routes snapshot answers every caller: the sessions' 1 s
+// revocation check, so sharing it adds no delay to a withdrawn route ending.
+const accessorSnapshotReuse = time.Second
 
 func newAccessorDiscoveryClient(controlURL string, auth privateAccessMachineAuth, transport http.RoundTripper) (*accessorDiscoveryClient, error) {
 	u, err := url.Parse(strings.TrimSpace(controlURL))
@@ -153,6 +166,25 @@ func newAccessorDiscoveryClient(controlURL string, auth privateAccessMachineAuth
 }
 
 func (c *accessorDiscoveryClient) snapshot(ctx context.Context) ([]accessorAdmission, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	now := time.Now
+	if c.now != nil {
+		now = c.now
+	}
+	if !c.fetched.IsZero() && now().Sub(c.fetched) < accessorSnapshotReuse {
+		return slices.Clone(c.last), c.lastErr
+	}
+	c.last, c.lastErr = c.fetchSnapshot(ctx)
+	if ctx.Err() == nil {
+		c.fetched = now() // a caller that gave up does not decide the others' answer
+	} else {
+		c.fetched = time.Time{}
+	}
+	return slices.Clone(c.last), c.lastErr
+}
+
+func (c *accessorDiscoveryClient) fetchSnapshot(ctx context.Context) ([]accessorAdmission, error) {
 	id, err := newPrivateAccessIdentifier()
 	if err != nil {
 		return nil, privatepreviewproxy.ErrAccessTemporarilyUnavailable
