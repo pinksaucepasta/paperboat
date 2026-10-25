@@ -2852,6 +2852,7 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 		t.Fatal(err)
 	}
 	service.ConfigureTerminalSessions(signer, nil)
+	service.ConfigureFileTransfer(accessdescriptor.FileTransferPolicy{AutomaticMaxBatchBytes: 2_000_000_000})
 	response, err := service.ConnectTerminalSession(ctx, userID, sourceMachineID, userMachineID, "cls_1", terminalSessionID)
 	if err != nil {
 		t.Fatal(err)
@@ -2939,6 +2940,7 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 		t.Fatal(err)
 	}
 	service.ConfigureTerminalSessions(signer, nil)
+	service.ConfigureFileTransfer(accessdescriptor.FileTransferPolicy{AutomaticMaxBatchBytes: 2_000_000_000})
 
 	created, err := service.CreateConfiguredTerminalSessionInDirectory(ctx, userID, userMachineID, userMachineID, "bench-run", "pb-mc-key", "/tmp/local project")
 	if err != nil {
@@ -3171,14 +3173,14 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 		t.Fatalf("get session default = %+v, %v", selected, err)
 	}
 
-	direct, err := service.FileTransferDescriptor(ctx, userID, source.id, destination.id, "cli_1", "")
+	direct, err := service.FileTransferDescriptor(ctx, userID, source.id, destination.id, "cli_1", "", TransferIntent{Mode: "automatic", DeclaredBytes: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if direct.Endpoint != "https://destination-"+suffix+".example.test/v1/file-transfers" || direct.DestinationMachineID != destination.id || direct.Policy != policy {
 		t.Fatalf("direct descriptor = %+v", direct)
 	}
-	session, err := service.FileTransferDescriptor(ctx, userID, source.id, destination.id, "cli_1", sessionID)
+	session, err := service.FileTransferDescriptor(ctx, userID, source.id, destination.id, "cli_1", sessionID, TransferIntent{Mode: "automatic", DeclaredBytes: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3193,7 +3195,7 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 	if claims.MachineID != host.id || claims.SourceMachineID != source.id || claims.SessionID != sessionID || claims.UserID != userID || claims.AssignmentID == "" || session.Auth["access_session_id"] != claims.AssignmentID {
 		t.Fatalf("session credential bindings = %+v", claims)
 	}
-	if _, err := service.FileTransferDescriptor(ctx, userID, foreign.id, destination.id, "cli_1", ""); !errors.Is(err, ErrNotFound) {
+	if _, err := service.FileTransferDescriptor(ctx, userID, foreign.id, destination.id, "cli_1", "", TransferIntent{Mode: "automatic", DeclaredBytes: 1}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("foreign source error = %v", err)
 	}
 

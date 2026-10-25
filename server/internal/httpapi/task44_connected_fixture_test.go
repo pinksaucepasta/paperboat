@@ -358,7 +358,7 @@ func TestTask44ConnectedCollaboration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fileDescriptor, err := machines.FileTransferDescriptorForRequest(ctx, member.id, source, machine, member.cli, "", request.RequestID, request.ManifestDigest)
+	fileDescriptor, err := machines.FileTransferDescriptorForRequest(ctx, member.id, source, machine, member.cli, "", request.RequestID, request.ManifestDigest, usermachines.TransferIntent{Mode: "automatic", DeclaredBytes: teaminbox.ManifestTotal(request.Files)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -392,7 +392,7 @@ func TestTask44ConnectedCollaboration(t *testing.T) {
 	if err != nil || automatic.Status != "approved" {
 		t.Fatalf("automatic acceptance: %v", err)
 	}
-	autoDescriptor, err := machines.FileTransferDescriptorForRequest(ctx, member.id, source, machine, member.cli, "", automatic.RequestID, automatic.ManifestDigest)
+	autoDescriptor, err := machines.FileTransferDescriptorForRequest(ctx, member.id, source, machine, member.cli, "", automatic.RequestID, automatic.ManifestDigest, usermachines.TransferIntent{Mode: "automatic", DeclaredBytes: teaminbox.ManifestTotal(automatic.Files)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -407,7 +407,7 @@ func TestTask44ConnectedCollaboration(t *testing.T) {
 	if err != nil || own.Status != "not_required" {
 		t.Fatalf("own-machine acceptance bypass: %v", err)
 	}
-	ownDescriptor, err := machines.FileTransferDescriptor(ctx, owner.id, ownSource, machine, owner.cli, "")
+	ownDescriptor, err := machines.FileTransferDescriptor(ctx, owner.id, ownSource, machine, owner.cli, "", usermachines.TransferIntent{Mode: "automatic", DeclaredBytes: 1})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -879,10 +879,67 @@ type FileTransferDescriptor struct {
 	Policy               accessdescriptor.FileTransferPolicy `json:"policy"`
 }
 
-func (s *Service) FileTransferDescriptor(ctx context.Context, userID, sourceMachineID, destinationMachineID, cliClientSessionID, sessionID string) (FileTransferDescriptor, error) {
-	return s.fileTransferDescriptor(ctx, userID, sourceMachineID, destinationMachineID, cliClientSessionID, sessionID, "", "")
+// TransferIntent is the sender's mode and the declared total of its prepared batch (every file
+// summed). Automatic is bounded by the policy's AutomaticMaxBatchBytes and signs that total as
+// max_bytes; Unlimited carries no bound.
+type TransferIntent struct {
+	Mode          string
+	DeclaredBytes int64
 }
 
-func (s *Service) FileTransferDescriptorForRequest(ctx context.Context, userID, sourceMachineID, destinationMachineID, cliClientSessionID, sessionID, requestID, manifestDigest string) (FileTransferDescriptor, error) {
-	return s.fileTransferDescriptor(ctx, userID, sourceMachineID, destinationMachineID, cliClientSessionID, sessionID, requestID, manifestDigest)
+// TransferTooLargeError refuses an Automatic transfer over the bound; Unlimited has none.
+type TransferTooLargeError struct{ TotalBytes, MaxBytes int64 }
+
+func (e *TransferTooLargeError) Error() string {
+	return fmt.Sprintf("transfer of %d bytes is over the automatic bound of %d bytes", e.TotalBytes, e.MaxBytes)
+}
+
+func (s *Service) FileTransferDescriptor(ctx context.Context, userID, sourceMachineID, destinationMachineID, cliClientSessionID, sessionID string, intent TransferIntent) (FileTransferDescriptor, error) {
+	return s.fileTransferDescriptor(ctx, userID, sourceMachineID, destinationMachineID, cliClientSessionID, sessionID, "", "", intent)
+}
+
+func (s *Service) FileTransferDescriptorForRequest(ctx context.Context, userID, sourceMachineID, destinationMachineID, cliClientSessionID, sessionID, requestID, manifestDigest string, intent TransferIntent) (FileTransferDescriptor, error) {
+	return s.fileTransferDescriptor(ctx, userID, sourceMachineID, destinationMachineID, cliClientSessionID, sessionID, requestID, manifestDigest, intent)
+}
+
+// declared reports whether the sender named a mode and size. A sender that does not yet
+// (released pb before the send-side mode work) is Automatic at the policy bound.
+func (i TransferIntent) declared() bool { return i.Mode != "" || i.DeclaredBytes != 0 }
+
+// effectiveIntent is the intent the credential signs: an undeclared send is Automatic with the
+// policy bound as its max_bytes.
+func (s *Service) effectiveIntent(intent TransferIntent) TransferIntent {
+	if intent.declared() {
+		return intent
+	}
+	return TransferIntent{Mode: mint.TransferModeAutomatic, DeclaredBytes: s.fileTransferPolicy.AutomaticMaxBatchBytes}
+}
+
+// checkTransferIntent validates the mode and refuses Automatic over the policy bound.
+func (s *Service) checkTransferIntent(intent TransferIntent) error {
+	switch intent.Mode {
+	case mint.TransferModeUnlimited:
+		if intent.DeclaredBytes < 0 {
+			return ErrInvalidTransferIntent
+		}
+		return nil
+	case mint.TransferModeAutomatic:
+		if intent.DeclaredBytes < 1 {
+			return ErrInvalidTransferIntent
+		}
+		if bound := s.fileTransferPolicy.AutomaticMaxBatchBytes; intent.DeclaredBytes > bound {
+			return &TransferTooLargeError{TotalBytes: intent.DeclaredBytes, MaxBytes: bound}
+		}
+		return nil
+	default:
+		return ErrInvalidTransferIntent
+	}
+}
+
+// signedMaxBytes is the max_bytes claim: the declared total for Automatic, none for Unlimited.
+func signedMaxBytes(intent TransferIntent) int64 {
+	if intent.Mode == mint.TransferModeAutomatic {
+		return intent.DeclaredBytes
+	}
+	return 0
 }
