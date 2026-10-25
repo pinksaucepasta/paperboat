@@ -184,6 +184,32 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	}
 	assertRelayGrant(t, initialCLIConfig.RelayGrants, userID, cliID, regionalNodeID, "epoch_"+suffix, 1, cliPublic, cliDisco, cliFingerprint, machinePublic, machineDisco, 1, relayWG, relayDisco)
 	assertRelayControlPeers(t, initialCLIConfig.RelayGrants, machinePublic)
+	// A Paperboat-managed node carries no hosting; the account's own pbh relay is self_hosted, which
+	// is the only relay an Unlimited transfer may use.
+	if hosting, ok := networkClaims(t, initialCLIConfig.CandidateSet)["nodes"].([]any)[0].(map[string]any)["hosting"]; ok {
+		t.Fatalf("managed node hosting=%v", hosting)
+	}
+	installationKey := sha256.Sum256([]byte("hosting_" + suffix))
+	if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete) VALUES($1,$2,$3,$3,$4,'hosting test','relay','account',$5,$1,true)`, "install_hosting_"+suffix, regionalNodeID, installationKey[:], []byte{1}, userID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.control_tunnel_nodes SET tls_spki_sha256=$2 WHERE id=$1`, regionalNodeID, installationKey[:]); err != nil {
+		t.Fatal(err)
+	}
+	ownRelayConfig, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "operation_own_relay_config_" + suffix, UserID: userID, EndpointID: cliID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertRegionalCandidates(t, ownRelayConfig.CandidateSet, userID, cliID, regionalNodeID, 1)
+	if hosting := networkClaims(t, ownRelayConfig.CandidateSet)["nodes"].([]any)[0].(map[string]any)["hosting"]; hosting != "self_hosted" {
+		t.Fatalf("own relay hosting=%v", hosting)
+	}
+	if _, err = store.SQL().ExecContext(ctx, `DELETE FROM paperboat.selfhost_installations WHERE id=$1`, "install_hosting_"+suffix); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.control_tunnel_nodes SET tls_spki_sha256=NULL WHERE id=$1`, regionalNodeID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.control_tunnel_nodes SET state='draining',ready=false,drain_deadline=$2 WHERE id=$1`, regionalNodeID, now.Add(30*time.Second)); err != nil {
 		t.Fatal(err)
 	}
