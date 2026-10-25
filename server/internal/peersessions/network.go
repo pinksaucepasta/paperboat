@@ -862,6 +862,8 @@ type RegionalNode struct {
 	CapacityLimit, CapacityUsed                 int64
 	DrainDeadline                               *int64
 	TLSPin                                      []byte
+	// SelfHosted: an account's or team's own pbh relay, the only relay an Unlimited transfer uses.
+	SelfHosted bool
 }
 
 func (n RegionalNode) Claims() (map[string]any, error) {
@@ -875,11 +877,14 @@ func (n RegionalNode) Claims() (map[string]any, error) {
 	if n.DrainDeadline != nil {
 		m["drain_deadline"] = *n.DrainDeadline
 	}
+	if n.SelfHosted {
+		m["hosting"] = "self_hosted"
+	}
 	return m, nil
 }
 
 func (s *NetworkService) regionalCandidates(ctx context.Context, tx *sql.Tx, accountID, endpointID string, generation int64, now, authorityExpiry time.Time) (string, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT id,node_generation,process_epoch,region,failure_domain,array_to_json(roles),array_to_json(transports),coalesce(endpoint_host,''),coalesce(endpoint_tcp_port,0),coalesce(endpoint_quic_port,0),state,last_heartbeat_at,registry_expires_at,capacity_limit,capacity_used,capacity_observed_at,drain_deadline,tls_spki_sha256 FROM paperboat.control_tunnel_nodes WHERE region IS NOT NULL AND paperboat.node_pool_eligible(id,$1,'relay') AND state='ready' AND ready AND last_heartbeat_at>$2::timestamptz-interval '15 seconds' AND registry_expires_at>$2::timestamptz AND capacity_observed_at>$2::timestamptz-interval '15 seconds' AND capacity_used<capacity_limit-capacity_limit/10 AND drain_deadline IS NULL ORDER BY region,id LIMIT 33`, accountID, now)
+	rows, err := tx.QueryContext(ctx, `SELECT id,node_generation,process_epoch,region,failure_domain,array_to_json(roles),array_to_json(transports),coalesce(endpoint_host,''),coalesce(endpoint_tcp_port,0),coalesce(endpoint_quic_port,0),state,last_heartbeat_at,registry_expires_at,capacity_limit,capacity_used,capacity_observed_at,drain_deadline,tls_spki_sha256,EXISTS(SELECT 1 FROM paperboat.selfhost_installations i WHERE i.node_id=control_tunnel_nodes.id AND i.scope_kind IN ('account','team')) FROM paperboat.control_tunnel_nodes WHERE region IS NOT NULL AND paperboat.node_pool_eligible(id,$1,'relay') AND state='ready' AND ready AND last_heartbeat_at>$2::timestamptz-interval '15 seconds' AND registry_expires_at>$2::timestamptz AND capacity_observed_at>$2::timestamptz-interval '15 seconds' AND capacity_used<capacity_limit-capacity_limit/10 AND drain_deadline IS NULL ORDER BY region,id LIMIT 33`, accountID, now)
 	if err != nil {
 		return "", err
 	}
@@ -890,7 +895,7 @@ func (s *NetworkService) regionalCandidates(ctx context.Context, tx *sql.Tx, acc
 		var roles, transports []byte
 		var observed, expires, capacityAt time.Time
 		var drain sql.NullTime
-		if err := rows.Scan(&n.NodeID, &n.NodeGeneration, &n.ProcessEpoch, &n.Region, &n.FailureDomain, &roles, &transports, &n.EndpointHost, &n.EndpointTCPPort, &n.EndpointQUICPort, &n.State, &observed, &expires, &n.CapacityLimit, &n.CapacityUsed, &capacityAt, &drain, &n.TLSPin); err != nil {
+		if err := rows.Scan(&n.NodeID, &n.NodeGeneration, &n.ProcessEpoch, &n.Region, &n.FailureDomain, &roles, &transports, &n.EndpointHost, &n.EndpointTCPPort, &n.EndpointQUICPort, &n.State, &observed, &expires, &n.CapacityLimit, &n.CapacityUsed, &capacityAt, &drain, &n.TLSPin, &n.SelfHosted); err != nil {
 			return "", err
 		}
 		if err := json.Unmarshal(roles, &n.Roles); err != nil {
