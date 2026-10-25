@@ -82,6 +82,10 @@ const sentences: Record<string, string> = {
     "The team has not allowed private access to its shared machines. Ask a team owner or admin to turn it on.",
   github_connection_in_use:
     "Config sync is using GitHub right now. Stop syncing config on your machines first, then disconnect.",
+  transfer_too_large:
+    "This file is over 2 GB. Switch File transfers to Unlimited in Account, then send it over a direct connection or your own relay.",
+  file_transfer_path_not_allowed:
+    "Unlimited transfers don’t use Paperboat’s relays. Connect the machines directly or add your own relay.",
   team_sso_required: "This team requires your company's SSO. Sign out and sign in with your work email.",
   team_suspended:
     "This team is suspended, so changes are paused. Ask the team owner to restore billing or resume the team.",

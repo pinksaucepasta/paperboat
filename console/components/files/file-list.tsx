@@ -24,6 +24,7 @@ import {
   ShareInboxFileDialog,
 } from "@/components/files/file-dialogs"
 import { DropOverlay, usePageFileDrop } from "@/components/file-drop"
+import { Transfers } from "@/components/files/transfers"
 import { ConfirmAction, SearchField, useListScope } from "@/components/list-toolbar"
 import { useCurrentMachine } from "@/components/machine-shell"
 import { RowMenus, type Entry } from "@/components/row-menus"
@@ -101,6 +102,7 @@ export function FileList({ machine: tabMachine }: { machine?: Machine }) {
     <section className="flex flex-col gap-4">
       {dropped}
       <Requests scope={scope} />
+      <Transfers scope={scope} />
       {empty ? (
         <Empty className="py-16">
           <EmptyHeader>

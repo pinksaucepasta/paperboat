@@ -40,6 +40,12 @@ export type InboxRequest = {
   destination_machine_id: string
   files: { basename: string; size: number; sha256: string }[]
   status: "pending" | "approved" | "declined" | "expired" | "revoked" | "completed" | string
+  /** After approval, how the transfer is going (File transfer modes, PLAN 3b). */
+  state?: "pending" | "sending" | "paused" | "done" | "failed"
+  pause_reason?: "no_eligible_path" | "destination_offline" | "relay_quota_exhausted"
+  transfer_mode?: "automatic" | "unlimited"
+  total_bytes?: number
+  committed_bytes?: number
   decision_generation: number
   expires_at: string
 }
