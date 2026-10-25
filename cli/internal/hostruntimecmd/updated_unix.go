@@ -26,16 +26,43 @@ import (
 
 // healMachineGuard replaces a guard left on another version by an older updater (it installs the guard
 // from this installation under the all-or-nothing undo), so no user has to run pb install after an
-// update. Failure leaves the guard as it was and is logged; doctor still reports it.
-func healMachineGuard(ctx context.Context, source installsource.Source, binary string, stderr io.Writer) {
-	healCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer cancel()
-	healed, err := hostinstall.HealMachineGuard(healCtx, source, binary)
-	if err != nil {
-		fmt.Fprintf(stderr, "paperboat-updated: machine guard runs another version and replacing it failed: %v\n", err)
-	} else if healed {
-		fmt.Fprintf(stderr, "paperboat-updated: machine guard ran another version; replaced it with %s\n", source.Version)
+// update. It runs only while it holds the installation lock: an install or update in progress owns the
+// guard and its undo, and a heal racing that undo left ubuntu24 without a running guard (2026-10-26).
+// The lock is only tried, never waited on, since an install may be restarting this service while it
+// holds it; a busy lock is tried again later. Failure leaves the guard as it was and is logged.
+var (
+	lockInstallation = updated.LockUnixNativeInstall
+	healGuard        = hostinstall.HealMachineGuard
+	healRetryWait    = 30 * time.Second
+)
+
+func healMachineGuard(ctx context.Context, stateRoot string, source installsource.Source, binary string, stderr io.Writer) {
+	for attempt := 0; attempt < 20; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(healRetryWait):
+			}
+		}
+		lockCtx, cancelLock := context.WithTimeout(ctx, time.Second)
+		lock, err := lockInstallation(lockCtx, stateRoot)
+		cancelLock()
+		if err != nil {
+			continue
+		}
+		healCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		healed, err := healGuard(healCtx, source, binary)
+		cancel()
+		_ = lock.Close()
+		if err != nil {
+			fmt.Fprintf(stderr, "paperboat-updated: machine guard runs another version and replacing it failed: %v\n", err)
+		} else if healed {
+			fmt.Fprintf(stderr, "paperboat-updated: machine guard ran another version; replaced it with %s\n", source.Version)
+		}
+		return
 	}
+	fmt.Fprintln(stderr, "paperboat-updated: machine guard version not checked; an installation held the lock for 10 minutes")
 }
 
 func runUpdated(ctx context.Context, args []string, _ io.Writer, stderr io.Writer) error {
@@ -124,7 +151,7 @@ func runUpdated(ctx context.Context, args []string, _ io.Writer, stderr io.Write
 		return failInitialization(err)
 	}
 	if !pending {
-		healMachineGuard(ctx, installedSource, binary, stderr)
+		go healMachineGuard(ctx, stateRoot, installedSource, binary, stderr)
 	}
 	environment := map[string]string{}
 	refreshManuals, err := newUnixManualRefresher(binary, uid, gid)
