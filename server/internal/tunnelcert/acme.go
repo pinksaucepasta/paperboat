@@ -87,7 +87,11 @@ type ACMEIssuerConfig struct {
 	AccountKeys         SignerReferenceSource
 	AccountKeyReference string
 
-	DNS                DNS01Provider
+	DNS DNS01Provider
+	// HTTP01, when set, answers http-01 authorizations instead of DNS-01. It
+	// is a staging path: configuration refuses it in production. Exactly one
+	// of DNS and HTTP01 must be set.
+	HTTP01             HTTP01Publisher
 	HTTPClient         *http.Client
 	Timeout            time.Duration
 	PropagationTimeout time.Duration
@@ -111,6 +115,7 @@ type ACMEIssuer struct {
 	accountKeys        SignerReferenceSource
 	accountKeyRef      string
 	dns                DNS01Provider
+	http01             HTTP01Publisher
 	httpClient         *http.Client
 	timeout            time.Duration
 	propagationTimeout time.Duration
@@ -145,7 +150,10 @@ func NewACMEIssuer(config ACMEIssuerConfig) (*ACMEIssuer, error) {
 	if config.AccountKey != nil && !supportedAccountKey(config.AccountKey) {
 		return nil, fmt.Errorf("%w: ACME account key algorithm is unsupported", ErrInvalid)
 	}
-	if config.DNS == nil {
+	if config.DNS != nil && config.HTTP01 != nil {
+		return nil, fmt.Errorf("%w: exactly one challenge provider (DNS-01 or HTTP-01) is allowed", ErrInvalid)
+	}
+	if config.DNS == nil && config.HTTP01 == nil {
 		return nil, fmt.Errorf("%w: DNS-01 provider is required", ErrDNSChallengeUnavailable)
 	}
 	client := config.HTTPClient
@@ -198,7 +206,7 @@ func NewACMEIssuer(config ACMEIssuerConfig) (*ACMEIssuer, error) {
 			return nil, fmt.Errorf("%w: challenge zone is invalid", ErrInvalid)
 		}
 	}
-	return &ACMEIssuer{directoryURL: strings.TrimRight(config.DirectoryURL, "/"), accountKID: acme.KeyID(strings.TrimSpace(config.AccountKID)), accountEmail: strings.TrimSpace(config.AccountEmail), accountKey: config.AccountKey, accountKeys: config.AccountKeys, accountKeyRef: config.AccountKeyReference, dns: config.DNS, httpClient: client, timeout: timeout, propagationTimeout: propagationTimeout, cleanupTimeout: cleanupTimeout, pollInterval: pollInterval, maxAttempts: maxAttempts, retryBase: retryBase, retryMax: retryMax, issuer: issuer, challengeZone: challengeZone}, nil
+	return &ACMEIssuer{directoryURL: strings.TrimRight(config.DirectoryURL, "/"), accountKID: acme.KeyID(strings.TrimSpace(config.AccountKID)), accountEmail: strings.TrimSpace(config.AccountEmail), accountKey: config.AccountKey, accountKeys: config.AccountKeys, accountKeyRef: config.AccountKeyReference, dns: config.DNS, http01: config.HTTP01, httpClient: client, timeout: timeout, propagationTimeout: propagationTimeout, cleanupTimeout: cleanupTimeout, pollInterval: pollInterval, maxAttempts: maxAttempts, retryBase: retryBase, retryMax: retryMax, issuer: issuer, challengeZone: challengeZone}, nil
 }
 
 func (i *ACMEIssuer) Issue(ctx context.Context, request IssueRequest) (CertificateBundle, error) {
@@ -358,7 +366,7 @@ func (i *ACMEIssuer) issueDNS01CSR(ctx context.Context, domain Domain, names []s
 	}
 
 	ctx = certificateContext(ctx)
-	if i == nil || i.dns == nil {
+	if i == nil || i.dns == nil && i.http01 == nil {
 		return CertificateBundle{}, ErrDNSChallengeUnavailable
 	}
 	// Bound the entire order, including ACME polling between fast HTTP
@@ -379,16 +387,18 @@ func (i *ACMEIssuer) issueDNS01CSR(ctx context.Context, domain Domain, names []s
 		return CertificateBundle{}, fmt.Errorf("%w: wildcard fallback is not enabled", ErrInvalid)
 	}
 	var challengeTarget string
-	if domain.Target().normalizedKind() == TargetPlatformWildcard {
-		challengeTarget, err = PlatformDNSChallengeTargetForDomain(domain)
-	} else {
-		if i.challengeZone == "" {
-			return CertificateBundle{}, fmt.Errorf("%w: Paperboat challenge zone is not configured", ErrDNSChallengeUnavailable)
+	if i.dns != nil {
+		if domain.Target().normalizedKind() == TargetPlatformWildcard {
+			challengeTarget, err = PlatformDNSChallengeTargetForDomain(domain)
+		} else {
+			if i.challengeZone == "" {
+				return CertificateBundle{}, fmt.Errorf("%w: Paperboat challenge zone is not configured", ErrDNSChallengeUnavailable)
+			}
+			challengeTarget, err = DelegatedChallengeTargetForDomain(domain, i.challengeZone)
 		}
-		challengeTarget, err = DelegatedChallengeTargetForDomain(domain, i.challengeZone)
-	}
-	if err != nil {
-		return CertificateBundle{}, err
+		if err != nil {
+			return CertificateBundle{}, err
+		}
 	}
 	slog.InfoContext(ctx, "certificate ACME phase", "phase", "order_authorization")
 	client, err := i.client(ctx)
@@ -399,21 +409,21 @@ func (i *ACMEIssuer) issueDNS01CSR(ctx context.Context, domain Domain, names []s
 	if err != nil {
 		return CertificateBundle{}, mapACMEError(err)
 	}
-	var records []DNS01Record
+	var withdraws []func(context.Context) error
 	defer func() {
-		if len(records) == 0 {
+		if len(withdraws) == 0 {
 			return
 		}
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), i.cleanupTimeout)
 		defer cancel()
-		for index := len(records) - 1; index >= 0; index-- {
-			if err := i.dns.Cleanup(cleanupCtx, records[index]); err != nil {
-				cleanupErr := fmt.Errorf("%w: DNS-01 record cleanup failed", ErrDNSChallengeUnavailable)
+		for index := len(withdraws) - 1; index >= 0; index-- {
+			if err := withdraws[index](cleanupCtx); err != nil {
+				cleanupErr := fmt.Errorf("%w: challenge cleanup failed", ErrDNSChallengeUnavailable)
 				returnErr = errors.Join(returnErr, cleanupErr)
 			}
 		}
 	}()
-	loggedDNS, loggedAuthorization := false, false
+	loggedChallenge, loggedAuthorization := false, false
 	for _, authorizationURL := range order.AuthzURLs {
 		authorization, err := client.GetAuthorization(ctx, authorizationURL)
 		if err != nil {
@@ -422,41 +432,16 @@ func (i *ACMEIssuer) issueDNS01CSR(ctx context.Context, domain Domain, names []s
 		if authorization.Status == acme.StatusValid {
 			continue
 		}
-		challenge := findDNS01Challenge(authorization)
-		if challenge == nil || challenge.Token == "" {
-			return CertificateBundle{}, ErrDNSChallengeUnavailable
+		if !loggedChallenge {
+			slog.InfoContext(ctx, "certificate ACME phase", "phase", i.challengePhase())
+			loggedChallenge = true
 		}
-		value, err := client.DNS01ChallengeRecord(challenge.Token)
-		if err != nil || len(value) == 0 || len(value) > maxACMEDNSRecordValueLength {
-			return CertificateBundle{}, ErrDNSChallengeUnavailable
+		challenge, withdraw, err := i.presentChallenge(ctx, client, domain, names, challengeTarget, authorization)
+		if withdraw != nil {
+			withdraws = append(withdraws, withdraw)
 		}
-		authorizationName := authorization.Identifier.Value
-		if !slices.Contains(names, authorizationName) && !slices.Contains(names, "*."+authorizationName) {
-			return CertificateBundle{}, ErrInvalid
-		}
-		challengeHost := "_acme-challenge." + strings.TrimPrefix(authorizationName, "*.")
-		recordTarget := challengeTarget
-		if domain.TargetKind == TargetPlatformWildcard {
-			recordTarget = challengeHost
-		}
-		record := DNS01Record{Domain: authorizationName, Name: recordTarget, TargetName: recordTarget, AuthorizationName: challengeHost, Value: value, TTL: 60 * time.Second}
-		if !loggedDNS {
-			slog.InfoContext(ctx, "certificate ACME phase", "phase", "dns_propagation")
-			loggedDNS = true
-		}
-		record, err = i.dns.Present(ctx, record)
 		if err != nil {
-			return CertificateBundle{}, mapDNSProviderError(err)
-		}
-		if record.Name != recordTarget || record.TargetName != recordTarget || record.AuthorizationName != challengeHost || record.Value != value || record.ProviderID == "" {
-			return CertificateBundle{}, ErrDNSChallengeUnavailable
-		}
-		records = append(records, record)
-		waitCtx, cancel := context.WithTimeout(ctx, i.propagationTimeout)
-		err = i.dns.Wait(waitCtx, record)
-		cancel()
-		if err != nil {
-			return CertificateBundle{}, mapDNSProviderError(err)
+			return CertificateBundle{}, err
 		}
 		if !loggedAuthorization {
 			slog.InfoContext(ctx, "certificate ACME phase", "phase", "authorization")
@@ -470,7 +455,7 @@ func (i *ACMEIssuer) issueDNS01CSR(ctx context.Context, domain Domain, names []s
 			return CertificateBundle{}, mapACMEError(err)
 		}
 		if completed == nil || completed.Status != acme.StatusValid {
-			return CertificateBundle{}, fmt.Errorf("%w: DNS-01 authorization did not become valid", ErrDNSChallengePending)
+			return CertificateBundle{}, fmt.Errorf("%w: challenge authorization did not become valid", ErrDNSChallengePending)
 		}
 	}
 	slog.InfoContext(ctx, "certificate ACME phase", "phase", "order")
@@ -588,16 +573,117 @@ func (i *ACMEIssuer) client(ctx context.Context) (*acme.Client, error) {
 	return client, nil
 }
 
-func findDNS01Challenge(authorization *acme.Authorization) *acme.Challenge {
+func findChallenge(authorization *acme.Authorization, challengeType string) *acme.Challenge {
 	if authorization == nil {
 		return nil
 	}
 	for _, challenge := range authorization.Challenges {
-		if challenge != nil && challenge.Type == "dns-01" && challenge.Status != acme.StatusInvalid {
+		if challenge != nil && challenge.Type == challengeType && challenge.Status != acme.StatusInvalid {
 			return challenge
 		}
 	}
 	return nil
+}
+
+func (i *ACMEIssuer) challengePhase() string {
+	if i.http01 != nil {
+		return "http_publish"
+	}
+	return "dns_propagation"
+}
+
+// presentChallenge answers one pending authorization with the configured
+// challenge type. withdraw is non-nil as soon as the response is visible to
+// the challenge's verifier, so the caller removes it even when a later step
+// fails.
+func (i *ACMEIssuer) presentChallenge(ctx context.Context, client *acme.Client, domain Domain, names []string, challengeTarget string, authorization *acme.Authorization) (*acme.Challenge, func(context.Context) error, error) {
+	if i.http01 != nil {
+		return i.presentHTTP01(ctx, client, domain, names, authorization)
+	}
+	return i.presentDNS01(ctx, client, names, challengeTarget, domain, authorization)
+}
+
+func (i *ACMEIssuer) presentDNS01(ctx context.Context, client *acme.Client, names []string, challengeTarget string, domain Domain, authorization *acme.Authorization) (*acme.Challenge, func(context.Context) error, error) {
+	challenge := findChallenge(authorization, "dns-01")
+	if challenge == nil || challenge.Token == "" {
+		return nil, nil, ErrDNSChallengeUnavailable
+	}
+	value, err := client.DNS01ChallengeRecord(challenge.Token)
+	if err != nil || len(value) == 0 || len(value) > maxACMEDNSRecordValueLength {
+		return nil, nil, ErrDNSChallengeUnavailable
+	}
+	authorizationName, err := authorizationIdentifier(authorization, names)
+	if err != nil {
+		return nil, nil, err
+	}
+	challengeHost := "_acme-challenge." + strings.TrimPrefix(authorizationName, "*.")
+	recordTarget := challengeTarget
+	if domain.TargetKind == TargetPlatformWildcard {
+		recordTarget = challengeHost
+	}
+	record := DNS01Record{Domain: authorizationName, Name: recordTarget, TargetName: recordTarget, AuthorizationName: challengeHost, Value: value, TTL: 60 * time.Second}
+	record, err = i.dns.Present(ctx, record)
+	if err != nil {
+		return nil, nil, mapDNSProviderError(err)
+	}
+	withdraw := func(ctx context.Context) error { return i.dns.Cleanup(ctx, record) }
+	if record.Name != recordTarget || record.TargetName != recordTarget || record.AuthorizationName != challengeHost || record.Value != value || record.ProviderID == "" {
+		return nil, withdraw, ErrDNSChallengeUnavailable
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, i.propagationTimeout)
+	err = i.dns.Wait(waitCtx, record)
+	cancel()
+	if err != nil {
+		return nil, withdraw, mapDNSProviderError(err)
+	}
+	return challenge, withdraw, nil
+}
+
+// presentHTTP01 publishes the key authorization to every edge that serves the
+// domain and waits until each has fetched it. Pebble-style verifiers connect
+// to the edge's public port 80, so the edge must have the response first.
+func (i *ACMEIssuer) presentHTTP01(ctx context.Context, client *acme.Client, domain Domain, names []string, authorization *acme.Authorization) (*acme.Challenge, func(context.Context) error, error) {
+	challenge := findChallenge(authorization, "http-01")
+	if challenge == nil || challenge.Token == "" {
+		return nil, nil, ErrDNSChallengeUnavailable
+	}
+	keyAuthorization, err := client.HTTP01ChallengeResponse(challenge.Token)
+	if err != nil {
+		return nil, nil, ErrDNSChallengeUnavailable
+	}
+	authorizationName, err := authorizationIdentifier(authorization, names)
+	if err != nil {
+		return nil, nil, err
+	}
+	edges := make([]string, 0, len(domain.EdgeTargets))
+	for _, target := range domain.EdgeTargets {
+		edges = append(edges, target.NodeID)
+	}
+	if len(edges) == 0 {
+		return nil, nil, fmt.Errorf("%w: no edge serves the domain for HTTP-01", ErrDNSChallengeUnavailable)
+	}
+	record := HTTP01Record{Hostname: authorizationName, Token: challenge.Token, KeyAuthorization: keyAuthorization, EdgeNodeIDs: edges}
+	if err := i.http01.Publish(ctx, record); err != nil {
+		return nil, nil, mapDNSProviderError(err)
+	}
+	withdraw := func(ctx context.Context) error { return i.http01.Withdraw(ctx, record) }
+	waitCtx, cancel := context.WithTimeout(ctx, i.propagationTimeout)
+	err = i.http01.Wait(waitCtx, record)
+	cancel()
+	if err != nil {
+		return nil, withdraw, mapDNSProviderError(err)
+	}
+	return challenge, withdraw, nil
+}
+
+// authorizationIdentifier returns the authorized name, which must be one of
+// the names the order requested (a wildcard authorization covers "*."+name).
+func authorizationIdentifier(authorization *acme.Authorization, names []string) (string, error) {
+	authorizationName := authorization.Identifier.Value
+	if !slices.Contains(names, authorizationName) && !slices.Contains(names, "*."+authorizationName) {
+		return "", ErrInvalid
+	}
+	return authorizationName, nil
 }
 
 func parseRetryAfter(value string, now time.Time) time.Duration {
