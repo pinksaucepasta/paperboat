@@ -490,6 +490,10 @@ type recoveryFixture struct {
 	initial *int
 	renewal *int
 	deny    *bool
+	// rejectHelper makes the mint refuse the enrolled runtime credential until it is renewed by proof.
+	rejectHelper *bool
+	operations   *[]string
+	helperRenews *int
 }
 
 // newRecoveryFixture enrolls a helper identity and holds a machine-control
@@ -500,8 +504,10 @@ func newRecoveryFixture(t *testing.T, renewalStatus int, credentialExpiry time.D
 	root := filepath.Join(t.TempDir(), "runtime")
 	const helperToken = "helper-identity-credential-012345678901234567890"
 	recovered := strings.Repeat("r", 40)
-	var initialCalls, renewalCalls int
-	deny := false
+	var initialCalls, renewalCalls, helperRenews int
+	deny, rejectHelper := false, false
+	var operations []string
+	const renewedHelper = "renewed-helper-credential-0123456789012345678"
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
@@ -510,8 +516,21 @@ func newRecoveryFixture(t *testing.T, renewalStatus int, credentialExpiry time.D
 		case "/v1/machine-control-renewals":
 			renewalCalls++
 			w.WriteHeader(renewalStatus)
+		case "/v1/helper-identity-renewals":
+			helperRenews++
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"helper_id": "hlp_1", "machine_id": "mch_1", "environment_id": "env_1", "credential": renewedHelper, "expires_at": time.Now().UTC().Add(48 * time.Hour)}})
 		case "/v1/machine-control-credentials":
 			initialCalls++
+			var body struct {
+				OperationID string `json:"operation_id"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			operations = append(operations, body.OperationID)
+			if rejectHelper && r.Header.Get("Authorization") != "Bearer "+renewedHelper {
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"error":{"code":"machine_identity_invalid","message":"rejected"}}`))
+				return
+			}
 			if deny {
 				w.WriteHeader(http.StatusUnauthorized)
 				return
@@ -546,7 +565,7 @@ func newRecoveryFixture(t *testing.T, renewalStatus int, credentialExpiry time.D
 	if err != nil {
 		t.Fatal(err)
 	}
-	return recoveryFixture{source: source, store: store, now: current, initial: &initialCalls, renewal: &renewalCalls, deny: &deny}
+	return recoveryFixture{source: source, store: store, now: current, initial: &initialCalls, renewal: &renewalCalls, deny: &deny, rejectHelper: &rejectHelper, operations: &operations, helperRenews: &helperRenews}
 }
 
 // HP sat with an expired, never-renewed credential until `pb tunnel create`
@@ -579,17 +598,47 @@ func TestSourceRecoveryBacksOffAfterDenial(t *testing.T) {
 			t.Fatalf("denied recovery = %v, want invalid", err)
 		}
 	}
-	if *f.initial != 1 {
-		t.Fatalf("initial requests inside the backoff = %d, want 1", *f.initial)
+	// One recovery attempt is a refused mint, a renewal of the runtime credential by proof, and one retry.
+	if *f.initial != 2 || *f.helperRenews != 1 {
+		t.Fatalf("requests inside the backoff = %d mints, %d renewals; want one attempt (2, 1)", *f.initial, *f.helperRenews)
 	}
 	*f.now = f.now.Add(recoveryBackoffStart + time.Second)
 	_, _ = f.source.Token(t.Context())
-	if *f.initial != 2 {
-		t.Fatalf("initial requests after the backoff = %d, want 2", *f.initial)
+	if *f.initial != 4 {
+		t.Fatalf("mints after the backoff = %d, want a second attempt (4)", *f.initial)
 	}
 	*f.now = f.now.Add(recoveryBackoffStart + time.Second)
 	_, _ = f.source.Token(t.Context())
-	if *f.initial != 2 {
-		t.Fatalf("the backoff must grow, got %d requests", *f.initial)
+	if *f.initial != 4 {
+		t.Fatalf("the backoff must grow, got %d mints", *f.initial)
+	}
+}
+
+// stg-m1, 2026-10-26: a rotated mint signing key made the server refuse both the machine-control credential and
+// the stored runtime credential. Nothing re-issued for 13+ minutes. Now a refused credential recovers at once, with
+// a fresh operation id, renewing the runtime credential by machine-key proof when the mint refuses it.
+func TestRefusedCredentialRecoversAtOnceThroughProofRenewal(t *testing.T) {
+	f := newRecoveryFixture(t, http.StatusCreated, time.Hour)
+	*f.rejectHelper = true
+	refused, err := f.source.Token(t.Context())
+	if err != nil || *f.initial != 0 {
+		t.Fatalf("a valid credential was not served from the store: err=%v initial=%d", err, *f.initial)
+	}
+	f.source.CredentialRejected(refused)
+	token, err := f.source.Token(t.Context())
+	if err != nil || token != strings.Repeat("r", 40) {
+		t.Fatalf("recovery failed: token=%q err=%v", token, err)
+	}
+	if *f.helperRenews != 1 || *f.initial != 2 {
+		t.Fatalf("helper renewals=%d mints=%d, want one renewal between two mints", *f.helperRenews, *f.initial)
+	}
+	registration, _ := f.store.Registration()
+	for _, operation := range *f.operations {
+		if operation == initialOperationID(registration, f.store.Current().ID) {
+			t.Fatal("recovery replayed the first mint's operation id, which returns the refused credential")
+		}
+	}
+	if again, err := f.source.Token(t.Context()); err != nil || again != token || *f.initial != 2 {
+		t.Fatalf("the recovered credential was not kept: err=%v mints=%d", err, *f.initial)
 	}
 }

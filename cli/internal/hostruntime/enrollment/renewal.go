@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
@@ -31,6 +32,15 @@ type RenewingTokenSource struct {
 	config   RenewingTokenConfig
 	endpoint *url.URL
 	client   *http.Client
+	// rejected is a credential a caller reported refused (401); the next Token renews it by proof at once.
+	rejected atomic.Pointer[string]
+}
+
+// CredentialRejected records that the control plane refused credential, so the next Token renews it.
+func (s *RenewingTokenSource) CredentialRejected(credential string) {
+	if s != nil && credential != "" {
+		s.rejected.Store(&credential)
+	}
 }
 
 func NewRenewingTokenSource(config RenewingTokenConfig) (*RenewingTokenSource, error) {
@@ -57,7 +67,26 @@ func NewRenewingTokenSource(config RenewingTokenConfig) (*RenewingTokenSource, e
 	return &RenewingTokenSource{config: config, endpoint: base, client: &http.Client{Transport: errorreport.TransportOperation(config.Transport, base.String(), "identity_renewal"), CheckRedirect: func(*http.Request, []*http.Request) error { return errEnrollmentRedirect }}}, nil
 }
 
-func (s *RenewingTokenSource) Token(ctx context.Context) (token string, resultErr error) {
+func (s *RenewingTokenSource) Token(ctx context.Context) (string, error) {
+	if rejected := s.rejected.Load(); rejected != nil {
+		if current, err := LoadRuntimeIdentityForRenewal(s.config.StateRoot, s.config.Clock().UTC()); err == nil && current.Credential == *rejected {
+			token, err := s.token(ctx, true)
+			if err == nil {
+				s.rejected.Store(nil)
+			}
+			return token, err
+		}
+	}
+	return s.token(ctx, false)
+}
+
+// Renew renews the runtime credential now, proving possession of the machine key alone: it recovers a
+// credential the server stopped accepting (a withdrawn signing key) even before its expiry.
+func (s *RenewingTokenSource) Renew(ctx context.Context) (string, error) {
+	return s.token(ctx, true)
+}
+
+func (s *RenewingTokenSource) token(ctx context.Context, force bool) (token string, resultErr error) {
 	attemptCtx, cancel := context.WithTimeout(ctx, s.config.Timeout)
 	defer cancel()
 	defer func() {
@@ -75,7 +104,7 @@ func (s *RenewingTokenSource) Token(ctx context.Context) (token string, resultEr
 	if err != nil {
 		return "", unavailableEnrollment(err)
 	}
-	if s.fresh(current, now) {
+	if !force && s.fresh(current, now) {
 		if err := attemptCtx.Err(); err != nil {
 			return "", unavailableEnrollment(err)
 		}
@@ -101,7 +130,7 @@ func (s *RenewingTokenSource) Token(ctx context.Context) (token string, resultEr
 	if err != nil {
 		return "", unavailableEnrollment(err)
 	}
-	if s.fresh(current, now) {
+	if !force && s.fresh(current, now) {
 		if err := attemptCtx.Err(); err != nil {
 			return "", unavailableEnrollment(err)
 		}

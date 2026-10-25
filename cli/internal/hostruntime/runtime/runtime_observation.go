@@ -319,6 +319,12 @@ func (s *runtimeObservationSender) send(ctx context.Context, mayConfirm bool) er
 	if len(responseBody) > 8<<20 {
 		return errors.New("runtime observation response is invalid")
 	}
+	if response.StatusCode == http.StatusUnauthorized {
+		// The control plane refused the runtime credential (a withdrawn signing key): renew it at once.
+		if rejected, ok := s.tokens.(interface{ CredentialRejected(string) }); ok {
+			rejected.CredentialRejected(token)
+		}
+	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		s.applyMachineServicesPolicy(nil)
 		return runtimeObservationFailure{stage: "control_request", cause: errorreport.HTTPStatusFailure(response), answered: true}

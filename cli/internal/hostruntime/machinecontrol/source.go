@@ -156,6 +156,22 @@ type Source struct {
 	// not hammer the control plane.
 	recoverAfter time.Time
 	recoverDelay time.Duration
+	// rejected is a credential an API call reported refused (401 control credential invalid): the next Token
+	// recovers at once instead of serving it until its renewal window (stg-m1: a mint key rotation left
+	// machines offline with no recovery attempt).
+	rejected string
+}
+
+// CredentialRejected records that the control plane refused credential; the API client calls it on a 401
+// for a machine-authenticated request.
+func (s *Source) CredentialRejected(credential string) {
+	if s == nil || credential == "" {
+		return
+	}
+	s.mu.Lock()
+	s.rejected = credential
+	s.recoverAfter = time.Time{}
+	s.mu.Unlock()
 }
 
 const (
@@ -204,6 +220,9 @@ func (s *Source) Token(ctx context.Context) (string, error) {
 			return s.recoverLocked(ctx, store)
 		}
 		return "", unavailable(err)
+	}
+	if current.Credential == s.rejected {
+		return s.recoverLocked(ctx, store)
 	}
 	if current.ExpiresAt.After(now.Add(s.config.RenewBefore)) {
 		return current.Credential, nil
@@ -306,7 +325,7 @@ func (s *Source) EnsureInitial(ctx context.Context) (string, error) {
 	} else if !expectedInvalidMachineControl(currentErr) {
 		return "", unavailable(currentErr)
 	}
-	return s.mintInitialLocked(ctx, store)
+	return s.mintInitialLocked(ctx, store, false)
 }
 
 // recoverLocked replaces a missing, expired or rejected credential through the
@@ -317,7 +336,7 @@ func (s *Source) recoverLocked(ctx context.Context, store *identity.Store) (stri
 	if now.Before(s.recoverAfter) {
 		return "", ErrInvalid
 	}
-	token, err := s.mintInitialLocked(ctx, store)
+	token, err := s.mintInitialLocked(ctx, store, true)
 	if err != nil {
 		if s.recoverDelay = 2 * s.recoverDelay; s.recoverDelay < recoveryBackoffStart {
 			s.recoverDelay = recoveryBackoffStart
@@ -327,17 +346,43 @@ func (s *Source) recoverLocked(ctx context.Context, store *identity.Store) (stri
 		s.recoverAfter = now.Add(s.recoverDelay)
 		return "", ErrInvalid
 	}
-	s.recoverDelay, s.recoverAfter = 0, time.Time{}
+	s.recoverDelay, s.recoverAfter, s.rejected = 0, time.Time{}, ""
 	return token, nil
 }
 
-func (s *Source) mintInitialLocked(ctx context.Context, store *identity.Store) (string, error) {
+// mintInitialLocked mints a machine-control credential with the runtime identity. The first mint uses a
+// deterministic operation id so a lost answer is replayed; a recovery uses a fresh one, since replaying the
+// first mint returns the credential the server just refused. If the runtime credential is refused too (its
+// signing key was withdrawn), a recovery renews it by machine-key proof alone and tries once more.
+func (s *Source) mintInitialLocked(ctx context.Context, store *identity.Store, recovering bool) (string, error) {
+	token, err := s.mintOnceLocked(ctx, store, recovering)
+	if !recovering || !errors.Is(err, errMintRefused) {
+		return token, err
+	}
+	renewer, renewErr := enrollment.NewRenewingTokenSource(enrollment.RenewingTokenConfig{ControlURL: strings.TrimSuffix(s.endpoint.String(), "/v1/machine-control-renewals"), StateRoot: s.config.StateRoot, Transport: s.config.Transport, Timeout: s.config.Timeout, Clock: s.config.Clock, OperationID: randomOperationID})
+	if renewErr != nil {
+		return "", err
+	}
+	if _, renewErr = renewer.Renew(ctx); renewErr != nil {
+		return "", errors.Join(err, renewErr)
+	}
+	return s.mintOnceLocked(ctx, store, recovering)
+}
+
+var errMintRefused = errors.Join(ErrInvalid, errors.New("machine control mint refused"))
+
+func (s *Source) mintOnceLocked(ctx context.Context, store *identity.Store, recovering bool) (string, error) {
 	now := s.config.Clock().UTC()
 	registration, err := store.Registration()
 	if err != nil {
 		return "", unavailable(err)
 	}
 	operationID := initialOperationID(registration, store.Current().ID)
+	if recovering {
+		if operationID, err = randomOperationID(); err != nil {
+			return "", unavailable(err)
+		}
+	}
 	body, err := json.Marshal(struct {
 		OperationID string `json:"operation_id"`
 	}{operationID})
@@ -372,7 +417,7 @@ func (s *Source) mintInitialLocked(ctx context.Context, store *identity.Store) (
 	raw, tooLarge, bodyErr := readMachineControlResponse(response)
 	if response.StatusCode != http.StatusCreated {
 		if (response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden) && bodyErr == nil && !tooLarge {
-			return "", ErrInvalid
+			return "", errMintRefused
 		}
 		statusFailure := errorreport.HTTPStatusFailure(response)
 		if bodyErr != nil {

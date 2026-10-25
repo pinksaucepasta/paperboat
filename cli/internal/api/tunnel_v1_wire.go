@@ -277,8 +277,10 @@ func (c *Client) doTunnelRequest(ctx context.Context, method, requestPath string
 			req.Header.Add(key, value)
 		}
 	}
+	machineToken := ""
 	if c.machineAuth != nil && machineAuthorizedRequest(method, req.URL.Path) {
 		token, tokenErr := c.machineAuth.Token(ctx)
+		machineToken = token
 		if tokenErr != nil {
 			return fmt.Errorf("machine authentication token: %w", tokenErr)
 		}
@@ -318,6 +320,7 @@ func (c *Client) doTunnelRequest(ctx context.Context, method, requestPath string
 		return fmt.Errorf("call %s %s: %w", method, requestPath, err)
 	}
 	defer resp.Body.Close()
+	c.reportMachineCredential(resp.StatusCode, machineToken)
 	if responseHeaders != nil {
 		*responseHeaders = resp.Header.Clone()
 	}

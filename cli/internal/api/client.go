@@ -78,6 +78,18 @@ func (c *Client) SetMachineAuth(source MachineAuthSource) {
 	c.machineAuth = source
 }
 
+// reportMachineCredential tells the machine auth source that the control plane refused its credential (any
+// 401 on a machine-authenticated request), so it recovers at once instead of serving the refused credential
+// until its renewal window.
+func (c *Client) reportMachineCredential(status int, token string) {
+	if status != http.StatusUnauthorized || token == "" {
+		return
+	}
+	if rejected, ok := c.machineAuth.(interface{ CredentialRejected(string) }); ok {
+		rejected.CredentialRejected(token)
+	}
+}
+
 // machineAuthorizedRequest mirrors the server's machine-proof routes. Merely
 // configuring a host signer must never replace a user credential on resource
 // management APIs (including domains, routes, and credential rotation).
@@ -199,8 +211,10 @@ func (c *Client) doRequestMeta(ctx context.Context, method, path string, body, o
 	if err != nil {
 		return err
 	}
+	machineToken := ""
 	if c.machineAuth != nil && machineAuthorizedRequest(method, req.URL.Path) {
 		token, err := c.machineAuth.Token(ctx)
+		machineToken = token
 		if err != nil {
 			return fmt.Errorf("machine authentication token: %w", err)
 		}
@@ -234,6 +248,7 @@ func (c *Client) doRequestMeta(ctx context.Context, method, path string, body, o
 		return fmt.Errorf("call %s %s: %w", method, path, err)
 	}
 	defer resp.Body.Close()
+	c.reportMachineCredential(resp.StatusCode, machineToken)
 	if responseHeaders != nil {
 		*responseHeaders = resp.Header.Clone()
 	}
